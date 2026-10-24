@@ -6,6 +6,7 @@ use result_validity::ResultInputKey;
 pub(crate) fn pure_bending() -> App {
     let mut model = crate::sample::portal_frame();
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model.stories.clear();
     model.nodes.truncate(2);
     model.nodes[0].coord = [0.0, 0.0, 0.0];
     model.nodes[1].coord = [1000.0, 0.0, 0.0];

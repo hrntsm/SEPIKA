@@ -589,7 +589,15 @@ impl Model {
                 id.0
             ));
         }
-        let levels: Vec<_> = self.stories.iter().map(|s| s.elevation).collect();
+        let errors = self.story_level_diagnostics();
+        if !errors.is_empty() {
+            return Err(errors.join("; "));
+        }
+        let levels: Vec<_> = self
+            .stories
+            .iter()
+            .map(|s| s.sl_mm().expect("階情報は検査済み"))
+            .collect();
         if levels.iter().any(|z| !z.is_finite()) || levels.windows(2).any(|p| p[0] >= p[1]) {
             return Err(format!("壁版 {}: 階帯境界が不正です", id.0));
         }

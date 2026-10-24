@@ -48,7 +48,7 @@ pub struct SpaceGrid {
     /// Y 方向の通りの位置（グローバル Y 座標 `[mm]`。昇順・重複なし）と通り名。
     pub y_lines: Vec<GridLine>,
     /// レベル（グローバル Z 座標 `[mm]`。昇順・重複なし）と階名。
-    /// 先頭は基部（[`Model::base_elevation`]）で、階名は `GL` とする。
+    /// 先頭は構造最下端（[`Model::base_elevation`]）、名称は「構造最下端」。
     pub levels: Vec<GridLevel>,
 }
 
@@ -66,7 +66,7 @@ pub struct GridLevel {
     pub name: String,
     /// 標高 `[mm]`。
     pub elevation: f64,
-    /// 対応する階。基部レベルは `None`。
+    /// 対応する階。構造最下端の補助面は `None`。
     pub story: Option<StoryId>,
 }
 
@@ -97,7 +97,7 @@ impl SpaceGrid {
 /// - 離れはグループの原点・方向角で測った符号付きの値なので、グローバル座標へ
 ///   戻してから昇順に並べる（[`AxisGroupKind::offset_dir`] の向きに沿う 1 次元の
 ///   位置なので、原点＋離れ×向きの該当成分がそのまま座標になる）。
-/// - レベルは基部（[`Model::base_elevation`]）と各階の標高。階は標高の昇順に
+/// - レベルは構造最下端（[`Model::base_elevation`]）と各階 SL。階は SL の昇順に
 ///   並ぶ不変条件を持つ（[`Model::validate`]）ため、そのまま使える。
 ///
 /// 同じ位置の通りが複数あるモデル（取り込みで重複した通り）では、[`GRID_TOL_MM`]
@@ -112,17 +112,20 @@ pub fn space_grid(model: &Model) -> SpaceGrid {
 
     let base = model.base_elevation();
     let mut levels = vec![GridLevel {
-        name: "GL".to_string(),
+        name: "構造最下端".to_string(),
         elevation: base,
         story: None,
     }];
     for s in &model.stories {
-        if (s.elevation - base).abs() <= GRID_TOL_MM {
+        let Some(sl) = s.sl_mm() else {
+            continue;
+        };
+        if (sl - base).abs() <= GRID_TOL_MM {
             continue;
         }
         levels.push(GridLevel {
             name: s.name.clone(),
-            elevation: s.elevation,
+            elevation: sl,
             story: Some(s.id),
         });
     }
@@ -199,7 +202,7 @@ impl BaseSupport {
 pub struct FrameSpec {
     /// 平面の原点 `(x, y)` `[mm]`。1 本目の通りの位置になる。
     pub origin: [f64; 2],
-    /// 基部の標高 `[mm]`。最下レベル（柱脚）になる。
+    /// 最下階 FL `[mm]`。支持節点はこの値に最下階 ΔSL を加えた SL に置く。
     pub base_elevation: f64,
     /// X 方向のスパン `[mm]`（要素数 ＝ 通りの本数 − 1）。空なら通り 1 本。
     pub x_spans: Vec<f64>,
@@ -207,6 +210,8 @@ pub struct FrameSpec {
     pub y_spans: Vec<f64>,
     /// 下から順の階高 `[mm]`（要素数 ＝ 生成する**層**の数）。
     pub story_heights: Vec<f64>,
+    /// 各階の ΔSL [mm]。要素数は階高数 + 1、未入力を補完しない。
+    pub sl_offsets_mm: Vec<Option<f64>>,
     /// 階（床）の名前。**要素数は `story_heights` より 1 つ多く**、先頭が基部の
     /// 床の名前である（階は床であり、床レベルは層より 1 つ多いため）。
     /// 空文字の要素は [`default_story_name`] で補う。
@@ -244,6 +249,7 @@ impl Default for FrameSpec {
             x_spans: vec![6000.0, 6000.0],
             y_spans: vec![6000.0],
             story_heights: vec![4000.0, 3500.0, 3500.0],
+            sl_offsets_mm: vec![Some(0.0); 4],
             story_names: Vec::new(),
             x_group_name: "X".to_string(),
             y_group_name: "Y".to_string(),
@@ -268,9 +274,35 @@ impl FrameSpec {
         accumulate(self.origin[1], &self.y_spans)
     }
 
-    /// 基部を含むレベル `[mm]`（先頭が基部）。
+    /// 最下階からの FL 列 `[mm]`。階高を順に累積した導出値。
     pub fn levels(&self) -> Vec<f64> {
         accumulate(self.base_elevation, &self.story_heights)
+    }
+
+    /// 各階 SL [mm]。未入力・非有限値または SL の逆転時はエラー。
+    pub fn structural_levels(&self) -> Result<Vec<f64>, String> {
+        let fls = self.levels();
+        if self.sl_offsets_mm.len() != fls.len() {
+            return Err("各階の ΔSL を入力してください".into());
+        }
+        let mut levels = Vec::new();
+        for (i, (&fl, offset)) in fls.iter().zip(&self.sl_offsets_mm).enumerate() {
+            let sl = offset
+                .filter(|v| v.is_finite())
+                .map(|v| fl + v)
+                .filter(|v| v.is_finite());
+            let Some(sl) = sl else {
+                return Err(format!("階 {i}: FL・ΔSL・SL は有限な入力が必要です"));
+            };
+            if levels.last().is_some_and(|last| {
+                let h: f64 = sl - last;
+                !h.is_finite() || h <= 0.0
+            }) {
+                return Err(format!("階 {i}: SL 間高さは有限な正値が必要です"));
+            }
+            levels.push(sl);
+        }
+        Ok(levels)
     }
 
     /// 入力の不備を日本語で返す（`None` なら生成できる）。
@@ -284,8 +316,26 @@ impl FrameSpec {
         if self.x_spans.iter().chain(&self.y_spans).any(|s| *s <= 0.0) {
             return Some("スパンは正の値で入力してください。".into());
         }
-        if self.story_heights.iter().any(|h| *h <= 0.0) {
+        if !self.base_elevation.is_finite()
+            || self
+                .story_heights
+                .iter()
+                .any(|h| !h.is_finite() || *h <= 0.0)
+        {
             return Some("階高は正の値で入力してください。".into());
+        }
+        if let Err(error) = self.structural_levels() {
+            return Some(error);
+        }
+        let fls = self.levels();
+        if fls.windows(2).any(|pair| {
+            let height = pair[1] - pair[0];
+            !height.is_finite() || height <= 0.0
+        }) {
+            return Some("FL 間高さの導出結果は有限な正値が必要です".into());
+        }
+        if fls.iter().any(|v| !v.is_finite()) {
+            return Some("FL の導出結果は有限値が必要です".into());
         }
         if self.with_slabs && self.slab_thickness <= 0.0 {
             return Some("床の板厚は正の値で入力してください。".into());
@@ -386,8 +436,7 @@ pub struct FrameGenResult {
 ///    （座標の昇順に 1 から）とする。所属節点はその通りの全格子点。出所は
 ///    [`AxisSource::Manual`] とし、あとで柱位置からの自動生成を実行しても
 ///    作り直されないようにする。
-/// 7. **階**は全レベルに 1 つずつ作る（**先頭は基部の床**）。階は床であり、
-///    その列の先頭が基部であることが `sepika_core::model::story` の不変条件である。
+/// 7. **階**は FL と ΔSL を保持し、代表節点を SL に配置する。最下段支持節点も最下階 SL。
 ///    階名は入力を優先し、空なら [`default_story_name`] で補う。所属節点・剛床・
 ///    地震用重量は準備計算が算定する派生値のため、ここでは空のままとする。
 /// 8. **床**は全レベルで、隣り合う通りに囲まれた格子床領域へ 1 枚ずつ作る
@@ -404,7 +453,8 @@ pub fn generate_frame(spec: &FrameSpec) -> Result<FrameGenResult, String> {
     }
     let xs = spec.x_coords();
     let ys = spec.y_coords();
-    let zs = spec.levels();
+    let fls = spec.levels();
+    let zs = spec.structural_levels()?;
     let (nx, ny, nz) = (xs.len(), ys.len(), zs.len());
 
     let nid = |ix: usize, iy: usize, iz: usize| NodeId(((ix * ny + iy) * nz + iz) as u32);
@@ -512,7 +562,7 @@ pub fn generate_frame(spec: &FrameSpec) -> Result<FrameGenResult, String> {
     let stories = zs
         .iter()
         .enumerate()
-        .map(|(si, z)| {
+        .map(|(si, _z)| {
             let name = spec
                 .story_names
                 .get(si)
@@ -523,7 +573,9 @@ pub fn generate_frame(spec: &FrameSpec) -> Result<FrameGenResult, String> {
                 wall_weights: Vec::new(),
                 id: StoryId(si as u32),
                 name,
-                elevation: *z,
+                elevation: Some(fls[si]),
+                sl_offset_mm: spec.sl_offsets_mm[si],
+                source_story: None,
                 node_ids: Vec::new(),
                 seismic_weight: None,
                 weight_override: None,
@@ -746,14 +798,14 @@ mod tests {
         let stories: Vec<(&str, f64)> = model
             .stories
             .iter()
-            .map(|s| (s.name.as_str(), s.elevation))
+            .map(|s| (s.name.as_str(), s.fl_mm().unwrap()))
             .collect();
         assert_eq!(
             stories,
             vec![("1F", 0.0), ("2F", 4000.0), ("3F", 7500.0), ("4F", 11000.0)]
         );
         // 不変条件: 階の列の先頭は基部。
-        assert_eq!(model.stories[0].elevation, model.base_elevation());
+        assert_eq!(model.stories[0].elevation, Some(model.base_elevation()));
         // 3 階建ての層は 3 つ。名前は下端の階（法令の「i 階」）。
         let layers: Vec<(String, f64)> = model
             .layers()
@@ -1004,7 +1056,12 @@ mod tests {
             .collect();
         assert_eq!(
             levels,
-            vec![("GL", 0.0), ("2F", 4000.0), ("3F", 7500.0), ("4F", 11000.0)]
+            vec![
+                ("構造最下端", 0.0),
+                ("2F", 4000.0),
+                ("3F", 7500.0),
+                ("4F", 11000.0)
+            ]
         );
         // 格子点は 3 × 2 × 4。
         assert_eq!(grid.points().count(), 24);
@@ -1084,5 +1141,21 @@ mod tests {
             .map(|l| (l.name.as_str(), l.coord))
             .collect();
         assert_eq!(xs, vec![("X1", 0.0), ("X2", 6000.0), ("X3", 12000.0)]);
+    }
+}
+
+#[cfg(test)]
+mod rounded_floor_level_test {
+    use super::*;
+    #[test]
+    fn positive_input_height_cannot_hide_rounded_duplicate_fl() {
+        let spec = FrameSpec {
+            base_elevation: 1e20,
+            story_heights: vec![1.0],
+            sl_offsets_mm: vec![Some(0.0), Some(32768.0)],
+            ..Default::default()
+        };
+        assert!(spec.structural_levels().is_ok());
+        assert!(frame_model(&spec).unwrap_err().contains("FL 間高さ"));
     }
 }

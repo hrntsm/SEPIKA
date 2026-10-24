@@ -6,6 +6,7 @@ mod frame {
 pub fn one_cubic_metre(attached: bool) -> sepika_core::model::Model {
     use sepika_core::{ids::*, model::*};
     let mut model = frame::steel_frame();
+    model.stories.truncate(2);
     model.nodes.truncate(4);
     model.elements.retain(|e| e.nodes.iter().all(|n| n.0 < 4));
     for (index, element) in model.elements.iter_mut().enumerate() {

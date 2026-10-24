@@ -146,6 +146,7 @@ pub fn with_plate_metadata(wall: bool) -> Model {
         input_key: vec![5, 0, 6],
         output_key: vec![24],
         calculated_weights: vec![],
+        automatic_node_stories: Vec::new(),
         automatic_diaphragms: vec![],
         automatic_master_restraints: vec![],
     });

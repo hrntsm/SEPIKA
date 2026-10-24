@@ -330,7 +330,10 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
                     "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\">\n",
                     sid(st.id.0),
                     esc(&st.name),
-                    fmt(st.elevation),
+                    fmt(st.fl_mm().ok_or_else(|| StbError::Unmappable(format!(
+                        "階 {}: FL が未設定です",
+                        st.id.0
+                    )))?),
                     story_kind(st.level_kind),
                 ));
                 if !members.is_empty() {

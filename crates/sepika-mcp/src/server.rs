@@ -553,7 +553,7 @@ mod tests {
                     coord: [0.0, 0.0, 3000.0],
                     restraint: Dof6Mask::FREE,
                     mass: None,
-                    story: Some(StoryId(0)),
+                    story: Some(StoryId(1)),
                     support_spring: None,
                 },
             ],
@@ -617,7 +617,9 @@ mod tests {
                     wall_weights: Vec::new(),
                     id: StoryId(0),
                     name: "1F".into(),
-                    elevation: 0.0,
+                    elevation: Some(0.0),
+                    sl_offset_mm: Some(0.0),
+                    source_story: None,
                     node_ids: vec![NodeId(0)],
                     seismic_weight: None,
                     weight_override: None,
@@ -632,7 +634,9 @@ mod tests {
                     wall_weights: Vec::new(),
                     id: StoryId(1),
                     name: "2F".into(),
-                    elevation: 3000.0,
+                    elevation: Some(3000.0),
+                    sl_offset_mm: Some(0.0),
+                    source_story: None,
                     node_ids: vec![NodeId(1)],
                     seismic_weight: Some(80_000.0),
                     weight_override: Some(80_000.0),
@@ -1344,7 +1348,7 @@ mod tests {
                 let dir = test_store_dir(&format!("{tag}_{name}"));
                 let mut model = pushover_model();
                 if tag == "inconsistent_gl" {
-                    model.stories[0].elevation = -9000.0;
+                    model.stories[0].elevation = Some(-9000.0);
                     model.nodes[0].coord[2] = -9000.0;
                     let template = model.stories[1].clone();
                     let node_template = model.nodes[1].clone();
@@ -1359,7 +1363,7 @@ mod tests {
                         let mut story = template.clone();
                         story.id = StoryId(id);
                         story.name = format!("floor{i}");
-                        story.elevation = elevation;
+                        story.elevation = Some(elevation);
                         story.node_ids = vec![NodeId(id)];
                         story.weight_override = Some(100_000.0);
                         if i < 2 {
@@ -1456,14 +1460,14 @@ mod tests {
         model.stories.truncate(1);
         model.nodes.truncate(1);
         model.elements.clear();
-        model.stories[0].elevation = -9000.0;
+        model.stories[0].elevation = Some(-9000.0);
         model.nodes[0].coord[2] = -9000.0;
         for (i, elevation) in [-6000.0, -3000.0, 15000.0, 30000.0].into_iter().enumerate() {
             let id = (i + 1) as u32;
             let mut story = story_template.clone();
             story.id = StoryId(id);
             story.name = format!("floor{id}");
-            story.elevation = elevation;
+            story.elevation = Some(elevation);
             story.node_ids = vec![NodeId(id)];
             story.seismic_weight = Some(100_000.0);
             story.weight_override = Some(100_000.0);

@@ -191,7 +191,7 @@ fn test_story_eccentricity_biased_rigidity() {
 fn test_story_eccentricity_empty_story() {
     let (model, _s0) = build_symmetric_frame(None);
     // S1 は存在しない（stories は S0 のみ）→ column_stiffnesses は空を返す。
-    let s1 = StoryId(1);
+    let s1 = StoryId(2);
     let cols = column_stiffnesses(&model, s1).unwrap();
     assert!(cols.is_empty(), "S1 に柱がないはず、got {} 本", cols.len());
     let cor = center_of_rigidity(&cols).unwrap();

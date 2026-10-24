@@ -9,6 +9,9 @@ use sepika_core::model::{
 fn source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo() {
     let mut model = sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/></StbStories></StbModel></ST_BRIDGE>"#).unwrap();
     model.source_stories.clear();
+    for story in &mut model.stories {
+        story.source_story = None;
+    }
     let initial = model.clone();
     let directory = std::env::temp_dir().join(format!("sepika-497-empty-{}", std::process::id()));
     let mut state = ServerState::with_fs_store(model, &directory).unwrap();
@@ -34,6 +37,9 @@ fn source_story_native_kind_mcp_matches_gui_command_and_preserves_imported_kinds
         let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
         if native {
             model.source_stories.clear();
+            for story in &mut model.stories {
+                story.source_story = None;
+            }
             model.source_stories_initialized = false;
         }
         let initial = model.clone();
@@ -142,8 +148,8 @@ fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
 
 fn column_stories() -> Vec<sepika_core::model::Story> {
     serde_json::from_value(serde_json::json!([
-        {"id": 0, "name": "1F", "elevation": 0.0, "node_ids": [0], "seismic_weight": null},
-        {"id": 1, "name": "2F", "elevation": 3000.0, "node_ids": [1], "seismic_weight": null}
+        {"id": 0, "name": "1F", "elevation": 0.0, "sl_offset_mm": 0.0, "node_ids": [0], "seismic_weight": null},
+        {"id": 1, "name": "2F", "elevation": 3000.0, "sl_offset_mm": 0.0, "node_ids": [1], "seismic_weight": null}
     ]))
     .unwrap()
 }
@@ -681,7 +687,7 @@ pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
     model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
 
     model.nodes[1].coord[2] = 7200.0;
-    model.stories[1].elevation = 7200.0;
+    model.stories[1].elevation = Some(7200.0);
     model.materials[0].fc = Some(30.0);
     model.materials[0].young = 25000.0;
     model.materials[1].category = MaterialCategory::Steel;
@@ -2587,6 +2593,18 @@ fn mcp_eigen_rejects_unknown_wall_band_and_refreshes_valid_edits_before_solving(
         model.damper_mass_generation = Some(gen.damper_mass_generation);
         model.wall_weight_generation = Some(gen.wall_weight_generation);
     };
+    model.stories = [0.0, 3000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, fl)| {
+            Story::new(
+                sepika_core::ids::StoryId(i as u32),
+                format!("{}F", i + 1),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect();
     apply(&mut model);
     if let Err(error) = crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
         panic!("regenerated eigen: {error}");
@@ -4121,7 +4139,7 @@ fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
     use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind};
     let mut model = rc_column_model();
     model.nodes[1].coord = [0.0, 0.0, 6000.0];
-    model.stories[1].elevation = 6000.0;
+    model.stories[1].elevation = Some(6000.0);
     model
         .validate_reference_ids()
         .expect("部材荷重モデルの参照整合");

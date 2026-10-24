@@ -559,7 +559,7 @@ impl Model {
         let tol = crate::model::DIAPHRAGM_LEVEL_TOL_MM;
         self.stories
             .iter()
-            .map(|s| s.elevation)
+            .filter_map(|s| s.sl_mm())
             .filter(|e| *e > z + tol)
             .fold(None::<f64>, |acc, e| Some(acc.map_or(e, |a: f64| a.min(e))))
             .map(|e| e - z)
@@ -1174,7 +1174,9 @@ mod tests {
                 wall_weights: Vec::new(),
                 id: StoryId(i as u32),
                 name: format!("{i}F"),
-                elevation: z,
+                elevation: Some(z),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![],
                 seismic_weight: None,
                 weight_override: None,

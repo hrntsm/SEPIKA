@@ -139,23 +139,12 @@ impl EditCommand for SetColumnFinishAreaWeight {
     }
 }
 
-/// 階の階名と階レベルを設定する（階種別は [`crate::SetStoryLevelKind`]）。
-///
-/// 標高を変えると並び順の不変条件が崩れうるため、適用後に標高昇順へ並べ替え、
-/// ID を振り直す。逆操作は「変更前の階定義の復元」とする
-/// （並べ替えで他階の ID も動きうるため、1 階分の差分では戻せない）。
-/// index が範囲外（削除済み等で階数が足りない）の場合は Noop。
-/// `StoryId ＝配列位置`が不変条件なので index 位置の階と ID は常に一致し、
-/// その確認は防御的なもの（将来この不変条件が崩れた場合の検出）。
-///
-/// **基部の階（`StoryId(0)`）は階名だけを変え、標高は据え置く**。基部の標高は
-/// 構造の最下端（[`Model::base_elevation`]）そのものであり、階の列の先頭が基部で
-/// あることは [`Model::layers`] が依拠する不変条件だからである。基部を動かすと
-/// 節点のない床レベルができ、最下層の階高が実際と食い違う。
+/// 階名・FL・ΔSL を変更する。未入力は保持できるが、非有限値・上下逆転は拒否する。
 pub struct SetStoryLevel {
     pub story: StoryId,
     pub name: String,
-    pub elevation: f64,
+    pub elevation: Option<f64>,
+    pub sl_offset_mm: Option<f64>,
 }
 
 /// 階の利用者定義欄の一括復元（[`SetStoryLevel`]・[`AddStory`]・[`DeleteStory`] の逆操作）。
@@ -188,26 +177,14 @@ pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
 
 pub(crate) fn source_story_index(model: &Model, story: StoryId) -> Result<Option<usize>, String> {
     let level = &model.stories[story.index()];
-    let matches: Vec<_> = model
-        .source_stories
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| s.height == level.elevation)
-        .map(|(i, _)| i)
-        .collect();
-    match matches.as_slice() {
-        [index] => Ok(Some(*index)),
-        [] if story.index() == 0
-            && level.elevation == model.base_elevation()
-            && model
-                .source_stories
-                .iter()
-                .all(|s| s.height > level.elevation) =>
-        {
-            Ok(None)
-        }
-        [] => Err("解析階と原階の対応を確認できません".into()),
-        _ => Err("解析階と原階の対応が一意ではありません".into()),
+    match level.source_story {
+        Some(id) => model
+            .source_stories
+            .iter()
+            .position(|s| s.id == id)
+            .map(Some)
+            .ok_or_else(|| format!("階 {}: 原階 {id} が存在しません", story.0)),
+        None => Ok(None),
     }
 }
 
@@ -217,7 +194,8 @@ fn resort_and_renumber(model: &mut Model) {
     order.sort_by(|&a, &b| {
         model.stories[a]
             .elevation
-            .total_cmp(&model.stories[b].elevation)
+            .partial_cmp(&model.stories[b].elevation)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     let mut remap = vec![StoryId(0); model.stories.len()];
     for (new_idx, &old_idx) in order.iter().enumerate() {
@@ -233,43 +211,73 @@ fn resort_and_renumber(model: &mut Model) {
     model.stories.sort_by_key(|s| s.id.0);
 }
 
+fn invalid_level_edit(model: &Model, index: usize) -> Option<String> {
+    let story = &model.stories[index];
+    let owner = format!("階 {} ({})", story.id.0, story.name);
+    if story.elevation.is_some_and(|v| !v.is_finite())
+        || story.sl_offset_mm.is_some_and(|v| !v.is_finite())
+    {
+        return Some(format!("{owner}: FL・ΔSL は有限値が必要です"));
+    }
+    if story.elevation.is_some() && story.sl_offset_mm.is_some() && story.sl_mm().is_none() {
+        return Some(format!("{owner}: SL の導出結果が有限値ではありません"));
+    }
+    for pair in model
+        .stories
+        .windows(2)
+        .filter(|pair| pair[0].id == story.id || pair[1].id == story.id)
+    {
+        for (field, bottom, top) in [
+            ("FL", pair[0].fl_mm(), pair[1].fl_mm()),
+            ("SL", pair[0].sl_mm(), pair[1].sl_mm()),
+        ] {
+            if let (Some(bottom), Some(top)) = (bottom, top) {
+                let height = top - bottom;
+                if !height.is_finite() || height <= 0.0 {
+                    return Some(format!(
+                        "{owner}: 階 {}・{} の {field} 間高さは有限な正値が必要です",
+                        pair[0].id.0, pair[1].id.0
+                    ));
+                }
+            }
+        }
+    }
+    None
+}
+
 impl EditCommand for SetStoryLevel {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let idx = self.story.index();
         if idx >= model.stories.len() || model.stories[idx].id != self.story {
             return Box::new(crate::Noop);
         }
-        if idx != 0
-            && (!self.elevation.is_finite()
-                || model
-                    .stories
-                    .iter()
-                    .any(|s| s.id != self.story && s.elevation == self.elevation))
-        {
-            return Box::new(crate::RejectedEdit(
-                "階レベルは有限で、同一heightの階へ変更できません".into(),
-            ));
-        }
-        let before = snapshot(model);
-        if let Err(reason) = model.initialize_source_stories() {
+        if let Err(reason) = source_story_index(model, self.story) {
             return Box::new(crate::RejectedEdit(reason));
         }
-        let index = match source_story_index(model, self.story) {
-            Ok(index) => index,
-            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
-        };
-        if let Some(index) = index {
-            model.source_stories[index].name = self.name.clone();
-            if idx != 0 {
-                model.source_stories[index].height = self.elevation;
+        let before = snapshot(model);
+        let mut candidate = model.clone();
+        if let Err(reason) = candidate.initialize_source_stories() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        let story = &mut candidate.stories[idx];
+        story.name = self.name.clone();
+        story.elevation = self.elevation;
+        story.sl_offset_mm = self.sl_offset_mm;
+        if let Some(reason) = invalid_level_edit(&candidate, idx) {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        if let Some(source) = candidate.stories[idx].source_story.and_then(|id| {
+            candidate
+                .source_stories
+                .iter_mut()
+                .find(|s| s.id == id && s.kind_from_native)
+        }) {
+            source.name = self.name.clone();
+            if let Some(fl) = self.elevation {
+                source.height = fl;
             }
         }
-        let story = &mut model.stories[idx];
-        story.name = self.name.clone();
-        if idx != 0 {
-            story.elevation = self.elevation;
-        }
-        resort_and_renumber(model);
+        *model = candidate;
         Box::new(before)
     }
 
@@ -283,18 +291,22 @@ impl EditCommand for SetStoryLevel {
 /// 所属節点・地震用重量は空のまま追加する（準備計算が埋める）。
 pub struct AddStory {
     pub name: String,
-    pub elevation: f64,
+    pub elevation: Option<f64>,
+    pub sl_offset_mm: Option<f64>,
 }
 
 impl EditCommand for AddStory {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let before = snapshot(model);
-        if !self.elevation.is_finite()
-            || model.stories.iter().any(|s| s.elevation == self.elevation)
-        {
+        if self.elevation.is_none() || self.sl_offset_mm.is_none() {
             return Box::new(crate::RejectedEdit(
-                "階レベルは有限で、同一heightの階を追加できません".into(),
+                "階追加には FL・ΔSL の入力が必要です".into(),
             ));
+        }
+        if self.elevation.is_some_and(|v| !v.is_finite())
+            || self.sl_offset_mm.is_some_and(|v| !v.is_finite())
+        {
+            return Box::new(crate::RejectedEdit("FL・ΔSL は有限値が必要です".into()));
         }
         if let Err(reason) = model.initialize_source_stories() {
             return Box::new(crate::RejectedEdit(reason));
@@ -314,7 +326,7 @@ impl EditCommand for AddStory {
             id,
             guid: None,
             name: self.name.clone(),
-            height: self.elevation,
+            height: self.elevation.unwrap(),
             kind: sepika_core::model::SourceStoryKind::General,
             id_dependence: None,
             strength_concrete: None,
@@ -325,6 +337,8 @@ impl EditCommand for AddStory {
             id: StoryId(model.stories.len() as u32),
             name: self.name.clone(),
             elevation: self.elevation,
+            sl_offset_mm: self.sl_offset_mm,
+            source_story: Some(id),
             node_ids: Vec::new(),
             seismic_weight: None,
             weight_override: None,
@@ -336,6 +350,17 @@ impl EditCommand for AddStory {
             fireproof: Default::default(),
         });
         resort_and_renumber(model);
+        if let Some(reason) = invalid_level_edit(
+            model,
+            model
+                .stories
+                .iter()
+                .position(|s| s.source_story == Some(id))
+                .unwrap(),
+        ) {
+            before.apply(model);
+            return Box::new(crate::RejectedEdit(reason));
+        }
         Box::new(before)
     }
 
@@ -388,6 +413,9 @@ impl EditCommand for DeleteStory {
         });
         let removed = self.story;
         if let Some(record) = &mut model.seismic_weight_generation {
+            record
+                .automatic_node_stories
+                .retain(|(_, story)| *story != removed);
             record
                 .calculated_weights
                 .retain(|(story, _)| *story != removed);

@@ -328,7 +328,21 @@ fn wall_mass_rejects_inertial_torsion_gauge_and_nonlinear_time_history() {
 }
 
 fn fixture(top: f64) -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: [0.0, 3000.0, 6000.0, 9000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                Story::new(
+                    StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
     for (i, coord) in [
         [0.0, 0.0, 3000.0],
         [4000.0, 0.0, 3000.0],

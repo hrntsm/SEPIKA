@@ -15,7 +15,21 @@ use sepika_section::shape::SectionShape;
 /// - LC0「長期」: 梁全長に等分布荷重 w = 10 N/mm（鉛直下向き）
 /// - LC1「地震X」: 梁レベル両節点に水平 20 kN
 pub fn portal_frame() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: [0.0, 3500.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
 
     let coords = [
         [0.0, 0.0, 0.0],

@@ -54,15 +54,11 @@ fn rest_positions(app: &App, result: &LumpedMassResult, align_vertical: bool) ->
     let layers = app.core.model.layers();
     let n = lm.stories.len();
     let mut out = Vec::with_capacity(n);
-    let mut z = app
-        .core
-        .model
-        .stories
-        .first()
-        .map(|s| s.elevation)
-        .unwrap_or(0.0);
-    for i in 0..n {
-        z += lm.stories[i].height;
+    if layers.len() != n {
+        return Vec::new();
+    }
+    for (i, layer) in layers.iter().enumerate() {
+        let z = layer.top_sl_mm;
         let xy = if lm.is_spatial() {
             lm.spatial[i].mass_xy
         } else {
@@ -261,7 +257,7 @@ pub(super) fn draw(
         .model
         .stories
         .first()
-        .map(|s| s.elevation)
+        .and_then(|s| s.sl_mm())
         .unwrap_or(0.0);
     let base = proj.project([rest[0][0], rest[0][1], base_z]);
 
@@ -340,5 +336,40 @@ mod tests {
         assert!((mid - 7.0 * 0.5_f32.sqrt()).abs() < 1e-5);
         assert!((mass_marker_radius(0.01, 10.0) - 4.0).abs() < 1e-6);
         assert!((mass_marker_radius(1.0, 0.0) - 7.0).abs() < 1e-6);
+    }
+    #[test]
+    fn stick_structure_coordinates_use_sl_while_calculation_height_stays_fl_difference() {
+        use crate::app::App;
+        use sepika_core::{ids::StoryId, model::Story};
+        use sepika_solver::dynamic::lumped_mass::{
+            LumpedMassModel, LumpedMassResult, StoryStick, StoryTrilinear,
+        };
+        let mut app = App::default();
+        app.core.model.stories = vec![
+            Story::new(StoryId(0), "1F".into(), Some(3500.0), Some(-500.0)),
+            Story::new(StoryId(1), "2F".into(), Some(7000.0), Some(-600.0)),
+        ];
+        let result = LumpedMassResult {
+            model: LumpedMassModel::from_stories(
+                Default::default(),
+                vec![StoryStick {
+                    story: StoryId(0),
+                    mass: 1.0,
+                    height: 3500.0,
+                    skeleton: StoryTrilinear::elastic(1000.0),
+                }],
+            ),
+            modal: Default::default(),
+            response: None,
+        };
+        for align in [false, true] {
+            assert_eq!(
+                super::rest_positions(&app, &result, align),
+                vec![[0.0, 0.0, 6400.0]]
+            );
+        }
+        assert_eq!(result.model.stories[0].height, 3500.0);
+        app.core.model.stories[1].sl_offset_mm = None;
+        assert!(super::rest_positions(&app, &result, false).is_empty());
     }
 }

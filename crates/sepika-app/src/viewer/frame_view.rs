@@ -124,7 +124,9 @@ fn draw_elevation_grid(
     let (z_lo, z_hi) = (lo[2] - m, hi[2] + m);
 
     for story in &model.stories {
-        let z = story.elevation;
+        let Some(z) = story.sl_mm() else {
+            continue;
+        };
         if z < z_lo || z > z_hi {
             continue;
         }

@@ -21,7 +21,7 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
         .nodes
         .retain(|node| !model.generated_masters.contains(&node.id));
     for node in &mut input.nodes {
-        node.story = None;
+        node.story = model.explicit_story_of_node(node.id);
     }
     for element in &mut input.elements {
         element.rigid_zone.face_i = None;
@@ -188,6 +188,18 @@ pub fn apply_generated_weights(
         })
         .map(|node| (node.id, node.restraint))
         .collect();
+    let automatic_node_stories = model
+        .nodes
+        .iter()
+        .zip(&generated.node_story)
+        .filter_map(|(node, story)| {
+            if model.explicit_story_of_node(node.id).is_some() {
+                None
+            } else {
+                story.map(|story| (node.id, story))
+            }
+        })
+        .collect();
     model.wall_weight_generation = Some(generated.wall_weight_generation);
     model.stories = generated.stories;
     for (node, story) in model.nodes.iter_mut().zip(generated.node_story) {
@@ -212,6 +224,7 @@ pub fn apply_generated_weights(
         input_key: Vec::new(),
         output_key: Vec::new(),
         calculated_weights,
+        automatic_node_stories,
         automatic_diaphragms,
         automatic_master_restraints,
     });

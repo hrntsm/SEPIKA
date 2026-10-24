@@ -17,7 +17,9 @@ fn base_story(node_ids: Vec<NodeId>) -> Story {
         structure: Default::default(),
         id: StoryId(0),
         name: "1F".to_string(),
-        elevation: 0.0,
+        elevation: Some(0.0),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids,
         seismic_weight: None,
         weight_override: None,
@@ -111,7 +113,9 @@ pub(super) fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
                 structure: Default::default(),
                 id: StoryId(1),
                 name: "2F".to_string(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(1)],
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
@@ -382,7 +386,9 @@ fn spring_column_model(kx: f64, support_kx: Option<f64>, seismic_weight: f64) ->
                 structure: Default::default(),
                 id: StoryId(1),
                 name: "2F".to_string(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(1)],
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
@@ -685,7 +691,9 @@ pub(super) fn two_story_model() -> Model {
                 structure: Default::default(),
                 id: StoryId(1),
                 name: "2F".to_string(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(1)],
                 seismic_weight: None,
                 weight_override: None,
@@ -700,7 +708,9 @@ pub(super) fn two_story_model() -> Model {
                 structure: Default::default(),
                 id: StoryId(2),
                 name: "3F".to_string(),
-                elevation: 6000.0,
+                elevation: Some(6000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(2)],
                 seismic_weight: None,
                 weight_override: None,
@@ -877,7 +887,9 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
                 structure: Default::default(),
                 id: StoryId(1),
                 name: "2F".to_string(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(1), NodeId(2)],
                 seismic_weight: None,
                 weight_override: None,
@@ -1130,7 +1142,9 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
                 structure: Default::default(),
                 id: StoryId(1),
                 name: "2F".to_string(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(1), NodeId(2)],
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
@@ -3524,7 +3538,9 @@ pub(super) fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
                 structure: Default::default(),
                 id: StoryId(1),
                 name: "2F".to_string(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(2), NodeId(3)],
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
@@ -3861,7 +3877,7 @@ fn pushover_standard_basement_load_preserves_hand_resultant() {
     model.nodes.push(node);
     let mut story = model.stories[1].clone();
     story.id = StoryId(2);
-    story.elevation = 6000.0;
+    story.elevation = Some(6000.0);
     story.node_ids = vec![NodeId(2)];
     story.level_kind = Default::default();
     model.stories.push(story);
@@ -3920,7 +3936,7 @@ fn pushover_rejects_inconsistent_common_ground_from_basement_depths() {
     model.nodes.truncate(1);
     model.stories.truncate(1);
     model.elements.clear();
-    model.stories[0].elevation = -9000.0;
+    model.stories[0].elevation = Some(-9000.0);
     model.nodes[0].coord[2] = -9000.0;
     for (i, elevation) in [-6000.0, -3000.0, 6000.0, 12000.0].into_iter().enumerate() {
         let id = (i + 1) as u32;
@@ -3932,7 +3948,7 @@ fn pushover_rejects_inconsistent_common_ground_from_basement_depths() {
         let mut story = story_template.clone();
         story.id = StoryId(id);
         story.name = format!("floor{id}");
-        story.elevation = elevation;
+        story.elevation = Some(elevation);
         story.node_ids = vec![NodeId(id)];
         if i < 2 {
             story.level_kind = sepika_core::model::StoryLevelKind::Basement {
@@ -3957,8 +3973,8 @@ fn pushover_rejects_inconsistent_common_ground_from_basement_depths() {
             .contains("GL")
     );
     model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 6000.0 };
-    model.stories[3].elevation = 15_000.0;
-    model.stories[4].elevation = 30_000.0;
+    model.stories[3].elevation = Some(15_000.0);
+    model.stories[4].elevation = Some(30_000.0);
     model.stories[3].structure = sepika_core::model::StoryStructure::S;
     let result =
         pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap();

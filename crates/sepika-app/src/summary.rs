@@ -242,9 +242,11 @@ pub fn build_report_csv(app: &App) -> String {
         out.push_str("\n[階]\n階,標高[mm],地震重量[kN]\n");
         for s in &model.stories {
             out.push_str(&format!(
-                "{},{:.0},{:.2}\n",
+                "{},{},{:.2}\n",
                 s.name,
-                s.elevation,
+                s.fl_mm()
+                    .map(|v| format!("{v:.0}"))
+                    .unwrap_or_else(|| "未設定".into()),
                 force_kn(s.seismic_weight.unwrap_or(0.0))
             ));
         }
@@ -1380,10 +1382,10 @@ mod tests {
         assert!(invalid[0].fes.is_err());
 
         let mut model = app.core.model.clone();
-        model.stories[1].elevation = f64::NAN;
+        model.stories[1].elevation = Some(f64::NAN);
         let invalid = compute_story_metrics_with(&model, disp, SeismicDir::X, &ctx);
-        assert!(invalid[0].rs.is_err());
-        assert!(invalid[0].fes.is_err());
+        assert!(invalid.is_empty());
+        assert!(!model.story_level_diagnostics().is_empty());
     }
 
     #[test]

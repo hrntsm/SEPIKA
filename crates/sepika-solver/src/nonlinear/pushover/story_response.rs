@@ -330,9 +330,7 @@ pub(super) fn record_cuts(
         .layers()
         .iter()
         .map(|layer| {
-            let z = (model.stories[layer.bottom.index()].elevation
-                + model.stories[layer.top.index()].elevation)
-                * 0.5;
+            let z = (layer.bottom_sl_mm + layer.top_sl_mm) * 0.5;
             let mut cut = StoryCut {
                 layer: layer.index,
                 elevation_mm: z,

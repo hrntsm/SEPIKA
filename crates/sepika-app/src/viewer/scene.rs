@@ -1349,7 +1349,7 @@ mod tests {
         for (id, elevation) in [(0, 0.0), (1, 3000.0)] {
             app.core.model.stories.push(
                 serde_json::from_value(serde_json::json!({
-                    "id": id, "name": format!("階{id}"), "elevation": elevation, "node_ids": []
+                    "id": id, "name": format!("階{id}"), "elevation": elevation, "sl_offset_mm": 0.0, "node_ids": []
                 }))
                 .unwrap(),
             );

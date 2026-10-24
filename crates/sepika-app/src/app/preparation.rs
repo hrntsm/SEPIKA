@@ -381,7 +381,7 @@ pub const RIGID_ZONE_RATIO_WARN: f64 = 0.5;
 
 impl App {
     /// 準備計算を実行する（利用者が明示的に実行する入口）。
-    /// 階が未定義なら初期化し、変更した重量入力と自動荷重を一括更新する。
+    /// FL・ΔSL の明示入力を要求し、変更した重量入力と自動荷重を一括更新する。
     /// 階生成失敗時も、階に依存しない診断・断面などの集計は継続する。
     pub fn run_preparation(&mut self) {
         self.core.scoped.last_error = None;
@@ -1418,14 +1418,14 @@ mod tests {
         app.generate_stories_action();
         let template = app.core.model.stories[1].clone();
         app.core.model.stories.truncate(1);
-        app.core.model.stories[0].elevation = -9000.0;
+        app.core.model.stories[0].elevation = Some(-9000.0);
         app.core.model.nodes[0].coord[2] = -9000.0;
         app.core.model.constraints.clear();
         for (i, elevation) in [-6000.0, -3000.0, 15000.0, 30000.0].into_iter().enumerate() {
             let mut story = template.clone();
             story.id = sepika_core::ids::StoryId((i + 1) as u32);
             story.name = format!("floor{i}");
-            story.elevation = elevation;
+            story.elevation = Some(elevation);
             story.seismic_weight = Some(100_000.0);
             story.structure = if i == 2 {
                 sepika_core::model::StoryStructure::S

@@ -865,7 +865,7 @@ impl Model {
                     matches!(c, super::Constraint::RigidDiaphragm { story: sid, master, slaves, .. }
                         if *sid == story.id && self.node(*master).is_some()
                             && slaves.iter().any(|id| self.node(*id).is_some_and(|n|
-                                (n.coord[2] - story.elevation).abs() <= super::DIAPHRAGM_LEVEL_TOL_MM)))
+                                story.sl_mm().is_some_and(|sl| (n.coord[2] - sl).abs() <= super::DIAPHRAGM_LEVEL_TOL_MM))))
                 }));
                 if !represented {
                     return Err(format!(

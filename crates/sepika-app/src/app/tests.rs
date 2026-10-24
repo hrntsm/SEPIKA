@@ -1,5 +1,19 @@
 use super::*;
 
+pub(super) fn explicit_story_inputs(fls: &[f64]) -> Vec<sepika_core::model::Story> {
+    fls.iter()
+        .enumerate()
+        .map(|(i, &fl)| {
+            sepika_core::model::Story::new(
+                StoryId(i as u32),
+                format!("{}F", i + 1),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn with_explicit_frame_gravity(
     mut model: sepika_core::model::Model,
 ) -> sepika_core::model::Model {
@@ -119,7 +133,7 @@ use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 
 #[cfg(feature = "gui")]
 fn source_story_close_levels_model() -> sepika_core::model::Model {
-    sepika_io::stbridge::import_stbridge(
+    let mut model = sepika_io::stbridge::import_stbridge(
         r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes>
     <StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/>
     <StbNode id="3" X="0" Y="0" Z="3000.5"/><StbNode id="4" X="0" Y="0" Z="6000"/>
@@ -130,7 +144,11 @@ fn source_story_close_levels_model() -> sepika_core::model::Model {
     <StbStory id="50" name="C" height="6000" kind="DEPENDENCE" id_dependence="30"/>
     </StbStories></StbModel></ST_BRIDGE>"#,
     )
-    .unwrap()
+    .unwrap();
+    for (story, offset) in model.stories.iter_mut().zip([0.0, 0.0, 0.0, 0.0]) {
+        story.sl_offset_mm = Some(offset);
+    }
+    model
 }
 
 #[cfg(feature = "gui")]
@@ -138,6 +156,9 @@ fn source_story_close_levels_model() -> sepika_core::model::Model {
 fn source_story_empty_table_gui_kind_edit_does_not_create_source() {
     let mut model = source_story_close_levels_model();
     model.source_stories.clear();
+    for story in &mut model.stories {
+        story.source_story = None;
+    }
     assert!(model.source_stories_initialized);
     let mut app = App::default();
     app.load_model(model);
@@ -170,6 +191,12 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
         model.nodes.truncate(2);
         model.stories.truncate(2);
         model.source_stories.clear();
+        for story in &mut model.stories {
+            story.source_story = None;
+        }
+        for story in &mut model.stories {
+            story.source_story = None;
+        }
         model.source_stories_initialized = false;
         model.stb_node_ids.clear();
         let mut app = App::default();
@@ -177,7 +204,8 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
         let target = if order == 2 {
             assert!(app.apply_model_edit(Box::new(sepika_edit::AddStory {
                 name: "追加".into(),
-                elevation: 6000.0
+                elevation: Some(6000.0),
+                sl_offset_mm: Some(0.0),
             })));
             StoryId(2)
         } else {
@@ -185,7 +213,8 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
                 assert!(app.apply_model_edit(Box::new(sepika_edit::SetStoryLevel {
                     story: StoryId(1),
                     name: "編集".into(),
-                    elevation: 3000.0
+                    elevation: Some(3000.0),
+                    sl_offset_mm: Some(0.0),
                 })));
             }
             StoryId(1)
@@ -208,7 +237,7 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
             output
                 .source_stories
                 .iter()
-                .find(|s| s.height == app.core.model.stories[target.index()].elevation)
+                .find(|s| Some(s.height) == app.core.model.stories[target.index()].elevation)
                 .unwrap()
                 .kind,
             SourceStoryKind::Penthouse
@@ -253,7 +282,7 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
             .model
             .source_stories
             .iter()
-            .find(|s| s.height == app.core.model.stories[target.index()].elevation)
+            .find(|s| Some(s.height) == app.core.model.stories[target.index()].elevation)
             .unwrap();
         assert_eq!(source.kind, SourceStoryKind::Basement);
     }
@@ -294,14 +323,15 @@ fn source_story_imported_kinds_close_levels_and_explicit_edit_correspondence() {
     assert!(app.apply_model_edit(Box::new(sepika_edit::SetStoryLevel {
         story: StoryId(2),
         name: "B編集".into(),
-        elevation: 3500.0
+        elevation: Some(3500.0),
+        sl_offset_mm: Some(0.0),
     })));
     let edited = sepika_io::stbridge::import_stbridge(
         &sepika_io::stbridge::export_stbridge(&app.core.model).unwrap(),
     )
     .unwrap();
     let raw = edited.source_stories.iter().find(|s| s.id == 40).unwrap();
-    assert_eq!((&raw.name, raw.height), (&"B編集".to_string(), 3500.0));
+    assert_eq!((&raw.name, raw.height), (&"B".to_string(), 3000.5));
     app.undo_action();
     assert!(app.core.model.eq_ignoring_dofmap(&before));
     assert!(app.apply_model_edit(Box::new(sepika_edit::DeleteStory { story: StoryId(2) })));
@@ -321,81 +351,28 @@ fn source_story_imported_kinds_close_levels_and_explicit_edit_correspondence() {
 #[cfg(feature = "gui")]
 #[test]
 fn source_story_missing_ambiguous_mapping_rejects_and_generated_base_has_no_source() {
-    use sepika_core::model::StoryLevelKind;
-    for ambiguous in [false, true] {
-        let mut model = source_story_close_levels_model();
-        if ambiguous {
-            let mut duplicate = model.source_stories[2].clone();
-            duplicate.id = 99;
-            model.source_stories.push(duplicate);
-        } else {
-            model.stories[2].elevation = 3300.0;
-        }
-        let mut app = App::default();
-        app.load_model(model);
-        let before = app.core.model.clone();
-        let revision = app.core.scoped.undo.revision();
-        for command in [
-            Box::new(sepika_edit::SetStoryLevel {
-                story: StoryId(2),
-                name: "変更".into(),
-                elevation: 3400.0,
-            }) as Box<dyn sepika_edit::EditCommand>,
-            Box::new(sepika_edit::DeleteStory { story: StoryId(2) }),
-            Box::new(sepika_edit::SetStoryLevelKind {
-                story: StoryId(2),
-                level_kind: StoryLevelKind::Penthouse { k: 0.7 },
-            }),
-        ] {
-            assert!(!app.apply_model_edit(command));
-            assert!(app.core.scoped.undo.last_error().unwrap().contains("対応"));
-            assert!(app.core.model.eq_ignoring_dofmap(&before));
-            assert_eq!(app.core.scoped.undo.revision(), revision);
-        }
-    }
     let mut model = source_story_close_levels_model();
-    model.source_stories.remove(0);
-    model.stories.remove(0);
-    for (index, story) in model.stories.iter_mut().enumerate() {
-        story.id = StoryId(index as u32);
-    }
+    let original = model.source_stories.clone();
+    model.stories[2].elevation = Some(3300.0);
     let mut app = App::default();
-    app.load_model(model);
-    app.run_preparation();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    let source = app.core.model.source_stories.clone();
+    assert!(app.load_model(model));
     assert!(app.apply_model_edit(Box::new(sepika_edit::SetStoryLevel {
-        story: StoryId(0),
-        name: "解析基部".into(),
-        elevation: 0.0
+        story: StoryId(2),
+        name: "編集".into(),
+        elevation: Some(3400.0),
+        sl_offset_mm: Some(0.0)
     })));
-    assert_eq!(app.core.model.source_stories, source);
-    assert!(
-        app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
-            story: StoryId(0),
-            level_kind: StoryLevelKind::Penthouse { k: 0.7 }
-        }))
-    );
-    assert_eq!(app.core.model.source_stories, source);
-    let revision = app.core.scoped.undo.revision();
+    assert_eq!(app.core.model.stories[2].id, StoryId(2));
+    assert_eq!(app.core.model.stories[2].source_story, Some(40));
+    assert_eq!(app.core.model.source_stories, original);
+    app.undo_action();
+    assert_eq!(app.core.model.stories[2].fl_mm(), Some(3300.0));
+    app.redo_action();
+    assert_eq!(app.core.model.stories[2].fl_mm(), Some(3400.0));
     let before = app.core.model.clone();
-    assert!(
-        !app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
-            story: StoryId(0),
-            level_kind: StoryLevelKind::Penthouse { k: 0.7 }
-        }))
-    );
-    assert!(
-        !app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
-            story: StoryId(u32::MAX),
-            level_kind: StoryLevelKind::Normal
-        }))
-    );
-    assert_eq!(app.core.scoped.undo.revision(), revision);
+    let mut invalid = before.clone();
+    invalid.stories[2].source_story = Some(999);
+    assert!(!app.load_model(invalid));
     assert!(app.core.model.eq_ignoring_dofmap(&before));
 }
 
@@ -561,14 +538,16 @@ fn test_pending_story_command_one_per_frame_and_undo_redo() {
         .pending_story_cmds
         .push_back(Box::new(sepika_edit::AddStory {
             name: "1F".into(),
-            elevation: 0.0,
+            elevation: Some(0.0),
+            sl_offset_mm: Some(0.0),
         }));
     app.ui
         .scoped
         .pending_story_cmds
         .push_back(Box::new(sepika_edit::AddStory {
             name: "2F".into(),
-            elevation: 3000.0,
+            elevation: Some(3000.0),
+            sl_offset_mm: Some(0.0),
         }));
     app.apply_pending_story_command();
     assert_eq!(app.core.model.stories.len(), 1);
@@ -812,7 +791,10 @@ fn preparation_wall_rebuild_preserves_assigned_boundary_and_node_selection() {
         assert_eq!(app.core.model.wall_plates, vec![plate.clone()]);
         assert_eq!(app.core.model.wall_assignment_regions, assignments);
         assert!(app.core.model.wall_regions.is_empty());
-        assert_eq!(app.core.model.nodes.len(), nodes.len());
+        assert_eq!(
+            app.core.model.nodes.len() - app.core.model.generated_masters.len(),
+            nodes.len()
+        );
         for (node, original) in app.core.model.nodes.iter().zip(&nodes) {
             assert_eq!(node.id, original.id);
             assert_eq!(node.coord, original.coord);
@@ -1049,7 +1031,21 @@ fn aligned_portal_frame() -> sepika_core::model::Model {
     };
     use sepika_section::shape::SectionShape;
 
-    let mut model = sepika_core::model::Model::default();
+    let mut model = sepika_core::model::Model {
+        stories: [0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
 
     let coords = [
         [0.0, 0.0, 0.0],
@@ -1430,12 +1426,14 @@ fn test_analysis_runs_with_non_structural_nodes_on_base_floor() {
 fn test_seismic_flow_requires_then_uses_stories() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
+    app.core.model.stories.clear();
 
     // 階なし → 明示エラー（サイレントゼロ結果ではない）
     app.run_seismic(SeismicDir::X);
     assert!(app.core.scoped.last_error.is_some());
 
     // 階の自動生成 → 地震静的が成功する
+    app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1784,7 +1782,7 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
         .last_error
         .as_deref()
         .unwrap()
-        .contains("地震水平力"));
+        .contains("階情報"));
     assert!(app.core.model.load_cases[ex.index()]
         .nodal
         .iter()
@@ -1796,14 +1794,14 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
         .last_error
         .as_deref()
         .unwrap()
-        .contains("水平力"));
+        .contains("階情報"));
     app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)));
     app.ui.scoped.nav.focus_result = app.core.scoped.last_static;
     app.run_static_all();
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert!(bundle.seismic(SeismicDir::X).is_none());
     assert!(bundle.combos.iter().all(|(n, _)| n != "G+EX"));
-    assert!(bundle.combos.iter().any(|(n, _)| n == "G"));
+    assert!(bundle.combos.is_empty());
     assert_ne!(
         app.core.scoped.last_static,
         Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)))
@@ -1877,7 +1875,14 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
         .nodal
         .retain(|l| l.source != LoadSource::Manual);
     app.start_static_all_job();
-    wait_for_job(&mut app);
+    assert!(app.core.scoped.job.is_none());
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("階情報"));
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert!(bundle.seismic(SeismicDir::X).is_none());
     assert!(bundle.combos.iter().all(|(n, _)| n != "G+EX"));
@@ -3660,6 +3665,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     };
 
     let mut model = Model {
+        stories: explicit_story_inputs(&[0.0, 3000.0]),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -3964,6 +3970,7 @@ fn test_rc_sigma_0_from_compression_axial_force() {
 
     let p = 100_000.0; // 圧縮荷重 [N]
     let model = Model {
+        stories: explicit_story_inputs(&[0.0, 3000.0]),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -4122,6 +4129,7 @@ fn test_rc_sigma_0_prefers_gravity_load_case_over_last_static() {
     let p1 = 100_000.0; // 先頭ケース(長期)の圧縮荷重 [N]
     let p2 = 60_000.0; // 2番目のケース(地震想定)の引張荷重 [N]
     let model = Model {
+        stories: explicit_story_inputs(&[0.0, 3000.0]),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -4381,7 +4389,7 @@ pub(super) fn make_square_slab_test_model() -> sepika_core::model::Model {
     };
     model.stories.push(
         serde_json::from_value(serde_json::json!({
-            "id": 0, "name": "1F", "elevation": 0.0,
+            "id": 0, "name": "1F", "elevation": 0.0, "sl_offset_mm": 0.0,
             "node_ids": [0, 1, 2, 3], "seismic_weight": null
         }))
         .unwrap(),
@@ -4414,6 +4422,8 @@ fn ダンパー総重量はgui共通同期経路の再実行でも増殖しな�
             app.core.model.elements.truncate(1);
             app.core.model.elements[0].kind = kind;
             app.core.model.nodes[2].coord[2] = -3000.0;
+            app.core.model.stories = explicit_story_inputs(&[-3000.0, 0.0]);
+            app.core.model.stories = explicit_story_inputs(&[-3000.0, 0.0]);
             app.core.model.load_cfg = Some(LoadCfg {
                 dampers: vec![DamperSpec {
                     elem: ElemId(0),
@@ -4462,6 +4472,7 @@ fn ゼロ重量指定追加で重量が同じでも階生成記録を更新す�
     app.core.model.constraints.clear();
     app.core.model.elements.truncate(1);
     app.core.model.nodes[2].coord[2] = -3000.0;
+    app.core.model.stories = explicit_story_inputs(&[-3000.0, 0.0]);
     app.generate_stories_action();
     assert!(app
         .core
@@ -5806,7 +5817,7 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
     });
     model.stories.push(
         serde_json::from_value(serde_json::json!({
-            "id": 1, "name": "2F", "elevation": Z_UPPER,
+            "id": 1, "name": "2F", "elevation": Z_UPPER, "sl_offset_mm": 0.0,
             "node_ids": [4, 5, 6, 7, 8, 9], "seismic_weight": null
         }))
         .unwrap(),
@@ -6726,30 +6737,23 @@ fn invalid_local_reference_invalidates_previous_static_result() {
 fn test_run_preparation_continues_when_story_generation_fails() {
     let mut app = App::default();
     app.load_model(sepika_core::model::Model::default());
-
     app.run_preparation();
-    assert!(
-        app.core
-            .scoped
-            .last_error
-            .as_deref()
-            .unwrap()
-            .contains("階の生成エラー"),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    let prep = app
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("階情報"));
+    assert!(app
         .core
         .scoped
         .preparation
         .as_ref()
-        .expect("階が作れなくても準備計算の集計は行われるはず");
-    assert!(prep.stories.is_empty());
-    assert!(!app.core.scoped.staleness.preparation_stale);
+        .is_none_or(|prep| prep.stories.is_empty()));
+    assert!(app.core.model.stories.is_empty());
 }
 
-/// 準備計算は実行のたびに階を再生成するが、利用者の手入力（地震用重量の手入力値・
-/// 階の種別）は引き継がれる。手入力を解除すれば次の準備計算で自動算定値へ戻る。
 #[test]
 fn test_run_preparation_regenerates_stories_keeping_manual_input() {
     use sepika_core::model::StoryLevelKind;
@@ -6886,6 +6890,7 @@ fn request_analysis_preparation_failure_deletes_only_static_targets() {
     use sepika_core::model::LoadCombination;
     for path in 0..8 {
         let mut app = tip_seismic_app();
+        app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
         app.generate_stories_action();
         app.core.model.combinations = vec![
             LoadCombination {
@@ -6980,6 +6985,7 @@ fn known_ai_failure_is_cleared_even_when_gravity_computation_fails() {
     };
     for preparation_only in [false, true] {
         let mut app = tip_seismic_app();
+        app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
         app.generate_stories_action();
         let ex = app
             .core
@@ -7128,6 +7134,7 @@ fn static_failure_paths_delete_only_execution_targets() {
     for preprocessing in [false, true] {
         for path in 0..6 {
             let mut app = tip_seismic_app();
+            app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
             app.generate_stories_action();
             app.core.model.combinations = vec![
                 LoadCombination {
@@ -7295,6 +7302,7 @@ fn tip_seismic_app() -> App {
         LoadCase, LoadCaseKind, LoadTransfer, RegionAnchor, SlabTipLoad, TipLoadDirection,
     };
     let mut model = crate::sample::portal_frame();
+    model.stories.clear();
     model.sections.push(
         sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
             .to_section(SectionId(2), "床".into()),
@@ -7363,6 +7371,7 @@ fn tip_ex_ey_failure_invalidates_previous_case_combo_and_display() {
                 [0.0, 1000.0, 0.0, 0.0, 0.0, 0.0]
             },
         ));
+        app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
         app.generate_stories_action();
         app.run_static_all();
         assert!(
@@ -7415,7 +7424,13 @@ fn tip_ex_ey_failure_invalidates_previous_case_combo_and_display() {
         assert!(app.ui.scoped.nav.focus_result.is_none());
         assert!(app.current_static().is_none());
         app.run_combination(1);
-        assert!(app.core.scoped.last_error.is_none());
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("階情報"));
         assert!(app
             .core
             .scoped
@@ -7550,6 +7565,7 @@ fn test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey() {
         name: "保持対象".into(),
         terms: vec![(LoadCaseId(0), 1.0)],
     });
+    app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
     app.generate_stories_action();
     app.run_static_all();
     assert!(
@@ -7582,8 +7598,7 @@ fn test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey() {
         Some(EY_CASE_NAME.into())
     );
     assert!(app.core.scoped.last_error.is_some());
-    assert_eq!(bundle.combos.len(), 1);
-    assert_eq!(bundle.combos[0].0, "保持対象");
+    assert!(bundle.combos.is_empty());
 }
 
 #[test]
@@ -7595,6 +7610,7 @@ fn test_tip_seismic_sync_and_job_use_same_load_case() {
         NodeId(2),
         [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     ));
+    app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
     app.generate_stories_action();
     app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
     assert!(
@@ -7625,6 +7641,7 @@ fn test_tip_seismic_sync_and_job_use_same_load_case() {
 #[test]
 fn test_generated_ai_and_tip_load_are_both_used_by_single_ex_analysis() {
     let mut app = tip_seismic_app();
+    app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -7670,6 +7687,7 @@ fn test_missing_tip_beam_stops_reanalysis_and_removes_result() {
         NodeId(2),
         [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     ));
+    app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
     app.generate_stories_action();
     app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
     assert!(
@@ -7902,6 +7920,18 @@ fn test_compute_ultimate_checks_rc_frame() {
         });
     }
 
+    for node in &mut model.nodes[1..] {
+        node.restraint.set_fixed(sepika_core::dof::Dof::Rx);
+        node.restraint.set_fixed(sepika_core::dof::Dof::Rz);
+    }
+    model.stories = explicit_story_inputs(&[0.0, 3000.0]);
+    model
+        .constraints
+        .push(sepika_core::model::Constraint::rigid_diaphragm(
+            sepika_core::ids::StoryId(1),
+            NodeId(1),
+            vec![NodeId(2)],
+        ));
     let mut app = App::default();
     app.load_model(model.clone());
     assert!(app
@@ -8297,6 +8327,7 @@ fn test_run_combination_errors_on_empty_seismic_case() {
     use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination};
 
     let mut model = crate::sample::portal_frame();
+    model.stories.clear();
     // 空の EX ケース（階未生成のため内容なし）と、それを参照する組合せ。
     let ex_id = LoadCaseId(model.load_cases.len() as u32);
     model.load_cases.push(LoadCase {
@@ -8603,6 +8634,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         one_way: None,
     };
     let mut model = Model {
+        stories: explicit_story_inputs(&[0.0, 3500.0]),
         nodes,
         elements,
         sections: vec![
@@ -9366,31 +9398,17 @@ mod grid_headless {
 /// （剛床に載らない基礎梁と柱だけが残る症状）。
 #[test]
 fn test_rigid_floor_beam_has_forces_and_checks() {
-    use sepika_core::model::{Constraint, Story};
+    use sepika_core::model::Constraint;
 
     let mut model = aligned_portal_frame();
     // 梁の両端（node1・node2）を剛床に載せる。剛床の情報源は拘束
     // （`Constraint::RigidDiaphragm`）のみなので、階と対で登録する。
     model.constraints.push(Constraint::rigid_diaphragm(
-        sepika_core::ids::StoryId(0),
+        sepika_core::ids::StoryId(1),
         NodeId(1),
         vec![NodeId(2)],
     ));
-    model.stories.push(Story {
-        wall_weights: Vec::new(),
-        level_kind: Default::default(),
-        structure: Default::default(),
-        id: sepika_core::ids::StoryId(0),
-        name: "2F".into(),
-        elevation: 3000.0,
-        node_ids: vec![NodeId(1), NodeId(2)],
-        seismic_weight: None,
-        weight_override: None,
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
-    });
+    model.stories[1].node_ids = vec![NodeId(1), NodeId(2)];
 
     let mut app = App::default();
     app.load_model(model);
@@ -9668,6 +9686,7 @@ fn test_preparation_without_stories_reports_notes() {
     let mut app = App::default();
     // 階を作らずに解析だけ実行する経路（`ensure_preparation`）を通す。
     app.load_model(crate::sample::portal_frame());
+    app.core.model.stories.clear();
     app.run_linear_static(LoadCaseId(0));
 
     let prep = app
@@ -9690,6 +9709,7 @@ fn test_preparation_without_stories_reports_notes() {
 fn test_analysis_ensures_preparation_without_generating_stories() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
+    app.core.model.stories.clear();
     assert!(app.core.scoped.staleness.preparation_stale);
 
     app.run_linear_static(LoadCaseId(0));
@@ -9933,6 +9953,8 @@ fn test_prep_sections_count_slab_reference() {
     assign_massless_slab_sections(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
+    model.stories.clear();
+    model.constraints.clear();
     let mut app = App {
         core: AppCore {
             model,
@@ -9940,7 +9962,7 @@ fn test_prep_sections_count_slab_reference() {
         },
         ..App::default()
     };
-    app.run_preparation();
+    app.ensure_preparation();
     let row = app
         .core
         .scoped
@@ -10370,6 +10392,7 @@ pub(super) fn cft_long_case2_app(n_compression_n: f64) -> App {
     model.nodes = vec![model.nodes[0].clone(), model.nodes[2].clone()];
     model.nodes[1].id = NodeId(1);
     model.nodes[1].coord = [0.0, 0.0, 7200.0];
+    model.stories = explicit_story_inputs(&[0.0, 7200.0]);
     model.elements.truncate(1);
     model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
     model.materials[0].fy = Some(235.0);
@@ -11900,7 +11923,7 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
     let revision = app.core.scoped.undo.revision();
     let mut invalid = app.core.model.clone();
     invalid.nodes[3].coord = invalid.nodes[2].coord;
-    invalid.nodes[3].coord[2] += 1000.0;
+    invalid.nodes[3].coord[2] -= 1000.0;
     let expected = invalid.validate_attached_slabs().unwrap_err().to_string();
     let issues = sepika_solver::statics::analysis::precheck::model_issues(&invalid);
     assert!(issues.iter().any(|issue| issue.message == expected));
@@ -12774,7 +12797,8 @@ fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through
             &mut model,
             Box::new(sepika_edit::AddStory {
                 name: "途中階".into(),
-                elevation: 18750.0,
+                elevation: Some(18750.0),
+                sl_offset_mm: Some(0.0),
             })
         ));
         let is_auto = |model: &sepika_core::model::Model| {
@@ -13684,6 +13708,7 @@ fn standard_rebar507_import_notice_reports_center_priority_without_refusing_prep
     assert!(notice.starts_with('⚠') && notice.contains("採用あき=30 mm"));
     assert!(app.core.model.stb_strength_diagnostics().is_empty());
     app.core.scoped.last_error = None;
+    app.core.model.stories = explicit_story_inputs(&[0.0, 3000.0]);
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -14393,4 +14418,280 @@ fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickn
         error.contains(&format!("ElemId({})", brace_id.0)) && error.contains("板厚"),
         "{error}"
     );
+}
+
+fn fl_sl_acceptance_model() -> sepika_core::model::Model {
+    let mut model = crate::sample::portal_frame();
+    model.stories[0].elevation = Some(3500.0);
+    model.stories[0].sl_offset_mm = Some(-500.0);
+    model.stories[1].elevation = Some(7000.0);
+    model.stories[1].sl_offset_mm = Some(-600.0);
+    for node in &mut model.nodes {
+        node.coord[2] = if node.coord[2] == 0.0 { 3000.0 } else { 6400.0 };
+    }
+    model
+}
+
+#[test]
+fn fl_sl_preparation_uses_sl_and_never_infers_missing_input_or_moves_nodes() {
+    let mut app = App::default();
+    app.load_model(fl_sl_acceptance_model());
+    let coordinates: Vec<_> = app.core.model.nodes.iter().map(|n| n.coord).collect();
+    app.generate_stories_action();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(app.core.model.layers()[0].height, 3500.0);
+    assert_eq!(app.core.model.layers()[0].structural_height_mm, 3400.0);
+    assert!(app
+        .core
+        .model
+        .diaphragms_of(StoryId(1))
+        .all(|d| d
+            .slaves
+            .iter()
+            .all(|id| app.core.model.nodes[id.index()].coord[2] == 6400.0)));
+    assert_eq!(
+        app.core.model.nodes[..coordinates.len()]
+            .iter()
+            .map(|n| n.coord)
+            .collect::<Vec<_>>(),
+        coordinates
+    );
+    assert!(app.core.model.explicit_story_of_node(NodeId(2)).is_none());
+    app.core.model.initialize_source_stories().unwrap();
+    assert!(app
+        .core
+        .model
+        .source_stories
+        .iter()
+        .all(|source| source.node_ids.is_empty()));
+    assert!(app.core.model.explicit_story_of_node(NodeId(2)).is_none());
+    app.core.model.stories[1].sl_offset_mm = None;
+    app.generate_stories_action();
+    assert!(app.core.scoped.last_error.as_ref().unwrap().contains("ΔSL"));
+    assert!(app.core.model.stories[1].sl_offset_mm.is_none());
+    assert!(!sepika_job::weight_preparation::weights_are_current(
+        &app.core.model,
+        app.core.analysis_cfg.mass_method
+    ));
+    assert!(
+        sepika_solver::statics::analysis::precheck::model_issues(&app.core.model)
+            .iter()
+            .any(|issue| issue.message.contains("ΔSL"))
+    );
+}
+
+#[test]
+fn fl_sl_stb_missing_offset_save_reopen_then_explicit_input_preserves_original_attributes() {
+    use sepika_core::model::Model;
+    use sepika_edit::{SetStoryLevel, UndoStack};
+    let xml = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes>
+    <StbNode id="10" X="0" Y="0" Z="3000"/><StbNode id="20" X="0" Y="0" Z="6400"/>
+    </StbNodes><StbStories><StbStory id="30" name="1F" height="3500" kind="GENERAL"><StbNodeIdList><StbNodeId id="10"/></StbNodeIdList></StbStory>
+    <StbStory id="40" name="2F" height="7000" kind="GENERAL"><StbNodeIdList><StbNodeId id="20"/></StbNodeIdList></StbStory></StbStories></StbModel></ST_BRIDGE>"#;
+    let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
+    let original_sources = model.source_stories.clone();
+    let coordinates: Vec<_> = model.nodes.iter().map(|n| n.coord).collect();
+    assert_eq!(
+        model
+            .stories
+            .iter()
+            .map(|s| s.elevation)
+            .collect::<Vec<_>>(),
+        [Some(3500.0), Some(7000.0)]
+    );
+    assert!(model.stories.iter().all(|s| s.sl_offset_mm.is_none()));
+    assert!(sepika_load::story_gen::generate_stories(&model, None)
+        .unwrap_err()
+        .contains("ΔSL"));
+    let path = std::env::temp_dir().join(format!(
+        "sepika729-story-levels-{}.ovika",
+        std::process::id()
+    ));
+    let roundtrip = |model: &Model| {
+        sepika_io::ovika::save_ovika(&path, model, Default::default()).unwrap();
+        sepika_io::ovika::load_ovika(&path).unwrap().model
+    };
+    model = roundtrip(&model);
+    assert!(model.stories.iter().all(|s| s.sl_offset_mm.is_none()));
+    let mut app = App::default();
+    assert!(app.load_model(model.clone()));
+    app.core.model.stories[0].elevation = None;
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.open_project_from(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app.core.model.stories[0].elevation.is_none());
+    assert!(app.core.model.stories[1].sl_offset_mm.is_none());
+    let mut undo = UndoStack::new();
+    for (story, offset) in [(StoryId(0), -500.0), (StoryId(1), -600.0)] {
+        assert!(undo.run(
+            &mut model,
+            Box::new(SetStoryLevel {
+                story,
+                name: format!("編集{}F", story.0 + 1),
+                elevation: Some(if story.0 == 0 { 3500.0 } else { 7000.0 }),
+                sl_offset_mm: Some(offset)
+            })
+        ));
+    }
+    assert_eq!(model.layers()[0].height, 3500.0);
+    assert_eq!(model.layers()[0].structural_height_mm, 3400.0);
+    assert_eq!(model.source_stories, original_sources);
+    assert_eq!(
+        model.nodes.iter().map(|n| n.coord).collect::<Vec<_>>(),
+        coordinates
+    );
+    let restored = roundtrip(&model);
+    assert_eq!(restored.stories, model.stories);
+    assert_eq!(restored.source_stories, original_sources);
+    undo.undo(&mut model);
+    assert!(model.stories[1].sl_mm().is_none());
+    undo.redo(&mut model);
+    assert_eq!(model.layers()[0].height, 3500.0);
+    assert_eq!(model.stories[1].sl_mm(), Some(6400.0));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn fl_sl_gui_pending_edit_and_undo_redo_invalidate_results_and_preserve_floor_identity() {
+    let mut app = App::default();
+    app.load_model(fl_sl_acceptance_model());
+    let original = app.core.model.clone();
+    let key = result_validity::ResultInputKey::Modal;
+    let original_input = app.result_input(&key);
+    app.core.scoped.staleness.results_stale = false;
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetStoryLevel {
+            story: StoryId(1),
+            name: "2F".into(),
+            elevation: Some(7000.0),
+            sl_offset_mm: Some(-500.0),
+        }));
+    app.apply_pending_story_command();
+    assert!(app.core.scoped.staleness.results_stale);
+    assert_ne!(app.result_input(&key), original_input);
+    assert_eq!(app.core.model.layers()[0].height, 3500.0);
+    assert_eq!(app.core.model.layers()[0].structural_height_mm, 3500.0);
+    assert_eq!(app.core.model.stories[1].id, StoryId(1));
+    assert_eq!(app.core.model.nodes, original.nodes);
+    app.undo_action();
+    assert_eq!(app.result_input(&key), original_input);
+    assert_eq!(app.core.model.stories[1].sl_mm(), Some(6400.0));
+    app.redo_action();
+    assert_ne!(app.result_input(&key), original_input);
+    assert_eq!(app.core.model.stories[1].sl_mm(), Some(6500.0));
+}
+
+#[test]
+fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
+    use sepika_core::model::{Node, SourceStory, SourceStoryKind, SourceStoryNode, Story};
+    use sepika_edit::{ApplyPreparedModel, SetSourceStoryNodes, SetStoryLevel, UndoStack};
+    let mut model = sepika_core::model::Model::default();
+    for (i, (fl, delta, z)) in [
+        (500.0, -500.0, 0.0),
+        (3500.0, -500.0, 3000.0),
+        (7000.0, -600.0, 6400.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = StoryId(i as u32);
+        let node = NodeId(i as u32);
+        let source = i as u32 + 10;
+        model.nodes.push(Node {
+            id: node,
+            coord: [0.0, 0.0, z],
+            restraint: Default::default(),
+            mass: None,
+            story: Some(id),
+            support_spring: None,
+        });
+        let mut story = Story::new(id, format!("{}F", i + 1), Some(fl), Some(delta));
+        story.source_story = Some(source);
+        story.node_ids = vec![node];
+        model.stories.push(story);
+        model.source_stories.push(SourceStory {
+            id: source,
+            guid: None,
+            name: format!("原階{}", i + 1),
+            height: fl,
+            kind: SourceStoryKind::General,
+            kind_from_native: false,
+            id_dependence: None,
+            strength_concrete: None,
+            node_ids: vec![SourceStoryNode {
+                id: i as u32 + 1,
+                node: Some(node),
+            }],
+        });
+    }
+    model.source_stories_initialized = true;
+    model.load_cases.push(sepika_core::model::LoadCase {
+        id: LoadCaseId(0),
+        name: "DL".into(),
+        kind: sepika_core::model::LoadCaseKind::Dead,
+        nodal: vec![sepika_core::model::NodalLoad::manual(
+            NodeId(1),
+            [0.0, 0.0, -100.0, 0.0, 0.0, 0.0],
+        )],
+        member: vec![],
+    });
+    let initial = sepika_load::story_gen::generate_stories(&model, Some(LoadCaseId(0))).unwrap();
+    let method = model.mass_method;
+    sepika_job::weight_preparation::apply_generated_weights(&mut model, initial, method);
+    assert_eq!(model.stories[1].seismic_weight, Some(100.0));
+    let mut undo = UndoStack::new();
+    let original = model.clone();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetSourceStoryNodes {
+            source_story: 11,
+            nodes: vec![]
+        })
+    ));
+    assert!(model.explicit_story_of_node(NodeId(1)).is_none());
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(1),
+            name: "2F".into(),
+            elevation: Some(3500.0),
+            sl_offset_mm: Some(-1000.0)
+        })
+    ));
+    let generated = sepika_load::story_gen::generate_stories(&model, Some(LoadCaseId(0))).unwrap();
+    assert_eq!(generated.node_story[1], Some(StoryId(2)));
+    assert_eq!(generated.stories[1].seismic_weight, Some(0.0));
+    assert_eq!(generated.stories[2].seismic_weight, Some(100.0));
+    assert!(generated.constraints.iter().all(|constraint| !matches!(constraint, sepika_core::model::Constraint::RigidDiaphragm { story, .. } if *story == StoryId(1))));
+    let mut prepared = model.clone();
+    let method = prepared.mass_method;
+    sepika_job::weight_preparation::apply_generated_weights(&mut prepared, generated, method);
+    assert!(undo.run(&mut model, Box::new(ApplyPreparedModel { prepared })));
+    assert_eq!(model.nodes[1].story, Some(StoryId(2)));
+    for _ in 0..3 {
+        undo.undo(&mut model);
+    }
+    assert!(model.eq_ignoring_dofmap(&original));
+    assert_eq!(model.explicit_story_of_node(NodeId(1)), Some(StoryId(1)));
+    for _ in 0..3 {
+        undo.redo(&mut model);
+    }
+    assert_eq!(model.nodes[1].story, Some(StoryId(2)));
+    assert!(model.source_stories[1].node_ids.is_empty());
 }

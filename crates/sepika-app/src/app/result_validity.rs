@@ -1145,7 +1145,7 @@ mod tests {
         let mut basement = app.core.model.stories[1].clone();
         basement.id = StoryId(1);
         basement.name = "B1".into();
-        basement.elevation = 1000.0;
+        basement.elevation = Some(1000.0);
         basement.node_ids = vec![basement_node];
         basement.weight_override = Some(100_000.0);
         basement.level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 0.0 };

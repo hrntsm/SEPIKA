@@ -383,6 +383,7 @@ mod tests {
         let mut model = crate::sample::portal_frame();
         model.nodes.truncate(2);
         model.nodes[1].coord = [0.0, 0.0, 3000.0];
+        model.stories = crate::app::tests::explicit_story_inputs(&[0.0, 3000.0]);
         model.nodes[1].restraint = Dof6Mask::FREE;
         model.elements.truncate(1);
         model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();

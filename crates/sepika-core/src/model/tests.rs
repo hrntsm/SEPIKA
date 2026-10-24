@@ -1065,7 +1065,9 @@ fn make_story_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
             wall_weights: Vec::new(),
             id: StoryId(i as u32),
             name: name.into(),
-            elevation,
+            elevation: Some(elevation),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: Vec::new(),
             seismic_weight: None,
             weight_override: None,
@@ -1223,7 +1225,7 @@ fn test_split_level_floor_shares_story_with_two_diaphragms() {
 /// 剛床を持たない階も成立する（階と剛床は別概念）。
 #[test]
 fn test_story_without_diaphragm_is_valid() {
-    let m = make_story_model(&[0.0, 4000.0], &[("1F", 4000.0)]);
+    let m = make_story_model(&[0.0, 4000.0], &[("1F", 0.0), ("2F", 4000.0)]);
     assert_eq!(m.diaphragms_of(StoryId(0)).count(), 0);
     assert!(!m.node_on_rigid_diaphragm(NodeId(1)));
     assert!(m.validate().is_ok());
@@ -1255,10 +1257,10 @@ fn test_validate_rejects_stories_out_of_elevation_order() {
     let mut m = make_story_model(&[0.0, 4000.0, 7500.0], &[("1F", 4000.0), ("2F", 7500.0)]);
     assert!(m.validate().is_ok());
 
-    m.stories[1].elevation = 1000.0;
+    m.stories[1].elevation = Some(1000.0);
     let err = m.validate().expect_err("標高の逆転を検出する");
     let msg = format!("{err}");
-    assert!(msg.contains("昇順"), "{msg}");
+    assert!(msg.contains("FL 間高さ"), "{msg}");
 }
 
 /// 同じ境界を持つ床領域が 2 つあると弾く（1 閉領域 1 領域の不変条件。D1）。
@@ -2010,6 +2012,7 @@ fn seismic_generation_snapshot_id_visits_keep_keys_stale_and_drop_deleted_node_o
             input_key: vec![1, 2],
             output_key: vec![3, 4],
             calculated_weights: vec![(StoryId(2), 123.0)],
+            automatic_node_stories: Vec::new(),
             automatic_diaphragms: vec![Constraint::rigid_diaphragm(
                 StoryId(2),
                 NodeId(4),

@@ -186,16 +186,20 @@ fn story_frame_includes_columns_below() {
     let up_a = push_node(&mut m, 0.0, 0.0, 8000.0);
     let col_up = push_line(&mut m, top_a, up_a);
 
-    let story = StoryId(0);
+    m.stories
+        .push(Story::new(StoryId(0), "1FL".into(), Some(0.0), Some(0.0)));
+    let story = StoryId(1);
     for n in [top_a, top_b] {
         m.nodes[n.index()].story = Some(story);
     }
-    m.nodes[up_a.index()].story = Some(StoryId(1));
+    m.nodes[up_a.index()].story = Some(StoryId(2));
     m.stories.push(Story {
         wall_weights: Vec::new(),
         id: story,
         name: "2FL".into(),
-        elevation: 4000.0,
+        elevation: Some(4000.0),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: vec![top_a, top_b],
         seismic_weight: None,
         weight_override: None,
@@ -207,6 +211,12 @@ fn story_frame_includes_columns_below() {
         fireproof: Default::default(),
     });
 
+    m.stories.push(Story::new(
+        StoryId(2),
+        "3FL".into(),
+        Some(8000.0),
+        Some(0.0),
+    ));
     let f = build_frame(&m, FrameTarget::Story(story)).expect("構面");
     assert_eq!(f.label, "2FL");
     assert_eq!(f.normal, [0.0, 0.0, 1.0], "伏図の法線は鉛直");

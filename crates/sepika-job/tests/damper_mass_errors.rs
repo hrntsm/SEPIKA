@@ -12,6 +12,18 @@ use sepika_solver::dynamic::timehistory::GroundMotion;
 
 fn generated_model(method: MassMethod) -> Model {
     let mut model = Model {
+        stories: [0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
         nodes: [0.0, 3000.0]
             .into_iter()
             .enumerate()
@@ -76,7 +88,7 @@ fn 公開固有値と時刻歴ジョブはダンパー質量不備をinvalid_inp
             match case {
                 0 => model.nodes[master].mass = None,
                 1 => model.nodes[master].mass.as_mut().unwrap()[0] = 0.5,
-                2 => model.stories[1].elevation = 4000.0,
+                2 => model.stories[1].elevation = Some(4000.0),
                 3 => model.stories[1].dynamic_mass.as_mut().unwrap().lumped_mass = None,
                 4 => model.load_cfg.as_mut().unwrap().dampers[0].total_weight = -1.0,
                 5 => model.load_cfg.as_mut().unwrap().dampers[0].total_weight = f64::NAN,
@@ -112,7 +124,21 @@ fn separated_model(method: MassMethod) -> Model {
     model.nodes[1].coord = [4000.0, 0.0, 3000.0];
     model.generated_masters.clear();
     model.damper_mass_generation = None;
-    model.stories.clear();
+    model.stories = [0.0, 3000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, fl)| {
+            sepika_core::model::Story::new(
+                sepika_core::ids::StoryId(i as u32),
+                format!("{}F", i + 1),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect();
+    for node in &mut model.nodes {
+        node.story = None;
+    }
     model.constraints.clear();
     for (id, coord) in [
         (2, [0.0, 0.0, 0.0]),

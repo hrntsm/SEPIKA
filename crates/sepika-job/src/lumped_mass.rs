@@ -508,7 +508,9 @@ mod tests {
                 wall_weights: Vec::new(),
                 id: StoryId(i),
                 name: format!("{}F", i + 1),
-                elevation: coords[i as usize][2],
+                elevation: Some(coords[i as usize][2]),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(i)],
                 seismic_weight: if i == 0 {
                     None

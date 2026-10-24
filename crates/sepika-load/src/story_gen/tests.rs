@@ -1,3 +1,18 @@
+fn explicit_stories(levels: &[f64]) -> Vec<Story> {
+    levels
+        .iter()
+        .enumerate()
+        .map(|(i, &fl)| {
+            Story::new(
+                StoryId(i as u32),
+                sepika_core::model::default_story_name(i),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect()
+}
+
 use super::geom::dist3;
 use super::*;
 use sepika_core::dof::Dof6Mask;
@@ -13,7 +28,10 @@ use sepika_core::section_shape::SectionShape;
 
 /// 2 層 × 1 スパンの平面ラーメン（各レベル 2 節点）。
 fn two_story_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3500.0, 7000.0]),
+        ..Default::default()
+    };
     let coords = [
         [0.0, 0.0, 0.0],
         [6000.0, 0.0, 0.0],
@@ -134,7 +152,7 @@ fn gen_slaves(gen: &StoryGenResult, story: StoryId) -> Vec<NodeId> {
 #[test]
 fn test_generated_story_names_are_floor_based() {
     let model = two_story_model();
-    assert!(model.stories.is_empty(), "階が未定義の状態から生成する");
+    assert_eq!(model.stories.len(), 3);
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
     let names: Vec<&str> = gen.stories.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, vec!["1F", "2F", "3F"]);
@@ -154,9 +172,9 @@ fn test_generate_two_stories() {
     let model = two_story_model();
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
     assert_eq!(gen.stories.len(), 3, "基部の床を含めて 3 階");
-    assert_eq!(gen.stories[0].elevation, 0.0, "先頭は基部の床");
-    assert_eq!(gen.stories[1].elevation, 3500.0);
-    assert_eq!(gen.stories[2].elevation, 7000.0);
+    assert_eq!(gen.stories[0].elevation, Some(0.0), "先頭は基部の床");
+    assert_eq!(gen.stories[1].elevation, Some(3500.0));
+    assert_eq!(gen.stories[2].elevation, Some(7000.0));
     // 各階 2 節点 → 代表節点(慣性力重心)を新規生成 + スレーブ2（既存節点は全てスレーブ）
     assert_eq!(gen.stories[1].node_ids.len(), 2);
     assert_eq!(gen_slaves(&gen, StoryId(0)).len(), 2, "基部の床の剛床");
@@ -309,7 +327,10 @@ fn test_generate_single_level_is_error() {
 
 /// 重量が非対称な 1 層モデル（自重なし・節点荷重のみで重みを制御）。
 fn asymmetric_weight_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     let coords = [
         [0.0, 0.0, 0.0],
         [4000.0, 0.0, 0.0],
@@ -404,7 +425,10 @@ fn test_generate_weighted_centroid_matches_hand_calc() {
 
 #[test]
 fn test_generate_zero_weight_falls_back_to_geometric_centroid() {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     // 幾何重心が非対称になるよう配置（自重・荷重ケースなし → 重量ゼロ）。
     let coords = [
         [0.0, 0.0, 0.0],
@@ -441,7 +465,10 @@ fn test_generate_zero_weight_falls_back_to_geometric_centroid() {
 /// マスターの質点質量算定（CorrectedLumped の控除／LumpedOnly の全量）を検証する
 /// 共通土台。
 fn two_columns_with_dl_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     let coords = [
         [0.0, 0.0, 0.0],
         [4000.0, 0.0, 0.0],
@@ -575,7 +602,10 @@ fn test_master_mass_corrected_lumped_deducts_density_self_weight() {
 /// （面積 0・せい 800）を持つ 1 層モデル。柱脚梁せい相当の追加自重だけが基部節点の質点
 /// 質量に残ることの検証に使う。
 fn rc_base_column_with_base_beam_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     let coords = [[0.0, 0.0, 0.0], [4000.0, 0.0, 0.0], [0.0, 0.0, 3000.0]];
     for (i, c) in coords.iter().enumerate() {
         model.nodes.push(Node {
@@ -902,7 +932,10 @@ fn test_weight_override_does_not_change_dynamic_mass() {
 /// 2 節点の既知配置で手計算と照合する。
 #[test]
 fn test_dynamic_mass_inertia_about_mass_center_3d() {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     // 基部の床 2 節点 + 上の床 2 節点。y 方向にもずらして 3 次元配置にする。
     let coords = [
         [0.0, 0.0, 0.0],
@@ -1031,7 +1064,10 @@ fn test_both_mass_methods_have_equal_total_dynamic_mass() {
 /// 水平 RC 梁 1 本（スラブ厚控除が効く）と自重ゼロの RC 柱 2 本を持つ 1 層モデル。
 fn rc_beam_with_slab_model() -> Model {
     let len = 6000.0;
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     for (i, c) in [
         [0.0, 0.0, 0.0],
         [len, 0.0, 0.0],
@@ -1249,7 +1285,10 @@ fn cft_column_model() -> Model {
     let mut section = shape.to_section(SectionId(0), "CFT".into());
     section.material = Some(MaterialId(0));
     section.steel_material = Some(MaterialId(1));
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     for (id, z, restraint) in [(0u32, 0.0, Dof6Mask::FIXED), (1, 3000.0, Dof6Mask::FREE)] {
         model.nodes.push(Node {
             id: NodeId(id),
@@ -1679,7 +1718,10 @@ fn test_wall_mass_consistent_between_density_and_case_paths() {
 /// 二次部材（小梁）1 本のみを持つ 1 層モデル（主架構要素なし）。
 /// 二次部材の自重は解析の質量行列（部材密度質量）に算入されないことの確認用。
 fn secondary_beam_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, 0.0],
@@ -1789,7 +1831,10 @@ fn test_master_mass_corrected_lumped_does_not_deduct_secondary_member_self_weigh
 /// 小梁の自重だけを見るため、支持柱は断面積 0（自重ゼロ）とする。
 #[test]
 fn test_secondary_beam_steel_weight_factor_applies_to_design_and_mass() {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     for (i, c) in [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0], [2000.0, 0.0, 3000.0]]
         .iter()
         .enumerate()
@@ -1908,7 +1953,10 @@ fn test_secondary_beam_steel_weight_factor_applies_to_design_and_mass() {
 /// 2 本の並行大梁（いずれも材軸中間に節点を持たない 1 部材）を持ち、
 /// その材軸位置 0.5 に小梁がアンカーするモデル。小梁の両端に一致する節点は無い。
 fn secondary_beam_on_girder_midspan_model(with_beam: bool) -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     for (i, (x, y, z)) in [
         (0.0, 0.0, 0.0),
         (0.0, 0.0, 3000.0),
@@ -2066,7 +2114,10 @@ fn single_beam_model(
     rigid_zone: RigidZone,
     load_cfg: Option<LoadCfg>,
 ) -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, len]),
+        ..Default::default()
+    };
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, 0.0],
@@ -2194,7 +2245,10 @@ fn test_member_load_reaction_distribution_end_to_end() {
     // 自重を持たない(section/material 未設定)部材に非対称な三角形分布荷重を与え、
     // 剛床代表節点の重心が naive な 1/2-1/2 配分(x=2000)ではなく
     // 静定反力配分による偏った位置(x≈2666.67)になることを確認する（§1.4）。
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     let coords = [
         [0.0, 0.0, 0.0],
         [4000.0, 0.0, 0.0],
@@ -2296,7 +2350,10 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
     let len = 6000.0;
     let area = 400.0 * 700.0;
     let density = 2.4e-9;
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     for (i, c) in [
         [0.0, 0.0, 0.0],
         [0.0, 0.0, 3000.0],
@@ -2502,7 +2559,10 @@ fn test_extra_line_weight_adds_to_self_weight() {
 
 /// 矩形壁(4000×3000, t=150)を上下 2 レベルの節点間に張った 1 層モデル。
 fn wall_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     let coords = [
         [0.0, 0.0, 0.0],
         [4000.0, 0.0, 0.0],
@@ -3068,6 +3128,9 @@ fn test_density_seismic_weight_includes_attached_wall_plate() {
     let mut model = two_story_model();
     let mut upper = model.nodes[5].clone();
     upper.id = NodeId(model.nodes.len() as u32);
+    model
+        .stories
+        .push(Story::new(StoryId(3), "4F".into(), Some(9000.0), Some(0.0)));
     upper.coord[2] = 9000.0;
     model.nodes.push(upper);
     let baseline = generate_stories(&model, None).unwrap();
@@ -3217,7 +3280,10 @@ fn test_top_beam_face_slit_preserves_geometric_story_weight() {
 fn single_column_with_attached_wall(transfer: LoadTransfer) -> (Model, f64) {
     use sepika_core::model::RegionAnchor;
 
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0, 4000.0]),
+        ..Default::default()
+    };
     for (id, z, restraint) in [(0, 0.0, Dof6Mask::FIXED), (1, 3000.0, Dof6Mask::FREE)] {
         model.nodes.push(Node {
             id: NodeId(id),
@@ -3445,7 +3511,7 @@ fn column_finish_model() -> Model {
         wall_weights: Vec::new(),
         id: StoryId(2),
         name: "RF".into(),
-        elevation: 6000.0,
+        elevation: Some(6000.0),
         ..model.stories[1].clone()
     });
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
@@ -4110,6 +4176,12 @@ fn rc_src柱仕上げは階共通値と実形状を使いdlと地震用重量で
             let mut model = column_finish_model();
             model.nodes[0].coord = bottom;
             model.nodes[1].coord = top;
+            if bottom[2] > 0.0 {
+                let mut lowest = model.nodes[0].clone();
+                lowest.id = NodeId(model.nodes.len() as u32);
+                lowest.coord = [0.0, 0.0, 0.0];
+                model.nodes.push(lowest);
+            }
             model.sections[0].shape = Some(shape.clone());
             // 断面性能の幅・せいではなく形状の寸法が正。
             model.sections[0].width = 123.0;
@@ -4271,7 +4343,10 @@ fn 階共通柱仕上げは用途未設定とブレースとs柱に適用しな�
 #[test]
 fn test_finish_area_weight_beam_perimeter_three_side() {
     // 水平梁(非鉛直)。φ=b+2D の三面仕上げ。
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, 0.0],
@@ -4368,7 +4443,10 @@ fn test_finish_area_weight_beam_perimeter_three_side() {
 
 #[test]
 fn test_base_column_without_lower_column_adds_max_beam_depth() {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, 0.0],
@@ -4504,7 +4582,10 @@ fn test_base_column_without_lower_column_adds_max_beam_depth() {
 /// `W_column/2` となり、このテストが失敗する。
 #[test]
 fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[-3000.0, 0.0, 3000.0]),
+        ..Default::default()
+    };
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, 0.0],
@@ -4692,7 +4773,10 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
 /// 実装では 3 節点 Beam の先頭 2 節点が下階柱と誤判定され `W_extra` が 0 になる。
 #[test]
 fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_depth() {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[-3000.0, 0.0, 3000.0]),
+        ..Default::default()
+    };
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, 0.0],
@@ -4879,7 +4963,10 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
 #[test]
 fn test_base_column_with_lower_column_does_not_add_beam_depth() {
     // 下階に柱がある場合は梁せいを付加しない(誤って常時付加しないことの回帰確認)。
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[-3000.0, 0.0, 3000.0]),
+        ..Default::default()
+    };
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, -3000.0],
@@ -5055,7 +5142,10 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
 /// K型ブレース: 基準節点(node2, node3)から内部節点(node4)へ2本のブレースが
 /// 集まる形。ブレース断面積を非対称にして配分規則による重心の違いを検出する。
 fn k_brace_model(rule: KBraceWeightRule) -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3000.0]),
+        ..Default::default()
+    };
     let coords = [
         [0.0, 0.0, 0.0],
         [4000.0, 0.0, 0.0],
@@ -5468,22 +5558,28 @@ fn test_regeneration_keeps_user_defined_story_fields() {
 
     let mut with_inserted_floor = model.clone();
     with_inserted_floor.stories.insert(
-        1,
+        2,
         Story {
             wall_weights: Vec::new(),
-            id: StoryId(99),
+            id: StoryId(2),
             name: "中間階".into(),
-            elevation: 5250.0,
+            elevation: Some(5250.0),
             ..model.stories[0].clone()
         },
     );
+    for (i, story) in with_inserted_floor.stories.iter_mut().enumerate() {
+        story.id = StoryId(i as u32);
+    }
+    for story in &mut with_inserted_floor.stories {
+        story.node_ids.clear();
+    }
     let regenerated = generate_stories(&with_inserted_floor, Some(LoadCaseId(0)))
         .unwrap()
         .stories;
     assert_eq!(
         regenerated
             .iter()
-            .find(|s| s.elevation == 0.0)
+            .find(|s| s.elevation == Some(0.0))
             .unwrap()
             .column_finish_area_weight,
         0.002
@@ -5491,7 +5587,7 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     assert_eq!(
         regenerated
             .iter()
-            .find(|s| s.elevation == 0.0)
+            .find(|s| s.elevation == Some(0.0))
             .and_then(|s| s.standard_floor_load)
             .unwrap()
             .dead,
@@ -5504,7 +5600,10 @@ fn test_regeneration_keeps_user_defined_story_fields() {
 
 /// 柱を中間高さで分割した 1 層モデル（各レベル 2 節点、中間に 2 節点）。
 fn split_column_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: explicit_stories(&[0.0, 3500.0]),
+        ..Default::default()
+    };
     let coords = [
         [0.0, 0.0, 0.0],
         [6000.0, 0.0, 0.0],
@@ -5527,21 +5626,6 @@ fn split_column_model() -> Model {
             support_spring: None,
         });
     }
-    model.stories.push(Story {
-        wall_weights: Vec::new(),
-        id: StoryId(0),
-        name: "2FL".into(),
-        elevation: 3500.0,
-        node_ids: Vec::new(),
-        seismic_weight: None,
-        weight_override: None,
-        structure: Default::default(),
-        level_kind: Default::default(),
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
-    });
     model
 }
 
@@ -5577,32 +5661,15 @@ fn test_mid_height_nodes_join_story_but_not_diaphragm() {
 #[test]
 fn test_predefined_stories_drive_the_assignment() {
     let mut model = two_story_model();
-    // 2 レベル（3500・7000）あるが、階は 7000 の 1 つだけ定義する。
-    model.stories.push(Story {
-        wall_weights: Vec::new(),
-        id: StoryId(0),
-        name: "RFL".into(),
-        elevation: 7000.0,
-        node_ids: Vec::new(),
-        seismic_weight: None,
-        weight_override: None,
-        structure: Default::default(),
-        level_kind: Default::default(),
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
-    });
-
+    model.stories = explicit_stories(&[500.0, 7000.0]);
+    model.stories[0].sl_offset_mm = Some(-500.0);
+    model.stories[1].name = "RFL".into();
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
-    // 定義した階はそのまま使い、階生成は基部の床だけを先頭に補う。
-    assert_eq!(gen.stories.len(), 2, "定義した RFL + 補われた基部の床");
-    assert_eq!(gen.stories[0].elevation, 0.0, "先頭は基部の床");
+    assert_eq!(gen.stories.len(), 2);
+    assert_eq!(gen.stories[0].fl_mm(), Some(500.0));
+    assert_eq!(gen.stories[0].sl_mm(), Some(0.0));
     assert_eq!(gen.stories[1].name, "RFL");
-    assert_eq!(gen.stories[1].elevation, 7000.0);
-    // 基部を除く 4 節点すべてが RFL の区間 (0, 7000] に入る。
     assert_eq!(gen.stories[1].node_ids.len(), 4);
-    // 剛床のスレーブは床面（z=7000）の 2 節点のみ。
     assert_eq!(gen_slaves(&gen, StoryId(1)).len(), 2);
 }
 
@@ -5612,37 +5679,9 @@ fn test_predefined_stories_drive_the_assignment() {
 #[test]
 fn test_story_without_floor_nodes_gets_no_diaphragm() {
     let mut model = two_story_model();
-    model.stories.push(Story {
-        wall_weights: Vec::new(),
-        id: StoryId(0),
-        name: "3F".into(),
-        elevation: 3500.0,
-        node_ids: Vec::new(),
-        seismic_weight: None,
-        weight_override: None,
-        structure: Default::default(),
-        level_kind: Default::default(),
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
-    });
-    // レベル 10500 には節点がない（区間 (3500, 10500] には z=7000 の節点が入る）。
-    model.stories.push(Story {
-        wall_weights: Vec::new(),
-        id: StoryId(1),
-        name: "4F".into(),
-        elevation: 10500.0,
-        node_ids: Vec::new(),
-        seismic_weight: None,
-        weight_override: None,
-        structure: Default::default(),
-        level_kind: Default::default(),
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
-    });
+    model.stories = explicit_stories(&[0.0, 3500.0, 10500.0]);
+    model.stories[1].name = "3F".into();
+    model.stories[2].name = "4F".into();
 
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
     assert_eq!(gen.stories.len(), 3, "定義した 2 階 + 補われた基部の床");
@@ -5663,109 +5702,20 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
     assert_eq!(gen.rep_nodes.len(), 2, "剛床のない階には代表節点も作らない");
 }
 
-/// 旧形式（層基準＝基部の階を持たない階列）のモデルを準備計算に通すと、
-/// 階生成が基部の床を補って床基準へ揃える。**層の量は新形式と一致する**。
-///
-/// これがないと `Model::layers` が最下層を見落とし、層間変形角・層せん断力から
-/// 静かに 1 層落ちる。移行コードを持たない代わりに、階生成が不変条件を作る
-/// ことでこれを防いでいる（`dev_docs/handoff` の申し送り参照）。
 #[test]
-fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
-    let base_model = two_story_model();
-
-    // 旧形式: 層の上端の床だけを階として持つ（基部の階がない）。
-    let mut legacy = base_model.clone();
-    legacy.stories = vec![
-        Story {
-            wall_weights: Vec::new(),
-            id: StoryId(0),
-            name: "2F".into(),
-            elevation: 3500.0,
-            node_ids: Vec::new(),
-            seismic_weight: None,
-            weight_override: None,
-            structure: Default::default(),
-            level_kind: Default::default(),
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
-        },
-        Story {
-            wall_weights: Vec::new(),
-            id: StoryId(1),
-            name: "3F".into(),
-            elevation: 7000.0,
-            node_ids: Vec::new(),
-            seismic_weight: None,
-            weight_override: None,
-            structure: Default::default(),
-            level_kind: Default::default(),
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
-        },
-    ];
-
-    // 新形式: 基部の床を先頭に持つ。
-    let mut modern = base_model.clone();
-    modern.stories = vec![
-        Story {
-            wall_weights: Vec::new(),
-            id: StoryId(0),
-            name: "1F".into(),
-            elevation: 0.0,
-            node_ids: Vec::new(),
-            seismic_weight: None,
-            weight_override: None,
-            structure: Default::default(),
-            level_kind: Default::default(),
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
-        },
-        legacy.stories[0].clone(),
-        legacy.stories[1].clone(),
-    ];
-    modern.stories[1].id = StoryId(1);
-    modern.stories[2].id = StoryId(2);
-
-    let apply = |m: &Model| -> Model {
-        let gen = generate_stories(m, Some(LoadCaseId(0))).unwrap();
-        let mut out = m.clone();
-        out.stories = gen.stories;
-        out
-    };
-    let from_legacy = apply(&legacy);
-    let from_modern = apply(&modern);
-
-    // どちらも床基準（先頭が基部）へ揃う。
-    assert_eq!(from_legacy.stories.len(), 3);
-    assert_eq!(
-        from_legacy.stories[0].elevation,
-        from_legacy.base_elevation()
-    );
-    assert_eq!(
-        from_modern.stories[0].elevation,
-        from_modern.base_elevation()
-    );
-
-    // 層の量（名前・階高・重量）が一致する。
-    let layers_of = |m: &Model| -> Vec<(String, f64, Option<f64>)> {
-        m.layers()
-            .into_iter()
-            .map(|l| (l.name, l.height, l.weight))
-            .collect()
-    };
-    let a = layers_of(&from_legacy);
-    let b = layers_of(&from_modern);
-    assert_eq!(a.len(), 2, "3500・7000 の 2 層");
-    assert_eq!(a, b, "旧形式・新形式で層の量が一致する");
-    // 最下層の階高は基部から数える（旧形式でも 0→3500）。
-    assert_eq!(a[0].1, 3500.0);
-    assert_eq!(a[1].1, 3500.0);
+fn explicit_lowest_fl_is_not_replaced_or_extended_from_structure_bottom() {
+    let mut model = two_story_model();
+    model.stories = explicit_stories(&[3500.0, 7000.0]);
+    let result = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
+    assert_eq!(result.stories.len(), 2);
+    assert_eq!(result.stories[0].fl_mm(), Some(3500.0));
+    assert_eq!(result.node_story[0], Some(StoryId(0)));
+    let mut generated = model.clone();
+    generated.stories = result.stories;
+    assert_eq!(generated.layers().len(), 1);
+    assert_eq!(generated.layers()[0].height, 3500.0);
+    model.stories[0].elevation = None;
+    assert!(generate_stories(&model, None).unwrap_err().contains("FL"));
 }
 
 #[test]
@@ -5988,4 +5938,76 @@ fn signed_story_reactions_preserve_synced_negative_mass_diagnostic_and_direction
         )
         .is_ok());
     }
+}
+
+#[test]
+fn sl_assignment_and_diaphragms_preserve_explicit_input_and_exclude_off_plane_nodes() {
+    let mut model = two_story_model();
+    model.nodes.truncate(4);
+    model.elements.truncate(2);
+    model.load_cases.clear();
+    model.stories = vec![
+        Story::new(StoryId(0), "1F".into(), Some(3500.0), Some(-500.0)),
+        Story::new(StoryId(1), "2F".into(), Some(7000.0), Some(-600.0)),
+    ];
+    for node in &mut model.nodes {
+        node.coord[2] = if node.id.0 < 2 { 3000.0 } else { 6400.0 };
+    }
+    let mut intermediate = model.nodes[2].clone();
+    intermediate.id = NodeId(4);
+    intermediate.coord[2] = 5000.0;
+    intermediate.story = Some(StoryId(0));
+    model.nodes.push(intermediate);
+    let manual = Constraint::rigid_diaphragm(StoryId(1), NodeId(2), vec![NodeId(3)]);
+    model.constraints.push(manual.clone());
+    let original = model.clone();
+    let generated = generate_stories_with_opts(&model, &[], false, MassMethod::LumpedOnly).unwrap();
+    assert_eq!(generated.stories.len(), 2);
+    assert_eq!(generated.stories[0].fl_mm(), Some(3500.0));
+    assert_eq!(generated.node_story[4], Some(StoryId(0)));
+    assert!(generated.constraints.contains(&manual));
+    assert!(generated.constraints.iter().all(|c| match c {
+        Constraint::RigidDiaphragm { slaves, .. } => !slaves.contains(&NodeId(4)),
+        _ => true,
+    }));
+    assert_eq!(model.nodes, original.nodes);
+    let mut supplied = model.clone();
+    supplied.stories = generated.stories;
+    assert_eq!(supplied.layers()[0].height, 3500.0);
+    assert_eq!(supplied.layers()[0].structural_height_mm, 3400.0);
+    model.stories[1].sl_offset_mm = None;
+    assert!(generate_stories(&model, None).unwrap_err().contains("ΔSL"));
+    model.stories.clear();
+    assert!(generate_stories(&model, None).unwrap_err().contains("FL"));
+    assert!(model.stories.is_empty());
+}
+
+#[test]
+fn saved_wall_geometry_reports_missing_levels_without_dropping_band_boundaries() {
+    let mut model = wall_model();
+    model.stories = explicit_stories(&[0.0, 3000.0, 6000.0]);
+    let generated = generate_stories(&model, None).unwrap();
+    model.stories = generated.stories;
+    model.wall_weight_generation = Some(sepika_core::model::WallWeightGenerationMode::Geometry);
+    model.validate_wall_weight_generation().unwrap();
+    let baseline = model.clone();
+    for story in &mut model.stories {
+        story.sl_offset_mm = None;
+    }
+    assert!(model
+        .validate_wall_weight_generation()
+        .unwrap_err()
+        .contains("ΔSL"));
+    model = baseline.clone();
+    model.stories[1].sl_offset_mm = None;
+    assert!(model
+        .validate_wall_weight_generation()
+        .unwrap_err()
+        .contains("ΔSL"));
+    model = baseline;
+    model.stories[1].elevation = None;
+    assert!(model
+        .validate_wall_weight_generation()
+        .unwrap_err()
+        .contains("FL"));
 }

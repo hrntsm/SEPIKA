@@ -29,6 +29,7 @@ fn record(m: &mut Model) -> &mut SeismicWeightGeneration {
             input_key: vec![],
             output_key: vec![],
             calculated_weights: vec![],
+            automatic_node_stories: Vec::new(),
             automatic_diaphragms: vec![],
             automatic_master_restraints: vec![],
         })

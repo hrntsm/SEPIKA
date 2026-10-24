@@ -312,7 +312,7 @@ impl App {
         self.report_info(format!("⏳ {label} を開始"));
     }
 
-    /// 未定義の階を初期化し、重量と自動荷重を Undo 可能な一括更新として採用する。
+    /// 入力済みの FL・ΔSL から重量と自動荷重を Undo 可能な一括更新として採用する。
     /// 階名・床レベル・種別・手入力重量は保持し、無変更時は再生成しない。
     pub fn generate_stories_action(&mut self) {
         self.core.scoped.last_error = None;

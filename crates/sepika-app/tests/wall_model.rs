@@ -140,7 +140,21 @@ fn static_res_for(app: &App, key: StaticCaseKey) -> &sepika_solver::statics::lin
 
 /// 壁 1 パネル＋雑壁 1 本を含む、柱 4 本・梁 4 本の 1 スパン立体架構。
 fn wall_bay_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: [0.0, 3000.0, 6000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
 
     // 節点: 柱脚 4（固定）+ 柱頭 4（自由）。
     let base = [
@@ -524,6 +538,7 @@ fn wall_bay_app() -> App {
         .wall_plates
         .retain(|p| p.id != WallPlateId(1));
     app.core.model.nodes.retain(|n| n.coord[2] != 6000.0);
+    app.core.model.stories.truncate(2);
     // 架構種別（Ds 表の行を選ぶ設定。`App::design_frame`）は既定で SteelFrame
     // のままだと、耐震壁を持つ本フィクスチャでも Ds 計算が鋼構造の表
     // （`ds_steel`）を使ってしまい、RC 耐力壁の Ds 表（`ds_rc`）が一度も
