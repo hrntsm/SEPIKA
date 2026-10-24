@@ -942,6 +942,7 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1161,6 +1162,7 @@ fn aligned_portal_frame() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -2252,6 +2254,7 @@ fn shear_model(n: usize) -> sepika_core::model::Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3762,6 +3765,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -4035,6 +4039,7 @@ fn test_rc_sigma_0_from_compression_axial_force() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -4194,6 +4199,7 @@ fn test_rc_sigma_0_prefers_gravity_load_case_over_last_static() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -4345,6 +4351,7 @@ pub(super) fn make_square_slab_test_model() -> sepika_core::model::Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -4849,6 +4856,7 @@ fn test_floor_design_skips_materialized_beam() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -4872,6 +4880,7 @@ fn test_floor_design_skips_materialized_beam() {
         end_cond: [EndCondition::Pinned, EndCondition::Pinned],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5010,6 +5019,7 @@ pub(super) fn make_floor_secondary_beam_test_model() -> sepika_core::model::Mode
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -5386,6 +5396,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -5573,6 +5584,7 @@ fn test_floor_design_checks_cantilever_beam() {
     );
     model.floor_regions[0].slab_ids = vec![first, second];
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -5653,6 +5665,7 @@ fn test_floor_design_checks_secondary_beam_without_section_is_input_error() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -5769,11 +5782,13 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
     }
     let beam = SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -5915,11 +5930,13 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
     }
     let beam = SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -6035,6 +6052,7 @@ fn test_floor_design_checks_secondary_beam_on_slab_edge() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -6575,6 +6593,7 @@ fn test_column_live_load_factors_three_story() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -6602,6 +6621,7 @@ fn test_column_live_load_factors_three_story() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -7914,6 +7934,7 @@ fn test_compute_ultimate_checks_rc_frame() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -8040,6 +8061,7 @@ fn test_compute_cft_ultimate_checks() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -8491,6 +8513,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -8607,6 +8630,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -8698,6 +8722,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         }],
         // 小梁: 大梁 y=0 の中間 (4000,0) と大梁 y=6000 の中間 (4000,6000) を結ぶ。
         unassigned_beams: vec![SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -9149,6 +9174,7 @@ mod grid_headless {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -10880,6 +10906,7 @@ fn test_generate_axes_action_does_not_stale_results() {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -11125,6 +11152,7 @@ fn test_wall_has_src_boundary_column() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };

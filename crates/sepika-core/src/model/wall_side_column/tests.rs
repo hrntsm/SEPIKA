@@ -20,6 +20,7 @@ fn member(id: u32, kind: ElementKind, nodes: &[u32], section: u32) -> ElementDat
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     }

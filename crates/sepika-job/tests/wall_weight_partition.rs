@@ -415,6 +415,7 @@ fn fixture(top: f64) -> Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -948,6 +949,7 @@ fn enclosed_secondary_beam_receives_all_dl_before_reaction_cascade() {
             ]),
             section: Some(SectionId(1)),
             name: "支持小梁".into(),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
         });
         model.wall_assignment_regions.regions[0].boundary[0].support =
@@ -1200,6 +1202,7 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
                 ]),
                 section: Some(SectionId(1)),
                 name: "梁中間の間柱".into(),
+                vertical_eccentricity: Some(0.0),
                 gravity_end_shares: Some([1.0, 0.0]),
             });
         }

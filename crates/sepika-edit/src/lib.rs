@@ -466,12 +466,14 @@ macro_rules! id_indexed_delete_insert {
 }
 
 mod axis;
+mod beam_placement;
 mod composite;
 mod load_case;
 mod member_detail;
 mod node_member;
 mod refs;
 mod secondary;
+pub use beam_placement::*;
 mod section_material;
 mod steel_design;
 mod story;

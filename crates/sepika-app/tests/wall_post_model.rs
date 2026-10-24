@@ -175,6 +175,7 @@ fn wall_post_model() -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -198,6 +199,7 @@ fn wall_post_model() -> Model {
     // 間柱で 2 枚へ分割する。
     model.unassigned_posts.push(SecondaryMember {
         id: SecondaryMemberId(0),
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: Some([0.5, 0.5]),
         kind: SecondaryMemberKind::Post,
         ends: SecondaryMemberEnds::Supported([

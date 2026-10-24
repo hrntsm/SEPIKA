@@ -750,6 +750,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         };
@@ -892,6 +893,7 @@ mod tests {
                 end_cond: [EndCondition::Fixed; 2],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             }],
@@ -1510,6 +1512,7 @@ mod tests {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         };
@@ -1647,6 +1650,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         };
@@ -1696,6 +1700,7 @@ mod tests {
             property_basis: Default::default(),
         });
         model.unassigned_beams.push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: SecondaryMemberId(0),
             kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -2168,6 +2173,7 @@ mod attached_anchor_tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }
@@ -2836,6 +2842,7 @@ mod cascade_tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         };
@@ -2856,6 +2863,7 @@ mod cascade_tests {
             one_way: None,
         };
         let beam_a = SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(4),
             kind: SecondaryMemberKind::Beam,
@@ -2873,6 +2881,7 @@ mod cascade_tests {
             name: "A".into(),
         };
         let beam_b = SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(6),
             kind: SecondaryMemberKind::Beam,

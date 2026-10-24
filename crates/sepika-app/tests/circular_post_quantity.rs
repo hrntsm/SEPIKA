@@ -56,6 +56,7 @@ fn circular_post_model() -> sepika_core::model::Model {
             ends: SecondaryMemberEnds::Detached(ends),
             section: Some(SectionId(0)),
             name: "間柱符号".into(),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
         }],
         ..Default::default()

@@ -524,7 +524,11 @@ pub(super) fn draw_anchor_marker(
     proj: &Projector,
     anchor: sepika_core::model::SecondaryMemberAnchor,
 ) {
-    if let Some(p) = app.core.model.anchor_point(anchor) {
+    if let Some(p) = super::displayed_anchor_point(
+        &app.core.model,
+        anchor,
+        app.ui.view.view_mode == super::ViewMode::Shape,
+    ) {
         let screen = proj.project(p);
         painter.circle_stroke(screen, 6.0, egui::Stroke::new(2.5_f32, theme::WARN_TEXT));
         painter.circle_filled(screen, 2.5_f32, theme::WARN_TEXT);
@@ -1937,6 +1941,7 @@ mod tests {
             end_cond: [sepika_core::model::EndCondition::Fixed; 2],
             force_regime: sepika_core::model::ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });

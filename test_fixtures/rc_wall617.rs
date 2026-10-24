@@ -139,6 +139,7 @@ pub fn expanded_model() -> Model {
                 face_j: Some(300.0),
                 ..Default::default()
             },
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -156,6 +157,7 @@ pub fn expanded_model() -> Model {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });

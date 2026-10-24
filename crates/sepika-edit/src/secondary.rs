@@ -523,7 +523,10 @@ pub struct SetSecondaryMemberEndSupport {
     pub end_support: [EndSupport; 2],
 }
 
-fn find_secondary_mut(model: &mut Model, id: SecondaryMemberId) -> Option<&mut SecondaryMember> {
+pub(crate) fn find_secondary_mut(
+    model: &mut Model,
+    id: SecondaryMemberId,
+) -> Option<&mut SecondaryMember> {
     if let Some(sm) = model.unassigned_beams.iter_mut().find(|sm| sm.id == id) {
         return Some(sm);
     }
@@ -576,6 +579,7 @@ impl EditCommand for SetSecondaryMemberEndSupport {
         let ends = model.secondary_ends_from_coords(self.member, kind, [a, b], new_supported);
         let candidate = SecondaryMember {
             id: self.member,
+            vertical_eccentricity: sm.vertical_eccentricity,
             gravity_end_shares: None,
             kind,
             ends,
@@ -730,6 +734,7 @@ impl EditCommand for PlaceSecondaryMember {
         }
         let candidate = SecondaryMember {
             id: SecondaryMemberId(u32::MAX),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: self.kind,
             ends: self.ends,
@@ -828,6 +833,7 @@ impl EditCommand for SetSecondaryMemberEnds {
         }
         let candidate = SecondaryMember {
             id: self.member,
+            vertical_eccentricity: sm.vertical_eccentricity,
             gravity_end_shares: None,
             kind: sm.kind,
             ends: self.ends,
@@ -962,6 +968,7 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
             }
             let member = SecondaryMember {
                 id: *id,
+                vertical_eccentricity: Some(0.0),
                 gravity_end_shares: None,
                 kind: *kind,
                 ends: *ends,
@@ -1115,6 +1122,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }

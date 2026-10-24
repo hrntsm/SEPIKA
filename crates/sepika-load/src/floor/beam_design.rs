@@ -973,6 +973,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         };
@@ -998,6 +999,7 @@ mod tests {
         );
         region.secondary_beams = vec![SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(4),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: sepika_core::model::SecondaryMemberEnds::Supported([
@@ -1347,6 +1349,7 @@ mod tests {
             .secondary_beams
             .push(SecondaryMember {
                 id: sepika_core::ids::SecondaryMemberId(6),
+                vertical_eccentricity: Some(0.0),
                 gravity_end_shares: None,
                 kind: SecondaryMemberKind::Beam,
                 ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -1471,6 +1474,7 @@ mod tests {
             .secondary_beams
             .push(SecondaryMember {
                 id: sepika_core::ids::SecondaryMemberId(8),
+                vertical_eccentricity: Some(0.0),
                 gravity_end_shares: None,
                 kind: SecondaryMemberKind::Beam,
                 ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -1567,6 +1571,7 @@ mod tests {
         });
         model.unassigned_beams.push(SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(10),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([

@@ -57,6 +57,7 @@ pub fn model() -> Model {
                 end_cond: [EndCondition::Fixed; 2],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             })
@@ -138,6 +139,7 @@ pub fn placed() -> Model {
             section: Some(SectionId(0)),
             ends: ends(0.5),
             name: "非節点小梁".into(),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
         });
     model.next_secondary_member_id = 558;

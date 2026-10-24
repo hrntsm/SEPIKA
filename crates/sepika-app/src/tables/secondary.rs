@@ -491,6 +491,9 @@ pub(crate) fn secondary_member_placement_form(
 
 /// 二次部材の一覧。所属・ID・断面・支持条件の変更・削除。
 pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: SecondaryMemberKind) {
+    if kind == SecondaryMemberKind::Beam {
+        super::beam_placement::beam_eccentricities(ui, app, true);
+    }
     let members: Vec<SecondaryMember> = match kind {
         SecondaryMemberKind::Beam => app
             .core
@@ -698,6 +701,7 @@ mod tests {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             }

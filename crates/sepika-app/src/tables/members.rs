@@ -109,6 +109,8 @@ fn members_table_view<'a>(model: &'a Model) -> MembersTableView<'a> {
 pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::{self, Col};
 
+    super::beam_placement::beam_eccentricities(ui, app, false);
+
     if app.core.model.nodes.len() < 2 {
         ui.label("梁を追加するには節点が2つ以上必要です");
     } else {
@@ -282,6 +284,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
+                    vertical_eccentricity: Some(0.0),
                     plastic_zone: None,
                     spring: None,
                 };
@@ -305,6 +308,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
+                    vertical_eccentricity: Some(0.0),
                     plastic_zone: None,
                     spring: None,
                 };
@@ -334,6 +338,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
+                    vertical_eccentricity: Some(0.0),
                     plastic_zone: None,
                     spring: None,
                 };

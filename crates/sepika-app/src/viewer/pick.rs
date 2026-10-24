@@ -118,6 +118,7 @@ pub(super) fn pick_nearest_member(
     pts: &[egui::Pos2],
     pos: egui::Pos2,
     filter: FrameFilter,
+    actual_projector: Option<&super::Projector>,
 ) -> Option<(sepika_core::ids::ElemId, f32)> {
     let mut best: Option<(sepika_core::ids::ElemId, f32)> = None;
     let mut best_score = f32::INFINITY;
@@ -139,7 +140,15 @@ pub(super) fn pick_nearest_member(
                 if n0 >= pts.len() || n1 >= pts.len() {
                     continue;
                 }
-                dist_point_to_segment(pos, pts[n0], pts[n1])
+                if let Some(projector) = actual_projector {
+                    let Some(ends) = super::primary_shape_ends(model, elem) else {
+                        continue;
+                    };
+                    let [a, b] = ends.map(|p| projector.project(p));
+                    dist_point_to_segment(pos, a, b)
+                } else {
+                    dist_point_to_segment(pos, pts[n0], pts[n1])
+                }
             }
             DrawShape::Polygon => {
                 let poly: Vec<egui::Pos2> = elem
@@ -273,8 +282,9 @@ pub(super) fn pick_support_anchor(
     pos: egui::Pos2,
     kind: sepika_core::model::SecondaryMemberKind,
     max_dist_px: f32,
+    actual_placement: bool,
 ) -> Option<sepika_core::model::SecondaryMemberAnchor> {
-    use sepika_core::model::{ElementKind, SecondaryMemberAnchor, SecondaryMemberKind};
+    use sepika_core::model::{SecondaryMemberAnchor, SecondaryMemberKind};
     let mut best: Option<(f32, SecondaryMemberAnchor)> = None;
     let mut consider = |axis: ([f64; 3], [f64; 3]),
                         support: sepika_core::model::SupportMemberId| {
@@ -302,16 +312,14 @@ pub(super) fn pick_support_anchor(
         }
     };
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
-        let (Some(a), Some(b)) = (model.node(e.nodes[0]), model.node(e.nodes[1])) else {
+        let support = sepika_core::model::SupportMemberId::Primary(e.id);
+        let Some([a, b]) = super::displayed_support_axis(model, support, actual_placement) else {
             continue;
         };
-        consider(
-            (a.coord, b.coord),
-            sepika_core::model::SupportMemberId::Primary(e.id),
-        );
+        consider((a, b), support);
     }
     let members = match kind {
         SecondaryMemberKind::Beam => model.beams().collect::<Vec<_>>(),
@@ -319,8 +327,8 @@ pub(super) fn pick_support_anchor(
     };
     for sm in members {
         let support = sepika_core::model::SupportMemberId::Secondary(sm.id);
-        if let Some(axis) = model.support_member_axis(support) {
-            consider(axis, support);
+        if let Some([a, b]) = super::displayed_support_axis(model, support, actual_placement) {
+            consider((a, b), support);
         }
     }
     best.map(|(_, anchor)| anchor)
@@ -390,6 +398,7 @@ mod tests {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             });
@@ -439,8 +448,15 @@ mod tests {
         assert!(pick_parent_region(&model, &proj, outside, true, false).is_none());
 
         let on_axis = proj.project([2000.0, 0.0, 0.0]);
-        let anchor = pick_support_anchor(&model, &proj, on_axis, SecondaryMemberKind::Beam, 12.0)
-            .expect("大梁の材軸上");
+        let anchor = pick_support_anchor(
+            &model,
+            &proj,
+            on_axis,
+            SecondaryMemberKind::Beam,
+            12.0,
+            false,
+        )
+        .expect("大梁の材軸上");
         assert_eq!(anchor.support, SupportMemberId::Primary(ElemId(0)));
         assert!((anchor.position - 0.5).abs() < 0.2, "{anchor:?}");
     }

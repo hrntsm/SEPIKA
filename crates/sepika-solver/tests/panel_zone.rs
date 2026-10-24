@@ -87,6 +87,7 @@ fn member(id: u32, n0: u32, n1: u32, sec: u32, rigid: RigidZone) -> ElementData 
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: rigid,
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     }

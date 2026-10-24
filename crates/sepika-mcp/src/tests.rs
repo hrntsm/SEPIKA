@@ -211,6 +211,7 @@ fn sample_model() -> Model {
             ],
             force_regime: sepika_core::model::ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -648,6 +649,7 @@ pub(crate) fn rc_column_model() -> Model {
             ],
             force_regime: sepika_core::model::ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -1158,6 +1160,7 @@ fn test_apply_edit_assign_slab_to_floor_plate_region() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1229,6 +1232,7 @@ fn four_node_edit_state(name: &str) -> ServerState {
                     end_cond: [EndCondition::Fixed; 2],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
+                    vertical_eccentricity: Some(0.0),
                     plastic_zone: None,
                     spring: None,
                 }]
@@ -1537,6 +1541,7 @@ fn test_apply_edit_place_secondary_member() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1581,6 +1586,7 @@ fn test_mcp_set_post_gravity_end_shares() {
         .unassigned_posts
         .push(sepika_core::model::SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(0),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: sepika_core::model::SecondaryMemberKind::Post,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -1865,6 +1871,7 @@ fn circular_post_model() -> sepika_core::model::Model {
             ends: SecondaryMemberEnds::Detached(ends),
             section: Some(SectionId(0)),
             name: "間柱符号".into(),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
         }],
         ..Default::default()
@@ -2981,6 +2988,7 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],

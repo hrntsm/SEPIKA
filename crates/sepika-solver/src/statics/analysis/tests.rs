@@ -42,6 +42,7 @@ fn make_cantilever_model() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -960,6 +961,7 @@ fn test_model_issues_rejects_slab_without_section() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1197,6 +1199,7 @@ fn make_two_story_diaphragm_model(
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -1882,6 +1885,7 @@ fn ss_beam_udl(l: f64, w: f64) -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -2145,6 +2149,7 @@ fn test_crossing_beams_reported_as_warning() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -2192,6 +2197,7 @@ fn test_model_issues_warns_unassigned_beam() {
         model.nodes[(n + 1) as usize].coord,
     ]);
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -2251,6 +2257,7 @@ fn test_model_issues_warns_unassigned_beam() {
         ],
         force_regime: sepika_core::model::ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -2280,6 +2287,7 @@ fn test_model_issues_errors_cft_secondary_section() {
         .push(cft_shape().to_section(SectionId(1), "CFT小梁".into()));
     model.materials[0].fc = Some(24.0);
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -2494,6 +2502,7 @@ fn test_model_issues_allows_steel_secondary_section() {
         thick: 10.0,
     });
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -2523,6 +2532,7 @@ fn test_model_issues_errors_unresolved_secondary() {
 
     let mut model = make_cantilever_model();
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -2575,6 +2585,7 @@ fn test_model_issues_warns_free_end_on_support() {
     support.nodes = [NodeId(2), NodeId(3)].into_iter().collect();
     model.elements.push(support);
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -2612,6 +2623,7 @@ fn test_model_issues_warns_free_end_on_free_tip() {
     let mut model = make_cantilever_model();
     for (id, name) in [(0u32, "CA"), (1, "CB")] {
         model.unassigned_beams.push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(id),
             kind: SecondaryMemberKind::Beam,
@@ -2675,6 +2687,7 @@ fn test_model_issues_warns_partial_beam_on_attached_edge() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -3109,6 +3122,7 @@ fn test_model_issues_warns_ignored_slit_without_boundary_nodes() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };

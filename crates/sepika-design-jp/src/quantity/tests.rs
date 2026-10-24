@@ -44,6 +44,7 @@ fn line_elem(id: u32, n0: u32, n1: u32, sec: u32) -> ElementData {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     }
@@ -1128,6 +1129,7 @@ fn circular_rc_post_model(end_mm: [f64; 3]) -> Model {
             ends: SecondaryMemberEnds::Detached([[0.0; 3], end_mm]),
             section: Some(SectionId(0)),
             name: "間柱符号".into(),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
         }],
         stories: vec![Story {
@@ -1528,6 +1530,7 @@ fn beam_contact_direct_support_span_secondary_and_vertical_union() {
         ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -1745,6 +1748,7 @@ fn beam_contact_unknown_beam_section_is_unavailable() {
                     ]),
                     section: Some(SectionId(999)),
                     name: "断面不明451".into(),
+                    vertical_eccentricity: Some(0.0),
                     gravity_end_shares: None,
                 });
         } else {
@@ -1831,6 +1835,7 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
         ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -1846,6 +1851,7 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
         ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [1000.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -2236,6 +2242,7 @@ fn nonnodal_beam_model() -> Model {
         })),
         section: Some(SectionId(0)),
         name: "小梁557".into(),
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
     });
     model
@@ -2590,6 +2597,7 @@ fn materialized_secondary_contact_reversal_uses_same_union_as_primary() {
             ends: sepika_core::model::SecondaryMemberEnds::Detached(ends),
             section: Some(SectionId(0)),
             name: "contact557".into(),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
         });
         assert!((contact_formwork(&model) - before).abs() < 1e-12);

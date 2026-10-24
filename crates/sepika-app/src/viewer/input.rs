@@ -139,8 +139,13 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                 }
             } else {
                 const PICK_THRESHOLD: f32 = 8.0;
-                if let Some((id, d)) = pick_nearest_member(&app.core.model, pts, click_pos, filter)
-                {
+                if let Some((id, d)) = pick_nearest_member(
+                    &app.core.model,
+                    pts,
+                    click_pos,
+                    filter,
+                    (mode == ViewMode::Shape).then_some(proj),
+                ) {
                     if d <= PICK_THRESHOLD && member_load_pickable(&app.core.model, id) {
                         let is_brace = crate::load_editor::is_brace(&app.core.model, id);
                         if let Some(editor) = app.ui.scoped.load_editor.as_mut() {
@@ -214,9 +219,14 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                     });
                     app.ui.scoped.member_place_first = None;
                 }
-            } else if let Some(anchor) =
-                pick_support_anchor(&app.core.model, proj, click_pos, kind, 12.0)
-            {
+            } else if let Some(anchor) = pick_support_anchor(
+                &app.core.model,
+                proj,
+                click_pos,
+                kind,
+                12.0,
+                mode == ViewMode::Shape,
+            ) {
                 match app.ui.scoped.member_place_first {
                     None => app.ui.scoped.member_place_first = Some(anchor),
                     Some(first) => {
@@ -289,7 +299,13 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                 .frame_target
                 .and_then(|t| sepika_core::frame::build_frame(display_model.as_ref(), t));
             let filter_pick = FrameFilter::new(frame_for_pick.as_ref());
-            match pick_nearest_member(display_model.as_ref(), pts, click_pos, filter_pick) {
+            match pick_nearest_member(
+                display_model.as_ref(),
+                pts,
+                click_pos,
+                filter_pick,
+                (mode == ViewMode::Shape).then_some(proj),
+            ) {
                 Some((id, d)) if d <= PICK_THRESHOLD => {
                     app.select_member(id);
                     if mode == ViewMode::Hinge {
@@ -359,6 +375,7 @@ mod selection_tests {
                     end_cond: [EndCondition::Fixed; 2],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
+                    vertical_eccentricity: Some(0.0),
                     plastic_zone: None,
                     spring: None,
                 });
