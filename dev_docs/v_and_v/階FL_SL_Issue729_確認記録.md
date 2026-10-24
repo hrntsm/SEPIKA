@@ -117,3 +117,21 @@ CI の逐次停止による後続 integration の確認漏れを収束させる�
 - 関連 4 クレート `cargo clippy --all-targets --locked -- -D warnings`: 成功。fmt／diff check、check-docs、mdbook build 成功。
 
 ログは TEMP の `sepika729-wall-height-*.log`。
+
+
+## FL 未設定階を含むモデルへの階追加
+
+独立レビューで、AddStory の全階ソートが Option の None を Some より前へ移し、未入力階の元の上下関係と後続修復を壊すことを確認した。
+既存階の FL が未設定・非有限で追加位置を確定できない場合は、原階初期化より前に階 ID・FL の診断で非破壊拒否する。入力済み階の順序・参照不正も採用せず、ソートは検査済み有限 FL の比較だけを行う。
+A／B／C の FL=0／None／6000 mm・ΔSL=0 に D=9000 mm を追加する試験で、拒否時の全モデル・履歴不変、原階・所属・拘束・座標の保持を確認した。
+B=3000 mm を同じ位置で補完した後は D を追加でき、正順 Undo/Redo で完全なモデルへ復元できる。GUI の保留コマンド経路でも同じ拒否・修復・追加・Undo/Redo を確認した。
+
+編集クレートの sort／partial_cmp／total_cmp／partition_point を横断確認した。別の階標高 Option を並べ替える経路はなく、階コピーの比較は座標照合、節点編集の partition_point は節点 ID、残りは照合キーの順序付けだった。
+
+- `cargo test -p sepika-edit --lib --locked`: 209 件成功。
+- `cargo test -p sepika-app --features gui --lib story --locked`: 関連 70 件成功。
+- `cargo test -p sepika-app --features gui --test story_application_lifecycle --test source_story --locked --no-fail-fast`: 3／13 件成功。
+- `cargo clippy -p sepika-edit -p sepika-app --all-targets --features sepika-app/gui --locked --message-format short -- -D warnings`: 成功。
+- fmt／diff check、check-docs、mdbook build: 成功。
+
+ログは TEMP の `sepika729-add-story-*.log`。
