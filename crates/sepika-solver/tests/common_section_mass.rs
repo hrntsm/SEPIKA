@@ -1015,6 +1015,18 @@ fn src_physical_self_weight_shares_inertial_mass_while_design_dl_distribution_is
             story: None,
             support_spring: None,
         });
+        model.stories = [0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect();
         let generated = sepika_load::story_gen::generate_stories_with_opts(
             &model,
             &[],
