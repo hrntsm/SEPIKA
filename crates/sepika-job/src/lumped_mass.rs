@@ -131,7 +131,8 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     for (i, layer) in layers.iter().enumerate() {
         let mut cols = column_stiffnesses_from_analysis(inp.model, layer.top, res_x, res_y)
             .map_err(JobError::InvalidInput)?;
-        append_misc_wall_stiffnesses(inp.model, layer.top, &mut cols);
+        append_misc_wall_stiffnesses(inp.model, layer.top, &mut cols)
+            .map_err(JobError::InvalidInput)?;
         let dm = layer.dynamic_mass.ok_or_else(|| {
             JobError::InvalidInput(format!(
                 "階 {} の動的質量が未算定です。準備計算で階を生成してください",
@@ -925,7 +926,7 @@ mod tests {
         assert!((d_origin - 20.0).abs() < 1e-12, "origin δ={d_origin}");
     }
     #[test]
-    fn spatial_propagates_unavailable_rigidity_center_with_layer_reason() {
+    fn spatial_rejects_nonfinite_column_response_with_layer_and_member_reason() {
         let model = two_story_column_model();
         let mut x = static_with_column_qz(3, &[(0, f64::INFINITY), (1, 40.0)]);
         let mut y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
@@ -939,8 +940,115 @@ mod tests {
         inp.res_y = Some(&y);
         let error = build_lumped_mass(inp).unwrap_err().to_string();
         assert!(
-            error.contains("階") && error.contains("剛心") && error.contains("集計できません"),
+            error.contains("階1") && error.contains("柱0") && error.contains("不正"),
             "{error}"
         );
+    }
+    #[test]
+    fn misc620_spatial_propagates_invalid_n_and_missing_column_response() {
+        let mut model = two_story_column_model();
+        let mut x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
+        let mut y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
+        x.disp[1][0] = 1.0;
+        x.disp[2][0] = 2.0;
+        y.disp[1][1] = 1.0;
+        y.disp[2][1] = 2.0;
+        model.stress_cfg.misc_wall_n = Some(0.0);
+        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+        inp.res_x = Some(&x);
+        inp.res_y = Some(&y);
+        assert!(build_lumped_mass(inp)
+            .unwrap_err()
+            .to_string()
+            .contains("係数n"));
+        model.stress_cfg.misc_wall_n = Some(1.0);
+        x.disp.truncate(1);
+        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+        inp.res_x = Some(&x);
+        inp.res_y = Some(&y);
+        assert!(build_lumped_mass(inp)
+            .unwrap_err()
+            .to_string()
+            .contains("欠損"));
+    }
+    #[test]
+    fn misc620_existing_spatial_column_ki_includes_wall_but_planar_does_not() {
+        use sepika_core::ids::{MaterialId, NodeId, SectionId, WallPlateId};
+        use sepika_core::model::{
+            Material, MaterialCategory, RegionAnchor, WallPlate, WallPlateShape,
+        };
+        let mut model = two_story_column_model();
+        model.materials.push(Material {
+            id: MaterialId(0),
+            name: "Fc24".into(),
+            category: MaterialCategory::Concrete,
+            young: 23000.0,
+            poisson: 0.2,
+            density: 0.0,
+            shear: None,
+            fc: Some(24.0),
+            fy: None,
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        model.sections[0].material = Some(MaterialId(0));
+        model.sections[0].area = 160000.0;
+        let mut section = model.sections[0].clone();
+        section.id = SectionId(1);
+        section.thickness = Some(100.0);
+        model.sections.push(section);
+        for (id, x) in [(3, 0.0), (4, 2000.0)] {
+            let mut node = model.nodes[0].clone();
+            node.id = NodeId(id);
+            node.coord = [x, 1000.0, 0.0];
+            node.story = None;
+            model.nodes.push(node);
+        }
+        model.wall_weight_generation =
+            Some(sepika_core::model::WallWeightGenerationMode::GravityCasesOnly);
+        model.wall_plates.push(WallPlate {
+            id: WallPlateId(0),
+            shape: WallPlateShape::Attached {
+                anchor: RegionAnchor::FloorRegion {
+                    nodes: [NodeId(3), NodeId(4)],
+                },
+                extent: None,
+            },
+            section: Some(SectionId(1)),
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+            dl_support: None,
+            self_weight_shares: vec![],
+        });
+        model.stress_cfg.misc_wall_n = Some(1.0);
+        let mut x = static_with_column_qz(5, &[(0, 10000.0), (1, 4000.0)]);
+        let mut y = static_with_column_qy(5, &[(0, 10000.0), (1, 4000.0)]);
+        x.disp[1][0] = 1.0;
+        x.disp[2][0] = 2.0;
+        y.disp[1][1] = 1.0;
+        y.disp[2][1] = 2.0;
+        for dim in [StickDim::Spatial, StickDim::Planar] {
+            let mut inp = input(&model, dim, SeismicDir::X, false);
+            inp.source = LumpedStiffnessSource::ColumnKi;
+            inp.res_x = Some(&x);
+            inp.res_y = Some(&y);
+            let lm = build_lumped_mass(inp).unwrap();
+            assert_eq!(
+                lm.stories[0].skeleton.k1,
+                if dim == StickDim::Spatial {
+                    22500.0
+                } else {
+                    10000.0
+                }
+            );
+            if dim == StickDim::Spatial {
+                assert_eq!(lm.spatial[0].k1_y, 10000.0);
+                assert!((lm.spatial[0].rigidity_xy[1] - 5000.0 / 9.0).abs() < 1e-9);
+                assert_eq!(lm.spatial[1].k1_x, 4000.0);
+            }
+        }
     }
 }

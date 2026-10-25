@@ -112,6 +112,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [自立壁n倍法_Issue620_確認記録.md](自立壁n倍法_Issue620_確認記録.md) | 自立壁n倍法の対象・入力・同一断面柱集計 | 🔶（独立Verification。原書・動的専用比較・実測Validation未） |
 | [RC梁左右床板厚_Issue618_2026-10.md](RC梁左右床板厚_Issue618_2026-10.md) | RC梁の左右床板実厚・長さ平均/丸め上下界・矩形集計・実配置と未解決/複数梁Attached診断 | 🔶（単体/公開入口・床板群の独立Verificationと危険側例。Validation・手動GUI・最終ゲートは記録参照） |
 | [層指標の生成入力照合_Issue810_2026-10.md](層指標の生成入力照合_Issue810_2026-10.md) | GUI/CSVのRs/Re/Fes依存成果と現在入力・計算契約 | 🔶（自動Verificationの記録は同レポート、手動GUI・Validation未） |
 | [保存ブランチ496の変更採否_2026-10.md](保存ブランチ496の変更採否_2026-10.md) | 全102コミットの採否、免震/保存の復元、全固定時刻歴と確定前記録 | 🔶（有限Verification。実験Validationは未実施） |
@@ -377,6 +378,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 13b | 標準鋼材名の厳密解決 | sepika-core / sepika-io | material_grade.rs・standard_material.rs・stbridge/strength_tests.rs | [Issue590の独立表・公開STB入口](標準鋼材名の厳密解決_Issue590_2026-10.md#独立期待値と実入口) | 横断 | 🔶（名称Verification、種類別F全照合・Validation未） |
 | 13d | 用途別せん断面積と二方向検定 | sepika-core / sepika-element / sepika-design-jp / sepika-app | section_shape・steel・frame/beam/construct・shear_area_acceptance_tests | [原5Done・独立期待値・run別証拠](用途別せん断面積と二方向検定_Issue417_2026-10.md)、`surface_radius_tests` / `shear_contract_tests` / `constructed_cantilever_*` | 横断 | 🔶（限定Verification、Validation・正式最終ゲート未確認） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
+| 620 | 自立壁n倍法 | sepika-design-jp / sepika-core / sepika-job / sepika-app | eccentricity::tests::misc620、eccentricity_analysis::misc620_tests、lumped_mass::tests::misc620 | [点検と独立期待値](自立壁n倍法_Issue620_確認記録.md#独立期待値と試験) | 二次設計 | 🔶（有限Verification、原書・Validation未） |
 | 718 | Fes 算定不能の伝播 | sepika-design-jp / sepika-app / sepika-job | secondary/holding_capacity・stiffness_ratio・eccentricity、summary、actions/design/holding、lumped_mass | [独立期待値と直接入口](Fes算定不能の伝播_Issue718_2026-10.md#独立期待値と直接入口) | 横断 | 🔶（Scope 内の自動 Verification 成功、手動 GUI・原典/Validation・最終ゲートは未確認） |
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
