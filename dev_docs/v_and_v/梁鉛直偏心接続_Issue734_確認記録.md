@@ -125,6 +125,23 @@ PR814のCI実行40176922975で、default構成のlib試験からGUI専用の編�
 - `cargo fmt --all -- --check`、`git diff --check`: 成功。
 - `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功（summary124・リンク644件・実装参照687件）。
 
+## MCPと設計入口のfixture追随
+
+CI実行40177947981で、MCPの標準配筋507関連3試験が取込梁の鉛直偏心未指定診断で先に停止し、workspaceの設計入口試験が断面未指定診断で先に停止することを確認した。いずれも製品ゲートを緩和せず、試験用入力を明示した。
+
+MCPでは取込直後に梁の偏心Noneをassertして欠落保持を確認してから、既存編集コマンドで0を明示する。標準配筋の元情報・再出力保持、未対応配筋を消費する入口の拒否理由、正常な接合部検定比の既存期待は変更しない。設計入口では既存鉛直部材へ柱用途の有効断面と材料を与え、不正局所軸と部材ID付きの元診断を維持する。製品コード・計算契約版53は変更しない。
+
+design-jp全試験の初回実行で、鋼材入力拒否試験の意図的な断面欠落・参照切れ2ケースに対し、共通ゲートの診断が先行して「部材 0」ではなく「部材 ID 0」を返す期待文言不一致を1件回収した。当該2ケースはIDと断面診断を期待し、他8ケースの期待は維持した。
+
+修正対象SHAは `deaeb16a`。次はmain統合前のローカル実行結果である。
+
+- `cargo test -p sepika-mcp --features mcp --locked --quiet`: lib131件・統合13件、計144件成功。
+- `cargo test -p sepika-mcp -p sepika-design-jp --locked --quiet`: 再実行で計777件成功。design-jp単体656件・MCP default単体95件と両crateの統合試験を含む。
+- `cargo clippy -p sepika-mcp -p sepika-design-jp --all-targets --locked -- -D warnings`: default構成成功。
+- `cargo clippy -p sepika-mcp --features mcp --all-targets --locked -- -D warnings`: feature構成成功。
+- `cargo fmt --all -- --check`、`git diff --check`: 成功。
+- `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功（summary124・リンク644件・実装参照687件）。
+
 ## 未実施範囲と残る制約
 
 実験・実測・実建物によるValidation、手動ネイティブGUI操作、塑性化後の全履歴を網羅する本接続専用の応答比較は未実施。一般XYZ偏心入力、柱/ブレース、二次小梁の新剛性算入、パネル中心偏心、新しい段違い接合式、有限回転・大変形接続、嵩上げ重量や別Issueの重量変更は対象外である。現在の時刻歴結果に独立した支持反力列を新設せず、既存の運動方程式・記録・質量と慣性入力の整合を確認する。PRの最終レビュー・CIは公開PRで別途確認する。
