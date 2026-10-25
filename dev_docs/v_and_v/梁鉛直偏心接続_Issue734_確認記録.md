@@ -142,6 +142,41 @@ design-jp全試験の初回実行で、鋼材入力拒否試験の意図的な�
 - `cargo fmt --all -- --check`、`git diff --check`: 成功。
 - `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功（summary124・リンク644件・実装参照687件）。
 
+## 先行Issue618とのmain統合
+
+main `d00b3c293e364070345de49490b136c2071b46e4` を統合コミット `85f88a90` で取り込んだ。先行Issue618の解析契約53と本接続を区別するため、最終の解析契約版は54とする。上記の53での実行結果は各対象SHA当時の記録として保持する。
+
+RC床板協力剛性の左右独立・材長加重平均厚と、承認済みの危険側注意・ADR0075は保持する。実P軸での要素構築と偏心接続は維持し、床板協力剛性のResult診断を合成する。full_modelの矩形RC梁に指定されたe=−D/2は、梁上端と床上面を一致させる先行Issueのfixture入力として保持し、解析応答への作用を含めて検証する。
+
+`length_weighted_rc_slab_and_eccentric_connection_keep_independent_stiffness_and_mass_couplings` は、先行Issueの左右別の分割・異厚床板群fixtureを使用し、実P軸と床位置を変えずに共有N高さとe=±300 mmを変更する。E=23000、A=300×600、L=10000よりEA/L=414000 N/mm、結合Kux,θy=±124200000 N、回転Kの追加分=e²EA/L=37260000000 Nmmを独立値とする。床協力後I=10307037269.681742 mm⁴は元の独立値を保持する。既存RC質量契約のγRC=24 kN/m³、g=9806.65 mm/s²から端軸質量m/3=1.4683913466882166 t、結合Mの絶対値440.51740400646503 t·mm、回転Mの追加分132155.2212019395 t·mm²を得る。Beam/Fiber/MultiSpringの線形factory経路でこれらを照合した。試験初回の質量期待は材料に直接指定した密度を使用して不一致となったため、既存RC質量契約の単位体積重量を用いる独立値へ訂正し、製品質量は変更していない。
+
+full_modelはGUI lib932件成功後、統合試験37/38件成功・代表値snapshotのみ不一致となった。矩形RC梁のe=−D/2が本Issueで初めてK・Mへ作用するため、上記の独立写像と床剛性の合成を確認してから、当該snapshot1件だけを更新した。これは実建物の独立解やValidationとはせず、明示fixtureに対する再現性回帰として扱う。
+
+| 代表値 | 統合前 | 統合後 |
+| --- | --- | --- |
+| 固有周期T[1]/T[2] | 0.4647 / 0.4199 s | 0.4646 / 0.4198 s |
+| EXの2FL/3FL/RFL最大Ux | 6.556 / 11.95 / 15.65 mm | 6.548 / 11.94 / 15.64 mm |
+| 最大検定比 | 0.3700 | 0.3698 |
+| 線形時刻歴最大Ux | 49.03 mm | 48.86 mm |
+| 同層間変形角4層 | 4.088e−3 / 3.514e−3 / 2.025e−3 / 1.847e−3 | 4.070e−3 / 3.503e−3 / 2.019e−3 / 1.842e−3 |
+
+同じsnapshotの層剛性・偏心率等にも微小差がある。準備重量・DL最小Uzと柱脚軸力和・検定件数と未検定0・履歴1001frameは不変。上端一致を取り消してe0へ戻す変更は行わない。更新後のfull_model38件・wall_model17件は成功した。
+
+統合版54のコード・試験の対象SHAは `b2ad23c6`。ローカル検証は次のとおり。
+
+- `rustup update stable`: stable rustc 1.99.1のまま最新。`cargo clippy --version`: 0.1.99。
+- `cargo test -p sepika-core -p sepika-element -p sepika-solver -p sepika-design-jp --locked --quiet`: 計2276件成功、既存ignored1件。core591・element550・solver340・design-jp656の単体試験と全統合試験を含む。
+- `cargo test -p sepika-element length_weighted_rc_slab_and_eccentric --locked --quiet`: 追加した床板平均厚と偏心接続の独立合成試験1件成功。
+- `cargo test -p sepika-app --features gui --lib --test full_model --test wall_model --locked --quiet`: GUI lib932件成功、full_modelは前記snapshot1件の差分で停止。
+- `cargo test -p sepika-app --features gui --test full_model --test wall_model --locked --quiet`: snapshot限定更新後、full_model38件・wall_model17件成功。
+- `cargo test -p sepika-app -p sepika-mcp --lib --locked --quiet`: app default413件・MCP default95件成功。
+- `cargo test -p sepika-mcp --locked --quiet`: default単体・統合計108件成功。
+- `cargo test -p sepika-mcp --features mcp --locked --quiet`: feature単体・統合計144件成功。
+- `cargo clippy -p sepika-core -p sepika-element -p sepika-solver -p sepika-design-jp -p sepika-app -p sepika-mcp --all-targets --locked -- -D warnings`: default構成成功。
+- `cargo clippy -p sepika-core -p sepika-element -p sepika-solver -p sepika-design-jp -p sepika-app -p sepika-mcp --features sepika-app/gui,sepika-mcp/mcp --all-targets --locked -- -D warnings`: GUI・MCP同時feature構成成功。
+- `cargo fmt --all -- --check`、`git diff --check`: 成功。
+- `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功（summary124・リンク646件・実装参照688件）。
+
 ## 未実施範囲と残る制約
 
 実験・実測・実建物によるValidation、手動ネイティブGUI操作、塑性化後の全履歴を網羅する本接続専用の応答比較は未実施。一般XYZ偏心入力、柱/ブレース、二次小梁の新剛性算入、パネル中心偏心、新しい段違い接合式、有限回転・大変形接続、嵩上げ重量や別Issueの重量変更は対象外である。現在の時刻歴結果に独立した支持反力列を新設せず、既存の運動方程式・記録・質量と慣性入力の整合を確認する。PRの最終レビュー・CIは公開PRで別途確認する。
