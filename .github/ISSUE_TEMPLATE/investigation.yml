@@ -8,6 +8,7 @@ body:
         なぜ調査するか、何を明らかにするか、どこまで確認するかを記載してください。
         完了条件は実装完了ではなく、仕様・根拠・後続作業が明確になることを基本とします。
         詳細な実装方法を先に決める必要はありません。
+        [Issue の書き方](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の書き方) に従い、タイトルと冒頭は一般的な用語で記述し、内部実装用語は補足へ分けてください。
   - type: textarea
     id: background
     attributes:
