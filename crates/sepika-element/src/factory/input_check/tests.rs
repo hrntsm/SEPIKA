@@ -710,6 +710,37 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
         vertical_eccentricity_mm: None,
         tip_loads: vec![],
     });
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    model.elements[0].vertical_eccentricity = Some(0.0);
+    model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+    model.stories.push(sepika_core::model::Story::new(
+        sepika_core::ids::StoryId(0),
+        "1F".into(),
+        Some(300.0),
+        Some(-300.0),
+    ));
+    model.slabs[0].reference_story = Some(sepika_core::ids::StoryId(0));
+    model.slabs[0].vertical_eccentricity_mm = Some(0.0);
+    for nodes in [[1, 2], [2, 3], [3, 0]] {
+        let mut edge = model.elements[0].clone();
+        edge.id = ElemId(model.elements.len() as u32);
+        edge.force_regime = ForceRegime::Auto;
+        edge.nodes = nodes.map(NodeId).into_iter().collect();
+        model.elements.push(edge);
+    }
+    model
+        .floor_assignment_regions
+        .regions
+        .push(sepika_core::model::FloorPlateAssignmentRegion {
+            id: sepika_core::ids::FloorPlateAssignmentRegionId(0),
+            assignment: sepika_core::model::PlateAssignment::Plate(SlabId(0)),
+            boundary: (0..4)
+                .map(|id| sepika_core::model::SupportBoundary {
+                    support: sepika_core::model::SupportMemberId::Primary(ElemId(id)),
+                    span: [0.0, 1.0],
+                })
+                .collect(),
+        });
     assert!(
         crate::frame::beam::stiffness_breakdown(&model, &model.elements[0])
             .unwrap()
@@ -718,7 +749,7 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     );
     let error = ensure_nonlinear_input(&model).unwrap_err();
     assert!(error.contains("スラブ引張筋面積と正負別骨格"), "{error}");
-    assert_eq!(public_generation_diagnostic(&model), error);
+    assert!(error.contains(&public_generation_diagnostic(&model)));
     model.set_member_rc_beam_reference(
         ElemId(0),
         Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
@@ -726,6 +757,8 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     if let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() {
         rebar.top = rebar.bottom.clone();
     }
+    model.elements.truncate(1);
+    model.floor_assignment_regions.regions.clear();
     model.slabs.clear();
     model.floor_regions.clear();
     assert!(ensure_nonlinear_input(&model).is_ok());

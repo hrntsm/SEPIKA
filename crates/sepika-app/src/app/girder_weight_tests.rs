@@ -285,6 +285,7 @@ fn girder_overlap_independent_values_reach_preparation_dl_and_seismic_weight() {
         (-50., Some((150., 0.)), None, 34560.),
         (0., Some((150., 0.)), None, 31680.),
         (0., Some((200., 0.)), None, 28800.),
+        (0., Some((150., 0.)), Some((200., 0.)), 30240.),
         (-50., Some((150., 0.)), Some((200., 0.)), 33120.),
         (-50., Some((150., 0.)), Some((150., 400.)), 37440.),
     ] {
@@ -309,6 +310,21 @@ fn girder_overlap_independent_values_reach_preparation_dl_and_seismic_weight() {
             let mut app = App::default();
             assert!(app.load_model(model));
             app.run_preparation();
+            let invalid_stiffness = left
+                .into_iter()
+                .chain(right)
+                .any(|(_, z)| (z - top).abs() > 1e-6);
+            if invalid_stiffness {
+                assert!(app.core.scoped.preparation.is_none());
+                let error = app.core.scoped.last_error.as_ref().unwrap();
+                assert!(
+                    error.contains("部材 ID 0")
+                        && error.contains("床板")
+                        && error.contains("上端と一致"),
+                    "{error}"
+                );
+                continue;
+            }
             let prep = app
                 .core
                 .scoped
@@ -711,18 +727,35 @@ fn girder_overlap_edits_undo_redo_and_save_reload_update_weights_and_invalidate_
             "redo {i}"
         );
         app.run_preparation();
-        let prep = app
-            .core
-            .scoped
-            .preparation
-            .as_ref()
-            .unwrap_or_else(|| panic!("edit {i}: {:?}", app.core.scoped.last_error));
-        let row = prep
-            .girder_self_weights
-            .iter()
-            .find(|r| r.element == ElemId(0))
-            .unwrap();
-        assert!((row.body_weight_n - row.slab_overlap_weight_n - expected).abs() < 1e-6);
+        if [0, 1, 5].contains(&i) {
+            assert!(app.core.scoped.preparation.is_none());
+            let error = app.core.scoped.last_error.as_ref().unwrap();
+            assert!(
+                error.contains("部材 ID 0") && error.contains("床板"),
+                "edit {i}: {error}"
+            );
+            assert!(
+                error.contains(if i == 5 {
+                    "一定幅"
+                } else {
+                    "上端と一致"
+                }),
+                "edit {i}: {error}"
+            );
+        } else {
+            let prep = app
+                .core
+                .scoped
+                .preparation
+                .as_ref()
+                .unwrap_or_else(|| panic!("edit {i}: {:?}", app.core.scoped.last_error));
+            let row = prep
+                .girder_self_weights
+                .iter()
+                .find(|r| r.element == ElemId(0))
+                .unwrap();
+            assert!((row.body_weight_n - row.slab_overlap_weight_n - expected).abs() < 1e-6);
+        }
         let path =
             std::env::temp_dir().join(format!("sepika-616-{i}-{}.ovika", std::process::id()));
         sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
