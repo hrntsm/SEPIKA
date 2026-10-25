@@ -124,7 +124,7 @@ fn point(a: f64) -> MemberLoad {
 fn rigid_point_bypasses_material_and_keeps_physical_force_arm_for_original_and_wall_connections() {
     use sepika_core::model::EndCondition::*;
     for condition in [Fixed, Pinned, SemiRigid { k_theta: 1e7 }] {
-        for normal in [Some([0., 0., 1.]), Some([0., 0.6, 0.8])] {
+        for normal in [None, Some([0., 0., 1.]), Some([0., 0.6, 0.8])] {
             let mut m = rigid_member();
             connect(&mut m, condition, normal);
             m.try_update_state_with_member_loads(&zero(), Some(&[point(100.)]), false)
@@ -218,6 +218,7 @@ fn elastic_original_and_oblique_wall_loaded_states_match_linear_beam_forces_and_
     for rigid in [false, true] {
         for condition in [Fixed, Pinned, SemiRigid { k_theta: 1e7 }] {
             for normal in [
+                None,
                 Some([0., 0., 1.]),
                 Some([0., 0.6, 0.8]),
                 Some([0., -0.6, -0.8]),
@@ -279,7 +280,7 @@ fn loaded_outer_yield_unload_finite_difference_and_rollback_share_one_commit() {
     use sepika_core::model::EndCondition::*;
     let model = Model::default();
     let ctx = Ctx { model: &model };
-    for normal in [Some([0., 0., 1.]), Some([0., 0.6, 0.8])] {
+    for normal in [None, Some([0., 0., 1.]), Some([0., 0.6, 0.8])] {
         let mut m = member(0.01);
         connect(&mut m, SemiRigid { k_theta: 1e7 }, normal);
         apply(&mut m, 500., 0, true);
@@ -340,7 +341,7 @@ fn loaded_outer_yield_unload_finite_difference_and_rollback_share_one_commit() {
 #[test]
 fn failed_loaded_outer_material_solve_reverts_rotations_history_and_all_response_state() {
     use sepika_core::model::EndCondition::*;
-    for normal in [Some([0., 0., 1.]), Some([0., 0.6, 0.8])] {
+    for normal in [None, Some([0., 0., 1.]), Some([0., 0.6, 0.8])] {
         let mut m = member(0.0);
         connect(&mut m, SemiRigid { k_theta: 1e7 }, normal);
         m.try_update_state_with_member_loads(&zero(), Some(&[udl(2., 1)]), true)
@@ -369,5 +370,45 @@ fn failed_loaded_outer_material_solve_reverts_rotations_history_and_all_response
         m.try_update_state_with_member_loads(&du, Some(&[udl(3., 1)]), false)
             .unwrap();
         assert_eq!(m.serialize_checkpoint(), retried);
+    }
+}
+
+#[test]
+fn tiny_nonzero_load_after_large_uncommitted_trial_matches_same_committed_history() {
+    let model = Model::default();
+    let ctx = Ctx { model: &model };
+    for plastic in [false, true] {
+        let mut m = member(0.01);
+        if plastic {
+            let mut du = zero();
+            du.data[6] = 2.;
+            m.update_state(&du, true, &ctx).unwrap();
+        }
+        let committed = m.snapshot_state();
+        let mut large = zero();
+        large.data[6] = 0.2;
+        m.update_state_with_member_loads(&large, &[udl(500., 0)], false, &ctx)
+            .unwrap();
+        let mut undo = zero();
+        undo.data[6] = -0.2;
+        let loads = [udl(1e-8, 1)];
+        m.update_state_with_member_loads(&undo, &loads, false, &ctx)
+            .unwrap();
+        let actual = m.state_frame_load_response().unwrap().unwrap();
+        let actual_q = [q(&m, 0), q(&m, 1)];
+        m.restore_state(committed.as_ref());
+        m.update_state_with_member_loads(&zero(), &loads, false, &ctx)
+            .unwrap();
+        let expected = m.state_frame_load_response().unwrap().unwrap();
+        close_force(
+            &actual.physical_frame_end_force_global,
+            &expected.physical_frame_end_force_global,
+        );
+        for end in 0..2 {
+            close_force(&actual_q[end], &q(&m, end));
+        }
+        let transverse: f64 =
+            actual.physical_frame_end_force_global[1] + actual.physical_frame_end_force_global[7];
+        assert_relative_eq!(transverse, -1e-5, epsilon = 1e-12);
     }
 }
