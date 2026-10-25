@@ -7,6 +7,7 @@ body:
         なぜ必要か、何を達成するか、今回扱う範囲を記載してください。
         文書改善・性能改善・リファクタリング・開発環境変更もこのフォームで扱います。
         詳細な実装手順やクラス・関数構成は不要です。
+        [Issue の書き方](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の書き方) に従い、タイトルと冒頭は一般的な用語で記述し、内部実装用語は補足へ分けてください。
   - type: textarea
     id: background
     attributes:
