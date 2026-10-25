@@ -179,11 +179,14 @@ impl DesignCheck for SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
-        if sec
+        if let Some(shape) = sec
             .shape
             .as_ref()
-            .is_some_and(SectionShape::has_unequal_box_thickness)
+            .filter(|shape| shape.has_unequal_box_thickness())
         {
+            if let Err(reason) = shape.validate_surface_radius() {
+                return CheckOutcome::Skipped { reason };
+            }
             return CheckOutcome::Skipped {
                 reason: "異厚BOXのせん断性能の採用式・適用条件が未確認のため鋼部材検定は未算定です"
                     .into(),
