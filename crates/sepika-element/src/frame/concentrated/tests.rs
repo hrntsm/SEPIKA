@@ -941,3 +941,45 @@ fn rigid_zone_and_total_rotation_reference_keep_loaded_material_equilibrium() {
         );
     }
 }
+
+#[test]
+fn committed_plastic_spring_preserves_force_and_directional_element_response() {
+    for peak in [0.001, 0.0001, 0.0011] {
+        let mut elem = make_yield_element();
+        let model = sepika_core::model::Model::default();
+        let ctx = Ctx { model: &model };
+        let kb = 2.0 * 205000.0 * 1e8 / 3000.0;
+        let moment = 9_900_000.0 + 1e10 * peak;
+        let theta = peak + moment / kb;
+        let rotations = |value: f64| LocalVec {
+            data: smallvec::smallvec![
+                0.0, 0.0, 0.0, 0.0, 0.0, value, 0.0, 0.0, 0.0, 0.0, 0.0, -value
+            ],
+        };
+        elem.update_state(&rotations(theta), false, &ctx).unwrap();
+        let trial_k = elem.tangent_stiffness(&ctx);
+        close_loaded(elem.internal_force(&ctx).data[5], moment);
+        elem.commit_state();
+        let committed_k = elem.tangent_stiffness(&ctx);
+        println!(
+            "peak={peak} spring={:?} trial_mode_k={} committed_mode_k={}",
+            elem.end_spring_rotations(),
+            trial_k.get(5, 5) - trial_k.get(5, 11),
+            committed_k.get(5, 5) - committed_k.get(5, 11),
+        );
+        close_loaded(elem.internal_force(&ctx).data[5], moment);
+        let committed = elem.serialize_checkpoint();
+        for (delta, ks) in [(1e-7, 1e10), (-1e-7, 1e12)] {
+            elem.update_state(&rotations(delta), false, &ctx).unwrap();
+            let expected_slope = kb * ks / (kb + ks);
+            close_loaded(
+                elem.internal_force(&ctx).data[5],
+                moment + expected_slope * delta,
+            );
+            let tangent = elem.tangent_stiffness(&ctx);
+            close_loaded(tangent.get(5, 5) - tangent.get(5, 11), expected_slope);
+            elem.revert_state();
+            assert_eq!(elem.serialize_checkpoint(), committed);
+        }
+    }
+}

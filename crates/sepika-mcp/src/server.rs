@@ -1132,12 +1132,13 @@ mod tests {
             assert_eq!(summary["load_target"]["source"], "saved_combination");
             assert_eq!(summary["load_target"]["combination_index"], index);
             assert_eq!(summary["term"], term);
-            assert_eq!(
+            approx::assert_relative_eq!(
                 summary["member_forces"]["rows"][0]["qy"]
                     .as_f64()
                     .unwrap()
                     .abs(),
-                q
+                q,
+                max_relative = 1e-12
             );
             assert_eq!(summary["member_forces"]["truncated"], false);
             assert_eq!(summary["member_forces"]["total_rows"], 3);
@@ -1164,12 +1165,13 @@ mod tests {
             summary["load_target"]["source"],
             "automatic_gravity_combination"
         );
-        assert_eq!(
+        approx::assert_relative_eq!(
             summary["member_forces"]["rows"][0]["qy"]
                 .as_f64()
                 .unwrap()
                 .abs(),
-            150_000.0
+            150_000.0,
+            max_relative = 1e-12
         );
         let reopened = SepikaServer::new(make_state(server.state.lock().await.model.clone(), &dir));
         assert_eq!(
