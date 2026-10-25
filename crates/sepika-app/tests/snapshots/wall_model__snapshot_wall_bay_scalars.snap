@@ -1,13 +1,13 @@
 ---
 source: crates/sepika-app/tests/wall_model.rs
-assertion_line: 987
+assertion_line: 1083
 expression: out
 ---
-prep.total_seismic_weight = 4.248e4
-eigen.T[0] = 7.392e-2
-eigen.T[1] = 4.019e-2
-eigen.T[2] = 1.223e-2
+prep.total_seismic_weight = 4.239e4
+eigen.T[0] = 6.349e-2
+eigen.T[1] = 3.725e-2
+eigen.T[2] = 1.221e-2
 static.DL.wall_forces_len = 3
-static.DL.wall_forces_abs_sum = 8.139e4
-static.EX.wall_forces_abs_sum = 2.936e7
-static.EX.top_disp_x[node4] = 8.975e-3
+static.DL.wall_forces_abs_sum = 8.133e4
+static.EX.wall_forces_abs_sum = 2.947e7
+static.EX.top_disp_x[node4] = 9.036e-3

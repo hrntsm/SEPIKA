@@ -1,5 +1,6 @@
 ---
 source: crates/sepika-app/tests/full_model.rs
+assertion_line: 3036
 expression: out
 ---
 model.nodes = 171
@@ -27,7 +28,7 @@ prep.seismic[RFL].Qi = 5.786e4
 eigen.T[0] = 5.010e-1
 eigen.T[1] = 4.647e-1
 eigen.T[2] = 4.199e-1
-static.DL.min_uz = -1.002e0
+static.DL.min_uz = -1.017e0
 static.DL.sum_base_axial = -3.192e6
 static.EX.story[1FL].max_ux = 0.000e0
 static.EX.story[2FL].max_ux = 6.556e0
@@ -47,13 +48,13 @@ metrics[1FL].Rs = 7.473e-1
 metrics[1FL].Re = 2.801e-2
 metrics[2FL].drift_angle = 1.349e-3
 metrics[2FL].Rs = 8.288e-1
-metrics[2FL].Re = 9.165e-3
+metrics[2FL].Re = 9.164e-3
 metrics[3FL].drift_angle = 9.243e-4
 metrics[3FL].Rs = 1.258e0
-metrics[3FL].Re = 2.990e-2
+metrics[3FL].Re = 2.991e-2
 metrics[RFL].drift_angle = 7.514e-4
 metrics[RFL].Rs = 1.166e0
-metrics[RFL].Re = 5.019e-3
+metrics[RFL].Re = 5.644e-3
 pushover.input = T形梁の情報不足により停止
 ultimate.checks = 17
 th.frames = 1001

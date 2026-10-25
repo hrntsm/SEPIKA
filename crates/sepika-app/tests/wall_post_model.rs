@@ -96,15 +96,14 @@ fn wall_post_model() -> Model {
         });
     }
 
-    // 断面: 柱 H-300x300、梁 H-400x200（鋼）、壁 RC t=150、間柱 H-200x100。
-    let mut col_section = SectionShape::SteelH {
-        root_r: Some(13.0),
+    // 断面: 柱 Box-300x300x10、梁 H-400x200（鋼）、壁 RC t=150、間柱 H-200x100。
+    let mut col_section = SectionShape::SteelBox {
         height: 300.0,
         width: 300.0,
-        web_thick: 10.0,
-        flange_thick: 15.0,
+        thick: 10.0,
+        corner_r: Some(13.0),
     }
-    .to_section(SectionId(0), "柱 H-300x300".into());
+    .to_section(SectionId(0), "柱 Box-300x300x10 R13".into());
     col_section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(col_section);
     let mut beam_section = SectionShape::SteelH {
