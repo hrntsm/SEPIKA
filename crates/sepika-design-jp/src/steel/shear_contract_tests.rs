@@ -19,6 +19,7 @@ fn supplied_section(category: ShapeCategory) -> Section {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(30.0),
             }),
             300.0,

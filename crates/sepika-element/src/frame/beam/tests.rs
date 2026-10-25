@@ -106,6 +106,7 @@ fn test_beam_new_src_cft_composite_props() {
         height: 400.0,
         width: 400.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
     };
 
     let mut model = Model {
@@ -293,6 +294,7 @@ fn test_beam_new_src_cft_composite_props() {
             height: 500.0,
             width: 300.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(30.0),
         }
         .to_section(SectionId(1), "保護A角丸CFT".into())

@@ -1573,6 +1573,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         });
         model.elements[2].local_axis.ref_vector = [1.0, 0.0, 0.0];
@@ -1636,6 +1637,7 @@ mod tests {
                 height: depth,
                 width: depth,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(0.0),
             }),
             material: Some(MaterialId(0)),

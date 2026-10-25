@@ -30,6 +30,7 @@ fn main() {
                 height: 400.0,
                 width: 400.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(0.0),
             },
             159.2691642053372,

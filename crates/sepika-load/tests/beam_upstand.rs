@@ -645,6 +645,7 @@ fn 同じ実配置の対応梁材種と要素表現で嵩上げ増分を変え�
             height: 600.,
             width: 400.,
             thick: 10.,
+            horizontal_thick: 10.,
             corner_r: Some(0.),
         },
         SectionShape::SteelH {
@@ -849,6 +850,7 @@ fn 斜中空梁の端capで上側管壁が消える不連続を左右極限の�
                 height: 600.,
                 width: 400.,
                 thick: 20.,
+                horizontal_thick: 20.,
                 corner_r: Some(0.),
             },
             166770.72,

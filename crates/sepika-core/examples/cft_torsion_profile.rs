@@ -91,6 +91,7 @@ fn diagnose(case: &Case, swapped: bool) -> Value {
         width,
         height,
         thick: case.thick_mm,
+        horizontal_thick: case.thick_mm,
         corner_r: Some(case.outer_r_mm),
     };
     let started = Instant::now();

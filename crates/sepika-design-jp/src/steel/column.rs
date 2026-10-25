@@ -274,6 +274,7 @@ mod tests {
             height: 300.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         }
         .to_section(sepika_core::ids::SectionId(0), "BOX-300x300x12".into());

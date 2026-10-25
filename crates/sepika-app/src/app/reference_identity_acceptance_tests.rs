@@ -98,6 +98,7 @@ fn built_box_equal_thickness_import_replaces_model_only_after_success() {
                 height: 300.,
                 width: 200.,
                 thick: 9.,
+                horizontal_thick: 9.,
                 corner_r: Some(0.),
             })
         );

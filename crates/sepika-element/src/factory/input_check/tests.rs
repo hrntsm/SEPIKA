@@ -333,6 +333,7 @@ fn adopted_shear_modulus_is_checked_for_regular_rc_src_and_cft_beams() {
         width: 400.0,
         height: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
         corner_r: Some(0.0),
     }
     .to_section(SectionId(0), "CFT".into());

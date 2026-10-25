@@ -120,6 +120,7 @@ fn cft_box() -> SectionShape {
         height: 400.0,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(30.0),
     }
 }
@@ -145,6 +146,7 @@ fn public_analysis_uses_current_h_and_rounded_box_j_in_tl_over_gj() {
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(30.0),
         },
         ElementKind::Beam,
@@ -205,6 +207,7 @@ fn public_analysis_rejects_pending_j_and_unknown_radius_with_the_reason() {
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: None,
         },
         ElementKind::Beam,
@@ -330,6 +333,7 @@ fn cft_numerical_failure_keeps_reason_and_targets_and_never_uses_steel_only() {
         height: 400.0,
         width: 1e-9,
         thick: 1e-10,
+        horizontal_thick: 1e-10,
         corner_r: Some(0.0),
     };
     assert!(shape.try_cft_core_props().unwrap().is_some());

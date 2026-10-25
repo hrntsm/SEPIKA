@@ -42,6 +42,7 @@ pub(crate) fn unsupported_box() -> App {
         height: 400.0,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(5.0),
     }
     .input_section(SectionId(0), "BOX適用外".into())
@@ -70,6 +71,7 @@ fn constructed_cantilever_matches_independent_bending_plus_shear_in_both_directi
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(0.0),
             },
             [377380352.0, 241229952.0],
@@ -80,6 +82,7 @@ fn constructed_cantilever_matches_independent_bending_plus_shear_in_both_directi
                 height: 300.0,
                 width: 400.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(0.0),
             },
             [241229952.0, 377380352.0],

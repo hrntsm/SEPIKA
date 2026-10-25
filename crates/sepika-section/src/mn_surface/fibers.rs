@@ -207,27 +207,14 @@ fn mesh_box_plates(
     fibers: &mut Vec<PlasticFiber>,
     height: f64,
     width: f64,
-    thick: f64,
+    thicknesses: [f64; 2],
     target: f64,
     mat: FiberMat,
 ) {
-    let hw = height - 2.0 * thick;
-    mesh_rect(
-        fibers,
-        [0.0, (height - thick) / 2.0],
-        width,
-        thick,
-        target,
-        mat,
-    );
-    mesh_rect(
-        fibers,
-        [0.0, -(height - thick) / 2.0],
-        width,
-        thick,
-        target,
-        mat,
-    );
+    let [thick, t2] = thicknesses;
+    let hw = height - 2.0 * t2;
+    mesh_rect(fibers, [0.0, (height - t2) / 2.0], width, t2, target, mat);
+    mesh_rect(fibers, [0.0, -(height - t2) / 2.0], width, t2, target, mat);
     for ysign in [1.0, -1.0] {
         mesh_rect(
             fibers,
@@ -333,7 +320,7 @@ fn mesh_rounded_box(
     mat: FiberMat,
 ) {
     if r == 0.0 {
-        mesh_box_plates(fibers, h, b, t, target, mat);
+        mesh_box_plates(fibers, h, b, [t; 2], target, mat);
         return;
     }
     if r >= t {
@@ -630,18 +617,31 @@ pub fn plastic_fibers_at(
             height,
             width,
             thick,
+            horizontal_thick,
             corner_r,
         } => {
-            mesh_rounded_box(
-                &mut fibers,
-                height,
-                width,
-                thick,
-                corner_r
-                    .ok_or_else(|| RebarGeometryError::SectionGeometry("角Rが未知です".into()))?,
-                target,
-                steel,
-            );
+            if shape.has_unequal_box_thickness() {
+                mesh_box_plates(
+                    &mut fibers,
+                    height,
+                    width,
+                    [thick, horizontal_thick],
+                    target,
+                    steel,
+                );
+            } else {
+                mesh_rounded_box(
+                    &mut fibers,
+                    height,
+                    width,
+                    thick,
+                    corner_r.ok_or_else(|| {
+                        RebarGeometryError::SectionGeometry("角Rが未知です".into())
+                    })?,
+                    target,
+                    steel,
+                );
+            }
         }
         SectionShape::SteelAngle {
             leg_a,
@@ -927,14 +927,26 @@ pub fn plastic_fibers_at(
             height,
             width,
             thick,
+            horizontal_thick,
             corner_r,
         } => {
             let r = corner_r
                 .ok_or_else(|| RebarGeometryError::SectionGeometry("角Rが未知です".into()))?;
-            mesh_rounded_box(&mut fibers, height, width, thick, r, target, steel);
+            if shape.has_unequal_box_thickness() {
+                mesh_box_plates(
+                    &mut fibers,
+                    height,
+                    width,
+                    [thick, horizontal_thick],
+                    target,
+                    steel,
+                );
+            } else {
+                mesh_rounded_box(&mut fibers, height, width, thick, r, target, steel);
+            }
             mesh_rounded_rect(
                 &mut fibers,
-                height - 2.0 * thick,
+                height - 2.0 * horizontal_thick,
                 width - 2.0 * thick,
                 (r - thick).max(0.0),
                 target,
@@ -1089,10 +1101,11 @@ mod rounded_tests {
                 height: h,
                 width: b,
                 thick: t,
+                horizontal_thick: t2,
                 corner_r: Some(r),
             } => {
                 let outer = rounded_width(h, b, r, z);
-                let inner = rounded_width(h - 2.0 * t, b - 2.0 * t, (r - t).max(0.0), z);
+                let inner = rounded_width(h - 2.0 * t2, b - 2.0 * t, (r - t).max(0.0), z);
                 if region == FiberRegion::Concrete {
                     if inner == 0.0 {
                         vec![]
@@ -1162,6 +1175,7 @@ mod rounded_tests {
                     height: h,
                     width: b,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(r),
                 });
             }
@@ -1285,6 +1299,7 @@ mod rounded_tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: r,
             };
             assert!(plastic_fibers_at(&shape, &StrengthParams::default(), 10.0, ring).is_err());
@@ -1354,6 +1369,7 @@ mod rounded_tests {
                     height: 400.0,
                     width: 400.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(0.0),
                 },
                 true,
@@ -1363,6 +1379,7 @@ mod rounded_tests {
                     height: 400.0,
                     width: 400.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(30.0),
                 },
                 false,
@@ -1372,6 +1389,7 @@ mod rounded_tests {
                     height: 500.0,
                     width: 300.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(0.0),
                 },
                 true,
@@ -1381,6 +1399,7 @@ mod rounded_tests {
                     height: 500.0,
                     width: 300.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(30.0),
                 },
                 false,
@@ -1432,7 +1451,7 @@ mod rounded_tests {
                             thick,
                             ..
                         } => {
-                            mesh_box_plates(&mut old, height, width, thick, target, steel);
+                            mesh_box_plates(&mut old, height, width, [thick; 2], target, steel);
                             mesh_rect(
                                 &mut old,
                                 [0.0, 0.0],

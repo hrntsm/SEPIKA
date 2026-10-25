@@ -238,6 +238,7 @@ fn panel_757_space_frame(column_rotation: f64, building_rotation: f64) -> Model 
         height: 250.0,
         width: 612.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(0.0),
     };
     let mut column = shape.to_section(SectionId(1), "Box-250x612x12".into());
@@ -311,6 +312,7 @@ fn panel_759_public_solver_preserves_original_span_loads_reactions_and_shear_wor
         height: 400.0,
         width: 200.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(0.0),
     });
     model.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];

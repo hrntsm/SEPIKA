@@ -140,6 +140,16 @@ impl Section {
 
     pub fn ensure_properties_resolved(&self) -> Result<(), String> {
         self.validate_lip_channel()?;
+        if self
+            .shape
+            .as_ref()
+            .is_some_and(|shape| shape.has_unequal_box_thickness())
+        {
+            return Err(format!(
+                "断面「{}」の異厚BOXせん断性能は採用式・適用条件が未確認のため未算定です",
+                self.name
+            ));
+        }
         let basis = self.property_basis;
         for (name, value) in [
             ("A", self.area),
@@ -188,6 +198,13 @@ impl Section {
     /// 未算定・形状欠落・適用域外・不正な供給値はエラー。CFT は鋼管単体の値。
     pub fn resolved_j(&self) -> Result<f64, String> {
         let error = |reason| format!("断面 {}「{}」の J: {reason}", self.id.0, self.name);
+        if let Some(shape) = self
+            .shape
+            .as_ref()
+            .filter(|shape| shape.has_unequal_box_thickness())
+        {
+            return shape.try_calc_j().map_err(error);
+        }
         match self.property_basis.j {
             PropertyBasis::Supplied => {
                 if self.j.is_finite() && self.j >= 0.0 {

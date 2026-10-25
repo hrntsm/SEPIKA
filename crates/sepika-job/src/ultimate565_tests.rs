@@ -8,6 +8,7 @@ fn fixture() -> (Model, Vec<Vec<(ElemId, MemberForces)>>) {
         height: 100.0,
         width: 100.0,
         thick: 5.0,
+        horizontal_thick: 5.0,
         corner_r: Some(0.0),
     });
     let model = Model {
@@ -224,6 +225,7 @@ fn actual_vertical_column_frame_gravity_preserves_compression_and_tension_in_all
                     height: 100.0,
                     width: 100.0,
                     thick: 5.0,
+                    horizontal_thick: 5.0,
                     corner_r: Some(0.0),
                 });
                 let mut steel = model.materials[0].clone();

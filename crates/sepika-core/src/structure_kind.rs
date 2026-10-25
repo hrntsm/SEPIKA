@@ -257,6 +257,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
             corner_r: Some(0.0),
         }
     }
@@ -328,6 +329,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         };
         let m = model_with(Some(cft), MaterialCategory::Concrete);
         assert_eq!(

@@ -668,6 +668,7 @@ fn 二次小梁の直接設計へ嵩上げの独立曲げせん断増分が届�
         height: 600.,
         width: 400.,
         thick: 10.,
+        horizontal_thick: 10.,
         corner_r: Some(0.),
     }
     .to_section(SectionId(1), "小梁".into());
@@ -747,6 +748,7 @@ fn gapのあるs梁も同側床板の矛盾をdlと準備結果で拒否する()
         height: 600.,
         width: 400.,
         thick: 10.,
+        horizontal_thick: 10.,
         corner_r: Some(0.),
     }
     .to_section(SectionId(1), "S梁".into());
@@ -787,6 +789,7 @@ fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_b
         height: 600.,
         width: 400.,
         thick: 10.,
+        horizontal_thick: 10.,
         corner_r: Some(0.),
     }
     .to_section(SectionId(1), "嵩上げ対象".into());
@@ -828,6 +831,7 @@ fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_b
                     height: 700.,
                     width: 400.,
                     thick: 10.,
+                    horizontal_thick: 10.,
                     corner_r: Some(0.),
                 },
                 frame_use: Some(FrameSectionUse::Girder),

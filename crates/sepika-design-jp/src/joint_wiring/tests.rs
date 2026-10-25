@@ -2791,6 +2791,7 @@ fn panel_585_cft_follows_lower_steel_material_without_redefining_whole_member_ax
         height: 400.0,
         width: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
         corner_r: Some(0.0),
     };
     let h = SectionShape::SteelH {
@@ -3261,6 +3262,7 @@ fn panel_758_rectangular_tubes_cft_and_reinforcement_keep_physical_plate_propert
                 height: 400.0,
                 width: 300.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
                 corner_r: Some(0.0),
             }
         } else {
@@ -3268,6 +3270,7 @@ fn panel_758_rectangular_tubes_cft_and_reinforcement_keep_physical_plate_propert
                 height: 400.0,
                 width: 300.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
                 corner_r: Some(0.0),
             }
         });
@@ -3478,6 +3481,7 @@ fn panel_601_cft_material_errors_stop_public_batch_using_selected_lower_column()
         height: 400.0,
         width: 300.0,
         thick: 50.0,
+        horizontal_thick: 50.0,
         corner_r: Some(0.0),
     });
     model.sections[0].material = Some(MaterialId(0));

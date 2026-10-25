@@ -385,6 +385,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         };
         for id in 0..2 {

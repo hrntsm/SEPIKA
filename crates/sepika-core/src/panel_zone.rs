@@ -359,6 +359,9 @@ impl PanelGeometry {
             } => Self {
                 kind: PanelShapeKind::Box { bc: *height },
                 dc: width - thick,
+                tp: sec
+                    .panel_thickness
+                    .unwrap_or(sec.shape.as_ref()?.box_thicknesses()?.1),
                 ..strong
             },
             SectionShape::SteelPipe { .. } | SectionShape::CftPipe { .. } => strong,
@@ -393,7 +396,7 @@ impl PanelGeometry {
                 ..
             }) => (
                 PanelShapeKind::Box { bc: width },
-                height - thick,
+                height - sec.shape.as_ref()?.box_thicknesses()?.1,
                 thick,
                 false,
             ),
@@ -404,7 +407,7 @@ impl PanelGeometry {
                 ..
             }) => (
                 PanelShapeKind::Box { bc: width },
-                height - thick,
+                height - sec.shape.as_ref()?.box_thicknesses()?.1,
                 thick,
                 true,
             ),
@@ -840,7 +843,12 @@ fn panel_analysis_joint(
             flange_thick,
             ..
         } => [*web_thick, *flange_thick],
-        SectionShape::SteelBox { thick, .. } | SectionShape::SteelPipe { thick, .. } => [*thick; 2],
+        SectionShape::SteelBox {
+            thick,
+            horizontal_thick,
+            ..
+        } => [*thick, *horizontal_thick],
+        SectionShape::SteelPipe { thick, .. } => [*thick; 2],
         _ => return Err(invalid("抵抗板の実板厚を解決できません".into())),
     };
     let g = material.shear_modulus();
@@ -1494,6 +1502,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
                 corner_r: Some(0.0),
             },
             400.0,
@@ -1562,6 +1571,7 @@ mod tests {
                     height: 400.0,
                     width: 400.0,
                     thick: 16.0,
+                    horizontal_thick: 16.0,
                 },
                 PanelShapeKind::Box { bc: 400.0 },
             ),
@@ -1600,6 +1610,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
                 corner_r: Some(0.0),
             },
             SectionShape::SteelPipe {
@@ -1624,6 +1635,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
                 corner_r: Some(0.0),
             },
             400.0,
@@ -1635,6 +1647,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
             },
             400.0,
             None,
@@ -1804,6 +1817,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
             corner_r: Some(0.0),
         });
         let joint = resolve_explicit_panel_joint(&model, NodeId(0), &model.elements)
@@ -1865,6 +1879,7 @@ mod tests {
                 height: 500.0,
                 width: 300.0,
                 thick: 20.0,
+                horizontal_thick: 20.0,
                 corner_r: Some(0.0),
             },
         );
@@ -1953,6 +1968,7 @@ mod tests {
             height: 500.0,
             width: 10.0,
             thick: 20.0,
+            horizontal_thick: 20.0,
             corner_r: Some(0.0),
         });
         let reason = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
@@ -2015,6 +2031,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
             corner_r: Some(0.0),
         });
         model.materials[0].name = "直接入力".into();
@@ -2382,6 +2399,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
             },
         );
         let joint = resolve_panel_joint(&m, NodeId(0), &m.elements)
@@ -2417,6 +2435,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: radius,
         };
         for (shape, direction, expected) in [
@@ -2495,6 +2514,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         };
         for (reference, expected) in [([1.0, 0.0, 0.0], 200.0), ([0.0, 1.0, 0.0], 100.0)] {
@@ -2620,6 +2640,7 @@ mod tests {
                 height: 500.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(0.0),
             },
             500.0,
@@ -2701,6 +2722,7 @@ mod tests {
                 height: 600.0,
                 width: 200.0,
                 thick: 20.0,
+                horizontal_thick: 20.0,
                 corner_r: None,
             });
             m.sections.push(unsupported);

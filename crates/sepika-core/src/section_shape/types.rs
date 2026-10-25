@@ -20,7 +20,10 @@ pub enum SectionShape {
     SteelBox {
         height: f64,
         width: f64,
+        /// 左右の縦板厚 `[mm]`。
         thick: f64,
+        /// 上下の横板厚 `[mm]`。異厚は明示した鋭角形状のみ。
+        horizontal_thick: f64,
         /// 角R `[mm]`。None は未知、Some(0) は明示した直角。
         corner_r: Option<f64>,
     },
@@ -108,7 +111,10 @@ pub enum SectionShape {
     CftBox {
         height: f64,
         width: f64,
+        /// 左右の縦板厚 `[mm]`。
         thick: f64,
+        /// 上下の横板厚 `[mm]`。異厚は明示した鋭角形状のみ。
+        horizontal_thick: f64,
         /// 角R `[mm]`。None は未知、Some(0) は明示した直角。
         corner_r: Option<f64>,
     },
@@ -383,4 +389,27 @@ pub struct CircleColumnHoop {
 pub struct RebarPoint {
     pub x: f64,
     pub y: f64,
+}
+
+impl SectionShape {
+    /// 角形鋼管・角形CFTの（左右縦板厚、上下横板厚）`[mm]`。他形状は `None`。
+    pub fn box_thicknesses(&self) -> Option<(f64, f64)> {
+        match *self {
+            Self::SteelBox {
+                thick,
+                horizontal_thick,
+                ..
+            }
+            | Self::CftBox {
+                thick,
+                horizontal_thick,
+                ..
+            } => Some((thick, horizontal_thick)),
+            _ => None,
+        }
+    }
+
+    pub fn has_unequal_box_thickness(&self) -> bool {
+        self.box_thicknesses().is_some_and(|(t1, t2)| t1 != t2)
+    }
 }

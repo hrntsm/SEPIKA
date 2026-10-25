@@ -22,6 +22,7 @@ fn column(cft: bool) -> App {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         }
     } else {

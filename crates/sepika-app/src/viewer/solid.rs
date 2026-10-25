@@ -300,7 +300,8 @@ pub(super) fn section_inner_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
             thick,
             ..
         } => {
-            let (hi, wi) = (height - 2.0 * thick, width - 2.0 * thick);
+            let (_, t2) = shape.box_thicknesses()?;
+            let (hi, wi) = (height - 2.0 * t2, width - 2.0 * thick);
             (hi > 0.0 && wi > 0.0).then(|| rect_outline(hi, wi))
         }
         SectionShape::SteelPipe { outer_dia, thick }

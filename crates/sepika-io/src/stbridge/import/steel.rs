@@ -48,6 +48,7 @@ fn built_box_shape(a: &Attrs) -> Result<SectionShape, String> {
             height: height_mm,
             width: width_mm,
             thick: side_thick_mm,
+            horizontal_thick: side_thick_mm,
             corner_r: Some(0.0),
         })
     })();
@@ -84,6 +85,7 @@ fn other_steel_shape(tag: &str, a: &Attrs) -> Option<SectionShape> {
             height: a_("A")?,
             width: a_("B")?,
             thick: a_("t")?,
+            horizontal_thick: a_("t")?,
             corner_r: a_("r"),
         }),
         "StbSecPipe" => Some(SectionShape::SteelPipe {

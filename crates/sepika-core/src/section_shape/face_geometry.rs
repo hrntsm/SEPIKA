@@ -171,16 +171,17 @@ impl SectionGeometry {
                 height: h,
                 width: w,
                 thick: t,
+                horizontal_thick: t2,
                 corner_r,
             } => {
-                if t <= 0.0 || 2.0 * t >= h.min(w) {
+                if t <= 0.0 || t2 <= 0.0 || 2.0 * t >= w || 2.0 * t2 >= h {
                     return Err("CFT鋼管厚が不正です".into());
                 }
                 let r = corner_r.ok_or("角形 CFT の角Rが未知です")?;
                 rounded_rectangle(&mut parts, h, w, r, Some(0));
                 rounded_rectangle(
                     &mut parts,
-                    h - 2.0 * t,
+                    h - 2.0 * t2,
                     w - 2.0 * t,
                     (r - t).max(0.0),
                     Some(1),
@@ -328,6 +329,7 @@ impl SectionGeometry {
                 height: h,
                 width: w,
                 thick: t,
+                horizontal_thick: t2,
                 corner_r: r,
             } => {
                 let r = r.ok_or("角形鋼管の外角半径が未知です")?;
@@ -335,7 +337,13 @@ impl SectionGeometry {
                     return Err("角形鋼管の寸法が不正です".into());
                 }
                 rounded_rectangle(&mut parts, h, w, r, Some(0));
-                rounded_rectangle(&mut parts, h - 2.0 * t, w - 2.0 * t, (r - t).max(0.0), None);
+                rounded_rectangle(
+                    &mut parts,
+                    h - 2.0 * t2,
+                    w - 2.0 * t,
+                    (r - t).max(0.0),
+                    None,
+                );
             }
             SectionShape::RcWall { .. } | SectionShape::RcSlab { .. } => {
                 return Err("側柱に壁・床の断面は指定できません".into())
@@ -451,18 +459,21 @@ mod face_tests {
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(5.0),
             },
             SectionShape::CftBox {
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(30.0),
             },
             SectionShape::CftBox {
                 height: 400.0,
                 width: 400.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(200.0),
             },
         ] {
@@ -545,6 +556,7 @@ mod face_tests {
             height: 400.0,
             width: 400.0,
             thick: 20.0,
+            horizontal_thick: 20.0,
             corner_r: Some(40.0),
         };
         let geometry = SectionGeometry::of(&shape).unwrap();

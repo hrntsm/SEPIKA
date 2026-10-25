@@ -508,6 +508,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: None,
         });
         assert!(count(20000.0, &sec, &material("SS400")).is_err());

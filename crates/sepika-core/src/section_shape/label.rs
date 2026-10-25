@@ -62,7 +62,16 @@ impl SectionShape {
                 width,
                 thick,
                 ..
-            } => format!("BOX-{}", dims(&[*height, *width, *thick])),
+            } => format!(
+                "BOX-{}",
+                dims(
+                    &if let Some((_, t2)) = self.box_thicknesses().filter(|(_, t2)| *t2 != *thick) {
+                        vec![*height, *width, *thick, t2]
+                    } else {
+                        vec![*height, *width, *thick]
+                    }
+                )
+            ),
             SectionShape::SteelPipe { outer_dia, thick } => {
                 format!("P-{}", dims(&[*outer_dia, *thick]))
             }
@@ -137,7 +146,16 @@ impl SectionShape {
                 width,
                 thick,
                 ..
-            } => format!("CFT-BOX-{}", dims(&[*height, *width, *thick])),
+            } => format!(
+                "CFT-BOX-{}",
+                dims(
+                    &if let Some((_, t2)) = self.box_thicknesses().filter(|(_, t2)| *t2 != *thick) {
+                        vec![*height, *width, *thick, t2]
+                    } else {
+                        vec![*height, *width, *thick]
+                    }
+                )
+            ),
             SectionShape::CftPipe { outer_dia, thick } => {
                 format!("CFT-P-{}", dims(&[*outer_dia, *thick]))
             }

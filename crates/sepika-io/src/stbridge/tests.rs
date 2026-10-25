@@ -538,12 +538,14 @@ fn surface_radius_export_rejects_unknown_zero_and_invalid() {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: radius,
             },
             SectionShape::CftBox {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: radius,
             },
         ] {
@@ -1929,12 +1931,14 @@ fn test_standard_roundtrip_steel_box_distinct_corner_r() {
         height: 300.0,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(30.0),
     };
     let without_r = SectionShape::SteelBox {
         height: 300.0,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(20.0),
     };
     push_section(&mut m, with_r.to_section(SectionId(0), "BOX-R30".into()));
@@ -1981,6 +1985,7 @@ fn test_import_box_without_r_attr_is_corner_r_zero() {
             height: 300.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: None,
         }),
         "r 属性がなければ未知"
@@ -2009,6 +2014,7 @@ fn test_standard_roundtrip_cft_box() {
         height: 400.0,
         width: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
     };
     let mut sec = shape.to_section(SectionId(0), "CFT1".into());
     sec.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
@@ -2248,6 +2254,7 @@ fn test_standard_unsupported_cft_beam_shape_falls_back_to_raw() {
         height: 300.0,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
     };
     let mut cft_sec = cft.to_section(SectionId(0), "CB".into());
     cft_sec.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);

@@ -2993,6 +2993,7 @@ mod capacity_issue_tests {
                 height: 600.0,
                 width: 600.0,
                 thick: 20.0,
+                horizontal_thick: 20.0,
                 corner_r: Some(0.0),
             });
             model.sections[1].steel_material = Some(steel_id);

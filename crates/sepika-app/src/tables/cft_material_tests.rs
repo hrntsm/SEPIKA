@@ -13,6 +13,7 @@ fn shapes() -> [SectionShape; 2] {
             height: 400.,
             width: 400.,
             thick: 12.,
+            horizontal_thick: 12.,
             corner_r: Some(0.),
         },
         SectionShape::CftPipe {

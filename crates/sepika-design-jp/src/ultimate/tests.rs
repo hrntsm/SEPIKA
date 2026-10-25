@@ -856,6 +856,7 @@ fn test_collect_cft_ultimate_checks() {
         height: 400.0,
         width: 400.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
     };
     let sec = Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Girder),

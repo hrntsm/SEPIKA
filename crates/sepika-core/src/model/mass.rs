@@ -403,23 +403,41 @@ fn validate_section_geometry(section: &Section) -> Result<(), String> {
             height,
             width,
             thick,
+            horizontal_thick,
             corner_r,
         } => {
-            dimensions.extend([("height", *height), ("width", *width), ("thick", *thick)]);
+            dimensions.extend([
+                ("height", *height),
+                ("width", *width),
+                ("thick", *thick),
+                ("horizontal_thick", *horizontal_thick),
+            ]);
             if let Some(r) = corner_r {
                 nonnegative("corner_r", *r)?;
             }
-            relation("height > 2 * thick", *height > 2.0 * *thick)?;
+            relation(
+                "height > 2 * horizontal_thick",
+                *height > 2.0 * *horizontal_thick,
+            )?;
             relation("width > 2 * thick", *width > 2.0 * *thick)?;
         }
         SectionShape::CftBox {
             height,
             width,
             thick,
+            horizontal_thick,
             ..
         } => {
-            dimensions.extend([("height", *height), ("width", *width), ("thick", *thick)]);
-            relation("height > 2 * thick", *height > 2.0 * *thick)?;
+            dimensions.extend([
+                ("height", *height),
+                ("width", *width),
+                ("thick", *thick),
+                ("horizontal_thick", *horizontal_thick),
+            ]);
+            relation(
+                "height > 2 * horizontal_thick",
+                *height > 2.0 * *horizontal_thick,
+            )?;
             relation("width > 2 * thick", *width > 2.0 * *thick)?;
         }
         SectionShape::SteelAngle {
@@ -1329,6 +1347,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
         let concrete = material(0, MaterialCategory::Concrete, 2.0, Some(24.0));
@@ -1354,6 +1373,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
         let concrete = material(0, MaterialCategory::Concrete, 2.0, None);
@@ -1376,6 +1396,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
         let concrete = material(0, MaterialCategory::Concrete, 2.0, Some(24.0));
@@ -1401,6 +1422,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
         let steel = material(0, MaterialCategory::Steel, 8.0, None);
@@ -1423,6 +1445,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
         for fc in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
@@ -1863,6 +1886,7 @@ mod tests {
                 height: 24.0,
                 width: 200.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(0.0),
             },
         ] {
@@ -2100,6 +2124,7 @@ mod tests {
                     height: 500.0,
                     width: 300.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(30.0),
                 },
                 [15170.79632679, 517817051.0231, 237343309.2454],
@@ -2110,6 +2135,7 @@ mod tests {
                     height: 500.0,
                     width: 300.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(30.0),
                 },
                 [15170.79632679, 517817051.0231, 237343309.2454],

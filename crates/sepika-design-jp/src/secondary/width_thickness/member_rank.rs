@@ -278,6 +278,9 @@ pub fn s_member_rank_by_kihon(
     member_use: SteelMemberUse,
     grade_name: &str,
 ) -> Option<MemberRank> {
+    if shape.has_unequal_box_thickness() {
+        return None;
+    }
     let thickness = match *shape {
         SectionShape::SteelH {
             web_thick,
@@ -290,10 +293,17 @@ pub fn s_member_rank_by_kihon(
             lower_thick,
             ..
         } => web_thick.max(upper_thick).max(lower_thick),
-        SectionShape::SteelBox { thick, .. }
-        | SectionShape::SteelPipe { thick, .. }
-        | SectionShape::CftBox { thick, .. }
-        | SectionShape::CftPipe { thick, .. } => thick,
+        SectionShape::SteelBox {
+            thick,
+            horizontal_thick,
+            ..
+        }
+        | SectionShape::CftBox {
+            thick,
+            horizontal_thick,
+            ..
+        } => thick.max(horizontal_thick),
+        SectionShape::SteelPipe { thick, .. } | SectionShape::CftPipe { thick, .. } => thick,
         _ => 40.0,
     };
     if sepika_core::material_grade::steel_f_value_issue(grade_name, thickness).is_some() {
@@ -427,6 +437,7 @@ mod sm520_tests {
                 height: 1000.0,
                 width: 1000.0,
                 thick: 100.001,
+                horizontal_thick: 100.001,
                 corner_r: Some(0.0),
             },
             SectionShape::SteelPipe {
@@ -437,6 +448,7 @@ mod sm520_tests {
                 height: 1000.0,
                 width: 1000.0,
                 thick: 100.001,
+                horizontal_thick: 100.001,
                 corner_r: Some(0.0),
             },
             SectionShape::CftPipe {

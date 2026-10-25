@@ -605,12 +605,14 @@ fn surface_radius_edit_preserves_properties_and_undo() {
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: None,
         },
         SectionShape::CftBox {
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: None,
         },
     ] {
@@ -695,12 +697,14 @@ fn radius_edit_updates_only_shape_properties_and_restores_basis() {
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         },
         SectionShape::CftBox {
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         },
     ] {
@@ -833,6 +837,7 @@ fn test_edit_section_shape_roundtrip() {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(0.0),
     };
     let cmd = EditSectionShape {
@@ -856,6 +861,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(0.0),
     };
     let mut model = empty_model();
@@ -907,6 +913,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         },
         sepika_section::shape::SectionShape::CftPipe {
             outer_dia: 400.0,
@@ -1024,6 +1031,7 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
             height: 200.0,
             width: 200.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         };
         let new_shape = sepika_section::shape::SectionShape::CftBox {
@@ -1031,6 +1039,7 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         };
         let mut model = empty_model();
         let mut section = old_shape.to_section(SectionId(0), "S".into());
@@ -1133,6 +1142,7 @@ fn test_edit_section_shape_invalid_id_noop() {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(0.0),
     };
     let cmd = EditSectionShape {
@@ -4512,6 +4522,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
                 height: 300.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(0.0),
             },
             frame_use: Some(sepika_core::model::FrameSectionUse::Column),
@@ -5957,6 +5968,7 @@ fn push_cft_section(model: &mut Model) -> SectionId {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         }
         .to_section(id, "CFT".into()),
     );
@@ -6269,6 +6281,7 @@ fn set_floor_region_beam_section_rejects_cft() {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         }
         .to_section(SectionId(0), "CFT".into()),
     );
@@ -8953,6 +8966,7 @@ fn secondary_cft_assignment_placement_and_shape_changes_leave_model_and_undo_unc
             height: 400.0,
             width: 400.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(0.0),
         },
         SectionShape::CftPipe {
@@ -10073,4 +10087,54 @@ fn adding_a_floor_requires_known_existing_fl_without_reordering_partial_input() 
     assert!(model.eq_ignoring_dofmap(&complete));
     undo.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&added));
+}
+
+#[test]
+fn built_box_edit_undo_redo_and_renumber_preserve_horizontal_thickness() {
+    use sepika_core::model::{FrameSectionUse, PropertyBasis, Section};
+    use sepika_core::section_shape::SectionShape;
+    let shape = |t2| SectionShape::SteelBox {
+        height: 300.0,
+        width: 200.0,
+        thick: 9.0,
+        horizontal_thick: t2,
+        corner_r: Some(0.0),
+    };
+    let mut model = seeded_model(2, 1);
+    model
+        .sections
+        .push(Section::zero(SectionId(0), "未使用".into()));
+    let mut s = shape(9.0).to_section(SectionId(1), "BOX".into());
+    s.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(s.clone());
+    model.elements[0].section = Some(SectionId(1));
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(EditSectionShape {
+            section: SectionId(1),
+            new_shape: shape(12.0),
+            frame_use: Some(FrameSectionUse::Girder)
+        })
+    ));
+    let edited = model.sections[1].clone();
+    assert_eq!(
+        (edited.area, edited.iy, edited.iz),
+        (9768.0, 131127264.0, 61342936.0)
+    );
+    assert_eq!(edited.property_basis.as_y, PropertyBasis::PendingShape);
+    assert_eq!(
+        edited.shape.as_ref().unwrap().box_thicknesses(),
+        Some((9.0, 12.0))
+    );
+    stack.undo(&mut model);
+    assert_eq!(model.sections[1], s);
+    stack.redo(&mut model);
+    assert_eq!(model.sections[1], edited);
+    assert!(stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) })));
+    assert_eq!(model.elements[0].section, Some(SectionId(0)));
+    assert_eq!(model.sections[0].shape, edited.shape);
+    assert_eq!(model.sections[0].area, 9768.0);
+    stack.undo(&mut model);
+    assert_eq!(model.sections[1], edited);
 }

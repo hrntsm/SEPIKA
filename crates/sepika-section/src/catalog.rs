@@ -170,6 +170,7 @@ fn parse_shape_from_name(shape: CatalogShape, name: &str) -> Option<SectionShape
                 height: dims[0],
                 width: dims[1],
                 thick: dims[2],
+                horizontal_thick: dims[2],
                 corner_r: None,
             })
         }
@@ -372,6 +373,7 @@ mod tests {
                     height: 100.0,
                     width: 100.0,
                     thick: 12.0,
+                    horizontal_thick: 12.0,
                     corner_r: None,
                 }),
             ),
@@ -382,6 +384,7 @@ mod tests {
                     height: 1000.0,
                     width: 1000.0,
                     thick: 22.0,
+                    horizontal_thick: 22.0,
                     corner_r: None,
                 }),
             ),

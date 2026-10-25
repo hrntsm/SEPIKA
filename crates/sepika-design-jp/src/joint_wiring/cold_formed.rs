@@ -37,6 +37,21 @@ pub(super) fn check_cold_formed(
                 )
         })
         .collect();
+    if cf_cols.iter().any(|c| {
+        c.sec
+            .shape
+            .as_ref()
+            .is_some_and(SectionShape::has_unequal_box_thickness)
+    }) {
+        out.push((
+            nid,
+            "冷間成形耐力比".into(),
+            CheckOutcome::Skipped {
+                reason: "異厚BOXは一様厚を前提とする冷間成形耐力比の適用外です".into(),
+            },
+        ));
+        return;
+    }
     if !cf_cols.is_empty() {
         for beam in beams.iter().filter(|b| b.kind.is_steel_like()) {
             if let Some(SectionShape::SteelH {
@@ -205,6 +220,7 @@ mod sm520_tests {
             height: 1000.0,
             width: 1000.0,
             thick: 20.0,
+            horizontal_thick: 20.0,
             corner_r: Some(0.0),
         }
         .to_section(SectionId(0), "BCR柱".into());

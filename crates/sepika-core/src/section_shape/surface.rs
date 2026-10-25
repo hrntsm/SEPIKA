@@ -44,17 +44,22 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                horizontal_thick,
                 corner_r,
             }
             | Self::CftBox {
                 height,
                 width,
                 thick,
+                horizontal_thick,
                 corner_r,
             } => {
-                positive(&[height, width, thick])?;
-                if height.min(width) <= 2.0 * thick {
+                positive(&[height, width, thick, horizontal_thick])?;
+                if height <= 2.0 * horizontal_thick || width <= 2.0 * thick {
                     return Err("角形鋼管の内法寸法が不正です（高さ・幅は板厚の 2 倍より大きい必要があります）".into());
+                }
+                if thick != horizontal_thick && corner_r != Some(0.0) {
+                    return Err("異厚BOXは角Rを明示した0（鋭角）にしてください".into());
                 }
                 radius(corner_r, height.min(width) / 2.0)
             }
@@ -181,12 +186,14 @@ mod tests {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: r,
             },
             SectionShape::CftBox {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: r,
             },
         ]

@@ -83,19 +83,21 @@ impl SectionShape {
                 height: h,
                 width: b,
                 thick: t,
+                horizontal_thick: t2,
                 corner_r,
             }
             | Self::CftBox {
                 height: h,
                 width: b,
                 thick: t,
+                horizontal_thick: t2,
                 corner_r,
             } => {
                 let ro = corner_r.ok_or("断面性能の算定に必要な角Rが未知です")?;
                 Ok(Some(
                     rounded_rectangle(h, b, ro)
                         .subtract(rounded_rectangle(
-                            h - 2.0 * t,
+                            h - 2.0 * t2,
                             b - 2.0 * t,
                             (ro - t).max(0.0),
                         ))
@@ -113,6 +115,7 @@ impl SectionShape {
             height: h,
             width: b,
             thick: t,
+            horizontal_thick: t2,
             corner_r,
         } = *self
         else {
@@ -121,7 +124,7 @@ impl SectionShape {
         self.validate_surface_radius()?;
         let ro = corner_r.ok_or("コア領域の算定に必要な角Rが未知です")?;
         Ok(Some(
-            rounded_rectangle(h - 2.0 * t, b - 2.0 * t, (ro - t).max(0.0)).validate()?,
+            rounded_rectangle(h - 2.0 * t2, b - 2.0 * t, (ro - t).max(0.0)).validate()?,
         ))
     }
 }
@@ -182,6 +185,7 @@ mod tests {
                     height: h,
                     width: b,
                     thick: t,
+                    horizontal_thick: t,
                     corner_r: Some(r),
                 };
                 let steel = shape.rounded_steel_properties().unwrap().unwrap();
@@ -255,6 +259,7 @@ mod tests {
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: r,
             };
             assert!(shape.rounded_steel_properties().is_err());
@@ -284,6 +289,7 @@ mod tests {
             height: 1.0e200,
             width: 1.0e200,
             thick: 1.0e199,
+            horizontal_thick: 1.0e199,
             corner_r: Some(0.0),
         };
         assert!(shape.try_calc_area().is_err());
@@ -307,12 +313,14 @@ mod tests {
                 height: 400.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: None,
             },
             SectionShape::CftBox {
                 height: 400.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: None,
             },
         ] {

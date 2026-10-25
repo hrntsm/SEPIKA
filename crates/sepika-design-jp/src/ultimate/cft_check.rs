@@ -103,7 +103,12 @@ pub fn collect_cft_ultimate_checks(
             .filter(|v| v.is_finite() && *v > 0.0)
             .ok_or_else(|| format!("CFT 部材 {} の Fc が未設定または不正です", elem.id.0))?;
         let thick = match *shape {
-            SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => thick,
+            SectionShape::CftBox {
+                thick,
+                horizontal_thick,
+                ..
+            } => thick.max(horizontal_thick),
+            SectionShape::CftPipe { thick, .. } => thick,
             _ => 0.0,
         };
         if let Some(reason) =
@@ -234,6 +239,9 @@ pub fn cft_mu_nm(
             return Err("角形 CFT の角Rが正の終局 N–M は未対応です（内角Rが 0 でも対象。設計仕様は #418 で策定）".into());
         }
     }
+    if shape.has_unequal_box_thickness() {
+        return Err("異厚BOXのCFT終局曲げ耐力は一様厚式の適用外です".into());
+    }
     let (bd, bb, thick) = match *shape {
         SectionShape::CftBox {
             height,
@@ -312,6 +320,7 @@ mod tests {
             height: 150.0,
             width: 150.0,
             thick: 4.5,
+            horizontal_thick: 4.5,
             corner_r: Some(0.0),
         }
     }
@@ -394,6 +403,7 @@ mod tests {
                 height: 150.0,
                 width: 150.0,
                 thick: 4.5,
+                horizontal_thick: 4.5,
                 corner_r,
             };
             assert!(cft_mu_nm(&bad, 30.0, 235.0, 8e5, 2700.0, false)
@@ -405,12 +415,14 @@ mod tests {
                 height: 150.0,
                 width: 150.0,
                 thick: 75.0,
+                horizontal_thick: 75.0,
                 corner_r: Some(0.0),
             },
             SectionShape::CftBox {
                 height: f64::NAN,
                 width: 150.0,
                 thick: 4.5,
+                horizontal_thick: 4.5,
                 corner_r: Some(0.0),
             },
         ] {

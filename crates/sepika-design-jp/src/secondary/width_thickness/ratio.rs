@@ -33,10 +33,11 @@ pub fn max_width_thickness(shape: &SectionShape) -> Option<f64> {
             height,
             width,
             thick,
+            horizontal_thick,
             ..
         } => {
-            let hi = ratio(height - 2.0 * thick, thick)?;
-            let wi = ratio(width - 2.0 * thick, thick)?;
+            let hi = ratio(height - 2.0 * horizontal_thick, thick)?;
+            let wi = ratio(width - 2.0 * thick, horizontal_thick)?;
             Some(hi.max(wi))
         }
         SectionShape::SteelBuiltH {
@@ -82,10 +83,11 @@ pub fn max_width_thickness(shape: &SectionShape) -> Option<f64> {
             height,
             width,
             thick,
+            horizontal_thick,
             ..
         } => {
-            let hi = ratio(height - 2.0 * thick, thick)?;
-            let wi = ratio(width - 2.0 * thick, thick)?;
+            let hi = ratio(height - 2.0 * horizontal_thick, thick)?;
+            let wi = ratio(width - 2.0 * thick, horizontal_thick)?;
             Some(hi.max(wi))
         }
         SectionShape::CftPipe { .. } => None,

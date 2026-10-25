@@ -5,6 +5,7 @@ fn shape(height: f64, radius: f64) -> SectionShape {
         height,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(radius),
     }
 }
@@ -95,6 +96,7 @@ fn radius_and_dimension_edits_use_their_own_core_j_and_invalid_geometry_is_rejec
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: None,
         },
     ] {
@@ -113,6 +115,7 @@ fn radius_and_dimension_edits_use_their_own_core_j_and_invalid_geometry_is_rejec
         height: 400.0,
         width: 1e-9,
         thick: 1e-10,
+        horizontal_thick: 1e-10,
         corner_r: Some(0.0),
     };
     for _ in 0..2 {

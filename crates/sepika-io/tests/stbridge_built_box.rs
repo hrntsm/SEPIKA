@@ -45,6 +45,7 @@ fn equal_built_box_preserves_shape_properties_and_steel_beam_mass_at_both_entran
                     height: 300.0,
                     width: 200.0,
                     thick: 9.0,
+                    horizontal_thick: 9.0,
                     corner_r: Some(0.0),
                 })
             );

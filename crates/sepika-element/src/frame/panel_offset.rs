@@ -410,6 +410,7 @@ mod tests {
                         height: 400.0,
                         width: 400.0,
                         thick: 13.0,
+                        horizontal_thick: 13.0,
                         corner_r: Some(0.0),
                     }),
                     ..sec

@@ -9,6 +9,7 @@ fn shapes() -> [SectionShape; 2] {
             height: 400.0,
             width: 400.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(0.0),
         },
         SectionShape::CftPipe {
@@ -86,6 +87,7 @@ fn secondary_cft_public_entries_reject_all_kinds_shapes_and_locations() {
                     height: 400.0,
                     width: 400.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(0.0),
                 }
                 .to_section(SectionId(0), "正常対照".into());
