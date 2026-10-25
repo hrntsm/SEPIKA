@@ -794,6 +794,85 @@ fn rc_slab_equal_single_absent_and_exchange_match_independent_inertia() {
 }
 
 #[test]
+fn attached_slab_spanning_two_beams_is_diagnosed_only_for_its_resolved_supports() {
+    use sepika_core::ids::{SectionId, SlabId, StoryId};
+    use sepika_core::model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape, Story};
+    let (mut model, mut first) = rc_beam_for_slab_factor(None);
+    first.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    model.nodes[2].coord = [12000.0, 0.0, 3000.0];
+    model.nodes[3].coord = [0.0, 3000.0, 3000.0];
+    let mut node = model.nodes[3].clone();
+    node.id = NodeId(4);
+    node.coord[0] = 6000.0;
+    model.nodes.push(node);
+    let mut second = first.clone();
+    second.id = ElemId(1);
+    second.nodes = smallvec::smallvec![NodeId(1), NodeId(2)];
+    let mut unrelated = first.clone();
+    unrelated.id = ElemId(2);
+    unrelated.nodes = smallvec::smallvec![NodeId(3), NodeId(4)];
+    model.elements = vec![first, second, unrelated];
+    model.floor_regions.clear();
+    model.stories = vec![Story::new(
+        StoryId(0),
+        "1F".into(),
+        Some(3300.0),
+        Some(-300.0),
+    )];
+    model.slabs = vec![Slab {
+        id: SlabId(0),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(2)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1000.0, 1000.0],
+        },
+        plate: SlabPlate {
+            section: Some(SectionId(1)),
+            ..Default::default()
+        },
+        reference_story: Some(StoryId(0)),
+        vertical_eccentricity_mm: Some(0.0),
+        tip_loads: vec![],
+    }];
+    let placement = model.resolved_slab_placement(SlabId(0)).unwrap();
+    assert_eq!(placement.top_z_mm, 3300.0);
+    let supports = model.attached_slab_supports(&model.slabs[0]).unwrap();
+    assert_eq!(
+        supports
+            .iter()
+            .map(|s| (s.elem, s.span))
+            .collect::<Vec<_>>(),
+        vec![(ElemId(0), [0.0, 1.0]), (ElemId(1), [0.0, 1.0])]
+    );
+    for data in &model.elements[..2] {
+        let error = stiffness_breakdown(&model, data).unwrap_err();
+        assert!(
+            error.contains(&format!("部材 ID {}", data.id.0))
+                && error.contains("床板 0")
+                && error.contains("適用範囲外"),
+            "{error}"
+        );
+        let error = BeamElement::try_new(data, &model).err().unwrap();
+        assert!(
+            error.contains(&format!("部材 ID {}", data.id.0))
+                && error.contains("床板 0")
+                && error.contains("適用範囲外"),
+            "{error}"
+        );
+    }
+    assert_eq!(
+        stiffness_breakdown(&model, &model.elements[2])
+            .unwrap()
+            .slab,
+        1.0
+    );
+    assert!(BeamElement::try_new(&model.elements[2], &model).is_ok());
+}
+
+#[test]
 fn rc_slab_invalid_and_unconfirmed_inputs_are_diagnosed() {
     use sepika_core::ids::SlabId;
     use sepika_core::model::{LoadTransfer, PlateAssignment, RegionAnchor, SlabShape};

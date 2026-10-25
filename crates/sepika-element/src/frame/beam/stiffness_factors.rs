@@ -309,12 +309,17 @@ fn rc_slab_sides(
         }
     }
     for slab in &model.slabs {
-        if let SlabShape::Attached {
-            anchor: sepika_core::model::RegionAnchor::Line { nodes, .. },
-            ..
-        } = slab.shape
-        {
-            if data.nodes.iter().all(|n| nodes.contains(n)) {
+        if matches!(
+            slab.shape,
+            SlabShape::Attached {
+                anchor: sepika_core::model::RegionAnchor::Line { .. },
+                ..
+            }
+        ) {
+            let supports = model.attached_slab_supports(slab).map_err(|reason| {
+                format!("床板 {}: 取付き支持を解決できません: {reason}", slab.id.0)
+            })?;
+            if supports.iter().any(|s| s.elem == data.id) {
                 return Err(format!(
                     "床板 {}: 取り付く床板は剛性算定の適用範囲外です",
                     slab.id.0
