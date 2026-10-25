@@ -91,3 +91,7 @@ Windowsの当該端末・devプロファイル（faer最適化3）での単回�
 | `mdbook build` | exit0 |
 
 一時probe sourceと各段階の`issue818-*.log/.exit`は共有targetへ保存し、製品コード・テストから一時観測を除去した。既定構成とGUI構成は元の診断コードで成功している。最終headの独立レビュー・CIはこのローカル結果へ予記しない。
+
+## 文書・テストのみの後続main統合
+
+#808の調査PRを含むmain `0f3d622f` を `e4792ba0` で統合した。製品ロジックの変更はなく、mathソースと解析57・検定30を維持した。未検証索引の競合は両節を保持して解消した。新しい塑性ばねの確定接線と公開時刻歴の回帰を含む `cargo test -p sepika-solver --test general_member_loads --locked` は12成功・exit0。先の全回帰は反復せず、追加範囲と文書・fmtを確認した。
