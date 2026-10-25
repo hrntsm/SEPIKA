@@ -17,6 +17,126 @@ const KINDS: [ElementKind; 3] = [
 ];
 
 #[test]
+#[ignore = "Issue821の現行モデル監査。開口モデルの妥当性を保証する回帰試験ではない"]
+fn audit_rc_wall_opening_linear_response() {
+    let opening = |width, height, x, z| WallOpening {
+        width,
+        height,
+        offset: Some([x, z]),
+    };
+    let cases = [
+        ("solid", vec![]),
+        ("center", vec![opening(1000.0, 1200.0, 1500.0, 900.0)]),
+        ("left", vec![opening(1000.0, 1200.0, 300.0, 900.0)]),
+        ("low", vec![opening(1000.0, 1200.0, 1500.0, 300.0)]),
+        ("wide", vec![opening(2000.0, 600.0, 1000.0, 1200.0)]),
+        ("tall", vec![opening(600.0, 2000.0, 1700.0, 500.0)]),
+        (
+            "double_close",
+            vec![
+                opening(500.0, 1200.0, 800.0, 900.0),
+                opening(500.0, 1200.0, 1700.0, 900.0),
+            ],
+        ),
+        (
+            "double",
+            vec![
+                opening(500.0, 1200.0, 800.0, 900.0),
+                opening(500.0, 1200.0, 2700.0, 900.0),
+            ],
+        ),
+    ];
+    for columns in [true, false] {
+        for mode in [
+            MultiOpeningMode::Equivalent,
+            MultiOpeningMode::Envelope,
+            MultiOpeningMode::Auto,
+        ] {
+            for (name, openings) in &cases {
+                let mut horizontal = fixture(ElementKind::Beam, Dof::Ux, 100_000.0);
+                horizontal.multi_opening_mode = mode;
+                horizontal.wall_attrs = vec![WallAttr {
+                    elem: ElemId(4),
+                    opening_area: 0.0,
+                    opening_weight: 0.0,
+                    slit: Default::default(),
+                    openings: openings.clone(),
+                    finish_intensity: 0.0,
+                }];
+                if !columns {
+                    horizontal.elements.retain(|e| e.id.0 >= 2);
+                }
+                let lateral = linear_static_once(&horizontal, LoadCaseId(0)).unwrap();
+                let lateral_wall = wall_nodal_force(&horizontal, &lateral);
+                let mut axial = horizontal.clone();
+                for node in &mut axial.nodes {
+                    node.restraint = Dof6Mask::FIXED;
+                    if node.id.0 >= 2 {
+                        node.restraint.set_free(Dof::Uz);
+                    }
+                }
+                axial.constraints = vec![Constraint::RigidLink {
+                    master: NodeId(2),
+                    slaves: vec![NodeId(3)],
+                    dofs: Dof6Mask(1 << Dof::Uz as u8),
+                }];
+                for load in &mut axial.load_cases[0].nodal {
+                    load.values = [0.0, 0.0, 50_000.0, 0.0, 0.0, 0.0];
+                }
+                let vertical = linear_static_once(&axial, LoadCaseId(0)).unwrap();
+                let axial_wall = wall_nodal_force(&axial, &vertical);
+                let lateral_forces = element_nodal_forces(&horizontal, &lateral);
+                let axial_forces = element_nodal_forces(&axial, &vertical);
+                let reaction_x_n: f64 = lateral_forces
+                    .iter()
+                    .flat_map(|e| &e[..2])
+                    .map(|f| f[0])
+                    .sum();
+                let reaction_z_n: f64 = axial_forces
+                    .iter()
+                    .flat_map(|e| &e[..2])
+                    .map(|f| f[2])
+                    .sum();
+                close(reaction_x_n, -100_000.0, 0.01);
+                close(reaction_z_n, -100_000.0, 0.01);
+                let column_q_n = lateral_forces[0][2][0] + lateral_forces[1][3][0];
+                let column_n_n = axial_forces[0][2][2] + axial_forces[1][3][2];
+                let full = DofMap::build(&horizontal).including_restrained_node_dofs();
+                let wall = horizontal
+                    .elements
+                    .iter()
+                    .find(|e| e.id == ElemId(4))
+                    .unwrap();
+                let seismic = wall_is_seismic(wall, &horizontal);
+                let behavior = build_behavior(wall, &horizontal);
+                let mode_u: Vec<_> = behavior
+                    .global_dofs(&full)
+                    .iter()
+                    .map(|&active| {
+                        let g = full.global(active as u32);
+                        match (g / 6, g % 6) {
+                            (2 | 3, 0) => 0.15,
+                            (2, 2) => 0.2,
+                            (3, 2) => -0.2,
+                            (2 | 3, 4) => 1e-4,
+                            _ => 0.0,
+                        }
+                    })
+                    .collect();
+                let stiffness = behavior.tangent_stiffness(&Ctx { model: &horizontal });
+                let mut bending_work_n_mm = 0.0;
+                for (i, &ui) in mode_u.iter().enumerate() {
+                    for (j, &uj) in mode_u.iter().enumerate() {
+                        bending_work_n_mm += ui * stiffness.get(i, j) * uj;
+                    }
+                }
+                println!("columns={columns}, mode={mode:?}, case={name}, seismic={seismic}, ux_mm={:.12}, uz_mm={:.12}, wall_Q_N={:.6}, wall_N_N={:.6}, column_Q_N={column_q_n:.6}, column_N_N={column_n_n:.6}, reaction_X_N={reaction_x_n:.6}, reaction_Z_N={reaction_z_n:.6}, axial_K_N_mm={:.6}, bending_uKu_N_mm={:.6}", lateral.disp[2][0], vertical.disp[2][2], lateral_wall[2][0]+lateral_wall[3][0], axial_wall[2][2]+axial_wall[3][2], 100_000.0/vertical.disp[2][2], bending_work_n_mm);
+            }
+        }
+    }
+}
+
+#[test]
 fn rc_wall_capacity_uses_both_physical_columns_for_each_representation() {
     for kind in KINDS {
         let mut model = fixture(kind, Dof::Ux, 100_000.0);
