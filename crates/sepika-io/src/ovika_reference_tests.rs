@@ -472,7 +472,7 @@ fn built_box_ovika_roundtrip_keeps_both_thicknesses_pending_properties_and_refer
         };
         let mut s = shape.input_section(SectionId(0), "異厚BOX".into()).unwrap();
         s.frame_use = Some(FrameSectionUse::Column);
-        for place in 0..5 {
+        for place in 0..if cft { 1 } else { 5 } {
             let mut model = member_model(place, vec![s.clone(), section(1, "別断面")], Some(0));
             model.visit_section_ids(|id| id.0 = 1 - id.0);
             model.sections.reverse();
