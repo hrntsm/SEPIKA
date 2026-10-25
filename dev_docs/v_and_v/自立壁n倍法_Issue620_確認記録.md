@@ -22,7 +22,7 @@
 
 GUI/CSVは `summary::seismic_story_metrics` がX/Y地震静的と採用長期組合せについて `require_result_input` を通し、失敗を `StoryMetricsCtx.re_error` からRe/Fesへ伝播する。保有耐力は `actions/design/holding.rs` の依存成果照合を通して `compute_story_metrics_with` を使う。直接の純計算関数へ新しい世代管理は追加しない。関連する入力世代試験は[層指標の生成入力照合](層指標の生成入力照合_Issue810_2026-10.md)を再利用する。
 
-保存結果の検定適用条件が変わるため `DESIGN_CONTRACT_VERSION` を28から29へ、既存3D質点系の生成条件も変わるため解析契約を52から53へ更新する。並行PR統合時の最終整数版は統合側で再調整する。
+保存結果の検定適用条件が変わるため `DESIGN_CONTRACT_VERSION` を28から29へ更新する。既存3D質点系の生成条件も変わるため、解析契約は最新main `d00b3c29`（Issue #618、解析契約53）の統合後に54へ更新する。初回実装の解析契約53をmainの53と同一契約として再利用しない。
 
 ## 独立期待値と試験
 
@@ -68,3 +68,22 @@ GUI/CSVは `summary::seismic_story_metrics` がX/Y地震静的と採用長期組
 - `mdbook build`: 成功。`cargo fmt --all --check` と `git diff --check` も成功。
 
 初回の略算の材料欠落別柱試験は、別柱へ欠落断面を割り当てていないfixture誤りで失敗し、入力を訂正して再試験した。これらの失敗を製品計算の不具合の証拠とは扱わない。CI・独立レビュー・mergeは本実行記録とは別に確認する。
+
+
+## 最新mainとの統合
+
+2026-10-25に `origin/main` の `d00b3c29` を取得し、`9210de26` で統合した。コードの競合はなく、検証目録と未検証一覧の追加項目だけを両方保持して解消した。
+Issue #618の左右床板平均厚、梁偏心を構造せいの半分下とする実モデルfixture、断面用途の検査はそのまま保持する。n倍法の式・対象や柱断面にその平均厚を転用しない。
+
+解析契約54・検定契約29の統合状態で以下を再実行し、すべて成功した。Cargoの対象ディレクトリは上記と同じ。
+
+- `rustup update stable`（1.99.1）、`cargo fmt --all --check`、`git diff --check`。
+- `cargo test -p sepika-design-jp --locked`: 単体665件・統合13件。
+- `cargo test -p sepika-job --lib lumped_mass --locked`: 18件。
+- `cargo test -p sepika-app --lib summary --locked`: 17件。
+- `cargo test -p sepika-app --test full_model story_metrics_computed_for_every_layer --locked`: 1件。#618の明示配置fixtureで全層のRs/Re/Fes算定を確認した。
+- `cargo clippy -p sepika-core -p sepika-design-jp -p sepika-job -p sepika-app --all-targets --locked -- -D warnings`。
+- `cargo run -p xtask -- check-docs`: summary 124、links 642、impl refs 685。
+- `mdbook build`。
+
+main統合による計算コードの手動修正は行っていない。独立fresh reviewと最終headのCIは管理側で確認する。
