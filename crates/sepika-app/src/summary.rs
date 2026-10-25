@@ -56,12 +56,24 @@ pub struct StoryMetricsCtx<'a> {
     pub seismic_y: Option<&'a StaticOnce>,
     /// 長期応力解析結果（重心の長期軸力算定用）
     pub long_term: Option<&'a StaticOnce>,
-    /// 選択方向の結果生成入力・計算契約の不整合。
+    /// 層間変形角・Rsに用いる選択方向の結果生成入力・計算契約の不整合。
     pub drift_error: Option<String>,
+    /// Reに用いるX/Y・採用長期結果の欠測、生成入力・計算契約の不整合。
+    pub re_error: Option<String>,
+}
+
+fn metrics_long_term_result<'a>(
+    model: &Model,
+    results: Option<&'a ResultsBundle>,
+) -> Option<&'a (String, StaticOnce)> {
+    results?
+        .combos
+        .iter()
+        .find(|(name, _)| sepika_core::load_combo::is_gravity_combination(name, model))
 }
 
 /// 解析結果一式から `StoryMetricsCtx` を組み立てる。
-/// 長期は「短期でない荷重組合せ」を優先し、なければ None。
+/// 長期は保存された常時G+P組合せ結果の先頭を用い、なければNone。
 pub fn metrics_ctx_from_results<'a>(
     model: &Model,
     results: Option<&'a ResultsBundle>,
@@ -75,16 +87,13 @@ pub fn metrics_ctx_from_results<'a>(
             .find(|(k, _)| *k == StaticCaseKey::Seismic(dir))
             .map(|(_, s)| s)
     };
-    let long_term = r
-        .combos
-        .iter()
-        .find(|(name, _)| sepika_core::load_combo::is_gravity_combination(name, model))
-        .map(|(_, s)| s);
+    let long_term = metrics_long_term_result(model, Some(r)).map(|(_, s)| s);
     StoryMetricsCtx {
         seismic_x: find_seismic(SeismicDir::X),
         seismic_y: find_seismic(SeismicDir::Y),
         long_term,
         drift_error: None,
+        re_error: None,
     }
 }
 
@@ -112,19 +121,16 @@ pub fn compute_story_metrics_with(
     let metric_disp = seismic.map(|s| s.disp.as_slice()).unwrap_or(&[]);
     let heights: Vec<_> = layers.iter().map(|l| l.height).collect();
 
-    let cog_drifts = cog_story_drifts(model, metric_disp, d);
-    let rs_all = if match dir {
-        SeismicDir::X => ctx.seismic_x,
-        SeismicDir::Y => ctx.seismic_y,
-    }
-    .is_none()
-    {
+    let rs_all = if let Some(reason) = &ctx.drift_error {
+        Err(reason.clone())
+    } else if seismic.is_none() {
         Err(format!(
             "対応する {:?} 方向の地震静的解析結果がありません",
             dir
         ))
     } else {
-        cog_drifts.and_then(|drifts| stiffness_ratios(&heights, &drifts))
+        cog_story_drifts(model, metric_disp, d)
+            .and_then(|drifts| stiffness_ratios(&heights, &drifts))
     };
 
     let denom = model.stress_cfg.drift_limit_denom;
@@ -133,19 +139,22 @@ pub fn compute_story_metrics_with(
         .iter()
         .map(|l| {
             let i = l.index;
-            let re = match (ctx.seismic_x, ctx.seismic_y) {
-                (Some(rx), Some(ry)) => {
-                    story_eccentricity_from_analysis(model, l.top, rx, ry, ctx.long_term).and_then(
-                        |ecc| {
-                            let (e_dist, radius) = match dir {
-                                SeismicDir::X => (ecc.ey, ecc.rex),
-                                SeismicDir::Y => (ecc.ex, ecc.rey),
-                            };
-                            eccentricity_ratio(e_dist, radius)
-                        },
-                    )
+            let re = if let Some(reason) = &ctx.re_error {
+                Err(reason.clone())
+            } else {
+                match (ctx.seismic_x, ctx.seismic_y) {
+                    (Some(rx), Some(ry)) => {
+                        story_eccentricity_from_analysis(model, l.top, rx, ry, ctx.long_term)
+                            .and_then(|ecc| {
+                                let (e_dist, radius) = match dir {
+                                    SeismicDir::X => (ecc.ey, ecc.rex),
+                                    SeismicDir::Y => (ecc.ex, ecc.rey),
+                                };
+                                eccentricity_ratio(e_dist, radius)
+                            })
+                    }
+                    _ => Err("偏心率に必要な X/Y 方向の地震静的解析結果がありません".into()),
                 }
-                _ => Err("偏心率に必要な X/Y 方向の地震静的解析結果がありません".into()),
             }
             .map_err(|reason| format!("{} {:?}: Re 算定不能: {reason}", l.name, dir));
             let rs = rs_all
@@ -213,22 +222,39 @@ pub fn compute_story_metrics_with(
         .collect()
 }
 
-/// 選択方向の地震静的結果を、保存した生成入力・計算契約と照合して集計する。
+/// Rsは選択方向、ReはX/Yと採用長期結果の生成入力・計算契約を照合して集計する。
 pub fn seismic_story_metrics(app: &App) -> Vec<StoryMetric> {
+    use crate::app::ResultInputKey;
     let dir = app.core.analysis_cfg.seismic_dir;
     let mut ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
-    let present = match dir {
-        SeismicDir::X => ctx.seismic_x,
-        SeismicDir::Y => ctx.seismic_y,
-    }
-    .is_some();
-    if present {
-        ctx.drift_error = app
-            .require_result_input(crate::app::ResultInputKey::Static(StaticCaseKey::Seismic(
-                dir,
-            )))
-            .err();
-    }
+    let seismic_error = |direction, result: Option<&StaticOnce>| {
+        if result.is_none() {
+            Some(format!("地震静的 {direction:?} の解析結果がありません"))
+        } else {
+            app.require_result_input(ResultInputKey::Static(StaticCaseKey::Seismic(direction)))
+                .err()
+                .map(|reason| format!("地震静的 {direction:?}: {reason}"))
+        }
+    };
+    let x_error = seismic_error(SeismicDir::X, ctx.seismic_x);
+    let y_error = seismic_error(SeismicDir::Y, ctx.seismic_y);
+    ctx.drift_error = match dir {
+        SeismicDir::X => ctx.seismic_x.and(x_error.clone()),
+        SeismicDir::Y => ctx.seismic_y.and(y_error.clone()),
+    };
+    let long_term_error =
+        metrics_long_term_result(&app.core.model, app.core.scoped.results.as_ref()).and_then(
+            |(name, _)| {
+                app.require_result_input(ResultInputKey::Combo(name.clone()))
+                    .err()
+                    .map(|reason| format!("長期組合せ「{name}」: {reason}"))
+            },
+        );
+    let reasons: Vec<_> = [x_error, y_error, long_term_error]
+        .into_iter()
+        .flatten()
+        .collect();
+    ctx.re_error = (!reasons.is_empty()).then(|| reasons.join(" / "));
     compute_story_metrics_with(&app.core.model, dir, &ctx)
 }
 
@@ -1415,6 +1441,193 @@ pub(crate) fn input_generation_hash(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn metrics_810_app(long_term: bool) -> App {
+        let mut app = App::default();
+        let mut model = crate::sample::portal_frame();
+        model.load_cases.push(sepika_core::model::LoadCase {
+            id: sepika_core::ids::LoadCaseId(2),
+            name: "P0".into(),
+            kind: sepika_core::model::LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
+        model
+            .combinations
+            .push(sepika_core::model::LoadCombination {
+                name: "G+P".into(),
+                terms: vec![
+                    (sepika_core::ids::LoadCaseId(0), 1.0),
+                    (sepika_core::ids::LoadCaseId(2), 1.0),
+                ],
+            });
+        app.load_model(model);
+        app.generate_stories_action();
+        if long_term {
+            app.run_combination(0);
+        }
+        app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.core.analysis_cfg.seismic_dir = SeismicDir::X;
+        app
+    }
+
+    #[test]
+    fn metrics_810_directional_missing_and_unknown_inputs_only_disable_dependencies() {
+        use crate::app::ResultInputKey;
+        for direction in [SeismicDir::X, SeismicDir::Y] {
+            for failure in ["欠測", "識別欠落", "入力不一致"] {
+                let mut app = metrics_810_app(false);
+                let results = app.core.scoped.results.as_mut().unwrap();
+                if failure == "欠測" {
+                    results
+                        .statics
+                        .retain(|(key, _)| *key != StaticCaseKey::Seismic(direction));
+                } else if failure == "識別欠落" {
+                    results.input_records.retain(|(key, _)| {
+                        *key != ResultInputKey::Static(StaticCaseKey::Seismic(direction))
+                    });
+                } else {
+                    results
+                        .input_records
+                        .iter_mut()
+                        .find(|(key, _)| {
+                            *key == ResultInputKey::Static(StaticCaseKey::Seismic(direction))
+                        })
+                        .unwrap()
+                        .1
+                        .push(0);
+                }
+                let before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+                let m = seismic_story_metrics(&app).remove(0);
+                assert_eq!(m.rs_ok.is_none(), direction == SeismicDir::X);
+                assert_eq!(m.drift_ok.is_none(), direction == SeismicDir::X);
+                assert_eq!(m.re_ok, None);
+                let reason = m.re.as_ref().unwrap_err();
+                assert!(
+                    reason.contains(&format!("地震静的 {direction:?}")),
+                    "{reason}"
+                );
+                assert!(
+                    reason.contains(match failure {
+                        "欠測" => "ありません",
+                        "識別欠落" => "入力識別情報",
+                        _ => "一致しません",
+                    }),
+                    "{reason}"
+                );
+                assert!(m.fes.is_err());
+                let csv = build_report_csv(&app);
+                assert!(csv.contains(reason));
+                assert_eq!(
+                    rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
+                    before
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn metrics_810_selected_long_term_unknown_or_mismatched_never_falls_back() {
+        use crate::app::ResultInputKey;
+        for unknown in [false, true] {
+            let mut app = metrics_810_app(true);
+            let results = app.core.scoped.results.as_mut().unwrap();
+            let name = results.combos[0].0.clone();
+            assert!(sepika_core::load_combo::is_gravity_combination(
+                &name,
+                &app.core.model
+            ));
+            let key = ResultInputKey::Combo(name.clone());
+            if unknown {
+                results.input_records.retain(|(saved, _)| *saved != key);
+            } else {
+                results
+                    .input_records
+                    .iter_mut()
+                    .find(|(saved, _)| *saved == key)
+                    .unwrap()
+                    .1
+                    .push(0);
+            }
+            let m = seismic_story_metrics(&app).remove(0);
+            assert_eq!(m.rs, Ok(1.0));
+            assert!(m.drift.is_ok());
+            assert_eq!(m.re_ok, None);
+            let reason = m.re.as_ref().unwrap_err();
+            assert!(reason.contains(&name), "{reason}");
+            assert!(reason.contains(if unknown {
+                "入力識別情報"
+            } else {
+                "一致しません"
+            }));
+            assert!(m.fes.is_err());
+            assert!(build_report_csv(&app).contains(reason));
+        }
+    }
+
+    #[test]
+    fn metrics_810_current_results_ignore_unrelated_settings_and_reject_related_edits() {
+        for long_term in [false, true] {
+            let mut app = metrics_810_app(long_term);
+            let results = app.core.scoped.results.as_mut().unwrap();
+            results
+                .combos
+                .push(("無関係な組合せ".into(), results.statics[0].1.clone()));
+            let before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+            app.core.analysis_cfg.push_steps += 1;
+            app.core.analysis_cfg.push_max_disp += 1.0;
+            app.core.model.stress_cfg.drift_limit_denom = 120.0;
+            for dir in [SeismicDir::X, SeismicDir::Y] {
+                app.core.analysis_cfg.seismic_dir = dir;
+                let m = seismic_story_metrics(&app).remove(0);
+                assert_eq!((m.rs, m.fes), (Ok(1.0), Ok(1.0)));
+                assert!(m.re.unwrap().abs() < 1e-12);
+            }
+            assert_eq!(
+                rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
+                before
+            );
+            app.core.analysis_cfg.c0 += 0.1;
+            let m = seismic_story_metrics(&app).remove(0);
+            assert!(m.rs.as_ref().unwrap_err().contains("計算設定"));
+            assert!(m.re.as_ref().unwrap_err().contains("計算設定"));
+            assert_eq!((m.rs_ok, m.re_ok), (None, None));
+            assert!(m.fes.is_err());
+        }
+    }
+
+    #[test]
+    fn metrics_810_unknown_or_incompatible_contract_has_no_values_or_verdicts() {
+        use sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION;
+        for version in [
+            None,
+            Some(ANALYSIS_CONTRACT_VERSION - 1),
+            Some(ANALYSIS_CONTRACT_VERSION + 1),
+        ] {
+            let mut app = metrics_810_app(false);
+            app.core
+                .scoped
+                .results
+                .as_mut()
+                .unwrap()
+                .analysis_contract_version = version;
+            let m = seismic_story_metrics(&app).remove(0);
+            assert_eq!((m.rs_ok, m.re_ok), (None, None));
+            assert!(m.rs.as_ref().unwrap_err().contains("地震静的 X"));
+            let reason = m.re.as_ref().unwrap_err();
+            assert!(reason.contains("地震静的 X"));
+            assert!(reason.contains("地震静的 Y"));
+            assert!(reason.contains("保存版="));
+            assert!(m.fes.is_err());
+            assert!(build_report_csv(&app).contains(&reason.replace(',', ";")));
+        }
+    }
 
     fn drift_result(model: &Model, dir: SeismicDir, response: &StaticOnce) -> StoryMetric {
         let ctx = StoryMetricsCtx {

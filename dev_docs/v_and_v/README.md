@@ -67,6 +67,10 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 [実使用経路の検証](層間変形角_Issue490_2026-10.md)は、上下階SL変位と共通FL間高さによる柱最大角、支配対象、対象なし・未計算・内部不整合、GUI・CSVの対応をVerificationする。手動GUI・実験Validation・法令適用資格は未検証であり、状態は🔶。対応テストは同記録の独立期待値表を要素→テスト索引とする。
 
+## 層指標の生成入力照合（#810）
+
+[検証記録](層指標の生成入力照合_Issue810_2026-10.md)は、GUI/CSVのRs/Re/Fesと使用する方向別静的・長期成果の対応を扱う。手動GUI・物理Validationは未実施で状態は🔶。
+
 ## 壁自重の用途配分
 
 [Issue #444 の独立幾何・実入口検証](壁自重の独立用途配分_Issue444_2026-10.md)。DL支持、階帯、共通physical/matrix総量を別々に照合する。局所質量分布の精度と未閲覧原本は未検証として保持する。
@@ -108,6 +112,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [層指標の生成入力照合_Issue810_2026-10.md](層指標の生成入力照合_Issue810_2026-10.md) | GUI/CSVのRs/Re/Fes依存成果と現在入力・計算契約 | 🔶（自動Verificationの記録は同レポート、手動GUI・Validation未） |
 | [保存ブランチ496の変更採否_2026-10.md](保存ブランチ496の変更採否_2026-10.md) | 全102コミットの採否、免震/保存の復元、全固定時刻歴と確定前記録 | 🔶（有限Verification。実験Validationは未実施） |
 | [保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | 物理曲率・非対称断面・剛域付き軸履歴、元端部解放の内外残差整合 | 🔶（有限Verification。全履歴の収束性・実験Validationは未検証） |
 | [集中ばね梁の部材荷重_Issue802_2026-10.md](集中ばね梁の部材荷重_Issue802_2026-10.md) | 集中ばね梁の元部材荷重・材料釣合い・記録・復元・保存失効・公開App保有耐力 | 🔶（独立Verification、Validation・最終ゲート未確認） |
@@ -300,6 +305,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 810 | 層指標の生成入力照合 | sepika-app | summary.rs・design_view.rs | [独立期待値と実入口](層指標の生成入力照合_Issue810_2026-10.md#対象と独立期待値) | 横断 | 🔶（手動GUI・Validation未） |
 | 802 | 集中ばね梁の部材荷重 | sepika-element / sepika-solver / sepika-mcp | frame/concentrated・general_member_loads.rs・persist.rs | [独立期待値と公開入口](集中ばね梁の部材荷重_Issue802_2026-10.md#対象と独立期待値) | 横断 | 🔶（限定Verification、Validation未） |
 | 616 | 大梁自重の床板実重複控除 | sepika-load / sepika-job / sepika-app | self_weight/girder_overlap.rs・app/girder_weight_tests.rs・weight_preparation.rs | [独立値と実入口](大梁床板実重複控除_Issue616_確認記録.md#独立期待値と実入口) | 横断 | 🔶（数値Verification、Validation未） |
 | 775 | ctutils 推移依存監査 | Cargo.lock / sepika-io | zip、ctutils、OVIKA | [監査と実行証拠](ctutils推移依存監査_Issue775_2026-10.md#実行証拠) | 横断 | 🔶（0.4.5 の最小解決、監査・IO default/parquet 成功。独立レビュー・最終 CI は記録を参照） |

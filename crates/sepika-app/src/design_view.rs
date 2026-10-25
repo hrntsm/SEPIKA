@@ -1250,6 +1250,51 @@ mod tests {
     use sepika_core::ids::{ElemId, SectionId};
 
     #[test]
+    fn metrics_810_gui_csv_reject_edited_model_results() {
+        use sepika_solver::statics::analysis::SeismicDir;
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.generate_stories_action();
+        app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
+        app.core.analysis_cfg.seismic_dir = SeismicDir::X;
+        let before = crate::summary::seismic_story_metrics(&app).remove(0);
+        assert_eq!(
+            (before.rs, before.re, before.fes),
+            (Ok(1.0), Ok(0.0), Ok(1.0))
+        );
+        app.core.model.nodes[2].coord[0] += 10.0;
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(8000.0, 2000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| story_metrics_section(ui, &mut app),
+        );
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let csv = crate::summary::build_report_csv(&app);
+        for metric in ["Rs", "Re"] {
+            let reason = format!("{metric} 算定不能");
+            assert!(csv.contains(&reason), "CSV: {csv}\nGUI: {text}");
+            assert!(text.contains(&reason), "GUI: {text}");
+        }
+        assert!(text.contains("地震静的 Xの生成入力"));
+        assert!(text.contains("地震静的 Yの生成入力"));
+    }
+
+    #[test]
     fn drift_490_egui_and_csv_show_the_same_values_and_unavailable_states() {
         use sepika_solver::statics::analysis::SeismicDir;
         fn collect_text(shape: &egui::epaint::Shape, out: &mut String) {
