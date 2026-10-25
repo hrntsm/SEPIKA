@@ -787,7 +787,7 @@ fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     );
     let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
 
-    for version in [23, 24] {
+    for version in [23, 24, 29] {
         let (mut loaded, path) = restore(
             &app,
             None,

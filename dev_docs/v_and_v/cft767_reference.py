@@ -15,3 +15,16 @@ for shape, area_mm2, core_mm2 in [
             s_nc = area_mm2 * s_fc * factor
             capacity = core_mm2 * concrete_fc + s_nc
             print(shape, term, e, f"sfc={s_fc * factor:.12f}", f"ratio={N / capacity:.12f}")
+
+for e in [100000, 205000, 300000]:
+    limit = math.sqrt(math.pi**2 * e / (0.6 * F))
+    for factor in [1 - 1e-6, 1.0, 1 + 1e-6]:
+        slenderness = limit * factor
+        x = (slenderness / limit) ** 2
+        s_fc = F * (1 - 0.4 * x) / (1.5 + (2 / 3) * x) if slenderness <= limit else 0.277 * F / x
+        ratios = [
+            N / (core * concrete_fc + area * s_fc * term_factor)
+            for area, core in [(15600, 144400), (3900 * math.pi, 36100 * math.pi)]
+            for concrete_fc, term_factor in [(8, 1), (16, 1.5)]
+        ]
+        print("boundary", e, repr(slenderness), ratios)

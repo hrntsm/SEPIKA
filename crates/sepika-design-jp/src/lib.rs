@@ -323,7 +323,7 @@ pub struct DesignCtx {
     pub rebar_material: Option<sepika_core::model::Material>,
     /// 断面が持つせん断補強筋の材料（`Section::shear_rebar_material` の実体）。
     pub shear_rebar_material: Option<sepika_core::model::Material>,
-    /// 断面が持つ内蔵鉄骨の材料（`Section::steel_material` の実体。SRC のみ）。
+    /// 断面が持つ内蔵鉄骨・CFT鋼管の材料（`Section::steel_material` の実体）。
     pub steel_material: Option<sepika_core::model::Material>,
     pub term: LoadTerm,
     pub kind: MemberKind,

@@ -10,13 +10,13 @@
 //! （断面形状・N-M 相関の算定方法が SRC 矩形断面と異なるため）。
 
 use crate::rc::concrete_allowable_compression;
-use crate::steel::{steel_fc, steel_fs, steel_ft};
+use crate::steel::{steel_fs, steel_ft};
 use crate::{
     effective_slenderness, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCheck,
     DesignCtx, LoadTerm, MemberForcesAt,
 };
 use sepika_core::model::{Material, Section};
-use sepika_core::section_shape::{SectionShape, E_STEEL};
+use sepika_core::section_shape::SectionShape;
 
 use crate::ratio_or_large;
 
@@ -143,20 +143,50 @@ fn cft_axis_capacity(
     }
 }
 
-/// CFT 柱の鋼管部分の許容応力度 (s_ft, s_fs, s_fc)。
-///
-/// s_fc は座屈を考慮する（SRC 規準準用。細長比の記号
-/// λ=Lk/i・Lk/D に対応）。細長比 λ は**鋼管単体**の断面二次半径で評価する
-/// （充填コンクリートの曲げ剛性寄与を無視するため実際より λ が大きく
-/// 算定され、安全側）。CFT 断面は鋼管専用の材料参照を持たず、主材料の
-/// `young` は充填コンクリートのヤング係数になり得るため、鋼管側の許容応力度は
-/// 基準資料の鉄骨固定ヤング係数 `E_STEEL` を用いる。λ=0（座屈長さ 0）
-/// のとき s_fc は長期 F/1.5（=s_ft）に一致する。
-fn cft_common_steel(f_value: f64, term: LoadTerm, lambda: f64) -> (f64, f64, f64) {
+/// 鋼管材料の E [N/mm²] と鋼管単体の細長比から (ft, fs, fc) [N/mm²] を返す。
+/// E が正の有限値でない場合、または中間値・許容応力度を表現できない場合は失敗する。
+fn cft_common_steel(
+    f_value: f64,
+    young_n_mm2: f64,
+    term: LoadTerm,
+    lambda: f64,
+) -> Result<(f64, f64, f64), String> {
+    if !young_n_mm2.is_finite() || young_n_mm2 <= 0.0 {
+        return Err("CFT検定: 鋼管材料のヤング係数Eは正の有限値が必要です".into());
+    }
+    let limit = crate::steel::big_lambda(f_value, young_n_mm2);
+    let ratio = lambda / limit;
+    let ratio_squared = ratio * ratio;
+    if !limit.is_finite()
+        || limit <= 0.0
+        || !lambda.is_finite()
+        || lambda < 0.0
+        || !ratio_squared.is_finite()
+        || (lambda > 0.0 && ratio_squared <= 0.0)
+    {
+        return Err(
+            "CFT検定: 鋼管材料のEと細長比から許容圧縮応力度を算定できません（中間値が表現範囲外）"
+                .into(),
+        );
+    }
+    // steel_fc の小さいΛに対するr=0補完は、任意の正有限Eを採る契約では使えない。
+    let fc_long = if lambda <= limit {
+        f_value * (1.0 - 0.4 * ratio_squared) / (1.5 + (2.0 / 3.0) * ratio_squared)
+    } else {
+        0.277 * f_value / ratio_squared
+    };
     let s_ft = steel_ft(f_value, term);
     let s_fs = steel_fs(f_value, term);
-    let s_fc = steel_fc(f_value, E_STEEL, lambda, term);
-    (s_ft, s_fs, s_fc)
+    let s_fc = fc_long * if term == LoadTerm::Short { 1.5 } else { 1.0 };
+    if [s_ft, s_fs, s_fc]
+        .iter()
+        .any(|v| !v.is_finite() || *v <= 0.0)
+    {
+        return Err(
+            "CFT検定: 鋼管材料のEから許容応力度を算定できません（結果が表現範囲外）".into(),
+        );
+    }
+    Ok((s_ft, s_fs, s_fc))
 }
 
 #[cfg(test)]
@@ -245,7 +275,7 @@ fn cft_box_check(
     let sz_y = geometry.iz * 2.0 / width;
     let lambda =
         effective_slenderness(geometry.iy, geometry.iz, sa, ctx.length, ctx.lk_y, ctx.lk_z);
-    let (s_ft, s_fs, s_fc) = cft_common_steel(f_value, ctx.term, lambda);
+    let (s_ft, s_fs, s_fc) = cft_common_steel(f_value, mat.young, ctx.term, lambda)?;
     let s_nt = sa * s_ft;
     let s_nc = sa * s_fc;
 
@@ -375,7 +405,7 @@ fn cft_pipe_check(
     let shape = SectionShape::CftPipe { outer_dia, thick };
     let iy = shape.calc_iy();
     let lambda = effective_slenderness(iy, iy, sa, ctx.length, ctx.lk_y, ctx.lk_z);
-    let (s_ft, s_fs, s_fc) = cft_common_steel(f_value, ctx.term, lambda);
+    let (s_ft, s_fs, s_fc) = cft_common_steel(f_value, mat.young, ctx.term, lambda)?;
     let s_nt = sa * s_ft;
     let s_nc = sa * s_fc;
 
@@ -454,9 +484,8 @@ fn cft_pipe_check(
     })
 }
 
-/// CFT 柱の断面検定（`SectionShape::CftBox`/`CftPipe` を対象とする）。
-/// 準拠規準に CFT 梁の規定はないため、`ctx.kind` に依らず柱の検定式を
-/// 適用する。
+/// CFT柱の断面検定（`CftBox`/`CftPipe`）。`ctx.kind` に依らず柱の式を適用する。
+/// 鋼管材料のE [N/mm²] は正の有限値を必要とし、数値的に算定不能なら理由付き未算定とする。
 pub struct CftDesign;
 
 impl DesignCheck for CftDesign {
