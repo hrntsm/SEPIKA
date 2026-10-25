@@ -202,6 +202,9 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
         );
     }
     model.rebuild_assignment_regions().unwrap();
+    for region in &mut model.floor_assignment_regions.regions {
+        region.assignment = sepika_core::model::PlateAssignment::NoPlate;
+    }
     assert!(model.wall_plates.is_empty());
     assert!(model.generated_wall_origins.is_empty());
     assert!(model.stb_strengths.members.iter().all(|input| !matches!(

@@ -902,7 +902,7 @@ fn test_load_model_resets_model_bound_ui_state() {
     assert!(app.ui.scoped.region_assign_dialog.is_none());
 }
 
-/// 未設定の割当領域が残る間は、GUI の解析入口が計算を開始せず確認待ちになる。
+/// 未設定の壁割当領域が残る間は、GUI の解析入口が計算を開始せず確認待ちになる。
 #[cfg(feature = "gui")]
 #[test]
 fn test_request_analysis_waits_for_unset_region_confirmation() {
@@ -921,7 +921,7 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
     {
         model.nodes.push(Node {
             id: NodeId(i as u32),
-            coord: [x, y, 0.0],
+            coord: [x, 0.0, y],
             restraint: Default::default(),
             mass: None,
             story: None,
@@ -949,8 +949,32 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
         });
     }
     app.core.model = model;
+    for element in &mut app.core.model.elements {
+        element.local_axis.ref_vector = [0.0, 1.0, 0.0];
+    }
+    app.core.model.stories = [0.0, 4000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, fl)| {
+            sepika_core::model::Story::new(
+                sepika_core::ids::StoryId(i as u32),
+                format!("{i}F"),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect();
     set_floor_test_self_weight_geometry(&mut app.core.model);
+    app.core.model.rebuild_assignment_regions().unwrap();
+    let unset = app.core.model.unset_plate_assignment_regions();
+    assert!(unset.0.is_empty());
+    assert!(!unset.1.is_empty());
     app.request_analysis(crate::app::PendingAnalysis::StaticAll);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
     assert!(
         app.core.scoped.pending_unset_analysis.is_some(),
         "未設定があるので確認待ち"
@@ -968,6 +992,33 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
         app.core.scoped.unset_regions_ack.is_some(),
         "続行時に確認済みの対象集合を記録する"
     );
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn request_analysis_rejects_unset_floor_before_confirmation() {
+    let mut model = make_square_slab_test_model();
+    model.slabs.clear();
+    model.floor_regions[0].slab_ids.clear();
+    model.floor_assignment_regions = Default::default();
+    set_floor_test_self_weight_geometry(&mut model);
+    model.rebuild_assignment_regions().unwrap();
+    assert!(!model.unset_plate_assignment_regions().0.is_empty());
+    let mut app = App {
+        core: AppCore {
+            model,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    app.request_analysis(crate::app::PendingAnalysis::StaticAll);
+    let error = app.core.scoped.last_error.as_ref().unwrap();
+    assert!(
+        error.contains("床板割当領域") && error.contains("未設定"),
+        "{error}"
+    );
+    assert!(app.core.scoped.pending_unset_analysis.is_none());
+    assert!(app.core.scoped.job.is_none());
 }
 
 /// モデル差し替えで、そのモデルに対して選んだ解析側の状態が破棄される。
@@ -4985,6 +5036,7 @@ fn set_floor_test_self_weight_geometry(model: &mut sepika_core::model::Model) {
             element.section = Some(id);
         }
     }
+    assign_massless_slab_sections(model);
 }
 
 pub(super) fn make_floor_secondary_beam_test_model() -> sepika_core::model::Model {
@@ -8157,7 +8209,23 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     }
     // 材料は断面が持つ。
     model.sections[0].material = Some(MaterialId(0));
+    model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::RcBeamRect {
+        b: 400.0,
+        d: 600.0,
+        rebar: sepika_core::section_shape::RcBeamRebar {
+            main_dia: 25.0,
+            top: vec![3],
+            bottom: vec![3],
+            cover: 50.0,
+            stirrup: sepika_core::section_shape::BeamStirrup {
+                dia: 10.0,
+                pitch: 150.0,
+                legs: 2,
+            },
+        },
+    });
     assign_massless_slab_sections(&mut model);
+    set_floor_test_self_weight_geometry(&mut model);
     model
         .validate()
         .expect("テストモデルは validate を通るはず");
@@ -8169,6 +8237,11 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
         ..App::default()
     };
     app.sync_gravity_load_cases_action();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
 
     let dl = app
         .core
@@ -8609,6 +8682,11 @@ fn test_import_stbridge_then_run_dl_succeeds() {
             app2.core.model.element(id).unwrap().vertical_eccentricity,
             Some(0.0)
         );
+    }
+    app2.core.model.rebuild_assignment_regions().unwrap();
+    assert!(!app2.core.model.floor_assignment_regions.regions.is_empty());
+    for region in &mut app2.core.model.floor_assignment_regions.regions {
+        region.assignment = sepika_core::model::PlateAssignment::NoPlate;
     }
     app2.run_linear_static(dl_id);
     assert!(
