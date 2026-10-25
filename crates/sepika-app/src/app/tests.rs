@@ -14150,7 +14150,7 @@ fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
         .retain(|(key, _)| *key != StaticCaseKey::Seismic(SeismicDir::Y));
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("X/Y 方向"), "{reason}");
-    assert!(crate::summary::build_report_csv(&app).contains("X/Y 方向"));
+    assert!(crate::summary::build_report_csv(&app).contains("地震静的 Y の解析結果がありません"));
 }
 
 #[test]
