@@ -33,7 +33,7 @@ STB固有の異厚受理と属性報告は[別実装 #683](https://github.com/hr
 | F区分 | `crates/sepika-design-jp/tests/built_box.rs` | t1/t2のどちらが41 mmでも最大厚41 mm、SN400BのF=215 N/mm² |
 | 材料別ファイバー領域 | `crates/sepika-section/tests/built_box.rs` | 両異厚の鋼・充填面積（面積許容差1e-7 mm²） |
 | 編集・Undo/Redo・削除再採番 | `sepika-edit::tests::built_box_edit_undo_redo_and_renumber_preserve_horizontal_thickness` | 同厚→異厚の再生成と参照追随 |
-| OVIKA保存・読込とID置換 | `sepika-io::ovika_reference_tests::built_box_ovika_roundtrip_keeps_both_thicknesses_pending_properties_and_references` | 主架構・床領域小梁・壁領域間柱・未割当小梁/間柱の5参照先 |
+| OVIKA保存・読込とID置換 | `sepika-io::ovika_reference_tests::built_box_ovika_roundtrip_keeps_both_thicknesses_pending_properties_and_references` | 鋼BOXは主架構・床領域小梁・壁領域間柱・未割当小梁/間柱の5参照先、CFTは主架構柱 |
 | 同厚・圧延角R | 既存core/section/edit/io/design/element/load回帰 | 既存同厚入力は両板厚を同値として明示 |
 
 ## 検証の限界
