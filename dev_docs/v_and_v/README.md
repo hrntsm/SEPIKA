@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [一般部材荷重_Issue716_2026-10.md](一般部材荷重_Issue716_2026-10.md) | 全固定材・通常Fiber/MS・非線形時刻歴の長期部材荷重 | 🔶（公開入口と独立梁値のVerification。実測Validation・手動GUI・最終ゲートは未確認） |
 | [大梁床板実重複控除_Issue616_確認記録.md](大梁床板実重複控除_Issue616_確認記録.md) | 矩形RC/SRC大梁と床板の実重複・左右幅配分・DL/地震重量・実準備入口・編集保存失効 | 🔶（独立算術と自動入口のVerification。実測Validation・手動GUI・CIは未確認） |
 | [梁鉛直偏心_Issue726_確認記録.md](梁鉛直偏心_Issue726_確認記録.md) | 節点材軸基準の一律偏心・有限実配置・GUI/保存/Undo | 🔶（直接Verification、最終横断検証・レビュー・CIは記録参照） |
 | [階FL_SL_Issue729_確認記録.md](階FL_SL_Issue729_確認記録.md) | FL／SL・用途別階高と明示入力、GUI編集・保存・Undo・元STB属性 | 🔶（階情報の直接Verification。#490の算定と個別偏心は対象外、最終レビュー・CIは未確認） |
@@ -473,3 +474,5 @@ RC壁の方向入力・材料役割の横断入口は[Issue535検証](RC壁方�
 RC壁の同一face内力・初期耐力の横断入口は[Issue617検証](RC壁同一faceと初期耐力_Issue617_2026-10.md)の`wall/static_face.rs`・`nonlinear/wall_reference.rs`・`joint_wiring/tests.rs`・App/MCP fixtureを参照する（🔶、独立算術・人工断面力・実求解・実入口を区別）。
 
 RC壁の二方式とGUI/採用run値/失効の横断入口は[Issue572検証](RC壁せん断耐力方式_Issue572_2026-10.md)を参照する。独立算術と実入口を区別する。
+
+一般部材荷重の横断入口は[Issue716検証](一般部材荷重_Issue716_2026-10.md)の `general_member_loads.rs`・`frame::fiber::member_load_tests`・時刻歴 `rollback.rs` を参照する。
