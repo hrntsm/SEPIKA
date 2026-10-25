@@ -177,6 +177,26 @@ full_modelはGUI lib932件成功後、統合試験37/38件成功・代表値snap
 - `cargo fmt --all -- --check`、`git diff --check`: 成功。
 - `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功（summary124・リンク646件・実装参照688件）。
 
+## 先行Issue620との最終main統合
+
+main `c0d5674112816ecd7a3d5f41b7124214769dfa43` を統合コミット `6dc07b1b` で取り込んだ。先行Issue620の解析契約54・検定契約29を保持し、梁偏心接続を含む最終解析契約を55へ更新する。上記54での各実行結果は当時の対象SHAの履歴として保持する。最終版55のコード・試験対象SHAは `9d064717`。
+
+雑壁剛性と剛心・偏心率、柱応答欠落の拒否、3次元質点系へのResult伝播はmainの契約を保持する。柱は梁偏心の対象外であり、柱力は従来どおり実部材内力を使用する。梁の偏心写像・床板平均厚との独立合成・#618の承認済み注意・上端一致fixtureは変更しない。
+
+`cargo test --workspace --locked --quiet` の初回で、jobの正方形短辺指定拒否試験が支持梁の未指定断面ゲートに先取りされるfixture未追随を1件回収した（job単体86/87件成功）。自動生成された支持梁へ既存fixtureの有効な鋼材・大梁断面と偏心0を明示し、元の正方形拒否assertは維持した。焦点試験 `cargo test -p sepika-job prepare_rejects_square_short_direction --locked --quiet` は成功。製品ゲートは変更しない。
+
+次のworkspace実行ではjob統合 `assignment_identity` にも同種の支持材断面欠落を1件回収した。共有の幾何fixtureは変更せず、jobの解析入口試験だけに水平大梁・鉛直柱の用途付き断面とゼロ密度の鋼材を与えた。元の孤立版・荷重0.0025・未更新診断と全入力の不変性assertを保持し、`cargo test -p sepika-job --test assignment_identity --locked --quiet` は成功した。以後の全体回収は `--no-fail-fast` を付けて実行する。
+
+- `rustup update stable`: stable rustc 1.99.1のまま最新。
+- `cargo test --workspace --locked --no-fail-fast --quiet`: 追随後4045件成功、既存ignored4件。app defaultとfull_model/wall_model、core・element・solver・design-jp・job、MCP defaultを含むworkspace単体・統合・doc testの108結果群がすべて成功。
+- `cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked --no-fail-fast --quiet`: CIと同じ統一feature構成で1435件成功、既存ignored3件。GUI lib932件、full_model38件・wall_model17件、MCP feature単体・統合、IO/Parquetを含む40結果群がすべて成功。追加のfixture追随やsnapshot更新は不要だった。
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: CIと同じdefault構成で成功。
+- `cargo clippy -p sepika-mcp -p sepika-app -p sepika-io --all-targets --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked -- -D warnings`: CIと同じ統一feature構成で成功。
+- `cargo fmt --all -- --check`、`git diff --check`: 成功。
+- `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功（summary124・リンク647件・実装参照688件）。
+
+CIの独立した `cargo test -p sepika-io --locked` とGUI単体checkは、今回個別コマンドとしては再実行していない。上記workspaceと統一feature構成で利用側の試験・全target静的解析を確認し、独立構成の最終結果はPRのCIで確認する。
+
 ## 未実施範囲と残る制約
 
 実験・実測・実建物によるValidation、手動ネイティブGUI操作、塑性化後の全履歴を網羅する本接続専用の応答比較は未実施。一般XYZ偏心入力、柱/ブレース、二次小梁の新剛性算入、パネル中心偏心、新しい段違い接合式、有限回転・大変形接続、嵩上げ重量や別Issueの重量変更は対象外である。現在の時刻歴結果に独立した支持反力列を新設せず、既存の運動方程式・記録・質量と慣性入力の整合を確認する。PRの最終レビュー・CIは公開PRで別途確認する。
