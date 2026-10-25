@@ -360,6 +360,51 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                 }
             }
         });
+        if let Some((mut t1, mut t2)) = shape.box_thicknesses() {
+            let original = (t1, t2);
+            ui.horizontal(|ui| {
+                ui.label("選択断面の左右板厚 t1 [mm]:");
+                num_field(ui, &mut t1);
+                ui.label("上下板厚 t2 [mm]:");
+                num_field(ui, &mut t2);
+            });
+            if (t1, t2) != original {
+                let current = &app.core.model.sections[section.index()];
+                let mut new_shape = current.shape.clone().unwrap();
+                if let SectionShape::SteelBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                }
+                | SectionShape::CftBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                } = &mut new_shape
+                {
+                    *thick = t1;
+                    *horizontal_thick = t2;
+                }
+                match new_shape.validate_surface_radius() {
+                    Ok(()) => {
+                        let frame_use = current.frame_use;
+                        if app.core.scoped.undo.run(
+                            &mut app.core.model,
+                            Box::new(EditSectionShape {
+                                section,
+                                new_shape,
+                                frame_use,
+                            }),
+                        ) {
+                            app.core.scoped.staleness.mark_edited();
+                        }
+                    }
+                    Err(error) => {
+                        ui.colored_label(egui::Color32::RED, error);
+                    }
+                }
+            }
+        }
     }
 
     let draft = &mut app.ui.scoped.section_draft;
