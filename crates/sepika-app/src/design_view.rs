@@ -3,6 +3,117 @@ use sepika_core::units::to_display::{
     area_load_kn_per_m2, force_kn, moment_kn_m, moment_kn_m_per_m, stiffness_kn_per_mm,
 };
 
+fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
+    use crate::table_util::Col;
+    ui.add_space(12.0);
+    ui.strong("層指標（二次設計: 層間変形角・剛性率・偏心率）");
+    ui.horizontal(|ui| {
+        use sepika_solver::statics::analysis::SeismicDir;
+        ui.label("加力方向:").on_hover_text(
+            "層指標と必要保有水平耐力の判定を評価する方向。\
+             剛心の精算には対応する向きの EX／EY の解析結果を用いる",
+        );
+        ui.selectable_value(&mut app.core.analysis_cfg.seismic_dir, SeismicDir::X, "X");
+        ui.selectable_value(&mut app.core.analysis_cfg.seismic_dir, SeismicDir::Y, "Y");
+    });
+    for reason in app.core.model.story_level_diagnostics() {
+        ui.colored_label(
+            crate::theme::ERROR_RED,
+            format!("層間変形角 算定不能: {reason}"),
+        );
+    }
+    if app.core.model.stories.is_empty() {
+        ui.colored_label(
+            crate::theme::GRAY_600,
+            "階が未定義です。解析タブの「準備計算 実行」を行ってください。",
+        );
+    } else {
+        let metrics = crate::summary::seismic_story_metrics(app);
+        ui.label(format!(
+            "対象ケース: 地震静的 {:?}（設定値との参考比較。法令適合の判定は行いません）",
+            app.core.analysis_cfg.seismic_dir
+        ));
+        crate::table_util::standard_table(
+            ui,
+            "design_story_metrics",
+            &[
+                Col::label("階"),
+                Col::num("FL間高さ[mm]"),
+                Col::label("状態・理由"),
+                Col::label("支配柱ID / 柱頭位置[mm]"),
+                Col::num("層間変位[mm]"),
+                Col::num("層間変形角"),
+                Col::label("設定値との参考比較"),
+                Col::num("剛性率Rs(≥0.6)"),
+                Col::num("偏心率Re(≤0.15)"),
+                Col::num("Fes"),
+            ],
+            metrics.len(),
+            |row| {
+                let m = &metrics[row.index()];
+                row.col(|ui| {
+                    crate::table_util::text_cell(ui, &m.name);
+                });
+                row.col(|ui| {
+                    ui.label(format!("{:.3}", m.height));
+                });
+                let [state, id, pos, delta, angle, comparison] = crate::summary::drift_cells(m);
+                row.col(|ui| {
+                    ui.label(&state).on_hover_text(&state);
+                });
+                row.col(|ui| {
+                    ui.label(format!("{id} {pos}"));
+                });
+                row.col(|ui| {
+                    ui.label(delta);
+                });
+                row.col(|ui| {
+                    ui.label(angle);
+                });
+                row.col(|ui| {
+                    ui.label(format!("1/{}: {comparison}", m.drift_limit_denom));
+                });
+                row.col(|ui| {
+                    let txt = crate::summary::metric_value_text(&m.rs);
+                    if m.rs_ok == Some(true) {
+                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
+                    } else {
+                        ui.colored_label(
+                            crate::theme::ERROR_RED,
+                            format!("{} {}", txt, crate::summary::metric_verdict_text(m.rs_ok)),
+                        )
+                        .on_hover_text(&txt);
+                    }
+                });
+                row.col(|ui| {
+                    let txt = crate::summary::metric_value_text(&m.re);
+                    if m.re_ok == Some(true) {
+                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
+                    } else {
+                        ui.colored_label(
+                            crate::theme::ERROR_RED,
+                            format!("{} {}", txt, crate::summary::metric_verdict_text(m.re_ok)),
+                        )
+                        .on_hover_text(&txt);
+                    }
+                });
+                row.col(|ui| {
+                    let text = crate::summary::metric_value_text(&m.fes);
+                    ui.label(&text).on_hover_text(text);
+                });
+            },
+        );
+        for metric in &metrics {
+            if let Err(reason) = &metric.fes {
+                ui.colored_label(
+                    crate::theme::ERROR_RED,
+                    format!("必要保有水平耐力・合否は算定不能: {reason}"),
+                );
+            }
+        }
+    }
+}
+
 /// 柱の積載荷重低減（令85条2項）の参考表示。
 /// `Model.load_cfg.live_load_reduction == true` のときのみ表示する。
 /// 支持床数・低減率の集計は `crate::app::column_live_load_factors` による。
@@ -511,119 +622,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             }
         });
 
-    ui.add_space(12.0);
-    ui.strong("層指標（二次設計: 層間変形角・剛性率・偏心率）");
-    ui.horizontal(|ui| {
-        use sepika_solver::statics::analysis::SeismicDir;
-        ui.label("加力方向:").on_hover_text(
-            "層指標と必要保有水平耐力の判定を評価する方向。\
-             剛心の精算には対応する向きの EX／EY の解析結果を用いる",
-        );
-        ui.selectable_value(&mut app.core.analysis_cfg.seismic_dir, SeismicDir::X, "X");
-        ui.selectable_value(&mut app.core.analysis_cfg.seismic_dir, SeismicDir::Y, "Y");
-    });
-    if app.core.model.stories.is_empty() {
-        ui.colored_label(
-            crate::theme::GRAY_600,
-            "階が未定義です。解析タブの「準備計算 実行」を行ってください。",
-        );
-    } else if let Some(st) = app.current_static() {
-        let ctx = crate::summary::metrics_ctx_from_results(
-            &app.core.model,
-            app.core.scoped.results.as_ref(),
-        );
-        let metrics = crate::summary::compute_story_metrics_with(
-            &app.core.model,
-            &st.disp,
-            app.core.analysis_cfg.seismic_dir,
-            &ctx,
-        );
-
-        let denom = metrics
-            .first()
-            .map(|m| m.drift_limit_denom)
-            .unwrap_or(app.core.model.stress_cfg.drift_limit_denom);
-        let drift_label = format!("変形角(1/{:.0})", denom);
-        crate::table_util::standard_table(
-            ui,
-            "design_story_metrics",
-            &[
-                Col::label("階"),
-                Col::num("階高[mm]"),
-                Col::num("層間変位[mm]"),
-                Col::num(drift_label.as_str()),
-                Col::num("剛性率Rs(≥0.6)"),
-                Col::num("偏心率Re(≤0.15)"),
-                Col::num("Fes"),
-            ],
-            metrics.len(),
-            |row| {
-                let m = &metrics[row.index()];
-                row.col(|ui| {
-                    crate::table_util::text_cell(ui, &m.name);
-                });
-                row.col(|ui| {
-                    ui.label(format!("{:.0}", m.height));
-                });
-                row.col(|ui| {
-                    ui.label(format!("{:.3}", m.drift));
-                });
-                row.col(|ui| {
-                    let txt = if m.drift_angle > 1e-12 {
-                        format!("1/{:.0}", 1.0 / m.drift_angle)
-                    } else {
-                        "0".to_string()
-                    };
-                    if m.drift_ok {
-                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
-                    } else {
-                        ui.colored_label(crate::theme::ERROR_RED, format!("{} NG", txt));
-                    }
-                });
-                row.col(|ui| {
-                    let txt = crate::summary::metric_value_text(&m.rs);
-                    if m.rs_ok == Some(true) {
-                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
-                    } else {
-                        ui.colored_label(
-                            crate::theme::ERROR_RED,
-                            format!("{} {}", txt, crate::summary::metric_verdict_text(m.rs_ok)),
-                        )
-                        .on_hover_text(&txt);
-                    }
-                });
-                row.col(|ui| {
-                    let txt = crate::summary::metric_value_text(&m.re);
-                    if m.re_ok == Some(true) {
-                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
-                    } else {
-                        ui.colored_label(
-                            crate::theme::ERROR_RED,
-                            format!("{} {}", txt, crate::summary::metric_verdict_text(m.re_ok)),
-                        )
-                        .on_hover_text(&txt);
-                    }
-                });
-                row.col(|ui| {
-                    let text = crate::summary::metric_value_text(&m.fes);
-                    ui.label(&text).on_hover_text(text);
-                });
-            },
-        );
-        for metric in &metrics {
-            if let Err(reason) = &metric.fes {
-                ui.colored_label(
-                    crate::theme::ERROR_RED,
-                    format!("必要保有水平耐力・合否は算定不能: {reason}"),
-                );
-            }
-        }
-    } else {
-        ui.colored_label(
-            crate::theme::GRAY_600,
-            "静的解析結果がありません。荷重ケース EX／EY（地震力）を実行すると層指標を評価できます。",
-        );
-    }
+    story_metrics_section(ui, app);
 
     ui.add_space(12.0);
     ui.strong("保有水平耐力（ルート3）");
@@ -1249,6 +1248,69 @@ pub(crate) fn holding_rank_mode_input(ui: &mut egui::Ui, app: &mut App) {
 mod tests {
     use super::*;
     use sepika_core::ids::{ElemId, SectionId};
+
+    #[test]
+    fn drift_490_egui_and_csv_show_the_same_values_and_unavailable_states() {
+        use sepika_solver::statics::analysis::SeismicDir;
+        fn collect_text(shape: &egui::epaint::Shape, out: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    out.push_str(text.galley.text());
+                    out.push('\n');
+                }
+                egui::epaint::Shape::Vec(parts) => {
+                    for part in parts {
+                        collect_text(part, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        fn render(app: &mut App) -> String {
+            let ctx = egui::Context::default();
+            let result = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(4000.0, 1400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| story_metrics_section(ui, app),
+            );
+            let mut text = String::new();
+            for shape in result.shapes {
+                collect_text(&shape.shape, &mut text);
+            }
+            text
+        }
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.generate_stories_action();
+        app.run_seismic(SeismicDir::X);
+        assert!(app.core.scoped.last_error.is_none());
+        app.core.analysis_cfg.seismic_dir = SeismicDir::X;
+        let response = &mut app.core.scoped.results.as_mut().unwrap().statics[0].1;
+        response.disp[2][0] = 18.0;
+        response.disp[3][0] = 10.0;
+        let expected = crate::summary::drift_cells(&crate::summary::seismic_story_metrics(&app)[0]);
+        let text = render(&mut app);
+        for cell in expected {
+            assert!(text.contains(&cell), "{cell}: {text}");
+        }
+        assert!(text.contains("設定値との参考比較"));
+        assert!(text.contains("地震静的 X"));
+        assert!(text.contains("3500"));
+        app.core.analysis_cfg.seismic_dir = SeismicDir::Y;
+        let text = render(&mut app);
+        assert!(text.contains("未計算: 地震静的 Y"));
+        assert!(text.contains("比較なし"));
+        assert!(crate::summary::build_report_csv(&app).contains("未計算: 地震静的 Y"));
+        app.core.model.stories[1].elevation = Some(0.0);
+        let text = render(&mut app);
+        assert!(text.contains("層間変形角 算定不能"));
+        assert!(crate::summary::build_report_csv(&app).contains("層間変形角 算定不能"));
+    }
 
     #[test]
     fn section_jump_replaces_other_member_detail() {

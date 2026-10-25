@@ -6,7 +6,7 @@ use sepika_core::ids::{ElemId, NodeId, StoryId};
 use sepika_core::model::{ElementKind, FrameSectionUse, Model};
 use std::collections::{HashMap, HashSet};
 
-/// 層に帰属する 1 本の柱（中間節点で分割された鉛直材の連なりを束ねたもの）。
+/// 層に帰属する 1 本の柱（中間節点で分割された柱の連なりを束ねたもの）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StoryColumn {
     /// 最上側セグメントの部材 ID（`ColumnDrift.elem` 等の代表 ID）。
@@ -20,20 +20,54 @@ pub struct StoryColumn {
 /// 上端階 SL の節点から下端階 SL に達した柱の連なりを返す。
 /// 上下階情報が未確定、または下端に達しない連なりは対象外。
 pub fn story_columns(model: &Model, story: StoryId) -> Vec<StoryColumn> {
+    collect_story_columns(model, story, false).unwrap_or_default()
+}
+
+/// 上下階SLを結ぶ非分岐柱を列挙し、柱節点の参照・座標不整合はErrを返す。
+pub fn checked_story_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, String> {
+    collect_story_columns(model, story, true)
+}
+
+fn collect_story_columns(
+    model: &Model,
+    story: StoryId,
+    reject_branch: bool,
+) -> Result<Vec<StoryColumn>, String> {
     let Some((_, bottom)) = layer_bounds(model, story) else {
-        return Vec::new();
+        return Err(format!("上端階{}の上下階SL又はFL間高さが不正です", story.0));
     };
+    for elem in &model.elements {
+        if model
+            .element_section(elem)
+            .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Column))
+        {
+            if elem.kind != ElementKind::Beam || elem.nodes.len() != 2 {
+                return Err(format!("柱{}の接続節点数又は要素種別が不正です", elem.id.0));
+            }
+            for id in &elem.nodes {
+                if !model
+                    .nodes
+                    .get(id.index())
+                    .is_some_and(|n| n.id == *id && n.coord.iter().all(|v| v.is_finite()))
+                {
+                    return Err(format!(
+                        "柱{}の節点{}の参照又は座標が不正です",
+                        elem.id.0, id.0
+                    ));
+                }
+            }
+        }
+    }
     let adj = vertical_beam_adjacency(model);
     let mut out = Vec::new();
     for node in &model.nodes {
-        if !model.on_diaphragm_level(story, node.coord[2]) {
-            continue;
-        }
-        if let Some(col) = trace_column_down(model, &adj, node.id, bottom) {
-            out.push(col);
+        if model.on_diaphragm_level(story, node.coord[2]) {
+            if let Some(col) = trace_column_down(model, &adj, node.id, bottom, reject_branch) {
+                out.push(col);
+            }
         }
     }
-    out
+    Ok(out)
 }
 
 fn layer_bounds(model: &Model, top_story: StoryId) -> Option<(StoryId, StoryId)> {
@@ -48,7 +82,6 @@ fn on_bottom_level(model: &Model, bottom: StoryId, z: f64) -> bool {
     model.on_diaphragm_level(bottom, z)
 }
 
-/// 鉛直 2 節点 Beam の隣接リスト（節点 → (隣接節点, 部材 ID)）。
 fn vertical_beam_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId)>> {
     let mut adj: HashMap<NodeId, Vec<(NodeId, ElemId)>> = HashMap::new();
     for elem in &model.elements {
@@ -69,12 +102,12 @@ fn vertical_beam_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId
     adj
 }
 
-/// 上端節点から鉛直材を下へ辿り、層下端に達する連なりを返す。
 fn trace_column_down(
     model: &Model,
     adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
     top: NodeId,
     bottom: StoryId,
+    reject_branch: bool,
 ) -> Option<StoryColumn> {
     let mut current = top;
     let mut top_elem = None;
@@ -91,11 +124,26 @@ fn trace_column_down(
             });
         }
 
+        if reject_branch && current != top && adj.get(&current)?.len() != 2 {
+            return None;
+        }
+        if cur_node.coord[2] < model.stories.iter().find(|s| s.id == bottom)?.sl_mm()? {
+            return None;
+        }
+        if reject_branch && cur_node.coord[2] > model.nodes[top.index()].coord[2] {
+            return None;
+        }
         let cur_z = cur_node.coord[2];
         let neighbors: Vec<_> = adj
             .get(&current)?
             .iter()
-            .filter(|(nid, _)| model.nodes[nid.index()].coord[2] < cur_z - 1e-9)
+            .filter(|(nid, _)| {
+                if reject_branch && current != top {
+                    !visited.contains(nid)
+                } else {
+                    model.nodes[nid.index()].coord[2] < cur_z - 1e-9
+                }
+            })
             .copied()
             .collect();
 
@@ -222,6 +270,49 @@ mod tests {
             ..Default::default()
         };
         (model, top_story)
+    }
+
+    #[test]
+    fn drift_490_cross_story_without_middle_sl_node_is_excluded() {
+        let (mut model, _) = build_split_column_model();
+        model.elements.truncate(1);
+        model.elements[0].nodes = [NodeId(0), NodeId(2)].into_iter().collect();
+        model.stories = [0.0, 2000.0, 4000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, z)| Story::new(StoryId(i as u32), format!("{}F", i + 1), Some(z), Some(0.0)))
+            .collect();
+        assert!(checked_story_columns(&model, StoryId(1))
+            .unwrap()
+            .is_empty());
+        assert!(checked_story_columns(&model, StoryId(2))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn drift_490_interior_branch_in_both_orientations_is_excluded() {
+        let (mut model, top) = build_split_column_model();
+        let mut extra = model.nodes[2].clone();
+        extra.id = NodeId(3);
+        extra.coord[0] = 1000.0;
+        model.nodes.push(extra);
+        let mut branch = model.elements[0].clone();
+        branch.id = ElemId(2);
+        branch.nodes = [NodeId(1), NodeId(3)].into_iter().collect();
+        model.elements.push(branch);
+        assert!(checked_story_columns(&model, top).unwrap().is_empty());
+        model.nodes[3].coord[2] = 0.0;
+        assert!(checked_story_columns(&model, top).unwrap().is_empty());
+    }
+
+    #[test]
+    fn drift_490_invalid_column_node_is_diagnosed() {
+        let (mut model, top) = build_split_column_model();
+        model.elements[0].nodes[0] = NodeId(99);
+        assert!(checked_story_columns(&model, top)
+            .unwrap_err()
+            .contains("節点99"));
     }
 
     #[test]

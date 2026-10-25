@@ -26,11 +26,6 @@ pub struct HoldingCapacityResult {
     pub member_ranks: Vec<(ElemId, MemberRank)>,
 }
 
-pub fn check_story_drift(story_height: f64, interstory_drift: f64) -> bool {
-    let angle = interstory_drift / story_height;
-    angle <= 1.0 / 200.0
-}
-
 /// 下層から上層の階高・重心位置の層間変位 `[mm]` から剛性率を返す。
 /// 同数の有限な正値が必要。空入力・ゼロ変位・演算不能は Err。
 pub fn stiffness_ratios(story_heights: &[f64], story_drifts: &[f64]) -> Result<Vec<f64>, String> {
@@ -348,12 +343,6 @@ mod tests {
             stiffness_ratios(&[3.0, 3.0], &[0.01, 0.01]).unwrap(),
             vec![1.0, 1.0]
         );
-    }
-
-    #[test]
-    fn test_check_story_drift_ok() {
-        assert!(check_story_drift(3.0, 0.01));
-        assert!(!check_story_drift(3.0, 0.02));
     }
 
     #[test]

@@ -1930,7 +1930,7 @@ pub(crate) fn steel_width_thickness_rank(
 
 mod result_validity;
 pub use result_validity::HoldingCapacitySource;
-use result_validity::ResultInputKey;
+pub(crate) use result_validity::ResultInputKey;
 mod actions;
 pub mod node_grid;
 #[cfg(test)]

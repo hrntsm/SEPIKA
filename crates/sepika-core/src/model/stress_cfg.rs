@@ -38,8 +38,8 @@ pub struct StressAnalysisCfg {
     /// `Kw' = n·Aw'·ΣKc/ΣAc` の n。入力値）。`None` は雑壁剛性を考慮しない。
     #[serde(default)]
     pub misc_wall_n: Option<f64>,
-    /// 層間変形角の制限値の分母（令82条の2）。原則 200（1/200）。帳壁・仕上げ等に
-    /// 著しい損傷の恐れがない場合は 120（1/120）へ緩和できる。
+    /// 層間変形角の設定値との参考比較に使う正の有限な分母。既定200。
+    /// 法令適合や緩和適用資格は判定せず、不正値では参考比較を行わない。
     #[serde(default = "default_drift_limit_denom")]
     pub drift_limit_denom: f64,
     /// 線形（弾性）応力解析で引張専用ブレースを active-set 反復で扱うか（既定 `false`）。
