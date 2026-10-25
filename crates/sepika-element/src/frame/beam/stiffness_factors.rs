@@ -147,30 +147,234 @@ fn slab_cooperating_width(
     Some((bf, t))
 }
 
-/// スラブ協力幅による強軸曲げ剛性の増大率。
-/// 適用不能時は 1.0。
-pub(super) fn slab_stiffness_factor(
+#[derive(Clone, Copy, Debug)]
+struct SlabFlange {
+    slab: sepika_core::ids::SlabId,
+    width_mm: f64,
+    thickness_mm: f64,
+}
+
+fn flanged_inertia(b_mm: f64, d_mm: f64, sides: &[Option<SlabFlange>; 2]) -> Result<f64, String> {
+    if !b_mm.is_finite() || b_mm <= 0.0 || !d_mm.is_finite() || d_mm <= 0.0 {
+        return Err("梁幅・せいは正の有限値が必要です".into());
+    }
+    let mut rectangles = vec![(b_mm, d_mm, d_mm / 2.0)];
+    for side in sides.iter().flatten() {
+        let (w, t) = (side.width_mm, side.thickness_mm);
+        if !w.is_finite() || w < 0.0 || !t.is_finite() || t <= 0.0 || t > d_mm {
+            return Err(format!(
+                "床板 {}: 協力幅は非負の有限値、実厚は0超・梁せい以下が必要です",
+                side.slab.0
+            ));
+        }
+        rectangles.push((w, t, d_mm - t / 2.0));
+    }
+    let area: f64 = rectangles.iter().map(|(w, t, _)| w * t).sum();
+    let centroid: f64 = rectangles.iter().map(|(w, t, z)| w * t * z).sum::<f64>() / area;
+    let inertia: f64 = rectangles
+        .iter()
+        .map(|(w, t, z)| w * t.powi(3) / 12.0 + w * t * (z - centroid).powi(2))
+        .sum();
+    if !inertia.is_finite() || inertia <= 0.0 {
+        return Err("合成断面二次モーメントが正の有限値ではありません".into());
+    }
+    Ok(inertia)
+}
+
+fn rc_slab_sides(
     model: &Model,
     data: &sepika_core::model::ElementData,
-    b: f64,
-    d: f64,
-) -> f64 {
-    if d <= 0.0 {
-        return 1.0;
+    b_mm: f64,
+    d_mm: f64,
+) -> Result<[Option<SlabFlange>; 2], String> {
+    use sepika_core::model::{PlateAssignment, SlabShape, SupportMemberId};
+    let support = SupportMemberId::Primary(data.id);
+    let mut candidates = std::collections::HashSet::new();
+    for region in &model.floor_assignment_regions.regions {
+        if !region.boundary.iter().any(|edge| edge.support == support) {
+            continue;
+        }
+        match region.assignment {
+            PlateAssignment::NoPlate => continue,
+            PlateAssignment::Unset => {
+                return Err(format!("床板割当領域 {}: 床板が未設定です", region.id.0))
+            }
+            PlateAssignment::Plate(id) => {
+                if model
+                    .floor_assignment_regions
+                    .regions
+                    .iter()
+                    .filter(|r| r.assignment == PlateAssignment::Plate(id))
+                    .count()
+                    != 1
+                {
+                    return Err(format!("床板 {}: 割当領域が重複しています", id.0));
+                }
+                candidates.insert(id);
+            }
+        }
     }
-    let Some((bf, t)) = slab_cooperating_width(model, data, b) else {
-        return 1.0;
-    };
-    let tf = t.min(d);
-    let aw = b * d;
-    let af = (bf - b) * tf;
-    let g = (aw * d / 2.0 + af * (d - tf / 2.0)) / (aw + af);
-    let i0 = b * d.powi(3) / 12.0;
-    let ie = i0
-        + aw * (g - d / 2.0).powi(2)
-        + (bf - b) * tf.powi(3) / 12.0
-        + af * (d - tf / 2.0 - g).powi(2);
-    (ie / i0).max(1.0)
+    for &id in &candidates {
+        model
+            .slab(id)
+            .ok_or_else(|| format!("床板 {}: 参照先がありません", id.0))?;
+    }
+    for region in &model.floor_regions {
+        if data.nodes.iter().all(|n| region.boundary.contains(n)) {
+            for &id in &region.slab_ids {
+                let slab = model
+                    .slab(id)
+                    .ok_or_else(|| format!("床板 {}: 参照先がありません", id.0))?;
+                if model.slab_assignment_region(id).is_none()
+                    && matches!(slab.shape, SlabShape::Enclosed)
+                {
+                    return Err(format!("床板 {}: 支持する割当領域がありません", id.0));
+                }
+            }
+        }
+    }
+    for slab in &model.slabs {
+        if let SlabShape::Attached {
+            anchor: sepika_core::model::RegionAnchor::Line { nodes, .. },
+            ..
+        } = slab.shape
+        {
+            if data.nodes.iter().all(|n| nodes.contains(n)) {
+                return Err(format!(
+                    "床板 {}: 取り付く床板は剛性算定の適用範囲外です",
+                    slab.id.0
+                ));
+            }
+        }
+    }
+    let mut sides: [Option<SlabFlange>; 2] = [None, None];
+    if candidates.is_empty() {
+        return Ok(sides);
+    }
+    let placement = model.beam_placement(support)?;
+    let [p0, p1] = placement.actual_ends;
+    let dx = p1[0] - p0[0];
+    let dy = p1[1] - p0[1];
+    let length_mm = dx.hypot(dy);
+    let tol = 1e-6;
+    if length_mm <= tol || (p1[2] - p0[2]).abs() > tol || placement.axes[1][2].abs() < 1.0 - 1e-9 {
+        return Err("水平・上端高さ一定の梁断面を確認できません".into());
+    }
+    let signed_dist = |p: [f64; 3]| (-(p[0] - p0[0]) * dy + (p[1] - p0[1]) * dx) / length_mm;
+    for id in candidates {
+        let slab = model
+            .slab(id)
+            .ok_or_else(|| format!("床板 {}: 参照先がありません", id.0))?;
+        if !matches!(slab.shape, SlabShape::Enclosed) {
+            return Err(format!("床板 {}: 囲まれた床板ではありません", id.0));
+        }
+        let floor = model.resolved_slab_placement(id)?;
+        let edges: Vec<_> = floor
+            .support_boundary
+            .iter()
+            .filter(|e| e.support == support)
+            .collect();
+        if edges.len() != 1
+            || edges[0].span.iter().any(|v| !v.is_finite())
+            || (edges[0].span[0].min(edges[0].span[1])).abs() > 1e-9
+            || (edges[0].span[0].max(edges[0].span[1]) - 1.0).abs() > 1e-9
+        {
+            return Err(format!("床板 {}: 梁全長の取付きを確認できません", id.0));
+        }
+        if (floor.top_z_mm - (p0[2] + d_mm / 2.0)).abs() > tol {
+            return Err(format!("床板 {}: 床上面が梁上端と一致しません", id.0));
+        }
+        let distances: Vec<_> = floor.top_boundary.iter().map(|&p| signed_dist(p)).collect();
+        let positive = distances.iter().copied().fold(0.0_f64, f64::max);
+        let negative = distances.iter().copied().fold(0.0_f64, f64::min);
+        if positive > tol && negative < -tol || positive <= tol && negative >= -tol {
+            return Err(format!("床板 {}: 梁の片側の床範囲を確認できません", id.0));
+        }
+        let (side, sign, distance) = if positive > tol {
+            (0, 1.0, positive)
+        } else {
+            (1, -1.0, -negative)
+        };
+        if floor.top_boundary.len() != 4
+            || floor.top_boundary.iter().any(|p| {
+                let x = ((p[0] - p0[0]) * dx + (p[1] - p0[1]) * dy) / length_mm;
+                let y = signed_dist(*p) * sign;
+                (x.abs() > tol && (x - length_mm).abs() > tol)
+                    || (y.abs() > tol && (y - distance).abs() > tol)
+            })
+        {
+            return Err(format!("床板 {}: 全長一定幅の床範囲を確認できません", id.0));
+        }
+
+        if let Some(old) = sides[side] {
+            return Err(format!(
+                "床板 {} と {}: 同じ側の床板が重複しています",
+                old.slab.0, id.0
+            ));
+        }
+        let mut far_width_mm = b_mm;
+        for edge in &floor.support_boundary {
+            let SupportMemberId::Primary(eid) = edge.support else {
+                continue;
+            };
+            let Some(e) = model.element(eid) else {
+                continue;
+            };
+            if e.kind != sepika_core::model::ElementKind::Beam
+                || e.nodes.len() != 2
+                || eid == data.id
+            {
+                continue;
+            }
+            let a = model
+                .node(e.nodes[0])
+                .ok_or("対向梁の節点がありません")?
+                .coord;
+            let z = model
+                .node(e.nodes[1])
+                .ok_or("対向梁の節点がありません")?
+                .coord;
+            if (signed_dist(a) * sign - distance).abs() <= 1.0
+                && (signed_dist(z) * sign - distance).abs() <= 1.0
+            {
+                far_width_mm = model
+                    .element_section(e)
+                    .ok_or("対向梁の断面がありません")?
+                    .width;
+                break;
+            }
+        }
+        if !far_width_mm.is_finite() || far_width_mm <= 0.0 {
+            return Err(format!("床板 {}: 対向梁幅が不正です", id.0));
+        }
+        let a_mm = (distance - b_mm / 2.0 - far_width_mm / 2.0).max(0.0);
+        let ba_mm = if a_mm < 0.5 * length_mm {
+            (0.5 - 0.6 * a_mm / length_mm) * a_mm
+        } else {
+            0.1 * length_mm
+        };
+        sides[side] = Some(SlabFlange {
+            slab: id,
+            width_mm: ba_mm,
+            thickness_mm: floor.thickness_mm,
+        });
+    }
+    Ok(sides)
+}
+
+fn slab_stiffness_factor(
+    model: &Model,
+    data: &sepika_core::model::ElementData,
+    b_mm: f64,
+    d_mm: f64,
+) -> Result<f64, String> {
+    let sides = rc_slab_sides(model, data, b_mm, d_mm)?;
+    let inertia = flanged_inertia(b_mm, d_mm, &sides)?;
+    let factor = inertia / (b_mm * d_mm.powi(3) / 12.0);
+    if !factor.is_finite() || factor <= 0.0 {
+        return Err("曲げ剛性増大率が正の有限値ではありません".into());
+    }
+    Ok(factor)
 }
 
 /// 床スラブコンクリートの設計基準強度の仮定値 [N/mm²]。
@@ -232,11 +436,12 @@ pub(super) fn breakdown_with(
     sec: &sepika_core::model::Section,
     es: f64,
     is_horizontal: bool,
-) -> StiffnessBreakdown {
+) -> Result<StiffnessBreakdown, String> {
     use sepika_core::section_shape::SectionShape;
     let slab = match &sec.shape {
         Some(SectionShape::RcBeamRect { .. }) => {
             slab_stiffness_factor(model, data, sec.width, sec.depth)
+                .map_err(|reason| format!("部材 ID {} の床板協力剛性: {reason}", data.id.0))?
         }
         Some(SectionShape::SteelH { .. }) => composite_beam_stiffness_factor(model, data, sec, es),
         _ => 1.0,
@@ -249,11 +454,11 @@ pub(super) fn breakdown_with(
     } else {
         1.0
     };
-    StiffnessBreakdown { slab, wall_girder }
+    Ok(StiffnessBreakdown { slab, wall_girder })
 }
 
 /// 部材の剛性算定で適用される割増し率を、モデルと要素データから求める。
-/// SRC 材料不正はエラー。対象外で断面・材料が引けない場合はすべて 1.0。
+/// RC床板の未解決・不正・適用範囲外、SRC材料不正は理由付きエラー。対象外で断面・材料が引けない場合はすべて 1.0。
 pub fn stiffness_breakdown(
     model: &Model,
     data: &sepika_core::model::ElementData,
@@ -293,7 +498,7 @@ pub fn stiffness_breakdown(
     );
     let lp = (dx * dx + dy * dy).sqrt();
     let is_horizontal = lp > 1e-9 && dz.abs() <= 0.05 * lp;
-    Ok(breakdown_with(model, data, sec, mat.young, is_horizontal))
+    breakdown_with(model, data, sec, mat.young, is_horizontal)
 }
 
 /// 壁上下の弾性剛梁として、壁剛性倍率が適用される線材かを返す。
@@ -434,4 +639,57 @@ pub(super) fn is_wall_top_bottom_girder(model: &Model, n0: NodeId, n1: NodeId) -
             && e.nodes.contains(&n1)
             && crate::wall::misc_wall::wall_is_seismic(e, model)
     })
+}
+
+#[cfg(test)]
+mod slab_geometry_tests {
+    use super::*;
+    use sepika_core::ids::SlabId;
+
+    #[test]
+    fn unequal_flange_rectangles_and_exchange_match_independent_inertia() {
+        let sides = [
+            Some(SlabFlange {
+                slab: SlabId(0),
+                width_mm: 500.0,
+                thickness_mm: 150.0,
+            }),
+            Some(SlabFlange {
+                slab: SlabId(1),
+                width_mm: 700.0,
+                thickness_mm: 200.0,
+            }),
+        ];
+        for s in [sides, [sides[1], sides[0]]] {
+            let inertia = flanged_inertia(300.0, 600.0, &s).unwrap();
+            assert!((inertia - 10306025843.881857).abs() < 1e-5);
+            assert!((inertia / 5400000000.0 - 1.908523304422566).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn invalid_beam_and_flange_dimensions_are_rejected() {
+        for b in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(flanged_inertia(b, 600.0, &[None; 2]).is_err());
+        }
+        for d in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(flanged_inertia(300.0, d, &[None; 2]).is_err());
+        }
+        for width_mm in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(flanged_inertia(
+                300.0,
+                600.0,
+                &[
+                    Some(SlabFlange {
+                        slab: SlabId(7),
+                        width_mm,
+                        thickness_mm: 150.0
+                    }),
+                    None
+                ]
+            )
+            .unwrap_err()
+            .contains("床板 7"));
+        }
+    }
 }

@@ -390,264 +390,6 @@ fn test_beam_new_src_cft_composite_props() {
     assert_eq!(beam.e, model.materials[0].young);
 }
 
-/// スラブ協力幅による強軸剛性増大。
-#[test]
-fn test_beam_new_slab_cooperation_width_amplifies_iy() {
-    use sepika_core::dof::Dof6Mask;
-    use sepika_core::ids::{FloorRegionId, MaterialId, SectionId, SlabId};
-    use sepika_core::model::{
-        DistributionMethod, EndCondition, FloorRegion, ForceRegime, LocalAxis, Model, Slab,
-        SlabPlate, SlabShape,
-    };
-    use sepika_core::section_shape::{RcBeamRebar, SectionShape};
-
-    let make_node = |id: u32, coord: [f64; 3]| Node {
-        id: NodeId(id),
-        coord,
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    };
-    let shape = SectionShape::RcBeamRect {
-        b: 300.0,
-        d: 600.0,
-        rebar: RcBeamRebar {
-            main_dia: 22.0,
-            top: vec![4],
-            bottom: vec![4],
-            cover: 40.0,
-            stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
-                pitch: 100.0,
-                legs: 2,
-            },
-        },
-    };
-    let mut model = Model {
-        nodes: vec![
-            make_node(0, [0.0, 0.0, 3000.0]),
-            make_node(1, [6000.0, 0.0, 3000.0]),
-            make_node(2, [6000.0, 2500.0, 3000.0]),
-            make_node(3, [0.0, 2500.0, 3000.0]),
-        ],
-        sections: vec![
-            shape.to_section(SectionId(0), "RC-300x600".into()),
-            SectionShape::RcSlab { thickness: 150.0 }.to_section(SectionId(1), "S15".into()),
-        ],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "FC24".into(),
-            category: MaterialCategory::Concrete,
-            young: 23000.0,
-            poisson: 0.2,
-            density: 2.4e-9,
-            shear: None,
-            fc: Some(24.0),
-            fy: None,
-        }],
-        floor_regions: vec![FloorRegion {
-            slab_ids: vec![SlabId(0)],
-            ..FloorRegion::new(
-                FloorRegionId(0),
-                vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            )
-        }],
-        slabs: vec![Slab {
-            id: SlabId(0),
-            shape: SlabShape::Enclosed,
-            plate: SlabPlate {
-                section: Some(SectionId(1)),
-                loads: vec![],
-                usage: None,
-                method: DistributionMethod::TriTrapezoid,
-                one_way: None,
-            },
-            reference_story: None,
-            vertical_eccentricity_mm: None,
-            tip_loads: Vec::new(),
-        }],
-        slab_thickness: 150.0,
-        ..Default::default()
-    };
-    model.sections[0].material = Some(MaterialId(0));
-    let elem = ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Beam,
-        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-        section: Some(SectionId(0)),
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 1.0, 0.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    };
-
-    let (b, d, t, l) = (300.0_f64, 600.0_f64, 150.0_f64, 6000.0_f64);
-    let a_clear = 2500.0 - b / 2.0 - b / 2.0;
-    let ba = (0.5 - 0.6 * a_clear / l) * a_clear;
-    assert!((ba - 616.0).abs() < 1e-9);
-    let bf = b + ba;
-    let (aw, af) = (b * d, (bf - b) * t);
-    let g = (aw * d / 2.0 + af * (d - t / 2.0)) / (aw + af);
-    let i0 = b * d.powi(3) / 12.0;
-    let ie = i0
-        + aw * (g - d / 2.0).powi(2)
-        + (bf - b) * t.powi(3) / 12.0
-        + af * (d - t / 2.0 - g).powi(2);
-
-    let beam = BeamElement::new(&elem, &model);
-    assert!(
-        (beam.iz - ie).abs() / ie < 1e-12,
-        "iz={} ie={}",
-        beam.iz,
-        ie
-    );
-    assert!(beam.iz / i0 > 1.3, "増大率が小さすぎる: {}", beam.iz / i0);
-    assert!((beam.iy - model.sections[0].iz).abs() < 1e-9);
-
-    model.slabs.clear();
-    let beam0 = BeamElement::new(&elem, &model);
-    assert!((beam0.iz - i0).abs() < 1e-9);
-}
-
-/// 床領域（大梁の1区画）が小梁で複数の床板（`Slab`）へ細分されていても、
-/// 床領域の外周を走る大梁のスラブ協力幅は効く（境界の判定は `FloorRegion::boundary`
-/// を優先するため。個々の床板の境界だけで判定すると、大梁の両端が別々の床板
-/// にまたがり、どちらの床板にも「両端を含む境界」が無くなって増大が消える
-/// 回帰が起きる）。
-#[test]
-fn test_beam_new_slab_cooperation_width_survives_beam_subdivided_region() {
-    use sepika_core::dof::Dof6Mask;
-    use sepika_core::ids::{FloorRegionId, MaterialId, SectionId, SlabId};
-    use sepika_core::model::{
-        DistributionMethod, EndCondition, FloorRegion, ForceRegime, LocalAxis, Model, Slab,
-        SlabPlate, SlabShape,
-    };
-    use sepika_core::section_shape::{RcBeamRebar, SectionShape};
-
-    let make_node = |id: u32, coord: [f64; 3]| Node {
-        id: NodeId(id),
-        coord,
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    };
-    let shape = SectionShape::RcBeamRect {
-        b: 300.0,
-        d: 600.0,
-        rebar: RcBeamRebar {
-            main_dia: 22.0,
-            top: vec![4],
-            bottom: vec![4],
-            cover: 40.0,
-            stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
-                pitch: 100.0,
-                legs: 2,
-            },
-        },
-    };
-    let mut model = Model {
-        nodes: vec![
-            make_node(0, [0.0, 0.0, 3000.0]),
-            make_node(1, [6000.0, 0.0, 3000.0]),
-            make_node(2, [6000.0, 5000.0, 3000.0]),
-            make_node(3, [0.0, 5000.0, 3000.0]),
-            make_node(4, [6000.0, 2500.0, 3000.0]),
-            make_node(5, [0.0, 2500.0, 3000.0]),
-        ],
-        sections: vec![
-            shape.to_section(SectionId(0), "RC-300x600".into()),
-            SectionShape::RcSlab { thickness: 150.0 }.to_section(SectionId(1), "S15".into()),
-        ],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "FC24".into(),
-            category: MaterialCategory::Concrete,
-            young: 23000.0,
-            poisson: 0.2,
-            density: 2.4e-9,
-            shear: None,
-            fc: Some(24.0),
-            fy: None,
-        }],
-        floor_regions: vec![FloorRegion {
-            slab_ids: vec![SlabId(0), SlabId(1)],
-            ..FloorRegion::new(
-                FloorRegionId(0),
-                vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            )
-        }],
-        slabs: vec![
-            Slab {
-                id: SlabId(0),
-                shape: SlabShape::Enclosed,
-                plate: SlabPlate {
-                    section: Some(SectionId(1)),
-                    loads: vec![],
-                    usage: None,
-                    method: DistributionMethod::TriTrapezoid,
-                    one_way: None,
-                },
-                reference_story: None,
-                vertical_eccentricity_mm: None,
-                tip_loads: Vec::new(),
-            },
-            Slab {
-                id: SlabId(1),
-                shape: SlabShape::Enclosed,
-                plate: SlabPlate {
-                    section: Some(SectionId(1)),
-                    loads: vec![],
-                    usage: None,
-                    method: DistributionMethod::TriTrapezoid,
-                    one_way: None,
-                },
-                reference_story: None,
-                vertical_eccentricity_mm: None,
-                tip_loads: Vec::new(),
-            },
-        ],
-        slab_thickness: 150.0,
-        ..Default::default()
-    };
-    model.sections[0].material = Some(MaterialId(0));
-    let elem = ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Beam,
-        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-        section: Some(SectionId(0)),
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 1.0, 0.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    };
-
-    let (b, d) = (300.0_f64, 600.0_f64);
-    let i0 = b * d.powi(3) / 12.0;
-    let beam = BeamElement::new(&elem, &model);
-    assert!(
-        beam.iz / i0 > 1.0,
-        "床領域が細分されていても大梁のスラブ協力幅は増大するはず: iz/i0={}",
-        beam.iz / i0
-    );
-}
-
 fn rc_beam_for_slab_factor(plate: Option<sepika_core::model::SlabPlate>) -> (Model, ElementData) {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{FloorRegionId, MaterialId, SectionId, SlabId};
@@ -745,60 +487,220 @@ fn rc_beam_for_slab_factor(plate: Option<sepika_core::model::SlabPlate>) -> (Mod
     (model, elem)
 }
 
-/// スラブ協力幅の対象は、版断面を持つ囲まれた床板だけ。
-///
-/// 版なしの床領域では建物一律のスラブ厚があっても 1.0、境界を持たない
-/// 取り付き版（`SlabShape::Attached`）でも 1.0 のまま。版あり＋断面厚では
-/// 1.0 を超える（増大しうるモデルであることの確認を兼ねる）。
-#[test]
-fn test_slab_stiffness_factor_only_for_enclosed_plated_slabs() {
-    use sepika_core::ids::SlabId;
-    use sepika_core::model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
-
-    let (m_none, e) = rc_beam_for_slab_factor(None);
-    let b_none = stiffness_breakdown(&m_none, &e).unwrap();
-    assert!(
-        (b_none.slab - 1.0).abs() < 1e-12,
-        "版なしは協力幅 1.0、got {}",
-        b_none.slab
-    );
-
-    let (m_plated, _) = rc_beam_for_slab_factor(Some(SlabPlate {
-        section: Some(sepika_core::ids::SectionId(1)),
+fn rc_slab_fixture() -> (Model, ElementData) {
+    use sepika_core::ids::{FloorPlateAssignmentRegionId, SectionId, SlabId, StoryId};
+    use sepika_core::model::{
+        FloorPlateAssignmentRegion, FrameSectionUse, PlateAssignment, SlabPlate, Story,
+        SupportBoundary, SupportMemberId,
+    };
+    let (mut model, mut beam) = rc_beam_for_slab_factor(Some(SlabPlate {
+        section: Some(SectionId(1)),
         ..Default::default()
     }));
-    let b_plated = stiffness_breakdown(&m_plated, &e).unwrap();
-    assert!(
-        b_plated.slab > 1.0,
-        "版あり＋断面厚なら協力幅 > 1、got {}",
-        b_plated.slab
-    );
+    beam.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    model.nodes[0].coord = [0.0, 0.0, -300.0];
+    model.nodes[1].coord = [10000.0, 0.0, -300.0];
+    model.nodes[2].coord = [10000.0, 1300.0, -300.0];
+    model.nodes[3].coord = [0.0, 1300.0, -300.0];
+    for coord in [[10000.0, -2300.0, -300.0], [0.0, -2300.0, -300.0]] {
+        let mut node = model.nodes[0].clone();
+        node.id = NodeId(model.nodes.len() as u32);
+        node.coord = coord;
+        model.nodes.push(node);
+    }
+    model.elements.push(beam.clone());
+    for nodes in [[1, 2], [2, 3], [3, 0], [0, 5], [5, 4], [4, 1]] {
+        let mut edge = beam.clone();
+        edge.id = ElemId(model.elements.len() as u32);
+        edge.nodes = nodes.map(NodeId).into_iter().collect();
+        model.elements.push(edge);
+    }
+    model
+        .stories
+        .push(Story::new(StoryId(0), "1F".into(), Some(0.0), Some(-300.0)));
+    model.slabs[0].reference_story = Some(StoryId(0));
+    model.slabs[0].vertical_eccentricity_mm = Some(0.0);
+    let mut slab = model.slabs[0].clone();
+    slab.id = SlabId(1);
+    slab.plate.section = Some(SectionId(2));
+    model.slabs.push(slab);
+    let mut sec = model.sections[1].clone();
+    sec.id = SectionId(2);
+    sec.thickness = Some(200.0);
+    model.sections.push(sec);
+    model.floor_assignment_regions.regions = [
+        [
+            (0, [0.0, 1.0]),
+            (1, [0.0, 1.0]),
+            (2, [0.0, 1.0]),
+            (3, [0.0, 1.0]),
+        ],
+        [
+            (0, [1.0, 0.0]),
+            (4, [0.0, 1.0]),
+            (5, [0.0, 1.0]),
+            (6, [0.0, 1.0]),
+        ],
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, edges)| FloorPlateAssignmentRegion {
+        id: FloorPlateAssignmentRegionId(i as u32),
+        boundary: edges
+            .into_iter()
+            .map(|(id, span)| SupportBoundary {
+                support: SupportMemberId::Primary(ElemId(id)),
+                span,
+            })
+            .collect(),
+        assignment: PlateAssignment::Plate(SlabId(i as u32)),
+    })
+    .collect();
+    (model, beam)
+}
 
-    let (mut m_attached, _) = rc_beam_for_slab_factor(None);
-    m_attached.slabs = vec![Slab {
-        id: SlabId(0),
-        shape: SlabShape::Attached {
-            anchor: RegionAnchor::Line {
-                nodes: [NodeId(0), NodeId(1)],
-                span: [0.0, 1.0],
-                transfer: LoadTransfer::Anchor,
-            },
-            extent: [1500.0, 1500.0],
-        },
-        plate: SlabPlate {
-            section: Some(sepika_core::ids::SectionId(1)),
-            ..Default::default()
-        },
-        reference_story: None,
-        vertical_eccentricity_mm: None,
-        tip_loads: Vec::new(),
-    }];
-    let b_attached = stiffness_breakdown(&m_attached, &e).unwrap();
-    assert!(
-        (b_attached.slab - 1.0).abs() < 1e-12,
-        "取り付く床板は協力幅 1.0、got {}",
-        b_attached.slab
+#[test]
+fn rc_slab_unequal_thickness_public_geometry_and_unchanged_properties() {
+    use sepika_core::model::PlateAssignment;
+    let (mut model, beam_data) = rc_slab_fixture();
+    let before = model.clone();
+    let left = model
+        .resolved_slab_placement(sepika_core::ids::SlabId(0))
+        .unwrap();
+    let right = model
+        .resolved_slab_placement(sepika_core::ids::SlabId(1))
+        .unwrap();
+    assert_eq!(
+        (
+            left.top_z_mm,
+            left.bottom_z_mm,
+            right.top_z_mm,
+            right.bottom_z_mm
+        ),
+        (0.0, -150.0, 0.0, -200.0)
     );
+    let beam = BeamElement::try_new(&beam_data, &model).unwrap();
+    assert_eq!(
+        bincode::serialize(&before).unwrap(),
+        bincode::serialize(&model).unwrap()
+    );
+    assert!((beam.iz - 10307037269.681742).abs() < 1e-5);
+    assert!(
+        (stiffness_breakdown(&model, &beam_data).unwrap().slab - 1.9087106054966188).abs() < 1e-12
+    );
+    model
+        .floor_assignment_regions
+        .regions
+        .iter_mut()
+        .for_each(|r| r.assignment = PlateAssignment::NoPlate);
+    model.slabs.clear();
+    model.floor_regions[0].slab_ids.clear();
+    let bare = BeamElement::try_new(&beam_data, &model).unwrap();
+    assert_eq!(bare.iz, 5400000000.0);
+    assert_eq!(
+        (beam.a, beam.iy, beam.j, beam.as_y, beam.as_z, beam.length),
+        (bare.a, bare.iy, bare.j, bare.as_y, bare.as_z, bare.length)
+    );
+    assert_eq!(beam.mass_properties, bare.mass_properties);
+    assert_eq!(
+        (beam.id, beam.nodes, beam.end_cond),
+        (bare.id, bare.nodes, bare.end_cond)
+    );
+    assert_eq!(before.elements, model.elements);
+    let mut supplied = before;
+    supplied.sections[0].iy = 2.0 * 5400000000.0;
+    assert!(
+        (BeamElement::try_new(&beam_data, &supplied).unwrap().iz - 2.0 * 10307037269.681742).abs()
+            < 2e-5
+    );
+}
+
+#[test]
+fn rc_slab_equal_single_absent_and_exchange_match_independent_inertia() {
+    use sepika_core::model::PlateAssignment;
+    let (model, data) = rc_slab_fixture();
+    let mut swapped = model.clone();
+    for node in &mut swapped.nodes {
+        node.coord[1] = -node.coord[1];
+    }
+    assert!((BeamElement::try_new(&data, &swapped).unwrap().iz - 10307037269.681742).abs() < 1e-5);
+    let mut equal = model.clone();
+    equal.sections[2].thickness = Some(150.0);
+    assert!((BeamElement::try_new(&data, &equal).unwrap().iz - 10293750000.0).abs() < 1e-5);
+    for (absent, expected) in [(1, 7968567073.170732), (0, 9203052208.83534)] {
+        let mut one = model.clone();
+        one.floor_assignment_regions.regions[absent].assignment = PlateAssignment::NoPlate;
+        one.slabs.retain(|s| s.id.0 != absent as u32);
+        one.floor_regions.clear();
+        assert!((BeamElement::try_new(&data, &one).unwrap().iz - expected).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn rc_slab_invalid_and_unconfirmed_inputs_are_diagnosed() {
+    use sepika_core::ids::SlabId;
+    use sepika_core::model::{LoadTransfer, PlateAssignment, RegionAnchor, SlabShape};
+    let (model, data) = rc_slab_fixture();
+    let check = |m: &Model, text: &str| {
+        let err = stiffness_breakdown(m, &data).expect_err(text);
+        assert!(err.contains(text), "{err}");
+        assert!(err.contains("部材 ID 0"), "{err}");
+        assert!(BeamElement::try_new(&data, m).is_err());
+    };
+    let mut m = model.clone();
+    m.floor_assignment_regions.regions[0].assignment = PlateAssignment::Unset;
+    check(&m, "未設定");
+    let mut m = model.clone();
+    m.floor_assignment_regions.regions[0].assignment = PlateAssignment::Plate(SlabId(99));
+    check(&m, "参照先");
+    for t in [0.0, -1.0, 601.0, f64::NAN, f64::INFINITY] {
+        let mut m = model.clone();
+        m.sections[1].thickness = Some(t);
+        check(&m, "床板 0");
+    }
+    let mut m = model.clone();
+    m.slabs[0].vertical_eccentricity_mm = Some(10.0);
+    check(&m, "一致");
+    let mut m = model.clone();
+    m.slabs[0].reference_story = None;
+    check(&m, "基準階");
+    let mut m = model.clone();
+    m.elements[0].vertical_eccentricity = None;
+    check(&m, "偏心");
+    let mut m = model.clone();
+    m.nodes[1].coord[2] += 10.0;
+    check(&m, "水平");
+    let mut m = model.clone();
+    m.nodes[2].coord[1] = f64::NAN;
+    check(&m, "床板 0");
+    let mut m = model.clone();
+    m.floor_assignment_regions.regions[0].boundary[0].span = [0.0, 0.5];
+    check(&m, "床板 0");
+    let mut m = model.clone();
+    let mut r = m.floor_assignment_regions.regions[0].clone();
+    r.id.0 = 2;
+    m.floor_assignment_regions.regions.push(r);
+    check(&m, "重複");
+    let mut m = model.clone();
+    let mut slab = m.slabs[0].clone();
+    slab.id = SlabId(2);
+    m.slabs.push(slab);
+    let mut r = m.floor_assignment_regions.regions[0].clone();
+    r.id.0 = 2;
+    r.assignment = PlateAssignment::Plate(SlabId(2));
+    m.floor_assignment_regions.regions.push(r);
+    check(&m, "重複");
+    let mut m = model.clone();
+    m.slabs[0].shape = SlabShape::Attached {
+        anchor: RegionAnchor::Line {
+            nodes: [NodeId(0), NodeId(1)],
+            span: [0.0, 1.0],
+            transfer: LoadTransfer::Anchor,
+        },
+        extent: [1300.0; 2],
+    };
+    check(&m, "適用範囲外");
 }
 
 /// SRC 梁はスラブ協力幅の対象外で倍率 1.0（RC 矩形梁のみ増大）。
