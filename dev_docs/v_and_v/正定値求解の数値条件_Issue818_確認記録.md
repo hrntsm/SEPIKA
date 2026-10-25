@@ -70,3 +70,24 @@ Windowsの当該端末・devプロファイル（faer最適化3）での単回�
 初回テストfixtureの未割当材料・配筋型の構築誤り、想定した超節点サイズ80の誤り、ねじり長を曲げ可撓長に取り違えた独立期待値、および最初のclippyの固定配列指摘は修正して再実行した。任意の十進倍率で境界SPDを一律拒否する旧試験は、上記の契約上の限界を区別する試験へ変更した。
 
 手動GUI・実験/実測Validation・任意行列の機構検出の数学的保証は対象外。標準推定は逆ノルムの下界を返すため、全機構を検出する証明とはしない。最終headの独立レビューと全適用CIは公開PRの証拠と区別する。
+
+## 最終main統合（解析57・検定30）
+
+`origin/main` の `27fa9502`（#786・#731・#652の文書を含む）を `88bb0d34` で統合し、解析契約版を57へ進め、検定契約版30を保持した。未検証索引の追記競合は双方の記録を保持して解消した。保存形式ページに既存の2箇所の現行版表記も57/30へ整合し、旧解析56以前の再解析を明記する。診断の式・閾値・物理モデルは変更していない。
+
+統合直後、共有targetを再利用した最初の複合テストではRC機構の拒否2試験が失敗した。そのログにはmathの実compileがなく、ソース内容が本件と一致するartifactの使用を確認できなかった。診断を一時観測すると、実経路の平衡化行列の1ノルムは2.938365726322542、逆1ノルム推定は7.551400522552195e15、推定逆条件数は4.506782971324298e-17となり、12列を全て求解した独立の逆1ノルムとも一致した。一時観測を除去して元コードへ完全復元し、source mtime更新後にmathの実compileを確認して既定構成を再実行すると、同じ機構を含め全試験が成功した。
+
+これは共有targetの再利用と再buildの観測として保持し、元artifactの内容を遡って確認できていないため原因を断定しない。閾値の増加や試験条件の緩和で解消していない。package限定cleanはtargetのCACHEDIR.TAG不備によりCargoが削除前に停止したため、全target削除や他cacheへの操作を行わず、元sourceの明示再buildを用いた。最終CIの新しいrunnerで確認する範囲と区別する。
+
+| 統合後コマンド | 結果 |
+| --- | --- |
+| `cargo test -p sepika-math -p sepika-core -p sepika-solver --locked` の初回 | core632・math33は成功、solverの新RC拒否2件でexit101。全成功とは扱わない |
+| 元math sourceの明示再build後 `cargo test -p sepika-math -p sepika-solver --locked` | math33+doctest2・solver429成功、exit0 |
+| `cargo test -p sepika-app --features gui --lib --locked` | 943成功、exit0。#786の既定解放機構拒否/Keep独立変位・支持釣合い、#731の準備・編集・Undo/Redo・保存再読込、保存成果の版失効を含む |
+| `cargo test -p sepika-load --test beam_upstand --locked` | #731の14成功、exit0 |
+| `cargo clippy -p sepika-math -p sepika-core -p sepika-solver -p sepika-app --features sepika-app/gui --all-targets --locked -- -D warnings` | exit0 |
+| `cargo fmt --all -- --check` | exit0 |
+| `cargo run -p xtask --locked -- check-docs` | summary124・links650・impl refs691、exit0 |
+| `mdbook build` | exit0 |
+
+一時probe sourceと各段階の`issue818-*.log/.exit`は共有targetへ保存し、製品コード・テストから一時観測を除去した。既定構成とGUI構成は元の診断コードで成功している。最終headの独立レビュー・CIはこのローカル結果へ予記しない。
