@@ -28,3 +28,13 @@ for e in [100000, 205000, 300000]:
             for concrete_fc, term_factor in [(8, 1), (16, 1.5)]
         ]
         print("boundary", e, repr(slenderness), ratios)
+
+for pipe in [False, True]:
+    area = math.pi * (400**2 - 376**2) / 4 if pipe else 400**2 - 376**2
+    inertia = math.pi * (400**4 - 376**4) / 64 if pipe else (400**4 - 376**4) / 12
+    core = math.pi * 376**2 / 4 if pipe else 376**2
+    slenderness = 7200 / math.sqrt(inertia / area)
+    for e in [100000, 300000]:
+        x = slenderness**2 * 0.6 * F / (math.pi**2 * e)
+        s_fc = F * (1 - 0.4 * x) / (1.5 + 2 * x / 3) if x <= 1 else 0.277 * F / x
+        print("app", pipe, e, f"ratio={N / (core * 10 + area * s_fc):.15f}")
