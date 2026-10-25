@@ -395,7 +395,7 @@ mod tests {
                 .iter()
                 .map(|elem| sepika_element::factory::build_behavior(elem, &model))
                 .collect();
-            let (legacy_rhs, loads) = super::super::loads::prepare_gravity(
+            let (legacy_rhs, loads) = crate::common::linear_load::prepare_nonlinear_loads(
                 &model,
                 &map,
                 &behaviors,

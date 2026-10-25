@@ -8,8 +8,12 @@
 //! [`super::step_record::StepRecorder`] が一手に引き受ける。ここはフェーズの制御
 //! （増分の刻み・収束判定・終了目標の判定・フェーズ間の引き継ぎ）だけを持つ。
 
+#[cfg(test)]
+#[path = "mixed_load_tests.rs"]
+mod mixed_load_tests;
+
 use super::diagnosis::{nonconvergence_detail, tangent_singular_diagnosis};
-use super::loads::{prepare_gravity, scaled_member_table, PhysicalPushoverLoads};
+use super::loads::PhysicalPushoverLoads;
 use super::mechanism::determine_mechanism;
 use super::member_response::compute_member_response;
 use super::response::{get_roof_dof, story_heights};
@@ -21,6 +25,7 @@ use super::types::{
 use crate::common::constraint::Reducer;
 use crate::common::csc_cache::CscCache;
 use crate::common::elem_loop::apply_du_trial_with_member_loads;
+use crate::common::linear_load::{prepare_nonlinear_loads, scaled_member_table};
 use crate::common::load_fraction::LoadFractionState;
 use crate::common::newton::{l2_norm, STATIC_NEWTON};
 use crate::common::tangent::{add_support_spring_f_int, assemble_k_cached, compute_f_int};
@@ -189,7 +194,8 @@ pub fn pushover_analysis_recording(
     let physical_loads = PhysicalPushoverLoads::new(model, &gravity_terms, load_case)?;
     let gravity_case = physical_loads.gravity_case();
     let has_gravity = !gravity_case.nodal.is_empty() || !gravity_case.member.is_empty();
-    let (f0, gravity_member_loads) = prepare_gravity(model, dofmap, &behaviors, &gravity_case)?;
+    let (f0, gravity_member_loads) =
+        prepare_nonlinear_loads(model, dofmap, &behaviors, &gravity_case)?;
     let empty_loads = vec![Vec::new(); behaviors.len()];
     apply_du_trial_with_member_loads(
         model,

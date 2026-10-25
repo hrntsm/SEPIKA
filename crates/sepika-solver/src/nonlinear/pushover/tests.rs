@@ -228,6 +228,43 @@ fn test_pushover_single_column_forms_hinge() {
 }
 
 #[test]
+fn public_pushover_keeps_transverse_gravity_in_final_physical_member_response() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = single_column_model(1e10, 1000.0);
+        model.elements[0].kind = kind;
+        model.load_cases[0].member.push(MemberLoad::manual(
+            ElemId(0),
+            [0.0, 1.0, 0.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 3000.0,
+                w1: 1.0,
+                w2: 1.0,
+            },
+        ));
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        let result =
+            pushover_analysis(&model, &map, &reducer, SeismicDir::X, 2, 0.0, false).unwrap();
+        assert_eq!(result.steps[0].load_factor, 0.0);
+        let response = &result.member_response[0];
+        assert!(
+            (response.m_weak - 4.5e6).abs() < 1e-5,
+            "{kind:?}: {response:?}"
+        );
+        assert!(
+            (response.shear_weak - 3000.0).abs() < 1e-7,
+            "{kind:?}: {response:?}"
+        );
+    }
+}
+
+#[test]
 fn test_pushover_load_control_endpoint_is_mesh_independent() {
     // 荷重制御プッシュオーバーの終点（λ=1、base_shear=一定）の頂部変位は、
     // 物理的には荷重増分ステップ数に依存しない。

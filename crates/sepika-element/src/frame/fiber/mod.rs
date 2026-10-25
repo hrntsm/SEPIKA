@@ -1561,7 +1561,7 @@ impl ElementBehavior for FiberBeam {
     }
 
     fn owns_frame_member_loads(&self) -> bool {
-        self.wall_connection.is_some()
+        true
     }
 
     fn frame_load_response(
@@ -1601,35 +1601,11 @@ impl ElementBehavior for FiberBeam {
         commit: bool,
         _ctx: &Ctx,
     ) -> Result<(), crate::behavior::ElementUpdateError> {
-        if self.owns_frame_member_loads() {
-            if !self.flex_length.is_finite() || self.flex_length <= 0.0 {
-                return Err(crate::behavior::ElementUpdateError(format!(
-                    "Fiber/MS 要素 {:?}: 可撓長が不正です",
-                    self.element_id
-                )));
-            }
-            FrameDeadLoadMap::new(
-                absolute_loads,
-                &self.axis,
-                self.length,
-                self.rigid_i,
-                self.rigid_j,
-            )
-            .map_err(|error| {
-                crate::behavior::ElementUpdateError(format!(
-                    "Fiber/MS 要素 {:?}の部材荷重: {error}",
-                    self.element_id
-                ))
-            })?;
-        }
-        if !self.owns_frame_member_loads() {
-            if !absolute_loads.is_empty() {
-                return Err(crate::behavior::ElementUpdateError(format!(
-                    "Fiber/MS 要素 {:?}: 壁側柱以外の部材荷重状態更新は未対応です",
-                    self.element_id
-                )));
-            }
-            return self.try_update_state_with_member_loads(du, None, commit);
+        if !self.flex_length.is_finite() || self.flex_length <= 0.0 {
+            return Err(crate::behavior::ElementUpdateError(format!(
+                "Fiber/MS 要素 {:?}: 可撓長が不正です",
+                self.element_id
+            )));
         }
         let previous = self.snapshot_state();
         let result = self

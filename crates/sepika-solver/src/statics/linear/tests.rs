@@ -373,6 +373,48 @@ fn wall_normal_release_retains_loaded_support_balance_without_end_moments() {
 }
 
 #[test]
+fn ordinary_fixed_udl_reactions_balance_original_force_and_moment() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = owned_udl_model();
+        model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        model.elements[0].kind = kind;
+        model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+        model.load_cases[0].member[0] = sepika_core::model::MemberLoad::manual(
+            model.elements[0].id,
+            [0.0, 1.0, 0.0],
+            sepika_core::model::MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 6000.0,
+                w1: 1.0,
+                w2: 1.0,
+            },
+        );
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        let stiffness =
+            StaticStiffness::build(&model, &map, &reducer, model.load_cases[0].kind).unwrap();
+        let entries: Vec<_> = stiffness
+            .behaviors
+            .iter()
+            .map(|(id, b, g)| (*id, b.as_ref(), g.as_slice()))
+            .collect();
+        let ledger = PhysicalLoadLedger::new(&model, &model.load_cases[0]).unwrap();
+        let (_, reactions) = recover_static(&model, &map, &[], &ledger, &entries).unwrap();
+        for reaction in &reactions {
+            assert!((reaction[1] + 3000.0).abs() < 1e-8);
+        }
+        assert!((reactions[0][5] + 3e6).abs() < 1e-7);
+        assert!((reactions[1][5] - 3e6).abs() < 1e-7);
+        assert!((reactions[0][1] + reactions[1][1] + 6000.0).abs() < 1e-8);
+        assert!((reactions[0][5] + reactions[1][5] + 6000.0 * reactions[1][1] + 18e6).abs() < 1e-7);
+    }
+}
+
+#[test]
 fn wall_physical_balance_preserves_normalized_node_order() {
     let mut model = owned_udl_model();
     model.load_cases[0].member.clear();
@@ -668,7 +710,12 @@ fn test_linear_static_once_zero_independent_dofs_load_case_validation() {
         assert_eq!(Reducer::build(&model, &dofmap).n_indep, 0);
         let result = linear_static_once(&model, LoadCaseId(1)).unwrap();
         assert_eq!(result.disp, vec![[0.0; 6]; model.nodes.len()]);
-        assert!(result.member_forces.is_empty());
+        assert_eq!(result.member_forces.len(), 1);
+        assert!(result.member_forces[0]
+            .1
+            .at
+            .iter()
+            .all(|(_, f)| f.iter().all(|v| *v == 0.0)));
         assert!(result.panel_moments.is_empty());
         let err = linear_static_once(&model, LoadCaseId(99)).unwrap_err();
         assert!(

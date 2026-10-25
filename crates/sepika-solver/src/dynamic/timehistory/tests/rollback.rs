@@ -80,9 +80,18 @@ fn udl() -> MemberLoad {
 
 use sepika_element::behavior::{Ctx, LocalVec};
 
-fn loaded_behaviors(model: &Model, kind: ElementKind) -> Vec<Box<dyn ElementBehavior>> {
+fn loaded_behaviors(model: &Model, kind: ElementKind, wall: bool) -> Vec<Box<dyn ElementBehavior>> {
     use sepika_element::factory::AnalysisKind;
     let data = &model.elements[0];
+    if !wall {
+        return vec![build_nonlinear_behavior(
+            data,
+            model,
+            StrengthBasis::Nominal,
+            AnalysisKind::TimeHistory,
+            None,
+        )];
+    }
     let member: Box<dyn ElementBehavior> = match kind {
         ElementKind::Fiber => {
             let mut member = sepika_element::frame::fiber::FiberBeam::with_plastic_zone(
@@ -165,41 +174,50 @@ fn assert_same_state(
 #[test]
 fn failed_step_restores_loaded_plastic_snapshot_and_retry_matches_control() {
     for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        for reason in [
-            "全体釣合いが反復上限 1 回までに収束しません",
-            "応答に非有限値があります",
-        ] {
-            let mut model = model(kind);
-            model.materials[0].fy = Some(235.);
-            let ctx = Ctx { model: &model };
-            let mut actual = loaded_behaviors(&model, kind);
-            let mut control = loaded_behaviors(&model, kind);
-            let elastic = actual[0].tangent_stiffness(&ctx).get(6, 6);
-            for batch in [&mut actual, &mut control] {
-                loaded_trial(&model, batch, 1.5, 0.5);
-                assert!(batch[0].tangent_stiffness(&ctx).get(6, 6) < elastic);
-                batch[0].commit_state();
-                loaded_trial(&model, batch, -0.2, 0.75);
+        for wall in [false, true] {
+            for reason in [
+                "全体釣合いが反復上限 1 回までに収束しません",
+                "応答に非有限値があります",
+            ] {
+                let mut model = model(kind);
+                model.materials[0].fy = Some(235.);
+                let ctx = Ctx { model: &model };
+                let mut actual = loaded_behaviors(&model, kind, wall);
+                let mut control = loaded_behaviors(&model, kind, wall);
+                let elastic = actual[0].tangent_stiffness(&ctx).get(6, 6);
+                for batch in [&mut actual, &mut control] {
+                    loaded_trial(&model, batch, 1.5, 0.5);
+                    assert!(batch[0].tangent_stiffness(&ctx).get(6, 6) < elastic);
+                    batch[0].commit_state();
+                    loaded_trial(&model, batch, -0.2, 0.75);
+                }
+                let mut resumed = loaded_behaviors(&model, kind, wall);
+                resumed[0]
+                    .deserialize_checkpoint(&actual[0].serialize_checkpoint())
+                    .unwrap();
+                assert_same_state(&model, &actual, &resumed);
+                let snapshot = StateSnapshot::capture(&actual);
+                loaded_trial(&model, &mut actual, 0.7, 2.);
+                assert_ne!(
+                    actual[0].serialize_checkpoint(),
+                    control[0].serialize_checkpoint()
+                );
+                let error =
+                    rollback_failed_step(&mut actual, &snapshot, 2, 0.002, reason).to_string();
+                assert!(
+                    error.contains("step 2")
+                        && error.contains("時刻 0.002 s")
+                        && error.contains(reason),
+                    "{error}"
+                );
+                assert_same_state(&model, &actual, &control);
+                for batch in [&mut actual, &mut control, &mut resumed] {
+                    loaded_trial(&model, batch, -0.1, 0.8);
+                    batch[0].commit_state();
+                }
+                assert_same_state(&model, &actual, &control);
+                assert_same_state(&model, &actual, &resumed);
             }
-            let snapshot = StateSnapshot::capture(&actual);
-            loaded_trial(&model, &mut actual, 0.7, 2.);
-            assert_ne!(
-                actual[0].serialize_checkpoint(),
-                control[0].serialize_checkpoint()
-            );
-            let error = rollback_failed_step(&mut actual, &snapshot, 2, 0.002, reason).to_string();
-            assert!(
-                error.contains("step 2")
-                    && error.contains("時刻 0.002 s")
-                    && error.contains(reason),
-                "{error}"
-            );
-            assert_same_state(&model, &actual, &control);
-            for batch in [&mut actual, &mut control] {
-                loaded_trial(&model, batch, -0.1, 0.8);
-                batch[0].commit_state();
-            }
-            assert_same_state(&model, &actual, &control);
         }
     }
 }

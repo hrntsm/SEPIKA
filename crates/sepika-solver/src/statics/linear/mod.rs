@@ -266,13 +266,6 @@ pub(crate) fn solve_static_case(
         .map(|(id, behavior, gdofs)| (*id, behavior.as_ref(), gdofs.as_slice()))
         .collect();
     validate_entries(model, dofmap, &entries)?;
-    if reducer.n_indep == 0 && !entries.iter().any(|(_, b, _)| b.owns_frame_member_loads()) {
-        return Ok(StaticOnce {
-            disp: vec![[0.0; 6]; model.nodes.len()],
-            member_forces: vec![],
-            panel_moments: vec![],
-        });
-    }
     let rhs = assemble_linear_rhs(model, dofmap, &physical, &entries)?;
     let u_free = if reducer.n_indep == 0 {
         vec![0.0; dofmap.n_active()]

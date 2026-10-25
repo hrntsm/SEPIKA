@@ -1425,7 +1425,11 @@ fn test_linear_static_zero_independent_dofs_load_case_validation() {
         assert_eq!(analysis.dofmap.n_active() == 0, all_fixed);
         let result = analysis.linear_static(LoadCaseId(1)).unwrap();
         assert_eq!(result.disp, vec![[0.0; 6]; model.nodes.len()]);
-        assert!(result.member_forces.is_empty());
+        assert_eq!(result.member_forces.len(), model.elements.len());
+        assert!(result.member_forces.iter().all(|(_, f)| f
+            .at
+            .iter()
+            .all(|(_, values)| values.iter().all(|v| *v == 0.0))));
         assert!(result.panel_moments.is_empty());
         let err = analysis.linear_static(LoadCaseId(99)).unwrap_err();
         assert!(

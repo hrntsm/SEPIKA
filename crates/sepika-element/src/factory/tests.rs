@@ -1737,7 +1737,7 @@ fn steel_plate_boundary_clones_preserve_registered_section_ownership_without_rc_
                 }
             };
             assert_eq!(valid.n_dof(), 12);
-            assert!(!valid.owns_frame_member_loads());
+            assert_eq!(valid.owns_frame_member_loads(), kind.is_some());
             let mut conflicting = data.clone();
             conflicting.section = Some(SectionId(3));
             let reason = wall_side_column_input_issue(&conflicting, &model, kind).unwrap();

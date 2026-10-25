@@ -219,13 +219,35 @@ impl MenegottoPinto {
         let r = (self.r0 - self.a1 * xi / (self.a2 + xi)).max(1.0);
 
         let eps_star = (strain - w.eps_r) / deps0;
-        let dum1 = 1.0 + eps_star.abs().powf(r);
-        let dum2 = dum1.powf(1.0 / r);
-        let sig_star = self.b * eps_star + (1.0 - self.b) * eps_star / dum2;
-        let dsig_star = self.b + (1.0 - self.b) / (dum1 * dum2);
+        // 反転後の微小応力は、反転点応力と正規化応力の直接加算では桁落ちする。
+        let (stress, dsig_star) = if eps_star.abs() <= 1.0 {
+            let power = eps_star.abs().powf(r);
+            let dum1 = 1.0 + power;
+            let dum2 = dum1.powf(1.0 / r);
+            let departure = (-power.ln_1p() / r).exp_m1();
+            let slope = dsig0 / deps0;
+            let intercept = (-slope).mul_add(w.eps_r, w.sig_r);
+            (
+                slope.mul_add(strain, intercept)
+                    + (1.0 - self.b) * slope * (strain - w.eps_r) * departure,
+                self.b + (1.0 - self.b) / (dum1 * dum2),
+            )
+        } else {
+            // 大ひずみ側まで直線項との差で評価すると、塑性漸近成分が相殺される。
+            let inverse_power = eps_star.abs().powf(-r);
+            let transition = eps_star.signum() * (1.0 + inverse_power).powf(-1.0 / r);
+            let sig_star = self.b * eps_star + (1.0 - self.b) * transition;
+            (
+                dsig0.mul_add(sig_star, w.sig_r),
+                self.b
+                    + (1.0 - self.b)
+                        * eps_star.abs().powf(-r - 1.0)
+                        * (1.0 + inverse_power).powf(-1.0 - 1.0 / r),
+            )
+        };
 
         w.strain = strain;
-        w.stress = w.sig_r + dsig0 * sig_star;
+        w.stress = stress;
         w.tangent = dsig_star * dsig0 / deps0;
         w
     }
@@ -266,6 +288,111 @@ impl UniaxialMaterial for MenegottoPinto {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn saved_reversal_branches_match_100_digit_original_mp_curve_and_derivative() {
+        for (fy, a3, bits, expected) in [
+            (
+                10000000000.0,
+                0.0,
+                [
+                    0x3ec5cf751db94e6b,
+                    0x3fe10e5604189375,
+                    0xc0e7d18f9c18f9c2,
+                    0xc202a05f20000000,
+                    0xc0e7d18f9c18f9c2,
+                ],
+                [
+                    (4.492147437296744e-17, 205000.0),
+                    (2.0500000449214743e-09, 205000.0),
+                    (-205.0, 205000.0),
+                    (-1230.0, 205000.0),
+                ],
+            ),
+            (
+                235.0,
+                0.0,
+                [
+                    0x3f60624dd2f1a9fc,
+                    0x406963b55c4df2a9,
+                    0xbf20a3f6de9ef5cc,
+                    0xc06d1d20dcbaf81c,
+                    0xbf689374bc6a7efa,
+                ],
+                [
+                    (-119.37724393541036, 87868.65885140876),
+                    (-119.37724393453168, 87868.65885210983),
+                    (-179.4678894362972, 38962.99173666924),
+                    (-239.25840925339216, 3818.4014322543917),
+                ],
+            ),
+            (
+                235.0,
+                0.03,
+                [
+                    0x3f60624dd2f1a9fc,
+                    0x406acb706849a951,
+                    0xbf317470e5b6a8d7,
+                    0xc06f47c010781f79,
+                    0xbf689374bc6a7efa,
+                ],
+                [
+                    (-118.86855151478392, 97561.77008454081),
+                    (-118.8685515138083, 97561.77008526116),
+                    (-186.93810549562255, 44949.44704040789),
+                    (-255.44910124215053, 4119.640210732085),
+                ],
+            ),
+        ] {
+            let [er, sr, e0, s0, ep] = bits.map(f64::from_bits);
+            let mut m = MenegottoPinto::with_isotropic(205000., fy, 0.01, 20., 18.5, 0.15, a3, 1.);
+            m.committed = MpState {
+                strain: er,
+                stress: sr,
+                tangent: m.e,
+                eps_r: er,
+                sig_r: sr,
+                eps_0: e0,
+                sig_0: s0,
+                eps_max: er,
+                eps_min: ep,
+                eps_pl: ep,
+                branch: LoadingBranch::TowardCompression,
+            };
+            m.trial = m.committed.clone();
+            for (strain, (stress, tangent)) in [0., 1e-14, -0.001, -0.006].into_iter().zip(expected)
+            {
+                let before = m.serialize_state();
+                let (actual_s, actual_t) = m.probe(strain);
+                let scale = sr.abs().max(((s0 - sr) / (e0 - er) * strain).abs());
+                assert_relative_eq!(
+                    actual_s,
+                    stress,
+                    epsilon = 4. * f64::EPSILON * scale,
+                    max_relative = 2e-14
+                );
+                assert_relative_eq!(actual_t, tangent, max_relative = 2e-14);
+                assert_eq!(m.serialize_state(), before);
+                let mut resumed = m.clone();
+                resumed.deserialize_state(&before).unwrap();
+                assert_eq!(resumed.trial(strain), (actual_s, actual_t));
+                resumed.revert();
+                assert_eq!(resumed.probe(strain), (actual_s, actual_t));
+            }
+            assert_eq!(m.probe(er), (sr, m.e));
+        }
+    }
+
+    #[test]
+    fn large_normalized_strain_keeps_plastic_asymptote_with_zero_or_tiny_hardening() {
+        for b in [0., 1e-14] {
+            let mut m = MenegottoPinto::with_params(205000., 235., b, 20., 18.5, 0.15);
+            m.committed.branch = LoadingBranch::TowardTension;
+            let (stress, tangent) = m.probe(1e20);
+            assert_relative_eq!(stress, 235. + b * 205000. * 1e20, max_relative = 2e-15);
+            assert_relative_eq!(tangent, b * 205000., epsilon = 1e-300, max_relative = 2e-15);
+        }
+    }
 
     #[test]
     fn test_menegotto_pinto_elastic() {

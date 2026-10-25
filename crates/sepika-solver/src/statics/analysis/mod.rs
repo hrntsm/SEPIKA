@@ -106,14 +106,6 @@ impl<'m> Analysis<'m> {
     }
 
     fn solve_and_recover(&self, load_case: &LoadCase) -> Result<StaticOnce, SolveError> {
-        if self.n_indep == 0
-            && !self
-                .behavior_cache
-                .iter()
-                .any(|(_, b, _)| b.owns_frame_member_loads())
-        {
-            return Ok(self.zero_result());
-        }
         let iterative =
             self.model.stress_cfg.tension_only_iteration && has_tension_only_brace(self.model);
         let fixed = if iterative {

@@ -20,7 +20,8 @@ const BTB: [f64; 3] = [4.0, 1600.0, 400.0];
 const AXIAL_KE: f64 = 200000000.0 / 3000.0;
 const AXIAL_Y: f64 = 200000.0;
 const AXIAL_HA: f64 = 1000.0 * HP / 600.0;
-const AXIAL_CASES: [(Option<[f64; 3]>, Option<f64>); 4] = [
+const AXIAL_CASES: [(Option<[f64; 3]>, Option<f64>); 5] = [
+    (None, None),
     (Some([0.0, 0.0, 1.0]), None),
     (Some([0.0, 0.6, 0.8]), None),
     (Some([0.0, 0.6, 0.8]), Some(1e7)),

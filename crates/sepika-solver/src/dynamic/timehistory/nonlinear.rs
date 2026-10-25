@@ -18,6 +18,8 @@ use crate::common::assemble::assemble_global_m;
 use crate::common::constraint::Reducer;
 use crate::common::csc_cache::{CscCache, WeightedSumGuard};
 use crate::common::elem_loop::apply_du_trial;
+use crate::common::elem_loop::apply_du_trial_with_member_loads;
+use crate::common::linear_load::{prepare_nonlinear_loads, scaled_member_table};
 use crate::common::newton::{l2_norm, NewtonCriteria, STATIC_NEWTON};
 use crate::common::tangent::{
     add_support_spring_f_int, assemble_k, assemble_k_cached_ref, compute_f_int,
@@ -148,20 +150,28 @@ pub fn nonlinear_time_history_analysis(
         ..
     } = NewmarkCoeffs::new(newmark, dt);
 
-    let f0_free: Vec<f64> = if cfg.apply_long_term {
-        let mut f = vec![0.0; n_free];
-        for lc in model.load_cases.iter().filter(|l| l.kind.is_long_term()) {
-            let flc = crate::common::assemble::assemble_global_f(model, dofmap, lc.id);
-            for (acc, v) in f.iter_mut().zip(flc) {
-                *acc += v;
-            }
-        }
-        f
-    } else {
-        vec![0.0; n_free]
+    let gravity_case = sepika_core::model::LoadCase {
+        id: sepika_core::ids::LoadCaseId(0),
+        name: "時刻歴の長期荷重".into(),
+        kind: sepika_core::model::LoadCaseKind::Other,
+        nodal: model
+            .load_cases
+            .iter()
+            .filter(|case| active_cases.contains(&case.id))
+            .flat_map(|case| case.nodal.iter().cloned())
+            .collect(),
+        member: model
+            .load_cases
+            .iter()
+            .filter(|case| active_cases.contains(&case.id))
+            .flat_map(|case| case.member.iter().cloned())
+            .collect(),
     };
+    let (f0_free, gravity_member_loads) =
+        prepare_nonlinear_loads(model, dofmap, &behaviors, &gravity_case)
+            .map_err(SolveError::InvalidInput)?;
     let f0_red = reducer.reduce_f(&f0_free);
-    let has_long_term = f0_red.iter().any(|&v| v.abs() > 0.0);
+    let has_long_term = !gravity_case.nodal.is_empty() || !gravity_case.member.is_empty();
 
     let mut u = vec![0.0; n_indep];
     if has_long_term {
@@ -171,6 +181,7 @@ pub fn nonlinear_time_history_analysis(
             reducer,
             &mut behaviors,
             &f0_red,
+            &gravity_member_loads,
             cfg.use_kg,
             &mut u,
         )?;
@@ -665,12 +676,14 @@ impl LoadFractionState {
 
 /// 長期荷重（`f0_red`、縮約空間）を静的 Newton 反復で載荷する。
 /// 収束したステップごとに要素状態を commit し、載荷完了時の変位（縮約空間）を `u_out` に加算する。
+#[allow(clippy::too_many_arguments)]
 fn apply_long_term_static(
     model: &Model,
     dofmap: &DofMap,
     reducer: &Reducer,
     behaviors: &mut [Box<dyn ElementBehavior>],
     f0_red: &[f64],
+    gravity_member_loads: &[Vec<sepika_core::model::MemberLoad>],
     use_kg: bool,
     u_out: &mut [f64],
 ) -> Result<(), SolveError> {
@@ -682,15 +695,18 @@ fn apply_long_term_static(
     let mut du_red_buf = vec![0.0f64; n_indep];
     let mut k_free_triplets_buf: Vec<Triplet> = Vec::new();
     let mut k_red_triplets_buf: Vec<Triplet> = Vec::new();
+    let mut element_failure = None;
     while let Some(mu_target) = state.next_target() {
         let snap = StateSnapshot::capture(behaviors);
         let f_target: Vec<f64> = f0_red.iter().map(|&v| v * mu_target).collect();
+        let loads = scaled_member_table(gravity_member_loads, mu_target);
         match newton_static_converge(
             model,
             dofmap,
             reducer,
             behaviors,
             &f_target,
+            &loads,
             use_kg,
             n_indep,
             &*u_out,
@@ -700,8 +716,9 @@ fn apply_long_term_static(
             &mut du_red_buf,
             &mut k_free_triplets_buf,
             &mut k_red_triplets_buf,
-        )? {
-            Some(du) => {
+        ) {
+            Ok(Some(du)) => {
+                element_failure = None;
                 for b in behaviors.iter_mut() {
                     b.commit_state();
                 }
@@ -710,9 +727,17 @@ fn apply_long_term_static(
                 }
                 state.record_success(mu_target);
             }
-            None => {
+            result => {
+                if let Err(error) = result {
+                    element_failure = Some(error);
+                }
                 snap.restore(behaviors);
                 if !state.record_failure() {
+                    if let Some(error) = element_failure.take() {
+                        return Err(SolveError::InvalidInput(format!(
+                            "長期荷重の初期載荷が収束しません: {error}"
+                        )));
+                    }
                     return Err(SolveError::InvalidInput(
                         "長期荷重の初期載荷が収束しません（長期荷重に対して構造が不安定な可能性）"
                             .into(),
@@ -734,6 +759,7 @@ fn newton_static_converge(
     reducer: &Reducer,
     behaviors: &mut [Box<dyn ElementBehavior>],
     f_target_red: &[f64],
+    absolute_loads: &[Vec<sepika_core::model::MemberLoad>],
     use_kg: bool,
     n_indep: usize,
     u_base_red: &[f64],
@@ -744,6 +770,14 @@ fn newton_static_converge(
     k_free_triplets_buf: &mut Vec<Triplet>,
     k_red_triplets_buf: &mut Vec<Triplet>,
 ) -> Result<Option<Vec<f64>>, SolveError> {
+    apply_du_trial_with_member_loads(
+        model,
+        dofmap,
+        behaviors,
+        &vec![0.0; dofmap.n_active()],
+        absolute_loads,
+    )
+    .map_err(SolveError::InvalidInput)?;
     let mut du_total = vec![0.0; n_indep];
     for _iter in STATIC_NEWTON.iters() {
         let k_free = assemble_k_cached_ref(
