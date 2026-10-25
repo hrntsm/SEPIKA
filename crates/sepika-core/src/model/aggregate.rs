@@ -1316,11 +1316,12 @@ impl Model {
         }
     }
 
-    /// 通り芯・保存波形設定・数量設定を除いた計算入力照合用のモデルを返す。
+    /// 通り芯・保存波形設定・数量設定・層間変形角の参考比較設定を除いた計算入力照合用モデルを返す。
     pub fn calculation_model(&self) -> Self {
         let mut model = self.clone();
         model.axes.clear();
         model.quantity_cfg = QuantityCfg::default();
+        model.stress_cfg.drift_limit_denom = StressAnalysisCfg::default().drift_limit_denom;
         model.vibration_cases.clear();
         model.lumped_vibration_cases.clear();
         model

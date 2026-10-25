@@ -375,8 +375,7 @@ impl App {
             .ok_or("保有耐力比較用の増分解析結果がありません")?;
         let ds_conditions = saved_ds.map_or(self.core.analysis_cfg, |e| e.conditions);
         let capacity_conditions = saved_capacity.map_or(self.core.analysis_cfg, |e| e.conditions);
-        let st = self
-            .core
+        self.core
             .scoped
             .results
             .as_ref()
@@ -385,8 +384,7 @@ impl App {
                 "静的解析結果がありません。地震静的(Ai)を実行してください。".to_string()
             })?;
 
-        let metrics =
-            crate::summary::compute_story_metrics_with(&self.core.model, &st.disp, view_dir, &ctx);
+        let metrics = crate::summary::compute_story_metrics_with(&self.core.model, view_dir, &ctx);
 
         let fes: Vec<f64> = metrics
             .iter()

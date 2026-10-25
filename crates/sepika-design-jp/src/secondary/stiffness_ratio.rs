@@ -1,20 +1,9 @@
-//! 層間変形角・剛性率（層間変形角は令82条の2、剛性率は令82条の6・昭55建告1792号）。
-//!
-//! - **層間変形角（確認用）:** 立体解析のため層間変形角は位置ごとに異なる。
-//!   その階の**柱の層間変形角の最大値**を用いて確認する（斜め柱は除外）:
-//!   `1/irs = max(δ1, δ2, …, δn) / iH`（δ: 当該層の上下端床レベル間の加力方向水平変位差。
-//!   中間節点で分割された柱は連なりとして 1 本とみなす）
-//! - **剛性率算出用の層間変形角:** 重心位置の層間変位 δg を用いる:
-//!   `1/irs = iδg / iH`, `Rs = rs / r̄s ≧ 0.6`（r̄s は相加平均）
-//!
-//! 剛性率の式自体（Ks=H/δ, Rs=Ks/mean）は
-//! `crate::secondary::holding_capacity::stiffness_ratios` を再利用する。
-//! 本モジュールは「δ に何を使うか」を上記の実務的取扱いに沿って揃える層である。
+//! 上下階SL節点の柱層間変位と、Rs用の重心位置変位を算定する。
 
 use sepika_core::ids::{ElemId, StoryId};
 use sepika_core::model::{Model, Node};
 
-use super::story_columns::story_columns;
+use super::story_columns::checked_story_columns;
 
 /// 柱 1 本の層間変位（加力方向）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -26,62 +15,56 @@ pub struct ColumnDrift {
     pub drift: f64,
 }
 
-/// 斜め柱判定の許容平面ズレ [mm]。柱頭・柱脚の平面位置がこれを超えて
-/// 異なる柱は「斜め柱」として層間変形角の確認から除外する（本実装の扱い）。
-const INCLINED_PLAN_TOL: f64 = 1.0;
-
-/// 当該層に帰属する柱を列挙して `f(elem_id, 柱頭節点, 柱脚節点)` を呼ぶ。
-///
-/// 中間節点で分割された鉛直材は連なりとして 1 本とみなす（[`super::story_columns`]）。
-/// `story` には**層の上端の階**（[`sepika_core::model::Layer::top`]）を渡すこと。
-fn for_each_story_column(model: &Model, story: StoryId, mut f: impl FnMut(ElemId, &Node, &Node)) {
-    for col in story_columns(model, story) {
-        let top = &model.nodes[col.top.index()];
-        let bot = &model.nodes[col.bottom.index()];
-        f(col.top_elem, top, bot);
-    }
-}
-
-/// 当該層の各柱の層間変位（加力方向）。**斜め柱は除外**する
-/// （柱頭・柱脚の平面位置が `INCLINED_PLAN_TOL` を超えてずれる柱）。
-///
-/// `disp` は節点変位（`model.nodes` と同順）、`dir` は加力方向（0=X, 1=Y）。
+/// 上下階SLを結ぶ非分岐柱の水平変位差の絶対値 `[mm]` を返す。
+/// `disp` は節点ID順、`dir` は0=X・1=Y。対象変位の欠測・非有限値はErr。
 pub fn column_drifts(
     model: &Model,
     disp: &[[f64; 6]],
     dir: usize,
     story: StoryId,
-) -> Vec<ColumnDrift> {
-    let mut out = Vec::new();
-    for_each_story_column(model, story, |eid, top, bot| {
-        let plan_off =
-            ((top.coord[0] - bot.coord[0]).powi(2) + (top.coord[1] - bot.coord[1]).powi(2)).sqrt();
-        if plan_off > INCLINED_PLAN_TOL {
-            return; // 斜め柱は除外
-        }
-        let (Some(ut), Some(ub)) = (disp.get(top.id.index()), disp.get(bot.id.index())) else {
-            return;
-        };
-        out.push(ColumnDrift {
-            elem: eid,
-            pos: [top.coord[0], top.coord[1]],
-            drift: (ut[dir] - ub[dir]).abs(),
-        });
-    });
-    out
+) -> Result<Vec<ColumnDrift>, String> {
+    if dir > 1 {
+        return Err(format!("層間変形角: 水平方向{dir}が不正です"));
+    }
+    checked_story_columns(model, story)?
+        .into_iter()
+        .map(|col| {
+            let top = &model.nodes[col.top.index()];
+            let displacement = |node: sepika_core::ids::NodeId| {
+                disp.get(node.index())
+                    .map(|u| u[dir])
+                    .filter(|u| u.is_finite())
+                    .ok_or_else(|| {
+                        format!(
+                            "柱{} 節点{}の変位が欠落又は非有限です",
+                            col.top_elem.0, node.0
+                        )
+                    })
+            };
+            let drift = (displacement(col.top)? - displacement(col.bottom)?).abs();
+            if !drift.is_finite() {
+                return Err(format!("柱{}の変位差が非有限です", col.top_elem.0));
+            }
+            Ok(ColumnDrift {
+                elem: col.top_elem,
+                pos: [top.coord[0], top.coord[1]],
+                drift,
+            })
+        })
+        .collect()
 }
 
-/// 当該層の柱の層間変位の最大値 `max(δ1, δ2, …, δn)` `[mm]`（層間変形角の式の分子）。
-/// 柱がない（または全て斜め柱の）層は `None`。
+/// 最大柱層間変位 `[mm]` と同じ対象のID・柱頭位置を返す。
+/// 対象なしはOk(None)、対象変位・接続の不整合はErr。
 pub fn max_column_drift(
     model: &Model,
     disp: &[[f64; 6]],
     dir: usize,
     story: StoryId,
-) -> Option<ColumnDrift> {
-    column_drifts(model, disp, dir, story)
+) -> Result<Option<ColumnDrift>, String> {
+    Ok(column_drifts(model, disp, dir, story)?
         .into_iter()
-        .max_by(|a, b| a.drift.total_cmp(&b.drift))
+        .max_by(|a, b| a.drift.total_cmp(&b.drift)))
 }
 
 /// 当該層の重心位置の水平変位 `[mm]`（加力方向）。
@@ -284,13 +267,13 @@ mod tests {
     }
 
     #[test]
-    fn test_max_column_drift_excludes_inclined() {
+    fn test_max_column_drift_includes_inclined() {
         let (model, s0) = build_model();
         let disp = disp_field();
-        let drifts = column_drifts(&model, &disp, 0, s0);
-        // 斜め柱（ElemId 2, δ=15）は除外され、鉛直 2 本のみ。
-        assert_eq!(drifts.len(), 2);
-        let max = max_column_drift(&model, &disp, 0, s0).unwrap();
+        let drifts = column_drifts(&model, &disp, 0, s0).unwrap();
+
+        assert_eq!(drifts.len(), 3);
+        let max = max_column_drift(&model, &disp, 0, s0).unwrap().unwrap();
         assert_eq!(max.elem, ElemId(1));
         assert!((max.drift - 20.0).abs() < 1e-12);
     }
@@ -440,7 +423,7 @@ mod tests {
         disp[0][0] = 0.0; // 下端 z=0
         disp[1][0] = 6.0; // 中間 z=2000（セグメント δ=4 や 6 ではない）
         disp[2][0] = 10.0; // 上端 z=4000
-        let drifts = column_drifts(&model, &disp, 0, top);
+        let drifts = column_drifts(&model, &disp, 0, top).unwrap();
         assert_eq!(drifts.len(), 1);
         assert!(
             (drifts[0].drift - 10.0).abs() < 1e-12,

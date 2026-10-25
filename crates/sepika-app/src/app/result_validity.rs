@@ -687,7 +687,7 @@ impl App {
         self.require_result_input(key)
     }
 
-    pub(super) fn require_result_input(&self, key: ResultInputKey) -> Result<(), String> {
+    pub(crate) fn require_result_input(&self, key: ResultInputKey) -> Result<(), String> {
         if let Some(bundle) = self
             .core
             .scoped

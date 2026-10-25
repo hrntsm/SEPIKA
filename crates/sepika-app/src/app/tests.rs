@@ -14263,7 +14263,12 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
         .as_deref()
         .unwrap();
     assert!(reason.contains("解析") && reason.contains("旧契約") && reason.contains("保存版=34"));
-    assert!(!crate::summary::build_report_csv(&reopened).contains("[層指標(二次設計)]"));
+    let metrics = crate::summary::seismic_story_metrics(&reopened);
+    assert!(!metrics.is_empty());
+    assert!(metrics
+        .iter()
+        .all(|m| m.drift.is_err() && m.drift_ok.is_none()));
+    assert!(crate::summary::build_report_csv(&reopened).contains("未計算: 地震静的"));
     assert!(reopened.compute_holding_capacity().is_err());
 }
 
