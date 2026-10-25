@@ -105,6 +105,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | レポート | 対象 | 状態 |
 |---|---|---|
 | [一般部材荷重_Issue716_2026-10.md](一般部材荷重_Issue716_2026-10.md) | 全固定材・通常Fiber/MS・非線形時刻歴の長期部材荷重 | 🔶（公開入口と独立梁値のVerification。実測Validation・手動GUI・最終ゲートは未確認） |
+| [増分性能量と物理支持反力_Issue717_2026-10.md](増分性能量と物理支持反力_Issue717_2026-10.md) | 全支持抵抗と骨組切断面・元荷重・支持作用の区別 | 🔶（有限例のVerification。一般MPC・全塑性履歴・物理Validation・最終ゲートは未確認） |
 | [大梁床板実重複控除_Issue616_確認記録.md](大梁床板実重複控除_Issue616_確認記録.md) | 矩形RC/SRC大梁と床板の実重複・左右幅配分・DL/地震重量・実準備入口・編集保存失効 | 🔶（独立算術と自動入口のVerification。実測Validation・手動GUI・CIは未確認） |
 | [梁鉛直偏心_Issue726_確認記録.md](梁鉛直偏心_Issue726_確認記録.md) | 節点材軸基準の一律偏心・有限実配置・GUI/保存/Undo | 🔶（直接Verification、最終横断検証・レビュー・CIは記録参照） |
 | [階FL_SL_Issue729_確認記録.md](階FL_SL_Issue729_確認記録.md) | FL／SL・用途別階高と明示入力、GUI編集・保存・Undo・元STB属性 | 🔶（階情報の直接Verification。#490の算定と個別偏心は対象外、最終レビュー・CIは未確認） |
