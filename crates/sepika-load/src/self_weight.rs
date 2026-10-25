@@ -9,7 +9,9 @@ use sepika_core::model::{LoadCfg, MemberLoad, MemberLoadKind, Model, NodalLoad};
 
 use crate::story_gen::{enumerate_self_weight, SelfWeightItem};
 
+mod beam_upstand;
 mod girder_overlap;
+pub use beam_upstand::{all_beam_upstand_segments, beam_upstand_segments, BeamUpstandSegment};
 pub use girder_overlap::{girder_self_weight_breakdown, GirderSelfWeightBreakdown};
 
 /// 旧スキーマの自重自動生成荷重ケース名（現行は自重を「DL」ケースへ統合して
@@ -48,6 +50,20 @@ pub fn self_weight_case_content(
 
     for item in enumerate_self_weight(model, load_cfg)? {
         match item {
+            SelfWeightItem::Upstand { elem_idx, segments } => {
+                member.extend(
+                    segments
+                        .into_iter()
+                        .filter(|segment| segment.design_weight_n > 0.0)
+                        .map(|segment| {
+                            MemberLoad::auto(
+                                model.elements[elem_idx].id,
+                                DIR_DOWN,
+                                segment.design_load,
+                            )
+                        }),
+                );
+            }
             SelfWeightItem::Line {
                 elem_idx,
                 load,
@@ -512,6 +528,9 @@ mod tests {
             .unwrap()
             .iter()
             .map(|item| match item {
+                SelfWeightItem::Upstand { segments, .. } => {
+                    segments.iter().map(|s| s.design_weight_n).sum()
+                }
                 crate::story_gen::SelfWeightItem::Line {
                     load,
                     extra_bottom_load,

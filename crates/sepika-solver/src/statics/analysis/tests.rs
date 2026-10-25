@@ -2649,6 +2649,10 @@ fn test_model_issues_warns_free_end_on_free_tip() {
     };
 
     let mut model = make_cantilever_model();
+    model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 10.0,
+        thick: 10.0,
+    });
     for (id, name) in [(0u32, "CA"), (1, "CB")] {
         model.unassigned_beams.push(SecondaryMember {
             vertical_eccentricity: Some(0.0),
@@ -2660,9 +2664,9 @@ fn test_model_issues_warns_free_end_on_free_tip() {
                     support: SupportMemberId::Primary(ElemId(0)),
                     position: 0.5,
                 },
-                free_end_vector: [500.0, 0.0],
+                free_end_vector: [0.0, 500.0],
             },
-            section: None,
+            section: Some(SectionId(0)),
             name: name.into(),
         });
     }

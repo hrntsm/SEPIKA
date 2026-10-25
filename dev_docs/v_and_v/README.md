@@ -120,9 +120,11 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC壁線形軸曲げ剛性_Issue652_調査記録.md](RC壁線形軸曲げ剛性_Issue652_調査記録.md) | 現行ps換算と総断面候補、公開原画像・材料役割・実入口V&V条件 | 🔶（現行線形7試験成功。候補採否・適用範囲・安全性未確定、候補の実入口V&V未実施） |
 | [RC片持ち架構の階入力_Issue786_確認記録.md](RC片持ち架構の階入力_Issue786_確認記録.md) | 自動剛床とRC片持ち架構の独立変位・支持釣合い、ねじり解放機構の拒否 | 🔶（数値Verification。物理Validation・手動GUI・一般特異性判定は記録参照） |
 | [古い自動荷重と通常保存_Issue816_確認記録.md](古い自動荷重と通常保存_Issue816_確認記録.md) | 梁短縮後の既存自動DLと通常保存・再読込、手入力検証・失敗時状態保持・直接検定保存 | 🔶（公開編集/保存入口の自動Verification。手動GUI・物理Validation・最終ゲート未確認） |
 | [自立壁n倍法_Issue620_確認記録.md](自立壁n倍法_Issue620_確認記録.md) | 自立壁n倍法の対象・入力・同一断面柱集計 | 🔶（独立Verification。原書・動的専用比較・実測Validation未） |
+| [梁の床板嵩上げ_Issue731_2026-10.md](梁の床板嵩上げ_Issue731_2026-10.md) | 中心線上端・投影幅、床板材料別の嵩上げ重量/質量、区間DL・小梁設計・動的層質量 | 🔶（独立Verification、手動GUI・Validation未） |
 | [RC梁左右床板厚_Issue618_2026-10.md](RC梁左右床板厚_Issue618_2026-10.md) | RC梁の左右床板実厚・長さ平均/丸め上下界・矩形集計・実配置と未解決/複数梁Attached診断 | 🔶（単体/公開入口・床板群の独立Verificationと危険側例。Validation・手動GUI・最終ゲートは記録参照） |
 | [層指標の生成入力照合_Issue810_2026-10.md](層指標の生成入力照合_Issue810_2026-10.md) | GUI/CSVのRs/Re/Fes依存成果と現在入力・計算契約 | 🔶（自動Verificationの記録は同レポート、手動GUI・Validation未） |
 | [保存ブランチ496の変更採否_2026-10.md](保存ブランチ496の変更採否_2026-10.md) | 全102コミットの採否、免震/保存の復元、全固定時刻歴と確定前記録 | 🔶（有限Verification。実験Validationは未実施） |
@@ -318,6 +320,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 731 | 梁の床板嵩上げ | sepika-core / sepika-load / sepika-job / sepika-app | beam_placement.rs・self_weight/beam_upstand.rs・cascade.rs・app/girder_weight_tests.rs | [独立値と実入口](梁の床板嵩上げ_Issue731_2026-10.md#確認した入口) | 横断 | 🔶（数値Verification、手動GUI・Validation未） |
 | 810 | 層指標の生成入力照合 | sepika-app | summary.rs・design_view.rs | [独立期待値と実入口](層指標の生成入力照合_Issue810_2026-10.md#対象と独立期待値) | 横断 | 🔶（手動GUI・Validation未） |
 | 802 | 集中ばね梁の部材荷重 | sepika-element / sepika-solver / sepika-mcp | frame/concentrated・general_member_loads.rs・persist.rs | [独立期待値と公開入口](集中ばね梁の部材荷重_Issue802_2026-10.md#対象と独立期待値) | 横断 | 🔶（限定Verification、Validation未） |
 | 616 | 大梁自重の床板実重複控除 | sepika-load / sepika-job / sepika-app | self_weight/girder_overlap.rs・app/girder_weight_tests.rs・weight_preparation.rs | [独立値と実入口](大梁床板実重複控除_Issue616_確認記録.md#独立期待値と実入口) | 横断 | 🔶（数値Verification、Validation未） |
@@ -428,6 +431,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
+| 30a | RC壁線形軸・面内曲げの調査 | sepika-element / sepika-solver | wall/wall_element.rs・factory/mod.rs・tests/wall_system_linear.rs | [Issue652の実入口と独立条件](RC壁線形軸曲げ剛性_Issue652_調査記録.md#独立期待値と実入口) | 要素／線形 | 🔶（現行7試験成功、総断面候補未採用・未検証） |
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 | 32a | OVIKA保存成果の計算契約 | sepika-core / sepika-app | result_contract.rs・result_validity.rs・actions/design・result_contract_tests.rs | [Issue587の実OVIKA・実入口](保存成果の計算契約版_Issue587_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終全構成は後続） |
 | 32b | MCP保存成果の生成元と公開 | sepika-core / sepika-io / sepika-mcp | results/fs_store.rs・persist.rs・server_lifecycle_tests.rs | [Issue589の独立期待状態と実入口](MCP保存成果の生成元_Issue589_2026-10.md#独立期待状態と実入口) | 横断 | 🔶（直接Verification。最終ゲートは[PR #651](https://github.com/hrntsm/SEPIKA/pull/651)） |

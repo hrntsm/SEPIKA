@@ -108,6 +108,7 @@ fn parallel_beam_model(kind: ElementKind) -> Model {
     model.unassigned_beams.push(SecondaryMember {
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
+        vertical_eccentricity: Some(-50.0),
         ends: anchors(),
         section: Some(SectionId(0)),
         ..Default::default()

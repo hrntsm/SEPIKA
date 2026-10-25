@@ -77,6 +77,8 @@ pub struct PreparationResult {
     pub load_cases: Vec<PrepLoadCaseRow>,
     /// 矩形RC/SRC大梁の梁本体・床板実重複控除 [N]。仕上げ・付加重量・嵩上げは含まない。
     pub girder_self_weights: Vec<sepika_load::self_weight::GirderSelfWeightBreakdown>,
+    /// 床板ID・採用材料・左右・作用区間別の嵩上げ設計重量と物理質量。
+    pub beam_upstands: Vec<sepika_load::self_weight::BeamUpstandSegment>,
     /// モデル整合性チェックのエラー件数。
     pub diag_errors: usize,
     /// モデル整合性チェックの警告件数。
@@ -454,6 +456,7 @@ impl App {
         let (member_stiffness, member_stiffness_candidates) = self.build_prep_member_stiffness()?;
         let torsion_skipped = self.build_prep_torsion_skipped(&member_stiffness);
         Ok(PreparationResult {
+            beam_upstands: sepika_load::self_weight::all_beam_upstand_segments(&self.core.model)?,
             girder_self_weights: self
                 .core
                 .model
