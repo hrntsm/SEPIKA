@@ -2,7 +2,7 @@
 
 ## 対象と判定
 
-対象は [Issue #734](https://github.com/hrntsm/SEPIKA/issues/734) の固定初期幾何に対する微小剛体接続である。基点SHAは `49e83a70c451a98e177a1895f6ad30b074a5863e`。検証対象は実装コミット `2c2eaa12c52ea6c293231226df00a6fa58e4cbbf`。実行結果は下記に記録する。現行の計算契約と適用範囲は[座標変換](../../docs/calc_basis/04_要素剛性/08_座標変換.md#梁の鉛直偏心接続)、設計判断は[ADR 0076](../adr/0076-beam-eccentric-connection.md)を正本とする。本記録は数値Verificationであり、実験・実測によるValidationではない。
+対象は [Issue #734](https://github.com/hrntsm/SEPIKA/issues/734) の固定初期幾何に対する微小剛体接続である。基点SHAは `49e83a70c451a98e177a1895f6ad30b074a5863e`。検証対象は初回実装 `2c2eaa12c52ea6c293231226df00a6fa58e4cbbf` と、独立レビュー修正 `193ca93c76be92295553377236bba4df7546e088`。実行結果は下記に記録する。現行の計算契約と適用範囲は[座標変換](../../docs/calc_basis/04_要素剛性/08_座標変換.md#梁の鉛直偏心接続)、設計判断は[ADR 0076](../adr/0076-beam-eccentric-connection.md)を正本とする。本記録は数値Verificationであり、実験・実測によるValidationではない。
 
 ## 導出と独立期待値
 
@@ -57,9 +57,9 @@ Ryだけ自由で並進を拘束した水平梁（他端全固定）、一律鉛
 
 偏心0でj端Uxだけ自由な整合質量の梁では、自由行の質量はρAL/3だが、地動影響係数は固定端列を含めρAL/2である。追加節点質量mnは両方へ同じmnを加える。質点のみ方式なら両方mnであり入力は不変となる。`consistent_ground_motion_keeps_fixed_end_mass_and_nodal_only_input_is_unchanged` が公開線形時刻歴の最初の変位を独立式で確認する。
 
-## 実行結果
+## 初回実装の実行結果
 
-- 最終対象SHA: `2c2eaa12c52ea6c293231226df00a6fa58e4cbbf`（コード・試験。文書は後続の別コミット）。
+- 初回対象SHA: `2c2eaa12c52ea6c293231226df00a6fa58e4cbbf`（コード・試験。文書は後続の別コミット）。
 - `rustup update stable`: 成功、stable rustc 1.99.1 (58cf8f9c3 2026-10-13)。`cargo clippy --version`: clippy 0.1.99。
 - `cargo check -p sepika-element -p sepika-solver --locked`: 成功。
 - `cargo test -p sepika-core -p sepika-element -p sepika-solver --locked --quiet`: core591件・element540件成功後、solverの新しい断面診断文言への期待差分1件で停止。診断期待を改訂。
@@ -87,6 +87,29 @@ Ryだけ自由で並進を拘束した水平梁（他端全固定）、一律鉛
 | 実建物の層間変形角 | 4.081e−3 / 3.508e−3 / 2.022e−3 / 1.844e−3 | 4.088e−3 / 3.514e−3 / 2.025e−3 / 1.847e−3 | 同じ地動入力是正による変化 |
 
 snapshotの一致自体を独立解との精度保証とはしない。独立一自由度式のVerificationと、実建物の再現性回帰を区別する。
+
+## 独立レビューによるフランジ位置ゲートの是正
+
+初回head `593cf346` の独立レビューで、フランジ位置の標準形式判定へ渡す実材軸の相対鉛直位置が0固定のままであることを確認した。既存の共有接合節点から各梁の実材軸端までのZ差を同じ位置判定へ供給し、判定式・公差・適用範囲は維持した。共通の偏心を新しいパネル中心位置や耐力式へ読み替えない。
+
+`eccentric_panel_flange_applicability_uses_actual_end_heights_without_extending_staggered_scope` は、せい600 mm・フランジ厚17 mmの相対する同断面梁に対する独立期待値を確認する。梁の一律鉛直偏心−100/0/+100 mmなら上フランジ位置は191.5/291.5/391.5 mm、下フランジ位置は−391.5/−291.5/−191.5 mm。追加試験の最初のredは、−100 mm入力に対して上フランジ191.5 mmの期待に旧291.5 mmが返ることだった。
+
+- 同偏心の両梁は標準形式に適合し、既存PanelJointのdb・実効体積等は偏心0と同じ。公開線形解析が成功する。
+- 異偏心の組0/+100、0/−100、+100/−100では、上下の位置差がそれぞれ−100/+100/+200 mmとなり、接合部・梁・上下差付きの段違い診断で公開適用判定と解析を拒否する。
+- 一方の偏心未指定を0補完せず、公開適用判定と解析が未指定理由で停止する。
+- Beam/Fiber/MultiSpringと両梁の端順4組に対して同じ判定を照合する。Beamの既存自動生成は同偏心で生成、異偏心では生成しない。
+
+Fiber/MSの試験は、既存のBeam経路で生成した明示パネルを保持し、対象梁の要素表現を切り替えて行う。NodeAdjacencyの自動生成対象は既存RustdocどおりBeamであり、本件でFiber/MSの自動パネル生成を新対応としたものではない。
+
+修正後の対象SHAは `193ca93c76be92295553377236bba4df7546e088`。計算契約版は未公開Issue内の修正として53を維持する。
+
+- `cargo test -p sepika-solver --test panel_zone eccentric_panel_flange --locked --quiet`: 追加受入1件成功。
+- `cargo test -p sepika-core -p sepika-element -p sepika-solver --locked --quiet`: 1598件成功、既存ignored 1件。core591・element541・solver340の単体試験と、panel_zone21件を含む統合試験が成功。
+- `cargo test -p sepika-design-jp panel --locked --quiet`: 既存パネル検定34件成功。
+- `cargo test -p sepika-app --features gui --lib panel --locked --quiet`: GUI/保存契約等の既存パネル関連29件成功。
+- `cargo clippy -p sepika-core -p sepika-element -p sepika-solver -p sepika-design-jp -p sepika-app --features sepika-app/gui --all-targets --locked -- -D warnings`: 成功。
+- `cargo fmt --all -- --check`、`git diff --check`: 成功。
+- `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功。リンク644件・実装参照687件。
 
 ## 未実施範囲と残る制約
 
