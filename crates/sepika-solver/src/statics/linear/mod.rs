@@ -540,8 +540,7 @@ fn recover_static(
             member_forces.push((elem.id, forces));
             for (i, node) in elem.nodes.iter().enumerate() {
                 for d in 0..6 {
-                    reactions[node.index()][d] +=
-                        response.physical_frame_end_force_global[i * 6 + d];
+                    reactions[node.index()][d] += response.nodal_residual.data[i * 6 + d];
                 }
             }
         } else {
@@ -565,9 +564,11 @@ fn recover_static(
                 }
             }
             let equivalent = legacy_member_force(model, elem, loads);
+            let equivalent =
+                sepika_element::frame::eccentric::transform_nodal_load(elem, model, &equivalent);
             for (i, node) in elem.nodes.iter().take(2).enumerate() {
                 for d in 0..6 {
-                    reactions[node.index()][d] -= equivalent[i * 6 + d];
+                    reactions[node.index()][d] -= equivalent.data[i * 6 + d];
                 }
             }
         }

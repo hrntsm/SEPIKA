@@ -59,6 +59,52 @@ impl Model {
         resolve().map_err(|reason| format!("{} の実配置: {reason}", beam_label(member)))
     }
 
+    /// 梁用途の主架構の実材軸端 [mm] を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
+    pub fn primary_beam_axis_ends(
+        &self,
+        data: &ElementData,
+    ) -> Result<Option<[[f64; 3]; 2]>, String> {
+        if !data.kind.is_primary_frame_support() {
+            return Ok(None);
+        }
+        let fail = |end: &str, item: &str, reason: &str| {
+            format!("部材 ID {} {end}の{item}: {reason}", data.id.0)
+        };
+        let section = self
+            .element_section(data)
+            .ok_or_else(|| fail("i/j端", "断面", "未指定または参照先がありません"))?;
+        if section.frame_use != Some(FrameSectionUse::Girder) {
+            return Ok(None);
+        }
+        if data.nodes.len() != 2 {
+            return Err(fail("i/j端", "節点", "二節点が必要です"));
+        }
+        let eccentricity = data
+            .vertical_eccentricity
+            .ok_or_else(|| fail("i/j端", "鉛直偏心", "未指定です"))?;
+        if !eccentricity.is_finite() {
+            return Err(fail("i/j端", "鉛直偏心", "非有限です"));
+        }
+        let mut ends = [[0.0; 3]; 2];
+        for (side, name) in ["i端", "j端"].iter().enumerate() {
+            let node = self
+                .node(data.nodes[side])
+                .ok_or_else(|| fail(name, "節点", "存在しません"))?;
+            if !node.coord.iter().all(|v| v.is_finite()) {
+                return Err(fail(name, "接続節点座標", "非有限です"));
+            }
+            ends[side] = node.coord;
+        }
+        let ends = actual_beam_axis_ends(ends, eccentricity)
+            .map_err(|reason| format!("部材 ID {} {reason}", data.id.0))?;
+        if !dist(ends[0], ends[1]).is_finite() || dist(ends[0], ends[1]) <= 0.0 {
+            return Err(fail("i/j端", "実材軸長", "有限な正値ではありません"));
+        }
+        local_frame_axes(ends[0], ends[1], data.local_axis.ref_vector)
+            .map_err(|reason| fail("i/j端", "実材軸・局所軸", reason))?;
+        Ok(Some(ends))
+    }
+
     fn validate_beam_reference_supports(&self, member: SupportMemberId) -> Result<(), String> {
         let mut pending = vec![member];
         let mut checked = std::collections::HashSet::new();
@@ -111,13 +157,7 @@ impl BeamPlacement {
         if !vertical_eccentricity.is_finite() {
             return Err("鉛直偏心が非有限です".into());
         }
-        if !reference_ends.iter().flatten().all(|v| v.is_finite()) {
-            return Err("基準両端位置が非有限です".into());
-        }
-        let actual_ends = reference_ends.map(|p| add(p, [0.0, 0.0, vertical_eccentricity]));
-        if !actual_ends.iter().flatten().all(|v| v.is_finite()) {
-            return Err("実材軸端が非有限です".into());
-        }
+        let actual_ends = actual_beam_axis_ends(reference_ends, vertical_eccentricity)?;
         let axes = local_frame_axes(actual_ends[0], actual_ends[1], reference)?;
         let length_mm = dist(actual_ends[0], actual_ends[1]);
         if !length_mm.is_finite() || length_mm <= 0.0 {
@@ -274,6 +314,23 @@ impl BeamPlacement {
         }
         Ok(result)
     }
+}
+
+fn actual_beam_axis_ends(
+    reference_ends: [[f64; 3]; 2],
+    eccentricity_mm: f64,
+) -> Result<[[f64; 3]; 2], String> {
+    let mut ends = reference_ends;
+    for (side, name) in ["i端", "j端"].iter().enumerate() {
+        if !reference_ends[side].iter().all(|v| v.is_finite()) {
+            return Err(format!("{name}の基準位置が非有限です"));
+        }
+        ends[side] = add(reference_ends[side], [0.0, 0.0, eccentricity_mm]);
+        if !ends[side].iter().all(|v| v.is_finite()) {
+            return Err(format!("{name}の実材軸端が非有限です"));
+        }
+    }
+    Ok(ends)
 }
 
 fn beam_label(member: SupportMemberId) -> String {

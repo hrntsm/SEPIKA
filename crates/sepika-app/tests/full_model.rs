@@ -399,6 +399,15 @@ fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_expl
         .scoped
         .last_error
         .as_ref()
+        .is_some_and(|message| message.contains("鉛直偏心")));
+    declare_analysis_beam_placements(&mut app.core.model);
+    clear_error(&mut app);
+    app.run_preparation();
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
         .is_some_and(|message| message.contains("主筋中心位置")));
 }
 

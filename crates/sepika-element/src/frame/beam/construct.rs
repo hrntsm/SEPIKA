@@ -55,7 +55,13 @@ impl BeamElement {
         data: &sepika_core::model::ElementData,
         model: &Model,
     ) -> Result<Self, String> {
-        let geom = crate::transform::EndGeometry::of_element(data, model);
+        if model.primary_beam_axis_ends(data)?.is_some() && model.element_material(data).is_none() {
+            return Err(format!(
+                "部材 ID {} i/j端の材料: 未指定または参照先がありません",
+                data.id.0
+            ));
+        }
+        let geom = crate::transform::EndGeometry::try_of_element(data, model)?;
         let [n0, n1] = geom.nodes;
         let [p0, p1] = geom.coords;
         let len = geom.length;

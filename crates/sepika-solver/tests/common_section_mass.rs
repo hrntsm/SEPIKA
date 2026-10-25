@@ -1416,3 +1416,142 @@ fn beam_736_wall_column_mass_gate_returns_finite_input_stiffness_diagnostics() {
         }
     }
 }
+
+#[test]
+fn eccentric_ground_motion_drives_free_rotation_with_restrained_translations() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for offset_mm in [-100.0_f64, 0.0, 100.0] {
+            let mut model = fixture(None, MaterialCategory::Steel);
+            model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+            model.sections[0].area = 10000.0;
+            model.sections[0].width = 100.0;
+            model.sections[0].depth = 100.0;
+            model.sections[0].iy = 10000.0 * 10000.0 / 12.0;
+            model.sections[0].iz = 10000.0 * 10000.0 / 12.0;
+            model.sections[0].as_y = 1e100;
+            model.sections[0].as_z = 1e100;
+            model.materials[0].fy = Some(1e10);
+            model.elements[0].kind = kind;
+            model.elements[0].vertical_eccentricity = Some(offset_mm);
+            model.elements[0].plastic_zone = Some(300.0);
+            model.nodes[0].restraint = Dof6Mask::FIXED;
+            model.nodes[1].restraint = Dof6Mask(0b101111);
+            let map = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &map);
+            assert_eq!(reducer.n_indep, 1);
+            let density = 7.85e-9;
+            let area = 10000.0;
+            let inertia = area * 10000.0 / 12.0;
+            let length = LENGTH_MM;
+            let stiffness =
+                4.0 * 205000.0 * inertia / length + offset_mm.powi(2) * 205000.0 * area / length;
+            let mass = density * area * length.powi(3) / 105.0
+                + density * inertia * length * 2.0 / 15.0
+                + offset_mm.powi(2) * density * area * length / 3.0;
+            let actual_mass = assemble_global_m(&model, &map, MassOption::Consistent).unwrap();
+            assert!((actual_mass.to_dense()[(0, 0)] / mass - 1.0).abs() < 1e-12);
+            let eigen = solve_eigen(&model, &map, &reducer, 1).unwrap();
+            assert!((eigen.omega2[0] / (stiffness / mass) - 1.0).abs() < 1e-10);
+            let dt = 0.0001;
+            let wave = GroundMotion {
+                dt,
+                accel_x: vec![0.0, 1.0, 1.0],
+                accel_y: None,
+                accel_theta: None,
+            };
+            let expected =
+                -offset_mm * density * area * length / 2.0 / (stiffness + 4.0 * mass / (dt * dt));
+            let linear = linear_time_history_analysis(
+                &model,
+                &map,
+                &reducer,
+                &wave,
+                &NewmarkCfg::average_accel(),
+                &Damping::MassProportional { h: 0.0, omega: 1.0 },
+                &[],
+                &[],
+                false,
+                Some(1),
+            )
+            .unwrap();
+            let nonlinear = nonlinear_time_history_analysis(
+                &model,
+                &map,
+                &reducer,
+                &wave,
+                &NewmarkCfg::average_accel(),
+                &Damping::MassProportional { h: 0.0, omega: 1.0 },
+                DampingAccumulation::default(),
+                &[],
+                &[],
+                NonlinearThCfg {
+                    apply_long_term: false,
+                    record_every: Some(1),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for result in [linear, nonlinear] {
+                assert_eq!(result.non_converged_steps, 0);
+                let first = result.recording.unwrap().node_disp[1][1][4];
+                assert!(
+                    (first - expected).abs() < 1e-10 * expected.abs().max(1e-12),
+                    "{kind:?} e={offset_mm}: {first} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn consistent_ground_motion_keeps_fixed_end_mass_and_nodal_only_input_is_unchanged() {
+    for nodal_only in [false, true] {
+        let mut model = fixture(None, MaterialCategory::Steel);
+        model.nodes[0].restraint = Dof6Mask::FIXED;
+        model.nodes[1].restraint = Dof6Mask(0b111110);
+        model.nodes[1].mass = Some([0.25, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        if nodal_only {
+            model.mass_method = MassMethod::LumpedOnly;
+        }
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        let distributed_mass = if nodal_only {
+            0.0
+        } else {
+            12345.0 * 7.85e-9 * LENGTH_MM
+        };
+        let mass = 0.25 + distributed_mass / 3.0;
+        let influence = 0.25 + distributed_mass / 2.0;
+        let stiffness = 205000.0 * 12345.0 / LENGTH_MM;
+        let dt = 0.0001;
+        let expected = -influence / (stiffness + 4.0 * mass / (dt * dt));
+        let wave = GroundMotion {
+            dt,
+            accel_x: vec![0.0, 1.0],
+            accel_y: None,
+            accel_theta: None,
+        };
+        let result = linear_time_history_analysis(
+            &model,
+            &map,
+            &reducer,
+            &wave,
+            &NewmarkCfg::average_accel(),
+            &Damping::MassProportional { h: 0.0, omega: 1.0 },
+            &[],
+            &[],
+            false,
+            Some(1),
+        )
+        .unwrap();
+        let first = result.recording.unwrap().node_disp[1][1][0];
+        assert!(
+            (first / expected - 1.0).abs() < 1e-10,
+            "{first} != {expected}"
+        );
+    }
+}

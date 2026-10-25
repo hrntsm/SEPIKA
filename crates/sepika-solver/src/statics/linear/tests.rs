@@ -2513,3 +2513,59 @@ fn invalid_beam_shear_modulus_is_rejected_by_public_static_entries_and_construct
         }
     }
 }
+
+#[test]
+fn eccentric_member_load_reactions_keep_transfer_moment_after_end_releases_and_rigid_zones() {
+    for e in [-100.0, 0.0, 100.0] {
+        for released in [[false, false], [true, false], [true, true]] {
+            for rigid in [0.0, 100.0] {
+                for reversed in [false, true] {
+                    let mut model = owned_udl_model();
+                    model.elements[0].vertical_eccentricity = Some(e);
+                    model.elements[0].end_cond = released.map(|v| {
+                        if v {
+                            EndCondition::Pinned
+                        } else {
+                            EndCondition::Fixed
+                        }
+                    });
+                    model.elements[0].rigid_zone.length_i = rigid;
+                    model.elements[0].rigid_zone.length_j = rigid;
+                    if reversed {
+                        model.elements[0].nodes.reverse();
+                    }
+                    model.load_cases[0].member[0] = MemberLoad::manual(
+                        ElemId(0),
+                        [1.0, 0.0, 0.0],
+                        MemberLoadKind::Distributed {
+                            a: 0.0,
+                            b: 1000.0,
+                            w1: 2.0,
+                            w2: 2.0,
+                        },
+                    );
+                    let map = DofMap::build(&model);
+                    let reducer = Reducer::build(&model, &map);
+                    let stiffness =
+                        StaticStiffness::build(&model, &map, &reducer, model.load_cases[0].kind)
+                            .unwrap();
+                    let entries: Vec<_> = stiffness
+                        .behaviors
+                        .iter()
+                        .map(|(id, b, g)| (*id, b.as_ref(), g.as_slice()))
+                        .collect();
+                    let ledger = PhysicalLoadLedger::new(&model, &model.load_cases[0]).unwrap();
+                    let (result, reactions) =
+                        recover_static(&model, &map, &[], &ledger, &entries).unwrap();
+                    for reaction in reactions {
+                        assert!((reaction[0] + 1000.0).abs() < 1e-7, "{reaction:?}");
+                        assert!((reaction[4] + 1000.0 * e).abs() < 1e-7, "{reaction:?}");
+                    }
+                    for (_, force) in result.member_forces[0].1.at.iter() {
+                        assert!(force[4].abs() < 1e-7 && force[5].abs() < 1e-7);
+                    }
+                }
+            }
+        }
+    }
+}

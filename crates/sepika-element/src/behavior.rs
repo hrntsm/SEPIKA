@@ -61,7 +61,7 @@ pub struct LocalVec {
 pub struct LoadedFrameResponse {
     /// 全体系の一般化残差。並びは外側要素の global_dofs と一致する。
     pub nodal_residual: LocalVec,
-    /// 内側物理梁の元節点位置における全体系12成分端力。仕口パネルの追加自由度を含まない。
+    /// 内側物理梁の実材軸端における全体系12成分端力。偏心移送モーメントと仕口パネル自由度を含まない。
     pub physical_frame_end_force_global: [f64; 12],
     /// 元材料局所軸の可撓フェイス12成分端力。剛域節点荷重を含まない。
     pub flex_face_force_local: [f64; 12],

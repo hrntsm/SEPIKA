@@ -158,8 +158,7 @@ pub(crate) fn assemble_linear_rhs(
             }
         } else if !loads.is_empty() {
             let force = legacy_member_force(model, elem, loads);
-            let force =
-                sepika_element::frame::panel_offset::transform_nodal_load(elem, model, &force);
+            let force = sepika_element::frame::eccentric::transform_nodal_load(elem, model, &force);
             if force.data.len() != gdofs.len() {
                 return Err(element_error(
                     elem.id,
@@ -211,8 +210,7 @@ pub(crate) fn prepare_nonlinear_loads(
         let loads = ledger.member_loads(elem.id);
         if !behavior.owns_frame_member_loads() && !loads.is_empty() {
             let force = legacy_member_force(model, elem, loads);
-            let force =
-                sepika_element::frame::panel_offset::transform_nodal_load(elem, model, &force);
+            let force = sepika_element::frame::eccentric::transform_nodal_load(elem, model, &force);
             let gdofs = behavior.global_dofs(dofmap);
             if force.data.len() != gdofs.len() {
                 return Err(format!(

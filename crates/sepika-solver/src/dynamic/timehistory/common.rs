@@ -235,17 +235,31 @@ pub(crate) struct GroundInfluence {
 }
 
 impl GroundInfluence {
-    pub(crate) fn build(
-        model: &Model,
-        dofmap: &DofMap,
-        m_free: &faer::sparse::SparseColMat<usize, f64>,
-    ) -> Self {
-        let (m_r_x, m_r_y) = horizontal_influence_m(model, dofmap, m_free);
-        Self {
-            m_r_x,
-            m_r_y,
-            m_r_theta: theta_influence_m(model, dofmap, m_free),
-        }
+    pub(crate) fn build(model: &Model, dofmap: &DofMap) -> Result<Self, SolveError> {
+        let full = dofmap.including_restrained_node_dofs();
+        let mass = crate::common::assemble::assemble_global_m(
+            model,
+            &full,
+            sepika_element::behavior::MassOption::Consistent,
+        )?;
+        let (x, y) = horizontal_influence_m(model, &full, &mass);
+        let theta = theta_influence_m(model, &full, &mass);
+        let active = |values: Vec<f64>| {
+            (0..dofmap.n_active())
+                .map(|a| {
+                    let global = dofmap.global(a as u32);
+                    values[full
+                        .active(global)
+                        .expect("自由自由度は全自由度に含まれます")
+                        as usize]
+                })
+                .collect()
+        };
+        Ok(Self {
+            m_r_x: active(x),
+            m_r_y: active(y),
+            m_r_theta: active(theta),
+        })
     }
 
     /// ステップ `n` の等価地震力 `p = −M·r·ẍg(n)`（自由 DOF 空間）を `out` へ書き込む。

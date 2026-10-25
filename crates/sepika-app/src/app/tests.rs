@@ -713,6 +713,7 @@ fn preparation_rebuild_clears_generated_wall_selection_only() {
         wall_plate_ids: vec![WallPlateId(0)],
         posts: Vec::new(),
     });
+    assign_zero_density_test_frame_sections(&mut app.core.model);
     let (_, index, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
     let generated = index.generated_elem_ids().next().expect("生成壁要素");
     assert!(app.core.model.element(generated).is_none());
@@ -4446,6 +4447,7 @@ fn ダンパー総重量はgui共通同期経路の再実行でも増殖しな�
                 ..Default::default()
             });
             app.core.model.mass_method = method;
+            assign_zero_density_test_frame_sections(&mut app.core.model);
             app.sync_gravity_load_cases_action();
             let dl = app
                 .core
@@ -8573,6 +8575,38 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         .expect("標準荷重ケース DL が自動作成されるはず")
         .id;
 
+    app2.run_linear_static(dl_id);
+    assert!(app2
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("鉛直偏心"));
+    let imported_beams = app2
+        .core
+        .model
+        .elements
+        .iter()
+        .filter(|element| {
+            element.kind.is_primary_frame_support()
+                && app2
+                    .core
+                    .model
+                    .element_section(element)
+                    .and_then(|section| section.frame_use)
+                    == Some(sepika_core::model::FrameSectionUse::Girder)
+        })
+        .map(|element| element.id)
+        .collect::<Vec<_>>();
+    for id in imported_beams {
+        assert!(
+            app2.apply_model_edit(Box::new(sepika_edit::SetBeamVerticalEccentricity {
+                member: sepika_core::model::SupportMemberId::Primary(id),
+                value: Some(0.0)
+            }))
+        );
+    }
     app2.run_linear_static(dl_id);
     assert!(
         app2.core.scoped.last_error.is_none(),
@@ -14921,5 +14955,40 @@ fn independent_eccentric_beam_is_visible_in_secondary_list() {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(text.contains("SM0"), visible, "{eccentricity:?}: {text}");
+    }
+}
+
+pub(super) fn assign_zero_density_test_frame_sections(model: &mut sepika_core::model::Model) {
+    if !model
+        .elements
+        .iter()
+        .any(|e| e.kind.is_primary_frame_support() && e.section.is_none())
+    {
+        return;
+    }
+    let seed = crate::sample::portal_frame();
+    let material_id = MaterialId(model.materials.len() as u32);
+    let mut material = seed.materials[0].clone();
+    material.id = material_id;
+    material.density = 0.0;
+    model.materials.push(material);
+    let column = SectionId(model.sections.len() as u32);
+    let girder = SectionId(column.0 + 1);
+    for (id, template) in [(column, 0), (girder, 1)] {
+        let mut section = seed.sections[template].clone();
+        section.id = id;
+        section.material = Some(material_id);
+        model.sections.push(section);
+    }
+    for element in &mut model.elements {
+        if element.kind.is_primary_frame_support() && element.section.is_none() {
+            let a = model.nodes[element.nodes[0].index()].coord;
+            let b = model.nodes[element.nodes[1].index()].coord;
+            element.section = Some(if (b[2] - a[2]).abs() > (b[0] - a[0]).hypot(b[1] - a[1]) {
+                column
+            } else {
+                girder
+            });
+        }
     }
 }

@@ -35,7 +35,20 @@ impl PhysicalStep {
             let elem = model
                 .element(load.elem)
                 .ok_or("性能曲線の荷重要素がありません")?;
-            let length = model.member_length(elem);
+            let reference = [
+                model
+                    .node(elem.nodes[0])
+                    .ok_or("性能曲線のi端荷重節点がありません")?
+                    .coord,
+                model
+                    .node(elem.nodes[1])
+                    .ok_or("性能曲線のj端荷重節点がありません")?
+                    .coord,
+            ];
+            let actual = model
+                .primary_beam_axis_ends(elem)?
+                .unwrap_or([reference[0], reference[1]]);
+            let length = sepika_core::geom::vec3::dist(actual[0], actual[1]);
             let projection = load.dir[d] / sepika_core::geom::vec3::norm(load.dir);
             if let MemberLoadKind::Point { a, p } = load.kind {
                 let endpoint = if a == 0. {
@@ -45,7 +58,9 @@ impl PhysicalStep {
                 } else {
                     None
                 };
-                if let Some(endpoint) = endpoint {
+                if let Some(endpoint) =
+                    endpoint.filter(|&endpoint| actual[endpoint] == reference[endpoint])
+                {
                     let node = elem.nodes[endpoint].index();
                     end[node] += p * projection;
                     if self.fixed_dofs[node][d] {
@@ -54,8 +69,8 @@ impl PhysicalStep {
                     continue;
                 }
             }
-            let zi = model.nodes[elem.nodes[0].index()].coord[2];
-            let zj = model.nodes[elem.nodes[1].index()].coord[2];
+            let zi = actual[0][2];
+            let zj = actual[1][2];
             if let Some(highest) = highest {
                 for layer in &layers {
                     member_story[layer.index] +=

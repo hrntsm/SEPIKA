@@ -153,6 +153,7 @@ fn with_panel_offset(
     data: &ElementData,
     model: &Model,
 ) -> Box<dyn ElementBehavior> {
+    let inner = crate::frame::eccentric::connect(inner, data, model);
     match crate::frame::panel_offset::resolve(data, model) {
         Some(ends) => Box::new(crate::frame::panel_offset::PanelOffsetMember::new(
             inner, ends,

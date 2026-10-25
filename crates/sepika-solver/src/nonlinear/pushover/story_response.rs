@@ -31,7 +31,7 @@ pub enum ForceGroup {
     Frame,
 }
 
-/// 物理要素を一度だけ計上した符号付き上側材端力 `[N]`。
+/// 物理要素を一度だけ計上した切断交点の符号付き合力 `[N]`。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CutForce {
     pub elem: ElemId,
@@ -386,7 +386,21 @@ pub(super) fn record_cuts_with_responses(
                     cut.unavailable = Some("切断要素の節点参照が欠落しています".into());
                     continue;
                 };
-                if !nodes.iter().any(|n| n.coord[2] > z) || !nodes.iter().any(|n| n.coord[2] < z) {
+                let actual_ends = match model.primary_beam_axis_ends(elem) {
+                    Ok(ends) => ends,
+                    Err(reason) => {
+                        cut.unavailable = Some(reason);
+                        continue;
+                    }
+                };
+                let crosses = if let Some(ends) = actual_ends {
+                    let heights = [nodes[0].coord[2], ends[0][2], ends[1][2], nodes[1].coord[2]];
+                    heights.iter().any(|height| *height > z)
+                        && heights.iter().any(|height| *height <= z)
+                } else {
+                    nodes.iter().any(|n| n.coord[2] > z) && nodes.iter().any(|n| n.coord[2] < z)
+                };
+                if !crosses {
                     continue;
                 }
                 let Some(b) = behaviors.get(i) else {
@@ -439,7 +453,7 @@ pub(super) fn record_cuts_with_responses(
                     ForceGroup::Frame
                 };
                 let response = responses[i].as_ref();
-                let force_n = if let Some(response) = response {
+                let force_n = if let Some(response) = response.filter(|_| actual_ends.is_none()) {
                     let pi = nodes[0].coord;
                     let pj = nodes[1].coord;
                     let xi = (z - pi[2]) / (pj[2] - pi[2]);
@@ -461,6 +475,7 @@ pub(super) fn record_cuts_with_responses(
                             - section[1] * frame.rot[1][d]
                             - section[2] * frame.rot[2][d])
                 } else {
+                    // 偏心接続腕だけを横切る断面もあるため、単一の材軸交点の断面力では合力を回復できない。
                     let end_force = physical.element_nodal[i]
                         .iter()
                         .filter(|(node, _)| model.nodes[*node].coord[2] > z)

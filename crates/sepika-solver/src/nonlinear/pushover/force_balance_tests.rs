@@ -507,3 +507,251 @@ fn rigid_link_to_fixed_master_keeps_its_dependent_support_resistance() {
         close(capacity.story[0], 0.);
     }
 }
+
+#[test]
+fn eccentric_confirmed_member_load_response_keeps_support_transfer_moment() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for offset in [-100.0, 0.0, 100.0] {
+            let mut model = super::tests::single_column_model(1e10, 0.0);
+            model.nodes[1].coord = [3000.0, 0.0, 0.0];
+            model.nodes[1].restraint = Dof6Mask::FIXED;
+            model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+            model.elements[0].kind = kind;
+            model.elements[0].vertical_eccentricity = Some(offset);
+            model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+            let map = DofMap::build(&model);
+            let mut behavior = sepika_element::factory::build_nonlinear_behavior(
+                &model.elements[0],
+                &model,
+                sepika_element::factory::StrengthBasis::Nominal,
+                sepika_core::model::AnalysisKind::Incremental,
+                None,
+            );
+            let mut source = super::loads::PhysicalPushoverLoads::empty().reference;
+            source.member.push(MemberLoad::manual(
+                model.elements[0].id,
+                [1.0, 0.0, 0.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 3000.0,
+                    w1: 2.0,
+                    w2: 2.0,
+                },
+            ));
+            behavior
+                .update_state_with_member_loads(
+                    &LocalVec {
+                        data: smallvec::smallvec![0.0; 12],
+                    },
+                    &source.member,
+                    true,
+                    &Ctx { model: &model },
+                )
+                .unwrap();
+            let behaviors = vec![behavior];
+            let responses = super::geom::member_recording_responses(&model, &behaviors).unwrap();
+            let physical = super::physical_response::PhysicalStep::recover(
+                &model,
+                &map,
+                &behaviors,
+                &responses,
+                &[],
+                source.clone(),
+                source,
+            )
+            .unwrap();
+            for end in 0..2 {
+                close(physical.support[end][0], -3000.0);
+                close(physical.support[end][4], -3000.0 * offset);
+                close(
+                    responses[0]
+                        .as_ref()
+                        .unwrap()
+                        .physical_frame_end_force_global[end * 6 + 4],
+                    0.0,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn eccentric_physical_path_cuts_include_arms_actual_load_position_and_plane_endpoints_once() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for reversed in [false, true] {
+            for (zi, zj, dx, offset, above_fraction, upper_nodes) in [
+                (0.0, 1800.0, 2400.0, 100.0, 2.0 / 9.0, 1),
+                (0.0, 1800.0, 2400.0, 0.0, 1.0 / 6.0, 1),
+                (0.0, 0.0, 3000.0, 2000.0, 1.0, 0),
+                (3000.0, 3000.0, 3000.0, -2000.0, 0.0, 2),
+                (1500.0, 1500.0, 3000.0, 500.0, 1.0, 0),
+                (2000.0, 2000.0, 3000.0, -500.0, 0.0, 2),
+            ] {
+                let mut model = super::tests::single_column_model(1e10, 0.0);
+                model.nodes[0].coord = [0.0, 0.0, zi];
+                model.nodes[1].coord = [dx, 0.0, zj];
+                model.nodes[1].restraint = Dof6Mask::FIXED;
+                model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+                model.elements[0].kind = kind;
+                model.elements[0].vertical_eccentricity = Some(offset);
+                model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+                if reversed {
+                    model.elements[0].nodes.reverse();
+                }
+                let map = DofMap::build(&model);
+                let mut behavior = sepika_element::factory::build_nonlinear_behavior(
+                    &model.elements[0],
+                    &model,
+                    sepika_element::factory::StrengthBasis::Nominal,
+                    sepika_core::model::AnalysisKind::Incremental,
+                    None,
+                );
+                let mut source = super::loads::PhysicalPushoverLoads::empty().reference;
+                source.member.push(MemberLoad::manual(
+                    model.elements[0].id,
+                    [1.0, 0.0, 0.0],
+                    MemberLoadKind::Distributed {
+                        a: 0.0,
+                        b: 3000.0,
+                        w1: 2.0,
+                        w2: 2.0,
+                    },
+                ));
+                behavior
+                    .update_state_with_member_loads(
+                        &LocalVec {
+                            data: smallvec::smallvec![0.0; 12],
+                        },
+                        &source.member,
+                        true,
+                        &Ctx { model: &model },
+                    )
+                    .unwrap();
+                let behaviors = vec![behavior];
+                let responses =
+                    super::geom::member_recording_responses(&model, &behaviors).unwrap();
+                let physical = super::physical_response::PhysicalStep::recover(
+                    &model,
+                    &map,
+                    &behaviors,
+                    &responses,
+                    &[],
+                    source.clone(),
+                    source.clone(),
+                )
+                .unwrap();
+                let actual_above =
+                    super::physical_response::load_above(&model, &source, 1500.0, 0).unwrap();
+                close(actual_above, 6000.0 * above_fraction);
+                let cuts = super::story_response::record_cuts_with_responses(
+                    &model,
+                    &map,
+                    &behaviors,
+                    SeismicDir::X,
+                    &responses,
+                    &physical,
+                )
+                .unwrap();
+                let cut = &cuts[0];
+                assert!(cut.unavailable.is_none(), "{:?}", cut.unavailable);
+                assert_eq!(cut.forces.len(), 1);
+                close(
+                    cut.forces[0].force_n,
+                    6000.0 * above_fraction - 3000.0 * f64::from(upper_nodes),
+                );
+                close(
+                    cut.forces[0].force_n,
+                    actual_above + physical.support_above(&model, 1500.0, 0),
+                );
+                if zi == zj {
+                    let mut increment = LocalVec {
+                        data: smallvec::smallvec![0.0; 12],
+                    };
+                    increment.data[6] = 0.001;
+                    let mut behaviors = behaviors;
+                    behaviors[0]
+                        .update_state_with_member_loads(
+                            &increment,
+                            &[],
+                            true,
+                            &Ctx { model: &model },
+                        )
+                        .unwrap();
+                    let responses =
+                        super::geom::member_recording_responses(&model, &behaviors).unwrap();
+                    let empty = super::loads::PhysicalPushoverLoads::empty().reference;
+                    let physical = super::physical_response::PhysicalStep::recover(
+                        &model,
+                        &map,
+                        &behaviors,
+                        &responses,
+                        &[],
+                        empty.clone(),
+                        empty,
+                    )
+                    .unwrap();
+                    assert!(physical.element_nodal[0][0].1[0].abs() > 1.0);
+                    let cut = super::story_response::record_cuts_with_responses(
+                        &model,
+                        &map,
+                        &behaviors,
+                        SeismicDir::X,
+                        &responses,
+                        &physical,
+                    )
+                    .unwrap()
+                    .remove(0);
+                    assert_eq!(cut.forces.len(), 1);
+                    close(cut.forces[0].force_n, 0.0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn eccentric_member_endpoint_load_is_not_a_direct_fixed_node_load() {
+    for offset in [0.0, 2000.0] {
+        for a in [0.0, 3000.0] {
+            let mut model = super::tests::single_column_model(1e10, 0.0);
+            model.nodes[1].coord = [3000.0, 0.0, 0.0];
+            model.nodes[1].restraint = Dof6Mask::FIXED;
+            model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+            model.elements[0].vertical_eccentricity = Some(offset);
+            model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+            let map = DofMap::build(&model);
+            let behavior = sepika_element::factory::build_behavior(&model.elements[0], &model);
+            let behaviors = vec![behavior];
+            let responses = super::geom::member_recording_responses(&model, &behaviors).unwrap();
+            let mut source = super::loads::PhysicalPushoverLoads::empty().reference;
+            source.member.push(MemberLoad::manual(
+                model.elements[0].id,
+                [1.0, 0.0, 0.0],
+                MemberLoadKind::Point { a, p: 1000.0 },
+            ));
+            let physical = super::physical_response::PhysicalStep::recover(
+                &model,
+                &map,
+                &behaviors,
+                &responses,
+                &[],
+                source.clone(),
+                source,
+            )
+            .unwrap();
+            let forces = physical
+                .capacity_forces(&model, &map, SeismicDir::X)
+                .unwrap();
+            close(forces.base, if offset == 0.0 { 0.0 } else { 1000.0 });
+            close(forces.story[0], if offset == 0.0 { 0.0 } else { 1000.0 });
+        }
+    }
+}

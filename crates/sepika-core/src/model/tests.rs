@@ -2294,11 +2294,14 @@ fn local_frame_guard_distinguishes_zero_length_members_from_spring_and_isolator(
             .collect(),
         ..Default::default()
     };
+    model
+        .sections
+        .push(Section::zero(SectionId(0), "局所軸検査".into()));
     model.elements.push(ElementData {
         id: ElemId(12),
         kind: ElementKind::Beam,
         nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
-        section: None,
+        section: Some(SectionId(0)),
         local_axis: LocalAxis {
             ref_vector: [1.0, 0.0, 0.0],
         },

@@ -1,6 +1,7 @@
 //! 線材（梁・柱・ブレース）要素。
 pub mod beam;
 pub mod concentrated;
+pub mod eccentric;
 pub mod fiber;
 pub mod member_load;
 pub mod multi_spring;
