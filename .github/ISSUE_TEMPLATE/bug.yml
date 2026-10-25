@@ -7,6 +7,7 @@ body:
       value: |
         分かっている現象と、修正によって達成したい状態を記載してください。
         再現条件や影響が未判明でも起票できます。詳細な実装手順は不要です。
+        [Issue の書き方](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の書き方) に従い、タイトルと冒頭は一般的な用語で記述し、内部実装用語は補足へ分けてください。
   - type: textarea
     id: background
     attributes:
