@@ -895,7 +895,7 @@ mod tests {
                         position: 0.0,
                     },
                 ]),
-                section: None,
+                section: Some(SectionId(1)),
                 name: "J".into(),
             });
         model.rebuild_floor_assignment_regions();

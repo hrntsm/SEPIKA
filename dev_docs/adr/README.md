@@ -105,8 +105,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0073](0073-panel-connection-face-distance.md) | accepted | 仕口パネルの梁端接合面を既存入力から一意に解決する |
 | [0075](0075-rc-beam-length-weighted-slab-thickness.md) | accepted | RC梁の床板厚を各側の取付長で加重平均する |
-
 | [0076](0076-beam-eccentric-connection.md) | accepted | 梁の実材軸への偏心接続を既存要素の外側で合成する |
+| [0077](0077-beam-centerline-slab-upstand.md) | accepted | 梁の床板嵩上げを中心線上端と水平投影幅で算定する |
 
 | [0078](0078-equilibrated-cholesky-condition-estimate.md) | accepted | 平衡化後の推定逆条件数で正定値求解の数値条件を診断する |
 

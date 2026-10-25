@@ -1080,15 +1080,50 @@ pub fn build_preparation_csv(app: &App) -> String {
         }
     }
 
-    if !p.girder_self_weights.is_empty() {
-        out.push_str("\n[矩形RC/SRC大梁自重（仕上げ・付加重量・嵩上げを除く）]\n部材ID,梁本体[kN],床板重複控除[kN],控除後[kN]\n");
-        for w in &p.girder_self_weights {
+    if !p.beam_upstands.is_empty() {
+        out.push_str("\n[梁の床板嵩上げ]\n梁,床板ID,材料ID,採用元,側,始端[mm],終端[mm],幅[mm],始端空き[mm],終端空き[mm],体積[m³],設計重量[kN],物理質量[t],物理質量相当重量[kN],設計単位重量[kN/m³],物理密度[t/m³]\n");
+        for s in &p.beam_upstands {
+            let beam = match s.beam {
+                sepika_core::model::SupportMemberId::Primary(id) => format!("大梁 {}", id.0),
+                sepika_core::model::SupportMemberId::Secondary(id) => format!("小梁 {}", id.0),
+            };
             out.push_str(&format!(
-                "{},{:.2},{:.2},{:.2}\n",
+                "{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.9},{:.6},{:.9},{:.6},{:.9},{:.9}\n",
+                beam,
+                s.slab.0,
+                s.material.0,
+                s.material_source_label(),
+                if s.side == 0 { "左" } else { "右" },
+                s.interval_mm[0],
+                s.interval_mm[1],
+                s.width_mm,
+                s.gap_mm[0],
+                s.gap_mm[1],
+                s.volume_mm3 / 1e9,
+                kn(s.design_weight_n),
+                s.physical_mass_t,
+                kn(s.mass_equivalent_weight_n),
+                s.design_unit_weight_n_per_mm3 / 1e-6,
+                s.physical_density_t_per_mm3 / 1e-9
+            ));
+        }
+    }
+    if !p.girder_self_weights.is_empty() {
+        out.push_str("\n[矩形RC/SRC大梁自重（仕上げ・付加重量を除く）]\n部材ID,梁本体[kN],床板重複控除[kN],嵩上げ加算[kN],合計[kN]\n");
+        for w in &p.girder_self_weights {
+            let upstand: f64 = p
+                .beam_upstands
+                .iter()
+                .filter(|s| s.beam == sepika_core::model::SupportMemberId::Primary(w.element))
+                .map(|s| s.design_weight_n)
+                .sum();
+            out.push_str(&format!(
+                "{},{:.2},{:.2},{:.2},{:.2}\n",
                 w.element.0,
                 kn(w.body_weight_n),
                 kn(w.slab_overlap_weight_n),
-                kn(w.body_weight_n - w.slab_overlap_weight_n)
+                kn(upstand),
+                kn(w.body_weight_n - w.slab_overlap_weight_n + upstand)
             ));
         }
     }
