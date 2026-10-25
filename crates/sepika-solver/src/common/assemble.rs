@@ -264,9 +264,14 @@ pub(crate) fn member_load_frame(model: &Model, elem: &ElementData) -> Option<(Lo
     if !is_member_load_target(elem) {
         return None;
     }
-    let p_i = model.nodes.get(elem.nodes[0].index())?.coord;
-    let p_j = model.nodes.get(elem.nodes[1].index())?.coord;
-    let length = model.member_length(elem);
+    let [p_i, p_j] = model
+        .primary_beam_axis_ends(elem)
+        .unwrap_or_else(|reason| panic!("{reason}"))
+        .unwrap_or([
+            model.nodes.get(elem.nodes[0].index())?.coord,
+            model.nodes.get(elem.nodes[1].index())?.coord,
+        ]);
+    let length = sepika_core::geom::vec3::dist(p_i, p_j);
     if length < 1e-9 {
         return None;
     }
@@ -309,8 +314,7 @@ fn add_member_loads(
             span_load_transfer(elem),
         );
         let q_global = frame.rotate_to_global(&q_local);
-        let force =
-            sepika_element::frame::panel_offset::transform_nodal_load(elem, model, &q_global);
+        let force = sepika_element::frame::eccentric::transform_nodal_load(elem, model, &q_global);
         let gdofs = build_behavior(elem, model).global_dofs(dofmap);
         assert_eq!(force.data.len(), gdofs.len(), "等価節点荷重の自由度数");
         for (&active, value) in gdofs.iter().zip(force.data) {

@@ -413,12 +413,12 @@ fn test_prepare_reports_diagnostics() {
     // 断面が未割当（部材）。
     let mut model = make_cantilever_model();
     model.elements[0].section = None;
-    expect(&model, "断面が未割当");
+    expect(&model, "i/j端の断面");
 
     // 材料が未割当（材料は断面が持つ。断面未割当とは別の不備として報告する）。
     let mut model = make_cantilever_model();
     model.sections[0].material = None;
-    expect(&model, "材料が未割当");
+    expect(&model, "i/j端の材料");
 
     // どの部材にも接続されない節点。
     let mut model = make_cantilever_model();

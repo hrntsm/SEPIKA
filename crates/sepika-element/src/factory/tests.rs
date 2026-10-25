@@ -2180,3 +2180,312 @@ fn panel_757_valid_steel_joint_couples_each_factory_representation_once() {
         }
     }
 }
+
+#[test]
+fn eccentric_beam_factory_preserves_work_stiffness_mass_and_committed_member_forces() {
+    use crate::behavior::{Ctx, LocalVec, MassOption};
+    for (kind, regime) in [
+        (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
+        (ElementKind::Beam, ForceRegime::AxialBendingInteract),
+        (ElementKind::Fiber, ForceRegime::Auto),
+        (ElementKind::MultiSpring, ForceRegime::Auto),
+    ] {
+        for offset in [-100.0, 0.0, 100.0] {
+            let mut model = eccentric_member_model(kind, offset);
+            model.elements[0].force_regime = regime;
+            let data = &model.elements[0];
+            let ctx = Ctx { model: &model };
+            let mut behavior = build_nonlinear_behavior(
+                data,
+                &model,
+                StrengthBasis::Nominal,
+                AnalysisKind::Incremental,
+                None,
+            );
+            let mut displacement = LocalVec {
+                data: smallvec::smallvec![0.0; 12],
+            };
+            displacement.data[4] = 0.001;
+            displacement.data[10] = 0.001;
+            displacement.data[8] = -1.0;
+            behavior.update_state(&displacement, true, &ctx).unwrap();
+            assert!(behavior
+                .internal_force(&ctx)
+                .data
+                .iter()
+                .all(|v| v.abs() < 1e-6));
+            let mut stretch = LocalVec {
+                data: smallvec::smallvec![0.0; 12],
+            };
+            stretch.data[6] = 0.5;
+            behavior.update_state(&stretch, true, &ctx).unwrap();
+            let response = behavior.state_frame_load_response().unwrap().unwrap();
+            let expected = 1000.0;
+            for (index, sign) in [(0, -1.0), (6, 1.0)] {
+                assert!((response.nodal_residual.data[index] - sign * expected).abs() < 1e-6);
+                assert!(
+                    (response.nodal_residual.data[index + 4] - sign * expected * offset).abs()
+                        < 1e-6
+                );
+                assert!(response.physical_frame_end_force_global[index + 4].abs() < 1e-6);
+            }
+            let geometric = behavior.geometric_stiffness(1000.0);
+            assert!((geometric.get(3, 3) - 1.2 * offset * offset).abs() < 1e-8);
+            assert!((geometric.get(3, 1) + 1.2 * offset).abs() < 1e-8);
+            let saved = behavior.serialize_checkpoint();
+            let snapshot = behavior.snapshot_state();
+            behavior.update_state(&stretch, false, &ctx).unwrap();
+            behavior.revert_state();
+            assert_eq!(behavior.serialize_checkpoint(), saved);
+            behavior.update_state(&stretch, false, &ctx).unwrap();
+            behavior.restore_state(snapshot.as_ref());
+            assert_eq!(behavior.serialize_checkpoint(), saved);
+            behavior.deserialize_checkpoint(&saved).unwrap();
+            let tangent = behavior.tangent_stiffness(&ctx);
+            let force = behavior.internal_force(&ctx);
+            let h = 1e-7;
+            let mut increment = LocalVec {
+                data: smallvec::smallvec![0.0; 12],
+            };
+            increment.data[10] = h;
+            behavior.update_state(&increment, false, &ctx).unwrap();
+            let perturbed = behavior.internal_force(&ctx);
+            for row in 0..12 {
+                assert!(
+                    ((perturbed.data[row] - force.data[row]) / h - tangent.get(row, 10)).abs()
+                        < 1e-3 * tangent.get(row, 10).abs().max(1.0)
+                );
+            }
+            behavior.revert_state();
+            for option in [MassOption::Lumped, MassOption::Consistent] {
+                let mass = behavior.try_mass_matrix(option).unwrap();
+                let total_x_mass =
+                    mass.get(0, 0) + mass.get(0, 6) + mass.get(6, 0) + mass.get(6, 6);
+                assert!((total_x_mass - 0.001).abs() < 1e-12);
+                let moment_sum =
+                    mass.get(4, 0) + mass.get(4, 6) + mass.get(10, 0) + mass.get(10, 6);
+                assert!((moment_sum - offset * total_x_mass).abs() < 1e-12);
+            }
+        }
+    }
+}
+
+fn eccentric_member_model(kind: ElementKind, offset: f64) -> Model {
+    let mut model = make_diaphragm_model();
+    model.nodes.truncate(2);
+    model.constraints.clear();
+    model.nodes[1].coord = [1000.0, 0.0, 0.0];
+    model.materials[0].density = 1e-8;
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind,
+        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 1.0, 0.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        vertical_eccentricity: Some(offset),
+        plastic_zone: Some(100.0),
+        spring: None,
+    });
+    model
+}
+
+#[test]
+fn eccentric_sloped_and_reversed_members_keep_axial_force_and_released_physical_moment() {
+    for direction in [[1.0, 0.0, 0.0], [0.8, 0.0, 0.6]] {
+        for reversed in [false, true] {
+            for offset in [-100.0, 0.0, 100.0] {
+                for released in [[false, false], [true, false], [true, true]] {
+                    for rigid in [0.0, 100.0] {
+                        let mut model = eccentric_member_model(ElementKind::Beam, offset);
+                        model.nodes[1].coord = direction.map(|d| d * 1000.0);
+                        model.elements[0].end_cond = released.map(|v| {
+                            if v {
+                                EndCondition::Pinned
+                            } else {
+                                EndCondition::Fixed
+                            }
+                        });
+                        model.elements[0].rigid_zone.length_i = rigid;
+                        model.elements[0].rigid_zone.length_j = rigid;
+                        if reversed {
+                            model.elements[0].nodes.reverse();
+                        }
+                        let data = &model.elements[0];
+                        let mut behavior = build_behavior(data, &model);
+                        let mut displacement = [0.0; 12];
+                        let moving = if reversed { 0 } else { 6 };
+                        for d in 0..3 {
+                            displacement[moving + d] = direction[d] * 0.5;
+                        }
+                        behavior
+                            .update_state(
+                                &crate::behavior::LocalVec {
+                                    data: smallvec::SmallVec::from_slice(&displacement),
+                                },
+                                true,
+                                &crate::behavior::Ctx { model: &model },
+                            )
+                            .unwrap();
+                        let force =
+                            behavior.internal_force(&crate::behavior::Ctx { model: &model });
+                        for end in 0..2 {
+                            let sign = if (end == 0) == reversed { 1.0 } else { -1.0 };
+                            assert!(
+                                (force.data[6 * end] - sign * 1000.0 * direction[0]).abs() < 1e-6
+                            );
+                            assert!(
+                                (force.data[6 * end + 2] - sign * 1000.0 * direction[2]).abs()
+                                    < 1e-6
+                            );
+                            assert!(
+                                (force.data[6 * end + 4] - sign * 1000.0 * direction[0] * offset)
+                                    .abs()
+                                    < 1e-6
+                            );
+                        }
+                        let physical = behavior.recover_forces(&displacement).unwrap();
+                        assert!(physical
+                            .at
+                            .iter()
+                            .all(|(_, f)| f[4].abs() < 1e-6 && f[5].abs() < 1e-6));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn eccentric_axis_uses_node_level_and_reports_each_unresolved_input() {
+    let mut model = eccentric_member_model(ElementKind::Beam, 100.0);
+    for node in &mut model.nodes {
+        node.coord[2] = 3500.0;
+    }
+    model.stories.push(sepika_core::model::Story::new(
+        sepika_core::ids::StoryId(0),
+        "1F".into(),
+        Some(0.0),
+        Some(3000.0),
+    ));
+    assert_eq!(
+        model
+            .primary_beam_axis_ends(&model.elements[0])
+            .unwrap()
+            .unwrap(),
+        [[0.0, 0.0, 3600.0], [1000.0, 0.0, 3600.0]]
+    );
+    assert!(model.validate_local_frames().is_ok());
+    for (item, mutate) in [
+        (
+            "鉛直偏心",
+            (|m: &mut Model| m.elements[0].vertical_eccentricity = None) as fn(&mut Model),
+        ),
+        ("鉛直偏心", |m: &mut Model| {
+            m.elements[0].vertical_eccentricity = Some(f64::INFINITY)
+        }),
+        ("i端の接続節点座標", |m: &mut Model| {
+            m.nodes[0].coord[0] = f64::NAN
+        }),
+        ("j端の節点", |m: &mut Model| {
+            m.elements[0].nodes[1] = NodeId(99)
+        }),
+        ("実材軸長", |m: &mut Model| {
+            m.nodes[1].coord = m.nodes[0].coord
+        }),
+        ("局所軸", |m: &mut Model| {
+            m.elements[0].local_axis.ref_vector[0] = f64::NAN
+        }),
+        ("断面", |m: &mut Model| {
+            m.elements[0].section = Some(SectionId(99))
+        }),
+        ("材料", |m: &mut Model| m.sections[0].material = None),
+    ] {
+        let mut invalid = model.clone();
+        mutate(&mut invalid);
+        let reason = invalid.validate_local_frames().unwrap_err();
+        assert!(
+            reason.contains("部材 ID 0") && reason.contains(item),
+            "{reason}"
+        );
+    }
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.elements[0].vertical_eccentricity = None;
+    assert!(model
+        .primary_beam_axis_ends(&model.elements[0])
+        .unwrap()
+        .is_none());
+    model.elements[0].kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    assert!(model
+        .primary_beam_axis_ends(&model.elements[0])
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn eccentric_nonlinear_member_loads_keep_section_forces_separate_from_node_transfer() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let model = eccentric_member_model(kind, 100.0);
+        let mut behavior = build_nonlinear_behavior(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            None,
+        );
+        let loads = [sepika_core::model::MemberLoad::manual(
+            ElemId(0),
+            [1.0, 0.0, 0.0],
+            sepika_core::model::MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 2.0,
+                w2: 2.0,
+            },
+        )];
+        let zero = crate::behavior::LocalVec {
+            data: smallvec::smallvec![0.0; 12],
+        };
+        behavior
+            .update_state_with_member_loads(
+                &zero,
+                &loads,
+                true,
+                &crate::behavior::Ctx { model: &model },
+            )
+            .unwrap();
+        let state = behavior.state_frame_load_response().unwrap().unwrap();
+        for end in 0..2 {
+            assert!((state.nodal_residual.data[end * 6] + 1000.0).abs() < 1e-7);
+            assert!((state.nodal_residual.data[end * 6 + 4] + 100000.0).abs() < 1e-7);
+            assert!(state.physical_frame_end_force_global[end * 6 + 4].abs() < 1e-7);
+        }
+        let forces = state.section.recover(&[0.0, 0.5, 1.0]).unwrap();
+        assert!(forces
+            .at
+            .iter()
+            .all(|(_, f)| f[4].abs() < 1e-7 && f[5].abs() < 1e-7));
+        let saved = behavior.serialize_checkpoint();
+        behavior
+            .update_state_with_member_loads(
+                &zero,
+                &[],
+                false,
+                &crate::behavior::Ctx { model: &model },
+            )
+            .unwrap();
+        behavior.revert_state();
+        assert_eq!(behavior.serialize_checkpoint(), saved);
+    }
+}

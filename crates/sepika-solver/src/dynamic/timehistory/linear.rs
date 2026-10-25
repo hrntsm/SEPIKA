@@ -229,7 +229,7 @@ impl LinearSetup {
         let k_red = reducer.reduce_k(&k_free);
         let c_red = damping.assemble_c(&m_red, &k_red);
 
-        let infl = GroundInfluence::build(model, dofmap, &m_free);
+        let infl = GroundInfluence::build(model, dofmap)?;
         let coeffs = NewmarkCoeffs::new(newmark, dt);
 
         let k_eff = sepika_math::sparse::weighted_sum_csc(

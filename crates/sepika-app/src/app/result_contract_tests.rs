@@ -2214,3 +2214,43 @@ fn steel601_failed_recheck_clears_old_design_and_keeps_valid_analysis() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+#[test]
+#[cfg(feature = "gui")]
+fn beam_eccentricity_edit_and_saved_reload_reject_results_from_previous_connection() {
+    use result_validity::ResultInputKey;
+    let mut app = calculated();
+    let key = ResultInputKey::Static(StaticCaseKey::User(LoadCaseId(0)));
+    app.require_result_input(key.clone()).unwrap();
+    let original = app.result_input(&key);
+    assert!(
+        app.apply_model_edit(Box::new(sepika_edit::SetBeamVerticalEccentricity {
+            member: sepika_core::model::SupportMemberId::Primary(ElemId(2)),
+            value: Some(100.0)
+        }))
+    );
+    assert_ne!(app.result_input(&key), original);
+    assert!(app.require_result_input(key.clone()).is_err());
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(DESIGN_CONTRACT_VERSION),
+        "734-eccentric-old-input",
+    );
+    assert_eq!(
+        loaded.core.model.elements[2].vertical_eccentricity,
+        Some(100.0)
+    );
+    assert!(loaded.require_result_input(key.clone()).is_err());
+    loaded.run_linear_static(LoadCaseId(0));
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    loaded.require_result_input(key.clone()).unwrap();
+    app.undo_action();
+    assert_eq!(app.result_input(&key), original);
+    assert!(app.core.scoped.staleness.results_stale);
+    std::fs::remove_file(path).unwrap();
+}

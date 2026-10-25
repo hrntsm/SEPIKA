@@ -88,18 +88,23 @@ fn beam_eccentricity_gui_edit_undo_redo_save_reload_and_missing_are_consistent()
 }
 
 #[test]
-fn beam_placement_does_not_transform_existing_analysis_stiffness_or_connectivity() {
-    let mut model = crate::sample::portal_frame();
-    let before = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(0)).unwrap();
+fn beam_placement_transforms_analysis_and_preserves_connectivity_through_undo_and_reload() {
+    let mut app = app();
+    let model = &app.core.model;
+    let before = sepika_solver::statics::linear::linear_static_once(model, LoadCaseId(0)).unwrap();
     let nodes = model.nodes.clone();
     let connectivity = model
         .elements
         .iter()
         .map(|e| (e.id, e.nodes.clone(), e.end_cond, e.rigid_zone))
         .collect::<Vec<_>>();
-    model.elements[2].vertical_eccentricity = Some(750.0);
-    let after = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(0)).unwrap();
-    assert_eq!(
+    assert!(app.apply_model_edit(Box::new(SetBeamVerticalEccentricity {
+        member: SupportMemberId::Primary(ElemId(2)),
+        value: Some(750.0)
+    })));
+    let model = &app.core.model;
+    let after = sepika_solver::statics::linear::linear_static_once(model, LoadCaseId(0)).unwrap();
+    assert_ne!(
         rmp_serde::to_vec_named(&before).unwrap(),
         rmp_serde::to_vec_named(&after).unwrap()
     );
@@ -111,6 +116,24 @@ fn beam_placement_does_not_transform_existing_analysis_stiffness_or_connectivity
             .map(|e| (e.id, e.nodes.clone(), e.end_cond, e.rigid_zone))
             .collect::<Vec<_>>(),
         connectivity
+    );
+    let path = std::env::temp_dir().join(format!("sepika-734-{}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(&path, model, Default::default()).unwrap();
+    let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    let reloaded =
+        sepika_solver::statics::linear::linear_static_once(&restored, LoadCaseId(0)).unwrap();
+    assert_eq!(
+        rmp_serde::to_vec_named(&after).unwrap(),
+        rmp_serde::to_vec_named(&reloaded).unwrap()
+    );
+    std::fs::remove_file(path).unwrap();
+    app.undo_action();
+    assert!(app.core.scoped.staleness.results_stale);
+    let undone =
+        sepika_solver::statics::linear::linear_static_once(&app.core.model, LoadCaseId(0)).unwrap();
+    assert_eq!(
+        rmp_serde::to_vec_named(&before).unwrap(),
+        rmp_serde::to_vec_named(&undone).unwrap()
     );
 }
 

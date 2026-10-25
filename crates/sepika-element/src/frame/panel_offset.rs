@@ -451,6 +451,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn eccentric_load_reaches_panel_rotation_once_and_cancelled_rotation_has_no_strain() {
+        let mut model = model_with_panel(200.0);
+        model.elements[0].vertical_eccentricity = Some(100.0);
+        let data = &model.elements[0];
+        let mut behavior = crate::factory::build_behavior(data, &model);
+        let mut load = [0.0; 12];
+        load[0] = 6000.0;
+        load[6] = 6000.0;
+        let response = crate::frame::eccentric::transform_nodal_load(data, &model, &load);
+        assert!((response.data[0] - 6000.0).abs() < 1e-7);
+        assert!((response.data[4] - 600000.0).abs() < 1e-7);
+        assert!((response.data[13] + 300000.0).abs() < 1e-7);
+        let mut displacement = LocalVec {
+            data: smallvec::smallvec![0.0; 14],
+        };
+        displacement.data[4] = 0.0005;
+        displacement.data[13] = 0.001;
+        let ctx = Ctx { model: &model };
+        behavior.update_state(&displacement, true, &ctx).unwrap();
+        assert!(behavior
+            .internal_force(&ctx)
+            .data
+            .iter()
+            .all(|v| v.abs() < 1e-7));
+    }
+
     /// 水平材は ζ = −0.5、鉛直材は ζ = +0.5。パネルが付く端だけが対象になる。
     #[test]
     fn test_resolve_assigns_zeta_by_member_direction() {

@@ -111,10 +111,18 @@ pub struct LocalAxis {
 }
 
 impl Model {
-    /// 断面参照方向を使う二節点要素の局所基底を検証する。失敗は部材 ID と理由を返す。
+    /// 二節点要素の局所基底と梁実材軸の必須入力を検証する。失敗は部材 ID と理由を返す。
     /// 零長の節点ばねは単位回転、零長の免震支承は仮想鉛直軸を用いる。
     pub fn validate_local_frames(&self) -> Result<(), String> {
         for element in &self.elements {
+            if self.primary_beam_axis_ends(element)?.is_some()
+                && self.element_material(element).is_none()
+            {
+                return Err(format!(
+                    "部材 ID {} i/j端の材料: 未指定または参照先がありません",
+                    element.id.0
+                ));
+            }
             if matches!(
                 element.kind,
                 ElementKind::PanelZone | ElementKind::Shell | ElementKind::Wall

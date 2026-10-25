@@ -8,6 +8,7 @@ fn 準備計算は孤立版を表示し領域と入力荷重を未更新にす�
     for wall in [false, true] {
         let mut app = App::default();
         app.core.model = fixture::with_plate_metadata(wall);
+        super::tests::assign_zero_density_test_frame_sections(&mut app.core.model);
         if wall {
             app.core.model.unassigned_posts.push(fixture::divider(true));
         } else {
@@ -200,6 +201,7 @@ fn 一般準備の候補拒否は支持再推定もauto_ex生成記録強度入�
     for wall in [false, true] {
         let mut app = App::default();
         app.core.model = fixture::with_plate_metadata(wall);
+        super::tests::assign_zero_density_test_frame_sections(&mut app.core.model);
         let mut member = fixture::divider(wall);
         member.ends = SecondaryMemberEnds::Detached(if wall {
             [[2000., 0., 0.], [2000., 0., 3000.]]
@@ -240,6 +242,7 @@ fn gui_redo拒否は理由を表示しモデル履歴と選択を維持し正常
         for duplicate_plate in [false, true] {
             let mut app = App::default();
             app.core.model = fixture::with_plate_metadata(wall);
+            super::tests::assign_zero_density_test_frame_sections(&mut app.core.model);
             app.core.model.assign_stb_node_ids().unwrap();
             let valid = app.core.model.clone();
             let sm = fixture::divider(wall);

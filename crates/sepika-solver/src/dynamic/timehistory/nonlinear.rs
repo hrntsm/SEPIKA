@@ -136,7 +136,7 @@ pub fn nonlinear_time_history_analysis(
     let m_red = reducer.reduce_k(&m_free);
 
     let n_free = dofmap.n_active();
-    let infl = GroundInfluence::build(model, dofmap, &m_free);
+    let infl = GroundInfluence::build(model, dofmap)?;
     let m_r_x: &[f64] = &infl.m_r_x;
     let m_r_y: &[f64] = &infl.m_r_y;
 

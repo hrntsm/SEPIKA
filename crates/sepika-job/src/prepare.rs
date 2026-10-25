@@ -977,12 +977,19 @@ mod tests {
                 ..SlabPlate::default()
             },
         );
+        let supports = steel_panel_model();
+        model.sections = supports.sections;
+        model.materials = supports.materials;
+        for element in &mut model.elements {
+            element.section = Some(SectionId(2));
+            element.vertical_eccentricity = Some(0.0);
+        }
         let error = match prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
         {
             Ok(_) => panic!("正方形の短辺方向を受け入れた"),
             Err(error) => error,
         };
-        assert!(error.to_string().contains("正方形"));
+        assert!(error.to_string().contains("正方形"), "{error}");
     }
 
     /// 剛域算定（`apply_rigid_zones_and_panels`）が壁展開モデルを見ていることの

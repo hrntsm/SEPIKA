@@ -2,35 +2,41 @@ use crate::behavior::LocalMat;
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, Model};
 
-/// 2 節点線材の端部幾何（節点 ID・節点座標・節点間距離）。
-///
-/// 節点 ID が範囲外のときは原点へ落とす。
+/// 2節点線材の材端幾何。梁用途では実材軸端を用い、不足・不正を拒否する。
+/// その他の既存要素で節点IDが範囲外なら原点を用いる。
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EndGeometry {
     /// 両端の節点 ID（i 端, j 端）。
     pub(crate) nodes: [NodeId; 2],
-    /// 両端の節点座標 \[mm\]（i 端, j 端）。
+    /// 両端の材端座標 \[mm\]（i 端, j 端）。
     pub(crate) coords: [[f64; 3]; 2],
-    /// 節点間距離（芯々長さ）\[mm\]。
+    /// 初期材軸長\[mm\]。
     pub(crate) length: f64,
 }
 
 impl EndGeometry {
     /// 要素データとモデルから端部幾何を求める。
     pub(crate) fn of_element(data: &ElementData, model: &Model) -> Self {
+        Self::try_of_element(data, model).unwrap_or_else(|reason| panic!("{reason}"))
+    }
+
+    pub(crate) fn try_of_element(data: &ElementData, model: &Model) -> Result<Self, String> {
+        let resolved = model.primary_beam_axis_ends(data)?;
         let nodes = [data.nodes[0], data.nodes[1]];
-        let coords = nodes.map(|n| {
-            model
-                .nodes
-                .get(n.index())
-                .map(|node| node.coord)
-                .unwrap_or([0.0; 3])
+        let coords = resolved.unwrap_or_else(|| {
+            nodes.map(|n| {
+                model
+                    .nodes
+                    .get(n.index())
+                    .map(|node| node.coord)
+                    .unwrap_or([0.0; 3])
+            })
         });
-        Self {
+        Ok(Self {
             nodes,
             coords,
             length: sepika_core::geom::vec3::dist(coords[0], coords[1]),
-        }
+        })
     }
 
     /// i 端から j 端へ向かう局所座標系。

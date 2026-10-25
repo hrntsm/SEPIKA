@@ -74,9 +74,7 @@ impl PhysicalStep {
                         return Err(error("節点がありません"));
                     }
                     let values = nodal.entry(node.index()).or_default();
-                    values.copy_from_slice(
-                        &response.physical_frame_end_force_global[end * 6..end * 6 + 6],
-                    );
+                    values.copy_from_slice(&response.nodal_residual.data[end * 6..end * 6 + 6]);
                 }
             } else {
                 let force = behavior.internal_force(&Ctx { model });
@@ -97,9 +95,14 @@ impl PhysicalStep {
                     }
                 }
                 let equivalent = legacy_member_force(model, elem, ledger.member_loads(elem.id));
+                let equivalent = sepika_element::frame::eccentric::transform_nodal_load(
+                    elem,
+                    model,
+                    &equivalent,
+                );
                 for (end, node) in elem.nodes.iter().take(2).enumerate() {
                     for d in 0..6 {
-                        nodal.entry(node.index()).or_default()[d] -= equivalent[end * 6 + d];
+                        nodal.entry(node.index()).or_default()[d] -= equivalent.data[end * 6 + d];
                     }
                 }
             }
@@ -231,14 +234,17 @@ pub(super) fn load_above(
         let pj = model
             .node(elem.nodes[1])
             .ok_or("増分解析: 部材荷重節点がありません")?;
-        let length = model.member_length(elem);
+        let [pi, pj] = model
+            .primary_beam_axis_ends(elem)?
+            .unwrap_or([pi.coord, pj.coord]);
+        let length = sepika_core::geom::vec3::dist(pi, pj);
         load.validate_direction()?;
         load.validate_extent(length)?;
-        let dz = pj.coord[2] - pi.coord[2];
+        let dz = pj[2] - pi[2];
         let x = if dz == 0. {
             0.
         } else {
-            (z - pi.coord[2]) / dz * length
+            (z - pi[2]) / dz * length
         };
         let magnitude = match load.kind {
             MemberLoadKind::Point { a, p } => {
@@ -247,7 +253,7 @@ pub(super) fn load_above(
                 } else if dz < 0. {
                     a < x
                 } else {
-                    pi.coord[2] > z
+                    pi[2] > z
                 };
                 if above {
                     p
@@ -260,7 +266,7 @@ pub(super) fn load_above(
                     (a.max(x).min(b), b)
                 } else if dz < 0. {
                     (a, b.min(x).max(a))
-                } else if pi.coord[2] > z {
+                } else if pi[2] > z {
                     (a, b)
                 } else {
                     (a, a)

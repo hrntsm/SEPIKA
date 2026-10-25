@@ -603,10 +603,25 @@ impl PanelPlane {
 /// 標準形式の方向確認用の無次元数値公差。施工・設計の傾斜許容値ではない。
 pub const PANEL_DIRECTION_TOL: f64 = 1e-12;
 
-fn model_beam_flanges(model: &Model, beam: &ElementData) -> Result<BeamFlangePositions, String> {
+fn model_beam_flanges(
+    model: &Model,
+    beam: &ElementData,
+    node: NodeId,
+) -> Result<BeamFlangePositions, String> {
     let sec = model.element_section(beam).ok_or("断面未設定")?;
     beam_panel_depth(sec)?;
-    let ex = member_unit_axis(model, beam).ok_or("梁材軸未解決")?;
+    let actual = model
+        .primary_beam_axis_ends(beam)?
+        .ok_or("大梁用途の実材軸が未解決です")?;
+    let side = beam
+        .nodes
+        .iter()
+        .take(2)
+        .position(|id| *id == node)
+        .ok_or("接続端がありません")?;
+    let connection = model.node(node).ok_or("接続節点がありません")?;
+    let vertical_offset_mm = actual[side][2] - connection.coord[2];
+    let ex = geom::vec3::unit_from(actual[0], actual[1]).ok_or("梁材軸未解決")?;
     if !ex[2].is_finite() || ex[2].abs() > PANEL_DIRECTION_TOL {
         return Err("勾配梁・鉛直Girderのフランジ位置と標準形式は未対応（材軸水平が必要）".into());
     }
@@ -651,7 +666,7 @@ fn model_beam_flanges(model: &Model, beam: &ElementData) -> Result<BeamFlangePos
     if ey[2] < 0.0 {
         std::mem::swap(&mut upper, &mut lower);
     }
-    BeamFlangePositions::from_dimensions(h, upper, lower, 0.0)
+    BeamFlangePositions::from_dimensions(h, upper, lower, vertical_offset_mm)
 }
 
 /// 相対する材軸で梁を検討面へ分ける。端部反転・要素順は結果に影響しない。
@@ -692,7 +707,7 @@ pub fn panel_joint_planes<'a>(
             axis = axis.map(|v| -v);
         }
         axis = axis.map(|v| if v.abs() < 1e-12 { 0.0 } else { v });
-        let flanges = model_beam_flanges(model, beam);
+        let flanges = model_beam_flanges(model, beam, node);
         let outer_depth = model.element_section(beam).and_then(|sec| match sec.shape {
             Some(
                 SectionShape::SteelH { height, .. } | SectionShape::SteelBuiltH { height, .. },

@@ -1551,3 +1551,118 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
         }
     }
 }
+
+#[test]
+fn eccentric_panel_flange_applicability_uses_actual_end_heights_without_extending_staggered_scope()
+{
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for reverse in [[false, false], [true, false], [false, true], [true, true]] {
+            let mut baseline = l_frame(false);
+            baseline
+                .nodes
+                .push(node(3, [-6000.0, 0.0, 3000.0], out_of_plane_fixed()));
+            baseline
+                .elements
+                .push(member(2, 3, 0, 0, Default::default()));
+            for (index, reversed) in [(0, reverse[0]), (2, reverse[1])] {
+                if reversed {
+                    baseline.elements[index].nodes.reverse();
+                }
+            }
+            let generated =
+                sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut baseline).unwrap();
+            assert_eq!(
+                generated.len(),
+                1,
+                "{kind:?} {reverse:?}: {:?}",
+                sepika_core::panel_zone::resolve_panel_joint(
+                    &baseline,
+                    NodeId(0),
+                    &baseline.elements
+                )
+            );
+            baseline.elements[0].kind = kind;
+            baseline.elements[2].kind = kind;
+            let original = sepika_core::panel_zone::resolve_panel_joint(
+                &baseline,
+                NodeId(0),
+                &baseline.elements,
+            )
+            .unwrap()
+            .unwrap();
+            for offsets in [
+                [-100.0, -100.0],
+                [0.0, 0.0],
+                [100.0, 100.0],
+                [0.0, 100.0],
+                [0.0, -100.0],
+                [100.0, -100.0],
+            ] {
+                let mut model = baseline.clone();
+                model.elements[0].vertical_eccentricity = Some(offsets[0]);
+                model.elements[2].vertical_eccentricity = Some(offsets[1]);
+                let planes =
+                    sepika_core::panel_zone::panel_joint_planes(&model, NodeId(0), &model.elements);
+                assert_eq!(planes.len(), 1);
+                for (beam, offset) in planes[0].beams.iter().zip(offsets) {
+                    let flange = beam.flanges.as_ref().unwrap();
+                    assert_eq!(flange.upper, offset + (BEAM_H - BEAM_TF) / 2.0);
+                    assert_eq!(flange.lower, offset - (BEAM_H - BEAM_TF) / 2.0);
+                }
+                if kind == ElementKind::Beam {
+                    let mut automatic = model.clone();
+                    let generated =
+                        sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut automatic)
+                            .unwrap();
+                    assert_eq!(generated.len(), usize::from(offsets[0] == offsets[1]));
+                }
+                let joint = sepika_core::panel_zone::resolve_panel_joint(
+                    &model,
+                    NodeId(0),
+                    &model.elements,
+                );
+                let solve =
+                    sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1));
+                if offsets[0] == offsets[1] {
+                    assert_eq!(joint.unwrap().unwrap(), original);
+                    assert!(solve.is_ok(), "{offsets:?}: {:?}", solve.err());
+                } else {
+                    let reason = joint.unwrap_err().to_string();
+                    assert!(reason.contains("段違い"), "{reason}");
+                    assert!(
+                        reason.contains(&format!("上位置差={} mm", offsets[0] - offsets[1])),
+                        "{reason}"
+                    );
+                    assert!(
+                        reason.contains(&format!("下位置差={} mm", offsets[0] - offsets[1])),
+                        "{reason}"
+                    );
+                    assert!(solve.err().unwrap().to_string().contains(&reason));
+                }
+            }
+            baseline.elements[2].vertical_eccentricity = None;
+            let reason = sepika_core::panel_zone::resolve_panel_joint(
+                &baseline,
+                NodeId(0),
+                &baseline.elements,
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                reason.contains("鉛直偏心") && reason.contains("未指定"),
+                "{reason}"
+            );
+            assert!(
+                sepika_solver::statics::linear::linear_static_once(&baseline, LoadCaseId(1))
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("鉛直偏心")
+            );
+        }
+    }
+}

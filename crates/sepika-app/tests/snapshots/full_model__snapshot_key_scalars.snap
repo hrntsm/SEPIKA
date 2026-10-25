@@ -1,6 +1,6 @@
 ---
 source: crates/sepika-app/tests/full_model.rs
-assertion_line: 3036
+assertion_line: 3142
 expression: out
 ---
 model.nodes = 171
@@ -26,41 +26,41 @@ prep.seismic[3FL].Qi = 3.440e5
 prep.seismic[RFL].Ai = 3.428e0
 prep.seismic[RFL].Qi = 5.786e4
 eigen.T[0] = 5.010e-1
-eigen.T[1] = 4.647e-1
-eigen.T[2] = 4.199e-1
+eigen.T[1] = 4.646e-1
+eigen.T[2] = 4.198e-1
 static.DL.min_uz = -1.017e0
 static.DL.sum_base_axial = -3.192e6
 static.EX.story[1FL].max_ux = 0.000e0
-static.EX.story[2FL].max_ux = 6.556e0
-static.EX.story[3FL].max_ux = 1.195e1
-static.EX.story[RFL].max_ux = 1.565e1
+static.EX.story[2FL].max_ux = 6.548e0
+static.EX.story[3FL].max_ux = 1.194e1
+static.EX.story[RFL].max_ux = 1.564e1
 static.EX.story[PHRFL].max_ux = 1.850e1
 design.member_checks = 115
 design.joint_checks = 84
 design.beam_checks = 56
 design.slab_checks = 81
-design.max_ratio = 3.700e-1
+design.max_ratio = 3.698e-1
 design.checked_positions = 345
 design.skipped_positions = 0
 design.beam_max_ratio = 3.065e-1
-metrics[1FL].drift_angle = 1.457e-3
-metrics[1FL].Rs = 7.473e-1
-metrics[1FL].Re = 2.801e-2
+metrics[1FL].drift_angle = 1.455e-3
+metrics[1FL].Rs = 7.480e-1
+metrics[1FL].Re = 2.802e-2
 metrics[2FL].drift_angle = 1.349e-3
-metrics[2FL].Rs = 8.288e-1
-metrics[2FL].Re = 9.164e-3
-metrics[3FL].drift_angle = 9.243e-4
+metrics[2FL].Rs = 8.285e-1
+metrics[2FL].Re = 9.171e-3
+metrics[3FL].drift_angle = 9.242e-4
 metrics[3FL].Rs = 1.258e0
 metrics[3FL].Re = 2.991e-2
 metrics[RFL].drift_angle = 7.514e-4
-metrics[RFL].Rs = 1.166e0
-metrics[RFL].Re = 5.644e-3
+metrics[RFL].Rs = 1.165e0
+metrics[RFL].Re = 5.642e-3
 pushover.input = T形梁の情報不足により停止
 ultimate.checks = 17
 th.frames = 1001
-th.peak_ux = 4.895e1
-th.drift_angle[0] = 4.081e-3
-th.drift_angle[1] = 3.508e-3
-th.drift_angle[2] = 2.022e-3
-th.drift_angle[3] = 1.844e-3
+th.peak_ux = 4.886e1
+th.drift_angle[0] = 4.070e-3
+th.drift_angle[1] = 3.503e-3
+th.drift_angle[2] = 2.019e-3
+th.drift_angle[3] = 1.842e-3
 th_nl.input = T形梁の情報不足により停止

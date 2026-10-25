@@ -382,6 +382,7 @@ fn app_with_abc_and_generated_wall() -> App {
         wall_plate_ids: vec![WallPlateId(0)],
         posts: Vec::new(),
     });
+    super::tests::assign_zero_density_test_frame_sections(&mut app.core.model);
     app.ui.scoped.nav.focus_material = Some(MaterialId(2));
     app.ui.scoped.nav.focus_section = Some(SectionId(2));
     app

@@ -704,9 +704,8 @@ impl FiberBeam {
         basis: crate::factory::StrengthBasis,
         kind: AnalysisKind,
     ) -> Result<Self, String> {
-        let n0 = &model.nodes[data.nodes[0].index()];
-        let n1 = &model.nodes[data.nodes[1].index()];
-        let length = sepika_core::geom::vec3::dist(n0.coord, n1.coord);
+        let geometry = crate::transform::EndGeometry::try_of_element(data, model)?;
+        let length = geometry.length;
         let (rigid_i, rigid_j) = crate::frame::rigid_arm::resolve_lengths(
             data.rigid_zone.rigid_length_i(),
             data.rigid_zone.rigid_length_j(),
@@ -778,8 +777,8 @@ impl FiberBeam {
         let initial_elastic_stiffness = beam_props.local_stiffness_flex_raw();
 
         let axis = crate::transform::LocalFrame::from_nodes(
-            n0.coord,
-            n1.coord,
+            geometry.coords[0],
+            geometry.coords[1],
             data.local_axis.ref_vector,
         )
         .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", data.id.0))?;
