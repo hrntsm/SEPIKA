@@ -111,6 +111,20 @@ Fiber/MSの試験は、既存のBeam経路で生成した明示パネルを保�
 - `cargo fmt --all -- --check`、`git diff --check`: 成功。
 - `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功。リンク644件・実装参照687件。
 
+## default構成のCI検証とGUI試験の境界
+
+PR814のCI実行40176922975で、default構成のlib試験からGUI専用の編集・Undoメソッドを呼び出すコンパイルエラーE0599を確認した。STB取込試験はGUI限定にせず、feature非依存の既存編集コマンドで偏心0を明示し、未指定拒否とDL解析成功を両構成で引き続き確認する。編集・Undo・保存再読込による旧成果拒否の専用試験は、その操作が存在するGUI構成で実行する。製品コード・計算契約版53は変更しない。
+
+修正対象SHAは `2dca3cf2`。次の結果はCI結果とは分けたローカル実行である。
+
+- `rustup update stable`: stable 1.99.1のまま最新。`cargo clippy --version`: 0.1.99。
+- `cargo test -p sepika-app --lib --locked --quiet`: default構成413件すべて成功。
+- `cargo test -p sepika-app --features gui --lib --locked --quiet`: GUI構成932件すべて成功。
+- `cargo clippy -p sepika-app --all-targets --locked -- -D warnings`: default構成成功。
+- `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings`: GUI構成成功。
+- `cargo fmt --all -- --check`、`git diff --check`: 成功。
+- `cargo run -p xtask --target-dir target/issue734-doc-check -- check-docs`、`mdbook build`: 成功（summary124・リンク644件・実装参照687件）。
+
 ## 未実施範囲と残る制約
 
 実験・実測・実建物によるValidation、手動ネイティブGUI操作、塑性化後の全履歴を網羅する本接続専用の応答比較は未実施。一般XYZ偏心入力、柱/ブレース、二次小梁の新剛性算入、パネル中心偏心、新しい段違い接合式、有限回転・大変形接続、嵩上げ重量や別Issueの重量変更は対象外である。現在の時刻歴結果に独立した支持反力列を新設せず、既存の運動方程式・記録・質量と慣性入力の整合を確認する。PRの最終レビュー・CIは公開PRで別途確認する。
