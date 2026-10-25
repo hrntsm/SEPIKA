@@ -87,6 +87,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0063](0063-wall-side-column-foundations.md) | accepted | 側柱の物理分類・回転接続・局所釣合いを要素表現から分離する |
 
+| [0064](0064-fiber-ms-axial-biaxial-consistency.md) | accepted | Fiber と MS の軸・二軸曲げを同じ材料応答へ整合させる |
+
 | [0065](0065-elastic-wall-top-bottom-girders.md) | accepted | 壁上下の剛梁を連続した壁板の弾性高剛性部材として扱う |
 
 | [0067](0067-nonlinear-timehistory-unconverged-rollback.md) | accepted | 骨組の非線形時刻歴の全体未収束は時刻開始状態へ復元して停止する |

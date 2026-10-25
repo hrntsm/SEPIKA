@@ -2076,3 +2076,12 @@ mod member_load_tests;
 
 #[cfg(test)]
 mod independent_plastic_reference;
+
+#[cfg(test)]
+mod physical_curvature_tests;
+
+#[cfg(test)]
+mod distributed_curvature_tests;
+
+#[cfg(test)]
+mod rigid_axial_tests;

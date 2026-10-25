@@ -180,6 +180,16 @@ impl FiberBeam {
             } else {
                 stiffness_scale * force_scale
             };
+            // 外側の端部解放より緩い内側残差を許すと、微小回転の修正を材料求解が無視して再試行が停滞する。
+            let scale = if self
+                .releases
+                .iter()
+                .any(|release| release.dof == HINGE_SLOTS[a])
+            {
+                scale.min(result.scales[a].max(1.0))
+            } else {
+                scale
+            };
             result.scales[a] = scale;
             result.normalized_residual = result
                 .normalized_residual
