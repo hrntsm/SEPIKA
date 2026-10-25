@@ -736,7 +736,7 @@ fn girder_overlap_edits_undo_redo_and_save_reload_update_weights_and_invalidate_
             );
             assert!(
                 error.contains(if i == 5 {
-                    "全長一定幅"
+                    "一定幅"
                 } else {
                     "上端と一致"
                 }),

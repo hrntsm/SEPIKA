@@ -181,21 +181,88 @@ fn flanged_inertia(b_mm: f64, d_mm: f64, sides: &[Option<SlabFlange>; 2]) -> Res
     Ok(inertia)
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SlabStrip {
+    slab: sepika_core::ids::SlabId,
+    span: [f64; 2],
+    clear_width_mm: f64,
+    flange_width_mm: f64,
+    thickness_mm: f64,
+}
+
+#[derive(Debug)]
+struct SlabSide {
+    slabs: Vec<sepika_core::ids::SlabId>,
+    flange: SlabFlange,
+}
+
+fn average_slab_side(mut strips: Vec<SlabStrip>) -> Result<Option<SlabSide>, String> {
+    if strips.is_empty() {
+        return Ok(None);
+    }
+    strips.sort_by(|a, b| a.span[0].total_cmp(&b.span[0]));
+    let first = strips[0];
+    let mut cursor = 0.0;
+    let mut thickness_mm = 0.0;
+    for strip in &strips {
+        if (strip.clear_width_mm - first.clear_width_mm).abs() > 1e-6
+            || (strip.flange_width_mm - first.flange_width_mm).abs() > 1e-6
+        {
+            return Err(format!(
+                "床板 {} と {}: 同じ側の内法距離・協力幅が変化しています",
+                first.slab.0, strip.slab.0
+            ));
+        }
+        if strip.span[0] < cursor - 1e-12 {
+            return Err(format!(
+                "床板 {}: 同じ側の取付区間が重複しています",
+                strip.slab.0
+            ));
+        }
+        if strip.span[0] > cursor + 1e-12 {
+            return Err(format!(
+                "床板 {}: 取付区間に隙間があり梁全長を覆いません",
+                strip.slab.0
+            ));
+        }
+        thickness_mm += (strip.span[1] - strip.span[0]) * strip.thickness_mm;
+        cursor = strip.span[1];
+    }
+    if (cursor - 1.0).abs() > 1e-12 {
+        return Err(format!(
+            "床板 {}: 取付区間が梁全長を覆いません",
+            first.slab.0
+        ));
+    }
+    Ok(Some(SlabSide {
+        slabs: strips.iter().map(|s| s.slab).collect(),
+        flange: SlabFlange {
+            slab: first.slab,
+            width_mm: first.flange_width_mm,
+            thickness_mm,
+        },
+    }))
+}
+
 fn rc_slab_sides(
     model: &Model,
     data: &sepika_core::model::ElementData,
     b_mm: f64,
     d_mm: f64,
-) -> Result<[Option<SlabFlange>; 2], String> {
+) -> Result<[Option<SlabSide>; 2], String> {
     use sepika_core::model::{PlateAssignment, SlabShape, SupportMemberId};
     let support = SupportMemberId::Primary(data.id);
     let mut candidates = std::collections::HashSet::new();
+    let mut no_plate_regions = Vec::new();
     for region in &model.floor_assignment_regions.regions {
         if !region.boundary.iter().any(|edge| edge.support == support) {
             continue;
         }
         match region.assignment {
-            PlateAssignment::NoPlate => continue,
+            PlateAssignment::NoPlate => {
+                no_plate_regions.push(region);
+                continue;
+            }
             PlateAssignment::Unset => {
                 return Err(format!("床板割当領域 {}: 床板が未設定です", region.id.0))
             }
@@ -247,9 +314,9 @@ fn rc_slab_sides(
             }
         }
     }
-    let mut sides: [Option<SlabFlange>; 2] = [None, None];
+    let mut strips: [Vec<SlabStrip>; 2] = [Vec::new(), Vec::new()];
     if candidates.is_empty() {
-        return Ok(sides);
+        return Ok([None, None]);
     }
     let placement = model.beam_placement(support)?;
     let [p0, p1] = placement.actual_ends;
@@ -275,16 +342,34 @@ fn rc_slab_sides(
             .filter(|e| e.support == support)
             .collect();
         if edges.len() != 1
-            || edges[0].span.iter().any(|v| !v.is_finite())
-            || (edges[0].span[0].min(edges[0].span[1])).abs() > 1e-9
-            || (edges[0].span[0].max(edges[0].span[1]) - 1.0).abs() > 1e-9
+            || edges[0]
+                .span
+                .iter()
+                .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
         {
-            return Err(format!("床板 {}: 梁全長の取付きを確認できません", id.0));
+            return Err(format!("床板 {}: 支持取付区間が不正です", id.0));
+        }
+        let span = [
+            edges[0].span[0].min(edges[0].span[1]),
+            edges[0].span[0].max(edges[0].span[1]),
+        ];
+        if span[1] <= span[0] {
+            return Err(format!("床板 {}: 取付区間長は正値が必要です", id.0));
+        }
+        if !floor.thickness_mm.is_finite() || floor.thickness_mm <= 0.0 || floor.thickness_mm > d_mm
+        {
+            return Err(format!(
+                "床板 {}: 実厚は正の有限値で梁せい以下が必要です",
+                id.0
+            ));
         }
         if (floor.top_z_mm - (p0[2] + d_mm / 2.0)).abs() > tol {
             return Err(format!("床板 {}: 床上面が梁上端と一致しません", id.0));
         }
         let distances: Vec<_> = floor.top_boundary.iter().map(|&p| signed_dist(p)).collect();
+        if distances.iter().any(|v| !v.is_finite()) {
+            return Err(format!("床板 {}: 梁からの距離が非有限です", id.0));
+        }
         let positive = distances.iter().copied().fold(0.0_f64, f64::max);
         let negative = distances.iter().copied().fold(0.0_f64, f64::min);
         if positive > tol && negative < -tol || positive <= tol && negative >= -tol {
@@ -299,19 +384,16 @@ fn rc_slab_sides(
             || floor.top_boundary.iter().any(|p| {
                 let x = ((p[0] - p0[0]) * dx + (p[1] - p0[1]) * dy) / length_mm;
                 let y = signed_dist(*p) * sign;
-                (x.abs() > tol && (x - length_mm).abs() > tol)
+                ((x - span[0] * length_mm).abs() > tol && (x - span[1] * length_mm).abs() > tol)
                     || (y.abs() > tol && (y - distance).abs() > tol)
             })
         {
-            return Err(format!("床板 {}: 全長一定幅の床範囲を確認できません", id.0));
-        }
-
-        if let Some(old) = sides[side] {
             return Err(format!(
-                "床板 {} と {}: 同じ側の床板が重複しています",
-                old.slab.0, id.0
+                "床板 {}: 取付区間で一定幅の矩形床範囲を確認できません",
+                id.0
             ));
         }
+
         let mut far_width_mm = b_mm;
         for edge in &floor.support_boundary {
             let SupportMemberId::Primary(eid) = edge.support else {
@@ -347,19 +429,47 @@ fn rc_slab_sides(
         if !far_width_mm.is_finite() || far_width_mm <= 0.0 {
             return Err(format!("床板 {}: 対向梁幅が不正です", id.0));
         }
-        let a_mm = (distance - b_mm / 2.0 - far_width_mm / 2.0).max(0.0);
+        let raw_a_mm = distance - b_mm / 2.0 - far_width_mm / 2.0;
+        if !raw_a_mm.is_finite() {
+            return Err(format!("床板 {}: 内法距離が非有限です", id.0));
+        }
+        let a_mm = raw_a_mm.max(0.0);
         let ba_mm = if a_mm < 0.5 * length_mm {
             (0.5 - 0.6 * a_mm / length_mm) * a_mm
         } else {
             0.1 * length_mm
         };
-        sides[side] = Some(SlabFlange {
+        strips[side].push(SlabStrip {
             slab: id,
-            width_mm: ba_mm,
+            span,
+            clear_width_mm: a_mm,
+            flange_width_mm: ba_mm,
             thickness_mm: floor.thickness_mm,
         });
     }
-    Ok(sides)
+    for region in no_plate_regions {
+        let points = model
+            .assignment_region_boundary_coords(&region.boundary)
+            .ok_or_else(|| format!("床板割当領域 {}: 版なしの支持境界が未解決です", region.id.0))?;
+        if !points.iter().flatten().all(|v| v.is_finite()) {
+            return Err(format!(
+                "床板割当領域 {}: 版なしの支持境界が非有限です",
+                region.id.0
+            ));
+        }
+        let positive = points.iter().any(|&p| signed_dist(p) > tol);
+        let negative = points.iter().any(|&p| signed_dist(p) < -tol);
+        for (side, exists) in [positive, negative].into_iter().enumerate() {
+            if exists && !strips[side].is_empty() {
+                return Err(format!(
+                    "床板 {} と床板割当領域 {}: 同じ側で床板ありとNoPlateが混在しています",
+                    strips[side][0].slab.0, region.id.0
+                ));
+            }
+        }
+    }
+    let [left, right] = strips;
+    Ok([average_slab_side(left)?, average_slab_side(right)?])
 }
 
 fn slab_stiffness_factor(
@@ -369,7 +479,13 @@ fn slab_stiffness_factor(
     d_mm: f64,
 ) -> Result<f64, String> {
     let sides = rc_slab_sides(model, data, b_mm, d_mm)?;
-    let inertia = flanged_inertia(b_mm, d_mm, &sides)?;
+    let flanges = sides.each_ref().map(|s| {
+        s.as_ref().map(|s| {
+            debug_assert!(!s.slabs.is_empty());
+            s.flange
+        })
+    });
+    let inertia = flanged_inertia(b_mm, d_mm, &flanges)?;
     let factor = inertia / (b_mm * d_mm.powi(3) / 12.0);
     if !factor.is_finite() || factor <= 0.0 {
         return Err("曲げ剛性増大率が正の有限値ではありません".into());
@@ -691,5 +807,60 @@ mod slab_geometry_tests {
             .unwrap_err()
             .contains("床板 7"));
         }
+    }
+}
+
+#[cfg(test)]
+mod averaged_thickness_safety_tests {
+    use super::*;
+    use sepika_core::ids::SlabId;
+
+    #[test]
+    fn side_mean_uses_support_length_and_retains_every_slab_id() {
+        let strip = |id, span, t| SlabStrip {
+            slab: SlabId(id),
+            span,
+            clear_width_mm: 1000.0,
+            flange_width_mm: 440.0,
+            thickness_mm: t,
+        };
+        let side = average_slab_side(vec![
+            strip(1, [0.25, 1.0], 175.0),
+            strip(0, [0.0, 0.25], 75.0),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(side.flange.thickness_mm, 150.0);
+        assert_eq!(side.slabs, vec![SlabId(0), SlabId(1)]);
+        assert_eq!(side.flange.width_mm, 440.0);
+    }
+
+    #[test]
+    fn mean_thickness_can_overestimate_stiffness_and_underestimate_constant_moment_rotation() {
+        let section = |t| {
+            flanged_inertia(
+                300.0,
+                600.0,
+                &[
+                    Some(SlabFlange {
+                        slab: SlabId(0),
+                        width_mm: 1200.0,
+                        thickness_mm: t,
+                    }),
+                    None,
+                ],
+            )
+            .unwrap()
+        };
+        let average = section(150.0);
+        let thin = section(50.0);
+        let thick = section(250.0);
+        assert!((average - 10293750000.0).abs() < 1e-5);
+        assert!((thin - 8815625000.0).abs() < 1e-5);
+        assert!((thick - 10407812500.0).abs() < 1e-5);
+        let equivalent = 1.0 / (0.5 / thin + 0.5 / thick);
+        assert!((equivalent - 9545782024.709421).abs() < 1e-5);
+        assert!(average > equivalent);
+        assert!(1.0 / average < 1.0 / equivalent);
     }
 }

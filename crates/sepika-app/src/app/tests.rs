@@ -8612,9 +8612,9 @@ fn test_import_stbridge_then_run_dl_succeeds() {
 ///   落ちる床荷重・小梁自重は大梁の**中間集中荷重（CMQ）**へ変換される。
 /// - 実梁がないスラブ辺（小梁上の辺・大梁の中間区間）の荷重も捨てられず
 ///   主架構へ伝達され、鉛直荷重の総和が保存される。
-/// - 矩形RC梁の全長協力剛性の適用範囲外として、部分取付きの床板を理由付きで診断する。
+/// - 上端一致で全長を覆う床板群の平均厚を用い、線形静的解析が成功する。
 #[test]
-fn test_secondary_beam_subdivided_slab_dl_cmq_and_rc_scope_diagnostic() {
+fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     use sepika_core::ids::{FloorRegionId, MaterialId, SectionId};
     use sepika_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime,
@@ -8829,6 +8829,11 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_rc_scope_diagnostic() {
             })
         };
     }
+    for element in &mut model.elements {
+        if element.section == Some(SectionId(2)) {
+            element.vertical_eccentricity = Some(-300.0);
+        }
+    }
     model.rebuild_floor_assignment_regions();
     let first = model
         .assign_enclosed_slab_to_matching_region(
@@ -8942,20 +8947,20 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_rc_scope_diagnostic() {
 
     let dl_id = dl.id;
     app.run_linear_static(dl_id);
-    let error = app.core.scoped.last_error.as_ref().unwrap();
     assert!(
-        error.contains("部材 ID 4") && error.contains("床板") && error.contains("梁全長の取付き"),
-        "{error}"
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
     );
     assert!(app
         .core
         .scoped
         .results
         .as_ref()
-        .is_none_or(|results| results
-            .statics
-            .iter()
-            .all(|(key, _)| *key != StaticCaseKey::User(dl_id))));
+        .unwrap()
+        .statics
+        .iter()
+        .any(|(key, _)| *key == StaticCaseKey::User(dl_id)));
 }
 
 /// 診断: 支点が1つも定義されていない空モデルは支点なし Error を返す。

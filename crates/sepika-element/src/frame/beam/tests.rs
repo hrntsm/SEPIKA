@@ -560,6 +560,162 @@ fn rc_slab_fixture() -> (Model, ElementData) {
     (model, beam)
 }
 
+fn split_rc_slab_side(model: &mut Model, side: usize, cuts: &[f64], thicknesses: &[f64]) {
+    use sepika_core::ids::{FloorPlateAssignmentRegionId, SectionId, SlabId};
+    use sepika_core::model::{
+        FloorPlateAssignmentRegion, PlateAssignment, SupportBoundary, SupportMemberId,
+    };
+    assert_eq!(cuts.len(), thicknesses.len() + 1);
+    let original = model.floor_assignment_regions.regions[side].clone();
+    let slab = model.slabs[side].clone();
+    let far = if side == 0 { 2 } else { 5 };
+    let far_y = if side == 0 { 1300.0 } else { -2300.0 };
+    let mut caps = Vec::new();
+    for &u in cuts {
+        let mut ends = Vec::new();
+        for y in [0.0, far_y] {
+            let mut n = model.nodes[0].clone();
+            n.id = NodeId(model.nodes.len() as u32);
+            n.coord = [u * 10000.0, y, -300.0];
+            ends.push(n.id);
+            model.nodes.push(n);
+        }
+        let mut e = model.elements[0].clone();
+        e.id = ElemId(model.elements.len() as u32);
+        e.nodes = ends.into_iter().collect();
+        caps.push(e.id);
+        model.elements.push(e);
+    }
+    model.floor_assignment_regions.regions.remove(side);
+    let mut regions = Vec::new();
+    for (j, (&t, pair)) in thicknesses.iter().zip(cuts.windows(2)).enumerate() {
+        let mut sec = model.sections[1].clone();
+        sec.id = SectionId(model.sections.len() as u32);
+        sec.thickness = Some(t);
+        let section = sec.id;
+        model.sections.push(sec);
+        let mut sl = slab.clone();
+        sl.id = if j == 0 {
+            slab.id
+        } else {
+            SlabId(model.slabs.len() as u32)
+        };
+        sl.plate.section = Some(section);
+        let id = sl.id;
+        if j == 0 {
+            model.slabs[side] = sl;
+        } else {
+            model.slabs.push(sl);
+        }
+        let edge = |id, span| SupportBoundary {
+            support: SupportMemberId::Primary(ElemId(id)),
+            span,
+        };
+        let boundary = if side == 0 {
+            vec![
+                edge(0, [pair[0], pair[1]]),
+                edge(caps[j + 1].0, [0.0, 1.0]),
+                edge(far, [1.0 - pair[1], 1.0 - pair[0]]),
+                edge(caps[j].0, [1.0, 0.0]),
+            ]
+        } else {
+            vec![
+                edge(0, [pair[1], pair[0]]),
+                edge(caps[j].0, [0.0, 1.0]),
+                edge(far, [pair[0], pair[1]]),
+                edge(caps[j + 1].0, [1.0, 0.0]),
+            ]
+        };
+        regions.push(FloorPlateAssignmentRegion {
+            id: if j == 0 {
+                original.id
+            } else {
+                FloorPlateAssignmentRegionId(100 + side as u32 * 10 + j as u32)
+            },
+            boundary,
+            assignment: PlateAssignment::Plate(id),
+        });
+    }
+    model
+        .floor_assignment_regions
+        .regions
+        .splice(side..side, regions);
+}
+
+#[test]
+fn rc_slab_length_weighted_thickness_and_different_side_breaks_match_independent_values() {
+    let (mut m, data) = rc_slab_fixture();
+    split_rc_slab_side(&mut m, 1, &[0.0, 0.7, 1.0], &[140.0, 340.0]);
+    split_rc_slab_side(&mut m, 0, &[0.0, 0.25, 1.0], &[75.0, 175.0]);
+    assert!((BeamElement::try_new(&data, &m).unwrap().iz - 10307037269.681742).abs() < 1e-5);
+    for cuts in [vec![0.0, 0.2, 1.0], vec![0.0, 0.17, 0.51, 0.93, 1.0]] {
+        let (mut m, data) = rc_slab_fixture();
+        split_rc_slab_side(&mut m, 0, &cuts, &vec![150.0; cuts.len() - 1]);
+        assert!((BeamElement::try_new(&data, &m).unwrap().iz - 10307037269.681742).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn rc_slab_groups_reject_missing_overlapping_no_plate_variable_width_and_invalid_individual_inputs()
+{
+    use sepika_core::model::PlateAssignment;
+    let (mut base, data) = rc_slab_fixture();
+    split_rc_slab_side(&mut base, 0, &[0.0, 0.25, 1.0], &[75.0, 175.0]);
+    let check = |m: &Model, text: &str| {
+        let e = stiffness_breakdown(m, &data).unwrap_err();
+        assert!(
+            e.contains("部材 ID 0") && e.contains("床板") && e.contains(text),
+            "{e}"
+        );
+    };
+    let (mut gap, _) = rc_slab_fixture();
+    split_rc_slab_side(&mut gap, 0, &[0.1, 0.25, 1.0], &[75.0, 175.0]);
+    check(&gap, "隙間");
+    let mut m = base.clone();
+    m.floor_assignment_regions.regions.remove(1);
+    m.floor_regions.clear();
+    check(&m, "全長");
+    let mut m = base.clone();
+    let mut region = m.floor_assignment_regions.regions[1].clone();
+    region.id.0 = 200;
+    let mut slab = m.slabs[2].clone();
+    slab.id.0 = 3;
+    m.slabs.push(slab);
+    region.assignment = PlateAssignment::Plate(sepika_core::ids::SlabId(3));
+    m.floor_assignment_regions.regions.push(region);
+    check(&m, "重複");
+    let mut m = base.clone();
+    m.floor_assignment_regions.regions[1].assignment = PlateAssignment::NoPlate;
+    m.floor_regions.clear();
+    check(&m, "NoPlate");
+    let mut m = base.clone();
+    m.floor_assignment_regions.regions[1].assignment = PlateAssignment::Unset;
+    check(&m, "未設定");
+    for t in [0.0, 601.0, f64::NAN] {
+        let mut m = base.clone();
+        let id = m.slabs[2].plate.section.unwrap();
+        m.sections[id.index()].thickness = Some(t);
+        check(&m, "床板 2");
+    }
+    let mut m = base.clone();
+    m.slabs[2].vertical_eccentricity_mm = Some(1.0);
+    check(&m, "上端");
+    let mut m = base.clone();
+    let mut far_section = m.sections[0].clone();
+    far_section.id.0 = m.sections.len() as u32;
+    far_section.width = 400.0;
+    let sid = far_section.id;
+    m.sections.push(far_section);
+    let mut far = m.elements[2].clone();
+    far.id.0 = m.elements.len() as u32;
+    far.section = Some(sid);
+    let eid = far.id;
+    m.elements.push(far);
+    m.floor_assignment_regions.regions[1].boundary[2].support =
+        sepika_core::model::SupportMemberId::Primary(eid);
+    check(&m, "内法距離");
+}
+
 #[test]
 fn rc_slab_unequal_thickness_public_geometry_and_unchanged_properties() {
     use sepika_core::model::PlateAssignment;
