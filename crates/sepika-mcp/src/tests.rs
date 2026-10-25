@@ -3762,9 +3762,40 @@ fn lateral_bracing_mcp_invalid_group_reference_is_retained_without_fallback() {
     assert_eq!(summary["n_skipped"], 0);
 }
 
+fn rebar507_with_explicit_zero_beam_eccentricity(
+    source: &str,
+) -> Result<Model, sepika_io::stbridge::StbError> {
+    let mut model = sepika_io::stbridge::import_stbridge(source)?;
+    let beams = model
+        .elements
+        .iter()
+        .filter(|element| {
+            element.kind.is_primary_frame_support()
+                && model
+                    .element_section(element)
+                    .and_then(|section| section.frame_use)
+                    == Some(FrameSectionUse::Girder)
+        })
+        .map(|element| element.id)
+        .collect::<Vec<_>>();
+    assert!(!beams.is_empty());
+    for id in beams {
+        assert_eq!(model.element(id).unwrap().vertical_eccentricity, None);
+        sepika_edit::EditCommand::apply(
+            &sepika_edit::SetBeamVerticalEccentricity {
+                member: sepika_core::model::SupportMemberId::Primary(id),
+                value: Some(0.0),
+            },
+            &mut model,
+        );
+        assert_eq!(model.element(id).unwrap().vertical_eccentricity, Some(0.0));
+    }
+    Ok(model)
+}
+
 #[test]
 fn standard_rebar507_query_reports_preserved_source_and_unsupported_analysis() {
-    let model = sepika_io::stbridge::import_stbridge(include_str!(
+    let model = rebar507_with_explicit_zero_beam_eccentricity(include_str!(
         "../../sepika-io/tests/fixtures/rebar507/normal_ThreeTypes_reverse_xml_order.stb"
     ))
     .unwrap();
@@ -3837,7 +3868,7 @@ fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_no
     use sepika_design_jp::{CheckOutcome, LoadTerm};
     let source =
         include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb");
-    let normal = sepika_io::stbridge::import_stbridge(source).unwrap();
+    let normal = rebar507_with_explicit_zero_beam_eccentricity(source).unwrap();
     let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
     let direct = |model: &Model| {
         let forces: Vec<_> = model
@@ -3877,7 +3908,7 @@ fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_no
             "2脚",
         ),
     ] {
-        let unsupported = sepika_io::stbridge::import_stbridge(input).unwrap();
+        let unsupported = rebar507_with_explicit_zero_beam_eccentricity(input).unwrap();
         let forces: Vec<_> = unsupported
             .elements
             .iter()
@@ -3901,7 +3932,7 @@ fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_no
         }
     }
     // 未使用断面と別の節点につく梁の配筋は、この接合部へ持ち込まない。
-    let unsupported = sepika_io::stbridge::import_stbridge(&secondary).unwrap();
+    let unsupported = rebar507_with_explicit_zero_beam_eccentricity(&secondary).unwrap();
     let mut unrelated = normal.clone();
     let mut section = unsupported.sections[1].clone();
     section.id = SectionId(2);
@@ -3944,7 +3975,7 @@ fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved
             .collect();
         sepika_design_jp::joint_wiring::collect_joint_checks(model, &forces, LoadTerm::Short)
     };
-    let normal = sepika_io::stbridge::import_stbridge(source).unwrap();
+    let normal = rebar507_with_explicit_zero_beam_eccentricity(source).unwrap();
     let checks = joint(&normal);
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].1, "柱梁接合部(SRC)");
@@ -3953,7 +3984,7 @@ fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved
         ("src_joint_secondary", source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\""), "副主筋"),
         ("src_joint_corner", source.replace("<StbSecBarArrangementColumn_SRC>", "<StbSecBarArrangementColumn_SRC kind_corner=\"DIR_X\">"), "kind_corner"),
     ] {
-        let model = sepika_io::stbridge::import_stbridge(&input).unwrap();
+        let model = rebar507_with_explicit_zero_beam_eccentricity(&input).unwrap();
         let result = joint(&model);
         assert_eq!(result.len(), 1);
         assert!(matches!(&result[0].2, CheckOutcome::Skipped { reason: message } if message.contains(reason)));
@@ -3968,9 +3999,9 @@ fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved
     }
     let src_beam_source =
         include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/src_column_beam.stb");
-    let src_beam_normal = sepika_io::stbridge::import_stbridge(src_beam_source).unwrap();
+    let src_beam_normal = rebar507_with_explicit_zero_beam_eccentricity(src_beam_source).unwrap();
     assert_eq!(checked_ratio507(&joint(&src_beam_normal)[0].2), 0.0);
-    let src_beam_extra = sepika_io::stbridge::import_stbridge(&src_beam_source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"")).unwrap();
+    let src_beam_extra = rebar507_with_explicit_zero_beam_eccentricity(&src_beam_source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"")).unwrap();
     assert!(
         matches!(&joint(&src_beam_extra)[0].2, CheckOutcome::Skipped { reason } if reason.contains("副主筋"))
     );
@@ -3989,7 +4020,7 @@ fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved
     assert!(supported
         .iter()
         .all(|(_, _, c)| matches!(c, CheckOutcome::Checked(_))));
-    let mut unsupported = sepika_io::stbridge::import_stbridge(&source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"")).unwrap();
+    let mut unsupported = rebar507_with_explicit_zero_beam_eccentricity(&source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"")).unwrap();
     unsupported.pca_attrs = pca.pca_attrs;
     let skipped =
         sepika_design_jp::rc::horizontal_joint::collect_pca_checks(&unsupported, &forces, false);

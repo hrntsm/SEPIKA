@@ -285,7 +285,12 @@ fn public_batch_rejects_invalid_steel_inputs_even_without_force_rows() {
             _ => unreachable!(),
         }
         let error = run_member_design_checks(&model, &[], &[], &Default::default()).unwrap_err();
-        assert!(error.contains("部材 0"), "case={case}: {error}");
+        if matches!(case, 3 | 4) {
+            assert!(error.contains("部材 ID 0"), "case={case}: {error}");
+            assert!(error.contains("断面"), "case={case}: {error}");
+        } else {
+            assert!(error.contains("部材 0"), "case={case}: {error}");
+        }
     }
     let mut known_no_fy = base;
     known_no_fy.materials[0].fy = None;
