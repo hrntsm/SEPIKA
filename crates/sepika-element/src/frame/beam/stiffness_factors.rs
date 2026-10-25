@@ -204,6 +204,8 @@ fn average_slab_side(mut strips: Vec<SlabStrip>) -> Result<Option<SlabSide>, Str
     let first = strips[0];
     let mut cursor = 0.0;
     let mut thickness_mm = 0.0;
+    let mut min_thickness_mm = first.thickness_mm;
+    let mut max_thickness_mm = first.thickness_mm;
     for strip in &strips {
         if (strip.clear_width_mm - first.clear_width_mm).abs() > 1e-6
             || (strip.flange_width_mm - first.flange_width_mm).abs() > 1e-6
@@ -225,6 +227,8 @@ fn average_slab_side(mut strips: Vec<SlabStrip>) -> Result<Option<SlabSide>, Str
                 strip.slab.0
             ));
         }
+        min_thickness_mm = min_thickness_mm.min(strip.thickness_mm);
+        max_thickness_mm = max_thickness_mm.max(strip.thickness_mm);
         thickness_mm += (strip.span[1] - strip.span[0]) * strip.thickness_mm;
         cursor = strip.span[1];
     }
@@ -234,14 +238,7 @@ fn average_slab_side(mut strips: Vec<SlabStrip>) -> Result<Option<SlabSide>, Str
             first.slab.0
         ));
     }
-    let thickness_mm = if strips
-        .iter()
-        .all(|strip| strip.thickness_mm == first.thickness_mm)
-    {
-        first.thickness_mm
-    } else {
-        thickness_mm
-    };
+    let thickness_mm = thickness_mm.clamp(min_thickness_mm, max_thickness_mm);
     Ok(Some(SlabSide {
         slabs: strips.iter().map(|s| s.slab).collect(),
         flange: SlabFlange {
@@ -849,7 +846,7 @@ mod averaged_thickness_safety_tests {
     }
 
     #[test]
-    fn uniform_depth_thickness_remains_exact_after_irregular_subdivision() {
+    fn averaged_thickness_respects_individual_bounds_after_irregular_subdivision() {
         let cuts = [
             0.0,
             0.03594368436477102,
@@ -863,20 +860,22 @@ mod averaged_thickness_safety_tests {
             0.9949256330202171,
             1.0,
         ];
-        let strips = cuts
-            .windows(2)
-            .enumerate()
-            .map(|(i, s)| SlabStrip {
-                slab: SlabId(i as u32),
-                span: [s[0], s[1]],
-                clear_width_mm: 1000.0,
-                flange_width_mm: 440.0,
-                thickness_mm: 600.0,
-            })
-            .collect();
-        let side = average_slab_side(strips).unwrap().unwrap();
-        assert_eq!(side.flange.thickness_mm, 600.0);
-        assert!(flanged_inertia(300.0, 600.0, &[Some(side.flange), None]).is_ok());
+        for first_thickness_mm in [600.0, 600.0_f64.next_down()] {
+            let strips = cuts
+                .windows(2)
+                .enumerate()
+                .map(|(i, s)| SlabStrip {
+                    slab: SlabId(i as u32),
+                    span: [s[0], s[1]],
+                    clear_width_mm: 1000.0,
+                    flange_width_mm: 440.0,
+                    thickness_mm: if i == 0 { first_thickness_mm } else { 600.0 },
+                })
+                .collect();
+            let side = average_slab_side(strips).unwrap().unwrap();
+            assert_eq!(side.flange.thickness_mm, 600.0);
+            assert!(flanged_inertia(300.0, 600.0, &[Some(side.flange), None]).is_ok());
+        }
     }
 
     #[test]

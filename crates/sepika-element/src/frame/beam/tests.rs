@@ -656,6 +656,39 @@ fn rc_slab_length_weighted_thickness_and_different_side_breaks_match_independent
 }
 
 #[test]
+fn rc_slab_heterogeneous_depth_boundary_accepts_valid_means_and_rejects_excess_individual_thickness(
+) {
+    let cuts = [
+        0.0,
+        0.03594368436477102,
+        0.12801457150946305,
+        0.1641040381680997,
+        0.4990074320535617,
+        0.7196274623713395,
+        0.7253355430923399,
+        0.8950370003028528,
+        0.9377616430020911,
+        0.9949256330202171,
+        1.0,
+    ];
+    let (mut valid, data) = rc_slab_fixture();
+    let mut thicknesses = [600.0; 10];
+    thicknesses[0] = 600.0_f64.next_down();
+    split_rc_slab_side(&mut valid, 0, &cuts, &thicknesses);
+    assert!(stiffness_breakdown(&valid, &data).is_ok());
+    assert!(BeamElement::try_new(&data, &valid).is_ok());
+    let mut invalid = valid;
+    let section = invalid.slabs[0].plate.section.unwrap();
+    invalid.sections[section.index()].thickness = Some(600.0_f64.next_up());
+    let error = stiffness_breakdown(&invalid, &data).unwrap_err();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("床板 0") && error.contains("梁せい以下"),
+        "{error}"
+    );
+    assert!(BeamElement::try_new(&data, &invalid).is_err());
+}
+
+#[test]
 fn rc_slab_groups_reject_missing_overlapping_no_plate_variable_width_and_invalid_individual_inputs()
 {
     use sepika_core::model::PlateAssignment;
