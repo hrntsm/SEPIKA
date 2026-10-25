@@ -104,6 +104,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0072](0072-slab-actual-placement.md) | accepted | 床板の実配置を支持座標から分離する |
 
 | [0073](0073-panel-connection-face-distance.md) | accepted | 仕口パネルの梁端接合面を既存入力から一意に解決する |
+| [0075](0075-rc-beam-length-weighted-slab-thickness.md) | accepted | RC梁の床板厚を各側の取付長で加重平均する |
 
 ## 規約
 
