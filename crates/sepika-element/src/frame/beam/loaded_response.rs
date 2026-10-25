@@ -13,7 +13,22 @@ impl BeamElement {
         loads: &[MemberLoad],
         connection: Option<ReleaseConnection>,
     ) -> Result<LoadedFrameResponse, String> {
-        self.try_loaded_response(u_elem, loads, connection)
+        self.loaded_response_with_stiffness(
+            u_elem,
+            loads,
+            connection,
+            &self.local_stiffness_flex_raw(),
+        )
+    }
+
+    pub(crate) fn loaded_response_with_stiffness(
+        &self,
+        u_elem: &[f64],
+        loads: &[MemberLoad],
+        connection: Option<ReleaseConnection>,
+        raw: &crate::behavior::LocalMat,
+    ) -> Result<LoadedFrameResponse, String> {
+        self.try_loaded_response(u_elem, loads, connection, raw)
             .map_err(|reason| format!("部材 {:?} の線形部材荷重応答: {reason}", self.id))
     }
 
@@ -22,6 +37,7 @@ impl BeamElement {
         u_elem: &[f64],
         loads: &[MemberLoad],
         connection: Option<ReleaseConnection>,
+        raw: &crate::behavior::LocalMat,
     ) -> Result<LoadedFrameResponse, String> {
         let u_global: &[f64; 12] = u_elem.try_into().map_err(|_| "変位は12自由度が必要です")?;
         if u_global.iter().any(|v| !v.is_finite()) {
@@ -32,7 +48,6 @@ impl BeamElement {
         }
         let (li, lj) = self.rigid_lengths();
         let map = FrameDeadLoadMap::new(loads, &self.axis, self.length, li, lj)?;
-        let raw = self.local_stiffness_flex_raw();
         let tangent = std::array::from_fn(|i| std::array::from_fn(|j| raw.get(i, j)));
         let mut connection = match connection {
             Some(connection) => connection,

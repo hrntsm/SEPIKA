@@ -591,8 +591,7 @@ fn test_build_nonlinear_behavior_concentrated_spring_uses_spring_beam() {
             Vec<Box<dyn sepika_material::uniaxial::UniaxialMaterial>>,
             [f64; 4],
             [f64; 4],
-            [f64; 12],
-            [f64; 12],
+            crate::frame::beam::state::ElasticLoadState,
         )>()
         .is_some();
     assert!(
@@ -1539,8 +1538,7 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
         Vec<Box<dyn sepika_material::UniaxialMaterial>>,
         [f64; 4],
         [f64; 4],
-        [f64; 12],
-        [f64; 12],
+        crate::frame::beam::state::ElasticLoadState,
     );
     let initial = behavior.snapshot_state();
     let initial = initial.downcast_ref::<Snapshot>().unwrap();
@@ -1567,12 +1565,12 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     let k = behavior.tangent_stiffness(&ctx);
     let f = behavior.internal_force(&ctx);
     for i in 0..12 {
-        let expected: f64 = (0..12).map(|j| k.get(i, j) * state.3[j]).sum();
+        let expected: f64 = (0..12).map(|j| k.get(i, j) * du.data[j]).sum();
         assert!((f.data[i] - expected).abs() < 1e-7);
     }
     for end in 0..2 {
         assert!((state.0[end].probe(state.1[end]).0 - f.data[5 + 6 * end]).abs() < 1e-7);
-        assert!((state.1[end] + state.2[end] - state.3[5 + 6 * end]).abs() < 1e-12);
+        assert!((state.1[end] + state.2[end] - du.data[5 + 6 * end]).abs() < 1e-12);
     }
     let zero = crate::behavior::LocalVec {
         data: smallvec::smallvec![0.0;12],

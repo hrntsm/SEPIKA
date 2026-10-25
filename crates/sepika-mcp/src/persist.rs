@@ -636,6 +636,7 @@ mod tests {
         for (version, reason) in [
             (None, "unknown_provenance"),
             (Some(0), "old_contract"),
+            (Some(51), "old_contract"),
             (
                 Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
                 "current",
