@@ -8600,11 +8600,16 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         .map(|element| element.id)
         .collect::<Vec<_>>();
     for id in imported_beams {
-        assert!(
-            app2.apply_model_edit(Box::new(sepika_edit::SetBeamVerticalEccentricity {
+        sepika_edit::EditCommand::apply(
+            &sepika_edit::SetBeamVerticalEccentricity {
                 member: sepika_core::model::SupportMemberId::Primary(id),
-                value: Some(0.0)
-            }))
+                value: Some(0.0),
+            },
+            &mut app2.core.model,
+        );
+        assert_eq!(
+            app2.core.model.element(id).unwrap().vertical_eccentricity,
+            Some(0.0)
         );
     }
     app2.run_linear_static(dl_id);

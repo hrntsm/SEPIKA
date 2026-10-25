@@ -2216,6 +2216,7 @@ fn steel601_failed_recheck_clears_old_design_and_keeps_valid_analysis() {
 }
 
 #[test]
+#[cfg(feature = "gui")]
 fn beam_eccentricity_edit_and_saved_reload_reject_results_from_previous_connection() {
     use result_validity::ResultInputKey;
     let mut app = calculated();
