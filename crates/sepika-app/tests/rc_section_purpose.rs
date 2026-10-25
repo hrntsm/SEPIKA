@@ -456,6 +456,10 @@ fn plate_model(wall: bool, numeric: bool) -> Model {
         ];
         model.slabs[0].reference_story = Some(StoryId(1));
         model.slabs[0].vertical_eccentricity_mm = Some(0.);
+        for element in &mut model.elements {
+            let section = &model.sections[element.section.unwrap().index()];
+            element.vertical_eccentricity = Some(-section.depth / 2.0);
+        }
     }
     model.validate().unwrap();
     model

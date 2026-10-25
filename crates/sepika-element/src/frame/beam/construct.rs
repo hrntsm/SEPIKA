@@ -37,7 +37,7 @@ impl BeamElement {
         Self::try_new(data, model).unwrap_or_else(|error| panic!("弾性梁を構築できません: {error}"))
     }
 
-    /// 採用 G [N/mm²] が不正、または弾性梁の可撓部剛性が非有限なら、部材 ID 付きのエラーを返す。
+    /// 採用 G [N/mm²]・可撓部剛性の不正、RC床板協力剛性の未解決・適用範囲外は部材ID付きエラー。
     pub fn try_new(data: &sepika_core::model::ElementData, model: &Model) -> Result<Self, String> {
         let beam = Self::resolve_properties(data, model)?;
         if matches!(
@@ -140,7 +140,7 @@ impl BeamElement {
 
         let lp = ((p1[0] - p0[0]).powi(2) + (p1[1] - p0[1]).powi(2)).sqrt();
         let is_horizontal = lp > 1e-9 && (p1[2] - p0[2]).abs() <= 0.05 * lp;
-        let factors = breakdown_with(model, data, &sec, e, is_horizontal);
+        let factors = breakdown_with(model, data, &sec, e, is_horizontal)?;
         let iz = iz * factors.slab;
 
         let wall_girder_factor = factors.wall_girder;

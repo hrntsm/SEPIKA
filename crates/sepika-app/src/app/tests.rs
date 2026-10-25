@@ -8651,7 +8651,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
 ///   落ちる床荷重・小梁自重は大梁の**中間集中荷重（CMQ）**へ変換される。
 /// - 実梁がないスラブ辺（小梁上の辺・大梁の中間区間）の荷重も捨てられず
 ///   主架構へ伝達され、鉛直荷重の総和が保存される。
-/// - そのまま線形静的解析が成功する（小梁支持節点は解析自由度から除外）。
+/// - 上端一致で全長を覆う床板群の平均厚を用い、線形静的解析が成功する。
 #[test]
 fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     use sepika_core::ids::{FloorRegionId, MaterialId, SectionId};
@@ -8868,6 +8868,11 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
             })
         };
     }
+    for element in &mut model.elements {
+        if element.section == Some(SectionId(2)) {
+            element.vertical_eccentricity = Some(-300.0);
+        }
+    }
     model.rebuild_floor_assignment_regions();
     let first = model
         .assign_enclosed_slab_to_matching_region(
@@ -8979,7 +8984,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         "小梁支持節点への節点荷重は大梁の集中荷重へ変換されるはず"
     );
 
-    // そのまま線形静的解析が成功する（小梁支持節点は解析自由度から除外される）。
     let dl_id = dl.id;
     app.run_linear_static(dl_id);
     assert!(
@@ -8995,7 +8999,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         .unwrap()
         .statics
         .iter()
-        .any(|(k, _)| *k == StaticCaseKey::User(dl_id)));
+        .any(|(key, _)| *key == StaticCaseKey::User(dl_id)));
 }
 
 /// 診断: 支点が1つも定義されていない空モデルは支点なし Error を返す。

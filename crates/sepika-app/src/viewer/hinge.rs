@@ -2926,8 +2926,8 @@ mod tests {
 
     #[test]
     fn rc_reference_cache_tracks_property_basis_and_slab_diagnostics_while_stale() {
-        use sepika_core::ids::{FloorRegionId, NodeId, SlabId};
-        use sepika_core::model::{FloorRegion, PropertyBasis, Slab, SlabPlate, SlabShape};
+        use sepika_core::ids::NodeId;
+        use sepika_core::model::{PropertyBasis, SlabPlate};
         for edit in 0..2 {
             let mut app = reference_cache_app();
             assert_eq!(refresh_reference_cache(&mut app).0, None);
@@ -2950,24 +2950,35 @@ mod tests {
                     node.coord = coord;
                     app.core.model.nodes.push(node);
                 }
-                app.core.model.floor_regions.push(FloorRegion {
-                    slab_ids: vec![SlabId(0)],
-                    ..FloorRegion::new(
-                        FloorRegionId(0),
-                        vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+                use sepika_core::ids::StoryId;
+                use sepika_core::model::{FrameSectionUse, Story};
+                app.core.model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+                app.core.model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+                for nodes in [[1, 2], [2, 3], [3, 0]] {
+                    let mut edge = app.core.model.elements[0].clone();
+                    edge.id = ElemId(app.core.model.elements.len() as u32);
+                    edge.nodes = nodes.map(NodeId).into_iter().collect();
+                    app.core.model.elements.push(edge);
+                }
+                app.core.model.rebuild_floor_assignment_regions();
+                app.core
+                    .model
+                    .assign_enclosed_slab_to_matching_region(
+                        &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+                        SlabPlate {
+                            section: Some(SectionId(1)),
+                            ..Default::default()
+                        },
                     )
-                });
-                app.core.model.slabs.push(Slab {
-                    id: SlabId(0),
-                    shape: SlabShape::Enclosed,
-                    plate: SlabPlate {
-                        section: Some(SectionId(1)),
-                        ..Default::default()
-                    },
-                    reference_story: None,
-                    vertical_eccentricity_mm: None,
-                    tip_loads: vec![],
-                });
+                    .unwrap();
+                app.core.model.stories.push(Story::new(
+                    StoryId(0),
+                    "1F".into(),
+                    Some(350.0),
+                    Some(-350.0),
+                ));
+                app.core.model.slabs[0].reference_story = Some(StoryId(0));
+                app.core.model.slabs[0].vertical_eccentricity_mm = Some(0.0);
                 "スラブ"
             };
             app.core.scoped.staleness.mark_edited();

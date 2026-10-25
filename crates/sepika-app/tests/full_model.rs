@@ -14,7 +14,8 @@
 //! 4 層＋PH の S 造（一部 RC）。節点 166・解析要素 115（柱 40・大梁 75）・
 //! 二次部材 56（小梁）・床領域 26（大梁1床領域単位）・階 5（Z=200/4700/8700/12700/16500）。
 //! FL と SL を一致させた階入力を解析用 fixture として明示する。実建物の ΔSL を推測した検証とはしない。
-//! 梁の節点材軸からの一律鉛直差も、この解析用 fixture では0 mmと明示する。
+//! 解析用fixtureの矩形RC梁は床上面へ梁上端を揃え、節点材軸から-D/2 mmと明示する。
+//! その他の梁は節点材軸から0 mmと明示する。
 //! 荷重は ST-Bridge に含まれないため、取り込み時に標準荷重ケース
 //! （DL・LL(架構用)・LL(地震用)・EX・EY）が自動生成される。支点情報も
 //! 含まれないため、最下レベルの柱脚 12 箇所がピン支点として自動設定される。
@@ -433,7 +434,7 @@ fn declare_analysis_story_levels(model: &mut sepika_core::model::Model) {
     }
 }
 
-/// 解析用fixtureの梁材軸は節点・支持アンカーから鉛直差0 mmとする。
+/// 解析用fixtureの矩形RC梁は梁上端を節点高さへ、その他は材軸を節点高さへ揃える。
 fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
     let girder_sections: std::collections::HashSet<_> = model
         .sections
@@ -446,7 +447,21 @@ fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
             .section
             .is_some_and(|id| girder_sections.contains(&id))
         {
-            element.vertical_eccentricity = Some(0.0);
+            let section = model
+                .sections
+                .iter()
+                .find(|s| Some(s.id) == element.section)
+                .unwrap();
+            element.vertical_eccentricity = Some(
+                if matches!(
+                    section.shape,
+                    Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
+                ) {
+                    -section.depth / 2.0
+                } else {
+                    0.0
+                },
+            );
         }
     }
     for beam in model
