@@ -38,8 +38,8 @@ use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Model, PanelZoneMode,
 };
 use sepika_core::panel_zone::{
-    is_horizontal_or_vertical_member, member_orientation, panel_half_extent,
-    resolve_panel_analysis_joint, PanelHalfExtent, PanelJointError,
+    is_horizontal_or_vertical_member, member_orientation, panel_connection_offset,
+    resolve_panel_analysis_joint, PanelJointError,
 };
 
 /// 1 つの接合部に生成するパネルの諸元。方向別の値は `[強軸, 弱軸]` の順。
@@ -147,45 +147,38 @@ fn far_end_at(e: &ElementData, node: NodeId) -> Option<NodeId> {
 ///
 /// パネルが 1 つもなければ全要素の値が 0 になるため、モデル化を OFF にすると
 /// オフセットは消える（冪等）。
-fn apply_panel_offsets(model: &mut Model, adjacency: &NodeAdjacency, panels: &[GeneratedPanel]) {
-    let mut extent_of: Vec<Option<PanelHalfExtent>> = vec![None; model.nodes.len()];
-    for p in panels {
-        let extent = panel_half_extent(model, p.node, adjacency.elements_at(model, p.node));
-        if let Some(slot) = extent_of.get_mut(p.node.index()) {
-            *slot = Some(extent);
+fn apply_panel_offsets(
+    model: &mut Model,
+    adjacency: &NodeAdjacency,
+    panels: &[GeneratedPanel],
+) -> Result<(), String> {
+    let mut offsets = vec![[0.0; 2]; model.elements.len()];
+    for panel in panels {
+        let joint = resolve_panel_analysis_joint(
+            model,
+            panel.node,
+            adjacency.elements_at(model, panel.node),
+        )
+        .map_err(|reason| reason.to_string())?
+        .expect("生成対象の接合部");
+        let column = &model.elements[joint.column.index()];
+        for member in adjacency.elements_at(model, panel.node) {
+            if !is_horizontal_or_vertical_member(model, member)
+                || member_orientation(model, member).is_none()
+            {
+                continue;
+            }
+            let end = usize::from(member.nodes[0] != panel.node);
+            offsets[member.id.index()][end] =
+                panel_connection_offset(model, panel.node, column, member)
+                    .map_err(|reason| reason.to_string())?;
         }
     }
-
-    let offsets: Vec<(usize, [f64; 2])> = model
-        .elements
-        .iter()
-        .enumerate()
-        .map(|(ei, e)| {
-            let ends = match (e.nodes.len() >= 2 && is_horizontal_or_vertical_member(model, e))
-                .then(|| member_orientation(model, e))
-                .flatten()
-            {
-                Some(orientation) => {
-                    let offset_at = |end: usize| {
-                        extent_of
-                            .get(e.nodes[end].index())
-                            .and_then(|x| x.as_ref())
-                            .map(|x| x.offset_for(orientation))
-                            .unwrap_or(0.0)
-                    };
-                    [offset_at(0), offset_at(1)]
-                }
-                None => [0.0, 0.0],
-            };
-            (ei, ends)
-        })
-        .collect();
-
-    for (ei, ends) in offsets {
-        let zone = &mut model.elements[ei].rigid_zone;
-        zone.panel_offset_i = ends[0];
-        zone.panel_offset_j = ends[1];
+    for (element, ends) in model.elements.iter_mut().zip(offsets) {
+        element.rigid_zone.panel_offset_i = ends[0];
+        element.rigid_zone.panel_offset_j = ends[1];
     }
+    Ok(())
 }
 
 /// モデルの仕口パネル要素を再生成する（冪等）。
@@ -243,7 +236,7 @@ pub fn apply_auto_panel_zones(model: &mut Model) -> Result<Vec<GeneratedPanel>, 
         model.elements.push(e);
     }
 
-    apply_panel_offsets(model, &adjacency, &generated);
+    apply_panel_offsets(model, &adjacency, &generated)?;
     Ok(generated)
 }
 
@@ -329,7 +322,7 @@ mod tests {
             section: Some(SectionId(sec)),
             local_axis: LocalAxis {
                 ref_vector: if sec == 1 {
-                    [0.0, 1.0, 0.0]
+                    [1.0, 0.0, 0.0]
                 } else {
                     [0.0, 0.0, 1.0]
                 },
@@ -611,6 +604,152 @@ mod tests {
         assert!((col.panel_offset_j - 300.0).abs() < 1e-9);
         assert_eq!(col.panel_offset_i, 0.0);
         assert!((col.rigid_length_j() - 300.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn panel_759_offsets_preserve_independent_inputs_and_lifecycle() {
+        let mut model = l_frame(SectionShape::SteelBox {
+            height: 400.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        });
+        model.nodes[1].coord = [0.0, 6000.0, 3000.0];
+        model.elements[0].rigid_zone.length_i = 20.0;
+        model.elements[0].rigid_zone.source_i = sepika_core::model::ZoneSource::Manual;
+        model.elements[0].rigid_zone.face_i = Some(777.0);
+        for _ in 0..2 {
+            apply_auto_panel_zones(&mut model).unwrap();
+            let zone = model.elements[0].rigid_zone;
+            assert_eq!(zone.panel_offset_i, 100.0);
+            assert_eq!(zone.rigid_length_i(), 100.0);
+            assert_eq!(zone.length_i, 20.0);
+            assert_eq!(zone.face_i, Some(777.0));
+            model.validate().unwrap();
+        }
+        model.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
+        assert!(model
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("必要値 200"));
+        apply_auto_panel_zones(&mut model).unwrap();
+        assert_eq!(model.elements[0].rigid_zone.panel_offset_i, 200.0);
+        for disabled in [false, true] {
+            let mut candidate = model.clone();
+            if disabled {
+                candidate.panel_zone = PanelZoneMode::None;
+            } else {
+                candidate.sections[1].shape = Some(SectionShape::CftBox {
+                    height: 400.0,
+                    width: 200.0,
+                    thick: 12.0,
+                    corner_r: Some(0.0),
+                });
+            }
+            apply_auto_panel_zones(&mut candidate).unwrap();
+            assert!(candidate
+                .elements
+                .iter()
+                .all(|element| element.rigid_zone.panel_offset_i == 0.0
+                    && element.rigid_zone.panel_offset_j == 0.0));
+            assert_eq!(candidate.elements[0].rigid_zone.length_i, 20.0);
+            assert_eq!(candidate.elements[0].rigid_zone.face_i, Some(777.0));
+        }
+        model.sections[1].shape = Some(h_shape(400.0, 200.0, 12.0, 20.0));
+        model.elements[1].local_axis.ref_vector = [1.0, 0.0, 0.0];
+        let before = bincode::serialize(&model).unwrap();
+        let error = apply_auto_panel_zones(&mut model).unwrap_err();
+        for text in ["接合部 ID 0", "柱 ID 1", "部材 ID 0", "接合詳細"] {
+            assert!(error.contains(text), "{error}");
+        }
+        assert_eq!(bincode::serialize(&model).unwrap(), before);
+    }
+
+    #[test]
+    fn panel_759_directional_rigid_connection_preserves_original_load_resultants_and_work() {
+        use crate::behavior::ElementBehavior;
+        use sepika_core::model::{MemberLoad, MemberLoadKind};
+        let mut model = l_frame(SectionShape::SteelBox {
+            height: 400.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        });
+        model.nodes[1].coord = [0.0, 6000.0, 3000.0];
+        apply_auto_panel_zones(&mut model).unwrap();
+        let data = &model.elements[0];
+        assert_eq!(data.rigid_zone.panel_offset_i, 100.0);
+        use crate::wall::side_column::{InPlaneReleasedColumn, ReleaseAxis};
+        let wrapped = crate::frame::panel_offset::PanelOffsetMember::new(
+            Box::new(InPlaneReleasedColumn::new(
+                crate::frame::beam::BeamElement::new(data, &model),
+                ReleaseAxis::LocalY,
+            )),
+            crate::frame::panel_offset::resolve(data, &model).unwrap(),
+        );
+        let loads = [
+            MemberLoad::manual(
+                data.id,
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Point { a: 50.0, p: 1000.0 },
+            ),
+            MemberLoad::manual(
+                data.id,
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 6000.0,
+                    w1: 2.0,
+                    w2: 4.0,
+                },
+            ),
+        ];
+        let zero = wrapped
+            .frame_load_response(&vec![0.0; wrapped.n_dof()], &loads)
+            .unwrap()
+            .unwrap();
+        let residual = &zero.nodal_residual.data;
+        assert!((residual[2] + residual[8] - 19000.0).abs() < 1e-8);
+        assert!((residual[3] + residual[9] + 6000.0 * residual[8] - 60_050_000.0).abs() < 1e-6);
+        let mut reference_data = data.clone();
+        reference_data.rigid_zone.panel_offset_i = 0.0;
+        reference_data.rigid_zone.length_i = 100.0;
+        let reference = InPlaneReleasedColumn::new(
+            crate::frame::beam::BeamElement::new(&reference_data, &model),
+            ReleaseAxis::LocalY,
+        );
+        let mut displacement = vec![0.0; wrapped.n_dof()];
+        displacement[12] = 0.001;
+        displacement[13] = -0.002;
+        let mut reference_displacement = [0.0; 12];
+        reference_displacement[3] = -0.0005;
+        reference_displacement[4] = 0.001;
+        let actual = wrapped
+            .frame_load_response(&displacement, &loads)
+            .unwrap()
+            .unwrap();
+        let expected = reference
+            .frame_load_response(&reference_displacement, &loads)
+            .unwrap()
+            .unwrap();
+        for (actual, expected) in actual.nodal_residual.data[..12]
+            .iter()
+            .zip(&expected.nodal_residual.data)
+        {
+            assert!((actual - expected).abs() < 1e-9 * expected.abs().max(1.0));
+        }
+        let work: f64 = displacement
+            .iter()
+            .zip(&actual.nodal_residual.data)
+            .map(|(u, f)| u * f)
+            .sum();
+        let reference_work: f64 = reference_displacement
+            .iter()
+            .zip(&expected.nodal_residual.data)
+            .map(|(u, f)| u * f)
+            .sum();
+        assert!((work - reference_work).abs() < 1e-9 * reference_work.abs().max(1.0));
     }
 
     /// 斜材はパネルの接合面を持たないため、剛域長へパネルオフセットを加えない。

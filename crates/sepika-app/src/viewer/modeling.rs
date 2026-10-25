@@ -911,17 +911,37 @@ fn draw_polygon_shape(
     }
 }
 
-/// 接合部に取り付く部材から、パネルの見付き半寸法を求める。
-///
-/// 解析側が部材の剛域長へ書き込むオフセットと同じ値
-/// （[`sepika_core::panel_zone::panel_half_extent`]）を使うため、図に現れる
-/// 四角形は解析上のパネル寸法と一致する。
-fn panel_half_extent_at(
+fn panel_face_distances_at(
     model: &Model,
     adjacency: &NodeAdjacency,
     node: NodeId,
-) -> sepika_core::panel_zone::PanelHalfExtent {
-    sepika_core::panel_zone::panel_half_extent(model, node, adjacency.elements_at(model, node))
+) -> Result<Vec<([f64; 3], f64)>, String> {
+    use sepika_core::panel_zone::{
+        member_orientation, member_unit_axis, panel_connection_offset, select_panel_column,
+        MemberOrientation,
+    };
+    let columns: Vec<_> = adjacency
+        .elements_at(model, node)
+        .filter(|element| member_orientation(model, element) == Some(MemberOrientation::Column))
+        .collect();
+    let column = select_panel_column(model, node, &columns).map_err(|reason| reason.to_string())?;
+    panel_beam_axes(model, adjacency, node)
+        .into_iter()
+        .map(|axis| {
+            let beam = adjacency
+                .elements_at(model, node)
+                .find(|element| {
+                    member_orientation(model, element) == Some(MemberOrientation::Beam)
+                        && member_unit_axis(model, element).is_some_and(|direction| {
+                            sepika_core::geom::vec3::dot(direction, axis).abs() > 1.0 - 1e-12
+                        })
+                })
+                .expect("梁材軸を持つ構面");
+            panel_connection_offset(model, node, column, beam)
+                .map(|distance| (axis, distance))
+                .map_err(|reason| reason.to_string())
+        })
+        .collect()
 }
 
 /// 水平材（はり）の材軸方向を、平行なものをまとめて集める。
@@ -939,7 +959,7 @@ fn panel_beam_axes(model: &Model, adjacency: &NodeAdjacency, node: NodeId) -> Ve
         };
         let parallel = axes
             .iter()
-            .any(|a| (a[0] * axis[0] + a[1] * axis[1] + a[2] * axis[2]).abs() > 0.99);
+            .any(|a| (a[0] * axis[0] + a[1] * axis[1] + a[2] * axis[2]).abs() > 1.0 - 1e-12);
         if !parallel {
             axes.push(axis);
         }
@@ -949,8 +969,7 @@ fn panel_beam_axes(model: &Model, adjacency: &NodeAdjacency, node: NodeId) -> Ve
 
 /// 仕口パネル（柱梁接合部パネル）を、接合部に設ける四角形として描く。
 ///
-/// 梁が取り付く構面ごとに、幅＝柱せい・高さ＝梁せいの四角形を接合部中心に描く。
-/// これは解析でパネルが占める領域（部材がその面で接合する範囲）そのものである。
+/// 梁が取り付く構面ごとに、解決した接合面距離と梁半せいで四角形を描く。
 ///
 /// 同じ区間には部材側の剛域ブロック（ハッチ）も重なって描かれる。両者は別の
 /// 情報で、ハッチは「その部材のこの区間が剛体アームである」、四角形は
@@ -979,15 +998,18 @@ fn draw_panel_zone(
     let c = pts[center];
     let c3 = coords3[center];
 
-    let extent = panel_half_extent_at(model, adjacency, node);
+    let beam_half = sepika_core::panel_zone::panel_beam_half_extent(model, node);
     let mut drawn = false;
-    if extent.beam_half > 0.0 && extent.column_half > 0.0 {
-        for axis in panel_beam_axes(model, adjacency, node) {
+    if let Ok(faces) = panel_face_distances_at(model, adjacency, node) {
+        for (axis, distance) in faces
+            .into_iter()
+            .filter(|(_, distance)| *distance > 0.0 && beam_half > 0.0)
+        {
             let corner = |sw: f64, sh: f64| -> [f64; 3] {
                 [
-                    c3[0] + sw * extent.column_half * axis[0],
-                    c3[1] + sw * extent.column_half * axis[1],
-                    c3[2] + sh * extent.beam_half,
+                    c3[0] + sw * distance * axis[0],
+                    c3[1] + sw * distance * axis[1],
+                    c3[2] + sh * beam_half,
                 ]
             };
             let quad: Vec<egui::Pos2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
@@ -1504,14 +1526,12 @@ mod tests {
     fn test_panel_half_extent_from_member_depths() {
         let model = cross_joint_model();
         let adjacency = NodeAdjacency::build(&model);
-        let extent = panel_half_extent_at(&model, &adjacency, NodeId(0));
-        assert!(
-            (extent.column_half - 200.0).abs() < 1e-9,
-            "水平半寸法は柱せい 400 の 1/2"
-        );
-        assert!(
-            (extent.beam_half - 300.0).abs() < 1e-9,
-            "鉛直半寸法は梁せい 600 の 1/2"
+        let faces = panel_face_distances_at(&model, &adjacency, NodeId(0)).unwrap();
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].1, 200.0);
+        assert_eq!(
+            sepika_core::panel_zone::panel_beam_half_extent(&model, NodeId(0)),
+            300.0
         );
 
         let axes = panel_beam_axes(&model, &adjacency, NodeId(0));
@@ -1531,7 +1551,7 @@ mod tests {
             story: None,
             support_spring: None,
         };
-        let model = Model {
+        let mut model = Model {
             nodes: vec![
                 node(0, [0.0, 0.0, 3000.0]),
                 node(1, [6000.0, 0.0, 3000.0]),
@@ -1549,14 +1569,28 @@ mod tests {
             ],
             ..Default::default()
         };
+        model.sections[1].shape = Some(sepika_core::section_shape::SectionShape::SteelBox {
+            height: 400.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        });
+        model.elements[2].local_axis.ref_vector = [1.0, 0.0, 0.0];
         let adjacency = NodeAdjacency::build(&model);
+        let faces = panel_face_distances_at(&model, &adjacency, NodeId(0)).unwrap();
+        assert_eq!(
+            faces,
+            vec![([1.0, 0.0, 0.0], 200.0), ([0.0, 1.0, 0.0], 100.0)]
+        );
         assert_eq!(
             panel_beam_axes(&model, &adjacency, NodeId(0)).len(),
             2,
             "直交 2 構面"
         );
-        let extent = panel_half_extent_at(&model, &adjacency, NodeId(0));
-        assert!((extent.beam_half - 300.0).abs() < 1e-9);
+        assert_eq!(
+            sepika_core::panel_zone::panel_beam_half_extent(&model, NodeId(0)),
+            300.0
+        );
     }
 
     /// 断面が求まらない接合部は四角形を描けないため、見付き半寸法が 0 になる
@@ -1565,9 +1599,11 @@ mod tests {
     fn test_panel_half_extent_without_sections() {
         let model = Model::default();
         let adjacency = NodeAdjacency::build(&model);
-        let extent = panel_half_extent_at(&model, &adjacency, NodeId(0));
-        assert_eq!(extent.column_half, 0.0);
-        assert_eq!(extent.beam_half, 0.0);
+        assert!(panel_face_distances_at(&model, &adjacency, NodeId(0)).is_err());
+        assert_eq!(
+            sepika_core::panel_zone::panel_beam_half_extent(&model, NodeId(0)),
+            0.0
+        );
         assert!(panel_beam_axes(&model, &adjacency, NodeId(0)).is_empty());
     }
 
@@ -1596,7 +1632,12 @@ mod tests {
             floor: None,
             panel_thickness: None,
             thickness: None,
-            shape: None,
+            shape: Some(sepika_core::section_shape::SectionShape::SteelBox {
+                height: depth,
+                width: depth,
+                thick: 12.0,
+                corner_r: Some(0.0),
+            }),
             material: Some(MaterialId(0)),
             rebar_material: None,
             shear_rebar_material: None,

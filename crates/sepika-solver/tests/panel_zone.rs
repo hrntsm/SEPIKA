@@ -79,7 +79,7 @@ fn member(id: u32, n0: u32, n1: u32, sec: u32, rigid: RigidZone) -> ElementData 
         section: Some(SectionId(sec)),
         local_axis: LocalAxis {
             ref_vector: if sec == 1 {
-                [0.0, 1.0, 0.0]
+                [1.0, 0.0, 0.0]
             } else {
                 [0.0, 0.0, 1.0]
             },
@@ -213,10 +213,10 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
     model
 }
 
-/// 柱の強軸・弱軸の実効体積 Ve とせん断剛性 G·Ve。
+/// 全体X・Y回転に対応する実効体積 Ve とせん断剛性 G·Ve。
 fn panel_stiffness(model: &Model) -> ([f64; 2], [f64; 2]) {
     let db = BEAM_H - BEAM_TF;
-    let ve = [(COL_H - COL_TF) * db * COL_TW, 2.0 * COL_B * db * COL_TF];
+    let ve = [2.0 * COL_B * db * COL_TF, (COL_H - COL_TF) * db * COL_TW];
     let mat = &model.materials[0];
     (ve, ve.map(|volume| mat.shear_modulus() * volume))
 }
@@ -234,14 +234,13 @@ fn panel_757_space_frame(column_rotation: f64, building_rotation: f64) -> Model 
     other_beam.id = ElemId(2);
     other_beam.nodes = smallvec::smallvec![NodeId(0), NodeId(3)];
     model.elements.push(other_beam);
-    let shape = SectionShape::SteelH {
-        height: 500.0,
-        width: 300.0,
-        web_thick: 12.0,
-        flange_thick: 24.0,
-        root_r: Some(0.0),
+    let shape = SectionShape::SteelBox {
+        height: 250.0,
+        width: 612.0,
+        thick: 12.0,
+        corner_r: Some(0.0),
     };
-    let mut column = shape.to_section(SectionId(1), "H-500x300x12x24".into());
+    let mut column = shape.to_section(SectionId(1), "Box-250x612x12".into());
     column.frame_use = Some(FrameSectionUse::Column);
     column.material = Some(MaterialId(0));
     model.sections[1] = column;
@@ -289,9 +288,9 @@ fn panel_757_space_frame(column_rotation: f64, building_rotation: f64) -> Model 
     ];
     let panels = sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
     assert_eq!(panels.len(), 1);
-    assert_eq!(panels[0].dc, [476.0, 300.0]);
+    assert_eq!(panels[0].dc, [238.0, 600.0]);
     assert_eq!(panels[0].db, [583.0; 2]);
-    assert_eq!(panels[0].tp, [12.0, 24.0]);
+    assert_eq!(panels[0].tp, [12.0, 12.0]);
     assert_eq!(panels[0].ve, [3_330_096.0, 8_395_200.0]);
     assert_eq!(panels[0].k_panel, [266_407_680_000.0, 671_616_000_000.0]);
     model
@@ -302,6 +301,144 @@ fn panel_757_rigid_comparison(model: &Model) -> Model {
     rigid.elements.retain(|e| e.kind != ElementKind::PanelZone);
     rigid.panel_zone = sepika_core::model::PanelZoneMode::None;
     rigid
+}
+
+#[test]
+fn panel_759_public_solver_preserves_original_span_loads_reactions_and_shear_work() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    let mut model = l_frame(false);
+    model.sections[1].shape = Some(SectionShape::SteelBox {
+        height: 400.0,
+        width: 200.0,
+        thick: 12.0,
+        corner_r: Some(0.0),
+    });
+    model.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    model.load_cases[0].nodal.clear();
+    model.load_cases[0].member = vec![
+        MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point { a: 50.0, p: 1000.0 },
+        ),
+        MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 6000.0,
+                w1: 2.0,
+                w2: 4.0,
+            },
+        ),
+    ];
+    sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+    assert_eq!(model.elements[0].rigid_zone.panel_offset_i, 100.0);
+    let analysis = sepika_solver::statics::analysis::Analysis::prepare(&model).unwrap();
+    let result = analysis.linear_static(LoadCaseId(1)).unwrap();
+    let direct = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1)).unwrap();
+    let dofs = DofMap::build(&model);
+    let assembled = dofs.expand_to_nodes(&solve_free(&model, &dofs), model.nodes.len());
+    for (actual, expected) in assembled.iter().flatten().zip(result.disp.iter().flatten()) {
+        assert!((actual - expected).abs() < 1e-9 * expected.abs().max(1.0));
+    }
+    for response in [&result, &direct] {
+        assert!(
+            (response.panel_moments[0].1[1] + 60_050_000.0).abs() < 1e-6,
+            "MS={:?}, forces={:?}",
+            response.panel_moments,
+            response.member_forces
+        );
+        let column = &response
+            .member_forces
+            .iter()
+            .find(|(id, _)| *id == ElemId(1))
+            .unwrap()
+            .1;
+        assert!((column.at[0].1[0] + 19_000.0).abs() < 1e-7);
+        assert!((column.at[0].1[4] - 60_050_000.0).abs() < 1e-6);
+    }
+    let rigid = panel_757_rigid_comparison(&model);
+    let reference = sepika_solver::statics::analysis::Analysis::prepare(&rigid)
+        .unwrap()
+        .linear_static(LoadCaseId(1))
+        .unwrap();
+    let stiffness_n_mm = (205_000.0 / 2.6) * 2.0 * 188.0 * 583.0 * 12.0;
+    let shear_rotation = 60_050_000.0 / stiffness_n_mm;
+    let extra_tip_disp = result.disp[1][2] - reference.disp[1][2];
+    assert!((extra_tip_disp + 6000.0 * shear_rotation).abs() < 1e-9);
+    let original_load_work_n_mm = -extra_tip_disp / 6000.0 * 60_050_000.0;
+    assert!((original_load_work_n_mm - 60_050_000.0_f64.powi(2) / stiffness_n_mm).abs() < 1e-5);
+}
+
+#[test]
+fn panel_759_public_pushover_prepares_panels_with_and_without_gravity_member_loads() {
+    use sepika_core::model::{LoadCombination, MemberLoad, MemberLoadKind, Story};
+    for gravity in [false, true] {
+        let mut model = l_frame(true);
+        model.materials[0].fy = Some(235.0);
+        let mut spring = model.elements[1].clone();
+        spring.id = ElemId(model.elements.len() as u32);
+        spring.kind = ElementKind::NodalSpring;
+        spring.section = None;
+        spring.spring = Some([10.0, 10.0, 10.0, 0.0, 0.0, 0.0]);
+        model.elements.push(spring);
+        model.stories = [(0.0, vec![NodeId(2)]), (3000.0, vec![NodeId(0), NodeId(1)])]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (fl, nodes))| {
+                let mut story = Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{i}F"),
+                    Some(fl),
+                    Some(0.0),
+                );
+                story.node_ids = nodes;
+                story.seismic_weight = Some(10_000.0);
+                story
+            })
+            .collect();
+        model.load_cases[0].nodal.clear();
+        model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Dead;
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point { a: 50.0, p: 100.0 },
+        )];
+        model.load_cases.push(LoadCase {
+            id: LoadCaseId(2),
+            name: "P=0".into(),
+            kind: sepika_core::model::LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
+        model.combinations = vec![LoadCombination {
+            name: "重力".into(),
+            terms: vec![(LoadCaseId(1), 1.0), (LoadCaseId(2), 1.0)],
+        }];
+        model.ultimate_gravity_combination = Some(0);
+        let dofs = DofMap::build(&model);
+        let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dofs);
+        let result = sepika_solver::nonlinear::pushover::pushover_analysis_recording(
+            &model,
+            &dofs,
+            &reducer,
+            sepika_solver::statics::analysis::SeismicDir::X,
+            1,
+            sepika_solver::nonlinear::pushover::PushoverTarget::from_max_disp(10.0),
+            Default::default(),
+            gravity,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+        assert!(!result.steps.is_empty());
+        assert_eq!(result.steps[0].load_factor == 0.0, gravity);
+        assert!(result
+            .steps
+            .iter()
+            .all(|step| step.top_disp.is_finite() && step.base_shear.is_finite()));
+    }
 }
 
 #[test]
@@ -1330,6 +1467,8 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
             for member in &mut model.elements {
                 member.rigid_zone.length_i *= scale;
                 member.rigid_zone.length_j *= scale;
+                member.rigid_zone.panel_offset_i *= scale;
+                member.rigid_zone.panel_offset_j *= scale;
                 member.rigid_zone.face_i = member.rigid_zone.face_i.map(|v| v * scale);
                 member.rigid_zone.face_j = member.rigid_zone.face_j.map(|v| v * scale);
             }

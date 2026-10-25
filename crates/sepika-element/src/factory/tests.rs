@@ -2070,7 +2070,7 @@ fn panel_757_valid_steel_joint_couples_each_factory_representation_once() {
     use sepika_core::section_shape::SectionShape;
 
     let mut model = make_diaphragm_model();
-    model.nodes[1].coord = [6_000.0, 0.0, 3_000.0];
+    model.nodes[1].coord = [3_600.0, 4_800.0, 3_000.0];
     model.materials[0].name = "SN400B".into();
     model.materials[0].young = 205_000.0;
     model.materials[0].fy = Some(235.0);

@@ -774,6 +774,8 @@ impl Model {
                 }
             }
         }
+        crate::panel_zone::validate_panel_connection_offsets(self)
+            .map_err(CoreError::InvalidInput)?;
 
         if !self.stories.is_empty() {
             let errors = self.story_level_input_diagnostics();

@@ -114,6 +114,7 @@ pub fn pushover_analysis_recording(
     use_kg: bool,
     ductility_method: DuctilityMethod,
 ) -> Result<PushoverResult, String> {
+    sepika_core::panel_zone::validate_panel_connection_offsets(model)?;
     sepika_element::factory::ensure_wall_side_column_analysis(
         model,
         Some(sepika_core::model::AnalysisKind::Incremental),
