@@ -656,6 +656,61 @@ fn rc_slab_length_weighted_thickness_and_different_side_breaks_match_independent
 }
 
 #[test]
+fn length_weighted_rc_slab_and_eccentric_connection_keep_independent_stiffness_and_mass_couplings()
+{
+    use crate::behavior::{Ctx, MassOption};
+
+    let (mut baseline, data) = rc_slab_fixture();
+    split_rc_slab_side(&mut baseline, 1, &[0.0, 0.7, 1.0], &[140.0, 340.0]);
+    split_rc_slab_side(&mut baseline, 0, &[0.0, 0.25, 1.0], &[75.0, 175.0]);
+    let raw = BeamElement::try_new(&data, &baseline).unwrap();
+    assert!((raw.iz - 10307037269.681742).abs() < 1e-5);
+    let reference = crate::factory::build_behavior(&data, &baseline);
+    let reference_k = reference.tangent_stiffness(&Ctx { model: &baseline });
+    let reference_m = reference.mass_matrix(MassOption::Consistent);
+    let axial_stiffness_n_per_mm = 23000.0 * 300.0 * 600.0 / 10000.0;
+    let end_axial_mass = (24.0e-6 / 9806.65) * 300.0 * 600.0 * 10000.0 / 3.0;
+    for e_mm in [-300.0, 300.0] {
+        let mut model = baseline.clone();
+        for node in &mut model.nodes {
+            node.coord[2] -= e_mm;
+        }
+        for element in &mut model.elements {
+            element.vertical_eccentricity = Some(e_mm);
+        }
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut shifted = model.elements[0].clone();
+            shifted.kind = kind;
+            model.validate_local_frames().unwrap();
+            let beam = BeamElement::try_new(&shifted, &model).unwrap();
+            assert!((beam.iz - 10307037269.681742).abs() < 1e-5);
+            let behavior = crate::factory::build_behavior(&shifted, &model);
+            let k = behavior.tangent_stiffness(&Ctx { model: &model });
+            let m = behavior.mass_matrix(MassOption::Consistent);
+            assert!((k.data[4] - e_mm * axial_stiffness_n_per_mm).abs() < 1e-6);
+            assert!((k.data[4 * 12] - e_mm * axial_stiffness_n_per_mm).abs() < 1e-6);
+            assert!(
+                (k.data[4 * 12 + 4]
+                    - reference_k.data[4 * 12 + 4]
+                    - e_mm.powi(2) * axial_stiffness_n_per_mm)
+                    .abs()
+                    < 1e-4
+            );
+            assert!((m.data[4] - e_mm * end_axial_mass).abs() < 1e-9);
+            assert!(
+                (m.data[4 * 12 + 4] - reference_m.data[4 * 12 + 4] - e_mm.powi(2) * end_axial_mass)
+                    .abs()
+                    < 1e-8
+            );
+        }
+    }
+}
+
+#[test]
 fn rc_slab_heterogeneous_depth_boundary_accepts_valid_means_and_rejects_excess_individual_thickness(
 ) {
     let cuts = [
