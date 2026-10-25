@@ -92,6 +92,13 @@ fn close(actual: f64, expected: f64) {
 }
 
 fn run(model: &Model) -> ResponseResult {
+    run_with_long_term(model, true).unwrap()
+}
+
+fn run_with_long_term(
+    model: &Model,
+    apply_long_term: bool,
+) -> Result<ResponseResult, sepika_math::solver::SolveError> {
     let map = DofMap::build(model);
     let reducer = Reducer::build(model, &map);
     nonlinear_time_history_analysis(
@@ -118,11 +125,11 @@ fn run(model: &Model) -> ResponseResult {
         &[],
         &[],
         NonlinearThCfg {
+            apply_long_term,
             record_every: Some(1),
             ..NonlinearThCfg::new(30, 1e-9)
         },
     )
-    .unwrap()
 }
 
 #[test]
@@ -390,4 +397,61 @@ fn mixed_time_history_member_rhs_keeps_legacy_axial_displacement_and_owner_physi
             close(f[5], 3e6 - 18e6 * x + 18e6 * x * x);
         }
     }
+}
+
+#[test]
+fn all_fixed_time_history_retains_loaded_end_forces_at_every_recorded_step() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let model = model(kind, false);
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        assert_eq!(reducer.n_indep, 0);
+        for enabled in [true, false] {
+            let result = run_with_long_term(&model, enabled).unwrap();
+            assert_eq!(result.time, vec![0.0, 0.001, 0.002, 0.003]);
+            let record = result.recording.unwrap();
+            assert_eq!(record.member_forces.len(), 4);
+            let factor = if enabled { 1.0 } else { 0.0 };
+            for frame in &record.member_forces {
+                let at = &frame[0].as_ref().unwrap().at;
+                close(at[0].1[1], factor * -3000.0);
+                close(at[1].1[1], factor * 3000.0);
+                close(at[0].1[5], factor * 3e6);
+                close(at[1].1[5], factor * 3e6);
+            }
+            for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
+                close(f[1], factor * (-3000.0 + 6000.0 * x));
+                close(f[5], factor * (3e6 - 18e6 * x + 18e6 * x * x));
+            }
+            assert!(record
+                .node_disp
+                .iter()
+                .flatten()
+                .flatten()
+                .all(|v| *v == 0.0));
+        }
+    }
+}
+
+#[test]
+fn all_fixed_time_history_reports_member_load_failure_and_keeps_empty_model_uncomputed() {
+    let mut model = model(ElementKind::Fiber, false);
+    model.load_cases[0].member[0].kind = MemberLoadKind::Distributed {
+        a: 0.0,
+        b: 6000.0,
+        w1: f64::MAX,
+        w2: f64::MAX,
+    };
+    let error = run_with_long_term(&model, true).unwrap_err().to_string();
+    assert!(
+        error.contains("0") && (error.contains("要素") || error.contains("部材")),
+        "{error}"
+    );
+    let empty = run(&Model::default());
+    assert!(empty.time.is_empty());
+    assert!(empty.recording.is_none());
 }

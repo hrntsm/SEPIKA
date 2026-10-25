@@ -115,7 +115,7 @@ pub fn nonlinear_time_history_analysis(
     let dt = resolve_dt(newmark.dt, wave)?;
 
     let n_indep = reducer.n_indep;
-    if n_indep == 0 {
+    if model.nodes.is_empty() && model.elements.is_empty() {
         return Ok(empty_response(model, true, cfg.apply_long_term));
     }
 
@@ -232,7 +232,11 @@ pub fn nonlinear_time_history_analysis(
     for i in 0..n_indep {
         rhs_a0[i] = p_red_0[i] + f0_red[i] - cv0[i] - f_int0_red[i];
     }
-    let mut a = solve_initial_accel(&m_red, &rhs_a0, n_indep)?;
+    let mut a = if n_indep == 0 {
+        Vec::new()
+    } else {
+        solve_initial_accel(&m_red, &rhs_a0, n_indep)?
+    };
 
     let n_steps = wave.accel_x.len() - 1;
     let mut u_free = vec![0.0f64; n_free];
@@ -297,8 +301,7 @@ pub fn nonlinear_time_history_analysis(
             .as_ref()
             .and_then(|a| a.first().copied())
             .unwrap_or(0.0);
-        let mf_init = member_forces_nonlinear(model, &behaviors);
-        super::recording::ensure_line_member_forces_nonlinear(model, &mf_init)?;
+        let mf_init = member_forces_nonlinear(model, &behaviors)?;
         recorder.record_step(
             0, 0.0, model, dofmap, m_r_x, m_r_y, &ma_free, &u_free, &v_free, &a_free, xg_x_init,
             xg_y_init, &mf_init,
@@ -514,6 +517,8 @@ pub fn nonlinear_time_history_analysis(
             ));
         }
 
+        let mf_now =
+            checked_step_member_forces(model, &mut behaviors, &step_snapshot, n + 1, t_next)?;
         {
             for i in 0..n_indep {
                 u[i] += du_total[i];
@@ -557,7 +562,6 @@ pub fn nonlinear_time_history_analysis(
             );
 
             let (xg_x_next, xg_y_next) = accel_xy_at(wave, n + 1);
-            let mf_now = member_forces_nonlinear(model, &behaviors);
             recorder.record_step(
                 (n + 1) as u64,
                 t_next,
@@ -596,6 +600,18 @@ pub fn nonlinear_time_history_analysis(
         recording: Some(recorder.finish()),
         nonlinear: true,
         applied_long_term: cfg.apply_long_term,
+    })
+}
+
+pub(super) fn checked_step_member_forces(
+    model: &Model,
+    behaviors: &mut [Box<dyn ElementBehavior>],
+    snapshot: &StateSnapshot,
+    step: usize,
+    time_s: f64,
+) -> Result<Vec<Option<sepika_element::frame::beam::MemberForces>>, SolveError> {
+    member_forces_nonlinear(model, behaviors).map_err(|error| {
+        rollback_failed_step(behaviors, snapshot, step, time_s, &error.to_string())
     })
 }
 

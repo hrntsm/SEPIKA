@@ -1,0 +1,525 @@
+{
+  "source_commit": "5f52417ac47708f3e98afdc484abc8dc251201c9",
+  "source_base": "8f4232a6621e440fc8d35604b7b398bf7d1d2ab5",
+  "comparison_main": "f2df3e14762349ea62f1c228e67799d4b4648afd",
+  "counts": {
+    "commits": 102,
+    "code_commits": 49,
+    "files": 3973,
+    "crate_files": 128,
+    "product_docs": 11,
+    "evidence_files": 3790
+  },
+  "commits": [
+    {
+      "commit": "6b87d1a297e8fc0f936b96377874f90ab383f9c9",
+      "title": "refactor: 壁側柱の物理分類を要素表現から分離する",
+      "group": "wall"
+    },
+    {
+      "commit": "097efa7de95b8f8d871cd660f83d1c8cbb82ce0c",
+      "title": "feat: 側柱の局所釣合いと整合接線の数値基盤を追加する",
+      "group": "wall"
+    },
+    {
+      "commit": "58c1aa22b4de532b5ad2546addb5f52d57e38c3b",
+      "title": "feat: 壁法線の回転解放と元端部条件を厳密に合成する",
+      "group": "wall"
+    },
+    {
+      "commit": "c485230d418a13ca6383852e2244d631bad4ca65",
+      "title": "docs: 壁側柱の分類と局所解放を分離する判断を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "096519e1ced07fc75e06d4545460d47b94aec5f5",
+      "title": "test: 側柱の弾性基線と荷重補間を独立基準で検証する",
+      "group": "material"
+    },
+    {
+      "commit": "8d261a3ff0e6e8df8f732890f63eb88fbf0cab78",
+      "title": "docs: 側柱の限定検証と未成立範囲を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "59abf859d6590489f15eaf4d0626a43f299bf74f",
+      "title": "docs: FiberとMSの軸曲げ応答を仕事共役に整合する判断を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "636a7bc0821d5ce29f2a786403ad8a2641176543",
+      "title": "fix: FiberとMSの軸降伏を断面と部材の釣合いへ反映する",
+      "group": "material"
+    },
+    {
+      "commit": "027951ace6f796a46b23289526db7c838f9be17e",
+      "title": "docs: FiberとMSの軸曲げ釣合いと履歴仕事を説明する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "ba73a7f9c325c190e51b1d83940d0c2de99d770b",
+      "title": "fix: FiberとMSの剛域時の初期軸剛性を統一",
+      "group": "material"
+    },
+    {
+      "commit": "ad28d01329243206be279e0b21d8e7e1c43f8a13",
+      "title": "docs: FiberとMSの軸曲げ構成則の検証を記録",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "74adb0ddecf119abbccc73d1ad6ce58789470bf7",
+      "title": "docs: 通常FiberとMSの剛域時の軸剛性を明記",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "15ea5d2df46216a30ae8c35a9d772b493755f708",
+      "title": "fix: 要素試行の失敗を解析全体で原子的に処理",
+      "group": "state"
+    },
+    {
+      "commit": "e3f6c1c45e5dbdf7045b58853a9f72fed6af6732",
+      "title": "docs: 剛域軸整合と試行状態復元の検証を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "5845876763b12336d2d643082bc61e7093b37643",
+      "title": "fix: 長期初期載荷を全荷重まで継続する",
+      "group": "loads"
+    },
+    {
+      "commit": "df2870c87731a325fa9ae28435d96257c1389e86",
+      "title": "docs: 初期載荷の全量到達条件と検証記録を残す",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "6d5f55433851ce78ed53c13ed773555e43bfd997",
+      "title": "fix: FiberとMSの公称剛性倍率を梁と揃える",
+      "group": "material"
+    },
+    {
+      "commit": "2ddaa793a43102efe469e91a20de7d9c1d057fdc",
+      "title": "fix: FiberとMSの曲率を物理断面の向きへ揃える",
+      "group": "material"
+    },
+    {
+      "commit": "3eda473c009d2d0bcc59608328432e57d655fb83",
+      "title": "docs: FiberとMSの物理曲率と公称剛性の検証を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "b01a210393d5d86a79a6ebfa873c53758f289533",
+      "title": "fix: 分布Fiberの曲率を実断面の回転に一致させる",
+      "group": "material"
+    },
+    {
+      "commit": "97ae128e037551465c9837dbac5b73ffc703959e",
+      "title": "docs: 壁梁の局所根探索と未到達の境界を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "feebf818d1930121f7cbc830cae056ac24b37679",
+      "title": "docs: 分布Fiberの物理曲率検証を追補する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "6f5cbf4e99ea1c74e93c1a17e56428936f8208af",
+      "title": "fix: 共通材端縮約で特異時の剛性保持を廃止する",
+      "group": "material"
+    },
+    {
+      "commit": "0428fc0dc0b8ea288bbee34b81d3dfd1f9bd2d85",
+      "title": "docs: 共通材端縮約の独立検証と質量の適用限界を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "01605d0de67977e56a452219cd7842908bc66710",
+      "title": "fix: 非線形チェックポイントの復元を原子的にする",
+      "group": "state"
+    },
+    {
+      "commit": "9089b5055b0796a965d8d488efaa0193c09356a4",
+      "title": "docs: 非線形チェックポイントの保存再開検証を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "af62ab734fb43c9ef4f7fc4686cb8cb800d20774",
+      "title": "docs: 壁上下梁の弾性高剛性の役割を確定する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "d9480162888cd351d658bb60e4515f81aa1c14e7",
+      "title": "fix: FiberとMSの材料履歴を保って壁法線回転を解放する",
+      "group": "wall"
+    },
+    {
+      "commit": "1ff2043fe85368310f4856f9db054d3aa3e57a59",
+      "title": "docs: FiberとMSの壁法線接続の単体検証を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "4a9b45131ffb308031c7843a73b0ba5a14695dd0",
+      "title": "fix: 壁上下梁の弾性高剛性の役割を解析と表示へ統一する",
+      "group": "wall"
+    },
+    {
+      "commit": "1d3c46973d7faff05239ed311ae1767081a5a2c0",
+      "title": "Merge main into fix/496-wall-side-column-contract",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "a8ae3b2ad3f0da45f0ddb90e3fa3588dc24c1c7a",
+      "title": "docs: 壁上下梁の弾性高剛性の役割と検証範囲を明記する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "f30a829e357944c1e1b6b2b91d11e3706ba6c7aa",
+      "title": "fix: 整合質量の面外回転を物理回転軸に合わせる",
+      "group": "material"
+    },
+    {
+      "commit": "6b953988410880938e5957ded85a1e44592c85fc",
+      "title": "fix: 壁側柱の初期接続と質量を同じ回転写像で扱う",
+      "group": "wall"
+    },
+    {
+      "commit": "e621b2b423dfbd14dbe4f93fca4ad30350a9a19c",
+      "title": "docs: 側柱接続の初期質量縮約と慣性の検証範囲を残す",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "30e74da8d714cba9afea27e8a13ec30aea591f9c",
+      "title": "fix: 壁側柱の採否と断面算入を物理分類へ統一する",
+      "group": "wall"
+    },
+    {
+      "commit": "743091c3bb20e1595db97d4914521c29be6655a6",
+      "title": "docs: 側柱の共通採否と断面算入の独立検証を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "5caad278d76a0b92569ab41b8ae231093cf67309",
+      "title": "fix: 壁側柱の要素生成と表示を共通の物理分類へ接続する",
+      "group": "wall"
+    },
+    {
+      "commit": "150bae7f73900d66c9445f7b0aab3ff54a84f891",
+      "title": "docs: 側柱の要素生成と表示の適用条件と検証範囲を明記する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "1f085034ed3c79c8fef7382e279f31d3ea15a2df",
+      "title": "fix: 壁側柱の解析条件と整合質量の診断を公開入口へ統一する",
+      "group": "wall"
+    },
+    {
+      "commit": "27333e1166d961dadb9057d0d9b029a5496543cc",
+      "title": "docs: 壁側柱の公開解析条件と整合質量の検証記録を残す",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "7f293954ec55efddc36a5cec567b1bd1e15ef1aa",
+      "title": "fix: 壁の断面力集計と内法質量を側柱の共通分類へ揃える",
+      "group": "wall"
+    },
+    {
+      "commit": "bf66a159d8fbf8d1589ff220bf519c6738767130",
+      "title": "fix: 部材荷重を可撓部と剛域の実荷重へ分割する",
+      "group": "loads"
+    },
+    {
+      "commit": "0fa85fa1330b994f4a7510c60740f572107d5bde",
+      "title": "docs: 壁側柱の解析条件と集計・質量の適用範囲を統合する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "ed8132ac057a4b946aaf836650a6e75422580040",
+      "title": "docs: 部材荷重の分割契約と有限検証を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "3101fd84c1ecadbf5847d725fb9d8a2dd1191040",
+      "title": "fix: 線形材の部材荷重込み応答を不変値で求める",
+      "group": "loads"
+    },
+    {
+      "commit": "e934bb562eecfe206bb6297bd58af5c2daf1cb60",
+      "title": "docs: 線形材の荷重込み応答の独立検証を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "75a883d1f9f1bad4ddcd7c1204b6ac2dcf42fad8",
+      "title": "fix: 端塑性材料と部材荷重の状態を原子的にそろえる",
+      "group": "loads"
+    },
+    {
+      "commit": "37a6ef46da9758f28822bc4f927d064ca04c6a95",
+      "title": "fix: 部材荷重を含む非線形材の端部接続を釣り合わせる",
+      "group": "loads"
+    },
+    {
+      "commit": "4da3af337bb21b2b5c075569f23fd136d1dd3a7c",
+      "title": "docs: 端塑性材の荷重釣合いと回帰修正の証拠を残す",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "4b3f67059e413bdb74c8f66c8876ae1e4aea42c3",
+      "title": "fix: 非線形材の荷重状態を公開APIと接続要素へ渡す",
+      "group": "loads"
+    },
+    {
+      "commit": "9cd30d159864370c711c75d258860bcf3a012e82",
+      "title": "docs: 部材荷重と非線形端部接続の検証範囲を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "3e39d93084595ee4c5fc39e314cf104a9e7b32cd",
+      "title": "docs: 荷重状態の公開APIと転送の検証を記録する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "5d3944150dbb4c6ab5f5ce6706c95937858f9307",
+      "title": "fix: 弾性材と接続要素の荷重状態を原子的に扱う",
+      "group": "loads"
+    },
+    {
+      "commit": "680681992bee514ee00cce7d9b4d7ec9381bb81e",
+      "title": "test: 部材荷重を持つ混在要素の再開と全体復元を保証する",
+      "group": "state"
+    },
+    {
+      "commit": "dcb08a74dd50b7b3aab86667dd5664edb385b5b7",
+      "title": "docs: 部材荷重の状態保存と混在復元の検証根拠を残す",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "d8e5259c9a5726694d056251c3e61a16f28ec0f2",
+      "title": "fix: 線形解析の部材荷重を実接続で一度だけ扱う",
+      "group": "loads"
+    },
+    {
+      "commit": "3deaf3f934f6ba5362d37d4205c6104b62fcaa31",
+      "title": "fix: 共有線形解析の全固定応答と荷重所有を統一する",
+      "group": "loads"
+    },
+    {
+      "commit": "2983eb904d0fa8ba65daf4e48981dc8967224449",
+      "title": "docs: 線形解析の部材荷重所有と全固定応答を検証記録に残す",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "665218cb66a5ce2fbfca4da427564a96197667bd",
+      "title": "feat: 部材荷重と変位の試行更新を一体で復元する",
+      "group": "loads"
+    },
+    {
+      "commit": "d39452e010447021311881cf984679060e434932",
+      "title": "fix: 増分解析の絶対部材荷重を各試行状態へ接続する",
+      "group": "loads"
+    },
+    {
+      "commit": "1e2caabc881adfe5b7ad76ca779585018bc734e2",
+      "title": "docs: 増分解析の部材荷重更新の検証根拠を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "a60d8fe7beb03cad82e09c82aac0fa2f9cd39d4d",
+      "title": "fix: 増分解析の部材記録を荷重込みの確定応答から取得",
+      "group": "loads"
+    },
+    {
+      "commit": "adca3a7022ef8c25e0e1d1de41c5ccfa6b1a0d71",
+      "title": "docs: 荷重込み部材応力記録の検証原本を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "d64a01e7a3b5107e7ae973e555ed9f2d98fbebe3",
+      "title": "fix: 増分解析の支持反力と層切断力を物理荷重から回復",
+      "group": "performance"
+    },
+    {
+      "commit": "bd7a1e69297b207337faf1cba56b06a4ddce4e1f",
+      "title": "docs: 層切断力の実荷重と支持作用の範囲を明記",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "e6d507c2797d25f80890fc15753e498b50b6b7d1",
+      "title": "docs: 物理反力と層切断釣合いの検証を追記",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "7b84feec362735962467054339f503604c370bda",
+      "title": "fix: 性能曲線の集計を物理反力と元荷重の釣合いへ接続",
+      "group": "performance"
+    },
+    {
+      "commit": "29656c2a8fe7d9675e2044c4ca6805a7f26831fd",
+      "title": "docs: 性能曲線の支持範囲と荷重帰属を定義",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "dffb274405c631f39fe1bedeff2b5cab7e5413cc",
+      "title": "test: RC壁の線形応答を側柱3表現の独立値へ照合",
+      "group": "wall"
+    },
+    {
+      "commit": "538b4da79f2031456ff50cb6c6f86f220a7dba77",
+      "title": "test: 壁全体系の反力と仕事を独立参照へ照合",
+      "group": "wall"
+    },
+    {
+      "commit": "45b3f9b738badf7f56e23175128103697f0ecce1",
+      "title": "docs: 性能曲線の反力と荷重帰属の検証根拠を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "d8df04b0dd116aff534c64e5f43afc586f8517a2",
+      "title": "test: 壁全体系の符号と軸変換を96状態で検証",
+      "group": "wall"
+    },
+    {
+      "commit": "a58586729971f8091926d9f53e30bc77d571d429",
+      "title": "test: 壁側柱3表現の方向別Quを独立値へ照合",
+      "group": "wall"
+    },
+    {
+      "commit": "2d86e399280721d7bd658b1d11ff611f1da9c690",
+      "title": "docs: 壁全体系の線形剛性と反力仕事の検証証跡を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "6e1058e06f1d26ca383eaba13510f2f0de8e3d71",
+      "title": "fix: 直接鋼壁の質量を実幅から面密度へ換算",
+      "group": "wall"
+    },
+    {
+      "commit": "cafa81f5234496cbab9d3d8c9a1ef701b19a0f76",
+      "title": "docs: 壁の方向反転とせん断耐力の検証証跡を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "59b7df244029b09d89e0484103514ce202de25fe",
+      "title": "test: 軸降伏履歴を独立塑性モデルと照合",
+      "group": "material"
+    },
+    {
+      "commit": "989683fc8b8b04d11dedb36b06a1af4af83edcf6",
+      "title": "docs: 壁検証メタデータのバイト列と現役導線を保持",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "2c2c28bf4a6f616b33fb35cc645ab759e4755887",
+      "title": "test: 軸力と二方向曲げの連成接線を独立検証",
+      "group": "material"
+    },
+    {
+      "commit": "822bc176058577f5a2bf2b3bd7bb0d7c2c77c9a1",
+      "title": "docs: 壁質量の領域と物理所有の検証証跡を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "b969a91f4e43212039aba865337ec2c78813e3df",
+      "title": "docs: 独立軸塑性モデルの履歴検証証跡を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "a7d7ab03b2c2f87a0db81f4031dbaabfe6b7fcf9",
+      "title": "test: 塑性履歴の仕事と失敗試行の復元を独立検証",
+      "group": "material"
+    },
+    {
+      "commit": "047e5e030af9c8610659bfd3fd39bcfacf8f07b7",
+      "title": "docs: 独立モデルによる連成接線の検証証跡を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "1b1f09e13746ddb0381a97ff3e41fabe9dda5cd9",
+      "title": "fix: 時刻歴の部材応答を確定前に検査",
+      "group": "recording"
+    },
+    {
+      "commit": "da403ba8ef886dd681b6807844d8708f142d7ec5",
+      "title": "docs: 塑性履歴の仕事と状態復元の検証証跡を保存",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "21e94d50905822ba910edd19db5f5264b5b5f0b3",
+      "title": "test: 線形時刻歴の空荷重と公開入口の適用判定を検証",
+      "group": "recording"
+    },
+    {
+      "commit": "6971abcc8844d4597024507e1ddb6e3033c2f520",
+      "title": "docs: 非線形時刻歴の荷重込み応力記録を検証する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "9bb49324c55fd5bc26188cab37b32b63cec5738d",
+      "title": "fix: 非線形時刻歴へ長期部材荷重を保持して渡す",
+      "group": "loads"
+    },
+    {
+      "commit": "8024d22e20d9430cc1fc6fcaa6231f923e80bd76",
+      "title": "docs: 線形時刻歴の空荷重と適用判定を検証する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "109343377fceac770663e83d931c34deedeacf35",
+      "title": "docs: 壁側柱と非線形部材の応答分担を明記する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "1979cf40259ce367260554fb40e36a5dbce4e38a",
+      "title": "docs: 時刻歴の長期荷重と試行復元を検証する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "03248833547e1f1771f586ef3d478a8e036b53ce",
+      "title": "fix: 壁側柱と材料応答の計算契約を更新する",
+      "group": "contract"
+    },
+    {
+      "commit": "7549c8e67accc1abe665fb623691b60de743faf0",
+      "title": "docs: 現行の計算契約と再実行条件を同期する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "692218e40c102e7237d91e8609cbb9259e4cc5d6",
+      "title": "fix: 剛床代表節点の元荷重を層の釣合いへ含める",
+      "group": "performance"
+    },
+    {
+      "commit": "07a929412ac9b17c6fbd96ea61fa875faef56a66",
+      "title": "docs: 剛床代表節点の荷重仕事による照合を明記する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "5b9a1762d0a2611f81586c1b4baa2f633f169379",
+      "title": "docs: 結果契約とcheckpointの非再認証を検証する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "4e42813f0f33790e36e787ef7e989e3cbc43dd7c",
+      "title": "docs: 剛床代表節点の荷重仕事と層性能を検証する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "79967a6826075d98562a01ff31910dc7d56f83cc",
+      "title": "fix: 全固定モデルでも非線形時刻歴の部材荷重を評価する",
+      "group": "recording"
+    },
+    {
+      "commit": "b3f687faceb6d04852f72cbcf362ccbd33ae23f8",
+      "title": "docs: 全固定の時刻歴で評価する部材内力を明記する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "1c9250bd1e0942b6aa0259705786738d54d47b76",
+      "title": "docs: 全固定の非線形時刻歴の荷重評価を検証する",
+      "group": "documentation_or_evidence"
+    },
+    {
+      "commit": "5f52417ac47708f3e98afdc484abc8dc251201c9",
+      "title": "docs: 純鋼板境界柱の誤解放を旧固定版で再現する",
+      "group": "documentation_or_evidence"
+    }
+  ]
+}

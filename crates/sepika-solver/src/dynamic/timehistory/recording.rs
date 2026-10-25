@@ -35,57 +35,68 @@ pub(crate) fn member_forces_linear(
         .collect()
 }
 
-/// 非線形解析用: 現在の要素状態（committed / trial）から部材内力分布を取り出す
-/// （`model.elements` と同じ並び）。
+/// 同一試行状態の荷重込み断面力を既存評価位置で返す。欠落・不正応答はエラー。
 pub(crate) fn member_forces_nonlinear(
     model: &Model,
     behaviors: &[Box<dyn ElementBehavior>],
-) -> Vec<Option<MemberForces>> {
-    let ctx = Ctx { model };
-    behaviors
-        .iter()
-        .map(|b| b.state_member_forces(&ctx))
-        .collect()
-}
-
-/// 非線形経路の線材内力の欠落ガード。
-/// 線材の `state_member_forces` が `None` を返す要素実装の不備を解析開始時点でエラー化する。
-pub(crate) fn ensure_line_member_forces_nonlinear(
-    model: &Model,
-    member_forces: &[Option<MemberForces>],
-) -> Result<(), sepika_math::solver::SolveError> {
+) -> Result<Vec<Option<MemberForces>>, sepika_math::solver::SolveError> {
     use sepika_core::model::ElementKind;
-    let missing: Vec<u32> = model
+    use sepika_math::solver::SolveError;
+    let responses = crate::common::member_recording::member_recording_responses(
+        model,
+        behaviors,
+        "非線形時刻歴解析",
+    )
+    .map_err(SolveError::InvalidInput)?;
+    let ctx = Ctx { model };
+    model
         .elements
         .iter()
-        .zip(member_forces)
-        .filter(|(e, mf)| {
-            matches!(
-                e.kind,
-                ElementKind::Beam
-                    | ElementKind::Fiber
-                    | ElementKind::MultiSpring
-                    | ElementKind::Brace { .. }
-            ) && mf.is_none()
+        .zip(behaviors)
+        .zip(responses)
+        .map(|((elem, behavior), response)| {
+            let error = |reason: &str| {
+                SolveError::InvalidInput(format!(
+                    "要素 ID {} の非線形時刻歴解析部材記録: {reason}",
+                    elem.id.0
+                ))
+            };
+            let forces = behavior.state_member_forces(&ctx);
+            let required = response.is_some()
+                || matches!(
+                    elem.kind,
+                    ElementKind::Beam
+                        | ElementKind::Fiber
+                        | ElementKind::MultiSpring
+                        | ElementKind::Brace { .. }
+                );
+            let Some(forces) = forces else {
+                return if required {
+                    Err(error("部材内力を取得できません"))
+                } else {
+                    Ok(None)
+                };
+            };
+            if forces.at.is_empty()
+                || forces.at.iter().any(|(xi, f)| {
+                    !xi.is_finite() || !(0.0..=1.0).contains(xi) || f.iter().any(|v| !v.is_finite())
+                })
+            {
+                return Err(error("断面位置または部材内力が不正です"));
+            }
+            match response {
+                Some(response) => {
+                    let positions: Vec<_> = forces.at.iter().map(|(xi, _)| *xi).collect();
+                    response
+                        .section
+                        .recover(&positions)
+                        .map(Some)
+                        .map_err(|reason| error(&reason))
+                }
+                None => Ok(Some(forces)),
+            }
         })
-        .map(|(e, _)| e.id.0)
-        .collect();
-    if missing.is_empty() {
-        return Ok(());
-    }
-    let head: Vec<String> = missing.iter().take(5).map(|id| id.to_string()).collect();
-    let more = if missing.len() > 5 {
-        format!(" 他{}件", missing.len() - 5)
-    } else {
-        String::new()
-    };
-    Err(sepika_math::solver::SolveError::InvalidInput(format!(
-        "非線形解析で線材の部材内力を取得できませんでした: 部材 ID {}{}。\
-         要素実装の不具合です（state_member_forces 未実装。このまま続けると\
-         応力図・断面検定から当該部材が無言で欠落します）。",
-        head.join(", "),
-        more
-    )))
+        .collect()
 }
 
 /// 部材端力の包絡を更新する（各成分・各評価位置の絶対値最大。符号は極値の符号を保持）。

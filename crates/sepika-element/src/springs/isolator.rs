@@ -30,6 +30,7 @@ const FRICTION_POST_SLIP_RATIO: f64 = 1.0e-4;
 const ZERO_LENGTH_EPS: f64 = 1e-9;
 
 /// 水平せん断ばねの状態。
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 enum ShearModel {
     /// 積層ゴム系: 各方向独立バイリニア（局所 y, z）。
     Laminated { sy: Bilinear, sz: Bilinear },
@@ -65,7 +66,7 @@ enum ShearModel {
 
 /// 歪依存 1 次元 kinematic バイリニア。降伏耐力 `qd`・二次剛性 `k2` を毎ステップ外部から
 /// 与える（歪依存）。塑性変位 `pl`（累積・符号付き）を状態に保持する。
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 struct StrainBilinear {
     k1: f64,
     /// 確定塑性変位。
@@ -120,9 +121,6 @@ impl StrainBilinear {
     fn commit(&mut self) {
         self.pl = self.tr_pl;
     }
-    fn revert(&mut self) {
-        self.tr_pl = self.pl;
-    }
 }
 
 /// γ の 2 次多項式 `c0+c1·γ+c2·γ²`（歪依存係数）。負値は 0 にクランプ。
@@ -136,6 +134,7 @@ pub struct IsolatorElement {
     pub axis: LocalFrame,
     pub props: IsolatorProps,
     shear: ShearModel,
+    committed_shear: ShearModel,
     committed_disp: [f64; 12],
     trial_disp: [f64; 12],
 }
@@ -206,6 +205,7 @@ impl IsolatorElement {
             nodes: [n0, n1],
             axis,
             props,
+            committed_shear: shear.clone(),
             shear,
             committed_disp: [0.0; 12],
             trial_disp: [0.0; 12],
@@ -394,6 +394,7 @@ impl ElementBehavior for IsolatorElement {
         }
         if commit {
             self.committed_disp = self.trial_disp;
+            self.committed_shear = self.shear.clone();
         }
         Ok(())
     }
@@ -403,59 +404,13 @@ impl ElementBehavior for IsolatorElement {
     }
 
     fn snapshot_state(&self) -> Box<dyn Any> {
-        let shear = match &self.shear {
-            ShearModel::Laminated { sy, sz } => (Some((sy.clone(), sz.clone())), None, None),
-            ShearModel::Friction { pl_y, pl_z, .. } => (None, Some((*pl_y, *pl_z)), None),
-            ShearModel::StrainDependent { sy, sz, .. } => (None, None, Some((sy.pl, sz.pl))),
-        };
-        Box::new((self.trial_disp, self.committed_disp, shear))
+        Box::new(self.checkpoint_state())
     }
 
-    #[allow(clippy::type_complexity)]
     fn restore_state(&mut self, state: &dyn Any) {
-        type Snapshot = (
-            [f64; 12],
-            [f64; 12],
-            (
-                Option<(Bilinear, Bilinear)>,
-                Option<(f64, f64)>,
-                Option<(f64, f64)>,
-            ),
-        );
-        let (trial, committed, shear) =
-            crate::behavior::downcast_snapshot::<Snapshot>("IsolatorElement", state);
-        self.trial_disp = *trial;
-        self.committed_disp = *committed;
-        match (&mut self.shear, &shear.0, &shear.1, &shear.2) {
-            (ShearModel::Laminated { sy, sz }, Some((sy0, sz0)), _, _) => {
-                *sy = sy0.clone();
-                *sz = sz0.clone();
-            }
-            (
-                ShearModel::Friction {
-                    pl_y,
-                    pl_z,
-                    tr_pl_y,
-                    tr_pl_z,
-                    ..
-                },
-                _,
-                Some((py, pz)),
-                _,
-            ) => {
-                *pl_y = *py;
-                *pl_z = *pz;
-                *tr_pl_y = *py;
-                *tr_pl_z = *pz;
-            }
-            (ShearModel::StrainDependent { sy, sz, .. }, _, _, Some((py, pz))) => {
-                sy.pl = *py;
-                sy.tr_pl = *py;
-                sz.pl = *pz;
-                sz.tr_pl = *pz;
-            }
-            _ => {}
-        }
+        let state =
+            crate::behavior::downcast_snapshot::<IsolatorCheckpoint>("IsolatorElement", state);
+        self.restore_checkpoint_state(state);
     }
 
     fn commit_state(&mut self) {
@@ -480,122 +435,56 @@ impl ElementBehavior for IsolatorElement {
             }
         }
         self.committed_disp = self.trial_disp;
+        self.committed_shear = self.shear.clone();
     }
 
     fn revert_state(&mut self) {
-        match &mut self.shear {
-            ShearModel::Laminated { sy, sz } => {
-                sy.revert();
-                sz.revert();
-            }
-            ShearModel::Friction {
-                pl_y,
-                pl_z,
-                tr_pl_y,
-                tr_pl_z,
-                ..
-            } => {
-                *tr_pl_y = *pl_y;
-                *tr_pl_z = *pl_z;
-            }
-            ShearModel::StrainDependent { sy, sz, .. } => {
-                sy.revert();
-                sz.revert();
-            }
-        }
+        self.shear = self.committed_shear.clone();
         self.trial_disp = self.committed_disp;
     }
 
     fn serialize_checkpoint(&self) -> Vec<u8> {
-        use sepika_material::UniaxialMaterial;
-        let (laminated, friction, strain) = match &self.shear {
-            ShearModel::Laminated { sy, sz } => (
-                Some((sy.serialize_state(), sz.serialize_state())),
-                None,
-                None,
-            ),
-            ShearModel::Friction {
-                pl_y,
-                pl_z,
-                tr_pl_y,
-                tr_pl_z,
-                ..
-            } => (None, Some([*pl_y, *pl_z, *tr_pl_y, *tr_pl_z]), None),
-            ShearModel::StrainDependent { sy, sz, .. } => {
-                (None, None, Some([sy.pl, sy.tr_pl, sz.pl, sz.tr_pl]))
-            }
-        };
-        let cp = IsolatorCheckpoint {
-            committed_disp: self.committed_disp,
-            trial_disp: self.trial_disp,
-            laminated,
-            friction,
-            strain,
-        };
-        bincode::serialize(&cp).expect("serialize checkpoint")
+        bincode::serialize(&self.checkpoint_state()).expect("serialize checkpoint")
     }
 
     fn deserialize_checkpoint(
         &mut self,
         data: &[u8],
     ) -> Result<(), crate::behavior::CheckpointError> {
-        use sepika_material::UniaxialMaterial;
         if data.is_empty() {
             return Ok(());
         }
-        let cp: IsolatorCheckpoint = bincode::deserialize(data)
+        let state: IsolatorCheckpoint = bincode::deserialize(data)
             .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
-        self.committed_disp = cp.committed_disp;
-        self.trial_disp = cp.trial_disp;
-        match &mut self.shear {
-            ShearModel::Laminated { sy, sz } => {
-                if let Some((by, bz)) = &cp.laminated {
-                    sy.deserialize_state(by)
-                        .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
-                    sz.deserialize_state(bz)
-                        .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
-                }
-            }
-            ShearModel::Friction {
-                pl_y,
-                pl_z,
-                tr_pl_y,
-                tr_pl_z,
-                ..
-            } => {
-                if let Some([py, pz, tpy, tpz]) = cp.friction {
-                    *pl_y = py;
-                    *pl_z = pz;
-                    *tr_pl_y = tpy;
-                    *tr_pl_z = tpz;
-                }
-            }
-            ShearModel::StrainDependent { sy, sz, .. } => {
-                if let Some([py, tpy, pz, tpz]) = cp.strain {
-                    sy.pl = py;
-                    sy.tr_pl = tpy;
-                    sz.pl = pz;
-                    sz.tr_pl = tpz;
-                }
-            }
-        }
+        self.restore_checkpoint_state(&state);
         Ok(())
     }
 }
 
-/// [`IsolatorElement`] のチェックポイント形式（serialize/deserialize 共用）。
-/// せん断モデルの状態はモデル種別ごとの排他フィールドで持つ（復元時は現在の
-/// モデル種別に一致するフィールドのみを適用する）。
-#[derive(serde::Serialize, serde::Deserialize)]
+impl IsolatorElement {
+    fn checkpoint_state(&self) -> IsolatorCheckpoint {
+        IsolatorCheckpoint {
+            committed_disp: self.committed_disp,
+            trial_disp: self.trial_disp,
+            shear: self.shear.clone(),
+            committed_shear: self.committed_shear.clone(),
+        }
+    }
+
+    fn restore_checkpoint_state(&mut self, state: &IsolatorCheckpoint) {
+        self.committed_disp = state.committed_disp;
+        self.trial_disp = state.trial_disp;
+        self.shear = state.shear.clone();
+        self.committed_shear = state.committed_shear.clone();
+    }
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct IsolatorCheckpoint {
     committed_disp: [f64; 12],
     trial_disp: [f64; 12],
-    /// Laminated: 各方向バイリニアの直列化状態 (y, z)。
-    laminated: Option<(Vec<u8>, Vec<u8>)>,
-    /// Friction: [pl_y, pl_z, tr_pl_y, tr_pl_z]。
-    friction: Option<[f64; 4]>,
-    /// StrainDependent: [pl_y, tr_pl_y, pl_z, tr_pl_z]。
-    strain: Option<[f64; 4]>,
+    shear: ShearModel,
+    committed_shear: ShearModel,
 }
 
 #[cfg(test)]
