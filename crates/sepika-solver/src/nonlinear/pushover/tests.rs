@@ -4250,3 +4250,16 @@ fn invalid_shear_modulus_is_a_public_pushover_input_error_before_factory_constru
         }
     }
 }
+
+#[test]
+fn 接線剛性による終了理由は数値的な打切りとして説明する() {
+    let termination = PushoverTermination::TangentSingular {
+        phase: "変位制御".into(),
+        load_factor: 1.25,
+    };
+    assert_eq!(
+        termination.describe(),
+        "変位制御で λ=1.250 にて接線剛性の数値的な特異性・精度限界により打ち切り"
+    );
+    assert!(termination.is_premature());
+}

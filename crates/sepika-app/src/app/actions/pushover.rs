@@ -227,4 +227,44 @@ mod tests {
         assert!(notice.contains("目標到達前に打ち切られました"));
         assert_eq!(wall_notices(&app).len(), 1);
     }
+
+    #[test]
+    fn 接線剛性による打切り理由は機構分類と独立に通知と保存結果へ反映する() {
+        use sepika_solver::nonlinear::pushover::{MechanismType, PushoverTermination};
+
+        let mut app = App::default();
+        app.load_model(steel_wall_model());
+        app.generate_stories_action();
+        app.core.analysis_cfg.push_steps = 2;
+        app.run_pushover();
+        let mut result = app.displayed_pushover().unwrap().clone();
+        result.mechanism = MechanismType::Partial;
+        result.termination = PushoverTermination::TangentSingular {
+            phase: "荷重制御".into(),
+            load_factor: 0.5,
+        };
+        let qu = result.qu;
+        let curve_len = result.capacity_curve.len();
+        app.apply_pushover_result(Ok(result));
+
+        let notice = app.core.scoped.last_notice.as_ref().unwrap();
+        assert!(notice.contains("目標到達前に打ち切られました"));
+        assert!(notice.contains("接線剛性の数値的な特異性・精度限界"));
+        assert!(notice.contains("最大ベースシアはその時点までの最大値"));
+        assert!(!notice.contains("機構形成・耐力喪失"));
+        app.sync_pushover_for_save();
+        let bytes = rmp_serde::to_vec_named(app.core.scoped.results.as_ref().unwrap()).unwrap();
+        let restored: ResultsBundle = rmp_serde::from_slice(&bytes).unwrap();
+        for result in [restored.pushover.as_ref(), restored.pushover_x.as_ref()] {
+            let result = result.unwrap();
+            assert!(matches!(result.mechanism, MechanismType::Partial));
+            assert!(matches!(
+                result.termination,
+                PushoverTermination::TangentSingular { .. }
+            ));
+            assert!(result.termination.is_premature());
+            assert_eq!(result.qu, qu);
+            assert_eq!(result.capacity_curve.len(), curve_len);
+        }
+    }
 }
