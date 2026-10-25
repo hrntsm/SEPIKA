@@ -115,7 +115,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [CFT鋼管材料GUI_Issue766_2026-10.md](CFT鋼管材料GUI_Issue766_2026-10.md) | CFT角形・円形の鋼管材料表示・編集・Undo/保存・重量検定再計算 | 🔶（egui実表・App直接Verification。手動GUI・Validation・独立レビュー・最終ゲート未実施） |
 | [鋼材F選択と入力停止_Issue601_2026-10.md](鋼材F選択と入力停止_Issue601_2026-10.md) | 通常鋼材・鋼小梁・S/CFTの材料/実厚/Fと不備停止・検定23 | 🔶（変更前再現と材料/パネルdesign674・core対象49・Clippy成功。App全479成功/既存1ignore、直接4成功。MCP feature144成功。GUI971成功/既存1ignoreはいずれも形状不足追補前。追補後design675/App4/MCP1とClippy成功。文書検査/build/fmt成功。Validation・最終ゲートは未確認） |
 | [微小相似Fiber初期断面_Issue783_2026-10.md](微小相似Fiber初期断面_Issue783_2026-10.md) | 微小断面分割・無次元化・局所後退誤差、公開Auto時刻歴と解析42失効 | 🔶（独立A/両軸I・連成弾性解・尺度変更・失敗復元のVerification。Validationと最終ゲートは記録を参照） |
-| [仕口パネル接合面距離_Issue759_2026-10.md](仕口パネル接合面距離_Issue759_2026-10.md) | 一意な実接合面の方向別距離・剛体接続・公開入口と保存失効 | 🔶（all-targets1716/GUI919/IO240・Clippy/文書成功。既存strictdoc警告#800、Validation・最終ゲートは同記録） |
+| [仕口パネル接合面距離_Issue759_2026-10.md](仕口パネル接合面距離_Issue759_2026-10.md) | 一意な実接合面の方向別距離・剛体接続・公開入口と保存失効 | 🔶（all-targets1716/IO240と追補App全tests1024成功。荷重対照と壁fixtureを記録、既存strictdoc警告#800・Validation・最終ゲートは同記録） |
 | [仕口パネル実軸力比_Issue761_2026-10.md](仕口パネル実軸力比_Issue761_2026-10.md) | 実材長・実基準軸耐力による軸力比と小寸法・相似尺度 | 🔶（公開要素Verification、solver・保存成果と最終ゲートは同記録。Validation未） |
 | [仕口パネル検定2軸集約_Issue758_2026-10.md](仕口パネル検定2軸集約_Issue758_2026-10.md) | S/CFT検定の符号付き主軸集約・参加構面の高さ・検定成果失効 | 🔶（極小nz修正後の直接11/design665・App保存3、先行App全475・関連ClippyのVerification。非鉛直MSなしの未対応域、原典適合・Validation・最終ゲートを区別） |
 | [仕口パネル柱2軸_Issue757_2026-10.md](仕口パネル柱2軸_Issue757_2026-10.md) | 柱2主軸と仕事共役な座標・部材接続・方向別成果 | 🔶（CIのjob診断期待を追随しjob159・workspace3851＋doc2成功/4 ignored、関連Clippy・文書検査成功。不正ref修正後の直接証拠と先行GUIを区別。Validation・最終headゲート未確認） |
