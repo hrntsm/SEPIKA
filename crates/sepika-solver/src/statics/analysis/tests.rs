@@ -2403,6 +2403,8 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
                 }
                 model.elements.push(member);
             }
+            model.elements[1].rigid_zone.panel_offset_j = 200.0;
+            model.elements[2].rigid_zone.panel_offset_i = 200.0;
             assert!(sepika_core::panel_zone::resolve_explicit_panel_joint(
                 &model,
                 NodeId(0),

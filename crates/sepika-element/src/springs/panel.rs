@@ -752,8 +752,8 @@ mod tests {
         let model = Model {
             nodes: vec![
                 node(0, [0.0, 0.0, 3000.0]),
-                node(1, [-5000.0, 0.0, 3000.0]),
-                node(2, [5000.0, 0.0, 3000.0]),
+                node(1, [0.0, -5000.0, 3000.0]),
+                node(2, [0.0, 5000.0, 3000.0]),
                 node(3, [0.0, 0.0, 0.0]),
                 node(4, [0.0, 0.0, 6000.0]),
             ],
@@ -1210,6 +1210,10 @@ mod tests {
                 .unwrap();
                 assert_eq!(axes, [frame.rot[2], frame.rot[1]]);
                 if coordinates.0 == [0.0, 0.0, 0.0] {
+                    for (node, sign) in [(1, -1.0), (2, 1.0)] {
+                        model.nodes[node].coord =
+                            std::array::from_fn(|i| coordinates.1[i] + sign * 5000.0 * axes[1][i]);
+                    }
                     assert_eq!(PanelZone::new(&data, &model).axes, axes);
                 }
             }
@@ -1893,7 +1897,7 @@ mod tests {
         for node in &mut model.nodes {
             node.coord = [
                 node.coord[0] * length_mm / 3000.0,
-                0.0,
+                node.coord[1] * length_mm / 3000.0,
                 (node.coord[2] - 3000.0) * length_mm / 3000.0,
             ];
         }

@@ -8479,12 +8479,18 @@ fn test_import_stbridge_then_run_dl_succeeds() {
             });
         }
     }
-    let col_shape = SectionShape::SteelH {
+    let beam_shape = SectionShape::SteelH {
         root_r: Some(13.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
         flange_thick: 15.0,
+    };
+    let col_shape = SectionShape::SteelBox {
+        height: 300.0,
+        width: 300.0,
+        thick: 10.0,
+        corner_r: Some(13.0),
     };
     // 材料は断面が持つ。
     model.sections.push(sepika_core::model::Section {
@@ -8495,7 +8501,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
     model.sections.push(sepika_core::model::Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
         material: Some(MaterialId(0)),
-        ..col_shape.to_section(SectionId(1), "梁".into())
+        ..beam_shape.to_section(SectionId(1), "梁".into())
     });
     model.materials.push(Material {
         strength_factor: None,

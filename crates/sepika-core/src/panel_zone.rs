@@ -153,72 +153,152 @@ pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOri
     }
 }
 
-/// 接合部が占める領域の半寸法 `[mm]`。
-///
-/// 部材は節点そのものではなく、パネルの面で接合する。その面までの距離が
-/// パネル分のオフセットになる。
-///
-/// - はりは**柱フェース**で接合するため、オフセットは [`Self::column_half`]
-/// - 柱は**梁フェース**で接合するため、オフセットは [`Self::beam_half`]
-///
-/// # 危険断面位置（`RigidZone::face_i` / `face_j`）と分けている理由
-///
-/// フェース距離は現在「接合する直交部材せいの 1/2」だが、これは断面算定の
-/// **既定の**危険断面位置でもあり、将来は任意位置を取りうる。一方パネルの
-/// オフセットは接合部の物理的な寸法そのもので、設計上の評価位置がどこへ動いても
-/// 変わってはいけない。両者を別の量として扱う。
-///
-/// また `face_i` は「概ね直交する全部材の最大せい/2」であり、はりにとっては
-/// 直交する**はり**も候補に入る。本構造体は柱・はりを明示的に区別するため、
-/// はりのオフセットが直交ばりのせいで決まることがない。
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct PanelHalfExtent {
-    /// 柱せいの最大値の 1/2 `[mm]`（＝はりのオフセット、パネルの水平半寸法）。
-    pub column_half: f64,
-    /// はりせいの最大値の 1/2 `[mm]`（＝柱のオフセット、パネルの鉛直半寸法）。
-    pub beam_half: f64,
+/// 接続梁の断面せいの最大値の半分 `[mm]`。柱端の仕口パネルオフセットに用いる。
+pub fn panel_beam_half_extent(model: &Model, node: NodeId) -> f64 {
+    model
+        .elements
+        .iter()
+        .filter(|element| {
+            element.nodes.iter().take(2).any(|id| *id == node)
+                && is_horizontal_or_vertical_member(model, element)
+                && member_orientation(model, element) == Some(MemberOrientation::Beam)
+        })
+        .filter_map(|element| model.element_section(element))
+        .map(|section| section.depth / 2.0)
+        .fold(0.0, f64::max)
 }
 
-impl PanelHalfExtent {
-    /// 向き `orientation` の部材が接合する面までのオフセット `[mm]`。
-    pub fn offset_for(&self, orientation: MemberOrientation) -> f64 {
-        match orientation {
-            MemberOrientation::Beam => self.column_half,
-            MemberOrientation::Column => self.beam_half,
-        }
-    }
-}
-
-/// 節点 `node` に取り付く部材 `members` から接合部の半寸法を集める。
-///
-/// `members` は当該節点へ接続する要素（隣接マップを持つ呼び出し側はそれを渡し、
-/// 持たない側は全要素を渡してよい。節点を端点に持たない要素は読み飛ばす）。
-pub fn panel_half_extent<'a>(
+/// 採用柱の実接合面までの部材材軸上の距離 `[mm]`。面が一意に決まらなければ対象 ID 付きエラー。
+/// 柱端は接続梁の最大せいの半分を用いる。
+pub fn panel_connection_offset(
     model: &Model,
     node: NodeId,
-    members: impl IntoIterator<Item = &'a ElementData>,
-) -> PanelHalfExtent {
-    let mut extent = PanelHalfExtent::default();
-    for e in members {
-        if !e.nodes.iter().take(2).any(|n| *n == node) {
-            continue;
+    column: &ElementData,
+    member: &ElementData,
+) -> Result<f64, PanelJointError> {
+    let invalid = |reason: &str| {
+        PanelJointError::InvalidInput(format!(
+            "接合部 ID {} のパネル接合面未解決: 柱 ID {}・部材 ID {}: {reason}",
+            node.0, column.id.0, member.id.0
+        ))
+    };
+    match member_orientation(model, member) {
+        Some(MemberOrientation::Column) => return Ok(panel_beam_half_extent(model, node)),
+        Some(MemberOrientation::Beam) => {}
+        None => return Err(invalid("柱・梁用途の部材が必要です")),
+    }
+    let direction = member_unit_axis(model, member).ok_or_else(|| invalid("梁材軸が未解決です"))?;
+    let axes = panel_column_moment_axes(model, column)
+        .ok_or_else(|| invalid("柱断面の参照方向が未解決です"))?;
+    let depth = geom::vec3::dot(direction, axes[1]).abs();
+    let width = geom::vec3::dot(direction, axes[0]).abs();
+    let shape = model
+        .element_section(column)
+        .and_then(|section| section.shape.as_ref())
+        .ok_or_else(|| invalid("柱断面形状が未設定です"))?;
+    let distance = match *shape {
+        SectionShape::SteelH {
+            height,
+            width: flange_width,
+            ..
+        } => {
+            if depth <= PANEL_DIRECTION_TOL {
+                return Err(invalid("H形柱の弱軸側は接合詳細がなく、ウェブ面・フランジ端面等の採用面を一意に決められません"));
+            }
+            let distance = height / (2.0 * depth);
+            if width * distance >= flange_width / 2.0 - PANEL_DIRECTION_TOL * flange_width {
+                return Err(invalid("H形柱の外フランジ広面の内部に梁材軸が交わらず、接合詳細から採用面を指定する必要があります"));
+            }
+            distance
         }
-        if !is_horizontal_or_vertical_member(model, e) {
-            continue;
+        SectionShape::SteelBox {
+            height,
+            width: breadth,
+            corner_r,
+            ..
+        } => {
+            let norm = depth.hypot(width);
+            if norm <= PANEL_DIRECTION_TOL {
+                return Err(invalid("梁と柱の材軸が平行です"));
+            }
+            if corner_r.is_none() {
+                let [depth, width] = [depth, width].map(|component| {
+                    if component <= 4.0 * f64::EPSILON {
+                        0.0
+                    } else {
+                        component
+                    }
+                });
+                let max_radius = height.min(breadth) / 2.0;
+                let depth_face = height / (2.0 * depth);
+                let width_face = breadth / (2.0 * width);
+                if depth_face <= width_face && width * depth_face <= breadth / 2.0 - max_radius {
+                    depth_face
+                } else if width_face <= depth_face
+                    && depth * width_face <= height / 2.0 - max_radius
+                {
+                    width_face
+                } else {
+                    return Err(invalid(
+                        "角形鋼管の角Rが未知で、梁材軸と外周の交点距離を一意に決められません",
+                    ));
+                }
+            } else {
+                crate::section_shape::face_geometry::SectionGeometry::of(shape)
+                    .and_then(|geometry| geometry.face_distance([depth, width]))
+                    .map_err(|reason| invalid(&reason))?
+            }
         }
-        let Some(orientation) = member_orientation(model, e) else {
+        SectionShape::SteelPipe { outer_dia, .. } => outer_dia / (2.0 * depth.hypot(width)),
+        _ => return Err(invalid("柱断面の接合面に未対応です")),
+    };
+    if !distance.is_finite() || distance <= 0.0 {
+        return Err(invalid("接合面までの距離は有限の正値が必要です"));
+    }
+    Ok(distance)
+}
+
+/// 明示仕口パネルへ接続する部材の保存オフセットが現在の接合面距離と一致するか検証する。
+/// 不一致は再準備が必要な部材・端と実距離を示すエラー。
+pub fn validate_panel_connection_offsets(model: &Model) -> Result<(), String> {
+    for panel in model
+        .elements
+        .iter()
+        .filter(|element| element.kind == crate::model::ElementKind::PanelZone)
+    {
+        let Some(&node) = panel.nodes.first() else {
             continue;
         };
-        let Some(sec) = e.section.and_then(|sid| model.sections.get(sid.index())) else {
+        let Some(joint) = resolve_explicit_panel_analysis_joint(model, node, &model.elements)
+            .map_err(|reason| reason.to_string())?
+        else {
             continue;
         };
-        let half = sec.depth / 2.0;
-        match orientation {
-            MemberOrientation::Column => extent.column_half = extent.column_half.max(half),
-            MemberOrientation::Beam => extent.beam_half = extent.beam_half.max(half),
+        let column = &model.elements[joint.column.index()];
+        for member in &model.elements {
+            if !is_horizontal_or_vertical_member(model, member)
+                || member_orientation(model, member).is_none()
+            {
+                continue;
+            }
+            for (end, &member_node) in member.nodes.iter().take(2).enumerate() {
+                if member_node != node {
+                    continue;
+                }
+                let expected = panel_connection_offset(model, node, column, member)
+                    .map_err(|reason| reason.to_string())?;
+                let actual = if end == 0 {
+                    member.rigid_zone.panel_offset_i
+                } else {
+                    member.rigid_zone.panel_offset_j
+                };
+                if !actual.is_finite() || (actual - expected).abs() > 1e-9 * expected.max(1.0) {
+                    return Err(format!("接合部 ID {}・柱 ID {}・部材 ID {} {}端のパネルオフセットが接合面距離と一致しません（保存値 {actual} mm、必要値 {expected} mm）。準備計算を再実行してください", node.0, column.id.0, member.id.0, if end == 0 { "i" } else { "j" }));
+                }
+            }
         }
     }
-    extent
+    Ok(())
 }
 
 /// パネルの断面区分（形状係数 κ・実効体積 `Ve` の算定式を分ける）。
@@ -794,6 +874,13 @@ fn panel_analysis_joint(
             column.local_axis.ref_vector
         ))
     })?;
+    for member in &model.elements {
+        if member.nodes.iter().take(2).any(|id| *id == node)
+            && member_orientation(model, member) == Some(MemberOrientation::Beam)
+        {
+            panel_connection_offset(model, node, column, member)?;
+        }
+    }
     Ok(Some(PanelAnalysisJoint {
         column: joint.column,
         db: joint.db,
@@ -1575,7 +1662,7 @@ mod tests {
             section: Some(crate::ids::SectionId(sec)),
             local_axis: crate::model::LocalAxis {
                 ref_vector: if sec == 1 {
-                    [0.0, 1.0, 0.0]
+                    [1.0, 0.0, 0.0]
                 } else {
                     [0.0, 0.0, 1.0]
                 },
@@ -1805,17 +1892,17 @@ mod tests {
                 root_r: Some(0.0),
             },
         );
-        model.nodes.push(node(3, [0.0, 6000.0, 3000.0]));
-        let mut orthogonal_section = model.sections[0].clone();
-        orthogonal_section.id = SectionId(2);
-        orthogonal_section.shape = Some(SectionShape::SteelH {
+        model.nodes.push(node(3, [6000.0, 3000.0, 3000.0]));
+        let mut other_section = model.sections[0].clone();
+        other_section.id = SectionId(2);
+        other_section.shape = Some(SectionShape::SteelH {
             height: 800.0,
             width: 200.0,
             web_thick: 12.0,
             flange_thick: 20.0,
             root_r: Some(0.0),
         });
-        model.sections.push(orthogonal_section);
+        model.sections.push(other_section);
         model.elements.push(member(2, 0, 3, 2));
         let joint = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
             .unwrap()
@@ -2298,11 +2385,154 @@ mod tests {
             e.rigid_zone.face_i = Some(9999.0);
             e.rigid_zone.face_j = Some(9999.0);
         }
-        let extent = panel_half_extent(&m, NodeId(0), &m.elements);
-        assert!((extent.column_half - 200.0).abs() < 1e-9);
-        assert!((extent.beam_half - 300.0).abs() < 1e-9);
-        assert!((extent.offset_for(MemberOrientation::Beam) - 200.0).abs() < 1e-9);
-        assert!((extent.offset_for(MemberOrientation::Column) - 300.0).abs() < 1e-9);
+        assert_eq!(panel_beam_half_extent(&m, NodeId(0)), 300.0);
+        assert_eq!(
+            panel_connection_offset(&m, NodeId(0), &m.elements[1], &m.elements[0]).unwrap(),
+            200.0
+        );
+        assert_eq!(
+            panel_connection_offset(&m, NodeId(0), &m.elements[1], &m.elements[1]).unwrap(),
+            300.0
+        );
+    }
+
+    #[test]
+    fn panel_759_resolves_actual_faces_and_identifies_undefined_connections() {
+        let box_shape = |radius| SectionShape::SteelBox {
+            height: 400.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: radius,
+        };
+        for (shape, direction, expected) in [
+            (box_shape(Some(0.0)), [3.0, 4.0], 125.0),
+            (box_shape(Some(40.0)), [2.0, 1.0], 92.0 * 5.0_f64.sqrt()),
+            (box_shape(None), [1.0, 2.0], 50.0 * 5.0_f64.sqrt()),
+            (
+                SectionShape::SteelPipe {
+                    outer_dia: 400.0,
+                    thick: 12.0,
+                },
+                [3.0, 4.0],
+                200.0,
+            ),
+            (
+                SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 12.0,
+                    flange_thick: 20.0,
+                    root_r: None,
+                },
+                [4.0, 1.0],
+                50.0 * 17.0_f64.sqrt(),
+            ),
+        ] {
+            let mut model = joint_model(h_beam(), 600.0, shape);
+            model.nodes[1].coord = [direction[0] * 1000.0, direction[1] * 1000.0, 3000.0];
+            let distance =
+                panel_connection_offset(&model, NodeId(0), &model.elements[1], &model.elements[0])
+                    .unwrap();
+            assert!(
+                (distance - expected).abs() < 1e-9,
+                "{distance} != {expected}"
+            );
+        }
+        for (shape, direction, reason) in [
+            (box_shape(None), [2.0, 1.0], "角Rが未知"),
+            (
+                SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 12.0,
+                    flange_thick: 20.0,
+                    root_r: Some(0.0),
+                },
+                [0.0, 1.0],
+                "接合詳細",
+            ),
+            (
+                SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 12.0,
+                    flange_thick: 20.0,
+                    root_r: Some(0.0),
+                },
+                [2.0, 1.0],
+                "広面の内部",
+            ),
+        ] {
+            let mut model = joint_model(h_beam(), 600.0, shape);
+            model.nodes[1].coord = [direction[0] * 1000.0, direction[1] * 1000.0, 3000.0];
+            let error = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
+                .unwrap_err()
+                .to_string();
+            for text in ["接合部 ID 0", "柱 ID 1", "部材 ID 0", reason] {
+                assert!(error.contains(text), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn panel_759_distance_follows_column_rotation_global_rotation_and_member_reversal() {
+        let shape = SectionShape::SteelBox {
+            height: 400.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        };
+        for (reference, expected) in [([1.0, 0.0, 0.0], 200.0), ([0.0, 1.0, 0.0], 100.0)] {
+            let mut model = joint_model(h_beam(), 600.0, shape.clone());
+            model.elements[1].local_axis.ref_vector = reference;
+            for reversed in [false, true] {
+                if reversed {
+                    model.elements[0].nodes.reverse();
+                    model.elements[1].nodes.reverse();
+                }
+                for angle in [0.0_f64, 0.37] {
+                    let rotate = |v: [f64; 3]| {
+                        [
+                            angle.cos() * v[0] - angle.sin() * v[1],
+                            angle.sin() * v[0] + angle.cos() * v[1],
+                            v[2],
+                        ]
+                    };
+                    let mut rotated = model.clone();
+                    for node in &mut rotated.nodes {
+                        node.coord = rotate(node.coord);
+                    }
+                    for member in &mut rotated.elements {
+                        member.local_axis.ref_vector = rotate(member.local_axis.ref_vector);
+                    }
+                    let actual = panel_connection_offset(
+                        &rotated,
+                        NodeId(0),
+                        &rotated.elements[1],
+                        &rotated.elements[0],
+                    )
+                    .unwrap();
+                    assert!((actual - expected).abs() < 1e-9);
+                }
+            }
+        }
+        let mut inclined = joint_model(
+            h_beam(),
+            600.0,
+            SectionShape::SteelPipe {
+                outer_dia: 400.0,
+                thick: 12.0,
+            },
+        );
+        inclined.nodes[2].coord[0] = -1000.0;
+        let actual = panel_connection_offset(
+            &inclined,
+            NodeId(0),
+            &inclined.elements[1],
+            &inclined.elements[0],
+        )
+        .unwrap();
+        assert!((actual - 200.0 * 10.0_f64.sqrt() / 3.0).abs() < 1e-9);
     }
 
     #[test]
@@ -2320,8 +2550,7 @@ mod tests {
             .unwrap()
             .expect("接合部");
         assert!((joint.db - (600.0 - 17.0)).abs() < 1e-9);
-        let extent = panel_half_extent(&m, NodeId(0), &m.elements);
-        assert!((extent.beam_half - 300.0).abs() < 1e-9);
+        assert_eq!(panel_beam_half_extent(&m, NodeId(0)), 300.0);
     }
 
     /// 用途が梁の傾斜部材は梁として扱い、幾何による再分類を行わない。

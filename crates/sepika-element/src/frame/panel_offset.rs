@@ -48,7 +48,8 @@ pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2
         }) {
             return None;
         }
-        let joint = resolve_explicit_panel_analysis_joint(model, nid, &model.elements).ok()??;
+        let joint = resolve_explicit_panel_analysis_joint(model, nid, &model.elements)
+            .unwrap_or_else(|reason| panic!("{reason}"))?;
         let axes = joint.moment_axes;
         let rotation = std::array::from_fn(|row| {
             std::array::from_fn(|col| {
@@ -65,6 +66,43 @@ pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2
         return None;
     }
     Some(ends)
+}
+
+/// `C`（12 × パネル自由度数）の非零成分を `(内側自由度, パネル自由度, 係数)` で列挙する。
+fn coupling(ends: &[Option<PanelEnd>; 2]) -> SmallVec<[(usize, usize, f64); 12]> {
+    let mut out = SmallVec::new();
+    let mut col = 12;
+    for (side, end) in ends.iter().enumerate() {
+        let Some(end) = end else { continue };
+        let rot0 = if side == 0 { 3 } else { 9 };
+        for row in 0..3 {
+            for axis in 0..2 {
+                let coefficient = end.rotation[row][axis];
+                if coefficient != 0.0 {
+                    out.push((rot0 + row, col + axis, coefficient));
+                }
+            }
+        }
+        col += 2;
+    }
+    out
+}
+
+/// 全体座標の部材等価節点荷重12成分を、仕口パネル追加自由度と仕事共役な要素荷重へ写す。
+/// 明示パネルの面・諸元が未解決の場合は診断理由でpanicする。
+pub fn transform_nodal_load(data: &ElementData, model: &Model, force: &[f64; 12]) -> LocalVec {
+    let mut result = LocalVec {
+        data: SmallVec::from_slice(force),
+    };
+    if let Some(ends) = resolve(data, model) {
+        result
+            .data
+            .resize(12 + 2 * ends.iter().flatten().count(), 0.0);
+        for (row, column, coefficient) in coupling(&ends) {
+            result.data[column] += coefficient * force[row];
+        }
+    }
+    result
 }
 
 /// 仕口パネルへ接合する部材。
@@ -88,33 +126,13 @@ impl PanelOffsetMember {
         self.ends.iter().filter(|e| e.is_some()).count() * 2
     }
 
-    /// `C`（12 × パネル自由度数）の非零成分を `(内側自由度, パネル自由度, 係数)` で列挙する。
-    fn coupling(&self) -> SmallVec<[(usize, usize, f64); 12]> {
-        let mut out = SmallVec::new();
-        let mut col = 12;
-        for (side, end) in self.ends.iter().enumerate() {
-            let Some(end) = end else { continue };
-            let rot0 = if side == 0 { 3 } else { 9 };
-            for row in 0..3 {
-                for axis in 0..2 {
-                    let coefficient = end.rotation[row][axis];
-                    if coefficient != 0.0 {
-                        out.push((rot0 + row, col + axis, coefficient));
-                    }
-                }
-            }
-            col += 2;
-        }
-        out
-    }
-
     /// 要素自由度の変位を内側 12 自由度の変位へ写す（`u_inner = T · u_elem`）。
     fn to_inner(&self, u: &[f64]) -> [f64; 12] {
         let mut inner = [0.0; 12];
         for (i, slot) in inner.iter_mut().enumerate() {
             *slot = u.get(i).copied().unwrap_or(0.0);
         }
-        for (r, c, z) in self.coupling() {
+        for (r, c, z) in coupling(&self.ends) {
             inner[r] += z * u.get(c).copied().unwrap_or(0.0);
         }
         inner
@@ -129,7 +147,7 @@ impl PanelOffsetMember {
                 out.set(i, j, k.get(i, j));
             }
         }
-        let cpl = self.coupling();
+        let cpl = coupling(&self.ends);
         for &(r, c, z) in &cpl {
             for i in 0..12 {
                 let v = out.get(i, c) + k.get(i, r) * z;
@@ -188,7 +206,7 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
             return Err("仕口パネル接続部材の内側荷重応答は12自由度が必要です".into());
         }
         response.nodal_residual.data.resize(self.n_dof(), 0.0);
-        for (r, c, z) in self.coupling() {
+        for (r, c, z) in coupling(&self.ends) {
             response.nodal_residual.data[c] += z * response.nodal_residual.data[r];
         }
         if response.nodal_residual.data.iter().any(|v| !v.is_finite()) {
@@ -207,7 +225,7 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
             return Err("仕口パネル接続部材の内側荷重応答は12自由度が必要です".into());
         }
         response.nodal_residual.data.resize(self.n_dof(), 0.0);
-        for (r, c, z) in self.coupling() {
+        for (r, c, z) in coupling(&self.ends) {
             response.nodal_residual.data[c] += z * response.nodal_residual.data[r];
         }
         if response.nodal_residual.data.iter().any(|v| !v.is_finite()) {
@@ -268,7 +286,7 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
         for (i, v) in f_inner.data.iter().take(12).enumerate() {
             f.data[i] = *v;
         }
-        for (r, c, z) in self.coupling() {
+        for (r, c, z) in coupling(&self.ends) {
             f.data[c] += z * f_inner.data.get(r).copied().unwrap_or(0.0);
         }
         f
@@ -388,6 +406,12 @@ mod tests {
                 Section {
                     frame_use: Some(FrameSectionUse::Column),
                     id: SectionId(1),
+                    shape: Some(SectionShape::SteelBox {
+                        height: 400.0,
+                        width: 400.0,
+                        thick: 13.0,
+                        corner_r: Some(0.0),
+                    }),
                     ..sec
                 },
             ],
@@ -444,6 +468,64 @@ mod tests {
             col_ends[1].map(|e| e.rotation),
             Some([[0.5, 0.0], [0.0, 0.5], [0.0, 0.0]])
         );
+    }
+
+    #[test]
+    fn panel_759_equivalent_loads_keep_work_in_rotated_sloped_and_reversed_connections() {
+        for normal in [[0.0, 0.0, 1.0], [0.6, 0.0, 0.8]] {
+            for angle in [0.0_f64, 0.37] {
+                for reversed in [false, true] {
+                    let rotate = |v: [f64; 3]| {
+                        [
+                            angle.cos() * v[0] - angle.sin() * v[1],
+                            angle.sin() * v[0] + angle.cos() * v[1],
+                            v[2],
+                        ]
+                    };
+                    let mut model = model_with_panel(200.0);
+                    model.nodes[2].coord = normal.map(|v| -3000.0 * v);
+                    model.nodes[2].coord[2] += 3000.0;
+                    for node in &mut model.nodes {
+                        node.coord = rotate(node.coord);
+                    }
+                    for element in &mut model.elements {
+                        element.local_axis.ref_vector = rotate(element.local_axis.ref_vector);
+                        if reversed && element.kind != ElementKind::PanelZone {
+                            element.nodes.reverse();
+                        }
+                    }
+                    let normal = rotate(normal);
+                    for (index, zeta) in [(0, -0.5), (1, 0.5)] {
+                        let element = &model.elements[index];
+                        let load: [f64; 12] = std::array::from_fn(|i| (i + 1) as f64 * 100.0);
+                        let transformed = transform_nodal_load(element, &model, &load);
+                        assert_eq!(&transformed.data[..12], &load);
+                        let mut displacement = [0.0; 14];
+                        for (i, value) in displacement[..12].iter_mut().enumerate() {
+                            *value = i as f64 * 1e-4;
+                        }
+                        displacement[12] = 0.001;
+                        displacement[13] = -0.002;
+                        let mut physical = displacement[..12].to_vec();
+                        let projection =
+                            normal[0] * displacement[12] + normal[1] * displacement[13];
+                        let end = usize::from(element.nodes[0] != NodeId(0));
+                        for row in 0..3 {
+                            let gamma = if row < 2 { displacement[12 + row] } else { 0.0 };
+                            physical[end * 6 + 3 + row] +=
+                                zeta * (gamma - normal[row] * projection);
+                        }
+                        let actual: f64 = displacement
+                            .iter()
+                            .zip(&transformed.data)
+                            .map(|(u, f)| u * f)
+                            .sum();
+                        let expected: f64 = physical.iter().zip(load).map(|(u, f)| u * f).sum();
+                        assert!((actual - expected).abs() < 1e-12 * expected.abs().max(1.0));
+                    }
+                }
+            }
+        }
     }
 
     /// `resolve` は危険断面位置（`face_i`/`face_j`）を一切参照しない。

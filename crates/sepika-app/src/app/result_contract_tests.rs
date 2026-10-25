@@ -1952,6 +1952,42 @@ fn panel_757_rotated_panel_results_expire_analysis36_and_survive_current_roundtr
 }
 
 #[test]
+fn panel_759_saved_analysis46_requires_reanalysis_and_current_contract_roundtrips() {
+    let app = panel_757_calculated();
+    for (version, keep) in [(46, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (mut loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("panel759-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        assert_eq!(loaded.core.scoped.staleness.results_stale, !keep);
+        assert_eq!(loaded.core.scoped.staleness.design_stale, !keep);
+        loaded.run_preparation();
+        loaded.run_linear_static(LoadCaseId(0));
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        assert_eq!(
+            loaded
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
 fn panel_757_preparation_roundtrip_preserves_both_axes_and_old_scalar_requires_repreparation() {
     let app = panel_757_calculated();
     let prep = app.core.scoped.preparation.as_ref().unwrap();

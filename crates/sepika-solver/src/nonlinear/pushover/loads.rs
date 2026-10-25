@@ -101,13 +101,20 @@ pub(super) fn prepare_gravity(
     let mut absolute = Vec::with_capacity(behaviors.len());
     for (elem, behavior) in model.elements.iter().zip(behaviors) {
         let loads = ledger.member_loads(elem.id);
-        if !behavior.owns_frame_member_loads() {
+        if !behavior.owns_frame_member_loads() && !loads.is_empty() {
             let force = legacy_member_force(model, elem, loads);
-            for (i, node) in elem.nodes.iter().take(2).enumerate() {
-                for d in 0..DOF_PER_NODE {
-                    if let Some(a) = dofmap.active(node.index() * DOF_PER_NODE + d) {
-                        rhs[a as usize] += force[i * DOF_PER_NODE + d];
-                    }
+            let force =
+                sepika_element::frame::panel_offset::transform_nodal_load(elem, model, &force);
+            let gdofs = behavior.global_dofs(dofmap);
+            if force.data.len() != gdofs.len() {
+                return Err(format!(
+                    "要素 ID {}・増分重力荷重の自由度数が一致しません",
+                    elem.id.0
+                ));
+            }
+            for (&active, value) in gdofs.iter().zip(force.data) {
+                if active != usize::MAX {
+                    rhs[active] += value;
                 }
             }
         }

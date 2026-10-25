@@ -503,11 +503,13 @@ fn 取付き床の斜め未到達異レベルとパネルは分割支持にな�
         .collect();
         member.section = Some(sepika_core::ids::SectionId(u32::from(column)));
         if column {
-            member.local_axis.ref_vector = [1., 0., 0.];
+            member.local_axis.ref_vector = [0., 1., 0.];
         }
         model.nodes.push(far);
         model.elements.push(member);
     }
+    model.elements[2].rigid_zone.panel_offset_i = 200.;
+    model.elements[3].rigid_zone.panel_offset_j = 200.;
     assert!(sepika_core::panel_zone::resolve_explicit_panel_joint(
         &model,
         sepika_core::ids::NodeId(2),

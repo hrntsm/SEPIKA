@@ -158,11 +158,17 @@ pub(crate) fn assemble_linear_rhs(
             }
         } else if !loads.is_empty() {
             let force = legacy_member_force(model, elem, loads);
-            for (i, node) in elem.nodes.iter().take(2).enumerate() {
-                for d in 0..DOF_PER_NODE {
-                    if let Some(a) = dofmap.active(node.index() * DOF_PER_NODE + d) {
-                        rhs[a as usize] += force[i * DOF_PER_NODE + d];
-                    }
+            let force =
+                sepika_element::frame::panel_offset::transform_nodal_load(elem, model, &force);
+            if force.data.len() != gdofs.len() {
+                return Err(element_error(
+                    elem.id,
+                    "等価節点荷重の自由度数が一致しません",
+                ));
+            }
+            for (&active, value) in gdofs.iter().zip(force.data) {
+                if active != usize::MAX {
+                    rhs[active] += value;
                 }
             }
         }

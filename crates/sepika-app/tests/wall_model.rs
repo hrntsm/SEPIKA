@@ -16,7 +16,7 @@
 //! # モデル
 //!
 //! 4m(X)×3m(Y)×3m(Z) の 1 スパン・1 層。柱 4 本（うち柱 0・1〔壁の側柱〕は RC、
-//! 柱 2・3 は H-300x300 鋼）・梁 8 本（うち id 4〔頂部 4-5〕・id 8〔柱脚間 0-1、
+//! 柱 2・3 は Box-300x300x10 鋼）・梁 8 本（うち id 4〔頂部 4-5〕・id 8〔柱脚間 0-1、
 //! いずれも壁の上下大梁〕は RC、残り 6 本は H-400x200 鋼。柱脚どうし・柱頭どうしの
 //! 両方で閉路。id 4-7 が頂部、id 8-11 が柱脚〔基礎大梁想定〕）・耐震壁 1 枚
 //! （Y=0 面、RC t=150、開口 1 つ）・フレーム外雑壁 1 本（Y=3000 面の梁上端に沿う想定、
@@ -139,7 +139,7 @@ fn static_res_for(app: &App, key: StaticCaseKey) -> &sepika_solver::statics::lin
         .1
 }
 
-/// 壁 1 パネル＋雑壁 1 本を含む、柱 4 本・梁 4 本の 1 スパン立体架構。
+/// 壁 1 パネル＋雑壁 1 本を含む、柱 4 本・梁 8 本の 1 スパン立体架構。
 fn wall_bay_model() -> Model {
     let mut model = Model {
         stories: [0.0, 3000.0, 6000.0]
@@ -191,13 +191,12 @@ fn wall_bay_model() -> Model {
         });
     }
 
-    // 断面: 柱 H-300x300、梁 H-400x200（鋼、SN400B）。
-    let col_shape = SectionShape::SteelH {
-        root_r: Some(13.0),
+    // 断面: 柱 Box-300x300、梁 H-400x200（鋼、SN400B）。
+    let col_shape = SectionShape::SteelBox {
         height: 300.0,
         width: 300.0,
-        web_thick: 10.0,
-        flange_thick: 15.0,
+        thick: 10.0,
+        corner_r: Some(13.0),
     };
     let beam_shape = SectionShape::SteelH {
         root_r: Some(13.0),
@@ -206,7 +205,7 @@ fn wall_bay_model() -> Model {
         web_thick: 8.0,
         flange_thick: 13.0,
     };
-    let mut col_section = col_shape.to_section(SectionId(0), "柱 H-300x300x10x15".into());
+    let mut col_section = col_shape.to_section(SectionId(0), "柱 Box-300x300x10 R13".into());
     col_section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(col_section);
     let mut beam_section = beam_shape.to_section(SectionId(1), "梁 H-400x200x8x13".into());
@@ -825,6 +824,78 @@ fn wall_fixture_weight_change_is_the_independent_fillet_area_increment() {
     eprintln!("壁モデルの総重量: 角丸={new_weight:.12e} N, 直角面積={old_weight:.12e} N, 独立差={expected:.12e} N");
 }
 
+#[test]
+fn wall_fixture_closed_columns_keep_real_properties_and_four_panel_connections() {
+    let mut model = wall_bay_model();
+    let section = &model.sections[0];
+    let expected_area_mm2 = 300.0_f64.powi(2)
+        - 280.0_f64.powi(2)
+        - (4.0 - std::f64::consts::PI) * (13.0_f64.powi(2) - 3.0_f64.powi(2));
+    assert!((section.area - expected_area_mm2).abs() < 1e-8);
+    let mut reference_iy_mm4 = 0.0;
+    let mut reference_iz_mm4 = 0.0;
+    for (lo_mm, hi_mm) in [(0.0, 137.0), (137.0, 140.0), (140.0, 150.0)] {
+        let dz_mm = (hi_mm - lo_mm) / 20_000.0;
+        for slice in 0..20_000 {
+            let z_mm = lo_mm + (f64::from(slice) + 0.5) * dz_mm;
+            let outer_width_mm = if z_mm <= 137.0 {
+                300.0
+            } else {
+                2.0 * (137.0 + (169.0 - (z_mm - 137.0).powi(2)).sqrt())
+            };
+            let inner_width_mm = if z_mm >= 140.0 {
+                0.0
+            } else if z_mm <= 137.0 {
+                280.0
+            } else {
+                2.0 * (137.0 + (9.0 - (z_mm - 137.0).powi(2)).sqrt())
+            };
+            reference_iy_mm4 += 2.0 * (outer_width_mm - inner_width_mm) * z_mm.powi(2) * dz_mm;
+            reference_iz_mm4 +=
+                2.0 * (outer_width_mm.powi(3) - inner_width_mm.powi(3)) / 12.0 * dz_mm;
+        }
+    }
+    assert!((section.iy / reference_iy_mm4 - 1.0).abs() < 2e-6);
+    assert!((section.iz / reference_iz_mm4 - 1.0).abs() < 2e-6);
+    let panels = sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+    assert_eq!(
+        panels.iter().map(|panel| panel.node).collect::<Vec<_>>(),
+        vec![NodeId(2), NodeId(3), NodeId(6), NodeId(7)]
+    );
+    for panel in &panels {
+        assert_eq!(panel.ve, [2_244_600.0; 2]);
+    }
+    for id in [2, 3] {
+        assert_eq!(model.elements[id].rigid_zone.panel_offset_i, 200.0);
+        assert_eq!(model.elements[id].rigid_zone.panel_offset_j, 200.0);
+    }
+    for (id, ends) in [
+        (5, [0.0, 150.0]),
+        (6, [150.0, 150.0]),
+        (7, [150.0, 0.0]),
+        (9, [0.0, 150.0]),
+        (10, [150.0, 150.0]),
+        (11, [150.0, 0.0]),
+    ] {
+        assert_eq!(
+            [
+                model.elements[id].rigid_zone.panel_offset_i,
+                model.elements[id].rigid_zone.panel_offset_j
+            ],
+            ends
+        );
+    }
+    assert_eq!(model.wall_plates.len(), 2);
+    assert_eq!(
+        model
+            .elements
+            .iter()
+            .filter(|element| element.kind == ElementKind::Beam)
+            .count(),
+        12
+    );
+}
+
 /// `App::run_design_check` が壁展開モデルを見ていることの回帰テスト（申し送り
 /// §5.15）。`run_member_design_checks`（内部の `joint_wiring::wall::check_walls`）
 /// は `results.member_forces` の壁 `ElemId` を `model.element` で引き直すため、
@@ -1201,8 +1272,12 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     let s = &holding.stories[0];
     let fillet_area_m2 = (4.0 - std::f64::consts::PI) * 0.013_f64.powi(2);
     let wall_upper_weight_kn = 3.7 * 1.3 * 0.15 * 23.53596;
-    let columns_upper_weight_kn =
-        2.0 * 0.3 * 0.3 * 3.0 * 23.53596 / 2.0 + (0.0117 + fillet_area_m2) * 3.0 * 78.5;
+    let columns_upper_weight_kn = 2.0 * 0.3 * 0.3 * 3.0 * 23.53596 / 2.0
+        + (0.3_f64.powi(2)
+            - 0.28_f64.powi(2)
+            - (4.0 - std::f64::consts::PI) * (0.013_f64.powi(2) - 0.003_f64.powi(2)))
+            * 3.0
+            * 78.5;
     let roof_girders_weight_kn =
         0.3 * 0.4 * 3.7 * 23.53596 + (0.008192 + fillet_area_m2) * 10.0 * 78.5;
     let expected_weight_n =
@@ -1231,8 +1306,8 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         sepika_core::model::RcWallShearMethod::ArakawaMean
     );
     assert_eq!(po.wall_capacities.len(), 1);
-    // t=150、D=4300、左右300角/6-D22、A=735000、λ=1。静的参照で観測したN=35747.50110771164を用いた独立荒川mean算術値。
-    let expected_wall_capacity_n = 1_717_735.984_149_153;
+    // 壁幾何・配筋とλ=1は不変。静的参照N=35718.3405661085に対し、独立値を0.1(te・j/A)ΔNで更新。
+    let expected_wall_capacity_n = 1_717_733.521_609_23;
     for capacity_n in po.wall_capacities[0].1 {
         assert!((capacity_n - expected_wall_capacity_n).abs() < 1e-6);
     }

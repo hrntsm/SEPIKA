@@ -72,6 +72,8 @@ pub fn add_support_spring_diag(model: &Model, dofmap: &DofMap, triplets: &mut Ve
 pub(crate) fn validate_global_mass_inputs(
     model: &Model,
 ) -> Result<(), sepika_math::solver::SolveError> {
+    sepika_core::panel_zone::validate_panel_connection_offsets(model)
+        .map_err(sepika_math::solver::SolveError::InvalidInput)?;
     validate_mass_inputs(model, true)
 }
 
@@ -300,8 +302,6 @@ fn add_member_loads(
         let Some((frame, length)) = member_load_frame(model, elem) else {
             continue;
         };
-        let ni = elem.nodes[0].index();
-        let nj = elem.nodes[1].index();
         let q_local = sepika_element::frame::member_load::consistent_load_local(
             loads,
             &frame,
@@ -309,12 +309,13 @@ fn add_member_loads(
             span_load_transfer(elem),
         );
         let q_global = frame.rotate_to_global(&q_local);
-        for (local_node, &node_idx) in [ni, nj].iter().enumerate() {
-            for d in 0..DOF_PER_NODE {
-                let g = node_idx * DOF_PER_NODE + d;
-                if let Some(active) = dofmap.active(g) {
-                    f[active as usize] += q_global[local_node * DOF_PER_NODE + d];
-                }
+        let force =
+            sepika_element::frame::panel_offset::transform_nodal_load(elem, model, &q_global);
+        let gdofs = build_behavior(elem, model).global_dofs(dofmap);
+        assert_eq!(force.data.len(), gdofs.len(), "等価節点荷重の自由度数");
+        for (&active, value) in gdofs.iter().zip(force.data) {
+            if active != usize::MAX {
+                f[active] += value;
             }
         }
     }

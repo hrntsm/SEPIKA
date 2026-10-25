@@ -378,6 +378,150 @@ mod tests {
     }
 
     #[test]
+    fn panel_759_public_preparation_uses_directional_column_faces() {
+        let mut model = steel_panel_model();
+        model.stories.clear();
+        let shape = SectionShape::SteelBox {
+            height: 400.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        };
+        for id in 0..2 {
+            let mut section = shape.to_section(SectionId(id), "C400x200".into());
+            section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+            section.material = Some(sepika_core::ids::MaterialId(0));
+            model.sections[id as usize] = section;
+            model.elements[id as usize].local_axis.ref_vector = [1.0, 0.0, 0.0];
+        }
+        let mut far = model.nodes[3].clone();
+        far.id = NodeId(4);
+        far.coord = [0.0, 6000.0, 3000.0];
+        model.nodes.push(far);
+        let mut girder = beam(3, 0, 4);
+        girder.section = Some(SectionId(2));
+        model.elements.push(girder);
+        model.nodes[1].restraint = sepika_core::dof::Dof6Mask::FIXED;
+        model.nodes[2].restraint = sepika_core::dof::Dof6Mask::FIXED;
+        model.nodes[3].restraint = sepika_core::dof::Dof6Mask::FIXED;
+        model.nodes[4].restraint = sepika_core::dof::Dof6Mask::FIXED;
+        prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+        let actual = [
+            model.elements[2].rigid_zone.panel_offset_i,
+            model.elements[3].rigid_zone.panel_offset_i,
+        ];
+        eprintln!("#759 公開準備 C400x200 X/Y 梁 offset [mm] = {actual:?}");
+        sepika_solver::statics::analysis::Analysis::prepare(&model).unwrap();
+        assert_eq!(actual, [200.0, 100.0]);
+        for angle in [0.001_f64, 0.37] {
+            let rotate = |v: [f64; 3]| {
+                [
+                    angle.cos() * v[0] - angle.sin() * v[1],
+                    angle.sin() * v[0] + angle.cos() * v[1],
+                    v[2],
+                ]
+            };
+            let mut rotated = model.clone();
+            for section in &mut rotated.sections[..2] {
+                if let Some(SectionShape::SteelBox { corner_r, .. }) = &mut section.shape {
+                    *corner_r = None;
+                }
+            }
+            for node in &mut rotated.nodes {
+                node.coord = rotate(node.coord);
+            }
+            for member in &mut rotated.elements {
+                member.local_axis.ref_vector = rotate(member.local_axis.ref_vector);
+            }
+            apply_rigid_zones_and_panels(&mut rotated).unwrap();
+            assert!((rotated.elements[2].rigid_zone.panel_offset_i - 200.0).abs() < 1e-9);
+            assert!((rotated.elements[3].rigid_zone.panel_offset_i - 100.0).abs() < 1e-9);
+        }
+        let mut unknown_corner = model.clone();
+        for section in &mut unknown_corner.sections[..2] {
+            if let Some(SectionShape::SteelBox { corner_r, .. }) = &mut section.shape {
+                *corner_r = None;
+            }
+        }
+        unknown_corner.nodes[3].coord[1] = 6e-10;
+        let error = apply_rigid_zones_and_panels(&mut unknown_corner)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("角Rが未知"), "{error}");
+        let mut stale = model.clone();
+        stale.elements[3].rigid_zone.panel_offset_i = 200.0;
+        let error = sepika_solver::statics::analysis::Analysis::prepare(&stale)
+            .err()
+            .unwrap()
+            .to_string();
+        for text in [
+            "接合部 ID 0",
+            "柱 ID 0",
+            "部材 ID 3",
+            "必要値 100",
+            "再実行",
+        ] {
+            assert!(error.contains(text), "{error}");
+        }
+        use sepika_core::dof::DofMap;
+        use sepika_solver::common::constraint::Reducer;
+        let dofs = DofMap::build(&stale);
+        let reducer = Reducer::build(&stale, &dofs);
+        let static_error = sepika_solver::statics::linear::linear_static_once(
+            &stale,
+            sepika_core::ids::LoadCaseId(0),
+        )
+        .unwrap_err()
+        .to_string();
+        let eigen_error = sepika_solver::dynamic::eigen::solve_eigen(&stale, &dofs, &reducer, 0)
+            .unwrap_err()
+            .to_string();
+        let push_error = sepika_solver::nonlinear::pushover::pushover_analysis_recording(
+            &stale,
+            &dofs,
+            &reducer,
+            sepika_solver::statics::analysis::SeismicDir::X,
+            0,
+            Default::default(),
+            Default::default(),
+            false,
+            false,
+            Default::default(),
+        )
+        .unwrap_err();
+        for error in [static_error, eigen_error, push_error] {
+            assert!(error.contains("必要値 100"), "{error}");
+        }
+        prepare_model_for_analysis(&mut stale, &AnalysisSettings::default(), None).unwrap();
+        assert_eq!(stale.elements[3].rigid_zone.panel_offset_i, 100.0);
+        sepika_solver::statics::analysis::Analysis::prepare(&stale).unwrap();
+        for id in 0..2 {
+            stale.sections[id].shape = Some(SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 12.0,
+                flange_thick: 20.0,
+                root_r: Some(0.0),
+            });
+        }
+        let error = sepika_solver::statics::analysis::Analysis::prepare(&stale)
+            .err()
+            .unwrap()
+            .to_string();
+        for text in ["接合部 ID 0", "柱 ID 0", "部材 ID 3", "接合詳細"] {
+            assert!(error.contains(text), "{error}");
+        }
+        let before = bincode::serialize(&stale.elements).unwrap();
+        let error = prepare_model_for_analysis(&mut stale, &AnalysisSettings::default(), None)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("接合詳細"), "{error}");
+        assert_eq!(bincode::serialize(&stale.elements).unwrap(), before);
+    }
+
+    #[test]
     fn panel_585_invalid_lower_column_stops_public_preparation() {
         let mut model = steel_panel_model();
         model.sections[0].material = None;
