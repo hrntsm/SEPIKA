@@ -145,6 +145,9 @@ fn finish_live_load_and_shared_material_are_preserved_once() {
         let mut model = fixture::one_cubic_metre(true);
         let mut shared = model.slabs[0].clone();
         shared.id = SlabId(1);
+        if let SlabShape::Attached { extent, .. } = &mut shared.shape {
+            *extent = extent.map(|v| -v);
+        }
         model.slabs.push(shared);
         prepare_model(&mut model, &Default::default(), None, true).unwrap();
         close(physical_weight(&model), 153964.405);
@@ -232,14 +235,14 @@ fn partial_attached_support_preserves_density_volume_total_and_invalid_inputs_fa
         error.contains("物理密度") && error.contains("負"),
         "{error}"
     );
-    let report = prepare_model(&mut model, &Default::default(), None, true).unwrap();
-    assert!(report
-        .notices
-        .iter()
-        .any(|n| n.contains("物理密度") && n.contains("負")));
-    let record = model.seismic_weight_generation.as_ref().unwrap();
-    assert!(record.input_key.is_empty() && record.output_key.is_empty());
-    assert!(record.calculated_weights.is_empty());
+    let error = prepare_model(&mut model, &Default::default(), None, true)
+        .err()
+        .expect("不正密度は準備計算を停止する")
+        .to_string();
+    assert!(
+        error.contains("物理密度") && error.contains("負"),
+        "{error}"
+    );
     assert!(!weights_are_current(&model, Default::default()));
     assert!(sepika_job::weight_preparation::require_current_generated_mass(&model).is_err());
     model.materials[1].density = 7.85e-9;
@@ -247,6 +250,72 @@ fn partial_attached_support_preserves_density_volume_total_and_invalid_inputs_fa
         *extent = [f64::NAN; 2];
     }
     assert!(sepika_load::slab_load::physical_self_weight_loads(&model).is_err());
+}
+
+#[test]
+fn 梁嵩上げの設計重量と物理質量を両質量方式の層と動的モデルへ一度だけ渡す() {
+    use sepika_job::lumped_mass::{build_lumped_mass, LumpedMassBuildInput};
+    use sepika_solver::dynamic::lumped_mass::{LumpedStiffnessSource, StickDim};
+    use sepika_solver::statics::{analysis::SeismicDir, linear::linear_static_once};
+    for mass_method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
+        let mut model = fixture::one_cubic_metre(true);
+        for node in &mut model.nodes {
+            if node.coord[0] > 0. {
+                node.coord[0] = 6000.;
+            }
+        }
+        model.sections[1] = sepika_core::section_shape::SectionShape::SteelH {
+            height: 400.,
+            width: 400.,
+            web_thick: 10.,
+            flange_thick: 15.,
+            root_r: Some(0.),
+        }
+        .to_section(SectionId(1), "嵩上げ梁".into());
+        model.sections[1].frame_use = Some(FrameSectionUse::Girder);
+        model.sections[1].material = Some(MaterialId(0));
+        model.elements[2].vertical_eccentricity = Some(-400.);
+        let settings = sepika_job::settings::AnalysisSettings {
+            mass_method,
+            ..Default::default()
+        };
+        prepare_model(&mut model, &settings, None, true).unwrap();
+        close(
+            model.stories.iter().filter_map(|s| s.seismic_weight).sum(),
+            113040.,
+        );
+        close(physical_weight(&model), 110854.3716);
+        close(
+            model
+                .layers()
+                .iter()
+                .filter_map(|l| l.dynamic_mass)
+                .map(|m| m.mass_equiv_weight_n / 9806.65)
+                .sum(),
+            11.304,
+        );
+        let ex = model
+            .load_cases
+            .iter()
+            .find(|c| c.name == EX_CASE_NAME)
+            .unwrap()
+            .id;
+        let response = linear_static_once(&model, ex).unwrap();
+        let result = build_lumped_mass(LumpedMassBuildInput {
+            model: &model,
+            dim: StickDim::Planar,
+            source: LumpedStiffnessSource::StoryQd,
+            dir: SeismicDir::X,
+            nonlinear: false,
+            secant_ratio: 0.75,
+            res_x: Some(&response),
+            res_y: None,
+            po_x: None,
+            po_y: None,
+        })
+        .unwrap();
+        close(result.stories.iter().map(|s| s.mass).sum(), 11.304);
+    }
 }
 
 #[test]

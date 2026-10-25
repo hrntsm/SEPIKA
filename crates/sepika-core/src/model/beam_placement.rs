@@ -146,6 +146,91 @@ impl Model {
 }
 
 impl BeamPlacement {
+    /// 水平面内の材軸直交方向への実断面外側投影幅 [mm]。
+    pub fn plan_width_mm(&self) -> Result<f64, String> {
+        let x = self.axes[0];
+        let norm = x[0].hypot(x[1]);
+        if !norm.is_finite() || norm <= 0.0 {
+            return Err(format!(
+                "{}: 水平材軸方向が不明です",
+                beam_label(self.member)
+            ));
+        }
+        let direction = [-x[1] / norm, x[0] / norm, 0.0];
+        let range = self
+            .geometry
+            .projected_range([dot(self.axes[1], direction), dot(self.axes[2], direction)])?;
+        Ok(range[1] - range[0])
+    }
+
+    /// 材軸のXYを通る鉛直線と梁実上面の交点が線形になる材軸位置 [mm]。
+    pub fn top_surface_breaks_mm(&self) -> Result<Vec<f64>, String> {
+        let mut cuts = vec![0.0, self.length_mm];
+        for offset in self.vertical_material_offsets_mm()?.into_iter().flatten() {
+            for end in [0.0, self.length_mm] {
+                let position = end - offset * self.axes[0][2];
+                if !position.is_finite() {
+                    return Err(format!(
+                        "{}: 上端切替位置が非有限です",
+                        beam_label(self.member)
+                    ));
+                }
+                if position > 0.0 && position < self.length_mm {
+                    cuts.push(position);
+                }
+            }
+        }
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup();
+        Ok(cuts)
+    }
+
+    /// 切替位置を内部に含まない材軸区間 [mm] の中心線上実上端Zの両端極限 [mm]。
+    /// 上端の不連続点では区間内からの極限を返し、区間不正・交点未解決はエラー。
+    pub fn top_surface_on_interval_mm(&self, interval: [f64; 2]) -> Result<[f64; 2], String> {
+        let [a, b] = interval;
+        let fail = |reason: &str| format!("{}: {reason}", beam_label(self.member));
+        if !interval.iter().all(|s| s.is_finite()) || a < 0.0 || b > self.length_mm || b <= a {
+            return Err(fail("上端照会区間が不正です"));
+        }
+        if self
+            .top_surface_breaks_mm()?
+            .iter()
+            .any(|s| *s > a && *s < b)
+        {
+            return Err(fail("上端照会区間が材料・端面の切替位置を跨いでいます"));
+        }
+        let middle = a + (b - a) / 2.0;
+        if middle <= a || middle >= b {
+            return Err(fail("上端照会区間の内部点を解決できません"));
+        }
+        let slope = self.axes[0][2];
+        let mut cap = [f64::NEG_INFINITY, f64::INFINITY];
+        if !clip(&mut cap, middle, slope, [0.0, self.length_mm])? {
+            return Err(fail("上端照会区間に有限梁の交点がありません"));
+        }
+        let selected = self
+            .vertical_material_offsets_mm()?
+            .into_iter()
+            .filter(|span| span[0].max(cap[0]) <= span[1].min(cap[1]))
+            .max_by(|left, right| left[1].min(cap[1]).total_cmp(&right[1].min(cap[1])))
+            .ok_or_else(|| fail("中心線上の鉛直線に実材料の交点がありません"))?;
+        let top = if selected[1] <= cap[1] {
+            interval.map(|s| self.actual_ends[0][2] + slope * s + selected[1])
+        } else {
+            let end = if slope > 0.0 { self.length_mm } else { 0.0 };
+            interval.map(|s| self.actual_ends[0][2] + slope * s + (end - s) / slope)
+        };
+        if !top.iter().all(|z| z.is_finite()) {
+            return Err(fail("実上端Zが非有限です"));
+        }
+        Ok(top)
+    }
+
+    fn vertical_material_offsets_mm(&self) -> Result<Vec<[f64; 2]>, String> {
+        self.line_material_intervals(self.actual_ends[0], [0.0, 0.0, 1.0], false)
+    }
+
     fn new(
         member: SupportMemberId,
         reference_ends: [[f64; 3]; 2],
@@ -220,6 +305,19 @@ impl BeamPlacement {
         origin: [f64; 3],
         direction: [f64; 3],
     ) -> Result<Option<[f64; 2]>, String> {
+        let intervals = self.line_material_intervals(origin, direction, true)?;
+        Ok(intervals
+            .first()
+            .zip(intervals.last())
+            .map(|(first, last)| [first[0], last[1]]))
+    }
+
+    fn line_material_intervals(
+        &self,
+        origin: [f64; 3],
+        direction: [f64; 3],
+        finite_ends: bool,
+    ) -> Result<Vec<[f64; 2]>, String> {
         if !origin.iter().all(|v| v.is_finite()) {
             return Err(format!("{}: 照会位置が非有限です", beam_label(self.member)));
         }
@@ -233,8 +331,8 @@ impl BeamPlacement {
             ));
         }
         let mut cap = [f64::NEG_INFINITY, f64::INFINITY];
-        if !clip(&mut cap, p[0], v[0], [0.0, self.length_mm])? {
-            return Ok(None);
+        if finite_ends && !clip(&mut cap, p[0], v[0], [0.0, self.length_mm])? {
+            return Ok(Vec::new());
         }
         let mut intervals = Vec::new();
         for (primitive, material) in &self.geometry.parts {
@@ -284,7 +382,7 @@ impl BeamPlacement {
         let mut boundaries: Vec<_> = intervals.iter().flat_map(|(span, _)| *span).collect();
         boundaries.sort_by(f64::total_cmp);
         boundaries.dedup();
-        let mut result: Option<[f64; 2]> = None;
+        let mut result: Vec<[f64; 2]> = Vec::new();
         for pair in boundaries
             .iter()
             .map(|v| [*v, *v])
@@ -297,22 +395,29 @@ impl BeamPlacement {
                 .find(|(span, _)| span[0] <= mid && mid <= span[1])
                 .is_some_and(|(_, material)| material.is_some())
             {
-                match &mut result {
-                    Some(range) => {
-                        range[0] = range[0].min(pair[0]);
-                        range[1] = range[1].max(pair[1]);
-                    }
-                    None => result = Some([pair[0], pair[1]]),
-                }
+                result.push(pair);
             }
         }
-        if result.is_some_and(|r| !r.iter().all(|v| v.is_finite())) {
+        if !result.iter().flatten().all(|v| v.is_finite()) {
             return Err(format!(
                 "{}: 実形状交点が非有限です",
                 beam_label(self.member)
             ));
         }
-        Ok(result)
+        result.sort_by(|left, right| {
+            left[0]
+                .total_cmp(&right[0])
+                .then(left[1].total_cmp(&right[1]))
+        });
+        let mut merged: Vec<[f64; 2]> = Vec::new();
+        for span in result {
+            if let Some(previous) = merged.last_mut().filter(|previous| span[0] <= previous[1]) {
+                previous[1] = previous[1].max(span[1]);
+            } else {
+                merged.push(span);
+            }
+        }
+        Ok(merged)
     }
 }
 

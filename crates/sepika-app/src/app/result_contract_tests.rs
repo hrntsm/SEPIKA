@@ -768,6 +768,23 @@ pub(super) fn direct_secondary_beam_app() -> App {
 #[test]
 fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     let mut app = direct_secondary_beam_app();
+    for region in &mut app.core.model.floor_regions {
+        for beam in &mut region.secondary_beams {
+            beam.vertical_eccentricity = Some(-500.);
+        }
+    }
+    for beam in &mut app.core.model.unassigned_beams {
+        beam.vertical_eccentricity = Some(-500.);
+    }
+    assert!(
+        sepika_load::self_weight::all_beam_upstand_segments(&app.core.model)
+            .unwrap()
+            .iter()
+            .any(|segment| matches!(
+                segment.beam,
+                sepika_core::model::SupportMemberId::Secondary(_)
+            ) && segment.design_weight_n > 0.)
+    );
     app.run_design_check();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -787,7 +804,7 @@ fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     );
     let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
 
-    for version in [23, 24] {
+    for version in [23, 24, 29] {
         let (mut loaded, path) = restore(
             &app,
             None,
