@@ -194,6 +194,10 @@ impl BeamElement {
     }
 
     pub(crate) fn local_stiffness_flex_rc_reference(&self) -> LocalMat {
+        self.condense_end_springs(&self.local_stiffness_flex_rc_reference_raw())
+    }
+
+    pub(crate) fn local_stiffness_flex_rc_reference_raw(&self) -> LocalMat {
         let (li, lj) = self.rigid_lengths();
         let l = self.length - li - lj;
         assert!(
@@ -206,8 +210,7 @@ impl BeamElement {
         beam.a = self.a * (l / self.length);
         beam.j = self.j * (l / self.length);
         let phi_y = 12.0 * beam.e * beam.iy / (beam.g * beam.as_z * l * l);
-        let raw = beam.local_stiffness_with_shear_factors(0.0, phi_y);
-        beam.condense_end_springs(&raw)
+        beam.local_stiffness_with_shear_factors(0.0, phi_y)
     }
 
     pub(crate) fn local_stiffness_flex_raw(&self) -> LocalMat {

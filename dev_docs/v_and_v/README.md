@@ -106,6 +106,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 |---|---|---|
 | [保存ブランチ496の変更採否_2026-10.md](保存ブランチ496の変更採否_2026-10.md) | 全102コミットの採否、免震/保存の復元、全固定時刻歴と確定前記録 | 🔶（有限Verification。実験Validationは未実施） |
 | [保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | 物理曲率・非対称断面・剛域付き軸履歴、元端部解放の内外残差整合 | 🔶（有限Verification。全履歴の収束性・実験Validationは未検証） |
+| [集中ばね梁の部材荷重_Issue802_2026-10.md](集中ばね梁の部材荷重_Issue802_2026-10.md) | 集中ばね梁の元部材荷重・材料釣合い・記録・復元・保存失効・公開App保有耐力 | 🔶（独立Verification、Validation・最終ゲート未確認） |
 | [一般部材荷重_Issue716_2026-10.md](一般部材荷重_Issue716_2026-10.md) | 全固定材・通常Fiber/MS・非線形時刻歴の長期部材荷重 | 🔶（公開入口と独立梁値のVerification。実測Validation・手動GUI・最終ゲートは未確認） |
 | [増分性能量と物理支持反力_Issue717_2026-10.md](増分性能量と物理支持反力_Issue717_2026-10.md) | 全支持抵抗と骨組切断面・元荷重・支持作用の区別 | 🔶（有限例のVerification。一般MPC・全塑性履歴・物理Validation・最終ゲートは未確認） |
 | [大梁床板実重複控除_Issue616_確認記録.md](大梁床板実重複控除_Issue616_確認記録.md) | 矩形RC/SRC大梁と床板の実重複・左右幅配分・DL/地震重量・実準備入口・編集保存失効 | 🔶（独立算術と自動入口のVerification。実測Validation・手動GUI・CIは未確認） |
@@ -295,6 +296,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 802 | 集中ばね梁の部材荷重 | sepika-element / sepika-solver / sepika-mcp | frame/concentrated・general_member_loads.rs・persist.rs | [独立期待値と公開入口](集中ばね梁の部材荷重_Issue802_2026-10.md#対象と独立期待値) | 横断 | 🔶（限定Verification、Validation未） |
 | 616 | 大梁自重の床板実重複控除 | sepika-load / sepika-job / sepika-app | self_weight/girder_overlap.rs・app/girder_weight_tests.rs・weight_preparation.rs | [独立値と実入口](大梁床板実重複控除_Issue616_確認記録.md#独立期待値と実入口) | 横断 | 🔶（数値Verification、Validation未） |
 | 775 | ctutils 推移依存監査 | Cargo.lock / sepika-io | zip、ctutils、OVIKA | [監査と実行証拠](ctutils推移依存監査_Issue775_2026-10.md#実行証拠) | 横断 | 🔶（0.4.5 の最小解決、監査・IO default/parquet 成功。独立レビュー・最終 CI は記録を参照） |
 | 496 | 壁側柱の物理的分担と局所解放 | sepika-core / sepika-element / sepika-solver / sepika-design-jp / sepika-job / sepika-app | model/wall_side_column.rs、wall/side_column、frame/fiber、tests/wall_system_linear.rs | [原七Doneとrun別結果](壁側柱の物理的分担と局所解放_Issue496_2026-10.md#完了条件と試験の対応) | 横断 | 🔶（限定Verification、full_model3snapshot未受入・最終ゲート・Validation未確認） |

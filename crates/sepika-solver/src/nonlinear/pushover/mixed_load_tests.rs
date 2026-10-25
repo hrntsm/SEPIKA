@@ -89,7 +89,7 @@ fn close(actual: f64, expected: f64) {
 }
 
 #[test]
-fn mixed_gravity_and_confirmed_pushover_keep_owner_and_legacy_load_paths_distinct() {
+fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() {
     for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
         let model = mixed_model(kind);
         let map = DofMap::build(&model);
@@ -120,11 +120,11 @@ fn mixed_gravity_and_confirmed_pushover_keep_owner_and_legacy_load_paths_distinc
             .collect();
         assert!(behaviors[3].owns_frame_member_loads());
         assert!(behaviors[5].owns_frame_member_loads());
-        assert!(!behaviors[6].owns_frame_member_loads());
+        assert!(behaviors[6].owns_frame_member_loads());
         let (rhs, loads) =
             prepare_nonlinear_loads(&model, &map, &behaviors, &model.load_cases[0]).unwrap();
         let active = map.active(6 * 6).unwrap() as usize;
-        close(rhs[active], 1000.);
+        close(rhs[active], 0.);
         let mut displacement = vec![0.; map.n_active()];
         let mut solver = SolverState::new(map.n_active(), reducer.n_indep);
         apply_initial_load(
@@ -167,11 +167,20 @@ fn mixed_gravity_and_confirmed_pushover_keep_owner_and_legacy_load_paths_distinc
         close(wall.physical_frame_end_force_global[10], 0.);
         close(wall.section.at(0.5).unwrap()[5].abs(), 1.125e6);
         let legacy = behaviors[6].internal_force(&Ctx { model: &model });
-        close(legacy.data[0], -1000.);
-        close(legacy.data[6], 1000.);
-        let legacy_support_reaction = legacy.data[0] - 1000.;
+        close(legacy.data[0], -2000.);
+        close(legacy.data[6], 0.);
+        let legacy_support_reaction = legacy.data[0];
         close(legacy_support_reaction + 2000., 0.);
-        close(1000. * 0.1 + rhs[active] * -0.3, -200.);
+        let applied = responses[6]
+            .as_ref()
+            .unwrap()
+            .section
+            .applied_nodal_forces_global();
+        close(applied[0][0] * 0.1 + applied[1][0] * -0.3, -200.);
+        close(
+            responses[6].as_ref().unwrap().section.at(0.5).unwrap()[0],
+            1000.,
+        );
         let reduced_internal = reducer.reduce_f(&compute_f_int(&model, &map, &behaviors));
         for (actual, expected) in reduced_internal.into_iter().zip(reducer.reduce_f(&rhs)) {
             close(actual, expected);
@@ -201,7 +210,7 @@ fn mixed_gravity_and_confirmed_pushover_keep_owner_and_legacy_load_paths_distinc
         close(recorded.member_history_steps[0][5].mz_j.abs() as f64, 3e6);
         close(recorded.member_history_steps[0][3].mz_i.abs() as f64, 0.);
         close(recorded.member_history_steps[0][3].mz_j.abs() as f64, 0.);
-        close(recorded.member_history_steps[0][6].n as f64, -1000.);
+        close(recorded.member_history_steps[0][6].n as f64, -2000.);
         let error =
             pushover_analysis(&model, &map, &reducer, SeismicDir::X, 1, 0., false).unwrap_err();
         assert!(

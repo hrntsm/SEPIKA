@@ -3813,8 +3813,7 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
             Vec<Box<dyn sepika_material::uniaxial::UniaxialMaterial>>,
             [f64; 4],
             [f64; 4],
-            [f64; 12],
-            [f64; 12],
+            crate::frame::beam::state::ElasticLoadState,
         )>()
         .unwrap();
     let expected_k_rot = 6.0 * 150579426048000.0 / 3000.0;

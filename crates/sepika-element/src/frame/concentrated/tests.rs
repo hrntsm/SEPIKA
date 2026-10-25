@@ -136,7 +136,7 @@ fn test_spring_yield() {
             0.0,
             0.0,
             0.0,
-            rot_yield * 10.0,
+            rot_yield * 100.0,
             0.0,
             0.0,
             0.0,
@@ -148,7 +148,7 @@ fn test_spring_yield() {
 
     let k_elastic = elem.tangent_stiffness(&ctx);
 
-    elem.update_state(&du_large, true, &ctx).unwrap();
+    elem.update_state(&du_large, false, &ctx).unwrap();
     let k_yielded = elem.tangent_stiffness(&ctx);
 
     let k55_elastic = k_elastic.get(5, 5);
@@ -333,38 +333,18 @@ fn test_concentrated_spring_checkpoint_roundtrip() {
     };
     elem.update_state(&du, true, &ctx).unwrap();
 
-    let snap_before = elem.snapshot_state();
     let checkpoint = elem.serialize_checkpoint();
-
     let mut restored = make_test_element();
     restored.deserialize_checkpoint(&checkpoint).unwrap();
-    let snap_after = restored.snapshot_state();
-
-    type Snap = (
-        Vec<Box<dyn UniaxialMaterial>>,
-        [f64; 4],
-        [f64; 4],
-        [f64; 12],
-        [f64; 12],
+    assert_eq!(checkpoint, restored.serialize_checkpoint());
+    assert_eq!(
+        elem.internal_force(&ctx).data,
+        restored.internal_force(&ctx).data
     );
-    let before = snap_before.downcast_ref::<Snap>().unwrap();
-    let after = snap_after.downcast_ref::<Snap>().unwrap();
-    for k in 0..4 {
-        assert_relative_eq!(before.1[k], after.1[k], epsilon = 1e-12);
-        assert_relative_eq!(before.2[k], after.2[k], epsilon = 1e-12);
-    }
-    assert!(
-        before.3.iter().any(|v| v.abs() > 1e-15),
-        "前提: committed が非零"
+    assert_eq!(
+        elem.state_member_forces(&ctx),
+        restored.state_member_forces(&ctx)
     );
-    assert!(
-        before.4.iter().any(|v| v.abs() > 1e-15),
-        "前提: trial が非零"
-    );
-    for i in 0..12 {
-        assert_relative_eq!(before.3[i], after.3[i], epsilon = 1e-12);
-        assert_relative_eq!(before.4[i], after.4[i], epsilon = 1e-12);
-    }
 }
 #[test]
 fn test_mn_interaction_reduces_spring_yield() {
@@ -737,4 +717,227 @@ fn explicit_total_reference_preserves_takeda_unloading_values() {
         757_858_283.255_199,
         max_relative = 1e-10
     );
+}
+
+fn loaded_udl(w: f64, axis: usize) -> sepika_core::model::MemberLoad {
+    let mut direction = [0.0; 3];
+    direction[axis] = 1.0;
+    sepika_core::model::MemberLoad::manual(
+        ElemId(0),
+        direction,
+        sepika_core::model::MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 3000.0,
+            w1: w,
+            w2: w,
+        },
+    )
+}
+
+fn close_loaded(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 1e-7 * expected.abs().max(1.0),
+        "{actual} != {expected}"
+    );
+}
+
+#[test]
+fn member_load_equilibrates_elastic_end_connections_and_section_forces() {
+    use sepika_core::model::EndCondition;
+    let ctx = Ctx {
+        model: &Default::default(),
+    };
+    let zero = LocalVec {
+        data: smallvec::smallvec![0.0; 12],
+    };
+    for condition in [
+        EndCondition::Fixed,
+        EndCondition::Pinned,
+        EndCondition::SemiRigid { k_theta: 2e10 },
+    ] {
+        let mut elem = make_test_element();
+        elem.elastic.end_cond = [condition; 2];
+        let kb = 2.0 * elem.elastic.e * elem.elastic.iz / 3000.0;
+        let moment = match condition {
+            EndCondition::Fixed => 750000.0 / (1.0 + kb / 1e10),
+            EndCondition::Pinned => 0.0,
+            EndCondition::SemiRigid { k_theta } => 750000.0 / (1.0 + kb / 1e10 + kb / k_theta),
+        };
+        for factor in [1.0, 0.5, 1.0, 0.0] {
+            let loads = if factor == 0.0 {
+                vec![]
+            } else {
+                vec![loaded_udl(factor, 1)]
+            };
+            elem.update_state_with_member_loads(&zero, &loads, true, &ctx)
+                .unwrap();
+            let response = elem.state_frame_load_response().unwrap().unwrap();
+            let f = response.physical_frame_end_force_global;
+            close_loaded(f[1], -1500.0 * factor);
+            close_loaded(f[7], -1500.0 * factor);
+            close_loaded(f[5], -moment * factor);
+            close_loaded(f[11], moment * factor);
+            close_loaded(elem.spring_i.probe(elem.trial_rot_i).0, f[5]);
+            close_loaded(elem.spring_j.probe(elem.trial_rot_j).0, f[11]);
+            close_loaded(
+                response.section.at(0.5).unwrap()[5],
+                moment * factor - 1125000.0 * factor,
+            );
+            assert_eq!(elem.internal_force(&ctx).data, response.nodal_residual.data);
+        }
+    }
+}
+
+#[test]
+fn member_point_load_yields_springs_and_matches_bilinear_equilibrium_and_tangent() {
+    let mut elem = make_yield_element();
+    let ctx = Ctx {
+        model: &Default::default(),
+    };
+    let zero = LocalVec {
+        data: smallvec::smallvec![0.0; 12],
+    };
+    let load = sepika_core::model::MemberLoad::manual(
+        ElemId(0),
+        [0.0, 1.0, 0.0],
+        sepika_core::model::MemberLoadKind::Point { a: 1500.0, p: 1e5 },
+    );
+    elem.update_state_with_member_loads(&zero, std::slice::from_ref(&load), false, &ctx)
+        .unwrap();
+    let kb = 2.0 * 205000.0 * 1e8 / 3000.0;
+    let rotation = (37500000.0 - 1e7 + 1e10 * 1e-5) / (kb + 1e10);
+    let moment = 37500000.0 - kb * rotation;
+    close_loaded(-elem.trial_rot_i, rotation);
+    close_loaded(elem.trial_rot_j, rotation);
+    close_loaded(elem.internal_force(&ctx).data[5], -moment);
+    close_loaded(elem.internal_force(&ctx).data[11], moment);
+    assert!(moment > 1e7);
+    let tangent = elem.tangent_stiffness(&ctx);
+    let before = elem.internal_force(&ctx);
+    let snapshot = elem.snapshot_state();
+    let mut increment = LocalVec {
+        data: smallvec::smallvec![0.0; 12],
+    };
+    increment.data[5] = 1e-8;
+    elem.update_state_with_member_loads(&increment, std::slice::from_ref(&load), false, &ctx)
+        .unwrap();
+    let after = elem.internal_force(&ctx);
+    close_loaded((after.data[5] - before.data[5]) / 1e-8, tangent.get(5, 5));
+    elem.restore_state(snapshot.as_ref());
+    elem.commit_state();
+    let checkpoint = elem.serialize_checkpoint();
+    let mut resumed = make_yield_element();
+    resumed.deserialize_checkpoint(&checkpoint).unwrap();
+    assert_eq!(resumed.serialize_checkpoint(), checkpoint);
+    for next in [&mut elem, &mut resumed] {
+        next.update_state_with_member_loads(&zero, &[], false, &ctx)
+            .unwrap();
+        assert!(next.internal_force(&ctx).data[5].abs() > 1e6);
+        next.revert_state();
+        assert_eq!(next.serialize_checkpoint(), checkpoint);
+    }
+}
+
+#[test]
+fn member_load_failed_trial_and_checkpoint_restore_every_material_and_load_state() {
+    let ctx = Ctx {
+        model: &Default::default(),
+    };
+    let zero = LocalVec {
+        data: smallvec::smallvec![0.0; 12],
+    };
+    let mut elem = make_yield_element();
+    elem.update_state_with_member_loads(&zero, &[loaded_udl(100.0, 1)], true, &ctx)
+        .unwrap();
+    let committed = elem.serialize_checkpoint();
+    elem.update_state_with_member_loads(&zero, &[loaded_udl(50.0, 1)], false, &ctx)
+        .unwrap();
+    let trial = elem.serialize_checkpoint();
+    for invalid in [loaded_udl(f64::NAN, 1), loaded_udl(f64::MAX, 1), {
+        let mut load = loaded_udl(1.0, 1);
+        load.elem = ElemId(9);
+        load
+    }] {
+        assert!(elem
+            .update_state_with_member_loads(&zero, &[invalid], true, &ctx)
+            .is_err());
+        assert_eq!(elem.serialize_checkpoint(), trial);
+    }
+    let mut cp: ConcentratedSpringCheckpoint = bincode::deserialize(&trial).unwrap();
+    cp.spring_j = vec![1, 2];
+    assert!(elem
+        .deserialize_checkpoint(&bincode::serialize(&cp).unwrap())
+        .is_err());
+    assert_eq!(elem.serialize_checkpoint(), trial);
+    elem.revert_state();
+    assert_eq!(elem.serialize_checkpoint(), committed);
+}
+
+#[test]
+fn axial_member_load_sets_each_end_mn_limit_from_its_physical_axial_force() {
+    let mut elem = make_yield_element().with_mn_interaction(1e7, 10000.0);
+    let ctx = Ctx {
+        model: &Default::default(),
+    };
+    let mut increment = LocalVec {
+        data: smallvec::smallvec![0.0; 12],
+    };
+    increment.data[6] = 3000.0 * 3000.0 / (205000.0 * 80000.0);
+    elem.update_state_with_member_loads(&increment, &[loaded_udl(2.0, 0)], true, &ctx)
+        .unwrap();
+    close_loaded(spring_fy(elem.spring_i.as_ref()), 4e6);
+    close_loaded(spring_fy(elem.spring_j.as_ref()), 1e7);
+    let response = elem.state_frame_load_response().unwrap().unwrap();
+    for (x, n) in [(0.0, 6000.0), (0.5, 3000.0), (1.0, 0.0)] {
+        close_loaded(response.section.at(x).unwrap()[0], n);
+    }
+    close_loaded(response.nodal_residual.data[0], -6000.0);
+    close_loaded(response.nodal_residual.data[6], 0.0);
+    let committed = elem.serialize_checkpoint();
+    let zero = LocalVec {
+        data: smallvec::smallvec![0.0; 12],
+    };
+    elem.update_state_with_member_loads(&zero, &[], false, &ctx)
+        .unwrap();
+    close_loaded(spring_fy(elem.spring_i.as_ref()), 7e6);
+    close_loaded(spring_fy(elem.spring_j.as_ref()), 7e6);
+    elem.revert_state();
+    close_loaded(spring_fy(elem.spring_i.as_ref()), 4e6);
+    close_loaded(spring_fy(elem.spring_j.as_ref()), 1e7);
+    assert_eq!(elem.serialize_checkpoint(), committed);
+}
+
+#[test]
+fn rigid_zone_and_total_rotation_reference_keep_loaded_material_equilibrium() {
+    let ctx = Ctx {
+        model: &Default::default(),
+    };
+    let zero = LocalVec {
+        data: smallvec::smallvec![0.0; 12],
+    };
+    for total in [false, true] {
+        let mut elem = make_yield_element();
+        elem.elastic.rigid = sepika_core::model::RigidZone {
+            length_i: 200.0,
+            length_j: 400.0,
+            ..Default::default()
+        };
+        if total {
+            elem = elem.with_total_rotation_reference(1e12);
+        }
+        elem.update_state_with_member_loads(&zero, &[loaded_udl(100.0, 1)], false, &ctx)
+            .unwrap();
+        let response = elem.state_frame_load_response().unwrap().unwrap();
+        let f = response.physical_frame_end_force_global;
+        close_loaded(f[1] + f[7], -300000.0);
+        close_loaded(f[5] + f[11] + 3000.0 * f[7], -450000000.0);
+        close_loaded(
+            response.flex_face_force_local[5],
+            elem.spring_i.probe(elem.trial_rot_i).0,
+        );
+        close_loaded(
+            response.flex_face_force_local[11],
+            elem.spring_j.probe(elem.trial_rot_j).0,
+        );
+    }
 }

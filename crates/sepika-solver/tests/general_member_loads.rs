@@ -99,6 +99,14 @@ fn run_with_long_term(
     model: &Model,
     apply_long_term: bool,
 ) -> Result<ResponseResult, sepika_math::solver::SolveError> {
+    run_with_tolerance(model, apply_long_term, 1e-9)
+}
+
+fn run_with_tolerance(
+    model: &Model,
+    apply_long_term: bool,
+    tolerance: f64,
+) -> Result<ResponseResult, sepika_math::solver::SolveError> {
     let map = DofMap::build(model);
     let reducer = Reducer::build(model, &map);
     nonlinear_time_history_analysis(
@@ -127,7 +135,7 @@ fn run_with_long_term(
         NonlinearThCfg {
             apply_long_term,
             record_every: Some(1),
-            ..NonlinearThCfg::new(30, 1e-9)
+            ..NonlinearThCfg::new(30, tolerance)
         },
     )
 }
@@ -341,7 +349,7 @@ fn plastic_fixed_mp_member_load_clear_retains_history_and_support_moments() {
 }
 
 #[test]
-fn mixed_time_history_member_rhs_keeps_legacy_axial_displacement_and_owner_physical_records() {
+fn mixed_time_history_member_rhs_keeps_axial_displacement_and_physical_records() {
     for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
         let mut model = model(kind, false);
         let mut node = model.nodes[1].clone();
@@ -366,7 +374,7 @@ fn mixed_time_history_member_rhs_keeps_legacy_axial_displacement_and_owner_physi
                 w2: 2.,
             },
         ));
-        for (i, expected) in [true, false].into_iter().enumerate() {
+        for (i, expected) in [true, true].into_iter().enumerate() {
             let behavior = build_nonlinear_behavior(
                 &model.elements[i],
                 &model,
@@ -385,12 +393,12 @@ fn mixed_time_history_member_rhs_keeps_legacy_axial_displacement_and_owner_physi
             close(owner[0].1[5], 3e6);
             close(owner[1].1[5], 3e6);
             let legacy = &frame[1].as_ref().unwrap().at;
-            close(legacy[0].1[0], 1000.);
-            close(legacy[1].1[0], 1000.);
-            let support_reaction_n = -legacy[0].1[0] - 1000.;
+            close(legacy[0].1[0], 2000.);
+            close(legacy[1].1[0], 0.);
+            let support_reaction_n = -legacy[0].1[0];
             close(support_reaction_n, -2000.);
             close(support_reaction_n + 2000., 0.);
-            let nodal_virtual_work_nmm = 1000. * 0.1 + legacy[1].1[0] * -0.3;
+            let nodal_virtual_work_nmm = -legacy[0].1[0] * 0.1 + legacy[1].1[0] * -0.3;
             close(nodal_virtual_work_nmm, -200.);
         }
         for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
@@ -454,4 +462,102 @@ fn all_fixed_time_history_reports_member_load_failure_and_keeps_empty_model_unco
     let empty = run(&Model::default());
     assert!(empty.time.is_empty());
     assert!(empty.recording.is_none());
+}
+
+#[test]
+fn concentrated_axial_cantilever_public_time_history_records_equilibrium_and_reaction() {
+    let mut model = model(ElementKind::Beam, false);
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.nodes[1].coord[0] = 1000.0;
+    model.nodes[1].restraint = Dof6Mask(0b111110);
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(0),
+        [1.0, 0.0, 0.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 2.0,
+            w2: 2.0,
+        },
+    )];
+    let record = run(&model).recording.unwrap();
+    for (u, frame) in record.node_disp.iter().zip(&record.member_forces) {
+        close(u[1][0], 0.00006097560975609757);
+        let at = &frame[0].as_ref().unwrap().at;
+        close(at[0].1[0], 2000.0);
+        close(at[1].1[0], 0.0);
+        let f = concentrated_internal_force_at_record(&model, u);
+        close(f[0], -2000.0);
+        close(f[6], 0.0);
+        close(f[0] + f[6] + 2000.0, 0.0);
+    }
+    for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
+        close(f[0], 2000.0 * (1.0 - x));
+    }
+    let midpoint = record.peak_member_forces[0]
+        .as_ref()
+        .unwrap()
+        .at
+        .iter()
+        .find(|(x, _)| *x == 0.5)
+        .expect("中央評価点を保持する");
+    close(midpoint.1[0], 1000.0);
+}
+
+fn concentrated_internal_force_at_record(model: &Model, u: &[[f64; 6]]) -> Vec<f64> {
+    let mut member = build_nonlinear_behavior(
+        &model.elements[0],
+        model,
+        StrengthBasis::Nominal,
+        AnalysisKind::TimeHistory,
+        None,
+    );
+    let displacement = LocalVec {
+        data: u.iter().flatten().copied().collect(),
+    };
+    let ctx = Ctx { model };
+    member
+        .update_state_with_member_loads(&displacement, &model.load_cases[0].member, true, &ctx)
+        .unwrap();
+    member.internal_force(&ctx).data.to_vec()
+}
+
+#[test]
+fn concentrated_transverse_public_time_history_records_udl_and_point_equilibrium() {
+    for point in [false, true] {
+        let mut model = model(ElementKind::Beam, true);
+        model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+        if point {
+            model.load_cases[0].member[0].kind = MemberLoadKind::Point {
+                a: 3000.0,
+                p: 6000.0,
+            };
+        }
+        let record = run_with_tolerance(&model, true, 1e-6)
+            .unwrap()
+            .recording
+            .unwrap();
+        for (u, frame) in record.node_disp.iter().zip(&record.member_forces) {
+            let at = &frame[0].as_ref().unwrap().at;
+            close(at[0].1[1], -6000.0);
+            close(at[0].1[5], 18e6);
+            close(at[1].1[1], 0.0);
+            close(at[1].1[5], 0.0);
+            let f = concentrated_internal_force_at_record(&model, u);
+            close(f[1], -6000.0);
+            close(f[5], -18e6);
+            close(f[7], 0.0);
+            close(f[11], 0.0);
+            close(f[1] + f[7] + 6000.0, 0.0);
+            close(f[5] + f[11] + 6000.0 * f[7] + 18e6, 0.0);
+        }
+        for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
+            let expected = if point {
+                36e6 * (0.5 - x).max(0.0)
+            } else {
+                18e6 * (1.0 - x).powi(2)
+            };
+            close(f[5], expected);
+        }
+    }
 }
