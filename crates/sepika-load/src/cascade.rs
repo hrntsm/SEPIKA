@@ -501,6 +501,15 @@ pub fn solve_with_basis(
         }
         if include_self_weight {
             if let Some(sm) = by_key.get(&ax.key) {
+                let upstand = crate::self_weight::beam_upstand_segments(
+                    model,
+                    sepika_core::model::SupportMemberId::Secondary(sm.id),
+                )
+                .map_err(crate::floor::FloorDistributionError::SelfWeight)?;
+                loads.extend(upstand.into_iter().map(|segment| match basis {
+                    SelfWeightBasis::Design => segment.design_load,
+                    SelfWeightBasis::MassEquiv => segment.mass_equivalent_load,
+                }));
                 if let Some(w) =
                     self_weight_udl(sm).map_err(crate::floor::FloorDistributionError::SelfWeight)?
                 {

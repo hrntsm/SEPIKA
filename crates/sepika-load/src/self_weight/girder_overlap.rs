@@ -64,6 +64,22 @@ pub fn girder_self_weight_breakdown(
             .attached_slab_supports(slab)
             .is_ok_and(|supports| supports.iter().any(|s| s.elem == elem.id));
         if direct || supported {
+            let placement = model.resolved_slab_placement(slab.id)?;
+            if beam.axes[2][2].abs() > 1e-12 {
+                if disjoint_vertical_bounds(&beam, [placement.bottom_z_mm, placement.top_z_mm])? {
+                    continue;
+                }
+            } else if overlap_integral(
+                &beam,
+                b,
+                d,
+                len,
+                interval,
+                [placement.bottom_z_mm, placement.top_z_mm],
+            )? == 0.0
+            {
+                continue;
+            }
             return Err(fail(&format!(
                 "取り付く床板 {} の実重複控除は未対応です",
                 slab.id.0
@@ -113,14 +129,7 @@ pub fn girder_self_weight_breakdown(
         if !winding.is_finite() || winding == 0.0 {
             return Err(fail(&format!("床板 {} の平面方向が不正です", id.0)));
         }
-        let section = model
-            .section(slab.section().ok_or_else(|| fail("床断面がありません"))?)
-            .ok_or_else(|| fail("床断面の参照先がありません"))?;
-        if section
-            .material
-            .and_then(|id| model.materials.iter().find(|m| m.id == id))
-            .is_none()
-        {
+        if model.slab_plate_material(slab).is_none() {
             return Err(fail(&format!("床板 {} の材料を解決できません", id.0)));
         }
         for edge in edges {
@@ -166,8 +175,23 @@ pub fn girder_self_weight_breakdown(
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
     let occupied = sides.iter().filter(|s| !s.is_empty()).count();
-    if occupied > 0 && beam.axes[2][2].abs() > 1e-12 {
-        return Err(fail("幅方向が水平でない矩形断面の実重複控除は未対応です"));
+    let tilted = beam.axes[2][2].abs() > 1e-12;
+    let mut has_overlap = false;
+    for side in &sides {
+        for (id, spans) in side {
+            let slab = model.resolved_slab_placement(*id)?;
+            if tilted {
+                if !disjoint_vertical_bounds(&beam, [slab.bottom_z_mm, slab.top_z_mm])? {
+                    return Err(fail("幅方向が水平でない矩形断面の実重複控除は未対応です"));
+                }
+                continue;
+            }
+            for span in spans {
+                has_overlap |=
+                    overlap_integral(&beam, b, d, len, *span, [slab.bottom_z_mm, slab.top_z_mm])?
+                        > 0.0;
+            }
+        }
     }
     let mut overlap_volume_mm3 = 0.0;
     for span in cuts.windows(2) {
@@ -180,7 +204,7 @@ pub fn girder_self_weight_breakdown(
                 .collect();
             ids.sort_unstable_by_key(|id| id.0);
             match ids.as_slice() {
-                [] if side.is_empty() => {}
+                [] if side.is_empty() || !has_overlap => {}
                 [] => {
                     return Err(fail(&format!(
                     "側 {side_index} の床板群の支持区間が自重算定区間全長を覆いません（{}〜{} mm）",
@@ -195,6 +219,9 @@ pub fn girder_self_weight_breakdown(
                     )))
                 }
             }
+        }
+        if !has_overlap {
+            continue;
         }
         for id in active.into_iter().flatten() {
             let slab = model.resolved_slab_placement(id)?;
@@ -238,6 +265,18 @@ pub fn girder_self_weight_breakdown(
         return Err(fail("重量が非有限です"));
     }
     Ok(Some(result))
+}
+
+fn disjoint_vertical_bounds(beam: &BeamPlacement, slab: [f64; 2]) -> Result<bool, String> {
+    let geometry =
+        sepika_core::section_shape::face_geometry::SectionGeometry::of(&beam.section_shape)?;
+    let bounds = geometry.projected_range([beam.axes[1][2], beam.axes[2][2]])?;
+    let bottom = beam.actual_ends[0][2].min(beam.actual_ends[1][2]) + bounds[0];
+    let top = beam.actual_ends[0][2].max(beam.actual_ends[1][2]) + bounds[1];
+    if ![bottom, top].iter().all(|z| z.is_finite()) {
+        return Err(format!("大梁 {:?}: 高さ包絡が非有限です", beam.member));
+    }
+    Ok(slab[0] >= top || slab[1] <= bottom)
 }
 
 fn overlap_integral(

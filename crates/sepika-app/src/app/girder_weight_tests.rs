@@ -66,7 +66,7 @@ fn model() -> Model {
         e.id = ElemId(i as u32);
         e.nodes = [NodeId(a), NodeId(b)].into_iter().collect();
         e.section = Some(SectionId(if i == 0 { 1 } else { 0 }));
-        e.vertical_eccentricity = Some(0.0);
+        e.vertical_eccentricity = Some(if i == 0 { 0.0 } else { 1000.0 });
         model.elements.push(e);
     }
     let mut ground = model.nodes[0].clone();
@@ -279,15 +279,15 @@ fn dl_weight(model: &Model) -> f64 {
 
 #[test]
 fn girder_overlap_independent_values_reach_preparation_dl_and_seismic_weight() {
-    for (top, left, right, expected) in [
-        (0., None, None, 40320.),
-        (-200., Some((150., 0.)), None, 40320.),
-        (-50., Some((150., 0.)), None, 34560.),
-        (0., Some((150., 0.)), None, 31680.),
-        (0., Some((200., 0.)), None, 28800.),
-        (0., Some((150., 0.)), Some((200., 0.)), 30240.),
-        (-50., Some((150., 0.)), Some((200., 0.)), 33120.),
-        (-50., Some((150., 0.)), Some((150., 400.)), 37440.),
+    for (top, left, right, expected, added) in [
+        (0., None, None, 40320., 0.),
+        (-200., Some((150., 0.)), None, 40320., 2880.),
+        (-50., Some((150., 0.)), None, 34560., 0.),
+        (0., Some((150., 0.)), None, 31680., 0.),
+        (0., Some((200., 0.)), None, 28800., 0.),
+        (0., Some((150., 0.)), Some((200., 0.)), 30240., 0.),
+        (-50., Some((150., 0.)), Some((200., 0.)), 33120., 0.),
+        (-50., Some((150., 0.)), Some((150., 400.)), 37440., 8640.),
     ] {
         for swap in [false, true] {
             let mut model = model();
@@ -299,14 +299,17 @@ fn girder_overlap_independent_values_reach_preparation_dl_and_seismic_weight() {
                 slab(&mut model, usize::from(!swap), t, z);
             }
             assert!((weight(&model) - expected).abs() < 1e-6);
-            assert!((dl_weight(&model) - expected).abs() < 1e-6);
+            assert!((dl_weight(&model) - expected - added).abs() < 1e-6);
             let generated = sepika_load::story_gen::generate_stories(&model, None).unwrap();
             let total: f64 = generated
                 .stories
                 .iter()
                 .map(|s| s.seismic_weight.unwrap_or(0.))
                 .sum();
-            assert!((total - expected).abs() < 1e-6, "{total} {expected}");
+            assert!(
+                (total - expected - added).abs() < 1e-6,
+                "{total} {expected} + {added}"
+            );
             let mut app = App::default();
             assert!(app.load_model(model));
             app.run_preparation();
@@ -582,7 +585,6 @@ fn damper_total_weight_replaces_girder_body_in_preparation_dl_and_seismic_weight
         }],
         ..Default::default()
     });
-    model.floor_assignment_regions.regions[0].assignment = PlateAssignment::Unset;
     let (nodal, member) =
         self_weight_case_content(&model, model.load_cfg.as_ref().unwrap()).unwrap();
     assert!((nodal.iter().map(|l| -l.values[2]).sum::<f64>() - 10000.).abs() < 1e-6);
@@ -648,6 +650,213 @@ fn girder_overlap_only_applies_to_rectangular_rc_src_girders() {
     assert!(girder_self_weight_breakdown(&model, &model.elements[0])
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn gapのあるs梁も同側床板の矛盾をdlと準備結果で拒否する() {
+    let mut model = model();
+    slab(&mut model, 0, 150., 0.);
+    model.sections[1] = SectionShape::SteelBox {
+        height: 600.,
+        width: 400.,
+        thick: 10.,
+        corner_r: Some(0.),
+    }
+    .to_section(SectionId(1), "S梁".into());
+    model.sections[1].frame_use = Some(FrameSectionUse::Girder);
+    model.sections[1].material = Some(MaterialId(0));
+    model.elements[0].vertical_eccentricity = Some(-150.);
+    let mut slab = model.slabs[0].clone();
+    slab.id = sepika_core::ids::SlabId(1);
+    model.slabs.push(slab);
+    let mut region = model.floor_assignment_regions.regions[0].clone();
+    region.id = sepika_core::ids::FloorPlateAssignmentRegionId(2);
+    region.assignment = PlateAssignment::Plate(sepika_core::ids::SlabId(1));
+    model.floor_assignment_regions.regions.push(region);
+    let error = self_weight_case_content(&model, &LoadCfg::default()).unwrap_err();
+    assert!(error.contains("床板 0 と 1") && error.contains("区間"));
+    let mut app = App::default();
+    app.core.model = model;
+    app.run_preparation();
+    assert!(app.core.scoped.preparation.is_none());
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .expect("準備計算は矛盾を拒否する");
+    assert!(
+        error.contains("R2") && error.contains("境界キーが衝突"),
+        "{error}"
+    );
+}
+
+#[test]
+fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_breakdown() {
+    use sepika_edit::*;
+    let mut base = model();
+    slab(&mut base, 0, 150., 0.);
+    base.sections[1] = SectionShape::SteelBox {
+        height: 600.,
+        width: 400.,
+        thick: 10.,
+        corner_r: Some(0.),
+    }
+    .to_section(SectionId(1), "嵩上げ対象".into());
+    base.sections[1].frame_use = Some(FrameSectionUse::Girder);
+    base.sections[1].material = Some(MaterialId(0));
+    base.elements[0].vertical_eccentricity = Some(-150.);
+    let mut alternate_material = base.materials[1].clone();
+    alternate_material.id = MaterialId(2);
+    alternate_material.density = 12e-6 / sepika_core::units::GRAVITY_MM_S2;
+    base.materials.push(alternate_material);
+    let mut alternate_section = base.sections[2].clone();
+    alternate_section.id = SectionId(3);
+    alternate_section.material = Some(MaterialId(2));
+    base.sections.push(alternate_section);
+    base.stb_strengths.materials.push(StbGradeMaterial {
+        grade: "Fc24".into(),
+        material: MaterialId(1),
+    });
+    let upstand = |model: &Model| {
+        sepika_load::self_weight::beam_upstand_segments(model, SupportMemberId::Primary(ElemId(0)))
+            .unwrap()
+            .iter()
+            .map(|s| s.design_weight_n)
+            .sum::<f64>()
+    };
+    assert!((upstand(&base) - 2880.).abs() < 1e-7);
+    let edits: Vec<(Box<dyn EditCommand>, f64)> = vec![
+        (
+            Box::new(SetSlabSection {
+                id: sepika_core::ids::SlabId(0),
+                section: Some(SectionId(3)),
+            }),
+            1440.,
+        ),
+        (
+            Box::new(EditSectionShape {
+                section: SectionId(1),
+                new_shape: SectionShape::SteelBox {
+                    height: 700.,
+                    width: 400.,
+                    thick: 10.,
+                    corner_r: Some(0.),
+                },
+                frame_use: Some(FrameSectionUse::Girder),
+            }),
+            0.,
+        ),
+        (
+            Box::new(SetNodeCoord {
+                node: NodeId(1),
+                coord: [3000., 0., 2650.],
+            }),
+            1440.,
+        ),
+        (
+            Box::new(SetStbStrengths {
+                input: StbStrengthInput {
+                    members: vec![StbMemberStrength {
+                        target: StrengthTarget::Slab(sepika_core::ids::SlabId(0)),
+                        node: NodeId(0),
+                        node_order: vec![],
+                        concrete: Some("Fc24".into()),
+                    }],
+                    ..Default::default()
+                },
+            }),
+            2880.,
+        ),
+        (
+            Box::new(SetBeamVerticalEccentricity {
+                member: SupportMemberId::Primary(ElemId(0)),
+                value: Some(-200.),
+            }),
+            5760.,
+        ),
+        (
+            Box::new(SetSlabPlacement {
+                id: sepika_core::ids::SlabId(0),
+                reference_story: Some(StoryId(1)),
+                vertical_eccentricity_mm: Some(50.),
+            }),
+            5760.,
+        ),
+        (
+            Box::new(EditSectionShape {
+                section: SectionId(2),
+                new_shape: SectionShape::RcSlab { thickness: 175. },
+                frame_use: None,
+            }),
+            1440.,
+        ),
+        (
+            Box::new(SetMaterialField {
+                id: MaterialId(1),
+                field: MaterialField::Density,
+                value: Some(12e-6 / sepika_core::units::GRAVITY_MM_S2),
+            }),
+            1440.,
+        ),
+    ];
+    for (i, (edit, expected)) in edits.into_iter().enumerate() {
+        let mut app = App::default();
+        assert!(app.load_model(base.clone()));
+        app.run_preparation();
+        let prep = app
+            .core
+            .scoped
+            .preparation
+            .as_ref()
+            .unwrap_or_else(|| panic!("{:?}", app.core.scoped.last_error));
+        assert!(prep
+            .beam_upstands
+            .iter()
+            .any(|s| s.beam == SupportMemberId::Primary(ElemId(0))
+                && s.slab == sepika_core::ids::SlabId(0)
+                && s.material == MaterialId(1)));
+        assert!(crate::summary::build_preparation_csv(&app).contains("[梁の床板嵩上げ]"));
+        app.core.scoped.staleness.mark_fresh();
+        app.core.scoped.staleness.design_stale = false;
+        let input = app.result_input(&result_validity::ResultInputKey::Modal);
+        assert!(app.apply_model_edit(edit));
+        assert!(
+            app.core.scoped.staleness.preparation_stale
+                && app.core.scoped.staleness.results_stale
+                && app.core.scoped.staleness.design_stale
+        );
+        assert_ne!(
+            app.result_input(&result_validity::ResultInputKey::Modal),
+            input
+        );
+        assert!(
+            (upstand(&app.core.model) - expected).abs() < 1e-7,
+            "edit {i}"
+        );
+        app.undo_action();
+        assert!((upstand(&app.core.model) - 2880.).abs() < 1e-7);
+        app.redo_action();
+        assert!((upstand(&app.core.model) - expected).abs() < 1e-7);
+        app.run_preparation();
+        assert!(
+            app.core.scoped.preparation.is_some(),
+            "edit {i}: {:?}",
+            app.core.scoped.last_error
+        );
+        assert!((upstand(&app.core.model) - expected).abs() < 1e-7);
+        let path =
+            std::env::temp_dir().join(format!("sepika-731-{i}-{}.ovika", std::process::id()));
+        app.save_project_to_opts(path.clone(), Some(false));
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "edit {i}: {:?}",
+            app.core.scoped.last_error
+        );
+        let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        assert!((upstand(&restored) - expected).abs() < 1e-7);
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 #[test]
