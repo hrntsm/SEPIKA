@@ -56,7 +56,7 @@ impl PushoverTarget {
     }
 }
 
-/// 増分解析がどのように終了したか。
+/// 増分解析の終了理由。崩壊機構の分類（[`MechanismType`]）とは独立。
 ///
 /// 複数フェーズ（荷重制御→変位制御）を経る場合は、目標到達が最優先、
 /// それ以外は**最後に実行されたフェーズの終了理由**を記録する。
@@ -81,8 +81,8 @@ pub enum PushoverTermination {
         /// 打ち切り時点の確定済み荷重係数。
         load_factor: f64,
     },
-    /// 接線剛性の分解が失敗（崩壊機構の形成・耐力喪失による特異化）して
-    /// 打ち切った。
+    /// 接線剛性の数値的な特異性・精度限界により打ち切った。
+    /// この終了理由だけでは物理的な機構形成・耐力喪失を判定しない。
     TangentSingular {
         /// 打ち切ったフェーズ。
         phase: String,
@@ -117,7 +117,7 @@ impl PushoverTermination {
                 phase, load_factor
             ),
             PushoverTermination::TangentSingular { phase, load_factor } => format!(
-                "{}で λ={:.3} にて接線剛性が特異化（機構形成・耐力喪失）",
+                "{}で λ={:.3} にて接線剛性の数値的な特異性・精度限界により打ち切り",
                 phase, load_factor
             ),
             PushoverTermination::Unknown => "終了理由未記録（旧形式の結果）".into(),
