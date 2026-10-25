@@ -7,12 +7,13 @@ use sepika_core::model::{ElementKind, FrameSectionUse, Model};
 use std::collections::{HashMap, HashSet};
 
 /// 層に帰属する 1 本の柱（中間節点で分割された柱の連なりを束ねたもの）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoryColumn {
     /// 最上側セグメントの部材 ID（`ColumnDrift.elem` 等の代表 ID）。
     pub top_elem: ElemId,
     pub top: NodeId,
     pub bottom: NodeId,
+    pub(crate) segments: Vec<ElemId>,
 }
 
 /// `story`（層の上端階）に属する柱の一覧を返す。
@@ -111,6 +112,7 @@ fn trace_column_down(
 ) -> Option<StoryColumn> {
     let mut current = top;
     let mut top_elem = None;
+    let mut segments = Vec::new();
     let mut visited = HashSet::new();
     visited.insert(top);
 
@@ -121,6 +123,7 @@ fn trace_column_down(
                 top_elem: top_elem?,
                 top,
                 bottom: current,
+                segments,
             });
         }
 
@@ -157,6 +160,7 @@ fn trace_column_down(
         if top_elem.is_none() {
             top_elem = Some(elem);
         }
+        segments.push(elem);
         current = next;
     }
 }

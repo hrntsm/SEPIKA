@@ -20,10 +20,7 @@ use super::eccentricity::{
 };
 
 /// 当該層に帰属する柱を列挙して `f(elem, 柱頭節点, 柱脚節点)` を呼ぶ。
-///
-/// 中間節点で分割された鉛直材は連なりとして 1 本とみなす（[`super::story_columns`]）。
-/// `crate::secondary::eccentricity::sum_column_area`（雑壁剛性評価が必要とする
-/// 柱断面積の集計）からも共用するため `pub(super)`（`secondary` 配下に公開）。
+/// 中間節点で分割された柱は連なりとして1本と数える。
 pub(super) fn for_each_story_column(
     model: &Model,
     story: StoryId,
@@ -71,7 +68,7 @@ fn station_force_global(
 /// - `kX` は X 加力時の（せん断力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
 ///   δ がほぼ 0 の柱は剛性 0 とする。
 ///
-/// 実際に内力変換する柱の局所基底を解決できなければ、部材 ID と理由を返す。
+/// 必要変位・内力の欠落や非有限、局所基底の不正は部材IDと理由を返す。
 pub fn column_stiffnesses_from_analysis(
     model: &Model,
     story: StoryId,
@@ -94,20 +91,32 @@ pub fn column_stiffnesses_from_analysis(
         >,
                     dir: usize|
          -> Result<f64, String> {
+            let failure = || {
+                format!(
+                    "Re: 階{}・{}方向の柱{}の変位又は内力が欠損・不正です",
+                    story.0,
+                    if dir == 0 { "X" } else { "Y" },
+                    elem.id.0
+                )
+            };
             let (Some(ut), Some(ub)) = (res.disp.get(top.id.index()), res.disp.get(bot.id.index()))
             else {
-                return Ok(0.0);
+                return Err(failure());
             };
             let delta = (ut[dir] - ub[dir]).abs();
+            let Some(&(_, local)) = forces.get(&elem.id).and_then(|force| force.at.first()) else {
+                return Err(failure());
+            };
+            if !ut[dir].is_finite()
+                || !ub[dir].is_finite()
+                || !delta.is_finite()
+                || local[..3].iter().any(|value| !value.is_finite())
+            {
+                return Err(failure());
+            }
             if delta < 1e-9 {
                 return Ok(0.0);
             }
-            let Some(mf) = forces.get(&elem.id) else {
-                return Ok(0.0);
-            };
-            let Some(&(_, local)) = mf.at.first() else {
-                return Ok(0.0);
-            };
             let g = station_force_global(p0, p1, elem.local_axis.ref_vector, local)
                 .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
             Ok(g[dir].abs() / delta)
@@ -204,39 +213,8 @@ pub fn story_eccentricity_from_analysis(
     if !model.stories.iter().any(|item| item.id == story) {
         return Err(format!("Re: 上端階{}に対応する層がありません", story.0));
     }
-    let mut invalid = None;
-    for_each_story_column(model, story, |elem, top, bottom| {
-        for (direction, result) in [(0, res_x), (1, res_y)] {
-            let valid_disp = result
-                .disp
-                .get(top.id.index())
-                .zip(result.disp.get(bottom.id.index()))
-                .is_some_and(|(ut, ub)| {
-                    ut[direction].is_finite()
-                        && ub[direction].is_finite()
-                        && (ut[direction] - ub[direction]).abs().is_finite()
-                });
-            let valid_force = result
-                .member_forces
-                .iter()
-                .find(|(id, _)| *id == elem.id)
-                .and_then(|(_, force)| force.at.first())
-                .is_some_and(|(_, force)| force[..3].iter().all(|value| value.is_finite()));
-            if !valid_disp || !valid_force {
-                invalid = Some(format!(
-                    "Re: 階{}・{}方向の柱{}の変位又は内力が欠損・不正です",
-                    story.0,
-                    if direction == 0 { "X" } else { "Y" },
-                    elem.id.0
-                ));
-            }
-        }
-    });
-    if let Some(reason) = invalid {
-        return Err(reason);
-    }
     let mut cols = column_stiffnesses_from_analysis(model, story, res_x, res_y)?;
-    append_misc_wall_stiffnesses(model, story, &mut cols);
+    append_misc_wall_stiffnesses(model, story, &mut cols)?;
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
     let com = match long_term
         .map(|lt| center_of_gravity_from_axial(model, story, lt))
@@ -270,7 +248,10 @@ mod tests {
     /// [n, qy, qz] を持つ member_forces と頂部一様変位 disp を合成する。
     /// 柱の ref_vector=[0,1,0] より ex=[0,0,1], ey=[0,1,0], ez=[1,0,0]。
     /// → 全体 X 方向せん断 = qz、全体 Y 方向せん断 = qy。
-    fn fabricate_static(top_disp: [f64; 2], col_local_forces: [[f64; 3]; 4]) -> StaticOnce {
+    pub(super) fn fabricate_static(
+        top_disp: [f64; 2],
+        col_local_forces: [[f64; 3]; 4],
+    ) -> StaticOnce {
         let mut disp = vec![[0.0; 6]; 8];
         for d in disp.iter_mut().skip(4) {
             d[0] = top_disp[0];
@@ -677,5 +658,29 @@ mod tests {
         let y = fabricate_static([0.0, 1.0], [[0.0, 1e308, 0.0]; 4]);
         let result = story_eccentricity_from_analysis(&model, story, &x, &y, None);
         assert!(result.is_err(), "{result:?}");
+    }
+}
+
+#[cfg(test)]
+mod misc620_tests {
+    use super::tests::fabricate_static;
+    use super::*;
+    use crate::secondary::eccentricity::test_support::build_symmetric_frame;
+
+    #[test]
+    fn missing_response_is_rejected_but_measured_zero_is_available() {
+        let (model, story) = build_symmetric_frame(None);
+        let x = fabricate_static([10.0, 0.0], [[0.0; 3]; 4]);
+        let y = fabricate_static([0.0, 10.0], [[0.0; 3]; 4]);
+        let cols = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
+        assert!(cols.iter().all(|c| c.dx == 0.0 && c.dy == 0.0));
+        assert!(story_eccentricity_from_analysis(&model, story, &x, &y, None).is_ok());
+        let mut missing = x.clone();
+        missing.member_forces.pop();
+        assert!(
+            story_eccentricity_from_analysis(&model, story, &missing, &y, None)
+                .unwrap_err()
+                .contains("欠損")
+        );
     }
 }
