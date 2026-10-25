@@ -959,8 +959,52 @@ fn label_factor(ui: &mut egui::Ui, factor: f64) {
 
 /// 荷重ケースの集計。
 fn loads_section(ui: &mut egui::Ui, prep: &PreparationResult) {
+    if !prep.beam_upstands.is_empty() {
+        ui.label("床板下面までの梁嵩上げ（床板・材料・左右・作用区間別）");
+        crate::table_util::standard_table(
+            ui,
+            "prep_beam_upstands",
+            &[
+                Col::num("梁"),
+                Col::num("床板ID"),
+                Col::num("材料ID"),
+                Col::num("採用元"),
+                Col::num("側"),
+                Col::num("始端 [mm]"),
+                Col::num("終端 [mm]"),
+                Col::num("体積 [m³]"),
+                Col::num("設計重量 [kN]"),
+                Col::num("物理質量 [t]"),
+            ],
+            prep.beam_upstands.len(),
+            |row| {
+                let s = &prep.beam_upstands[row.index()];
+                let beam = match s.beam {
+                    sepika_core::model::SupportMemberId::Primary(id) => format!("大梁 {}", id.0),
+                    sepika_core::model::SupportMemberId::Secondary(id) => format!("小梁 {}", id.0),
+                };
+                for value in [
+                    beam,
+                    s.slab.0.to_string(),
+                    s.material.0.to_string(),
+                    s.material_source_label().to_string(),
+                    if s.side == 0 { "左" } else { "右" }.to_string(),
+                    format!("{:.1}", s.interval_mm[0]),
+                    format!("{:.1}", s.interval_mm[1]),
+                    format!("{:.6}", s.volume_mm3 / 1e9),
+                    format!("{:.4}", force_kn(s.design_weight_n)),
+                    format!("{:.6}", s.physical_mass_t),
+                ] {
+                    row.col(|ui| {
+                        ui.label(value);
+                    });
+                }
+            },
+        );
+        ui.add_space(4.0);
+    }
     if !prep.girder_self_weights.is_empty() {
-        ui.label("矩形RC/SRC大梁の自重内訳（仕上げ・付加重量・嵩上げを除く）");
+        ui.label("矩形RC/SRC大梁の自重内訳（仕上げ・付加重量を除く）");
         crate::table_util::standard_table(
             ui,
             "prep_girder_self_weights",
@@ -968,18 +1012,26 @@ fn loads_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 Col::num("部材ID"),
                 Col::num("梁本体 [kN]"),
                 Col::num("床板重複控除 [kN]"),
-                Col::num("控除後 [kN]"),
+                Col::num("嵩上げ加算 [kN]"),
+                Col::num("合計 [kN]"),
             ],
             prep.girder_self_weights.len(),
             |row| {
                 let w = &prep.girder_self_weights[row.index()];
+                let upstand: f64 = prep
+                    .beam_upstands
+                    .iter()
+                    .filter(|s| s.beam == sepika_core::model::SupportMemberId::Primary(w.element))
+                    .map(|s| s.design_weight_n)
+                    .sum();
                 row.col(|ui| {
                     ui.label(w.element.0.to_string());
                 });
                 for n in [
                     w.body_weight_n,
                     w.slab_overlap_weight_n,
-                    w.body_weight_n - w.slab_overlap_weight_n,
+                    upstand,
+                    w.body_weight_n - w.slab_overlap_weight_n + upstand,
                 ] {
                     row.col(|ui| {
                         ui.label(format!("{:.2}", force_kn(n)));

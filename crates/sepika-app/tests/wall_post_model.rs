@@ -251,6 +251,11 @@ fn wall_post_model() -> Model {
     assert_eq!(report.unassigned_wall_plates, 0);
     assert_eq!(report.unassigned_posts, 0, "間柱が壁領域へ帰属する");
 
+    model.rebuild_floor_assignment_regions();
+    assert!(!model.floor_assignment_regions.regions.is_empty());
+    for region in &mut model.floor_assignment_regions.regions {
+        region.assignment = sepika_core::model::PlateAssignment::NoPlate;
+    }
     model
 }
 

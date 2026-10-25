@@ -306,6 +306,21 @@ fn generate_stories_impl(
     }
 
     let distribute = |target: &mut Vec<f64>, item: &SelfWeightItem, basis: Basis| match item {
+        SelfWeightItem::Upstand { elem_idx, segments } => {
+            if basis != Basis::Matrix {
+                let elem = &model.elements[*elem_idx];
+                for segment in segments {
+                    let load = match basis {
+                        Basis::Load => &segment.design_load,
+                        Basis::MassEquiv => &segment.mass_equivalent_load,
+                        Basis::Matrix => unreachable!(),
+                    };
+                    let (a, b) = static_reactions(load, model.member_length(elem));
+                    target[elem.nodes[0].index()] += a;
+                    target[elem.nodes[1].index()] += b;
+                }
+            }
+        }
         SelfWeightItem::Line {
             elem_idx,
             load,

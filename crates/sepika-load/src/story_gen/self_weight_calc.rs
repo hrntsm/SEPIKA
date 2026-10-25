@@ -97,6 +97,10 @@ fn finish_perimeter(width: f64, depth: f64, is_vertical: bool) -> f64 {
 /// 中間表現。重量の算定規則（自重算定長・スラブ厚控除・仕上げ・ダンパー置換等）は
 /// [`enumerate_self_weight`] に一元化する。
 pub(crate) enum SelfWeightItem {
+    Upstand {
+        elem_idx: usize,
+        segments: Vec<crate::self_weight::BeamUpstandSegment>,
+    },
     /// 線材（柱・梁・ブレース）の自重。`elem_idx` は `model.elements` の添字。
     ///
     /// - `load` は通常部の設計重量 [N]（DL・地震用重量）。鉄骨重量割増 `factor`・
@@ -412,6 +416,13 @@ pub(crate) fn enumerate_self_weight(
                     extra_bottom_mass_equiv,
                     is_column,
                 });
+                let segments = crate::self_weight::beam_upstand_segments(
+                    model,
+                    sepika_core::model::SupportMemberId::Primary(elem.id),
+                )?;
+                if !segments.is_empty() {
+                    items.push(SelfWeightItem::Upstand { elem_idx, segments });
+                }
             }
             ElementKind::Shell if elem.nodes.len() >= 3 => {
                 let Some(t) = sec.thickness else {
