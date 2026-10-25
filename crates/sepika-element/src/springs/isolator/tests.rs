@@ -262,3 +262,70 @@ fn test_checkpoint_roundtrip_restores_hysteresis() {
     let mut fresh = IsolatorElement::new(&model.elements[0], &model);
     assert!(fresh.deserialize_checkpoint(&[]).is_ok());
 }
+
+#[test]
+fn snapshot_and_checkpoint_preserve_uncommitted_plastic_states_and_force_tangent_caches() {
+    for props in [laminated(), friction(), hdr_strain_dependent()] {
+        let model = iso_model(props);
+        let ctx = Ctx { model: &model };
+        let mut elem = IsolatorElement::new(&model.elements[0], &model);
+        push_horizontal(&mut elem, &ctx, 1.0);
+        let mut du = LocalVec {
+            data: smallvec::smallvec![0.0;12],
+        };
+        du.data[6] = 100.0;
+        elem.update_state(&du, false, &ctx).unwrap();
+        match &elem.shear {
+            ShearModel::Friction {
+                pl_y,
+                pl_z,
+                tr_pl_y,
+                tr_pl_z,
+                ..
+            } => assert!((pl_y - tr_pl_y).abs() + (pl_z - tr_pl_z).abs() > 0.0),
+            ShearModel::StrainDependent { sy, sz, .. } => {
+                assert!((sy.pl - sy.tr_pl).abs() + (sz.pl - sz.tr_pl).abs() > 0.0)
+            }
+            ShearModel::Laminated { .. } => {}
+        }
+        let snapshot = elem.snapshot_state();
+        let bytes = elem.serialize_checkpoint();
+        let force = elem.internal_force(&ctx).data;
+        let tangent = elem.tangent_stiffness(&ctx).data;
+        elem.update_state(&du, true, &ctx).unwrap();
+        elem.restore_state(snapshot.as_ref());
+        assert_eq!(elem.serialize_checkpoint(), bytes);
+        assert_eq!(elem.internal_force(&ctx).data, force);
+        assert_eq!(elem.tangent_stiffness(&ctx).data, tangent);
+        let mut restored = IsolatorElement::new(&model.elements[0], &model);
+        restored.deserialize_checkpoint(&bytes).unwrap();
+        assert_eq!(restored.serialize_checkpoint(), bytes);
+        assert_eq!(restored.internal_force(&ctx).data, force);
+        assert_eq!(restored.tangent_stiffness(&ctx).data, tangent);
+        assert!(restored
+            .deserialize_checkpoint(&bytes[..bytes.len() / 2])
+            .is_err());
+        assert_eq!(restored.serialize_checkpoint(), bytes);
+        for member in [&mut elem, &mut restored] {
+            member.commit_state();
+            let committed = member.serialize_checkpoint();
+            let committed_force = member.internal_force(&ctx).data;
+            let committed_tangent = member.tangent_stiffness(&ctx).data;
+            member.update_state(&du, false, &ctx).unwrap();
+            member.revert_state();
+            assert_eq!(member.serialize_checkpoint(), committed);
+            assert_eq!(member.internal_force(&ctx).data, committed_force);
+            assert_eq!(member.tangent_stiffness(&ctx).data, committed_tangent);
+            member.update_state(&du, false, &ctx).unwrap();
+        }
+        assert_eq!(elem.serialize_checkpoint(), restored.serialize_checkpoint());
+        assert_eq!(
+            elem.internal_force(&ctx).data,
+            restored.internal_force(&ctx).data
+        );
+        assert_eq!(
+            elem.tangent_stiffness(&ctx).data,
+            restored.tangent_stiffness(&ctx).data
+        );
+    }
+}

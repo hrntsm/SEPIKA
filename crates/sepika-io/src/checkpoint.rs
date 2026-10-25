@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::io;
 use std::path::Path;
 
-/// StateSnapshot を直列化したバイト列（全要素・全材料の committed 状態）。
+/// 全要素の試行状態・確定状態を直列化したバイト列。
 /// 線形時刻歴では空配列でよい。
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
 pub struct StateBlob {
@@ -26,7 +26,7 @@ pub struct Checkpoint {
 }
 
 /// 読込を受理するチェックポイントの版。
-pub const CHECKPOINT_SCHEMA_VERSION: u32 = 2;
+pub const CHECKPOINT_SCHEMA_VERSION: u32 = 3;
 
 const CHECKPOINT_DIR: &str = "checkpoint";
 const CHECKPOINT_FILE: &str = "checkpoint.bin";
@@ -125,7 +125,7 @@ pub fn save_nonlinear_checkpoint(
 }
 
 /// チェックポイントから非線形解析状態を復元する。
-/// behaviors の deserialize_checkpoint を呼んで要素状態を復元。
+/// 要素数不一致・復号失敗は InvalidData を返し、全要素の試行・確定状態を読込直前へ戻す。
 pub fn load_nonlinear_checkpoint(
     dir: &Path,
     model: &sepika_core::model::Model,
@@ -135,9 +135,28 @@ pub fn load_nonlinear_checkpoint(
     let expected_hash = compute_model_hash(model);
     verify_model_hash(&cp, &expected_hash)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    for (b, state_bytes) in behaviors.iter_mut().zip(&cp.state.element_states) {
-        b.deserialize_checkpoint(state_bytes)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    if behaviors.len() != cp.state.element_states.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "チェックポイントの要素数が一致しません: 保存={} 復元先={}",
+                cp.state.element_states.len(),
+                behaviors.len()
+            ),
+        ));
+    }
+    let previous: Vec<_> = behaviors.iter().map(|b| b.snapshot_state()).collect();
+    for index in 0..behaviors.len() {
+        if let Err(error) = behaviors[index].deserialize_checkpoint(&cp.state.element_states[index])
+        {
+            for (behavior, snapshot) in behaviors.iter_mut().zip(&previous) {
+                behavior.restore_state(snapshot.as_ref());
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("チェックポイントの要素状態を復元できません: index={index}: {error}"),
+            ));
+        }
     }
     Ok(cp)
 }
@@ -466,3 +485,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+#[path = "checkpoint/preserved_tests.rs"]
+mod preserved_tests;
