@@ -203,9 +203,8 @@ fn test_story_eccentricity_empty_story() {
 #[test]
 fn test_misc_wall_stiffness() {
     // Kw' = n·Aw'·ΣKc/ΣAc = 2·1000·400/400 = 2000
-    assert!((misc_wall_stiffness(2.0, 1000.0, 400.0, 400.0) - 2000.0).abs() < 1e-12);
-    // ΣAc = 0 → Kw' = 0（0 除算回避）
-    assert_eq!(misc_wall_stiffness(2.0, 1000.0, 400.0, 0.0), 0.0);
+    assert!((misc_wall_stiffness(2.0, 1000.0, 400.0, 400.0).unwrap() - 2000.0).abs() < 1e-12);
+    assert!(misc_wall_stiffness(2.0, 1000.0, 400.0, 0.0).is_err());
 }
 
 /// 壁厚 100mm の壁用断面を末尾に足し、その `SectionId` を返す。
@@ -215,6 +214,11 @@ fn push_wall_section(model: &mut sepika_core::Model) -> sepika_core::ids::Sectio
     sec.id = id;
     sec.name = "wall".to_string();
     sec.thickness = Some(100.0);
+    let mut material = model.materials[0].clone();
+    material.id = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    material.category = sepika_core::model::MaterialCategory::Concrete;
+    sec.material = Some(material.id);
+    model.materials.push(material);
     model.sections.push(sec);
     id
 }
@@ -245,9 +249,6 @@ fn push_self_standing(
     });
 }
 
-/// n 倍法が拾うのは「断面が割り当たっていて上階まで届いている自立壁」だけである。
-/// 腰高の自立壁・断面なしの自立壁・取付き線に取り付く腰壁は、いずれも層剛性に
-/// 効かないため対象にしない。
 #[test]
 fn test_append_misc_wall_stiffnesses() {
     use sepika_core::ids::{NodeId, WallPlateId};
@@ -257,7 +258,7 @@ fn test_append_misc_wall_stiffnesses() {
     model.stress_cfg.misc_wall_n = Some(2.0);
     let wall_sec = push_wall_section(&mut model);
     // 柱 4 本 × area 100
-    assert!((sum_column_area(&model, s0) - 400.0).abs() < 1e-12);
+    assert!((sum_column_area(&model, s0).unwrap() - 400.0).abs() < 1e-12);
 
     // 対象: x=6000 の Y 方向の自立壁（N1→N3、z=0）。高さは階高（3000）。
     // 長さ 6000 × 厚 100 → Aw' = 6e5、z_mid = 1500 → S0 帰属。
@@ -269,8 +270,6 @@ fn test_append_misc_wall_stiffnesses() {
         Some([1500.0, 1500.0]),
         Some(wall_sec),
     );
-    // 対象外: 断面が無く板厚を引けない自立壁。
-    push_self_standing(&mut model, [NodeId(0), NodeId(1)], None, None);
     // 対象外: 取付き線に取り付く全高の腰壁。フロア間で壁がつながっていないもの
     // （腰壁・垂れ壁・パラペット）は周辺部材の断面性能へ算入する経路が受け持つ。
     model.wall_plates.push(WallPlate {
@@ -316,7 +315,7 @@ fn test_append_misc_wall_stiffnesses() {
             dy: 100.0,
         },
     ];
-    append_misc_wall_stiffnesses(&model, s0, &mut cols);
+    append_misc_wall_stiffnesses(&model, s0, &mut cols).unwrap();
     assert_eq!(cols.len(), 5, "上階まで届く断面付きの自立壁 1 枚のみ追加");
     let wall = cols[4];
     // Kw'y = n·Aw'·ΣKy/ΣAc = 2·6e5·400/400 = 1.2e6（cy=1 なので dy へ全量）
@@ -332,7 +331,7 @@ fn test_append_misc_wall_stiffnesses() {
     let mut model2 = model.clone();
     model2.stress_cfg.misc_wall_n = None;
     let mut cols2 = cols[..4].to_vec();
-    append_misc_wall_stiffnesses(&model2, s0, &mut cols2);
+    append_misc_wall_stiffnesses(&model2, s0, &mut cols2).unwrap();
     assert_eq!(cols2.len(), 4);
 }
 
@@ -397,6 +396,22 @@ fn test_column_stiffnesses_merges_split_column() {
         d0.dy,
         d1.dy
     );
+    model.stress_cfg.misc_wall_n = Some(1.0);
+    let wall_section = push_wall_section(&mut model);
+    push_self_standing(&mut model, [NodeId(0), NodeId(3)], None, Some(wall_section));
+    assert_eq!(sum_column_area(&model, s0).unwrap(), 400.0);
+    assert!(story_eccentricity(&model, s0).is_ok());
+    model.elements.last_mut().unwrap().section = Some(sepika_core::ids::SectionId(1));
+    let error = story_eccentricity(&model, s0).unwrap_err();
+    assert!(
+        error.contains("階1") && error.contains("柱0") && error.contains("断面が変わる"),
+        "{error}"
+    );
+    model.stress_cfg.misc_wall_n = None;
+    assert!(story_eccentricity(&model, s0).is_ok());
+    model.stress_cfg.misc_wall_n = Some(1.0);
+    model.wall_plates.clear();
+    assert!(story_eccentricity(&model, s0).is_ok());
 }
 
 #[test]
@@ -444,4 +459,257 @@ fn fes718_rigidity_sum_overflow_cannot_generate_normal_re() {
         .collect();
     assert!(center_of_rigidity(&cols).is_err());
     assert!(eccentricity(&cols, [0.25, 7e152], [0.0; 2]).is_err());
+}
+
+#[test]
+fn misc620_scalar_contract_and_independent_values() {
+    assert_eq!(
+        misc_wall_stiffness(1.0, 200000.0, 10000.0, 160000.0).unwrap(),
+        12500.0
+    );
+    assert!((misc_wall_stiffness(1.0, 1.0, 500.0, 300.0).unwrap() - 5.0 / 3.0).abs() < 1e-12);
+    assert_eq!(misc_wall_stiffness(1.0, 1.0, 0.0, 1.0).unwrap(), 0.0);
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(misc_wall_stiffness(bad, 1.0, 1.0, 1.0).is_err());
+        assert!(misc_wall_stiffness(1.0, bad, 1.0, 1.0).is_err());
+        assert!(misc_wall_stiffness(1.0, 1.0, 1.0, bad).is_err());
+        if bad != 0.0 {
+            assert!(misc_wall_stiffness(1.0, 1.0, bad, 1.0).is_err());
+        }
+    }
+    assert!(misc_wall_stiffness(f64::MAX, 2.0, 1.0, 1.0).is_err());
+}
+
+fn misc620_model() -> (sepika_core::Model, StoryId) {
+    use sepika_core::ids::NodeId;
+    let (mut model, story) = build_symmetric_frame(None);
+    model.stress_cfg.misc_wall_n = Some(1.0);
+    let section = push_wall_section(&mut model);
+    push_self_standing(&mut model, [NodeId(0), NodeId(3)], None, Some(section));
+    (model, story)
+}
+
+#[test]
+fn misc620_wall_material_opening_and_slit_are_distinct() {
+    use sepika_core::model::MaterialCategory;
+    let (model, story) = misc620_model();
+    let wall_section = model.wall_plates[0].section.unwrap().index();
+    let wall_material = model.sections[wall_section].material.unwrap().index();
+    for category in [MaterialCategory::Steel, MaterialCategory::Concrete] {
+        let mut changed = model.clone();
+        changed.materials[wall_material].category = category;
+        let mut cols = column_stiffnesses(&changed, story).unwrap();
+        append_misc_wall_stiffnesses(&changed, story, &mut cols).unwrap();
+        assert_eq!(
+            cols.len(),
+            if category == MaterialCategory::Concrete {
+                5
+            } else {
+                4
+            }
+        );
+    }
+    for variant in 0..3 {
+        let mut changed = model.clone();
+        match variant {
+            0 => changed.wall_plates[0].slit.beam_face[0] = true,
+            1 => changed.wall_plates[0].opening_area = 100.0,
+            _ => {
+                changed.wall_plates[0]
+                    .openings
+                    .push(sepika_core::model::WallOpening {
+                        width: 100.0,
+                        height: 100.0,
+                        offset: None,
+                    });
+                changed.wall_plates[0].opening_area = f64::NAN;
+            }
+        }
+        let mut cols = column_stiffnesses(&changed, story).unwrap();
+        append_misc_wall_stiffnesses(&changed, story, &mut cols).unwrap();
+        assert_eq!(cols.len(), 4);
+    }
+    for missing_section in [false, true] {
+        let mut changed = model.clone();
+        if missing_section {
+            changed.wall_plates[0].section = None;
+        } else {
+            changed.sections[wall_section].material = None;
+        }
+        let error = story_eccentricity(&changed, story).unwrap_err();
+        assert!(error.contains("壁0"), "{error}");
+    }
+}
+
+#[test]
+fn misc620_projection_has_independent_directional_totals() {
+    let (mut model, story) = misc620_model();
+    let sid = model.wall_plates[0].section.unwrap();
+    model.sections[sid.index()].thickness = Some(200000.0 / 6000.0_f64.hypot(6000.0));
+    for sec in &mut model.sections[..2] {
+        sec.area = 40000.0;
+    }
+    let mut cols = vec![
+        ColumnStiffness {
+            pos: [0.0, 0.0],
+            dx: 2500.0,
+            dy: 5000.0
+        };
+        4
+    ];
+    append_misc_wall_stiffnesses(&model, story, &mut cols).unwrap();
+    assert!((cols[4].dx - 6250.0).abs() < 1e-9);
+    assert!((cols[4].dy - 12500.0).abs() < 1e-9);
+}
+
+#[test]
+fn misc620_missing_other_column_material_cannot_dilute_wall_stiffness() {
+    let (mut model, story) = misc620_model();
+    assert_eq!(sum_column_area(&model, story).unwrap(), 400.0);
+    model.elements[1].section = Some(sepika_core::ids::SectionId(1));
+    model.sections[1].material = None;
+    assert!(
+        sepika_solver::statics::analysis::precheck::model_issues(&model)
+            .iter()
+            .any(|issue| issue.message.contains("材料が未割当"))
+    );
+    assert!(column_stiffnesses(&model, story).unwrap().len() < 4);
+    let error = story_eccentricity(&model, story).unwrap_err();
+    assert!(error.contains("柱") && error.contains("材料"), "{error}");
+}
+
+#[test]
+fn misc620_invalid_coefficient_is_rejected_even_without_walls() {
+    let (mut model, story) = build_symmetric_frame(None);
+    for n in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        model.stress_cfg.misc_wall_n = Some(n);
+        assert!(story_eccentricity(&model, story)
+            .unwrap_err()
+            .contains("係数n"));
+    }
+    model.stress_cfg.misc_wall_n = None;
+    assert!(story_eccentricity(&model, story).is_ok());
+}
+
+#[test]
+fn misc620_invalid_area_and_directional_stiffness_stop_before_append() {
+    let (model, story) = misc620_model();
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::MAX] {
+        let mut changed = model.clone();
+        changed.sections[0].area = bad;
+        assert!(sum_column_area(&changed, story).is_err());
+    }
+    for bad in [-1.0, f64::NAN, f64::INFINITY, f64::MAX] {
+        let mut cols = vec![
+            ColumnStiffness {
+                pos: [0.0; 2],
+                dx: bad,
+                dy: 1.0
+            };
+            4
+        ];
+        assert!(append_misc_wall_stiffnesses(&model, story, &mut cols).is_err());
+        assert_eq!(cols.len(), 4);
+    }
+    let mut cols = vec![
+        ColumnStiffness {
+            pos: [0.0; 2],
+            dx: 0.0,
+            dy: 0.0
+        };
+        4
+    ];
+    append_misc_wall_stiffnesses(&model, story, &mut cols).unwrap();
+    assert_eq!((cols[4].dx, cols[4].dy), (0.0, 0.0));
+    let mut changed = model.clone();
+    let section = changed.wall_plates[0].section.unwrap();
+    changed.sections[section.index()].thickness = Some(f64::MAX);
+    assert!(story_eccentricity(&changed, story)
+        .unwrap_err()
+        .contains("壁0"));
+}
+
+#[test]
+fn misc620_wall_follows_only_supporting_story_after_edits() {
+    use sepika_core::ids::{ElemId, NodeId};
+    use sepika_core::model::{RegionAnchor, Story, WallPlateShape};
+    let (mut model, story) = misc620_model();
+    model
+        .stories
+        .push(Story::new(StoryId(2), "3F".into(), Some(6000.0), Some(0.0)));
+    model
+        .stories
+        .push(Story::new(StoryId(3), "4F".into(), Some(9000.0), Some(0.0)));
+    for i in 0..4 {
+        let mut node = model.nodes[4 + i].clone();
+        node.id = NodeId(8 + i as u32);
+        node.coord[2] = 6000.0;
+        node.story = Some(StoryId(2));
+        model.nodes.push(node);
+        let mut col = model.elements[i].clone();
+        col.id = ElemId(8 + i as u32);
+        col.nodes = [NodeId(4 + i as u32), NodeId(8 + i as u32)]
+            .into_iter()
+            .collect();
+        model.elements.push(col);
+    }
+    for (i, original) in [0, 3].into_iter().enumerate() {
+        let mut node = model.nodes[original].clone();
+        node.id = NodeId(12 + i as u32);
+        model.nodes.push(node);
+    }
+    model.wall_plates[0].shape = WallPlateShape::Attached {
+        anchor: RegionAnchor::FloorRegion {
+            nodes: [NodeId(12), NodeId(13)],
+        },
+        extent: Some([6500.0; 2]),
+    };
+    let added = |model: &sepika_core::Model, story| {
+        let mut cols = column_stiffnesses(model, story).unwrap();
+        let before = cols.len();
+        append_misc_wall_stiffnesses(model, story, &mut cols).unwrap();
+        cols.len() - before
+    };
+    assert_eq!(added(&model, story), 1);
+    assert_eq!(added(&model, StoryId(2)), 0);
+    assert_eq!(added(&model, StoryId(3)), 0);
+    model.stories[1].elevation = Some(4000.0);
+    for node in &mut model.nodes[4..8] {
+        node.coord[2] = 4000.0;
+    }
+    assert_eq!(added(&model, story), 1);
+    for node in &mut model.nodes[12..14] {
+        node.coord[2] = 4000.0;
+    }
+    assert_eq!(added(&model, story), 0);
+    assert_eq!(added(&model, StoryId(2)), 1);
+    model.wall_plates.clear();
+    assert_eq!(added(&model, StoryId(2)), 0);
+}
+
+#[test]
+fn misc620_roof_parapet_is_excluded_but_undefined_story_height_is_an_error() {
+    use sepika_core::ids::NodeId;
+    use sepika_core::model::{RegionAnchor, WallPlateShape};
+    let (mut model, story) = misc620_model();
+    model.wall_plates[0].shape = WallPlateShape::Attached {
+        anchor: RegionAnchor::FloorRegion {
+            nodes: [NodeId(4), NodeId(7)],
+        },
+        extent: Some([1000.0; 2]),
+    };
+    let mut cols = column_stiffnesses(&model, story).unwrap();
+    append_misc_wall_stiffnesses(&model, story, &mut cols).unwrap();
+    assert_eq!(cols.len(), 4);
+    if let WallPlateShape::Attached { extent, .. } = &mut model.wall_plates[0].shape {
+        *extent = None;
+    }
+    assert!(append_misc_wall_stiffnesses(&model, story, &mut cols)
+        .unwrap_err()
+        .contains("壁0"));
+    if let WallPlateShape::Attached { extent, .. } = &mut model.wall_plates[0].shape {
+        *extent = Some([1000.0; 2]);
+    }
+    model.stories[0].elevation = None;
+    assert!(append_misc_wall_stiffnesses(&model, story, &mut cols).is_err());
 }

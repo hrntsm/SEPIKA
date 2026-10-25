@@ -198,7 +198,7 @@ pub fn story_centers(model: &Model, story: StoryId) -> Result<StoryCenters, Stri
 /// 当該層の偏心率を算定して返す。
 pub fn story_eccentricity(model: &Model, story: StoryId) -> Result<Eccentricity, String> {
     let mut cols = column_stiffnesses(model, story)?;
-    append_misc_wall_stiffnesses(model, story, &mut cols);
+    append_misc_wall_stiffnesses(model, story, &mut cols)?;
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
     let com = center_of_mass(model, story)?;
     eccentricity(&cols, com, cor).map_err(|reason| format!("階{}: {reason}", story.0))

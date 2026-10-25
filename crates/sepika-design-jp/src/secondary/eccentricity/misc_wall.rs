@@ -1,148 +1,225 @@
-//! 雑壁（柱梁に囲まれない自立壁）の剛性を n 倍法で等価剛性要素へ換算する層。
-//!
-//! - [`misc_wall_stiffness`] — 雑壁 1 枚の等価水平剛性 Kw'。
-//! - [`sum_column_area`] — 当該層の柱断面積の和 ΣAc。
-//! - [`append_misc_wall_stiffnesses`] — 雑壁を等価剛性要素として `cols` に追加。
-//!
-//! 対象は自立壁（立ち上がりが直上の階レベルに達しているもの）だけである。
-//! 腰壁・垂壁・パラペットは断面性能への算入経路が受け持つため、ここでは数えない。
+//! 無開口RC自立壁のn倍法による方向別付加剛性。
 
 use sepika_core::ids::StoryId;
-use sepika_core::model::{Model, RegionAnchor, WallPlate, WallPlateShape, DIAPHRAGM_LEVEL_TOL_MM};
+use sepika_core::model::{
+    MaterialCategory, Model, RegionAnchor, WallPlate, WallPlateShape, DIAPHRAGM_LEVEL_TOL_MM,
+};
 
 use super::core::ColumnStiffness;
 
-/// 雑壁 1 枚の等価水平剛性 `Kw' = n·Aw'·ΣKc/ΣAc`。
-///
-/// - `n`: 雑壁の剛性を柱の剛性から求める場合の係数（入力値）
-/// - `aw`: 雑壁の断面積 Aw' `[mm²]`
-/// - `sum_kc`: 当該階の柱の剛性の和 ΣKc
-/// - `sum_ac`: 当該階の柱の断面積の和 ΣAc `[mm²]`（0 の場合は Kw' = 0）
-pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> f64 {
-    if sum_ac <= 0.0 {
-        return 0.0;
+/// 正の有限なn・壁面積・柱面積と非負有限の柱剛性から付加剛性 [N/mm] を返す。
+/// aw・sum_acは [mm²]、sum_kcは [N/mm]、nは無次元。入力不正又は非有限な結果はErr。
+pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> Result<f64, String> {
+    if [n, aw, sum_ac].iter().any(|v| !v.is_finite() || *v <= 0.0)
+        || !sum_kc.is_finite()
+        || sum_kc < 0.0
+    {
+        return Err("n倍法: n・壁面積・柱面積は正の有限値、柱剛性は非負有限値が必要です".into());
     }
-    n * aw * sum_kc / sum_ac
+    let stiffness = n * aw * sum_kc / sum_ac;
+    if !stiffness.is_finite() {
+        return Err("n倍法: 付加剛性の積又は除算結果が非有限です".into());
+    }
+    Ok(stiffness)
 }
 
-/// 当該層の柱の断面積の和 ΣAc `[mm²]`。
-pub fn sum_column_area(model: &Model, story: StoryId) -> f64 {
+/// 層内同一断面の柱の総面積 [mm²]。断面・材料・面積の欠落や不正はErr。
+pub fn sum_column_area(model: &Model, story: StoryId) -> Result<f64, String> {
     let mut sum = 0.0;
-    crate::secondary::eccentricity_analysis::for_each_story_column(
-        model,
-        story,
-        |elem, _top, _bot| {
-            if let Some(sid) = elem.section {
-                sum += model.sections[sid.index()].area;
+    for col in crate::secondary::story_columns::story_columns(model, story) {
+        let failure =
+            |reason: &str| format!("n倍法: 階{}の柱{}: {reason}", story.0, col.top_elem.0);
+        let elem = model
+            .element(col.top_elem)
+            .ok_or_else(|| failure("部材を参照できません"))?;
+        let sec = model
+            .element_section(elem)
+            .ok_or_else(|| failure("断面を参照できません"))?;
+        for id in &col.segments {
+            let part = model
+                .element(*id)
+                .ok_or_else(|| failure("分割部材を参照できません"))?;
+            if part.section != elem.section {
+                return Err(failure("層内で断面が変わる柱には適用できません"));
             }
-        },
-    );
-    sum
+            let mat = model
+                .element_material(part)
+                .ok_or_else(|| failure("材料を参照できません"))?;
+            if !mat.young.is_finite() || mat.young <= 0.0 {
+                return Err(failure("ヤング係数が正の有限値ではありません"));
+            }
+        }
+        if !sec.area.is_finite() || sec.area <= 0.0 {
+            return Err(failure("柱断面積が正の有限値ではありません"));
+        }
+        sum += sec.area;
+    }
+    if !sum.is_finite() || sum <= 0.0 {
+        return Err(format!(
+            "n倍法: 階{}の柱総面積が正の有限値ではありません",
+            story.0
+        ));
+    }
+    Ok(sum)
 }
 
-/// n 倍法の対象になる自立壁 1 枚の幾何。
 struct SelfStandingStiffness {
-    /// 壁の平面中点 [mm]。
     pos: [f64; 2],
-    /// 壁面内方向の方向余弦 (cx, cy)。
     dir: [f64; 2],
-    /// 断面積 Aw' [mm²]（平面長さ × 構造厚）。
     aw: f64,
-    /// 帰属層の判定に使う中間高さ [mm]。
     z_mid: f64,
 }
 
-/// 壁版が n 倍法の対象になるなら、その幾何を返す。
-///
-/// 対象は「断面が割り当たっていて、立ち上がりが直上の階レベルに達している自立壁」
-/// である（モジュール doc 参照）。
-///
-/// `Aw'` の厚さは断面の板厚（構造厚）から引く。仕上げ・増打ち
-/// （[`WallPlate::loads`]）は荷重としてのみ効くもので、打ち継ぎで一体性が保証されず
-/// 構造厚には含めないため、剛性の算定にも入れない。
-fn self_standing_stiffness(model: &Model, plate: &WallPlate) -> Option<SelfStandingStiffness> {
+fn self_standing_stiffness(
+    model: &Model,
+    plate: &WallPlate,
+) -> Result<Option<SelfStandingStiffness>, String> {
     let WallPlateShape::Attached {
         anchor: RegionAnchor::FloorRegion { nodes },
         ..
     } = &plate.shape
     else {
-        return None;
+        return Ok(None);
     };
-    let t = model.wall_plate_thickness(plate)?;
-    let extent = model.wall_plate_extent(plate)?;
-    let a = model.nodes.get(nodes[0].index())?.coord;
-    let b = model.nodes.get(nodes[1].index())?.coord;
+    let failure = |reason: &str| format!("n倍法: 壁{}: {reason}", plate.id.0);
+    if !plate.openings.is_empty() || plate.slit.any() {
+        return Ok(None);
+    }
+    if !plate.opening_area.is_finite() || plate.opening_area < 0.0 {
+        return Err(failure("開口面積が不正です"));
+    }
+    if plate.opening_area > 0.0 {
+        return Ok(None);
+    }
+    let coord = |id: sepika_core::ids::NodeId| {
+        model
+            .nodes
+            .get(id.index())
+            .filter(|node| node.id == id && node.coord.iter().all(|v| v.is_finite()))
+            .map(|node| node.coord)
+            .ok_or_else(|| failure("支持節点の参照又は座標が不正です"))
+    };
+    let a = coord(nodes[0])?;
+    let b = coord(nodes[1])?;
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let len = dx.hypot(dy);
-    if len <= 0.0 || t <= 0.0 {
-        return None;
+    if !len.is_finite() || len <= 0.0 {
+        return Err(failure("平面長さが正の有限値ではありません"));
     }
-    let z_base = (a[2] + b[2]) / 2.0;
-    let story_height = model.story_height_above(z_base)?;
-    let reach = extent[0].min(extent[1]);
-    if reach < story_height - DIAPHRAGM_LEVEL_TOL_MM {
-        return None;
+    let z_base = a[2] / 2.0 + b[2] / 2.0;
+    if matches!(
+        plate.shape,
+        WallPlateShape::Attached {
+            extent: Some(_),
+            ..
+        }
+    ) && model.story_level_diagnostics().is_empty()
+        && model
+            .stories
+            .last()
+            .and_then(|s| s.sl_mm())
+            .is_some_and(|sl| (z_base - sl).abs() <= DIAPHRAGM_LEVEL_TOL_MM)
+    {
+        return Ok(None);
     }
-    Some(SelfStandingStiffness {
-        pos: [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0],
+    let story_height = model
+        .try_story_height_above(z_base)
+        .map_err(|reason| failure(&reason))?;
+    let extent = model
+        .try_wall_plate_extent(plate)
+        .map_err(|reason| failure(&reason))?;
+    if extent.iter().any(|v| !v.is_finite()) {
+        return Err(failure("壁高さが非有限です"));
+    }
+    if extent[0].min(extent[1]) < story_height - DIAPHRAGM_LEVEL_TOL_MM {
+        return Ok(None);
+    }
+    let mat = model
+        .wall_plate_material(plate)
+        .ok_or_else(|| failure("主材料を参照できません"))?;
+    if mat.category != MaterialCategory::Concrete {
+        return Ok(None);
+    }
+    let t = model
+        .wall_plate_thickness(plate)
+        .ok_or_else(|| failure("構造厚を参照できません"))?;
+    let aw = len * t;
+    let z_mid = z_base + story_height / 2.0;
+    if !aw.is_finite() || aw <= 0.0 || !z_mid.is_finite() {
+        return Err(failure("壁断面積又は帰属高さが不正です"));
+    }
+    Ok(Some(SelfStandingStiffness {
+        pos: [a[0] / 2.0 + b[0] / 2.0, a[1] / 2.0 + b[1] / 2.0],
         dir: [dx / len, dy / len],
-        aw: len * t,
-        z_mid: z_base + story_height / 2.0,
-    })
+        aw,
+        z_mid,
+    }))
 }
 
-/// 当該層に帰属する自立壁を n 倍法で等価剛性要素へ換算し、`cols` に追加する
-/// （剛心・ねじり剛性への寄与）。
-///
-/// - n 係数は `Model::stress_cfg.misc_wall_n`（`None` なら雑壁剛性を考慮しない）
-/// - 帰属層: 壁の中間高さ z が（直下層 elevation, 当該層 elevation] に入る壁
-/// - `Aw' = 壁の平面長さ × 構造厚`（`self_standing_stiffness` の対象外は無視）
-/// - 方向別に `Kw'x = n·Aw'·ΣKc,x/ΣAc`, `Kw'y = n·Aw'·ΣKc,y/ΣAc` を求め、
-///   壁面内方向の方向余弦 (cx, cy) で `dx = Kw'x·cx²`, `dy = Kw'y·cy²` として
-///   壁の平面中点に置く。ΣAc = 0 の場合は Kw' = 0（0 除算回避）。
+/// 対象層の無開口RC自立壁を付加する。n未指定なら追加しない。
+/// n不正、対象壁・柱の必須入力不足、層内異断面、剛性集計不整合はErr。
 pub fn append_misc_wall_stiffnesses(
     model: &Model,
     story: StoryId,
     cols: &mut Vec<ColumnStiffness>,
-) {
+) -> Result<(), String> {
     let Some(n) = model.stress_cfg.misc_wall_n else {
-        return;
+        return Ok(());
     };
+    if !n.is_finite() || n <= 0.0 {
+        return Err("n倍法: 係数nは正の有限値にしてください".into());
+    }
     if model.wall_plates.is_empty() {
-        return;
+        return Ok(());
     }
-    let sum_ac = sum_column_area(model, story);
-    if sum_ac <= 0.0 {
-        return;
-    }
-    let sum_kx: f64 = cols.iter().map(|c| c.dx).sum();
-    let sum_ky: f64 = cols.iter().map(|c| c.dy).sum();
-
     let idx = story.index();
-    let Some(elev) = model.stories.get(idx).and_then(|s| s.sl_mm()) else {
-        return;
-    };
+    let elev = model
+        .stories
+        .get(idx)
+        .and_then(|s| s.sl_mm())
+        .ok_or_else(|| format!("n倍法: 階{}のSLを参照できません", story.0))?;
     let below = if idx == 0 {
         f64::NEG_INFINITY
     } else {
-        match model.stories[idx - 1].sl_mm() {
-            Some(sl) => sl,
-            None => return,
-        }
+        model.stories[idx - 1]
+            .sl_mm()
+            .ok_or_else(|| format!("n倍法: 階{}の直下階SLを参照できません", story.0))?
     };
-
+    let mut walls = Vec::new();
     for plate in &model.wall_plates {
-        let Some(w) = self_standing_stiffness(model, plate) else {
-            continue;
-        };
-        if !(w.z_mid > below + 1e-9 && w.z_mid <= elev + 1e-9) {
-            continue;
+        if let Some(w) = self_standing_stiffness(model, plate)? {
+            if w.z_mid > below + 1e-9 && w.z_mid <= elev + 1e-9 {
+                walls.push((plate.id, w));
+            }
         }
+    }
+    if walls.is_empty() {
+        return Ok(());
+    }
+    let sum_ac = sum_column_area(model, story)?;
+    let columns = crate::secondary::story_columns::story_columns(model, story);
+    if columns.len() != cols.len()
+        || cols
+            .iter()
+            .any(|c| !c.dx.is_finite() || c.dx < 0.0 || !c.dy.is_finite() || c.dy < 0.0)
+    {
+        return Err(format!(
+            "n倍法: 階{}の柱剛性集合が不足又は不正です",
+            story.0
+        ));
+    }
+    let sum_kx = cols.iter().map(|c| c.dx).sum();
+    let sum_ky = cols.iter().map(|c| c.dy).sum();
+    let mut additions = Vec::new();
+    for (id, w) in walls {
+        let failure = |reason| format!("階{}の壁{}: {reason}", story.0, id.0);
         let [cx, cy] = w.dir;
-        cols.push(ColumnStiffness {
+        additions.push(ColumnStiffness {
             pos: w.pos,
-            dx: misc_wall_stiffness(n, w.aw, sum_kx, sum_ac) * cx * cx,
-            dy: misc_wall_stiffness(n, w.aw, sum_ky, sum_ac) * cy * cy,
+            dx: misc_wall_stiffness(n, w.aw, sum_kx, sum_ac).map_err(failure)? * cx * cx,
+            dy: misc_wall_stiffness(n, w.aw, sum_ky, sum_ac).map_err(failure)? * cy * cy,
         });
     }
+    cols.extend(additions);
+    Ok(())
 }
