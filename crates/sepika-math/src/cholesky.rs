@@ -1,14 +1,16 @@
 use crate::solver::{LinearSolver, SolveError, SparsityPattern};
+use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::{Llt, SymbolicLlt};
 use faer::sparse::SparseColMat;
 use faer::Side;
 use std::sync::Mutex;
 
-/// 疎 Cholesky（LLᵀ）直接法ソルバ。
-/// 直前と同じスパースパターンであれば symbolic 分解を再利用する。
+/// 疎 Cholesky 直接法。平衡化後の推定逆条件数が機械精度未満なら分解を拒否する。
+/// 分解失敗後の求解は `NotFactorized` を返す。同じ疎構造では symbolic 分解を再利用する。
 pub struct CholeskySolver {
     factor: Option<Llt<usize, f64>>,
     symbolic_cache: Option<(SymbolicLlt<usize>, SparsityPattern)>,
+    diagonal_sqrt: Vec<f64>,
     n: usize,
     scratch: Mutex<faer::Mat<f64>>,
 }
@@ -18,6 +20,7 @@ impl Default for CholeskySolver {
         Self {
             factor: None,
             symbolic_cache: None,
+            diagonal_sqrt: Vec::new(),
             n: 0,
             scratch: Mutex::new(faer::Mat::new()),
         }
@@ -26,7 +29,48 @@ impl Default for CholeskySolver {
 
 impl LinearSolver for CholeskySolver {
     fn factorize(&mut self, k: &SparseColMat<usize, f64>) -> Result<(), SolveError> {
+        self.factor = None;
         self.n = k.nrows();
+        self.diagonal_sqrt = vec![0.0; self.n];
+        let (pattern, values) = k.parts();
+        for col in 0..self.n {
+            for (offset, row) in pattern.row_idx_of_col_raw(col).iter().copied().enumerate() {
+                if row == col {
+                    let value = values[pattern.col_range(col).start + offset];
+                    if !value.is_finite() || value <= 0.0 {
+                        return Err(SolveError::NotPositiveDefinite);
+                    }
+                    self.diagonal_sqrt[col] = value.sqrt();
+                }
+            }
+            if self.diagonal_sqrt[col] == 0.0 {
+                return Err(SolveError::NotPositiveDefinite);
+            }
+        }
+        let mut scaled = k.clone();
+        let (pattern, values) = scaled.parts_mut();
+        let mut column_sums = vec![0.0; self.n];
+        for col in 0..self.n {
+            for (offset, row) in pattern.row_idx_of_col_raw(col).iter().copied().enumerate() {
+                if row < col {
+                    continue;
+                }
+                let value = &mut values[pattern.col_range(col).start + offset];
+                *value = if row == col {
+                    1.0
+                } else {
+                    (*value / self.diagonal_sqrt[row]) / self.diagonal_sqrt[col]
+                };
+                if !value.is_finite() {
+                    return Err(SolveError::NotPositiveDefinite);
+                }
+                column_sums[col] += value.abs();
+                if row != col {
+                    column_sums[row] += value.abs();
+                }
+            }
+        }
+        let norm = column_sums.into_iter().fold(0.0_f64, f64::max);
         let symbolic = match &self.symbolic_cache {
             Some((sym, cached_pattern)) if cached_pattern.matches(k) => sym.clone(),
             _ => {
@@ -36,21 +80,55 @@ impl LinearSolver for CholeskySolver {
                 sym
             }
         };
-        let llt = Llt::try_new_with_symbolic(symbolic, k.as_ref(), Side::Lower)
+        let factor = Llt::try_new_with_symbolic(symbolic, scaled.as_ref(), Side::Lower)
             .map_err(|_| SolveError::NotPositiveDefinite)?;
-        self.factor = Some(llt);
+        if self.n > 0 {
+            let mut column = faer::Mat::zeros(self.n, 1);
+            let inverse_norm = crate::condition::estimate_symmetric_one_norm(self.n, |x| {
+                for (i, value) in x.iter().enumerate() {
+                    column[(i, 0)] = *value;
+                }
+                factor.solve_in_place(column.as_mut());
+                for (i, value) in x.iter_mut().enumerate() {
+                    *value = column[(i, 0)];
+                }
+            });
+            let rcond = (1.0 / norm) / inverse_norm;
+            if !rcond.is_finite() || rcond < f64::EPSILON / 2.0 {
+                return Err(SolveError::NotPositiveDefinite);
+            }
+        }
+        self.factor = Some(factor);
         Ok(())
     }
 
     fn solve(&self, rhs: &[f64]) -> Result<Vec<f64>, SolveError> {
-        let llt = self.factor.as_ref().ok_or(SolveError::NotFactorized)?;
-        crate::solver::solve_dense_column(llt, rhs, self.n)
+        let mut out = Vec::new();
+        self.solve_into(rhs, &mut out)?;
+        Ok(out)
     }
 
     fn solve_into(&self, rhs: &[f64], out: &mut Vec<f64>) -> Result<(), SolveError> {
-        let llt = self.factor.as_ref().ok_or(SolveError::NotFactorized)?;
+        let factor = self.factor.as_ref().ok_or(SolveError::NotFactorized)?;
+        if rhs.len() != self.n {
+            return Err(SolveError::DimMismatch {
+                k: self.n,
+                rhs: rhs.len(),
+            });
+        }
         let mut scratch = self.scratch.lock().expect("スクラッチのロックに失敗");
-        crate::solver::solve_dense_column_into(llt, rhs, self.n, &mut scratch, out)
+        if scratch.nrows() != self.n || scratch.ncols() != 1 {
+            *scratch = faer::Mat::zeros(self.n, 1);
+        }
+        for i in 0..self.n {
+            scratch[(i, 0)] = rhs[i] / self.diagonal_sqrt[i];
+        }
+        factor.solve_in_place(scratch.as_mut());
+        out.resize(self.n, 0.0);
+        for i in 0..self.n {
+            out[i] = scratch[(i, 0)] / self.diagonal_sqrt[i];
+        }
+        Ok(())
     }
 }
 
@@ -297,6 +375,254 @@ mod acceptance_tests {
                 })
                 .collect(),
         )
+    }
+
+    #[test]
+    #[ignore = "条件数診断による分解コストを比較する手動計測"]
+    fn condition_estimation_cost() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        faer::set_global_parallelism(faer::Par::Seq);
+        for side in [8, 16] {
+            let n = side * side * side;
+            let mut entries = Vec::new();
+            for z in 0..side {
+                for y in 0..side {
+                    for x in 0..side {
+                        let col = x + side * (y + side * z);
+                        entries.push(Triplet {
+                            row: col,
+                            col,
+                            val: 6.1,
+                        });
+                        for neighbor in [
+                            (x + 1 < side).then_some(col + 1),
+                            (y + 1 < side).then_some(col + side),
+                            (z + 1 < side).then_some(col + side * side),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        {
+                            entries.push(Triplet {
+                                row: neighbor,
+                                col,
+                                val: -1.0,
+                            });
+                            entries.push(Triplet {
+                                row: col,
+                                col: neighbor,
+                                val: -1.0,
+                            });
+                        }
+                    }
+                }
+            }
+            let k = assemble_csc(n, entries);
+            let symbolic = SymbolicLlt::try_new(k.symbolic(), Side::Lower).unwrap();
+            black_box(
+                Llt::try_new_with_symbolic(symbolic.clone(), k.as_ref(), Side::Lower).unwrap(),
+            );
+            let mut solver = CholeskySolver::default();
+            solver.factorize(&k).unwrap();
+            let start = Instant::now();
+            for _ in 0..5 {
+                black_box(
+                    Llt::try_new_with_symbolic(symbolic.clone(), k.as_ref(), Side::Lower).unwrap(),
+                );
+            }
+            let baseline = start.elapsed().as_secs_f64() / 5.0;
+            let start = Instant::now();
+            for _ in 0..5 {
+                solver.factorize(black_box(&k)).unwrap();
+            }
+            let checked = start.elapsed().as_secs_f64() / 5.0;
+            println!(
+                "n={n}, nnz={}, baseline_ms={:.3}, checked_ms={:.3}, ratio={:.3}",
+                k.parts().1.len(),
+                baseline * 1000.0,
+                checked * 1000.0,
+                checked / baseline
+            );
+        }
+    }
+
+    #[test]
+    fn rounded_mechanism_is_rejected_for_scaled_and_sign_reversed_coordinates() {
+        for scale in [
+            [1.0, 1.0],
+            [2.0_f64.powi(-100), 2.0_f64.powi(100)],
+            [2.0_f64.powi(100), 2.0_f64.powi(-100)],
+        ] {
+            for sign in [-1.0, 1.0] {
+                let k = matrix(&[
+                    &[scale[0] * scale[0], sign * scale[0] * scale[1]],
+                    &[
+                        sign * scale[0] * scale[1],
+                        scale[1] * scale[1] * (1.0 + f64::EPSILON),
+                    ],
+                ]);
+                let mut solver = CholeskySolver::default();
+                assert!(matches!(
+                    solver.factorize(&k),
+                    Err(SolveError::NotPositiveDefinite)
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn lower_triangle_is_the_only_input_to_factorization_and_condition_diagnosis() {
+        let mut solver = CholeskySolver::default();
+        for upper in [0.0, f64::NAN, 1e300] {
+            solver
+                .factorize(&matrix(&[&[4.0, upper], &[1.0, 9.0]]))
+                .unwrap();
+            let x = solver.solve(&[6.0, 19.0]).unwrap();
+            approx::assert_relative_eq!(x[0], 1.0, max_relative = 1e-14);
+            approx::assert_relative_eq!(x[1], 2.0, max_relative = 1e-14);
+        }
+        assert!(solver
+            .factorize(&matrix(&[&[4.0, 1.0], &[f64::NAN, 9.0]]))
+            .is_err());
+    }
+
+    #[test]
+    fn coordinate_permutations_preserve_weak_finite_solutions() {
+        let values = [
+            [1.0, -1.0, 0.0],
+            [-1.0, 1.0 + 1e-10, 0.0],
+            [0.0, 0.0, 1e120],
+        ];
+        for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+            let entries = (0..3)
+                .flat_map(|row| {
+                    (0..3).map(move |col| Triplet {
+                        row,
+                        col,
+                        val: values[order[row]][order[col]],
+                    })
+                })
+                .collect();
+            let mut solver = CholeskySolver::default();
+            solver.factorize(&assemble_csc(3, entries)).unwrap();
+            let rhs = order.map(|i| [0.0, 1e-10, 1e120][i]);
+            let x = solver.solve(&rhs).unwrap();
+            for value in x {
+                approx::assert_relative_eq!(value, 1.0, max_relative = 1e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn finite_weak_stiffness_is_accepted_independently_of_other_blocks_and_units() {
+        for n in [2, 10000] {
+            for scale in [[1.0, 1.0], [1e-60, 1e60], [1e60, 1e-60]] {
+                let stiffness = 1e-10;
+                let mut entries = vec![
+                    Triplet {
+                        row: 0,
+                        col: 0,
+                        val: scale[0] * scale[0],
+                    },
+                    Triplet {
+                        row: 0,
+                        col: 1,
+                        val: -scale[0] * scale[1],
+                    },
+                    Triplet {
+                        row: 1,
+                        col: 0,
+                        val: -scale[0] * scale[1],
+                    },
+                    Triplet {
+                        row: 1,
+                        col: 1,
+                        val: (1.0 + stiffness) * scale[1] * scale[1],
+                    },
+                ];
+                entries.extend((2..n).map(|i| Triplet {
+                    row: i,
+                    col: i,
+                    val: 1e-200,
+                }));
+                let k = assemble_csc(n, entries);
+                let mut solver = CholeskySolver::default();
+                solver.factorize(&k).unwrap();
+                let mut rhs = vec![1e-200; n];
+                rhs[0] = 0.0;
+                rhs[1] = stiffness * scale[1];
+                let result = solver.solve(&rhs).unwrap();
+                for (i, value) in result.iter().enumerate() {
+                    let expected = if i < 2 { 1.0 / scale[i] } else { 1.0 };
+                    approx::assert_relative_eq!(*value, expected, max_relative = 1e-5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dense_factor_preserves_finite_weak_stiffness() {
+        let n = 192;
+        for weak in [1e-8, f64::EPSILON] {
+            let k = assemble_csc(
+                n,
+                (0..n)
+                    .flat_map(|col| {
+                        (0..n).map(move |row| Triplet {
+                            row,
+                            col,
+                            val: if row == col { 1.0 + weak } else { 1.0 },
+                        })
+                    })
+                    .collect(),
+            );
+            let mut solver = CholeskySolver::default();
+            let symbolic = faer::sparse::linalg::cholesky::factorize_symbolic_cholesky(
+                k.symbolic(),
+                Side::Lower,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
+            assert!(matches!(
+                symbolic.raw(),
+                faer::sparse::linalg::cholesky::SymbolicCholeskyRaw::Supernodal(_)
+            ));
+            let result = solver.factorize(&k);
+            if weak > f64::EPSILON {
+                result.unwrap();
+                let x = solver.solve(&vec![n as f64 + weak; n]).unwrap();
+                for value in x {
+                    approx::assert_relative_eq!(value, 1.0, max_relative = 1e-5);
+                }
+            } else {
+                assert!(matches!(result, Err(SolveError::NotPositiveDefinite)));
+            }
+        }
+    }
+
+    #[test]
+    fn failed_refactorization_invalidates_all_previous_solutions() {
+        let mut solver = CholeskySolver::default();
+        solver
+            .factorize(&matrix(&[&[2.0, 0.0], &[0.0, 3.0]]))
+            .unwrap();
+        for bad in [
+            matrix(&[&[1.0, 1.0], &[1.0, 1.0 + f64::EPSILON]]),
+            matrix(&[&[0.0]]),
+        ] {
+            assert!(solver.factorize(&bad).is_err());
+            assert!(matches!(
+                solver.solve(&[1.0, 1.0]),
+                Err(SolveError::NotFactorized)
+            ));
+            assert!(matches!(
+                solver.solve_into(&[1.0, 1.0], &mut vec![]),
+                Err(SolveError::NotFactorized)
+            ));
+        }
+        solver.factorize(&matrix(&[&[2.0]])).unwrap();
+        approx::assert_relative_eq!(solver.solve(&[4.0]).unwrap()[0], 2.0, max_relative = 1e-14);
     }
 
     #[test]

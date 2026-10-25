@@ -18,7 +18,7 @@ pub trait LinearSolver: Send + Sync {
 pub enum SolveError {
     #[error("not factorized yet")]
     NotFactorized,
-    #[error("matrix not positive definite")]
+    #[error("matrix not numerically positive definite")]
     NotPositiveDefinite,
     #[error("dimension mismatch: K={k}, rhs={rhs}")]
     DimMismatch { k: usize, rhs: usize },

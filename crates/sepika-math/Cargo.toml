@@ -2,7 +2,7 @@
 name = "sepika-math"
 version = "0.0.1"
 edition = "2021"
-license = "MIT"
+license = "MIT AND BSD-3-Clause"
 
 [dependencies]
 faer      = { workspace = true }

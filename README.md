@@ -33,4 +33,4 @@ SEPIKA（セピカ）は、Rust で開発する日本の建築構造計算一貫
 
 ## ライセンス
 
-[MIT License](LICENSE)
+[MIT License](LICENSE)。LAPACK由来部分の著作権・利用条件は[第三者ライセンス](crates/sepika-math/LICENSE-LAPACK)を参照してください。バイナリを再配布する場合も、この第三者ライセンスを同梱してください
