@@ -4882,6 +4882,7 @@ dependencies = [
 name = "sepika-mcp"
 version = "0.0.1"
 dependencies = [
+ "approx",
  "arrow",
  "rmcp",
  "schemars 1.2.1",
