@@ -113,6 +113,10 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 性能 | 速度回帰 | `criterion` + CI 閾値 |
 | 決定性 | 同一入力ビット一致 | 専用テスト |
 
+## 塑性確定点のバイリニア接線（#808）
+
+[検証記録](塑性確定点のバイリニア接線_Issue808_2026-10.md)は材料の正負方向微分・応力と塑性履歴の保持、集中梁と瞬間剛性比例減衰への定量伝播を扱う。状態は🔶。同一点の返却接線を固定せず、減衰用接線の採用判断は[Issue #808](https://github.com/hrntsm/SEPIKA/issues/808)に残る。公開時刻歴の有限例で不収束は再現せず、一般応答・累積減衰・Validationは未確認。
+
 ## レポート目録
 
 各レポートの照合結果・修正履歴・残課題の詳細。**未完了の要約**は
@@ -129,6 +133,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [層指標の生成入力照合_Issue810_2026-10.md](層指標の生成入力照合_Issue810_2026-10.md) | GUI/CSVのRs/Re/Fes依存成果と現在入力・計算契約 | 🔶（自動Verificationの記録は同レポート、手動GUI・Validation未） |
 | [保存ブランチ496の変更採否_2026-10.md](保存ブランチ496の変更採否_2026-10.md) | 全102コミットの採否、免震/保存の復元、全固定時刻歴と確定前記録 | 🔶（有限Verification。実験Validationは未実施） |
 | [保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | 物理曲率・非対称断面・剛域付き軸履歴、元端部解放の内外残差整合 | 🔶（有限Verification。全履歴の収束性・実験Validationは未検証） |
+| [塑性確定点のバイリニア接線_Issue808_2026-10.md](塑性確定点のバイリニア接線_Issue808_2026-10.md) | 同一点の非微分性・正負方向別接線・履歴保持・公開減衰行列への伝播 | 🔶（減衰用接線の採用判断・一般応答は未確認） |
 | [集中ばね梁の部材荷重_Issue802_2026-10.md](集中ばね梁の部材荷重_Issue802_2026-10.md) | 集中ばね梁の元部材荷重・材料釣合い・記録・復元・保存失効・公開App保有耐力 | 🔶（独立Verification、Validation・最終ゲート未確認） |
 | [一般部材荷重_Issue716_2026-10.md](一般部材荷重_Issue716_2026-10.md) | 全固定材・通常Fiber/MS・非線形時刻歴の長期部材荷重 | 🔶（公開入口と独立梁値のVerification。実測Validation・手動GUI・最終ゲートは未確認） |
 | [増分性能量と物理支持反力_Issue717_2026-10.md](増分性能量と物理支持反力_Issue717_2026-10.md) | 全支持抵抗と骨組切断面・元荷重・支持作用の区別 | 🔶（有限例のVerification。一般MPC・全塑性履歴・物理Validation・最終ゲートは未確認） |
@@ -322,6 +327,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 |---|------|----------|---------------|-----------|---------|------|
 | 731 | 梁の床板嵩上げ | sepika-core / sepika-load / sepika-job / sepika-app | beam_placement.rs・self_weight/beam_upstand.rs・cascade.rs・app/girder_weight_tests.rs | [独立値と実入口](梁の床板嵩上げ_Issue731_2026-10.md#確認した入口) | 横断 | 🔶（数値Verification、手動GUI・Validation未） |
 | 810 | 層指標の生成入力照合 | sepika-app | summary.rs・design_view.rs | [独立期待値と実入口](層指標の生成入力照合_Issue810_2026-10.md#対象と独立期待値) | 横断 | 🔶（手動GUI・Validation未） |
+| 808 | 塑性確定点のバイリニア接線 | sepika-material / sepika-element / sepika-solver | bilinear_yield_surface.rs・frame/concentrated・general_member_loads.rs | [自動回帰と実行証拠](塑性確定点のバイリニア接線_Issue808_2026-10.md#自動回帰と実行証拠) | 横断 | 🔶（方向別Verification、減衰用接線の判断未決） |
 | 802 | 集中ばね梁の部材荷重 | sepika-element / sepika-solver / sepika-mcp | frame/concentrated・general_member_loads.rs・persist.rs | [独立期待値と公開入口](集中ばね梁の部材荷重_Issue802_2026-10.md#対象と独立期待値) | 横断 | 🔶（限定Verification、Validation未） |
 | 616 | 大梁自重の床板実重複控除 | sepika-load / sepika-job / sepika-app | self_weight/girder_overlap.rs・app/girder_weight_tests.rs・weight_preparation.rs | [独立値と実入口](大梁床板実重複控除_Issue616_確認記録.md#独立期待値と実入口) | 横断 | 🔶（数値Verification、Validation未） |
 | 775 | ctutils 推移依存監査 | Cargo.lock / sepika-io | zip、ctutils、OVIKA | [監査と実行証拠](ctutils推移依存監査_Issue775_2026-10.md#実行証拠) | 横断 | 🔶（0.4.5 の最小解決、監査・IO default/parquet 成功。独立レビュー・最終 CI は記録を参照） |

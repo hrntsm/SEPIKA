@@ -561,3 +561,141 @@ fn concentrated_transverse_public_time_history_records_udl_and_point_equilibrium
         }
     }
 }
+
+#[test]
+fn committed_bilinear_end_springs_propagate_into_tangent_damping_matrix() {
+    use sepika_element::behavior::ElementBehavior;
+    use sepika_element::frame::beam::BeamElement;
+    use sepika_element::frame::concentrated::ConcentratedSpringBeam;
+    use sepika_material::uniaxial::Bilinear;
+    use sepika_math::sparse::{assemble_csc, sparse_matvec, Triplet};
+
+    let mut model = model(ElementKind::Beam, false);
+    model.nodes[1].coord[0] = 3000.0;
+    model.sections[0].iy = 1e8;
+    model.sections[0].iz = 1e8;
+    let ctx = Ctx { model: &model };
+    let elastic = BeamElement::new(&model.elements[0], &model);
+    let mut member = ConcentratedSpringBeam::new_one_component(
+        elastic,
+        Box::new(Bilinear::new(1e12, 1e7, 0.01)),
+        Box::new(Bilinear::new(1e12, 1e7, 0.01)),
+    );
+    let kb = 2.0 * 205000.0 * 1e8 / 3000.0;
+    let theta = 0.0011 + 20_900_000.0 / kb;
+    let displacement = LocalVec {
+        data: smallvec::smallvec![0., 0., 0., 0., 0., theta, 0., 0., 0., 0., 0., -theta],
+    };
+    member.update_state(&displacement, false, &ctx).unwrap();
+    let scalar = |k: f64| {
+        assemble_csc(
+            1,
+            vec![Triplet {
+                row: 0,
+                col: 0,
+                val: k,
+            }],
+        )
+    };
+    let damping = Damping::StiffnessProportional {
+        h: 0.02,
+        omega: 10.0,
+        basis: StiffnessKind::Tangent,
+    };
+    let mass = scalar(1.0);
+    let before = member.tangent_stiffness(&ctx);
+    let before_k = before.get(5, 5) - before.get(5, 11);
+    let before_c = damping.assemble_c_tangent(&mass, &scalar(before_k), &scalar(before_k), &[1.0]);
+    let before_force = member.internal_force(&ctx).data[5];
+    member.commit_state();
+    let after = member.tangent_stiffness(&ctx);
+    let after_k = after.get(5, 5) - after.get(5, 11);
+    let after_c = damping.assemble_c_tangent(&mass, &scalar(after_k), &scalar(before_k), &[1.0]);
+    let before_damping = sparse_matvec(&before_c, &[0.001])[0];
+    let after_damping = sparse_matvec(&after_c, &[0.001])[0];
+    println!("commit: K {before_k} -> {after_k}; C*v (v=0.001) {before_damping} -> {after_damping}; force {before_force} -> {}", member.internal_force(&ctx).data[5]);
+    close(before_force, 20_900_000.0);
+    close(member.internal_force(&ctx).data[5], 20_900_000.0);
+    close(before_damping, 23_098.591_549_295_776);
+    close(after_damping, 0.004 * after_k * 0.001);
+    let snapshot = member.snapshot_state();
+    for (delta, expected_damping) in [
+        (1e-7, 23_098.591_549_295_776),
+        (-1e-7, 53_929.628_411_707_07),
+    ] {
+        let increment = LocalVec {
+            data: smallvec::smallvec![0., 0., 0., 0., 0., delta, 0., 0., 0., 0., 0., -delta],
+        };
+        member.update_state(&increment, false, &ctx).unwrap();
+        let k = member.tangent_stiffness(&ctx);
+        let k_mode = k.get(5, 5) - k.get(5, 11);
+        let c = damping.assemble_c_tangent(&mass, &scalar(k_mode), &scalar(before_k), &[1.0]);
+        close(sparse_matvec(&c, &[0.001])[0], expected_damping);
+        member.restore_state(snapshot.as_ref());
+    }
+}
+
+#[test]
+fn plastic_end_springs_public_time_history_with_tangent_damping_remains_finite() {
+    let mut model = model(ElementKind::Beam, false);
+    model.nodes[1].coord[0] = 3000.0;
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask(0b011111);
+    }
+    model.sections[0].iy = 1e8;
+    model.sections[0].iz = 1e8;
+    model.materials[0].fy = Some(20.0);
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.load_cases.clear();
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    let response = nonlinear_time_history_analysis(
+        &model,
+        &map,
+        &reducer,
+        &GroundMotion {
+            dt: 1e-5,
+            accel_x: vec![0.; 6],
+            accel_y: None,
+            accel_theta: None,
+        },
+        &NewmarkCfg {
+            beta: 0.25,
+            gamma: 0.5,
+            dt: 1e-5,
+        },
+        &Damping::StiffnessProportional {
+            h: 0.02,
+            omega: 10.,
+            basis: StiffnessKind::Tangent,
+        },
+        DampingAccumulation::NonCumulative,
+        &[0.002, -0.002],
+        &[0.001, -0.001],
+        NonlinearThCfg {
+            apply_long_term: false,
+            record_every: Some(1),
+            ..NonlinearThCfg::new(50, 1e-6)
+        },
+    )
+    .unwrap();
+    let record = response.recording.unwrap();
+    println!(
+        "public plastic TH: nonconverged={}, rotations={:?}",
+        response.non_converged_steps,
+        record
+            .node_disp
+            .iter()
+            .map(|frame| [frame[0][5], frame[1][5]])
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(response.non_converged_steps, 0);
+    assert_eq!(record.frame_time.len(), 6);
+    assert!(record
+        .node_disp
+        .iter()
+        .flatten()
+        .flatten()
+        .all(|x| x.is_finite()));
+    assert!(record.member_forces[0][0].as_ref().unwrap().at[0].1[5].abs() > 1e7);
+}

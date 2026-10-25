@@ -7,6 +7,7 @@ const ELASTIC_DUMMY_FY: f64 = 1e18;
 
 /// バイリニア鋼材（弾性＋線形硬化）。
 /// 降伏点 fy [N/mm²]、ヤング率 e [N/mm²]、降伏後接線 = hardening·e。
+/// 降伏面上の同一点再評価は、確定時または次の載荷方向の接線を保証しない。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Bilinear {
     pub e: f64,
@@ -133,6 +134,34 @@ mod tests {
     use super::*;
     use crate::MaterialStateError;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn same_strain_commits_preserve_plastic_strain_with_roundoff_tolerance() {
+        for (strain, plastic_strain) in [(0.001, 0.000_980_1), (0.0001, 0.000_089_1)] {
+            for direction in [-1.0, 1.0] {
+                let mut material = Bilinear::new(1e12, 1e7, 0.01);
+                material.trial(direction * strain);
+                material.commit();
+                let ep = material.committed.plastic_strain;
+                let yield_residual = (material.e * (direction * strain - ep) - material.hp() * ep)
+                    .abs()
+                    - material.fy;
+                println!(
+                    "strain={} ep={ep:.17} yield_residual={yield_residual}",
+                    direction * strain
+                );
+                for _ in 0..32 {
+                    material.trial(direction * strain);
+                    material.commit();
+                    assert_relative_eq!(
+                        material.committed.plastic_strain,
+                        direction * plastic_strain,
+                        epsilon = 1e-18
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_bilinear_elastic() {
