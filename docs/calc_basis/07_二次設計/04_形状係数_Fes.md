@@ -155,6 +155,13 @@ D 値（一般階）:
 
 ## 算定できない場合
 
+設計画面とレポート CSV では、Rs は選択方向の地震静的結果、Re は X・Y 両方向の地震静的結果について、現在のモデル・関連計算条件と解析時の入力および計算契約の対応を確認します。
+Re の重心に長期結果を用いる場合は、保存された常時 G+P の長期組合せ結果のうち先頭のものも確認します。
+必要な結果の欠落、入力不一致、入力識別情報の欠落、計算契約の不一致・欠落があれば、対象の方向・組合せと理由を表示します。
+選択方向以外の地震結果又は長期結果だけが無効な場合、Rs と層間変形角の表示は継続し、Re と Fes を算定不能とします。
+長期結果が存在しても入力の対応を確認できない場合は、長期結果なしとして質量重心へ切り替えません。
+増分解析の刻み・目標変位、表示方向、層間変形角の参考比較分母の変更だけでは、地震静的結果を無効にしません。
+
 階高と重心位置の層間変位は、全層について対応する正の有限値が必要です。
 全層の変位が 0 の場合も、一部の層だけが 0 の場合も、相対剛性を定義できないため Rs を算定しません。
 ゼロ変位の層を平均から除いたり、Rs=1 や他層の最大値で代用したりしません。
@@ -177,7 +184,7 @@ Rs 又は Re を算定できなければ Fes と、それに依存する必要�
 
 <div class="impl-ref">
 
-**実装参照**：`sepika_design_jp::secondary::holding_capacity` と `sepika_app::summary::compute_story_metrics_with`（`crates/sepika-app/src/summary.rs`）。
+**実装参照**：`sepika_design_jp::secondary::holding_capacity` と `sepika_app::summary::{seismic_story_metrics, compute_story_metrics_with}`（`crates/sepika-app/src/summary.rs`）。
 
 </div>
 
