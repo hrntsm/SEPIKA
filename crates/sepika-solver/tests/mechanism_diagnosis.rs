@@ -191,9 +191,9 @@ fn rc_torsion_release_is_rejected() {
         let mut model = rc_frame();
         model.load_cases[0].nodal = vec![NodalLoad::manual(NodeId(2), load)];
         match Analysis::prepare(&model) {
-            Ok(_) => panic!("機構が正常終了"),
+            Ok(_) => panic!("不安定な架構が正常終了"),
             Err(sepika_math::solver::SolveError::InvalidInput(message)) => {
-                assert!(message.contains("数値精度") && message.contains("機構"))
+                assert!(message.contains("数値精度") && message.contains("不安定"))
             }
             Err(error) => panic!("不安定以外のエラー: {error}"),
         }
@@ -233,6 +233,6 @@ fn standalone_eigen_entry_rejects_the_same_mechanism_before_iteration() {
     let error =
         sepika_solver::dynamic::eigen::solve_eigen(&model, &dofmap, &reducer, 1).unwrap_err();
     assert!(
-        matches!(error, sepika_math::solver::SolveError::InvalidInput(message) if message.contains("数値精度") && message.contains("機構"))
+        matches!(error, sepika_math::solver::SolveError::InvalidInput(message) if message.contains("数値精度") && message.contains("不安定"))
     );
 }

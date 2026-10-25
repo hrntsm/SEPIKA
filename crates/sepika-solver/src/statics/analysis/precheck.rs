@@ -1502,7 +1502,7 @@ pub(super) fn precheck_model(model: &Model) -> Result<(), SolveError> {
 pub(crate) fn singular_diagnosis(model: &Model) -> String {
     let n_restrained = model.nodes.iter().filter(|n| n.restraint.0 != 0).count();
     format!(
-        "剛性行列が特異(非正定値)か、数値精度上信頼できる正定値求解を確認できません。構造が機構(不安定)になっている可能性があります。\
+        "剛性行列が特異(非正定値)か、数値精度上信頼できる正定値求解を確認できません。架構が不安定になっている可能性があります。\
          考えられる原因: (1) 拘束が不足している(現在 {} 節点に拘束あり)、\
          (2) ピン接合が連続し回転が拘束されない部材がある、\
          (3) 断面性能(A・I)が 0 の断面がある、(4) 剛性比が大きく数値精度が不足している。",

@@ -63,7 +63,7 @@ pub fn solve_eigen(
     solver.factorize(&k_red).map_err(|e| match e {
         SolveError::NotPositiveDefinite => SolveError::InvalidInput(
             "固有値解析: 剛性行列が特異(非正定値)か、数値精度上信頼できる正定値求解を確認できません。拘束が不足しているか、\
-             構造が機構(不安定)になっている可能性があります。支持条件を確認してください。"
+             架構が不安定になっている可能性があります。支持条件を確認してください。"
                 .into(),
         ),
         other => other,

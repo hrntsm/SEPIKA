@@ -3913,13 +3913,13 @@ fn public_static_entries_reject_unexcited_mechanism_and_zero_load() {
         ));
         let error = Analysis::prepare(&model)
             .err()
-            .expect("機構を持つモデルから解析成果を生成しない");
+            .expect("不安定な架構のモデルから解析成果を生成しない");
         assert!(
-            matches!(&error, SolveError::InvalidInput(message) if message.contains("機構") && message.contains("非正定値"))
+            matches!(&error, SolveError::InvalidInput(message) if message.contains("不安定") && message.contains("非正定値"))
         );
         let error = crate::statics::linear::linear_static_once(&model, LoadCaseId(1)).unwrap_err();
         assert!(
-            matches!(error, SolveError::InvalidInput(message) if message.contains("機構") && message.contains("非正定値"))
+            matches!(error, SolveError::InvalidInput(message) if message.contains("不安定") && message.contains("非正定値"))
         );
     }
 }
