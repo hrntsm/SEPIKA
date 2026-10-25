@@ -1783,6 +1783,7 @@ fn pushover_reaches_ultimate_state() {
     assert!(!run.gravity_terms.is_empty());
     assert_eq!(push.steps[0].load_factor, 0.0);
     println!("PO termination={:?}, terminal_step={}, gravity_applied={}, gravity_terms={:?}, gravity_load_factor={}", push.termination, push.capacity_curve.last().unwrap().step, run.gravity_applied, run.gravity_terms, push.steps[0].load_factor);
+    assert_steel_portal_gravity_and_panel_loads(&app, push);
     insta::assert_snapshot!(
         "four_story_steel_portal_pushover",
         format!(
@@ -1826,6 +1827,96 @@ fn pushover_reaches_ultimate_state() {
         !push.member_response.is_empty(),
         "最終確定ステップの部材別応答が空"
     );
+}
+
+fn assert_steel_portal_gravity_and_panel_loads(
+    app: &App,
+    push: &sepika_solver::nonlinear::pushover::PushoverResult,
+) {
+    use sepika_core::model::{AnalysisKind, MemberLoadKind};
+    use sepika_element::behavior::{Ctx, LocalVec};
+    use sepika_element::factory::{build_nonlinear_behavior, StrengthBasis};
+    let model = &app.core.model;
+    let initial = push.confirmed_history.as_ref().unwrap().first().unwrap();
+    let terms = sepika_core::load_combo::ultimate_gravity_terms(model).unwrap();
+    for id in [2, 5, 8, 11] {
+        let element = model.element(sepika_core::ids::ElemId(id)).unwrap();
+        let beam = sepika_element::frame::beam::BeamElement::new(element, model);
+        let mut loads = Vec::new();
+        let mut w_n_per_mm = 0.0;
+        for &(case, factor) in &terms {
+            for load in model
+                .load_cases
+                .iter()
+                .find(|lc| lc.id == case)
+                .unwrap()
+                .member
+                .iter()
+                .filter(|load| load.elem == element.id)
+            {
+                let MemberLoadKind::Distributed { a, b, w1, w2 } = load.kind else {
+                    panic!("全長等分布荷重の対照")
+                };
+                assert_eq!((a, b), (0.0, beam.length));
+                assert_eq!(w1, w2);
+                assert_eq!(load.dir, [0.0, 0.0, -1.0]);
+                assert_eq!(factor, 1.0);
+                w_n_per_mm -= w1;
+                loads.push(load.clone());
+            }
+        }
+        let expected_shear_n = -w_n_per_mm * beam.length / 2.0;
+        let recorded = initial
+            .members
+            .iter()
+            .find(|member| member.elem == element.id)
+            .unwrap();
+        assert!((recorded.shear_strong - expected_shear_n).abs() < 1e-6);
+        let li_mm = beam.rigid.rigid_length_i();
+        let lj_mm = beam.rigid.rigid_length_j();
+        assert_eq!(li_mm, lj_mm);
+        let flex_mm = beam.length - li_mm - lj_mm;
+        // 同一の両端ばねks=6EI/Lでは、反対称端モーメントの荷重縮約率は1/(1+2EI/(Lks))=3/4。
+        let q_moment_nmm = w_n_per_mm
+            * (0.75 * flex_mm.powi(2) / 12.0 + li_mm * flex_mm / 2.0 + li_mm.powi(2) / 2.0);
+        let mut local = [0.0; 12];
+        local[1] = -expected_shear_n;
+        local[7] = -expected_shear_n;
+        local[5] = q_moment_nmm;
+        local[11] = -q_moment_nmm;
+        let expected = beam.axis.rotate_to_global(&local).map(|load| -load);
+        let mut behavior = build_nonlinear_behavior(
+            element,
+            model,
+            StrengthBasis::MaterialStrength,
+            AnalysisKind::Incremental,
+            None,
+        );
+        assert_eq!(behavior.n_dof(), 16);
+        let zero = LocalVec {
+            data: smallvec::smallvec![0.0; 16],
+        };
+        behavior
+            .update_state_with_member_loads(&zero, &loads, false, &Ctx { model })
+            .unwrap();
+        let response = behavior.state_frame_load_response().unwrap().unwrap();
+        for (actual, expected) in response.nodal_residual.data[..12].iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-7 * expected.abs().max(1.0));
+        }
+        for end in 0..2 {
+            for axis in 0..2 {
+                let expected_panel = -0.5 * expected[end * 6 + 3 + axis];
+                let actual = response.nodal_residual.data[12 + 2 * end + axis];
+                assert!((actual - expected_panel).abs() < 1e-7 * expected_panel.abs().max(1.0));
+            }
+        }
+    }
+    for step in push.confirmed_history.as_ref().unwrap().iter().skip(1) {
+        for cut in &step.cuts {
+            let evaluated = cut.evaluate().unwrap();
+            assert!(evaluated.residual_n.abs() <= evaluated.tolerance_n);
+        }
+    }
 }
 
 // ===================== 11. 時刻歴応答解析 =====================
