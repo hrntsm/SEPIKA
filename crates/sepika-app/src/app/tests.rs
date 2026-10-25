@@ -8612,9 +8612,9 @@ fn test_import_stbridge_then_run_dl_succeeds() {
 ///   落ちる床荷重・小梁自重は大梁の**中間集中荷重（CMQ）**へ変換される。
 /// - 実梁がないスラブ辺（小梁上の辺・大梁の中間区間）の荷重も捨てられず
 ///   主架構へ伝達され、鉛直荷重の総和が保存される。
-/// - そのまま線形静的解析が成功する（小梁支持節点は解析自由度から除外）。
+/// - 矩形RC梁の全長協力剛性の適用範囲外として、部分取付きの床板を理由付きで診断する。
 #[test]
-fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
+fn test_secondary_beam_subdivided_slab_dl_cmq_and_rc_scope_diagnostic() {
     use sepika_core::ids::{FloorRegionId, MaterialId, SectionId};
     use sepika_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime,
@@ -8940,23 +8940,22 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         "小梁支持節点への節点荷重は大梁の集中荷重へ変換されるはず"
     );
 
-    // そのまま線形静的解析が成功する（小梁支持節点は解析自由度から除外される）。
     let dl_id = dl.id;
     app.run_linear_static(dl_id);
+    let error = app.core.scoped.last_error.as_ref().unwrap();
     assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
+        error.contains("部材 ID 4") && error.contains("床板") && error.contains("梁全長の取付き"),
+        "{error}"
     );
     assert!(app
         .core
         .scoped
         .results
         .as_ref()
-        .unwrap()
-        .statics
-        .iter()
-        .any(|(k, _)| *k == StaticCaseKey::User(dl_id)));
+        .is_none_or(|results| results
+            .statics
+            .iter()
+            .all(|(key, _)| *key != StaticCaseKey::User(dl_id))));
 }
 
 /// 診断: 支点が1つも定義されていない空モデルは支点なし Error を返す。
