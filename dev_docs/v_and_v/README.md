@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## RC片持ち架構の明示階入力（#786）
+
+[確認記録](RC片持ち架構の階入力_Issue786_確認記録.md)は、元の回転拘束付き自動剛床の成功、追加拘束なしのねじり保持モデルの独立変位・支持釣合い、既定解放による機構のApp拒否をVerificationする。状態は🔶。要素→テスト索引は同記録の自動回帰表を参照する。[無階直接solverの特異性見逃し（#818）](https://github.com/hrntsm/SEPIKA/issues/818)、一般の解放ルール、物理Validation・手動GUIは未確認として保持する。
+
 本ディレクトリは、SEPIKA の各要素・各設計式に対する V&V（Verification & Validation）レポートを格納する。
 
 ## 更新手順
@@ -112,6 +116,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC片持ち架構の階入力_Issue786_確認記録.md](RC片持ち架構の階入力_Issue786_確認記録.md) | 自動剛床とRC片持ち架構の独立変位・支持釣合い、ねじり解放機構の拒否 | 🔶（数値Verification。物理Validation・手動GUI・一般特異性判定は記録参照） |
 | [古い自動荷重と通常保存_Issue816_確認記録.md](古い自動荷重と通常保存_Issue816_確認記録.md) | 梁短縮後の既存自動DLと通常保存・再読込、手入力検証・失敗時状態保持・直接検定保存 | 🔶（公開編集/保存入口の自動Verification。手動GUI・物理Validation・最終ゲート未確認） |
 | [自立壁n倍法_Issue620_確認記録.md](自立壁n倍法_Issue620_確認記録.md) | 自立壁n倍法の対象・入力・同一断面柱集計 | 🔶（独立Verification。原書・動的専用比較・実測Validation未） |
 | [梁の床板嵩上げ_Issue731_2026-10.md](梁の床板嵩上げ_Issue731_2026-10.md) | 中心線上端・投影幅、床板材料別の嵩上げ重量/質量、区間DL・小梁設計・動的層質量 | 🔶（独立Verification、手動GUI・Validation未） |
@@ -330,6 +335,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 28a | 鉛直Column支持の小梁自重 | sepika-core / sepika-edit / sepika-load | face_distance.rs, tests/column_support_faces.rs | [Issue423の独立値・公開入口・全5Done](鉛直柱支持小梁の自重フェース_Issue423_2026-10.md) | 横断 | 🔶（公開8試験/MassEquiv節点加算/旧20保存回帰Verification、Validation未実施） |
 | 1d | 質点系先行成果鮮度 | sepika-app | app/actions/lumped_mass.rs | [Issue612検証](質点系先行成果鮮度_Issue612_2026-10.md)：実成果存在・入力一致、限定片持柱独立 K/T、拒否/失敗/取消保持 | P1/P2 | 🔶（自動入口 Verification、手動 GUI 未） |
 | 618 | RC梁の左右床板厚 | sepika-element / sepika-core | frame/beam/{stiffness_factors,construct,tests}.rs、result_contract.rs | [独立期待値とテスト索引](RC梁左右床板厚_Issue618_2026-10.md#独立期待値とテスト索引) | 幾何剛性 | 🔶（有限例Verification） |
+| 786 | RC片持ち架構の階入力と安定性 | sepika-app / sepika-element / sepika-solver | app/tests.rs | [独立モード・変位・支持釣合いと自動回帰](RC片持ち架構の階入力_Issue786_確認記録.md#自動回帰と実行記録) | 横断 | 🔶（有限Verification、手動GUI・物理Validation未） |
 | 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
 | 760 | 梁文書の局所軸と保存性能 | sepika-core / sepika-element / sepika-app | section_shape/{properties,builder}.rs、geom/vec3.rs、frame/beam/{construct,stiffness,tests}.rs、app/shear_area_acceptance_tests.rs | [独立座標図・手計算と直接試験](梁要素の局所軸と保存性能_Issue760_2026-10.md#独立手計算と直接試験) | 文書 | ✅（座標・添字の対応のVerification） |
 | 713 | 部材荷重の微小区間 | sepika-element / sepika-solver | frame/member_load.rs・common/linear_load.rs・statics/linear | [独立期待値と公開入口](部材荷重微小区間_Issue713_2026-10.md#独立期待値と公開入口) | 横断 | 🔶（限定Verification、後続ゲート・Validation未） |

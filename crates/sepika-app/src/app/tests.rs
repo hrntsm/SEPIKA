@@ -7824,11 +7824,7 @@ fn test_auto_generate_combinations_uses_standard_case_names() {
     assert!(!names.iter().any(|n| n.contains('W')), "{names:?}");
 }
 
-/// 終局検定（靭性保証型耐震設計指針）の App 経由の一括算定を検証する。
-/// RC 矩形の柱・梁について `compute_ultimate_checks` が部材別の終局せん断・付着
-/// 余裕度を返し、柱には軸終局耐力（Nuc/Nut）が付くことを確認する。
-#[test]
-fn test_compute_ultimate_checks_rc_frame() {
+fn rc_cantilever_frame() -> sepika_core::model::Model {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::MaterialId;
     use sepika_core::model::{
@@ -7838,7 +7834,6 @@ fn test_compute_ultimate_checks_rc_frame() {
     use sepika_core::section_shape::{
         RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
     };
-    use sepika_design_jp::MemberKind;
 
     let rebar = RcRectColumnRebar {
         main_dia: 25.0,
@@ -7967,18 +7962,21 @@ fn test_compute_ultimate_checks_rc_frame() {
         });
     }
 
+    model
+}
+
+/// 終局検定（靭性保証型耐震設計指針）の App 経由の一括算定を検証する。
+/// RC 矩形の柱・梁について `compute_ultimate_checks` が部材別の終局せん断・付着
+/// 余裕度を返し、柱には軸終局耐力（Nuc/Nut）が付くことを確認する。
+#[test]
+fn test_compute_ultimate_checks_rc_frame() {
+    use sepika_design_jp::MemberKind;
+    let mut model = rc_cantilever_frame();
     for node in &mut model.nodes[1..] {
         node.restraint.set_fixed(sepika_core::dof::Dof::Rx);
         node.restraint.set_fixed(sepika_core::dof::Dof::Rz);
     }
     model.stories = explicit_story_inputs(&[0.0, 3000.0]);
-    model
-        .constraints
-        .push(sepika_core::model::Constraint::rigid_diaphragm(
-            sepika_core::ids::StoryId(1),
-            NodeId(1),
-            vec![NodeId(2)],
-        ));
     let mut app = App::default();
     app.load_model(model.clone());
     assert!(app
@@ -14999,5 +14997,234 @@ pub(super) fn assign_zero_density_test_frame_sections(model: &mut sepika_core::m
                 girder
             });
         }
+    }
+}
+
+#[test]
+fn rc_cantilever_released_torsion_mechanism_is_rejected_with_diaphragms() {
+    use sepika_core::model::Constraint;
+    use sepika_element::factory::build_behavior;
+    use sepika_element::frame::beam::{i_end_torsion_release, RigidZoneRule};
+
+    let mut bare = rc_cantilever_frame();
+    sepika_element::frame::beam::apply_auto_rigid_zones(&mut bare, &RigidZoneRule::default());
+    assert!(i_end_torsion_release(&bare.elements[0], &bare));
+    assert!(!i_end_torsion_release(&bare.elements[1], &bare));
+    let mechanism = [
+        [0.0; 6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.001],
+        [0.0, 6.0, 0.0, 0.0, 0.0, 0.001],
+    ];
+    for element in &bare.elements {
+        let displacement: Vec<_> = element
+            .nodes
+            .iter()
+            .flat_map(|n| mechanism[n.index()])
+            .collect();
+        let mut behavior = build_behavior(element, &bare);
+        let ctx = sepika_element::behavior::Ctx { model: &bare };
+        behavior
+            .update_state(
+                &sepika_element::behavior::LocalVec {
+                    data: displacement.into_iter().collect(),
+                },
+                false,
+                &ctx,
+            )
+            .unwrap();
+        let response = behavior.internal_force(&ctx);
+        assert!(response.data.iter().all(|f| f.abs() < 1e-5));
+    }
+    let mut no_stories = App::default();
+    no_stories.load_model(with_explicit_frame_gravity(rc_cantilever_frame()));
+    no_stories.run_linear_static(LoadCaseId(0));
+    assert!(no_stories
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("FL・ΔSL"));
+    assert!(no_stories.current_static().is_none());
+
+    for explicit in [false, true] {
+        let mut model = rc_cantilever_frame();
+        model.stories = explicit_story_inputs(&[0.0, 3000.0]);
+        if explicit {
+            model.constraints.push(Constraint::rigid_diaphragm(
+                StoryId(1),
+                NodeId(1),
+                vec![NodeId(2)],
+            ));
+        }
+        let mut app = App::default();
+        app.load_model(with_explicit_frame_gravity(model));
+        app.run_linear_static(LoadCaseId(0));
+        let error = app.core.scoped.last_error.as_ref().unwrap();
+        assert!(error.contains("特異"), "{error}");
+        assert!(app.current_static().is_none());
+        assert_eq!(app.core.model.elements.len(), 2);
+        assert_eq!(
+            app.core.model.generated_masters.len(),
+            if explicit { 1 } else { 2 }
+        );
+    }
+}
+
+#[test]
+fn rc_cantilever_keep_torsion_matches_independent_displacements_and_support_balance() {
+    use sepika_core::model::{Constraint, GirderTorsionMode, LoadCase, LoadCaseKind, NodalLoad};
+    use sepika_element::factory::build_behavior;
+    use sepika_element::frame::beam::RigidZoneRule;
+    use sepika_solver::statics::analysis::Analysis;
+
+    let assert_close = |actual: f64, expected: f64| {
+        let tolerance = 1e-10_f64.max(expected.abs() * 1e-8);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "actual={actual}, expected={expected}, tolerance={tolerance}"
+        );
+    };
+    let mut model = rc_cantilever_frame();
+    model.girder_torsion = GirderTorsionMode::Keep;
+    model.load_cases.push(LoadCase {
+        id: LoadCaseId(0),
+        name: "独立釣合い確認".into(),
+        kind: LoadCaseKind::Wind,
+        nodal: vec![NodalLoad::manual(
+            NodeId(2),
+            [0.0, 500.0, -1000.0, 0.0, 0.0, 0.0],
+        )],
+        member: vec![],
+    });
+    let mut bare = model.clone();
+    sepika_element::frame::beam::apply_auto_rigid_zones(&mut bare, &RigidZoneRule::default());
+    let bare_result = Analysis::prepare(&bare)
+        .unwrap()
+        .linear_static(LoadCaseId(0))
+        .unwrap();
+    let mut reference: Option<Vec<f64>> = None;
+    for explicit in [false, true] {
+        let mut input = model.clone();
+        input.stories = explicit_story_inputs(&[0.0, 3000.0]);
+        if explicit {
+            input.constraints.push(Constraint::rigid_diaphragm(
+                StoryId(1),
+                NodeId(1),
+                vec![NodeId(2)],
+            ));
+        }
+        let mut app = App::default();
+        app.load_model(with_explicit_frame_gravity(input));
+        app.run_linear_static(LoadCaseId(0));
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let result = app.current_static().unwrap();
+        assert_eq!(app.core.model.elements.len(), 2);
+        assert_eq!(
+            app.core.model.nodes[1].restraint,
+            sepika_core::dof::Dof6Mask::FREE
+        );
+        assert_eq!(
+            app.core.model.nodes[2].restraint,
+            sepika_core::dof::Dof6Mask::FREE
+        );
+        let col = &app.core.model.elements[0];
+        let beam = &app.core.model.elements[1];
+        assert_eq!(
+            [col.rigid_zone.length_i, col.rigid_zone.length_j],
+            [0.0, 200.0]
+        );
+        assert_eq!(
+            [beam.rigid_zone.length_i, beam.rigid_zone.length_j],
+            [125.0, 0.0]
+        );
+        let e = 23000.0;
+        let g = e / 2.4;
+        let col_i_mm4 = 10_800_000_000.0;
+        let col_j_mm4 = 18_252_000_000.0;
+        let beam_i_mm4 = 11_433_333_333.333_334;
+        let uy_col_mm = 500.0 * (3000_f64.powi(3) - 200_f64.powi(3)) / (3.0 * e * col_i_mm4)
+            + 500.0 * 2800.0 / (g * 300_000.0);
+        let ry_col_rad = 1000.0 * 6000.0 * 2800.0 / (e * col_i_mm4);
+        let rz_col_rad = 500.0 * 6000.0 * 3000.0 / (g * col_j_mm4);
+        let expected_top = [
+            1000.0 * 6000.0 * (3000_f64.powi(2) - 200_f64.powi(2)) / (2.0 * e * col_i_mm4),
+            uy_col_mm,
+            -1000.0 * 3000.0 / (e * 360_000.0),
+            -500.0 * (3000_f64.powi(2) - 200_f64.powi(2)) / (2.0 * e * col_i_mm4),
+            ry_col_rad,
+            rz_col_rad,
+        ];
+        let expected_tip = [
+            expected_top[0],
+            uy_col_mm + 6000.0 * rz_col_rad,
+            expected_top[2]
+                - 6000.0 * ry_col_rad
+                - 1000.0 * 5875_f64.powi(3) / (3.0 * e * beam_i_mm4)
+                - 1000.0 * 5875.0 / (g * (280_000.0 / 1.2)),
+            expected_top[3],
+            ry_col_rad + 1000.0 * 5875_f64.powi(2) / (2.0 * e * beam_i_mm4),
+            rz_col_rad,
+        ];
+        for (actual, expected) in result.disp[1..3]
+            .iter()
+            .flatten()
+            .zip(expected_top.into_iter().chain(expected_tip))
+        {
+            assert_close(*actual, expected);
+        }
+        for node in 1..3 {
+            for dof in [0, 2, 4] {
+                assert_close(result.disp[node][dof], bare_result.disp[node][dof]);
+            }
+        }
+        let displacement: Vec<_> = col
+            .nodes
+            .iter()
+            .flat_map(|n| result.disp[n.index()])
+            .collect();
+        let mut behavior = build_behavior(col, &app.core.model);
+        let ctx = sepika_element::behavior::Ctx {
+            model: &app.core.model,
+        };
+        behavior
+            .update_state(
+                &sepika_element::behavior::LocalVec {
+                    data: displacement.into_iter().collect(),
+                },
+                false,
+                &ctx,
+            )
+            .unwrap();
+        let support = behavior.internal_force(&ctx);
+        for (actual, expected) in support.data[..6].iter().zip([
+            0.0,
+            -500.0,
+            1000.0,
+            1_500_000.0,
+            -6_000_000.0,
+            -3_000_000.0,
+        ]) {
+            assert!(
+                (*actual - expected).abs() < 1e-6,
+                "actual={actual}, expected={expected}"
+            );
+        }
+        if let Some(previous) = &reference {
+            for (actual, expected) in result.disp[..3].iter().flatten().zip(previous) {
+                assert_close(*actual, *expected);
+            }
+        }
+        reference = Some(
+            result.disp[..3]
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
     }
 }
