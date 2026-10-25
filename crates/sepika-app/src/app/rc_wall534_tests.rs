@@ -189,22 +189,8 @@ fn crack_reference_input_edits_undo_redo_and_save_never_reauthenticate_old_resul
         ));
         app.save_project_to(path.clone());
         if edit == 2 {
-            assert!(!path.exists());
-            assert!(
-                app.core
-                    .scoped
-                    .last_error
-                    .as_ref()
-                    .is_some_and(|reason| reason.contains("保存エラー")
-                        && reason.contains("[0, 4200]")
-                        && reason.contains("材長 2100")),
-                "{:?}",
-                app.core.scoped.last_error
-            );
-            app.sync_auto_load_cases_action();
-            assert!(app.core.model.validate_member_load_extents().is_ok());
+            assert!(app.core.model.validate_member_load_extents().is_err());
             assert!(app.current_design_results().is_none());
-            app.save_project_to(path.clone());
         }
         assert!(app.core.scoped.pending_save_recording.is_none());
         assert!(

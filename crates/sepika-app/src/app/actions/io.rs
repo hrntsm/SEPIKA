@@ -77,6 +77,8 @@ impl App {
     /// 生成入力または検定契約が不一致の検定は保存対象から除外する。
     /// 解析結果を同梱しないときは、振動荷重ケースもモデルから外して書く
     /// （結果のない空ケースがナビに残らないようにする。メモリ上のケースは残す）。
+    /// 準備が古く自動部材荷重の位置・区間が不正な場合は、保存候補から全自動荷重と成果を除く。
+    /// 手入力と編集中モデル・履歴は保持し、保存のための準備計算は実行しない。
     ///
     /// 解析結果の直列化サイズが `SAVE_RECORDING_CONFIRM_BYTES` を超え、かつ
     /// 時刻歴の詳細記録（`ThRecording`）を含む場合は、保存せずに確認保留
@@ -101,6 +103,16 @@ impl App {
             return;
         }
         self.sync_pushover_for_save();
+        let discard_auto_loads = self.core.scoped.staleness.preparation_stale
+            && self.core.model.load_cases.iter().any(|case| {
+                case.member.iter().any(|load| {
+                    load.source.is_auto()
+                        && self.core.model.element(load.elem).is_some_and(|element| {
+                            load.validate_extent(self.core.model.member_length(element))
+                                .is_err()
+                        })
+                })
+            });
         let prep = self
             .core
             .scoped
@@ -118,7 +130,8 @@ impl App {
         } else {
             None
         };
-        let persist_results = self.core.scoped.results.is_some()
+        let persist_results = !discard_auto_loads
+            && self.core.scoped.results.is_some()
             && (!self.core.scoped.staleness.results_stale
                 || (self.require_design_input().is_ok()
                     && self
@@ -212,7 +225,19 @@ impl App {
                 std::mem::take(&mut self.core.model.lumped_vibration_cases),
             ))
         };
-        let save_result = sepika_io::ovika::save_ovika(&path, &self.core.model, extras);
+        let save_model = discard_auto_loads.then(|| {
+            let mut model = self.core.model.clone();
+            for case in &mut model.load_cases {
+                case.nodal.retain(|load| !load.source.is_auto());
+                case.member.retain(|load| !load.source.is_auto());
+            }
+            model
+        });
+        let save_result = sepika_io::ovika::save_ovika(
+            &path,
+            save_model.as_ref().unwrap_or(&self.core.model),
+            extras,
+        );
         if let Some((spatial, lumped)) = taken_vibration_cases {
             self.core.model.vibration_cases = spatial;
             self.core.model.lumped_vibration_cases = lumped;

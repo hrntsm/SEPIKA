@@ -2595,4 +2595,7 @@ mod beam_placement_tests;
 mod girder_weight_tests;
 
 #[cfg(all(test, feature = "gui"))]
+mod stale_auto_load_save_tests;
+
+#[cfg(all(test, feature = "gui"))]
 mod slab_placement_tests;
