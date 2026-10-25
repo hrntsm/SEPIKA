@@ -7,6 +7,20 @@ pub(super) struct PhysicalPushoverLoads {
 }
 
 impl PhysicalPushoverLoads {
+    #[cfg(test)]
+    pub(super) fn empty() -> Self {
+        Self {
+            gravity_cases: vec![],
+            reference: LoadCase {
+                id: LoadCaseId(0),
+                name: String::new(),
+                nodal: vec![],
+                member: vec![],
+                kind: LoadCaseKind::Other,
+            },
+        }
+    }
+
     pub(super) fn new(
         model: &Model,
         terms: &[(LoadCaseId, f64)],

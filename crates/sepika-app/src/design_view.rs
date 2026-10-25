@@ -692,7 +692,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     for (label, point, conditions, forces) in [("Ds判定", &source.ds_point, &source.ds_conditions, &source.ds_forces), ("保有耐力比較", &source.capacity_point, &source.capacity_conditions, &source.capacity_forces)] {
                         ui.label(format!("{label}: run {} step {} {:?} / {}", point.run_id, point.step, point.direction, point.selection_reason));
                         ui.label(format!("入力世代 {} / {}", crate::summary::input_generation_hash(&point.input_generation), crate::summary::pushover_conditions_text(conditions)));
-                        for f in forces { ui.label(format!("層{} Qu={} 壁={} 筋かい={} 柱梁={} 外力={} 基準={} 支持ばね={} 残差={} 許容差={} [N] βu={}", f.layer+1, f.qu_n, f.wall_n, f.brace_n, f.frame_n, f.external_n, f.reference_n, f.support_n, f.residual_n, f.tolerance_n, f.beta_u)); }
+                        for f in forces { ui.label(format!("層{} Qu={} 壁={} 筋かい={} 柱梁={} 外力={} 基準={} 上側支持抵抗={} 残差={} 許容差={} [N] βu={}", f.layer+1, f.qu_n, f.wall_n, f.brace_n, f.frame_n, f.external_n, f.reference_n, f.support_n, f.residual_n, f.tolerance_n, f.beta_u)); }
                     }
                     ui.label(format!("Ds終了理由: {:?} / 比較終了理由: {:?}", source.termination, source.capacity_termination));
                     ui.hyperlink_to("βu定義の背景資料（住指発96・歴史通知）", "https://www.mlit.go.jp/notice/noticedata/sgml/099/81000085/81000085.html");

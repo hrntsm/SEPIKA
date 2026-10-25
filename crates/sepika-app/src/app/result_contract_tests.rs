@@ -243,6 +243,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-local-frame-reference", Some(37), "旧契約"),
         ("old-face-direction-reference", Some(38), "旧契約"),
         ("old-secondary-materialization", Some(44), "旧契約"),
+        ("old-pushover-support-resistance", Some(48), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {

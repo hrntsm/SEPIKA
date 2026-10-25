@@ -93,6 +93,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0068](0068-panel-reference-column-lower-first.md) | accepted | 仕口パネルの参照柱を物理的な下側優先で統一する |
 | [0069](0069-panel-column-axes-and-h-weak-shear.md) | accepted | 仕口パネルを柱2主軸へ接続し、H形弱軸はフランジ2枚の純せん断モデルとする |
+| [0074](0074-pushover-physical-support-resistance.md) | accepted | 増分性能曲線を物理支持反力から回復し、層切断面力と区別する |
 
 | [0070](0070-story-fl-sl.md) | accepted | 階の FL・差分を入力とし SL と用途別の高さを導出する |
 

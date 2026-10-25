@@ -1329,7 +1329,7 @@ fn holding_evaluation_rows(
         match po.evaluate_stories(point, purpose) {
             Ok(stories) => {
                 for s in stories {
-                    rows.push((format!("{label} 層{} 符号付き層切断面力[N]", s.layer+1), format!("Qu={} Wall={} Brace={} Frame={} βu={} 上層外力={} 基準外力={} 支持ばね内力={} 残差={} 許容差={}", s.qu_n, s.wall_n, s.brace_n, s.frame_n, s.beta_u, s.external_n, s.reference_n, s.support_n, s.residual_n, s.tolerance_n)));
+                    rows.push((format!("{label} 層{} 符号付き層切断面力[N]", s.layer+1), format!("Qu={} Wall={} Brace={} Frame={} βu={} 上層外力={} 基準外力={} 上側支持抵抗={} 残差={} 許容差={}", s.qu_n, s.wall_n, s.brace_n, s.frame_n, s.beta_u, s.external_n, s.reference_n, s.support_n, s.residual_n, s.tolerance_n)));
                 }
             }
             Err(reason) => rows.push((format!("{label}集計不能"), reason)),
