@@ -1,5 +1,5 @@
 use super::*;
-use sepika_core::ids::StoryId;
+use sepika_core::ids::{SecondaryMemberId, StoryId};
 use sepika_core::model::*;
 use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
 use sepika_load::self_weight::{girder_self_weight_breakdown, self_weight_case_content};
@@ -650,6 +650,93 @@ fn girder_overlap_only_applies_to_rectangular_rc_src_girders() {
     assert!(girder_self_weight_breakdown(&model, &model.elements[0])
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn 二次小梁の直接設計へ嵩上げの独立曲げせん断増分が届く() {
+    let mut base = model();
+    slab(&mut base, 0, 150., 0.);
+    slab(&mut base, 1, 150., 0.);
+    base.sections[0] = SectionShape::SteelFlatBar {
+        width: 400.,
+        thick: 300.,
+    }
+    .to_section(SectionId(0), "支持梁".into());
+    base.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    base.sections[0].material = Some(MaterialId(0));
+    base.sections[1] = SectionShape::SteelBox {
+        height: 600.,
+        width: 400.,
+        thick: 10.,
+        corner_r: Some(0.),
+    }
+    .to_section(SectionId(1), "小梁".into());
+    base.sections[1].frame_use = Some(FrameSectionUse::Girder);
+    base.sections[1].material = Some(MaterialId(0));
+    base.elements.remove(0);
+    for (i, e) in base.elements.iter_mut().enumerate() {
+        e.id = ElemId(i as u32);
+    }
+    for region in &mut base.floor_assignment_regions.regions {
+        for edge in &mut region.boundary {
+            if let SupportMemberId::Primary(id) = edge.support {
+                edge.support = if id.0 == 0 {
+                    SupportMemberId::Secondary(SecondaryMemberId(0))
+                } else {
+                    SupportMemberId::Primary(ElemId(id.0 - 1))
+                };
+            }
+        }
+    }
+    base.floor_regions = vec![FloorRegion {
+        id: sepika_core::ids::FloorRegionId(0),
+        name: "床領域".into(),
+        boundary: [0, 5, 4, 1, 2, 3].map(NodeId).to_vec(),
+        slab_ids: vec![sepika_core::ids::SlabId(0), sepika_core::ids::SlabId(1)],
+        secondary_beams: vec![SecondaryMember {
+            id: SecondaryMemberId(0),
+            section: Some(SectionId(1)),
+            vertical_eccentricity: Some(-150.),
+            ends: SecondaryMemberEnds::Supported([
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(ElemId(2)),
+                    position: 1.,
+                },
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(ElemId(0)),
+                    position: 0.,
+                },
+            ]),
+            ..Default::default()
+        }],
+    }];
+    base.constraints = vec![Constraint::rigid_diaphragm(
+        StoryId(1),
+        NodeId(0),
+        (1..6).map(NodeId).collect(),
+    )];
+    let design = |model: Model| {
+        let mut app = App::default();
+        app.core.model = model;
+        let (checks, _) = app.floor_design_checks().unwrap();
+        checks
+            .into_iter()
+            .find(|(_, target, _)| {
+                *target
+                    == BeamCheckTarget::SecondaryBeam {
+                        member: SecondaryMemberId(0),
+                    }
+            })
+            .unwrap()
+            .2
+    };
+    let increased = design(base.clone());
+    base.floor_regions[0].secondary_beams[0].vertical_eccentricity = Some(-100.);
+    let baseline = design(base);
+    assert!(!increased.unchecked && !baseline.unchecked);
+    assert!((increased.w - baseline.w - 0.448).abs() < 1e-9);
+    assert!((increased.m_max - baseline.m_max - 2150400.).abs() < 1e-5);
+    assert!((increased.q_max - baseline.q_max - 1344.).abs() < 1e-6);
 }
 
 #[test]

@@ -506,10 +506,18 @@ pub fn solve_with_basis(
                     sepika_core::model::SupportMemberId::Secondary(sm.id),
                 )
                 .map_err(crate::floor::FloorDistributionError::SelfWeight)?;
-                loads.extend(upstand.into_iter().map(|segment| match basis {
-                    SelfWeightBasis::Design => segment.design_load,
-                    SelfWeightBasis::MassEquiv => segment.mass_equivalent_load,
-                }));
+                loads.extend(
+                    upstand
+                        .into_iter()
+                        .filter(|segment| match basis {
+                            SelfWeightBasis::Design => segment.design_weight_n > 0.0,
+                            SelfWeightBasis::MassEquiv => segment.mass_equivalent_weight_n > 0.0,
+                        })
+                        .map(|segment| match basis {
+                            SelfWeightBasis::Design => segment.design_load,
+                            SelfWeightBasis::MassEquiv => segment.mass_equivalent_load,
+                        }),
+                );
                 if let Some(w) =
                     self_weight_udl(sm).map_err(crate::floor::FloorDistributionError::SelfWeight)?
                 {

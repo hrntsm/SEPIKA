@@ -890,9 +890,16 @@ fn 斜中空梁の端capで上側管壁が消える不連続を左右極限の�
         );
         assert!((target_dl_increment(&m) - expected_weight).abs() < 1e-6);
         for original in &pieces {
-            let reflected=reversed.iter().find(|s|s.slab==original.slab && (s.interval_mm[0]-(7500.-original.interval_mm[1])).abs()<1e-8 && (s.interval_mm[1]-(7500.-original.interval_mm[0])).abs()<1e-8).unwrap();
-            assert!((reflected.gap_mm[0]-original.gap_mm[1]).abs()<1e-8);
-            assert!((reflected.gap_mm[1]-original.gap_mm[0]).abs()<1e-8);
+            let reflected = reversed
+                .iter()
+                .find(|s| {
+                    s.slab == original.slab
+                        && (s.interval_mm[0] - (7500. - original.interval_mm[1])).abs() < 1e-8
+                        && (s.interval_mm[1] - (7500. - original.interval_mm[0])).abs() < 1e-8
+                })
+                .unwrap();
+            assert!((reflected.gap_mm[0] - original.gap_mm[1]).abs() < 1e-8);
+            assert!((reflected.gap_mm[1] - original.gap_mm[0]).abs() < 1e-8);
         }
     }
 }

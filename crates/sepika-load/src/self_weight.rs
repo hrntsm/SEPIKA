@@ -51,9 +51,18 @@ pub fn self_weight_case_content(
     for item in enumerate_self_weight(model, load_cfg)? {
         match item {
             SelfWeightItem::Upstand { elem_idx, segments } => {
-                member.extend(segments.into_iter().map(|segment| {
-                    MemberLoad::auto(model.elements[elem_idx].id, DIR_DOWN, segment.design_load)
-                }));
+                member.extend(
+                    segments
+                        .into_iter()
+                        .filter(|segment| segment.design_weight_n > 0.0)
+                        .map(|segment| {
+                            MemberLoad::auto(
+                                model.elements[elem_idx].id,
+                                DIR_DOWN,
+                                segment.design_load,
+                            )
+                        }),
+                );
             }
             SelfWeightItem::Line {
                 elem_idx,
