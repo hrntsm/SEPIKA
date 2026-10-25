@@ -804,7 +804,7 @@ fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     );
     let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
 
-    for version in [23, 24, 29] {
+    for version in [23, 24, 29, DESIGN_CONTRACT_VERSION - 1] {
         let (mut loaded, path) = restore(
             &app,
             None,
@@ -2270,4 +2270,139 @@ fn beam_eccentricity_edit_and_saved_reload_reject_results_from_previous_connecti
     assert_eq!(app.result_input(&key), original);
     assert!(app.core.scoped.staleness.results_stale);
     std::fs::remove_file(path).unwrap();
+}
+
+fn assert_cft767_ratio(app: &App, expected: f64) {
+    let bundle = app.current_design_results().expect("現行CFT検定");
+    assert!(bundle.design_source.is_some());
+    assert_eq!(bundle.member_checks.len(), 1);
+    assert!(!bundle.member_checks[0].positions.is_empty());
+    for position in &bundle.member_checks[0].positions {
+        let sepika_design_jp::CheckOutcome::Checked(result) = &position.outcome else {
+            panic!("CFT検定が未算定: {:?}", position.outcome);
+        };
+        assert!(result.basis.contains("CFT"));
+        assert!(
+            (result.ratio() - expected).abs() < 1.0e-11,
+            "actual={}, expected={expected}, result={result:?}",
+            result.ratio()
+        );
+    }
+}
+
+#[test]
+fn cft767_old_saved_design_keeps_analysis_and_requires_material_e_recheck() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+    use sepika_core::{ids::SectionId, section_shape::SectionShape};
+
+    for (pipe, steel_e, expected) in [
+        (false, 100000.0, 2.168526597281381),
+        (false, 300000.0, 1.9514729074061137),
+        (true, 100000.0, 2.904563424070127),
+        (true, 300000.0, 2.5297985673895163),
+    ] {
+        let mut app = super::tests::cft_long_case2_app(8_000_000.0);
+        if pipe {
+            let old = app.core.model.sections[0].clone();
+            app.core.model.sections[0] = sepika_core::model::Section {
+                material: old.material,
+                steel_material: old.steel_material,
+                frame_use: old.frame_use,
+                ..SectionShape::CftPipe {
+                    outer_dia: 400.0,
+                    thick: 12.0,
+                }
+                .to_section(SectionId(0), "CFT767円形".into())
+            };
+        }
+        app.core.model.materials[0].young = steel_e;
+        app.core.model.steel_design_attrs = vec![sepika_core::model::SteelDesignAttr {
+            elem: ElemId(0),
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            c_direct: None,
+            lk_y_direct: Some(7200.0),
+            lk_z_direct: Some(7200.0),
+        }];
+        app.run_linear_static(LoadCaseId(0));
+        app.run_design_check();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert_cft767_ratio(&app, expected);
+        let original = app.current_design_results().unwrap().clone();
+        assert_eq!(
+            original.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            original.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        let original_checks = rmp_serde::to_vec_named(&original.member_checks).unwrap();
+        let (current, current_path) = super::result_contract_tests::restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("cft767-current-{pipe}-{steel_e}"),
+        );
+        assert_cft767_ratio(&current, expected);
+        std::fs::remove_file(current_path).unwrap();
+
+        let (mut loaded, path) = super::result_contract_tests::restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(DESIGN_CONTRACT_VERSION - 1),
+            &format!("cft767-old-{pipe}-{steel_e}"),
+        );
+        assert!(loaded.require_selected_static_input().is_ok());
+        assert!(loaded.current_design_results().is_none());
+        let stale = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(stale.member_forces, original.member_forces);
+        assert_eq!(
+            stale.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert!(stale.member_checks.is_empty());
+        assert!(stale.design_source.is_none());
+        assert_eq!(stale.design_contract_version, None);
+        loaded.save_project_to(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert!(reopened.require_selected_static_input().is_ok());
+        assert!(reopened.current_design_results().is_none());
+        assert!(reopened
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .member_checks
+            .is_empty());
+        reopened.run_design_check();
+        assert!(
+            reopened.core.scoped.last_error.is_none(),
+            "{:?}",
+            reopened.core.scoped.last_error
+        );
+        assert_cft767_ratio(&reopened, expected);
+        let recovered = reopened.current_design_results().unwrap();
+        assert_eq!(
+            recovered.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(recovered.member_forces, original.member_forces);
+        assert_eq!(
+            rmp_serde::to_vec_named(&recovered.member_checks).unwrap(),
+            original_checks
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 }

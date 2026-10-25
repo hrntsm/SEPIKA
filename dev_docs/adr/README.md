@@ -35,7 +35,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0027](0027-calc-docs-use-code-units.md) | accepted | 計算根拠の単位表記は法令・規準の単位に従う |
 | [0028](0028-src-cft-ns-material-or-fallback.md) | partially superseded by ADR-0062 | SRC/CFT の等価断面剛性は材料由来 ns を通常とし、算定不能時は N_S_EQ=15 へフォールバックして通知する |
 | [0029](0029-live-load-four-purposes.md) | accepted | 積載荷重を床用・小梁用・大梁用・地震力用の 4 区分とする |
-| [0030](0030-cft-steel-allowable-stress-fixed-young.md) | accepted | CFT の鋼管部分の許容応力度は固定ヤング係数 E_STEEL で算定する |
+| [0030](0030-cft-steel-allowable-stress-fixed-young.md) | accepted | CFT の鋼管を専用材料で参照し、許容圧縮には正の有限な材料Eを用いる |
 | [0031](0031-withdraw-high-strength-shear-reinforcement.md) | accepted | 高強度せん断補強筋の製品別対応を撤回する |
 | [0032](0032-concrete-allowable-stress-basis.md) | accepted | コンクリートの許容圧縮・せん断応力度の採用値 |
 | [0033](0033-steel-design-weight-vs-physical-mass.md) | accepted | 鋼材の設計重量（78.5 kN/m³）と物理質量（7.85 t/m³）を分離する |
