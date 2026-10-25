@@ -244,6 +244,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-face-direction-reference", Some(38), "旧契約"),
         ("old-secondary-materialization", Some(44), "旧契約"),
         ("old-pushover-support-resistance", Some(48), "旧契約"),
+        ("old-fiber-end-release-equilibrium", Some(49), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -288,7 +289,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20, 22, 24, 26, 28, 37, 38] {
+    for version in [5, 6, 7, 20, 22, 24, 26, 28, 37, 38, 49] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
