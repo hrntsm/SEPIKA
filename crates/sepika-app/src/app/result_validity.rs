@@ -1340,7 +1340,7 @@ mod purpose_tests {
                 format!("Frame={frame} N"),
                 format!("上層外力={external} N"),
                 "基準外力=100 N".into(),
-                "支持ばね内力=2 N".into(),
+                "上側支持抵抗=2 N".into(),
                 format!("残差={residual} N"),
                 "許容差=0.000001 N".into(),
                 format!("βu={beta} [-]"),

@@ -46,6 +46,7 @@ pub struct StoryCut {
     pub forces: Vec<CutForce>,
     pub external_n: f64,
     pub reference_n: f64,
+    /// 切断面上側の固定支持・厳密ゼロ変位拘束・地盤支持ばねの抵抗 `[N]`。
     pub support_n: f64,
     pub tolerance_n: f64,
     pub unavailable: Option<String>,
@@ -116,7 +117,7 @@ impl StoryCut {
         let diagnostic = |reason: &str| {
             let beta_text = beta.map_or_else(|| "未定義".into(), |v| v.to_string());
             fail(&format!(
-                "{reason}; Qu={qu} N Wall={wall} N Brace={brace} N Frame={frame} N 上層外力={} N 基準外力={} N 支持ばね内力={} N 残差={residual} N 許容差={} N βu={beta_text} [-]",
+                "{reason}; Qu={qu} N Wall={wall} N Brace={brace} N Frame={frame} N 上層外力={} N 基準外力={} N 上側支持抵抗={} N 残差={residual} N 許容差={} N βu={beta_text} [-]",
                 self.external_n, self.reference_n, self.support_n, self.tolerance_n
             ))
         };
@@ -317,16 +318,46 @@ impl PushoverResult {
     }
 }
 
+#[cfg(test)]
 pub(super) fn record_cuts(
     model: &Model,
     dofmap: &sepika_core::dof::DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
     dir: SeismicDir,
 ) -> Vec<StoryCut> {
+    let responses = super::geom::member_recording_responses(model, behaviors).unwrap();
+    let empty = sepika_core::model::LoadCase {
+        id: sepika_core::ids::LoadCaseId(0),
+        name: String::new(),
+        nodal: vec![],
+        member: vec![],
+        kind: Default::default(),
+    };
+    let physical = super::physical_response::PhysicalStep::recover(
+        model,
+        dofmap,
+        behaviors,
+        &responses,
+        &vec![0.; dofmap.n_active()],
+        empty.clone(),
+        empty,
+    )
+    .unwrap();
+    record_cuts_with_responses(model, dofmap, behaviors, dir, &responses, &physical).unwrap()
+}
+
+pub(super) fn record_cuts_with_responses(
+    model: &Model,
+    dofmap: &sepika_core::dof::DofMap,
+    behaviors: &[Box<dyn ElementBehavior>],
+    dir: SeismicDir,
+    responses: &[Option<sepika_element::behavior::LoadedFrameResponse>],
+    physical: &super::physical_response::PhysicalStep,
+) -> Result<Vec<StoryCut>, String> {
     let d = usize::from(dir == SeismicDir::Y);
     let ctx = Ctx { model };
     let index = sepika_core::model::WallSideColumnIndex::build(model);
-    model
+    Ok(model
         .layers()
         .iter()
         .map(|layer| {
@@ -407,21 +438,7 @@ pub(super) fn record_cuts(
                 } else {
                     ForceGroup::Frame
                 };
-                let response = if b.owns_frame_member_loads() {
-                    match b.state_frame_load_response() {
-                        Ok(Some(response)) => Some(response),
-                        Ok(None) => {
-                            cut.unavailable = Some("壁側柱の確定応答が欠落しています".into());
-                            continue;
-                        }
-                        Err(reason) => {
-                            cut.unavailable = Some(reason);
-                            continue;
-                        }
-                    }
-                } else {
-                    None
-                };
+                let response = responses[i].as_ref();
                 let force_n = if let Some(response) = response {
                     let pi = nodes[0].coord;
                     let pj = nodes[1].coord;
@@ -444,26 +461,31 @@ pub(super) fn record_cuts(
                             - section[1] * frame.rot[1][d]
                             - section[2] * frame.rot[2][d])
                 } else {
-                    let force_n = nodes
+                    let end_force = physical.element_nodal[i]
                         .iter()
-                        .filter(|n| n.coord[2] > z)
-                        .map(|n| {
-                            global_dofs
-                                .iter()
-                                .position(|g| {
-                                    Some(*g)
-                                        == dofmap.active(n.id.index() * 6 + d).map(|a| a as usize)
-                                })
-                                .and_then(|k| f.data.get(k))
-                                .copied()
-                        })
-                        .collect::<Option<Vec<_>>>()
-                        .map(|v| v.iter().sum());
-                    let Some(force_n) = force_n else {
-                        cut.unavailable = Some("切断要素の内力自由度順が節点と一致しません".into());
-                        continue;
+                        .filter(|(node, _)| model.nodes[*node].coord[2] > z)
+                        .map(|(_, force)| force[d])
+                        .sum::<f64>();
+                    let source = sepika_core::model::LoadCase {
+                        id: physical.source.id,
+                        name: String::new(),
+                        nodal: vec![],
+                        member: physical
+                            .source
+                            .member
+                            .iter()
+                            .filter(|load| load.elem == elem.id)
+                            .cloned()
+                            .collect(),
+                        kind: Default::default(),
                     };
-                    force_n
+                    match super::physical_response::load_above(model, &source, z, d) {
+                        Ok(applied) => end_force + applied,
+                        Err(reason) => {
+                            cut.unavailable = Some(reason);
+                            continue;
+                        }
+                    }
                 };
                 cut.forces.push(CutForce {
                     elem: elem.id,
@@ -473,7 +495,7 @@ pub(super) fn record_cuts(
             }
             cut
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -817,12 +839,20 @@ mod tests {
                 SeismicDir::X,
                 &heights,
                 Default::default(),
+                super::super::loads::PhysicalPushoverLoads::empty(),
             )
             .unwrap();
             recorder.reference_external = vec![0.0; map.n_active()];
             recorder.reference_external[map.active(6).unwrap() as usize] = 100_000.0;
             recorder.reference_external[map.active(12).unwrap() as usize] = 50_000.0;
             recorder.constant_external = vec![0.0; map.n_active()];
+            recorder.physical_loads.reference.nodal =
+                [(m.nodes[1].id, 100_000.), (m.nodes[2].id, 50_000.)]
+                    .into_iter()
+                    .map(|(node, force)| {
+                        sepika_core::model::NodalLoad::manual(node, [force, 0., 0., 0., 0., 0.])
+                    })
+                    .collect();
             recorder.record(1.0, &m, &map, &behaviors, &disp).unwrap();
             let recorded = recorder.finish();
             let cuts = &recorded.confirmed_history[0].cuts;

@@ -12,6 +12,7 @@
 //! - `step_record` — 確定ステップの記録（性能曲線・ヒンジ・部材履歴）
 //! - `geom` — 幾何ヘルパ（内積・軸圧縮力）
 
+mod capacity_response;
 mod diagnosis;
 mod driver;
 mod ductility;
@@ -20,6 +21,7 @@ mod hinge;
 mod loads;
 mod mechanism;
 pub(crate) mod member_response;
+mod physical_response;
 mod response;
 mod shear_yield;
 mod step_record;
@@ -59,3 +61,6 @@ use smallvec::SmallVec;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod force_balance_tests;

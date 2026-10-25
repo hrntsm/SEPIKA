@@ -596,6 +596,7 @@ mod tests {
             SeismicDir::X,
             &[3000.0],
             super::super::types::DuctilityMethod::default(),
+            super::super::loads::PhysicalPushoverLoads::empty(),
         )
         .unwrap();
         recorder.record(0.0, &m, &map, &b, &u).unwrap();

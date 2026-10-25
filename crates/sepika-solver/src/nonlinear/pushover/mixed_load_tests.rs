@@ -182,10 +182,17 @@ fn mixed_gravity_and_confirmed_pushover_keep_owner_and_legacy_load_paths_distinc
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
+            super::super::loads::PhysicalPushoverLoads::empty(),
         )
         .unwrap();
         recorder.constant_external = rhs;
         recorder.reference_external = vec![0.; map.n_active()];
+        recorder.physical_loads = super::super::loads::PhysicalPushoverLoads::new(
+            &model,
+            &[(model.load_cases[0].id, 1.)],
+            super::super::loads::PhysicalPushoverLoads::empty().reference,
+        )
+        .unwrap();
         recorder
             .record(0., &model, &map, &behaviors, &displacement)
             .unwrap();

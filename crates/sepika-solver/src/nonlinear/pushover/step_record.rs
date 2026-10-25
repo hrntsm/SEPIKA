@@ -4,15 +4,11 @@
 use super::ductility::{compute_ductility_refs, update_ductility, DuctilityRef, DuctilityTracker};
 use super::hinge::{compute_hinge_thresholds, track_hinges, HingeThreshold};
 use super::member_response::record_member_step;
-use super::response::{
-    compute_base_shear, compute_story_drift, compute_story_shear, get_roof_disp,
-    max_story_drift_angle,
-};
+use super::response::{compute_story_drift, get_roof_disp, max_story_drift_angle};
 use super::shear_yield::{compute_shear_yield_thresholds, track_shear_yield, ShearThreshold};
 use super::types::{
     CapacityPoint, DuctilityMethod, HingeEvent, MemberStepState, PushoverStep, ShearYieldEvent,
 };
-use crate::common::tangent::{add_support_spring_f_int, compute_f_int};
 use crate::statics::analysis::SeismicDir;
 use sepika_core::dof::DofMap;
 use sepika_core::model::Model;
@@ -60,6 +56,7 @@ pub(super) struct StepRecorder<'a> {
     pub(super) run: super::wall_response::WallRunIdentity,
     pub(super) reference_external: Vec<f64>,
     pub(super) constant_external: Vec<f64>,
+    pub(super) physical_loads: super::loads::PhysicalPushoverLoads,
     confirmed_history: Vec<super::story_response::ConfirmedStepResponse>,
 }
 
@@ -81,6 +78,7 @@ impl<'a> StepRecorder<'a> {
         dir: SeismicDir,
         heights: &'a [f64],
         ductility_method: DuctilityMethod,
+        physical_loads: super::loads::PhysicalPushoverLoads,
     ) -> Result<Self, String> {
         Ok(Self {
             dir,
@@ -100,6 +98,7 @@ impl<'a> StepRecorder<'a> {
             run: super::wall_response::WallRunIdentity::new(),
             reference_external: vec![],
             constant_external: vec![],
+            physical_loads,
             confirmed_history: vec![],
         })
     }
@@ -107,7 +106,7 @@ impl<'a> StepRecorder<'a> {
     /// 確定したステップを 1 つ記録する。
     ///
     /// `load_factor` は参照外力ベクトル q に対する倍率で、呼び出し側が決めて渡す。
-    /// ベースシアは内力の釣合いから算定する。
+    /// 性能曲線は同じ確定状態の物理材端力と支持反力から回復する。
     pub(super) fn record(
         &mut self,
         load_factor: f64,
@@ -119,59 +118,54 @@ impl<'a> StepRecorder<'a> {
         let responses = super::geom::member_recording_responses(model, behaviors)?;
         let member_step = record_member_step(model, dofmap, behaviors, total_disp, &responses)
             .map_err(|error| format!("増分解析・部材履歴 step={}: {error}", self.step_no))?;
-        let owner_cut_loads = model
-            .layers()
-            .iter()
-            .map(|layer| {
-                let z = (layer.bottom_sl_mm + layer.top_sl_mm) * 0.5;
-                model
-                    .elements
-                    .iter()
-                    .zip(&responses)
-                    .try_fold(0.0, |sum, (elem, response)| {
-                        let Some(response) = response else {
-                            return Ok(sum);
-                        };
-                        let force = response.section.applied_force_above_elevation(
-                            model.nodes[elem.nodes[0].index()].coord[2],
-                            model.nodes[elem.nodes[1].index()].coord[2],
-                            z,
-                        )?;
-                        Ok::<_, String>(sum + force[usize::from(self.dir == SeismicDir::Y)])
-                    })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+        let source = super::physical_response::current_case(&self.physical_loads, 1.0, load_factor);
+        let physical = super::physical_response::PhysicalStep::recover(
+            model,
+            dofmap,
+            behaviors,
+            &responses,
+            total_disp,
+            source,
+            self.physical_loads.reference.clone(),
+        )?;
+        let capacity = physical.capacity_forces(model, dofmap, self.dir)?;
         let roof = get_roof_disp(total_disp, model, dofmap, self.dir);
-        let mut f_int_now = compute_f_int(model, dofmap, behaviors);
-        for ((elem, behavior), response) in model.elements.iter().zip(behaviors).zip(&responses) {
-            if let Some(response) = response {
-                let gdofs = behavior.global_dofs(dofmap);
-                for (end, applied) in response
-                    .section
-                    .applied_nodal_forces_global()
-                    .iter()
-                    .enumerate()
-                {
-                    for (d, force) in applied.iter().enumerate() {
-                        let a = gdofs[end * 6 + d];
-                        if a != usize::MAX {
-                            f_int_now[a] += force;
-                        }
-                    }
-                }
-                debug_assert_eq!(elem.nodes.len(), 2);
-            }
-        }
-        add_support_spring_f_int(model, dofmap, total_disp, &mut f_int_now);
-        let base_shear = compute_base_shear(model, dofmap, &f_int_now, self.dir);
+        let base_shear = capacity.base;
         let story_drift = compute_story_drift(model, dofmap, total_disp, self.dir);
         let drift_angle = max_story_drift_angle(&story_drift, self.heights);
+
+        let mut cuts = super::story_response::record_cuts_with_responses(
+            model, dofmap, behaviors, self.dir, &responses, &physical,
+        )?;
+        let external: Vec<_> = (0..dofmap.n_active())
+            .map(|a| {
+                self.reference_external.get(a).copied().unwrap_or(0.) * load_factor
+                    + self.constant_external.get(a).copied().unwrap_or(0.)
+            })
+            .collect();
+        let force_scale = crate::common::newton::l2_norm(&external).max(1.0);
+        let d = usize::from(self.dir == SeismicDir::Y);
+        for cut in &mut cuts {
+            cut.reference_n = super::physical_response::load_above(
+                model,
+                &physical.reference,
+                cut.elevation_mm,
+                d,
+            )?;
+            cut.support_n = -physical.support_above(model, cut.elevation_mm, d);
+            cut.external_n =
+                super::physical_response::load_above(model, &physical.source, cut.elevation_mm, d)?
+                    - cut.support_n;
+            cut.tolerance_n = crate::common::newton::STATIC_NEWTON.tol
+                * force_scale
+                * (model.nodes.len() as f64).sqrt();
+        }
 
         self.capacity_curve.push(CapacityPoint {
             step: self.step_no,
             roof_disp: roof,
             base_shear,
-            story_shear: compute_story_shear(model, dofmap, &f_int_now, self.dir),
+            story_shear: capacity.story,
             story_drift: story_drift.clone(),
         });
         self.steps.push(PushoverStep {
@@ -213,34 +207,6 @@ impl<'a> StepRecorder<'a> {
                 self.dir,
                 self.step_no,
             ));
-        let mut cuts = super::story_response::record_cuts(model, dofmap, behaviors, self.dir);
-        let external: Vec<_> = self
-            .reference_external
-            .iter()
-            .zip(&self.constant_external)
-            .map(|(q, f)| q * load_factor + f)
-            .collect();
-        let mut support = vec![0.0; dofmap.n_active()];
-        add_support_spring_f_int(model, dofmap, total_disp, &mut support);
-        let force_scale = crate::common::newton::l2_norm(&external).max(1.0);
-        let d = usize::from(self.dir == SeismicDir::Y);
-        for (cut, owner_load) in cuts.iter_mut().zip(owner_cut_loads) {
-            let sum_above = |f: &[f64]| {
-                model
-                    .nodes
-                    .iter()
-                    .filter(|n| n.coord[2] > cut.elevation_mm)
-                    .filter_map(|n| dofmap.active(n.id.index() * 6 + d))
-                    .filter_map(|a| f.get(a as usize))
-                    .sum::<f64>()
-            };
-            cut.reference_n = sum_above(&self.reference_external);
-            cut.support_n = sum_above(&support);
-            cut.external_n = sum_above(&external) + owner_load - cut.support_n;
-            cut.tolerance_n = crate::common::newton::STATIC_NEWTON.tol
-                * force_scale
-                * (model.nodes.len() as f64).sqrt();
-        }
         self.confirmed_history
             .push(super::story_response::ConfirmedStepResponse {
                 run_id: self.run.run_id.clone(),
@@ -306,8 +272,14 @@ mod tests {
         let model = super::super::tests::single_column_model(235.0, 80_000.0);
         let map = DofMap::build(&model);
         let heights = super::super::response::story_heights(&model);
-        let mut recorder =
-            StepRecorder::new(&model, SeismicDir::X, &heights, DuctilityMethod::default()).unwrap();
+        let mut recorder = StepRecorder::new(
+            &model,
+            SeismicDir::X,
+            &heights,
+            DuctilityMethod::default(),
+            super::super::loads::PhysicalPushoverLoads::empty(),
+        )
+        .unwrap();
         let behaviors: Vec<_> = model
             .elements
             .iter()
@@ -343,15 +315,21 @@ mod tests {
     }
 
     #[test]
-    fn loaded_wall_owner_and_ordinary_girder_keep_legacy_capacity_and_same_step_cut_partition() {
+    fn loaded_wall_owner_and_ordinary_girder_keep_total_resistance_and_same_step_cut_partition() {
         let mut model = super::super::tests::prepared_wall_story_model_with(4000.0, 100_000.0);
         for elem in &mut model.elements {
             elem.rigid_zone = Default::default();
         }
         let map = DofMap::build(&model);
         let heights = super::super::response::story_heights(&model);
-        let mut recorder =
-            StepRecorder::new(&model, SeismicDir::X, &heights, DuctilityMethod::default()).unwrap();
+        let mut recorder = StepRecorder::new(
+            &model,
+            SeismicDir::X,
+            &heights,
+            DuctilityMethod::default(),
+            super::super::loads::PhysicalPushoverLoads::empty(),
+        )
+        .unwrap();
         for (step, (sign, point)) in [(1.0, false), (-1.0, false), (1.0, true), (-1.0, true)]
             .into_iter()
             .enumerate()
@@ -446,13 +424,17 @@ mod tests {
             assert!((applied - sign * 6000.0).abs() < 1e-7);
             recorder.reference_external = vec![0.0; map.n_active()];
             recorder.constant_external = legacy_rhs;
+            recorder.physical_loads = super::super::loads::PhysicalPushoverLoads::new(
+                &model,
+                &[(model.load_cases[0].id, 1.)],
+                super::super::loads::PhysicalPushoverLoads::empty().reference,
+            )
+            .unwrap();
             recorder
                 .record(1.0, &model, &map, &behaviors, &displacement)
                 .unwrap();
-            // 集中荷重の上端等価力は6000*(3*0.75²-2*0.75³)=5062.5 N。物理上端反力4500 Nとは異なる。
-            let expected_capacity = if point { 13062.5 } else { 11000.0 };
+            let expected_capacity = 14000.0;
             let capacity = &recorder.capacity_curve[step];
-            println!("mixed point={point} sign={sign} base={} story={} wall={wall_shear} upper_reaction={upper_reaction} owner_residual={:?} owner_applied={:?}", capacity.base_shear, capacity.story_shear[0], column.nodal_residual.data, column.section.applied_nodal_forces_global());
             assert!((capacity.base_shear - sign * expected_capacity).abs() < 1e-5);
             assert!((capacity.story_shear[0] - sign * expected_capacity).abs() < 1e-5);
             let cut = &recorder.confirmed_history[step].cuts[0];

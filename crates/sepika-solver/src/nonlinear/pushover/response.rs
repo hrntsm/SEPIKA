@@ -1,7 +1,5 @@
 //! 層・全体の応答量算定。
 //!
-//! - [`compute_base_shear`] — ベースシア（内力の釣合いから）
-//! - [`compute_story_shear`] — 層せん断力
 //! - [`compute_story_drift`] — 層間変位
 //! - [`story_heights`] — 階高（elevation の隣接差分）
 //! - [`max_story_drift_angle`] — 全層の最大層間変形角
@@ -19,57 +17,6 @@ fn dir_index(dir: SeismicDir) -> usize {
         SeismicDir::X => 0,
         SeismicDir::Y => 1,
     }
-}
-
-/// ベースシア（層せん断の総和）を内力の釣合いから求める。
-pub(crate) fn compute_base_shear(
-    model: &Model,
-    dofmap: &DofMap,
-    f_int: &[f64],
-    dir: SeismicDir,
-) -> f64 {
-    let dir_idx = dir_index(dir);
-    let mut v = 0.0;
-    for node in &model.nodes {
-        let g = node.id.index() * 6 + dir_idx;
-        if let Some(a) = dofmap.active(g) {
-            v += f_int[a as usize];
-        }
-    }
-    v
-}
-
-/// 層せん断力を内力の釣合いから求める。
-///
-/// 第 i 層以上の層に属する節点の載荷方向水平内力の合計（上層から累積）。
-/// 層がなければ空ベクトルを返す。
-pub(crate) fn compute_story_shear(
-    model: &Model,
-    dofmap: &DofMap,
-    f_int: &[f64],
-    dir: SeismicDir,
-) -> Vec<f64> {
-    let dir_idx = dir_index(dir);
-    let layers = model.layers();
-    let n = layers.len();
-    let mut level_force = vec![0.0; n];
-    for layer in &layers {
-        for nid in &layer.node_ids {
-            let g = nid.index() * 6 + dir_idx;
-            if let Some(a) = dofmap.active(g) {
-                if let Some(&v) = f_int.get(a as usize) {
-                    level_force[layer.index] += v;
-                }
-            }
-        }
-    }
-    let mut shear = vec![0.0; n];
-    let mut acc = 0.0;
-    for i in (0..n).rev() {
-        acc += level_force[i];
-        shear[i] = acc;
-    }
-    shear
 }
 
 /// 階を代表する節点。
