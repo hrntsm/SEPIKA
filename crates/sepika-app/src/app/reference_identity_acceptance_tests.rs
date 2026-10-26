@@ -79,8 +79,8 @@ const BUILT_BOX_INPUT: &str =
     include_str!("../../../sepika-io/tests/fixtures/built_box_standard.stb");
 
 #[test]
-fn built_box_equal_thickness_import_replaces_model_only_after_success() {
-    for t2 in ["9", "9.0"] {
+fn built_box_import_preserves_both_thicknesses_and_replaces_model_after_success() {
+    for t2 in ["6", "9", "9.0", "12", "9.000000000000002"] {
         let mut app = existing_app();
         let source = BUILT_BOX_INPUT.replace("t2=\"9\"", &format!("t2=\"{t2}\""));
         let file = path(&format!("742-equal-{t2}")).with_extension("stb");
@@ -98,7 +98,7 @@ fn built_box_equal_thickness_import_replaces_model_only_after_success() {
                 height: 300.,
                 width: 200.,
                 thick: 9.,
-                horizontal_thick: 9.,
+                horizontal_thick: t2.parse().unwrap(),
                 corner_r: Some(0.),
             })
         );
@@ -148,16 +148,6 @@ fn built_box_rejected_import_preserves_model_results_history_and_files_with_diag
     let before = retained(&app);
 
     for (label, replacement, details) in [
-        (
-            "unequal-6",
-            "t2=\"6\"",
-            &["t1", "9", "t2", "6", "未対応"][..],
-        ),
-        (
-            "unequal-12",
-            "t2=\"12\"",
-            &["t1", "9", "t2", "12", "未対応"][..],
-        ),
         ("missing", "", &["t2", "欠落"][..]),
         ("zero", "t2=\"0\"", &["t2", "0", "正値"][..]),
         ("negative", "t2=\"-1\"", &["t2", "-1", "正値"][..]),
