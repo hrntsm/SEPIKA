@@ -391,7 +391,7 @@ mod tests {
         model.nodes[1].restraint = Dof6Mask::FREE;
         model.elements.truncate(1);
         model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
-        model.sections = vec![sepika_section::shape::SectionShape::SteelFlatBar {
+        model.sections = vec![sepika_core::section_shape::SectionShape::SteelFlatBar {
             width: 300.0,
             thick: 300.0,
         }

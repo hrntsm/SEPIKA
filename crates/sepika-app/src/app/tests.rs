@@ -1082,7 +1082,7 @@ fn aligned_portal_frame() -> sepika_core::model::Model {
         ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis, Material,
         MemberLoad, MemberLoadKind, Node,
     };
-    use sepika_section::shape::SectionShape;
+    use sepika_core::section_shape::SectionShape;
 
     let mut model = sepika_core::model::Model {
         stories: [0.0, 3000.0]
@@ -8494,7 +8494,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
     use sepika_core::model::{
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, Node,
     };
-    use sepika_section::shape::SectionShape;
+    use sepika_core::section_shape::SectionShape;
 
     let dir = test_tmp().join("sepika_app_test_stbridge_run_dl");
     std::fs::create_dir_all(&dir).unwrap();
@@ -13312,12 +13312,12 @@ fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
 
 #[test]
 fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_retained() {
+    use sepika_core::section_shape::SectionShape;
     use sepika_core::{
         dof::Dof6Mask,
         model::{ElementKind, PanelZoneMode},
     };
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
-    use sepika_section::shape::SectionShape;
     let mut model = crate::sample::portal_frame();
     model.panel_zone = PanelZoneMode::None;
     let h = |height| SectionShape::SteelH {

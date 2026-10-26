@@ -1,9 +1,9 @@
 //! 日本国内の鋼材断面カタログ（JIS 規格等）。
 //! `data/japan_steel_sections.csv` をビルド時に埋め込む。
 
-use crate::shape::SectionShape;
 use sepika_core::ids::SectionId;
 use sepika_core::model::Section;
+use sepika_core::section_shape::SectionShape;
 use std::sync::OnceLock;
 
 const CSV_DATA: &str = include_str!("../data/japan_steel_sections.csv");

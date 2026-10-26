@@ -560,7 +560,7 @@ fn test_add_delete_member_roundtrip() {
 fn test_add_section_shape_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
-    let shape = sepika_section::shape::SectionShape::SteelH {
+    let shape = sepika_core::section_shape::SectionShape::SteelH {
         root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
@@ -822,7 +822,7 @@ fn test_edit_section_shape_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
 
-    let shape1 = sepika_section::shape::SectionShape::SteelH {
+    let shape1 = sepika_core::section_shape::SectionShape::SteelH {
         root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
@@ -833,7 +833,7 @@ fn test_edit_section_shape_roundtrip() {
     let area_h = sec.area;
     model.sections.push(sec);
 
-    let shape2 = sepika_section::shape::SectionShape::SteelBox {
+    let shape2 = sepika_core::section_shape::SectionShape::SteelBox {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
@@ -857,7 +857,7 @@ fn test_edit_section_shape_roundtrip() {
 
 #[test]
 fn test_edit_section_shape_rejects_use_change_for_references() {
-    let shape = sepika_section::shape::SectionShape::SteelBox {
+    let shape = sepika_core::section_shape::SectionShape::SteelBox {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
@@ -908,14 +908,14 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
             name: "B1".into(),
         });
     for new_shape in [
-        sepika_section::shape::SectionShape::CftBox {
+        sepika_core::section_shape::SectionShape::CftBox {
             corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
             horizontal_thick: 16.0,
         },
-        sepika_section::shape::SectionShape::CftPipe {
+        sepika_core::section_shape::SectionShape::CftPipe {
             outer_dia: 400.0,
             thick: 16.0,
         },
@@ -941,8 +941,8 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
 
 #[test]
 fn test_edit_rc_slab_section_shape_with_shell_reference() {
-    let old_shape = sepika_section::shape::SectionShape::RcSlab { thickness: 150.0 };
-    let new_shape = sepika_section::shape::SectionShape::RcSlab { thickness: 200.0 };
+    let old_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 };
+    let new_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 200.0 };
     let mut model = empty_model();
     model
         .sections
@@ -975,13 +975,13 @@ fn test_edit_rc_slab_section_shape_with_shell_reference() {
 
 #[test]
 fn test_edit_rc_wall_section_shape_with_wall_reference() {
-    let old_shape = sepika_section::shape::SectionShape::RcWall {
+    let old_shape = sepika_core::section_shape::SectionShape::RcWall {
         thickness: 180.0,
         pwh_ratio: None,
         pwv_ratio: None,
         ps: 0.0,
     };
-    let new_shape = sepika_section::shape::SectionShape::RcWall {
+    let new_shape = sepika_core::section_shape::SectionShape::RcWall {
         thickness: 220.0,
         pwh_ratio: None,
         pwv_ratio: None,
@@ -1027,14 +1027,14 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
         ElementKind::Damper,
         ElementKind::Isolator,
     ] {
-        let old_shape = sepika_section::shape::SectionShape::SteelBox {
+        let old_shape = sepika_core::section_shape::SectionShape::SteelBox {
             height: 200.0,
             width: 200.0,
             thick: 12.0,
             horizontal_thick: 12.0,
             corner_r: Some(0.0),
         };
-        let new_shape = sepika_section::shape::SectionShape::CftBox {
+        let new_shape = sepika_core::section_shape::SectionShape::CftBox {
             corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
@@ -1077,7 +1077,7 @@ fn test_duplicate_section_for_member_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
 
-    let shape = sepika_section::shape::SectionShape::SteelH {
+    let shape = sepika_core::section_shape::SectionShape::SteelH {
         root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
@@ -1138,7 +1138,7 @@ fn test_edit_section_shape_invalid_id_noop() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
 
-    let shape = sepika_section::shape::SectionShape::SteelBox {
+    let shape = sepika_core::section_shape::SectionShape::SteelBox {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
@@ -1161,7 +1161,7 @@ fn test_delete_add_section_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
 
-    let shape = sepika_section::shape::SectionShape::SteelH {
+    let shape = sepika_core::section_shape::SectionShape::SteelH {
         root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
@@ -4400,8 +4400,8 @@ fn test_failed_command_keeps_redo_history() {
 // 断面の同一性キー（符号＋階）の不変条件
 // ---------------------------------------------------------------------------
 
-fn h_shape() -> sepika_section::shape::SectionShape {
-    sepika_section::shape::SectionShape::SteelH {
+fn h_shape() -> sepika_core::section_shape::SectionShape {
+    sepika_core::section_shape::SectionShape::SteelH {
         root_r: Some(0.0),
         height: 300.0,
         width: 150.0,
@@ -4518,7 +4518,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
         &mut model,
         Box::new(EditSectionShape {
             section: SectionId(0),
-            new_shape: sepika_section::shape::SectionShape::SteelBox {
+            new_shape: sepika_core::section_shape::SectionShape::SteelBox {
                 height: 300.0,
                 width: 300.0,
                 thick: 12.0,
@@ -4532,7 +4532,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
     assert_eq!(model.sections[0].floor.as_deref(), Some("1"));
     assert!(matches!(
         model.sections[0].shape,
-        Some(sepika_section::shape::SectionShape::SteelBox { .. })
+        Some(sepika_core::section_shape::SectionShape::SteelBox { .. })
     ));
 }
 

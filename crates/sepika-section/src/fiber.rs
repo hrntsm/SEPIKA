@@ -92,14 +92,6 @@ pub fn integrate_fibers(
     (SectionForce { n, my, mz }, SectionStiffness { d })
 }
 
-/// テンプレート材料からファイバ数分の独立した状態インスタンスを生成する。
-pub fn uniform_fiber_mats(
-    template: &dyn UniaxialMaterial,
-    n: usize,
-) -> Vec<Box<dyn UniaxialMaterial>> {
-    (0..n).map(|_| template.clone_box()).collect()
-}
-
 /// 矩形断面をファイバに分割する。`material` は材料種別タグ。
 pub fn rect_fiber_section(
     width: f64,
@@ -133,7 +125,9 @@ mod tests {
     use sepika_material::{Bilinear, Concrete};
 
     fn steel_mats(sec: &FiberSection) -> Vec<Box<dyn UniaxialMaterial>> {
-        uniform_fiber_mats(&Bilinear::new(205000.0, 235.0, 0.01), sec.fibers.len())
+        (0..sec.fibers.len())
+            .map(|_| Box::new(Bilinear::new(205000.0, 235.0, 0.01)) as Box<dyn UniaxialMaterial>)
+            .collect()
     }
 
     #[test]
@@ -246,7 +240,9 @@ mod tests {
         // 積分が破綻しない（共有状態だと履歴混入で発散する）。
         // 曲率を増やし、ピークと軟化後を含む代表点で |M| を評価する。
         let sec = rect_fiber_section(100.0, 200.0, 4, 20, 0);
-        let mut mats = uniform_fiber_mats(&Concrete::new(30.0, 2.0), sec.fibers.len());
+        let mut mats: Vec<Box<dyn UniaxialMaterial>> = (0..sec.fibers.len())
+            .map(|_| Box::new(Concrete::new(30.0, 2.0)) as Box<dyn UniaxialMaterial>)
+            .collect();
         let y_max = sec.fibers.iter().map(|f| f.y.abs()).fold(0.0, f64::max);
         let kz_peak = -0.002 / y_max; // 最外縁が εc0 に達する曲率
         let mut moments = Vec::new();

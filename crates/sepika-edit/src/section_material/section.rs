@@ -145,7 +145,7 @@ impl EditCommand for SetSectionName {
 ///
 /// 符号＋階が既存の断面と衝突する追加は [`Noop`] として拒否する。
 pub struct AddSectionShape {
-    pub shape: sepika_section::shape::SectionShape,
+    pub shape: sepika_core::section_shape::SectionShape,
     pub new_id: SectionId,
     pub name: String,
     pub floor: Option<String>,
@@ -156,8 +156,8 @@ impl EditCommand for AddSectionShape {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let non_frame = matches!(
             &self.shape,
-            sepika_section::shape::SectionShape::RcWall { .. }
-                | sepika_section::shape::SectionShape::RcSlab { .. }
+            sepika_core::section_shape::SectionShape::RcWall { .. }
+                | sepika_core::section_shape::SectionShape::RcSlab { .. }
         );
         if (!non_frame && self.frame_use.is_none()) || (non_frame && self.frame_use.is_some()) {
             return Box::new(Noop);
@@ -205,7 +205,7 @@ impl EditCommand for AddSectionShape {
 /// （`to_section` は形状から決まらない階を `None` で返すため、明示的に引き継ぐ）。
 pub struct EditSectionShape {
     pub section: SectionId,
-    pub new_shape: sepika_section::shape::SectionShape,
+    pub new_shape: sepika_core::section_shape::SectionShape,
     pub frame_use: Option<sepika_core::model::FrameSectionUse>,
 }
 
@@ -243,8 +243,8 @@ impl EditCommand for EditSectionShape {
         }
         let non_frame = matches!(
             &self.new_shape,
-            sepika_section::shape::SectionShape::RcWall { .. }
-                | sepika_section::shape::SectionShape::RcSlab { .. }
+            sepika_core::section_shape::SectionShape::RcWall { .. }
+                | sepika_core::section_shape::SectionShape::RcSlab { .. }
         );
         let idx = self.section.index();
         if idx >= model.sections.len() || model.sections[idx].id != self.section {

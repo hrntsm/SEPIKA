@@ -4791,7 +4791,6 @@ dependencies = [
  "schemars 0.8.22",
  "sepika-core",
  "sepika-load",
- "sepika-section",
  "serde",
  "smallvec",
 ]
@@ -4908,8 +4907,6 @@ dependencies = [
  "approx",
  "sepika-core",
  "sepika-material",
- "serde",
- "serde_json",
 ]
 
 [[package]]

@@ -6,7 +6,6 @@ license = "MIT"
 
 [dependencies]
 sepika-core = { path = "../sepika-core" }
-sepika-section = { path = "../sepika-section" }
 serde = { workspace = true }
 schemars = { workspace = true }
 smallvec = { workspace = true }

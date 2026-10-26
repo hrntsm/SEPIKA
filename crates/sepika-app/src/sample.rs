@@ -7,7 +7,7 @@ use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase, LocalAxis,
     Material, MaterialCategory, MemberLoad, MemberLoadKind, Model, NodalLoad,
 };
-use sepika_section::shape::SectionShape;
+use sepika_core::section_shape::SectionShape;
 
 /// 鋼構造の門型ラーメン（スパン 6m × 高さ 3.5m、柱脚固定）を生成する。
 ///
