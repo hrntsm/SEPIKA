@@ -1,5 +1,10 @@
 # V&V レポート（検証・妥当性確認）
 
+参考用スケルトン計算は [#849](https://github.com/hrntsm/SEPIKA/issues/849) で廃止した。
+旧クレート・API・試験・コマンドに言及する記録は実施時点の履歴であり、現在の実行対象ではない。
+#436の単位是正と検証の実施記録は維持する。廃止判断と現行計算の保証対応は
+[ADR 0080](../adr/0080-retire-reference-skeleton.md) を参照。
+
 ## STB異厚組立BOX（#683）
 
 [読込確認記録と要素→テスト索引](STB異厚組立BOX_Issue683_確認記録.md)は、通常鋼・CFTの両公開入口、両板厚・断面参照・属性報告・質量・OVIKA保持とApp受理/失敗時原子性を扱う。状態は🔶。物理Validation・手動GUI・全XSD適合は未確認。
@@ -244,7 +249,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [地震力標準式と適用診断_Issue486_2026-10.md](地震力標準式と適用診断_Issue486_2026-10.md) | 標準地震力・Qud/増分標準接続・共通GL/入力/適用診断・GUI/MCP入口と失敗理由 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
 | [原階所属_Issue497_2026-10.md](原階所属_Issue497_2026-10.md) | 原階保存・編集・Fc供給・公開fixture意味的往復・採用2.0.2全XML schema・GUI/MCP入力世代 | ✅（原階/節点Scope。鋼ブレース文字子はIssue550記録、配筋はIssue507記録で別検証） |
 | [鋼ブレースXML文字子_Issue550_2026-10.md](鋼ブレースXML文字子_Issue550_2026-10.md) | 最小鋼ブレース公開export全文の公式2.0.2 XSD成功・文字子negative2件・属性escape・公開importの独立意味照合 | ✅（Scope内Verification。最終ゲートは[PR #648](https://github.com/hrntsm/SEPIKA/pull/648)） |
-| [参照骨格の部材角単位_Issue436_2026-10.md](参照骨格の部材角単位_Issue436_2026-10.md) | 正側参考骨格のQ/Ks・明示s/z・不正/未対応拒否・利用側比較 | 🔶（単位契約Verification済み、モデル一般精度・全履歴・実験未） |
+| [参照骨格の部材角単位_Issue436_2026-10.md](参照骨格の部材角単位_Issue436_2026-10.md) | 正側参考骨格のQ/Ks・明示s/z・不正/未対応拒否・利用側比較 | 廃止済み（#849）。単位契約Verificationの履歴を保持 |
 | [耐震壁_未検定_Issue495_2026-10.md](耐震壁_未検定_Issue495_2026-10.md) | 壁版候補・case・種別別未検定とスリット／自重対象外、不正入力、GUI・MCP・CSV・保存 | 🔶（状態契約のVerification。純鋼板国内式・実験Validationは未対応） |
 | [壁の確定ステップ応答_Issue443_2026-10.md](壁の確定ステップ応答_Issue443_2026-10.md) | 壁単体Qw/Qdir・基準点付き24成分F/M・実要素N/M・弦変形・確定履歴・GUI/MCP/CSV/保存・設計拒否 | ✅（Scope内Verification。材料γ・壁用イベント・系全体集計・実験Validationは未対応） |
 | [リップ溝形材_未検定_Issue509_2026-10.md](リップ溝形材_未検定_Issue509_2026-10.md) | 単一リップ材の3座屈分類、荷重/補剛状態と理由付き未検定、保存・GUI・CSV | 🔶（未検定契約のVerification。耐力式・実験照合は未対応） |
@@ -434,7 +439,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 20a | 微小相似Fiber初期断面 | sepika-math / sepika-element / sepika-solver | dense_lu.rs, frame/fiber/constitutive_tests.rs, panel_zone.rs | `near_diagonal_coupling_roundoff_*`・`similar_*`・`panel_753_public_nonlinear_time_history_*`（[Issue #783検証](微小相似Fiber初期断面_Issue783_2026-10.md)） | P4 | 🔶（数値Verification。実験Validation未） |
 | 20b | 物理曲率・非対称断面・剛域付き軸履歴 | sepika-element | frame/fiber/physical_curvature_tests.rs、distributed_curvature_tests.rs、rigid_axial_tests.rs | [保存成果の補完と端部解放の収束検証](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | P4 | 🔶（有限Verification。実験Validation未） |
 | 20c | 保存/失敗時の全要素復元と全固定時刻歴 | sepika-element / sepika-io / sepika-solver | springs/isolator/tests.rs、checkpoint/preserved_tests.rs、common/elem_loop/preserved_tests.rs、timehistory/tests/loaded_recording.rs、tests/general_member_loads.rs | [保存ブランチの残りの復元検証](保存ブランチ496の変更採否_2026-10.md) | 横断 | 🔶（有限Verification。実験Validation未） |
-| 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
+| 21 | 参考骨格算定（M–φ→M–θ、廃止済み） | — | — | 現行の試験対象なし。上記#436の履歴記録を参照 | P4 / #436 / #849 | 廃止済み（単位・拒否契約の検証履歴を保持） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
 | 23d | STB組立BOXの入力境界 | sepika-io / sepika-app | tests/stbridge_built_box.rs、app/reference_identity_acceptance_tests.rs | [Issue683の読込結合](STB異厚組立BOX_Issue683_確認記録.md#要素テスト索引) | 横断 | 🔶（異厚の公開入口・参照/属性報告・質量/保存と不正寸法のVerification、Validation・手動GUIは未確認） |

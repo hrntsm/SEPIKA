@@ -1,12 +1,12 @@
 # アーキテクチャ
 
-SEPIKA は 14 のクレートから成る階層型アーキテクチャで構成されています。
+SEPIKA は 13 のクレートから成る階層型アーキテクチャで構成されています。
 
 ```
 Layer 0: sepika-core（基本データ構造・DOF 管理・荷重組合せ）、sepika-math（疎行列・ソルバ）、
          sepika-material（一軸材料履歴則）
 Layer 1: sepika-section（断面性能算定）、sepika-load（Ai 分布・床荷重）
-Layer 2: sepika-edit（編集トランザクション）、sepika-skeleton（スケルトン曲線）
+Layer 2: sepika-edit（編集トランザクション）
 Layer 3: sepika-element（梁・板・仕口パネル要素）
 Layer 4: sepika-solver（各種解析）、sepika-io（結果 I/O）
 Layer 5: sepika-design-jp（日本仕様設計計算）
@@ -36,7 +36,6 @@ cargo run -p xtask -- check-deps
 | `sepika-material` | 一軸材料履歴則 |
 | `sepika-section` | 断面性能算定 |
 | `sepika-element` | 梁・板・仕口パネル要素 |
-| `sepika-skeleton` | スケルトン曲線 |
 | `sepika-load` | Ai 分布・床荷重 |
 | `sepika-solver` | 各種解析 |
 | `sepika-design-jp` | 日本仕様設計計算 |
