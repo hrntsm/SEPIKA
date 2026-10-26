@@ -45,7 +45,7 @@ pub struct SecondaryMember {
     pub section: Option<SectionId>,
     /// 表示名。
     pub name: String,
-    /// 基準材軸からの一律鉛直偏心 [mm]。+Z が正、None は未指定。
+    /// 基準材軸からの一律鉛直偏心 `[mm]`。+Z が正、None は未指定。
     #[serde(default)]
     pub vertical_eccentricity: Option<f64>,
 }

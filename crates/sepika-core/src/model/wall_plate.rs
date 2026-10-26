@@ -537,7 +537,7 @@ impl Model {
         self.try_wall_plate_extent(plate).ok()
     }
 
-    /// 壁版の立ち上がり高さ [mm]。必要な階・取付き節点が未解決の場合は原因を返す。
+    /// 壁版の立ち上がり高さ `[mm]`。必要な階・取付き節点が未解決の場合は原因を返す。
     pub fn try_wall_plate_extent(&self, plate: &WallPlate) -> Result<[f64; 2], String> {
         let WallPlateShape::Attached { anchor, extent } = &plate.shape else {
             return Err("取り付く壁版ではありません".into());
@@ -559,12 +559,12 @@ impl Model {
         Ok([h, h])
     }
 
-    /// 標高 z [mm] から直上の SL までの高さ [mm]。必要な階が未解決なら None。
+    /// 標高 z `[mm]` から直上の SL までの高さ `[mm]`。必要な階が未解決なら None。
     pub fn story_height_above(&self, z: f64) -> Option<f64> {
         self.try_story_height_above(z).ok()
     }
 
-    /// 直上 SL までの高さ [mm]。階順に必要な FL・ΔSL を検査し、不足・不正は階 ID 付きで返す。
+    /// 直上 SL までの高さ `[mm]`。階順に必要な FL・ΔSL を検査し、不足・不正は階 ID 付きで返す。
     pub fn try_story_height_above(&self, z: f64) -> Result<f64, String> {
         let threshold = z + crate::model::DIAPHRAGM_LEVEL_TOL_MM;
         if !z.is_finite() || !threshold.is_finite() {

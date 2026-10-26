@@ -116,7 +116,7 @@ pub struct Slab {
     pub plate: SlabPlate,
     /// 床上面の基準階。未入力は未解決。
     pub reference_story: Option<StoryId>,
-    /// 階FLから床上面への鉛直差 [mm]。上向き正、未入力と0を区別する。
+    /// 階FLから床上面への鉛直差 `[mm]`。上向き正、未入力と0を区別する。
     pub vertical_eccentricity_mm: Option<f64>,
     #[serde(default)]
     pub tip_loads: Vec<SlabTipLoad>,
@@ -152,7 +152,7 @@ impl Slab {
         }
     }
 
-    /// 荷重伝達用の支持境界座標 [mm]。床上面とは区別し、支持参照を解決できなければ `None`。
+    /// 荷重伝達用の支持境界座標 `[mm]`。床上面とは区別し、支持参照を解決できなければ `None`。
     pub fn boundary_coords(&self, model: &Model) -> Option<Vec<[f64; 3]>> {
         match self.shape {
             SlabShape::Enclosed => {
@@ -165,7 +165,7 @@ impl Slab {
         }
     }
 
-    /// 支持節点座標を差し替えた支持境界 [mm]。床上面の表示には `surface_coords_with` を使う。
+    /// 支持節点座標を差し替えた支持境界 `[mm]`。床上面の表示には `surface_coords_with` を使う。
     /// 線取付きの重複端点は未変形時の頂点対応を保つ。支持参照を引けなければ `None`。
     pub fn boundary_coords_with(
         &self,
@@ -265,7 +265,7 @@ impl Slab {
         }
     }
 
-    /// 支持境界の平均Z [mm]。床上面Zとは区別し、境界を引けなければ `None`。
+    /// 支持境界の平均Z `[mm]`。床上面Zとは区別し、境界を引けなければ `None`。
     pub fn level(&self, model: &Model) -> Option<f64> {
         let coords = self.boundary_coords(model)?;
         if coords.is_empty() {

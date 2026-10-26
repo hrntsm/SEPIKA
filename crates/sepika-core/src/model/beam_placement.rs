@@ -59,7 +59,7 @@ impl Model {
         resolve().map_err(|reason| format!("{} の実配置: {reason}", beam_label(member)))
     }
 
-    /// 梁用途の主架構の実材軸端 [mm] を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
+    /// 梁用途の主架構の実材軸端 `[mm]` を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
     pub fn primary_beam_axis_ends(
         &self,
         data: &ElementData,
@@ -146,7 +146,7 @@ impl Model {
 }
 
 impl BeamPlacement {
-    /// 水平面内の材軸直交方向への実断面外側投影幅 [mm]。
+    /// 水平面内の材軸直交方向への実断面外側投影幅 `[mm]`。
     pub fn plan_width_mm(&self) -> Result<f64, String> {
         let x = self.axes[0];
         let norm = x[0].hypot(x[1]);
@@ -163,7 +163,7 @@ impl BeamPlacement {
         Ok(range[1] - range[0])
     }
 
-    /// 材軸のXYを通る鉛直線と梁実上面の交点が線形になる材軸位置 [mm]。
+    /// 材軸のXYを通る鉛直線と梁実上面の交点が線形になる材軸位置 `[mm]`。
     pub fn top_surface_breaks_mm(&self) -> Result<Vec<f64>, String> {
         let mut cuts = vec![0.0, self.length_mm];
         for offset in self.vertical_material_offsets_mm()?.into_iter().flatten() {
@@ -185,7 +185,7 @@ impl BeamPlacement {
         Ok(cuts)
     }
 
-    /// 切替位置を内部に含まない材軸区間 [mm] の中心線上実上端Zの両端極限 [mm]。
+    /// 切替位置を内部に含まない材軸区間 `[mm]` の中心線上実上端Zの両端極限 `[mm]`。
     /// 上端の不連続点では区間内からの極限を返し、区間不正・交点未解決はエラー。
     pub fn top_surface_on_interval_mm(&self, interval: [f64; 2]) -> Result<[f64; 2], String> {
         let [a, b] = interval;
@@ -265,7 +265,7 @@ impl BeamPlacement {
         })
     }
 
-    /// 指定 XY [mm] を通る鉛直線と有限実形状の交点の下端・上端 Z [mm]。交差なしは None。
+    /// 指定 XY `[mm]` を通る鉛直線と有限実形状の交点の下端・上端 Z `[mm]`。交差なしは None。
     pub fn vertical_range(&self, xy_mm: [f64; 2]) -> Result<Option<[f64; 2]>, String> {
         let origin_z = self.actual_ends[0][2];
         self.line_range([xy_mm[0], xy_mm[1], origin_z], [0.0, 0.0, 1.0])
@@ -279,7 +279,7 @@ impl BeamPlacement {
             .map_err(|reason| format!("{}: {reason}", beam_label(self.member)))
     }
 
-    /// 点 [mm] を通り材軸の水平直交方向に沿う実形状の幅 [mm]。交差なしは None。
+    /// 点 `[mm]` を通り材軸の水平直交方向に沿う実形状の幅 `[mm]`。交差なしは None。
     pub fn horizontal_width(&self, point_mm: [f64; 3]) -> Result<Option<f64>, String> {
         let x = self.axes[0];
         let norm = x[0].hypot(x[1]);
