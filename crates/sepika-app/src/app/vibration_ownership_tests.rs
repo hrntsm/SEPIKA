@@ -83,6 +83,7 @@ fn time_history_ownership_sample_amplitude_changes_actual_input_and_preserves_ot
                     App::sample_wave(&app.core.analysis_cfg).unwrap(),
                     "同名サンプル".into(),
                 )
+                .unwrap()
                 .source
             }
         };
@@ -335,10 +336,14 @@ fn lumped_time_history_ownership_distinguishes_current_pushover_generation_condi
 #[test]
 fn time_history_ownership_real_request_waits_then_runs_original_input_after_selection_change() {
     let mut app = ownership_unset_portal();
-    let input_a = app.time_history_input(ownership_wave(1.0, 0.02), "A.csv".into());
+    let input_a = app
+        .time_history_input(ownership_wave(1.0, 0.02), "A.csv".into())
+        .unwrap();
     app.apply_time_history_result(Ok(ownership_result(11.0)), input_a.source);
     let id_a = app.core.model.vibration_cases[0].id;
-    let input = app.time_history_input(ownership_wave(0.0, 0.02), "B.csv".into());
+    let input = app
+        .time_history_input(ownership_wave(0.0, 0.02), "B.csv".into())
+        .unwrap();
     let expected_identity = input.source.identity.clone();
     app.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
     assert!(app.core.scoped.pending_unset_analysis.is_some());
@@ -397,6 +402,7 @@ fn time_history_ownership_real_request_cancellation_preserves_both_result_kinds(
         let mut app = ownership_unset_portal();
         let source = app
             .time_history_input(ownership_wave(1.0, 0.02), "A".into())
+            .unwrap()
             .source;
         app.apply_time_history_result(Ok(ownership_result(11.0)), source);
         let source = app
@@ -423,7 +429,8 @@ fn time_history_ownership_real_request_cancellation_preserves_both_result_kinds(
             ))
         } else {
             PendingAnalysis::TimeHistory(Box::new(
-                app.time_history_input(ownership_wave(2.0, 0.02), "B".into()),
+                app.time_history_input(ownership_wave(2.0, 0.02), "B".into())
+                    .unwrap(),
             ))
         };
         app.request_analysis(pending);
@@ -494,6 +501,7 @@ fn time_history_ownership_existing_file_handlers_keep_read_payload_name_and_orig
         } else {
             let source = app
                 .time_history_input(ownership_wave(77.0, 0.02), "A.csv".into())
+                .unwrap()
                 .source;
             app.apply_time_history_result(Ok(ownership_result(77.0)), source);
             app.core.model.vibration_cases[0].id.0
@@ -590,11 +598,15 @@ fn time_history_ownership_existing_file_handlers_keep_read_payload_name_and_orig
 #[test]
 fn time_history_ownership_fixed_results_follow_input_and_keep_one_slot() {
     let mut app = App::default();
-    let input_a = app.time_history_input(ownership_wave(1.0, 0.02), "A.csv".into());
+    let input_a = app
+        .time_history_input(ownership_wave(1.0, 0.02), "A.csv".into())
+        .unwrap();
     app.apply_time_history_result(Ok(ownership_result(11.0)), input_a.source);
     let id_a = app.core.model.vibration_cases[0].id;
     app.core.scoped.wave_library_selection = Some("A.csv".into());
-    let input_b = app.time_history_input(ownership_wave(2.0, 0.02), "B.csv".into());
+    let input_b = app
+        .time_history_input(ownership_wave(2.0, 0.02), "B.csv".into())
+        .unwrap();
     ownership_job(
         &mut app,
         Some(JobResult::TimeHistory(
@@ -610,7 +622,9 @@ fn time_history_ownership_fixed_results_follow_input_and_keep_one_slot() {
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert_eq!(bundle.time_history_for(id_a).unwrap().peak_disp[0][0], 11.0);
     assert_eq!(bundle.time_history_for(id_b).unwrap().peak_disp[0][0], 22.0);
-    let rerun = app.time_history_input(ownership_wave(1.0, 0.02), "A.csv".into());
+    let rerun = app
+        .time_history_input(ownership_wave(1.0, 0.02), "A.csv".into())
+        .unwrap();
     assert_eq!(rerun.source.target, Some(id_a.0));
     ownership_job(
         &mut app,
@@ -632,13 +646,17 @@ fn time_history_ownership_fixed_results_follow_input_and_keep_one_slot() {
 fn time_history_ownership_same_name_distinguishes_samples_dt_and_scale() {
     let mut app = App::default();
     for (value, dt) in [(1.0, 0.02), (2.0, 0.02), (1.0, 0.04), (10.0, 0.02)] {
-        let input = app.time_history_input(ownership_wave(value, dt), "同名.csv".into());
+        let input = app
+            .time_history_input(ownership_wave(value, dt), "同名.csv".into())
+            .unwrap();
         assert!(input.source.target.is_none());
         app.apply_time_history_result(Ok(ownership_result(value)), input.source);
     }
     assert_eq!(app.core.model.vibration_cases.len(), 4);
     let first = app.core.model.vibration_cases[0].id;
-    let input = app.time_history_input(ownership_wave(1.0, 0.02), "同名.csv".into());
+    let input = app
+        .time_history_input(ownership_wave(1.0, 0.02), "同名.csv".into())
+        .unwrap();
     assert_eq!(input.source.target, Some(first.0));
     app.apply_time_history_result(Ok(ownership_result(99.0)), input.source);
     assert_eq!(
@@ -652,7 +670,9 @@ fn time_history_ownership_same_name_distinguishes_samples_dt_and_scale() {
         4
     );
     app.core.analysis_cfg.rc_damage_control = !app.core.analysis_cfg.rc_damage_control;
-    let input = app.time_history_input(ownership_wave(1.0, 0.02), "同名.csv".into());
+    let input = app
+        .time_history_input(ownership_wave(1.0, 0.02), "同名.csv".into())
+        .unwrap();
     assert_eq!(input.source.target, Some(first.0));
 }
 
@@ -728,6 +748,7 @@ fn time_history_ownership_rejection_failure_and_disconnection_preserve_results()
                     .source
             } else {
                 app.time_history_input(ownership_wave(1.0, 0.02), "A".into())
+                    .unwrap()
                     .source
             };
             if lumped {
@@ -746,6 +767,7 @@ fn time_history_ownership_rejection_failure_and_disconnection_preserve_results()
                     .source
             } else {
                 app.time_history_input(ownership_wave(1.0, 0.02), "A".into())
+                    .unwrap()
                     .source
             };
             let result = if failure == 4 {
@@ -885,14 +907,18 @@ fn time_history_ownership_save_reload_and_invalid_identity_are_not_recertified()
         bincode::serialize(&app.core.scoped.results.as_ref().unwrap().statics).unwrap();
     let original_design =
         bincode::serialize(&app.core.scoped.results.as_ref().unwrap().member_checks).unwrap();
-    let input = app.time_history_input(ownership_wave(1.0, 0.02), "A.csv".into());
+    let input = app
+        .time_history_input(ownership_wave(1.0, 0.02), "A.csv".into())
+        .unwrap();
     app.apply_time_history_result(Ok(ownership_result(11.0)), input.source);
     let lumped = app.lumped_time_history_input(vec![0.0, 2.0], "B.csv".into());
     app.apply_lumped_mass_result(Ok(dummy_lumped(0.21, true)), Some(lumped.source));
     for (value, dt) in [(1.0, 0.04), (10.0, 0.02)] {
         app.core.analysis_cfg.th_dt = dt;
         app.core.scoped.staleness.mark_edited();
-        let input = app.time_history_input(ownership_wave(value, dt), "A.csv".into());
+        let input = app
+            .time_history_input(ownership_wave(value, dt), "A.csv".into())
+            .unwrap();
         app.apply_time_history_result(Ok(ownership_result(value * 10.0)), input.source);
         app.core.analysis_cfg.lumped_th_dt = dt;
         app.core.scoped.staleness.mark_edited();
@@ -1066,7 +1092,9 @@ fn time_history_ownership_save_reload_and_invalid_identity_are_not_recertified()
 fn time_history_ownership_pending_freezes_input_and_rejects_setting_changes_or_cancel() {
     for lumped in [false, true] {
         let mut app = ownership_unset_portal();
-        let input = app.time_history_input(ownership_wave(1.0, 0.02), "B.csv".into());
+        let input = app
+            .time_history_input(ownership_wave(1.0, 0.02), "B.csv".into())
+            .unwrap();
         let pending = if lumped {
             PendingAnalysis::LumpedMassTimeHistory(Box::new(
                 app.lumped_time_history_input(vec![0.0, 1.0], "B.csv".into()),
@@ -1093,7 +1121,9 @@ fn time_history_ownership_pending_freezes_input_and_rejects_setting_changes_or_c
             .contains("波形生成後"));
         assert!(app.core.model.vibration_cases.is_empty());
         assert!(app.core.model.lumped_vibration_cases.is_empty());
-        let input = app.time_history_input(ownership_wave(1.0, 0.02), "B.csv".into());
+        let input = app
+            .time_history_input(ownership_wave(1.0, 0.02), "B.csv".into())
+            .unwrap();
         app.core.scoped.pending_unset_analysis =
             Some(PendingAnalysis::TimeHistory(Box::new(input)));
         app.cancel_pending_analysis();
@@ -1110,7 +1140,9 @@ fn time_history_ownership_sample_entry_ignores_selected_library_name() {
     app.core.analysis_cfg.threads = 1;
     app.core.analysis_cfg.th_duration = 0.04;
     app.generate_stories_action();
-    let input = app.time_history_input(ownership_wave(1.0, 0.02), "A.csv".into());
+    let input = app
+        .time_history_input(ownership_wave(1.0, 0.02), "A.csv".into())
+        .unwrap();
     app.apply_time_history_result(Ok(ownership_result(11.0)), input.source);
     let id = app.core.model.vibration_cases[0].id;
     app.core.scoped.wave_library_selection = Some("A.csv".into());
@@ -1211,14 +1243,18 @@ fn time_history_ownership_asynchronous_sample_entries_preserve_selected_existing
                 vec![0.77]
             );
         } else {
-            let input = app.time_history_input(ownership_wave(77.0, 0.02), "A.csv".into());
+            let input = app
+                .time_history_input(ownership_wave(77.0, 0.02), "A.csv".into())
+                .unwrap();
             app.apply_time_history_result(Ok(ownership_result(77.0)), input.source);
             let a = app.core.model.vibration_cases[0].clone();
             app.core.scoped.wave_library_selection = Some("A.csv".into());
-            let input = app.time_history_input(
-                App::sample_wave(&app.core.analysis_cfg).unwrap(),
-                "サンプル".into(),
-            );
+            let input = app
+                .time_history_input(
+                    App::sample_wave(&app.core.analysis_cfg).unwrap(),
+                    "サンプル".into(),
+                )
+                .unwrap();
             #[cfg(feature = "gui")]
             {
                 app.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
@@ -1285,7 +1321,7 @@ fn time_history_ownership_csv_parser_keeps_effective_arrays_and_source_name() {
         wave.accel_y.as_deref(),
         Some([10.0, -20.0, 30.0].as_slice())
     );
-    let input = app.time_history_input(wave, "B.csv".into());
+    let input = app.time_history_input(wave, "B.csv".into()).unwrap();
     app.apply_time_history_result(Ok(ownership_result(22.0)), input.source);
     assert_eq!(app.core.model.vibration_cases[0].wave_name, "B.csv");
     app.core.analysis_cfg.lumped_dir = SeismicDir::Y;
@@ -1368,4 +1404,84 @@ fn lumped_model_type_separates_cases_and_survives_project_reload() {
         bincode::serialize(bundle.lumped_result_for(bending_id).unwrap()).unwrap()
     );
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn time_history_missing_phase_y_rejects_sync_background_and_sample_without_changing_results() {
+    for path in 0..3 {
+        let mut app = ownership_portal();
+        let input = app
+            .time_history_input(ownership_wave(1.0, 0.02), "既存".into())
+            .unwrap();
+        app.apply_time_history_result(Ok(ownership_result(42.0)), input.source);
+        let cases = bincode::serialize(&app.core.model.vibration_cases).unwrap();
+        let results = bincode::serialize(&app.core.scoped.results).unwrap();
+        let freshness = (
+            app.core.scoped.staleness.results_stale,
+            app.core.scoped.staleness.last_run,
+        );
+        app.core.analysis_cfg.phase_diff_enabled = true;
+        app.core.analysis_cfg.phase_diff_dir_y = true;
+        assert!(app
+            .time_history_input(ownership_wave(1.0, 0.02), "不正".into())
+            .is_err());
+        match path {
+            0 => app.run_time_history(ownership_wave(1.0, 0.02)),
+            1 => app.start_time_history_job(ownership_wave(1.0, 0.02)),
+            _ => app.run_time_history_sample(),
+        }
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("Y方向加速度"));
+        assert!(app.core.scoped.job.is_none());
+        assert_eq!(
+            bincode::serialize(&app.core.model.vibration_cases).unwrap(),
+            cases
+        );
+        assert_eq!(
+            bincode::serialize(&app.core.scoped.results).unwrap(),
+            results
+        );
+        assert_eq!(
+            (
+                app.core.scoped.staleness.results_stale,
+                app.core.scoped.staleness.last_run
+            ),
+            freshness
+        );
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn time_history_missing_phase_y_rejects_csv_and_library_before_requesting_analysis() {
+    for library in [false, true] {
+        let dir = test_tmp();
+        let path = dir.join("Yなし.csv");
+        std::fs::write(&path, "0\n1\n-1\n").unwrap();
+        let mut app = ownership_unset_portal();
+        app.core.analysis_cfg.phase_diff_enabled = true;
+        app.core.analysis_cfg.phase_diff_dir_y = true;
+        app.set_wave_library_selection(Some("Yなし.csv".into()));
+        if library {
+            app.run_time_history_from_library_in(&dir);
+        } else {
+            app.run_time_history_from_csv_path(&path);
+        }
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("Y方向加速度"));
+        assert!(app.core.scoped.pending_unset_analysis.is_none());
+        assert!(app.core.scoped.job.is_none());
+        assert!(app.core.model.vibration_cases.is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
 }

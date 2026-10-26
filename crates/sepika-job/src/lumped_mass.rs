@@ -180,18 +180,12 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
             )));
         }
         let skeleton_x = if inp.nonlinear {
-            sk_x.stories
-                .get(i)
-                .map(|s| s.skeleton)
-                .unwrap_or_else(|| StoryTrilinear::elastic(kxi))
+            sk_x.stories[i].skeleton
         } else {
             StoryTrilinear::elastic(kxi)
         };
         let skeleton_y = if inp.nonlinear {
-            sk_y.stories
-                .get(i)
-                .map(|s| s.skeleton)
-                .unwrap_or_else(|| StoryTrilinear::elastic(kyi))
+            sk_y.stories[i].skeleton
         } else {
             StoryTrilinear::elastic(kyi)
         };
@@ -861,6 +855,79 @@ mod tests {
             s.j,
             dm.inertia_t_mm2
         );
+    }
+
+    #[test]
+    fn spatial_preserves_all_xy_skeletons_and_intentional_linear_elasticity() {
+        use sepika_solver::nonlinear::pushover::CapacityPoint;
+        let model = two_story_column_model();
+        let mut res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
+        let mut res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
+        res_x.disp[1][0] = 1.0;
+        res_x.disp[2][0] = 2.0;
+        res_y.disp[1][1] = 1.0;
+        res_y.disp[2][1] = 2.0;
+        let mut po_x = empty_pushover();
+        let mut po_y = empty_pushover();
+        for (po, factor) in [(&mut po_x, 1.0), (&mut po_y, 2.0)] {
+            po.capacity_curve = [(1.0, 100.0), (2.0, 140.0), (4.0, 180.0)]
+                .into_iter()
+                .enumerate()
+                .map(|(i, (d, q))| CapacityPoint {
+                    step: i as u32,
+                    roof_disp: d,
+                    base_shear: q * factor,
+                    story_drift: vec![d, d * 2.0],
+                    story_shear: vec![q * factor, q * factor * 0.5],
+                })
+                .collect();
+        }
+        for nonlinear in [true, false] {
+            for dir in [SeismicDir::X, SeismicDir::Y] {
+                let mut inp = input(&model, StickDim::Spatial, dir, nonlinear);
+                inp.source = LumpedStiffnessSource::ColumnKi;
+                inp.res_x = Some(&res_x);
+                inp.res_y = Some(&res_y);
+                inp.po_x = Some(&po_x);
+                inp.po_y = Some(&po_y);
+                let lm = build_lumped_mass(inp).unwrap();
+                assert_eq!(lm.stories.len(), 2);
+                assert_eq!(lm.spatial.len(), 2);
+                for (i, (story, spatial)) in lm.stories.iter().zip(&lm.spatial).enumerate() {
+                    assert_eq!(story.story, model.layers()[i].bottom);
+                    assert_eq!(story.mass, [20.0, 10.0][i]);
+                    for (sk, factor) in [(spatial.skeleton_x, 1.0), (spatial.skeleton_y, 2.0)] {
+                        if nonlinear {
+                            assert_eq!(sk.k1, [100.0, 25.0][i] * factor);
+                            assert_eq!(sk.q3, [180.0, 90.0][i] * factor);
+                            assert!(sk.q3 / sk.d3 < sk.k1);
+                        } else {
+                            assert_eq!(sk.q1 / sk.d1, sk.k1);
+                            assert_eq!(sk.q2 / sk.d2, sk.k1);
+                            assert_eq!(sk.q3 / sk.d3, sk.k1);
+                        }
+                    }
+                    assert_eq!(
+                        story.skeleton.k1,
+                        match dir {
+                            SeismicDir::X => spatial.k1_x,
+                            SeismicDir::Y => spatial.k1_y,
+                        }
+                    );
+                }
+                let response = sepika_solver::dynamic::lumped_mass::lumped_mass_time_history(
+                    &lm,
+                    &[0.0, 1.0, -1.0],
+                    0.01,
+                    0.02,
+                )
+                .unwrap();
+                assert_eq!(response.time.len(), 3);
+                assert_eq!(response.non_converged_steps, 0);
+                assert!(response.roof_disp.iter().all(|value| value.is_finite()));
+                assert!(response.roof_disp.iter().any(|value| *value != 0.0));
+            }
+        }
     }
 
     #[test]

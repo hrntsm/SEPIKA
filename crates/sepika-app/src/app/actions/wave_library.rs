@@ -237,7 +237,13 @@ impl App {
         };
         self.core.scoped.wave_library_selected_sha256 =
             sepika_io::wave_library::wave_sha256(dir, &name).ok();
-        let input = self.time_history_input(wave, name);
+        let input = match self.time_history_input(wave, name) {
+            Ok(input) => input,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
         self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
     }
 }

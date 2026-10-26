@@ -558,10 +558,12 @@ impl App {
                 .clicked()
             {
                 match Self::sample_wave(&self.core.analysis_cfg) {
-                    Ok(wave) => {
-                        let input = self.time_history_input(wave, "サンプル".into());
-                        self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
-                    }
+                    Ok(wave) => match self.time_history_input(wave, "サンプル".into()) {
+                        Ok(input) => {
+                            self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)))
+                        }
+                        Err(error) => self.report_error(error.to_string()),
+                    },
                     Err(e) => self.report_error(e.to_string()),
                 }
             }
@@ -655,7 +657,13 @@ impl App {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        let input = self.time_history_input(wave, name);
+        let input = match self.time_history_input(wave, name) {
+            Ok(input) => input,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
         self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
     }
 

@@ -8,7 +8,8 @@ impl App {
         &self,
         wave: sepika_solver::dynamic::timehistory::GroundMotion,
         wave_name: String,
-    ) -> TimeHistoryInput<sepika_solver::dynamic::timehistory::GroundMotion> {
+    ) -> sepika_job::JobResult<TimeHistoryInput<sepika_solver::dynamic::timehistory::GroundMotion>>
+    {
         let cfg = self.core.analysis_cfg;
         let effective = sepika_job::compute::effective_time_history_wave(
             &cfg,
@@ -18,7 +19,7 @@ impl App {
                 accel_y: wave.accel_y.clone(),
                 accel_theta: wave.accel_theta.clone(),
             },
-        );
+        )?;
         let analysis_identity = crate::app::vibration::vibration_identity(&(
             effective.dt,
             &effective.accel_x,
@@ -34,7 +35,7 @@ impl App {
             .iter()
             .find(|c| c.input_identity.as_ref() == Some(&identity))
             .map(|c| c.id.0);
-        TimeHistoryInput {
+        Ok(TimeHistoryInput {
             data: wave,
             source: TimeHistorySource {
                 cfg,
@@ -44,7 +45,7 @@ impl App {
                 dependency_identity: None,
                 target,
             },
-        }
+        })
     }
 
     pub(crate) fn apply_time_history_result(
@@ -85,7 +86,13 @@ impl App {
 
     /// 入力波による時刻歴応答解析を実行する。表示名は「入力波」。
     pub fn run_time_history(&mut self, wave: sepika_solver::dynamic::timehistory::GroundMotion) {
-        let input = self.time_history_input(wave, "入力波".into());
+        let input = match self.time_history_input(wave, "入力波".into()) {
+            Ok(input) => input,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
         self.run_time_history_input(input);
     }
 
@@ -114,7 +121,13 @@ impl App {
         &mut self,
         wave: sepika_solver::dynamic::timehistory::GroundMotion,
     ) {
-        let input = self.time_history_input(wave, "入力波".into());
+        let input = match self.time_history_input(wave, "入力波".into()) {
+            Ok(input) => input,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
         self.start_time_history_input_job(input);
     }
 
@@ -184,7 +197,13 @@ impl App {
                 return;
             }
         };
-        let input = self.time_history_input(wave, "サンプル".into());
+        let input = match self.time_history_input(wave, "サンプル".into()) {
+            Ok(input) => input,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
         self.run_time_history_input(input);
     }
 }
