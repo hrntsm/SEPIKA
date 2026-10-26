@@ -1,18 +1,8 @@
 use crate::frame::fiber::FiberBeam;
-use sepika_core::ids::MaterialId;
 use sepika_core::model::Model;
-
-/// 軸ばね1本。
-pub struct AxialSpring {
-    pub y: f64,
-    pub z: f64,
-    pub material: MaterialId,
-}
 
 /// MS（マルチスプリング）梁要素。
 pub struct MultiSpringElement {
-    /// 軸バネ配置（両端共通）。
-    pub springs: Vec<AxialSpring>,
     pub inner: FiberBeam,
 }
 
@@ -36,26 +26,7 @@ impl MultiSpringElement {
 
         let inner = FiberBeam::build_plastic_zone(data, model, lp, MS_NW, MS_ND, basis, kind);
 
-        let springs = inner
-            .gauss_points
-            .first()
-            .map(|gp| {
-                gp.section
-                    .fibers
-                    .iter()
-                    .map(|f| AxialSpring {
-                        y: f.y,
-                        z: f.z,
-                        material: model
-                            .element_section(data)
-                            .and_then(|s| s.material)
-                            .unwrap_or(MaterialId(0)),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        MultiSpringElement { springs, inner }
+        MultiSpringElement { inner }
     }
 }
 

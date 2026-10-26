@@ -576,7 +576,7 @@ fn committed_bilinear_end_springs_propagate_into_tangent_damping_matrix() {
     model.sections[0].iz = 1e8;
     let ctx = Ctx { model: &model };
     let elastic = BeamElement::new(&model.elements[0], &model);
-    let mut member = ConcentratedSpringBeam::new_one_component(
+    let mut member = ConcentratedSpringBeam::new(
         elastic,
         Box::new(Bilinear::new(1e12, 1e7, 0.01)),
         Box::new(Bilinear::new(1e12, 1e7, 0.01)),

@@ -53,10 +53,7 @@ fn axial_member(
     if let Some(n) = normal {
         inner.configure_wall_release(n).unwrap();
     }
-    crate::frame::multi_spring::MultiSpringElement {
-        springs: Vec::new(),
-        inner,
-    }
+    crate::frame::multi_spring::MultiSpringElement { inner }
 }
 
 fn axial_behavior(

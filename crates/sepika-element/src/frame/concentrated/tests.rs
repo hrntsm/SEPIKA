@@ -43,7 +43,7 @@ fn make_test_element() -> ConcentratedSpringBeam {
     let elastic = make_test_beam();
     let spring_i = Box::new(Bilinear::new(1.0e10, 1.0e20, 0.01));
     let spring_j = Box::new(Bilinear::new(1.0e10, 1.0e20, 0.01));
-    ConcentratedSpringBeam::new_one_component(elastic, spring_i, spring_j)
+    ConcentratedSpringBeam::new(elastic, spring_i, spring_j)
 }
 
 fn make_yield_element() -> ConcentratedSpringBeam {
@@ -52,7 +52,7 @@ fn make_yield_element() -> ConcentratedSpringBeam {
     elastic.iy = 1.0e8;
     let spring_i = Box::new(Bilinear::new(1.0e12, 1.0e7, 0.01));
     let spring_j = Box::new(Bilinear::new(1.0e12, 1.0e7, 0.01));
-    ConcentratedSpringBeam::new_one_component(elastic, spring_i, spring_j)
+    ConcentratedSpringBeam::new(elastic, spring_i, spring_j)
 }
 
 /// Box<dyn UniaxialMaterial> から Bilinear の降伏値を読み出す（テスト用）。
@@ -240,7 +240,7 @@ fn test_consistent_mass_uses_initial_end_spring_stiffness_after_yield() {
     elastic.mass_properties = sepika_core::model::SectionMassProperties::uniform(
         2.4e-9, elastic.a, elastic.iz, elastic.iy,
     );
-    let mut elem = ConcentratedSpringBeam::new_one_component(
+    let mut elem = ConcentratedSpringBeam::new(
         elastic,
         Box::new(Bilinear::new(1.0e12, 1.0e7, 0.01)),
         Box::new(Bilinear::new(1.0e12, 1.0e7, 0.01)),
@@ -269,7 +269,7 @@ fn test_consistent_mass_uses_initial_end_spring_stiffness_after_yield() {
         beam_before.iz,
         beam_before.iy,
     );
-    let lumped_before = ConcentratedSpringBeam::new_one_component(
+    let lumped_before = ConcentratedSpringBeam::new(
         beam_before,
         Box::new(Bilinear::new(1.0e12, 1.0e7, 0.01)),
         Box::new(Bilinear::new(1.0e12, 1.0e7, 0.01)),
@@ -289,7 +289,7 @@ fn rc_consistent_mass_resolver_matches_beam() {
     let mut elastic = make_test_beam();
     elastic.mass_properties = rc_properties;
     let beam = elastic.clone();
-    let concentrated = ConcentratedSpringBeam::new_one_component(
+    let concentrated = ConcentratedSpringBeam::new(
         elastic,
         Box::new(Bilinear::new(1.0e20, 1.0e30, 0.01)),
         Box::new(Bilinear::new(1.0e20, 1.0e30, 0.01)),
@@ -354,8 +354,8 @@ fn test_mn_interaction_reduces_spring_yield() {
     let n_allow = ea_over_l;
     let spring_i = Box::new(Bilinear::new(1.0e12, my0, 0.01));
     let spring_j = Box::new(Bilinear::new(1.0e12, my0, 0.01));
-    let mut elem = ConcentratedSpringBeam::new_one_component(elastic, spring_i, spring_j)
-        .with_mn_interaction(my0, n_allow);
+    let mut elem =
+        ConcentratedSpringBeam::new(elastic, spring_i, spring_j).with_mn_interaction(my0, n_allow);
 
     let ctx = Ctx {
         model: &sepika_core::model::Model::default(),
@@ -376,7 +376,7 @@ fn test_mn_interaction_reduces_spring_yield() {
     let elastic_t = make_test_beam();
     let spring_ti = Box::new(Bilinear::new(1.0e12, my0, 0.01));
     let spring_tj = Box::new(Bilinear::new(1.0e12, my0, 0.01));
-    let mut elem_t = ConcentratedSpringBeam::new_one_component(elastic_t, spring_ti, spring_tj)
+    let mut elem_t = ConcentratedSpringBeam::new(elastic_t, spring_ti, spring_tj)
         .with_mn_interaction(my0, n_allow);
     elem_t.update_state(&du_t, false, &ctx).unwrap();
     assert_relative_eq!(spring_fy(&*elem_t.spring_i), 0.5 * my0, max_relative = 1e-9);
@@ -388,7 +388,7 @@ fn test_mn_interaction_disabled_keeps_yield() {
     let elastic = make_test_beam();
     let spring_i = Box::new(Bilinear::new(1.0e12, my0, 0.01));
     let spring_j = Box::new(Bilinear::new(1.0e12, my0, 0.01));
-    let mut elem = ConcentratedSpringBeam::new_one_component(elastic, spring_i, spring_j);
+    let mut elem = ConcentratedSpringBeam::new(elastic, spring_i, spring_j);
     let ctx = Ctx {
         model: &sepika_core::model::Model::default(),
     };
@@ -406,7 +406,7 @@ fn test_mn_interaction_floor_at_high_axial() {
     let ea_over_l = 205000.0 * 80000.0 / 3000.0;
     let spring_i = Box::new(Bilinear::new(1.0e12, my0, 0.01));
     let spring_j = Box::new(Bilinear::new(1.0e12, my0, 0.01));
-    let mut elem = ConcentratedSpringBeam::new_one_component(elastic, spring_i, spring_j)
+    let mut elem = ConcentratedSpringBeam::new(elastic, spring_i, spring_j)
         .with_mn_interaction(my0, ea_over_l);
     let ctx = Ctx {
         model: &sepika_core::model::Model::default(),
@@ -425,7 +425,7 @@ fn test_mn_interaction_yield_moment_in_response() {
     let ea_over_l = 205000.0 * 80000.0 / 3000.0;
     let spring_i = Box::new(Bilinear::new(1.0e12, my0, 0.0));
     let spring_j = Box::new(Bilinear::new(1.0e12, my0, 0.0));
-    let mut elem = ConcentratedSpringBeam::new_one_component(elastic, spring_i, spring_j)
+    let mut elem = ConcentratedSpringBeam::new(elastic, spring_i, spring_j)
         .with_mn_interaction(my0, ea_over_l);
     let ctx = Ctx {
         model: &sepika_core::model::Model::default(),
@@ -572,8 +572,8 @@ fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
         Box::new(sepika_material::HysteresisMaterial::new(total.clone()))
             as Box<dyn UniaxialMaterial>
     };
-    let mut element = ConcentratedSpringBeam::new_one_component(elastic, mk(), mk())
-        .with_total_rotation_reference(1e9);
+    let mut element =
+        ConcentratedSpringBeam::new(elastic, mk(), mk()).with_total_rotation_reference(1e9);
     let model = sepika_core::model::Model::default();
     let ctx = Ctx { model: &model };
     let elastic_k = element.elastic.local_stiffness_flex_rc_reference();
@@ -653,8 +653,8 @@ fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
         Box::new(sepika_material::HysteresisMaterial::new(alpha_one.clone()))
             as Box<dyn UniaxialMaterial>
     };
-    let mut element = ConcentratedSpringBeam::new_one_component(element.elastic, mk(), mk())
-        .with_total_rotation_reference(1e9);
+    let mut element =
+        ConcentratedSpringBeam::new(element.elastic, mk(), mk()).with_total_rotation_reference(1e9);
     element.elastic.committed_disp = [0.0; 12];
     element.elastic.trial_disp = [0.0; 12];
     element.update_state(&du(0.001), true, &ctx).unwrap();
@@ -686,8 +686,8 @@ fn explicit_total_reference_preserves_takeda_unloading_values() {
         Box::new(sepika_material::HysteresisMaterial::new(total.clone()))
             as Box<dyn UniaxialMaterial>
     };
-    let mut element = ConcentratedSpringBeam::new_one_component(elastic, mk(), mk())
-        .with_total_rotation_reference(1e9);
+    let mut element =
+        ConcentratedSpringBeam::new(elastic, mk(), mk()).with_total_rotation_reference(1e9);
     let model = sepika_core::model::Model::default();
     let ctx = Ctx { model: &model };
     let du = |theta| LocalVec {

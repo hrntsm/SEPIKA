@@ -265,10 +265,9 @@ pub fn build_nonlinear_behavior(
                     }
                     let (spring_i, spring_j, backbone) =
                         build_flexural_springs(data, model, rule, basis);
-                    let beam =
-                        crate::frame::concentrated::ConcentratedSpringBeam::new_one_component(
-                            elem, spring_i, spring_j,
-                        );
+                    let beam = crate::frame::concentrated::ConcentratedSpringBeam::new(
+                        elem, spring_i, spring_j,
+                    );
                     let beam = if springs::uses_rc_alpha_reference(data, model)
                         && matches!(
                             rule,

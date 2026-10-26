@@ -646,7 +646,6 @@ fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
         AnalysisKind::Incremental,
     );
     ms.inner.gauss_points.clear();
-    ms.springs.clear();
     for opt in [MassOption::Lumped, MassOption::Consistent] {
         assert_mass(&fiber.mass_matrix(opt), SRC_MASS_T, opt);
         assert_mass(&ms.mass_matrix(opt), SRC_MASS_T, opt);
@@ -966,7 +965,7 @@ fn beam_delegates_share_both_mass_forms_and_reject_the_same_resolver_failure() {
                     None,
                 ],
             )),
-            Box::new(ConcentratedSpringBeam::new_one_component(
+            Box::new(ConcentratedSpringBeam::new(
                 beam,
                 Box::new(Bilinear::new(1.0e12, 1.0e20, 0.01)),
                 Box::new(Bilinear::new(1.0e12, 1.0e20, 0.01)),
