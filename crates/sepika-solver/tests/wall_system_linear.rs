@@ -84,6 +84,57 @@ fn audit_rc_wall_opening_linear_response() {
                     load.values = [0.0, 0.0, 50_000.0, 0.0, 0.0, 0.0];
                 }
                 let vertical = linear_static_once(&axial, LoadCaseId(0)).unwrap();
+                if columns {
+                    for (direct_model, direct_result, dof) in
+                        [(&horizontal, &lateral, 0), (&axial, &vertical, 2)]
+                    {
+                        let prepared = opening_audit_plate_expansion(direct_model);
+                        let actual = linear_static_once(&prepared, LoadCaseId(0)).unwrap();
+                        let actual_forces = element_nodal_forces(&prepared, &actual);
+                        let wall_force = &actual_forces[4];
+                        println!("prepared mode={mode:?}, case={name}, dof={:?}, displacement_mm={:.12}, wall_force_N={:.6}, column_force_N={:.6}",
+                            dof,
+                            actual.disp[2][dof],
+                            wall_force[2][dof] + wall_force[3][dof],
+                            actual_forces[0][2][dof] + actual_forces[1][3][dof]);
+                        let wall = prepared
+                            .elements
+                            .iter()
+                            .find(|e| e.id == ElemId(4))
+                            .unwrap();
+                        if !wall_is_seismic(wall, &prepared) {
+                            let support_n: f64 = actual_forces
+                                .iter()
+                                .flat_map(|e| &e[..2])
+                                .map(|f| f[dof])
+                                .sum();
+                            close(support_n, -100_000.0, 0.01);
+                            for beam in &actual_forces[2..4] {
+                                for node in beam {
+                                    for (d, &force) in node.iter().enumerate() {
+                                        close(force, 0.0, if d < 3 { 0.01 } else { 0.1 });
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        for (actual, expected) in actual.disp.iter().zip(&direct_result.disp) {
+                            for (&actual, &expected) in actual.iter().zip(expected) {
+                                close(actual, expected, 1e-10);
+                            }
+                        }
+                        let expected_forces = element_nodal_forces(direct_model, direct_result);
+                        for (actual, expected) in actual_forces.iter().zip(&expected_forces) {
+                            for (actual, expected) in actual.iter().zip(expected) {
+                                for (d, (&actual, &expected)) in
+                                    actual.iter().zip(expected).enumerate()
+                                {
+                                    close(actual, expected, if d < 3 { 0.01 } else { 0.1 });
+                                }
+                            }
+                        }
+                    }
+                }
                 let axial_wall = wall_nodal_force(&axial, &vertical);
                 let lateral_forces = element_nodal_forces(&horizontal, &lateral);
                 let axial_forces = element_nodal_forces(&axial, &vertical);
@@ -130,10 +181,55 @@ fn audit_rc_wall_opening_linear_response() {
                         bending_work_n_mm += ui * stiffness.get(i, j) * uj;
                     }
                 }
+                let axial_area_mm2 =
+                    (axial_wall[2][2] + axial_wall[3][2]) / vertical.disp[2][2] * 3000.0 / 30_000.0;
+                let bending_i_mm4 = bending_work_n_mm * 3000.0 / (30_000.0 * 1e-8);
+                println!("plate_expansion_checked={columns}, inferred_wall_A_mm2={axial_area_mm2:.6}, inferred_wall_I_mm4={bending_i_mm4:.6}");
                 println!("columns={columns}, mode={mode:?}, case={name}, seismic={seismic}, ux_mm={:.12}, uz_mm={:.12}, wall_Q_N={:.6}, wall_N_N={:.6}, column_Q_N={column_q_n:.6}, column_N_N={column_n_n:.6}, reaction_X_N={reaction_x_n:.6}, reaction_Z_N={reaction_z_n:.6}, axial_K_N_mm={:.6}, bending_uKu_N_mm={:.6}", lateral.disp[2][0], vertical.disp[2][2], lateral_wall[2][0]+lateral_wall[3][0], axial_wall[2][2]+axial_wall[3][2], 100_000.0/vertical.disp[2][2], bending_work_n_mm);
             }
         }
     }
+}
+
+fn opening_audit_plate_expansion(direct: &Model) -> Model {
+    use sepika_core::ids::{WallPlateId, WallRegionId};
+    use sepika_core::wall_expand::expand_wall_elements;
+
+    let mut input = direct.clone();
+    let wall = input.elements.pop().unwrap();
+    assert_eq!(wall.id, ElemId(4));
+    let attr = input.wall_attrs.pop().unwrap();
+    let boundary = wall.nodes.to_vec();
+    let plate = input.add_enclosed_wall_plate_from_nodes(
+        &boundary,
+        WallPlate {
+            id: WallPlateId(0),
+            shape: WallPlateShape::Enclosed,
+            section: wall.section,
+            dl_support: Some(WallDlSupport::LowerBeam),
+            self_weight_shares: Vec::new(),
+            opening_area: attr.opening_area,
+            opening_weight: attr.opening_weight,
+            openings: attr.openings,
+            loads: Vec::new(),
+            slit: attr.slit,
+        },
+    );
+    input.wall_regions.push(WallRegion {
+        id: WallRegionId(0),
+        name: "開口監査".into(),
+        boundary,
+        wall_plate_ids: vec![plate],
+        posts: Vec::new(),
+    });
+    assert_eq!(input.elements.len(), 4);
+    let (expanded, _, report) = expand_wall_elements(&input);
+    assert_eq!(report.generated, 1);
+    assert_eq!(
+        expanded.generated_wall_origins.get(&ElemId(4)),
+        Some(&plate)
+    );
+    expanded
 }
 
 #[test]
