@@ -1,0 +1,172 @@
+{
+  "issue": 747,
+  "baseline": {
+    "source_head": "4198a0c679c6259d25de0129b359bb0594fafeb5",
+    "binary": "target/issue747-evidence/sepika-before.exe",
+    "sha256": "180049806B857A5FDC9EADCCAE730F8041647EC87184CBE5F9BEFD7B2B26A582",
+    "build": "cargo build -p sepika-app --features gui --locked"
+  },
+  "after": {
+    "source": "同じ4198a0c6に本Issueの未コミット差分を適用。#749統合前に比較を完了。",
+    "binary": "target/issue747-evidence/sepika-after.exe",
+    "sha256": "EA9DBA56BDF87308161987E737B8702E6E0B1C951EE6B2EAF34469B1D0038BFE"
+  },
+  "conditions": {
+    "platform": "Windows",
+    "model": "ファイル→サンプル(門型ラーメン)、形状比較は読込直後。応力・検定比は既定の[0]長期を単体実行しモデルタブへ戻る。両版で同じ操作。",
+    "window_client_size_px": [
+      1280,
+      800
+    ],
+    "window_image_size_px": [
+      1282,
+      831
+    ],
+    "camera": {
+      "yaw_rad": "π/4",
+      "pitch_rad": "−π/4",
+      "zoom": 3.0,
+      "pan_px": [
+        0,
+        0
+      ]
+    },
+    "ui_scale": "起動時の既定（拡大縮小操作なし）",
+    "view": "全体（3D）、断面表示は線材比較のみOFF、その他ON",
+    "force": "My・Mz、コンターOFF、値表示OFF、変形表示OFF（既定）。Mz max=25.2 kN·m、Myは全0。",
+    "check_ratio": "最大、位置別マーカーON、全部材数値ラベルOFF（既定）。max=0.25、NG=0件。",
+    "selection": "梁 #2（H-400x200x8x13）。線材・断面の選択画面はポインタを部材から外して保存。",
+    "note": "模型・視点・倍率・ウィンドウサイズ・各モードの設定は前後で同じ。画像はウィンドウ全体を無加工で保存。"
+  },
+  "observed": {
+    "before": "通常hoverと選択はともに赤い中心線。検定比では選択部材の緑の中心線が赤に覆われる。",
+    "after": "線材・断面の未選択hoverは青、選択はより太い紫。候補外で青が消え、選択+hoverとポインタ外で紫が同じまま残る。空白クリックで選択解除。検定比の緑の結果線・位置マーカー、応力図の紫の曲線・塗り・凡例を保持。検定比hoverでも緑線と内訳ツールチップを確認。",
+    "frame": "追加の直接確認: 同じ模型の形状・断面表示ON・2F伏図で、通常/青hover/紫選択を確認（画像追加なし）。",
+    "h_section": "before/after-section-selected.jpgで梁のフランジ・ウェブの段差、柱頭のH形の凹部と空白を目視確認。強調は細い中心線に限られ、面全体の一括塗りはない。solid.rs/断面形状/面塗り/隠面処理には変更なし。",
+    "limits": "H形空隙は既定倍率の代表画面と形状描画未変更の差分で確認。拡大検査・全状態×全モードの総当たりは未実施。"
+  },
+  "comparisons": [
+    {
+      "mode": "wire",
+      "before": "before-wire-selected.jpg",
+      "after": "after-wire-selected.jpg"
+    },
+    {
+      "mode": "section",
+      "before": "before-section-selected.jpg",
+      "after": "after-section-selected.jpg"
+    },
+    {
+      "mode": "force",
+      "before": "before-force-selected.jpg",
+      "after": "after-force-selected.jpg"
+    },
+    {
+      "mode": "check",
+      "before": "before-check-selected.jpg",
+      "after": "after-check-selected.jpg"
+    }
+  ],
+  "additional_states": [
+    "after-wire-hover.jpg",
+    "after-section-hover.jpg",
+    "after-check-hover.jpg"
+  ],
+  "images": {
+    "after-check-hover.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "f8734e3b289004d7337fae018f5fbea4889583eec8030737f3acaa661c50fe90",
+      "format": "JPEG"
+    },
+    "after-check-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "740f9176c55070b26dd8a37d9ff051d727981d6f0073f8f2c40de4faacc37a3c",
+      "format": "JPEG"
+    },
+    "after-force-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "55816b04297431465fcc01b0466cc871aa194351b5fae3d994e746955ef0e4b8",
+      "format": "JPEG"
+    },
+    "after-section-hover.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "9f1e7b5b454116a83a0563d933d78956e42453bf9a1d172e2eabd283775dd97c",
+      "format": "JPEG"
+    },
+    "after-section-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "1b3609cadbff5b4a56e46350b281f251eda3377b8fc2da943f3f1268ea54c049",
+      "format": "JPEG"
+    },
+    "after-wire-hover.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "50eab868eed7b67427fa299506e958ccaf79b285b230a294f75258069dc633f3",
+      "format": "JPEG"
+    },
+    "after-wire-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "c0bbca1921cadd7890392e93da45db0b53e2a2407166ae589ac960e35138693c",
+      "format": "JPEG"
+    },
+    "before-check-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "4ffa0fd924b8d64a80ce6b469c6f4750e68680873a9c6bc13916e33356f3f13f",
+      "format": "JPEG"
+    },
+    "before-force-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "e6461bad0bf868c1ab89695504f509990471ae5f7e3c0135b4806a6b180b2a25",
+      "format": "JPEG"
+    },
+    "before-section-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "c9a24cd9b9316a3dd620a3ddaf723fa63db619e24370af082cb26bea50ace4a5",
+      "format": "JPEG"
+    },
+    "before-wire-selected.jpg": {
+      "size_px": [
+        1282,
+        831
+      ],
+      "sha256": "d7c4f3c67f9c555dfc48a81cc5b4132217eea39e99f5cde91368b847467838e3",
+      "format": "JPEG"
+    }
+  },
+  "validation": [
+    "cargo test -p sepika-app --features gui --locked（成功、単体980件と統合テスト）",
+    "cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings（成功）",
+    "cargo fmt --all -- --check（成功）",
+    "cargo run -p xtask -- check-docs（成功、summary124 / links654 / impl refs703）",
+    "mdbook build（成功）"
+  ]
+}
