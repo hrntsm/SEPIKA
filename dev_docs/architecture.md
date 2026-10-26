@@ -3,9 +3,9 @@
 SEPIKA は 13 のクレートから成る階層型アーキテクチャで構成されています。
 
 ```
-Layer 0: sepika-core（基本データ構造・DOF 管理・荷重組合せ）、sepika-math（疎行列・ソルバ）、
+Layer 0: sepika-core（基本データ構造・DOF 管理・荷重組合せ・壁解析モデル生成）、sepika-math（疎行列・ソルバ）、
          sepika-material（一軸材料履歴則）
-Layer 1: sepika-section（断面性能算定）、sepika-load（Ai 分布・床荷重）
+Layer 1: sepika-section（断面性能算定）、sepika-load（Ai 分布・床/壁/部材の荷重・重量・質量）
 Layer 2: sepika-edit（編集トランザクション）
 Layer 3: sepika-element（梁・板・仕口パネル要素）
 Layer 4: sepika-solver（各種解析）、sepika-io（結果 I/O）
@@ -31,12 +31,12 @@ cargo run -p xtask -- check-deps
 
 | クレート | 役割 |
 |----------|------|
-| `sepika-core` | 基本データ構造・DOF 管理・荷重組合せ |
+| `sepika-core` | 基本データ構造・DOF 管理・荷重組合せ・壁解析モデル生成 |
 | `sepika-math` | 疎行列・ソルバ |
 | `sepika-material` | 一軸材料履歴則 |
 | `sepika-section` | 断面性能算定 |
 | `sepika-element` | 梁・板・仕口パネル要素 |
-| `sepika-load` | Ai 分布・床荷重 |
+| `sepika-load` | Ai 分布・床/壁/部材の荷重・重量・質量 |
 | `sepika-solver` | 各種解析 |
 | `sepika-design-jp` | 日本仕様設計計算 |
 | `sepika-io` | 結果 I/O |
@@ -48,3 +48,5 @@ cargo run -p xtask -- check-deps
 ## API リファレンス
 
 各クレートの API ドキュメント（rustdoc）は、CI で `cargo doc` から生成され、このサイトの [`api/`](https://hrntsm.github.io/SEPIKA/api/sepika_core/index.html) 以下に併設されます。
+
+壁版からの一時的な解析要素生成は `sepika_core::wall_expand` が正本を持つ。荷重クレートも同じ生成結果を利用する。解析梁のCMQは `sepika_element::frame::member_load` の実荷重処理へ集約し、荷重クレートから要素クレートへの依存は設けない。
