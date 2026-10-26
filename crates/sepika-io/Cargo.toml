@@ -24,7 +24,6 @@ smallvec   = { workspace = true }
 encoding_rs = { workspace = true }
 dirs        = { workspace = true }
 sepika-core    = { path = "../sepika-core" }
-sepika-element = { path = "../sepika-element" }
 
 [dev-dependencies]
 sepika-element = { path = "../sepika-element" }

@@ -7,7 +7,7 @@ use std::path::Path;
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 /// manifest への記載が必須な zip エントリ。
-const REQUIRED_ENTRIES: [&str; 2] = ["model.msgpack", "settings.json"];
+const REQUIRED_ENTRIES: [&str; 1] = ["model.msgpack"];
 
 /// zip エントリ 1 個あたりの最大展開サイズ [byte]。
 const MAX_ENTRY_UNCOMPRESSED: u64 = 4 * 1024 * 1024 * 1024;
@@ -133,25 +133,12 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
     let tmp_path = path.with_extension("ovika.tmp");
 
     let model_bytes = rmp_serde::to_vec_named(model).map_err(|e| IoError::Decode(e.to_string()))?;
-    let settings_bytes = serde_json::to_vec_pretty(&serde_json::json!({
-        "code": "JIS B 0001",
-        "created_at": "",
-    }))
-    .map_err(|e| IoError::Decode(e.to_string()))?;
-
     let model_hash = sha256_of(&model_bytes);
-    let settings_hash = sha256_of(&settings_bytes);
 
-    let mut entries = vec![
-        crate::manifest::EntryHash {
-            name: "model.msgpack".to_string(),
-            sha256: model_hash,
-        },
-        crate::manifest::EntryHash {
-            name: "settings.json".to_string(),
-            sha256: settings_hash,
-        },
-    ];
+    let mut entries = vec![crate::manifest::EntryHash {
+        name: "model.msgpack".to_string(),
+        sha256: model_hash,
+    }];
     for (name, data) in [
         (PREPARATION_ENTRY, extras.preparation),
         (RESULTS_ENTRY, extras.results),
@@ -188,10 +175,6 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
         zip.start_file("model.msgpack", opts)
             .map_err(|e| IoError::Zip(e.to_string()))?;
         zip.write_all(&model_bytes)?;
-
-        zip.start_file("settings.json", opts)
-            .map_err(|e| IoError::Zip(e.to_string()))?;
-        zip.write_all(&settings_bytes)?;
 
         for (name, data) in [
             (PREPARATION_ENTRY, extras.preparation),
@@ -476,25 +459,18 @@ mod tests {
                 assert_eq!(std::fs::read(&path).unwrap(), original);
                 assert!(model.eq_ignoring_dofmap(&before));
                 let bytes = rmp_serde::to_vec_named(&model).unwrap();
-                let settings = b"{}";
                 let manifest = Manifest {
                     schema_version: CURRENT_SCHEMA_VERSION,
                     units: "internal: N-mm-s".into(),
                     created_by: "rc-purpose-fixture".into(),
-                    entries: vec![
-                        crate::manifest::EntryHash {
-                            name: "model.msgpack".into(),
-                            sha256: sha256_of(&bytes),
-                        },
-                        crate::manifest::EntryHash {
-                            name: "settings.json".into(),
-                            sha256: sha256_of(settings),
-                        },
-                    ],
+                    entries: vec![crate::manifest::EntryHash {
+                        name: "model.msgpack".into(),
+                        sha256: sha256_of(&bytes),
+                    }],
                 };
                 let invalid_path =
                     path.with_file_name(format!("rc-purpose-invalid-{index}-{mode}.ovika"));
-                write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+                write_zip_with_manifest(&invalid_path, &manifest, &bytes);
                 assert!(
                     matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if expected(&message)),
                     "shape={index} mode={mode}"
@@ -564,27 +540,20 @@ mod tests {
                     assert_eq!(std::fs::read(&path).unwrap(), original);
                     assert!(model.eq_ignoring_dofmap(&before));
                     let bytes = rmp_serde::to_vec_named(&model).unwrap();
-                    let settings = b"{}";
                     let manifest = Manifest {
                         schema_version: CURRENT_SCHEMA_VERSION,
                         units: "internal: N-mm-s".into(),
                         created_by: "rc-purpose-noncanonical-fixture".into(),
-                        entries: vec![
-                            crate::manifest::EntryHash {
-                                name: "model.msgpack".into(),
-                                sha256: sha256_of(&bytes),
-                            },
-                            crate::manifest::EntryHash {
-                                name: "settings.json".into(),
-                                sha256: sha256_of(settings),
-                            },
-                        ],
+                        entries: vec![crate::manifest::EntryHash {
+                            name: "model.msgpack".into(),
+                            sha256: sha256_of(&bytes),
+                        }],
                     };
                     let invalid_path = path.with_file_name(format!(
                         "rc-purpose-noncanonical-{index}-{}-{assigned}.ovika",
                         id.0
                     ));
-                    write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+                    write_zip_with_manifest(&invalid_path, &manifest, &bytes);
                     let container = std::fs::read(&invalid_path).unwrap();
                     assert!(
                         matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if expected(&message))
@@ -659,24 +628,17 @@ mod tests {
             );
             assert_eq!(std::fs::read(&path).unwrap(), original);
             let bytes = rmp_serde::to_vec_named(&model).unwrap();
-            let settings = b"{}";
             let manifest = Manifest {
                 schema_version: CURRENT_SCHEMA_VERSION,
                 units: "internal: N-mm-s".into(),
                 created_by: "independent-635-fixture".into(),
-                entries: vec![
-                    crate::manifest::EntryHash {
-                        name: "model.msgpack".into(),
-                        sha256: sha256_of(&bytes),
-                    },
-                    crate::manifest::EntryHash {
-                        name: "settings.json".into(),
-                        sha256: sha256_of(settings),
-                    },
-                ],
+                entries: vec![crate::manifest::EntryHash {
+                    name: "model.msgpack".into(),
+                    sha256: sha256_of(&bytes),
+                }],
             };
             let invalid_path = path.with_file_name(format!("issue635-invalid-{b}.ovika"));
-            write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+            write_zip_with_manifest(&invalid_path, &manifest, &bytes);
             assert!(
                 matches!(load_ovika(&invalid_path),Err(IoError::Decode(message)) if message==reason)
             );
@@ -845,24 +807,17 @@ mod tests {
                 );
                 assert_eq!(std::fs::read(&path).unwrap(), original);
                 let bytes = rmp_serde::to_vec_named(&model).unwrap();
-                let settings = b"{}";
                 let manifest = Manifest {
                     schema_version: CURRENT_SCHEMA_VERSION,
                     units: "internal: N-mm-s".into(),
                     created_by: "independent-562-fixture".into(),
-                    entries: vec![
-                        crate::manifest::EntryHash {
-                            name: "model.msgpack".into(),
-                            sha256: sha256_of(&bytes),
-                        },
-                        crate::manifest::EntryHash {
-                            name: "settings.json".into(),
-                            sha256: sha256_of(settings),
-                        },
-                    ],
+                    entries: vec![crate::manifest::EntryHash {
+                        name: "model.msgpack".into(),
+                        sha256: sha256_of(&bytes),
+                    }],
                 };
                 let invalid_path = path.with_extension("invalid.ovika");
-                write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+                write_zip_with_manifest(&invalid_path, &manifest, &bytes);
                 assert!(
                     matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if message == reason)
                 );
@@ -901,24 +856,17 @@ mod tests {
                 Err(IoError::Decode(message)) if message == reason));
             assert_eq!(std::fs::read(&path).unwrap(), original);
             let bytes = rmp_serde::to_vec_named(&model).unwrap();
-            let settings = b"{}";
             let manifest = Manifest {
                 schema_version: CURRENT_SCHEMA_VERSION,
                 units: "internal: N-mm-s".into(),
                 created_by: "independent-544-fixture".into(),
-                entries: vec![
-                    crate::manifest::EntryHash {
-                        name: "model.msgpack".into(),
-                        sha256: sha256_of(&bytes),
-                    },
-                    crate::manifest::EntryHash {
-                        name: "settings.json".into(),
-                        sha256: sha256_of(settings),
-                    },
-                ],
+                entries: vec![crate::manifest::EntryHash {
+                    name: "model.msgpack".into(),
+                    sha256: sha256_of(&bytes),
+                }],
             };
             let invalid = path.with_extension("invalid.ovika");
-            write_zip_with_manifest(&invalid, &manifest, &bytes, settings);
+            write_zip_with_manifest(&invalid, &manifest, &bytes);
             assert!(
                 matches!(load_ovika(&invalid), Err(IoError::Decode(message)) if message == reason)
             );
@@ -1176,14 +1124,6 @@ mod tests {
         let path = crate::test_util::test_tmp().join("corrupt_model.ovika");
         save_ovika(&path, &make_3node_model(), OvikaExtras::default()).unwrap();
         let mut manifest = read_manifest(&path);
-        let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
-        let mut settings = Vec::new();
-        archive
-            .by_name("settings.json")
-            .unwrap()
-            .read_to_end(&mut settings)
-            .unwrap();
-        drop(archive);
         let corrupt = [0xc1];
         manifest
             .entries
@@ -1191,7 +1131,7 @@ mod tests {
             .find(|e| e.name == "model.msgpack")
             .unwrap()
             .sha256 = sha256_of(&corrupt);
-        write_zip_with_manifest(&path, &manifest, &corrupt, &settings);
+        write_zip_with_manifest(&path, &manifest, &corrupt);
         assert!(matches!(load_ovika(&path), Err(IoError::Decode(_))));
     }
 
@@ -1219,14 +1159,6 @@ mod tests {
         let positional_path = dir.join("measure_positional.ovika");
         save_ovika(&named_path, &model, OvikaExtras::default()).unwrap();
         let mut manifest = read_manifest(&named_path);
-        let mut archive = zip::ZipArchive::new(std::fs::File::open(&named_path).unwrap()).unwrap();
-        let mut settings = Vec::new();
-        archive
-            .by_name("settings.json")
-            .unwrap()
-            .read_to_end(&mut settings)
-            .unwrap();
-        drop(archive);
         for named in [false, true] {
             let encode = || {
                 if named {
@@ -1245,7 +1177,7 @@ mod tests {
                     .find(|e| e.name == "model.msgpack")
                     .unwrap()
                     .sha256 = sha256_of(&bytes);
-                write_zip_with_manifest(path, &manifest, &bytes, &settings);
+                write_zip_with_manifest(path, &manifest, &bytes);
             }
             let loaded = load_ovika(path).unwrap().model;
             loaded.validate().unwrap();
@@ -1370,11 +1302,13 @@ mod tests {
         );
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.created_by, "SEPIKA");
+        assert_eq!(manifest.entries.len(), 1);
+        assert_eq!(manifest.entries[0].name, "model.msgpack");
         let file = std::fs::File::open(&path).unwrap();
         let archive = zip::ZipArchive::new(file).unwrap();
         assert_eq!(
             archive.file_names().collect::<Result<Vec<_>, _>>().unwrap(),
-            ["manifest.json", "model.msgpack", "settings.json"]
+            ["manifest.json", "model.msgpack"]
         );
 
         assert_eq!(back.nodes.len(), model.nodes.len());
@@ -1595,36 +1529,17 @@ mod tests {
         let dir = crate::test_util::test_tmp();
         let path = dir.join("p_hash.ovika");
         save_ovika(&path, &model, OvikaExtras::default()).unwrap();
-        let settings_bytes = {
-            let f = std::fs::File::open(&path).unwrap();
-            let mut ar = zip::ZipArchive::new(f).unwrap();
-            let mut sb = Vec::new();
-            ar.by_name("settings.json")
-                .unwrap()
-                .read_to_end(&mut sb)
-                .unwrap();
-            sb
-        };
 
-        // model.msgpack を改竄相当のバイト列に差し替え、manifest のハッシュと食い違わせる。
-        // settings.json は正しいハッシュにして、必須エントリチェックではなく
-        // ハッシュ検証そのものでエラーになることを確認する。
         let bad_manifest = Manifest {
             schema_version: CURRENT_SCHEMA_VERSION,
             units: "internal: N-mm-s".to_string(),
             created_by: "test".to_string(),
-            entries: vec![
-                crate::manifest::EntryHash {
-                    name: "model.msgpack".to_string(),
-                    sha256: "badhash".to_string(),
-                },
-                crate::manifest::EntryHash {
-                    name: "settings.json".to_string(),
-                    sha256: sha256_of(&settings_bytes),
-                },
-            ],
+            entries: vec![crate::manifest::EntryHash {
+                name: "model.msgpack".to_string(),
+                sha256: "badhash".to_string(),
+            }],
         };
-        write_zip_with_manifest(&path, &bad_manifest, &[0u8; 4], &settings_bytes);
+        write_zip_with_manifest(&path, &bad_manifest, &[0u8; 4]);
 
         let result = load_ovika(&path);
         assert!(matches!(result, Err(IoError::HashMismatch(ref name)) if name == "model.msgpack"));
@@ -1644,7 +1559,7 @@ mod tests {
                 created_by: "test".to_string(),
                 entries: vec![],
             };
-            write_zip_with_manifest(&path, &manifest, &[], &[]);
+            write_zip_with_manifest(&path, &manifest, &[]);
 
             let result = load_ovika(&path);
             assert!(
@@ -1663,46 +1578,130 @@ mod tests {
         let dir = crate::test_util::test_tmp();
         let path = dir.join("p_missing_entry.ovika");
         save_ovika(&path, &model, OvikaExtras::default()).unwrap();
-        let (model_bytes, settings_bytes) = {
-            let f = std::fs::File::open(&path).unwrap();
-            let mut ar = zip::ZipArchive::new(f).unwrap();
-            let mut mb = Vec::new();
-            ar.by_name("model.msgpack")
-                .unwrap()
-                .read_to_end(&mut mb)
-                .unwrap();
-            let mut sb = Vec::new();
-            ar.by_name("settings.json")
-                .unwrap()
-                .read_to_end(&mut sb)
-                .unwrap();
-            (mb, sb)
-        };
+        let model_bytes = rmp_serde::to_vec_named(&model).unwrap();
 
         // model.msgpack のエントリだけを manifest から落とす（zip 内には実体を残す）。
         let manifest = Manifest {
             schema_version: CURRENT_SCHEMA_VERSION,
             units: "internal: N-mm-s".to_string(),
             created_by: "test".to_string(),
-            entries: vec![crate::manifest::EntryHash {
-                name: "settings.json".to_string(),
-                sha256: sha256_of(&settings_bytes),
-            }],
+            entries: vec![],
         };
-        write_zip_with_manifest(&path, &manifest, &model_bytes, &settings_bytes);
+        write_zip_with_manifest(&path, &manifest, &model_bytes);
 
         let result = load_ovika(&path);
         assert!(matches!(result, Err(IoError::MissingEntry(ref name)) if name == "model.msgpack"));
         let _ = std::fs::remove_file(&path);
     }
 
+    #[test]
+    fn listed_payloads_reject_missing_or_tampered_bytes() {
+        let model = make_3node_model();
+        let model_bytes = rmp_serde::to_vec_named(&model).unwrap();
+        for name in [
+            "model.msgpack",
+            PREPARATION_ENTRY,
+            RESULTS_ENTRY,
+            ANALYSIS_SETTINGS_ENTRY,
+        ] {
+            for missing in [false, true] {
+                let path = crate::test_util::test_tmp()
+                    .join(format!("listed_payload_{name}_{missing}.ovika"));
+                let mut manifest = Manifest {
+                    schema_version: CURRENT_SCHEMA_VERSION,
+                    units: "internal: N-mm-s".into(),
+                    created_by: "payload-boundary-fixture".into(),
+                    entries: vec![crate::manifest::EntryHash {
+                        name: "model.msgpack".into(),
+                        sha256: sha256_of(&model_bytes),
+                    }],
+                };
+                if name != "model.msgpack" {
+                    manifest.entries.push(crate::manifest::EntryHash {
+                        name: name.into(),
+                        sha256: sha256_of(b"payload"),
+                    });
+                }
+                let mut writer = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+                let options = zip::write::SimpleFileOptions::default();
+                writer.start_file("manifest.json", options).unwrap();
+                writer
+                    .write_all(&serde_json::to_vec(&manifest).unwrap())
+                    .unwrap();
+                if name != "model.msgpack" {
+                    writer.start_file("model.msgpack", options).unwrap();
+                    writer.write_all(&model_bytes).unwrap();
+                }
+                if !missing {
+                    writer.start_file(name, options).unwrap();
+                    writer.write_all(b"tampered").unwrap();
+                }
+                writer.finish().unwrap();
+                let result = load_ovika(&path);
+                if missing {
+                    assert!(matches!(result, Err(IoError::Zip(message)) if message.contains(name)));
+                } else {
+                    assert!(matches!(result, Err(IoError::HashMismatch(entry)) if entry == name));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn extra_settings_is_ignored_but_listed_entries_are_verified() {
+        let model = make_3node_model();
+        let bytes = rmp_serde::to_vec_named(&model).unwrap();
+        let settings = br#"{"code":"JIS B 0001","created_at":""}"#;
+        for (listed, tampered) in [(false, false), (true, false), (true, true)] {
+            let path = crate::test_util::test_tmp()
+                .join(format!("extra_settings_{listed}_{tampered}.ovika"));
+            let mut manifest = Manifest {
+                schema_version: CURRENT_SCHEMA_VERSION,
+                units: "internal: N-mm-s".into(),
+                created_by: "extra-entry-fixture".into(),
+                entries: vec![crate::manifest::EntryHash {
+                    name: "model.msgpack".into(),
+                    sha256: sha256_of(&bytes),
+                }],
+            };
+            if listed {
+                manifest.entries.push(crate::manifest::EntryHash {
+                    name: "settings.json".into(),
+                    sha256: sha256_of(settings),
+                });
+            }
+            let mut writer = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+            let options = zip::write::SimpleFileOptions::default();
+            for (name, data) in [
+                ("manifest.json", serde_json::to_vec(&manifest).unwrap()),
+                ("model.msgpack", bytes.clone()),
+                (
+                    "settings.json",
+                    if tampered {
+                        b"changed".to_vec()
+                    } else {
+                        settings.to_vec()
+                    },
+                ),
+            ] {
+                writer.start_file(name, options).unwrap();
+                writer.write_all(&data).unwrap();
+            }
+            writer.finish().unwrap();
+            if tampered {
+                assert!(
+                    matches!(load_ovika(&path), Err(IoError::HashMismatch(name)) if name == "settings.json")
+                );
+            } else {
+                let loaded = load_ovika(&path).unwrap();
+                assert!(model.eq_ignoring_dofmap(&loaded.model));
+                assert!(loaded.analysis_settings.is_none());
+            }
+        }
+    }
+
     /// テスト用: 指定 manifest と実バイトで .ovika を書き直す。
-    fn write_zip_with_manifest(
-        path: &Path,
-        manifest: &Manifest,
-        model_bytes: &[u8],
-        settings_bytes: &[u8],
-    ) {
+    fn write_zip_with_manifest(path: &Path, manifest: &Manifest, model_bytes: &[u8]) {
         let manifest_bytes = serde_json::to_vec_pretty(manifest).unwrap();
         let tmp_path = path.with_extension("ovika.tmp");
         {
@@ -1714,8 +1713,6 @@ mod tests {
             zip.write_all(&manifest_bytes).unwrap();
             zip.start_file("model.msgpack", opts).unwrap();
             zip.write_all(model_bytes).unwrap();
-            zip.start_file("settings.json", opts).unwrap();
-            zip.write_all(settings_bytes).unwrap();
             zip.finish().unwrap();
         }
         std::fs::rename(&tmp_path, path).unwrap();

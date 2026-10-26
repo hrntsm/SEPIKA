@@ -1,4 +1,3 @@
-pub mod checkpoint;
 pub mod manifest;
 pub mod ovika;
 #[cfg(feature = "parquet")]
