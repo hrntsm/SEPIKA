@@ -53,7 +53,6 @@ impl ResultsBundle {
             || self.modal.is_some()
             || !self.member_forces.is_empty()
             || !self.panel_moments.is_empty()
-            || self.pushover.is_some()
             || self.pushover_x.is_some()
             || self.pushover_y.is_some()
             || !self.holding_evaluations.is_empty()
@@ -1426,36 +1425,32 @@ mod purpose_tests {
     fn gui未採用でもピークは解析経過と表示し自動耐力未入力は手動切替を妨げない() {
         let mut app = ready();
         let bundle = app.core.scoped.results.as_mut().unwrap();
-        for po in [bundle.pushover.as_mut(), bundle.pushover_x.as_mut()]
-            .into_iter()
-            .flatten()
-        {
-            po.qu = 150_000.0;
-            for point in &mut po.capacity_curve {
-                point.story_shear.fill(120_000.0);
+        let po = bundle.pushover_x.as_mut().unwrap();
+        po.qu = 150_000.0;
+        for point in &mut po.capacity_curve {
+            point.story_shear.fill(120_000.0);
+        }
+        po.capacity_curve
+            .first_mut()
+            .unwrap()
+            .story_shear
+            .fill(150_000.0);
+        let step = po.capacity_curve.last().unwrap().step;
+        let response = po
+            .confirmed_history
+            .as_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r.step == step)
+            .unwrap();
+        for cut in &mut response.cuts {
+            let count = cut.forces.len() as f64;
+            for force in &mut cut.forces {
+                force.force_n = 120_000.0 / count;
             }
-            po.capacity_curve
-                .first_mut()
-                .unwrap()
-                .story_shear
-                .fill(150_000.0);
-            let step = po.capacity_curve.last().unwrap().step;
-            let response = po
-                .confirmed_history
-                .as_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|r| r.step == step)
-                .unwrap();
-            for cut in &mut response.cuts {
-                let count = cut.forces.len() as f64;
-                for force in &mut cut.forces {
-                    force.force_n = 120_000.0 / count;
-                }
-                cut.external_n = 120_000.0;
-                cut.reference_n = 120_000.0;
-                cut.support_n = 0.0;
-            }
+            cut.external_n = 120_000.0;
+            cut.reference_n = 120_000.0;
+            cut.support_n = 0.0;
         }
         let ctx = egui::Context::default();
         ctx.global_style_mut(|style| style.animation_time = 0.0);
@@ -1721,12 +1716,8 @@ mod purpose_tests {
     fn 目的別run条件の差を許容し同時点の独立期待値と保存帳票を維持する() {
         let mut app = two_purposes();
         let bundle = app.core.scoped.results.as_mut().unwrap();
-        for po in [bundle.pushover.as_mut(), bundle.pushover_x.as_mut()]
-            .into_iter()
-            .flatten()
-        {
-            po.qu = 150_000.0;
-        }
+        let po = bundle.pushover_x.as_mut().unwrap();
+        po.qu = 150_000.0;
         let entries = &mut app
             .core
             .scoped

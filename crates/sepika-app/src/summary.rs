@@ -1292,7 +1292,6 @@ pub fn has_report_content(results: &Option<ResultsBundle>) -> bool {
         .map(|r| {
             !r.statics.is_empty()
                 || r.modal.is_some()
-                || r.pushover.is_some()
                 || r.pushover_x.is_some()
                 || r.pushover_y.is_some()
                 || r.time_history.is_some()

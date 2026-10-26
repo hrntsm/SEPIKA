@@ -1549,17 +1549,13 @@ mod tests {
         for mismatch in 0..4 {
             app.core.scoped.results = valid_results.clone();
             let bundle = app.core.scoped.results.as_mut().unwrap();
-            for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-                .into_iter()
-                .flatten()
-            {
-                let point = po.ds_evaluation.as_mut().unwrap();
-                match mismatch {
-                    0 => point.run_id.push_str("other"),
-                    1 => point.input_generation.push(0),
-                    2 => point.direction = SeismicDir::Y,
-                    _ => point.step = u32::MAX,
-                }
+            let po = bundle.pushover_x.as_mut().unwrap();
+            let point = po.ds_evaluation.as_mut().unwrap();
+            match mismatch {
+                0 => point.run_id.push_str("other"),
+                1 => point.input_generation.push(0),
+                2 => point.direction = SeismicDir::Y,
+                _ => point.step = u32::MAX,
             }
             assert!(
                 app.compute_holding_capacity().is_err(),

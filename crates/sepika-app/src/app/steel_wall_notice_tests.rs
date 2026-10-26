@@ -195,7 +195,14 @@ fn 増分解析の同期非同期でも生成鋼板壁注意を維持する() {
             "{:?}",
             app.core.scoped.last_error
         );
-        assert!(app.core.scoped.results.as_ref().unwrap().pushover.is_some());
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .pushover_x
+            .is_some());
         assert_eq!(wall_notices(&app).len(), 1);
         assert!(app
             .core
