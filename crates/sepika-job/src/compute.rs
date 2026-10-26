@@ -119,13 +119,13 @@ pub fn compute_seismic(
 }
 
 /// 位相差入力（ねじれ加振）を `wave` へ付加する。
-/// `phase_diff_enabled` が false なら `wave` をそのまま返す。
+/// 位相差が無効なら入力波をそのまま返す。Y 基準で Y 加速度がなければ入力エラー。
 pub fn effective_time_history_wave(
     cfg: &AnalysisSettings,
     mut wave: sepika_solver::dynamic::timehistory::GroundMotion,
-) -> sepika_solver::dynamic::timehistory::GroundMotion {
+) -> JobResult<sepika_solver::dynamic::timehistory::GroundMotion> {
     if !cfg.phase_diff_enabled {
-        return wave;
+        return Ok(wave);
     }
     use sepika_solver::dynamic::phase_diff::{phase_lag_time, torsional_accel_series};
     let lag = phase_lag_time(
@@ -133,15 +133,17 @@ pub fn effective_time_history_wave(
         cfg.phase_diff_incidence_deg,
         cfg.phase_diff_vs,
     );
-    let base: Vec<f64> = if cfg.phase_diff_dir_y {
-        wave.accel_y.clone().unwrap_or_else(|| wave.accel_x.clone())
+    let base = if cfg.phase_diff_dir_y {
+        wave.accel_y.as_ref().ok_or_else(|| {
+            JobError::InvalidInput("Y方向の位相差入力にはY方向加速度が必要です".into())
+        })?
     } else {
-        wave.accel_x.clone()
+        &wave.accel_x
     };
     let l_mm = (cfg.phase_diff_length_m * 1000.0).max(1.0);
-    let theta = torsional_accel_series(&base, wave.dt, lag, l_mm);
+    let theta = torsional_accel_series(base, wave.dt, lag, l_mm);
     wave.accel_theta = Some(theta);
-    wave
+    Ok(wave)
 }
 
 /// 増分解析（プッシュオーバー）。モデルは呼び出し側で複製したものを渡すこと。
@@ -194,7 +196,7 @@ pub fn compute_time_history(
     model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
-    let wave = effective_time_history_wave(&cfg, wave);
+    let wave = effective_time_history_wave(&cfg, wave)?;
     let model = expand_walls(model);
     sepika_element::factory::ensure_wall_side_column_analysis(
         &model,

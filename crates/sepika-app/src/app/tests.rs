@@ -7004,15 +7004,18 @@ fn request_analysis_preparation_failure_deletes_only_static_targets() {
             2 => PendingAnalysis::StaticAll,
             3 => PendingAnalysis::Eigen(1),
             4 => PendingAnalysis::Pushover,
-            5 => PendingAnalysis::TimeHistory(Box::new(app.time_history_input(
-                sepika_solver::dynamic::timehistory::GroundMotion {
-                    dt: 0.01,
-                    accel_x: vec![0.0],
-                    accel_y: None,
-                    accel_theta: None,
-                },
-                "サンプル".into(),
-            ))),
+            5 => PendingAnalysis::TimeHistory(Box::new(
+                app.time_history_input(
+                    sepika_solver::dynamic::timehistory::GroundMotion {
+                        dt: 0.01,
+                        accel_x: vec![0.0],
+                        accel_y: None,
+                        accel_theta: None,
+                    },
+                    "サンプル".into(),
+                )
+                .unwrap(),
+            )),
             6 => PendingAnalysis::LumpedMassEigen,
             _ => PendingAnalysis::LumpedMassTimeHistory(Box::new(
                 app.lumped_time_history_input(vec![0.0], "サンプル".into()),
