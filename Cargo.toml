@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/sepika-core", "crates/sepika-math", "crates/sepika-io",
     "crates/sepika-material", "crates/sepika-section", "crates/sepika-element",
-    "crates/sepika-skeleton", "crates/sepika-load", "crates/sepika-solver",
+    "crates/sepika-load", "crates/sepika-solver",
     "crates/sepika-design-jp", "crates/sepika-edit", "crates/sepika-job",
     "crates/sepika-mcp", "crates/sepika-app",
     "xtask",
