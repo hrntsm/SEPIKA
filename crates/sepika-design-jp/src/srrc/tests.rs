@@ -1415,3 +1415,223 @@ fn src_beam_public_runner_rejects_requested_gravity_gaps_without_reviving_result
         }
     }
 }
+
+fn strength912_section(column: bool, web_mm: f64, flange_mm: f64) -> Section {
+    make_section(if column {
+        src_column_rect_shape(
+            300.0,
+            600.0,
+            16.0,
+            vec![2],
+            vec![2],
+            20.0,
+            8.0,
+            100.0,
+            2,
+            2,
+            400.0,
+            200.0,
+            web_mm,
+            flange_mm,
+        )
+    } else {
+        src_beam_rect_shape(
+            300.0,
+            600.0,
+            16.0,
+            vec![2],
+            vec![2],
+            20.0,
+            8.0,
+            100.0,
+            2,
+            400.0,
+            200.0,
+            web_mm,
+            flange_mm,
+        )
+    })
+}
+
+#[test]
+fn src912_unknown_strength_and_missing_or_nonsteel_material_are_not_checked() {
+    let concrete = make_material(24.0, "Fc24");
+    for column in [false, true] {
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            let mut ctx = if column {
+                ctx_column(term)
+            } else {
+                ctx_beam(term)
+            };
+            let sec = strength912_section(column, 8.0, 12.0);
+            let forces = MemberForcesAt {
+                n: if column { 2_000_000.0 } else { 0.0 },
+                mz: if column { 0.0 } else { 211_982_789.84174365 },
+                ..zero_forces()
+            };
+            for fy in [
+                None,
+                Some(100.0),
+                Some(235.0),
+                Some(345.0),
+                Some(0.0),
+                Some(-1.0),
+                Some(f64::NAN),
+                Some(f64::INFINITY),
+                Some(f64::NEG_INFINITY),
+            ] {
+                let mut steel = make_steel_material("直接入力鋼材");
+                steel.fy = fy;
+                ctx.steel_material = Some(steel);
+                let CheckOutcome::Skipped { reason } =
+                    SrcDesign.check(&forces, &sec, &concrete, &ctx)
+                else {
+                    panic!(
+                        "未知鋼材 column={column}, term={term:?}, fy={fy:?} を補完してはならない"
+                    );
+                };
+                assert!(reason.contains("直接入力"), "{reason}");
+                assert!(
+                    reason.contains(if fy.is_some_and(|v| v.is_finite() && v > 0.0) {
+                        "適用根拠が未確定"
+                    } else {
+                        "正の有限値"
+                    }),
+                    "{reason}"
+                );
+            }
+            ctx.steel_material = None;
+            assert!(matches!(SrcDesign.check(&forces, &sec, &concrete, &ctx),
+                CheckOutcome::Skipped { reason } if reason.contains("未割当")));
+            let mut steel = make_steel_material("SN400B");
+            steel.category = MaterialCategory::Concrete;
+            ctx.steel_material = Some(steel);
+            assert!(matches!(SrcDesign.check(&forces, &sec, &concrete, &ctx),
+                CheckOutcome::Skipped { reason } if reason.contains("鋼材ではありません")));
+        }
+    }
+}
+
+#[test]
+fn src912_issue_beam_independent_capacity_ignores_known_grade_fy() {
+    let sec = strength912_section(false, 8.0, 12.0);
+    let concrete = make_material(24.0, "Fc24");
+    let forces = MemberForcesAt {
+        mz: 211_982_789.84174365,
+        ..zero_forces()
+    };
+    let mut ctx = ctx_beam(LoadTerm::Long);
+    for fy in [
+        None,
+        Some(100.0),
+        Some(235.0),
+        Some(345.0),
+        Some(0.0),
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+    ] {
+        ctx.steel_material.as_mut().unwrap().fy = fy;
+        let check = SrcDesign
+            .check(&forces, &sec, &concrete, &ctx)
+            .unwrap_checked();
+        assert!((check.ratio() - 1.0).abs() < 1e-12, "{check:?}");
+        assert!((forces.mz / check.ratio() - 211_982_789.84174365).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn src912_each_actual_plate_thickness_must_be_positive_finite() {
+    let concrete = make_material(24.0, "Fc24");
+    for column in [false, true] {
+        let ctx = if column {
+            ctx_column(LoadTerm::Long)
+        } else {
+            ctx_beam(LoadTerm::Long)
+        };
+        for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (web, flange) in [(invalid, 12.0), (8.0, invalid)] {
+                let sec = strength912_section(column, web, flange);
+                assert!(
+                    matches!(SrcDesign.check(&zero_forces(), &sec, &concrete, &ctx),
+                    CheckOutcome::Skipped { reason } if reason.contains("実板厚")),
+                    "column={column}, web={web}, flange={flange}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn src912_known_grade_actual_thickness_boundaries_have_independent_capacities() {
+    let concrete = make_material(24.0, "Fc24");
+    // 鋭角Hの矩形積分Zと4-D16/上下各2-D16の面積から独立算定した長期耐力。
+    for (name, web, flange, beam_ma_nmm, column_nt_n) in [
+        ("SN400B", 40.0, 12.0, 323022641.93063253, 3281179.9263202487),
+        ("SN400B", 8.0, 40.0, 467529635.70841026, 3080646.5929869157),
+        (
+            "SN400B",
+            40.001,
+            12.0,
+            299165706.38503253,
+            3016700.4863202483,
+        ),
+        ("SN400B", 8.0, 40.001, 431378103.0066007, 2833234.966320249),
+        ("SN400B", 100.0, 12.0, 489643129.0417437, 6250246.592986915),
+        ("SN400B", 8.0, 100.0, 715377457.9306325, 6135579.926320249),
+        ("SM520B", 40.0, 12.0, 466183303.26396585, 4868379.926320249),
+        ("SM520B", 8.0, 40.0, 684481102.3750769, 4565446.592986915),
+        ("SM520B", 40.001, 12.0, 442328139.6308992, 4603930.566320248),
+        ("SM520B", 8.0, 40.001, 648333501.8086914, 4318065.686320248),
+        ("SM520B", 75.0, 12.0, 615453813.486188, 7542913.259653582),
+        ("SM520B", 8.0, 75.0, 954610791.2639657, 7319579.926320249),
+        ("SM520B", 75.001, 12.0, 598360479.0826325, 7322994.72632025),
+        ("SM520B", 8.0, 75.001, 927395068.9897438, 7106329.792986916),
+        ("SM520B", 100.0, 12.0, 718328924.5972992, 9359579.926320247),
+        ("SM520B", 8.0, 100.0, 1059555235.7084103, 9186246.592986915),
+    ] {
+        for column in [false, true] {
+            let sec = strength912_section(column, web, flange);
+            let mut ctx = if column {
+                ctx_column(LoadTerm::Long)
+            } else {
+                ctx_beam(LoadTerm::Long)
+            };
+            ctx.steel_material = Some(make_steel_material(name));
+            ctx.steel_material.as_mut().unwrap().fy = Some(999.0);
+            let forces = MemberForcesAt {
+                n: if column { column_nt_n * 1.1 } else { 0.0 },
+                mz: if column { 0.0 } else { beam_ma_nmm * 1.1 },
+                ..zero_forces()
+            };
+            let result = SrcDesign
+                .check(&forces, &sec, &concrete, &ctx)
+                .unwrap_checked();
+            assert!(
+                (result.ratio() - 1.1).abs() < 1e-12,
+                "{name}, column={column}, tw={web}, tf={flange}: {result:?}"
+            );
+            assert!(!result.ok());
+        }
+    }
+    for name in ["SN400B", "SM520B"] {
+        for column in [false, true] {
+            let mut ctx = if column {
+                ctx_column(LoadTerm::Long)
+            } else {
+                ctx_beam(LoadTerm::Long)
+            };
+            ctx.steel_material = Some(make_steel_material(name));
+            for fy in [None, Some(100.0), Some(999.0)] {
+                ctx.steel_material.as_mut().unwrap().fy = fy;
+                for (web, flange) in [(100.001, 12.0), (8.0, 100.001)] {
+                    let sec = strength912_section(column, web, flange);
+                    assert!(
+                        matches!(SrcDesign.check(&zero_forces(), &sec, &concrete, &ctx),
+                        CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))
+                    );
+                }
+            }
+        }
+    }
+}
