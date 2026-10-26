@@ -175,3 +175,16 @@ fn abs_lerp_integral_splits_at_zero_when_sign_reverses() {
     assert!((abs_lerp_integral(h, -h, 0.5, 1.0) - h * 0.25).abs() < 1e-9);
     assert!((abs_lerp_centroid(h, -h) - 0.5).abs() < 1e-12);
 }
+
+#[test]
+fn abs_lerp_integral_preserves_zero_threshold_and_clamped_intervals() {
+    for h in [0.5e-15, 1.0e-15, 2.0e-15] {
+        let expected = if h <= 1e-15 { h } else { h * 0.5 };
+        assert_eq!(abs_lerp_integral(h, -h, 0.0, 1.0), expected);
+        assert_eq!(abs_lerp_integral(-h, h, -1.0, 2.0), expected);
+        assert_eq!(abs_lerp_integral(h, -h, 0.0, 0.5), h * 0.25);
+    }
+    assert_eq!(abs_lerp_integral(0.0, 0.0, 0.0, 1.0), 0.0);
+    assert_eq!(abs_lerp_integral(-2.0, 2.0, 0.75, 0.25), 0.0);
+    assert_eq!(abs_lerp_integral(-2.0, 2.0, 0.5, 0.5), 0.0);
+}

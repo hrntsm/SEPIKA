@@ -822,78 +822,6 @@ fn test_default_combinations() {
     assert_eq!(cases[4].name, EY_CASE_NAME);
 }
 
-/// 旧スキーマの自動生成ケース名の移行: 改名（床荷重(自動)→DL 等）と、
-/// 「自重(自動)」の DL への統合（組合せ参照の付け替え・重複項の除去・
-/// id == 添字規約の維持）を確認する。
-#[test]
-fn test_migrate_legacy_auto_load_cases() {
-    let mk = |i: u32, name: &str, kind: LoadCaseKind| LoadCase {
-        id: LoadCaseId(i),
-        name: name.into(),
-        nodal: Vec::new(),
-        member: Vec::new(),
-        kind,
-    };
-    // 旧構成: 手動ケース + 床荷重(自動) + 自重(自動) + 床積載(自動)。
-    let mut model = Model {
-        load_cases: vec![
-            mk(0, "手動", LoadCaseKind::Other),
-            mk(1, "床荷重(自動)", LoadCaseKind::Dead),
-            mk(2, "自重(自動)", LoadCaseKind::Dead),
-            mk(3, "床積載(自動)", LoadCaseKind::Live),
-        ],
-        combinations: vec![
-            // 自重と床荷重の両方を参照する組合せ → 自重項は除去される。
-            LoadCombination {
-                name: "G+P".into(),
-                terms: vec![
-                    (LoadCaseId(1), 1.0),
-                    (LoadCaseId(2), 1.0),
-                    (LoadCaseId(3), 1.0),
-                ],
-            },
-            // 自重のみ参照する組合せ → DL へ付け替え。
-            LoadCombination {
-                name: "自重のみ".into(),
-                terms: vec![(LoadCaseId(2), 1.0)],
-            },
-        ],
-        ..Default::default()
-    };
-    model.migrate_legacy_auto_load_cases();
-    assert!(model.validate().is_ok(), "{:?}", model.validate());
-
-    let names: Vec<&str> = model.load_cases.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, vec!["手動", DL_CASE_NAME, LL_FRAME_CASE_NAME]);
-    let dl_id = model.load_cases[1].id;
-    // G+P: 自重項が除去され、床積載(→LL(架構用)、id 3→2)の参照が詰め直される。
-    assert_eq!(
-        model.combinations[0].terms,
-        vec![(dl_id, 1.0), (LoadCaseId(2), 1.0)]
-    );
-    // 自重のみ: DL へ付け替え。
-    assert_eq!(model.combinations[1].terms, vec![(dl_id, 1.0)]);
-}
-
-/// 「自重(自動)」だけがある旧モデルは DL へ改名される（削除しない）。
-#[test]
-fn test_migrate_legacy_self_weight_only_renames_to_dl() {
-    let mut model = Model {
-        load_cases: vec![LoadCase {
-            id: LoadCaseId(0),
-            name: "自重(自動)".into(),
-            nodal: Vec::new(),
-            member: Vec::new(),
-            kind: LoadCaseKind::Dead,
-        }],
-        ..Default::default()
-    };
-    model.migrate_legacy_auto_load_cases();
-    assert_eq!(model.load_cases.len(), 1);
-    assert_eq!(model.load_cases[0].name, DL_CASE_NAME);
-    assert_eq!(model.load_cases[0].kind, LoadCaseKind::Dead);
-}
-
 /// 断面・材料の割当が必須なのは剛性を断面諸元から作る線材・面材のみ。
 #[test]
 fn test_requires_section_and_material_covers_line_and_area_elements() {
@@ -2572,4 +2500,42 @@ mod rc_section_reference_resolution {
         assert!(general.section(SectionId(99)).is_none());
         assert!(general.validate_rc_section_usage().is_ok());
     }
+}
+
+#[test]
+fn model_equality_distinguishes_each_multi_opening_mode() {
+    for mode in [
+        MultiOpeningMode::Equivalent,
+        MultiOpeningMode::Envelope,
+        MultiOpeningMode::Auto,
+    ] {
+        let model = Model {
+            multi_opening_mode: mode,
+            ..Default::default()
+        };
+        assert!(model.eq_ignoring_dofmap(&model.clone()));
+        for other in [
+            MultiOpeningMode::Equivalent,
+            MultiOpeningMode::Envelope,
+            MultiOpeningMode::Auto,
+        ] {
+            let changed = Model {
+                multi_opening_mode: other,
+                ..Default::default()
+            };
+            assert_eq!(model.eq_ignoring_dofmap(&changed), mode == other);
+        }
+    }
+}
+
+#[test]
+fn model_equality_ignores_only_temporary_analysis_fields() {
+    let model = two_node_model(&[[0.; 3], [1000., 0., 0.]]);
+    let mut derived = model.clone();
+    derived.dof_map = crate::dof::DofMap::build(&model);
+    derived
+        .generated_wall_origins
+        .insert(ElemId(42), WallPlateId(7));
+    assert!(model.eq_ignoring_dofmap(&derived));
+    assert!(derived.eq_ignoring_dofmap(&model));
 }

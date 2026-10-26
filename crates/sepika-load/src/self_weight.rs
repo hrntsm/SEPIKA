@@ -14,14 +14,10 @@ mod girder_overlap;
 pub use beam_upstand::{all_beam_upstand_segments, beam_upstand_segments, BeamUpstandSegment};
 pub use girder_overlap::{girder_self_weight_breakdown, GirderSelfWeightBreakdown};
 
-/// 旧スキーマの自重自動生成荷重ケース名（現行は自重を「DL」ケースへ統合して
-/// 同期する。読込時の移行 `Model::migrate_legacy_auto_load_cases` が参照する）。
-pub const SELF_WEIGHT_AUTO_LOAD_CASE_NAME: &str = "自重(自動)";
-
 /// 重力方向（全体座標系 −Z）。
 const DIR_DOWN: [f64; 3] = [0.0, 0.0, -1.0];
 
-/// 自重(自動)ケースの内容（節点荷重・部材荷重）を生成する。
+/// 自重の荷重ケース内容（節点荷重・部材荷重）を生成する。
 ///
 /// - **柱（2 節点の鉛直 Beam/Fiber/MultiSpring）**: 上端節点へ `total/2`、下端節点へ
 ///   `total/2 + extra_bottom` の節点荷重（下端は z 座標が低い側）。`extra_bottom` は

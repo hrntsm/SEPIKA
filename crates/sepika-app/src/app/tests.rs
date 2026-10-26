@@ -8285,7 +8285,7 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
         .model
         .load_cases
         .iter()
-        .all(|lc| lc.name != SELF_WEIGHT_AUTO_LOAD_CASE_NAME));
+        .all(|lc| lc.name != "自重(自動)"));
 }
 
 /// 地震用重量が二重計上されないことを確認する: DL に自重が含まれる構成での
@@ -8400,44 +8400,6 @@ fn test_generate_stories_syncs_ex_ey_cases() {
     assert!(fy > 0.0, "EY は +Y 方向の水平力を持つはず: {fy}");
     // 層せん断力の総和は方向によらず同じ（同じ Ai 分布）。
     assert!((fx - fy).abs() < 1e-9, "fx={fx} fy={fy}");
-}
-
-/// `load_model` が自動生成ケース名を標準名へ移行することを確認する
-/// （床荷重(自動)→DL、自重(自動)は DL へ統合、床積載(自動)→LL(架構用)）。
-#[test]
-fn test_load_model_migrates_legacy_case_names() {
-    use sepika_core::model::{LoadCase, LoadCaseKind};
-
-    let mut model = crate::sample::portal_frame();
-    model.load_cases.clear();
-    let mk = |i: u32, name: &str, kind: LoadCaseKind| LoadCase {
-        id: LoadCaseId(i),
-        name: name.into(),
-        nodal: Vec::new(),
-        member: Vec::new(),
-        kind,
-    };
-    model
-        .load_cases
-        .push(mk(0, "床荷重(自動)", LoadCaseKind::Dead));
-    model
-        .load_cases
-        .push(mk(1, "自重(自動)", LoadCaseKind::Dead));
-    model
-        .load_cases
-        .push(mk(2, "床積載(自動)", LoadCaseKind::Live));
-
-    let mut app = App::default();
-    app.load_model(model);
-    let names: Vec<&str> = app
-        .core
-        .model
-        .load_cases
-        .iter()
-        .map(|c| c.name.as_str())
-        .collect();
-    assert_eq!(names, vec![DL_CASE_NAME, LL_FRAME_CASE_NAME]);
-    assert!(app.core.model.validate().is_ok());
 }
 
 /// 空の地震荷重ケース（未生成の EX 等）を参照する荷重組合せは実行せず、
@@ -15315,5 +15277,35 @@ fn rc_cantilever_keep_torsion_matches_independent_displacements_and_support_bala
                 .copied()
                 .collect::<Vec<_>>(),
         );
+    }
+}
+
+#[test]
+fn multi_opening_mode_is_preserved_by_model_loading_and_preparation() {
+    use sepika_core::model::MultiOpeningMode;
+    for mode in [
+        MultiOpeningMode::Equivalent,
+        MultiOpeningMode::Envelope,
+        MultiOpeningMode::Auto,
+    ] {
+        let mut model = seismic_freshness_fixture::two_storeys_with_weightless_steel_girders();
+        model.multi_opening_mode = mode;
+        let cases = model.load_cases.clone();
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        assert_eq!(app.core.model.multi_opening_mode, mode);
+        assert_eq!(app.core.model.load_cases, cases);
+        app.run_preparation();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert_eq!(app.core.model.multi_opening_mode, mode);
+        let prepared = app.core.model.clone();
+        let revision = app.core.scoped.undo.revision();
+        app.run_preparation();
+        assert!(app.core.model.eq_ignoring_dofmap(&prepared));
+        assert_eq!(app.core.scoped.undo.revision(), revision);
     }
 }

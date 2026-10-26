@@ -1280,6 +1280,7 @@ mod tests {
     #[test]
     fn test_roundtrip_preserves_rich_model() {
         let mut model = make_rich_model();
+        model.multi_opening_mode = sepika_core::model::MultiOpeningMode::Auto;
         model.load_cfg = Some(sepika_core::model::LoadCfg {
             dampers: vec![sepika_core::model::DamperSpec {
                 elem: ElemId(0),

@@ -1677,11 +1677,6 @@ pub use sepika_core::model::{
     DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME, LL_FRAME_CASE_NAME, LL_SEISMIC_CASE_NAME,
 };
 
-/// 読込時に DL へ移行される自重自動生成ケース名（
-/// 未移行モデルに対する二重計上防止の除外判定にのみ使う）。
-pub const SELF_WEIGHT_AUTO_LOAD_CASE_NAME: &str =
-    sepika_load::self_weight::SELF_WEIGHT_AUTO_LOAD_CASE_NAME;
-
 use sepika_core::geom::is_vertical_pair;
 
 /// 柱要素ごとの「支持する床数」と「積載荷重低減率」（令85条2項）を一覧する。

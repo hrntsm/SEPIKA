@@ -22,7 +22,7 @@
 
 use std::time::Instant;
 
-use sepika_app::app::{App, DL_CASE_NAME, LL_FRAME_CASE_NAME, SELF_WEIGHT_AUTO_LOAD_CASE_NAME};
+use sepika_app::app::{App, DL_CASE_NAME, LL_FRAME_CASE_NAME};
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, FloorRegionId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
@@ -250,9 +250,7 @@ fn timed_generate_stories(app: &mut App) -> [std::time::Duration; 5] {
                 .model
                 .load_cases
                 .iter()
-                .filter(|lc| {
-                    lc.kind == LoadCaseKind::Dead && lc.name != SELF_WEIGHT_AUTO_LOAD_CASE_NAME
-                })
+                .filter(|lc| lc.kind == LoadCaseKind::Dead)
                 .map(|lc| lc.id)
                 .collect();
             let live_seismic: Vec<LoadCaseId> = app

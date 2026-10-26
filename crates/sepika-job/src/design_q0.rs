@@ -5,10 +5,9 @@ use std::collections::HashMap;
 use sepika_core::ids::{ElemId, LoadCaseId};
 use sepika_core::model::{LoadCaseKind, MemberLoadKind, Model, LL_FRAME_CASE_NAME};
 use sepika_element::frame::beam::MemberForces;
-use sepika_load::self_weight::SELF_WEIGHT_AUTO_LOAD_CASE_NAME;
 
 /// 地震用重量に使う重力ケース ID 列。検定用QL・QD1用Q0とは区別する。
-/// 自重専用ケースと骨組用積載ケースは除外し、種別未設定なら先頭ケースのみを用いる。
+/// 骨組用積載ケースは除外し、種別未設定なら先頭ケースのみを用いる。
 pub fn gravity_case_ids_for_seismic_weight(model: &Model) -> Vec<LoadCaseId> {
     let any_kind_set = model
         .load_cases
@@ -21,7 +20,7 @@ pub fn gravity_case_ids_for_seismic_weight(model: &Model) -> Vec<LoadCaseId> {
     let mut result: Vec<LoadCaseId> = model
         .load_cases
         .iter()
-        .filter(|lc| lc.kind == LoadCaseKind::Dead && lc.name != SELF_WEIGHT_AUTO_LOAD_CASE_NAME)
+        .filter(|lc| lc.kind == LoadCaseKind::Dead)
         .map(|lc| lc.id)
         .collect();
 
@@ -474,7 +473,7 @@ mod tests {
     /// 地震用重量に使う重力ケースの選択が、並び順ではなく
     /// `LoadCaseKind` に基づくこと。Dead+LiveSeismic 優先、LiveSeismic がなければ
     /// Dead+Live、種別が一つも設定されていなければ後方互換で先頭ケースのみ。
-    /// 自動生成の自重ケースと骨組用積載ケースは除外する。
+    /// 骨組用積載ケースは除外する。
     #[test]
     fn test_gravity_case_ids_for_seismic_weight_selection() {
         use sepika_core::model::LoadCase;
@@ -502,12 +501,12 @@ mod tests {
         );
 
         // LiveSeismic がない → Dead + Live。
-        // ただし自重(自動)ケースと骨組用積載ケースは地震用重量から除外する。
+        // 骨組用積載ケースは地震用重量から除外する。
         let model_dead_live = Model {
             load_cases: vec![
                 mk_lc(0, "固定", LoadCaseKind::Dead),
                 mk_lc(1, LL_FRAME_CASE_NAME, LoadCaseKind::Live),
-                mk_lc(2, SELF_WEIGHT_AUTO_LOAD_CASE_NAME, LoadCaseKind::Dead),
+                mk_lc(2, "追加固定", LoadCaseKind::Dead),
                 mk_lc(3, "積載(長期)", LoadCaseKind::Live),
                 mk_lc(4, "積雪", LoadCaseKind::Snow),
             ],
@@ -515,8 +514,8 @@ mod tests {
         };
         assert_eq!(
             gravity_case_ids_for_seismic_weight(&model_dead_live),
-            vec![LoadCaseId(0), LoadCaseId(3)],
-            "LiveSeismic がなければ Dead+Live（自重(自動)・骨組用積載・積雪は除外）"
+            vec![LoadCaseId(0), LoadCaseId(2), LoadCaseId(3)],
+            "LiveSeismic がなければ Dead+Live（骨組用積載・積雪は除外）"
         );
 
         // LiveSeismic があれば Live ではなく LiveSeismic を優先
