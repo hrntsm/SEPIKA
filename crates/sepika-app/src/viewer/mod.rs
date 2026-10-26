@@ -550,7 +550,7 @@ use deform::{
     bbox_diagonal, deform_display_scale, display_disp, frame_bbox, model_bbox, model_bbox_size,
     time_history_deform_scale, BeamDeflection, DEFORM_CURVE_SEGMENTS,
 };
-use pick::{pick_assignment_region, pick_nearest_member};
+use pick::pick_assignment_region;
 use scene::{
     draw_anchor_marker, draw_assignment_regions, draw_axis_gadget, draw_grid_and_axes,
     draw_mode_rest_ghost, draw_slabs, draw_wall_plates, draw_work_scope, draws_as_line,
@@ -810,7 +810,8 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         .collect();
     let filter = FrameFilter::new(frame.as_ref());
 
-    if response.clicked() && !cube_clicked {
+    let normal_selection = input::normal_selection_enabled(app);
+    if response.clicked() && !cube_clicked && !normal_selection {
         input::handle_click(
             app,
             &response,
@@ -821,6 +822,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                 proj: &proj,
                 frame: frame.as_ref(),
                 mode,
+                member_candidate: None,
             },
         );
     }
@@ -866,9 +868,8 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         }
     }
 
-    let mut solids_skipped = 0usize;
-    if app.ui.view.show_sections && !lumped_only {
-        solids_skipped = solid::draw_section_solids(
+    let (solids_skipped, mut bodies) = if app.ui.view.show_sections && !lumped_only {
+        solid::draw_section_solids(
             &painter,
             &app.core.model,
             &coords3,
@@ -876,8 +877,17 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             show_secondary,
             filter,
             mode == ViewMode::Shape,
-        );
-    }
+        )
+    } else {
+        (0, pick::MemberBodies::default())
+    };
+
+    let solid_members = display_model
+        .elements
+        .iter()
+        .filter(|e| bodies.contains(e.id))
+        .map(|e| e.id)
+        .collect::<std::collections::HashSet<_>>();
 
     if !lumped_only && mode == ViewMode::Mode {
         let pts_rest: Vec<egui::Pos2> = app
@@ -952,6 +962,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                     })
                     .collect();
                 if poly.len() == elem.nodes.len() {
+                    bodies.push(elem.id, poly.clone(), true, true, 1.5);
                     painter.add(egui::Shape::convex_polygon(
                         poly,
                         theme::translucent(theme::DATA_BLUE, 50),
@@ -981,6 +992,9 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                         let poly3 = beam.polyline(deform_scale_actual, DEFORM_CURVE_SEGMENTS);
                         let screen: Vec<egui::Pos2> =
                             poly3.iter().map(|&p| proj.project(p)).collect();
+                        if !solid_members.contains(&elem.id) {
+                            bodies.push(elem.id, screen.clone(), false, false, line_stroke.width);
+                        }
                         painter.add(egui::Shape::line(screen, line_stroke));
                         continue;
                     }
@@ -989,10 +1003,18 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
 
             if mode == ViewMode::Shape {
                 if let Some(ends) = primary_shape_ends(&app.core.model, elem) {
-                    painter.line_segment(ends.map(|p| proj.project(p)), line_stroke);
+                    let screen = ends.map(|p| proj.project(p));
+                    if !solid_members.contains(&elem.id) {
+                        bodies.push(elem.id, screen.to_vec(), false, false, line_stroke.width);
+                    }
+                    painter.line_segment(screen, line_stroke);
                 }
             } else {
-                painter.line_segment([pts[n0], pts[n1]], line_stroke);
+                let screen = [pts[n0], pts[n1]];
+                if !solid_members.contains(&elem.id) {
+                    bodies.push(elem.id, screen.to_vec(), false, false, line_stroke.width);
+                }
+                painter.line_segment(screen, line_stroke);
             }
         }
 
@@ -1023,6 +1045,31 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             }
         }
     }
+
+    let member_candidate = if normal_selection && cube_hover.is_none() {
+        response.hover_pos().and_then(|pos| bodies.pick(pos))
+    } else {
+        None
+    };
+    let checked_node_hover = if cube_hover.is_none() && mode == ViewMode::CheckRatio {
+        response.hover_pos().and_then(|pos| {
+            check_ratio::pick_nearest_checked_node(app, &pts, pos, filter)
+                .filter(|&(_, d)| d <= check_ratio::NODE_HOVER_THRESHOLD)
+        })
+    } else {
+        None
+    };
+    let isolator_hover = supports_visible(lumped::is_lumped_view(mode), app.ui.view.show_supports)
+        && response.hover_pos().is_some_and(|pos| {
+            support_symbols::support_isolators(&app.core.model)
+                .iter()
+                .any(|&(idx, _, _)| {
+                    filter.shows_node(idx)
+                        && pts.get(idx).is_some_and(|p| (*p - pos).length() <= 8.0)
+                })
+        });
+    let hovered_member =
+        member_candidate.filter(|_| checked_node_hover.is_none() && !isolator_hover);
 
     if lumped::is_lumped_view(mode) {
         lumped::draw(&painter, app, &proj, mode, mode_idx, model_size);
@@ -1079,65 +1126,24 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     }
     if mode == ViewMode::Modeling {
         modeling::draw_modeling(&painter, app, &display_model, &pts, &coords3, &proj, filter);
-        if cube_hover.is_none() {
-            if let Some(hover_pos) = response.hover_pos() {
-                const HOVER_PICK_THRESHOLD: f32 = 8.0;
-                if let Some((id, d)) = pick_nearest_member(
-                    &display_model,
-                    &pts,
-                    hover_pos,
-                    filter,
-                    (mode == ViewMode::Shape).then_some(&proj),
-                ) {
-                    if d <= HOVER_PICK_THRESHOLD {
-                        modeling::show_modeling_tooltip(ui, app, &display_model, id);
-                    }
-                }
-            }
+        if let Some(id) = hovered_member {
+            modeling::show_modeling_tooltip(ui, app, &display_model, id);
         }
     }
     if mode == ViewMode::CheckRatio {
         check_ratio::draw_check_ratio(&painter, app, &display_model, &pts, filter);
-        if cube_hover.is_none() {
-            if let Some(hover_pos) = response.hover_pos() {
-                const HOVER_PICK_THRESHOLD: f32 = 8.0;
-                let node_hit = check_ratio::pick_nearest_checked_node(app, &pts, hover_pos, filter)
-                    .filter(|&(_, d)| d <= check_ratio::NODE_HOVER_THRESHOLD);
-                if let Some((idx, _)) = node_hit {
-                    if let Some(node) = app.core.model.nodes.get(idx) {
-                        check_ratio::show_node_check_tooltip(ui, app, node.id);
-                    }
-                } else if let Some((id, d)) = pick_nearest_member(
-                    &display_model,
-                    &pts,
-                    hover_pos,
-                    filter,
-                    (mode == ViewMode::Shape).then_some(&proj),
-                ) {
-                    if d <= HOVER_PICK_THRESHOLD {
-                        check_ratio::show_check_tooltip(ui, app, id);
-                    }
-                }
+        if let Some((idx, _)) = checked_node_hover {
+            if let Some(node) = app.core.model.nodes.get(idx) {
+                check_ratio::show_node_check_tooltip(ui, app, node.id);
             }
+        } else if let Some(id) = hovered_member {
+            check_ratio::show_check_tooltip(ui, app, id);
         }
     }
     if mode == ViewMode::Hinge {
         hinge::draw_hinge(&painter, app, &display_model, &pts, &proj, filter);
-        if cube_hover.is_none() {
-            if let Some(hover_pos) = response.hover_pos() {
-                const HOVER_PICK_THRESHOLD: f32 = 8.0;
-                if let Some((id, d)) = pick_nearest_member(
-                    &display_model,
-                    &pts,
-                    hover_pos,
-                    filter,
-                    (mode == ViewMode::Shape).then_some(&proj),
-                ) {
-                    if d <= HOVER_PICK_THRESHOLD {
-                        hinge::show_hinge_tooltip(ui, app, id);
-                    }
-                }
-            }
+        if let Some(id) = hovered_member {
+            hinge::show_hinge_tooltip(ui, app, id);
         }
     }
 
@@ -1174,7 +1180,18 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
 
-    for &elem_id in app.ui.scoped.selection.members() {
+    for elem_id in app
+        .ui
+        .scoped
+        .selection
+        .members()
+        .iter()
+        .copied()
+        .chain(hovered_member.filter(|id| !app.ui.scoped.selection.members().contains(id)))
+    {
+        if !bodies.contains(elem_id) {
+            continue;
+        }
         let Some(elem) = display_model.element(elem_id) else {
             continue;
         };
@@ -1345,6 +1362,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             const HOVER_PICK_THRESHOLD: f32 = 8.0;
             let nearest = support_isolators
                 .iter()
+                .filter(|&&(idx, _, _)| filter.shows_node(idx))
                 .filter_map(|&(idx, elem_id, props)| {
                     pts.get(idx)
                         .map(|&p| (elem_id, props, (hover_pos - p).length()))
@@ -1365,6 +1383,24 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         viewcube::draw(&painter, &cam, &cube.layout, cube_hover);
     }
     draw_axis_gadget(&painter, &cam);
+
+    drop(display_model);
+    if response.clicked() && !cube_clicked && normal_selection {
+        input::handle_click(
+            app,
+            &response,
+            input::ClickContext {
+                pts: &pts,
+                node_visible: &node_visible,
+                filter: FrameFilter::new(frame.as_ref()),
+                proj: &proj,
+                frame: frame.as_ref(),
+                mode,
+                member_candidate,
+            },
+        );
+        ui.ctx().request_repaint();
+    }
 
     app.ui.view.camera = cam;
 
@@ -1744,3 +1780,6 @@ mod wall_expanded_view_model_tests {
         assert!((axis.p_i[0] - 2000.0).abs() < 1e-6);
     }
 }
+
+#[cfg(test)]
+mod member_selection_tests;

@@ -14,7 +14,7 @@ use super::pick::{
     member_load_pickable, pick_assignment_region, pick_nearest_member, pick_nearest_node,
     pick_parent_region, pick_support_anchor, ParentRegionPick, RegionPick,
 };
-use super::wall_expanded_view_model;
+
 use super::{frame_view, space_grid, viewcube, FrameFilter, Projector, ViewMode};
 
 /// ViewCube（右上に描く方位キューブ）の当たり判定結果。
@@ -99,6 +99,15 @@ pub(super) fn interact_viewcube(
     }
 }
 
+pub(super) fn normal_selection_enabled(app: &App) -> bool {
+    !app.load_pick_active()
+        && !app.ui.scoped.beam_draw_mode
+        && !app.ui.scoped.wall_draw_mode
+        && !app.ui.scoped.slab_draw_mode
+        && !app.ui.scoped.beam_place_mode
+        && !app.ui.scoped.post_place_mode
+}
+
 /// クリック処理が要る描画側の文脈（投影結果と絞り込み条件）。
 ///
 /// `pts` は全節点をこのフレームの投影で写した画面座標、`node_visible` はその
@@ -110,14 +119,13 @@ pub(super) struct ClickContext<'a> {
     pub proj: &'a Projector<'a>,
     pub frame: Option<&'a Frame>,
     pub mode: ViewMode,
+    pub member_candidate: Option<sepika_core::ids::ElemId>,
 }
 
 /// 描画領域のクリックを処理する（荷重の対象ピック・作成モードの節点選び・
 /// 通常の選択）。ViewCube 上のクリックは呼び出し側で除外済み。
 ///
-/// 呼び出し側の描画用モデル（`wall_expanded_view_model` の結果）を作る前に呼ぶ。
-/// 梁・壁作成モードが `app.core.model` を可変借用するためである。
-/// 通常モードの部材ピックだけは壁を展開したモデルが要るため、この中で作り直す。
+/// 専用操作は描画前に、通常選択は本体描画で得た共通候補の確定後に呼ぶ。
 pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickContext<'_>) {
     let ClickContext {
         pts,
@@ -126,6 +134,7 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
         proj,
         frame,
         mode,
+        member_candidate,
     } = ctx;
     if let Some(click_pos) = response.interact_pointer_pos() {
         if app.load_pick_active() {
@@ -300,22 +309,8 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                 }
             }
         } else {
-            const PICK_THRESHOLD: f32 = 8.0;
-            let display_model = wall_expanded_view_model(&app.core.model);
-            let frame_for_pick = app
-                .ui
-                .scoped
-                .frame_target
-                .and_then(|t| sepika_core::frame::build_frame(display_model.as_ref(), t));
-            let filter_pick = FrameFilter::new(frame_for_pick.as_ref());
-            match pick_nearest_member(
-                display_model.as_ref(),
-                pts,
-                click_pos,
-                filter_pick,
-                (mode == ViewMode::Shape).then_some(proj),
-            ) {
-                Some((id, d)) if d <= PICK_THRESHOLD => {
+            match member_candidate {
+                Some(id) => {
                     app.select_member(id);
                     if mode == ViewMode::Hinge {
                         if app.ui.scoped.hinge_detail_elem != Some(id) {
@@ -340,6 +335,7 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
 mod selection_tests {
     use super::*;
     use crate::app::{GeometrySelection, WorkScope};
+    use crate::viewer::wall_expanded_view_model;
     use sepika_core::ids::*;
     use sepika_core::model::*;
     use sepika_core::section_shape::SectionShape;
@@ -482,6 +478,7 @@ mod selection_tests {
                             proj: &proj,
                             frame: None,
                             mode: ViewMode::Shape,
+                            member_candidate: None,
                         },
                     );
                 }
