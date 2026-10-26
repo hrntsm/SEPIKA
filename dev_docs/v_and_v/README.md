@@ -284,7 +284,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [原典照合リスト.md](原典照合リスト.md) | 法令・規準の埋め込み値の照合チェックリスト（実装者は使わない） | 運用中 |
 | [材料強度_基準強度照合.md](材料強度_基準強度照合.md) | 告示・材料強度資料 | 🔶 |
 | [未入力材料強度の危険側フォールバック_2026-07.md](未入力材料強度の危険側フォールバック_2026-07.md) | フォールバック是正 | 🔶 |
-| [ファイバー材料モデル_論文照合_2026-07.md](ファイバー材料モデル_論文照合_2026-07.md) | MP/Mander/Yassin | ✅ |
+| [ファイバー材料モデル_論文照合_2026-07.md](ファイバー材料モデル_論文照合_2026-07.md) | MP/Yassin、および削除済みManderの歴史的照合記録 | ✅ |
 | [ファイバー形状_長期初期載荷_2026-07.md](ファイバー形状_長期初期載荷_2026-07.md) | ファイバー形状・長期荷重 | ✅ |
 | [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | パネルゾーン力学 | 🔶 |
 | [床荷重XY両方向分配_格子方式比較_2026-09.md](床荷重XY両方向分配_格子方式比較_2026-09.md) | 2026-09時点の矩形/非矩形200×200比較記録。U/Cの現行VerificationはIssue437記録、台形の追加精度・原因分解はIssue438記録 | 🔶 |
@@ -429,7 +429,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 17b | 時刻歴の入力・応答時間軸 | sepika-solver / sepika-job / sepika-app / sepika-mcp / sepika-io | dynamic/timehistory・lumped_mass、sample_wave.rs、checkpoint.rs | [Issue610の独立fixtureと実入口](時刻歴時間軸_Issue610_2026-10.md#修正後の実入口と観測) | 横断 | 🔶（焦点Verification成功、手動GUI／Validation未） |
 | 17a | GUI 時刻歴の実入力と結果所属 | sepika-core / sepika-app | model/vibration.rs・app/actions/time_history.rs・lumped_mass.rs・result_validity.rs | [Issue611受入表](時刻歴の実入力と結果所属_Issue611_2026-10.md#受入対応表) | 横断 | 🔶（修正後GUI14＋既存617の入口Verification、広域再検査・native操作・Validation未） |
 | 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
-| 19 | 部材履歴則（武田・原点指向・スリップ） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs`、`zero_increment_*`と実factory/壁/質点系solver（[Issue596検証](ゼロ増分履歴保持_Issue596_2026-10.md)） | P4 | 🔶（ゼロ増分Verification済み、全履歴Validation未） |
+| 19 | 部材履歴則（武田・原点指向・標準・逆行・最大点指向） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs`、`zero_increment_*`と実factory/壁/質点系solver（[Issue596検証](ゼロ増分履歴保持_Issue596_2026-10.md)） | P4 | 🔶（ゼロ増分Verification済み、全履歴Validation未） |
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 20a | 微小相似Fiber初期断面 | sepika-math / sepika-element / sepika-solver | dense_lu.rs, frame/fiber/constitutive_tests.rs, panel_zone.rs | `near_diagonal_coupling_roundoff_*`・`similar_*`・`panel_753_public_nonlinear_time_history_*`（[Issue #783検証](微小相似Fiber初期断面_Issue783_2026-10.md)） | P4 | 🔶（数値Verification。実験Validation未） |
 | 20b | 物理曲率・非対称断面・剛域付き軸履歴 | sepika-element | frame/fiber/physical_curvature_tests.rs、distributed_curvature_tests.rs、rigid_axial_tests.rs | [保存成果の補完と端部解放の収束検証](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | P4 | 🔶（有限Verification。実験Validation未） |
