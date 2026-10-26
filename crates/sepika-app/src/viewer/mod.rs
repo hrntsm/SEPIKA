@@ -646,8 +646,6 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     let mode = app.ui.view.view_mode;
     let mode_idx = app.ui.scoped.view_mode_idx;
 
-    frame_range_controls(ui, app);
-
     let frame = app
         .ui
         .scoped
@@ -1374,101 +1372,6 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     th_detail::show_th_detail_window(ui, app);
 }
 
-fn frame_range_controls(ui: &mut egui::Ui, app: &mut App) {
-    use sepika_core::frame::FrameTarget;
-
-    let mut choices: Vec<(FrameTarget, String)> = Vec::new();
-    for (gi, group) in app.core.model.axes.iter().enumerate() {
-        for (ai, ax) in group.axes.iter().enumerate() {
-            choices.push((
-                FrameTarget::Axis {
-                    group: gi,
-                    axis: ai,
-                },
-                format!("{} / {}", group.name, ax.name),
-            ));
-        }
-    }
-    let axis_count = choices.len();
-    for st in &app.core.model.stories {
-        choices.push((FrameTarget::Story(st.id), st.name.clone()));
-    }
-    if choices.is_empty() {
-        return;
-    }
-
-    ui.horizontal_wrapped(|ui| {
-        ui.label("表示範囲:");
-        let mut target = app.ui.scoped.frame_target;
-        if ui
-            .selectable_label(target.is_none(), "全体(3D)")
-            .on_hover_text("モデル全体を 3D で表示します")
-            .clicked()
-        {
-            target = None;
-        }
-        let cur = target.and_then(|t| choices.iter().position(|(c, _)| *c == t));
-        let label = cur
-            .map(|i| choices[i].1.clone())
-            .unwrap_or_else(|| "選択…".to_string());
-        let is_frame = target.is_some();
-        ui.scope(|ui| {
-            if !is_frame {
-                ui.style_mut().visuals.override_text_color = Some(theme::GRAY_600);
-            }
-            egui::ComboBox::from_id_salt("frame_target")
-                .selected_text(label)
-                .show_ui(ui, |ui| {
-                    for (i, (t, name)) in choices.iter().enumerate() {
-                        if i == 0 && axis_count > 0 {
-                            ui.label(egui::RichText::new("通り（軸組図）").size(11.0));
-                        }
-                        if i == axis_count && axis_count < choices.len() {
-                            ui.separator();
-                            ui.label(egui::RichText::new("階（伏図）").size(11.0));
-                        }
-                        if ui.selectable_label(target == Some(*t), name).clicked() {
-                            target = Some(*t);
-                        }
-                    }
-                })
-                .response
-                .on_hover_text(
-                    "選んだ通り・階の構面だけを、正対の 2D で表示します。\
-                     表示モード（形状・変形・応力図など）はそのまま使えます。",
-                );
-        });
-        let step = |target: &mut Option<FrameTarget>, delta: i64| {
-            let n = choices.len() as i64;
-            let cur = target
-                .and_then(|t| choices.iter().position(|(c, _)| *c == t))
-                .map(|i| i as i64)
-                .unwrap_or(if delta > 0 { -1 } else { n });
-            let next = (cur + delta).rem_euclid(n) as usize;
-            *target = Some(choices[next].0);
-        };
-        if ui.button("◀").on_hover_text("前の通り／階").clicked() {
-            step(&mut target, -1);
-        }
-        if ui.button("▶").on_hover_text("次の通り／階").clicked() {
-            step(&mut target, 1);
-        }
-        if target.is_some() {
-            ui.add_enabled(
-                false,
-                egui::Label::new(
-                    egui::RichText::new("左ドラッグ:移動 / スクロール:ズーム（回転なし）")
-                        .size(11.0),
-                ),
-            );
-        }
-        if app.ui.scoped.frame_target != target {
-            app.ui.view.camera.pan = [0.0, 0.0];
-            app.ui.view.camera.zoom = 3.0;
-        }
-        app.ui.scoped.frame_target = target;
-    });
-}
 #[cfg(test)]
 mod frame_filter_tests {
     use super::*;

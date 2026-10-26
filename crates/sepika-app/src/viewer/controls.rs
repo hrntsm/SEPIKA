@@ -1,89 +1,30 @@
-//! ビューアの操作 UI（表示モード・応力図成分・検定比フィルタ・時刻歴再生・変形表示）。
-//!
-//! 描画領域の上に積む操作行をここへ集める。どの行も「app の表示設定を読み、
-//! ウィジェットへ渡し、書き戻す」だけで、描画そのものには関与しない。
-//! 表示モードの追加はこのファイルだけで閉じる。
+//! ビューアの主操作と、現在の表示モードに対応する操作 UI。
 
 use crate::app::App;
 use crate::theme;
 
 use super::playback::{advance_play_time, frame_at_time};
-use super::{check_ratio, lumped, space_grid};
+use super::{check_ratio, lumped};
+
 use super::{
     CheckRatioFilter, CmqComponent, ForceComponent, ForceComponents, ModelingAnalysis, ViewMode,
 };
 
+mod primary;
+
+#[cfg(test)]
+mod tests;
+
 /// 描画領域の上に置く操作 UI を描き、変更を `app` へ書き戻す。
 pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
-    let mut mode = app.ui.view.view_mode;
+    primary::primary_controls(ui, app);
+    let mode = app.ui.view.view_mode;
     let mut mode_idx = app.ui.scoped.view_mode_idx;
     let mut force_components = app.ui.view.force_components;
     let mut cmq_component = app.ui.view.cmq_component;
     let mut cmq_axes = app.ui.view.cmq_axes;
     let mut check_ratio_filter = app.ui.view.check_ratio_filter;
     let mut modeling_analysis = app.ui.view.modeling_analysis;
-    let has_th_recording = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .and_then(|r| r.time_history.as_ref())
-        .and_then(|t| t.recording.as_ref())
-        .is_some();
-
-    ui.horizontal_wrapped(|ui| {
-        ui.label("表示:");
-        ui.selectable_value(&mut mode, ViewMode::Shape, "形状");
-        ui.selectable_value(&mut mode, ViewMode::Deformed, "変形");
-        ui.selectable_value(&mut mode, ViewMode::Mode, "モード");
-        ui.selectable_value(&mut mode, ViewMode::Force, "応力図");
-        ui.selectable_value(&mut mode, ViewMode::Cmq, "CMQ図");
-        ui.selectable_value(&mut mode, ViewMode::CheckRatio, "検定比");
-        ui.selectable_value(&mut mode, ViewMode::Hinge, "ヒンジ");
-        ui.selectable_value(&mut mode, ViewMode::Modeling, "モデル化");
-        if has_th_recording {
-            ui.selectable_value(&mut mode, ViewMode::TimeHistory, "時刻歴");
-        }
-        if lumped::has_lumped(app) {
-            ui.selectable_value(&mut mode, ViewMode::LumpedMode, "質点モード");
-            ui.selectable_value(&mut mode, ViewMode::LumpedTimeHistory, "質点時刻歴");
-        }
-        ui.separator();
-        ui.toggle_value(&mut app.ui.view.show_sections, "断面表示");
-        ui.toggle_value(&mut app.ui.view.show_floor_secondary, "床壁・二次部材")
-            .on_hover_text(
-                "床板・小梁・間柱と、解析要素にならない壁版（腰壁・垂壁・パラペット・\
-                 自立壁・間柱で分割された壁）の表示",
-            );
-        if !lumped::is_lumped_view(mode) {
-            ui.toggle_value(&mut app.ui.view.show_supports, "支点")
-                .on_hover_text("拘束された節点の矢印・円弧、支点ばね、免震マーカー");
-        }
-        let has_diaphragm_constraint = app
-            .core
-            .model
-            .constraints
-            .iter()
-            .any(|c| matches!(c, sepika_core::model::Constraint::RigidDiaphragm { .. }));
-        if has_diaphragm_constraint {
-            ui.toggle_value(&mut app.ui.view.show_diaphragm_master, "剛床代表点");
-        }
-        if space_grid::has_grid(&app.core.model) {
-            ui.toggle_value(&mut app.ui.view.show_space_grid, "通り芯グリッド")
-                .on_hover_text(
-                    "各階レベルに通り芯の平面格子を描きます。\
-                     梁作成モードでは格子点にスナップし、節点が無ければ梁とあわせて作ります",
-                );
-        }
-        ui.separator();
-        ui.add_enabled(
-            false,
-            egui::Label::new(
-                egui::RichText::new("左ドラッグ:回転 / 右ドラッグ:移動 / スクロール:ズーム")
-                    .size(11.0),
-            ),
-        );
-    });
     if mode == ViewMode::Cmq {
         ui.horizontal_wrapped(|ui| {
             ui.label("成分:");
