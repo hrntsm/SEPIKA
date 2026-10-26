@@ -104,6 +104,7 @@ fn primary_row_moves_controls_in_order_and_shares_settings_after_resizing() {
     let labels = [
         "形状",
         "全体（3D）",
+        "全体に合わせる",
         "◀",
         "▶",
         "断面表示",
@@ -127,11 +128,13 @@ fn primary_row_moves_controls_in_order_and_shares_settings_after_resizing() {
         h.width = width as f32;
         let output = h.settled();
         let navigation = text_rect(&output, "◀").is_some();
+        assert_eq!(text_rect(&output, "全体に合わせる").is_some(), navigation);
         let toggles = text_rect(&output, "断面表示").is_some();
         if !navigation && toggles {
             navigation_moved = true;
             let output = h.click_text(&output, "表示設定");
             assert!(text_rect(&output, "◀").is_some());
+            assert!(text_rect(&output, "全体に合わせる").is_some());
             h.frame(vec![Event::Key {
                 key: egui::Key::Escape,
                 physical_key: None,
@@ -152,6 +155,7 @@ fn primary_row_moves_controls_in_order_and_shares_settings_after_resizing() {
             h.width = 1400.0;
             let output = h.settled();
             assert!(text_rect(&output, "断面表示").is_some());
+            assert!(text_rect(&output, "全体に合わせる").is_some());
             assert_eq!(h.app.ui.view.show_sections, !value);
             assert!(text_rect(&output, "表示設定").is_some());
             break;
@@ -437,6 +441,17 @@ fn panel_changes_and_display_zoom_keep_primary_row_and_view_settings() {
             assert!(h.app.ui.view.show_sections);
             assert!(!h.app.ui.view.show_floor_secondary);
             assert_eq!(h.app.ui.view.view_mode, ViewMode::Force);
+            let camera = h.app.ui.view.camera.clone();
+            h.app.ui.view.camera.pan = [100.0, -50.0];
+            h.app.ui.view.camera.zoom = 6.0;
+            let mut output = h.settled();
+            if text_rect(&output, "全体に合わせる").is_none() {
+                output = h.click_text(&output, "表示設定");
+            }
+            h.click_text(&output, "全体に合わせる");
+            assert_eq!(h.app.ui.view.camera.pan, [0.0, 0.0]);
+            assert_eq!(h.app.ui.view.camera.zoom, 3.0);
+            assert_eq!(h.app.ui.view.camera.rot, camera.rot);
             assert_eq!(state(&h.app), before);
         }
     }
@@ -466,6 +481,119 @@ fn zooming_model_and_frame_views_preserves_model_undo_and_result_state() {
             assert_eq!(h.app.ui.view.camera.rot, camera.rot);
             assert_eq!(state(&h.app), before);
             assert!(h.app.ui.view.camera.pan.iter().all(|x| x.is_finite()));
+        }
+    }
+}
+
+#[test]
+fn fit_to_view_preserves_direction_selection_and_results_in_model_and_frame_views() {
+    for target in [
+        None,
+        Some(FrameTarget::Axis { group: 0, axis: 0 }),
+        Some(FrameTarget::Story(sepika_core::ids::StoryId(0))),
+    ] {
+        let mut h = Harness::new();
+        h.viewer = true;
+        h.app.ui.scoped.frame_target = target;
+        h.app.ui.view.camera.turntable_drag(120.0, -30.0);
+        h.app.ui.view.view_mode = ViewMode::Force;
+        h.app.ui.view.deform_scale_factor = 2.5;
+        h.app.ui.view.overlay_deform = true;
+        h.app.ui.view.show_sections = false;
+        h.app.ui.view.show_floor_secondary = false;
+        let input_key = crate::app::ResultInputKey::Combo("長期".into());
+        h.app.core.scoped.results = Some(ResultsBundle {
+            combos: vec![(
+                "長期".into(),
+                sepika_solver::statics::linear::StaticOnce {
+                    disp: vec![[0.0, 0.0, 10.0, 0.0, 0.0, 0.0]; h.app.core.model.nodes.len()],
+                    member_forces: vec![],
+                    panel_moments: vec![],
+                },
+            )],
+            input_records: vec![(input_key, vec![7, 4, 9])],
+            ..Default::default()
+        });
+        h.app.ui.scoped.nav.focus_result = Some(crate::app::StaticKey::Combo(0));
+        h.app.select_node(sepika_core::ids::NodeId(0));
+        h.settled();
+        let camera = h.app.ui.view.camera.clone();
+        let selected = h.app.ui.scoped.selection.nodes().to_vec();
+        let before = state(&h.app);
+        for width in [1400.0, 320.0, 1400.0] {
+            h.width = width;
+            for iteration in 0..2 {
+                if iteration == 0 {
+                    h.app.ui.view.camera.pan = [120.0, -75.0];
+                    h.app.ui.view.camera.zoom = 8.0;
+                }
+                let mut output = h.settled();
+                if text_rect(&output, "全体に合わせる").is_none() {
+                    output = h.click_text(&output, "表示設定");
+                }
+                assert_eq!(
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|shape| matches!(
+                            &shape.shape,
+                            egui::Shape::Text(text) if text.galley.job.text == "全体に合わせる"
+                        ))
+                        .count(),
+                    1
+                );
+                h.click_text(&output, "全体に合わせる");
+                assert_eq!(h.app.ui.view.camera.pan, [0.0, 0.0]);
+                assert_eq!(h.app.ui.view.camera.zoom, 3.0);
+                assert_eq!(h.app.ui.view.camera.rot, camera.rot);
+                assert_eq!(h.app.ui.view.camera.yaw, camera.yaw);
+                assert_eq!(h.app.ui.view.camera.pitch, camera.pitch);
+                assert_eq!(h.app.ui.scoped.frame_target, target);
+                assert_eq!(h.app.ui.scoped.selection.nodes(), selected);
+                assert_eq!(h.app.ui.view.view_mode, ViewMode::Force);
+                assert_eq!(
+                    h.app.ui.scoped.nav.focus_result,
+                    Some(crate::app::StaticKey::Combo(0))
+                );
+                assert_eq!(h.app.ui.view.deform_scale_factor, 2.5);
+                assert!(h.app.ui.view.overlay_deform);
+                assert!(!h.app.ui.view.show_sections);
+                assert!(!h.app.ui.view.show_floor_secondary);
+                assert_eq!(state(&h.app), before);
+            }
+        }
+    }
+}
+
+#[test]
+fn fit_to_view_keeps_empty_single_node_and_empty_frame_fallbacks_valid() {
+    for node_count in [0, 1, 8] {
+        for in_frame in [false, true] {
+            let mut h = Harness::new();
+            h.viewer = true;
+            h.app.core.model.nodes.truncate(node_count);
+            h.app.core.model.elements.clear();
+            h.app.core.model.constraints.clear();
+            h.app.core.model.stories.clear();
+            let target = in_frame.then_some(FrameTarget::Axis { group: 0, axis: 0 });
+            h.app.ui.scoped.frame_target = target;
+            if let Some(target) = target {
+                let frame = sepika_core::frame::build_frame(&h.app.core.model, target).unwrap();
+                assert!(super::super::frame_bbox(&h.app.core.model, &frame).is_none());
+            }
+            h.settled();
+            let camera = h.app.ui.view.camera.clone();
+            let before = state(&h.app);
+            h.app.ui.view.camera.pan = [-200.0, 100.0];
+            h.app.ui.view.camera.zoom = 0.5;
+            let output = h.settled();
+            h.click_text(&output, "全体に合わせる");
+            assert_eq!(h.app.ui.view.camera.pan, [0.0, 0.0]);
+            assert_eq!(h.app.ui.view.camera.zoom, 3.0);
+            assert_eq!(h.app.ui.view.camera.rot, camera.rot);
+            assert_eq!(h.app.ui.scoped.frame_target, target);
+            assert!(h.app.ui.view.camera.rot.iter().all(|v| v.is_finite()));
+            assert_eq!(state(&h.app), before);
         }
     }
 }
