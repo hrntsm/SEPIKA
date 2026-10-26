@@ -140,6 +140,10 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 [検証記録](塑性確定点のバイリニア接線_Issue808_2026-10.md)は材料の正負方向微分・応力と塑性履歴の保持、集中梁と瞬間剛性比例減衰への定量伝播を扱う。状態は🔶。同一点の返却接線を固定せず、減衰用接線の採用判断は[Issue #808](https://github.com/hrntsm/SEPIKA/issues/808)に残る。公開時刻歴の有限例で不収束は再現せず、一般応答・累積減衰・Validationは未確認。
 
+## 仕口パネル耐力式の原典調査（#723）
+
+[原典調査と要素→証拠索引](仕口パネル耐力式_Issue723_原典調査.md)に、2025解説書第2版第1刷の原画像・N/A/Fと現行降伏式の対応、全塑性式との区別、CFT調査#888との境界を記録する。状態は🔶。指定原典の関連節は閲覧済みだが、別原典による式・適用条件の採否は未確定で#723は未完了。
+
 ## レポート目録
 
 各レポートの照合結果・修正履歴・残課題の詳細。**未完了の要約**は
@@ -147,6 +151,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [仕口パネル耐力式_Issue723_原典調査.md](仕口パネル耐力式_Issue723_原典調査.md) | 2025解説書の直接記載と別原典の境界、N/A/F・降伏/全塑性の採否 | 🔶（関連原画像閲覧済み。式全体の原典適合・採否未確定） |
 | [RC開口壁_Issue821_モデル監査.md](RC開口壁_Issue821_モデル監査.md) | 開口48条件の実入口、壁柱分担・不成立分岐、独立断面幾何と公開原図 | 🔶（現行Verification。適用範囲・安全性・モデル採否未確定） |
 | [RC壁線形軸曲げ剛性_Issue652_調査記録.md](RC壁線形軸曲げ剛性_Issue652_調査記録.md) | 現行ps換算と総断面候補、公開原画像・材料役割・実入口V&V条件 | 🔶（現行線形7試験成功。候補採否・適用範囲・安全性未確定、候補の実入口V&V未実施） |
 | [RC片持ち架構の階入力_Issue786_確認記録.md](RC片持ち架構の階入力_Issue786_確認記録.md) | 自動剛床とRC片持ち架構の独立変位・支持釣合い、ねじり解放で不安定となる架構の拒否 | 🔶（数値Verification。物理Validation・手動GUI・一般特異性判定は記録参照） |
@@ -394,6 +399,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 4 | MITC4 シェル（膜） | sepika-element | shell.rs | `test_patch_membrane_distorted`（歪みメッシュ・機械精度） | P1.5 | ✅ |
 | 5 | MITC4 シェル（曲げ） | sepika-element | shell.rs | `test_patch_bending_distorted`（歪みメッシュ定曲率・機械精度） | P1.5 | ✅ |
 | 6 | MITC4 シェル（せん断/収束） | sepika-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
+| 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像と現行式の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、新規数値試験なし | 原典 | 🔶（N/A/F・式の採否未確定、Validation未） |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
 | 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（釣合い残差がゼロ）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
 | 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
