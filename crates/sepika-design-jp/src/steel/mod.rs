@@ -11,9 +11,6 @@ pub use crate::material_strength::{
 };
 
 mod beam;
-/// 鉄骨造梁の非線形復元力特性（全塑性 Mp・横座屈 Mcr・軸 Nu）。
-/// 非線形解析の材端バネ骨格に用いる（鋼構造塑性設計指針）。
-pub mod beam_nonlinear;
 mod brace;
 /// 鉄骨造柱の座屈長さ係数 K（鋼構造塑性設計指針、水平移動非拘束）。
 pub mod buckling;
