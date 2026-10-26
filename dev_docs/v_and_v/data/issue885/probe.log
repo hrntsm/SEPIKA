@@ -1,0 +1,140 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling libm v0.2.16
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling autocfg v1.5.1
+   Compiling crossbeam-utils v0.8.21
+   Compiling bytemuck v1.25.0
+   Compiling rand_core v0.6.4
+   Compiling crossbeam-epoch v0.9.20
+   Compiling rand v0.8.6
+   Compiling cfg-if v1.0.4
+   Compiling nano-gemm-codegen v0.2.1
+   Compiling num-traits v0.2.19
+   Compiling bitflags v2.13.0
+   Compiling version_check v0.9.5
+   Compiling rayon-core v1.13.0
+   Compiling paste v1.0.15
+   Compiling crossbeam-deque v0.8.6
+   Compiling syn v2.0.118
+   Compiling pulp v0.22.2
+   Compiling raw-cpuid v11.6.0
+   Compiling pulp-wasm-simd-flag v0.1.0
+   Compiling either v1.16.0
+   Compiling reborrow v0.5.5
+   Compiling num-complex v0.4.6
+   Compiling dyn-stack-macros v0.1.3
+   Compiling rayon v1.12.0
+   Compiling zerocopy v0.8.52
+   Compiling dyn-stack v0.13.2
+   Compiling ucd-trie v0.1.7
+   Compiling seq-macro v0.3.6
+   Compiling windows_x86_64_msvc v0.42.2
+   Compiling getrandom v0.3.4
+   Compiling once_cell v1.21.4
+   Compiling syn v1.0.109
+   Compiling memchr v2.8.2
+   Compiling nano-gemm-core v0.2.1
+   Compiling pest v2.8.6
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling rand_core v0.9.5
+   Compiling equator-macro v0.4.2
+   Compiling pest_meta v2.8.6
+   Compiling serde_derive v1.0.228
+   Compiling pest_generator v2.8.6
+   Compiling gemm-common v0.19.0
+   Compiling windows-sys v0.42.0
+   Compiling num-integer v0.1.46
+   Compiling nano-gemm-f32 v0.2.1
+   Compiling nano-gemm-c64 v0.2.1
+   Compiling nano-gemm-c32 v0.2.1
+   Compiling nano-gemm-f64 v0.2.1
+   Compiling crossbeam-queue v0.3.12
+   Compiling crossbeam-channel v0.5.15
+   Compiling defer v0.2.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling crossbeam v0.8.4
+   Compiling rand_chacha v0.9.0
+   Compiling pest_derive v2.8.6
+   Compiling num-bigint v0.4.6
+   Compiling atomic-wait v1.1.0
+   Compiling interpol v0.2.1
+   Compiling equator v0.4.2
+   Compiling equator-macro v0.2.1
+   Compiling thiserror v1.0.69
+   Compiling private-gemm-x86 v0.1.20
+   Compiling foldhash v0.2.0
+   Compiling spindle v0.2.6
+   Compiling equator v0.2.2
+   Compiling py_literal v0.4.0
+   Compiling rand v0.9.4
+   Compiling gemm-c32 v0.19.0
+   Compiling gemm-c64 v0.19.0
+   Compiling gemm-f64 v0.19.0
+   Compiling gemm-f32 v0.19.0
+   Compiling qd v0.8.0
+   Compiling thiserror-impl v1.0.69
+   Compiling byteorder v1.5.0
+   Compiling generativity v1.2.1
+   Compiling equator-macro v0.6.0
+   Compiling num_cpus v1.17.0
+   Compiling equator v0.6.0
+   Compiling faer-traits v0.24.0
+   Compiling npyz v0.8.4
+   Compiling gemm v0.19.0
+   Compiling nano-gemm v0.2.2
+   Compiling rand_distr v0.5.1
+   Compiling i_float v4.1.0
+   Compiling equivalent v1.0.2
+   Compiling allocator-api2 v0.2.21
+   Compiling faer v0.24.0
+   Compiling i_shape v4.0.0
+   Compiling hashbrown v0.16.1
+   Compiling hashbrown v0.17.1
+   Compiling smallvec v1.15.2
+   Compiling robust v1.2.0
+   Compiling i_tree v0.19.0
+   Compiling i_key_sort v0.11.0
+   Compiling i_overlay v8.1.1
+   Compiling spade v2.15.1
+   Compiling lru v0.18.5
+   Compiling bincode v1.3.3
+   Compiling approx v0.5.1
+   Compiling sepika-material v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-material)
+   Compiling sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-core)
+   Compiling sepika-math v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-math)
+   Compiling sepika-section v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-section)
+   Compiling sepika-load v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-load)
+   Compiling sepika-element v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-element)
+   Compiling sepika-solver v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-solver)
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-design-jp)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1m 59s
+     Running tests\source885_probe.rs (target\debug\deps\source885_probe-178219562eea6212.exe)
+
+running 2 tests
+beta=0.3, SRC original minimum=0.25, steel=0.25, RC=0.3
+beta=0.300001, SRC original minimum=0.3, steel=0.25, RC=0.35
+beta=0.7, SRC original minimum=0.3, steel=0.25, RC=0.35
+beta=0.700001, SRC original minimum=0.35, steel=0.25, RC=0.4
+N/N0=0.2, sM0/M0=0.5: bending=FA, shear=FB
+N/N0=0.2, sM0/M0=0.3: bending=FB, shear=FC
+N/N0=0.35, sM0/M0=0.5: bending=FB, shear=FC
+N/N0=0.35, sM0/M0=0.3: bending=FC, shear=FD
+N/N0=0.5, sM0/M0=0.5: bending=FD, shear=FD
+N/N0=0.299999, sM0/M0=0.4: bending=FA, shear=FB
+N/N0=0.3, sM0/M0=0.4: bending=FA, shear=FB
+test source885_other_structure_tables_cannot_substitute_src_wall_frame ... N/N0=0.300001, sM0/M0=0.4: bending=FB, shear=FC
+N/N0=0.399999, sM0/M0=0.4: bending=FB, shear=FC
+N/N0=0.4, sM0/M0=0.4: bending=FB, shear=FC
+N/N0=0.400001, sM0/M0=0.4: bending=FD, shear=FD
+N/N0=0.3, sM0/M0=0.399999: bending=FB, shear=FC
+N/N0=0.3, sM0/M0=0.400001: bending=FA, shear=FB
+N/N0=0.4, sM0/M0=0.399999: bending=FC, shear=FD
+N/N0=0.4, sM0/M0=0.400001: bending=FB, shear=FC
+wall: other=WA, shear=WC; physical failure identification is outside this probe
+ok
+test source885_src_column_table_and_boundaries ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
