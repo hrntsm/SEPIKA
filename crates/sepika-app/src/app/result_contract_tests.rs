@@ -2286,6 +2286,96 @@ fn assert_cft767_ratio(app: &App, expected: f64) {
     }
 }
 
+fn cft916_calculated(fc_n_mm2: f64) -> App {
+    let mut app = super::tests::cft_long_case2_app(1000.0);
+    app.core.model.materials[1].fc = Some(fc_n_mm2);
+    app.run_linear_static(LoadCaseId(0));
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+
+fn assert_cft916_unchecked(app: &App, fc_n_mm2: f64) {
+    let bundle = app.current_design_results().expect("現行CFT検定");
+    assert_eq!(bundle.member_checks.len(), 1);
+    assert!(!bundle.member_checks[0].positions.is_empty());
+    for position in &bundle.member_checks[0].positions {
+        let sepika_design_jp::CheckOutcome::Skipped { reason } = &position.outcome else {
+            panic!("下限未満を適合と区別できません: {:?}", position.outcome);
+        };
+        assert!(reason.contains("告示464号第三2"), "{reason}");
+        assert!(reason.contains("下限24 N/mm²未満"), "{reason}");
+        assert!(reason.contains(&format!("Fc={fc_n_mm2} N/mm²")), "{reason}");
+    }
+    let csv = crate::summary::build_report_csv(app);
+    assert!(csv.contains(",-,検定不能,CFT検定: 充填コンクリートのFc="));
+    assert!(csv.contains("下限24 N/mm²未満"));
+    assert_eq!(app.core.model.materials[1].fc, Some(fc_n_mm2));
+}
+
+#[test]
+fn cft916_app_analysis_and_report_distinguish_concrete_strength_lower_bound() {
+    for fc_n_mm2 in [21.0, 23.999, 24.0, 24.001] {
+        let app = cft916_calculated(fc_n_mm2);
+        assert!(app.require_selected_static_input().is_ok());
+        if fc_n_mm2 < 24.0 {
+            assert_cft916_unchecked(&app, fc_n_mm2);
+        } else {
+            assert_cft767_ratio(&app, 0.0);
+            let csv = crate::summary::build_report_csv(&app);
+            assert!(csv.contains(",0.0000,OK,"));
+            assert!(!csv.contains("下限24 N/mm²未満"));
+        }
+        assert_eq!(app.core.model.materials[1].fc, Some(fc_n_mm2));
+    }
+}
+
+#[test]
+fn cft916_old_saved_passing_design_expires_and_recheck_reports_low_fc() {
+    let passing = cft916_calculated(24.0);
+    let mut app = cft916_calculated(21.0);
+    app.core.scoped.results.as_mut().unwrap().member_checks = passing
+        .current_design_results()
+        .unwrap()
+        .member_checks
+        .clone();
+    assert_cft767_ratio(&app, 0.0);
+    let original = app.current_design_results().unwrap().clone();
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(33),
+        "cft916-fc21-old-passing",
+    );
+    assert!(loaded.require_selected_static_input().is_ok());
+    assert!(loaded.current_design_results().is_none());
+    let stale = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(stale.member_forces, original.member_forces);
+    assert!(stale.member_checks.is_empty());
+    assert_eq!(stale.design_contract_version, None);
+    let csv = crate::summary::build_report_csv(&loaded);
+    assert!(!csv.contains("[部材検定]"));
+    loaded.save_project_to(path.clone());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    assert!(reopened.current_design_results().is_none());
+    reopened.run_design_check();
+    assert!(reopened.core.scoped.last_error.is_none());
+    assert_cft916_unchecked(&reopened, 21.0);
+    let recovered = reopened.current_design_results().unwrap();
+    assert_eq!(
+        recovered.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(recovered.member_forces, original.member_forces);
+    std::fs::remove_file(path).unwrap();
+}
+
 #[test]
 fn cft767_old_saved_design_keeps_analysis_and_requires_material_e_recheck() {
     use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
