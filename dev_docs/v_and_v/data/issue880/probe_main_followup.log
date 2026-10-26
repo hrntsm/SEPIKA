@@ -1,0 +1,21 @@
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-880\crates\sepika-design-jp)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.57s
+     Running tests\source880_probe.rs (target\debug\deps\source880_probe-34da38e0f5da530a.exe)
+
+running 3 tests
+single_story W_N=1000000 Z=0.8 Rt=0.9 C0=1 Qud_N=720000.0000000001
+Ds=0.25 Fes=1 Qud_N=1000000 Qu_N=249999 Qun_N=250000 ok=false
+Ds=0.25 Fes=1 Qud_N=1000000 Qu_N=250000 Qun_N=250000 ok=true
+Ds=0.25 Fes=1 Qud_N=1000000 Qu_N=250001 Qun_N=250000 ok=true
+decimal_product Qu_N=300000 exact_Qun_N=300000 computed_Qun_N=300000.00000000005820766 ok=false
+test source880_single_story_c0_one_force ... Ds=0.35 Fes=1.2 Qud_N=800000 Qu_N=335999 Qun_N=336000 ok=false
+Ds=0.35 Fes=1.2 Qud_N=800000 Qu_N=336000 Qun_N=336000 ok=true
+Ds=0.35 Fes=1.2 Qud_N=800000 Qu_N=336001 Qun_N=336000 ok=true
+Ds=0.375 Fes=1.5 Qud_N=500000 Qu_N=281249 Qun_N=281250 ok=false
+Ds=0.375 Fes=1.5 Qud_N=500000 Qu_N=281250 Qun_N=281250 ok=true
+okDs=0.375 Fes=1.5 Qud_N=500000 Qu_N=281251 Qun_N=281250 ok=true
+
+test source880_decimal_product_rounding_observation ... ok
+test source880_qun_product_and_inclusive_boundary ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

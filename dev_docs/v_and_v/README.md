@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## 鉄骨耐震ルートの重点照合（#880）
+
+[原典・独立数値・要素証拠索引](鉄骨耐震ルート_Issue880_原典照合.md)に、第2版第1刷の6.3.1 pp.375–376、6.2.4 p.363、6.3.3 pp.387/390、付録1-2.3 pp.650–651の原画像と現行機能を対応づけた。Qunの積・Quとの等号境界を有限Verificationし、ルート適用資格とルート2の一次地震時βによる応力割増しの自動確認なしを分離する。終局時βuを一次βへ流用しない。必須条件の未確認と未割増し時の応力過小評価の可能性は#697で継続し、Ds/Fes横断調査・#871/#872の残件、#489のclosed状態を変更しない。全ルート適合・専門家サインオフ・実建物Validationは未確認で状態は🔶。
+
 ## 鉄骨材料・許容応力度の重点原典照合（#879）
 
 [原典照合と有限Verification](鉄骨材料と許容応力度_Issue879_原典照合.md)は2025年版第2版第1刷の指定鋼種F・厚さ境界、長短期ft/fs、圧縮fc・Λと有効細長比を扱う。状態は🔶。材料表と算術の一致、圧縮式の相違、法定上限未判定を分離し、自動K等の別原典、未確認・対象外と後続追跡を記録する。実験Validation・専門家サインオフ・手動GUIは未実施。
@@ -155,6 +159,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [鉄骨耐震ルート_Issue880_原典照合.md](鉄骨耐震ルート_Issue880_原典照合.md) | ルート適用資格・Qun積と等号・一次筋かいβの応力割増し | 🔶（積と境界の有限Verification。ルート2自動適用なし・Validation未） |
 | [鉄骨材料と許容応力度_Issue879_原典照合.md](鉄骨材料と許容応力度_Issue879_原典照合.md) | 原典指定範囲・F/厚さ境界・ft/fs・fc/Λ・細長比上限 | 🔶（限定原典照合と入口Verification。圧縮式の危険側疑い・上限修正・別原典とValidationは残る） |
 | [鉄骨柱脚接合構造細則_Issue878_原典照合.md](鉄骨柱脚接合構造細則_Issue878_原典照合.md) | 2025年第2版の柱脚・接合詳細・ブレース・防火被覆の現行範囲 | 🔶（重点原画像と有限Verification。詳細専用検定未対応・法令適用/Validation未確認） |
 | [仕口パネル耐力式_Issue723_原典調査.md](仕口パネル耐力式_Issue723_原典調査.md) | 2025解説書の直接記載と別原典の境界、N/A/F・降伏/全塑性の採否 | 🔶（関連原画像閲覧済み。式全体の原典適合・採否未確定） |
@@ -369,6 +374,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
 | 878 | 鉄骨柱脚・接合・ブレース・防火被覆 | sepika-design-jp / sepika-load | steel/brace.rs・story_gen/tests.rs | [短命probeと既存焦点試験](鉄骨柱脚接合構造細則_Issue878_原典照合.md#要素テスト索引と残範囲)（新規恒久試験なし） | 横断 | 🔶（部材軸力/重量の有限Verification。接合詳細・防火性能の専用判定未対応） |
+| 880 | 鉄骨耐震ルート・Qun | sepika-design-jp / sepika-app | secondary/holding_capacity.rs・app/actions/design/holding.rs | [独立数値と証拠](鉄骨耐震ルート_Issue880_原典照合.md#独立数値と要素証拠索引)、保存probe3試験 | 原典／二次設計 | 🔶（積・境界Verification、ルート2自動適用なし・Validation未） |
 | 731 | 梁の床板嵩上げ | sepika-core / sepika-load / sepika-job / sepika-app | beam_placement.rs・self_weight/beam_upstand.rs・cascade.rs・app/girder_weight_tests.rs | [独立値と実入口](梁の床板嵩上げ_Issue731_2026-10.md#確認した入口) | 横断 | 🔶（数値Verification、手動GUI・Validation未） |
 | 810 | 層指標の生成入力照合 | sepika-app | summary.rs・design_view.rs | [独立期待値と実入口](層指標の生成入力照合_Issue810_2026-10.md#対象と独立期待値) | 横断 | 🔶（手動GUI・Validation未） |
 | 808 | 塑性確定点のバイリニア接線 | sepika-material / sepika-element / sepika-solver | bilinear_yield_surface.rs・frame/concentrated・general_member_loads.rs | [自動回帰と実行証拠](塑性確定点のバイリニア接線_Issue808_2026-10.md#自動回帰と実行証拠) | 横断 | 🔶（方向別Verification、減衰用接線の判断未決） |
