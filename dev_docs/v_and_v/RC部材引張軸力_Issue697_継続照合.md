@@ -171,3 +171,18 @@ fresh独立レビュー・最終head CI・mergeは本記録時点で未確認。
 `cargo run -p xtask -- check-docs` と `mdbook build` は追随後も成功（[check-docsログ](data/issue697/check-docs-rebase.log)、[mdBookログ](data/issue697/mdbook-rebase.log)）。
 変更dev文書のリンク/アンカーも解決を確認した（[検査ログ](data/issue697/dev-links-rebase.log)）。`git diff --check` は成功。
 fresh独立レビュー・最終head CI・mergeの結果は予記しない。
+
+
+## PR #920統合後の文書競合解消
+
+旧head `ca6031ce23a2a017436d3be2a7fdcdbb1d21e2e6` へ、最新main `4598766fbb10352423e665f46f0a98de51982305` を統合した。
+未検証一覧冒頭の競合は#697と#720の両節を保持して解消した。#720の技術原典の版・編集対象時点と、公的公布原文の取得不足を示す先行記録を保持し、#720はOPENのままとする。
+#888/#889の先行記録、#697の原典適用・安全性保留・失敗記録・18run/1818点の限定結論は変更していない。
+
+旧headからの `crates/`・保存probe・独立算術の差分はなく、今回branchから最新mainへの生産コード差分もない。
+差分根拠と#720先行節の逐語保持は[統合context](data/issue697/integration-context.log)へ記録したため、同一18runの再実行は行っていない。
+追加原典調査・新近似・符号付き外挿・閉Issueの再開は行わない。
+
+`cargo run -p xtask -- check-docs` と `mdbook build` は成功（[check-docsログ](data/issue697/check-docs-integration.log)、[mdBookログ](data/issue697/mdbook-integration.log)）。
+変更dev文書のリンク/アンカーは[検査ログ](data/issue697/dev-links-integration.log)のとおり解決し、`git diff --check` も成功した。
+fresh独立レビュー・統合後headのCI・mergeの成功は予記しない。
