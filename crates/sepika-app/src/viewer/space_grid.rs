@@ -45,7 +45,7 @@ pub fn draw(painter: &egui::Painter, proj: &Projector, model: &Model) {
     }
     let (x0, x1) = span(&grid.x_lines);
     let (y0, y1) = span(&grid.y_lines);
-    let stroke = egui::Stroke::new(1.0_f32, theme::translucent(theme::GRAY_600, 70));
+    let stroke = egui::Stroke::new(1.0_f32, theme::GRAY_300);
     for lv in &grid.levels {
         let z = lv.elevation;
         for gx in &grid.x_lines {

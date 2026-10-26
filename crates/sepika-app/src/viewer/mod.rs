@@ -671,7 +671,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     let cube_clicked = cube.clicked;
 
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, theme::VIEW_BG);
+    painter.rect_filled(rect, 0.0, theme::VIEW_3D_BG);
 
     let center = [rect.center().x, rect.center().y];
 
@@ -1100,6 +1100,76 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
 
+    for elem_id in app
+        .ui
+        .scoped
+        .selection
+        .members()
+        .iter()
+        .copied()
+        .chain(hovered_member.filter(|id| !app.ui.scoped.selection.members().contains(id)))
+    {
+        if !bodies.contains(elem_id) {
+            continue;
+        }
+        let Some(elem) = display_model.element(elem_id) else {
+            continue;
+        };
+        let selected = app.ui.scoped.selection.members().contains(&elem_id);
+        let mut stroke = if selected {
+            theme::VIEW_SELECTED_STROKE
+        } else {
+            theme::VIEW_HOVER_STROKE
+        };
+        if mode == ViewMode::CheckRatio {
+            stroke.width += 2.0;
+        }
+        let core_stroke = egui::Stroke::new(
+            2.0_f32,
+            if matches!(mode, ViewMode::Deformed | ViewMode::Mode) {
+                theme::HILITE_PURPLE
+            } else {
+                theme::GRAY_700
+            },
+        );
+        match element_draw_shape(elem.kind) {
+            DrawShape::None => {}
+            DrawShape::Polygon => {
+                let poly: Vec<egui::Pos2> = elem
+                    .nodes
+                    .iter()
+                    .filter_map(|n| {
+                        let idx = n.index();
+                        (idx < pts.len()).then(|| pts[idx])
+                    })
+                    .collect();
+                if poly.len() >= 3 && poly.len() == elem.nodes.len() {
+                    painter.add(egui::Shape::closed_line(poly.clone(), stroke));
+                    painter.add(egui::Shape::closed_line(poly, core_stroke));
+                }
+            }
+            DrawShape::Line => {
+                if elem.nodes.len() < 2 {
+                    continue;
+                }
+                let n0 = elem.nodes[0].index();
+                let n1 = elem.nodes[1].index();
+                if n0 < pts.len() && n1 < pts.len() {
+                    if mode == ViewMode::Shape {
+                        if let Some(ends) = primary_shape_ends(&app.core.model, elem) {
+                            let screen = ends.map(|p| proj.project(p));
+                            painter.line_segment(screen, stroke);
+                            painter.line_segment(screen, core_stroke);
+                        }
+                    } else {
+                        painter.line_segment([pts[n0], pts[n1]], stroke);
+                        painter.line_segment([pts[n0], pts[n1]], core_stroke);
+                    }
+                }
+            }
+        }
+    }
+
     if mode == ViewMode::Force {
         diagram::draw_force_diagram(
             &painter,
@@ -1178,56 +1248,6 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             egui::FontId::proportional(12.0),
             theme::GRAY_600,
         );
-    }
-
-    for elem_id in app
-        .ui
-        .scoped
-        .selection
-        .members()
-        .iter()
-        .copied()
-        .chain(hovered_member.filter(|id| !app.ui.scoped.selection.members().contains(id)))
-    {
-        if !bodies.contains(elem_id) {
-            continue;
-        }
-        let Some(elem) = display_model.element(elem_id) else {
-            continue;
-        };
-        let stroke = egui::Stroke::new(4.0_f32, theme::PARETO_RED);
-        match element_draw_shape(elem.kind) {
-            DrawShape::None => {}
-            DrawShape::Polygon => {
-                let poly: Vec<egui::Pos2> = elem
-                    .nodes
-                    .iter()
-                    .filter_map(|n| {
-                        let idx = n.index();
-                        (idx < pts.len()).then(|| pts[idx])
-                    })
-                    .collect();
-                if poly.len() >= 3 && poly.len() == elem.nodes.len() {
-                    painter.add(egui::Shape::closed_line(poly, stroke));
-                }
-            }
-            DrawShape::Line => {
-                if elem.nodes.len() < 2 {
-                    continue;
-                }
-                let n0 = elem.nodes[0].index();
-                let n1 = elem.nodes[1].index();
-                if n0 < pts.len() && n1 < pts.len() {
-                    if mode == ViewMode::Shape {
-                        if let Some(ends) = primary_shape_ends(&app.core.model, elem) {
-                            painter.line_segment(ends.map(|p| proj.project(p)), stroke);
-                        }
-                    } else {
-                        painter.line_segment([pts[n0], pts[n1]], stroke);
-                    }
-                }
-            }
-        }
     }
 
     if app.ui.view.show_diaphragm_master {
