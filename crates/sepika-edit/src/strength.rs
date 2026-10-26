@@ -63,6 +63,30 @@ impl EditCommand for RestoreStrengthInput {
             stories,
         })
     }
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let previous = model.stb_strengths.clone();
+        let stories = model.source_stories.clone();
+        let inverse = self.inverse.apply_candidate(model);
+        model.stb_strengths = self.input.clone();
+        model.source_stories = self.stories.clone();
+        Box::new(Self {
+            input: previous,
+            inverse,
+            stories,
+        })
+    }
+    fn apply_in_transaction(&self, before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        let previous = model.stb_strengths.clone();
+        let stories = model.source_stories.clone();
+        let inverse = self.inverse.apply_in_transaction(before, model);
+        model.stb_strengths = self.input.clone();
+        model.source_stories = self.stories.clone();
+        Box::new(Self {
+            input: previous,
+            inverse,
+            stories,
+        })
+    }
     fn label(&self) -> &str {
         self.inverse.label()
     }

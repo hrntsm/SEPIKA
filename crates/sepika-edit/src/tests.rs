@@ -10138,3 +10138,60 @@ fn built_box_edit_undo_redo_and_renumber_preserve_horizontal_thickness() {
     stack.undo(&mut model);
     assert_eq!(model.sections[1], edited);
 }
+
+#[test]
+fn 直接適用する入れ子複合操作も子の拒否で全変更を破棄する() {
+    struct Reject;
+    impl EditCommand for Reject {
+        fn apply(&self, _model: &mut Model) -> Box<dyn EditCommand> {
+            Box::new(RejectedEdit("子の拒否理由".into()))
+        }
+        fn label(&self) -> &str {
+            "拒否"
+        }
+    }
+    let mut model = seeded_model(2, 1);
+    let before = model.clone();
+    let inverse = CompositeCommand {
+        label: "直接適用".into(),
+        children: vec![Box::new(CompositeCommand {
+            label: "内側".into(),
+            children: vec![
+                Box::new(SetNodeCoord {
+                    node: NodeId(1),
+                    coord: [2000.0, 0.0, 0.0],
+                }),
+                Box::new(Reject),
+            ],
+        })],
+    }
+    .apply(&mut model);
+    assert_eq!(inverse.rejection(), Some("子の拒否理由"));
+    assert!(model.eq_ignoring_dofmap(&before));
+}
+
+#[test]
+fn undo既定上限は最後の百編集を保持する() {
+    let mut model = seeded_model(1, 0);
+    let mut undo = UndoStack::new();
+    for index in 1..=101 {
+        assert!(undo.run(
+            &mut model,
+            Box::new(SetNodeCoord {
+                node: NodeId(0),
+                coord: [f64::from(index), 0.0, 0.0],
+            })
+        ));
+    }
+    for _ in 0..100 {
+        undo.undo(&mut model);
+    }
+    assert_eq!(model.nodes[0].coord, [1.0, 0.0, 0.0]);
+    assert!(!undo.can_undo());
+    assert_eq!(undo.revision(), 201);
+    undo.undo(&mut model);
+    assert_eq!(undo.revision(), 201);
+    undo.redo(&mut model);
+    assert_eq!(model.nodes[0].coord, [2.0, 0.0, 0.0]);
+    assert_eq!(undo.revision(), 202);
+}
