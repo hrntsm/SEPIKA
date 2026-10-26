@@ -410,6 +410,9 @@ fn switching_to_deformation_during_edit_is_cleared_before_the_next_pick() {
     app.ui.scoped.beam_draw_mode = true;
     draw(&ctx, &mut app, vec![]);
     let output = draw(&ctx, &mut app, vec![]);
+    click(&ctx, &mut app, text_pos(&output, "形状"));
+    draw(&ctx, &mut app, vec![]);
+    let output = draw(&ctx, &mut app, vec![]);
     let pos = text_pos(&output, "変形");
     click(&ctx, &mut app, pos);
     assert_eq!(app.ui.view.view_mode, ViewMode::Shape);
