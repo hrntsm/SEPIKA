@@ -1,11 +1,77 @@
 //! ノード/部材ピック。
-//!
-//! `viewer` ハブからの構造分割。アルゴリズム変更は行わない。
 
 use super::{
     scene::{element_draw_shape, DrawShape},
     FrameFilter,
 };
+
+#[derive(Default)]
+pub(super) struct MemberBodies {
+    shapes: Vec<MemberBody>,
+    ids: std::collections::HashSet<sepika_core::ids::ElemId>,
+}
+
+struct MemberBody {
+    id: sepika_core::ids::ElemId,
+    points: Vec<egui::Pos2>,
+    closed: bool,
+    filled: bool,
+    width_px: f32,
+}
+
+impl MemberBodies {
+    pub fn push(
+        &mut self,
+        id: sepika_core::ids::ElemId,
+        points: Vec<egui::Pos2>,
+        closed: bool,
+        filled: bool,
+        width_px: f32,
+    ) {
+        if points.len() < 2 {
+            return;
+        }
+        self.ids.insert(id);
+        self.shapes.push(MemberBody {
+            id,
+            points,
+            closed,
+            filled,
+            width_px,
+        });
+    }
+
+    pub fn contains(&self, id: sepika_core::ids::ElemId) -> bool {
+        self.ids.contains(&id)
+    }
+
+    pub fn pick(&self, pos: egui::Pos2) -> Option<sepika_core::ids::ElemId> {
+        let mut nearest = None;
+        let mut nearest_distance = 8.0;
+        for body in self.shapes.iter().rev() {
+            let edge_distance = body
+                .points
+                .windows(2)
+                .map(|edge| dist_point_to_segment(pos, edge[0], edge[1]))
+                .chain(body.closed.then(|| {
+                    dist_point_to_segment(pos, *body.points.last().unwrap(), body.points[0])
+                }))
+                .fold(f32::INFINITY, f32::min);
+            if edge_distance <= body.width_px * 0.5
+                || (body.filled && point_in_polygon(pos, &body.points))
+            {
+                return Some(body.id);
+            }
+            if edge_distance <= nearest_distance
+                && (nearest.is_none() || edge_distance < nearest_distance)
+            {
+                nearest = Some(body.id);
+                nearest_distance = edge_distance;
+            }
+        }
+        nearest
+    }
+}
 
 fn dist_point_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     let ab = b - a;
@@ -112,7 +178,7 @@ pub(super) fn pick_nearest_node(
 /// スクリーン座標 `pos` に最も近い部材の `(ElemId, 距離px)` を返す。
 ///
 /// 線材は先頭 2 節点の線分距離、壁・シェルは多角形の内側（距離 0）または辺距離。
-/// 2 節点未満の要素・節点参照が範囲外の要素は対象外。部材ピック・ホバーで共有する。
+/// 2 節点未満の要素・節点参照が範囲外の要素は対象外。荷重対象の専用ピックに用いる。
 pub(super) fn pick_nearest_member(
     model: &sepika_core::model::Model,
     pts: &[egui::Pos2],
@@ -337,6 +403,92 @@ pub(super) fn pick_support_anchor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use sepika_core::ids::ElemId;
+
+    fn line(bodies: &mut MemberBodies, id: u32, y: f32, width: f32) {
+        bodies.push(
+            ElemId(id),
+            vec![egui::pos2(0.0, y), egui::pos2(100.0, y)],
+            false,
+            false,
+            width,
+        );
+    }
+
+    fn face(bodies: &mut MemberBodies, id: u32) {
+        bodies.push(
+            ElemId(id),
+            vec![
+                egui::pos2(0.0, 0.0),
+                egui::pos2(100.0, 0.0),
+                egui::pos2(100.0, 100.0),
+                egui::pos2(0.0, 100.0),
+            ],
+            true,
+            true,
+            1.0,
+        );
+    }
+
+    #[test]
+    fn direct_body_hit_beats_closer_nearby_line_in_either_draw_order() {
+        for face_last in [false, true] {
+            let mut bodies = MemberBodies::default();
+            if !face_last {
+                face(&mut bodies, 0);
+            }
+            line(&mut bodies, 1, -2.0, 1.0);
+            if face_last {
+                face(&mut bodies, 0);
+            }
+            assert_eq!(bodies.pick(egui::pos2(50.0, 0.0)), Some(ElemId(0)));
+            assert_eq!(bodies.pick(egui::pos2(50.0, 50.0)), Some(ElemId(0)));
+        }
+    }
+
+    #[test]
+    fn overlapping_direct_hits_follow_last_body_draw_order() {
+        let mut bodies = MemberBodies::default();
+        face(&mut bodies, 0);
+        line(&mut bodies, 1, 50.0, 4.0);
+        assert_eq!(bodies.pick(egui::pos2(50.0, 51.9)), Some(ElemId(1)));
+        assert_eq!(bodies.pick(egui::pos2(50.0, 52.1)), Some(ElemId(0)));
+        face(&mut bodies, 2);
+        assert_eq!(bodies.pick(egui::pos2(50.0, 50.0)), Some(ElemId(2)));
+    }
+
+    #[test]
+    fn nearby_lines_use_distance_then_draw_order_with_eight_pixel_limit() {
+        let mut bodies = MemberBodies::default();
+        line(&mut bodies, 0, 0.0, 1.0);
+        line(&mut bodies, 1, 10.0, 1.0);
+        assert_eq!(bodies.pick(egui::pos2(50.0, 4.0)), Some(ElemId(0)));
+        assert_eq!(bodies.pick(egui::pos2(50.0, 5.0)), Some(ElemId(1)));
+        assert_eq!(bodies.pick(egui::pos2(50.0, 18.0)), Some(ElemId(1)));
+        assert_eq!(bodies.pick(egui::pos2(50.0, 18.01)), None);
+    }
+
+    #[test]
+    fn unfilled_outline_does_not_turn_its_interior_into_a_face() {
+        let mut bodies = MemberBodies::default();
+        bodies.push(
+            ElemId(0),
+            vec![
+                egui::pos2(0.0, 0.0),
+                egui::pos2(100.0, 0.0),
+                egui::pos2(100.0, 100.0),
+                egui::pos2(0.0, 100.0),
+            ],
+            true,
+            false,
+            1.0,
+        );
+        assert_eq!(bodies.pick(egui::pos2(50.0, 50.0)), None);
+        assert_eq!(bodies.pick(egui::pos2(7.0, 50.0)), Some(ElemId(0)));
+        line(&mut bodies, 1, 49.0, 1.0);
+        assert_eq!(bodies.pick(egui::pos2(50.0, 50.0)), Some(ElemId(1)));
+    }
 
     #[test]
     fn point_in_polygon_detects_interior() {
