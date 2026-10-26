@@ -488,3 +488,53 @@ fn built_box_ovika_roundtrip_keeps_both_thicknesses_pending_properties_and_refer
         }
     }
 }
+
+#[test]
+fn misc889_ovika_rejects_invalid_n_without_replacing_saved_model() {
+    let path = crate::test_util::test_tmp().join("misc889-n.ovika");
+    let mut model = Model::default();
+    for n in [None, Some(1.0), Some(2.0)] {
+        model.stress_cfg.misc_wall_n = n;
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        assert_eq!(load_ovika(&path).unwrap().model.stress_cfg.misc_wall_n, n);
+    }
+    let saved = std::fs::read(&path).unwrap();
+    for n in [0.5, 0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        model.stress_cfg.misc_wall_n = Some(n);
+        assert!(save_ovika(&path, &model, OvikaExtras::default())
+            .unwrap_err()
+            .to_string()
+            .contains("係数n"));
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        assert_eq!(model.stress_cfg.misc_wall_n.unwrap().to_bits(), n.to_bits());
+    }
+    let mut old_model = serde_json::to_value(Model::default()).unwrap();
+    old_model["stress_cfg"]["misc_wall_n"] = 0.5.into();
+    let bytes = rmp_serde::to_vec_named(&old_model).unwrap();
+    let manifest = Manifest {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        units: "internal: N-mm-s".into(),
+        created_by: "misc889-fixture".into(),
+        entries: vec![crate::manifest::EntryHash {
+            name: "model.msgpack".into(),
+            sha256: sha256_of(&bytes),
+        }],
+    };
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    let options = zip::write::FileOptions::<()>::default();
+    for (name, data) in [
+        ("manifest.json", serde_json::to_vec(&manifest).unwrap()),
+        ("model.msgpack", bytes),
+    ] {
+        writer.start_file(name, options).unwrap();
+        writer.write_all(&data).unwrap();
+    }
+    writer.finish().unwrap();
+    let old_file = std::fs::read(&path).unwrap();
+    assert!(load_ovika(&path)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("係数n"));
+    assert_eq!(std::fs::read(&path).unwrap(), old_file);
+}
