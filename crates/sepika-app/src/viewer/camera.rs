@@ -77,12 +77,20 @@ impl Default for CameraState {
             yaw,
             pitch,
             pan: [0.0, 0.0],
-            zoom: 3.0,
+            zoom: Self::DEFAULT_ZOOM,
         }
     }
 }
 
 impl CameraState {
+    const DEFAULT_ZOOM: f32 = 3.0;
+
+    /// 視点方向を保ち、画面移動とズームを全体表示の既定状態へ戻す。
+    pub(crate) fn fit_to_view(&mut self) {
+        self.pan = [0.0, 0.0];
+        self.zoom = Self::DEFAULT_ZOOM;
+    }
+
     /// ドラッグ回転の感度 [rad/px]
     const ROT_SENS: f32 = 0.005;
     /// スクロール 1 単位あたりのズーム変化率。

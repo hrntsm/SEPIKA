@@ -116,6 +116,14 @@ fn section_toggles(ui: &mut egui::Ui, app: &mut App) {
         );
 }
 
+fn fit_to_view(ui: &mut egui::Ui, app: &mut App) -> egui::Response {
+    let response = ui.button("全体に合わせる");
+    if response.clicked() {
+        app.ui.view.camera.fit_to_view();
+    }
+    response
+}
+
 pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
     let choices = FrameChoices::new(app);
     let mut target = app.ui.scoped.frame_target;
@@ -153,8 +161,10 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
         .response
         .rect
         .width();
-    let navigation_width =
-        probe.button("◀").rect.width() + probe.button("▶").rect.width() + spacing;
+    let navigation_width = probe.button("全体に合わせる").rect.width()
+        + probe.button("◀").rect.width()
+        + probe.button("▶").rect.width()
+        + 2.0 * spacing;
     let mut sections = app.ui.view.show_sections;
     let mut secondary = app.ui.view.show_floor_secondary;
     let toggle_width = probe.toggle_value(&mut sections, "断面表示").rect.width()
@@ -217,6 +227,7 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
                     }
                 }).on_hover_text("表示範囲");
                 if navigation_inline {
+                    fit_to_view(ui, app);
                     choices.navigation(ui, &mut target);
                 }
                 if toggles_inline {
@@ -224,6 +235,9 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
                 }
                 ui.menu_button("表示設定", |ui| {
                     if !navigation_inline {
+                        if fit_to_view(ui, app).clicked() {
+                            ui.close();
+                        }
                         ui.horizontal(|ui| choices.navigation(ui, &mut target));
                     }
                     if !toggles_inline {
@@ -263,8 +277,7 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
         });
     });
     if app.ui.scoped.frame_target != target {
-        app.ui.view.camera.pan = [0.0, 0.0];
-        app.ui.view.camera.zoom = 3.0;
+        app.ui.view.camera.fit_to_view();
     }
     app.ui.scoped.frame_target = target;
 }
