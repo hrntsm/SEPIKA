@@ -478,14 +478,14 @@ fn pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
 }
 
 #[test]
-fn reference_identity_save_rejection_precedes_result_sync_and_preserves_existing_file() {
+fn reference_identity_save_rejection_preserves_results_and_existing_file() {
     let mut app = existing_app();
     let file = path("existing-save");
     sepika_io::ovika::save_ovika(&file, &Model::default(), Default::default()).unwrap();
     let original_file = std::fs::read(&file).unwrap();
     app.core.model.elements[0].section = Some(SectionId(678));
     let bundle = app.core.scoped.results.as_mut().unwrap();
-    bundle.pushover = Some(pushover(11.));
+
     bundle.pushover_x = Some(pushover(22.));
     bundle.pushover_y = Some(pushover(33.));
     app.core.scoped.pushover_view_dir = SeismicDir::Y;
@@ -500,20 +500,6 @@ fn reference_identity_save_rejection_precedes_result_sync_and_preserves_existing
         .model
         .elements
         .is_empty());
-    app.sync_pushover_for_save();
-    assert_eq!(
-        app.core
-            .scoped
-            .results
-            .as_ref()
-            .unwrap()
-            .pushover
-            .as_ref()
-            .unwrap()
-            .qu,
-        33.
-    );
-    assert_ne!(bytes(&app.core.scoped.results), before.results);
     std::fs::remove_file(file).unwrap();
 }
 
@@ -897,7 +883,7 @@ fn internal_reference_app_entries_accept_existing_targets_and_preserve_rejected_
 
             app.core.model = reference.model(app.core.model.clone(), Some(absent));
             let bundle = app.core.scoped.results.as_mut().unwrap();
-            bundle.pushover = Some(pushover(11.));
+
             bundle.pushover_y = Some(pushover(33.));
             app.core.scoped.pushover_view_dir = SeismicDir::Y;
             let before_save = retained(&app);

@@ -1495,17 +1495,13 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     ] {
         app.core.scoped.results = original.clone();
         let bundle = app.core.scoped.results.as_mut().unwrap();
-        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-            .into_iter()
-            .flatten()
-        {
-            if let Some(reason) = reason {
-                let record = po.wall_history.as_mut().unwrap().last_mut().unwrap();
-                record.response = None;
-                record.unavailable = Some(reason);
-            } else {
-                po.wall_history = None;
-            }
+        let po = bundle.pushover_x.as_mut().unwrap();
+        if let Some(reason) = reason {
+            let record = po.wall_history.as_mut().unwrap().last_mut().unwrap();
+            record.response = None;
+            record.unavailable = Some(reason);
+        } else {
+            po.wall_history = None;
         }
         let error = app
             .compute_holding_capacity()
@@ -1522,12 +1518,8 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     }
     app.core.scoped.results = original.clone();
     let bundle = app.core.scoped.results.as_mut().unwrap();
-    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-        .into_iter()
-        .flatten()
-    {
-        po.wall_run = None;
-    }
+    let po = bundle.pushover_x.as_mut().unwrap();
+    po.wall_run = None;
     assert!(app
         .compute_holding_capacity()
         .err()
@@ -1536,35 +1528,31 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     for corrupt in 0..3 {
         app.core.scoped.results = original.clone();
         let bundle = app.core.scoped.results.as_mut().unwrap();
-        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-            .into_iter()
-            .flatten()
-        {
-            match corrupt {
-                0 => po.wall_run.as_mut().unwrap().input_generation = Some(vec![0]),
-                1 => {
-                    po.wall_history
-                        .as_mut()
-                        .unwrap()
-                        .last_mut()
-                        .unwrap()
-                        .response
-                        .as_mut()
-                        .unwrap()
-                        .qw_n = f64::NAN
-                }
-                _ => {
-                    po.wall_history
-                        .as_mut()
-                        .unwrap()
-                        .last_mut()
-                        .unwrap()
-                        .response
-                        .as_mut()
-                        .unwrap()
-                        .equilibrium_residual
-                        .force_n[0] = 1e12
-                }
+        let po = bundle.pushover_x.as_mut().unwrap();
+        match corrupt {
+            0 => po.wall_run.as_mut().unwrap().input_generation = Some(vec![0]),
+            1 => {
+                po.wall_history
+                    .as_mut()
+                    .unwrap()
+                    .last_mut()
+                    .unwrap()
+                    .response
+                    .as_mut()
+                    .unwrap()
+                    .qw_n = f64::NAN
+            }
+            _ => {
+                po.wall_history
+                    .as_mut()
+                    .unwrap()
+                    .last_mut()
+                    .unwrap()
+                    .response
+                    .as_mut()
+                    .unwrap()
+                    .equilibrium_residual
+                    .force_n[0] = 1e12
             }
         }
         let error = app
@@ -1682,33 +1670,29 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
         (tau_case_qw, MemberRank::FB),
     ] {
         let bundle = app.core.scoped.results.as_mut().unwrap();
-        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-            .into_iter()
-            .flatten()
-        {
-            let wall = po
-                .wall_history
-                .as_mut()
-                .unwrap()
-                .last_mut()
-                .unwrap()
-                .response
-                .as_mut()
-                .unwrap();
-            wall.qw_n = qw;
-            wall.top.force_n = wall.inplane_axis.map(|component| qw * component);
-            wall.qdir_n = wall.top.force_n[0];
-            wall.bottom.force_n = wall.top.force_n.map(|force| -force);
-            wall.top.moment_nmm = [0.0; 3];
-            wall.bottom.moment_nmm = [
-                wall.height_mm * wall.top.force_n[1],
-                -wall.height_mm * wall.top.force_n[0],
-                0.0,
-            ];
-            wall.equilibrium_residual.force_n = [0.0; 3];
-            wall.equilibrium_residual.moment_nmm = [0.0; 3];
-            assert!((wall.qdir_n.abs() - c * qw.abs()).abs() < 1e-6);
-        }
+        let po = bundle.pushover_x.as_mut().unwrap();
+        let wall = po
+            .wall_history
+            .as_mut()
+            .unwrap()
+            .last_mut()
+            .unwrap()
+            .response
+            .as_mut()
+            .unwrap();
+        wall.qw_n = qw;
+        wall.top.force_n = wall.inplane_axis.map(|component| qw * component);
+        wall.qdir_n = wall.top.force_n[0];
+        wall.bottom.force_n = wall.top.force_n.map(|force| -force);
+        wall.top.moment_nmm = [0.0; 3];
+        wall.bottom.moment_nmm = [
+            wall.height_mm * wall.top.force_n[1],
+            -wall.height_mm * wall.top.force_n[0],
+            0.0,
+        ];
+        wall.equilibrium_residual.force_n = [0.0; 3];
+        wall.equilibrium_residual.moment_nmm = [0.0; 3];
+        assert!((wall.qdir_n.abs() - c * qw.abs()).abs() < 1e-6);
         let (holding, _) = app
             .compute_holding_capacity()
             .expect("斜め壁の専用応答で種別を判定");
@@ -1731,13 +1715,9 @@ fn select_holding_points(app: &mut sepika_app::app::App) {
     let Some(bundle) = &mut app.core.scoped.results else {
         return;
     };
-    for po in [
-        &mut bundle.pushover,
-        &mut bundle.pushover_x,
-        &mut bundle.pushover_y,
-    ]
-    .into_iter()
-    .flatten()
+    for po in [&mut bundle.pushover_x, &mut bundle.pushover_y]
+        .into_iter()
+        .flatten()
     {
         let Some(step) = po.capacity_curve.last().map(|p| p.step) else {
             continue;

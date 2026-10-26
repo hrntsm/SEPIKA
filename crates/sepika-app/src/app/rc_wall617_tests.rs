@@ -192,7 +192,7 @@ fn background_nonlinear_jobs_reject_results_after_input_edit() {
             .scoped
             .results
             .as_ref()
-            .is_none_or(|r| r.pushover.is_none() && r.time_history.is_none()));
+            .is_none_or(|r| r.pushover_x.is_none() && r.time_history.is_none()));
     }
 }
 
@@ -326,23 +326,15 @@ fn incremental_modeling_reads_adopted_run_numbers_and_rejects_missing_invalid_or
     );
     assert_eq!(ledger(&app), before);
     let bundle = app.core.scoped.results.as_mut().unwrap();
-    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-        .into_iter()
-        .flatten()
-    {
-        po.wall_capacities.clear();
-    }
+    let po = bundle.pushover_x.as_mut().unwrap();
+    po.wall_capacities.clear();
     assert!(app
         .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
         .unwrap_err()
         .contains("未解決"));
     let bundle = app.core.scoped.results.as_mut().unwrap();
-    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-        .into_iter()
-        .flatten()
-    {
-        po.wall_capacities.push((wall.id, [f64::NAN, expected[1]]));
-    }
+    let po = bundle.pushover_x.as_mut().unwrap();
+    po.wall_capacities.push((wall.id, [f64::NAN, expected[1]]));
     assert!(app
         .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
         .unwrap_err()
@@ -409,18 +401,14 @@ fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
         let mut ranks = Vec::new();
         for demand_ratio in [0.98, 1.0] {
             let bundle = app.core.scoped.results.as_mut().unwrap();
-            for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-                .into_iter()
-                .flatten()
-            {
-                let qu = &mut po
-                    .wall_capacities
-                    .iter_mut()
-                    .find(|(id, _)| *id == wall_id)
-                    .unwrap()
-                    .1;
-                qu[branch] = qw.abs() / demand_ratio;
-            }
+            let po = bundle.pushover_x.as_mut().unwrap();
+            let qu = &mut po
+                .wall_capacities
+                .iter_mut()
+                .find(|(id, _)| *id == wall_id)
+                .unwrap()
+                .1;
+            qu[branch] = qw.abs() / demand_ratio;
             let (result, _) = app
                 .compute_holding_capacity()
                 .unwrap_or_else(|reason| panic!("{reason}"));
@@ -442,12 +430,8 @@ fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
         );
         assert_eq!(ledger(&app), before);
         let bundle = app.core.scoped.results.as_mut().unwrap();
-        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-            .into_iter()
-            .flatten()
-        {
-            po.wall_capacities.clear();
-        }
+        let po = bundle.pushover_x.as_mut().unwrap();
+        po.wall_capacities.clear();
         let missing = app
             .compute_holding_capacity()
             .err()
@@ -572,7 +556,7 @@ fn wall_method_default_runs_save_undo_and_reject_old_results_and_jobs() {
             .scoped
             .results
             .as_ref()
-            .is_none_or(|r| r.pushover.is_none() && r.time_history.is_none()));
+            .is_none_or(|r| r.pushover_x.is_none() && r.time_history.is_none()));
     }
 }
 

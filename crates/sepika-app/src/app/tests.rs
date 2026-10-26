@@ -2584,43 +2584,7 @@ fn test_nonlinear_time_history_with_long_term_flow() {
     );
 }
 
-/// 旧形式（`pushover` のみ）が `push_dir` のスロットへ移行されること。
-#[test]
-fn test_legacy_pushover_deserialize_migrates_to_slot() {
-    use sepika_solver::statics::analysis::SeismicDir;
-
-    let legacy = ResultsBundle {
-        pushover: Some(sepika_solver::nonlinear::pushover::PushoverResult {
-            wall_capacities: Vec::new(),
-            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
-            steps: vec![],
-            wall_history: None,
-            wall_run: None,
-            confirmed_history: None,
-            ds_evaluation: None,
-            capacity_evaluation: None,
-            capacity_curve: vec![],
-            hinges: vec![],
-            shear_yields: vec![],
-            mechanism: sepika_solver::nonlinear::pushover::MechanismType::Partial,
-            qu: 123.0,
-            member_response: vec![],
-            control: Default::default(),
-            member_history: vec![],
-            fiber_states: vec![],
-            termination: Default::default(),
-        }),
-        ..Default::default()
-    };
-    let bytes = rmp_serde::to_vec(&legacy).unwrap();
-    let mut bundle: ResultsBundle = rmp_serde::from_slice(&bytes).unwrap();
-    bundle.migrate_legacy_pushover(SeismicDir::X);
-    assert!(bundle.pushover_x.is_some());
-    assert_eq!(bundle.pushover_x.as_ref().unwrap().qu, 123.0);
-    assert!(bundle.pushover_y.is_none());
-}
-
-/// X/Y 方向を別スロットに格納し、表示方向切替で `pushover` 窓口が同期されること。
+/// X/Y 方向を別スロットに格納し、選択した方向の結果を表示する。
 #[test]
 fn test_pushover_x_y_slots_and_view_dir() {
     use sepika_solver::statics::analysis::SeismicDir;
@@ -2733,7 +2697,7 @@ fn test_async_pushover_job_flow() {
         .results
         .as_ref()
         .unwrap()
-        .pushover
+        .pushover_x
         .as_ref()
         .unwrap();
     assert!(!po.capacity_curve.is_empty());
@@ -2816,7 +2780,14 @@ fn test_start_job_while_running_is_rejected() {
         "{:?}",
         app.core.scoped.last_error
     );
-    assert!(app.core.scoped.results.as_ref().unwrap().pushover.is_some());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .pushover_x
+        .is_some());
     assert!(app
         .core
         .scoped
@@ -3921,7 +3892,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         .results
         .as_ref()
         .unwrap()
-        .pushover
+        .pushover_x
         .as_ref()
         .unwrap()
         .member_response
@@ -3988,343 +3959,6 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     app.run_pushover();
     select_holding_points(&mut app);
     assert!(app.compute_holding_capacity().is_ok());
-}
-
-/// `rc_sigma_0_from_gravity_or_last_static`: 圧縮軸力から σ0 が正しく算定されることを、
-/// 実際に静的解析を実行して確認する。
-///
-/// モデル: 鉛直片持ち柱（節点0=基部, 固定, z=0 / 節点1=先端, 自由, z=3000）に
-/// RC矩形断面 400x600 を設定し、先端節点へ下向き(圧縮)集中荷重 P=100,000N を
-/// 与える。軸力のみが生じる単純な釣合いなので、内力の軸力の大きさは
-/// 弾性係数・断面性能によらず厳密に P と一致する。
-///
-/// 符号規約の確認: sepika-solver::linear::test_linear_static_axial_cantilever
-/// で N=+1000N(引張)のとき forces.at[0].1[0]≈-1000 であることを確認済みなので、
-/// 圧縮(先端を下向きに押す)では forces.at[0].1[0]≈+P（正）になるはず。
-#[test]
-fn test_rc_sigma_0_from_compression_axial_force() {
-    use sepika_core::dof::Dof6Mask;
-    use sepika_core::ids::MaterialId;
-    use sepika_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis, Material, Model,
-        NodalLoad, Node,
-    };
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
-
-    let b = 400.0;
-    let d = 600.0;
-    let rebar = RcRectColumnRebar {
-        main_dia: 22.0,
-        x: vec![4],
-        y: vec![3],
-        cover: 40.0,
-        hoop: RectColumnHoop {
-            dia: 10.0,
-            pitch: 150.0,
-            legs_x: 2,
-            legs_y: 2,
-        },
-    };
-    let rc_shape = SectionShape::RcColumnRect {
-        b,
-        d,
-        rebar: rebar.clone(),
-    };
-
-    let p = 100_000.0; // 圧縮荷重 [N]
-    let model = Model {
-        stories: explicit_story_inputs(&[0.0, 3000.0]),
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                restraint: Dof6Mask::FIXED,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [0.0, 0.0, 3000.0],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
-        sections: vec![sepika_core::model::Section {
-            frame_use: Some(sepika_core::model::FrameSectionUse::Column),
-            material: Some(MaterialId(0)),
-            rebar_material: Some(MaterialId(1)),
-            shear_rebar_material: Some(MaterialId(1)),
-            ..rc_shape.to_section(SectionId(0), "RC-400x600".into())
-        }],
-        materials: vec![
-            Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "FC24".into(),
-                category: MaterialCategory::Concrete,
-                young: 23000.0,
-                poisson: 0.2,
-                density: 2.4e-9,
-                shear: None,
-                fc: Some(24.0),
-                fy: None,
-            },
-            Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(1),
-                name: "SD345".into(),
-                category: MaterialCategory::Rebar,
-                young: 205000.0,
-                poisson: 0.3,
-                density: 7.85e-9,
-                shear: None,
-                fc: None,
-                fy: Some(345.0),
-            },
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Beam,
-            nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [1.0, 0.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        }],
-        load_cases: vec![LoadCase {
-            kind: Default::default(),
-            id: LoadCaseId(0),
-            name: "圧縮".into(),
-            nodal: vec![NodalLoad::manual(NodeId(1), [0.0, 0.0, -p, 0.0, 0.0, 0.0])],
-            member: Vec::new(),
-        }],
-        ..Default::default()
-    };
-
-    let mut app = App::default();
-    app.load_model(model);
-    app.run_linear_static(LoadCaseId(0));
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-
-    let member_forces = &app.core.scoped.results.as_ref().unwrap().member_forces;
-    let (_, mf) = member_forces
-        .iter()
-        .find(|(id, _)| *id == ElemId(0))
-        .expect("elem 0 の内力があるはず");
-    let n_raw = mf.at.first().expect("eval_sections[0] があるはず").1[0];
-    // 軸力は引張正の部材内力なので、圧縮 P に対して n_raw = -P となる。
-    assert!(
-        (n_raw + p).abs() < 1e-6,
-        "n_raw={} (expected {})",
-        n_raw,
-        -p
-    );
-
-    let statics = &app.core.scoped.results.as_ref().unwrap().statics;
-    let gravity_lc = app.core.model.load_cases.first().map(|c| c.id);
-    let sigma_0 =
-        rc_sigma_0_from_gravity_or_last_static(statics, member_forces, gravity_lc, ElemId(0), b, d);
-    let expected_sigma_0 = p / (b * d);
-    assert!(
-        (sigma_0 - expected_sigma_0).abs() < 1e-9,
-        "sigma_0={} expected={}",
-        sigma_0,
-        expected_sigma_0
-    );
-}
-
-/// `rc_sigma_0_from_gravity_or_last_static`: 先頭荷重ケース(gravity_lc)の静的解析結果が
-/// `bundle.statics` にあれば、最後に実行した(かつ結果が異なる)静的解析ではなく
-/// 先頭荷重ケースの結果が優先されることを確認する。
-///
-/// モデル: `test_rc_sigma_0_from_compression_axial_force` と同じ片持ち柱に、
-/// 先頭荷重ケース(id=0,"長期")として圧縮荷重 P1、2番目のケース(id=1,"地震")として
-/// 引張荷重 P2 を設定する。両ケースをこの順に実行すると
-/// `bundle.member_forces`(=最後に実行したケース)は引張(id=1)の結果になり、
-/// これをそのまま使うと σ0=0(引張は 0 とみなす安全側処理)になってしまう。
-/// 優先順位が正しく効いていれば、`bundle.statics` 内の id=0(長期)の圧縮軸力から
-/// σ0=P1/(b・D) (>0) が算定される。
-#[test]
-fn test_rc_sigma_0_prefers_gravity_load_case_over_last_static() {
-    use sepika_core::dof::Dof6Mask;
-    use sepika_core::ids::MaterialId;
-    use sepika_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis, Material, Model,
-        NodalLoad, Node,
-    };
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
-
-    let b = 400.0;
-    let d = 600.0;
-    let rebar = RcRectColumnRebar {
-        main_dia: 22.0,
-        x: vec![4],
-        y: vec![3],
-        cover: 40.0,
-        hoop: RectColumnHoop {
-            dia: 10.0,
-            pitch: 150.0,
-            legs_x: 2,
-            legs_y: 2,
-        },
-    };
-    let rc_shape = SectionShape::RcColumnRect {
-        b,
-        d,
-        rebar: rebar.clone(),
-    };
-
-    let p1 = 100_000.0; // 先頭ケース(長期)の圧縮荷重 [N]
-    let p2 = 60_000.0; // 2番目のケース(地震想定)の引張荷重 [N]
-    let model = Model {
-        stories: explicit_story_inputs(&[0.0, 3000.0]),
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                restraint: Dof6Mask::FIXED,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [0.0, 0.0, 3000.0],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
-        sections: vec![sepika_core::model::Section {
-            frame_use: Some(sepika_core::model::FrameSectionUse::Column),
-            material: Some(MaterialId(0)),
-            rebar_material: Some(MaterialId(1)),
-            shear_rebar_material: Some(MaterialId(1)),
-            ..rc_shape.to_section(SectionId(0), "RC-400x600".into())
-        }],
-        materials: vec![
-            Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "FC24".into(),
-                category: MaterialCategory::Concrete,
-                young: 23000.0,
-                poisson: 0.2,
-                density: 2.4e-9,
-                shear: None,
-                fc: Some(24.0),
-                fy: None,
-            },
-            Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(1),
-                name: "SD345".into(),
-                category: MaterialCategory::Rebar,
-                young: 205000.0,
-                poisson: 0.3,
-                density: 7.85e-9,
-                shear: None,
-                fc: None,
-                fy: Some(345.0),
-            },
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Beam,
-            nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [1.0, 0.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        }],
-        load_cases: vec![
-            LoadCase {
-                kind: Default::default(),
-                id: LoadCaseId(0),
-                name: "長期".into(),
-                nodal: vec![NodalLoad::manual(NodeId(1), [0.0, 0.0, -p1, 0.0, 0.0, 0.0])],
-                member: Vec::new(),
-            },
-            LoadCase {
-                kind: Default::default(),
-                id: LoadCaseId(1),
-                name: "地震".into(),
-                nodal: vec![NodalLoad::manual(NodeId(1), [0.0, 0.0, p2, 0.0, 0.0, 0.0])],
-                member: Vec::new(),
-            },
-        ],
-        ..Default::default()
-    };
-
-    let mut app = App::default();
-    app.load_model(model);
-    // 先頭ケース(長期,圧縮)→2番目のケース(地震,引張)の順に実行し、
-    // 「最後に実行した静的解析結果」は引張(id=1)になるようにする。
-    app.run_linear_static(LoadCaseId(0));
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    app.run_linear_static(LoadCaseId(1));
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-
-    let bundle = app.core.scoped.results.as_ref().unwrap();
-    // 最後に実行した静的解析結果(bundle.member_forces)は引張なので、
-    // これをそのまま使うと σ0=0 になってしまうことの確認(比較対象)。
-    let sigma_0_last_only =
-        rc_sigma_0_from_gravity_or_last_static(&[], &bundle.member_forces, None, ElemId(0), b, d);
-    assert_eq!(sigma_0_last_only, 0.0, "引張のみなら σ0=0 のはず(比較対象)");
-
-    // 優先順位が正しく効いていれば、先頭ケース(長期,id=0)の圧縮軸力から
-    // σ0=P1/(b・D) (>0) が算定される。
-    let gravity_lc = app.core.model.load_cases.first().map(|c| c.id);
-    assert_eq!(gravity_lc, Some(LoadCaseId(0)));
-    let sigma_0 = rc_sigma_0_from_gravity_or_last_static(
-        &bundle.statics,
-        &bundle.member_forces,
-        gravity_lc,
-        ElemId(0),
-        b,
-        d,
-    );
-    let expected_sigma_0 = p1 / (b * d);
-    assert!(
-        (sigma_0 - expected_sigma_0).abs() < 1e-9,
-        "sigma_0={} expected={}(先頭ケースの圧縮軸力が優先されるはず)",
-        sigma_0,
-        expected_sigma_0
-    );
 }
 
 /// `App::cmq_display_load_case`（CMQ図の表示対象ケース）は、`nav.focus_load_case`
@@ -7598,10 +7232,11 @@ fn test_tip_only_seismic_rejected_in_single_combo_and_batch() {
         "{:?}",
         app.core.scoped.last_error
     );
-    assert!(!app.core.scoped.results.as_ref().is_some_and(|r| r
-        .statics
-        .iter()
-        .any(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))));
+    assert!(!app.core.scoped.results.as_ref().is_some_and(|r| {
+        r.statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))
+    }));
     app.start_static_all_job();
     wait_for_job(&mut app);
     assert!(app
@@ -7611,10 +7246,11 @@ fn test_tip_only_seismic_rejected_in_single_combo_and_batch() {
         .as_ref()
         .unwrap()
         .contains("水平力"));
-    assert!(!app.core.scoped.results.as_ref().is_some_and(|r| r
-        .statics
-        .iter()
-        .any(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))));
+    assert!(!app.core.scoped.results.as_ref().is_some_and(|r| {
+        r.statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))
+    }));
     app.core.model.load_cases[2].nodal.push(NodalLoad::manual(
         NodeId(2),
         [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -11617,35 +11253,6 @@ fn test_build_result_tree_sections_and_labels() {
     );
 }
 
-/// 旧 time_history のみの bundle を振動ケースへ移行する
-/// （ケース名は波形名・方向・線形/非線形から作る）。
-#[test]
-fn test_migrate_legacy_time_history_only() {
-    use sepika_core::model::VibrationThDir;
-
-    let mut model = sepika_core::model::Model::default();
-    let mut bundle = ResultsBundle {
-        time_history: Some(dummy_th(vec![0.0])),
-        ..Default::default()
-    };
-    bundle.migrate_legacy_time_history(&mut model, "サンプル", VibrationThDir::X, false);
-    assert_eq!(model.vibration_cases.len(), 1);
-    assert_eq!(model.vibration_cases[0].name, "サンプル X (線形)");
-    assert_eq!(bundle.time_histories.len(), 1);
-    assert!(bundle.time_history.is_some());
-
-    // 渡した波形名・方向・非線形フラグがケース名に入る。
-    let mut model = sepika_core::model::Model::default();
-    let mut bundle = ResultsBundle {
-        time_history: Some(dummy_th(vec![0.0])),
-        ..Default::default()
-    };
-    bundle.migrate_legacy_time_history(&mut model, "elcentro", VibrationThDir::Y, true);
-    assert_eq!(model.vibration_cases.len(), 1);
-    assert_eq!(model.vibration_cases[0].name, "elcentro Y (非線形)");
-    assert_eq!(bundle.time_histories.len(), 1);
-}
-
 /// 同じケース ID への upsert は結果を置き換え、ID が違えば別スロットとして残る
 /// （ケース ID の採番・同一性は Core 側の所有テストで確認する）。
 #[test]
@@ -11730,23 +11337,30 @@ fn test_build_result_tree_empty_or_static_only() {
     assert!(!tree.has_lumped_section());
 }
 
-/// 旧 `pushover` 窓口だけがある結果でも、増分解析ノードを出す。
+/// 増分解析ノードは保持する方向だけを表示する。
 #[test]
-fn test_build_result_tree_legacy_pushover_only() {
+fn test_build_result_tree_pushover_only_held_directions() {
     use sepika_solver::statics::analysis::SeismicDir;
 
-    let bundle = ResultsBundle {
-        pushover: Some(dummy_pushover(1.0)),
-        ..Default::default()
-    };
-    let model = sepika_core::model::Model::default();
-    let tree = super::nav_results::build_result_tree(Some(&bundle), &model, |_| String::new());
-    assert_eq!(tree.pushover_dirs, vec![SeismicDir::X]);
+    for dirs in [
+        vec![SeismicDir::X],
+        vec![SeismicDir::Y],
+        vec![SeismicDir::X, SeismicDir::Y],
+    ] {
+        let bundle = ResultsBundle {
+            pushover_x: dirs.contains(&SeismicDir::X).then(|| dummy_pushover(1.0)),
+            pushover_y: dirs.contains(&SeismicDir::Y).then(|| dummy_pushover(1.0)),
+            ..Default::default()
+        };
+        let model = sepika_core::model::Model::default();
+        let tree = super::nav_results::build_result_tree(Some(&bundle), &model, |_| String::new());
+        assert_eq!(tree.pushover_dirs, dirs);
+    }
 }
 
-/// 増分解析の表示方向切替は、相手方向のスロットが空でも窓口を消さない。
+/// 選択方向に結果がなければ、反対方向の結果を表示しない。
 #[test]
-fn test_set_pushover_view_dir_keeps_window_when_slot_missing() {
+fn test_set_pushover_view_dir_hides_missing_slot() {
     use sepika_solver::statics::analysis::SeismicDir;
 
     let po = dummy_pushover(12.0);
@@ -11754,8 +11368,7 @@ fn test_set_pushover_view_dir_keeps_window_when_slot_missing() {
         core: AppCore {
             scoped: ModelScoped {
                 results: Some(ResultsBundle {
-                    pushover_x: Some(po.clone()),
-                    pushover: Some(po),
+                    pushover_x: Some(po),
                     ..Default::default()
                 }),
                 pushover_view_dir: SeismicDir::X,
@@ -11767,10 +11380,9 @@ fn test_set_pushover_view_dir_keeps_window_when_slot_missing() {
     };
     app.set_pushover_view_dir(SeismicDir::Y);
     assert_eq!(app.core.scoped.pushover_view_dir, SeismicDir::Y);
-    assert!(
-        app.core.scoped.results.as_ref().unwrap().pushover.is_some(),
-        "相手方向スロットが空でも表示中の増分結果を消してはいけない"
-    );
+    assert!(app.displayed_pushover().is_none());
+    app.set_pushover_view_dir(SeismicDir::X);
+    assert_eq!(app.displayed_pushover().unwrap().qu, 12.0);
 }
 
 /// 質点系固有値のみの再実行は、時刻歴の `stick_response` を残さない。
@@ -11803,32 +11415,6 @@ fn test_lumped_eigen_only_clears_stick_response() {
         .unwrap()
         .response
         .is_none());
-}
-
-/// 質点系結果（時刻歴あり）の移行は、渡した波形名でケースを作る。
-#[test]
-fn test_migrate_legacy_lumped_uses_wave_name() {
-    use sepika_core::model::{LumpedVibrationDim, LumpedVibrationDir};
-
-    let mut model = sepika_core::model::Model::default();
-    let mut bundle = ResultsBundle {
-        lumped: Some(dummy_lumped(0.5, true)),
-        ..Default::default()
-    };
-    bundle.migrate_legacy_lumped(
-        &mut model,
-        "elcentro",
-        LumpedVibrationDir::Y,
-        true,
-        LumpedVibrationDim::Spatial,
-    );
-    assert_eq!(model.lumped_vibration_cases.len(), 1);
-    assert_eq!(
-        model.lumped_vibration_cases[0].name,
-        "elcentro Y (非線形・3次元)"
-    );
-    assert_eq!(bundle.lumped_results.len(), 1);
-    assert!(bundle.lumped.is_some());
 }
 
 /// ナビから質点系固有値を選ぶと、3D ビューアの質点モードへ切り替わる。
@@ -12879,13 +12465,9 @@ pub(super) fn select_holding_points(app: &mut App) {
     let Some(bundle) = &mut app.core.scoped.results else {
         return;
     };
-    for po in [
-        &mut bundle.pushover,
-        &mut bundle.pushover_x,
-        &mut bundle.pushover_y,
-    ]
-    .into_iter()
-    .flatten()
+    for po in [&mut bundle.pushover_x, &mut bundle.pushover_y]
+        .into_iter()
+        .flatten()
     {
         let Some(step) = po.capacity_curve.last().map(|p| p.step) else {
             continue;
@@ -13383,6 +12965,7 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
             let bytes = rmp_serde::to_vec_named(&SavedResults {
                 bundle,
                 last_static: static_key,
+                pushover_view_dir: None,
                 view_vibration_case: None,
                 view_lumped_vibration_case: None,
                 last_run: Some(SystemTime::now()),
@@ -14312,6 +13895,7 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
         let bytes = rmp_serde::to_vec_named(&SavedResults {
             bundle: source.core.scoped.results.as_ref().unwrap().clone(),
             last_static: source.core.scoped.last_static,
+            pushover_view_dir: None,
             view_vibration_case: None,
             view_lumped_vibration_case: None,
             last_run: None,
@@ -14619,14 +14203,11 @@ fn fl_sl_preparation_uses_sl_and_never_infers_missing_input_or_moves_nodes() {
     );
     assert_eq!(app.core.model.layers()[0].height, 3500.0);
     assert_eq!(app.core.model.layers()[0].structural_height_mm, 3400.0);
-    assert!(app
-        .core
-        .model
-        .diaphragms_of(StoryId(1))
-        .all(|d| d
-            .slaves
+    assert!(app.core.model.diaphragms_of(StoryId(1)).all(|d| {
+        d.slaves
             .iter()
-            .all(|id| app.core.model.nodes[id.index()].coord[2] == 6400.0)));
+            .all(|id| app.core.model.nodes[id.index()].coord[2] == 6400.0)
+    }));
     assert_eq!(
         app.core.model.nodes[..coordinates.len()]
             .iter()

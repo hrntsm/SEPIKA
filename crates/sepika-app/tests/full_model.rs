@@ -241,7 +241,11 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
         (actual / expected - 1.0).abs() < 1.0e-7,
         "actual={actual:.12e}, independently expected={expected:.12e}"
     );
-    eprintln!("実モデル断面数={}, 独立 A/I 最大差={max_error:.12e}, 対象線材DL={actual:.12e} N, 独立DL={expected:.12e} N, 直角モデルDL={old:.12e} N, 差={:.12e} N", references.len(), actual - old);
+    eprintln!(
+        "実モデル断面数={}, 独立 A/I 最大差={max_error:.12e}, 対象線材DL={actual:.12e} N, 独立DL={expected:.12e} N, 直角モデルDL={old:.12e} N, 差={:.12e} N",
+        references.len(),
+        actual - old
+    );
     let mut baseline = imported();
     for section in &mut baseline.core.model.sections {
         if let Some((_, old_area)) = references.get(&section.id) {
@@ -277,7 +281,10 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
         (new_weight - 3.192e6).abs() < 500.0,
         "新スナップショットの重量と不整合: {new_weight}"
     );
-    eprintln!("小梁・床荷重を含む総地震用重量: 角丸={new_weight:.12e} N, 独立直角面積={old_weight:.12e} N, 差={:.12e} N", new_weight - old_weight);
+    eprintln!(
+        "小梁・床荷重を含む総地震用重量: 角丸={new_weight:.12e} N, 独立直角面積={old_weight:.12e} N, 差={:.12e} N",
+        new_weight - old_weight
+    );
 }
 
 /// テストが書き込む一時ディレクトリ（プロセス ID 入り）。
@@ -785,7 +792,7 @@ fn imported_t_beams_stop_pushover_and_nonlinear_time_history() {
         .scoped
         .results
         .as_ref()
-        .is_none_or(|r| r.pushover.is_none()));
+        .is_none_or(|r| r.pushover_x.is_none()));
     clear_error(&mut app);
     app.core.analysis_cfg.th_nonlinear = true;
     app.run_time_history_sample();
@@ -1642,31 +1649,26 @@ fn select_holding_points(app: &mut App) -> u32 {
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
     let dir = app.core.scoped.pushover_view_dir;
     let bundle = app.core.scoped.results.as_mut().unwrap();
-    let mut selected_step = 0;
-    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
-        .into_iter()
-        .flatten()
-    {
-        selected_step = po.capacity_curve.last().unwrap().step;
-        po.ds_evaluation = Some(
-            po.evaluation_point(
-                EvaluationPurpose::Ds,
-                dir,
-                selected_step,
-                "終端確定stepを試験で明示採用".into(),
-            )
-            .unwrap(),
-        );
-        po.capacity_evaluation = Some(
-            po.evaluation_point(
-                EvaluationPurpose::HoldingCapacity,
-                dir,
-                selected_step,
-                "終端確定stepを試験で明示採用".into(),
-            )
-            .unwrap(),
-        );
-    }
+    let po = bundle.pushover_x.as_mut().unwrap();
+    let selected_step = po.capacity_curve.last().unwrap().step;
+    po.ds_evaluation = Some(
+        po.evaluation_point(
+            EvaluationPurpose::Ds,
+            dir,
+            selected_step,
+            "終端確定stepを試験で明示採用".into(),
+        )
+        .unwrap(),
+    );
+    po.capacity_evaluation = Some(
+        po.evaluation_point(
+            EvaluationPurpose::HoldingCapacity,
+            dir,
+            selected_step,
+            "終端確定stepを試験で明示採用".into(),
+        )
+        .unwrap(),
+    );
     selected_step
 }
 
@@ -1687,7 +1689,7 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
         .results
         .as_ref()
         .unwrap()
-        .pushover
+        .pushover_x
         .as_ref()
         .unwrap();
     assert_eq!(po.capacity_curve.last().unwrap().step, selected_step);
@@ -1782,7 +1784,7 @@ fn pushover_reaches_ultimate_state() {
         .results
         .as_ref()
         .expect("解析結果")
-        .pushover
+        .pushover_x
         .as_ref()
         .expect("増分解析の結果");
 
@@ -1805,7 +1807,14 @@ fn pushover_reaches_ultimate_state() {
     assert!(run.gravity_applied);
     assert!(!run.gravity_terms.is_empty());
     assert_eq!(push.steps[0].load_factor, 0.0);
-    println!("PO termination={:?}, terminal_step={}, gravity_applied={}, gravity_terms={:?}, gravity_load_factor={}", push.termination, push.capacity_curve.last().unwrap().step, run.gravity_applied, run.gravity_terms, push.steps[0].load_factor);
+    println!(
+        "PO termination={:?}, terminal_step={}, gravity_applied={}, gravity_terms={:?}, gravity_load_factor={}",
+        push.termination,
+        push.capacity_curve.last().unwrap().step,
+        run.gravity_applied,
+        run.gravity_terms,
+        push.steps[0].load_factor
+    );
     assert_steel_portal_gravity_and_panel_loads(&app, push);
     insta::assert_snapshot!(
         "four_story_steel_portal_pushover",
@@ -3092,7 +3101,14 @@ fn snapshot_key_scalars() {
 
     app.run_pushover();
     assert_t_beam_diagnostic(&app);
-    assert!(app.core.scoped.results.as_ref().unwrap().pushover.is_none());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .pushover_x
+        .is_none());
     line("pushover.input", "T形梁の情報不足により停止".into());
     clear_error(&mut app);
     analyze_ultimate_gravity(&mut app);

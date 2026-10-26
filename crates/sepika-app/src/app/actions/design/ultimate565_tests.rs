@@ -140,7 +140,7 @@ fn pushover_ultimate_adopts_confirmed_capacity_step_and_never_static_fallback() 
     app.core.ultimate_upper_factor = 1.0;
     assert!(app.ultimate_demand_by_elem().unwrap_err().contains("step"));
     let bundle = app.core.scoped.results.as_mut().unwrap();
-    let po = bundle.pushover.as_mut().unwrap();
+    let po = bundle.pushover_x.as_mut().unwrap();
     let step = po.confirmed_history.as_ref().unwrap().last().unwrap().step;
     po.capacity_evaluation = Some(
         po.evaluation_point(
@@ -151,8 +151,7 @@ fn pushover_ultimate_adopts_confirmed_capacity_step_and_never_static_fallback() 
         )
         .unwrap(),
     );
-    let copy = po.clone();
-    bundle.pushover_x = Some(copy);
+
     let demand = app.ultimate_demand_by_elem().unwrap();
     assert!(demand.iter().all(|(_, d)| d.mode
         == sepika_design_jp::ultimate::UltimateDemandMode::ConfirmedTotal

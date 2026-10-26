@@ -436,13 +436,6 @@ mod tests {
         let bundle = app.core.scoped.results.as_mut().unwrap();
         let run = bundle.pushover_x.as_mut().unwrap();
         run.member_response.clear();
-        let mut display_alias = run.clone();
-        display_alias
-            .capacity_evaluation
-            .as_mut()
-            .unwrap()
-            .direction = SeismicDir::Y;
-        bundle.pushover = Some(display_alias);
         assert_eq!(demand_source_note(&app).unwrap(), adopted);
         println!("ultimate source note: {adopted}");
     }

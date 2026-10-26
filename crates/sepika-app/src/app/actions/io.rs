@@ -99,7 +99,6 @@ impl App {
             self.report_error(format!("保存エラー: {error}"));
             return;
         }
-        self.sync_pushover_for_save();
         let discard_auto_loads = self.core.scoped.staleness.preparation_stale
             && self.core.model.load_cases.iter().any(|case| {
                 case.member.iter().any(|load| {
@@ -172,6 +171,7 @@ impl App {
                     saved
                 },
                 last_static: self.core.scoped.last_static,
+                pushover_view_dir: Some(self.core.scoped.pushover_view_dir),
                 view_vibration_case: self.core.scoped.view_vibration_case,
                 view_lumped_vibration_case: self.core.scoped.view_lumped_vibration_case,
                 last_run: self.core.scoped.staleness.last_run,
@@ -333,40 +333,15 @@ impl App {
                 if let Some(saved) =
                     self.decode_on_load::<SavedResults>(contents.results, "解析結果")
                 {
-                    let mut bundle = saved.bundle;
-                    bundle.migrate_legacy_pushover(self.core.analysis_cfg.push_dir);
-                    bundle.migrate_legacy_time_history(
-                        &mut self.core.model,
-                        self.core
-                            .scoped
-                            .wave_library_selection
-                            .as_deref()
-                            .unwrap_or("サンプル"),
-                        crate::app::vibration::vibration_th_dir_from_th(
-                            self.core.analysis_cfg.th_dir,
-                        ),
-                        self.core.analysis_cfg.th_nonlinear,
-                    );
-                    bundle.migrate_legacy_lumped(
-                        &mut self.core.model,
-                        self.core
-                            .scoped
-                            .lumped_wave_library_selection
-                            .as_deref()
-                            .unwrap_or("サンプル"),
-                        crate::app::vibration::lumped_vibration_dir_from_seismic(
-                            self.core.analysis_cfg.lumped_dir,
-                        ),
-                        self.core.analysis_cfg.lumped_nonlinear,
-                        crate::app::vibration::lumped_vibration_dim_from_stick(
-                            self.core.analysis_cfg.lumped_dim,
-                        ),
-                    );
+                    let bundle = saved.bundle;
                     self.core.scoped.pushover_view_dir =
-                        bundle.infer_pushover_view_dir(self.core.analysis_cfg.push_dir);
-                    bundle.pushover = bundle
-                        .pushover_for_dir(self.core.scoped.pushover_view_dir)
-                        .cloned();
+                        saved.pushover_view_dir.unwrap_or_else(|| {
+                            match (bundle.pushover_x.is_some(), bundle.pushover_y.is_some()) {
+                                (true, false) => SeismicDir::X,
+                                (false, true) => SeismicDir::Y,
+                                _ => self.core.analysis_cfg.push_dir,
+                            }
+                        });
                     self.core.scoped.results = Some(bundle);
                     self.core.scoped.last_static = saved.last_static;
                     self.core.scoped.staleness.last_run = saved.last_run;

@@ -143,7 +143,7 @@ impl serde::Serialize for ContractFixture<'_> {
                 map.serialize_entry("wall_checks", &self.0.wall_checks)?;
                 map.serialize_entry("beam_checks", &self.0.beam_checks)?;
                 map.serialize_entry("slab_checks", &self.0.slab_checks)?;
-                map.serialize_entry("pushover", &self.0.pushover)?;
+
                 map.serialize_entry("pushover_x", &self.0.pushover_x)?;
                 map.serialize_entry("pushover_y", &self.0.pushover_y)?;
                 map.serialize_entry("time_history", &self.0.time_history)?;
@@ -181,6 +181,7 @@ pub(super) fn restore(
     let saved = SavedResults {
         bundle,
         last_static: app.core.scoped.last_static,
+        pushover_view_dir: None,
         view_vibration_case: None,
         view_lumped_vibration_case: None,
         last_run: app.core.scoped.staleness.last_run,
@@ -638,12 +639,7 @@ fn old_analysis_is_excluded_before_partial_success_or_failure_without_restamping
         bundle.analysis_contract_version,
         Some(ANALYSIS_CONTRACT_VERSION)
     );
-    assert!(
-        bundle.modal.is_none()
-            && bundle.pushover.is_none()
-            && bundle.pushover_x.is_none()
-            && bundle.pushover_y.is_none()
-    );
+    assert!(bundle.modal.is_none() && bundle.pushover_x.is_none() && bundle.pushover_y.is_none());
     assert!(
         bundle.time_history.is_none()
             && bundle.time_histories.is_empty()

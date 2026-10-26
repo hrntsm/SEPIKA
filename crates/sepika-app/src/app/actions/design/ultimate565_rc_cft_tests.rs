@@ -239,7 +239,7 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
         app.core.ultimate_use_pushover = true;
         assert!(app_error(&mut app, cft).contains("step"));
         let bundle = app.core.scoped.results.as_mut().unwrap();
-        let po = bundle.pushover.as_mut().unwrap();
+        let po = bundle.pushover_x.as_mut().unwrap();
         let history = po.confirmed_history.as_ref().unwrap();
         assert!(history.len() >= 3);
         let response = history[1].clone();
@@ -277,7 +277,6 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
                 (LoadCaseId(2), 1.0)
             ]
         );
-        bundle.pushover_x = Some(po.clone());
         let r = response
             .members
             .iter()
@@ -424,8 +423,8 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
         assert!(current_records.iter().any(|(key, bytes)| *key
             == ResultInputKey::Pushover(SeismicDir::X)
             && bytes == &current_generation));
-        bundle.pushover_x = Some(old_run.clone());
-        bundle.pushover = Some(old_run);
+        bundle.pushover_x = Some(old_run);
+
         assert_eq!(bundle.input_records, current_records);
         assert!(app
             .require_result_input(ResultInputKey::Pushover(SeismicDir::X))
@@ -461,7 +460,7 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
             )
             .unwrap(),
         );
-        bundle.pushover = Some(po.clone());
+
         let demand = app.ultimate_demand_by_elem().unwrap()[0].1;
         assert_eq!(demand.mode, UltimateDemandMode::ConfirmedTotal);
         check_app(&mut app, cft, 150000.0, demand.shear);

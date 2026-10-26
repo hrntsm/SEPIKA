@@ -126,9 +126,6 @@ pub(crate) fn build_result_tree(
     if r.pushover_y.is_some() {
         pushover_dirs.push(SeismicDir::Y);
     }
-    if pushover_dirs.is_empty() && r.pushover.is_some() {
-        pushover_dirs.push(r.infer_pushover_view_dir(SeismicDir::X));
-    }
 
     let time_history_cases: Vec<_> = r
         .time_histories

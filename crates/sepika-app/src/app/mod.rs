@@ -468,6 +468,9 @@ pub struct SavedResults {
     pub bundle: ResultsBundle,
     /// 表示対象の静的解析結果。
     pub last_static: Option<StaticKey>,
+    /// 表示中の増分解析方向。欠落時は保持方向と解析設定から選択する。
+    #[serde(default)]
+    pub pushover_view_dir: Option<SeismicDir>,
     /// 表示中の立体時刻歴振動ケース。
     #[serde(default)]
     pub view_vibration_case: Option<VibrationCaseId>,
@@ -523,8 +526,6 @@ pub struct ResultsBundle {
     pub beam_checks: Vec<BeamCheck>,
     /// スラブ（床）の設計（一方向曲げ）。
     pub slab_checks: Vec<SlabCheck>,
-    /// 表示中の増分解析結果（互換・既存参照の窓口）。
-    pub pushover: Option<sepika_solver::nonlinear::pushover::PushoverResult>,
     /// X 方向の増分解析結果。
     #[serde(default)]
     pub pushover_x: Option<sepika_solver::nonlinear::pushover::PushoverResult>,
@@ -578,46 +579,6 @@ impl ResultsBundle {
             .iter()
             .find(|(k, _)| *k == StaticCaseKey::Seismic(dir))
             .map(|(_, s)| s)
-    }
-
-    /// `.ovika`（`pushover` のみ）を `push_dir` のスロットへ移す。
-    pub fn migrate_legacy_pushover(&mut self, push_dir: SeismicDir) {
-        if self.pushover_x.is_none() && self.pushover_y.is_none() {
-            if let Some(po) = self.pushover.clone() {
-                match push_dir {
-                    SeismicDir::X => self.pushover_x = Some(po),
-                    SeismicDir::Y => self.pushover_y = Some(po),
-                }
-            }
-        }
-    }
-
-    /// 保存済み `pushover` がどちらの方向のスロットか推定する（一致しなければ `fallback`）。
-    pub fn infer_pushover_view_dir(&self, fallback: SeismicDir) -> SeismicDir {
-        match (self.pushover_x.is_some(), self.pushover_y.is_some()) {
-            (true, false) => SeismicDir::X,
-            (false, true) => SeismicDir::Y,
-            _ => {
-                let Some(po) = &self.pushover else {
-                    return fallback;
-                };
-                if self
-                    .pushover_x
-                    .as_ref()
-                    .is_some_and(|x| (x.qu - po.qu).abs() < 1e-3)
-                {
-                    SeismicDir::X
-                } else if self
-                    .pushover_y
-                    .as_ref()
-                    .is_some_and(|y| (y.qu - po.qu).abs() < 1e-3)
-                {
-                    SeismicDir::Y
-                } else {
-                    fallback
-                }
-            }
-        }
     }
 }
 
@@ -1840,44 +1801,6 @@ fn wall_has_src_boundary_column(
         sepika_core::geom::is_vertical_axis(a.coord, b.coord)
             && member_structure_kind(model, e) == StructureKind::Src
     })
-}
-
-/// 長期軸力の簡易近似として先頭荷重ケース(`model.load_cases.first()`)の結果を優先し、
-/// `bundle.statics` になければ最後に実行した静的解析結果(`member_forces`)を
-/// 用いて部材の軸力を取得する。圧縮のときのみ σ0 \[N/mm²\]（= |N|/(b・D)）を返す。
-/// 引張・軸力なし・対象部材の結果がない場合は 0.0（安全側）。
-///
-/// `statics` は `StaticCaseKey` をキーとするため、ユーザー荷重ケースの結果
-/// (`StaticCaseKey::User`)と地震静的の結果(`StaticCaseKey::Seismic`)は別々に
-/// 格納される。
-/// 先頭荷重ケースが `statics` にない（未実行）場合のみ `fallback_member_forces`
-/// （最後に実行した静的解析の内力）を用いる。
-#[allow(dead_code)]
-fn rc_sigma_0_from_gravity_or_last_static(
-    statics: &[(StaticCaseKey, sepika_solver::statics::linear::StaticOnce)],
-    fallback_member_forces: &[(ElemId, sepika_element::frame::beam::MemberForces)],
-    gravity_lc: Option<LoadCaseId>,
-    elem_id: ElemId,
-    b: f64,
-    d: f64,
-) -> f64 {
-    let member_forces = gravity_lc
-        .and_then(|lc| {
-            statics
-                .iter()
-                .find(|(id, _)| *id == StaticCaseKey::User(lc))
-        })
-        .map(|(_, s)| s.member_forces.as_slice())
-        .unwrap_or(fallback_member_forces);
-
-    member_forces
-        .iter()
-        .find(|(id, _)| *id == elem_id)
-        .and_then(|(_, mf)| mf.at.first())
-        .map(|(_, f)| f[0])
-        .filter(|n| *n < 0.0)
-        .map(|n| -n / (b * d))
-        .unwrap_or(0.0)
 }
 
 /// 幅厚比ランク表の行（柱／梁）を部材から選ぶ。柱以外（梁・ブレース）は梁の行を用いる。

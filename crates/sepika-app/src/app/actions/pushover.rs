@@ -97,35 +97,19 @@ impl App {
     ) -> Option<&sepika_solver::nonlinear::pushover::PushoverResult> {
         let view_dir = self.core.scoped.pushover_view_dir;
         let results = self.core.scoped.results.as_ref()?;
-        results
-            .pushover_for_dir(view_dir)
-            .or(results.pushover.as_ref())
+        results.pushover_for_dir(view_dir)
     }
 
-    /// 結果タブの増分解析表示方向を切り替え、`pushover` 窓口も同期する。
+    /// 結果タブの増分解析表示方向を切り替える。
     #[cfg(any(test, feature = "gui"))]
     pub(crate) fn set_pushover_view_dir(&mut self, dir: SeismicDir) {
         if self.core.scoped.pushover_view_dir == dir {
             return;
         }
         self.core.scoped.pushover_view_dir = dir;
-        if let Some(bundle) = self.core.scoped.results.as_mut() {
-            if let Some(po) = bundle.pushover_for_dir(dir).cloned() {
-                bundle.pushover = Some(po);
-            }
-        }
         #[cfg(feature = "gui")]
         {
             self.ui.scoped.hinge_view_cache = None;
-        }
-    }
-
-    /// 保存直前に `pushover` 窓口を表示中方向へ同期する。
-    pub(crate) fn sync_pushover_for_save(&mut self) {
-        if let Some(bundle) = self.core.scoped.results.as_mut() {
-            bundle.pushover = bundle
-                .pushover_for_dir(self.core.scoped.pushover_view_dir)
-                .cloned();
         }
     }
 
@@ -149,10 +133,9 @@ impl App {
                 let mut bundle = self.take_results_for_analysis();
                 bundle.record_input(input_key, input);
                 match dir {
-                    SeismicDir::X => bundle.pushover_x = Some(result.clone()),
-                    SeismicDir::Y => bundle.pushover_y = Some(result.clone()),
+                    SeismicDir::X => bundle.pushover_x = Some(result),
+                    SeismicDir::Y => bundle.pushover_y = Some(result),
                 }
-                bundle.pushover = Some(result);
                 self.core.scoped.results = Some(bundle);
                 self.core.scoped.pushover_view_dir = dir;
                 self.core.scoped.staleness.mark_fresh();
@@ -213,7 +196,7 @@ mod tests {
             .results
             .as_ref()
             .unwrap()
-            .pushover
+            .pushover_x
             .clone()
             .unwrap();
         result.termination =
@@ -252,19 +235,141 @@ mod tests {
         assert!(notice.contains("接線剛性の数値的な特異性・精度限界"));
         assert!(notice.contains("最大ベースシアはその時点までの最大値"));
         assert!(!notice.contains("機構形成・耐力喪失"));
-        app.sync_pushover_for_save();
         let bytes = rmp_serde::to_vec_named(app.core.scoped.results.as_ref().unwrap()).unwrap();
         let restored: ResultsBundle = rmp_serde::from_slice(&bytes).unwrap();
-        for result in [restored.pushover.as_ref(), restored.pushover_x.as_ref()] {
-            let result = result.unwrap();
-            assert!(matches!(result.mechanism, MechanismType::Partial));
-            assert!(matches!(
-                result.termination,
-                PushoverTermination::TangentSingular { .. }
-            ));
-            assert!(result.termination.is_premature());
-            assert_eq!(result.qu, qu);
-            assert_eq!(result.capacity_curve.len(), curve_len);
+        let result = restored.pushover_x.as_ref().unwrap();
+        assert!(matches!(result.mechanism, MechanismType::Partial));
+        assert!(matches!(
+            result.termination,
+            PushoverTermination::TangentSingular { .. }
+        ));
+        assert!(result.termination.is_premature());
+        assert_eq!(result.qu, qu);
+        assert_eq!(result.capacity_curve.len(), curve_len);
+    }
+    #[test]
+    fn 保存した表示方向は同じ最大ベースシアでも復元し方向欠落時は保持方向と設定だけで選ぶ() {
+        let mut app = App::default();
+        app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+            crate::sample::portal_frame(),
+        ));
+        app.core.analysis_cfg.push_steps = 2;
+        app.run_pushover();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let x = app.displayed_pushover().unwrap().clone();
+        app.core.analysis_cfg.push_dir = SeismicDir::Y;
+        app.apply_pushover_result(Ok(x));
+        let both = app.core.scoped.results.as_ref().unwrap().clone();
+        assert_eq!(
+            both.pushover_x.as_ref().unwrap().qu,
+            both.pushover_y.as_ref().unwrap().qu
+        );
+
+        for (index, (hold_x, hold_y, saved_dir, configured, expected)) in [
+            (
+                true,
+                true,
+                Some(SeismicDir::X),
+                SeismicDir::Y,
+                SeismicDir::X,
+            ),
+            (
+                true,
+                true,
+                Some(SeismicDir::Y),
+                SeismicDir::X,
+                SeismicDir::Y,
+            ),
+            (true, false, None, SeismicDir::Y, SeismicDir::X),
+            (false, true, None, SeismicDir::X, SeismicDir::Y),
+            (true, true, None, SeismicDir::X, SeismicDir::X),
+            (true, true, None, SeismicDir::Y, SeismicDir::Y),
+            (
+                true,
+                false,
+                Some(SeismicDir::Y),
+                SeismicDir::X,
+                SeismicDir::Y,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut bundle = both.clone();
+            if !hold_x {
+                bundle.pushover_x = None;
+            }
+            if !hold_y {
+                bundle.pushover_y = None;
+            }
+            let saved = SavedResults {
+                bundle,
+                last_static: None,
+                pushover_view_dir: saved_dir,
+                view_vibration_case: None,
+                view_lumped_vibration_case: None,
+                last_run: None,
+            };
+            let mut value = serde_json::to_value(saved).unwrap();
+            if saved_dir.is_none() {
+                value.as_object_mut().unwrap().remove("pushover_view_dir");
+            }
+            let results = rmp_serde::to_vec_named(&value).unwrap();
+            app.core.analysis_cfg.push_dir = configured;
+            let settings = rmp_serde::to_vec_named(&SavedAnalysisSettings {
+                cfg: app.core.analysis_cfg,
+                wave_name: None,
+                wave_sha256: None,
+                lumped_wave_name: None,
+                lumped_wave_sha256: None,
+            })
+            .unwrap();
+            let file = std::env::temp_dir()
+                .join(format!("sepika865-{}-{index}.ovika", std::process::id()));
+            sepika_io::ovika::save_ovika(
+                &file,
+                &app.core.model,
+                sepika_io::ovika::OvikaExtras {
+                    results: Some(&results),
+                    analysis_settings: Some(&settings),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut restored = App::default();
+            restored.open_project_from(file.clone());
+            assert!(
+                restored.core.scoped.last_error.is_none(),
+                "{:?}",
+                restored.core.scoped.last_error
+            );
+            assert_eq!(restored.core.scoped.pushover_view_dir, expected);
+            assert_eq!(
+                restored.displayed_pushover().is_some(),
+                match expected {
+                    SeismicDir::X => hold_x,
+                    SeismicDir::Y => hold_y,
+                }
+            );
+            std::fs::remove_file(file).unwrap();
         }
+
+        app.set_pushover_view_dir(SeismicDir::X);
+        let file =
+            std::env::temp_dir().join(format!("sepika865-save-{}.ovika", std::process::id()));
+        app.save_project_to(file.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let contents = sepika_io::ovika::load_ovika(&file).unwrap();
+        let value: serde_json::Value = rmp_serde::from_slice(&contents.results.unwrap()).unwrap();
+        assert!(value["bundle"].get("pushover").is_none());
+        let mut restored = App::default();
+        restored.open_project_from(file.clone());
+        assert_eq!(restored.core.scoped.pushover_view_dir, SeismicDir::X);
+        assert!(restored.displayed_pushover().is_some());
+        std::fs::remove_file(file).unwrap();
     }
 }
