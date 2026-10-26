@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## SRC耐震ルートの重点照合（#885）
+
+[原画像対応・独立数値・要素→証拠索引](SRC耐震ルート_Issue885_原典照合.md)で第2版第1刷6.5 pp436–444と6.2.4 p363・6.9 pp482–484の関連条件を有限確認。柱表5区分・境界と公開分類入口は一致（30観測）、壁bool分類2、他種Ds表8の限定Verificationを記録する。状態は🔶。SRC用Ds選択は未対応で、手動S選択経路の条件付き危険側反例を保持する。実SRCモデルのApp通し実行は未確認、選択経路のソース確認と公開関数実測を区別する。#489のclosed見送りは維持し、再開・同一新規修正は要求せず、未解決条件を#697へ追補する。比算定略算は別原典必要（#886）、柱脚・破壊同定・併用条件不足は#872/#697で継続。全ルート・全表・専門家サインオフ・実験Validation・手動GUIは未確認。
+
 ## SRC構造細則・一次設計の重点照合（#884）
 
 [原典対応と独立数値・要素証拠索引](SRC構造細則一次設計_Issue884_原典照合.md)に2025年第2版第1刷の3.8 pp.226–228、6.1 pp.337–339、9.2 p.566、9.3 p.584を対応づけた。法定鉄骨かぶり・準用全条件の自動判定なし、梁N/My/Qzの未評価を明記し、未評価を適合と誤読した場合の危険側可能性は#697で継続する。未知鋼材のF235補完による低強度材の耐力過大疑いは[修正#912](https://github.com/hrntsm/SEPIKA/issues/912)へ接続する。換算・累加/分担式は閲覧節では照合不可で別原典を要し、#434の有限Verificationと分離する。#745はnot_planned閉で共通化実装済みとはしない。#879/#881の共通材料成果を参照し、#885/#886・CFTは対象外。全原典・専門家サインオフ・実験Validationは未確認で状態は🔶。
@@ -174,6 +178,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
 | [SRC構造細則一次設計_Issue884_原典照合.md](SRC構造細則一次設計_Issue884_原典照合.md) | SRC固有細則・複合断面・一次設計の適用と公開梁検定境界 | 🔶（有限Verification、法定詳細/別原典/Validationは残る） |
 | [RC部材力学モデル_Issue883_原典照合.md](RC部材力学モデル_Issue883_原典照合.md) | 梁Mu/Mc・柱Mu軸力三分岐・壁Qu/βs/Qcと適用条件 | 🔶（原画像・独立6probe成功。壁Qu上限是正#910、適用根拠#697・Validation未） |
 | [鉄骨耐震ルート_Issue880_原典照合.md](鉄骨耐震ルート_Issue880_原典照合.md) | ルート適用資格・Qun積と等号・一次筋かいβの応力割増し | 🔶（積と境界の有限Verification。ルート2自動適用なし・Validation未） |
@@ -509,6 +514,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 26a | 梁型枠の床接触控除 | sepika-design-jp / sepika-app / sepika-mcp | quantity/contact.rs・tests.rs、tests/beam_contact_quantity.rs | [Issue451検証](梁型枠接触和集合_Issue451_2026-10.md)の独立期待値・診断・実入口対応表 | 横断 | 🔶（限定Verification、一般形状・実施工未検証） |
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
+| 885 | SRC耐震ルート・柱区分とDs適用 | sepika-design-jp / sepika-app | secondary/src_rank.rs・ds_group.rs、actions/design/holding.rs | [原典セル・独立境界・公開probe索引](SRC耐震ルート_Issue885_原典照合.md#独立数値境界と要素証拠索引) | 二次設計 | 🔶（分類Verification、SRC表選択・適用条件未対応、Validation未） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |

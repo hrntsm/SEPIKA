@@ -1,0 +1,30 @@
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-885\crates\sepika-design-jp)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.20s
+     Running tests\source885_probe.rs (target\debug\deps\source885_probe-178219562eea6212.exe)
+
+running 2 tests
+beta=0.3, SRC original minimum=0.25, steel=0.25, RC=0.3
+beta=0.300001, SRC original minimum=0.3, steel=0.25, RC=0.35
+beta=0.7, SRC original minimum=0.3, steel=0.25, RC=0.35
+beta=0.700001, SRC original minimum=0.35, steel=0.25, RC=0.4
+N/N0=0.2, sM0/M0=0.5: bending=FA, shear=FB
+N/N0=0.2, sM0/M0=0.3: bending=FB, shear=FC
+N/N0=0.35, sM0/M0=0.5: bending=FB, shear=FC
+N/N0=0.35, sM0/M0=0.3: bending=FC, shear=FD
+N/N0=0.5, sM0/M0=0.5: bending=FD, shear=FD
+N/N0=0.299999, sM0/M0=0.4: bending=FA, shear=FB
+N/N0=0.3, sM0/M0=0.4: bending=FA, shear=FB
+N/N0=0.300001, sM0/M0=0.4: bending=FB, shear=FC
+N/N0=0.399999, sM0/M0=0.4: bending=FB, shear=FC
+N/N0=0.4, sM0/M0=0.4: bending=FB, shear=FC
+N/N0=0.400001, sM0/M0=0.4: bending=FD, shear=FD
+N/N0=0.3, sM0/M0=0.399999: bending=FB, shear=FC
+N/N0=0.3, sM0/M0=0.400001: bending=FA, shear=FB
+N/N0=0.4, sM0/M0=0.399999: bending=FC, shear=FD
+N/N0=0.4, sM0/M0=0.400001: bending=FB, shear=FC
+wall: other=WA, shear=WC; physical failure identification is outside this probe
+test source885_other_structure_tables_cannot_substitute_src_wall_frame ... ok
+test source885_src_column_table_and_boundaries ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
