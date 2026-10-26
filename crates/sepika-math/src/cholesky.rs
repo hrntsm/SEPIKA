@@ -171,43 +171,9 @@ mod tests {
         let x = solver.solve(&[0.0, 1000.0]).unwrap();
         approx::assert_relative_eq!(x[0], 10.0, max_relative = 1e-9);
         approx::assert_relative_eq!(x[1], 15.0, max_relative = 1e-9);
-    }
-
-    #[test]
-    fn test_2dof_deterministic() {
-        faer::set_global_parallelism(faer::Par::Seq);
-        let k = assemble_csc(
-            2,
-            vec![
-                Triplet {
-                    row: 0,
-                    col: 0,
-                    val: 300.0,
-                },
-                Triplet {
-                    row: 1,
-                    col: 0,
-                    val: -200.0,
-                },
-                Triplet {
-                    row: 0,
-                    col: 1,
-                    val: -200.0,
-                },
-                Triplet {
-                    row: 1,
-                    col: 1,
-                    val: 200.0,
-                },
-            ],
-        );
-        let mut solver0 = make_solver(SolverBackend::DirectSparseCholesky);
-        solver0.factorize(&k).unwrap();
-        let x0 = solver0.solve(&[0.0, 1000.0]).unwrap();
-        let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
-        solver.factorize(&k).unwrap();
-        let x = solver.solve(&[0.0, 1000.0]).unwrap();
-        assert_eq!(x, x0);
+        let mut independent = make_solver(SolverBackend::DirectSparseCholesky);
+        independent.factorize(&k).unwrap();
+        assert_eq!(x, independent.solve(&[0.0, 1000.0]).unwrap());
     }
 
     /// 3 自由度のバネ連成系（三重対角パターン）。行列の値だけを差し替えて

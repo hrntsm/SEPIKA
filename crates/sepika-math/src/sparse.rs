@@ -307,25 +307,11 @@ impl WeightedSumCache {
 /// 単一の CSC 行列をスカラ倍した新しい行列を返す（パターンは複製し値のみ `alpha` 倍する）。
 pub fn scale_csc(mat: &SparseColMat<usize, f64>, alpha: f64) -> SparseColMat<usize, f64> {
     let mut out = mat.clone();
-    scale_csc_into(mat, alpha, &mut out);
-    out
-}
-
-/// [`scale_csc`] のバッファ再利用版。`out` は事前に `mat` と同一パターンを持つこと。
-///
-/// # Panics
-/// `out` の非ゼロ数が `mat` と異なる場合。
-pub fn scale_csc_into(
-    mat: &SparseColMat<usize, f64>,
-    alpha: f64,
-    out: &mut SparseColMat<usize, f64>,
-) {
-    let src_len = mat.val().len();
-    let (_, dst_vals) = out.parts_mut();
-    assert_eq!(src_len, dst_vals.len(), "out のパターンが mat と一致しない");
-    for (d, &s) in dst_vals.iter_mut().zip(mat.val().iter()) {
-        *d = s * alpha;
+    let (_, values) = out.parts_mut();
+    for value in values {
+        *value *= alpha;
     }
+    out
 }
 
 #[cfg(test)]
@@ -738,9 +724,8 @@ mod tests {
         let scaled = scale_csc(&k, alpha);
         assert_dense_bit_eq(&reference, &scaled, n);
 
-        let mut out = k.clone();
-        scale_csc_into(&k, alpha, &mut out);
-        assert_dense_bit_eq(&reference, &out, n);
+        assert_eq!(scaled.symbolic().col_ptr(), k.symbolic().col_ptr());
+        assert_eq!(scaled.symbolic().row_idx(), k.symbolic().row_idx());
     }
 
     #[test]
