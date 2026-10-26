@@ -75,9 +75,3 @@ impl Default for StrengthParams {
         }
     }
 }
-
-/// コンクリートの弾性係数 [N/mm²]（RC規準式。密度を持たない経路の既定 γC=23）。
-/// `fc<=0` では 0 を返すため、数値積分では呼出側で下限を保証すること。
-pub fn concrete_young(fc: f64) -> f64 {
-    sepika_core::section_shape::concrete_young_modulus(fc.max(1.0))
-}

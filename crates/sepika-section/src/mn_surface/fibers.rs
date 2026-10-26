@@ -1,9 +1,9 @@
 //! 断面形状から全塑性計算用のファイバ/バネ配置を生成する。
 
 use sepika_core::error::RebarGeometryError;
-use sepika_core::section_shape::{one_bar_area, RebarPoint, SectionShape};
+use sepika_core::section_shape::{concrete_young_modulus, one_bar_area, RebarPoint, SectionShape};
 
-use super::types::{concrete_young, FiberRegion, PlasticFiber, StrengthParams, YieldModelKind};
+use super::types::{FiberRegion, PlasticFiber, StrengthParams, YieldModelKind};
 
 const NOMINAL_SLAB_WIDTH_MM: f64 = 1000.0;
 
@@ -580,7 +580,7 @@ pub fn plastic_fibers_at(
     let conc = FiberMat {
         sigma_t: 0.0,
         sigma_c: -fc,
-        young: concrete_young(fc),
+        young: concrete_young_modulus(fc),
         region: FiberRegion::Concrete,
     };
     let mut fibers = Vec::new();
@@ -1065,6 +1065,39 @@ mod rounded_tests {
     use super::*;
     use std::f64::consts::PI;
 
+    #[test]
+    fn concrete_fiber_young_uses_unmodified_strength() {
+        let shape = SectionShape::RcSlab { thickness: 150.0 };
+        for fc in [
+            0.5,
+            1.0,
+            24.0,
+            60.0,
+            0.0,
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let strength = StrengthParams {
+                concrete_fc: fc,
+                ..StrengthParams::default()
+            };
+            let fibers = plastic_fibers(&shape, &strength, YieldModelKind::MultiSpring).unwrap();
+            assert!(!fibers.is_empty());
+            let expected = concrete_young_modulus(fc);
+            assert!(
+                fibers
+                    .iter()
+                    .all(|fiber| fiber.region == FiberRegion::Concrete && fiber.young == expected),
+                "Fc={fc}"
+            );
+            if !fc.is_finite() || fc <= 0.0 {
+                assert_eq!(expected, 0.0);
+            }
+        }
+    }
+
     fn rounded_width(h: f64, b: f64, r: f64, z: f64) -> f64 {
         if z.abs() >= h / 2.0 {
             0.0
@@ -1335,7 +1368,7 @@ mod rounded_tests {
         let conc = FiberMat {
             sigma_t: 0.0,
             sigma_c: -24.0,
-            young: concrete_young(24.0),
+            young: concrete_young_modulus(24.0),
             region: FiberRegion::Concrete,
         };
         let ring = AnnulusRes {

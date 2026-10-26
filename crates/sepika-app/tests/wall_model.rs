@@ -74,8 +74,8 @@ use sepika_core::model::{
     LocalAxis, Material, MaterialCategory, Model, Node, RegionAnchor, RigidZone, Section,
     WallOpening, WallPlate, WallPlateShape,
 };
+use sepika_core::section_shape::{RcBeamRebar, RcRectColumnRebar, SectionShape};
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
-use sepika_section::shape::{RcBeamRebar, RcRectColumnRebar, SectionShape};
 use sepika_solver::statics::analysis::SeismicDir;
 
 #[path = "support/frame_gravity.rs"]
@@ -269,7 +269,7 @@ fn wall_bay_model() -> Model {
         x: vec![3],
         y: vec![2],
         cover: 40.0,
-        hoop: sepika_section::shape::RectColumnHoop {
+        hoop: sepika_core::section_shape::RectColumnHoop {
             dia: 10.0,
             pitch: 100.0,
             legs_x: 2,
@@ -281,7 +281,7 @@ fn wall_bay_model() -> Model {
         top: vec![3],
         bottom: vec![3],
         cover: 40.0,
-        stirrup: sepika_section::shape::BeamStirrup {
+        stirrup: sepika_core::section_shape::BeamStirrup {
             dia: 10.0,
             pitch: 100.0,
             legs: 2,
@@ -669,11 +669,11 @@ fn wall_analysis_preserves_side_column_shapes_with_long_axial_cut() {
 #[test]
 fn circular_side_column_shear_section_runs_analysis() {
     let mut app = wall_bay_app();
-    let rebar = sepika_section::shape::RcCircleColumnRebar {
+    let rebar = sepika_core::section_shape::RcCircleColumnRebar {
         main_dia: 22.0,
         count: 8,
         cover: 40.0,
-        hoop: sepika_section::shape::CircleColumnHoop {
+        hoop: sepika_core::section_shape::CircleColumnHoop {
             dia: 10.0,
             pitch: 100.0,
         },

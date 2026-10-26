@@ -8,15 +8,15 @@
 use crate::app::App;
 use sepika_core::ids::SectionId;
 use sepika_core::model::FrameSectionUse;
+use sepika_core::section_shape::{
+    BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
+    RectColumnHoop, SectionShape,
+};
 use sepika_edit::{
     AddCatalogSection, AddSectionShape, EditSectionShape, SectionField, SetSectionField,
     SetSectionName, SetSectionSurfaceRadius,
 };
 use sepika_section::catalog::CatalogShape;
-use sepika_section::shape::{
-    BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
-    RectColumnHoop, SectionShape,
-};
 
 /// 断面作成UIのドラフト状態。App に保持して UI を跨いで維持。
 #[derive(Debug, Clone)]
