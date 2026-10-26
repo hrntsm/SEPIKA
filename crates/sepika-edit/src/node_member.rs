@@ -65,6 +65,18 @@ impl EditCommand for RestoreAssignmentTopology {
         redo
     }
 
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let redo = self.inverse.apply_candidate(model);
+        self.snapshot.clone().restore(model);
+        redo
+    }
+
+    fn apply_in_transaction(&self, before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        let redo = self.inverse.apply_in_transaction(before, model);
+        self.snapshot.clone().restore(model);
+        redo
+    }
+
     fn label(&self) -> &str {
         self.inverse.label()
     }
@@ -150,18 +162,25 @@ impl EditCommand for SetNodeCoord {
 
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
-        let inverse = self.apply_candidate(&mut candidate);
+        let inverse = self.apply_in_transaction(model, &mut candidate);
+        if inverse.rejection().is_none() && !inverse.is_noop() {
+            *model = candidate;
+        }
+        inverse
+    }
+
+    fn apply_in_transaction(&self, before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        let inverse = self.apply_candidate(model);
         if inverse.is_noop() || inverse.rejection().is_some() {
             return inverse;
         }
-        if let Err(reason) = validate_coordinate_loads(model, &candidate) {
+        if let Err(reason) = validate_coordinate_loads(before, model) {
             return Box::new(RejectedEdit(reason));
         }
-        let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
         if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
             return Box::new(RejectedEdit(reason));
         }
-        *model = candidate;
         inverse
     }
 
@@ -456,13 +475,20 @@ impl EditCommand for AddMember {
 
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
-        let inverse = self.apply_candidate(&mut candidate);
+        let inverse = self.apply_in_transaction(model, &mut candidate);
         if inverse.rejection().is_none() && !inverse.is_noop() {
-            let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+            *model = candidate;
+        }
+        inverse
+    }
+
+    fn apply_in_transaction(&self, _before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        let inverse = self.apply_candidate(model);
+        if inverse.rejection().is_none() && !inverse.is_noop() {
+            let report = model.rebuild_assignment_regions_dropping_orphan_plates();
             if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
                 return Box::new(RejectedEdit(reason));
             }
-            *model = candidate;
         }
         inverse
     }
@@ -837,13 +863,20 @@ impl EditCommand for DeleteMember {
 
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
-        let inverse = self.apply_candidate(&mut candidate);
+        let inverse = self.apply_in_transaction(model, &mut candidate);
         if inverse.rejection().is_none() && !inverse.is_noop() {
-            let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+            *model = candidate;
+        }
+        inverse
+    }
+
+    fn apply_in_transaction(&self, _before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        let inverse = self.apply_candidate(model);
+        if inverse.rejection().is_none() && !inverse.is_noop() {
+            let report = model.rebuild_assignment_regions_dropping_orphan_plates();
             if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
                 return Box::new(RejectedEdit(reason));
             }
-            *model = candidate;
         }
         inverse
     }

@@ -879,3 +879,38 @@ fn 傾斜床で削除主架構に直接接しない旧境界も支持喪失二�
     undo.redo(&mut model);
     fixture::assert_inputs_eq(&model, &after);
 }
+
+#[test]
+fn 非境界編集の事前表示は検査を確定側へ委ね不正領域の編集は拒否する() {
+    let mut model = fixture::with_plate_metadata(false);
+    model
+        .floor_assignment_regions
+        .regions
+        .push(model.floor_assignment_regions.regions[0].clone());
+    let before = model.clone();
+    let command = || {
+        Box::new(SetNodeRestraint {
+            node: NodeId(0),
+            restraint: sepika_core::dof::Dof6Mask::FIXED,
+        })
+    };
+    assert!(preview_plate_assignment_loss(&model, command().as_ref())
+        .unwrap()
+        .is_empty());
+    let mut undo = UndoStack::new();
+    assert!(!undo.run_preserving_plate_assignments(&mut model, command()));
+    fixture::assert_inputs_eq(&model, &before);
+    assert_eq!(undo.revision(), 0);
+    assert!(!undo.can_undo() && !undo.can_redo());
+    assert!(undo.id_changes().is_empty());
+    assert!(undo.last_error().unwrap().starts_with("モデルは未更新: "));
+    assert!(preview_plate_assignment_loss(
+        &model,
+        &SetNodeCoord {
+            node: NodeId(0),
+            coord: [0.0, 0.0, 100.0],
+        }
+    )
+    .unwrap_err()
+    .starts_with("モデル・履歴は未更新: "));
+}
