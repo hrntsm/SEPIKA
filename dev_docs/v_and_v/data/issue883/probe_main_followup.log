@@ -1,0 +1,49 @@
+   Compiling sepika-element v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-883\crates\sepika-element)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.51s
+     Running tests\source883_probe.rs (target\debug\deps\source883_probe-76ef5d0cfc6516ed.exe)
+
+running 6 tests
+beam Mu=324000000 Nmm Qmu=108000 N; Mc(N=0,supplied Ze18000000)=50400000 Nmm
+column N=-1600001 N Mu=0 Nmm expected=0
+column N=-1600000 N Mu=0 Nmm expected=0
+member sigma0=-1 and 0 MPa both Qsu=285101.3796229174 N; applying signed 0.1sigma0 term would subtract 15750 N (not a validated tensile formula)
+column N=-800000 N Mu=160000000 Nmm expected=160000000
+column N=-1 N Mu=319999800 Nmm expected=319999800
+column N=0 N Mu=320000000 Nmm expected=320000000
+column N=1 N Mu=320000249.99995 Nmm expected=320000249.99995
+column N=1000000 N Mu=520000000 Nmm expected=520000000
+column N=1999999 N Mu=619999949.9999499 Nmm expected=619999949.99995
+column N=2000000 N Mu=620000000 Nmm expected=620000000
+column N=2000001 N Mu=619999865.2173913 Nmm expected=619999865.2173913
+wall ArakawaMin horizontal=0 Qu=1494374.9999999998 N expected=1494375
+wall ArakawaMin lambda=0.5 Qu=2089374.9999999998 N expected=2089375
+wall ArakawaMin lambda=1 Qu=2089374.9999999998 N expected=2089375
+wall ArakawaMin lambda=3 Qu=1176314.1025641025 N expected=1176314.1025641025
+wall ArakawaMin lambda=4 Qu=1176314.1025641025 N expected=1176314.1025641025
+wall ArakawaMean lambda=0.5 Qu=2599044.208388216 N expected=2599044.208388216
+column N=4300000 N Mu=310000000 Nmm expected=310000000
+column N=6600000 N Mu=0 Nmm expected=0
+column N=6600001 N Mu=0 Nmm expected=0
+test source883_beam_moment_and_zero_axial_cracking ... public element ArakawaMin: horizontal=.012 vertical=.002 Qu=[2881619.4568420458, 2881619.4568420458] N; source-limited horizontal=.004 Qu=[2145279.1775840833, 2145279.1775840833] N; excess=736340.279257963 N
+wall ArakawaMin horizontal=0.012 Qu=2524945.230503482 N expected=2524945.230503482
+wall ArakawaMin horizontal=0.02 Qu=2524945.230503482 N expected=2524945.230503482
+wall ArakawaMean horizontal=0 Qu=2004044.2083882159 N expected=2004044.208388216
+wall ArakawaMean horizontal=0.012 Qu=3034614.4388916977 N expected=3034614.4388916977
+wall ArakawaMean horizontal=0.02 Qu=3034614.4388916977 N expected=3034614.4388916977
+ok
+wall ArakawaMean lambda=1 Qu=2599044.208388216 N expected=2599044.208388216
+wall ArakawaMean lambda=3 Qu=1823772.3167435795 N expected=1823772.3167435792
+wall ArakawaMean lambda=4 Qu=1823772.3167435795 N expected=1823772.3167435792
+core wall sigma0=-1 MPa Qu=2019375 N (current behavior, not source endorsement)
+core wall sigma0=0 MPa Qu=2019375 N (current behavior, not source endorsement)
+core wall sigma0=10 MPa Qu=2719375 N (current behavior, not source endorsement)
+core wall sigma0=11 MPa Qu=2719375 N (current behavior, not source endorsement)
+test source883_tensile_member_axial_stress_is_zeroed ... ok
+test source883_column_all_branches_and_one_newton_boundaries ... ok
+public element ArakawaMean: horizontal=.012 vertical=.002 Qu=[3602890.799525881, 3602890.799525881] N; source-limited horizontal=.004 Qu=[2866550.5202679187, 2866550.5202679187] N; excess=736340.279257963 N
+test source883_wall_methods_and_source_span_limits ... ok
+test source883_wall_horizontal_and_axial_caps_are_current_behavior ... ok
+test source883_public_wall_exceeds_vertical_reinforcement_limit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
