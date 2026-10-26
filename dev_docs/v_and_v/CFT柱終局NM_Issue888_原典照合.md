@@ -83,7 +83,7 @@ Remove-Item -LiteralPath crates/sepika-design-jp/examples/issue888_probe.rs
 [#440](https://github.com/hrntsm/SEPIKA/issues/440)・[#418](https://github.com/hrntsm/SEPIKA/issues/418)は2026-10-11 CLOSED/NOT_PLANNED。#440閉鎖をSRC/CFT終局全面実装完了と読まず、#418未対応を現役開発予定としない。再開・重複機能要求は行わない。
 #767/#766の完了成果、#887の材料許容調査と#916、#723のパネル調査も維持する。
 
-追跡は#697の既存横断枠へ、①円形引張係数の採用根拠、②短/中/長Mu接続の規準適否、③拘束割増・別原典と法定除外の資格未判定を追加する。
+追跡は[#697の追補](https://github.com/hrntsm/SEPIKA/issues/697#issuecomment-6424353485)で、①円形引張係数の採用根拠、②短/中/長Mu接続の規準適否、③拘束割増・別原典と法定除外の資格未判定を継続する。
 今回の閲覧節に式がないだけでは修正Issueを作らない。新しい計算近似・安全側判断・不足入力補完は採用しない。
 実験・実測Validation、専門家サインオフ、手動GUI、支持条件・二軸連成全域、長方形の面外/横座屈は未確認。
 
@@ -103,3 +103,25 @@ Remove-Item -LiteralPath crates/sepika-design-jp/examples/issue888_probe.rs
 開発文書の相対リンク・見出しも確認する。全クレート回帰、最終head CI・独立レビューは公開PRを正本とする。
 
 先行PR #917のmerge後、`440654c7`へrebaseして#887の索引3点と記録・データを保持した。コード3ファイルと本probeがrebase前と同一であることを差分確認した。相対リンク・見出しアンカー9件（#887記録への参照を含む）を確認し、check-docs（124/659/706）、mdbook build、base差分のdiff-checkを再実行して成功した。
+
+## PR #918のfeature CI失敗と観測契約の訂正
+
+初回CI run `40379561053` のMCP/GUI/Parquet featureジョブ `121771795901` は、App 982成功・1失敗だった。
+`cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason`が、終局Mu未算定の理由に終了済みIssue番号`#418`を要求していたため失敗した。
+保存ログは`tmp/issue888/ci-feature-failed.log`。初回CI失敗を、修正後ローカル実行や最終head CI成功と混同しない。
+
+横断検索でMCPの終局JSON理由にも同じ依存を確認し、AppとMCPの2箇所だけを「角Rが正の終局 N–M は未対応」という利用者が観測する理由のassertへ訂正した。
+MCPのMu=null、理由あり、軸結果保持、全算定・全適合=falseのassertは維持する。
+残る許容曲げ・QD1/minの`#418`メッセージとそのassertは、今回訂正した終局理由のconsumerではないため変更しない。
+計算式・ゲート・原典照合の結論・固定数値期待値は変更しない。
+
+修正後、CIと同じpackage・feature集合でCFT関連だけをローカル再実行した。
+
+```powershell
+cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked cft --lib
+```
+
+結果はexit0、App19・io5・MCP5の計29試験成功。失敗したApp試験とMCPの`rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass`を含む。
+初回feature buildは9分59秒。ログ・exitは`tmp/issue888/feature-cft-final.*`に保持する。
+`cargo run -p xtask -- check-docs`（124/659/706）、`mdbook build`、`cargo fmt --all -- --check`、`git diff --check`も成功。
+これはCFT関連のfocused再検証であり、初回CIのApp全983件や全feature集合の再成功、最終head CI、手動GUI・外部MCP transport・Validationの実施とは扱わない。
