@@ -83,7 +83,7 @@ mod tests {
                         vec![]
                     },
                 };
-                let response = lumped_mass_time_history(&lm, &acceleration, 1.0, 0.0);
+                let response = lumped_mass_time_history(&lm, &acceleration, 1.0, 0.0).unwrap();
                 assert_eq!(response.non_converged_steps, 0);
                 assert_eq!(response.roof_disp.len(), 4);
                 for (got, expected) in response.roof_disp.iter().zip([0.0, -0.03, -0.03, -0.04]) {
@@ -136,7 +136,7 @@ mod tests {
                     (vec![100.0], vec![0.0]),
                     (vec![0.0, 0.0], vec![0.0, 0.0]),
                 ] {
-                    let result = lumped_mass_time_history(&lm, &input, 0.1, 0.0);
+                    let result = lumped_mass_time_history(&lm, &input, 0.1, 0.0).unwrap();
                     assert_eq!(result.time.len(), input.len());
                     assert_eq!(result.non_converged_steps, 0);
                     for (i, &u) in expected.iter().enumerate() {
@@ -149,7 +149,10 @@ mod tests {
                         assert!((result.floor_disp[i][0][d] - u).abs() <= 1e-9);
                     }
                 }
-                assert!(lumped_mass_time_history(&lm, &[], 0.1, 0.0).time.is_empty());
+                assert!(lumped_mass_time_history(&lm, &[], 0.1, 0.0)
+                    .unwrap()
+                    .time
+                    .is_empty());
             }
         }
     }
@@ -798,7 +801,7 @@ mod tests {
             spatial: Vec::new(),
             stories: vec![stick(1.0, 1000.0, 0.1, 0.3, 140.0, 1.0, 160.0)],
         };
-        let res = lumped_mass_time_history(&lm, &vec![0.0; 200], 0.01, 0.02);
+        let res = lumped_mass_time_history(&lm, &vec![0.0; 200], 0.01, 0.02).unwrap();
         assert!(res.roof_disp.iter().all(|&v| v.abs() < 1e-9));
         assert_eq!(res.story_ductility[0], 0.0);
     }
@@ -823,7 +826,7 @@ mod tests {
         let accel: Vec<f64> = (0..300)
             .map(|i| 2000.0 * (2.0 * std::f64::consts::PI * 1.5 * i as f64 * dt).sin())
             .collect();
-        let res = lumped_mass_time_history(&lm, &accel, dt, 0.03);
+        let res = lumped_mass_time_history(&lm, &accel, dt, 0.03).unwrap();
         assert_eq!(res.time.len(), 300);
         assert!(res.roof_disp.iter().all(|v| v.is_finite()));
         assert!(
@@ -862,7 +865,7 @@ mod tests {
                 3000.0 * (2.0 * std::f64::consts::PI * 0.8 * t).sin()
             })
             .collect();
-        let res = lumped_mass_time_history(&lm, &accel, dt, 0.02);
+        let res = lumped_mass_time_history(&lm, &accel, dt, 0.02).unwrap();
         assert!(res.roof_disp.iter().all(|v| v.is_finite()));
         assert!(
             res.story_ductility[0] > 1.0,

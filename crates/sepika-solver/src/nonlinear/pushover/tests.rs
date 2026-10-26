@@ -3053,6 +3053,10 @@ fn test_pushover_long_term_preload_sets_initial_axial_state() {
         p
     );
 
+    let response = &result.member_response[0];
+    assert!(response.m_strong.max(response.m_weak) > 1.0);
+    assert!(response.m_strong.is_finite() && response.m_weak.is_finite());
+
     // 長期荷重を無効にした場合は λ=0 の記録はない。
     let model2 = single_column_model(235.0, 80_000.0);
     let dofmap2 = DofMap::build(&model2);

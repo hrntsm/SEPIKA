@@ -419,6 +419,11 @@ pub fn bending_shear_time_history(
     dt: f64,
     damping: f64,
 ) -> Result<StickResponse, SolveError> {
+    if lm.model_type != super::model::LumpedMassType::EquivalentBendingShear {
+        return Err(invalid(
+            "曲げせん断時刻歴には曲げせん断型の質点系を指定してください",
+        ));
+    }
     let mass = mass(lm)?;
     let ns = stride(lm);
     let n = lm.stories.len();
@@ -610,6 +615,36 @@ mod tests {
     }
     fn near(a: f64, b: f64) {
         assert!((a - b).abs() < 1e-9 * b.abs().max(1.0), "{a} != {b}");
+    }
+
+    #[test]
+    fn time_history_entries_reject_wrong_model_and_keep_invalid_input_reason() {
+        for spatial in [false, true] {
+            let mut lm = model(spatial);
+            let error =
+                crate::dynamic::lumped_mass::lumped_mass_time_history(&lm, &[0., 1.], 0.01, 0.02)
+                    .unwrap_err()
+                    .to_string();
+            assert!(error.contains("せん断型時刻歴"), "{error}");
+            lm.model_type = LumpedMassType::EquivalentShear;
+            let error = bending_shear_time_history(&lm, &[0., 1.], 0.01, 0.02)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("曲げせん断型"), "{error}");
+            lm.model_type = LumpedMassType::EquivalentBendingShear;
+            lm.stories[0].mass = f64::NAN;
+            let error = bending_shear_time_history(&lm, &[0., 1.], 0.01, 0.02)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("質量"), "{error}");
+            lm.stories[0].mass = 2.;
+            lm.bending.clear();
+            let error = bending_shear_time_history(&lm, &[0., 1.], 0.01, 0.02)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("不足"), "{error}");
+        }
+        assert!(serde_json::from_str::<LumpedMassType>(r#""BendingShearSeparated""#).is_err());
     }
 
     #[test]

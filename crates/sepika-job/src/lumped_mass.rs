@@ -44,11 +44,6 @@ pub fn build_lumped_mass(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassM
     if inp.model_type == LumpedMassType::EquivalentBendingShear {
         return bending::build(inp);
     }
-    if inp.model_type != LumpedMassType::EquivalentShear {
-        return Err(JobError::InvalidInput(
-            "曲げせん断分離型は使用できません".into(),
-        ));
-    }
     match inp.dim {
         StickDim::Planar => build_planar(inp),
         StickDim::Spatial => build_spatial(inp),
