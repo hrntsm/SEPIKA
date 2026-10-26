@@ -563,7 +563,7 @@ fn visualization(ui: &mut egui::Ui, app: &mut App) {
     );
 
     let mut cam = app.ui.scoped.mn_view.camera.clone();
-    cam.apply_pointer_input(ui, &response, true);
+    cam.apply_pointer_input(ui, &response, true, true);
 
     draw_3d(ui, &rect, &cam, cache, show, n_target);
     app.ui.scoped.mn_view.camera = cam;
@@ -774,6 +774,56 @@ fn plot_m_theta_line(plot_ui: &mut egui_plot::PlotUi<'_>, pts: &[[f64; 2]], kind
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mn_visualization_zoom_keeps_the_point_and_other_cameras() {
+        let mut app = App::default();
+        app.core.model = crate::sample::portal_frame();
+        app.core.model.sections[0].shape = Some(rc_rect(400.0, 600.0));
+        app.ui.scoped.mn_view.camera.pan = [23.0, -17.0];
+        let model_camera = app.ui.view.camera.clone();
+        let ctx = egui::Context::default();
+        let point = [0.8, -0.4, 0.3];
+        let mut pointer = egui::Pos2::ZERO;
+        for step in 0..4 {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 700.0),
+                    )),
+                    events: if step == 3 {
+                        vec![egui::Event::PointerMoved(pointer), egui::Event::Zoom(1.5)]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                },
+                |ui| {
+                    let rect = egui::Rect::from_min_size(
+                        ui.cursor().min,
+                        egui::vec2(
+                            ui.available_width(),
+                            (ui.available_height() * 0.6).max(80.0),
+                        ),
+                    );
+                    if step < 3 {
+                        pointer = mn_draw::MnView::new(&rect, &app.ui.scoped.mn_view.camera)
+                            .project(point);
+                    }
+                    visualization(ui, &mut app);
+                    if step == 3 {
+                        let after = mn_draw::MnView::new(&rect, &app.ui.scoped.mn_view.camera)
+                            .project(point);
+                        assert!(after.distance(pointer) < 0.0001, "{pointer:?} -> {after:?}");
+                    }
+                },
+            );
+        }
+        assert_eq!(app.ui.scoped.mn_view.camera.zoom, 4.5);
+        assert_eq!(app.ui.view.camera.zoom, model_camera.zoom);
+        assert_eq!(app.ui.view.camera.pan, model_camera.pan);
+    }
 
     fn rc_rect(b: f64, d: f64) -> SectionShape {
         use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
