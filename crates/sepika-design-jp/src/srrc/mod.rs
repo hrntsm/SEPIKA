@@ -347,24 +347,23 @@ impl DesignCheck for SrcDesign {
                     .to_string(),
             };
         };
-        let steel_grade = steel_mat.name.as_str();
-        let thickness = match shape {
-            SectionShape::SrcBeamRect {
-                steel_web_thick,
-                steel_flange_thick,
-                ..
+        let f_value = match crate::material_strength::section_steel_f(sec, Some(steel_mat)) {
+            Ok(f_value) => f_value,
+            Err(reason) => {
+                return CheckOutcome::Skipped {
+                    reason: format!("SRC検定: {reason}"),
+                }
             }
-            | SectionShape::SrcColumnRect {
-                steel_web_thick,
-                steel_flange_thick,
-                ..
-            } => steel_web_thick.max(*steel_flange_thick),
-            _ => unreachable!(),
         };
-        if let Some(reason) =
-            sepika_core::material_grade::steel_f_value_issue(steel_grade, thickness)
+        if sepika_core::material_grade::steel_f_value_prefix(
+            &steel_mat.name,
+            crate::material_strength::plate_thickness(sec),
+        )
+        .is_none()
         {
-            return CheckOutcome::Skipped { reason };
+            return CheckOutcome::Skipped {
+                reason: format!("SRC検定: 内蔵鉄骨「{}」は対応する鋼材名ではなく、直接入力強度のSRC規準への適用根拠が未確定です", steel_mat.name),
+            };
         }
 
         let cr = match shape {
@@ -420,7 +419,7 @@ impl DesignCheck for SrcDesign {
                     *steel_width,
                     *steel_web_thick,
                     *steel_flange_thick,
-                    steel_grade,
+                    f_value,
                     fc_raw,
                 )
             }
@@ -469,7 +468,7 @@ impl DesignCheck for SrcDesign {
                     *steel_width,
                     *steel_web_thick,
                     *steel_flange_thick,
-                    steel_grade,
+                    f_value,
                     fc_raw,
                 )
             }
