@@ -212,3 +212,157 @@ fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck
         std::fs::remove_file(path).unwrap();
     }
 }
+
+fn assert_src912_skipped(app: &App) {
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let bundle = app.current_design_results().expect("理由付き現行検定");
+    assert_eq!(bundle.member_checks.len(), 1);
+    assert!(!bundle.member_checks[0].positions.is_empty());
+    assert!(bundle.member_checks[0].positions.iter().all(|p|
+        matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用根拠が未確定"))));
+    assert!(!crate::summary::build_report_csv(app).contains(",OK,"));
+}
+
+#[test]
+fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips() {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::model::FrameSectionUse;
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    use sepika_edit::{MaterialField, SetMaterialField, SetMaterialName};
+
+    for column in [false, true] {
+        for fy in [100.0, 235.0, 345.0] {
+            let mut app = app(false, QdMethod::Qd1);
+            if column {
+                let old = app.core.model.sections[0].clone();
+                let mut sec = SectionShape::SrcColumnRect {
+                    b: 500.0,
+                    d: 700.0,
+                    rebar: RcRectColumnRebar {
+                        main_dia: 22.0,
+                        x: vec![3],
+                        y: vec![3],
+                        cover: 40.0,
+                        hoop: RectColumnHoop {
+                            dia: 10.0,
+                            pitch: 100.0,
+                            legs_x: 2,
+                            legs_y: 2,
+                        },
+                    },
+                    steel_height: 500.0,
+                    steel_width: 200.0,
+                    steel_web_thick: 9.0,
+                    steel_flange_thick: 14.0,
+                }
+                .to_section(SectionId(0), "SRC柱912".into());
+                sec.material = old.material;
+                sec.steel_material = old.steel_material;
+                sec.rebar_material = old.rebar_material;
+                sec.shear_rebar_material = old.shear_rebar_material;
+                sec.frame_use = Some(FrameSectionUse::Column);
+                app.core.model.sections[0] = sec;
+                app.core.model.nodes[1].coord = [0.0, 0.0, 6000.0];
+                app.core.model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
+                app.core.model.stories = super::tests::explicit_story_inputs(&[0.0, 6000.0]);
+            }
+            app.run_combination(0);
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            assert!(app.current_design_results().unwrap().member_checks[0]
+                .positions
+                .iter()
+                .all(|p| matches!(&p.outcome, CheckOutcome::Checked(_))));
+            let old_f235_checks = app.current_design_results().unwrap().member_checks.clone();
+            assert!(app.core.scoped.undo.run(
+                &mut app.core.model,
+                Box::new(SetMaterialName {
+                    id: MaterialId(2),
+                    name: "直接入力鋼材912".into(),
+                })
+            ));
+            assert!(
+                app.core.scoped.undo.run(
+                    &mut app.core.model,
+                    Box::new(SetMaterialField {
+                        id: MaterialId(2),
+                        field: MaterialField::Fy,
+                        value: Some(fy),
+                    })
+                ) || fy == 235.0
+            );
+            app.core.scoped.staleness.mark_edited();
+            app.sync_auto_load_cases_action();
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            app.run_combination(0);
+            app.run_design_check();
+            assert_src912_skipped(&app);
+            let original = app.current_design_results().unwrap().clone();
+            let checks = bytes(&original.member_checks);
+            for version in [
+                Some(DESIGN_CONTRACT_VERSION),
+                Some(DESIGN_CONTRACT_VERSION - 1),
+            ] {
+                app.core.scoped.results.as_mut().unwrap().member_checks =
+                    if version == Some(DESIGN_CONTRACT_VERSION) {
+                        original.member_checks.clone()
+                    } else {
+                        old_f235_checks.clone()
+                    };
+                let (mut loaded, path) = super::result_contract_tests::restore(
+                    &app,
+                    Some(ANALYSIS_CONTRACT_VERSION),
+                    version,
+                    &format!("src912-{column}-{fy}-{version:?}"),
+                );
+                assert!(loaded.require_selected_static_input().is_ok());
+                assert_eq!(
+                    loaded.core.scoped.results.as_ref().unwrap().member_forces,
+                    original.member_forces
+                );
+                if version == Some(DESIGN_CONTRACT_VERSION) {
+                    assert_src912_skipped(&loaded);
+                } else {
+                    assert!(loaded.current_design_results().is_none());
+                    assert!(loaded
+                        .core
+                        .scoped
+                        .results
+                        .as_ref()
+                        .unwrap()
+                        .member_checks
+                        .is_empty());
+                    loaded.run_design_check();
+                    assert_src912_skipped(&loaded);
+                }
+                assert_eq!(
+                    bytes(&loaded.current_design_results().unwrap().member_checks),
+                    checks
+                );
+                loaded.save_project_to(path.clone());
+                assert!(loaded.core.scoped.last_error.is_none());
+                let mut reopened = App::default();
+                reopened.open_project_from(path.clone());
+                assert_src912_skipped(&reopened);
+                assert_eq!(reopened.core.model.materials[2].name, "直接入力鋼材912");
+                assert_eq!(reopened.core.model.materials[2].fy, Some(fy));
+                assert_eq!(
+                    bytes(&reopened.current_design_results().unwrap().member_checks),
+                    checks
+                );
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
+}

@@ -9,6 +9,10 @@
 長期コンクリートせん断は[修正#922](https://github.com/hrntsm/SEPIKA/issues/922)、長期付着は[修正#923](https://github.com/hrntsm/SEPIKA/issues/923)で追跡する。鋼材圧縮#924はユーザー承認により[ADR0084](../adr/0084-steel-compression-material-e.md)の共通適用方針を確定し、判断待ちから外した。
 別原典が必要な項目と既存#489の見送りは維持する。#720の公布原文不足は、今回のユーザー指定による原典受理と区別する。
 
+## SRC内蔵鉄骨の材料解決（#912）
+
+[材料境界・独立耐力・App保存経路の記録](SRC内蔵鉄骨材料_Issue912_確認記録.md)を参照。未知名のF235補完を撤去し、適用根拠未確定の直接入力は理由付き未算定とする。既知表の実板厚・梁柱耐力境界と旧検定失効をVerificationする。新材料適用・全原典適合・Validation・手動GUIは未確認で状態🔶。
+
 ## Fes通常式・ただし書の公的原文照合（#720）
 
 [今回の追補照合](原典照合リスト_2025年版追補_20261027.md)では、ユーザー指定により2025年第2版第1刷の収録告示を原典として受理し、通常式・境界・上限・ただし書の条件説明に相違がないことを確認した。
@@ -25,7 +29,7 @@
 指定版p699/704と建築研究資料197号の限定原画像確認で引張ゼロ化の安全根拠は確認できなかった。
 公開pushoverの18run/1818確定点で、引張−240kNと軸力0の同イベント境界、圧縮+240kNの境界上昇とQ/N/M釣合いをVerificationした。
 短柱の範囲外診断と反曲点中央に対応する柱の追試を分け、引張への符号付き外挿・実験Validation・設計適用承認は未確認。
-状態🔶、#697 OPENを維持。具体修正#901/#910/#912/#916の未実装と、#849廃止参考骨格の一覧陳腐化を区別する。
+状態🔶、#697 OPENを維持。具体修正#901/#910/#916の未実装と#912の材料解決是正と、#849廃止参考骨格の一覧陳腐化を区別する。
 
 ## CFT適用・材料・許容耐力の重点照合（#887）
 
@@ -41,11 +45,11 @@
 
 ## SRC部材の靭性・終局耐力・仕口パネル（#886）
 
-[原画像・独立値・公開入口対応](SRC靭性終局仕口_Issue886_原典照合.md)は2025年第2版第1刷の付録1-4.1 pp.758–759、1-4.2 pp.764–768/770を有限照合する。状態は🔶。原典終局式の算術、現行rank比4点・許容パネル境界12点・SRC終局collector除外1点のVerificationを分離する。終局せん断累加/格子・ラチス/終局パネルは未対応。付録のN0/M0とrank用の同名値は異義で、柱軸力分担・端部条件との採用関係、引張ゼロ化・強軸比、許容パネルの根拠は#697で継続する。未知F235は#912、必須細則・未評価成分とSRC表不在は#697、#489/#745の閉鎖を維持する。#671/#552を再検証済みとせず、専門家サインオフ・実験Validation・手動GUIは未確認。
+[原画像・独立値・公開入口対応](SRC靭性終局仕口_Issue886_原典照合.md)は2025年第2版第1刷の付録1-4.1 pp.758–759、1-4.2 pp.764–768/770を有限照合する。状態は🔶。原典終局式の算術、現行rank比4点・許容パネル境界12点・SRC終局collector除外1点のVerificationを分離する。終局せん断累加/格子・ラチス/終局パネルは未対応。付録のN0/M0とrank用の同名値は異義で、柱軸力分担・端部条件との採用関係、引張ゼロ化・強軸比、許容パネルの根拠は#697で継続する。未知F235の是正は[#912確認記録](SRC内蔵鉄骨材料_Issue912_確認記録.md)、必須細則・未評価成分とSRC表不在は#697、#489/#745の閉鎖を維持する。#671/#552を再検証済みとせず、専門家サインオフ・実験Validation・手動GUIは未確認。
 
 ## SRC構造細則・一次設計の重点照合（#884）
 
-[原典対応と独立数値・要素証拠索引](SRC構造細則一次設計_Issue884_原典照合.md)に2025年第2版第1刷の3.8 pp.226–228、6.1 pp.337–339、9.2 p.566、9.3 p.584を対応づけた。法定鉄骨かぶり・準用全条件の自動判定なし、梁N/My/Qzの未評価を明記し、未評価を適合と誤読した場合の危険側可能性は#697で継続する。未知鋼材のF235補完による低強度材の耐力過大疑いは[修正#912](https://github.com/hrntsm/SEPIKA/issues/912)へ接続する。換算・累加/分担式は閲覧節では照合不可で別原典を要し、#434の有限Verificationと分離する。#745はnot_planned閉で共通化実装済みとはしない。#879/#881の共通材料成果を参照し、#885/#886・CFTは対象外。全原典・専門家サインオフ・実験Validationは未確認で状態は🔶。
+[原典対応と独立数値・要素証拠索引](SRC構造細則一次設計_Issue884_原典照合.md)に2025年第2版第1刷の3.8 pp.226–228、6.1 pp.337–339、9.2 p.566、9.3 p.584を対応づけた。法定鉄骨かぶり・準用全条件の自動判定なし、梁N/My/Qzの未評価を明記し、未評価を適合と誤読した場合の危険側可能性は#697で継続する。未知鋼材のF235補完は[#912で是正](SRC内蔵鉄骨材料_Issue912_確認記録.md)し、未知名は理由付き未算定とする。換算・累加/分担式は閲覧節では照合不可で別原典を要し、#434の有限Verificationと分離する。#745はnot_planned閉で共通化実装済みとはしない。#879/#881の共通材料成果を参照し、#885/#886・CFTは対象外。全原典・専門家サインオフ・実験Validationは未確認で状態は🔶。
 
 ## RC部材・耐震壁の重点原典照合（#883）
 
@@ -565,6 +569,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 26a | 梁型枠の床接触控除 | sepika-design-jp / sepika-app / sepika-mcp | quantity/contact.rs・tests.rs、tests/beam_contact_quantity.rs | [Issue451検証](梁型枠接触和集合_Issue451_2026-10.md)の独立期待値・診断・実入口対応表 | 横断 | 🔶（限定Verification、一般形状・実施工未検証） |
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
+| 912 | SRC梁柱の内蔵鉄骨材料解決 | sepika-design-jp / sepika-app | srrc/{mod,beam,column,tests}.rs、app/src_ql_acceptance_tests.rs | [独立耐力・境界と保存経路](SRC内蔵鉄骨材料_Issue912_確認記録.md#要素から製品経路への証拠索引) | 一次設計・入出力 | 🔶（材料契約Verification、全規準・Validation未） |
 | 885 | SRC耐震ルート・柱区分とDs適用 | sepika-design-jp / sepika-app | secondary/src_rank.rs・ds_group.rs、actions/design/holding.rs | [原典セル・独立境界・公開probe索引](SRC耐震ルート_Issue885_原典照合.md#独立数値境界と要素証拠索引) | 二次設計 | 🔶（分類Verification、SRC表選択・適用条件未対応、Validation未） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
