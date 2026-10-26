@@ -271,7 +271,7 @@ fn previous_and_future_checkpoint_versions_leave_all_states_unchanged() {
     let mut behaviors = build_behaviors(&model, 2);
     prepare_trial(&mut behaviors, &ctx);
     let dir = crate::test_util::test_tmp().join("cp_preserved_versions");
-    for version in [1, 2, CHECKPOINT_SCHEMA_VERSION + 1] {
+    for version in [1, 2, 3, CHECKPOINT_SCHEMA_VERSION + 1] {
         let mut cp = make_checkpoint(&compute_model_hash(&model), 2);
         cp.schema_version = version;
         cp.state.element_states = behaviors.iter().map(|b| b.serialize_checkpoint()).collect();

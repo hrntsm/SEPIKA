@@ -21,7 +21,6 @@ pub struct TsujiYamada {
 
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 struct TyState {
-    strain: f64,
     stress: f64,
     tangent: f64,
     /// 塑性変形 dp。
@@ -67,7 +66,6 @@ impl TsujiYamada {
         let f = (q_tr - c.alpha).abs() - r;
         if f <= 0.0 {
             TyState {
-                strain,
                 stress: q_tr,
                 tangent: self.k1,
                 ..c
@@ -81,7 +79,6 @@ impl TsujiYamada {
             let stress = self.k1 * (strain - dp_new);
             let tangent = self.k1 * h / (self.k1 + h);
             TyState {
-                strain,
                 stress,
                 tangent,
                 dp: dp_new,

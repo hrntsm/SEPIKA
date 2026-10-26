@@ -12,24 +12,27 @@ const ELASTIC_DUMMY_FY: f64 = 1e18;
 pub struct Bilinear {
     pub e: f64,
     pub fy: f64,
+    /// 硬化率（0以上1未満）。範囲外では trial/probe が panic する。
     pub hardening: f64,
     committed: BilinearState,
     trial: BilinearState,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 struct BilinearState {
-    strain: f64,
     stress: f64,
     tangent: f64,
     plastic_strain: f64,
 }
 
 impl Bilinear {
+    /// 硬化率は0以上1未満。範囲外（非有限値を含む）では panic する。
     pub fn new(e: f64, fy: f64, hardening: f64) -> Self {
+        assert!(
+            (0.0..1.0).contains(&hardening),
+            "硬化率は0以上1未満であること"
+        );
         let init = BilinearState {
-            strain: 0.0,
             stress: 0.0,
             tangent: e,
             plastic_strain: 0.0,
@@ -45,11 +48,11 @@ impl Bilinear {
 
     /// 1D 線形 kinematic hardening の塑性係数 Hp。
     fn hp(&self) -> f64 {
-        if self.hardening >= 1.0 {
-            f64::INFINITY
-        } else {
-            self.hardening * self.e / (1.0 - self.hardening)
-        }
+        assert!(
+            (0.0..1.0).contains(&self.hardening),
+            "硬化率は0以上1未満であること"
+        );
+        self.hardening * self.e / (1.0 - self.hardening)
     }
 
     /// 塑性ひずみ ep と strain から状態を評価する。
@@ -60,7 +63,6 @@ impl Bilinear {
         let f_tr = (sigma_tr - alpha).abs() - self.fy;
         if f_tr <= 0.0 {
             BilinearState {
-                strain,
                 stress: sigma_tr,
                 tangent: self.e,
                 plastic_strain: ep,
@@ -70,13 +72,8 @@ impl Bilinear {
             let dep = f_tr / (self.e + hp);
             let ep_new = ep + sgn * dep;
             let stress = self.e * (strain - ep_new);
-            let tangent = if hp.is_infinite() {
-                0.0
-            } else {
-                self.e * hp / (self.e + hp)
-            };
+            let tangent = self.e * hp / (self.e + hp);
             BilinearState {
-                strain,
                 stress,
                 tangent,
                 plastic_strain: ep_new,
