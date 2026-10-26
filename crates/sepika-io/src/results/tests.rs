@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn parquet_compressed_results_preserve_values_and_column_projection() {
+    use parquet::arrow::ArrowWriter;
+    use parquet::basic::Compression;
+    use parquet::file::properties::WriterProperties;
+
+    let dir = tempfile::tempdir().unwrap();
+    let batch = nodal_disp_batch(
+        &[7, 42],
+        &[
+            [1.25, -2.5, 0.0, 0.125, -0.25, 0.5],
+            [-3.75, 4.5, 8.0, -0.625, 0.75, -1.0],
+        ],
+    )
+    .unwrap();
+
+    for compression in [
+        Compression::UNCOMPRESSED,
+        Compression::SNAPPY,
+        Compression::GZIP(Default::default()),
+        Compression::BROTLI(Default::default()),
+        Compression::LZ4_RAW,
+        Compression::ZSTD(Default::default()),
+    ] {
+        let path = dir.path().join(format!("{compression:?}.parquet"));
+        let path_str = path.to_str().unwrap();
+        let props = WriterProperties::builder()
+            .set_compression(compression)
+            .build();
+        let mut writer = ArrowWriter::try_new(
+            std::fs::File::create(&path).unwrap(),
+            batch.schema(),
+            Some(props),
+        )
+        .unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        assert_eq!(read_all(path_str).unwrap(), vec![batch.clone()]);
+        assert_eq!(
+            read_partial(path_str, vec![0, 2, 6]).unwrap(),
+            vec![batch.project(&[0, 2, 6]).unwrap()]
+        );
+    }
+}
+
+#[test]
 fn test_parquet_roundtrip_basic_schemas() {
     let dir = crate::test_util::test_tmp();
 
