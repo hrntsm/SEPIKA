@@ -1,0 +1,133 @@
+2026-10-27 Issue910 ローカル検証
+CARGO_TARGET_DIR=C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target
+rustc 1.99.1 / clippy 0.1.99
+
+実行コマンド:
+gh issue view 910 --repo hrntsm/SEPIKA
+rustup update stable
+cargo clippy --version
+python dev_docs/v_and_v/data/issue910/independent_decimal.py
+cargo test -p sepika-core -p sepika-element -p sepika-design-jp --lib --locked (初回旧期待値1件失敗、修正済み)
+cargo test -p sepika-core -p sepika-element -p sepika-design-jp -p sepika-solver --lib --locked (追加期待値1件失敗後に再成功)
+cargo test -p sepika-core -p sepika-element -p sepika-design-jp -p sepika-solver --locked
+cargo fmt --all
+cargo fmt --all -- --check
+cargo clippy -p sepika-core -p sepika-element -p sepika-design-jp -p sepika-solver --all-targets --locked -- -D warnings (過剰桁1件修正、再成功)
+cargo run -p xtask -- check-docs
+mdbook build
+Pythonによる変更dev文書4件のローカルリンク・追加参照アンカー検証
+git diff --check
+
+成功結果（ツール出力抜粋）:
+
+tests-final.log
+    Finished `test` profile [optimized + debuginfo] target(s) in 12.40s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_core-f079367c1fe62d0c.exe)
+test rc_wall_capacity::tests::vertical_limit_and_one_point_two_percent_intersection_match_independent_values ... ok
+test result: ok. 605 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.22s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_design_jp-d5e289316a1ceb69.exe)
+test joint_wiring::tests::reference_skeleton_report_caps_horizontal_rebar_and_diagnoses_missing_vertical_input ... ok
+test rc::wall_nonlinear::tests::vertical_limit_prevents_overstated_reference_skeleton ... ok
+test result: ok. 651 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_element-46dc2fdddc12c8ce.exe)
+test wall::wall_element::wall_method_tests::both_side_columns_require_vertical_ratio_and_limit_horizontal_contribution ... ok
+test result: ok. 553 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.40s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_solver-af84b6c651ae0460.exe)
+test nonlinear::wall_reference::tests::public_pushover_preparation_saves_capped_capacity_and_rejects_unknown_vertical_ratio ... ok
+test result: ok. 352 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.69s
+
+tests-all.log
+    Finished `test` profile [optimized + debuginfo] target(s) in 1m 12s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_core-f079367c1fe62d0c.exe)
+test rc_wall_capacity::tests::vertical_limit_and_one_point_two_percent_intersection_match_independent_values ... ok
+test result: ok. 605 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.14s
+     Running tests\built_box.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\built_box-7c41ee6088491bee.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\cft_core_j_reuse_contract.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\cft_core_j_reuse_contract-84796a97c7c21d99.exe)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.93s
+     Running tests\cft_torsion_contract.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\cft_torsion_contract-5bae3095a92d7b15.exe)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.67s
+     Running tests\frame_support_representation.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\frame_support_representation-81b9e1dbc9c2ff92.exe)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\lip_channel_geometry.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\lip_channel_geometry-f0b1aabafe7fdf17.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\perf_probe.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\perf_probe-3c161178a3bdd655.exe)
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\reference_boundaries.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\reference_boundaries-c2b5796aa0737159.exe)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\secondary_materialization.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\secondary_materialization-73478c7c689c47b8.exe)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\slab_placement.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\slab_placement-a69c59fad4eca48c.exe)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\torsion_property_contract.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\torsion_property_contract-c6c881bf9bba2495.exe)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_design_jp-d5e289316a1ceb69.exe)
+test joint_wiring::tests::reference_skeleton_report_caps_horizontal_rebar_and_diagnoses_missing_vertical_input ... ok
+test rc::wall_nonlinear::tests::vertical_limit_prevents_overstated_reference_skeleton ... ok
+test result: ok. 651 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+     Running tests\attached_slab.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\attached_slab-ce869c244e1887ad.exe)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\built_box.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\built_box-270786fdd79f7b6a.exe)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\cft_concrete_strength.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\cft_concrete_strength-b20c6b7328f7bb46.exe)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\cft_steel_young.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\cft_steel_young-6ad89ad6d9251543.exe)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\local_frame_entry.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\local_frame_entry-5463fa6ef6707ef5.exe)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\steel_strength_selection.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\steel_strength_selection-14463a72adae065b.exe)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\vnv_rigid_zone_ds.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\vnv_rigid_zone_ds-31606380a26eec7a.exe)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_element-46dc2fdddc12c8ce.exe)
+test wall::wall_element::wall_method_tests::both_side_columns_require_vertical_ratio_and_limit_horizontal_contribution ... ok
+test result: ok. 553 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.38s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_solver-af84b6c651ae0460.exe)
+test nonlinear::wall_reference::tests::public_pushover_preparation_saves_capped_capacity_and_rejects_unknown_vertical_ratio ... ok
+test result: ok. 352 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+     Running tests\beam_shear_dynamic_input.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\beam_shear_dynamic_input-f579b3de52b05de1.exe)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests\common_section_mass.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\common_section_mass-ae8ae0f77aa5931b.exe)
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+     Running tests\general_member_loads.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\general_member_loads-809a3399854ff135.exe)
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+     Running tests\mechanism_diagnosis.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\mechanism_diagnosis-18e80f098f035d38.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\panel_zone.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\panel_zone-95e7543907f9eca5.exe)
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+     Running tests\parallel_batch.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\parallel_batch-ec5a6491f8414ac5.exe)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+     Running tests\rc_section_purpose.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\rc_section_purpose-bd9c7bae09bacbc8.exe)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\reference_boundaries.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\reference_boundaries-9717305013bb4a56.exe)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\torsion_contract.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\torsion_contract-f40eb339a9fdafc2.exe)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.74s
+     Running tests\wall_system_linear.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\wall_system_linear-5afe23a7cc39c816.exe)
+test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.19s
+     Running tests\weight_mass.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\weight_mass-51390adebfa01289.exe)
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+   Doc-tests sepika_core
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests sepika_design_jp
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests sepika_element
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests sepika_solver
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+clippy.log
+    Finished `dev` profile [optimized + debuginfo] target(s) in 6.57s
+
+docs-check.log
+    Finished `dev` profile [optimized + debuginfo] target(s) in 32.99s
+All doc links OK (summary: 124, links: 660, impl refs: 706)
+
+mdbook.log
+ INFO HTML book written to `C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\book`
+
+全test: 36 suite / 2318 passed / 0 failed / 2 ignored
+dev local links: 711 / missing: 0 / new anchors: 2 OK
+fmt --check / git diff --check: success
+全test後の設計契約35→36・Rustdoc補足についてClippyを再成功。main合流後の最終CIとは区別。
+原典本文・画像を含まない。GUI手操作・実OVIKA・MCP反例実ジョブ・全体ランクDs変化は今回未実測。
