@@ -24,10 +24,8 @@ impl App {
     /// 起こらない。持ち越すもの（解析条件・設計条件・ドック配置・カメラ・配色等）は
     /// [`AppCore`] 直下と [`UiViewState`] にあり、この代入では触れない。
     ///
-    /// 自動生成荷重ケース名（「床荷重(自動)」「自重(自動)」等）は
-    /// 標準ケース名（DL・LL(架構用)・LL(地震用)）へ移行する。
     /// 不正な構造 ID・参照、主架構節点数と二次部材の断面用途は差し替え前に拒否し、通知して `false` を返す。
-    pub fn load_model(&mut self, mut model: sepika_core::model::Model) -> bool {
+    pub fn load_model(&mut self, model: sepika_core::model::Model) -> bool {
         if let Err(error) = model.validate_reference_ids() {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;
@@ -44,7 +42,6 @@ impl App {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;
         }
-        model.migrate_legacy_auto_load_cases();
         self.core.model = model;
         self.core.scoped = ModelScoped::default();
         self.ui.scoped = UiModelScoped::default();

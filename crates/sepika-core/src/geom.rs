@@ -126,9 +126,6 @@ pub fn abs_lerp_integral(h0: f64, h1: f64, t0: f64, t1: f64) -> f64 {
         return (a.abs() + b.abs()) * 0.5 * (t1 - t0);
     }
     let denom = h1 - h0;
-    if denom.abs() <= 1e-15 {
-        return a.abs() * (t1 - t0);
-    }
     let tz = (-h0 / denom).clamp(t0, t1);
     abs_lerp_integral(h0, h1, t0, tz) + abs_lerp_integral(h0, h1, tz, t1)
 }

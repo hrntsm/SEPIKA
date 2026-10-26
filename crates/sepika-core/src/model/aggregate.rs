@@ -117,11 +117,6 @@ pub struct Model {
     /// 持たないため、要素の追加・削除に伴う ID 繰上げ／繰下げ（`shift_elem_attr_refs`・
     /// `take_elem_attrs`・`restore_elem_attrs`）の対象外。部材への割当は
     /// `DamperDef::props` の値コピー（`Model::damper_attrs` へ追加）で行う。
-    ///
-    /// **msgpack（.ovika）は位置ベース配列で直列化されるため、新しいフィールドは
-    /// 必ずこの構造体の末尾（`dof_map` の手前）へ追加すること**。中間に挿入すると
-    /// 旧バージョンで保存された .ovika の後続フィールドの値がずれて読み込まれ、
-    /// `#[serde(default)]` があっても救済されない（default 補完は末尾欠損のみ有効）。
     #[serde(default)]
     pub damper_defs: Vec<DamperDef>,
     /// 梁（水平材）のねじり剛性の扱い（建物一律。既定は i 端ねじれ解放）。
@@ -186,7 +181,7 @@ pub struct Model {
     pub dof_map: crate::dof::DofMap,
 }
 
-/// コレクション内の id が「配列添字 == id.index()」かつ重複しないことを検証する。
+/// コレクション内の id が「配列添字 == id.index()」であることを検証する。
 /// `coll` は配列名（例 "nodes"）、`id_name` は id 型名（例 "NodeId"）。
 fn check_id_consistency<T>(
     items: &[T],
@@ -200,15 +195,6 @@ fn check_id_consistency<T>(
         if index_of(item) != i {
             return Err(CoreError::IndexMismatch(format!(
                 "{coll}[{i}] has {id_name}({})",
-                raw_of(item)
-            )));
-        }
-    }
-    let mut seen = std::collections::HashSet::new();
-    for item in items {
-        if !seen.insert(index_of(item)) {
-            return Err(CoreError::DuplicateId(format!(
-                "{id_name}({})",
                 raw_of(item)
             )));
         }
@@ -282,11 +268,7 @@ impl Model {
             }
         }
 
-        let mut seen_elems = std::collections::HashSet::new();
         for elem in &self.elements {
-            if !seen_elems.insert(elem.id) {
-                return Err(CoreError::DuplicateId(format!("ElemId({})", elem.id.0)));
-            }
             for &nid in &elem.nodes {
                 if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
                     return Err(CoreError::DanglingRef(format!(
@@ -1351,6 +1333,7 @@ impl Model {
             && self.mass_method == other.mass_method
             && self.slab_thickness == other.slab_thickness
             && self.load_cfg == other.load_cfg
+            && self.multi_opening_mode == other.multi_opening_mode
             && self.wall_attrs == other.wall_attrs
             && self.wall_plates == other.wall_plates
             && self.stress_cfg == other.stress_cfg
@@ -1925,21 +1908,13 @@ impl Model {
     /// RC 専用型の用途と、主架構・二次部材・床板・壁版からの参照を検証する。
     pub fn validate_rc_section_usage(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
-        let mut sections_by_id = std::collections::HashMap::with_capacity(self.sections.len());
         for section in &self.sections {
             section
                 .validate_rc_frame_use()
                 .map_err(CoreError::InvalidInput)?;
-            sections_by_id.entry(section.id).or_insert(section);
         }
-        let section_for_id = |id: SectionId| {
-            self.sections
-                .get(id.index())
-                .filter(|section| section.id == id)
-                .or_else(|| sections_by_id.get(&id).copied())
-        };
         for element in &self.elements {
-            if let Some(section) = element.section.and_then(section_for_id) {
+            if let Some(section) = element.section.and_then(|id| self.section(id)) {
                 section
                     .validate_rc_element_use(element.kind)
                     .map_err(|reason| {
@@ -1948,7 +1923,7 @@ impl Model {
             }
         }
         for sm in self.beams().chain(self.posts()) {
-            if let Some(section) = sm.section.and_then(section_for_id) {
+            if let Some(section) = sm.section.and_then(|id| self.section(id)) {
                 section
                     .validate_rc_secondary_use(sm.kind)
                     .map_err(|reason| {
@@ -1960,14 +1935,14 @@ impl Model {
             }
         }
         for slab in &self.slabs {
-            if let Some(section) = slab.plate.section.and_then(section_for_id) {
+            if let Some(section) = slab.plate.section.and_then(|id| self.section(id)) {
                 section.validate_rc_plate_use().map_err(|reason| {
                     CoreError::InvalidInput(format!("SlabId({}): {reason}", slab.id.0))
                 })?;
             }
         }
         for plate in &self.wall_plates {
-            if let Some(section) = plate.section.and_then(section_for_id) {
+            if let Some(section) = plate.section.and_then(|id| self.section(id)) {
                 section.validate_rc_plate_use().map_err(|reason| {
                     CoreError::InvalidInput(format!("WallPlateId({}): {reason}", plate.id.0))
                 })?;
@@ -2026,17 +2001,8 @@ impl Model {
     /// 領域内・未割当の全小梁・間柱の断面用途を検証する。
     /// 断面は [`Self::section`] と同じ優先順で解決し、未割当・参照先欠落は検査しない。
     pub fn validate_secondary_section_usage(&self) -> Result<(), crate::error::CoreError> {
-        let mut sections_by_id = std::collections::HashMap::with_capacity(self.sections.len());
-        for section in &self.sections {
-            sections_by_id.entry(section.id).or_insert(section);
-        }
         for sm in self.beams().chain(self.posts()) {
-            if let Some(section) = sm.section.and_then(|sid| {
-                self.sections
-                    .get(sid.index())
-                    .filter(|section| section.id == sid)
-                    .or_else(|| sections_by_id.get(&sid).copied())
-            }) {
+            if let Some(section) = sm.section.and_then(|id| self.section(id)) {
                 Self::validate_secondary_section_use(sm, section)?;
             }
         }
@@ -2274,95 +2240,6 @@ impl Model {
                     Some(new_id) => crate::model::PlateAssignment::Plate(new_id),
                     None => crate::model::PlateAssignment::Unset,
                 };
-            }
-        }
-    }
-
-    /// 自動生成荷重ケース名を標準ケース名へ移行する。
-    ///
-    /// - 「床荷重(自動)」→「DL」、「床積載(自動)」→「LL(架構用)」、
-    ///   「床地震用積載(自動)」→「LL(地震用)」に改名する
-    ///   （移行先の名前が既に使われている場合は改名しない）。
-    /// - 「自重(自動)」は DL へ統合する（自重は DL の同期内容に含まれるように
-    ///   なったため）。DL ケースが存在する場合は「自重(自動)」を削除し、
-    ///   荷重組合せの参照は DL へ付け替える（同一組合せが既に DL を参照して
-    ///   いる場合は項を除去して二重計上を防ぐ）。DL がない場合は
-    ///   「自重(自動)」自体を「DL」へ改名する。
-    ///
-    /// ケースの内容は改名/削除のみで書き換えない（自動生成ケースの内容は
-    /// 解析実行前の同期アクションが毎回再計算して全置換する）。
-    /// 削除時は `LoadCaseId` の「id == 添字」規約を保つよう後続ケースの ID と
-    /// 組合せの参照を詰め直す。
-    pub fn migrate_legacy_auto_load_cases(&mut self) {
-        const LEGACY_SELF_WEIGHT: &str = "自重(自動)";
-        let renames = [
-            ("床荷重(自動)", DL_CASE_NAME),
-            ("床積載(自動)", LL_FRAME_CASE_NAME),
-            ("床地震用積載(自動)", LL_SEISMIC_CASE_NAME),
-        ];
-        for (old, new) in renames {
-            if self.load_cases.iter().any(|lc| lc.name == new) {
-                continue;
-            }
-            if let Some(lc) = self.load_cases.iter_mut().find(|lc| lc.name == old) {
-                lc.name = new.to_string();
-            }
-        }
-
-        let Some(sw_idx) = self
-            .load_cases
-            .iter()
-            .position(|lc| lc.name == LEGACY_SELF_WEIGHT)
-        else {
-            return;
-        };
-        let sw_id = self.load_cases[sw_idx].id;
-        match self
-            .load_cases
-            .iter()
-            .find(|lc| lc.name == DL_CASE_NAME)
-            .map(|lc| lc.id)
-        {
-            None => {
-                self.load_cases[sw_idx].name = DL_CASE_NAME.to_string();
-                self.load_cases[sw_idx].kind = LoadCaseKind::Dead;
-            }
-            Some(dl_id) => {
-                for combo in &mut self.combinations {
-                    let has_dl = combo.terms.iter().any(|(id, _)| *id == dl_id);
-                    if has_dl {
-                        combo.terms.retain(|(id, _)| *id != sw_id);
-                    } else {
-                        for (id, _) in &mut combo.terms {
-                            if *id == sw_id {
-                                *id = dl_id;
-                            }
-                        }
-                    }
-                }
-                self.load_cases.remove(sw_idx);
-                for lc in &mut self.load_cases {
-                    if lc.id.0 > sw_id.0 {
-                        lc.id.0 -= 1;
-                    }
-                }
-                for combo in &mut self.combinations {
-                    for (id, _) in &mut combo.terms {
-                        if id.0 > sw_id.0 {
-                            id.0 -= 1;
-                        }
-                    }
-                }
-                for slab in &mut self.slabs {
-                    for load in &mut slab.tip_loads {
-                        if load.case == sw_id {
-                            load.case = dl_id;
-                        }
-                        if load.case.0 > sw_id.0 {
-                            load.case.0 -= 1;
-                        }
-                    }
-                }
             }
         }
     }
