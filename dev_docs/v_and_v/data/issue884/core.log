@@ -1,0 +1,73 @@
+   Compiling zmij v1.0.21
+   Compiling serde_json v1.0.150
+   Compiling rmp v0.8.15
+   Compiling itoa v1.0.18
+   Compiling rmp-serde v1.3.1
+   Compiling sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-884\crates\sepika-core)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1m 22s
+     Running unittests src\lib.rs (target\debug\deps\sepika_core-f079367c1fe62d0c.exe)
+
+running 1 test
+test section_shape::composite::src_tests::src_analysis_ratio_matches_independent_rectangular_h_section ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 602 filtered out; finished in 0.00s
+
+     Running tests\built_box.rs (target\debug\deps\built_box-7c41ee6088491bee.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\cft_core_j_reuse_contract.rs (target\debug\deps\cft_core_j_reuse_contract-84796a97c7c21d99.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\cft_torsion_contract.rs (target\debug\deps\cft_torsion_contract-5bae3095a92d7b15.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests\frame_support_representation.rs (target\debug\deps\frame_support_representation-81b9e1dbc9c2ff92.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\lip_channel_geometry.rs (target\debug\deps\lip_channel_geometry-f0b1aabafe7fdf17.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\perf_probe.rs (target\debug\deps\perf_probe-3c161178a3bdd655.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\reference_boundaries.rs (target\debug\deps\reference_boundaries-c2b5796aa0737159.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\secondary_materialization.rs (target\debug\deps\secondary_materialization-73478c7c689c47b8.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\slab_placement.rs (target\debug\deps\slab_placement-a69c59fad4eca48c.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\torsion_property_contract.rs (target\debug\deps\torsion_property_contract-c6c881bf9bba2495.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
