@@ -1033,14 +1033,16 @@ mod tests {
         x.disp[2][0] = 2.0;
         y.disp[1][1] = 1.0;
         y.disp[2][1] = 2.0;
-        model.stress_cfg.misc_wall_n = Some(0.0);
-        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
-        inp.res_x = Some(&x);
-        inp.res_y = Some(&y);
-        assert!(build_lumped_mass(inp)
-            .unwrap_err()
-            .to_string()
-            .contains("係数n"));
+        for n in [0.5, 0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            model.stress_cfg.misc_wall_n = Some(n);
+            let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+            inp.res_x = Some(&x);
+            inp.res_y = Some(&y);
+            assert!(build_lumped_mass(inp)
+                .unwrap_err()
+                .to_string()
+                .contains("係数n"));
+        }
         model.stress_cfg.misc_wall_n = Some(1.0);
         x.disp.truncate(1);
         let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);

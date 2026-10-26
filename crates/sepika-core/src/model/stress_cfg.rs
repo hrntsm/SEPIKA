@@ -34,9 +34,9 @@ pub struct StressAnalysisCfg {
     pub no_long_axial_brace: bool,
     /// 長期応力解析で柱（鉛直な `ElementKind::Beam`）に軸力を負担させない。
     pub no_long_axial_column: bool,
-    /// 剛性率・偏心率算定時の雑壁剛性の n 倍法係数（雑壁の剛性評価。RC 規準。
-    /// `Kw' = n·Aw'·ΣKc/ΣAc` の n。入力値）。`None` は雑壁剛性を考慮しない。
-    #[serde(default)]
+    /// 自立壁のn倍法係数（無次元）。1以上の有限値に限り、入出力時に不正値を拒否する。
+    /// `None`（既定）は自立壁の付加剛性を考慮しない。
+    #[serde(default, with = "misc_wall_coefficient")]
     pub misc_wall_n: Option<f64>,
     /// 層間変形角の設定値との参考比較に使う正の有限な分母。既定200。
     /// 法令適合や緩和適用資格は判定せず、不正値では参考比較を行わない。
@@ -56,6 +56,37 @@ pub struct StressAnalysisCfg {
     /// 部材の剛域長を剛性・荷重応答へ反映する。既定true。仕口パネルの偏心は保持する。
     #[serde(default = "default_rigid_zone_consider_walls")]
     pub consider_rigid_zones: bool,
+}
+
+impl StressAnalysisCfg {
+    /// 自立壁のn倍法係数が未指定又は1以上の有限値でなければErr。
+    pub fn validate_misc_wall_n(&self) -> Result<(), String> {
+        misc_wall_coefficient::validate(self.misc_wall_n)
+    }
+}
+
+mod misc_wall_coefficient {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn validate(value: Option<f64>) -> Result<(), String> {
+        if value.is_some_and(|n| !n.is_finite() || n < 1.0) {
+            return Err("n倍法: 係数nは1以上の有限値にしてください".into());
+        }
+        Ok(())
+    }
+
+    pub fn serialize<S: Serializer>(value: &Option<f64>, serializer: S) -> Result<S::Ok, S::Error> {
+        validate(*value).map_err(serde::ser::Error::custom)?;
+        value.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<f64>, D::Error> {
+        let value = Option::<f64>::deserialize(deserializer)?;
+        validate(value).map_err(serde::de::Error::custom)?;
+        Ok(value)
+    }
 }
 
 fn default_rigid_zone_consider_walls() -> bool {
@@ -104,5 +135,104 @@ mod rigid_zone_switch_tests {
             serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
         assert!(!restored.consider_rigid_zones);
         assert!(restored.rigid_zone_consider_walls);
+    }
+}
+
+#[cfg(test)]
+mod misc889_tests {
+    use super::*;
+
+    #[derive(serde::Serialize)]
+    struct UncheckedCfg {
+        #[serde(flatten)]
+        fields: serde_json::Map<String, serde_json::Value>,
+        misc_wall_n: Option<f64>,
+    }
+
+    #[test]
+    fn misc889_input_serialization_and_model_validation_share_lower_bound() {
+        for n in [None, Some(1.0), Some(2.0)] {
+            let cfg = StressAnalysisCfg {
+                misc_wall_n: n,
+                ..Default::default()
+            };
+            let json = serde_json::to_string(&cfg).unwrap();
+            let binary = rmp_serde::to_vec_named(&cfg).unwrap();
+            assert_eq!(
+                serde_json::from_str::<StressAnalysisCfg>(&json)
+                    .unwrap()
+                    .misc_wall_n,
+                n
+            );
+            assert_eq!(
+                rmp_serde::from_slice::<StressAnalysisCfg>(&binary)
+                    .unwrap()
+                    .misc_wall_n,
+                n
+            );
+            let model = crate::Model {
+                stress_cfg: cfg,
+                ..Default::default()
+            };
+            assert!(model.validate().is_ok());
+        }
+        let mut fields = serde_json::to_value(StressAnalysisCfg::default())
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .clone();
+        fields.remove("misc_wall_n");
+        assert_eq!(
+            serde_json::from_value::<StressAnalysisCfg>(fields.clone().into())
+                .unwrap()
+                .misc_wall_n,
+            None
+        );
+        for n in [
+            f64::MIN_POSITIVE,
+            0.5,
+            1.0 - f64::EPSILON,
+            0.0,
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let cfg = StressAnalysisCfg {
+                misc_wall_n: Some(n),
+                ..Default::default()
+            };
+            assert!(serde_json::to_string(&cfg)
+                .unwrap_err()
+                .to_string()
+                .contains("係数n"));
+            assert!(rmp_serde::to_vec_named(&cfg)
+                .unwrap_err()
+                .to_string()
+                .contains("係数n"));
+            let binary = rmp_serde::to_vec_named(&UncheckedCfg {
+                fields: fields.clone(),
+                misc_wall_n: Some(n),
+            })
+            .unwrap();
+            assert!(rmp_serde::from_slice::<StressAnalysisCfg>(&binary)
+                .unwrap_err()
+                .to_string()
+                .contains("係数n"));
+            if n.is_finite() {
+                let mut value = fields.clone();
+                value.insert("misc_wall_n".into(), n.into());
+                assert!(serde_json::from_value::<StressAnalysisCfg>(value.into())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("係数n"));
+            }
+            let model = crate::Model {
+                stress_cfg: cfg,
+                ..Default::default()
+            };
+            assert!(model.validate().unwrap_err().to_string().contains("係数n"));
+            assert_eq!(model.stress_cfg.misc_wall_n.unwrap().to_bits(), n.to_bits());
+        }
     }
 }

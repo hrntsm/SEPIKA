@@ -581,7 +581,7 @@ fn misc620_missing_other_column_material_cannot_dilute_wall_stiffness() {
 #[test]
 fn misc620_invalid_coefficient_is_rejected_even_without_walls() {
     let (mut model, story) = build_symmetric_frame(None);
-    for n in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+    for n in [0.5, 0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         model.stress_cfg.misc_wall_n = Some(n);
         assert!(story_eccentricity(&model, story)
             .unwrap_err()
@@ -712,4 +712,80 @@ fn misc620_roof_parapet_is_excluded_but_undefined_story_height_is_an_error() {
     }
     model.stories[0].elevation = None;
     assert!(append_misc_wall_stiffnesses(&model, story, &mut cols).is_err());
+}
+
+#[test]
+fn misc889_coefficient_lower_bound() {
+    assert_eq!(misc_wall_stiffness(1.0, 2.0, 3.0, 4.0).unwrap(), 1.5);
+    assert_eq!(misc_wall_stiffness(2.0, 2.0, 3.0, 4.0).unwrap(), 3.0);
+    for n in [
+        f64::MIN_POSITIVE,
+        0.5,
+        1.0 - f64::EPSILON,
+        0.0,
+        -1.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        assert!(misc_wall_stiffness(n, 2.0, 3.0, 4.0).is_err(), "{n}");
+    }
+}
+
+#[test]
+fn misc889_wall_coefficient_can_increase_or_decrease_re_and_fes() {
+    use crate::secondary::holding_capacity::fes;
+    use sepika_core::ids::NodeId;
+    let (mut model, story) = build_symmetric_frame(None);
+    let section = push_wall_section(&mut model);
+    model.sections[section.index()].thickness = Some(100.0 / 6000.0);
+    push_self_standing(&mut model, [NodeId(0), NodeId(1)], None, Some(section));
+    let mut observed = Vec::new();
+    for (n, expected_y, expected_kr, expected_re) in [
+        (
+            1.0,
+            2400.0,
+            79200000.0,
+            [1.0 / (2.0 * 11.0_f64.sqrt()), 7.0 / (6.0 * 11.0_f64.sqrt())],
+        ),
+        (
+            2.0,
+            2000.0,
+            84000000.0,
+            [1.0 / 14.0_f64.sqrt(), 1.0 / 14.0_f64.sqrt()],
+        ),
+    ] {
+        model.stress_cfg.misc_wall_n = Some(n);
+        let mut cols: Vec<_> = model.nodes[..4]
+            .iter()
+            .map(|node| ColumnStiffness {
+                pos: [node.coord[0], node.coord[1]],
+                dx: 1.0,
+                dy: 1.0,
+            })
+            .collect();
+        append_misc_wall_stiffnesses(&model, story, &mut cols).unwrap();
+        assert!((cols[4].dx - n).abs() < 1e-12);
+        assert_eq!(cols[4].dy, 0.0);
+        let cr = center_of_rigidity(&cols).unwrap();
+        assert_eq!(cr, [3000.0, expected_y]);
+        let mut factors = Vec::new();
+        for (yg, expected) in [3000.0, 1000.0].into_iter().zip(expected_re) {
+            let ecc = eccentricity(&cols, [3000.0, yg], cr).unwrap();
+            assert!((ecc.kr - expected_kr).abs() < 1e-6);
+            let re = ecc.re_x.unwrap();
+            assert!((re - expected).abs() < 1e-12);
+            factors.push(fes(1.0, re).unwrap());
+        }
+        observed.push(factors);
+    }
+    assert!(observed[0][0] < observed[1][0]);
+    assert!(observed[0][1] > observed[1][1]);
+    model.stress_cfg.misc_wall_n = Some(0.5);
+    let mut cols = column_stiffnesses(&model, story).unwrap();
+    let before = cols.clone();
+    assert!(append_misc_wall_stiffnesses(&model, story, &mut cols)
+        .unwrap_err()
+        .contains("係数n"));
+    assert_eq!(cols, before);
 }

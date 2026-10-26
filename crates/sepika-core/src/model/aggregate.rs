@@ -594,6 +594,9 @@ impl Model {
         self.validate_rc_section_usage()?;
         self.validate_lip_channels()?;
         self.validate_attached_slabs()?;
+        self.stress_cfg
+            .validate_misc_wall_n()
+            .map_err(CoreError::InvalidInput)?;
         let mut strength_sections = std::collections::HashSet::new();
         let mut strength_targets = Vec::new();
         for input in &self.stb_strengths.sections {
