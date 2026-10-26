@@ -39,7 +39,7 @@ fn run_check_deps() -> anyhow::Result<()> {
     let layers: &[&[&str]] = &[
         &["sepika-core", "sepika-math", "sepika-material"],
         &["sepika-section", "sepika-load"],
-        &["sepika-edit", "sepika-skeleton"],
+        &["sepika-edit"],
         &["sepika-element"],
         &["sepika-solver", "sepika-io"],
         &["sepika-design-jp"],

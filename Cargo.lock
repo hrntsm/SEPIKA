@@ -4777,8 +4777,6 @@ dependencies = [
  "sepika-core",
  "sepika-element",
  "sepika-load",
- "sepika-material",
- "sepika-skeleton",
  "sepika-solver",
  "serde",
  "smallvec",
@@ -4907,16 +4905,6 @@ dependencies = [
  "approx",
  "sepika-core",
  "sepika-material",
-]
-
-[[package]]
-name = "sepika-skeleton"
-version = "0.0.1"
-dependencies = [
- "approx",
- "sepika-core",
- "sepika-material",
- "sepika-section",
 ]
 
 [[package]]
