@@ -1,0 +1,150 @@
+use sepika_core::ids::{MaterialId, SectionId};
+use sepika_core::model::{Material, MaterialCategory};
+use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+use sepika_design_jp::{
+    CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind, SrcDesign,
+};
+trait Checked {
+    fn checked(self) -> sepika_design_jp::CheckResult;
+}
+impl Checked for CheckOutcome {
+    fn checked(self) -> sepika_design_jp::CheckResult {
+        match self {
+            CheckOutcome::Checked(r) => r,
+            other => panic!("{other:?}"),
+        }
+    }
+}
+fn material(name: &str, category: MaterialCategory) -> Material {
+    Material {
+        id: MaterialId(0),
+        name: name.into(),
+        category,
+        young: 20500.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: Some(345.0),
+        strength_factor: None,
+        concrete_class: Default::default(),
+    }
+}
+fn ctx() -> DesignCtx {
+    DesignCtx {
+        term: LoadTerm::Long,
+        kind: MemberKind::Girder,
+        rebar_material: Some(material("SD345", MaterialCategory::Rebar)),
+        shear_rebar_material: Some(material("SD295A", MaterialCategory::Rebar)),
+        steel_material: Some(material("SN400B", MaterialCategory::Steel)),
+        ..Default::default()
+    }
+}
+fn section(b: f64) -> sepika_core::model::Section {
+    SectionShape::SrcBeamRect {
+        b,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 16.0,
+            top: vec![2],
+            bottom: vec![2],
+            cover: 20.0,
+            stirrup: BeamStirrup {
+                dia: 8.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+        steel_height: 400.0,
+        steel_width: 200.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 12.0,
+    }
+    .to_section(SectionId(0), "独立SRC断面".into())
+}
+fn forces() -> MemberForcesAt {
+    MemberForcesAt {
+        pos: 0.0,
+        n: 0.0,
+        qy: 0.0,
+        qz: 0.0,
+        my: 0.0,
+        mz: 0.0,
+    }
+}
+#[test]
+fn source884_beam_fixed_allowable_and_boundary() {
+    // 鋭角Hの独立矩形積分Z=1080743.2533333334 mm³、2-D16面積=402.1238596594935 mm²、j=493.5 mm。
+    let ma = 211_982_789.841_743_65;
+    for factor in [0.999999, 1.0, 1.000001] {
+        let f = MemberForcesAt {
+            mz: ma * factor,
+            ..forces()
+        };
+        let result = SrcDesign
+            .check(
+                &f,
+                &section(300.0),
+                &material("Fc24", MaterialCategory::Concrete),
+                &ctx(),
+            )
+            .checked();
+        assert!((result.ratio() - factor).abs() < 1e-12);
+        println!("moment,factor={factor},ratio={:.15}", result.ratio());
+    }
+}
+#[test]
+fn source884_cover_and_unchecked_components_are_not_qualification() {
+    for b in [299.8, 300.0, 300.2] {
+        let result = SrcDesign.check(
+            &forces(),
+            &section(b),
+            &material("Fc24", MaterialCategory::Concrete),
+            &ctx(),
+        );
+        assert!(matches!(result, CheckOutcome::Checked(_)));
+        println!("steel_cover_mm={},checked=true", (b - 200.0) / 2.0);
+    }
+    for (label, n, my, qz) in [
+        ("N", 100_000_000.0, 0.0, 0.0),
+        ("My", 0.0, 100_000_000_000.0, 0.0),
+        ("Qz", 0.0, 0.0, 100_000_000.0),
+    ] {
+        let ignored = MemberForcesAt {
+            n,
+            my,
+            qz,
+            ..forces()
+        };
+        let result = SrcDesign
+            .check(
+                &ignored,
+                &section(300.0),
+                &material("Fc24", MaterialCategory::Concrete),
+                &ctx(),
+            )
+            .checked();
+        assert_eq!(result.ratio(), 0.0);
+        println!("beam_{label}_only,ratio={}", result.ratio());
+    }
+    for fy in [100.0, 235.0, 345.0] {
+        let mut unknown = ctx();
+        let steel = unknown.steel_material.as_mut().unwrap();
+        steel.name = "直接入力鋼材".into();
+        steel.fy = Some(fy);
+        let f = MemberForcesAt {
+            mz: 211_982_789.841_743_65,
+            ..forces()
+        };
+        let result = SrcDesign
+            .check(
+                &f,
+                &section(300.0),
+                &material("Fc24", MaterialCategory::Concrete),
+                &unknown,
+            )
+            .checked();
+        assert!((result.ratio() - 1.0).abs() < 1e-12);
+        println!("unknown_steel,fy={fy},moment_ratio={:.15}", result.ratio());
+    }
+}

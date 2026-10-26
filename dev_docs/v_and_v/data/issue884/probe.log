@@ -1,0 +1,21 @@
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-884\crates\sepika-design-jp)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.28s
+     Running tests\source884_probe.rs (target\debug\deps\source884_probe-f16ad8dcd5c7c178.exe)
+
+running 2 tests
+steel_cover_mm=49.900000000000006,checked=true
+steel_cover_mm=50,checked=true
+steel_cover_mm=50.099999999999994,checked=true
+beam_N_only,ratio=0
+beam_My_only,ratio=0
+beam_Qz_only,ratio=0
+unknown_steel,fy=100,moment_ratio=1.000000000000000
+unknown_steel,fy=235,moment_ratio=1.000000000000000
+moment,factor=0.999999,ratio=0.999999000000000
+unknown_steel,fy=345,moment_ratio=1.000000000000000
+moment,factor=1,ratio=1.000000000000000
+moment,factor=1.000001,ratio=1.000001000000000
+test source884_cover_and_unchecked_components_are_not_qualification ... ok
+test source884_beam_fixed_allowable_and_boundary ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
