@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## STB異厚組立BOX（#683）
+
+[読込確認記録と要素→テスト索引](STB異厚組立BOX_Issue683_確認記録.md)は、通常鋼・CFTの両公開入口、両板厚・断面参照・属性報告・質量・OVIKA保持とApp受理/失敗時原子性を扱う。状態は🔶。物理Validation・手動GUI・全XSD適合は未確認。
+
 ## 異厚組立BOX（#831）
 
 [検証記録と要素→テスト索引](異厚組立BOX_Issue831_確認記録.md)は、鋭角の鋼材・CFT充填部の幾何、材料別質量、実板厚F・接合部方向別板厚、編集・保存・再採番を扱う。状態は🔶。J・せん断式とCFT等価剛性への適用は未確認のため理由付き未算定とし、物理Validation・手動GUIは未確認。
@@ -168,6 +172,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [仕口パネル高軸力降伏域_Issue753_2026-10.md](仕口パネル高軸力降伏域_Issue753_2026-10.md) | 高軸力の公開降伏値・実材料閾値と適用域、旧解析成果の利用制限 | 🔶（旧下限・直接5・element516・solver14・App保存契約のVerification。途中試行伝播/先行失敗は同記録、Validation/最終ゲート未） |
 | [仕口パネルrevert復元_Issue751_2026-10.md](仕口パネルrevert復元_Issue751_2026-10.md) | 軸力依存降伏値を含む確定状態への直接revertと再試行 | 🔶（直接Verification3・element511成功。関連検証は同レポート、連成接線・Validationは別範囲、高nは#7h） |
 | [仕口パネル軸力と履歴_Issue724_2026-10.md](仕口パネル軸力と履歴_Issue724_2026-10.md) | 試行変位による軸力推定・耐力更新・連成接線・履歴と失敗復元 | 🔶（独立Verification4・element508/solver380・Clippy成功。赤再現2件は#751/#752、高n下限は算術のみで#753へ分離。原典§6・Validation・最終ゲート未確認） |
+| [STB異厚組立BOX_Issue683_確認記録.md](STB異厚組立BOX_Issue683_確認記録.md) | STB両公開入口と汎用異厚形状・質量・OVIKAへの結合 | 🔶（IO244成功/2 ignored、App default/gui各2成功、Clippy・文書検証成功。Validation・手動GUI未確認） |
 | [STB組立BOX暫定拒否_Issue742_2026-10.md](STB組立BOX暫定拒否_Issue742_2026-10.md) | 参照組立BOXの入力境界と同厚性能保持、GUI読込失敗時の状態保持 | 🔶（変更前40観測の誤受理を再現、IO240成功・Clippy/文書検証成功。GUI default/gui各focused2・既存module11/GUI all-target Clippy成功。Validation・最終ゲート未確認） |
 | [STB_CFT鋼管標準密度_Issue741_2026-10.md](STB_CFT鋼管標準密度_Issue741_2026-10.md) | 既知標準鋼材のCFT単独・通常鋼混在の密度と独立面積質量 | 🔶（変更前両公開入口の密度0/質量Err再現、修正後core/IO822成功・共有helper物性4成功・App GUI関連6成功・Clippy/fmt/文書検証成功。Validation・最終ゲート未確認） |
 | [弾性梁の有限入力演算_Issue736_2026-10.md](弾性梁の有限入力演算_Issue736_2026-10.md) | 有限極大Gによる可撓部剛性・端部縮約の診断 | 🔶（最新main公開再現・正常対照と既存GVe拒否を区別、レビューの壁側柱先行質量panic修正後element504/solver380・Clippy成功、先行App契約default17/GUI18を区別。最終ゲート・Validation未） |
@@ -432,7 +437,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
-| 23d | STB組立BOXの入力境界 | sepika-io / sepika-app | tests/stbridge_built_box.rs、app/reference_identity_acceptance_tests.rs | [Issue742の公開入口と境界](STB組立BOX暫定拒否_Issue742_2026-10.md#独立期待値と公開入口) | 横断 | 🔶（両公開入口と正常性能保持のVerification成功、GUI状態保持/診断描画も成功、異厚本対応・Validationは別範囲） |
+| 23d | STB組立BOXの入力境界 | sepika-io / sepika-app | tests/stbridge_built_box.rs、app/reference_identity_acceptance_tests.rs | [Issue683の読込結合](STB異厚組立BOX_Issue683_確認記録.md#要素テスト索引) | 横断 | 🔶（異厚の公開入口・参照/属性報告・質量/保存と不正寸法のVerification、Validation・手動GUIは未確認） |
 | 23c | STB CFT鋼管の標準密度 | sepika-io / sepika-core | stbridge/import/assemble.rs、tests/stbridge_cft_steel_density.rs | [Issue741の公開入口と独立面積期待値](STB_CFT鋼管標準密度_Issue741_2026-10.md#独立期待値と公開入口) | 横断 | 🔶（公開入口・独立面積質量のVerification成功、Validation・最終ゲート未確認） |
 | 23a | STB標準入力限定 | sepika-io / sepika-app | stbridge/import、tests/stbridge_standard_input.rs、tests/stbridge_standard_rebar.rs、reference_identity_acceptance_tests.rs | [Issue660の独立入力と観測契約](STB標準入力限定_Issue660_2026-10.md#独立入力と観測契約) | 横断 | 🔶（両入口直接10・IO200・App lib837・文書検査成功。追加feature回帰1失敗後、App試験移行対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
 | 23b | STB断面系列別ID | sepika-io / sepika-app | stbridge/import、tests/stbridge_namespace.rs、tests/stbridge_section_series.rs、tests/stbridge_section_reference_boundaries.rs、reference_identity_acceptance_tests.rs | [Issue571の独立入力と予定観測](STB断面系列別ID_Issue571_2026-10.md#独立入力と予定観測) | 横断 | 🔶（series12・boundary6・namespace9・App自動9・IO227・最終feature1322成功。文書修正後の再検査/レビュー・最終ゲート未確認） |
