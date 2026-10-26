@@ -441,3 +441,31 @@ fn panel_changes_and_display_zoom_keep_primary_row_and_view_settings() {
         }
     }
 }
+
+#[test]
+fn zooming_model_and_frame_views_preserves_model_undo_and_result_state() {
+    for empty in [false, true] {
+        let mut h = Harness::new();
+        h.viewer = true;
+        if empty {
+            h.app.core.model = Default::default();
+        }
+        for in_frame in [false, true] {
+            if in_frame && !empty {
+                h.app.ui.scoped.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
+            }
+            h.settled();
+            h.app.ui.view.camera.pan = [23.0, -17.0];
+            let before = state(&h.app);
+            let camera = h.app.ui.view.camera.clone();
+            let pointer = egui::pos2(400.0, 400.0);
+            h.frame(vec![Event::PointerMoved(pointer)]);
+            h.frame(vec![Event::Zoom(1.5)]);
+            assert!(h.app.ui.view.camera.zoom > camera.zoom);
+            assert_ne!(h.app.ui.view.camera.pan, camera.pan);
+            assert_eq!(h.app.ui.view.camera.rot, camera.rot);
+            assert_eq!(state(&h.app), before);
+            assert!(h.app.ui.view.camera.pan.iter().all(|x| x.is_finite()));
+        }
+    }
+}

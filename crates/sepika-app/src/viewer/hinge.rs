@@ -1032,7 +1032,7 @@ fn draw_mn_plot_3d(
         egui::vec2(ui.available_width(), 260.0),
         egui::Sense::click_and_drag(),
     );
-    cam.apply_pointer_input(ui, &response, true);
+    cam.apply_pointer_input(ui, &response, true, true);
 
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::VIEW_BG);
@@ -1398,6 +1398,56 @@ mod tests {
     use crate::viewer::wall_expanded_view_model;
     use sepika_core::model::ForceRegime;
     use sepika_core::units::to_display::moment_kn_m;
+
+    #[test]
+    fn hinge_detail_zoom_keeps_the_point_with_its_own_camera() {
+        let surface = MnSurface {
+            kind: sepika_section::mn_surface::YieldModelKind::MultiFiber,
+            grid: vec![],
+            n_comp: -1.0,
+            n_tens: 1.0,
+            mp_y: 1.0,
+            mp_z: 1.0,
+        };
+        let mut cam = crate::viewer::CameraState {
+            pan: [23.0, -17.0],
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let point = [0.8, -0.4, 0.3];
+        let mut pointer = egui::Pos2::ZERO;
+        for step in 0..4 {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 700.0),
+                    )),
+                    events: if step == 3 {
+                        vec![egui::Event::PointerMoved(pointer), egui::Event::Zoom(1.5)]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                },
+                |ui| {
+                    let rect = egui::Rect::from_min_size(
+                        ui.cursor().min,
+                        egui::vec2(ui.available_width(), 260.0),
+                    );
+                    if step < 3 {
+                        pointer = mn_draw::MnView::new(&rect, &cam).project(point);
+                    }
+                    draw_mn_plot_3d(ui, &surface, &[], 0, &mut cam);
+                    if step == 3 {
+                        let after = mn_draw::MnView::new(&rect, &cam).project(point);
+                        assert!(after.distance(pointer) < 0.0001, "{pointer:?} -> {after:?}");
+                    }
+                },
+            );
+        }
+        assert_eq!(cam.zoom, 4.5);
+    }
 
     /// テスト用のヒンジ発生イベントを組み立てる。
     fn event(elem: u32, pos: f64, level: HingeLevel, ductility: f64, step: u32) -> HingeEvent {

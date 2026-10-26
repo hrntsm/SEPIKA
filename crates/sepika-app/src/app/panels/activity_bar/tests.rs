@@ -115,7 +115,7 @@ impl Harness {
                         .ui
                         .view
                         .camera
-                        .apply_pointer_input(ui, &response, true);
+                        .apply_pointer_input(ui, &response, true, true);
                 });
         });
         self.icons = self

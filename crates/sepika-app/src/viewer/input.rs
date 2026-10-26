@@ -39,12 +39,24 @@ pub(super) fn interact_camera(
     base: &CameraState,
 ) -> CameraState {
     let mut cam = base.clone();
-    cam.apply_pointer_input(ui, response, frame.is_none());
+    let cube_layout = viewcube_layout(response.rect);
+    let over_cube = frame.is_none()
+        && response
+            .hover_pos()
+            .is_some_and(|p| viewcube::hit_test(&cam, &cube_layout, p).is_some());
+    cam.apply_pointer_input(ui, response, frame.is_none(), !over_cube);
 
     if let Some(f) = frame {
         cam.snap_to_direction(frame_view::view_direction(f.normal));
     }
     cam
+}
+
+fn viewcube_layout(rect: egui::Rect) -> viewcube::Layout {
+    viewcube::Layout {
+        center: egui::pos2(rect.max.x - 55.0, rect.min.y + 55.0),
+        scale: 22.0,
+    }
 }
 
 /// ViewCube の当たり判定と、クリックによる視点スナップ。
@@ -59,10 +71,7 @@ pub(super) fn interact_viewcube(
     visible: bool,
     cam: &mut CameraState,
 ) -> ViewCubeState {
-    let layout = viewcube::Layout {
-        center: egui::pos2(rect.max.x - 55.0, rect.min.y + 55.0),
-        scale: 22.0,
-    };
+    let layout = viewcube_layout(rect);
     let hover = visible
         .then(|| {
             response
@@ -671,6 +680,57 @@ mod selection_tests {
                         assert_eq!(app.ui.scoped.selection.active_node(), Some(NodeId(1)));
                     }
                 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod camera_tests {
+    use super::*;
+
+    #[test]
+    fn viewcube_blocks_wheel_and_pinch_but_the_frame_view_keeps_zooming() {
+        for pinch in [1.0, 2.0] {
+            for in_frame in [false, true] {
+                let ctx = egui::Context::default();
+                let rect =
+                    egui::Rect::from_min_size(egui::pos2(20.0, 40.0), egui::vec2(600.0, 400.0));
+                let base = CameraState::default();
+                let pointer = viewcube_layout(rect).center;
+                assert!(viewcube::hit_test(&base, &viewcube_layout(rect), pointer).is_some());
+                let frame = Frame {
+                    label: "通り".into(),
+                    normal: [0.0, 1.0, 0.0],
+                    node_on: vec![],
+                    elem_on: vec![],
+                };
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::PointerMoved(pointer), egui::Event::Zoom(pinch)],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let mut response = ui.interact(
+                            rect,
+                            ui.id().with("viewer"),
+                            egui::Sense::click_and_drag(),
+                        );
+                        response.flags.set(egui::response::Flags::HOVERED, true);
+                        ui.input_mut(|i| i.smooth_scroll_delta.y = 25.0);
+                        let cam = interact_camera(ui, &response, in_frame.then_some(&frame), &base);
+                        if in_frame {
+                            assert!(cam.zoom > base.zoom);
+                            let mut expected = base.clone();
+                            expected.snap_to_direction(frame_view::view_direction(frame.normal));
+                            assert_eq!(cam.rot, expected.rot);
+                        } else {
+                            assert_eq!(cam.zoom, base.zoom);
+                            assert_eq!(cam.pan, base.pan);
+                            assert_eq!(cam.rot, base.rot);
+                        }
+                    },
+                );
             }
         }
     }
