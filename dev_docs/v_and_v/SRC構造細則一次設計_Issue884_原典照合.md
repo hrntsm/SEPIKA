@@ -54,3 +54,10 @@ SRC部に固有の適用条件を落とすと、単材の許容値が正しく�
 - `cargo run -p xtask -- check-docs`: 成功（summary124、links656、impl refs705）。`mdbook build`: 成功。
 - `git diff --check`: 成功。変更した開発文書のローカルリンク・実装参照先を確認。
 - 保存probeは公開design入口のVerificationで、実験ValidationやGUI編集・解析・保存の新規通し試験ではない。
+## 先行RC照合との統合
+
+2026-10-27に`origin/main`の`35bd8d5107cd32b78466f6fc544f6bf183a8d94c`（PR #911）を統合した。先頭の対象hashと保存probeは実行時点の証拠として維持する。README・未検証一覧の同時追記は双方を保持し、原典照合リスト・RC製品docs・#883の独立証拠も保持した。
+
+`7635aeed`から統合先までの`crates/sepika-design-jp/src/srrc/`、`crates/sepika-core/src/section_shape/composite.rs`、`crates/sepika-design-jp/src/material_strength/`に差分はなく、今回の公開検定と等価断面の観測へ影響する変更はない。計算コード不変のためprobeの再実行は行っていない。
+
+統合後の`cargo run -p xtask -- check-docs`は成功（summary124、links657、impl refs704）、`mdbook build`も成功した。`git diff origin/main --check`は成功し、#884の変更文書のローカル参照先を再確認した。統合時のstaged全差分検査には、先行#883の`probe.log`・`probe_main_followup.log`の既存末尾空行が各1件表示された。先行実行ログの内容は変更せず保持する。実験Validation等の未確認範囲と#912/#697の追跡は変わらない。
