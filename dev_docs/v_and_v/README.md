@@ -22,7 +22,7 @@
 
 ## CFT適用・材料・許容耐力の重点照合（#887）
 
-[原画像対応・独立数値・要素→証拠索引](CFT適用材料許容耐力_Issue887_原典照合.md)で第2版第1刷§3.10.11 p237・文献p241、p566/584と告464を有限確認した。公開CFT検定の独立Qy/Qz・N=0曲げ6条件、Fc下限前後4条件と既存E境界6試験を確認。状態は🔶。共通材料#879/#881、#767/#766完了成果を参照し、累加・面積・等価性能の別原典必要性を分離する。法定Fc下限の是正は[#916](https://github.com/hrntsm/SEPIKA/issues/916)、施工・適用除外条件の自動判定不足と圧縮Eの危険側疑いは[#697の追補](https://github.com/hrntsm/SEPIKA/issues/697#issuecomment-6423911591)で継続する。#418はclosed/not_plannedで現行未算定制約を保持、終局は#888・パネルは#723へ分離。全規準適合・専門家サインオフ・実験Validation・手動GUIは未確認。
+[原画像対応・独立数値・要素→証拠索引](CFT適用材料許容耐力_Issue887_原典照合.md)で第2版第1刷§3.10.11 p237・文献p241、p566/584と告464を有限確認した。公開CFT検定の独立Qy/Qz・N=0曲げ6条件、Fc下限前後4条件と既存E境界6試験を確認。状態は🔶。共通材料#879/#881、#767/#766完了成果を参照し、累加・面積・等価性能の別原典必要性を分離する。法定Fc下限は[#916の回帰証拠](CFT充填Fc下限_Issue916_2026-10.md)で是正し、施工・適用除外条件の自動判定不足と圧縮Eの危険側疑いは[#697の追補](https://github.com/hrntsm/SEPIKA/issues/697#issuecomment-6423911591)で継続する。#418はclosed/not_plannedで現行未算定制約を保持、終局は#888・パネルは#723へ分離。全規準適合・専門家サインオフ・実験Validation・手動GUIは未確認。
 
 ## CFT柱終局耐力・N–Mの重点原典照合（#888）
 
@@ -211,6 +211,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | レポート | 対象 | 状態 |
 |---|---|---|
 | [RC部材引張軸力_Issue697_継続照合.md](RC部材引張軸力_Issue697_継続照合.md) | RC引張Qsuの公的一次資料・公開求解と#697残件棚卸し | 🔶（18run/1818点のVerification。引張適用・安全性・Validation未） |
+| [CFT充填Fc下限_Issue916_2026-10.md](CFT充填Fc下限_Issue916_2026-10.md) | Fc24の公開・App境界と旧保存合格の失効 | 🔶（Fc下限Verification、手動GUI・Validation未） |
 | [CFT適用材料許容耐力_Issue887_原典照合.md](CFT適用材料許容耐力_Issue887_原典照合.md) | CFT適用・材料・許容耐力とFc下限・別原典境界 | 🔶（有限Verification、法定自動判定・別原典・Validation未） |
 | [CFT柱終局NM_Issue888_原典照合.md](CFT柱終局NM_Issue888_原典照合.md) | CFT終局・N–Mの原典限界、Case2と半断面の独立公開入口Verification | 🔶（別原典・適用資格・円形係数差・Validationは残る） |
 | [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
@@ -484,6 +485,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 4 | MITC4 シェル（膜） | sepika-element | shell.rs | `test_patch_membrane_distorted`（歪みメッシュ・機械精度） | P1.5 | ✅ |
 | 5 | MITC4 シェル（曲げ） | sepika-element | shell.rs | `test_patch_bending_distorted`（歪みメッシュ定曲率・機械精度） | P1.5 | ✅ |
 | 6 | MITC4 シェル（せん断/収束） | sepika-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
+| 916 | CFT充填コンクリートの法定Fc下限 | sepika-design-jp / sepika-core / sepika-app | cft/mod.rs・result_contract.rs・app/result_contract_tests.rs | [独立境界と製品入口](CFT充填Fc下限_Issue916_2026-10.md#独立境界と製品入口) | 公開／App／保存 | 🔶（下限Verification、手動GUI・Validation未） |
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
 | 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像と現行式の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、新規数値試験なし | 原典 | 🔶（N/A/F・式の採否未確定、Validation未） |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
