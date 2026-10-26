@@ -358,13 +358,13 @@ impl ForceComponents {
     }
 }
 
-/// CMQ 図で表示する成分（C: 固定端モーメント／M: 単純梁中央モーメント／Q: せん断）。
+/// CMQ 図で表示する成分（C: 固定端モーメント／M: 荷重込み曲げモーメント／Q: せん断）。
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum CmqComponent {
     /// 固定端モーメント C 図
     #[default]
     C,
-    /// 単純梁としての曲げモーメント M 図（中央モーメントの目安）
+    /// 節点変位0の荷重込み曲げモーメント M 図
     M,
     /// せん断 Q 図
     Q,
@@ -563,7 +563,7 @@ use support::{
 
 /// ビューア表示用に、壁の解析要素（`ElementKind::Wall`。D5により生成専用）を
 /// 含むモデルを返す。壁の解析要素は `model` 自体には存在せず、`WallRegion`/
-/// `WallPlate` から都度生成する（D5・`sepika_load::wall_expand`）。
+/// `WallPlate` から都度生成する（D5・`sepika_core::wall_expand`）。
 ///
 /// ビューアは毎フレーム呼ばれるため、壁版を1つも持たないモデル（既定・現状の
 /// 実 ST-Bridge フィクスチャは全件該当）では `expand_wall_elements` が伴う
@@ -575,8 +575,8 @@ use support::{
 pub(crate) fn wall_expanded_view_model(
     model: &sepika_core::model::Model,
 ) -> std::borrow::Cow<'_, sepika_core::model::Model> {
-    if sepika_load::wall_expand::model_has_wall_plates_to_expand(model) {
-        std::borrow::Cow::Owned(sepika_load::wall_expand::expand_wall_elements(model).0)
+    if sepika_core::wall_expand::model_has_wall_plates_to_expand(model) {
+        std::borrow::Cow::Owned(sepika_core::wall_expand::expand_wall_elements(model).0)
     } else {
         std::borrow::Cow::Borrowed(model)
     }

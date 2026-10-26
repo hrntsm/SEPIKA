@@ -137,7 +137,7 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
             }
             model.elements.retain(|e| e.kind != ElementKind::Wall);
             model.generated_wall_origins.clear();
-            let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+            let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
             let notice = sepika_job::notices::steel_seismic_wall_notice(&expanded, &index);
             assert_eq!(notice.is_some(), steel_wall);
             if let Some(notice) = notice {

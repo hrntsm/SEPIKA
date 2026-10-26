@@ -92,7 +92,7 @@ fn fixture() -> Model {
 }
 
 fn capacity(model: &Model) -> [f64; 2] {
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(model);
     let wall = expanded
         .elements
         .iter()
@@ -277,7 +277,7 @@ fn preparation_and_pushover_report_the_same_missing_wall_direction() {
     let mut app = App::default();
     app.load_model(model);
     app.run_preparation();
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let wall = expanded
         .elements
         .iter()
@@ -372,7 +372,7 @@ fn same_section_wall_member_fc_and_direction_materials_survive_expansion_and_ren
             model.visit_elem_ids(|id| id.0 = count - 1 - id.0);
             model.elements.reverse();
         }
-        let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         let mut capacities = Vec::new();
         for (plate, fc) in [(WallPlateId(0), 30.0), (second, 24.0)] {
             let elem = expanded
@@ -431,7 +431,7 @@ fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
     });
     model.sections[2].rebar_material = None;
     model.sections[2].shear_rebar_material = None;
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
     let wall = expanded
         .elements
         .iter()
@@ -446,7 +446,7 @@ fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
     assert!(capacity(&model)[0] > 0.0);
     for position in [Some("TOP"), Some("BOTTOM")] {
         model.stb_strengths.sections[0].reinforcement[1].position = position.map(str::to_owned);
-        let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         let wall = expanded
             .elements
             .iter()
@@ -472,7 +472,7 @@ fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
         None,
         Some(MaterialId(3)),
     ));
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
     let wall = expanded
         .elements
         .iter()
@@ -504,7 +504,7 @@ fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
             material: None,
         }))
     );
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let wall = expanded
         .elements
         .iter()
@@ -537,7 +537,7 @@ fn explicitly_nonseismic_rc_wall_keeps_elastic_mode_without_directional_inputs()
     app.core.analysis_cfg.push_steps = 3;
     app.core.analysis_cfg.push_max_disp = 1.0;
     app.run_preparation();
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let wall = expanded
         .elements
         .iter()
@@ -758,7 +758,7 @@ fn quantity_setting_edit_undo_redo_save_preserves_rc_mass_response_and_current_r
         .wall_weight(&app.core.model.wall_plates[0])
         .unwrap()
         .totals;
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let elem = expanded
         .elements
         .iter()
@@ -800,7 +800,7 @@ fn quantity_setting_edit_undo_redo_save_preserves_rc_mass_response_and_current_r
             .totals,
         weight
     );
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let elem = expanded
         .elements
         .iter()

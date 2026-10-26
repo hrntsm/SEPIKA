@@ -25,7 +25,83 @@ impl ElementBehavior for BeamElement {
         self.axis.to_global(&kg_node)
     }
 
-    crate::behavior::elastic_disp_behavior!(BeamElement, 12);
+    fn owns_frame_member_loads(&self) -> bool {
+        true
+    }
+
+    fn frame_load_response(
+        &self,
+        displacement: &[f64],
+        loads: &[sepika_core::model::MemberLoad],
+    ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        self.loaded_response(displacement, loads, None).map(Some)
+    }
+
+    fn state_frame_load_response(
+        &self,
+    ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        self.current_loaded_response(None).map(Some)
+    }
+
+    fn internal_force(&self, _ctx: &Ctx) -> crate::behavior::LocalVec {
+        self.current_loaded_response(None)
+            .unwrap_or_else(|error| panic!("{error}"))
+            .nodal_residual
+    }
+
+    fn update_state(
+        &mut self,
+        du: &crate::behavior::LocalVec,
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        self.update_loaded_state(du, &self.trial_member_loads.clone(), commit, None)
+    }
+
+    fn update_state_with_member_loads(
+        &mut self,
+        du: &crate::behavior::LocalVec,
+        loads: &[sepika_core::model::MemberLoad],
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        self.update_loaded_state(du, loads, commit, None)
+    }
+
+    fn commit_state(&mut self) {
+        self.committed_disp = self.trial_disp;
+        self.committed_member_loads = self.trial_member_loads.clone();
+    }
+
+    fn revert_state(&mut self) {
+        self.trial_disp = self.committed_disp;
+        self.trial_member_loads = self.committed_member_loads.clone();
+    }
+
+    fn snapshot_state(&self) -> Box<dyn std::any::Any> {
+        Box::new(self.elastic_load_state())
+    }
+
+    fn restore_state(&mut self, state: &dyn std::any::Any) {
+        self.restore_elastic_load_state(
+            crate::behavior::downcast_snapshot::<super::state::ElasticLoadState>(
+                "BeamElement",
+                state,
+            )
+            .clone(),
+        );
+    }
+
+    fn serialize_checkpoint(&self) -> Vec<u8> {
+        self.serialize_loaded_checkpoint(None)
+    }
+
+    fn deserialize_checkpoint(
+        &mut self,
+        data: &[u8],
+    ) -> Result<(), crate::behavior::CheckpointError> {
+        self.restore_loaded_checkpoint(data, None)
+    }
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
         self.try_mass_matrix(opt)
@@ -89,6 +165,12 @@ impl ElementBehavior for BeamElement {
     }
 
     fn state_member_forces(&self, _ctx: &Ctx) -> Option<crate::frame::beam::MemberForces> {
-        Some(self.recover_forces(&self.trial_disp))
+        Some(
+            self.current_loaded_response(None)
+                .unwrap_or_else(|error| panic!("{error}"))
+                .section
+                .recover(&self.eval_sections)
+                .unwrap_or_else(|error| panic!("{error}")),
+        )
     }
 }

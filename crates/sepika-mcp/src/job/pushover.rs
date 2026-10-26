@@ -280,7 +280,7 @@ mod tests {
                 missing.sections[2].shear_rebar_material = None;
             }
             sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut missing);
-            let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&missing);
+            let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&missing);
             let wall = expanded
                 .elements
                 .iter()

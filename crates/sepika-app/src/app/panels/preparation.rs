@@ -229,6 +229,14 @@ impl App {
                 );
 
                 ui.add_space(6.0);
+                let mut enabled = self.core.model.stress_cfg.consider_rigid_zones;
+                if ui.checkbox(&mut enabled, "剛域を考慮する").changed() {
+                    self.core.model.stress_cfg.consider_rigid_zones = enabled;
+                    self.core.scoped.staleness.mark_edited();
+                }
+                ui.label(
+                    "剛域長を剛性と部材荷重に反映します。OFFでも仕口パネルの偏心は保持します。",
+                );
                 let mut consider = self.core.model.stress_cfg.rigid_zone_consider_walls;
                 let resp = ui
                     .checkbox(&mut consider, "剛域の算定で壁を考慮する")

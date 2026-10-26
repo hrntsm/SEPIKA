@@ -34,9 +34,9 @@ pub fn apply_rigid_zones_and_panels(
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
     };
-    if sepika_load::wall_expand::model_has_wall_plates_to_expand(model) {
+    if sepika_core::wall_expand::model_has_wall_plates_to_expand(model) {
         let (mut expanded, _wall_index, _wall_report) =
-            sepika_load::wall_expand::expand_wall_elements(model);
+            sepika_core::wall_expand::expand_wall_elements(model);
         sepika_element::frame::beam::apply_auto_rigid_zones(&mut expanded, &rule);
         debug_assert!(
             model.elements.len() <= expanded.elements.len()
@@ -228,7 +228,7 @@ fn prepare_work_model(
     if let Some(warning) = model.unset_plate_assignment_warning() {
         notices.push(warning);
     }
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(model);
     notices.extend(
         expanded
             .elements
@@ -1314,5 +1314,74 @@ mod tests {
                         && reason.contains("下位置差=-50 mm")));
             }
         }
+    }
+    #[test]
+    fn rigid_zone_setting_reaches_common_preparation_static_analysis_and_cmq() {
+        use sepika_core::ids::LoadCaseId;
+        use sepika_core::model::{LoadCase, MemberLoad, MemberLoadKind, ZoneSource};
+        let mut input = steel_panel_model();
+        input.stories.clear();
+        input.panel_zone = sepika_core::model::PanelZoneMode::None;
+        for node in &mut input.nodes {
+            node.restraint = sepika_core::dof::Dof6Mask::FIXED;
+        }
+        input.elements[2].rigid_zone.length_i = 500.0;
+        input.elements[2].rigid_zone.length_j = 200.0;
+        input.elements[2].rigid_zone.source_i = ZoneSource::Manual;
+        input.elements[2].rigid_zone.source_j = ZoneSource::Manual;
+        input.load_cases.push(LoadCase {
+            id: LoadCaseId(99),
+            name: "剛域切替確認".into(),
+            kind: Default::default(),
+            nodal: vec![],
+            member: vec![MemberLoad::manual(
+                ElemId(2),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 6000.0,
+                    w1: 2.0,
+                    w2: 2.0,
+                },
+            )],
+        });
+        let mut end_moments = vec![];
+        for enabled in [true, false] {
+            let mut model = input.clone();
+            model.stress_cfg.consider_rigid_zones = enabled;
+            prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            let zone = model.elements[2].rigid_zone;
+            assert_eq!((zone.length_i, zone.length_j), (500.0, 200.0));
+            let loads = &model
+                .load_cases
+                .iter()
+                .find(|case| case.id == LoadCaseId(99))
+                .unwrap()
+                .member;
+            let cmq = sepika_element::frame::member_load::cmq_with_rigid_zone(
+                &model,
+                &model.elements[2],
+                loads,
+            )
+            .unwrap();
+            let result =
+                crate::compute::compute_linear_static(model.clone(), LoadCaseId(99)).unwrap();
+            let (_, forces) = result
+                .member_forces
+                .iter()
+                .find(|(id, _)| *id == ElemId(2))
+                .unwrap();
+            for (xi, force) in &forces.at {
+                let expected = cmq.section.at(*xi).unwrap();
+                for (actual, expected) in force.iter().zip(expected) {
+                    assert!(
+                        (actual - expected).abs() < 1e-5,
+                        "enabled={enabled}, xi={xi}"
+                    );
+                }
+            }
+            end_moments.push(cmq.section.at(0.0).unwrap()[5]);
+        }
+        assert!((end_moments[0] - end_moments[1]).abs() > 1.0);
     }
 }

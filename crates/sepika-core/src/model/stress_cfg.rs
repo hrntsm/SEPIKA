@@ -53,6 +53,9 @@ pub struct StressAnalysisCfg {
     /// `false`: 部材の原断面だけで算定する。
     #[serde(default = "default_rigid_zone_consider_walls")]
     pub rigid_zone_consider_walls: bool,
+    /// 部材の剛域長を剛性・荷重応答へ反映する。既定true。仕口パネルの偏心は保持する。
+    #[serde(default = "default_rigid_zone_consider_walls")]
+    pub consider_rigid_zones: bool,
 }
 
 fn default_rigid_zone_consider_walls() -> bool {
@@ -73,6 +76,33 @@ impl Default for StressAnalysisCfg {
             drift_limit_denom: default_drift_limit_denom(),
             tension_only_iteration: false,
             rigid_zone_consider_walls: default_rigid_zone_consider_walls(),
+            consider_rigid_zones: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod rigid_zone_switch_tests {
+    use super::*;
+
+    #[test]
+    fn rigid_zone_switch_defaults_on_and_roundtrips_off() {
+        let mut cfg = StressAnalysisCfg::default();
+        assert!(cfg.consider_rigid_zones);
+        let mut value = serde_json::to_value(&cfg).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("consider_rigid_zones");
+        assert!(
+            serde_json::from_value::<StressAnalysisCfg>(value)
+                .unwrap()
+                .consider_rigid_zones
+        );
+        cfg.consider_rigid_zones = false;
+        let restored: StressAnalysisCfg =
+            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!restored.consider_rigid_zones);
+        assert!(restored.rigid_zone_consider_walls);
     }
 }

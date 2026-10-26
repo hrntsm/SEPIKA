@@ -1429,7 +1429,7 @@ mod tests {
             let run = app.displayed_pushover().unwrap().wall_run.as_ref().unwrap();
             assert!(run.gravity_applied);
             assert_eq!(run.gravity_terms, gravity_terms);
-            let (model, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+            let (model, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
             let wall = model
                 .elements
                 .iter()

@@ -722,8 +722,8 @@ impl FiberBeam {
         let geometry = crate::transform::EndGeometry::try_of_element(data, model)?;
         let length = geometry.length;
         let (rigid_i, rigid_j) = crate::frame::rigid_arm::resolve_lengths(
-            data.rigid_zone.rigid_length_i(),
-            data.rigid_zone.rigid_length_j(),
+            model.analysis_rigid_zone(data).rigid_length_i(),
+            model.analysis_rigid_zone(data).rigid_length_j(),
             length,
         );
         let flex_length = length - rigid_i - rigid_j;

@@ -2569,3 +2569,248 @@ fn eccentric_member_load_reactions_keep_transfer_moment_after_end_releases_and_r
         }
     }
 }
+
+#[test]
+fn building_rigid_zone_switch_preserves_inputs_and_changes_stiffness_and_cmq() {
+    use sepika_element::frame::member_load::cmq_with_rigid_zone;
+    let mut model = make_axial_cantilever();
+    model.sections[0].iy = 1e7;
+    model.sections[0].iz = 1e7;
+    model.sections[0].as_y = 1e10;
+    model.sections[0].as_z = 1e10;
+    model.elements[0].rigid_zone = sepika_core::model::RigidZone {
+        length_i: 200.0,
+        length_j: 100.0,
+        source_i: sepika_core::model::ZoneSource::Manual,
+        source_j: sepika_core::model::ZoneSource::Manual,
+        face_i: Some(250.0),
+        face_j: Some(150.0),
+        ..Default::default()
+    };
+    let saved = model.elements[0].rigid_zone;
+    model.load_cases[0].nodal[0].values = [0.0, 0.0, -1000.0, 0.0, 0.0, 0.0];
+    let on = linear_static_once(&model, LoadCaseId(1)).unwrap();
+    model.stress_cfg.consider_rigid_zones = false;
+    let off = linear_static_once(&model, LoadCaseId(1)).unwrap();
+    assert!(off.disp[1][2].abs() > on.disp[1][2].abs());
+    assert_eq!(model.elements[0].rigid_zone, saved);
+    let mut baseline = model.clone();
+    baseline.elements[0].rigid_zone.length_i = 0.0;
+    baseline.elements[0].rigid_zone.length_j = 0.0;
+    baseline.stress_cfg.consider_rigid_zones = true;
+    let no_zone = linear_static_once(&baseline, LoadCaseId(1)).unwrap();
+    assert_eq!(off.disp, no_zone.disp);
+    let loads = [MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 2.0,
+            w2: 2.0,
+        },
+    )];
+    for (enabled, expected) in [
+        (true, [1100.0, 900.0, 785000.0 / 3.0, -485000.0 / 3.0]),
+        (false, [1000.0, 1000.0, 500000.0 / 3.0, -500000.0 / 3.0]),
+    ] {
+        model.stress_cfg.consider_rigid_zones = enabled;
+        let response = cmq_with_rigid_zone(&model, &model.elements[0], &loads).unwrap();
+        let f = response.physical_frame_end_force_global;
+        for (actual, expected) in [f[2], f[8], -f[4], -f[10]].into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+        }
+        let mi = response.section.at(0.0).unwrap()[5];
+        let mj = response.section.at(1.0).unwrap()[5];
+        assert!((mi + expected[2]).abs() < 1e-6);
+        assert!((mj - expected[3]).abs() < 1e-6);
+    }
+    model.elements[0].rigid_zone.panel_offset_i = 75.0;
+    model.stress_cfg.consider_rigid_zones = false;
+    let zone = model.analysis_rigid_zone(&model.elements[0]);
+    assert_eq!(zone.rigid_length_i(), 75.0);
+    assert_eq!(zone.face_i, Some(250.0));
+    assert_eq!(model.elements[0].rigid_zone.length_i, 200.0);
+}
+
+#[test]
+fn building_rigid_zone_cmq_keeps_load_force_and_moment_for_all_shapes_and_releases() {
+    use sepika_element::frame::member_load::cmq_with_rigid_zone;
+    let mut model = make_axial_cantilever();
+    model.elements[0].rigid_zone.length_i = 200.0;
+    model.elements[0].rigid_zone.length_j = 100.0;
+    let cases = [
+        (
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 2.0,
+                w2: 2.0,
+            },
+            2000.0,
+            1000000.0,
+        ),
+        (
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 150.0,
+                w1: 2.0,
+                w2: 2.0,
+            },
+            300.0,
+            22500.0,
+        ),
+        (
+            MemberLoadKind::Distributed {
+                a: 100.0,
+                b: 800.0,
+                w1: 1.0,
+                w2: 3.0,
+            },
+            1400.0,
+            2135000.0 / 3.0,
+        ),
+        (
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 0.0,
+                w2: 3.0,
+            },
+            1500.0,
+            1000000.0,
+        ),
+    ];
+    for enabled in [true, false] {
+        model.stress_cfg.consider_rigid_zones = enabled;
+        for (reverse, reference) in [
+            (false, [0.0, 0.0, 1.0]),
+            (true, [0.0, 0.0, 1.0]),
+            (false, [0.0, 1.0, 1.0]),
+        ] {
+            model.elements[0].nodes = if reverse {
+                smallvec::smallvec![NodeId(1), NodeId(0)]
+            } else {
+                smallvec::smallvec![NodeId(0), NodeId(1)]
+            };
+            model.elements[0].local_axis.ref_vector = reference;
+            model.elements[0].rigid_zone.length_i = if reverse { 100.0 } else { 200.0 };
+            model.elements[0].rigid_zone.length_j = if reverse { 200.0 } else { 100.0 };
+            for release in [EndCondition::Fixed, EndCondition::Pinned] {
+                model.elements[0].end_cond = [release, release];
+                for (kind, resultant, moment) in cases.iter().cloned().chain(
+                    [0.0, 100.0, 200.0, 500.0, 900.0, 950.0, 1000.0]
+                        .map(|a| (MemberLoadKind::Point { a, p: 1000.0 }, 1000.0, a * 1000.0)),
+                ) {
+                    for sign in [-1.0, 1.0] {
+                        let loads = [MemberLoad::manual(
+                            ElemId(0),
+                            [0.0, 0.0, -sign],
+                            kind.clone(),
+                        )];
+                        let r = cmq_with_rigid_zone(&model, &model.elements[0], &loads).unwrap();
+                        let f = r.physical_frame_end_force_global;
+                        assert!((f[2] + f[8] - sign * resultant).abs() < 1e-6);
+                        assert!(
+                            (1000.0 * f[if reverse { 2 } else { 8 }]
+                                - f[4]
+                                - f[10]
+                                - sign
+                                    * if reverse {
+                                        1000.0 * resultant - moment
+                                    } else {
+                                        moment
+                                    })
+                            .abs()
+                                < 1e-6,
+                            "enabled={enabled}, release={release:?}, load={kind:?}: {f:?}"
+                        );
+                        for xi in [0.0, 0.25, 0.5, 0.9, 1.0] {
+                            assert!(r.section.at(xi).unwrap().iter().all(|v| v.is_finite()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn building_rigid_zone_switch_reaches_incremental_and_timehistory_member_load_states() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::behavior::{Ctx, LocalVec};
+    use sepika_element::factory::{build_nonlinear_behavior, StrengthBasis};
+    let mut input = make_axial_cantilever();
+    input.materials[0].fy = Some(1e10);
+    input.elements[0].rigid_zone.length_i = 200.0;
+    input.elements[0].rigid_zone.length_j = 100.0;
+    let loads = [MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 2.0,
+            w2: 2.0,
+        },
+    )];
+    for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+        for regime in [
+            ForceRegime::UniaxialBendingShear,
+            ForceRegime::AxialBendingInteract,
+        ] {
+            let mut observed = vec![];
+            for enabled in [true, false] {
+                let mut model = input.clone();
+                model.stress_cfg.consider_rigid_zones = enabled;
+                model.elements[0].force_regime = regime;
+                let basis = match kind {
+                    AnalysisKind::Incremental => StrengthBasis::MaterialStrength,
+                    AnalysisKind::TimeHistory => StrengthBasis::Nominal,
+                };
+                let mut behavior =
+                    build_nonlinear_behavior(&model.elements[0], &model, basis, kind, None);
+                let du = LocalVec {
+                    data: vec![0.0; behavior.n_dof()].into(),
+                };
+                behavior
+                    .update_state_with_member_loads(&du, &loads, true, &Ctx { model: &model })
+                    .unwrap();
+                let response = behavior.state_frame_load_response().unwrap().unwrap();
+                let f = response.physical_frame_end_force_global;
+                assert!((f[2] + f[8] - 2000.0).abs() < 1e-6);
+                assert!((1000.0 * f[8] - f[4] - f[10] - 1000000.0).abs() < 1e-5);
+                observed.push(response.section.at(0.0).unwrap()[5]);
+                if !enabled {
+                    let mut baseline = model.clone();
+                    baseline.stress_cfg.consider_rigid_zones = true;
+                    baseline.elements[0].rigid_zone.length_i = 0.0;
+                    baseline.elements[0].rigid_zone.length_j = 0.0;
+                    let mut base = build_nonlinear_behavior(
+                        &baseline.elements[0],
+                        &baseline,
+                        basis,
+                        kind,
+                        None,
+                    );
+                    base.update_state_with_member_loads(
+                        &du,
+                        &loads,
+                        true,
+                        &Ctx { model: &baseline },
+                    )
+                    .unwrap();
+                    let expected = base.state_frame_load_response().unwrap().unwrap();
+                    for (actual, expected) in f.iter().zip(expected.physical_frame_end_force_global)
+                    {
+                        assert!((actual - expected).abs() < 1e-6);
+                    }
+                }
+            }
+            assert!(
+                (observed[0] - observed[1]).abs() > 1.0,
+                "{kind:?} {regime:?}"
+            );
+        }
+    }
+}

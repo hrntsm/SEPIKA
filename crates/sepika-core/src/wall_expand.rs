@@ -1,7 +1,7 @@
 //! 壁展開（壁版から解析要素を組み立てる。D4・D5）。
 //!
-//! 入力の正は「壁領域」（[`sepika_core::model::WallRegion`]）と「壁版」
-//! （[`sepika_core::model::WallPlate`]）であり、`Model.elements` には壁の
+//! 入力の正は「壁領域」（[`crate::model::WallRegion`]）と「壁版」
+//! （[`crate::model::WallPlate`]）であり、`Model.elements` には壁の
 //! 解析要素（`ElementKind::Wall`）を一切持たせない（D5）。ソルバ・断面力表示・
 //! 保有水平耐力など、壁の解析要素を必要とする消費者は、それぞれ
 //! [`expand_wall_elements`] を呼んで**壁展開モデル**（生成要素を追加した
@@ -18,7 +18,7 @@
 //!
 //! # キャッシュしない（都度計算）
 //!
-//! 生成は決定的（[`sepika_core::model::Model::wall_regions`] の並び順、各領域内は
+//! 生成は決定的（[`crate::model::Model::wall_regions`] の並び順、各領域内は
 //! `wall_plate_ids` の並び順）であるため、同じモデルに対して複数回呼んでも同じ
 //! `ElemId` 割当になる。展開処理自体は `WallRegion`/`WallPlate` に対する軽い
 //! 走査であり（境界検出という重い幾何走査は `rebuild_wall_regions` が既に済ませて
@@ -29,7 +29,7 @@
 //!
 //! 生成した壁要素ごとに、由来する `WallPlate` の開口・スリットを写した
 //! `WallAttr` を壁展開モデルの `wall_attrs` へ合成して積む。既存の壁消費者
-//! （自重算定 `crate::story_gen::self_weight_calc`、開口低減・剛性
+//! （自重算定 `sepika_load::story_gen`、開口低減・剛性
 //! （`sepika_element::factory::wall_opening`）、偏心率の雑壁剛性、数量拾い等、
 //! 現時点で 9 箇所ほど）はいずれも `model.wall_attrs.iter().find(|a| a.elem ==
 //! data.id)` という同じ形の参照を持つ。壁展開モデルにこの合成 `wall_attrs` を
@@ -79,15 +79,15 @@
 //!
 //! 要素にならなかった壁版（間柱で分割された壁版・腰壁・垂れ壁・パラペット・
 //! 5 節点以上の壁領域内の壁版）は**壁エレメントにならない壁版**であり、これは正常な状態
-//! である。自重は `crate::wall_plate_load` が辺へ分配し、剛性は
+//! である。自重は `sepika_load::wall_plate_load` が辺へ分配し、剛性は
 //! `sepika_element` がフレーム内雑壁（袖壁・腰壁・垂壁）として周辺の柱梁の
 //! 断面性能へ算入する。したがって診断で警告を出すことはしない。
 //!
 //! `section` 未割当の壁版だけは生成対象から外れる（自重すら求まらないため。
 //! `WallPlate` モジュール doc 参照）。これは解析前チェックが警告する。
 
-use sepika_core::ids::{ElemId, WallPlateId};
-use sepika_core::model::{
+use crate::ids::{ElemId, WallPlateId};
+use crate::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Model, WallAttr, WallPlateShape,
 };
 use std::collections::HashMap;
@@ -251,8 +251,8 @@ pub fn expand_wall_elements_owned(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sepika_core::ids::{NodeId, SectionId, WallRegionId};
-    use sepika_core::model::{Node, Section, WallPlate, WallRegion};
+    use crate::ids::{NodeId, SectionId, WallRegionId};
+    use crate::model::{Node, Section, WallPlate, WallRegion};
 
     fn node(id: u32, x: f64, y: f64, z: f64) -> Node {
         Node {
@@ -294,7 +294,7 @@ mod tests {
         WallPlate {
             dl_support: None,
             self_weight_shares: Vec::new(),
-            id: sepika_core::ids::WallPlateId(id),
+            id: crate::ids::WallPlateId(id),
             shape: WallPlateShape::Enclosed,
             section,
             opening_area: 0.0,
@@ -332,7 +332,7 @@ mod tests {
     /// 使うので落ちず、差が出るのは要素になる壁版だけという気づきにくい形になる。
     #[test]
     fn test_copies_finish_intensity_into_synthesized_wall_attr() {
-        use sepika_core::model::AreaLoad;
+        use crate::model::AreaLoad;
 
         let mut m = base_model();
         let mut plate = quad_plate(0, Some(SectionId(0)));
@@ -351,7 +351,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
 
@@ -377,7 +377,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
 
@@ -400,10 +400,7 @@ mod tests {
             .find(|e| e.kind == ElementKind::Wall)
             .expect("壁エレメント");
         assert_eq!(elem.nodes.len(), 4);
-        assert_eq!(
-            index.plate_of(elem.id),
-            Some(sepika_core::ids::WallPlateId(0))
-        );
+        assert_eq!(index.plate_of(elem.id), Some(crate::ids::WallPlateId(0)));
         // 既存の壁消費者（自重算定等）が無改修で動くよう、合成 `WallAttr` を積む
         // （モジュール doc「wall_attrs の合成」参照）。
         assert_eq!(expanded.wall_attrs.len(), 1);
@@ -420,7 +417,7 @@ mod tests {
         let mut plate = quad_plate(0, Some(SectionId(0)));
         plate.opening_area = 1_000_000.0;
         plate.opening_weight = 5000.0;
-        plate.slit = sepika_core::model::WallSlit {
+        plate.slit = crate::model::WallSlit {
             column_face: [true, false],
             beam_face: [false, true],
         };
@@ -429,7 +426,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
 
@@ -462,9 +459,9 @@ mod tests {
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             wall_plate_ids: vec![
-                sepika_core::ids::WallPlateId(0),
-                sepika_core::ids::WallPlateId(1),
-                sepika_core::ids::WallPlateId(2),
+                crate::ids::WallPlateId(0),
+                crate::ids::WallPlateId(1),
+                crate::ids::WallPlateId(2),
             ],
             posts: Vec::new(),
         });
@@ -495,7 +492,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
         let (expanded, _index, _report) = expand_wall_elements(&m);
@@ -510,7 +507,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
 
@@ -540,7 +537,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(4), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
 
@@ -559,12 +556,12 @@ mod tests {
         m.wall_plates.push(WallPlate {
             dl_support: None,
             self_weight_shares: Vec::new(),
-            id: sepika_core::ids::WallPlateId(0),
+            id: crate::ids::WallPlateId(0),
             shape: WallPlateShape::Attached {
-                anchor: sepika_core::model::RegionAnchor::Line {
+                anchor: crate::model::RegionAnchor::Line {
                     nodes: [NodeId(0), NodeId(1)],
                     span: [0.0, 1.0],
-                    transfer: sepika_core::model::LoadTransfer::Anchor,
+                    transfer: crate::model::LoadTransfer::Anchor,
                 },
                 extent: Some([900.0, 900.0]),
             },
@@ -585,7 +582,7 @@ mod tests {
     /// 生成した `ElemId` は既存要素の最大 ID より後ろへ付与し、衝突しない。
     #[test]
     fn test_generated_elem_id_does_not_collide_with_existing_elements() {
-        use sepika_core::model::{ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis};
+        use crate::model::{ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis};
         let mut m = base_model();
         m.elements.push(ElementData {
             id: ElemId(5),
@@ -607,7 +604,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
 
@@ -639,7 +636,7 @@ mod tests {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
             posts: Vec::new(),
         });
 

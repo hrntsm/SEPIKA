@@ -460,7 +460,7 @@ pub fn build_report_csv(app: &App) -> String {
                 c0: app.core.analysis_cfg.c0,
             };
             let (expanded, _wall_index, _wall_report) =
-                sepika_load::wall_expand::expand_wall_elements(model);
+                sepika_core::wall_expand::expand_wall_elements(model);
             if let Ok(analysis) = sepika_solver::statics::analysis::Analysis::prepare(&expanded) {
                 if let Ok(p) = analysis.seismic_nodal_force_magnitudes(cfg) {
                     let theta =

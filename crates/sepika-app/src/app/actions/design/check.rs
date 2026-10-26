@@ -145,9 +145,9 @@ impl App {
         let expanded_storage;
         let wall_index;
         let design_model: &sepika_core::model::Model =
-            if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
+            if sepika_core::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
                 let (expanded, index, _wall_report) =
-                    sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+                    sepika_core::wall_expand::expand_wall_elements(&self.core.model);
                 wall_index = Some(index);
                 expanded_storage = expanded;
                 &expanded_storage

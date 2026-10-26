@@ -8,6 +8,6 @@ eigen.T[0] = 6.349e-2
 eigen.T[1] = 3.725e-2
 eigen.T[2] = 1.221e-2
 static.DL.wall_forces_len = 3
-static.DL.wall_forces_abs_sum = 8.133e4
+static.DL.wall_forces_abs_sum = 8.130e4
 static.EX.wall_forces_abs_sum = 2.947e7
 static.EX.top_disp_x[node4] = 9.036e-3

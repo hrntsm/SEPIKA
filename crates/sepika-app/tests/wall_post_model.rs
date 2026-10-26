@@ -278,7 +278,7 @@ fn test_split_wall_plates_do_not_become_elements() {
             "分割された壁版は壁領域を覆わない"
         );
     }
-    let (expanded, index, report) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (expanded, index, report) = sepika_core::wall_expand::expand_wall_elements(&model);
     assert_eq!(report.generated, 0, "壁エレメントは作られない");
     assert_eq!(report.skipped_not_covering, 2);
     assert!(index.is_empty());

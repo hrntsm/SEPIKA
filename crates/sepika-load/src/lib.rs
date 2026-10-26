@@ -1,9 +1,5 @@
 pub mod ai;
 pub mod cascade;
-/// 標準荷重組合せ（令82条）。実体は [`sepika_core::load_combo`]。
-/// 荷重ケースの意味（`LoadCaseKind`）と長期判定を持つ core に置き、
-/// 新規モデルの既定組合せと同じ実装を使う。
-pub use sepika_core::load_combo as combo;
 mod fireproof;
 pub mod floor;
 pub mod live_load;
@@ -12,5 +8,4 @@ pub mod self_weight;
 pub mod slab_load;
 pub mod story_gen;
 pub mod wall_attached;
-pub mod wall_expand;
 pub mod wall_plate_load;

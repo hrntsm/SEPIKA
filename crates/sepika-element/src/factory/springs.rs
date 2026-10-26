@@ -66,7 +66,8 @@ pub(super) fn yield_moment_and_axial(
 
 /// 部材の可撓長さ [mm]（= 節点間長 − 両端剛域長。剛域控除後が非正なら全長）。
 fn flexible_length(data: &ElementData, model: &Model) -> f64 {
-    data.rigid_zone
+    model
+        .analysis_rigid_zone(data)
         .flexible_length_from(model.member_length(data))
 }
 
@@ -270,8 +271,8 @@ pub(super) fn flexural_alpha_y_checked(
     }
     let n = es / ec;
     let l = model.member_length(data)
-        - data.rigid_zone.rigid_length_i()
-        - data.rigid_zone.rigid_length_j();
+        - model.analysis_rigid_zone(data).rigid_length_i()
+        - model.analysis_rigid_zone(data).rigid_length_j();
     sepika_core::rc_capacity::rc_alpha_y_sugano_checked(pt_alpha_ratio, l / (2.0 * d), d_eff / d, n)
 }
 
@@ -325,8 +326,8 @@ pub(super) fn rc_reference_stiffness(data: &ElementData, model: &Model) -> Resul
         return Err("剛域長・パネルオフセットは非負の有限値が必要です".into());
     }
     let l = model.member_length(data)
-        - data.rigid_zone.rigid_length_i()
-        - data.rigid_zone.rigid_length_j();
+        - model.analysis_rigid_zone(data).rigid_length_i()
+        - model.analysis_rigid_zone(data).rigid_length_j();
     if !l.is_finite() || l <= 0.0 {
         return Err("剛域控除後の柔部材長Lは正の有限値が必要です。全長へ代用しません".into());
     }

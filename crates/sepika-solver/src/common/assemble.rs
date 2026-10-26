@@ -304,18 +304,37 @@ fn add_member_loads(
         let Some(loads) = by_elem.get(&elem.id) else {
             continue;
         };
-        let Some((frame, length)) = member_load_frame(model, elem) else {
+        if !is_member_load_target(elem) {
             continue;
+        }
+        let behavior = build_behavior(elem, model);
+        let force = if behavior.owns_frame_member_loads() {
+            let response = behavior
+                .frame_load_response(&vec![0.0; behavior.n_dof()], loads)
+                .unwrap_or_else(|reason| panic!("部材 ID {} の等価節点荷重: {reason}", elem.id.0))
+                .expect("部材荷重所有要素の線形荷重応答");
+            sepika_element::behavior::LocalVec {
+                data: response
+                    .nodal_residual
+                    .data
+                    .iter()
+                    .map(|force| -force)
+                    .collect(),
+            }
+        } else {
+            let Some((frame, length)) = member_load_frame(model, elem) else {
+                continue;
+            };
+            let q_local = sepika_element::frame::member_load::consistent_load_local(
+                loads,
+                &frame,
+                length,
+                span_load_transfer(elem),
+            );
+            let q_global = frame.rotate_to_global(&q_local);
+            sepika_element::frame::eccentric::transform_nodal_load(elem, model, &q_global)
         };
-        let q_local = sepika_element::frame::member_load::consistent_load_local(
-            loads,
-            &frame,
-            length,
-            span_load_transfer(elem),
-        );
-        let q_global = frame.rotate_to_global(&q_local);
-        let force = sepika_element::frame::eccentric::transform_nodal_load(elem, model, &q_global);
-        let gdofs = build_behavior(elem, model).global_dofs(dofmap);
+        let gdofs = behavior.global_dofs(dofmap);
         assert_eq!(force.data.len(), gdofs.len(), "等価節点荷重の自由度数");
         for (&active, value) in gdofs.iter().zip(force.data) {
             if active != usize::MAX {

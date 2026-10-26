@@ -7,12 +7,12 @@ use sepika_core::model::{
 };
 use sepika_core::units::to_display::{force_kn, stiffness_kn_per_mm, viscous_c0_kn};
 use sepika_core::units::to_internal;
+use sepika_core::wall_expand::{self, WallExpansionIndex};
 use sepika_edit::{
     AddDamper, AddIsolator, AddMember, DeleteMember, DeleteWallPlate, EditCommand,
     RemoveSupportIsolator, SetDamperProps, SetElementSection, SetMemberHysteresis,
     SetMemberHysteresisTh, SetMemberRcBeamReference,
 };
-use sepika_load::wall_expand::{self, WallExpansionIndex};
 use std::borrow::Cow;
 
 /// 要素の節点 ID をカンマ区切りで並べたセル文字列（制振ダンパー表・免震支承材表で共有）。

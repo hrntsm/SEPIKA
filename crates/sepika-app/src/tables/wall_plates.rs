@@ -1613,7 +1613,7 @@ mod tests {
         for id in 0..2 {
             add_distinct_wall(&mut model, &ids, id, Some(SectionId(0)));
         }
-        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (_, before, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         let selected = before
             .generated_elem_ids()
             .find(|id| before.plate_of(*id) == Some(selected_plate))
@@ -1629,7 +1629,7 @@ mod tests {
         set_wall_plate_section(&mut app, WallPlateId(0), Some(SectionId(1)));
 
         assert_eq!(app.core.model.wall_plates[0].section, Some(SectionId(1)));
-        let (_, after, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        let (_, after, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
         for id in before.generated_elem_ids() {
             assert_eq!(after.plate_of(id), before.plate_of(id));
         }
@@ -1645,7 +1645,7 @@ mod tests {
         for id in 0..2 {
             add_distinct_wall(&mut model, &ids, id, (id == 1).then_some(SectionId(0)));
         }
-        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (_, before, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         let selected = before
             .generated_elem_ids()
             .find(|id| before.plate_of(*id) == Some(WallPlateId(1)))
@@ -1656,13 +1656,13 @@ mod tests {
 
         set_wall_plate_section(&mut app, WallPlateId(0), Some(SectionId(0)));
 
-        let (_, after, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        let (_, after, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
         assert_eq!(after.plate_of(selected), Some(WallPlateId(0)));
         assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
 
         app.select_member(selected);
         set_wall_plate_section(&mut app, WallPlateId(0), None);
-        let (_, restored, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        let (_, restored, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
         assert_eq!(restored.plate_of(selected), Some(WallPlateId(1)));
         assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
     }
@@ -1676,7 +1676,7 @@ mod tests {
         for id in 0..2 {
             add_distinct_wall(&mut model, &ids, id, (id == 1).then_some(SectionId(0)));
         }
-        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (_, before, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         let selected = before.generated_elem_ids().next().unwrap();
         let mut app = App::default();
         app.core.model = model;
@@ -1701,7 +1701,7 @@ mod tests {
         for id in 0..2 {
             add_distinct_wall(&mut model, &ids, id, Some(SectionId(0)));
         }
-        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (_, before, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         let selected = before
             .generated_elem_ids()
             .find(|id| before.plate_of(*id) == Some(WallPlateId(0)))
@@ -1715,7 +1715,7 @@ mod tests {
                 region: WallPlateAssignmentRegionId(0),
             }),
         );
-        let (_, after, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        let (_, after, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
         assert_eq!(after.plate_of(selected), Some(WallPlateId(0)));
         assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
     }

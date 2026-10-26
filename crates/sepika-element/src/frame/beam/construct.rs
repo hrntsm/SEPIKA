@@ -288,7 +288,7 @@ impl BeamElement {
             mass_properties_error,
             nodes: [n0, n1],
             axis,
-            rigid: data.rigid_zone,
+            rigid: model.analysis_rigid_zone(data),
             end_cond: data.end_cond,
             torsion_release: [super::torsion::i_end_torsion_release(data, model), false],
             eval_sections,

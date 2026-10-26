@@ -210,7 +210,7 @@ fn 増分解析の同期非同期でも生成鋼板壁注意を維持する() {
 #[test]
 fn 共通通知は明示壁と生成壁を集約しrcとsrc内蔵鋼板と要素にならない版を除外する() {
     let input = steel_wall_model();
-    let (mut expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&input);
+    let (mut expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&input);
     let mut wall = expanded.elements.last().unwrap().clone();
     let first_id = wall.id.0;
     wall.id = ElemId(first_id + 1);
@@ -231,10 +231,10 @@ fn 共通通知は明示壁と生成壁を集約しrcとsrc内蔵鋼板と要素
     assert!(sepika_job::notices::steel_seismic_wall_notice(&expanded, &index).is_none());
     let mut input = input;
     input.wall_plates[0].slit.beam_face[0] = true;
-    let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&input);
+    let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&input);
     assert!(sepika_job::notices::steel_seismic_wall_notice(&expanded, &index).is_none());
     input.wall_plates[0].section = None;
-    let (expanded, index, report) = sepika_load::wall_expand::expand_wall_elements(&input);
+    let (expanded, index, report) = sepika_core::wall_expand::expand_wall_elements(&input);
     assert_eq!(report.generated, 0);
     assert!(sepika_job::notices::steel_seismic_wall_notice(&expanded, &index).is_none());
     assert!(expanded

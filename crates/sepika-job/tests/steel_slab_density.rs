@@ -18,12 +18,11 @@ fn steel_slab_one_cubic_metre_design_and_independent_physical_distribution() {
             (total(&auto_loads::compute_dl_beam_loads(&model).unwrap()) - 78500.0).abs() < 1e-8
         );
         // 材料から質量を生成するAPIではなく、独立に与えた物理面荷重の分配を検証する。
-        let physical =
-            sepika_load::floor::distribute_slab_w_checked(&model, slab, 0.00769822025).unwrap();
+        let physical = sepika_load::floor::distribute_slab_w(&model, slab, 0.00769822025).unwrap();
         assert!((total(&physical) - 76982.2025).abs() < 1e-8);
         model.materials[1].density = 85e-6 / 9806.65;
         let physical =
-            sepika_load::floor::distribute_slab_w_checked(&model, &model.slabs[0], 0.0085).unwrap();
+            sepika_load::floor::distribute_slab_w(&model, &model.slabs[0], 0.0085).unwrap();
         assert!((total(&physical) - 85000.0).abs() < 1e-8);
         assert!((total(&physical) - 78500.0 - 6500.0).abs() < 1e-8);
         for error in [
@@ -46,8 +45,7 @@ fn steel_slab_one_cubic_metre_design_and_independent_physical_distribution() {
                 assert!(error.contains(token), "{error}");
             }
         }
-        let ll =
-            sepika_load::floor::distribute_slab_w_checked(&model, &model.slabs[0], 0.003).unwrap();
+        let ll = sepika_load::floor::distribute_slab_w(&model, &model.slabs[0], 0.003).unwrap();
         assert!((total(&ll) - 30000.0).abs() < 1e-8);
     }
 }

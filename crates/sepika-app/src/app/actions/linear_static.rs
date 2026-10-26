@@ -177,7 +177,7 @@ impl App {
         model: sepika_core::model::Model,
         combo: sepika_core::model::LoadCombination,
     ) -> Result<sepika_solver::statics::linear::StaticOnce, String> {
-        let model = sepika_load::wall_expand::expand_wall_elements_owned(model).0;
+        let model = sepika_core::wall_expand::expand_wall_elements_owned(model).0;
         match Analysis::prepare(&model) {
             Ok(analysis) => analysis
                 .linear_combination(&combo)
@@ -451,7 +451,7 @@ impl App {
         case_keys: Vec<(LoadCaseId, StaticCaseKey)>,
         combos: Vec<sepika_core::model::LoadCombination>,
     ) -> Result<StaticAllComputed, String> {
-        let model = sepika_load::wall_expand::expand_wall_elements_owned(model).0;
+        let model = sepika_core::wall_expand::expand_wall_elements_owned(model).0;
         let analysis = Analysis::prepare(&model).map_err(|e| format!("解析準備エラー: {:?}", e))?;
         let ids: Vec<LoadCaseId> = case_keys.iter().map(|(id, _)| *id).collect();
         let batch = analysis.linear_static_with_combinations(&ids, &combos);

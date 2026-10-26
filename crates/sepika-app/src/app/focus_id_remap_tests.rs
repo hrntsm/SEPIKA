@@ -401,7 +401,7 @@ fn check_preparation_keeps_focus(materials: bool, undo: bool) {
     assert!(!app.core.scoped.undo.id_changes().is_empty());
     let material_focus = app.ui.scoped.nav.focus_material;
     let section_focus = app.ui.scoped.nav.focus_section;
-    let (_, index, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (_, index, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let generated = index.generated_elem_ids().next().expect("実際の生成壁要素");
     assert!(app.core.model.element(generated).is_none());
     app.select_member(generated);

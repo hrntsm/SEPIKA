@@ -2428,7 +2428,7 @@ mod tests {
             "生モデルには壁の解析要素が無い"
         );
 
-        let expanded = sepika_load::wall_expand::expand_wall_elements(&model).0;
+        let expanded = sepika_core::wall_expand::expand_wall_elements(&model).0;
         let expanded_key = hinge_view_key(&expanded, &column, 0, &stale);
         assert!(
             wall_side_column_release(&column, &expanded).is_some(),
@@ -2467,14 +2467,14 @@ mod tests {
             .model
         };
         assert_eq!(view(&model), AnalysisHingeModel::Fiber);
-        let expanded = sepika_load::wall_expand::expand_wall_elements(&model).0;
+        let expanded = sepika_core::wall_expand::expand_wall_elements(&model).0;
         assert_eq!(view(&expanded), AnalysisHingeModel::Fiber);
     }
 
     #[test]
     fn stale_wall_side_column_cache_tracks_regime_rejection_and_return_to_fiber() {
         let (input, column) = wall_side_column_view_model();
-        let mut model = sepika_load::wall_expand::expand_wall_elements(&input).0;
+        let mut model = sepika_core::wall_expand::expand_wall_elements(&input).0;
         let staleness = Staleness {
             results_stale: true,
             last_run: Some(SystemTime::UNIX_EPOCH),
@@ -2528,7 +2528,7 @@ mod tests {
         for representation in [ElementKind::Fiber, ElementKind::MultiSpring] {
             let (mut input, _) = wall_side_column_view_model();
             input.elements[0].kind = representation;
-            let expanded = sepika_load::wall_expand::expand_wall_elements(&input).0;
+            let expanded = sepika_core::wall_expand::expand_wall_elements(&input).0;
             let staleness = Staleness {
                 results_stale: true,
                 last_run: Some(SystemTime::UNIX_EPOCH),

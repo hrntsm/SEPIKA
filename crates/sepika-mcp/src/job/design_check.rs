@@ -89,8 +89,8 @@ pub(crate) fn compute_design_check_job(
     let result = sepika_solver::statics::linear::superpose_static(&refs);
     let expanded_storage;
     let wall_index;
-    let model: &Model = if sepika_load::wall_expand::model_has_wall_plates_to_expand(&work) {
-        let (expanded, index, _wall_report) = sepika_load::wall_expand::expand_wall_elements(&work);
+    let model: &Model = if sepika_core::wall_expand::model_has_wall_plates_to_expand(&work) {
+        let (expanded, index, _wall_report) = sepika_core::wall_expand::expand_wall_elements(&work);
         wall_index = Some(index);
         expanded_storage = expanded;
         &expanded_storage
@@ -487,7 +487,7 @@ mod tests {
                     serde_json::to_value(member_force_rows).unwrap(),
                     serde_json::to_value(flatten_member_force_rows(&direct.member_forces)).unwrap()
                 );
-                let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&work);
+                let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&work);
                 let wall = expanded
                     .elements
                     .iter()
