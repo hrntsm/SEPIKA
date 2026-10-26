@@ -47,16 +47,3 @@ fn snapshot_origin_oriented_loop() {
     let csv = run_loop(&mut mat, &hist);
     insta::assert_snapshot!("origin_oriented_loop", csv);
 }
-
-#[test]
-fn snapshot_slip_loop() {
-    let rule = HysteresisRule::Slip {
-        yield_point: (100.0, 0.01),
-        ultimate: (120.0, 0.05),
-        slip_factor: 0.5,
-    };
-    let mut mat = HysteresisMaterial::new(rule);
-    let hist = cyclic_history(0.01);
-    let csv = run_loop(&mut mat, &hist);
-    insta::assert_snapshot!("slip_loop", csv);
-}

@@ -20,17 +20,6 @@ struct HystState {
     branch: Branch,
     /// 反転点
     reversal: (f64, f64),
-    /// ピーク到達回数（正側・負側）
-    peak_count_pos: u32,
-    peak_count_neg: u32,
-}
-
-impl HystState {
-    /// 現在の劣化係数。
-    fn degrade_factor(&self, degradation_rate: f64) -> f64 {
-        let n = self.peak_count_pos.max(self.peak_count_neg);
-        degradation_rate.powi(n as i32)
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -108,24 +97,19 @@ impl HysteresisMaterial {
 
     /// 反対側の目標点。経験がなければ降伏点。
     fn opposite_target(&self, dir: f64) -> (f64, f64) {
-        self.opposite_target_degraded(dir, 1.0)
-    }
-
-    /// 反対側の目標点（劣化係数適用）。
-    fn opposite_target_degraded(&self, dir: f64, degrade: f64) -> (f64, f64) {
         let ty = self.rule_for(dir).yield_deformation();
         let my = self.rule_for(dir).yield_strength();
         if dir > 0.0 {
             if self.committed.max_pos.0.abs() > 1e-15 {
-                (self.committed.max_pos.0, self.committed.max_pos.1 * degrade)
+                (self.committed.max_pos.0, self.committed.max_pos.1)
             } else {
-                (ty, my * degrade)
+                (ty, my)
             }
         } else {
             if self.committed.max_neg.0.abs() > 1e-15 {
-                (self.committed.max_neg.0, self.committed.max_neg.1 * degrade)
+                (self.committed.max_neg.0, self.committed.max_neg.1)
             } else {
-                (-ty, -my * degrade)
+                (-ty, -my)
             }
         }
     }
@@ -176,13 +160,6 @@ impl HysteresisMaterial {
         if reversed {
             s.reversal = (c.theta, c.m);
             let ty = self.rule_for(c.theta).yield_deformation();
-            if matches!(c.branch, Branch::Skeleton) {
-                if c.theta > ty {
-                    s.peak_count_pos = c.peak_count_pos + 1;
-                } else if c.theta < -ty {
-                    s.peak_count_neg = c.peak_count_neg + 1;
-                }
-            }
             let yielded = c.theta.abs() >= ty || self.has_yielded();
             if self.rule.is_standard() {
                 s.branch = Branch::Masing {
@@ -271,12 +248,9 @@ impl HysteresisMaterial {
 
     /// 現在の branch 上で θ を評価する。
     fn eval_on_branch(&self, theta: f64, s: &HystState) -> (f64, f64, Branch) {
-        let degrade = s.degrade_factor(self.rule.degradation_rate());
         match s.branch {
             Branch::Skeleton => {
-                let (m, k) = self
-                    .rule_for(theta)
-                    .skeleton_with_degradation(theta, degrade);
+                let (m, k) = self.rule_for(theta).skeleton(theta);
                 (m, k, Branch::Skeleton)
             }
             Branch::Unloading { ku } => {
@@ -286,8 +260,8 @@ impl HysteresisMaterial {
                 if crossed_zero {
                     let theta_zero = tr - mr / ku;
                     let origin = (theta_zero, 0.0);
-                    let target = self.opposite_target_degraded(s.dir, degrade);
-                    let (m2, k2) = reload_line(self.rule_for(s.dir), origin, target, theta);
+                    let target = self.opposite_target(s.dir);
+                    let (m2, k2) = reload_line(origin, target, theta);
                     (m2, k2, Branch::Reloading { origin, target })
                 } else {
                     (m, ku, Branch::Unloading { ku })
@@ -300,12 +274,10 @@ impl HysteresisMaterial {
                     theta <= target.0
                 };
                 if reached {
-                    let (m, k) = self
-                        .rule_for(theta)
-                        .skeleton_with_degradation(theta, degrade);
+                    let (m, k) = self.rule_for(theta).skeleton(theta);
                     (m, k, Branch::Skeleton)
                 } else {
-                    let (m, k) = reload_line(self.rule_for(s.dir), origin, target, theta);
+                    let (m, k) = reload_line(origin, target, theta);
                     (m, k, Branch::Reloading { origin, target })
                 }
             }
@@ -321,12 +293,10 @@ impl HysteresisMaterial {
                 };
                 if reached_target {
                     if s.dir * (theta - outer_target.0) >= 0.0 {
-                        let (m, k) = self
-                            .rule_for(theta)
-                            .skeleton_with_degradation(theta, degrade);
+                        let (m, k) = self.rule_for(theta).skeleton(theta);
                         return (m, k, Branch::Skeleton);
                     }
-                    let (m, k) = reload_line(self.rule_for(s.dir), target, outer_target, theta);
+                    let (m, k) = reload_line(target, outer_target, theta);
                     (
                         m,
                         k,
@@ -336,7 +306,7 @@ impl HysteresisMaterial {
                         },
                     )
                 } else {
-                    let (m, k) = reload_line(self.rule_for(s.dir), origin, target, theta);
+                    let (m, k) = reload_line(origin, target, theta);
                     (
                         m,
                         k,
@@ -391,32 +361,13 @@ impl HysteresisMaterial {
 }
 
 /// 再載荷直線。
-fn reload_line(
-    rule: &HysteresisRule,
-    origin: (f64, f64),
-    target: (f64, f64),
-    theta: f64,
-) -> (f64, f64) {
+fn reload_line(origin: (f64, f64), target: (f64, f64), theta: f64) -> (f64, f64) {
     let dt = target.0 - origin.0;
     if dt.abs() < 1e-15 {
         return (origin.1, 0.0);
     }
-    if let HysteresisRule::Slip { slip_factor, .. } = rule {
-        let sf = slip_factor.clamp(1e-6, 1.0 - 1e-6);
-        let dm = target.1 - origin.1;
-        let pinch_x = origin.0 + sf * dt;
-        let pinch_m = origin.1 + sf * sf * dm;
-        if (theta - origin.0).abs() <= (pinch_x - origin.0).abs() {
-            let k = (pinch_m - origin.1) / (pinch_x - origin.0);
-            (origin.1 + k * (theta - origin.0), k)
-        } else {
-            let k = (target.1 - pinch_m) / (target.0 - pinch_x);
-            (pinch_m + k * (theta - pinch_x), k)
-        }
-    } else {
-        let k = (target.1 - origin.1) / dt;
-        (origin.1 + k * (theta - origin.0), k)
-    }
+    let k = (target.1 - origin.1) / dt;
+    (origin.1 + k * (theta - origin.0), k)
 }
 
 impl UniaxialMaterial for HysteresisMaterial {
@@ -444,29 +395,19 @@ mod tests {
     use crate::hysteresis::rule::{max_point, retrograde, standard, takeda};
     use approx::assert_relative_eq;
 
-    fn zero_increment_rule(degrading: bool) -> HysteresisRule {
-        if degrading {
-            HysteresisRule::TakedaDegrading {
-                crack: (10.0, 0.01),
-                yield_point: (20.0, 0.02),
-                ultimate: (30.0, 0.04),
-                alpha: 0.0,
-                degradation: 0.9,
-            }
-        } else {
-            HysteresisRule::Takeda {
-                crack: (10.0, 0.01),
-                yield_point: (20.0, 0.02),
-                ultimate: (30.0, 0.04),
-                alpha: 0.0,
-            }
+    fn zero_increment_rule() -> HysteresisRule {
+        HysteresisRule::Takeda {
+            crack: (10.0, 0.01),
+            yield_point: (20.0, 0.02),
+            ultimate: (30.0, 0.04),
+            alpha: 0.0,
         }
     }
 
     #[test]
     fn zero_increment_preserves_initial_tangent_and_finite_tiny_motion() {
         for zero in [0.0, -0.0] {
-            let mut m = HysteresisMaterial::new(zero_increment_rule(false));
+            let mut m = HysteresisMaterial::new(zero_increment_rule());
             assert_eq!(m.probe(zero), (0.0, 1000.0));
             assert_eq!(m.trial(zero), (0.0, 1000.0));
             m.commit();
@@ -476,7 +417,7 @@ mod tests {
             assert_eq!(m.probe(zero), (0.0, 1000.0));
         }
         for theta in [1e-20, -1e-20] {
-            let mut m = HysteresisMaterial::new(zero_increment_rule(false));
+            let mut m = HysteresisMaterial::new(zero_increment_rule());
             assert_eq!(m.trial(theta), (1000.0 * theta, 1000.0));
             assert_eq!(m.trial.theta, theta);
             assert_eq!(m.trial.dir, theta.signum());
@@ -491,7 +432,7 @@ mod tests {
             (-0.03, -25.0, 500.0),
             (0.03, 25.0, 500.0),
         ] {
-            let mut material = HysteresisMaterial::new(zero_increment_rule(false));
+            let mut material = HysteresisMaterial::new(zero_increment_rule());
             assert_eq!(material.trial(theta), (force, tangent));
             material.commit();
             let before = material.serialize_state();
@@ -504,14 +445,13 @@ mod tests {
 
     #[test]
     fn zero_increment_negative_peak_has_independent_response_and_entire_history() {
-        let mut direct = HysteresisMaterial::new(zero_increment_rule(false));
+        let mut direct = HysteresisMaterial::new(zero_increment_rule());
         assert_relative_eq!(direct.trial(-0.03).0, -25.0, epsilon = 1e-12);
         assert_eq!(direct.trial.kt, 500.0);
         direct.commit();
         assert_eq!(direct.committed.dir, -1.0);
         assert_eq!(direct.committed.branch, Branch::Skeleton);
         assert_eq!(direct.committed.max_neg, (-0.03, -25.0));
-        assert_eq!(direct.committed.peak_count_neg, 0);
         assert_eq!(
             direct.committed,
             HystState {
@@ -531,10 +471,6 @@ mod tests {
         assert_eq!(reversal.trial.reversal, (-0.03, -25.0));
         assert_eq!(reversal.trial.max_neg, (-0.03, -25.0));
         assert_eq!(reversal.trial.max_pos, (0.0, 0.0));
-        assert_eq!(
-            (reversal.trial.peak_count_pos, reversal.trial.peak_count_neg),
-            (0, 1)
-        );
         let before_failed_restore = direct.serialize_state();
         assert!(direct.deserialize_state(&[0xff, 0x00, 0x01]).is_err());
         assert_eq!(before_failed_restore, direct.serialize_state());
@@ -554,45 +490,42 @@ mod tests {
 
     #[test]
     fn zero_increment_probe_keeps_outstanding_trial_and_trial_replaces_it() {
-        for degrading in [false, true] {
-            let mut base = HysteresisMaterial::new(zero_increment_rule(degrading));
-            for theta in [-0.005, -0.03, -0.029, 0.025, 0.015, -0.02] {
-                base.trial(theta);
-                base.commit();
-                let mut probe = base.clone();
-                probe.trial(theta + 0.001);
-                let outstanding = probe.trial.clone();
-                let committed = probe.committed.clone();
-                let before = probe.serialize_state();
-                assert_eq!(probe.probe(theta), (committed.m, committed.kt));
-                assert_eq!(before, probe.serialize_state());
-                probe.commit();
-                assert_eq!(probe.committed, outstanding);
-                let mut trial = base.clone();
-                trial.trial(theta + 0.001);
-                assert_eq!(trial.trial(theta), (committed.m, committed.kt));
-                trial.commit();
-                assert_eq!(trial.committed, committed);
-                trial.trial(theta - 0.001);
-                trial.revert();
-                assert_eq!(trial.trial, committed);
-                assert_eq!(trial.trial(theta + 0.001), base.trial(theta + 0.001));
-                base.revert();
-            }
+        let mut base = HysteresisMaterial::new(zero_increment_rule());
+        for theta in [-0.005, -0.03, -0.029, 0.025, 0.015, -0.02] {
+            base.trial(theta);
+            base.commit();
+            let mut probe = base.clone();
+            probe.trial(theta + 0.001);
+            let outstanding = probe.trial.clone();
+            let committed = probe.committed.clone();
+            let before = probe.serialize_state();
+            assert_eq!(probe.probe(theta), (committed.m, committed.kt));
+            assert_eq!(before, probe.serialize_state());
+            probe.commit();
+            assert_eq!(probe.committed, outstanding);
+            let mut trial = base.clone();
+            trial.trial(theta + 0.001);
+            assert_eq!(trial.trial(theta), (committed.m, committed.kt));
+            trial.commit();
+            assert_eq!(trial.committed, committed);
+            trial.trial(theta - 0.001);
+            trial.revert();
+            assert_eq!(trial.trial, committed);
+            assert_eq!(trial.trial(theta + 0.001), base.trial(theta + 0.001));
+            base.revert();
         }
     }
 
     #[test]
-    fn zero_increment_asymmetric_degrading_cycles_do_not_create_peaks_or_branches() {
-        let negative = HysteresisRule::TakedaDegrading {
+    fn zero_increment_asymmetric_cycles_preserve_history_and_branches() {
+        let negative = HysteresisRule::Takeda {
             crack: (10.0, 0.01),
             yield_point: (30.0, 0.03),
             ultimate: (40.0, 0.05),
             alpha: 0.0,
-            degradation: 0.9,
         };
         let mut direct =
-            HysteresisMaterial::new(zero_increment_rule(true)).with_negative_rule(negative);
+            HysteresisMaterial::new(zero_increment_rule()).with_negative_rule(negative);
         let mut repeated = direct.clone();
         for theta in [
             -0.005, -0.04, -0.039, 0.0, 0.03, 0.029, -0.04, -0.02, 0.01, 0.04,
@@ -611,8 +544,6 @@ mod tests {
             repeated.commit();
             assert_eq!(direct.committed, repeated.committed);
         }
-        assert!(direct.committed.peak_count_neg > 0);
-        assert!(direct.committed.peak_count_pos > 0);
     }
 
     #[test]
@@ -754,63 +685,6 @@ mod tests {
     }
 
     #[test]
-    fn test_slip_pinching() {
-        let rule = HysteresisRule::Slip {
-            yield_point: (100.0, 0.01),
-            ultimate: (120.0, 0.05),
-            slip_factor: 0.5,
-        };
-        let mut mat = HysteresisMaterial::new(rule);
-        // 降伏→反転→原点付近で M が小さい（ピンチ）
-        mat.trial(0.03);
-        mat.commit();
-        mat.trial(0.0);
-        mat.commit();
-        let (m_near_zero, _) = mat.trial(0.001);
-        assert!(
-            m_near_zero.abs() < 30.0,
-            "slip should pinch near origin, got M={}",
-            m_near_zero
-        );
-    }
-
-    #[test]
-    fn test_slip_reload_pinch_shape() {
-        // スリップ再載荷は「原点付近の剛性が直線割線より低く、その後急峻」という
-        // ピンチ形状でなければならない（従来は逆に原点付近が急峻だった）。
-        let rule = HysteresisRule::Slip {
-            yield_point: (100.0, 0.01),
-            ultimate: (120.0, 0.05),
-            slip_factor: 0.5,
-        };
-        let origin = (0.0, 0.0);
-        let target = (0.03, 110.0);
-        let dt = target.0 - origin.0;
-        let k_line = (target.1 - origin.1) / dt;
-
-        // 区間1（スリップ域、θ=0.3·dt < 0.5·dt）: 剛性 = slip_factor·k_line。
-        let (_m1, k1) = reload_line(&rule, origin, target, 0.3 * dt);
-        assert!(
-            (k1 - 0.5 * k_line).abs() < 1e-6 * k_line,
-            "segment-1 slope should be slip_factor·k_line: k1={k1} k_line={k_line}"
-        );
-        // 区間2（θ=0.7·dt > 0.5·dt）: 剛性 = (1+slip_factor)·k_line。
-        let (_m2, k2) = reload_line(&rule, origin, target, 0.7 * dt);
-        assert!(
-            (k2 - 1.5 * k_line).abs() < 1e-6 * k_line,
-            "segment-2 slope should be (1+slip_factor)·k_line: k2={k2}"
-        );
-        // ピンチ: 原点付近は割線より軟、その後は割線より剛。
-        assert!(
-            k1 < k_line && k2 > k_line,
-            "k1={k1} k_line={k_line} k2={k2}"
-        );
-        // 終点で target に一致（連続）。
-        let (m_end, _) = reload_line(&rule, origin, target, target.0);
-        assert!((m_end - target.1).abs() < 1e-9, "reload must reach target");
-    }
-
-    #[test]
     fn test_probe_matches_trial_without_mutating_state() {
         // probe は trial と数学的に同一の結果を返し、状態を書き換えない
         // （反転・内側ループを経た複雑な分岐状態で確認）。
@@ -864,68 +738,6 @@ mod tests {
             m_inner,
             m_back
         );
-    }
-
-    #[test]
-    fn test_takeda_degrading_peak_reduction() {
-        // TakedaDegrading: ピーク到達ごとに耐力が劣化する。
-        let rule = HysteresisRule::TakedaDegrading {
-            crack: (40.0, 0.002),
-            yield_point: (100.0, 0.01),
-            ultimate: (120.0, 0.05),
-            alpha: 0.4,
-            degradation: 0.9, // 1ピークごとに 10% 低下
-        };
-        let mut mat = HysteresisMaterial::new(rule);
-        // 1 サイクル目: +0.03 → -0.03（ピーク到達 2 回）
-        mat.trial(0.03);
-        mat.commit();
-        mat.trial(0.0);
-        mat.commit();
-        mat.trial(-0.03);
-        mat.commit();
-        // 2 サイクル目の正側ピーク再到達で耐力が低下しているか
-        mat.trial(0.0);
-        mat.commit();
-        let (m_peak2, _) = mat.trial(0.03);
-        // 初回ピークは 110（skeleton at 0.03）。劣化後は 110*0.9^n 系で低下。
-        assert!(
-            m_peak2 < 110.0,
-            "degrading model should reduce peak on 2nd cycle: m={}",
-            m_peak2
-        );
-    }
-
-    #[test]
-    fn test_takeda_degrading_monotonic_is_step_independent() {
-        // 単調載荷での耐力劣化は載荷刻み数に依存してはならない（物理的に、
-        // 処女包絡線を辿るだけでは劣化しない）。1 ステップと 50 ステップで
-        // 同一変位まで押した最終応力が一致することを検証する。
-        let rule = HysteresisRule::TakedaDegrading {
-            crack: (40.0, 0.002),
-            yield_point: (100.0, 0.01),
-            ultimate: (120.0, 0.05),
-            alpha: 0.4,
-            degradation: 0.9,
-        };
-        let target = 0.03;
-
-        let mut coarse = HysteresisMaterial::new(rule.clone());
-        let (m_coarse, _) = coarse.trial(target);
-        coarse.commit();
-
-        let mut fine = HysteresisMaterial::new(rule);
-        let n = 50;
-        let mut m_fine = 0.0;
-        for i in 1..=n {
-            let (m, _) = fine.trial(target * i as f64 / n as f64);
-            fine.commit();
-            m_fine = m;
-        }
-
-        assert_relative_eq!(m_coarse, m_fine, epsilon = 1e-9);
-        // 処女単調載荷では劣化なし（スケルトン値 110 に一致）。
-        assert_relative_eq!(m_coarse, 110.0, epsilon = 1e-6);
     }
 
     #[test]

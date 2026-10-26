@@ -18,9 +18,7 @@ pub struct Concrete {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 struct ConcreteState {
-    strain: f64,
     stress: f64,
     tangent: f64,
     /// 最大経験圧縮ひずみ。
@@ -45,7 +43,6 @@ impl Concrete {
         residual_ratio: f64,
     ) -> Self {
         let init = ConcreteState {
-            strain: 0.0,
             stress: 0.0,
             tangent: 0.0,
             max_comp_strain: 0.0,
@@ -151,7 +148,6 @@ impl Concrete {
         };
 
         ConcreteState {
-            strain,
             stress,
             tangent,
             max_comp_strain: max_comp,

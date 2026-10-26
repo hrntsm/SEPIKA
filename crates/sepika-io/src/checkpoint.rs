@@ -26,7 +26,7 @@ pub struct Checkpoint {
 }
 
 /// 読込を受理するチェックポイントの版。
-pub const CHECKPOINT_SCHEMA_VERSION: u32 = 3;
+pub const CHECKPOINT_SCHEMA_VERSION: u32 = 4;
 
 const CHECKPOINT_DIR: &str = "checkpoint";
 const CHECKPOINT_FILE: &str = "checkpoint.bin";

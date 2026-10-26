@@ -3,7 +3,6 @@
 //! 応答は通常の符号規約（圧縮負・引張正）で返す。
 
 use crate::state_serde::impl_material_serde;
-use crate::uniaxial::mander;
 use crate::uniaxial::UniaxialMaterial;
 
 /// 圧縮側の包絡線（骨格曲線）。
@@ -20,17 +19,6 @@ pub enum ConcreteEnvelope {
         /// 残留開始ひずみ εcu（正）。
         eps_cu: f64,
     },
-    /// Mander (1988) の Popovics 型連続曲線。
-    Mander {
-        /// 圧縮強度 f'cc（正）。
-        fcc: f64,
-        /// f'cc 時ひずみ εcc（正）。
-        eps_cc: f64,
-        /// 初期弾性係数 Ec。
-        ec: f64,
-        /// 終局ひずみ εcu（正）。
-        eps_cu: f64,
-    },
     /// NewRC 式。
     NewRc {
         /// NewRC 式の圧縮包絡線。
@@ -45,7 +33,6 @@ impl ConcreteEnvelope {
     pub fn initial_tangent(&self) -> f64 {
         match *self {
             ConcreteEnvelope::KentPark { fc, eps_c0, .. } => 2.0 * fc / eps_c0,
-            ConcreteEnvelope::Mander { ec, .. } => ec,
             ConcreteEnvelope::NewRc { envelope, .. } => envelope.ec,
         }
     }
@@ -54,7 +41,6 @@ impl ConcreteEnvelope {
     pub fn peak_stress(&self) -> f64 {
         match *self {
             ConcreteEnvelope::KentPark { fc, .. } => fc,
-            ConcreteEnvelope::Mander { fcc, .. } => fcc,
             ConcreteEnvelope::NewRc { envelope, .. } => envelope.fc,
         }
     }
@@ -63,7 +49,6 @@ impl ConcreteEnvelope {
     pub fn peak_strain(&self) -> f64 {
         match *self {
             ConcreteEnvelope::KentPark { eps_c0, .. } => eps_c0,
-            ConcreteEnvelope::Mander { eps_cc, .. } => eps_cc,
             ConcreteEnvelope::NewRc { envelope, .. } => envelope.eps_c0,
         }
     }
@@ -85,19 +70,6 @@ impl ConcreteEnvelope {
                     (fc + slope * (x - eps_c0), slope)
                 } else {
                     (fcu, 0.0)
-                }
-            }
-            ConcreteEnvelope::Mander {
-                fcc,
-                eps_cc,
-                ec,
-                eps_cu,
-            } => {
-                if x <= eps_cu {
-                    mander::popovics_envelope(fcc, eps_cc, ec, x)
-                } else {
-                    let (s, _) = mander::popovics_envelope(fcc, eps_cc, ec, eps_cu);
-                    (s, 0.0)
                 }
             }
             ConcreteEnvelope::NewRc { envelope, eps_cu } => {
@@ -127,7 +99,6 @@ pub struct ConcreteCyclic {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct CcState {
-    strain: f64,
     stress: f64,
     tangent: f64,
     /// 最大経験圧縮ひずみ。
@@ -151,20 +122,6 @@ impl ConcreteCyclic {
         )
     }
 
-    /// Mander 骨格。
-    pub fn mander(fcc: f64, eps_cc: f64, ec: f64, eps_cu: f64, ft: f64, ets: f64) -> Self {
-        Self::with_envelope(
-            ConcreteEnvelope::Mander {
-                fcc,
-                eps_cc,
-                ec,
-                eps_cu,
-            },
-            ft,
-            ets,
-        )
-    }
-
     /// NewRC 骨格 + Yassin 履歴。
     pub fn newrc(fc: f64, eps_cu: f64, ft: f64, ets: f64) -> Self {
         let envelope = crate::newrc::NewRcEnvelope::new(fc);
@@ -181,24 +138,8 @@ impl ConcreteCyclic {
         material
     }
 
-    /// Mander 骨格（拘束後パラメータを算定）。
-    #[allow(clippy::too_many_arguments)]
-    pub fn mander_confined(
-        fco: f64,
-        eps_co: f64,
-        ec: f64,
-        fl_eff: f64,
-        eps_cu: f64,
-        ft: f64,
-        ets: f64,
-    ) -> Self {
-        let p = mander::confined_params(fco, eps_co, fl_eff);
-        Self::mander(p.fcc, p.eps_cc, ec, eps_cu, ft, ets)
-    }
-
     fn with_envelope(envelope: ConcreteEnvelope, ft: f64, ets: f64) -> Self {
         let init = CcState {
-            strain: 0.0,
             stress: 0.0,
             tangent: envelope.initial_tangent(),
             eps_min: 0.0,
@@ -286,7 +227,6 @@ impl ConcreteCyclic {
         };
 
         CcState {
-            strain,
             stress,
             tangent,
             eps_min,
@@ -433,27 +373,6 @@ mod tests {
         let mut c2 = kp30();
         let (s_zero, _) = c2.trial(eps_t0 + 0.003);
         assert_relative_eq!(s_zero, 0.0, epsilon = 1e-9);
-    }
-
-    #[test]
-    fn test_mander_envelope_peak_via_popovics() {
-        // Mander 骨格: ピークで σ = f'cc（Popovics の恒等式）。
-        let mut c = ConcreteCyclic::mander(46.95, 0.00765, 25000.0, 0.02, 2.0, 1000.0);
-        let (s_peak, _) = c.trial(-0.00765);
-        assert_relative_eq!(s_peak, -46.95, max_relative = 1e-9);
-    }
-
-    #[test]
-    fn test_mander_confined_stronger_than_unconfined() {
-        // 有効拘束圧があると強度・靱性が上がる。
-        let mut un = ConcreteCyclic::mander_confined(30.0, 0.002, 25000.0, 0.0, 0.01, 2.0, 1000.0);
-        let mut co = ConcreteCyclic::mander_confined(30.0, 0.002, 25000.0, 3.0, 0.01, 2.0, 1000.0);
-        let (s_un, _) = un.trial(-0.004);
-        let (s_co, _) = co.trial(-0.004);
-        assert!(
-            s_co < s_un,
-            "拘束ありの方が高応力（負に大きい）: un={s_un}, co={s_co}"
-        );
     }
 
     #[test]

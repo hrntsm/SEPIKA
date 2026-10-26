@@ -93,9 +93,7 @@ pub enum ConcreteHysteresis {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 struct NewRcState {
-    strain: f64,
     stress: f64,
     tangent: f64,
     max_comp_strain: f64,
@@ -134,7 +132,6 @@ impl ConcreteNewRc {
         let ec = envelope.ec;
         let eps_c0 = envelope.eps_c0;
         let init = NewRcState {
-            strain: 0.0,
             stress: 0.0,
             tangent: ec,
             max_comp_strain: 0.0,
@@ -208,7 +205,6 @@ impl ConcreteNewRc {
             (s, t, c.max_comp_strain, max_tens, cracked)
         };
         NewRcState {
-            strain,
             stress,
             tangent,
             max_comp_strain: max_comp,

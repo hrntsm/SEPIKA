@@ -15,28 +15,12 @@ pub enum HysteresisRule {
         /// 除荷剛性低下指数 α
         alpha: f64,
     },
-    /// 武田モデル劣化版。
-    TakedaDegrading {
-        crack: (f64, f64),
-        yield_point: (f64, f64),
-        ultimate: (f64, f64),
-        alpha: f64,
-        /// 劣化率
-        degradation: f64,
-    },
     /// 原点指向型（せん断）。
     OriginOriented {
         /// 降伏点 (Qy, δy)
         yield_point: (f64, f64),
         /// 終局点 (Qu, δu)
         ultimate: (f64, f64),
-    },
-    /// スリップ型（せん断）。
-    Slip {
-        yield_point: (f64, f64),
-        ultimate: (f64, f64),
-        /// スリップ量係数（0..1）
-        slip_factor: f64,
     },
     /// 逆行型。
     Retrograde {
@@ -61,15 +45,9 @@ pub enum HysteresisRule {
 impl HysteresisRule {
     /// スケルトン包絡線上の (力, 接線剛性) を返す。符号対称を仮定。
     /// 変形は θ `[rad]` または δ `[mm]`、力は [N·mm] または `[N]`。
-    pub fn skeleton_with_degradation(&self, theta: f64, degrade_factor: f64) -> (f64, f64) {
+    pub fn skeleton(&self, theta: f64) -> (f64, f64) {
         match *self {
             HysteresisRule::Takeda {
-                crack: (mc, tc),
-                yield_point: (my, ty),
-                ultimate: (mu, tu),
-                ..
-            }
-            | HysteresisRule::TakedaDegrading {
                 crack: (mc, tc),
                 yield_point: (my, ty),
                 ultimate: (mu, tu),
@@ -89,35 +67,11 @@ impl HysteresisRule {
                 crack: (mc, tc),
                 yield_point: (my, ty),
                 ultimate: (mu, tu),
-            } => {
-                let (m, k) = trilinear_symmetric(theta, tc, mc, ty, my, tu, mu);
-                (m * degrade_factor, k * degrade_factor)
-            }
+            } => trilinear_symmetric(theta, tc, mc, ty, my, tu, mu),
             HysteresisRule::OriginOriented {
                 yield_point: (my, ty),
                 ultimate: (mu, tu),
-            }
-            | HysteresisRule::Slip {
-                yield_point: (my, ty),
-                ultimate: (mu, tu),
-                ..
-            } => {
-                let (m, k) = bilinear_symmetric(theta, ty, my, tu, mu);
-                (m * degrade_factor, k * degrade_factor)
-            }
-        }
-    }
-
-    /// スケルトン包絡線（劣化なし）。
-    pub fn skeleton(&self, theta: f64) -> (f64, f64) {
-        self.skeleton_with_degradation(theta, 1.0)
-    }
-
-    /// 劣化版の劣化率。
-    pub fn degradation_rate(&self) -> f64 {
-        match *self {
-            HysteresisRule::TakedaDegrading { degradation, .. } => degradation,
-            _ => 1.0,
+            } => bilinear_symmetric(theta, ty, my, tu, mu),
         }
     }
 
@@ -125,9 +79,7 @@ impl HysteresisRule {
     pub fn yield_point(&self) -> (f64, f64) {
         match *self {
             HysteresisRule::Takeda { yield_point, .. }
-            | HysteresisRule::TakedaDegrading { yield_point, .. }
             | HysteresisRule::OriginOriented { yield_point, .. }
-            | HysteresisRule::Slip { yield_point, .. }
             | HysteresisRule::Retrograde { yield_point, .. }
             | HysteresisRule::Standard { yield_point, .. }
             | HysteresisRule::MaxPointOriented { yield_point, .. } => yield_point,
@@ -148,24 +100,10 @@ impl HysteresisRule {
     pub fn crack_point(&self) -> Option<(f64, f64)> {
         match *self {
             HysteresisRule::Takeda { crack, .. }
-            | HysteresisRule::TakedaDegrading { crack, .. }
             | HysteresisRule::Retrograde { crack, .. }
             | HysteresisRule::Standard { crack, .. }
             | HysteresisRule::MaxPointOriented { crack, .. } => Some(crack),
             _ => None,
-        }
-    }
-
-    /// 終局点。
-    pub fn ultimate_point(&self) -> (f64, f64) {
-        match *self {
-            HysteresisRule::Takeda { ultimate, .. }
-            | HysteresisRule::TakedaDegrading { ultimate, .. }
-            | HysteresisRule::OriginOriented { ultimate, .. }
-            | HysteresisRule::Slip { ultimate, .. }
-            | HysteresisRule::Retrograde { ultimate, .. }
-            | HysteresisRule::Standard { ultimate, .. }
-            | HysteresisRule::MaxPointOriented { ultimate, .. } => ultimate,
         }
     }
 
@@ -174,12 +112,6 @@ impl HysteresisRule {
     pub fn unloading_stiffness(&self, max_deformation: f64) -> Option<f64> {
         match *self {
             HysteresisRule::Takeda {
-                crack: (mc, tc),
-                yield_point: (_my, theta_y),
-                alpha,
-                ..
-            }
-            | HysteresisRule::TakedaDegrading {
                 crack: (mc, tc),
                 yield_point: (_my, theta_y),
                 alpha,
@@ -193,7 +125,6 @@ impl HysteresisRule {
                 Some(k0 * ratio.powf(-alpha))
             }
             HysteresisRule::OriginOriented { .. }
-            | HysteresisRule::Slip { .. }
             | HysteresisRule::Retrograde { .. }
             | HysteresisRule::Standard { .. }
             | HysteresisRule::MaxPointOriented { .. } => None,
@@ -201,10 +132,7 @@ impl HysteresisRule {
     }
 
     pub(crate) fn is_takeda(&self) -> bool {
-        matches!(
-            *self,
-            HysteresisRule::Takeda { .. } | HysteresisRule::TakedaDegrading { .. }
-        )
+        matches!(*self, HysteresisRule::Takeda { .. })
     }
 
     pub(crate) fn is_retrograde(&self) -> bool {

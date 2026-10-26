@@ -4,7 +4,6 @@ use std::fmt::Debug;
 pub mod bilinear;
 pub mod concrete;
 pub mod concrete_cyclic;
-pub mod mander;
 pub mod menegotto_pinto;
 
 pub use bilinear::Bilinear;
@@ -63,6 +62,3 @@ pub trait UniaxialMaterial: Send + Sync + Debug {
     /// コンクリート履歴の除荷則を解析種別で切替える（既定は何もしない）。
     fn set_concrete_hysteresis(&mut self, _dynamic: bool) {}
 }
-
-pub type ElasticSteel = Bilinear;
-pub type ElasticConcrete = Concrete;
