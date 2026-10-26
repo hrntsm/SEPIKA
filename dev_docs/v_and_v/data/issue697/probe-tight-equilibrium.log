@@ -1,0 +1,22 @@
+   Compiling sepika-solver v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-697\crates\sepika-solver)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.81s
+     Running tests\issue697_probe.rs (target\debug\deps\issue697_probe-710aa1931c48a4d7.exe)
+
+running 1 test
+WEIGHT=3300000 AXIAL=-240000 TERMINATION=LambdaCap { lambda: 1.0 } STEPS=101 EVENTS=[] RESPONSE=[PushoverMemberResponse { elem: ElemId(0), m_strong: 329999999.9989486, m_weak: 2.928558707489573e-9, shear_strong: 659999.9999984516, shear_weak: 1.0615672091307395e-11, axial: 0.0, rp: 0.0012210088136041651, horizontal_force: 659999.9999984516, wall_shear_signed: None }]
+
+thread 'tension_shear_public_solver' (32256) panicked at crates\sepika-solver\tests\issue697_probe.rs:208:25:
+N residual=0.15625
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+STEP 0 lambda=0 Q=-0 u=0 history=Some(MemberStepState { n: -240000.0, my_i: -7.147637e-10, mz_i: 5.2011217e-25, my_j: 7.147637e-10, mz_j: -5.2011217e-25, ry_i: 0.0, rz_i: 0.0, ry_j: 0.0, rz_j: 0.0, spring_rz_i: 0.0, spring_rz_j: 0.0 })
+STEP 1 lambda=0.01 Q=6599.9999999999945 u=0.0033823671497584537 history=Some(MemberStepState { n: -240000.0, my_i: 3.237956e-9, mz_i: -3300000.0, my_j: 1.0043194e-9, mz_j: -4.656613e-10, ry_i: 2.4278658e-21, rz_i: -6.7647343e-6, ry_j: -2.4278658e-21, rz_j: -1.7828503e-6, spring_rz_i: 0.0, spring_rz_j: 0.0 })
+test tension_shear_public_solver ... FAILED
+
+failures:
+
+failures:
+    tension_shear_public_solver
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p sepika-solver --test issue697_probe`
