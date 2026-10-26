@@ -1119,11 +1119,9 @@ impl Model {
         Ok(())
     }
 
-    /// 支持部材の材軸を `(始端座標, 終端座標)` `[mm]` で返す。引けない場合は `None`。
-    ///
-    /// 主架構は 2 節点要素の両端節点、二次部材は支持端アンカーを再帰的に解決する。
-    /// 片持ち二次部材の自由端は親構面内ベクトルで表され、構面の基底をモデルが
-    /// 持たないため解決できない（`None`）。
+    /// 支持部材の材軸を `(始端座標, 終端座標)` `[mm]` で返す。
+    /// 片持ち小梁・間柱は、支持端と自由端ベクトルを解決できれば `(支持端座標, 自由端座標)` を返す。
+    /// 支持部材・アンカー・必要な構面方向が解決できない場合や、支持参照が循環する場合は `None`。
     pub fn support_member_axis(&self, id: SupportMemberId) -> Option<([f64; 3], [f64; 3])> {
         let mut visiting = std::collections::HashSet::new();
         self.support_member_axis_inner(id, &mut visiting)
