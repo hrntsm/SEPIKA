@@ -1,0 +1,27 @@
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-886\crates\sepika-design-jp)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.64s
+     Running tests\source886_probe.rs (target\debug\deps\source886_probe-301469f4ea67e0ec.exe)
+
+running 3 tests
+allowable_panel,shape=Cross,ma=483516000,factor=0.999999,ratio=0.999999000000000
+allowable_panel,shape=Cross,ma=483516000,factor=1,ratio=1.000000000000000
+allowable_panel,shape=Cross,ma=483516000,factor=1.000001,ratio=1.000001000000000
+rank,n=-2000000,n_ratio=0.000000000000000,m_ratio=0.479761357753610
+allowable_panel,shape=Tee,ma=322344000,factor=0.999999,ratio=0.999999000000000
+rank,n=0,n_ratio=0.000000000000000,m_ratio=0.479761357753610
+rc_ultimate_collector,src_members=1,results=0
+rank,n=2000000,n_ratio=0.171982708773543,m_ratio=0.479761357753610
+rank,n=11629076.052252904,n_ratio=1.000000000000000,m_ratio=0.479761357753610
+allowable_panel,shape=Tee,ma=322344000,factor=1,ratio=1.000000000000000
+allowable_panel,shape=Tee,ma=322344000,factor=1.000001,ratio=1.000001000000000
+allowable_panel,shape=Knee,ma=322344000,factor=0.999999,ratio=0.999999000000000
+allowable_panel,shape=Knee,ma=322344000,factor=1,ratio=1.000000000000000
+allowable_panel,shape=Knee,ma=322344000,factor=1.000001,ratio=1.000001000000000
+allowable_panel,shape=Corner,ma=161172000,factor=0.999999,ratio=0.999999000000000
+test source886_src_is_excluded_from_rc_ultimate_collector ... ok
+allowable_panel,shape=Corner,ma=161172000,factor=1,ratio=1.000000000000000
+test source886_rank_ratios_are_reproduction_not_appendix_n0 ... okallowable_panel,shape=Corner,ma=161172000,factor=1.000001,ratio=1.000001000000000
+
+test source886_allowable_panel_fixed_capacities_and_boundary ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

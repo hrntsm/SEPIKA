@@ -4,6 +4,10 @@
 
 [原画像対応・独立数値・要素→証拠索引](SRC耐震ルート_Issue885_原典照合.md)で第2版第1刷6.5 pp436–444と6.2.4 p363・6.9 pp482–484の関連条件を有限確認。柱表5区分・境界と公開分類入口は一致（30観測）、壁bool分類2、他種Ds表8の限定Verificationを記録する。状態は🔶。SRC用Ds選択は未対応で、手動S選択経路の条件付き危険側反例を保持する。実SRCモデルのApp通し実行は未確認、選択経路のソース確認と公開関数実測を区別する。#489のclosed見送りは維持し、再開・同一新規修正は要求せず、未解決条件を#697へ追補する。比算定略算は別原典必要（#886）、柱脚・破壊同定・併用条件不足は#872/#697で継続。全ルート・全表・専門家サインオフ・実験Validation・手動GUIは未確認。
 
+## SRC部材の靭性・終局耐力・仕口パネル（#886）
+
+[原画像・独立値・公開入口対応](SRC靭性終局仕口_Issue886_原典照合.md)は2025年第2版第1刷の付録1-4.1 pp.758–759、1-4.2 pp.764–768/770を有限照合する。状態は🔶。原典終局式の算術、現行rank比4点・許容パネル境界12点・SRC終局collector除外1点のVerificationを分離する。終局せん断累加/格子・ラチス/終局パネルは未対応。付録のN0/M0とrank用の同名値は異義で、柱軸力分担・端部条件との採用関係、引張ゼロ化・強軸比、許容パネルの根拠は#697で継続する。未知F235は#912、必須細則・未評価成分とSRC表不在は#697、#489/#745の閉鎖を維持する。#671/#552を再検証済みとせず、専門家サインオフ・実験Validation・手動GUIは未確認。
+
 ## SRC構造細則・一次設計の重点照合（#884）
 
 [原典対応と独立数値・要素証拠索引](SRC構造細則一次設計_Issue884_原典照合.md)に2025年第2版第1刷の3.8 pp.226–228、6.1 pp.337–339、9.2 p.566、9.3 p.584を対応づけた。法定鉄骨かぶり・準用全条件の自動判定なし、梁N/My/Qzの未評価を明記し、未評価を適合と誤読した場合の危険側可能性は#697で継続する。未知鋼材のF235補完による低強度材の耐力過大疑いは[修正#912](https://github.com/hrntsm/SEPIKA/issues/912)へ接続する。換算・累加/分担式は閲覧節では照合不可で別原典を要し、#434の有限Verificationと分離する。#745はnot_planned閉で共通化実装済みとはしない。#879/#881の共通材料成果を参照し、#885/#886・CFTは対象外。全原典・専門家サインオフ・実験Validationは未確認で状態は🔶。
@@ -179,6 +183,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | レポート | 対象 | 状態 |
 |---|---|---|
 | [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
+| [SRC靭性終局仕口_Issue886_原典照合.md](SRC靭性終局仕口_Issue886_原典照合.md) | SRC靭性・曲げ累加/軸力・せん断区分・終局/許容パネルの原典対応と有限独立値 | 🔶（限定Verification、未対応終局・別原典・Validationは残る） |
 | [SRC構造細則一次設計_Issue884_原典照合.md](SRC構造細則一次設計_Issue884_原典照合.md) | SRC固有細則・複合断面・一次設計の適用と公開梁検定境界 | 🔶（有限Verification、法定詳細/別原典/Validationは残る） |
 | [RC部材力学モデル_Issue883_原典照合.md](RC部材力学モデル_Issue883_原典照合.md) | 梁Mu/Mc・柱Mu軸力三分岐・壁Qu/βs/Qcと適用条件 | 🔶（原画像・独立6probe成功。壁Qu上限是正#910、適用根拠#697・Validation未） |
 | [鉄骨耐震ルート_Issue880_原典照合.md](鉄骨耐震ルート_Issue880_原典照合.md) | ルート適用資格・Qun積と等号・一次筋かいβの応力割増し | 🔶（積と境界の有限Verification。ルート2自動適用なし・Validation未） |
@@ -411,6 +416,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 616 | 大梁自重の床板実重複控除 | sepika-load / sepika-job / sepika-app | self_weight/girder_overlap.rs・app/girder_weight_tests.rs・weight_preparation.rs | [独立値と実入口](大梁床板実重複控除_Issue616_確認記録.md#独立期待値と実入口) | 横断 | 🔶（数値Verification、Validation未） |
 | 775 | ctutils 推移依存監査 | Cargo.lock / sepika-io | zip、ctutils、OVIKA | [監査と実行証拠](ctutils推移依存監査_Issue775_2026-10.md#実行証拠) | 横断 | 🔶（0.4.5 の最小解決、監査・IO default/parquet 成功。独立レビュー・最終 CI は記録を参照） |
 | 496 | 壁側柱の物理的分担と局所解放 | sepika-core / sepika-element / sepika-solver / sepika-design-jp / sepika-job / sepika-app | model/wall_side_column.rs、wall/side_column、frame/fiber、tests/wall_system_linear.rs | [原七Doneとrun別結果](壁側柱の物理的分担と局所解放_Issue496_2026-10.md#完了条件と試験の対応) | 横断 | 🔶（限定Verification、full_model3snapshot未受入・最終ゲート・Validation未確認） |
+| 886 | SRC靭性・終局・仕口の重点照合 | sepika-design-jp | srrc/panel_zone.rs・secondary/src_rank.rs・ultimate/rc_check.rs | [独立値と公開入口](SRC靭性終局仕口_Issue886_原典照合.md#独立数値と入口verification)、保存source886_* 3試験 | 設計/調査 | 🔶（原典算術と現行入口Verificationを区別。別原典・実験Validation未） |
 | 671 | SRC梁のQL参照完全性 | sepika-design-jp / sepika-core / sepika-app | srrc/tests.rs、member_design_check.rs、result_contract.rs、app/src_ql_acceptance_tests.rs | [変更後の直接検証](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後の直接検証)・[Appと保存受入](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後のappと保存受入) | 横断 | 🔶（直接/公開actions/OVIKA資格・Windows横断Verification成功、MCP専用受入は今回対象外、最終ゲート・Validation未確認） |
 | 690 | 依存監査とOVIKA保存 | workspace / sepika-io / sepika-app | Cargo.toml、Cargo.lock、deny.toml、ovika.rs | [実使用APIと維持する境界](依存監査とOVIKA保存_Issue690_2026-10.md#実使用apiと維持する境界)・[実行証拠](依存監査とOVIKA保存_Issue690_2026-10.md#実行証拠) | 横断 | 🔶（最終旧8構成App441/関連feature1276成功・監査/静的/文書成功。中間IO195を区別、正式review/最終CI・#671連携は後続） |
 | 687 | 部材荷重方向の計算入口拒否 | sepika-core / sepika-solver / sepika-job / sepika-app / sepika-mcp | model/load.rs、statics/analysis/tests.rs、job/tests/member_load_direction.rs、member_load_direction_acceptance_tests.rs、mcp/tests/member_load_direction.rs、persist.rs | [直接回帰](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後の共通入口と直接回帰)・[App](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後のapp公開actionundoovika)・[MCP](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後のmcp公開job保存成果) | 横断 | 🔶（方向拒否・正常値・保持/Undo/保存と旧成果失効を確認。構成/追補の重複を独立件数へ足さない。横断1720/feature1272・IO191を記録（記法修正前snapshot）。最終fmt/default Clippy成功、文書/正式ゲート未確認） |

@@ -1,0 +1,7 @@
+appendix_concrete,Fc_prime,cNuc,cN0,cM0 19.2 6912000.0 3456000.0 518400000.0
+appendix_shear,Fs_at_24_and_50 3.33 4.5
+appendix_shear,rQsu1,rQsu2,rQu 873000.0 747000.0 500000
+appendix_shear,sQsu_solid,lacing45 405946.5212726097 166170.09357883869
+appendix_ultimate_panel,jMu 1019355463.5312772
+current_allowable_panel,Ma 483516000.00000006
+current_rank,N0,N2MN_over_N0,sM0_over_M0 11629076.052252904 0.1719827087735435 0.4797613577536099
