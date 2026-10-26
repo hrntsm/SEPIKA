@@ -7,14 +7,17 @@ use sepika_core::model::{
 
 use super::core::ColumnStiffness;
 
-/// 正の有限なn・壁面積・柱面積と非負有限の柱剛性から付加剛性 [N/mm] を返す。
+/// 1以上の有限なn、正の有限な壁面積・柱面積と非負有限の柱剛性から付加剛性 [N/mm] を返す。
 /// aw・sum_acは [mm²]、sum_kcは [N/mm]、nは無次元。入力不正又は非有限な結果はErr。
 pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> Result<f64, String> {
-    if [n, aw, sum_ac].iter().any(|v| !v.is_finite() || *v <= 0.0)
+    if !n.is_finite() || n < 1.0 {
+        return Err("n倍法: 係数nは1以上の有限値にしてください".into());
+    }
+    if [aw, sum_ac].iter().any(|v| !v.is_finite() || *v <= 0.0)
         || !sum_kc.is_finite()
         || sum_kc < 0.0
     {
-        return Err("n倍法: n・壁面積・柱面積は正の有限値、柱剛性は非負有限値が必要です".into());
+        return Err("n倍法: 壁面積・柱面積は正の有限値、柱剛性は非負有限値が必要です".into());
     }
     let stiffness = n * aw * sum_kc / sum_ac;
     if !stiffness.is_finite() {
@@ -166,9 +169,7 @@ pub fn append_misc_wall_stiffnesses(
     let Some(n) = model.stress_cfg.misc_wall_n else {
         return Ok(());
     };
-    if !n.is_finite() || n <= 0.0 {
-        return Err("n倍法: 係数nは正の有限値にしてください".into());
-    }
+    model.stress_cfg.validate_misc_wall_n()?;
     if model.wall_plates.is_empty() {
         return Ok(());
     }

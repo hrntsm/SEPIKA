@@ -4,9 +4,17 @@
 
 [追加調査記録](../handoff/Fes原典_Issue720_調査記録.md#2026-10-27の追加調査と再開条件)で採用技術原典の版・編集対象時点を確認した。公的公布原文照合は未完了（🔶）。具体的な不足と再開条件は[未検証一覧](未検証一覧.md#fes通常式ただし書の公的原文照合720)を参照。
 
+## 自立壁n倍法の下限（#889）
+
+[限定原典照合・独立値・製品経路の証拠](自立壁n下限_Issue889_確認記録.md)に2025年第2版第1刷p740–741のn下限と代表内柱D値式を記録する。1未満の受理根拠は確認できず、入力・保存読込・実行の下限を統一した。これは現行層内合算方式全体の原典適合証明ではない。Re/Fesの変化方向が逆になる有限例を確認し、一律安全側とは判定しない。状態は🔶。Rs接続の#740、動的専用比較・Validation等の#620残件を維持する。
+
 ## CFT適用・材料・許容耐力の重点照合（#887）
 
 [原画像対応・独立数値・要素→証拠索引](CFT適用材料許容耐力_Issue887_原典照合.md)で第2版第1刷§3.10.11 p237・文献p241、p566/584と告464を有限確認した。公開CFT検定の独立Qy/Qz・N=0曲げ6条件、Fc下限前後4条件と既存E境界6試験を確認。状態は🔶。共通材料#879/#881、#767/#766完了成果を参照し、累加・面積・等価性能の別原典必要性を分離する。法定Fc下限の是正は[#916](https://github.com/hrntsm/SEPIKA/issues/916)、施工・適用除外条件の自動判定不足と圧縮Eの危険側疑いは[#697の追補](https://github.com/hrntsm/SEPIKA/issues/697#issuecomment-6423911591)で継続する。#418はclosed/not_plannedで現行未算定制約を保持、終局は#888・パネルは#723へ分離。全規準適合・専門家サインオフ・実験Validation・手動GUIは未確認。
+
+## CFT柱終局耐力・N–Mの重点原典照合（#888）
+
+[原典対応・独立値・公開入口証拠](CFT柱終局NM_Issue888_原典照合.md)で2025年第2版第1刷§3.10.11 p237・参考文献p241の掲載限界、告464第七/十一と1999/2017論文の有限確認を記録する。状態は🔶。正方形長柱Case2の掲載式と採用モデルの公開入口Verificationを分ける。円形引張係数差・分類境界のMu接続・法定適用除外は#697、Fc下限は#916、パネルは#723。#325完了成果と#440/#418のNOT_PLANNED閉を維持し、別原典未確認を同一機能の再開要求にしない。全規準・専門家サインオフ・実験Validationは未確認。
 
 ## SRC耐震ルートの重点照合（#885）
 
@@ -191,6 +199,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | レポート | 対象 | 状態 |
 |---|---|---|
 | [CFT適用材料許容耐力_Issue887_原典照合.md](CFT適用材料許容耐力_Issue887_原典照合.md) | CFT適用・材料・許容耐力とFc下限・別原典境界 | 🔶（有限Verification、法定自動判定・別原典・Validation未） |
+| [CFT柱終局NM_Issue888_原典照合.md](CFT柱終局NM_Issue888_原典照合.md) | CFT終局・N–Mの原典限界、Case2と半断面の独立公開入口Verification | 🔶（別原典・適用資格・円形係数差・Validationは残る） |
 | [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
 | [SRC靭性終局仕口_Issue886_原典照合.md](SRC靭性終局仕口_Issue886_原典照合.md) | SRC靭性・曲げ累加/軸力・せん断区分・終局/許容パネルの原典対応と有限独立値 | 🔶（限定Verification、未対応終局・別原典・Validationは残る） |
 | [SRC構造細則一次設計_Issue884_原典照合.md](SRC構造細則一次設計_Issue884_原典照合.md) | SRC固有細則・複合断面・一次設計の適用と公開梁検定境界 | 🔶（有限Verification、法定詳細/別原典/Validationは残る） |
@@ -205,6 +214,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [RC壁線形軸曲げ剛性_Issue652_調査記録.md](RC壁線形軸曲げ剛性_Issue652_調査記録.md) | 現行ps換算と総断面候補、2025年版解説書の指定実画像・材料役割・実入口V&V条件 | 🔶（三本柱の分担と適用上の注意を限定照合。ps換算／総断面採用条件は本書では照合不可。候補未採用・実入口V&V未実施） |
 | [RC片持ち架構の階入力_Issue786_確認記録.md](RC片持ち架構の階入力_Issue786_確認記録.md) | 自動剛床とRC片持ち架構の独立変位・支持釣合い、ねじり解放で不安定となる架構の拒否 | 🔶（数値Verification。物理Validation・手動GUI・一般特異性判定は記録参照） |
 | [古い自動荷重と通常保存_Issue816_確認記録.md](古い自動荷重と通常保存_Issue816_確認記録.md) | 梁短縮後の既存自動DLと通常保存・再読込、手入力検証・失敗時状態保持・直接検定保存 | 🔶（公開編集/保存入口の自動Verification。手動GUI・物理Validation・最終ゲート未確認） |
+| [自立壁n下限_Issue889_確認記録.md](自立壁n下限_Issue889_確認記録.md) | 2025年第2版第1刷の係数下限、入出力・実行の有限Verification | 🔶（下限整合、方式全体の適合・Validation未） |
 | [自立壁n倍法_Issue620_確認記録.md](自立壁n倍法_Issue620_確認記録.md) | 自立壁n倍法の対象・入力・同一断面柱集計 | 🔶（独立Verification。2025限定照合は#740、採用整合・動的専用比較・実測Validation未） |
 | [自立壁Rs接続_Issue740_調査記録.md](自立壁Rs接続_Issue740_調査記録.md) | 2025原典のD値式・Rs/Re考慮必要、現行量の定義差・連成2例・Rs正規化 | 🔶（2025限定照合済、一般厳密式は不成立。現行量への近似適用根拠・精度は未確定、#740はblocked・未完了） |
 | [梁の床板嵩上げ_Issue731_2026-10.md](梁の床板嵩上げ_Issue731_2026-10.md) | 中心線上端・投影幅、床板材料別の嵩上げ重量/質量、区間DL・小梁設計・動的層質量 | 🔶（独立Verification、手動GUI・Validation未） |
@@ -494,6 +504,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 13b | 標準鋼材名の厳密解決 | sepika-core / sepika-io | material_grade.rs・standard_material.rs・stbridge/strength_tests.rs | [Issue590の独立表・公開STB入口](標準鋼材名の厳密解決_Issue590_2026-10.md#独立期待値と実入口) | 横断 | 🔶（名称Verification、種類別F全照合・Validation未） |
 | 13d | 用途別せん断面積と二方向検定 | sepika-core / sepika-element / sepika-design-jp / sepika-app | section_shape・steel・frame/beam/construct・shear_area_acceptance_tests | [原5Done・独立期待値・run別証拠](用途別せん断面積と二方向検定_Issue417_2026-10.md)、`surface_radius_tests` / `shear_contract_tests` / `constructed_cantilever_*` | 横断 | 🔶（限定Verification、Validation・正式最終ゲート未確認） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
+| 889 | 自立壁n倍法の係数下限 | sepika-core / sepika-io / sepika-design-jp / sepika-job / sepika-app | stress_cfg::misc889、ovika::reference_tests::misc889、eccentricity::tests::misc889・misc620、lumped_mass::tests::misc620、summary / result_validity | [要素と製品経路](自立壁n下限_Issue889_確認記録.md#要素から製品経路への証拠索引) | 二次設計・入出力 | 🔶（下限・有限影響を検証、全方式適合・Validation未） |
 | 620 | 自立壁n倍法 | sepika-design-jp / sepika-core / sepika-job / sepika-app | eccentricity::tests::misc620、eccentricity_analysis::misc620_tests、lumped_mass::tests::misc620 | [点検と独立期待値](自立壁n倍法_Issue620_確認記録.md#独立期待値と試験) | 二次設計 | 🔶（有限Verification、2025限定照合は#740、採用整合・Validation未） |
 | 740 | 自立壁Rs接続の成立範囲 | 独立線形静力学・有理数算術 | 製品テスト追加なし | [連成2例とRs正規化](自立壁Rs接続_Issue740_調査記録.md#独立線形静力学による成立範囲) | 二次設計 | 🔶（2025限定照合済、D→K・層内合算・δg接続と近似精度は未確定） |
 | 718 | Fes 算定不能の伝播 | sepika-design-jp / sepika-app / sepika-job | secondary/holding_capacity・stiffness_ratio・eccentricity、summary、actions/design/holding、lumped_mass | [独立期待値と直接入口](Fes算定不能の伝播_Issue718_2026-10.md#独立期待値と直接入口) | 横断 | 🔶（Scope 内の自動 Verification 成功、手動 GUI・原典/Validation・最終ゲートは未確認） |

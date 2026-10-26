@@ -129,7 +129,7 @@ fn rounded_cft_gate_distinguishes_core_steel_and_qd_methods() {
             let mu = crate::ultimate::cft_mu_nm(&shape, 24.0, 235.0, 0.0, 3000.0, false);
             assert_eq!(mu.is_ok(), r == 0.0);
             if r > 0.0 {
-                assert!(mu.unwrap_err().contains("#418"));
+                assert!(mu.unwrap_err().contains("角Rが正の終局 N–M は未対応"));
             }
             if r <= 10.0 {
                 let mut forces = zero_forces();
