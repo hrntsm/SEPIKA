@@ -1,0 +1,20 @@
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-882\crates\sepika-design-jp)
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.92s
+     Running tests\source882_probe.rs (target\debug\deps\source882_probe-1b979239e36b9905.exe)
+
+running 1 test
+stress: Q=2880000 N, ratio=0.2, expected=0.2
+stress: Q=-2880000 N, ratio=0.2, expected=0.2
+stress: Q=0 N, ratio=0, expected=0
+area: 149999 mm2, eligible=false
+area: 150000 mm2, eligible=true
+area: 150001 mm2, eligible=true
+sqrt(st/3): 399 mm, eligible=false
+2t: 399 mm, eligible=false
+sqrt(st/3): 400 mm, eligible=true
+2t: 400 mm, eligible=true
+sqrt(st/3): 401 mm, eligible=true
+2t: 401 mm, eligible=true
+test source882_wall_stress_and_independent_dimension_boundaries ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
