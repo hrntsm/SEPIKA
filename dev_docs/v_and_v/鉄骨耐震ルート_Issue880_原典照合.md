@@ -21,10 +21,10 @@
 |---|---|---|---|
 | 6.3.1 pp.375–376、図6.3-1（6.03の1–2頁） | ルート1/2/3の設計フロー。図の高さ16/31/60 m、ルート2の層間角1/200、Rs≥0.6、Re≤0.15、塔状比≤4等は複数の条件の一部。設計者判断で詳細なルートを選ぶ分岐もある | Appの`compute_holding_capacity`は目的別評価点・Qud・Ds・Fesから耐力比較を行う。建物高さ等に応じた法定ルート選択や全適用条件の確認は行わない。[保有水平耐力](../../docs/calc_basis/07_二次設計/01_保有水平耐力の判定.md) | **未対応（資格の自動判定）**。図の数値をUIの適合条件へ実装したとの判定はしない |
 | 6.2.4 p.363（6.02の12頁）、令82条の3掲示枠・解説 | 各階・各方向のQu≥Qun、Qun=Ds Fes Qud。書籍のQun/QudはkN、Ds/Fesは無次元 | `secondary::holding_capacity::check_holding_capacity_at_state`の積と比較、内部力N。Appは`seismic_distribution_for_model`にC0=1.0を指定。製品docsはNを明示 | **一致（積・等号・換算の限定範囲）**。Qu評価点の物理的正当性を今回再認定しない |
-| 6.3.3 p.387（6.03の13頁）、告1791第2第一号掲示枠 | 地下を除く筋かい設置階で、一次地震力による当該階の主要部分の応力を、β≤5/7で1+0.7β、β>5/7で1.5以上に割増し。βは一次地震時の筋かい水平力/当該階水平力（無次元） | 部材検定の`collect_design_checks_with_options`は入力断面力を`SteelDesign::check`へ渡す。`steel::brace::check_brace`は入力N/Aに対する引張・圧縮検定。ルート2用β・割増率の自動適用なし | **未対応（自動算定・適用）**。未割増し応力をそのままルート2設計値として使えば必要応力を過小評価し得る。部材検定OKをルート2適合としない |
+| 6.3.3 p.387（6.03の13頁）、告1791第2第一号掲示枠 | 地下を除く筋かい設置階で、一次地震力による当該階の主要部分の応力を、β≤5/7で1+0.7β、β>5/7で1.5以上に割増し。βは一次地震時の筋かい水平力/当該階水平力（無次元） | Appの`app/actions/design/check.rs`から`run_member_design_checks`（`member_design_check.rs`）へ進み、`checker.check`を介して`SteelDesign::check`へ入力断面力を渡す。`steel::brace::check_brace`は入力N/Aに対する引張・圧縮検定。ルート2用β・割増率の自動適用なし | **未対応（自動算定・適用）**。未割増し応力をそのままルート2設計値として使えば必要応力を過小評価し得る。部材検定OKをルート2適合としない |
 | 6.3.3(1) p.390（6.03の16頁）、付録1-2.3 pp.650–651（付録1-02の12–13頁） | 割増しは筋かい単材だけでなく柱梁・柱脚への影響も対象。付録①は原則対象階全材の一次地震応力、柱軸力の下階への伝達、境界梁の扱いを説明。②は軸力増分の釣合いを扱い、③は割増し層せん断力から水平力を逆算して再解析する別法 | Ds用`ds_beta_u_by_story`は確定した終局評価点の筋かい水平力分担率であり、一次地震時βの代わりに流用できない。ルート2の増分伝達・再解析機能はない | **未対応（ルート2割増し経路）**。付録の選択肢全部を新機能必須とはしない。長期応力も一律に割増す根拠ではない |
 
-対応コード: [holding_capacity.rs](../../crates/sepika-design-jp/src/secondary/holding_capacity.rs)、[App holding.rs](../../crates/sepika-app/src/app/actions/design/holding.rs)、[member_design_check.rs](../../crates/sepika-design-jp/src/member_design_check.rs)、[steel/brace.rs](../../crates/sepika-design-jp/src/steel/brace.rs)。実装位置を読んだことと、GUI通し実行を区別する。
+対応コード: [holding_capacity.rs](../../crates/sepika-design-jp/src/secondary/holding_capacity.rs)、[App holding.rs](../../crates/sepika-app/src/app/actions/design/holding.rs)、[App check.rs](../../crates/sepika-app/src/app/actions/design/check.rs)、[member_design_check.rs](../../crates/sepika-design-jp/src/member_design_check.rs)、[steel/brace.rs](../../crates/sepika-design-jp/src/steel/brace.rs)。実装位置を読んだことと、GUI通し実行を区別する。
 
 ## 独立数値と要素・証拠索引
 
@@ -60,3 +60,11 @@ Ds/Fesは積の入力値として固定し、今回それぞれの算定表・�
 - `git diff --check`: 成功。変更文書のローカルリンク・実装パスを確認。
 - `gh issue view 697 --comments`と本文及び全状態Issue検索で既存追跡の重複を確認し、上記コメントで必須条件を継続追跡した。新規修正Issue・計算コード変更なし。
 - 本probeはdesign-jp公開関数のVerification。AppのGUI→地震力組立→目的別採用点→保存の新規通し試験や、実建物のValidationの証拠ではない。
+
+## 最新main追随とレビュー訂正
+
+2026-10-27に`5669967b85d641e2795f794a1079cf818e545cf5`（#905）へrebaseした。先頭の対象hashと初回・最終probeログは実行時点の証拠として保持する。#878（#904）の製品docs・V&V索引・原典リスト・未検証一覧を保持して競合を解消した。
+
+独立レビューで指摘された実在しない入口名を、`app/actions/design/check.rs` → `run_member_design_checks` → `checker.check` → `SteelDesign::check`へ訂正した。#697の既存コメントも同じ訂正を行った。調査開始時baseと追随先の差分では、対象5ファイルの変更は`holding.rs`の目的別評価点不一致に関するテストだけであり、Qunの積・比較、C0=1.0、入力応力の鋼部材検定経路に変更はなかった。未対応という結論を変更しない。
+
+追随後も同じ保存probeを一時integration testとして再実行し、3試験成功・0失敗を確認した（[追随後ログ](data/issue880/probe_main_followup.log)）。一時コピーは除去した。`cargo run -p xtask -- check-docs`は成功（summary 124、links 656、impl refs 703）、`mdbook build`と`git diff --check`も成功。変更文書のローカルリンク698先を確認し、追記したログの実在も確認した。新アンカーは既存の見出しを維持している。実建物Validation等の未実施範囲は変わらない。
