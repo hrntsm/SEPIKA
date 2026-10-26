@@ -486,6 +486,8 @@ pub struct WallStoryWeight {
     pub band: WallWeightTotals,
     pub center_xy_mm: [f64; 2],
     pub inertia_t_mm2: f64,
+    /// 重心まわりの [Jx, Jy, Σm dx dy] [t·mm²]。
+    pub horizontal_inertia_t_mm2: [f64; 3],
 }
 
 impl WallWeight {
@@ -532,6 +534,8 @@ impl WallWeight {
             ));
         }
         let mean = if m[0] > 0.0 { m[1] / m[0] } else { 0.0 };
+        let inertia = self.intensity.physical_n / crate::units::GRAVITY_MM_S2
+            * (m[2] - m[0] * mean * mean).max(0.0);
         let result = WallStoryWeight {
             plate: self.plate,
             total: self.totals,
@@ -540,8 +544,12 @@ impl WallWeight {
                 self.origin_xy[0] + self.axis_xy[0] * mean,
                 self.origin_xy[1] + self.axis_xy[1] * mean,
             ],
-            inertia_t_mm2: self.intensity.physical_n / crate::units::GRAVITY_MM_S2
-                * (m[2] - m[0] * mean * mean).max(0.0),
+            inertia_t_mm2: inertia,
+            horizontal_inertia_t_mm2: [
+                inertia * self.axis_xy[1].powi(2),
+                inertia * self.axis_xy[0].powi(2),
+                inertia * self.axis_xy[0] * self.axis_xy[1],
+            ],
         };
         if result.center_xy_mm.iter().any(|v| !v.is_finite()) || !result.inertia_t_mm2.is_finite() {
             return Err(format!(
@@ -660,6 +668,9 @@ fn wall_story_weights_close(a: &WallStoryWeight, b: &WallStoryWeight) -> bool {
             w.center_xy_mm[0],
             w.center_xy_mm[1],
             w.inertia_t_mm2,
+            w.horizontal_inertia_t_mm2[0],
+            w.horizontal_inertia_t_mm2[1],
+            w.horizontal_inertia_t_mm2[2],
         ]
     };
     values(a)

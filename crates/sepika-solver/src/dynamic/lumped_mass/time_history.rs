@@ -115,11 +115,14 @@ pub struct StickResponse {
     /// 塑性率の方向内訳。
     #[serde(default)]
     pub ductility_dir: StickDirPeaks,
+    /// 各時刻・各階の曲げ回転 [θx, θy] [rad]。せん断型では空。
+    pub bending_rotations: Vec<Vec<[f64; 2]>>,
 }
 
 impl StickResponse {
     pub(crate) fn empty(n: usize) -> Self {
         Self {
+            bending_rotations: Vec::new(),
             time: Vec::new(),
             roof_disp: Vec::new(),
             story_peak_drift: vec![0.0; n],
@@ -253,6 +256,10 @@ pub fn lumped_mass_time_history(
     h: f64,
 ) -> StickResponse {
     let n = lm.stories.len();
+    if lm.model_type == super::model::LumpedMassType::EquivalentBendingShear {
+        return super::bending::bending_shear_time_history(lm, accel, dt, h)
+            .unwrap_or_else(|_| StickResponse::empty(n));
+    }
     if n == 0 || !dt.is_finite() || dt <= 0.0 || accel.is_empty() {
         return StickResponse::empty(n);
     }
@@ -408,6 +415,7 @@ pub fn lumped_mass_time_history(
     let ductility = ductility_dir.story_max();
 
     StickResponse {
+        bending_rotations: Vec::new(),
         time,
         roof_disp: roof,
         story_peak_drift: peak_drift,

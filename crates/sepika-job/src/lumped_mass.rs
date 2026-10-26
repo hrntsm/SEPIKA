@@ -19,6 +19,7 @@ use sepika_solver::statics::linear::StaticOnce;
 
 /// 質点系生成に渡す解析結果。
 pub struct LumpedMassBuildInput<'a> {
+    pub model_type: LumpedMassType,
     pub model: &'a Model,
     pub dim: StickDim,
     pub source: LumpedStiffnessSource,
@@ -40,11 +41,21 @@ pub fn build_lumped_mass(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassM
     inp.model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
+    if inp.model_type == LumpedMassType::EquivalentBendingShear {
+        return bending::build(inp);
+    }
+    if inp.model_type != LumpedMassType::EquivalentShear {
+        return Err(JobError::InvalidInput(
+            "曲げせん断分離型は使用できません".into(),
+        ));
+    }
     match inp.dim {
         StickDim::Planar => build_planar(inp),
         StickDim::Spatial => build_spatial(inp),
     }
 }
+
+mod bending;
 
 fn build_planar(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     if inp.nonlinear {
@@ -212,6 +223,7 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     }
 
     Ok(LumpedMassModel {
+        bending: Vec::new(),
         model_type: LumpedMassType::EquivalentShear,
         stories,
         dim: StickDim::Spatial,
@@ -444,6 +456,7 @@ mod tests {
         nonlinear: bool,
     ) -> LumpedMassBuildInput<'a> {
         LumpedMassBuildInput {
+            model_type: LumpedMassType::EquivalentShear,
             model,
             dim,
             source: LumpedStiffnessSource::StoryQd,
@@ -481,7 +494,7 @@ mod tests {
         assert!(err.to_string().contains("EX"), "{err}");
     }
 
-    fn two_story_column_model() -> Model {
+    pub(super) fn two_story_column_model() -> Model {
         use sepika_core::dof::Dof6Mask;
         use sepika_core::ids::{ElemId, NodeId, StoryId};
         use sepika_core::model::{
@@ -522,6 +535,7 @@ mod tests {
                 structure: Default::default(),
                 level_kind: Default::default(),
                 dynamic_mass: Some(sepika_core::model::StoryDynamicMass {
+                    horizontal_inertia_t_mm2: [0.0; 3],
                     mass_equiv_weight_n: f64::from(3 - i) * 10.0 * GRAVITY_MM_S2,
                     lumped_mass: None,
                     center_xy_mm: [f64::from(i), 0.0],
@@ -666,7 +680,7 @@ mod tests {
         assert!(err.to_string().contains("動的質量が未算定"), "{err}");
     }
 
-    fn empty_pushover() -> PushoverResult {
+    pub(super) fn empty_pushover() -> PushoverResult {
         PushoverResult {
             wall_capacities: Vec::new(),
             rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
@@ -714,6 +728,7 @@ mod tests {
     fn spatial_rejects_zero_mass_before_inertia_check() {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
+            horizontal_inertia_t_mm2: [0.0; 3],
             mass_equiv_weight_n: 0.0,
             lumped_mass: None,
             center_xy_mm: [0.0, 0.0],
@@ -740,6 +755,7 @@ mod tests {
     fn planar_linear_rejects_non_finite_mass() {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
+            horizontal_inertia_t_mm2: [0.0; 3],
             mass_equiv_weight_n: f64::NAN,
             lumped_mass: None,
             center_xy_mm: [0.0, 0.0],
@@ -759,6 +775,7 @@ mod tests {
     fn spatial_linear_rejects_non_finite_mass() {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
+            horizontal_inertia_t_mm2: [0.0; 3],
             mass_equiv_weight_n: f64::NAN,
             lumped_mass: None,
             center_xy_mm: [0.0, 0.0],
@@ -785,6 +802,7 @@ mod tests {
         let mut model = two_story_column_model();
         // 質量は正・J のみ NaN にして、J 側の検証だけを見る。
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
+            horizontal_inertia_t_mm2: [0.0; 3],
             mass_equiv_weight_n: 10.0 * GRAVITY_MM_S2,
             lumped_mass: None,
             center_xy_mm: [0.0, 0.0],

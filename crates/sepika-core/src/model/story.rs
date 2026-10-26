@@ -133,6 +133,8 @@ pub struct StoryDynamicMass {
     pub center_xy_mm: [f64; 2],
     /// 質量重心まわりの回転慣性 [t·mm²]。
     pub inertia_t_mm2: f64,
+    /// 質量重心まわりの [Jx, Jy, Σm(x−xG)(y−yG)] [t·mm²]。
+    pub horizontal_inertia_t_mm2: [f64; 3],
     /// 階生成で算定した代表節点質量の反映記録。未生成・代表節点なしは `None`。
     #[serde(default)]
     pub lumped_mass: Option<StoryLumpedMass>,

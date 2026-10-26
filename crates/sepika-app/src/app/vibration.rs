@@ -38,6 +38,7 @@ pub(crate) fn vibration_identity(value: &impl serde::Serialize) -> String {
 pub(crate) fn vibration_settings(cfg: AnalysisSettings, lumped: bool) -> AnalysisSettings {
     let mut relevant = AnalysisSettings::default();
     if lumped {
+        relevant.lumped_mass_type = cfg.lumped_mass_type;
         relevant.lumped_dim = cfg.lumped_dim;
         relevant.lumped_stiffness = cfg.lumped_stiffness;
         relevant.lumped_dir = cfg.lumped_dir;

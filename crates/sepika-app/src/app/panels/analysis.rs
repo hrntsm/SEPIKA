@@ -661,7 +661,9 @@ impl App {
 
     /// 右ドック「質点系」パネル。
     pub(crate) fn lumped_mass_analysis_panel(&mut self, ui: &mut egui::Ui) {
-        use sepika_solver::dynamic::lumped_mass::{LumpedStiffnessSource, StickDim};
+        use sepika_solver::dynamic::lumped_mass::{
+            LumpedMassType, LumpedStiffnessSource, StickDim,
+        };
 
         ui.heading("質点系");
         ui.separator();
@@ -669,6 +671,19 @@ impl App {
         ui.separator();
         let running = self.core.scoped.job.is_some();
 
+        ui.horizontal_wrapped(|ui| {
+            ui.label("モデル:");
+            ui.selectable_value(
+                &mut self.core.analysis_cfg.lumped_mass_type,
+                LumpedMassType::EquivalentShear,
+                "せん断型",
+            );
+            ui.selectable_value(
+                &mut self.core.analysis_cfg.lumped_mass_type,
+                LumpedMassType::EquivalentBendingShear,
+                "曲げせん断型",
+            );
+        });
         ui.horizontal_wrapped(|ui| {
             ui.label("次元:");
             ui.selectable_value(
@@ -690,7 +705,8 @@ impl App {
             ui.selectable_value(&mut self.core.analysis_cfg.lumped_dir, SeismicDir::Y, "Y");
             ui.separator();
             ui.label("剛性:");
-            let stiff_enabled = !self.core.analysis_cfg.lumped_nonlinear;
+            let stiff_enabled = !self.core.analysis_cfg.lumped_nonlinear
+                && self.core.analysis_cfg.lumped_mass_type == LumpedMassType::EquivalentShear;
             ui.add_enabled_ui(stiff_enabled, |ui| {
                 egui::ComboBox::from_id_salt("lumped_stiffness")
                     .selected_text(self.core.analysis_cfg.lumped_stiffness.label())
@@ -710,7 +726,11 @@ impl App {
             if !stiff_enabled {
                 ui.colored_label(
                     crate::theme::GRAY_600,
-                    "非線形時の並進剛性は増分の初期剛性です",
+                    if self.core.analysis_cfg.lumped_nonlinear {
+                        "非線形時の並進剛性は増分の初期剛性です"
+                    } else {
+                        "曲げを差し引いた層 Q/δs から自動算定します"
+                    },
                 );
             }
         });
@@ -758,6 +778,24 @@ impl App {
             .is_some();
         let spatial = self.core.analysis_cfg.lumped_dim == StickDim::Spatial;
         let nl = self.core.analysis_cfg.lumped_nonlinear;
+        let bending =
+            self.core.analysis_cfg.lumped_mass_type == LumpedMassType::EquivalentBendingShear;
+        if bending {
+            ui.label("弾性曲げを分離し、せん断骨格を自動生成します（基部固定・P–Δなし）。");
+            let ready = if spatial {
+                has_ex && has_ey
+            } else if self.core.analysis_cfg.lumped_dir == SeismicDir::X {
+                has_ex
+            } else {
+                has_ey
+            };
+            if !ready {
+                ui.colored_label(
+                    crate::theme::WARN_TEXT,
+                    "曲げせん断型には対象方向の地震静的 EX/EY が必要です。",
+                );
+            }
+        }
 
         if !nl {
             let need = if spatial {

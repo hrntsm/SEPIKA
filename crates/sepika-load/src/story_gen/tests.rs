@@ -995,6 +995,18 @@ fn test_dynamic_mass_inertia_about_mass_center_3d() {
         "gy={}",
         dm.center_xy_mm[1]
     );
+    let expected = [
+        3.0e11 / GRAVITY_MM_S2,
+        1.2e12 / GRAVITY_MM_S2,
+        6.0e11 / GRAVITY_MM_S2,
+    ];
+    for (actual, expected) in dm.horizontal_inertia_t_mm2.iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-9 * expected);
+    }
+    assert!(
+        (dm.horizontal_inertia_t_mm2[0] + dm.horizontal_inertia_t_mm2[1] - dm.inertia_t_mm2).abs()
+            < 1e-9 * dm.inertia_t_mm2
+    );
     // J = Σ (w/g)·((x−gx)² + (y−gy)²)。重心まわりで直接算定する。
     let j = (w[0] * ((coords[2][0] - gx).powi(2) + (coords[2][1] - gy).powi(2))
         + w[1] * ((coords[3][0] - gx).powi(2) + (coords[3][1] - gy).powi(2)))

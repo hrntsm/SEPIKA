@@ -194,6 +194,7 @@ fn generated_slab_mass_reaches_existing_planar_dynamic_model() {
         .id;
     let response = linear_static_once(&model, ex).unwrap();
     let result = build_lumped_mass(LumpedMassBuildInput {
+        model_type: sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
         model: &model,
         dim: StickDim::Planar,
         source: LumpedStiffnessSource::StoryQd,
@@ -302,6 +303,7 @@ fn 梁嵩上げの設計重量と物理質量を両質量方式の層と動的�
             .id;
         let response = linear_static_once(&model, ex).unwrap();
         let result = build_lumped_mass(LumpedMassBuildInput {
+            model_type: sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
             model: &model,
             dim: StickDim::Planar,
             source: LumpedStiffnessSource::StoryQd,

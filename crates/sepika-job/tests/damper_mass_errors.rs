@@ -242,6 +242,7 @@ fn assert_lumped_input_error(model: &Model) {
     for dim in [StickDim::Planar, StickDim::Spatial] {
         for nonlinear in [false, true] {
             let input = LumpedMassBuildInput {
+                model_type: sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
                 model,
                 dim,
                 source: LumpedStiffnessSource::StoryQd,
@@ -312,6 +313,7 @@ fn 質点系job入口も不正指定と編集後の古い質量を拒否する()
         let model = separated_model(method);
         let po = sample_pushover();
         let input = LumpedMassBuildInput {
+            model_type: sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
             model: &model,
             dim: StickDim::Planar,
             source: LumpedStiffnessSource::StoryQd,

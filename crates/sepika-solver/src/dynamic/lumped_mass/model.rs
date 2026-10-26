@@ -19,10 +19,10 @@ use sepika_math::solver::SolveError;
 /// 質点系の次元。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum StickDim {
-    /// 2 次元（加力方向 1 本のせん断串）。
+    /// 2 次元（加力方向の並進。曲げせん断型は曲げ回転も持つ）。
     #[default]
     Planar,
-    /// 3 次元（各階 Ux, Uy, θz）。
+    /// 3 次元（各階 Ux, Uy, θz。曲げせん断型は θx, θy を追加）。
     Spatial,
 }
 
@@ -109,6 +109,35 @@ impl StoryTrilinear {
         }
     }
 
+    /// 正の初期剛性・有限な非減少骨格と第1折点の整合を検証する。
+    /// 同一変位の折点は、力が相対64ε以内で一致する場合に限り許容する。値は変更しない。
+    pub fn is_valid_spring(&self) -> bool {
+        let same = |a: f64, b: f64| {
+            a.is_finite()
+                && b.is_finite()
+                && (a - b).abs() <= 64.0 * f64::EPSILON * a.abs().max(b.abs())
+        };
+        if [
+            self.k1, self.d1, self.q1, self.d2, self.q2, self.d3, self.q3,
+        ]
+        .iter()
+        .any(|v| !v.is_finite() || *v <= 0.0)
+            || !same(self.k1, self.q1 / self.d1)
+        {
+            return false;
+        }
+        [(self.d1, self.q1), (self.d2, self.q2), (self.d3, self.q3)]
+            .windows(2)
+            .all(|points| {
+                let [(d0, q0), (d1, q1)] = [points[0], points[1]];
+                if d1 == d0 {
+                    same(q0, q1)
+                } else {
+                    d1 > d0 && q1 >= q0 && ((q1 - q0) / (d1 - d0)).is_finite()
+                }
+            })
+    }
+
     /// 線形ばね相当（折点を十分遠くに置いた弾性トリリニア）。
     pub fn elastic(k1: f64) -> Self {
         let k = k1.max(0.0);
@@ -177,6 +206,17 @@ pub struct LumpedMassModel {
     /// 3 次元の層データ（`dim == Spatial` のとき `stories` と同順・同長）。
     #[serde(default)]
     pub spatial: Vec<StorySpatial>,
+    /// 曲げせん断型の層別諸元。せん断型では空。
+    pub bending: Vec<StoryBending>,
+}
+
+/// 弾性曲げ剛性 [N·mm²] と重心まわりの物理回転慣性 [t·mm²]。
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StoryBending {
+    pub ei_x: f64,
+    pub ei_y: f64,
+    /// [Jx, Jy, Σm dx dy]。
+    pub inertia: [f64; 3],
 }
 
 impl LumpedMassModel {
@@ -190,6 +230,7 @@ impl LumpedMassModel {
             dir: SeismicDir::X,
             nonlinear: true,
             spatial: Vec::new(),
+            bending: Vec::new(),
         }
     }
 

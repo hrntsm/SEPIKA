@@ -13,7 +13,8 @@ pub struct StoryColumn {
     pub top_elem: ElemId,
     pub top: NodeId,
     pub bottom: NodeId,
-    pub(crate) segments: Vec<ElemId>,
+    /// 上端から下端へ連なる柱セグメント。各部材を一度ずつ含む。
+    pub segments: Vec<ElemId>,
 }
 
 /// `story`（層の上端階）に属する柱の一覧を返す。
