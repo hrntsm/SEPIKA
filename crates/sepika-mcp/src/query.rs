@@ -2,12 +2,12 @@
 
 use super::*;
 
-pub fn get_model_json(state: &ServerState) -> String {
-    serde_json::to_string(&state.model).unwrap_or_default()
-}
-
-/// `model.query` の中核ロジック（feature 非依存・テスト可能）。
-pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde_json::Value> {
+/// 指定種別の項目を返す。未知の種別は対応種別を含む入力エラー。
+pub fn query_model(
+    model: &Model,
+    kind: &str,
+    filter: Option<&str>,
+) -> Result<Vec<serde_json::Value>, String> {
     use serde_json::json;
     let items: Vec<serde_json::Value> = match kind {
         "stb_strengths" => vec![serde_json::to_value(&model.stb_strengths).unwrap()],
@@ -98,12 +98,8 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
                 let shape = match &p.shape {
                     sepika_core::model::WallPlateShape::Enclosed => json!({
                         "kind": "Enclosed",
-                        "boundary": p
-                            .boundary_nodes(model)
-                            .unwrap_or_default()
-                            .iter()
-                            .map(|n| n.0)
-                            .collect::<Vec<_>>(),
+                        "boundary": p.boundary_nodes(model)
+                            .map(|nodes| nodes.into_iter().map(|n| n.0).collect::<Vec<_>>()),
                     }),
                     sepika_core::model::WallPlateShape::Attached { anchor, extent } => json!({
                         "kind": "Attached",
@@ -134,12 +130,8 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
             .map(|s| {
                 let shape = match &s.shape {
                     sepika_core::model::SlabShape::Enclosed => {
-                        let boundary: Vec<u32> = s
-                            .boundary_nodes(model)
-                            .unwrap_or_default()
-                            .iter()
-                            .map(|n| n.0)
-                            .collect();
+                        let boundary = s.boundary_nodes(model)
+                            .map(|nodes| nodes.into_iter().map(|n| n.0).collect::<Vec<_>>());
                         json!({
                             "kind": "Enclosed",
                             "boundary": boundary,
@@ -218,25 +210,35 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
             .beams()
             .map(|sm| serde_json::to_value(sm).unwrap_or(json!(null)))
             .collect(),
-        _ => vec![],
+        _ => return Err(format!("未知の kind: {kind}。対応種別: stb_strengths, rebar_notices, strength_diagnostics, resolved_strengths, source_stories, source_story_diagnostics, node/nodes, member/members/element/elements, section/sections, wall_plate/wall_plates, slab/slabs, floor_region/floor_regions, wall_region/wall_regions, floor_assignment_region/floor_assignment_regions, wall_assignment_region/wall_assignment_regions, secondary_member_end/secondary_member_ends, unassigned_beam/unassigned_beams, unassigned_post/unassigned_posts, secondary_beam/secondary_beams")),
     };
-    match filter {
+    Ok(match filter {
         Some(f) if !f.is_empty() => items
             .into_iter()
             .filter(|v| v.to_string().contains(f))
             .collect(),
         _ => items,
-    }
+    })
 }
 
-/// 数量積算（feature 非依存・テスト可能）。
-pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_json::Value {
+/// 数量を集計する。未指定・空の集計軸は category、未知の明示軸は入力エラー。
+pub fn quantity_takeoff_json(
+    model: &Model,
+    group_by: Option<&str>,
+) -> Result<serde_json::Value, String> {
     use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityTotals};
     use serde_json::json;
 
+    let group_by = match group_by {
+        None | Some("") => "category",
+        Some(axis @ ("category" | "story" | "stories" | "structure" | "steel" | "rebar" | "detail" | "items")) => axis,
+        Some(axis) => return Err(format!("未知の group_by: {axis}。対応する集計軸: category, story/stories, structure, steel, rebar, detail/items")),
+    };
     let q = match try_compute_quantity_takeoff(model, &model.quantity_cfg) {
         Ok(q) => q,
-        Err(reason) => return json!({ "status": "unavailable", "reason": reason, "totals": null }),
+        Err(reason) => {
+            return Ok(json!({ "status": "unavailable", "reason": reason, "totals": null }))
+        }
     };
     let totals_json = |t: &QuantityTotals| {
         json!({
@@ -249,7 +251,7 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
             "rebar_joints": t.rebar_joints,
         })
     };
-    let rows: Vec<serde_json::Value> = match group_by.unwrap_or("category") {
+    let rows: Vec<serde_json::Value> = match group_by {
         "story" | "stories" => q
             .totals_by_story()
             .iter()
@@ -317,10 +319,10 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
             })
             .collect(),
     };
-    json!({
+    Ok(json!({
         "status": q.totals().rebar_status(),
         "rows": rows,
         "totals": totals_json(&q.totals()),
         "notes": q.notes,
-    })
+    }))
 }

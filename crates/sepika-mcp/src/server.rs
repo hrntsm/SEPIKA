@@ -52,7 +52,8 @@ impl SepikaServer {
         Parameters(args): Parameters<QueryArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let st = self.state.lock().await;
-        let items = super::query_model(&st.model, &args.kind, args.filter.as_deref());
+        let items = super::query_model(&st.model, &args.kind, args.filter.as_deref())
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
         let result = QueryResult { items };
         Ok(CallToolResult::success(vec![Content::json(result)?]))
     }
@@ -76,7 +77,8 @@ impl SepikaServer {
         Parameters(args): Parameters<QuantityTakeoffArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let st = self.state.lock().await;
-        let result = super::quantity_takeoff_json(&st.model, args.group_by.as_deref());
+        let result = super::quantity_takeoff_json(&st.model, args.group_by.as_deref())
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
         Ok(CallToolResult::success(vec![Content::json(result)?]))
     }
 
@@ -248,6 +250,7 @@ impl ServerHandler for SepikaServer {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct QueryArgs {
+    /// 対応種別: stb_strengths, rebar_notices, strength_diagnostics, resolved_strengths, source_stories, source_story_diagnostics, node/nodes, member/members/element/elements, section/sections, wall_plate/wall_plates, slab/slabs, floor_region/floor_regions, wall_region/wall_regions, floor_assignment_region/floor_assignment_regions, wall_assignment_region/wall_assignment_regions, secondary_member_end/secondary_member_ends, unassigned_beam/unassigned_beams, unassigned_post/unassigned_posts, secondary_beam/secondary_beams。未知の値は入力エラー。
     pub kind: String,
     pub filter: Option<String>,
 }
@@ -266,7 +269,7 @@ pub struct QueryResult {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct QuantityTakeoffArgs {
-    /// 集計単位（既定 `"category"`）。
+    /// 集計軸: category、story/stories、structure、steel、rebar、detail/items。未指定・空は category、未知の値は入力エラー。
     pub group_by: Option<String>,
 }
 
@@ -833,6 +836,52 @@ mod tests {
             wait_for_terminal(&server, &id).await,
             JobStatus::Done { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn query_and_quantity_invalid_inputs_reach_mcp_as_invalid_params() {
+        let mut model = cantilever_with_load_case();
+        model.elements[0].nodes.clear();
+        let dir = test_store_dir("query864");
+        let server = SepikaServer::new(make_state(model, &dir));
+        let error = server
+            .model_query(Parameters(QueryArgs {
+                kind: "unknown864".into(),
+                filter: None,
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(error.message.contains("unknown864"));
+        assert!(error.message.contains("strength_diagnostics"));
+        let result = server
+            .model_query(Parameters(QueryArgs {
+                kind: "slabs".into(),
+                filter: None,
+            }))
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+        assert_eq!(value, serde_json::json!({"items": []}));
+        let error = server
+            .quantity_takeoff(Parameters(QuantityTakeoffArgs {
+                group_by: Some("unknown864".into()),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(error.message.contains("group_by"));
+        assert!(error.message.contains("unknown864"));
+        let result = server
+            .quantity_takeoff(Parameters(QuantityTakeoffArgs { group_by: None }))
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+        assert_eq!(value["status"], "unavailable");
+        assert!(value["totals"].is_null());
+        assert!(value["reason"].is_string());
     }
 
     fn done_summary(status: &JobStatus) -> serde_json::Value {
