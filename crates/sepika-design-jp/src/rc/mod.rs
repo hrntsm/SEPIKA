@@ -5,8 +5,6 @@ use sepika_core::model::{Material, Section};
 use sepika_core::section_shape::SectionShape;
 
 mod beam;
-/// 鉄筋コンクリート造梁の非線形復元力特性（曲げトリリニア・せん断・軸）。
-pub mod beam_nonlinear;
 mod bond;
 mod column;
 /// RC 柱の短期設計せん断力用 ΣMy（崩壊メカニズム判定）。

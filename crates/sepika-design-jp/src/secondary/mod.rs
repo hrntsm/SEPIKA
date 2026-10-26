@@ -5,7 +5,6 @@ pub mod eccentricity_analysis;
 pub mod holding_capacity;
 pub mod member_rank;
 pub mod principal_axis;
-pub mod rc_capacity;
 pub mod src_rank;
 pub mod stiffness_ratio;
 pub mod story_columns;
