@@ -937,7 +937,11 @@ fn test_collect_cft_ultimate_checks() {
     assert_eq!(checks.len(), 1);
     assert!(checks[0].ncu > 0.0 && checks[0].ntu > 0.0);
     assert_ne!(checks[0].ncu, c.ncu);
-    assert!(checks[0].mu_nm.as_ref().unwrap_err().contains("#418"));
+    assert!(checks[0]
+        .mu_nm
+        .as_ref()
+        .unwrap_err()
+        .contains("角Rが正の終局 N–M は未対応"));
     assert!(checks[0].detail.contains("未算定"));
 }
 
