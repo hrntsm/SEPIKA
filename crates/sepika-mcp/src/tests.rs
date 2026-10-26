@@ -122,7 +122,7 @@ fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
     ));
     assert!(model.eq_ignoring_dofmap(&state.model));
     assert_eq!(
-        query_model(&state.model, "source_stories", None)[0]["node_ids"][0]["id"],
+        query_model(&state.model, "source_stories", None).unwrap()[0]["node_ids"][0]["id"],
         1
     );
     let expected: Vec<_> = state
@@ -133,7 +133,7 @@ fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
         .map(|message| serde_json::json!({"message":message}))
         .collect();
     assert_eq!(
-        query_model(&state.model, "source_story_diagnostics", None),
+        query_model(&state.model, "source_story_diagnostics", None).unwrap(),
         expected
     );
     assert_ne!(state.model.source_stories, snapshot.source_stories);
@@ -249,20 +249,23 @@ fn pending_geometry_queries_and_quantity_are_not_reported_as_zero() {
         concrete_class: Default::default(),
         strength_factor: None,
     });
-    let rows = query_model(&model, "sections", None);
+    let rows = query_model(&model, "sections", None).unwrap();
     assert!(rows[0]["area"].is_null());
     assert!(rows[0]["iy"].is_null());
     assert!(rows[0]["unavailable_reason"]
         .as_str()
         .unwrap()
         .contains("未算定"));
-    let unavailable = quantity_takeoff_json(&model, None);
+    let unavailable = quantity_takeoff_json(&model, None).unwrap();
     assert_eq!(unavailable["status"], "unavailable");
     assert!(unavailable["totals"].is_null());
     model.sections[0].area = 9000.0;
     model.sections[0].property_basis.area = PropertyBasis::Supplied;
-    assert_eq!(query_model(&model, "sections", None)[0]["area"], 9000.0);
-    let available = quantity_takeoff_json(&model, None);
+    assert_eq!(
+        query_model(&model, "sections", None).unwrap()[0]["area"],
+        9000.0
+    );
+    let available = quantity_takeoff_json(&model, None).unwrap();
     assert!(available["totals"]["steel_t"].as_f64().unwrap() > 0.0);
     let mut known = model.sections[0].clone();
     known.id = SectionId(1);
@@ -448,7 +451,7 @@ fn linear_static_job_rejects_tip_seismic_without_an_adoptable_ai_mode() {
 #[test]
 fn test_query_model_nodes() {
     let m = sample_model();
-    let items = query_model(&m, "node", None);
+    let items = query_model(&m, "node", None).unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["id"], 0);
     assert_eq!(items[1]["story"], 1);
@@ -457,8 +460,8 @@ fn test_query_model_nodes() {
 #[test]
 fn test_query_model_elements_and_sections() {
     let m = sample_model();
-    assert_eq!(query_model(&m, "member", None).len(), 1);
-    let secs = query_model(&m, "section", None);
+    assert_eq!(query_model(&m, "member", None).unwrap().len(), 1);
+    let secs = query_model(&m, "section", None).unwrap();
     assert_eq!(secs.len(), 1);
     assert_eq!(secs[0]["name"], "H-400");
 }
@@ -469,7 +472,7 @@ fn test_query_model_elements_and_sections() {
 fn test_query_model_sections_expose_materials() {
     let mut m = sample_model();
     m.sections[0].rebar_material = None;
-    let secs = query_model(&m, "section", None);
+    let secs = query_model(&m, "section", None).unwrap();
     assert_eq!(secs[0]["material"], 0, "主材料の ID を出す");
     assert!(
         secs[0]["rebar_material"].is_null(),
@@ -494,7 +497,7 @@ fn test_query_model_sections_expose_frame_use() {
     unset.frame_use = None;
     m.sections.extend([beam, brace, unset]);
 
-    let sections = query_model(&m, "sections", None);
+    let sections = query_model(&m, "sections", None).unwrap();
     assert_eq!(sections[0]["frame_use"], "Column");
     assert_eq!(sections[1]["frame_use"], "Girder");
     assert_eq!(sections[2]["frame_use"], "Brace");
@@ -505,14 +508,213 @@ fn test_query_model_sections_expose_frame_use() {
 fn test_query_model_filter() {
     let m = sample_model();
     // 名前で絞り込み（断面名 H-400 を含むものだけ）。
-    assert_eq!(query_model(&m, "section", Some("H-400")).len(), 1);
-    assert_eq!(query_model(&m, "section", Some("RC")).len(), 0);
+    assert_eq!(query_model(&m, "section", Some("H-400")).unwrap().len(), 1);
+    assert_eq!(query_model(&m, "section", Some("RC")).unwrap().len(), 0);
 }
 
 #[test]
 fn test_query_model_unknown_kind() {
     let m = sample_model();
-    assert!(query_model(&m, "bogus", None).is_empty());
+    let error = query_model(&m, "bogus", None).unwrap_err();
+    assert!(error.contains("bogus"), "{error}");
+    assert!(error.contains("source_stories"), "{error}");
+    assert!(error.contains("strength_diagnostics"), "{error}");
+}
+
+#[test]
+fn query_kinds_and_aliases_accept_empty_models() {
+    let model = Model::default();
+    let error = query_model(&model, "unknown", None).unwrap_err();
+    for kind in [
+        "node",
+        "nodes",
+        "member",
+        "members",
+        "element",
+        "elements",
+        "section",
+        "sections",
+        "wall_plate",
+        "wall_plates",
+        "slab",
+        "slabs",
+        "floor_region",
+        "floor_regions",
+        "wall_region",
+        "wall_regions",
+        "floor_assignment_region",
+        "floor_assignment_regions",
+        "wall_assignment_region",
+        "wall_assignment_regions",
+        "secondary_member_end",
+        "secondary_member_ends",
+        "unassigned_beam",
+        "unassigned_beams",
+        "unassigned_post",
+        "unassigned_posts",
+        "secondary_beam",
+        "secondary_beams",
+        "source_stories",
+        "source_story_diagnostics",
+        "strength_diagnostics",
+        "rebar_notices",
+        "resolved_strengths",
+    ] {
+        assert!(error.contains(kind), "{kind}: {error}");
+        assert!(
+            query_model(&model, kind, None).unwrap().is_empty(),
+            "{kind}"
+        );
+    }
+    assert_eq!(query_model(&model, "stb_strengths", None).unwrap().len(), 1);
+    assert!(
+        query_model(&model, "stb_strengths", Some("no_such_strength_864"))
+            .unwrap()
+            .is_empty()
+    );
+    for kind in ["", "Nodes", "unknown"] {
+        assert!(query_model(&model, kind, Some("no_match")).is_err());
+    }
+}
+
+#[test]
+fn quantity_grouping_defaults_aliases_and_invalid_input() {
+    let model = rc_column_model();
+    let category = quantity_takeoff_json(&model, Some("category")).unwrap();
+    assert_eq!(quantity_takeoff_json(&model, None).unwrap(), category);
+    assert_eq!(quantity_takeoff_json(&model, Some("")).unwrap(), category);
+    for (alias, canonical) in [("stories", "story"), ("items", "detail")] {
+        assert_eq!(
+            quantity_takeoff_json(&model, Some(alias)).unwrap(),
+            quantity_takeoff_json(&model, Some(canonical)).unwrap()
+        );
+    }
+    for axis in ["unknown", "Category", " "] {
+        let error = quantity_takeoff_json(&model, Some(axis)).unwrap_err();
+        assert!(error.contains(axis), "{error}");
+        assert!(error.contains("group_by"), "{error}");
+    }
+    let mut unavailable = sample_model();
+    unavailable.elements[0].nodes.clear();
+    assert_eq!(
+        quantity_takeoff_json(&unavailable, None).unwrap()["status"],
+        "unavailable"
+    );
+    assert!(quantity_takeoff_json(&unavailable, Some("unknown"))
+        .unwrap_err()
+        .contains("group_by"));
+}
+
+#[test]
+fn enclosed_plate_boundaries_preserve_unresolved_and_resolved_geometry() {
+    use sepika_core::ids::{
+        FloorPlateAssignmentRegionId, SlabId, WallPlateAssignmentRegionId, WallPlateId,
+    };
+    use sepika_core::model::{
+        FloorPlateAssignmentRegion, PlateAssignment, Slab, SlabShape, SupportBoundary,
+        SupportMemberId, WallPlate, WallPlateAssignmentRegion, WallPlateShape,
+    };
+    let mut model = sample_model();
+    model.slabs.push(Slab {
+        id: SlabId(0),
+        shape: SlabShape::Enclosed,
+        plate: Default::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
+        tip_loads: vec![],
+    });
+    model.wall_plates.push(WallPlate {
+        id: WallPlateId(0),
+        shape: WallPlateShape::Enclosed,
+        section: None,
+        dl_support: None,
+        self_weight_shares: vec![],
+        opening_area: 0.0,
+        opening_weight: 0.0,
+        openings: vec![],
+        loads: vec![],
+        slit: Default::default(),
+    });
+    for kind in ["slab", "wall_plate"] {
+        let items = query_model(&model, kind, None).unwrap();
+        assert_eq!(items[0]["id"], 0);
+        assert_eq!(
+            items[0]["shape"],
+            serde_json::json!({"kind":"Enclosed", "boundary":null})
+        );
+    }
+    model
+        .floor_assignment_regions
+        .regions
+        .push(FloorPlateAssignmentRegion {
+            id: FloorPlateAssignmentRegionId(0),
+            boundary: vec![],
+            assignment: PlateAssignment::Plate(SlabId(0)),
+        });
+    model
+        .wall_assignment_regions
+        .regions
+        .push(WallPlateAssignmentRegion {
+            id: WallPlateAssignmentRegionId(0),
+            boundary: vec![],
+            assignment: PlateAssignment::Plate(WallPlateId(0)),
+        });
+    for boundary in [
+        vec![],
+        vec![SupportBoundary {
+            support: SupportMemberId::Primary(ElemId(99)),
+            span: [0.0, 1.0],
+        }],
+        vec![SupportBoundary {
+            support: SupportMemberId::Primary(ElemId(0)),
+            span: [0.2, 0.8],
+        }],
+        vec![SupportBoundary {
+            support: SupportMemberId::Primary(ElemId(0)),
+            span: [0.0, 1.0],
+        }],
+    ] {
+        model.floor_assignment_regions.regions[0].boundary = boundary.clone();
+        model.wall_assignment_regions.regions[0].boundary = boundary.clone();
+        for kind in ["slabs", "wall_plates"] {
+            let rows = query_model(&model, kind, None).unwrap();
+            if boundary.first().is_some_and(|b| {
+                b.support == SupportMemberId::Primary(ElemId(0)) && b.span == [0.0, 1.0]
+            }) {
+                assert_eq!(rows[0]["shape"]["boundary"], serde_json::json!([0, 1]));
+            } else {
+                assert!(rows[0]["shape"]["boundary"].is_null(), "{kind}: {rows:?}");
+            }
+        }
+    }
+    let anchor: sepika_core::model::RegionAnchor = serde_json::from_value(serde_json::json!({
+        "Line": {"nodes": [0, 1], "span": [0.0, 1.0], "transfer": "Anchor"}
+    }))
+    .unwrap();
+    model.slabs[0].shape = SlabShape::Attached {
+        anchor,
+        extent: [100.0, 200.0],
+    };
+    model.wall_plates[0].shape = WallPlateShape::Attached {
+        anchor,
+        extent: None,
+    };
+    for kind in ["slab", "wall_plate"] {
+        let rows = query_model(&model, kind, None).unwrap();
+        assert_eq!(rows[0]["shape"]["kind"], "Attached");
+        assert!(rows[0]["shape"].get("boundary").is_none());
+        assert_eq!(
+            rows[0]["shape"]["anchor"]["Line"]["nodes"],
+            serde_json::json!([0, 1])
+        );
+    }
+    assert_eq!(
+        query_model(&model, "slab", None).unwrap()[0]["shape"]["extent"],
+        serde_json::json!([100.0, 200.0])
+    );
+    let walls = query_model(&model, "wall_plate", None).unwrap();
+    assert!(walls[0]["shape"]["extent"].is_null());
+    assert!(walls[0]["shape"].get("resolved_extent").is_some());
 }
 
 /// 部材付帯情報（ハンチ・継手位置）が登録された部材は、`query_model` の
@@ -539,7 +741,7 @@ fn test_query_model_elements_with_member_detail() {
             kind: JointKind::Shop,
         }],
     });
-    let items = query_model(&m, "elements", None);
+    let items = query_model(&m, "elements", None).unwrap();
     assert_eq!(items.len(), 1);
     let e = &items[0];
     assert_eq!(e["haunch_i"]["length"], 700.0);
@@ -891,18 +1093,18 @@ fn test_job_registry_lifecycle() {
 fn test_quantity_takeoff_json_column() {
     let model = rc_column_model();
     // 部位別（既定）: RC 柱 1 本 → 0.6×0.6×3.0 = 1.08 m³。
-    let v = quantity_takeoff_json(&model, None);
+    let v = quantity_takeoff_json(&model, None).unwrap();
     let rows = v["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["category"], "柱");
     assert!((rows[0]["concrete_m3"].as_f64().unwrap() - 1.08).abs() < 1e-9);
     // 明細: 部材 1 件。合計と注記も返る。
-    let detail = quantity_takeoff_json(&model, Some("detail"));
+    let detail = quantity_takeoff_json(&model, Some("detail")).unwrap();
     assert_eq!(detail["rows"].as_array().unwrap().len(), 1);
     assert!(detail["totals"]["rebar_t"].as_f64().unwrap() > 0.0);
     assert!(!detail["notes"].as_array().unwrap().is_empty());
     // 鉄筋径別: D25（主筋）と D10（フープ）。
-    let rebar = quantity_takeoff_json(&model, Some("rebar"));
+    let rebar = quantity_takeoff_json(&model, Some("rebar")).unwrap();
     assert_eq!(rebar["rows"].as_array().unwrap().len(), 2);
 }
 
@@ -923,7 +1125,7 @@ fn test_query_model_wall_plates() {
         loads: vec![],
         slit: Default::default(),
     });
-    let items = query_model(&m, "wall_plate", None);
+    let items = query_model(&m, "wall_plate", None).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], 0);
     assert_eq!(items[0]["shape"]["kind"], "Enclosed");
@@ -1077,7 +1279,10 @@ fn test_apply_edit_wall_plate_region_assignment() {
         state.model.wall_plates[0].shape,
         WallPlateShape::Enclosed
     ));
-    assert_eq!(query_model(&state.model, "wall_plate", None).len(), 1);
+    assert_eq!(
+        query_model(&state.model, "wall_plate", None).unwrap().len(),
+        1
+    );
 
     // 版なしへ。
     let body = serde_json::json!({ "command": "SetWallPlateRegionNoPlate", "region": region.0 });
@@ -1134,8 +1339,8 @@ fn test_query_model_slabs_and_floor_regions() {
         secondary_beams: Vec::new(),
         slab_ids: vec![SlabId(0)],
     });
-    assert_eq!(query_model(&m, "slab", None).len(), 1);
-    let regions = query_model(&m, "floor_region", None);
+    assert_eq!(query_model(&m, "slab", None).unwrap().len(), 1);
+    let regions = query_model(&m, "floor_region", None).unwrap();
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0]["name"], "R1");
 }
@@ -1907,13 +2112,13 @@ fn circular_post_model() -> sepika_core::model::Model {
 fn circular_post_quantity_headless_preserves_values_and_diagnostics() {
     let mut model = circular_post_model();
     for grouping in ["category", "story", "detail"] {
-        let value = quantity_takeoff_json(&model, Some(grouping));
+        let value = quantity_takeoff_json(&model, Some(grouping)).unwrap();
         assert!((value["totals"]["concrete_m3"].as_f64().unwrap() - 0.3769911184).abs() < 1e-9);
         assert!((value["totals"]["formwork_m2"].as_f64().unwrap() - 3.7699111843).abs() < 1e-9);
     }
     for ends in [[[0.0; 3]; 2], [[0.0; 3], [0.0, 0.0, f64::INFINITY]]] {
         model.unassigned_posts[0].ends = sepika_core::model::SecondaryMemberEnds::Detached(ends);
-        let value = quantity_takeoff_json(&model, None);
+        let value = quantity_takeoff_json(&model, None).unwrap();
         assert_eq!(value["status"], "unavailable");
         assert!(value["totals"].is_null());
         let reason = value["reason"].as_str().unwrap();
@@ -1959,8 +2164,12 @@ fn stb_strength_mcp_edits_diagnostics_and_undo_use_resolved_material() {
             .fc,
         Some(33.)
     );
-    assert!(!query_model(&state.model, "resolved_strengths", None).is_empty());
-    assert!(query_model(&state.model, "strength_diagnostics", None).is_empty());
+    assert!(!query_model(&state.model, "resolved_strengths", None)
+        .unwrap()
+        .is_empty());
+    assert!(query_model(&state.model, "strength_diagnostics", None)
+        .unwrap()
+        .is_empty());
     state.undo.undo(&mut state.model);
     state.undo.undo(&mut state.model);
     assert!(state.model.eq_ignoring_dofmap(&initial));
@@ -1980,7 +2189,9 @@ fn stb_strength_mcp_edits_diagnostics_and_undo_use_resolved_material() {
         .model
         .element_material(&state.model.elements[0])
         .is_none());
-    assert!(!query_model(&state.model, "strength_diagnostics", None).is_empty());
+    assert!(!query_model(&state.model, "strength_diagnostics", None)
+        .unwrap()
+        .is_empty());
     let before = state.model.clone();
     let mut duplicate = before.stb_strengths.clone();
     duplicate.members.push(duplicate.members[0].clone());
@@ -3065,7 +3276,7 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
 #[test]
 fn beam_contact_quantity_mcp_preserves_union_and_diagnostics() {
     for (model, expected_m2) in beam_contact_placement_fixtures() {
-        let value = quantity_takeoff_json(&model, Some("detail"));
+        let value = quantity_takeoff_json(&model, Some("detail")).unwrap();
         let beam = value["rows"]
             .as_array()
             .unwrap()
@@ -3078,7 +3289,7 @@ fn beam_contact_quantity_mcp_preserves_union_and_diagnostics() {
         );
     }
     for model in beam_contact_narrow_fixtures() {
-        let value = quantity_takeoff_json(&model, Some("detail"));
+        let value = quantity_takeoff_json(&model, Some("detail")).unwrap();
         let beam = value["rows"]
             .as_array()
             .unwrap()
@@ -3090,7 +3301,7 @@ fn beam_contact_quantity_mcp_preserves_union_and_diagnostics() {
             "{value}"
         );
     }
-    let no_plate = quantity_takeoff_json(&beam_contact_no_plate_fixture(), Some("detail"));
+    let no_plate = quantity_takeoff_json(&beam_contact_no_plate_fixture(), Some("detail")).unwrap();
     let beam = no_plate["rows"]
         .as_array()
         .unwrap()
@@ -3102,7 +3313,7 @@ fn beam_contact_quantity_mcp_preserves_union_and_diagnostics() {
         "{no_plate}"
     );
     let model = beam_contact_fixture();
-    let value = quantity_takeoff_json(&model, Some("detail"));
+    let value = quantity_takeoff_json(&model, Some("detail")).unwrap();
     let items = value["rows"].as_array().unwrap();
     let beam = items.iter().find(|i| i["label"] == "G451").unwrap();
     assert!(
@@ -3110,7 +3321,7 @@ fn beam_contact_quantity_mcp_preserves_union_and_diagnostics() {
         "{value}"
     );
     for (invalid, expected_reason) in beam_contact_invalid_cases() {
-        let value = quantity_takeoff_json(&invalid, Some("detail"));
+        let value = quantity_takeoff_json(&invalid, Some("detail")).unwrap();
         assert_eq!(value["status"], "unavailable");
         assert!(value["totals"].is_null());
         assert!(
@@ -3801,7 +4012,7 @@ fn standard_rebar507_query_reports_preserved_source_and_unsupported_analysis() {
         "../../sepika-io/tests/fixtures/rebar507/normal_ThreeTypes_reverse_xml_order.stb"
     ))
     .unwrap();
-    let raw = query_model(&model, "stb_strengths", None);
+    let raw = query_model(&model, "stb_strengths", None).unwrap();
     assert_eq!(
         raw[0]["sections"][1]["rebar"]["positions"]
             .as_array()
@@ -3810,7 +4021,7 @@ fn standard_rebar507_query_reports_preserved_source_and_unsupported_analysis() {
         3
     );
     let expected = model.stb_strength_diagnostics();
-    let report = query_model(&model, "strength_diagnostics", None);
+    let report = query_model(&model, "strength_diagnostics", None).unwrap();
     assert_eq!(report.len(), expected.len());
     assert!(report
         .iter()
@@ -4063,13 +4274,15 @@ fn checked_ratio507(outcome: &sepika_design_jp::CheckOutcome) -> f64 {
 fn rebar_cover_center_notice_query_is_nonblocking_and_distinct_from_strength_errors() {
     let xml=include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb").replace("center_top_bottom=\"51\" center_side=\"51\"", "center_top_bottom=\"51\" center_side=\"51\" depth_cover_top_bottom=\"40\" depth_cover_side=\"40\"");
     let model = sepika_io::stbridge::import_stbridge(&xml).unwrap();
-    let notices = query_model(&model, "rebar_notices", None);
+    let notices = query_model(&model, "rebar_notices", None).unwrap();
     assert_eq!(notices.len(), 3);
     for row in notices {
         assert_eq!(row["blocking"], false);
         assert!(row["message"].as_str().unwrap().contains("採用あき=30 mm"));
     }
-    assert!(query_model(&model, "strength_diagnostics", None).is_empty());
+    assert!(query_model(&model, "strength_diagnostics", None)
+        .unwrap()
+        .is_empty());
     model
         .ensure_stb_rebar_supported(sepika_core::ids::SectionId(1))
         .unwrap();
@@ -4202,7 +4415,7 @@ fn secondary_cft_quantity_is_unavailable_for_all_kinds_shapes_and_locations() {
                     }
                 }
                 for grouping in [None, Some("detail"), Some("story"), Some("category")] {
-                    let result = quantity_takeoff_json(&model, grouping);
+                    let result = quantity_takeoff_json(&model, grouping).unwrap();
                     assert_eq!(result["status"], "unavailable");
                     assert!(result["totals"].is_null());
                     let reason = result["reason"].as_str().unwrap();
@@ -4344,7 +4557,7 @@ fn lip_channel_geometry_mcp_query_analysis_and_quantity_report_reason() {
     model.sections[0].property_basis = Default::default();
     let before = format!("{model:?}");
     let reason = model.validate_lip_channels().unwrap_err().to_string();
-    let items = query_model(&model, "sections", None);
+    let items = query_model(&model, "sections", None).unwrap();
     assert!(items[0]["unavailable_reason"]
         .as_str()
         .unwrap()
@@ -4353,7 +4566,7 @@ fn lip_channel_geometry_mcp_query_analysis_and_quantity_report_reason() {
         .err()
         .unwrap();
     assert!(error.to_string().contains(&reason), "{error}");
-    let quantity = quantity_takeoff_json(&model, None);
+    let quantity = quantity_takeoff_json(&model, None).unwrap();
     assert_eq!(quantity["status"], "unavailable");
     assert!(quantity["totals"].is_null());
     assert!(quantity["reason"].as_str().unwrap().contains(&reason));
@@ -4457,7 +4670,7 @@ fn directional_wall_quantity_mcp_edit_and_all_groupings_preserve_partial_reasons
 ) {
     let dir = std::env::temp_dir().join(format!("sepika536-mcp-query-{}", std::process::id()));
     let mut state = ServerState::with_fs_store(directional_quantity_mcp_fixture(), &dir).unwrap();
-    let value = quantity_takeoff_json(&state.model, Some("detail"));
+    let value = quantity_takeoff_json(&state.model, Some("detail")).unwrap();
     let wall = value["rows"]
         .as_array()
         .unwrap()
@@ -4487,7 +4700,7 @@ fn directional_wall_quantity_mcp_edit_and_all_groupings_preserve_partial_reasons
     state.model = sepika_io::ovika::load_ovika(&path).unwrap().model;
     std::fs::remove_file(path).unwrap();
     assert_eq!(state.model.quantity_cfg, cfg);
-    let value = quantity_takeoff_json(&state.model, Some("detail"));
+    let value = quantity_takeoff_json(&state.model, Some("detail")).unwrap();
     let wall = value["rows"]
         .as_array()
         .unwrap()
@@ -4498,7 +4711,7 @@ fn directional_wall_quantity_mcp_edit_and_all_groupings_preserve_partial_reasons
     for ratio in [None, Some(0.006), None, Some(0.0)] {
         apply_edit(&mut state,&serde_json::json!({"command":"EditSectionShape","section":2,"new_shape":{"RcWall":{"thickness":200.0,"ps":0.002,"pwh_ratio":ratio,"pwv_ratio":0.002}}})).unwrap();
         for group in ["category", "story", "structure", "detail", "rebar", "steel"] {
-            let v = quantity_takeoff_json(&state.model, Some(group));
+            let v = quantity_takeoff_json(&state.model, Some(group)).unwrap();
             if ratio.is_none() {
                 assert_eq!(v["status"], "incomplete");
                 assert_eq!(v["totals"]["rebar_issues"][0]["wall_plate"], 0);
@@ -4517,16 +4730,16 @@ fn directional_wall_quantity_mcp_edit_and_all_groupings_preserve_partial_reasons
     }
     state.undo.undo(&mut state.model);
     assert_eq!(
-        quantity_takeoff_json(&state.model, None)["status"],
+        quantity_takeoff_json(&state.model, None).unwrap()["status"],
         "incomplete"
     );
     state.undo.redo(&mut state.model);
     assert_eq!(
-        quantity_takeoff_json(&state.model, None)["status"],
+        quantity_takeoff_json(&state.model, None).unwrap()["status"],
         "complete"
     );
     assert_eq!(
-        quantity_takeoff_json(&Model::default(), None)["status"],
+        quantity_takeoff_json(&Model::default(), None).unwrap()["status"],
         "empty"
     );
     drop(state);
