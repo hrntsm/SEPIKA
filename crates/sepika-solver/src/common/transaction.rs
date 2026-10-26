@@ -21,10 +21,3 @@ impl StateSnapshot {
         }
     }
 }
-
-/// 全要素の trial を committed に戻す（rollback）
-pub fn revert_all(behaviors: &mut [Box<dyn ElementBehavior>]) {
-    for b in behaviors.iter_mut() {
-        b.revert_state();
-    }
-}

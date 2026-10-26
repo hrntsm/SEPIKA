@@ -266,3 +266,153 @@ fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() 
         close(legacy.shear_strong, 0.);
     }
 }
+
+#[test]
+fn fixed_member_full_initial_load_matches_one_committed_trial_and_restores_on_failure() {
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let mut model = super::super::tests::single_column_model(1e10, 0.);
+        model.elements[0].kind = kind;
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask::FIXED;
+        }
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        let build = |model: &Model, elem: &sepika_core::model::ElementData| {
+            build_nonlinear_behavior(
+                elem,
+                model,
+                StrengthBasis::MaterialStrength,
+                sepika_core::model::AnalysisKind::Incremental,
+                None,
+            )
+        };
+        let mut actual = vec![build(&model, &model.elements[0])];
+        let mut expected = vec![build(&model, &model.elements[0])];
+        let load = MemberLoad::manual(
+            model.elements[0].id,
+            [1., 0., 0.],
+            MemberLoadKind::Distributed {
+                a: 0.,
+                b: 3000.,
+                w1: 2.,
+                w2: 2.,
+            },
+        );
+        let loads = vec![vec![load.clone()]];
+        apply_du_trial_with_member_loads(&model, &map, &mut expected, &[], &loads).unwrap();
+        expected[0].commit_state();
+        let mut solver = SolverState::new(0, 0);
+        apply_initial_load(
+            &model,
+            &map,
+            &reducer,
+            &mut actual,
+            &[],
+            &loads,
+            false,
+            &mut [],
+            &mut solver,
+        )
+        .unwrap();
+        assert_eq!(
+            actual[0].serialize_checkpoint(),
+            expected[0].serialize_checkpoint()
+        );
+        let response = actual[0].state_frame_load_response().unwrap().unwrap();
+        close(response.physical_frame_end_force_global[0], -3000.);
+        close(response.physical_frame_end_force_global[6], -3000.);
+
+        let mut duplicate = model.elements[0].clone();
+        duplicate.id = ElemId(1);
+        model.elements.push(duplicate.clone());
+        actual.push(build(&model, &duplicate));
+        let before: Vec<_> = actual.iter().map(|b| b.serialize_checkpoint()).collect();
+        let mut invalid = load.clone();
+        invalid.elem = ElemId(1);
+        if let MemberLoadKind::Distributed { w1, w2, .. } = &mut invalid.kind {
+            *w1 = f64::MAX;
+            *w2 = f64::MAX;
+        }
+        let error = apply_initial_load(
+            &model,
+            &map,
+            &reducer,
+            &mut actual,
+            &[],
+            &[vec![load], vec![invalid]],
+            false,
+            &mut [],
+            &mut solver,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("長期荷重の初期載荷") && error.contains("1"),
+            "{error}"
+        );
+        assert_eq!(
+            actual
+                .iter()
+                .map(|b| b.serialize_checkpoint())
+                .collect::<Vec<_>>(),
+            before
+        );
+    }
+}
+
+#[test]
+fn initial_newton_factor_failure_preserves_displacement_and_loaded_element_snapshot() {
+    let mut model = super::super::tests::single_column_model(1e10, 0.);
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
+    }
+    let mut disconnected = model.nodes[1].clone();
+    disconnected.id = NodeId(2);
+    disconnected.restraint = Dof6Mask(0b111110);
+    model.nodes.push(disconnected);
+    model
+        .constraints
+        .push(sepika_core::model::Constraint::RigidLink {
+            master: NodeId(2),
+            slaves: vec![],
+            dofs: Dof6Mask::FIXED,
+        });
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    assert_eq!(map.n_active(), 1);
+    assert_eq!(reducer.n_indep, 1);
+    let mut behaviors = vec![build_nonlinear_behavior(
+        &model.elements[0],
+        &model,
+        StrengthBasis::MaterialStrength,
+        sepika_core::model::AnalysisKind::Incremental,
+        None,
+    )];
+    let before = behaviors[0].serialize_checkpoint();
+    let load = MemberLoad::manual(
+        model.elements[0].id,
+        [1., 0., 0.],
+        MemberLoadKind::Distributed {
+            a: 0.,
+            b: 3000.,
+            w1: 2.,
+            w2: 2.,
+        },
+    );
+    let mut displacement = [0.25];
+    let mut solver = SolverState::new(1, 1);
+    let error = apply_initial_load(
+        &model,
+        &map,
+        &reducer,
+        &mut behaviors,
+        &[1.],
+        &[vec![load]],
+        false,
+        &mut displacement,
+        &mut solver,
+    )
+    .unwrap_err();
+    assert!(error.contains("長期荷重の初期載荷"), "{error}");
+    assert_eq!(behaviors[0].serialize_checkpoint(), before);
+    assert_eq!(displacement, [0.25]);
+}

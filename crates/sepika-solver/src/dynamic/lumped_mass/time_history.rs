@@ -241,6 +241,7 @@ pub(crate) fn story_spring(sk: &StoryTrilinear) -> HysteresisMaterial {
     })
 }
 
+/// せん断型以外のモデルはエラー。
 /// 質点系（せん断型）モデルの非線形時刻歴応答解析（Newmark-β 平均加速度法・
 /// Newton-Raphson）。せん断型多質点系の復元力特性（各層トリリニア、構造力学）。
 ///
@@ -254,17 +255,20 @@ pub fn lumped_mass_time_history(
     accel: &[f64],
     dt: f64,
     h: f64,
-) -> StickResponse {
+) -> Result<StickResponse, sepika_math::solver::SolveError> {
     let n = lm.stories.len();
-    if lm.model_type == super::model::LumpedMassType::EquivalentBendingShear {
-        return super::bending::bending_shear_time_history(lm, accel, dt, h)
-            .unwrap_or_else(|_| StickResponse::empty(n));
+    if lm.model_type != super::model::LumpedMassType::EquivalentShear {
+        return Err(sepika_math::solver::SolveError::InvalidInput(
+            "せん断型時刻歴にはせん断型の質点系を指定してください".into(),
+        ));
     }
     if n == 0 || !dt.is_finite() || dt <= 0.0 || accel.is_empty() {
-        return StickResponse::empty(n);
+        return Ok(StickResponse::empty(n));
     }
     if lm.is_spatial() {
-        return super::spatial::lumped_mass_time_history_spatial(lm, accel, dt, h);
+        return Ok(super::spatial::lumped_mass_time_history_spatial(
+            lm, accel, dt, h,
+        ));
     }
     let mass: Vec<f64> = lm.stories.iter().map(|s| s.mass.max(1e-9)).collect();
     let k_init: Vec<f64> = lm.stories.iter().map(|s| s.skeleton.k1.max(1e-9)).collect();
@@ -414,7 +418,7 @@ pub fn lumped_mass_time_history(
     let ductility_dir = dir_ductility(&drift_dir, &d1x, &d1y);
     let ductility = ductility_dir.story_max();
 
-    StickResponse {
+    Ok(StickResponse {
         bending_rotations: Vec::new(),
         time,
         roof_disp: roof,
@@ -426,7 +430,7 @@ pub fn lumped_mass_time_history(
         drift_dir,
         shear_dir,
         ductility_dir,
-    }
+    })
 }
 
 /// せん断型三重対角 `(scale·K)·x` を直接計算する。`scale` は減衰係数 a1。

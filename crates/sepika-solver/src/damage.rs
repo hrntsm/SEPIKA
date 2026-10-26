@@ -104,24 +104,6 @@ pub fn cumulative_damage_rainflow(ductility_series: &[f64], p: FatigueParams) ->
     d
 }
 
-/// 累積塑性変形倍率（最大振幅）による累積損傷度
-/// `D = η/(4·(μmax−1))·(μmax/C)^(1/β)`。`μmax≤1` は 0。
-pub fn cumulative_damage_max_amplitude(mu_max: f64, eta: f64, p: FatigueParams) -> f64 {
-    if p.c <= 0.0 || p.beta <= 0.0 || mu_max <= 1.0 {
-        return 0.0;
-    }
-    eta / (4.0 * (mu_max - 1.0)) * (mu_max / p.c).powf(1.0 / p.beta)
-}
-
-/// 累積損傷度の算定方式（レインフロー法（ASTM E1049-85）・Miner 則）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DamageMethod {
-    /// レインフロー法。
-    Rainflow,
-    /// 累積塑性変形倍率（最大振幅）。
-    MaxAmplitude,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,17 +149,6 @@ mod tests {
         let p = FatigueParams { c: 20.0, beta: 0.5 };
         let d = cumulative_damage_rainflow(&[0.0, 4.0, 0.0], p);
         assert!((d - 0.01).abs() < 1e-9, "D={d}");
-    }
-
-    #[test]
-    fn test_cumulative_damage_max_amplitude_handcalc() {
-        // D = η/(4·(μmax−1))·(μmax/C)^(1/β)。μmax=4,η=1,C=20,β=0.5:
-        // 1/(4·3)·(0.2)^2 = (1/12)·0.04 = 0.003333…。
-        let p = FatigueParams { c: 20.0, beta: 0.5 };
-        let d = cumulative_damage_max_amplitude(4.0, 1.0, p);
-        assert!((d - 0.04 / 12.0).abs() < 1e-9, "D={d}");
-        // μmax<1 は 0。
-        assert_eq!(cumulative_damage_max_amplitude(0.5, 1.0, p), 0.0);
     }
 
     #[test]

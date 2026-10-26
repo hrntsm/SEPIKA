@@ -410,6 +410,7 @@ pub fn compute_lumped_mass(
                 cfg.lumped_th_dt,
                 cfg.lumped_th_damping,
             )
+            .map_err(|error| JobError::Solve(error.to_string()))?
         };
         if !lm.stories.is_empty() && resp.time.is_empty() {
             return Err(JobError::Solve(

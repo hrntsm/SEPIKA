@@ -1462,6 +1462,11 @@ fn test_nonlinear_apply_long_term_matches_static_solution() {
         result.peak_disp[1][0],
         expected_u
     );
+    assert!(
+        result.history.base_shear[0].abs() < 1e-6,
+        "無地動の長期釣合いで初期慣性力が生じないこと: {}",
+        result.history.base_shear[0]
+    );
     // 動的加振も初期変位もゼロなので、時刻歴を通じて長期解のまま静止する。
     let recording = result.recording.expect("recording");
     for frame in &recording.node_disp {

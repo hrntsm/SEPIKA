@@ -264,3 +264,121 @@ fn public_entry_stops_at_nonfinite_step_after_a_converged_step() {
         );
     }
 }
+
+#[test]
+fn long_term_full_load_commits_fixed_member_state_once_and_failure_restores_all_elements() {
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let mut model = model(kind);
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask::FIXED;
+        }
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        let mut actual = loaded_behaviors(&model, kind, false);
+        let mut expected = loaded_behaviors(&model, kind, false);
+        loaded_trial(&model, &mut expected, 0., 1.);
+        expected[0].commit_state();
+        apply_long_term_static(
+            &model,
+            &map,
+            &reducer,
+            &mut actual,
+            &[],
+            &[vec![udl()]],
+            false,
+            &mut [],
+        )
+        .unwrap();
+        assert_same_state(&model, &actual, &expected);
+
+        let mut duplicate = model.elements[0].clone();
+        duplicate.id = ElemId(11);
+        model.elements.push(duplicate.clone());
+        actual.push(build_nonlinear_behavior(
+            &duplicate,
+            &model,
+            StrengthBasis::Nominal,
+            sepika_element::factory::AnalysisKind::TimeHistory,
+            None,
+        ));
+        let before: Vec<_> = actual.iter().map(|b| b.serialize_checkpoint()).collect();
+        let mut invalid = udl();
+        invalid.elem = ElemId(11);
+        if let MemberLoadKind::Distributed { w1, w2, .. } = &mut invalid.kind {
+            *w1 = f64::MAX;
+            *w2 = f64::MAX;
+        }
+        let error = apply_long_term_static(
+            &model,
+            &map,
+            &reducer,
+            &mut actual,
+            &[],
+            &[vec![udl()], vec![invalid]],
+            false,
+            &mut [],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("長期荷重の初期載荷") && error.contains("11"),
+            "{error}"
+        );
+        assert_eq!(
+            actual
+                .iter()
+                .map(|b| b.serialize_checkpoint())
+                .collect::<Vec<_>>(),
+            before
+        );
+    }
+}
+
+#[test]
+fn initial_newton_factor_failure_restores_preexisting_trial_and_committed_state() {
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let mut model = model(kind);
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask::FIXED;
+        }
+        let mut disconnected = model.nodes[1].clone();
+        disconnected.id = NodeId(2);
+        disconnected.restraint = Dof6Mask(0b111110);
+        model.nodes.push(disconnected);
+        model
+            .constraints
+            .push(sepika_core::model::Constraint::RigidLink {
+                master: NodeId(2),
+                slaves: vec![],
+                dofs: Dof6Mask::FIXED,
+            });
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        assert_eq!(map.n_active(), 1);
+        assert_eq!(reducer.n_indep, 1);
+        let mut actual = loaded_behaviors(&model, kind, false);
+        loaded_trial(&model, &mut actual, 0., 0.5);
+        actual[0].commit_state();
+        loaded_trial(&model, &mut actual, 0., 0.75);
+        let before = actual[0].serialize_checkpoint();
+        let mut displacement = [0.25];
+        let error = apply_long_term_static(
+            &model,
+            &map,
+            &reducer,
+            &mut actual,
+            &[1.],
+            &[vec![udl()]],
+            false,
+            &mut displacement,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("長期荷重の初期載荷") && error.contains("factor"),
+            "{error}"
+        );
+        assert_eq!(actual[0].serialize_checkpoint(), before);
+        assert_eq!(displacement, [0.25]);
+    }
+}
