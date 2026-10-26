@@ -1,0 +1,3 @@
+public probe output rows: old=486 rebased=486
+all input, STEP and MAX_RESIDUAL rows identical
+18 solver runs, 1818 committed states asserted in each run

@@ -1,0 +1,3 @@
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.16s
+     Running `target\debug\xtask.exe check-docs`
+All doc links OK (summary: 124, links: 659, impl refs: 706)
