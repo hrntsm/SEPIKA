@@ -68,28 +68,20 @@ fn member_model(place: usize, sections: Vec<Section>, reference: Option<u32>) ->
 
 fn correct_hash_file(path: &Path, model: &Model) {
     let bytes = rmp_serde::to_vec_named(model).unwrap();
-    let settings = b"{}";
     let manifest = Manifest {
         schema_version: CURRENT_SCHEMA_VERSION,
         units: "internal: N-mm-s".into(),
         created_by: "reference-contract-fixture".into(),
-        entries: vec![
-            crate::manifest::EntryHash {
-                name: "model.msgpack".into(),
-                sha256: sha256_of(&bytes),
-            },
-            crate::manifest::EntryHash {
-                name: "settings.json".into(),
-                sha256: sha256_of(settings),
-            },
-        ],
+        entries: vec![crate::manifest::EntryHash {
+            name: "model.msgpack".into(),
+            sha256: sha256_of(&bytes),
+        }],
     };
     let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
     let options = zip::write::FileOptions::<()>::default();
     for (name, data) in [
         ("manifest.json", serde_json::to_vec(&manifest).unwrap()),
         ("model.msgpack", bytes),
-        ("settings.json", settings.to_vec()),
     ] {
         writer.start_file(name, options).unwrap();
         writer.write_all(&data).unwrap();

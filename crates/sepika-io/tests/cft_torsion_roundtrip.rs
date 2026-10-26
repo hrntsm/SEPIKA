@@ -106,7 +106,7 @@ fn roundtrip(model: &Model) -> Model {
         .map(|name| name.unwrap().into_owned())
         .collect();
     names.sort();
-    assert_eq!(names, ["manifest.json", "model.msgpack", "settings.json"]);
+    assert_eq!(names, ["manifest.json", "model.msgpack"]);
     let manifest: serde_json::Value =
         serde_json::from_reader(archive.by_name("manifest.json").unwrap()).unwrap();
     assert_eq!(manifest["schema_version"], 1);

@@ -141,14 +141,12 @@ const TARGETS: &[&str] = &[
 ];
 fn independent_file(path: &Path, m: &Model) {
     let model = rmp_serde::to_vec_named(m).unwrap();
-    let settings = b"{}";
-    let manifest = serde_json::json!({"schema_version":1,"units":"internal: N-mm-s","created_by":"independent probe681","entries":[{"name":"model.msgpack","sha256":format!("{:x}",Sha256::digest(&model))},{"name":"settings.json","sha256":format!("{:x}",Sha256::digest(settings))}]});
+    let manifest = serde_json::json!({"schema_version":1,"units":"internal: N-mm-s","created_by":"independent probe681","entries":[{"name":"model.msgpack","sha256":format!("{:x}",Sha256::digest(&model))}]});
     let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
     let opts = zip::write::FileOptions::<()>::default();
     for (name, bytes) in [
         ("manifest.json", serde_json::to_vec(&manifest).unwrap()),
         ("model.msgpack", model),
-        ("settings.json", settings.to_vec()),
     ] {
         z.start_file(name, opts).unwrap();
         z.write_all(&bytes).unwrap();
