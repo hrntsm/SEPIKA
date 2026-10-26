@@ -175,8 +175,6 @@ pub enum LumpedMassType {
     EquivalentShear,
     /// 等価曲げせん断型（曲げ剛性を梁要素として考慮）。
     EquivalentBendingShear,
-    /// 曲げせん断分離型（曲げ剛性を回転ばねとして考慮）。
-    BendingShearSeparated,
 }
 
 impl LumpedMassType {
@@ -184,7 +182,6 @@ impl LumpedMassType {
         match self {
             LumpedMassType::EquivalentShear => "等価せん断型",
             LumpedMassType::EquivalentBendingShear => "等価曲げせん断型",
-            LumpedMassType::BendingShearSeparated => "曲げせん断分離型",
         }
     }
 }

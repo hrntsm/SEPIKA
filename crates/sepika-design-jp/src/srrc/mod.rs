@@ -11,9 +11,6 @@ use sepika_core::rc_rebar_geom::RectEdge;
 use sepika_core::section_shape::{RcBeamRebar, RcRectColumnRebar, SectionShape};
 
 mod beam;
-/// 鉄骨鉄筋コンクリート造梁のせん断終局強度（非線形解析のせん断ばね終局耐力）。
-/// SRC 梁せん断復元力特性（構造関係技術基準解説書・SRC 規準）。
-pub mod beam_nonlinear;
 mod column;
 pub mod panel_zone;
 

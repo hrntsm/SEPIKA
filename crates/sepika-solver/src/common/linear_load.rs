@@ -1,7 +1,7 @@
 use super::assemble::{member_load_frame, span_load_transfer};
 use sepika_core::dof::{DofMap, DOF_PER_NODE};
 use sepika_core::ids::ElemId;
-use sepika_core::model::{ElementData, LoadCase, MemberLoad, MemberLoadKind, Model};
+use sepika_core::model::{ElementData, LoadCase, MemberLoad, Model};
 use sepika_element::behavior::{ElementBehavior, LoadedFrameResponse};
 use sepika_math::solver::SolveError;
 use std::collections::HashMap;
@@ -175,17 +175,6 @@ pub(crate) fn assemble_linear_rhs(
     Ok(rhs)
 }
 
-pub(crate) fn scaled_member_table(loads: &[Vec<MemberLoad>], factor: f64) -> Vec<Vec<MemberLoad>> {
-    loads
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|load| scaled_member_load(load, factor))
-                .collect()
-        })
-        .collect()
-}
-
 pub(crate) fn prepare_nonlinear_loads(
     model: &Model,
     dofmap: &DofMap,
@@ -227,18 +216,6 @@ pub(crate) fn prepare_nonlinear_loads(
         absolute.push(loads.to_vec());
     }
     Ok((rhs, absolute))
-}
-
-fn scaled_member_load(load: &MemberLoad, factor: f64) -> MemberLoad {
-    let mut scaled = load.clone();
-    match &mut scaled.kind {
-        MemberLoadKind::Point { p, .. } => *p *= factor,
-        MemberLoadKind::Distributed { w1, w2, .. } => {
-            *w1 *= factor;
-            *w2 *= factor;
-        }
-    }
-    scaled
 }
 
 #[cfg(test)]

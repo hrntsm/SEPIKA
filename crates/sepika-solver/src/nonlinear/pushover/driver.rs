@@ -25,8 +25,7 @@ use super::types::{
 use crate::common::constraint::Reducer;
 use crate::common::csc_cache::CscCache;
 use crate::common::elem_loop::apply_du_trial_with_member_loads;
-use crate::common::linear_load::{prepare_nonlinear_loads, scaled_member_table};
-use crate::common::load_fraction::LoadFractionState;
+use crate::common::linear_load::prepare_nonlinear_loads;
 use crate::common::newton::{l2_norm, STATIC_NEWTON};
 use crate::common::tangent::{add_support_spring_f_int, assemble_k_cached, compute_f_int};
 use crate::common::transaction::StateSnapshot;
@@ -641,60 +640,46 @@ fn apply_initial_load(
     total_disp: &mut [f64],
     st: &mut SolverState,
 ) -> Result<(), String> {
-    let n_active = total_disp.len();
-    let mut state = LoadFractionState::new(5);
-    let mut element_failure = None;
-    while let Some(mu_target) = state.next_target() {
-        let snap = StateSnapshot::capture(behaviors);
-        let f_ext: Vec<f64> = f0.iter().map(|&v| v * mu_target).collect();
-        let absolute_loads = scaled_member_table(gravity_member_loads, mu_target);
-        match newton_converge(
-            model,
-            dofmap,
-            reducer,
-            behaviors,
-            &f_ext,
-            &absolute_loads,
-            &format!("増分解析・重力初期載荷 μ={mu_target}"),
-            use_kg,
-            n_active,
-            total_disp,
-            st,
-        ) {
-            Ok(Some(step_du_free)) => {
-                element_failure = None;
-                for behavior in behaviors.iter_mut() {
-                    behavior.commit_state();
-                }
-                for (&du, td) in step_du_free.iter().zip(total_disp.iter_mut()) {
-                    *td += du;
-                }
-                state.record_success(mu_target);
+    let snap = StateSnapshot::capture(behaviors);
+    match newton_converge(
+        model,
+        dofmap,
+        reducer,
+        behaviors,
+        f0,
+        gravity_member_loads,
+        "増分解析・重力初期載荷 μ=1",
+        use_kg,
+        total_disp.len(),
+        total_disp,
+        st,
+    ) {
+        Ok(Some(step_du_free)) => {
+            for behavior in behaviors.iter_mut() {
+                behavior.commit_state();
             }
-            result => {
-                if let Err(error) = result {
-                    element_failure = Some(error);
-                }
-                snap.restore(behaviors);
-                if !state.record_failure() {
-                    if let Some(error) = element_failure.take() {
-                        return Err(format!("長期荷重の初期載荷が収束しません: {error}"));
-                    }
-                    let detail = current_failure_detail(
-                        model,
-                        dofmap,
-                        reducer,
-                        behaviors,
-                        use_kg,
-                        st,
-                        "長期荷重の初期載荷における接線剛性",
-                    );
-                    return Err(format!("長期荷重の初期載荷が収束しません（長期荷重に対して構造が不安定な可能性）。{detail}"));
-                }
+            for (&du, td) in step_du_free.iter().zip(total_disp.iter_mut()) {
+                *td += du;
             }
+            Ok(())
+        }
+        result => {
+            snap.restore(behaviors);
+            let detail = match result {
+                Err(error) => error,
+                _ => current_failure_detail(
+                    model,
+                    dofmap,
+                    reducer,
+                    behaviors,
+                    use_kg,
+                    st,
+                    "長期荷重の初期載荷における接線剛性",
+                ),
+            };
+            Err(format!("長期荷重の初期載荷が収束しません: {detail}"))
         }
     }
-    Ok(())
 }
 
 /// 固定外力 `f_ext` に対する Newton 反復。
