@@ -37,18 +37,11 @@ fn built_box_shape(a: &Attrs) -> Result<SectionShape, String> {
                 ));
             }
         }
-        if side_thick_mm != top_bottom_thick_mm {
-            return Err(format!(
-                "t1={:?}, t2={:?}: 異厚組立BOXは未対応です",
-                a.get("t1").unwrap(),
-                a.get("t2").unwrap()
-            ));
-        }
         Ok(SectionShape::SteelBox {
             height: height_mm,
             width: width_mm,
             thick: side_thick_mm,
-            horizontal_thick: side_thick_mm,
+            horizontal_thick: top_bottom_thick_mm,
             corner_r: Some(0.0),
         })
     })();

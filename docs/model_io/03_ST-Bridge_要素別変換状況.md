@@ -136,7 +136,7 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 | `StbSecRoll-H` | ✅ | ✅ | `SteelH` のルート半径 `r` を保持。書き出しには既知の正半径が必要 |
 | `StbSecBuild-H` | ✅ | ✅ | 対称断面も `SteelBuiltH` の板組輪郭として保持 |
 | `StbSecBuild-H`（上下フランジ相違） | ❌ | ✅ | 入力の標準属性は `A`/`B`/`t1`/`t2`。独自の `B2`/`t2_lower` は読まない。現行出力ではこれらの方言属性を持つが、再読込による非対称形状の保存は保証しない |
-| `StbSecRoll-BOX` / `StbSecBuild-BOX` | ⚠️ | ⚠️ | `SteelBox` の外角半径 `r` を保持。圧延は `t` を一様板厚に採る。組立はA/B/t1/t2と内法の有限正値を検査し、数値としてt1=t2の場合だけ受理する。異厚・欠落・不正寸法は読込全体を理由付きエラーにする（[組立BOXの読み込み](02_ST-Bridge_形式.md#組立boxの読み込み)）。圧延の欠落半径は未知、組立は明示した直角。書き出しには既知の正半径が必要 |
+| `StbSecRoll-BOX` / `StbSecBuild-BOX` | ⚠️ | ⚠️ | `SteelBox` の外角半径 `r` を保持。圧延は `t` を一様板厚に採る。組立はA/B/t1/t2と内法の有限正値を検査し、同厚・異厚とも左右t1・上下t2を保持する。欠落・不正寸法は読込全体を理由付きエラーにする（[組立BOXの読み込み](02_ST-Bridge_形式.md#組立boxの読み込み)）。圧延の欠落半径は未知、組立は明示した直角。書き出しには既知の正半径が必要 |
 | `StbSecPipe` | ✅ | ✅ | 鋼管。標準の `D`/`t` を読む。独自の `StbSecRoll-Pipe`/`StbSecBuild-Pipe` は読まない |
 | `StbSecRoll-L` | ✅ | ✅ | 山形鋼（`SteelAngle`） |
 | `StbSecRoll-C` | ✅ | ✅ | 溝形鋼（`SteelChannel`） |
