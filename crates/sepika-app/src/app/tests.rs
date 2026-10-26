@@ -10166,7 +10166,10 @@ fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
     assert!(!rows.is_empty());
     for row in rows {
         assert!(row.ncu > 0.0 && row.ntu > 0.0);
-        assert!(row.mu_nm.unwrap_err().contains("#418"));
+        assert!(row
+            .mu_nm
+            .unwrap_err()
+            .contains("角Rが正の終局 N–M は未対応"));
         assert!(row.detail.contains("未算定"));
     }
 }

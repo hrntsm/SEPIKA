@@ -357,7 +357,7 @@ fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
             assert!(row["mu_nm_unavailable_reason"]
                 .as_str()
                 .unwrap()
-                .contains("#418"));
+                .contains("角Rが正の終局 N–M は未対応"));
             assert!(row["ncu"].as_f64().unwrap() > 0.0);
             assert!(!row["axial_ok"].is_null());
             assert_eq!(summary["all_checks_calculated_and_ok"], false);

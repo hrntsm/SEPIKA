@@ -236,7 +236,7 @@ pub fn cft_mu_nm(
     } = shape
     {
         if *r > 0.0 {
-            return Err("角形 CFT の角Rが正の終局 N–M は未対応です（内角Rが 0 でも対象。設計仕様は #418 で策定）".into());
+            return Err("角形 CFT の角Rが正の終局 N–M は未対応です（内角Rが 0 でも対象）".into());
         }
     }
     if shape.has_unequal_box_thickness() {
