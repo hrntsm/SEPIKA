@@ -178,6 +178,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
 | [SRC構造細則一次設計_Issue884_原典照合.md](SRC構造細則一次設計_Issue884_原典照合.md) | SRC固有細則・複合断面・一次設計の適用と公開梁検定境界 | 🔶（有限Verification、法定詳細/別原典/Validationは残る） |
 | [RC部材力学モデル_Issue883_原典照合.md](RC部材力学モデル_Issue883_原典照合.md) | 梁Mu/Mc・柱Mu軸力三分岐・壁Qu/βs/Qcと適用条件 | 🔶（原画像・独立6probe成功。壁Qu上限是正#910、適用根拠#697・Validation未） |
 | [鉄骨耐震ルート_Issue880_原典照合.md](鉄骨耐震ルート_Issue880_原典照合.md) | ルート適用資格・Qun積と等号・一次筋かいβの応力割増し | 🔶（積と境界の有限Verification。ルート2自動適用なし・Validation未） |
