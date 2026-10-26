@@ -243,10 +243,7 @@ fn released_fiber_and_ms_keep_axial_yield_unload_reload_work_and_checkpoints() {
             let mut fiber = raw_member(false);
             fiber.configure_wall_release([0.0, 0.6, 0.8]).unwrap();
             let mut member: Box<dyn ElementBehavior> = if ms {
-                Box::new(crate::frame::multi_spring::MultiSpringElement {
-                    springs: Vec::new(),
-                    inner: fiber,
-                })
+                Box::new(crate::frame::multi_spring::MultiSpringElement { inner: fiber })
             } else {
                 Box::new(fiber)
             };
@@ -307,10 +304,7 @@ fn nonlinear_trial_tangent_matches_reconverged_finite_differences_and_fresh_chec
             let build = || -> Box<dyn ElementBehavior> {
                 let mut f = raw_member(false);
                 if ms {
-                    let mut m = crate::frame::multi_spring::MultiSpringElement {
-                        springs: Vec::new(),
-                        inner: f,
-                    };
+                    let mut m = crate::frame::multi_spring::MultiSpringElement { inner: f };
                     m.configure_wall_release(normal).unwrap();
                     Box::new(m)
                 } else {
@@ -457,10 +451,7 @@ fn singular_inner_trial_after_material_evaluation_rolls_back_and_allows_retry() 
         }
         fiber.configure_wall_release([0.0, 0.6, 0.8]).unwrap();
         let mut member: Box<dyn ElementBehavior> = if ms {
-            Box::new(crate::frame::multi_spring::MultiSpringElement {
-                springs: Vec::new(),
-                inner: fiber,
-            })
+            Box::new(crate::frame::multi_spring::MultiSpringElement { inner: fiber })
         } else {
             Box::new(fiber)
         };
@@ -518,7 +509,6 @@ fn test_configure(
 
 fn wrapped_raw() -> crate::frame::multi_spring::MultiSpringElement {
     crate::frame::multi_spring::MultiSpringElement {
-        springs: Vec::new(),
         inner: raw_member(true),
     }
 }

@@ -55,5 +55,3 @@ pub(crate) fn add_surrounding_frame(
         });
     }
 }
-
-mod section_geometry;

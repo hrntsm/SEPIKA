@@ -5,12 +5,6 @@ use sepika_material::uniaxial::UniaxialMaterial;
 use smallvec::SmallVec;
 use std::any::Any;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum SpringModel {
-    OneComponent,
-    TwoComponent,
-}
-
 /// 端バネの N-M 相関パラメータ。
 #[derive(Clone, Copy, Debug)]
 pub struct MnInteraction {
@@ -43,7 +37,6 @@ pub struct ConcentratedSpringBeam {
     pub spring_j: Box<dyn UniaxialMaterial>,
     initial_spring_stiffness_i: f64,
     initial_spring_stiffness_j: f64,
-    pub model: SpringModel,
     total_rotation_reference: Option<f64>,
     /// N-M 相関。
     pub mn: Option<MnInteraction>,
@@ -67,7 +60,6 @@ impl ConcentratedSpringBeam {
         elastic: crate::frame::beam::BeamElement,
         spring_i: Box<dyn UniaxialMaterial>,
         spring_j: Box<dyn UniaxialMaterial>,
-        model: SpringModel,
     ) -> Self {
         Self {
             initial_spring_stiffness_i: spring_i.probe(0.0).1,
@@ -75,7 +67,6 @@ impl ConcentratedSpringBeam {
             elastic,
             spring_i,
             spring_j,
-            model,
             total_rotation_reference: None,
             mn: None,
             rot_i: 0.0,
@@ -88,14 +79,6 @@ impl ConcentratedSpringBeam {
             trial_thb_j: 0.0,
             flex_stiffness_cache: std::sync::OnceLock::new(),
         }
-    }
-
-    pub fn new_one_component(
-        elastic: crate::frame::beam::BeamElement,
-        spring_i: Box<dyn UniaxialMaterial>,
-        spring_j: Box<dyn UniaxialMaterial>,
-    ) -> Self {
-        Self::new(elastic, spring_i, spring_j, SpringModel::OneComponent)
     }
 
     /// 総角材料からM/Sを控除して接続する。初期剛性S[N·mm/rad]を持つ同一逆対称基準に限定する。
@@ -425,12 +408,7 @@ impl ElementBehavior for ConcentratedSpringBeam {
         let kti = self.spring_i.probe(self.trial_rot_i).1;
         let ktj = self.spring_j.probe(self.trial_rot_j).1;
 
-        let k_local = match self.model {
-            SpringModel::OneComponent => compute_kstar(&self.elastic, self.k_flex(), kti, ktj),
-            SpringModel::TwoComponent => unimplemented!(
-                "TwoComponent spring model is not yet implemented. Use OneComponent."
-            ),
-        };
+        let k_local = compute_kstar(&self.elastic, self.k_flex(), kti, ktj);
         self.elastic.axis.to_global(&k_local)
     }
 

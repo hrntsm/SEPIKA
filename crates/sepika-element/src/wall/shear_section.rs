@@ -1,7 +1,7 @@
-use super::section_geometry::{Primitive, SectionGeometry};
 use crate::transform::LocalFrame;
 use sepika_core::geom::vec3::dot;
 use sepika_core::model::{wall_element_geometry, ElementData, Model, WallSideColumnIndex};
+use sepika_core::section_shape::face_geometry::{Primitive, SectionGeometry};
 use sepika_core::section_shape::{
     concrete_young_modulus_gamma, material_strip_section_properties, MaterialSectionStrip,
     MaterialStripSectionProperties, SectionShape,
