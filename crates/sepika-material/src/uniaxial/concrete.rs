@@ -66,11 +66,6 @@ impl Concrete {
         2.0 * self.fc / self.ec0.abs()
     }
 
-    /// せん断弾性率 G0 = E0/(2(1+ν))。ν=0.2。
-    pub fn e0_shear(&self) -> f64 {
-        self.e0() / (2.0 * (1.0 + 0.2))
-    }
-
     /// 圧縮包絡線。
     fn envelope_compression(&self, strain: f64) -> (f64, f64) {
         if strain >= self.ec0 {

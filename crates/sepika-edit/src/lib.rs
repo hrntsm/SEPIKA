@@ -25,9 +25,15 @@ pub trait EditCommand: Send {
     fn inverse_id_changes(&self) -> Vec<IdChange> {
         Vec::new()
     }
-    /// 複合編集の途中候補へ適用する。座標と荷重区間の整合は複合編集の最終候補で検証する。
+    /// 破棄可能な複合編集の途中候補へ適用する。拒否時は呼出し側が候補全体を破棄する。
+    /// 座標と荷重区間の整合は複合編集の最終候補で検証する。
     fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
         self.apply(model)
+    }
+    /// 確定境界が所有する破棄可能な候補へ適用する。拒否時は呼出し側が候補を破棄する。
+    /// `before` は適用前の確定モデル。複合編集の中間状態には `apply_candidate` を使う。
+    fn apply_in_transaction(&self, _before: &Model, candidate: &mut Model) -> Box<dyn EditCommand> {
+        self.apply(candidate)
     }
     /// 何も変更しないコマンド（適用失敗時の安全なフォールバック `Noop` 等）か。
     /// [`UndoStack::run`] は逆コマンドがこれに該当する場合、undo 履歴へ積まない。
@@ -66,6 +72,24 @@ impl EditCommand for RestoreStbNodeIdentities {
             identities,
         })
     }
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let identities = model.stb_node_ids.clone();
+        let command = self.command.apply_candidate(model);
+        model.stb_node_ids = self.identities.clone();
+        Box::new(Self {
+            command,
+            identities,
+        })
+    }
+    fn apply_in_transaction(&self, before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        let identities = model.stb_node_ids.clone();
+        let command = self.command.apply_in_transaction(before, model);
+        model.stb_node_ids = self.identities.clone();
+        Box::new(Self {
+            command,
+            identities,
+        })
+    }
     fn label(&self) -> &str {
         self.command.label()
     }
@@ -94,6 +118,10 @@ impl EditCommand for CommandWithIdChanges {
 
     fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
         self.command.apply_candidate(model)
+    }
+
+    fn apply_in_transaction(&self, before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        self.command.apply_in_transaction(before, model)
     }
 
     fn label(&self) -> &str {
@@ -132,14 +160,14 @@ pub fn preview_plate_assignment_loss(
     model: &Model,
     command: &dyn EditCommand,
 ) -> Result<sepika_core::model::PlateAssignmentLoss, String> {
-    model
-        .validate_assignment_region_identity()
-        .map_err(|reason| format!("モデル・履歴は未更新: {reason}"))?;
     if !command.changes_assignment_boundaries() {
         return Ok(Default::default());
     }
+    model
+        .validate_assignment_region_identity()
+        .map_err(|reason| format!("モデル・履歴は未更新: {reason}"))?;
     let mut candidate = model.clone();
-    let inverse = command.apply(&mut candidate);
+    let inverse = command.apply_in_transaction(model, &mut candidate);
     if let Some(reason) = inverse.rejection() {
         return Err(reason.to_owned());
     }
@@ -165,18 +193,6 @@ impl UndoStack {
             done: Vec::new(),
             undone: Vec::new(),
             max_undo: 100,
-            revision: 0,
-            last_error: None,
-            id_changes: Vec::new(),
-            affects_calculation: true,
-        }
-    }
-
-    pub fn with_max(max_undo: usize) -> Self {
-        Self {
-            done: Vec::new(),
-            undone: Vec::new(),
-            max_undo,
             revision: 0,
             last_error: None,
             id_changes: Vec::new(),
@@ -213,7 +229,7 @@ impl UndoStack {
             return false;
         }
         let affects_calculation = cmd.affects_calculation();
-        let inv = cmd.apply(&mut candidate);
+        let inv = cmd.apply_in_transaction(model, &mut candidate);
         if let Some(reason) = inv.rejection() {
             self.last_error = Some(reason.to_owned());
             return false;
@@ -306,7 +322,7 @@ impl UndoStack {
         }
         let mut candidate = model.clone();
         let affects_calculation = cmd.affects_calculation();
-        let undo_cmd = cmd.apply(&mut candidate);
+        let undo_cmd = cmd.apply_in_transaction(model, &mut candidate);
         if let Some(reason) = undo_cmd.rejection() {
             self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
             return;
@@ -360,10 +376,6 @@ impl Default for UndoStack {
     fn default() -> Self {
         Self::new()
     }
-}
-
-pub fn push_edit_command(model: &mut Model, stack: &mut UndoStack, cmd: Box<dyn EditCommand>) {
-    stack.run(model, cmd);
 }
 
 /// ID＝配列添字エンティティの「削除／再挿入」コマンド対を生成するマクロ。

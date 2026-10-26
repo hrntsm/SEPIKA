@@ -26,40 +26,45 @@ impl EditCommand for CompositeCommand {
     }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
-        let inverse = self.apply_candidate(&mut candidate);
+        let inverse = self.apply_in_transaction(model, &mut candidate);
+        if inverse.rejection().is_none() {
+            *model = candidate;
+        }
+        inverse
+    }
+
+    fn apply_in_transaction(&self, before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
+        let inverse = self.apply_candidate(model);
         if inverse.rejection().is_some() {
             return inverse;
         }
-        if let Err(error) = candidate.validate_rc_section_usage() {
+        if let Err(error) = model.validate_rc_section_usage() {
             return Box::new(crate::RejectedEdit(error.to_string()));
         }
-        if let Err(error) = candidate.validate_attached_slabs() {
+        if let Err(error) = model.validate_attached_slabs() {
             return Box::new(crate::RejectedEdit(error.to_string()));
         }
-        if let Err(reason) = crate::node_member::validate_coordinate_loads(model, &candidate) {
+        if let Err(reason) = crate::node_member::validate_coordinate_loads(before, model) {
             return Box::new(crate::RejectedEdit(reason));
         }
         if self.changes_assignment_boundaries() {
-            let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+            let report = model.rebuild_assignment_regions_dropping_orphan_plates();
             if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
                 return Box::new(crate::RejectedEdit(reason));
             }
         }
-        *model = candidate;
         inverse
     }
 
     fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        let mut candidate = model.clone();
         let mut inverses = Vec::new();
         for child in &self.children {
-            let inverse = child.apply_candidate(&mut candidate);
+            let inverse = child.apply_candidate(model);
             if inverse.rejection().is_some() {
                 return inverse;
             }
             inverses.push(inverse);
         }
-        *model = candidate;
         Box::new(CompositeCommand {
             label: self.label.clone(),
             children: inverses.into_iter().rev().collect(),
