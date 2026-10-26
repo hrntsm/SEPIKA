@@ -55,36 +55,6 @@ pub(crate) fn solve_dense_column<S: faer::linalg::solvers::Solve<f64>>(
     Ok((0..n).map(|i| x[(i, 0)]).collect())
 }
 
-/// [`solve_dense_column`] のバッファ再利用版（内部用）。
-pub(crate) fn solve_dense_column_into<S: faer::linalg::solvers::Solve<f64>>(
-    factor: &S,
-    rhs: &[f64],
-    n: usize,
-    scratch: &mut faer::Mat<f64>,
-    out: &mut Vec<f64>,
-) -> Result<(), SolveError> {
-    if rhs.len() != n {
-        return Err(SolveError::DimMismatch {
-            k: n,
-            rhs: rhs.len(),
-        });
-    }
-    if scratch.nrows() != n || scratch.ncols() != 1 {
-        *scratch = faer::Mat::zeros(n, 1);
-    }
-    for i in 0..n {
-        scratch[(i, 0)] = rhs[i];
-    }
-    factor.solve_in_place(scratch.as_mut());
-    if out.len() != n {
-        out.resize(n, 0.0);
-    }
-    for i in 0..n {
-        out[i] = scratch[(i, 0)];
-    }
-    Ok(())
-}
-
 /// スパースパターンの不変シグネチャ（内部用）。値は含めない。
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct SparsityPattern {
