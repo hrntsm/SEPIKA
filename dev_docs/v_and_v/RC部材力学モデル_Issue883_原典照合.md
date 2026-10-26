@@ -115,3 +115,14 @@ p716は横筋比を1.2%以下、かつ壁板の鉛直せん断補強筋比の2�
 - 変更dev文書4件のローカルリンクと見出しアンカー：709参照・欠落0。`git diff --check`成功。
 - 保存probeの整形は初回、保存先の相対fixtureパスが実行先と異なりrustfmtのモジュール解決が失敗。`--config skip_children=true`で保存sourceのみを整形し、実行時は指定どおり一時integration先へコピーする。
 - 生産コード・API/依存/featureは不変の文書調査のため、全workspace・GUI・MCP・Clippyの再実行はしていない。独立レビュー・最終head CI・mergeは後続PRゲートで確認し、予記しない。
+
+
+### 最新main追随後
+
+2026-10-27、`origin/main=7635aeedfe8f6bab56575eccf0166cc827c31076` へrebaseし、競合なし。
+PR #909の開口追補を保持した統合後の調査headは `244d8950ab91b9739f8e9a1fae19add572c172af`。
+生産コード・恒久テストは今回変更していない。
+整形済み保存probeを同じ一時integration先へ再コピーした[追随後ログ](data/issue883/probe_main_followup.log)は6成功・失敗0。
+`check-docs`（summary124/links657/impl refs704）・`mdbook build`は再成功、変更dev文書4件の最終参照は713件・欠落0。
+一時integrationコピーを除去した。原画像・抽出本文・依存導入は未追跡の `.tmp/` にのみ保持し、commitに含めていない。
+この節の追加後は文書差分だけであり、上記のソース/数値検証を最終ゲート全体の成功へ読み替えない。
