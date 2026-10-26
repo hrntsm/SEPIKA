@@ -1,0 +1,75 @@
+{
+  "issue": 711,
+  "baseline": {
+    "binary": "target/issue711-evidence/sepika-before.exe",
+    "sha256": "C74CEC6E9AD40828DDA8AAD8D3A6021ED8C146F98ED5F92E91202FC9214D0AED",
+    "source_head": "未確定（既存target/debug/sepika.exe、本日12:04ビルド）"
+  },
+  "after": {
+    "base_head": "a0ede307（main / #710統合後）＋df7b1cb0のコード差分",
+    "binary": "C:/Users/hiroa/Desktop/ikkan/.worktree/.build-cache/debug/sepika.exe",
+    "sha256": "EDA974C8B8AE09D627FF6452A141AADC52962B486BD5C4FB47D1AB8924E4A6A1"
+  },
+  "conditions": {
+    "model": "ファイル→サンプル(門型ラーメン)、変更なし、梁H-400x200x8x13",
+    "mode": "形状、全体(3D)、断面表示ON",
+    "rotation": "起動時の既定視点",
+    "zoom": "起動時からホイール-450、上限10",
+    "zoom_pointer_window_px": [
+      618,
+      294
+    ],
+    "click_pointer_window_px": {
+      "before": [
+        615,
+        280
+      ],
+      "after": [
+        615,
+        310
+      ]
+    },
+    "note": "模型・視点・倍率は同条件だがパン位置は約26 px異なる。変更前は既存実行ファイルで再現した選択不可の参考例（ソースhead未特定）であり、同一baseの厳密なA/B検証ではない。画像はトリミングなし。",
+    "window_image_size_px": [
+      1282,
+      802
+    ]
+  },
+  "observed": {
+    "before": "塗り面クリック後もInspector未選択",
+    "after": "中心線から8 px以上離れた塗り面クリックで部材ID 2、断面梁H-400x200x8x13をInspectorに表示。空白クリックによる解除と、塗り面への通常ホバー強調も確認。"
+  },
+  "images": {
+    "before": "dev_docs/images/issue-711/before-solid-face.png",
+    "after": "dev_docs/images/issue-711/after-solid-face.png"
+  },
+  "measurements": {
+    "method": "選択強調の赤い中心線を画像x=360..800、y=114..499内でR>180/G<125/B<110として列ごとに抽出し、y座標平均へ最小二乗直線を適合。クリック座標から当該直線までの垂直距離 [px]。",
+    "before": {
+      "reference_image": "dev_docs/images/issue-711/before-centerline-reference.png",
+      "columns": 408,
+      "line_y_equals_a_x_plus_b": {
+        "a": -0.7072935865722385,
+        "b": 684.3740320973784
+      },
+      "point_px": [
+        615,
+        280
+      ],
+      "centerline_distance_px": 24.99200338057935
+    },
+    "after": {
+      "reference_image": "dev_docs/images/issue-711/after-solid-face.png",
+      "columns": 441,
+      "line_y_equals_a_x_plus_b": {
+        "a": -0.7073809943557843,
+        "b": 709.9147635744275
+      },
+      "point_px": [
+        615,
+        310
+      ],
+      "centerline_distance_px": 28.675366101698916
+    }
+  }
+}

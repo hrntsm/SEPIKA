@@ -313,17 +313,8 @@ pub(super) fn section_inner_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
     }
 }
 
-/// 部材の断面押し出しソリッドを描画する。
-///
-/// `coords` は表示用の節点座標（変形図では変位を加味済み）で、
-/// `model.nodes` と同順であること。断面を描けなかった線材
-/// （断面未割当・形状情報なし）の本数を返す。
-///
-/// `show_secondary` は二次部材（小梁・間柱）を描くか。呼び出し側の
-/// 「床壁・二次部材」トグル（と、主架構の図である CMQ 図での常時非表示）に
-/// 追従させるための引数で、false のときは二次部材を一切描かず、
-/// 断面未定義の注記（戻り値）にも数えない（非表示の部材について
-/// 「断面未定義」と注記するのは誤解を招くため）。
+/// `coords` はモデル節点順の表示座標 [mm]。二次部材は `show_secondary` が真の場合だけ描く。
+/// 戻り値は（表示対象のうち断面を描けなかった本数、描画順の通常部材本体）。
 pub(super) fn draw_section_solids(
     painter: &egui::Painter,
     model: &Model,
@@ -332,11 +323,13 @@ pub(super) fn draw_section_solids(
     show_secondary: bool,
     frame_filter: super::FrameFilter,
     actual_placement: bool,
-) -> usize {
-    let mut prims: Vec<(f32, SolidPrim)> = Vec::new();
+) -> (usize, super::pick::MemberBodies) {
+    let mut bodies = super::pick::MemberBodies::default();
+    let mut prims: Vec<(f32, Option<sepika_core::ids::ElemId>, SolidPrim)> = Vec::new();
     let mut skipped = 0usize;
 
-    let mut extrude = |p_i: [f64; 3],
+    let mut extrude = |id: Option<sepika_core::ids::ElemId>,
+                       p_i: [f64; 3],
                        p_j: [f64; 3],
                        ref_vector: [f64; 3],
                        sec: &Section,
@@ -379,6 +372,7 @@ pub(super) fn draw_section_solids(
             let fill = shaded(base, shade);
             prims.push((
                 depth,
+                id,
                 SolidPrim::Quad {
                     pts: [
                         proj.cam_to_screen(quad[0]),
@@ -395,6 +389,7 @@ pub(super) fn draw_section_solids(
             let depth = ring.iter().map(|r| r[2]).sum::<f32>() / n as f32;
             prims.push((
                 depth,
+                id,
                 SolidPrim::Outline {
                     pts: ring.iter().map(|&r| proj.cam_to_screen(r)).collect(),
                     color: shaded(base, 0.5),
@@ -437,7 +432,14 @@ pub(super) fn draw_section_solids(
         } else {
             [coords[n0], coords[n1]]
         };
-        if !extrude(ends[0], ends[1], elem.local_axis.ref_vector, sec, base) {
+        if !extrude(
+            Some(elem.id),
+            ends[0],
+            ends[1],
+            elem.local_axis.ref_vector,
+            sec,
+            base,
+        ) {
             skipped += 1;
         }
     }
@@ -457,6 +459,7 @@ pub(super) fn draw_section_solids(
                     continue;
                 };
                 if !extrude(
+                    None,
                     a,
                     b,
                     if sm.kind == sepika_core::model::SecondaryMemberKind::Beam {
@@ -488,16 +491,19 @@ pub(super) fn draw_section_solids(
             } else {
                 [0.0, 0.0, 1.0]
             };
-            if !extrude(p_i, p_j, ref_vector, sec, theme::BEST_YELLOW) {
+            if !extrude(None, p_i, p_j, ref_vector, sec, theme::BEST_YELLOW) {
                 skipped += 1;
             }
         }
     }
 
     prims.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    for (_, prim) in prims {
+    for (_, id, prim) in prims {
         match prim {
             SolidPrim::Quad { pts, fill, stroke } => {
+                if let Some(id) = id {
+                    bodies.push(id, pts.to_vec(), true, true, 0.5);
+                }
                 painter.add(egui::Shape::convex_polygon(
                     pts.to_vec(),
                     fill,
@@ -505,6 +511,9 @@ pub(super) fn draw_section_solids(
                 ));
             }
             SolidPrim::Outline { pts, color } => {
+                if let Some(id) = id {
+                    bodies.push(id, pts.clone(), true, false, 1.0);
+                }
                 painter.add(egui::Shape::closed_line(
                     pts,
                     egui::Stroke::new(1.0_f32, color),
@@ -512,5 +521,95 @@ pub(super) fn draw_section_solids(
             }
         }
     }
-    skipped
+    (skipped, bodies)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sepika_core::ids::ElemId;
+
+    fn beam_model() -> Model {
+        let mut model = crate::sample::portal_frame();
+        model.elements = vec![model.elements[2].clone()];
+        model.elements[0].id = ElemId(0);
+        model
+    }
+
+    #[test]
+    fn rendered_h_section_keeps_empty_space_and_contour_neighborhood_distinct() {
+        let model = beam_model();
+        let coords = model.nodes.iter().map(|n| n.coord).collect::<Vec<_>>();
+        let mut cam = super::super::CameraState::default();
+        cam.snap_to_direction([1.0, 0.0, 0.0]);
+        let proj = Projector::new([3000.0, 0.0, 3500.0], &cam, 1.0, [400.0, 400.0]);
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let (_, bodies) = draw_section_solids(
+                ui.painter(),
+                &model,
+                &coords,
+                &proj,
+                false,
+                super::super::FrameFilter::default(),
+                false,
+            );
+            assert_eq!(bodies.pick(proj.project([3000.0, -50.0, 3500.0])), None);
+            assert_eq!(
+                bodies.pick(proj.project([3000.0, -10.0, 3500.0])),
+                Some(ElemId(0))
+            );
+            assert_eq!(
+                bodies.pick(proj.project([3000.0, -100.0, 3700.0])),
+                Some(ElemId(0))
+            );
+        });
+    }
+
+    #[test]
+    fn rendered_solid_faces_use_actual_depth_sorted_paint_order() {
+        let mut model = beam_model();
+        let mut other = model.elements[0].clone();
+        other.id = ElemId(1);
+        model.elements.push(other);
+        let coords = model.nodes.iter().map(|n| n.coord).collect::<Vec<_>>();
+        let cam = super::super::CameraState::default();
+        let proj = Projector::new([3000.0, 0.0, 3500.0], &cam, 0.4, [400.0, 400.0]);
+        let ctx = egui::Context::default();
+        let mut bodies = None;
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            bodies = Some(
+                draw_section_solids(
+                    ui.painter(),
+                    &model,
+                    &coords,
+                    &proj,
+                    false,
+                    super::super::FrameFilter::default(),
+                    false,
+                )
+                .1,
+            );
+        });
+        let face = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT => Some(path),
+                _ => None,
+            })
+            .find(|path| {
+                let a = path.points[1] - path.points[0];
+                let b = path.points[3] - path.points[0];
+                (a.x * b.y - a.y * b.x).abs() > 100.0
+            })
+            .expect("面積を持つ描画面");
+        let center = face
+            .points
+            .iter()
+            .map(|p| p.to_vec2())
+            .fold(egui::Vec2::ZERO, |a, b| a + b)
+            / face.points.len() as f32;
+        assert_eq!(bodies.unwrap().pick(center.to_pos2()), Some(ElemId(1)));
+    }
 }
