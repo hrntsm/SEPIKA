@@ -9,7 +9,7 @@
 use super::{ratio_or_large, src_shear_check, steel_h_props, SrcAxisProps, SrcSeismicCtx};
 use crate::material_strength::{main_rebar_grade, rebar_sigma_y_of};
 use crate::rc::{concrete_allowable_shear_class, rebar_allowable_shear, rebar_allowable_tension};
-use crate::steel::{steel_f_value_prefix, steel_fs, steel_ft};
+use crate::steel::{steel_fs, steel_ft};
 use crate::{CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt};
 use sepika_core::model::Material;
 use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
@@ -31,7 +31,7 @@ pub(crate) fn src_beam_check(
     steel_width: f64,
     steel_web_thick: f64,
     steel_flange_thick: f64,
-    steel_grade: &str,
+    f_value: f64,
     fc_raw: f64,
 ) -> CheckResult {
     let long_term = ctx.term == LoadTerm::Long;
@@ -44,8 +44,6 @@ pub(crate) fn src_beam_check(
     );
     let ft = rebar_allowable_tension(grade, main_dia, long_term);
 
-    let thickness = steel_web_thick.max(steel_flange_thick);
-    let f_value = steel_f_value_prefix(steel_grade, thickness).unwrap_or(235.0);
     let s_ft = steel_ft(f_value, ctx.term);
     let s_fs = steel_fs(f_value, ctx.term);
 
@@ -152,6 +150,7 @@ mod tests {
     use crate::srrc::tests::{
         ctx_beam, make_material, make_section, src_beam_rect_shape, zero_forces,
     };
+    use crate::steel::steel_f_value_prefix;
     use crate::DesignCheck;
     use sepika_core::section_shape::SectionShape;
 
