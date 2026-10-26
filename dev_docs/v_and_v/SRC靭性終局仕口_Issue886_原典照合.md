@@ -81,3 +81,11 @@ Windows、rustc/cargo 1.99.1、mdBook 0.5.4。CIのmdBook版とは区別する�
 - `git diff --check`: 成功。追加した開発文書のローカルリンク20件と対象アンカー・実装参照先を確認。
 
 生産コードの変更がないため全クレート回帰・Clippyは再実行しない。専門家によるサインオフ、実験によるValidation、最終headの独立レビュー・CI・mergeの成功は予記しない。
+
+## 先行SRCルート調査との統合
+
+2026-10-27、PR #914を含む`origin/main`の`d9175abd1d46f1f6b566af1ef57ad9ee56c82e28`へrebaseした。README・原典照合リスト・未検証一覧の同時追記は#885と#886を双方保持し、READMEの目録行も双方を維持した。他の製品docs・既存証拠を削除せず、計算上の実質変更はない。
+
+冒頭の`cc5a4634`とprobe/logは実行時点の履歴として維持する。probe対象の`srrc/`・`secondary/src_rank.rs`・`ultimate/rc_check.rs`が実行対象から不変であることを確認した。追随後に`cargo run -p xtask -- check-docs`（summary124、links659、impl refs706）、`mdbook build`、`git diff origin/main --check`が成功。追加開発文書と#885/#886の接続リンク23件・アンカーの実在と原画像の保持を再確認した。
+
+採用根拠・必須条件などの残件は[#697の本調査接続コメント](https://github.com/hrntsm/SEPIKA/issues/697#issuecomment-6423600483)で継続する。公開入口の有限Verificationを全原典適合・実験Validationへ格上げしない。
