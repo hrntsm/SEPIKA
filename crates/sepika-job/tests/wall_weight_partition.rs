@@ -230,7 +230,7 @@ fn prepared_wall_system_mass_separates_plate_matrix_and_base_correction_owners()
                 };
                 wall_mass_close(node_totals_t[0], expected_node_t);
                 wall_mass_close(node_totals_t[1], expected_node_t);
-                let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+                let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
                 let walls: Vec<_> = expanded
                     .elements
                     .iter()
@@ -291,7 +291,7 @@ fn wall_mass_rejects_inertial_torsion_gauge_and_nonlinear_time_history() {
         let mut model = wall_system_mass_fixture(kind, false, true);
         sepika_job::prepare::prepare_model_for_analysis(&mut model, &Default::default(), None)
             .unwrap();
-        let (mut expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (mut expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         for element in &mut expanded.elements[..2] {
             element.end_cond = [EndCondition::Pinned; 2];
         }
@@ -680,7 +680,7 @@ fn real_assembly_preserves_physical_wall_mass_in_both_routes_and_methods() {
                 model.constraints = gen.constraints;
                 model.generated_masters = gen.generated_masters;
                 model.damper_mass_generation = Some(gen.damper_mass_generation);
-                let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+                let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
                 assert_eq!(
                     expanded
                         .elements
@@ -838,7 +838,7 @@ fn rc_standard_physical_density_is_not_replaced_by_saved_density() {
     );
     close(w.totals.physical_n, 48000.0);
     close(w.totals.matrix_n, 48000.0);
-    let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
     let elem = expanded
         .elements
         .iter()
@@ -1095,7 +1095,7 @@ fn generated_wall_origin_preserves_plate_identity_and_deduplicates_assignments()
     model.wall_regions[0].wall_plate_ids.push(WallPlateId(0));
     let duplicate = model.wall_regions[0].clone();
     model.wall_regions.push(duplicate);
-    let (expanded, index, report) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (expanded, index, report) = sepika_core::wall_expand::expand_wall_elements(&model);
     assert_eq!(report.generated, 1);
     assert_eq!(index.len(), 1);
     let id = index.generated_elem_ids().next().unwrap();
@@ -1122,7 +1122,7 @@ fn generated_wall_origin_preserves_plate_identity_and_deduplicates_assignments()
     assignment.assignment = PlateAssignment::Plate(WallPlateId(1));
     model.wall_assignment_regions.regions.push(assignment);
     model.wall_regions[0].wall_plate_ids.push(WallPlateId(1));
-    let (expanded, index, report) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (expanded, index, report) = sepika_core::wall_expand::expand_wall_elements(&model);
     assert_eq!(report.generated, 2);
     for id in index.generated_elem_ids() {
         let plate = index.plate_of(id).unwrap();
@@ -1153,7 +1153,7 @@ fn generated_wall_origin_preserves_plate_identity_and_deduplicates_assignments()
 #[test]
 fn native_wall_without_physical_plate_is_explicitly_unavailable_for_weight() {
     let model = fixture(6000.0);
-    let (mut native, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (mut native, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
     let wall_id = index.generated_elem_ids().next().unwrap();
     native.generated_wall_origins.clear();
     native.wall_plates.clear();

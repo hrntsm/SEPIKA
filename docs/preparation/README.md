@@ -231,7 +231,7 @@ MCP 経由で解析した場合は、前処理の注意事項（`notices`）に�
 
 <div class="impl-ref">
 
-**実装参照**：検査の本体は `sepika_solver::statics::analysis::precheck::model_issues`（`crates/sepika-solver/src/statics/analysis/precheck.rs`）にあり、解析前チェックと GUI の診断（`sepika_app::app::App::run_diagnostics`、`crates/sepika-app/src/app/actions/mod.rs`）が同じ判定を共有します。GUI は壁展開モデル（`sepika_load::wall_expand::expand_wall_elements`）へ `model_issues` を適用し、対象のクリック選択は `ModelIssue` が持つ `IssueTargets` で 3D ビューと結び付けます。
+**実装参照**：検査の本体は `sepika_solver::statics::analysis::precheck::model_issues`（`crates/sepika-solver/src/statics/analysis/precheck.rs`）にあり、解析前チェックと GUI の診断（`sepika_app::app::App::run_diagnostics`、`crates/sepika-app/src/app/actions/mod.rs`）が同じ判定を共有します。GUI は壁展開モデル（`sepika_core::wall_expand::expand_wall_elements`）へ `model_issues` を適用し、対象のクリック選択は `ModelIssue` が持つ `IssueTargets` で 3D ビューと結び付けます。
 
 </div>
 

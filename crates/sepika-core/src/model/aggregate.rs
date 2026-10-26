@@ -2529,3 +2529,15 @@ impl Model {
             })
     }
 }
+
+impl Model {
+    /// 解析用の剛域。全体OFFでは剛域長だけを抑止し、入力値・フェース・仕口偏心を保持する。
+    pub fn analysis_rigid_zone(&self, element: &ElementData) -> RigidZone {
+        let mut zone = element.rigid_zone;
+        if !self.stress_cfg.consider_rigid_zones {
+            zone.length_i = 0.0;
+            zone.length_j = 0.0;
+        }
+        zone
+    }
+}

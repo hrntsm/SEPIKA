@@ -600,6 +600,50 @@ pub fn fixed_internal_local(
     f
 }
 
+/// モデルの剛域設定・局所軸・材端解放に従う、節点変位ゼロの梁CMQ応答 [N, N·mm]。
+/// 荷重・材端幾何が不正、または線材の荷重応答を取得できない場合はエラー。
+pub fn cmq_with_rigid_zone(
+    model: &sepika_core::model::Model,
+    data: &sepika_core::model::ElementData,
+    loads: &[MemberLoad],
+) -> Result<crate::behavior::LoadedFrameResponse, String> {
+    if data.nodes.len() != 2
+        || !matches!(
+            data.kind,
+            sepika_core::model::ElementKind::Beam
+                | sepika_core::model::ElementKind::Fiber
+                | sepika_core::model::ElementKind::MultiSpring
+        )
+    {
+        return Err("CMQは2節点梁要素に限ります".into());
+    }
+    if let Some(reason) = crate::factory::wall_side_column_input_issue(data, model, None) {
+        return Err(reason);
+    }
+    crate::frame::beam::BeamElement::try_new(data, model)?;
+    if sepika_core::panel_zone::is_horizontal_or_vertical_member(model, data)
+        && sepika_core::panel_zone::member_orientation(model, data).is_some()
+    {
+        for &node in &data.nodes {
+            if model.elements.iter().any(|element| {
+                element.kind == sepika_core::model::ElementKind::PanelZone
+                    && element.nodes.first() == Some(&node)
+            }) {
+                sepika_core::panel_zone::resolve_explicit_panel_analysis_joint(
+                    model,
+                    node,
+                    &model.elements,
+                )
+                .map_err(|reason| reason.to_string())?;
+            }
+        }
+    }
+    let behavior = crate::factory::build_behavior(data, model);
+    behavior
+        .frame_load_response(&vec![0.0; behavior.n_dof()], loads)?
+        .ok_or_else(|| "対象要素は梁の荷重応答を持ちません".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

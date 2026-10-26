@@ -1640,7 +1640,7 @@ fn changing_vertical_ratio_and_strength_keeps_horizontal_skeleton_unchanged() {
     assert!(matches!(altered, CheckOutcome::Checked(_)));
 }
 
-fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) {
+fn status_wall_model() -> (Model, sepika_core::wall_expand::WallExpansionIndex) {
     use sepika_core::ids::{WallPlateId, WallRegionId};
     use sepika_core::model::{WallPlate, WallPlateShape, WallRegion};
     let mut model = wall_with_columns_model();
@@ -1726,7 +1726,7 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
             posts: vec![],
         });
     }
-    let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+    let (model, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
     (model, index)
 }
 
@@ -2092,7 +2092,7 @@ fn wall_status_slit_stays_outside_with_or_without_section() {
     source.wall_plates[0].slit.beam_face[0] = true;
     for section in [Some(SectionId(0)), None] {
         source.wall_plates[0].section = section;
-        let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&source);
+        let (model, index, _) = sepika_core::wall_expand::expand_wall_elements(&source);
         let checks =
             collect_wall_design_checks(&model, &[], LoadTerm::Short, Some(&index), "case:0", None);
         assert_eq!(checks.len(), 2);
@@ -2121,7 +2121,7 @@ fn wall_status_slit_stays_outside_with_invalid_thickness_and_plate_or_attr() {
     source.wall_plates[0].slit.beam_face[0] = true;
     for thickness in [180.0, -1.0] {
         source.sections[0].thickness = Some(thickness);
-        let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&source);
+        let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&source);
         let wall = expanded
             .elements
             .iter()
@@ -2190,7 +2190,7 @@ fn wall_status_ungenerated_missing_section_and_attached_weight_only_remain_visib
         },
         extent: Some([500.0, 500.0]),
     };
-    let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&expanded);
+    let (model, index, _) = sepika_core::wall_expand::expand_wall_elements(&expanded);
     let checks =
         collect_wall_design_checks(&model, &[], LoadTerm::Long, Some(&index), "case:0", None);
     assert!(checks
@@ -2529,7 +2529,7 @@ mod rc_wall534_fixture;
 fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
     use sepika_element::frame::beam::MemberForces;
     let input = rc_wall534_fixture::input_model(rc_wall617_fixture::input_model());
-    let (mut model, index, _) = sepika_load::wall_expand::expand_wall_elements(&input);
+    let (mut model, index, _) = sepika_core::wall_expand::expand_wall_elements(&input);
     let wall = model
         .elements
         .iter()

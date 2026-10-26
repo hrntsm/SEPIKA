@@ -1071,7 +1071,7 @@ impl EditCommand for SetAttachedWallPlateAnchor {
 /// （[`SetSlabSection`] と同じ規約）。
 ///
 /// 断面は壁版の自重（板厚 × 材料密度）と、囲まれた壁版では解析要素の生成可否
-/// （`sepika_load::wall_expand` は断面未割当の壁版から要素を作らない）を
+/// （`sepika_core::wall_expand` は断面未割当の壁版から要素を作らない）を
 /// 決めるため、囲まれた壁版・取り付く壁版のどちらにも意味を持つ。
 pub struct SetWallPlateSection {
     pub id: WallPlateId,

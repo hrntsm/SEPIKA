@@ -152,7 +152,7 @@ impl App {
     }
 
     fn notice_steel_seismic_walls(&mut self) {
-        let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+        let (model, index, _) = sepika_core::wall_expand::expand_wall_elements(&self.core.model);
         if let Some(notice) = sepika_job::notices::steel_seismic_wall_notice(&model, &index) {
             self.append_analysis_notice(notice);
         }
@@ -321,7 +321,7 @@ impl App {
     }
 
     /// 荷重ケースから標準組合せを生成し、undo 可能に一括追加する
-    /// （`sepika_load::combo::standard_combinations`・`AddCombination` を使用）。
+    /// （`sepika_core::load_combo::standard_combinations`・`AddCombination` を使用）。
     ///
     /// 固定（Dead）・積載（Live）・積雪（Snow）は種別の先頭 1 件を用いる。
     /// 地震は、準備計算が自動生成する標準ケース名（`EX`/`EY`）で方向を判別する
@@ -362,19 +362,19 @@ impl App {
         };
         let snow = find_first(LoadCaseKind::Snow);
 
-        let input = sepika_load::combo::ComboInput {
+        let input = sepika_core::load_combo::ComboInput {
             dl,
             ll,
             seismic_x: find_named(EX_CASE_NAME, LoadCaseKind::Seismic),
             seismic_y: find_named(EY_CASE_NAME, LoadCaseKind::Seismic),
             snow,
             heavy_snow_zone: self.core.analysis_cfg.heavy_snow_zone,
-            snow_factors: Some(sepika_load::combo::SnowFactors {
+            snow_factors: Some(sepika_core::load_combo::SnowFactors {
                 delta1: self.core.analysis_cfg.snow_delta1,
                 delta3: self.core.analysis_cfg.snow_delta3,
             }),
         };
-        let combos = sepika_load::combo::standard_combinations(&input);
+        let combos = sepika_core::load_combo::standard_combinations(&input);
         for combo in combos {
             self.core.scoped.undo.run(
                 &mut self.core.model,
@@ -531,7 +531,7 @@ impl App {
         // `sepika_job::compute` 側の展開と同じ理由。忘れると壁の不備が診断タブに
         // 現れないまま解析実行時に初めて分かる、という劣化になる）。
         let (wall_expanded_model, _wall_index, _wall_report) =
-            sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+            sepika_core::wall_expand::expand_wall_elements(&self.core.model);
         for issue in sepika_solver::statics::analysis::precheck::model_issues(&wall_expanded_model)
         {
             push_issue_diagnostics(&mut diags, issue);

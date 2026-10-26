@@ -714,7 +714,7 @@ fn preparation_rebuild_clears_generated_wall_selection_only() {
         posts: Vec::new(),
     });
     assign_zero_density_test_frame_sections(&mut app.core.model);
-    let (_, index, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (_, index, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let generated = index.generated_elem_ids().next().expect("生成壁要素");
     assert!(app.core.model.element(generated).is_none());
     app.select_member(generated);
@@ -3025,6 +3025,7 @@ fn test_save_and_open_project_roundtrip() {
 
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
+    app.core.model.stress_cfg.consider_rigid_zones = false;
     app.core.scoped.staleness.mark_edited();
     app.save_project_to(path.clone());
     assert!(
@@ -3054,6 +3055,7 @@ fn test_save_and_open_project_roundtrip() {
         app2.core.scoped.last_error
     );
     assert!(app2.core.model.eq_ignoring_dofmap(&saved_model));
+    assert!(!app2.core.model.stress_cfg.consider_rigid_zones);
     assert_eq!(app2.core.scoped.project_path.as_ref(), Some(&path));
 
     std::fs::remove_file(&path).ok();
@@ -6277,9 +6279,8 @@ fn test_slab_design_span_respects_one_way() {
     assert_eq!(short_model.slabs[0].one_way(), Some(OneWayDir::Short));
 
     let w = short_model.slabs[0].plate.loads[0].value;
-    let loads =
-        sepika_load::floor::distribute_slab_w_checked(&short_model, &short_model.slabs[0], w)
-            .expect("寸法変更後の短辺方向分配");
+    let loads = sepika_load::floor::distribute_slab_w(&short_model, &short_model.slabs[0], w)
+        .expect("寸法変更後の短辺方向分配");
     assert!(!loads.is_empty());
     assert!(loads
         .iter()
@@ -14143,7 +14144,7 @@ fn wall_connection_gui_diagnostic_preserves_shared_stop_reason() {
         let mut duplicate = app.core.model.elements[0].clone();
         duplicate.id = ElemId(4);
         app.core.model.elements.push(duplicate);
-        let expanded = sepika_load::wall_expand::expand_wall_elements(&app.core.model).0;
+        let expanded = sepika_core::wall_expand::expand_wall_elements(&app.core.model).0;
         let expected = sepika_element::factory::ensure_wall_side_column_analysis(
             &expanded,
             None,

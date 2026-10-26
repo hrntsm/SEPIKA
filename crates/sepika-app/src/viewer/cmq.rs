@@ -1,4 +1,4 @@
-//! CMQ 図（両端固定端モーメント・単純梁モーメント・せん断）。
+//! 節点変位0の梁CMQ図（端部固定値・荷重込み曲げ・せん断）。
 //!
 //! 描画ソースは表示中荷重ケース（`nav.focus_load_case`。応力図と異なり解析実行を
 //! 要しない）の `member`（部材荷重）そのもの。床分配・自重・取り付く壁版の線
@@ -159,6 +159,7 @@ fn project_load(kind: MemberLoadKind, dir: [f64; 3], axis: [f64; 3]) -> MemberLo
 }
 
 /// グループ内の全荷重の両端固定端モーメントを合算する（C 図）。
+#[cfg(test)]
 fn sum_fixed_end_moments(loads: &[MemberLoadKind], l: f64) -> (f64, f64) {
     loads
         .iter()
@@ -167,6 +168,7 @@ fn sum_fixed_end_moments(loads: &[MemberLoadKind], l: f64) -> (f64, f64) {
 }
 
 /// グループ内の全荷重の単純梁反力を合算する（Q 図）。
+#[cfg(test)]
 fn sum_simple_reactions(loads: &[MemberLoadKind], l: f64) -> (f64, f64) {
     loads
         .iter()
@@ -174,7 +176,7 @@ fn sum_simple_reactions(loads: &[MemberLoadKind], l: f64) -> (f64, f64) {
         .fold((0.0, 0.0), |(ai, aj), (ri, rj)| (ai + ri, aj + rj))
 }
 
-/// M（単純梁中央モーメント）図の折れ線サンプリング位置 ξ∈[0,1] を返す。
+/// M・Q図の折れ線サンプリング位置 ξ∈[0,1] を返す。
 /// 等分割に加え、`loads` に含まれる区間分布荷重の両端 a/L, b/L・集中荷重の a/L を
 /// 折れ点として正確に出すため追加する。
 fn cmq_m_sample_xis(loads: &[MemberLoadKind], l: f64) -> Vec<f64> {
@@ -183,7 +185,13 @@ fn cmq_m_sample_xis(loads: &[MemberLoadKind], l: f64) -> Vec<f64> {
     if l > 1e-9 {
         for load in loads {
             match *load {
-                MemberLoadKind::Point { a, .. } => xis.push((a / l).clamp(0.0, 1.0)),
+                MemberLoadKind::Point { a, .. } => {
+                    let xi = (a / l).clamp(0.0, 1.0);
+                    xis.push(xi);
+                    if xi < 1.0 {
+                        xis.push((a.next_up() / l).next_up().min(1.0));
+                    }
+                }
                 MemberLoadKind::Distributed { a, b, .. } => {
                     xis.push((a / l).clamp(0.0, 1.0));
                     xis.push((b / l).clamp(0.0, 1.0));
@@ -192,7 +200,7 @@ fn cmq_m_sample_xis(loads: &[MemberLoadKind], l: f64) -> Vec<f64> {
         }
     }
     xis.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    xis.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    xis.dedup_by(|a, b| *a == *b);
     xis
 }
 
@@ -219,12 +227,14 @@ pub(super) fn paint_diagram_polygon(
 
 /// 1 大梁・1 軸（ey または ez）分の描画対象。荷重は `axis`（局所軸の単位ベクトル。
 /// 世界座標）へ投影済みの `MemberLoadKind` 列で持つ。
-struct CmqTrace<'g> {
-    group: &'g CmqElemGroup,
+struct CmqTrace {
+    ends: [[f64; 3]; 2],
     l: f64,
     /// 描画位置の張り出し方向（構面表示では `in_plane_offset_dir` で構面内へ倒し済み）。
     offset_dir: [f64; 3],
     loads: Vec<MemberLoadKind>,
+    section: sepika_element::frame::member_load::LoadedFrameSection,
+    c: (f64, f64),
     /// 投影元の面（強軸 ey／弱軸 ez）。色は成分（C/M/Q）で決まるため軸では変えないが、
     /// **2D 構面表示では ey・ez の張り出し方向が同一直線上に潰れる**
     /// （`in_plane_offset_dir` は材軸と構面法線だけから向きを決め、投影元の面を見ない
@@ -232,6 +242,25 @@ struct CmqTrace<'g> {
     /// 色そのものが違う（Mz=紫・My=赤）ため重なっても判別できるが、CMQ 図は軸に関わらず
     /// 成分色が共通のため、区別できるよう ez を半透明で描く（`plane_alpha_scale`）。
     plane: DiagramPlane,
+}
+
+fn trace_max_shear(trace: &CmqTrace) -> f64 {
+    let index = match trace.plane {
+        DiagramPlane::Ey => 1,
+        DiagramPlane::Ez => 2,
+    };
+    cmq_m_sample_xis(&trace.loads, trace.l)
+        .into_iter()
+        .map(|xi| trace.section.at(xi).expect("CMQの有限な全長比")[index].abs())
+        .fold(0.0_f64, f64::max)
+}
+
+fn trace_moment(trace: &CmqTrace, xi: f64) -> f64 {
+    let force = trace.section.at(xi).expect("CMQの有限な全長比");
+    match trace.plane {
+        DiagramPlane::Ey => force[5],
+        DiagramPlane::Ez => -force[4],
+    }
 }
 
 /// `CmqTrace::plane` に応じた塗り・輪郭の不透明度倍率（0.0〜1.0）。
@@ -245,7 +274,7 @@ fn plane_alpha_scale(plane: DiagramPlane) -> f32 {
     }
 }
 
-/// 部材ローカルに沿って CMQ 図（両端固定端モーメント C・単純梁中央モーメント M・
+/// 部材ローカルに沿って CMQ 図（両端固定端モーメント C・荷重込み曲げモーメント M・
 /// せん断 Q）を描く。
 ///
 /// 応力図と同じ「面」の区別（強軸 ey・弱軸 ez。`app.ui.view.cmq_axes`）を持つ。部材の局所軸が
@@ -255,7 +284,7 @@ fn plane_alpha_scale(plane: DiagramPlane) -> f32 {
 pub(super) fn draw_cmq_diagram(
     painter: &egui::Painter,
     app: &App,
-    coords3: &[[f64; 3]],
+    _coords3: &[[f64; 3]],
     proj: &Projector,
     filter: FrameFilter,
     frame_normal: Option<[f64; 3]>,
@@ -298,12 +327,7 @@ pub(super) fn draw_cmq_diagram(
 
     let groups: Vec<CmqElemGroup> = group_member_loads_by_elem(&app.core.model, case)
         .into_iter()
-        .filter(|g| {
-            filter.shows(g.elem)
-                && g.n0 < coords3.len()
-                && g.n1 < coords3.len()
-                && member_len3(coords3[g.n0], coords3[g.n1]) >= 1e-9
-        })
+        .filter(|g| filter.shows(g.elem))
         .collect();
 
     if groups.is_empty() {
@@ -324,11 +348,54 @@ pub(super) fn draw_cmq_diagram(
         return;
     }
 
+    let mut cmq_error = None;
+    let responses: HashMap<_, _> = groups
+        .iter()
+        .filter_map(|group| {
+            let data = app.core.model.element(group.elem)?;
+            let loads = group
+                .loads
+                .iter()
+                .map(|(kind, dir)| {
+                    sepika_core::model::MemberLoad::manual(group.elem, *dir, kind.clone())
+                })
+                .collect::<Vec<_>>();
+            match sepika_element::frame::member_load::cmq_with_rigid_zone(
+                &app.core.model,
+                data,
+                &loads,
+            ) {
+                Ok(response) => {
+                    let ends = app
+                        .core
+                        .model
+                        .primary_beam_axis_ends(data)
+                        .expect("CMQ応答で検証済みの実材軸")
+                        .unwrap_or_else(|| {
+                            [
+                                app.core.model.nodes[group.n0].coord,
+                                app.core.model.nodes[group.n1].coord,
+                            ]
+                        });
+                    Some((group.elem, (response.section, ends)))
+                }
+                Err(reason) => {
+                    cmq_error = Some(reason);
+                    None
+                }
+            }
+        })
+        .collect();
+    if let Some(reason) = cmq_error {
+        info_text(painter, &format!("CMQを計算できません: {reason}"));
+        return;
+    }
+    let responses = &responses;
     let traces: Vec<CmqTrace> = groups
         .iter()
         .flat_map(|g| {
-            let p_i = coords3[g.n0];
-            let p_j = coords3[g.n1];
+            let (section, ends) = &responses[&g.elem];
+            let [p_i, p_j] = *ends;
             let l = member_len3(p_i, p_j);
             axes.iter().filter_map(move |&plane| {
                 let axis_dir = diagram_offset_dir(p_i, p_j, g.ref_vec, plane)?;
@@ -341,12 +408,21 @@ pub(super) fn draw_cmq_diagram(
                     .iter()
                     .map(|(kind, dir)| project_load(kind.clone(), *dir, axis_dir))
                     .collect();
+                let section = section.clone();
+                let (m_index, sign) = match plane {
+                    DiagramPlane::Ey => (5, 1.0),
+                    DiagramPlane::Ez => (4, -1.0),
+                };
+                let fi = section.at(0.0).ok()?;
+                let fj = section.at(1.0).ok()?;
                 Some(CmqTrace {
-                    group: g,
+                    ends: *ends,
                     l,
                     offset_dir,
                     loads,
                     plane,
+                    c: (-sign * fi[m_index], sign * fj[m_index]),
+                    section,
                 })
             })
         })
@@ -355,27 +431,17 @@ pub(super) fn draw_cmq_diagram(
     let max_c = traces
         .iter()
         .map(|t| {
-            let (c_i, c_j) = sum_fixed_end_moments(&t.loads, t.l);
+            let (c_i, c_j) = t.c;
             c_i.abs().max(c_j.abs())
         })
         .fold(0.0_f64, f64::max);
-    let max_q = traces
-        .iter()
-        .map(|t| {
-            let (q_i, q_j) = sum_simple_reactions(&t.loads, t.l);
-            q_i.abs().max(q_j.abs())
-        })
-        .fold(0.0_f64, f64::max);
+    let max_q = traces.iter().map(trace_max_shear).fold(0.0_f64, f64::max);
     let max_m = traces
         .iter()
         .map(|t| {
             cmq_m_sample_xis(&t.loads, t.l)
                 .into_iter()
-                .fold(0.0_f64, |acc, xi| {
-                    acc.max(
-                        sepika_load::floor::simple_beam_moment_at(&t.loads, t.l, xi * t.l).abs(),
-                    )
-                })
+                .fold(0.0_f64, |acc, xi| acc.max(trace_moment(t, xi).abs()))
         })
         .fold(0.0_f64, f64::max);
     if max_c < 1e-12 && max_q < 1e-12 && max_m < 1e-12 {
@@ -394,8 +460,7 @@ pub(super) fn draw_cmq_diagram(
     let m_amp = 60.0 / max_m.max(1e-12) / scale as f64;
 
     for t in &traces {
-        let p_i = coords3[t.group.n0];
-        let p_j = coords3[t.group.n1];
+        let [p_i, p_j] = t.ends;
         let p0 = proj.project(p_i);
         let p1 = proj.project(p_j);
         let ey = t.offset_dir;
@@ -405,7 +470,7 @@ pub(super) fn draw_cmq_diagram(
 
         match app.ui.view.cmq_component {
             CmqComponent::C => {
-                let (c_i, c_j) = sum_fixed_end_moments(&t.loads, t.l);
+                let (c_i, c_j) = t.c;
                 let peak_px = (60.0 * c_i.abs().max(c_j.abs()) / max_c.max(1e-12)) as f32;
                 if peak_px < diagram::MIN_DIAGRAM_PX {
                     continue;
@@ -429,8 +494,7 @@ pub(super) fn draw_cmq_diagram(
                 let samples: Vec<(f64, f64)> = xis
                     .into_iter()
                     .map(|xi| {
-                        let val =
-                            sepika_load::floor::simple_beam_moment_at(&t.loads, t.l, xi * t.l);
+                        let val = trace_moment(t, xi);
                         val_max = val_max.max(val.abs());
                         (xi, val)
                     })
@@ -499,23 +563,61 @@ pub(super) fn draw_cmq_diagram(
                 ));
             }
             CmqComponent::Q => {
-                let (q_i, q_j) = sum_simple_reactions(&t.loads, t.l);
-                let peak_px = (60.0 * q_i.abs().max(q_j.abs()) / max_q.max(1e-12)) as f32;
+                let peak_px = (60.0 * trace_max_shear(t) / max_q.max(1e-12)) as f32;
                 if peak_px < diagram::MIN_DIAGRAM_PX {
                     continue;
                 }
-                let q_poly = vec![
-                    p0,
-                    proj.project_offset(p_i, ey, q_i * q_amp),
-                    proj.project_offset(p_j, ey, q_j * q_amp),
-                    p1,
-                ];
-                paint_diagram_polygon(
-                    painter,
-                    q_poly,
-                    theme::translucent(theme::GOOD_GREEN, fill_alpha),
-                    theme::translucent(theme::GOOD_GREEN, stroke_alpha),
-                );
+                let samples: Vec<_> = cmq_m_sample_xis(&t.loads, t.l)
+                    .into_iter()
+                    .map(|xi| {
+                        let force = t.section.at(xi).expect("CMQの有限な全長比");
+                        let value = force[match t.plane {
+                            DiagramPlane::Ey => 1,
+                            DiagramPlane::Ez => 2,
+                        }];
+                        (xi, value)
+                    })
+                    .collect();
+                let project_sample = |(xi, value): (f64, f64)| {
+                    let base = std::array::from_fn(|d| p_i[d] + (p_j[d] - p_i[d]) * xi);
+                    proj.project_offset(base, ey, value * q_amp)
+                };
+                let projected: Vec<_> = samples.iter().copied().map(project_sample).collect();
+                if !p0.is_finite()
+                    || !p1.is_finite()
+                    || projected.iter().any(|point| !point.is_finite())
+                {
+                    continue;
+                }
+                for polygon in diagram::diagram_fill_polygons(&samples, 1) {
+                    let points: Vec<_> = polygon.into_iter().map(project_sample).collect();
+                    let origin = points[0];
+                    let area_twice: f64 = points[1..]
+                        .windows(2)
+                        .map(|edge| {
+                            let a = edge[0] - origin;
+                            let b = edge[1] - origin;
+                            a.x as f64 * b.y as f64 - a.y as f64 * b.x as f64
+                        })
+                        .sum();
+                    if points.iter().all(|point| point.is_finite())
+                        && area_twice.is_finite()
+                        && area_twice != 0.0
+                    {
+                        painter.add(egui::Shape::convex_polygon(
+                            points,
+                            theme::translucent(theme::GOOD_GREEN, fill_alpha),
+                            egui::Stroke::NONE,
+                        ));
+                    }
+                }
+                let mut outline = vec![p0];
+                outline.extend(projected);
+                outline.push(p1);
+                painter.add(egui::Shape::line(
+                    outline,
+                    egui::Stroke::new(1.5_f32, theme::translucent(theme::GOOD_GREEN, stroke_alpha)),
+                ));
             }
         }
     }
@@ -528,15 +630,15 @@ pub(super) fn draw_cmq_diagram(
     };
     let legend = match app.ui.view.cmq_component {
         CmqComponent::C => format!(
-            "CMQ図 C(max={:.2}, {}{}) 青",
+            "解析梁CMQ C（節点変位0）(max={:.2}, {}{}) 青",
             max_c, axis_label, both_axes_note
         ),
         CmqComponent::M => format!(
-            "CMQ図 M(max={:.2}, {}{}) 紫",
+            "解析梁CMQ M（荷重込み・節点変位0）(max={:.2}, {}{}) 紫",
             max_m, axis_label, both_axes_note
         ),
         CmqComponent::Q => format!(
-            "CMQ図 Q(max={:.2}, {}{}) 緑",
+            "解析梁CMQ Q（荷重込み・節点変位0）(max={:.2}, {}{}) 緑",
             max_q, axis_label, both_axes_note
         ),
     };
@@ -666,22 +768,54 @@ mod tests {
             }],
             ..Default::default()
         };
+        let mut section =
+            sepika_core::model::Section::zero(sepika_core::ids::SectionId(0), "CMQ".into());
+        section.area = 1000.0;
+        section.iy = 1e7;
+        section.iz = 1e7;
+        section.j = 1e6;
+        section.as_y = 800.0;
+        section.as_z = 800.0;
+        section.material = Some(sepika_core::ids::MaterialId(0));
+        app.core.model.sections.push(section);
+        app.core.model.materials.push(sepika_core::model::Material {
+            id: sepika_core::ids::MaterialId(0),
+            name: "CMQ".into(),
+            category: sepika_core::model::MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: None,
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        app.core.model.elements[0].section = Some(sepika_core::ids::SectionId(0));
         app
     }
 
     fn draw_paths(app: &App, scale: f32) -> Vec<egui::epaint::PathShape> {
+        let coords: Vec<_> = app.core.model.nodes.iter().map(|node| node.coord).collect();
+        draw_paths_from_coords(app, scale, &coords)
+    }
+
+    fn draw_paths_from_coords(
+        app: &App,
+        scale: f32,
+        coords: &[[f64; 3]],
+    ) -> Vec<egui::epaint::PathShape> {
         let ctx = egui::Context::default();
         let camera = super::super::CameraState {
             rot: [1.0, 0.0, 0.0, 0.0],
             ..Default::default()
         };
         let proj = Projector::new([0.0; 3], &camera, scale, [100.0, 100.0]);
-        let coords: Vec<_> = app.core.model.nodes.iter().map(|node| node.coord).collect();
         ctx.run_ui(egui::RawInput::default(), |ui| {
             draw_cmq_diagram(
                 &ui.ctx().layer_painter(egui::LayerId::background()),
                 app,
-                &coords,
+                coords,
                 &proj,
                 FrameFilter::default(),
                 None,
@@ -715,10 +849,10 @@ mod tests {
                 let b = edge.1;
                 for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
                     let p = *a + (*b - *a) * fraction;
-                    let ordinate = outline
+                    let ordinates: Vec<_> = outline
                         .points
                         .windows(2)
-                        .find_map(|segment| {
+                        .filter_map(|segment| {
                             let [u, v] = [segment[0], segment[1]];
                             if (u.x - v.x).abs() < 1e-5
                                 || p.x < u.x.min(v.x) - 1e-4
@@ -728,11 +862,13 @@ mod tests {
                             }
                             Some(u.y + (v.y - u.y) * (p.x - u.x) / (v.x - u.x))
                         })
-                        .expect("塗りの点は輪郭の材軸区間内");
+                        .collect();
+                    assert!(!ordinates.is_empty(), "塗りの点は輪郭の材軸区間内");
+                    let low = ordinates.iter().copied().fold(100.0_f32, f32::min);
+                    let high = ordinates.iter().copied().fold(100.0_f32, f32::max);
                     assert!(
-                        p.y >= 100.0_f32.min(ordinate) - 2e-4
-                            && p.y <= 100.0_f32.max(ordinate) + 2e-4,
-                        "輪郭外の塗り: {p:?}, ordinate={ordinate}"
+                        p.y >= low - 2e-4 && p.y <= high + 2e-4,
+                        "輪郭外の塗り: {p:?}, range={low}..{high}"
                     );
                 }
                 if (a.y - 100.0).abs() > 1e-4 {
@@ -877,16 +1013,19 @@ mod tests {
         let paths = draw_paths(&app, 0.5);
         let outline = paths.iter().find(|path| !path.closed).unwrap();
         let mut expected = vec![egui::pos2(100.0, 100.0)];
-        for k in 1..=32 {
+        for k in 0..=32 {
             let xi = k as f32 / 32.0;
             expected.push(egui::pos2(
                 100.0 + 500.0 * xi,
-                100.0 + 240.0 * xi * (1.0 - xi),
+                100.0 + 360.0 * xi * (1.0 - xi) - 60.0,
             ));
         }
         expected.push(egui::pos2(600.0, 100.0));
-        assert_eq!(outline.points, expected);
-        assert_eq!(paths.iter().filter(|path| path.closed).count(), 32);
+        assert_eq!(outline.points.len(), expected.len());
+        for (actual, expected) in outline.points.iter().zip(expected) {
+            assert!((*actual - expected).length() < 1e-4);
+        }
+        assert_eq!(paths.iter().filter(|path| path.closed).count(), 34);
     }
 
     #[test]
@@ -1223,5 +1362,115 @@ mod tests {
             ez_alpha > 0.0 && ez_alpha < ey_alpha,
             "弱軸は強軸より薄いが完全透明ではないはず: ez_alpha={ez_alpha}"
         );
+    }
+    #[test]
+    fn building_rigid_zone_setting_changes_all_rendered_cmq_components() {
+        let mut app = drawing_app(
+            vec![MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 2.0,
+                w2: 2.0,
+            }],
+            false,
+            DiagramPlane::Ey,
+        );
+        app.core.model.elements[0].rigid_zone.length_i = 200.0;
+        app.core.model.elements[0].rigid_zone.length_j = 100.0;
+        for component in [CmqComponent::C, CmqComponent::M, CmqComponent::Q] {
+            app.ui.view.cmq_component = component;
+            app.core.model.stress_cfg.consider_rigid_zones = true;
+            let on = draw_paths(&app, 0.5);
+            app.core.model.stress_cfg.consider_rigid_zones = false;
+            let off = draw_paths(&app, 0.5);
+            assert!(!on.is_empty() && !off.is_empty());
+            assert_ne!(on, off, "{component:?}");
+        }
+        let loads = [MemberLoadKind::Point {
+            a: 500.0,
+            p: 1000.0,
+        }];
+        let xis = cmq_m_sample_xis(&loads, 1000.0);
+        assert!(xis.contains(&0.5));
+        assert!(xis.iter().any(|&xi| xi > 0.5 && xi < 0.500000000001));
+    }
+    #[test]
+    fn cmq_q_fill_stays_inside_signed_curve_and_point_load_jump() {
+        for loads in [
+            vec![MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 2.0,
+                w2: 2.0,
+            }],
+            vec![MemberLoadKind::Distributed {
+                a: 100.0,
+                b: 800.0,
+                w1: 1.0,
+                w2: 3.0,
+            }],
+            vec![MemberLoadKind::Point {
+                a: 370.0,
+                p: 1000.0,
+            }],
+        ] {
+            for reverse in [false, true] {
+                let mut app = drawing_app(loads.clone(), reverse, DiagramPlane::Ey);
+                app.ui.view.cmq_component = CmqComponent::Q;
+                app.core.model.elements[0].rigid_zone.length_i = 200.0;
+                app.core.model.elements[0].rigid_zone.length_j = 100.0;
+                for enabled in [true, false] {
+                    app.core.model.stress_cfg.consider_rigid_zones = enabled;
+                    let paths = draw_paths(&app, 0.5);
+                    assert_fill_inside_sampled_outline(&paths);
+                    if matches!(loads[0], MemberLoadKind::Point { .. }) {
+                        let outline = paths.iter().find(|path| !path.closed).unwrap();
+                        let x = if reverse { 415.0 } else { 285.0 };
+                        let at_point: Vec<_> = outline
+                            .points
+                            .iter()
+                            .filter(|point| (point.x - x).abs() < 1e-4)
+                            .collect();
+                        assert_eq!(at_point.len(), 2);
+                        assert!((at_point[0].y - at_point[1].y).abs() > 1.0);
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn eccentric_cmq_uses_actual_axis_for_point_jump_length_and_local_components() {
+        for plane in [DiagramPlane::Ey, DiagramPlane::Ez] {
+            let mut app = drawing_app(
+                vec![MemberLoadKind::Point {
+                    a: 370.0,
+                    p: 1000.0,
+                }],
+                false,
+                plane,
+            );
+            app.ui.view.cmq_component = CmqComponent::Q;
+            app.core.model.sections[0].frame_use =
+                Some(sepika_core::model::FrameSectionUse::Girder);
+            app.core.model.elements[0].vertical_eccentricity = Some(200.0);
+            app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+            app.core.model.nodes[1].coord = [1000.0, 0.0, 300.0];
+            app.core.model.load_cases[0].member[0].dir = [0.0, -1.0, -1.0];
+            let expected = draw_paths(&app, 0.5);
+            assert!(!expected.is_empty());
+            let display_coords = [[0.0, 0.0, 0.0], [900.0, 100.0, 0.0]];
+            assert_eq!(draw_paths_from_coords(&app, 0.5, &display_coords), expected);
+            if plane == DiagramPlane::Ey {
+                let outline = expected.iter().find(|path| !path.closed).unwrap();
+                let point_x = 100.0 + 500.0 * 370.0 / 1090000.0_f64.sqrt();
+                let jump: Vec<_> = outline
+                    .points
+                    .iter()
+                    .filter(|point| (point.x as f64 - point_x).abs() < 1e-4)
+                    .collect();
+                assert_eq!(jump.len(), 2);
+                assert!((jump[0].y - jump[1].y).abs() > 1.0);
+            }
+        }
     }
 }

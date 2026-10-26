@@ -7,7 +7,7 @@ use sepika_element::wall::misc_wall::{is_rc_wall, wall_is_seismic};
 /// 対象がない場合は `None`。線形解析では呼び出さないこと。
 pub fn steel_seismic_wall_notice(
     model: &Model,
-    index: &sepika_load::wall_expand::WallExpansionIndex,
+    index: &sepika_core::wall_expand::WallExpansionIndex,
 ) -> Option<String> {
     let mut ids: Vec<_> = model
         .elements

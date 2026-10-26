@@ -834,6 +834,10 @@ mod tests {
             |a| a.core.analysis_cfg.z = 0.8,
             |a| a.core.analysis_cfg.push_steps += 1,
             |a| {
+                a.core.model.stress_cfg.consider_rigid_zones =
+                    !a.core.model.stress_cfg.consider_rigid_zones
+            },
+            |a| {
                 a.core.model.stress_cfg.rigid_zone_consider_walls =
                     !a.core.model.stress_cfg.rigid_zone_consider_walls
             },

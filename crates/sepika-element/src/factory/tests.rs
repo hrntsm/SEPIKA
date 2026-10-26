@@ -1736,11 +1736,17 @@ fn steel_plate_boundary_clones_preserve_registered_section_ownership_without_rc_
                 }
             };
             assert_eq!(valid.n_dof(), 12);
-            assert_eq!(valid.owns_frame_member_loads(), kind.is_some());
+            assert!(valid.owns_frame_member_loads());
             let mut conflicting = data.clone();
             conflicting.section = Some(SectionId(3));
             let reason = wall_side_column_input_issue(&conflicting, &model, kind).unwrap();
             assert!(reason.contains("断面参照"));
+            if kind.is_none() {
+                assert_eq!(
+                    crate::frame::member_load::cmq_with_rigid_zone(&model, &conflicting, &[]).err(),
+                    Some(reason.clone())
+                );
+            }
             let panic = std::panic::catch_unwind(|| match kind {
                 None => build_behavior(&conflicting, &model),
                 Some(analysis) => build_nonlinear_behavior(
@@ -2116,6 +2122,24 @@ fn panel_757_valid_steel_joint_couples_each_factory_representation_once() {
     panel.nodes = smallvec::smallvec![NodeId(2)];
     panel.section = None;
     model.elements = vec![column, girder, panel];
+    assert!(
+        crate::frame::member_load::cmq_with_rigid_zone(&model, &model.elements[1], &[]).is_ok()
+    );
+    let mut invalid = model.clone();
+    let mut column_material = invalid.materials[0].clone();
+    column_material.id = MaterialId(1);
+    column_material.shear = Some(0.0);
+    invalid.materials.push(column_material);
+    invalid.sections[1].material = Some(MaterialId(1));
+    let reason =
+        crate::frame::member_load::cmq_with_rigid_zone(&invalid, &invalid.elements[1], &[])
+            .err()
+            .unwrap();
+    assert!(
+        reason.contains("接合部") && reason.contains('G'),
+        "{reason}"
+    );
+
     for representation in [
         ElementKind::Beam,
         ElementKind::Fiber,

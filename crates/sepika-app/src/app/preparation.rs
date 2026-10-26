@@ -689,7 +689,8 @@ impl App {
                 nj.coord[2] - ni.coord[2],
             ];
             let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            let (arm_i, arm_j) = (rz.rigid_length_i(), rz.rigid_length_j());
+            let adopted = model.analysis_rigid_zone(e);
+            let (arm_i, arm_j) = (adopted.rigid_length_i(), adopted.rigid_length_j());
             let clear_length = length - arm_i - arm_j;
             rows.push(PrepRigidZoneRow {
                 elem: e.id,
@@ -889,7 +890,7 @@ impl App {
     /// 壁の解析要素（`ElementKind::Wall`）は `self.core.model` には存在しない生成物
     /// （D5）のため、壁上下大梁の剛性割増しを確認表へ出すには壁展開モデルを
     /// 都度組み立てて走査する（`App` に専用のキャッシュは持たせない。
-    /// `sepika_load::wall_expand` の「都度計算」方針に揃える）。壁展開は
+    /// `sepika_core::wall_expand` の「都度計算」方針に揃える）。壁展開は
     /// 既存要素の末尾へ生成要素を追記するだけなので、柱・梁の `ElemId` は
     /// 展開の有無で変わらない。壁を持たないモデル（実 ST-Bridge フィクスチャは
     /// 現状すべて該当する）では `expand_wall_elements` の `model.clone()` を
@@ -900,9 +901,9 @@ impl App {
 
         let expanded_storage;
         let model: &Model =
-            if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
+            if sepika_core::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
                 let (expanded, _wall_index, _wall_report) =
-                    sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+                    sepika_core::wall_expand::expand_wall_elements(&self.core.model);
                 expanded_storage = expanded;
                 &expanded_storage
             } else {

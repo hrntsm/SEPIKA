@@ -192,7 +192,7 @@ pub(crate) fn enumerate_self_weight(
         ));
     }
     let (mut expanded, _wall_index, _wall_expand_report) =
-        crate::wall_expand::expand_wall_elements(model);
+        sepika_core::wall_expand::expand_wall_elements(model);
     expanded.load_cfg = Some(load_cfg.clone());
     let model = &expanded;
     validate_cft_steel_materials(model)?;

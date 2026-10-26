@@ -172,7 +172,7 @@ pub fn collect_wall_design_checks(
     model: &Model,
     member_forces: &[(ElemId, ForcesAt<'_>)],
     term: LoadTerm,
-    index: Option<&sepika_load::wall_expand::WallExpansionIndex>,
+    index: Option<&sepika_core::wall_expand::WallExpansionIndex>,
     case: &str,
     load_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
 ) -> Vec<crate::wall_check::WallCheck> {

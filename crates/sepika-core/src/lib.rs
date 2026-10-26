@@ -31,3 +31,5 @@ pub use ids::*;
 pub use model::*;
 
 pub mod standard_material;
+
+pub mod wall_expand;

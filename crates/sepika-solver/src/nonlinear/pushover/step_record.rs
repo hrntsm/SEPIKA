@@ -401,7 +401,7 @@ mod tests {
                 .filter_map(|node| map.active(node.id.index() * 6))
                 .map(|a| legacy_rhs[a as usize])
                 .sum();
-            assert!((horizontal_rhs - sign * 8000.0).abs() < 1e-7);
+            assert!(horizontal_rhs.abs() < 1e-7);
             crate::common::elem_loop::apply_du_trial_with_member_loads(
                 &model,
                 &map,
@@ -415,7 +415,7 @@ mod tests {
             }
             let responses =
                 super::super::geom::member_recording_responses(&model, &behaviors).unwrap();
-            assert!(responses[2].is_none());
+            assert!(responses[2].is_some());
             let column = responses[3].as_ref().unwrap();
             for end in [0, 1] {
                 assert!(

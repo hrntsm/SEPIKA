@@ -456,7 +456,7 @@ fn test_one_way_short_direction_uses_short_edge_axis() {
     let pts = [(0.0, 0.0), (0.0, 3000.0), (5000.0, 3000.0), (5000.0, 0.0)];
     let (model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::Short);
-    let loads = super::distribute_slab_w_checked(&model, &slab, w).unwrap();
+    let loads = super::distribute_slab_w(&model, &slab, w).unwrap();
     assert!(
         loads
             .iter()
@@ -485,7 +485,7 @@ fn test_one_way_short_direction_rejects_skewed_parallelogram() {
     );
     for load in [0., w] {
         assert_eq!(
-            super::distribute_slab_w_checked(&model, &slab, load).unwrap_err(),
+            super::distribute_slab_w(&model, &slab, load).unwrap_err(),
             FloorDistributionError::ShortDirectionRequiresRectangle { slab_id: slab.id }
         );
     }
@@ -507,8 +507,7 @@ fn test_one_way_short_direction_rejects_square_with_zero_load() {
     let (mut model, slab) = make_square_slab_model(4000.0, DistributionMethod::OneWay, 0.0);
     model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
 
-    let err =
-        super::distribute_slab_w_checked(&model, &model.slabs[slab.id.index()], 0.0).unwrap_err();
+    let err = super::distribute_slab_w(&model, &model.slabs[slab.id.index()], 0.0).unwrap_err();
     assert!(matches!(
         err,
         FloorDistributionError::ShortDirectionOnSquare { .. }
@@ -610,7 +609,7 @@ fn test_polygon_trapezoid_conservation() {
         Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
     ));
     assert!(matches!(
-        super::distribute_slab_w_checked(&model, &slab, w),
+        super::distribute_slab_w(&model, &slab, w),
         Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
     ));
 }

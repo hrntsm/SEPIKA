@@ -7,7 +7,6 @@
 //! - `rect` — 矩形床の分配戦略（三角形・台形／一方向／負担面積／小梁二段階）
 //! - `cantilever` — 片持ちスラブ・出隅スラブの分配戦略
 //! - `polygon` — 多角形床の負担面積法（最近接辺グリッドサンプリング）
-//! - `rigid_zone` — 剛域を考慮した大梁 CMQ（[`cmq_with_rigid_zone`]）
 //!
 //! 本モジュールにはこれらを束ねるディスパッチャ [`distribute_slab`] と、床領域単位の
 //! 束ね役 [`distribute_region`] を置く。
@@ -28,7 +27,6 @@ mod fem;
 mod geometry;
 mod polygon;
 mod rect;
-mod rigid_zone;
 mod types;
 
 pub use beam_design::{
@@ -48,7 +46,6 @@ pub use geometry::{point_in_slab_boundary, slab_dimensions, slab_dimensions_of};
 pub use polygon::{
     integrate_polygon, PolygonDistribution, PolygonDistributionError, PolygonIntegrationOptions,
 };
-pub use rigid_zone::{cmq_with_rigid_zone, RigidZoneCmqMode, RigidZoneCmqResult};
 pub use types::{BeamLoad, Cmq, LoadShape, LoadTarget};
 
 /// 分配荷重と、多角形経路の面積・格子・誤差診断。
@@ -164,14 +161,6 @@ pub fn distribute_slab(
 /// （用途別（床用/小梁用/大梁・柱・基礎用/地震力用）の積載荷重の使い分けや、荷重組合せでの DL/LL 係数分けに用いる）。
 /// ゼロ荷重でも境界・支持参照を検査する。
 pub fn distribute_slab_w(
-    model: &Model,
-    slab: &Slab,
-    w: f64,
-) -> Result<Vec<BeamLoad>, FloorDistributionError> {
-    distribute_slab_w_checked(model, slab, w)
-}
-
-pub fn distribute_slab_w_checked(
     model: &Model,
     slab: &Slab,
     w: f64,
@@ -505,15 +494,7 @@ pub fn distribute_slab_resolved(
     slab: &Slab,
     w: f64,
 ) -> Result<Vec<BeamLoad>, FloorDistributionError> {
-    distribute_slab_resolved_checked(model, slab, w)
-}
-
-pub fn distribute_slab_resolved_checked(
-    model: &Model,
-    slab: &Slab,
-    w: f64,
-) -> Result<Vec<BeamLoad>, FloorDistributionError> {
-    resolve_edges_to_span(model, slab, distribute_slab_w_checked(model, slab, w)?)
+    resolve_edges_to_span(model, slab, distribute_slab_w(model, slab, w)?)
 }
 
 /// 床領域（大梁の 1 スパン区画）の面荷重を、床領域内の床板へ束ねて分配する。

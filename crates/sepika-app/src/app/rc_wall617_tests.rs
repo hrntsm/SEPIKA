@@ -95,7 +95,7 @@ fn rejected_wall_time_history_keeps_adopted_pushover_capacity_and_input_across_s
     app.run_linear_static(LoadCaseId(0));
     assert!(app.core.scoped.last_error.is_none());
     let static_ledger = ledger(&app);
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let wall = expanded
         .elements
         .iter()
@@ -232,7 +232,7 @@ fn selected_static_case_and_combo_reach_common_face_and_reject_missing_or_old_re
             "{:?}",
             app.core.scoped.last_error
         );
-        let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
         let wall = expanded
             .elements
             .iter()
@@ -302,7 +302,7 @@ fn selected_static_case_and_combo_reach_common_face_and_reject_missing_or_old_re
 fn incremental_modeling_reads_adopted_run_numbers_and_rejects_missing_invalid_or_old_capacity() {
     use crate::viewer::ModelingAnalysis;
     let mut app = ready();
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let wall = expanded
         .elements
         .iter()
@@ -582,7 +582,7 @@ fn wall_method_modeling_uses_selected_run_and_no_display_recalculation() {
     use crate::viewer::ModelingAnalysis;
     use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
     let mut app = ready();
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let wall = expanded
         .elements
         .iter()

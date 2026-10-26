@@ -14,7 +14,7 @@ use sepika_solver::statics::analysis::Analysis;
 
 /// 壁展開モデルを組み立てる（本モジュール共通のエントリポイント）。
 fn expand_walls(model: sepika_core::model::Model) -> sepika_core::model::Model {
-    sepika_load::wall_expand::expand_wall_elements_owned(model).0
+    sepika_core::wall_expand::expand_wall_elements_owned(model).0
 }
 
 fn dynamic_solve_error(error: sepika_math::solver::SolveError) -> JobError {
@@ -150,7 +150,7 @@ pub fn compute_pushover(
     model: sepika_core::model::Model,
     cfg: AnalysisSettings,
 ) -> JobResult<sepika_solver::nonlinear::pushover::PushoverResult> {
-    let (work, wall_index, _) = sepika_load::wall_expand::expand_wall_elements_owned(model);
+    let (work, wall_index, _) = sepika_core::wall_expand::expand_wall_elements_owned(model);
     Analysis::prepare(&work).map_err(|e| JobError::Prepare(e.to_string()))?;
     let dofmap = sepika_core::dof::DofMap::build(&work);
     let reducer = sepika_solver::common::constraint::Reducer::build(&work, &dofmap);

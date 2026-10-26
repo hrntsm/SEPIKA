@@ -341,7 +341,7 @@ pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearT
             };
             let (as_y, as_z) = sec.map(|s| (s.as_y, s.as_z)).unwrap_or((0.0, 0.0));
             let raw_length = elem_length(model, elem).unwrap_or(0.0);
-            let clear_span = effective_clear_span(raw_length, &elem.rigid_zone);
+            let clear_span = effective_clear_span(raw_length, &model.analysis_rigid_zone(elem));
             ShearThreshold {
                 y: build_dir_threshold(as_z, mats, sec, ShearDir::Y, clear_span),
                 z: build_dir_threshold(as_y, mats, sec, ShearDir::Z, clear_span),

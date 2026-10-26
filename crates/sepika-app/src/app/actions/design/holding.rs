@@ -399,7 +399,7 @@ impl App {
             .map(|m| m.re.clone())
             .collect::<Result<_, _>>()?;
 
-        if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
+        if sepika_core::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
             let generation = po
                 .wall_run
                 .as_ref()
@@ -443,9 +443,9 @@ impl App {
         }
         let expanded_storage;
         let evaluation_model =
-            if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
+            if sepika_core::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
                 expanded_storage =
-                    sepika_load::wall_expand::expand_wall_elements(&self.core.model).0;
+                    sepika_core::wall_expand::expand_wall_elements(&self.core.model).0;
                 &expanded_storage
             } else {
                 &self.core.model
@@ -529,9 +529,9 @@ impl App {
             let expanded_storage;
             let wall_index;
             let model: &sepika_core::model::Model =
-                if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
+                if sepika_core::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
                     let (expanded, index, _wall_report) =
-                        sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+                        sepika_core::wall_expand::expand_wall_elements(&self.core.model);
                     wall_index = index;
                     expanded_storage = expanded;
                     &expanded_storage
@@ -1361,7 +1361,7 @@ mod tests {
     }
 
     fn wall_619_geometry(model: &sepika_core::model::Model) -> Result<RcWallDsGeometry, String> {
-        let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(model);
+        let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(model);
         let id = index.generated_elem_ids().next().unwrap();
         rc_wall_ds_geometry(expanded.element(id).unwrap(), &expanded, index.plate_of(id))
     }
@@ -1377,7 +1377,7 @@ mod tests {
             (2400.0, false, MemberRank::FD),
         ] {
             let model = single_wall_619_model(height);
-            let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+            let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
             let id = index.generated_elem_ids().next().unwrap();
             let wall = expanded.element(id).unwrap();
             let center = sepika_core::model::wall_element_geometry(wall, &expanded)
@@ -1439,7 +1439,7 @@ mod tests {
     #[test]
     fn rc_wall_619_rejects_unknown_opening_shared_and_invalid_geometry_with_reason() {
         let mut model = single_wall_619_model(1500.0);
-        let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
         let id = index.generated_elem_ids().next().unwrap();
         assert!(
             rc_wall_ds_geometry(expanded.element(id).unwrap(), &expanded, None)

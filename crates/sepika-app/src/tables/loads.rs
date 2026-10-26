@@ -584,19 +584,19 @@ fn combinations_section(ui: &mut egui::Ui, app: &mut App) {
             .clicked()
         {
             if let (Some(dl), Some(ll)) = (app.ui.scoped.combo_draft.dl, app.ui.scoped.combo_draft.ll) {
-                let input = sepika_load::combo::ComboInput {
+                let input = sepika_core::load_combo::ComboInput {
                     dl,
                     ll,
                     seismic_x: app.ui.scoped.combo_draft.seismic_x,
                     seismic_y: app.ui.scoped.combo_draft.seismic_y,
                     snow: app.ui.scoped.combo_draft.snow,
                     heavy_snow_zone: app.core.analysis_cfg.heavy_snow_zone,
-                    snow_factors: Some(sepika_load::combo::SnowFactors {
+                    snow_factors: Some(sepika_core::load_combo::SnowFactors {
                         delta1: app.core.analysis_cfg.snow_delta1,
                         delta3: app.core.analysis_cfg.snow_delta3,
                     }),
                 };
-                let combos = sepika_load::combo::standard_combinations(&input);
+                let combos = sepika_core::load_combo::standard_combinations(&input);
                 for combo in combos {
                     app.core.scoped.undo
                         .run(&mut app.core.model, Box::new(AddCombination { combo }));

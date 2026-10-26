@@ -50,7 +50,7 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 検定条件（長期/短期）。
     pub term: LoadTerm,
     /// 壁展開時の元壁版と生成要素の対応。壁版のない要素fixtureではNoneを許す。
-    pub wall_index: Option<&'a sepika_load::wall_expand::WallExpansionIndex>,
+    pub wall_index: Option<&'a sepika_core::wall_expand::WallExpansionIndex>,
     /// 検定する荷重ケース・組合せの既存キー。
     pub wall_case: &'a str,
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。

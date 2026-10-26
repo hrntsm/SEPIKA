@@ -113,6 +113,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0079](0079-bending-shear-stick.md) | accepted | 曲げせん断型を弾性曲げと履歴せん断の直列要素で扱う |
 
 | [0080](0080-retire-reference-skeleton.md) | accepted | 参考用スケルトン計算を廃止し製品計算の責務を維持する |
+| [0081](0081-load-responsibility-and-cmq.md) | accepted | 壁解析モデル生成をモデル層へ、梁CMQを実荷重応答へ集約する |
 
 ## 規約
 

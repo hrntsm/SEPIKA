@@ -162,7 +162,7 @@ fn fixed_member_response(
     source: LoadCase,
 ) -> super::physical_response::PhysicalStep {
     let map = DofMap::build(model);
-    let behaviors: Vec<Box<dyn sepika_element::behavior::ElementBehavior>> = model
+    let mut behaviors: Vec<Box<dyn sepika_element::behavior::ElementBehavior>> = model
         .elements
         .iter()
         .map(|elem| {
@@ -170,6 +170,24 @@ fn fixed_member_response(
                 as Box<dyn sepika_element::behavior::ElementBehavior>
         })
         .collect();
+    for (elem, behavior) in model.elements.iter().zip(&mut behaviors) {
+        let loads: Vec<_> = source
+            .member
+            .iter()
+            .filter(|load| load.elem == elem.id)
+            .cloned()
+            .collect();
+        behavior
+            .update_state_with_member_loads(
+                &LocalVec {
+                    data: vec![0.0; behavior.n_dof()].into(),
+                },
+                &loads,
+                true,
+                &Ctx { model },
+            )
+            .unwrap();
+    }
     let responses = super::geom::member_recording_responses(model, &behaviors).unwrap();
     super::physical_response::PhysicalStep::recover(
         model,
@@ -336,7 +354,7 @@ fn concentrated_load_at_midcut_preserves_material_i_side_limit_under_end_reversa
                         &model,
                     ))
                 };
-                if fiber {
+                if behavior.owns_frame_member_loads() {
                     behavior
                         .update_state_with_member_loads(
                             &LocalVec {
@@ -728,15 +746,25 @@ fn eccentric_member_endpoint_load_is_not_a_direct_fixed_node_load() {
             model.elements[0].vertical_eccentricity = Some(offset);
             model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
             let map = DofMap::build(&model);
-            let behavior = sepika_element::factory::build_behavior(&model.elements[0], &model);
-            let behaviors = vec![behavior];
-            let responses = super::geom::member_recording_responses(&model, &behaviors).unwrap();
+            let mut behavior = sepika_element::factory::build_behavior(&model.elements[0], &model);
             let mut source = super::loads::PhysicalPushoverLoads::empty().reference;
             source.member.push(MemberLoad::manual(
                 model.elements[0].id,
                 [1.0, 0.0, 0.0],
                 MemberLoadKind::Point { a, p: 1000.0 },
             ));
+            behavior
+                .update_state_with_member_loads(
+                    &LocalVec {
+                        data: smallvec::smallvec![0.0; 12],
+                    },
+                    &source.member,
+                    true,
+                    &Ctx { model: &model },
+                )
+                .unwrap();
+            let behaviors = vec![behavior];
+            let responses = super::geom::member_recording_responses(&model, &behaviors).unwrap();
             let physical = super::physical_response::PhysicalStep::recover(
                 &model,
                 &map,

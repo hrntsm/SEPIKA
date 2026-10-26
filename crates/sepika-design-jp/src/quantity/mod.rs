@@ -840,9 +840,9 @@ fn compute_quantity_takeoff_validated(
     secondary: &HashMap<SecondaryMemberId, SecondaryQuantity>,
 ) -> QuantityTakeoff {
     let expanded_storage;
-    let model: &Model = if sepika_load::wall_expand::model_has_wall_plates_to_expand(model) {
+    let model: &Model = if sepika_core::wall_expand::model_has_wall_plates_to_expand(model) {
         let (expanded, _wall_index, _wall_report) =
-            sepika_load::wall_expand::expand_wall_elements(model);
+            sepika_core::wall_expand::expand_wall_elements(model);
         expanded_storage = expanded;
         &expanded_storage
     } else {

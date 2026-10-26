@@ -1,7 +1,7 @@
 //! 取り付く壁版（[`WallPlateShape::Attached`]）の自重配分。
 //!
 //! `Attached` な壁版（パラペット・腰壁・垂れ壁・自立壁）は解析要素を持たない（D5）ため、
-//! 壁展開（[`crate::wall_expand`]）を経由する自重算定（`story_gen::enumerate_self_weight`）
+//! 壁展開（[`sepika_core::wall_expand`]）を経由する自重算定（`story_gen::enumerate_self_weight`）
 //! では検出できず、これまで地震用重量・長期応力解析のDLのどちらからも自重が
 //! 抜け落ちていた（`dev_docs/handoff/床領域・壁領域の再設計_申し送り.md` §9・§5.22）。
 //! 本モジュールは、取付き先（`RegionAnchor`）の種別ごとに定めた伝達規則（D16）に沿って、

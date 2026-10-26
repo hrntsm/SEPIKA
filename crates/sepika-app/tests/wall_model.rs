@@ -431,7 +431,7 @@ fn wall_bay_model() -> Model {
     // （`region_gen::wall` の面走査が Y=0 面の閉路を検出し、この壁版の重心が
     // その閉路に収まることで帰属が決まる。ノード順・巻き方向は面走査側の
     // 走査結果と一致している必要はない。`match_candidate` は全頂点が同一構面上に
-    // あることと局所座標での内包だけを見る）。`sepika_load::wall_expand::
+    // あることと局所座標での内包だけを見る）。`sepika_core::wall_expand::
     // expand_wall_elements` が準備計算・解析入口の直前でこの壁版から
     // `ElementKind::Wall` を生成する。`next_id = 既存要素の最大 ID + 1` で
     // 決定的に採番されるが、値そのものは呼び出し経路に依存する。準備計算
@@ -1031,7 +1031,7 @@ fn snapshot_wall_bay_scalars() {
     // 生成 `ElemId` を求める（`run_static_all` が内部で行う展開と同じ入力・
     // 同じ決定的な採番規則なので同じ ID になる）。
     let (_expanded_for_id, wall_index, wall_expand_report) =
-        sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     assert_eq!(wall_expand_report.generated, 1, "壁要素が1件生成されるはず");
     let wall_elem_id = wall_index
         .generated_elem_ids()
@@ -1308,8 +1308,31 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         sepika_core::model::RcWallShearMethod::ArakawaMean
     );
     assert_eq!(po.wall_capacities.len(), 1);
-    // 壁幾何・配筋とλ=1は不変。静的参照N=35718.3405661085に対し、独立値を0.1(te・j/A)ΔNで更新。
-    let expected_wall_capacity_n = 1_717_733.521_609_23;
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
+    let wall = expanded.element(po.wall_capacities[0].0).unwrap();
+    let face = sepika_element::wall::static_face::StaticWallFace::new(wall, &expanded).unwrap();
+    let gravity_name =
+        &app.core.model.combinations[app.core.model.ultimate_gravity_combination.unwrap()].name;
+    let (_, gravity_result) = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .combos
+        .iter()
+        .find(|(name, _)| name == gravity_name)
+        .unwrap();
+    let batch: Vec<_> = gravity_result
+        .member_forces
+        .iter()
+        .map(|(id, forces)| (*id, forces.at.as_slice()))
+        .collect();
+    let expected_compression_n = 35_707.887_290_661_97;
+    assert!((face.recover(&batch).unwrap().compression_n - expected_compression_n).abs() < 1e-6);
+    // A=735000、D=4300、te=A/D、j=3631.25より軸力項は0.1·N·j/D。
+    let expected_wall_capacity_n =
+        1_714_717.190_814_330_4 + 0.1 * expected_compression_n * 3631.25 / 4300.0;
     for capacity_n in po.wall_capacities[0].1 {
         assert!((capacity_n - expected_wall_capacity_n).abs() < 1e-6);
     }
@@ -1632,7 +1655,7 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     assert!((wall.inplane_axis[0].abs() - c).abs() < 1e-12);
     assert!((wall.inplane_axis[1].abs() - c).abs() < 1e-12);
     let elem_id = last.elem;
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
     let elem = expanded.element(elem_id).unwrap();
     let qu = po
         .wall_capacities
