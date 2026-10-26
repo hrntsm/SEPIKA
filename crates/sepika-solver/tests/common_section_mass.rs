@@ -302,6 +302,7 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
                 height: 600.0,
                 width: 600.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(0.0),
             }
             .to_section(SectionId(index as u32), "鋼材".into());
@@ -557,6 +558,7 @@ fn geometry_and_adopted_density_are_independent_mass_oracles_for_all_frame_forms
                 height: 600.0,
                 width: 300.0,
                 thick,
+                horizontal_thick: thick,
                 corner_r: Some(0.0),
             }),
             MaterialCategory::Concrete,
@@ -718,6 +720,7 @@ fn cft_mass_only_failure_allows_static_but_public_dynamic_analyses_return_diagno
             height: 600.0,
             width: 300.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(0.0),
         }),
         MaterialCategory::Concrete,
@@ -827,6 +830,7 @@ fn public_mass_rejects_invalid_dimensions_radii_and_required_materials_before_fa
                 height: 600.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(0.0),
             }),
             MaterialCategory::Concrete,

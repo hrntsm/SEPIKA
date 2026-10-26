@@ -7,6 +7,7 @@ fn cft_model() -> sepika_core::model::Model {
         height: 400.0,
         width: 400.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(0.0),
     });
     let mut steel = cft.materials[0].clone();

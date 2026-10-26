@@ -2085,6 +2085,7 @@ fn secondary_cft_is_rejected_for_both_kinds_and_locations_even_with_column_use()
             height: 400.0,
             width: 400.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(0.0),
         },
         SectionShape::CftPipe {

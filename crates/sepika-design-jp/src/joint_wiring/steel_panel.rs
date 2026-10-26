@@ -166,10 +166,19 @@ pub(super) fn check_s_panel(
                     flange_thick,
                     ..
                 } => [*web_thick, *flange_thick][index],
-                SectionShape::SteelBox { thick, .. }
-                | SectionShape::SteelPipe { thick, .. }
-                | SectionShape::CftBox { thick, .. }
-                | SectionShape::CftPipe { thick, .. } => *thick,
+                SectionShape::SteelBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                }
+                | SectionShape::CftBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                } => [*thick, *horizontal_thick][index],
+                SectionShape::SteelPipe { thick, .. } | SectionShape::CftPipe { thick, .. } => {
+                    *thick
+                }
                 _ => return Err("抵抗板の実板厚が未解決".into()),
             };
             if [
@@ -412,11 +421,20 @@ pub(crate) fn validate_steel_panel_inputs(model: &Model) -> Result<(), String> {
                 ..
             }) => vec![*web_thick, *flange_thick],
             Some(
-                SectionShape::SteelBox { thick, .. }
-                | SectionShape::SteelPipe { thick, .. }
-                | SectionShape::CftBox { thick, .. }
-                | SectionShape::CftPipe { thick, .. },
-            ) => vec![*thick],
+                SectionShape::SteelBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                }
+                | SectionShape::CftBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                },
+            ) => vec![*thick, *horizontal_thick],
+            Some(SectionShape::SteelPipe { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
+                vec![*thick]
+            }
             None => {
                 return Err(format!(
                     "接合部 {} 採用柱 {}: パネル計算に必要な断面形状が未設定です",

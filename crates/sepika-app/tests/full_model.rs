@@ -137,6 +137,7 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
                 height: h,
                 width: b,
                 thick: t,
+                horizontal_thick: _,
                 corner_r: Some(r),
             } => {
                 let outer = rectangle(h, b, r);

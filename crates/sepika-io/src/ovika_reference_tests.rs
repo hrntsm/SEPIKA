@@ -448,3 +448,51 @@ fn indexed_ids_and_existing_reference_families_are_checked_before_persistence() 
         assert_rejected_preserving_input(&model, label, reason);
     }
 }
+
+#[test]
+fn built_box_ovika_roundtrip_keeps_both_thicknesses_pending_properties_and_references() {
+    use sepika_core::section_shape::SectionShape;
+    for cft in [false, true] {
+        let shape = if cft {
+            SectionShape::CftBox {
+                height: 300.0,
+                width: 200.0,
+                thick: 9.0,
+                horizontal_thick: 12.0,
+                corner_r: Some(0.0),
+            }
+        } else {
+            SectionShape::SteelBox {
+                height: 300.0,
+                width: 200.0,
+                thick: 9.0,
+                horizontal_thick: 12.0,
+                corner_r: Some(0.0),
+            }
+        };
+        let mut s = shape.input_section(SectionId(0), "異厚BOX".into()).unwrap();
+        s.frame_use = Some(FrameSectionUse::Column);
+        for place in 0..if cft { 1 } else { 5 } {
+            let mut model = member_model(place, vec![s.clone(), section(1, "別断面")], Some(0));
+            model.visit_section_ids(|id| id.0 = 1 - id.0);
+            model.sections.reverse();
+            assert_eq!(
+                model.sections[1].shape.as_ref().unwrap().box_thicknesses(),
+                Some((9.0, 12.0))
+            );
+            assert_roundtrip(&model, &format!("built-box-{cft}-{place}"));
+            assert!(crate::stbridge::export_stbridge(&model)
+                .unwrap_err()
+                .to_string()
+                .contains("異厚BOXのSTB出力は未対応"));
+            assert_eq!(
+                (
+                    model.sections[1].area,
+                    model.sections[1].iy,
+                    model.sections[1].iz
+                ),
+                (9768.0, 131127264.0, 61342936.0)
+            );
+        }
+    }
+}

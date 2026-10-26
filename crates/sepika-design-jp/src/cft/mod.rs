@@ -196,6 +196,7 @@ fn cft_box_steel_props(height: f64, width: f64, thick: f64) -> (f64, f64, f64) {
         height,
         width,
         thick,
+        horizontal_thick: thick,
     };
     let a = shape.calc_area();
     let iy = shape.calc_iy();
@@ -243,11 +244,17 @@ fn cft_box_check(
         height,
         width,
         thick,
+        horizontal_thick: _,
         corner_r,
     } = *shape
     else {
         return Err("角形 CFT の断面形状が不一致です".into());
     };
+    if shape.has_unequal_box_thickness() {
+        return Err(
+            "異厚BOXのせん断性能の採用式・適用条件が未確認のためCFT検定は未算定です".into(),
+        );
+    }
     let geometry = shape
         .rounded_steel_properties()?
         .ok_or("角形 CFT の鋼管性能を解決できません")?;
@@ -509,9 +516,12 @@ impl DesignCheck for CftDesign {
             };
         };
         let thick = match &sec.shape {
-            Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
-                *thick
-            }
+            Some(SectionShape::CftBox {
+                thick,
+                horizontal_thick,
+                ..
+            }) => thick.max(*horizontal_thick),
+            Some(SectionShape::CftPipe { thick, .. }) => *thick,
             _ => 0.0,
         };
         if let Some(reason) =

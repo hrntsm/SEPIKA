@@ -1287,6 +1287,7 @@ fn cft_column_model() -> Model {
         height: 400.0,
         width: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
     };
     let mut section = shape.to_section(SectionId(0), "CFT".into());
     section.material = Some(MaterialId(0));
@@ -1403,6 +1404,7 @@ fn rounded_cft_supplied_area_preserves_dl_and_all_story_mass_modes() {
         height: 500.0,
         width: 300.0,
         thick: 10.0,
+        horizontal_thick: 10.0,
         corner_r: Some(30.0),
     }
     .to_section(SectionId(0), "角丸CFT".into());
@@ -1473,6 +1475,7 @@ fn rounded_h_box_supplied_area_uses_shape_mass_but_saved_design_area() {
             height: 500.0,
             width: 300.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(30.0),
         },
         steel_h_shape(),
@@ -3574,6 +3577,7 @@ fn 明示非線形線材は混在接続でもbeamとdl階重量物理質量が�
             height: 400.0,
             width: 300.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         },
         FrameSectionUse::Column,
@@ -3586,6 +3590,7 @@ fn 明示非線形線材は混在接続でもbeamとdl階重量物理質量が�
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
             corner_r: Some(0.0),
         },
         FrameSectionUse::Column,
@@ -3767,6 +3772,7 @@ fn fireproof_shapes_roles_and_weight_paths_agree_without_steel_markup() {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(30.0),
             },
             1400.0 - (8.0 - 2.0 * pi) * 30.0,
@@ -3785,6 +3791,7 @@ fn fireproof_shapes_roles_and_weight_paths_agree_without_steel_markup() {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(30.0),
             },
             1400.0 - (8.0 - 2.0 * pi) * 30.0,
@@ -4121,6 +4128,7 @@ fn fireproof_unresolved_structure_is_not_rc_exclusion() {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(30.0),
             }
         } else {

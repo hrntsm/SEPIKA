@@ -29,7 +29,7 @@ impl SectionShape {
         result.map_err(|error: String| format!("断面 {}「{}」: {error}", id.0, name))
     }
 
-    /// 形状を入力し、算定不能な A・Iy・Iz・J は項目ごとに未算定として保持する。
+    /// 形状を入力し、算定不能な A・Iy・Iz・J・As は項目ごとに未算定として保持する。
     /// 不正な寸法はエラー。未算定値を用いる計算は `Section` の解決検証で拒否する。
     pub fn input_section(&self, id: SectionId, name: String) -> Result<Section, String> {
         self.validate_surface_radius()?;
@@ -49,6 +49,12 @@ impl SectionShape {
             if j.is_err() {
                 section.property_basis.j = crate::model::PropertyBasis::PendingShape;
             }
+            if self.has_unequal_box_thickness() {
+                section.as_y = 0.0;
+                section.as_z = 0.0;
+                section.property_basis.as_y = crate::model::PropertyBasis::PendingShape;
+                section.property_basis.as_z = crate::model::PropertyBasis::PendingShape;
+            }
             Ok(section)
         } else {
             let j = self.try_calc_j();
@@ -62,6 +68,12 @@ impl SectionShape {
             );
             if j.is_err() {
                 section.property_basis.j = crate::model::PropertyBasis::PendingShape;
+            }
+            if self.has_unequal_box_thickness() {
+                section.as_y = 0.0;
+                section.as_z = 0.0;
+                section.property_basis.as_y = crate::model::PropertyBasis::PendingShape;
+                section.property_basis.as_z = crate::model::PropertyBasis::PendingShape;
             }
             Ok(section)
         }
@@ -212,7 +224,12 @@ impl SectionShape {
             ),
         };
         let thickness = match *self {
-            SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => Some(thick),
+            SectionShape::CftBox {
+                thick,
+                horizontal_thick,
+                ..
+            } => Some(thick.max(horizontal_thick)),
+            SectionShape::CftPipe { thick, .. } => Some(thick),
             SectionShape::RcWall { thickness, .. } | SectionShape::RcSlab { thickness } => {
                 Some(thickness)
             }

@@ -20,6 +20,23 @@ pub fn section_steel_f(sec: &Section, mat: Option<&Material>) -> Result<f64, Str
             .and_then(|()| shape.validate_lip_channel())
             .map_err(|reason| format!("断面「{}」: {reason}", sec.name))?;
         let (dimensions_mm, inner_dimensions_valid) = match *shape {
+            SectionShape::SteelBox {
+                height,
+                width,
+                thick,
+                horizontal_thick,
+                ..
+            }
+            | SectionShape::CftBox {
+                height,
+                width,
+                thick,
+                horizontal_thick,
+                ..
+            } => (
+                vec![height, width],
+                height > 2.0 * horizontal_thick && width > 2.0 * thick,
+            ),
             SectionShape::SteelBuiltH {
                 height,
                 upper_width,
@@ -67,6 +84,18 @@ pub fn section_steel_f(sec: &Section, mat: Option<&Material>) -> Result<f64, Str
     }
     let thicknesses = match sec.shape.as_ref() {
         Some(
+            SectionShape::SteelBox {
+                thick,
+                horizontal_thick,
+                ..
+            }
+            | SectionShape::CftBox {
+                thick,
+                horizontal_thick,
+                ..
+            },
+        ) => vec![*thick, *horizontal_thick],
+        Some(
             SectionShape::SteelH {
                 web_thick,
                 flange_thick,
@@ -90,12 +119,10 @@ pub fn section_steel_f(sec: &Section, mat: Option<&Material>) -> Result<f64, Str
             ..
         }) => vec![*web_thick, *upper_thick, *lower_thick],
         Some(
-            SectionShape::SteelBox { thick, .. }
-            | SectionShape::SteelAngle { thick, .. }
+            SectionShape::SteelAngle { thick, .. }
             | SectionShape::SteelPipe { thick, .. }
             | SectionShape::SteelFlatBar { thick, .. }
             | SectionShape::SteelLipChannel { thick, .. }
-            | SectionShape::CftBox { thick, .. }
             | SectionShape::CftPipe { thick, .. },
         ) => vec![*thick],
         Some(SectionShape::SteelRoundBar { dia }) => vec![*dia],
@@ -131,6 +158,16 @@ pub fn section_steel_f(sec: &Section, mat: Option<&Material>) -> Result<f64, Str
 pub fn plate_thickness(sec: &Section) -> f64 {
     if let Some(shape) = &sec.shape {
         match *shape {
+            SectionShape::SteelBox {
+                thick,
+                horizontal_thick,
+                ..
+            }
+            | SectionShape::CftBox {
+                thick,
+                horizontal_thick,
+                ..
+            } => return thick.max(horizontal_thick),
             SectionShape::SteelH {
                 web_thick,
                 flange_thick,
@@ -146,12 +183,10 @@ pub fn plate_thickness(sec: &Section) -> f64 {
                 flange_thick,
                 ..
             } => return web_thick.max(flange_thick),
-            SectionShape::SteelBox { thick, .. }
-            | SectionShape::SteelAngle { thick, .. }
+            SectionShape::SteelAngle { thick, .. }
             | SectionShape::SteelPipe { thick, .. }
             | SectionShape::SteelFlatBar { thick, .. }
             | SectionShape::SteelLipChannel { thick, .. }
-            | SectionShape::CftBox { thick, .. }
             | SectionShape::CftPipe { thick, .. } => return thick,
             SectionShape::SteelRoundBar { dia } => return dia,
             SectionShape::SteelBuiltH {

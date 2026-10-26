@@ -73,6 +73,17 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     model
         .validate_lip_channels()
         .map_err(|e| StbError::Unmappable(e.to_string()))?;
+    if let Some(section) = model.sections.iter().find(|section| {
+        section
+            .shape
+            .as_ref()
+            .is_some_and(|shape| shape.has_unequal_box_thickness())
+    }) {
+        return Err(StbError::Unmappable(format!(
+            "断面「{}」: 異厚BOXのSTB出力は未対応です。両板厚を保持するにはOVIKAを使用してください",
+            section.name
+        )));
+    }
     let mut output_model = model.clone();
     output_model
         .assign_stb_node_ids()

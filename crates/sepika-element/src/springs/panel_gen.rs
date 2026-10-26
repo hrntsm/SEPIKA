@@ -513,6 +513,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
             },
             SectionShape::CftPipe {
                 outer_dia: 400.0,
@@ -538,6 +539,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
                 corner_r: Some(0.0),
             },
             SectionShape::SteelPipe {
@@ -612,6 +614,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         });
         model.nodes[1].coord = [0.0, 6000.0, 3000.0];
@@ -644,6 +647,7 @@ mod tests {
                     height: 400.0,
                     width: 200.0,
                     thick: 12.0,
+                    horizontal_thick: 12.0,
                     corner_r: Some(0.0),
                 });
             }
@@ -674,6 +678,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         });
         model.nodes[1].coord = [0.0, 6000.0, 3000.0];

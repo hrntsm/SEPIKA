@@ -165,6 +165,12 @@ impl SectionShape {
         {
             return Err("CFT の解析用弾性係数・換算比が正の有限値ではありません".into());
         }
+        if self.has_unequal_box_thickness() {
+            return Err(
+                "異厚BOXのせん断性能の採用式・適用条件が未確認のため、CFT等価剛性は未算定です"
+                    .into(),
+            );
+        }
         let core = self.try_cft_core_props()?.expect("CFT コア幾何");
         let steel_area = self.try_calc_area()?;
         let steel_iy = self.try_calc_iy()?;
@@ -339,13 +345,14 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                horizontal_thick,
                 corner_r,
             } => {
                 self.validate_surface_radius()?;
                 let ro = corner_r.ok_or("CFT コア領域の算定に必要な角Rが未知です")?;
                 Ok(Some((
                     width - 2.0 * thick,
-                    height - 2.0 * thick,
+                    height - 2.0 * horizontal_thick,
                     Some((ro - thick).max(0.0)),
                 )))
             }

@@ -1700,6 +1700,7 @@ fn steel_plate_boundary_clones_preserve_registered_section_ownership_without_rc_
             height: 600.0,
             width: 600.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         }
         .to_section(SectionId(index), "S".into());
@@ -1766,6 +1767,7 @@ fn steel_plate_wall_factory_rejects_boundary_column_with_girder_section_use() {
             height: 600.0,
             width: 600.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         }
         .to_section(SectionId(index), "S".into());

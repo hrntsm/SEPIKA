@@ -74,6 +74,7 @@ mod tests {
             height: 200.0,
             width: 150.0,
             thick: 9.0,
+            horizontal_thick: 9.0,
             corner_r: Some(0.0),
         };
         let wt = max_width_thickness(&shape).unwrap();
@@ -169,6 +170,7 @@ mod tests {
             height: 200.0,
             width: 150.0,
             thick: -9.0,
+            horizontal_thick: -9.0,
             corner_r: Some(0.0),
         };
         assert!(max_width_thickness(&shape).is_none());
@@ -238,6 +240,7 @@ mod tests {
                 height,
                 width: height,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(0.0),
             };
             let rank =
@@ -256,6 +259,7 @@ mod tests {
             height: 400.0,
             width: 1000.0, // 幅は d の算定に使わないことを示すため、あえて全く違う値にする
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         };
         let rank = s_member_rank_by_kihon(&shape, SteelMemberUse::Column, "STKR400").expect("Some");
@@ -292,6 +296,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         };
         let column_box_rank =
@@ -308,6 +313,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         };
         let cft_box = SectionShape::CftBox {
@@ -315,6 +321,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
         };
         assert_eq!(
             s_member_rank_by_kihon(&steel_box, SteelMemberUse::Column, "STKR400"),

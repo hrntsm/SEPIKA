@@ -196,6 +196,7 @@ fn wall_bay_model() -> Model {
         height: 300.0,
         width: 300.0,
         thick: 10.0,
+        horizontal_thick: 10.0,
         corner_r: Some(13.0),
     };
     let beam_shape = SectionShape::SteelH {
@@ -705,6 +706,7 @@ fn rotated_src_and_cft_side_columns_run_linear_analysis() {
                 height: 700.0,
                 width: 500.0,
                 thick: 20.0,
+                horizontal_thick: 20.0,
             }
         } else {
             SectionShape::SrcColumnRect {

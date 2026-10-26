@@ -1242,6 +1242,7 @@ mod tests {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(30.0),
             },
             false,
@@ -1272,6 +1273,7 @@ mod tests {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(6.0),
             },
             true,
@@ -1323,6 +1325,7 @@ mod tests {
             height: 400.0,
             width: 1e-9,
             thick: 1e-10,
+            horizontal_thick: 1e-10,
             corner_r: Some(0.0),
         };
         let failure = shape.try_cft_core_torsion().unwrap_err();

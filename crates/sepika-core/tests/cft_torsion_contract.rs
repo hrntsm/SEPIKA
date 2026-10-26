@@ -5,6 +5,7 @@ fn box_shape(r: Option<f64>) -> SectionShape {
         height: 400.0,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: r,
     }
 }
@@ -121,6 +122,7 @@ fn supplied_steel_j_keeps_core_available_outside_shape_steel_j_domain() {
             height: 100.0,
             width: 100.0,
             thick: 20.0,
+            horizontal_thick: 20.0,
             corner_r: Some(25.0),
         },
     ] {
@@ -173,6 +175,7 @@ fn invalid_radius_and_dimensions_are_reasoned_errors_in_both_core_apis() {
             height: 400.0,
             width: 24.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         },
         SectionShape::CftPipe {
@@ -272,6 +275,7 @@ fn numerical_failure_retains_completed_levels_through_public_diagnostic_api() {
         height: 400e100,
         width: 300e100,
         thick: 12e100,
+        horizontal_thick: 12e100,
         corner_r: Some(30e100),
     };
     let error = shape.try_cft_core_torsion().unwrap_err();
@@ -290,6 +294,7 @@ fn core_geometry_is_available_when_numerical_torsion_cannot_be_resolved() {
         height: 400.0,
         width: 1e-9,
         thick: 1e-10,
+        horizontal_thick: 1e-10,
         corner_r: Some(0.0),
     };
     let core = shape.try_cft_core_props().unwrap().unwrap();

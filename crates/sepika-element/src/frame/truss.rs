@@ -260,6 +260,7 @@ mod tests {
                         height: 500.0,
                         width: 300.0,
                         thick: 10.0,
+                        horizontal_thick: 10.0,
                         corner_r: Some(0.0),
                     },
                     30.0,
@@ -380,6 +381,7 @@ mod tests {
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: None,
             },
         ] {
@@ -409,6 +411,7 @@ mod tests {
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: r,
             });
             assert!(TrussElement::try_new(&data, &model)

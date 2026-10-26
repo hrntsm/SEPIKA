@@ -138,6 +138,7 @@ fn cft_initial_shear_rigidity_distinguishes_directional_plates_and_published_coe
                 height,
                 width,
                 thick,
+                horizontal_thick: thick,
                 corner_r: Some(radius),
             };
             let props = shape

@@ -790,6 +790,7 @@ fn cft_shape() -> sepika_core::section_shape::SectionShape {
         height: 400.0,
         width: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
     }
 }
 
@@ -879,6 +880,7 @@ fn test_model_issues_rejects_cft_composite_with_zero_core() {
         height: 400.0,
         width: 400.0,
         thick: 200.0,
+        horizontal_thick: 200.0,
     });
     model.materials[0].fc = Some(24.0);
     model.materials[0].young = 205000.0;

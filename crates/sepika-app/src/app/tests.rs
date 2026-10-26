@@ -8070,6 +8070,7 @@ fn test_compute_cft_ultimate_checks() {
         height: 400.0,
         width: 400.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
     };
     let mut model = Model {
         nodes: vec![
@@ -8563,6 +8564,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         height: 300.0,
         width: 300.0,
         thick: 10.0,
+        horizontal_thick: 10.0,
         corner_r: Some(13.0),
     };
     // 材料は断面が持つ。
@@ -10345,6 +10347,7 @@ fn test_preparation_member_stiffness_reports_composite_props() {
         height: 400.0,
         width: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
     };
     // 材料は断面が持つ。差し替えた断面へ元の材料を引き継ぐ。
     model.sections[0] = sepika_core::model::Section {
@@ -10453,6 +10456,7 @@ fn test_preparation_rejects_cft_without_fc() {
         height: 400.0,
         width: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
     };
     let mut model = crate::sample::portal_frame();
     model.sections[0] = sepika_core::model::Section {
@@ -10490,6 +10494,7 @@ fn test_preparation_rejects_cft_with_zero_core() {
         height: 400.0,
         width: 400.0,
         thick: 200.0,
+        horizontal_thick: 200.0,
     };
     let mut model = crate::sample::portal_frame();
     model.sections[0] = sepika_core::model::Section {
@@ -10538,6 +10543,7 @@ fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
         height: 400.0,
         width: 300.0,
         thick: 10.0,
+        horizontal_thick: 10.0,
         corner_r: Some(30.0),
     }
     .to_section(SectionId(0), "CFT角R30".into());
@@ -10591,6 +10597,7 @@ pub(super) fn cft_long_case2_app(n_compression_n: f64) -> App {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         }
         .to_section(SectionId(0), "CFT400長柱Case2".into())
@@ -14567,6 +14574,7 @@ fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickn
         height: 310.0,
         width: 310.0,
         thick: 10.0,
+        horizontal_thick: 10.0,
         corner_r: Some(0.0),
     }
     .to_section(sid, "筋かい".into());

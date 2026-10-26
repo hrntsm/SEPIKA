@@ -821,6 +821,7 @@ mod tests {
                     height: 500.0,
                     width: 300.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(30.0),
                 },
                 15170.79632679,
@@ -831,6 +832,7 @@ mod tests {
                     height: 500.0,
                     width: 300.0,
                     thick: 10.0,
+                    horizontal_thick: 10.0,
                     corner_r: Some(30.0),
                 },
                 15170.79632679,
@@ -863,6 +865,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         });
         let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         assert!(member.is_empty(), "柱のみなので部材荷重は出ない");
@@ -915,6 +918,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         });
         let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         let total = node_force(&nodal, 0)
@@ -949,6 +953,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         });
         let per_mm = 78.5e-6 * 24576.0 + 23.0e-6 * 135424.0;
         let w_col = per_mm * 3000.0;
@@ -979,6 +984,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         });
         model.load_cfg = Some(cfg.clone());
         let (as_area, ac_area) = (24576.0, 135424.0);
@@ -1014,6 +1020,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
+            horizontal_thick: 16.0,
         }
         .to_section(SectionId(0), "CFT".into());
         column.material = Some(MaterialId(0));

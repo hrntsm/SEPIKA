@@ -459,6 +459,7 @@ mod tests {
                 height: 800.0,
                 width: 600.0,
                 thick: 20.0,
+                horizontal_thick: 20.0,
             },
             SectionShape::CftPipe {
                 outer_dia: 600.0,
@@ -484,6 +485,7 @@ mod tests {
             height: 600.0,
             width: 400.0,
             thick: 20.0,
+            horizontal_thick: 20.0,
             corner_r: Some(0.0),
         };
         let wall = section(&shape, 0.0);
@@ -508,6 +510,7 @@ mod tests {
                 height: 600.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: Some(24.0),
             },
             SectionShape::SteelAngle {

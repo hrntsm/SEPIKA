@@ -611,17 +611,22 @@ impl SectionShape {
     pub fn try_calc_j(&self) -> Result<f64, String> {
         self.validate_lip_channel()?;
         self.validate_surface_radius()?;
+        if self.has_unequal_box_thickness() {
+            return Err("異厚BOXのねじり定数 J は採用式・適用条件が未確認のため未算定です".into());
+        }
         let j = match *self {
             Self::SteelBox {
                 height,
                 width,
                 thick,
+                horizontal_thick: _,
                 corner_r,
             }
             | Self::CftBox {
                 height,
                 width,
                 thick,
+                horizontal_thick: _,
                 corner_r,
             } => {
                 let ro = corner_r.ok_or("ねじり定数 J の算定に必要な外角Rが未知です")?;

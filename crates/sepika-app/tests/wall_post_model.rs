@@ -101,6 +101,7 @@ fn wall_post_model() -> Model {
         height: 300.0,
         width: 300.0,
         thick: 10.0,
+        horizontal_thick: 10.0,
         corner_r: Some(13.0),
     }
     .to_section(SectionId(0), "柱 Box-300x300x10 R13".into());

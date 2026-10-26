@@ -440,6 +440,7 @@ fn 角丸cft柱は実外角を保持し矩形置換と材料界面を採らな�
                 height: 400.0,
                 width: 400.0,
                 thick: 20.0,
+                horizontal_thick: 20.0,
                 corner_r: Some(40.0),
             },
             delta,
@@ -553,6 +554,7 @@ fn 角丸cftの共通大梁と壁フェースも実外角を使い未知角rを�
                 height: 400.0,
                 width: 400.0,
                 thick: 20.0,
+                horizontal_thick: 20.0,
                 corner_r: Some(40.0),
             },
             delta,
@@ -604,6 +606,7 @@ fn 角丸cftの共通大梁と壁フェースも実外角を使い未知角rを�
             height: 400.0,
             width: 400.0,
             thick: 20.0,
+            horizontal_thick: 20.0,
             corner_r: None,
         });
         let mut pending = model.clone();

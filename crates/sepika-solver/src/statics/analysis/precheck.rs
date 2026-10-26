@@ -548,7 +548,13 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         let Some(mat) = model.element_steel_material(elem) else {
             continue;
         };
-        if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(&mat.name, *thick) {
+        let thickness = section
+            .shape
+            .as_ref()
+            .and_then(SectionShape::box_thicknesses)
+            .map_or(*thick, |(t1, t2)| t1.max(t2));
+        if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(&mat.name, thickness)
+        {
             issues.push(ModelIssue::members("CFT 断面の基準強度適用範囲外", "ID ", vec![elem.id], &reason,
                 "SM520 系列は有効板厚 100 mm 以下で指定してください。範囲外を明示 fy で補完できません。"));
         }
@@ -568,7 +574,12 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 return None;
             }
             let thickness = match section.shape.as_ref()? {
-                SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => *thick,
+                SectionShape::CftBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                } => thick.max(*horizontal_thick),
+                SectionShape::CftPipe { thick, .. } => *thick,
                 _ => return None,
             };
             (!section

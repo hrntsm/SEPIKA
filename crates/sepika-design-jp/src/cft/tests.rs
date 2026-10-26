@@ -67,6 +67,7 @@ fn cft_box_section(height: f64, width: f64, thick: f64) -> Section {
         height,
         width,
         thick,
+        horizontal_thick: thick,
     })
 }
 
@@ -82,6 +83,7 @@ fn rounded_cft_gate_distinguishes_core_steel_and_qd_methods() {
                 height,
                 width,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(r),
             };
             let section = shape
@@ -545,6 +547,7 @@ fn test_cft_box_seismic_qd1_governs_when_smaller() {
         height,
         width,
         thick,
+        horizontal_thick: thick,
     };
     let mu = crate::ultimate::cft_mu_nm(&shape, 24.0, f_value, 0.0, length, false).unwrap();
     let qd1 = 2.0 * mu / h_clear;
@@ -720,6 +723,7 @@ fn sm520_out_of_range_cft_primary_and_direct_checks_keep_reason_for_every_fy() {
                     height: 1000.0,
                     width: 1000.0,
                     thick: 100.001,
+                    horizontal_thick: 100.001,
                     corner_r: Some(0.0)
                 },
                 24.0
@@ -750,6 +754,7 @@ fn sm520_cft_public_precheck_weight_and_ultimate_entries_reject_every_explicit_f
                     height: 1000.0,
                     width: 1000.0,
                     thick: 100.001,
+                    horizontal_thick: 100.001,
                     corner_r: Some(0.0),
                 },
                 SectionShape::CftPipe {

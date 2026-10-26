@@ -1003,6 +1003,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 9.0,
+            horizontal_thick: 9.0,
             corner_r: Some(0.0),
         };
         let mut model = make_model(Some(shape), None);
@@ -1103,6 +1104,7 @@ mod tests {
                         height: 1000.0,
                         width: 1000.0,
                         thick: 100.001,
+                        horizontal_thick: 100.001,
                         corner_r: Some(0.0),
                     },
                     SectionShape::CftPipe {

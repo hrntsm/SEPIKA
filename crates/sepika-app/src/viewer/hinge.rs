@@ -1815,6 +1815,7 @@ mod tests {
                 height: 300.0,
                 width: 200.0,
                 thick: 9.0,
+                horizontal_thick: 9.0,
                 corner_r: Some(0.0),
             }),
             material: Some(MaterialId(0)),

@@ -162,7 +162,11 @@ impl EditCommand for AddSectionShape {
         if (!non_frame && self.frame_use.is_none()) || (non_frame && self.frame_use.is_some()) {
             return Box::new(Noop);
         }
-        let mut candidate = match self.shape.try_to_section(self.new_id, self.name.clone()) {
+        let mut candidate = match if self.shape.has_unequal_box_thickness() {
+            self.shape.input_section(self.new_id, self.name.clone())
+        } else {
+            self.shape.try_to_section(self.new_id, self.name.clone())
+        } {
             Ok(candidate) => candidate,
             Err(reason) => return Box::new(crate::RejectedEdit(reason)),
         };
@@ -289,10 +293,12 @@ impl EditCommand for EditSectionShape {
             model.sections[idx] = updated;
             return Box::new(RestoreSection { old });
         }
-        let mut new_sec = match self
-            .new_shape
-            .try_to_section(self.section, old.name.clone())
-        {
+        let mut new_sec = match if self.new_shape.has_unequal_box_thickness() {
+            self.new_shape.input_section(self.section, old.name.clone())
+        } else {
+            self.new_shape
+                .try_to_section(self.section, old.name.clone())
+        } {
             Ok(section) => section,
             Err(reason) => return Box::new(crate::RejectedEdit(reason)),
         };

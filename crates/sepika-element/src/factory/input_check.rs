@@ -636,9 +636,12 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                     steel_flange_thick,
                     ..
                 } => Some(steel_web_thick.max(*steel_flange_thick)),
-                SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => {
-                    Some(*thick)
-                }
+                SectionShape::CftBox {
+                    thick,
+                    horizontal_thick,
+                    ..
+                } => Some(thick.max(*horizontal_thick)),
+                SectionShape::CftPipe { thick, .. } => Some(*thick),
                 _ => None,
             };
             if let Some(reason) = thickness

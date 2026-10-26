@@ -497,6 +497,7 @@ fn c15_cft_recognition_does_not_claim_qu_or_nonlinear_applicability() {
         height: 600.,
         width: 600.,
         thick: 16.,
+        horizontal_thick: 16.,
         corner_r: Some(32.),
     });
     model.sections[2].steel_material = Some(MaterialId(1));

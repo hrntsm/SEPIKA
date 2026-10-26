@@ -179,6 +179,19 @@ impl DesignCheck for SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
+        if let Some(shape) = sec
+            .shape
+            .as_ref()
+            .filter(|shape| shape.has_unequal_box_thickness())
+        {
+            if let Err(reason) = shape.validate_surface_radius() {
+                return CheckOutcome::Skipped { reason };
+            }
+            return CheckOutcome::Skipped {
+                reason: "異厚BOXのせん断性能の採用式・適用条件が未確認のため鋼部材検定は未算定です"
+                    .into(),
+            };
+        }
         if matches!(sec.shape, Some(SectionShape::SteelLipChannel { .. })) {
             return CheckOutcome::Skipped {
                 reason: lip_channel::unsupported_reason(forces, sec, ctx),
@@ -283,6 +296,7 @@ mod surface_radius_tests {
                 height: 400.0,
                 width: 300.0,
                 thick: 12.0,
+                horizontal_thick: 12.0,
                 corner_r: radius,
             }),
             ..Section::zero(SectionId(0), name.into())
@@ -403,6 +417,7 @@ mod surface_radius_tests {
                     height: 400.0,
                     width: 300.0,
                     thick: invalid,
+                    horizontal_thick: invalid,
                     corner_r: Some(0.0),
                 });
                 assert!(
@@ -417,6 +432,7 @@ mod surface_radius_tests {
                 height: section.depth,
                 width: section.width,
                 thick: 1e-200,
+                horizontal_thick: 1e-200,
                 corner_r: Some(0.0),
             });
             assert!(
@@ -442,6 +458,7 @@ mod surface_radius_tests {
                     height: 400.0 * scale,
                     width: 300.0 * scale,
                     thick: 12.0 * scale,
+                    horizontal_thick: 12.0 * scale,
                     corner_r: Some(30.0 * scale),
                 }
                 .to_section(SectionId(0), "相似Boxせん断".into());
@@ -533,6 +550,7 @@ mod surface_radius_tests {
                         height: height * scale,
                         width: width * scale,
                         thick: 12.0 * scale,
+                        horizontal_thick: 12.0 * scale,
                         corner_r: Some(radius * scale),
                     }
                     .to_section(SectionId(0), "BOX".into());

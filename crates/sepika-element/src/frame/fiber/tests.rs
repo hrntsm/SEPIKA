@@ -49,6 +49,7 @@ fn rounded_beam_fiber_mass_and_default_fiber_geometry_follow_independent_propert
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(30.0),
             },
             [15170.79632679, 517817051.0231, 237343309.2454],
@@ -59,6 +60,7 @@ fn rounded_beam_fiber_mass_and_default_fiber_geometry_follow_independent_propert
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(0.0),
             },
             [15600.0, 544520000.0, 246920000.0],
@@ -69,6 +71,7 @@ fn rounded_beam_fiber_mass_and_default_fiber_geometry_follow_independent_propert
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(30.0),
             },
             [15170.79632679, 517817051.0231, 237343309.2454],
@@ -79,6 +82,7 @@ fn rounded_beam_fiber_mass_and_default_fiber_geometry_follow_independent_propert
                 height: 500.0,
                 width: 300.0,
                 thick: 10.0,
+                horizontal_thick: 10.0,
                 corner_r: Some(0.0),
             },
             [15600.0, 544520000.0, 246920000.0],
@@ -297,6 +301,7 @@ fn cftの鋼管fyはsteel_materialの板厚区分を使う() {
         height: 400.0,
         width: 400.0,
         thick: 16.0,
+        horizontal_thick: 16.0,
     };
     let steel = Material {
         strength_factor: None,
@@ -327,6 +332,7 @@ fn 有効断面性能を使うbeamとfiberのphiと整合質量が一致する()
         height: 260.0,
         width: 180.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
     });
     model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Shape;
     model.sections[0].material = Some(MaterialId(1));
@@ -407,6 +413,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
+                horizontal_thick: 16.0,
             },
             MaterialCategory::Concrete,
             false,
@@ -631,6 +638,7 @@ fn cftファイバーは鋼管と充填コンクリートの初期接線を分�
         height: 400.0,
         width: 300.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
     });
     model.sections[0].material = Some(MaterialId(1));
     model.sections[0].steel_material = Some(MaterialId(0));
@@ -3566,6 +3574,7 @@ fn test_steel_box_fibers_are_hollow() {
         height: 400.0,
         width: 400.0,
         thick: 12.0,
+        horizontal_thick: 12.0,
         corner_r: Some(0.0),
     };
     let (sec, mats) = build_gauss_fibers(

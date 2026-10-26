@@ -118,6 +118,7 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                         height: 600.0,
                         width: 600.0,
                         thick: 12.0,
+                        horizontal_thick: 12.0,
                         corner_r: Some(0.0),
                     }
                     .to_section(SectionId(i as u32), "鋼材".into());

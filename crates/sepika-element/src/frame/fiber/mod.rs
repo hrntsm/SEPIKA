@@ -125,12 +125,18 @@ pub(crate) fn resolve_fiber_yield(
                 sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
         }
-        Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
+        Some(
+            box_shape @ SectionShape::CftBox { thick, .. }
+            | box_shape @ SectionShape::CftPipe { thick, .. },
+        ) => {
+            let thick = box_shape
+                .box_thicknesses()
+                .map_or(*thick, |(t1, t2)| t1.max(t2));
             model.element_steel_material(data).and_then(|m| {
-                if sepika_core::material_grade::steel_f_value_issue(&m.name, *thick).is_some() {
+                if sepika_core::material_grade::steel_f_value_issue(&m.name, thick).is_some() {
                     return None;
                 }
-                sepika_core::material_grade::steel_f_value_prefix(&m.name, *thick).or(m.fy)
+                sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
         }
         _ => main,
@@ -256,9 +262,12 @@ pub(crate) fn resolve_steel_fiber_fy(
                 steel_flange_thick, ..
             },
         ) => Some(*steel_flange_thick),
-        Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
-            Some(*thick)
-        }
+        Some(SectionShape::CftBox {
+            thick,
+            horizontal_thick,
+            ..
+        }) => Some(thick.max(*horizontal_thick)),
+        Some(SectionShape::CftPipe { thick, .. }) => Some(*thick),
         _ => None,
     };
     if let (Some(m), Some(t)) = (steel_mat, thickness) {
@@ -280,12 +289,18 @@ pub(crate) fn resolve_steel_fiber_fy(
                     .or(m.fy)
             })
             .or(mat_fy),
-        Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => steel_mat
+        Some(
+            box_shape @ SectionShape::CftBox { thick, .. }
+            | box_shape @ SectionShape::CftPipe { thick, .. },
+        ) => steel_mat
             .and_then(|m| {
-                if sepika_core::material_grade::steel_f_value_issue(&m.name, *thick).is_some() {
+                let thick = box_shape
+                    .box_thicknesses()
+                    .map_or(*thick, |(t1, t2)| t1.max(t2));
+                if sepika_core::material_grade::steel_f_value_issue(&m.name, thick).is_some() {
                     return None;
                 }
-                sepika_core::material_grade::steel_f_value_prefix(&m.name, *thick).or(m.fy)
+                sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
             .or(mat_fy),
         _ => mat_fy,

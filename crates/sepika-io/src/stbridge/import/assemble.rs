@@ -1501,11 +1501,13 @@ fn build_sections(
                         height,
                         width,
                         thick,
+                        horizontal_thick,
                         corner_r,
                     } => Some(SectionShape::CftBox {
                         height,
                         width,
                         thick,
+                        horizontal_thick,
                         corner_r,
                     }),
                     SectionShape::SteelPipe { outer_dia, thick } => {

@@ -695,12 +695,14 @@ fn rounded_secondary_supplied_area_mass_reaches_stories_and_unknown_is_error() {
             height: 500.0,
             width: 300.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(30.0),
         },
         SectionShape::CftBox {
             height: 500.0,
             width: 300.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(30.0),
         },
     ] {

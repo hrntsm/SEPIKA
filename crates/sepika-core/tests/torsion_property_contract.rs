@@ -18,6 +18,7 @@ fn tube(height: f64, width: f64, thick: f64, r: Option<f64>, cft: bool) -> Secti
             height,
             width,
             thick,
+            horizontal_thick: thick,
             corner_r: r,
         }
     } else {
@@ -25,6 +26,7 @@ fn tube(height: f64, width: f64, thick: f64, r: Option<f64>, cft: bool) -> Secti
             height,
             width,
             thick,
+            horizontal_thick: thick,
             corner_r: r,
         }
     }

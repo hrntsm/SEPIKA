@@ -326,6 +326,7 @@ fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
         height: 400.0,
         width: 300.0,
         thick: 10.0,
+        horizontal_thick: 10.0,
         corner_r: Some(30.0),
     }
     .to_section(SectionId(0), "角丸CFT".into());
@@ -722,6 +723,7 @@ pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
+            horizontal_thick: 12.0,
             corner_r: Some(0.0),
         }
         .to_section(SectionId(0), "CFT400長柱Case2".into())
@@ -4165,6 +4167,7 @@ fn secondary_cft_quantity_is_unavailable_for_all_kinds_shapes_and_locations() {
             height: 400.0,
             width: 400.0,
             thick: 10.0,
+            horizontal_thick: 10.0,
             corner_r: Some(0.0),
         },
         SectionShape::CftPipe {

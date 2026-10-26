@@ -483,7 +483,12 @@ pub fn validate_cft_steel_materials(model: &Model) -> Result<(), String> {
             continue;
         };
         let thickness = match shape {
-            SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => *thick,
+            SectionShape::CftBox {
+                thick,
+                horizontal_thick,
+                ..
+            } => thick.max(*horizontal_thick),
+            SectionShape::CftPipe { thick, .. } => *thick,
             _ => continue,
         };
         let Some(material) = model.element_steel_material(elem) else {
