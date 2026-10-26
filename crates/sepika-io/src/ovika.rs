@@ -1317,6 +1317,7 @@ mod tests {
         let dir = crate::test_util::test_tmp();
         let path = dir.join("p_rich_roundtrip.ovika");
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
+            horizontal_inertia_t_mm2: [0.0; 3],
             mass_equiv_weight_n: 19613.3,
             center_xy_mm: [0.0, 0.0],
             inertia_t_mm2: 8000000.0,

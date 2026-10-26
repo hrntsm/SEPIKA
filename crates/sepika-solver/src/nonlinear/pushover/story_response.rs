@@ -578,6 +578,7 @@ mod tests {
                 story_drift: vec![1.0; cuts.len()],
             });
             po.steps.push(PushoverStep {
+                floor_disp: Vec::new(),
                 load_factor: 1.0,
                 top_disp: step as f64,
                 base_shear: 0.0,

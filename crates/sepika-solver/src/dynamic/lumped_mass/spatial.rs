@@ -145,6 +145,7 @@ pub(crate) fn lumped_mass_eigen_spatial(
         shapes_xyz.push(xyz);
     }
     Ok(LumpedMassModal {
+        bending_rotations: Vec::new(),
         omega2,
         period,
         shapes,
@@ -420,6 +421,7 @@ pub(crate) fn lumped_mass_time_history_spatial(
     let ductility = ductility_dir.story_max();
 
     StickResponse {
+        bending_rotations: Vec::new(),
         time,
         roof_disp: roof,
         story_peak_drift: peak_drift,
@@ -491,6 +493,7 @@ mod tests {
         let j = 1.0e8;
         let kr = 1.0e10;
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             stories: vec![StoryStick {
                 story: sepika_core::ids::StoryId(0),
@@ -536,6 +539,7 @@ mod tests {
         let j = 1.0e8;
         let kr = 1.0e10;
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             stories: vec![StoryStick {
                 story: sepika_core::ids::StoryId(0),
@@ -577,6 +581,7 @@ mod tests {
         let mass = 10.0;
         let k = 100.0;
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             stories: vec![StoryStick {
                 story: sepika_core::ids::StoryId(0),

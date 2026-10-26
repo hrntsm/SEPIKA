@@ -173,6 +173,21 @@ impl<'a> StepRecorder<'a> {
             top_disp: roof,
             base_shear,
             story_drifts: story_drift,
+            floor_disp: model
+                .stories
+                .iter()
+                .map(|story| {
+                    super::response::story_reference_node(model, story).map_or([0.0; 3], |node| {
+                        std::array::from_fn(|i| {
+                            let global = node.index() * 6 + [0, 1, 5][i];
+                            dofmap
+                                .active(global)
+                                .and_then(|a| total_disp.get(a as usize).copied())
+                                .unwrap_or(0.0)
+                        })
+                    })
+                })
+                .collect(),
         });
         let mu = update_ductility(
             behaviors,

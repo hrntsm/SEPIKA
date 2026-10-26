@@ -151,7 +151,11 @@ impl App {
         };
         let mut keys = Vec::new();
         for &dir in dirs {
-            if cfg.lumped_dim == StickDim::Spatial || !cfg.lumped_nonlinear {
+            if cfg.lumped_dim == StickDim::Spatial
+                || !cfg.lumped_nonlinear
+                || cfg.lumped_mass_type
+                    == sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentBendingShear
+            {
                 keys.push(ResultInputKey::Static(StaticCaseKey::Seismic(dir)));
             }
             if cfg.lumped_nonlinear {
@@ -796,5 +800,57 @@ mod tests {
             app.core.scoped.results.as_ref().unwrap().input_records,
             before
         );
+    }
+    #[test]
+    fn bending_planar_nonlinear_requires_current_static_as_well_as_pushover() {
+        use sepika_solver::dynamic::lumped_mass::LumpedMassType;
+        let mut app = portal_app();
+        app.core.analysis_cfg.lumped_dim = StickDim::Planar;
+        app.core.analysis_cfg.lumped_nonlinear = true;
+        app.core.analysis_cfg.lumped_dir = SeismicDir::X;
+        let key = ResultInputKey::Static(StaticCaseKey::Seismic(SeismicDir::X));
+        remove_slot(app.core.scoped.results.as_mut().unwrap(), &key);
+        assert!(app.require_lumped_prerequisites().is_ok());
+        app.core.analysis_cfg.lumped_mass_type = LumpedMassType::EquivalentBendingShear;
+        let error = app.require_lumped_prerequisites().unwrap_err();
+        assert!(error.contains("地震静的 X"), "{error}");
+        app.run_seismic(SeismicDir::X);
+        assert!(app.require_lumped_prerequisites().is_ok());
+        app.core.model.materials[0].young *= 0.5;
+        let error = app.require_lumped_prerequisites().unwrap_err();
+        assert!(error.contains("再実行"), "{error}");
+    }
+
+    #[test]
+    fn bending_planar_gui_job_retains_ei_and_rotations() {
+        use sepika_solver::dynamic::lumped_mass::LumpedMassType;
+        let mut app = portal_app();
+        app.core.analysis_cfg.lumped_mass_type = LumpedMassType::EquivalentBendingShear;
+        app.core.analysis_cfg.lumped_dim = StickDim::Planar;
+        app.core.analysis_cfg.lumped_dir = SeismicDir::X;
+        app.core.analysis_cfg.lumped_nonlinear = false;
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let result = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .lumped
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            result.model.model_type,
+            LumpedMassType::EquivalentBendingShear
+        );
+        assert!(result.model.bending[0].ei_y > 0.0);
+        assert!(!result.modal.bending_rotations.is_empty());
+        assert_eq!(result.modal.period.len(), 2);
     }
 }

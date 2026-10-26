@@ -323,4 +323,6 @@ pub struct PushoverStep {
     pub top_disp: f64,
     pub base_shear: f64,
     pub story_drifts: Vec<f64>,
+    /// 各階代表節点の [Ux, Uy, θz] [mm, mm, rad]。モデルの階と同順。
+    pub floor_disp: Vec<[f64; 3]>,
 }

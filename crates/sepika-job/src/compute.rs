@@ -367,6 +367,7 @@ pub fn compute_lumped_mass(
 ) -> JobResult<sepika_solver::dynamic::lumped_mass::LumpedMassResult> {
     let model = expand_walls(model);
     let lm = crate::lumped_mass::build_lumped_mass(crate::lumped_mass::LumpedMassBuildInput {
+        model_type: cfg.lumped_mass_type,
         model: &model,
         dim: cfg.lumped_dim,
         source: cfg.lumped_stiffness,
@@ -392,12 +393,24 @@ pub fn compute_lumped_mass(
                 "質点系時刻歴の時間刻み dt には正の有限値を指定してください".into(),
             ));
         }
-        let resp = sepika_solver::dynamic::lumped_mass::lumped_mass_time_history(
-            &lm,
-            a,
-            cfg.lumped_th_dt,
-            cfg.lumped_th_damping,
-        );
+        let resp = if lm.model_type
+            == sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentBendingShear
+        {
+            sepika_solver::dynamic::lumped_mass::bending_shear_time_history(
+                &lm,
+                a,
+                cfg.lumped_th_dt,
+                cfg.lumped_th_damping,
+            )
+            .map_err(|error| JobError::Solve(error.to_string()))?
+        } else {
+            sepika_solver::dynamic::lumped_mass::lumped_mass_time_history(
+                &lm,
+                a,
+                cfg.lumped_th_dt,
+                cfg.lumped_th_damping,
+            )
+        };
         if !lm.stories.is_empty() && resp.time.is_empty() {
             return Err(JobError::Solve(
                 "質点系時刻歴を解けませんでした。質量または回転慣性を確認してください".into(),

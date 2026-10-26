@@ -2,15 +2,17 @@
 //!
 //! 立体フレームのプッシュオーバー結果から層ごとの Q-δ 関係を等包絡面積則でトリリニア骨格へ縮約する。
 
+mod bending;
 mod eigen;
 mod model;
 mod spatial;
 mod time_history;
 
+pub use bending::{bending_drifts, bending_shear_element, bending_shear_time_history};
 pub use eigen::{lumped_mass_eigen, LumpedMassModal};
 pub use model::{
     build_lumped_mass_model, fit_story_trilinear, LumpedMassModel, LumpedMassType,
-    LumpedStiffnessSource, StickDim, StorySpatial, StoryStick, StoryTrilinear,
+    LumpedStiffnessSource, StickDim, StoryBending, StorySpatial, StoryStick, StoryTrilinear,
 };
 pub use time_history::{lumped_mass_time_history, StickDirPeaks, StickResponse, STICK_NEWTON};
 
@@ -54,6 +56,7 @@ mod tests {
         for dim in [StickDim::Planar, StickDim::Spatial] {
             for dir in [SeismicDir::X, SeismicDir::Y] {
                 let lm = LumpedMassModel {
+                    bending: Vec::new(),
                     model_type: LumpedMassType::EquivalentShear,
                     stories: vec![StoryStick {
                         story: StoryId(0),
@@ -330,6 +333,7 @@ mod tests {
                     level_kind: Default::default(),
                     structure: Default::default(),
                     dynamic_mass: Some(sepika_core::model::StoryDynamicMass {
+                        horizontal_inertia_t_mm2: [0.0; 3],
                         mass_equiv_weight_n: 1.0e6,
                         lumped_mass: None,
                         center_xy_mm: [0.0, 0.0],
@@ -372,18 +376,21 @@ mod tests {
         ];
         let steps = vec![
             crate::nonlinear::pushover::PushoverStep {
+                floor_disp: Vec::new(),
                 load_factor: 0.0,
                 top_disp: -0.1,
                 base_shear: 0.0,
                 story_drifts: vec![-0.2],
             },
             crate::nonlinear::pushover::PushoverStep {
+                floor_disp: Vec::new(),
                 load_factor: 0.5,
                 top_disp: 5.0,
                 base_shear: 500_000.0,
                 story_drifts: vec![-0.2 + 5.0],
             },
             crate::nonlinear::pushover::PushoverStep {
+                floor_disp: Vec::new(),
                 load_factor: 1.0,
                 top_disp: 10.0,
                 base_shear: 1_000_000.0,
@@ -551,6 +558,7 @@ mod tests {
         for weight in [0.0, -1.0, f64::NAN] {
             let mut top = base_story(1, 3000.0);
             top.dynamic_mass = Some(StoryDynamicMass {
+                horizontal_inertia_t_mm2: [0.0; 3],
                 mass_equiv_weight_n: weight,
                 lumped_mass: None,
                 center_xy_mm: [0.0, 0.0],
@@ -588,6 +596,7 @@ mod tests {
     #[test]
     fn test_lumped_mass_eigen_two_dof_analytic() {
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -626,6 +635,7 @@ mod tests {
     #[test]
     fn test_lumped_mass_eigen_matches_power_iteration_omega1() {
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -654,6 +664,7 @@ mod tests {
     #[test]
     fn test_lumped_mass_eigen_rejects_non_positive_mass() {
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -673,6 +684,7 @@ mod tests {
     #[test]
     fn test_stick_omega1_survives_zero_mass_story_without_blowing_up() {
         let healthy = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -687,6 +699,7 @@ mod tests {
         let w_healthy = stick_omega1(&healthy);
 
         let with_zero_mass_story = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -712,6 +725,7 @@ mod tests {
     #[test]
     fn test_stick_omega1_survives_zero_stiffness_story_without_blowing_up() {
         let healthy = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -726,6 +740,7 @@ mod tests {
         let w_healthy = stick_omega1(&healthy);
 
         let with_zero_stiffness_story = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -755,6 +770,7 @@ mod tests {
     #[test]
     fn test_lumped_mass_eigen_truncates_to_story_count() {
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -773,6 +789,7 @@ mod tests {
     #[test]
     fn test_stick_th_zero_input_zero_response() {
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -790,6 +807,7 @@ mod tests {
     fn test_stick_th_responds_and_bounded() {
         // 正弦地動で応答が非ゼロかつ有限。
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,
@@ -827,6 +845,7 @@ mod tests {
     fn test_stick_th_yields_under_strong_input() {
         // 強い地動で層が降伏（塑性率 μ>1）。
         let lm = LumpedMassModel {
+            bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
             stiffness_source: LumpedStiffnessSource::StoryQd,

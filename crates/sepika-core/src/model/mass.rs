@@ -728,6 +728,9 @@ impl Model {
                         && m.center_xy_mm.iter().all(|v| v.is_finite())
                         && m.inertia_t_mm2.is_finite()
                         && m.inertia_t_mm2 >= 0.0
+                        && m.horizontal_inertia_t_mm2.iter().all(|v| v.is_finite())
+                        && m.horizontal_inertia_t_mm2[0] >= 0.0
+                        && m.horizontal_inertia_t_mm2[1] >= 0.0
                 });
                 if actual != Some(*expected) || !valid {
                     return Err(format!("階 {} の動的質量の全量物理重量・重心・慣性または反映記録が生成結果と一致しません。階を再生成してください", id.0));

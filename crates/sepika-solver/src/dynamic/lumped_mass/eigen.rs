@@ -23,19 +23,20 @@ pub struct LumpedMassModal {
     /// 3 次元のモード形状（各層 [Ux, Uy, θz]。2 次元では空）。
     #[serde(default)]
     pub shapes_xyz: Vec<Vec<[f64; 3]>>,
+    /// 各モードの各階曲げ回転 [θx, θy] [rad]。
+    pub bending_rotations: Vec<Vec<[f64; 2]>>,
 }
 
-/// 串団子モデルの固有値解析（せん断型多質点系）。
-/// `n_modes` が層数を超える場合、返るモード数は層数まで切り詰められる
-/// （立体モデルの [`crate::dynamic::eigen::solve_eigen`] と同じ規約。呼び出し側は
-/// 返り値の長さを確認すること）。
-///
-/// 層に質量が 0 以下のものがあると `SolveError::InvalidInput` を返す。
+/// 正の質量・剛性を持つ質点系の固有値とモードを返す。不正入力は `InvalidInput`。
+/// モード数の上限は、せん断型が層数（3次元は3倍）、曲げせん断型が層数の2倍（3次元は5倍）。
 pub fn lumped_mass_eigen(
     lm: &LumpedMassModel,
     n_modes: usize,
 ) -> Result<LumpedMassModal, SolveError> {
     let n = lm.stories.len();
+    if lm.model_type == super::model::LumpedMassType::EquivalentBendingShear {
+        return super::bending::eigen(lm, n_modes);
+    }
     if n == 0 || n_modes == 0 {
         return Ok(LumpedMassModal::default());
     }
@@ -108,6 +109,7 @@ fn eigen_from_arrays(
         shapes.push(shape);
     }
     Ok(LumpedMassModal {
+        bending_rotations: Vec::new(),
         omega2,
         period,
         shapes,

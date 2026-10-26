@@ -9954,6 +9954,7 @@ fn test_load_model_resets_model_derived_state() {
 
     // 差し替え前のモデル由来の状態を擬似的に残す。
     app.core.scoped.stick_response = Some(sepika_solver::dynamic::lumped_mass::StickResponse {
+        bending_rotations: Vec::new(),
         time: vec![0.0],
         roof_disp: vec![0.0],
         story_peak_drift: vec![0.0],
@@ -11505,6 +11506,7 @@ pub(super) fn dummy_lumped(
             vec![],
         ),
         modal: sepika_solver::dynamic::lumped_mass::LumpedMassModal {
+            bending_rotations: Vec::new(),
             period: vec![period],
             ..Default::default()
         },
@@ -11564,6 +11566,7 @@ fn test_build_result_tree_sections_and_labels() {
             vec![],
         ),
         modal: sepika_solver::dynamic::lumped_mass::LumpedMassModal {
+            bending_rotations: Vec::new(),
             period: vec![0.52],
             ..Default::default()
         },

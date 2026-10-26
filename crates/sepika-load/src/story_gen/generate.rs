@@ -676,10 +676,32 @@ fn generate_stories_impl(
             } else {
                 0.0
             };
+            let mut horizontal_inertia = [0.0; 3];
+            for n in &node_ids {
+                let mi = node_mass_equiv[n.index()] / GRAVITY_MM_S2;
+                let dx = model.nodes[n.index()].coord[0] - gx;
+                let dy = model.nodes[n.index()].coord[1] - gy;
+                horizontal_inertia[0] += mi * dy * dy;
+                horizontal_inertia[1] += mi * dx * dx;
+                horizontal_inertia[2] += mi * dx * dy;
+            }
+            for w in wall {
+                let mi = w.band.physical_n / GRAVITY_MM_S2;
+                let dx = w.center_xy_mm[0] - gx;
+                let dy = w.center_xy_mm[1] - gy;
+                for (target, value) in horizontal_inertia.iter_mut().zip([
+                    w.horizontal_inertia_t_mm2[0] + mi * dy * dy,
+                    w.horizontal_inertia_t_mm2[1] + mi * dx * dx,
+                    w.horizontal_inertia_t_mm2[2] + mi * dx * dy,
+                ]) {
+                    *target += value;
+                }
+            }
             StoryDynamicMass {
                 mass_equiv_weight_n: w_sum,
                 center_xy_mm: [gx, gy],
                 inertia_t_mm2: inertia,
+                horizontal_inertia_t_mm2: horizontal_inertia,
                 lumped_mass: None,
             }
         };

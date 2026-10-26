@@ -375,6 +375,8 @@ impl App {
 
         let total_mass: f64 = lm.stories.iter().map(|s| s.mass).sum();
         ui.horizontal(|ui| {
+            ui.label(lm.model_type.label());
+            ui.separator();
             ui.label(format!("質点数: {}", lm.stories.len()));
             ui.separator();
             ui.label(format!("総質量: {:.1} t", total_mass));
@@ -388,6 +390,31 @@ impl App {
             }
         });
         ui.separator();
+
+        if !lm.bending.is_empty() {
+            egui::Grid::new("lumped_bending_properties")
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("層（下から）");
+                    ui.label("EI_x [N·mm²]");
+                    ui.label("EI_y [N·mm²]");
+                    ui.end_row();
+                    for (i, b) in lm.bending.iter().enumerate().rev() {
+                        ui.label(format!("{}", i + 1));
+                        ui.label(if b.ei_x > 0.0 {
+                            format!("{:.6e}", b.ei_x)
+                        } else {
+                            "対象外".into()
+                        });
+                        ui.label(if b.ei_y > 0.0 {
+                            format!("{:.6e}", b.ei_y)
+                        } else {
+                            "対象外".into()
+                        });
+                        ui.end_row();
+                    }
+                });
+        }
 
         let order: Vec<usize> = (0..lm.stories.len()).rev().collect();
         if spatial {

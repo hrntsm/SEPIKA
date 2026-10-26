@@ -1298,3 +1298,74 @@ fn time_history_ownership_csv_parser_keeps_effective_arrays_and_source_name() {
     app.apply_lumped_mass_result(Ok(dummy_lumped(0.21, true)), Some(input.source));
     assert_eq!(app.core.model.lumped_vibration_cases[0].wave_name, "B.csv");
 }
+
+#[test]
+fn lumped_model_type_separates_cases_and_survives_project_reload() {
+    use sepika_solver::dynamic::lumped_mass::{LumpedMassType, StoryBending};
+    let mut app = ownership_portal();
+    let wave = vec![0.0, 1.0, -1.0];
+    let shear = app.lumped_time_history_input(wave.clone(), "同じ波形".into());
+    let shear_identity = shear.source.identity.clone();
+    app.apply_lumped_mass_result(Ok(dummy_lumped(0.21, true)), Some(shear.source));
+    let shear_id = app.core.model.lumped_vibration_cases[0].id;
+    app.core.analysis_cfg.lumped_mass_type = LumpedMassType::EquivalentBendingShear;
+    let bending = app.lumped_time_history_input(wave.clone(), "同じ波形".into());
+    assert_ne!(shear_identity, bending.source.identity);
+    assert!(bending.source.target.is_none());
+    let mut result = dummy_lumped(0.31, true);
+    result.model.model_type = LumpedMassType::EquivalentBendingShear;
+    result.model.bending = vec![StoryBending {
+        ei_x: 1e14,
+        ei_y: 2e14,
+        inertia: [1e6, 2e6, 3e5],
+    }];
+    result.modal.bending_rotations = vec![vec![[0.001, 0.002]]];
+    result.response.as_mut().unwrap().bending_rotations = vec![vec![[0.003, 0.004]]];
+    let serialized = bincode::serialize(&result).unwrap();
+    app.apply_lumped_mass_result(Ok(result), Some(bending.source));
+    assert_eq!(app.core.model.lumped_vibration_cases.len(), 2);
+    let bending_id = app.core.model.lumped_vibration_cases[1].id;
+    assert_ne!(shear_id, bending_id);
+    app.core.analysis_cfg.lumped_mass_type = LumpedMassType::EquivalentShear;
+    assert_eq!(
+        app.lumped_time_history_input(wave.clone(), "表示名変更".into())
+            .source
+            .target,
+        Some(shear_id.0)
+    );
+    app.core.analysis_cfg.lumped_mass_type = LumpedMassType::EquivalentBendingShear;
+    assert_eq!(
+        app.lumped_time_history_input(wave, "表示名変更".into())
+            .source
+            .target,
+        Some(bending_id.0)
+    );
+    let path = test_tmp().join("issue834-bending-ownership.ovika");
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    assert_eq!(
+        loaded.core.analysis_cfg.lumped_mass_type,
+        LumpedMassType::EquivalentBendingShear
+    );
+    let bundle = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        bundle.lumped_result_for(shear_id).unwrap().model.model_type,
+        LumpedMassType::EquivalentShear
+    );
+    assert_eq!(
+        serialized,
+        bincode::serialize(bundle.lumped_result_for(bending_id).unwrap()).unwrap()
+    );
+    std::fs::remove_file(path).unwrap();
+}
