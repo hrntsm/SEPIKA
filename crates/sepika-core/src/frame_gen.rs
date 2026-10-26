@@ -210,7 +210,7 @@ pub struct FrameSpec {
     pub y_spans: Vec<f64>,
     /// 下から順の階高 `[mm]`（要素数 ＝ 生成する**層**の数）。
     pub story_heights: Vec<f64>,
-    /// 各階の ΔSL [mm]。要素数は階高数 + 1、未入力を補完しない。
+    /// 各階の ΔSL `[mm]`。要素数は階高数 + 1、未入力を補完しない。
     pub sl_offsets_mm: Vec<Option<f64>>,
     /// 階（床）の名前。**要素数は `story_heights` より 1 つ多く**、先頭が基部の
     /// 床の名前である（階は床であり、床レベルは層より 1 つ多いため）。
@@ -279,7 +279,7 @@ impl FrameSpec {
         accumulate(self.base_elevation, &self.story_heights)
     }
 
-    /// 各階 SL [mm]。未入力・非有限値または SL の逆転時はエラー。
+    /// 各階 SL `[mm]`。未入力・非有限値または SL の逆転時はエラー。
     pub fn structural_levels(&self) -> Result<Vec<f64>, String> {
         let fls = self.levels();
         if self.sl_offsets_mm.len() != fls.len() {

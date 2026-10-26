@@ -215,9 +215,9 @@ pub struct Story {
     pub id: StoryId,
     /// 階名（`2F`・`PH1` など）。表示用の自由文字列。識別子は `id`。
     pub name: String,
-    /// FL（床上端の基準標高）[mm]。`None` は未入力。
+    /// FL（床上端の基準標高）`[mm]`。`None` は未入力。
     pub elevation: Option<f64>,
-    /// SL − FL [mm]。上向きを正とし、`None` は未入力。
+    /// SL − FL `[mm]`。上向きを正とし、`None` は未入力。
     pub sl_offset_mm: Option<f64>,
     /// 取込元の原階 ID。現在の FL・SL の編集では元属性を変更しない。
     pub source_story: Option<u32>,
@@ -285,11 +285,11 @@ pub struct Layer {
     pub top: StoryId,
     /// 層の高さ（階高）`[mm]`。
     pub height: f64,
-    /// 上下階の SL 間高さ [mm]。
+    /// 上下階の SL 間高さ `[mm]`。
     pub structural_height_mm: f64,
-    /// 下端階 SL [mm]。
+    /// 下端階 SL `[mm]`。
     pub bottom_sl_mm: f64,
-    /// 上端階 SL [mm]。
+    /// 上端階 SL `[mm]`。
     pub top_sl_mm: f64,
     /// 下端階の FL `[mm]`。
     pub bottom_elevation: f64,
@@ -308,7 +308,7 @@ pub struct Layer {
 }
 
 impl Story {
-    /// 階 ID・名称・FL・ΔSL [mm] を保持する未算定の階を作る。
+    /// 階 ID・名称・FL・ΔSL `[mm]` を保持する未算定の階を作る。
     pub fn new(
         id: StoryId,
         name: String,
@@ -334,12 +334,12 @@ impl Story {
         }
     }
 
-    /// FL [mm] を返す。未入力・非有限値は `None`。
+    /// FL `[mm]` を返す。未入力・非有限値は `None`。
     pub fn fl_mm(&self) -> Option<f64> {
         self.elevation.filter(|v| v.is_finite())
     }
 
-    /// SL [mm] を返す。FL・ΔSL の不足または非有限な導出値は `None`。
+    /// SL `[mm]` を返す。FL・ΔSL の不足または非有限な導出値は `None`。
     pub fn sl_mm(&self) -> Option<f64> {
         let sl = self.fl_mm()? + self.sl_offset_mm.filter(|v| v.is_finite())?;
         sl.is_finite().then_some(sl)
@@ -577,7 +577,7 @@ impl Model {
         self.stories.len().saturating_sub(1)
     }
 
-    /// 構造節点（生成代表節点を除く）の最小 Z [mm]。節点なしは 0。
+    /// 構造節点（生成代表節点を除く）の最小 Z `[mm]`。節点なしは 0。
     pub fn base_elevation(&self) -> f64 {
         let excluded: std::collections::HashSet<NodeId> =
             self.generated_masters.iter().copied().collect();
@@ -594,7 +594,7 @@ impl Model {
         }
     }
 
-    /// SL を境界とする所属区間 (下端, 上端] [mm]。最下階のみ構造最下端を含む。
+    /// SL を境界とする所属区間 (下端, 上端] `[mm]`。最下階のみ構造最下端を含む。
     /// 階情報の不足・逆転時は空。
     pub fn story_spans(&self) -> Vec<(f64, f64)> {
         if !self.story_level_diagnostics().is_empty() {

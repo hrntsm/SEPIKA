@@ -88,7 +88,7 @@ pub struct FrameDeadLoadMap {
 }
 
 impl FrameDeadLoadMap {
-    /// 解決済み剛域長 [mm] と全長座標の荷重を受け取る。フェイス上の集中荷重は可撓側に属する。
+    /// 解決済み剛域長 `[mm]` と全長座標の荷重を受け取る。フェイス上の集中荷重は可撓側に属する。
     /// 非有限値、不正な長さ・荷重区間・方向、非有限な計算結果はエラーを返す。
     pub fn new(
         loads: &[MemberLoad],
@@ -229,12 +229,12 @@ impl FrameDeadLoadMap {
         &self.frame
     }
 
-    /// 節点間の全長 [mm]。
+    /// 節点間の全長 `[mm]`。
     pub fn length_mm(&self) -> f64 {
         self.length_mm
     }
 
-    /// 解決済み剛域長 (i端, j端) [mm]。
+    /// 解決済み剛域長 (i端, j端) `[mm]`。
     pub fn rigid_lengths_mm(&self) -> (f64, f64) {
         (self.li_mm, self.lj_mm)
     }
@@ -255,7 +255,7 @@ impl LoadedFrameSection {
         }
     }
 
-    /// 部材荷重の元節点における等価並進力を全体系 [N] で返す。
+    /// 部材荷重の元節点における等価並進力を全体系 `[N]` で返す。
     pub fn applied_nodal_forces_global(&self) -> [[f64; 3]; 2] {
         let (li, lj) = self.map.rigid_lengths_mm();
         let flex = crate::frame::rigid_arm::to_node_force(self.map.flex_load(), li, lj);
@@ -264,7 +264,7 @@ impl LoadedFrameSection {
         std::array::from_fn(|end| std::array::from_fn(|d| global[end * 6 + d]))
     }
 
-    /// 水平切断面の上側へ作用する部材荷重の全体並進合力 [N]。切断位置の集中荷重は断面力の左極限に合わせる。
+    /// 水平切断面の上側へ作用する部材荷重の全体並進合力 `[N]`。切断位置の集中荷重は断面力の左極限に合わせる。
     pub fn applied_force_above_elevation(
         &self,
         z_i: f64,
@@ -314,7 +314,7 @@ impl LoadedFrameSection {
         Ok(force)
     }
 
-    /// i端からの全長比xi∈[0,1]における[N,Qy,Qz,Mx,My,Mz]。集中荷重位置では左極限を返す。
+    /// i端からの全長比xi∈`[0,1]`における`[N,Qy,Qz,Mx,My,Mz]`。集中荷重位置では左極限を返す。
     pub fn at(&self, xi: f64) -> Result<[f64; 6], String> {
         if !xi.is_finite() || !(0.0..=1.0).contains(&xi) {
             return Err("部材断面位置は有限の全長比0以上1以下が必要です".into());

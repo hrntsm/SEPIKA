@@ -75,7 +75,7 @@ pub struct PreparationResult {
     pub panel_modeling_enabled: bool,
     /// 荷重ケースの集計（`model.load_cases` と同順）。
     pub load_cases: Vec<PrepLoadCaseRow>,
-    /// 矩形RC/SRC大梁の梁本体・床板実重複控除 [N]。仕上げ・付加重量・嵩上げは含まない。
+    /// 矩形RC/SRC大梁の梁本体・床板実重複控除 `[N]`。仕上げ・付加重量・嵩上げは含まない。
     pub girder_self_weights: Vec<sepika_load::self_weight::GirderSelfWeightBreakdown>,
     /// 床板ID・採用材料・左右・作用区間別の嵩上げ設計重量と物理質量。
     pub beam_upstands: Vec<sepika_load::self_weight::BeamUpstandSegment>,

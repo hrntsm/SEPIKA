@@ -169,12 +169,12 @@ impl Model {
 }
 
 impl Slab {
-    /// 床上面の未変形境界 [mm]。実配置を解決できなければ `None`。
+    /// 床上面の未変形境界 `[mm]`。実配置を解決できなければ `None`。
     pub fn surface_coords(&self, model: &Model) -> Option<Vec<[f64; 3]>> {
         Some(model.resolved_slab_placement(self.id).ok()?.top_boundary)
     }
 
-    /// 床上面へ支持点の変位を一度だけ加えた表示境界 [mm]。未解決・非有限は `None`。
+    /// 床上面へ支持点の変位を一度だけ加えた表示境界 `[mm]`。未解決・非有限は `None`。
     pub fn surface_coords_with(
         &self,
         model: &Model,

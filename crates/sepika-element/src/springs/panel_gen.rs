@@ -47,11 +47,11 @@ use sepika_core::panel_zone::{
 pub struct GeneratedPanel {
     /// 接合部の節点。
     pub node: NodeId,
-    /// 方向別パネル寸法 `dc` [mm]。H 形の弱軸はフランジ幅。
+    /// 方向別パネル寸法 `dc` `[mm]`。H 形の弱軸はフランジ幅。
     pub dc: [f64; 2],
     /// 梁フランジ板厚中心間距離 `db` `[mm]`。
     pub db: [f64; 2],
-    /// 抵抗板 1 枚あたりの有効厚 `tp` [mm]。
+    /// 抵抗板 1 枚あたりの有効厚 `tp` `[mm]`。
     pub tp: [f64; 2],
     /// 実効体積 `Ve` `[mm³]`。
     pub ve: [f64; 2],
