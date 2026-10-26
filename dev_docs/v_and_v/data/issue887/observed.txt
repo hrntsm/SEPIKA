@@ -1,0 +1,10 @@
+Fc=21: Checked ok=true ratio=0
+Fc=23.999: Checked ok=true ratio=0
+Fc=24: Checked ok=true ratio=0
+Fc=24.001: Checked ok=true ratio=0
+Long axis=0 ratio=0.122513779394584
+Long axis=1 ratio=0.166902829899869
+Long axis=2 ratio=0.338278274932780
+Short axis=0 ratio=0.081675852929723
+Short axis=1 ratio=0.111268553266579
+Short axis=2 ratio=0.225518849955186
