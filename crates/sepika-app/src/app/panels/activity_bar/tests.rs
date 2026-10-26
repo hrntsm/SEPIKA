@@ -131,7 +131,7 @@ impl Harness {
                 .iter()
                 .find_map(|shape| match &shape.shape {
                     egui::epaint::Shape::Rect(rect)
-                        if rect.fill == crate::theme::VIEW_BG
+                        if rect.fill == crate::theme::VIEW_3D_BG
                             && rect.stroke.width == 0.0
                             && rect.rect.width() > 200.0 =>
                     {

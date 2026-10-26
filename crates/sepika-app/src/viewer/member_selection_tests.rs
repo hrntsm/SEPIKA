@@ -36,12 +36,14 @@ fn click(ctx: &egui::Context, app: &mut App, pos: egui::Pos2) {
 fn highlighted(output: &egui::FullOutput) -> bool {
     output.shapes.iter().any(|shape| match &shape.shape {
         egui::Shape::LineSegment { stroke, .. } => {
-            stroke.color == theme::PARETO_RED && stroke.width == 4.0
+            [theme::VIEW_HOVER_STROKE, theme::VIEW_SELECTED_STROKE].contains(stroke)
         }
-        egui::Shape::Path(path) => {
-            path.stroke.color == egui::epaint::ColorMode::Solid(theme::PARETO_RED)
-                && path.stroke.width == 4.0
-        }
+        egui::Shape::Path(path) => [theme::VIEW_HOVER_STROKE, theme::VIEW_SELECTED_STROKE]
+            .iter()
+            .any(|stroke| {
+                path.stroke.color == egui::epaint::ColorMode::Solid(stroke.color)
+                    && path.stroke.width == stroke.width
+            }),
         _ => false,
     })
 }
@@ -169,7 +171,7 @@ fn viewcube_has_input_priority_over_a_member_behind_it() {
         .shapes
         .iter()
         .find_map(|shape| match &shape.shape {
-            egui::Shape::Rect(r) if r.fill == theme::VIEW_BG => Some(r.rect),
+            egui::Shape::Rect(r) if r.fill == theme::VIEW_3D_BG => Some(r.rect),
             _ => None,
         })
         .unwrap();
@@ -306,5 +308,95 @@ fn deformed_result_selection_keeps_results_and_only_editing_switches_to_rest_sha
     app.ui.scoped.beam_draw_mode = true;
     frame(&ctx, &mut app, vec![]);
     assert_eq!(app.ui.view.view_mode, ViewMode::Shape);
+    assert_eq!(bincode::serialize(&app.core.scoped.results).unwrap(), saved);
+}
+
+fn state_lines(output: &egui::FullOutput) -> Vec<([egui::Pos2; 2], egui::Stroke)> {
+    output
+        .shapes
+        .iter()
+        .filter_map(|shape| match shape.shape {
+            egui::Shape::LineSegment { points, stroke }
+                if stroke.width >= 6.0
+                    && [theme::BLUE_500, theme::HILITE_PURPLE].contains(&stroke.color) =>
+            {
+                Some((points, stroke))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn hover_is_temporary_and_selection_has_priority_for_each_visible_member() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    let ctx = egui::Context::default();
+    frame(&ctx, &mut app, vec![]);
+    let normal = frame(&ctx, &mut app, vec![]);
+    let point = beam_point(&normal);
+    assert!(state_lines(&normal).is_empty());
+    let hover = frame(&ctx, &mut app, vec![egui::Event::PointerMoved(point)]);
+    assert_eq!(state_lines(&hover).len(), 1);
+    assert_eq!(state_lines(&hover)[0].1, theme::VIEW_HOVER_STROKE);
+    assert!(state_lines(&frame(&ctx, &mut app, vec![egui::Event::PointerGone])).is_empty());
+    app.select_members(vec![ElemId(0), ElemId(2)], Some(ElemId(2)));
+    let selected = state_lines(&frame(&ctx, &mut app, vec![]));
+    assert_eq!(selected.len(), 2);
+    assert!(selected
+        .iter()
+        .all(|(_, stroke)| *stroke == theme::VIEW_SELECTED_STROKE));
+    assert_eq!(
+        state_lines(&frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(point)]
+        )),
+        selected
+    );
+    assert_eq!(
+        state_lines(&frame(&ctx, &mut app, vec![egui::Event::PointerGone])),
+        selected
+    );
+}
+
+#[test]
+fn check_ratio_colors_are_painted_over_hover_and_selection_without_changing_results() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+    assert!(app.current_design_results().is_some());
+    app.ui.view.view_mode = ViewMode::CheckRatio;
+    let saved = bincode::serialize(&app.core.scoped.results).unwrap();
+    let ctx = egui::Context::default();
+    frame(&ctx, &mut app, vec![]);
+    let normal = frame(&ctx, &mut app, vec![]);
+    let point = beam_point(&normal);
+    let colors = |output: &egui::FullOutput| {
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match shape.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.width == 4.0 || stroke.width == 5.0 =>
+                {
+                    Some((points, stroke))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = colors(&normal);
+    assert_eq!(expected.len(), 3);
+    for selected in [false, true] {
+        if selected {
+            app.select_member(ElemId(2));
+        }
+        let output = frame(&ctx, &mut app, vec![egui::Event::PointerMoved(point)]);
+        assert_eq!(colors(&output), expected);
+        let state_index = output.shapes.iter().position(|shape| matches!(shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.width >= 8.0)).unwrap();
+        let result_index = output.shapes.iter().position(|shape| matches!(shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.width == 4.0 || stroke.width == 5.0)).unwrap();
+        assert!(state_index < result_index);
+    }
     assert_eq!(bincode::serialize(&app.core.scoped.results).unwrap(), saved);
 }

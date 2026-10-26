@@ -34,7 +34,7 @@ pub const GRAY_300: Color32 = Color32::from_rgb(0xA8, 0xB4, 0xC4);
 pub const GRAY_200: Color32 = Color32::from_rgb(0xC5, 0xD0, 0xDE);
 /// ドック／パネル内部（ツールバーより一段淡い）
 pub const GRAY_100: Color32 = Color32::from_rgb(0xE6, 0xEC, 0xF5);
-/// 入力欄・2D グラフ・中央キャンバス（3D ビュー）背景
+/// 入力欄・2D グラフ背景
 pub const WHITE: Color32 = Color32::WHITE;
 
 /// 重要操作（解析実行・確定）および進捗
@@ -60,8 +60,20 @@ pub const SECONDARY_AMBER: Color32 = Color32::from_rgb(0xD9, 0x77, 0x06);
 /// 淡色パネル上の注意ラベル（⚠ stale 等）。BEST_YELLOW はグラフ塗り用で文字には薄い。
 pub const WARN_TEXT: Color32 = SECONDARY_AMBER;
 
-/// 3D 背景（中央キャンバス。ドックより淡く、2D グラフと同じ白）
+/// 2D グラフの背景。
 pub const VIEW_BG: Color32 = Color32::WHITE;
+/// 3D ビューの背景。
+pub const VIEW_3D_BG: Color32 = Color32::from_rgb(0xF7, 0xF9, 0xFC);
+/// 通常部材の一時的なホバー強調。
+pub const VIEW_HOVER_STROKE: Stroke = Stroke {
+    width: 6.0,
+    color: BLUE_500,
+};
+/// 選択部材の継続的な強調。
+pub const VIEW_SELECTED_STROKE: Stroke = Stroke {
+    width: 8.0,
+    color: HILITE_PURPLE,
+};
 /// X 軸（赤系）
 pub const AXIS_X: Color32 = Color32::from_rgb(0xD2, 0x64, 0x64);
 /// Y 軸（緑系）
