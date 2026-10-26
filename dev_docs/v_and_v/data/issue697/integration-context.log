@@ -1,0 +1,6 @@
+pre-integration head=ca6031ce23a2a017436d3be2a7fdcdbb1d21e2e6
+incoming main=4598766fbb10352423e665f46f0a98de51982305
+production crates, saved probe, independent arithmetic: no changes from pre-integration head
+dev_docs/v_and_v/README.md: incoming #720 section preserved verbatim
+dev_docs/v_and_v/未検証一覧.md: incoming #720 section preserved verbatim
+incoming #720 handoff and product Fes docs: no changes from incoming main
