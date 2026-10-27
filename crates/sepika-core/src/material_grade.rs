@@ -216,8 +216,8 @@ pub fn material_strength_factor_steel(mat: &crate::model::Material) -> f64 {
 ///
 /// 直接入力の割増係数（[`crate::model::Material::strength_factor`]）があれば
 /// それを優先し、なければ 1.1（鉄筋の材料強度は基準強度の 1.1 倍以下と
-/// できる規定）。fy 未設定で既定値（SD345 相当の 345）を用いる場合にも
-/// 同係数を乗じる。**せん断補強筋は割増対象外**（本係数を用いないこと）。
+/// できる規定）。本関数は fy の解決・補完を行わない。
+/// **せん断補強筋は割増対象外**（本係数を用いないこと）。
 pub fn material_strength_factor_rebar(mat: &crate::model::Material) -> f64 {
     mat.strength_factor.unwrap_or(1.1)
 }
