@@ -80,19 +80,28 @@ mod tests {
 
     #[test]
     fn test_concrete_allowable_bond_table() {
-        // Fc=24 上端筋: min(24/15, 0.9+2/75×24) = min(1.6, 1.54) = 1.54
-        assert!((concrete_allowable_bond(24.0, true, true) - 1.54).abs() < 1e-9);
-        // Fc=24 その他: min(24/10, 1.355+24/25) = min(2.4, 2.315) = 2.315
-        assert!((concrete_allowable_bond(24.0, false, true) - 2.315).abs() < 1e-9);
-        assert!(
-            (concrete_allowable_bond(24.0, true, false)
-                - concrete_allowable_bond(24.0, true, true) * 1.5)
-                .abs()
-                < 1e-9
-        );
-        // 低強度側の分岐: Fc=15 上端筋 min(1.0, 1.3) = 1.0（Fc/15 側が支配）。
-        assert!((concrete_allowable_bond(15.0, true, true) - 1.0).abs() < 1e-9);
-        assert!((concrete_allowable_bond(48.0, false, true) - 2.795).abs() < 1e-9);
+        for (fc, top_long, other_long, top_short, other_short) in [
+            (15.0, 1.0, 1.5, 1.5, 2.25),
+            (22.49, 1.4993333333333334, 2.249, 2.249, 3.3735),
+            (22.5, 1.5, 2.25, 2.25, 3.375),
+            (22.51, 1.5002666666666666, 2.2504, 2.2504, 3.3756),
+            (24.0, 1.54, 2.31, 2.31, 3.465),
+            (36.0, 1.86, 2.79, 2.79, 4.185),
+            (48.0, 1.86, 2.79, 2.79, 4.185),
+        ] {
+            for (top_bar, long_term, expected) in [
+                (true, true, top_long),
+                (false, true, other_long),
+                (true, false, top_short),
+                (false, false, other_short),
+            ] {
+                let actual = concrete_allowable_bond(fc, top_bar, long_term);
+                assert!(
+                    (actual - expected).abs() < 1e-12,
+                    "Fc={fc}, 上端={top_bar}, 長期={long_term}: {actual} != {expected}"
+                );
+            }
+        }
     }
 
     #[test]
