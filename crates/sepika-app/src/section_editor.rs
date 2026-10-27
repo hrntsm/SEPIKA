@@ -963,16 +963,18 @@ fn rebar_layers(ui: &mut egui::Ui, label: &str, layers: &mut Vec<u32>) {
     }
 }
 
-/// 鉄筋の呼び名サイズ入力（`D10`〜`D41`）。値は呼び名の数値で保持する。
+/// 標準呼び名以外の径は mm で表示し、標準呼び名を選んだときだけ値を更新する。
 fn size_field(ui: &mut egui::Ui, id: &str, val: &mut f64) {
+    let selected_text = if sepika_core::material_grade::REBAR_NOMINAL_SIZES.contains(val) {
+        format!("D{val}")
+    } else {
+        format!("{val} mm")
+    };
     egui::ComboBox::from_id_salt(id)
-        .selected_text(format!("D{}", *val as i64))
+        .selected_text(selected_text)
         .show_ui(ui, |ui| {
             for &s in sepika_core::material_grade::REBAR_NOMINAL_SIZES {
-                if ui
-                    .selectable_label((*val - s).abs() < 1e-9, format!("D{}", s as i64))
-                    .clicked()
-                {
+                if ui.selectable_label(*val == s, format!("D{s}")).clicked() {
                     *val = s;
                 }
             }
@@ -1190,6 +1192,135 @@ fn panel_thickness_field(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn render_size_field(
+        context: &egui::Context,
+        val: &mut f64,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        let output = context.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| size_field(ui, "test_rebar_dia", val),
+        );
+        fn collect(shape: &egui::Shape, texts: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => texts.push((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, texts);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        for shape in output.shapes {
+            collect(&shape.shape, &mut texts);
+        }
+        texts
+    }
+
+    fn click_at(pos: egui::Pos2) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            },
+        ]
+    }
+
+    #[test]
+    fn rebar_size_display_preserves_numeric_diameter_and_section_data() {
+        for (dia, label) in [
+            (28.6, "28.6 mm"),
+            (25.0, "D25"),
+            (29.0, "D29"),
+            (28.0, "28 mm"),
+        ] {
+            for kind in [
+                ShapeKind::RcBeamRect,
+                ShapeKind::RcColumnRect,
+                ShapeKind::RcColumnCircle,
+            ] {
+                let mut draft = SectionEditorDraft {
+                    kind,
+                    main_dia: dia,
+                    shear_dia: dia,
+                    ..Default::default()
+                };
+                let shape = build_shape(&draft);
+                let section = shape.to_section(SectionId(1), "配筋断面".into());
+                let saved = bincode::serialize(&section).unwrap();
+                let context = egui::Context::default();
+                for value in [&mut draft.main_dia, &mut draft.shear_dia] {
+                    let texts = render_size_field(&context, value, Vec::new());
+                    assert!(texts.iter().any(|(text, _)| text == label), "{texts:?}");
+                    assert_eq!(*value, dia);
+                }
+                let after = build_shape(&draft);
+                assert_eq!(after, shape);
+                assert_eq!(
+                    bincode::serialize(&after.to_section(SectionId(1), "配筋断面".into())).unwrap(),
+                    saved
+                );
+            }
+        }
+
+        let mut draft = SectionEditorDraft {
+            kind: ShapeKind::RcBeamRect,
+            main_dia: 28.6,
+            ..Default::default()
+        };
+        let mut model = crate::sample::portal_frame();
+        model.materials[0].category = sepika_core::model::MaterialCategory::Concrete;
+        let mut section = build_shape(&draft).to_section(SectionId(1), "RC梁".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        section.material = model.sections[1].material;
+        model.sections[1] = section;
+        let quantity = crate::summary::build_quantity_csv(&model);
+        assert!(quantity.contains(",主筋,28.6,"), "{quantity}");
+        render_size_field(&egui::Context::default(), &mut draft.main_dia, Vec::new());
+        model.sections[1].shape = Some(build_shape(&draft));
+        assert_eq!(crate::summary::build_quantity_csv(&model), quantity);
+    }
+
+    #[test]
+    fn rebar_size_selection_replaces_numeric_diameter_with_standard_size() {
+        for target in [25.0, 29.0] {
+            let context = egui::Context::default();
+            let mut dia = 28.6;
+            let texts = render_size_field(&context, &mut dia, Vec::new());
+            let button = texts.iter().find(|(text, _)| text == "28.6 mm").unwrap().1;
+            render_size_field(&context, &mut dia, click_at(button.center()));
+            let texts = render_size_field(&context, &mut dia, Vec::new());
+            assert_eq!(dia, 28.6);
+            assert!(!texts.iter().any(|(text, _)| text == "D28"));
+            let option = texts
+                .iter()
+                .find(|(text, _)| text == &format!("D{target}"))
+                .unwrap()
+                .1;
+            render_size_field(&context, &mut dia, click_at(option.center()));
+            assert_eq!(dia, target);
+            let texts = render_size_field(&context, &mut dia, Vec::new());
+            assert!(texts.iter().any(|(text, _)| text == &format!("D{target}")));
+        }
+    }
 
     #[test]
     fn wall_edit_preserves_explicit_horizontal_ratio() {
