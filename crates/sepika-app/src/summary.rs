@@ -423,6 +423,13 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
+    if let Some(reason) = app.holding_ds_conditions_unavailable_reason() {
+        out.push_str(&format!(
+            "\n必要保有水平耐力・合否,算定不能,{}\n",
+            csv_cell(&reason)
+        ));
+    }
+
     let Some(results) = &app.core.scoped.results else {
         out.push_str("\n(解析結果なし)\n");
         return out;

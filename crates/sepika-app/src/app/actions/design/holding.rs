@@ -192,13 +192,30 @@ fn rc_wall_ds_geometry(
 }
 
 impl App {
-    /// 保有水平耐力の層別判定を行う。前提データが不足していれば Err(案内文)。
-    ///
-    /// 戻り値の第 2 要素は層ごとに採用された部材ランク（`design_rank_auto` が
-    /// true の場合は自動判定。確定応力・耐力入力・ランクの欠損は Err。
-    /// false の場合は全層の明示入力 `design_rank`）。
+    /// 保有水平耐力の層別判定と採用ランクを返す。条件未確認時は対象と不足理由を返す。
     #[allow(clippy::type_complexity)]
     pub fn compute_holding_capacity(
+        &mut self,
+    ) -> Result<
+        (
+            sepika_design_jp::secondary::holding_capacity::HoldingCapacityResult,
+            Vec<sepika_design_jp::secondary::holding_capacity::MemberRank>,
+        ),
+        String,
+    > {
+        let candidate = self.compute_unconfirmed_holding_capacity()?;
+        if let Some(reason) = self.holding_ds_conditions_unavailable_reason() {
+            self.core.scoped.holding_capacity_source = None;
+            self.core.scoped.ds_beta_u_by_story.clear();
+            self.core.scoped.ds_wall_details.clear();
+            return Err(reason);
+        }
+        Ok(candidate)
+    }
+
+    /// 適用条件未確認の候補を返す。製品の表示・保存・適合判定には使用しない。
+    #[allow(clippy::type_complexity)]
+    pub(in crate::app) fn compute_unconfirmed_holding_capacity(
         &mut self,
     ) -> Result<
         (
@@ -217,7 +234,6 @@ impl App {
         };
         use sepika_design_jp::secondary::member_rank::worst_rank;
         use sepika_solver::nonlinear::pushover::story_response::{EvaluationPurpose, ForceGroup};
-        use sepika_solver::nonlinear::pushover::MechanismType;
 
         self.core.scoped.holding_capacity_source = None;
         self.core.scoped.ds_beta_u_by_story.clear();
@@ -931,7 +947,7 @@ impl App {
                     MemberRank::FD => GroupType::D,
                 };
                 let rep_rank = story_ranks[i];
-                let mut cb_group = if self.core.design_rank_auto {
+                let cb_group = if self.core.design_rank_auto {
                     member_group(&cb_members[i]).ok_or_else(|| {
                         if ds_response.cuts[i].forces.iter().any(|f| f.group == ForceGroup::Frame) {
                             format!("層{}: 存在する柱梁群の耐力入力が欠損しています", i+1)
@@ -942,15 +958,6 @@ impl App {
                 } else {
                     explicit_group(rep_rank)
                 };
-                if let MechanismType::StoryCollapse { layer } = mechanism {
-                    if *layer == i {
-                        cb_group = match cb_group {
-                            GroupType::A => GroupType::B,
-                            GroupType::B => GroupType::C,
-                            GroupType::C | GroupType::D => GroupType::D,
-                        };
-                    }
-                }
                 if beta_u_by_story[i] == 0.0 {
                     let rank = match cb_group {
                         GroupType::A => MemberRank::FA,
@@ -1528,7 +1535,7 @@ mod tests {
         let wall_id = po.wall_capacities[0].0;
         let qw_n = po.wall_response_at(wall_id, point.step).unwrap().qw_n;
         assert!(qw_n.is_finite() && qw_n.abs() > 0.0);
-        let result = app.compute_holding_capacity().unwrap().0;
+        let result = app.compute_unconfirmed_holding_capacity().unwrap().0;
         assert!(result.member_ranks.iter().any(|(id, _)| *id == wall_id));
         let detail = &app.core.scoped.ds_wall_details[0];
         assert!(detail.contains(&format!("Q_Ds={qw_n:.3}")), "{detail}");
@@ -1545,6 +1552,15 @@ mod tests {
             detail.contains(&format!("τu/Fc={:.9}", qw_n.abs() / 14_400_000.0)),
             "{detail}"
         );
+        for auto in [false, true] {
+            app.core.design_rank_auto = auto;
+            let reason = app.compute_holding_capacity().err().unwrap();
+            assert!(reason.contains("Ds判定保留"), "{reason}");
+            assert!(reason.contains("RC非ヒンジ柱種別"), "{reason}");
+            assert!(reason.contains("崩壊時応力・破壊形式"), "{reason}");
+            assert!(reason.contains("対象だけの最低種別"), "{reason}");
+            assert!(app.core.scoped.holding_capacity_source.is_none());
+        }
         let valid_results = app.core.scoped.results.clone();
         for mismatch in 0..4 {
             app.core.scoped.results = valid_results.clone();
@@ -2153,6 +2169,124 @@ mod tests {
         ] {
             assert!(error.contains("部材 ElemId(3)"), "{error}");
             assert!(error.contains("断面 SectionId(4)"), "{error}");
+        }
+    }
+
+    #[test]
+    fn ds871_diagonal_wall_candidate_uses_local_shear_without_confirming_conditions() {
+        use sepika_core::section_shape::SectionShape;
+        let mut app = App::default();
+        app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+            single_wall_619_model(1500.0),
+        ));
+        app.core.design_frame = sepika_design_jp::secondary::holding_capacity::FrameType::RcWall;
+        app.core.analysis_cfg.push_use_drift_angle = false;
+        app.core.analysis_cfg.push_use_max_disp = true;
+        app.core.analysis_cfg.push_max_disp = 1.0;
+        app.core.analysis_cfg.push_steps = 4;
+        let section = &mut app.core.model.sections[2];
+        section.shape = Some(SectionShape::RcWall {
+            thickness: 150.0,
+            ps: 0.012,
+            pwh_ratio: Some(0.012),
+            pwv_ratio: Some(0.012),
+        });
+        let c = std::f64::consts::FRAC_1_SQRT_2;
+        for node in &mut app.core.model.nodes {
+            let [x, y, z] = node.coord;
+            node.coord = [c * (x - y), c * (x + y), z];
+        }
+        for elem in &mut app.core.model.elements {
+            let [x, y, z] = elem.local_axis.ref_vector;
+            elem.local_axis.ref_vector = [c * (x - y), c * (x + y), z];
+        }
+        app.run_preparation();
+        app.run_static_all();
+        app.run_pushover();
+        app.run_seismic(SeismicDir::Y);
+        crate::app::tests::select_holding_points(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let po = app.displayed_pushover().unwrap();
+        let last = po.wall_history.as_ref().unwrap().last().unwrap();
+        let wall = po.wall_response_at(last.elem, last.step).unwrap();
+        assert!(
+            wall.qw_n.abs() > 100.0,
+            "実壁の局所せん断は有限非ゼロ: Qw={}, Qdir={}, steps={}",
+            wall.qw_n,
+            wall.qdir_n,
+            po.steps.len()
+        );
+        assert!((wall.qw_n.abs() - wall.qdir_n.abs()).abs() > 10.0);
+        assert!((wall.inplane_axis[0].abs() - c).abs() < 1e-12);
+        assert!((wall.inplane_axis[1].abs() - c).abs() < 1e-12);
+        let elem_id = last.elem;
+        let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
+        let elem = expanded.element(elem_id).unwrap();
+        let qu = po
+            .wall_capacities
+            .iter()
+            .find(|(id, _)| *id == elem_id)
+            .unwrap()
+            .1;
+        let geom = sepika_core::model::wall_element_geometry(elem, &expanded).unwrap();
+        let r2 = sepika_element::wall::wall_element::WallElement::opening_strength_reduction(
+            elem, &expanded,
+        );
+        let fc = expanded.element_material(elem).unwrap().fc.unwrap();
+        let tau_case_qw = 0.105 * fc * 150.0 * geom.lw * r2;
+        assert!(
+            tau_case_qw < 0.99 * qu[0],
+            "τu単独の試験で頭打ちに達しない: Qw={tau_case_qw}, Qu={qu:?}"
+        );
+        app.core.design_rank_auto = true;
+        app.core.wall_structure = true;
+        use sepika_design_jp::secondary::holding_capacity::MemberRank;
+        for (qw, expected) in [
+            (qu[0], MemberRank::FD),
+            (-qu[1], MemberRank::FD),
+            (tau_case_qw, MemberRank::FB),
+        ] {
+            let bundle = app.core.scoped.results.as_mut().unwrap();
+            let po = bundle.pushover_x.as_mut().unwrap();
+            let wall = po
+                .wall_history
+                .as_mut()
+                .unwrap()
+                .last_mut()
+                .unwrap()
+                .response
+                .as_mut()
+                .unwrap();
+            wall.qw_n = qw;
+            wall.top.force_n = wall.inplane_axis.map(|component| qw * component);
+            wall.qdir_n = wall.top.force_n[0];
+            wall.bottom.force_n = wall.top.force_n.map(|force| -force);
+            wall.top.moment_nmm = [0.0; 3];
+            wall.bottom.moment_nmm = [
+                wall.height_mm * wall.top.force_n[1],
+                -wall.height_mm * wall.top.force_n[0],
+                0.0,
+            ];
+            wall.equilibrium_residual.force_n = [0.0; 3];
+            wall.equilibrium_residual.moment_nmm = [0.0; 3];
+            assert!((wall.qdir_n.abs() - c * qw.abs()).abs() < 1e-6);
+            let (holding, _) = app
+                .compute_unconfirmed_holding_capacity()
+                .expect("斜め壁の専用応答で種別を判定");
+            assert_eq!(
+                holding
+                    .member_ranks
+                    .iter()
+                    .find(|(id, _)| *id == elem_id)
+                    .unwrap()
+                    .1,
+                expected,
+                "Qdirへ投影して局所頭打ち/τuを低下させない"
+            );
         }
     }
 }

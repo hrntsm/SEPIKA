@@ -3424,7 +3424,7 @@ fn test_holding_capacity_flow() {
     );
 
     let (result, story_ranks) = app
-        .compute_holding_capacity()
+        .compute_unconfirmed_holding_capacity()
         .expect("前提が揃えば Ok のはず");
     assert_eq!(result.stories.len(), 1);
     assert!(result.stories[0].qun > 0.0);
@@ -3506,7 +3506,7 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
 
     app.core.design_rank_auto = true;
     let (result, story_ranks) = app
-        .compute_holding_capacity()
+        .compute_unconfirmed_holding_capacity()
         .expect("shape 付き鋼断面があれば Ok のはず");
 
     assert!(
@@ -3587,7 +3587,9 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
 
     // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
     app.core.design_rank_auto = false;
-    let _ = app.compute_holding_capacity().expect("Ok のはず");
+    let _ = app
+        .compute_unconfirmed_holding_capacity()
+        .expect("Ok のはず");
     assert!(app.core.scoped.ds_rank_fallback_stories.is_empty());
 }
 
@@ -3866,7 +3868,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
 
     app.core.design_rank_auto = true;
     let (result, _story_ranks) = app
-        .compute_holding_capacity()
+        .compute_unconfirmed_holding_capacity()
         .expect("RC 矩形 + fc 付き材料があれば Ok のはず");
 
     assert!(
@@ -3958,7 +3960,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     assert!(app.compute_holding_capacity().is_err());
     app.run_pushover();
     select_holding_points(&mut app);
-    assert!(app.compute_holding_capacity().is_ok());
+    assert!(app.compute_unconfirmed_holding_capacity().is_ok());
 }
 
 /// `App::cmq_display_load_case`（CMQ図の表示対象ケース）は、`nav.focus_load_case`
@@ -5195,7 +5197,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         });
         // この試験は表示用の直接床検定fixtureを構築する。
         let selected = app.core.scoped.last_static.take();
-        let _ = app.compute_holding_capacity();
+        let _ = app.compute_unconfirmed_holding_capacity();
         app.certify_design_fixture();
         app.core.scoped.last_static = selected;
         let context = egui::Context::default();
@@ -13779,7 +13781,9 @@ fn fes_718_ready_app() -> App {
 #[test]
 fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
     let mut app = fes_718_ready_app();
-    let normal = app.compute_holding_capacity().expect("有効な方向別結果");
+    let normal = app
+        .compute_unconfirmed_holding_capacity()
+        .expect("有効な方向別結果");
     assert_eq!(normal.0.stories[0].rs, 1.0);
     assert_eq!(normal.0.stories[0].re, 0.0);
     assert_eq!(normal.0.stories[0].fes, 1.0);
@@ -13804,7 +13808,8 @@ fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
 #[test]
 fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
     let mut app = fes_718_ready_app();
-    app.compute_holding_capacity().expect("有効な方向別結果");
+    app.compute_unconfirmed_holding_capacity()
+        .expect("有効な方向別結果");
     let y = app
         .core
         .scoped
@@ -13959,7 +13964,8 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
 #[cfg(feature = "gui")]
 fn fes_718_gui_draws_target_reason_without_normal_verdict() {
     let mut app = fes_718_ready_app();
-    app.compute_holding_capacity().expect("有効な方向別結果");
+    app.compute_unconfirmed_holding_capacity()
+        .expect("有効な方向別結果");
     for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
         result.disp.fill([0.0; 6]);
     }
@@ -14161,7 +14167,7 @@ fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickn
         app.core.scoped.last_error
     );
     app.core.design_rank_auto = true;
-    let (result, _) = app.compute_holding_capacity().unwrap();
+    let (result, _) = app.compute_unconfirmed_holding_capacity().unwrap();
     // 細長比は約57、400の種別境界890/√400=44.5を超える。
     assert_eq!(
         result
@@ -14896,5 +14902,240 @@ fn multi_opening_mode_is_preserved_by_model_loading_and_preparation() {
         app.run_preparation();
         assert!(app.core.model.eq_ignoring_dofmap(&prepared));
         assert_eq!(app.core.scoped.undo.revision(), revision);
+    }
+}
+
+#[test]
+fn ds871_public_entry_holds_both_rank_modes_and_clears_candidate_source() {
+    use sepika_design_jp::secondary::holding_capacity::MemberRank;
+    let mut app = fes_718_ready_app();
+    for auto in [false, true] {
+        for rank in [MemberRank::FA, MemberRank::FD] {
+            app.core.design_rank_auto = auto;
+            app.core.design_rank = rank;
+            let candidate = app.compute_unconfirmed_holding_capacity().unwrap();
+            assert!(candidate.0.stories[0].ds.is_finite());
+            assert!(app.core.scoped.holding_capacity_source.is_some());
+            let reason = app.compute_holding_capacity().err().unwrap();
+            for text in [
+                "Ds判定保留",
+                "S非ヒンジ柱種別",
+                "接合部 節点 ID",
+                "柱脚の有無・形式",
+                "伸び能力",
+                "保有耐力接合",
+                "群Dを0.05割増対象にしません",
+            ] {
+                assert!(reason.contains(text), "auto={auto} rank={rank:?}: {reason}");
+            }
+            assert!(app.core.scoped.holding_capacity_source.is_none());
+            assert!(app.core.scoped.ds_beta_u_by_story.is_empty());
+            let csv = crate::summary::build_report_csv(&app);
+            assert!(csv.contains("必要保有水平耐力・合否,算定不能"));
+            assert!(csv.contains(&reason));
+            assert!(!csv.contains("必要保有水平耐力を満足"));
+        }
+    }
+}
+
+#[test]
+fn ds871_rc_conditions_exclude_orthogonal_beams_and_identify_joint_targets() {
+    use sepika_core::model::{FrameSectionUse, MaterialCategory};
+    let mut app = App::default();
+    let mut model = crate::sample::portal_frame();
+    model.materials[0].category = MaterialCategory::Concrete;
+    model.materials[0].fc = Some(24.0);
+    for section in &mut model.sections {
+        section.shape = None;
+    }
+    let mut orthogonal = model.elements[2].clone();
+    orthogonal.id = ElemId(model.elements.len() as u32);
+    let mut end = model.nodes[2].clone();
+    end.id = NodeId(model.nodes.len() as u32);
+    end.coord = [
+        model.nodes[2].coord[0],
+        model.nodes[2].coord[1] + 3000.0,
+        model.nodes[2].coord[2],
+    ];
+    orthogonal.nodes = smallvec::smallvec![NodeId(2), end.id];
+    let mut beam_section = model.sections[orthogonal.section.unwrap().index()].clone();
+    beam_section.id = SectionId(model.sections.len() as u32);
+    beam_section.frame_use = Some(FrameSectionUse::Girder);
+    orthogonal.section = Some(beam_section.id);
+    let beam_id = orthogonal.id.0;
+    model.sections.push(beam_section);
+    model.nodes.push(end);
+    model.elements.push(orthogonal);
+    app.load_model(model);
+    for direction in [SeismicDir::X, SeismicDir::Y] {
+        app.core.scoped.pushover_view_dir = direction;
+        let reason = app.holding_ds_conditions_unavailable_reason().unwrap();
+        assert!(reason.contains("Ds算定階の崩壊時応力・破壊形式"));
+        assert!(reason.contains("RC非ヒンジ柱種別"));
+        assert!(reason.contains("対象だけの最低種別"));
+        assert!(!reason.contains("露出柱脚"));
+        let column = reason
+            .lines()
+            .find(|line| line.contains("RC非ヒンジ柱種別: 柱 ID 0、"))
+            .unwrap();
+        let expected = if direction == SeismicDir::X {
+            "[2]".to_string()
+        } else {
+            format!("[{beam_id}]")
+        };
+        assert!(
+            column.contains(&format!("接続梁 ID {expected}（直交梁を除く）")),
+            "{column}"
+        );
+    }
+}
+
+#[test]
+fn ds871_s_frame_detects_rc_foundation_beam_outside_layers_without_conversion() {
+    use sepika_core::model::{FrameSectionUse, MaterialCategory};
+    let mut app = App::default();
+    let mut model = crate::sample::portal_frame();
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(model.materials.len() as u32);
+    concrete.category = MaterialCategory::Concrete;
+    concrete.fc = Some(24.0);
+    let mut section = model.sections[0].clone();
+    section.id = SectionId(model.sections.len() as u32);
+    section.shape = None;
+    section.material = Some(concrete.id);
+    section.frame_use = Some(FrameSectionUse::Girder);
+    let mut beam = model.elements[2].clone();
+    beam.id = ElemId(model.elements.len() as u32);
+    beam.section = Some(section.id);
+    beam.nodes = smallvec::smallvec![NodeId(0), NodeId(1)];
+    let beam_id = beam.id.0;
+    model.materials.push(concrete);
+    model.sections.push(section);
+    model.elements.push(beam);
+    app.load_model(model);
+    let reason = app.holding_ds_conditions_unavailable_reason().unwrap();
+    assert!(
+        reason.contains(&format!("RC梁 ID {beam_id}（層外を含む）")),
+        "{reason}"
+    );
+    assert!(reason.contains("基礎梁用途・塑性ヒンジ・限定換算の適用条件・RCのFD回避"));
+    assert!(reason.contains("一般適用しません"));
+}
+
+#[test]
+#[cfg(feature = "gui")]
+fn ds871_gui_renders_hold_reason_without_capacity_verdict() {
+    let mut app = fes_718_ready_app();
+    for auto in [false, true] {
+        app.core.design_rank_auto = auto;
+        let context = egui::Context::default();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(4000.0, 20000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::design_view::design_table(ui, &mut app),
+        );
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Ds判定保留"), "{text}");
+        assert!(text.contains("柱脚の有無・形式"), "{text}");
+        assert!(!text.contains("Qun[kN]"), "{text}");
+        assert!(app.core.scoped.holding_capacity_source.is_none());
+    }
+}
+
+#[test]
+fn ds871_old_design_is_invalidated_but_analysis_remains_and_ds_stays_on_hold() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+    let mut app = fes_718_ready_app();
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let original = app.core.scoped.results.as_ref().unwrap().clone();
+    assert!(original.has_design_results());
+    let (mut current, current_path) = super::result_contract_tests::restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(DESIGN_CONTRACT_VERSION),
+        "ds871-current-design",
+    );
+    assert!(current.current_design_results().is_some());
+    assert!(current
+        .compute_holding_capacity()
+        .err()
+        .unwrap()
+        .contains("Ds判定保留"));
+    std::fs::remove_file(current_path).unwrap();
+    for saved_version in [39, 40, 41, DESIGN_CONTRACT_VERSION + 1] {
+        let (mut loaded, path) = super::result_contract_tests::restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(saved_version),
+            &format!("ds871-saved-design-{saved_version}"),
+        );
+        let stale = loaded.core.scoped.results.as_ref().unwrap();
+        assert!(stale.has_analysis_results());
+        assert!(stale.member_checks.is_empty());
+        assert!(stale.wall_checks.is_empty());
+        assert!(stale.beam_checks.is_empty());
+        assert!(stale.slab_checks.is_empty());
+        assert!(stale
+            .joint_checks
+            .iter()
+            .all(|c| matches!(c.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
+        assert!(loaded.current_design_results().is_none());
+        assert_eq!(stale.member_forces, original.member_forces);
+        assert_eq!(stale.design_contract_version, None);
+        assert!(loaded
+            .core
+            .scoped
+            .result_contract_notice
+            .as_ref()
+            .unwrap()
+            .contains(if saved_version < DESIGN_CONTRACT_VERSION {
+                "旧契約"
+            } else {
+                "未来版"
+            }));
+        loaded.save_project_to(path.clone());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert!(reopened.current_design_results().is_none());
+        assert!(reopened
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .has_analysis_results());
+        let reason = reopened.compute_holding_capacity().err().unwrap();
+        assert!(reason.contains("Ds判定保留"), "{reason}");
+        assert!(crate::summary::build_report_csv(&reopened).contains("柱脚の有無・形式"));
+        reopened.run_design_check();
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert_eq!(
+            reopened
+                .current_design_results()
+                .unwrap()
+                .design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert!(reopened.compute_holding_capacity().is_err());
+        std::fs::remove_file(path).unwrap();
     }
 }
