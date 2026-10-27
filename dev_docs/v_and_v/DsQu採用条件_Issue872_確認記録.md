@@ -26,9 +26,9 @@
 | 全層Qu≥Qunでも未崩壊耐力の採用保留 | `all_story_capacity_comparisons_passing_do_not_prove_noncollapse_adoption`：人工確定履歴の層内力・外力・許容差を同率拡大し釣合いを維持、数値候補の全層比較成功をassertした上で公開採用を保留。実耐力のValidationではない |
 | 既存数値の保証 | `compute_unconfirmed_holding_capacity`へ既存試験を移し、数値期待値・モデル・試験件数を維持。公開GUIの成功表示期待は保留理由へ変更し、数値候補の独立assertを残す |
 
-GUIの描画文字列試験は手動GUI操作と区別する。公開入口では未確認の数値候補を合否として返さず、CSVでも不足理由を列挙する。計算契約版の更新と先行#871との統合は管理担当が最終構成で行う。
+GUIの描画文字列試験は手動GUI操作と区別する。公開入口では未確認の数値候補を合否として返さず、CSVでも不足理由を列挙する。先行#871の部材・柱脚条件不足も同じ公開入口とCSVへ集約する。解析契約64を保持し、検定契約43では旧検定42以前の保存成果を失効する。
 
-## 実行結果
+## 暫定構成の実行結果
 
 専用`CARGO_TARGET_DIR`を`C:/Users/hiroa/Desktop/ikkan/.worktree/.cargo-target-872`に指定した。
 
@@ -43,6 +43,33 @@ GUIの描画文字列試験は手動GUI操作と区別する。公開入口で�
 - `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings`：成功。
 - `cargo fmt --all -- --check`、`git diff --check`：成功。
 
+## 先行修正との統合
+
+main `3532847d`（#901）とレビュー済み#871 `35a8e20a`を通常mergeし、#871の数値候補・公開保留・実モデル応答検証を保持した。公開入口では既存の識別・釣合い検査を先行し、成功した数値候補について#872の11条件と#871の部材・接合部・柱脚条件を集約して一度だけ採用元と表示値を失効する。CSVは双方の全理由を出力し、GUI描画試験でも同時表示を検査する。
+
+検定契約43へ更新した。既存の保存往復試験`ds871_old_design_is_invalidated_but_analysis_remains_and_ds_stays_on_hold`へ旧42を追加し、解析64の応力保持・旧検定値の削除・再保存後も双方の理由で保留することを検査する。新しい解析や採用成功経路を追加する変更ではない。
+
+公開mainの#871 merge `177ce4c3`を追加で通常mergeし、内容差分0とその祖先関係を確認した。最終コードは`eb09c696`。`origin/main`との全差分で、既存の数値試験・公開陰性保証・実モデル応答の欠落がないことを確認した。
+
+統合途中の競合解消で6ファイルの末尾を切り詰める編集不備をfmtが検出したため、レビュー済み#871の各ファイル全文へ戻し、#872の限定差分を再適用した。#871との全差分で意図しない削除がないことを確認した。既存試験の追加候補移行は撤回し、#871の公開入口の陰性保証を維持する。
+
+統合初回のdefault libは435件中434成功・1失敗だった。既存試験が保証する公開理由全文とCSVの一致が、条件ごとのCSV行追加により失われていた。公開入口と同じ順で全理由を一つのCSVセルへ集約し、既存assertを維持して是正した。下記の最終再検証と区別する。
+
+GUI初回も修正前の構成で1007件中1006成功・1失敗だった。同じCSV全文一致の失敗であり、以下の最終成功件数へ混ぜない。
+
+## 最終統合構成の実行結果
+
+専用targetを維持し、以下を実行した。default・GUIの全libでは、新規4試験と旧検定42の保存往復を含め、失敗・無視・filterは0である。
+
+- `cargo test -p sepika-app --lib --locked`：435成功。
+- `cargo test -p sepika-app --features gui --lib --locked`：1007成功。
+- `cargo test -p sepika-app --test wall_model --locked`：全17成功、失敗・無視・filterは0。既存の壁応答・重量・Qud・Fes・snapshotと保留を維持。
+- `cargo test -p sepika-app --test full_model --locked steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks -- --exact`：対象1成功、37filter、失敗・無視0。鋼4層の実応答snapshot・釣合いとRC終局検定の既存期待値を保持。対象外の長時間解析を全件反復したとは数えない。
+- `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings`：成功。
+- `cargo run -p xtask -- check-docs`：成功、summary124／links669／impl refs710。
+- `mdbook build`、`cargo fmt --all -- --check`、`git diff --check`：成功。
+- 変更した開発文書の相対リンク731先の実在、新規索引アンカーを確認。公開mainの祖先関係を`git merge-base --is-ancestor 177ce4c3 HEAD`で確認しexit0。main取込による内容差分は0。
+
 ## 未検証・範囲外
 
-必要な採用証拠の取得・保存と採用成功経路、実建物のDs/Qu・機構や鉛直支持性能、手動GUI、実験Validationは未検証。通常群判定・Ds表全数値、#489再開、新しい崩壊解析や余耐力法、法規ルート網羅は対象外。#871の部材/柱脚群条件とは理由を別管理し、最終公開入口・CSVでは両者を集約する必要がある。
+必要な採用証拠の取得・保存と採用成功経路、実建物のDs/Qu・機構や鉛直支持性能、手動GUI、実験Validationは未検証。通常群判定・Ds表全数値、#489再開、新しい崩壊解析や余耐力法、法規ルート網羅は対象外。#871の部材/柱脚群条件は別契約として保持し、両者の理由を集約する。最終fresh review・全target CI・公開mainとの統合結果は管理担当の最終ゲートで確認する。
