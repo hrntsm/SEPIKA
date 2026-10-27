@@ -50,6 +50,7 @@ fn invalid_direction_rejects_all_cases_before_manual_auto_or_weight_mutation() {
             ] {
                 let mut model = fixture::steel_frame();
                 model.load_cases.push(LoadCase {
+                    origin: Default::default(),
                     id: LoadCaseId(9),
                     name: "非選択ケース".into(),
                     nodal: vec![],
@@ -136,6 +137,7 @@ fn valid_nonunit_zero_and_opposing_manual_loads_survive_preparation() {
             ),
         ];
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(9),
             name: "保持対照".into(),
             nodal: vec![],

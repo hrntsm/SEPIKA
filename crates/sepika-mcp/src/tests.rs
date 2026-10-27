@@ -297,6 +297,7 @@ fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
     use sepika_core::section_shape::SectionShape;
     let mut model = rc_column_model();
     model.load_cases.push(sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(1),
         name: "P=0".into(),
         kind: sepika_core::model::LoadCaseKind::Live,
@@ -379,6 +380,7 @@ fn linear_static_job_rejects_tip_seismic_without_an_adoptable_ai_mode() {
     model.nodes[1].coord = [3000.0, 0.0, 0.0];
     model.sections[0] = rc_girder_section(SectionId(0), "G600");
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: sepika_core::model::EX_CASE_NAME.into(),
         kind: LoadCaseKind::Seismic,
@@ -876,6 +878,7 @@ pub(crate) fn rc_column_model() -> Model {
             spring: None,
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: sepika_core::model::LoadCaseKind::Dead,
             id: sepika_core::ids::LoadCaseId(0),
             name: "長期".into(),
@@ -893,6 +896,7 @@ pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
     use sepika_core::section_shape::SectionShape;
     let mut model = rc_column_model();
     model.load_cases.push(sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(1),
         name: "P=0".into(),
         kind: sepika_core::model::LoadCaseKind::Live,
@@ -980,6 +984,7 @@ fn cft_long_case2_job_reports_independent_mu_and_never_passes_axial_overload() {
 fn test_compute_ultimate_check_job_rejects_incomplete_rc_gravity_demand() {
     let mut model = rc_column_model();
     model.load_cases.push(sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(1),
         name: "P=0".into(),
         kind: sepika_core::model::LoadCaseKind::Live,
@@ -1916,6 +1921,7 @@ fn loaded_full_length_intent_survives_mcp_preparation_and_linear_analysis() {
     let length_mm = model.member_length(&model.elements[0]);
     let case_id = LoadCaseId(model.load_cases.len() as u32);
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: case_id,
         name: "手入力".into(),
         kind: LoadCaseKind::Other,
@@ -2907,6 +2913,7 @@ fn load_state_contract_model() -> Model {
     .into_iter()
     .enumerate()
     .map(|(i, (kind, kn))| LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(i as u32),
         name: format!("手入力{i}"),
         kind,
@@ -4481,6 +4488,7 @@ fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
         .expect("部材荷重モデルの参照整合");
     let case_id = LoadCaseId(model.load_cases.len() as u32);
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: case_id,
         name: "635対照".into(),
         kind: LoadCaseKind::Other,

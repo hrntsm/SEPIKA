@@ -188,6 +188,7 @@ pub(super) fn restore(
     };
     let results = rmp_serde::to_vec_named(&ContractFixture(&saved)).unwrap();
     let settings = rmp_serde::to_vec_named(&SavedAnalysisSettings {
+        references: None,
         cfg: app.core.analysis_cfg,
         wave_name: None,
         wave_sha256: None,
@@ -2665,6 +2666,7 @@ fn issue901_load_combinations_keep_tension_and_compression_outcomes_separate() {
     }
     let live_id = LoadCaseId(model.load_cases.iter().map(|c| c.id.0).max().unwrap() + 1);
     model.load_cases.push(sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: live_id,
         name: "積載0".into(),
         kind: sepika_core::model::LoadCaseKind::Live,

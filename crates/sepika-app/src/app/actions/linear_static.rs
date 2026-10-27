@@ -40,7 +40,7 @@ impl App {
                 let member_forces = res.member_forces.clone();
                 let panel_moments = res.panel_moments.clone();
                 let mut bundle = self.take_results_for_analysis();
-                bundle.record_input(input_key, input);
+                bundle.record_scoped_input(input_key, input, self.result_source_reference());
                 bundle.statics.retain(|(id, _)| *id != key);
                 bundle.statics.push((key, res));
                 bundle.member_forces = member_forces;
@@ -202,7 +202,7 @@ impl App {
                 let member_forces = res.member_forces.clone();
                 let panel_moments = res.panel_moments.clone();
                 let mut bundle = self.take_results_for_analysis();
-                bundle.record_input(input_key, input);
+                bundle.record_scoped_input(input_key, input, self.result_source_reference());
                 let pos = match bundle.combos.iter().position(|(n, _)| *n == name) {
                     Some(pos) => {
                         bundle.combos[pos].1 = res;
@@ -550,7 +550,7 @@ impl App {
             self.take_results_for_analysis()
         };
         for (key, input) in case_inputs.into_iter().chain(combo_inputs) {
-            bundle.record_input(key, input);
+            bundle.record_scoped_input(key, input, self.result_source_reference());
         }
         let mut last_case: Option<StaticCaseKey> = None;
         for (key, res) in items.cases {

@@ -203,6 +203,7 @@ fn ダンパー総重量は全体質量行列へ一度だけ計上し両方式�
                 assert_eq!(nodal[0].values[2], -9806.65);
                 assert_eq!(nodal[1].values[2], -9806.65);
                 model.load_cases = vec![LoadCase {
+                    origin: Default::default(),
                     id: LoadCaseId(0),
                     name: "DL".into(),
                     kind: LoadCaseKind::Dead,
@@ -314,6 +315,7 @@ fn ダンパー帰属階に床面節点が無ければ両方式とも生成と�
             )
             .unwrap();
             model.load_cases = vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "DL".into(),
                 kind: LoadCaseKind::Dead,
@@ -377,6 +379,7 @@ fn gravity_cases_onlyでも不正ダンパー入力を拒否し直接質量組�
         }
         let mut valid = model(ElementKind::Beam, true);
         valid.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "手入力".into(),
             kind: LoadCaseKind::Dead,
@@ -421,6 +424,7 @@ fn 生成したダンパー質量の欠落と不足と未反映は全公開solve
             )
             .unwrap();
             baseline.load_cases = vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "DL".into(),
                 kind: LoadCaseKind::Dead,
@@ -602,6 +606,7 @@ fn 質点系solverもダンパー編集後の古い動的質量を拒否する()
             )
             .unwrap();
             model.load_cases = vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "DL".into(),
                 kind: LoadCaseKind::Dead,
@@ -679,6 +684,7 @@ fn 全量物理重量と重心と慣性の生成データ単独不整合も全�
                 .unwrap()
             };
             baseline.load_cases = vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "DL".into(),
                 kind: LoadCaseKind::Dead,
@@ -831,6 +837,7 @@ fn 生成記録の部分欠落と重複と余分な要素は全公開solverで�
                 .unwrap()
             };
             baseline.load_cases = vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "DL".into(),
                 kind: LoadCaseKind::Dead,
@@ -994,6 +1001,7 @@ fn 同階合計を保つ編集でもダンパーの重量配分と配置の変�
             )
             .unwrap();
             baseline.load_cases = vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "DL".into(),
                 kind: LoadCaseKind::Dead,

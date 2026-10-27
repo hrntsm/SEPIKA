@@ -360,6 +360,7 @@ mod tests {
                 concrete_class: Default::default(),
             }],
             load_cases: vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "鉛直軸力".into(),
                 kind: LoadCaseKind::Dead,

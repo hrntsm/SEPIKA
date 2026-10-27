@@ -17,6 +17,7 @@ pub fn select_frame_gravity(model: &mut Model) {
     {
         let id = LoadCaseId(model.load_cases.iter().map(|case| case.id.0).max().unwrap() + 1);
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id,
             name: "無載荷の架構用P".into(),
             kind: LoadCaseKind::Live,

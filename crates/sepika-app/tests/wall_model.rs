@@ -932,6 +932,7 @@ fn test_wall_shear_check_appears_after_run_design_check() {
         .model
         .load_cases
         .push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             id: live_id,
             name: "無載荷の架構用P".into(),
             kind: sepika_core::model::LoadCaseKind::Live,

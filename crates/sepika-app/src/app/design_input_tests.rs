@@ -333,6 +333,7 @@ fn design602_combo_source_and_independent_selected_display() {
         .model
         .load_cases
         .push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             id: live,
             name: "独立P0".into(),
             kind: sepika_core::model::LoadCaseKind::Live,
@@ -402,6 +403,7 @@ fn design602_failed_analysis_and_rejected_job_do_not_make_design_current() {
     let (sender, receiver) = std::sync::mpsc::channel();
     drop(sender);
     app.core.scoped.job = Some(AnalysisJob {
+        reference_source: app.input_reference(),
         label: "異常終了fixture",
         started: SystemTime::now(),
         input: app.job_input(),

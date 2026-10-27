@@ -549,6 +549,7 @@ pub fn build_seismic_load_case_from_model(
     };
 
     let mut lc = sepika_core::model::LoadCase {
+        origin: Default::default(),
         kind: sepika_core::model::LoadCaseKind::Seismic,
         id: lc_id,
         name: format!("seismic_{:?}_{:?}", dir, mode),

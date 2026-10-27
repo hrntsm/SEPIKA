@@ -262,6 +262,7 @@ impl App {
 
     /// 地震力（Ai 分布）の算定諸元。準備計算が EX/EY 荷重ケースを組み立てる入力。
     fn seismic_condition_section(&mut self, ui: &mut egui::Ui) {
+        let mut cfg = self.core.analysis_cfg;
         egui::CollapsingHeader::new("地震力の条件 (Ai 分布)")
             .default_open(true)
             .id_salt("as_seismic_cfg")
@@ -273,13 +274,13 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("T算定:");
                     ui.selectable_value(
-                        &mut self.core.analysis_cfg.ai_mode,
+                        &mut cfg.ai_mode,
                         AiMode::SemiPrecise,
                         "固有値（地震力未対応）",
                     )
                     .on_hover_text("参考周期。告示1793号第2ただし書の適用証拠・採用Rt下限の検証は未対応のため、標準EX/EYは生成しません");
                     ui.selectable_value(
-                        &mut self.core.analysis_cfg.ai_mode,
+                        &mut cfg.ai_mode,
                         AiMode::Approx,
                         "略算",
                     )
@@ -288,7 +289,7 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Z:");
                     ui.add(
-                        egui::DragValue::new(&mut self.core.analysis_cfg.z)
+                        egui::DragValue::new(&mut cfg.z)
                             .speed(0.05)
                             .range(0.7..=1.0),
                     )
@@ -302,16 +303,17 @@ impl App {
                         ("第二種", SoilClass::II),
                         ("第三種", SoilClass::III),
                     ] {
-                        ui.selectable_value(&mut self.core.analysis_cfg.soil, soil, label);
+                        ui.selectable_value(&mut cfg.soil, soil, label);
                     }
                     ui.label("C0:");
                     ui.add(
-                        egui::DragValue::new(&mut self.core.analysis_cfg.c0)
+                        egui::DragValue::new(&mut cfg.c0)
                             .speed(0.05)
                             .range(0.05..=1.0),
                     );
                 });
             });
+        self.commit_analysis_settings(cfg);
     }
 
     fn misc_wall_conditions(&mut self, ui: &mut egui::Ui) {
@@ -411,6 +413,7 @@ impl App {
     /// 計算条件（質量方式・並列スレッド数）。いずれも準備計算の実行時に
     /// モデルへ反映される、または解析全体に共通で効く設定。
     fn calc_condition_section(&mut self, ui: &mut egui::Ui) {
+        let mut cfg = self.core.analysis_cfg;
         egui::CollapsingHeader::new("計算条件")
             .default_open(false)
             .id_salt("as_calc_cfg")
@@ -438,18 +441,18 @@ impl App {
                     use sepika_core::model::MassMethod;
                     ui.label("質量方式:");
                     egui::ComboBox::from_id_salt("mass_method")
-                        .selected_text(match self.core.analysis_cfg.mass_method {
+                        .selected_text(match cfg.mass_method {
                             MassMethod::CorrectedLumped => "補正質点（既定）",
                             MassMethod::LumpedOnly => "質点のみ",
                         })
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
-                                &mut self.core.analysis_cfg.mass_method,
+                                &mut cfg.mass_method,
                                 MassMethod::CorrectedLumped,
                                 "補正質点（既定）",
                             );
                             ui.selectable_value(
-                                &mut self.core.analysis_cfg.mass_method,
+                                &mut cfg.mass_method,
                                 MassMethod::LumpedOnly,
                                 "質点のみ",
                             );
@@ -462,15 +465,14 @@ impl App {
                 });
                 ui.horizontal_wrapped(|ui| {
                     ui.label("並列スレッド数:");
-                    ui.add(
-                        egui::DragValue::new(&mut self.core.analysis_cfg.threads).range(0..=256),
-                    );
+                    ui.add(egui::DragValue::new(&mut cfg.threads).range(0..=256));
                 });
                 ui.colored_label(
                     crate::theme::GRAY_600,
                     "0=自動(全コア) / 1=単一スレッド(結果の完全再現) / n=固定",
                 );
             });
+        self.commit_analysis_settings(cfg);
     }
 
     /// 階名・FL・ΔSL を明示して階を追加する（所属節点・重量は
@@ -1173,6 +1175,87 @@ mod wall_method_tests {
             egui::Shape::Vec(values) => values.iter().find_map(|s| text_center(s, text)),
             _ => None,
         }
+    }
+
+    #[test]
+    fn 地震条件のgui確定は旧世代を再使用せず同フレームの計算開始より前に反映する() {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        let context = egui::Context::default();
+        crate::app::install_japanese_fonts(&context);
+        let frame = |app: &mut App, events, start| {
+            context.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    app.seismic_condition_section(ui);
+                    if start {
+                        app.start_eigen_job(1);
+                    }
+                },
+            )
+        };
+        frame(&mut app, vec![], false);
+        let initial = frame(&mut app, vec![], false);
+        let reference = app
+            .target_reference(crate::app::references::ReferenceTarget::Node(NodeId(0)))
+            .unwrap();
+        let original = app.input_reference();
+        let position = |output: &egui::FullOutput, text| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| text_center(&shape.shape, text))
+                .expect("設定ラベルが描画される")
+        };
+        let click = |app: &mut App, pos, start| {
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                    start && !pressed,
+                );
+            }
+        };
+        click(
+            &mut app,
+            position(&initial, "固有値（地震力未対応）"),
+            false,
+        );
+        let changed = app.input_reference();
+        assert!(changed.generation > original.generation);
+        let edited = frame(&mut app, vec![], false);
+        click(&mut app, position(&edited, "略算"), false);
+        assert_eq!(app.core.analysis_cfg.ai_mode, AiMode::Approx);
+        assert!(app.input_reference().generation > changed.generation);
+        assert!(app.resolve_target_reference(&reference).is_err());
+        let reverted = frame(&mut app, vec![], false);
+        click(
+            &mut app,
+            position(&reverted, "固有値（地震力未対応）"),
+            true,
+        );
+        let started = app
+            .core
+            .scoped
+            .job
+            .as_ref()
+            .expect("同フレームに計算が開始する")
+            .reference_source
+            .clone();
+        assert_eq!(started, app.input_reference());
+        assert!(started.generation > changed.generation);
+        crate::app::tests::wait_for_job(&mut app);
     }
 
     #[test]

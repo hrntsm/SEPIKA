@@ -19,6 +19,7 @@ pub fn input_model(mut model: sepika_core::model::Model) -> sepika_core::model::
     model.materials[0].shear = Some(3339.437618147448);
     // AwQu=1440000、te=300、d=4500、10-D22、M/QD<=1のmean式からQu=4000000となる圧縮N。
     model.load_cases = vec![LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "Qc独立fixture".into(),
         kind: LoadCaseKind::Dead,

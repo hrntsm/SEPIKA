@@ -19,6 +19,7 @@ fn ownership_result(marker: f64) -> sepika_solver::dynamic::timehistory::Respons
 fn ownership_job(app: &mut App, result: Option<JobResult>) {
     let (tx, rx) = std::sync::mpsc::channel();
     app.core.scoped.job = Some(AnalysisJob {
+        reference_source: app.input_reference(),
         label: "所属fixture",
         started: SystemTime::now(),
         input: app.job_input(),

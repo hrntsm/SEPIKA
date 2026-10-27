@@ -152,6 +152,7 @@ pub fn nonlinear_time_history_analysis(
     } = NewmarkCoeffs::new(newmark, dt);
 
     let gravity_case = sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(0),
         name: "時刻歴の長期荷重".into(),
         kind: sepika_core::model::LoadCaseKind::Other,

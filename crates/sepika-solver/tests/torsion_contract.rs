@@ -86,6 +86,7 @@ fn cantilever(shape: SectionShape, kind: ElementKind) -> Model {
             },
         ],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "純ねじり".into(),
             kind: Default::default(),

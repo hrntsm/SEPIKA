@@ -544,6 +544,7 @@ mod state_tests {
         .into_iter()
         .enumerate()
         .map(|(i, kind)| LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(i as u32),
             name: "任意名称".into(),
             nodal: vec![],

@@ -132,6 +132,7 @@ fn scaled_rc_frame(length_scale: f64) -> Model {
             })
             .collect(),
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "先端荷重".into(),
             kind: Default::default(),

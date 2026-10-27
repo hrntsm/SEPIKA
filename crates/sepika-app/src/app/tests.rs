@@ -32,6 +32,7 @@ pub(crate) fn with_explicit_frame_gravity(
                     .map_or(0, |id| id + 1),
             );
             model.load_cases.push(LoadCase {
+                origin: Default::default(),
                 id,
                 name: if kind == LoadCaseKind::Dead {
                     "明示G0"
@@ -101,6 +102,7 @@ pub(crate) fn with_explicit_pushover_gravity(
                 .map_or(0, |id| id + 1),
         );
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id,
             name: DL_CASE_NAME.into(),
             kind: LoadCaseKind::Dead,
@@ -1222,6 +1224,7 @@ fn aligned_portal_frame() -> sepika_core::model::Model {
     }
 
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "長期".into(),
@@ -1645,6 +1648,7 @@ fn tip_load_sync_merges_into_ex_and_custom_case_without_losing_manual() {
     assert!(!ex_horizontal.is_empty());
     let custom = LoadCaseId(app.core.model.load_cases.len() as u32);
     app.core.model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: custom,
         name: "独自のケース".into(),
         kind: LoadCaseKind::Other,
@@ -3202,6 +3206,7 @@ fn test_select_displayed_result_switches_forces_and_term() {
         .model
         .load_cases
         .push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(2),
             name: "P=0".into(),
             kind: sepika_core::model::LoadCaseKind::Live,
@@ -3804,6 +3809,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         });
     }
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "長期".into(),
@@ -3820,6 +3826,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         )],
     });
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(1),
         name: "地震X".into(),
@@ -3973,6 +3980,7 @@ fn cmq_display_load_case_falls_back_to_first_case() {
     use sepika_core::model::{LoadCase, LoadCaseKind};
 
     let mk_case = |id: u32, name: &str| LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(id),
         name: name.to_string(),
         kind: LoadCaseKind::Dead,
@@ -5174,6 +5182,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         .model
         .load_cases
         .push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(app.core.model.load_cases.len() as u32),
             name: "任意風".into(),
             kind: sepika_core::model::LoadCaseKind::Wind,
@@ -6124,6 +6133,7 @@ fn kind_lc(
     kind: sepika_core::model::LoadCaseKind,
 ) -> sepika_core::model::LoadCase {
     sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(i),
         name: name.to_string(),
         nodal: Vec::new(),
@@ -7039,6 +7049,7 @@ fn tip_seismic_app() -> App {
     );
     model.sections[2].material = Some(model.materials[0].id);
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(2),
         name: EX_CASE_NAME.into(),
         kind: LoadCaseKind::Seismic,
@@ -7284,6 +7295,7 @@ fn test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey() {
 
     let mut app = tip_seismic_app();
     app.core.model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(3),
         name: EY_CASE_NAME.into(),
         kind: LoadCaseKind::Seismic,
@@ -7492,6 +7504,7 @@ fn test_auto_generate_combinations_uses_standard_case_names() {
         .model
         .load_cases
         .push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             id: next_id,
             name: LL_FRAME_CASE_NAME.into(),
             kind: sepika_core::model::LoadCaseKind::Live,
@@ -8055,6 +8068,7 @@ fn test_run_combination_errors_on_empty_seismic_case() {
     // 空の EX ケース（階未生成のため内容なし）と、それを参照する組合せ。
     let ex_id = LoadCaseId(model.load_cases.len() as u32);
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: ex_id,
         name: EX_CASE_NAME.into(),
         nodal: Vec::new(),
@@ -12360,6 +12374,7 @@ fn load_state_gui_contract_model() -> sepika_core::model::Model {
     .into_iter()
     .enumerate()
     .map(|(i, (kind, kn))| LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(i as u32),
         name: format!("手入力{i}"),
         kind,
@@ -14407,6 +14422,7 @@ fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
     }
     model.source_stories_initialized = true;
     model.load_cases.push(sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "DL".into(),
         kind: sepika_core::model::LoadCaseKind::Dead,
@@ -14734,6 +14750,7 @@ fn rc_cantilever_keep_torsion_matches_independent_displacements_and_support_bala
     let mut model = rc_cantilever_frame();
     model.girder_torsion = GirderTorsionMode::Keep;
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "独立釣合い確認".into(),
         kind: LoadCaseKind::Wind,

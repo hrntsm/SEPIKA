@@ -431,6 +431,7 @@ mod tests {
             *pwh_ratio = Some(0.006);
         }
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(20),
             name: "独立水平P".into(),
             kind: LoadCaseKind::Live,

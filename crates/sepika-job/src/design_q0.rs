@@ -479,6 +479,7 @@ mod tests {
         use sepika_core::model::LoadCase;
 
         let mk_lc = |i: u32, name: &str, kind: LoadCaseKind| LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(i),
             name: name.to_string(),
             nodal: Vec::new(),
@@ -569,6 +570,7 @@ mod load_contract_tests {
             .into_iter()
             .enumerate()
             .map(|(i, kind)| LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(i as u32),
                 name: "改名".into(),
                 kind,
@@ -679,6 +681,7 @@ mod q0_contract_tests {
         .into_iter()
         .enumerate()
         .map(|(i, (kind, w))| LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(i as u32),
             name: "任意名称".into(),
             kind,

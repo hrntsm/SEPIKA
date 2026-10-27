@@ -190,6 +190,8 @@ impl App {
             .map(|case| case.id)
             .collect();
         if !self.core.model.eq_ignoring_dofmap(&prepared) {
+            let input = self.input_reference();
+            let revision = self.core.scoped.undo.revision();
             if !self.core.scoped.undo.run(
                 &mut self.core.model,
                 Box::new(sepika_edit::ApplyPreparedModel { prepared }),
@@ -202,6 +204,7 @@ impl App {
                 ));
                 return;
             }
+            self.account_preparation_revision(&input, revision);
             self.core.scoped.staleness.mark_edited();
         }
         self.invalidate_missing_tip_seismic(&failed);
@@ -276,10 +279,13 @@ impl App {
             if self.core.model.load_cases[id.index()].tip_loads_match(&member) {
                 continue;
             }
+            let input = self.input_reference();
+            let revision = self.core.scoped.undo.revision();
             self.core.scoped.undo.run(
                 &mut self.core.model,
                 Box::new(sepika_edit::SyncTipLoadsToCase { id, member }),
             );
+            self.account_preparation_revision(&input, revision);
             self.core.scoped.staleness.mark_edited();
         }
     }
@@ -307,6 +313,8 @@ impl App {
             return;
         }
 
+        let input = self.input_reference();
+        let revision = self.core.scoped.undo.revision();
         self.core.scoped.undo.run(
             &mut self.core.model,
             Box::new(sepika_edit::SyncSlabLoadsToCase {
@@ -316,6 +324,7 @@ impl App {
                 member,
             }),
         );
+        self.account_preparation_revision(&input, revision);
         self.core.scoped.staleness.mark_edited();
     }
 

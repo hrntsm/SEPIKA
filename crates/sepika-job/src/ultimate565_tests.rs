@@ -21,6 +21,7 @@ fn fixture() -> (Model, Vec<Vec<(ElemId, MemberForces)>>) {
         .into_iter()
         .enumerate()
         .map(|(i, kind)| LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(i as u32),
             name: format!("任意{i}"),
             kind,
@@ -237,6 +238,7 @@ fn actual_vertical_column_frame_gravity_preserves_compression_and_tension_in_all
                 model.materials[0].fy = None;
                 model.materials.push(steel);
                 model.load_cases.push(LoadCase {
+                    origin: Default::default(),
                     id: LoadCaseId(1),
                     name: "明示P0".into(),
                     kind: LoadCaseKind::Live,

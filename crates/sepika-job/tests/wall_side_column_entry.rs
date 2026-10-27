@@ -151,6 +151,7 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                         LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind, NodalLoad,
                     };
                     input.load_cases.push(LoadCase {
+                        origin: Default::default(),
                         id: LoadCaseId(0),
                         name: "線形時刻歴では載荷しない".into(),
                         kind: LoadCaseKind::Dead,

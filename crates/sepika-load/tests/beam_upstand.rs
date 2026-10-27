@@ -176,6 +176,7 @@ fn assert_dynamic_increment(
         nodal.extend(sn);
         member.extend(sm);
         m.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             kind: LoadCaseKind::Dead,
             name: "DL".into(),

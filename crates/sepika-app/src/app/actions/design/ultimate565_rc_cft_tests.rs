@@ -75,6 +75,7 @@ fn column(cft: bool) -> App {
     .into_iter()
     .enumerate()
     .map(|(i, (kind, x, z))| LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(i as u32),
         name: format!("任意名{i}"),
         kind,

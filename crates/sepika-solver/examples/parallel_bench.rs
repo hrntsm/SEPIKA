@@ -39,6 +39,7 @@ fn make_frame(nx: usize, ny: usize, nz: usize, n_cases: usize) -> Model {
             let mut values = [0.0; 6];
             values[i % 3] = 10_000.0 * ((i % 5) as f64 + 1.0);
             LoadCase {
+                origin: Default::default(),
                 kind: Default::default(),
                 id: LoadCaseId(i as u32 + 1),
                 name: format!("case{}", i + 1),

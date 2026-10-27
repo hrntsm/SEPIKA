@@ -65,6 +65,7 @@ fn model(kind: ElementKind, cantilever: bool) -> Model {
             concrete_class: Default::default(),
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "元長期等分布".into(),
             kind: LoadCaseKind::Dead,

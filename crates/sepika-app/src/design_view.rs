@@ -4,6 +4,7 @@ use sepika_core::units::to_display::{
 };
 
 fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
+    let mut cfg = app.core.analysis_cfg;
     use crate::table_util::Col;
     ui.add_space(12.0);
     ui.strong("層指標（二次設計: 層間変形角・剛性率・偏心率）");
@@ -13,9 +14,10 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
             "層指標と必要保有水平耐力の判定を評価する方向。\
              剛心の精算には対応する向きの EX／EY の解析結果を用いる",
         );
-        ui.selectable_value(&mut app.core.analysis_cfg.seismic_dir, SeismicDir::X, "X");
-        ui.selectable_value(&mut app.core.analysis_cfg.seismic_dir, SeismicDir::Y, "Y");
+        ui.selectable_value(&mut cfg.seismic_dir, SeismicDir::X, "X");
+        ui.selectable_value(&mut cfg.seismic_dir, SeismicDir::Y, "Y");
     });
+    app.commit_analysis_settings(cfg);
     for reason in app.core.model.story_level_diagnostics() {
         ui.colored_label(
             crate::theme::ERROR_TEXT,
@@ -31,7 +33,7 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
         let metrics = crate::summary::seismic_story_metrics(app);
         ui.label(format!(
             "対象ケース: 地震静的 {:?}（設定値との参考比較。法令適合の判定は行いません）",
-            app.core.analysis_cfg.seismic_dir
+            cfg.seismic_dir
         ));
         crate::table_util::standard_table(
             ui,
@@ -170,12 +172,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         app.run_design_check();
     }
     ui.horizontal(|ui| {
+        let mut cfg = app.core.analysis_cfg;
         let mut changed = false;
         changed |= ui
-            .checkbox(
-                &mut app.core.analysis_cfg.rc_damage_control,
-                "RC短期せん断: 損傷制御",
-            )
+            .checkbox(&mut cfg.rc_damage_control, "RC短期せん断: 損傷制御")
             .on_hover_text("ON: 損傷制御のための検討（2/3・α・fs）、OFF: 安全確保のための検討")
             .changed();
         ui.label("QD:");
@@ -185,14 +185,14 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             (sepika_design_jp::QdMethod::Qd2, "QD2"),
         ] {
             if ui
-                .selectable_label(app.core.analysis_cfg.qd_method == m, label)
+                .selectable_label(cfg.qd_method == m, label)
                 .on_hover_text(
                     "地震時短期の設計用せん断力の決定方法（QD1=終局曲げベース、\
                      QD2=QL+n・QE。長期組合せ(G+P)を先に解析している場合のみ有効）",
                 )
                 .clicked()
             {
-                app.core.analysis_cfg.qd_method = m;
+                cfg.qd_method = m;
                 changed = true;
             }
         }
@@ -202,17 +202,18 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             (sepika_design_jp::BondMethod::Rc1991, "1991"),
         ] {
             if ui
-                .selectable_label(app.core.analysis_cfg.bond_method == m, label)
+                .selectable_label(cfg.bond_method == m, label)
                 .on_hover_text(
                     "RC 梁付着検定の方式。1999=必要付着長さ、1991=τa=Q/(ψ·j)。既定は 1999",
                 )
                 .clicked()
             {
-                app.core.analysis_cfg.bond_method = m;
+                cfg.bond_method = m;
                 changed = true;
             }
         }
         if changed {
+            app.commit_analysis_settings(cfg);
             app.run_design_check();
         }
     });

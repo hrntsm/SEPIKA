@@ -12,6 +12,7 @@ impl PhysicalPushoverLoads {
         Self {
             gravity_cases: vec![],
             reference: LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: String::new(),
                 nodal: vec![],
@@ -45,6 +46,7 @@ impl PhysicalPushoverLoads {
 
     pub(super) fn gravity_case(&self) -> LoadCase {
         let mut combined = LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "増分解析の重力荷重".into(),
             nodal: Vec::new(),

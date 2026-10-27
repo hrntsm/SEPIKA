@@ -33,6 +33,7 @@ sepika-math = { version = "0.0.1", path = "../sepika-math" }
 bincode = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
+uuid = { version = "1.23.3", features = ["v4"] }
 rmp-serde = { workspace = true }
 
 [dev-dependencies]
