@@ -283,18 +283,19 @@ fn preparation_and_pushover_report_the_same_missing_wall_direction() {
         .iter()
         .find(|e| e.kind == ElementKind::Wall)
         .unwrap();
-    assert!(WallElement::directional_shear_capacity_at_reference(
+    let capacity_reason = WallElement::directional_shear_capacity_at_reference(
         wall,
         &expanded,
         StrengthBasis::MaterialStrength,
         0.0,
-        [1.0; 2]
+        [1.0; 2],
     )
-    .is_ok());
+    .unwrap_err();
+    assert!(capacity_reason.contains("縦筋比"));
     let reason =
         WallElement::wall_shear_capacity_issue(wall, &expanded, StrengthBasis::MaterialStrength)
             .unwrap();
-    assert!(reason.contains("縦筋比"));
+    assert_eq!(capacity_reason, reason);
     assert!(app
         .core
         .log
