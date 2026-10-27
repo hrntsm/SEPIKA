@@ -204,6 +204,19 @@ pub(super) fn check_s_panel(
                 col.mat
             };
             let fy = sepika_core::material_grade::resolve_steel_f(Some(material), Some(thickness))?;
+            let area_mm2 = col.sec.area;
+            if !area_mm2.is_finite() || area_mm2 <= 0.0 {
+                return Err("採用柱の断面積Aは有限の正値 [mm²] が必要です".into());
+            }
+            let axial_capacity_n = fy * area_mm2;
+            if !axial_capacity_n.is_finite() || axial_capacity_n <= 0.0 {
+                return Err("採用柱の基準軸耐力F×Aは有限の正値 [N] が必要です".into());
+            }
+            let compression_n = (-force[0]).max(0.0);
+            let axial_ratio = compression_n / axial_capacity_n;
+            if !axial_ratio.is_finite() || (compression_n > 0.0 && axial_ratio == 0.0) {
+                return Err("採用柱の圧縮軸力比N/(F×A)を有限の正値で表現できません".into());
+            }
             let demand = if let Some(moment) = panel_moment {
                 let analysis_db = planes
                     .iter()
@@ -253,7 +266,7 @@ pub(super) fn check_s_panel(
                 geometry,
                 db,
                 fy,
-                axial_ratio: (-force[0]).max(0.0) / (fy * col.sec.area.max(1e-9)),
+                axial_ratio,
                 beam_moment_left: 0.0,
                 beam_moment_right: 0.0,
                 col_shear_upper: 0.0,
