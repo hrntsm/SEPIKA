@@ -1,0 +1,7 @@
+---
+source: crates/sepika-app/tests/wall_model.rs
+expression: out
+---
+analysis.qu = 2.068e6
+analysis.fes = 1.500e0
+ds.status = 保留

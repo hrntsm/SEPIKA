@@ -6,5 +6,4 @@
 mod check;
 mod holding;
 mod holding_adoption;
-mod period;
-mod ultimate;
+mod holding_conditions;

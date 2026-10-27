@@ -45,7 +45,7 @@
 //! 主筋 3-D22・せん断補強筋 D10@100）を使う。** 以前は「鋼断面（H 形）の断面性能を
 //! そのまま流用し材料だけ RC へ差し替える」トリックを使っていたが、これは
 //! 実在しない断面（形状は鋼、材料は RC）で、増分解析（プッシュオーバー）・
-//! 保有水平耐力の Ds 群回帰テスト（`snapshot_wall_ds_group_and_holding_capacity`）を
+//! 保有水平耐力の Ds 群回帰テスト（`snapshot_wall_response_and_ds_hold`）を
 //! 追加しようとした際に破綻した（ファイバー断面が `shape` だけで鋼材と判定し
 //! 材料の `fy` を要求してエラーになる、側柱の主筋がないと壁の等価引張鉄筋比 pte が
 //! 算定できない）。本物の RC 矩形に差し替えたことで、線形の代表スカラ・
@@ -1222,19 +1222,9 @@ fn test_region_gen_wall_finds_all_four_faces() {
     }
 }
 
-/// 壁を含む Ds 群・保有水平耐力・増分解析の代表スカラをピン止めする
-/// （dig 2026-08-26 Q2=A）。
-///
-/// ElemId→領域参照への張り替え（`holding.rs`/`pushover.rs`。dig Q2 の本題）に
-/// 着手する前の安全網。壁の耐力壁種別判定（告示「耐力壁の種別」表。τu/Fc で
-/// WA〜WD、実装上は `MemberRank::FA`〜`FD` に統合）・保有水平耐力・増分解析の
-/// いずれも、これまで壁を含むモデルで一度も回帰されていなかった
-/// （`full_model.rs` の実フィクスチャは壁要素 0 件のため。モジュール doc 参照）。
-/// 参照張り替えで壁の応答（`resp_by_elem`）や壁長・壁厚の参照が壊れると、
-/// 壁は判定不能としてスキップされ層は選択ランクへ静かにフォールバックする
-/// （`holding.rs` 参照）。これはエラーにならないため、値の変化でしか検出できない。
+/// 壁の実応答・重量・Qud・Fesを維持し、Ds条件不足では確定判定を保留する。
 #[test]
-fn snapshot_wall_ds_group_and_holding_capacity() {
+fn snapshot_wall_response_and_ds_hold() {
     let mut app = unperforated_wall_bay_app();
     app.run_preparation();
     assert!(
@@ -1264,14 +1254,15 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         app.core.scoped.last_error
     );
 
-    let (holding, ranks) = app
-        .compute_holding_capacity()
-        .expect("保有水平耐力が算定できるはず");
-
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(
+        reason.contains("Ds判定保留") && reason.contains("RC壁版 ID 0"),
+        "{reason}"
+    );
+    assert!(app.core.scoped.holding_capacity_source.is_none());
     let mut out = String::new();
     let mut line = |k: &str, v: String| out.push_str(&format!("{k} = {v}\n"));
-    assert_eq!(holding.stories.len(), 1, "本フィクスチャは 1 層");
-    let s = &holding.stories[0];
     let fillet_area_m2 = (4.0 - std::f64::consts::PI) * 0.013_f64.powi(2);
     let wall_upper_weight_kn = 3.7 * 1.3 * 0.15 * 23.53596;
     let columns_upper_weight_kn = 2.0 * 0.3 * 0.3 * 3.0 * 23.53596 / 2.0
@@ -1296,12 +1287,6 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
             .abs()
             < 1e-6
     );
-    assert!(
-        (s.qud - expected_weight_n).abs() < 1e-6,
-        "単層Ai=1、Z=Rt=C0=1: {} != {expected_weight_n}",
-        s.qud
-    );
-    let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
     let po = app.displayed_pushover().unwrap();
     assert_eq!(
         po.rc_wall_shear_method,
@@ -1336,7 +1321,14 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     for capacity_n in po.wall_capacities[0].1 {
         assert!((capacity_n - expected_wall_capacity_n).abs() < 1e-6);
     }
-    let capacity_force = &source.capacity_forces[0];
+    let capacity_forces = po
+        .evaluate_stories(
+            po.capacity_evaluation.as_ref().unwrap(),
+            EvaluationPurpose::HoldingCapacity,
+        )
+        .unwrap();
+    assert_eq!(capacity_forces.len(), 1);
+    let capacity_force = &capacity_forces[0];
     let point = po.capacity_evaluation.as_ref().unwrap();
     let step = &po.steps[point.step as usize];
     assert!((capacity_force.reference_n - 0.2 * expected_weight_n).abs() < 1e-6);
@@ -1350,59 +1342,55 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     assert!(capacity_force.wall_n <= expected_wall_capacity_n + 1e-6);
     assert_eq!(capacity_force.brace_n, 0.0);
     assert!(capacity_force.frame_n > 0.0);
-    assert!((s.qu - capacity_force.wall_n - capacity_force.frame_n).abs() < 1e-6);
-    assert!((s.qu - capacity_force.external_n).abs() <= capacity_force.tolerance_n);
-    assert!(source.ds_forces[0].beta_u > 0.7);
+    assert!((capacity_force.qu_n - capacity_force.wall_n - capacity_force.frame_n).abs() < 1e-6);
+    assert!((capacity_force.qu_n - capacity_force.external_n).abs() <= capacity_force.tolerance_n);
+    let ds_point = po.ds_evaluation.as_ref().unwrap();
+    let ds_forces = po
+        .evaluate_stories(ds_point, EvaluationPurpose::Ds)
+        .unwrap();
+    assert!(ds_forces[0].beta_u > 0.7);
+    let expanded = sepika_core::wall_expand::expand_wall_elements(&app.core.model).0;
     assert!(matches!(
-        source.ds_mechanism,
+        po.mechanism_at(ds_point, &expanded).unwrap(),
         sepika_solver::nonlinear::pushover::MechanismType::Partial
     ));
-    assert_eq!(s.ds, 0.4);
-    assert_eq!(s.fes, 1.5);
-    assert!((s.qun - 0.4 * 1.5 * s.qud).abs() < 1e-8);
-
-    assert!(
-        s.qu > 0.0 && s.qu.is_finite(),
-        "保有水平耐力 Qu が異常: {}",
-        s.qu
+    let metrics = sepika_app::summary::compute_story_metrics_with(
+        &app.core.model,
+        SeismicDir::X,
+        &sepika_app::summary::metrics_ctx_from_results(
+            &app.core.model,
+            app.core.scoped.results.as_ref(),
+        ),
     );
-    // RC 造の Ds 表（`ds_rc`）が取りうる値の範囲は 0.30〜0.55（`App::design_frame`
-    // を `FrameType::RcWall` にしないと鋼構造の表 `ds_steel`（0.25〜0.55）が使われ
-    // てしまい、この範囲チェックを鋼構造の下限 0.25 まで緩めない限り気づけない
-    // 誤りになる。`wall_bay_app` 参照）。
-    assert!(
-        (0.3..=0.55).contains(&s.ds),
-        "構造特性係数 Ds が RC 造の規定範囲外: {}",
-        s.ds
-    );
-    assert!(
-        s.qun > 0.0 && s.qun.is_finite(),
-        "必要保有水平耐力 Qun が異常: {}",
-        s.qun
-    );
-    line("holding.qu", sig4(s.qu));
-    line("holding.ds", sig4(s.ds));
-    line("holding.qun", sig4(s.qun));
-    assert_eq!(ranks.len(), 1, "本フィクスチャは 1 層");
-    line("holding.rank", format!("{:?}", ranks[0]));
+    assert_eq!(metrics[0].fes, Ok(1.5));
+    let analysis = sepika_solver::statics::analysis::Analysis::prepare(&app.core.model).unwrap();
+    let t = analysis
+        .seismic_period(app.core.analysis_cfg.ai_mode)
+        .unwrap();
+    let qud = sepika_solver::statics::analysis::seismic_distribution_for_model(
+        &app.core.model,
+        sepika_solver::statics::analysis::SeismicCfg {
+            dir: SeismicDir::X,
+            mode: app.core.analysis_cfg.ai_mode,
+            z: app.core.analysis_cfg.z,
+            soil: app.core.analysis_cfg.soil,
+            c0: 1.0,
+        },
+        t,
+    )
+    .unwrap();
+    assert!((qud.qi[0] - expected_weight_n).abs() < 1e-6);
+    assert!(capacity_force.qu_n > 0.0 && capacity_force.qu_n.is_finite());
+    line("analysis.qu", sig4(capacity_force.qu_n));
+    line("analysis.fes", sig4(*metrics[0].fes.as_ref().unwrap()));
+    line("ds.status", "保留".into());
 
     insta::assert_snapshot!(out);
 }
 
-/// `App::compute_holding_capacity` の部材ランク自動判定
-/// （`design_rank_auto == true`）が壁展開モデルを見ていることの回帰テスト
-/// （申し送り §5.15）。この経路は `self.model.elements` を直接走査するため、
-/// 壁展開前のモデルでは耐震壁が一度も `ElementKind::Wall` として分類されず
-/// `wall_members` へ積まれない。`design_frame == FrameType::RcWall`
-/// （耐力壁付き）を宣言しているのに層内の耐力壁が 1 枚も検出できないと、
-/// `ds_beta_u_unavailable` が true になり βu を使わない簡易 Ds 表へ
-/// フォールバックする（`holding.rs` 参照）。壁展開モデルを見ていれば、
-/// この 1 バイ・1 枚壁のフィクスチャでは耐震壁が検出され false になるはず。
-///
-/// `snapshot_wall_ds_group_and_holding_capacity`（`design_rank_auto` 既定 false）
-/// はこの分岐を一度も通らないため検知できない（§5.15 未検証一覧参照）。
+/// 自動ランクは壁応答を認識しても、破壊形式・接合部等の条件不足を保留する。
 #[test]
-fn test_holding_capacity_auto_rank_detects_wall() {
+fn test_holding_capacity_auto_rank_detects_wall_before_ds_hold() {
     let mut app = unperforated_wall_bay_app();
     app.run_preparation();
     assert!(
@@ -1433,9 +1421,9 @@ fn test_holding_capacity_auto_rank_detects_wall() {
     );
 
     app.core.design_rank_auto = true;
-    let (_holding, _ranks) = app
-        .compute_holding_capacity()
-        .expect("保有水平耐力が算定できるはず");
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("Ds判定保留"), "{reason}");
+    assert!(reason.contains("RC壁版 ID 0"), "{reason}");
 
     assert!(
         !app.core.scoped.ds_beta_u_unavailable,
@@ -1486,7 +1474,11 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     ] {
         assert!(csv.contains(label), "{label}");
     }
-    assert!(app.compute_holding_capacity().is_ok());
+    assert!(app
+        .compute_holding_capacity()
+        .err()
+        .unwrap()
+        .contains("Ds判定保留"));
     let original = app.core.scoped.results.clone();
     for reason in [
         None,
@@ -1596,7 +1588,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
 }
 
 #[test]
-fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
+fn diagonal_wall_response_is_preserved_but_ds_conditions_stay_unconfirmed() {
     let mut app = unperforated_wall_bay_app();
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.core.analysis_cfg.push_use_max_disp = true;
@@ -1663,50 +1655,9 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     );
     app.core.design_rank_auto = true;
     app.core.wall_structure = true;
-    use sepika_design_jp::secondary::holding_capacity::MemberRank;
-    for (qw, expected) in [
-        (qu[0], MemberRank::FD),
-        (-qu[1], MemberRank::FD),
-        (tau_case_qw, MemberRank::FB),
-    ] {
-        let bundle = app.core.scoped.results.as_mut().unwrap();
-        let po = bundle.pushover_x.as_mut().unwrap();
-        let wall = po
-            .wall_history
-            .as_mut()
-            .unwrap()
-            .last_mut()
-            .unwrap()
-            .response
-            .as_mut()
-            .unwrap();
-        wall.qw_n = qw;
-        wall.top.force_n = wall.inplane_axis.map(|component| qw * component);
-        wall.qdir_n = wall.top.force_n[0];
-        wall.bottom.force_n = wall.top.force_n.map(|force| -force);
-        wall.top.moment_nmm = [0.0; 3];
-        wall.bottom.moment_nmm = [
-            wall.height_mm * wall.top.force_n[1],
-            -wall.height_mm * wall.top.force_n[0],
-            0.0,
-        ];
-        wall.equilibrium_residual.force_n = [0.0; 3];
-        wall.equilibrium_residual.moment_nmm = [0.0; 3];
-        assert!((wall.qdir_n.abs() - c * qw.abs()).abs() < 1e-6);
-        let (holding, _) = app
-            .compute_holding_capacity()
-            .expect("斜め壁の専用応答で種別を判定");
-        assert_eq!(
-            holding
-                .member_ranks
-                .iter()
-                .find(|(id, _)| *id == elem_id)
-                .unwrap()
-                .1,
-            expected,
-            "Qdirへ投影して局所頭打ち/τuを低下させない"
-        );
-    }
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("Ds判定保留"), "{reason}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
 }
 
 fn select_holding_points(app: &mut sepika_app::app::App) {

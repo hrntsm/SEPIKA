@@ -1,0 +1,12 @@
+---
+source: crates/sepika-app/tests/full_model.rs
+expression: response_scalars
+---
+story[0].Qu=1.073e5
+story[0].Fes=1.000e0
+story[1].Qu=9.235e4
+story[1].Fes=1.000e0
+story[2].Qu=7.130e4
+story[2].Fes=1.000e0
+story[3].Qu=4.314e4
+story[3].Fes=1.000e0
