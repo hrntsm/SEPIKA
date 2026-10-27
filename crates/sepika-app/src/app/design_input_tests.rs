@@ -308,11 +308,13 @@ fn design602_actual_table_hides_old_ratios_after_th() {
         })
         .collect::<Vec<_>>()
     };
-    assert!(labels(&mut app).iter().any(|text| text == "0.8000"));
+    assert!(labels(&mut app).iter().any(|text| text == "0.8000 良好"));
     edit_fy(&mut app);
     app.run_time_history_sample();
     let text = labels(&mut app);
-    assert!(!text.iter().any(|text| text == "0.8000"));
+    assert!(!text
+        .iter()
+        .any(|text| text.split_whitespace().any(|part| part == "0.8000")));
     assert!(text.iter().any(|text| text.contains("要再計算")));
 }
 
