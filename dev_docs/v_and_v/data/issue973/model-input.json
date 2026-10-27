@@ -1,0 +1,60 @@
+{
+  "base_commit": "1b057e81",
+  "fixture": "crates/sepika-app/tests/fixtures/model.stb",
+  "fixture_sha256": "1909407d49574fe563ca21aac9c6c7ab04d267dccb9e9e73119582732be79215",
+  "target": {
+    "source_type": "StbGirder",
+    "source_id": "43",
+    "name": "G43",
+    "baseline_section": "10"
+  },
+  "sections": [
+    {
+      "source_id": "10",
+      "name": "GY1",
+      "floor": "2",
+      "shape": "H-500x250x9x16",
+      "steel": "SN400B"
+    },
+    {
+      "source_id": "11",
+      "name": "GY2",
+      "floor": "2",
+      "shape": "H-700x250x12x19",
+      "steel": "SN400B"
+    },
+    {
+      "source_id": "23",
+      "name": "b6",
+      "floor": null,
+      "shape": "H-450x200x9x14",
+      "steel": "SS400"
+    }
+  ],
+  "endpoint_nodes": [
+    {
+      "source_id": "13",
+      "xyz_mm": [
+        1000.0,
+        1000.0,
+        4700.0
+      ]
+    },
+    {
+      "source_id": "14",
+      "xyz_mm": [
+        5000.0,
+        1000.0,
+        4700.0
+      ]
+    }
+  ],
+  "candidate_a_section": "11",
+  "candidate_b_section": "23",
+  "displacement_node": "14",
+  "displacement_global_direction": "Z",
+  "unit": "mm",
+  "design_load_target": "saved combination: 保存長期架構G+P",
+  "term": "long",
+  "product_calculation": "not executed in issue973"
+}

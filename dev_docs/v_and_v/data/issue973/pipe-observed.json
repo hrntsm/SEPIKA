@@ -1,0 +1,16 @@
+{
+  "utc": "2026-10-27T14:59:25.8004179Z",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "powershell": "7.6.9",
+  "dotnet": "10.0.14",
+  "transport": "Windows named pipe / byte / CurrentUserOnly",
+  "roundtrip": "pass",
+  "response_id": "r1",
+  "study_id": "s1",
+  "roundtrip_ms": 40.9102,
+  "server_disconnect_eof": "pass",
+  "absent_server_timeout": "pass",
+  "product_gui": "not tested",
+  "mcp_client": "not tested",
+  "cross_user_denial": "not tested"
+}
