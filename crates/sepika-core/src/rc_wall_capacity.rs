@@ -21,8 +21,10 @@ pub struct RcWallShearInput {
     pub tension_column_at: f64,
     /// 水平せん断補強筋（横筋）の材料強度 σwh [N/mm²]。
     pub sigma_wh: f64,
-    /// 横筋比 Pwh（小数。pwh = Pwh·t/te、1.2% 上限）。
+    /// 実壁厚基準の横筋比 Pwh（小数）。
     pub pwh_ratio: f64,
+    /// 壁板の実壁厚基準の鉛直せん断補強筋比（小数）。
+    pub pwv_ratio: f64,
     /// 全断面積に対する平均軸方向応力度 σ0 = N/A [N/mm²]（圧縮正）。
     pub sigma_0: f64,
     /// せん断スパン比 M/(Q·D)（適用範囲 1.0〜3.0 にクランプ）。
@@ -74,6 +76,7 @@ pub fn wall_opening_reduction_stiffness(r0: f64) -> f64 {
 }
 
 /// 指定方式によるRC壁の終局せん断耐力 Qu `[N]`。
+/// 横筋比は等価壁厚換算後、1.2%と実壁厚基準の壁板縦筋比の2倍以下に制限する。
 /// Fc・te・D・主筋面積・有効せいが非正の場合は0。適用条件は各consumerで検査する。
 pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
     let d = inp.d_wall - inp.dc_compression / 2.0;
@@ -89,7 +92,9 @@ pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
     let j = 7.0 / 8.0 * d;
     let shear_span_ratio = inp.shear_span_ratio.clamp(1.0, 3.0);
     let pwh = if inp.te > 0.0 {
-        (inp.pwh_ratio.max(0.0) * inp.t / inp.te).min(0.012)
+        (inp.pwh_ratio.max(0.0) * inp.t / inp.te)
+            .min(0.012)
+            .min(2.0 * inp.pwv_ratio.max(0.0))
     } else {
         0.0
     };
@@ -120,9 +125,92 @@ mod tests {
             tension_column_at: 1000.0,
             sigma_wh: 295.0,
             pwh_ratio: 0.0025,
+            pwv_ratio: 0.006,
             sigma_0: 0.0,
             shear_span_ratio: 1.0,
             opening: None,
+        }
+    }
+
+    #[test]
+    fn vertical_limit_and_one_point_two_percent_intersection_match_independent_values() {
+        let mut input = sample();
+        input.t = 300.0;
+        input.te = 300.0;
+        input.d_wall = 4300.0;
+        input.dc_compression = 300.0;
+        input.tension_column_at = 10.0 * std::f64::consts::PI * 121.0;
+        input.shear_span_ratio = 1.5;
+        for (t, horizontal, vertical, min_n, mean_n) in [
+            (
+                300.0,
+                0.003999,
+                0.002,
+                2_145_153.437283912,
+                2_866_424.779967747,
+            ),
+            (
+                300.0,
+                0.004,
+                0.002,
+                2_145_279.177584084,
+                2_866_550.520267919,
+            ),
+            (
+                300.0,
+                0.004001,
+                0.002,
+                2_145_279.177584084,
+                2_866_550.520267919,
+            ),
+            (
+                300.0,
+                0.012,
+                0.002,
+                2_145_279.177584084,
+                2_866_550.520267919,
+            ),
+            (
+                300.0,
+                0.02,
+                0.005999,
+                2_881_474.267475025,
+                3_602_745.610_158_86,
+            ),
+            (300.0, 0.02, 0.006, 2_881_619.456842047, 3_602_890.799525881),
+            (
+                300.0,
+                0.02,
+                0.006001,
+                2_881_619.456842047,
+                3_602_890.799525881,
+            ),
+            (
+                200.0,
+                0.012,
+                0.002,
+                2_145_279.177584084,
+                2_866_550.520267919,
+            ),
+            (
+                200.0,
+                0.005,
+                0.002,
+                2_057_639.571590579,
+                2_778_910.914274414,
+            ),
+            (200.0, 0.02, 0.006, 2_881_619.456842047, 3_602_890.799525881),
+        ] {
+            input.t = t;
+            input.pwh_ratio = horizontal;
+            input.pwv_ratio = vertical;
+            for (method, expected) in [
+                (RcWallShearMethod::ArakawaMin, min_n),
+                (RcWallShearMethod::ArakawaMean, mean_n),
+            ] {
+                input.method = method;
+                assert!((wall_shear_ultimate(&input) - expected).abs() < 1e-6);
+            }
         }
     }
 
@@ -138,6 +226,7 @@ mod tests {
             tension_column_at: 3097.0,
             sigma_wh: 295.0,
             pwh_ratio: 0.004,
+            pwv_ratio: 0.006,
             sigma_0: 1.0,
             shear_span_ratio: 6450.0 / 4600.0,
             opening: None,
@@ -264,6 +353,7 @@ mod tests {
             tension_column_at: 3097.0,
             sigma_wh: 295.0,
             pwh_ratio: 0.004,
+            pwv_ratio: 0.006,
             sigma_0: 1.0,
             shear_span_ratio: 1.5,
             opening: None,

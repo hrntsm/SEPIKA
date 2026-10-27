@@ -254,6 +254,93 @@ mod tests {
             .unwrap()
     }
     #[test]
+    fn public_pushover_preparation_saves_capped_capacity_and_rejects_unknown_vertical_ratio() {
+        use crate::common::constraint::Reducer;
+        use crate::nonlinear::pushover::{
+            pushover_analysis_recording, DuctilityMethod, PushoverControl, PushoverTarget,
+        };
+        use sepika_core::dof::DofMap;
+        use sepika_core::section_shape::SectionShape;
+        let mut model = fixture::expanded_model();
+        if let Some(SectionShape::RcColumnRect { b, d, .. }) = &mut model.sections[0].shape {
+            *b = 300.0;
+            *d = 300.0;
+        }
+        if let Some(SectionShape::RcWall {
+            thickness,
+            pwh_ratio,
+            ..
+        }) = &mut model.sections[2].shape
+        {
+            *thickness = 300.0;
+            *pwh_ratio = Some(0.012);
+        }
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        for method in [
+            sepika_core::model::RcWallShearMethod::ArakawaMin,
+            sepika_core::model::RcWallShearMethod::ArakawaMean,
+        ] {
+            model.stress_cfg.rc_wall_shear_method = method;
+            let result = pushover_analysis_recording(
+                &model,
+                &map,
+                &reducer,
+                SeismicDir::X,
+                1,
+                PushoverTarget::default(),
+                PushoverControl::default(),
+                false,
+                false,
+                DuctilityMethod::default(),
+            )
+            .unwrap();
+            let expected = resolve(&model, false, StrengthBasis::MaterialStrength).unwrap();
+            assert_eq!(result.wall_capacities, expected);
+            let expected_n = match method {
+                sepika_core::model::RcWallShearMethod::ArakawaMin => 2_653_948.664319789,
+                sepika_core::model::RcWallShearMethod::ArakawaMean => 3_243_667.162482196,
+            };
+            assert!(result.wall_capacities[0]
+                .1
+                .iter()
+                .all(|q| (*q - expected_n).abs() < 1e-6));
+            let bytes = serde_json::to_vec(&result).unwrap();
+            let saved: crate::nonlinear::pushover::PushoverResult =
+                serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(saved.wall_capacities, expected);
+            assert_eq!(saved.rc_wall_shear_method, method);
+            if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[2].shape {
+                *pwh_ratio = Some(0.004);
+            }
+            assert_eq!(
+                resolve(&model, false, StrengthBasis::MaterialStrength).unwrap(),
+                expected
+            );
+            if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[2].shape {
+                *pwh_ratio = Some(0.012);
+            }
+        }
+        if let Some(SectionShape::RcWall { pwv_ratio, .. }) = &mut model.sections[2].shape {
+            *pwv_ratio = None;
+        }
+        let error = pushover_analysis_recording(
+            &model,
+            &map,
+            &reducer,
+            SeismicDir::X,
+            1,
+            PushoverTarget::default(),
+            PushoverControl::default(),
+            false,
+            false,
+            DuctilityMethod::default(),
+        )
+        .unwrap_err();
+        assert!(error.contains("縦筋比"), "{error}");
+    }
+
+    #[test]
     fn actual_static_cut_equilibrium_and_reference_capacity_match_independent_values() {
         let m = fixture::expanded_model();
         let g = direct_state(&m, m.load_cases[0].clone());

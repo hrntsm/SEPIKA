@@ -1,0 +1,99 @@
+   Compiling typenum v1.20.1
+   Compiling once_cell v1.21.4
+   Compiling getrandom v0.3.4
+   Compiling cfg-if v1.0.4
+   Compiling shlex v2.0.1
+   Compiling zeroize v1.9.0
+   Compiling find-msvc-tools v0.1.9
+   Compiling cmov v0.5.4
+   Compiling const-oid v0.10.2
+   Compiling gemm-common v0.19.0
+   Compiling jobserver v0.1.34
+   Compiling ctutils v0.4.5
+   Compiling pkg-config v0.3.33
+   Compiling generic-array v0.14.7
+   Compiling gemm-f32 v0.19.0
+   Compiling gemm-c64 v0.19.0
+   Compiling gemm-c32 v0.19.0
+   Compiling hybrid-array v0.4.15
+   Compiling gemm-f64 v0.19.0
+   Compiling cc v1.2.64
+   Compiling rustversion v1.0.22
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling gemm v0.19.0
+   Compiling faer v0.24.0
+   Compiling digest v0.11.3
+   Compiling windows_x86_64_msvc v0.48.5
+   Compiling zstd-sys v2.1.2+zstd.1.5.7
+   Compiling cpufeatures v0.3.1
+   Compiling getrandom v0.4.3
+   Compiling crc32fast v1.5.0
+   Compiling zstd-safe v8.2.0
+   Compiling windows-targets v0.48.5
+   Compiling inout v0.2.4
+   Compiling windows-link v0.2.1
+   Compiling libc v0.2.186
+   Compiling windows-sys v0.61.2
+   Compiling constant_time_eq v0.6.1
+   Compiling cipher v0.5.2
+   Compiling windows-sys v0.48.0
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling sha2 v0.11.1
+   Compiling hmac v0.13.0
+   Compiling cpubits v0.1.1
+   Compiling num-conv v0.2.2
+   Compiling libbz2-rs-sys v0.2.5
+   Compiling zlib-rs v0.6.3
+   Compiling log v0.4.32
+   Compiling simd-adler32 v0.3.9
+   Compiling option-ext v0.2.0
+   Compiling powerfmt v0.2.0
+   Compiling bumpalo v3.20.3
+   Compiling time-core v0.1.9
+   Compiling deranged v0.5.8
+   Compiling zopfli v0.8.3
+   Compiling dirs-sys v0.4.1
+   Compiling bzip2 v0.6.1
+   Compiling lzma-rust2 v0.22.0
+   Compiling aes v0.9.3
+   Compiling time v0.3.49
+   Compiling flate2 v1.1.9
+   Compiling pbkdf2 v0.13.0
+   Compiling digest v0.10.7
+   Compiling sha1 v0.11.0
+   Compiling indexmap v2.14.0
+   Compiling deflate64 v0.1.12
+   Compiling cpufeatures v0.2.17
+   Compiling typed-path v0.12.3
+   Compiling fastrand v2.4.1
+   Compiling encode_unicode v1.0.0
+   Compiling sha2 v0.10.9
+   Compiling console v0.16.3
+   Compiling tempfile v3.27.0
+   Compiling dirs v5.0.1
+   Compiling quick-xml v0.41.0
+   Compiling encoding_rs v0.8.35
+   Compiling similar v2.7.0
+   Compiling insta v1.48.0
+   Compiling zstd v0.14.3
+   Compiling zip v9.0.5
+   Compiling sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-core)
+   Compiling sepika-math v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-math)
+   Compiling sepika-section v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-section)
+   Compiling sepika-load v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-load)
+   Compiling sepika-io v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-io)
+   Compiling sepika-edit v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-edit)
+   Compiling sepika-element v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-element)
+   Compiling sepika-solver v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-solver)
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-design-jp)
+   Compiling sepika-job v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-job)
+   Compiling sepika-app v0.0.1 (C:\Users\hiroa\Desktop\ikkan\.worktree\issue-910\crates\sepika-app)
+    Finished `test` profile [optimized + debuginfo] target(s) in 3m 23s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_app-4a1b86fe634bcaf6.exe)
+
+running 1 test
+test app::result_contract_tests::ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_results ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 419 filtered out; finished in 0.32s

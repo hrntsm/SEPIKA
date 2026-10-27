@@ -1,0 +1,8 @@
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [optimized + debuginfo] target(s) in 2m 40s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_app-4a1b86fe634bcaf6.exe)
+
+running 1 test
+test app::result_contract_tests::ovika_old_direct_secondary_beam_design_requires_explicit_recheck ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 419 filtered out; finished in 0.06s
