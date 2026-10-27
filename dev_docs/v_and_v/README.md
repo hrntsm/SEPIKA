@@ -6,7 +6,7 @@
 
 [照合記録・不一致・残項目](原典照合リスト_2025年版追補_20261027.md)に、指定本の政令・告示を原典として受理したDs表・Fes・地震力・積雪係数・RC接合部有効幅の追加確認を記録する。
 状態は🔶。専門家サインオフ・全適用条件・実験Validationは未確認。
-長期コンクリートせん断は[修正#922](https://github.com/hrntsm/SEPIKA/issues/922)、長期付着は[修正#923](https://github.com/hrntsm/SEPIKA/issues/923)で追跡する。鋼材圧縮#924はユーザー承認により[ADR0084](../adr/0084-steel-compression-material-e.md)の共通適用方針を確定し、判断待ちから外した。
+長期コンクリートせん断は[修正#922](https://github.com/hrntsm/SEPIKA/issues/922)、長期付着は[#923の是正・直接回帰](異形鉄筋長期付着_Issue923_2026-10.md)を参照する。鋼材圧縮#924はユーザー承認により[ADR0084](../adr/0084-steel-compression-material-e.md)の共通適用方針を確定し、判断待ちから外した。
 別原典が必要な項目と既存#489の見送りは維持する。#720は指定2025年版での原典照合を完了した。
 
 ## SRC内蔵鉄骨の材料解決（#912）
@@ -428,12 +428,15 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 |----------|----------|------|
 | [p3_review.md](p3_review.md) | P3 最小 UI | 🔶 |
 | [p4_review.md](p4_review.md) | P4 材料断面 | ✅ |
+| [異形鉄筋長期付着_Issue923_2026-10.md](異形鉄筋長期付着_Issue923_2026-10.md) | 告1450の長期値・境界と1991/1999利用側 | 🔶（長期値是正の限定Verification済み） |
 | [p7_review.md](p7_review.md) | P7 二次設計 | 🔶 |
 | [Fes 算定不能の伝播](Fes算定不能の伝播_Issue718_2026-10.md) | Issue718・通常式/実集計/算定不能の自動 GUI・CSV・保存・再計算 | 🔶 |
 | [p8_review.md](p8_review.md) | P8 操作連携 | 🔶 |
 | [pending_items.md](pending_items.md) | P9 仕上げ | 🔶 |
 
 ## 索引（要素/設計式 → テスト）
+
+Issue #923の材料付着28条件、1991検定、1999別式、RcDesign公開入口は[直接回帰索引](異形鉄筋長期付着_Issue923_2026-10.md#要素と直接回帰)を参照。異形長期値の限定Verificationは✅、短期倍率・上限・別式原典・Validationは🔶。
 
 Issue #884の原典頁・独立MA・かぶり境界・梁未評価成分の公開入口は[詳細索引](SRC構造細則一次設計_Issue884_原典照合.md#独立数値と要素証拠索引)を参照。保存probeと#434の既存独立A/I/EIを区別し、状態は🔶。
 
