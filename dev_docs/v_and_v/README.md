@@ -1,5 +1,10 @@
 # V&V レポート（検証・妥当性確認）
 
+## Ds・Qu採用条件の不足と合否保留（#872）
+
+[公開入口・全不足理由・既存数値検証の記録](DsQu採用条件_Issue872_確認記録.md)を参照。11条件の証拠を現在の保存形式で確認できないため、自動・手動とも合否を保留する。目的別の識別・釣合い検査を維持し、選定理由・終了理由・機構分類やQu≥Qunから成立を推定しない。状態🔶。採用成功に必要な証拠の取得・保存、実建物の性能、手動GUI・Validationは未確認。
+
+
 ## 原典照合リストの2025年版追補（2026-10-27）
 
 現在の原典確認の残項目は[原典照合リストの「照合待ち」](原典照合リスト.md#照合待ち)へ集約する。不一致の修正待ち・照合済み・廃止済みとは分けて参照する。
@@ -233,6 +238,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [CFT充填Fc下限_Issue916_2026-10.md](CFT充填Fc下限_Issue916_2026-10.md) | Fc24の公開・App境界と旧保存合格の失効 | 🔶（Fc下限Verification、手動GUI・Validation未） |
 | [CFT適用材料許容耐力_Issue887_原典照合.md](CFT適用材料許容耐力_Issue887_原典照合.md) | CFT適用・材料・許容耐力とFc下限・別原典境界 | 🔶（有限Verification、法定自動判定・別原典・Validation未） |
 | [CFT柱終局NM_Issue888_原典照合.md](CFT柱終局NM_Issue888_原典照合.md) | CFT終局・N–Mの原典限界、Case2と半断面の独立公開入口Verification | 🔶（別原典・適用資格・円形係数差・Validationは残る） |
+| [DsQu採用条件_Issue872_確認記録.md](DsQu採用条件_Issue872_確認記録.md) | Ds/Qu採用11条件の不足理由、公開合否保留・識別維持 | 🔶（限定Verification、採用証拠・Validation未） |
 | [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
 | [SRC靭性終局仕口_Issue886_原典照合.md](SRC靭性終局仕口_Issue886_原典照合.md) | SRC靭性・曲げ累加/軸力・せん断区分・終局/許容パネルの原典対応と有限独立値 | 🔶（限定Verification、未対応終局・別原典・Validationは残る） |
 | [SRC構造細則一次設計_Issue884_原典照合.md](SRC構造細則一次設計_Issue884_原典照合.md) | SRC固有細則・複合断面・一次設計の適用と公開梁検定境界 | 🔶（有限Verification、法定詳細/別原典/Validationは残る） |
@@ -586,6 +592,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
 | 912 | SRC梁柱の内蔵鉄骨材料解決 | sepika-design-jp / sepika-app | srrc/{mod,beam,column,tests}.rs、app/src_ql_acceptance_tests.rs | [独立耐力・境界と保存経路](SRC内蔵鉄骨材料_Issue912_確認記録.md#要素から製品経路への証拠索引) | 一次設計・入出力 | 🔶（材料契約Verification、全規準・Validation未） |
+| 872 | Ds/Qu採用条件 | sepika-app | actions/design/holding_adoption.rs・holding.rs、summary.rs | [公開入口の要素→試験索引](DsQu採用条件_Issue872_確認記録.md#要素試験索引) | 二次設計 | 🔶（採用保留Verification、証拠保存・Validation未） |
 | 885 | SRC耐震ルート・柱区分とDs適用 | sepika-design-jp / sepika-app | secondary/src_rank.rs・ds_group.rs、actions/design/holding.rs | [原典セル・独立境界・公開probe索引](SRC耐震ルート_Issue885_原典照合.md#独立数値境界と要素証拠索引) | 二次設計 | 🔶（分類Verification、SRC表選択・適用条件未対応、Validation未） |
 | 922 | コンクリート長期許容せん断 | sepika-design-jp / sepika-core / sepika-app | material_strength・rc・srrc、result_contract、src_ql_acceptance_tests | [独立値・経路・保存失効](コンクリート長期せん断_Issue922_是正記録.md#独立期待値と要素からの証拠索引) | 一次設計・保存 | 🔶（限定Verification、全規準・Validation未） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
