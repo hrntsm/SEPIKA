@@ -22,6 +22,10 @@
 
 [2026-03-27 Q&A](https://www.icba.or.jp/zzfilebox/kenshuka/2025qa.pdf) のNo.1–25の対象頁・質問を確認した。今回のせん断0.49、付着1.35、鉄筋径28mm・SR295の表値を変更する回答はない。No.8・23・24は接合部配筋・保証設計等であり今回の材料表に転用しない。[刊行後の改正一覧（2026-07-01現在）](https://www.icba.or.jp/gijutukijunkaiseilist2025.html) には型わく等の告658号（p210・221）、特殊壁式RCの告693号等があるが、今回照合した通常RC材料表の数値変更は掲載されていない。これを一覧更新日後を含む全法令の不存在証明とはしない。
 
+## 付着長期値の是正（Issue #923）
+
+以下の表は照合時点の記録です。異形鉄筋その他の定数1.355は[Issue923](異形鉄筋長期付着_Issue923_2026-10.md)で1.35へ是正しました。短期1.5倍・Fc上限36・1999別式の原典確認を完了したという意味ではありません。
+
 ## 原典・採用値の対応
 
 単位は応力度・強度が N/mm²、径・距離が mm、比率は無次元。現行仕様の正本は [材料の許容応力度](../../docs/calc_basis/06_一次設計/01_材料の許容応力度.md) と [RC断面検定](../../docs/calc_basis/06_一次設計/02_RC_断面検定.md)。実装参照は `crates/sepika-design-jp/src/material_strength/{concrete,rebar}.rs`、柱は `rc/provisions.rs::column_provisions_info`。
