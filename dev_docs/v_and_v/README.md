@@ -213,6 +213,10 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 [原典調査と要素→証拠索引](仕口パネル耐力式_Issue723_原典調査.md)に、2025解説書第2版第1刷の原画像・N/A/Fと現行降伏式の対応、全塑性式との区別、CFT調査#888との境界を記録する。状態は🔶。指定原典の関連節は閲覧済みだが、別原典による式・適用条件の採否は未確定で#723は未完了。
 
+## 静的仕口パネルの実断面積（#892）
+
+[独立算術・公開検定入口・保存契約の確認](仕口パネル静的実断面積_Issue892_確認記録.md)は、S/CFTの正の有限面積の実値使用と算定不能の理由をVerificationする。状態🔶。原典N/A/F・現行式の採用根拠・CFT全適用条件・実験Validationは#723で継続する。
+
 ## レポート目録
 
 各レポートの照合結果・修正履歴・残課題の詳細。**未完了の要約**は
@@ -233,6 +237,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [RC耐震ルート_Issue882_原典照合.md](RC耐震ルート_Issue882_原典照合.md) | RCルート適用範囲・連層壁・ピロティ・側柱適格境界 | 🔶（原画像・公開入口の限定Verification。適用条件是正・全性能・Validationは残る） |
 | [鉄骨材料と許容応力度_Issue879_原典照合.md](鉄骨材料と許容応力度_Issue879_原典照合.md) | 原典指定範囲・F/厚さ境界・ft/fs・fc/Λ・細長比上限 | 🔶（限定原典照合と入口Verification。圧縮式の危険側疑い・上限修正・別原典とValidationは残る） |
 | [鉄骨柱脚接合構造細則_Issue878_原典照合.md](鉄骨柱脚接合構造細則_Issue878_原典照合.md) | 2025年第2版の柱脚・接合詳細・ブレース・防火被覆の現行範囲 | 🔶（重点原画像と有限Verification。詳細専用検定未対応・法令適用/Validation未確認） |
+| [仕口パネル静的実断面積_Issue892_確認記録.md](仕口パネル静的実断面積_Issue892_確認記録.md) | S/CFT静的パネルの実断面積・数値境界・保存検定失効 | 🔶（算術Verification、原典採用・Validationは未確認） |
 | [仕口パネル耐力式_Issue723_原典調査.md](仕口パネル耐力式_Issue723_原典調査.md) | 2025解説書の直接記載と別原典の境界、N/A/F・降伏/全塑性の採否 | 🔶（関連原画像閲覧済み。式全体の原典適合・採否未確定） |
 | [コンクリート長期せん断_Issue922_是正記録.md](コンクリート長期せん断_Issue922_是正記録.md) | 長期告示値の是正、RC/SRC長短期の独立境界と保存旧検定失効 | 🔶（限定Verification、軽量係数・全規準・Validation未） |
 | [RC材料構造細則_Issue881_原典照合.md](RC材料構造細則_Issue881_原典照合.md) | 2025年第2版のRC材料表・柱細則、独立数値と径/材種境界 | 🔶（指定頁原画像・材料関数Verification。相違の是正、別原典・柱条件・専門家サインオフ・Validation未） |
@@ -507,6 +512,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（釣合い残差がゼロ）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
 | 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
 | 7l | 仕口パネルの方向別接合面距離 | sepika-core / sepika-element / sepika-job / sepika-solver / sepika-app | panel_zone.rs / panel_gen.rs / prepare.rs / modeling.rs / result_contract_tests.rs | [Issue759の公開再現・独立距離・釣合いと仕事](仕口パネル接合面距離_Issue759_2026-10.md) | 横断 | 🔶（Verification、Validation未） |
+| 892 | 静的仕口パネルの実断面積 | sepika-design-jp / sepika-core / sepika-app | joint_wiring/steel_panel.rs・joint_wiring/tests.rs・result_contract.rs・result_contract_tests.rs | [独立値と公開入口の対応](仕口パネル静的実断面積_Issue892_確認記録.md#要素から証拠への索引) | 横断 | 🔶（算術Verification、原典採用・Validation未） |
 | 7k | 仕口パネルの実軸力比 | sepika-element / sepika-solver / sepika-core / sepika-app | springs/panel.rs / tests/panel_zone.rs / result_contract.rs / result_contract_tests.rs | [Issue761の修正前実測と独立期待値](仕口パネル実軸力比_Issue761_2026-10.md) | 横断 | 🔶（限定Verification、Validation・最終ゲート未） |
 | 7j | 仕口パネル検定の柱2軸集約 | sepika-design-jp / sepika-core / sepika-app | joint_wiring/steel_panel.rs / material_grade.rs / result_contract_tests.rs | [Issue758の独立需要・公開検定・未対応域](仕口パネル検定2軸集約_Issue758_2026-10.md) | 横断 | 🔶（極小nz修正後の直接11/design665・App保存3、先行App全475・関連ClippyのVerification。原典適合・Validation・最終ゲートは記録を参照） |
 | 7i | 仕口パネルの柱2軸と座標 | sepika-core / sepika-element / sepika-solver / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / frame/panel_offset.rs / prepare.rs / result_contract_tests.rs | [Issue757の実諸元・公開解析・保存と制約](仕口パネル柱2軸_Issue757_2026-10.md) | 横断 | 🔶（方向別諸元/F・3次元接続・公開釣合い/仕事・不正参照方向拒否/有限fallback・保存失効・job診断のVerification、workspace成功。Validation・最終headゲート未確認） |
