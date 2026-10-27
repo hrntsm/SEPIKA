@@ -1635,3 +1635,88 @@ fn src912_known_grade_actual_thickness_boundaries_have_independent_capacities() 
         }
     }
 }
+
+#[test]
+fn concrete_shear_922_src_beam_uses_reduced_long_and_short_allowables() {
+    let section = make_section(src_beam_rect_shape(
+        400.0,
+        700.0,
+        20.0,
+        vec![4],
+        vec![4],
+        40.0,
+        10.0,
+        100.0,
+        0,
+        500.0,
+        200.0,
+        50.0,
+        14.0,
+    ));
+    let mat = make_material(24.0, "Fc24");
+    let forces = MemberForcesAt {
+        qy: 882583.6882258701,
+        ..zero_forces()
+    };
+    for (term, expected_ratio, expected_ok) in [
+        (LoadTerm::Long, 1.005, false),
+        (LoadTerm::Short, 0.67, true),
+    ] {
+        let result = SrcDesign
+            .check(&forces, &section, &mat, &ctx_beam(term))
+            .unwrap_checked();
+        let shear = result
+            .components
+            .iter()
+            .find(|c| c.kind == crate::CheckKind::Shear)
+            .unwrap();
+        assert!(
+            (shear.ratio - expected_ratio).abs() < 1e-12,
+            "{term:?}: {shear:?}"
+        );
+        assert_eq!(result.ok(), expected_ok);
+    }
+}
+
+#[test]
+fn concrete_shear_922_src_column_uses_reduced_long_and_short_allowables() {
+    let section = make_section(src_column_rect_shape(
+        500.0,
+        500.0,
+        20.0,
+        vec![4],
+        vec![4],
+        40.0,
+        10.0,
+        100.0,
+        0,
+        0,
+        300.0,
+        200.0,
+        50.0,
+        14.0,
+    ));
+    let mat = make_material(24.0, "Fc24");
+    let forces = MemberForcesAt {
+        qy: 537471.99,
+        ..zero_forces()
+    };
+    for (term, expected_ratio, expected_ok) in [
+        (LoadTerm::Long, 1.005, false),
+        (LoadTerm::Short, 0.6827523092941661, true),
+    ] {
+        let result = SrcDesign
+            .check(&forces, &section, &mat, &ctx_column(term))
+            .unwrap_checked();
+        let shear = result
+            .components
+            .iter()
+            .find(|c| c.kind == crate::CheckKind::Shear)
+            .unwrap();
+        assert!(
+            (shear.ratio - expected_ratio).abs() < 1e-12,
+            "{term:?}: {shear:?}"
+        );
+        assert_eq!(result.ok(), expected_ok);
+    }
+}
