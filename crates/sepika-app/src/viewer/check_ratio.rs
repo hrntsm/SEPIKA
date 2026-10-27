@@ -14,8 +14,9 @@
 //! ホバー時に位置×式の内訳を見せるツールチップも提供する。
 //!
 //! 検定不能（[`CheckOutcome::Skipped`]）の位置は、検定式フィルタ適用後は
-//! いずれも `None`（対象外）として扱う。ある部材の全位置が検定不能の場合、
-//! その部材は未検定と同様に無着色となる（位置別マーカーも描かない）。
+//! いずれも `None`（対象外）として扱う。
+//! 未検定位置を含む部材は、他位置の適合値へ集約せずグレーで表示する。
+//! 確認済みのNGがある場合は、そのNGと未検定位置の存在を表示する。
 
 use std::collections::HashMap;
 
@@ -52,6 +53,7 @@ const ALL_KINDS: [CheckKind; 7] = [
 /// - `Kind(k)`: `cr.components` から `kind == k` の最大検定比を探し
 ///   `Some((r, r <= 1.0))` を返す。該当する式がなければ `None`
 ///   （＝この検定位置は当該式の検定対象外。着色・マーカーとも描かない）。
+///   上限超過の構造規定は、選択した式にかかわらず不適合として残す。
 pub(super) fn ratio_for_filter(
     outcome: &CheckOutcome,
     filter: CheckRatioFilter,
@@ -68,7 +70,7 @@ pub(super) fn ratio_for_filter(
             let max_ratio = cr
                 .components
                 .iter()
-                .filter(|c| c.kind == k)
+                .filter(|c| c.kind == k || c.kind == CheckKind::Provision && c.ratio > 1.0)
                 .map(|c| c.ratio)
                 .fold(None, |acc: Option<f64>, r| {
                     Some(acc.map_or(r, |a| a.max(r)))
@@ -147,6 +149,29 @@ fn max_ratio_by_elem<I: IntoIterator<Item = (ElemId, Option<(f64, bool)>)>>(
     items: I,
 ) -> HashMap<ElemId, (f64, bool)> {
     max_ratio_by_key(items)
+}
+
+/// 未検定位置を含む部材は適合値へ集約せず、確認済みのNGだけを残す。
+fn member_ratios_for_filter(
+    checks: &[MemberChecks],
+    filter: CheckRatioFilter,
+) -> HashMap<ElemId, (f64, bool)> {
+    let mut ratios = max_ratio_by_elem(checks.iter().flat_map(|m| {
+        m.positions
+            .iter()
+            .map(|p| (m.elem, ratio_for_filter(&p.outcome, filter)))
+    }));
+    for member in checks {
+        if member
+            .positions
+            .iter()
+            .any(|p| matches!(p.outcome, CheckOutcome::Skipped { .. }))
+            && ratios.get(&member.elem).is_some_and(|(_, ok)| *ok)
+        {
+            ratios.remove(&member.elem);
+        }
+    }
+    ratios
 }
 
 /// 節点ごとの（フィルタ適用後の）最大検定比・OK フラグを集計する。
@@ -442,11 +467,7 @@ pub(super) fn draw_check_ratio(
     let markers = app.ui.view.check_ratio_markers;
     let label_all = app.ui.view.check_ratio_label_all;
 
-    let elem_ratios = max_ratio_by_elem(results.member_checks.iter().flat_map(|m| {
-        m.positions
-            .iter()
-            .map(|p| (m.elem, ratio_for_filter(&p.outcome, filter)))
-    }));
+    let elem_ratios = member_ratios_for_filter(&results.member_checks, filter);
     let incomplete_nodes =
         incomplete_joint_nodes(results.joint_checks.iter().map(|j| (j.node, &j.outcome)));
     let node_ratios = max_ratio_by_node(
@@ -463,7 +484,27 @@ pub(super) fn draw_check_ratio(
         if !frame_filter.shows(elem.id) {
             continue;
         }
+        let incomplete = checks_by_elem.get(&elem.id).is_some_and(|m| {
+            m.positions
+                .iter()
+                .any(|p| matches!(p.outcome, CheckOutcome::Skipped { .. }))
+        });
         let Some(&(ratio, ok)) = elem_ratios.get(&elem.id) else {
+            if incomplete && elem.nodes.len() == 2 {
+                if let (Some(p0), Some(p1)) = (
+                    pts.get(elem.nodes[0].index()),
+                    pts.get(elem.nodes[1].index()),
+                ) {
+                    painter.line_segment([*p0, *p1], egui::Stroke::new(4.0_f32, theme::GRAY_600));
+                    painter.text(
+                        p0.lerp(*p1, 0.5),
+                        egui::Align2::CENTER_BOTTOM,
+                        "未検定",
+                        egui::FontId::proportional(11.0),
+                        theme::GRAY_700,
+                    );
+                }
+            }
             continue;
         };
         let color = theme::check_ratio_color(ratio);
@@ -565,7 +606,11 @@ pub(super) fn draw_check_ratio(
         painter.text(
             mid,
             egui::Align2::CENTER_BOTTOM,
-            mid_label_text(ratio, dominant),
+            if incomplete {
+                format!("{}（未検定あり）", mid_label_text(ratio, dominant))
+            } else {
+                mid_label_text(ratio, dominant)
+            },
             egui::FontId::proportional(font_size),
             label_color,
         );
@@ -1668,5 +1713,245 @@ mod tests {
             assert!(incomplete_joint_nodes(items).contains(&NodeId(0)));
         }
         assert!(incomplete_joint_nodes([(NodeId(0), &checked)]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod issue901_tests {
+    use super::*;
+    #[test]
+    fn issue901_failed_provision_survives_all_filters_and_mixed_positions() {
+        let failure = CheckOutcome::Checked(CheckResult {
+            basis: "令65条".into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Provision,
+                ratio: 1.0000005,
+                detail: "λ=200.0001 > 法定上限200（応力度比ではありません）".into(),
+            }],
+        });
+        let success = CheckOutcome::Checked(CheckResult {
+            basis: String::new(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Bending,
+                ratio: 0.2,
+                detail: String::new(),
+            }],
+        });
+        for filter in std::iter::once(CheckRatioFilter::Max)
+            .chain(ALL_KINDS.into_iter().map(CheckRatioFilter::Kind))
+        {
+            let checks = vec![MemberChecks {
+                elem: ElemId(0),
+                positions: vec![
+                    PositionCheck {
+                        xi: 0.0,
+                        outcome: success.clone(),
+                    },
+                    PositionCheck {
+                        xi: 0.5,
+                        outcome: failure.clone(),
+                    },
+                    PositionCheck {
+                        xi: 1.0,
+                        outcome: CheckOutcome::Skipped {
+                            reason: "主軸未確認".into(),
+                        },
+                    },
+                ],
+            }];
+            let aggregate = member_ratios_for_filter(&checks, filter);
+            assert_eq!(aggregate[&ElemId(0)], (1.0000005, false));
+            assert_eq!(
+                theme::check_ratio_color(aggregate[&ElemId(0)].0),
+                theme::PARETO_RED
+            );
+        }
+    }
+
+    fn angle_app() -> App {
+        use sepika_core::ids::{LoadCaseId, MaterialId, SectionId};
+        use sepika_core::model::{
+            FrameSectionUse, LoadCase, LoadCaseKind, LoadCombination, NodalLoad,
+        };
+        let base = crate::app::design_input_tests::pure_bending();
+        let mut model = base.core.model.clone();
+        model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        let mut section = sepika_core::section_shape::SectionShape::SteelAngle {
+            leg_a: 100.0,
+            leg_b: 100.0,
+            thick: 10.0,
+        }
+        .to_section(SectionId(0), "L100x100x10".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        section.material = Some(MaterialId(0));
+        model.sections = vec![section];
+        model.load_cases = vec![
+            LoadCase {
+                id: LoadCaseId(0),
+                name: "G0".into(),
+                kind: LoadCaseKind::Dead,
+                nodal: vec![],
+                member: vec![],
+            },
+            LoadCase {
+                id: LoadCaseId(1),
+                name: "P0".into(),
+                kind: LoadCaseKind::Live,
+                nodal: vec![],
+                member: vec![],
+            },
+            LoadCase {
+                id: LoadCaseId(2),
+                name: "W".into(),
+                kind: LoadCaseKind::Wind,
+                nodal: vec![NodalLoad::manual(
+                    NodeId(1),
+                    [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                )],
+                member: vec![],
+            },
+        ];
+        model.combinations = [1.0, -1.0]
+            .into_iter()
+            .map(|factor| LoadCombination {
+                name: format!("G+P+{factor}W"),
+                terms: vec![
+                    (LoadCaseId(0), 1.0),
+                    (LoadCaseId(1), 1.0),
+                    (LoadCaseId(2), factor),
+                ],
+            })
+            .collect();
+        let mut app = App::default();
+        app.load_model(model);
+        app.core.analysis_cfg.threads = 1;
+        app.run_combination(0);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.ui.view.check_ratio_label_all = true;
+        app
+    }
+    fn render_angle(app: &mut App) -> egui::FullOutput {
+        egui::Context::default().run_ui(Default::default(), |ui| {
+            draw_check_ratio(
+                ui.painter(),
+                app,
+                &app.core.model,
+                &[egui::pos2(100.0, 500.0), egui::pos2(500.0, 500.0)],
+                Default::default(),
+            );
+            crate::design_view::design_table(ui, app);
+        })
+    }
+    fn is_gray_member(output: &egui::FullOutput) -> bool {
+        let colors: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if *points == [egui::pos2(100.0, 500.0), egui::pos2(500.0, 500.0)] =>
+                {
+                    Some(stroke.color)
+                }
+                _ => None,
+            })
+            .collect();
+        colors == [theme::GRAY_600]
+    }
+    fn has_text(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(t) => t.galley.text().contains(text),
+            egui::Shape::Vec(parts) => parts.iter().any(|p| has_text(p, text)),
+            _ => false,
+        }
+    }
+    #[test]
+    fn issue901_angle_mixed_positions_draw_unknown_gray_and_keep_reasons_for_all_filters() {
+        use sepika_element::frame::beam::MemberForces;
+        let mut app = angle_app();
+        let mf = MemberForces {
+            at: vec![
+                (0.0, [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                (0.5, [-1000.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                (1.0, [0.0; 6]),
+            ],
+        };
+        let report = sepika_design_jp::run_member_design_checks(
+            &app.core.model,
+            &[(ElemId(0), mf)],
+            &[],
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(report.member_checks.len(), 3);
+        app.core.scoped.results.as_mut().unwrap().member_checks =
+            crate::app::group_member_checks(report.member_checks);
+        let checks = &app.current_design_results().unwrap().member_checks;
+        assert_eq!(
+            checks[0]
+                .positions
+                .iter()
+                .filter(|p| matches!(p.outcome, CheckOutcome::Checked(_)))
+                .count(),
+            2
+        );
+        let (_, rows) = build_tooltip_rows(&checks[0].positions);
+        assert!(rows.iter().any(|r| matches!(&r.verdict, RowVerdict::Skipped(reason) if reason.contains("山形鋼") && reason.contains("主軸"))));
+        for filter in std::iter::once(CheckRatioFilter::Max)
+            .chain(ALL_KINDS.into_iter().map(CheckRatioFilter::Kind))
+        {
+            app.ui.view.check_ratio_filter = filter;
+            assert!(!member_ratios_for_filter(
+                &app.current_design_results().unwrap().member_checks,
+                filter
+            )
+            .contains_key(&ElemId(0)));
+            let rendered = render_angle(&mut app);
+            assert!(is_gray_member(&rendered));
+            assert!(rendered
+                .shapes
+                .iter()
+                .any(|s| has_text(&s.shape, "圧縮山形鋼")));
+        }
+    }
+    #[test]
+    fn issue901_angle_selected_combinations_do_not_reuse_tension_success_for_compression() {
+        let mut app = angle_app();
+        assert!(
+            member_ratios_for_filter(
+                &app.current_design_results().unwrap().member_checks,
+                CheckRatioFilter::Max
+            )[&ElemId(0)]
+                .1
+        );
+        assert!(!is_gray_member(&render_angle(&mut app)));
+        app.run_combination(1);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert!(app.current_design_results().unwrap().member_checks[0].positions.iter().all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("主軸"))));
+        for filter in std::iter::once(CheckRatioFilter::Max)
+            .chain(ALL_KINDS.into_iter().map(CheckRatioFilter::Kind))
+        {
+            app.ui.view.check_ratio_filter = filter;
+            assert!(is_gray_member(&render_angle(&mut app)));
+        }
+        app.run_combination(0);
+        app.ui.view.check_ratio_filter = CheckRatioFilter::Max;
+        assert!(
+            member_ratios_for_filter(
+                &app.current_design_results().unwrap().member_checks,
+                CheckRatioFilter::Max
+            )[&ElemId(0)]
+                .1
+        );
+        assert!(!is_gray_member(&render_angle(&mut app)));
     }
 }
