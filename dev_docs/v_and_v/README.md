@@ -276,6 +276,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [コンクリート長期せん断_Issue922_是正記録.md](コンクリート長期せん断_Issue922_是正記録.md) | 長期告示値の是正、RC/SRC長短期の独立境界と保存旧検定失効 | 🔶（限定Verification、軽量係数・全規準・Validation未） |
 | [RC材料構造細則_Issue881_原典照合.md](RC材料構造細則_Issue881_原典照合.md) | 2025年第2版のRC材料表・柱細則、独立数値と径/材種境界 | 🔶（指定頁原画像・材料関数Verification。相違の是正、別原典・柱条件・専門家サインオフ・Validation未） |
 | [RC断面設計n_Issue944_適用照合.md](RC断面設計n_Issue944_適用照合.md) | 公開改定案12条の区分・境界・用途と刊行原典の未確認範囲 | 🔶（Fc≤60の公開案部分照合。刊行版・高Fc・全材料/SRC適用・Validation未） |
+| [USD685主筋_Issue945_認定条件照合.md](USD685主筋_Issue945_認定条件照合.md) | MSRB-0117指定値と現行値、A/B品質差、材料入力→RC断面検定の経路 | 🔶（同認定の長期差を#991へ分離。他認定・現有効性・設計条件・Validation未） |
 | [RC鉄筋径と未指定強度_Issue947_照合記録.md](RC鉄筋径と未指定強度_Issue947_照合記録.md) | p567/p572再照合、公開STB6・native径API3・材料不足5条件、API許容値過大を#961へ分離 | 🔶（限定Verification。API径修正待ち、STB径意味・別原典・全入口保護・Validation未） |
 | [RC開口壁_Issue821_モデル監査.md](RC開口壁_Issue821_モデル監査.md) | 直接48条件・壁版展開24条件、指定2025年版原画像、独立幾何・軸剛性上界 | 🔶（限定比較体の軸変位過小方向と不成立時の雑壁分岐を確認。実RCへの適用・モデル採否未確定、#821 OPEN / blocked） |
 | [RC壁線形軸曲げ剛性_Issue652_調査記録.md](RC壁線形軸曲げ剛性_Issue652_調査記録.md) | 現行ps換算と総断面候補、2025年版解説書の指定実画像・材料役割・実入口V&V条件 | 🔶（三本柱の分担と適用上の注意を限定照合。ps換算／総断面採用条件は本書では照合不可。候補未採用・実入口V&V未実施） |
@@ -631,6 +632,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 947 | RC鉄筋径と未指定強度 | sepika-core / sepika-io / sepika-element / sepika-design-jp | material_grade・stbridge/import/rebar・factory/input_check・rc | [原典・入口・観測](RC鉄筋径と未指定強度_Issue947_照合記録.md#独立期待値と公開入口の実行) | 一次設計・入力 | 🔶（公開入口Verification、API径の過大選択は[#961](https://github.com/hrntsm/SEPIKA/issues/961)修正待ち、STB径意味・別原典・全入口未） |
 | 944 | RC断面設計用n | sepika-design-jp / sepika-core / sepika-element | material_strength/concrete・rc/allowable・rc/beam・rc/column・srrc/column・srrc/panel_zone | [要素から用途への対応](RC断面設計n_Issue944_適用照合.md#要素から用途への対応と検証限界) | 一次設計・解析との区別 | 🔶（公開案の区分・境界照合とコード読取。既存実測と再実行を区別、刊行版・適用域・Validation未） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
+| 945 | USD685主筋の認定条件 | sepika-core / sepika-design-jp | material_grade.rs・material_strength/rebar.rs・rc/beam.rs | [指定値・入力経路・直接観測](USD685主筋_Issue945_認定条件照合.md) | 一次設計・入力 | 🔶（MSRB-0117長期差#991、他認定・使用条件・Validation未） |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
@@ -723,3 +725,5 @@ RC壁の二方式とGUI/採用run値/失効の横断入口は[Issue572検証](RC
 ## RC材料表と構造細則（#881）
 
 [原典照合・要素→確認索引](RC材料構造細則_Issue881_原典照合.md)の原典対応表と独立数値表を参照。公開材料関数の一時probeと、柱のソース読取を区別する。法令表との残る相違は原典照合リストを参照し、鉄筋径・未指定強度は[#947の追加調査](RC鉄筋径と未指定強度_Issue947_照合記録.md)の未確認・再判定条件へ接続する。原典限定照合を是正済みと扱わない。状態は🔶。
+
+USD685は[#945の認定条件照合](USD685主筋_Issue945_認定条件照合.md)で、MSRB-0117の長期195に対する現行215の差と、A/B・用途・設計条件・入力経路を区別した。是正は#991、他認定と現在の有効性・Fc/定着/付着条件は再判定条件に残す。補強筋の未対応は維持し、状態は🔶。
