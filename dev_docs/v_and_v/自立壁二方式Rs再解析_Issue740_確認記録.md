@@ -40,17 +40,17 @@
 
 ## 実行記録
 
-Rust stableは`rustup update stable`で確認済み（rustc 1.99.1、clippy 0.1.99）。main `6df3404e` の取込後、解析契約64・検定契約38で最終確認した。
+Rust stableは`rustup update stable`で確認済み（rustc 1.99.1、clippy 0.1.99）。main `8a1df66d` の取込後（統合コミット `2831b22e`）、解析契約64・検定契約39で最終確認した。直前のmain統合後にも同範囲は成功していたが、材料の付着応力度修正と契約版の更新を含めて再実行した。機能実装は変更していない。
 
 | 実行した検証 | 結果 |
 | --- | --- |
-| `cargo test -p sepika-design-jp -p sepika-job -p sepika-solver --lib --locked -- --quiet` | design-jp 661件・job 109件・solver 352件成功。二方式、偏心壁、異方性斜め壁、複層、微小荷重、分母0・商overflowを含む |
-| `cargo test -p sepika-app --features gui --lib --locked -- --quiet` | 990件成功。GUIのn倍法有効化・方式変更・Undo、代表条件と専用変位の成功／失敗の実.ovika保存読込、旧解析63・検定37の失効、既存の層指標・保有耐力経路を含む |
+| `cargo test -p sepika-design-jp -p sepika-job -p sepika-solver --lib --locked -- --quiet` | design-jp 664件・job 109件・solver 352件成功。二方式、偏心壁、異方性斜め壁、複層、微小荷重、分母0・商overflowを含む |
+| `cargo test -p sepika-app --features gui --lib --locked -- --quiet` | 990件成功。GUIのn倍法有効化・方式変更・Undo、代表条件と専用変位の成功／失敗の実.ovika保存読込、旧解析63・検定38の失効、既存の層指標・保有耐力経路を含む |
 | `cargo clippy -p sepika-core -p sepika-edit -p sepika-solver -p sepika-design-jp -p sepika-job -p sepika-app --all-targets --features sepika-app/gui --locked -- -D warnings` | 成功 |
 | `cargo fmt --all -- --check`・`git diff --check` | 成功 |
 
 設定・参照・編集層の変更時にはcore 607件、edit 215件のlibテストも成功し、代表条件の保存復元、指定柱・階の削除拒否、別部材削除時の再採番、階挿入とUndoを確認した。その後の修正は剛性抽出・利用経路と計算契約版であり、core/editの同じテストは重複実行していない。
 
-親エージェントによる文書検証は、`mdbook build`、専用targetを使った`check-docs`（SUMMARY 124件・リンク665件・実装参照707件）、変更した開発文書8ファイルの相対リンク898件の確認で成功している。
+親エージェントによる文書検証は、`mdbook build`、専用targetを使った`check-docs`（SUMMARY 124件・リンク666件・実装参照707件）、変更した開発文書8ファイルの相対リンク905件の確認で成功している。
 
 この記録は線形釣合い・設定・結果利用経路のVerificationであり、任意の実建物に対する物理Validationや、解説書のD値式との同一性の証明ではない。
