@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## Ds条件不足の保留（#871）
+
+[実入口・条件別理由・旧数値試験の境界](Ds条件不足の保留_Issue871_確認記録.md)を参照。層崩壊の一律補正を除き、RC/S非ヒンジ柱・接合部・S柱脚等の情報不足を自動/手動とも保留にする。剛域の解析機構試験は維持し、旧story_ds経路の成功をAppの規準適合とは扱わない。状態は🔶（限定Verification、規準全体・Validation未）。
+
 ## 原典照合リストの2025年版追補（2026-10-27）
 
 現在の原典確認の残項目は[原典照合リストの「照合待ち」](原典照合リスト.md#照合待ち)へ集約する。不一致の修正待ち・照合済み・廃止済みとは分けて参照する。
@@ -323,6 +327,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [弧長法削除と既存増分回帰_Issue433_2026-10.md](弧長法削除と既存増分回帰_Issue433_2026-10.md) | 弧長専用実装/API/試験/導線削除、既存荷重増分・変位制御の回帰 | 🔶（限定Verification。最終ゲートは[PR #649](https://github.com/hrntsm/SEPIKA/pull/649)） |
 | [SM520告示基準強度と範囲外拒否_Issue629_2026-10.md](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md) | 告示3区分・100 mm超非補完・現役実入口・OVIKA15/6 | 🔶（直接Verification、正式JIS全製品/Validation未確認。最終ゲートは[PR #646](https://github.com/hrntsm/SEPIKA/pull/646)） |
 | [質点系先行成果鮮度_Issue612_2026-10.md](質点系先行成果鮮度_Issue612_2026-10.md) | GUI 実依存の存在・入力一致、限定片持柱の独立 K/T、状態保持 | 🔶（自動入口 Verification、手動 GUI・freshレビュー・最終head CI は後続） |
+| [Ds条件不足の保留_Issue871_確認記録.md](Ds条件不足の保留_Issue871_確認記録.md) | 公開Appの自動/手動・条件別不足理由・CSV/egui・保存失効・候補数値計算と解析機構の境界 | 🔶（限定Verification、全規準・Validation未） |
 | [リップ溝形の幾何成立条件_Issue544_2026-10.md](リップ溝形の幾何成立条件_Issue544_2026-10.md) | 5矩形境界・独立総性能/質量・生成/保存/編集/GUI/MCP・両質量方式の公開動的Result入口 | 🔶（Windows直接Verification成功、自動App/egui・実MCP・公開solver成功、修正後freshレビュー修正必須なし、手動GUI・実製品Validation・最終docs commit/CIは後続） |
 | [主架構線材の2節点入力_Issue562_2026-10.md](主架構線材の2節点入力_Issue562_2026-10.md) | 対象4kindの共通節点数・編集/I/O/数量/共有準備/solver/GUI/MCP入口と状態不変 | 🔶（Windows入口・自動App/egui・MCP Verification成功、手動GUI未実施、最終headレビュー・全CIは後続） |
 | [節点TSV一括拒否_Issue615_2026-10.md](節点TSV一括拒否_Issue615_2026-10.md) | 節点TSVの有限値・矩形全体・展開上限・適用時再検査と拒否時状態保持 | 🔶（SEPIKA Pasteイベント経路のVerification。実Excel/OSクリップボードは未実施・必須対象外、最終ゲートは後続） |
@@ -586,6 +591,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
 | 912 | SRC梁柱の内蔵鉄骨材料解決 | sepika-design-jp / sepika-app | srrc/{mod,beam,column,tests}.rs、app/src_ql_acceptance_tests.rs | [独立耐力・境界と保存経路](SRC内蔵鉄骨材料_Issue912_確認記録.md#要素から製品経路への証拠索引) | 一次設計・入出力 | 🔶（材料契約Verification、全規準・Validation未） |
+| 871 | Ds条件不足の保留 | sepika-app / sepika-design-jp | actions/design/holding・holding_conditions、member_rank、tests/vnv_rigid_zone_mechanism | [実入口と観測契約](Ds条件不足の保留_Issue871_確認記録.md#実入口と観測契約) | 二次設計 | 🔶（条件不足の保留Verification、全規準・Validation未） |
 | 885 | SRC耐震ルート・柱区分とDs適用 | sepika-design-jp / sepika-app | secondary/src_rank.rs・ds_group.rs、actions/design/holding.rs | [原典セル・独立境界・公開probe索引](SRC耐震ルート_Issue885_原典照合.md#独立数値境界と要素証拠索引) | 二次設計 | 🔶（分類Verification、SRC表選択・適用条件未対応、Validation未） |
 | 922 | コンクリート長期許容せん断 | sepika-design-jp / sepika-core / sepika-app | material_strength・rc・srrc、result_contract、src_ql_acceptance_tests | [独立値・経路・保存失効](コンクリート長期せん断_Issue922_是正記録.md#独立期待値と要素からの証拠索引) | 一次設計・保存 | 🔶（限定Verification、全規準・Validation未） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |

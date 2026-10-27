@@ -1672,9 +1672,9 @@ fn select_holding_points(app: &mut App) -> u32 {
     selected_step
 }
 
-/// 鋼構造サンプルの保有水平耐力・Ds・ランク、および元STBの静的結果によるRC終局検定。
+/// 鋼構造の解析点・Qud・FesとDs保留、および元STBの静的結果によるRC終局検定。
 #[test]
-fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
+fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     let mut app = prepared_steel_portal(true);
     app.run_static_all();
     assert_no_error(&app, "鋼構造サンプルの静的解析");
@@ -1698,13 +1698,24 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
         po.termination
     );
 
-    let (holding, ranks) = app
-        .compute_holding_capacity()
-        .expect("保有水平耐力が算定できるはず");
-    let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
-    assert_eq!(source.ds_point.step, selected_step);
-    assert_eq!(source.capacity_point.step, selected_step);
-    assert_eq!(source.ds_point.run_id, source.capacity_point.run_id);
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let ds_point = po.ds_evaluation.as_ref().unwrap();
+    let capacity_point = po.capacity_evaluation.as_ref().unwrap();
+    assert_eq!(ds_point.step, selected_step);
+    assert_eq!(capacity_point.step, selected_step);
+    assert_eq!(ds_point.run_id, capacity_point.run_id);
+    let forces = po
+        .evaluate_stories(capacity_point, EvaluationPurpose::HoldingCapacity)
+        .unwrap();
+    let metrics = sepika_app::summary::compute_story_metrics_with(
+        &app.core.model,
+        SeismicDir::X,
+        &sepika_app::summary::metrics_ctx_from_results(
+            &app.core.model,
+            app.core.scoped.results.as_ref(),
+        ),
+    );
+    let qud = required_story_shear(&app);
     // h=14m、S造高さ比1よりT=.42s、地盤IIのRt=1。独立手計算のQud。
     let expected_qud = [
         278_488.0739614658,
@@ -1712,46 +1723,38 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
         185_103.76674667903,
         111_996.66208577435,
     ];
-    for (story, expected) in holding.stories.iter().zip(expected_qud) {
-        assert!((story.qud - expected).abs() < 1e-7, "Qud={}", story.qud);
+    for (actual, expected) in qud.iter().zip(expected_qud) {
+        assert!((actual - expected).abs() < 1e-7, "Qud={actual}");
     }
-    assert_eq!(holding.stories.len(), 4, "保有水平耐力の層数");
-    assert_eq!(ranks.len(), 4, "層ごとの部材ランク");
-    for s in &holding.stories {
-        assert!(
-            s.qu > 0.0 && s.qu.is_finite(),
-            "保有水平耐力 Qu が異常: {}",
-            s.qu
-        );
-        assert!(
-            (0.25..=0.55).contains(&s.ds),
-            "構造特性係数 Ds が規定の範囲外: {}",
-            s.ds
-        );
-        assert!(
-            s.qun > 0.0 && s.qun.is_finite(),
-            "必要保有水平耐力 Qun が異常: {}",
-            s.qun
-        );
-        assert!(s.fes >= 1.0, "Fes が 1.0 未満: {}", s.fes);
+    assert_eq!(forces.len(), 4);
+    for (force, metric) in forces.iter().zip(&metrics) {
+        assert!(force.qu_n > 0.0 && force.qu_n.is_finite());
+        assert!(force.residual_n.abs() <= force.tolerance_n);
+        assert!(metric.fes.as_ref().unwrap() >= &1.0);
     }
-
+    let response_scalars = forces
+        .iter()
+        .zip(&metrics)
+        .enumerate()
+        .map(|(i, (force, metric))| {
+            format!(
+                "story[{i}].Qu={}\nstory[{i}].Fes={}",
+                sig4(force.qu_n),
+                sig4(*metric.fes.as_ref().unwrap())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     insta::assert_snapshot!(
-        "four_story_steel_portal_holding_capacity",
-        holding
-            .stories
-            .iter()
-            .enumerate()
-            .map(|(i, story)| format!(
-                "story[{i}].Qu={}\nstory[{i}].Qun={}\nstory[{i}].Ds={}\nstory[{i}].Fes={}",
-                sig4(story.qu),
-                sig4(story.qun),
-                sig4(story.ds),
-                sig4(story.fes),
-            ))
-            .collect::<Vec<_>>()
-            .join("\n")
+        "four_story_steel_portal_response_on_ds_hold",
+        response_scalars
     );
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(
+        reason.contains("Ds判定保留") && reason.contains("柱脚の有無・形式"),
+        "{reason}"
+    );
+    assert!(app.core.scoped.holding_capacity_source.is_none());
     let mut app = analyzed();
     analyze_ultimate_gravity(&mut app);
     let ultimate = app
@@ -3346,7 +3349,12 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     assert_no_error(&app, "整合GLの増分解析");
     app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
-    let qud = app.compute_holding_capacity().unwrap().0.stories[0].qud;
+    let qud = required_story_shear(&app)[0];
+    assert!(app
+        .compute_holding_capacity()
+        .err()
+        .unwrap()
+        .contains("Ds判定保留"));
     assert!((qud - 217_750.0).abs() < 1e-8);
     for (i, elevation) in [(4, 30_000.0), (3, 15_000.0)] {
         let name = app.core.model.stories[i].name.clone();
@@ -3447,7 +3455,12 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
 
-    assert!((app.compute_holding_capacity().unwrap().0.stories[0].qud - 215_250.0).abs() < 1e-7);
+    assert!((required_story_shear(&app)[0] - 215_250.0).abs() < 1e-7);
+    assert!(app
+        .compute_holding_capacity()
+        .err()
+        .unwrap()
+        .contains("Ds判定保留"));
 
     assert!(app.core.scoped.undo.run(
         &mut app.core.model,
@@ -3489,4 +3502,25 @@ fn declare_analysis_slab_placements(model: &mut sepika_core::model::Model) {
         slab.reference_story = Some(story);
         slab.vertical_eccentricity_mm = Some(eccentricity);
     }
+}
+
+fn required_story_shear(app: &App) -> Vec<f64> {
+    use sepika_solver::statics::analysis::{Analysis, SeismicCfg};
+    let analysis = Analysis::prepare(&app.core.model).unwrap();
+    let t = analysis
+        .seismic_period(app.core.analysis_cfg.ai_mode)
+        .unwrap();
+    sepika_solver::statics::analysis::seismic_distribution_for_model(
+        &app.core.model,
+        SeismicCfg {
+            dir: app.core.scoped.pushover_view_dir,
+            mode: app.core.analysis_cfg.ai_mode,
+            z: app.core.analysis_cfg.z,
+            soil: app.core.analysis_cfg.soil,
+            c0: 1.0,
+        },
+        t,
+    )
+    .unwrap()
+    .qi
 }

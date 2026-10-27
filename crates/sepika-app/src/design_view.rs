@@ -784,10 +784,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         crate::theme::GRAY_600
                     },
                     format!(
-                        "崩壊機構: {}（Ds へ層別に反映{}）",
+                        "解析上の崩壊機構: {}（適用条件は別途確認{}）",
                         mech,
                         if warn {
-                            "。機構が確定するまで Ds・Qun は暫定値です"
+                            "。機構分類だけでは Ds・Qun の適用条件を確認できません"
                         } else {
                             ""
                         }
@@ -842,11 +842,11 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             }
             let note = if app.core.design_rank_auto {
                 "Qu は保有耐力比較用に明示採用した同じ確定点の層切断面力。\
-                 Ds は部材ランク自動判定（鋼=幅厚比、RC矩形=せん断余裕度 Qsu/Qmu の略算。柱は\
-                 軸力考慮の曲げ終局から Qmu を算定）×崩壊機構。形状未設定・RC円形・Fc未設定材料は\
+                 Ds の候補は部材ランク自動判定（鋼=幅厚比、RC矩形=せん断余裕度 Qsu/Qmu の略算。柱は\
+                 軸力考慮の曲げ終局から Qmu を算定）。形状未設定・RC円形・Fc未設定材料は\
                  自動判定不能として理由を表示。"
             } else {
-                "Qu は保有耐力比較用の確定点の層切断面力。Ds は明示ランクと Ds 用機構\
+                "Qu は保有耐力比較用の確定点の層切断面力。Ds の候補は明示ランク\
                  （部材ランク自動判定OFF）。"
             };
             ui.colored_label(crate::theme::GRAY_600, note);
@@ -1239,7 +1239,7 @@ pub(crate) fn holding_rank_mode_input(ui: &mut egui::Ui, app: &mut App) {
             "自動判定（鋼=幅厚比・RC矩形=Qsu/Qmu）",
         )
         .on_hover_text(
-            "鋼は幅厚比、RC はせん断余裕度等から Ds 用確定点の応力で判定します。群耐力重みは明示入力し、欠損・対象外部材は理由付きで停止します。",
+            "鋼は幅厚比、RC はせん断余裕度等から候補ランクを計算します。破壊形式・非ヒンジ柱・接合部・柱脚の条件不足は手動ランクでも補えず、Ds・必要耐力・合否を保留します。",
         );
     });
 }

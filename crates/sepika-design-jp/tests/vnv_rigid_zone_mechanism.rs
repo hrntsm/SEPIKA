@@ -1,13 +1,4 @@
-//! 系レベル V&V: 剛域を考慮したプッシュオーバーの崩壊機構が Ds へ伝わることの検証。
-//!
-//! 要素レベル（`sepika-element` の `fiber/tests.rs`）とプッシュオーバーレベル
-//! （`sepika-solver` の `pushover/tests.rs`）に加えて、
-//! **プッシュオーバー → 崩壊機構 → 層 Ds** の一連の経路を通しで確認する。
-//!
-//! 告示の Ds は「部材群としての種別」に加えて崩壊機構で補正される
-//! （[`sepika_design_jp::secondary::member_rank::story_ds`]: 層崩壊・部分崩壊は
-//! 代表ランクを 1 段階不利側へ移す）。剛域は崩壊荷重・崩壊機構の成立時期を変える
-//! ため、この経路が破綻していないことを系レベルで担保する。
+//! 剛域を持つ門形フレームの解析機構・可撓長のVerification。Dsの規準適合は検証しない。
 
 use sepika_core::dof::{Dof6Mask, DofMap};
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
@@ -15,8 +6,6 @@ use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
     MaterialCategory, Model, Node, RigidZone, Section, Story,
 };
-use sepika_design_jp::secondary::holding_capacity::{FrameType, MemberRank};
-use sepika_design_jp::secondary::member_rank::story_ds;
 use sepika_solver::common::constraint::Reducer;
 use sepika_solver::nonlinear::pushover::{
     pushover_analysis, HingeLevel, MechanismType, PushoverResult,
@@ -176,10 +165,8 @@ fn run_pushover(rigid: f64, seismic_weight: f64, steps: usize) -> PushoverResult
         .expect("pushover should run end-to-end")
 }
 
-/// 剛域を考慮したプッシュオーバーでも崩壊機構が成立し、Ds の機構補正が
-/// 「補正なし（全体崩壊）」側に決まること。
 #[test]
-fn 剛域つきプッシュオーバーの崩壊機構がdsへ伝わる() {
+fn 剛域つきプッシュオーバーが解析上の機構に達する() {
     let result = run_pushover(300.0, 600_000.0, 400);
 
     // 柱両端の 4 ヒンジで運動学的機構が成立している。
@@ -193,52 +180,19 @@ fn 剛域つきプッシュオーバーの崩壊機構がdsへ伝わる() {
         !matches!(result.mechanism, MechanismType::Partial),
         "剛域つきで崩壊機構が成立しない（Partial）"
     );
-
-    // 崩壊機構 → 層 Ds。全体崩壊ならランク補正なし。
-    let ranks = [MemberRank::FB];
-    let ds = story_ds(&ranks, FrameType::SteelFrame, &result.mechanism);
-    let ds_no_correction = sepika_design_jp::secondary::holding_capacity::ds_value(
-        FrameType::SteelFrame,
-        MemberRank::FB,
-    );
-    assert!(
-        (ds - ds_no_correction).abs() < 1e-12,
-        "全体崩壊なのに Ds が補正された: ds={ds}, 無補正={ds_no_correction}"
-    );
 }
 
-/// 崩壊機構が成立しない（部分崩壊）ままだと Ds が 1 ランク不利側へ補正されること。
-/// 剛域の有無に関わらず成り立つ Ds 側の規則で、上のテストと対になる
-/// 「機構判定が Ds を動かす」ことの確認。
 #[test]
-fn 機構が成立しない場合はdsが不利側へ補正される() {
-    // 地震用重量を小さくして降伏に至らせない（＝機構が成立しない）。
+fn 未降伏のフレームを解析上の機構成立と扱わない() {
     let result = run_pushover(300.0, 1_000.0, 20);
     assert!(
         matches!(result.mechanism, MechanismType::Partial),
         "降伏させていないのに機構が成立した"
     );
-
-    let ranks = [MemberRank::FB];
-    let ds = story_ds(&ranks, FrameType::SteelFrame, &result.mechanism);
-    let ds_fb = sepika_design_jp::secondary::holding_capacity::ds_value(
-        FrameType::SteelFrame,
-        MemberRank::FB,
-    );
-    let ds_fc = sepika_design_jp::secondary::holding_capacity::ds_value(
-        FrameType::SteelFrame,
-        MemberRank::FC,
-    );
-    assert!(ds_fc > ds_fb, "前提: FC の Ds は FB より大きい");
-    assert!(
-        (ds - ds_fc).abs() < 1e-12,
-        "部分崩壊で Ds が 1 ランク不利側へ補正されていない: ds={ds}, 期待={ds_fc}"
-    );
 }
 
 /// 剛域は保有水平耐力（崩壊荷重）を可撓長基準へ引き上げること。
-/// `sepika-solver` 側の V&V と同じ現象を、設計側（Ds 経路）の入口である
-/// `PushoverResult` の水準で再確認する。
+/// 4材端が降伏した点のせん断力比を可撓長の独立比と比較する。
 #[test]
 fn 剛域は保有水平耐力を可撓長基準へ引き上げる() {
     let collapse_shear = |r: &PushoverResult| -> Option<f64> {

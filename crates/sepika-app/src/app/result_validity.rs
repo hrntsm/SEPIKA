@@ -759,7 +759,7 @@ mod tests {
         app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         app
     }
 
@@ -798,7 +798,7 @@ mod tests {
         app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
     }
 
     #[test]
@@ -867,7 +867,12 @@ mod tests {
     #[test]
     fn 表示ステップと表示選択と表示専用通り芯の変更は利用を維持する() {
         let mut app = ready();
-        let initial = app.compute_holding_capacity().unwrap().0.stories[0].qun;
+        let initial = app
+            .compute_unconfirmed_holding_capacity()
+            .unwrap()
+            .0
+            .stories[0]
+            .qun;
         #[cfg(feature = "gui")]
         {
             app.ui.scoped.hinge_step = Some(1);
@@ -883,7 +888,11 @@ mod tests {
         app.core.analysis_cfg.th_record_every = 17;
         app.core.analysis_cfg.seismic_dir = SeismicDir::Y;
         assert_eq!(
-            app.compute_holding_capacity().unwrap().0.stories[0].qun,
+            app.compute_unconfirmed_holding_capacity()
+                .unwrap()
+                .0
+                .stories[0]
+                .qun,
             initial
         );
     }
@@ -899,14 +908,14 @@ mod tests {
         app.core.analysis_cfg.push_dir = SeismicDir::Y;
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         app.core.model.materials[0].fy = Some(345.0);
         app.run_seismic(SeismicDir::X);
         app.run_seismic(SeismicDir::Y);
         app.core.analysis_cfg.push_dir = SeismicDir::X;
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         app.set_pushover_view_dir(SeismicDir::Y);
         let reason = app.compute_holding_capacity().err().expect("拒否される");
         assert!(
@@ -920,7 +929,7 @@ mod tests {
         let mut app = ready();
         app.run_seismic(SeismicDir::Y);
         app.run_eigen(1);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         app.core.model.materials[0].fy = Some(345.0);
         app.run_seismic(SeismicDir::X);
         app.run_pushover();
@@ -931,9 +940,9 @@ mod tests {
             .expect("拒否される")
             .contains("地震静的 Y"));
         app.run_seismic(SeismicDir::Y);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         app.run_eigen(1);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
     }
 
     #[test]
@@ -987,7 +996,7 @@ mod tests {
             ))),
             static_input
         );
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
     }
 
     #[test]
@@ -1021,7 +1030,7 @@ mod tests {
         app.run_static_all();
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         app.core.model.materials[0].fy = Some(345.0);
         app.run_seismic(SeismicDir::X);
         app.run_seismic(SeismicDir::Y);
@@ -1033,7 +1042,7 @@ mod tests {
             .expect("拒否される")
             .contains("静的組合せ「長期」"));
         app.run_static_all();
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
     }
 
     #[test]
@@ -1070,7 +1079,7 @@ mod tests {
         super::super::tests::select_holding_points(&mut app);
         let bytes = rmp_serde::to_vec(app.core.scoped.results.as_ref().unwrap()).unwrap();
         app.core.scoped.results = Some(rmp_serde::from_slice(&bytes).unwrap());
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
     }
 
     #[test]
@@ -1103,7 +1112,12 @@ mod tests {
         app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
-        let baseline = app.compute_holding_capacity().unwrap().0.stories[0].qud;
+        let baseline = app
+            .compute_unconfirmed_holding_capacity()
+            .unwrap()
+            .0
+            .stories[0]
+            .qud;
         assert!((baseline - 100_000.0).abs() < 1e-8);
         app.run_eigen(1);
         app.core
@@ -1115,7 +1129,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .period[0] = 20.0;
-        let with_modal = app.compute_holding_capacity().unwrap().0.stories[0].qud;
+        let with_modal = app
+            .compute_unconfirmed_holding_capacity()
+            .unwrap()
+            .0
+            .stories[0]
+            .qud;
         assert_eq!(baseline, with_modal);
     }
     #[test]
@@ -1253,7 +1272,7 @@ mod tests {
             "{:?}",
             app.core.scoped.last_error
         );
-        let result = app.compute_holding_capacity().unwrap().0;
+        let result = app.compute_unconfirmed_holding_capacity().unwrap().0;
         assert!((result.stories[0].qud - 110_000.0).abs() < 1e-8);
         assert!((result.stories[1].qud - 100_000.0).abs() < 1e-8);
     }
@@ -1425,7 +1444,7 @@ mod purpose_tests {
             (sepika_core::ids::ElemId(0), f64::NAN),
         ];
         app.core.design_rank_auto = false;
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         app.core.design_rank_auto = true;
         assert!(app
             .compute_holding_capacity()
@@ -1435,7 +1454,7 @@ mod purpose_tests {
     }
     #[cfg(feature = "gui")]
     #[test]
-    fn gui未採用でもピークは解析経過と表示し自動耐力未入力は手動切替を妨げない() {
+    fn gui未採用のピーク表示と手動切替はds条件保留と両立する() {
         let mut app = ready();
         let bundle = app.core.scoped.results.as_mut().unwrap();
         let po = bundle.pushover_x.as_mut().unwrap();
@@ -1489,7 +1508,11 @@ mod purpose_tests {
         assert!(!csv.contains("保有水平耐力Qu[kN]"));
         super::super::tests::select_holding_points(&mut app);
         assert_eq!(
-            app.compute_holding_capacity().unwrap().0.stories[0].qu,
+            app.compute_unconfirmed_holding_capacity()
+                .unwrap()
+                .0
+                .stories[0]
+                .qu,
             120_000.0
         );
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -1517,7 +1540,8 @@ mod purpose_tests {
             },
             |ui| crate::design_view::design_table(ui, &mut app),
         );
-        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "120.0")));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text.contains("Ds判定保留"))));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "120.0")));
         app.core
             .scoped
             .results
@@ -1611,11 +1635,11 @@ mod purpose_tests {
             });
         }
         assert!(!app.core.design_rank_auto);
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
     }
     #[cfg(feature = "gui")]
     #[test]
-    fn guiは壁負担率適用後のdsと目的ごとの部材応答変形stepを表示する() {
+    fn guiは目的別候補点を維持しても条件未確認のds値を表示しない() {
         use sepika_design_jp::secondary::holding_capacity::{FrameType, MemberRank};
         use sepika_solver::nonlinear::pushover::story_response::{CutForce, ForceGroup};
         let mut app = ready();
@@ -1675,9 +1699,12 @@ mod purpose_tests {
         cut.external_n = 100_000.0;
         cut.reference_n = 100_000.0;
         cut.support_n = 0.0;
-        let (result, _) = app.compute_holding_capacity().unwrap();
+        let (result, _) = app.compute_unconfirmed_holding_capacity().unwrap();
         assert_eq!(app.core.scoped.ds_beta_u_by_story, vec![0.77]);
         assert_eq!(result.stories[0].ds, 0.40);
+        let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
+        assert_eq!(source.ds_point.step, ds_step);
+        assert_eq!(source.capacity_point.step, capacity_step);
         let ctx = egui::Context::default();
         let output = ctx.run_ui(
             egui::RawInput {
@@ -1697,12 +1724,14 @@ mod purpose_tests {
                 _ => None,
             })
             .collect();
-        assert!(labels.contains(&"0.40"));
-        assert!(!labels.iter().any(|text| text.contains("簡易運用")));
-        assert!(labels.contains(&format!("採用方向: X、Ds部材応答の採用ステップ: {ds_step}、保有耐力比較・変形の採用ステップ: {capacity_step}").as_str()));
+        assert!(!labels.contains(&"0.40"));
+        assert!(labels.iter().any(|text| text.contains("Ds判定保留")));
+        assert!(labels.contains(&"Ds判定"));
+        assert!(labels.contains(&"保有耐力比較"));
         assert!(!labels
             .iter()
-            .any(|text| text.contains("部材応答・変形の採用ステップ")));
+            .any(|text| text.contains("採用方向: X、Ds部材応答の採用ステップ")));
+        assert!(app.core.scoped.holding_capacity_source.is_none());
     }
     fn two_purposes() -> App {
         let mut app = ready();
@@ -1764,7 +1793,7 @@ mod purpose_tests {
                 point.story_shear.fill(999_000.0);
             }
         }
-        let (result, _) = app.compute_holding_capacity().unwrap();
+        let (result, _) = app.compute_unconfirmed_holding_capacity().unwrap();
         assert_eq!(result.stories[0].qu, 120_000.0);
         let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
         assert_eq!(source.ds_forces[0].qu_n, 150_000.0);
@@ -1818,7 +1847,12 @@ mod purpose_tests {
             2
         );
         assert_eq!(
-            loaded.compute_holding_capacity().unwrap().0.stories[0].qu,
+            loaded
+                .compute_unconfirmed_holding_capacity()
+                .unwrap()
+                .0
+                .stories[0]
+                .qu,
             120_000.0
         );
         assert!(crate::summary::build_report_csv(&loaded).contains("Qu=150000"));
@@ -1863,7 +1897,7 @@ mod purpose_tests {
         super::super::tests::select_holding_points(&mut app);
         app.adopt_holding_evaluation(EvaluationPurpose::HoldingCapacity)
             .unwrap();
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_unconfirmed_holding_capacity().is_ok());
         let ds = &app
             .core
             .scoped
