@@ -96,7 +96,7 @@ pub(crate) fn concrete_allowable_bond_for_rebar(
         }
     } else {
         if deformed {
-            (fc / 10.0).min(1.355 + fc / 25.0)
+            (fc / 10.0).min(1.35 + fc / 25.0)
         } else {
             (6.0 * fc / 100.0).min(1.35)
         }
