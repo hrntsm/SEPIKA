@@ -2,7 +2,7 @@
 
 use crate::model::RcWallShearMethod;
 
-/// 耐震壁の終局せん断強度算定の入力（SI 系: 長さ `[mm]`・面積 `[mm²]`・応力 [N/mm²]）。
+/// 両側柱付き耐震壁の終局せん断強度算定の入力（SI 系: 長さ `[mm]`・面積 `[mm²]`・応力 [N/mm²]）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcWallShearInput {
     /// 採用する終局せん断耐力の算定方式。
@@ -15,7 +15,7 @@ pub struct RcWallShearInput {
     pub t: f64,
     /// 付帯柱を含めた耐震壁の全長 D `[mm]`。
     pub d_wall: f64,
-    /// 圧縮側柱のせい Dc `[mm]`（有効せい d = D − Dc/2）。付帯柱がない場合は 0。
+    /// 圧縮側柱のせい Dc `[mm]`（有効せい d = D − Dc/2）。有限の正値が必須。
     pub dc_compression: f64,
     /// 引張側柱の主筋断面積 at `[mm²]`（pte = 100·at/(te·d) の分子）。
     pub tension_column_at: f64,
@@ -77,8 +77,12 @@ pub fn wall_opening_reduction_stiffness(r0: f64) -> f64 {
 
 /// 指定方式によるRC壁の終局せん断耐力 Qu `[N]`。
 /// 横筋比は等価壁厚換算後、1.2%と実壁厚基準の壁板縦筋比の2倍以下に制限する。
-/// Fc・te・D・主筋面積・有効せいが非正の場合は0。適用条件は各consumerで検査する。
-pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
+/// 両側柱付き壁が前提で、圧縮側柱せいが非有限・非正ならエラー。
+/// Fc・te・D・主筋面積・有効せいが非正の場合は `Ok(0)`。他の適用条件は呼出側で検査する。
+pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> Result<f64, String> {
+    if !inp.dc_compression.is_finite() || inp.dc_compression <= 0.0 {
+        return Err("両側柱付きRC壁の耐力には有限正値の圧縮側柱せいが必要です".into());
+    }
     let d = inp.d_wall - inp.dc_compression / 2.0;
     if inp.fc <= 0.0
         || inp.te <= 0.0
@@ -86,7 +90,7 @@ pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
         || inp.tension_column_at <= 0.0
         || d <= 0.0
     {
-        return 0.0;
+        return Ok(0.0);
     }
     let pte = 100.0 * inp.tension_column_at / (inp.te * d);
     let j = 7.0 / 8.0 * d;
@@ -107,7 +111,7 @@ pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
     let sigma_0 = inp.sigma_0.clamp(0.0, 0.4 * inp.fc);
     let axial_term = 0.1 * sigma_0;
     let r = wall_opening_reduction_strength(inp.opening);
-    (concrete_term + hoop_term + axial_term) * inp.te * j * r
+    Ok((concrete_term + hoop_term + axial_term) * inp.te * j * r)
 }
 
 #[cfg(test)]
@@ -121,7 +125,7 @@ mod tests {
             te: 200.0,
             t: 200.0,
             d_wall: 4000.0,
-            dc_compression: 0.0,
+            dc_compression: 600.0,
             tension_column_at: 1000.0,
             sigma_wh: 295.0,
             pwh_ratio: 0.0025,
@@ -209,7 +213,7 @@ mod tests {
                 (RcWallShearMethod::ArakawaMean, mean_n),
             ] {
                 input.method = method;
-                assert!((wall_shear_ultimate(&input) - expected).abs() < 1e-6);
+                assert!((wall_shear_ultimate(&input).unwrap() - expected).abs() < 1e-6);
             }
         }
     }
@@ -231,9 +235,9 @@ mod tests {
             shear_span_ratio: 6450.0 / 4600.0,
             opening: None,
         };
-        assert!((wall_shear_ultimate(&input) - 1_495_316.044904383).abs() < 1e-6);
+        assert!((wall_shear_ultimate(&input).unwrap() - 1_495_316.044904383).abs() < 1e-6);
         input.method = RcWallShearMethod::ArakawaMean;
-        assert!((wall_shear_ultimate(&input) - 1_962_988.493518).abs() < 1e-6);
+        assert!((wall_shear_ultimate(&input).unwrap() - 1_962_988.493518).abs() < 1e-6);
     }
 
     /// 開口低減（耐力用）は r2 = 1 − max(r0, l0/lw, h0/h)。
@@ -282,10 +286,10 @@ mod tests {
     #[test]
     fn test_qu_scales_with_opening_reduction() {
         let mut inp = sample();
-        let qu0 = wall_shear_ultimate(&inp);
+        let qu0 = wall_shear_ultimate(&inp).unwrap();
         inp.opening = Some((1000.0, 1000.0, 3000.0, 4000.0));
         let r = wall_opening_reduction_strength(inp.opening);
-        let qu1 = wall_shear_ultimate(&inp);
+        let qu1 = wall_shear_ultimate(&inp).unwrap();
         assert!(
             (qu1 - qu0 * r).abs() < 1e-6,
             "qu1={} qu0*r={}",
@@ -298,43 +302,54 @@ mod tests {
     #[test]
     fn test_qu_axial_term_clamped() {
         let mut inp = sample();
-        let q0 = wall_shear_ultimate(&inp);
+        let q0 = wall_shear_ultimate(&inp).unwrap();
         inp.sigma_0 = 5.0;
-        let q1 = wall_shear_ultimate(&inp);
+        let q1 = wall_shear_ultimate(&inp).unwrap();
         assert!(q1 > q0);
         inp.sigma_0 = 100.0; // 0.4Fc = 9.6 でクランプ
-        let q2 = wall_shear_ultimate(&inp);
+        let q2 = wall_shear_ultimate(&inp).unwrap();
         let mut inp_c = sample();
         inp_c.sigma_0 = 0.4 * 24.0;
-        assert!((q2 - wall_shear_ultimate(&inp_c)).abs() < 1e-9);
+        assert!((q2 - wall_shear_ultimate(&inp_c).unwrap()).abs() < 1e-9);
     }
 
     #[test]
     fn test_qu_invalid_inputs_are_zero() {
         let mut inp = sample();
         inp.tension_column_at = 0.0;
-        assert_eq!(wall_shear_ultimate(&inp), 0.0);
+        assert_eq!(wall_shear_ultimate(&inp).unwrap(), 0.0);
         let mut inp = sample();
         inp.fc = 0.0;
-        assert_eq!(wall_shear_ultimate(&inp), 0.0);
+        assert_eq!(wall_shear_ultimate(&inp).unwrap(), 0.0);
     }
 
-    /// 代表値の手計算照合（無開口・軸力なし・M/(QD)=1.0）。
     #[test]
-    fn test_qu_matches_handcalc() {
-        let inp = sample();
-        let d: f64 = 4000.0;
-        let pte: f64 = 100.0 * 1000.0 / (200.0 * d);
-        let j = 7.0 / 8.0 * d;
-        let concrete = 0.053 * pte.powf(0.23) * (24.0 + 18.0) / (1.0 + 0.12);
-        let hoop = 0.85 * (0.0025f64 * 295.0).sqrt();
-        let expect = (concrete + hoop) * 200.0 * j;
-        assert!(
-            (wall_shear_ultimate(&inp) - expect).abs() < 1e-6,
-            "{} vs {}",
-            wall_shear_ultimate(&inp),
-            expect
-        );
+    fn supported_wall_capacity_matches_independent_values() {
+        let mut input = sample();
+        for (method, expected_n) in [
+            (RcWallShearMethod::ArakawaMin, 1_284_776.426863849),
+            (RcWallShearMethod::ArakawaMean, 1_575_371.113062248),
+        ] {
+            input.method = method;
+            assert!((wall_shear_ultimate(&input).unwrap() - expected_n).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn absent_or_invalid_compression_column_is_rejected() {
+        for method in [
+            RcWallShearMethod::ArakawaMin,
+            RcWallShearMethod::ArakawaMean,
+        ] {
+            for depth_mm in [0.0, -600.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut input = sample();
+                input.method = method;
+                input.dc_compression = depth_mm;
+                assert!(wall_shear_ultimate(&input)
+                    .unwrap_err()
+                    .contains("圧縮側柱せい"));
+            }
+        }
     }
 
     /// 非零 Dc・非零 σ0 を含む手計算照合。
@@ -369,9 +384,9 @@ mod tests {
         let axial = 0.1 * 1.0_f64.clamp(0.0, 0.4 * 24.0);
         let expect = (concrete + hoop + axial) * 180.0 * j;
         assert!(
-            (wall_shear_ultimate(&inp) - expect).abs() < 1e-3,
+            (wall_shear_ultimate(&inp).unwrap() - expect).abs() < 1e-3,
             "{} vs {}",
-            wall_shear_ultimate(&inp),
+            wall_shear_ultimate(&inp).unwrap(),
             expect
         );
     }
@@ -383,19 +398,27 @@ mod tests {
         low.shear_span_ratio = 0.2;
         let mut at_1 = sample();
         at_1.shear_span_ratio = 1.0;
-        assert!((wall_shear_ultimate(&low) - wall_shear_ultimate(&at_1)).abs() < 1e-6);
+        assert!(
+            (wall_shear_ultimate(&low).unwrap() - wall_shear_ultimate(&at_1).unwrap()).abs() < 1e-6
+        );
 
         let mut high = sample();
         high.shear_span_ratio = 9.0;
         let mut at_3 = sample();
         at_3.shear_span_ratio = 3.0;
-        assert!((wall_shear_ultimate(&high) - wall_shear_ultimate(&at_3)).abs() < 1e-6);
+        assert!(
+            (wall_shear_ultimate(&high).unwrap() - wall_shear_ultimate(&at_3).unwrap()).abs()
+                < 1e-6
+        );
 
         let mut over = sample();
         over.pwh_ratio = 0.05;
         let mut capped = sample();
         capped.pwh_ratio = 0.012;
-        assert!((wall_shear_ultimate(&over) - wall_shear_ultimate(&capped)).abs() < 1e-6);
+        assert!(
+            (wall_shear_ultimate(&over).unwrap() - wall_shear_ultimate(&capped).unwrap()).abs()
+                < 1e-6
+        );
     }
     #[test]
     fn horizontal_term_matches_independent_force_and_single_thickness_conversion() {
@@ -406,7 +429,7 @@ mod tests {
         input.dc_compression = 600.0;
         input.pwh_ratio = 0.002;
         input.sigma_wh = 0.0;
-        let concrete = wall_shear_ultimate(&input);
+        let concrete = wall_shear_ultimate(&input).unwrap();
         for (ratio, fy, force_n) in [
             (0.002, 295.0, 422751.059098319),
             (0.006, 295.0, 732226.313311841),
@@ -414,13 +437,13 @@ mod tests {
         ] {
             input.pwh_ratio = ratio;
             input.sigma_wh = fy;
-            assert!((wall_shear_ultimate(&input) - concrete - force_n).abs() < 1e-8);
+            assert!((wall_shear_ultimate(&input).unwrap() - concrete - force_n).abs() < 1e-8);
         }
         input.pwh_ratio = 0.002;
         input.sigma_wh = 0.0;
         input.te = 300.0;
-        let concrete = wall_shear_ultimate(&input);
+        let concrete = wall_shear_ultimate(&input).unwrap();
         input.sigma_wh = 295.0;
-        assert!((wall_shear_ultimate(&input) - concrete - 517762.1915060282).abs() < 1e-8);
+        assert!((wall_shear_ultimate(&input).unwrap() - concrete - 517762.1915060282).abs() < 1e-8);
     }
 }
