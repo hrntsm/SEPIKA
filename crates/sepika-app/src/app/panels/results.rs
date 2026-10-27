@@ -9,6 +9,7 @@ use sepika_core::units::to_display::{force_kn, stiffness_kn_per_mm};
 impl App {
     /// 結果タブ：3Dビューア と 時刻歴グラフを切替。
     pub(crate) fn results_tab_panel(&mut self, ui: &mut egui::Ui) {
+        crate::theme::panel_heading(ui, "解析結果", "参照専用");
         self.unset_regions_banner(ui);
         let result_options = self.result_display_options();
         let current_key = self

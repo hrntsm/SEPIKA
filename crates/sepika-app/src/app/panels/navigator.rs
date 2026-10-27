@@ -8,9 +8,8 @@ use sepika_core::units::to_display::force_kn;
 impl App {
     /// 左ペイン：ナビゲータ（階/部材群/断面・材料/荷重ケース/結果ケースのツリー）。
     pub(crate) fn navigator_panel(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.strong("ナビゲータ");
-            ui.separator();
+        ui.scope(|ui| {
+            crate::theme::panel_heading(ui, "ナビゲータ", "選択・参照");
 
             let header = egui::CollapsingHeader::new("部材グループ")
                 .default_open(true)

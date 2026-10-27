@@ -18,7 +18,7 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
     });
     for reason in app.core.model.story_level_diagnostics() {
         ui.colored_label(
-            crate::theme::ERROR_RED,
+            crate::theme::ERROR_TEXT,
             format!("層間変形角 算定不能: {reason}"),
         );
     }
@@ -76,10 +76,10 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
                 row.col(|ui| {
                     let txt = crate::summary::metric_value_text(&m.rs);
                     if m.rs_ok == Some(true) {
-                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
+                        ui.colored_label(crate::theme::GOOD_TEXT, txt);
                     } else {
                         ui.colored_label(
-                            crate::theme::ERROR_RED,
+                            crate::theme::ERROR_TEXT,
                             format!("{} {}", txt, crate::summary::metric_verdict_text(m.rs_ok)),
                         )
                         .on_hover_text(&txt);
@@ -88,10 +88,10 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
                 row.col(|ui| {
                     let txt = crate::summary::metric_value_text(&m.re);
                     if m.re_ok == Some(true) {
-                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
+                        ui.colored_label(crate::theme::GOOD_TEXT, txt);
                     } else {
                         ui.colored_label(
-                            crate::theme::ERROR_RED,
+                            crate::theme::ERROR_TEXT,
                             format!("{} {}", txt, crate::summary::metric_verdict_text(m.re_ok)),
                         )
                         .on_hover_text(&txt);
@@ -106,7 +106,7 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
         for metric in &metrics {
             if let Err(reason) = &metric.fes {
                 ui.colored_label(
-                    crate::theme::ERROR_RED,
+                    crate::theme::ERROR_TEXT,
                     format!("必要保有水平耐力・合否は算定不能: {reason}"),
                 );
             }
@@ -327,7 +327,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             });
             row.col(|ui| match r.ratio {
                 Some(ratio) => {
-                    ui.colored_label(crate::theme::status_color(ratio), format!("{:.4}", ratio));
+                    ui.colored_label(crate::theme::ratio_status(ratio).0, format!("{:.4}", ratio));
                 }
                 None => {
                     ui.label("-");
@@ -338,7 +338,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     ui.label("OK");
                 }
                 Some(false) => {
-                    ui.colored_label(crate::theme::ERROR_RED, "NG");
+                    ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                 }
                 None => {
                     ui.colored_label(crate::theme::GRAY_600, "検定不能");
@@ -361,7 +361,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                                 ui.label("／");
                             }
                             ui.colored_label(
-                                crate::theme::status_color(c.ratio),
+                                crate::theme::ratio_status(c.ratio).0,
                                 format!("{} {:.2}", c.kind.label(), c.ratio),
                             )
                             .on_hover_text(&c.detail);
@@ -470,7 +470,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 row.col(|ui| match j.ratio {
                     Some(ratio) => {
                         ui.colored_label(
-                            crate::theme::status_color(ratio),
+                            crate::theme::ratio_status(ratio).0,
                             format!("{:.4}", ratio),
                         );
                     }
@@ -483,7 +483,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         ui.label("OK");
                     }
                     Some(false) => {
-                        ui.colored_label(crate::theme::ERROR_RED, "NG");
+                        ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                     }
                     None => {
                         ui.colored_label(crate::theme::GRAY_600, "検定不能");
@@ -751,9 +751,9 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     });
                     row.col(|ui| {
                         if s.ok {
-                            ui.colored_label(crate::theme::GOOD_GREEN, "OK");
+                            ui.colored_label(crate::theme::GOOD_TEXT, "OK");
                         } else {
-                            ui.colored_label(crate::theme::ERROR_RED, "NG");
+                            ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                         }
                     });
                     row.col(|ui| {
@@ -958,9 +958,9 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                     if jr.unchecked {
                         ui.label("未");
                     } else if jr.ok {
-                        ui.colored_label(crate::theme::GOOD_GREEN, "OK");
+                        ui.colored_label(crate::theme::GOOD_TEXT, "OK");
                     } else {
-                        ui.colored_label(crate::theme::ERROR_RED, "NG");
+                        ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                     }
                 });
             },

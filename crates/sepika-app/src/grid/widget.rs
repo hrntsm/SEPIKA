@@ -708,24 +708,18 @@ impl GridWidget {
             .line_segment([g.left_bottom(), g.right_bottom()], grid_stroke);
         let is_real = cell.row < adapter.rows();
         if !is_real {
-            ui.painter().rect_filled(
-                g,
-                egui::CornerRadius::ZERO,
-                theme::translucent(theme::GRAY_100, 140),
-            );
+            ui.painter()
+                .rect_filled(g, egui::CornerRadius::ZERO, theme::GRAY_100);
         }
         let sel = self.grid.rect();
         let selected = self.grid.active && sel.contains(cell.row, cell.col);
         let is_anchor = self.grid.active && self.grid.anchor == cell;
         if selected && !is_anchor {
-            ui.painter().rect_filled(
-                g,
-                egui::CornerRadius::ZERO,
-                theme::translucent(theme::BLUE_300, 70),
-            );
+            ui.painter()
+                .rect_filled(g, egui::CornerRadius::ZERO, theme::SELECTION_BG);
         }
         if selected {
-            let b = egui::Stroke::new(2.0_f32, theme::BLUE_500);
+            let b = theme::FOCUS_STROKE;
             if cell.row == sel.r0 {
                 ui.painter().line_segment([g.left_top(), g.right_top()], b);
             }
@@ -754,14 +748,28 @@ impl GridWidget {
                 );
             }
         }
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        ui.painter().text(
-            rect.left_center() + egui::vec2(4.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            self.cell_display(adapter, cell.row, cell.col),
-            font,
-            theme::GRAY_700,
-        );
+        let text = self.cell_display(adapter, cell.row, cell.col);
+        let numeric = text.parse::<f64>().is_ok();
+        let style = if numeric {
+            egui::TextStyle::Monospace
+        } else {
+            egui::TextStyle::Body
+        };
+        let font = style.resolve(ui.style());
+        let (position, alignment) = if numeric {
+            (
+                rect.right_center() - egui::vec2(4.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+            )
+        } else {
+            (
+                rect.left_center() + egui::vec2(4.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+            )
+        };
+        ui.painter()
+            .text(position, alignment, &text, font, theme::GRAY_700);
+        let resp = resp.on_hover_text(&text);
         let (shift, primary_pressed, primary_down, pointer_pos) = ui.input(|i| {
             (
                 i.modifiers.shift,
@@ -828,8 +836,7 @@ impl GridWidget {
     }
 
     /// 編集モードのセル描画（TextEdit＋確定/キャンセル判定）。
-    /// 選択モードのセルと同じ矩形・同じ左余白（4px）へ `put` で固定し、
-    /// モード切替時に文字が動かないようにする
+    /// 数値は等幅・右寄せ、その他は本文・左寄せで表示する。
     fn edit_mode_cell(
         &mut self,
         ui: &mut egui::Ui,
@@ -838,14 +845,28 @@ impl GridWidget {
         cell: CellRef,
     ) {
         let rect = ui.available_rect_before_wrap();
+        let numeric = self
+            .cell_display(adapter, cell.row, cell.col)
+            .parse::<f64>()
+            .is_ok();
         let resp = ui.put(
             rect,
             egui::TextEdit::singleline(&mut self.edit_buf)
-                .font(egui::TextStyle::Body)
+                .font(if numeric {
+                    egui::TextStyle::Monospace
+                } else {
+                    egui::TextStyle::Body
+                })
+                .horizontal_align(if numeric {
+                    egui::Align::Max
+                } else {
+                    egui::Align::Min
+                })
                 .vertical_align(egui::Align::Center)
                 .margin(egui::Margin::symmetric(4, 0))
                 .clip_text(false),
         );
+        theme::focus_outline(ui, &resp);
         if self.edit_needs_focus {
             resp.request_focus();
             self.edit_needs_focus = false;

@@ -30,15 +30,14 @@ impl App {
         } else {
             std::borrow::Cow::Borrowed(&self.core.model)
         };
-        ui.group(|ui| {
-            ui.strong("インスペクタ");
-            ui.separator();
+        ui.scope(|ui| {
+            crate::theme::panel_heading(ui, "インスペクタ", "参照専用");
 
             if let Some(id) = self.ui.scoped.nav.focus_vibration_case {
                 if let Some(case) = self.core.model.vibration_cases.iter().find(|c| c.id == id) {
                     ui.strong("表示中の立体振動ケース");
-                    ui.label(format!("名称: {}", case.name));
-                    ui.label(format!("波形: {}", case.wave_name));
+                    crate::theme::name_label(ui, &format!("名称: {}", case.name));
+                    crate::theme::name_label(ui, &format!("波形: {}", case.wave_name));
                     ui.label(format!(
                         "方向: {}",
                         match case.dir {
@@ -66,8 +65,8 @@ impl App {
                     .find(|c| c.id == id)
                 {
                     ui.strong("表示中の質点系振動ケース");
-                    ui.label(format!("名称: {}", case.name));
-                    ui.label(format!("波形: {}", case.wave_name));
+                    crate::theme::name_label(ui, &format!("名称: {}", case.name));
+                    crate::theme::name_label(ui, &format!("波形: {}", case.wave_name));
                     ui.label(format!(
                         "方向: {}",
                         match case.dir {
@@ -121,7 +120,8 @@ impl App {
                             .get(sec_id.index())
                             .filter(|s| s.id == sec_id)
                         {
-                            ui.label(format!("断面: {} ({})", sec.name, sec_id.0));
+                            crate::theme::name_label(ui, &format!("断面: {}", sec.name));
+                            ui.label(format!("断面 ID: {}", sec_id.0));
                             ui.label(format!(
                                 "  A = {} cm²",
                                 fmt_section_prop(area_cm2(sec.area))
@@ -149,7 +149,8 @@ impl App {
                         ui.label("断面: 未割当");
                     }
                     if let Some(mat) = self.core.model.element_material(e) {
-                        ui.label(format!("材料: {} ({})", mat.name, mat.id.0));
+                        crate::theme::name_label(ui, &format!("材料: {}", mat.name));
+                        ui.label(format!("材料 ID: {}", mat.id.0));
                         ui.label(format!("  E = {:.1} N/mm²", mat.young));
                         if let Some(fc) = mat.fc {
                             ui.label(format!("  Fc = {:.1} N/mm²", fc));
@@ -168,10 +169,10 @@ impl App {
                             match &p.outcome {
                                 sepika_design_jp::CheckOutcome::Checked(cr) => {
                                     let ratio = cr.ratio();
-                                    let color = crate::theme::status_color(ratio);
+                                    let (color, state) = crate::theme::ratio_status(ratio);
                                     ui.colored_label(
                                         color,
-                                        format!("  pos={:.2} 検定比={:.3}", p.xi, ratio),
+                                        format!("{state} pos={:.2} 検定比={:.3}", p.xi, ratio),
                                     );
                                 }
                                 sepika_design_jp::CheckOutcome::Skipped { reason } => {
@@ -190,17 +191,15 @@ impl App {
                     ui.colored_label(crate::theme::GRAY_600, "部材を選択してください");
                 }
             } else {
-                ui.colored_label(
-                    egui::Color32::from_rgb(150, 150, 150),
-                    "部材を選択してください",
-                );
+                ui.colored_label(crate::theme::GRAY_600, "部材を選択してください");
             }
 
             if let Some(sec_id) = self.ui.scoped.nav.focus_section {
                 if let Some(sec) = self.core.model.section(sec_id) {
                     ui.separator();
                     ui.strong("表示中の断面");
-                    ui.label(format!("名前: {} ({})", sec.name, sec_id.0));
+                    crate::theme::name_label(ui, &format!("名前: {}", sec.name));
+                    ui.label(format!("断面 ID: {}", sec_id.0));
                     ui.label(format!(
                         "  A = {} cm²",
                         fmt_section_prop(area_cm2(sec.area))

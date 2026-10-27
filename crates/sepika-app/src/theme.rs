@@ -58,7 +58,71 @@ pub const HILITE_PURPLE: Color32 = Color32::from_rgb(0x7C, 0x4D, 0xFF);
 /// （スラブの BEST_YELLOW と同族の暖色。線の視認性のため濃いめのアンバー）
 pub const SECONDARY_AMBER: Color32 = Color32::from_rgb(0xD9, 0x77, 0x06);
 /// 淡色パネル上の注意ラベル（⚠ stale 等）。BEST_YELLOW はグラフ塗り用で文字には薄い。
-pub const WARN_TEXT: Color32 = SECONDARY_AMBER;
+pub const WARN_TEXT: Color32 = Color32::from_rgb(0x8A, 0x49, 0x00);
+
+/// 淡色背景上のエラー文字。
+pub const ERROR_TEXT: Color32 = Color32::from_rgb(0xB0, 0x24, 0x1C);
+/// 淡色背景上の正常状態文字。
+pub const GOOD_TEXT: Color32 = Color32::from_rgb(0x1C, 0x68, 0x34);
+/// キーボードフォーカスの輪郭。
+pub const FOCUS_STROKE: Stroke = Stroke {
+    width: 2.0,
+    color: BLUE_600,
+};
+/// 選択領域の不透明背景。
+pub const SELECTION_BG: Color32 = Color32::from_rgb(0xDC, 0xE9, 0xF8);
+
+/// 名称を一行に省略し、ホバーで全文を表示する。
+pub(crate) fn name_label(ui: &mut egui::Ui, name: &str) -> egui::Response {
+    ui.add(egui::Label::new(name).truncate())
+        .on_hover_text(name)
+}
+
+/// 選択項目に印と全文ホバーを付ける。キー操作は標準ボタンに従う。
+pub(crate) fn selectable_name(ui: &mut egui::Ui, selected: bool, name: &str) -> egui::Response {
+    let label = if selected {
+        format!("▸ {name}")
+    } else {
+        name.to_owned()
+    };
+    let response = ui
+        .add(egui::Button::selectable(selected, label).truncate())
+        .on_hover_text(name);
+    focus_outline(ui, &response);
+    response
+}
+
+/// フォーカスがある操作欄の内側に輪郭を描く。
+pub(crate) fn focus_outline(ui: &egui::Ui, response: &egui::Response) {
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect.shrink(1.0),
+            3,
+            FOCUS_STROKE,
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+/// 補助パネルの見出しを、外枠を増やさず表示する。
+pub(crate) fn panel_heading(ui: &mut egui::Ui, title: &str, access: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.strong(title);
+        ui.label(egui::RichText::new(access).small().color(GRAY_600));
+    });
+    ui.add_space(ui.spacing().item_spacing.y);
+}
+
+/// 検定比の表示用文字色と状態名。コンターの色には使用しない。
+pub(crate) fn ratio_status(ratio: f64) -> (Color32, &'static str) {
+    if ratio <= 0.8 {
+        (GOOD_TEXT, "良好")
+    } else if ratio <= 1.0 {
+        (WARN_TEXT, "注意")
+    } else {
+        (ERROR_TEXT, "超過")
+    }
+}
 
 /// 2D グラフの背景。
 pub const VIEW_BG: Color32 = Color32::WHITE;
@@ -98,7 +162,7 @@ pub fn lighten(c: Color32, t: f32) -> Color32 {
 
 /// テーブル行（ヘッダ・本文とも）の上下余白。行高がフォントの行高ちょうどだと
 /// セル内の文字が枠線に接して窮屈に見えるため、視認性のために少し余裕を持たせる。
-const TABLE_ROW_PADDING_PX: f32 = 3.0;
+const TABLE_ROW_PADDING_PX: f32 = 6.0;
 
 /// テーブルの標準行高。本文フォントの行高＋ `TABLE_ROW_PADDING_PX`。
 /// 固定 px 値（旧 18px 等）では日本語フォントの行高（Body 13pt で約 19px）に足りず
@@ -289,14 +353,16 @@ pub fn apply_theme(ctx: &egui::Context) {
 
     v.panel_fill = GRAY_100;
     v.window_fill = GRAY_100;
-    v.extreme_bg_color = GRAY_200;
+    v.extreme_bg_color = WHITE;
     v.text_edit_bg_color = Some(WHITE);
-    v.faint_bg_color = GRAY_200;
+    v.faint_bg_color = Color32::from_rgb(0xF2, 0xF5, 0xFA);
+    v.warn_fg_color = WARN_TEXT;
+    v.error_fg_color = ERROR_TEXT;
     v.code_bg_color = WHITE;
     v.hyperlink_color = BLUE_500;
 
-    v.selection.bg_fill = BLUE_500;
-    v.selection.stroke = Stroke::new(1.0_f32, WHITE);
+    v.selection.bg_fill = SELECTION_BG;
+    v.selection.stroke = Stroke::new(1.5_f32, GRAY_900);
 
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
@@ -322,10 +388,10 @@ pub fn apply_theme(ctx: &egui::Context) {
     v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, GRAY_900);
     v.widgets.hovered.corner_radius = r4;
 
-    v.widgets.active.bg_fill = BLUE_500;
-    v.widgets.active.weak_bg_fill = BLUE_500;
-    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, BLUE_500);
-    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, WHITE);
+    v.widgets.active.bg_fill = SELECTION_BG;
+    v.widgets.active.weak_bg_fill = SELECTION_BG;
+    v.widgets.active.bg_stroke = FOCUS_STROKE;
+    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, GRAY_900);
     v.widgets.active.corner_radius = r4;
 
     v.widgets.open.bg_fill = WHITE;
@@ -341,21 +407,23 @@ pub fn apply_theme(ctx: &egui::Context) {
             TextStyle::Heading,
             FontId::new(18.0, FontFamily::Proportional),
         ),
-        (TextStyle::Body, FontId::new(13.0, FontFamily::Proportional)),
+        (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
         (
             TextStyle::Button,
-            FontId::new(13.0, FontFamily::Proportional),
+            FontId::new(14.0, FontFamily::Proportional),
         ),
         (
             TextStyle::Monospace,
-            FontId::new(12.0, FontFamily::Monospace),
+            FontId::new(14.0, FontFamily::Monospace),
         ),
         (
             TextStyle::Small,
-            FontId::new(11.0, FontFamily::Proportional),
+            FontId::new(12.0, FontFamily::Proportional),
         ),
     ]
     .into();
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding = egui::vec2(6.0, 4.0);
 
     ctx.set_global_style(style);
 }
@@ -370,10 +438,7 @@ pub fn toolbar_frame() -> egui::Frame {
 
 /// 左右ドックの枠。ツールバーより淡いブルーグレー。
 pub fn content_panel_frame() -> egui::Frame {
-    egui::Frame::new()
-        .inner_margin(8)
-        .fill(GRAY_100)
-        .stroke(Stroke::new(1.0_f32, GRAY_200))
+    egui::Frame::new().inner_margin(8).fill(GRAY_100)
 }
 
 /// 中央キャンバスおよび下ドックの枠（白）。
@@ -417,6 +482,37 @@ pub fn apply_status_bar_visuals(ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_text_remains_readable_on_panel_and_selection_backgrounds() {
+        let luminance = |color: Color32| {
+            let linear = |v: u8| {
+                let v = f64::from(v) / 255.0;
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+        };
+        for background in [WHITE, GRAY_100, SELECTION_BG] {
+            for text in [
+                GRAY_900, GRAY_700, GRAY_600, WARN_TEXT, ERROR_TEXT, GOOD_TEXT,
+            ] {
+                let contrast = (luminance(background) + 0.05) / (luminance(text) + 0.05);
+                assert!(contrast >= 4.5, "{text:?} / {background:?}: {contrast}");
+            }
+        }
+    }
+
+    #[test]
+    fn ratio_state_is_explicit_at_display_boundaries() {
+        assert_eq!(ratio_status(0.8).1, "良好");
+        assert_eq!(ratio_status(0.80001).1, "注意");
+        assert_eq!(ratio_status(1.0).1, "注意");
+        assert_eq!(ratio_status(1.00001).1, "超過");
+    }
 
     /// 発散型（青-白-赤）は中央 t=0.5 がニュートラルな白になる。
     #[test]
