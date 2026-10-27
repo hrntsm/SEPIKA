@@ -79,6 +79,7 @@ fn check_walls_selected(
             thickness,
             ps,
             pwh_ratio,
+            pwv_ratio,
             ..
         }) = sec.shape
         else {
@@ -483,6 +484,21 @@ fn check_walls_selected(
                 continue;
             }
         };
+        let pwv_ratio = match pwv_ratio {
+            Some(ratio) if ratio.is_finite() && ratio >= 0.0 && ps.is_finite() && ratio >= ps => {
+                ratio
+            }
+            _ => {
+                out.push((
+                    elem.nodes[0],
+                    "耐震壁(RC)せん断非線形".into(),
+                    CheckOutcome::Skipped {
+                        reason: format!("耐震壁 ID {} の縦筋比 pwv_ratio は明示した有限・非負・直交最小筋比以上の値が必要です（psから推定しません）", elem.id.0),
+                    },
+                ));
+                continue;
+            }
+        };
         if !(0.33..=1.63).contains(&(h / l)) {
             out.push((
                 elem.nodes[0],
@@ -582,6 +598,7 @@ fn check_walls_selected(
                 tension_column_at: col_main_area_max,
                 sigma_wh,
                 pwh_ratio,
+                pwv_ratio,
                 sigma_0,
                 shear_span_ratio,
                 opening: if l0p > 1e-9 && h0p > 1e-9 {

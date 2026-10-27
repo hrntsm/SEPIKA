@@ -1,0 +1,9 @@
+cargo test -p sepika-app --features gui --lib preparation_and_pushover_report_the_same_missing_wall_direction --locked
+
+    Finished `test` profile [optimized + debuginfo] target(s) in 7m 29s
+     Running unittests src\lib.rs (C:\Users\hiroa\Desktop\ikkan\.worktree\.cargo-target\debug\deps\sepika_app-92906cb1d9405d8b.exe)
+
+running 1 test
+test app::rc_wall_direction_tests::preparation_and_pushover_report_the_same_missing_wall_direction ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 985 filtered out; finished in 0.02s

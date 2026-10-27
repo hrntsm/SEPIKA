@@ -645,6 +645,7 @@ impl WallElement {
                 tension_column_at: at,
                 sigma_wh,
                 pwh_ratio,
+                pwv_ratio,
                 sigma_0,
                 shear_span_ratio,
                 opening: opening.map(|(l0, h0)| (l0, h0, h, lw)),
@@ -771,11 +772,7 @@ impl WallElement {
         };
         let te = (properties.area_mm2 / d_wall).min(1.5 * t);
         let sigma_wh = wall_rebar_strength(data, model, false, basis)?;
-        let pwv_ratio = if section.columns.iter().any(Option::is_none) {
-            wall_direction_ratio(data, model, true)?
-        } else {
-            0.0
-        };
+        let pwv_ratio = wall_direction_ratio(data, model, true)?;
         let inputs = std::array::from_fn(|tension| WallShearGeometry {
             method: model.stress_cfg.rc_wall_shear_method,
             fc: Some(fc),
@@ -3484,10 +3481,9 @@ mod capacity_issue_tests {
         if let Some(SectionShape::RcWall { pwv_ratio, .. }) = model.sections[0].shape.as_mut() {
             *pwv_ratio = None;
         }
-        assert_eq!(
-            fixture_directional_capacity(&wall, &model, basis).unwrap(),
-            qu
-        );
+        assert!(fixture_directional_capacity(&wall, &model, basis)
+            .unwrap_err()
+            .contains("縦筋比"));
         let fiber = WallElement::try_new(&wall, &model)
             .unwrap()
             .with_fiber_flexure(
@@ -3506,10 +3502,12 @@ mod capacity_issue_tests {
             if let Some(SectionShape::RcWall { pwv_ratio, .. }) = model.sections[0].shape.as_mut() {
                 *pwv_ratio = value;
             }
-            assert_eq!(
-                fixture_directional_capacity(&wall, &model, basis).unwrap(),
-                qu
-            );
+            let capacity = fixture_directional_capacity(&wall, &model, basis).unwrap();
+            if value == Some(0.0) {
+                assert!(capacity.iter().zip(qu).all(|(q, original)| *q < original));
+            } else {
+                assert_eq!(capacity, qu);
+            }
             let element = WallElement::try_new(&wall, &model)
                 .unwrap()
                 .with_fiber_flexure(
@@ -3648,6 +3646,53 @@ mod wall_method_tests {
     use super::*;
     use crate::factory::StrengthBasis;
     use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
+
+    #[test]
+    fn both_side_columns_require_vertical_ratio_and_limit_horizontal_contribution() {
+        let mut model = rc_wall572_fixture::expanded_model();
+        if let Some(SectionShape::RcColumnRect { b, d, .. }) = &mut model.sections[0].shape {
+            *b = 300.0;
+            *d = 300.0;
+        }
+        if let Some(SectionShape::RcWall {
+            thickness,
+            pwh_ratio,
+            ..
+        }) = &mut model.sections[2].shape
+        {
+            *thickness = 300.0;
+            *pwh_ratio = Some(0.012);
+        }
+        for (method, expected) in [
+            (ArakawaMin, 2_145_279.177584084),
+            (ArakawaMean, 2_866_550.520267919),
+        ] {
+            model.stress_cfg.rc_wall_shear_method = method;
+            let q = WallElement::directional_shear_capacity_at_reference(
+                &model.elements[4],
+                &model,
+                StrengthBasis::Nominal,
+                0.0,
+                [1.5; 2],
+            )
+            .unwrap();
+            assert!(q.iter().all(|q| (*q - expected).abs() < 1e-6));
+        }
+        for invalid in [None, Some(f64::NAN), Some(-0.001)] {
+            if let Some(SectionShape::RcWall { pwv_ratio, .. }) = &mut model.sections[2].shape {
+                *pwv_ratio = invalid;
+            }
+            let reason = WallElement::directional_shear_capacity_at_reference(
+                &model.elements[4],
+                &model,
+                StrengthBasis::Nominal,
+                0.0,
+                [1.5; 2],
+            )
+            .unwrap_err();
+            assert!(reason.contains("縦筋比"));
+        }
+    }
 
     #[test]
     fn selected_method_reaches_both_directions_with_real_area_and_limited_te() {
