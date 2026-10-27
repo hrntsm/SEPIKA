@@ -30,13 +30,15 @@
 | RC壁 | 長短期の共通材料値を使用 | `rc::wall::rc_wall_shear_check`（既存単体・結線回帰） |
 | RC接合部 | 短期の共通材料値を使用 | `rc::joint::rc_joint_shear_check`（既存回帰） |
 | SRC仕口パネル | 長短期の共通材料値を使用 | `srrc::panel_zone::src_panel_zone_check`（既存回帰） |
-| 保存済み検定 | 旧検定35を除去、解析内力を保持。再保存・再読込みでも旧OKを公開せず、明示再検定で現行値を採用。現行版は保持、未来版は失効 | `app::src_ql_acceptance_tests::src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck`、実OVIKA往復 |
+| 保存済み検定 | 旧検定35・36を除去、解析63の内力を保持。再保存・再読込みでも旧OKを公開せず、明示再検定で現行値を採用。現行版は保持、未来版は失効 | `app::src_ql_acceptance_tests::src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck`、実OVIKA往復 |
 
 RC長短期の上記許容せん断力は梁327040 N/柱245280 Nである。訂正前は梁331520 N/柱248640 Nのため同じ需要を許容内としていた。SRCの長期比1.005は訂正前0.9914189189189189であり、RC負担の支配を確認する。これらは材料値の差で旧合格となる境界のVerificationであり、脚数0のfixtureを実建物の適合配筋例とはしない。
 
-検定計算契約版を35から36へ更新する。解析契約62とスキーマを維持し、旧検定のみ失効する。別変更との統合では検定版の重複を避ける必要がある。
+当初実装は検定計算契約版を35から36へ更新し、解析契約62とスキーマを維持した。その後、#910を含むmain（`6c911bc2`）を統合し、mainの解析契約63を保持、検定契約を37へ更新した。解析63の保存内力を保持し、旧検定35・36のみ失効して再検定を要求する。スキーマ変更はない。
 
 ## 実行結果と未確認
+
+### 当初実装・main統合前の記録
 
 追加SRC柱試験の初回は期待値側でα′を1.5としたため失敗した（観測比0.8375）。SRC柱のα上限2と3b′/b=1.8の条件を手計算で見直し、期待値のQA・Qを訂正した。実装側は変更していない。
 
@@ -54,5 +56,19 @@ RC長短期の上記許容せん断力は梁327040 N/柱245280 Nである。訂�
 | `cargo run -p xtask -- check-docs` | 成功（summary124・links662・impl refs706） |
 | `mdbook build` | 成功 |
 | 変更Markdownの相対リンク先検査 | 全件の実在を確認。開発文書も対象 |
+
+### main統合後の確認
+
+共有targetを専有した状態で、変更したcore・element・solver・design-jp・App等のworkspaceクレートを再ビルドし、実行件数を確認した。旧35・36、現行37、未来38を、解析63の実保存・再読込み・再保存・再検定へ通した。旧版の期待失効状態は現行定数との比較から生成せず、明示したfalseで確認した。前表の解析62・検定36時点の全core試験は履歴であり、今回の版統合を理由に全件を繰り返さない。
+
+| ローカルコマンド | 統合後の結果 |
+| --- | --- |
+| `cargo test -p sepika-design-jp --lib concrete_shear_922 --locked` | 4 passed、654 filtered。独立材料境界・RC梁柱・SRC梁柱 |
+| `cargo test -p sepika-app --lib src_ql_acceptance_tests --locked` | 3 passed、417 filtered。10種類の保存契約条件を含む。明示期待状態への最終修正後も成功 |
+| `cargo test -p sepika-app --lib result_contract_tests --locked` | 36 passed、384 filtered |
+| `cargo clippy -p sepika-core -p sepika-design-jp -p sepika-app --all-targets --locked -- -D warnings` | 成功 |
+| `cargo fmt --all -- --check` / `git diff --check` | 成功 |
+| `cargo run -p xtask -- check-docs` | 成功（summary124・links663・impl refs706） |
+| `mdbook build` | 成功 |
 
 専門家サインオフ、実建物・実験Validation、手動GUI操作、全法令の改正履歴監査、部材式全体及び軽量係数の別規準原典照合は未実施。限定したVerificationをもって全規準適合とは扱わない。#881時点の相違は履歴を維持し、本記録へ接続する。
