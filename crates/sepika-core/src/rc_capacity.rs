@@ -189,9 +189,8 @@ pub fn rc_column_mu_simple(inp: &RcCapacityInput, ag: f64, n_axial: f64) -> f64 
 /// - せん断スパン比 `M/(Q・d_e) = h0/(2・d_e)` は反曲点中央（等曲げ勾配）の仮定から
 ///   導く略算のため、式の適用範囲である 1.0〜3.0 にクランプする。
 /// - `pw` は式の適用範囲の上限 0.012 でクランプする（下限は 0）。
-/// - 軸力項 `0.1・σ0`（σ0: 軸方向圧縮応力度）は荒川式の適用範囲である
-///   0〜0.4Fc にクランプする（負の σ0（引張）は 0 とみなし、Qsu を低減しない
-///   安全側の扱いとする）。
+/// - 軸方向圧縮応力度 σ0 は 0〜0.4Fc にクランプする。
+///   引張は 0 として Qsu を低減しない。引張域の適用・安全性は未確認。
 ///
 /// 全係数は要・原典照合。
 /// 不正入力（b, d_eff, at, Fc, clear_span のいずれかが 0 以下）は 0.0 を返す。
@@ -800,7 +799,6 @@ mod tests {
 
     #[test]
     fn test_rc_qsu_simple_sigma_0_negative_is_clamped_to_zero() {
-        // 負の sigma_0（引張）は 0 とみなす（Qsu を低減しない安全側）。
         let mut inp_neg = sample_input();
         inp_neg.sigma_0 = -10.0;
         let qsu_neg = rc_qsu_simple(&inp_neg);
