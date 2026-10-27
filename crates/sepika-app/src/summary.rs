@@ -423,13 +423,16 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
+    let mut holding_reasons = app.holding_adoption_unavailable_reasons();
     if let Some(reason) = app.holding_ds_conditions_unavailable_reason() {
+        holding_reasons.push(reason);
+    }
+    if !holding_reasons.is_empty() {
         out.push_str(&format!(
             "\n必要保有水平耐力・合否,算定不能,{}\n",
-            csv_cell(&reason)
+            csv_cell(&holding_reasons.join("\n"))
         ));
     }
-
     let Some(results) = &app.core.scoped.results else {
         out.push_str("\n(解析結果なし)\n");
         return out;

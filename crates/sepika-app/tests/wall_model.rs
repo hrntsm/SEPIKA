@@ -1423,6 +1423,7 @@ fn test_holding_capacity_auto_rank_detects_wall_before_ds_hold() {
     app.core.design_rank_auto = true;
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("Ds判定保留"), "{reason}");
+    assert!(reason.contains("壁せん断破壊時のβuは採用保留"), "{reason}");
     assert!(reason.contains("RC壁版 ID 0"), "{reason}");
 
     assert!(
@@ -1657,6 +1658,7 @@ fn diagonal_wall_response_is_preserved_but_ds_conditions_stay_unconfirmed() {
     app.core.wall_structure = true;
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("Ds判定保留"), "{reason}");
+    assert!(reason.contains("壁せん断破壊時のβuは採用保留"), "{reason}");
     assert!(app.core.scoped.holding_capacity_source.is_none());
 }
 

@@ -204,13 +204,18 @@ impl App {
         String,
     > {
         let candidate = self.compute_unconfirmed_holding_capacity()?;
+        let mut reasons = self.holding_adoption_unavailable_reasons();
         if let Some(reason) = self.holding_ds_conditions_unavailable_reason() {
+            reasons.push(reason);
+        }
+        if reasons.is_empty() {
+            Ok(candidate)
+        } else {
             self.core.scoped.holding_capacity_source = None;
             self.core.scoped.ds_beta_u_by_story.clear();
             self.core.scoped.ds_wall_details.clear();
-            return Err(reason);
+            Err(reasons.join("\n"))
         }
-        Ok(candidate)
     }
 
     /// 適用条件未確認の候補を返す。製品の表示・保存・適合判定には使用しない。

@@ -15080,7 +15080,7 @@ fn ds871_old_design_is_invalidated_but_analysis_remains_and_ds_stays_on_hold() {
         .unwrap()
         .contains("Ds判定保留"));
     std::fs::remove_file(current_path).unwrap();
-    for saved_version in [39, 40, 41, DESIGN_CONTRACT_VERSION + 1] {
+    for saved_version in [39, 40, 41, 42, DESIGN_CONTRACT_VERSION + 1] {
         let (mut loaded, path) = super::result_contract_tests::restore(
             &app,
             Some(ANALYSIS_CONTRACT_VERSION),
@@ -15125,7 +15125,14 @@ fn ds871_old_design_is_invalidated_but_analysis_remains_and_ds_stays_on_hold() {
             .has_analysis_results());
         let reason = reopened.compute_holding_capacity().err().unwrap();
         assert!(reason.contains("Ds判定保留"), "{reason}");
-        assert!(crate::summary::build_report_csv(&reopened).contains("柱脚の有無・形式"));
+        assert!(
+            reason.contains("未崩壊の確認済耐力Quは採用保留"),
+            "{reason}"
+        );
+        assert!(reopened.core.scoped.holding_capacity_source.is_none());
+        let csv = crate::summary::build_report_csv(&reopened);
+        assert!(csv.contains("柱脚の有無・形式"));
+        assert!(csv.contains("連層壁脚拘束のDs/Qu対応は採用保留"));
         reopened.run_design_check();
         assert!(reopened.core.scoped.last_error.is_none());
         assert_eq!(
