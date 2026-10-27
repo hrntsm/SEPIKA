@@ -757,6 +757,7 @@ mod tests {
             nodes: vec![mk_node(0, 0.0, 0.0, 0.0), mk_node(1, 1000.0, 0.0, 0.0)],
             elements: vec![mk_beam(0, u32::from(reverse), u32::from(!reverse), ref_vec)],
             load_cases: vec![LoadCase {
+                origin: Default::default(),
                 id: sepika_core::ids::LoadCaseId(0),
                 name: "CMQ fixture".into(),
                 kind: LoadCaseKind::Dead,
@@ -1158,6 +1159,7 @@ mod tests {
             ..Default::default()
         };
         let case = LoadCase {
+            origin: Default::default(),
             id: sepika_core::ids::LoadCaseId(0),
             name: "DL".into(),
             kind: LoadCaseKind::Dead,

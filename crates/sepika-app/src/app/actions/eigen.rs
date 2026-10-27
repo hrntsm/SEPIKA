@@ -38,7 +38,7 @@ impl App {
         match res {
             Ok(modal) => {
                 let mut bundle = self.take_results_for_analysis();
-                bundle.record_input(input_key, input);
+                bundle.record_scoped_input(input_key, input, self.result_source_reference());
                 bundle.modal = Some(modal);
                 self.core.scoped.results = Some(bundle);
                 self.core.scoped.staleness.last_run = Some(SystemTime::now());

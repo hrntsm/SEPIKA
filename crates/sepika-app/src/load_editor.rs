@@ -881,6 +881,7 @@ mod tests {
                 ),
             ],
             load_cases: vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "LC0".into(),
                 nodal: Vec::new(),

@@ -368,6 +368,7 @@ mod tests {
         let mut app = App::default();
         app.core.model.load_cases = (0..3)
             .map(|i| LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(i),
                 name: format!("LC{i}"),
                 nodal: Vec::new(),
@@ -398,6 +399,7 @@ mod tests {
 
         let mut app = App::default();
         app.core.model.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "LC0".into(),
             nodal: Vec::new(),

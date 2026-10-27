@@ -5,6 +5,7 @@ fn analyzed() -> App {
     let mut app = App::default();
     let mut model = crate::sample::portal_frame();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(2),
         name: "明示P0".into(),
         kind: LoadCaseKind::Live,

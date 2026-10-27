@@ -371,6 +371,7 @@ fn fixture(kind: ElementKind, dof: Dof, total_force_n: f64) -> Model {
     let mut force = [0.0; 6];
     force[dof as usize] = total_force_n / 2.0;
     model.load_cases = vec![LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "独立1自由度参照".into(),
         kind: LoadCaseKind::Other,

@@ -193,6 +193,7 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
         }],
         elements,
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "P".into(),
@@ -257,6 +258,7 @@ fn panel_757_space_frame(column_rotation: f64, building_rotation: f64) -> Model 
     }
     model.load_cases = vec![
         LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(1),
             name: "二方向同時".into(),
             kind: Default::default(),
@@ -267,6 +269,7 @@ fn panel_757_space_frame(column_rotation: f64, building_rotation: f64) -> Model 
             member: Vec::new(),
         },
         LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(2),
             name: "X梁単独".into(),
             kind: Default::default(),
@@ -277,6 +280,7 @@ fn panel_757_space_frame(column_rotation: f64, building_rotation: f64) -> Model 
             member: Vec::new(),
         },
         LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(3),
             name: "Y梁単独".into(),
             kind: Default::default(),
@@ -408,6 +412,7 @@ fn panel_759_public_pushover_prepares_panels_with_and_without_gravity_member_loa
             MemberLoadKind::Point { a: 50.0, p: 100.0 },
         )];
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(2),
             name: "P=0".into(),
             kind: sepika_core::model::LoadCaseKind::Live,

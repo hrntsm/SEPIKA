@@ -704,6 +704,7 @@ fn both_mass_options_reject_invalid_density_with_element_id_and_lumped_only_bypa
 fn constrained(model: &mut Model) {
     model.nodes[0].restraint = Dof6Mask::FIXED;
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "質量不要".into(),
         kind: LoadCaseKind::Dead,

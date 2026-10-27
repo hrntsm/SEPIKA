@@ -595,11 +595,12 @@ pub fn apply_auto_load_cases(model: &mut Model, cases: &[AutoLoadCaseContent]) {
 
         let empty = case.nodal.is_empty() && case.member.is_empty();
         if let Some(idx) = model.load_cases.iter().position(|lc| lc.name == case.name) {
-            model.load_cases[idx].kind = case.kind;
+            model.load_cases[idx].apply_generated_kind(case.kind);
             model.load_cases[idx].replace_auto_loads(case.nodal.clone(), case.member.clone());
         } else if !empty {
             let new_id = LoadCaseId(model.load_cases.len() as u32);
             let mut lc = LoadCase {
+                origin: sepika_core::model::LoadCaseOrigin::Generated,
                 id: new_id,
                 name: case.name.to_string(),
                 kind: case.kind,
@@ -939,6 +940,7 @@ mod tests {
             ..Default::default()
         };
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(5),
             name: "独自".into(),
             kind: LoadCaseKind::Other,

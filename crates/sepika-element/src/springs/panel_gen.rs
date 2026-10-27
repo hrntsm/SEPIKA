@@ -1057,6 +1057,7 @@ mod tests {
         model.girder_groups = vec![vec![ElemId(3)]];
         model.set_member_hysteresis(ElemId(3), sepika_core::model::HysteresisModel::Standard);
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "追加部材の参照".into(),
             kind: LoadCaseKind::Dead,

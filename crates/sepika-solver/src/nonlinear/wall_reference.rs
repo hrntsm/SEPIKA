@@ -75,6 +75,7 @@ fn resolve_inputs(
         .map(|w| StaticWallFace::new(w, model))
         .collect::<Result<_, _>>()?;
     let mut gravity = LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "RC壁一次参照G".into(),
         kind: LoadCaseKind::Dead,
@@ -133,6 +134,7 @@ fn resolve_inputs(
         let g = sepika_core::model::wall_element_geometry(w, model).ok_or("壁方向が不明です")?;
         for sign in [1.0, -1.0] {
             let mut case = LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(reference_model.load_cases.len() as u32),
                 name: format!("壁{}一次参照E{sign}", w.id.0),
                 kind: LoadCaseKind::Seismic,
@@ -235,6 +237,7 @@ mod tests {
     ) -> sepika_element::wall::static_face::WallFaceForces {
         let mut m = model.clone();
         m.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             ..case
         }];
@@ -346,6 +349,7 @@ mod tests {
         let g = direct_state(&m, m.load_cases[0].clone());
         close(g.compression_n, 800_000.0);
         let lateral = LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "E".into(),
             kind: LoadCaseKind::Seismic,
@@ -386,6 +390,7 @@ mod tests {
         m.load_cases.clear();
         assert_eq!(resolve(&m, true, StrengthBasis::Nominal).unwrap(), off);
         m.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "axial".into(),
             kind: LoadCaseKind::Dead,

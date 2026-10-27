@@ -75,6 +75,7 @@ impl App {
     /// 解析結果を同梱しないときは、振動荷重ケースもモデルから外して書く
     /// （結果のない空ケースがナビに残らないようにする。メモリ上のケースは残す）。
     /// 準備が古く自動部材荷重の位置・区間が不正な場合は、保存候補から全自動荷重と成果を除く。
+    /// 未準備の質量設定は保存候補へ反映し、旧設定の準備・解析成果を同梱しない。
     /// 手入力と編集中モデル・履歴は保持し、保存のための準備計算は実行しない。
     ///
     /// 解析結果の直列化サイズが `SAVE_RECORDING_CONFIRM_BYTES` を超え、かつ
@@ -109,12 +110,13 @@ impl App {
                         })
                 })
             });
+        let pending_mass_method = self.core.model.mass_method != self.core.analysis_cfg.mass_method;
         let prep = self
             .core
             .scoped
             .preparation
             .as_ref()
-            .filter(|_| !self.core.scoped.staleness.preparation_stale)
+            .filter(|_| !self.core.scoped.staleness.preparation_stale && !pending_mass_method)
             .map(rmp_serde::to_vec_named);
         let exclude_recording = include_recording == Some(false);
         let taken_recordings = if exclude_recording {
@@ -127,6 +129,7 @@ impl App {
             None
         };
         let persist_results = !discard_auto_loads
+            && !pending_mass_method
             && self.core.scoped.results.is_some()
             && (!self.core.scoped.staleness.results_stale
                 || (self.require_design_input().is_ok()
@@ -146,6 +149,18 @@ impl App {
                 bundle: {
                     let mut saved = if self.core.scoped.staleness.results_stale {
                         ResultsBundle {
+                            reference_sources: bundle
+                                .reference_sources
+                                .iter()
+                                .filter(|(key, _)| *key == ResultInputKey::Design)
+                                .cloned()
+                                .collect(),
+                            reference_runs: bundle
+                                .reference_runs
+                                .iter()
+                                .filter(|(key, _)| *key == ResultInputKey::Design)
+                                .cloned()
+                                .collect(),
                             member_checks: bundle.member_checks.clone(),
                             joint_checks: bundle.joint_checks.clone(),
                             wall_checks: bundle.wall_checks.clone(),
@@ -184,6 +199,7 @@ impl App {
             }
         }
         let analysis_settings = Some(rmp_serde::to_vec_named(&SavedAnalysisSettings {
+            references: Some(self.saved_references()),
             cfg: self.core.analysis_cfg,
             wave_name: self.core.scoped.wave_library_selection.clone(),
             wave_sha256: self.core.scoped.wave_library_selected_sha256.clone(),
@@ -222,11 +238,14 @@ impl App {
                 std::mem::take(&mut self.core.model.lumped_vibration_cases),
             ))
         };
-        let save_model = discard_auto_loads.then(|| {
+        let save_model = (discard_auto_loads || pending_mass_method).then(|| {
             let mut model = self.core.model.clone();
-            for case in &mut model.load_cases {
-                case.nodal.retain(|load| !load.source.is_auto());
-                case.member.retain(|load| !load.source.is_auto());
+            model.mass_method = self.core.analysis_cfg.mass_method;
+            if discard_auto_loads {
+                for case in &mut model.load_cases {
+                    case.nodal.retain(|load| !load.source.is_auto());
+                    case.member.retain(|load| !load.source.is_auto());
+                }
             }
             model
         });
@@ -317,6 +336,8 @@ impl App {
                     "解析タブの設定値",
                 ) {
                     self.core.analysis_cfg = saved.cfg;
+                    self.core.analysis_cfg.mass_method = self.core.model.mass_method;
+                    self.restore_references(saved.references);
                     self.restore_wave_library_selection(saved.wave_name, saved.wave_sha256);
                     self.restore_lumped_wave_library_selection(
                         saved.lumped_wave_name,

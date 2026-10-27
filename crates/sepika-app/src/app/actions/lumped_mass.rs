@@ -59,6 +59,7 @@ impl App {
         wave_name: String,
     ) -> TimeHistoryInput<Vec<f64>> {
         let cfg = self.core.analysis_cfg;
+        let raw_identity = crate::app::vibration::vibration_identity(&(cfg.lumped_th_dt, &accel));
         let dependency_identity = self.lumped_prerequisite_identity();
         let analysis_identity = crate::app::vibration::vibration_identity(&(
             &accel,
@@ -76,6 +77,7 @@ impl App {
         TimeHistoryInput {
             data: accel,
             source: TimeHistorySource {
+                raw_identity,
                 cfg,
                 wave_name,
                 identity,
@@ -114,6 +116,7 @@ impl App {
         }
         if let Some(source) = source.as_mut() {
             self.bind_time_history_source(source, true);
+            self.accept_time_history_reference(source, true);
         }
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;
@@ -255,7 +258,13 @@ impl App {
                         Some(source.identity),
                     );
                     let key = ResultInputKey::LumpedTimeHistory(case_id);
-                    bundle.record_input(key, input);
+                    bundle
+                        .reference_vibration_settings
+                        .retain(|(saved, _)| *saved != key);
+                    bundle
+                        .reference_vibration_settings
+                        .push((key.clone(), source.cfg));
+                    bundle.record_scoped_input(key, input, self.result_source_reference());
                     bundle.upsert_lumped_result(case_id, result.clone());
                     self.core.scoped.results = Some(bundle);
                     self.set_lumped_mass_view(Some(case_id), &result);

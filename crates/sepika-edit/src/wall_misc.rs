@@ -104,11 +104,19 @@ impl EditCommand for SetLoadCaseKind {
             return Box::new(Noop);
         }
         let old = model.load_cases[idx].kind;
+        if old == self.kind {
+            return Box::new(Noop);
+        }
         model.load_cases[idx].kind = self.kind;
-        Box::new(SetLoadCaseKind {
-            id: self.id,
-            kind: old,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            true,
+            Box::new(SetLoadCaseKind {
+                id: self.id,
+                kind: old,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -157,12 +165,13 @@ impl EditCommand for SyncSlabLoadsToCase {
         }
         if let Some(idx) = model.load_cases.iter().position(|lc| lc.name == self.name) {
             let old = model.load_cases[idx].clone();
-            model.load_cases[idx].kind = self.kind;
+            model.load_cases[idx].apply_generated_kind(self.kind);
             model.load_cases[idx].replace_auto_loads(self.nodal.clone(), self.member.clone());
             Box::new(RestoreLoadCaseContent { old })
         } else {
             let new_id = LoadCaseId(model.load_cases.len() as u32);
             let mut case = LoadCase {
+                origin: sepika_core::model::LoadCaseOrigin::Generated,
                 id: new_id,
                 name: self.name.clone(),
                 kind: self.kind,

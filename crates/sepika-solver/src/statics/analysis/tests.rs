@@ -83,6 +83,7 @@ fn make_cantilever_model() -> Model {
         }],
         load_cases: vec![
             LoadCase {
+                origin: Default::default(),
                 kind: Default::default(),
                 id: LoadCaseId(1),
                 name: "axial".into(),
@@ -93,6 +94,7 @@ fn make_cantilever_model() -> Model {
                 member: Vec::new(),
             },
             LoadCase {
+                origin: Default::default(),
                 kind: Default::default(),
                 id: LoadCaseId(2),
                 name: "shear".into(),
@@ -114,6 +116,7 @@ fn make_cantilever_model() -> Model {
 fn direction_model(loads: Vec<MemberLoad>) -> Model {
     let mut model = make_cantilever_model();
     model.load_cases = vec![LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "方向対照".into(),
         nodal: vec![],
@@ -1946,6 +1949,7 @@ fn ss_beam_udl(l: f64, w: f64) -> Model {
             fy: None,
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "udl".into(),
@@ -2033,6 +2037,7 @@ fn analysis_linear_combination_matches_assembled_load_case() {
     // 節点荷重 2 ケース（軸・せん断）＋部材中間荷重 1 ケースを参照する組合せ。
     let mut model = make_cantilever_model();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(3),
         name: "udl".into(),
@@ -2060,6 +2065,7 @@ fn analysis_linear_combination_matches_assembled_load_case() {
     let mut merged = model.clone();
     merged.combinations.clear();
     merged.load_cases = vec![LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(9),
         name: "merged".into(),

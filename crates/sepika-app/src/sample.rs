@@ -115,6 +115,7 @@ pub fn portal_frame() -> Model {
     }
 
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: sepika_core::model::LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "長期".into(),
@@ -131,6 +132,7 @@ pub fn portal_frame() -> Model {
         )],
     });
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: sepika_core::model::LoadCaseKind::Seismic,
         id: LoadCaseId(1),
         name: "地震X".into(),

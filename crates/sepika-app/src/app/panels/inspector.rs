@@ -21,6 +21,7 @@ pub(crate) fn section_member_ids(
 impl App {
     /// 右ペイン：選択要素のインスペクタ。
     pub(crate) fn inspector_panel(&mut self, ui: &mut egui::Ui) {
+        self.reference_panel(ui);
         let mut duplicate_member = None;
         let mut highlight_section_members: Option<Vec<ElemId>> = None;
         let display_model = if self.ui.scoped.selection.active_member().is_some()

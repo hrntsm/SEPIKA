@@ -227,6 +227,9 @@ impl LoadCaseKind {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LoadCase {
+    #[serde(default)]
+    /// 既定は明示入力。自動適用前の種別と利用者編集による明示化を保持する。
+    pub origin: LoadCaseOrigin,
     pub id: LoadCaseId,
     pub name: String,
     pub nodal: Vec<NodalLoad>,
@@ -238,7 +241,31 @@ pub struct LoadCase {
     pub kind: LoadCaseKind,
 }
 
+/// ケース定義の明示入力と、自動生成・自動適用前の種別を区別する。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LoadCaseOrigin {
+    #[default]
+    Explicit,
+    Generated,
+    ExplicitWithGeneratedKind(LoadCaseKind),
+}
+
 impl LoadCase {
+    /// 明示種別を初回だけ保存し、生成に用いる種別へ更新する。
+    pub fn apply_generated_kind(&mut self, kind: LoadCaseKind) {
+        if self.origin == LoadCaseOrigin::Explicit && self.kind != kind {
+            self.origin = LoadCaseOrigin::ExplicitWithGeneratedKind(self.kind);
+        }
+        self.kind = kind;
+    }
+
+    /// 自動適用前の明示種別を返す。自動作成ケースでは現在種別を返す。
+    pub fn explicit_input_kind(&self) -> LoadCaseKind {
+        match self.origin {
+            LoadCaseOrigin::ExplicitWithGeneratedKind(kind) => kind,
+            _ => self.kind,
+        }
+    }
     /// 手入力の節点荷重を「`nodal` 上の添字」付きで列挙する。
     /// 編集・削除コマンドは添字で対象を指すため、表示側も添字を持ち回る。
     pub fn manual_nodal(&self) -> impl Iterator<Item = (usize, &NodalLoad)> {
@@ -337,6 +364,7 @@ pub const EY_CASE_NAME: &str = "EY";
 /// （`Model::validate` の「id == 添字」規約に従う）。
 pub fn default_load_cases() -> Vec<LoadCase> {
     let make = |i: u32, name: &str, kind: LoadCaseKind| LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(i),
         name: name.to_string(),
         nodal: Vec::new(),
@@ -591,6 +619,7 @@ mod direction_tests {
         invalid.dir = [0.0; 3];
         invalid.name = "手入力P".into();
         model.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(8),
             name: "非選択ケース".into(),
             nodal: vec![],

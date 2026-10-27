@@ -1009,6 +1009,7 @@ fn rc_reference_kind_and_active_load_diagnostics_do_not_use_inactive_settings() 
     assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_err());
     model.set_member_hysteresis(ElemId(0), HysteresisModel::Retrograde);
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "長期".into(),
         kind: LoadCaseKind::Dead,

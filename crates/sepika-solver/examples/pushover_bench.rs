@@ -70,6 +70,7 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
         .collect();
     let load_cases = vec![
         LoadCase {
+            origin: Default::default(),
             kind: LoadCaseKind::Dead,
             id: LoadCaseId(0),
             name: "長期".into(),
@@ -77,6 +78,7 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
             member,
         },
         LoadCase {
+            origin: Default::default(),
             kind: LoadCaseKind::Live,
             id: LoadCaseId(1),
             name: "P=0".into(),

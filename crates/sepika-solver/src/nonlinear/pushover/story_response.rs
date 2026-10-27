@@ -327,6 +327,7 @@ pub(super) fn record_cuts(
 ) -> Vec<StoryCut> {
     let responses = super::geom::member_recording_responses(model, behaviors).unwrap();
     let empty = sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(0),
         name: String::new(),
         nodal: vec![],
@@ -482,6 +483,7 @@ pub(super) fn record_cuts_with_responses(
                         .map(|(_, force)| force[d])
                         .sum::<f64>();
                     let source = sepika_core::model::LoadCase {
+                        origin: Default::default(),
                         id: physical.source.id,
                         name: String::new(),
                         nodal: vec![],

@@ -340,6 +340,7 @@ fn attached_tip_gravity_load_is_not_replaced_with_slab_density() {
     support.nodes = vec![NodeId(4), NodeId(5)].into();
     model.elements.push(support);
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: DL_CASE_NAME.into(),
         kind: LoadCaseKind::Dead,

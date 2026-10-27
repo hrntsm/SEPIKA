@@ -11,6 +11,12 @@ impl App {
     ) -> sepika_job::JobResult<TimeHistoryInput<sepika_solver::dynamic::timehistory::GroundMotion>>
     {
         let cfg = self.core.analysis_cfg;
+        let raw_identity = crate::app::vibration::vibration_identity(&(
+            wave.dt,
+            &wave.accel_x,
+            &wave.accel_y,
+            &wave.accel_theta,
+        ));
         let effective = sepika_job::compute::effective_time_history_wave(
             &cfg,
             sepika_solver::dynamic::timehistory::GroundMotion {
@@ -38,6 +44,7 @@ impl App {
         Ok(TimeHistoryInput {
             data: wave,
             source: TimeHistorySource {
+                raw_identity,
                 cfg,
                 wave_name,
                 identity,
@@ -72,7 +79,16 @@ impl App {
                     Some(source.identity),
                 );
                 let mut bundle = self.take_results_for_analysis();
-                bundle.record_input(ResultInputKey::TimeHistory(case_id), input);
+                let key = ResultInputKey::TimeHistory(case_id);
+                bundle
+                    .reference_vibration_settings
+                    .retain(|(saved, _)| *saved != key);
+                bundle.reference_vibration_settings.push((key, source.cfg));
+                bundle.record_scoped_input(
+                    ResultInputKey::TimeHistory(case_id),
+                    input,
+                    self.result_source_reference(),
+                );
                 bundle.upsert_time_history(case_id, res.clone());
                 self.core.scoped.results = Some(bundle);
                 self.set_spatial_time_history_view(case_id, &res);
@@ -104,6 +120,7 @@ impl App {
             return;
         }
         self.bind_time_history_source(&mut input.source, false);
+        self.accept_time_history_reference(&input.source, false);
         if input.source.cfg.th_nonlinear {
             self.notice_steel_seismic_walls();
         }
@@ -146,6 +163,7 @@ impl App {
             mut source,
         } = input;
         self.bind_time_history_source(&mut source, false);
+        self.accept_time_history_reference(&source, false);
         if source.cfg.th_nonlinear {
             self.notice_steel_seismic_walls();
         }

@@ -302,6 +302,7 @@ impl App {
             let _ = tx.send(work());
         });
         self.core.scoped.job = Some(AnalysisJob {
+            reference_source: self.input_reference(),
             label,
             started: std::time::SystemTime::now(),
             input: self.job_input(),
@@ -410,6 +411,8 @@ impl App {
                         )
                     })
                     .unwrap_or(("解析", 0.0));
+                self.core.scoped.applying_result_source =
+                    job.as_ref().map(|job| job.reference_source.clone());
                 #[cfg(feature = "gui")]
                 let jump = job.and_then(|j| j.jump_on_success);
                 #[cfg(not(feature = "gui"))]
@@ -438,6 +441,7 @@ impl App {
                         excluded,
                     } => self.apply_static_all_result(computed, pre_errors, excluded),
                 }
+                self.core.scoped.applying_result_source = None;
                 // 失敗時は各 apply_* が report_error 経由で last_error とログの両方
                 // へ反映済みのため、ここでは成功時のみ完了ログを追加する
                 // （二重ログを避ける）。

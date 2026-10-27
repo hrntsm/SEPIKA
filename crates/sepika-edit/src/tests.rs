@@ -413,6 +413,7 @@ fn test_add_delete_member_load_roundtrip() {
     use sepika_core::model::{LoadCase, MemberLoad, MemberLoadKind};
     let mut model = seeded_model(2, 1);
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "lc".into(),
@@ -500,6 +501,7 @@ fn test_delete_member_undo_preserves_member_load_order() {
     model.elements = vec![mk_elem(0), mk_elem(1), mk_elem(2)];
     // 荷重順 [e0:1, e1:2, e2:3, e1:4]。elem1 に 2 つの荷重が離れて存在する。
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "lc".into(),
@@ -1292,6 +1294,7 @@ fn test_delete_member_middle_renumbers_and_roundtrips() {
     let mut model = two_member_model();
     // 両方の部材に部材荷重を付ける
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "lc".into(),
@@ -1732,6 +1735,7 @@ fn test_commands_reject_dangling_references() {
     model.sections.push(bare_section(SectionId(0), None));
     stack_add_material(&mut model, "Fc24");
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "L".into(),
         kind: LoadCaseKind::Dead,
@@ -8465,6 +8469,7 @@ mod member_load_coordinate_contract {
             ..auto.clone()
         };
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "追加".into(),
             kind: LoadCaseKind::Other,
@@ -9063,6 +9068,7 @@ mod fixed_distance_input_contract {
         let mut model = seeded_model(2, 1);
         model.nodes[1].coord = [6000.0, 0.0, 0.0];
         model.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "635対照".into(),
             kind: LoadCaseKind::Other,

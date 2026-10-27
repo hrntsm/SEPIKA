@@ -6,6 +6,7 @@ use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination};
 fn load_state_csv_keeps_selected_target_terms_duration_and_floor_scope() {
     let mut model = sepika_app::sample::portal_frame();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(2),
         name: "P,空".into(),
         kind: LoadCaseKind::Live,

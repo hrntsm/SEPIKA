@@ -1403,6 +1403,7 @@ mod tests {
             let live_id =
                 LoadCaseId(model.load_cases.iter().map(|case| case.id.0).max().unwrap() + 1);
             model.load_cases.push(LoadCase {
+                origin: Default::default(),
                 id: live_id,
                 name: "明示P0".into(),
                 kind: LoadCaseKind::Live,

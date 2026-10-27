@@ -1499,6 +1499,7 @@ mod tests {
         let mut app = App::default();
         let mut model = crate::sample::portal_frame();
         model.load_cases.push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             id: sepika_core::ids::LoadCaseId(2),
             name: "P0".into(),
             kind: sepika_core::model::LoadCaseKind::Live,

@@ -66,6 +66,7 @@ pub fn scalar_model(kind: sepika_core::model::ElementKind) -> sepika_core::model
             concrete_class: Default::default(),
         }],
         load_cases: vec![LoadCase {
+ origin: Default::default(),
             id: LoadCaseId(0),
             name: "scalar".into(),
             kind: LoadCaseKind::Dead,
