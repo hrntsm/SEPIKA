@@ -124,6 +124,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0085](0085-misc-wall-methods-and-rs-analysis.md) | accepted | 自立壁の基準剛性を二方式から選択し、Rsは付加剛性を反映して再解析する |
 
 | [0086](0086-initial-stiffness-damping.md) | accepted | 非線形時刻歴の既定減衰を未載荷の初期剛性比例とする |
+| [0087](0087-gui-owned-study-and-local-ai.md) | accepted | GUIを検討の所有者とし、外部AIは名前付きパイプで比較案を操作する |
 
 ## 規約
 
