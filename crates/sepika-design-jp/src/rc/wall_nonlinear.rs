@@ -22,7 +22,7 @@ pub struct WallShearTrilinearInput {
     pub t: f64,
     /// 付帯柱を含めた耐震壁の全長 D `[mm]`。
     pub d_wall: f64,
-    /// 圧縮側柱のせい Dc `[mm]`（有効せい d = D − Dc/2）。
+    /// 圧縮側柱のせい Dc `[mm]`（有効せい d = D − Dc/2）。有限の正値が必須。
     pub dc_compression: f64,
     /// 引張側柱の主筋断面積 at `[mm²]`（pte = 100·at/(te·d) の分子）。
     pub tension_column_at: f64,
@@ -142,8 +142,9 @@ pub fn wall_shear_opening_reduction(opening: Option<(f64, f64, f64, f64)>) -> f6
 }
 
 /// 終局せん断耐力 `[N]`。横筋比は実壁厚基準で入力し、耐力式で等価壁厚換算する。
-/// 開口低減を含む耐力単体評価。骨格の適用条件は一括算定入口で別途検査する。
-pub fn wall_shear_ultimate(inp: &WallShearTrilinearInput) -> f64 {
+/// 両側柱付き壁が前提で、圧縮側柱せいが非有限・非正ならエラー。
+/// その他の不正入力・開口低減はcoreの耐力単体評価に従い、骨格の適用条件は一括算定入口で検査する。
+pub fn wall_shear_ultimate(inp: &WallShearTrilinearInput) -> Result<f64, String> {
     sepika_core::rc_wall_capacity::wall_shear_ultimate(
         &sepika_core::rc_wall_capacity::RcWallShearInput {
             method: inp.method,
@@ -194,7 +195,7 @@ pub fn wall_shear_trilinear(inp: &WallShearTrilinearInput) -> Result<WallShearTr
     if !inp.pwv_ratio.is_finite() || inp.pwv_ratio < 0.0 {
         return Err("縦筋比 pwv_ratio は有限の非負値が必要です".into());
     }
-    let qu = wall_shear_ultimate(inp);
+    let qu = wall_shear_ultimate(inp)?;
     if !qu.is_finite() || !qc.is_finite() || qc <= 0.0 || qu <= qc {
         return Err("Qc < Qu を満たさないためせん断トリリニア骨格を算定できません".into());
     }
@@ -229,6 +230,16 @@ mod tests {
         }
     }
     #[test]
+    fn ultimate_capacity_rejects_missing_compression_column() {
+        let mut input = base_input();
+        input.dc_compression = 0.0;
+        assert!(wall_shear_ultimate(&input)
+            .unwrap_err()
+            .contains("圧縮側柱せい"));
+        assert!(wall_shear_trilinear(&input).is_err());
+    }
+
+    #[test]
     fn vertical_limit_prevents_overstated_reference_skeleton() {
         let mut input = base_input();
         input.t = 300.0;
@@ -250,7 +261,7 @@ mod tests {
             ),
         ] {
             input.method = method;
-            assert!((wall_shear_ultimate(&input) - expected).abs() < 1e-6);
+            assert!((wall_shear_ultimate(&input).unwrap() - expected).abs() < 1e-6);
             assert!(wall_shear_trilinear(&input)
                 .unwrap_err()
                 .contains("Qc < Qu"));

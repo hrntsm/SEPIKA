@@ -134,8 +134,6 @@ struct WallShearGeometry {
     dc_compression: f64,
     /// 引張側柱の主筋断面積 at [mm²]
     col_main_at: f64,
-    /// 側柱（付帯柱）があるか
-    has_side_column: bool,
     /// 壁横筋の降伏点 σwh [N/mm²]
     sigma_wh: f64,
     /// 開口寸法 `(l0, h0)` [mm]（無開口は `None`）
@@ -596,8 +594,8 @@ impl WallElement {
 
     /// 選択方式による耐震壁の面内せん断終局強度 Qu [N]。
     /// 開口低減は耐力用 r2 = 1−max(r0, l0/lw, h0/h)（剛性用 r1 = 1−1.25·r0 とは別式）。
-    /// 算定できない場合（Fc 未設定など）は 0.0 を返す。
-    fn shear_capacity(inp: &WallShearGeometry) -> f64 {
+    /// 圧縮側柱せいが非有限・非正ならエラー。他の入力不足（Fc 未設定など）は `Ok(0)`。
+    fn shear_capacity(inp: &WallShearGeometry) -> Result<f64, String> {
         let &WallShearGeometry {
             method,
             fc,
@@ -612,27 +610,22 @@ impl WallElement {
             d_wall,
             dc_compression,
             col_main_at,
-            has_side_column,
             sigma_wh,
             opening,
         } = inp;
         let Some(fc) = fc else {
-            return 0.0;
+            return Ok(0.0);
         };
         if fc <= 0.0 || t <= 0.0 || lw <= 0.0 || h <= 0.0 {
-            return 0.0;
+            return Ok(0.0);
         }
         let d_eff = d_wall - dc_compression / 2.0;
         if d_eff <= 0.0 {
-            return 0.0;
+            return Ok(0.0);
         }
-        let at = if has_side_column {
-            col_main_at
-        } else {
-            pwv_ratio * t * lw
-        };
+        let at = col_main_at;
         if at <= 0.0 {
-            return 0.0;
+            return Ok(0.0);
         }
         sepika_core::rc_wall_capacity::wall_shear_ultimate(
             &sepika_core::rc_wall_capacity::RcWallShearInput {
@@ -664,7 +657,7 @@ impl WallElement {
     }
 
     /// 静的一次参照の圧縮正N `[N]`と局所正負のM/(QD)からQu `[N]`を求める。
-    /// 参照の欠落・非有限・引張N・0.4Fcを超える圧縮は理由付きで拒否する。
+    /// RC壁は両側柱が必須。参照の欠落・非有限・引張N・0.4Fcを超える圧縮は理由付きで拒否する。
     pub fn directional_shear_capacity_at_reference(
         data: &ElementData,
         model: &Model,
@@ -682,8 +675,16 @@ impl WallElement {
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
             return Ok([Self::steel_shear_capacity_of(data, model); 2]);
         }
+        let section = super::shear_section::WallSection::new(data, model)?;
+        if section.columns.iter().any(Option::is_none) {
+            return Err(wall_input_error(
+                data,
+                "せん断耐力",
+                "両側柱付きRC壁のみ対応しています（無側柱・片側柱の壁は適用外です）",
+            ));
+        }
         let mut inputs = Self::shear_inputs(data, model, basis)?;
-        let properties = super::shear_section::WallSection::new(data, model)?.properties()?;
+        let properties = section.properties()?;
         let fc = inputs[0].fc.ok_or("Fcが不足しています")?;
         let sigma_0 = compression_n / properties.area_mm2;
         if !sigma_0.is_finite()
@@ -696,11 +697,14 @@ impl WallElement {
                 "NまたはM/(QD)が適用範囲外・非有限です",
             ));
         }
-        let qu = std::array::from_fn(|branch| {
+        for branch in 0..2 {
             inputs[branch].sigma_0 = sigma_0;
             inputs[branch].shear_span_ratio = span_ratios[branch];
-            Self::shear_capacity(&inputs[branch])
-        });
+        }
+        let qu = [
+            Self::shear_capacity(&inputs[0])?,
+            Self::shear_capacity(&inputs[1])?,
+        ];
         if qu.iter().any(|v| !v.is_finite() || *v <= 0.0) {
             return Err(wall_input_error(
                 data,
@@ -787,12 +791,11 @@ impl WallElement {
             d_wall,
             dc_compression: depth[1 - tension],
             col_main_at: at[tension],
-            has_side_column: section.columns[tension].is_some(),
             sigma_wh,
             opening: wall_opening_equiv_dims(data, model),
         });
-        if inputs.iter().any(|input| {
-            let at = if input.has_side_column {
+        if inputs.iter().enumerate().any(|(side, input)| {
+            let at = if section.columns[side].is_some() {
                 input.col_main_at
             } else {
                 input.pwv_ratio * input.t * input.lw
@@ -2432,74 +2435,15 @@ mod geometry_tests {
 mod shear_yield_tests {
     use super::*;
     use crate::behavior::{Ctx, LocalVec};
-    use sepika_core::dof::Dof6Mask;
-    use sepika_core::ids::{ElemId, MaterialId, SectionId};
+    use sepika_core::ids::MaterialId;
+    use sepika_core::model::Material;
     use sepika_core::model::MaterialCategory;
-    use sepika_core::model::{ElementKind, EndCondition, ForceRegime, LocalAxis, Material, Node};
-    use sepika_core::section_shape::SectionShape;
 
     fn wall_model() -> (Model, ElementData) {
-        let shape = SectionShape::RcWall {
-            thickness: 200.0,
-            pwh_ratio: Some(0.0025),
-            pwv_ratio: Some(0.0025),
-            ps: 0.0025,
-        };
-        let mk = |id: u32, c: [f64; 3]| Node {
-            id: NodeId(id),
-            coord: c,
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        };
-        let model = Model {
-            nodes: vec![
-                mk(0, [0.0, 0.0, 0.0]),
-                mk(1, [4000.0, 0.0, 0.0]),
-                mk(2, [4000.0, 0.0, 3000.0]),
-                mk(3, [0.0, 0.0, 3000.0]),
-            ],
-            sections: vec![sepika_core::model::Section {
-                material: Some(MaterialId(0)),
-                ..shape.to_section(SectionId(0), "W200".into())
-            }],
-            materials: vec![Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "FC24".into(),
-                category: MaterialCategory::Concrete,
-                young: 23000.0,
-                poisson: 0.2,
-                density: 2.4e-9,
-                shear: None,
-                fc: Some(24.0),
-                fy: None,
-            }],
-            ..Default::default()
-        };
-        let data = ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Wall,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        };
-        let mut model = model;
-        model.elements.push(data.clone());
-        crate::wall::add_surrounding_frame(&mut model, &data);
-        let mut model = model;
-        explicit_wall_test_rebar(&mut model);
-        (model, data)
+        super::capacity_issue_tests::model_with(
+            Some(super::capacity_issue_tests::rc_col(true)),
+            0.0025,
+        )
     }
 
     #[test]
@@ -2748,7 +2692,7 @@ mod capacity_issue_tests {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
     /// 側柱あり／なし、側柱断面の指定を切り替えて壁モデルを作る。
-    fn model_with(side_col_sec: Option<Section>, ps: f64) -> (Model, ElementData) {
+    pub(super) fn model_with(side_col_sec: Option<Section>, ps: f64) -> (Model, ElementData) {
         let shape = SectionShape::RcWall {
             thickness: 200.0,
             ps,
@@ -2850,7 +2794,7 @@ mod capacity_issue_tests {
         (model, wall)
     }
 
-    fn rc_col(with_rebar: bool) -> Section {
+    pub(super) fn rc_col(with_rebar: bool) -> Section {
         let shape = if with_rebar {
             SectionShape::RcColumnRect {
                 b: 600.0,
@@ -3169,9 +3113,8 @@ mod capacity_issue_tests {
         assert!(fixture_capacity(&wall, &model).is_err());
     }
 
-    /// 側柱がない壁（壁のみの耐震壁）は不備ではなく、壁筋比から pte を算定する。
     #[test]
-    fn test_no_side_column_uses_wall_rebar_ratio() {
+    fn no_side_column_keeps_linear_diagnostic_but_rejects_ultimate_capacity() {
         let (model, wall) = model_with(None, 0.0025);
         assert_eq!(
             WallElement::wall_shear_capacity_issue(
@@ -3181,7 +3124,9 @@ mod capacity_issue_tests {
             ),
             None
         );
-        assert!(fixture_capacity(&wall, &model).unwrap() > 0.0);
+        assert!(fixture_capacity(&wall, &model)
+            .unwrap_err()
+            .contains("両側柱"));
     }
 
     /// 側柱も壁筋比もなければ pte を算定できないため不備とする。
@@ -3646,6 +3591,36 @@ mod wall_method_tests {
     use super::*;
     use crate::factory::StrengthBasis;
     use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
+
+    #[test]
+    fn reference_capacity_rejects_walls_missing_either_side_column() {
+        for method in [ArakawaMin, ArakawaMean] {
+            for missing in [[0, 1].as_slice(), [0].as_slice(), [1].as_slice()] {
+                let mut model = rc_wall572_fixture::expanded_model();
+                model.stress_cfg.rc_wall_shear_method = method;
+                let wall = model.elements[4].clone();
+                model
+                    .elements
+                    .retain(|element| !missing.contains(&element.id.0));
+                let reason = WallElement::directional_shear_capacity_at_reference(
+                    &wall,
+                    &model,
+                    StrengthBasis::Nominal,
+                    0.0,
+                    [1.5; 2],
+                )
+                .unwrap_err();
+                assert!(reason.contains("両側柱"), "{missing:?}: {reason}");
+                assert!(super::super::static_face::StaticWallFace::new(&wall, &model).is_err());
+                assert!(WallElement::wall_shear_capacity_issue(
+                    &wall,
+                    &model,
+                    StrengthBasis::Nominal,
+                )
+                .is_none());
+            }
+        }
+    }
 
     #[test]
     fn both_side_columns_require_vertical_ratio_and_limit_horizontal_contribution() {
