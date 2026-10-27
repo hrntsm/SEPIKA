@@ -10,6 +10,14 @@
 
 SRC/CFTは構造種別による既存別検定器を維持する。BRBは製品Na・Lk/限界長の独立検定であり、芯材/拘束材の断面性能と令65用有効長の対応が未確認である。通常鋼λの流用・法令対象外の認定はせず、[#932](https://github.com/hrntsm/SEPIKA/issues/932)へスコープ分割した。BRB適合は令65適合を保証しない。
 
+## 山形鋼の主軸未確認と制限（Issue #935）
+
+freshレビューで、山形鋼の幾何軸Iy/Izを主軸として扱う危険側反例を確認した。等辺L100×100×10 mmの矩形和による独立値はA=1900 mm²、Iy=Iz=1800043.859649 mm⁴、Iyz=-1065789.473684 mm⁴、Imin=734254.385965 mm⁴。両軸有効長6000 mmでは幾何軸λ=194.933512に対し主軸λ=305.2142288であり、柱200・他250の双方を超える。幾何軸の値を使うと小圧縮N=-1000 Nを適合と誤判定しうる。
+
+coreの`SectionShape::calc_iy/calc_iz`が保持する幾何軸定義は変更しない。有効長と主軸の対応を推定せず、圧縮山形鋼は理由付き未検定へ制限した。これは確定NGや法令対象外の認定ではない。本格的な主軸・有効長・検定適用の対応は[#935](https://github.com/hrntsm/SEPIKA/issues/935)へ分割した。引張・軸力0への追加制限は行わず、それらの既存検定全体を再承認したものとも扱わない。
+
+未検定位置を含む部材は他位置の適合値だけで集約しない。理由文字列による山形鋼だけの表示特例を避け、既存の検定不能結果を用いて、部材の適合色を抑止する。選択項目の確認済みNGと、全項目に残す構造規定NGは保持する。
+
 ## 結果表現と安全性
 
 既存の構造規定成分を用い、上限超過時にλ/上限を不適合として返す。これは応力度比ではない。確定した法定不適合を応力度未対応によるSkippedで隠さないため、超過時は応力度検定より先に返す。表示の項目フィルタでも超過した構造規定を残す。NaN・無限値・負の有効長・非正の断面性能、表現不能な二次半径/λは理由付き未判定とし、0への補完で適合にしない。座屈長さ0の既存座屈無視契約は変更しない。
@@ -27,6 +35,9 @@ SRC/CFTは構造種別による既存別検定器を維持する。BRBは製品N
 | 全フィルタ部材集約 | `viewer/check_ratio.rs::issue901_failed_provision_survives_all_filters_and_mixed_positions`。適合曲げ2位置と超過1位置を集約して全項目でNG |
 | App・OVIKA・旧検定失効 | `app/result_contract_tests.rs::issue901_ovika_current_failure_roundtrips_and_old_design38_and39_expire_until_recheck`。実解析、実保存・読込、検定38・39失効と40再検定、解析応力維持 |
 | 荷重組合せ | 同ファイル`issue901_load_combinations_keep_tension_and_compression_outcomes_separate`。G+P±Eの実求解で圧縮NGとなる柱が正負で入れ替わる |
+| 圧縮山形の独立反例 | `tests/steel_slenderness.rs::issue901_compressed_angles_require_principal_axis_effective_lengths`。上記矩形和と固定Iminから主軸λ305.2142288を確認し、長短期・柱/大梁/筋かいの圧縮を未検定、引張/0を区別 |
+| 未検定混在の描画 | `viewer/check_ratio.rs::issue901_angle_mixed_positions_draw_unknown_gray_and_keep_reasons_for_all_filters`。公開runnerの引張/圧縮/0の3位置を使い、全フィルタの実egui描画線がグレー、表とホバーの理由が残ることを観測 |
+| 山形鋼の組合せ切替 | 同ファイル`issue901_angle_selected_combinations_do_not_reuse_tension_success_for_compression`。G+P±Wの実求解で引張Checkedと圧縮Skippedを切り替え、過去の適合色を再使用しない |
 | 自動egui | 同ファイル`issue901_egui_table_displays_statutory_failure`。表の上限理由・構造規定・NGの描画文字を検査 |
 
 ## 実行結果
@@ -52,6 +63,19 @@ SRC/CFTは構造種別による既存別検定器を維持する。BRBは製品N
 `da4ce52c`の版・試験更新に対して、専用targetで`cargo test -p sepika-design-jp --test steel_slenderness --locked`の6件と`cargo test -p sepika-app --lib --features gui issue901 --locked`の4件が成功した。上記3クレートのall-targets・GUI有効clippy、fmt、mdBook、diff検証も成功。`check-docs`はsummary124・links666・impl refs708。`rustup update stable`はrustc1.99.1を維持し、clippy0.1.99を再確認した。全体回帰は上記取込前の記録と区別し、今回の版更新だけでcore全試験を繰り返していない。検証ログは作業用の`verification-901/`へ保持し、追跡対象には含めない。
 
 
+### 山形鋼制限と未検定混在表示の確認
+
+対象コード: `7119e05d`。
+
+- `cargo test -p sepika-design-jp --test steel_slenderness --locked`: 7件成功（圧縮山形鋼の独立反例を含む）。
+- `cargo test -p sepika-app --lib --features gui issue901 --locked`: 6件成功（混在位置・選択組合せ・全フィルタの灰色と理由表示を含む）。
+- `cargo test -p sepika-design-jp --locked`: 単体664件・統合28件、合計692件成功。doc-test0件は新規試験の件数に算入しない。
+- `cargo test -p sepika-app --lib --features gui --locked`: 996件成功。既存`viewer::check_ratio`38件すべての成功を含む。
+- `cargo clippy -p sepika-design-jp -p sepika-app --all-targets --features sepika-app/gui --locked -- -D warnings`: 成功。stable更新後のrustc1.99.1・clippy0.1.99を確認。
+- `cargo run -p xtask -- check-docs`: summary124・links666・impl refs708で成功。fmt、mdBook、diff検証も成功。
+
+全cargoは専用targetを使用した。描画試験は対象線分に唯一のグレー線があり、適合色の重ね描きがないことを直接観測する。確認済み構造規定NGと未検定が混在する場合は、全フィルタでNGを保持する。初回のApp試験fixtureは水平梁と柱用途の不整合で解析準備に拒否されたため、水平梁用途へ修正した。上記は修正後の成功結果。
+
 ## 残る未検証
 
-物理実験・実建物Validation、手動GUI、全認定鋼材・全製品適用条件は未確認。BRBは#932、自動有効長の根拠とfc採用式の差は#879/#697の記録を維持する。
+山形鋼の主軸・有効長対応は#935で未確認。物理実験・実建物Validation、手動GUI、全認定鋼材・全製品適用条件は未確認。BRBは#932、自動有効長の根拠とfc採用式の差は#879/#697の記録を維持する。
