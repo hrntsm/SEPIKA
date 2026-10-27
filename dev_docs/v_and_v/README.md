@@ -6,7 +6,7 @@
 
 [照合記録・不一致・残項目](原典照合リスト_2025年版追補_20261027.md)に、指定本の政令・告示を原典として受理したDs表・Fes・地震力・積雪係数・RC接合部有効幅の追加確認を記録する。
 状態は🔶。専門家サインオフ・全適用条件・実験Validationは未確認。
-長期コンクリートせん断は[修正#922](https://github.com/hrntsm/SEPIKA/issues/922)、長期付着は[#923の是正・直接回帰](異形鉄筋長期付着_Issue923_2026-10.md)を参照する。鋼材圧縮#924はユーザー承認により[ADR0084](../adr/0084-steel-compression-material-e.md)の共通適用方針を確定し、判断待ちから外した。
+長期コンクリートせん断の是正・検証は[#922記録](コンクリート長期せん断_Issue922_是正記録.md)、長期付着は[#923の是正・直接回帰](異形鉄筋長期付着_Issue923_2026-10.md)を参照する。鋼材圧縮#924はユーザー承認により[ADR0084](../adr/0084-steel-compression-material-e.md)の共通適用方針を確定し、判断待ちから外した。
 別原典が必要な項目と既存#489の見送りは維持する。#720は指定2025年版での原典照合を完了した。
 
 ## SRC内蔵鉄骨の材料解決（#912）
@@ -234,6 +234,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [鉄骨材料と許容応力度_Issue879_原典照合.md](鉄骨材料と許容応力度_Issue879_原典照合.md) | 原典指定範囲・F/厚さ境界・ft/fs・fc/Λ・細長比上限 | 🔶（限定原典照合と入口Verification。圧縮式の危険側疑い・上限修正・別原典とValidationは残る） |
 | [鉄骨柱脚接合構造細則_Issue878_原典照合.md](鉄骨柱脚接合構造細則_Issue878_原典照合.md) | 2025年第2版の柱脚・接合詳細・ブレース・防火被覆の現行範囲 | 🔶（重点原画像と有限Verification。詳細専用検定未対応・法令適用/Validation未確認） |
 | [仕口パネル耐力式_Issue723_原典調査.md](仕口パネル耐力式_Issue723_原典調査.md) | 2025解説書の直接記載と別原典の境界、N/A/F・降伏/全塑性の採否 | 🔶（関連原画像閲覧済み。式全体の原典適合・採否未確定） |
+| [コンクリート長期せん断_Issue922_是正記録.md](コンクリート長期せん断_Issue922_是正記録.md) | 長期告示値の是正、RC/SRC長短期の独立境界と保存旧検定失効 | 🔶（限定Verification、軽量係数・全規準・Validation未） |
 | [RC材料構造細則_Issue881_原典照合.md](RC材料構造細則_Issue881_原典照合.md) | 2025年第2版のRC材料表・柱細則、独立数値と径/材種境界 | 🔶（指定頁原画像・材料関数Verification。相違の是正、別原典・柱条件・専門家サインオフ・Validation未） |
 | [RC開口壁_Issue821_モデル監査.md](RC開口壁_Issue821_モデル監査.md) | 直接48条件・壁版展開24条件、指定2025年版原画像、独立幾何・軸剛性上界 | 🔶（限定比較体の軸変位過小方向と不成立時の雑壁分岐を確認。実RCへの適用・モデル採否未確定、#821 OPEN / blocked） |
 | [RC壁線形軸曲げ剛性_Issue652_調査記録.md](RC壁線形軸曲げ剛性_Issue652_調査記録.md) | 現行ps換算と総断面候補、2025年版解説書の指定実画像・材料役割・実入口V&V条件 | 🔶（三本柱の分担と適用上の注意を限定照合。ps換算／総断面採用条件は本書では照合不可。候補未採用・実入口V&V未実施） |
@@ -574,6 +575,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
 | 912 | SRC梁柱の内蔵鉄骨材料解決 | sepika-design-jp / sepika-app | srrc/{mod,beam,column,tests}.rs、app/src_ql_acceptance_tests.rs | [独立耐力・境界と保存経路](SRC内蔵鉄骨材料_Issue912_確認記録.md#要素から製品経路への証拠索引) | 一次設計・入出力 | 🔶（材料契約Verification、全規準・Validation未） |
 | 885 | SRC耐震ルート・柱区分とDs適用 | sepika-design-jp / sepika-app | secondary/src_rank.rs・ds_group.rs、actions/design/holding.rs | [原典セル・独立境界・公開probe索引](SRC耐震ルート_Issue885_原典照合.md#独立数値境界と要素証拠索引) | 二次設計 | 🔶（分類Verification、SRC表選択・適用条件未対応、Validation未） |
+| 922 | コンクリート長期許容せん断 | sepika-design-jp / sepika-core / sepika-app | material_strength・rc・srrc、result_contract、src_ql_acceptance_tests | [独立値・経路・保存失効](コンクリート長期せん断_Issue922_是正記録.md#独立期待値と要素からの証拠索引) | 一次設計・保存 | 🔶（限定Verification、全規準・Validation未） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |

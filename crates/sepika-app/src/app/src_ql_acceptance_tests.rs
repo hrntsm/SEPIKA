@@ -108,15 +108,17 @@ fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck
     assert_checked(&original);
     let input = bytes(&original.core.model);
     let original_bundle = original.core.scoped.results.as_ref().unwrap();
-    for (name, version) in [
-        ("src-missing", None),
-        ("src-old14", Some(14)),
-        ("src-old15", Some(15)),
-        ("src-old16", Some(16)),
-        ("src-old17", Some(17)),
-        ("src-old18", Some(18)),
-        ("src-current19", Some(19)),
-        ("src-future20", Some(20)),
+    for (name, version, current) in [
+        ("src-missing", None, false),
+        ("src-old14", Some(14), false),
+        ("src-old15", Some(15), false),
+        ("src-old16", Some(16), false),
+        ("src-old17", Some(17), false),
+        ("src-old18", Some(18), false),
+        ("src-old35", Some(35), false),
+        ("src-old36", Some(36), false),
+        ("src-current", Some(DESIGN_CONTRACT_VERSION), true),
+        ("src-future", Some(DESIGN_CONTRACT_VERSION + 1), false),
     ] {
         let (mut loaded, path) = super::result_contract_tests::restore(
             &original,
@@ -134,7 +136,6 @@ fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck
         );
         assert_eq!(bytes(&bundle.combos), bytes(&original_bundle.combos));
         assert_eq!(bundle.member_forces, original_bundle.member_forces);
-        let current = version == Some(DESIGN_CONTRACT_VERSION);
         assert_eq!(loaded.current_design_results().is_some(), current);
         assert_eq!(bundle.has_design_results(), current);
         assert_eq!(

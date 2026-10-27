@@ -17,9 +17,13 @@ pub fn concrete_allowable_compression(fc: f64, long_term: bool) -> f64 {
 
 /// コンクリートの許容せん断応力度 fs [N/mm²]。
 ///
-/// `長期 = min(Fc/30, 0.5 + Fc/100)`、`短期 = 長期 × 1.5`。
+/// 長期は令91条・告1450第2の値、短期は長期の1.5倍を用いる。
 pub fn concrete_allowable_shear(fc: f64, long_term: bool) -> f64 {
-    let long = (fc / 30.0).min(0.5 + fc / 100.0);
+    let long = if fc <= 21.0 {
+        fc / 30.0
+    } else {
+        0.49 + fc / 100.0
+    };
     if long_term {
         long
     } else {

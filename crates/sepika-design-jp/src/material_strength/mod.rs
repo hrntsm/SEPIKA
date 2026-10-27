@@ -27,15 +27,23 @@ mod tests {
     use sepika_core::units::ConcreteClass;
 
     #[test]
-    fn test_concrete_shear_long_term_min_branch() {
-        // Fc=21: Fc/30=0.7, 0.5+Fc/100=0.71 → Fc/30 側が支配。
-        assert!((concrete_allowable_shear(21.0, true) - 0.7).abs() < 1e-9);
+    fn concrete_shear_922_matches_independent_legal_boundary_values() {
+        for (fc, long, short) in [
+            (20.999, 0.6999666666666667, 1.04995),
+            (21.0, 0.7, 1.05),
+            (21.001, 0.70001, 1.050015),
+            (24.0, 0.73, 1.095),
+            (36.0, 0.85, 1.275),
+        ] {
+            assert!((concrete_allowable_shear(fc, true) - long).abs() < 1e-12);
+            assert!((concrete_allowable_shear(fc, false) - short).abs() < 1e-12);
+        }
     }
 
     #[test]
     fn test_concrete_fc24_representative_values() {
         for (long, compression, normal_shear, lightweight_shear) in
-            [(true, 8.0, 0.74, 0.666), (false, 16.0, 1.11, 0.999)]
+            [(true, 8.0, 0.73, 0.657), (false, 16.0, 1.095, 0.9855)]
         {
             assert!((concrete_allowable_compression(24.0, long) - compression).abs() < 1e-12);
             assert!((concrete_allowable_shear(24.0, long) - normal_shear).abs() < 1e-12);
