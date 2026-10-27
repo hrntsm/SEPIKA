@@ -123,10 +123,25 @@ mod tests {
     }
 
     #[test]
-    fn test_rebar_tension_sd345_d29_reduction() {
-        assert!((rebar_allowable_tension("SD345", 25.0, true) - 215.0).abs() < 1e-9);
-        assert!((rebar_allowable_tension("SD345", 29.0, true) - 195.0).abs() < 1e-9);
-        assert!((rebar_allowable_tension("SD345", 25.0, false) - 345.0).abs() < 1e-9);
+    fn rebar_long_term_tension_follows_article_90_diameter_boundary_mm() {
+        for (grade, short_term) in [("SD345", 345.0), ("SD390", 390.0), ("SD490", 490.0)] {
+            for (dia_mm, expected_long_term) in [
+                (25.0, 215.0),
+                (25.4, 215.0),
+                (27.999, 215.0),
+                (28.0, 215.0),
+                (28.001, 195.0),
+                (28.6, 195.0),
+                (29.0, 195.0),
+            ] {
+                assert_eq!(
+                    rebar_allowable_tension(grade, dia_mm, true),
+                    expected_long_term,
+                    "{grade}, {dia_mm} mm"
+                );
+                assert_eq!(rebar_allowable_tension(grade, dia_mm, false), short_term);
+            }
+        }
     }
 
     #[test]
