@@ -2496,7 +2496,7 @@ fn cft767_old_saved_design_keeps_analysis_and_requires_material_e_recheck() {
 #[test]
 fn misc740_旧解析契約63の通常応力をrs評価結果として再採用しない() {
     let app = calculated();
-    let (loaded, path) = restore(&app, Some(63), Some(37), "740-analysis63");
+    let (loaded, path) = restore(&app, Some(63), Some(38), "740-analysis63");
     let results = loaded.core.scoped.results.as_ref().unwrap();
     assert!(!results.has_analysis_results());
     assert!(!results.has_design_results());
