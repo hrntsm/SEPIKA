@@ -147,7 +147,7 @@ pub enum ThDir {
 /// 時刻歴の減衰モデル選択。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ThDampingModel {
-    /// 初期剛性比例（C=2h/ω1·Ke）。
+    /// 長期載荷前の初期剛性比例（C=2h/ω1·Ke）。
     StiffnessProportional,
     /// Rayleigh 減衰（1次・2次で目標減衰比）。
     Rayleigh,
@@ -215,6 +215,34 @@ impl Default for AnalysisSettings {
             lumped_th_duration: 10.0,
             lumped_th_period: 0.5,
             lumped_th_amp: 1000.0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_time_history_settings_preserve_initial_stiffness_default_and_explicit_choices() {
+        let mut settings = AnalysisSettings::default();
+        assert_eq!(
+            settings.th_damping_model,
+            ThDampingModel::StiffnessProportional
+        );
+        assert_eq!(settings.th_damping, 0.02);
+        for model in [
+            ThDampingModel::StiffnessProportional,
+            ThDampingModel::Rayleigh,
+            ThDampingModel::Modal,
+            ThDampingModel::TangentAlpha1,
+            ThDampingModel::TangentH1,
+        ] {
+            settings.th_damping_model = model;
+            let bytes = bincode::serialize(&settings).unwrap();
+            let restored: AnalysisSettings = bincode::deserialize(&bytes).unwrap();
+            assert_eq!(restored.th_damping_model, model);
+            assert_eq!(restored.th_damping, 0.02);
         }
     }
 }

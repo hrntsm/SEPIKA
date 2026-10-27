@@ -446,8 +446,9 @@ impl App {
             ui.selectable_value(
                 &mut self.core.analysis_cfg.th_damping_model,
                 ThDampingModel::StiffnessProportional,
-                "剛性比例",
-            );
+                "初期剛性比例",
+            )
+            .on_hover_text("長期載荷前の初期剛性で減衰行列を固定。塑性化による剛性低下を減衰行列に反映しません。");
             ui.selectable_value(
                 &mut self.core.analysis_cfg.th_damping_model,
                 ThDampingModel::Rayleigh,
