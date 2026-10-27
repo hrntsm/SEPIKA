@@ -3659,3 +3659,107 @@ fn panel_601_each_axis_uses_its_product_thickness_with_reinforcement() {
     assert!((ratio(&first, 0) - ratio(&direct, 0)).abs() < 1e-12);
     assert!((ratio(&first, 1) / ratio(&direct, 1) - 235.0 / 215.0).abs() < 1e-12);
 }
+
+fn panel_892_model(cft: bool, area_mm2: f64, fy_n_mm2: f64) -> Model {
+    let mut model = panel_758_model(0.0);
+    model.sections[0].shape = Some(if cft {
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+            horizontal_thick: 16.0,
+            corner_r: Some(0.0),
+        }
+    } else {
+        SectionShape::SteelBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+            horizontal_thick: 16.0,
+            corner_r: Some(0.0),
+        }
+    });
+    model.sections[0].area = area_mm2;
+    model.materials[2].name = "直接入力鋼材".into();
+    model.materials[2].fy = Some(fy_n_mm2);
+    model
+}
+
+fn panel_892_checks(model: &Model, compression_n: f64, direct: bool) -> Vec<CheckOutcome> {
+    let mut forces = [[0.0; 6]; 4];
+    forces[0][0] = -compression_n;
+    forces[2][5] = -1e8;
+    panel_758_checks(model, &forces, direct.then_some([0.0, 1e8]))
+}
+
+#[test]
+fn panel_892_actual_positive_area_matches_independent_capacity_for_steel_and_cft() {
+    for cft in [false, true] {
+        for direct in [false, true] {
+            for (area, compression, expected_n, expected_ratio) in [
+                (5e-10, 5e-8, "0.5000", 0.15731806208638105),
+                (1e-9, 1e-7, "0.5000", 0.15731806208638105),
+                (24576.0, 2457600.0, "0.5000", 0.15731806208638105),
+                (24576.0, 0.0, "0.0000", 0.13624143824094354),
+                (24576.0, -2457600.0, "0.0000", 0.13624143824094354),
+            ] {
+                let model = panel_892_model(cft, area, 200.0);
+                let checks = panel_892_checks(&model, compression, direct);
+                assert_eq!(checks.len(), 2, "{checks:?}");
+                for (index, outcome) in checks.into_iter().enumerate() {
+                    let result = outcome.unwrap_checked();
+                    let expected = if index == 0 { expected_ratio } else { 0.0 };
+                    assert!(
+                        (result.ratio() - expected).abs() < 1e-12,
+                        "cft={cft}, direct={direct}, A={area}, {result:?}"
+                    );
+                    assert!(result.components[0]
+                        .detail
+                        .contains(&format!("n={expected_n}")));
+                }
+            }
+            for compression in [4915200.0, 9830400.0] {
+                let checks =
+                    panel_892_checks(&panel_892_model(cft, 24576.0, 200.0), compression, direct);
+                assert_eq!(checks.len(), 2);
+                for result in checks {
+                    let result = result.unwrap_checked();
+                    assert_eq!(result.ratio(), f64::INFINITY);
+                    assert!(result.components[0].detail.contains("pMy=0.0"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_892_invalid_area_capacity_and_unrepresentable_ratio_are_skipped_with_reason() {
+    let subnormal = f64::from_bits(1);
+    for cft in [false, true] {
+        for direct in [false, true] {
+            for (area, fy, compression, reason, expected_count) in [
+                (0.0, 200.0, 0.0, "断面積A", 1),
+                (-1.0, 200.0, 0.0, "断面積A", 1),
+                (f64::NAN, 200.0, 0.0, "断面積A", 1),
+                (f64::INFINITY, 200.0, 0.0, "断面積A", 1),
+                (f64::NEG_INFINITY, 200.0, 0.0, "断面積A", 1),
+                (2.0, f64::MAX, 0.0, "基準軸耐力F×A", 2),
+                (subnormal, 0.5, 0.0, "基準軸耐力F×A", 2),
+                (subnormal, 200.0, f64::MAX, "圧縮軸力比N/(F×A)", 2),
+                (1e300, 200.0, subnormal, "圧縮軸力比N/(F×A)", 2),
+                (24576.0, 200.0, f64::NAN, "軸力は有限値", 2),
+                (24576.0, 200.0, f64::INFINITY, "軸力は有限値", 2),
+            ] {
+                let checks = panel_892_checks(&panel_892_model(cft, area, fy), compression, direct);
+                assert_eq!(checks.len(), expected_count, "{checks:?}");
+                for check in checks {
+                    assert!(
+                        matches!(check, CheckOutcome::Skipped { reason: ref actual }
+                        if actual.contains("接合部 ID 0") && actual.contains(reason)),
+                        "cft={cft}, direct={direct}, A={area}, F={fy}, N={compression}: {check:?}"
+                    );
+                }
+            }
+        }
+    }
+}
