@@ -199,9 +199,10 @@ fn lip_channel_invalid_geometry_is_rejected_by_existing_mass_input() {
 #[cfg(feature = "gui")]
 #[test]
 fn lip_channel_egui_design_table_displays_unchecked_reason() {
-    let mut app = App::default();
-    app.load_model(lip_model());
-    app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+    let mut app = lip_app_with_direct_buckling_length(1000.0);
+    let lambda = 1000.0_f64 / 28.08671071462023;
+    assert!(lambda < 200.0);
+    assert!((lambda - 35.60402676414013).abs() < 1e-12);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -213,6 +214,70 @@ fn lip_channel_egui_design_table_displays_unchecked_reason() {
     let text = rendered_design_table(&mut app);
     assert!(text.contains("検定済み 0 位置、検定不能 1 位置"), "{text}");
     assert!(text.contains("リップ溝形鋼"), "{text}");
+    assert!(!text.contains("OK"), "{text}");
+}
+
+#[cfg(feature = "gui")]
+fn lip_app_with_direct_buckling_length(length_mm: f64) -> App {
+    let mut model = lip_model();
+    let section = &model.sections[0];
+    assert!((section.area - 760.84).abs() < 1e-10);
+    assert!((section.iy - 2804950.3045333335).abs() < 1e-8);
+    assert!((section.iz - 600198.7674505038).abs() < 1e-8);
+    model.steel_design_attrs = model
+        .elements
+        .iter()
+        .map(|elem| sepika_core::model::SteelDesignAttr {
+            elem: elem.id,
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            lk_y_direct: Some(length_mm),
+            lk_z_direct: Some(length_mm),
+            c_direct: None,
+        })
+        .collect();
+    let mut app = App::default();
+    app.load_model(model);
+    app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn lip_channel_egui_reports_statutory_failure_before_unsupported_stress_check() {
+    let mut app = lip_app_with_direct_buckling_length(6000.0);
+    let results = app.core.scoped.results.as_mut().unwrap();
+    results.member_checks.truncate(1);
+    results.member_checks[0].positions.truncate(1);
+    let CheckOutcome::Checked(result) = &results.member_checks[0].positions[0].outcome else {
+        panic!("確定した法定上限超過を未検定へ隠さない")
+    };
+    assert!(!result.ok());
+    assert_eq!(result.components.len(), 1);
+    let component = &result.components[0];
+    assert_eq!(component.kind, sepika_design_jp::CheckKind::Provision);
+    assert!((component.ratio - 1.068120802924204).abs() < 1e-12);
+    assert!(
+        component.detail.contains("法定上限200")
+            && component.detail.contains("応力度比ではありません")
+    );
+    let text = rendered_design_table(&mut app);
+    assert!(
+        text.contains("検定済み 1 位置、検定不能 0 位置、NG 1 件"),
+        "{text}"
+    );
+    assert!(
+        text.contains("有効細長比上限") && text.contains("構造規定"),
+        "{text}"
+    );
     assert!(!text.contains("OK"), "{text}");
 }
 
