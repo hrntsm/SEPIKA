@@ -4,7 +4,8 @@ use sepika_core::model::Material;
 
 /// 異形鉄筋の許容引張・圧縮応力度 ft [N/mm²]。
 ///
-/// D29 以上で長期値低減、USD685 は長期 215・短期 685。
+/// `dia` は正の有限な径 [mm]。SD345・SD390・SD490 は長期に径28 mm超で低減する。
+/// USD685 は長期 215・短期 685。
 pub fn rebar_allowable_tension(grade: &str, dia: f64, long_term: bool) -> f64 {
     let g = grade.trim();
     if g == "USD685" {
@@ -16,7 +17,7 @@ pub fn rebar_allowable_tension(grade: &str, dia: f64, long_term: bool) -> f64 {
         } else if g.starts_with("SD295") {
             195.0
         } else if g == "SD345" || g == "SD390" || g == "SD490" {
-            if dia >= 29.0 {
+            if dia > 28.0 {
                 195.0
             } else {
                 215.0

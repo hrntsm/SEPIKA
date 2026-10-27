@@ -293,7 +293,7 @@ pub fn one_bar_area(dia: f64) -> f64 {
 /// 主筋セットの総断面積 `[mm²]`。
 /// RC 梁の実配筋。
 ///
-/// `main_dia`: 主筋径 `[mm]`（全段共通）。`top`/`bottom`: 上端筋・下端筋の
+/// `main_dia`: 正の有限な主筋径 `[mm]`（全段共通）。`top`/`bottom`: 上端筋・下端筋の
 /// かぶり側から内側へ数えた段別本数。`cover`: かぶり `[mm]`。`stirrup`: あばら筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcBeamRebar {
@@ -313,7 +313,7 @@ impl RcBeamRebar {
 
 /// RC 矩形柱の実配筋。
 ///
-/// `main_dia`: 主筋径 `[mm]`（全段共通）。`x`/`y`: X 方向・Y 方向の段別本数。
+/// `main_dia`: 正の有限な主筋径 `[mm]`（全段共通）。`x`/`y`: X 方向・Y 方向の段別本数。
 /// 各段は断面中心対称な 2 本の配筋線を 1 段とし、本数は片側 1 線あたり。
 /// `cover`: かぶり `[mm]`。`hoop`: 帯筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -334,7 +334,7 @@ impl RcRectColumnRebar {
 
 /// RC 円形柱の実配筋。
 ///
-/// `main_dia`: 主筋径 `[mm]`。`count`: 主筋総本数（円周上へ等間隔配置）。
+/// `main_dia`: 正の有限な主筋径 `[mm]`（呼び名への丸めなし）。`count`: 主筋総本数（円周上へ等間隔配置）。
 /// `cover`: かぶり `[mm]`。`hoop`: 帯筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcCircleColumnRebar {

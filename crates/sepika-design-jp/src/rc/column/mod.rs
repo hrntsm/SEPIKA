@@ -612,6 +612,51 @@ mod tests {
     use crate::DesignCheck;
 
     #[test]
+    fn public_column_check_uses_195_for_nominal_d29_diameter_mm() {
+        use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
+
+        let shape = SectionShape::RcColumnRect {
+            b: 800.0,
+            d: 800.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 28.6,
+                x: vec![6],
+                y: vec![4],
+                cover: 65.0 - 6.35 - 28.6 / 2.0,
+                hoop: RectColumnHoop {
+                    dia: 6.35,
+                    pitch: 100.0,
+                    legs_x: 2,
+                    legs_y: 2,
+                },
+            },
+        };
+        let sec = make_section(shape);
+        let mat = make_material(24.0, "Fc24");
+        let forces = MemberForcesAt {
+            n: -100_000.0,
+            mz: 1_000_000.0,
+            pos: 0.5,
+            qy: 0.0,
+            qz: 0.0,
+            my: 0.0,
+        };
+        let mut ctx = ctx_column(LoadTerm::Long);
+        ctx.shear_rebar_material = Some(crate::rc::tests::make_rebar_material("SD345", 345.0));
+        let sd345 = super::super::RcDesign
+            .check(&forces, &sec, &mat, &ctx)
+            .unwrap_checked();
+        ctx.rebar_material = Some(crate::rc::tests::make_rebar_material("SD295A", 295.0));
+        let sd295 = super::super::RcDesign
+            .check(&forces, &sec, &mat, &ctx)
+            .unwrap_checked();
+
+        // 令90条表2で両材種とも長期195 N/mm²。同じ幾何・需要なら耐力と検定比も一致する。
+        assert_eq!(sd345.components, sd295.components);
+        assert_eq!(sd345.detail, sd295.detail);
+    }
+
+    #[test]
     fn test_column_axial_capacity_handcalc() {
         let fc = 8.0; // 長期許容圧縮（Fc=24 なら 8.0）
         let ft = 215.0;
