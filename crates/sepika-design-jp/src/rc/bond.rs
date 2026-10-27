@@ -171,6 +171,56 @@ mod tests {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
 
     #[test]
+    fn test_bond_1991_fc24_other_bar_long_and_short() {
+        for (long_term, expected_fa, expected_ratio) in [
+            (true, 2.31, 1.001082251082251),
+            (false, 3.465, 0.6673881673881674),
+        ] {
+            let result =
+                rc_beam_bond_check_1991(231250.0, 500.0, 200.0, 24.0, false, long_term).unwrap();
+            assert!((result.fa - expected_fa).abs() < 1e-12);
+            assert!((result.tau - 2.3125).abs() < 1e-12);
+            assert!((result.ratio - expected_ratio).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn test_bond_1999_retains_independent_splitting_formula() {
+        let info = RcRebarInfo {
+            main_dia: 20.0,
+            tension_first_layer_count: 4.0,
+            shear_pitch: 0.0,
+            ..bond_test_info()
+        };
+        for (top_bar, long_term, expected_fb, expected_ldb) in [
+            (false, true, 1.0, 312.5),
+            (true, true, 0.8, 390.625),
+            (false, false, 1.5, 208.33333333333334),
+            (true, false, 1.2, 260.4166666666667),
+        ] {
+            let result = rc_beam_bond_check_with_rebar(
+                0.5,
+                3000.0,
+                420.0,
+                540.0,
+                500.0,
+                1000.0,
+                50_000_000.0,
+                &info,
+                24.0,
+                long_term,
+                top_bar,
+                true,
+            )
+            .unwrap();
+            assert!((result.fb - expected_fb).abs() < 1e-12);
+            assert!((result.k - 1.6).abs() < 1e-12);
+            assert!((result.ldb - expected_ldb).abs() < 1e-10);
+            assert!((result.ratio - expected_ldb / 1500.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
     fn test_rc_beam_bond_check_1991_hand_calc() {
         // 4-D22（φ=4×π×22）、j=7/8×540、Q=180kN、Fc=24、上端筋・短期。
         let phi = 4.0 * std::f64::consts::PI * 22.0;

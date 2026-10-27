@@ -768,6 +768,40 @@ mod tests {
     }
 
     #[test]
+    fn test_beam_bond_1991_corrected_allowable_rejects_excess_demand() {
+        let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
+        let sec = make_section(shape);
+        let mat = make_material(24.0, "SD345");
+        let mut ctx = ctx_beam(LoadTerm::Long);
+        ctx.length = 3000.0;
+        ctx.bond_method = BondMethod::Rc1991;
+        // 4本D19、j=7/8×540.5 mmに対してτa=2.3125 N/mm²。
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 261125.3034629518,
+            qz: 0.0,
+            my: 0.0,
+            mz: 30.0e6,
+        };
+        let result = crate::RcDesign
+            .check(&forces, &sec, &mat, &ctx)
+            .unwrap_checked();
+        let bond = result
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Bond)
+            .unwrap();
+        assert!(
+            (bond.ratio - 1.001082251082251).abs() < 1e-12,
+            "{}",
+            bond.ratio
+        );
+        assert!(bond.ratio > 1.0);
+        assert!(bond.detail.contains("fa=2.310"));
+    }
+
+    #[test]
     fn test_beam_bond_selects_rebar_category_and_grade() {
         let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
         let sec = make_section(shape);
@@ -794,9 +828,9 @@ mod tests {
                 .detail
                 .clone()
         };
-        assert!(detail("SD345").contains("fa=2.315"));
+        assert!(detail("SD345").contains("fa=2.310"));
         assert!(detail("SR235").contains("fa=1.350"));
-        assert!(detail("任意名称").contains("fa=2.315"));
+        assert!(detail("任意名称").contains("fa=2.310"));
     }
 
     /// 断片が意図した component に配置されていることの確認
