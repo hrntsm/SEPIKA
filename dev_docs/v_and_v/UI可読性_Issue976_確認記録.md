@@ -11,7 +11,7 @@
 - #974 main `f20dc6ec94ea1984fc2ac73b07c4c753cf512282` を専用ブランチへ取り込み済み。取り込み後のGUIビルドと局所検証は下記のとおり。
 - `cargo build -p sepika-app --features gui --bin sepika --locked` 成功（3分08秒）。専用worktree `target/debug/sepika.exe` を起動し、UIAでナビゲータ・属性・共通参照などの新旧統合された表示項目を取得した。これは下記の視覚確認が成立した証拠にはしない。
 
-- #974取り込み後の `cargo test -p sepika-app --features gui --lib --locked`: 1049件成功（25.22秒）。最終の表示文言修正後は `cargo test -p sepika-app --features gui --lib --locked theme::tests` の8件が成功。160pt幅で長い名称の描画矩形が収まることを製品scale 1.0/1.5で検証したが、これはヘッドレス配置試験でありOSの100%/150%実機表示ではない。
+- #974取り込み後、最終の表示文言修正前に `cargo test -p sepika-app --features gui --lib --locked` を実行し、1049件成功（25.22秒）。これは最終ソース全件の成功ではない。最終の表示文言修正後は `cargo test -p sepika-app --features gui --lib --locked theme::tests` の8件が成功。160pt幅で長い名称の描画矩形が収まることを製品scale 1.0/1.5で検証したが、これはヘッドレス配置試験でありOSの100%/150%実機表示ではない。
 - 最終差分に対する `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings` 成功（18.45秒）。
 - 最終文書に対する `cargo run -p xtask -- check-docs` 成功（summary 124、links 671、impl refs 713）。開発文書の相対リンク先も存在確認済み。
 
@@ -46,3 +46,20 @@
 
 
 停止理由は製品の実表示を取得できず、必須の100%/150%・フォーカス・IMEの検証が成立しないためである。上記Recoveryの引用を、あらゆるUI操作を一律に禁止する規定とは解釈しない。専用instanceの終了についてAPIリファレンスを確認したが、前面化不要のclose/quit/terminate専用APIは記載されていない。製品の画像座標も得られていないため、閉じるボタンへの座標操作や終了キーの再試行は行わず、instance残存を引き継ぐ。
+
+
+## CIで検出された表示テストの期待値不一致
+
+head `5c635ea4` のCI run `40550296656` で、`design602_actual_table_hides_old_ratios_after_th` が失敗した。テストは変更前に表示するラベルを `0.8000` と完全一致で検出していたが、最終の画面は `0.8000 良好` を表示するため、最初のassertが成立しなかった。上記1049件の全件検証はこの表示文言修正前であり、最終headの回帰成功として扱えない。
+
+修正では入力変更前の表示に `0.8000 良好` を要求する。入力変更と時刻歴実行後は、描画文字の空白区切りトークンに `0.8000` が一つも存在しないことを検証する。古い数値に状態文字が付いて残る場合も失敗させ、要再計算の理由表示を確認する既存のassertも維持する。計算値・結果の有効性判定は変更していない。
+
+
+今回の期待値修正後の最終ソースで実行した確認:
+
+- `cargo test -p sepika-app --features gui --lib --locked app::design_input_tests::`: 当該表示テストを含む8件成功（1041件は対象外）。
+- `cargo test -p sepika-app --features gui --lib --locked app::design_input_tests::design602_actual_table_hides_old_ratios_after_th -- --exact`: 1件成功（1048件は対象外）。
+- `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings`: 成功。
+- `cargo fmt --all --check`、`git diff --check`、`cargo run -p xtask -- check-docs`: 成功。
+
+この追試ではlib全1049件を再実行していない。上記8件と当該1件の最終ソースでの成功を記録し、過去の全件成功で最終headの全件回帰を代用しない。必須実機条件の未確認は継続している。
