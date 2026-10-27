@@ -76,6 +76,19 @@ coreの`SectionShape::calc_iy/calc_iz`が保持する幾何軸定義は変更し
 
 全cargoは専用targetを使用した。描画試験は対象線分に唯一のグレー線があり、適合色の重ね描きがないことを直接観測する。確認済み構造規定NGと未検定が混在する場合は、全フィルタでNGを保持する。初回のApp試験fixtureは水平梁と柱用途の不整合で解析準備に拒否されたため、水平梁用途へ修正した。上記は修正後の成功結果。
 
+### リップ溝形鋼の未検定と確定法定NGの表示条件
+
+feature CIで、既存のリップ溝形鋼の未検定理由表示試験が、自動有効長による確定法定NGと衝突した。製品の上限判定を弱めず、未検定を検証するfixtureだけに上限内の有効長を指定し、上限超過は別の観測回帰へ分けた。
+
+C150×75×20×2.3 mmを重複しない5矩形へ分けた独立算術は、A=760.84 mm²、Iy=2804950.3045333333 mm⁴、Iz=600198.7674505038 mm⁴、最小二次半径28.08671071462023 mm。Decimal35桁で矩形の面積・図心・平行軸項を合算した。製品の細長比関数・自動Kを期待値計算には使用しない。
+
+`sepika-app/tests/lip_channel.rs`では、両軸の直接有効長1000 mmでλ=35.60402676414013<200とし、`lip_channel_egui_design_table_displays_unchecked_reason`が未検定理由だけを検証する。一方、`lip_channel_egui_reports_statutory_failure_before_unsupported_stress_check`は有効長6000 mm、λ=213.6241605848408、λ/200=1.068120802924204を独立期待値とし、実解析後のegui表が構造規定NGを先に表示することを確認する。法定NGは応力度・有効断面の算定対応を意味しない。
+
+対象テストの修正は`ef64d6ea`。GUI有効の`cargo test -p sepika-app --test lip_channel --test load_state_report --features gui --locked`でlip_channel全7件と荷重状態CSV1件が成功した。他のApp統合targetの部材検定・未検定集計の期待も検索し、今回のfixture変更が共通supportや製品コードを変更しないこと、CIでfull_model38件は既に成功していることを確認した。無関係なApp全単体・core全試験は繰り返さない。
+
+`cargo test -p sepika-design-jp --test steel_slenderness --locked`の7件、`cargo test -p sepika-app --lib --features gui issue901 --locked`の6件も成功。`cargo clippy -p sepika-app --all-targets --features gui --locked -- -D warnings`、fmt、mdBook、diff検証が成功し、`check-docs`はsummary124・links666・impl refs708。stable更新後のrustc1.99.1/clippy0.1.99と専用targetを使用した。
+
+
 ## 残る未検証
 
 山形鋼の主軸・有効長対応は#935で未確認。物理実験・実建物Validation、手動GUI、全認定鋼材・全製品適用条件は未確認。BRBは#932、自動有効長の根拠とfc採用式の差は#879/#697の記録を維持する。
