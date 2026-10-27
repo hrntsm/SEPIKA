@@ -423,6 +423,12 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
+    for reason in app.holding_adoption_unavailable_reasons() {
+        out.push_str(&format!(
+            "必要保有水平耐力・合否,採用保留,{}\n",
+            csv_cell(&reason)
+        ));
+    }
     let Some(results) = &app.core.scoped.results else {
         out.push_str("\n(解析結果なし)\n");
         return out;

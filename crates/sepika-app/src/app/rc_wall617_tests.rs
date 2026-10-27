@@ -386,7 +386,7 @@ fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
         );
         super::tests::select_holding_points(&mut app);
         app.core.design_rank_auto = true;
-        let valid = app.compute_holding_capacity();
+        let valid = app.compute_unconfirmed_holding_capacity();
         assert!(valid.is_ok(), "{:?}", valid.err());
         let before = ledger(&app);
         let po = app.displayed_pushover().unwrap();
@@ -410,7 +410,7 @@ fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
                 .1;
             qu[branch] = qw.abs() / demand_ratio;
             let (result, _) = app
-                .compute_holding_capacity()
+                .compute_unconfirmed_holding_capacity()
                 .unwrap_or_else(|reason| panic!("{reason}"));
             ranks.push(
                 result
@@ -433,13 +433,13 @@ fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
         let po = bundle.pushover_x.as_mut().unwrap();
         po.wall_capacities.clear();
         let missing = app
-            .compute_holding_capacity()
+            .compute_unconfirmed_holding_capacity()
             .err()
             .expect("採用Qu欠落は未算定");
         assert!(missing.contains("初期Quが未解決"), "{missing}");
         assert_eq!(ledger(&app), before);
         app.core.model.materials[2].fy = Some(345.0);
-        assert!(app.compute_holding_capacity().is_err());
+        assert!(app.compute_unconfirmed_holding_capacity().is_err());
     }
 }
 

@@ -3394,7 +3394,7 @@ fn test_holding_capacity_flow() {
     app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
 
     // 階が未定義 → Err
-    assert!(app.compute_holding_capacity().is_err());
+    assert!(app.compute_unconfirmed_holding_capacity().is_err());
 
     app.generate_stories_action();
     assert!(
@@ -3412,7 +3412,7 @@ fn test_holding_capacity_flow() {
     );
 
     // プッシュオーバー未実行 → Err
-    assert!(app.compute_holding_capacity().is_err());
+    assert!(app.compute_unconfirmed_holding_capacity().is_err());
 
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
@@ -3424,7 +3424,7 @@ fn test_holding_capacity_flow() {
     );
 
     let (result, story_ranks) = app
-        .compute_holding_capacity()
+        .compute_unconfirmed_holding_capacity()
         .expect("前提が揃えば Ok のはず");
     assert_eq!(result.stories.len(), 1);
     assert!(result.stories[0].qun > 0.0);
@@ -3458,7 +3458,10 @@ fn test_holding_capacity_rejects_declared_brace_when_undetected() {
     app.core.design_rank_auto = false;
     app.core.design_rank = MemberRank::FA;
     app.core.design_frame = FrameType::SteelBrace;
-    let reason = app.compute_holding_capacity().err().expect("拒否される");
+    let reason = app
+        .compute_unconfirmed_holding_capacity()
+        .err()
+        .expect("拒否される");
     assert!(
         reason.contains("宣言した壁・筋かい架構の負担力がありません"),
         "{reason}"
@@ -3506,7 +3509,7 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
 
     app.core.design_rank_auto = true;
     let (result, story_ranks) = app
-        .compute_holding_capacity()
+        .compute_unconfirmed_holding_capacity()
         .expect("shape 付き鋼断面があれば Ok のはず");
 
     assert!(
@@ -3582,12 +3585,14 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     select_holding_points(&mut app);
     app.core.design_rank_auto = true;
     app.core.design_rank = MemberRank::FB;
-    let reason = app.compute_holding_capacity().err().unwrap();
+    let reason = app.compute_unconfirmed_holding_capacity().err().unwrap();
     assert!(reason.contains("確定評価データが不足"), "{reason}");
 
     // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
     app.core.design_rank_auto = false;
-    let _ = app.compute_holding_capacity().expect("Ok のはず");
+    let _ = app
+        .compute_unconfirmed_holding_capacity()
+        .expect("Ok のはず");
     assert!(app.core.scoped.ds_rank_fallback_stories.is_empty());
 }
 
@@ -3866,7 +3871,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
 
     app.core.design_rank_auto = true;
     let (result, _story_ranks) = app
-        .compute_holding_capacity()
+        .compute_unconfirmed_holding_capacity()
         .expect("RC 矩形 + fc 付き材料があれば Ok のはず");
 
     assert!(
@@ -3952,13 +3957,13 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         panic!("RC柱断面");
     };
     rebar.hoop.pitch += 50.0;
-    assert!(app.compute_holding_capacity().is_err());
+    assert!(app.compute_unconfirmed_holding_capacity().is_err());
     app.run_seismic(SeismicDir::X);
     app.run_seismic(SeismicDir::Y);
-    assert!(app.compute_holding_capacity().is_err());
+    assert!(app.compute_unconfirmed_holding_capacity().is_err());
     app.run_pushover();
     select_holding_points(&mut app);
-    assert!(app.compute_holding_capacity().is_ok());
+    assert!(app.compute_unconfirmed_holding_capacity().is_ok());
 }
 
 /// `App::cmq_display_load_case`（CMQ図の表示対象ケース）は、`nav.focus_load_case`
@@ -5195,7 +5200,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         });
         // この試験は表示用の直接床検定fixtureを構築する。
         let selected = app.core.scoped.last_static.take();
-        let _ = app.compute_holding_capacity();
+        let _ = app.compute_unconfirmed_holding_capacity();
         app.certify_design_fixture();
         app.core.scoped.last_static = selected;
         let context = egui::Context::default();
@@ -13779,7 +13784,9 @@ fn fes_718_ready_app() -> App {
 #[test]
 fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
     let mut app = fes_718_ready_app();
-    let normal = app.compute_holding_capacity().expect("有効な方向別結果");
+    let normal = app
+        .compute_unconfirmed_holding_capacity()
+        .expect("有効な方向別結果");
     assert_eq!(normal.0.stories[0].rs, 1.0);
     assert_eq!(normal.0.stories[0].re, 0.0);
     assert_eq!(normal.0.stories[0].fes, 1.0);
@@ -13789,7 +13796,10 @@ fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
     for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
         result.disp.fill([0.0; 6]);
     }
-    let reason = app.compute_holding_capacity().err().expect("全層ゼロ変位");
+    let reason = app
+        .compute_unconfirmed_holding_capacity()
+        .err()
+        .expect("全層ゼロ変位");
     assert!(reason.contains("Rs 算定不能"), "{reason}");
     assert!(reason.contains("X"), "{reason}");
     assert!(app.core.scoped.holding_capacity_source.is_none());
@@ -13797,14 +13807,15 @@ fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
     assert!(csv.contains("Rs 算定不能"));
     assert!(csv.contains("判定なし"));
     assert!(csv.contains("必要保有水平耐力・合否,算定不能"));
-    assert!(app.compute_holding_capacity().is_err());
+    assert!(app.compute_unconfirmed_holding_capacity().is_err());
     assert!(app.core.scoped.holding_capacity_source.is_none());
 }
 
 #[test]
 fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
     let mut app = fes_718_ready_app();
-    app.compute_holding_capacity().expect("有効な方向別結果");
+    app.compute_unconfirmed_holding_capacity()
+        .expect("有効な方向別結果");
     let y = app
         .core
         .scoped
@@ -13820,7 +13831,7 @@ fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
             force.fill(0.0);
         }
     }
-    let reason = app.compute_holding_capacity().err().unwrap();
+    let reason = app.compute_unconfirmed_holding_capacity().err().unwrap();
     assert!(reason.contains("Re 算定不能"), "{reason}");
     assert!(app.core.scoped.holding_capacity_source.is_none());
     app.core
@@ -13830,7 +13841,7 @@ fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
         .unwrap()
         .statics
         .retain(|(key, _)| *key != StaticCaseKey::Seismic(SeismicDir::Y));
-    let reason = app.compute_holding_capacity().err().unwrap();
+    let reason = app.compute_unconfirmed_holding_capacity().err().unwrap();
     assert!(reason.contains("X/Y 方向"), "{reason}");
     assert!(crate::summary::build_report_csv(&app).contains("地震静的 Y の解析結果がありません"));
 }
@@ -13855,7 +13866,7 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
     );
     assert_eq!(results.statics.len(), normal_count);
     assert!(crate::summary::build_report_csv(&reopened).contains("Rs 算定不能"));
-    assert!(reopened.compute_holding_capacity().is_err());
+    assert!(reopened.compute_unconfirmed_holding_capacity().is_err());
 
     let mut original = fes_718_ready_app();
     original.run_design_check();
@@ -13952,14 +13963,15 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
         .iter()
         .all(|m| m.drift.is_err() && m.drift_ok.is_none()));
     assert!(crate::summary::build_report_csv(&reopened).contains("未計算: 地震静的"));
-    assert!(reopened.compute_holding_capacity().is_err());
+    assert!(reopened.compute_unconfirmed_holding_capacity().is_err());
 }
 
 #[test]
 #[cfg(feature = "gui")]
 fn fes_718_gui_draws_target_reason_without_normal_verdict() {
     let mut app = fes_718_ready_app();
-    app.compute_holding_capacity().expect("有効な方向別結果");
+    app.compute_unconfirmed_holding_capacity()
+        .expect("有効な方向別結果");
     for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
         result.disp.fill([0.0; 6]);
     }
@@ -14161,7 +14173,7 @@ fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickn
         app.core.scoped.last_error
     );
     app.core.design_rank_auto = true;
-    let (result, _) = app.compute_holding_capacity().unwrap();
+    let (result, _) = app.compute_unconfirmed_holding_capacity().unwrap();
     // 細長比は約57、400の種別境界890/√400=44.5を超える。
     assert_eq!(
         result
@@ -14175,7 +14187,10 @@ fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickn
     app.core.model.materials[mid.index()].name = "SS400".into();
     app.core.model.sections[sid.index()].shape = None;
     app.core.model.sections[sid.index()].thickness = None;
-    let error = app.compute_holding_capacity().err().expect("拒否される");
+    let error = app
+        .compute_unconfirmed_holding_capacity()
+        .err()
+        .expect("拒否される");
     assert!(
         error.contains(&format!("ElemId({})", brace_id.0)) && error.contains("板厚"),
         "{error}"

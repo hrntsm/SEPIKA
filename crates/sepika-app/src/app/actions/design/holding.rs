@@ -192,13 +192,32 @@ fn rc_wall_ds_geometry(
 }
 
 impl App {
-    /// 保有水平耐力の層別判定を行う。前提データが不足していれば Err(案内文)。
-    ///
-    /// 戻り値の第 2 要素は層ごとに採用された部材ランク（`design_rank_auto` が
-    /// true の場合は自動判定。確定応力・耐力入力・ランクの欠損は Err。
-    /// false の場合は全層の明示入力 `design_rank`）。
+    /// 目的別評価点の識別・釣合いを検査し、採用条件の不足を理由付きで返す。
+    /// 自動・手動ランクとも採用条件が未確認なら合否を保留し、前回の採用結果を失効する。
     #[allow(clippy::type_complexity)]
     pub fn compute_holding_capacity(
+        &mut self,
+    ) -> Result<
+        (
+            sepika_design_jp::secondary::holding_capacity::HoldingCapacityResult,
+            Vec<sepika_design_jp::secondary::holding_capacity::MemberRank>,
+        ),
+        String,
+    > {
+        let candidate = self.compute_unconfirmed_holding_capacity()?;
+        let reasons = self.holding_adoption_unavailable_reasons();
+        if reasons.is_empty() {
+            Ok(candidate)
+        } else {
+            self.core.scoped.holding_capacity_source = None;
+            self.core.scoped.ds_beta_u_by_story.clear();
+            self.core.scoped.ds_wall_details.clear();
+            Err(reasons.join("\n"))
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(in crate::app) fn compute_unconfirmed_holding_capacity(
         &mut self,
     ) -> Result<
         (
@@ -1528,7 +1547,7 @@ mod tests {
         let wall_id = po.wall_capacities[0].0;
         let qw_n = po.wall_response_at(wall_id, point.step).unwrap().qw_n;
         assert!(qw_n.is_finite() && qw_n.abs() > 0.0);
-        let result = app.compute_holding_capacity().unwrap().0;
+        let result = app.compute_unconfirmed_holding_capacity().unwrap().0;
         assert!(result.member_ranks.iter().any(|(id, _)| *id == wall_id));
         let detail = &app.core.scoped.ds_wall_details[0];
         assert!(detail.contains(&format!("Q_Ds={qw_n:.3}")), "{detail}");
@@ -1558,14 +1577,14 @@ mod tests {
                 _ => point.step = u32::MAX,
             }
             assert!(
-                app.compute_holding_capacity().is_err(),
+                app.compute_unconfirmed_holding_capacity().is_err(),
                 "mismatch={mismatch}"
             );
             assert!(app.core.scoped.ds_wall_details.is_empty());
         }
         app.core.scoped.results = valid_results;
         app.core.model.materials[0].fc = Some(25.0);
-        assert!(app.compute_holding_capacity().is_err());
+        assert!(app.compute_unconfirmed_holding_capacity().is_err());
         assert!(app.core.scoped.ds_wall_details.is_empty());
     }
 
