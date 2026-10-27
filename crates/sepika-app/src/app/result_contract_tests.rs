@@ -2528,11 +2528,11 @@ fn issue901_assert_failure(app: &App) {
     assert!(results.member_checks.iter().flat_map(|m| &m.positions).any(|p| matches!(&p.outcome, CheckOutcome::Checked(r) if !r.ok() && r.components.iter().any(|c| c.kind == CheckKind::Provision && c.detail.contains("法定上限") && c.detail.contains("応力度比ではありません")))));
 }
 #[test]
-fn issue901_ovika_current_failure_roundtrips_and_old_design38_expires_until_recheck() {
+fn issue901_ovika_current_failure_roundtrips_and_old_design38_and39_expire_until_recheck() {
     let mut app = issue901_calculated();
     issue901_assert_failure(&app);
-    for design in [Some(DESIGN_CONTRACT_VERSION), Some(38)] {
-        if design == Some(38) {
+    for design in [Some(DESIGN_CONTRACT_VERSION), Some(38), Some(39)] {
+        if design != Some(DESIGN_CONTRACT_VERSION) {
             for member in &mut app.core.scoped.results.as_mut().unwrap().member_checks {
                 for position in &mut member.positions {
                     position.outcome =
@@ -2569,7 +2569,7 @@ fn issue901_ovika_current_failure_roundtrips_and_old_design38_expires_until_rech
             .unwrap()
             .member_forces
             .clone();
-        if design == Some(38) {
+        if design != Some(DESIGN_CONTRACT_VERSION) {
             assert!(loaded.current_design_results().is_none());
         } else {
             issue901_assert_failure(&loaded);
