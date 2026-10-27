@@ -24,6 +24,7 @@ fn make_model(n_cases: usize) -> Model {
             // ケースごとに方向・大きさを変える（x/y/z の集中荷重）
             values[i % 3] = 100.0 * (i as f64 + 1.0);
             LoadCase {
+                origin: Default::default(),
                 kind: Default::default(),
                 id: LoadCaseId(i as u32 + 1),
                 name: format!("case{}", i + 1),
@@ -293,6 +294,7 @@ fn loaded_frame_and_legacy_brace_cases_remain_independent_in_parallel() {
                     (1, LoadCaseKind::Seismic, -1.0),
                 ] {
                     model.load_cases.push(LoadCase {
+                        origin: Default::default(),
                         id: LoadCaseId(id),
                         name: format!("loaded-{id}"),
                         kind,

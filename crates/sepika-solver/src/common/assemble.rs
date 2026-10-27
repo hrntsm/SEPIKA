@@ -394,6 +394,7 @@ mod tests {
                 spring: Some([kx, 0.0, 0.0, 0.0, 0.0, 0.0]),
             }],
             load_cases: vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "TEST".to_string(),
                 nodal: vec![NodalLoad::manual(

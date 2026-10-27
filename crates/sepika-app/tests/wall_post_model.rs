@@ -576,6 +576,7 @@ fn 明示負担率で密度直接集計とdl集計の階重量が一致する() 
             .unwrap();
         let id = LoadCaseId(0);
         model.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id,
             name: "DL".into(),
             kind: dl.kind,

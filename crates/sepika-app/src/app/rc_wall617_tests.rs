@@ -207,6 +207,7 @@ fn selected_static_case_and_combo_reach_common_face_and_reject_missing_or_old_re
         *pwh_ratio = Some(0.006);
     }
     app.core.model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(20),
         name: "独立水平P".into(),
         kind: LoadCaseKind::Live,

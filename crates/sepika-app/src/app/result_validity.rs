@@ -3,7 +3,7 @@ use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VE
 use sepika_design_jp::CheckOutcome;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) enum ResultInputKey {
+pub enum ResultInputKey {
     Static(StaticCaseKey),
     Combo(String),
     Pushover(SeismicDir),
@@ -18,6 +18,68 @@ struct VibrationResultInput {
     model: sepika_core::model::Model,
     analysis_identity: String,
     identity: String,
+}
+
+pub(super) fn decode_recorded_input(
+    key: &ResultInputKey,
+    bytes: &[u8],
+    vibration_cfg: Option<AnalysisSettings>,
+) -> Result<references::RecordedCalculationInput, String> {
+    use references::{RecordedCalculationInput, RecordedSettings};
+    let unavailable =
+        |_| "保存された計算条件は取得不能です。現在の設定で補完しません。".to_string();
+    match key {
+        ResultInputKey::Design => {
+            type DesignInput = (
+                sepika_core::model::Model,
+                bool,
+                bool,
+                sepika_design_jp::BondMethod,
+                sepika_design_jp::QdMethod,
+                Option<(ResultInputKey, Option<Vec<u8>>)>,
+            );
+            let (model, short_term, rc_damage_control, bond_method, qd_method, source): DesignInput = bincode::deserialize(bytes).map_err(unavailable)?;
+            let source = source.map(|(key, input)| {
+                let input = input
+                    .and_then(|bytes| decode_recorded_input(&key, &bytes, None).ok())
+                    .map(Box::new);
+                (key, input)
+            });
+            Ok(RecordedCalculationInput {
+                model,
+                settings: RecordedSettings::Design {
+                    short_term,
+                    rc_damage_control,
+                    bond_method,
+                    qd_method,
+                    source,
+                },
+            })
+        }
+        ResultInputKey::TimeHistory(_) | ResultInputKey::LumpedTimeHistory(_) => {
+            let input: VibrationResultInput = bincode::deserialize(bytes).map_err(unavailable)?;
+            Ok(RecordedCalculationInput {
+                model: input.model,
+                settings: RecordedSettings::Vibration {
+                    analysis_identity: input.analysis_identity,
+                    identity: input.identity,
+                    cfg: vibration_cfg.map(Box::new),
+                },
+            })
+        }
+        _ => {
+            let (model, cfg, period_s): (sepika_core::model::Model, AnalysisSettings, Option<f64>) =
+                bincode::deserialize(bytes).map_err(unavailable)?;
+            Ok(RecordedCalculationInput {
+                model,
+                settings: RecordedSettings::Analysis {
+                    kind: key.clone(),
+                    cfg: Box::new(cfg),
+                    period_s,
+                },
+            })
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -82,7 +144,21 @@ impl ResultsBundle {
             .retain(|(key, _)| *key != ResultInputKey::Design);
     }
 
+    pub(super) fn record_scoped_input(
+        &mut self,
+        key: ResultInputKey,
+        input: Vec<u8>,
+        source: references::InputReference,
+    ) {
+        self.reference_sources.retain(|(saved, _)| *saved != key);
+        self.reference_sources.push((key.clone(), source));
+        self.record_input(key, input);
+    }
+
     pub(super) fn record_input(&mut self, key: ResultInputKey, input: Vec<u8>) {
+        self.reference_runs.retain(|(k, _)| *k != key);
+        self.reference_runs
+            .push((key.clone(), uuid::Uuid::new_v4().to_string()));
         self.input_records.retain(|(k, _)| *k != key);
         self.input_records.push((key, input));
     }
@@ -520,9 +596,10 @@ impl App {
     pub(super) fn record_design_input(&mut self) {
         let source = self.selected_design_source();
         let input = self.design_input(source.clone());
+        let reference_source = self.input_reference();
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.design_source = source;
-            bundle.record_input(ResultInputKey::Design, input);
+            bundle.record_scoped_input(ResultInputKey::Design, input, reference_source);
         }
     }
 
@@ -1875,6 +1952,7 @@ mod purpose_tests {
         ));
         let id = LoadCaseId(app.core.model.load_cases.len() as u32);
         app.core.model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id,
             name: "利用者荷重".into(),
             kind: LoadCaseKind::Dead,

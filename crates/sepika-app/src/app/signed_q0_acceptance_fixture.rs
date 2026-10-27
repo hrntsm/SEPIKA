@@ -67,6 +67,7 @@ pub fn model() -> Model {
         .into_iter()
         .enumerate()
         .map(|(i, kind)| LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(i as u32),
             name: "任意名称".into(),
             kind,
@@ -89,6 +90,7 @@ pub fn model() -> Model {
     model.load_cases[0].member = vec![point(1500.0, 1000.0)];
     model.load_cases[1].member = vec![point(4500.0, 1000.0)];
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(2),
         name: "独立地震".into(),
         kind: LoadCaseKind::Seismic,

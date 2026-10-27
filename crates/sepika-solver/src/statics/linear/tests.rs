@@ -112,6 +112,7 @@ fn simply_supported_udl_midspan_moment() {
             fy: None,
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "udl".into(),
@@ -235,6 +236,7 @@ fn ss_beam(l: f64, member: Vec<MemberLoad>) -> Model {
             fy: None,
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "lc".into(),
@@ -650,6 +652,7 @@ fn make_axial_cantilever() -> Model {
             fy: None,
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "axial".to_string(),
@@ -923,6 +926,7 @@ fn test_linear_static_vertical_cantilever_bending() {
             fy: None,
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "h".to_string(),
@@ -1068,6 +1072,7 @@ fn test_shell_rigid_floor_membrane_off() {
             vec![NodeId(1), NodeId(2), NodeId(3)],
         )],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "load".to_string(),
@@ -1198,6 +1203,7 @@ fn make_ss_plate(n: usize, a: f64, t: f64, e: f64, nu: f64, q: f64, clamped: boo
             fy: None,
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "q".into(),
@@ -1391,6 +1397,7 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
         sections: vec![sec],
         materials: vec![mat],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(1),
             name: "gravity".into(),
             nodal: vec![NodalLoad::manual(
@@ -1515,6 +1522,7 @@ fn column_with_parallel_vertical_brace() -> Model {
         sections: vec![sec],
         materials: vec![mat],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(1),
             name: "gravity".into(),
             nodal: vec![NodalLoad::manual(
@@ -1612,6 +1620,7 @@ fn test_axial_cut_not_applied_to_short_term_case() {
     let mut model = braced_frame(sepika_core::model::LoadCaseKind::Dead);
     // 同一の鉛直荷重を持つ短期（地震）荷重ケースを追加する。
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(2),
         name: "seismic_gravity_dummy".into(),
         nodal: vec![NodalLoad::manual(
@@ -1845,6 +1854,7 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
         sections: vec![sec],
         materials: vec![mat],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(1),
             name: "wind".into(),
             nodal: vec![
@@ -1996,6 +2006,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
             fy: Some(235.0),
         }],
         load_cases: vec![LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "udl".into(),

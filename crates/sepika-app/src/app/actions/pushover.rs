@@ -131,7 +131,7 @@ impl App {
                 }
                 let dir = self.core.analysis_cfg.push_dir;
                 let mut bundle = self.take_results_for_analysis();
-                bundle.record_input(input_key, input);
+                bundle.record_scoped_input(input_key, input, self.result_source_reference());
                 match dir {
                     SeismicDir::X => bundle.pushover_x = Some(result),
                     SeismicDir::Y => bundle.pushover_y = Some(result),
@@ -321,6 +321,7 @@ mod tests {
             let results = rmp_serde::to_vec_named(&value).unwrap();
             app.core.analysis_cfg.push_dir = configured;
             let settings = rmp_serde::to_vec_named(&SavedAnalysisSettings {
+                references: None,
                 cfg: app.core.analysis_cfg,
                 wave_name: None,
                 wave_sha256: None,

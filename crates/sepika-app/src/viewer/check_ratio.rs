@@ -1789,6 +1789,7 @@ mod issue901_tests {
         model.sections = vec![section];
         model.load_cases = vec![
             LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "G0".into(),
                 kind: LoadCaseKind::Dead,
@@ -1796,6 +1797,7 @@ mod issue901_tests {
                 member: vec![],
             },
             LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(1),
                 name: "P0".into(),
                 kind: LoadCaseKind::Live,
@@ -1803,6 +1805,7 @@ mod issue901_tests {
                 member: vec![],
             },
             LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(2),
                 name: "W".into(),
                 kind: LoadCaseKind::Wind,

@@ -181,6 +181,7 @@ pub fn expanded_model() -> Model {
         });
     }
     model.load_cases = vec![LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: "G".into(),
         kind: LoadCaseKind::Dead,

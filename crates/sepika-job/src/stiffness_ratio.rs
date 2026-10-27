@@ -367,6 +367,7 @@ mod tests {
         model.load_cases.clear();
         for (axis, name) in [EX_CASE_NAME, EY_CASE_NAME].into_iter().enumerate() {
             model.load_cases.push(LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(axis as u32),
                 name: name.into(),
                 kind: LoadCaseKind::Seismic,

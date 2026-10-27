@@ -3,6 +3,55 @@
 use super::*;
 use sepika_core::ids::*;
 
+pub(crate) fn retain_load_case_input_origin(
+    model: &mut Model,
+    index: usize,
+    kind_edited: bool,
+    inverse: Box<dyn EditCommand>,
+) -> Box<dyn EditCommand> {
+    use sepika_core::model::LoadCaseOrigin;
+    let case = &mut model.load_cases[index];
+    let old = case.origin;
+    if kind_edited || old == LoadCaseOrigin::Generated {
+        case.origin = LoadCaseOrigin::Explicit;
+    }
+    if case.origin == old {
+        return inverse;
+    }
+    Box::new(CompositeCommand {
+        label: inverse.label().into(),
+        children: vec![
+            inverse,
+            Box::new(RestoreLoadCaseOrigin {
+                id: case.id,
+                origin: old,
+            }),
+        ],
+    })
+}
+
+struct RestoreLoadCaseOrigin {
+    id: LoadCaseId,
+    origin: sepika_core::model::LoadCaseOrigin,
+}
+
+impl EditCommand for RestoreLoadCaseOrigin {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(case) = model.load_cases.iter_mut().find(|case| case.id == self.id) else {
+            return Box::new(Noop);
+        };
+        let origin = std::mem::replace(&mut case.origin, self.origin);
+        Box::new(Self {
+            id: self.id,
+            origin,
+        })
+    }
+
+    fn label(&self) -> &str {
+        "荷重ケース入力の復元"
+    }
+}
+
 /// 荷重ケース追加。末尾に `LoadCaseId(len)` で追加する。逆操作は荷重ケース削除。
 pub struct AddLoadCase {
     pub name: String,
@@ -12,6 +61,7 @@ impl EditCommand for AddLoadCase {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let new_id = LoadCaseId(model.load_cases.len() as u32);
         model.load_cases.push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: new_id,
             name: self.name.clone(),
@@ -536,5 +586,90 @@ impl EditCommand for ApplyPreparedModel {
 
     fn label(&self) -> &str {
         "準備計算の採用"
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+    use sepika_core::model::{LoadCase, LoadCaseKind, LoadCaseOrigin, LoadSource, NodalLoad, Node};
+
+    #[test]
+    fn 自動ケースへの手入力昇格とundo_redoは生成元を含めて復元する() {
+        let mut model = Model::default();
+        model.nodes.push(Node {
+            id: NodeId(0),
+            coord: [0.0; 3],
+            restraint: Default::default(),
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+        model.load_cases = vec![LoadCase {
+            origin: LoadCaseOrigin::Generated,
+            id: LoadCaseId(0),
+            name: "DL".into(),
+            kind: LoadCaseKind::Dead,
+            nodal: Vec::new(),
+            member: Vec::new(),
+        }];
+        let mut undo = UndoStack::new();
+        assert!(undo.run(
+            &mut model,
+            Box::new(AddNodalLoad {
+                lc: LoadCaseId(0),
+                load: NodalLoad {
+                    node: NodeId(0),
+                    values: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    name: "明示".into(),
+                    source: LoadSource::Manual
+                }
+            })
+        ));
+        assert_eq!(model.load_cases[0].origin, LoadCaseOrigin::Explicit);
+        undo.undo(&mut model);
+        assert_eq!(model.load_cases[0].origin, LoadCaseOrigin::Generated);
+        assert!(model.load_cases[0].nodal.is_empty());
+        undo.redo(&mut model);
+        assert_eq!(model.load_cases[0].origin, LoadCaseOrigin::Explicit);
+        assert_eq!(model.load_cases[0].nodal.len(), 1);
+        assert!(undo.run(
+            &mut model,
+            Box::new(DeleteNodalLoad {
+                lc: LoadCaseId(0),
+                index: 0
+            })
+        ));
+        assert_eq!(model.load_cases[0].origin, LoadCaseOrigin::Explicit);
+    }
+
+    #[test]
+    fn 明示kindの利用者変更をundoすると自動適用前kindも復元する() {
+        let mut model = Model {
+            load_cases: vec![LoadCase {
+                origin: LoadCaseOrigin::ExplicitWithGeneratedKind(LoadCaseKind::Other),
+                id: LoadCaseId(0),
+                name: "DL".into(),
+                kind: LoadCaseKind::Dead,
+                nodal: Vec::new(),
+                member: Vec::new(),
+            }],
+            ..Default::default()
+        };
+        let original = model.load_cases[0].clone();
+        let mut undo = UndoStack::new();
+        assert!(undo.run(
+            &mut model,
+            Box::new(SetLoadCaseKind {
+                id: LoadCaseId(0),
+                kind: LoadCaseKind::Live
+            })
+        ));
+        assert_eq!(model.load_cases[0].origin, LoadCaseOrigin::Explicit);
+        undo.undo(&mut model);
+        assert_eq!(model.load_cases[0], original);
+        undo.redo(&mut model);
+        assert_eq!(model.load_cases[0].kind, LoadCaseKind::Live);
+        assert_eq!(model.load_cases[0].origin, LoadCaseOrigin::Explicit);
     }
 }

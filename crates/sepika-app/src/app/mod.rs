@@ -184,6 +184,7 @@ pub struct TimeHistoryInput<T> {
 /// 時刻歴成果の入力識別と開始時の対象ケース。
 #[derive(Clone)]
 pub struct TimeHistorySource {
+    pub(crate) raw_identity: String,
     pub(crate) cfg: AnalysisSettings,
     pub(crate) wave_name: String,
     pub(crate) identity: String,
@@ -489,6 +490,8 @@ pub struct SavedResults {
 /// （`analysis_settings.msgpack` のエントリ本体）。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SavedAnalysisSettings {
+    #[serde(default)]
+    pub references: Option<references::ProjectReferences>,
     pub cfg: AnalysisSettings,
     /// 波形ライブラリ（`sepika_io::wave_library`）で選択中の波形ファイル名。
     pub wave_name: Option<String>,
@@ -504,6 +507,12 @@ pub struct SavedAnalysisSettings {
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ResultsBundle {
+    #[serde(default)]
+    pub reference_vibration_settings: Vec<(result_validity::ResultInputKey, AnalysisSettings)>,
+    #[serde(default)]
+    pub reference_runs: Vec<(result_validity::ResultInputKey, String)>,
+    #[serde(default)]
+    pub reference_sources: Vec<(result_validity::ResultInputKey, references::InputReference)>,
     #[serde(default)]
     pub holding_evaluations: Vec<result_validity::HoldingEvaluationInput>,
     pub statics: Vec<(StaticCaseKey, sepika_solver::statics::linear::StaticOnce)>,
@@ -639,6 +648,7 @@ pub enum JobResult {
 /// 一括解析)を UI スレッドから逃がす。
 /// 結果は poll_job で受け取り適用する。
 pub struct AnalysisJob {
+    reference_source: references::InputReference,
     pub label: &'static str,
     pub started: std::time::SystemTime,
     input: Vec<u8>,
@@ -890,6 +900,10 @@ impl Default for AppCore {
 /// [`App::load_model`] が `Default::default()` の代入で丸ごと破棄するため、
 /// ここへ足したフィールドは自動的にリセット対象になる。
 pub struct ModelScoped {
+    pub(crate) reference_preparation_revisions: u64,
+    pub reference_session: String,
+    pub(crate) applying_result_source: Option<references::InputReference>,
+    pub references: references::ProjectReferences,
     pub results: Option<ResultsBundle>,
     /// 表示中の立体時刻歴振動ケース ID。
     pub view_vibration_case: Option<VibrationCaseId>,
@@ -998,6 +1012,10 @@ pub struct ModelScoped {
 impl Default for ModelScoped {
     fn default() -> Self {
         Self {
+            reference_preparation_revisions: 0,
+            reference_session: uuid::Uuid::new_v4().to_string(),
+            references: references::ProjectReferences::default(),
+            applying_result_source: None,
             results: None,
             view_vibration_case: None,
             view_lumped_vibration_case: None,
@@ -1053,6 +1071,10 @@ pub struct UiState {
 /// ドラフト・詳細ウィンドウの選択部材とそのキャッシュ・作成モードの選択節点）を
 /// ここへ置く。[`App::load_model`] が `Default::default()` の代入で丸ごと破棄する。
 pub struct UiModelScoped {
+    #[cfg(feature = "gui")]
+    pub opened_reference: Option<references::TargetReference>,
+    #[cfg(feature = "gui")]
+    pub reference_snapshot: Option<(String, references::RecordedCalculationInput)>,
     pub selection: GeometrySelection,
     /// 節点座標の編集バッファ（model.nodes に同期）
     pub node_edit: Vec<[String; 3]>,
@@ -1227,6 +1249,10 @@ pub struct UiModelScoped {
 impl Default for UiModelScoped {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "gui")]
+            opened_reference: None,
+            #[cfg(feature = "gui")]
+            reference_snapshot: None,
             selection: GeometrySelection::default(),
             node_edit: Vec::new(),
             #[cfg(feature = "gui")]
@@ -1846,6 +1872,7 @@ pub(crate) fn steel_width_thickness_rank(
     )
 }
 
+pub mod references;
 mod result_validity;
 pub use result_validity::HoldingCapacitySource;
 pub(crate) use result_validity::ResultInputKey;
@@ -1990,6 +2017,7 @@ impl eframe::App for App {
         crate::frame_wizard::frame_wizard_window(ui.ctx(), self);
         crate::story_copy_view::story_copy_window(ui.ctx(), self);
         self.region_assign_window(ui.ctx());
+        self.reference_snapshot_window(ui.ctx());
 
         if self.core.scoped.pending_save_recording.is_some() {
             let mut choice: Option<bool> = None;

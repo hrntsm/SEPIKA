@@ -551,28 +551,32 @@ fn combinations_section(ui: &mut egui::Ui, app: &mut App) {
         true,
     );
 
-    ui.checkbox(&mut app.core.analysis_cfg.heavy_snow_zone, "多雪区域")
-        .on_hover_text("有効にすると長期 G+P+δ1・S、短期地震 G+P+δ3・S±K の組合せも生成します（施行令86条・82条）");
-    if app.core.analysis_cfg.heavy_snow_zone {
+    let mut cfg = app.core.analysis_cfg;
+    ui.checkbox(&mut cfg.heavy_snow_zone, "多雪区域")
+        .on_hover_text(
+        "有効にすると長期 G+P+δ1・S、短期地震 G+P+δ3・S±K の組合せも生成します（施行令86条・82条）",
+    );
+    if cfg.heavy_snow_zone {
         ui.horizontal(|ui| {
             ui.label("積雪低減係数:").on_hover_text(
                 "多雪区域の積雪荷重低減係数（平12建告1455号。既定 δ1=0.7、δ3=0.35）",
             );
             ui.label("δ1(長期)");
             ui.add(
-                egui::DragValue::new(&mut app.core.analysis_cfg.snow_delta1)
+                egui::DragValue::new(&mut cfg.snow_delta1)
                     .speed(0.01)
                     .range(0.0..=1.0),
             );
             ui.label("δ3(地震時)");
             ui.add(
-                egui::DragValue::new(&mut app.core.analysis_cfg.snow_delta3)
+                egui::DragValue::new(&mut cfg.snow_delta3)
                     .speed(0.01)
                     .range(0.0..=1.0),
             );
         });
     }
 
+    app.commit_analysis_settings(cfg);
     let can_generate =
         app.ui.scoped.combo_draft.dl.is_some() && app.ui.scoped.combo_draft.ll.is_some();
     ui.horizontal(|ui| {

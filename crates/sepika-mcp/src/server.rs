@@ -511,6 +511,7 @@ mod tests {
                 fy: Some(235.0),
             }],
             load_cases: vec![LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(1),
                 name: "case1".into(),
                 nodal: vec![NodalLoad::manual(
@@ -663,6 +664,7 @@ mod tests {
         let mut model = pushover_model();
         model.load_cases = vec![
             LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: DL_CASE_NAME.into(),
                 kind: LoadCaseKind::Dead,
@@ -670,6 +672,7 @@ mod tests {
                 member: Vec::new(),
             },
             LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(1),
                 name: "P=0".into(),
                 kind: LoadCaseKind::Live,
@@ -1120,6 +1123,7 @@ mod tests {
         .into_iter()
         .enumerate()
         .map(|(i, (kind, force))| LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(i as u32),
             name: format!("任意荷重{i}"),
             kind,
@@ -1437,6 +1441,7 @@ mod tests {
                     }
                 }
                 model.load_cases.push(sepika_core::model::LoadCase {
+                    origin: Default::default(),
                     id: sepika_core::ids::LoadCaseId(0),
                     name: name.into(),
                     kind: sepika_core::model::LoadCaseKind::Seismic,
@@ -1447,6 +1452,7 @@ mod tests {
                     member: Vec::new(),
                 });
                 model.load_cases.push(sepika_core::model::LoadCase {
+                    origin: Default::default(),
                     id: sepika_core::ids::LoadCaseId(1),
                     name: "DL".into(),
                     kind: sepika_core::model::LoadCaseKind::Dead,
@@ -1545,6 +1551,7 @@ mod tests {
             model.elements.push(beam);
         }
         model.load_cases.push(sepika_core::model::LoadCase {
+            origin: Default::default(),
             id: sepika_core::ids::LoadCaseId(0),
             name: "EX".into(),
             kind: sepika_core::model::LoadCaseKind::Seismic,

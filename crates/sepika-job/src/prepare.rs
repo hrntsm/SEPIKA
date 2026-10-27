@@ -1330,6 +1330,7 @@ mod tests {
         input.elements[2].rigid_zone.source_i = ZoneSource::Manual;
         input.elements[2].rigid_zone.source_j = ZoneSource::Manual;
         input.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(99),
             name: "剛域切替確認".into(),
             kind: Default::default(),

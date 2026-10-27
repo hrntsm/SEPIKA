@@ -147,6 +147,7 @@ pub fn two_storeys_with_weightless_steel_girders() -> Model {
         });
     }
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: LoadCaseId(0),
         name: DL_CASE_NAME.into(),
         kind: LoadCaseKind::Dead,

@@ -1231,6 +1231,7 @@ fn build_load_cases(
             })
             .collect();
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             kind: Default::default(),
             id: LoadCaseId(i as u32),
             name: lc.name,

@@ -1402,6 +1402,7 @@ fn test_story_shear_matches_base_shear() {
 fn test_nonlinear_apply_long_term_matches_static_solution() {
     let mut model = fiber_column_model(1e10);
     model.load_cases.push(sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(0),
         name: "DL".to_string(),
         nodal: vec![sepika_core::model::NodalLoad::manual(
@@ -1527,6 +1528,7 @@ fn test_support_spring_long_term_static_matches_analytical() {
     let f_load = 300.0_f64;
     let mut model = support_spring_sdof_model(k, m);
     model.load_cases.push(sepika_core::model::LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(0),
         name: "DL".to_string(),
         nodal: vec![sepika_core::model::NodalLoad::manual(

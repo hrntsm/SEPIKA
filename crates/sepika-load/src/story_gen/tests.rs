@@ -109,6 +109,7 @@ fn two_story_model() -> Model {
         });
     }
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -354,6 +355,7 @@ fn asymmetric_weight_model() -> Model {
         });
     }
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -544,6 +546,7 @@ fn two_columns_with_dl_model() -> Model {
         });
     }
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -880,6 +883,7 @@ fn test_dynamic_mass_matches_between_density_and_synced_paths() {
     let (nodal, member) =
         crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -964,6 +968,7 @@ fn test_dynamic_mass_inertia_about_mass_center_3d() {
     }
     let w = [100000.0, 300000.0];
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -1445,6 +1450,7 @@ fn rounded_cft_supplied_area_preserves_dl_and_all_story_mass_modes() {
         let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &cfg).unwrap();
         assert!((nodal.iter().map(|n| -n.values[2]).sum::<f64>() - design).abs() < 1e-8);
         model.load_cases = vec![LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             kind: LoadCaseKind::Dead,
             name: "DL".into(),
@@ -1595,6 +1601,7 @@ fn test_synced_self_weight_cft_column_mass_excludes_core_from_factor() {
     let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &cfg).unwrap();
     model.load_cases.clear();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -1655,6 +1662,7 @@ fn test_self_weight_via_case_matches_density_for_mass() {
     let (nodal, member) =
         crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -1706,6 +1714,7 @@ fn test_wall_mass_consistent_between_density_and_case_paths() {
         crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.clear();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -2313,6 +2322,7 @@ fn test_member_load_reaction_distribution_end_to_end() {
         spring: None,
     });
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -2917,6 +2927,7 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
 fn test_generate_stories_multi_sums_multiple_gravity_cases_and_dedupes() {
     let mut model = asymmetric_weight_model();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: Default::default(),
         id: LoadCaseId(1),
         name: "LL".into(),
@@ -2956,6 +2967,7 @@ fn test_generate_stories_with_opts_self_weight_via_case_matches_density() {
     let (nodal, member) =
         crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -3058,6 +3070,7 @@ fn test_synced_self_weight_mass_methods_agree() {
     let (nodal, member) =
         crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -3099,6 +3112,7 @@ fn test_synced_self_weight_steel_mass_is_physical() {
     let (nodal, member) =
         crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -3132,6 +3146,7 @@ fn test_synced_self_weight_rejects_case_without_self_weight() {
     // 自重を含まない（荷重が空の）DL ケース。
     model.load_cases.clear();
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
         name: "DL".into(),
@@ -3647,6 +3662,7 @@ fn 明示非線形線材は混在接続でもbeamとdl階重量物理質量が�
                     assert_eq!(direct.stories, expected.stories);
                     assert_eq!(direct.rep_nodes, expected.rep_nodes);
                     model.load_cases = vec![LoadCase {
+                        origin: Default::default(),
                         id: LoadCaseId(0),
                         name: "DL".into(),
                         kind: LoadCaseKind::Dead,
@@ -3911,6 +3927,7 @@ fn fireproof_shapes_roles_and_weight_paths_agree_without_steel_markup() {
                         < 1e-7
                 );
                 model.load_cases = vec![LoadCase {
+                    origin: Default::default(),
                     id: LoadCaseId(0),
                     name: "DL".into(),
                     kind: LoadCaseKind::Dead,
@@ -4259,6 +4276,7 @@ fn rc_src柱仕上げは階共通値と実形状を使いdlと地震用重量で
                 .sum();
             assert!((seismic - expected).abs() < 1e-7);
             model.load_cases.push(LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(0),
                 name: "DL".into(),
                 kind: LoadCaseKind::Dead,

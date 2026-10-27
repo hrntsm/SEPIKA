@@ -105,6 +105,7 @@ mod tests {
 
         model.load_cases.extend([
             LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(1),
                 name: "P=0".into(),
                 kind: LoadCaseKind::Live,
@@ -112,6 +113,7 @@ mod tests {
                 member: Vec::new(),
             },
             LoadCase {
+                origin: Default::default(),
                 id: LoadCaseId(2),
                 name: DL_CASE_NAME.into(),
                 kind: LoadCaseKind::Dead,

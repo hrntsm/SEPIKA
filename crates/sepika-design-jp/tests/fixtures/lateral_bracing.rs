@@ -99,6 +99,7 @@ pub fn frame(split: bool) -> Model {
     }
     model.panel_zone = PanelZoneMode::None;
     model.load_cases.push(LoadCase {
+ origin: Default::default(),
         id: LoadCaseId(0),
         name: "reference-load".into(),
         kind: LoadCaseKind::Dead,

@@ -154,6 +154,7 @@ pub fn with_plate_metadata(wall: bool) -> Model {
         automatic_master_restraints: vec![],
     });
     model.load_cases.push(LoadCase {
+        origin: Default::default(),
         id: sepika_core::ids::LoadCaseId(0),
         name: EX_CASE_NAME.into(),
         kind: LoadCaseKind::Seismic,

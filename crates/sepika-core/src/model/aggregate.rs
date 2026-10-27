@@ -2299,6 +2299,7 @@ mod node_reference_tests {
 
         // 0: 節点荷重。
         model.load_cases.push(LoadCase {
+            origin: Default::default(),
             id: LoadCaseId(0),
             name: "L".into(),
             nodal: vec![NodalLoad {

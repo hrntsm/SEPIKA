@@ -15,11 +15,19 @@ impl EditCommand for SetLoadCaseName {
         if idx >= model.load_cases.len() || model.load_cases[idx].id != self.id {
             return Box::new(Noop);
         }
+        if model.load_cases[idx].name == self.name {
+            return Box::new(Noop);
+        }
         let old = std::mem::replace(&mut model.load_cases[idx].name, self.name.clone());
-        Box::new(SetLoadCaseName {
-            id: self.id,
-            name: old,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(SetLoadCaseName {
+                id: self.id,
+                name: old,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -55,10 +63,15 @@ impl EditCommand for AddNodalLoad {
             return Box::new(Noop);
         }
         model.load_cases[idx].nodal.push(self.load.clone());
-        Box::new(DeleteNodalLoad {
-            lc: self.lc,
-            index: model.load_cases[idx].nodal.len() - 1,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(DeleteNodalLoad {
+                lc: self.lc,
+                index: model.load_cases[idx].nodal.len() - 1,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -88,11 +101,16 @@ impl EditCommand for SetNodalLoad {
             return Box::new(Noop);
         }
         let old = std::mem::replace(&mut nodal[self.index], self.load.clone());
-        Box::new(SetNodalLoad {
-            lc: self.lc,
-            index: self.index,
-            load: old,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(SetNodalLoad {
+                lc: self.lc,
+                index: self.index,
+                load: old,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -117,11 +135,16 @@ impl EditCommand for DeleteNodalLoad {
             return Box::new(Noop);
         }
         let removed = nodal.remove(self.index);
-        Box::new(InsertNodalLoad {
-            lc: self.lc,
-            index: self.index,
-            load: removed,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(InsertNodalLoad {
+                lc: self.lc,
+                index: self.index,
+                load: removed,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -146,10 +169,15 @@ impl EditCommand for InsertNodalLoad {
             return Box::new(Noop);
         }
         nodal.insert(self.index, self.load.clone());
-        Box::new(DeleteNodalLoad {
-            lc: self.lc,
-            index: self.index,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(DeleteNodalLoad {
+                lc: self.lc,
+                index: self.index,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -186,10 +214,15 @@ impl EditCommand for AddMemberLoad {
         }
         model.load_cases[idx].member.push(self.load.clone());
         let pos = model.load_cases[idx].member.len() - 1;
-        Box::new(DeleteMemberLoad {
-            lc: self.lc,
-            index: pos,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(DeleteMemberLoad {
+                lc: self.lc,
+                index: pos,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -227,11 +260,16 @@ impl EditCommand for SetMemberLoad {
             return Box::new(Noop);
         }
         let old = std::mem::replace(&mut member[self.index], self.load.clone());
-        Box::new(SetMemberLoad {
-            lc: self.lc,
-            index: self.index,
-            load: old,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(SetMemberLoad {
+                lc: self.lc,
+                index: self.index,
+                load: old,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -255,11 +293,16 @@ impl EditCommand for DeleteMemberLoad {
             return Box::new(Noop);
         }
         let removed = member.remove(self.index);
-        Box::new(InsertMemberLoad {
-            lc: self.lc,
-            index: self.index,
-            load: removed,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(InsertMemberLoad {
+                lc: self.lc,
+                index: self.index,
+                load: removed,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
@@ -284,10 +327,15 @@ impl EditCommand for InsertMemberLoad {
             return Box::new(Noop);
         }
         member.insert(self.index, self.load.clone());
-        Box::new(DeleteMemberLoad {
-            lc: self.lc,
-            index: self.index,
-        })
+        crate::load_case::retain_load_case_input_origin(
+            model,
+            idx,
+            false,
+            Box::new(DeleteMemberLoad {
+                lc: self.lc,
+                index: self.index,
+            }),
+        )
     }
 
     fn label(&self) -> &str {
