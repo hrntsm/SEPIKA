@@ -1499,7 +1499,7 @@ fn sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons() {
         for auto in [false, true] {
             app.core.design_rank_auto = auto;
             assert!(app
-                .compute_unconfirmed_holding_capacity()
+                .compute_holding_capacity()
                 .err()
                 .unwrap()
                 .contains("適用範囲"));

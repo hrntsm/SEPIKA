@@ -1751,7 +1751,9 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     );
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(
-        reason.contains("Ds判定保留") && reason.contains("柱脚の有無・形式"),
+        reason.contains("Ds判定保留")
+            && reason.contains("柱脚の有無・形式")
+            && reason.contains("Ai/Qun外力分布は採用保留"),
         "{reason}"
     );
     assert!(app.core.scoped.holding_capacity_source.is_none());

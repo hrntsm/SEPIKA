@@ -3394,7 +3394,7 @@ fn test_holding_capacity_flow() {
     app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
 
     // 階が未定義 → Err
-    assert!(app.compute_unconfirmed_holding_capacity().is_err());
+    assert!(app.compute_holding_capacity().is_err());
 
     app.generate_stories_action();
     assert!(
@@ -3412,7 +3412,7 @@ fn test_holding_capacity_flow() {
     );
 
     // プッシュオーバー未実行 → Err
-    assert!(app.compute_unconfirmed_holding_capacity().is_err());
+    assert!(app.compute_holding_capacity().is_err());
 
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
@@ -3458,10 +3458,7 @@ fn test_holding_capacity_rejects_declared_brace_when_undetected() {
     app.core.design_rank_auto = false;
     app.core.design_rank = MemberRank::FA;
     app.core.design_frame = FrameType::SteelBrace;
-    let reason = app
-        .compute_unconfirmed_holding_capacity()
-        .err()
-        .expect("拒否される");
+    let reason = app.compute_holding_capacity().err().expect("拒否される");
     assert!(
         reason.contains("宣言した壁・筋かい架構の負担力がありません"),
         "{reason}"
@@ -3585,7 +3582,7 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     select_holding_points(&mut app);
     app.core.design_rank_auto = true;
     app.core.design_rank = MemberRank::FB;
-    let reason = app.compute_unconfirmed_holding_capacity().err().unwrap();
+    let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("確定評価データが不足"), "{reason}");
 
     // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
@@ -3957,10 +3954,10 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         panic!("RC柱断面");
     };
     rebar.hoop.pitch += 50.0;
-    assert!(app.compute_unconfirmed_holding_capacity().is_err());
+    assert!(app.compute_holding_capacity().is_err());
     app.run_seismic(SeismicDir::X);
     app.run_seismic(SeismicDir::Y);
-    assert!(app.compute_unconfirmed_holding_capacity().is_err());
+    assert!(app.compute_holding_capacity().is_err());
     app.run_pushover();
     select_holding_points(&mut app);
     assert!(app.compute_unconfirmed_holding_capacity().is_ok());
@@ -13796,10 +13793,7 @@ fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
     for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
         result.disp.fill([0.0; 6]);
     }
-    let reason = app
-        .compute_unconfirmed_holding_capacity()
-        .err()
-        .expect("全層ゼロ変位");
+    let reason = app.compute_holding_capacity().err().expect("全層ゼロ変位");
     assert!(reason.contains("Rs 算定不能"), "{reason}");
     assert!(reason.contains("X"), "{reason}");
     assert!(app.core.scoped.holding_capacity_source.is_none());
@@ -13807,7 +13801,7 @@ fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
     assert!(csv.contains("Rs 算定不能"));
     assert!(csv.contains("判定なし"));
     assert!(csv.contains("必要保有水平耐力・合否,算定不能"));
-    assert!(app.compute_unconfirmed_holding_capacity().is_err());
+    assert!(app.compute_holding_capacity().is_err());
     assert!(app.core.scoped.holding_capacity_source.is_none());
 }
 
@@ -13831,7 +13825,7 @@ fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
             force.fill(0.0);
         }
     }
-    let reason = app.compute_unconfirmed_holding_capacity().err().unwrap();
+    let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("Re 算定不能"), "{reason}");
     assert!(app.core.scoped.holding_capacity_source.is_none());
     app.core
@@ -13841,7 +13835,7 @@ fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
         .unwrap()
         .statics
         .retain(|(key, _)| *key != StaticCaseKey::Seismic(SeismicDir::Y));
-    let reason = app.compute_unconfirmed_holding_capacity().err().unwrap();
+    let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("X/Y 方向"), "{reason}");
     assert!(crate::summary::build_report_csv(&app).contains("地震静的 Y の解析結果がありません"));
 }
@@ -13866,7 +13860,7 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
     );
     assert_eq!(results.statics.len(), normal_count);
     assert!(crate::summary::build_report_csv(&reopened).contains("Rs 算定不能"));
-    assert!(reopened.compute_unconfirmed_holding_capacity().is_err());
+    assert!(reopened.compute_holding_capacity().is_err());
 
     let mut original = fes_718_ready_app();
     original.run_design_check();
@@ -13963,7 +13957,7 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
         .iter()
         .all(|m| m.drift.is_err() && m.drift_ok.is_none()));
     assert!(crate::summary::build_report_csv(&reopened).contains("未計算: 地震静的"));
-    assert!(reopened.compute_unconfirmed_holding_capacity().is_err());
+    assert!(reopened.compute_holding_capacity().is_err());
 }
 
 #[test]
@@ -14187,10 +14181,7 @@ fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickn
     app.core.model.materials[mid.index()].name = "SS400".into();
     app.core.model.sections[sid.index()].shape = None;
     app.core.model.sections[sid.index()].thickness = None;
-    let error = app
-        .compute_unconfirmed_holding_capacity()
-        .err()
-        .expect("拒否される");
+    let error = app.compute_holding_capacity().err().expect("拒否される");
     assert!(
         error.contains(&format!("ElemId({})", brace_id.0)) && error.contains("板厚"),
         "{error}"
@@ -15089,7 +15080,7 @@ fn ds871_old_design_is_invalidated_but_analysis_remains_and_ds_stays_on_hold() {
         .unwrap()
         .contains("Ds判定保留"));
     std::fs::remove_file(current_path).unwrap();
-    for saved_version in [39, 40, 41, DESIGN_CONTRACT_VERSION + 1] {
+    for saved_version in [39, 40, 41, 42, DESIGN_CONTRACT_VERSION + 1] {
         let (mut loaded, path) = super::result_contract_tests::restore(
             &app,
             Some(ANALYSIS_CONTRACT_VERSION),
@@ -15134,7 +15125,14 @@ fn ds871_old_design_is_invalidated_but_analysis_remains_and_ds_stays_on_hold() {
             .has_analysis_results());
         let reason = reopened.compute_holding_capacity().err().unwrap();
         assert!(reason.contains("Ds判定保留"), "{reason}");
-        assert!(crate::summary::build_report_csv(&reopened).contains("柱脚の有無・形式"));
+        assert!(
+            reason.contains("未崩壊の確認済耐力Quは採用保留"),
+            "{reason}"
+        );
+        assert!(reopened.core.scoped.holding_capacity_source.is_none());
+        let csv = crate::summary::build_report_csv(&reopened);
+        assert!(csv.contains("柱脚の有無・形式"));
+        assert!(csv.contains("連層壁脚拘束のDs/Qu対応は採用保留"));
         reopened.run_design_check();
         assert!(reopened.core.scoped.last_error.is_none());
         assert_eq!(

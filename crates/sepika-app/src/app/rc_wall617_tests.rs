@@ -433,13 +433,13 @@ fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
         let po = bundle.pushover_x.as_mut().unwrap();
         po.wall_capacities.clear();
         let missing = app
-            .compute_unconfirmed_holding_capacity()
+            .compute_holding_capacity()
             .err()
             .expect("採用Qu欠落は未算定");
         assert!(missing.contains("初期Quが未解決"), "{missing}");
         assert_eq!(ledger(&app), before);
         app.core.model.materials[2].fy = Some(345.0);
-        assert!(app.compute_unconfirmed_holding_capacity().is_err());
+        assert!(app.compute_holding_capacity().is_err());
     }
 }
 

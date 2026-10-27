@@ -129,6 +129,12 @@ mod tests {
                 #[cfg(feature = "gui")]
                 assert!(gui.contains(&expected), "{gui}");
             }
+            for expected in ["Ds判定保留", "柱脚の有無・形式"] {
+                assert!(reason.contains(expected), "{reason}");
+                assert!(csv.contains(expected), "{csv}");
+                #[cfg(feature = "gui")]
+                assert!(gui.contains(expected), "{gui}");
+            }
             assert!(app.core.scoped.holding_capacity_source.is_none());
             assert!(app.core.scoped.ds_beta_u_by_story.is_empty());
             assert!(app.core.scoped.ds_wall_details.is_empty());
