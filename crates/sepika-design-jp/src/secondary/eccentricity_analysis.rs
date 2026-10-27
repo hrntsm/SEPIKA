@@ -66,7 +66,7 @@ fn station_force_global(
 ///
 /// - `res_x` / `res_y`: X / Y 方向加力時の弾性応力解析結果
 /// - `kX` は X 加力時の（せん断力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
-///   δ がほぼ 0 の柱は剛性 0 とする。
+///   変位差が0又は剛性の商が非有限となる柱は、方向・部材ID付きでErr。
 ///
 /// 必要変位・内力の欠落や非有限、局所基底の不正は部材IDと理由を返す。
 pub fn column_stiffnesses_from_analysis(
@@ -75,9 +75,48 @@ pub fn column_stiffnesses_from_analysis(
     res_x: &StaticOnce,
     res_y: &StaticOnce,
 ) -> Result<Vec<ColumnStiffness>, String> {
+    let x = column_horizontal_stiffnesses(
+        model,
+        story,
+        res_x,
+        sepika_solver::statics::analysis::SeismicDir::X,
+    )?;
+    let y = column_horizontal_stiffnesses(
+        model,
+        story,
+        res_y,
+        sepika_solver::statics::analysis::SeismicDir::Y,
+    )?;
+    let mut positions = Vec::new();
+    for_each_story_column(model, story, |_, top, _| {
+        positions.push([top.coord[0], top.coord[1]])
+    });
+    Ok(positions
+        .into_iter()
+        .zip(x)
+        .zip(y)
+        .map(|((pos, dx), dy)| ColumnStiffness { pos, dx, dy })
+        .collect())
+}
+
+/// 指定方向の柱水平剛性 [N/mm] を層内柱の順序で返す。他方向の応答は要求しない。
+/// 変位差0又は非有限な商、必要応答・局所軸の不正は方向・部材付きErr。
+pub fn column_horizontal_stiffnesses(
+    model: &Model,
+    story: StoryId,
+    response: &StaticOnce,
+    direction: sepika_solver::statics::analysis::SeismicDir,
+) -> Result<Vec<f64>, String> {
     use std::collections::HashMap;
-    let fx: HashMap<_, _> = res_x.member_forces.iter().map(|(id, f)| (*id, f)).collect();
-    let fy: HashMap<_, _> = res_y.member_forces.iter().map(|(id, f)| (*id, f)).collect();
+    let forces: HashMap<_, _> = response
+        .member_forces
+        .iter()
+        .map(|(id, f)| (*id, f))
+        .collect();
+    let axis = match direction {
+        sepika_solver::statics::analysis::SeismicDir::X => 0,
+        sepika_solver::statics::analysis::SeismicDir::Y => 1,
+    };
 
     let mut out = Vec::new();
     let mut invalid = None;
@@ -114,20 +153,32 @@ pub fn column_stiffnesses_from_analysis(
             {
                 return Err(failure());
             }
-            if delta < 1e-9 {
-                return Ok(0.0);
-            }
             let g = station_force_global(p0, p1, elem.local_axis.ref_vector, local)
                 .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
-            Ok(g[dir].abs() / delta)
+            let invalid_stiffness = |reason| {
+                format!(
+                    "Re: 階{}・{}方向の柱{}: {reason}",
+                    story.0,
+                    if dir == 0 { "X" } else { "Y" },
+                    elem.id.0
+                )
+            };
+            if delta == 0.0 {
+                return Err(invalid_stiffness("層間変位が0のため剛性を算定できません"));
+            }
+            let stiffness = g[dir].abs() / delta;
+            if !stiffness.is_finite() {
+                return Err(invalid_stiffness("せん断力と層間変位の商が非有限です"));
+            }
+            Ok(stiffness)
         };
-        match k_of(res_x, &fx, 0).and_then(|dx| k_of(res_y, &fy, 1).map(|dy| (dx, dy))) {
-            Ok((dx, dy)) => out.push(ColumnStiffness {
-                pos: [top.coord[0], top.coord[1]],
-                dx,
-                dy,
-            }),
-            Err(reason) => invalid = Some(reason),
+        match k_of(response, &forces, axis) {
+            Ok(stiffness) => out.push(stiffness),
+            Err(reason) => {
+                if invalid.is_none() {
+                    invalid = Some(reason);
+                }
+            }
         }
     });
     invalid.map_or(Ok(out), Err)
@@ -270,6 +321,7 @@ mod tests {
             })
             .collect();
         StaticOnce {
+            stiffness_ratio_disp: None,
             disp,
             member_forces,
             panel_moments: Vec::new(),
@@ -518,6 +570,7 @@ mod tests {
         disp_x[2][0] = 10.0; // 上端
         disp_x[0][0] = 0.0; // 下端
         let res_x = StaticOnce {
+            stiffness_ratio_disp: None,
             disp: disp_x,
             member_forces: vec![(
                 ElemId(0),
@@ -530,6 +583,7 @@ mod tests {
         let mut disp_y = vec![[0.0; 6]; 3];
         disp_y[2][1] = 10.0;
         let res_y = StaticOnce {
+            stiffness_ratio_disp: None,
             disp: disp_y,
             member_forces: vec![(
                 ElemId(0),
@@ -666,6 +720,43 @@ mod misc620_tests {
     use super::tests::fabricate_static;
     use super::*;
     use crate::secondary::eccentricity::test_support::build_symmetric_frame;
+
+    #[test]
+    fn misc740_有限な微小変位でも同比例荷重なら柱剛性は不変() {
+        let (model, story) = build_symmetric_frame(None);
+        for scale in [1.0, 1e-12] {
+            let x = fabricate_static([10.0 * scale, 0.0], [[0.0, 0.0, 1000.0 * scale]; 4]);
+            let y = fabricate_static([0.0, 10.0 * scale], [[0.0, 1000.0 * scale, 0.0]; 4]);
+            let columns = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
+            for column in columns {
+                assert!((column.dx - 100.0).abs() < 1e-9);
+                assert!((column.dy - 100.0).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn misc740_ゼロ分母と商のoverflowは対象方向と理由を返す() {
+        let (mut model, story) = build_symmetric_frame(None);
+        let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        for q in [0.0, 1000.0] {
+            let x = fabricate_static([0.0, 0.0], [[0.0, 0.0, q]; 4]);
+            let reason = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap_err();
+            for expected in ["階1", "X方向", "柱", "層間変位が0"] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+        }
+        let x = fabricate_static([f64::MIN_POSITIVE, 0.0], [[0.0, 0.0, f64::MAX]; 4]);
+        let reason = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap_err();
+        assert!(
+            reason.contains("X方向") && reason.contains("商が非有限"),
+            "{reason}"
+        );
+        model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        let zero = fabricate_static([0.0, 0.0], [[0.0; 3]; 4]);
+        let reason = column_stiffnesses_from_analysis(&model, story, &zero, &y).unwrap_err();
+        assert!(reason.contains("局所座標"), "{reason}");
+    }
 
     #[test]
     fn missing_response_is_rejected_but_measured_zero_is_available() {

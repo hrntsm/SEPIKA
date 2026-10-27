@@ -314,6 +314,100 @@ impl App {
             });
     }
 
+    fn misc_wall_conditions(&mut self, ui: &mut egui::Ui) {
+        use sepika_core::model::{MiscWallRepresentativeColumn, MiscWallStiffnessMethod};
+        let previous = self.core.model.stress_cfg.clone();
+        let mut cfg = previous.clone();
+        let mut enabled = cfg.misc_wall_n.is_some();
+        if ui
+            .checkbox(&mut enabled, "自立壁の剛性をn倍法で考慮する")
+            .changed()
+        {
+            cfg.misc_wall_n = enabled.then_some(1.0);
+        }
+        ui.add_enabled_ui(enabled, |ui| {
+            if let Some(n) = &mut cfg.misc_wall_n {
+                ui.horizontal(|ui| {
+                    ui.label("係数n:");
+                    ui.add(egui::DragValue::new(n).speed(0.1).range(1.0..=f64::MAX));
+                });
+            }
+            egui::ComboBox::from_id_salt("misc_wall_method")
+                .selected_text(cfg.misc_wall_method.label())
+                .show_ui(ui, |ui| {
+                    for method in [
+                        MiscWallStiffnessMethod::StoryColumns,
+                        MiscWallStiffnessMethod::RepresentativeColumn,
+                    ] {
+                        ui.selectable_value(&mut cfg.misc_wall_method, method, method.label());
+                    }
+                });
+            if cfg.misc_wall_method == MiscWallStiffnessMethod::RepresentativeColumn {
+                for layer in self.core.model.layers() {
+                    let mut selected = cfg
+                        .misc_wall_representatives
+                        .iter()
+                        .find(|entry| entry.story == layer.top)
+                        .map(|entry| entry.column);
+                    let previous_selection = selected;
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{}の代表内柱:", layer.name));
+                        egui::ComboBox::from_id_salt(("misc_wall_column", layer.top.0))
+                            .selected_text(
+                                selected
+                                    .map_or_else(|| "未指定".into(), |id| format!("柱{}", id.0)),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut selected, None, "未指定");
+                                for column in
+                                    sepika_design_jp::secondary::story_columns::story_columns(
+                                        &self.core.model,
+                                        layer.top,
+                                    )
+                                {
+                                    let node = &self.core.model.nodes[column.top.index()];
+                                    ui.selectable_value(
+                                        &mut selected,
+                                        Some(column.top_elem),
+                                        format!(
+                                            "柱{} ({:.0}, {:.0}) mm",
+                                            column.top_elem.0, node.coord[0], node.coord[1]
+                                        ),
+                                    );
+                                }
+                            });
+                    });
+                    if selected != previous_selection {
+                        cfg.misc_wall_representatives
+                            .retain(|entry| entry.story != layer.top);
+                        if let Some(column) = selected {
+                            cfg.misc_wall_representatives
+                                .push(MiscWallRepresentativeColumn {
+                                    story: layer.top,
+                                    column,
+                                });
+                        }
+                    }
+                }
+                ui.label("各層で内柱を1本指定し、同じ柱のX・Y方向の値を使います。");
+            }
+            ui.label(
+                "無開口・スリットなしで層高さに達するRC自立壁を対象とし、Rs・Reに反映します。",
+            );
+        });
+        if cfg != previous {
+            self.core.scoped.undo.run(
+                &mut self.core.model,
+                Box::new(sepika_edit::SetMiscWallConditions {
+                    n: cfg.misc_wall_n,
+                    method: cfg.misc_wall_method,
+                    representatives: cfg.misc_wall_representatives,
+                }),
+            );
+            self.core.scoped.staleness.mark_edited();
+        }
+    }
+
     /// 計算条件（質量方式・並列スレッド数）。いずれも準備計算の実行時に
     /// モデルへ反映される、または解析全体に共通で効く設定。
     fn calc_condition_section(&mut self, ui: &mut egui::Ui) {
@@ -338,6 +432,7 @@ impl App {
                         });
                 });
                 self.set_rc_wall_shear_method(method);
+                self.misc_wall_conditions(ui);
 
                 ui.horizontal_wrapped(|ui| {
                     use sepika_core::model::MassMethod;
@@ -1078,6 +1173,69 @@ mod wall_method_tests {
             egui::Shape::Vec(values) => values.iter().find_map(|s| text_center(s, text)),
             _ => None,
         }
+    }
+
+    #[test]
+    fn misc740_guiでn倍法を有効にして方式を選びundoできる() {
+        use sepika_core::model::MiscWallStiffnessMethod;
+        let mut app = App::default();
+        let context = egui::Context::default();
+        crate::app::install_japanese_fonts(&context);
+        let frame = |app: &mut App, events| {
+            context.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.misc_wall_conditions(ui),
+            )
+        };
+        let position = |output: &egui::FullOutput, text| {
+            output
+                .shapes
+                .iter()
+                .find_map(|s| text_center(&s.shape, text))
+                .unwrap_or_else(|| panic!("描画なし: {text}"))
+        };
+        let click = |app: &mut App, pos| {
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+        };
+        frame(&mut app, vec![]);
+        let initial = frame(&mut app, vec![]);
+        click(
+            &mut app,
+            position(&initial, "自立壁の剛性をn倍法で考慮する"),
+        );
+        assert_eq!(app.core.model.stress_cfg.misc_wall_n, Some(1.0));
+        let enabled = frame(&mut app, vec![]);
+        click(&mut app, position(&enabled, "層内柱合算方式"));
+        frame(&mut app, vec![]);
+        let combo = frame(&mut app, vec![]);
+        click(&mut app, position(&combo, "代表内柱方式"));
+        assert_eq!(
+            app.core.model.stress_cfg.misc_wall_method,
+            MiscWallStiffnessMethod::RepresentativeColumn
+        );
+        app.undo_action();
+        assert_eq!(
+            app.core.model.stress_cfg.misc_wall_method,
+            MiscWallStiffnessMethod::StoryColumns
+        );
+        app.undo_action();
+        assert_eq!(app.core.model.stress_cfg.misc_wall_n, None);
     }
 
     #[test]

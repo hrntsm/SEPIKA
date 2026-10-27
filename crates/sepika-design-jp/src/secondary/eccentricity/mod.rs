@@ -20,7 +20,10 @@ mod misc_wall;
 mod model_extract;
 
 pub use core::{center_of_rigidity, d_value, eccentricity, ColumnStiffness, Eccentricity};
-pub use misc_wall::{append_misc_wall_stiffnesses, misc_wall_stiffness, sum_column_area};
+pub use misc_wall::{
+    append_misc_wall_stiffnesses, has_misc_wall, misc_wall_stiffness, misc_wall_stiffnesses,
+    sum_column_area, MiscWallStiffness,
+};
 pub use model_extract::{
     center_of_mass, column_stiffnesses, story_centers, story_eccentricity, StoryCenters,
 };

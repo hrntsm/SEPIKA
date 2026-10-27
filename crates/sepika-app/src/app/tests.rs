@@ -11072,6 +11072,7 @@ fn activity_svgs_rasterize() {
 
 fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
     sepika_solver::statics::linear::StaticOnce {
+        stiffness_ratio_disp: None,
         disp: vec![],
         member_forces: vec![],
         panel_moments: vec![],

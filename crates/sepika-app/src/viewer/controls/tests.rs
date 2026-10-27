@@ -506,6 +506,7 @@ fn fit_to_view_preserves_direction_selection_and_results_in_model_and_frame_view
             combos: vec![(
                 "長期".into(),
                 sepika_solver::statics::linear::StaticOnce {
+                    stiffness_ratio_disp: None,
                     disp: vec![[0.0, 0.0, 10.0, 0.0, 0.0, 0.0]; h.app.core.model.nodes.len()],
                     member_forces: vec![],
                     panel_moments: vec![],

@@ -1767,42 +1767,44 @@ fn panel_758_design21_expires_checks_and_display_but_keeps_current_analysis_unti
 }
 
 #[test]
-fn panel_892_design38_expires_checks_but_keeps_analysis_until_explicit_recheck() {
+fn panel_892_old_design_expires_checks_but_keeps_analysis_until_explicit_recheck() {
     let app = panel_757_calculated();
     assert_panel_758_both_axes(&app);
     let original = app.core.scoped.results.as_ref().unwrap();
     let expected_checks = rmp_serde::to_vec_named(&original.joint_checks).unwrap();
-    let (mut loaded, path) = restore(
-        &app,
-        Some(ANALYSIS_CONTRACT_VERSION),
-        Some(38),
-        "panel892-design38",
-    );
-    let results = loaded.core.scoped.results.as_ref().unwrap();
-    assert_eq!(results.panel_moments, original.panel_moments);
-    assert_eq!(results.member_forces, original.member_forces);
-    assert_eq!(results.statics[0].1.disp, original.statics[0].1.disp);
-    assert!(!results.has_design_results());
-    assert!(loaded.require_selected_static_input().is_ok());
-    assert!(loaded.current_design_results().is_none());
-    assert!(!loaded.core.scoped.staleness.results_stale);
-    assert!(loaded.core.scoped.staleness.design_stale);
-    loaded.run_design_check();
-    assert!(loaded.core.scoped.last_error.is_none());
-    assert_panel_758_both_axes(&loaded);
-    let results = loaded.core.scoped.results.as_ref().unwrap();
-    assert_eq!(
-        results.design_contract_version,
-        Some(DESIGN_CONTRACT_VERSION)
-    );
-    assert_eq!(results.member_forces, original.member_forces);
-    assert_eq!(results.panel_moments, original.panel_moments);
-    assert_eq!(
-        rmp_serde::to_vec_named(&results.joint_checks).unwrap(),
-        expected_checks
-    );
-    assert!(loaded.core.scoped.result_contract_notice.is_none());
-    std::fs::remove_file(path).unwrap();
+    for old_version in [38, 39] {
+        let (mut loaded, path) = restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(old_version),
+            &format!("panel892-design{old_version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.panel_moments, original.panel_moments);
+        assert_eq!(results.member_forces, original.member_forces);
+        assert_eq!(results.statics[0].1.disp, original.statics[0].1.disp);
+        assert!(!results.has_design_results());
+        assert!(loaded.require_selected_static_input().is_ok());
+        assert!(loaded.current_design_results().is_none());
+        assert!(!loaded.core.scoped.staleness.results_stale);
+        assert!(loaded.core.scoped.staleness.design_stale);
+        loaded.run_design_check();
+        assert!(loaded.core.scoped.last_error.is_none());
+        assert_panel_758_both_axes(&loaded);
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(
+            results.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(results.member_forces, original.member_forces);
+        assert_eq!(results.panel_moments, original.panel_moments);
+        assert_eq!(
+            rmp_serde::to_vec_named(&results.joint_checks).unwrap(),
+            expected_checks
+        );
+        assert!(loaded.core.scoped.result_contract_notice.is_none());
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 #[test]
@@ -2530,4 +2532,16 @@ fn cft767_old_saved_design_keeps_analysis_and_requires_material_e_recheck() {
         );
         std::fs::remove_file(path).unwrap();
     }
+}
+
+#[test]
+fn misc740_旧解析契約63の通常応力をrs評価結果として再採用しない() {
+    let app = calculated();
+    let (loaded, path) = restore(&app, Some(63), Some(38), "740-analysis63");
+    let results = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(!results.has_analysis_results());
+    assert!(!results.has_design_results());
+    assert!(loaded.core.scoped.staleness.results_stale);
+    assert!(loaded.core.scoped.last_static.is_none());
+    std::fs::remove_file(path).unwrap();
 }

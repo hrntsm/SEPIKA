@@ -454,7 +454,8 @@ impl App {
         let model = sepika_core::wall_expand::expand_wall_elements_owned(model).0;
         let analysis = Analysis::prepare(&model).map_err(|e| format!("解析準備エラー: {:?}", e))?;
         let ids: Vec<LoadCaseId> = case_keys.iter().map(|(id, _)| *id).collect();
-        let batch = analysis.linear_static_with_combinations(&ids, &combos);
+        let mut batch = analysis.linear_static_with_combinations(&ids, &combos);
+        sepika_job::stiffness_ratio::attach_evaluations(&model, &ids, &mut batch.cases);
         let case_name = |id: LoadCaseId| {
             model
                 .load_cases

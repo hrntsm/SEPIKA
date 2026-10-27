@@ -831,6 +831,19 @@ mod tests {
             },
             |a| a.core.model.stories[0].seismic_weight = Some(1.0),
             |a| a.core.analysis_cfg.z = 0.8,
+            |a| a.core.model.stress_cfg.misc_wall_n = Some(1.0),
+            |a| {
+                a.core.model.stress_cfg.misc_wall_method =
+                    sepika_core::model::MiscWallStiffnessMethod::RepresentativeColumn
+            },
+            |a| {
+                a.core.model.stress_cfg.misc_wall_representatives.push(
+                    sepika_core::model::MiscWallRepresentativeColumn {
+                        story: sepika_core::ids::StoryId(1),
+                        column: sepika_core::ids::ElemId(0),
+                    },
+                )
+            },
             |a| a.core.analysis_cfg.push_steps += 1,
             |a| {
                 a.core.model.stress_cfg.consider_rigid_zones =
