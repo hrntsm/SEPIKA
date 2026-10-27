@@ -25,7 +25,7 @@ SRC/CFTは構造種別による既存別検定器を維持する。BRBは製品N
 | SRC/CFT非流用 | 同ファイル`issue901_composite_checkers_do_not_apply_ordinary_steel_limit`。構造種別で別検定器を選ぶ |
 | 公開一括・位置混在 | 同ファイル`issue901_public_batch_retains_compression_failure_among_tension_and_zero_positions`。端引張/中央圧縮/他端0を独立に判定。`issue901_public_batch_uses_face_positions_without_node_center_axial_substitution`ではフェース0.1/0.9・中央0.5を判定し節点芯を除外 |
 | 全フィルタ部材集約 | `viewer/check_ratio.rs::issue901_failed_provision_survives_all_filters_and_mixed_positions`。適合曲げ2位置と超過1位置を集約して全項目でNG |
-| App・OVIKA・旧検定失効 | `app/result_contract_tests.rs::issue901_ovika_current_failure_roundtrips_and_old_design38_expires_until_recheck`。実解析、実保存・読込、検定38失効と39再検定、解析応力維持 |
+| App・OVIKA・旧検定失効 | `app/result_contract_tests.rs::issue901_ovika_current_failure_roundtrips_and_old_design38_and39_expire_until_recheck`。実解析、実保存・読込、検定38・39失効と40再検定、解析応力維持 |
 | 荷重組合せ | 同ファイル`issue901_load_combinations_keep_tension_and_compression_outcomes_separate`。G+P±Eの実求解で圧縮NGとなる柱が正負で入れ替わる |
 | 自動egui | 同ファイル`issue901_egui_table_displays_statutory_failure`。表の上限理由・構造規定・NGの描画文字を検査 |
 
@@ -41,9 +41,16 @@ SRC/CFTは構造種別による既存別検定器を維持する。BRBは製品N
 - `cargo fmt --all --check`、`mdbook build`、`git diff --check`: 成功。
 
 
-### main統合後の確認
+### 長期付着修正の統合後の確認
 
 先行#923（main `8a1df66d`、検定契約38）を`eface27c`で取り込み、解析63・検定39を維持した。統合後に上記の`steel_slenderness`6件とAppの`issue901`4件を再実行して全成功。3クレートの同じclippyコマンド、fmt、mdBook、diff検証も再成功した。`check-docs`はsummary124・links664・impl refs707。main取込を理由に無関係なcore全試験を繰り返さず、全体回帰と統合後の直接再検証を区別した。
+
+### 自立壁修正の統合と検定契約40
+
+先行#740（main `53693092`、解析契約64・検定契約39）を`a34a75e5`で取り込んだ。解析64を保持し、鋼細長比上限の検定契約を40へ更新した。OVIKA回帰は旧検定38・39の適合データをそれぞれ失効させ、解析応力を保持した明示再検定で現行40の構造規定NGとなることを対象とする。先行する自立壁の保存結果回帰も保持した。
+
+`da4ce52c`の版・試験更新に対して、専用targetで`cargo test -p sepika-design-jp --test steel_slenderness --locked`の6件と`cargo test -p sepika-app --lib --features gui issue901 --locked`の4件が成功した。上記3クレートのall-targets・GUI有効clippy、fmt、mdBook、diff検証も成功。`check-docs`はsummary124・links666・impl refs708。`rustup update stable`はrustc1.99.1を維持し、clippy0.1.99を再確認した。全体回帰は上記取込前の記録と区別し、今回の版更新だけでcore全試験を繰り返していない。検証ログは作業用の`verification-901/`へ保持し、追跡対象には含めない。
+
 
 ## 残る未検証
 
