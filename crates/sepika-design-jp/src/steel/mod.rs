@@ -166,6 +166,55 @@ fn nonzero(z: f64) -> f64 {
     }
 }
 
+fn compression_slenderness_outcome(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    ctx: &DesignCtx,
+) -> Option<CheckOutcome> {
+    use crate::{CheckComponent, CheckKind, CheckResult};
+    if forces.n.is_finite() && forces.n >= 0.0 {
+        return None;
+    }
+    let lengths_mm = [
+        ctx.lk_y.unwrap_or(ctx.length),
+        ctx.lk_z.unwrap_or(ctx.length),
+    ];
+    if !forces.n.is_finite()
+        || [sec.area, sec.iy, sec.iz]
+            .iter()
+            .any(|v| !v.is_finite() || *v <= 0.0)
+        || lengths_mm.iter().any(|v| !v.is_finite() || *v < 0.0)
+    {
+        return Some(CheckOutcome::Skipped {
+            reason: "有効細長比の法定上限を判定できません。軸力・断面性能・有効座屈長さを確認してください".into(),
+        });
+    }
+    let radii_mm = [(sec.iy / sec.area).sqrt(), (sec.iz / sec.area).sqrt()];
+    let lambdas = [lengths_mm[0] / radii_mm[0], lengths_mm[1] / radii_mm[1]];
+    if radii_mm.iter().any(|v| !v.is_finite() || *v <= 0.0)
+        || lambdas.iter().any(|v| !v.is_finite())
+    {
+        return Some(CheckOutcome::Skipped {
+            reason: "有効細長比を有限値で算定できないため法定上限を判定できません".into(),
+        });
+    }
+    let lambda = lambdas[0].max(lambdas[1]);
+    let limit = if ctx.kind == MemberKind::Column {
+        200.0
+    } else {
+        250.0
+    };
+    (lambda > limit).then(|| CheckOutcome::Checked(CheckResult {
+        basis: "建築基準法施行令第65条 有効細長比上限".into(),
+        detail: String::new(),
+        components: vec![CheckComponent {
+            kind: CheckKind::Provision,
+            ratio: lambda / limit,
+            detail: format!("有効細長比λ={lambda} > 法定上限{limit}。λ/上限={ratio}（応力度比ではありません）", ratio=lambda/limit),
+        }],
+    }))
+}
+
 pub struct SteelDesign;
 
 impl DesignCheck for SteelDesign {
@@ -176,6 +225,9 @@ impl DesignCheck for SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
+        if let Some(outcome) = compression_slenderness_outcome(forces, sec, ctx) {
+            return outcome;
+        }
         if let Some(shape) = sec
             .shape
             .as_ref()

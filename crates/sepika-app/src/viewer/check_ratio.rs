@@ -52,6 +52,7 @@ const ALL_KINDS: [CheckKind; 7] = [
 /// - `Kind(k)`: `cr.components` から `kind == k` の最大検定比を探し
 ///   `Some((r, r <= 1.0))` を返す。該当する式がなければ `None`
 ///   （＝この検定位置は当該式の検定対象外。着色・マーカーとも描かない）。
+///   上限超過の構造規定は、選択した式にかかわらず不適合として残す。
 pub(super) fn ratio_for_filter(
     outcome: &CheckOutcome,
     filter: CheckRatioFilter,
@@ -68,7 +69,7 @@ pub(super) fn ratio_for_filter(
             let max_ratio = cr
                 .components
                 .iter()
-                .filter(|c| c.kind == k)
+                .filter(|c| c.kind == k || c.kind == CheckKind::Provision && c.ratio > 1.0)
                 .map(|c| c.ratio)
                 .fold(None, |acc: Option<f64>, r| {
                     Some(acc.map_or(r, |a| a.max(r)))
@@ -1668,5 +1669,45 @@ mod tests {
             assert!(incomplete_joint_nodes(items).contains(&NodeId(0)));
         }
         assert!(incomplete_joint_nodes([(NodeId(0), &checked)]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod issue901_tests {
+    use super::*;
+    #[test]
+    fn issue901_failed_provision_survives_all_filters_and_mixed_positions() {
+        let failure = CheckOutcome::Checked(CheckResult {
+            basis: "令65条".into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Provision,
+                ratio: 1.0000005,
+                detail: "λ=200.0001 > 法定上限200（応力度比ではありません）".into(),
+            }],
+        });
+        let success = CheckOutcome::Checked(CheckResult {
+            basis: String::new(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Bending,
+                ratio: 0.2,
+                detail: String::new(),
+            }],
+        });
+        for filter in std::iter::once(CheckRatioFilter::Max)
+            .chain(ALL_KINDS.into_iter().map(CheckRatioFilter::Kind))
+        {
+            let aggregate = max_ratio_by_elem(
+                [&success, &failure, &success]
+                    .into_iter()
+                    .map(|outcome| (ElemId(0), ratio_for_filter(outcome, filter))),
+            );
+            assert_eq!(aggregate[&ElemId(0)], (1.0000005, false));
+            assert_eq!(
+                theme::check_ratio_color(aggregate[&ElemId(0)].0),
+                theme::PARETO_RED
+            );
+        }
     }
 }

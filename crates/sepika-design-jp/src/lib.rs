@@ -180,7 +180,7 @@ pub enum CheckKind {
     Axial,
     /// たわみ
     Deflection,
-    /// 構造規定（かぶり・補強筋間隔等の入力エラー）
+    /// 構造規定（有効細長比上限・かぶり・補強筋間隔等）
     Provision,
 }
 

@@ -2492,3 +2492,186 @@ fn cft767_old_saved_design_keeps_analysis_and_requires_material_e_recheck() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+fn issue901_calculated() -> App {
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model.steel_design_attrs = model
+        .elements
+        .iter()
+        .map(|e| sepika_core::model::SteelDesignAttr {
+            elem: e.id,
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            lk_y_direct: Some(1000000.0),
+            lk_z_direct: Some(1000000.0),
+            c_direct: None,
+        })
+        .collect();
+    let mut app = App::default();
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+fn issue901_assert_failure(app: &App) {
+    use sepika_design_jp::{CheckKind, CheckOutcome};
+    let results = app.current_design_results().unwrap();
+    assert!(results.member_checks.iter().flat_map(|m| &m.positions).any(|p| matches!(&p.outcome, CheckOutcome::Checked(r) if !r.ok() && r.components.iter().any(|c| c.kind == CheckKind::Provision && c.detail.contains("法定上限") && c.detail.contains("応力度比ではありません")))));
+}
+#[test]
+fn issue901_ovika_current_failure_roundtrips_and_old_design38_expires_until_recheck() {
+    let mut app = issue901_calculated();
+    issue901_assert_failure(&app);
+    for design in [Some(DESIGN_CONTRACT_VERSION), Some(38)] {
+        if design == Some(38) {
+            for member in &mut app.core.scoped.results.as_mut().unwrap().member_checks {
+                for position in &mut member.positions {
+                    position.outcome =
+                        sepika_design_jp::CheckOutcome::Checked(sepika_design_jp::CheckResult {
+                            basis: "法定上限未判定の旧適合".into(),
+                            detail: String::new(),
+                            components: vec![sepika_design_jp::CheckComponent {
+                                kind: sepika_design_jp::CheckKind::Axial,
+                                ratio: 0.2,
+                                detail: String::new(),
+                            }],
+                        });
+                }
+            }
+        }
+        let (mut loaded, path) = restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            design,
+            &format!("901-{design:?}"),
+        );
+        assert!(loaded
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .has_analysis_results());
+        let forces = loaded
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .member_forces
+            .clone();
+        if design == Some(38) {
+            assert!(loaded.current_design_results().is_none());
+        } else {
+            issue901_assert_failure(&loaded);
+        }
+        loaded.run_design_check();
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        issue901_assert_failure(&loaded);
+        assert_eq!(
+            loaded.core.scoped.results.as_ref().unwrap().member_forces,
+            forces
+        );
+        loaded.save_project_to(path.clone());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        issue901_assert_failure(&reopened);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+#[cfg(feature = "gui")]
+#[test]
+fn issue901_egui_table_displays_statutory_failure() {
+    fn contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
+        match shape {
+            egui::epaint::Shape::Text(t) => t.galley.text().contains(needle),
+            egui::epaint::Shape::Vec(parts) => parts.iter().any(|p| contains(p, needle)),
+            _ => false,
+        }
+    }
+    let mut app = issue901_calculated();
+    let context = egui::Context::default();
+    let rendered = context.run_ui(Default::default(), |ui| {
+        crate::design_view::design_table(ui, &mut app)
+    });
+    for needle in ["有効細長比上限", "構造規定", "NG"] {
+        assert!(
+            rendered.shapes.iter().any(|s| contains(&s.shape, needle)),
+            "{needle}"
+        );
+    }
+}
+
+#[test]
+fn issue901_load_combinations_keep_tension_and_compression_outcomes_separate() {
+    let mut app = issue901_calculated();
+    let mut model = app.core.model.clone();
+    for load in &mut model.load_cases[1].nodal {
+        load.values[0] *= 10.0;
+    }
+    let live_id = LoadCaseId(model.load_cases.iter().map(|c| c.id.0).max().unwrap() + 1);
+    model.load_cases.push(sepika_core::model::LoadCase {
+        id: live_id,
+        name: "積載0".into(),
+        kind: sepika_core::model::LoadCaseKind::Live,
+        nodal: vec![],
+        member: vec![],
+    });
+    let index = model.combinations.len();
+    for (name, factor) in [("901正方向", 1.0), ("901負方向", -1.0)] {
+        model
+            .combinations
+            .push(sepika_core::model::LoadCombination {
+                name: name.into(),
+                terms: vec![
+                    (LoadCaseId(0), 1.0),
+                    (live_id, 1.0),
+                    (LoadCaseId(1), factor),
+                ],
+            });
+    }
+    app.load_model(model);
+    let column_failure_ids = |app: &App| -> Vec<ElemId> {
+        let current = app.current_design_results().unwrap();
+        current.member_checks.iter().filter(|m| app.core.model.element_section(&app.core.model.elements[m.elem.index()]).is_some_and(|s| s.frame_use == Some(sepika_core::model::FrameSectionUse::Column))).filter(|m| m.positions.iter().any(|p| matches!(&p.outcome, sepika_design_jp::CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == sepika_design_jp::CheckKind::Provision)))).map(|m| m.elem).collect()
+    };
+    app.run_combination(index);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let positive = column_failure_ids(&app);
+    assert_eq!(
+        positive.len(),
+        1,
+        "cases={:?} attrs={:?} checks={:?}",
+        app.core.model.load_cases,
+        app.core.model.steel_design_attrs,
+        app.current_design_results().unwrap().member_checks
+    );
+    app.run_combination(index + 1);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let negative = column_failure_ids(&app);
+    assert_eq!(negative.len(), 1);
+    assert_ne!(positive, negative);
+    app.run_combination(index);
+    assert_eq!(column_failure_ids(&app), positive);
+}
