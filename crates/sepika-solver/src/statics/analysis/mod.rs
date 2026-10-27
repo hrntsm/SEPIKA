@@ -99,6 +99,7 @@ impl<'m> Analysis<'m> {
 
     fn zero_result(&self) -> StaticOnce {
         StaticOnce {
+            stiffness_ratio_disp: None,
             disp: vec![[0.0; 6]; self.model.nodes.len()],
             member_forces: Vec::new(),
             panel_moments: Vec::new(),

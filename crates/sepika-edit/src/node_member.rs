@@ -882,6 +882,16 @@ impl EditCommand for DeleteMember {
     }
 
     fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if model
+            .stress_cfg
+            .misc_wall_representatives
+            .iter()
+            .any(|entry| entry.column == self.id)
+        {
+            return Box::new(crate::RejectedEdit(
+                "自立壁の代表内柱に指定された柱です。指定を解除してから削除してください".into(),
+            ));
+        }
         if let Err(reason) = model.validate_assignment_region_identity() {
             return Box::new(RejectedEdit(reason));
         }

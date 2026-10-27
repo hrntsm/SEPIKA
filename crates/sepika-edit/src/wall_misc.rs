@@ -1306,3 +1306,68 @@ impl EditCommand for SetRcWallShearMethod {
         "RC壁終局せん断耐力方式変更"
     }
 }
+
+/// 自立壁n倍法の係数・建物共通の方式・各層の代表内柱指定を一括変更する。
+pub struct SetMiscWallConditions {
+    pub n: Option<f64>,
+    pub method: sepika_core::model::MiscWallStiffnessMethod,
+    pub representatives: Vec<sepika_core::model::MiscWallRepresentativeColumn>,
+}
+
+impl EditCommand for SetMiscWallConditions {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let mut cfg = model.stress_cfg.clone();
+        cfg.misc_wall_n = self.n;
+        cfg.misc_wall_method = self.method;
+        cfg.misc_wall_representatives = self.representatives.clone();
+        if let Err(reason) = cfg.validate_misc_wall_n() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        if cfg == model.stress_cfg {
+            return Box::new(crate::Noop);
+        }
+        let old = std::mem::replace(&mut model.stress_cfg, cfg);
+        Box::new(Self {
+            n: old.misc_wall_n,
+            method: old.misc_wall_method,
+            representatives: old.misc_wall_representatives,
+        })
+    }
+    fn label(&self) -> &str {
+        "自立壁のn倍法条件変更"
+    }
+}
+
+#[cfg(test)]
+mod misc_wall_condition_tests {
+    use super::*;
+    use sepika_core::ids::{ElemId, StoryId};
+    use sepika_core::model::{MiscWallRepresentativeColumn, MiscWallStiffnessMethod};
+
+    #[test]
+    fn n倍法の方式と指定柱は一括undo_redoできる() {
+        let mut model = Model::default();
+        let before = model.stress_cfg.clone();
+        let command = SetMiscWallConditions {
+            n: Some(2.0),
+            method: MiscWallStiffnessMethod::RepresentativeColumn,
+            representatives: vec![MiscWallRepresentativeColumn {
+                story: StoryId(1),
+                column: ElemId(3),
+            }],
+        };
+        let undo = command.apply(&mut model);
+        let chosen = model.stress_cfg.clone();
+        let redo = undo.apply(&mut model);
+        assert_eq!(model.stress_cfg, before);
+        redo.apply(&mut model);
+        assert_eq!(model.stress_cfg, chosen);
+        let invalid = SetMiscWallConditions {
+            n: Some(0.5),
+            method: MiscWallStiffnessMethod::StoryColumns,
+            representatives: vec![],
+        };
+        assert!(invalid.apply(&mut model).rejection().is_some());
+        assert_eq!(model.stress_cfg, chosen);
+    }
+}

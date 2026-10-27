@@ -10195,3 +10195,57 @@ fn undo既定上限は最後の百編集を保持する() {
     assert_eq!(model.nodes[0].coord, [2.0, 0.0, 0.0]);
     assert_eq!(undo.revision(), 202);
 }
+
+#[test]
+fn misc740_他部材の削除再採番でも代表内柱の実体を維持する() {
+    use sepika_core::model::MiscWallRepresentativeColumn;
+    let mut model = seeded_model(3, 2);
+    model.stories.push(make_story(0, None));
+    model.stress_cfg.misc_wall_representatives = vec![MiscWallRepresentativeColumn {
+        story: StoryId(0),
+        column: ElemId(1),
+    }];
+    let mut undo = UndoStack::new();
+    assert!(undo.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+    assert_eq!(
+        model.stress_cfg.misc_wall_representatives[0].column,
+        ElemId(0)
+    );
+    assert_eq!(model.elements[0].nodes.as_slice(), &[NodeId(1), NodeId(2)]);
+    assert!(!undo.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+    undo.undo(&mut model);
+    assert_eq!(
+        model.stress_cfg.misc_wall_representatives[0].column,
+        ElemId(1)
+    );
+    assert_eq!(model.elements[1].nodes.as_slice(), &[NodeId(1), NodeId(2)]);
+}
+
+#[test]
+fn misc740_階挿入とundoで代表内柱の対象階を維持する() {
+    use sepika_core::model::MiscWallRepresentativeColumn;
+    let mut model = story_edit_model(&[0.0, 3000.0], &[("1F", 0.0), ("RF", 3000.0)]);
+    model.stress_cfg.misc_wall_representatives = vec![MiscWallRepresentativeColumn {
+        story: StoryId(1),
+        column: ElemId(0),
+    }];
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "2F".into(),
+            elevation: Some(1500.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    assert_eq!(
+        model.stress_cfg.misc_wall_representatives[0].story,
+        StoryId(2)
+    );
+    assert!(!undo.run(&mut model, Box::new(DeleteStory { story: StoryId(2) })));
+    undo.undo(&mut model);
+    assert_eq!(
+        model.stress_cfg.misc_wall_representatives[0].story,
+        StoryId(1)
+    );
+}
