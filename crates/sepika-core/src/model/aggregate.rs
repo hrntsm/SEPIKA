@@ -329,6 +329,26 @@ impl Model {
             }
             Ok(())
         };
+        let mut representative_stories = std::collections::HashSet::new();
+        for entry in &self.stress_cfg.misc_wall_representatives {
+            check_story("自立壁の代表内柱", entry.story)?;
+            if self
+                .elements
+                .get(entry.column.index())
+                .is_none_or(|element| element.id != entry.column)
+            {
+                return Err(CoreError::DanglingRef(format!(
+                    "自立壁の代表内柱 -> Element {}",
+                    entry.column.0
+                )));
+            }
+            if !representative_stories.insert(entry.story) {
+                return Err(CoreError::InvalidInput(format!(
+                    "階{}の自立壁代表内柱が重複しています",
+                    entry.story.0
+                )));
+            }
+        }
         let check_constraint = |owner: &str, constraint: &Constraint| {
             match constraint {
                 Constraint::RigidDiaphragm {
@@ -1511,6 +1531,9 @@ impl Model {
     /// 階の追加・削除では「ID＝配列位置」の不変条件を保つために ID の繰り上げが
     /// 必要になる。参照箇所を呼び出し側へ散らさないよう、走査はここに集約する。
     pub fn visit_story_ids(&mut self, mut f: impl FnMut(&mut StoryId)) {
+        for entry in &mut self.stress_cfg.misc_wall_representatives {
+            f(&mut entry.story);
+        }
         for slab in &mut self.slabs {
             if let Some(story) = &mut slab.reference_story {
                 f(story);
@@ -1679,6 +1702,9 @@ impl Model {
     /// 要素の追加・削除に伴う ID 繰上げ／繰下げで、参照整合を保つために用いる
     /// （要素自身の ID・部材荷重も含めた全参照は [`Model::visit_elem_ids`]）。
     pub fn shift_elem_attr_refs(&mut self, mut f: impl FnMut(&mut ElemId)) {
+        for entry in &mut self.stress_cfg.misc_wall_representatives {
+            f(&mut entry.column);
+        }
         for a in &mut self.wall_attrs {
             f(&mut a.elem);
         }

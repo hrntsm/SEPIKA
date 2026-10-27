@@ -129,7 +129,16 @@ pub fn compute_story_metrics_with(
             dir
         ))
     } else {
-        cog_story_drifts(model, metric_disp, d)
+        let rs_disp = if model.stress_cfg.misc_wall_n.is_some() {
+            seismic
+                .and_then(|s| s.stiffness_ratio_disp.as_ref())
+                .ok_or_else(|| "自立壁を考慮したRs評価用再解析結果がありません".to_string())
+                .and_then(|result| result.as_deref().map_err(Clone::clone))
+        } else {
+            Ok(metric_disp)
+        };
+        rs_disp
+            .and_then(|disp| cog_story_drifts(model, disp, d))
             .and_then(|drifts| stiffness_ratios(&heights, &drifts))
     };
 
@@ -1512,6 +1521,152 @@ mod tests {
     }
 
     #[test]
+    fn misc740_代表内柱条件とrs専用変位の成功失敗をovikaに保存する() {
+        use sepika_core::model::{MiscWallRepresentativeColumn, MiscWallStiffnessMethod};
+        let mut app = metrics_810_app(false);
+        let representatives: Vec<_> = app
+            .core
+            .model
+            .layers()
+            .iter()
+            .map(|layer| {
+                let column = sepika_design_jp::secondary::story_columns::story_columns(
+                    &app.core.model,
+                    layer.top,
+                )[0]
+                .top_elem;
+                MiscWallRepresentativeColumn {
+                    story: layer.top,
+                    column,
+                }
+            })
+            .collect();
+        app.core.model.stress_cfg.misc_wall_n = Some(1.5);
+        app.core.model.stress_cfg.misc_wall_method = MiscWallStiffnessMethod::RepresentativeColumn;
+        app.core.model.stress_cfg.misc_wall_representatives = representatives;
+        app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let expected = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(SeismicDir::X)
+            .unwrap()
+            .stiffness_ratio_disp
+            .clone()
+            .unwrap()
+            .unwrap();
+        let cfg = app.core.model.stress_cfg.clone();
+        let path = std::env::temp_dir().join(format!(
+            "sepika-misc740-rs-save-{}.ovika",
+            std::process::id()
+        ));
+        app.save_project_to_opts(path.clone(), Some(true));
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        assert_eq!(loaded.core.model.stress_cfg, cfg);
+        assert_eq!(
+            loaded
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .seismic(SeismicDir::X)
+                .unwrap()
+                .stiffness_ratio_disp,
+            Some(Ok(expected))
+        );
+        assert!(seismic_story_metrics(&loaded)[0].rs.is_ok());
+        loaded
+            .core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .statics
+            .iter_mut()
+            .find(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))
+            .unwrap()
+            .1
+            .stiffness_ratio_disp = Some(Err("壁の支持床が不明です".into()));
+        loaded.save_project_to_opts(path.clone(), Some(true));
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        let mut failed = App::default();
+        failed.open_project_from(path.clone());
+        assert!(
+            failed.core.scoped.last_error.is_none(),
+            "{:?}",
+            failed.core.scoped.last_error
+        );
+        assert_eq!(
+            failed
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .seismic(SeismicDir::X)
+                .unwrap()
+                .stiffness_ratio_disp,
+            Some(Err("壁の支持床が不明です".into()))
+        );
+        let metric = seismic_story_metrics(&failed).remove(0);
+        assert!(metric.rs.unwrap_err().contains("支持床"));
+        assert!(metric.drift.is_ok());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn misc740_rs専用結果の欠落や失敗を通常変位で補完しない() {
+        let app = metrics_810_app(false);
+        let mut model = app.core.model.clone();
+        model.stress_cfg.misc_wall_n = Some(1.0);
+        let mut results = app.core.scoped.results.clone().unwrap();
+        for state in 0..4 {
+            let result = &mut results
+                .statics
+                .iter_mut()
+                .find(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))
+                .unwrap()
+                .1;
+            result.stiffness_ratio_disp = match state {
+                0 => None,
+                1 => Some(Err("評価用剛床が不明".into())),
+                2 => Some(Ok(vec![[0.0; 6]; result.disp.len()])),
+                _ => Some(Ok(result.disp.clone())),
+            };
+            let ctx = metrics_ctx_from_results(&model, Some(&results));
+            let metrics = compute_story_metrics_with(&model, SeismicDir::X, &ctx);
+            assert!(!metrics.is_empty());
+            assert!(metrics[0].drift.is_ok());
+            assert_eq!(metrics[0].rs.is_ok(), state == 3);
+            assert_eq!(metrics[0].fes.is_ok(), state == 3);
+        }
+    }
+
+    #[test]
     fn metrics_810_directional_missing_and_unknown_inputs_only_disable_dependencies() {
         use crate::app::ResultInputKey;
         for direction in [SeismicDir::X, SeismicDir::Y] {
@@ -1681,6 +1836,7 @@ mod tests {
         (
             model,
             StaticOnce {
+                stiffness_ratio_disp: None,
                 disp: vec![[0.0; 6]; 4],
                 member_forces: vec![],
                 panel_moments: vec![],

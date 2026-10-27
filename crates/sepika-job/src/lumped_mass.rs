@@ -314,15 +314,9 @@ fn story_stiffness(
         }
         LumpedStiffnessSource::ColumnKi => {
             for layer in &layers {
-                let cols = column_stiffnesses_from_analysis(model, layer.top, res, res)
+                let cols = sepika_design_jp::secondary::eccentricity_analysis::column_horizontal_stiffnesses(model, layer.top, res, dir)
                     .map_err(JobError::InvalidInput)?;
-                let sum: f64 = cols
-                    .iter()
-                    .map(|c| match dir {
-                        SeismicDir::X => c.dx,
-                        SeismicDir::Y => c.dy,
-                    })
-                    .sum();
+                let sum: f64 = cols.iter().sum();
                 if sum <= 0.0 {
                     return Err(JobError::InvalidInput(format!(
                         "階 {} の柱剛性合計が 0 です",
@@ -590,6 +584,7 @@ mod tests {
         use sepika_core::ids::ElemId;
         use sepika_element::frame::beam::MemberForces;
         StaticOnce {
+            stiffness_ratio_disp: None,
             disp: vec![[0.0; 6]; n_nodes],
             member_forces: qz
                 .iter()
@@ -611,6 +606,7 @@ mod tests {
         use sepika_core::ids::ElemId;
         use sepika_element::frame::beam::MemberForces;
         StaticOnce {
+            stiffness_ratio_disp: None,
             disp: vec![[0.0; 6]; n_nodes],
             member_forces: qy
                 .iter()

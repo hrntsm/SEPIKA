@@ -542,7 +542,7 @@ fn misc620_wall_material_opening_and_slit_are_distinct() {
 }
 
 #[test]
-fn misc620_projection_has_independent_directional_totals() {
+fn misc740_diagonal_wall_uses_one_projected_in_plane_stiffness() {
     let (mut model, story) = misc620_model();
     let sid = model.wall_plates[0].section.unwrap();
     model.sections[sid.index()].thickness = Some(200000.0 / 6000.0_f64.hypot(6000.0));
@@ -558,8 +558,8 @@ fn misc620_projection_has_independent_directional_totals() {
         4
     ];
     append_misc_wall_stiffnesses(&model, story, &mut cols).unwrap();
-    assert!((cols[4].dx - 6250.0).abs() < 1e-9);
-    assert!((cols[4].dy - 12500.0).abs() < 1e-9);
+    assert!((cols[4].dx - 9375.0).abs() < 1e-9);
+    assert!((cols[4].dy - 9375.0).abs() < 1e-9);
 }
 
 #[test]
@@ -788,4 +788,48 @@ fn misc889_wall_coefficient_can_increase_or_decrease_re_and_fes() {
         .unwrap_err()
         .contains("係数n"));
     assert_eq!(cols, before);
+}
+
+#[test]
+fn misc740_representative_column_and_story_sum_are_distinct_choices() {
+    use sepika_core::model::{MiscWallRepresentativeColumn, MiscWallStiffnessMethod};
+    let (mut model, story) = misc620_model();
+    let sid = model.wall_plates[0].section.unwrap();
+    model.sections[sid.index()].thickness = Some(200000.0 / 6000.0_f64.hypot(6000.0));
+    for section in &mut model.sections[..2] {
+        section.area = 40000.0;
+    }
+    let cols: Vec<_> = [100.0, 200.0, 300.0, 400.0]
+        .into_iter()
+        .map(|dx| ColumnStiffness {
+            pos: [0.0; 2],
+            dx,
+            dy: dx * 2.0,
+        })
+        .collect();
+    let aggregate = misc_wall_stiffnesses(&model, story, &cols).unwrap();
+    assert!((aggregate[0].kx - 1250.0).abs() < 1e-9);
+    assert!((aggregate[0].ky - 2500.0).abs() < 1e-9);
+    model.stress_cfg.misc_wall_method = MiscWallStiffnessMethod::RepresentativeColumn;
+    assert!(misc_wall_stiffnesses(&model, story, &cols)
+        .unwrap_err()
+        .contains("1本指定"));
+    let column = crate::secondary::story_columns::story_columns(&model, story)[0].top_elem;
+    model
+        .stress_cfg
+        .misc_wall_representatives
+        .push(MiscWallRepresentativeColumn { story, column });
+    let representative = misc_wall_stiffnesses(&model, story, &cols).unwrap();
+    assert!((representative[0].kx - 500.0).abs() < 1e-9);
+    assert!((representative[0].ky - 1000.0).abs() < 1e-9);
+    model
+        .stress_cfg
+        .misc_wall_representatives
+        .push(model.stress_cfg.misc_wall_representatives[0]);
+    assert!(misc_wall_stiffnesses(&model, story, &cols).is_err());
+    model.stress_cfg.misc_wall_representatives.pop();
+    model.stress_cfg.misc_wall_representatives[0].column = sepika_core::ids::ElemId(9999);
+    assert!(misc_wall_stiffnesses(&model, story, &cols)
+        .unwrap_err()
+        .contains("対象層の柱ではありません"));
 }

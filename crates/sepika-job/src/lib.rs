@@ -20,6 +20,7 @@ pub mod notices;
 pub mod prepare;
 pub mod sample_wave;
 pub mod settings;
+pub mod stiffness_ratio;
 pub mod ultimate_demand;
 pub mod weight_preparation;
 

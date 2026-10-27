@@ -271,6 +271,7 @@ fn deformed_result_selection_keeps_results_and_only_editing_switches_to_rest_sha
         statics: vec![(
             StaticCaseKey::User(LoadCaseId(0)),
             sepika_solver::statics::linear::StaticOnce {
+                stiffness_ratio_disp: None,
                 disp,
                 member_forces: vec![],
                 panel_moments: vec![],

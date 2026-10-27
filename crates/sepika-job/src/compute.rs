@@ -77,9 +77,13 @@ pub fn compute_linear_static(
     }
     let model = expand_walls(model);
     match Analysis::prepare(&model) {
-        Ok(analysis) => analysis
-            .linear_static(lc)
-            .map_err(|e| JobError::Solve(format!("{e:?}"))),
+        Ok(analysis) => {
+            let mut result = analysis
+                .linear_static(lc)
+                .map_err(|e| JobError::Solve(format!("{e:?}")))?;
+            crate::stiffness_ratio::attach_single_evaluation(&model, &analysis, lc, &mut result);
+            Ok(result)
+        }
         Err(e) => Err(JobError::Prepare(format!("{e:?}"))),
     }
 }

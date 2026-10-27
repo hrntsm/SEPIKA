@@ -2,7 +2,8 @@
 
 use sepika_core::ids::StoryId;
 use sepika_core::model::{
-    MaterialCategory, Model, RegionAnchor, WallPlate, WallPlateShape, DIAPHRAGM_LEVEL_TOL_MM,
+    MaterialCategory, MiscWallStiffnessMethod, Model, RegionAnchor, WallPlate, WallPlateShape,
+    DIAPHRAGM_LEVEL_TOL_MM,
 };
 
 use super::core::ColumnStiffness;
@@ -159,20 +160,27 @@ fn self_standing_stiffness(
     }))
 }
 
-/// 対象層の無開口RC自立壁を付加する。n未指定なら追加しない。
-/// n不正、対象壁・柱の必須入力不足、層内異断面、剛性集計不整合はErr。
-pub fn append_misc_wall_stiffnesses(
+/// 無開口RC自立壁の位置・方向と、面積比を反映した基準剛性 [N/mm]。
+#[derive(Clone, Debug)]
+pub struct MiscWallStiffness {
+    pub wall: sepika_core::ids::WallPlateId,
+    pub pos: [f64; 2],
+    pub dir: [f64; 2],
+    pub kx: f64,
+    pub ky: f64,
+}
+
+impl MiscWallStiffness {
+    /// 壁面内方向へ投影した付加剛性 [N/mm]。
+    pub fn in_plane_stiffness(&self) -> f64 {
+        self.kx * self.dir[0] * self.dir[0] + self.ky * self.dir[1] * self.dir[1]
+    }
+}
+
+fn walls_for_story(
     model: &Model,
     story: StoryId,
-    cols: &mut Vec<ColumnStiffness>,
-) -> Result<(), String> {
-    let Some(n) = model.stress_cfg.misc_wall_n else {
-        return Ok(());
-    };
-    model.stress_cfg.validate_misc_wall_n()?;
-    if model.wall_plates.is_empty() {
-        return Ok(());
-    }
+) -> Result<Vec<(sepika_core::ids::WallPlateId, SelfStandingStiffness)>, String> {
     let idx = story.index();
     let elev = model
         .stories
@@ -194,10 +202,36 @@ pub fn append_misc_wall_stiffnesses(
             }
         }
     }
-    if walls.is_empty() {
-        return Ok(());
+    Ok(walls)
+}
+
+/// 対象層にn倍法の対象となる自立壁があるか。不正な壁入力はErr。
+pub fn has_misc_wall(model: &Model, story: StoryId) -> Result<bool, String> {
+    Ok(!walls_for_story(model, story)?.is_empty())
+}
+
+/// 対象層の無開口RC自立壁の付加剛性を返す。n未指定なら空。
+/// n不正、対象壁・柱の必須入力不足、層内異断面、剛性集計不整合はErr。
+pub fn misc_wall_stiffnesses(
+    model: &Model,
+    story: StoryId,
+    cols: &[ColumnStiffness],
+) -> Result<Vec<MiscWallStiffness>, String> {
+    let Some(n) = model.stress_cfg.misc_wall_n else {
+        return Ok(Vec::new());
+    };
+    model.stress_cfg.validate_misc_wall_n()?;
+    if model.wall_plates.is_empty() {
+        return Ok(Vec::new());
     }
-    let sum_ac = sum_column_area(model, story)?;
+    let walls = walls_for_story(model, story)?;
+    if walls.is_empty() {
+        return Ok(Vec::new());
+    }
+    let aggregate_area = (model.stress_cfg.misc_wall_method
+        == MiscWallStiffnessMethod::StoryColumns)
+        .then(|| sum_column_area(model, story))
+        .transpose()?;
     let columns = crate::secondary::story_columns::story_columns(model, story);
     if columns.len() != cols.len()
         || cols
@@ -209,18 +243,91 @@ pub fn append_misc_wall_stiffnesses(
             story.0
         ));
     }
-    let sum_kx = cols.iter().map(|c| c.dx).sum();
-    let sum_ky = cols.iter().map(|c| c.dy).sum();
+    let (sum_ac, sum_kx, sum_ky) = match aggregate_area {
+        Some(area) => (
+            area,
+            cols.iter().map(|c| c.dx).sum(),
+            cols.iter().map(|c| c.dy).sum(),
+        ),
+        None => {
+            let selected: Vec<_> = model
+                .stress_cfg
+                .misc_wall_representatives
+                .iter()
+                .filter(|entry| entry.story == story)
+                .collect();
+            if selected.len() != 1 {
+                return Err(format!(
+                    "n倍法: 階{}の代表内柱を1本指定してください",
+                    story.0
+                ));
+            }
+            let index = columns
+                .iter()
+                .position(|col| col.segments.contains(&selected[0].column))
+                .ok_or_else(|| {
+                    format!(
+                        "n倍法: 階{}の代表内柱{}は対象層の柱ではありません",
+                        story.0, selected[0].column.0
+                    )
+                })?;
+            let col = &columns[index];
+            let elem = model
+                .element(col.top_elem)
+                .ok_or("n倍法: 代表内柱を参照できません")?;
+            let section = model
+                .element_section(elem)
+                .ok_or("n倍法: 代表内柱の断面を参照できません")?;
+            for id in &col.segments {
+                let part = model
+                    .element(*id)
+                    .ok_or("n倍法: 代表内柱の分割部材を参照できません")?;
+                let material = model
+                    .element_material(part)
+                    .ok_or("n倍法: 代表内柱の材料を参照できません")?;
+                if part.section != elem.section
+                    || !material.young.is_finite()
+                    || material.young <= 0.0
+                {
+                    return Err(format!(
+                        "n倍法: 階{}の代表内柱は層内同一断面と正の有限なヤング係数が必要です",
+                        story.0
+                    ));
+                }
+            }
+            (section.area, cols[index].dx, cols[index].dy)
+        }
+    };
     let mut additions = Vec::new();
     for (id, w) in walls {
         let failure = |reason| format!("階{}の壁{}: {reason}", story.0, id.0);
-        let [cx, cy] = w.dir;
-        additions.push(ColumnStiffness {
+        let addition = MiscWallStiffness {
+            wall: id,
             pos: w.pos,
-            dx: misc_wall_stiffness(n, w.aw, sum_kx, sum_ac).map_err(failure)? * cx * cx,
-            dy: misc_wall_stiffness(n, w.aw, sum_ky, sum_ac).map_err(failure)? * cy * cy,
-        });
+            dir: w.dir,
+            kx: misc_wall_stiffness(n, w.aw, sum_kx, sum_ac).map_err(failure)?,
+            ky: misc_wall_stiffness(n, w.aw, sum_ky, sum_ac).map_err(failure)?,
+        };
+        if !addition.in_plane_stiffness().is_finite() {
+            return Err(failure("壁面内方向の付加剛性が非有限です".into()));
+        }
+        additions.push(addition);
     }
-    cols.extend(additions);
+    Ok(additions)
+}
+
+/// 対象層の無開口RC自立壁を付加する。n未指定なら追加しない。
+/// 基準剛性又は壁入力が不正な場合はErrとなり、colsを変更しない。
+pub fn append_misc_wall_stiffnesses(
+    model: &Model,
+    story: StoryId,
+    cols: &mut Vec<ColumnStiffness>,
+) -> Result<(), String> {
+    let additions = misc_wall_stiffnesses(model, story, cols)?;
+    cols.extend(additions.into_iter().map(|w| ColumnStiffness {
+        pos: w.pos,
+        dx: w.in_plane_stiffness() * w.dir[0] * w.dir[0],
+        dy: w.in_plane_stiffness() * w.dir[1] * w.dir[1],
+    }));
     Ok(())
 }
