@@ -335,8 +335,7 @@ fn test_column_safety_check_excludes_alpha() {
 
     // 柱の「安全確保のための検討」式は α を含まない。普通強度せん断補強筋で、
     // 手計算の期待値 b・j・(fs + 0.5・w_ft・(pw − 0.002)) と照合する。
-    // fs = min(24/30, 0.5+24/100)×1.5 = 1.11、pw ≈ 0.003927。
-    let fs = 1.11;
+    let fs = 1.095;
     let pw = props.pw;
     assert!(pw > 0.002, "テストの前提として pw > 0.002 が必要: pw={pw}");
     let b_j = props.b * props.j;
@@ -1104,6 +1103,51 @@ mod rc_gravity_contract_tests {
                 .member_checks
                 .iter()
                 .all(|(_, _, outcome)| matches!(outcome, CheckOutcome::Checked(_))));
+        }
+    }
+}
+
+#[test]
+fn concrete_shear_922_rc_beam_and_column_reject_old_passing_shear() {
+    for (shape, mut ctx, q_n, expected_ratio) in [
+        (
+            rc_beam_shape(400.0, 700.0, 4, 20.0, 1, 40.0, 10.0, 100.0, 0),
+            ctx_beam(LoadTerm::Long),
+            329280.0,
+            1.0068493150684932,
+        ),
+        (
+            rc_rect_shape(400.0, 700.0, 8, 20.0, 1, 40.0, 10.0, 100.0, 0),
+            ctx_column(LoadTerm::Long),
+            246960.0,
+            1.0068493150684932,
+        ),
+    ] {
+        let section = make_section(shape);
+        let mat = make_material(24.0, "Fc24");
+        let forces = MemberForcesAt {
+            pos: 0.0,
+            n: 0.0,
+            qy: q_n,
+            qz: 0.0,
+            my: 0.0,
+            mz: 0.0,
+        };
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            ctx.term = term;
+            let result = RcDesign
+                .check(&forces, &section, &mat, &ctx)
+                .unwrap_checked();
+            let shear = result
+                .components
+                .iter()
+                .find(|c| c.kind == crate::CheckKind::Shear)
+                .unwrap();
+            assert!(
+                (shear.ratio - expected_ratio).abs() < 1e-12,
+                "{term:?}: {shear:?}"
+            );
+            assert!(!result.ok());
         }
     }
 }
