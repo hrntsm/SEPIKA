@@ -33,7 +33,7 @@ coreの`SectionShape::calc_iy/calc_iz`が保持する幾何軸定義は変更し
 | SRC/CFT非流用 | 同ファイル`issue901_composite_checkers_do_not_apply_ordinary_steel_limit`。構造種別で別検定器を選ぶ |
 | 公開一括・位置混在 | 同ファイル`issue901_public_batch_retains_compression_failure_among_tension_and_zero_positions`。端引張/中央圧縮/他端0を独立に判定。`issue901_public_batch_uses_face_positions_without_node_center_axial_substitution`ではフェース0.1/0.9・中央0.5を判定し節点芯を除外 |
 | 全フィルタ部材集約 | `viewer/check_ratio.rs::issue901_failed_provision_survives_all_filters_and_mixed_positions`。適合曲げ2位置と超過1位置を集約して全項目でNG |
-| App・OVIKA・旧検定失効 | `app/result_contract_tests.rs::issue901_ovika_current_failure_roundtrips_and_old_design38_and39_expire_until_recheck`。実解析、実保存・読込、検定38・39失効と40再検定、解析応力維持 |
+| App・OVIKA・旧検定失効 | `app/result_contract_tests.rs::issue901_ovika_current_failure_roundtrips_and_old_design38_39_and40_expire_until_recheck`。実解析、実保存・読込、検定38・39・40失効と41再検定、解析応力維持 |
 | 荷重組合せ | 同ファイル`issue901_load_combinations_keep_tension_and_compression_outcomes_separate`。G+P±Eの実求解で圧縮NGとなる柱が正負で入れ替わる |
 | 圧縮山形の独立反例 | `tests/steel_slenderness.rs::issue901_compressed_angles_require_principal_axis_effective_lengths`。上記矩形和と固定Iminから主軸λ305.2142288を確認し、長短期・柱/大梁/筋かいの圧縮を未検定、引張/0を区別 |
 | 未検定混在の描画 | `viewer/check_ratio.rs::issue901_angle_mixed_positions_draw_unknown_gray_and_keep_reasons_for_all_filters`。公開runnerの引張/圧縮/0の3位置を使い、全フィルタの実egui描画線がグレー、表とホバーの理由が残ることを観測 |
@@ -87,6 +87,22 @@ C150×75×20×2.3 mmを重複しない5矩形へ分けた独立算術は、A=760
 対象テストの修正は`ef64d6ea`。GUI有効の`cargo test -p sepika-app --test lip_channel --test load_state_report --features gui --locked`でlip_channel全7件と荷重状態CSV1件が成功した。他のApp統合targetの部材検定・未検定集計の期待も検索し、今回のfixture変更が共通supportや製品コードを変更しないこと、CIでfull_model38件は既に成功していることを確認した。無関係なApp全単体・core全試験は繰り返さない。
 
 `cargo test -p sepika-design-jp --test steel_slenderness --locked`の7件、`cargo test -p sepika-app --lib --features gui issue901 --locked`の6件も成功。`cargo clippy -p sepika-app --all-targets --features gui --locked -- -D warnings`、fmt、mdBook、diff検証が成功し、`check-docs`はsummary124・links666・impl refs708。stable更新後のrustc1.99.1/clippy0.1.99と専用targetを使用した。
+
+
+### 仕口パネル実断面積修正の統合と検定契約41
+
+先行#892（main `a71c5a4a`、解析64・検定40）を`091ae4ab`で取り込み、先行する仕口パネルの実断面積・基準軸耐力・保存結果回帰を保持した。解析64は変更せず、本件の検定契約を41へ更新した。OVIKA回帰は旧検定38・39・40の適合データをそれぞれ失効させ、解析応力を保持して明示再検定した現行41の構造規定NGを確認する構成へ更新した。製品の保存結果ページの現行版も41へ整合した。
+
+版・試験更新は`36378558`。統合後の専用targetによるローカル確認は次のとおりで、すべて成功した。
+
+- `cargo test -p sepika-design-jp --test steel_slenderness --locked`: 7件。
+- `cargo test -p sepika-app --lib --features gui issue901 --locked`: 6件。旧38・39・40の実OVIKA失効と現行41への明示再検定を含む。
+- `cargo test -p sepika-app --test lip_channel --test load_state_report --features gui --locked`: リップGUI統合7件、荷重状態CSV1件。
+- `cargo test -p sepika-app --lib --features gui panel_892 --locked`: 先行保存契約1件。
+- `cargo clippy -p sepika-core -p sepika-design-jp -p sepika-app --all-targets --features sepika-app/gui --locked -- -D warnings`: 成功。
+- `cargo run -p xtask -- check-docs`: summary124・links667・impl refs708。fmt、mdBook、diff検証も成功。
+
+stable更新後のrustc1.99.1・clippy0.1.99を使用し、新規filterの実行件数が0でないことを確認した。版定数の更新を理由とする無関係な全App・core・design試験の反復は行っていない。
 
 
 ## 残る未検証
