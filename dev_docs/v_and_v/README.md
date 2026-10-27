@@ -18,9 +18,14 @@
 [最終判定](../handoff/Fes原典_Issue720_調査記録.md#最終判定2026-10-27)に従い、2025年第2版第1刷pp.372–374の収録本文・表・ただし書で照合を完了した。通常式・境界・上限と個別評価との区別に計算修正を要する差はない。
 [PR #926](https://github.com/hrntsm/SEPIKA/pull/926)で照合結果を反映済み。旧官報の追加取得待ちは残さない。個別評価機能・専門家サインオフ・実建物Validationは本Issueの完了条件に含めない。
 
+## 自立壁の二方式とRs再解析（#740）
+
+[採用方針と調査記録](自立壁Rs接続_Issue740_調査記録.md)、[ADR 0085](../adr/0085-misc-wall-methods-and-rs-analysis.md)に2026-10-27のユーザー決定を記録する。代表内柱・層内柱合算の二方式を選択し、斜め壁は壁面内方向の単一ばねで評価する。Rsは付加剛性と配置を反映して再解析し、スカラー補正は採用しない。D値式との同一性や両方式の統一を採用条件にせず、旧調査の近似接続保留と区別する。
+[実装・数値の確認記録](自立壁二方式Rs再解析_Issue740_確認記録.md)に、今回の製品経路のVerificationと未実施範囲をまとめる。
+
 ## 自立壁n倍法の下限（#889）
 
-[限定原典照合・独立値・製品経路の証拠](自立壁n下限_Issue889_確認記録.md)に2025年第2版第1刷p740–741のn下限と代表内柱D値式を記録する。1未満の受理根拠は確認できず、入力・保存読込・実行の下限を統一した。これは現行層内合算方式全体の原典適合証明ではない。Re/Fesの変化方向が逆になる有限例を確認し、一律安全側とは判定しない。状態は🔶。Rs接続の#740、動的専用比較・Validation等の#620残件を維持する。
+[限定原典照合・独立値・製品経路の証拠](自立壁n下限_Issue889_確認記録.md)に2025年第2版第1刷p740–741のn下限と代表内柱D値式を記録する。1未満の受理根拠は確認できず、入力・保存読込・実行の下限を統一した。これは現行方式全体の原典適合証明ではない。Re/Fesの変化方向が逆になる有限例を確認し、一律安全側とは判定しない。状態は🔶。Rs接続は上記#740の採用方針へ更新し、動的専用比較・Validation等の#620残件は別途維持する。
 
 ## RC部材の引張軸力と原典照合の継続（#697）
 
@@ -242,7 +247,8 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [古い自動荷重と通常保存_Issue816_確認記録.md](古い自動荷重と通常保存_Issue816_確認記録.md) | 梁短縮後の既存自動DLと通常保存・再読込、手入力検証・失敗時状態保持・直接検定保存 | 🔶（公開編集/保存入口の自動Verification。手動GUI・物理Validation・最終ゲート未確認） |
 | [自立壁n下限_Issue889_確認記録.md](自立壁n下限_Issue889_確認記録.md) | 2025年第2版第1刷の係数下限、入出力・実行の有限Verification | 🔶（下限整合、方式全体の適合・Validation未） |
 | [自立壁n倍法_Issue620_確認記録.md](自立壁n倍法_Issue620_確認記録.md) | 自立壁n倍法の対象・入力・同一断面柱集計 | 🔶（独立Verification。2025限定照合は#740、採用整合・動的専用比較・実測Validation未） |
-| [自立壁Rs接続_Issue740_調査記録.md](自立壁Rs接続_Issue740_調査記録.md) | 2025原典のD値式・Rs/Re考慮必要、現行量の定義差・連成2例・Rs正規化 | 🔶（2025限定照合済、一般厳密式は不成立。現行量への近似適用根拠・精度は未確定、#740はblocked・未完了） |
+| [自立壁Rs接続_Issue740_調査記録.md](自立壁Rs接続_Issue740_調査記録.md) | 2025原典のD値式・Rs/Re考慮必要、連成2例と2026-10-27の二方式・Rs再解析の採用決定 | 🔶（原典指定範囲を照合済。近似補正は不採用、実験Validationは別範囲） |
+| [自立壁二方式Rs再解析_Issue740_確認記録.md](自立壁二方式Rs再解析_Issue740_確認記録.md) | 二方式、壁面内単一ばね、Rs評価用再解析、設定・結果保存と失効の製品経路 | 🔶（限定Verification。実験Validation・手動GUIの実施範囲は同記録を参照） |
 | [梁の床板嵩上げ_Issue731_2026-10.md](梁の床板嵩上げ_Issue731_2026-10.md) | 中心線上端・投影幅、床板材料別の嵩上げ重量/質量、区間DL・小梁設計・動的層質量 | 🔶（独立Verification、手動GUI・Validation未） |
 | [RC梁左右床板厚_Issue618_2026-10.md](RC梁左右床板厚_Issue618_2026-10.md) | RC梁の左右床板実厚・長さ平均/丸め上下界・矩形集計・実配置と未解決/複数梁Attached診断 | 🔶（単体/公開入口・床板群の独立Verificationと危険側例。Validation・手動GUI・最終ゲートは記録参照） |
 | [層指標の生成入力照合_Issue810_2026-10.md](層指標の生成入力照合_Issue810_2026-10.md) | GUI/CSVのRs/Re/Fes依存成果と現在入力・計算契約 | 🔶（自動Verificationの記録は同レポート、手動GUI・Validation未） |
@@ -538,7 +544,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
 | 889 | 自立壁n倍法の係数下限 | sepika-core / sepika-io / sepika-design-jp / sepika-job / sepika-app | stress_cfg::misc889、ovika::reference_tests::misc889、eccentricity::tests::misc889・misc620、lumped_mass::tests::misc620、summary / result_validity | [要素と製品経路](自立壁n下限_Issue889_確認記録.md#要素から製品経路への証拠索引) | 二次設計・入出力 | 🔶（下限・有限影響を検証、全方式適合・Validation未） |
 | 620 | 自立壁n倍法 | sepika-design-jp / sepika-core / sepika-job / sepika-app | eccentricity::tests::misc620、eccentricity_analysis::misc620_tests、lumped_mass::tests::misc620 | [点検と独立期待値](自立壁n倍法_Issue620_確認記録.md#独立期待値と試験) | 二次設計 | 🔶（有限Verification、2025限定照合は#740、採用整合・Validation未） |
-| 740 | 自立壁Rs接続の成立範囲 | 独立線形静力学・有理数算術 | 製品テスト追加なし | [連成2例とRs正規化](自立壁Rs接続_Issue740_調査記録.md#独立線形静力学による成立範囲) | 二次設計 | 🔶（2025限定照合済、D→K・層内合算・δg接続と近似精度は未確定） |
+| 740 | 自立壁二方式とRs再解析 | sepika-core / sepika-edit / sepika-design-jp / sepika-job / sepika-app | stress_cfg、eccentricity::tests::misc740、stiffness_ratio::tests、summary / result_validity | [独立数値・製品経路](自立壁二方式Rs再解析_Issue740_確認記録.md)、[調査と採用決定](自立壁Rs接続_Issue740_調査記録.md) | 二次設計 | 🔶（二方式と再解析の限定Verification。実験Validationは別範囲） |
 | 718 | Fes 算定不能の伝播 | sepika-design-jp / sepika-app / sepika-job | secondary/holding_capacity・stiffness_ratio・eccentricity、summary、actions/design/holding、lumped_mass | [独立期待値と直接入口](Fes算定不能の伝播_Issue718_2026-10.md#独立期待値と直接入口) | 横断 | 🔶（Scope 内の自動 Verification 成功、手動 GUI・原典/Validation・最終ゲートは未確認） |
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |

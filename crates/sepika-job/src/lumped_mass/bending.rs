@@ -709,6 +709,7 @@ mod tests {
         (
             model,
             StaticOnce {
+                stiffness_ratio_disp: None,
                 disp,
                 member_forces,
                 panel_moments: Vec::new(),

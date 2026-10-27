@@ -19,6 +19,30 @@ impl RcWallShearMethod {
     }
 }
 
+/// 自立壁の基準剛性の算定方式。既定は層内柱合算。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MiscWallStiffnessMethod {
+    #[default]
+    StoryColumns,
+    RepresentativeColumn,
+}
+
+impl MiscWallStiffnessMethod {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::StoryColumns => "層内柱合算方式",
+            Self::RepresentativeColumn => "代表内柱方式",
+        }
+    }
+}
+
+/// 代表内柱の指定。storyは層の上端階、columnはその層の柱を構成する部材。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MiscWallRepresentativeColumn {
+    pub story: crate::ids::StoryId,
+    pub column: crate::ids::ElemId,
+}
+
 /// 長期応力解析の計算条件（令82条の応力解析）。
 ///
 /// 計算条件の指定により、一部の部材（ブレース・柱・制振間柱）について
@@ -38,6 +62,12 @@ pub struct StressAnalysisCfg {
     /// `None`（既定）は自立壁の付加剛性を考慮しない。
     #[serde(default, with = "misc_wall_coefficient")]
     pub misc_wall_n: Option<f64>,
+    /// 自立壁の基準剛性の建物共通の算定方式。
+    #[serde(default)]
+    pub misc_wall_method: MiscWallStiffnessMethod,
+    /// 代表内柱方式で各層に指定する柱。X/Y方向で同じ柱を使う。
+    #[serde(default)]
+    pub misc_wall_representatives: Vec<MiscWallRepresentativeColumn>,
     /// 層間変形角の設定値との参考比較に使う正の有限な分母。既定200。
     /// 法令適合や緩和適用資格は判定せず、不正値では参考比較を行わない。
     #[serde(default = "default_drift_limit_denom")]
@@ -104,6 +134,8 @@ impl Default for StressAnalysisCfg {
             no_long_axial_brace: false,
             no_long_axial_column: false,
             misc_wall_n: None,
+            misc_wall_method: MiscWallStiffnessMethod::default(),
+            misc_wall_representatives: Vec::new(),
             drift_limit_denom: default_drift_limit_denom(),
             tension_only_iteration: false,
             rigid_zone_consider_walls: default_rigid_zone_consider_walls(),
@@ -234,5 +266,61 @@ mod misc889_tests {
             assert!(model.validate().unwrap_err().to_string().contains("係数n"));
             assert_eq!(model.stress_cfg.misc_wall_n.unwrap().to_bits(), n.to_bits());
         }
+    }
+}
+
+#[cfg(test)]
+mod misc_wall_method_tests {
+    use super::*;
+    use crate::ids::{ElemId, StoryId};
+
+    #[test]
+    fn 代表内柱方式と層ごとの指定柱を保存復元する() {
+        let cfg = StressAnalysisCfg {
+            misc_wall_n: Some(1.5),
+            misc_wall_method: MiscWallStiffnessMethod::RepresentativeColumn,
+            misc_wall_representatives: vec![
+                MiscWallRepresentativeColumn {
+                    story: StoryId(1),
+                    column: ElemId(3),
+                },
+                MiscWallRepresentativeColumn {
+                    story: StoryId(2),
+                    column: ElemId(8),
+                },
+            ],
+            ..Default::default()
+        };
+        let binary = rmp_serde::to_vec_named(&cfg).unwrap();
+        assert_eq!(
+            rmp_serde::from_slice::<StressAnalysisCfg>(&binary).unwrap(),
+            cfg
+        );
+        assert_eq!(
+            serde_json::from_str::<StressAnalysisCfg>(&serde_json::to_string(&cfg).unwrap())
+                .unwrap(),
+            cfg
+        );
+        assert_eq!(
+            StressAnalysisCfg::default().misc_wall_method,
+            MiscWallStiffnessMethod::StoryColumns
+        );
+    }
+
+    #[test]
+    fn 不正な代表内柱参照はモデル検証で拒否する() {
+        let mut model = crate::Model::default();
+        model
+            .stress_cfg
+            .misc_wall_representatives
+            .push(MiscWallRepresentativeColumn {
+                story: StoryId(999),
+                column: ElemId(999),
+            });
+        assert!(model
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("代表内柱"));
     }
 }

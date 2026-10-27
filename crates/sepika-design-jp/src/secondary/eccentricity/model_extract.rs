@@ -197,6 +197,12 @@ pub fn story_centers(model: &Model, story: StoryId) -> Result<StoryCenters, Stri
 
 /// 当該層の偏心率を算定して返す。
 pub fn story_eccentricity(model: &Model, story: StoryId) -> Result<Eccentricity, String> {
+    if model.stress_cfg.misc_wall_n.is_some()
+        && model.stress_cfg.misc_wall_method
+            == sepika_core::model::MiscWallStiffnessMethod::RepresentativeColumn
+    {
+        return Err("代表内柱方式にはX/Y方向の一次解析結果が必要です".into());
+    }
     let mut cols = column_stiffnesses(model, story)?;
     append_misc_wall_stiffnesses(model, story, &mut cols)?;
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;

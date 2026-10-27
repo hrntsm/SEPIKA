@@ -151,6 +151,7 @@ pub struct SetStoryLevel {
 ///
 /// `model.stories` を丸ごと差し替え、`StoryId` の参照も復元前の対応へ戻す。
 pub struct RestoreStoryDefs {
+    pub misc_wall_representatives: Vec<sepika_core::model::MiscWallRepresentativeColumn>,
     pub seismic_weight_generation: Option<sepika_core::model::SeismicWeightGeneration>,
     pub source_stories_initialized: bool,
     pub source_stories: Vec<sepika_core::model::SourceStory>,
@@ -166,6 +167,7 @@ pub struct RestoreStoryDefs {
 /// 現在の階定義・階参照のスナップショットを撮る。
 pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
     RestoreStoryDefs {
+        misc_wall_representatives: model.stress_cfg.misc_wall_representatives.clone(),
         seismic_weight_generation: model.seismic_weight_generation.clone(),
         source_stories_initialized: model.source_stories_initialized,
         source_stories: model.source_stories.clone(),
@@ -389,6 +391,16 @@ pub struct DeleteStory {
 
 impl EditCommand for DeleteStory {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if model
+            .stress_cfg
+            .misc_wall_representatives
+            .iter()
+            .any(|entry| entry.story == self.story)
+        {
+            return Box::new(crate::RejectedEdit(
+                "自立壁の代表内柱が指定された階です。指定を解除してから削除してください".into(),
+            ));
+        }
         let idx = self.story.index();
         if idx >= model.stories.len() || model.stories[idx].id != self.story {
             return Box::new(crate::Noop);
@@ -476,6 +488,7 @@ impl EditCommand for DeleteStory {
 impl EditCommand for RestoreStoryDefs {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let redo = snapshot(model);
+        model.stress_cfg.misc_wall_representatives = self.misc_wall_representatives.clone();
         model.seismic_weight_generation = self.seismic_weight_generation.clone();
         model.stories = self.stories.clone();
         model.source_stories = self.source_stories.clone();

@@ -108,6 +108,10 @@ impl StaticStiffness {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticOnce {
+    /// 自立壁の付加剛性を反映したRs評価専用の節点変位 [mm, rad]。Errは評価不能理由。
+    /// Noneは評価未実施であり、通常変位で補完しない。
+    #[serde(default)]
+    pub stiffness_ratio_disp: Option<Result<Vec<[f64; 6]>, String>>,
     pub disp: Vec<[f64; 6]>,
     pub member_forces: Vec<(sepika_core::ids::ElemId, MemberForces)>,
     /// 全体 X・Y 軸まわりの仕口パネルせん断モーメント `[MSX, MSY]` [N·mm] を節点ごとに保持する。
@@ -121,6 +125,7 @@ pub struct StaticOnce {
 pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
     let Some((first, _)) = terms.first() else {
         return StaticOnce {
+            stiffness_ratio_disp: None,
             disp: Vec::new(),
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
@@ -164,6 +169,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
         }
     }
     StaticOnce {
+        stiffness_ratio_disp: None,
         disp,
         member_forces,
         panel_moments,
@@ -579,6 +585,7 @@ fn recover_static(
     ensure_line_member_forces(model, &member_forces)?;
     Ok((
         StaticOnce {
+            stiffness_ratio_disp: None,
             disp: dofmap.expand_to_nodes(u_free, model.nodes.len()),
             member_forces,
             panel_moments,

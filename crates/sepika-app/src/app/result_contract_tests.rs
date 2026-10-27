@@ -2675,3 +2675,15 @@ fn issue901_load_combinations_keep_tension_and_compression_outcomes_separate() {
     app.run_combination(index);
     assert_eq!(column_failure_ids(&app), positive);
 }
+
+#[test]
+fn misc740_旧解析契約63の通常応力をrs評価結果として再採用しない() {
+    let app = calculated();
+    let (loaded, path) = restore(&app, Some(63), Some(38), "740-analysis63");
+    let results = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(!results.has_analysis_results());
+    assert!(!results.has_design_results());
+    assert!(loaded.core.scoped.staleness.results_stale);
+    assert!(loaded.core.scoped.last_static.is_none());
+    std::fs::remove_file(path).unwrap();
+}
