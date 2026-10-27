@@ -175,6 +175,11 @@ fn compression_slenderness_outcome(
     if forces.n.is_finite() && forces.n >= 0.0 {
         return None;
     }
+    if forces.n < 0.0 && matches!(sec.shape, Some(SectionShape::SteelAngle { .. })) {
+        return Some(CheckOutcome::Skipped {
+            reason: "圧縮山形鋼は幾何軸と主軸が異なり、主軸に対応する有効座屈長さが未確認のため、有効細長比の法定上限を含む鋼部材検定は未算定です".into(),
+        });
+    }
     let lengths_mm = [
         ctx.lk_y.unwrap_or(ctx.length),
         ctx.lk_z.unwrap_or(ctx.length),

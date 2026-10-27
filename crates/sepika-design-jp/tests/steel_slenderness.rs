@@ -336,3 +336,38 @@ fn issue901_public_batch_uses_face_positions_without_node_center_axial_substitut
         assert_eq!(result(outcome).ok(), pos != 0.5);
     }
 }
+
+#[test]
+fn issue901_compressed_angles_require_principal_axis_effective_lengths() {
+    let sec = sepika_core::section_shape::SectionShape::SteelAngle {
+        leg_a: 100.0,
+        leg_b: 100.0,
+        thick: 10.0,
+    }
+    .to_section(SectionId(0), "L100x100x10".into());
+    assert_eq!(sec.area, 1900.0);
+    assert!((sec.iy - 1800043.859649).abs() < 1e-6);
+    assert!((sec.iz - 1800043.859649).abs() < 1e-6);
+    let principal_lambda = 6000.0 / (734254.385965_f64 / 1900.0).sqrt();
+    assert!((principal_lambda - 305.2142288).abs() < 1e-7);
+    assert!(principal_lambda > 250.0);
+    assert!((6000.0 / (sec.iy / sec.area).sqrt() - 194.933512).abs() < 1e-6);
+    for kind in [MemberKind::Column, MemberKind::Girder, MemberKind::Brace] {
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            let ctx = DesignCtx {
+                kind,
+                term,
+                length: 6000.0,
+                lk_y: Some(6000.0),
+                lk_z: Some(6000.0),
+                ..Default::default()
+            };
+            assert!(
+                matches!(SteelDesign.check(&forces(-1000.0), &sec, &material(), &ctx), CheckOutcome::Skipped { reason } if reason.contains("山形鋼") && reason.contains("主軸") && reason.contains("有効座屈長さ"))
+            );
+            for n in [0.0, 1000.0] {
+                assert!(result(SteelDesign.check(&forces(n), &sec, &material(), &ctx)).ok());
+            }
+        }
+    }
+}
