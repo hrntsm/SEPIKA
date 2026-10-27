@@ -302,7 +302,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         &[
             Col::id_named("部材"),
             Col::num("位置"),
-            Col::num("検定比"),
+            Col::wide_num("検定比・表示状態"),
             Col::label("判定"),
             Col::text("根拠"),
             Col::text("内訳"),
@@ -328,7 +328,8 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             });
             row.col(|ui| match r.ratio {
                 Some(ratio) => {
-                    ui.colored_label(crate::theme::ratio_status(ratio).0, format!("{:.4}", ratio));
+                    let (color, state) = crate::theme::ratio_status(ratio);
+                    ui.colored_label(color, format!("{ratio:.4} {state}"));
                 }
                 None => {
                     ui.label("-");
@@ -361,9 +362,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                             if idx > 0 {
                                 ui.label("／");
                             }
+                            let (color, state) = crate::theme::ratio_status(c.ratio);
                             ui.colored_label(
-                                crate::theme::ratio_status(c.ratio).0,
-                                format!("{} {:.2}", c.kind.label(), c.ratio),
+                                color,
+                                format!("{} {:.2} {state}", c.kind.label(), c.ratio),
                             )
                             .on_hover_text(&c.detail);
                         }
@@ -455,7 +457,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             &[
                 Col::id_named("節点"),
                 Col::name("種別"),
-                Col::num("検定比"),
+                Col::wide_num("検定比・表示状態"),
                 Col::label("判定"),
                 Col::text("根拠"),
             ],
@@ -470,10 +472,8 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 });
                 row.col(|ui| match j.ratio {
                     Some(ratio) => {
-                        ui.colored_label(
-                            crate::theme::ratio_status(ratio).0,
-                            format!("{:.4}", ratio),
-                        );
+                        let (color, state) = crate::theme::ratio_status(ratio);
+                        ui.colored_label(color, format!("{ratio:.4} {state}"));
                     }
                     None => {
                         ui.label("-");
@@ -905,7 +905,7 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                 Col::num("M[kN·m]"),
                 Col::num("Q[kN]"),
                 Col::wide_num("δ[mm]"),
-                Col::num("検定比"),
+                Col::wide_num("検定比・表示状態"),
                 Col::label("判定"),
             ],
             r.beam_checks.len(),
@@ -950,10 +950,12 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                     }));
                 });
                 row.col(|ui| {
-                    ui.colored_label(
-                        crate::theme::status_color(jr.ratio),
-                        format!("{:.2}", jr.ratio),
-                    );
+                    if jr.unchecked {
+                        ui.label("— 未検定");
+                    } else {
+                        let (color, state) = crate::theme::ratio_status(jr.ratio);
+                        ui.colored_label(color, format!("{:.2} {state}", jr.ratio));
+                    }
                 });
                 row.col(|ui| {
                     if jr.unchecked {

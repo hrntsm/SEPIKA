@@ -514,6 +514,24 @@ mod tests {
         assert_eq!(ratio_status(1.00001).1, "超過");
     }
 
+    #[test]
+    fn long_names_stay_inside_narrow_panel_at_two_product_scales() {
+        for scale in [1.0, 1.5] {
+            let ctx = egui::Context::default();
+            apply_theme(&ctx);
+            ctx.set_zoom_factor(scale);
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_width(160.0);
+                let name = "一階大梁の長い日本語の断面名称と識別の補足";
+                let label = name_label(ui, name);
+                assert!(label.rect.width() <= 160.0);
+                let selected = selectable_name(ui, true, name);
+                assert!(selected.rect.width() <= 160.0);
+                assert!(table_row_height(ui) > label.rect.height());
+            });
+        }
+    }
+
     /// 発散型（青-白-赤）は中央 t=0.5 がニュートラルな白になる。
     #[test]
     fn colormap_blue_white_red_midpoint_is_white() {

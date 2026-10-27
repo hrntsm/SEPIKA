@@ -32,7 +32,7 @@ impl App {
             std::borrow::Cow::Borrowed(&self.core.model)
         };
         ui.scope(|ui| {
-            crate::theme::panel_heading(ui, "インスペクタ", "参照専用");
+            crate::theme::panel_heading(ui, "インスペクタ", "属性・結果を参照");
 
             if let Some(id) = self.ui.scoped.nav.focus_vibration_case {
                 if let Some(case) = self.core.model.vibration_cases.iter().find(|c| c.id == id) {
@@ -140,6 +140,7 @@ impl App {
                                 crate::theme::BLUE_500,
                                 format!("この断面を使う {} 部材に影響", n_used),
                             );
+                            ui.label("編集操作: 断面を複製して割当");
                             if self.core.model.element(elem_id).is_some()
                                 && ui.button("📋 複製してこの部材だけ別断面に").clicked()
                             {

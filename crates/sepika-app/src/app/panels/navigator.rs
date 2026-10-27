@@ -79,9 +79,9 @@ impl App {
                     }
                 } else {
                     for s in self.core.model.stories.iter().rev() {
+                        crate::theme::name_label(ui, &s.name);
                         ui.label(format!(
-                            "{}  SL={}mm  W={:.1}kN",
-                            s.name,
+                            "SL={} mm  W={:.1} kN",
                             s.sl_mm()
                                 .map(|v| format!("{v:.0}"))
                                 .unwrap_or_else(|| "未設定".into()),

@@ -277,8 +277,7 @@ pub(crate) fn muted_cell(ui: &mut egui::Ui, text: &str, hover: &str) {
 
 /// 行選択に連動する ID セル。クリックされたとき `true` を返す。
 ///
-/// 選択時の背景（blue-500）と文字色（白）はテーマの `selection` が決めるため、
-/// 呼び出し側で色を指定しないこと。
+/// 選択印・背景・フォーカス輪郭は共通テーマに従う。
 pub(crate) fn id_cell(ui: &mut egui::Ui, selected: bool, id: u32, hover: &str) -> bool {
     crate::theme::selectable_name(ui, selected, &id.to_string())
         .on_hover_text(hover)

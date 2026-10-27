@@ -35,7 +35,7 @@ impl App {
                 }
                 for case in &self.core.model.vibration_cases {
                     let is_sel = self.ui.scoped.nav.focus_vibration_case == Some(case.id);
-                    if ui.selectable_label(is_sel, &case.name).clicked() {
+                    if crate::theme::selectable_name(ui, is_sel, &case.name).clicked() {
                         action = Some(VibrationNavAction::Spatial(case.id));
                     }
                 }
@@ -50,7 +50,7 @@ impl App {
                 }
                 for case in &self.core.model.lumped_vibration_cases {
                     let is_sel = self.ui.scoped.nav.focus_lumped_vibration_case == Some(case.id);
-                    if ui.selectable_label(is_sel, &case.name).clicked() {
+                    if crate::theme::selectable_name(ui, is_sel, &case.name).clicked() {
                         action = Some(VibrationNavAction::Lumped(case.id));
                     }
                 }
