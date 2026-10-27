@@ -54,7 +54,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         shape: Some(SectionShape::RcWall {
             thickness,
             pwh_ratio: Some(0.006),
-            pwv_ratio: None,
+            pwv_ratio: Some(0.006),
             ps: 0.006,
         }),
         // 材料は断面が持つ。壁筋（縦筋・横筋）は SD345。
@@ -1900,6 +1900,79 @@ fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
 mod rc_wall617_fixture;
 
 #[test]
+fn reference_skeleton_report_caps_horizontal_rebar_and_diagnoses_missing_vertical_input() {
+    use crate::wall_check::WallCheckKind;
+    use sepika_element::frame::beam::MemberForces;
+    let mut model = rc_wall617_fixture::expanded_model();
+    let forces = vec![
+        (
+            ElemId(4),
+            MemberForces {
+                at: vec![(0.0, [-400_000.0, 200_000.0, 0.0, 0.0, 0.0, -1.75e9])],
+            },
+        ),
+        (
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.1, [-300_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            },
+        ),
+        (
+            ElemId(1),
+            MemberForces {
+                at: vec![(0.1, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            },
+        ),
+    ];
+    for method in [
+        sepika_core::model::RcWallShearMethod::ArakawaMin,
+        sepika_core::model::RcWallShearMethod::ArakawaMean,
+    ] {
+        model.stress_cfg.rc_wall_shear_method = method;
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[2].shape {
+            *pwh_ratio = Some(0.012);
+        }
+        let high =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[2].shape {
+            *pwh_ratio = Some(0.004 * 270.0 / 180.0);
+        }
+        let limited =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
+        let high = high
+            .wall_checks
+            .iter()
+            .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+            .unwrap();
+        let limited = limited
+            .wall_checks
+            .iter()
+            .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+            .unwrap();
+        let (CheckOutcome::Checked(high_check), CheckOutcome::Checked(limited_check)) =
+            (&high.outcome, &limited.outcome)
+        else {
+            panic!("{:?} {:?}", high.outcome, limited.outcome);
+        };
+        assert_eq!(high_check.ratio(), limited_check.ratio());
+        assert!(high_check.components[0].detail.contains("Qu="));
+        let high_skeleton = high.reference_skeleton.as_ref().unwrap();
+        let limited_skeleton = limited.reference_skeleton.as_ref().unwrap();
+        assert_eq!(
+            high_skeleton.displacement_points[2].1,
+            limited_skeleton.displacement_points[2].1
+        );
+        assert!(high_skeleton.beta_s > limited_skeleton.beta_s);
+    }
+    if let Some(SectionShape::RcWall { pwv_ratio, .. }) = &mut model.sections[2].shape {
+        *pwv_ratio = None;
+    }
+    let report =
+        crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
+    assert!(report.wall_checks.iter().any(|w| w.kind == WallCheckKind::ReferenceSkeleton && matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("縦筋比"))));
+}
+
+#[test]
 fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_missing_side() {
     for kind in [
         ElementKind::Beam,
@@ -1918,8 +1991,14 @@ fn reference_skeleton_for_frame_representation(kind: ElementKind) {
         frame.kind = kind;
     }
     m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMin;
-    if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut m.sections[2].shape {
+    if let Some(SectionShape::RcWall {
+        pwh_ratio,
+        pwv_ratio,
+        ..
+    }) = &mut m.sections[2].shape
+    {
         *pwh_ratio = Some(0.006);
+        *pwv_ratio = Some(0.003);
     }
     let mut forces = vec![
         (

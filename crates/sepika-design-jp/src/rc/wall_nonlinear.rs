@@ -30,6 +30,8 @@ pub struct WallShearTrilinearInput {
     pub sigma_wh: f64,
     /// 実壁厚に対する横筋比（小数）。βsでは等価壁厚へ換算しない。
     pub pwh_ratio: f64,
+    /// 壁板の実壁厚基準の鉛直せん断補強筋比（小数）。
+    pub pwv_ratio: f64,
     /// 平均圧縮軸応力度 `[N/mm²]`。
     pub sigma_0: f64,
     /// せん断スパン比 M/(QD)。骨格では有限の正値が必須。
@@ -153,6 +155,7 @@ pub fn wall_shear_ultimate(inp: &WallShearTrilinearInput) -> f64 {
             tension_column_at: inp.tension_column_at,
             sigma_wh: inp.sigma_wh,
             pwh_ratio: inp.pwh_ratio,
+            pwv_ratio: inp.pwv_ratio,
             sigma_0: inp.sigma_0,
             shear_span_ratio: inp.shear_span_ratio,
             opening: inp.opening,
@@ -188,6 +191,9 @@ pub fn wall_shear_trilinear(inp: &WallShearTrilinearInput) -> Result<WallShearTr
     if !inp.shear_span_ratio.is_finite() || inp.shear_span_ratio <= 0.0 {
         return Err("せん断スパン比 M/(QD) が有限の正値ではありません".into());
     }
+    if !inp.pwv_ratio.is_finite() || inp.pwv_ratio < 0.0 {
+        return Err("縦筋比 pwv_ratio は有限の非負値が必要です".into());
+    }
     let qu = wall_shear_ultimate(inp);
     if !qu.is_finite() || !qc.is_finite() || qc <= 0.0 || qu <= qc {
         return Err("Qc < Qu を満たさないためせん断トリリニア骨格を算定できません".into());
@@ -216,11 +222,49 @@ mod tests {
             tension_column_at: 3097.0,
             sigma_wh: 295.0,
             pwh_ratio: 0.002,
+            pwv_ratio: 0.006,
             sigma_0: 1.0,
             shear_span_ratio: 1.5,
             opening: None,
         }
     }
+    #[test]
+    fn vertical_limit_prevents_overstated_reference_skeleton() {
+        let mut input = base_input();
+        input.t = 300.0;
+        input.te = 300.0;
+        input.d_wall = 4300.0;
+        input.dc_compression = 300.0;
+        input.tension_column_at = 10.0 * std::f64::consts::PI * 121.0;
+        input.pwh_ratio = 0.012;
+        input.pwv_ratio = 0.002;
+        input.sigma_0 = 0.0;
+        for (method, expected) in [
+            (
+                sepika_core::model::RcWallShearMethod::ArakawaMin,
+                2_145_279.177584084,
+            ),
+            (
+                sepika_core::model::RcWallShearMethod::ArakawaMean,
+                2_866_550.520267919,
+            ),
+        ] {
+            input.method = method;
+            assert!((wall_shear_ultimate(&input) - expected).abs() < 1e-6);
+            assert!(wall_shear_trilinear(&input)
+                .unwrap_err()
+                .contains("Qc < Qu"));
+            input.t = 200.0;
+            let skeleton = wall_shear_trilinear(&input).unwrap();
+            assert!((skeleton.qu - expected).abs() < 1e-6);
+            input.t = 300.0;
+        }
+        for invalid in [f64::NAN, f64::INFINITY, -0.001] {
+            input.pwv_ratio = invalid;
+            assert!(wall_shear_trilinear(&input).unwrap_err().contains("縦筋比"));
+        }
+    }
+
     #[test]
     fn horizontal_rebar_beta_matches_independent_expected_values() {
         let mut input = base_input();
