@@ -59,4 +59,21 @@ GUIの初回は992成功・3失敗。旧正常値表示を期待した2試験は
 | `mdbook build` | 成功 |
 | 変更した開発文書3件の相対リンク・見出しアンカー | 解決不能0 |
 
-最終差分の基準mainは`a71c5a4a`。#901の別改修を含む最終統合・freshレビュー・全CIは後続であり、本記録の成功件数へ含めない。ローカルログは専用worktreeの`target/issue871/`へ保存した。
+上表を実行した基準mainは`a71c5a4a`。ローカルログは専用worktreeの`target/issue871/`へ保存した。
+
+
+## #901統合後の追加確認
+
+main`3532847d`（#901統合済み、解析64・検定41）を`3b2e75f3`で取り込んだ。競合は検定契約版とOVIKAの版説明だけで、42を保持し、41の細長比・未検定表示の適用条件も保持した。#901の変更コード・試験6ファイルは取り込んだmainと差分0である。保存41・現行42・未来版を含む上記の実OVIKA試験を再実行した。
+
+| 追加検証 | 結果 |
+| --- | --- |
+| App GUI `--lib ds871` | 6成功・997除外 |
+| App標準構成 `--lib ds871` | 5成功・426除外 |
+| App GUI `--lib issue901` | 6成功・997除外（保存・表示・位置別状態を含む） |
+| design-jp `--test steel_slenderness` | 7成功 |
+| core・app・design-jpのGUI構成all-targets Clippy | 成功 |
+| fmt・diff check | 成功 |
+| check-docs・mdbook build | 成功（summary124・links668・impl refs708） |
+
+freshレビューとPRの全CIは後続であり、ここに含めない。追加ログは`target/issue871/issue871-901-*.log`。
