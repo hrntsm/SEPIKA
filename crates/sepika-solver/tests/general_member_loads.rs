@@ -581,6 +581,8 @@ fn committed_bilinear_end_springs_propagate_into_tangent_damping_matrix() {
         Box::new(Bilinear::new(1e12, 1e7, 0.01)),
         Box::new(Bilinear::new(1e12, 1e7, 0.01)),
     );
+    let initial = member.tangent_stiffness(&ctx);
+    let initial_k = initial.get(5, 5) - initial.get(5, 11);
     let kb = 2.0 * 205000.0 * 1e8 / 3000.0;
     let theta = 0.0011 + 20_900_000.0 / kb;
     let displacement = LocalVec {
@@ -618,6 +620,34 @@ fn committed_bilinear_end_springs_propagate_into_tangent_damping_matrix() {
     close(member.internal_force(&ctx).data[5], 20_900_000.0);
     close(before_damping, 23_098.591_549_295_776);
     close(after_damping, 0.004 * after_k * 0.001);
+    let initial_damping = Damping::StiffnessProportional {
+        h: 0.02,
+        omega: 10.0,
+        basis: StiffnessKind::Initial,
+    };
+    // kbとばね剛性1e12の直列柔性から、初期モード剛性は13,482,407,102.92668。
+    for tangent in [before_k, after_k] {
+        let c =
+            initial_damping.assemble_c_tangent(&mass, &scalar(tangent), &scalar(initial_k), &[1.0]);
+        close(sparse_matvec(&c, &[0.001])[0], 53_929.628_411_707_07);
+    }
+    member
+        .update_state(
+            &LocalVec {
+                data: smallvec::smallvec![0.; 12],
+            },
+            false,
+            &ctx,
+        )
+        .unwrap();
+    let same = member.tangent_stiffness(&ctx);
+    let c = initial_damping.assemble_c_tangent(
+        &mass,
+        &scalar(same.get(5, 5) - same.get(5, 11)),
+        &scalar(initial_k),
+        &[1.0],
+    );
+    close(sparse_matvec(&c, &[0.001])[0], 53_929.628_411_707_07);
     let snapshot = member.snapshot_state();
     for (delta, expected_damping) in [
         (1e-7, 23_098.591_549_295_776),
@@ -698,4 +728,100 @@ fn plastic_end_springs_public_time_history_with_tangent_damping_remains_finite()
         .flatten()
         .all(|x| x.is_finite()));
     assert!(record.member_forces[0][0].as_ref().unwrap().at[0].1[5].abs() > 1e7);
+}
+
+#[test]
+fn initial_stiffness_damping_public_time_history_keeps_unloaded_basis_after_plasticity() {
+    let mut model = model(ElementKind::Beam, false);
+    model.nodes[1].coord[0] = 3000.0;
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask(0b011111);
+    }
+    model.sections[0].iy = 1e8;
+    model.sections[0].iz = 1e8;
+    model.materials[0].fy = Some(20.0);
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.load_cases[0].member.clear();
+    model.load_cases[0].nodal = vec![
+        NodalLoad {
+            node: NodeId(0),
+            values: [0., 0., 0., 0., 0., 10_900_000.],
+            name: String::new(),
+            source: LoadSource::Manual,
+        },
+        NodalLoad {
+            node: NodeId(1),
+            values: [0., 0., 0., 0., 0., -10_900_000.],
+            name: String::new(),
+            source: LoadSource::Manual,
+        },
+    ];
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    // 梁の逆対称回転モード2EI/Lと材端ばね6EI/Lの直列柔性。節点回転慣性は各1。
+    let k_initial = 10_250_000_000.0;
+    let c_initial = 41_000_000.0;
+    let dt = 1e-6;
+    let v0 = -0.001;
+    for apply_long_term in [false, true] {
+        for accumulation in [
+            DampingAccumulation::NonCumulative,
+            DampingAccumulation::Cumulative,
+        ] {
+            let response = nonlinear_time_history_analysis(
+                &model,
+                &map,
+                &reducer,
+                &GroundMotion {
+                    dt,
+                    accel_x: vec![0.; 6],
+                    accel_y: None,
+                    accel_theta: None,
+                },
+                &NewmarkCfg {
+                    beta: 0.25,
+                    gamma: 0.5,
+                    dt,
+                },
+                &Damping::StiffnessProportional {
+                    h: 0.02,
+                    omega: 10.,
+                    basis: StiffnessKind::Initial,
+                },
+                accumulation,
+                if apply_long_term {
+                    &[]
+                } else {
+                    &[0.002, -0.002]
+                },
+                &[v0, -v0],
+                NonlinearThCfg {
+                    apply_long_term,
+                    record_every: Some(1),
+                    ..NonlinearThCfg::new(50, 1e-8)
+                },
+            )
+            .unwrap();
+            assert_eq!(response.non_converged_steps, 0);
+            let record = response.recording.unwrap();
+            assert_eq!(record.frame_time.len(), 6);
+            let theta0 = record.node_disp[0][0][5];
+            let moment0 = record.member_forces[0][0].as_ref().unwrap().at[0].1[5].abs();
+            assert!(moment0 > 10_000_000.);
+            let torque = if apply_long_term { 10_900_000. } else { 0. };
+            let mut velocity = v0;
+            let mut acceleration = torque - moment0 - c_initial * velocity;
+            for pair in record.node_disp.windows(2) {
+                let delta = pair[1][0][5] - pair[0][0][5];
+                let next_acceleration = 4. * (delta - dt * velocity) / (dt * dt) - acceleration;
+                let next_velocity = 2. * delta / dt - velocity;
+                let moment = moment0 + k_initial * (pair[1][0][5] - theta0);
+                let residual = next_acceleration + c_initial * next_velocity + moment - torque;
+                assert!(residual.abs() < 0.1, "long_term={apply_long_term}, accumulation={accumulation:?}, residual={residual}");
+                assert!(pair[1][0][5] < theta0);
+                velocity = next_velocity;
+                acceleration = next_acceleration;
+            }
+        }
+    }
 }

@@ -81,6 +81,7 @@ impl Default for NonlinearThCfg {
 /// （プッシュオーバーの長期載荷フェーズと同じ考え方）、その変位・応力状態を初期条件とする。
 /// `initial_disp`/`initial_vel` は「長期解からの増分」としての動的初期条件で、
 /// 記録される変位は長期変位を含む全変位である。
+/// 初期剛性を基準とする減衰は、長期載荷・動的初期条件の適用前の剛性を全時刻で用いる。
 #[allow(clippy::too_many_arguments)]
 pub fn nonlinear_time_history_analysis(
     model: &Model,
@@ -173,6 +174,10 @@ pub fn nonlinear_time_history_analysis(
     let f0_red = reducer.reduce_f(&f0_free);
     let has_long_term = !gravity_case.nodal.is_empty() || !gravity_case.member.is_empty();
 
+    let k_initial_free = assemble_k(model, dofmap, &behaviors, cfg.use_kg);
+    let k_initial_red = reducer.reduce_k(&k_initial_free);
+    let c_red = damping.assemble_c(&m_red, &k_initial_red);
+
     let mut u = vec![0.0; n_indep];
     if has_long_term {
         apply_long_term_static(
@@ -186,10 +191,6 @@ pub fn nonlinear_time_history_analysis(
             &mut u,
         )?;
     }
-
-    let k_free = assemble_k(model, dofmap, &behaviors, cfg.use_kg);
-    let k_red = reducer.reduce_k(&k_free);
-    let c_red = damping.assemble_c(&m_red, &k_red);
 
     {
         let du_dyn = reduced_vec_from(n_indep, initial_disp);
@@ -366,7 +367,7 @@ pub fn nonlinear_time_history_analysis(
                     &mut k_t_red_cache,
                     &mut k_t_red_triplets_buf,
                 );
-                let c = damping.assemble_c_tangent(&m_red, k_t_red, &k_red, &u_mode1);
+                let c = damping.assemble_c_tangent(&m_red, k_t_red, &k_initial_red, &u_mode1);
                 (Some(c), Some(k_t_red))
             } else {
                 (None, None)
