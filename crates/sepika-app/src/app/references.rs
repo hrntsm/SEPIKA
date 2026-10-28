@@ -129,6 +129,7 @@ pub struct RecordedCalculationInput {
 
 #[derive(Clone, Debug)]
 pub enum RecordedSettings {
+    Quantity,
     Analysis {
         kind: ResultInputKey,
         cfg: Box<AnalysisSettings>,
@@ -148,7 +149,87 @@ pub enum RecordedSettings {
     },
 }
 
+#[cfg(feature = "gui")]
+pub(crate) fn recorded_member_material_lines(
+    model: &sepika_core::model::Model,
+    member: &sepika_core::model::ElementData,
+) -> Vec<String> {
+    [
+        ("主材料", model.element_material(member)),
+        ("主筋", model.element_rebar_material(member)),
+        ("せん断補強筋", model.element_shear_rebar_material(member)),
+        ("内蔵鉄骨・鋼管", model.element_steel_material(member)),
+    ].into_iter().map(|(role, material)| {
+        material.map_or_else(
+            || format!("計算時の実解決材料 / {role}: 未割当・解決不能（形状により対象外の役割を含む）"),
+            |material| format!("計算時の実解決材料 / {role}: #{} {} / Fc={:?} N/mm² / Fy={:?} N/mm² / E={} N/mm²", material.id.0, material.name, material.fc, material.fy, material.young),
+        )
+    }).collect()
+}
+
 impl App {
+    /// 保存された計算時入力内の対象から参照を作る。現行入力への対応は推定しない。
+    pub fn recorded_target_result_reference(
+        &self,
+        kind: ResultInputKey,
+        target: ReferenceTarget,
+        display: DisplayConditions,
+    ) -> Result<ResultReference, String> {
+        let (source, model) = self.calculation_snapshot(&kind)?;
+        let exists = match target {
+            ReferenceTarget::Node(id) => model.node(id).is_some(),
+            ReferenceTarget::Member(id) => model.element(id).is_some(),
+            ReferenceTarget::Section(id) => model.section(id).is_some(),
+            ReferenceTarget::Material(id) => model.materials.iter().any(|m| m.id == id),
+            _ => return Err("この対象の計算時参照は未対応です。".into()),
+        };
+        if !exists {
+            return Err("計算時入力内の対象は取得不能です。".into());
+        }
+        let bundle = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .ok_or("結果がありません。")?;
+        let bytes = &bundle
+            .input_records
+            .iter()
+            .find(|(key, _)| *key == kind)
+            .ok_or("計算時入力は取得不能です。")?
+            .1;
+        let run = bundle
+            .reference_runs
+            .iter()
+            .find(|(key, _)| *key == kind)
+            .ok_or("実行識別は取得不能です。")?
+            .1
+            .clone();
+        let contract = if kind == ResultInputKey::Design {
+            bundle.design_contract_version
+        } else {
+            bundle.analysis_contract_version
+        }
+        .ok_or("計算契約は取得不能です。")?;
+        let identity = String::new();
+        let lifetime =
+            digest(&bincode::serialize(&(&source, target, &identity)).expect("対象参照の直列化"));
+        Ok(ResultReference {
+            target: TargetReference {
+                source: source.clone(),
+                target,
+                identity,
+                lifetime,
+            },
+            source,
+            kind,
+            run,
+            calculation_input: digest(bytes),
+            contract,
+            display,
+        })
+    }
+
     /// ユーザーが確定した解析設定を適用し、変更がある場合だけ編集世代を進める。
     pub fn commit_analysis_settings(&mut self, next: AnalysisSettings) -> bool {
         if bincode::serialize(&self.core.analysis_cfg).expect("解析設定の直列化")
@@ -1454,65 +1535,157 @@ impl App {
         let Some((title, input)) = self.ui.scoped.reference_snapshot.as_ref() else {
             return;
         };
+        let current = self.input_reference();
         let model = &input.model;
         let mut open = true;
         let mut edit_current = false;
+        let mut move_to_current = false;
         egui::Window::new(title).open(&mut open).show(ctx, |ui| {
             ui.strong("読み取り専用・計算時の計算用入力");
-            ui.label("通り・数量・保存波形設定等を含む完全な編集モデルは取得不能です。");
+            if matches!(input.settings, RecordedSettings::Quantity) {
+                ui.label(format!("数量設定: 壁筋仮定径 {} mm / 定着係数 {} 径倍", model.quantity_cfg.assumed_wall_bar_dia, model.quantity_cfg.anchorage_dia_factor));
+                ui.label(format!("小梁主筋比 {} / 小梁スターラップ比 {} / 床・片持ち床の鉄筋比 {}（コンクリート体積比・無次元）", model.quantity_cfg.beam_main_ratio, model.quantity_cfg.beam_stirrup_ratio, model.quantity_cfg.slab_rebar_ratio));
+            } else {
+                ui.label("通り・数量・保存波形設定等を含む完全な編集モデルは取得不能です。");
+            }
             ui.label("現在の編集入力とは独立した、結果生成時の入力です。");
             Self::recorded_settings_ui(ui, &input.settings);
             egui::ScrollArea::vertical()
                 .max_height(450.0)
-                .show(ui, |ui| {
-                    ui.collapsing("節点 [mm]", |ui| {
-                        for node in &model.nodes {
-                            ui.label(format!("{:?}: {:?}", node.id, node.coord));
-                        }
-                    });
-                    ui.collapsing("部材・断面", |ui| {
-                        for member in &model.elements {
-                            ui.label(format!(
-                                "{:?}: 節点 {:?} / 断面 {:?}",
-                                member.id, member.nodes, member.section
-                            ));
-                        }
-                        for section in &model.sections {
-                            ui.label(format!(
-                                "#{} {} / A={} mm² / Iy={} mm⁴ / Iz={} mm⁴",
-                                section.id.0, section.name, section.area, section.iy, section.iz
-                            ));
-                        }
-                    });
-                    ui.collapsing("荷重ケース・組合せ", |ui| {
-                        for case in &model.load_cases {
-                            ui.label(format!("{:?}: {} / {:?}", case.id, case.name, case.kind));
-                        }
-                        for combo in &model.combinations {
-                            ui.label(format!("{}: {:?}", combo.name, combo.terms));
-                        }
-                    });
-                    ui.collapsing("材料", |ui| {
-                        for material in &model.materials {
-                            ui.label(format!(
-                                "#{} {} / E={} N/mm² / 密度={} t/mm³",
-                                material.id.0, material.name, material.young, material.density
-                            ));
-                        }
-                    });
-                });
-            if ui.button("閲覧を閉じて現在の本案を編集する").clicked() {
+                .show(ui, |ui| Self::recorded_input_contents_ui(ui, input));
+            ui.label(format!("現在編集の本案: 案 {} / 入力世代 {}（計算元は窓タイトルで確認してください）", current.proposal, current.generation));
+            if ui.button("元の結果へ戻る（閲覧を閉じる）").clicked() {
                 edit_current = true;
             }
+            if ui.button("現在の本案の入力表へ移動（計算時入力の閲覧は保持）").clicked() {
+                move_to_current = true;
+            }
         });
+        if move_to_current {
+            let return_to = self.enter_evidence_editor(self.ui.view.model_tab);
+            if self.ui.scoped.reference_snapshot_return.is_none() {
+                self.ui.scoped.reference_snapshot_return = Some(return_to);
+            }
+        }
         if !open || edit_current {
             self.ui.scoped.reference_snapshot = None;
+            if let Some(return_to) = self.ui.scoped.reference_snapshot_return.take() {
+                self.return_from_evidence_editor(return_to);
+            }
         }
+    }
+
+    pub(crate) fn recorded_input_contents_ui(ui: &mut egui::Ui, input: &RecordedCalculationInput) {
+        let model = &input.model;
+        if matches!(input.settings, RecordedSettings::Quantity) {
+            ui.collapsing("数量対象の配置・支持範囲（読み取り専用）", |ui| {
+                for slab in &model.slabs {
+                    ui.label(format!("床板 #{} / 断面 {:?} / 基準階 {:?} / 鉛直偏心 {:?} mm / 配置 {:?}", slab.id.0, slab.plate.section, slab.reference_story, slab.vertical_eccentricity_mm, slab.shape));
+                    ui.label(format!("床板 #{} の支持境界 [mm]: {}", slab.id.0, slab.boundary_coords(model).map_or_else(|| "取得不能".into(), |coords| format!("{coords:?}"))));
+                    if let Some(region) = model.slab_assignment_region(slab.id) { ui.label(format!("床板 #{} の支持部材・材軸区間（無次元）: {:?}", slab.id.0, region.boundary)); }
+                    match model.resolved_slab_placement(slab.id) {
+                        Ok(placement) => { ui.label(format!("床板 #{} の実配置: 上面Z={} mm / 下面Z={} mm / 実厚={} mm / 上面境界 {:?} mm", slab.id.0, placement.top_z_mm, placement.bottom_z_mm, placement.thickness_mm, placement.top_boundary)); }
+                        Err(reason) => { ui.label(format!("床板 #{} の実配置は取得不能: {reason}", slab.id.0)); }
+                    }
+                }
+                for plate in &model.wall_plates {
+                    ui.label(format!("壁版 #{} / 断面 {:?} / 配置 {:?} / 開口面積 {} mm² / 個別開口 {:?}", plate.id.0, plate.section, plate.shape, plate.opening_area, plate.openings));
+                    ui.label(format!("壁版 #{} の境界 [mm]: {}", plate.id.0, plate.boundary_coords(model).map_or_else(|| "取得不能".into(), |coords| format!("{coords:?}"))));
+                    if let Some(region) = model.wall_plate_assignment_region(plate.id) { ui.label(format!("壁版 #{} の支持部材・材軸区間（無次元）: {:?}", plate.id.0, region.boundary)); }
+                }
+                for region in &model.floor_regions { ui.label(format!("床領域 #{} {} / 境界節点 {:?} / 床板 {:?}", region.id.0, region.name, region.boundary, region.slab_ids)); }
+                for region in &model.wall_regions { ui.label(format!("壁領域 #{} {} / 境界節点 {:?} / 壁版 {:?}", region.id.0, region.name, region.boundary, region.wall_plate_ids)); }
+                for member in model.floor_regions.iter().flat_map(|region| &region.secondary_beams).chain(model.wall_regions.iter().flat_map(|region| &region.posts)).chain(&model.unassigned_beams).chain(&model.unassigned_posts) {
+                    ui.label(format!("二次部材 #{} {} / 種別 {:?} / 断面 {:?} / 支持位置 {:?} / 鉛直偏心 {:?} mm", member.id.0, member.name, member.kind, member.section, member.ends, member.vertical_eccentricity));
+                    ui.label(format!("二次部材 #{} の両端 [mm]: {}", member.id.0, model.secondary_member_end_points(member).map_or_else(|| "取得不能".into(), |coords| format!("{coords:?}"))));
+                    let steel = member.section.and_then(|id| model.section(id)).and_then(|section| {
+                        if model.stb_strengths.sections.iter().any(|input| input.section == section.id && !input.steel.is_empty()) { model.stb_steel_material(section.id) }
+                        else { section.steel_material.and_then(|id| model.materials.get(id.index())) }
+                    });
+                    for (role, material) in [("主材料", model.secondary_material(member)), ("主筋", model.secondary_rebar_material(member)), ("せん断補強筋", model.secondary_shear_rebar_material(member)), ("内蔵鉄骨・鋼管", steel)] {
+                        ui.label(material.map_or_else(|| format!("二次部材 #{} / {role}: 未割当・解決不能（形状により対象外の役割を含む）", member.id.0), |material| format!("二次部材 #{} / {role}: #{} {} / Fc={:?} N/mm² / Fy={:?} N/mm²", member.id.0, material.id.0, material.name, material.fc, material.fy)));
+                    }
+                }
+            });
+        }
+        ui.collapsing("節点 [mm]", |ui| {
+            for node in &model.nodes {
+                ui.label(format!(
+                    "{:?}: {:?} / 所属階 {:?}",
+                    node.id, node.coord, node.story
+                ));
+                ui.label(format!(
+                    "拘束 {:?} / 支点ばね {:?}",
+                    node.restraint, node.support_spring
+                ));
+            }
+        });
+        ui.collapsing("階の配置 [mm]", |ui| {
+            for story in &model.stories {
+                ui.label(format!(
+                    "階 #{} {} / FL {:?} mm / ΔSL {:?} mm",
+                    story.id.0, story.name, story.elevation, story.sl_offset_mm
+                ));
+            }
+        });
+        ui.collapsing("部材・断面", |ui| {
+            for member in &model.elements {
+                ui.label(format!(
+                    "{:?}: 節点 {:?} / 断面 {:?}",
+                    member.id, member.nodes, member.section
+                ));
+                for line in recorded_member_material_lines(model, member) { ui.label(line); }
+                ui.label(format!("種別 {:?} / フェース距離 i={:?} mm・j={:?} mm（Noneは未算定） / 鉛直偏心 {:?} mm / 局所軸参照方向 {:?}", member.kind, member.rigid_zone.face_i, member.rigid_zone.face_j, member.vertical_eccentricity, member.local_axis.ref_vector));
+                if let Some(detail) = model.member_detail(member.id) { ui.label(format!("ハンチ i={:?} / j={:?}（長さ・せい増分・幅増分 mm）", detail.haunch_i, detail.haunch_j)); }
+                else { ui.label("ハンチ: 指定なし"); }
+                if let Some(wall) = model.wall_attrs.iter().find(|attr| attr.elem == member.id) { ui.label(format!("壁・シェルの開口面積 {} mm² / 個別開口 {:?}（寸法・位置 mm）", wall.opening_area, wall.openings)); }
+            }
+            for section in &model.sections {
+                ui.label(format!(
+                    "#{} {} / A={} mm² / Iy={} mm⁴ / Iz={} mm⁴",
+                    section.id.0, section.name, section.area, section.iy, section.iz
+                ));
+                ui.label(format!("断面の明示割当: 主材料 {:?} / 主筋 {:?} / せん断補強筋 {:?} / 内蔵鉄骨・鋼管 {:?}", section.material, section.rebar_material, section.shear_rebar_material, section.steel_material));
+                ui.label(format!("断面形状・配筋 {:?}", section.shape));
+                ui.label(format!("断面用途 {:?} / 幅 {} mm / せい {} mm / 実板厚 {:?} mm / 断面積の採用元 {:?}", section.frame_use, section.width, section.depth, section.thickness, section.property_basis.area));
+            }
+        });
+        ui.collapsing("荷重ケース・組合せ", |ui| {
+            for case in &model.load_cases {
+                ui.label(format!("{:?}: {} / {:?}", case.id, case.name, case.kind));
+                for load in &case.nodal {
+                    ui.label(format!(
+                        "節点 #{} / {} / [Fx,Fy,Fz] N・[Mx,My,Mz] N·mm: {:?}",
+                        load.node.0, load.name, load.values
+                    ));
+                }
+                for load in &case.member {
+                    ui.label(format!(
+                        "部材 #{} / 全体座標方向 {:?} / 荷重 {:?}（位置mm・集中N・分布N/mm）",
+                        load.elem.0, load.dir, load.kind
+                    ));
+                }
+            }
+            for combo in &model.combinations {
+                ui.label(format!("{}: {:?}", combo.name, combo.terms));
+            }
+        });
+        ui.collapsing("材料", |ui| {
+            for material in &model.materials {
+                ui.label(format!(
+                    "#{} {} / 種別 {:?} / E={} N/mm² / ν={} / 密度={} t/mm³ / Fc={:?} N/mm² / Fy={:?} N/mm²",
+                    material.id.0, material.name, material.category, material.young, material.poisson, material.density, material.fc, material.fy
+                ));
+            }
+        });
     }
 
     fn recorded_settings_ui(ui: &mut egui::Ui, settings: &RecordedSettings) {
         ui.strong("保存された計算条件（読み取り専用）");
         match settings {
+            RecordedSettings::Quantity => {
+                ui.label("数量は表示時の入力から集計しています。解析・検定の成功を意味しません。");
+            }
             RecordedSettings::Analysis {
                 kind,
                 cfg,

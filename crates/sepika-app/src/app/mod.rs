@@ -1072,6 +1072,10 @@ pub struct UiModelScoped {
     pub opened_reference: Option<references::TargetReference>,
     #[cfg(feature = "gui")]
     pub reference_snapshot: Option<(String, references::RecordedCalculationInput)>,
+    #[cfg(feature = "gui")]
+    pub(crate) reference_snapshot_return: Option<workspace::EvidenceReturn>,
+    #[cfg(feature = "gui")]
+    pub(crate) result_evidence: Option<result_evidence::ResultEvidence>,
     pub selection: GeometrySelection,
     /// 節点座標の編集バッファ（model.nodes に同期）
     pub node_edit: Vec<[String; 3]>,
@@ -1226,6 +1230,10 @@ impl Default for UiModelScoped {
             opened_reference: None,
             #[cfg(feature = "gui")]
             reference_snapshot: None,
+            #[cfg(feature = "gui")]
+            reference_snapshot_return: None,
+            #[cfg(feature = "gui")]
+            result_evidence: None,
             selection: GeometrySelection::default(),
             node_edit: Vec::new(),
             #[cfg(feature = "gui")]
@@ -1720,6 +1728,8 @@ pub(crate) fn steel_width_thickness_rank(
 }
 
 pub mod references;
+#[cfg(feature = "gui")]
+pub mod result_evidence;
 mod result_validity;
 pub use result_validity::HoldingCapacitySource;
 pub(crate) use result_validity::ResultInputKey;
@@ -1868,6 +1878,7 @@ impl eframe::App for App {
         crate::story_copy_view::story_copy_window(ui.ctx(), self);
         self.region_assign_window(ui.ctx());
         self.reference_snapshot_window(ui.ctx());
+        self.result_evidence_window(ui.ctx());
 
         if self.core.scoped.pending_save_recording.is_some() {
             let mut choice: Option<bool> = None;
