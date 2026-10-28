@@ -3,7 +3,21 @@
 作成日: 2026-10-28。状態: 🔶（描画変更のVerification、必須実機条件は未了）。
 共通規約は[GUIの文字と状態表示](../ui_readability.md)を参照。
 
-## 実行と確認範囲
+## 最新の統合ソースによる自動確認
+
+コードコミット `a3528f51` で、#975を含むmain `104a50bbe231e74e59942bc12017cace782dc11f` を取り込んだ。主領域の配置・狭幅での領域切替・領域見出し、ツリーの部材グループに共通の選択印とフォーカス輪郭を適用した。統合ではグリッドの編集IDとフォーカス追跡を保持し、表示変更から入力の確定処理を変更していない。
+
+| 検証 | 実行結果と範囲 |
+| --- | --- |
+| `cargo test -p sepika-app --features gui --lib --locked` | 全1067件成功。コンパイル1分48秒、試験7.62秒。新主領域の選択印、配置・切替時のモデル/結果/Undo不変性、検定比の失効表示、文字コントラストを含む |
+| `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings` | 成功、14.31秒 |
+| `cargo build -p sepika-app --features gui --bin sepika --locked` | 成功、1分05秒。専用worktreeの `target/debug/sepika.exe` を生成 |
+| `cargo fmt --all --check` / `git diff --check` | 成功 |
+| `cargo run -p xtask -- check-docs` | 成功。summary 124、links 674、impl refs 716 |
+
+これらは統合後の自動検証であり、100%/150%の実機表示・キーボードフォーカス・IMEの観察を代替しない。以下の旧headの結果は、実行時点を区別して保持する。
+
+## 過去の実行と確認範囲
 
 - 先行#974取り込み前: `cargo test -p sepika-app --features gui --lib --locked` は1011件成功。新規の文字コントラスト試験と検定状態境界試験を含む。これは旧headの結果であり、#974取り込み後の検証と区別する。
 - `rustup update stable` はstable 1.99.1で更新なし。`cargo clippy --version`: clippy 0.1.99 (58cf8f9c35 2026-10-13)。

@@ -8,7 +8,7 @@
 | 表 | 行高は実際のBody行高+6pt。数値列と単位見出しを維持し、節点入力表の数値は等幅・右寄せ | `theme::table_row_height`、`table_util`、`grid/widget.rs` |
 | 主・補助領域 | 主領域は白、補助パネルは淡色。見出しと余白で区別し、ナビゲータ・属性を追加枠で囲まない | `central_panel_frame`、`content_panel_frame`、`panel_heading` |
 | 名称 | 一行の省略表示と全文ホバー。属性の名称はIDと分ける。単位・検定状態を名称に連結して省略しない | `name_label`、`selectable_name`、`table_util::text_cell` |
-| 選択 | 淡青の不透明背景と選択印「▸」。グリッドは選択範囲の外周線とアクティブセルで識別する | `selectable_name`、`SELECTION_BG`、`grid/widget.rs` |
+| 選択 | 淡青の不透明背景と選択印「▸」。主領域の配置・領域切替も同じ規則を使う。グリッドは行列見出しも同じ背景とし、選択範囲の外周線とアクティブセルで識別する | `selectable_name`、`SELECTION_BG`、`app/workspace.rs`、`grid/widget.rs` |
 | フォーカス | 標準のeguiフォーカス処理を維持。共通選択・表入力の操作欄へ2ptの輪郭を重ねる | `focus_outline`、`FOCUS_STROKE` |
 | 状態文字 | 注意・エラー・良好の文字色は淡色地上で読める濃色。検定表・内訳・属性の検定比は「良好/注意/超過」を併記 | `WARN_TEXT`、`ERROR_TEXT`、`GOOD_TEXT`、`ratio_status` |
 | 編集・参照 | 入力は白地の標準操作欄、属性値は参照表示とし、断面複製・割当は編集操作と明記。結果は参照専用の見出し。対象外の無効数値欄には編集不可の理由をホバー表示 | `apply_theme`、`cell_drag_value`、属性・結果パネル |
