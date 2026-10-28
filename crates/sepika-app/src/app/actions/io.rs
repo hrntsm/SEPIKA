@@ -35,6 +35,7 @@ impl App {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;
         }
+        self.studies = study::Studies::default();
         self.core.model = model;
         self.core.scoped = ModelScoped::default();
         self.ui.scoped = UiModelScoped::default();
@@ -93,6 +94,20 @@ impl App {
         path: std::path::PathBuf,
         include_recording: Option<bool>,
     ) {
+        let active = self.studies.active;
+        if active != study::Location::Main {
+            if let Err(reason) = self.switch_study(study::Location::Main) {
+                self.report_error(reason);
+                return;
+            }
+            self.save_project_to_opts(path, include_recording);
+            let error = self.core.scoped.last_error.clone();
+            let _ = self.switch_study(active);
+            if let Some(error) = error {
+                self.report_error(error);
+            }
+            return;
+        }
         self.core.scoped.last_error = None;
         if let Err(error) = self.core.model.validate_reference_ids() {
             self.report_error(format!("保存エラー: {error}"));
@@ -223,7 +238,15 @@ impl App {
             }
         }
 
+        let study_bytes = match rmp_serde::to_vec_named(&self.saved_studies()) {
+            Ok(bytes) => Some(bytes),
+            Err(error) => {
+                self.report_error(format!("検討の保存エラー: {error}"));
+                return;
+            }
+        };
         let extras = sepika_io::ovika::OvikaExtras {
+            studies: study_bytes.as_deref(),
             preparation: prep_bytes.as_deref(),
             results: results_bytes.as_deref(),
             analysis_settings: analysis_settings_bytes.as_deref(),
@@ -265,6 +288,14 @@ impl App {
                 self.report_notice(format!("保存しました: {}", name));
                 self.core.scoped.project_path = Some(path);
                 self.core.scoped.staleness.unsaved_changes = false;
+                self.studies.dirty = false;
+                for study in &mut self.studies.items {
+                    for proposal in &mut study.proposals {
+                        if let Some(slot) = &mut proposal.state {
+                            slot.core.scoped.staleness.unsaved_changes = false;
+                        }
+                    }
+                }
             }
             Err(e) => self.report_error(format!("保存エラー: {}", e)),
         }
@@ -326,6 +357,7 @@ impl App {
                     self.report_error(format!("読込モデルの検証エラー: {:?}", e));
                     return;
                 }
+                let saved_studies = contents.studies;
                 if !self.load_model(contents.model) {
                     return;
                 }
@@ -454,6 +486,13 @@ impl App {
                         saved.view_vibration_case,
                         saved.view_lumped_vibration_case,
                     );
+                }
+                if let Some(saved) =
+                    self.decode_on_load::<study::SavedStudies>(saved_studies, "検討")
+                {
+                    if let Err(reason) = self.restore_studies(saved) {
+                        self.report_error(format!("検討の読込エラー: {reason}"));
+                    }
                 }
                 self.prune_orphan_vibration_cases();
                 self.core.scoped.project_path = Some(path);

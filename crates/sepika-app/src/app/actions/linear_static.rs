@@ -13,6 +13,10 @@ impl App {
     /// 地震荷重を「EX」「EY」ケースへ同期する（モデル・関連設定が前回同期時から
     /// 変わっていなければ荷重の再計算は丸ごとスキップする）。
     pub fn run_linear_static(&mut self, lc: LoadCaseId) {
+        if self.studies.running.is_some() {
+            self.report_error("解析実行中です");
+            return;
+        }
         let ready = self.begin_analysis();
         self.invalidate_missing_tip_seismic(&[lc]);
         if !ready {
@@ -91,11 +95,11 @@ impl App {
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_linear_static_job(&mut self, lc: LoadCaseId) {
         let ready = self.begin_analysis_job();
-        if self.core.scoped.job.is_none() {
+        if self.core.scoped.job.is_none() && self.studies.running.is_none() {
             self.invalidate_missing_tip_seismic(&[lc]);
         }
         if !ready {
-            if self.core.scoped.job.is_none() {
+            if self.core.scoped.job.is_none() && self.studies.running.is_none() {
                 self.invalidate_static_cases(&[lc]);
             }
             return;
@@ -147,6 +151,10 @@ impl App {
     /// 組合せが空の地震荷重ケースを参照している場合は解かずにエラーで案内する
     /// （地震項が黙って 0 になるのを防ぐ）。
     pub fn run_combination(&mut self, index: usize) {
+        if self.studies.running.is_some() {
+            self.report_error("解析実行中です");
+            return;
+        }
         let ready = self.begin_analysis();
         if !ready {
             self.invalidate_static_combo(index);
@@ -234,7 +242,7 @@ impl App {
     pub fn start_combination_job(&mut self, index: usize) {
         let ready = self.begin_analysis_job();
         if !ready {
-            if self.core.scoped.job.is_none() {
+            if self.core.scoped.job.is_none() && self.studies.running.is_none() {
                 self.invalidate_static_combo(index);
             }
             return;
@@ -271,6 +279,10 @@ impl App {
     /// 個別の解析エラーは処理を止めず、件数と最初のエラー内容を `last_error` に
     /// まとめる。失敗・除外対象の旧結果を削除し、対象外の結果は保持する。
     pub fn run_static_all(&mut self) {
+        if self.studies.running.is_some() {
+            self.report_error("解析実行中です");
+            return;
+        }
         if !self.begin_analysis() {
             self.invalidate_static_all_targets();
             return;
@@ -691,7 +703,7 @@ impl App {
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_static_all_job(&mut self) {
         if !self.begin_analysis_job() {
-            if self.core.scoped.job.is_none() {
+            if self.core.scoped.job.is_none() && self.studies.running.is_none() {
                 self.invalidate_static_all_targets();
             }
             return;
@@ -781,6 +793,10 @@ impl App {
     /// および任意のユーザー荷重ケースの結果と衝突せず共存できる。
     /// 準備計算 `ensure_preparation` が Ai 荷重を同期する。
     pub fn run_seismic(&mut self, dir: SeismicDir) {
+        if self.studies.running.is_some() {
+            self.report_error("解析実行中です");
+            return;
+        }
         let ready = self.begin_analysis();
         if let Some(id) = self.seismic_case_id(dir) {
             self.invalidate_missing_tip_seismic(&[id]);
@@ -809,13 +825,13 @@ impl App {
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_seismic_job(&mut self, dir: SeismicDir) {
         let ready = self.begin_analysis_job();
-        if self.core.scoped.job.is_none() {
+        if self.core.scoped.job.is_none() && self.studies.running.is_none() {
             if let Some(id) = self.seismic_case_id(dir) {
                 self.invalidate_missing_tip_seismic(&[id]);
             }
         }
         if !ready {
-            if self.core.scoped.job.is_none() {
+            if self.core.scoped.job.is_none() && self.studies.running.is_none() {
                 self.invalidate_static_key(StaticCaseKey::Seismic(dir));
             }
             return;

@@ -156,6 +156,10 @@ impl App {
         {
             return false;
         }
+        if !self.study_is_main() {
+            self.report_error("検討の計算条件は作成時に固定されています");
+            return false;
+        }
         self.core.analysis_cfg = next;
         self.core.scoped.references.advance();
         self.core.scoped.staleness.mark_non_calc_edited();
@@ -510,6 +514,9 @@ impl App {
         &self,
         reference: &ResultReference,
     ) -> Result<sepika_core::model::Model, String> {
+        if let Some(app) = self.study_result_view(reference) {
+            return app.result_input_snapshot(reference);
+        }
         if reference.target.source != reference.source {
             return Err("結果と対象の入力版が一致しません。".into());
         }
@@ -573,6 +580,9 @@ impl App {
         &self,
         reference: &ResultReference,
     ) -> Result<ReferenceTarget, String> {
+        if let Some(result) = self.resolve_study_result(reference) {
+            return result;
+        }
         self.result_input_snapshot(reference)?;
         self.require_result_input(reference.kind.clone())?;
         self.resolve_target_reference(&reference.target)
@@ -641,6 +651,9 @@ impl App {
         &self,
         reference: &ResultReference,
     ) -> Result<RecordedCalculationInput, String> {
+        if let Some(app) = self.study_result_view(reference) {
+            return app.recorded_result_input(reference);
+        }
         self.result_input_snapshot(reference)?;
         self.recorded_calculation_input(&reference.kind)
             .map(|(_, input)| input)
@@ -736,6 +749,12 @@ impl App {
         view: ReferenceView,
         reveal: bool,
     ) -> Result<(), String> {
+        if let Some(location) = self.study_result_location(reference) {
+            if self.studies.active != location {
+                self.switch_study(location)?;
+            }
+        }
+        self.activate_study_result_reference(reference);
         self.resolve_result_reference(reference)?;
         self.validate_reference_display(reference)?;
         if let Some(frame) = reference.display.frame {
@@ -1031,6 +1050,12 @@ impl App {
         view: ReferenceView,
         reveal: bool,
     ) -> Result<(), String> {
+        if let Some(location) = self.study_target_location(reference) {
+            if self.studies.active != location {
+                self.switch_study(location)?;
+            }
+        }
+
         let destination = if matches!(
             reference.target,
             ReferenceTarget::Vibration(_) | ReferenceTarget::LumpedVibration(_)
@@ -1234,7 +1259,15 @@ impl App {
         }
         ui.collapsing("共通参照・固定対象", |ui| {
             let input = self.input_reference();
-            ui.label(format!("本案 / 編集世代 {}", input.generation));
+            ui.label(format!(
+                "{} / 編集世代 {}",
+                if self.study_is_main() {
+                    "本案"
+                } else {
+                    "表示中の検討入力"
+                },
+                input.generation
+            ));
             ui.label(format!("プロジェクト: {}", input.project));
             ui.label(format!("案: {}", input.proposal));
             ui.label(format!(
@@ -1323,6 +1356,7 @@ impl App {
                                 Ok(()) => {
                                     self.core.scoped.references.fixed_results.push(reference);
                                     self.core.scoped.staleness.mark_non_calc_edited();
+                                    self.retain_study_view_references();
                                 }
                                 Err(reason) => self.report_notice(reason),
                             },

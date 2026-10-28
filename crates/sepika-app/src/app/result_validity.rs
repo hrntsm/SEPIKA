@@ -764,6 +764,9 @@ impl App {
     }
 
     pub(crate) fn require_result_input(&self, key: ResultInputKey) -> Result<(), String> {
+        if key == ResultInputKey::Design {
+            return self.require_design_input();
+        }
         if let Some(bundle) = self
             .core
             .scoped

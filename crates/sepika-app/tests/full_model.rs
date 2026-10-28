@@ -2323,6 +2323,7 @@ fn ovika_corrupt_optional_payloads_report_notices() {
         &path,
         &app.core.model,
         sepika_io::ovika::OvikaExtras {
+            studies: None,
             preparation: Some(&corrupt),
             results: Some(&corrupt),
             analysis_settings: Some(&corrupt),

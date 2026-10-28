@@ -37,15 +37,17 @@ pub struct QuantityViewState {
 pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
     let mut cfg = app.core.model.quantity_cfg;
     let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.label("壁筋仮定径 [mm]");
-        changed |= ui
-            .add(egui::DragValue::new(&mut cfg.assumed_wall_bar_dia).speed(1.0))
-            .changed();
-        ui.label("定着係数 [径倍]");
-        changed |= ui
-            .add(egui::DragValue::new(&mut cfg.anchorage_dia_factor).speed(1.0))
-            .changed();
+    ui.add_enabled_ui(app.study_is_main(), |ui| {
+        ui.horizontal(|ui| {
+            ui.label("壁筋仮定径 [mm]");
+            changed |= ui
+                .add(egui::DragValue::new(&mut cfg.assumed_wall_bar_dia).speed(1.0))
+                .changed();
+            ui.label("定着係数 [径倍]");
+            changed |= ui
+                .add(egui::DragValue::new(&mut cfg.anchorage_dia_factor).speed(1.0))
+                .changed();
+        });
     });
     if changed {
         app.apply_model_edit(Box::new(sepika_edit::SetQuantityCfg { cfg }));

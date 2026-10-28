@@ -24,7 +24,10 @@ impl App {
                 }
             });
             ui.collapsing("検討", |ui| {
-                ui.label("固定対象は共通参照から確認できます。比較案の作成・採用は未接続です。");
+                ui.label("本案を変えずに基準案・比較案を編集、計算、保存できます。");
+                if ui.button("検討・設計案を開く").clicked() {
+                    self.studies.window_open = true;
+                }
                 if ui.button("共通参照・固定対象を開く").clicked() {
                     self.ui.view.right_dock_open = true;
                     self.ui.view.right_panel = RightPanel::Inspector;

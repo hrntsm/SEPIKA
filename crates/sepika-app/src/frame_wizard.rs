@@ -57,7 +57,7 @@ const USAGE_PRESETS: &[(Option<SlabUsage>, &str)] = &[
 
 /// ウィザードのウィンドウを描く。生成が確定したら現在のモデルを置き換える。
 pub fn frame_wizard_window(ctx: &egui::Context, app: &mut App) {
-    if !app.ui.view.frame_wizard.open {
+    if !app.study_is_main() || !app.ui.view.frame_wizard.open {
         return;
     }
     let mut open = true;

@@ -36,19 +36,21 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     ui.strong("終局検定（塑性理論式による終局せん断・付着余裕度）");
     ui.add_space(4.0);
     let mut selection = app.core.model.ultimate_gravity_combination;
-    egui::ComboBox::from_id_salt("ultimate_gravity_combination")
-        .selected_text(
-            selection
-                .and_then(|i| app.core.model.combinations.get(i))
-                .map(|c| c.name.as_str())
-                .unwrap_or("長期架構用組合せを選択"),
-        )
-        .show_ui(ui, |ui| {
-            ui.selectable_value(&mut selection, None, "未指定（未検定）");
-            for (index, combo) in app.core.model.combinations.iter().enumerate() {
-                ui.selectable_value(&mut selection, Some(index), &combo.name);
-            }
-        });
+    ui.add_enabled_ui(app.study_is_main(), |ui| {
+        egui::ComboBox::from_id_salt("ultimate_gravity_combination")
+            .selected_text(
+                selection
+                    .and_then(|i| app.core.model.combinations.get(i))
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("長期架構用組合せを選択"),
+            )
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut selection, None, "未指定（未検定）");
+                for (index, combo) in app.core.model.combinations.iter().enumerate() {
+                    ui.selectable_value(&mut selection, Some(index), &combo.name);
+                }
+            });
+    });
     if selection != app.core.model.ultimate_gravity_combination {
         app.core.scoped.undo.run(
             &mut app.core.model,
@@ -78,88 +80,89 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
         demand_source_note(app).unwrap_or_else(|reason| format!("需要由来は未検定: {reason}")),
     );
 
-    ui.horizontal(|ui| {
-        ui.label("ヒンジ回転角 Rp:");
-        ui.add(
-            egui::DragValue::new(&mut app.core.ultimate_rp)
-                .speed(0.001)
-                .range(0.0..=0.1)
-                .fixed_decimals(3),
-        )
-        .on_hover_text(
-            "終局限界状態でのヒンジ領域の回転角 Rp [rad]。ν=(1−15Rp)ν0、\
+    ui.add_enabled_ui(app.study_is_main(), |ui| {
+        ui.horizontal(|ui| {
+            ui.label("ヒンジ回転角 Rp:");
+            ui.add(
+                egui::DragValue::new(&mut app.core.ultimate_rp)
+                    .speed(0.001)
+                    .range(0.0..=0.1)
+                    .fixed_decimals(3),
+            )
+            .on_hover_text(
+                "終局限界状態でのヒンジ領域の回転角 Rp [rad]。ν=(1−15Rp)ν0、\
              cotφ=2−50Rp に効きます。0 で塑性化前（cotφ=2.0, ν=ν0）の終局強度。",
-        );
-        ui.separator();
-        ui.label("上限強度倍率:");
-        ui.add(
-            egui::DragValue::new(&mut app.core.ultimate_upper_factor)
-                .speed(0.05)
-                .range(0.1..=2.0)
-                .fixed_decimals(2),
-        )
-        .on_hover_text("Qmu = 上限強度倍率·2·Mu/内法 の倍率。");
-    });
-    ui.horizontal(|ui| {
-        ui.checkbox(
-            &mut app.core.ultimate_lightweight,
-            "軽量コンクリート（Qsu・Qbu を 0.9 倍）",
-        )
-        .on_hover_text("軽量コンクリート使用時のせん断終局耐力 0.9 倍低減（共通事項）。");
-        ui.checkbox(&mut app.core.ultimate_include_bond, "付着割裂 Qbu を検定");
-    });
-    ui.horizontal(|ui| {
-        ui.label("終局せん断強度:");
-        ui.selectable_value(
-            &mut app.core.ultimate_shear_ductility,
-            false,
-            "塑性理論式(Qsu)",
-        )
-        .on_hover_text(
-            "藤井・森田式系の塑性理論式（終局強度型設計指針）で終局せん断強度を算定します。",
-        );
-        ui.selectable_value(
-            &mut app.core.ultimate_shear_ductility,
-            true,
-            "靭性指針式(Vu)",
-        )
-        .on_hover_text(
-            "AIJ「靭性保証型耐震設計指針」6.4 の Vu=min(Vu1,Vu2,Vu3)（トラス＋アーチ機構）\
+            );
+            ui.separator();
+            ui.label("上限強度倍率:");
+            ui.add(
+                egui::DragValue::new(&mut app.core.ultimate_upper_factor)
+                    .speed(0.05)
+                    .range(0.1..=2.0)
+                    .fixed_decimals(2),
+            )
+            .on_hover_text("Qmu = 上限強度倍率·2·Mu/内法 の倍率。");
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut app.core.ultimate_lightweight,
+                "軽量コンクリート（Qsu・Qbu を 0.9 倍）",
+            )
+            .on_hover_text("軽量コンクリート使用時のせん断終局耐力 0.9 倍低減（共通事項）。");
+            ui.checkbox(&mut app.core.ultimate_include_bond, "付着割裂 Qbu を検定");
+        });
+        ui.horizontal(|ui| {
+            ui.label("終局せん断強度:");
+            ui.selectable_value(
+                &mut app.core.ultimate_shear_ductility,
+                false,
+                "塑性理論式(Qsu)",
+            )
+            .on_hover_text(
+                "藤井・森田式系の塑性理論式（終局強度型設計指針）で終局せん断強度を算定します。",
+            );
+            ui.selectable_value(
+                &mut app.core.ultimate_shear_ductility,
+                true,
+                "靭性指針式(Vu)",
+            )
+            .on_hover_text(
+                "AIJ「靭性保証型耐震設計指針」6.4 の Vu=min(Vu1,Vu2,Vu3)（トラス＋アーチ機構）\
                  で終局せん断信頼強度を算定します。Qsu 列に Vu を表示します。",
-        );
-    });
-    ui.horizontal(|ui| {
-        ui.checkbox(&mut app.core.ultimate_biaxial_shear, "柱を2軸せん断で検定")
-            .on_hover_text(
-                "RC 柱のせん断余裕度を 2 軸せん断 1/((Qmx/Qux)²+(Qmy/Quy)²)^(1/2) として\
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut app.core.ultimate_biaxial_shear, "柱を2軸せん断で検定")
+                .on_hover_text(
+                    "RC 柱のせん断余裕度を 2 軸せん断 1/((Qmx/Qux)²+(Qmy/Quy)²)^(1/2) として\
                  検定します（採用応力）。Qsu/Qmu 列は 2 軸合成値を表示します。",
-            );
-        ui.checkbox(&mut app.core.ultimate_biaxial_bending, "柱を2軸曲げで検定")
-            .on_hover_text(
-                "RC 柱の曲げ余裕度を 2 軸曲げ 1/((Mmx/Mux)²+(Mmy/Muy)²)^(1/2) として検定します\
+                );
+            ui.checkbox(&mut app.core.ultimate_biaxial_bending, "柱を2軸曲げで検定")
+                .on_hover_text(
+                    "RC 柱の曲げ余裕度を 2 軸曲げ 1/((Mmx/Mux)²+(Mmy/Muy)²)^(1/2) として検定します\
                  （採用応力）。需要曲げは応答（増分解析／静的）の値を用います。",
-            );
-    });
-    ui.horizontal(|ui| {
-        ui.checkbox(
-            &mut app.core.ultimate_use_pushover,
-            "設計用応力・Rp を増分解析応答から反映",
-        )
-        .on_hover_text(
-            "設計用せん断 Qmu・需要曲げ・軸力・部材別 Rp を、明示した採用stepの\
+                );
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut app.core.ultimate_use_pushover,
+                "設計用応力・Rp を増分解析応答から反映",
+            )
+            .on_hover_text(
+                "設計用せん断 Qmu・需要曲げ・軸力・部材別 Rp を、明示した採用stepの\
              確定総応答から直接反映します。不足時は未検定です。",
-        );
-        if app.core.ultimate_use_pushover {
-            let has_po = app.ultimate_demand_by_elem().is_ok();
-            if has_po {
-                ui.colored_label(crate::theme::GOOD_GREEN, "● 応答反映中");
-            } else {
-                ui.colored_label(crate::theme::GRAY_600, "（確定総応答が不足・未検定）");
+            );
+            if app.core.ultimate_use_pushover {
+                let has_po = app.ultimate_demand_by_elem().is_ok();
+                if has_po {
+                    ui.colored_label(crate::theme::GOOD_GREEN, "● 応答反映中");
+                } else {
+                    ui.colored_label(crate::theme::GRAY_600, "（確定総応答が不足・未検定）");
+                }
             }
-        }
+        });
+        ui.separator();
     });
-    ui.separator();
-
     match app.compute_ultimate_checks() {
         Err(msg) => {
             ui.colored_label(crate::theme::GRAY_600, &msg);

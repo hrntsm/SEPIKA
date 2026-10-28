@@ -387,6 +387,10 @@ impl App {
     /// FL・ΔSL の明示入力を要求し、変更した重量入力と自動荷重を一括更新する。
     /// 階生成失敗時も、階に依存しない診断・断面などの集計は継続する。
     pub fn run_preparation(&mut self) {
+        if !self.study_is_main() {
+            self.report_error("検討の計算を使用してください");
+            return;
+        }
         self.core.scoped.last_error = None;
         self.core.scoped.last_notice = None;
         self.generate_stories_action();

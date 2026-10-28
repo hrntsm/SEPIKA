@@ -33,6 +33,19 @@ impl App {
 
     /// 右ドック「静的解析」パネル。
     pub(crate) fn static_panel(&mut self, ui: &mut egui::Ui) {
+        if let study::Location::Proposal(s, p) = self.studies.active {
+            ui.label("検討作成時の条件・全荷重ケース・全組合せで計算します");
+            if ui.button("検討の計算").clicked() {
+                if let Err(reason) = self.start_study_calculation(s, p) {
+                    self.report_error(reason);
+                }
+            }
+            return;
+        }
+        if self.study_read_only() {
+            ui.label("計算時入力・結果は読取専用です");
+            return;
+        }
         ui.heading("静的解析");
         ui.separator();
         self.analysis_status_header(ui);

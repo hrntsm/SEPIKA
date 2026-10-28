@@ -254,7 +254,7 @@ pub enum CheckOutcome {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LoadTerm {
     #[default]
     Long,

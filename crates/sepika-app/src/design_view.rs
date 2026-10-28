@@ -8,14 +8,16 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::Col;
     ui.add_space(12.0);
     ui.strong("層指標（二次設計: 層間変形角・剛性率・偏心率）");
-    ui.horizontal(|ui| {
-        use sepika_solver::statics::analysis::SeismicDir;
-        ui.label("加力方向:").on_hover_text(
-            "層指標と必要保有水平耐力の判定を評価する方向。\
+    ui.add_enabled_ui(app.study_is_main(), |ui| {
+        ui.horizontal(|ui| {
+            use sepika_solver::statics::analysis::SeismicDir;
+            ui.label("加力方向:").on_hover_text(
+                "層指標と必要保有水平耐力の判定を評価する方向。\
              剛心の精算には対応する向きの EX／EY の解析結果を用いる",
-        );
-        ui.selectable_value(&mut cfg.seismic_dir, SeismicDir::X, "X");
-        ui.selectable_value(&mut cfg.seismic_dir, SeismicDir::Y, "Y");
+            );
+            ui.selectable_value(&mut cfg.seismic_dir, SeismicDir::X, "X");
+            ui.selectable_value(&mut cfg.seismic_dir, SeismicDir::Y, "Y");
+        });
     });
     app.commit_analysis_settings(cfg);
     for reason in app.core.model.story_level_diagnostics() {
@@ -164,58 +166,60 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     ui.strong("部材検定（許容応力度）");
     if ui
         .add_enabled(
-            app.core.scoped.job.is_none(),
+            app.study_is_main() && app.core.scoped.job.is_none(),
             egui::Button::new("検定を再実行"),
         )
         .clicked()
     {
         app.run_design_check();
     }
-    ui.horizontal(|ui| {
-        let mut cfg = app.core.analysis_cfg;
-        let mut changed = false;
-        changed |= ui
-            .checkbox(&mut cfg.rc_damage_control, "RC短期せん断: 損傷制御")
-            .on_hover_text("ON: 損傷制御のための検討（2/3・α・fs）、OFF: 安全確保のための検討")
-            .changed();
-        ui.label("QD:");
-        for (m, label) in [
-            (sepika_design_jp::QdMethod::Min, "min(QD1,QD2)"),
-            (sepika_design_jp::QdMethod::Qd1, "QD1"),
-            (sepika_design_jp::QdMethod::Qd2, "QD2"),
-        ] {
-            if ui
-                .selectable_label(cfg.qd_method == m, label)
-                .on_hover_text(
-                    "地震時短期の設計用せん断力の決定方法（QD1=終局曲げベース、\
+    ui.add_enabled_ui(app.study_is_main(), |ui| {
+        ui.horizontal(|ui| {
+            let mut cfg = app.core.analysis_cfg;
+            let mut changed = false;
+            changed |= ui
+                .checkbox(&mut cfg.rc_damage_control, "RC短期せん断: 損傷制御")
+                .on_hover_text("ON: 損傷制御のための検討（2/3・α・fs）、OFF: 安全確保のための検討")
+                .changed();
+            ui.label("QD:");
+            for (m, label) in [
+                (sepika_design_jp::QdMethod::Min, "min(QD1,QD2)"),
+                (sepika_design_jp::QdMethod::Qd1, "QD1"),
+                (sepika_design_jp::QdMethod::Qd2, "QD2"),
+            ] {
+                if ui
+                    .selectable_label(cfg.qd_method == m, label)
+                    .on_hover_text(
+                        "地震時短期の設計用せん断力の決定方法（QD1=終局曲げベース、\
                      QD2=QL+n・QE。長期組合せ(G+P)を先に解析している場合のみ有効）",
-                )
-                .clicked()
-            {
-                cfg.qd_method = m;
-                changed = true;
+                    )
+                    .clicked()
+                {
+                    cfg.qd_method = m;
+                    changed = true;
+                }
             }
-        }
-        ui.label("付着:");
-        for (m, label) in [
-            (sepika_design_jp::BondMethod::Rc1999, "1999"),
-            (sepika_design_jp::BondMethod::Rc1991, "1991"),
-        ] {
-            if ui
-                .selectable_label(cfg.bond_method == m, label)
-                .on_hover_text(
-                    "RC 梁付着検定の方式。1999=必要付着長さ、1991=τa=Q/(ψ·j)。既定は 1999",
-                )
-                .clicked()
-            {
-                cfg.bond_method = m;
-                changed = true;
+            ui.label("付着:");
+            for (m, label) in [
+                (sepika_design_jp::BondMethod::Rc1999, "1999"),
+                (sepika_design_jp::BondMethod::Rc1991, "1991"),
+            ] {
+                if ui
+                    .selectable_label(cfg.bond_method == m, label)
+                    .on_hover_text(
+                        "RC 梁付着検定の方式。1999=必要付着長さ、1991=τa=Q/(ψ·j)。既定は 1999",
+                    )
+                    .clicked()
+                {
+                    cfg.bond_method = m;
+                    changed = true;
+                }
             }
-        }
-        if changed {
-            app.commit_analysis_settings(cfg);
-            app.run_design_check();
-        }
+            if changed {
+                app.commit_analysis_settings(cfg);
+                app.run_design_check();
+            }
+        });
     });
     if app.require_design_input().is_err() || app.core.scoped.result_contract_notice.is_some() {
         ui.colored_label(
@@ -627,45 +631,47 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
 
     ui.add_space(12.0);
     ui.strong("保有水平耐力（ルート3）");
-    ui.horizontal(|ui| {
-        use sepika_design_jp::secondary::holding_capacity::FrameType;
-        ui.label("架構種別:");
-        ui.selectable_value(&mut app.core.design_frame, FrameType::RcFrame, "RCラーメン");
-        ui.selectable_value(&mut app.core.design_frame, FrameType::RcWall, "RC壁式");
-        ui.selectable_value(
-            &mut app.core.design_frame,
-            FrameType::SteelFrame,
-            "Sラーメン",
-        );
-        ui.selectable_value(
-            &mut app.core.design_frame,
-            FrameType::SteelBrace,
-            "Sブレース",
-        );
-    });
-    holding_rank_mode_input(ui, app);
-    ui.horizontal(|ui| {
-        use sepika_design_jp::secondary::holding_capacity::MemberRank;
-        ui.label(if app.core.design_rank_auto {
-            "部材ランク（手動判定時）:"
-        } else {
-            "部材ランク:"
+    ui.add_enabled_ui(app.study_is_main(), |ui| {
+        ui.horizontal(|ui| {
+            use sepika_design_jp::secondary::holding_capacity::FrameType;
+            ui.label("架構種別:");
+            ui.selectable_value(&mut app.core.design_frame, FrameType::RcFrame, "RCラーメン");
+            ui.selectable_value(&mut app.core.design_frame, FrameType::RcWall, "RC壁式");
+            ui.selectable_value(
+                &mut app.core.design_frame,
+                FrameType::SteelFrame,
+                "Sラーメン",
+            );
+            ui.selectable_value(
+                &mut app.core.design_frame,
+                FrameType::SteelBrace,
+                "Sブレース",
+            );
         });
-        ui.selectable_value(&mut app.core.design_rank, MemberRank::FA, "FA");
-        ui.selectable_value(&mut app.core.design_rank, MemberRank::FB, "FB");
-        ui.selectable_value(&mut app.core.design_rank, MemberRank::FC, "FC");
-        ui.selectable_value(&mut app.core.design_rank, MemberRank::FD, "FD");
-    });
-    ui.horizontal(|ui| {
-        ui.checkbox(&mut app.core.wall_structure, "壁式構造")
-            .on_hover_text(
-                "耐力壁の種別（WA〜WD）判定に壁式構造の列を用います。告示「耐力壁の種別」表は\
+        holding_rank_mode_input(ui, app);
+        ui.horizontal(|ui| {
+            use sepika_design_jp::secondary::holding_capacity::MemberRank;
+            ui.label(if app.core.design_rank_auto {
+                "部材ランク（手動判定時）:"
+            } else {
+                "部材ランク:"
+            });
+            ui.selectable_value(&mut app.core.design_rank, MemberRank::FA, "FA");
+            ui.selectable_value(&mut app.core.design_rank, MemberRank::FB, "FB");
+            ui.selectable_value(&mut app.core.design_rank, MemberRank::FC, "FC");
+            ui.selectable_value(&mut app.core.design_rank, MemberRank::FD, "FD");
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut app.core.wall_structure, "壁式構造")
+                .on_hover_text(
+                    "耐力壁の種別（WA〜WD）判定に壁式構造の列を用います。告示「耐力壁の種別」表は\
                  壁式構造で限界値が厳しく（τu/Fc: WA 0.1・WB 0.125・WC 0.15）、\
                  壁式構造以外（WA 0.20・WB 0.25）とは別の列になります。",
-            );
-    });
+                );
+        });
 
-    holding_evaluation_inputs(ui, app);
+        holding_evaluation_inputs(ui, app);
+    });
     match app.compute_holding_capacity() {
         Err(msg) => {
             ui.colored_label(crate::theme::GRAY_600, &msg);

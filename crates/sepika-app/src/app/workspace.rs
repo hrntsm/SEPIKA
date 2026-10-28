@@ -524,7 +524,8 @@ impl App {
         pane.set_clip_rect(rect.intersect(ui.clip_rect()));
         let ui = &mut pane;
         view.pane_index = index;
-        view.allow_creation = self.ui.view.workspace.placement.active == index;
+        view.allow_creation =
+            self.study_is_main() && self.ui.view.workspace.placement.active == index;
         let mut content = self.ui.view.workspace.placement.contents[index];
         let input_focus = text_input_focus(ui);
         let header = ui.horizontal_wrapped(|ui| {
@@ -568,7 +569,7 @@ impl App {
         {
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.strong("作成・割当設定 · 対象: 本案");
+                    ui.strong(if self.study_is_main() { "作成・割当設定 · 対象: 本案" } else { "断面割当設定 · 対象: 表示中の検討案" });
                     if ui.button("取消して閉じる").clicked() || ui.button("取消").clicked() {
                         self.reset_draw_modes();
                         self.ui.scoped.draw_section_assignment = None;
@@ -579,7 +580,11 @@ impl App {
                 egui::ScrollArea::vertical().id_salt("drawing_settings").max_height(170.0).show(ui, |ui| self.draw_tools_panel(ui));
             });
         }
-        ui.label(if rect.height() < 300.0 {
+        ui.label(if self.study_read_only() {
+            "検討の固定入力 · 読取専用"
+        } else if !self.study_is_main() {
+            "検討案 · 比較案の固定対象断面のみ編集可 · Undo / Redo: 表示中の案"
+        } else if rect.height() < 300.0 {
             if content.editable() {
                 "本案 · 条件編集可 · 結果値は読取専用 · Undo: 本案"
             } else {
@@ -590,7 +595,8 @@ impl App {
         } else {
             "読み取り専用 · 編集先 / Undo: 本案"
         });
-        view.allow_creation = self.ui.view.workspace.placement.active == index;
+        view.allow_creation =
+            self.study_is_main() && self.ui.view.workspace.placement.active == index;
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id(if content == Content::Drawing {
@@ -613,12 +619,16 @@ impl App {
     }
 
     pub(crate) fn workspace_table(&mut self, ui: &mut egui::Ui, content: Content) {
+        let enabled = content != Content::Loads || self.study_is_main();
         let mut table = ui.new_child(
             egui::UiBuilder::new()
                 .id(egui::Id::new(("shared_input_table", content.label())))
                 .max_rect(ui.available_rect_before_wrap())
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
+        if !enabled {
+            table.disable();
+        }
         egui::ScrollArea::vertical()
             .id_salt("table_scroll")
             .auto_shrink([false, false])

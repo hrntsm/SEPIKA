@@ -104,6 +104,7 @@ impl App {
             return;
         }
 
+        ui.add_enabled_ui(self.study_is_main(), |ui| {
         ui.horizontal(|ui| {
             let beam_was_on = self.ui.scoped.beam_draw_mode;
             ui.toggle_value(&mut self.ui.scoped.beam_draw_mode, "梁作成モード");
@@ -234,7 +235,11 @@ impl App {
             }
         });
 
+        });
         self.prepare_coordinate_edit_view();
+        if self.study_read_only() {
+            ui.disable();
+        }
 
         if let Some(draft) = &self.ui.scoped.draw_section_assignment {
             let invalid = self.resolve_target_reference(&draft.member).is_err()
@@ -306,7 +311,7 @@ impl App {
                 .map(PendingSectionAssignment::ids)
             {
                 ui.label(format!(
-                    "適用対象: 本案の部材 #{}（共有断面の内容は変更しません）",
+                    "適用対象: 表示中の案の部材 #{}（共有断面の内容は変更しません）",
                     elem.0
                 ));
                 ui.horizontal(|ui| {
