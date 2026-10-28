@@ -4,6 +4,14 @@
 
 [表示規約・実機条件の確認記録](UI可読性_Issue976_確認記録.md)を参照。状態🔶。100%/150%・フォーカス・日本語IMEの実機確認は未了で、完了条件として保留する。
 
+## RC接合部の許容せん断式（#948）
+
+[原画像・入力組立・再判定条件](RC接合部許容せん断_Issue948_照合記録.md)で有効幅の限定一致と許容式全体の未照合を分離した。状態🔶。κA・fs−0.5・断面積・設計用せん断力・全適用条件は規準本体待ちで、数値応答の維持と設計採用保留を区別する。終局式からの流用・安全性不明の修正は行わない。製品文書に個別確認と自動除外がない範囲を明記した。
+
+## RC材料の短期倍率・軽量せん断係数（#946）
+
+[項目別の原典・用途・再判定条件](RC材料短期倍率軽量_Issue946_適用調査.md)に、2025年版収録法令の倍率と学会公開資料の同値掲載を記録した。軽量1・2種0.9及びせん断・付着短期1.5の掲載確認を、通常RC/SRC部材への適用承認と区別する。状態🔶。RC規準の当該本文・解説が未取得のため採用判断を保留し、#922/#923の是正及び用途別上限を維持する。今回新規の計算修正候補はない。
+
 ## 図表による設計案検討の接続確認（#973）
 
 [Windowsの接続小実験と代表モデルの検証データ](UI検討_Issue973_接続確認.md)に、ローカル名前付きパイプのJSON往復・サーバ切断・接続先不在の実測を記録した。状態🔶。GUI/MCP製品接続・権限検証・構造計算の一連操作は未実施で、#982/#985の証拠に代用しない。
@@ -252,6 +260,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC接合部許容せん断_Issue948_照合記録.md](RC接合部許容せん断_Issue948_照合記録.md) | 有効幅の限定一致、許容係数・内力・適用条件の原典待ち | 🔶（調査記録完了。規準本体・設計採用・Validation未、数値応答維持） |
 | [UI検討_Issue973_接続確認.md](UI検討_Issue973_接続確認.md) | Windows名前付きパイプの往復/切断/不在、現行モデルと既存2断面の一連検証データ | 🔶（接続小実験のみ、製品GUI/MCP・構造計算・権限検証は#982/#985） |
 | [RC曲げひび割れMc_Issue940_適用調査.md](RC曲げひび割れMc_Issue940_適用調査.md) | 鉄筋考慮Ze・軸力項の原典適用域、集中ばね/記録/ファイバーの経路と独立感度 | 🔶（調査記録完了。設計採否・是正要否は追加原典/外部判断まで保留、実解析比較・Validation未） |
 | [RC引張Qsu_Issue939_適用調査.md](RC引張Qsu_Issue939_適用調査.md) | 引張Qsuの原典適用・補強条件、別式との区別、追加原典と再判定条件 | 🔶（調査記録完了。引張設計適用判断保留・Validation未、計算式不変） |
@@ -275,6 +284,8 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [仕口パネル耐力式_Issue723_原典調査.md](仕口パネル耐力式_Issue723_原典調査.md) | 2025解説書の直接記載と別原典の境界、N/A/F・降伏/全塑性の採否 | 🔶（関連原画像閲覧済み。式全体の原典適合・採否未確定） |
 | [コンクリート長期せん断_Issue922_是正記録.md](コンクリート長期せん断_Issue922_是正記録.md) | 長期告示値の是正、RC/SRC長短期の独立境界と保存旧検定失効 | 🔶（限定Verification、軽量係数・全規準・Validation未） |
 | [RC材料構造細則_Issue881_原典照合.md](RC材料構造細則_Issue881_原典照合.md) | 2025年第2版のRC材料表・柱細則、独立数値と径/材種境界 | 🔶（指定頁原画像・材料関数Verification。相違の是正、別原典・柱条件・専門家サインオフ・Validation未） |
+| [RC断面設計n_Issue944_適用照合.md](RC断面設計n_Issue944_適用照合.md) | 公開改定案12条の区分・境界・用途と刊行原典の未確認範囲 | 🔶（Fc≤60の公開案部分照合。刊行版・高Fc・全材料/SRC適用・Validation未） |
+| [USD685主筋_Issue945_認定条件照合.md](USD685主筋_Issue945_認定条件照合.md) | MSRB-0117指定値と現行値、A/B品質差、材料入力→RC断面検定の経路 | 🔶（同認定の長期差を#991へ分離。他認定・現有効性・設計条件・Validation未） |
 | [RC鉄筋径と未指定強度_Issue947_照合記録.md](RC鉄筋径と未指定強度_Issue947_照合記録.md) | p567/p572再照合、公開STB6・native径API3・材料不足5条件、API許容値過大を#961へ分離 | 🔶（限定Verification。API径修正待ち、STB径意味・別原典・全入口保護・Validation未） |
 | [RC開口壁_Issue821_モデル監査.md](RC開口壁_Issue821_モデル監査.md) | 直接48条件・壁版展開24条件、指定2025年版原画像、独立幾何・軸剛性上界 | 🔶（限定比較体の軸変位過小方向と不成立時の雑壁分岐を確認。実RCへの適用・モデル採否未確定、#821 OPEN / blocked） |
 | [RC壁線形軸曲げ剛性_Issue652_調査記録.md](RC壁線形軸曲げ剛性_Issue652_調査記録.md) | 現行ps換算と総断面候補、2025年版解説書の指定実画像・材料役割・実入口V&V条件 | 🔶（三本柱の分担と適用上の注意を限定照合。ps換算／総断面採用条件は本書では照合不可。候補未採用・実入口V&V未実施） |
@@ -612,6 +623,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 23b | STB断面系列別ID | sepika-io / sepika-app | stbridge/import、tests/stbridge_namespace.rs、tests/stbridge_section_series.rs、tests/stbridge_section_reference_boundaries.rs、reference_identity_acceptance_tests.rs | [Issue571の独立入力と予定観測](STB断面系列別ID_Issue571_2026-10.md#独立入力と予定観測) | 横断 | 🔶（series12・boundary6・namespace9・App自動9・IO227・最終feature1322成功。文書修正後の再検査/レビュー・最終ゲート未確認） |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
+| 948 | RC接合部の許容せん断 | sepika-design-jp | rc/joint.rs・joint_wiring/rc_joint.rs | [原画像とコードの対応](RC接合部許容せん断_Issue948_照合記録.md#コードとの対応と未確認項目)（今回新規の数値試験なし） | 一次設計 | 🔶（有効幅のみ限定照合、許容式全体・設計採用は保留） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*`、Case2の証拠区分は[§6-c](終局検定_参照実装照合.md#6-c-cft-中柱長柱の-n-m-相互作用) | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
 | 26c | 非節点二次部材の数量 | sepika-design-jp / sepika-app / sepika-mcp / sepika-edit / sepika-io | quantity・quantity_view・summary・query・secondary・ovika | [Issue557の元6受入と実入口](非節点二次部材数量_Issue557_2026-10.md#元の受入6項目と実入口) | 横断 | 🔶（自動実入口・広域Verification成功、nativeGUI/transport/Validation未） |
@@ -628,7 +640,9 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 885 | SRC耐震ルート・柱区分とDs適用 | sepika-design-jp / sepika-app | secondary/src_rank.rs・ds_group.rs、actions/design/holding.rs | [原典セル・独立境界・公開probe索引](SRC耐震ルート_Issue885_原典照合.md#独立数値境界と要素証拠索引) | 二次設計 | 🔶（分類Verification、SRC表選択・適用条件未対応、Validation未） |
 | 922 | コンクリート長期許容せん断 | sepika-design-jp / sepika-core / sepika-app | material_strength・rc・srrc、result_contract、src_ql_acceptance_tests | [独立値・経路・保存失効](コンクリート長期せん断_Issue922_是正記録.md#独立期待値と要素からの証拠索引) | 一次設計・保存 | 🔶（限定Verification、全規準・Validation未） |
 | 947 | RC鉄筋径と未指定強度 | sepika-core / sepika-io / sepika-element / sepika-design-jp | material_grade・stbridge/import/rebar・factory/input_check・rc | [原典・入口・観測](RC鉄筋径と未指定強度_Issue947_照合記録.md#独立期待値と公開入口の実行) | 一次設計・入力 | 🔶（公開入口Verification、API径の過大選択は[#961](https://github.com/hrntsm/SEPIKA/issues/961)修正待ち、STB径意味・別原典・全入口未） |
+| 944 | RC断面設計用n | sepika-design-jp / sepika-core / sepika-element | material_strength/concrete・rc/allowable・rc/beam・rc/column・srrc/column・srrc/panel_zone | [要素から用途への対応](RC断面設計n_Issue944_適用照合.md#要素から用途への対応と検証限界) | 一次設計・解析との区別 | 🔶（公開案の区分・境界照合とコード読取。既存実測と再実行を区別、刊行版・適用域・Validation未） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
+| 945 | USD685主筋の認定条件 | sepika-core / sepika-design-jp | material_grade.rs・material_strength/rebar.rs・rc/beam.rs | [指定値・入力経路・直接観測](USD685主筋_Issue945_認定条件照合.md) | 一次設計・入力 | 🔶（MSRB-0117長期差#991、他認定・使用条件・Validation未） |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
@@ -721,3 +735,5 @@ RC壁の二方式とGUI/採用run値/失効の横断入口は[Issue572検証](RC
 ## RC材料表と構造細則（#881）
 
 [原典照合・要素→確認索引](RC材料構造細則_Issue881_原典照合.md)の原典対応表と独立数値表を参照。公開材料関数の一時probeと、柱のソース読取を区別する。法令表との残る相違は原典照合リストを参照し、鉄筋径・未指定強度は[#947の追加調査](RC鉄筋径と未指定強度_Issue947_照合記録.md)の未確認・再判定条件へ接続する。原典限定照合を是正済みと扱わない。状態は🔶。
+
+USD685は[#945の認定条件照合](USD685主筋_Issue945_認定条件照合.md)で、MSRB-0117の長期195に対する現行215の差と、A/B・用途・設計条件・入力経路を区別した。是正は#991、他認定と現在の有効性・Fc/定着/付着条件は再判定条件に残す。補強筋の未対応は維持し、状態は🔶。
