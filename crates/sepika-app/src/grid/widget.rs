@@ -546,11 +546,8 @@ impl GridWidget {
             .line_segment([g.left_top(), g.left_bottom()], grid_stroke);
         let sel = self.grid.rect();
         if self.grid.active && (sel.r0..=sel.r1).contains(&row) {
-            ui.painter().rect_filled(
-                g,
-                egui::CornerRadius::ZERO,
-                theme::translucent(theme::BLUE_300, 80),
-            );
+            ui.painter()
+                .rect_filled(g, egui::CornerRadius::ZERO, theme::SELECTION_BG);
         }
         let font = egui::TextStyle::Body.resolve(ui.style());
         ui.painter().text(
@@ -650,11 +647,8 @@ impl GridWidget {
             .line_segment([g.left_top(), g.right_top()], grid_stroke);
         let sel = self.grid.rect();
         if self.grid.active && (sel.c0..=sel.c1).contains(&col) {
-            ui.painter().rect_filled(
-                g,
-                egui::CornerRadius::ZERO,
-                theme::translucent(theme::BLUE_300, 80),
-            );
+            ui.painter()
+                .rect_filled(g, egui::CornerRadius::ZERO, theme::SELECTION_BG);
         }
         let font = egui::TextStyle::Body.resolve(ui.style());
         ui.painter().text(

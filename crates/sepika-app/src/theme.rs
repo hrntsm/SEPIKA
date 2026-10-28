@@ -160,15 +160,12 @@ pub fn lighten(c: Color32, t: f32) -> Color32 {
     Color32::from_rgb(mix(c.r()), mix(c.g()), mix(c.b()))
 }
 
-/// テーブル行（ヘッダ・本文とも）の上下余白。行高がフォントの行高ちょうどだと
-/// セル内の文字が枠線に接して窮屈に見えるため、視認性のために少し余裕を持たせる。
-const TABLE_ROW_PADDING_PX: f32 = 6.0;
+/// テーブルのヘッダ・本文に共通する上下余白の合計 [pt]。
+const TABLE_ROW_PADDING_PT: f32 = 6.0;
 
-/// テーブルの標準行高。本文フォントの行高＋ `TABLE_ROW_PADDING_PX`。
-/// 固定 px 値（旧 18px 等）では日本語フォントの行高（Body 13pt で約 19px）に足りず
-/// 文字の下側が見切れるため、実測から算定する。ヘッダにも同じ値を使う。
+/// ヘッダ・本文共通の行高 [pt]。本文フォントの行高に上下余白を加える。
 pub fn table_row_height(ui: &egui::Ui) -> f32 {
-    ui.text_style_height(&TextStyle::Body) + TABLE_ROW_PADDING_PX
+    ui.text_style_height(&TextStyle::Body) + TABLE_ROW_PADDING_PT
 }
 
 /// 検定比などの「状態」をセマンティック 3 色へ写像する。
@@ -206,9 +203,6 @@ const CHECK_RATIO_LUT: [(f32, Color32); 4] = [
 /// - ≤0.8: 淡緑→緑（余裕が小さいほど濃い緑）
 /// - ≤1.0: 黄→アンバー（注意域。0.8 の境界で緑から明確に色相が変わる）
 /// - >1.0: 赤（NG。連続値ではなく単色）
-///
-/// 検定表（`design_view.rs`）のセル着色は [`status_color`] の3色規約を
-/// 使う（表では文字と背景色の対比が要るため、淡い連続色は適さない）。
 pub fn check_ratio_color(ratio: f64) -> Color32 {
     if ratio > 1.0 {
         PARETO_RED
