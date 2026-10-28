@@ -234,11 +234,12 @@ impl App {
                 format!("検索元: 本案 / 領域{} / 編集世代 {}", state.pane + 1, state.source.as_ref().map_or(0, |source| source.generation))
             });
             if let Some(source) = &state.source {
-                ui.add(egui::Label::new(format!("案: {}", source.proposal)).truncate()).on_hover_text(&source.proposal);
+                crate::theme::name_label(ui, &format!("案: {}", source.proposal));
             }
             ui.label("部材（断面符号・ID）・断面・階・通り・荷重ケース・画面名。上下キーで選択、Enterで詳細／画面へ、Escで取消。");
             let response = ui.add(egui::TextEdit::singleline(&mut state.query).hint_text("例: G1、2階、静的解析").desired_width(f32::INFINITY));
             if state.focus_query { response.request_focus(); state.focus_query = false; }
+            crate::theme::focus_outline(ui, &response);
             if response.changed() { state.selected = None; state.reason = None; }
             let candidates = self.search_candidates(&state.query);
             let previous_selection = state.selected;
@@ -274,7 +275,7 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 for (index, candidate) in candidates.iter().enumerate() {
                     let selected = state.selected == Some(index);
-                    let response = ui.add(egui::Button::selectable(selected, format!("{} [{}] {}", if selected { "▸" } else { " " }, candidate.kind(), candidate.name)).wrap_mode(egui::TextWrapMode::Truncate)).on_hover_text(&candidate.name);
+                    let response = crate::theme::selectable_name(ui, selected, &format!("[{}] {}", candidate.kind(), candidate.name));
                     if response.clicked() { state.selected = Some(index); state.reason = None; }
                     if selected && state.selected != previous_selection { response.scroll_to_me(Some(egui::Align::Center)); }
                     ui.add(egui::Label::new(&candidate.context).wrap());
