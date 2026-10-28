@@ -441,7 +441,7 @@ fn right_activity_bar_full_app_layout_routes_wheel_without_editing_inputs() {
             h.app.ui.view.bottom_tab = BottomTab::Log;
             h.ctx.data_mut(|data| {
                 data.insert_persisted(
-                    egui::Id::new("bottom_dock"),
+                    h.app.workspace_dock_id("bottom_dock"),
                     egui::containers::panel::PanelState {
                         rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 80.0)),
                     },
@@ -465,8 +465,15 @@ fn right_activity_bar_full_app_layout_routes_wheel_without_editing_inputs() {
             let results = rmp_serde::to_vec_named(&h.app.core.scoped.results).unwrap();
             let settings = generation_inputs(&h.app);
             for name in ["top_toolbar", "status_bar", "bottom_dock"] {
-                let state =
-                    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(name)).unwrap();
+                let state = egui::containers::panel::PanelState::load(
+                    &h.ctx,
+                    if name == "bottom_dock" {
+                        h.app.workspace_dock_id(name)
+                    } else {
+                        egui::Id::new(name)
+                    },
+                )
+                .unwrap();
                 assert!(
                     !h.scroll().clip.intersects(state.rect),
                     "overlap {name}: {:?} {:?}",

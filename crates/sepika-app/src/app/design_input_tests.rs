@@ -408,8 +408,6 @@ fn design602_failed_analysis_and_rejected_job_do_not_make_design_current() {
         started: SystemTime::now(),
         input: app.job_input(),
         rx: receiver,
-        #[cfg(feature = "gui")]
-        jump_on_success: None,
     });
     assert!(app.poll_job());
     assert!(app.core.scoped.last_error.is_some());

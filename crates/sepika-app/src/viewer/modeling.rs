@@ -404,7 +404,9 @@ fn flexible_span(elem: &ElementData, l: f64) -> (f32, f32, f64) {
 /// （いずれも `app.core.model.nodes` と同じ順序）、`proj` は投影文脈。基本形状の上に、
 /// 解析モデル分類ごとの色で部材を塗り、剛域・塑性ヒンジ・ファイバー域・端部接合条件
 /// などモデル化の要素を記号で重ねる。
-pub(super) fn draw_modeling(
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_modeling_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
     app: &App,
     model: &Model,
@@ -413,7 +415,7 @@ pub(super) fn draw_modeling(
     proj: &Projector,
     frame_filter: super::FrameFilter,
 ) {
-    let analysis = app.ui.view.modeling_analysis;
+    let analysis = view.modeling_analysis;
 
     let mut present: Vec<ModelClass> = Vec::new();
     let mut sym = Symbols::default();
@@ -439,7 +441,15 @@ pub(super) fn draw_modeling(
                 proj,
                 elem,
                 analysis,
-                app.adopted_wall_capacity(elem, model, analysis).ok(),
+                app.adopted_wall_capacity_for(
+                    elem,
+                    model,
+                    analysis,
+                    view.pushover_dir
+                        .unwrap_or(app.core.scoped.pushover_view_dir),
+                    view.spatial_case_id(app),
+                )
+                .ok(),
                 class.color(),
                 &mut sym,
             ),
@@ -467,9 +477,9 @@ pub(super) fn draw_modeling(
         }
     }
 
-    draw_wall_plates_modeling(
+    draw_wall_plates_modeling_with_view(
+        view,
         painter,
-        app,
         model,
         coords3,
         proj,
@@ -482,16 +492,16 @@ pub(super) fn draw_modeling(
 
 /// 壁エレメントにならない壁版を、フレーム内雑壁と剛性算入なしの壁版に描き分ける。
 /// 周辺部材への剛性算入対象をフレーム内雑壁として描く。
-fn draw_wall_plates_modeling(
+fn draw_wall_plates_modeling_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
-    app: &App,
     model: &Model,
     coords3: &[[f64; 3]],
     proj: &Projector,
     frame_filter: super::FrameFilter,
     present: &mut Vec<ModelClass>,
 ) {
-    if !app.ui.view.show_floor_secondary {
+    if !view.show_floor_secondary {
         return;
     }
     let targets: Vec<_> = model
@@ -1206,7 +1216,8 @@ fn draw_legend(
 /// 壁エレメントの降伏はファイバー（軸・曲げ）と面内せん断ばね（Qu 頭打ち）の
 /// 2 機構からなる。図では前者を壁柱端部の Lp、後者を壁柱に沿うジグザグで示すため、
 /// ここではその根拠となる数値を並べる。
-fn show_wall_modeling_detail(
+fn show_wall_modeling_detail_with_view(
+    viewport: &crate::viewer::ViewportState,
     ui: &mut egui::Ui,
     app: &App,
     model: &Model,
@@ -1230,7 +1241,15 @@ fn show_wall_modeling_detail(
             ui.label("軸・曲げ: 未構築（必要入力を確認してください）");
         }
     }
-    let qu = app.adopted_wall_capacity(elem, model, modeling_analysis);
+    let qu = app.adopted_wall_capacity_for(
+        elem,
+        model,
+        modeling_analysis,
+        viewport
+            .pushover_dir
+            .unwrap_or(app.core.scoped.pushover_view_dir),
+        viewport.spatial_case_id(app),
+    );
     if let Ok(qu) = qu {
         let label = if sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
             format!(
@@ -1252,7 +1271,8 @@ fn show_wall_modeling_detail(
 
 /// モデル化図のホバー詳細ツールチップ。部材の解析モデル分類・端条件・剛域・
 /// 塑性化域などのモデル化情報を表示する。
-pub(super) fn show_modeling_tooltip(
+pub(super) fn show_modeling_tooltip_with_view(
+    view: &crate::viewer::ViewportState,
     ui: &egui::Ui,
     app: &App,
     model: &Model,
@@ -1261,7 +1281,7 @@ pub(super) fn show_modeling_tooltip(
     let Some(elem) = model.element(elem_id) else {
         return;
     };
-    let class = classify(elem, model, app.ui.view.modeling_analysis);
+    let class = classify(elem, model, view.modeling_analysis);
     let end_label = |c: EndCondition| -> &'static str {
         match c {
             EndCondition::Fixed => "剛",
@@ -1278,7 +1298,7 @@ pub(super) fn show_modeling_tooltip(
         |ui| {
             ui.label(format!("部材 #{}", elem_id.0));
             ui.colored_label(class.color(), class.label());
-            let kind = match app.ui.view.modeling_analysis {
+            let kind = match view.modeling_analysis {
                 ModelingAnalysis::Static => None,
                 ModelingAnalysis::Incremental => {
                     Some(sepika_core::model::AnalysisKind::Incremental)
@@ -1300,7 +1320,14 @@ pub(super) fn show_modeling_tooltip(
                 }
             }
             if class == ModelClass::Wall {
-                show_wall_modeling_detail(ui, app, model, app.ui.view.modeling_analysis, elem);
+                show_wall_modeling_detail_with_view(
+                    view,
+                    ui,
+                    app,
+                    model,
+                    view.modeling_analysis,
+                    elem,
+                );
                 return;
             }
             if is_wall_girder(elem, model, &seismic_wall_nodes(model)) {
@@ -1355,6 +1382,17 @@ pub(super) fn show_modeling_tooltip(
         },
     );
 }
+#[cfg(test)]
+fn show_wall_modeling_detail(
+    ui: &mut egui::Ui,
+    app: &App,
+    model: &sepika_core::model::Model,
+    analysis: ModelingAnalysis,
+    elem: &sepika_core::model::ElementData,
+) {
+    show_wall_modeling_detail_with_view(&app.ui.view.viewport, ui, app, model, analysis, elem);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1913,9 +1951,9 @@ mod tests {
             let mut present = Vec::new();
             let output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let painter = ui.ctx().layer_painter(egui::LayerId::background());
-                draw_wall_plates_modeling(
+                draw_wall_plates_modeling_with_view(
+                    &app.ui.view.viewport,
                     &painter,
-                    &app,
                     &input,
                     &coords,
                     &projector,

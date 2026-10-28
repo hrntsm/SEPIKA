@@ -281,7 +281,8 @@ fn plane_alpha_scale(plane: DiagramPlane) -> f32 {
 /// 傾いている（斜め柱・ひねりのある断面等）場合、鉛直荷重でも ey・ez 両方に成分が
 /// 生じうるため、実際に `MemberLoad.dir` を局所軸へ投影して評価する
 /// （[`project_load`]）。両軸を同時表示するときは同一スケールで重ねて描く。
-pub(super) fn draw_cmq_diagram(
+pub(super) fn draw_cmq_diagram_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
     app: &App,
     _coords3: &[[f64; 3]],
@@ -304,7 +305,7 @@ pub(super) fn draw_cmq_diagram(
         );
     }
 
-    let Some(case) = app.cmq_display_load_case() else {
+    let Some(case) = view.cmq_load_case(app) else {
         info_text(
             painter,
             "荷重ケースがありません。荷重タブで作成するか、「準備計算」タブで準備計算を\
@@ -314,8 +315,8 @@ pub(super) fn draw_cmq_diagram(
     };
 
     let axes: Vec<DiagramPlane> = [
-        (app.ui.view.cmq_axes.ey, DiagramPlane::Ey),
-        (app.ui.view.cmq_axes.ez, DiagramPlane::Ez),
+        (view.cmq_axes.ey, DiagramPlane::Ey),
+        (view.cmq_axes.ez, DiagramPlane::Ez),
     ]
     .into_iter()
     .filter_map(|(on, plane)| on.then_some(plane))
@@ -450,7 +451,7 @@ pub(super) fn draw_cmq_diagram(
             &format!(
                 "選択中の軸（{}）には有意な荷重成分がありません。\
                  「軸:」で他の軸も試すか、他の成分・荷重ケースを確認してください",
-                selected_axis_label(app.ui.view.cmq_axes)
+                selected_axis_label(view.cmq_axes)
             ),
         );
         return;
@@ -468,7 +469,7 @@ pub(super) fn draw_cmq_diagram(
         let fill_alpha = (60.0 * alpha).round() as u8;
         let stroke_alpha = (255.0 * alpha).round() as u8;
 
-        match app.ui.view.cmq_component {
+        match view.cmq_component {
             CmqComponent::C => {
                 let (c_i, c_j) = t.c;
                 let peak_px = (60.0 * c_i.abs().max(c_j.abs()) / max_c.max(1e-12)) as f32;
@@ -622,13 +623,13 @@ pub(super) fn draw_cmq_diagram(
         }
     }
 
-    let axis_label = selected_axis_label(app.ui.view.cmq_axes);
-    let both_axes_note = if app.ui.view.cmq_axes.ey && app.ui.view.cmq_axes.ez {
+    let axis_label = selected_axis_label(view.cmq_axes);
+    let both_axes_note = if view.cmq_axes.ey && view.cmq_axes.ez {
         "・弱軸は半透明"
     } else {
         ""
     };
-    let legend = match app.ui.view.cmq_component {
+    let legend = match view.cmq_component {
         CmqComponent::C => format!(
             "解析梁CMQ C（節点変位0）(max={:.2}, {}{}) 青",
             max_c, axis_label, both_axes_note
@@ -653,6 +654,28 @@ pub(super) fn draw_cmq_diagram(
         theme::GRAY_700,
     );
 }
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_cmq_diagram(
+    painter: &egui::Painter,
+    app: &App,
+    _coords3: &[[f64; 3]],
+    proj: &Projector,
+    filter: FrameFilter,
+    frame_normal: Option<[f64; 3]>,
+) {
+    draw_cmq_diagram_with_view(
+        &app.ui.view.viewport,
+        painter,
+        app,
+        _coords3,
+        proj,
+        filter,
+        frame_normal,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

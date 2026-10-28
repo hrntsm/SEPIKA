@@ -107,29 +107,42 @@ fn combo<R>(
     .inner
 }
 
-fn section_toggles(ui: &mut egui::Ui, app: &mut App) {
-    ui.toggle_value(&mut app.ui.view.show_sections, "断面表示");
-    ui.toggle_value(&mut app.ui.view.show_floor_secondary, "床壁・二次部材")
+fn section_toggles_with_view(
+    view: &mut crate::viewer::ViewportState,
+    ui: &mut egui::Ui,
+    _app: &mut App,
+) {
+    ui.toggle_value(&mut view.show_sections, "断面表示");
+    ui.toggle_value(&mut view.show_floor_secondary, "床壁・二次部材")
         .on_hover_text(
             "床板・小梁・間柱と、解析要素にならない壁版（腰壁・垂壁・パラペット・\
              自立壁・間柱で分割された壁）の表示",
         );
 }
 
-fn fit_to_view(ui: &mut egui::Ui, app: &mut App) -> egui::Response {
+fn fit_to_view_with_view(
+    view: &mut crate::viewer::ViewportState,
+    ui: &mut egui::Ui,
+    _app: &mut App,
+) -> egui::Response {
     let response = ui.button("全体に合わせる");
     if response.clicked() {
-        app.ui.view.camera.fit_to_view();
+        view.camera.fit_to_view();
+        view.fit_scale = None;
     }
     response
 }
 
-pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
+pub(super) fn primary_controls_with_view(
+    view: &mut crate::viewer::ViewportState,
+    ui: &mut egui::Ui,
+    app: &mut App,
+) {
     let choices = FrameChoices::new(app);
-    let mut target = app.ui.scoped.frame_target;
+    let mut target = view.frame_target;
     let mode_label = MODES
         .iter()
-        .find(|(mode, _)| *mode == app.ui.view.view_mode)
+        .find(|(mode, _)| *mode == view.view_mode)
         .unwrap()
         .1;
     let range_label = choices.label(target);
@@ -165,8 +178,8 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
         + probe.button("◀").rect.width()
         + probe.button("▶").rect.width()
         + 2.0 * spacing;
-    let mut sections = app.ui.view.show_sections;
-    let mut secondary = app.ui.view.show_floor_secondary;
+    let mut sections = view.show_sections;
+    let mut secondary = view.show_floor_secondary;
     let toggle_width = probe.toggle_value(&mut sections, "断面表示").rect.width()
         + probe
             .toggle_value(&mut secondary, "床壁・二次部材")
@@ -197,11 +210,9 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                let has_recording = app.core.scoped.results.as_ref()
-                    .and_then(|results| results.time_history.as_ref())
-                    .and_then(|result| result.recording.as_ref()).is_some();
-                let has_lumped = lumped::has_lumped(app);
-                let mut mode = app.ui.view.view_mode;
+                let has_recording = view.spatial_result(app).and_then(|result| result.recording.as_ref()).is_some();
+                let has_lumped = view.lumped_result(app).is_some();
+                let mut mode = view.view_mode;
                 combo(ui, "view_mode", mode_label, mode_width, |ui| {
                     for (candidate, label) in MODES {
                         if mode_available(candidate, has_recording, has_lumped) {
@@ -209,7 +220,7 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
                         }
                     }
                 }).on_hover_text("表示モード");
-                app.ui.view.view_mode = mode;
+                view.view_mode = mode;
                 combo(ui, "frame_target", range_label, range_width, |ui| {
                     ui.set_max_width(400.0_f32.min(ui.ctx().content_rect().width() - 32.0));
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -227,36 +238,36 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
                     }
                 }).on_hover_text("表示範囲");
                 if navigation_inline {
-                    fit_to_view(ui, app);
+                    fit_to_view_with_view(view, ui, app);
                     choices.navigation(ui, &mut target);
                 }
                 if toggles_inline {
-                    section_toggles(ui, app);
+                    section_toggles_with_view(view, ui, app);
                 }
                 ui.menu_button("表示設定", |ui| {
                     if !navigation_inline {
-                        if fit_to_view(ui, app).clicked() {
+                        if fit_to_view_with_view(view, ui, app).clicked() {
                             ui.close();
                         }
                         ui.horizontal(|ui| choices.navigation(ui, &mut target));
                     }
                     if !toggles_inline {
-                        section_toggles(ui, app);
+                        section_toggles_with_view(view, ui, app);
                     }
                     if !navigation_inline || !toggles_inline {
                         ui.separator();
                     }
-                    if !lumped::is_lumped_view(app.ui.view.view_mode) {
-                        ui.checkbox(&mut app.ui.view.show_supports, "支点")
+                    if !lumped::is_lumped_view(view.view_mode) {
+                        ui.checkbox(&mut view.show_supports, "支点")
                             .on_hover_text("拘束された節点の矢印・円弧、支点ばね、免震マーカー");
                     }
                     if app.core.model.constraints.iter().any(|constraint| matches!(
                         constraint, sepika_core::model::Constraint::RigidDiaphragm { .. }
                     )) {
-                        ui.checkbox(&mut app.ui.view.show_diaphragm_master, "剛床代表点");
+                        ui.checkbox(&mut view.show_diaphragm_master, "剛床代表点");
                     }
                     if space_grid::has_grid(&app.core.model) {
-                        ui.checkbox(&mut app.ui.view.show_space_grid, "通り芯グリッド")
+                        ui.checkbox(&mut view.show_space_grid, "通り芯グリッド")
                             .on_hover_text(
                                 "各階レベルに通り芯の平面格子を描きます。\
                                  梁作成モードでは格子点にスナップし、節点が無ければ梁とあわせて作ります",
@@ -276,8 +287,9 @@ pub(super) fn primary_controls(ui: &mut egui::Ui, app: &mut App) {
             });
         });
     });
-    if app.ui.scoped.frame_target != target {
-        app.ui.view.camera.fit_to_view();
+    if view.frame_target != target {
+        view.camera.fit_to_view();
+        view.fit_scale = None;
     }
-    app.ui.scoped.frame_target = target;
+    view.frame_target = target;
 }

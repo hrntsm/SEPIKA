@@ -18,3 +18,6 @@ pub use self::widget::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "gui")]
+pub(crate) use widget::retain_editing_for_layout;

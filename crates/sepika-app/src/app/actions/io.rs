@@ -16,15 +16,8 @@ pub(crate) fn needs_recording_confirm(results_bytes: usize, has_recording: bool)
 }
 
 impl App {
-    /// モデルを丸ごと差し替える（新規作成・サンプル読込・ファイル読込で共用）。
-    ///
-    /// 現在のモデルに紐づく状態（[`ModelScoped`]・[`UiModelScoped`]）を丸ごと
-    /// 捨てる。個々のフィールドを列挙してリセットするのではなく `Default::default()`
-    /// を代入するため、フィールドを増やしてもここへ書き足す必要がなく、リセット漏れが
-    /// 起こらない。持ち越すもの（解析条件・設計条件・ドック配置・カメラ・配色等）は
-    /// [`AppCore`] 直下と [`UiViewState`] にあり、この代入では触れない。
-    ///
-    /// 不正な構造 ID・参照、主架構節点数と二次部材の断面用途は差し替え前に拒否し、通知して `false` を返す。
+    /// モデルを差し替え、選択・入力ドラフト・表示参照・再生位置を破棄する。配置・視点は保持する。
+    /// 不正な構造参照・主架構節点数・二次部材の断面用途は差し替え前に拒否し、通知して `false` を返す。
     pub fn load_model(&mut self, model: sepika_core::model::Model) -> bool {
         if let Err(error) = model.validate_reference_ids() {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
@@ -45,6 +38,11 @@ impl App {
         self.core.model = model;
         self.core.scoped = ModelScoped::default();
         self.ui.scoped = UiModelScoped::default();
+        #[cfg(feature = "gui")]
+        {
+            self.ui.view.viewport.reset_model_state();
+            self.ui.view.workspace.secondary.reset_model_state();
+        }
         self.sync_node_edit();
         true
     }

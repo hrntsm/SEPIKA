@@ -12,6 +12,10 @@
 
 [Windowsの接続小実験と代表モデルの検証データ](UI検討_Issue973_接続確認.md)に、ローカル名前付きパイプのJSON往復・サーバ切断・接続先不在の実測を記録した。状態🔶。GUI/MCP製品接続・権限検証・構造計算の一連操作は未実施で、#982/#985の証拠に代用しない。
 
+## 本案の主作業領域と独立した図（#975）
+
+[配置・入力保持・独立表示とWindows実画面の確認記録](主作業領域_Issue975_確認記録.md)を参照。状態🔶。主領域回帰8件・レビューと入力経路対応10件と製品exeの有限操作を確認し、外部AI通信・比較案・構造計算の妥当性とは区別する。
+
 ## Ds・Qu採用条件の不足と合否保留（#872）
 
 [公開入口・全不足理由・既存数値検証の記録](DsQu採用条件_Issue872_確認記録.md)を参照。11条件の証拠を現在の保存形式で確認できないため、自動・手動とも合否を保留する。目的別の識別・釣合い検査を維持し、選定理由・終了理由・機構分類やQu≥Qunから成立を推定しない。状態🔶。採用成功に必要な証拠の取得・保存、実建物の性能、手動GUI・Validationは未確認。
@@ -258,6 +262,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 |---|---|---|
 | [RC接合部許容せん断_Issue948_照合記録.md](RC接合部許容せん断_Issue948_照合記録.md) | 有効幅の限定一致、許容係数・内力・適用条件の原典待ち | 🔶（調査記録完了。規準本体・設計採用・Validation未、数値応答維持） |
 | [UI検討_Issue973_接続確認.md](UI検討_Issue973_接続確認.md) | Windows名前付きパイプの往復/切断/不在、現行モデルと既存2断面の一連検証データ | 🔶（接続小実験のみ、製品GUI/MCP・構造計算・権限検証は#982/#985） |
+| [主作業領域_Issue975_確認記録.md](主作業領域_Issue975_確認記録.md) | 単独／左右・上下二分割、独立視点・表示、入力・選択・配置保持、Windows実画面 | 🔶（有限GUI Verification。比較案・外部AIの一連操作は対象外） |
 | [RC曲げひび割れMc_Issue940_適用調査.md](RC曲げひび割れMc_Issue940_適用調査.md) | 鉄筋考慮Ze・軸力項の原典適用域、集中ばね/記録/ファイバーの経路と独立感度 | 🔶（調査記録完了。設計採否・是正要否は追加原典/外部判断まで保留、実解析比較・Validation未） |
 | [RC引張Qsu_Issue939_適用調査.md](RC引張Qsu_Issue939_適用調査.md) | 引張Qsuの原典適用・補強条件、別式との区別、追加原典と再判定条件 | 🔶（調査記録完了。引張設計適用判断保留・Validation未、計算式不変） |
 | [RC部材引張軸力_Issue697_継続照合.md](RC部材引張軸力_Issue697_継続照合.md) | RC引張Qsuの公的一次資料・公開求解と#697残件棚卸し | 🔶（18run/1818点のVerification。引張適用・安全性・Validation未） |
@@ -512,6 +517,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
 | 973 | GUI所有の検討へのローカルAI接続 | 製品実装前の.NET小実験 | data/issue973/pipe-probe.ps1・model-input.ps1 | [往復/EOF/不在と代表データ](UI検討_Issue973_接続確認.md) | — | 🔶（小実験のみ。#982/#985の完了とはしない） |
+| 975 | 本案の主作業領域・表示条件の独立 | sepika-app | app/workspace.rs・viewer/viewport.rs・grid/widget.rs | [GUI契約18件と製品画面](主作業領域_Issue975_確認記録.md#自動回帰と観測対象) | GUI | 🔶（有限Verification） |
 | 878 | 鉄骨柱脚・接合・ブレース・防火被覆 | sepika-design-jp / sepika-load | steel/brace.rs・story_gen/tests.rs | [短命probeと既存焦点試験](鉄骨柱脚接合構造細則_Issue878_原典照合.md#要素テスト索引と残範囲)（新規恒久試験なし） | 横断 | 🔶（部材軸力/重量の有限Verification。接合詳細・防火性能の専用判定未対応） |
 | 880 | 鉄骨耐震ルート・Qun | sepika-design-jp / sepika-app | secondary/holding_capacity.rs・app/actions/design/holding.rs | [独立数値と証拠](鉄骨耐震ルート_Issue880_原典照合.md#独立数値と要素証拠索引)、保存probe3試験 | 原典／二次設計 | 🔶（積・境界Verification、ルート2自動適用なし・Validation未） |
 | 731 | 梁の床板嵩上げ | sepika-core / sepika-load / sepika-job / sepika-app | beam_placement.rs・self_weight/beam_upstand.rs・cascade.rs・app/girder_weight_tests.rs | [独立値と実入口](梁の床板嵩上げ_Issue731_2026-10.md#確認した入口) | 横断 | 🔶（数値Verification、手動GUI・Validation未） |

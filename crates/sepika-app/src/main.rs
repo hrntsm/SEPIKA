@@ -16,6 +16,7 @@ fn main() -> eframe::Result<()> {
             sepika_app::theme::apply_theme(&cc.egui_ctx);
             let mut app = sepika_app::app::App::default();
             app.load_model(sepika_core::model::Model::with_default_load_cases());
+            app.restore_workspace_preferences();
             Ok(Box::new(app))
         }),
     )

@@ -32,6 +32,8 @@ pub struct GridWidget {
     rows_deleted: bool,
     edit_buf: String,
     edit_needs_focus: bool,
+    edit_id: Option<egui::Id>,
+    focus_ids: Vec<egui::Id>,
     /// セル起点のドラッグ選択が進行中か（スクロールバー等のドラッグと区別する。）
     drag_selecting: bool,
     /// ドラッグ選択の起点が行ヘッダか（行単位選択モード）
@@ -65,6 +67,8 @@ impl Default for GridWidget {
             rows_deleted: false,
             edit_buf: String::new(),
             edit_needs_focus: false,
+            edit_id: None,
+            focus_ids: Vec::new(),
             drag_selecting: false,
             drag_rows: false,
             drag_cols: false,
@@ -436,7 +440,11 @@ impl GridWidget {
     /// 選択モード時のグローバル入力（編集モード中は一切処理しない。
     /// TextEdit が Ctrl+C/V・矢印・文字入力を消費する）
     fn handle_events(&mut self, ctx: &egui::Context, adapter: &mut dyn GridAdapter) {
-        if self.grid.editing.is_some() {
+        if self.grid.editing.is_some()
+            || ctx
+                .memory(|memory| memory.focused())
+                .is_some_and(|focus| !self.focus_ids.contains(&focus))
+        {
             return;
         }
         let events = ctx.input(|i| i.events.clone());
@@ -514,6 +522,7 @@ impl GridWidget {
             ui.id().with(("grid_row_header", row)),
             egui::Sense::click_and_drag(),
         );
+        self.focus_ids.push(resp.id);
         let is_real = row < adapter.rows();
         if is_real && adapter.can_delete_rows() {
             if resp.secondary_clicked() {
@@ -601,6 +610,7 @@ impl GridWidget {
             ui.id().with("grid_corner_header"),
             egui::Sense::click(),
         );
+        self.focus_ids.push(resp.id);
         let sp = ui.spacing().item_spacing;
         let g = rect.expand2(egui::vec2(sp.x * 0.5, sp.y * 0.5));
         ui.painter()
@@ -637,6 +647,7 @@ impl GridWidget {
             ui.id().with(("grid_col_header", col)),
             egui::Sense::click_and_drag(),
         );
+        self.focus_ids.push(resp.id);
         let sp = ui.spacing().item_spacing;
         let g = rect.expand2(egui::vec2(sp.x * 0.5, sp.y * 0.5));
         ui.painter()
@@ -699,6 +710,7 @@ impl GridWidget {
             ui.id().with(("grid_cell", cell.row, cell.col)),
             egui::Sense::click_and_drag(),
         );
+        self.focus_ids.push(resp.id);
         let sp = ui.spacing().item_spacing;
         let g = rect.expand2(egui::vec2(sp.x * 0.5, sp.y * 0.5));
         let grid_stroke = egui::Stroke::new(1.0_f32, theme::GRAY_200);
@@ -841,11 +853,13 @@ impl GridWidget {
         let resp = ui.put(
             rect,
             egui::TextEdit::singleline(&mut self.edit_buf)
+                .id(self.edit_id.unwrap_or_else(|| ui.id().with("grid_editor")))
                 .font(egui::TextStyle::Body)
                 .vertical_align(egui::Align::Center)
                 .margin(egui::Margin::symmetric(4, 0))
                 .clip_text(false),
         );
+        self.focus_ids.push(resp.id);
         if self.edit_needs_focus {
             resp.request_focus();
             self.edit_needs_focus = false;
@@ -858,6 +872,14 @@ impl GridWidget {
             )
         });
         if resp.lost_focus() {
+            if ui
+                .ctx()
+                .data(|data| data.get_temp::<u64>(egui::Id::new("retain_grid_edit_for_layout")))
+                == Some(ui.ctx().cumulative_frame_nr())
+            {
+                resp.request_focus();
+                return;
+            }
             self.grid.end_edit();
             if esc {
                 self.push_log("編集をキャンセル（Esc）");
@@ -895,6 +917,12 @@ impl GridWidget {
             }
         }
         self.handle_events(&ctx, adapter);
+        self.focus_ids.clear();
+        if self.grid.editing.is_none() {
+            self.edit_id = None;
+        } else if self.edit_id.is_none() {
+            self.edit_id = Some(ui.id().with("grid_editor"));
+        }
 
         use egui_extras::{Column, TableBuilder};
         let n = self.grid.rows;
@@ -969,6 +997,11 @@ impl GridWidget {
             self.grid.deactivate();
         }
     }
+}
+
+pub(crate) fn retain_editing_for_layout(ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("retain_grid_edit_for_layout"), frame));
 }
 
 #[cfg(test)]
