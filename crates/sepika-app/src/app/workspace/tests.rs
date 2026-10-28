@@ -83,7 +83,7 @@ fn requested_pairs_render_in_both_directions_without_changing_document_or_select
             h.app.ui.view.workspace.placement.contents = [Content::Drawing, content];
             h.app.ui.view.results_view = ResultsView::TimeHistory;
             let output = h.settled();
-            assert!(text_rect(&output, "領域1 · 本案").is_some());
+            assert!(text_rect(&output, "▸ 領域1 · 本案").is_some());
             assert!(text_rect(&output, "領域2 · 本案").is_some());
             assert_eq!(document_state(&h.app), before);
             assert_eq!(
@@ -221,7 +221,7 @@ fn narrow_switch_and_reset_keep_both_cameras_and_selection() {
     let output = h.settled();
     assert!(text_rect(&output, "推奨配置へ戻す").is_some());
     let output = h.click(&output, "領域2");
-    assert!(text_rect(&output, "領域2 · 本案").is_some());
+    assert!(text_rect(&output, "▸ 領域2 · 本案").is_some());
     assert_eq!(h.app.ui.view.camera.zoom, 4.0);
     assert_eq!(h.app.ui.view.workspace.secondary.camera.zoom, 6.0);
     h.click(&output, "推奨配置へ戻す");

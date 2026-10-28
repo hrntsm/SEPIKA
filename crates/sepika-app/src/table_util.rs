@@ -263,7 +263,7 @@ pub(crate) fn standard_table(
 /// 文字列セル。列幅で切り詰められても内容を追えるよう、全文をホバーに出す。
 /// 空文字のときはホバーを付けない（空のツールチップが出るのを避ける）。
 pub(crate) fn text_cell(ui: &mut egui::Ui, text: &str) {
-    let resp = ui.label(text);
+    let resp = crate::theme::name_label(ui, text);
     if !text.is_empty() {
         resp.on_hover_text(text);
     }
@@ -277,10 +277,9 @@ pub(crate) fn muted_cell(ui: &mut egui::Ui, text: &str, hover: &str) {
 
 /// 行選択に連動する ID セル。クリックされたとき `true` を返す。
 ///
-/// 選択時の背景（blue-500）と文字色（白）はテーマの `selection` が決めるため、
-/// 呼び出し側で色を指定しないこと。
+/// 選択印・背景・フォーカス輪郭は共通テーマに従う。
 pub(crate) fn id_cell(ui: &mut egui::Ui, selected: bool, id: u32, hover: &str) -> bool {
-    ui.add(egui::Button::selectable(selected, id.to_string()))
+    crate::theme::selectable_name(ui, selected, &id.to_string())
         .on_hover_text(hover)
         .clicked()
 }
@@ -311,7 +310,9 @@ pub(crate) fn delete_cell(ui: &mut egui::Ui, hover: &str, blocked: Option<&str>)
 /// （ウィジェット側に固定幅を書くと列幅と食い違い、列がずれる・欄が見切れる）。
 pub(crate) fn cell_text_edit(ui: &mut egui::Ui, buf: &mut String) -> egui::Response {
     let w = ui.available_width();
-    ui.add(egui::TextEdit::singleline(buf).desired_width(w))
+    let response = ui.add(egui::TextEdit::singleline(buf).desired_width(w));
+    crate::theme::focus_outline(ui, &response);
+    response
 }
 
 /// セル幅いっぱいの数値ドラッグ入力。`enabled` が `false` のときは無効表示にする
@@ -322,8 +323,15 @@ pub(crate) fn cell_drag_value(
     dv: egui::DragValue<'_>,
 ) -> egui::Response {
     let size = egui::vec2(ui.available_width(), ui.available_height());
-    ui.add_enabled_ui(enabled, |ui| ui.add_sized(size, dv))
-        .inner
+    let response = ui
+        .add_enabled_ui(enabled, |ui| ui.add_sized(size, dv))
+        .inner;
+    crate::theme::focus_outline(ui, &response);
+    if !enabled {
+        response.on_disabled_hover_text("参照専用・この項目は編集できません")
+    } else {
+        response
+    }
 }
 
 /// セル幅いっぱいのコンボボックス。
