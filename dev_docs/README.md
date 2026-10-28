@@ -21,6 +21,7 @@
 | [handoff/](handoff/README.md) | 過去の実装経緯・判断の履歴。未完了作業の状態はGitHub Issuesで管理 |
 | [v_and_v/](v_and_v/README.md) | V&V の証拠・未検証項目。目録・要素→テスト索引と更新手順はリンク先で管理 |
 | [architecture.md](architecture.md) | クレート構成・依存方向等のアーキテクチャ |
+| [GUIの文字と状態表示](ui_readability.md) | 共通の文字・余白・選択・フォーカス・状態表示規約 |
 | [theme.rs](../crates/sepika-app/src/theme.rs)・[table_util.rs](../crates/sepika-app/src/table_util.rs) | UI のテーマ・frame helper・表の規約と実装 |
 | [full_model.rs](../crates/sepika-app/tests/full_model.rs)・[wall_model.rs](../crates/sepika-app/tests/wall_model.rs) | 実モデル統合テスト固有の情報・実行方法。既知不具合・経緯は [既存 handoff](handoff/実モデル統合テスト_申し送り.md) |
 | [book.toml](../book.toml)・[theme/](../theme/)・[docs workflow](../.github/workflows/docs.yml) | mdBook 設定、表示・フッター、公開と API リファレンス生成の実装 |

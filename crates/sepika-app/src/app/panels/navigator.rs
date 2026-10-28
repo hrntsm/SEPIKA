@@ -8,8 +8,8 @@ use sepika_core::units::to_display::force_kn;
 impl App {
     /// 左ペイン：ナビゲータ（階/部材群/断面・材料/荷重ケース/結果ケースのツリー）。
     pub(crate) fn navigator_panel(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.strong("探す · モデル / 条件 / 結果 / 検討");
+        ui.scope(|ui| {
+            crate::theme::panel_heading(ui, "探す · モデル / 条件 / 結果 / 検討", "選択・参照");
             ui.horizontal_wrapped(|ui| {
                 if ui.button("モデル表").clicked() {
                     self.ui.view.bottom_dock_open = true;
@@ -38,18 +38,24 @@ impl App {
             header.show(ui, |ui| {
                 let (steel_ids, rc_ids) = member_material_groups(&self.core.model);
                 let is_steel_sel = member_group_selected(&self.ui.scoped.selection, &steel_ids);
-                if ui
-                    .selectable_label(is_steel_sel, format!("鋼材部材 ({})", steel_ids.len()))
-                    .on_hover_text("クリックで3Dビューにハイライト")
-                    .clicked()
+                if crate::theme::selectable_name(
+                    ui,
+                    is_steel_sel,
+                    &format!("鋼材部材 ({})", steel_ids.len()),
+                )
+                .on_hover_text("クリックで3Dビューにハイライト")
+                .clicked()
                 {
                     self.select_members(steel_ids.clone(), None);
                 }
                 let is_rc_sel = member_group_selected(&self.ui.scoped.selection, &rc_ids);
-                if ui
-                    .selectable_label(is_rc_sel, format!("RC部材 ({})", rc_ids.len()))
-                    .on_hover_text("クリックで3Dビューにハイライト")
-                    .clicked()
+                if crate::theme::selectable_name(
+                    ui,
+                    is_rc_sel,
+                    &format!("RC部材 ({})", rc_ids.len()),
+                )
+                .on_hover_text("クリックで3Dビューにハイライト")
+                .clicked()
                 {
                     self.select_members(rc_ids.clone(), None);
                 }
@@ -100,9 +106,9 @@ impl App {
                     }
                 } else {
                     for s in self.core.model.stories.iter().rev() {
+                        crate::theme::name_label(ui, &s.name);
                         ui.label(format!(
-                            "{}  SL={}mm  W={:.1}kN",
-                            s.name,
+                            "SL={} mm  W={:.1} kN",
                             s.sl_mm()
                                 .map(|v| format!("{v:.0}"))
                                 .unwrap_or_else(|| "未設定".into()),

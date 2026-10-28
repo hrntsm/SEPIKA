@@ -376,7 +376,11 @@ impl App {
                     (Arrangement::Horizontal, "左右二分割"),
                     (Arrangement::Vertical, "上下二分割"),
                 ] {
-                    ui.selectable_value(&mut p.arrangement, arrangement, label);
+                    if crate::theme::selectable_name(ui, p.arrangement == arrangement, label)
+                        .clicked()
+                    {
+                        p.arrangement = arrangement;
+                    }
                 }
                 if ui.button("入替").clicked() {
                     p.contents.swap(0, 1);
@@ -455,11 +459,16 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label("狭幅表示:");
                 for index in 0..2 {
-                    ui.selectable_value(
-                        &mut self.ui.view.workspace.placement.active,
-                        index,
-                        format!("領域{}", index + 1),
-                    );
+                    let active = &mut self.ui.view.workspace.placement.active;
+                    if crate::theme::selectable_name(
+                        ui,
+                        *active == index,
+                        &format!("領域{}", index + 1),
+                    )
+                    .clicked()
+                    {
+                        *active = index;
+                    }
                 }
             });
         }
@@ -529,8 +538,7 @@ impl App {
         let input_focus = text_input_focus(ui);
         let header = ui.horizontal_wrapped(|ui| {
             let active = self.ui.view.workspace.placement.active == index;
-            if ui
-                .selectable_label(active, format!("領域{} · 本案", index + 1))
+            if crate::theme::selectable_name(ui, active, &format!("領域{} · 本案", index + 1))
                 .clicked()
             {
                 self.ui.view.workspace.placement.active = index;
