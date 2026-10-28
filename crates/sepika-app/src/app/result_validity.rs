@@ -952,7 +952,7 @@ mod tests {
             .qun;
         #[cfg(feature = "gui")]
         {
-            app.ui.scoped.hinge_step = Some(1);
+            app.ui.view.hinge_step = Some(1);
             app.ui.view.camera.yaw += 0.1;
         }
         app.ui.scoped.nav.focus_result = Some(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));

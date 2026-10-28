@@ -9,7 +9,27 @@ impl App {
     /// 左ペイン：ナビゲータ（階/部材群/断面・材料/荷重ケース/結果ケースのツリー）。
     pub(crate) fn navigator_panel(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
-            ui.strong("ナビゲータ");
+            ui.strong("探す · モデル / 条件 / 結果 / 検討");
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("モデル表").clicked() {
+                    self.ui.view.bottom_dock_open = true;
+                    self.ui.view.bottom_tab = BottomTab::Model;
+                }
+                if ui.button("条件").clicked() {
+                    self.ui.view.right_dock_open = true;
+                    self.ui.view.right_panel = RightPanel::Preparation;
+                }
+                if ui.button("結果").clicked() {
+                    self.ui.view.active_tab = Tab::Results;
+                }
+            });
+            ui.collapsing("検討", |ui| {
+                ui.label("固定対象は共通参照から確認できます。比較案の作成・採用は未接続です。");
+                if ui.button("共通参照・固定対象を開く").clicked() {
+                    self.ui.view.right_dock_open = true;
+                    self.ui.view.right_panel = RightPanel::Inspector;
+                }
+            });
             ui.separator();
 
             let header = egui::CollapsingHeader::new("部材グループ")

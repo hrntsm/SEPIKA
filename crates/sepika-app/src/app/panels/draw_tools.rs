@@ -4,7 +4,67 @@
 
 use super::*;
 
+pub struct PendingSectionAssignment {
+    member: references::TargetReference,
+    section: Option<references::TargetReference>,
+}
+
+impl PendingSectionAssignment {
+    fn ids(&self) -> (ElemId, Option<SectionId>) {
+        let references::ReferenceTarget::Member(member) = self.member.target else {
+            unreachable!()
+        };
+        let section = self.section.as_ref().map(|reference| {
+            let references::ReferenceTarget::Section(section) = reference.target else {
+                unreachable!()
+            };
+            section
+        });
+        (member, section)
+    }
+}
+
 impl App {
+    pub(crate) fn stage_section_assignment(
+        &mut self,
+        member: ElemId,
+        section: Option<SectionId>,
+    ) -> Result<(), String> {
+        self.ui.scoped.draw_section_assignment = Some(PendingSectionAssignment {
+            member: self.target_reference(references::ReferenceTarget::Member(member))?,
+            section: section
+                .map(|section| self.target_reference(references::ReferenceTarget::Section(section)))
+                .transpose()?,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn apply_pending_section_assignment(&mut self) -> bool {
+        let Some(draft) = &self.ui.scoped.draw_section_assignment else {
+            return false;
+        };
+        let validation = self.resolve_target_reference(&draft.member).and_then(|_| {
+            draft
+                .section
+                .as_ref()
+                .map(|section| self.resolve_target_reference(section))
+                .transpose()
+        });
+        if let Err(reason) = validation {
+            self.report_notice(format!(
+                "保留中の断面割当は適用できません。対象と候補を選び直してください: {reason}"
+            ));
+            return false;
+        }
+        let (elem, section) = draft.ids();
+        if self.apply_model_edit(Box::new(sepika_edit::SetElementSection { elem, section })) {
+            self.ui.scoped.draw_section_assignment = None;
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn prepare_coordinate_edit_view(&mut self) {
         if !(self.ui.scoped.beam_draw_mode
             || self.ui.scoped.wall_draw_mode
@@ -176,9 +236,31 @@ impl App {
 
         self.prepare_coordinate_edit_view();
 
+        if let Some(draft) = &self.ui.scoped.draw_section_assignment {
+            let invalid = self.resolve_target_reference(&draft.member).is_err()
+                || draft
+                    .section
+                    .as_ref()
+                    .is_some_and(|section| self.resolve_target_reference(section).is_err());
+            if invalid {
+                ui.colored_label(crate::theme::WARN_TEXT, "保留中の割当は入力版が異なるため適用できません。取消して対象と候補を選び直してください。");
+                if ui.button("断面割当を取消").clicked() {
+                    self.ui.scoped.draw_section_assignment = None;
+                }
+                return;
+            }
+        }
+
         let focus_id: Option<sepika_core::ids::ElemId> = self.ui.scoped.selection.active_member();
-        let elem_info: Option<(sepika_core::ids::ElemId, Option<SectionId>)> =
-            focus_id.and_then(|eid| self.core.model.element(eid).map(|e| (e.id, e.section)));
+        let elem_info: Option<(sepika_core::ids::ElemId, Option<SectionId>)> = self
+            .ui
+            .scoped
+            .draw_section_assignment
+            .as_ref()
+            .map(PendingSectionAssignment::ids)
+            .or_else(|| {
+                focus_id.and_then(|eid| self.core.model.element(eid).map(|e| (e.id, e.section)))
+            });
 
         let mut pending_assign: Option<Option<SectionId>> = None;
 
@@ -212,14 +294,29 @@ impl App {
                     });
             });
             if let Some(section) = pending_assign {
-                self.core.scoped.undo.run(
-                    &mut self.core.model,
-                    Box::new(sepika_edit::SetElementSection {
-                        elem: elem_id,
-                        section,
-                    }),
-                );
-                self.core.scoped.staleness.mark_edited();
+                if let Err(reason) = self.stage_section_assignment(elem_id, section) {
+                    self.report_notice(reason);
+                }
+            }
+            if let Some((elem, _)) = self
+                .ui
+                .scoped
+                .draw_section_assignment
+                .as_ref()
+                .map(PendingSectionAssignment::ids)
+            {
+                ui.label(format!(
+                    "適用対象: 本案の部材 #{}（共有断面の内容は変更しません）",
+                    elem.0
+                ));
+                ui.horizontal(|ui| {
+                    if ui.button("断面割当を適用").clicked() {
+                        self.apply_pending_section_assignment();
+                    }
+                    if ui.button("断面割当を取消").clicked() {
+                        self.ui.scoped.draw_section_assignment = None;
+                    }
+                });
             }
         } else {
             ui.label("ビューアで梁をクリックすると選択できます");

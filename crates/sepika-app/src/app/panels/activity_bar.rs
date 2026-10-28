@@ -175,7 +175,7 @@ impl App {
     pub(crate) fn left_activity_bar(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             let is_nav_active =
-                self.ui.view.left_dock_open && self.ui.view.left_panel == LeftPanel::Navigator;
+                self.left_dock_visible() && self.ui.view.left_panel == LeftPanel::Navigator;
             if activity_icon_button(
                 ui,
                 ActivityGlyph::Navigator,
@@ -187,9 +187,10 @@ impl App {
                 && toggle_dock_icon(&mut self.ui.view.left_dock_open, is_nav_active)
             {
                 self.ui.view.left_panel = LeftPanel::Navigator;
+                self.ui.view.workspace.compact_dock = Some(true);
             }
             let is_draw_active =
-                self.ui.view.left_dock_open && self.ui.view.left_panel == LeftPanel::DrawTools;
+                self.left_dock_visible() && self.ui.view.left_panel == LeftPanel::DrawTools;
             if activity_icon_button(
                 ui,
                 ActivityGlyph::DrawTools,
@@ -201,6 +202,7 @@ impl App {
                 && toggle_dock_icon(&mut self.ui.view.left_dock_open, is_draw_active)
             {
                 self.ui.view.left_panel = LeftPanel::DrawTools;
+                self.ui.view.workspace.compact_dock = Some(true);
             }
         });
     }
@@ -240,7 +242,7 @@ impl App {
                     ),
                     (RightPanel::LumpedMass, ActivityGlyph::LumpedMass, "質点系"),
                 ] {
-                    let active = self.ui.view.right_dock_open && self.ui.view.right_panel == panel;
+                    let active = self.right_dock_visible() && self.ui.view.right_panel == panel;
                     let response =
                         activity_icon_button(ui, glyph, active, ActivityAccentEdge::Right, label);
                     if (selection_changed && selected == panel) || response.gained_focus() {
@@ -253,6 +255,7 @@ impl App {
                             response.scroll_to_me(None);
                         }
                         self.ui.view.right_panel = panel;
+                        self.ui.view.workspace.compact_dock = Some(false);
                     }
                 }
             });

@@ -289,9 +289,7 @@ impl App {
             .unwrap_or_else(|p| Err(analysis_panic_message(p.as_ref())))
     }
 
-    /// 計算クロージャをバックグラウンドスレッドで起動し、ジョブとして登録する
-    /// （起動ログ込み）。結果タブへの自動遷移（`jump_on_success`）が必要な場合は
-    /// 呼び出し側が登録後に `self.core.scoped.job` へ設定する。
+    /// バックグラウンド計算を開始する。完了通知では工程・配置を変更しない。
     fn spawn_analysis_job(
         &mut self,
         label: &'static str,
@@ -307,8 +305,6 @@ impl App {
             started: std::time::SystemTime::now(),
             input: self.job_input(),
             rx,
-            #[cfg(feature = "gui")]
-            jump_on_success: None,
         });
         self.report_info(format!("⏳ {label} を開始"));
     }
@@ -395,8 +391,6 @@ impl App {
         };
         match recv {
             Ok(result) => {
-                // ラベルと経過時間は完了ログ用に、jump_on_success は結果タブへの
-                // 自動遷移用に、job を take する前に取り出しておく。
                 let job = self.core.scoped.job.take();
                 if job.as_ref().is_some_and(|j| j.input != self.job_input()) {
                     self.report_error("計算中にモデル・計算設定が変更されたため、旧入力の解析結果を破棄しました。必要な解析を再実行してください。");
@@ -413,15 +407,11 @@ impl App {
                     .unwrap_or(("解析", 0.0));
                 self.core.scoped.applying_result_source =
                     job.as_ref().map(|job| job.reference_source.clone());
-                #[cfg(feature = "gui")]
-                let jump = job.and_then(|j| j.jump_on_success);
-                #[cfg(not(feature = "gui"))]
-                let _ = job;
 
                 // ジョブ完了は新しい状態の起点なので、ジョブ実行中に発生した無関係の
                 // エラー表示（例: ファイル保存失敗）をここでクリアしてから結果を適用する。
                 // こうしないと成功判定（下の last_error.is_none()）が古いエラーに
-                // 引きずられ、成功したのに完了ログ・自動遷移が行われない
+                // 引きずられ、成功したのに完了ログが残らない
                 // （エラー自体はイベントログに残っており失われない）。
                 self.core.scoped.last_error = None;
                 match result {
@@ -447,12 +437,6 @@ impl App {
                 // （二重ログを避ける）。
                 if self.core.scoped.last_error.is_none() {
                     self.report_info(format!("✅ {} が完了 ({:.1}s)", label, elapsed_secs));
-                    #[cfg(feature = "gui")]
-                    if let Some((tab, view)) = jump {
-                        self.ui.view.active_tab = tab;
-                        self.apply_tab_preset(tab);
-                        self.ui.view.results_view = view;
-                    }
                 }
                 true
             }
@@ -465,9 +449,7 @@ impl App {
         }
     }
 
-    /// 工程タブ切替時のドック初期配置プリセット。各タブに適した初期配置への
-    /// ショートカットであり、ユーザーが後からドック開閉・パネル切替を自由に
-    /// 行うことを妨げない（あくまで切替直後の便宜的な既定値）。
+    /// 工程を初めて開くとき、または推奨配置へ戻すときの補助領域を設定する。
     #[cfg(feature = "gui")]
     pub(crate) fn apply_tab_preset(&mut self, tab: Tab) {
         match tab {

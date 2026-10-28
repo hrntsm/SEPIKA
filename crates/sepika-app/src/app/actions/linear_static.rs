@@ -654,6 +654,17 @@ impl App {
                 && remap(self.ui.scoped.nav.focus_result).is_none();
         self.core.scoped.last_static = remap(self.core.scoped.last_static);
         self.ui.scoped.nav.focus_result = remap(self.ui.scoped.nav.focus_result);
+        #[cfg(feature = "gui")]
+        for view in [
+            &mut self.ui.view.viewport,
+            &mut self.ui.view.workspace.secondary,
+        ] {
+            let remapped = remap(view.static_key);
+            if view.static_key.is_some() && remapped.is_none() {
+                view.static_unavailable = true;
+            }
+            view.static_key = remapped;
+        }
         let excluded_input = |key: &ResultInputKey| match key {
             ResultInputKey::Static(key) => excluded.0.contains(key),
             ResultInputKey::Combo(name) => excluded.1.contains(name),
@@ -748,6 +759,11 @@ impl App {
             return;
         };
         self.ui.scoped.nav.focus_result = Some(key);
+        #[cfg(feature = "gui")]
+        {
+            self.active_viewport_mut().static_key = Some(key);
+            self.active_viewport_mut().static_unavailable = false;
+        }
         self.core.scoped.last_static = Some(key);
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.member_forces = member_forces;
@@ -1282,5 +1298,61 @@ mod static595_failure_tests {
             );
             std::fs::remove_file(path).unwrap();
         }
+    }
+}
+
+#[cfg(all(test, feature = "gui"))]
+mod workspace_result_tests {
+    use super::*;
+
+    #[test]
+    fn issue975_combination_removal_preserves_each_view_and_never_substitutes_the_next_result() {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        let make = |value| sepika_solver::statics::linear::StaticOnce {
+            stiffness_ratio_disp: None,
+            disp: vec![[value; 6]; 4],
+            member_forces: Vec::new(),
+            panel_moments: Vec::new(),
+        };
+        app.core.scoped.results = Some(ResultsBundle {
+            combos: vec![
+                ("A".into(), make(1.0)),
+                ("B".into(), make(2.0)),
+                ("C".into(), make(3.0)),
+            ],
+            ..Default::default()
+        });
+        app.ui.view.viewport.static_key = Some(StaticKey::Combo(1));
+        app.ui.view.workspace.secondary.static_key = Some(StaticKey::Combo(2));
+        app.core.scoped.last_static = Some(StaticKey::Combo(2));
+        app.remove_excluded_tip_results(&(Vec::new(), vec!["A".into()]));
+        assert_eq!(
+            app.ui.view.viewport.current_static(&app).unwrap().disp[0][0],
+            2.0
+        );
+        assert_eq!(
+            app.ui
+                .view
+                .workspace
+                .secondary
+                .current_static(&app)
+                .unwrap()
+                .disp[0][0],
+            3.0
+        );
+        app.remove_excluded_tip_results(&(Vec::new(), vec!["B".into()]));
+        assert!(app.ui.view.viewport.current_static(&app).is_none());
+        assert!(app.ui.view.viewport.static_unavailable);
+        assert_eq!(
+            app.ui
+                .view
+                .workspace
+                .secondary
+                .current_static(&app)
+                .unwrap()
+                .disp[0][0],
+            3.0
+        );
     }
 }

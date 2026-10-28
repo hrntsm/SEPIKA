@@ -58,9 +58,17 @@ fn level_rank(level: &HingeLevel) -> u8 {
 ///
 /// 各端について、最高レベル（Crack < Yield < Ultimate）・最大塑性率・初出 step
 /// （最小 step）を保持する 1 件へまとめる。
+#[cfg(test)]
 pub(super) fn aggregate_hinges(hinges: &[HingeEvent]) -> Vec<HingeMarker> {
+    aggregate_hinges_at(hinges, None)
+}
+
+pub(super) fn aggregate_hinges_at(hinges: &[HingeEvent], step: Option<usize>) -> Vec<HingeMarker> {
     let mut map: HashMap<(ElemId, bool), HingeMarker> = HashMap::new();
-    for h in hinges {
+    for h in hinges
+        .iter()
+        .filter(|event| step.is_none_or(|step| event.step as usize <= step))
+    {
         let end_j = h.pos >= 0.5;
         let key = (h.elem, end_j);
         map.entry(key)
@@ -149,6 +157,7 @@ pub(super) fn hinge_marker_screen_pos(
 /// ヒンジ図を描く。`pts` は `viewer_panel` で計算済みの節点スクリーン座標
 /// （`app.core.model.nodes` と同じ順序）。
 pub(super) fn draw_hinge(
+    viewport: &super::ViewportState,
     painter: &egui::Painter,
     app: &App,
     model: &Model,
@@ -156,12 +165,12 @@ pub(super) fn draw_hinge(
     proj: &super::Projector<'_>,
     frame_filter: super::FrameFilter,
 ) {
-    let Some(po) = app.displayed_pushover() else {
+    let Some(po) = viewport.pushover_result(app) else {
         draw_no_result_legend(painter);
         return;
     };
 
-    let markers = aggregate_hinges(&po.hinges);
+    let markers = aggregate_hinges_at(&po.hinges, viewport.hinge_step);
     let mut counts = [0usize; 3];
 
     for m in &markers {
@@ -190,11 +199,16 @@ pub(super) fn draw_hinge(
 /// ヒンジ図のホバー詳細ツールチップ。部材 `elem_id` にヒンジがあれば
 /// i端／j端それぞれの最高レベル・最大塑性率・初出 step を表示する。
 /// ヒンジのない部材は何も表示しない。
-pub(super) fn show_hinge_tooltip(ui: &egui::Ui, app: &App, elem_id: ElemId) {
-    let Some(po) = app.displayed_pushover() else {
+pub(super) fn show_hinge_tooltip(
+    viewport: &super::ViewportState,
+    ui: &egui::Ui,
+    app: &App,
+    elem_id: ElemId,
+) {
+    let Some(po) = viewport.pushover_result(app) else {
         return;
     };
-    let markers = aggregate_hinges(&po.hinges);
+    let markers = aggregate_hinges_at(&po.hinges, viewport.hinge_step);
     let mut rows: Vec<&HingeMarker> = markers.iter().filter(|m| m.elem == elem_id).collect();
     if rows.is_empty() {
         return;
@@ -636,7 +650,11 @@ pub(super) fn pick_fiber_section(
 
 /// ヒンジ詳細ウィンドウ（クリックで開く）。`app.ui.scoped.hinge_detail_elem` が `None`
 /// なら何も描かない。閉じるボタン（×）で `app.ui.scoped.hinge_detail_elem` をクリアする。
-pub(crate) fn show_hinge_detail_window(ui: &egui::Ui, app: &mut App) {
+pub(crate) fn show_hinge_detail_window(
+    ui: &egui::Ui,
+    app: &mut App,
+    viewport: &mut super::ViewportState,
+) {
     let Some(elem_id) = app.ui.scoped.hinge_detail_elem else {
         return;
     };
@@ -649,20 +667,25 @@ pub(crate) fn show_hinge_detail_window(ui: &egui::Ui, app: &mut App) {
         .open(&mut open)
         .show(ui.ctx(), |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                draw_hinge_detail_content(ui, app, elem_id);
+                draw_hinge_detail_content(ui, app, elem_id, viewport);
             });
         });
     if !open {
         app.ui.scoped.hinge_detail_elem = None;
         app.ui.scoped.hinge_view_cache = None;
-        app.ui.scoped.hinge_step = None;
+        viewport.hinge_step = None;
     }
 }
 
 /// ヒンジ詳細ウィンドウの中身。共通ヘッダ（i端/j端の集約ヒンジ情報）と解析モデルの
 /// 表示に続けて、表示ステップの選択、M-θ カーブ、N-M 相関図、ファイバー断面の
 /// 塑性化マップを該当するものだけ縦に並べる。
-fn draw_hinge_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) {
+fn draw_hinge_detail_content(
+    ui: &mut egui::Ui,
+    app: &mut App,
+    elem_id: ElemId,
+    viewport: &mut super::ViewportState,
+) {
     let display = super::wall_expanded_view_model(&app.core.model);
     let (elem_snapshot, elem_section) = {
         let Some(elem) = display.element(elem_id) else {
@@ -676,12 +699,12 @@ fn draw_hinge_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) 
         (elem.clone(), elem.section)
     };
 
-    let Some(po) = app.displayed_pushover() else {
+    let Some(po) = viewport.pushover_result(app) else {
         ui.colored_label(theme::GRAY_600, "増分解析が未実行です。");
         return;
     };
 
-    let mine: Vec<HingeMarker> = aggregate_hinges(&po.hinges)
+    let mine: Vec<HingeMarker> = aggregate_hinges_at(&po.hinges, viewport.hinge_step)
         .into_iter()
         .filter(|m| m.elem == elem_id)
         .collect();
@@ -721,7 +744,7 @@ fn draw_hinge_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) 
         .map(|(_, s)| s.clone());
     let dominant_z = dominant_bend_axis_z(&records[records.len() - 1]);
 
-    let step = hinge_step_selector(ui, &mut app.ui.scoped.hinge_step, &records);
+    let step = hinge_step_selector(ui, &mut viewport.hinge_step, &records);
     let axial_force_n = records[step].n as f64;
     let key = hinge_view_key(
         display.as_ref(),

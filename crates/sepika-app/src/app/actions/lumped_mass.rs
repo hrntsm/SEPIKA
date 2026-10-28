@@ -138,10 +138,6 @@ impl App {
                 source.map(Box::new),
             )
         });
-        #[cfg(feature = "gui")]
-        if let Some(job) = self.core.scoped.job.as_mut() {
-            job.jump_on_success = Some((Tab::Results, ResultsView::LumpedMass));
-        }
     }
 
     fn lumped_prerequisite_keys(&self) -> Vec<ResultInputKey> {
@@ -293,9 +289,9 @@ impl App {
         self.ui.view.active_tab = Tab::Results;
         #[cfg(feature = "gui")]
         {
-            self.ui.view.results_view = ResultsView::Spatial;
-            self.ui.view.view_mode = crate::viewer::ViewMode::LumpedMode;
-            self.ui.scoped.view_mode_idx = mode_idx;
+            self.open_result_workspace(ResultsView::Spatial);
+            self.active_viewport_mut().view_mode = crate::viewer::ViewMode::LumpedMode;
+            self.active_viewport_mut().view_mode_idx = mode_idx;
         }
     }
 

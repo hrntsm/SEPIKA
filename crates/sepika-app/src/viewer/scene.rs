@@ -518,7 +518,8 @@ fn draw_work_scope_polygon(
 }
 
 /// 配置モードで 1 点目に選んだ支持部材アンカーを丸印で示す。
-pub(super) fn draw_anchor_marker(
+pub(super) fn draw_anchor_marker_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
     app: &App,
     proj: &Projector,
@@ -527,7 +528,7 @@ pub(super) fn draw_anchor_marker(
     if let Some(p) = super::displayed_anchor_point(
         &app.core.model,
         anchor,
-        app.ui.view.view_mode == super::ViewMode::Shape,
+        view.view_mode == super::ViewMode::Shape,
     ) {
         let screen = proj.project(p);
         painter.circle_stroke(screen, 6.0, egui::Stroke::new(2.5_f32, theme::WARN_TEXT));
@@ -1464,7 +1465,7 @@ mod tests {
         };
         let saved_contents = save_contents(&app);
         for axis in 0..2 {
-            app.ui.scoped.view_mode_idx = axis;
+            app.ui.view.view_mode_idx = axis;
             for factor in [0.1, 1.0, 10.0] {
                 app.ui.view.deform_scale_factor = factor;
                 let shapes = paint_viewer(&mut app);
@@ -1487,11 +1488,11 @@ mod tests {
         app.ui.view.show_floor_secondary = false;
         assert_eq!(filled_plate_points(&paint_viewer(&mut app), 55).len(), 1);
         app.ui.view.show_floor_secondary = true;
-        app.ui.scoped.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
+        app.ui.view.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
         assert_eq!(filled_plate_points(&paint_viewer(&mut app), 55).len(), 1);
-        app.ui.scoped.frame_target = Some(FrameTarget::Story(StoryId(1)));
+        app.ui.view.frame_target = Some(FrameTarget::Story(StoryId(1)));
         assert_eq!(filled_plate_points(&paint_viewer(&mut app), 55).len(), 3);
-        app.ui.scoped.frame_target = None;
+        app.ui.view.frame_target = None;
         app.ui.view.view_mode = ViewMode::Shape;
         assert!(filled_plate_points(&paint_viewer(&mut app), 55).is_empty());
         app.ui.view.view_mode = ViewMode::Mode;

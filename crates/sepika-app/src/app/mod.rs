@@ -11,7 +11,7 @@ use sepika_solver::statics::analysis::{AiMode, Analysis, SeismicDir};
 pub use sepika_job::settings::{AnalysisSettings, ThDampingModel, ThDir};
 
 /// 工程タブ。進行ロックしない。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Tab {
     #[default]
     Model,
@@ -44,7 +44,7 @@ pub enum ModelTab {
 
 /// 下ドックのタブ。ログに加え、横幅を要する編集テーブルを収容する
 /// （横長テーブルは幅の狭い左ドックより下ドックの方が視認性が良い）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BottomTab {
     #[default]
     Log,
@@ -59,7 +59,7 @@ pub enum BottomTab {
 }
 
 /// 左ドックのパネル。左右のアイコン列で切り替える。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LeftPanel {
     #[default]
     Navigator,
@@ -73,7 +73,7 @@ pub enum LeftPanel {
 /// 質点系の各解析パネルに分ける。① と各解析の並びは右アイコン列（上から準備計算の次に
 /// 静的・固有値・増分・時刻歴・質点系）で示す。どのパネルも 3D を見ながら設定・実行できる
 /// よう右ドックに置く。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RightPanel {
     #[default]
     Inspector,
@@ -653,9 +653,6 @@ pub struct AnalysisJob {
     pub started: std::time::SystemTime,
     input: Vec<u8>,
     rx: std::sync::mpsc::Receiver<JobResult>,
-    /// ジョブ成功時に自動遷移する結果タブ・表示切替（GUI 専用）。
-    #[cfg(feature = "gui")]
-    pub jump_on_success: Option<(Tab, ResultsView)>,
 }
 
 /// ログの重要度。下ドック（ログパネル）での色分けと文頭ラベルに使う。
@@ -1108,29 +1105,8 @@ pub struct UiModelScoped {
     /// 一致する限り `HingeView` を再生成しない）。
     #[cfg(feature = "gui")]
     pub hinge_view_cache: Option<crate::viewer::hinge::HingeViewCache>,
-    /// ヒンジ詳細ウィンドウで選択中の確定ステップ（`member_history` の `records` の
-    /// 添字）。`None` は最終ステップを表示する既定。
     #[cfg(feature = "gui")]
-    pub hinge_step: Option<usize>,
-    /// モード形の表示インデックス
-    #[cfg(feature = "gui")]
-    pub view_mode_idx: usize,
-    /// 2D 構面表示の対象（`None` は全体表示）。
-    /// 通り芯の再生成・モデルの入れ替えで添字がずれるため、描画のたびに
-    /// 実在を検証し、解決できなければ全体表示へ戻す。
-    #[cfg(feature = "gui")]
-    pub frame_target: Option<sepika_core::frame::FrameTarget>,
-    /// 時刻歴モード（[`crate::viewer::ViewMode::TimeHistory`]）の現在フレーム番号
-    /// （`ThRecording::frame_time` の添字）。
-    #[cfg(feature = "gui")]
-    pub th_frame: usize,
-    /// 時刻歴モードの再生中フラグ（ON でフレームを自動で進める）。
-    #[cfg(feature = "gui")]
-    pub th_playing: bool,
-    /// 時刻歴モードの再生経過時刻 `[s]`（`ThRecording::frame_time` に基づき現在
-    /// フレームを決定する。スライダー操作時は選択フレームの時刻に同期する）。
-    #[cfg(feature = "gui")]
-    pub th_play_time: f64,
+    pub hinge_detail_source: Option<(usize, SeismicDir)>,
     /// 時刻歴モードでクリック選択された部材（履歴・検定ウィンドウの表示対象。
     /// `None` はウィンドウ非表示）。
     #[cfg(feature = "gui")]
@@ -1143,11 +1119,6 @@ pub struct UiModelScoped {
         sepika_core::ids::ElemId,
         crate::viewer::th_detail::AxialComponent,
     )>,
-    /// 時刻歴アニメーション（[`crate::viewer::ViewMode::TimeHistory`]）の変形倍率
-    /// キャッシュ（高-2）。フレームごとに再正規化せず、記録全体のピーク変位から
-    /// 1 回だけ算定した自動倍率（手動係数を掛ける前の値）を保持する。
-    #[cfg(feature = "gui")]
-    pub th_scale_cache: Option<crate::viewer::TimeHistoryScaleCache>,
     /// 時刻歴応答データ（描画用）
     #[cfg(feature = "gui")]
     pub time_history_data: crate::time_history_view::TimeHistoryData,
@@ -1169,6 +1140,8 @@ pub struct UiModelScoped {
     /// ビューアの梁作成モード（ON 中はクリックで節点を選び 2 点で梁を作る）
     #[cfg(feature = "gui")]
     pub beam_draw_mode: bool,
+    #[cfg(feature = "gui")]
+    pub draw_section_assignment: Option<panels::draw_tools::PendingSectionAssignment>,
     /// 梁作成モードで選択済みの始点節点（2 点目で梁を生成しリセット）
     #[cfg(feature = "gui")]
     pub beam_draw_first: Option<crate::viewer::space_grid::SnapPoint>,
@@ -1273,23 +1246,11 @@ impl Default for UiModelScoped {
             #[cfg(feature = "gui")]
             hinge_view_cache: None,
             #[cfg(feature = "gui")]
-            hinge_step: None,
-            #[cfg(feature = "gui")]
-            view_mode_idx: 0,
-            #[cfg(feature = "gui")]
-            frame_target: None,
-            #[cfg(feature = "gui")]
-            th_frame: 0,
-            #[cfg(feature = "gui")]
-            th_playing: false,
-            #[cfg(feature = "gui")]
-            th_play_time: 0.0,
+            hinge_detail_source: None,
             #[cfg(feature = "gui")]
             th_detail_elem: None,
             #[cfg(feature = "gui")]
             th_detail_axial_component: None,
-            #[cfg(feature = "gui")]
-            th_scale_cache: None,
             #[cfg(feature = "gui")]
             time_history_data: crate::time_history_view::TimeHistoryData::default(),
             #[cfg(feature = "gui")]
@@ -1304,6 +1265,8 @@ impl Default for UiModelScoped {
             damper_def_draft: crate::damper_def_editor::DamperDefDraft::default(),
             #[cfg(feature = "gui")]
             beam_draw_mode: false,
+            #[cfg(feature = "gui")]
+            draw_section_assignment: None,
             #[cfg(feature = "gui")]
             beam_draw_first: None,
             #[cfg(feature = "gui")]
@@ -1357,6 +1320,10 @@ impl Default for UiModelScoped {
 /// モデルを差し替えてもこれらは保つ（差し替えのたびにドック配置やカメラが初期化されると
 /// 作業にならないため）。
 pub struct UiViewState {
+    #[cfg(feature = "gui")]
+    pub workspace: workspace::Workspace,
+    #[cfg(feature = "gui")]
+    pub viewport: crate::viewer::ViewportState,
     pub active_tab: Tab,
     /// モデルタブ内のサブタブ
     pub model_tab: ModelTab,
@@ -1385,87 +1352,10 @@ pub struct UiViewState {
     /// 設計タブ内の表示切替（検定表 / MN相関曲面）
     #[cfg(feature = "gui")]
     pub design_view: DesignView,
-    /// ビューアの表示モード
-    #[cfg(feature = "gui")]
-    pub view_mode: crate::viewer::ViewMode,
-    /// 応力図で表示中の成分（N/Qy/Qz/Mx/My/Mz の ON/OFF。複数同時表示）
-    #[cfg(feature = "gui")]
-    pub force_components: crate::viewer::ForceComponents,
-    /// 応力図に数値ラベル（両端部・中央の値）を表示するか
-    #[cfg(feature = "gui")]
-    pub diagram_values: bool,
-    /// CMQ 図で表示する成分（C: モーメント／Q: せん断）
-    #[cfg(feature = "gui")]
-    pub cmq_component: crate::viewer::CmqComponent,
-    /// CMQ 図で表示する軸（強軸 ey／弱軸 ez。応力図の`ForceComponent::plane`と同じ
-    /// 局所面の区別。既定は強軸のみ）
-    #[cfg(feature = "gui")]
-    pub cmq_axes: crate::viewer::CmqAxes,
-    /// 検定比図の着色対象（最大＝全式の max、または特定の検定式のみ）
-    #[cfg(feature = "gui")]
-    pub check_ratio_filter: crate::viewer::CheckRatioFilter,
-    /// 検定比図で検定位置ごとの正方形マーカーを表示するか
-    #[cfg(feature = "gui")]
-    pub check_ratio_markers: bool,
-    /// 検定比図の数値ラベルを全部材に表示するか（false=注意域以上のみ。既定）
-    #[cfg(feature = "gui")]
-    pub check_ratio_label_all: bool,
     /// ヒンジ詳細ウィンドウの N-M 相関図（3D ワイヤーフレーム）用カメラ状態
     /// （`viewer::CameraState` を再利用し、断面詳細ビューと同じ操作感にする）。
     #[cfg(feature = "gui")]
     pub hinge_mn_camera: crate::viewer::CameraState,
-    /// N/Q/M 図の表示切替（false=単色塗り／true=値に応じたコンター色分け）
-    #[cfg(feature = "gui")]
-    pub diagram_contour: bool,
-    /// コンター表示のカラーマップ（既定は Viridis）
-    #[cfg(feature = "gui")]
-    pub contour_colormap: crate::theme::ColorMap,
-    /// N/Q/M 図で変形図を重ねて表示するか（応力と変形を同時に確認する）
-    #[cfg(feature = "gui")]
-    pub overlay_deform: bool,
-    /// 床（スラブ・小梁）と二次部材の表示（変形図で解析対象外の要素を隠せる）
-    #[cfg(feature = "gui")]
-    pub show_floor_secondary: bool,
-    /// ビューアのカメラ状態
-    #[cfg(feature = "gui")]
-    pub camera: crate::viewer::CameraState,
-    /// ビューアの断面表示（部材を断面形状の押し出しソリッドで立体表示する）
-    #[cfg(feature = "gui")]
-    pub show_sections: bool,
-    /// 変形図の表示倍率の手動係数（自動算定倍率への乗数、既定 1.0）。
-    /// 自動倍率（バウンディングボックスと梁スパンから決定）にこの係数を掛けた
-    /// 値が実効倍率になる。スライダーで拡大・縮小できる。
-    #[cfg(feature = "gui")]
-    pub deform_scale_factor: f32,
-    /// 剛床代表節点（重心マスター）の可視化トグル（既定 OFF）。
-    /// ON にすると代表点マーカー・面内拘束マーク・関連スレーブ節点への点線を描く。
-    /// 点線は節点数が多いと他部材が見づらくなるため、既定は非表示にしている。
-    #[cfg(feature = "gui")]
-    pub show_diaphragm_master: bool,
-    /// 支点記号（矢印・円弧・支点ばね・免震マーカー）の表示トグル（既定 ON）。
-    /// 質点モード・質点時刻歴では立体の支点は関係ないので、この値に依らず出さない。
-    #[cfg(feature = "gui")]
-    pub show_supports: bool,
-    /// 立体グリッド（通り芯 × 階レベルの平面格子）の表示トグル（既定 ON）。
-    /// モデリングの下敷きとして使うため既定で出す。梁作成モードのスナップ対象は
-    /// 「格子を描いているときだけ」とし、このトグルと構面表示の両方に従わせる
-    /// （見えていない格子点が選ばれるのを防ぐ）。
-    #[cfg(feature = "gui")]
-    pub show_space_grid: bool,
-    /// モデル化図で可視化する解析種別（静解析＝弾性／増分解析＝弾塑性）。
-    /// 解析種別によって部材のモデル化（要素定式化）が変わるため切り替える。
-    #[cfg(feature = "gui")]
-    pub modeling_analysis: crate::viewer::ModelingAnalysis,
-    /// 変形図・応力図の変形重ねで、梁を内部たわみ（Hermite 3 次曲線）で描くか
-    /// （既定 ON）。ON では梁の内部たわみと、それに載る床・二次部材の追従を
-    /// 曲線で表示する。OFF では梁を節点間の直線（弦）で描き、床・二次部材の追従も
-    /// 線形補間にする（全体の変形を素直に見る用）。変位図だけでなく N/Q/M 図の
-    /// 変形重ねにも適用する。
-    #[cfg(feature = "gui")]
-    pub show_beam_interpolation: bool,
-    /// 時刻歴モードの再生速度倍率（×0.25〜×2 等）。
-    #[cfg(feature = "gui")]
-    pub th_speed: f32,
     /// 時刻歴詳細ウィンドウの梁・柱ループで表示する曲げ軸（true=強軸Mz／false=弱軸My）。
     #[cfg(feature = "gui")]
     pub th_detail_axis_z: bool,
@@ -1481,9 +1371,6 @@ pub struct UiViewState {
     /// 層応答分布グラフの方向選択（記録済みの X・Y いずれか）
     #[cfg(feature = "gui")]
     pub story_response_dir: crate::story_response::StoryRespDir,
-    /// 3D で質点系を骨組に重ねて描く（OFF で質点・ばねのみ）。
-    #[cfg(feature = "gui")]
-    pub lumped_show_frame: bool,
     /// 「🌊 波形を保存…」で選んだファイルが波形ライブラリに同名で既に存在し、
     /// 上書き確認ダイアログの表示待ちであることを示す（パスは登録元）。
     #[cfg(feature = "gui")]
@@ -1502,6 +1389,10 @@ pub struct UiViewState {
 impl Default for UiViewState {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "gui")]
+            viewport: crate::viewer::ViewportState::default(),
+            #[cfg(feature = "gui")]
+            workspace: workspace::Workspace::default(),
             active_tab: Tab::Model,
             model_tab: ModelTab::default(),
             #[cfg(feature = "gui")]
@@ -1521,49 +1412,7 @@ impl Default for UiViewState {
             #[cfg(feature = "gui")]
             design_view: DesignView::default(),
             #[cfg(feature = "gui")]
-            view_mode: crate::viewer::ViewMode::default(),
-            #[cfg(feature = "gui")]
-            force_components: crate::viewer::ForceComponents::default(),
-            #[cfg(feature = "gui")]
-            diagram_values: false,
-            #[cfg(feature = "gui")]
-            cmq_component: crate::viewer::CmqComponent::default(),
-            #[cfg(feature = "gui")]
-            cmq_axes: crate::viewer::CmqAxes::default(),
-            #[cfg(feature = "gui")]
-            check_ratio_filter: crate::viewer::CheckRatioFilter::default(),
-            #[cfg(feature = "gui")]
-            check_ratio_markers: true,
-            #[cfg(feature = "gui")]
-            check_ratio_label_all: false,
-            #[cfg(feature = "gui")]
             hinge_mn_camera: crate::viewer::CameraState::default(),
-            #[cfg(feature = "gui")]
-            diagram_contour: false,
-            #[cfg(feature = "gui")]
-            contour_colormap: crate::theme::ColorMap::default(),
-            #[cfg(feature = "gui")]
-            overlay_deform: false,
-            #[cfg(feature = "gui")]
-            show_floor_secondary: true,
-            #[cfg(feature = "gui")]
-            camera: crate::viewer::CameraState::default(),
-            #[cfg(feature = "gui")]
-            show_sections: false,
-            #[cfg(feature = "gui")]
-            deform_scale_factor: 1.0,
-            #[cfg(feature = "gui")]
-            show_diaphragm_master: false,
-            #[cfg(feature = "gui")]
-            show_supports: true,
-            #[cfg(feature = "gui")]
-            show_space_grid: true,
-            #[cfg(feature = "gui")]
-            modeling_analysis: crate::viewer::ModelingAnalysis::default(),
-            #[cfg(feature = "gui")]
-            show_beam_interpolation: true,
-            #[cfg(feature = "gui")]
-            th_speed: 1.0,
             #[cfg(feature = "gui")]
             th_detail_axis_z: true,
             #[cfg(feature = "gui")]
@@ -1574,8 +1423,6 @@ impl Default for UiViewState {
             story_response_kind: crate::story_response::StoryResponseKind::default(),
             #[cfg(feature = "gui")]
             story_response_dir: crate::story_response::StoryRespDir::default(),
-            #[cfg(feature = "gui")]
-            lumped_show_frame: true,
             #[cfg(feature = "gui")]
             pending_wave_register: None,
             #[cfg(feature = "gui")]
@@ -1894,7 +1741,9 @@ mod nav_results;
 mod nav_vibration;
 #[cfg(feature = "gui")]
 pub(crate) mod panels;
-mod vibration;
+pub(crate) mod vibration;
+#[cfg(feature = "gui")]
+mod workspace;
 
 /// 保存（Windows/Linux: Ctrl+S、macOS: ⌘S）。
 #[cfg(feature = "gui")]
@@ -1994,6 +1843,7 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.ui.view.workspace.compact = ui.max_rect().width() < 1100.0;
         self.apply_pending_story_command();
         if self.core.scoped.job.is_some() {
             self.poll_job();
@@ -2166,10 +2016,11 @@ impl eframe::App for App {
             }
         }
 
-        egui::Panel::top("top_toolbar")
+        let layout_input_focus = workspace::text_input_focus(ui);
+        let toolbar = egui::Panel::top("top_toolbar")
             .frame(crate::theme::toolbar_frame())
             .show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     self.file_menu(ui);
                     ui.separator();
                     let tabs = [
@@ -2193,7 +2044,6 @@ impl eframe::App for App {
                         let label_str = format!("{} {}", label, stale_marker);
                         if ui.selectable_label(selected, label_str).clicked() && !selected {
                             self.ui.view.active_tab = *tab;
-                            self.apply_tab_preset(*tab);
                         }
                     }
                     ui.separator();
@@ -2213,6 +2063,9 @@ impl eframe::App for App {
                     }
                 });
             });
+
+        workspace::retain_input_focus(ui, layout_input_focus, toolbar.response.rect);
+        self.enter_workspace();
 
         egui::Panel::bottom("status_bar")
             .exact_size(ui.text_style_height(&egui::TextStyle::Body) + 8.0)
@@ -2240,10 +2093,10 @@ impl eframe::App for App {
                 self.right_activity_bar(ui);
             });
 
-        if self.ui.view.left_dock_open {
-            egui::Panel::left("left_dock")
+        if self.left_dock_visible() {
+            let panel_size = egui::Panel::left(self.workspace_dock_id("left_dock"))
                 .resizable(true)
-                .default_size(280.0)
+                .default_size(self.ui.view.workspace.placement.widths[0])
                 .size_range(180.0..=520.0)
                 .frame(crate::theme::content_panel_frame())
                 .show_inside(ui, |ui| {
@@ -2251,15 +2104,25 @@ impl eframe::App for App {
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.ui.view.left_panel {
                             LeftPanel::Navigator => self.navigator_panel(ui),
-                            LeftPanel::DrawTools => self.draw_tools_panel(ui),
+                            LeftPanel::DrawTools => {
+                                ui.label("作成設定は主領域の図の端に表示します。");
+                                if ui.button("作成を閉じる").clicked() {
+                                    self.ui.view.left_panel = LeftPanel::Navigator;
+                                    self.reset_draw_modes();
+                                }
+                            }
                         });
-                });
+                })
+                .response
+                .rect
+                .width();
+            self.ui.view.workspace.placement.widths[0] = panel_size;
         }
 
-        if self.ui.view.right_dock_open {
-            egui::Panel::right("right_dock")
+        if self.right_dock_visible() {
+            let panel_size = egui::Panel::right(self.workspace_dock_id("right_dock"))
                 .resizable(true)
-                .default_size(320.0)
+                .default_size(self.ui.view.workspace.placement.widths[1])
                 .size_range(220.0..=560.0)
                 .frame(crate::theme::content_panel_frame())
                 .show_inside(ui, |ui| {
@@ -2274,13 +2137,17 @@ impl eframe::App for App {
                             RightPanel::TimeHistory => self.time_history_panel(ui),
                             RightPanel::LumpedMass => self.lumped_mass_analysis_panel(ui),
                         });
-                });
+                })
+                .response
+                .rect
+                .width();
+            self.ui.view.workspace.placement.widths[1] = panel_size;
         }
 
         if self.ui.view.bottom_dock_open {
-            egui::Panel::bottom("bottom_dock")
+            let panel_size = egui::Panel::bottom(self.workspace_dock_id("bottom_dock"))
                 .resizable(true)
-                .default_size(200.0)
+                .default_size(self.ui.view.workspace.placement.widths[2])
                 .size_range(80.0..=520.0)
                 .frame(crate::theme::central_panel_frame())
                 .show_inside(ui, |ui| {
@@ -2363,16 +2230,33 @@ impl eframe::App for App {
                             self.core.log.show(ui);
                         }
                         BottomTab::Model => {
-                            egui::ScrollArea::vertical()
-                                .id_salt("bottom_model")
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| self.model_tab_panel(ui));
+                            if self.table_in_workspace(workspace::Content::Model) {
+                                ui.label("モデル入力表は主領域に表示中です。");
+                            } else {
+                                if ui.button("モデル入力表を主領域に広げる").clicked()
+                                {
+                                    self.promote_table(workspace::Content::Model);
+                                    if let Some(focus) = layout_input_focus {
+                                        ui.ctx().memory_mut(|memory| memory.request_focus(focus));
+                                    }
+                                } else {
+                                    self.workspace_table(ui, workspace::Content::Model);
+                                }
+                            }
                         }
                         BottomTab::Loads => {
-                            egui::ScrollArea::vertical()
-                                .id_salt("bottom_loads")
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| crate::tables::loads::loads_table(ui, self));
+                            if self.table_in_workspace(workspace::Content::Loads) {
+                                ui.label("荷重入力表は主領域に表示中です。");
+                            } else {
+                                if ui.button("荷重入力表を主領域に広げる").clicked() {
+                                    self.promote_table(workspace::Content::Loads);
+                                    if let Some(focus) = layout_input_focus {
+                                        ui.ctx().memory_mut(|memory| memory.request_focus(focus));
+                                    }
+                                } else {
+                                    self.workspace_table(ui, workspace::Content::Loads);
+                                }
+                            }
                         }
                         BottomTab::Preparation => {
                             crate::prep_view::preparation_panel(ui, self);
@@ -2426,17 +2310,17 @@ impl eframe::App for App {
                             }
                         }
                     }
-                });
+                })
+                .response
+                .rect
+                .height();
+            self.ui.view.workspace.placement.widths[2] = panel_size;
         }
 
         egui::CentralPanel::default()
             .frame(crate::theme::central_panel_frame())
-            .show_inside(ui, |ui| match self.ui.view.active_tab {
-                Tab::Model | Tab::Loads | Tab::Analysis => crate::viewer::viewer_panel(ui, self),
-                Tab::Results => self.results_tab_panel(ui),
-                Tab::Design => self.design_tab_panel(ui),
-                Tab::Report => self.report_tab_panel(ui),
-            });
+            .show_inside(ui, |ui| self.workspace_panel(ui));
+        self.persist_workspace();
 
         self.load_editor_ui(ui.ctx());
     }
@@ -2545,3 +2429,17 @@ mod stale_auto_load_save_tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod slab_placement_tests;
+
+#[cfg(feature = "gui")]
+impl std::ops::Deref for UiViewState {
+    type Target = crate::viewer::ViewportState;
+    fn deref(&self) -> &Self::Target {
+        &self.viewport
+    }
+}
+#[cfg(feature = "gui")]
+impl std::ops::DerefMut for UiViewState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.viewport
+    }
+}

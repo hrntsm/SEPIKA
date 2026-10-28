@@ -7,15 +7,6 @@ use sepika_solver::statics::analysis::SeismicDir;
 
 use super::{playback, Projector, ViewMode};
 
-pub(super) fn has_lumped(app: &App) -> bool {
-    app.core
-        .scoped
-        .results
-        .as_ref()
-        .and_then(|r| r.lumped.as_ref())
-        .is_some()
-}
-
 pub(super) fn is_lumped_view(mode: ViewMode) -> bool {
     matches!(mode, ViewMode::LumpedMode | ViewMode::LumpedTimeHistory)
 }
@@ -82,7 +73,13 @@ fn rest_positions(app: &App, result: &LumpedMassResult, align_vertical: bool) ->
     out
 }
 
-fn disp_at(app: &App, result: &LumpedMassResult, mode: ViewMode, mode_idx: usize) -> Vec<[f64; 3]> {
+fn disp_at_with_view(
+    view: &crate::viewer::ViewportState,
+    _app: &App,
+    result: &LumpedMassResult,
+    mode: ViewMode,
+    mode_idx: usize,
+) -> Vec<[f64; 3]> {
     let n = result.model.stories.len();
     let zero = vec![[0.0; 3]; n];
     match mode {
@@ -116,7 +113,7 @@ fn disp_at(app: &App, result: &LumpedMassResult, mode: ViewMode, mode_idx: usize
             if th.floor_disp.is_empty() {
                 return zero;
             }
-            let frame = playback::frame_at_time(&th.time, app.ui.scoped.th_play_time)
+            let frame = playback::frame_at_time(&th.time, view.th_play_time)
                 .min(th.floor_disp.len().saturating_sub(1));
             th.floor_disp.get(frame).cloned().unwrap_or(zero)
         }
@@ -132,18 +129,20 @@ fn peak_xy<'a>(disps: impl Iterator<Item = &'a [f64; 3]>) -> f64 {
 
 /// 質点変位のピークがモデル対角の 10% になる自動倍率に、手動係数を掛ける。
 /// 時刻歴は全フレームのピークで固定し、振幅の小さい時刻で倍率が発散しないようにする。
-pub(super) fn display_scale(app: &App, mode: ViewMode, mode_idx: usize, model_size: f64) -> f64 {
-    let Some(result) = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .and_then(|r| r.lumped.as_ref())
-    else {
+pub(super) fn display_scale_with_view(
+    view: &crate::viewer::ViewportState,
+    app: &App,
+    mode: ViewMode,
+    mode_idx: usize,
+    model_size: f64,
+) -> f64 {
+    let Some(result) = view.lumped_result(app) else {
         return 0.0;
     };
     let peak = match mode {
-        ViewMode::LumpedMode => peak_xy(disp_at(app, result, mode, mode_idx).iter()),
+        ViewMode::LumpedMode => {
+            peak_xy(disp_at_with_view(view, app, result, mode, mode_idx).iter())
+        }
         ViewMode::LumpedTimeHistory => result
             .response
             .as_ref()
@@ -154,7 +153,7 @@ pub(super) fn display_scale(app: &App, mode: ViewMode, mode_idx: usize, model_si
     if peak <= 1e-12 || model_size <= 1e-12 {
         return 0.0;
     }
-    model_size * 0.1 / peak * f64::from(app.ui.view.deform_scale_factor)
+    model_size * 0.1 / peak * f64::from(view.deform_scale_factor)
 }
 
 const GHOST_DASH: f32 = 6.0;
@@ -205,7 +204,8 @@ fn draw_stick_masses(
     }
 }
 
-pub(super) fn draw(
+pub(super) fn draw_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
     app: &App,
     proj: &Projector<'_>,
@@ -213,21 +213,15 @@ pub(super) fn draw(
     mode_idx: usize,
     model_size: f64,
 ) {
-    let Some(result) = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .and_then(|r| r.lumped.as_ref())
-    else {
+    let Some(result) = view.lumped_result(app) else {
         return;
     };
-    let rest = rest_positions(app, result, !app.ui.view.lumped_show_frame);
+    let rest = rest_positions(app, result, !view.lumped_show_frame);
     if rest.is_empty() {
         return;
     }
-    let disp = disp_at(app, result, mode, mode_idx);
-    let scale = display_scale(app, mode, mode_idx, model_size);
+    let disp = disp_at_with_view(view, app, result, mode, mode_idx);
+    let scale = display_scale_with_view(view, app, mode, mode_idx, model_size);
     let rest_pts: Vec<egui::Pos2> = rest.iter().map(|&p| proj.project(p)).collect();
     let pts: Vec<egui::Pos2> = rest
         .iter()

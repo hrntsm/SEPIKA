@@ -183,10 +183,6 @@ impl App {
                 Box::new(source),
             )
         });
-        #[cfg(feature = "gui")]
-        if let Some(job) = self.core.scoped.job.as_mut() {
-            job.jump_on_success = Some((Tab::Results, ResultsView::TimeHistory));
-        }
     }
 
     pub(crate) fn time_history_source_is_unchanged(&mut self, source: &TimeHistorySource) -> bool {

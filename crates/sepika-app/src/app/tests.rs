@@ -9594,11 +9594,11 @@ fn test_load_model_resets_model_derived_state() {
     #[cfg(feature = "gui")]
     {
         app.ui.scoped.hinge_detail_elem = Some(sepika_core::ids::ElemId(0));
-        app.ui.scoped.hinge_step = Some(3);
+        app.ui.view.hinge_step = Some(3);
         app.ui.scoped.th_detail_elem = Some(sepika_core::ids::ElemId(0));
         app.ui.scoped.analysis_target = None;
-        app.ui.scoped.th_frame = 42;
-        app.ui.scoped.th_playing = true;
+        app.ui.view.th_frame = 42;
+        app.ui.view.th_playing = true;
     }
     // 波形ライブラリの選択も差し替え前のモデル由来の状態。ここが漏れていると、
     // プロジェクトAで選んだ波形が、一度も選んでいないプロジェクトBへ
@@ -9621,10 +9621,10 @@ fn test_load_model_resets_model_derived_state() {
     #[cfg(feature = "gui")]
     {
         assert!(app.ui.scoped.hinge_detail_elem.is_none());
-        assert!(app.ui.scoped.hinge_step.is_none());
+        assert!(app.ui.view.hinge_step.is_none());
         assert!(app.ui.scoped.th_detail_elem.is_none());
-        assert_eq!(app.ui.scoped.th_frame, 0);
-        assert!(!app.ui.scoped.th_playing);
+        assert_eq!(app.ui.view.th_frame, 0);
+        assert!(!app.ui.view.th_playing);
     }
 }
 
@@ -11095,7 +11095,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
     }
 }
 
-fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
+pub(super) fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
     sepika_solver::nonlinear::pushover::PushoverResult {
         wall_capacities: Vec::new(),
         rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
@@ -11460,7 +11460,7 @@ fn test_select_lumped_eigen_mode_switches_spatial_view() {
     {
         assert_eq!(app.ui.view.results_view, ResultsView::Spatial);
         assert_eq!(app.ui.view.view_mode, crate::viewer::ViewMode::LumpedMode);
-        assert_eq!(app.ui.scoped.view_mode_idx, 1);
+        assert_eq!(app.ui.view.view_mode_idx, 1);
     }
 }
 

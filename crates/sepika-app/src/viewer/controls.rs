@@ -16,15 +16,85 @@ mod primary;
 mod tests;
 
 /// 描画領域の上に置く操作 UI を描き、変更を `app` へ書き戻す。
-pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
-    primary::primary_controls(ui, app);
-    let mode = app.ui.view.view_mode;
-    let mut mode_idx = app.ui.scoped.view_mode_idx;
-    let mut force_components = app.ui.view.force_components;
-    let mut cmq_component = app.ui.view.cmq_component;
-    let mut cmq_axes = app.ui.view.cmq_axes;
-    let mut check_ratio_filter = app.ui.view.check_ratio_filter;
-    let mut modeling_analysis = app.ui.view.modeling_analysis;
+pub(super) fn view_controls_with_view(
+    view: &mut crate::viewer::ViewportState,
+    ui: &mut egui::Ui,
+    app: &mut App,
+) {
+    view.capture_result_sources(app);
+    primary::primary_controls_with_view(view, ui, app);
+    let sources = view.clone();
+    let mode = view.view_mode;
+    if mode == ViewMode::Hinge
+        || mode == ViewMode::Modeling && view.modeling_analysis == ModelingAnalysis::Incremental
+    {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("加力方向:");
+            for direction in [
+                sepika_solver::statics::analysis::SeismicDir::X,
+                sepika_solver::statics::analysis::SeismicDir::Y,
+            ] {
+                if app.pushover_for(direction).is_some()
+                    && ui
+                        .selectable_value(
+                            &mut view.pushover_dir,
+                            Some(direction),
+                            format!("{direction:?}"),
+                        )
+                        .changed()
+                {
+                    view.hinge_step = None;
+                }
+            }
+            if let Some(step) = view.hinge_step.filter(|_| mode == ViewMode::Hinge) {
+                ui.label(format!("表示 step {step} まで"));
+                if ui.button("最終へ").clicked() {
+                    view.hinge_step = None;
+                }
+            }
+        });
+    }
+
+    if matches!(mode, ViewMode::Force | ViewMode::Deformed) {
+        let options = app.result_display_options();
+        if !options.is_empty() {
+            egui::ComboBox::from_id_salt("viewport_static_case")
+                .selected_text(
+                    options
+                        .iter()
+                        .find(|(key, _)| Some(*key) == view.static_key)
+                        .map_or("結果を選択", |(_, label)| label.as_str()),
+                )
+                .show_ui(ui, |ui| {
+                    for (key, label) in options {
+                        if ui
+                            .selectable_value(&mut view.static_key, Some(key), label)
+                            .clicked()
+                        {
+                            view.static_unavailable = false;
+                        }
+                    }
+                });
+        }
+    }
+    if mode == ViewMode::Cmq {
+        egui::ComboBox::from_id_salt("viewport_load_case")
+            .selected_text(
+                view.cmq_load_case(app)
+                    .map_or("荷重ケース", |case| case.name.as_str()),
+            )
+            .show_ui(ui, |ui| {
+                for case in &app.core.model.load_cases {
+                    ui.selectable_value(&mut view.load_case, Some(case.id), &case.name);
+                }
+            });
+    }
+    let mut mode_idx = view.view_mode_idx;
+    let mut force_components = view.force_components;
+    let mut cmq_component = view.cmq_component;
+    let mut cmq_axes = view.cmq_axes;
+    let mut check_ratio_filter = view.check_ratio_filter;
+    let mut modeling_analysis = view.modeling_analysis;
     if mode == ViewMode::Cmq {
         ui.horizontal_wrapped(|ui| {
             ui.label("成分:");
@@ -36,11 +106,11 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
             ui.checkbox(&mut cmq_axes.ey, "強軸(ey)");
             ui.checkbox(&mut cmq_axes.ez, "弱軸(ez)");
             ui.separator();
-            let case_label = app
-                .cmq_display_load_case()
+            let case_label = view
+                .cmq_load_case(app)
                 .map(|lc| lc.name.clone())
                 .unwrap_or_else(|| "(荷重ケースなし)".to_string());
-            ui.label(format!("荷重ケース: {case_label}（ナビゲータで切替）"));
+            ui.label(format!("荷重ケース: {case_label}"));
         });
     }
     if mode == ViewMode::Modeling {
@@ -92,10 +162,10 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
             }
         });
         ui.horizontal_wrapped(|ui| {
-            ui.toggle_value(&mut app.ui.view.overlay_deform, "変形表示");
-            ui.toggle_value(&mut app.ui.view.diagram_contour, "コンター");
-            if app.ui.view.diagram_contour {
-                let mut colormap = app.ui.view.contour_colormap;
+            ui.toggle_value(&mut view.overlay_deform, "変形表示");
+            ui.toggle_value(&mut view.diagram_contour, "コンター");
+            if view.diagram_contour {
+                let mut colormap = view.contour_colormap;
                 egui::ComboBox::from_id_salt("contour_colormap")
                     .selected_text(colormap.label())
                     .show_ui(ui, |ui| {
@@ -109,9 +179,9 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
                             ui.selectable_value(&mut colormap, cm, cm.label());
                         }
                     });
-                app.ui.view.contour_colormap = colormap;
+                view.contour_colormap = colormap;
             }
-            ui.toggle_value(&mut app.ui.view.diagram_values, "値を表示")
+            ui.toggle_value(&mut view.diagram_values, "値を表示")
                 .on_hover_text(
                     "各部材の両端部と中央（ξ=0・0.5・1.0）の値を kN・kN·m で表示します\
                      （その成分の最大値の 1% 未満は表示しません）。",
@@ -159,8 +229,8 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
                 );
             }
             ui.separator();
-            ui.checkbox(&mut app.ui.view.check_ratio_markers, "位置別マーカー");
-            ui.checkbox(&mut app.ui.view.check_ratio_label_all, "全部材に数値ラベル")
+            ui.checkbox(&mut view.check_ratio_markers, "位置別マーカー");
+            ui.checkbox(&mut view.check_ratio_label_all, "全部材に数値ラベル")
                 .on_hover_text(
                     "既定では検定比 0.8 以上の部材にのみ数値ラベルを表示し、\
                      それ未満は色の濃淡（グラデーション）で余裕度を示します。",
@@ -196,12 +266,8 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
         }
     }
     if mode == ViewMode::LumpedMode {
-        let n_modes = app
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .and_then(|r| r.lumped.as_ref())
+        let n_modes = view
+            .lumped_result(app)
             .map(|m| m.modal.period.len())
             .unwrap_or(0);
         if n_modes > 0 {
@@ -210,12 +276,8 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
                 let mut idx = mode_idx.min(n_modes - 1);
                 ui.add(egui::Slider::new(&mut idx, 0..=n_modes - 1).text(""));
                 mode_idx = idx;
-                if let Some(t) = app
-                    .core
-                    .scoped
-                    .results
-                    .as_ref()
-                    .and_then(|r| r.lumped.as_ref())
+                if let Some(t) = view
+                    .lumped_result(app)
                     .and_then(|m| m.modal.period.get(idx))
                 {
                     ui.label(format!("T={:.3} s", t));
@@ -225,7 +287,49 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
     }
     if lumped::is_lumped_view(mode) {
         ui.horizontal(|ui| {
-            ui.checkbox(&mut app.ui.view.lumped_show_frame, "骨組を重ねる");
+            ui.checkbox(&mut view.lumped_show_frame, "骨組を重ねる");
+        });
+    }
+    if mode == ViewMode::TimeHistory
+        || mode == ViewMode::Modeling && view.modeling_analysis == ModelingAnalysis::TimeHistory
+    {
+        let label = match &view.spatial_source {
+            Some(super::viewport::SpatialResultSource::Case(id, _)) => app
+                .core
+                .model
+                .vibration_cases
+                .iter()
+                .find(|case| case.id == *id)
+                .map_or("取得不能", |case| case.name.as_str()),
+            _ => "既存の時刻歴結果",
+        };
+        egui::ComboBox::from_id_salt("viewport_spatial_case").selected_text(label).show_ui(ui, |ui| {
+            for case in &app.core.model.vibration_cases {
+                if app.core.scoped.results.as_ref().and_then(|bundle| bundle.time_history_for(case.id)).is_some()
+                    && ui.selectable_label(matches!(&view.spatial_source, Some(super::viewport::SpatialResultSource::Case(id, _)) if *id == case.id), &case.name).clicked() {
+                    view.select_spatial_case(app, case.id);
+                }
+            }
+        });
+    }
+    if lumped::is_lumped_view(mode) {
+        let label = match &view.lumped_source {
+            Some(super::viewport::LumpedResultSource::Case(id, _)) => app
+                .core
+                .model
+                .lumped_vibration_cases
+                .iter()
+                .find(|case| case.id == *id)
+                .map_or("取得不能", |case| case.name.as_str()),
+            _ => "既存の質点系結果",
+        };
+        egui::ComboBox::from_id_salt("viewport_lumped_case").selected_text(label).show_ui(ui, |ui| {
+            for case in &app.core.model.lumped_vibration_cases {
+                if app.core.scoped.results.as_ref().and_then(|bundle| bundle.lumped_result_for(case.id)).is_some()
+                    && ui.selectable_label(matches!(&view.lumped_source, Some(super::viewport::LumpedResultSource::Case(id, _)) if *id == case.id), &case.name).clicked() {
+                    view.select_lumped_case(app, case.id);
+                }
+            }
         });
     }
     if mode == ViewMode::TimeHistory {
@@ -235,56 +339,43 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
                 "⚠ モデルが編集されています。解析を再実行してください\
                  （変形アニメーション・部材クリックは無効化しています）。",
             );
-        } else if let Some(recording) = app
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .and_then(|r| r.time_history.as_ref())
+        } else if let Some(recording) = sources
+            .spatial_result(app)
             .and_then(|t| t.recording.as_ref())
         {
             let n_frames = recording.frame_time.len();
             if n_frames > 0 {
                 let duration = recording.frame_time.last().copied().unwrap_or(0.0);
-                app.ui.scoped.th_frame = app.ui.scoped.th_frame.min(n_frames - 1);
+                view.th_frame = view.th_frame.min(n_frames - 1);
                 ui.horizontal_wrapped(|ui| {
                     if ui
-                        .button(if app.ui.scoped.th_playing {
-                            "⏸"
-                        } else {
-                            "▶"
-                        })
+                        .button(if view.th_playing { "⏸" } else { "▶" })
                         .on_hover_text("再生 / 一時停止")
                         .clicked()
                     {
-                        app.ui.scoped.th_playing = !app.ui.scoped.th_playing;
+                        view.th_playing = !view.th_playing;
                     }
                     ui.label("速度:");
                     for s in [0.25_f32, 0.5, 1.0, 2.0] {
-                        ui.selectable_value(&mut app.ui.view.th_speed, s, format!("×{s}"));
+                        ui.selectable_value(&mut view.th_speed, s, format!("×{s}"));
                     }
                     ui.separator();
-                    let mut frame = app.ui.scoped.th_frame;
+                    let mut frame = view.th_frame;
                     if ui
                         .add(egui::Slider::new(&mut frame, 0..=n_frames - 1).text(""))
                         .changed()
                     {
-                        app.ui.scoped.th_frame = frame;
-                        app.ui.scoped.th_play_time = recording.frame_time[frame];
+                        view.th_frame = frame;
+                        view.th_play_time = recording.frame_time[frame];
                     }
-                    let t = recording.frame_time[app.ui.scoped.th_frame];
+                    let t = recording.frame_time[view.th_frame];
                     ui.label(format!("t={:.2}s / {:.2}s", t, duration));
                 });
-                if app.ui.scoped.th_playing {
+                if view.th_playing {
                     let dt = ui.input(|i| i.stable_dt);
-                    app.ui.scoped.th_play_time = advance_play_time(
-                        app.ui.scoped.th_play_time,
-                        dt,
-                        app.ui.view.th_speed,
-                        duration,
-                    );
-                    app.ui.scoped.th_frame =
-                        frame_at_time(&recording.frame_time, app.ui.scoped.th_play_time);
+                    view.th_play_time =
+                        advance_play_time(view.th_play_time, dt, view.th_speed, duration);
+                    view.th_frame = frame_at_time(&recording.frame_time, view.th_play_time);
                     ui.ctx().request_repaint();
                 }
             } else {
@@ -295,53 +386,35 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
         }
     }
     if mode == ViewMode::LumpedTimeHistory {
-        if let Some(th) = app
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .and_then(|r| r.lumped.as_ref())
-            .and_then(|l| l.response.as_ref())
-        {
+        if let Some(th) = sources.lumped_result(app).and_then(|l| l.response.as_ref()) {
             let n_frames = th.time.len();
             if n_frames > 0 {
                 let duration = th.time.last().copied().unwrap_or(0.0);
-                app.ui.scoped.th_frame = app.ui.scoped.th_frame.min(n_frames - 1);
+                view.th_frame = view.th_frame.min(n_frames - 1);
                 ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .button(if app.ui.scoped.th_playing {
-                            "⏸"
-                        } else {
-                            "▶"
-                        })
-                        .clicked()
-                    {
-                        app.ui.scoped.th_playing = !app.ui.scoped.th_playing;
+                    if ui.button(if view.th_playing { "⏸" } else { "▶" }).clicked() {
+                        view.th_playing = !view.th_playing;
                     }
                     ui.label("速度:");
                     for s in [0.25_f32, 0.5, 1.0, 2.0] {
-                        ui.selectable_value(&mut app.ui.view.th_speed, s, format!("×{s}"));
+                        ui.selectable_value(&mut view.th_speed, s, format!("×{s}"));
                     }
-                    let mut frame = app.ui.scoped.th_frame;
+                    let mut frame = view.th_frame;
                     if ui
                         .add(egui::Slider::new(&mut frame, 0..=n_frames - 1).text(""))
                         .changed()
                     {
-                        app.ui.scoped.th_frame = frame;
-                        app.ui.scoped.th_play_time = th.time.get(frame).copied().unwrap_or(0.0);
-                        app.ui.scoped.th_playing = false;
+                        view.th_frame = frame;
+                        view.th_play_time = th.time.get(frame).copied().unwrap_or(0.0);
+                        view.th_playing = false;
                     }
-                    ui.label(format!("t={:.3} s", app.ui.scoped.th_play_time));
+                    ui.label(format!("t={:.3} s", view.th_play_time));
                 });
-                if app.ui.scoped.th_playing {
+                if view.th_playing {
                     let dt = ui.input(|i| i.stable_dt);
-                    app.ui.scoped.th_play_time = advance_play_time(
-                        app.ui.scoped.th_play_time,
-                        dt,
-                        app.ui.view.th_speed,
-                        duration,
-                    );
-                    app.ui.scoped.th_frame = frame_at_time(&th.time, app.ui.scoped.th_play_time);
+                    view.th_play_time =
+                        advance_play_time(view.th_play_time, dt, view.th_speed, duration);
+                    view.th_frame = frame_at_time(&th.time, view.th_play_time);
                     ui.ctx().request_repaint();
                 }
             }
@@ -356,10 +429,10 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
             | ViewMode::TimeHistory
             | ViewMode::LumpedMode
             | ViewMode::LumpedTimeHistory
-    ) || (mode == ViewMode::Force && app.ui.view.overlay_deform);
+    ) || (mode == ViewMode::Force && view.overlay_deform);
     if show_deform_options {
         ui.horizontal(|ui| {
-            ui.toggle_value(&mut app.ui.view.show_beam_interpolation, "内部たわみ")
+            ui.toggle_value(&mut view.show_beam_interpolation, "内部たわみ")
                 .on_hover_text(
                     "梁を内部たわみ（Hermite 曲線）で描き、床・二次部材も曲線に追従。\
                      OFF で梁を直線（弦）にし全体の変形を見る",
@@ -367,21 +440,28 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
             ui.separator();
             ui.label("変形倍率:");
             ui.add(
-                egui::Slider::new(&mut app.ui.view.deform_scale_factor, 0.1..=10.0)
+                egui::Slider::new(&mut view.deform_scale_factor, 0.1..=10.0)
                     .logarithmic(true)
                     .text("×（自動比）"),
             );
             if ui.button("リセット").clicked() {
-                app.ui.view.deform_scale_factor = 1.0;
+                view.deform_scale_factor = 1.0;
             }
         });
     }
 
-    app.ui.view.view_mode = mode;
-    app.ui.scoped.view_mode_idx = mode_idx;
-    app.ui.view.force_components = force_components;
-    app.ui.view.cmq_component = cmq_component;
-    app.ui.view.cmq_axes = cmq_axes;
-    app.ui.view.check_ratio_filter = check_ratio_filter;
-    app.ui.view.modeling_analysis = modeling_analysis;
+    view.view_mode = mode;
+    view.view_mode_idx = mode_idx;
+    view.force_components = force_components;
+    view.cmq_component = cmq_component;
+    view.cmq_axes = cmq_axes;
+    view.check_ratio_filter = check_ratio_filter;
+    view.modeling_analysis = modeling_analysis;
+}
+
+#[cfg(test)]
+pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
+    let mut view = std::mem::take(&mut app.ui.view.viewport);
+    view_controls_with_view(&mut view, ui, app);
+    app.ui.view.viewport = view;
 }

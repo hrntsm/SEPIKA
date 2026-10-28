@@ -246,7 +246,7 @@ fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
 }
 
 /// 時刻歴詳細ウィンドウ（`app.ui.scoped.th_detail_elem` があれば表示）。
-pub(crate) fn show_th_detail_window(ui: &egui::Ui, app: &mut App) {
+pub(crate) fn show_th_detail_window_at(ui: &egui::Ui, app: &mut App, view: &super::ViewportState) {
     let Some(elem_id) = app.ui.scoped.th_detail_elem else {
         return;
     };
@@ -259,7 +259,7 @@ pub(crate) fn show_th_detail_window(ui: &egui::Ui, app: &mut App) {
         .open(&mut open)
         .show(ui.ctx(), |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                draw_th_detail_content(ui, app, elem_id);
+                draw_th_detail_content_at(ui, app, elem_id, view.th_frame, view);
             });
         });
     if !open {
@@ -271,7 +271,13 @@ pub(crate) fn show_th_detail_window(ui: &egui::Ui, app: &mut App) {
 /// 借用（`app.core.scoped.results` 由来。フレーム数×要素数の内力を持つため複製すると重い）と
 /// `app: &mut App` の同時使用を避け、最後にまとめて書き戻す
 /// （§実装内容2 のループ本体は `app.core.model`／`app.core.scoped.results` の共有参照のみで完結する）。
-fn draw_th_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) {
+fn draw_th_detail_content_at(
+    ui: &mut egui::Ui,
+    app: &mut App,
+    elem_id: ElemId,
+    frame: usize,
+    view: &super::ViewportState,
+) {
     if app.core.scoped.staleness.results_stale {
         ui.colored_label(
             theme::WARN_TEXT,
@@ -280,13 +286,7 @@ fn draw_th_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) {
         );
         return;
     }
-    let Some(th_result) = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .and_then(|r| r.time_history.as_ref())
-    else {
+    let Some(th_result) = view.spatial_result(app) else {
         ui.colored_label(theme::GRAY_600, "時刻歴の詳細記録がありません。");
         return;
     };
@@ -311,7 +311,7 @@ fn draw_th_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) {
 
     ui.label(format!("部材 #{}（{}）", elem_id.0, kind_label(&elem.kind)));
     let n_frames = recording.frame_time.len();
-    let frame = app.ui.scoped.th_frame.min(n_frames.saturating_sub(1));
+    let frame = frame.min(n_frames.saturating_sub(1));
     if let Some(t) = recording.frame_time.get(frame) {
         ui.label(format!(
             "現在フレーム: {frame}/{} (t={:.3}s)",
@@ -381,8 +381,6 @@ fn draw_th_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) {
             );
         }
     }
-    app.ui.view.th_detail_axis_z = axis_z;
-    app.ui.scoped.th_detail_axial_component = Some((elem_id, axial_component));
 
     ui.add_space(6.0);
     ui.separator();
@@ -396,6 +394,8 @@ fn draw_th_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) {
         th_applied_long_term,
         &axis,
     );
+    app.ui.view.th_detail_axis_z = axis_z;
+    app.ui.scoped.th_detail_axial_component = Some((elem_id, axial_component));
 }
 
 /// 軸力系要素（ブレース・ダンパー・免震・節点ばね）の荷重変形ループ。

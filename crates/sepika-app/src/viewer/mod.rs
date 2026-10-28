@@ -103,6 +103,9 @@ mod support_symbols;
 pub(crate) mod th_detail;
 
 mod camera;
+mod viewport;
+pub use viewport::ViewportState;
+pub(crate) use viewport::{LumpedResultSource, SpatialResultSource};
 mod cmq;
 mod controls;
 mod deform;
@@ -545,14 +548,14 @@ pub(crate) fn project(
 }
 
 use camera::q_rotate;
-use cmq::draw_cmq_diagram;
+use cmq::draw_cmq_diagram_with_view;
 use deform::{
     bbox_diagonal, deform_display_scale, display_disp, frame_bbox, model_bbox, model_bbox_size,
-    time_history_deform_scale, BeamDeflection, DEFORM_CURVE_SEGMENTS,
+    time_history_deform_scale_with_view, BeamDeflection, DEFORM_CURVE_SEGMENTS,
 };
 use pick::pick_assignment_region;
 use scene::{
-    draw_anchor_marker, draw_assignment_regions, draw_axis_gadget, draw_grid_and_axes,
+    draw_anchor_marker_with_view, draw_assignment_regions, draw_axis_gadget, draw_grid_and_axes,
     draw_mode_rest_ghost, draw_slabs, draw_wall_plates, draw_work_scope, draws_as_line,
     element_draw_shape, DrawShape,
 };
@@ -639,25 +642,45 @@ pub(super) fn member_axis_endpoints(
 pub use camera::CameraState;
 pub use deform::TimeHistoryScaleCache;
 
-pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
-    app.prepare_coordinate_edit_view();
-    controls::view_controls(ui, app);
-    app.prepare_coordinate_edit_view();
-    let mode = app.ui.view.view_mode;
-    let mode_idx = app.ui.scoped.view_mode_idx;
+pub fn viewer_panel_with_view(
+    view: &mut crate::viewer::ViewportState,
+    ui: &mut egui::Ui,
+    app: &mut App,
+) {
+    if view.static_key.is_none() && !view.static_unavailable {
+        view.static_key = app
+            .ui
+            .scoped
+            .nav
+            .focus_result
+            .or(app.core.scoped.last_static);
+    }
+    if view.load_case.is_none() {
+        view.load_case = app.cmq_display_load_case().map(|case| case.id);
+    }
+    view.capture_result_sources(app);
+    view.prepare_coordinate_edit(app);
+    controls::view_controls_with_view(view, ui, app);
+    view.prepare_coordinate_edit(app);
+    let mode = view.view_mode;
+    let mode_idx = view.view_mode_idx;
+    let design_source_matches = !view.static_unavailable
+        && (view.static_key.is_none() || view.static_key == app.core.scoped.last_static);
 
-    let frame = app
-        .ui
-        .scoped
+    let frame = view
         .frame_target
         .and_then(|t| sepika_core::frame::build_frame(&app.core.model, t));
     if frame.is_none() {
-        app.ui.scoped.frame_target = None;
+        view.frame_target = None;
     }
 
     ui.separator();
 
-    let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), ui.available_height()));
+    let available = ui.available_size();
+    if available.x < 32.0 || available.y < 32.0 {
+        return;
+    }
+    let (_, rect) = ui.allocate_space(available);
     // 表示モードで先行する操作行が変わるため、自動 ID では切替直後のクリックを失う。
     let response = ui.interact(
         rect,
@@ -665,7 +688,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         egui::Sense::click_and_drag(),
     );
 
-    let mut cam = input::interact_camera(ui, &response, frame.as_ref(), &app.ui.view.camera);
+    let mut cam = input::interact_camera(ui, &response, frame.as_ref(), &view.camera);
     let cube = input::interact_viewcube(ui, &response, rect, frame.is_none(), &mut cam);
     let cube_hover = cube.hover;
     let cube_clicked = cube.clicked;
@@ -695,11 +718,21 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     } else {
         1.0
     };
+    if !fit.is_finite() || fit <= 0.0 {
+        return;
+    }
+    if view
+        .fit_scale
+        .is_some_and(|scale| !scale.is_finite() || scale <= 0.0)
+    {
+        view.fit_scale = None;
+    }
+    let fit = *view.fit_scale.get_or_insert(fit);
     let scale = fit * (cam.zoom / 3.0);
     let proj = Projector::new(center3, &cam, scale, center);
 
-    let region_pick_floor = app.ui.scoped.slab_draw_mode;
-    let region_pick_wall = app.ui.scoped.wall_draw_mode;
+    let region_pick_floor = view.allow_creation && app.ui.scoped.slab_draw_mode;
+    let region_pick_wall = view.allow_creation && app.ui.scoped.wall_draw_mode;
     let region_hover = if (region_pick_floor || region_pick_wall) && cube_hover.is_none() {
         response.hover_pos().and_then(|p| {
             pick_assignment_region(
@@ -717,22 +750,20 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
-    match (&frame, app.ui.scoped.frame_target) {
+    match (&frame, view.frame_target) {
         (Some(f), Some(t)) => {
             frame_view::draw_frame_grid(&painter, &app.core.model, f, t, (bmin, bmax), &proj)
         }
         _ => draw_grid_and_axes(&painter, rect, &proj),
     }
 
-    if app.ui.view.show_space_grid && frame.is_none() {
+    if view.show_space_grid && frame.is_none() {
         space_grid::draw(&painter, &proj, &app.core.model);
     }
 
     let disp = match mode {
-        ViewMode::Deformed => app.current_static().map(|s| s.disp.clone()),
-        ViewMode::Force if app.ui.view.overlay_deform => {
-            app.current_static().map(|s| s.disp.clone())
-        }
+        ViewMode::Deformed => view.current_static(app).map(|s| s.disp.clone()),
+        ViewMode::Force if view.overlay_deform => view.current_static(app).map(|s| s.disp.clone()),
         ViewMode::Mode => app
             .core
             .scoped
@@ -741,40 +772,32 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             .and_then(|r| r.modal.as_ref())
             .and_then(|m| m.node_shapes.get(mode_idx))
             .cloned(),
-        ViewMode::TimeHistory if !app.core.scoped.staleness.results_stale => app
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .and_then(|r| r.time_history.as_ref())
+        ViewMode::TimeHistory if !app.core.scoped.staleness.results_stale => view
+            .spatial_result(app)
             .and_then(|t| t.recording.as_ref())
             .and_then(|rec| {
-                rec.node_disp.get(
-                    app.ui
-                        .scoped
-                        .th_frame
-                        .min(rec.node_disp.len().saturating_sub(1)),
-                )
+                rec.node_disp
+                    .get(view.th_frame.min(rec.node_disp.len().saturating_sub(1)))
             })
             .cloned(),
         _ => None,
     };
 
-    let disp = disp.map(|d| display_disp(&app.core.model, d, app.ui.view.show_beam_interpolation));
+    let disp = disp.map(|d| display_disp(&app.core.model, d, view.show_beam_interpolation));
 
     let deform_scale_actual = if mode == ViewMode::TimeHistory {
         if app.core.scoped.staleness.results_stale {
             0.0
         } else {
-            time_history_deform_scale(app, model_size)
+            time_history_deform_scale_with_view(view, app, model_size)
         }
     } else {
         deform_display_scale(
             &app.core.model,
             disp.as_deref(),
             model_size,
-            app.ui.view.show_beam_interpolation,
-            app.ui.view.deform_scale_factor,
+            view.show_beam_interpolation,
+            view.deform_scale_factor,
         )
     };
 
@@ -802,7 +825,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(i, &s)| {
-            (s || app.ui.view.show_floor_secondary)
+            (s || view.show_floor_secondary)
                 && frame
                     .as_ref()
                     .is_none_or(|f| f.node_on.get(i).copied().unwrap_or(false))
@@ -811,8 +834,9 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     let filter = FrameFilter::new(frame.as_ref());
 
     let normal_selection = input::normal_selection_enabled(app);
-    if response.clicked() && !cube_clicked && !normal_selection {
-        input::handle_click(
+    if response.clicked() && !cube_clicked && !normal_selection && view.allow_creation {
+        input::handle_click_with_view(
+            view,
             app,
             &response,
             input::ClickContext {
@@ -828,15 +852,13 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     }
 
     let display_model = wall_expanded_view_model(&app.core.model);
-    let frame_for_draw = app
-        .ui
-        .scoped
+    let frame_for_draw = view
         .frame_target
         .and_then(|t| sepika_core::frame::build_frame(display_model.as_ref(), t));
     let filter = FrameFilter::new(frame_for_draw.as_ref());
 
-    let lumped_only = lumped::is_lumped_view(mode) && !app.ui.view.lumped_show_frame;
-    let show_secondary = !lumped_only && mode != ViewMode::Cmq && app.ui.view.show_floor_secondary;
+    let lumped_only = lumped::is_lumped_view(mode) && !view.lumped_show_frame;
+    let show_secondary = !lumped_only && mode != ViewMode::Cmq && view.show_floor_secondary;
     if show_secondary {
         draw_slabs(&painter, app, filter, &proj, &coords3);
         if mode != ViewMode::Modeling {
@@ -864,11 +886,11 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             app.ui.scoped.post_place_mode,
         );
         if let Some(first) = app.ui.scoped.member_place_first {
-            draw_anchor_marker(&painter, app, &proj, first);
+            draw_anchor_marker_with_view(view, &painter, app, &proj, first);
         }
     }
 
-    let (solids_skipped, mut bodies) = if app.ui.view.show_sections && !lumped_only {
+    let (solids_skipped, mut bodies) = if view.show_sections && !lumped_only {
         solid::draw_section_solids(
             &painter,
             &app.core.model,
@@ -907,7 +929,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             &node_visible,
             filter,
             show_secondary,
-            app.ui.view.show_sections,
+            view.show_sections,
         );
     }
 
@@ -943,7 +965,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         } else {
             theme::GRAY_700
         };
-        let line_stroke = if app.ui.view.show_sections {
+        let line_stroke = if view.show_sections {
             egui::Stroke::new(1.0_f32, theme::translucent(line_color, 110))
         } else {
             egui::Stroke::new(2.0_f32, line_color)
@@ -980,8 +1002,8 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                 continue;
             }
 
-            let curved_beam = app.ui.view.show_beam_interpolation
-                && elem.kind == sepika_core::model::ElementKind::Beam;
+            let curved_beam =
+                view.show_beam_interpolation && elem.kind == sepika_core::model::ElementKind::Beam;
             if let (true, Some(d)) = (curved_beam, &disp) {
                 let p_i = app.core.model.nodes[n0].coord;
                 let p_j = app.core.model.nodes[n1].coord;
@@ -1019,7 +1041,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         }
 
         if show_secondary {
-            let secondary_stroke = if app.ui.view.show_sections {
+            let secondary_stroke = if view.show_sections {
                 egui::Stroke::new(1.0_f32, theme::translucent(theme::SECONDARY_AMBER, 110))
             } else {
                 egui::Stroke::new(1.5_f32, theme::SECONDARY_AMBER)
@@ -1051,15 +1073,16 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     } else {
         None
     };
-    let checked_node_hover = if cube_hover.is_none() && mode == ViewMode::CheckRatio {
-        response.hover_pos().and_then(|pos| {
-            check_ratio::pick_nearest_checked_node(app, &pts, pos, filter)
-                .filter(|&(_, d)| d <= check_ratio::NODE_HOVER_THRESHOLD)
-        })
-    } else {
-        None
-    };
-    let isolator_hover = supports_visible(lumped::is_lumped_view(mode), app.ui.view.show_supports)
+    let checked_node_hover =
+        if cube_hover.is_none() && mode == ViewMode::CheckRatio && design_source_matches {
+            response.hover_pos().and_then(|pos| {
+                check_ratio::pick_nearest_checked_node(app, &pts, pos, filter)
+                    .filter(|&(_, d)| d <= check_ratio::NODE_HOVER_THRESHOLD)
+            })
+        } else {
+            None
+        };
+    let isolator_hover = supports_visible(lumped::is_lumped_view(mode), view.show_supports)
         && response.hover_pos().is_some_and(|pos| {
             support_symbols::support_isolators(&app.core.model)
                 .iter()
@@ -1072,7 +1095,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         member_candidate.filter(|_| checked_node_hover.is_none() && !isolator_hover);
 
     if lumped::is_lumped_view(mode) {
-        lumped::draw(&painter, app, &proj, mode, mode_idx, model_size);
+        lumped::draw_with_view(view, &painter, app, &proj, mode, mode_idx, model_size);
     }
 
     if let Some(f) = &frame_for_draw {
@@ -1087,7 +1110,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         }
     }
 
-    if app.ui.view.show_sections && solids_skipped > 0 {
+    if view.show_sections && solids_skipped > 0 {
         painter.text(
             egui::pos2(
                 painter.clip_rect().max.x - 10.0,
@@ -1171,11 +1194,12 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     }
 
     if mode == ViewMode::Force {
-        diagram::draw_force_diagram(
+        diagram::draw_force_diagram_with_view(
+            view,
             &painter,
             app,
             &display_model,
-            app.ui.view.force_components,
+            view.force_components,
             &coords3,
             disp.as_deref(),
             deform_scale_actual,
@@ -1185,7 +1209,8 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
     if mode == ViewMode::Cmq {
-        draw_cmq_diagram(
+        draw_cmq_diagram_with_view(
+            view,
             &painter,
             app,
             &coords3,
@@ -1195,13 +1220,31 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
     if mode == ViewMode::Modeling {
-        modeling::draw_modeling(&painter, app, &display_model, &pts, &coords3, &proj, filter);
+        modeling::draw_modeling_with_view(
+            view,
+            &painter,
+            app,
+            &display_model,
+            &pts,
+            &coords3,
+            &proj,
+            filter,
+        );
         if let Some(id) = hovered_member {
-            modeling::show_modeling_tooltip(ui, app, &display_model, id);
+            modeling::show_modeling_tooltip_with_view(view, ui, app, &display_model, id);
         }
     }
-    if mode == ViewMode::CheckRatio {
-        check_ratio::draw_check_ratio(&painter, app, &display_model, &pts, filter);
+    if mode == ViewMode::CheckRatio && !design_source_matches {
+        painter.text(
+            rect.min + egui::vec2(10.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            "検定比は表示できません: 図の荷重状態と保持済み検定の荷重状態が異なります。",
+            egui::FontId::proportional(14.0),
+            theme::WARN_TEXT,
+        );
+    }
+    if mode == ViewMode::CheckRatio && design_source_matches {
+        check_ratio::draw_check_ratio_with_view(view, &painter, app, &display_model, &pts, filter);
         if let Some((idx, _)) = checked_node_hover {
             if let Some(node) = app.core.model.nodes.get(idx) {
                 check_ratio::show_node_check_tooltip(ui, app, node.id);
@@ -1211,14 +1254,14 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         }
     }
     if mode == ViewMode::Hinge {
-        hinge::draw_hinge(&painter, app, &display_model, &pts, &proj, filter);
+        hinge::draw_hinge(view, &painter, app, &display_model, &pts, &proj, filter);
         if let Some(id) = hovered_member {
-            hinge::show_hinge_tooltip(ui, app, id);
+            hinge::show_hinge_tooltip(view, ui, app, id);
         }
     }
 
     let scale_note = if mode == ViewMode::LumpedTimeHistory {
-        lumped::display_scale(app, mode, mode_idx, model_size)
+        lumped::display_scale_with_view(view, app, mode, mode_idx, model_size)
     } else if deform_scale_actual > 0.0 && mode != ViewMode::Mode {
         deform_scale_actual
     } else {
@@ -1226,16 +1269,16 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     };
     if scale_note > 0.0 {
         let y = match mode {
-            ViewMode::Force if app.ui.view.diagram_contour => 70.0,
+            ViewMode::Force if view.diagram_contour => 70.0,
             ViewMode::Force => 30.0,
             _ => 10.0,
         };
-        let note = if (app.ui.view.deform_scale_factor - 1.0).abs() < 1e-3 {
+        let note = if (view.deform_scale_factor - 1.0).abs() < 1e-3 {
             format!("変形倍率 ×{:.0}（自動）", scale_note)
         } else {
             format!(
                 "変形倍率 ×{:.0}（自動×{:.2}）",
-                scale_note, app.ui.view.deform_scale_factor
+                scale_note, view.deform_scale_factor
             )
         };
         painter.text(
@@ -1250,7 +1293,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
 
-    if app.ui.view.show_diaphragm_master {
+    if view.show_diaphragm_master {
         const DASH: f32 = 5.0;
         const GAP: f32 = 4.0;
         for c in &app.core.model.constraints {
@@ -1281,7 +1324,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
     const SUPPORT_ARROW_PX: f32 = 18.0;
     const SUPPORT_ARC_PX: f32 = 12.0;
     let lumped_view = lumped::is_lumped_view(mode);
-    let draw_supports = supports_visible(lumped_view, app.ui.view.show_supports);
+    let draw_supports = supports_visible(lumped_view, view.show_supports);
     let diaphragm_masters: std::collections::HashSet<usize> = app
         .core
         .model
@@ -1307,7 +1350,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                 continue;
             }
             let is_master = diaphragm_masters.contains(&i);
-            if is_master && !app.ui.view.show_diaphragm_master {
+            if is_master && !view.show_diaphragm_master {
                 continue;
             }
             if !is_master && !draw_supports {
@@ -1406,7 +1449,9 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
 
     drop(display_model);
     if response.clicked() && !cube_clicked && normal_selection {
-        input::handle_click(
+        app.ui.view.workspace.placement.active = view.pane_index;
+        input::handle_click_with_view(
+            view,
             app,
             &response,
             input::ClickContext {
@@ -1422,10 +1467,29 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         ui.ctx().request_repaint();
     }
 
-    app.ui.view.camera = cam;
+    view.camera = cam;
+}
 
-    hinge::show_hinge_detail_window(ui, app);
-    th_detail::show_th_detail_window(ui, app);
+pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
+    let mut view = std::mem::take(&mut app.ui.view.viewport);
+    viewer_panel_with_view(&mut view, ui, app);
+    app.ui.view.viewport = view;
+}
+
+pub(crate) fn show_detail_windows(ui: &egui::Ui, app: &mut App) {
+    let mut view = app.active_viewport().clone();
+    let source = (
+        view.pane_index,
+        view.pushover_dir
+            .unwrap_or(app.core.scoped.pushover_view_dir),
+    );
+    if app.ui.scoped.hinge_detail_source != Some(source) {
+        app.ui.scoped.hinge_view_cache = None;
+        app.ui.scoped.hinge_detail_source = Some(source);
+    }
+    hinge::show_hinge_detail_window(ui, app, &mut view);
+    app.active_viewport_mut().hinge_step = view.hinge_step;
+    th_detail::show_th_detail_window_at(ui, app, &view);
 }
 
 #[cfg(test)]
