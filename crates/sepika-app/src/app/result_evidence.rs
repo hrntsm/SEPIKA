@@ -107,7 +107,7 @@ impl App {
         };
         match state {
             Ok(()) => {
-                ui.label("状態: 現行の生成入力と一致（個々のOK／NG・未検定は結果欄を確認）");
+                ui.label("状態: 現行の生成入力と一致（個々の合否・未検定は結果欄を確認）");
             }
             Err(reason) => {
                 ui.colored_label(
@@ -469,7 +469,7 @@ impl App {
             Some(EvidenceReference::Calculation(reference)) => {
                 if let Err(reason) = self.result_input_snapshot(reference) { return format!("状態: 参照した実行は現在保持する結果と異なるか取得不能です。表示値は開いた時点の記録です / {reason}"); }
                 let state = if reference.kind == ResultInputKey::Design { self.require_design_input() } else { self.require_result_input(reference.kind.clone()) };
-                state.err().map_or_else(|| "状態: 現行の生成入力と一致（OK／NG・未検定は個々の結果を確認）".into(), |reason| format!("状態: 履歴・要再計算 / {reason}"))
+                state.err().map_or_else(|| "状態: 現行の生成入力と一致（合否・未検定は個々の結果を確認）".into(), |reason| format!("状態: 履歴・要再計算 / {reason}"))
             }
             Some(EvidenceReference::Quantity(quantity)) => {
                 if quantity.source == self.input_reference() { "状態: 現在の本案の数量入力と一致（解析・検定の成功とは別）".into() }
