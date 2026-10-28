@@ -3,6 +3,27 @@
 作成日: 2026-10-28。状態: 🔶（描画変更のVerification、必須実機条件は未了）。
 共通規約は[GUIの文字と状態表示](../ui_readability.md)を参照。
 
+## 最新成果物の実機確認と阻害状態
+
+対象はコード `a3528f51`、文書head `e28dfad3` の最終exe。以下は担当者から引き継いだ今回の実測であり、後段の旧headの履歴と区別する。
+
+| 対象 | 実測・観察 | 確認できない範囲 |
+| --- | --- | --- |
+| SEPIKA起動 | `require_escalated` の `Start-Process` で通常デスクトップへ起動成功。`sky.list_windows` でwindow ID `2689298` を取得し、`sky.get_window` 成功 | 起動成功を表示・入力の確認成功とは扱わない |
+| SEPIKA状態取得 | `sky.get_window_state` のscreenshot+text取得で、アクセシビリティ情報から「▸ 左右二分割」「▸ 領域1」、参照専用・未実行等を取得 | 1282×827 pxの画像は黒で製品を視認できない。この寸法を画面解像度やアプリ有効寸法の実測に使わない |
+| SEPIKA前面化 | `sky.activate_window` は `failed to activate captured window` で失敗。新しい `mcp__cua_repl` で `getState` / `getApp` は成功したが、アクセシビリティの `SecondaryAction Raise` を1回実行しても同じエラー | 前面化・視覚確認・キー入力の成功は確認できず、この失敗経路の反復を終了した |
+| Windows設定起動 | `sky.launch_app(SystemSettings.exe)` は約1180秒無応答で担当の親エージェントが中断。その後通常の `Start-Process ms-settings:display` でSettingsのwindow ID `197914` を取得 | 設定画面を観察できていない |
+| Windows設定状態取得 | Settingsに対する `sky.get_window` / `sky.get_window_state` のscreenshot+text取得を含む同一呼出しが約565.9秒無応答となり、担当の親エージェントが中断 | 設定へのクリック・入力は一度も行っていない |
+| 倍率・解像度 | OS倍率・解像度・製品倍率はいずれも変更していない | 元の実効値は未取得。100%/150%の代表表示・切れ・重なりは未確認 |
+| キーボード・IME | 実機操作は未実施 | Tab / Shift+Tab / Enter / Esc、フォーカスの見え方、日本語IME未確定文字列の操作は未確認 |
+| 復元・残存 | 設定変更がないため復元対象の変更なし。読取専用の `Get-Process` で専用SEPIKA PID `25000`、Settings PID `7284` の現存を確認 | 利用できた正規APIで前面化不要の終了ができず残存。終了済み・復元成功とは記録しない |
+
+黒画像は証拠として添付しない。アクセシビリティでの文言取得を、必須の100%/150%表示・フォーカス・IMEの完了証拠に代用しない。今回の停止理由は対象画面を視認・前面化できず、実機条件を実施できないことである。必須実機条件を確認して記録するまで#976の完了・merge判定に使わない。
+
+残存プロセスの確認パスは、SEPIKAが `C:\Users\hiroa\Desktop\ikkan\.worktree\issue-976\target\debug\sepika.exe`、Settingsが `C:\Windows\ImmersiveControlPanel\SystemSettings.exe`。いずれも `MainWindowTitle` は空だった。これら以外のプロセスには触れていない。
+
+阻害要因は許可不足ではなく、画面取得・前面化のツール障害である。PR #988はDraftを維持し、mergeせず実機検証をblockedとして引き継ぐ。上記の未確認を解消した確認記録が必要である。
+
 ## 最新の統合ソースによる自動確認
 
 コードコミット `a3528f51` で、#975を含むmain `104a50bbe231e74e59942bc12017cace782dc11f` を取り込んだ。主領域の配置・狭幅での領域切替・領域見出し、ツリーの部材グループに共通の選択印とフォーカス輪郭を適用した。統合ではグリッドの編集IDとフォーカス追跡を保持し、表示変更から入力の確定処理を変更していない。
@@ -29,7 +50,7 @@
 - 最終差分に対する `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings` 成功（18.45秒）。
 - 最終文書に対する `cargo run -p xtask -- check-docs` 成功（summary 124、links 671、impl refs 713）。開発文書の相対リンク先も存在確認済み。
 
-## 実機条件と未確認
+## 過去の実機条件と未確認
 
 | 条件 | 実測・観察 | 想定/未確認 |
 | --- | --- | --- |
@@ -44,7 +65,7 @@
 | 100% / 150% | 未実施 | 両条件のツリー・入力表・属性・結果詳細の実表示、切れ/重なり、フォーカスは未確認 |
 | 入力 | キーイベントと編集確定経路は変更せず既存lib試験成功 | 実機Tab/Shift+Tab/Enter/Escと日本語IME未確定文字列の操作は未確認 |
 
-## GUI操作が成立しなかった経緯
+## 過去のGUI操作が成立しなかった経緯
 
 専用製品exeの起動・一覧・アクセシビリティ取得は成功した。`get_window_state`の画像には壁紙のみが表示され、`activate_window`は `failed to activate captured window` で失敗した。手順に従って最新の一覧から対象ウィンドウを再取得し、状態取得後に一度だけ再試行したが同じエラーとなった。古い座標でのクリック・入力は行わず、実機操作を停止した。別アプリの終了やファイル上書きはしていない。
 
