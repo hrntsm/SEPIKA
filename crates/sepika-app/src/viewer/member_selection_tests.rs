@@ -108,10 +108,10 @@ fn hidden_selected_members_keep_shared_selection_and_regain_highlight_when_shown
     let ctx = egui::Context::default();
     frame(&ctx, &mut app, vec![]);
     assert!(highlighted(&frame(&ctx, &mut app, vec![])));
-    app.ui.scoped.frame_target = Some(sepika_core::frame::FrameTarget::Story(StoryId(0)));
+    app.ui.view.frame_target = Some(sepika_core::frame::FrameTarget::Story(StoryId(0)));
     assert!(!highlighted(&frame(&ctx, &mut app, vec![])));
     assert_eq!(app.ui.scoped.selection.members(), &[ElemId(0), ElemId(2)]);
-    app.ui.scoped.frame_target = None;
+    app.ui.view.frame_target = None;
     assert!(highlighted(&frame(&ctx, &mut app, vec![])));
     app.ui.view.view_mode = ViewMode::LumpedMode;
     app.ui.view.lumped_show_frame = false;

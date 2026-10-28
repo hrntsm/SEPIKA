@@ -9,7 +9,28 @@ impl App {
     /// 左ペイン：ナビゲータ（階/部材群/断面・材料/荷重ケース/結果ケースのツリー）。
     pub(crate) fn navigator_panel(&mut self, ui: &mut egui::Ui) {
         ui.scope(|ui| {
-            crate::theme::panel_heading(ui, "ナビゲータ", "選択・参照");
+            crate::theme::panel_heading(ui, "探す · モデル / 条件 / 結果 / 検討", "選択・参照");
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("モデル表").clicked() {
+                    self.ui.view.bottom_dock_open = true;
+                    self.ui.view.bottom_tab = BottomTab::Model;
+                }
+                if ui.button("条件").clicked() {
+                    self.ui.view.right_dock_open = true;
+                    self.ui.view.right_panel = RightPanel::Preparation;
+                }
+                if ui.button("結果").clicked() {
+                    self.ui.view.active_tab = Tab::Results;
+                }
+            });
+            ui.collapsing("検討", |ui| {
+                ui.label("固定対象は共通参照から確認できます。比較案の作成・採用は未接続です。");
+                if ui.button("共通参照・固定対象を開く").clicked() {
+                    self.ui.view.right_dock_open = true;
+                    self.ui.view.right_panel = RightPanel::Inspector;
+                }
+            });
+            ui.separator();
 
             let header = egui::CollapsingHeader::new("部材グループ")
                 .default_open(true)
@@ -17,18 +38,24 @@ impl App {
             header.show(ui, |ui| {
                 let (steel_ids, rc_ids) = member_material_groups(&self.core.model);
                 let is_steel_sel = member_group_selected(&self.ui.scoped.selection, &steel_ids);
-                if ui
-                    .selectable_label(is_steel_sel, format!("鋼材部材 ({})", steel_ids.len()))
-                    .on_hover_text("クリックで3Dビューにハイライト")
-                    .clicked()
+                if crate::theme::selectable_name(
+                    ui,
+                    is_steel_sel,
+                    &format!("鋼材部材 ({})", steel_ids.len()),
+                )
+                .on_hover_text("クリックで3Dビューにハイライト")
+                .clicked()
                 {
                     self.select_members(steel_ids.clone(), None);
                 }
                 let is_rc_sel = member_group_selected(&self.ui.scoped.selection, &rc_ids);
-                if ui
-                    .selectable_label(is_rc_sel, format!("RC部材 ({})", rc_ids.len()))
-                    .on_hover_text("クリックで3Dビューにハイライト")
-                    .clicked()
+                if crate::theme::selectable_name(
+                    ui,
+                    is_rc_sel,
+                    &format!("RC部材 ({})", rc_ids.len()),
+                )
+                .on_hover_text("クリックで3Dビューにハイライト")
+                .clicked()
                 {
                     self.select_members(rc_ids.clone(), None);
                 }

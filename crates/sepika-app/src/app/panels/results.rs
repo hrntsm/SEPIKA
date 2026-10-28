@@ -8,16 +8,21 @@ use sepika_core::units::to_display::{force_kn, stiffness_kn_per_mm};
 
 impl App {
     /// 結果タブ：3Dビューア と 時刻歴グラフを切替。
-    pub(crate) fn results_tab_panel(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn results_tab_panel_with_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        view: &mut crate::viewer::ViewportState,
+    ) {
         crate::theme::panel_heading(ui, "解析結果", "参照専用");
         self.unset_regions_banner(ui);
         let result_options = self.result_display_options();
-        let current_key = self
-            .ui
-            .scoped
-            .nav
-            .focus_result
-            .or(self.core.scoped.last_static);
+        let current_key = if view.static_unavailable {
+            None
+        } else {
+            view.static_key
+                .or(self.ui.scoped.nav.focus_result)
+                .or(self.core.scoped.last_static)
+        };
         let mut selected_result: Option<StaticKey> = None;
         ui.horizontal(|ui| {
             let sel_spatial = self.ui.view.results_view == ResultsView::Spatial;
@@ -72,11 +77,12 @@ impl App {
             }
         });
         if let Some(key) = selected_result {
-            self.select_displayed_result(key);
+            view.static_key = Some(key);
+            view.static_unavailable = false;
         }
         ui.separator();
         match self.ui.view.results_view {
-            ResultsView::Spatial => crate::viewer::viewer_panel(ui, self),
+            ResultsView::Spatial => crate::viewer::viewer_panel_with_view(view, ui, self),
             ResultsView::TimeHistory => crate::time_history_view::time_history_panel(ui, self),
             ResultsView::Pushover => self.pushover_results_panel(ui),
             ResultsView::LumpedMass => self.lumped_mass_panel(ui),

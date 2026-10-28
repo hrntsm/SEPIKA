@@ -126,7 +126,12 @@ pub(super) struct ClickContext<'a> {
 /// 通常の選択）。ViewCube 上のクリックは呼び出し側で除外済み。
 ///
 /// 専用操作は描画前に、通常選択は本体描画で得た共通候補の確定後に呼ぶ。
-pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickContext<'_>) {
+pub(super) fn handle_click_with_view(
+    view: &mut crate::viewer::ViewportState,
+    app: &mut App,
+    response: &egui::Response,
+    ctx: ClickContext<'_>,
+) {
     let ClickContext {
         pts,
         node_visible,
@@ -174,7 +179,7 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                 }
             }
         } else if app.ui.scoped.beam_draw_mode {
-            let picked = if app.ui.view.show_space_grid && frame.is_none() {
+            let picked = if view.show_space_grid && frame.is_none() {
                 space_grid::pick(&app.core.model, proj, pts, node_visible, click_pos)
             } else {
                 const NODE_PICK_THRESHOLD: f32 = 10.0;
@@ -314,7 +319,7 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                     app.select_member(id);
                     if mode == ViewMode::Hinge {
                         if app.ui.scoped.hinge_detail_elem != Some(id) {
-                            app.ui.scoped.hinge_step = None;
+                            view.hinge_step = None;
                             app.ui.scoped.hinge_view_cache = None;
                         }
                         app.ui.scoped.hinge_detail_elem = Some(id);
@@ -329,6 +334,14 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
             }
         }
     }
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickContext<'_>) {
+    let mut view = std::mem::take(&mut app.ui.view.viewport);
+    handle_click_with_view(&mut view, app, response, ctx);
+    app.ui.view.viewport = view;
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@
 
 mod activity_bar;
 mod analysis;
-mod draw_tools;
+pub(crate) mod draw_tools;
 pub(crate) mod inspector;
 mod navigator;
 mod preparation;
@@ -141,7 +141,7 @@ impl App {
     /// 結果タブの「表示対象」ドロップダウン用の選択肢（キーと表示名）を収集する。
     /// 静的ケース（ユーザー荷重・地震静的）に続けて荷重組合せを並べる。
     /// ラベルはナビゲータの葉ノードと揃える（[`super::nav_results`]）。
-    fn result_display_options(&self) -> Vec<(StaticKey, String)> {
+    pub(crate) fn result_display_options(&self) -> Vec<(StaticKey, String)> {
         let mut opts = Vec::new();
         if let Some(r) = &self.core.scoped.results {
             for (key, _) in r.statics.iter() {

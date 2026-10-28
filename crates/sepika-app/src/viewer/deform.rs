@@ -387,35 +387,29 @@ fn th_peak_translation_disp(result: &sepika_solver::dynamic::timehistory::Respon
 }
 
 /// 時刻歴アニメーションの実効表示倍率（自動倍率 × 手動係数）。
-/// `app.ui.scoped.th_scale_cache` を記録の同一性で使い回し、フレーム切替のたびに
+/// `app.ui.view.th_scale_cache` を記録の同一性で使い回し、フレーム切替のたびに
 /// 自動倍率を再計算しない（高-2）。時刻歴の詳細記録・結果がなければ 0。
-pub(super) fn time_history_deform_scale(app: &mut App, model_size: f64) -> f64 {
-    let Some(result) = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .and_then(|r| r.time_history.as_ref())
-    else {
-        app.ui.scoped.th_scale_cache = None;
+pub(super) fn time_history_deform_scale_with_view(
+    view: &mut crate::viewer::ViewportState,
+    app: &mut App,
+    model_size: f64,
+) -> f64 {
+    let Some(result) = view.spatial_result(app) else {
+        view.th_scale_cache = None;
         return 0.0;
     };
     let n_frames = result.recording.as_ref().map_or(0, |r| r.frame_time.len());
     let peak_max_disp = th_peak_translation_disp(result);
-    let use_beam_interpolation = app.ui.view.show_beam_interpolation;
+    let use_beam_interpolation = view.show_beam_interpolation;
 
-    let reuse = app.ui.scoped.th_scale_cache.is_some_and(|c| {
+    let reuse = view.th_scale_cache.is_some_and(|c| {
         c.n_frames == n_frames
             && c.peak_max_disp == peak_max_disp
             && c.model_size == model_size
             && c.use_beam_interpolation == use_beam_interpolation
     });
     let auto_scale = if reuse {
-        app.ui
-            .scoped
-            .th_scale_cache
-            .expect("reuse implies Some")
-            .auto_scale
+        view.th_scale_cache.expect("reuse implies Some").auto_scale
     } else {
         let peak_disp_field: Vec<[f64; 6]> = result.peak_disp.clone();
         let auto = deform_display_scale(
@@ -425,7 +419,7 @@ pub(super) fn time_history_deform_scale(app: &mut App, model_size: f64) -> f64 {
             use_beam_interpolation,
             1.0,
         );
-        app.ui.scoped.th_scale_cache = Some(TimeHistoryScaleCache {
+        view.th_scale_cache = Some(TimeHistoryScaleCache {
             n_frames,
             peak_max_disp,
             model_size,
@@ -434,7 +428,7 @@ pub(super) fn time_history_deform_scale(app: &mut App, model_size: f64) -> f64 {
         });
         auto
     };
-    auto_scale * app.ui.view.deform_scale_factor as f64
+    auto_scale * view.deform_scale_factor as f64
 }
 
 /// 梁のスパンに対する内部たわみが過大にならないよう、表示倍率の上限を算定する。

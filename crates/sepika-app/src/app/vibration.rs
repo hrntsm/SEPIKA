@@ -261,12 +261,13 @@ impl App {
             .and_then(|b| b.time_history_for(id))
             .cloned()
         {
+            self.open_result_workspace(ResultsView::TimeHistory);
             self.set_spatial_time_history_view(id, &res);
-            self.ui.view.active_tab = Tab::Results;
+            self.bind_spatial_case_to_active_view(id);
             #[cfg(feature = "gui")]
             {
                 self.ui.view.results_view = ResultsView::TimeHistory;
-                self.ui.view.view_mode = crate::viewer::ViewMode::TimeHistory;
+                self.active_viewport_mut().view_mode = crate::viewer::ViewMode::TimeHistory;
             }
         }
     }
@@ -285,8 +286,10 @@ impl App {
             .and_then(|b| b.lumped_result_for(id))
             .cloned()
         {
+            self.open_result_workspace(ResultsView::LumpedMass);
             self.set_lumped_mass_view(Some(id), &res);
-            self.ui.view.active_tab = Tab::Results;
+            self.bind_lumped_case_to_active_view(id);
+            self.active_viewport_mut().view_mode = crate::viewer::ViewMode::LumpedTimeHistory;
             #[cfg(feature = "gui")]
             {
                 self.ui.view.results_view = ResultsView::LumpedMass;

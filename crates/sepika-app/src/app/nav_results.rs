@@ -181,7 +181,7 @@ fn is_static_selected(app: &App, key: StaticKey) -> bool {
 fn is_eigen_mode_selected(app: &App, mode_idx: usize) -> bool {
     app.ui.view.results_view == ResultsView::Spatial
         && app.ui.view.view_mode == crate::viewer::ViewMode::Mode
-        && app.ui.scoped.view_mode_idx == mode_idx
+        && app.ui.view.view_mode_idx == mode_idx
 }
 
 #[cfg(feature = "gui")]
@@ -199,7 +199,7 @@ fn is_time_history_case_selected(app: &App, id: VibrationCaseId) -> bool {
 fn is_lumped_eigen_mode_selected(app: &App, mode_idx: usize) -> bool {
     app.ui.view.results_view == ResultsView::Spatial
         && app.ui.view.view_mode == crate::viewer::ViewMode::LumpedMode
-        && app.ui.scoped.view_mode_idx == mode_idx
+        && app.ui.view.view_mode_idx == mode_idx
 }
 
 #[cfg(feature = "gui")]
@@ -402,22 +402,20 @@ impl App {
     fn apply_result_tree_action(&mut self, action: ResultTreeAction) {
         match action {
             ResultTreeAction::Static(key) => {
+                self.open_result_workspace(ResultsView::Spatial);
                 self.select_displayed_result(key);
-                self.ui.view.active_tab = Tab::Results;
-                self.ui.view.results_view = ResultsView::Spatial;
             }
             ResultTreeAction::EigenMode(i) => {
                 self.ui.scoped.nav.focus_result = None;
-                self.ui.view.active_tab = Tab::Results;
-                self.ui.view.results_view = ResultsView::Spatial;
-                self.ui.view.view_mode = crate::viewer::ViewMode::Mode;
-                self.ui.scoped.view_mode_idx = i;
+                self.open_result_workspace(ResultsView::Spatial);
+                self.active_viewport_mut().view_mode = crate::viewer::ViewMode::Mode;
+                self.active_viewport_mut().view_mode_idx = i;
             }
             ResultTreeAction::Pushover(dir) => {
                 self.ui.scoped.nav.focus_result = None;
+                self.open_result_workspace(ResultsView::Pushover);
                 self.set_pushover_view_dir(dir);
-                self.ui.view.active_tab = Tab::Results;
-                self.ui.view.results_view = ResultsView::Pushover;
+                self.active_viewport_mut().pushover_dir = Some(dir);
             }
             ResultTreeAction::TimeHistoryCase(id) => {
                 if let Some(res) = self
@@ -429,10 +427,10 @@ impl App {
                     .cloned()
                 {
                     self.ui.scoped.nav.focus_result = None;
+                    self.open_result_workspace(ResultsView::TimeHistory);
                     self.set_spatial_time_history_view(id, &res);
-                    self.ui.view.active_tab = Tab::Results;
-                    self.ui.view.results_view = ResultsView::TimeHistory;
-                    self.ui.view.view_mode = crate::viewer::ViewMode::TimeHistory;
+                    self.bind_spatial_case_to_active_view(id);
+                    self.active_viewport_mut().view_mode = crate::viewer::ViewMode::TimeHistory;
                 }
             }
             ResultTreeAction::LumpedEigenMode(i) => {
@@ -448,10 +446,99 @@ impl App {
                     .cloned()
                 {
                     self.ui.scoped.nav.focus_result = None;
+                    self.open_result_workspace(ResultsView::LumpedMass);
                     self.set_lumped_mass_view(Some(id), &res);
-                    self.ui.view.active_tab = Tab::Results;
-                    self.ui.view.results_view = ResultsView::LumpedMass;
-                    self.ui.view.view_mode = crate::viewer::ViewMode::LumpedTimeHistory;
+                    self.bind_lumped_case_to_active_view(id);
+                    self.active_viewport_mut().view_mode =
+                        crate::viewer::ViewMode::LumpedTimeHistory;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(test, feature = "gui"))]
+mod workspace_navigation_tests {
+    use super::*;
+
+    #[test]
+    fn issue975_result_navigation_resolves_the_restored_destination_before_updating_its_view() {
+        for action in [
+            ResultTreeAction::Static(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0)))),
+            ResultTreeAction::EigenMode(2),
+            ResultTreeAction::Pushover(SeismicDir::Y),
+            ResultTreeAction::TimeHistoryCase(VibrationCaseId(0)),
+            ResultTreeAction::LumpedEigenMode(1),
+            ResultTreeAction::LumpedTimeHistoryCase(LumpedVibrationCaseId(0)),
+        ] {
+            let mut app = App::default();
+            app.load_model(crate::sample::portal_frame());
+            app.core
+                .model
+                .vibration_cases
+                .push(sepika_core::model::VibrationCase {
+                    id: VibrationCaseId(0),
+                    name: "立体".into(),
+                    wave_name: "波".into(),
+                    input_identity: Some("立体入力".into()),
+                    dir: sepika_core::model::VibrationThDir::X,
+                    nonlinear: false,
+                });
+            app.core
+                .model
+                .lumped_vibration_cases
+                .push(sepika_core::model::LumpedVibrationCase {
+                    id: LumpedVibrationCaseId(0),
+                    name: "質点".into(),
+                    wave_name: "波".into(),
+                    input_identity: Some("質点入力".into()),
+                    dir: sepika_core::model::LumpedVibrationDir::X,
+                    dim: sepika_core::model::LumpedVibrationDim::Planar,
+                    nonlinear: false,
+                });
+            app.core.scoped.results = Some(ResultsBundle {
+                statics: vec![(
+                    StaticCaseKey::User(LoadCaseId(0)),
+                    sepika_solver::statics::linear::StaticOnce {
+                        stiffness_ratio_disp: None,
+                        disp: vec![[1.0; 6]; 4],
+                        member_forces: vec![],
+                        panel_moments: vec![],
+                    },
+                )],
+                time_histories: vec![(
+                    VibrationCaseId(0),
+                    crate::app::tests::dummy_th(vec![0.0, 1.0]),
+                )],
+                lumped_results: vec![(
+                    LumpedVibrationCaseId(0),
+                    crate::app::tests::dummy_lumped(1.0, true),
+                )],
+                ..Default::default()
+            });
+            app.enter_workspace();
+            app.ui.view.workspace.placement.active = 1;
+            app.ui.view.workspace.secondary.view_mode_idx = 99;
+            app.apply_result_tree_action(action);
+            assert_eq!(app.ui.view.active_tab, Tab::Results);
+            assert_eq!(app.ui.view.workspace.placement.active, 0);
+            assert_eq!(
+                app.active_workspace_content(),
+                crate::app::workspace::Content::Results
+            );
+            assert_eq!(app.ui.view.workspace.secondary.view_mode_idx, 99);
+            match app.ui.view.results_view {
+                ResultsView::Spatial => assert!(
+                    app.ui.view.viewport.static_key.is_some() || app.ui.view.view_mode_idx < 3
+                ),
+                ResultsView::TimeHistory => {
+                    assert!(app.ui.view.viewport.spatial_result(&app).is_some())
+                }
+                ResultsView::LumpedMass => {
+                    assert!(app.ui.view.viewport.lumped_result(&app).is_some())
+                }
+                ResultsView::Pushover => {
+                    assert_eq!(app.ui.view.viewport.pushover_dir, Some(SeismicDir::Y))
                 }
             }
         }

@@ -19,12 +19,30 @@ impl App {
         }
     }
 
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", test))]
     pub(crate) fn adopted_wall_capacity(
         &self,
         elem: &sepika_core::model::ElementData,
         model: &sepika_core::model::Model,
         analysis: crate::viewer::ModelingAnalysis,
+    ) -> Result<[f64; 2], String> {
+        self.adopted_wall_capacity_for(
+            elem,
+            model,
+            analysis,
+            self.core.scoped.pushover_view_dir,
+            self.core.scoped.view_vibration_case,
+        )
+    }
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn adopted_wall_capacity_for(
+        &self,
+        elem: &sepika_core::model::ElementData,
+        model: &sepika_core::model::Model,
+        analysis: crate::viewer::ModelingAnalysis,
+        direction: SeismicDir,
+        vibration_case: Option<VibrationCaseId>,
     ) -> Result<[f64; 2], String> {
         if !sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
             let qu = sepika_element::wall::wall_element::WallElement::steel_shear_capacity_of(
@@ -38,7 +56,7 @@ impl App {
         }
         let capacities = match analysis {
             crate::viewer::ModelingAnalysis::Incremental => {
-                let dir = self.core.scoped.pushover_view_dir;
+                let dir = direction;
                 self.require_result_input(ResultInputKey::Pushover(dir))?;
                 &self
                     .pushover_for(dir)
@@ -46,11 +64,7 @@ impl App {
                     .wall_capacities
             }
             crate::viewer::ModelingAnalysis::TimeHistory => {
-                let case = self
-                    .core
-                    .scoped
-                    .view_vibration_case
-                    .ok_or("表示する非線形時刻歴ケースが未選択です")?;
+                let case = vibration_case.ok_or("表示する非線形時刻歴ケースが未選択です")?;
                 self.require_result_input(ResultInputKey::TimeHistory(case))?;
                 let result = self
                     .core
@@ -172,10 +186,6 @@ impl App {
                 sepika_job::compute::compute_pushover(model, cfg).map_err(|e| e.to_string())
             })))
         });
-        #[cfg(feature = "gui")]
-        if let Some(job) = self.core.scoped.job.as_mut() {
-            job.jump_on_success = Some((Tab::Results, ResultsView::Pushover));
-        }
     }
 }
 

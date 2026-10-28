@@ -659,12 +659,17 @@ pub enum ReferenceView {
 impl App {
     pub fn current_display_conditions(&self) -> Result<DisplayConditions, String> {
         use crate::viewer::ViewMode;
-        if self.ui.view.active_tab == Tab::Results
-            && self.ui.view.results_view != ResultsView::Spatial
+        let content = self.active_workspace_content();
+        if content != super::workspace::Content::Drawing
+            && !(content == super::workspace::Content::Results
+                && self.ui.view.results_view == ResultsView::Spatial)
         {
-            return Err("このグラフからの表示条件固定には未対応です。立体図の表示へ切り替えて固定してください。".into());
+            return Err(
+                "表・グラフからの表示条件固定には未対応です。主領域の図を選択してください。".into(),
+            );
         }
-        let diagram = match self.ui.view.view_mode {
+        let view = self.active_viewport();
+        let diagram = match view.view_mode {
             ViewMode::Shape => ReferenceDiagram::Shape,
             ViewMode::Deformed => ReferenceDiagram::Deformed,
             ViewMode::Force => ReferenceDiagram::Force,
@@ -675,15 +680,14 @@ impl App {
             ViewMode::LumpedTimeHistory => ReferenceDiagram::LumpedTimeHistory,
             _ => return Err("この表示種別の結果参照固定には未対応です。形状・変形・応力・モード・ヒンジ・時刻歴の図で固定してください。".into()),
         };
-        let frame = self.ui.scoped.frame_target.map(|target| match target {
+        let frame = view.frame_target.map(|target| match target {
             sepika_core::frame::FrameTarget::Story(id) => ReferenceTarget::Story(id),
             sepika_core::frame::FrameTarget::Axis { group, axis } => {
                 ReferenceTarget::Axis { group, axis }
             }
         });
-        let force_components = (diagram == ReferenceDiagram::Force).then(|| {
-            crate::viewer::ForceComponent::ALL.map(|c| self.ui.view.force_components.is_on(c))
-        });
+        let force_components = (diagram == ReferenceDiagram::Force)
+            .then(|| crate::viewer::ForceComponent::ALL.map(|c| view.force_components.is_on(c)));
         let unit = match diagram {
             ReferenceDiagram::Force => "kN・kN·m",
             ReferenceDiagram::Deformed
@@ -696,27 +700,30 @@ impl App {
             force_components,
             frame,
             component: (diagram == ReferenceDiagram::Force).then(|| {
-                self.ui
-                    .view
-                    .force_components
+                view.force_components
                     .selected()
                     .map(|c| format!("{c:?}"))
                     .collect::<Vec<_>>()
                     .join("/")
             }),
             unit: Some(unit.into()),
-            direction: matches!(diagram, ReferenceDiagram::Hinge)
-                .then(|| format!("{:?}", self.core.scoped.pushover_view_dir)),
+            direction: matches!(diagram, ReferenceDiagram::Hinge).then(|| {
+                format!(
+                    "{:?}",
+                    view.pushover_dir
+                        .unwrap_or(self.core.scoped.pushover_view_dir)
+                )
+            }),
             mode: matches!(
                 diagram,
                 ReferenceDiagram::Mode | ReferenceDiagram::LumpedMode
             )
-            .then_some(self.ui.scoped.view_mode_idx as u32),
+            .then_some(view.view_mode_idx as u32),
             step: match diagram {
                 ReferenceDiagram::TimeHistory | ReferenceDiagram::LumpedTimeHistory => {
-                    Some(self.ui.scoped.th_frame as u32)
+                    Some(view.th_frame as u32)
                 }
-                ReferenceDiagram::Hinge => self.ui.scoped.hinge_step.map(|step| step as u32),
+                ReferenceDiagram::Hinge => view.hinge_step.map(|step| step as u32),
                 _ => None,
             },
             position: None,
@@ -788,8 +795,8 @@ impl App {
         if playback.is_some_and(|(_, time)| !time.is_finite()) {
             return Err("参照するステップの時刻は取得不能です。".into());
         }
-        self.show_reference(&reference.target, view, true)?;
-        self.ui.scoped.frame_target = if reveal {
+        self.show_reference_at(&reference.target, view, true, Tab::Results)?;
+        self.ui.view.frame_target = if reveal {
             None
         } else {
             reference.display.frame.map(|frame| match frame {
@@ -819,72 +826,32 @@ impl App {
             }
         }
         if let Some(mode) = reference.display.mode {
-            self.ui.scoped.view_mode_idx = mode as usize;
+            self.ui.view.view_mode_idx = mode as usize;
         }
         if let Some(step) = reference.display.step {
             if reference.display.diagram == Some(ReferenceDiagram::Hinge) {
-                self.ui.scoped.hinge_step = Some(step as usize);
+                self.ui.view.hinge_step = Some(step as usize);
             } else {
-                self.ui.scoped.th_frame = step as usize;
+                self.ui.view.th_frame = step as usize;
             }
         }
         if reference.display.diagram == Some(ReferenceDiagram::Hinge) {
-            self.ui.scoped.hinge_step = reference.display.step.map(|step| step as usize);
+            self.ui.view.hinge_step = reference.display.step.map(|step| step as usize);
         }
         match reference.kind {
-            ResultInputKey::Pushover(dir) => self.set_pushover_view_dir(dir),
-            ResultInputKey::TimeHistory(id) => {
-                if let Some(result) = self
-                    .core
-                    .scoped
-                    .results
-                    .as_ref()
-                    .and_then(|b| b.time_history_for(id))
-                    .cloned()
-                {
-                    self.set_spatial_time_history_view(id, &result);
-                }
-            }
-            ResultInputKey::LumpedTimeHistory(id) => {
-                if let Some(result) = self
-                    .core
-                    .scoped
-                    .results
-                    .as_ref()
-                    .and_then(|b| b.lumped_result_for(id))
-                    .cloned()
-                {
-                    self.set_lumped_mass_view(Some(id), &result);
-                }
-            }
+            ResultInputKey::Pushover(dir) => self.ui.view.viewport.pushover_dir = Some(dir),
+            ResultInputKey::TimeHistory(id) => self.bind_spatial_case_to_active_view(id),
+            ResultInputKey::LumpedTimeHistory(id) => self.bind_lumped_case_to_active_view(id),
             _ => {}
         }
         if let Some((frame, time)) = playback {
-            self.ui.scoped.th_frame = frame;
-            self.ui.scoped.th_play_time = time;
-            self.ui.scoped.th_playing = false;
+            self.ui.view.th_frame = frame;
+            self.ui.view.th_play_time = time;
+            self.ui.view.th_playing = false;
         }
         if let Some(key) = static_key {
-            self.ui.scoped.nav.focus_result = Some(key);
-            self.core.scoped.last_static = Some(key);
-            if let Some(bundle) = self.core.scoped.results.as_mut() {
-                let result = match key {
-                    StaticKey::Case(key) => bundle
-                        .statics
-                        .iter()
-                        .find(|(k, _)| *k == key)
-                        .map(|(_, result)| result),
-                    StaticKey::Combo(index) => bundle.combos.get(index).map(|(_, result)| result),
-                };
-                if let Some(result) = result {
-                    bundle.member_forces = result.member_forces.clone();
-                    bundle.panel_moments = result.panel_moments.clone();
-                }
-            }
-        }
-        if matches!(view, ReferenceView::Diagram) {
-            self.ui.view.active_tab = Tab::Results;
-            self.ui.view.results_view = ResultsView::Spatial;
+            self.ui.view.viewport.static_key = Some(key);
+            self.ui.view.viewport.static_unavailable = false;
         }
         Ok(())
     }
@@ -1039,7 +1006,7 @@ impl App {
             if let Some(id) = self.ui.scoped.nav.focus_load_case {
                 selected.push(ReferenceTarget::LoadCase(id));
             }
-            if let Some(frame) = self.ui.scoped.frame_target {
+            if let Some(frame) = self.active_viewport().frame_target {
                 selected.push(match frame {
                     sepika_core::frame::FrameTarget::Story(id) => ReferenceTarget::Story(id),
                     sepika_core::frame::FrameTarget::Axis { group, axis } => {
@@ -1063,6 +1030,24 @@ impl App {
         reference: &TargetReference,
         view: ReferenceView,
         reveal: bool,
+    ) -> Result<(), String> {
+        let destination = if matches!(
+            reference.target,
+            ReferenceTarget::Vibration(_) | ReferenceTarget::LumpedVibration(_)
+        ) {
+            Tab::Results
+        } else {
+            Tab::Model
+        };
+        self.show_reference_at(reference, view, reveal, destination)
+    }
+
+    fn show_reference_at(
+        &mut self,
+        reference: &TargetReference,
+        view: ReferenceView,
+        reveal: bool,
+        destination: Tab,
     ) -> Result<(), String> {
         let target = self.resolve_target_reference(reference)?;
         match (target, view) {
@@ -1103,8 +1088,12 @@ impl App {
         if self.reference_hidden(target) && !reveal {
             return Err("対象は現在の階・通りで非表示です。「対象を表示」で表示できます。".into());
         }
+        if matches!(view, ReferenceView::Diagram) {
+            self.ui.view.active_tab = destination;
+            self.show_workspace_reference_diagram();
+        }
         if reveal {
-            self.ui.scoped.frame_target = None;
+            self.ui.view.frame_target = None;
         }
         self.ui.scoped.opened_reference = Some(reference.clone());
         self.ui.scoped.nav.focus_section = None;
@@ -1137,10 +1126,10 @@ impl App {
             }
             ReferenceTarget::Material(id) => self.ui.scoped.nav.focus_material = Some(id),
             ReferenceTarget::Story(id) => {
-                self.ui.scoped.frame_target = Some(sepika_core::frame::FrameTarget::Story(id))
+                self.ui.view.frame_target = Some(sepika_core::frame::FrameTarget::Story(id))
             }
             ReferenceTarget::Axis { group, axis } => {
-                self.ui.scoped.frame_target =
+                self.ui.view.frame_target =
                     Some(sepika_core::frame::FrameTarget::Axis { group, axis })
             }
             ReferenceTarget::LoadCase(id) => self.ui.scoped.nav.focus_load_case = Some(id),
@@ -1157,13 +1146,15 @@ impl App {
             ReferenceTarget::Vibration(id) => {
                 self.ui.scoped.nav.focus_vibration_case = Some(id);
                 if matches!(view, ReferenceView::Diagram) {
-                    self.focus_spatial_vibration_case(id);
+                    self.bind_spatial_case_to_active_view(id);
+                    self.ui.view.viewport.view_mode = crate::viewer::ViewMode::TimeHistory;
                 }
             }
             ReferenceTarget::LumpedVibration(id) => {
                 self.ui.scoped.nav.focus_lumped_vibration_case = Some(id);
                 if matches!(view, ReferenceView::Diagram) {
-                    self.focus_lumped_vibration_case(id);
+                    self.bind_lumped_case_to_active_view(id);
+                    self.ui.view.viewport.view_mode = crate::viewer::ViewMode::LumpedTimeHistory;
                 }
             }
         }
@@ -1173,11 +1164,13 @@ impl App {
                     target,
                     ReferenceTarget::Vibration(_) | ReferenceTarget::LumpedVibration(_)
                 ) {
-                    self.ui.view.active_tab = Tab::Model;
+                    self.ui.view.active_tab = destination;
                     self.ui.view.view_mode = crate::viewer::ViewMode::Shape;
                 }
+                self.show_workspace_reference_diagram();
             }
             ReferenceView::Table => {
+                self.enter_workspace();
                 self.ui.view.bottom_dock_open = true;
                 self.ui.view.bottom_tab = BottomTab::Model;
                 self.ui.view.model_tab = match target {
@@ -1191,6 +1184,11 @@ impl App {
                         ModelTab::Nodes
                     }
                 };
+                self.promote_table(if self.ui.view.bottom_tab == BottomTab::Loads {
+                    super::workspace::Content::Loads
+                } else {
+                    super::workspace::Content::Model
+                });
             }
             ReferenceView::Detail => {
                 self.ui.view.right_dock_open = true;
@@ -1201,7 +1199,7 @@ impl App {
     }
 
     fn reference_hidden(&self, target: ReferenceTarget) -> bool {
-        self.reference_hidden_in(target, self.ui.scoped.frame_target)
+        self.reference_hidden_in(target, self.ui.view.frame_target)
     }
 
     fn reference_hidden_in(
@@ -1847,7 +1845,7 @@ mod tests {
         let reference = app
             .target_reference(ReferenceTarget::Member(ElemId(2)))
             .unwrap();
-        app.ui.scoped.frame_target = Some(sepika_core::frame::FrameTarget::Story(
+        app.ui.view.frame_target = Some(sepika_core::frame::FrameTarget::Story(
             sepika_core::ids::StoryId(0),
         ));
         let input = app.input_reference();
@@ -1856,10 +1854,10 @@ mod tests {
             .unwrap_err()
             .contains("非表示"));
         assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
-        assert!(app.ui.scoped.frame_target.is_some());
+        assert!(app.ui.view.frame_target.is_some());
         app.show_reference(&reference, ReferenceView::Diagram, true)
             .unwrap();
-        assert!(app.ui.scoped.frame_target.is_none());
+        assert!(app.ui.view.frame_target.is_none());
         assert_eq!(app.ui.scoped.selection.active_member(), Some(ElemId(2)));
         assert_eq!(app.input_reference(), input);
     }
@@ -1995,7 +1993,7 @@ mod tests {
         let revision = app.core.scoped.undo.revision();
         app.ui.view.view_mode = crate::viewer::ViewMode::Shape;
         app.ui.view.force_components = crate::viewer::ForceComponents::PRESET_M;
-        app.ui.scoped.frame_target = Some(sepika_core::frame::FrameTarget::Story(
+        app.ui.view.frame_target = Some(sepika_core::frame::FrameTarget::Story(
             sepika_core::ids::StoryId(0),
         ));
         app.show_result_reference(&reference, ReferenceView::Diagram, false)
@@ -2005,7 +2003,7 @@ mod tests {
             app.ui.view.force_components,
             crate::viewer::ForceComponents::PRESET_N
         );
-        assert!(app.ui.scoped.frame_target.is_none());
+        assert!(app.ui.view.frame_target.is_none());
         assert_eq!(app.input_reference(), input);
         assert_eq!(app.core.scoped.undo.revision(), revision);
         assert_eq!(
@@ -2217,7 +2215,10 @@ mod tests {
         app.ui.view.results_view = ResultsView::TimeHistory;
         app.show_result_reference(&reference, ReferenceView::Diagram, false)
             .unwrap();
-        assert_eq!(app.ui.view.results_view, ResultsView::Spatial);
+        assert_eq!(
+            app.active_workspace_content(),
+            super::super::workspace::Content::Drawing
+        );
         assert_eq!(app.ui.view.active_tab, Tab::Results);
         assert_eq!(app.ui.view.view_mode, crate::viewer::ViewMode::Force);
     }
@@ -2320,7 +2321,7 @@ mod tests {
                 app.ui.view.view_mode = crate::viewer::ViewMode::TimeHistory;
                 ResultInputKey::TimeHistory(VibrationCaseId(0))
             };
-            app.ui.scoped.th_frame = 1;
+            app.ui.view.th_frame = 1;
             let target = app
                 .target_reference(ReferenceTarget::Member(ElemId(0)))
                 .unwrap();
@@ -2329,14 +2330,14 @@ mod tests {
                 .unwrap();
             let before = app.input_reference();
             let revision = app.core.scoped.undo.revision();
-            app.ui.scoped.th_frame = 2;
-            app.ui.scoped.th_play_time = times[2];
-            app.ui.scoped.th_playing = true;
+            app.ui.view.th_frame = 2;
+            app.ui.view.th_play_time = times[2];
+            app.ui.view.th_playing = true;
             app.show_result_reference(&reference, ReferenceView::Diagram, false)
                 .unwrap();
-            assert_eq!(app.ui.scoped.th_frame, 1);
-            assert_eq!(app.ui.scoped.th_play_time, times[1]);
-            assert!(!app.ui.scoped.th_playing);
+            assert_eq!(app.ui.view.th_frame, 1);
+            assert_eq!(app.ui.view.th_play_time, times[1]);
+            assert!(!app.ui.view.th_playing);
             assert_eq!(app.input_reference(), before);
             assert_eq!(app.core.scoped.undo.revision(), revision);
             assert!(app.resolve_result_reference(&reference).is_ok());
@@ -2832,5 +2833,208 @@ mod tests {
         assert_eq!(loaded.input_reference(), input);
         assert!(loaded.resolve_target_reference(&member).is_ok());
         assert!(loaded.resolve_target_reference(&node).is_ok());
+    }
+    #[test]
+    fn issue975_saved_spatial_and_lumped_reference_rebinds_the_destination_before_restoring_time() {
+        for lumped in [false, true] {
+            let mut app = sample();
+            calculate(&mut app);
+            let times = vec![0.0, 0.27, 0.91];
+            for value in [1.0, 2.0] {
+                if lumped {
+                    let input = app
+                        .lumped_time_history_input(vec![0.0, value, -value], format!("波{value}"));
+                    let mut result = super::super::tests::dummy_lumped(value, true);
+                    result.response.as_mut().unwrap().time = times.clone();
+                    app.apply_lumped_mass_result(Ok(result), Some(input.source));
+                } else {
+                    let input = app
+                        .time_history_input(raw_wave(value), format!("波{value}"))
+                        .unwrap();
+                    let mut result = super::super::tests::dummy_th(times.clone());
+                    result.peak_disp = vec![[value; 6]; app.core.model.nodes.len()];
+                    result.recording = Some(sepika_solver::dynamic::timehistory::ThRecording {
+                        frame_time: times.clone(),
+                        ..Default::default()
+                    });
+                    app.apply_time_history_result(Ok(result), input.source);
+                }
+            }
+            app.ui.view.active_tab = Tab::Results;
+            app.enter_workspace();
+            app.ui.view.workspace.placement.arrangement =
+                super::super::workspace::Arrangement::Horizontal;
+            app.ui.view.workspace.placement.contents = [
+                super::super::workspace::Content::Drawing,
+                super::super::workspace::Content::Results,
+            ];
+            app.ui.view.results_view = if lumped {
+                ResultsView::LumpedMass
+            } else {
+                ResultsView::TimeHistory
+            };
+            app.ui.view.view_mode = if lumped {
+                crate::viewer::ViewMode::LumpedTimeHistory
+            } else {
+                crate::viewer::ViewMode::TimeHistory
+            };
+            app.ui.view.th_frame = 1;
+            let kind = if lumped {
+                ResultInputKey::LumpedTimeHistory(LumpedVibrationCaseId(1))
+            } else {
+                ResultInputKey::TimeHistory(VibrationCaseId(1))
+            };
+            let target = app
+                .target_reference(ReferenceTarget::Member(ElemId(0)))
+                .unwrap();
+            let reference = app
+                .result_reference(target, kind, app.current_display_conditions().unwrap())
+                .unwrap();
+            let mut previous = app.ui.view.viewport.clone();
+            if lumped {
+                previous.select_lumped_case(&app, LumpedVibrationCaseId(0));
+            } else {
+                previous.select_spatial_case(&app, VibrationCaseId(0));
+            }
+            app.ui.view.viewport = previous.clone();
+            app.ui.view.workspace.secondary = previous;
+            app.ui.view.th_playing = true;
+            if lumped {
+                let result = app
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .unwrap()
+                    .lumped_result_for(LumpedVibrationCaseId(0))
+                    .unwrap()
+                    .clone();
+                app.set_lumped_mass_view(Some(LumpedVibrationCaseId(0)), &result);
+            } else {
+                let result = app
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .unwrap()
+                    .time_history_for(VibrationCaseId(0))
+                    .unwrap()
+                    .clone();
+                app.set_spatial_time_history_view(VibrationCaseId(0), &result);
+            }
+            let before = app.input_reference();
+            let results_before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+            let graph_kind = app.ui.view.results_view;
+            app.show_result_reference(&reference, ReferenceView::Diagram, false)
+                .unwrap();
+            assert_eq!(app.ui.view.workspace.placement.active, 0);
+            assert_eq!(
+                app.active_workspace_content(),
+                super::super::workspace::Content::Drawing
+            );
+            assert_eq!(app.ui.view.th_frame, 1);
+            assert_eq!(app.ui.view.th_play_time, times[1]);
+            assert!(!app.ui.view.th_playing);
+            if lumped {
+                assert_eq!(
+                    app.ui
+                        .view
+                        .viewport
+                        .lumped_result(&app)
+                        .unwrap()
+                        .modal
+                        .period[0],
+                    2.0
+                );
+                assert_eq!(
+                    app.ui
+                        .view
+                        .workspace
+                        .secondary
+                        .lumped_result(&app)
+                        .unwrap()
+                        .modal
+                        .period[0],
+                    1.0
+                );
+            } else {
+                assert_eq!(
+                    app.ui.view.viewport.spatial_result(&app).unwrap().peak_disp[0][0],
+                    2.0
+                );
+                assert_eq!(
+                    app.ui
+                        .view
+                        .workspace
+                        .secondary
+                        .spatial_result(&app)
+                        .unwrap()
+                        .peak_disp[0][0],
+                    1.0
+                );
+            }
+            assert_eq!(app.input_reference(), before);
+            assert_eq!(app.ui.view.results_view, graph_kind);
+            assert_eq!(
+                rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
+                results_before
+            );
+        }
+    }
+    #[test]
+    fn issue975_reference_diagram_preserves_the_adjacent_graph_kind_and_static_case() {
+        let mut app = sample();
+        let first = calculate(&mut app);
+        let second_id = app.core.model.load_cases[1].id;
+        app.run_linear_static(second_id);
+        app.ui.view.view_mode = crate::viewer::ViewMode::Force;
+        let target = app
+            .target_reference(ReferenceTarget::Member(ElemId(0)))
+            .unwrap();
+        let reference = app
+            .result_reference(
+                target,
+                ResultInputKey::Static(StaticCaseKey::User(second_id)),
+                app.current_display_conditions().unwrap(),
+            )
+            .unwrap();
+        let ResultInputKey::Static(first_key) = first.kind else {
+            unreachable!()
+        };
+        app.select_displayed_result(StaticKey::Case(first_key));
+        app.ui.view.active_tab = Tab::Results;
+        app.enter_workspace();
+        app.ui.view.workspace.placement.arrangement =
+            super::super::workspace::Arrangement::Horizontal;
+        app.ui.view.workspace.placement.contents = [
+            super::super::workspace::Content::Drawing,
+            super::super::workspace::Content::Results,
+        ];
+        app.ui.view.results_view = ResultsView::Pushover;
+        app.ui.view.workspace.secondary.static_key = Some(StaticKey::Case(first_key));
+        let before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+        app.show_result_reference(&reference, ReferenceView::Diagram, false)
+            .unwrap();
+        assert_eq!(app.ui.view.results_view, ResultsView::Pushover);
+        assert_eq!(
+            app.ui.view.workspace.placement.contents[1],
+            super::super::workspace::Content::Results
+        );
+        assert_eq!(
+            app.ui.view.viewport.static_key,
+            Some(StaticKey::Case(StaticCaseKey::User(second_id)))
+        );
+        assert_eq!(
+            app.ui.view.workspace.secondary.static_key,
+            Some(StaticKey::Case(first_key))
+        );
+        assert_eq!(
+            app.core.scoped.last_static,
+            Some(StaticKey::Case(first_key))
+        );
+        assert_eq!(
+            rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
+            before
+        );
     }
 }

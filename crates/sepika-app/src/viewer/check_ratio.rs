@@ -404,7 +404,8 @@ pub(super) fn build_tooltip_rows(positions: &[PositionCheck]) -> (Vec<CheckKind>
 
 /// 検定比図を描く。`pts` は `viewer_panel` で計算済みの節点スクリーン座標
 /// （`app.core.model.nodes` と同じ順序）。
-pub(super) fn draw_check_ratio(
+pub(super) fn draw_check_ratio_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
     app: &App,
     model: &sepika_core::model::Model,
@@ -463,9 +464,9 @@ pub(super) fn draw_check_ratio(
             theme::GRAY_600,
         );
     }
-    let filter = app.ui.view.check_ratio_filter;
-    let markers = app.ui.view.check_ratio_markers;
-    let label_all = app.ui.view.check_ratio_label_all;
+    let filter = view.check_ratio_filter;
+    let markers = view.check_ratio_markers;
+    let label_all = view.check_ratio_label_all;
 
     let elem_ratios = member_ratios_for_filter(&results.member_checks, filter);
     let incomplete_nodes =
@@ -960,6 +961,26 @@ fn draw_legend(
         );
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_check_ratio(
+    painter: &egui::Painter,
+    app: &App,
+    model: &sepika_core::model::Model,
+    pts: &[egui::Pos2],
+    frame_filter: super::FrameFilter,
+) {
+    draw_check_ratio_with_view(
+        &app.ui.view.viewport,
+        painter,
+        app,
+        model,
+        pts,
+        frame_filter,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

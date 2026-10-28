@@ -333,7 +333,8 @@ fn wall_force_axis(
 /// 6 成分同時でも直交 2 面に分かれて重なりが減る。理論上ゼロの成分は描かない
 /// （[`is_significant`]）。
 #[allow(clippy::too_many_arguments)]
-pub(super) fn draw_force_diagram(
+pub(super) fn draw_force_diagram_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
     app: &App,
     model: &Model,
@@ -349,7 +350,7 @@ pub(super) fn draw_force_diagram(
         return;
     };
     let mut maxes = [0.0_f64; 6];
-    for (_, mf) in &results.member_forces {
+    for (_, mf) in view.member_forces(app) {
         for (_, f) in &mf.at {
             for (m, v) in maxes.iter_mut().zip(f.iter()) {
                 *m = m.max(v.abs());
@@ -362,7 +363,8 @@ pub(super) fn draw_force_diagram(
     for c in components.selected() {
         let max_abs = display_scales[c.force_index()];
         if max_abs > 0.0 {
-            draw_component(
+            draw_component_with_view(
+                view,
                 painter,
                 app,
                 model,
@@ -382,14 +384,15 @@ pub(super) fn draw_force_diagram(
     draw_force_legend(
         painter,
         &legend_rows,
-        app.ui.view.diagram_contour,
-        app.ui.view.contour_colormap,
+        view.diagram_contour,
+        view.contour_colormap,
     );
 }
 
 /// 1 成分ぶんの応力図を全部材について描く（[`draw_force_diagram`] の本体）。
 #[allow(clippy::too_many_arguments)]
-fn draw_component(
+fn draw_component_with_view(
+    view: &crate::viewer::ViewportState,
     painter: &egui::Painter,
     app: &App,
     model: &Model,
@@ -399,7 +402,7 @@ fn draw_component(
     disp: Option<&[[f64; 6]]>,
     deform_scale: f64,
     proj: &Projector,
-    results: &crate::app::ResultsBundle,
+    _results: &crate::app::ResultsBundle,
     frame_filter: super::FrameFilter,
     frame_normal: Option<[f64; 3]>,
 ) {
@@ -408,13 +411,13 @@ fn draw_component(
     let plot_sign = component.plot_sign();
     let amp_world = 60.0 / max_abs / scale as f64;
 
-    let contour = app.ui.view.diagram_contour;
-    let colormap = app.ui.view.contour_colormap;
+    let contour = view.diagram_contour;
+    let colormap = view.contour_colormap;
     let fill_alpha: u8 = if contour { 160 } else { 60 };
     let outline_color = component.color();
     let outline_width: f32 = if contour { 1.0 } else { 1.5 };
 
-    for (elem_id, mf) in &results.member_forces {
+    for (elem_id, mf) in view.member_forces(app) {
         if !frame_filter.shows(*elem_id) {
             continue;
         }
@@ -463,7 +466,7 @@ fn draw_component(
             None => ey,
         };
         let deflection: Option<BeamDeflection> =
-            if app.ui.view.show_beam_interpolation && elem.kind == ElementKind::Beam {
+            if view.show_beam_interpolation && elem.kind == ElementKind::Beam {
                 let n0 = elem.nodes[0].index();
                 let n1 = elem.nodes[1].index();
                 disp.and_then(|d| {
@@ -570,7 +573,7 @@ fn draw_component(
             egui::Stroke::new(outline_width, outline_color),
         ));
 
-        if app.ui.view.diagram_values {
+        if view.diagram_values {
             draw_value_labels(painter, mf, component, max_abs, plot_sign, &to_screen);
         }
     }

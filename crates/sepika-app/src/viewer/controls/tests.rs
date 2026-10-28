@@ -179,7 +179,7 @@ fn range_menu_keeps_categories_cyclic_navigation_and_camera_reset() {
     h.app.ui.view.camera.zoom = 7.0;
     h.click_text(&output, "▶");
     assert_eq!(
-        h.app.ui.scoped.frame_target,
+        h.app.ui.view.frame_target,
         Some(FrameTarget::Axis { group: 0, axis: 0 })
     );
     assert_eq!(h.app.ui.view.camera.pan, [0.0, 0.0]);
@@ -187,7 +187,7 @@ fn range_menu_keeps_categories_cyclic_navigation_and_camera_reset() {
     let output = h.settled();
     h.click_text(&output, "◀");
     assert_eq!(
-        h.app.ui.scoped.frame_target,
+        h.app.ui.view.frame_target,
         h.app
             .core
             .model
@@ -224,7 +224,7 @@ fn long_range_names_are_truncated_without_wrapping_and_available_in_menu() {
     let mut h = Harness::new();
     h.width = 320.0;
     h.app.core.model.axes[0].axes[0].name = "長い通り名称".repeat(30);
-    h.app.ui.scoped.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
+    h.app.ui.view.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
     let full_name = format!(
         "{} / {}",
         h.app.core.model.axes[0].name, h.app.core.model.axes[0].axes[0].name
@@ -370,8 +370,8 @@ fn mode_menu_includes_conditional_results_and_keeps_time_history_playback() {
     assert_eq!(h.app.ui.view.view_mode, ViewMode::TimeHistory);
     assert!(text_rect(&output, "速度:").is_some());
     h.click_text(&output, "▶");
-    assert!(h.app.ui.scoped.th_playing);
-    assert!(h.app.ui.scoped.th_play_time > 0.0);
+    assert!(h.app.ui.view.th_playing);
+    assert!(h.app.ui.view.th_play_time > 0.0);
     assert_eq!(state(&h.app), before);
 }
 
@@ -467,7 +467,7 @@ fn zooming_model_and_frame_views_preserves_model_undo_and_result_state() {
         }
         for in_frame in [false, true] {
             if in_frame && !empty {
-                h.app.ui.scoped.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
+                h.app.ui.view.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
             }
             h.settled();
             h.app.ui.view.camera.pan = [23.0, -17.0];
@@ -494,7 +494,7 @@ fn fit_to_view_preserves_direction_selection_and_results_in_model_and_frame_view
     ] {
         let mut h = Harness::new();
         h.viewer = true;
-        h.app.ui.scoped.frame_target = target;
+        h.app.ui.view.frame_target = target;
         h.app.ui.view.camera.turntable_drag(120.0, -30.0);
         h.app.ui.view.view_mode = ViewMode::Force;
         h.app.ui.view.deform_scale_factor = 2.5;
@@ -549,7 +549,7 @@ fn fit_to_view_preserves_direction_selection_and_results_in_model_and_frame_view
                 assert_eq!(h.app.ui.view.camera.rot, camera.rot);
                 assert_eq!(h.app.ui.view.camera.yaw, camera.yaw);
                 assert_eq!(h.app.ui.view.camera.pitch, camera.pitch);
-                assert_eq!(h.app.ui.scoped.frame_target, target);
+                assert_eq!(h.app.ui.view.frame_target, target);
                 assert_eq!(h.app.ui.scoped.selection.nodes(), selected);
                 assert_eq!(h.app.ui.view.view_mode, ViewMode::Force);
                 assert_eq!(
@@ -577,7 +577,7 @@ fn fit_to_view_keeps_empty_single_node_and_empty_frame_fallbacks_valid() {
             h.app.core.model.constraints.clear();
             h.app.core.model.stories.clear();
             let target = in_frame.then_some(FrameTarget::Axis { group: 0, axis: 0 });
-            h.app.ui.scoped.frame_target = target;
+            h.app.ui.view.frame_target = target;
             if let Some(target) = target {
                 let frame = sepika_core::frame::build_frame(&h.app.core.model, target).unwrap();
                 assert!(super::super::frame_bbox(&h.app.core.model, &frame).is_none());
@@ -592,7 +592,7 @@ fn fit_to_view_keeps_empty_single_node_and_empty_frame_fallbacks_valid() {
             assert_eq!(h.app.ui.view.camera.pan, [0.0, 0.0]);
             assert_eq!(h.app.ui.view.camera.zoom, 3.0);
             assert_eq!(h.app.ui.view.camera.rot, camera.rot);
-            assert_eq!(h.app.ui.scoped.frame_target, target);
+            assert_eq!(h.app.ui.view.frame_target, target);
             assert!(h.app.ui.view.camera.rot.iter().all(|v| v.is_finite()));
             assert_eq!(state(&h.app), before);
         }

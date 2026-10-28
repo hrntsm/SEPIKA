@@ -24,8 +24,6 @@ fn ownership_job(app: &mut App, result: Option<JobResult>) {
         started: SystemTime::now(),
         input: app.job_input(),
         rx,
-        #[cfg(feature = "gui")]
-        jump_on_success: None,
     });
     if let Some(result) = result {
         tx.send(result).unwrap();
@@ -797,8 +795,6 @@ fn time_history_ownership_rejection_failure_and_disconnection_preserve_results()
             {
                 app.ui.view.active_tab = Tab::Model;
                 app.ui.view.results_view = ResultsView::Spatial;
-                app.core.scoped.job.as_mut().unwrap().jump_on_success =
-                    Some((Tab::Results, ResultsView::TimeHistory));
             }
             match failure {
                 0 => {
