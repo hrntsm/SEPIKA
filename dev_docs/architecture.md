@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-SEPIKA は 13 のクレートから成る階層型アーキテクチャで構成されています。
+SEPIKA は 14 のクレートから成る階層型アーキテクチャで構成されています。
 
 ```
 Layer 0: sepika-core（基本データ構造・DOF 管理・荷重組合せ・壁解析モデル生成）、sepika-math（疎行列・ソルバ）、
@@ -11,6 +11,7 @@ Layer 3: sepika-element（梁・板・仕口パネル要素）
 Layer 4: sepika-solver（各種解析）、sepika-io（結果 I/O）
 Layer 5: sepika-design-jp（日本仕様設計計算）
 Layer 6: sepika-job（解析前処理・解析条件・解析の純粋計算）
+         sepika-ai-connection（GUI接続のパイプ・行フレーム・要求応答の搬送）
 Layer 7: sepika-mcp（MCP サーバ）、sepika-app（GUI アプリケーション）
 ```
 
@@ -42,6 +43,7 @@ cargo run -p xtask -- check-deps
 | `sepika-io` | 結果 I/O |
 | `sepika-edit` | 編集トランザクション |
 | `sepika-job` | 解析前処理・解析条件・解析の純粋計算（GUI と MCP の共通下層） |
+| `sepika-ai-connection` | GUI/MCP間のローカル通信。モデル・許可・受理台帳はGUIが所有 |
 | `sepika-mcp` | MCP サーバ |
 | `sepika-app` | GUI アプリケーション |
 
