@@ -538,10 +538,11 @@ impl App {
                     quantities.push(quantity.clone());
                 }
                 let state=self.ai_calculation_state(s,&expected);
-                let verification=self.ai_verification(s,&expected);
-                let submitted=Submission{input:expected.clone(),explanation:submission.explanation,unchecked:submission.unchecked,references:submission.references,quantity_references:quantities,calculation_state:state,verification,submitted:SystemTime::now()};
+                let run_index=self.ai_latest_run_index(s,&expected);
+                let verification=self.ai_verification_at(s,run_index);
+                let submitted=Submission{receipt_id:request.id.clone(),run_index,input:expected.clone(),explanation:submission.explanation,unchecked:submission.unchecked,references:submission.references,quantity_references:quantities,calculation_state:state,verification,submitted:SystemTime::now()};
                 self.studies.items[s].ai.tasks.iter_mut().find(|t|t.id==task_id).unwrap().submissions.push(submitted.clone());
-                json!({"status":"submitted","submission":{"input":submitted.input,"calculation_state":submitted.calculation_state,"verification":submitted.verification,"result_reference_count":submitted.references.len(),"quantity_reference_count":submitted.quantity_references.len(),"submitted":submitted.submitted},"notice":"成果提出は計算成功・検定合格・人による採用とは別です"})
+                json!({"status":"submitted","submission":{"input":submitted.input,"run_index":submitted.run_index,"calculation_state":submitted.calculation_state,"verification":submitted.verification,"result_reference_count":submitted.references.len(),"quantity_reference_count":submitted.quantity_references.len(),"submitted":submitted.submitted},"notice":"成果提出は計算成功・検定合格・人による採用とは別です"})
             }
             _=>return Err(reject("unsupported_operation","この操作は公開していません。本案更新・採用・警告承諾・取消・任意ファイル操作は実行できません")),
         };
@@ -629,7 +630,7 @@ impl App {
                 .map_err(|e| reject("receipt_invalid", e.to_string()))?;
             if matches!(
                 request.operation.as_str(),
-                "begin_request" | "create_comparison" | "assign_section" | "calculate" | "submit"
+                "begin_request" | "create_comparison" | "assign_section" | "calculate"
             ) {
                 return Ok(());
             }
@@ -647,8 +648,14 @@ impl App {
                     "この接続では受理済み応答内の保存旧版を閲覧できません",
                 ));
             }
-            self.ai_read_input(s, p, &expected)?;
+            if request.operation != "submit" {
+                self.ai_read_input(s, p, &expected)?;
+            }
             match request.operation.as_str() {
+                "submit" => {
+                    self.ai_validate_submission(s, receipt, &expected, history)?;
+                    return Ok(());
+                }
                 "receipt" => {
                     let id: Id = args(&request)?;
                     receipt = self.studies.items[s]
@@ -732,8 +739,14 @@ impl App {
                 "基準案の編集は許可されていません",
             ));
         }
-        if self.studies.running.as_ref().is_some_and(|r| r.study == s) {
-            return Err(reject("calculation_busy", "この検討は計算中です"));
+        let proposal = self.ai_proposal_reference(s, p).proposal;
+        if self
+            .studies
+            .running
+            .as_ref()
+            .is_some_and(|r| r.study == s && r.input.references.proposal == proposal)
+        {
+            return Err(reject("calculation_busy", "この案は計算中です"));
         }
         let assign: Assign = args(request)?;
         if assign.targets.is_empty() {
@@ -866,11 +879,20 @@ impl App {
             })
     }
 
-    fn ai_verification(&self, s: usize, input: &InputReference) -> Verification {
-        let Some(run) = self.studies.items[s].runs.iter().rev().find(|r| {
+    fn ai_latest_run_index(&self, s: usize, input: &InputReference) -> Option<usize> {
+        self.studies.items[s].runs.iter().rposition(|r| {
             Self::ai_input_reference(&r.input) == *input
                 || Self::ai_input_reference(&r.prepared) == *input
-        }) else {
+        })
+    }
+
+    #[cfg(test)]
+    fn ai_verification(&self, s: usize, input: &InputReference) -> Verification {
+        self.ai_verification_at(s, self.ai_latest_run_index(s, input))
+    }
+
+    fn ai_verification_at(&self, s: usize, run_index: Option<usize>) -> Verification {
+        let Some(run) = run_index.and_then(|r| self.studies.items[s].runs.get(r)) else {
             return verification_counts(&comparison::projection::Summary::default(), false, false);
         };
         let fixed = comparison::projection::fixed_members(&self.studies.items[s]);
@@ -880,6 +902,83 @@ impl App {
             unavailable.is_empty(),
             !checks.is_empty(),
         )
+    }
+
+    fn ai_validate_submission(
+        &self,
+        s: usize,
+        receipt: &Receipt,
+        expected: &InputReference,
+        history: bool,
+    ) -> Result<(), Rejection> {
+        let submission = self.studies.items[s]
+            .ai
+            .tasks
+            .iter()
+            .flat_map(|task| &task.submissions)
+            .find(|submission| submission.receipt_id == receipt.id && submission.input == *expected)
+            .ok_or_else(|| reject("submission_missing", "元の受理済み提出がありません"))?;
+        for reference in &submission.references {
+            self.ai_validate_reference(s, expected, reference, history)?;
+        }
+        for quantity in &submission.quantity_references {
+            if quantity.source != *expected
+                || quantity.contract != references::QUANTITY_EVIDENCE_CONTRACT_VERSION
+                || quantity.identity() != quantity.identity
+            {
+                return Err(reject(
+                    "result_unavailable",
+                    "提出した数量根拠の版・範囲・契約が失効しています",
+                ));
+            }
+            quantity
+                .takeoff()
+                .map_err(|e| reject("quantity_unavailable", e))?;
+        }
+        if let Some(index) = submission.run_index {
+            let run = self.studies.items[s]
+                .runs
+                .get(index)
+                .ok_or_else(|| reject("result_unavailable", "提出元の保持計算がありません"))?;
+            if Self::ai_input_reference(&run.input) != *expected
+                && Self::ai_input_reference(&run.prepared) != *expected
+            {
+                return Err(reject(
+                    "result_scope_mismatch",
+                    "提出元の保持計算と入力版が一致しません",
+                ));
+            }
+            if let Some(bundle) = &run.results {
+                let app =
+                    comparison::projection::result_app(&run.prepared, bundle, run.last_static);
+                for (case, _) in &bundle.statics {
+                    app.require_result_input(ResultInputKey::Static(*case))
+                        .map_err(|e| reject("result_unavailable", e))?;
+                }
+                for (name, _) in &bundle.combos {
+                    app.require_result_input(ResultInputKey::Combo(name.clone()))
+                        .map_err(|e| reject("result_unavailable", e))?;
+                }
+                if !bundle.member_checks.is_empty()
+                    || !bundle.joint_checks.is_empty()
+                    || !bundle.wall_checks.is_empty()
+                {
+                    app.require_design_input()
+                        .map_err(|e| reject("result_unavailable", e))?;
+                }
+            } else if submission.calculation_state == "calculated" {
+                return Err(reject("result_unavailable", "提出元の計算結果がありません"));
+            }
+        } else if submission.calculation_state == "calculated" {
+            return Err(reject("result_unavailable", "提出元の保持計算がありません"));
+        }
+        if self.ai_verification_at(s, submission.run_index) != submission.verification {
+            return Err(reject(
+                "result_unavailable",
+                "提出時の検定根拠・評価範囲が失効・変化しています",
+            ));
+        }
+        Ok(())
     }
 
     fn ai_result_view(&self, s: usize, reference: &ResultReference) -> Result<App, Rejection> {

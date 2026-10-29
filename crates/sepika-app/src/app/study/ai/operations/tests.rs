@@ -36,6 +36,278 @@ fn accepted(response: Response) -> Value {
 }
 
 #[test]
+fn only_the_calculating_proposal_is_locked_and_other_proposal_edits_do_not_change_its_input() {
+    let (mut app, s) = fixture();
+    let running = app.create_comparison(s, "計算中".into()).unwrap();
+    let other = app.create_comparison(s, "別案".into()).unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, 0, "begin_request", Value::Null));
+    let started = app.ai_proposal_reference(s, running);
+    app.start_study_calculation(s, running).unwrap();
+    let fixed = app.studies.items[s].fixed.clone();
+    assert_eq!(
+        call(
+            &mut app,
+            s,
+            running,
+            "assign_section",
+            json!({"targets":fixed,"section":2})
+        )
+        .error
+        .unwrap()
+        .code,
+        "calculation_busy"
+    );
+    accepted(call(
+        &mut app,
+        s,
+        other,
+        "assign_section",
+        json!({"targets":fixed,"section":2}),
+    ));
+    assert_eq!(app.ai_proposal_reference(s, running), started);
+    assert_eq!(
+        app.proposal_input(s, other)
+            .model
+            .element(ElemId(2))
+            .unwrap()
+            .section,
+        Some(SectionId(2))
+    );
+    crate::app::study::tests::wait(&mut app);
+    let run = &app.studies.items[s].runs[0];
+    assert_eq!(App::ai_input_reference(&run.input), started);
+    assert_eq!(
+        run.input.model.element(ElemId(2)).unwrap().section,
+        Some(SectionId(1))
+    );
+    assert_eq!(app.studies.active, Location::Main);
+}
+
+#[test]
+fn submitted_receipts_recheck_saved_version_and_original_calculation_even_without_result_references(
+) {
+    for include_reference in [false, true] {
+        let (mut app, s) = fixture();
+        let p = app.create_comparison(s, "提出の比較".into()).unwrap();
+        app.start_study_calculation(s, p).unwrap();
+        crate::app::study::tests::wait(&mut app);
+        permit(&mut app, s, Mode::Comparison);
+        accepted(call(&mut app, s, p, "begin_request", Value::Null));
+        let references = if include_reference {
+            comparison::projection::check_rows(&app.studies.items[s].runs[0].comparison_checks[0])
+                .unwrap()
+                .into_iter()
+                .find_map(|row| row.evidence)
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        assert_eq!(references.len(), usize::from(include_reference));
+        let mut submit = request(
+            &app,
+            s,
+            p,
+            "submit",
+            json!({"explanation":"提出時の計算を参照","unchecked":["採用"],"references":references}),
+        );
+        let submitted = accepted(app.handle_ai_request("client", submit.clone()));
+        assert_eq!(submitted["submission"]["run_index"], 0);
+        let saved_submission =
+            rmp_serde::to_vec_named(&app.studies.items[s].ai.tasks[0].submissions[0]).unwrap();
+        let fixed = app.studies.items[s].fixed.clone();
+        accepted(call(
+            &mut app,
+            s,
+            p,
+            "assign_section",
+            json!({"targets":fixed,"section":2}),
+        ));
+        app.ai_connection.pending = Some("client".into());
+        app.approve_ai_connection(s, Mode::Review, false).unwrap();
+        submit.session = Some(
+            app.ai_connection
+                .permission
+                .as_ref()
+                .unwrap()
+                .session
+                .clone(),
+        );
+        assert_eq!(
+            app.handle_ai_request("client", submit.clone())
+                .error
+                .unwrap()
+                .code,
+            "permission_denied"
+        );
+        assert_eq!(
+            call(&mut app, s, p, "receipt", json!({"id":submit.id}))
+                .error
+                .unwrap()
+                .code,
+            "permission_denied"
+        );
+        permit(&mut app, s, Mode::Review);
+        submit.session = Some(
+            app.ai_connection
+                .permission
+                .as_ref()
+                .unwrap()
+                .session
+                .clone(),
+        );
+        assert_eq!(
+            accepted(app.handle_ai_request("client", submit.clone())),
+            submitted
+        );
+        let other = app.create_comparison(s, "後からの別計算".into()).unwrap();
+        app.start_study_calculation(s, other).unwrap();
+        crate::app::study::tests::wait(&mut app);
+        assert_eq!(
+            accepted(app.handle_ai_request("client", submit.clone())),
+            submitted
+        );
+        app.studies.items[s].runs[0]
+            .results
+            .as_mut()
+            .unwrap()
+            .analysis_contract_version = Some(0);
+        for evidence in &mut app.studies.items[s].runs[0].comparison_checks {
+            evidence.bundle.analysis_contract_version = Some(0);
+        }
+        assert_eq!(
+            app.handle_ai_request("client", submit.clone())
+                .error
+                .unwrap()
+                .code,
+            "result_unavailable"
+        );
+        assert_eq!(
+            call(&mut app, s, p, "receipt", json!({"id":submit.id}))
+                .error
+                .unwrap()
+                .code,
+            "result_unavailable"
+        );
+        assert_eq!(
+            rmp_serde::to_vec_named(&app.studies.items[s].ai.tasks[0].submissions[0]).unwrap(),
+            saved_submission
+        );
+    }
+}
+
+#[test]
+fn quantity_only_submission_keeps_its_fixed_evidence_and_never_uses_a_later_calculation() {
+    let (mut app, s) = fixture();
+    let p = app.create_comparison(s, "数量の比較".into()).unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, p, "begin_request", Value::Null));
+    let quantity = accepted(call(
+        &mut app,
+        s,
+        p,
+        "quantity",
+        json!({"offset":0,"limit":1}),
+    ));
+    let mut submit = request(
+        &app,
+        s,
+        p,
+        "submit",
+        json!({"explanation":"数量だけの確認","unchecked":["解析・検定"],"references":[],"quantity_references":[quantity["identity"]]}),
+    );
+    let submitted = accepted(app.handle_ai_request("client", submit.clone()));
+    assert!(submitted["submission"]["run_index"].is_null());
+    assert_eq!(
+        submitted["submission"]["calculation_state"],
+        "not_calculated"
+    );
+    assert!(app.delete_comparison(s, p).is_err());
+    let saved = app.saved_studies();
+    app.restore_studies(saved).unwrap();
+    assert!(app.delete_comparison(s, p).is_err());
+    let retained = app.studies.items[s].ai.tasks[0].submissions[0].quantity_references[0].clone();
+    assert_eq!(retained.identity, quantity["identity"]);
+    assert_eq!(retained.takeoff().unwrap().items.len(), 1);
+    #[cfg(feature = "gui")]
+    app.open_result_evidence(references::EvidenceReference::Quantity(Box::new(retained)))
+        .unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    submit.session = Some(
+        app.ai_connection
+            .permission
+            .as_ref()
+            .unwrap()
+            .session
+            .clone(),
+    );
+    let fixed = app.studies.items[s].fixed.clone();
+    accepted(call(
+        &mut app,
+        s,
+        p,
+        "assign_section",
+        json!({"targets":fixed,"section":2}),
+    ));
+    app.ai_connection.pending = Some("client".into());
+    app.approve_ai_connection(s, Mode::Review, false).unwrap();
+    submit.session = Some(
+        app.ai_connection
+            .permission
+            .as_ref()
+            .unwrap()
+            .session
+            .clone(),
+    );
+    assert_eq!(
+        app.handle_ai_request("client", submit.clone())
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    assert_eq!(
+        call(&mut app, s, p, "receipt", json!({"id":submit.id}))
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    permit(&mut app, s, Mode::Review);
+    submit.session = Some(
+        app.ai_connection
+            .permission
+            .as_ref()
+            .unwrap()
+            .session
+            .clone(),
+    );
+    let other = app.create_comparison(s, "無関係な後続計算".into()).unwrap();
+    app.start_study_calculation(s, other).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    assert_eq!(
+        accepted(app.handle_ai_request("client", submit.clone())),
+        submitted
+    );
+    app.studies.items[s].ai.tasks[0].submissions[0].quantity_references[0].contract = 0;
+    assert_eq!(
+        app.handle_ai_request("client", submit.clone())
+            .error
+            .unwrap()
+            .code,
+        "result_unavailable"
+    );
+    assert_eq!(
+        call(&mut app, s, p, "receipt", json!({"id":submit.id}))
+            .error
+            .unwrap()
+            .code,
+        "result_unavailable"
+    );
+}
+
+#[test]
 fn successful_reads_are_persisted_replayed_and_cannot_reuse_ids_for_mutations() {
     let (mut app, s) = fixture();
     permit(&mut app, s, Mode::Comparison);

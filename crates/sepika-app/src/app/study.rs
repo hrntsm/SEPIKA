@@ -270,7 +270,7 @@ impl StudyRun {
 pub struct RunningStudy {
     study: usize,
     name: String,
-    #[cfg(feature = "gui")]
+    #[cfg(any(feature = "gui", test))]
     input: std::sync::Arc<StudyInput>,
     worker: Box<App>,
     preparing: Option<std::sync::mpsc::Receiver<Result<StudyWorkerOutcome, String>>>,
@@ -650,6 +650,13 @@ impl App {
                 .runs
                 .iter()
                 .any(|r| r.proposal == input.references.proposal)
+            || self.studies.items[s]
+                .ai
+                .tasks
+                .iter()
+                .flat_map(|task| &task.submissions)
+                .flat_map(|submission| &submission.quantity_references)
+                .any(|quantity| quantity.source.proposal == input.references.proposal)
         {
             return Err("保持した計算結果の根拠となる案は削除できません".into());
         }
@@ -925,7 +932,7 @@ impl App {
         self.studies.running = Some(RunningStudy {
             study: s,
             name,
-            #[cfg(feature = "gui")]
+            #[cfg(any(feature = "gui", test))]
             input,
             worker: Box::default(),
             preparing,

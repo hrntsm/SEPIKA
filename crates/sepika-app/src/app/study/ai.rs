@@ -20,6 +20,8 @@ pub enum Mode {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Submission {
+    pub receipt_id: String,
+    pub run_index: Option<usize>,
     pub input: super::references::InputReference,
     pub explanation: String,
     pub unchecked: Vec<String>,
@@ -30,7 +32,7 @@ pub struct Submission {
     pub submitted: SystemTime,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Verification {
     pub scope_available: bool,
     pub checked: Option<usize>,
@@ -39,7 +41,7 @@ pub struct Verification {
     pub observed_counts: Option<ObservedCounts>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedCounts {
     pub scope: String,
     pub count_unit: String,

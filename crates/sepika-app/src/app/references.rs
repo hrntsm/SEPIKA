@@ -3308,7 +3308,7 @@ impl From<&EvidenceReference> for EvidenceReference {
     }
 }
 
-#[cfg(feature = "gui")]
+#[cfg(any(feature = "gui", test))]
 impl QuantityEvidenceScope {
     pub(crate) fn label(&self) -> String {
         match self {
