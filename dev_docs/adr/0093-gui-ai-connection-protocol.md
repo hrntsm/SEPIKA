@@ -6,7 +6,9 @@ Status: accepted
 
 Issue #982では[ADR0087](0087-gui-owned-study-and-local-ai.md)を具体化し、`sepika-ai-connection`をGUIとMCPの共通下層に置く。このクレートはWindowsパイプ、最大1MiBのUTF-8 JSON行、要求・応答の搬送だけを担当する。モデル、許可、検討、受理台帳は所有しない。GUIからMCPへの依存や、モデル・ファイル入出力層への通信処理の混入を避けるための最小分離であり、汎用権限基盤にはしない。
 
-GUIはランダムなパイプ名を生成し、現在のTokenLogonSidだけに保護DACLを付与する。クライアントの許可アクセスは`FILE_GENERIC_READ | FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES`（0x12018b）とし、追加のパイプ作成権を含む`GENERIC_WRITE`は付与しない。クライアントは同じ限定アクセス、overlapped I/O、`SECURITY_IDENTIFICATION`で開く。Tokioの`first_pipe_instance(true)`、`reject_remote_clients(true)`、`max_instances(1)`を使い、切断後は既存server handleを再使用する。OSの恒久設定は変更しない。
+GUIはランダムなパイプ名を生成し、現在のTokenLogonSidだけに保護DACLを付与する。クライアントの許可アクセスは`FILE_GENERIC_READ | FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES`（0x12018b）とし、追加のパイプ作成権を含む`GENERIC_WRITE`は付与しない。クライアントは同じ限定アクセス、overlapped I/O、`SECURITY_IDENTIFICATION`で開く。Tokioの`first_pipe_instance(true)`、`reject_remote_clients(true)`、`max_instances(1)`を使い、1回の有効化は一つのクライアント接続だけを受け付け、切断時にserver handleと当該endpointを破棄する。GUIは許可と有効化を終了し、人が再有効化して新しいランダム接続先を渡し、新規承認する。OSの恒久設定は変更しない。
+
+同じTokio/mio serverのdisconnect/connect再使用は、旧接続のread状態が次のbyte streamへ残る問題を製品回帰と実機で検出した。上流mio #1983の既知問題と一致し、修正は未releaseである。EOFの読み飛ばし・不確実なdrain・未merge forkの導入・追加instanceのためのACL緩和・同名再bindは採らず、接続先を使い捨てる。自動再接続・要求の自動再送は行わない。MCP中継は応答IDと要求IDの一致も検査し、不一致は受理結果不明として接続を閉じ、新しい接続先と承認後に保存要求IDを照会する。
 
 パイプスレッドからGUIへ要求と応答用oneshotを渡し、GUIのイベント処理で許可・入力版・対象を照合する。有効化中は短い再描画間隔で未操作中の要求も処理する。比較案の既存Undo/編集トランザクション、既存の検討用一件非同期計算を利用し、表示案・選択・入力ドラフトを切り替えない。計算の確認待ちは既存GUIに残し、AIへ承諾操作を公開しない。
 
@@ -35,3 +37,6 @@ AI計算の要求job IDを既存のRunningStudyへ固定し、完了取込でStu
 - [Tokio ServerOptions](https://docs.rs/tokio/latest/tokio/net/windows/named_pipe/struct.ServerOptions.html)
 - [Windowsのパイプ権限](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
 - [Issue #982](https://github.com/hrntsm/SEPIKA/issues/982)
+
+- [mioのインスタンス再使用時のread状態残存](https://github.com/tokio-rs/mio/issues/1983)
+- [未releaseの上流修正案](https://github.com/tokio-rs/mio/pull/2028)
