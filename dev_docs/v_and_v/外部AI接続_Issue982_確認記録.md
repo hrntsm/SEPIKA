@@ -64,3 +64,9 @@ Windows専用CIジョブを追加し、PRで共有通信全test・GUI AI契約�
 d3cdddaaの確定sourceでGUI全lib1156件成功・3件ignore、非GUI476件成功・1件ignore、feature/非featureのGUI/MCP全target clippy警告禁止、MCP stdio最終1件、文書・依存・整形が成功した。fresh4は修正必須なしで完了した。実機は未起動。
 
 Goal照合で、新しい確認接続が既存の手計算runの位置と旧入力版を発見する入口が不足していたため、読取metadataの`runs`だけを追加する。保存再読込後の新しいReview接続がproposals→runsのページから旧版を選び、既存results/evidenceへ明示入力版を渡す回帰を追加した。history=falseは旧版の一覧・数値・根拠と過去の一覧応答の再送/照会を拒否し、現在版の計算だけを件数へ含める。数値計算・既存有効性・集計処理は変更していない。AI契約14件の実行中で、確定sourceの最終検証を追記する。
+
+## 保持計算とジョブ観測の状態分離
+
+a233d682ではGUI1157件成功・3件ignore、非GUI477件成功・1件ignore、GUI/MCP feature・非feature全target clippy、stdio1件、文書・依存・整形が成功した。独立確認で、同入力の後続job状態を保持runの状態や提出へ混在させる不整合を検出した。
+
+修正ではresultsのstateを明示runから取得し、Submitに任意run_indexを追加した。結果参照があればその明示runを必須とし、異なる保持runの参照を混在させない。run未指定は同依頼jobの提出時観測と説明・数量だけを保存し、job_id/sourceで区別する。検定根拠は自動補完しない。既存probeも明示runを提出する。再計算中/確認待ちで保持run0の状態が変わらないこと、AI失敗後の人成功run、元runの混在拒否、進行job観測後の完了/再読込で過去説明へrunを補わない回帰を追加し、AI契約16件を実行中。最終sourceの検証と実機は後で追記する。
