@@ -1,4 +1,5 @@
 mod comparison;
+pub mod ai;
 use super::*;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -111,6 +112,7 @@ pub struct Proposal {
     pub state: Option<Slot>,
 }
 pub struct Study {
+    pub ai: ai::StudyAi,
     pub purpose: String,
     pub notes: String,
     pub fixed: Vec<references::TargetReference>,
@@ -281,6 +283,8 @@ pub struct SavedStudies {
 }
 #[derive(Serialize, Deserialize)]
 struct SavedStudy {
+    #[serde(default)]
+    ai: ai::StudyAi,
     purpose: String,
     notes: String,
     fixed: Vec<references::TargetReference>,
@@ -417,6 +421,7 @@ impl App {
         state.core.scoped.undo.restrict_sections(Vec::new());
         let index = self.studies.items.len();
         self.studies.items.push(Study {
+            ai: ai::StudyAi::default(),
             purpose,
             notes: String::new(),
             fixed,
@@ -805,6 +810,7 @@ impl App {
                 .iter()
                 .enumerate()
                 .map(|(s, study)| SavedStudy {
+                    ai: study.ai.clone(),
                     purpose: study.purpose.clone(),
                     notes: study.notes.clone(),
                     fixed: study.fixed.clone(),
@@ -822,6 +828,7 @@ impl App {
         }
     }
     pub fn restore_studies(&mut self, saved: SavedStudies) -> Result<(), String> {
+        self.ai_connection = ai::AiConnection::default();
         let mut items = Vec::new();
         for study in saved.items {
             let targets: Vec<_> = study
@@ -856,6 +863,7 @@ impl App {
                 });
             }
             items.push(Study {
+                ai: study.ai,
                 purpose: study.purpose,
                 notes: study.notes,
                 fixed: study.fixed,
@@ -864,6 +872,13 @@ impl App {
                 proposals,
                 runs: study.runs,
             });
+        }
+        for study in &mut items {
+            for job in &mut study.ai.jobs {
+                if matches!(job.state.as_str(), "running" | "awaiting_gui_confirmation") {
+                    job.state = "interrupted_no_result".into();
+                }
+            }
         }
         self.studies = Studies {
             items,
@@ -1082,6 +1097,7 @@ impl App {
             .collapsible(self.studies.running.is_none())
             .vscroll(true)
             .show(ctx, |ui| {
+                self.ai_connection_panel(ui);
                 let active = self.study_display_name();
                 ui.strong(format!("表示・編集先: {active}"));
                 if ui.button("本案を表示").clicked() {

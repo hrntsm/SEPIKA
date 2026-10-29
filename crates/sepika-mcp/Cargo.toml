@@ -17,6 +17,7 @@ path = "src/main.rs"
 required-features = ["mcp"]
 
 [dependencies]
+sepika-ai-connection = { path = "../sepika-ai-connection" }
 sepika-core = { path = "../sepika-core" }
 sepika-element = { path = "../sepika-element" }
 sepika-solver = { path = "../sepika-solver" }

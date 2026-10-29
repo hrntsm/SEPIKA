@@ -1,30 +1,30 @@
 use super::*;
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct ExpectedPosition {
+pub(in crate::app::study) struct ExpectedPosition {
     xi: u64,
     components: Option<Vec<sepika_design_jp::CheckKind>>,
 }
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct ExpectedMember {
+pub(in crate::app::study) struct ExpectedMember {
     elem: ElemId,
     positions: Vec<ExpectedPosition>,
 }
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct ExpectedJoint {
+pub(in crate::app::study) struct ExpectedJoint {
     node: NodeId,
     label: String,
     components: Option<Vec<sepika_design_jp::CheckKind>>,
 }
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct ExpectedWall {
+pub(in crate::app::study) struct ExpectedWall {
     label: String,
     node: Option<NodeId>,
     seismic_target: bool,
     components: Option<Vec<sepika_design_jp::CheckKind>>,
 }
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct ExpectedChecks {
+pub(in crate::app::study) struct ExpectedChecks {
     source: Option<ResultInputKey>,
     run: Option<String>,
     members: Vec<ExpectedMember>,
@@ -32,7 +32,7 @@ pub(super) struct ExpectedChecks {
     walls: Vec<ExpectedWall>,
 }
 impl ExpectedChecks {
-    pub(super) fn capture(bundle: &ResultsBundle) -> Self {
+    pub(in crate::app::study) fn capture(bundle: &ResultsBundle) -> Self {
         fn components(
             outcome: &sepika_design_jp::CheckOutcome,
         ) -> Option<Vec<sepika_design_jp::CheckKind>> {
@@ -102,11 +102,11 @@ impl ExpectedChecks {
     }
 }
 
-pub(super) fn validate_expected_checks(evidence: &ReferencedResult) -> Result<(), String> {
+pub(in crate::app::study) fn validate_expected_checks(evidence: &ReferencedResult) -> Result<(), String> {
     validate_expected_bundle(evidence.expected_checks.as_ref(), &evidence.bundle)
 }
 
-pub(super) fn validate_expected_bundle(
+pub(in crate::app::study) fn validate_expected_bundle(
     expected: Option<&ExpectedChecks>,
     bundle: &ResultsBundle,
 ) -> Result<(), String> {
@@ -134,7 +134,7 @@ pub(super) fn validate_expected_bundle(
     Ok(())
 }
 
-pub(super) fn capture_checks(worker: &App) -> Vec<ReferencedResult> {
+pub(in crate::app::study) fn capture_checks(worker: &App) -> Vec<ReferencedResult> {
     let Some(bundle) = &worker.core.scoped.results else {
         return Vec::new();
     };
@@ -173,11 +173,11 @@ pub(super) fn capture_checks(worker: &App) -> Vec<ReferencedResult> {
 }
 
 #[cfg(any(feature = "gui", test))]
-mod projection {
+pub(in crate::app::study) mod projection {
     use super::*;
     use references::{DisplayConditions, EvidenceReference, ReferenceTarget};
 
-    pub(super) fn fixed_members(study: &Study) -> Vec<ElemId> {
+    pub(in crate::app::study) fn fixed_members(study: &Study) -> Vec<ElemId> {
         let mut members: Vec<_> = study
             .fixed
             .iter()
@@ -194,7 +194,7 @@ mod projection {
         members
     }
 
-    pub(super) fn same_conditions(
+    pub(in crate::app::study) fn same_conditions(
         baseline: &StudyInput,
         input: &StudyInput,
         fixed: &[ElemId],
@@ -225,7 +225,7 @@ mod projection {
             == bincode::serialize(&candidate.model).unwrap()
     }
 
-    pub(super) fn condition_differences(
+    pub(in crate::app::study) fn condition_differences(
         baseline: &StudyInput,
         input: &StudyInput,
         fixed: &[ElemId],
@@ -302,7 +302,7 @@ mod projection {
         differences
     }
 
-    pub(super) fn result_app(
+    pub(in crate::app::study) fn result_app(
         input: &StudyInput,
         bundle: &ResultsBundle,
         last: Option<StaticKey>,
@@ -320,7 +320,7 @@ mod projection {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub(super) struct CheckRow {
+    pub(in crate::app::study) struct CheckRow {
         pub key: String,
         pub case: String,
         pub target: Option<ReferenceTarget>,
@@ -347,7 +347,7 @@ mod projection {
             sepika_design_jp::CheckOutcome::Skipped { reason } => (None, reason.clone()),
         }
     }
-    pub(super) fn fixed_coverage(
+    pub(in crate::app::study) fn fixed_coverage(
         evidence: &ReferencedResult,
         fixed: &[ElemId],
     ) -> Result<(), String> {
@@ -364,14 +364,14 @@ mod projection {
         Ok(())
     }
 
-    pub(super) fn fixed_rows<'a>(
+    pub(in crate::app::study) fn fixed_rows<'a>(
         rows: impl IntoIterator<Item = &'a CheckRow>,
         fixed: &[ElemId],
     ) -> Vec<&'a CheckRow> {
         rows.into_iter().filter(|row| matches!(row.target, Some(ReferenceTarget::Member(id)) if fixed.contains(&id))).collect()
     }
 
-    pub(super) fn case_label(key: &ResultInputKey, model: &sepika_core::model::Model) -> String {
+    pub(in crate::app::study) fn case_label(key: &ResultInputKey, model: &sepika_core::model::Model) -> String {
         match key {
             ResultInputKey::Static(StaticCaseKey::User(id)) => {
                 model.load_cases.iter().find(|c| c.id == *id).map_or_else(
@@ -387,7 +387,7 @@ mod projection {
         }
     }
 
-    pub(super) fn check_rows(evidence: &ReferencedResult) -> Result<Vec<CheckRow>, String> {
+    pub(in crate::app::study) fn check_rows(evidence: &ReferencedResult) -> Result<Vec<CheckRow>, String> {
         validate_expected_checks(evidence)?;
         let app = result_app(&evidence.input, &evidence.bundle, evidence.last_static);
         app.require_design_input()?;
@@ -487,7 +487,7 @@ mod projection {
         Ok(rows)
     }
 
-    pub(super) fn displacement(
+    pub(in crate::app::study) fn displacement(
         app: &App,
         key: StaticKey,
         node: NodeId,
@@ -548,13 +548,13 @@ mod projection {
     }
 
     #[derive(Default)]
-    pub(super) struct Summary {
+    pub(in crate::app::study) struct Summary {
         pub maximum: Option<CheckRow>,
         pub checked: usize,
         pub skipped: usize,
         pub ng: usize,
     }
-    pub(super) fn summarize<'a>(rows: impl IntoIterator<Item = &'a CheckRow>) -> Summary {
+    pub(in crate::app::study) fn summarize<'a>(rows: impl IntoIterator<Item = &'a CheckRow>) -> Summary {
         let mut summary = Summary::default();
         let mut maximum: Option<&CheckRow> = None;
         for row in rows {
@@ -574,7 +574,7 @@ mod projection {
         summary.maximum = maximum.cloned();
         summary
     }
-    pub(super) fn same_evaluation_set<'a>(
+    pub(in crate::app::study) fn same_evaluation_set<'a>(
         baseline: impl IntoIterator<Item = &'a CheckRow>,
         rows: impl IntoIterator<Item = &'a CheckRow>,
     ) -> bool {
@@ -591,7 +591,7 @@ mod projection {
         baseline.len() == before.len() && rows.len() == after.len() && before == after
     }
 
-    pub(super) fn same_check_scope<'a>(
+    pub(in crate::app::study) fn same_check_scope<'a>(
         baseline: impl IntoIterator<Item = &'a CheckRow>,
         rows: impl IntoIterator<Item = &'a CheckRow>,
     ) -> bool {
@@ -620,7 +620,7 @@ mod projection {
         scopes(baseline) == scopes(rows)
     }
 
-    pub(super) fn same_evaluation_range<'a>(
+    pub(in crate::app::study) fn same_evaluation_range<'a>(
         baseline: impl IntoIterator<Item = &'a CheckRow>,
         rows: impl IntoIterator<Item = &'a CheckRow>,
     ) -> bool {
@@ -672,7 +672,7 @@ mod projection {
     }
 
     #[derive(Clone)]
-    pub(super) struct MemberImpact {
+    pub(in crate::app::study) struct MemberImpact {
         pub before: Option<CheckRow>,
         pub after: CheckRow,
         pub difference: Option<f64>,
@@ -682,7 +682,7 @@ mod projection {
         pub items_changed: bool,
         pub new_ng: bool,
     }
-    pub(super) fn member_impacts(
+    pub(in crate::app::study) fn member_impacts(
         baseline: &[CheckRow],
         rows: &[CheckRow],
         fixed: &[ElemId],
@@ -750,7 +750,7 @@ mod projection {
         impacts
     }
 
-    pub(super) fn unmatched_positions<'a>(
+    pub(in crate::app::study) fn unmatched_positions<'a>(
         baseline: impl IntoIterator<Item = &'a CheckRow>,
         rows: impl IntoIterator<Item = &'a CheckRow>,
     ) -> (usize, usize) {
@@ -775,7 +775,7 @@ mod projection {
         (missing_before, missing_after)
     }
 
-    pub(super) fn worsening<'a>(
+    pub(in crate::app::study) fn worsening<'a>(
         baseline: &[CheckRow],
         rows: impl IntoIterator<Item = &'a CheckRow>,
         fixed: &[ElemId],
@@ -796,6 +796,6 @@ mod projection {
 #[cfg(feature = "gui")]
 mod gui;
 #[cfg(feature = "gui")]
-pub(super) use gui::ComparisonView;
+pub(in crate::app::study) use gui::ComparisonView;
 #[cfg(test)]
 mod tests;
