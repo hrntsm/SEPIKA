@@ -791,6 +791,11 @@ pub fn viewer_panel_with_view(
         } else {
             time_history_deform_scale_with_view(view, app, model_size)
         }
+    } else if let Some(scale) = view
+        .fixed_deform_scale
+        .filter(|scale| disp.is_some() && scale.is_finite() && *scale > 0.0)
+    {
+        scale
     } else {
         deform_display_scale(
             &app.core.model,
@@ -1273,7 +1278,9 @@ pub fn viewer_panel_with_view(
             ViewMode::Force => 30.0,
             _ => 10.0,
         };
-        let note = if (view.deform_scale_factor - 1.0).abs() < 1e-3 {
+        let note = if view.fixed_deform_scale.is_some() {
+            format!("変形倍率 ×{scale_note:.2}（比較共通・絶対倍率）")
+        } else if (view.deform_scale_factor - 1.0).abs() < 1e-3 {
             format!("変形倍率 ×{:.0}（自動）", scale_note)
         } else {
             format!(

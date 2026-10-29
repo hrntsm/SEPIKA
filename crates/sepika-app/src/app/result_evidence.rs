@@ -113,7 +113,11 @@ impl App {
                 return Ok(());
             }
         }
-        let lines = self.static_reference_lines(&reference, &input.model)?;
+        let lines = if reference.kind == ResultInputKey::Design {
+            self.other_design_reference_lines(&reference)?
+        } else {
+            self.static_reference_lines(&reference, &input.model)?
+        };
         self.ui.scoped.result_evidence = Some(ResultEvidence {
             title: "参照した結果の根拠".into(),
             source: Some(reference.source.clone()),
@@ -123,6 +127,88 @@ impl App {
             return_to: None,
         });
         Ok(())
+    }
+
+    fn other_design_reference_lines(
+        &self,
+        reference: &ResultReference,
+    ) -> Result<Vec<String>, String> {
+        self.require_design_input()?;
+        let bundle = self.core.scoped.results.as_ref().ok_or("検定結果なし")?;
+        let component = reference
+            .display
+            .component
+            .as_deref()
+            .ok_or("検定項目が欠落")?;
+        let target = match reference.target.target {
+            ReferenceTarget::Member(id) => format!("部材{}", id.0),
+            ReferenceTarget::Node(id) => format!("節点{}", id.0),
+            _ => "保存された対象".into(),
+        };
+        let source = bundle.design_source.as_ref().map_or_else(
+            || "取得不能".into(),
+            |key| load_label(key, Some(&self.core.model)),
+        );
+        let mut lines = vec![format!(
+            "検定対象: {component} / {target} / 応力源 {source}"
+        )];
+        let mut outcomes = Vec::new();
+        for joint in &bundle.joint_checks {
+            if component == format!("節点{}/{}", joint.node.0, joint.label) {
+                outcomes.push(&joint.outcome);
+            }
+        }
+        for wall in &bundle.wall_checks {
+            if component == wall.label() {
+                outcomes.push(&wall.outcome);
+            }
+        }
+        if outcomes.is_empty() {
+            return Err("参照した検定項目が欠落しています".into());
+        }
+        for outcome in outcomes {
+            match outcome {
+                sepika_design_jp::CheckOutcome::Checked(check)
+                    if !result_validity::evaluate_check(check).complete =>
+                {
+                    lines.push(
+                        "未評価: 検定成分が欠落・非有限・負のため、検定比と合否を確定しません。"
+                            .into(),
+                    );
+                    if let Some(ratio) = result_validity::evaluate_check(check).known_ng {
+                        lines.push(format!("確認済みNG: 検定比 {ratio:.4}（未評価あり）"));
+                        for component in check
+                            .components
+                            .iter()
+                            .filter(|c| c.ratio.is_finite() && c.ratio > 1.0)
+                        {
+                            lines.push(format!(
+                                "{} / 確認済みNG {:.4} / {}",
+                                component.kind.label(),
+                                component.ratio,
+                                component.detail
+                            ));
+                        }
+                    }
+                }
+                sepika_design_jp::CheckOutcome::Checked(check) => {
+                    lines.push(check.basis.clone());
+                    lines.push(check.detail.clone());
+                    for c in &check.components {
+                        lines.push(format!(
+                            "{} / 比 {} / {}",
+                            c.kind.label(),
+                            c.ratio,
+                            c.detail
+                        ));
+                    }
+                }
+                sepika_design_jp::CheckOutcome::Skipped { reason } => {
+                    lines.push(format!("未検定: {reason}"))
+                }
+            }
+        }
+        Ok(lines)
     }
 
     fn static_reference_lines(
@@ -201,6 +287,26 @@ impl App {
                 .and_then(|m| m.positions.iter().find(|p| p.xi == position))
             {
                 match &check.outcome {
+                    sepika_design_jp::CheckOutcome::Checked(check)
+                        if !result_validity::evaluate_check(check).complete =>
+                    {
+                        lines.push(result_validity::INVALID_CHECK_COMPONENTS.into());
+                        if let Some(ratio) = result_validity::evaluate_check(check).known_ng {
+                            lines.push(format!("確認済みNG: 検定比 {ratio:.4}（未評価あり）"));
+                            for component in check
+                                .components
+                                .iter()
+                                .filter(|c| c.ratio.is_finite() && c.ratio > 1.0)
+                            {
+                                lines.push(format!(
+                                    "{} / 確認済みNG {:.4} / {}",
+                                    component.kind.label(),
+                                    component.ratio,
+                                    component.detail
+                                ));
+                            }
+                        }
+                    }
                     sepika_design_jp::CheckOutcome::Checked(check) => {
                         checked = true;
                         lines.push(format!(
@@ -382,13 +488,10 @@ impl App {
         if quantity.contract != QUANTITY_EVIDENCE_CONTRACT_VERSION {
             return Err("数量集計の計算契約が異なるため取得不能です。".into());
         }
-        let takeoff = sepika_design_jp::quantity::try_compute_quantity_takeoff(
-            &quantity.model,
-            &quantity.model.quantity_cfg,
-        )?;
+        let takeoff = quantity.takeoff()?;
         let totals = takeoff.totals();
         let unit_weight = sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3;
-        let mut lines = vec![format!("集計対象: モデル全体 / 明細 {} 件 / コンクリート {:.6} m³ / 鋼材体積 {:.6} m³ / 鉄骨 {:.6} t", takeoff.items.len(), totals.concrete_m3, totals.steel_t / unit_weight, totals.steel_t), "鋼材体積は鉄骨重量を数量用単位重量7.85 t/m³で換算した値です。鉄筋を含みません。".into(), format!("鉄筋の状態: {}", totals.rebar_status().label())];
+        let mut lines = vec![format!("集計対象: {} / 明細 {} 件 / コンクリート {:.6} m³ / 鋼材体積 {:.6} m³ / 鉄骨 {:.6} t", quantity.scope.label(), takeoff.items.len(), totals.concrete_m3, totals.steel_t / unit_weight, totals.steel_t), "鋼材体積は鉄骨重量を数量用単位重量7.85 t/m³で換算した値です。鉄筋を含みません。".into(), format!("鉄筋の状態: {}", totals.rebar_status().label())];
         for item in &takeoff.items {
             lines.push(format!("要素 {:?} / 床板 {:?} / 二次部材 {:?} / 壁版 {:?} / {} / {} / 断面 {:?} / コンクリート {:.6} m³ / 鋼材体積 {:.6} m³ / 鉄筋 {}", item.elem, item.slab, item.secondary, item.wall_plate, item.story, item.label, item.section, item.concrete_m3, item.steel_weight_t() / unit_weight, item.rebar_status().label()));
             for issue in &item.rebar_issues {
@@ -441,7 +544,7 @@ impl App {
             } else { ui.label("計算元の案・入力版は取得不能です。"); }
             match &evidence.reference {
                 Some(EvidenceReference::Calculation(reference)) => { ui.small(format!("実行 {} / 計算契約 {}", reference.run, reference.contract)); }
-                Some(EvidenceReference::Quantity(quantity)) => { ui.small(format!("数量集計契約 {} / 対象: モデル全体 / 識別 {}", quantity.contract, quantity.identity)); }
+                Some(EvidenceReference::Quantity(quantity)) => { ui.small(format!("数量集計契約 {} / 対象: {} / 識別 {}", quantity.contract, quantity.scope.label(), quantity.identity)); }
                 None => {}
             }
             ui.label(&state);
@@ -1627,5 +1730,225 @@ mod tests {
         )
         .unwrap();
         println!("GUI fixtures: {}", directory.display());
+    }
+    #[test]
+    fn fixed_member_quantity_scope_roundtrip_opens_only_its_original_members_and_rejects_tampering()
+    {
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        let quantity = app.member_quantity_evidence_reference(vec![ElemId(2)]);
+        let restored: QuantityEvidenceReference =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&quantity).unwrap()).unwrap();
+        assert_eq!(restored.identity, quantity.identity);
+        app.open_result_evidence(EvidenceReference::Quantity(Box::new(restored)))
+            .unwrap();
+        let lines = &app.ui.scoped.result_evidence.as_ref().unwrap().lines;
+        assert!(lines[0].contains("固定対象 1 部材"));
+        assert!(lines[0].contains("明細 1 件"));
+        assert!(!lines[0].contains("モデル全体"));
+        let before = lines.clone();
+        app.core.model.elements[2].section = Some(SectionId(0));
+        app.open_result_evidence(EvidenceReference::Quantity(Box::new(quantity.clone())))
+            .unwrap();
+        assert_eq!(
+            before,
+            app.ui.scoped.result_evidence.as_ref().unwrap().lines
+        );
+        let mut tampered = quantity;
+        tampered.scope = references::QuantityEvidenceScope::WholeModel;
+        assert!(app
+            .open_result_evidence(EvidenceReference::Quantity(Box::new(tampered)))
+            .is_err());
+    }
+    #[test]
+    fn malformed_check_components_stay_unrated_in_common_member_and_joint_evidence() {
+        for invalid in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.5)] {
+            let mut app = calculated();
+            let member = app.core.scoped.results.as_ref().unwrap().member_checks[0].elem;
+            let position =
+                app.core.scoped.results.as_ref().unwrap().member_checks[0].positions[0].xi;
+            let components = invalid
+                .map(|ratio| sepika_design_jp::CheckComponent {
+                    kind: sepika_design_jp::CheckKind::AxialBending,
+                    ratio,
+                    detail: "欠落状態の回帰".into(),
+                })
+                .into_iter()
+                .collect();
+            let outcome = sepika_design_jp::CheckOutcome::Checked(sepika_design_jp::CheckResult {
+                basis: "不正成分".into(),
+                detail: String::new(),
+                components,
+            });
+            let bundle = app.core.scoped.results.as_mut().unwrap();
+            bundle.member_checks[0].positions[0].outcome = outcome.clone();
+            bundle.joint_checks.push(JointCheck {
+                node: NodeId(0),
+                label: "不正成分".into(),
+                outcome,
+            });
+            let before = bytes(&app.core.scoped.results);
+            app.open_member_check_evidence(member, position);
+            let lines = &app.ui.scoped.result_evidence.as_ref().unwrap().lines;
+            assert!(lines.iter().any(|l| l.contains("未評価:")));
+            assert!(!lines.iter().any(|l| l.contains(" / OK")));
+            let reference = app
+                .recorded_target_result_reference(
+                    ResultInputKey::Design,
+                    ReferenceTarget::Node(NodeId(0)),
+                    DisplayConditions {
+                        component: Some("節点0/不正成分".into()),
+                        unit: Some("無次元".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            app.open_result_evidence(&reference).unwrap();
+            let lines = &app.ui.scoped.result_evidence.as_ref().unwrap().lines;
+            assert!(lines.iter().any(|l| l.contains("未評価:")));
+            assert!(!lines.iter().any(|l| l.contains(" / OK")));
+            assert_eq!(before, bytes(&app.core.scoped.results));
+        }
+    }
+    #[test]
+    fn malformed_components_remain_unrated_when_opening_normal_design_table() {
+        for ratio in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.5)] {
+            let mut app = calculated();
+            let outcome = sepika_design_jp::CheckOutcome::Checked(sepika_design_jp::CheckResult {
+                basis: "検定成分回帰".into(),
+                detail: String::new(),
+                components: ratio
+                    .map(|ratio| sepika_design_jp::CheckComponent {
+                        kind: sepika_design_jp::CheckKind::AxialBending,
+                        ratio,
+                        detail: String::new(),
+                    })
+                    .into_iter()
+                    .collect(),
+            });
+            for member in &mut app.core.scoped.results.as_mut().unwrap().member_checks {
+                for position in &mut member.positions {
+                    position.outcome = outcome.clone();
+                }
+            }
+            let before = bytes(&app.core.scoped.results);
+            let ctx = egui::Context::default();
+            let mut rendered = String::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(2400.0, 1800.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| crate::design_view::design_table(ui, &mut app),
+                );
+                rendered.push_str(&rendered_text(output));
+            }
+            assert!(rendered.contains("未評価:"), "{rendered}");
+            assert!(rendered.contains("検定済み 0 位置"), "{rendered}");
+            assert_eq!(before, bytes(&app.core.scoped.results));
+        }
+    }
+    #[test]
+    fn same_position_partial_ng_remains_visible_in_normal_table_and_common_roots() {
+        use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+        for invalid in [f64::NAN, f64::INFINITY, -0.5] {
+            for valid in [Some(1.2), Some(0.6), None] {
+                let mut app = calculated();
+                let mut components = vec![CheckComponent {
+                    kind: CheckKind::Shear,
+                    ratio: invalid,
+                    detail: String::new(),
+                }];
+                if let Some(ratio) = valid {
+                    components.push(CheckComponent {
+                        kind: CheckKind::Bending,
+                        ratio,
+                        detail: String::new(),
+                    });
+                }
+                let outcome = CheckOutcome::Checked(CheckResult {
+                    basis: String::new(),
+                    detail: String::new(),
+                    components,
+                });
+                let bundle = app.core.scoped.results.as_mut().unwrap();
+                for member in &mut bundle.member_checks {
+                    for p in &mut member.positions {
+                        p.outcome = outcome.clone();
+                    }
+                }
+                bundle.joint_checks = vec![JointCheck {
+                    node: NodeId(0),
+                    label: "partial".into(),
+                    outcome,
+                }];
+                let member = bundle.member_checks[0].elem;
+                let position = bundle.member_checks[0].positions[0].xi;
+                let before = bytes(&app.core.scoped.results);
+                app.open_member_check_evidence(member, position);
+                let lines = app
+                    .ui
+                    .scoped
+                    .result_evidence
+                    .as_ref()
+                    .unwrap()
+                    .lines
+                    .join(" ");
+                assert!(lines.contains("未評価:"));
+                assert_eq!(
+                    lines.contains("確認済みNG: 検定比 1.2000"),
+                    valid == Some(1.2),
+                    "{lines}"
+                );
+                let reference = app
+                    .recorded_target_result_reference(
+                        ResultInputKey::Design,
+                        ReferenceTarget::Node(NodeId(0)),
+                        DisplayConditions {
+                            component: Some("節点0/partial".into()),
+                            unit: Some("無次元".into()),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                app.open_result_evidence(&reference).unwrap();
+                let lines = app
+                    .ui
+                    .scoped
+                    .result_evidence
+                    .as_ref()
+                    .unwrap()
+                    .lines
+                    .join(" ");
+                assert!(lines.contains("未評価:"));
+                assert_eq!(
+                    lines.contains("確認済みNG: 検定比 1.2000"),
+                    valid == Some(1.2),
+                    "{lines}"
+                );
+                let ctx = egui::Context::default();
+                let mut rendered = String::new();
+                for _ in 0..3 {
+                    rendered.push_str(&rendered_text(ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(2400.0, 1800.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| crate::design_view::design_table(ui, &mut app),
+                    )));
+                }
+                assert!(rendered.contains("検定済み 0 位置"), "{rendered}");
+                assert!(rendered.contains("未評価:"), "{rendered}");
+                assert_eq!(rendered.contains("1.200"), valid == Some(1.2), "{rendered}");
+                assert_eq!(before, bytes(&app.core.scoped.results));
+            }
+        }
     }
 }

@@ -57,7 +57,13 @@ pub(super) fn view_controls_with_view(
 
     if matches!(mode, ViewMode::Force | ViewMode::Deformed) {
         let options = app.result_display_options();
-        if !options.is_empty() {
+        if view.static_case_locked {
+            let label = options
+                .iter()
+                .find(|(key, _)| Some(*key) == view.static_key)
+                .map_or("取得不能", |(_, label)| label.as_str());
+            ui.label(format!("荷重状態: {label}（上部の共通指定）"));
+        } else if !options.is_empty() {
             egui::ComboBox::from_id_salt("viewport_static_case")
                 .selected_text(
                     options
@@ -439,13 +445,17 @@ pub(super) fn view_controls_with_view(
                 );
             ui.separator();
             ui.label("変形倍率:");
-            ui.add(
-                egui::Slider::new(&mut view.deform_scale_factor, 0.1..=10.0)
-                    .logarithmic(true)
-                    .text("×（自動比）"),
-            );
-            if ui.button("リセット").clicked() {
-                view.deform_scale_factor = 1.0;
+            if let Some(scale) = view.fixed_deform_scale {
+                ui.label(format!("{scale}倍（比較共通の絶対倍率）"));
+            } else {
+                ui.add(
+                    egui::Slider::new(&mut view.deform_scale_factor, 0.1..=10.0)
+                        .logarithmic(true)
+                        .text("×（自動比）"),
+                );
+                if ui.button("リセット").clicked() {
+                    view.deform_scale_factor = 1.0;
+                }
             }
         });
     }

@@ -247,6 +247,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         elem: sepika_core::ids::ElemId,
         pos: f64,
         ratio: Option<f64>,
+        complete: bool,
         ok: Option<bool>,
         basis: String,
         /// 全検定式に共通の数値根拠（根拠セルのホバー表示用）。
@@ -263,16 +264,30 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         sepika_design_jp::CheckOutcome::Checked(cr) => CheckRow {
                             elem: m.elem,
                             pos: p.xi,
-                            ratio: Some(cr.ratio()),
-                            ok: Some(cr.ok()),
-                            basis: cr.basis.clone(),
+                            ratio: crate::app::checked_ratio(cr),
+                            complete: crate::app::evaluate_check(cr).complete,
+                            ok: crate::app::checked_ratio(cr).map(|r| r <= 1.0),
+                            basis: if crate::app::evaluate_check(cr).complete {
+                                cr.basis.clone()
+                            } else {
+                                crate::app::INVALID_CHECK_COMPONENTS.into()
+                            },
                             detail: cr.detail.clone(),
-                            components: cr.components.clone(),
+                            components: if crate::app::checked_ratio(cr).is_some() {
+                                cr.components
+                                    .iter()
+                                    .filter(|c| c.ratio.is_finite() && c.ratio >= 0.0)
+                                    .cloned()
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            },
                         },
                         sepika_design_jp::CheckOutcome::Skipped { reason } => CheckRow {
                             elem: m.elem,
                             pos: p.xi,
                             ratio: None,
+                            complete: false,
                             ok: None,
                             basis: reason.clone(),
                             detail: String::new(),
@@ -306,7 +321,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         );
     } else {
         let ng_count = checks.iter().filter(|row| row.ok == Some(false)).count();
-        let checked_count = checks.iter().filter(|row| row.ok.is_some()).count();
+        let checked_count = checks.iter().filter(|row| row.complete).count();
         let skipped_count = checks.len() - checked_count;
         ui.label(format!(
             "検定済み {} 位置、検定不能 {} 位置、NG {} 件（部材IDクリックで 3D ビューにハイライト）",
@@ -426,6 +441,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         node: sepika_core::ids::NodeId,
         label: String,
         ratio: Option<f64>,
+        complete: bool,
         ok: Option<bool>,
         basis: String,
         /// 根拠セルのホバー表示用（単一式なので component の detail。
@@ -449,9 +465,14 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         JointCheckRow {
                             node: j.node,
                             label: j.label.clone(),
-                            ratio: Some(cr.ratio()),
-                            ok: Some(cr.ok()),
-                            basis: cr.basis.clone(),
+                            ratio: crate::app::checked_ratio(cr),
+                            complete: crate::app::evaluate_check(cr).complete,
+                            ok: crate::app::checked_ratio(cr).map(|r| r <= 1.0),
+                            basis: if crate::app::evaluate_check(cr).complete {
+                                cr.basis.clone()
+                            } else {
+                                crate::app::INVALID_CHECK_COMPONENTS.into()
+                            },
                             detail,
                         }
                     }
@@ -459,6 +480,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         node: j.node,
                         label: j.label.clone(),
                         ratio: None,
+                        complete: false,
                         ok: None,
                         basis: reason.clone(),
                         detail: String::new(),
@@ -471,7 +493,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         ui.add_space(12.0);
         ui.strong("接合部・耐震壁の検定");
         let ng = joint_checks.iter().filter(|j| j.ok == Some(false)).count();
-        let checked = joint_checks.iter().filter(|j| j.ok.is_some()).count();
+        let checked = joint_checks.iter().filter(|j| j.complete).count();
         ui.label(format!(
             "検定済み {} 面・項目、検定不能 {} 面・項目、NG {} 件",
             checked,
@@ -1158,10 +1180,12 @@ pub(crate) fn wall_checks_ui(
     ui: &mut egui::Ui,
     checks: &[sepika_design_jp::wall_check::WallCheck],
 ) {
+    let summary = crate::app::displayed_wall_summary(checks);
+    let displayed = crate::app::displayed_wall_checks(checks);
+    let checks = displayed.as_ref();
     if checks.is_empty() {
         return;
     }
-    let summary = sepika_design_jp::wall_check::WallCheckSummary::from_checks(checks);
     ui.strong("耐震壁検定");
     ui.label(format!(
         "壁 {} 枚 / 検定 {} 件：合格 {}・NG {}・未検定 {} / 対象外 {} 件 / 最大検定比 {}",
@@ -1176,6 +1200,7 @@ pub(crate) fn wall_checks_ui(
             .map(|r| format!("{r:.4}"))
             .unwrap_or_else(|| "-".into())
     ));
+    ui.label("NGと未検定は同じ検定行に併存する場合があります。");
     for kind in [
         sepika_design_jp::wall_check::WallCheckKind::AllowableShear,
         sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton,

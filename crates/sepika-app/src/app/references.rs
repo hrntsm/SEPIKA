@@ -3273,7 +3273,7 @@ mod tests {
 
 pub(crate) const QUANTITY_EVIDENCE_CONTRACT_VERSION: u32 = 1;
 
-/// 保存結果または固定した数量入力を指す。数量の対象範囲はモデル全体。
+/// 保存結果または対象範囲を固定した数量入力を指す。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum EvidenceReference {
     Calculation(Box<ResultReference>),
@@ -3293,6 +3293,7 @@ pub struct QuantityEvidenceReference {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum QuantityEvidenceScope {
     WholeModel,
+    Members(Vec<ElemId>),
 }
 
 impl From<&ResultReference> for EvidenceReference {
@@ -3307,7 +3308,39 @@ impl From<&EvidenceReference> for EvidenceReference {
     }
 }
 
+#[cfg(feature = "gui")]
+impl QuantityEvidenceScope {
+    pub(crate) fn label(&self) -> String {
+        match self {
+            Self::WholeModel => "モデル全体".into(),
+            Self::Members(ids) => format!("検討の固定対象 {} 部材", ids.len()),
+        }
+    }
+}
+
 impl QuantityEvidenceReference {
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn takeoff(&self) -> Result<sepika_design_jp::quantity::QuantityTakeoff, String> {
+        let mut takeoff = sepika_design_jp::quantity::try_compute_quantity_takeoff(
+            &self.model,
+            &self.model.quantity_cfg,
+        )?;
+        if let QuantityEvidenceScope::Members(ids) = &self.scope {
+            if ids.is_empty() {
+                return Err("固定対象なし".into());
+            }
+            if ids.iter().any(|id| {
+                self.model.element(*id).is_none()
+                    || !takeoff.items.iter().any(|item| item.elem == Some(*id))
+            }) {
+                return Err("固定対象の数量明細が欠落しています".into());
+            }
+            takeoff
+                .items
+                .retain(|item| item.elem.is_some_and(|id| ids.contains(&id)));
+        }
+        Ok(takeoff)
+    }
     pub(crate) fn identity(&self) -> String {
         use sha2::{Digest, Sha256};
         format!(
@@ -3321,6 +3354,21 @@ impl QuantityEvidenceReference {
 }
 
 impl App {
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn member_quantity_evidence_reference(
+        &self,
+        mut members: Vec<ElemId>,
+    ) -> QuantityEvidenceReference {
+        members.sort_by_key(|id| id.0);
+        members.dedup();
+        let EvidenceReference::Quantity(mut quantity) = self.quantity_evidence_reference() else {
+            unreachable!()
+        };
+        quantity.scope = QuantityEvidenceScope::Members(members);
+        quantity.identity = quantity.identity();
+        *quantity
+    }
+
     /// 現在表示の入力とモデル全体の集計対象を同時に固定する。
     pub fn quantity_evidence_reference(&self) -> EvidenceReference {
         let mut quantity = QuantityEvidenceReference {
