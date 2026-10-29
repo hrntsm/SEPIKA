@@ -493,6 +493,8 @@ pub struct SavedAnalysisSettings {
     #[serde(default)]
     pub references: Option<references::ProjectReferences>,
     pub cfg: AnalysisSettings,
+    #[serde(default)]
+    pub design_settings: Option<study::StudySettings>,
     /// 波形ライブラリ（`sepika_io::wave_library`）で選択中の波形ファイル名。
     pub wave_name: Option<String>,
     /// `wave_name` を実行／保存した時点のライブラリ内ファイルの SHA-256。

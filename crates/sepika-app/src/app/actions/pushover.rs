@@ -331,6 +331,7 @@ mod tests {
             let results = rmp_serde::to_vec_named(&value).unwrap();
             app.core.analysis_cfg.push_dir = configured;
             let settings = rmp_serde::to_vec_named(&SavedAnalysisSettings {
+                design_settings: None,
                 references: None,
                 cfg: app.core.analysis_cfg,
                 wave_name: None,

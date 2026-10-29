@@ -12,9 +12,9 @@ pub enum IdChange {
 
 /// 編集コマンド。`Send` を要求するのは、MCP サーバが `UndoStack` を
 /// スレッド間で共有する(`rmcp::ServerHandler: Send + Sync`)ため。
-/// コマンドはモデルデータの断片のみを保持するプレーンな構造体であり、
-/// 全実装が自然に `Send` を満たす。
 pub trait EditCommand: Send {
+    /// モデルと履歴の確定後にだけ呼ばれる通知。候補の検証中には呼ばれない。
+    fn committed(&self) {}
     /// 解析・検定の計算入力を変更する編集か。
     fn affects_calculation(&self) -> bool {
         true
@@ -64,6 +64,9 @@ struct RestoreStbNodeIdentities {
 }
 
 impl EditCommand for RestoreStbNodeIdentities {
+    fn committed(&self) {
+        self.command.committed();
+    }
     fn section_assignment(&self) -> Option<(sepika_core::ids::ElemId, Option<SectionId>)> {
         self.command.section_assignment()
     }
@@ -116,6 +119,9 @@ fn with_id_changes(command: Box<dyn EditCommand>, changes: Vec<IdChange>) -> Box
 }
 
 impl EditCommand for CommandWithIdChanges {
+    fn committed(&self) {
+        self.command.committed();
+    }
     fn section_assignment(&self) -> Option<(sepika_core::ids::ElemId, Option<SectionId>)> {
         self.command.section_assignment()
     }
@@ -309,6 +315,7 @@ impl UndoStack {
         }
         self.undone.clear();
         self.revision += 1;
+        cmd.committed();
         true
     }
 
@@ -380,6 +387,7 @@ impl UndoStack {
             self.id_changes = redo_cmd.inverse_id_changes();
             self.undone.push(redo_cmd);
             self.revision += 1;
+            cmd.committed();
         }
     }
 
@@ -421,10 +429,11 @@ impl UndoStack {
         }
         *model = candidate;
         self.affects_calculation = affects_calculation;
-        self.undone.pop();
+        let command = self.undone.pop().expect("Redo対象");
         self.id_changes = undo_cmd.inverse_id_changes();
         self.done.push(undo_cmd);
         self.revision += 1;
+        command.committed();
     }
 
     /// 直前に確定した編集が解析・検定の計算入力を変更したか。

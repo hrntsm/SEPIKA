@@ -140,21 +140,7 @@ impl Entry {
             .collect();
         if let Some(run) = run {
             for case in &cases {
-                let has_result =
-                    app.core
-                        .scoped
-                        .results
-                        .as_ref()
-                        .is_some_and(|bundle| match case {
-                            ResultInputKey::Static(key) => {
-                                bundle.statics.iter().any(|(k, _)| k == key)
-                            }
-                            ResultInputKey::Combo(name) => {
-                                bundle.combos.iter().any(|(n, _)| n == name)
-                            }
-                            _ => false,
-                        });
-                if !has_result || app.require_result_input(case.clone()).is_err() {
+                if require_static_result(&app, case).is_err() {
                     failures.push(format!(
                         "静的結果の欠落・古い・失敗: {}",
                         case_label(case, &app.core.model)
@@ -242,6 +228,8 @@ pub(in crate::app) struct ComparisonView {
     differences: Vec<Vec<String>>,
     displacements: Vec<Result<(f64, EvidenceReference), String>>,
     impacts: Vec<Vec<MemberImpact>>,
+    confirmation: Option<adoption::Confirmation>,
+    reason: String,
 }
 impl ComparisonView {
     pub(in crate::app) fn new(owner: &App, study: usize) -> Result<Self, String> {
@@ -284,6 +272,8 @@ impl ComparisonView {
             differences,
             displacements: Vec::new(),
             impacts,
+            confirmation: None,
+            reason: String::new(),
         };
         view.bind_case();
         view.refresh_displacements();
@@ -398,8 +388,120 @@ impl ComparisonView {
                 }
             }
         });
+        ui.separator();
+        ui.strong("本案への採否（人による確認）");
+        ui.label("採用は検定OKを意味しません。以下の変更・固定条件・全体への影響・未確認事項と注意を確認してください。");
+        for (p, entry) in self.entries.iter().enumerate().skip(1) {
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button(format!("{} の結果と断面変更を確認して採否へ", entry.name))
+                    .clicked()
+                {
+                    let result = entry
+                        .retained_run
+                        .ok_or_else(|| "未計算です。案の計算へ戻ってください".to_string())
+                        .and_then(|r| {
+                            owner.confirm_study_run(
+                                self.study,
+                                p,
+                                &owner.studies.items[self.study].runs[r],
+                            )
+                        });
+                    match result {
+                        Ok(mut value) => {
+                            value.baseline_run = self.entries[0]
+                                .retained_run
+                                .map(|r| owner.studies.items[self.study].runs[r].clone());
+                            value.case = self.case.clone();
+                            value.node = self.node;
+                            value.component = self.component;
+                            value.envelope = self.envelope;
+                            self.confirmation = Some(value);
+                            self.reason.clear();
+                        }
+                        Err(reason) => owner.report_error(reason),
+                    }
+                }
+                if ui.button(format!("{} を計算", entry.name)).clicked() {
+                    if let Err(reason) = owner.start_study_calculation(self.study, p) {
+                        owner.report_error(reason);
+                    }
+                }
+            });
+            if let Some(r) = entry.retained_run {
+                let run = &owner.studies.items[self.study].runs[r];
+                ui.collapsing(
+                    format!("{} の既存警告・診断・未確認事項", entry.name),
+                    |ui| {
+                        for log in &run.log {
+                            if log.level != LogLevel::Info {
+                                ui.label(&log.message);
+                            }
+                        }
+                        for diagnostic in &run.diagnostics {
+                            ui.label(&diagnostic.message);
+                        }
+                        if let Some(notice) = &run.notice {
+                            ui.label(notice);
+                        }
+                        if let Some(error) = &run.error {
+                            ui.label(error);
+                        }
+                        for failure in &entry.failures {
+                            ui.label(failure);
+                        }
+                    },
+                );
+            }
+        }
+        let mut decision = None;
+        if let Some(confirmation) = &self.confirmation {
+            ui.label(format!(
+                "確認済み: {} / 計算時入力世代 {} / 変更一式のみを反映",
+                confirmation.run.proposal_name, confirmation.input.references.generation
+            ));
+            ui.label("理由（任意）");
+            ui.text_edit_multiline(&mut self.reason);
+            ui.horizontal_wrapped(|ui| {
+                for (accepted, label) in [
+                    (true, "確認済みの変更一式を本案へ採用"),
+                    (false, "不採用として判断を記録"),
+                ] {
+                    if ui.button(label).clicked() {
+                        decision = Some(accepted);
+                    }
+                }
+            });
+        }
+        if let Some(accepted) = decision {
+            let confirmation = self.confirmation.take().expect("確認済み");
+            if let Err(reason) =
+                owner.decide_study(self.study, confirmation, accepted, self.reason.clone())
+            {
+                owner.report_error(reason);
+            }
+        }
+        if owner.study_main_changed(self.study) {
+            ui.colored_label(
+                crate::theme::WARN_TEXT,
+                "本案が基準と異なります。新しい基準で検討してください。",
+            );
+            if ui.button("本案を表示して新しい基準の検討へ").clicked() {
+                match owner.switch_study(Location::Main) {
+                    Ok(()) => {
+                        owner.clear_geometry_selection();
+                        owner.studies.window_open = true;
+                        owner.report_info(
+                            "本案で対象の鉄骨大梁を選び、新しい検討を作成してください",
+                        );
+                    }
+                    Err(reason) => owner.report_error(reason),
+                }
+            }
+        }
         let mut case_changed = false;
         let mut displacement_changed = false;
+        let mut envelope_changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.label("指定ケース / 組合せ:");
             egui::ComboBox::from_id_salt("comparison_case")
@@ -423,11 +525,16 @@ impl ComparisonView {
             for (i, name) in ["全体X", "全体Y", "全体Z"].into_iter().enumerate() {
                 displacement_changed |= ui.selectable_value(&mut self.component, i, name).changed();
             }
-            ui.checkbox(
-                &mut self.envelope,
-                "検定は同ケース集合内の最大（オフ: 指定ケースのみ）",
-            );
+            envelope_changed = ui
+                .checkbox(
+                    &mut self.envelope,
+                    "検定は同ケース集合内の最大（オフ: 指定ケースのみ）",
+                )
+                .changed();
         });
+        if case_changed || displacement_changed || envelope_changed {
+            self.confirmation = None;
+        }
         if case_changed {
             self.bind_case();
         }
