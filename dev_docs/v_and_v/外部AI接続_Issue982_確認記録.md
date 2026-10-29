@@ -58,3 +58,9 @@ GUI/MCP全ターゲットclippy警告禁止は先行sourceで成功し、再送�
 修正では完了取込・保存snapshot・復元を同じ状態同期規則に集約した。AI要求job IDを既存実行と保持runへ引き継ぎ、実際の完了runを持つ記録だけを完了へ同期する。中断したジョブを後続の同入力別ジョブの成功で補完しない。状態変更は検討dirtyへ反映し、workerエラーとchannel切断の理由付き失敗も保存する。修正途中のAI契約13件は全成功。計算poll完了直後にAI pollなしで保存・復元、完成runを持つrunning/interrupted記録の復旧、真の未完了、中断後の同入力別ジョブ、dirtyと無変更同期、worker失敗の保持を含む。最終sourceでは通常OVIKA保存APIによる即時保存往復も同じ回帰へ追加し、確定後に再実行する。
 
 Windows専用CIジョブを追加し、PRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行する。Ubuntu既存4構成は維持し、Windows失敗も必須「テスト」を失敗させる。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時は省略する。debug symbolだけを0としてPR/mainの環境を揃えた。PyYAML構文と、PR/main/cache/gate条件・対象コマンドをローカル確認した。実際のGitHub CI結果はまだ確認していない。
+
+## 保持計算の発見入口
+
+d3cdddaaの確定sourceでGUI全lib1156件成功・3件ignore、非GUI476件成功・1件ignore、feature/非featureのGUI/MCP全target clippy警告禁止、MCP stdio最終1件、文書・依存・整形が成功した。fresh4は修正必須なしで完了した。実機は未起動。
+
+Goal照合で、新しい確認接続が既存の手計算runの位置と旧入力版を発見する入口が不足していたため、読取metadataの`runs`だけを追加する。保存再読込後の新しいReview接続がproposals→runsのページから旧版を選び、既存results/evidenceへ明示入力版を渡す回帰を追加した。history=falseは旧版の一覧・数値・根拠と過去の一覧応答の再送/照会を拒否し、現在版の計算だけを件数へ含める。数値計算・既存有効性・集計処理は変更していない。AI契約14件の実行中で、確定sourceの最終検証を追記する。
