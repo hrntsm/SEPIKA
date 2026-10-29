@@ -826,6 +826,7 @@ impl EventLog {
 /// リセット処理へ書き足す必要はない（書き漏らしが起こりえない）。
 #[derive(Default)]
 pub struct App {
+    pub ai_connection: study::ai::AiConnection,
     pub studies: study::Studies,
     /// モデルと解析・設計の状態。
     pub core: AppCore,
@@ -1894,6 +1895,14 @@ impl eframe::App for App {
 #[cfg(feature = "gui")]
 impl App {
     fn app_ui(&mut self, ui: &mut egui::Ui) {
+        #[cfg(windows)]
+        {
+            self.poll_ai_connection();
+            if self.ai_connection.listener.is_some() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(50));
+            }
+        }
         if self.studies.running.is_some() {
             self.poll_study_calculation();
             ui.ctx()

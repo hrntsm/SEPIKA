@@ -134,6 +134,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0091](0091-study-comparison-evidence.md) | accepted | 比較用のケース別検定根拠を原本から分け、数量の固定対象を保持する |
 
 | [0092](0092-confirmed-study-adoption.md) | accepted | 確認済み断面割当を既存Undoで採用し、判断根拠を固定する |
+| [0093](0093-gui-ai-connection-protocol.md) | accepted | GUIの検討操作を限定DACLのパイプと保存受理台帳で中継する |
 
 ## 規約
 

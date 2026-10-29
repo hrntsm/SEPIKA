@@ -35,6 +35,7 @@ impl App {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;
         }
+        self.ai_connection = study::ai::AiConnection::default();
         self.studies = study::Studies::default();
         self.core.model = model;
         self.core.scoped = ModelScoped::default();

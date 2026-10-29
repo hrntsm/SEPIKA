@@ -6,7 +6,7 @@ license = "MIT"
 
 [features]
 default = []
-mcp = ["dep:rmcp", "dep:tokio"]
+mcp = ["dep:rmcp", "dep:tokio", "dep:sepika-ai-connection"]
 
 # MCP サーバ起動用バイナリ。ライブラリは feature なしでもビルドできるが、
 # stdio サーバの実体（rmcp/tokio）は mcp feature が要るため bin だけを
@@ -17,6 +17,7 @@ path = "src/main.rs"
 required-features = ["mcp"]
 
 [dependencies]
+sepika-ai-connection = { path = "../sepika-ai-connection", optional = true }
 sepika-core = { path = "../sepika-core" }
 sepika-element = { path = "../sepika-element" }
 sepika-solver = { path = "../sepika-solver" }

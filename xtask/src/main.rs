@@ -43,7 +43,7 @@ fn run_check_deps() -> anyhow::Result<()> {
         &["sepika-element"],
         &["sepika-solver", "sepika-io"],
         &["sepika-design-jp"],
-        &["sepika-job"],
+        &["sepika-job", "sepika-ai-connection"],
         &["sepika-mcp", "sepika-app"],
     ];
 

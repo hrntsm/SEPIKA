@@ -14,6 +14,14 @@ pub struct CompositeCommand {
 }
 
 impl EditCommand for CompositeCommand {
+    fn section_assignments(&self) -> Option<Vec<(sepika_core::ids::ElemId, Option<SectionId>)>> {
+        self.children
+            .iter()
+            .filter(|child| !child.is_noop())
+            .map(|child| child.section_assignments())
+            .collect::<Option<Vec<_>>>()
+            .map(|assignments| assignments.into_iter().flatten().collect())
+    }
     fn affects_calculation(&self) -> bool {
         self.children
             .iter()

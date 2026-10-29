@@ -18,7 +18,7 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  # main は品質ゲートではなくキャッシュ生成のみを担うため、1 ジョブで直列に全構成を --no-run で
+  # main のUbuntu構成は品質ゲートではなくキャッシュ生成のみを担うため、1 ジョブで直列に --no-run で
   # ビルドして単一のキャッシュへまとめる。PR 側の復元元を 1 つに保つため、構成ごとに
   # shared-key を分けない。
   test-cache:
@@ -51,7 +51,7 @@ jobs:
         if: steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo check -p sepika-app --features sepika-app/gui --locked
 
-  # PR は 4 構成を独立ジョブで並列実行する。各ジョブは main の同一キャッシュを復元するだけで、
+  # PR のUbuntu 4 構成は独立ジョブで並列実行する。各ジョブは main の同一キャッシュを復元するだけで、
   # 保存はしない（同一キーへの競合保存を避ける）。
   test:
     name: テスト（${{ matrix.name }}）
@@ -79,16 +79,49 @@ jobs:
       - name: ${{ matrix.name }}
         run: ${{ matrix.command }}
 
-  # ブランチ保護の必須チェック名「テスト」を維持するための集約ジョブ。matrix のいずれかが
+  windows-connection:
+    name: ${{ github.event_name == 'push' && 'Windows通信（キャッシュ生成）' || 'Windows通信' }}
+    runs-on: windows-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          shared-key: test-windows-ai
+          save-if: ${{ github.event_name == 'push' }}
+      - name: パイプ通信テストビルド
+        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-ai-connection --locked --no-run
+      - name: GUI検討通信テストビルド
+        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-app --lib --features gui --locked --no-run
+      - name: MCP中継テストビルド
+        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked --no-run
+      - name: パイプ実通信テスト
+        if: github.event_name == 'pull_request'
+        run: cargo test -p sepika-ai-connection --locked
+      - name: GUI検討の実通信・編集・計算テスト
+        if: github.event_name == 'pull_request'
+        run: cargo test -p sepika-app --lib --features gui --locked app::study::ai::operations::tests -- --test-threads=1
+      - name: MCP stdio中継テスト
+        if: github.event_name == 'pull_request'
+        run: cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked
+
+  # ブランチ保護の必須チェック名「テスト」を維持するための集約ジョブ。Ubuntu構成かWindows通信が
   # 失敗・キャンセルされた場合に失敗する。
   test-gate:
     name: テスト
-    needs: test
+    needs: [test, windows-connection]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: 検証結果
-        if: needs.test.result != 'success'
+        if: needs.test.result != 'success' || needs['windows-connection'].result != 'success'
         run: exit 1
 
   clippy:

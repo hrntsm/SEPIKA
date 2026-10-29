@@ -13,7 +13,13 @@ name = "sepika"
 path = "src/main.rs"
 required-features = ["gui"]
 
+[[example]]
+name = "ai_connection_fixture"
+required-features = ["gui"]
+
 [dependencies]
+sepika-ai-connection = { path = "../sepika-ai-connection" }
+serde_json = { workspace = true }
 sepika-core = { path = "../sepika-core" }
 sepika-element = { path = "../sepika-element" }
 sepika-solver = { path = "../sepika-solver" }
@@ -37,6 +43,6 @@ uuid = { version = "1.23.3", features = ["v4"] }
 rmp-serde = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true }
 zip = { workspace = true }
-serde_json = { workspace = true }
 insta = { workspace = true }

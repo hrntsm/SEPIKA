@@ -1,5 +1,7 @@
 # MCP サーバ
 
+開いているGUIの検討へ接続する場合は、[GUI接続の起動手順](01_ビルドと起動.md#開いているguiの検討への接続)を使います。この方式はGUIの許可した検討だけを扱い、以下の独立起動とは接続先・公開操作が異なります。
+
 `sepika-mcp` は SEPIKA の構造モデルを [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 経由で AI エージェントに公開するサーバです。標準入出力（stdio）をトランスポートとして動作し、接続したクライアント（Claude Code、Claude Desktop など）から次のことができます。
 
 - 構造モデル（節点・部材・断面・壁版・床板・床領域・壁領域・二次部材）の照会
