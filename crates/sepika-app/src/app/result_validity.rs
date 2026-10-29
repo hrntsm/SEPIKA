@@ -108,6 +108,98 @@ pub struct HoldingCapacitySource {
     pub capacity_conditions: AnalysisSettings,
 }
 
+#[cfg(any(feature = "gui", test))]
+pub(crate) const INVALID_CHECK_COMPONENTS: &str =
+    "未評価: 検定成分が欠落・非有限・負のため、検定比と合否を確定しません。";
+
+#[cfg(any(feature = "gui", test))]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CheckEvaluation {
+    pub complete: bool,
+    pub valid_max: Option<f64>,
+    pub known_ng: Option<f64>,
+}
+#[cfg(any(feature = "gui", test))]
+pub(crate) fn evaluate_check(check: &sepika_design_jp::CheckResult) -> CheckEvaluation {
+    let valid = |r: f64| r.is_finite() && r >= 0.0;
+    let complete = !check.components.is_empty() && check.components.iter().all(|c| valid(c.ratio));
+    let valid_max = check
+        .components
+        .iter()
+        .map(|c| c.ratio)
+        .filter(|r| valid(*r))
+        .reduce(f64::max);
+    CheckEvaluation {
+        complete,
+        valid_max,
+        known_ng: valid_max.filter(|r| *r > 1.0),
+    }
+}
+#[cfg(any(feature = "gui", test))]
+pub(crate) fn checked_ratio(check: &sepika_design_jp::CheckResult) -> Option<f64> {
+    let evaluation = evaluate_check(check);
+    if evaluation.complete {
+        evaluation.valid_max
+    } else {
+        evaluation.known_ng
+    }
+}
+
+#[cfg(any(feature = "gui", test))]
+pub(crate) fn check_is_unrated(outcome: &sepika_design_jp::CheckOutcome) -> bool {
+    match outcome {
+        sepika_design_jp::CheckOutcome::Checked(check) => !evaluate_check(check).complete,
+        sepika_design_jp::CheckOutcome::Skipped { .. } => true,
+    }
+}
+
+#[cfg(feature = "gui")]
+pub(crate) fn displayed_wall_checks(
+    checks: &[sepika_design_jp::wall_check::WallCheck],
+) -> std::borrow::Cow<'_, [sepika_design_jp::wall_check::WallCheck]> {
+    let invalid = |outcome: &sepika_design_jp::CheckOutcome| {
+        matches!(outcome, sepika_design_jp::CheckOutcome::Checked(_)) && check_is_unrated(outcome)
+    };
+    if !checks.iter().any(|c| invalid(&c.outcome)) {
+        return std::borrow::Cow::Borrowed(checks);
+    }
+    let mut displayed = Vec::new();
+    for check in checks {
+        if invalid(&check.outcome) {
+            if let sepika_design_jp::CheckOutcome::Checked(cr) = &check.outcome {
+                if check.seismic_target && evaluate_check(cr).known_ng.is_some() {
+                    let mut ng = check.clone();
+                    if let sepika_design_jp::CheckOutcome::Checked(cr) = &mut ng.outcome {
+                        cr.components
+                            .retain(|c| c.ratio.is_finite() && c.ratio >= 0.0);
+                        cr.basis = format!("確認済みNG（未評価あり）: {}", cr.basis);
+                    }
+                    displayed.push(ng);
+                }
+            }
+            let mut unrated = check.clone();
+            unrated.outcome = sepika_design_jp::CheckOutcome::Skipped {
+                reason: INVALID_CHECK_COMPONENTS.into(),
+            };
+            displayed.push(unrated);
+        } else {
+            displayed.push(check.clone());
+        }
+    }
+    std::borrow::Cow::Owned(displayed)
+}
+
+#[cfg(feature = "gui")]
+pub(crate) fn displayed_wall_summary(
+    checks: &[sepika_design_jp::wall_check::WallCheck],
+) -> sepika_design_jp::wall_check::WallCheckSummary {
+    let displayed = displayed_wall_checks(checks);
+    let mut summary =
+        sepika_design_jp::wall_check::WallCheckSummary::from_checks(displayed.as_ref());
+    summary.n_checks = checks.iter().filter(|check| check.seismic_target).count();
+    summary
+}
+
 impl ResultsBundle {
     pub(super) fn has_analysis_results(&self) -> bool {
         !self.statics.is_empty()

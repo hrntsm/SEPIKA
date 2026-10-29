@@ -31,6 +31,7 @@ pub struct ViewportState {
     pub camera: crate::viewer::CameraState,
     pub show_sections: bool,
     pub deform_scale_factor: f32,
+    pub(crate) fixed_deform_scale: Option<f64>,
     pub show_diaphragm_master: bool,
     pub show_supports: bool,
     pub show_space_grid: bool,
@@ -50,6 +51,7 @@ pub struct ViewportState {
     pub(crate) lumped_source: Option<LumpedResultSource>,
     pub(crate) static_unavailable: bool,
     pub(crate) static_key: Option<crate::app::StaticKey>,
+    pub(crate) static_case_locked: bool,
     pub(crate) load_case: Option<sepika_core::ids::LoadCaseId>,
     pub(crate) pane_index: usize,
     pub(crate) allow_creation: bool,
@@ -73,6 +75,7 @@ impl Default for ViewportState {
             camera: crate::viewer::CameraState::default(),
             show_sections: false,
             deform_scale_factor: 1.0,
+            fixed_deform_scale: None,
             show_diaphragm_master: false,
             show_supports: true,
             show_space_grid: true,
@@ -92,6 +95,7 @@ impl Default for ViewportState {
             lumped_source: None,
             static_unavailable: false,
             static_key: None,
+            static_case_locked: false,
             load_case: None,
             pane_index: 0,
             allow_creation: true,
@@ -141,9 +145,11 @@ impl ViewportState {
         self.th_play_time = 0.0;
         self.th_scale_cache = None;
         self.static_key = None;
+        self.static_case_locked = false;
         self.static_unavailable = false;
         self.load_case = None;
         self.fit_scale = None;
+        self.fixed_deform_scale = None;
     }
 
     pub(crate) fn current_static<'a>(

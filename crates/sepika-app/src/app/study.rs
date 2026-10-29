@@ -1,3 +1,4 @@
+mod comparison;
 use super::*;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -120,6 +121,8 @@ pub struct Study {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ReferencedResult {
+    #[serde(default)]
+    expected_checks: Option<comparison::ExpectedChecks>,
     pub input: StudyInput,
     pub bundle: ResultsBundle,
     pub last_static: Option<StaticKey>,
@@ -173,6 +176,7 @@ impl ViewReferences {
             });
             if needed {
                 captured.evidence.push(ReferencedResult {
+                    expected_checks: Some(comparison::ExpectedChecks::capture(bundle)),
                     input: StudyInput::capture(core),
                     bundle: bundle.clone(),
                     last_static: core.scoped.last_static,
@@ -195,6 +199,10 @@ pub struct StudyRun {
     pub input: StudyInput,
     pub prepared: StudyInput,
     pub results: Option<ResultsBundle>,
+    #[serde(default)]
+    pub comparison_checks: Vec<ReferencedResult>,
+    #[serde(default)]
+    expected_result_checks: Option<comparison::ExpectedChecks>,
     pub preparation: Option<PreparationResult>,
     pub last_static: Option<StaticKey>,
     pub app_version: String,
@@ -206,6 +214,29 @@ pub struct StudyRun {
     pub diagnostics: Vec<Diagnostic>,
 }
 impl StudyRun {
+    fn result_scope_error(&self, reference: &references::ResultReference) -> Option<String> {
+        if reference.kind != ResultInputKey::Design {
+            return None;
+        }
+        if self
+            .results
+            .as_ref()
+            .is_some_and(|b| bundle_contains_reference(b, reference))
+        {
+            return self.original_scope_error();
+        }
+        self.comparison_checks
+            .iter()
+            .chain(&self.result_view_references.evidence)
+            .chain(&self.input_view_references.evidence)
+            .find(|e| bundle_contains_reference(&e.bundle, reference))
+            .and_then(|e| comparison::validate_expected_checks(e).err())
+    }
+    fn original_scope_error(&self) -> Option<String> {
+        self.results.as_ref().and_then(|bundle| {
+            comparison::validate_expected_bundle(self.expected_result_checks.as_ref(), bundle).err()
+        })
+    }
     fn referenced_result(
         &self,
         reference: &references::ResultReference,
@@ -217,9 +248,9 @@ impl StudyRun {
         {
             return Some((&self.prepared, bundle, self.last_static));
         }
-        self.result_view_references
-            .evidence
+        self.comparison_checks
             .iter()
+            .chain(&self.result_view_references.evidence)
             .chain(&self.input_view_references.evidence)
             .find(|e| bundle_contains_reference(&e.bundle, reference))
             .map(|e| (&e.input, &e.bundle, e.last_static))
@@ -241,6 +272,8 @@ pub struct Studies {
     pub running: Option<RunningStudy>,
     pub dirty: bool,
     pub window_open: bool,
+    #[cfg(feature = "gui")]
+    comparison: Option<Box<comparison::ComparisonView>>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct SavedStudies {
@@ -263,6 +296,7 @@ enum StudyWorkerOutcome {
 }
 
 fn finish_study_run(worker: &mut App, input: &StudyInput, name: String) -> StudyRun {
+    let comparison_checks = comparison::capture_checks(worker);
     let log = worker.core.log.finish_recording();
     let diagnostics = worker
         .core
@@ -271,6 +305,13 @@ fn finish_study_run(worker: &mut App, input: &StudyInput, name: String) -> Study
         .take()
         .unwrap_or_else(|| worker.core.scoped.diagnostics.clone());
     StudyRun {
+        expected_result_checks: worker
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .map(comparison::ExpectedChecks::capture),
+        comparison_checks,
         log,
         diagnostics,
         input_view_references: ViewReferences::default(),
@@ -465,6 +506,15 @@ impl App {
         if self.core.scoped.job.is_some() {
             return Err("本案の解析実行中は案を切り替えられません".into());
         }
+        let scope_error = if let Location::History(s, r) = next {
+            self.studies
+                .items
+                .get(s)
+                .and_then(|s| s.runs.get(r))
+                .and_then(StudyRun::original_scope_error)
+        } else {
+            None
+        };
         let mut next_slot = match next {
             Location::Main => self.studies.main.take().ok_or("本案がありません")?,
             Location::Proposal(s, p) => self
@@ -521,6 +571,9 @@ impl App {
         self.studies.active = next;
         if matches!(next, Location::History(..)) {
             self.validate_restored_results();
+            if let Some(reason) = scope_error {
+                self.reject_incomplete_study_design(reason);
+            }
             #[cfg(feature = "gui")]
             self.set_study_result_selection(self.core.scoped.last_static);
         }
@@ -656,6 +709,14 @@ impl App {
         &mut self,
         reference: &references::ResultReference,
     ) {
+        let scope_error = self.study_result_location(reference).and_then(|location| {
+            if let Location::History(s, r) = location {
+                self.studies.items[s].runs[r].result_scope_error(reference)
+            } else {
+                None
+            }
+        });
+
         if self
             .core
             .scoped
@@ -663,6 +724,9 @@ impl App {
             .as_ref()
             .is_some_and(|b| bundle_contains_reference(b, reference))
         {
+            if let Some(reason) = scope_error {
+                self.reject_incomplete_study_design(reason);
+            }
             if reference.kind == ResultInputKey::Design {
                 self.set_study_result_selection(self.core.scoped.last_static);
             }
@@ -681,6 +745,9 @@ impl App {
             self.core.scoped.results = Some(bundle.clone());
             self.core.scoped.last_static = last;
             self.validate_restored_results();
+            if let Some(reason) = scope_error {
+                self.reject_incomplete_study_design(reason);
+            }
             self.set_study_result_selection(self.core.scoped.last_static);
         }
     }
@@ -901,6 +968,13 @@ impl App {
 }
 
 impl App {
+    fn reject_incomplete_study_design(&mut self, reason: String) {
+        if let Some(bundle) = &mut self.core.scoped.results {
+            bundle.clear_design_results();
+        }
+        self.core.scoped.staleness.design_stale = true;
+        self.core.scoped.result_contract_notice = Some(reason);
+    }
     pub fn study_result_location(
         &self,
         reference: &references::ResultReference,
@@ -915,9 +989,9 @@ impl App {
                         .as_ref()
                         .is_some_and(|b| bundle_contains_reference(b, reference))
                         || run
-                            .result_view_references
-                            .evidence
+                            .comparison_checks
                             .iter()
+                            .chain(&run.result_view_references.evidence)
                             .chain(&run.input_view_references.evidence)
                             .any(|e| bundle_contains_reference(&e.bundle, reference)))
                     .then_some(Location::History(s, r))
@@ -928,7 +1002,9 @@ impl App {
         let Location::History(s, r) = self.study_result_location(reference)? else {
             unreachable!()
         };
-        if self.core.scoped.references.project == reference.source.project
+        let scope_error = self.studies.items[s].runs[r].result_scope_error(reference);
+        if scope_error.is_none()
+            && self.core.scoped.references.project == reference.source.project
             && self.core.scoped.references.proposal == reference.source.proposal
             && self
                 .core
@@ -947,6 +1023,9 @@ impl App {
         app.core.scoped.results = Some(bundle.clone());
         app.core.scoped.last_static = last;
         app.validate_restored_results();
+        if let Some(reason) = scope_error {
+            app.reject_incomplete_study_design(reason);
+        }
         Some(app)
     }
     pub(crate) fn resolve_study_result(
@@ -1019,6 +1098,7 @@ impl App {
                 let mut delete = None;
                 let mut calculate = None;
                 let mut quantity = None;
+                let mut compare = None;
                 for s in 0..self.studies.items.len() {
                     ui.separator();
                     let main_changed = self.study_main_changed(s);
@@ -1029,6 +1109,7 @@ impl App {
                     if main_changed {
                         ui.colored_label(crate::theme::WARN_TEXT, "本案は検討開始時から変更されています。履歴閲覧は可能です。採用可否の判定・採用は未対応です。");
                     }
+                    if ui.button("変更・結果を比較").clicked() { compare = Some(s); }
                     if ui.button("基準案から比較案を作成").clicked() { create = Some(s); }
                     for (p, proposal) in study.proposals.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
@@ -1067,6 +1148,12 @@ impl App {
                         });
                     }
                     if changed { self.studies.dirty = true; }
+                }
+                if let Some(s) = compare {
+                    match comparison::ComparisonView::new(self, s) {
+                        Ok(view) => self.studies.comparison = Some(Box::new(view)),
+                        Err(reason) => self.report_error(reason),
+                    }
                 }
                 let result = if let Some(next) = switch { self.switch_study(next) }
                     else if let Some(s) = create { self.create_comparison(s, "比較案".into()).map(|_| ()) }
@@ -1120,7 +1207,7 @@ mod tests {
     fn bytes(value: &impl Serialize) -> Vec<u8> {
         rmp_serde::to_vec_named(value).unwrap()
     }
-    fn app() -> App {
+    pub(super) fn app() -> App {
         let mut app = App::default();
         let mut model = crate::sample::portal_frame();
         model.panel_zone = sepika_core::model::PanelZoneMode::None;
@@ -1139,7 +1226,7 @@ mod tests {
         app.core.analysis_cfg.threads = 1;
         app
     }
-    fn assign(app: &mut App, section: u32) -> bool {
+    pub(super) fn assign(app: &mut App, section: u32) -> bool {
         let result = app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(sepika_edit::SetElementSection {
@@ -1152,7 +1239,7 @@ mod tests {
         }
         result
     }
-    fn wait(app: &mut App) {
+    pub(super) fn wait(app: &mut App) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while app.studies.running.is_some() {
             #[cfg(feature = "gui")]

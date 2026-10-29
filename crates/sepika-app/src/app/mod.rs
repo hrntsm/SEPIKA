@@ -1758,6 +1758,11 @@ mod result_validity;
 pub mod study;
 pub use result_validity::HoldingCapacitySource;
 pub(crate) use result_validity::ResultInputKey;
+#[cfg(feature = "gui")]
+pub(crate) use result_validity::{
+    check_is_unrated, checked_ratio, displayed_wall_checks, displayed_wall_summary, evaluate_check,
+    INVALID_CHECK_COMPONENTS,
+};
 mod actions;
 pub mod node_grid;
 #[cfg(test)]
@@ -1940,6 +1945,7 @@ impl App {
         self.region_assign_window(ui.ctx());
         self.reference_snapshot_window(ui.ctx());
         self.study_window(ui.ctx());
+        self.study_comparison_window(ui.ctx());
         self.result_evidence_window(ui.ctx());
 
         if self.core.scoped.pending_save_recording.is_some() {

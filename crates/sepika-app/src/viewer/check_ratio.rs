@@ -49,7 +49,8 @@ const ALL_KINDS: [CheckKind; 7] = [
 ///
 /// - [`CheckOutcome::Skipped`]（検定不能）は常に `None`（フィルタ対象外。
 ///   未検定と同様に着色しない）。
-/// - `Max`: `cr.ratio()`／`cr.ok()` を返す。
+/// - 空・非有限・負の検定成分は `None`。
+/// - `Max`: 有効な全成分の最大比と合否を返す。
 /// - `Kind(k)`: `cr.components` から `kind == k` の最大検定比を探し
 ///   `Some((r, r <= 1.0))` を返す。該当する式がなければ `None`
 ///   （＝この検定位置は当該式の検定対象外。着色・マーカーとも描かない）。
@@ -61,21 +62,21 @@ pub(super) fn ratio_for_filter(
     let CheckOutcome::Checked(cr) = outcome else {
         return None;
     };
-    if cr.components.is_empty() {
-        return None;
-    }
     match filter {
-        CheckRatioFilter::Max => Some((cr.ratio(), cr.ok())),
+        CheckRatioFilter::Max => crate::app::checked_ratio(cr).map(|r| (r, r <= 1.0)),
         CheckRatioFilter::Kind(k) => {
             let max_ratio = cr
                 .components
                 .iter()
+                .filter(|c| c.ratio.is_finite() && c.ratio >= 0.0)
                 .filter(|c| c.kind == k || c.kind == CheckKind::Provision && c.ratio > 1.0)
                 .map(|c| c.ratio)
                 .fold(None, |acc: Option<f64>, r| {
                     Some(acc.map_or(r, |a| a.max(r)))
                 });
-            max_ratio.map(|r| (r, r <= 1.0))
+            max_ratio
+                .filter(|r| crate::app::evaluate_check(cr).complete || *r > 1.0)
+                .map(|r| (r, r <= 1.0))
         }
     }
 }
@@ -84,6 +85,7 @@ pub(super) fn ratio_for_filter(
 fn dominant_kind_of(components: &[CheckComponent]) -> Option<CheckKind> {
     components
         .iter()
+        .filter(|c| c.ratio.is_finite() && c.ratio >= 0.0)
         .max_by(|a, b| {
             a.ratio
                 .partial_cmp(&b.ratio)
@@ -151,6 +153,12 @@ fn max_ratio_by_elem<I: IntoIterator<Item = (ElemId, Option<(f64, bool)>)>>(
     max_ratio_by_key(items)
 }
 
+fn has_unrated_positions(positions: &[PositionCheck]) -> bool {
+    positions
+        .iter()
+        .any(|p| crate::app::check_is_unrated(&p.outcome))
+}
+
 /// 未検定位置を含む部材は適合値へ集約せず、確認済みのNGだけを残す。
 fn member_ratios_for_filter(
     checks: &[MemberChecks],
@@ -162,10 +170,7 @@ fn member_ratios_for_filter(
             .map(|p| (m.elem, ratio_for_filter(&p.outcome, filter)))
     }));
     for member in checks {
-        if member
-            .positions
-            .iter()
-            .any(|p| matches!(p.outcome, CheckOutcome::Skipped { .. }))
+        if has_unrated_positions(&member.positions)
             && ratios.get(&member.elem).is_some_and(|(_, ok)| *ok)
         {
             ratios.remove(&member.elem);
@@ -187,10 +192,25 @@ fn incomplete_joint_nodes<'a>(
 ) -> std::collections::HashSet<NodeId> {
     items
         .into_iter()
-        .filter_map(|(node, outcome)| {
-            matches!(outcome, CheckOutcome::Skipped { .. }).then_some(node)
-        })
+        .filter_map(|(node, outcome)| crate::app::check_is_unrated(outcome).then_some(node))
         .collect()
+}
+
+fn joint_ratios_for_filter(
+    checks: &[crate::app::JointCheck],
+    filter: CheckRatioFilter,
+) -> (
+    HashMap<NodeId, (f64, bool)>,
+    std::collections::HashSet<NodeId>,
+) {
+    let incomplete = incomplete_joint_nodes(checks.iter().map(|c| (c.node, &c.outcome)));
+    let mut ratios = max_ratio_by_node(
+        checks
+            .iter()
+            .map(|c| (c.node, ratio_for_filter(&c.outcome, filter))),
+    );
+    ratios.retain(|node, (_, ok)| !*ok || !incomplete.contains(node));
+    (ratios, incomplete)
 }
 
 /// 部材中点に数値ラベルを描くかを判定する（純粋関数）。
@@ -284,9 +304,18 @@ pub(super) fn show_node_check_tooltip(ui: &egui::Ui, app: &App, node: NodeId) {
                     for j in rows {
                         ui.label(&j.label);
                         match &j.outcome {
+                            CheckOutcome::Checked(cr)
+                                if crate::app::checked_ratio(cr).is_none() =>
+                            {
+                                ui.label("-");
+                                ui.colored_label(theme::GRAY_600, "未評価");
+                                ui.label(crate::app::INVALID_CHECK_COMPONENTS);
+                            }
                             CheckOutcome::Checked(cr) => {
-                                ui.label(format!("{:.2}", cr.ratio()));
-                                if cr.ok() {
+                                ui.label(format!("{:.2}", crate::app::checked_ratio(cr).unwrap()));
+                                if !crate::app::evaluate_check(cr).complete {
+                                    ui.colored_label(theme::PARETO_RED, "NG（未評価あり）");
+                                } else if cr.ok() {
                                     ui.colored_label(theme::GOOD_GREEN, "OK");
                                 } else {
                                     ui.colored_label(theme::PARETO_RED, "NG");
@@ -341,6 +370,7 @@ pub(super) fn elem_check_positions(
 pub(super) enum RowVerdict {
     Ok,
     Ng,
+    NgUnrated,
     /// 検定不能（理由）。
     Skipped(String),
 }
@@ -363,19 +393,27 @@ pub(super) struct TooltipRow {
 /// [`RowVerdict::Skipped`] になる。
 pub(super) fn build_tooltip_rows(positions: &[PositionCheck]) -> (Vec<CheckKind>, Vec<TooltipRow>) {
     let kinds = available_check_kinds(positions.iter().filter_map(|p| match &p.outcome {
-        CheckOutcome::Checked(cr) => Some(cr.components.as_slice()),
+        CheckOutcome::Checked(cr) if crate::app::checked_ratio(cr).is_some() => {
+            Some(cr.components.as_slice())
+        }
+        CheckOutcome::Checked(_) => None,
         CheckOutcome::Skipped { .. } => None,
     }));
     let rows = positions
         .iter()
         .map(|p| match &p.outcome {
+            CheckOutcome::Checked(cr) if crate::app::checked_ratio(cr).is_none() => TooltipRow {
+                xi: p.xi,
+                values: vec![None; kinds.len()],
+                verdict: RowVerdict::Skipped(crate::app::INVALID_CHECK_COMPONENTS.into()),
+            },
             CheckOutcome::Checked(cr) => {
                 let values = kinds
                     .iter()
                     .map(|k| {
                         cr.components
                             .iter()
-                            .filter(|c| c.kind == *k)
+                            .filter(|c| c.kind == *k && c.ratio.is_finite() && c.ratio >= 0.0)
                             .map(|c| c.ratio)
                             .fold(None, |acc: Option<f64>, r| {
                                 Some(acc.map_or(r, |a| a.max(r)))
@@ -385,7 +423,9 @@ pub(super) fn build_tooltip_rows(positions: &[PositionCheck]) -> (Vec<CheckKind>
                 TooltipRow {
                     xi: p.xi,
                     values,
-                    verdict: if cr.ok() {
+                    verdict: if !crate::app::evaluate_check(cr).complete {
+                        RowVerdict::NgUnrated
+                    } else if cr.ok() {
                         RowVerdict::Ok
                     } else {
                         RowVerdict::Ng
@@ -447,7 +487,8 @@ pub(super) fn draw_check_ratio_with_view(
             continue;
         }
         let status = match &wall.outcome {
-            CheckOutcome::Checked(cr) => format!("{:.2}", cr.ratio()),
+            CheckOutcome::Checked(cr) => crate::app::checked_ratio(cr)
+                .map_or_else(|| "未評価".into(), |ratio| format!("{ratio:.2}")),
             CheckOutcome::Skipped { .. } => {
                 if wall.seismic_target {
                     "未検定".into()
@@ -469,14 +510,7 @@ pub(super) fn draw_check_ratio_with_view(
     let label_all = view.check_ratio_label_all;
 
     let elem_ratios = member_ratios_for_filter(&results.member_checks, filter);
-    let incomplete_nodes =
-        incomplete_joint_nodes(results.joint_checks.iter().map(|j| (j.node, &j.outcome)));
-    let node_ratios = max_ratio_by_node(
-        results
-            .joint_checks
-            .iter()
-            .map(|j| (j.node, ratio_for_filter(&j.outcome, filter))),
-    );
+    let (node_ratios, incomplete_nodes) = joint_ratios_for_filter(&results.joint_checks, filter);
 
     let checks_by_elem: HashMap<ElemId, &MemberChecks> =
         results.member_checks.iter().map(|m| (m.elem, m)).collect();
@@ -485,11 +519,9 @@ pub(super) fn draw_check_ratio_with_view(
         if !frame_filter.shows(elem.id) {
             continue;
         }
-        let incomplete = checks_by_elem.get(&elem.id).is_some_and(|m| {
-            m.positions
-                .iter()
-                .any(|p| matches!(p.outcome, CheckOutcome::Skipped { .. }))
-        });
+        let incomplete = checks_by_elem
+            .get(&elem.id)
+            .is_some_and(|m| has_unrated_positions(&m.positions));
         let Some(&(ratio, ok)) = elem_ratios.get(&elem.id) else {
             if incomplete && elem.nodes.len() == 2 {
                 if let (Some(p0), Some(p1)) = (
@@ -586,12 +618,16 @@ pub(super) fn draw_check_ratio_with_view(
             positions
                 .iter()
                 .filter_map(|p| match &p.outcome {
-                    CheckOutcome::Checked(cr) => Some(cr),
+                    CheckOutcome::Checked(cr) if crate::app::checked_ratio(cr).is_some() => {
+                        Some(cr)
+                    }
+                    CheckOutcome::Checked(_) => None,
                     CheckOutcome::Skipped { .. } => None,
                 })
                 .max_by(|a, b| {
-                    a.ratio()
-                        .partial_cmp(&b.ratio())
+                    crate::app::checked_ratio(a)
+                        .unwrap()
+                        .partial_cmp(&crate::app::checked_ratio(b).unwrap())
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .and_then(dominant_kind)
@@ -628,15 +664,22 @@ pub(super) fn draw_check_ratio_with_view(
                     egui::pos2(p.x, p.y + r),
                     egui::pos2(p.x - r, p.y),
                 ];
+                let known_ng = node_ratios
+                    .get(&node.id)
+                    .filter(|(_, ok)| !ok)
+                    .map(|(ratio, _)| *ratio);
                 painter.add(egui::Shape::convex_polygon(
                     diamond,
-                    theme::GRAY_600,
+                    known_ng.map_or(theme::GRAY_600, theme::check_ratio_color),
                     egui::Stroke::new(1.5_f32, theme::VIEW_BG),
                 ));
                 painter.text(
                     p + egui::vec2(r + 2.0, 0.0),
                     egui::Align2::LEFT_CENTER,
-                    "未算定",
+                    known_ng.map_or_else(
+                        || "未算定".into(),
+                        |ratio| format!("{ratio:.2} NG（未算定あり）"),
+                    ),
                     egui::FontId::proportional(11.0),
                     theme::GRAY_700,
                 );
@@ -741,6 +784,9 @@ pub(super) fn show_check_tooltip(ui: &egui::Ui, app: &App, elem_id: ElemId) {
                         match &row.verdict {
                             RowVerdict::Ok => {
                                 ui.label("OK");
+                            }
+                            RowVerdict::NgUnrated => {
+                                ui.colored_label(theme::PARETO_RED, "NG（未評価あり）");
                             }
                             RowVerdict::Ng => {
                                 ui.colored_label(theme::PARETO_RED, "NG");
@@ -889,7 +935,7 @@ fn draw_legend(
         egui::pos2(x0, y),
         egui::Align2::LEFT_TOP,
         format!(
-            "検定比図 (対象: {}, max={}, NG {}件)",
+            "検定比図 (対象: {}, 算定済み範囲のmax={}, NG {}件)",
             filter_label(filter),
             max_ratio
                 .map(|r| format!("{r:.2}"))
@@ -902,8 +948,7 @@ fn draw_legend(
     y = title_rect.max.y + 4.0;
     if let Some(results) = &app.core.scoped.results {
         if !results.wall_checks.is_empty() {
-            let s =
-                sepika_design_jp::wall_check::WallCheckSummary::from_checks(&results.wall_checks);
+            let s = crate::app::displayed_wall_summary(&results.wall_checks);
             let text = painter.text(
                 egui::pos2(x0, y),
                 egui::Align2::LEFT_TOP,
@@ -1977,5 +2022,534 @@ mod issue901_tests {
                 .1
         );
         assert!(!is_gray_member(&render_angle(&mut app)));
+    }
+}
+
+#[cfg(test)]
+mod incomplete_evidence_tests {
+    use super::*;
+    #[test]
+    fn malformed_components_are_unrated_in_diagram_filters_and_tooltips() {
+        for ratio in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.5)] {
+            let outcome = CheckOutcome::Checked(CheckResult {
+                basis: String::new(),
+                detail: String::new(),
+                components: ratio
+                    .map(|ratio| CheckComponent {
+                        kind: CheckKind::AxialBending,
+                        ratio,
+                        detail: String::new(),
+                    })
+                    .into_iter()
+                    .collect(),
+            });
+            assert_eq!(ratio_for_filter(&outcome, CheckRatioFilter::Max), None);
+            assert_eq!(
+                ratio_for_filter(&outcome, CheckRatioFilter::Kind(CheckKind::AxialBending)),
+                None
+            );
+            let (_, rows) = build_tooltip_rows(&[PositionCheck { xi: 0.5, outcome }]);
+            assert!(matches!(rows[0].verdict, RowVerdict::Skipped(_)));
+            assert!(rows[0].values.iter().all(Option::is_none));
+        }
+    }
+    fn outcome(ratio: Option<f64>) -> CheckOutcome {
+        CheckOutcome::Checked(CheckResult {
+            basis: String::new(),
+            detail: String::new(),
+            components: ratio
+                .map(|ratio| CheckComponent {
+                    kind: CheckKind::Bending,
+                    ratio,
+                    detail: String::new(),
+                })
+                .into_iter()
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn mixed_and_all_malformed_components_never_make_members_or_nodes_fully_ok() {
+        for invalid in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.5)] {
+            for ratios in [
+                [Some(0.6), invalid],
+                [invalid, invalid],
+                [Some(1.2), invalid],
+            ] {
+                let positions: Vec<_> = ratios
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, r)| PositionCheck {
+                        xi: i as f64,
+                        outcome: outcome(r),
+                    })
+                    .collect();
+                assert!(has_unrated_positions(&positions));
+                let checks = [MemberChecks {
+                    elem: ElemId(2),
+                    positions,
+                }];
+                for filter in [
+                    CheckRatioFilter::Max,
+                    CheckRatioFilter::Kind(CheckKind::Bending),
+                ] {
+                    let members = member_ratios_for_filter(&checks, filter);
+                    assert!(!members.get(&ElemId(2)).is_some_and(|(_, ok)| *ok));
+                    if ratios[0] == Some(1.2) {
+                        assert_eq!(members.get(&ElemId(2)), Some(&(1.2, false)));
+                    }
+                    let incomplete = incomplete_joint_nodes(
+                        checks[0].positions.iter().map(|p| (NodeId(3), &p.outcome)),
+                    );
+                    assert!(incomplete.contains(&NodeId(3)));
+                    let joints: Vec<_> = checks[0]
+                        .positions
+                        .iter()
+                        .map(|p| crate::app::JointCheck {
+                            node: NodeId(3),
+                            label: String::new(),
+                            outcome: p.outcome.clone(),
+                        })
+                        .collect();
+                    let (nodes, unrated) = joint_ratios_for_filter(&joints, filter);
+                    assert!(unrated.contains(&NodeId(3)));
+                    assert!(!nodes.get(&NodeId(3)).is_some_and(|(_, ok)| *ok));
+                    if ratios[0] == Some(1.2) {
+                        assert_eq!(nodes.get(&NodeId(3)), Some(&(1.2, false)));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_and_all_malformed_outcomes_draw_unrated_member_and_node_markers() {
+        for invalid in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.5)] {
+            for first in [Some(0.6), invalid, Some(1.2)] {
+                let mut app = App::default();
+                let mut model = crate::sample::portal_frame();
+                model.panel_zone = sepika_core::model::PanelZoneMode::None;
+                assert!(app.load_model(model));
+                app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+                app.run_design_check();
+                let bundle = app.core.scoped.results.as_mut().unwrap();
+                bundle.member_checks = vec![MemberChecks {
+                    elem: ElemId(2),
+                    positions: vec![
+                        PositionCheck {
+                            xi: 0.0,
+                            outcome: outcome(first),
+                        },
+                        PositionCheck {
+                            xi: 1.0,
+                            outcome: outcome(invalid),
+                        },
+                    ],
+                }];
+                bundle.joint_checks = vec![
+                    crate::app::JointCheck {
+                        node: NodeId(3),
+                        label: "面A".into(),
+                        outcome: outcome(first),
+                    },
+                    crate::app::JointCheck {
+                        node: NodeId(3),
+                        label: "面B".into(),
+                        outcome: outcome(invalid),
+                    },
+                ];
+                let before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+                let ctx = egui::Context::default();
+                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    draw_check_ratio(
+                        ui.painter(),
+                        &app,
+                        &app.core.model,
+                        &[
+                            egui::pos2(50.0, 200.0),
+                            egui::pos2(350.0, 200.0),
+                            egui::pos2(50.0, 50.0),
+                            egui::pos2(350.0, 50.0),
+                        ],
+                        Default::default(),
+                    )
+                });
+                let labels: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|s| {
+                        if let egui::Shape::Text(t) = &s.shape {
+                            Some(t.galley.text())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert!(labels.iter().any(|l| l.contains("未検定")), "{labels:?}");
+                assert!(labels.iter().any(|l| l.contains("未算定")), "{labels:?}");
+                if first == Some(1.2) {
+                    assert!(labels.iter().any(|l| l.contains("1.20 NG")), "{labels:?}");
+                }
+                assert!(!labels.iter().any(|l| l.contains("0.60")), "{labels:?}");
+                assert_eq!(
+                    before,
+                    rmp_serde::to_vec_named(&app.core.scoped.results).unwrap()
+                );
+            }
+        }
+    }
+    #[test]
+    fn malformed_wall_components_are_unrated_in_table_and_legend_without_hiding_known_ng() {
+        use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallCheckSummary};
+        for invalid in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.5)] {
+            for first in [Some(0.6), Some(1.2), invalid] {
+                let checks: Vec<_> = [first, invalid]
+                    .into_iter()
+                    .map(|ratio| WallCheck {
+                        plate: None,
+                        elem: Some(ElemId(2)),
+                        node: Some(NodeId(3)),
+                        case: "ケース".into(),
+                        kind: WallCheckKind::AllowableShear,
+                        shear_method: None,
+                        seismic_target: true,
+                        skip_kind: None,
+                        outcome: outcome(ratio),
+                        reference_skeleton: None,
+                    })
+                    .collect();
+                let before = rmp_serde::to_vec_named(&checks).unwrap();
+                let displayed = crate::app::displayed_wall_checks(&checks);
+                let summary = WallCheckSummary::from_checks(displayed.as_ref());
+                assert_eq!(summary.n_ok_walls, 0);
+                assert!(summary.n_skipped >= 1);
+                if first == Some(0.6) {
+                    assert_eq!((summary.n_ok, summary.n_ng, summary.n_skipped), (1, 0, 1));
+                    assert_eq!(summary.n_skipped_walls, 1);
+                } else if first == Some(1.2) {
+                    assert_eq!((summary.n_ok, summary.n_ng, summary.n_skipped), (0, 1, 1));
+                    assert_eq!(summary.n_ng_walls, 1);
+                } else {
+                    assert_eq!((summary.n_ok, summary.n_ng, summary.n_skipped), (0, 0, 2));
+                    assert_eq!(summary.max_ratio, None);
+                }
+                let mut app = App::default();
+                app.core.scoped.results = Some(crate::app::ResultsBundle {
+                    wall_checks: checks.clone(),
+                    ..Default::default()
+                });
+                for surface in 0..2 {
+                    let ctx = egui::Context::default();
+                    let mut labels = String::new();
+                    for _ in 0..2 {
+                        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                            if surface == 0 {
+                                crate::design_view::wall_checks_ui(ui, &checks);
+                            } else {
+                                draw_legend(
+                                    ui.painter(),
+                                    &app,
+                                    &HashMap::new(),
+                                    &HashMap::new(),
+                                    CheckRatioFilter::Max,
+                                    true,
+                                    false,
+                                );
+                            }
+                        });
+                        for shape in &output.shapes {
+                            if let egui::Shape::Text(t) = &shape.shape {
+                                labels.push_str(t.galley.text());
+                            }
+                        }
+                    }
+                    assert!(
+                        labels.contains(&format!(
+                            "合格 {}・NG {}・未検定 {}",
+                            summary.n_ok, summary.n_ng, summary.n_skipped
+                        )),
+                        "入口 {surface}: {labels}"
+                    );
+                    let maximum = if surface == 0 {
+                        summary.max_ratio.map_or_else(
+                            || "最大検定比 -".into(),
+                            |ratio| format!("最大検定比 {ratio:.4}"),
+                        )
+                    } else {
+                        summary
+                            .max_ratio
+                            .map_or_else(|| "max=-".into(), |ratio| format!("max={ratio:.2}"))
+                    };
+                    assert!(labels.contains(&maximum), "入口 {surface}: {labels}");
+                }
+                assert_eq!(before, rmp_serde::to_vec_named(&checks).unwrap());
+                assert_eq!(
+                    before,
+                    rmp_serde::to_vec_named(&app.core.scoped.results.as_ref().unwrap().wall_checks)
+                        .unwrap()
+                );
+            }
+        }
+    }
+    #[test]
+    fn same_position_partial_ng_survives_filters_tooltips_and_wall_table_and_legend() {
+        use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallCheckSummary};
+        for invalid in [f64::NAN, f64::INFINITY, -0.5] {
+            for valid in [Some(1.2), Some(0.6), None] {
+                let mut components = vec![CheckComponent {
+                    kind: CheckKind::Shear,
+                    ratio: invalid,
+                    detail: String::new(),
+                }];
+                if let Some(ratio) = valid {
+                    components.push(CheckComponent {
+                        kind: CheckKind::Bending,
+                        ratio,
+                        detail: String::new(),
+                    });
+                }
+                let outcome = CheckOutcome::Checked(CheckResult {
+                    basis: String::new(),
+                    detail: String::new(),
+                    components,
+                });
+                let positions = vec![PositionCheck {
+                    xi: 0.5,
+                    outcome: outcome.clone(),
+                }];
+                assert!(has_unrated_positions(&positions));
+                let expected = valid.filter(|r| *r > 1.0).map(|r| (r, false));
+                assert_eq!(ratio_for_filter(&outcome, CheckRatioFilter::Max), expected);
+                assert_eq!(
+                    ratio_for_filter(&outcome, CheckRatioFilter::Kind(CheckKind::Bending)),
+                    expected
+                );
+                let members = member_ratios_for_filter(
+                    &[MemberChecks {
+                        elem: ElemId(2),
+                        positions: positions.clone(),
+                    }],
+                    CheckRatioFilter::Max,
+                );
+                assert_eq!(members.get(&ElemId(2)).copied(), expected);
+                let (nodes, incomplete) = joint_ratios_for_filter(
+                    &[crate::app::JointCheck {
+                        node: NodeId(3),
+                        label: String::new(),
+                        outcome: outcome.clone(),
+                    }],
+                    CheckRatioFilter::Max,
+                );
+                assert!(incomplete.contains(&NodeId(3)));
+                assert_eq!(nodes.get(&NodeId(3)).copied(), expected);
+                let (_, tooltip) = build_tooltip_rows(&positions);
+                if valid == Some(1.2) {
+                    assert!(matches!(tooltip[0].verdict, RowVerdict::NgUnrated));
+                    assert!(tooltip[0].values.contains(&Some(1.2)));
+                } else {
+                    assert!(matches!(tooltip[0].verdict, RowVerdict::Skipped(_)));
+                }
+                let mut diagram = App::default();
+                let mut model = crate::sample::portal_frame();
+                model.panel_zone = sepika_core::model::PanelZoneMode::None;
+                assert!(diagram.load_model(model));
+                diagram.run_linear_static(sepika_core::ids::LoadCaseId(0));
+                diagram.run_design_check();
+                let bundle = diagram.core.scoped.results.as_mut().unwrap();
+                bundle.member_checks = vec![MemberChecks {
+                    elem: ElemId(2),
+                    positions: positions.clone(),
+                }];
+                bundle.joint_checks = vec![crate::app::JointCheck {
+                    node: NodeId(3),
+                    label: String::new(),
+                    outcome: outcome.clone(),
+                }];
+                let ctx = egui::Context::default();
+                let output = ctx.run_ui(Default::default(), |ui| {
+                    draw_check_ratio(
+                        ui.painter(),
+                        &diagram,
+                        &diagram.core.model,
+                        &[
+                            egui::pos2(50.0, 200.0),
+                            egui::pos2(350.0, 200.0),
+                            egui::pos2(50.0, 50.0),
+                            egui::pos2(350.0, 50.0),
+                        ],
+                        Default::default(),
+                    )
+                });
+                let labels: String = output
+                    .shapes
+                    .iter()
+                    .filter_map(|s| {
+                        if let egui::Shape::Text(t) = &s.shape {
+                            Some(t.galley.text())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert!(
+                    labels.contains("未検定") && labels.contains("未算定"),
+                    "{labels}"
+                );
+                assert_eq!(labels.contains("1.20 NG"), valid == Some(1.2), "{labels}");
+                assert!(!labels.contains("0.60"), "{labels}");
+                let checks = vec![WallCheck {
+                    plate: None,
+                    elem: Some(ElemId(2)),
+                    node: Some(NodeId(3)),
+                    case: "partial".into(),
+                    kind: WallCheckKind::AllowableShear,
+                    shear_method: None,
+                    seismic_target: true,
+                    skip_kind: None,
+                    outcome,
+                    reference_skeleton: None,
+                }];
+                let original = rmp_serde::to_vec_named(&checks).unwrap();
+                let displayed = crate::app::displayed_wall_checks(&checks);
+                let summary = WallCheckSummary::from_checks(displayed.as_ref());
+                assert_eq!(
+                    (summary.n_ok, summary.n_ng, summary.n_skipped),
+                    (0, usize::from(valid == Some(1.2)), 1)
+                );
+                assert_eq!(summary.max_ratio, valid.filter(|r| *r > 1.0));
+                let mut app = App::default();
+                app.core.scoped.results = Some(crate::app::ResultsBundle {
+                    wall_checks: checks.clone(),
+                    ..Default::default()
+                });
+                for surface in 0..2 {
+                    let ctx = egui::Context::default();
+                    let mut labels = String::new();
+                    for _ in 0..2 {
+                        let output = ctx.run_ui(Default::default(), |ui| {
+                            if surface == 0 {
+                                crate::design_view::wall_checks_ui(ui, &checks);
+                            } else {
+                                draw_legend(
+                                    ui.painter(),
+                                    &app,
+                                    &HashMap::new(),
+                                    &HashMap::new(),
+                                    CheckRatioFilter::Max,
+                                    true,
+                                    false,
+                                );
+                            }
+                        });
+                        for shape in output.shapes {
+                            if let egui::Shape::Text(t) = shape.shape {
+                                labels.push_str(t.galley.text());
+                            }
+                        }
+                    }
+                    assert!(labels.contains("壁 1 枚 / 検定 1 件"), "{labels}");
+                    assert!(
+                        labels.contains(&format!(
+                            "合格 0・NG {}・未検定 1",
+                            usize::from(valid == Some(1.2))
+                        )),
+                        "{labels}"
+                    );
+                }
+                assert_eq!(original, rmp_serde::to_vec_named(&checks).unwrap());
+            }
+        }
+    }
+    #[test]
+    fn wall_counts_preserve_original_target_scope_with_outside_and_partial_ng() {
+        use sepika_design_jp::wall_check::{WallCheck, WallCheckKind};
+        for (targets, partial_ng, count, outside, ng, unrated) in [
+            ([true, false], false, 1, 1, 0, 0),
+            ([false, false], false, 0, 2, 0, 0),
+            ([true, false], true, 1, 1, 1, 1),
+        ] {
+            let checks: Vec<_> = targets
+                .into_iter()
+                .map(|target| {
+                    let mut result = outcome(Some(if partial_ng { 1.2 } else { 0.6 }));
+                    if partial_ng {
+                        if let CheckOutcome::Checked(cr) = &mut result {
+                            cr.components.push(CheckComponent {
+                                kind: CheckKind::Shear,
+                                ratio: f64::NAN,
+                                detail: String::new(),
+                            });
+                        }
+                    }
+                    WallCheck {
+                        plate: None,
+                        elem: Some(ElemId(2)),
+                        node: Some(NodeId(3)),
+                        case: String::new(),
+                        kind: WallCheckKind::AllowableShear,
+                        shear_method: None,
+                        seismic_target: target,
+                        skip_kind: None,
+                        outcome: result,
+                        reference_skeleton: None,
+                    }
+                })
+                .collect();
+            let before = rmp_serde::to_vec_named(&checks).unwrap();
+            let summary = crate::app::displayed_wall_summary(&checks);
+            assert_eq!(
+                (
+                    summary.n_checks,
+                    summary.n_outside,
+                    summary.n_ng,
+                    summary.n_skipped
+                ),
+                (count, outside, ng, unrated)
+            );
+            assert_eq!(summary.n_walls, usize::from(count > 0));
+            let mut app = App::default();
+            app.core.scoped.results = Some(crate::app::ResultsBundle {
+                wall_checks: checks.clone(),
+                ..Default::default()
+            });
+            for surface in 0..2 {
+                let ctx = egui::Context::default();
+                let mut labels = String::new();
+                for _ in 0..2 {
+                    let output = ctx.run_ui(Default::default(), |ui| {
+                        if surface == 0 {
+                            crate::design_view::wall_checks_ui(ui, &checks);
+                        } else {
+                            draw_legend(
+                                ui.painter(),
+                                &app,
+                                &HashMap::new(),
+                                &HashMap::new(),
+                                CheckRatioFilter::Max,
+                                true,
+                                false,
+                            );
+                        }
+                    });
+                    for shape in output.shapes {
+                        if let egui::Shape::Text(t) = shape.shape {
+                            labels.push_str(t.galley.text());
+                        }
+                    }
+                }
+                assert!(
+                    labels.contains(&format!(
+                        "壁 {} 枚 / 検定 {count} 件",
+                        usize::from(count > 0)
+                    )),
+                    "{surface}: {labels}"
+                );
+                assert!(
+                    labels.contains(&format!("NG {ng}・未検定 {unrated} / 対象外 {outside}")),
+                    "{surface}: {labels}"
+                );
+            }
+            assert_eq!(before, rmp_serde::to_vec_named(&checks).unwrap());
+        }
     }
 }
