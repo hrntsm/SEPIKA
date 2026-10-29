@@ -42,3 +42,11 @@ GUI/MCP全ターゲットclippy警告禁止は先行sourceで成功し、再送�
 ## 実機用の正常fixture
 
 `cargo build -p sepika-app --features gui --example ai_connection_fixture --locked --target-dir target-issue982`で、未設定壁版を持たない専用GUIを生成する。起動対象は`target-issue982/debug/examples/ai_connection_fixture.exe`。MCPの代表操作は`crates/sepika-mcp/tests/support/gui_probe.py`へ、専用MCP実行ファイル、GUI表示のpipe、`--scenario review`または`comparison`、専用出力パスを渡す。外部LLMやAPIキーは使わず、GUIでの明示許可を待つ。通常の計算値・根拠・参照と提出をJSONへ記録する。
+
+## 独立確認後の修正群
+
+9e26a7d4の独立確認ではAI契約7件が成功した。保存済みsubmit応答の無条件開示を修正し、提出時の受理ID・保持計算と既存Quantity根拠を保存して現在の閲覧許可と元根拠を照合する。説明だけの提出にも適用し、後続の無関係な計算で当初の未計算状態を補完しない。計算中の編集拒否は開始proposalに限定し、同じ検討の別案を編集できるようにする。数量のみの提出根拠も案の削除不可規則へ追加した。非GUI構成で数量範囲のlabel取得が欠けるコンパイルエラーを検出し、利用するtest cfgと同じ範囲へ揃えた。
+
+この修正群のAI契約10件（提出の結果参照有無・Quantityの旧版/失効/保存再読込、計算中案と他案の編集を含む）は実行中。直前のGUI全lib成功と区別し、このsourceの最終全lib・静的解析・実機結果は後で追記する。
+
+9e26a7d4の関連確認ではMCP非feature全libが98件成功した。feature全libは並列実行で134成功・既存CFTジョブ待機の1件が時間切れとなった。変更せず単独実行すると2.58秒で成功し、既存MCPテストexeを逐次全135件実行して全成功（12.09秒）した。待機上限や計算式は変更していない。GUI/MCP全target clippy警告禁止もこの段階で成功した。
