@@ -1069,6 +1069,8 @@ pub struct UiState {
 /// ここへ置く。[`App::load_model`] が `Default::default()` の代入で丸ごと破棄する。
 pub struct UiModelScoped {
     #[cfg(feature = "gui")]
+    pub(crate) search: search::Search,
+    #[cfg(feature = "gui")]
     pub opened_reference: Option<references::TargetReference>,
     #[cfg(feature = "gui")]
     pub reference_snapshot: Option<(String, references::RecordedCalculationInput)>,
@@ -1222,6 +1224,8 @@ pub struct UiModelScoped {
 impl Default for UiModelScoped {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "gui")]
+            search: Default::default(),
             #[cfg(feature = "gui")]
             opened_reference: None,
             #[cfg(feature = "gui")]
@@ -1741,6 +1745,8 @@ mod nav_results;
 mod nav_vibration;
 #[cfg(feature = "gui")]
 pub(crate) mod panels;
+#[cfg(feature = "gui")]
+mod search;
 pub(crate) mod vibration;
 #[cfg(feature = "gui")]
 mod workspace;
@@ -1843,6 +1849,35 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.app_ui(ui);
+    }
+}
+
+#[cfg(feature = "gui")]
+impl App {
+    fn app_ui(&mut self, ui: &mut egui::Ui) {
+        if std::mem::take(&mut self.ui.scoped.search.resume_input) {
+            if let Some(focus) = self.ui.scoped.search.previous_focus.take() {
+                ui.ctx().memory_mut(|memory| memory.request_focus(focus));
+            }
+            crate::grid::retain_editing_for_layout(ui.ctx());
+        }
+        if ui
+            .ctx()
+            .input_mut(|input| input.consume_shortcut(&search::SHORTCUT_SEARCH))
+            && !self.ui.scoped.search.open
+        {
+            self.open_search(ui);
+        }
+        if self.ui.scoped.search.open {
+            if self.core.scoped.job.is_some() {
+                self.poll_job();
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            self.search_ui(ui);
+            return;
+        }
         self.ui.view.workspace.compact = ui.max_rect().width() < 1100.0;
         self.apply_pending_story_command();
         if self.core.scoped.job.is_some() {
@@ -2022,6 +2057,13 @@ impl eframe::App for App {
             .show_inside(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     self.file_menu(ui);
+                    if ui
+                        .button("検索…")
+                        .on_hover_text("対象・操作を検索（Ctrl+Shift+P）")
+                        .clicked()
+                    {
+                        self.open_search(ui);
+                    }
                     ui.separator();
                     let tabs = [
                         ("モデル", Tab::Model),
@@ -2065,6 +2107,11 @@ impl eframe::App for App {
             });
 
         workspace::retain_input_focus(ui, layout_input_focus, toolbar.response.rect);
+        if self.ui.scoped.search.open {
+            self.ui.scoped.search.previous_focus = layout_input_focus;
+            self.search_ui(ui);
+            return;
+        }
         self.enter_workspace();
 
         egui::Panel::bottom("status_bar")

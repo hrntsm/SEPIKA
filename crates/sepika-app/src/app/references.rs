@@ -1050,6 +1050,15 @@ impl App {
         destination: Tab,
     ) -> Result<(), String> {
         let target = self.resolve_target_reference(reference)?;
+        self.require_reference_view(target, view)?;
+        self.show_resolved_reference(reference, target, view, reveal, destination)
+    }
+
+    pub(super) fn require_reference_view(
+        &self,
+        target: ReferenceTarget,
+        view: ReferenceView,
+    ) -> Result<(), String> {
         match (target, view) {
             (
                 ReferenceTarget::Material(_)
@@ -1085,6 +1094,17 @@ impl App {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn show_resolved_reference(
+        &mut self,
+        reference: &TargetReference,
+        target: ReferenceTarget,
+        view: ReferenceView,
+        reveal: bool,
+        destination: Tab,
+    ) -> Result<(), String> {
         if self.reference_hidden(target) && !reveal {
             return Err("対象は現在の階・通りで非表示です。「対象を表示」で表示できます。".into());
         }
@@ -1193,12 +1213,13 @@ impl App {
             ReferenceView::Detail => {
                 self.ui.view.right_dock_open = true;
                 self.ui.view.right_panel = RightPanel::Inspector;
+                self.ui.view.workspace.compact_dock = Some(false);
             }
         }
         Ok(())
     }
 
-    fn reference_hidden(&self, target: ReferenceTarget) -> bool {
+    pub(super) fn reference_hidden(&self, target: ReferenceTarget) -> bool {
         self.reference_hidden_in(target, self.ui.view.frame_target)
     }
 
