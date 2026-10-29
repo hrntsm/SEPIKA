@@ -90,4 +90,4 @@ OS設定の取得・起動・変更、過去に拒否された未設定壁版の
 
 ## Windows CI
 
-Windows専用ジョブはPRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行し、失敗は必須「テスト」を失敗させる。既存Ubuntu4構成は維持した。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時に省略する。PR/mainのdebug symbol設定を揃えた。PyYAML構文とPR/main/cache/gate条件・対象コマンドをローカル確認した。実GitHub CI結果はPRで別途確認する。
+Windows専用ジョブはPRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行し、失敗は必須「テスト」を失敗させる。既存Ubuntu4構成は維持した。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時に省略する。PR/mainのdebug symbol設定を揃えた。PyYAML構文とPR/main/cache/gate条件・対象コマンドをローカル確認した。GitHub CI結果は[PR #1002のチェック](https://github.com/hrntsm/SEPIKA/pull/1002/checks)の最終HEADに対する結果を参照し、上記ローカル実行の成功と区別する。
