@@ -59,6 +59,7 @@ impl App {
     /// - 検定器は構造種別（`sepika_core::structure_kind`）で選択する。
     /// - 床板の設計自重が計算不可の場合は理由を通知し、既存の検定結果を消去する。
     pub fn run_design_check(&mut self) {
+        self.retain_study_view_references();
         if self.core.scoped.staleness.results_stale && self.reject_unsupported_panel_results(false)
         {
             return;

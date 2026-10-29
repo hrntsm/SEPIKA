@@ -113,6 +113,11 @@ impl App {
             }
         });
         ui.separator();
+        if self.study_read_only()
+            || (!self.study_is_main() && self.ui.view.model_tab != ModelTab::Members)
+        {
+            ui.disable();
+        }
         match self.ui.view.model_tab {
             ModelTab::Nodes => crate::tables::nodes::nodes_table(ui, self),
             ModelTab::BoundaryConditions => {

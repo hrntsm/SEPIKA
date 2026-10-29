@@ -288,7 +288,7 @@ impl Staleness {
 }
 
 /// 診断の重要度。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DiagSeverity {
     Error,
     Warning,
@@ -296,14 +296,14 @@ pub enum DiagSeverity {
 }
 
 /// 診断が指す対象（クリックで 3D 選択・インスペクタへ反映するために持つ）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DiagTarget {
     Node(NodeId),
     Member(ElemId),
 }
 
 /// モデル整合性チェックの結果1件。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Diagnostic {
     pub severity: DiagSeverity,
     pub message: String,
@@ -656,7 +656,7 @@ pub struct AnalysisJob {
 }
 
 /// ログの重要度。下ドック（ログパネル）での色分けと文頭ラベルに使う。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LogLevel {
     Info,
     Notice,
@@ -686,6 +686,7 @@ impl LogLevel {
 
 /// セッション内イベントログの1件。時刻はアプリ起動からの経過時間で持つ
 /// （std のみでは壁時計のローカル時刻表記ができないため。表示は「mm:ss」）。
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogEntry {
     pub elapsed: std::time::Duration,
     pub level: LogLevel,
@@ -704,6 +705,7 @@ impl LogEntry {
 pub struct EventLog {
     started: std::time::Instant,
     pub entries: Vec<LogEntry>,
+    retained_entries: Option<Vec<LogEntry>>,
 }
 
 impl Default for EventLog {
@@ -711,6 +713,7 @@ impl Default for EventLog {
         Self {
             started: std::time::Instant::now(),
             entries: Vec::new(),
+            retained_entries: None,
         }
     }
 }
@@ -720,12 +723,26 @@ impl EventLog {
     /// 上限を超えたら古いものから捨てて直近の履歴のみ保持する。
     const MAX_ENTRIES: usize = 1000;
 
+    pub(crate) fn begin_recording(&mut self) {
+        if self.retained_entries.is_none() {
+            self.retained_entries = Some(self.entries.clone());
+        }
+    }
+    pub(crate) fn finish_recording(&mut self) -> Vec<LogEntry> {
+        self.retained_entries
+            .take()
+            .unwrap_or_else(|| self.entries.clone())
+    }
     pub fn push(&mut self, level: LogLevel, message: impl Into<String>) {
-        self.entries.push(LogEntry {
+        let entry = LogEntry {
             elapsed: self.started.elapsed(),
             level,
             message: message.into(),
-        });
+        };
+        if let Some(retained) = &mut self.retained_entries {
+            retained.push(entry.clone());
+        }
+        self.entries.push(entry);
         if self.entries.len() > Self::MAX_ENTRIES {
             let overflow = self.entries.len() - Self::MAX_ENTRIES;
             self.entries.drain(..overflow);
@@ -807,6 +824,7 @@ impl EventLog {
 /// リセット処理へ書き足す必要はない（書き漏らしが起こりえない）。
 #[derive(Default)]
 pub struct App {
+    pub studies: study::Studies,
     /// モデルと解析・設計の状態。
     pub core: AppCore,
     /// 画面の状態。
@@ -941,6 +959,7 @@ pub struct ModelScoped {
     pub staleness: Staleness,
     /// モデル整合性チェック（診断）の結果一覧。`run_diagnostics` で再構築する。
     pub diagnostics: Vec<Diagnostic>,
+    pub(crate) recorded_diagnostics: Option<Vec<Diagnostic>>,
     /// 準備計算（解析前の前処理）の結果。解析前に階の分布・剛域・Ai 分布・
     /// 荷重集計を確認するために保持する。`run_preparation`／
     /// 各解析実行時の `ensure_preparation` で再構築する。
@@ -1027,6 +1046,7 @@ impl Default for ModelScoped {
             pending_plate_loss_edit: None,
             staleness: Staleness::default(),
             diagnostics: Vec::new(),
+            recorded_diagnostics: None,
             preparation: None,
             ds_beta_u_by_story: Vec::new(),
             ds_wall_details: Vec::new(),
@@ -1735,6 +1755,7 @@ pub mod references;
 #[cfg(feature = "gui")]
 pub mod result_evidence;
 mod result_validity;
+pub mod study;
 pub use result_validity::HoldingCapacitySource;
 pub(crate) use result_validity::ResultInputKey;
 mod actions;
@@ -1866,6 +1887,11 @@ impl eframe::App for App {
 #[cfg(feature = "gui")]
 impl App {
     fn app_ui(&mut self, ui: &mut egui::Ui) {
+        if self.studies.running.is_some() {
+            self.poll_study_calculation();
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
         if std::mem::take(&mut self.ui.scoped.search.resume_input) {
             if let Some(focus) = self.ui.scoped.search.previous_focus.take() {
                 ui.ctx().memory_mut(|memory| memory.request_focus(focus));
@@ -1913,6 +1939,7 @@ impl App {
         crate::story_copy_view::story_copy_window(ui.ctx(), self);
         self.region_assign_window(ui.ctx());
         self.reference_snapshot_window(ui.ctx());
+        self.study_window(ui.ctx());
         self.result_evidence_window(ui.ctx());
 
         if self.core.scoped.pending_save_recording.is_some() {
@@ -2188,12 +2215,30 @@ impl App {
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.ui.view.right_panel {
                             RightPanel::Inspector => self.inspector_panel(ui),
-                            RightPanel::Preparation => self.preparation_panel(ui),
+                            RightPanel::Preparation => {
+                                ui.add_enabled_ui(self.study_is_main(), |ui| {
+                                    self.preparation_panel(ui)
+                                });
+                            }
                             RightPanel::Static => self.static_panel(ui),
-                            RightPanel::Eigen => self.eigen_panel(ui),
-                            RightPanel::Pushover => self.pushover_panel(ui),
-                            RightPanel::TimeHistory => self.time_history_panel(ui),
-                            RightPanel::LumpedMass => self.lumped_mass_analysis_panel(ui),
+                            RightPanel::Eigen => {
+                                ui.add_enabled_ui(self.study_is_main(), |ui| self.eigen_panel(ui));
+                            }
+                            RightPanel::Pushover => {
+                                ui.add_enabled_ui(self.study_is_main(), |ui| {
+                                    self.pushover_panel(ui)
+                                });
+                            }
+                            RightPanel::TimeHistory => {
+                                ui.add_enabled_ui(self.study_is_main(), |ui| {
+                                    self.time_history_panel(ui)
+                                });
+                            }
+                            RightPanel::LumpedMass => {
+                                ui.add_enabled_ui(self.study_is_main(), |ui| {
+                                    self.lumped_mass_analysis_panel(ui)
+                                });
+                            }
                         });
                 })
                 .response

@@ -114,7 +114,7 @@ pub fn fes(rs: f64, re: f64) -> Result<f64, String> {
 }
 
 /// 架構種別。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FrameType {
     RcFrame,
     RcWall,

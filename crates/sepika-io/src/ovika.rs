@@ -72,6 +72,8 @@ fn read_entry_bytes_capped(
 pub const PREPARATION_ENTRY: &str = "preparation.msgpack";
 
 /// 解析結果を格納する zip エントリ名（任意エントリ）。
+pub const STUDIES_ENTRY: &str = "studies.msgpack";
+
 pub const RESULTS_ENTRY: &str = "results.msgpack";
 
 /// 解析タブの設定値（`AnalysisSettings`）を格納する zip エントリ名（任意エントリ）。
@@ -90,6 +92,8 @@ pub const ANALYSIS_SETTINGS_ENTRY: &str = "analysis_settings.msgpack";
 /// エントリを書かない。書く項目は manifest に列挙してハッシュ検証の対象にする。
 #[derive(Default, Clone, Copy)]
 pub struct OvikaExtras<'a> {
+    /// 検討と保持した計算根拠。
+    pub studies: Option<&'a [u8]>,
     /// 準備計算の結果。
     pub preparation: Option<&'a [u8]>,
     /// 解析結果。
@@ -100,6 +104,7 @@ pub struct OvikaExtras<'a> {
 
 /// [`load_ovika`] の返り値。モデルと、同梱されていれば付随データ。
 pub struct OvikaContents {
+    pub studies: Option<Vec<u8>>,
     pub model: Model,
     /// 準備計算の結果（同梱がなければ `None`）。
     pub preparation: Option<Vec<u8>>,
@@ -143,6 +148,7 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
         (PREPARATION_ENTRY, extras.preparation),
         (RESULTS_ENTRY, extras.results),
         (ANALYSIS_SETTINGS_ENTRY, extras.analysis_settings),
+        (STUDIES_ENTRY, extras.studies),
     ] {
         if let Some(data) = data {
             entries.push(crate::manifest::EntryHash {
@@ -180,6 +186,7 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
             (PREPARATION_ENTRY, extras.preparation),
             (RESULTS_ENTRY, extras.results),
             (ANALYSIS_SETTINGS_ENTRY, extras.analysis_settings),
+            (STUDIES_ENTRY, extras.studies),
         ] {
             if let Some(data) = data {
                 zip.start_file(name, opts)
@@ -239,6 +246,7 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
     let mut preparation = None;
     let mut results = None;
     let mut analysis_settings = None;
+    let mut studies = None;
     for entry in &manifest.entries {
         let data = read_entry_capped(&mut archive, &entry.name, MAX_ENTRY_UNCOMPRESSED)?;
         let actual_hash = sha256_of(&data);
@@ -250,6 +258,7 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
             PREPARATION_ENTRY => preparation = Some(data),
             RESULTS_ENTRY => results = Some(data),
             ANALYSIS_SETTINGS_ENTRY => analysis_settings = Some(data),
+            STUDIES_ENTRY => studies = Some(data),
             _ => {}
         }
     }
@@ -282,6 +291,7 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
         .map_err(IoError::Decode)?;
 
     Ok(OvikaContents {
+        studies,
         model,
         preparation,
         results,
@@ -1734,6 +1744,7 @@ mod tests {
             &path,
             &model,
             OvikaExtras {
+                studies: None,
                 preparation: Some(&prep),
                 results: Some(&results),
                 analysis_settings: Some(&cfg),

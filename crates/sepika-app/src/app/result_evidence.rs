@@ -3,54 +3,8 @@ use references::{
     DisplayConditions, InputReference, RecordedCalculationInput, ReferenceTarget, ResultReference,
 };
 
-const QUANTITY_EVIDENCE_CONTRACT_VERSION: u32 = 1;
-
-/// 保存結果または固定した数量入力を指す。数量の対象範囲はモデル全体。
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum EvidenceReference {
-    Calculation(Box<ResultReference>),
-    Quantity(Box<QuantityEvidenceReference>),
-}
-
-/// 集計時に固定した入力と対象範囲。現在モデルで欠落を補完しない。
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct QuantityEvidenceReference {
-    source: InputReference,
-    model: sepika_core::model::Model,
-    contract: u32,
-    scope: QuantityEvidenceScope,
-    identity: String,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-enum QuantityEvidenceScope {
-    WholeModel,
-}
-
-impl From<&ResultReference> for EvidenceReference {
-    fn from(reference: &ResultReference) -> Self {
-        Self::Calculation(Box::new(reference.clone()))
-    }
-}
-
-impl From<&EvidenceReference> for EvidenceReference {
-    fn from(reference: &EvidenceReference) -> Self {
-        reference.clone()
-    }
-}
-
-impl QuantityEvidenceReference {
-    fn identity(&self) -> String {
-        use sha2::{Digest, Sha256};
-        format!(
-            "{:x}",
-            Sha256::digest(
-                bincode::serialize(&(&self.source, &self.model, self.contract, &self.scope))
-                    .expect("数量根拠の直列化")
-            )
-        )
-    }
-}
+use references::QUANTITY_EVIDENCE_CONTRACT_VERSION;
+pub use references::{EvidenceReference, QuantityEvidenceReference};
 
 pub(crate) struct ResultEvidence {
     title: String,
@@ -92,11 +46,11 @@ impl App {
             .map(|(_, source)| source.clone());
         if let Some(source) = source {
             ui.label(format!(
-                "計算元の本案 / 案 {} / 入力世代 {}",
+                "計算元の案 {} / 入力世代 {}",
                 source.proposal, source.generation
             ));
             ui.small(format!("入力識別: {}", source.input));
-            ui.label("計算時の案名称は記録されていません。案の識別で区別します。");
+            ui.label("案の識別と入力版で計算元を区別します。");
         } else {
             ui.label("計算元の案・入力版は取得不能です。");
         }
@@ -145,6 +99,11 @@ impl App {
                 return self.open_quantity_reference(*quantity)
             }
         };
+        if let Some(mut saved) = self.study_result_view(&reference) {
+            saved.open_result_evidence(reference.as_ref())?;
+            self.ui.scoped.result_evidence = saved.ui.scoped.result_evidence.take();
+            return Ok(());
+        }
         let input = self.recorded_result_input(&reference)?;
         if reference.kind == ResultInputKey::Design {
             if let (ReferenceTarget::Member(elem), Some(position)) =
@@ -410,19 +369,6 @@ impl App {
         });
     }
 
-    /// 現在の本案とモデル全体の集計対象を同時に固定する。
-    pub fn quantity_evidence_reference(&self) -> EvidenceReference {
-        let mut quantity = QuantityEvidenceReference {
-            source: self.input_reference(),
-            model: self.core.model.clone(),
-            contract: QUANTITY_EVIDENCE_CONTRACT_VERSION,
-            scope: QuantityEvidenceScope::WholeModel,
-            identity: String::new(),
-        };
-        quantity.identity = quantity.identity();
-        EvidenceReference::Quantity(Box::new(quantity))
-    }
-
     fn open_quantity_reference(
         &mut self,
         quantity: QuantityEvidenceReference,
@@ -468,12 +414,15 @@ impl App {
         match &evidence.reference {
             Some(EvidenceReference::Calculation(reference)) => {
                 if let Err(reason) = self.result_input_snapshot(reference) { return format!("状態: 参照した実行は現在保持する結果と異なるか取得不能です。表示値は開いた時点の記録です / {reason}"); }
+                if !self.core.scoped.results.as_ref().is_some_and(|bundle| bundle.reference_runs.iter().any(|(kind, run)| *kind == reference.kind && *run == reference.run)) {
+                    return "状態: 保持した計算履歴。現在表示の結果・入力とは独立した根拠です。".into();
+                }
                 let state = if reference.kind == ResultInputKey::Design { self.require_design_input() } else { self.require_result_input(reference.kind.clone()) };
                 state.err().map_or_else(|| "状態: 現行の生成入力と一致（合否・未検定は個々の結果を確認）".into(), |reason| format!("状態: 履歴・要再計算 / {reason}"))
             }
             Some(EvidenceReference::Quantity(quantity)) => {
-                if quantity.source == self.input_reference() { "状態: 現在の本案の数量入力と一致（解析・検定の成功とは別）".into() }
-                else { "状態: 過去の固定数量入力。現在の本案から再集計した最新数量ではありません。".into() }
+                if quantity.source == self.input_reference() { "状態: 現在表示の数量入力と一致（解析・検定の成功とは別）".into() }
+                else { "状態: 過去の固定数量入力。現在表示の入力から再集計した最新数量ではありません。".into() }
             }
             None => "状態: 生成元の参照は取得不能です。表示値は保持されていた記録であり、最新結果として利用できません。".into(),
         }
@@ -510,13 +459,26 @@ impl App {
             }
             let current = self.input_reference();
             ui.separator();
-            ui.label(format!("現在編集する本案: 案 {} / 入力世代 {}", current.proposal, current.generation));
+            ui.label(format!("現在表示の入力: 案 {} / 入力世代 {}", current.proposal, current.generation));
             ui.label(if evidence.source.as_ref() == Some(&current) { "根拠と現在編集の入力版は一致します。" } else { "根拠と現在編集の案・入力版は異なるか取得不能です。対象の対応は推定しません。" });
+            if let Some(EvidenceReference::Quantity(quantity)) = &evidence.reference {
+                if self.study_is_main() {
+                    ui.label("数量根拠を保存するには、保存先の検討の基準案・比較案または計算履歴を表示してください。");
+                } else if ui.button("この固定数量根拠を検討に保存").clicked() {
+                    match self.save_study_quantity_reference(quantity.as_ref().clone()) {
+                        Ok(()) => self.report_notice("固定数量根拠を検討に保存しました"),
+                        Err(reason) => self.report_error(reason),
+                    }
+                }
+            }
+            ui.label("断面・材料の編集先は本案です。基準案・比較案・計算時入力の定義は変更しません。");
             ui.horizontal(|ui| {
-                for (label, tab) in [("現在の断面入力を編集", ModelTab::Sections), ("現在の材料入力を編集", ModelTab::Materials)] {
+                for (label, tab) in [("本案の断面入力を編集", ModelTab::Sections), ("本案の材料入力を編集", ModelTab::Materials)] {
                     if ui.button(label).clicked() {
-                        let return_to = self.enter_evidence_editor(tab);
-                        if evidence.return_to.is_none() { evidence.return_to = Some(return_to); }
+                        match self.enter_evidence_editor(tab) {
+                            Ok(return_to) => { if evidence.return_to.is_none() { evidence.return_to = Some(return_to); } }
+                            Err(reason) => self.report_error(reason),
+                        }
                     }
                 }
                 if evidence.return_to.is_some() && ui.button("元の結果へ戻る").clicked() {
@@ -590,6 +552,278 @@ mod tests {
         app
     }
 
+    fn study_app() -> (App, usize) {
+        let mut app = App::default();
+        let mut model = crate::sample::portal_frame();
+        model.panel_zone = sepika_core::model::PanelZoneMode::None;
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.threads = 1;
+        let study = app
+            .create_study("固定根拠".into(), vec![ElemId(2)])
+            .unwrap();
+        (app, study)
+    }
+    fn bytes(value: &impl serde::Serialize) -> Vec<u8> {
+        rmp_serde::to_vec_named(value).unwrap()
+    }
+    fn input_value(input: &RecordedCalculationInput) -> (Vec<u8>, String) {
+        (bytes(&input.model), format!("{:?}", input.settings))
+    }
+    #[test]
+    fn issue979_未計算基準と比較の数量根拠を明示保存し案編集と通常保存後も固定入力を開く() {
+        use study::Location;
+        let (mut app, s) = study_app();
+        app.switch_study(Location::Proposal(s, 0)).unwrap();
+        let baseline = bytes(&app.studies.items[s].baseline);
+        let EvidenceReference::Quantity(base) = app.quantity_evidence_reference() else {
+            panic!()
+        };
+        assert!(app.studies.items[s].quantity_evidence.is_empty());
+        app.save_study_quantity_reference(*base.clone()).unwrap();
+        let comparison = app.create_comparison(s, "比較".into()).unwrap();
+        app.switch_study(Location::Proposal(s, comparison)).unwrap();
+        let EvidenceReference::Quantity(proposal) = app.quantity_evidence_reference() else {
+            panic!()
+        };
+        assert_ne!(base.source.proposal, proposal.source.proposal);
+        app.save_study_quantity_reference(*proposal.clone())
+            .unwrap();
+        app.ui.scoped.node_edit = vec![["-".into(), "".into(), "".into()]];
+        app.open_result_evidence(EvidenceReference::Quantity(proposal.clone()))
+            .unwrap();
+        let return_to = app.enter_evidence_editor(ModelTab::Sections).unwrap();
+        assert_eq!(app.studies.active, Location::Main);
+        assert_eq!(app.ui.view.model_tab, ModelTab::Sections);
+        assert!(app.ui.scoped.result_evidence.is_some());
+        app.return_from_evidence_editor(return_to);
+        assert_eq!(app.studies.active, Location::Proposal(s, comparison));
+        assert_eq!(app.ui.scoped.node_edit[0][0], "-");
+        assert!(!app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(sepika_edit::SetNodeCoord {
+                node: NodeId(0),
+                coord: [10., 0., 0.]
+            })
+        ));
+        let saved = bytes(&app.studies.items[s].quantity_evidence);
+        let before = app.input_reference();
+        let undo = app.core.scoped.undo.revision();
+        assert!(app.project_unsaved());
+        assert!(app.studies.items[s].runs.is_empty());
+        assert!(app.delete_comparison(s, comparison).is_err());
+        let path = std::env::temp_dir().join(format!(
+            "sepika-study-quantity-{}.ovika",
+            uuid::Uuid::new_v4()
+        ));
+        app.save_project_to(path.clone());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert_eq!(app.studies.active, Location::Proposal(s, comparison));
+        assert!(!app.project_unsaved());
+        assert_eq!(app.input_reference(), before);
+        assert_eq!(app.core.scoped.undo.revision(), undo);
+        app.save_study_quantity_reference(*proposal.clone())
+            .unwrap();
+        assert!(!app.project_unsaved());
+        app.switch_study(Location::Main).unwrap();
+        assert!(app.save_study_quantity_reference(*base.clone()).is_err());
+        app.core.model.sections[1].name = "変更後の本案".into();
+        app.core.model.quantity_cfg.anchorage_dia_factor += 9.0;
+        app.core.scoped.staleness.mark_edited();
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        assert_eq!(loaded.core.model.sections[1].name, "変更後の本案");
+        assert_eq!(bytes(&loaded.studies.items[s].baseline), baseline);
+        assert_eq!(bytes(&loaded.studies.items[s].quantity_evidence), saved);
+        assert!(loaded.studies.items[s].runs.is_empty());
+        for quantity in [&base, &proposal] {
+            loaded
+                .open_result_evidence(EvidenceReference::Quantity(quantity.clone()))
+                .unwrap();
+            let evidence = loaded.ui.scoped.result_evidence.as_ref().unwrap();
+            assert_eq!(evidence.source.as_ref(), Some(&quantity.source));
+            assert_eq!(
+                bytes(&evidence.input.as_ref().unwrap().model),
+                bytes(&quantity.model)
+            );
+            assert!(!loaded.project_unsaved());
+        }
+        assert!(loaded.studies.items[s].quantity_evidence.len() == 2);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn issue979_保存済み元と追加検定と静的の根拠は表示中bundleを混ぜず本案編集から元ビューに戻る() {
+        use study::Location;
+        let (mut app, s) = study_app();
+        app.start_study_calculation(s, 0).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while app.studies.running.is_some() {
+            app.poll_study_calculation();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.switch_study(Location::History(s, 0)).unwrap();
+        let check = app.core.scoped.results.as_ref().unwrap().member_checks[0].clone();
+        let display = DisplayConditions {
+            position: Some(check.positions[0].xi),
+            unit: Some("無次元".into()),
+            ..Default::default()
+        };
+        let original = app
+            .recorded_target_result_reference(
+                ResultInputKey::Design,
+                ReferenceTarget::Member(check.elem),
+                display.clone(),
+            )
+            .unwrap();
+        app.core
+            .scoped
+            .references
+            .fixed_results
+            .push(original.clone());
+        app.retain_study_view_references();
+        app.open_result_evidence(&original).unwrap();
+        let original_lines = app
+            .ui
+            .scoped
+            .result_evidence
+            .as_ref()
+            .unwrap()
+            .lines
+            .clone();
+        let original_input = input_value(&app.recorded_result_input(&original).unwrap());
+        app.select_displayed_result(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
+        let extra = app
+            .recorded_target_result_reference(
+                ResultInputKey::Design,
+                ReferenceTarget::Member(check.elem),
+                display,
+            )
+            .unwrap();
+        assert_ne!(original.run, extra.run);
+        app.core.scoped.references.fixed_results.push(extra.clone());
+        app.retain_study_view_references();
+        app.open_result_evidence(&extra).unwrap();
+        let extra_lines = app
+            .ui
+            .scoped
+            .result_evidence
+            .as_ref()
+            .unwrap()
+            .lines
+            .clone();
+        let extra_input = input_value(&app.recorded_result_input(&extra).unwrap());
+        let static_ref = app
+            .recorded_target_result_reference(
+                ResultInputKey::Static(StaticCaseKey::User(LoadCaseId(0))),
+                ReferenceTarget::Node(NodeId(2)),
+                DisplayConditions {
+                    direction: Some("X".into()),
+                    component: Some("節点変位".into()),
+                    unit: Some("mm".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        app.open_result_evidence(&static_ref).unwrap();
+        let static_lines = app
+            .ui
+            .scoped
+            .result_evidence
+            .as_ref()
+            .unwrap()
+            .lines
+            .clone();
+        let static_input = input_value(&app.recorded_result_input(&static_ref).unwrap());
+        let run = bytes(&app.studies.items[s].runs[0]);
+        let display_bundle = bytes(&app.core.scoped.results);
+        let input = app.input_reference();
+        app.ui.scoped.reference_snapshot = Some((
+            "固定検定".into(),
+            app.recorded_result_input(&extra).unwrap(),
+        ));
+        app.ui.view.active_tab = Tab::Design;
+        app.enter_workspace();
+        let layout = bytes(&app.ui.view.workspace.placement);
+        let return_to = app.enter_evidence_editor(ModelTab::Materials).unwrap();
+        assert_eq!(app.studies.active, Location::Main);
+        assert!(app.ui.scoped.reference_snapshot.is_some());
+        assert!(!app.study_read_only());
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(sepika_edit::SetNodeCoord {
+                node: NodeId(0),
+                coord: [10., 0., 0.]
+            })
+        ));
+        app.return_from_evidence_editor(return_to);
+        assert_eq!(app.studies.active, Location::History(s, 0));
+        assert_eq!(bytes(&app.core.scoped.results), display_bundle);
+        assert_eq!(app.input_reference(), input);
+        assert_eq!(bytes(&app.ui.view.workspace.placement), layout);
+        assert!(app.ui.scoped.reference_snapshot.is_some());
+        assert!(app.study_read_only());
+        assert_eq!(bytes(&app.studies.items[s].runs[0]), run);
+        let path = std::env::temp_dir().join(format!(
+            "sepika-study-evidence-{}.ovika",
+            uuid::Uuid::new_v4()
+        ));
+        let return_to = app.enter_evidence_editor(ModelTab::Sections).unwrap();
+        app.switch_study(Location::History(s, 0)).unwrap();
+        app.core
+            .scoped
+            .references
+            .fixed_results
+            .push(static_ref.clone());
+        app.core.scoped.staleness.mark_non_calc_edited();
+        app.switch_study(Location::Main).unwrap();
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        assert!(!app.project_unsaved());
+        app.return_from_evidence_editor(return_to);
+        assert!(!app.project_unsaved());
+        assert!(app
+            .core
+            .scoped
+            .references
+            .fixed_results
+            .contains(&static_ref));
+        assert_eq!(bytes(&app.core.scoped.results), display_bundle);
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        for app in [&mut app, &mut loaded] {
+            app.switch_study(Location::Main).unwrap();
+            let displayed = bytes(&app.core.scoped.results);
+            let current = app.input_reference();
+            let history = bytes(&app.studies.items[s].runs[0]);
+            for (reference, lines, input) in [
+                (&original, &original_lines, &original_input),
+                (&extra, &extra_lines, &extra_input),
+                (&original, &original_lines, &original_input),
+                (&static_ref, &static_lines, &static_input),
+            ] {
+                app.open_result_evidence(reference).unwrap();
+                let evidence = app.ui.scoped.result_evidence.as_ref().unwrap();
+                assert_eq!(&evidence.lines, lines);
+                assert_eq!(&input_value(evidence.input.as_ref().unwrap()), input);
+                let Some(EvidenceReference::Calculation(saved)) = &evidence.reference else {
+                    panic!()
+                };
+                assert_eq!(saved.run, reference.run);
+                assert_eq!(app.studies.active, Location::Main);
+                assert_eq!(bytes(&app.core.scoped.results), displayed);
+                assert_eq!(app.input_reference(), current);
+                assert_eq!(bytes(&app.studies.items[s].runs[0]), history);
+            }
+        }
+        std::fs::remove_file(path).unwrap();
+    }
     #[test]
     fn issue978_古い検定の根拠は計算時断面と条件を保持し閲覧では編集しない() {
         let mut app = calculated();
@@ -1338,7 +1572,9 @@ mod tests {
         let check = app.core.scoped.results.as_ref().unwrap().member_checks[0].clone();
         app.open_member_check_evidence(check.elem, check.positions[0].xi);
         let selection = app.ui.scoped.selection.members().to_vec();
-        let return_to = app.enter_evidence_editor(crate::app::ModelTab::Sections);
+        let return_to = app
+            .enter_evidence_editor(crate::app::ModelTab::Sections)
+            .unwrap();
         assert!(app.table_in_workspace(workspace::Content::Model));
         assert_eq!(app.ui.view.model_tab, crate::app::ModelTab::Sections);
         assert_eq!(app.ui.scoped.selection.members(), selection);
@@ -1386,6 +1622,7 @@ mod tests {
                 results: Some(&bytes),
                 analysis_settings: Some(&cfg),
                 preparation: None,
+                studies: None,
             },
         )
         .unwrap();

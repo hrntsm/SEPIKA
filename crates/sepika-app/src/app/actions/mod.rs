@@ -266,6 +266,10 @@ impl App {
     ///
     /// 解析の入口は必ず本メソッドを通ること。
     fn begin_analysis(&mut self) -> bool {
+        if !self.study_is_main() || self.studies.running.is_some() {
+            self.report_error("検討の計算を使用してください。別の計算中は開始できません");
+            return false;
+        }
         self.apply_parallelism_setting();
         self.core.scoped.last_error = None;
         self.core.scoped.last_notice = None;
@@ -277,7 +281,7 @@ impl App {
     /// バックグラウンドジョブ共通の入口ガード＋前処理。
     /// ジョブ実行中なら案内を出して `false` を返す（呼び出し側は即 return）。
     fn begin_analysis_job(&mut self) -> bool {
-        if self.core.scoped.job.is_some() {
+        if self.core.scoped.job.is_some() || self.studies.running.is_some() {
             self.report_error("解析実行中です");
             return false;
         }
@@ -551,6 +555,13 @@ impl App {
             }
         }
 
+        if let Some(recorded) = &mut self.core.scoped.recorded_diagnostics {
+            for diagnostic in &diags {
+                if !recorded.contains(diagnostic) {
+                    recorded.push(diagnostic.clone());
+                }
+            }
+        }
         self.core.scoped.diagnostics = diags;
         self.core.scoped.staleness.diagnostics_stale = false;
     }
@@ -583,6 +594,10 @@ impl App {
 impl App {
     /// 解析パネルの実行入口。未設定の割当領域があれば確認待ちにして戻る。
     pub fn request_analysis(&mut self, pending: PendingAnalysis) {
+        if !self.study_is_main() || self.studies.running.is_some() {
+            self.report_error("検討の計算を使用してください。別の計算中は開始できません");
+            return;
+        }
         self.core.scoped.last_error = None;
         self.ensure_preparation();
         if self.core.scoped.last_error.is_some() {

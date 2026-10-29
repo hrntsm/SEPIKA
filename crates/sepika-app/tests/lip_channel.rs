@@ -46,6 +46,7 @@ fn lip_channel_internal_edit_and_ovika_preserve_unsupported_reason_and_gross_pro
         &path,
         &model,
         sepika_io::ovika::OvikaExtras {
+            studies: None,
             preparation: None,
             results: None,
             analysis_settings: None,

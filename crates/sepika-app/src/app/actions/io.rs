@@ -35,6 +35,7 @@ impl App {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;
         }
+        self.studies = study::Studies::default();
         self.core.model = model;
         self.core.scoped = ModelScoped::default();
         self.ui.scoped = UiModelScoped::default();
@@ -93,6 +94,20 @@ impl App {
         path: std::path::PathBuf,
         include_recording: Option<bool>,
     ) {
+        let active = self.studies.active;
+        if active != study::Location::Main {
+            if let Err(reason) = self.switch_study(study::Location::Main) {
+                self.report_error(reason);
+                return;
+            }
+            self.save_project_to_opts(path, include_recording);
+            let error = self.core.scoped.last_error.clone();
+            let _ = self.switch_study(active);
+            if let Some(error) = error {
+                self.report_error(error);
+            }
+            return;
+        }
         self.core.scoped.last_error = None;
         if let Err(error) = self.core.model.validate_reference_ids() {
             self.report_error(format!("保存エラー: {error}"));
@@ -223,7 +238,15 @@ impl App {
             }
         }
 
+        let study_bytes = match rmp_serde::to_vec_named(&self.saved_studies()) {
+            Ok(bytes) => Some(bytes),
+            Err(error) => {
+                self.report_error(format!("検討の保存エラー: {error}"));
+                return;
+            }
+        };
         let extras = sepika_io::ovika::OvikaExtras {
+            studies: study_bytes.as_deref(),
             preparation: prep_bytes.as_deref(),
             results: results_bytes.as_deref(),
             analysis_settings: analysis_settings_bytes.as_deref(),
@@ -265,6 +288,14 @@ impl App {
                 self.report_notice(format!("保存しました: {}", name));
                 self.core.scoped.project_path = Some(path);
                 self.core.scoped.staleness.unsaved_changes = false;
+                self.studies.dirty = false;
+                for study in &mut self.studies.items {
+                    for proposal in &mut study.proposals {
+                        if let Some(slot) = &mut proposal.state {
+                            slot.core.scoped.staleness.unsaved_changes = false;
+                        }
+                    }
+                }
             }
             Err(e) => self.report_error(format!("保存エラー: {}", e)),
         }
@@ -326,6 +357,7 @@ impl App {
                     self.report_error(format!("読込モデルの検証エラー: {:?}", e));
                     return;
                 }
+                let saved_studies = contents.studies;
                 if !self.load_model(contents.model) {
                     return;
                 }
@@ -364,74 +396,7 @@ impl App {
                     self.core.scoped.results = Some(bundle);
                     self.core.scoped.last_static = saved.last_static;
                     self.core.scoped.staleness.last_run = saved.last_run;
-                    self.core.scoped.staleness.results_stale = false;
-                    self.core.scoped.staleness.design_stale = false;
-                    self.reject_result_contracts();
-                    self.reject_unsupported_panel_results(true);
-                    if let Some(key) = self.core.scoped.last_static {
-                        if let Err(reason) = self.require_selected_static_input() {
-                            let diagnostics = self
-                                .core
-                                .scoped
-                                .results
-                                .as_ref()
-                                .unwrap()
-                                .joint_checks
-                                .iter()
-                                .filter(|check| {
-                                    check.label.starts_with("パネルゾーン(S)")
-                                        && matches!(
-                                            check.outcome,
-                                            sepika_design_jp::CheckOutcome::Skipped { .. }
-                                        )
-                                })
-                                .cloned()
-                                .collect();
-                            match key {
-                                StaticKey::Case(key) => self.invalidate_static_key(key),
-                                StaticKey::Combo(index) => {
-                                    let name = self
-                                        .core
-                                        .scoped
-                                        .results
-                                        .as_ref()
-                                        .and_then(|bundle| bundle.combos.get(index))
-                                        .map(|(name, _)| name.clone());
-                                    if let Some(name) = name {
-                                        self.remove_excluded_tip_results(&(Vec::new(), vec![name]));
-                                    }
-                                }
-                            }
-                            if let Some(bundle) = self.core.scoped.results.as_mut() {
-                                bundle.member_forces.clear();
-                                bundle.panel_moments.clear();
-                                bundle.clear_design_results();
-                                bundle.joint_checks = diagnostics;
-                            }
-                            self.core.scoped.last_static = None;
-                            self.ui.scoped.nav.focus_result = None;
-                            self.core.scoped.staleness.results_stale =
-                                !self.core.scoped.results.as_ref().is_some_and(|bundle| {
-                                    bundle.time_history.is_some()
-                                        || !bundle.time_histories.is_empty()
-                                        || bundle.lumped.is_some()
-                                        || !bundle.lumped_results.is_empty()
-                                });
-                            self.core.scoped.staleness.design_stale = true;
-                            self.core.scoped.result_contract_notice = Some(reason.clone());
-                            self.report_notice(reason);
-                        }
-                    }
-                    if self
-                        .core
-                        .scoped
-                        .results
-                        .as_ref()
-                        .is_some_and(|b| b.has_design_results())
-                    {
-                        self.core.scoped.staleness.design_stale =
-                            self.require_design_input().is_err();
-                    }
+                    self.validate_restored_results();
                     let mut bundle = self.core.scoped.results.as_ref().unwrap().clone();
                     self.core.scoped.view_vibration_case = saved.view_vibration_case;
                     self.core.scoped.view_lumped_vibration_case = saved.view_lumped_vibration_case;
@@ -454,6 +419,13 @@ impl App {
                         saved.view_vibration_case,
                         saved.view_lumped_vibration_case,
                     );
+                }
+                if let Some(saved) =
+                    self.decode_on_load::<study::SavedStudies>(saved_studies, "検討")
+                {
+                    if let Err(reason) = self.restore_studies(saved) {
+                        self.report_error(format!("検討の読込エラー: {reason}"));
+                    }
                 }
                 self.prune_orphan_vibration_cases();
                 self.core.scoped.project_path = Some(path);

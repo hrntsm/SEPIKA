@@ -107,13 +107,19 @@ impl App {
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "(未保存プロジェクト)".to_string());
-                let marker = if self.core.scoped.staleness.unsaved_changes {
-                    " ●"
-                } else {
-                    ""
-                };
+                let marker = if self.project_unsaved() { " ●" } else { "" };
                 ui.label(format!("{}{}", file_label, marker));
                 ui.separator();
+                if !self.study_is_main() {
+                    if let Some(reason) = self.core.scoped.undo.last_error() {
+                        ui.label("編集は拒否されました").on_hover_text(reason);
+                        ui.separator();
+                    }
+                }
+                if self.studies.running.is_some() {
+                    ui.label("⏳ 検討の計算中");
+                    ui.separator();
+                }
                 if let Some(job) = &self.core.scoped.job {
                     let elapsed = job.started.elapsed().unwrap_or_default().as_secs_f64();
                     ui.colored_label(

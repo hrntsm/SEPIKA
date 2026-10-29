@@ -12,6 +12,9 @@ pub struct SetElementSection {
 }
 
 impl EditCommand for SetElementSection {
+    fn section_assignment(&self) -> Option<(ElemId, Option<SectionId>)> {
+        Some((self.elem, self.section))
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let idx = self.elem.index();
         if idx >= model.elements.len() || model.elements[idx].id != self.elem {

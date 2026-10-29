@@ -21,6 +21,10 @@ pub trait EditCommand: Send {
     }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand>;
     fn label(&self) -> &str;
+    /// 単一部材の断面割当である場合の対象と割当先。
+    fn section_assignment(&self) -> Option<(sepika_core::ids::ElemId, Option<SectionId>)> {
+        None
+    }
     /// この逆コマンドを生成した編集の ID 変更を、適用順に返す。材料・断面の挿入・削除がなければ空。
     fn inverse_id_changes(&self) -> Vec<IdChange> {
         Vec::new()
@@ -60,6 +64,9 @@ struct RestoreStbNodeIdentities {
 }
 
 impl EditCommand for RestoreStbNodeIdentities {
+    fn section_assignment(&self) -> Option<(sepika_core::ids::ElemId, Option<SectionId>)> {
+        self.command.section_assignment()
+    }
     fn affects_calculation(&self) -> bool {
         self.command.affects_calculation()
     }
@@ -109,6 +116,9 @@ fn with_id_changes(command: Box<dyn EditCommand>, changes: Vec<IdChange>) -> Box
 }
 
 impl EditCommand for CommandWithIdChanges {
+    fn section_assignment(&self) -> Option<(sepika_core::ids::ElemId, Option<SectionId>)> {
+        self.command.section_assignment()
+    }
     fn affects_calculation(&self) -> bool {
         self.command.affects_calculation()
     }
@@ -177,6 +187,28 @@ pub fn preview_plate_assignment_loss(
     Ok(model.assignment_plate_loss(&candidate))
 }
 
+/// 検討で割当可能な、鋼材と有限な正の剛性を持つ既存大梁断面か。
+pub fn valid_study_section(model: &Model, section: &sepika_core::model::Section) -> bool {
+    section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder)
+        && section
+            .material
+            .and_then(|id| model.materials.iter().find(|m| m.id == id))
+            .is_some_and(|m| {
+                m.category == sepika_core::model::MaterialCategory::Steel
+                    && m.young.is_finite()
+                    && m.young > 0.0
+            })
+        && [section.area, section.iy, section.iz, section.j]
+            .iter()
+            .all(|x| x.is_finite() && *x > 0.0)
+        && section.ensure_properties_resolved().is_ok()
+        && section.resolved_area().is_ok_and(|v| v > 0.0)
+        && section.resolved_j().is_ok_and(|v| v > 0.0)
+        && [section.property_basis.iy, section.property_basis.iz]
+            .iter()
+            .all(|v| *v != sepika_core::model::PropertyBasis::PendingShape)
+}
+
 pub struct UndoStack {
     done: Vec<Box<dyn EditCommand>>,
     undone: Vec<Box<dyn EditCommand>>,
@@ -185,6 +217,7 @@ pub struct UndoStack {
     last_error: Option<String>,
     id_changes: Vec<IdChange>,
     affects_calculation: bool,
+    restriction: Option<Vec<sepika_core::ids::ElemId>>,
 }
 
 impl UndoStack {
@@ -197,6 +230,7 @@ impl UndoStack {
             last_error: None,
             id_changes: Vec::new(),
             affects_calculation: true,
+            restriction: None,
         }
     }
 
@@ -206,6 +240,11 @@ impl UndoStack {
     /// 毎フレーム計算し直さずに済むよう、キャッシュのキーとして使う。
     /// undo・redo でも増えるため、このスタックを通した変更であれば、値が同じことが
     /// モデルが同じことを意味する。
+    /// 空集合は読取専用。指定時は既存鉄骨大梁への有効断面割当だけを許可する。
+    pub fn restrict_sections(&mut self, targets: Vec<sepika_core::ids::ElemId>) {
+        self.restriction = Some(targets);
+    }
+
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -219,6 +258,10 @@ impl UndoStack {
     pub fn run(&mut self, model: &mut Model, cmd: Box<dyn EditCommand>) -> bool {
         self.last_error = None;
         self.id_changes.clear();
+        if let Err(reason) = self.check_restriction(model, cmd.as_ref()) {
+            self.last_error = Some(reason);
+            return false;
+        }
         if let Err(reason) = model.validate_assignment_region_identity() {
             self.last_error = Some(format!("モデルは未更新: {reason}"));
             return false;
@@ -269,6 +312,29 @@ impl UndoStack {
         true
     }
 
+    fn check_restriction(&self, model: &Model, cmd: &dyn EditCommand) -> Result<(), String> {
+        if let Some(targets) = &self.restriction {
+            let allowed = cmd.section_assignment().is_some_and(|(elem, section)| {
+                targets.contains(&elem)
+                    && model.element(elem).is_some_and(|e| {
+                        e.kind == sepika_core::model::ElementKind::Beam
+                            && e.section
+                                .and_then(|id| model.section(id))
+                                .is_some_and(|s| valid_study_section(model, s))
+                    })
+                    && section
+                        .and_then(|id| model.section(id))
+                        .is_some_and(|s| valid_study_section(model, s))
+            });
+            if !allowed {
+                return Err(
+                    "この案では固定対象の鉄骨大梁への既存有効断面割当だけを変更できます".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// 確認を行えない入口では、版・入力荷重が失われる編集を確定せず拒否する。
     pub fn run_preserving_plate_assignments(
         &mut self,
@@ -300,6 +366,13 @@ impl UndoStack {
     }
 
     pub fn undo(&mut self, model: &mut Model) {
+        self.last_error = None;
+        if let Some(cmd) = self.done.last() {
+            if let Err(reason) = self.check_restriction(model, cmd.as_ref()) {
+                self.last_error = Some(reason);
+                return;
+            }
+        }
         self.id_changes.clear();
         if let Some(cmd) = self.done.pop() {
             self.affects_calculation = cmd.affects_calculation();
@@ -316,6 +389,10 @@ impl UndoStack {
         let Some(cmd) = self.undone.last() else {
             return;
         };
+        if let Err(reason) = self.check_restriction(model, cmd.as_ref()) {
+            self.last_error = Some(reason);
+            return;
+        }
         if let Err(reason) = model.validate_assignment_region_identity() {
             self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
             return;

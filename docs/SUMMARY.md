@@ -14,6 +14,7 @@
     - [テーブル編集とグリッド操作](./model_edit/07_テーブル編集とグリッド操作.md)
     - [断面用途](./model_edit/08_断面用途.md)
     - [梁の鉛直偏心](./model_edit/09_梁の鉛直偏心.md)
+    - [断面案の検討](./model_edit/10_断面案の検討.md)
 - [準備計算（解析前の確認）](./preparation/README.md)
     - [階の分布](./preparation/01_階の分布.md)
     - [地震力（Ai 分布）](./preparation/02_地震力_Ai分布.md)

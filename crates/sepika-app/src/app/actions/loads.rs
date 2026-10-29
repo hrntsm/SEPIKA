@@ -47,6 +47,10 @@ impl App {
     /// 解析実行系（`sync_auto_load_cases_action` 経由）・`generate_stories_action`
     /// の入口で毎回呼ぶことを想定した冪等な同期アクション。
     pub fn sync_gravity_load_cases_action(&mut self) {
+        if !self.study_is_main() {
+            self.report_error("比較案では入力荷重を変更できません");
+            return;
+        }
         let result = match sepika_job::auto_loads::compute_gravity_auto_load_cases(&self.core.model)
         {
             Ok(result) => result,
@@ -78,6 +82,10 @@ impl App {
     /// SemiPrecise で固有値解析が未実行の場合は `last_notice` に案内する。
     /// 冪等な同期アクション（`sync_gravity_load_cases_action` と同じ規約）。
     pub fn sync_seismic_load_cases_action(&mut self) {
+        if !self.study_is_main() {
+            self.report_error("比較案では入力荷重を変更できません");
+            return;
+        }
         self.sync_prepared_model(false);
     }
 
@@ -135,6 +143,10 @@ impl App {
 
     /// 現在入力から重量と自動荷重を一括同期する。無変更時は Undo を追加しない。
     pub fn sync_auto_load_cases_action(&mut self) {
+        if !self.study_is_main() {
+            self.report_error("比較案では入力荷重を変更できません");
+            return;
+        }
         self.sync_prepared_model(false);
     }
 

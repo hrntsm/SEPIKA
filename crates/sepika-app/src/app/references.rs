@@ -237,6 +237,10 @@ impl App {
         {
             return false;
         }
+        if !self.study_is_main() {
+            self.report_error("検討の計算条件は作成時に固定されています");
+            return false;
+        }
         self.core.analysis_cfg = next;
         self.core.scoped.references.advance();
         self.core.scoped.staleness.mark_non_calc_edited();
@@ -591,6 +595,9 @@ impl App {
         &self,
         reference: &ResultReference,
     ) -> Result<sepika_core::model::Model, String> {
+        if let Some(app) = self.study_result_view(reference) {
+            return app.result_input_snapshot(reference);
+        }
         if reference.target.source != reference.source {
             return Err("結果と対象の入力版が一致しません。".into());
         }
@@ -654,6 +661,9 @@ impl App {
         &self,
         reference: &ResultReference,
     ) -> Result<ReferenceTarget, String> {
+        if let Some(result) = self.resolve_study_result(reference) {
+            return result;
+        }
         self.result_input_snapshot(reference)?;
         self.require_result_input(reference.kind.clone())?;
         self.resolve_target_reference(&reference.target)
@@ -722,6 +732,9 @@ impl App {
         &self,
         reference: &ResultReference,
     ) -> Result<RecordedCalculationInput, String> {
+        if let Some(app) = self.study_result_view(reference) {
+            return app.recorded_result_input(reference);
+        }
         self.result_input_snapshot(reference)?;
         self.recorded_calculation_input(&reference.kind)
             .map(|(_, input)| input)
@@ -817,6 +830,12 @@ impl App {
         view: ReferenceView,
         reveal: bool,
     ) -> Result<(), String> {
+        if let Some(location) = self.study_result_location(reference) {
+            if self.studies.active != location {
+                self.switch_study(location)?;
+            }
+        }
+        self.activate_study_result_reference(reference);
         self.resolve_result_reference(reference)?;
         self.validate_reference_display(reference)?;
         if let Some(frame) = reference.display.frame {
@@ -1112,6 +1131,12 @@ impl App {
         view: ReferenceView,
         reveal: bool,
     ) -> Result<(), String> {
+        if let Some(location) = self.study_target_location(reference) {
+            if self.studies.active != location {
+                self.switch_study(location)?;
+            }
+        }
+
         let destination = if matches!(
             reference.target,
             ReferenceTarget::Vibration(_) | ReferenceTarget::LumpedVibration(_)
@@ -1336,7 +1361,15 @@ impl App {
         }
         ui.collapsing("共通参照・固定対象", |ui| {
             let input = self.input_reference();
-            ui.label(format!("本案 / 編集世代 {}", input.generation));
+            ui.label(format!(
+                "{} / 編集世代 {}",
+                if self.study_is_main() {
+                    "本案"
+                } else {
+                    "表示中の検討入力"
+                },
+                input.generation
+            ));
             ui.label(format!("プロジェクト: {}", input.project));
             ui.label(format!("案: {}", input.proposal));
             ui.label(format!(
@@ -1425,6 +1458,7 @@ impl App {
                                 Ok(()) => {
                                     self.core.scoped.references.fixed_results.push(reference);
                                     self.core.scoped.staleness.mark_non_calc_edited();
+                                    self.retain_study_view_references();
                                 }
                                 Err(reason) => self.report_notice(reason),
                             },
@@ -1574,7 +1608,7 @@ impl App {
             egui::ScrollArea::vertical()
                 .max_height(450.0)
                 .show(ui, |ui| Self::recorded_input_contents_ui(ui, input));
-            ui.label(format!("現在編集の本案: 案 {} / 入力世代 {}（計算元は窓タイトルで確認してください）", current.proposal, current.generation));
+            ui.label(format!("現在表示の入力: 案 {} / 入力世代 {}（編集への移動先は本案です）", current.proposal, current.generation));
             if ui.button("元の結果へ戻る（閲覧を閉じる）").clicked() {
                 edit_current = true;
             }
@@ -1583,9 +1617,13 @@ impl App {
             }
         });
         if move_to_current {
-            let return_to = self.enter_evidence_editor(self.ui.view.model_tab);
-            if self.ui.scoped.reference_snapshot_return.is_none() {
-                self.ui.scoped.reference_snapshot_return = Some(return_to);
+            match self.enter_evidence_editor(self.ui.view.model_tab) {
+                Ok(return_to) => {
+                    if self.ui.scoped.reference_snapshot_return.is_none() {
+                        self.ui.scoped.reference_snapshot_return = Some(return_to);
+                    }
+                }
+                Err(reason) => self.report_error(reason),
             }
         }
         if !open || edit_current {
@@ -3230,5 +3268,69 @@ mod tests {
             rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
             before
         );
+    }
+}
+
+pub(crate) const QUANTITY_EVIDENCE_CONTRACT_VERSION: u32 = 1;
+
+/// 保存結果または固定した数量入力を指す。数量の対象範囲はモデル全体。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum EvidenceReference {
+    Calculation(Box<ResultReference>),
+    Quantity(Box<QuantityEvidenceReference>),
+}
+
+/// 集計時に固定した入力と対象範囲。現在モデルで欠落を補完しない。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct QuantityEvidenceReference {
+    pub(crate) source: InputReference,
+    pub(crate) model: sepika_core::model::Model,
+    pub(crate) contract: u32,
+    pub(crate) scope: QuantityEvidenceScope,
+    pub(crate) identity: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) enum QuantityEvidenceScope {
+    WholeModel,
+}
+
+impl From<&ResultReference> for EvidenceReference {
+    fn from(reference: &ResultReference) -> Self {
+        Self::Calculation(Box::new(reference.clone()))
+    }
+}
+
+impl From<&EvidenceReference> for EvidenceReference {
+    fn from(reference: &EvidenceReference) -> Self {
+        reference.clone()
+    }
+}
+
+impl QuantityEvidenceReference {
+    pub(crate) fn identity(&self) -> String {
+        use sha2::{Digest, Sha256};
+        format!(
+            "{:x}",
+            Sha256::digest(
+                bincode::serialize(&(&self.source, &self.model, self.contract, &self.scope))
+                    .expect("数量根拠の直列化")
+            )
+        )
+    }
+}
+
+impl App {
+    /// 現在表示の入力とモデル全体の集計対象を同時に固定する。
+    pub fn quantity_evidence_reference(&self) -> EvidenceReference {
+        let mut quantity = QuantityEvidenceReference {
+            source: self.input_reference(),
+            model: self.core.model.clone(),
+            contract: QUANTITY_EVIDENCE_CONTRACT_VERSION,
+            scope: QuantityEvidenceScope::WholeModel,
+            identity: String::new(),
+        };
+        quantity.identity = quantity.identity();
+        EvidenceReference::Quantity(Box::new(quantity))
     }
 }

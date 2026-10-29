@@ -92,6 +92,8 @@ pub struct Workspace {
 }
 
 pub(crate) struct EvidenceReturn {
+    location: study::Location,
+    readonly_view: Option<Box<study::Slot>>,
     tab: Tab,
     model_tab: ModelTab,
     placement: Placement,
@@ -135,22 +137,64 @@ fn preference_path() -> Option<std::path::PathBuf> {
 }
 
 impl App {
-    pub(crate) fn enter_evidence_editor(&mut self, model_tab: ModelTab) -> EvidenceReturn {
+    fn switch_evidence_location(
+        &mut self,
+        next: study::Location,
+        restore: Option<study::Slot>,
+    ) -> Result<Option<study::Slot>, String> {
+        let evidence = self.ui.scoped.result_evidence.take();
+        let snapshot = self.ui.scoped.reference_snapshot.take();
+        let snapshot_return = self.ui.scoped.reference_snapshot_return.take();
+        self.retain_study_view_references();
+        let result = self.switch_study_with_view(next);
+        if result.is_ok() {
+            if let Some(mut slot) = restore {
+                slot.core.scoped.references.fixed = self.core.scoped.references.fixed.clone();
+                slot.core.scoped.references.fixed_results =
+                    self.core.scoped.references.fixed_results.clone();
+                slot.core.scoped.staleness.unsaved_changes = false;
+                slot.core.scoped.project_path = self.core.scoped.project_path.clone();
+                slot.core.scoped.pending_save_recording =
+                    self.core.scoped.pending_save_recording.take();
+                self.put_slot(slot);
+            }
+        }
+        self.ui.scoped.result_evidence = evidence;
+        self.ui.scoped.reference_snapshot = snapshot;
+        self.ui.scoped.reference_snapshot_return = snapshot_return;
+        result
+    }
+    pub(crate) fn enter_evidence_editor(
+        &mut self,
+        model_tab: ModelTab,
+    ) -> Result<EvidenceReturn, String> {
         self.enter_workspace();
         self.capture_workspace();
-        let return_to = EvidenceReturn {
+        let mut return_to = EvidenceReturn {
+            location: self.studies.active,
+            readonly_view: None,
             tab: self.ui.view.active_tab,
             model_tab: self.ui.view.model_tab,
             placement: self.ui.view.workspace.placement.clone(),
         };
+        return_to.readonly_view = self
+            .switch_evidence_location(study::Location::Main, None)?
+            .map(Box::new);
         self.ui.view.active_tab = Tab::Model;
         self.enter_workspace();
         self.ui.view.model_tab = model_tab;
         self.promote_table(Content::Model);
-        return_to
+        Ok(return_to)
     }
 
     pub(crate) fn return_from_evidence_editor(&mut self, return_to: EvidenceReturn) {
+        if let Err(reason) = self.switch_evidence_location(
+            return_to.location,
+            return_to.readonly_view.map(|slot| *slot),
+        ) {
+            self.report_error(reason);
+            return;
+        }
         self.ui.view.active_tab = return_to.tab;
         self.enter_workspace();
         self.ui.view.model_tab = return_to.model_tab;
@@ -471,13 +515,25 @@ impl App {
         } else {
             let input = self.input_reference();
             ui.label(format!(
-                "本案 · 編集世代 {} · プロジェクト {}",
-                input.generation, input.project
+                "{} · 編集世代 {} · プロジェクト {}",
+                self.study_display_name(),
+                input.generation,
+                input.project
             ));
             let response = self.workspace_controls(ui);
-            ui.label(
-                "属性・検索・Undo / Redo の対象: 本案（画面の閲覧だけでは編集先を変更しません）",
-            );
+            if self.study_is_main() {
+                ui.label("属性・検索・Undo / Redo の対象: 本案（画面の閲覧だけでは編集先を変更しません）");
+            } else if self.study_read_only() {
+                ui.label(format!(
+                    "属性・検索の対象: {}（入力編集・Undo / Redo は利用できません）",
+                    self.study_display_name()
+                ));
+            } else {
+                ui.label(format!(
+                    "属性・検索・Undo / Redo の対象: {}（固定対象の断面割当のみ編集できます）",
+                    self.study_display_name()
+                ));
+            }
             response
         };
         retain_input_focus(ui, input_focus, controls.rect);
@@ -562,13 +618,18 @@ impl App {
         pane.set_clip_rect(rect.intersect(ui.clip_rect()));
         let ui = &mut pane;
         view.pane_index = index;
-        view.allow_creation = self.ui.view.workspace.placement.active == index;
+        view.allow_creation =
+            self.study_is_main() && self.ui.view.workspace.placement.active == index;
         let mut content = self.ui.view.workspace.placement.contents[index];
         let input_focus = text_input_focus(ui);
         let header = ui.horizontal_wrapped(|ui| {
             let active = self.ui.view.workspace.placement.active == index;
-            if crate::theme::selectable_name(ui, active, &format!("領域{} · 本案", index + 1))
-                .clicked()
+            if crate::theme::selectable_name(
+                ui,
+                active,
+                &format!("領域{} · {}", index + 1, self.study_display_name()),
+            )
+            .clicked()
             {
                 self.ui.view.workspace.placement.active = index;
             }
@@ -605,7 +666,7 @@ impl App {
         {
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.strong("作成・割当設定 · 対象: 本案");
+                    ui.strong(if self.study_is_main() { "作成・割当設定 · 対象: 本案" } else { "断面割当設定 · 対象: 表示中の検討案" });
                     if ui.button("取消して閉じる").clicked() || ui.button("取消").clicked() {
                         self.reset_draw_modes();
                         self.ui.scoped.draw_section_assignment = None;
@@ -616,7 +677,11 @@ impl App {
                 egui::ScrollArea::vertical().id_salt("drawing_settings").max_height(170.0).show(ui, |ui| self.draw_tools_panel(ui));
             });
         }
-        ui.label(if rect.height() < 300.0 {
+        ui.label(if self.study_read_only() {
+            "検討の固定入力 · 読取専用"
+        } else if !self.study_is_main() {
+            "検討案 · 比較案の固定対象断面のみ編集可 · Undo / Redo: 表示中の案"
+        } else if rect.height() < 300.0 {
             if content.editable() {
                 "本案 · 条件編集可 · 結果値は読取専用 · Undo: 本案"
             } else {
@@ -627,7 +692,8 @@ impl App {
         } else {
             "読み取り専用 · 編集先 / Undo: 本案"
         });
-        view.allow_creation = self.ui.view.workspace.placement.active == index;
+        view.allow_creation =
+            self.study_is_main() && self.ui.view.workspace.placement.active == index;
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id(if content == Content::Drawing {
@@ -650,12 +716,16 @@ impl App {
     }
 
     pub(crate) fn workspace_table(&mut self, ui: &mut egui::Ui, content: Content) {
+        let enabled = content != Content::Loads || self.study_is_main();
         let mut table = ui.new_child(
             egui::UiBuilder::new()
                 .id(egui::Id::new(("shared_input_table", content.label())))
                 .max_rect(ui.available_rect_before_wrap())
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
+        if !enabled {
+            table.disable();
+        }
         egui::ScrollArea::vertical()
             .id_salt("table_scroll")
             .auto_shrink([false, false])

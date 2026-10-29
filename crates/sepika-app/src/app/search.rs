@@ -232,7 +232,7 @@ impl App {
         egui::CentralPanel::default().frame(crate::theme::content_panel_frame()).show_inside(root, |ui| {
             ui.heading("対象・操作を検索");
             ui.label(if self.ui.scoped.reference_snapshot.is_some() { "検索元: 過去入力（読み取り専用）・本案の候補は操作不可".into() } else {
-                format!("検索元: 本案 / 領域{} / 編集世代 {}", state.pane + 1, state.source.as_ref().map_or(0, |source| source.generation))
+                format!("検索元: {} / 領域{} / 編集世代 {}", self.study_display_name(), state.pane + 1, state.source.as_ref().map_or(0, |source| source.generation))
             });
             if let Some(source) = &state.source {
                 crate::theme::name_label(ui, &format!("案: {}", source.proposal));

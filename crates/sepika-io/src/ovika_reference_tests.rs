@@ -128,6 +128,7 @@ fn assert_roundtrip(model: &Model, label: &str) {
         &path,
         model,
         OvikaExtras {
+            studies: None,
             preparation: Some(b"preparation"),
             results: Some(b"results"),
             analysis_settings: Some(b"settings"),
