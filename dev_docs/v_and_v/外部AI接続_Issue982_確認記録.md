@@ -1,12 +1,12 @@
 # 外部AI接続の確認記録（Issue #982）
 
-状態: 🔶。以下は通信・権限・既存計算への接続のVerificationであり、構造計算式・規準適合の新たな認証ではない。Windows実機は具体的共有承認後に再開し、以下の再接続問題を検出した。修正後の最終実機は未完了である。
+状態: 🔶。最終ソースの自動回帰・独立確認と、正常サンプルによるWindows実機の参照・実編集・既存計算・根拠提出・解除・正常終了を確認した。通信と権限・既存計算への接続の有限なVerificationであり、構造計算式・規準適合の新たな認証ではない。
 
 ## 対象と確定版
 
-2026-10-29、Windowsの専用worktreeで検証した。最終ソースは`31e85aa5`、対応文書込みの固定HEADは`8ba9a181637210b27af0c57869d0fdbfe660e5d5`。#981を統合したmain `29c14e5d`に接続している。
+2026-10-29、Windowsの専用worktreeで検証した。最終ソースは`03c9a6d9`、対応文書込みの検証HEADは`a5af25eec1422293e51a7ffaf2906390bf2e6c20`。最終実機もこのソースから生成したexeを使った。#981を統合したmain `29c14e5d`へ接続している。
 
-対象は`sepika-ai-connection`、GUIの検討処理、MCP stdio薄中継。実編集・実計算には正常な門形架構を使用した。外部LLM・APIキー・生成文章の一致は検証に使わない。実行許可は保存せず、依頼・開始・最終操作・成果・受理台帳を検討へ保存する。切断と計算取消、成果提出と計算成功・検定合格・人による採用を区別する。
+対象は`sepika-ai-connection`、GUIの検討処理、MCP stdio薄中継。正常な門形架構の専用fixtureを使用し、実ユーザープロジェクト、外部LLM、APIキー、生成文章の一致を検証に使っていない。実行許可は保存せず、依頼・開始・最終操作・成果・受理台帳を検討へ保存する。切断と計算取消、成果提出と計算成功・検定合格・人による採用を区別する。
 
 ## 製品Rustでの方式小実験
 
@@ -19,23 +19,23 @@
 
 ## 最終ソースの直接回帰
 
-コマンドのtargetは全て専用ディレクトリ。次の結果は`8ba9a181`のローカル実行で、GitHub CIとは区別する。
+targetは全て専用ディレクトリ。次の結果は`a5af25ee`のローカル実行で、GitHub CIとは区別する。
 
 | 検証 | コマンド要部 | 結果 |
 | --- | --- | --- |
+| 共有通信 | `cargo test -p sepika-ai-connection --locked --target-dir target-issue982-transport` | 4成功 |
 | GUI全lib | `cargo test -p sepika-app --features gui --lib --locked --target-dir target-issue982` | 1159成功、3 ignore |
 | 非GUI全lib | `cargo test -p sepika-app --lib --locked --target-dir target-issue982` | 479成功、1 ignore |
 | AI契約 | GUI test exeの`app::study::ai::operations::tests --test-threads=1` | 16成功。独立Reviewerも同じ確定exeで16成功 |
-| GUI/MCP関連feature | `cargo clippy -p sepika-app -p sepika-mcp --features sepika-app/gui,sepika-mcp/mcp --all-targets --locked --target-dir target-issue982 -- -D warnings` | 成功 |
+| 関連feature | `cargo clippy -p sepika-app -p sepika-mcp --features sepika-app/gui,sepika-mcp/mcp --all-targets --locked --target-dir target-issue982 -- -D warnings` | 成功 |
 | 非feature | 同clippyの`--features`なし | 成功 |
-| MCP stdio | `cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked --target-dir target-issue982` | 1成功。initialize、tools一覧、gui_requestの製品パイプ往復 |
+| 共有通信の静的解析 | `cargo clippy -p sepika-ai-connection --all-targets --locked --target-dir target-issue982-transport -- -D warnings` | 成功 |
+| MCP stdio | `cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked --target-dir target-issue982` | 正常中継・不一致応答の拒否の2成功 |
 | 専用GUI | `cargo build -p sepika-app --features gui --example ai_connection_fixture --locked --target-dir target-issue982` | 成功 |
 | 文書 | `xtask check-docs`、`mdbook build --dest-dir target-issue982-tools/book` | 125項目・678リンク・722実装参照、HTML生成成功 |
 | 依存・整形 | `xtask check-deps`、`cargo fmt --all -- --check`、`git diff --check` | 46依存方向、整形・差分とも成功 |
 
-最新stableはrustc 1.99.1、clippy 0.1.99。共有通信クレートの3件（不正・過大・非UTF-8・未完了行・未知フィールドを含む）と全target clippy、変更した編集層の全lib218件と全target clippyも成功した。これらは最終修正群で変更していない。
-
-MCP全libは先行HEADで非feature98件成功。featureは並列負荷中に既存CFTジョブ待機1件が時間切れとなり、変更せず単独では2.58秒で成功した。既存exeの逐次全実行は135件成功（12.09秒）。待機上限や計算式は変更していない。
+最新stableはrustc 1.99.1、clippy 0.1.99。変更した編集層の全lib218件と全target clippyも成功し、最終修正群では変更していない。MCP全libは先行HEADで非feature98件成功。featureは並列負荷中に既存CFTジョブ待機1件が時間切れとなり、変更せず単独では2.58秒で成功、既存exeの逐次全実行は135件成功（12.09秒）。待機上限や計算式は変更していない。
 
 ### 実通信と拒否契約
 
@@ -55,37 +55,39 @@ MCP全libは先行HEADで非feature98件成功。featureは並列負荷中に既
 
 resultsと明示run付き提出のstateはそのrunへ固定した。同入力の後続jobが計算中・確認待ちでも過去runの状態を変えず、AI失敗後の人成功runもcalculatedを保った。提出の異なるrun参照混在を拒否した。run未指定の説明・数量提出は同依頼jobの提出時観測か未計算だけを保存し、後続完了でrun・検定根拠を補完しない。数量のみの提出も元案・根拠を保持し、削除拒否と保存再読込後の取得を確認した。
 
-独立確認で検出したread台帳、提出キャッシュ開示、保存同期race、保持run発見、保持runと後続jobの混在を修正した。最終fresh6は修正必須なしで完了した。
+独立確認で検出したread台帳、提出キャッシュ開示、保存同期race、保持run発見、保持runと後続jobの混在を修正した。再接続修正後の最終fresh7は修正必須なしで完了した。
+
+## 同一パイプ再使用の失敗と製品制約
+
+先行sourceの実機ではReviewが完了した後、Comparison用の新クライアントが初回connectでos233になった。許可された明示再接続1回は承認できたが、begin_requestにconnect応答、studyにstarted応答、fixed_targetsにstudy応答という一応答ずれでprobeが停止した。Comparisonのモデル変更には到達していない。
+
+同一Listener/serverでclient1の複数要求・切断観測後にclient2へ接続する小さな回帰でも、2クライアント目の最初の要求がpremature disconnect/os233で失敗した。[mio #1983](https://github.com/tokio-rs/mio/issues/1983)の同インスタンス再使用時のstale read報告と、手元mio1.2.2の状態管理に一致する。上流修正案は未releaseであり、OSや一般的なGUI終了の原因特定とは扱わない。
+
+最終実装は一有効化・一クライアントへ限定した。切断後はserverと旧endpointを廃止し、GUIも許可・有効化を終了する。人が再有効化して新しいランダム接続先を渡し、新規承認する。EOFの読み飛ばし、不確実なdrain、ACL緩和、同名再bind、未merge fork、自動retryは追加しない。bridgeは要求IDと応答IDの不一致を成功扱いせず、受理不明として閉じる。probeも外側JSON-RPCと内側要求IDを検査する。新回帰では3回の新endpoint・旧endpoint不在・各3要求のID一致と、GUIの許可失効・再承認を確認した。
+
+## 最終Windows実機
+
+ユーザーから、専用正常サンプルの全モデル・条件・結果をこのPC内の専用MCPブリッジとgui_probe.pyだけへ共有し、Reviewの参照・説明提出、Comparisonの固定大梁への既存断面割当・既存計算・根拠提出、最後の解除を行う具体的承認を得て実施した。
+
+対象は`target-issue982/debug/examples/ai_connection_fixture.exe`（タイトル「SEPIKA #982 接続確認」）、PID8808。初期設定は内側1280×800・最小800×600で、実画像の外枠1282×802を確認した。Maximizeは使用していない。MCPは専用`sepika-mcp.exe`と`crates/sepika-mcp/tests/support/gui_probe.py`で起動し、Comparisonは任意の`--release-marker`で提出後に同clientを保持した。
+
+- Review: GUIで対象Studyと確認のみを許可し、参照・説明提出が成功した。create_comparisonとcalculateはpermission_denied、提出はnot_calculated/source=none/runなし/検定件数nullだった。probe exit0後、操作なしでGUIが接続先・許可を終了し、有効化ボタンへ戻った。
+- Comparison: 人が新endpointを作り、比較権限で新clientを明示承認した。固定部材2の断面は1→2、変更件数は1。作成・割当・既存計算・結果・根拠・数量取得・run_index=0の提出が成功し、marker待機へ進んだ。外側・内側の要求応答IDを全て照合した。AI操作中、GUI表示は本案・編集世代0のままだった。
+- 保持計算と同じGUIの照合: 人の操作で比較案の準備後入力・結果を開き、案dfa664c7-032a-4453-b5d8-39c053297bdd、世代1、入力識別b939949a…ce2af、6節点・静的5ケース・検定結果9件を確認した。長期ケースの部材0の検定比はGUIで0.086／0.074／0.121、MCPで0.08610299045044587／0.07413204054251889／0.12096722602267818で、表示精度で一致した。通常の検定根拠窓でも同じ案・版と長期比0.0861、軸曲げ・せん断の内訳、計算時部材・断面・材料を確認した。節点変位の実機数値照合は行っていない。
+- 件数とページ: 提出はsource=run/run_index=0/calculated、checked=26・confirmed_ng=0・unchecked=39。全体合格とは扱わない。結果ページはtotal155/limit100/omitted=true、節点根拠ページはtotal6/limit1/omitted=trueであり、部分ページを全体集計へ置き換えない。
+- 解除: marker待機中にGUIで接続を明示解除した後、同clientの旧context読取1回がos232（pipe is being closed）で拒否され、probeはexit0で終了した。新規接続や再送はしていない。保持した計算は残り、接続UIは有効化ボタンへ戻った。
+- 保存・終了: 本案表示へ戻し、編集世代0・4節点・未計算を確認した。通常Save Asで専用target内のfinal-ai-connection.ovikaへ保存し、AXの保存成功・dirty消失と57368bytesのファイル生成を確認した。Alt+F4で通常終了し、起動時から保持したプロセスのexit0、専用GUI/MCPプロセス不存在を確認した。
+
+専用target/cuのfinal-review.jsonとfinal-comparison.jsonに各応答を記録した。これらは検証生成物であり、製品や実ユーザープロジェクトの共有先ではない。実機での保存再読込・全DPI/最小寸法・全結果行・全根拠の網羅は未実施で、保存再読込と境界の直接回帰と区別する。
+
+### 停止と再開の記録
+
+先行fixtureではnative AX Maximizeを1回実行した直後、共有前・probe起動前に終了code 0xC000041Dで終了した。stderrはフォント読込infoだけでRust panicなし。同操作は反復せず、原因未確定の別課題[#1001](https://github.com/hrntsm/SEPIKA/issues/1001)へ記録した。手操作再現・#980の消失と同原因かは未確認。先行プロセスの再起動後は解除・専用保存・通常exit0を確認した。
+
+共有の具体承認がない段階では自動承認レビューが有効化を拒否したため停止し、迂回しなかった。受信者・データ・権限を特定したユーザー承認後に正規操作で再開した。最終fixtureの初回activateと回復1回も失敗したため停止し、ユーザーの手動前面化回答後にfresh inventoryから選び直した。実画像の重畳を確認後、通常activate1回は成功し、その後の上記最終操作を完了した。追加起動・別経路前面化は行っていない。
+
+OS設定の取得・起動・変更、過去に拒否された未設定壁版の警告続行、クラウド送信、実ユーザープロジェクト、本案更新・採用は行っていない。
 
 ## Windows CI
 
-Windows専用ジョブはPRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行し、失敗は必須「テスト」を失敗させる。既存Ubuntu4構成は維持した。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時に省略する。PR/mainのdebug symbol設定を揃えた。PyYAML構文とPR/main/cache/gate条件・対象コマンドをローカル確認した。実GitHub CI結果は未確認。
-
-## Windows実機の到達範囲と停止
-
-起動対象は同HEADから生成した`target-issue982/debug/examples/ai_connection_fixture.exe`（タイトル「SEPIKA #982 接続確認」）。実ユーザープロジェクトを使わず、未設定壁版を持たない正常サンプルだけを使用した。代表クライアントは`crates/sepika-mcp/tests/support/gui_probe.py`と専用`sepika-mcp.exe`。外部LLM・APIキー・クラウド接続は使用しない計画だが、以下の拒否時点ではprobeを起動していない。
-
-1. 専用プロセスが存在しないことを確認し、PID36608を可視起動した。初期AX・画像は取得できた。native AXのMaximizeを1回実行した直後にプロセスが終了し、終了codeは`0xC000041D`。stderrは日本語フォント読込infoだけでRust panicはなく、共有有効化前・probe起動前だった。#982起因とは断定しない。同操作は再試行していない。原因未確定の別課題として[#1001](https://github.com/hrntsm/SEPIKA/issues/1001)へ記録した。手操作での再現と、#980の消失事象と同原因かは未確認。
-2. 親との調整後、同じexeをPID36824で再起動し、新規inventoryから選び直した。小窓の外枠拡張はAPIのwindow bounds外として拒否され、通常窓のまま継続した。接続パネルのクラウド送信可能性、全モデルの読取範囲、固定鉄骨大梁の編集範囲、対象Study、比較操作許可が未選択のcheckboxを実画像・AXで確認した。
-3. 「ローカル接続を有効化」が自動承認レビューに拒否された。理由は、外部クライアントへの共有境界を有効にするアクセス変更について、受信者・データ範囲・権限の具体的なユーザー承認が不足するため。再試行・コード等の間接有効化をせず、依存CU入力を停止して親へ承認確認を依頼した。この時点ではPID36824を共有未有効のまま保持した。
-
-この段階では実機のReview拒否・Comparison往復・解除・通常終了確認は未完了だった。OS設定の取得・起動・変更、過去に拒否された未設定壁版の警告続行は行っていない。
-
-## 具体承認後の実機と再接続の修正
-
-ユーザーから、専用正常サンプルの全モデル・条件・結果をこのPC内の専用MCPブリッジとgui_probe.pyだけへ共有し、Reviewの参照・説明提出、Comparisonの固定大梁への既存断面割当・既存計算・根拠提出、最後の解除を行う具体的承認を得て再開した。既存PID36824をfresh inventoryで選び直し、二重起動していない。
-
-有効化とReview承認を実施し、probeはexit0で参照・説明提出を完了した。作成と計算はpermission_denied、提出はnot_calculated/source=none/runなし/検定件数null。GUI表示先は本案のままだった。続くComparison用の新クライアントは初回connectでos233になり、許可された明示再接続1回は承認できたが、begin_requestにconnect応答、studyにstarted応答、fixed_targetsにstudy応答という一応答ずれを記録してprobeが停止した。Comparisonのモデル変更には到達していない。
-
-同一Listener/serverでclient1の複数要求・切断観測後にclient2へ接続する小さな回帰でも、2クライアント目の最初の要求がpremature disconnect/os233で失敗した。これは[mio #1983](https://github.com/tokio-rs/mio/issues/1983)の同インスタンス再使用時のstale read報告と、手元mio1.2.2の状態管理に一致する。上流の修正案は未release。応答ずれの実測と上流報告との一致を、OS設定や一般的なGUI終了の原因特定とは扱わない。
-
-修正前のGUIでは接続を明示解除し、通常Save Asで専用target内のpre-phase6-review.ovikaへ保存した。AXの保存成功・dirty消失とファイル生成を確認し、Alt+F4で通常終了した。保持した起動プロセスのexit0と専用GUI/MCPプロセス不存在を確認した。破棄選択はしていない。
-
-修正は一有効化・一クライアントへ限定した。切断後はserverと旧endpointを廃止し、GUIも許可・有効化を終了する。再接続は人が再有効化して新しいランダム接続先を渡し、新規承認する。EOFの読み飛ばし、不確実なdrain、ACL緩和、同名再bind、未merge上流fork、自動retryは追加しない。bridgeは要求IDと応答IDの不一致を成功扱いせず、受理不明として閉じる。probeも外側JSON-RPCと内側要求IDを検査する。
-
-新しいtransport回帰は3回の新endpoint・旧endpoint不在・各3要求の応答ID一致を確認し、全4件とclippyが成功した。Appの実通信回帰は切断後のGUI有効化と許可の終了、旧許可拒否、新endpoint・新承認・旧session拒否を含めAI16件が成功した。fake応答ID不一致の拒否を含むMCP stdio2件も成功した。最終構成の広い検証と実機は次段で確認する。probeに任意の専用marker待機を追加し、提出後のGUI根拠確認・明示解除・旧context一回の拒否を同じclientで記録できるようにした。専用fixtureの初期サイズは通常製品と同じ1280×800、最小800×600へ揃えた。#1001の修正や解消とは扱わない。
-## 再使用廃止後の確定回帰と実機起動
-
-修正ソース`03c9a6d9`、対応文書込みHEAD`a5af25eec1422293e51a7ffaf2906390bf2e6c20`で、共有通信全4件・GUI全lib1159件（3 ignore）・非GUI全lib479件（1 ignore）・GUI/MCPの関連feature有無それぞれの全target clippy警告禁止・MCP stdio2件・専用fixture buildが成功した。fmt、check-docs（125/678/722）、check-deps（46方向）、mdbook build、git diff --checkも成功した。fresh7は修正必須なしで完了し、同じ確定exeのAI16件が独立実行でも全成功した。
-
-最終実機を再開し、専用GUI/MCPプロセス不存在を確認してfixtureをPID8808で可視起動した。fresh inventoryから専用窓2820414を一意選択したが、`sky.activate_window`は`failed to activate captured window`となった。再inventory・再get_windowによる回復を1回だけ試みても同じエラーだったため、以後のCU入力を停止した。共有有効化・probe起動・OS設定・Maximizeは実行していない。プロセスは生存し、stderrはフォント読込infoだけ。PID8808を保持して手動前面化の調整待ちであり、通常サイズの実画像・最終Comparison往復・明示解除・正常終了はまだ確認していない。具体的共有承認は維持し、承認不足による停止とは区別する。
+Windows専用ジョブはPRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行し、失敗は必須「テスト」を失敗させる。既存Ubuntu4構成は維持した。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時に省略する。PR/mainのdebug symbol設定を揃えた。PyYAML構文とPR/main/cache/gate条件・対象コマンドをローカル確認した。実GitHub CI結果はPRで別途確認する。
