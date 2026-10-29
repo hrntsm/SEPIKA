@@ -84,3 +84,8 @@ Windows専用ジョブはPRで共有通信全test・GUI AI契約（逐次）・M
 修正は一有効化・一クライアントへ限定した。切断後はserverと旧endpointを廃止し、GUIも許可・有効化を終了する。再接続は人が再有効化して新しいランダム接続先を渡し、新規承認する。EOFの読み飛ばし、不確実なdrain、ACL緩和、同名再bind、未merge上流fork、自動retryは追加しない。bridgeは要求IDと応答IDの不一致を成功扱いせず、受理不明として閉じる。probeも外側JSON-RPCと内側要求IDを検査する。
 
 新しいtransport回帰は3回の新endpoint・旧endpoint不在・各3要求の応答ID一致を確認し、全4件とclippyが成功した。Appの実通信回帰は切断後のGUI有効化と許可の終了、旧許可拒否、新endpoint・新承認・旧session拒否を含めAI16件が成功した。fake応答ID不一致の拒否を含むMCP stdio2件も成功した。最終構成の広い検証と実機は次段で確認する。probeに任意の専用marker待機を追加し、提出後のGUI根拠確認・明示解除・旧context一回の拒否を同じclientで記録できるようにした。専用fixtureの初期サイズは通常製品と同じ1280×800、最小800×600へ揃えた。#1001の修正や解消とは扱わない。
+## 再使用廃止後の確定回帰と実機起動
+
+修正ソース`03c9a6d9`、対応文書込みHEAD`a5af25eec1422293e51a7ffaf2906390bf2e6c20`で、共有通信全4件・GUI全lib1159件（3 ignore）・非GUI全lib479件（1 ignore）・GUI/MCPの関連feature有無それぞれの全target clippy警告禁止・MCP stdio2件・専用fixture buildが成功した。fmt、check-docs（125/678/722）、check-deps（46方向）、mdbook build、git diff --checkも成功した。fresh7は修正必須なしで完了し、同じ確定exeのAI16件が独立実行でも全成功した。
+
+最終実機を再開し、専用GUI/MCPプロセス不存在を確認してfixtureをPID8808で可視起動した。fresh inventoryから専用窓2820414を一意選択したが、`sky.activate_window`は`failed to activate captured window`となった。再inventory・再get_windowによる回復を1回だけ試みても同じエラーだったため、以後のCU入力を停止した。共有有効化・probe起動・OS設定・Maximizeは実行していない。プロセスは生存し、stderrはフォント読込infoだけ。PID8808を保持して手動前面化の調整待ちであり、通常サイズの実画像・最終Comparison往復・明示解除・正常終了はまだ確認していない。具体的共有承認は維持し、承認不足による停止とは区別する。
