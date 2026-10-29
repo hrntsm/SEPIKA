@@ -36,6 +36,174 @@ fn accepted(response: Response) -> Value {
 }
 
 #[test]
+fn a_fresh_review_connection_discovers_saved_manual_runs_and_history_permission_controls_every_read(
+) {
+    let (mut app, s) = fixture();
+    let p = app.create_comparison(s, "手計算の比較".into()).unwrap();
+    let other = app.create_comparison(s, "別案の手計算".into()).unwrap();
+    app.start_study_calculation(s, p).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    app.switch_study(Location::Proposal(s, p)).unwrap();
+    assert!(crate::app::study::tests::assign(&mut app, 2));
+    app.switch_study(Location::Main).unwrap();
+    app.start_study_calculation(s, p).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    app.start_study_calculation(s, other).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    app.switch_study(Location::Proposal(s, p)).unwrap();
+    assert!(crate::app::study::tests::assign(&mut app, 1));
+    app.switch_study(Location::Main).unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "sepika-ai-discovery-{}.ovika",
+        uuid::Uuid::new_v4()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut app = App::default();
+    app.open_project_from(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    std::fs::remove_file(path).unwrap();
+    assert!(app.studies.items[s].ai.tasks.is_empty());
+    assert!(app.studies.items[s].ai.receipts.is_empty());
+    let connect: Request =
+        serde_json::from_value(json!({"version":1,"id":"fresh-connect","operation":"connect"}))
+            .unwrap();
+    accepted(app.handle_ai_request("client", connect.clone()));
+    app.approve_ai_connection(s, Mode::Review, true).unwrap();
+    let connected = accepted(app.handle_ai_request("client", connect));
+    let begin = request(&app, s, 0, "begin_request", Value::Null);
+    assert_eq!(begin.input.as_ref().unwrap(), &connected["baseline"]);
+    accepted(app.handle_ai_request("client", begin));
+    let proposals = accepted(call(
+        &mut app,
+        s,
+        0,
+        "proposals",
+        json!({"offset":0,"limit":100}),
+    ));
+    let current: InputReference = serde_json::from_value(
+        proposals["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == "手計算の比較")
+            .unwrap()["input"]
+            .clone(),
+    )
+    .unwrap();
+    let mut runs = request(&app, s, 0, "runs", json!({"offset":0,"limit":1}));
+    runs.proposal = Some(current.proposal.clone());
+    runs.input = Some(json!(current));
+    let discovered = accepted(app.handle_ai_request("client", runs.clone()));
+    assert_eq!(discovered["history_included"], true);
+    assert_eq!(discovered["page"]["total"], 2);
+    assert_eq!(discovered["page"]["omitted"], true);
+    assert_eq!(discovered["page"]["next_offset"], 1);
+    let row = &discovered["page"]["items"][0];
+    assert_eq!(row["recorded_calculation_state"], "calculated");
+    assert_eq!(row["matches_requested_input"], false);
+    assert!(row["ai_job"].is_null());
+    assert!(row.get("result_available").is_none());
+    let old: InputReference = serde_json::from_value(row["input"].clone()).unwrap();
+    assert_ne!(old, current);
+    let mut second = runs.clone();
+    second.id = uuid::Uuid::new_v4().to_string();
+    second.arguments = json!({"offset":1,"limit":1});
+    let second = accepted(app.handle_ai_request("client", second));
+    assert_eq!(second["page"]["items"][0]["run_index"], 1);
+    assert_ne!(second["page"]["items"][0]["input"], row["input"]);
+    assert!(second["page"]["next_offset"].is_null());
+    let mut results = request(
+        &app,
+        s,
+        0,
+        "results",
+        json!({"run_index":row["run_index"],"offset":0,"limit":1}),
+    );
+    results.proposal = Some(old.proposal.clone());
+    results.input = Some(json!(old));
+    let numerical = accepted(app.handle_ai_request("client", results.clone()));
+    assert_eq!(numerical["conditions"], row["conditions"]);
+    let reference = numerical["page"]["items"][0]["reference"].clone();
+    assert!(!reference.is_null());
+    let mut evidence = request(
+        &app,
+        s,
+        0,
+        "evidence",
+        json!({"reference":reference,"table":"nodes","offset":0,"limit":1}),
+    );
+    evidence.proposal = Some(old.proposal.clone());
+    evidence.input = Some(json!(old));
+    accepted(app.handle_ai_request("client", evidence.clone()));
+    app.ai_connection.pending = Some("client".into());
+    app.approve_ai_connection(s, Mode::Review, false).unwrap();
+    let session = app
+        .ai_connection
+        .permission
+        .as_ref()
+        .unwrap()
+        .session
+        .clone();
+    runs.session = Some(session.clone());
+    assert_eq!(
+        app.handle_ai_request("client", runs.clone())
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    let mut current_only = runs.clone();
+    current_only.id = uuid::Uuid::new_v4().to_string();
+    let visible = accepted(app.handle_ai_request("client", current_only));
+    assert_eq!(visible["history_included"], false);
+    assert_eq!(visible["page"]["total"], 0);
+    assert!(visible["page"]["items"].as_array().unwrap().is_empty());
+    let other_current: InputReference = serde_json::from_value(
+        proposals["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == "別案の手計算")
+            .unwrap()["input"]
+            .clone(),
+    )
+    .unwrap();
+    let mut current_run = request(&app, s, 0, "runs", json!({"offset":0,"limit":1}));
+    current_run.proposal = Some(other_current.proposal.clone());
+    current_run.input = Some(json!(other_current));
+    let current_run = accepted(app.handle_ai_request("client", current_run));
+    assert_eq!(current_run["page"]["total"], 1);
+    assert_eq!(current_run["page"]["items"][0]["run_index"], 2);
+    assert_eq!(
+        current_run["page"]["items"][0]["matches_requested_input"],
+        true
+    );
+    let mut receipt = request(&app, s, 0, "receipt", json!({"id":runs.id}));
+    receipt.proposal = Some(current.proposal.clone());
+    receipt.input = Some(json!(current));
+    assert_eq!(
+        app.handle_ai_request("client", receipt).error.unwrap().code,
+        "permission_denied"
+    );
+    for mut req in [results, evidence] {
+        req.session = Some(session.clone());
+        assert_eq!(
+            app.handle_ai_request("client", req.clone())
+                .error
+                .unwrap()
+                .code,
+            "permission_denied"
+        );
+        req.id = uuid::Uuid::new_v4().to_string();
+        assert_eq!(
+            app.handle_ai_request("client", req).error.unwrap().code,
+            "input_conflict"
+        );
+    }
+}
+
+#[test]
 fn worker_errors_and_disconnections_remain_failed_with_their_reason_after_reload() {
     for disconnected in [false, true] {
         let (mut app, s) = fixture();

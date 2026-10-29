@@ -493,6 +493,10 @@ impl App {
                 page(rows,pagination.offset,pagination.limit)?
             }
             "results"=>self.ai_results(s,p,&expected,&request,history)?,
+            "runs"=> {
+                let pagination:Page=args(&request)?;
+                self.ai_run_metadata(s,p,&expected,pagination,history)?
+            }
             "quantity"=> {
                 let pagination:Page=args(&request)?;
                 let input=self.ai_read_input(s,p,&expected)?;
@@ -645,10 +649,58 @@ impl App {
                     "この接続では受理済み応答内の保存旧版を閲覧できません",
                 ));
             }
-            if request.operation != "submit" {
+            if !matches!(request.operation.as_str(), "submit" | "runs") {
                 self.ai_read_input(s, p, &expected)?;
             }
             match request.operation.as_str() {
+                "runs" => {
+                    if receipt.result.get("history_included") == Some(&Value::Bool(true))
+                        && !history
+                    {
+                        return Err(reject(
+                            "permission_denied",
+                            "この接続では保存旧版を含む保持計算一覧を閲覧できません",
+                        ));
+                    }
+                    let rows = receipt
+                        .result
+                        .get("page")
+                        .and_then(|page| page.get("items"))
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| {
+                            reject("receipt_invalid", "保持計算一覧の受理記録が不正です")
+                        })?;
+                    for row in rows {
+                        let index = row
+                            .get("run_index")
+                            .and_then(Value::as_u64)
+                            .and_then(|index| usize::try_from(index).ok())
+                            .ok_or_else(|| reject("receipt_invalid", "保持計算位置が不正です"))?;
+                        let run = self.studies.items[s].runs.get(index).ok_or_else(|| {
+                            reject("result_missing", "保持計算一覧の元計算がありません")
+                        })?;
+                        if run.proposal != expected.proposal
+                            || Self::ai_run_metadata_row(index, run, &expected) != *row
+                        {
+                            return Err(reject(
+                                "result_unavailable",
+                                "保持計算一覧の元の案・入力版・実行記録が変わっています",
+                            ));
+                        }
+                        if !history
+                            && Self::ai_input_reference(&run.input)
+                                != self.ai_proposal_reference(s, p)
+                            && Self::ai_input_reference(&run.prepared)
+                                != self.ai_proposal_reference(s, p)
+                        {
+                            return Err(reject(
+                                "permission_denied",
+                                "この接続では保存旧版の保持計算を閲覧できません",
+                            ));
+                        }
+                    }
+                    return Ok(());
+                }
                 "submit" => {
                     self.ai_validate_submission(s, receipt, &expected, history)?;
                     return Ok(());
@@ -1064,6 +1116,38 @@ impl App {
         };
         Ok(
             json!({"state":self.ai_calculation_state(s,input),"input":input,"run_index":args.run_index,"conditions":run.input.settings,"error":run.error,"notice":run.notice,"unavailable":unavailable,"whole_checks":summary_json(summary),"fixed_checks":summary_json(fixed_summary),"fixed_steel_volume":{"value_m3":volume.as_ref().ok(),"error":volume.as_ref().err(),"members":fixed,"identity":quantity.identity},"page":page(rows,args.offset,args.limit)?}),
+        )
+    }
+
+    fn ai_run_metadata_row(index: usize, run: &StudyRun, requested: &InputReference) -> Value {
+        let input = Self::ai_input_reference(&run.input);
+        let prepared = Self::ai_input_reference(&run.prepared);
+        json!({"run_index":index,"input":input,"prepared_input":prepared,"matches_requested_input":input==*requested || prepared==*requested,"created":run.created,"proposal_name":run.proposal_name,"recorded_calculation_state":if run.error.is_some() || run.results.is_none() {"failed"} else {"calculated"},"error":run.error,"notice":run.notice,"conditions":run.input.settings,"app_version":run.app_version,"ai_job":run.ai_job})
+    }
+
+    fn ai_run_metadata(
+        &self,
+        s: usize,
+        p: usize,
+        requested: &InputReference,
+        pagination: Page,
+        history: bool,
+    ) -> Result<Value, Rejection> {
+        let current = self.ai_proposal_reference(s, p);
+        let rows = self.studies.items[s]
+            .runs
+            .iter()
+            .enumerate()
+            .filter(|(_, run)| {
+                run.proposal == current.proposal
+                    && (history
+                        || Self::ai_input_reference(&run.input) == current
+                        || Self::ai_input_reference(&run.prepared) == current)
+            })
+            .map(|(index, run)| Self::ai_run_metadata_row(index, run, requested))
+            .collect();
+        Ok(
+            json!({"proposal":current.proposal,"requested_input":requested,"history_included":history,"state_meaning":"保持計算の実行時の状態です。現在の結果利用可否・検定合格・人の採用とは別です。数値と根拠はresults/evidenceで照合します","page":page(rows,pagination.offset,pagination.limit)?}),
         )
     }
 }
