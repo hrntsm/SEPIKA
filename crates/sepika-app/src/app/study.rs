@@ -1,8 +1,9 @@
+mod adoption;
 mod comparison;
 pub mod ai;
 use super::*;
 use serde::{Deserialize, Serialize};
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StudySettings {
     pub design_term: LoadTerm,
     pub design_frame: sepika_design_jp::secondary::holding_capacity::FrameType,
@@ -20,7 +21,14 @@ pub struct StudySettings {
     pub analysis_cfg: AnalysisSettings,
 }
 impl StudySettings {
-    fn capture(core: &AppCore) -> Self {
+    fn same_input_conditions(&self, other: &Self) -> bool {
+        let mut a = self.clone();
+        let mut b = other.clone();
+        a.design_term = LoadTerm::Long;
+        b.design_term = LoadTerm::Long;
+        bincode::serialize(&a).expect("設定") == bincode::serialize(&b).expect("設定")
+    }
+    pub(super) fn capture(core: &AppCore) -> Self {
         Self {
             design_term: core.design_term,
             design_frame: core.design_frame,
@@ -38,7 +46,7 @@ impl StudySettings {
             analysis_cfg: core.analysis_cfg,
         }
     }
-    fn apply(&self, core: &mut AppCore) {
+    pub(super) fn apply(&self, core: &mut AppCore) {
         core.design_term = self.design_term;
         core.design_frame = self.design_frame;
         core.design_rank = self.design_rank;
@@ -120,6 +128,7 @@ pub struct Study {
     pub quantity_evidence: Vec<references::QuantityEvidenceReference>,
     pub proposals: Vec<Proposal>,
     pub runs: Vec<StudyRun>,
+    pub decisions: Vec<adoption::Decision>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ReferencedResult {
@@ -292,6 +301,7 @@ struct SavedStudy {
     quantity_evidence: Vec<references::QuantityEvidenceReference>,
     proposals: Vec<(String, StudyInput)>,
     runs: Vec<StudyRun>,
+    decisions: Vec<adoption::Decision>,
 }
 
 enum StudyWorkerOutcome {
@@ -432,6 +442,7 @@ impl App {
                 state: Some(state),
             }],
             runs: Vec::new(),
+            decisions: Vec::new(),
         });
         self.mark_study_dirty();
         self.studies.window_open = true;
@@ -823,6 +834,11 @@ impl App {
                         .map(|(p, proposal)| (proposal.name.clone(), self.proposal_input(s, p)))
                         .collect(),
                     runs: self.saved_study_runs(s),
+                    decisions: study
+                        .decisions
+                        .iter()
+                        .map(adoption::Decision::snapshot)
+                        .collect(),
                 })
                 .collect(),
         }
@@ -871,6 +887,7 @@ impl App {
                 quantity_evidence: study.quantity_evidence,
                 proposals,
                 runs: study.runs,
+                decisions: study.decisions,
             });
         }
         for study in &mut items {
@@ -974,11 +991,7 @@ impl App {
             &self.studies.main.as_ref().expect("本案").core
         };
         let baseline = &self.studies.items[s].baseline;
-        main.scoped.references.generation + main.scoped.undo.revision()
-            - main.scoped.reference_preparation_revisions
-            != baseline.references.generation
-            || bincode::serialize(&StudySettings::capture(main)).expect("設定")
-                != bincode::serialize(&baseline.settings).expect("設定")
+        !adoption::same_input(&StudyInput::capture(main), baseline)
     }
 }
 
@@ -1118,12 +1131,13 @@ impl App {
                 for s in 0..self.studies.items.len() {
                     ui.separator();
                     let main_changed = self.study_main_changed(s);
+                    let current_main = self.main_study_input();
                     let study = &mut self.studies.items[s];
                     let mut changed = ui.text_edit_singleline(&mut study.purpose).changed();
                     ui.label(format!("固定対象: {} 部材", study.fixed.len()));
                     changed |= ui.text_edit_multiline(&mut study.notes).changed();
                     if main_changed {
-                        ui.colored_label(crate::theme::WARN_TEXT, "本案は検討開始時から変更されています。履歴閲覧は可能です。採用可否の判定・採用は未対応です。");
+                        ui.colored_label(crate::theme::WARN_TEXT, "本案の入力・計算設定が基準案と異なります。本案を表示して新しい検討を作成してください。");
                     }
                     if ui.button("変更・結果を比較").clicked() { compare = Some(s); }
                     if ui.button("基準案から比較案を作成").clicked() { create = Some(s); }
@@ -1134,6 +1148,20 @@ impl App {
                             if ui.button("表示").clicked() { switch = Some(Location::Proposal(s, p)); }
                             if ui.button("計算").clicked() { calculate = Some((s, p)); }
                             if p > 0 && ui.button("削除").clicked() { delete = Some((s, p)); }
+                        });
+                    }
+                    for (d, decision) in study.decisions.iter().enumerate() {
+                        let status = if !decision.accepted { "不採用" } else if !decision.is_applied() { "採用をUndoで取消" } else { "採用済み（現在の本案との一致は別）" };
+                        ui.collapsing(format!("判断 {} · {} · {}", d+1, decision.confirmation.run.proposal_name, status), |ui| {
+                            ui.label(format!("理由: {}", decision.reason));
+                            if let Some(adopted) = &decision.adopted_input { ui.label(if adoption::same_input(adopted, &current_main) { "現在の本案は採用時入力と一致" } else { "現在の本案は採用時入力から変更されています（Undo取消状態とは別）" }); }
+                            ui.label("採用・計算完了・検定OKは別の状態です。判断時の入力と結果を表示します。");
+                            ui.label(format!("判断時入力世代 {}", decision.confirmation.input.references.generation));
+                            ui.label(format!("判断時の変位: 節点{}・全体{}・{} / 検定: {} / 固定対象 {} 部材", decision.confirmation.node, ["X", "Y", "Z"].get(decision.confirmation.component).unwrap_or(&"方向不明"), comparison::decision_case_label(&decision.confirmation), if decision.confirmation.envelope { "同ケース集合内の最大" } else { "指定ケースのみ" }, decision.confirmation.fixed.len()));
+                            if let Some(r) = study.runs.iter().position(|r| r.created == decision.confirmation.run.created && r.proposal == decision.confirmation.run.proposal) {
+                                if ui.button("判断時の計算開始入力").clicked() { switch = Some(Location::StartedInput(s,r)); }
+                                if ui.button("判断時の準備後入力・結果").clicked() { switch = Some(Location::History(s,r)); }
+                            }
                         });
                     }
                     for (q, reference) in study.quantity_evidence.iter().enumerate() {

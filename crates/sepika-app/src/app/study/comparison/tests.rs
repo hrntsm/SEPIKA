@@ -2,7 +2,7 @@ use super::super::tests::{app, assign, wait};
 use super::{projection::*, *};
 use references::{EvidenceReference, ReferenceTarget};
 
-pub(super) fn computed() -> App {
+pub(in crate::app::study) fn computed() -> App {
     let mut app = app();
     app.core
         .model

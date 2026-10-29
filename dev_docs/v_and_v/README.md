@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## 確認済み断面案の採否と取消（#981）
+
+[採用・判断根拠・保存とWindows実機の記録](断面案採用_Issue981_確認記録.md)を参照。状態🔶。確認済み一括採用、直後Undo/Redo、後続通常編集との区別、理由と判断時根拠の保存再読込、外枠802×827の操作入口を有限実機確認した。案再編集後の固定Redoや拒否系、非既定設定と動的入力の往復は直接回帰と分ける。800×600/高さ631px、今回のIME変換、全DPI・外部AI一連操作・Validationは未確認。fresh3は修正必須なし、今回の記録HEADのCI・最終ゲートは別途確認する。
+
 ## 断面案の実計算結果比較（#980）
 
 [固定対象・ケース別根拠と検証の記録](断面案比較_Issue980_確認記録.md)を参照。通常結果照合・保存往復・未評価状態の自動回帰、正常fixtureのWindows実機で図表連動・根拠・任意2案・共通表示・符号付き変位・変更外悪化・別名保存再読込を確認した。最終freshは修正必須なし。二度の専用プロセス消失は原因未断定の履歴を残す。別段階の正規回復で802px幅の次frame再レイアウト・比較の代表操作到達・通常CloseのEXIT=0を確認した。高さ631pxとDPI全条件は未確認。実機と合成した新規NG／支配ケース交替の契約回帰を混同しない。
@@ -286,6 +290,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [対象操作検索_Issue977_確認記録.md](対象操作検索_Issue977_確認記録.md) | 名前検索、明示確定、入力保持、参照・二画面、狭幅・IMEの合成イベントと実機試行の境界 | 🔶（自動・有限実機Verification、Esc時AX panic修正。別の途中消失は原因未確定） |
 | [結果根拠_Issue978_確認記録.md](結果根拠_Issue978_確認記録.md) | 静的変位・検定・数量の参照、固定readonly・現在編集・履歴・取得不能・元結果復帰 | 🔶（参照と有限GUI Verification完了。全モデル・全幅・床壁二次部材配置の実機は未確認、計算Validationは対象外） |
 | [断面案検討_Issue979_確認記録.md](断面案検討_Issue979_確認記録.md) | 基準・比較案の所有と編集制限、計算時入力・数量根拠・警告・全体保存、有限Windows実機 | 🔶（自動回帰・有限GUI・最終ラベル実機・最終fresh確認。979ea409全CI成功、新記録HEADのCI後続。一般構造適合・Validation未） |
+| [断面案採用_Issue981_確認記録.md](断面案採用_Issue981_確認記録.md) | 確認済み断面割当の一括採用、Undo/Redoと判断記録、設定・根拠保存、有限Windows実機 | 🔶（直接回帰・代表実機・fresh3確認。低い高さ条件・今回のIME・外部AI・Validation未） |
 | [RC曲げひび割れMc_Issue940_適用調査.md](RC曲げひび割れMc_Issue940_適用調査.md) | 鉄筋考慮Ze・軸力項の原典適用域、集中ばね/記録/ファイバーの経路と独立感度 | 🔶（調査記録完了。設計採否・是正要否は追加原典/外部判断まで保留、実解析比較・Validation未） |
 | [RC引張Qsu_Issue939_適用調査.md](RC引張Qsu_Issue939_適用調査.md) | 引張Qsuの原典適用・補強条件、別式との区別、追加原典と再判定条件 | 🔶（調査記録完了。引張設計適用判断保留・Validation未、計算式不変） |
 | [RC部材引張軸力_Issue697_継続照合.md](RC部材引張軸力_Issue697_継続照合.md) | RC引張Qsuの公的一次資料・公開求解と#697残件棚卸し | 🔶（18run/1818点のVerification。引張適用・安全性・Validation未） |
@@ -652,6 +657,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 23b | STB断面系列別ID | sepika-io / sepika-app | stbridge/import、tests/stbridge_namespace.rs、tests/stbridge_section_series.rs、tests/stbridge_section_reference_boundaries.rs、reference_identity_acceptance_tests.rs | [Issue571の独立入力と予定観測](STB断面系列別ID_Issue571_2026-10.md#独立入力と予定観測) | 横断 | 🔶（series12・boundary6・namespace9・App自動9・IO227・最終feature1322成功。文書修正後の再検査/レビュー・最終ゲート未確認） |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
+| 24b | 比較案の確認済み断面割当採用と判断記録 | sepika-app / sepika-edit | app/study/adoption.rs、app/study/comparison.rs、app/actions/io.rs、sepika-edit/src/lib.rs | [Issue981の直接回帰索引](断面案採用_Issue981_確認記録.md#自動回帰と要素からの証拠索引) | #981 | 🔶（状態契約・有限GUI。全画面条件・外部AI・Validation未） |
 | 948 | RC接合部の許容せん断 | sepika-design-jp | rc/joint.rs・joint_wiring/rc_joint.rs | [原画像とコードの対応](RC接合部許容せん断_Issue948_照合記録.md#コードとの対応と未確認項目)（今回新規の数値試験なし） | 一次設計 | 🔶（有効幅のみ限定照合、許容式全体・設計採用は保留） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*`、Case2の証拠区分は[§6-c](終局検定_参照実装照合.md#6-c-cft-中柱長柱の-n-m-相互作用) | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |

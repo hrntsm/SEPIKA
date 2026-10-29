@@ -1710,6 +1710,7 @@ mod tests {
         saved.bundle.input_records.clear();
         let bytes = rmp_serde::to_vec_named(&saved).unwrap();
         let cfg = rmp_serde::to_vec_named(&SavedAnalysisSettings {
+            design_settings: None,
             references: Some(app.saved_references()),
             cfg: app.core.analysis_cfg,
             wave_name: None,
