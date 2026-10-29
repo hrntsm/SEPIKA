@@ -1,5 +1,24 @@
 use super::*;
 
+pub(super) fn require_static_result(app: &App, key: &ResultInputKey) -> Result<(), String> {
+    app.require_result_input(key.clone())?;
+    if app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .is_some_and(|bundle| match key {
+            ResultInputKey::Static(key) => bundle.statics.iter().any(|(k, _)| k == key),
+            ResultInputKey::Combo(name) => bundle.combos.iter().any(|(n, _)| n == name),
+            _ => false,
+        })
+    {
+        Ok(())
+    } else {
+        Err("静的結果の欠落・未計算です。再計算してください".into())
+    }
+}
+
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct ExpectedPosition {
     xi: u64,
@@ -200,8 +219,7 @@ mod projection {
         fixed: &[ElemId],
     ) -> bool {
         if baseline.references.project != input.references.project
-            || bincode::serialize(&baseline.settings).unwrap()
-                != bincode::serialize(&input.settings).unwrap()
+            || !baseline.settings.same_input_conditions(&input.settings)
         {
             return false;
         }
@@ -291,9 +309,7 @@ mod projection {
         {
             differences.push("解析・検定設定が不一致".into());
         }
-        if bincode::serialize(&baseline.settings).unwrap()
-            != bincode::serialize(&input.settings).unwrap()
-        {
+        if !baseline.settings.same_input_conditions(&input.settings) {
             differences.push("検定条件・設定が不一致".into());
         }
         if !same_conditions(baseline, input, fixed) {
@@ -798,4 +814,12 @@ mod gui;
 #[cfg(feature = "gui")]
 pub(super) use gui::ComparisonView;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
+
+#[cfg(feature = "gui")]
+pub(super) fn decision_case_label(confirmation: &super::adoption::Confirmation) -> String {
+    confirmation.case.as_ref().map_or_else(
+        || "指定なし".into(),
+        |case| projection::case_label(case, &confirmation.run.prepared.model),
+    )
+}

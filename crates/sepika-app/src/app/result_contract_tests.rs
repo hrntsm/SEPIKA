@@ -188,6 +188,7 @@ pub(super) fn restore(
     };
     let results = rmp_serde::to_vec_named(&ContractFixture(&saved)).unwrap();
     let settings = rmp_serde::to_vec_named(&SavedAnalysisSettings {
+        design_settings: None,
         references: None,
         cfg: app.core.analysis_cfg,
         wave_name: None,

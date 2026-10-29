@@ -213,6 +213,7 @@ impl App {
         }
         let analysis_settings = Some(rmp_serde::to_vec_named(&SavedAnalysisSettings {
             references: Some(self.saved_references()),
+            design_settings: Some(study::StudySettings::capture(&self.core)),
             cfg: self.core.analysis_cfg,
             wave_name: self.core.scoped.wave_library_selection.clone(),
             wave_sha256: self.core.scoped.wave_library_selected_sha256.clone(),
@@ -251,7 +252,7 @@ impl App {
             results: results_bytes.as_deref(),
             analysis_settings: analysis_settings_bytes.as_deref(),
         };
-        let taken_vibration_cases = if persist_results {
+        let taken_vibration_cases = if persist_results || !self.studies.items.is_empty() {
             None
         } else {
             Some((
@@ -365,6 +366,9 @@ impl App {
                     contents.analysis_settings,
                     "解析タブの設定値",
                 ) {
+                    if let Some(settings) = saved.design_settings {
+                        settings.apply(&mut self.core);
+                    }
                     self.core.analysis_cfg = saved.cfg;
                     self.core.analysis_cfg.mass_method = self.core.model.mass_method;
                     self.restore_references(saved.references);
@@ -427,7 +431,9 @@ impl App {
                         self.report_error(format!("検討の読込エラー: {reason}"));
                     }
                 }
-                self.prune_orphan_vibration_cases();
+                if self.studies.items.is_empty() {
+                    self.prune_orphan_vibration_cases();
+                }
                 self.core.scoped.project_path = Some(path);
             }
             Err(e) => self.report_error(format!("読込エラー: {}", e)),
