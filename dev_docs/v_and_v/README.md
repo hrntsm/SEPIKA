@@ -22,7 +22,7 @@
 
 ## 対象・操作の検索（#977）
 
-[自動回帰とWindows実機試行の記録](対象操作検索_Issue977_確認記録.md)を参照。状態🔶。検索8件を含むGUIライブラリ1072件・静的解析・専用exe buildは成功した。実機ウィンドウのactivate失敗で入力前に停止したため、通常操作・日本語IME・狭幅の実画面確認は未完了で、Draft PRとして継続する。
+[自動回帰とWindows実機試行の記録](対象操作検索_Issue977_確認記録.md)を参照。状態🔶。#976統合済みmainと共通テーマ接続後の `d1e90cec` でGUIライブラリ1075件・静的解析・専用exe buildが成功した。実機は通常幅で検索・同名識別・明示確定・日本語IMEを有限確認したが、ユーザーの物理Escapeで操作を停止した。狭幅・二画面・入力ドラフト・通常取消は実機未確認のため、Draft PRとmerge保留を維持する。OS設定の取得・起動・変更は行っていない。
 
 ## Ds・Qu採用条件の不足と合否保留（#872）
 
@@ -271,7 +271,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [RC接合部許容せん断_Issue948_照合記録.md](RC接合部許容せん断_Issue948_照合記録.md) | 有効幅の限定一致、許容係数・内力・適用条件の原典待ち | 🔶（調査記録完了。規準本体・設計採用・Validation未、数値応答維持） |
 | [UI検討_Issue973_接続確認.md](UI検討_Issue973_接続確認.md) | Windows名前付きパイプの往復/切断/不在、現行モデルと既存2断面の一連検証データ | 🔶（接続小実験のみ、製品GUI/MCP・構造計算・権限検証は#982/#985） |
 | [主作業領域_Issue975_確認記録.md](主作業領域_Issue975_確認記録.md) | 単独／左右・上下二分割、独立視点・表示、入力・選択・配置保持、Windows実画面 | 🔶（有限GUI Verification。比較案・外部AIの一連操作は対象外） |
-| [対象操作検索_Issue977_確認記録.md](対象操作検索_Issue977_確認記録.md) | 名前検索、明示確定、入力保持、参照・二画面、狭幅・IMEの合成イベントと実機試行の境界 | 🔶（自動Verification成功、実機activate失敗で通常操作・IME・狭幅は未確認） |
+| [対象操作検索_Issue977_確認記録.md](対象操作検索_Issue977_確認記録.md) | 名前検索、明示確定、入力保持、参照・二画面、狭幅・IMEの合成イベントと実機試行の境界 | 🔶（自動Verification・通常幅とIMEの有限実機確認。ユーザー停止後、狭幅・二画面・ドラフト・通常取消は未確認） |
 | [RC曲げひび割れMc_Issue940_適用調査.md](RC曲げひび割れMc_Issue940_適用調査.md) | 鉄筋考慮Ze・軸力項の原典適用域、集中ばね/記録/ファイバーの経路と独立感度 | 🔶（調査記録完了。設計採否・是正要否は追加原典/外部判断まで保留、実解析比較・Validation未） |
 | [RC引張Qsu_Issue939_適用調査.md](RC引張Qsu_Issue939_適用調査.md) | 引張Qsuの原典適用・補強条件、別式との区別、追加原典と再判定条件 | 🔶（調査記録完了。引張設計適用判断保留・Validation未、計算式不変） |
 | [RC部材引張軸力_Issue697_継続照合.md](RC部材引張軸力_Issue697_継続照合.md) | RC引張Qsuの公的一次資料・公開求解と#697残件棚卸し | 🔶（18run/1818点のVerification。引張適用・安全性・Validation未） |
@@ -527,7 +527,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 |---|------|----------|---------------|-----------|---------|------|
 | 973 | GUI所有の検討へのローカルAI接続 | 製品実装前の.NET小実験 | data/issue973/pipe-probe.ps1・model-input.ps1 | [往復/EOF/不在と代表データ](UI検討_Issue973_接続確認.md) | — | 🔶（小実験のみ。#982/#985の完了とはしない） |
 | 975 | 本案の主作業領域・表示条件の独立 | sepika-app | app/workspace.rs・viewer/viewport.rs・grid/widget.rs | [GUI契約18件と製品画面](主作業領域_Issue975_確認記録.md#自動回帰と観測対象) | GUI | 🔶（有限Verification） |
-| 977 | 対象・操作検索と既存参照への移動 | sepika-app | app/search.rs・app/references.rs | [検索8件の観測対象](対象操作検索_Issue977_確認記録.md#自動回帰と観測対象) | GUI | 🔶（自動Verification、実機操作は未確認） |
+| 977 | 対象・操作検索と既存参照への移動 | sepika-app | app/search.rs・app/references.rs | [検索8件の観測対象](対象操作検索_Issue977_確認記録.md#自動回帰と観測対象) | GUI | 🔶（自動Verificationと有限実機確認。狭幅・二画面・ドラフト・通常取消は未確認） |
 | 878 | 鉄骨柱脚・接合・ブレース・防火被覆 | sepika-design-jp / sepika-load | steel/brace.rs・story_gen/tests.rs | [短命probeと既存焦点試験](鉄骨柱脚接合構造細則_Issue878_原典照合.md#要素テスト索引と残範囲)（新規恒久試験なし） | 横断 | 🔶（部材軸力/重量の有限Verification。接合詳細・防火性能の専用判定未対応） |
 | 880 | 鉄骨耐震ルート・Qun | sepika-design-jp / sepika-app | secondary/holding_capacity.rs・app/actions/design/holding.rs | [独立数値と証拠](鉄骨耐震ルート_Issue880_原典照合.md#独立数値と要素証拠索引)、保存probe3試験 | 原典／二次設計 | 🔶（積・境界Verification、ルート2自動適用なし・Validation未） |
 | 731 | 梁の床板嵩上げ | sepika-core / sepika-load / sepika-job / sepika-app | beam_placement.rs・self_weight/beam_upstand.rs・cascade.rs・app/girder_weight_tests.rs | [独立値と実入口](梁の床板嵩上げ_Issue731_2026-10.md#確認した入口) | 横断 | 🔶（数値Verification、手動GUI・Validation未） |
