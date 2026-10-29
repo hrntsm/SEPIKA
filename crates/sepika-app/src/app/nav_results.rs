@@ -247,8 +247,7 @@ impl App {
                     .id_salt("nav_result_static");
                 let s_resp = h.show(ui, |ui| {
                     for (key, label) in &tree.static_leaves {
-                        if ui
-                            .selectable_label(is_static_selected(self, *key), label)
+                        if crate::theme::selectable_name(ui, is_static_selected(self, *key), label)
                             .clicked()
                         {
                             action = Some(ResultTreeAction::Static(*key));
@@ -270,9 +269,12 @@ impl App {
                     .id_salt("nav_result_eigen");
                 let e_resp = h.show(ui, |ui| {
                     for (i, label) in &tree.eigen_modes {
-                        if ui
-                            .selectable_label(is_eigen_mode_selected(self, *i), label)
-                            .clicked()
+                        if crate::theme::selectable_name(
+                            ui,
+                            is_eigen_mode_selected(self, *i),
+                            label,
+                        )
+                        .clicked()
                         {
                             action = Some(ResultTreeAction::EigenMode(*i));
                         }
@@ -294,9 +296,12 @@ impl App {
                 let p_resp = h.show(ui, |ui| {
                     for dir in &tree.pushover_dirs {
                         let label = pushover_dir_label(*dir);
-                        if ui
-                            .selectable_label(is_pushover_selected(self, *dir), label)
-                            .clicked()
+                        if crate::theme::selectable_name(
+                            ui,
+                            is_pushover_selected(self, *dir),
+                            label,
+                        )
+                        .clicked()
                         {
                             action = Some(ResultTreeAction::Pushover(*dir));
                         }
@@ -317,9 +322,12 @@ impl App {
                     .id_salt("nav_result_time_history");
                 let t_resp = h.show(ui, |ui| {
                     for (id, label) in &tree.time_history_cases {
-                        if ui
-                            .selectable_label(is_time_history_case_selected(self, *id), label)
-                            .clicked()
+                        if crate::theme::selectable_name(
+                            ui,
+                            is_time_history_case_selected(self, *id),
+                            label,
+                        )
+                        .clicked()
                         {
                             action = Some(ResultTreeAction::TimeHistoryCase(*id));
                         }
@@ -349,12 +357,12 @@ impl App {
                             .id_salt("nav_result_lumped_eigen");
                         eh.show(ui, |ui| {
                             for (i, label) in &tree.lumped_eigen_modes {
-                                if ui
-                                    .selectable_label(
-                                        is_lumped_eigen_mode_selected(self, *i),
-                                        label,
-                                    )
-                                    .clicked()
+                                if crate::theme::selectable_name(
+                                    ui,
+                                    is_lumped_eigen_mode_selected(self, *i),
+                                    label,
+                                )
+                                .clicked()
                                 {
                                     action = Some(ResultTreeAction::LumpedEigenMode(*i));
                                 }
@@ -367,9 +375,12 @@ impl App {
                             .id_salt("nav_result_lumped_th");
                         th.show(ui, |ui| {
                             for (id, label) in &tree.lumped_th_cases {
-                                if ui
-                                    .selectable_label(is_lumped_th_case_selected(self, *id), label)
-                                    .clicked()
+                                if crate::theme::selectable_name(
+                                    ui,
+                                    is_lumped_th_case_selected(self, *id),
+                                    label,
+                                )
+                                .clicked()
                                 {
                                     action = Some(ResultTreeAction::LumpedTimeHistoryCase(*id));
                                 }

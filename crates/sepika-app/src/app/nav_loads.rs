@@ -146,8 +146,7 @@ impl App {
                 ui.colored_label(crate::theme::GRAY_600, "（なし）");
             }
             for (index, label) in &entries {
-                let leaf = ui
-                    .selectable_label(false, label)
+                let leaf = crate::theme::selectable_name(ui, false, label)
                     .on_hover_text("クリックで対象を 3D ビューで選択／右クリックで編集・削除");
                 if leaf.clicked() {
                     self.focus_load_target(case_index, group, *index);

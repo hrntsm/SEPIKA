@@ -13,6 +13,7 @@ impl App {
         ui: &mut egui::Ui,
         view: &mut crate::viewer::ViewportState,
     ) {
+        crate::theme::panel_heading(ui, "解析結果", "参照専用");
         self.unset_regions_banner(ui);
         let result_options = self.result_display_options();
         let current_key = if view.static_unavailable {
