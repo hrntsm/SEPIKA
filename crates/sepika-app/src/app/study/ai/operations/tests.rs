@@ -1177,7 +1177,11 @@ fn real_pipe_edits_existing_comparison_calculates_and_submits_the_same_gui_evide
             let deadline=std::time::Instant::now()+std::time::Duration::from_secs(30);
             loop {
                 tokio::select! {
-                    response=&mut response=>return response.unwrap().unwrap(),
+                    response=&mut response=>{
+                        let response=response.unwrap().unwrap();
+                        assert_eq!(response.id,request.id);
+                        return response;
+                    },
                     _=tokio::time::sleep(std::time::Duration::from_millis(2))=>{
                         app.poll_study_calculation();app.poll_ai_connection();
                         assert!(std::time::Instant::now()<deadline,"実通信応答がありません");
@@ -1248,6 +1252,28 @@ fn real_pipe_edits_existing_comparison_calculates_and_submits_the_same_gui_evide
         let mut old_result=request(&app,s,1,"results",json!({"run_index":0,"offset":0,"limit":1}));
         old_result.input=Some(json!(old_input));
         assert!(exchange(&mut app,&mut reader,&old_result).await.error.is_none());
+        drop(reader);
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+        while app.ai_connection.listener.is_some() {
+            app.poll_ai_connection();
+            assert!(std::time::Instant::now()<deadline,"切断後の有効化が終了しません");
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        assert!(app.ai_connection.permission.is_none());
+        assert!(pipe::connect(&endpoint).is_err());
+        assert_eq!(app.handle_ai_request("old",old_result.clone()).error.unwrap().code,"permission_denied");
+        let new_endpoint=app.enable_ai_connection().unwrap();
+        assert_ne!(endpoint,new_endpoint);
+        let mut reader=BufReader::new(pipe::connect(&new_endpoint).unwrap());
+        assert_eq!(accepted(exchange(&mut app,&mut reader,&connect).await)["status"],"awaiting_gui_approval");
+        assert_eq!(exchange(&mut app,&mut reader,&old_result).await.error.unwrap().code,"permission_denied");
+        app.approve_ai_connection(s,Mode::Review,true).unwrap();
+        let reconnected=accepted(exchange(&mut app,&mut reader,&connect).await);
+        assert_ne!(reconnected["session"],connected["session"]);
+        assert_eq!(exchange(&mut app,&mut reader,&old_result).await.error.unwrap().code,"disconnected");
+        let mut new_begin=request(&app,s,0,"begin_request",Value::Null);
+        new_begin.request=Some("new-review-request".into());
+        assert_eq!(accepted(exchange(&mut app,&mut reader,&new_begin).await)["status"],"started");
         let save=rmp_serde::to_vec_named(&app.saved_studies()).unwrap();
         app.restore_studies(rmp_serde::from_slice(&save).unwrap()).unwrap();
         assert!(app.ai_connection.permission.is_none());

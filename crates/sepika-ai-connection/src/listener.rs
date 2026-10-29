@@ -46,9 +46,8 @@ impl Listener {
                 let _=ready_tx.send(Ok(()));
                 tokio::select! { _ = stopped => {}, _ = async move {
                     let mut server = server;
-                    loop {
-                        if server.connect().await.is_err() { break; }
-                        let connection = uuid::Uuid::new_v4().to_string();
+                    let connection = uuid::Uuid::new_v4().to_string();
+                    if server.connect().await.is_ok() {
                         let (read,mut write)=tokio::io::split(&mut server);
                         let mut reader=BufReader::new(read);
                         loop {
@@ -66,9 +65,9 @@ impl Listener {
                         }
                         drop(reader);
                         drop(write);
-                        let _=events_tx.send(Event::Disconnected(connection));
-                        if server.disconnect().is_err() { break; }
                     }
+                    drop(server);
+                    let _=events_tx.send(Event::Disconnected(connection));
                 } => {} }
             });
         });
@@ -80,5 +79,86 @@ impl Listener {
             events,
             stop: Some(stop),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn disconnected_endpoint_is_retired_and_new_endpoints_preserve_response_ids() {
+        let mut previous = None;
+        for client in 0..3 {
+            let listener = Listener::start().unwrap();
+            let name = listener.name.clone();
+            assert_ne!(previous.as_ref(), Some(&name));
+            if let Some(previous) = &previous {
+                assert!(pipe::connect(previous).is_err());
+            }
+            let worker = std::thread::spawn(move || {
+                let mut connection = None;
+                for sequence in 0..3 {
+                    let event = listener
+                        .events
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap();
+                    let Event::Request(incoming) = event else {
+                        panic!("client {client} sequence {sequence}: premature disconnect");
+                    };
+                    let expected = format!("client-{client}-request-{sequence}");
+                    assert_eq!(incoming.request.id, expected);
+                    assert_eq!(
+                        connection.get_or_insert(incoming.connection.clone()),
+                        &incoming.connection
+                    );
+                    incoming
+                        .response
+                        .send(Response::accepted(
+                            incoming.request.id,
+                            json!({"client": client, "sequence": sequence}),
+                        ))
+                        .unwrap();
+                }
+                let Event::Disconnected(disconnected) = listener
+                    .events
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap()
+                else {
+                    panic!("missing disconnect");
+                };
+                assert_eq!(Some(disconnected), connection);
+            });
+            let mut stream = BufReader::new(pipe::connect(&name).unwrap());
+            for sequence in 0..3 {
+                let id = format!("client-{client}-request-{sequence}");
+                let request = serde_json::from_value::<Request>(
+                    json!({"version": 1, "id": id, "operation": "connect"}),
+                )
+                .unwrap();
+                write_frame(stream.get_mut(), &request).await.unwrap();
+                let response = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    read_frame::<Response>(&mut stream),
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+                assert_eq!(response.id, id);
+                assert_eq!(
+                    response.result.unwrap(),
+                    json!({"client": client, "sequence": sequence})
+                );
+            }
+            drop(stream);
+            tokio::task::spawn_blocking(move || worker.join().unwrap())
+                .await
+                .unwrap();
+            assert!(pipe::connect(&name).is_err());
+            previous = Some(name);
+        }
     }
 }

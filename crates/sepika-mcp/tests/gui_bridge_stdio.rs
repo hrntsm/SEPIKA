@@ -7,6 +7,15 @@ use std::{
 
 #[test]
 fn mcp_initialize_lists_only_gui_tool_and_relays_a_real_pipe_request() {
+    check_stdio_response(false);
+}
+
+#[test]
+fn a_mismatched_pipe_response_is_not_returned_as_a_successful_tool_result() {
+    check_stdio_response(true);
+}
+
+fn check_stdio_response(mismatch: bool) {
     let listener = sepika_ai_connection::listener::Listener::start().unwrap();
     let name = listener.name.clone();
     let worker = std::thread::spawn(move || {
@@ -22,13 +31,22 @@ fn mcp_initialize_lists_only_gui_tool_and_relays_a_real_pipe_request() {
         incoming
             .response
             .send(sepika_ai_connection::protocol::Response::accepted(
-                incoming.request.id,
+                if mismatch {
+                    "another-request".into()
+                } else {
+                    incoming.request.id
+                },
                 json!({"status":"awaiting_gui_approval"}),
             ))
             .unwrap();
-        let _ = listener
+        let event = listener
             .events
-            .recv_timeout(std::time::Duration::from_secs(15));
+            .recv_timeout(std::time::Duration::from_secs(15))
+            .unwrap();
+        assert!(matches!(
+            event,
+            sepika_ai_connection::listener::Event::Disconnected(_)
+        ));
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_sepika-mcp"))
         .args(["--gui-pipe", &name])
@@ -84,9 +102,19 @@ fn mcp_initialize_lists_only_gui_tool_and_relays_a_real_pipe_request() {
         json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"gui_request","arguments":{"envelope":{"version":1,"id":"connection","operation":"connect"}}}}),
     );
     let result = receive(&lines_rx);
-    let result: Value =
-        serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(result["result"]["status"], "awaiting_gui_approval");
+    if mismatch {
+        assert_eq!(result["error"]["code"], -32603);
+        assert!(result["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("応答ID"));
+        assert!(result.get("result").is_none());
+    } else {
+        let result: Value =
+            serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(result["id"], "connection");
+        assert_eq!(result["result"]["status"], "awaiting_gui_approval");
+    }
     drop(stdin);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {

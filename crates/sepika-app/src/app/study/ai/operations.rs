@@ -136,6 +136,7 @@ impl App {
             ui.label("外部クライアントがクラウドAIを利用すると、取得した情報が外部送信され得ます。クライアント側の保存・送信はSEPIKAの管理範囲外です。");
             ui.label("読取範囲: 許可した検討の基準・比較案の全体モデル、候補断面、条件、保持結果。固定対象以外の情報も含みます。");
             ui.label("編集範囲: 指定検討の比較案にある固定鉄骨大梁への既存有効断面の割当だけ。本案更新・採用は人が行います。");
+            ui.label("クライアント切断で接続先と許可を終了します。再接続は手動で再有効化し、新しい起動引数とGUI承認を使ってください。受理済み計算は停止しません。");
             #[cfg(windows)]
             {
                 if self.ai_connection.listener.is_none() {
@@ -235,18 +236,8 @@ impl App {
                     let response = self.handle_ai_request(&incoming.connection, incoming.request);
                     let _ = incoming.response.send(response);
                 }
-                sepika_ai_connection::listener::Event::Disconnected(connection) => {
-                    if self
-                        .ai_connection
-                        .permission
-                        .as_ref()
-                        .is_some_and(|p| p.connection == connection)
-                    {
-                        self.ai_connection.permission = None;
-                    }
-                    if self.ai_connection.pending.as_ref() == Some(&connection) {
-                        self.ai_connection.pending = None;
-                    }
+                sepika_ai_connection::listener::Event::Disconnected(_) => {
+                    self.disconnect_ai_connection();
                 }
             }
         }

@@ -56,9 +56,15 @@ impl GuiBridge {
         let stream = client.as_mut().unwrap();
         let result = async {
             write_frame(stream.get_mut(), &request).await?;
-            read_frame::<Response>(stream).await?.ok_or_else(|| {
+            let response = read_frame::<Response>(stream).await?.ok_or_else(|| {
                 std::io::Error::other("GUIとの接続が終了しました。受理結果は不明です")
-            })
+            })?;
+            if response.id != request.id {
+                return Err(std::io::Error::other(
+                    "GUIの応答IDが要求と一致しません。受理結果は不明です",
+                ));
+            }
+            Ok(response)
         }
         .await;
         match result {
@@ -66,7 +72,7 @@ impl GuiBridge {
             Err(error) => {
                 *client = None;
                 Err(ErrorData::internal_error(
-                    format!("{error}。再接続は再承認が必要です。自動再送しません"),
+                    format!("{error}。再接続はGUIで再有効化し、新しい接続先と再承認が必要です。受理結果は要求IDで照会してください。自動再送しません"),
                     None,
                 ))
             }

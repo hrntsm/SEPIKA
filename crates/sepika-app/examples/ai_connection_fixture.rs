@@ -8,7 +8,12 @@ use sepika_core::{
 fn main() -> eframe::Result<()> {
     eframe::run_native(
         "SEPIKA #982 接続確認",
-        eframe::NativeOptions::default(),
+        eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_inner_size([1280.0, 800.0])
+                .with_min_inner_size([800.0, 600.0]),
+            ..Default::default()
+        },
         Box::new(|cc| {
             sepika_app::app::install_japanese_fonts(&cc.egui_ctx);
             sepika_app::theme::apply_theme(&cc.egui_ctx);

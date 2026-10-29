@@ -15,6 +15,7 @@ def main():
     parser.add_argument("--pipe", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--scenario", choices=["review", "comparison"], required=True)
+    parser.add_argument("--release-marker")
     args = parser.parse_args()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +46,7 @@ def main():
         if notify:
             return None
         response = replies.get(timeout=30)
+        assert response.get("id") == number, (number, response)
         if "error" in response:
             raise RuntimeError(response)
         return response["result"]
@@ -53,7 +55,9 @@ def main():
         result = rpc("tools/call", dict(name="gui_request", arguments=dict(envelope=body)))
         if result.get("isError"):
             raise RuntimeError(result)
-        return json.loads(result["content"][0]["text"])
+        response = json.loads(result["content"][0]["text"])
+        assert response["id"] == body["id"], (body["id"], response)
+        return response
 
     try:
         initialized = rpc("initialize", dict(protocolVersion="2024-11-05", capabilities={},
@@ -125,6 +129,24 @@ def main():
             call("quantity", dict(offset=0, limit=1))
             call("submit", dict(run_index=state["run_index"], explanation="既存計算・検定の同じ根拠を参照しました。",
                                 unchecked=["人による採用", "規準全体の確認"], references=[reference]))
+        if args.release_marker:
+            marker = Path(args.release_marker)
+            assert not marker.exists(), "専用の未使用markerを指定してください"
+            save(dict(stage="waiting_for_gui_release", marker=str(marker)))
+            deadline = time.monotonic() + 600
+            while not marker.exists():
+                if time.monotonic() > deadline:
+                    raise TimeoutError("GUI解除後のmarkerがありません")
+                time.sleep(0.1)
+            body = dict(context, id=str(uuid.uuid4()), operation="study",
+                        proposal=current["proposal"], input=current, arguments=None)
+            try:
+                response = envelope(body)
+            except RuntimeError as error:
+                save(dict(stage="old_session_rejected_after_gui_release", error=str(error)))
+            else:
+                assert response.get("error"), response
+                save(dict(stage="old_session_rejected_after_gui_release", response=response))
         save(dict(stage="completed", scenario=args.scenario))
     finally:
         child.stdin.close()
