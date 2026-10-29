@@ -13,7 +13,9 @@ use sepika_mcp::{default_result_dir, ServerState};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("--gui-pipe") {
-        let pipe = std::env::args().nth(2).ok_or("GUIの接続先を指定してください")?;
+        let pipe = std::env::args()
+            .nth(2)
+            .ok_or("GUIの接続先を指定してください")?;
         #[cfg(windows)]
         return sepika_mcp::gui_bridge::run(pipe).await;
         #[cfg(not(windows))]

@@ -13,7 +13,10 @@ pub struct Receipt {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Mode { Review, Comparison }
+pub enum Mode {
+    Review,
+    Comparison,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Submission {
@@ -21,8 +24,18 @@ pub struct Submission {
     pub explanation: String,
     pub unchecked: Vec<String>,
     pub references: Vec<super::references::ResultReference>,
+    pub quantity_references: Vec<super::references::QuantityEvidenceReference>,
     pub calculation_state: String,
+    pub verification: Verification,
     pub submitted: SystemTime,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Verification {
+    pub scope_available: bool,
+    pub checked: usize,
+    pub unchecked: usize,
+    pub confirmed_ng: usize,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -30,9 +43,11 @@ pub struct Task {
     pub id: String,
     pub mode: Mode,
     pub baseline: super::references::InputReference,
+    pub started_input: super::references::InputReference,
     pub fixed: Vec<super::references::TargetReference>,
     pub started: SystemTime,
     pub last_operation: SystemTime,
+    pub last_operation_name: String,
     pub submissions: Vec<Submission>,
 }
 
@@ -45,7 +60,12 @@ pub struct StudyAi {
 }
 impl Default for StudyAi {
     fn default() -> Self {
-        Self { id: uuid::Uuid::new_v4().to_string(), receipts: Vec::new(), tasks: Vec::new(), jobs: Vec::new() }
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            receipts: Vec::new(),
+            tasks: Vec::new(),
+            jobs: Vec::new(),
+        }
     }
 }
 

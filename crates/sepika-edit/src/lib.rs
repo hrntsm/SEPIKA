@@ -25,6 +25,10 @@ pub trait EditCommand: Send {
     fn section_assignment(&self) -> Option<(sepika_core::ids::ElemId, Option<SectionId>)> {
         None
     }
+    /// 全変更が断面割当だけである場合に、対象と割当先を返す。
+    fn section_assignments(&self) -> Option<Vec<(sepika_core::ids::ElemId, Option<SectionId>)>> {
+        self.section_assignment().map(|assignment| vec![assignment])
+    }
     /// この逆コマンドを生成した編集の ID 変更を、適用順に返す。材料・断面の挿入・削除がなければ空。
     fn inverse_id_changes(&self) -> Vec<IdChange> {
         Vec::new()
@@ -64,6 +68,9 @@ struct RestoreStbNodeIdentities {
 }
 
 impl EditCommand for RestoreStbNodeIdentities {
+    fn section_assignments(&self) -> Option<Vec<(sepika_core::ids::ElemId, Option<SectionId>)>> {
+        self.command.section_assignments()
+    }
     fn committed(&self) {
         self.command.committed();
     }
@@ -119,6 +126,9 @@ fn with_id_changes(command: Box<dyn EditCommand>, changes: Vec<IdChange>) -> Box
 }
 
 impl EditCommand for CommandWithIdChanges {
+    fn section_assignments(&self) -> Option<Vec<(sepika_core::ids::ElemId, Option<SectionId>)>> {
+        self.command.section_assignments()
+    }
     fn committed(&self) {
         self.command.committed();
     }
@@ -321,17 +331,20 @@ impl UndoStack {
 
     fn check_restriction(&self, model: &Model, cmd: &dyn EditCommand) -> Result<(), String> {
         if let Some(targets) = &self.restriction {
-            let allowed = cmd.section_assignment().is_some_and(|(elem, section)| {
-                targets.contains(&elem)
-                    && model.element(elem).is_some_and(|e| {
-                        e.kind == sepika_core::model::ElementKind::Beam
-                            && e.section
+            let allowed = cmd.section_assignments().is_some_and(|assignments| {
+                !assignments.is_empty()
+                    && assignments.into_iter().all(|(elem, section)| {
+                        targets.contains(&elem)
+                            && model.element(elem).is_some_and(|e| {
+                                e.kind == sepika_core::model::ElementKind::Beam
+                                    && e.section
+                                        .and_then(|id| model.section(id))
+                                        .is_some_and(|s| valid_study_section(model, s))
+                            })
+                            && section
                                 .and_then(|id| model.section(id))
                                 .is_some_and(|s| valid_study_section(model, s))
                     })
-                    && section
-                        .and_then(|id| model.section(id))
-                        .is_some_and(|s| valid_study_section(model, s))
             });
             if !allowed {
                 return Err(

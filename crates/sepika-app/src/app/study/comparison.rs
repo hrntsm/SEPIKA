@@ -121,7 +121,9 @@ impl ExpectedChecks {
     }
 }
 
-pub(in crate::app::study) fn validate_expected_checks(evidence: &ReferencedResult) -> Result<(), String> {
+pub(in crate::app::study) fn validate_expected_checks(
+    evidence: &ReferencedResult,
+) -> Result<(), String> {
     validate_expected_bundle(evidence.expected_checks.as_ref(), &evidence.bundle)
 }
 
@@ -387,7 +389,10 @@ pub(in crate::app::study) mod projection {
         rows.into_iter().filter(|row| matches!(row.target, Some(ReferenceTarget::Member(id)) if fixed.contains(&id))).collect()
     }
 
-    pub(in crate::app::study) fn case_label(key: &ResultInputKey, model: &sepika_core::model::Model) -> String {
+    pub(in crate::app::study) fn case_label(
+        key: &ResultInputKey,
+        model: &sepika_core::model::Model,
+    ) -> String {
         match key {
             ResultInputKey::Static(StaticCaseKey::User(id)) => {
                 model.load_cases.iter().find(|c| c.id == *id).map_or_else(
@@ -403,7 +408,9 @@ pub(in crate::app::study) mod projection {
         }
     }
 
-    pub(in crate::app::study) fn check_rows(evidence: &ReferencedResult) -> Result<Vec<CheckRow>, String> {
+    pub(in crate::app::study) fn check_rows(
+        evidence: &ReferencedResult,
+    ) -> Result<Vec<CheckRow>, String> {
         validate_expected_checks(evidence)?;
         let app = result_app(&evidence.input, &evidence.bundle, evidence.last_static);
         app.require_design_input()?;
@@ -570,7 +577,9 @@ pub(in crate::app::study) mod projection {
         pub skipped: usize,
         pub ng: usize,
     }
-    pub(in crate::app::study) fn summarize<'a>(rows: impl IntoIterator<Item = &'a CheckRow>) -> Summary {
+    pub(in crate::app::study) fn summarize<'a>(
+        rows: impl IntoIterator<Item = &'a CheckRow>,
+    ) -> Summary {
         let mut summary = Summary::default();
         let mut maximum: Option<&CheckRow> = None;
         for row in rows {

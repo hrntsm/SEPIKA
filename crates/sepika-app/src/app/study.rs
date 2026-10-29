@@ -1,6 +1,6 @@
 mod adoption;
-mod comparison;
 pub mod ai;
+mod comparison;
 use super::*;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

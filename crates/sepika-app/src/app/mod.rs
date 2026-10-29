@@ -1899,7 +1899,8 @@ impl App {
         {
             self.poll_ai_connection();
             if self.ai_connection.listener.is_some() {
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(50));
             }
         }
         if self.studies.running.is_some() {

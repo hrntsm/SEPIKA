@@ -11,6 +11,101 @@ fn empty_model() -> Model {
     Model::default()
 }
 
+#[test]
+fn restricted_section_batch_is_atomic_and_one_undo_including_unchanged_assignments() {
+    let mut model = seeded_model(4, 3);
+    let mut setup = UndoStack::new();
+    assert!(setup.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "鋼材".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            fc: None,
+            fy: Some(235.0),
+            strength_factor: None,
+            concrete_class: Default::default()
+        })
+    ));
+    for (id, height) in [(0, 400.0), (1, 500.0)] {
+        let mut section = sepika_core::section_shape::SectionShape::SteelH {
+            root_r: Some(13.0),
+            height,
+            width: 200.0,
+            web_thick: 9.0,
+            flange_thick: 16.0,
+        }
+        .to_section(SectionId(id), format!("断面{id}"));
+        section.material = Some(MaterialId(0));
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        model.sections.push(section);
+    }
+    for member in &mut model.elements {
+        member.section = Some(SectionId(0));
+    }
+    let mut stack = UndoStack::new();
+    stack.restrict_sections(vec![ElemId(0), ElemId(1)]);
+    let baseline = model.clone();
+    for children in [
+        vec![
+            Box::new(SetElementSection {
+                elem: ElemId(0),
+                section: Some(SectionId(1)),
+            }) as Box<dyn EditCommand>,
+            Box::new(SetElementSection {
+                elem: ElemId(2),
+                section: Some(SectionId(1)),
+            }),
+        ],
+        vec![
+            Box::new(SetElementSection {
+                elem: ElemId(0),
+                section: Some(SectionId(1)),
+            }) as Box<dyn EditCommand>,
+            Box::new(SetNodeCoord {
+                node: NodeId(0),
+                coord: [0.0, 100.0, 0.0],
+            }),
+        ],
+    ] {
+        assert!(!stack.run(
+            &mut model,
+            Box::new(CompositeCommand {
+                label: "拒否する変更".into(),
+                children
+            })
+        ));
+        assert!(model.eq_ignoring_dofmap(&baseline));
+        assert_eq!(stack.revision(), 0);
+    }
+    assert!(stack.run(
+        &mut model,
+        Box::new(CompositeCommand {
+            label: "許可した断面割当".into(),
+            children: vec![
+                Box::new(SetElementSection {
+                    elem: ElemId(0),
+                    section: Some(SectionId(0))
+                }),
+                Box::new(SetElementSection {
+                    elem: ElemId(1),
+                    section: Some(SectionId(1))
+                })
+            ]
+        })
+    ));
+    assert_eq!(model.elements[1].section, Some(SectionId(1)));
+    assert_eq!(stack.revision(), 1);
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&baseline));
+    assert_eq!(stack.revision(), 2);
+    stack.redo(&mut model);
+    assert_eq!(model.elements[1].section, Some(SectionId(1)));
+    assert_eq!(stack.revision(), 3);
+}
+
 /// 参照検証（`crate::refs`）を通すための下地モデル。
 /// X 方向 1 m 間隔に節点を `n_nodes` 個並べ、隣どうしを梁 `n_elems` 本でつなぐ。
 /// 節点・部材を指す編集コマンドのテストは、参照先が実在するこのモデルから始める。

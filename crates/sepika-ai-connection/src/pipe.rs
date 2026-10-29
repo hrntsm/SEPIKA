@@ -30,7 +30,13 @@ fn logon_sid() -> io::Result<String> {
         let mut bytes = 0;
         GetTokenInformation(token, TokenLogonSid, null_mut(), 0, &mut bytes);
         let mut data = vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())];
-        let ok = GetTokenInformation(token, TokenLogonSid, data.as_mut_ptr().cast(), bytes, &mut bytes);
+        let ok = GetTokenInformation(
+            token,
+            TokenLogonSid,
+            data.as_mut_ptr().cast(),
+            bytes,
+            &mut bytes,
+        );
         let error = io::Error::last_os_error();
         CloseHandle(token);
         if ok == 0 {
@@ -59,7 +65,13 @@ pub fn create(name: &str) -> io::Result<NamedPipeServer> {
     let sddl = wide(&format!("D:P(A;;{CLIENT_ACCESS:#x};;;{})", logon_sid()?));
     unsafe {
         let mut descriptor = null_mut();
-        if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut descriptor, null_mut()) == 0 {
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            1,
+            &mut descriptor,
+            null_mut(),
+        ) == 0
+        {
             return Err(io::Error::last_os_error());
         }
         let mut attributes = SECURITY_ATTRIBUTES {
@@ -71,7 +83,10 @@ pub fn create(name: &str) -> io::Result<NamedPipeServer> {
             .first_pipe_instance(true)
             .reject_remote_clients(true)
             .max_instances(1)
-            .create_with_security_attributes_raw(name, (&mut attributes as *mut SECURITY_ATTRIBUTES).cast());
+            .create_with_security_attributes_raw(
+                name,
+                (&mut attributes as *mut SECURITY_ATTRIBUTES).cast(),
+            );
         LocalFree(descriptor);
         result
     }
@@ -82,8 +97,13 @@ pub fn connect(name: &str) -> io::Result<NamedPipeClient> {
     let name = wide(name);
     unsafe {
         let handle = CreateFileW(
-            name.as_ptr(), CLIENT_ACCESS, 0, null(), OPEN_EXISTING,
-            FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, null_mut(),
+            name.as_ptr(),
+            CLIENT_ACCESS,
+            0,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+            null_mut(),
         );
         if handle == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
@@ -122,7 +142,9 @@ mod tests {
     async fn dacl_excludes_create_instance_and_generic_write() {
         let name = format!(r"\\.\pipe\sepika-test-{}", uuid::Uuid::new_v4());
         let server = create(&name).unwrap();
-        assert!(tokio::net::windows::named_pipe::ClientOptions::new().open(&name).is_err());
+        assert!(tokio::net::windows::named_pipe::ClientOptions::new()
+            .open(&name)
+            .is_err());
         assert!(ServerOptions::new().create(&name).is_err());
         let client = connect(&name).unwrap();
         drop(client);
