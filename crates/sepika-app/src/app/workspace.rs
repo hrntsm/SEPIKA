@@ -91,6 +91,12 @@ pub struct Workspace {
     pub(crate) compact_dock: Option<bool>,
 }
 
+pub(crate) struct EvidenceReturn {
+    tab: Tab,
+    model_tab: ModelTab,
+    placement: Placement,
+}
+
 impl Default for Workspace {
     fn default() -> Self {
         Self {
@@ -129,6 +135,29 @@ fn preference_path() -> Option<std::path::PathBuf> {
 }
 
 impl App {
+    pub(crate) fn enter_evidence_editor(&mut self, model_tab: ModelTab) -> EvidenceReturn {
+        self.enter_workspace();
+        self.capture_workspace();
+        let return_to = EvidenceReturn {
+            tab: self.ui.view.active_tab,
+            model_tab: self.ui.view.model_tab,
+            placement: self.ui.view.workspace.placement.clone(),
+        };
+        self.ui.view.active_tab = Tab::Model;
+        self.enter_workspace();
+        self.ui.view.model_tab = model_tab;
+        self.promote_table(Content::Model);
+        return_to
+    }
+
+    pub(crate) fn return_from_evidence_editor(&mut self, return_to: EvidenceReturn) {
+        self.ui.view.active_tab = return_to.tab;
+        self.enter_workspace();
+        self.ui.view.model_tab = return_to.model_tab;
+        self.ui.view.workspace.placement = return_to.placement;
+        self.apply_workspace_placement(true);
+        self.capture_workspace();
+    }
     pub(crate) fn workspace_dock_id(&self, name: &str) -> egui::Id {
         egui::Id::new((
             name,

@@ -80,6 +80,17 @@ impl App {
             view.static_key = Some(key);
             view.static_unavailable = false;
         }
+        if self.ui.view.results_view == ResultsView::Spatial {
+            if !view.static_unavailable {
+                if let Some(key) = view.static_key.or(current_key) {
+                    self.static_evidence_ui(ui, key);
+                } else {
+                    ui.label("静的結果: 未計算・結果なし。入力不備や計算失敗の理由はログで確認してください。");
+                }
+            } else {
+                ui.label("この領域で指定した静的結果は取得不能です。別のケースで代用しません。");
+            }
+        }
         ui.separator();
         match self.ui.view.results_view {
             ResultsView::Spatial => crate::viewer::viewer_panel_with_view(view, ui, self),

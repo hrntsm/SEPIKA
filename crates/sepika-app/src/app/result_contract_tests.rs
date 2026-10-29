@@ -1027,14 +1027,20 @@ fn direct_secondary_beam_design_rejects_used_finite_unresolvable_local_frame() {
 #[cfg(feature = "gui")]
 #[test]
 fn gui_reports_old_contract_and_explicit_recheck_button_recovers_without_reanalysis() {
-    fn text_position(shape: &egui::epaint::Shape, needle: &str) -> Option<egui::Pos2> {
+    fn text_position(shape: &egui::epaint::Shape, needle: &str, exact: bool) -> Option<egui::Pos2> {
         match shape {
-            egui::epaint::Shape::Text(text) if text.galley.text().contains(needle) => {
+            egui::epaint::Shape::Text(text)
+                if if exact {
+                    text.galley.text() == needle
+                } else {
+                    text.galley.text().contains(needle)
+                } =>
+            {
                 Some(text.pos + text.galley.size() * 0.5)
             }
-            egui::epaint::Shape::Vec(parts) => {
-                parts.iter().find_map(|part| text_position(part, needle))
-            }
+            egui::epaint::Shape::Vec(parts) => parts
+                .iter()
+                .find_map(|part| text_position(part, needle, exact)),
             _ => None,
         }
     }
@@ -1060,11 +1066,11 @@ fn gui_reports_old_contract_and_explicit_recheck_button_recovers_without_reanaly
     assert!(rendered
         .shapes
         .iter()
-        .any(|s| text_position(&s.shape, "旧契約").is_some()));
+        .any(|s| text_position(&s.shape, "旧契約", false).is_some()));
     let button = rendered
         .shapes
         .iter()
-        .find_map(|s| text_position(&s.shape, "検定を再実行"))
+        .find_map(|s| text_position(&s.shape, "検定を再実行", true))
         .unwrap();
     assert_eq!(
         loaded
