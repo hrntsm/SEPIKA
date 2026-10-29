@@ -50,3 +50,11 @@ GUI/MCP全ターゲットclippy警告禁止は先行sourceで成功し、再送�
 この修正群のAI契約10件（提出の結果参照有無・Quantityの旧版/失効/保存再読込、計算中案と他案の編集を含む）は実行中。直前のGUI全lib成功と区別し、このsourceの最終全lib・静的解析・実機結果は後で追記する。
 
 9e26a7d4の関連確認ではMCP非feature全libが98件成功した。feature全libは並列実行で134成功・既存CFTジョブ待機の1件が時間切れとなった。変更せず単独実行すると2.58秒で成功し、既存MCPテストexeを逐次全135件実行して全成功（12.09秒）した。待機上限や計算式は変更していない。GUI/MCP全target clippy警告禁止もこの段階で成功した。
+
+## 完了状態の保存同期とWindows CI
+
+1fef9194ではGUI全libが1153件成功・3件ignore、非GUI全lib（474対象）が正常終了し、GUI/MCPのfeature・非feature全target clippy警告禁止が成功した。独立確認はAI10件成功のうえ、完了run取込とAI状態同期の間の保存raceを検出した。
+
+修正では完了取込・保存snapshot・復元を同じ状態同期規則に集約した。AI要求job IDを既存実行と保持runへ引き継ぎ、実際の完了runを持つ記録だけを完了へ同期する。中断したジョブを後続の同入力別ジョブの成功で補完しない。状態変更は検討dirtyへ反映し、workerエラーとchannel切断の理由付き失敗も保存する。修正途中のAI契約13件は全成功。計算poll完了直後にAI pollなしで保存・復元、完成runを持つrunning/interrupted記録の復旧、真の未完了、中断後の同入力別ジョブ、dirtyと無変更同期、worker失敗の保持を含む。最終sourceでは通常OVIKA保存APIによる即時保存往復も同じ回帰へ追加し、確定後に再実行する。
+
+Windows専用CIジョブを追加し、PRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行する。Ubuntu既存4構成は維持し、Windows失敗も必須「テスト」を失敗させる。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時は省略する。debug symbolだけを0としてPR/mainの環境を揃えた。PyYAML構文と、PR/main/cache/gate条件・対象コマンドをローカル確認した。実際のGitHub CI結果はまだ確認していない。
