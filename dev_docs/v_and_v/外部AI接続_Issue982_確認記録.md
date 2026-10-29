@@ -1,72 +1,72 @@
 # 外部AI接続の確認記録（Issue #982）
 
-状態: 🔶。構造計算式や規準適合を新たに認証する検証ではない。最終実機・関連回帰の結果は実行後に追記する。
+状態: 🔶。以下は通信・権限・既存計算への接続のVerificationであり、構造計算式・規準適合の新たな認証ではない。Windows実機の共有操作は自動承認レビューの拒否後に停止し、完了を主張しない。
+
+## 対象と確定版
+
+2026-10-29、Windowsの専用worktreeで検証した。最終ソースは`31e85aa5`、対応文書込みの固定HEADは`8ba9a181637210b27af0c57869d0fdbfe660e5d5`。#981を統合したmain `29c14e5d`に接続している。
+
+対象は`sepika-ai-connection`、GUIの検討処理、MCP stdio薄中継。実編集・実計算には正常な門形架構を使用した。外部LLM・APIキー・生成文章の一致は検証に使わない。実行許可は保存せず、依頼・開始・最終操作・成果・受理台帳を検討へ保存する。切断と計算取消、成果提出と計算成功・検定合格・人による採用を区別する。
 
 ## 製品Rustでの方式小実験
 
-2026-10-29、Windowsの専用worktreeと専用target内で`cargo test -p sepika-ai-connection --target-dir target-issue982`を実行し、次の2件が成功した。
+専用資源だけで`cargo test -p sepika-ai-connection --target-dir target-issue982`を実行し、次の2件が成功した。
 
-- `same_logon_round_trip_eof_missing_and_exclusive_creation`: 同じログオンから製品TokioパイプへUTF-8日本語行を送信し、応答を受信。クライアント終了後のEOF、server終了後の不在、同名の先行インスタンスの排他拒否を確認。
-- `dacl_excludes_create_instance_and_generic_write`: TokenLogonSid限定DACLに対し、既定TokioクライアントのGENERIC_WRITE要求と追加server作成が失敗し、FILE_CREATE_PIPE_INSTANCEを含まない限定rightsの製品クライアントは接続できた。
+- `same_logon_round_trip_eof_missing_and_exclusive_creation`: 同じログオンから製品TokioパイプへUTF-8日本語行を送受信し、クライアント終了後のEOF、server終了後の不在、同名先行インスタンスの排他拒否を確認した。
+- `dacl_excludes_create_instance_and_generic_write`: TokenLogonSid限定DACLに対し、既定TokioクライアントのGENERIC_WRITE要求と追加server作成は失敗した。FILE_CREATE_PIPE_INSTANCEを含まない限定rightsの製品クライアントは接続できた。
 
-リモート拒否のオプション指定とログオンSID限定DACLの組立をコードで確認した。実際の別ログオン・別端末からの接続試行は未実施であり、その拒否を実測済みとはしない。OS設定、ファイアウォール、レジストリ、サービスは変更していない。#973の.NET小実験とは別の証拠である。
+リモート拒否オプションとログオンSID限定DACLの組立をコードで確認した。実際の別ログオン・別端末からの接続試行は未実施であり、実測済みとはしない。OS設定・ファイアウォール・レジストリ・サービスは変更していない。#973の.NET小実験とは別の証拠である。
 
-## 実装と検証対象
+## 最終ソースの直接回帰
 
-`sepika-ai-connection`、`sepika_app::app::study::ai`、`sepika_mcp::gui_bridge`を対象とする。実編集・実計算には既存の正常な門形架構を使い、未設定壁版の警告を承諾する操作は行わない。外部LLM、APIキー、生成文章の一致は検証に用いない。
+コマンドのtargetは全て専用ディレクトリ。次の結果は`8ba9a181`のローカル実行で、GitHub CIとは区別する。
 
-最新mainの#981を統合し、採否とAI観測データを同じ検討保存へ接続する。実行許可は保存せず、受理・開始・提出・結果検証を保存する。切断と計算取消、提出と計算成功・検定合格・人による採用を区別する。
+| 検証 | コマンド要部 | 結果 |
+| --- | --- | --- |
+| GUI全lib | `cargo test -p sepika-app --features gui --lib --locked --target-dir target-issue982` | 1159成功、3 ignore |
+| 非GUI全lib | `cargo test -p sepika-app --lib --locked --target-dir target-issue982` | 479成功、1 ignore |
+| AI契約 | GUI test exeの`app::study::ai::operations::tests --test-threads=1` | 16成功。独立Reviewerも同じ確定exeで16成功 |
+| GUI/MCP関連feature | `cargo clippy -p sepika-app -p sepika-mcp --features sepika-app/gui,sepika-mcp/mcp --all-targets --locked --target-dir target-issue982 -- -D warnings` | 成功 |
+| 非feature | 同clippyの`--features`なし | 成功 |
+| MCP stdio | `cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked --target-dir target-issue982` | 1成功。initialize、tools一覧、gui_requestの製品パイプ往復 |
+| 専用GUI | `cargo build -p sepika-app --features gui --example ai_connection_fixture --locked --target-dir target-issue982` | 成功 |
+| 文書 | `xtask check-docs`、`mdbook build --dest-dir target-issue982-tools/book` | 125項目・678リンク・722実装参照、HTML生成成功 |
+| 依存・整形 | `xtask check-deps`、`cargo fmt --all -- --check`、`git diff --check` | 46依存方向、整形・差分とも成功 |
 
-## 実装途中の確認
+最新stableはrustc 1.99.1、clippy 0.1.99。共有通信クレートの3件（不正・過大・非UTF-8・未完了行・未知フィールドを含む）と全target clippy、変更した編集層の全lib218件と全target clippyも成功した。これらは最終修正群で変更していない。
 
-- 最新stableはrustc 1.99.1、clippy 0.1.99。共有通信クレートの3件と`clippy --all-targets -- -D warnings`が成功した。
-- `mdbook build`、`xtask check-docs`（125項目・678リンク・722実装参照）、`xtask check-deps`（46依存方向）が成功した。
-- 初回GUI契約テストは確認依頼の再承認・再読込拒否が成功し、実編集を含む2件が既存の単一断面割当制限によるComposite拒否を検出した。編集層へ全断面割当の識別を追加し、原子性・混在拒否・一操作Undo/Redoの回帰を追加した。修正後の再実行とMCP stdioはビルド中で、成功をまだ主張しない。
-- 受理台帳はADR0087の契約を維持し、参照・照会を含む全成功検討操作の内容・応答を保存する判断に確定した。参照IDの変更要求への再利用拒否、同内容の参照再送、参照の受理照会と再読込の回帰を追加した。ページ応答を複製する容量増加は製品文書へ明記する。
-- GUI実機・最終独立レビュー・関連構成の最終回帰は未実施。
+MCP全libは先行HEADで非feature98件成功。featureは並列負荷中に既存CFTジョブ待機1件が時間切れとなり、変更せず単独では2.58秒で成功した。既存exeの逐次全実行は135件成功（12.09秒）。待機上限や計算式は変更していない。
 
-## 修正後の自動回帰
+### 実通信と拒否契約
 
-GUIの`cargo test -p sepika-app --features gui --lib --locked --target-dir target-issue982`は1150件成功・3件ignore。AI契約7件を含み、実通信の比較案作成・原子的断面割当・既存非同期計算・通常根拠との数値と計算時入力照合・説明提出・旧版明示閲覧・再読込まで通過した。計算時入力には生成節点を含み、本案の4節点で根拠の6節点を置き換えない。GUI表示案と本案入力は通信操作で変更されなかった。
+製品パイプから比較案作成・一括断面割当・既存非同期計算・通常根拠と同じ値と入力の取得・説明提出・保存再読込まで通過した。計算時入力の生成節点を含み、本案4節点で根拠6節点を置き換えない。GUIの表示案・本案入力・未確定draftはAI操作で変更しない。
 
-確認依頼の新許可による昇格、範囲外・古い版・無効対象、本案・採用操作、未知操作、現在Review接続での変更要求再送を拒否した。既存の人による確認待ちを観測し、AIの警告承諾・再開・取消を拒否した。解除は計算停止にせず、再読込では許可を破棄し未完了ジョブを中断・結果なしにした。
+確認依頼の再承認による昇格、本案・採用操作、範囲外・古い版・無効対象、未知操作を拒否した。断面以外との混在batchや固定対象外は無変更拒否し、有効な一括割当は一操作Undo/Redoできた。人による確認待ちを観測し、AIによる警告承諾・再開・取消は拒否した。計算中案だけを編集拒否し、同じ検討の別案は編集でき、結果を開始版へ固定した。
 
-全成功参照の受理保存・同内容再送・異内容ID再利用拒否・参照の受理照会と保存往復を確認した。旧版参照の保存応答も再承認時のhistory=falseで再送・照会を拒否し、history=trueで元の応答を返した。元の解析契約が失効するとキャッシュ参照を再認証しなかった。
+全成功参照・照会もID・内容・応答を保存し、同内容再送、異内容ID再利用拒否、receipt、保存往復を確認した。旧版readや提出の保存応答でも現在history=falseなら再送・照会を拒否し、history=trueなら元根拠を検査した。結果契約の失効後はキャッシュで再認証しない。全read応答の保存による容量増加は製品文書へ明記した。
 
-根拠全体の取得不能、取得できた根拠だけの部分集計、確認済みNGと不正成分による未評価の併存を確認した。全範囲件数は取得不能時にnull、取得根拠なしではobserved_countsもnullとした。Static参照によるDesign詳細表取得を拒否した。
+新しいReview接続が保存後のproposals→runsページから手計算の旧版を発見し、明示input/run_indexで既存results/evidenceへ到達した。history=falseは旧版metadata・数値・根拠と過去一覧の再送/照会を拒否し、現在版runだけを件数へ含めた。
 
-`cargo test -p sepika-edit --lib --locked --target-dir target-issue982-edit`は218件成功。固定対象外・断面以外の混在batchを無変更拒否し、変更なし子を含む一括割当も一操作Undo/Redoできた。編集層と共有通信クレートの全ターゲットclippy警告禁止が成功した。MCPの`gui_bridge_stdio`はinitialize・公開ツール一覧・gui_requestの製品パイプ往復1件が成功した。
+### 根拠・状態・保存契約
 
-GUI/MCP全ターゲットclippy警告禁止は先行sourceで成功し、再送開示再検査を含む最終sourceの再実行中。非GUIとMCPの関連全lib、最終独立レビュー、実機は次段で追記する。CI成功とは区別する。
+根拠全体取得不能では全範囲件数をnull、有効に取得した範囲だけをscope/count_unit付きobserved_countsへ返し、取得根拠なしは部分件数もnullとした。既知NG・有効最大・未評価を併存させ、構造無効な根拠の残存値を再認証しない。Static参照でDesign詳細を取得する要求を拒否し、詳細もページ取得した。
 
-## 実機用の正常fixture
+完了poll直後にAI pollなしで通常OVIKAへ保存し、再読込後も同じrun/calculatedになった。真の未完了はinterrupted_no_result、実worker失敗は理由付きfailedとして区別した。保存対象の同期変更をdirtyへ反映し、元job IDでrunへ帰属させ、後続の同入力別jobで中断を成功へ補完しなかった。
 
-`cargo build -p sepika-app --features gui --example ai_connection_fixture --locked --target-dir target-issue982`で、未設定壁版を持たない専用GUIを生成する。起動対象は`target-issue982/debug/examples/ai_connection_fixture.exe`。MCPの代表操作は`crates/sepika-mcp/tests/support/gui_probe.py`へ、専用MCP実行ファイル、GUI表示のpipe、`--scenario review`または`comparison`、専用出力パスを渡す。外部LLMやAPIキーは使わず、GUIでの明示許可を待つ。通常の計算値・根拠・参照と提出をJSONへ記録する。
+resultsと明示run付き提出のstateはそのrunへ固定した。同入力の後続jobが計算中・確認待ちでも過去runの状態を変えず、AI失敗後の人成功runもcalculatedを保った。提出の異なるrun参照混在を拒否した。run未指定の説明・数量提出は同依頼jobの提出時観測か未計算だけを保存し、後続完了でrun・検定根拠を補完しない。数量のみの提出も元案・根拠を保持し、削除拒否と保存再読込後の取得を確認した。
 
-## 独立確認後の修正群
+独立確認で検出したread台帳、提出キャッシュ開示、保存同期race、保持run発見、保持runと後続jobの混在を修正した。最終fresh6は修正必須なしで完了した。
 
-9e26a7d4の独立確認ではAI契約7件が成功した。保存済みsubmit応答の無条件開示を修正し、提出時の受理ID・保持計算と既存Quantity根拠を保存して現在の閲覧許可と元根拠を照合する。説明だけの提出にも適用し、後続の無関係な計算で当初の未計算状態を補完しない。計算中の編集拒否は開始proposalに限定し、同じ検討の別案を編集できるようにする。数量のみの提出根拠も案の削除不可規則へ追加した。非GUI構成で数量範囲のlabel取得が欠けるコンパイルエラーを検出し、利用するtest cfgと同じ範囲へ揃えた。
+## Windows CI
 
-この修正群のAI契約10件（提出の結果参照有無・Quantityの旧版/失効/保存再読込、計算中案と他案の編集を含む）は実行中。直前のGUI全lib成功と区別し、このsourceの最終全lib・静的解析・実機結果は後で追記する。
+Windows専用ジョブはPRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行し、失敗は必須「テスト」を失敗させる。既存Ubuntu4構成は維持した。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時に省略する。PR/mainのdebug symbol設定を揃えた。PyYAML構文とPR/main/cache/gate条件・対象コマンドをローカル確認した。実GitHub CI結果は未確認。
 
-9e26a7d4の関連確認ではMCP非feature全libが98件成功した。feature全libは並列実行で134成功・既存CFTジョブ待機の1件が時間切れとなった。変更せず単独実行すると2.58秒で成功し、既存MCPテストexeを逐次全135件実行して全成功（12.09秒）した。待機上限や計算式は変更していない。GUI/MCP全target clippy警告禁止もこの段階で成功した。
+## Windows実機の到達範囲と停止
 
-## 完了状態の保存同期とWindows CI
+起動対象は同HEADから生成した`target-issue982/debug/examples/ai_connection_fixture.exe`（タイトル「SEPIKA #982 接続確認」）。実ユーザープロジェクトを使わず、未設定壁版を持たない正常サンプルだけを使用した。代表クライアントは`crates/sepika-mcp/tests/support/gui_probe.py`と専用`sepika-mcp.exe`。外部LLM・APIキー・クラウド接続は使用しない計画だが、以下の拒否時点ではprobeを起動していない。
 
-1fef9194ではGUI全libが1153件成功・3件ignore、非GUI全lib（474対象）が正常終了し、GUI/MCPのfeature・非feature全target clippy警告禁止が成功した。独立確認はAI10件成功のうえ、完了run取込とAI状態同期の間の保存raceを検出した。
+1. 専用プロセスが存在しないことを確認し、PID36608を可視起動した。初期AX・画像は取得できた。native AXのMaximizeを1回実行した直後にプロセスが終了し、終了codeは`0xC000041D`。stderrは日本語フォント読込infoだけでRust panicはなく、共有有効化前・probe起動前だった。#982起因とは断定しない。同操作は再試行していない。原因未確定の別課題として[#1001](https://github.com/hrntsm/SEPIKA/issues/1001)へ記録した。手操作での再現と、#980の消失事象と同原因かは未確認。
+2. 親との調整後、同じexeをPID36824で再起動し、新規inventoryから選び直した。小窓の外枠拡張はAPIのwindow bounds外として拒否され、通常窓のまま継続した。接続パネルのクラウド送信可能性、全モデルの読取範囲、固定鉄骨大梁の編集範囲、対象Study、比較操作許可が未選択のcheckboxを実画像・AXで確認した。
+3. 「ローカル接続を有効化」が自動承認レビューに拒否された。理由は、外部クライアントへの共有境界を有効にするアクセス変更について、受信者・データ範囲・権限の具体的なユーザー承認が不足するため。再試行・コード等の間接有効化をせず、依存CU入力を停止して親へ承認確認を依頼した。PID36824は共有未有効のまま待機している。
 
-修正では完了取込・保存snapshot・復元を同じ状態同期規則に集約した。AI要求job IDを既存実行と保持runへ引き継ぎ、実際の完了runを持つ記録だけを完了へ同期する。中断したジョブを後続の同入力別ジョブの成功で補完しない。状態変更は検討dirtyへ反映し、workerエラーとchannel切断の理由付き失敗も保存する。修正途中のAI契約13件は全成功。計算poll完了直後にAI pollなしで保存・復元、完成runを持つrunning/interrupted記録の復旧、真の未完了、中断後の同入力別ジョブ、dirtyと無変更同期、worker失敗の保持を含む。最終sourceでは通常OVIKA保存APIによる即時保存往復も同じ回帰へ追加し、確定後に再実行する。
-
-Windows専用CIジョブを追加し、PRで共有通信全test・GUI AI契約（逐次）・MCP stdioを実行する。Ubuntu既存4構成は維持し、Windows失敗も必須「テスト」を失敗させる。mainは同じWindows構成のno-runだけで専用cacheを生成し、完全hit時は省略する。debug symbolだけを0としてPR/mainの環境を揃えた。PyYAML構文と、PR/main/cache/gate条件・対象コマンドをローカル確認した。実際のGitHub CI結果はまだ確認していない。
-
-## 保持計算の発見入口
-
-d3cdddaaの確定sourceでGUI全lib1156件成功・3件ignore、非GUI476件成功・1件ignore、feature/非featureのGUI/MCP全target clippy警告禁止、MCP stdio最終1件、文書・依存・整形が成功した。fresh4は修正必須なしで完了した。実機は未起動。
-
-Goal照合で、新しい確認接続が既存の手計算runの位置と旧入力版を発見する入口が不足していたため、読取metadataの`runs`だけを追加する。保存再読込後の新しいReview接続がproposals→runsのページから旧版を選び、既存results/evidenceへ明示入力版を渡す回帰を追加した。history=falseは旧版の一覧・数値・根拠と過去の一覧応答の再送/照会を拒否し、現在版の計算だけを件数へ含める。数値計算・既存有効性・集計処理は変更していない。AI契約14件の実行中で、確定sourceの最終検証を追記する。
-
-## 保持計算とジョブ観測の状態分離
-
-a233d682ではGUI1157件成功・3件ignore、非GUI477件成功・1件ignore、GUI/MCP feature・非feature全target clippy、stdio1件、文書・依存・整形が成功した。独立確認で、同入力の後続job状態を保持runの状態や提出へ混在させる不整合を検出した。
-
-修正ではresultsのstateを明示runから取得し、Submitに任意run_indexを追加した。結果参照があればその明示runを必須とし、異なる保持runの参照を混在させない。run未指定は同依頼jobの提出時観測と説明・数量だけを保存し、job_id/sourceで区別する。検定根拠は自動補完しない。既存probeも明示runを提出する。再計算中/確認待ちで保持run0の状態が変わらないこと、AI失敗後の人成功run、元runの混在拒否、進行job観測後の完了/再読込で過去説明へrunを補わない回帰を追加し、AI契約16件を実行中。最終sourceの検証と実機は後で追記する。
+実機でのReview拒否・Comparison往復・解除・通常終了確認は未完了。専用プロセスの最終安全終了も再開または終了指示後に確認する。OS設定の取得・起動・変更、過去に拒否された未設定壁版の警告続行は行っていない。
