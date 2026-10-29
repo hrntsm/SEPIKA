@@ -16,6 +16,57 @@ fn args<T: serde::de::DeserializeOwned>(request: &Request) -> Result<T, Rejectio
     serde_json::from_value(request.arguments.clone())
         .map_err(|e| reject("invalid_arguments", e.to_string()))
 }
+
+const CHECK_COUNT_UNIT: &str = "既存検定の評価行（部材×位置×ケース、接合部・壁）";
+
+fn verification_counts(
+    summary: &comparison::projection::Summary,
+    scope_available: bool,
+    has_rows: bool,
+) -> Verification {
+    let scope_available = scope_available && has_rows;
+    Verification {
+        scope_available,
+        checked: scope_available.then_some(summary.checked),
+        unchecked: scope_available.then_some(summary.skipped),
+        confirmed_ng: scope_available.then_some(summary.ng),
+        observed_counts: has_rows.then(|| ObservedCounts {
+            scope: if scope_available {
+                "全取得範囲"
+            } else {
+                "取得できた有効根拠だけの部分集計。取得不能範囲は件数不明"
+            }
+            .into(),
+            count_unit: CHECK_COUNT_UNIT.into(),
+            checked: summary.checked,
+            unchecked: summary.skipped,
+            confirmed_ng: summary.ng,
+        }),
+    }
+}
+
+fn ai_check_rows(
+    run: &StudyRun,
+    fixed: &[ElemId],
+) -> (Vec<comparison::projection::CheckRow>, Vec<String>) {
+    let mut checks = Vec::new();
+    let mut unavailable = Vec::new();
+    if let Some(reason) = run.original_scope_error() {
+        unavailable.push(reason);
+    }
+    if run.comparison_checks.is_empty() {
+        unavailable.push("ケース別検定根拠がありません。未検定を0や合格へ置き換えません".into());
+    }
+    for evidence in &run.comparison_checks {
+        match comparison::projection::fixed_coverage(evidence, fixed)
+            .and_then(|()| comparison::projection::check_rows(evidence))
+        {
+            Ok(mut rows) => checks.append(&mut rows),
+            Err(reason) => unavailable.push(reason),
+        }
+    }
+    (checks, unavailable)
+}
 fn page(rows: Vec<Value>, offset: usize, limit: usize) -> Result<Value, Rejection> {
     if limit == 0 || limit > 100 || offset > rows.len() {
         return Err(reject(
@@ -273,6 +324,16 @@ impl App {
             .ok_or_else(|| reject("study_missing", "検討がありません"))?;
         let mode = permission.mode;
         let history = permission.history;
+        let mutates = matches!(
+            request.operation.as_str(),
+            "create_comparison" | "assign_section" | "calculate"
+        );
+        if mutates && mode != Mode::Comparison {
+            return Err(reject(
+                "permission_denied",
+                "確認のみの接続では作成・編集・計算を実行できません",
+            ));
+        }
         let mut content = serde_json::to_value(&request).unwrap();
         content.as_object_mut().unwrap().remove("session");
         if let Some(receipt) = self.studies.items[s]
@@ -281,14 +342,14 @@ impl App {
             .iter()
             .find(|r| r.id == request.id)
         {
-            return if receipt.content == content {
-                Ok(receipt.result.clone())
-            } else {
-                Err(reject(
+            if receipt.content != content {
+                return Err(reject(
                     "request_id_conflict",
                     "同じ要求IDを異なる内容に再利用できません",
-                ))
-            };
+                ));
+            }
+            self.ai_validate_receipt(s, receipt, history)?;
+            return Ok(receipt.result.clone());
         }
         let p = self.ai_proposal_index(s, request.proposal.as_deref())?;
         let current = self.ai_proposal_reference(s, p);
@@ -303,16 +364,6 @@ impl App {
             return Err(reject(
                 "scope_mismatch",
                 "対象の案・プロジェクトが一致しません",
-            ));
-        }
-        let mutates = matches!(
-            request.operation.as_str(),
-            "create_comparison" | "assign_section" | "calculate"
-        );
-        if mutates && mode != Mode::Comparison {
-            return Err(reject(
-                "permission_denied",
-                "確認のみの依頼では作成・編集・計算を実行できません",
             ));
         }
         let old = expected != current;
@@ -430,6 +481,7 @@ impl App {
             "receipt"=> {
                 let id:Id=args(&request)?;
                 let receipt=self.studies.items[s].ai.receipts.iter().find(|r|r.id==id.id && r.content.get("request").and_then(Value::as_str)==Some(task_id)).ok_or_else(||reject("receipt_missing","受理済み要求がありません。未受理か応答不明であり変更の成否を推定しないでください"))?;
+                self.ai_validate_receipt(s,receipt,history)?;
                 json!(receipt)
             }
             "changes"=> {
@@ -452,6 +504,9 @@ impl App {
             }
             "evidence"=> {
                 let evidence:Evidence=args(&request)?;
+                if matches!(evidence.table.as_str(),"design_details"|"joint_details"|"wall_details") && evidence.reference.kind!=ResultInputKey::Design {
+                    return Err(reject("result_kind_mismatch","検定詳細には対応するDesign結果参照を指定してください"));
+                }
                 self.ai_validate_reference(s,&expected,&evidence.reference,history)?;
                 let view=self.ai_result_view(s,&evidence.reference)?;
                 let recorded=view.recorded_result_input(&evidence.reference).map_err(|e|reject("result_unavailable",e))?;
@@ -499,16 +554,11 @@ impl App {
             task.last_operation = SystemTime::now();
             task.last_operation_name = request.operation.clone();
         }
-        if matches!(
-            request.operation.as_str(),
-            "begin_request" | "create_comparison" | "assign_section" | "calculate" | "submit"
-        ) {
-            self.studies.items[s].ai.receipts.push(Receipt {
-                id: request.id,
-                content,
-                result: output.clone(),
-            });
-        }
+        self.studies.items[s].ai.receipts.push(Receipt {
+            id: request.id,
+            content,
+            result: output.clone(),
+        });
         self.mark_study_dirty();
         Ok(output)
     }
@@ -565,6 +615,114 @@ impl App {
             .find(|input| Self::ai_input_reference(input) == *expected)
             .cloned()
             .ok_or_else(|| reject("input_missing", "保存入力版がありません"))
+    }
+
+    fn ai_validate_receipt(
+        &self,
+        s: usize,
+        receipt: &Receipt,
+        history: bool,
+    ) -> Result<(), Rejection> {
+        let mut receipt = receipt;
+        for _ in 0..=self.studies.items[s].ai.receipts.len() {
+            let request: Request = serde_json::from_value(receipt.content.clone())
+                .map_err(|e| reject("receipt_invalid", e.to_string()))?;
+            if matches!(
+                request.operation.as_str(),
+                "begin_request" | "create_comparison" | "assign_section" | "calculate" | "submit"
+            ) {
+                return Ok(());
+            }
+            let p = self.ai_proposal_index(s, request.proposal.as_deref())?;
+            let expected: InputReference = serde_json::from_value(
+                request
+                    .input
+                    .clone()
+                    .ok_or_else(|| reject("receipt_invalid", "受理記録の入力版がありません"))?,
+            )
+            .map_err(|e| reject("receipt_invalid", e.to_string()))?;
+            if self.ai_proposal_reference(s, p) != expected && !history {
+                return Err(reject(
+                    "permission_denied",
+                    "この接続では受理済み応答内の保存旧版を閲覧できません",
+                ));
+            }
+            self.ai_read_input(s, p, &expected)?;
+            match request.operation.as_str() {
+                "receipt" => {
+                    let id: Id = args(&request)?;
+                    receipt = self.studies.items[s]
+                        .ai
+                        .receipts
+                        .iter()
+                        .find(|r| r.id == id.id)
+                        .ok_or_else(|| reject("receipt_missing", "照会先の受理記録がありません"))?;
+                }
+                "results" => {
+                    let current = self.ai_results(s, p, &expected, &request, history)?;
+                    for key in [
+                        "conditions",
+                        "error",
+                        "notice",
+                        "unavailable",
+                        "whole_checks",
+                        "fixed_checks",
+                        "fixed_steel_volume",
+                        "page",
+                    ] {
+                        if current.get(key) != receipt.result.get(key) {
+                            return Err(reject(
+                                "result_unavailable",
+                                "受理済み応答の元の計算根拠が失効・変化しています",
+                            ));
+                        }
+                    }
+                    return Ok(());
+                }
+                "evidence" => {
+                    let evidence: Evidence = args(&request)?;
+                    if matches!(
+                        evidence.table.as_str(),
+                        "design_details" | "joint_details" | "wall_details"
+                    ) && evidence.reference.kind != ResultInputKey::Design
+                    {
+                        return Err(reject(
+                            "result_kind_mismatch",
+                            "検定詳細には対応するDesign結果参照を指定してください",
+                        ));
+                    }
+                    self.ai_validate_reference(s, &expected, &evidence.reference, history)?;
+                    return Ok(());
+                }
+                "quantity" => {
+                    let input = self.ai_read_input(s, p, &expected)?;
+                    let app = App {
+                        core: input.core(),
+                        ..Default::default()
+                    };
+                    let quantity = app.member_quantity_evidence_reference(
+                        comparison::projection::fixed_members(&self.studies.items[s]),
+                    );
+                    if receipt.result.get("identity") != Some(&json!(quantity.identity))
+                        || receipt.result.get("contract") != Some(&json!(quantity.contract))
+                    {
+                        return Err(reject(
+                            "result_unavailable",
+                            "受理済み数量根拠の入力・範囲・契約が失効しています",
+                        ));
+                    }
+                    quantity
+                        .takeoff()
+                        .map_err(|e| reject("quantity_unavailable", e))?;
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+        Err(reject(
+            "receipt_invalid",
+            "受理記録の照会関係が循環しています",
+        ))
     }
 
     fn ai_assign(&mut self, s: usize, p: usize, request: &Request) -> Result<Value, Rejection> {
@@ -709,36 +867,19 @@ impl App {
     }
 
     fn ai_verification(&self, s: usize, input: &InputReference) -> Verification {
-        let mut verification = Verification {
-            scope_available: false,
-            checked: 0,
-            unchecked: 0,
-            confirmed_ng: 0,
-        };
         let Some(run) = self.studies.items[s].runs.iter().rev().find(|r| {
             Self::ai_input_reference(&r.input) == *input
                 || Self::ai_input_reference(&r.prepared) == *input
         }) else {
-            return verification;
+            return verification_counts(&comparison::projection::Summary::default(), false, false);
         };
-        verification.scope_available =
-            !run.comparison_checks.is_empty() && run.original_scope_error().is_none();
         let fixed = comparison::projection::fixed_members(&self.studies.items[s]);
-        for evidence in &run.comparison_checks {
-            if comparison::projection::fixed_coverage(evidence, &fixed).is_err() {
-                verification.scope_available = false;
-            }
-            match comparison::projection::check_rows(evidence) {
-                Ok(rows) => {
-                    let summary = comparison::projection::summarize(rows.iter());
-                    verification.checked += summary.checked;
-                    verification.unchecked += summary.skipped;
-                    verification.confirmed_ng += summary.ng;
-                }
-                Err(_) => verification.scope_available = false,
-            }
-        }
-        verification
+        let (checks, unavailable) = ai_check_rows(run, &fixed);
+        verification_counts(
+            &comparison::projection::summarize(checks.iter()),
+            unavailable.is_empty(),
+            !checks.is_empty(),
+        )
     }
 
     fn ai_result_view(&self, s: usize, reference: &ResultReference) -> Result<App, Rejection> {
@@ -824,24 +965,7 @@ impl App {
             .takeoff()
             .map(|q| q.totals().steel_t / sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3);
         let mut rows = Vec::new();
-        let mut checks = Vec::new();
-        let mut unavailable = Vec::new();
-        if let Some(reason) = run.original_scope_error() {
-            unavailable.push(reason);
-        }
-        if run.comparison_checks.is_empty() {
-            unavailable
-                .push("ケース別検定根拠がありません。未検定を0や合格へ置き換えません".into());
-        }
-        for evidence in &run.comparison_checks {
-            if let Err(reason) = comparison::projection::fixed_coverage(evidence, &fixed) {
-                unavailable.push(reason);
-            }
-            match comparison::projection::check_rows(evidence) {
-                Ok(mut r) => checks.append(&mut r),
-                Err(reason) => unavailable.push(reason),
-            }
-        }
+        let (checks, unavailable) = ai_check_rows(run, &fixed);
         for check in &checks {
             rows.push(json!({"kind":"check","case":check.case,"target":check.target,"position":check.position,"ratio":check.ratio,"complete":check.complete,"reason":check.reason,"reference":check.evidence,"unit":"無次元","scope":"既存の全ケース・全組合せ主架構検定（非対象・未対応・未検定を含む）"}));
         }
@@ -866,7 +990,14 @@ impl App {
             checks.iter(),
             &fixed,
         ));
-        let summary_json = |summary: comparison::projection::Summary| json!({"checked":summary.checked,"unchecked":summary.skipped,"confirmed_ng":summary.ng,"evaluated_maximum":summary.maximum.as_ref().and_then(|r|r.ratio),"maximum":if unavailable.is_empty() && summary.skipped==0 {summary.maximum.and_then(|r|r.ratio)} else {None},"scope_complete":unavailable.is_empty(),"unit":"無次元"});
+        let summary_json = |summary: comparison::projection::Summary| {
+            let verification = verification_counts(
+                &summary,
+                unavailable.is_empty(),
+                summary.checked + summary.skipped > 0,
+            );
+            json!({"checked":verification.checked,"unchecked":verification.unchecked,"confirmed_ng":verification.confirmed_ng,"observed_counts":verification.observed_counts,"count_unit":CHECK_COUNT_UNIT,"evaluated_maximum":summary.maximum.as_ref().and_then(|r|r.ratio),"maximum":if verification.scope_available && summary.skipped==0 {summary.maximum.and_then(|r|r.ratio)} else {None},"scope_complete":verification.scope_available,"unit":"無次元"})
+        };
         Ok(
             json!({"state":self.ai_calculation_state(s,input),"input":input,"run_index":args.run_index,"conditions":run.input.settings,"error":run.error,"notice":run.notice,"unavailable":unavailable,"whole_checks":summary_json(summary),"fixed_checks":summary_json(fixed_summary),"fixed_steel_volume":{"value_m3":volume.as_ref().ok(),"error":volume.as_ref().err(),"members":fixed,"identity":quantity.identity},"page":page(rows,args.offset,args.limit)?}),
         )

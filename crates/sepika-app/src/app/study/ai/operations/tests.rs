@@ -36,6 +36,237 @@ fn accepted(response: Response) -> Value {
 }
 
 #[test]
+fn successful_reads_are_persisted_replayed_and_cannot_reuse_ids_for_mutations() {
+    let (mut app, s) = fixture();
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, 0, "begin_request", Value::Null));
+    let read = request(&app, s, 0, "study", Value::Null);
+    let result = accepted(app.handle_ai_request("client", read.clone()));
+    app.studies.items[s].purpose = "人による目的の更新".into();
+    assert_eq!(
+        accepted(app.handle_ai_request("client", read.clone())),
+        result
+    );
+    let mut mutation = read.clone();
+    mutation.operation = "create_comparison".into();
+    mutation.arguments = json!({"name":"拒否する比較"});
+    assert_eq!(
+        app.handle_ai_request("client", mutation)
+            .error
+            .unwrap()
+            .code,
+        "request_id_conflict"
+    );
+    assert_eq!(app.studies.items[s].proposals.len(), 1);
+    let receipt = accepted(call(&mut app, s, 0, "receipt", json!({"id":read.id})));
+    assert_eq!(receipt["content"]["operation"], "study");
+    assert_eq!(receipt["result"], result);
+    let saved = app.saved_studies();
+    app.restore_studies(saved).unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    let mut replay = read;
+    replay.session = Some(
+        app.ai_connection
+            .permission
+            .as_ref()
+            .unwrap()
+            .session
+            .clone(),
+    );
+    assert_eq!(accepted(app.handle_ai_request("client", replay)), result);
+}
+
+#[test]
+fn cached_reads_recheck_history_permission_and_result_validity_and_mutations_recheck_mode() {
+    let (mut app, s) = fixture();
+    let p = app.create_comparison(s, "再送の比較".into()).unwrap();
+    app.start_study_calculation(s, p).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, p, "begin_request", Value::Null));
+    let mut read = request(&app, s, p, "members", json!({"offset":0,"limit":1}));
+    let original = accepted(app.handle_ai_request("client", read.clone()));
+    let fixed = app.studies.items[s].fixed.clone();
+    let mut assign = request(
+        &app,
+        s,
+        p,
+        "assign_section",
+        json!({"targets":fixed,"section":2}),
+    );
+    let assigned = accepted(app.handle_ai_request("client", assign.clone()));
+    app.ai_connection.pending = Some("client".into());
+    app.approve_ai_connection(s, Mode::Review, false).unwrap();
+    read.session = Some(
+        app.ai_connection
+            .permission
+            .as_ref()
+            .unwrap()
+            .session
+            .clone(),
+    );
+    assign.session = read.session.clone();
+    assert_eq!(
+        app.handle_ai_request("client", assign.clone())
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    assert_eq!(
+        app.handle_ai_request("client", read.clone())
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    assert_eq!(
+        call(&mut app, s, p, "receipt", json!({"id":read.id}))
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    assert_eq!(
+        accepted(call(&mut app, s, p, "receipt", json!({"id":assign.id})))["result"],
+        assigned
+    );
+    permit(&mut app, s, Mode::Comparison);
+    read.session = Some(
+        app.ai_connection
+            .permission
+            .as_ref()
+            .unwrap()
+            .session
+            .clone(),
+    );
+    assert_eq!(
+        accepted(app.handle_ai_request("client", read.clone())),
+        original
+    );
+    assert_eq!(
+        accepted(call(&mut app, s, p, "receipt", json!({"id":read.id})))["result"],
+        original
+    );
+    let mut result = request(
+        &app,
+        s,
+        p,
+        "results",
+        json!({"run_index":0,"offset":0,"limit":1}),
+    );
+    result.input = read.input.clone();
+    accepted(app.handle_ai_request("client", result.clone()));
+    app.studies.items[s].runs[0]
+        .results
+        .as_mut()
+        .unwrap()
+        .analysis_contract_version = Some(0);
+    for evidence in &mut app.studies.items[s].runs[0].comparison_checks {
+        evidence.bundle.analysis_contract_version = Some(0);
+    }
+    assert_eq!(
+        app.handle_ai_request("client", result.clone())
+            .error
+            .unwrap()
+            .code,
+        "result_unavailable"
+    );
+    assert_eq!(
+        call(&mut app, s, p, "receipt", json!({"id":result.id}))
+            .error
+            .unwrap()
+            .code,
+        "result_unavailable"
+    );
+}
+
+#[test]
+fn unavailable_and_partial_check_counts_are_not_zero_and_known_ng_survives_unrated_values() {
+    let mut app = crate::app::study::tests::app();
+    app.core
+        .model
+        .combinations
+        .push(sepika_core::model::LoadCombination {
+            name: "長期＋地震X".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+        });
+    let s = app
+        .create_study("検定範囲の取得".into(), vec![ElemId(2)])
+        .unwrap();
+    app.start_study_calculation(s, 0).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    permit(&mut app, s, Mode::Review);
+    accepted(call(&mut app, s, 0, "begin_request", Value::Null));
+    let original = app.studies.items[s].runs[0].clone();
+    assert!(original.comparison_checks.len() > 1);
+    app.studies.items[s].runs[0].comparison_checks.clear();
+    let none = accepted(call(
+        &mut app,
+        s,
+        0,
+        "results",
+        json!({"run_index":0,"offset":0,"limit":1}),
+    ));
+    assert!(none["whole_checks"]["checked"].is_null());
+    assert!(none["whole_checks"]["unchecked"].is_null());
+    assert!(none["whole_checks"]["confirmed_ng"].is_null());
+    assert!(none["whole_checks"]["observed_counts"].is_null());
+    let input = app.ai_proposal_reference(s, 0);
+    assert!(app.ai_verification(s, &input).observed_counts.is_none());
+    app.studies.items[s].runs[0] = original.clone();
+    app.studies.items[s].runs[0].comparison_checks[0]
+        .bundle
+        .member_checks
+        .clear();
+    let partial = accepted(call(
+        &mut app,
+        s,
+        0,
+        "results",
+        json!({"run_index":0,"offset":0,"limit":1}),
+    ));
+    assert!(partial["whole_checks"]["unchecked"].is_null());
+    assert!(partial["whole_checks"]["observed_counts"]["scope"]
+        .as_str()
+        .unwrap()
+        .contains("部分集計"));
+    assert_eq!(
+        partial["whole_checks"]["observed_counts"]["count_unit"],
+        CHECK_COUNT_UNIT
+    );
+    app.studies.items[s].runs[0] = original;
+    let check = app.studies.items[s].runs[0]
+        .comparison_checks
+        .iter_mut()
+        .flat_map(|e| &mut e.bundle.member_checks)
+        .flat_map(|m| &mut m.positions)
+        .find_map(|position| match &mut position.outcome {
+            sepika_design_jp::CheckOutcome::Checked(check) if check.components.len() >= 2 => {
+                Some(check)
+            }
+            _ => None,
+        })
+        .unwrap();
+    check.components[0].ratio = 2.0;
+    check.components[1].ratio = f64::NAN;
+    let mixed = accepted(call(
+        &mut app,
+        s,
+        0,
+        "results",
+        json!({"run_index":0,"offset":0,"limit":1}),
+    ));
+    assert!(mixed["whole_checks"]["confirmed_ng"].as_u64().unwrap() > 0);
+    assert!(mixed["whole_checks"]["unchecked"].as_u64().unwrap() > 0);
+    assert!(mixed["whole_checks"]["maximum"].is_null());
+    assert!(mixed["whole_checks"]["evaluated_maximum"].as_f64().unwrap() >= 2.0);
+    let verification = app.ai_verification(s, &input);
+    assert!(verification.confirmed_ng.unwrap() > 0);
+    assert!(verification.unchecked.unwrap() > 0);
+}
+
+#[test]
 fn review_request_remains_read_only_after_new_comparison_permission_and_reload() {
     let (mut app, s) = fixture();
     permit(&mut app, s, Mode::Review);
@@ -239,9 +470,13 @@ fn real_pipe_edits_existing_comparison_calculates_and_submits_the_same_gui_evide
         let (expected,_)=comparison::projection::displacement(&gui,key,NodeId(2),0).unwrap();
         let actual=displacement["value"].as_f64().unwrap();
         assert!((actual-expected).abs()<1e-10);
+        let calculation_nodes=gui.recorded_result_input(&reference).unwrap().model.nodes.len();
+        assert!(calculation_nodes>app.core.model.nodes.len());
+        let mismatch=request(&app,s,1,"evidence",json!({"reference":reference,"table":"design_details","offset":0,"limit":1}));
+        assert_eq!(exchange(&mut app,&mut reader,&mismatch).await.error.unwrap().code,"result_kind_mismatch");
         let evidence=request(&app,s,1,"evidence",json!({"reference":reference,"table":"nodes","offset":0,"limit":1}));
         let evidence=accepted(exchange(&mut app,&mut reader,&evidence).await);
-        assert_eq!(evidence["page"]["total"],app.core.model.nodes.len());
+        assert_eq!(evidence["page"]["total"],calculation_nodes);
         let submit=request(&app,s,1,"submit",json!({"explanation":"既存結果に基づく比較","unchecked":["人による採用"],"references":[reference]}));
         let submitted=accepted(exchange(&mut app,&mut reader,&submit).await);
         assert_eq!(submitted["submission"]["calculation_state"],"calculated");
@@ -256,7 +491,7 @@ fn real_pipe_edits_existing_comparison_calculates_and_submits_the_same_gui_evide
         app.restore_studies(rmp_serde::from_slice(&save).unwrap()).unwrap();
         assert!(app.ai_connection.permission.is_none());
         assert_eq!(app.ai_observations(s).unwrap().tasks[0].submissions.len(),1);
-        assert_eq!(app.studies.items[s].ai.receipts.len(),6);
+        assert!(app.studies.items[s].ai.receipts.len()>6);
     });
 }
 

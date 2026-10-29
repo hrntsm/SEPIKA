@@ -33,6 +33,16 @@ pub struct Submission {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Verification {
     pub scope_available: bool,
+    pub checked: Option<usize>,
+    pub unchecked: Option<usize>,
+    pub confirmed_ng: Option<usize>,
+    pub observed_counts: Option<ObservedCounts>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ObservedCounts {
+    pub scope: String,
+    pub count_unit: String,
     pub checked: usize,
     pub unchecked: usize,
     pub confirmed_ng: usize,
