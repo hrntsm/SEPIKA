@@ -114,6 +114,7 @@ pub struct Study {
     pub notes: String,
     pub fixed: Vec<references::TargetReference>,
     pub baseline: StudyInput,
+    pub quantity_evidence: Vec<references::QuantityEvidenceReference>,
     pub proposals: Vec<Proposal>,
     pub runs: Vec<StudyRun>,
 }
@@ -251,6 +252,7 @@ struct SavedStudy {
     notes: String,
     fixed: Vec<references::TargetReference>,
     baseline: StudyInput,
+    quantity_evidence: Vec<references::QuantityEvidenceReference>,
     proposals: Vec<(String, StudyInput)>,
     runs: Vec<StudyRun>,
 }
@@ -378,6 +380,7 @@ impl App {
             notes: String::new(),
             fixed,
             baseline,
+            quantity_evidence: Vec::new(),
             proposals: vec![Proposal {
                 name: "基準案".into(),
                 state: Some(state),
@@ -387,6 +390,45 @@ impl App {
         self.mark_study_dirty();
         self.studies.window_open = true;
         Ok(index)
+    }
+    /// 表示中の検討へ固定数量根拠を明示保存する。本案表示中は保存先未指定として拒否する。
+    pub fn save_study_quantity_reference(
+        &mut self,
+        reference: references::QuantityEvidenceReference,
+    ) -> Result<(), String> {
+        let s = match self.studies.active {
+            Location::Proposal(s, _) | Location::History(s, _) | Location::StartedInput(s, _) => s,
+            Location::Main => {
+                return Err("保存先の検討で基準案・比較案または計算履歴を表示してください".into())
+            }
+        };
+        if reference.contract != references::QUANTITY_EVIDENCE_CONTRACT_VERSION
+            || reference.source.project != self.core.scoped.references.project
+            || reference.identity != reference.identity()
+        {
+            return Err("数量の案・入力版と固定入力の識別が一致しません".into());
+        }
+        if !self.studies.items[s]
+            .proposals
+            .iter()
+            .enumerate()
+            .any(|(p, proposal)| {
+                let core = if self.studies.active == Location::Proposal(s, p) {
+                    &self.core
+                } else {
+                    &proposal.state.as_ref().expect("非表示案").core
+                };
+                core.scoped.references.proposal == reference.source.proposal
+            })
+        {
+            return Err("数量根拠の元の案が属する検討を表示してください".into());
+        }
+        let saved = &mut self.studies.items[s].quantity_evidence;
+        if !saved.iter().any(|q| q.identity == reference.identity) {
+            saved.push(reference);
+            self.mark_study_dirty();
+        }
+        Ok(())
     }
     fn mark_study_dirty(&mut self) {
         self.studies.dirty = true;
@@ -398,20 +440,27 @@ impl App {
             ui: std::mem::take(&mut self.ui.scoped),
         }
     }
-    fn put_slot(&mut self, slot: Slot) {
+    pub(crate) fn put_slot(&mut self, slot: Slot) {
         self.core = slot.core;
         self.ui.scoped = slot.ui;
     }
-    fn store_slot(&mut self, location: Location, slot: Slot) {
+    fn store_slot(&mut self, location: Location, slot: Slot) -> Option<Slot> {
         match location {
             Location::Main => self.studies.main = Some(slot),
             Location::Proposal(s, p) => self.studies.items[s].proposals[p].state = Some(slot),
-            Location::History(..) | Location::StartedInput(..) => {}
+            Location::History(..) | Location::StartedInput(..) => return Some(slot),
         }
+        None
     }
     pub fn switch_study(&mut self, next: Location) -> Result<(), String> {
+        self.switch_study_with_view(next).map(|_| ())
+    }
+    pub(crate) fn switch_study_with_view(
+        &mut self,
+        next: Location,
+    ) -> Result<Option<Slot>, String> {
         if self.studies.active == next {
-            return Ok(());
+            return Ok(None);
         }
         if self.core.scoped.job.is_some() {
             return Err("本案の解析実行中は案を切り替えられません".into());
@@ -467,10 +516,15 @@ impl App {
             self.core.scoped.pending_save_recording.take();
         let previous = self.studies.active;
         let slot = self.take_active_slot();
-        self.store_slot(previous, slot);
+        let previous_view = self.store_slot(previous, slot);
         self.put_slot(next_slot);
         self.studies.active = next;
-        Ok(())
+        if matches!(next, Location::History(..)) {
+            self.validate_restored_results();
+            #[cfg(feature = "gui")]
+            self.set_study_result_selection(self.core.scoped.last_static);
+        }
+        Ok(previous_view)
     }
     fn proposal_input(&self, s: usize, p: usize) -> StudyInput {
         if self.studies.active == Location::Proposal(s, p) {
@@ -520,9 +574,13 @@ impl App {
         }
         let input = self.proposal_input(s, p);
         if self.studies.items[s]
-            .runs
+            .quantity_evidence
             .iter()
-            .any(|r| r.proposal == input.references.proposal)
+            .any(|q| q.source.proposal == input.references.proposal)
+            || self.studies.items[s]
+                .runs
+                .iter()
+                .any(|r| r.proposal == input.references.proposal)
         {
             return Err("保持した計算結果の根拠となる案は削除できません".into());
         }
@@ -590,7 +648,7 @@ impl App {
         #[cfg(feature = "gui")]
         {
             self.active_viewport_mut().static_key = last;
-            self.active_viewport_mut().static_unavailable = false;
+            self.active_viewport_mut().static_unavailable = last.is_none();
         }
     }
     #[cfg(feature = "gui")]
@@ -621,7 +679,9 @@ impl App {
             self.core.scoped.references = input.references.clone();
             run.result_view_references.apply(&mut self.core);
             self.core.scoped.results = Some(bundle.clone());
-            self.set_study_result_selection(last);
+            self.core.scoped.last_static = last;
+            self.validate_restored_results();
+            self.set_study_result_selection(self.core.scoped.last_static);
         }
     }
     fn saved_study_runs(&self, s: usize) -> Vec<StudyRun> {
@@ -682,6 +742,7 @@ impl App {
                     notes: study.notes.clone(),
                     fixed: study.fixed.clone(),
                     baseline: study.baseline.clone(),
+                    quantity_evidence: study.quantity_evidence.clone(),
                     proposals: study
                         .proposals
                         .iter()
@@ -732,6 +793,7 @@ impl App {
                 notes: study.notes,
                 fixed: study.fixed,
                 baseline: study.baseline,
+                quantity_evidence: study.quantity_evidence,
                 proposals,
                 runs: study.runs,
             });
@@ -884,6 +946,7 @@ impl App {
         };
         app.core.scoped.results = Some(bundle.clone());
         app.core.scoped.last_static = last;
+        app.validate_restored_results();
         Some(app)
     }
     pub(crate) fn resolve_study_result(
@@ -913,6 +976,23 @@ impl App {
 
 #[cfg(feature = "gui")]
 impl App {
+    pub(crate) fn study_display_name(&self) -> String {
+        match self.studies.active {
+            Location::Main => "本案".into(),
+            Location::Proposal(_, 0) => "基準案（読取専用）".into(),
+            Location::Proposal(s, p) => {
+                format!("比較案「{}」", self.studies.items[s].proposals[p].name)
+            }
+            Location::History(s, r) => format!(
+                "{} の準備後入力・結果（読取専用）",
+                self.studies.items[s].runs[r].proposal_name
+            ),
+            Location::StartedInput(s, r) => format!(
+                "{} の計算開始時入力（読取専用）",
+                self.studies.items[s].runs[r].proposal_name
+            ),
+        }
+    }
     pub(crate) fn study_window(&mut self, ctx: &egui::Context) {
         if !self.studies.window_open {
             return;
@@ -923,12 +1003,7 @@ impl App {
             .collapsible(self.studies.running.is_none())
             .vscroll(true)
             .show(ctx, |ui| {
-                let active = match self.studies.active {
-                    Location::Main => "本案".to_string(),
-                    Location::Proposal(s, p) => self.studies.items[s].proposals[p].name.clone(),
-                    Location::History(..) => "準備後入力・結果（読取専用）".into(),
-                    Location::StartedInput(..) => "計算開始時入力（読取専用）".into(),
-                };
+                let active = self.study_display_name();
                 ui.strong(format!("表示・編集先: {active}"));
                 if ui.button("本案を表示").clicked() {
                     if let Err(reason) = self.switch_study(Location::Main) { self.report_error(reason); }
@@ -943,6 +1018,7 @@ impl App {
                 let mut create = None;
                 let mut delete = None;
                 let mut calculate = None;
+                let mut quantity = None;
                 for s in 0..self.studies.items.len() {
                     ui.separator();
                     let main_changed = self.study_main_changed(s);
@@ -962,6 +1038,11 @@ impl App {
                             if ui.button("計算").clicked() { calculate = Some((s, p)); }
                             if p > 0 && ui.button("削除").clicked() { delete = Some((s, p)); }
                         });
+                    }
+                    for (q, reference) in study.quantity_evidence.iter().enumerate() {
+                        if ui.button(format!("固定数量根拠 {} / 案 {} / 入力世代 {}", q + 1, reference.source.proposal, reference.source.generation)).clicked() {
+                            quantity = Some((s, q));
+                        }
                     }
                     for (r, run) in study.runs.iter().enumerate() {
                         ui.horizontal(|ui| {
@@ -993,6 +1074,10 @@ impl App {
                     else if let Some((s, p)) = calculate { self.start_study_calculation(s, p) }
                     else { Ok(()) };
                 if let Err(reason) = result { self.report_error(reason); }
+                if let Some((s, q)) = quantity {
+                    let reference = references::EvidenceReference::Quantity(Box::new(self.studies.items[s].quantity_evidence[q].clone()));
+                    if let Err(reason) = self.open_result_evidence(&reference) { self.report_error(reason); }
+                }
                 let mut resume=false;
                 if let Some(running) = &mut self.studies.running {
                     ui.separator();
@@ -1085,6 +1170,396 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "計算が完了しない");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn workspace_search_and_study_headers_name_the_same_active_input_without_editing_it() {
+        fn text(app: &mut App, surface: usize) -> String {
+            let ctx = egui::Context::default();
+            let mut rendered = String::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(2600.0, 1800.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| match surface {
+                        0 => app.workspace_panel(ui),
+                        1 => app.study_window(ui.ctx()),
+                        2 => {
+                            app.open_search(ui);
+                            app.search_ui(ui);
+                        }
+                        _ => crate::quantity_view::quantity_panel(ui, app),
+                    },
+                );
+                rendered = output
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.text()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+            rendered
+        }
+        let mut app = app();
+        let s = app.create_study("案表示".into(), vec![ElemId(2)]).unwrap();
+        let p = app.create_comparison(s, "断面比較A".into()).unwrap();
+        app.start_study_calculation(s, 0).unwrap();
+        wait(&mut app);
+        for (location, expected) in [
+            (Location::Main, "本案"),
+            (Location::Proposal(s, 0), "基準案（読取専用）"),
+            (Location::Proposal(s, p), "比較案「断面比較A」"),
+            (
+                Location::History(s, 0),
+                "基準案 の準備後入力・結果（読取専用）",
+            ),
+            (
+                Location::StartedInput(s, 0),
+                "基準案 の計算開始時入力（読取専用）",
+            ),
+        ] {
+            app.switch_study(location).unwrap();
+            app.ui.scoped.reference_snapshot = None;
+            let model = bytes(&app.core.model);
+            let results = bytes(&app.core.scoped.results);
+            let generation = app.input_reference();
+            let revision = app.core.scoped.undo.revision();
+            let workspace = text(&mut app, 0);
+            assert!(
+                workspace.contains(&format!("{expected} · 編集世代")),
+                "{workspace}"
+            );
+            assert!(
+                workspace.contains(&format!("領域1 · {expected}")),
+                "{workspace}"
+            );
+            assert_eq!(
+                workspace.contains("属性・検索・Undo / Redo の対象: 本案"),
+                location == Location::Main
+            );
+            app.studies.window_open = true;
+            let study = text(&mut app, 1);
+            assert!(
+                study.contains(&format!("表示・編集先: {expected}")),
+                "{study}"
+            );
+            let search = text(&mut app, 2);
+            assert!(
+                search.contains(&format!("検索元: {expected} / 領域1")),
+                "{search}"
+            );
+            let quantity = text(&mut app, 3);
+            assert!(
+                quantity.contains(&format!(
+                    "集計元: {expected} / 案 {} / 入力世代 {}",
+                    generation.proposal, generation.generation
+                )),
+                "{quantity}"
+            );
+            assert_eq!(bytes(&app.core.model), model);
+            assert_eq!(bytes(&app.core.scoped.results), results);
+            assert_eq!(app.input_reference(), generation);
+            assert_eq!(app.core.scoped.undo.revision(), revision);
+        }
+    }
+    #[test]
+    fn retained_result_views_apply_contract_input_and_panel_gates_without_changing_saved_evidence()
+    {
+        use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+        let mut app = app();
+        let s = app
+            .create_study("結果有効性".into(), vec![ElemId(2)])
+            .unwrap();
+        app.start_study_calculation(s, 0).unwrap();
+        wait(&mut app);
+        app.switch_study(Location::History(s, 0)).unwrap();
+        let check = app.core.scoped.results.as_ref().unwrap().member_checks[0].clone();
+        let display = references::DisplayConditions {
+            position: Some(check.positions[0].xi),
+            ..Default::default()
+        };
+        let original = app
+            .recorded_target_result_reference(
+                ResultInputKey::Design,
+                references::ReferenceTarget::Member(check.elem),
+                display.clone(),
+            )
+            .unwrap();
+        app.select_displayed_result(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
+        let extra = app
+            .recorded_target_result_reference(
+                ResultInputKey::Design,
+                references::ReferenceTarget::Member(check.elem),
+                display,
+            )
+            .unwrap();
+        app.core.scoped.references.fixed_results.push(extra.clone());
+        app.retain_study_view_references();
+        assert_eq!(
+            app.studies.items[s].runs[0]
+                .result_view_references
+                .evidence
+                .len(),
+            1
+        );
+        app.switch_study(Location::Main).unwrap();
+        let valid = bytes(&app.saved_studies());
+        let path = std::env::temp_dir().join(format!(
+            "sepika-study-validity-{}.ovika",
+            uuid::Uuid::new_v4()
+        ));
+        for additional in [false, true] {
+            for scenario in [
+                "exact",
+                "analysis-missing",
+                "analysis-old",
+                "analysis-future",
+                "design-missing",
+                "design-old",
+                "design-future",
+                "static-input-missing",
+                "static-input-mismatch",
+                "design-input-missing",
+                "design-input-mismatch",
+                "unsupported-panel",
+            ] {
+                app.restore_studies(rmp_serde::from_slice(&valid).unwrap())
+                    .unwrap();
+                let run = &mut app.studies.items[s].runs[0];
+                let (input, bundle, last) = if additional {
+                    let evidence = &mut run.result_view_references.evidence[0];
+                    (
+                        &mut evidence.input,
+                        &mut evidence.bundle,
+                        evidence.last_static,
+                    )
+                } else {
+                    (
+                        &mut run.prepared,
+                        run.results.as_mut().unwrap(),
+                        run.last_static,
+                    )
+                };
+                let static_key = match last.unwrap() {
+                    StaticKey::Case(key) => ResultInputKey::Static(key),
+                    StaticKey::Combo(index) => {
+                        ResultInputKey::Combo(bundle.combos[index].0.clone())
+                    }
+                };
+                match scenario {
+                    "analysis-missing" => bundle.analysis_contract_version = None,
+                    "analysis-old" => {
+                        bundle.analysis_contract_version = Some(ANALYSIS_CONTRACT_VERSION - 1)
+                    }
+                    "analysis-future" => {
+                        bundle.analysis_contract_version = Some(ANALYSIS_CONTRACT_VERSION + 1)
+                    }
+                    "design-missing" => bundle.design_contract_version = None,
+                    "design-old" => {
+                        bundle.design_contract_version = Some(DESIGN_CONTRACT_VERSION - 1)
+                    }
+                    "design-future" => {
+                        bundle.design_contract_version = Some(DESIGN_CONTRACT_VERSION + 1)
+                    }
+                    "static-input-missing" => {
+                        bundle.input_records.retain(|(key, _)| *key != static_key)
+                    }
+                    "design-input-missing" => bundle
+                        .input_records
+                        .retain(|(key, _)| *key != ResultInputKey::Design),
+                    "static-input-mismatch" => {
+                        let mut other = App {
+                            core: input.core(),
+                            ..Default::default()
+                        };
+                        other.core.model.materials[0].young *= 0.9;
+                        let different = other.result_input(&static_key);
+                        bundle
+                            .input_records
+                            .iter_mut()
+                            .find(|(key, _)| *key == static_key)
+                            .unwrap()
+                            .1 = different;
+                    }
+                    "design-input-mismatch" => {
+                        let mut other = App {
+                            core: input.core(),
+                            ..Default::default()
+                        };
+                        other.core.scoped.results = Some(bundle.clone());
+                        other.core.scoped.last_static = last;
+                        other.core.analysis_cfg.rc_damage_control =
+                            !other.core.analysis_cfg.rc_damage_control;
+                        other.run_design_check();
+                        let different = other
+                            .core
+                            .scoped
+                            .results
+                            .as_ref()
+                            .unwrap()
+                            .input_records
+                            .iter()
+                            .find(|(key, _)| *key == ResultInputKey::Design)
+                            .unwrap()
+                            .1
+                            .clone();
+                        let record = bundle
+                            .input_records
+                            .iter_mut()
+                            .find(|(key, _)| *key == ResultInputKey::Design)
+                            .unwrap();
+                        assert!(record.1 != different, "異なる検定条件の生成入力");
+                        record.1 = different;
+                    }
+                    "unsupported-panel" => {
+                        let mut pipe = sepika_core::section_shape::SectionShape::SteelPipe {
+                            outer_dia: 400.0,
+                            thick: 12.0,
+                        }
+                        .to_section(SectionId(1), "未対応パネルの鋼管大梁".into());
+                        pipe.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+                        pipe.material = input.model.sections[1].material;
+                        input.model.sections[1] = pipe;
+                    }
+                    "exact" => {}
+                    _ => unreachable!(),
+                }
+                let stored = bytes(&app.studies.items[s].runs[0]);
+                app.save_project_to(path.clone());
+                assert!(app.core.scoped.last_error.is_none());
+                let mut loaded = App::default();
+                loaded.open_project_from(path.clone());
+                assert!(loaded.core.scoped.last_error.is_none());
+                loaded.switch_study(Location::History(s, 0)).unwrap();
+                let reference = if additional { &extra } else { &original };
+                #[cfg(not(feature = "gui"))]
+                let view;
+                let visible = if additional {
+                    #[cfg(feature = "gui")]
+                    {
+                        loaded.activate_study_result_reference(reference);
+                        &loaded
+                    }
+                    #[cfg(not(feature = "gui"))]
+                    {
+                        view = loaded.study_result_view(reference).unwrap();
+                        &view
+                    }
+                } else {
+                    &loaded
+                };
+                if scenario == "exact" {
+                    assert!(!visible.core.scoped.staleness.results_stale);
+                    assert!(!visible.core.scoped.staleness.design_stale);
+                    assert!(visible.require_selected_static_input().is_ok());
+                    assert!(visible.current_design_results().is_some());
+                    assert!(loaded.resolve_result_reference(reference).is_ok());
+                } else {
+                    assert!(
+                        visible.current_design_results().is_none(),
+                        "{additional}/{scenario}"
+                    );
+                    assert!(
+                        visible.core.scoped.staleness.design_stale,
+                        "{additional}/{scenario}"
+                    );
+                    if scenario.starts_with("design-") {
+                        assert!(
+                            visible.require_selected_static_input().is_ok(),
+                            "{additional}/{scenario}"
+                        );
+                        assert!(!visible.core.scoped.staleness.results_stale);
+                    } else {
+                        assert!(
+                            visible.core.scoped.staleness.results_stale,
+                            "{additional}/{scenario}"
+                        );
+                        assert!(
+                            visible.core.scoped.last_static.is_none(),
+                            "{additional}/{scenario}"
+                        );
+                        assert!(visible
+                            .core
+                            .scoped
+                            .results
+                            .as_ref()
+                            .unwrap()
+                            .member_forces
+                            .is_empty());
+                        #[cfg(feature = "gui")]
+                        if !additional || std::ptr::eq(visible, &loaded) {
+                            assert!(visible.ui.scoped.nav.focus_result.is_none());
+                            assert!(visible.active_viewport().static_key.is_none());
+                            assert!(visible.active_viewport().static_unavailable);
+                        }
+                        if scenario == "unsupported-panel" {
+                            assert!(visible
+                                .core
+                                .scoped
+                                .last_notice
+                                .as_ref()
+                                .is_some_and(|n| n.contains("標準パネル")));
+                        } else {
+                            assert!(visible.core.scoped.result_contract_notice.is_some());
+                        }
+                    }
+                    assert!(
+                        loaded.resolve_result_reference(reference).is_err(),
+                        "{additional}/{scenario}"
+                    );
+                }
+                assert_eq!(
+                    bytes(&loaded.studies.items[s].runs[0]),
+                    stored,
+                    "{additional}/{scenario}"
+                );
+                loaded.save_project_to(path.clone());
+                assert!(loaded.core.scoped.last_error.is_none());
+                let mut restored = App::default();
+                restored.open_project_from(path.clone());
+                assert_eq!(
+                    bytes(&restored.studies.items[s].runs[0]),
+                    stored,
+                    "{additional}/{scenario}"
+                );
+            }
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn quantity_only_study_roundtrip_keeps_fixed_source_without_analysis() {
+        let mut app = app();
+        let s = app.create_study("数量確認".into(), Vec::new()).unwrap();
+        app.switch_study(Location::Proposal(s, 0)).unwrap();
+        let references::EvidenceReference::Quantity(quantity) = app.quantity_evidence_reference()
+        else {
+            panic!()
+        };
+        app.save_study_quantity_reference(*quantity.clone())
+            .unwrap();
+        let saved = bytes(&app.saved_studies());
+        let mut loaded = App::default();
+        loaded
+            .restore_studies(rmp_serde::from_slice(&saved).unwrap())
+            .unwrap();
+        assert_eq!(loaded.studies.items[s].proposals.len(), 1);
+        assert!(loaded.studies.items[s].runs.is_empty());
+        assert_eq!(
+            bytes(&loaded.studies.items[s].quantity_evidence[0]),
+            bytes(&quantity)
+        );
+        loaded.switch_study(Location::Proposal(s, 0)).unwrap();
+        assert_eq!(loaded.input_reference(), quantity.source);
+        assert!(loaded.study_read_only());
     }
     #[test]
     fn proposals_isolate_input_undo_and_incomplete_drafts() {

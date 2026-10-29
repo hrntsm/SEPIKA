@@ -13,6 +13,7 @@ impl App {
         ui: &mut egui::Ui,
         view: &mut crate::viewer::ViewportState,
     ) {
+        crate::theme::panel_heading(ui, "解析結果", "参照専用");
         self.unset_regions_banner(ui);
         let result_options = self.result_display_options();
         let current_key = if view.static_unavailable {
@@ -78,6 +79,17 @@ impl App {
         if let Some(key) = selected_result {
             view.static_key = Some(key);
             view.static_unavailable = false;
+        }
+        if self.ui.view.results_view == ResultsView::Spatial {
+            if !view.static_unavailable {
+                if let Some(key) = view.static_key.or(current_key) {
+                    self.static_evidence_ui(ui, key);
+                } else {
+                    ui.label("静的結果: 未計算・結果なし。入力不備や計算失敗の理由はログで確認してください。");
+                }
+            } else {
+                ui.label("この領域で指定した静的結果は取得不能です。別のケースで代用しません。");
+            }
         }
         ui.separator();
         match self.ui.view.results_view {

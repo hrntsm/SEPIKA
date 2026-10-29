@@ -414,7 +414,7 @@ impl App {
         self.remove_excluded_tip_results(&(keys, combos));
     }
 
-    pub(super) fn invalidate_static_key(&mut self, key: StaticCaseKey) {
+    pub(in crate::app) fn invalidate_static_key(&mut self, key: StaticCaseKey) {
         let id = match key {
             StaticCaseKey::User(id) => Some(id),
             StaticCaseKey::Seismic(dir) => self.seismic_case_id(dir),
@@ -636,7 +636,7 @@ impl App {
         }
     }
 
-    pub(super) fn remove_excluded_tip_results(
+    pub(in crate::app) fn remove_excluded_tip_results(
         &mut self,
         excluded: &(Vec<StaticCaseKey>, Vec<String>),
     ) {

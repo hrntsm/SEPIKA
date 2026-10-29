@@ -127,8 +127,9 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0087](0087-gui-owned-study-and-local-ai.md) | accepted | GUIを検討の所有者とし、外部AIは名前付きパイプで比較案を操作する |
 
 | [0088](0088-version-scoped-references.md) | accepted | 対象参照を入力版内で照合し、計算開始時の案版を保存する |
+| [0089](0089-recorded-result-and-quantity-evidence.md) | accepted | 結果と数量の根拠を固定入力の参照から開く |
 
-| [0089](0089-study-calculation-evidence.md) | accepted | 検討の計算根拠を現在の案入力と分離して保存する |
+| [0090](0090-study-calculation-evidence.md) | accepted | 検討の計算根拠を現在の案入力と分離して保存する |
 
 ## 規約
 

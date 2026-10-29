@@ -91,6 +91,14 @@ pub struct Workspace {
     pub(crate) compact_dock: Option<bool>,
 }
 
+pub(crate) struct EvidenceReturn {
+    location: study::Location,
+    readonly_view: Option<Box<study::Slot>>,
+    tab: Tab,
+    model_tab: ModelTab,
+    placement: Placement,
+}
+
 impl Default for Workspace {
     fn default() -> Self {
         Self {
@@ -129,6 +137,71 @@ fn preference_path() -> Option<std::path::PathBuf> {
 }
 
 impl App {
+    fn switch_evidence_location(
+        &mut self,
+        next: study::Location,
+        restore: Option<study::Slot>,
+    ) -> Result<Option<study::Slot>, String> {
+        let evidence = self.ui.scoped.result_evidence.take();
+        let snapshot = self.ui.scoped.reference_snapshot.take();
+        let snapshot_return = self.ui.scoped.reference_snapshot_return.take();
+        self.retain_study_view_references();
+        let result = self.switch_study_with_view(next);
+        if result.is_ok() {
+            if let Some(mut slot) = restore {
+                slot.core.scoped.references.fixed = self.core.scoped.references.fixed.clone();
+                slot.core.scoped.references.fixed_results =
+                    self.core.scoped.references.fixed_results.clone();
+                slot.core.scoped.staleness.unsaved_changes = false;
+                slot.core.scoped.project_path = self.core.scoped.project_path.clone();
+                slot.core.scoped.pending_save_recording =
+                    self.core.scoped.pending_save_recording.take();
+                self.put_slot(slot);
+            }
+        }
+        self.ui.scoped.result_evidence = evidence;
+        self.ui.scoped.reference_snapshot = snapshot;
+        self.ui.scoped.reference_snapshot_return = snapshot_return;
+        result
+    }
+    pub(crate) fn enter_evidence_editor(
+        &mut self,
+        model_tab: ModelTab,
+    ) -> Result<EvidenceReturn, String> {
+        self.enter_workspace();
+        self.capture_workspace();
+        let mut return_to = EvidenceReturn {
+            location: self.studies.active,
+            readonly_view: None,
+            tab: self.ui.view.active_tab,
+            model_tab: self.ui.view.model_tab,
+            placement: self.ui.view.workspace.placement.clone(),
+        };
+        return_to.readonly_view = self
+            .switch_evidence_location(study::Location::Main, None)?
+            .map(Box::new);
+        self.ui.view.active_tab = Tab::Model;
+        self.enter_workspace();
+        self.ui.view.model_tab = model_tab;
+        self.promote_table(Content::Model);
+        Ok(return_to)
+    }
+
+    pub(crate) fn return_from_evidence_editor(&mut self, return_to: EvidenceReturn) {
+        if let Err(reason) = self.switch_evidence_location(
+            return_to.location,
+            return_to.readonly_view.map(|slot| *slot),
+        ) {
+            self.report_error(reason);
+            return;
+        }
+        self.ui.view.active_tab = return_to.tab;
+        self.enter_workspace();
+        self.ui.view.model_tab = return_to.model_tab;
+        self.ui.view.workspace.placement = return_to.placement;
+        self.apply_workspace_placement(true);
+        self.capture_workspace();
+    }
     pub(crate) fn workspace_dock_id(&self, name: &str) -> egui::Id {
         egui::Id::new((
             name,
@@ -376,7 +449,11 @@ impl App {
                     (Arrangement::Horizontal, "左右二分割"),
                     (Arrangement::Vertical, "上下二分割"),
                 ] {
-                    ui.selectable_value(&mut p.arrangement, arrangement, label);
+                    if crate::theme::selectable_name(ui, p.arrangement == arrangement, label)
+                        .clicked()
+                    {
+                        p.arrangement = arrangement;
+                    }
                 }
                 if ui.button("入替").clicked() {
                     p.contents.swap(0, 1);
@@ -438,13 +515,25 @@ impl App {
         } else {
             let input = self.input_reference();
             ui.label(format!(
-                "本案 · 編集世代 {} · プロジェクト {}",
-                input.generation, input.project
+                "{} · 編集世代 {} · プロジェクト {}",
+                self.study_display_name(),
+                input.generation,
+                input.project
             ));
             let response = self.workspace_controls(ui);
-            ui.label(
-                "属性・検索・Undo / Redo の対象: 本案（画面の閲覧だけでは編集先を変更しません）",
-            );
+            if self.study_is_main() {
+                ui.label("属性・検索・Undo / Redo の対象: 本案（画面の閲覧だけでは編集先を変更しません）");
+            } else if self.study_read_only() {
+                ui.label(format!(
+                    "属性・検索の対象: {}（入力編集・Undo / Redo は利用できません）",
+                    self.study_display_name()
+                ));
+            } else {
+                ui.label(format!(
+                    "属性・検索・Undo / Redo の対象: {}（固定対象の断面割当のみ編集できます）",
+                    self.study_display_name()
+                ));
+            }
             response
         };
         retain_input_focus(ui, input_focus, controls.rect);
@@ -455,11 +544,16 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label("狭幅表示:");
                 for index in 0..2 {
-                    ui.selectable_value(
-                        &mut self.ui.view.workspace.placement.active,
-                        index,
-                        format!("領域{}", index + 1),
-                    );
+                    let active = &mut self.ui.view.workspace.placement.active;
+                    if crate::theme::selectable_name(
+                        ui,
+                        *active == index,
+                        &format!("領域{}", index + 1),
+                    )
+                    .clicked()
+                    {
+                        *active = index;
+                    }
                 }
             });
         }
@@ -530,9 +624,12 @@ impl App {
         let input_focus = text_input_focus(ui);
         let header = ui.horizontal_wrapped(|ui| {
             let active = self.ui.view.workspace.placement.active == index;
-            if ui
-                .selectable_label(active, format!("領域{} · 本案", index + 1))
-                .clicked()
+            if crate::theme::selectable_name(
+                ui,
+                active,
+                &format!("領域{} · {}", index + 1, self.study_display_name()),
+            )
+            .clicked()
             {
                 self.ui.view.workspace.placement.active = index;
             }

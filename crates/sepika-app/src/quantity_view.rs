@@ -52,6 +52,14 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
     if changed {
         app.apply_model_edit(Box::new(sepika_edit::SetQuantityCfg { cfg }));
     }
+    let source = app.input_reference();
+    ui.label(format!(
+        "集計元: {} / 案 {} / 入力世代 {}",
+        app.study_display_name(),
+        source.proposal,
+        source.generation
+    ));
+    ui.label("集計対象: モデル全体（図の選択・階や通りの絞込みに依存しません）。表示時に算定し、保存結果の履歴とは別です。");
 
     let takeoff = match try_compute_quantity_takeoff(&app.core.model, &app.core.model.quantity_cfg)
     {
@@ -109,6 +117,14 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
     });
 
     let totals = takeoff.totals();
+    let steel_volume_m3 = totals.steel_t / sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3;
+    ui.label(format!("鋼材体積 {steel_volume_m3:.6} m³ / 鉄骨数量の対象（S・SRC・CFT・ブレース）。鉄筋を含みません。"));
+    if ui.button("体積・数量の対象と集計時入力を見る").clicked() {
+        let reference = app.quantity_evidence_reference();
+        if let Err(reason) = app.open_result_evidence(&reference) {
+            app.report_notice(reason);
+        }
+    }
     ui.horizontal(|ui| {
         ui.label(format!("コンクリート {:.1} m³", totals.concrete_m3));
         ui.separator();

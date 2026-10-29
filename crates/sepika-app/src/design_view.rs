@@ -22,7 +22,7 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
     app.commit_analysis_settings(cfg);
     for reason in app.core.model.story_level_diagnostics() {
         ui.colored_label(
-            crate::theme::ERROR_RED,
+            crate::theme::ERROR_TEXT,
             format!("層間変形角 算定不能: {reason}"),
         );
     }
@@ -80,10 +80,10 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
                 row.col(|ui| {
                     let txt = crate::summary::metric_value_text(&m.rs);
                     if m.rs_ok == Some(true) {
-                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
+                        ui.colored_label(crate::theme::GOOD_TEXT, txt);
                     } else {
                         ui.colored_label(
-                            crate::theme::ERROR_RED,
+                            crate::theme::ERROR_TEXT,
                             format!("{} {}", txt, crate::summary::metric_verdict_text(m.rs_ok)),
                         )
                         .on_hover_text(&txt);
@@ -92,10 +92,10 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
                 row.col(|ui| {
                     let txt = crate::summary::metric_value_text(&m.re);
                     if m.re_ok == Some(true) {
-                        ui.colored_label(crate::theme::GOOD_GREEN, txt);
+                        ui.colored_label(crate::theme::GOOD_TEXT, txt);
                     } else {
                         ui.colored_label(
-                            crate::theme::ERROR_RED,
+                            crate::theme::ERROR_TEXT,
                             format!("{} {}", txt, crate::summary::metric_verdict_text(m.re_ok)),
                         )
                         .on_hover_text(&txt);
@@ -110,7 +110,7 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
         for metric in &metrics {
             if let Err(reason) = &metric.fes {
                 ui.colored_label(
-                    crate::theme::ERROR_RED,
+                    crate::theme::ERROR_TEXT,
                     format!("必要保有水平耐力・合否は算定不能: {reason}"),
                 );
             }
@@ -164,6 +164,18 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     }
 
     ui.strong("部材検定（許容応力度）");
+    app.result_origin_ui(ui, crate::app::references::ResultInputKey::Design);
+    ui.collapsing("保持された検定結果の位置・根拠（履歴を含む）", |ui| {
+        let recorded_model = app.calculation_snapshot(&crate::app::references::ResultInputKey::Design).ok().map(|(_, model)| model);
+        let positions: Vec<_> = app.core.scoped.results.as_ref().map(|bundle| bundle.member_checks.iter().flat_map(|member| member.positions.iter().map(move |p| (member.elem, p.xi))).collect()).unwrap_or_default();
+        if positions.is_empty() { ui.label("主架構検定: 未検定・結果なし。計算失敗・入力不備の理由はログで確認してください。"); }
+        for (elem, position) in positions {
+            let section = recorded_model.as_ref().and_then(|model| model.element(elem).and_then(|member| member.section).and_then(|id| model.section(id))).map_or("取得不能", |section| section.name.as_str());
+            if ui.button(format!("部材 #{} / ξ={position:.3} / 計算時断面 {section} / 検定比・支配条件・既存詳細", elem.0)).clicked() {
+                app.open_member_check_evidence(elem, position);
+            }
+        }
+    });
     if ui
         .add_enabled(
             app.study_is_main() && app.core.scoped.job.is_none(),
@@ -271,14 +283,19 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 .collect()
         })
         .unwrap_or_default();
+    let recorded_model = app
+        .calculation_snapshot(&crate::app::references::ResultInputKey::Design)
+        .ok()
+        .map(|(_, model)| model);
     let section_of: Vec<Option<(sepika_core::ids::SectionId, String)>> = checks
         .iter()
         .map(|row| {
-            app.core
-                .model
-                .element(row.elem)
-                .and_then(|e| e.section)
-                .and_then(|sid| app.core.model.section(sid).map(|s| (sid, s.name.clone())))
+            recorded_model.as_ref().and_then(|model| {
+                model
+                    .element(row.elem)
+                    .and_then(|e| e.section)
+                    .and_then(|sid| model.section(sid).map(|s| (sid, s.name.clone())))
+            })
         })
         .collect();
 
@@ -299,14 +316,14 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
 
     let n = checks.len();
     let mut focus: Option<sepika_core::ids::ElemId> = None;
-    let mut jump_to_section: Option<(sepika_core::ids::SectionId, sepika_core::ids::ElemId)> = None;
+    let mut evidence = None;
     crate::table_util::standard_table(
         ui,
         "design_member_checks",
         &[
             Col::id_named("部材"),
             Col::num("位置"),
-            Col::num("検定比"),
+            Col::wide_num("検定比・表示状態"),
             Col::label("判定"),
             Col::text("根拠"),
             Col::text("内訳"),
@@ -332,7 +349,14 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             });
             row.col(|ui| match r.ratio {
                 Some(ratio) => {
-                    ui.colored_label(crate::theme::status_color(ratio), format!("{:.4}", ratio));
+                    let (color, state) = crate::theme::ratio_status(ratio);
+                    if ui
+                        .button(egui::RichText::new(format!("{ratio:.4} {state}")).color(color))
+                        .on_hover_text("検定位置・支配条件・既存詳細・計算時入力を開く")
+                        .clicked()
+                    {
+                        evidence = Some((r.elem, r.pos));
+                    }
                 }
                 None => {
                     ui.label("-");
@@ -343,7 +367,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     ui.label("OK");
                 }
                 Some(false) => {
-                    ui.colored_label(crate::theme::ERROR_RED, "NG");
+                    ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                 }
                 None => {
                     ui.colored_label(crate::theme::GRAY_600, "検定不能");
@@ -365,9 +389,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                             if idx > 0 {
                                 ui.label("／");
                             }
+                            let (color, state) = crate::theme::ratio_status(c.ratio);
                             ui.colored_label(
-                                crate::theme::status_color(c.ratio),
-                                format!("{} {:.2}", c.kind.label(), c.ratio),
+                                color,
+                                format!("{} {:.2} {state}", c.kind.label(), c.ratio),
                             )
                             .on_hover_text(&c.detail);
                         }
@@ -375,26 +400,26 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 }
             });
             row.col(|ui| match &section_of[i] {
-                Some((sid, name)) => {
+                Some((_sid, name)) => {
                     if ui
                         .button(name)
-                        .on_hover_text("クリックでモデルタブの断面編集へ移動")
+                        .on_hover_text("計算時の断面と材料を確認し、現在入力の編集先を選びます")
                         .clicked()
                     {
-                        jump_to_section = Some((*sid, r.elem));
+                        evidence = Some((r.elem, r.pos));
                     }
                 }
                 None => {
-                    ui.label("-");
+                    ui.label("取得不能");
                 }
             });
         },
     );
+    if let Some((elem, position)) = evidence {
+        app.open_member_check_evidence(elem, position);
+    }
     if let Some(id) = focus {
         app.select_member(id);
-    }
-    if let Some((sid, eid)) = jump_to_section {
-        jump_to_member_section(app, sid, eid);
     }
 
     struct JointCheckRow {
@@ -459,7 +484,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             &[
                 Col::id_named("節点"),
                 Col::name("種別"),
-                Col::num("検定比"),
+                Col::wide_num("検定比・表示状態"),
                 Col::label("判定"),
                 Col::text("根拠"),
             ],
@@ -474,10 +499,8 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 });
                 row.col(|ui| match j.ratio {
                     Some(ratio) => {
-                        ui.colored_label(
-                            crate::theme::status_color(ratio),
-                            format!("{:.4}", ratio),
-                        );
+                        let (color, state) = crate::theme::ratio_status(ratio);
+                        ui.colored_label(color, format!("{ratio:.4} {state}"));
                     }
                     None => {
                         ui.label("-");
@@ -488,7 +511,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         ui.label("OK");
                     }
                     Some(false) => {
-                        ui.colored_label(crate::theme::ERROR_RED, "NG");
+                        ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                     }
                     None => {
                         ui.colored_label(crate::theme::GRAY_600, "検定不能");
@@ -758,9 +781,9 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     });
                     row.col(|ui| {
                         if s.ok {
-                            ui.colored_label(crate::theme::GOOD_GREEN, "OK");
+                            ui.colored_label(crate::theme::GOOD_TEXT, "OK");
                         } else {
-                            ui.colored_label(crate::theme::ERROR_RED, "NG");
+                            ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                         }
                     });
                     row.col(|ui| {
@@ -863,17 +886,6 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     floor_design_section(ui, app);
 }
 
-fn jump_to_member_section(
-    app: &mut App,
-    section: sepika_core::ids::SectionId,
-    member: sepika_core::ids::ElemId,
-) {
-    app.select_member(member);
-    app.ui.view.active_tab = crate::app::Tab::Model;
-    app.ui.view.model_tab = crate::app::ModelTab::Sections;
-    app.ui.scoped.nav.focus_section = Some(section);
-}
-
 /// 床の中での小梁・スラブ設計の表示（`ResultsBundle.beam_checks`/`slab_checks`）。
 /// 小梁は単純梁または片持ち梁として曲げ・たわみを検定し、スラブは一方向版として設計曲げ
 /// モーメント・必要鉄筋量を表示する（いずれも全体 FEM から独立）。
@@ -911,7 +923,7 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                 Col::num("M[kN·m]"),
                 Col::num("Q[kN]"),
                 Col::wide_num("δ[mm]"),
-                Col::num("検定比"),
+                Col::wide_num("検定比・表示状態"),
                 Col::label("判定"),
             ],
             r.beam_checks.len(),
@@ -956,18 +968,20 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                     }));
                 });
                 row.col(|ui| {
-                    ui.colored_label(
-                        crate::theme::status_color(jr.ratio),
-                        format!("{:.2}", jr.ratio),
-                    );
+                    if jr.unchecked {
+                        ui.label("— 未検定");
+                    } else {
+                        let (color, state) = crate::theme::ratio_status(jr.ratio);
+                        ui.colored_label(color, format!("{:.2} {state}", jr.ratio));
+                    }
                 });
                 row.col(|ui| {
                     if jr.unchecked {
                         ui.label("未");
                     } else if jr.ok {
-                        ui.colored_label(crate::theme::GOOD_GREEN, "OK");
+                        ui.colored_label(crate::theme::GOOD_TEXT, "OK");
                     } else {
-                        ui.colored_label(crate::theme::ERROR_RED, "NG");
+                        ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                     }
                 });
             },
@@ -1254,7 +1268,6 @@ pub(crate) fn holding_rank_mode_input(ui: &mut egui::Ui, app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sepika_core::ids::{ElemId, SectionId};
 
     #[test]
     fn metrics_810_gui_csv_reject_edited_model_results() {
@@ -1362,20 +1375,5 @@ mod tests {
         let text = render(&mut app);
         assert!(text.contains("層間変形角 算定不能"));
         assert!(crate::summary::build_report_csv(&app).contains("層間変形角 算定不能"));
-    }
-
-    #[test]
-    fn section_jump_replaces_other_member_detail() {
-        let mut app = App::default();
-        app.select_member(ElemId(0));
-        app.ui.scoped.nav.focus_section = Some(SectionId(0));
-
-        jump_to_member_section(&mut app, SectionId(1), ElemId(1));
-
-        assert_eq!(app.ui.scoped.selection.members(), &[ElemId(1)]);
-        assert_eq!(app.ui.scoped.selection.active_member(), Some(ElemId(1)));
-        assert_eq!(app.ui.scoped.nav.focus_section, Some(SectionId(1)));
-        assert_eq!(app.ui.view.active_tab, crate::app::Tab::Model);
-        assert_eq!(app.ui.view.model_tab, crate::app::ModelTab::Sections);
     }
 }

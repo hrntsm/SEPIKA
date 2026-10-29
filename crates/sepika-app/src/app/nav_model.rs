@@ -171,9 +171,12 @@ impl App {
                     for sid in ids {
                         let sec = &self.core.model.sections[sid.index()];
                         let is_focus = self.ui.scoped.nav.focus_section == Some(*sid);
-                        let resp = ui
-                            .selectable_label(is_focus, format!("[{}] {}", sec.id.0, sec.name))
-                            .on_hover_text("クリックで断面テーブルへ移動");
+                        let resp = crate::theme::selectable_name(
+                            ui,
+                            is_focus,
+                            &format!("[{}] {}", sec.id.0, sec.name),
+                        )
+                        .on_hover_text("クリックで断面テーブルへ移動");
                         if resp.clicked() {
                             jump = Some(*sid);
                         }
@@ -213,9 +216,12 @@ impl App {
                     for mid in ids {
                         let mat = &self.core.model.materials[mid.index()];
                         let is_focus = self.ui.scoped.nav.focus_material == Some(*mid);
-                        let resp = ui
-                            .selectable_label(is_focus, format!("[{}] {}", mat.id.0, mat.name))
-                            .on_hover_text("クリックで材料テーブルへ移動");
+                        let resp = crate::theme::selectable_name(
+                            ui,
+                            is_focus,
+                            &format!("[{}] {}", mat.id.0, mat.name),
+                        )
+                        .on_hover_text("クリックで材料テーブルへ移動");
                         if resp.clicked() {
                             jump = Some(*mid);
                         }
