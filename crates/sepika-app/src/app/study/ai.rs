@@ -81,14 +81,67 @@ impl Default for StudyAi {
     }
 }
 
+impl StudyAi {
+    /// 同じ要求ID・入力版の保持計算と所有する実行から同期し、状態変更の有無を返す。
+    pub(super) fn sync_jobs(
+        &mut self,
+        runs: &[super::StudyRun],
+        running: Option<&super::RunningStudy>,
+    ) -> bool {
+        let mut changed = false;
+        for job in &mut self.jobs {
+            let pending = matches!(job.state.as_str(), "running" | "awaiting_gui_confirmation");
+            if !pending && job.state != "interrupted_no_result" {
+                continue;
+            }
+            let found = runs.iter().position(|run| {
+                run.ai_job.as_ref() == Some(&job.id) && run.input.input_reference() == job.input
+            });
+            let active = running.filter(|running| running.ai_job.as_ref() == Some(&job.id));
+            let failure = active.and_then(|running| running.ai_error.as_ref());
+            let state = if failure.is_some() {
+                "failed"
+            } else if let Some(index) = found {
+                if runs[index].error.is_some() || runs[index].results.is_none() {
+                    "failed"
+                } else {
+                    "calculated"
+                }
+            } else if pending {
+                match active {
+                    Some(running)
+                        if running.worker.core.scoped.pending_unset_analysis.is_some() =>
+                    {
+                        "awaiting_gui_confirmation"
+                    }
+                    Some(_) => "running",
+                    None => "interrupted_no_result",
+                }
+            } else {
+                "interrupted_no_result"
+            };
+            let error = failure
+                .cloned()
+                .or_else(|| found.and_then(|index| runs[index].error.clone()));
+            if job.state != state || job.run_index != found || job.error != error {
+                job.state = state.into();
+                job.run_index = found;
+                job.error = error;
+                changed = true;
+            }
+        }
+        changed
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AiJob {
     pub id: String,
     pub request: String,
     pub input: super::references::InputReference,
     pub state: String,
+    pub error: Option<String>,
     pub run_index: Option<usize>,
-    pub previous_runs: usize,
 }
 
 pub struct Permission {

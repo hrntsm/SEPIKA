@@ -36,6 +36,133 @@ fn accepted(response: Response) -> Value {
 }
 
 #[test]
+fn worker_errors_and_disconnections_remain_failed_with_their_reason_after_reload() {
+    for disconnected in [false, true] {
+        let (mut app, s) = fixture();
+        let p = app.create_comparison(s, "実行失敗".into()).unwrap();
+        permit(&mut app, s, Mode::Comparison);
+        accepted(call(&mut app, s, p, "begin_request", Value::Null));
+        accepted(call(&mut app, s, p, "calculate", Value::Null));
+        let input = app.ai_proposal_reference(s, p);
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.studies.running.as_mut().unwrap().preparing = Some(rx);
+        if !disconnected {
+            tx.send(Err("fixtureの計算worker失敗".into())).unwrap();
+        }
+        drop(tx);
+        app.studies.dirty = false;
+        assert!(app.poll_study_calculation());
+        assert!(app.studies.running.is_none());
+        assert!(app.studies.items[s].runs.is_empty());
+        assert_eq!(app.ai_calculation_state(s, &input), "failed");
+        let error = app.studies.items[s].ai.jobs[0].error.clone().unwrap();
+        assert!(error.contains(if disconnected {
+            "異常終了"
+        } else {
+            "fixtureの計算worker失敗"
+        }));
+        assert!(app.studies.dirty);
+        let saved = app.saved_studies();
+        app.restore_studies(saved).unwrap();
+        assert_eq!(app.ai_calculation_state(s, &input), "failed");
+        assert_eq!(
+            app.studies.items[s].ai.jobs[0].error.as_deref(),
+            Some(error.as_str())
+        );
+        assert!(app.studies.items[s].ai.jobs[0].run_index.is_none());
+    }
+}
+
+#[test]
+fn completed_calculation_is_saved_as_calculated_without_an_intervening_ai_poll() {
+    let (mut app, s) = fixture();
+    let p = app.create_comparison(s, "即時保存".into()).unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, p, "begin_request", Value::Null));
+    accepted(call(&mut app, s, p, "calculate", Value::Null));
+    let input = app.ai_proposal_reference(s, p);
+    crate::app::study::tests::wait(&mut app);
+    assert_eq!(app.studies.items[s].ai.jobs[0].state, "calculated");
+    assert_eq!(app.studies.items[s].ai.jobs[0].run_index, Some(0));
+    let path = std::env::temp_dir().join(format!(
+        "sepika-ai-immediate-save-{}.ovika",
+        uuid::Uuid::new_v4()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    assert_eq!(reopened.ai_calculation_state(s, &input), "calculated");
+    assert_eq!(reopened.studies.items[s].ai.jobs[0].run_index, Some(0));
+    std::fs::remove_file(path).unwrap();
+    let saved = app.saved_studies();
+    assert_eq!(saved.items[s].ai.jobs[0].state, "calculated");
+    app.restore_studies(saved).unwrap();
+    assert_eq!(app.ai_calculation_state(s, &input), "calculated");
+    assert_eq!(app.studies.items[s].ai.jobs[0].run_index, Some(0));
+    let mut raced = app.saved_studies();
+    raced.items[s].ai.jobs[0].state = "running".into();
+    raced.items[s].ai.jobs[0].run_index = None;
+    app.restore_studies(raced).unwrap();
+    assert_eq!(app.ai_calculation_state(s, &input), "calculated");
+    let mut raced = app.saved_studies();
+    raced.items[s].ai.jobs[0].state = "interrupted_no_result".into();
+    raced.items[s].ai.jobs[0].run_index = None;
+    app.restore_studies(raced).unwrap();
+    assert_eq!(app.ai_calculation_state(s, &input), "calculated");
+    app.studies.items[s].ai.jobs[0].state = "running".into();
+    app.studies.items[s].ai.jobs[0].run_index = None;
+    assert_eq!(app.saved_studies().items[s].ai.jobs[0].state, "calculated");
+}
+
+#[test]
+fn unfinished_calculation_reloads_as_interrupted_and_sync_changes_are_dirty_only_once() {
+    let (mut app, s) = fixture();
+    let p = app.create_comparison(s, "未完了".into()).unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, p, "begin_request", Value::Null));
+    accepted(call(&mut app, s, p, "calculate", Value::Null));
+    let input = app.ai_proposal_reference(s, p);
+    let saved = app.saved_studies();
+    assert!(saved.items[s].runs.is_empty());
+    app.restore_studies(saved).unwrap();
+    assert_eq!(app.ai_calculation_state(s, &input), "interrupted_no_result");
+    assert!(app.studies.items[s].ai.jobs[0].run_index.is_none());
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, p, "calculate", Value::Null));
+    crate::app::study::tests::wait(&mut app);
+    assert_eq!(
+        app.studies.items[s].ai.jobs[0].state,
+        "interrupted_no_result"
+    );
+    assert!(app.studies.items[s].ai.jobs[0].run_index.is_none());
+    let saved = app.saved_studies();
+    app.restore_studies(saved).unwrap();
+    assert_eq!(
+        app.studies.items[s].ai.jobs[0].state,
+        "interrupted_no_result"
+    );
+    assert_eq!(app.studies.items[s].ai.jobs[1].state, "calculated");
+    let last = app.studies.items[s].ai.jobs.len() - 1;
+    app.studies.items[s].ai.jobs[last].state = "running".into();
+    app.studies.items[s].ai.jobs[last].run_index = None;
+    app.studies.dirty = false;
+    app.core.scoped.staleness.unsaved_changes = false;
+    assert!(!app.project_unsaved());
+    let main = app.input_reference();
+    app.sync_ai_jobs();
+    assert!(app.project_unsaved());
+    assert!(app.studies.dirty);
+    assert_eq!(app.studies.items[s].ai.jobs[last].state, "calculated");
+    assert_eq!(app.input_reference(), main);
+    app.studies.dirty = false;
+    app.core.scoped.staleness.unsaved_changes = false;
+    app.sync_ai_jobs();
+    assert!(!app.project_unsaved());
+}
+
+#[test]
 fn only_the_calculating_proposal_is_locked_and_other_proposal_edits_do_not_change_its_input() {
     let (mut app, s) = fixture();
     let running = app.create_comparison(s, "計算中".into()).unwrap();

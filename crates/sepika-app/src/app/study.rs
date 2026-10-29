@@ -80,6 +80,13 @@ pub struct StudyInput {
     pub references: references::ProjectReferences,
 }
 impl StudyInput {
+    fn input_reference(&self) -> references::InputReference {
+        App {
+            core: self.core(),
+            ..Default::default()
+        }
+        .input_reference()
+    }
     fn capture(core: &AppCore) -> Self {
         let mut references = core.scoped.references.clone();
         references.generation +=
@@ -203,6 +210,8 @@ impl ViewReferences {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StudyRun {
+    #[serde(default)]
+    pub ai_job: Option<String>,
     pub proposal: String,
     pub proposal_name: String,
     pub input_view_references: ViewReferences,
@@ -268,6 +277,8 @@ impl StudyRun {
     }
 }
 pub struct RunningStudy {
+    ai_job: Option<String>,
+    ai_error: Option<String>,
     study: usize,
     name: String,
     #[cfg(any(feature = "gui", test))]
@@ -319,6 +330,7 @@ fn finish_study_run(worker: &mut App, input: &StudyInput, name: String) -> Study
         .take()
         .unwrap_or_else(|| worker.core.scoped.diagnostics.clone());
     StudyRun {
+        ai_job: None,
         expected_result_checks: worker
             .core
             .scoped
@@ -827,25 +839,35 @@ impl App {
                 .items
                 .iter()
                 .enumerate()
-                .map(|(s, study)| SavedStudy {
-                    ai: study.ai.clone(),
-                    purpose: study.purpose.clone(),
-                    notes: study.notes.clone(),
-                    fixed: study.fixed.clone(),
-                    baseline: study.baseline.clone(),
-                    quantity_evidence: study.quantity_evidence.clone(),
-                    proposals: study
-                        .proposals
-                        .iter()
-                        .enumerate()
-                        .map(|(p, proposal)| (proposal.name.clone(), self.proposal_input(s, p)))
-                        .collect(),
-                    runs: self.saved_study_runs(s),
-                    decisions: study
-                        .decisions
-                        .iter()
-                        .map(adoption::Decision::snapshot)
-                        .collect(),
+                .map(|(s, study)| {
+                    let runs = self.saved_study_runs(s);
+                    let mut ai = study.ai.clone();
+                    let running = self
+                        .studies
+                        .running
+                        .as_ref()
+                        .filter(|running| running.study == s);
+                    ai.sync_jobs(&runs, running);
+                    SavedStudy {
+                        ai,
+                        purpose: study.purpose.clone(),
+                        notes: study.notes.clone(),
+                        fixed: study.fixed.clone(),
+                        baseline: study.baseline.clone(),
+                        quantity_evidence: study.quantity_evidence.clone(),
+                        proposals: study
+                            .proposals
+                            .iter()
+                            .enumerate()
+                            .map(|(p, proposal)| (proposal.name.clone(), self.proposal_input(s, p)))
+                            .collect(),
+                        runs,
+                        decisions: study
+                            .decisions
+                            .iter()
+                            .map(adoption::Decision::snapshot)
+                            .collect(),
+                    }
                 })
                 .collect(),
         }
@@ -898,11 +920,7 @@ impl App {
             });
         }
         for study in &mut items {
-            for job in &mut study.ai.jobs {
-                if matches!(job.state.as_str(), "running" | "awaiting_gui_confirmation") {
-                    job.state = "interrupted_no_result".into();
-                }
-            }
+            study.ai.sync_jobs(&study.runs, None);
         }
         self.studies = Studies {
             items,
@@ -930,6 +948,8 @@ impl App {
             false,
         ));
         self.studies.running = Some(RunningStudy {
+            ai_job: None,
+            ai_error: None,
             study: s,
             name,
             #[cfg(any(feature = "gui", test))]
@@ -958,6 +978,7 @@ impl App {
     }
     pub fn poll_study_calculation(&mut self) -> bool {
         let Some(mut running) = self.studies.running.take() else {
+            self.sync_ai_jobs();
             return false;
         };
         if let Some(preparing) = &running.preparing {
@@ -967,20 +988,21 @@ impl App {
                     running.preparing = None;
                     self.studies.window_open = true;
                 }
-                Ok(Ok(StudyWorkerOutcome::Finished(run))) => {
+                Ok(Ok(StudyWorkerOutcome::Finished(mut run))) => {
+                    run.ai_job = running.ai_job.take();
                     self.studies.items[running.study].runs.push(*run);
                     self.mark_study_dirty();
+                    self.sync_ai_jobs();
                     return true;
                 }
                 Ok(Err(reason)) => {
-                    self.report_error(format!("検討「{}」: {reason}", running.name));
+                    self.fail_study_worker(running, reason);
+                    self.sync_ai_jobs();
                     return true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.report_error(format!(
-                        "検討「{}」の計算スレッドが異常終了しました",
-                        running.name
-                    ));
+                    self.fail_study_worker(running, "計算スレッドが異常終了しました".into());
+                    self.sync_ai_jobs();
                     return true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -989,7 +1011,22 @@ impl App {
             self.studies.window_open = true;
         }
         self.studies.running = Some(running);
+        self.sync_ai_jobs();
         false
+    }
+    pub(crate) fn sync_ai_jobs(&mut self) {
+        let mut changed = false;
+        for (s, study) in self.studies.items.iter_mut().enumerate() {
+            let running = self
+                .studies
+                .running
+                .as_ref()
+                .filter(|running| running.study == s);
+            changed |= study.ai.sync_jobs(&study.runs, running);
+        }
+        if changed {
+            self.mark_study_dirty();
+        }
     }
     pub fn study_main_changed(&self, s: usize) -> bool {
         let main = if self.study_is_main() {
@@ -999,6 +1036,14 @@ impl App {
         };
         let baseline = &self.studies.items[s].baseline;
         !adoption::same_input(&StudyInput::capture(main), baseline)
+    }
+    fn fail_study_worker(&mut self, mut running: RunningStudy, reason: String) {
+        self.report_error(format!("検討「{}」: {reason}", running.name));
+        running.ai_error = Some(reason);
+        let study = &mut self.studies.items[running.study];
+        if study.ai.sync_jobs(&study.runs, Some(&running)) {
+            self.mark_study_dirty();
+        }
     }
 }
 

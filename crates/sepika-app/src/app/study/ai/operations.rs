@@ -469,7 +469,8 @@ impl App {
                 if old {return Err(reject("input_conflict","計算開始には現在入力版を指定してください"));}
                 if !request.arguments.is_null() && request.arguments!=json!({}) {return Err(reject("unsupported","計算条件の上書きには対応していません"));}
                 self.start_study_calculation(s,p).map_err(|e|reject("calculation_busy",e))?;
-                let job=AiJob {id:request.id.clone(),request:task_id.into(),input:current.clone(),state:"running".into(),run_index:None,previous_runs:self.studies.items[s].runs.len()};
+                self.studies.running.as_mut().expect("開始した計算").ai_job=Some(request.id.clone());
+                let job=AiJob {id:request.id.clone(),request:task_id.into(),input:current.clone(),state:"running".into(),error:None,run_index:None};
                 self.studies.items[s].ai.jobs.push(job.clone());
                 json!(job)
             }
@@ -591,11 +592,7 @@ impl App {
         }
     }
     fn ai_input_reference(input: &StudyInput) -> InputReference {
-        App {
-            core: input.core(),
-            ..Default::default()
-        }
-        .input_reference()
+        input.input_reference()
     }
     fn ai_proposals(&self, s: usize) -> Value {
         Value::Array(self.studies.items[s].proposals.iter().enumerate().map(|(p,proposal)|json!({"name":proposal.name,"baseline":p==0,"input":self.ai_proposal_reference(s,p)})).collect())
@@ -817,38 +814,6 @@ impl App {
         Ok(
             json!({"applied":applied,"members":ids,"section":assign.section,"input":self.ai_proposal_reference(s,p)}),
         )
-    }
-
-    pub(super) fn sync_ai_jobs(&mut self) {
-        for (s, study) in self.studies.items.iter_mut().enumerate() {
-            for job in &mut study.ai.jobs {
-                if !matches!(job.state.as_str(), "running" | "awaiting_gui_confirmation") {
-                    continue;
-                }
-                if let Some(run_index) = (job.previous_runs..study.runs.len())
-                    .find(|r| Self::ai_input_reference(&study.runs[*r].input) == job.input)
-                {
-                    let run = &study.runs[run_index];
-                    job.run_index = Some(run_index);
-                    job.state = if run.error.is_some() || run.results.is_none() {
-                        "failed"
-                    } else {
-                        "calculated"
-                    }
-                    .into();
-                } else if let Some(running) = self.studies.running.as_ref().filter(|r| r.study == s)
-                {
-                    job.state = if running.worker.core.scoped.pending_unset_analysis.is_some() {
-                        "awaiting_gui_confirmation"
-                    } else {
-                        "running"
-                    }
-                    .into();
-                } else {
-                    job.state = "interrupted_no_result".into();
-                }
-            }
-        }
     }
 
     fn ai_calculation_state(&self, s: usize, input: &InputReference) -> String {
