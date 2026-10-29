@@ -1,5 +1,965 @@
 use super::*;
 
+#[cfg(feature = "gui")]
+fn prepared_call(app: &mut App, s: usize, id: &str, operation: &str, arguments: Value) -> Response {
+    let input = app.studies.items[s]
+        .ai
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .unwrap()
+        .started_input
+        .clone();
+    let mut req = request(app, s, 0, operation, arguments);
+    req.request = Some(id.into());
+    req.proposal = Some(input.proposal.clone());
+    req.input = Some(json!(input));
+    app.handle_ai_request("client", req)
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn prepared_review_keeps_generic_targets_unstarted_and_read_only_after_copy_connection_and_reload()
+{
+    let mut app = crate::app::study::tests::app();
+    app.select_node(NodeId(0));
+    app.prepare_ai_request("節点の条件を確認".into(), Mode::Review)
+        .unwrap();
+    let original = app.input_reference();
+    let (s, id) = app.confirm_ai_request().unwrap();
+    app.select_member(ElemId(2));
+    let task = &app.studies.items[s].ai.tasks[0];
+    assert_eq!(task.fixed[0].target, ReferenceTarget::Node(NodeId(0)));
+    assert_eq!(task.started_input, original);
+    assert_eq!(task.status(&[]), "未開始");
+    assert!(app.studies.items[s].fixed.is_empty());
+    assert_eq!(app.studies.items[s].proposals.len(), 1);
+    let text = app.ai_request_text(s, &id).unwrap();
+    assert!(text.contains(&id));
+    assert!(text.contains(&app.studies.items[s].ai.id));
+    assert!(!text.contains("young"));
+    permit(&mut app, s, Mode::Comparison);
+    assert_eq!(
+        prepared_call(&mut app, s, &id, "begin_request", Value::Null)
+            .error
+            .unwrap()
+            .code,
+        "request_conflict"
+    );
+    assert!(app.studies.items[s].ai.tasks[0].started.is_none());
+    app.disconnect_ai_connection();
+    permit(&mut app, s, Mode::Review);
+    assert_eq!(app.studies.items[s].ai.tasks[0].status(&[]), "未開始");
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "begin_request",
+        Value::Null,
+    ));
+    assert_eq!(
+        app.studies.items[s].ai.tasks[0].status(&[]),
+        "作業中（内部処理は未観測）"
+    );
+    assert_eq!(
+        prepared_call(
+            &mut app,
+            s,
+            &id,
+            "create_comparison",
+            json!({"name":"禁止"})
+        )
+        .error
+        .unwrap()
+        .code,
+        "permission_denied"
+    );
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "submit",
+        json!({"explanation":"元の節点条件を確認しました","unchecked":["設計上の採否"],"references":[]}),
+    ));
+    assert_eq!(app.studies.items[s].ai.tasks[0].status(&[]), "成果提出済み");
+    app.studies.dirty = false;
+    app.set_ai_request_note(s, &id, "人が追加の根拠を確認する".into())
+        .unwrap();
+    assert!(app.studies.dirty);
+    app.disconnect_ai_connection();
+    assert!(app.studies.items[s].ai.tasks[0]
+        .status(&[])
+        .contains("接続中断"));
+    let saved = rmp_serde::to_vec_named(&app.saved_studies()).unwrap();
+    app.restore_studies(rmp_serde::from_slice(&saved).unwrap())
+        .unwrap();
+    assert!(app.ai_connection.permission.is_none());
+    let task = &app.studies.items[s].ai.tasks[0];
+    assert_eq!(task.note, "人が追加の根拠を確認する");
+    assert_eq!(
+        task.submissions[0].explanation,
+        "元の節点条件を確認しました"
+    );
+    let target = task.fixed[0].clone();
+    app.show_reference(&target, references::ReferenceView::Table, true)
+        .unwrap();
+    assert_eq!(app.studies.active, Location::RequestInput(s, 0));
+    assert!(app.study_read_only());
+    assert_eq!(app.input_reference(), original);
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn prepared_request_rechecks_changed_input_without_following_later_selection() {
+    let mut app = crate::app::study::tests::app();
+    app.select_member(ElemId(2));
+    app.prepare_ai_request("断面を比べる".into(), Mode::Comparison)
+        .unwrap();
+    app.select_node(NodeId(1));
+    assert_eq!(
+        app.ai_connection.draft.as_ref().unwrap().fixed[0].target,
+        ReferenceTarget::Member(ElemId(2))
+    );
+    assert!(app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+        node: NodeId(0),
+        coord: [10., 0., 0.]
+    })));
+    assert!(app.confirm_ai_request().unwrap_err().contains("再確認"));
+    assert!(app.studies.items.is_empty());
+    app.select_member(ElemId(2));
+    app.prepare_ai_request("断面を比べる".into(), Mode::Comparison)
+        .unwrap();
+    let (s, id) = app.confirm_ai_request().unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "begin_request",
+        Value::Null,
+    ));
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "create_comparison",
+        json!({"name":"比較案A"}),
+    ));
+    app.disconnect_ai_connection();
+    app.switch_study(Location::Proposal(s, 1)).unwrap();
+    assert!(crate::app::study::tests::assign(&mut app, 2));
+    assert!(app.core.scoped.undo.can_undo());
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn review_from_retained_results_keeps_original_reference_and_allows_only_explicit_old_input() {
+    let (mut app, s) = fixture();
+    let p = app.create_comparison(s, "結果元".into()).unwrap();
+    app.start_study_calculation(s, p).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    app.switch_study(Location::History(s, 0)).unwrap();
+    app.select_node(NodeId(0));
+    let explicit = app
+        .recorded_target_result_reference(
+            ResultInputKey::Static(
+                app.core
+                    .scoped
+                    .last_static
+                    .and_then(|key| match key {
+                        StaticKey::Case(key) => Some(key),
+                        _ => None,
+                    })
+                    .unwrap(),
+            ),
+            ReferenceTarget::Node(NodeId(0)),
+            references::DisplayConditions {
+                direction: Some("X".into()),
+                component: Some("節点変位".into()),
+                unit: Some("mm".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    app.open_result_evidence(&explicit).unwrap();
+    app.ai_connection.request_evidence = Some(references::EvidenceReference::from(&explicit));
+    app.prepare_ai_request("計算時の節点変位を確認".into(), Mode::Review)
+        .unwrap();
+    let source = app.input_reference();
+    let (same, id) = app.confirm_ai_request().unwrap();
+    assert_eq!(same, s);
+    let reference = app.studies.items[s].ai.tasks[0]
+        .results
+        .iter()
+        .find(|r| r.kind != ResultInputKey::Design)
+        .unwrap()
+        .clone();
+    assert_eq!(reference.source.proposal, source.proposal);
+    app.switch_study(Location::Proposal(s, p)).unwrap();
+    assert!(crate::app::study::tests::assign(&mut app, 2));
+    app.ai_connection.pending = Some("client".into());
+    app.approve_ai_connection(s, Mode::Review, false).unwrap();
+    assert_eq!(
+        prepared_call(&mut app, s, &id, "begin_request", Value::Null)
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    app.disconnect_ai_connection();
+    permit(&mut app, s, Mode::Review);
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "begin_request",
+        Value::Null,
+    ));
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "submit",
+        json!({"run_index":0,"explanation":"保持した旧版の変位を確認","unchecked":["現在案の再計算"],"references":[reference]}),
+    ));
+    let path = std::env::temp_dir().join(format!("sepika-request-{}.ovika", uuid::Uuid::new_v4()));
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    let task = &reopened.studies.items[s].ai.tasks[0];
+    assert_eq!(task.started_input, source);
+    assert!(task.interrupted.is_some());
+    reopened.open_result_evidence(&reference).unwrap();
+    assert!(reopened.ui.scoped.result_evidence.is_some());
+    let target = reopened.studies.items[s].ai.tasks[0].fixed[0].clone();
+    reopened
+        .show_reference(&target, references::ReferenceView::Table, true)
+        .unwrap();
+    assert!(reopened.study_read_only());
+    assert_eq!(reopened.input_reference(), source);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn cancelling_uncommitted_request_inputs_preserves_view_selection_and_unrelated_ui_data() {
+    let mut app = crate::app::study::tests::app();
+    app.select_member(ElemId(2));
+    app.ui.view.camera.zoom = 4.5;
+    app.ui.view.workspace.placement.arrangement = crate::app::workspace::Arrangement::Vertical;
+    app.ui.scoped.node_edit = vec![["-".into(), "".into(), "".into()]];
+    app.ui.scoped.axis_name_draft.editing = Some((0, 0));
+    app.ui.scoped.axis_name_draft.name = "未確定".into();
+    app.ui.scoped.load_cfg_draft.steel_factor = 1.7;
+    app.ui.scoped.load_cfg_draft.steel_factor_active = true;
+    let model = rmp_serde::to_vec_named(&app.core.model).unwrap();
+    let ctx = egui::Context::default();
+    let unrelated = egui::Id::new("unrelated-ui-state");
+    let numeric = egui::Id::new("test-numeric-cell");
+    ctx.data_mut(|d| {
+        d.insert_temp(unrelated, "維持".to_string());
+        d.insert_temp(numeric, (Some(1.0), "-".to_string()));
+        d.insert_temp(egui::Id::new("numeric_input_cells"), vec![numeric]);
+    });
+    let _ = ctx.run_ui(Default::default(), |ui| app.cancel_ai_request_inputs(ui));
+    assert_eq!(app.ui.view.camera.zoom, 4.5);
+    assert_eq!(
+        app.ui.view.workspace.placement.arrangement,
+        crate::app::workspace::Arrangement::Vertical
+    );
+    assert_eq!(app.ui.scoped.selection.members(), &[ElemId(2)]);
+    assert!(app.ui.scoped.axis_name_draft.editing.is_none());
+    assert!(!app.ui.scoped.load_cfg_draft.steel_factor_active);
+    assert!(ctx
+        .data(|d| d.get_temp::<(Option<f64>, String)>(numeric))
+        .is_none());
+    assert_eq!(
+        ctx.data(|d| d.get_temp::<String>(unrelated)).as_deref(),
+        Some("維持")
+    );
+    assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), model);
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn main_review_preserves_explicit_result_source_while_shape_selection_does_not_invent_results() {
+    let mut app = crate::app::study::tests::app();
+    app.run_static_all();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.select_node(NodeId(0));
+    app.prepare_ai_request("節点入力の確認".into(), Mode::Review)
+        .unwrap();
+    assert!(app.ai_connection.draft.as_ref().unwrap().results.is_empty());
+    let key = ResultInputKey::Static(app.core.scoped.results.as_ref().unwrap().statics[0].0);
+    let reference = app
+        .recorded_target_result_reference(
+            key,
+            ReferenceTarget::Node(NodeId(0)),
+            references::DisplayConditions {
+                direction: Some("Z".into()),
+                component: Some("節点変位".into()),
+                unit: Some("mm".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    app.ai_connection.request_evidence = Some(references::EvidenceReference::from(&reference));
+    app.prepare_ai_request("指定Z変位の確認".into(), Mode::Review)
+        .unwrap();
+    let (s, id) = app.confirm_ai_request().unwrap();
+    assert_eq!(
+        app.studies.items[s].ai.tasks[0].results,
+        vec![reference.clone()]
+    );
+    assert_eq!(
+        app.studies.items[s].ai.tasks[0].started_input,
+        reference.source
+    );
+    permit(&mut app, s, Mode::Review);
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "begin_request",
+        Value::Null,
+    ));
+    accepted(prepared_call(
+        &mut app,
+        s,
+        &id,
+        "submit",
+        json!({"run_index":0,"explanation":"指定したZ変位の元入力を確認","unchecked":[],"references":[reference]}),
+    ));
+    let path =
+        std::env::temp_dir().join(format!("sepika-main-review-{}.ovika", uuid::Uuid::new_v4()));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    reopened.open_result_evidence(&reference).unwrap();
+    assert_eq!(
+        reopened.studies.items[s].ai.tasks[0].results[0]
+            .display
+            .direction
+            .as_deref(),
+        Some("Z")
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn explicit_quantity_scope_without_selection_survives_copy_replay_receipt_submission_and_reload() {
+    for members in [false, true] {
+        let mut app = crate::app::study::tests::app();
+        let quantity = if members {
+            app.member_quantity_evidence_reference(vec![ElemId(2)])
+        } else {
+            let references::EvidenceReference::Quantity(quantity) =
+                app.quantity_evidence_reference()
+            else {
+                unreachable!()
+            };
+            *quantity
+        };
+        app.ai_connection.request_evidence = Some(references::EvidenceReference::Quantity(
+            Box::new(quantity.clone()),
+        ));
+        assert!(app.ui.scoped.selection.members().is_empty());
+        assert!(app.ui.scoped.selection.nodes().is_empty());
+        assert!(app
+            .prepare_ai_request("数量範囲の確認".into(), Mode::Comparison)
+            .is_err());
+        app.prepare_ai_request("数量範囲の確認".into(), Mode::Review)
+            .unwrap();
+        assert!(app.ai_connection.draft.as_ref().unwrap().fixed.is_empty());
+        app.select_member(ElemId(0));
+        let (s, id) = app.confirm_ai_request().unwrap();
+        assert!(app.studies.items[s].fixed.is_empty());
+        assert!(app.studies.items[s].ai.tasks[0].fixed.is_empty());
+        assert_eq!(app.studies.items[s].proposals.len(), 1);
+        let text = app.ai_request_text(s, &id).unwrap();
+        assert!(text.contains(&quantity.identity));
+        assert!(text.contains(&quantity.scope.label()));
+        assert!(!text.contains("固定対象 0 件"));
+        assert!(!text.contains("\"model\":"));
+        permit(&mut app, s, Mode::Review);
+        let begun = accepted(prepared_call(
+            &mut app,
+            s,
+            &id,
+            "begin_request",
+            Value::Null,
+        ));
+        assert_eq!(begun["quantity_identity"], quantity.identity);
+        assert_eq!(begun["quantity_scope"], json!(quantity.scope));
+        let mut read = request(&app, s, 0, "quantity", json!({"offset":0,"limit":100}));
+        read.request = Some(id.clone());
+        let first = accepted(app.handle_ai_request("client", read.clone()));
+        assert_eq!(first["identity"], quantity.identity);
+        assert_eq!(first["scope"], quantity.scope.label());
+        assert_eq!(
+            first["scope_members"],
+            if members { json!([2]) } else { Value::Null }
+        );
+        let count = app.studies.items[s].ai.receipts.len();
+        assert_eq!(
+            accepted(app.handle_ai_request("client", read.clone())),
+            first
+        );
+        assert_eq!(app.studies.items[s].ai.receipts.len(), count);
+        let receipt = accepted(prepared_call(
+            &mut app,
+            s,
+            &id,
+            "receipt",
+            json!({"id":read.id}),
+        ));
+        assert_eq!(receipt["result"], first);
+        let fresh = accepted(prepared_call(
+            &mut app,
+            s,
+            &id,
+            "quantity",
+            json!({"offset":0,"limit":100}),
+        ));
+        assert_eq!(fresh["identity"], quantity.identity);
+        accepted(prepared_call(
+            &mut app,
+            s,
+            &id,
+            "submit",
+            json!({"explanation":"同じ固定範囲の数量を確認","unchecked":["設計上の採否"],"references":[],"quantity_references":[quantity.identity]}),
+        ));
+        let submitted = app.studies.items[s].ai.tasks[0].submissions[0]
+            .receipt_id
+            .clone();
+        let path = std::env::temp_dir().join(format!(
+            "sepika-quantity-request-{}.ovika",
+            uuid::Uuid::new_v4()
+        ));
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert!(reopened.ai_connection.permission.is_none());
+        let task = &reopened.studies.items[s].ai.tasks[0];
+        assert_eq!(task.quantity.as_ref().unwrap().identity, quantity.identity);
+        assert_eq!(task.quantity.as_ref().unwrap().source, quantity.source);
+        assert_eq!(
+            task.submissions[0].quantity_references[0].identity,
+            quantity.identity
+        );
+        permit(&mut reopened, s, Mode::Review);
+        read.session = Some(
+            reopened
+                .ai_connection
+                .permission
+                .as_ref()
+                .unwrap()
+                .session
+                .clone(),
+        );
+        assert_eq!(
+            accepted(reopened.handle_ai_request("client", read.clone())),
+            first
+        );
+        assert_eq!(
+            accepted(prepared_call(
+                &mut reopened,
+                s,
+                &id,
+                "receipt",
+                json!({"id":read.id})
+            ))["result"],
+            first
+        );
+        accepted(prepared_call(
+            &mut reopened,
+            s,
+            &id,
+            "receipt",
+            json!({"id":submitted}),
+        ));
+        assert_eq!(
+            accepted(prepared_call(
+                &mut reopened,
+                s,
+                &id,
+                "quantity",
+                json!({"offset":0,"limit":100})
+            ))["identity"],
+            quantity.identity
+        );
+        reopened.studies.items[s].ai.tasks[0]
+            .quantity
+            .as_mut()
+            .unwrap()
+            .contract += 1;
+        assert_eq!(
+            reopened
+                .handle_ai_request("client", read)
+                .error
+                .unwrap()
+                .code,
+            "quantity_reference_invalid"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn quantity_request_rejects_edited_input_before_and_after_reload_until_saved_input_is_explicit() {
+    let mut app = crate::app::study::tests::app();
+    let references::EvidenceReference::Quantity(quantity) = app.quantity_evidence_reference()
+    else {
+        unreachable!()
+    };
+    app.ai_connection.request_evidence =
+        Some(references::EvidenceReference::Quantity(quantity.clone()));
+    app.prepare_ai_request("元数量の確認".into(), Mode::Review)
+        .unwrap();
+    let (s, _) = app.confirm_ai_request().unwrap();
+    assert!(app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+        node: NodeId(0),
+        coord: [10., 0., 0.]
+    })));
+    app.ai_connection.request_evidence =
+        Some(references::EvidenceReference::Quantity(quantity.clone()));
+    assert!(app
+        .prepare_ai_request("古い数量の確認".into(), Mode::Review)
+        .unwrap_err()
+        .contains("元の保存入力"));
+    assert!(app.ai_connection.draft.is_none());
+    let path = std::env::temp_dir().join(format!(
+        "sepika-old-quantity-request-{}.ovika",
+        uuid::Uuid::new_v4()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    let saved = reopened.studies.items[s].ai.tasks[0]
+        .quantity
+        .clone()
+        .unwrap();
+    reopened.ai_connection.request_evidence =
+        Some(references::EvidenceReference::Quantity(Box::new(saved)));
+    assert!(reopened
+        .prepare_ai_request("古い数量の確認".into(), Mode::Review)
+        .unwrap_err()
+        .contains("元の保存入力"));
+    reopened.switch_study(Location::RequestInput(s, 0)).unwrap();
+    reopened
+        .prepare_ai_request("元入力を明示して数量を確認".into(), Mode::Review)
+        .unwrap();
+    let (same, id) = reopened.confirm_ai_request().unwrap();
+    assert_eq!(same, s);
+    permit(&mut reopened, s, Mode::Review);
+    accepted(prepared_call(
+        &mut reopened,
+        s,
+        &id,
+        "begin_request",
+        Value::Null,
+    ));
+    assert_eq!(
+        accepted(prepared_call(
+            &mut reopened,
+            s,
+            &id,
+            "quantity",
+            json!({"offset":0,"limit":100})
+        ))["identity"],
+        quantity.identity
+    );
+    assert_eq!(reopened.studies.items[s].ai.tasks.len(), 2);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn comparison_request_keeps_the_modified_source_input_separate_from_the_baseline() {
+    let (mut app, s) = fixture();
+    let p = app
+        .create_comparison(s, "依頼元の変更済み案".into())
+        .unwrap();
+    app.switch_study(Location::Proposal(s, p)).unwrap();
+    assert!(crate::app::study::tests::assign(&mut app, 2));
+    app.select_member(ElemId(2));
+    let source = app.input_reference();
+    let baseline = app.studies.items[s].baseline.clone();
+    let fixed = app.studies.items[s].fixed.clone();
+    app.prepare_ai_request("変更済み断面から比較を依頼".into(), Mode::Comparison)
+        .unwrap();
+    let (same, _) = app.confirm_ai_request().unwrap();
+    assert_eq!(same, s);
+    let task = &app.studies.items[s].ai.tasks[0];
+    assert_eq!(task.started_input, source);
+    assert_eq!(task.origin.input_reference(), source);
+    assert_eq!(
+        task.origin.model.element(ElemId(2)).unwrap().section,
+        Some(SectionId(2))
+    );
+    assert_eq!(task.fixed, fixed);
+    assert_ne!(task.source_targets[0].source, task.fixed[0].source);
+    let target = task.source_targets[0].clone();
+    assert!(crate::app::study::tests::assign(&mut app, 1));
+    app.show_reference(&target, references::ReferenceView::Table, true)
+        .unwrap();
+    assert!(app.study_read_only());
+    assert_eq!(app.input_reference(), source);
+    assert_eq!(
+        app.core.model.element(ElemId(2)).unwrap().section,
+        Some(SectionId(2))
+    );
+    assert_eq!(
+        app.studies.items[s]
+            .baseline
+            .model
+            .element(ElemId(2))
+            .unwrap()
+            .section,
+        baseline.model.element(ElemId(2)).unwrap().section
+    );
+    let path = std::env::temp_dir().join(format!(
+        "sepika-comparison-request-origin-{}.ovika",
+        uuid::Uuid::new_v4()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    reopened
+        .show_reference(&target, references::ReferenceView::Table, true)
+        .unwrap();
+    assert_eq!(reopened.input_reference(), source);
+    assert_eq!(
+        reopened.core.model.element(ElemId(2)).unwrap().section,
+        Some(SectionId(2))
+    );
+    assert_eq!(reopened.studies.items[s].fixed, fixed);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn main_review_rechecks_live_main_before_start_and_marks_submissions_old_after_edit_and_reload() {
+    for started in [false, true] {
+        let mut app = crate::app::study::tests::app();
+        app.select_node(NodeId(0));
+        app.prepare_ai_request("本案の節点条件を確認".into(), Mode::Review)
+            .unwrap();
+        let (s, id) = app.confirm_ai_request().unwrap();
+        let source = app.input_reference();
+        permit(&mut app, s, Mode::Review);
+        if started {
+            accepted(prepared_call(
+                &mut app,
+                s,
+                &id,
+                "begin_request",
+                Value::Null,
+            ));
+            accepted(prepared_call(
+                &mut app,
+                s,
+                &id,
+                "submit",
+                json!({"explanation":"作成時の本案を確認","unchecked":[],"references":[]}),
+            ));
+            let task = &app.studies.items[s].ai.tasks[0];
+            assert!(app.ai_submission_current(s, &task.submissions[0]));
+        }
+        assert!(app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+            node: NodeId(0),
+            coord: [10., 0., 0.]
+        })));
+        let task = &app.studies.items[s].ai.tasks[0];
+        assert!(task.from_main);
+        assert_eq!(task.origin.input_reference(), source);
+        assert!(!app.ai_task_source_current(task));
+        if started {
+            assert!(!app.ai_submission_current(s, &task.submissions[0]));
+        } else {
+            assert_eq!(
+                prepared_call(&mut app, s, &id, "begin_request", Value::Null)
+                    .error
+                    .unwrap()
+                    .code,
+                "input_conflict"
+            );
+            assert!(app.studies.items[s].ai.tasks[0].started.is_none());
+        }
+        let path = std::env::temp_dir().join(format!(
+            "sepika-main-request-version-{}.ovika",
+            uuid::Uuid::new_v4()
+        ));
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        let task = &reopened.studies.items[s].ai.tasks[0];
+        assert!(task.from_main);
+        assert!(!reopened.ai_task_source_current(task));
+        if started {
+            assert!(!reopened.ai_submission_current(s, &task.submissions[0]));
+        } else {
+            permit(&mut reopened, s, Mode::Review);
+            assert_eq!(
+                prepared_call(&mut reopened, s, &id, "begin_request", Value::Null)
+                    .error
+                    .unwrap()
+                    .code,
+                "input_conflict"
+            );
+        }
+        reopened.switch_study(Location::RequestInput(s, 0)).unwrap();
+        assert!(reopened.study_read_only());
+        assert_eq!(reopened.input_reference(), source);
+        assert_eq!(reopened.core.model.node(NodeId(0)).unwrap().coord[0], 0.);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn request_list_target_action_opens_material_load_case_and_unused_section_in_their_saved_tables() {
+    for target in [
+        ReferenceTarget::Material(MaterialId(0)),
+        ReferenceTarget::LoadCase(LoadCaseId(0)),
+        ReferenceTarget::Section(SectionId(2)),
+    ] {
+        let mut app = crate::app::study::tests::app();
+        match target {
+            ReferenceTarget::Material(id) => app.ui.scoped.nav.focus_material = Some(id),
+            ReferenceTarget::LoadCase(id) => app.ui.scoped.nav.focus_load_case = Some(id),
+            ReferenceTarget::Section(id) => app.ui.scoped.nav.focus_section = Some(id),
+            _ => unreachable!(),
+        }
+        app.prepare_ai_request("選んだ入力の根拠確認".into(), Mode::Review)
+            .unwrap();
+        let (s, _) = app.confirm_ai_request().unwrap();
+        let reference = app.studies.items[s].ai.tasks[0].source_targets[0].clone();
+        let source = reference.source.clone();
+        assert_eq!(reference.target, target);
+        assert!(app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+            node: NodeId(0),
+            coord: [10., 0., 0.]
+        })));
+        app.open_ai_request_target(s, 0, &reference).unwrap();
+        assert!(app.study_read_only());
+        assert_eq!(app.input_reference(), source);
+        assert_eq!(app.ui.scoped.opened_reference, Some(reference));
+        match target {
+            ReferenceTarget::Material(id) => {
+                assert_eq!(app.ui.scoped.nav.focus_material, Some(id));
+                assert_eq!(app.ui.view.model_tab, crate::app::ModelTab::Materials);
+                assert_eq!(
+                    app.active_workspace_content(),
+                    crate::app::workspace::Content::Model
+                );
+            }
+            ReferenceTarget::LoadCase(id) => {
+                assert_eq!(app.ui.scoped.nav.focus_load_case, Some(id));
+                assert_eq!(
+                    app.active_workspace_content(),
+                    crate::app::workspace::Content::Loads
+                );
+            }
+            ReferenceTarget::Section(id) => {
+                assert_eq!(app.ui.scoped.nav.focus_section, Some(id));
+                assert_eq!(app.ui.view.model_tab, crate::app::ModelTab::Sections);
+                assert_eq!(
+                    app.active_workspace_content(),
+                    crate::app::workspace::Content::Model
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn request_target_action_keeps_the_chosen_request_when_sources_are_shared() {
+    let mut app = crate::app::study::tests::app();
+    app.select_member(ElemId(2));
+    let source = app.input_reference();
+    let section = app.core.model.element(ElemId(2)).unwrap().section;
+    app.prepare_ai_request("先行する確認依頼".into(), Mode::Review)
+        .unwrap();
+    let (review, _) = app.confirm_ai_request().unwrap();
+    app.prepare_ai_request("後から作る比較依頼".into(), Mode::Comparison)
+        .unwrap();
+    let (comparison, _) = app.confirm_ai_request().unwrap();
+    let target = app.studies.items[comparison].ai.tasks[0].source_targets[0].clone();
+    assert_eq!(
+        app.studies.items[review].ai.tasks[0].source_targets[0],
+        target
+    );
+
+    for previous in [Location::Main, Location::RequestInput(review, 0)] {
+        app.switch_study(previous).unwrap();
+        app.open_ai_request_target(comparison, 0, &target).unwrap();
+        assert_eq!(app.studies.active, Location::RequestInput(comparison, 0));
+        assert!(app.study_read_only());
+        assert_eq!(app.input_reference(), source);
+        assert_eq!(app.ui.scoped.opened_reference, Some(target.clone()));
+        assert_eq!(app.core.model.element(ElemId(2)).unwrap().section, section);
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn request_input_derived_review_requires_current_history_permission_for_start_reads_and_saved_replies(
+) {
+    fn permit_history(app: &mut App, s: usize, history: bool) {
+        app.ai_connection.pending = Some("client".into());
+        app.approve_ai_connection(s, Mode::Review, history).unwrap();
+    }
+    fn replay(app: &mut App, request: &Request) -> Response {
+        let mut request = request.clone();
+        request.session = Some(
+            app.ai_connection
+                .permission
+                .as_ref()
+                .unwrap()
+                .session
+                .clone(),
+        );
+        app.handle_ai_request("client", request)
+    }
+    let mut app = crate::app::study::tests::app();
+    let quantity = app.quantity_evidence_reference();
+    app.ai_connection.request_evidence = Some(quantity.clone());
+    app.prepare_ai_request("本案数量の確認".into(), Mode::Review)
+        .unwrap();
+    let (s, _) = app.confirm_ai_request().unwrap();
+    assert!(app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+        node: NodeId(0),
+        coord: [10., 0., 0.]
+    })));
+    app.switch_study(Location::RequestInput(s, 0)).unwrap();
+    app.ai_connection.request_evidence = Some(quantity);
+    app.prepare_ai_request("保存元の数量を明示確認".into(), Mode::Review)
+        .unwrap();
+    let (same, id) = app.confirm_ai_request().unwrap();
+    assert_eq!(same, s);
+    let task = &app.studies.items[s].ai.tasks[1];
+    assert!(task.historical);
+    assert!(!task.from_main);
+    assert_eq!(task.started_input, app.ai_proposal_reference(s, 0));
+    assert!(!app.ai_input_is_current(s, &task.started_input));
+    permit_history(&mut app, s, false);
+    assert_eq!(
+        prepared_call(&mut app, s, &id, "begin_request", Value::Null)
+            .error
+            .unwrap()
+            .code,
+        "permission_denied"
+    );
+    assert!(app.studies.items[s].ai.tasks[1].started.is_none());
+    permit_history(&mut app, s, true);
+    let mut begin = request(&app, s, 0, "begin_request", Value::Null);
+    begin.request = Some(id.clone());
+    accepted(replay(&mut app, &begin));
+    let mut read = request(&app, s, 0, "quantity", json!({"offset":0,"limit":100}));
+    read.request = Some(id.clone());
+    let original = accepted(replay(&mut app, &read));
+    let mut receipt = request(&app, s, 0, "receipt", json!({"id":read.id}));
+    receipt.request = Some(id.clone());
+    let original_receipt = accepted(replay(&mut app, &receipt));
+    assert_eq!(original_receipt["result"], original);
+    let path = std::env::temp_dir().join(format!(
+        "sepika-request-history-permission-{}.ovika",
+        uuid::Uuid::new_v4()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    for reload in [false, true] {
+        if reload {
+            app = App::default();
+            app.open_project_from(path.clone());
+            assert!(app.core.scoped.last_error.is_none());
+        }
+        permit_history(&mut app, s, false);
+        let count = app.studies.items[s].ai.receipts.len();
+        for request in [&begin, &read, &receipt] {
+            assert_eq!(
+                replay(&mut app, request).error.unwrap().code,
+                "permission_denied"
+            );
+        }
+        assert_eq!(
+            prepared_call(
+                &mut app,
+                s,
+                &id,
+                "quantity",
+                json!({"offset":0,"limit":100})
+            )
+            .error
+            .unwrap()
+            .code,
+            "permission_denied"
+        );
+        assert_eq!(
+            prepared_call(&mut app, s, &id, "receipt", json!({"id":read.id}))
+                .error
+                .unwrap()
+                .code,
+            "permission_denied"
+        );
+        assert_eq!(app.studies.items[s].ai.receipts.len(), count);
+        permit_history(&mut app, s, true);
+        accepted(replay(&mut app, &begin));
+        assert_eq!(accepted(replay(&mut app, &read)), original);
+        assert_eq!(accepted(replay(&mut app, &receipt)), original_receipt);
+        assert_eq!(
+            accepted(prepared_call(
+                &mut app,
+                s,
+                &id,
+                "receipt",
+                json!({"id":read.id})
+            ))["result"],
+            original
+        );
+        assert_eq!(
+            accepted(prepared_call(
+                &mut app,
+                s,
+                &id,
+                "quantity",
+                json!({"offset":0,"limit":100})
+            ))["identity"],
+            original["identity"]
+        );
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
 fn fixture() -> (App, usize) {
     let mut app = crate::app::study::tests::app();
     let s = app
@@ -417,6 +1377,11 @@ fn worker_errors_and_disconnections_remain_failed_with_their_reason_after_reload
         assert!(app.studies.running.is_none());
         assert!(app.studies.items[s].runs.is_empty());
         assert_eq!(app.ai_calculation_state(s, &input), "failed");
+        #[cfg(feature = "gui")]
+        assert_eq!(
+            app.studies.items[s].ai.tasks[0].status(&app.studies.items[s].ai.jobs),
+            "失敗"
+        );
         let error = app.studies.items[s].ai.jobs[0].error.clone().unwrap();
         assert!(error.contains(if disconnected {
             "異常終了"
@@ -1310,6 +2275,11 @@ fn confirmation_wait_is_observable_and_cannot_be_acknowledged_by_ai_or_resumed_b
     assert_eq!(
         accepted(call(&mut app, s, 0, "job", json!({"id":job["id"]})))["state"],
         "awaiting_gui_confirmation"
+    );
+    #[cfg(feature = "gui")]
+    assert_eq!(
+        app.studies.items[s].ai.tasks[0].status(&app.studies.items[s].ai.jobs),
+        "人の確認待ち"
     );
     for operation in ["resume", "acknowledge_warning", "cancel"] {
         assert_eq!(

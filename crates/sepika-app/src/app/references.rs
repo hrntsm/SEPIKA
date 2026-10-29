@@ -1516,7 +1516,7 @@ impl App {
         });
     }
 
-    fn reference_target_description(&self, target: ReferenceTarget) -> String {
+    pub(crate) fn reference_target_description(&self, target: ReferenceTarget) -> String {
         let model = &self.core.model;
         match target {
             ReferenceTarget::Node(id) => model

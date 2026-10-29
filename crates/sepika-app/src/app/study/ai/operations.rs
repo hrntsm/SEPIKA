@@ -3,6 +3,7 @@ use crate::app::{study::*, App};
 use references::{InputReference, ReferenceTarget, ResultReference, TargetReference};
 use sepika_ai_connection::protocol::{Rejection, Request, Response, VERSION};
 use serde_json::json;
+mod requests;
 #[cfg(test)]
 mod tests;
 
@@ -133,6 +134,7 @@ impl App {
     #[cfg(feature = "gui")]
     pub(crate) fn ai_connection_panel(&mut self, ui: &mut egui::Ui) {
         ui.collapsing("外部AIへのローカル接続",|ui| {
+            ui.label("接続手順: ①依頼を保存し依頼文をコピー ②ローカル接続を有効化 ③外部MCPクライアントにsepika-mcp.exeとコピーした --gui-pipe 引数を設定 ④クライアントから接続し、ここで検討と許可を確認 ⑤コピーした依頼文をクライアントへ渡す。依頼開始・成果提出は実際の受理後に表示します。");
             ui.label("外部クライアントがクラウドAIを利用すると、取得した情報が外部送信され得ます。クライアント側の保存・送信はSEPIKAの管理範囲外です。");
             ui.label("読取範囲: 許可した検討の基準・比較案の全体モデル、候補断面、条件、保持結果。固定対象以外の情報も含みます。");
             ui.label("編集範囲: 指定検討の比較案にある固定鉄骨大梁への既存有効断面の割当だけ。本案更新・採用は人が行います。");
@@ -192,6 +194,18 @@ impl App {
     }
 
     pub fn disconnect_ai_connection(&mut self) {
+        if let Some(permission) = &self.ai_connection.permission {
+            let study_id = permission.study.clone();
+            if let Some(study) = self.studies.items.iter_mut().find(|s| s.ai.id == study_id) {
+                for task in &mut study.ai.tasks {
+                    if task.started.is_some() {
+                        task.interrupted =
+                            Some((SystemTime::now(), "接続終了・新規操作の許可なし".into()));
+                    }
+                }
+                self.mark_study_dirty();
+            }
+        }
         self.ai_connection = AiConnection::default();
     }
 
@@ -317,6 +331,12 @@ impl App {
             .ok_or_else(|| reject("study_missing", "検討がありません"))?;
         let mode = permission.mode;
         let history = permission.history;
+        if !history && self.ai_history_required(s, request.request.as_deref(), None) {
+            return Err(reject(
+                "permission_denied",
+                "保存入力を明示した依頼には、現在の接続で保存旧版の閲覧許可が必要です",
+            ));
+        }
         let mutates = matches!(
             request.operation.as_str(),
             "create_comparison" | "assign_section" | "calculate"
@@ -359,8 +379,11 @@ impl App {
                 "対象の案・プロジェクトが一致しません",
             ));
         }
-        let old = expected != current;
-        if old && (mutates || !history) {
+        let old = !self.ai_input_is_current(s, &expected);
+        if (old && mutates)
+            || (!history
+                && self.ai_history_required(s, request.request.as_deref(), Some(&expected)))
+        {
             return Err(reject(
                 "input_conflict",
                 "対象の入力版が現在版と一致しません。許可した保存旧版の明示閲覧だけが可能です",
@@ -371,6 +394,11 @@ impl App {
                 Self::ai_input_reference(&r.input) == expected
                     || Self::ai_input_reference(&r.prepared) == expected
             })
+            && !self.studies.items[s]
+                .ai
+                .tasks
+                .iter()
+                .any(|task| Self::ai_input_reference(&task.origin) == expected)
         {
             return Err(reject("input_missing", "明示した保存入力版がありません"));
         }
@@ -385,7 +413,7 @@ impl App {
                 .ai
                 .tasks
                 .iter()
-                .any(|t| t.id == task_id)
+                .any(|t| t.id == task_id && t.started.is_some())
         {
             return Err(reject(
                 "request_not_started",
@@ -408,19 +436,35 @@ impl App {
         }
         let output=match request.operation.as_str() {
             "begin_request"=> {
-                if old {return Err(reject("input_conflict","依頼開始は現在入力版を指定してください"));}
-                if self.studies.items[s].ai.tasks.iter().any(|t|t.id==task_id) {return Err(reject("request_exists","依頼IDは既に開始済みです"));}
+                if old && !self.studies.items[s].ai.tasks.iter().any(|t|t.id==task_id && t.started.is_none() && t.mode==Mode::Review && t.historical && t.started_input==expected) {return Err(reject("input_conflict","対象の入力版が変わりました。保存入力を明示して依頼を再確認してください"));}
                 let baseline=Self::ai_input_reference(&self.studies.items[s].baseline);
                 let fixed=self.studies.items[s].fixed.clone();
-                self.studies.items[s].ai.tasks.push(Task{id:task_id.into(),mode,baseline,started_input:current.clone(),fixed,started:SystemTime::now(),last_operation:SystemTime::now(),last_operation_name:"begin_request".into(),submissions:Vec::new()});
-                json!({"status":"started","request":task_id,"mode":mode,"input":current})
+                if self.studies.items[s].ai.tasks.iter().find(|task|task.id==task_id && task.started.is_none()).is_some_and(|task|!self.ai_task_source_current(task)) {return Err(reject("input_conflict","依頼元の本案の入力版・条件が変わりました。元入力と対象を再確認して依頼を作成してください"));}
+                if let Some(task)=self.studies.items[s].ai.tasks.iter_mut().find(|t|t.id==task_id) {
+                    if task.started.is_some() {return Err(reject("request_exists","依頼IDは既に開始済みです"));}
+                    if task.mode != mode || task.started_input != expected || task.baseline != baseline || (task.mode == Mode::Comparison && task.fixed != fixed) {return Err(reject("request_conflict","準備した依頼の種別・元案版・基準・対象と許可が一致しません。依頼を再確認してください"));}
+                    task.started=Some(SystemTime::now());
+                    task.interrupted=None;
+                } else {
+                    let purpose=self.studies.items[s].purpose.clone();
+                    let origin=self.proposal_input(s,p);
+                    let source_app=App{core:origin.core(),..Default::default()};
+                    let source_targets=fixed.iter().map(|target|source_app.target_reference(target.target).map_err(|reason|reject("target_invalid",reason))).collect::<Result<Vec<_>,_>>()?;
+                    let proposal_name=self.studies.items[s].proposals[p].name.clone();
+                    self.studies.items[s].ai.tasks.push(Task{id:task_id.into(),mode,baseline,started_input:current.clone(),origin,from_main:false,source_targets,historical:false,fixed,purpose,note:String::new(),proposal_name,conditions:"保存した案の解析・検定設定、全ケース・全組合せ".into(),frame:"指定なし".into(),results:Vec::new(),display:Default::default(),quantity:None,prepared:SystemTime::now(),started:Some(SystemTime::now()),interrupted:None,last_operation:SystemTime::now(),last_operation_name:"begin_request".into(),submissions:Vec::new()});
+                }
+                let task=self.studies.items[s].ai.tasks.iter().find(|t|t.id==task_id).unwrap();
+                json!({"status":"started","request":task_id,"mode":task.mode,"input":expected,"purpose":task.purpose,"fixed":task.fixed,"result_references":task.results,"display":task.display,"quantity_identity":task.quantity.as_ref().map(|q|&q.identity),"quantity_scope":task.quantity.as_ref().map(|q|&q.scope)})
             }
-            "study"=>json!({"purpose":self.studies.items[s].purpose,"notes":self.studies.items[s].notes,"fixed_count":self.studies.items[s].fixed.len(),"proposal_count":self.studies.items[s].proposals.len(),"decision_count":self.studies.items[s].decisions.len(),"input":expected,"read_scope":"当該検討の全体モデル・条件・結果","edit_scope":"比較案の固定鉄骨大梁の既存有効断面割当のみ"}),
+            "study"=> {
+                let task=self.studies.items[s].ai.tasks.iter().find(|t|t.id==task_id).unwrap();
+                json!({"purpose":task.purpose,"notes":self.studies.items[s].notes,"fixed_count":task.fixed.len(),"proposal_count":self.studies.items[s].proposals.len(),"decision_count":self.studies.items[s].decisions.len(),"input":expected,"request":task.id,"mode":task.mode,"read_scope":"当該検討の全体モデル・条件・結果","edit_scope":if task.mode==Mode::Review {"編集・計算不可"}else{"比較案の固定鉄骨大梁の既存有効断面割当のみ"}})
+            },
             "proposals" | "fixed_targets" | "decisions" => {
                 let pagination:Page=args(&request)?;
                 let rows=match request.operation.as_str() {
                     "proposals"=>self.ai_proposals(s).as_array().unwrap().clone(),
-                    "fixed_targets"=>self.studies.items[s].fixed.iter().map(|v|json!(v)).collect(),
+                    "fixed_targets"=>self.studies.items[s].ai.tasks.iter().find(|t|t.id==task_id).unwrap().fixed.iter().map(|v|json!(v)).collect(),
                     _=>self.studies.items[s].decisions.iter().map(|v|json!({"accepted":v.accepted,"reason":v.reason,"created":v.created,"applied":v.is_applied()})).collect(),
                 };
                 page(rows,pagination.offset,pagination.limit)?
@@ -492,13 +536,12 @@ impl App {
             }
             "quantity"=> {
                 let pagination:Page=args(&request)?;
-                let input=self.ai_read_input(s,p,&expected)?;
-                let app=App{core:input.core(),..Default::default()};
-                let quantity=app.member_quantity_evidence_reference(comparison::projection::fixed_members(&self.studies.items[s]));
+                let quantity=self.ai_quantity_reference(s,p,task_id,&expected)?;
                 let takeoff=quantity.takeoff().map_err(|e|reject("quantity_unavailable",e))?;
                 let totals=takeoff.totals();
                 let rows=takeoff.items.iter().map(|item|json!({"member":item.elem,"section":item.section,"steel_t":item.steel_weight_t(),"label":item.label,"steel_volume_m3":item.steel_weight_t()/sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3})).collect();
-                json!({"source":quantity.source,"identity":quantity.identity,"scope":quantity.scope.label(),"scope_members":comparison::projection::fixed_members(&self.studies.items[s]),"contract":quantity.contract,"whole_scope_totals":{"steel_t":totals.steel_t,"steel_volume_m3":totals.steel_t/sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3,"members":totals.member_count},"page":page(rows,pagination.offset,pagination.limit)?})
+                let scope_members=match &quantity.scope {references::QuantityEvidenceScope::WholeModel=>None,references::QuantityEvidenceScope::Members(members)=>Some(members)};
+                json!({"source":quantity.source,"identity":quantity.identity,"scope":quantity.scope.label(),"scope_members":scope_members,"contract":quantity.contract,"whole_scope_totals":{"steel_t":totals.steel_t,"steel_volume_m3":totals.steel_t/sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3,"members":totals.member_count},"page":page(rows,pagination.offset,pagination.limit)?})
             }
             "evidence"=> {
                 let evidence:Evidence=args(&request)?;
@@ -535,14 +578,12 @@ impl App {
                     if !submission.references.is_empty() {return Err(reject("run_required","結果参照を提出する場合は元のrun_indexを明示してください"));}
                     self.studies.items[s].ai.jobs.iter().rev().find(|job|job.request==task_id && job.input==expected).map(|job|(job.state.clone(),Some(job.id.clone()))).unwrap_or_else(||("not_calculated".into(),None))
                 };
-                let input=self.ai_read_input(s,p,&expected)?;
-                let quantity_app=App{core:input.core(),..Default::default()};
-                let quantity=quantity_app.member_quantity_evidence_reference(comparison::projection::fixed_members(&self.studies.items[s]));
                 let mut quantities=Vec::new();
                 for identity in &submission.quantity_references {
+                    let quantity=self.ai_quantity_reference(s,p,task_id,&expected)?;
                     if *identity!=quantity.identity {return Err(reject("quantity_reference_invalid","対象入力版と固定対象の数量根拠が一致しません"));}
                     quantity.takeoff().map_err(|e|reject("quantity_unavailable",e))?;
-                    quantities.push(quantity.clone());
+                    quantities.push(quantity);
                 }
                 let run_index=submission.run_index;
                 let verification=self.ai_verification_at(s,run_index);
@@ -560,6 +601,7 @@ impl App {
         {
             task.last_operation = SystemTime::now();
             task.last_operation_name = request.operation.clone();
+            task.interrupted = None;
         }
         self.studies.items[s].ai.receipts.push(Receipt {
             id: request.id,
@@ -615,9 +657,83 @@ impl App {
             .runs
             .iter()
             .flat_map(|r| [&r.input, &r.prepared])
+            .chain(
+                self.studies.items[s]
+                    .ai
+                    .tasks
+                    .iter()
+                    .map(|task| &task.origin),
+            )
             .find(|input| Self::ai_input_reference(input) == *expected)
             .cloned()
             .ok_or_else(|| reject("input_missing", "保存入力版がありません"))
+    }
+
+    fn ai_input_is_current(&self, s: usize, input: &InputReference) -> bool {
+        if !self.studies.items[s]
+            .proposals
+            .iter()
+            .enumerate()
+            .any(|(p, _)| self.ai_proposal_reference(s, p) == *input)
+        {
+            return false;
+        }
+        let main = self.main_study_input().input_reference();
+        input.proposal != main.proposal || *input == main
+    }
+
+    fn ai_history_required(
+        &self,
+        s: usize,
+        task_id: Option<&str>,
+        input: Option<&InputReference>,
+    ) -> bool {
+        self.studies.items[s]
+            .ai
+            .tasks
+            .iter()
+            .find(|task| Some(task.id.as_str()) == task_id)
+            .is_some_and(|task| task.historical)
+            || input.is_some_and(|input| !self.ai_input_is_current(s, input))
+    }
+
+    fn ai_quantity_reference(
+        &self,
+        s: usize,
+        p: usize,
+        task_id: &str,
+        expected: &InputReference,
+    ) -> Result<references::QuantityEvidenceReference, Rejection> {
+        if let Some(task) = self.studies.items[s]
+            .ai
+            .tasks
+            .iter()
+            .find(|task| task.id == task_id)
+        {
+            if let Some(quantity) = &task.quantity {
+                if task.mode != Mode::Review
+                    || quantity.source != *expected
+                    || quantity.contract != references::QUANTITY_EVIDENCE_CONTRACT_VERSION
+                    || quantity.identity() != quantity.identity
+                {
+                    return Err(reject(
+                        "quantity_reference_invalid",
+                        "依頼に固定した数量根拠の入力版・範囲・契約が一致しません",
+                    ));
+                }
+                return Ok(quantity.clone());
+            }
+        }
+        let input = self.ai_read_input(s, p, expected)?;
+        let app = App {
+            core: input.core(),
+            ..Default::default()
+        };
+        Ok(
+            app.member_quantity_evidence_reference(comparison::projection::fixed_members(
+                &self.studies.items[s],
+            )),
+        )
     }
 
     fn ai_validate_receipt(
@@ -630,6 +746,12 @@ impl App {
         for _ in 0..=self.studies.items[s].ai.receipts.len() {
             let request: Request = serde_json::from_value(receipt.content.clone())
                 .map_err(|e| reject("receipt_invalid", e.to_string()))?;
+            if !history && self.ai_history_required(s, request.request.as_deref(), None) {
+                return Err(reject(
+                    "permission_denied",
+                    "保存入力由来の受理記録には、現在の保存旧版閲覧許可が必要です",
+                ));
+            }
             if matches!(
                 request.operation.as_str(),
                 "begin_request" | "create_comparison" | "assign_section" | "calculate"
@@ -644,7 +766,8 @@ impl App {
                     .ok_or_else(|| reject("receipt_invalid", "受理記録の入力版がありません"))?,
             )
             .map_err(|e| reject("receipt_invalid", e.to_string()))?;
-            if self.ai_proposal_reference(s, p) != expected && !history {
+            if !history && self.ai_history_required(s, request.request.as_deref(), Some(&expected))
+            {
                 return Err(reject(
                     "permission_denied",
                     "この接続では受理済み応答内の保存旧版を閲覧できません",
@@ -753,14 +876,14 @@ impl App {
                     return Ok(());
                 }
                 "quantity" => {
-                    let input = self.ai_read_input(s, p, &expected)?;
-                    let app = App {
-                        core: input.core(),
-                        ..Default::default()
-                    };
-                    let quantity = app.member_quantity_evidence_reference(
-                        comparison::projection::fixed_members(&self.studies.items[s]),
-                    );
+                    let quantity = self.ai_quantity_reference(
+                        s,
+                        p,
+                        request.request.as_deref().ok_or_else(|| {
+                            reject("receipt_invalid", "受理記録の依頼IDがありません")
+                        })?,
+                        &expected,
+                    )?;
                     if receipt.result.get("identity") != Some(&json!(quantity.identity))
                         || receipt.result.get("contract") != Some(&json!(quantity.contract))
                     {
@@ -1066,11 +1189,7 @@ impl App {
                 "提出・閲覧対象の入力版と結果の計算時入力が一致しません",
             ));
         }
-        let current = self.studies.items[s]
-            .proposals
-            .iter()
-            .enumerate()
-            .any(|(p, _)| self.ai_proposal_reference(s, p) == *input);
+        let current = self.ai_input_is_current(s, input);
         if !current && !history {
             return Err(reject(
                 "permission_denied",

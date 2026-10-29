@@ -71,6 +71,7 @@ pub enum Location {
     Proposal(usize, usize),
     History(usize, usize),
     StartedInput(usize, usize),
+    RequestInput(usize, usize),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -414,7 +415,10 @@ impl App {
     pub fn study_read_only(&self) -> bool {
         matches!(
             self.studies.active,
-            Location::History(..) | Location::StartedInput(..) | Location::Proposal(_, 0)
+            Location::History(..)
+                | Location::StartedInput(..)
+                | Location::RequestInput(..)
+                | Location::Proposal(_, 0)
         )
     }
     pub fn study_is_main(&self) -> bool {
@@ -446,6 +450,15 @@ impl App {
         let mut input = baseline.clone();
         input.references.proposal = uuid::Uuid::new_v4().to_string();
         input.references.generation = 0;
+        Ok(self.insert_study(purpose, fixed, baseline, input))
+    }
+    fn insert_study(
+        &mut self,
+        purpose: String,
+        fixed: Vec<references::TargetReference>,
+        baseline: StudyInput,
+        input: StudyInput,
+    ) -> usize {
         let mut state = Slot::new(&input);
         state.core.scoped.undo.restrict_sections(Vec::new());
         let index = self.studies.items.len();
@@ -465,7 +478,7 @@ impl App {
         });
         self.mark_study_dirty();
         self.studies.window_open = true;
-        Ok(index)
+        index
     }
     /// 表示中の検討へ固定数量根拠を明示保存する。本案表示中は保存先未指定として拒否する。
     pub fn save_study_quantity_reference(
@@ -473,7 +486,10 @@ impl App {
         reference: references::QuantityEvidenceReference,
     ) -> Result<(), String> {
         let s = match self.studies.active {
-            Location::Proposal(s, _) | Location::History(s, _) | Location::StartedInput(s, _) => s,
+            Location::Proposal(s, _)
+            | Location::History(s, _)
+            | Location::StartedInput(s, _)
+            | Location::RequestInput(s, _) => s,
             Location::Main => {
                 return Err("保存先の検討で基準案・比較案または計算履歴を表示してください".into())
             }
@@ -524,7 +540,9 @@ impl App {
         match location {
             Location::Main => self.studies.main = Some(slot),
             Location::Proposal(s, p) => self.studies.items[s].proposals[p].state = Some(slot),
-            Location::History(..) | Location::StartedInput(..) => return Some(slot),
+            Location::History(..) | Location::StartedInput(..) | Location::RequestInput(..) => {
+                return Some(slot)
+            }
         }
         None
     }
@@ -571,6 +589,19 @@ impl App {
                 slot.core.log.entries = run.log.clone();
                 slot.core.scoped.diagnostics = run.diagnostics.clone();
                 slot.core.scoped.staleness.diagnostics_stale = false;
+                slot.core.scoped.undo.restrict_sections(Vec::new());
+                slot
+            }
+            Location::RequestInput(s, t) => {
+                let task = self
+                    .studies
+                    .items
+                    .get(s)
+                    .and_then(|s| s.ai.tasks.get(t))
+                    .ok_or("依頼時入力がありません")?;
+                let mut slot = Slot::new(&task.origin);
+                slot.core.scoped.references.fixed = task.source_targets.clone();
+                slot.core.scoped.references.fixed_results = task.results.clone();
                 slot.core.scoped.undo.restrict_sections(Vec::new());
                 slot
             }
@@ -818,7 +849,7 @@ impl App {
         // 派生値の再算定で共通参照の入力版は変わらないため、両ビューが同じ参照を持つときは表示先を維持する。
         if matches!(
             self.studies.active,
-            Location::StartedInput(..) | Location::History(..)
+            Location::StartedInput(..) | Location::History(..) | Location::RequestInput(..)
         ) && self.core.scoped.references.fixed.contains(target)
         {
             return Some(self.studies.active);
@@ -828,15 +859,26 @@ impl App {
             .iter()
             .enumerate()
             .find_map(|(s, study)| {
-                study.runs.iter().enumerate().find_map(|(r, run)| {
-                    if run.result_view_references.fixed.contains(target) {
-                        Some(Location::History(s, r))
-                    } else if run.input_view_references.fixed.contains(target) {
-                        Some(Location::StartedInput(s, r))
-                    } else {
-                        None
-                    }
-                })
+                study
+                    .runs
+                    .iter()
+                    .enumerate()
+                    .find_map(|(r, run)| {
+                        if run.result_view_references.fixed.contains(target) {
+                            Some(Location::History(s, r))
+                        } else if run.input_view_references.fixed.contains(target) {
+                            Some(Location::StartedInput(s, r))
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        study.ai.tasks.iter().enumerate().find_map(|(t, task)| {
+                            task.source_targets
+                                .contains(target)
+                                .then_some(Location::RequestInput(s, t))
+                        })
+                    })
             })
     }
     pub fn saved_studies(&self) -> SavedStudies {
@@ -927,7 +969,21 @@ impl App {
             });
         }
         for study in &mut items {
+            for task in &study.ai.tasks {
+                task.origin
+                    .model
+                    .validate_reference_ids()
+                    .map_err(|error| error.to_string())?;
+            }
             study.ai.sync_jobs(&study.runs, None);
+            for task in &mut study.ai.tasks {
+                if task.started.is_some() {
+                    task.interrupted = Some((
+                        SystemTime::now(),
+                        "再読込後の継続未確認・接続許可なし".into(),
+                    ));
+                }
+            }
         }
         self.studies = Studies {
             items,
@@ -1157,6 +1213,10 @@ impl App {
                 "{} の計算開始時入力（読取専用）",
                 self.studies.items[s].runs[r].proposal_name
             ),
+            Location::RequestInput(s, t) => format!(
+                "依頼「{}」の固定入力（読取専用）",
+                self.studies.items[s].ai.tasks[t].purpose
+            ),
         }
     }
     pub(crate) fn study_window(&mut self, ctx: &egui::Context) {
@@ -1165,11 +1225,14 @@ impl App {
         }
         let mut open = true;
         egui::Window::new("検討・設計案")
+            .default_width(620.0)
+            .max_width((ctx.content_rect().width()-24.0).max(240.0))
             .open(&mut open)
             .collapsible(self.studies.running.is_none())
             .vscroll(true)
             .show(ctx, |ui| {
                 self.ai_connection_panel(ui);
+                self.ai_request_panel(ui);
                 let active = self.study_display_name();
                 ui.strong(format!("表示・編集先: {active}"));
                 if ui.button("本案を表示").clicked() {

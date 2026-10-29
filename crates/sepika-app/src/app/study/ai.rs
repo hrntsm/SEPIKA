@@ -57,8 +57,22 @@ pub struct Task {
     pub mode: Mode,
     pub baseline: super::references::InputReference,
     pub started_input: super::references::InputReference,
+    pub origin: super::StudyInput,
+    pub from_main: bool,
+    pub source_targets: Vec<super::references::TargetReference>,
+    pub historical: bool,
     pub fixed: Vec<super::references::TargetReference>,
-    pub started: SystemTime,
+    pub purpose: String,
+    pub note: String,
+    pub proposal_name: String,
+    pub conditions: String,
+    pub frame: String,
+    pub results: Vec<super::references::ResultReference>,
+    pub display: super::references::DisplayConditions,
+    pub quantity: Option<super::references::QuantityEvidenceReference>,
+    pub prepared: SystemTime,
+    pub started: Option<SystemTime>,
+    pub interrupted: Option<(SystemTime, String)>,
     pub last_operation: SystemTime,
     pub last_operation_name: String,
     pub submissions: Vec<Submission>,
@@ -124,6 +138,17 @@ impl StudyAi {
                 job.state = state.into();
                 job.run_index = found;
                 job.error = error;
+                if let Some(task) = self.tasks.iter_mut().find(|task| task.id == job.request) {
+                    task.last_operation = SystemTime::now();
+                    task.last_operation_name = match state {
+                        "awaiting_gui_confirmation" => "計算の続行確認を待機",
+                        "calculated" => "計算結果を取込",
+                        "failed" => "計算の失敗を確認",
+                        "interrupted_no_result" => "計算の中断・結果なしを確認",
+                        _ => "計算の実行を確認",
+                    }
+                    .into();
+                }
                 changed = true;
             }
         }
@@ -159,4 +184,23 @@ pub struct AiConnection {
     pub selected_study: usize,
     pub comparison: bool,
     pub history: bool,
+    pub purpose: String,
+    pub review: bool,
+    pub draft: Option<RequestDraft>,
+    pub request_evidence: Option<super::references::EvidenceReference>,
+}
+
+pub struct RequestDraft {
+    pub input: super::references::InputReference,
+    pub fixed: Vec<super::references::TargetReference>,
+    pub source_targets: Vec<super::references::TargetReference>,
+    pub from_main: bool,
+    pub results: Vec<super::references::ResultReference>,
+    pub display: super::references::DisplayConditions,
+    pub quantity: Option<super::references::QuantityEvidenceReference>,
+    pub mode: Mode,
+    pub purpose: String,
+    pub proposal_name: String,
+    pub conditions: String,
+    pub frame: String,
 }
