@@ -13,6 +13,7 @@ pub(super) const SHORTCUT_SEARCH: egui::KeyboardShortcut = egui::KeyboardShortcu
 pub(crate) struct Search {
     pub open: bool,
     pub previous_focus: Option<egui::Id>,
+    pub resume_input: bool,
     query: String,
     selected: Option<usize>,
     source: Option<InputReference>,
@@ -295,10 +296,10 @@ impl App {
             state.open = false;
         }
         if !state.open {
-            if let Some(focus) = state.previous_focus {
-                ctx.memory_mut(|memory| memory.request_focus(focus));
+            state.resume_input = true;
+            if !cancel {
+                state.previous_focus = None;
             }
-            crate::grid::retain_editing_for_layout(&ctx);
             ctx.request_repaint();
         }
         self.ui.scoped.search = state;

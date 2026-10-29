@@ -1856,6 +1856,12 @@ impl eframe::App for App {
 #[cfg(feature = "gui")]
 impl App {
     fn app_ui(&mut self, ui: &mut egui::Ui) {
+        if std::mem::take(&mut self.ui.scoped.search.resume_input) {
+            if let Some(focus) = self.ui.scoped.search.previous_focus.take() {
+                ui.ctx().memory_mut(|memory| memory.request_focus(focus));
+            }
+            crate::grid::retain_editing_for_layout(ui.ctx());
+        }
         if ui
             .ctx()
             .input_mut(|input| input.consume_shortcut(&search::SHORTCUT_SEARCH))

@@ -15,15 +15,17 @@ impl Harness {
         section.id = SectionId(1);
         section.name = "追加断面".into();
         app.core.model.sections.push(section);
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
         Self {
             app,
-            ctx: Default::default(),
+            ctx,
             size: egui::vec2(1300.0, 950.0),
         }
     }
 
     fn frame(&mut self, events: Vec<Event>) -> FullOutput {
-        self.ctx.run_ui(
+        let output = self.ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, self.size)),
                 modifiers: if events
@@ -38,7 +40,13 @@ impl Harness {
                 ..Default::default()
             },
             |ui| self.app.app_ui(ui),
-        )
+        );
+        let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+        assert!(
+            tree.nodes.iter().any(|(id, _)| *id == tree.focus),
+            "アクセシビリティのフォーカス先は表示中のノードに含まれる必要がある"
+        );
+        output
     }
 
     fn settled(&mut self) -> FullOutput {
@@ -143,60 +151,73 @@ fn search_names_distinguish_member_section_story_axis_and_operation_without_sele
 
 #[test]
 fn search_button_and_shortcut_preserve_invalid_grid_draft_and_selection_on_cancel() {
-    for button in [false, true] {
-        for draft in ["未確定", "123.0"] {
-            let mut h = Harness::new();
-            h.settled();
-            h.app.ui.view.workspace.placement.contents[0] = workspace::Content::Model;
-            h.settled();
-            h.app
-                .ui
-                .scoped
-                .node_grid
-                .grid
-                .click(crate::grid::CellRef { row: 0, col: 0 }, false);
-            h.key(Key::F2);
-            h.frame(vec![Event::Text(draft.into())]);
-            let output = h.settled();
-            assert!(h.app.ui.scoped.node_grid.grid.editing.is_some());
-            let focus = h.ctx.memory(|memory| memory.focused());
-            let before = document(&h.app);
-            let selection = (
-                h.app.ui.scoped.selection.nodes().to_vec(),
-                h.app.ui.scoped.selection.members().to_vec(),
-            );
-            if button {
-                h.click(&output, "検索…");
+    for pane in [0, 1] {
+        for button in [false, true] {
+            for draft in ["未確定", "123.0"] {
+                let mut h = Harness::new();
                 h.settled();
-            } else {
-                h.open();
-            }
-            assert!(h.app.ui.scoped.search.open);
-            h.frame(vec![Event::Text("検索だけ".into())]);
-            h.key(Key::Escape);
-            h.settled();
-            assert!(!h.app.ui.scoped.search.open);
-            assert_eq!(h.ctx.memory(|memory| memory.focused()), focus);
-            assert!(h.app.ui.scoped.node_grid.grid.editing.is_some());
-            assert_eq!(document(&h.app), before);
-            assert_eq!(
-                (
+                h.app.ui.view.workspace.placement.active = pane;
+                h.app.ui.view.workspace.placement.contents[pane] = workspace::Content::Model;
+                h.settled();
+                h.app
+                    .ui
+                    .scoped
+                    .node_grid
+                    .grid
+                    .click(crate::grid::CellRef { row: 0, col: 0 }, false);
+                h.key(Key::F2);
+                h.frame(vec![Event::Text(draft.into())]);
+                let output = h.settled();
+                assert!(h.app.ui.scoped.node_grid.grid.editing.is_some());
+                let focus = h.ctx.memory(|memory| memory.focused());
+                let before = document(&h.app);
+                let selection = (
                     h.app.ui.scoped.selection.nodes().to_vec(),
-                    h.app.ui.scoped.selection.members().to_vec()
-                ),
-                selection
-            );
-            h.open();
-            h.frame(vec![Event::Text("断面入力表".into())]);
-            h.key(Key::ArrowDown);
-            h.key(Key::Enter);
-            h.settled();
-            assert_eq!(h.app.ui.view.model_tab, ModelTab::Sections);
-            assert_eq!(document(&h.app), before);
-            h.app.ui.view.model_tab = ModelTab::Nodes;
-            h.settled();
-            assert!(h.app.ui.scoped.node_grid.grid.editing.is_some());
-            assert_eq!(document(&h.app), before);
+                    h.app.ui.scoped.selection.members().to_vec(),
+                );
+                if button {
+                    h.click(&output, "検索…");
+                    h.settled();
+                } else {
+                    h.open();
+                }
+                assert!(h.app.ui.scoped.search.open);
+                h.frame(vec![Event::Text("検索だけ".into())]);
+                if button {
+                    let output = h.settled();
+                    h.click(&output, "取消");
+                } else {
+                    h.key(Key::Escape);
+                }
+                h.settled();
+                assert!(!h.app.ui.scoped.search.open);
+                assert_eq!(h.ctx.memory(|memory| memory.focused()), focus);
+                assert!(h.app.ui.scoped.node_grid.grid.editing.is_some());
+                assert_eq!(document(&h.app), before);
+                assert_eq!(
+                    (
+                        h.app.ui.scoped.selection.nodes().to_vec(),
+                        h.app.ui.scoped.selection.members().to_vec()
+                    ),
+                    selection
+                );
+                for (query, tab) in [
+                    ("節点入力表", ModelTab::Nodes),
+                    ("断面入力表", ModelTab::Sections),
+                ] {
+                    h.open();
+                    h.frame(vec![Event::Text(query.into())]);
+                    h.key(Key::ArrowDown);
+                    h.key(Key::Enter);
+                    h.settled();
+                    assert_eq!(h.app.ui.view.model_tab, tab);
+                    assert_eq!(document(&h.app), before);
+                    h.app.ui.view.model_tab = ModelTab::Nodes;
+                    h.settled();
+                    assert!(h.app.ui.scoped.node_grid.grid.editing.is_some());
+                    assert_eq!(document(&h.app), before);
+                }
+            }
         }
     }
 }
