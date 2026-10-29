@@ -16,6 +16,9 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--scenario", choices=["review", "comparison"], required=True)
     parser.add_argument("--release-marker")
+    parser.add_argument("--request-id")
+    parser.add_argument("--input-json")
+    parser.add_argument("--submit-marker")
     args = parser.parse_args()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -80,8 +83,20 @@ def main():
             time.sleep(0.5)
         save(dict(stage="GUI approved", connection=connected))
         context = dict(version=1, session=connected["session"], project=connected["project"],
-                       study=connected["study"], request=str(uuid.uuid4()))
-        current = connected["baseline"]
+                       study=connected["study"], request=args.request_id or str(uuid.uuid4()))
+        current = json.loads(args.input_json) if args.input_json else connected["baseline"]
+        assert current["project"] == connected["project"], "依頼元のプロジェクトが一致しません"
+
+        def wait_before_submit():
+            if args.submit_marker:
+                marker = Path(args.submit_marker)
+                assert not marker.exists(), "専用の未使用markerを指定してください"
+                save(dict(stage="waiting_before_submission", marker=str(marker)))
+                deadline = time.monotonic() + 600
+                while not marker.exists():
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("提出前の確認markerがありません")
+                    time.sleep(0.1)
 
         def call(operation, arguments=None, expect_error=None):
             body = dict(context, id=str(uuid.uuid4()), operation=operation,
@@ -94,7 +109,7 @@ def main():
                 raise RuntimeError(response)
             return response.get("result")
 
-        call("begin_request")
+        begun = call("begin_request")
         study = call("study")
         fixed = call("fixed_targets", dict(offset=0, limit=100))["items"]
         call("conditions")
@@ -104,8 +119,29 @@ def main():
             assert connected["mode"] == "Review"
             call("create_comparison", dict(name="作成不可"), expect_error="permission_denied")
             call("calculate", expect_error="permission_denied")
-            call("submit", dict(explanation="固定対象と条件を参照しました。計算していません。",
-                                unchecked=["解析・検定", "人による採用"], references=[]))
+            references = begun.get("result_references", [])
+            submission = dict(explanation="固定対象と条件を参照しました。新しい計算はしていません。",
+                              unchecked=["現在案の再計算", "人による採用"], references=references)
+            if references:
+                runs = call("runs", dict(offset=0, limit=100))["page"]
+                assert not runs["omitted"], "正常fixtureの保持計算だけを対象にします"
+                sources = []
+                for run in runs["items"]:
+                    if not run["matches_requested_input"]:
+                        continue
+                    result = call("results", dict(run_index=run["run_index"], offset=0, limit=100))
+                    rows = result["page"]
+                    assert not rows["omitted"], "正常fixtureの有限結果だけを対象にします"
+                    observed = [row["reference"] for row in rows["items"] if row.get("reference")]
+                    if all(any(item["run"] == reference["run"] and item["kind"] == reference["kind"]
+                               for item in observed) for reference in references):
+                        sources.append(run["run_index"])
+                assert len(sources) == 1, "提出元の保持計算を一意に確認できません"
+                submission["run_index"] = sources[0]
+                for reference in references:
+                    call("evidence", dict(reference=reference, table="nodes", offset=0, limit=1))
+            wait_before_submit()
+            call("submit", submission)
         else:
             assert connected["mode"] == "Comparison"
             current = call("create_comparison", dict(name="MCP実通信比較"))["input"]
@@ -127,6 +163,7 @@ def main():
                              if row.get("kind") == "check" and row.get("reference"))
             call("evidence", dict(reference=reference, table="nodes", offset=0, limit=1))
             call("quantity", dict(offset=0, limit=1))
+            wait_before_submit()
             call("submit", dict(run_index=state["run_index"], explanation="既存計算・検定の同じ根拠を参照しました。",
                                 unchecked=["人による採用", "規準全体の確認"], references=[reference]))
         if args.release_marker:

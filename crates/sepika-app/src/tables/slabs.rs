@@ -844,6 +844,14 @@ fn slab_placements(ui: &mut egui::Ui, app: &mut App) {
                             }
                         });
                     let id = ui.id().with("eccentricity_text");
+                    ui.data_mut(|data| {
+                        let cells = data.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(
+                            "numeric_input_cells",
+                        ));
+                        if !cells.contains(&id) {
+                            cells.push(id);
+                        }
+                    });
                     let stored = ui.data(|d| d.get_temp::<(Option<f64>, String)>(id));
                     let mut text = stored
                         .filter(|(value, _)| *value == eccentricity)

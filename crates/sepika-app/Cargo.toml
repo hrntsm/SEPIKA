@@ -6,7 +6,7 @@ license = "MIT"
 
 [features]
 default = []
-gui = ["egui", "eframe", "egui_extras", "egui_plot", "dep:rfd"]
+gui = ["egui", "eframe", "egui_extras", "egui_plot", "dep:rfd", "dep:time"]
 
 [[bin]]
 name = "sepika"
@@ -35,6 +35,7 @@ egui_extras = { workspace = true, optional = true, features = ["svg"] }
 egui_plot = { workspace = true, optional = true }
 smallvec = { workspace = true }
 rfd = { version = "0.17", optional = true }
+time = { version = "0.3.49", features = ["formatting"], optional = true }
 sepika-math = { version = "0.0.1", path = "../sepika-math" }
 bincode = { workspace = true }
 serde = { workspace = true }

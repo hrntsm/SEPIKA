@@ -474,7 +474,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
 }
 
 /// load_model が UI scoped を破棄した後、材料表に属する temp だけを破棄する。
-fn clear_material_inputs(ui: &mut egui::Ui) {
+pub(crate) fn clear_material_inputs(ui: &mut egui::Ui) {
     let registry = egui::Id::new("material_cell_ids");
     let cells = ui.data(|d| d.get_temp::<Vec<egui::Id>>(registry).unwrap_or_default());
     for cell in &cells {

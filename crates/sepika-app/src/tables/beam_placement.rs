@@ -31,6 +31,10 @@ pub(super) fn beam_eccentricities(ui: &mut egui::Ui, app: &mut App, secondary: b
                 ui.horizontal(|ui| {
                     ui.label(match member { SupportMemberId::Primary(id) => format!("大梁 ID {}", id.0), SupportMemberId::Secondary(id) => format!("小梁 ID {}", id.0) });
                     let id = ui.id().with("eccentricity_text");
+                    ui.data_mut(|data| {
+                        let cells = data.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new("numeric_input_cells"));
+                        if !cells.contains(&id) { cells.push(id); }
+                    });
                     let stored = ui.data(|d| d.get_temp::<(Option<f64>, String)>(id));
                     let mut text = stored.filter(|(saved, _)| *saved == value)
                         .map(|(_, text)| text).unwrap_or_else(|| value.map(|v| v.to_string()).unwrap_or_default());

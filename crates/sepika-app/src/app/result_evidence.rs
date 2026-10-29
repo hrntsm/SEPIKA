@@ -548,6 +548,11 @@ impl App {
                 None => {}
             }
             ui.label(&state);
+            if evidence.reference.is_some() && ui.button("この根拠からAIへの依頼を作る").clicked() {
+                self.ai_connection.request_evidence=evidence.reference.clone();
+                self.ai_connection.review=true;
+                self.studies.window_open=true;
+            }
             egui::ScrollArea::vertical().id_salt("evidence_lines").max_height(330.0).show(ui, |ui| {
                 for line in &evidence.lines { ui.label(line); }
             });
