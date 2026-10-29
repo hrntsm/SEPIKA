@@ -35,6 +35,200 @@ fn accepted(response: Response) -> Value {
     response.result.unwrap()
 }
 
+fn retained_check_reference(app: &App, s: usize, index: usize) -> ResultReference {
+    comparison::projection::check_rows(&app.studies.items[s].runs[index].comparison_checks[0])
+        .unwrap()
+        .into_iter()
+        .find_map(|row| row.evidence)
+        .unwrap()
+}
+
+#[test]
+fn retained_results_and_submissions_keep_their_run_state_during_recalculation_or_confirmation() {
+    for confirmation in [false, true] {
+        let (mut app, s) = fixture();
+        let p = app.create_comparison(s, "元計算と新ジョブ".into()).unwrap();
+        app.start_study_calculation(s, p).unwrap();
+        crate::app::study::tests::wait(&mut app);
+        permit(&mut app, s, Mode::Comparison);
+        accepted(call(&mut app, s, p, "begin_request", Value::Null));
+        let reference = retained_check_reference(&app, s, 0);
+        let mut original_results = request(
+            &app,
+            s,
+            p,
+            "results",
+            json!({"run_index":0,"offset":0,"limit":1}),
+        );
+        let before = accepted(app.handle_ai_request("client", original_results.clone()));
+        assert_eq!(before["state"], "calculated");
+        let job = accepted(call(&mut app, s, p, "calculate", Value::Null));
+        if confirmation {
+            let mut worker = app.proposal_input(s, p).core();
+            worker.scoped.pending_unset_analysis = Some(PendingAnalysis::StaticAll);
+            let (tx, rx) = std::sync::mpsc::channel();
+            app.studies.running.as_mut().unwrap().preparing = Some(rx);
+            tx.send(Ok(StudyWorkerOutcome::Confirmation(Box::new(worker))))
+                .unwrap();
+            app.poll_study_calculation();
+        }
+        let observed = if confirmation {
+            "awaiting_gui_confirmation"
+        } else {
+            "running"
+        };
+        assert_eq!(
+            accepted(call(&mut app, s, p, "job", json!({"id":job["id"]})))["state"],
+            observed
+        );
+        assert_eq!(
+            accepted(call(
+                &mut app,
+                s,
+                p,
+                "results",
+                json!({"run_index":0,"offset":0,"limit":1})
+            ))["state"],
+            "calculated"
+        );
+        assert_eq!(
+            accepted(app.handle_ai_request("client", original_results.clone())),
+            before
+        );
+        let missing = call(
+            &mut app,
+            s,
+            p,
+            "submit",
+            json!({"explanation":"元計算の指定が必要","unchecked":[],"references":[reference]}),
+        );
+        assert_eq!(missing.error.unwrap().code, "run_required");
+        let mut submit = request(
+            &app,
+            s,
+            p,
+            "submit",
+            json!({"run_index":0,"explanation":"保持run0の数値","unchecked":["採用"],"references":[reference]}),
+        );
+        let selected = accepted(app.handle_ai_request("client", submit.clone()));
+        assert_eq!(selected["submission"]["source"], "run");
+        assert_eq!(selected["submission"]["calculation_state"], "calculated");
+        assert_eq!(selected["submission"]["run_index"], 0);
+        assert!(selected["submission"]["job_id"].is_null());
+        let mut explanation = request(
+            &app,
+            s,
+            p,
+            "submit",
+            json!({"explanation":"進行jobの観測だけ","unchecked":["完了結果"],"references":[]}),
+        );
+        let observed_submission = accepted(app.handle_ai_request("client", explanation.clone()));
+        assert_eq!(observed_submission["submission"]["source"], "job");
+        assert_eq!(observed_submission["submission"]["job_id"], job["id"]);
+        assert_eq!(
+            observed_submission["submission"]["calculation_state"],
+            observed
+        );
+        assert!(observed_submission["submission"]["run_index"].is_null());
+        assert!(observed_submission["submission"]["verification"]["checked"].is_null());
+        if !confirmation {
+            crate::app::study::tests::wait(&mut app);
+            let other_reference = retained_check_reference(&app, s, 1);
+            assert_ne!(reference.run, other_reference.run);
+            assert_eq!(call(&mut app,s,p,"submit",json!({"run_index":0,"explanation":"異なるrunを混ぜない","unchecked":[],"references":[reference,other_reference]})).error.unwrap().code,"submission_run_mismatch");
+        }
+        let saved = app.saved_studies();
+        app.restore_studies(saved).unwrap();
+        permit(&mut app, s, Mode::Review);
+        let session = Some(
+            app.ai_connection
+                .permission
+                .as_ref()
+                .unwrap()
+                .session
+                .clone(),
+        );
+        submit.session = session.clone();
+        explanation.session = session.clone();
+        original_results.session = session;
+        assert_eq!(accepted(app.handle_ai_request("client", submit)), selected);
+        assert_eq!(
+            accepted(app.handle_ai_request("client", explanation)),
+            observed_submission
+        );
+        assert_eq!(
+            accepted(app.handle_ai_request("client", original_results)),
+            before
+        );
+    }
+}
+
+#[test]
+fn a_human_successful_run_is_not_marked_failed_by_an_earlier_ai_job() {
+    let (mut app, s) = fixture();
+    let p = app.create_comparison(s, "失敗後の人の計算".into()).unwrap();
+    permit(&mut app, s, Mode::Comparison);
+    accepted(call(&mut app, s, p, "begin_request", Value::Null));
+    let job = accepted(call(&mut app, s, p, "calculate", Value::Null));
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.studies.running.as_mut().unwrap().preparing = Some(rx);
+    tx.send(Err("先行AI worker失敗".into())).unwrap();
+    app.poll_study_calculation();
+    assert_eq!(app.studies.items[s].ai.jobs[0].state, "failed");
+    app.start_study_calculation(s, p).unwrap();
+    crate::app::study::tests::wait(&mut app);
+    assert!(app.studies.items[s].runs[0].ai_job.is_none());
+    assert_eq!(
+        accepted(call(&mut app, s, p, "job", json!({"id":job["id"]})))["state"],
+        "failed"
+    );
+    assert_eq!(
+        accepted(call(
+            &mut app,
+            s,
+            p,
+            "results",
+            json!({"run_index":0,"offset":0,"limit":1})
+        ))["state"],
+        "calculated"
+    );
+    let reference = retained_check_reference(&app, s, 0);
+    let mut submit = request(
+        &app,
+        s,
+        p,
+        "submit",
+        json!({"run_index":0,"explanation":"人が完了したrun","unchecked":["採用"],"references":[reference]}),
+    );
+    let selected = accepted(app.handle_ai_request("client", submit.clone()));
+    assert_eq!(selected["submission"]["source"], "run");
+    assert_eq!(selected["submission"]["calculation_state"], "calculated");
+    assert!(selected["submission"]["job_id"].is_null());
+    let observed = accepted(call(
+        &mut app,
+        s,
+        p,
+        "submit",
+        json!({"explanation":"先行失敗jobの観測","unchecked":["結果未指定"],"references":[]}),
+    ));
+    assert_eq!(observed["submission"]["source"], "job");
+    assert_eq!(observed["submission"]["job_id"], job["id"]);
+    assert_eq!(observed["submission"]["calculation_state"], "failed");
+    assert!(observed["submission"]["verification"]["checked"].is_null());
+    let saved = app.saved_studies();
+    app.restore_studies(saved).unwrap();
+    permit(&mut app, s, Mode::Review);
+    submit.session = Some(
+        app.ai_connection
+            .permission
+            .as_ref()
+            .unwrap()
+            .session
+            .clone(),
+    );
+    assert_eq!(accepted(app.handle_ai_request("client", submit)), selected);
+}
+
 #[test]
 fn a_fresh_review_connection_discovers_saved_manual_runs_and_history_permission_controls_every_read(
 ) {
@@ -405,7 +599,7 @@ fn submitted_receipts_recheck_saved_version_and_original_calculation_even_withou
             s,
             p,
             "submit",
-            json!({"explanation":"提出時の計算を参照","unchecked":["採用"],"references":references}),
+            json!({"run_index":0,"explanation":"提出時の計算を参照","unchecked":["採用"],"references":references}),
         );
         let submitted = accepted(app.handle_ai_request("client", submit.clone()));
         assert_eq!(submitted["submission"]["run_index"], 0);
@@ -1044,7 +1238,7 @@ fn real_pipe_edits_existing_comparison_calculates_and_submits_the_same_gui_evide
         let evidence=request(&app,s,1,"evidence",json!({"reference":reference,"table":"nodes","offset":0,"limit":1}));
         let evidence=accepted(exchange(&mut app,&mut reader,&evidence).await);
         assert_eq!(evidence["page"]["total"],calculation_nodes);
-        let submit=request(&app,s,1,"submit",json!({"explanation":"既存結果に基づく比較","unchecked":["人による採用"],"references":[reference]}));
+        let submit=request(&app,s,1,"submit",json!({"run_index":0,"explanation":"既存結果に基づく比較","unchecked":["人による採用"],"references":[reference]}));
         let submitted=accepted(exchange(&mut app,&mut reader,&submit).await);
         assert_eq!(submitted["submission"]["calculation_state"],"calculated");
         assert_eq!(app.input_reference(),main);

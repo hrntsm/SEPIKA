@@ -22,6 +22,7 @@ pub enum Mode {
 pub struct Submission {
     pub receipt_id: String,
     pub run_index: Option<usize>,
+    pub job_id: Option<String>,
     pub input: super::references::InputReference,
     pub explanation: String,
     pub unchecked: Vec<String>,
@@ -102,11 +103,7 @@ impl StudyAi {
             let state = if failure.is_some() {
                 "failed"
             } else if let Some(index) = found {
-                if runs[index].error.is_some() || runs[index].results.is_none() {
-                    "failed"
-                } else {
-                    "calculated"
-                }
+                runs[index].calculation_state()
             } else if pending {
                 match active {
                     Some(running)

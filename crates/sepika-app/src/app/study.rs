@@ -234,6 +234,13 @@ pub struct StudyRun {
     pub diagnostics: Vec<Diagnostic>,
 }
 impl StudyRun {
+    fn calculation_state(&self) -> &'static str {
+        if self.error.is_some() || self.results.is_none() {
+            "failed"
+        } else {
+            "calculated"
+        }
+    }
     fn result_scope_error(&self, reference: &references::ResultReference) -> Option<String> {
         if reference.kind != ResultInputKey::Design {
             return None;

@@ -112,6 +112,8 @@ struct RunPage {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Submit {
+    #[serde(default)]
+    run_index: Option<usize>,
     explanation: String,
     unchecked: Vec<String>,
     references: Vec<ResultReference>,
@@ -533,6 +535,15 @@ impl App {
                 let submission:Submit=args(&request)?;
                 if submission.explanation.trim().is_empty() {return Err(reject("invalid_arguments","説明を指定してください"));}
                 for reference in &submission.references {self.ai_validate_reference(s,&expected,reference,history)?;}
+                let (state,job_id)=if let Some(index)=submission.run_index {
+                    let run=self.studies.items[s].runs.get(index).ok_or_else(||reject("result_missing","提出する保持計算がありません"))?;
+                    if Self::ai_input_reference(&run.input)!=expected && Self::ai_input_reference(&run.prepared)!=expected {return Err(reject("result_scope_mismatch","提出する保持計算の案・入力版が一致しません"));}
+                    if submission.references.iter().any(|reference|run.referenced_result(reference).is_none()) {return Err(reject("submission_run_mismatch","結果参照は指定した一つの保持計算にそろえてください"));}
+                    (run.calculation_state().to_string(),run.ai_job.clone())
+                } else {
+                    if !submission.references.is_empty() {return Err(reject("run_required","結果参照を提出する場合は元のrun_indexを明示してください"));}
+                    self.studies.items[s].ai.jobs.iter().rev().find(|job|job.request==task_id && job.input==expected).map(|job|(job.state.clone(),Some(job.id.clone()))).unwrap_or_else(||("not_calculated".into(),None))
+                };
                 let input=self.ai_read_input(s,p,&expected)?;
                 let quantity_app=App{core:input.core(),..Default::default()};
                 let quantity=quantity_app.member_quantity_evidence_reference(comparison::projection::fixed_members(&self.studies.items[s]));
@@ -542,12 +553,11 @@ impl App {
                     quantity.takeoff().map_err(|e|reject("quantity_unavailable",e))?;
                     quantities.push(quantity.clone());
                 }
-                let state=self.ai_calculation_state(s,&expected);
-                let run_index=self.ai_latest_run_index(s,&expected);
+                let run_index=submission.run_index;
                 let verification=self.ai_verification_at(s,run_index);
-                let submitted=Submission{receipt_id:request.id.clone(),run_index,input:expected.clone(),explanation:submission.explanation,unchecked:submission.unchecked,references:submission.references,quantity_references:quantities,calculation_state:state,verification,submitted:SystemTime::now()};
+                let submitted=Submission{receipt_id:request.id.clone(),run_index,job_id,input:expected.clone(),explanation:submission.explanation,unchecked:submission.unchecked,references:submission.references,quantity_references:quantities,calculation_state:state,verification,submitted:SystemTime::now()};
                 self.studies.items[s].ai.tasks.iter_mut().find(|t|t.id==task_id).unwrap().submissions.push(submitted.clone());
-                json!({"status":"submitted","submission":{"input":submitted.input,"run_index":submitted.run_index,"calculation_state":submitted.calculation_state,"verification":submitted.verification,"result_reference_count":submitted.references.len(),"quantity_reference_count":submitted.quantity_references.len(),"submitted":submitted.submitted},"notice":"成果提出は計算成功・検定合格・人による採用とは別です"})
+                json!({"status":"submitted","submission":{"input":submitted.input,"source":if submitted.run_index.is_some(){"run"}else if submitted.job_id.is_some(){"job"}else{"none"},"run_index":submitted.run_index,"job_id":submitted.job_id,"calculation_state":submitted.calculation_state,"verification":submitted.verification,"result_reference_count":submitted.references.len(),"quantity_reference_count":submitted.quantity_references.len(),"submitted":submitted.submitted},"notice":"状態は提出時に選んだ元の観測です。成果提出は計算成功・検定合格・人による採用とは別です"})
             }
             _=>return Err(reject("unsupported_operation","この操作は公開していません。本案更新・採用・警告承諾・取消・任意ファイル操作は実行できません")),
         };
@@ -717,6 +727,7 @@ impl App {
                 "results" => {
                     let current = self.ai_results(s, p, &expected, &request, history)?;
                     for key in [
+                        "state",
                         "conditions",
                         "error",
                         "notice",
@@ -868,6 +879,7 @@ impl App {
         )
     }
 
+    #[cfg(test)]
     fn ai_calculation_state(&self, s: usize, input: &InputReference) -> String {
         self.studies.items[s]
             .ai
@@ -896,6 +908,7 @@ impl App {
             })
     }
 
+    #[cfg(test)]
     fn ai_latest_run_index(&self, s: usize, input: &InputReference) -> Option<usize> {
         self.studies.items[s].runs.iter().rposition(|r| {
             Self::ai_input_reference(&r.input) == *input
@@ -965,6 +978,18 @@ impl App {
                     "提出元の保持計算と入力版が一致しません",
                 ));
             }
+            if run.ai_job != submission.job_id
+                || run.calculation_state() != submission.calculation_state
+                || submission
+                    .references
+                    .iter()
+                    .any(|reference| run.referenced_result(reference).is_none())
+            {
+                return Err(reject(
+                    "submission_run_mismatch",
+                    "提出の保持計算・実行・結果参照が一致しません",
+                ));
+            }
             if let Some(bundle) = &run.results {
                 let app =
                     comparison::projection::result_app(&run.prepared, bundle, run.last_static);
@@ -986,8 +1011,27 @@ impl App {
             } else if submission.calculation_state == "calculated" {
                 return Err(reject("result_unavailable", "提出元の計算結果がありません"));
             }
-        } else if submission.calculation_state == "calculated" {
-            return Err(reject("result_unavailable", "提出元の保持計算がありません"));
+        } else if let Some(job_id) = &submission.job_id {
+            if !submission.references.is_empty()
+                || !self.studies.items[s].ai.jobs.iter().any(|job| {
+                    job.id == *job_id
+                        && job.input == *expected
+                        && receipt.content.get("request").and_then(Value::as_str)
+                            == Some(job.request.as_str())
+                })
+            {
+                return Err(reject(
+                    "job_missing",
+                    "提出時に観測した元ジョブがありません",
+                ));
+            }
+        } else if submission.calculation_state != "not_calculated"
+            || !submission.references.is_empty()
+        {
+            return Err(reject(
+                "result_unavailable",
+                "提出元の計算・ジョブがありません",
+            ));
         }
         if self.ai_verification_at(s, submission.run_index) != submission.verification {
             return Err(reject(
@@ -1115,14 +1159,14 @@ impl App {
             json!({"checked":verification.checked,"unchecked":verification.unchecked,"confirmed_ng":verification.confirmed_ng,"observed_counts":verification.observed_counts,"count_unit":CHECK_COUNT_UNIT,"evaluated_maximum":summary.maximum.as_ref().and_then(|r|r.ratio),"maximum":if verification.scope_available && summary.skipped==0 {summary.maximum.and_then(|r|r.ratio)} else {None},"scope_complete":verification.scope_available,"unit":"無次元"})
         };
         Ok(
-            json!({"state":self.ai_calculation_state(s,input),"input":input,"run_index":args.run_index,"conditions":run.input.settings,"error":run.error,"notice":run.notice,"unavailable":unavailable,"whole_checks":summary_json(summary),"fixed_checks":summary_json(fixed_summary),"fixed_steel_volume":{"value_m3":volume.as_ref().ok(),"error":volume.as_ref().err(),"members":fixed,"identity":quantity.identity},"page":page(rows,args.offset,args.limit)?}),
+            json!({"state":run.calculation_state(),"input":input,"run_index":args.run_index,"conditions":run.input.settings,"error":run.error,"notice":run.notice,"unavailable":unavailable,"whole_checks":summary_json(summary),"fixed_checks":summary_json(fixed_summary),"fixed_steel_volume":{"value_m3":volume.as_ref().ok(),"error":volume.as_ref().err(),"members":fixed,"identity":quantity.identity},"page":page(rows,args.offset,args.limit)?}),
         )
     }
 
     fn ai_run_metadata_row(index: usize, run: &StudyRun, requested: &InputReference) -> Value {
         let input = Self::ai_input_reference(&run.input);
         let prepared = Self::ai_input_reference(&run.prepared);
-        json!({"run_index":index,"input":input,"prepared_input":prepared,"matches_requested_input":input==*requested || prepared==*requested,"created":run.created,"proposal_name":run.proposal_name,"recorded_calculation_state":if run.error.is_some() || run.results.is_none() {"failed"} else {"calculated"},"error":run.error,"notice":run.notice,"conditions":run.input.settings,"app_version":run.app_version,"ai_job":run.ai_job})
+        json!({"run_index":index,"input":input,"prepared_input":prepared,"matches_requested_input":input==*requested || prepared==*requested,"created":run.created,"proposal_name":run.proposal_name,"recorded_calculation_state":run.calculation_state(),"error":run.error,"notice":run.notice,"conditions":run.input.settings,"app_version":run.app_version,"ai_job":run.ai_job})
     }
 
     fn ai_run_metadata(

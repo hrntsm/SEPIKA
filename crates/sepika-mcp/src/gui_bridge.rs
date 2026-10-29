@@ -39,7 +39,7 @@ impl GuiBridge {
 #[tool_router]
 impl GuiBridge {
     #[tool(
-        description = "開いているSEPIKA GUIの許可した検討へ要求を中継する。envelopeはversion=1,id,operation,session,project,study,request,proposal,input,arguments。最初にconnect（id,version,operationのみ）、GUI承認後に再connectでsessionと対象版を取得しbegin_request。操作: study,proposals,fixed_targets,decisions,conditions,members,nodes,materials,load_cases,combinations,sections,create_comparison(name),assign_section(targets,section),calculate,job(id),receipt(id),changes,quantity,runs(offset,limit),results(run_index,offset,limit),evidence(reference,table,offset,limit),submit(explanation,unchecked,references)。一覧はoffsetと1〜100のlimit。runsで指定案の保持計算と開始/準備後入力版を発見し、保存旧版はGUIのhistory許可が必要。実行時状態と現在の結果有効性は別。更新は期待入力版の完全一致が必要。応答喪失時は再承認後receiptで要求IDを照会し、失敗とも成功とも推定しない。確認のみ依頼で作成/編集/計算は禁止。本案更新/採用/警告承諾/ファイル操作は提供しない。"
+        description = "開いているSEPIKA GUIの許可した検討へ要求を中継する。envelopeはversion=1,id,operation,session,project,study,request,proposal,input,arguments。最初にconnect（id,version,operationのみ）、GUI承認後に再connectでsessionと対象版を取得しbegin_request。操作: study,proposals,fixed_targets,decisions,conditions,members,nodes,materials,load_cases,combinations,sections,create_comparison(name),assign_section(targets,section),calculate,job(id),receipt(id),changes,quantity,runs(offset,limit),results(run_index,offset,limit),evidence(reference,table,offset,limit),submit(run_index,explanation,unchecked,references)。一覧はoffsetと1〜100のlimit。runsで指定案の保持計算と開始/準備後入力版を発見し、保存旧版はGUIのhistory許可が必要。実行時状態と現在の結果有効性は別。結果を提出するときは元のrun_indexを一つ明示し、参照をそのrunにそろえる。run未指定は説明/数量と同依頼jobの提出時観測だけで検定根拠を補完しない。更新は期待入力版の完全一致が必要。応答喪失時は再承認後receiptで要求IDを照会し、失敗とも成功とも推定しない。確認のみ依頼で作成/編集/計算は禁止。本案更新/採用/警告承諾/ファイル操作は提供しない。"
     )]
     pub async fn gui_request(
         &self,

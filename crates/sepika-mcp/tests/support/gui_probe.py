@@ -123,7 +123,7 @@ def main():
                              if row.get("kind") == "check" and row.get("reference"))
             call("evidence", dict(reference=reference, table="nodes", offset=0, limit=1))
             call("quantity", dict(offset=0, limit=1))
-            call("submit", dict(explanation="既存計算・検定の同じ根拠を参照しました。",
+            call("submit", dict(run_index=state["run_index"], explanation="既存計算・検定の同じ根拠を参照しました。",
                                 unchecked=["人による採用", "規準全体の確認"], references=[reference]))
         save(dict(stage="completed", scenario=args.scenario))
     finally:
