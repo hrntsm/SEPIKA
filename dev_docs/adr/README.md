@@ -136,6 +136,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0092](0092-confirmed-study-adoption.md) | accepted | 確認済み断面割当を既存Undoで採用し、判断根拠を固定する |
 | [0093](0093-gui-ai-connection-protocol.md) | accepted | GUIの検討操作を限定DACLのパイプと保存受理台帳で中継する |
 | [0094](0094-prepared-ai-study-requests.md) | accepted | AI依頼を未開始から保存し、確認元入力を編集対象と分離する |
+| [0095](0095-fixed-steel-quantity-evidence.md) | accepted | 固定したS造部材の鋼材数量と全体数量の算定状態を分離する |
 
 ## 規約
 
