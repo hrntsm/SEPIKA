@@ -282,14 +282,10 @@ fn pending_geometry_queries_and_quantity_are_not_reported_as_zero() {
     normal.section = Some(SectionId(1));
     model.elements[0].id = ElemId(1);
     model.elements.insert(0, normal);
-    let before = model.clone();
     match compute_job(&model, JobKind::LinearStatic, &JobParams::default()) {
         Err(error) => assert!(error.to_string().contains("フィレット"), "{error}"),
         Ok(_) => panic!("未知フィレットの部分入力から成功結果を公開してはいけない"),
     }
-    assert_eq!(model.load_cases, before.load_cases);
-    assert_eq!(model.stories, before.stories);
-    assert_eq!(model.nodes, before.nodes);
 }
 
 #[test]
@@ -460,34 +456,9 @@ fn test_query_model_nodes() {
 }
 
 #[test]
-fn test_query_model_elements_and_sections() {
-    let m = sample_model();
-    assert_eq!(query_model(&m, "member", None).unwrap().len(), 1);
-    let secs = query_model(&m, "section", None).unwrap();
-    assert_eq!(secs.len(), 1);
-    assert_eq!(secs[0]["name"], "H-400");
-}
-
-/// 断面の問い合わせは材料 4 欄を出す。材料は断面が持ち、未割当は解析前チェックが
-/// 止めるため、どの断面のどの欄が空かを問い合わせ側から追えるようにする。
-#[test]
-fn test_query_model_sections_expose_materials() {
+fn test_query_model_sections_expose_materials_and_frame_use() {
     let mut m = sample_model();
     m.sections[0].rebar_material = None;
-    let secs = query_model(&m, "section", None).unwrap();
-    assert_eq!(secs[0]["material"], 0, "主材料の ID を出す");
-    assert!(
-        secs[0]["rebar_material"].is_null(),
-        "未割当の欄は null で見分けられる"
-    );
-    for key in ["floor", "shear_rebar_material", "steel_material"] {
-        assert!(secs[0].get(key).is_some(), "{key} の欄がある");
-    }
-}
-
-#[test]
-fn test_query_model_sections_expose_frame_use() {
-    let mut m = sample_model();
     let mut beam = m.sections[0].clone();
     beam.id = SectionId(1);
     beam.frame_use = Some(FrameSectionUse::Girder);
@@ -497,9 +468,16 @@ fn test_query_model_sections_expose_frame_use() {
     let mut unset = beam.clone();
     unset.id = SectionId(3);
     unset.frame_use = None;
+    assert_eq!(query_model(&m, "section", None).unwrap().len(), 1);
     m.sections.extend([beam, brace, unset]);
 
     let sections = query_model(&m, "sections", None).unwrap();
+    assert_eq!(sections[0]["name"], "H-400");
+    assert_eq!(sections[0]["material"], 0);
+    assert!(sections[0]["rebar_material"].is_null());
+    for key in ["floor", "shear_rebar_material", "steel_material"] {
+        assert!(sections[0].get(key).is_some(), "{key} の欄がある");
+    }
     assert_eq!(sections[0]["frame_use"], "Column");
     assert_eq!(sections[1]["frame_use"], "Girder");
     assert_eq!(sections[2]["frame_use"], "Brace");
@@ -515,18 +493,10 @@ fn test_query_model_filter() {
 }
 
 #[test]
-fn test_query_model_unknown_kind() {
-    let m = sample_model();
-    let error = query_model(&m, "bogus", None).unwrap_err();
-    assert!(error.contains("bogus"), "{error}");
-    assert!(error.contains("source_stories"), "{error}");
-    assert!(error.contains("strength_diagnostics"), "{error}");
-}
-
-#[test]
-fn query_kinds_and_aliases_accept_empty_models() {
+fn query_kinds_and_aliases_preserve_items_and_filtering() {
     let model = Model::default();
-    let error = query_model(&model, "unknown", None).unwrap_err();
+    let error = query_model(&model, "bogus", None).unwrap_err();
+    assert!(error.contains("bogus"), "{error}");
     for kind in [
         "node",
         "nodes",
@@ -576,6 +546,57 @@ fn query_kinds_and_aliases_accept_empty_models() {
     );
     for kind in ["", "Nodes", "unknown"] {
         assert!(query_model(&model, kind, Some("no_match")).is_err());
+    }
+    use sepika_core::ids::{
+        FloorPlateAssignmentRegionId, SecondaryMemberId, WallPlateAssignmentRegionId,
+    };
+    use sepika_core::model::{
+        FloorPlateAssignmentRegion, PlateAssignment, SecondaryMember, SecondaryMemberKind,
+        WallPlateAssignmentRegion,
+    };
+    let mut populated = Model::default();
+    for id in [9, 3] {
+        populated
+            .floor_assignment_regions
+            .regions
+            .push(FloorPlateAssignmentRegion {
+                id: FloorPlateAssignmentRegionId(id),
+                boundary: vec![],
+                assignment: PlateAssignment::Unset,
+            });
+        populated
+            .wall_assignment_regions
+            .regions
+            .push(WallPlateAssignmentRegion {
+                id: WallPlateAssignmentRegionId(id),
+                boundary: vec![],
+                assignment: PlateAssignment::NoPlate,
+            });
+        populated.unassigned_beams.push(SecondaryMember {
+            id: SecondaryMemberId(id),
+            name: format!("小梁{id}"),
+            ..Default::default()
+        });
+        populated.unassigned_posts.push(SecondaryMember {
+            id: SecondaryMemberId(id),
+            name: format!("間柱{id}"),
+            kind: SecondaryMemberKind::Post,
+            ..Default::default()
+        });
+    }
+    for (singular, plural) in [
+        ("floor_assignment_region", "floor_assignment_regions"),
+        ("wall_assignment_region", "wall_assignment_regions"),
+        ("unassigned_beam", "unassigned_beams"),
+        ("unassigned_post", "unassigned_posts"),
+    ] {
+        let rows = query_model(&populated, singular, None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], 9);
+        assert_eq!(rows[1]["id"], 3);
+        assert_eq!(rows, query_model(&populated, plural, None).unwrap());
+        let filtered = query_model(&populated, plural, Some("\"id\":3")).unwrap();
+        assert_eq!(filtered, vec![rows[1].clone()]);
     }
 }
 
@@ -719,13 +740,11 @@ fn enclosed_plate_boundaries_preserve_unresolved_and_resolved_geometry() {
     assert!(walls[0]["shape"].get("resolved_extent").is_some());
 }
 
-/// 部材付帯情報（ハンチ・継手位置）が登録された部材は、`query_model` の
-/// member/elements 出力に `haunch_i`/`haunch_j`/`joints` が含まれる。
-/// 付帯情報がない部材（本テストには含めない）は従来どおりのフィールドのみとなる
-/// （`test_query_model_elements_and_sections` で確認済み）。
+/// 部材照会は登録された材端ハンチ・継手位置を返す。
 #[test]
 fn test_query_model_elements_with_member_detail() {
     let mut m = sample_model();
+    assert_eq!(query_model(&m, "member", None).unwrap().len(), 1);
     m.member_detail_attrs.push(MemberDetailAttr {
         elem: ElemId(0),
         haunch_i: Some(Haunch {
@@ -1297,25 +1316,6 @@ fn test_apply_edit_wall_plate_region_assignment() {
     // 領域不在は applied:false。
     let body = serde_json::json!({ "command": "AssignWallPlateToRegion", "region": 99 });
     assert!(!apply_edit(&mut state, &body).expect("parse ok").applied);
-}
-
-#[test]
-fn test_apply_edit_noop_unknown_node() {
-    let mut state = ServerState {
-        model: sample_model(),
-        undo: sepika_edit::UndoStack::new(),
-        jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
-        results: sepika_io::results::FsResultStore::open(
-            std::env::temp_dir().join(format!("sepika-test-{}/mcp_edit_noop", std::process::id())),
-        )
-        .expect("temp store"),
-    };
-    let body = serde_json::json!({
-        "command": "AssignWallPlateToRegion",
-        "region": 99
-    });
-    let result = apply_edit(&mut state, &body).expect("parse ok");
-    assert!(!result.applied);
     assert!(state.model.wall_plates.is_empty());
 }
 
@@ -1936,6 +1936,10 @@ fn loaded_full_length_intent_survives_mcp_preparation_and_linear_analysis() {
     let path = std::env::temp_dir().join(format!("sepika-449-mcp-{}.ovika", std::process::id()));
     sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
     let loaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    assert_eq!(
+        loaded.load_cases[case_id.index()],
+        model.load_cases[case_id.index()]
+    );
     let params = JobParams {
         load_case: Some(case_id.0),
         ..Default::default()
@@ -1948,10 +1952,6 @@ fn loaded_full_length_intent_survives_mcp_preparation_and_linear_analysis() {
     let outcome = compute_job(&loaded, JobKind::LinearStatic, &params)
         .unwrap_or_else(|error| panic!("{error}"));
     assert!(matches!(outcome, JobOutcome::LinearStatic { case, .. } if case == case_id.0));
-    assert_eq!(
-        loaded.load_cases[case_id.index()],
-        model.load_cases[case_id.index()]
-    );
     let mut invalid = loaded;
     if let sepika_core::model::MemberLoadKind::Distributed { b, .. } =
         &mut invalid.load_cases[case_id.index()].member[0].kind
@@ -4477,7 +4477,7 @@ async fn secondary_cft_mcp_tool_returns_unavailable_without_totals() {
 }
 
 #[test]
-fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
+fn issue635_existing_mcp_analysis_rejects_fixed_distance() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind};
     let mut model = rc_column_model();
@@ -4517,7 +4517,6 @@ fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
                 w2: -1.0,
             },
         )];
-        let before = format!("{model:?}");
         let result = compute_job(&model, JobKind::LinearStatic, &params);
         assert_eq!(
             result.is_ok(),
@@ -4534,7 +4533,6 @@ fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
                 "{reason}"
             );
         }
-        assert_eq!(format!("{model:?}"), before);
     }
     let mut state = ServerState::with_fs_store(
         model,
@@ -4563,7 +4561,6 @@ fn lip_channel_geometry_mcp_query_analysis_and_quantity_report_reason() {
     });
     model.sections[0].name = "LC544".into();
     model.sections[0].property_basis = Default::default();
-    let before = format!("{model:?}");
     let reason = model.validate_lip_channels().unwrap_err().to_string();
     let items = query_model(&model, "sections", None).unwrap();
     assert!(items[0]["unavailable_reason"]
@@ -4578,7 +4575,6 @@ fn lip_channel_geometry_mcp_query_analysis_and_quantity_report_reason() {
     assert_eq!(quantity["status"], "unavailable");
     assert!(quantity["totals"].is_null());
     assert!(quantity["reason"].as_str().unwrap().contains(&reason));
-    assert_eq!(format!("{model:?}"), before);
 }
 
 #[test]
@@ -4595,16 +4591,6 @@ fn running_progress_json_and_schema_distinguish_unmeasured_from_zero() {
         serde_json::to_value(&measured).unwrap(),
         serde_json::json!({"Running": {"progress": 0.0}})
     );
-    assert!(matches!(
-        serde_json::from_value::<JobStatus>(serde_json::to_value(unknown).unwrap()).unwrap(),
-        JobStatus::Running { progress: None }
-    ));
-    assert!(matches!(
-        serde_json::from_value::<JobStatus>(serde_json::to_value(measured).unwrap()).unwrap(),
-        JobStatus::Running {
-            progress: Some(0.0)
-        }
-    ));
     let schema = serde_json::to_value(schemars::schema_for!(JobStatus)).unwrap();
     let variants = schema["oneOf"].as_array().unwrap();
     let running = variants

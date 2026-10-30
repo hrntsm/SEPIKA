@@ -95,9 +95,8 @@ async fn zero_requested_eigen_modes_remain_known_after_publication_and_reopen() 
     assert_eq!(summary["store"]["entries"][0]["rows"], 0);
     assert_eq!(summary["store"]["entries"][0]["provenance"]["conditions"]["n_modes"], 0);
 
-    for reopened in [false, true] {
-        let reopened_server = SepikaServer::new(make_state(model.clone(), &dir));
-        let selected = if reopened { &reopened_server } else { &server };
+    let reopened_server = SepikaServer::new(make_state(model.clone(), &dir));
+    for selected in [&server, &reopened_server] {
         let got = selected.result_get(Parameters(ResultGetArgs {
             case: 0, kind: "Modal".into(), node_ids: None, member_ids: None, step_range: None,
         })).await.unwrap();

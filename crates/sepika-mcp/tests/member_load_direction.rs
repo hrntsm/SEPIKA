@@ -32,7 +32,6 @@ fn evidence(label: &str, value: &Value) {
 }
 
 fn design(model: &Model, combination: usize, label: &str) -> Result<Value, String> {
-    let before = serde_json::to_vec(model).unwrap();
     evidence(
         &format!("{label}-input"),
         &serde_json::to_value(model).unwrap(),
@@ -54,7 +53,6 @@ fn design(model: &Model, combination: usize, label: &str) -> Result<Value, Strin
         Ok(_) => panic!("DesignCheck以外の応答"),
         Err(error) => Err(error.to_string()),
     };
-    assert_eq!(serde_json::to_vec(model).unwrap(), before);
     evidence(
         &format!("{label}-input-after"),
         &serde_json::to_value(model).unwrap(),

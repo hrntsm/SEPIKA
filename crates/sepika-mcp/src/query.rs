@@ -180,32 +180,16 @@ pub fn query_model(
                 })
             })
             .collect(),
-        "floor_assignment_region" | "floor_assignment_regions" => {
-            serde_json::to_value(&model.floor_assignment_regions.regions)
-                .ok()
-                .and_then(|v| v.as_array().cloned())
-                .unwrap_or_default()
-        }
-        "wall_assignment_region" | "wall_assignment_regions" => {
-            serde_json::to_value(&model.wall_assignment_regions.regions)
-                .ok()
-                .and_then(|v| v.as_array().cloned())
-                .unwrap_or_default()
-        }
+        "floor_assignment_region" | "floor_assignment_regions" => model.floor_assignment_regions.regions.iter().map(|item| serde_json::to_value(item).unwrap()).collect(),
+        "wall_assignment_region" | "wall_assignment_regions" => model.wall_assignment_regions.regions.iter().map(|item| serde_json::to_value(item).unwrap()).collect(),
         "secondary_member_end" | "secondary_member_ends" => model
             .beams()
             .chain(model.posts())
             .filter(|sm| !sm.is_detached())
             .map(|sm| serde_json::to_value(sm).unwrap_or(json!(null)))
             .collect(),
-        "unassigned_beam" | "unassigned_beams" => serde_json::to_value(&model.unassigned_beams)
-            .ok()
-            .and_then(|v| v.as_array().cloned())
-            .unwrap_or_default(),
-        "unassigned_post" | "unassigned_posts" => serde_json::to_value(&model.unassigned_posts)
-            .ok()
-            .and_then(|v| v.as_array().cloned())
-            .unwrap_or_default(),
+        "unassigned_beam" | "unassigned_beams" => model.unassigned_beams.iter().map(|item| serde_json::to_value(item).unwrap()).collect(),
+        "unassigned_post" | "unassigned_posts" => model.unassigned_posts.iter().map(|item| serde_json::to_value(item).unwrap()).collect(),
         "secondary_beam" | "secondary_beams" => model
             .beams()
             .map(|sm| serde_json::to_value(sm).unwrap_or(json!(null)))
