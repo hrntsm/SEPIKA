@@ -7,7 +7,7 @@
 
 基点mainは `5b7860b8a477c6a97e63a2a5a033d2323520a31c`。対象コードのコミットは `61775a2d0c045caef0bcef6f54952d07da881269`。以下は2026-10-14 WindowsでのローカルVerificationであり、最終headの全構成成功やIssue全体完了を表さない。
 
-製品仕様の正本は[RC壁の壁脚内力と初期耐力](../../docs/calc_basis/04_要素剛性/10_RC壁の壁脚内力と初期耐力.md)、判断は[ADR 0055](../adr/0055-rc-wall-static-face-and-initial-capacity.md)とする。材料入力#535を再利用し、方式選択#572、側柱拡張#496、履歴再構築は対象外である。
+製品仕様の正本は[RC壁の壁脚内力と初期耐力](../../docs/calc_basis/08_部材終局耐力/08_RC壁の壁脚内力と初期耐力.md)、判断は[ADR 0055](../adr/0055-rc-wall-static-face-and-initial-capacity.md)とする。材料入力#535を再利用し、方式選択#572、側柱拡張#496、履歴再構築は対象外である。
 
 ## 参照資料と確認限界
 

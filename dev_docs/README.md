@@ -64,3 +64,7 @@ OSS としてコードまで追えるよう、既存の `実装参照` を本文
 - [未完了の開発作業（GitHub Issues）](https://github.com/hrntsm/SEPIKA/issues)
 - [handoffのIssue移行判定記録](handoff/handoffのIssue移行_Issue430_判定記録.md)（移行時点の履歴）
 - [未検証一覧](v_and_v/未検証一覧.md)
+
+## 利用マニュアルの配置
+
+- [章再編のページ・節対応](handoff/利用マニュアル章再編_Issue1016_配置対応.md)：各内容の正本と、操作・剛性・復元力・耐力・建物評価の境界。
