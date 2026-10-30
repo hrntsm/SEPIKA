@@ -17,10 +17,10 @@ SEPIKA は構造モデルを 2 つのファイル形式で入出力します。
 
 ## この章の内容
 
-- [OVIKA プロジェクト形式（.ovika）](./01_プロジェクト形式_ovika.md)
-- [ST-Bridge 形式（.stb / .xml）](./02_ST-Bridge_形式.md)
-- [ST-Bridge 要素別 変換状況一覧](./03_ST-Bridge_要素別変換状況.md)
-- [波形ライブラリ](./04_波形ライブラリ.md)
+- [OVIKA プロジェクト形式（.ovika）](01_プロジェクト形式_ovika.md)
+- [ST-Bridge 形式（.stb / .xml）](02_ST-Bridge_形式.md)
+- [ST-Bridge 要素別 変換状況一覧](03_ST-Bridge_要素別変換状況.md)
+- [波形ライブラリ](04_波形ライブラリ.md)
 
 ## MCP サーバでのモデル入力
 

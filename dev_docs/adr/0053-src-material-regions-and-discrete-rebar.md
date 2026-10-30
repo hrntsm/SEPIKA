@@ -10,4 +10,4 @@ Issue [#552](https://github.com/hrntsm/SEPIKA/issues/552) の限定対象であ�
 
 解析契約版は3→4へ更新する。非線形内力・接線と幾何の適用条件が変わるため旧解析成果は失効させる。検定の式・適用条件は変わらず版2を維持する。`sepika-design-jp`はこのM–Nファイバー生成元を消費せず、解析成果が失効した際には`sepika-app::app::result_validity`の既存経路がそれに依存する検定成果も消去する。
 
-現在仕様は[ファイバー断面](../../docs/calc_basis/03_断面性能/07_ファイバー断面.md)、証拠は[Issue552 V&V](../v_and_v/SRC材料領域_Issue552_2026-10.md)を参照。SRC2014規準原本と全履歴則の実験Validationは未閲覧・未実施であり、検証済みと扱わない。
+現在仕様は[ファイバー断面](../../docs/nonlinear/03_ファイバー断面.md)、証拠は[Issue552 V&V](../v_and_v/SRC材料領域_Issue552_2026-10.md)を参照。SRC2014規準原本と全履歴則の実験Validationは未閲覧・未実施であり、検証済みと扱わない。

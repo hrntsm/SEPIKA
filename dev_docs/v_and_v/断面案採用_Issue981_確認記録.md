@@ -6,7 +6,7 @@
 
 製品コードは `9dad259ad52fa31051098b1f849f7a76ab2e9e65`、操作文書を含む確認時HEADは `cc6f338b5e30d064ad3f61d5ee96482c3d0bbe3c`。実機exeのSHA256は `478048D58CE07999F3A0A04D8BBC4AD68129ACE0CCA2ED5D1BFEC3C75571EB92`。本記録の追記では製品コードを変更していない。記録追記後の最終HEADの文書レビュー・PRの全CI・mergeは別途確認し、成功を予記しない。
 
-判断の境界は[ADR0092](../adr/0092-confirmed-study-adoption.md)、操作は[断面案の検討](../../docs/model_edit/10_断面案の検討.md)、比較指標の通常結果との照合は[#980の記録](断面案比較_Issue980_確認記録.md)を参照する。
+判断の境界は[ADR0092](../adr/0092-confirmed-study-adoption.md)、操作は[断面案の検討](../../docs/section_study/01_断面案の検討.md)、比較指標の通常結果との照合は[#980の記録](断面案比較_Issue980_確認記録.md)を参照する。
 
 ## 自動回帰と要素からの証拠索引
 

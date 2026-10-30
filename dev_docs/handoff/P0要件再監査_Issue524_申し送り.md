@@ -30,7 +30,7 @@
 pwhは実壁厚基準の横筋比（小数）、σwhとFcはN/mm²。
 2026-10-18に[wall_shear_beta_s](../../crates/sepika-design-jp/src/rc/wall_nonlinear.rs)の計算と入力診断をコードで確認した。
 同関数はFcを170～280kgf/cm²相当、横筋比を0～0.015に制限し、強度の有限正値と0<βs<1を検査する。
-現行の採用条件の正本は[RC非線形復元力特性](../../docs/calc_basis/08_部材終局耐力/04_RC_部材_非線形復元力特性.md)とする。
+現行の採用条件の正本は[RC非線形復元力特性](../../docs/nonlinear/05_RC_部材_非線形復元力特性.md)とする。
 コードの確認は規準・原研究との照合や解析試験の実行を意味しない。
 
 監査時点ではwall_shear_beta_uが縦筋比・縦筋fyを使い、WallShearTrilinearが終局点割線/初期剛性として骨格へ結線していた。

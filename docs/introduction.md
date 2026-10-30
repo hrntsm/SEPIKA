@@ -11,20 +11,14 @@ SEPIKA takes its name from Sepia (cuttlefish) and IKA, inspired by the Japanese 
 
 このサイトは、SEPIKA を利用する方に向けたドキュメントです。
 
-- **[モデル入出力（ファイル形式）](./model_io/README.md)**：ネイティブの `.ovika` 形式と
-  ST-Bridge（`.stb`）形式でモデルを保存・読込・書出する入出力経路と、その対応範囲
-- **[モデルの編集](./model_edit/README.md)**：通り芯・断面の符号と階・架構作成ウィザード・
-  立体グリッドとスナップ・階への複製
-- **[MCP サーバ](./mcp_server/README.md)**：AI エージェントからモデル照会・解析実行・結果取得を行う
-  MCP（Model Context Protocol）サーバのビルド・起動・ツール一覧
-- **[準備計算（解析前の確認）](./preparation/README.md)**：応力解析に先立って階・剛域・断面性能・
-  地震力・荷重を確定させる計算と、その確認画面の見方
-- **[結果の表示（3D ビューア）](./result_view/README.md)**：変形図の表示倍率、床・二次部材の変形追従、
-  検定比図・モデル化図など、3D ビューアの表示仕様
-- **[計算根拠](./calc_basis/README.md)**：各計算が「何という基準・法令の、何という式で」
-  算定されているかを、告示・施行令の条／式番号と実装位置まで対応づけた根拠ドキュメント。
-  荷重・材料・断面性能・構造解析・一次設計・二次設計・部材終局耐力・免震制振の
-  各章を、算定項目ごとのページに分けて収録しています
+利用目的に合わせて、次の章から参照してください。
+
+- [基本操作・モデル入力](model_edit/README.md)、[準備・解析の実行・結果の確認](workflow/README.md)、[断面案の検討](section_study/README.md)
+- [荷重・重量・質量](calc_basis/01_荷重/README.md)、[材料・断面諸量・弾性剛性](elastic/README.md)、[非線形モデル・復元力](nonlinear/README.md)、[構造解析の方法](calc_basis/05_構造解析/README.md)
+- [許容応力度・部材検定](calc_basis/06_一次設計/README.md)、[部材終局耐力](calc_basis/08_部材終局耐力/README.md)、[建物全体の耐震評価](calc_basis/07_二次設計/README.md)
+- [数量積算](calc_basis/10_数量積算/README.md)、[保存・入出力・外部AI連携](external/README.md)
+
+式・単位・出典と実装参照の読み方は[計算根拠の読み方](calc_basis/README.md)にまとめています。
 
 ## ライセンスと免責事項
 

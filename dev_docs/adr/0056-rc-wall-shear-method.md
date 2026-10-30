@@ -10,7 +10,7 @@ accepted
 
 ## Decision
 
-建物共通のStressAnalysisCfgにRcWallShearMethodの二択を一項目だけ置き、新規Defaultをmeanとする。部材・断面・階別の上書き、汎用registry、二方式同時計算・比較を追加しない。採用式と適用限界は[製品計算根拠](../../docs/calc_basis/04_要素剛性/10_RC壁の壁脚内力と初期耐力.md#終局せん断耐力の方式と入力)を正本とする。
+建物共通のStressAnalysisCfgにRcWallShearMethodの二択を一項目だけ置き、新規Defaultをmeanとする。部材・断面・階別の上書き、汎用registry、二方式同時計算・比較を追加しない。採用式と適用限界は[製品計算根拠](../../docs/calc_basis/08_部材終局耐力/08_RC壁の壁脚内力と初期耐力.md#終局せん断耐力の方式と入力)を正本とする。
 
 #535の材料・方向配筋と、[ADR 0055](0055-rc-wall-static-face-and-initial-capacity.md)の同一face入力・run初期静的前処理を再利用する。参考骨格と解析前正負Quへ同じ選択を明示的に渡す。初期Quは開始時Modelから固定し、モデル化表示とDsは既存runの採用値を読む。重複する前処理や旧仮定による再計算を作らない。
 
