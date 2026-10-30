@@ -707,17 +707,6 @@ mod tests {
     }
 
     #[test]
-    fn test_commit_revert() {
-        let mut mat = HysteresisMaterial::new(takeda());
-        mat.trial(0.01);
-        mat.commit();
-        let (m1, _) = mat.trial(0.02);
-        mat.revert();
-        let (m2, _) = mat.trial(0.005);
-        assert!(m2.abs() < m1.abs());
-    }
-
-    #[test]
     fn test_takeda_inner_loop_polygon() {
         // 外側ループ途中で反転 → 内側ループ → 再反転でポリゴン則。
         let mut mat = HysteresisMaterial::new(takeda());

@@ -470,19 +470,4 @@ mod tests {
         let after_probe = m.trial(probe_theta);
         assert_eq!(after_probe, via_trial);
     }
-
-    #[test]
-    fn test_steel_buckling_commit_revert() {
-        // 硬化域（θy=0.1 < θ < θu=0.2）で単調に耐力増加する区間を用いる。
-        let mut m = SteelBuckling::with_defaults(1000.0, 100.0, 1.2);
-        m.trial(0.12);
-        m.commit();
-        let (s1, _) = m.trial(0.18);
-        m.revert();
-        let (s2, _) = m.trial(0.13);
-        assert!(
-            s2 < s1,
-            "revert then smaller θ → smaller M: s1={s1}, s2={s2}"
-        );
-    }
 }

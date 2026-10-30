@@ -1,3 +1,4 @@
+use crate::solver::SparsityPattern;
 use faer::sparse::SparseColMat;
 
 #[derive(Clone, Copy, Debug)]
@@ -235,7 +236,7 @@ impl CscAssembler {
 /// ```
 pub struct WeightedSumCache {
     slot_of: Vec<usize>,
-    input_patterns: Vec<(Vec<usize>, Vec<usize>)>,
+    input_patterns: Vec<SparsityPattern>,
     mat: SparseColMat<usize, f64>,
 }
 
@@ -245,8 +246,7 @@ impl WeightedSumCache {
         let mut triplets: Vec<Triplet> = Vec::new();
         let mut input_patterns = Vec::with_capacity(mats.len());
         for (coef, mat) in mats {
-            let sym = mat.symbolic();
-            input_patterns.push((sym.col_ptr().to_vec(), sym.row_idx().to_vec()));
+            input_patterns.push(SparsityPattern::of(mat));
             for t in sparse_to_triplets(mat) {
                 triplets.push(Triplet {
                     row: t.row,
@@ -269,10 +269,7 @@ impl WeightedSumCache {
             && mats
                 .iter()
                 .zip(self.input_patterns.iter())
-                .all(|((_, m), (cp, ri))| {
-                    let sym = m.symbolic();
-                    sym.col_ptr() == cp.as_slice() && sym.row_idx() == ri.as_slice()
-                })
+                .all(|((_, mat), pattern)| pattern.matches(mat))
     }
 
     /// `mats` の重み付き和を再計算し、更新後の行列への参照を返す。
