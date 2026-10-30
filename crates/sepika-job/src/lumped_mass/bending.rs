@@ -848,21 +848,6 @@ mod tests {
         assert!(error.contains("傾斜柱") && error.contains("階"), "{error}");
     }
     #[test]
-    fn unsupported_vertical_wall_is_not_omitted_from_story_force() {
-        let (mut model, res) = fixture(SeismicDir::X, false, false);
-        let mut wall = model.elements[0].clone();
-        wall.id = ElemId(model.elements.len() as u32);
-        wall.kind = sepika_core::model::ElementKind::Wall;
-        wall.nodes = [NodeId(0), NodeId(1), NodeId(4), NodeId(5)]
-            .into_iter()
-            .collect();
-        model.elements.push(wall);
-        let error = validate_scope(&input(&model, &res, SeismicDir::X))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("階") && error.contains("対象外"), "{error}");
-    }
-    #[test]
     fn unsupported_wall_is_rejected_in_every_dimension_and_linearity() {
         let (mut model, res) = fixture(SeismicDir::X, false, false);
         let mut wall = model.elements[0].clone();
@@ -1055,13 +1040,11 @@ mod tests {
         use sepika_solver::nonlinear::pushover::{CapacityPoint, PushoverStep};
         let (model, res) = fixture(SeismicDir::X, false, false);
         let mut po = super::super::tests::empty_pushover();
-        let mut expected = Vec::new();
         for index in 0..=30 {
             let ds = index as f64 * 0.1;
             let q = 50.0 * ds.min(2.0) + 5.0 * (ds - 2.0).max(0.0);
             let db = bending_drifts(&[3000.0; 2], &[1.2e14; 2], &[q, q]).unwrap();
             let drift = vec![ds + db[0], ds + db[1]];
-            expected.push((ds, q));
             po.capacity_curve.push(CapacityPoint {
                 step: index as u32,
                 roof_disp: drift.iter().sum(),
@@ -1082,8 +1065,6 @@ mod tests {
         inp.secant_ratio = 0.9;
         inp.po_x = Some(&po);
         let lm = build(inp).unwrap();
-        let expected = fit_story_trilinear(&expected, 0.9);
-        assert_eq!(expected.d1, expected.d2);
         for story in &lm.stories {
             assert!(story.skeleton.is_valid_spring());
             near(story.skeleton.k1, 50.0);

@@ -60,9 +60,6 @@ fn run_check_deps() -> anyhow::Result<()> {
     let mut violations = Vec::new();
 
     for (name, &layer_idx) in &layer_map {
-        if *name == "xtask" {
-            continue;
-        }
         let cargo_toml = crate_root.join(name).join("Cargo.toml");
         if !cargo_toml.exists() {
             continue;

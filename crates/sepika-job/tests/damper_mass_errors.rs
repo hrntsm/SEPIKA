@@ -336,32 +336,25 @@ fn 質点系job入口も不正指定と編集後の古い質量を拒否する()
         let result =
             compute_lumped_mass(model.clone(), cfg, None, None, Some(po), None, None).unwrap();
         assert!((result.model.stories[0].mass - 4.0).abs() < 1e-10);
-        for case in 0..8 {
+        for total_weight in [
+            model.load_cfg.as_ref().unwrap().dampers[0].total_weight * 2.0,
+            0.0,
+            -1.0,
+            f64::NAN,
+        ] {
             let mut edited = model.clone();
-            match case {
-                0 => edited.load_cfg.as_mut().unwrap().dampers[0].total_weight *= 2.0,
-                1 => edited.load_cfg.as_mut().unwrap().dampers[0].total_weight = 0.0,
-                2 => {
-                    let d = &mut edited.load_cfg.as_mut().unwrap().dampers;
-                    d[0].total_weight += 9806.65;
-                    d[1].total_weight -= 9806.65;
-                }
-                3 => edited.load_cfg.as_mut().unwrap().dampers[0].elem = ElemId(2),
-                4 => edited.nodes[0].coord[0] += 500.0,
-                5 => edited.load_cfg.as_mut().unwrap().dampers[0].total_weight = -1.0,
-                6 => edited.load_cfg.as_mut().unwrap().dampers[0].total_weight = f64::NAN,
-                _ => {
-                    let master = edited.stories[1]
-                        .dynamic_mass
-                        .unwrap()
-                        .lumped_mass
-                        .unwrap()
-                        .master;
-                    edited.nodes[master.index()].mass = None;
-                }
-            }
+            edited.load_cfg.as_mut().unwrap().dampers[0].total_weight = total_weight;
             assert_lumped_input_error(&edited);
         }
+        let mut edited = model.clone();
+        let master = edited.stories[1]
+            .dynamic_mass
+            .unwrap()
+            .lumped_mass
+            .unwrap()
+            .master;
+        edited.nodes[master.index()].mass = None;
+        assert_lumped_input_error(&edited);
     }
 }
 

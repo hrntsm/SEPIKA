@@ -252,9 +252,6 @@ fn rc_beam_q0_by_terms(
         let Some(case) = model.load_cases.iter().find(|case| case.id == *id) else {
             return Ok(HashMap::new());
         };
-        if !factor.is_finite() {
-            return Ok(HashMap::new());
-        }
         for load in &case.member {
             let Some(elem) = model.element(load.elem) else {
                 return Ok(HashMap::new());
