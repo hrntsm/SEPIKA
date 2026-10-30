@@ -6,15 +6,30 @@ use sepika_core::ids::{ElemId, SectionId};
 #[path = "issue985_wire.rs"]
 mod wire;
 
+fn fixture_content_hash(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    let text = std::str::from_utf8(bytes).unwrap().replace("\r\n", "\n");
+    format!("{:x}", sha2::Sha256::digest(text.as_bytes()))
+}
+
+#[test]
+fn issue985_fixture_hash_ignores_checkout_line_endings_but_detects_content_changes() {
+    let bytes = std::fs::read(fixture_path()).unwrap();
+    let lf = std::str::from_utf8(&bytes).unwrap().replace("\r\n", "\n");
+    let expected = "c137797755de759807a3e04f90fa349a01104072045e526ca22b353c25f72e9a";
+    assert_eq!(fixture_content_hash(lf.as_bytes()), expected);
+    assert_eq!(
+        fixture_content_hash(lf.replace('\n', "\r\n").as_bytes()),
+        expected
+    );
+    assert_ne!(fixture_content_hash(format!("{lf} ").as_bytes()), expected);
+}
+
 fn fixture() -> App {
     let mut app = imported();
-    use sha2::Digest;
     assert_eq!(
-        format!(
-            "{:x}",
-            sha2::Sha256::digest(std::fs::read(fixture_path()).unwrap())
-        ),
-        "1909407d49574fe563ca21aac9c6c7ab04d267dccb9e9e73119582732be79215"
+        fixture_content_hash(&std::fs::read(fixture_path()).unwrap()),
+        "c137797755de759807a3e04f90fa349a01104072045e526ca22b353c25f72e9a"
     );
     let supports: Vec<_> = app
         .core
