@@ -84,11 +84,8 @@ fn format_dofs(list: &[DofRef]) -> String {
 }
 
 /// 接線剛性の分解に失敗したときの診断メッセージ。
-///
-/// `phase` は失敗したフェーズ名（「初期接線剛性」「長期荷重の初期載荷」など）で、
-/// メッセージ先頭に置く。剛性ゼロの自由度が見つかった場合はそれを名指しし
-/// （モデルの入力不備。修正すべき対象が特定できる）、見つからない場合は
-/// 崩壊機構・耐力劣化の可能性として案内する。
+/// `phase` はメッセージ先頭に置くフェーズ名。対角成分の診断と要確認事項を示し、
+/// 求解失敗だけから耐力ピーク・耐力劣化・崩壊機構への到達を判定しない。
 pub(super) fn tangent_singular_diagnosis(
     model: &Model,
     dofmap: &DofMap,
@@ -108,18 +105,18 @@ pub(super) fn tangent_singular_diagnosis(
     }
     if !negative.is_empty() {
         return format!(
-            "{phase}が非正定値です（剛性の対角が負: {}）。部材の耐力劣化・崩壊機構の形成により\
-             構造が不安定になっています。部材耐力・履歴則の設定、または終了目標\
-             （目標変位・目標層間変形角）を見直してください。",
+            "{phase}が非正定値です（剛性の対角が負: {}）。原因は未確定です。\
+             拘束・接合・材料・部材剛性・履歴則の設定と数値条件を確認してください。\
+             この診断だけでは耐力ピーク・耐力劣化・崩壊機構への到達を判定できません。",
             format_dofs(&negative)
         );
     }
     let n_restrained = model.nodes.iter().filter(|n| n.restraint.0 != 0).count();
     format!(
-        "{phase}が非正定値です。構造が機構（不安定）になっている可能性があります。\
-         考えられる原因: (1) 拘束が不足している（現在 {n_restrained} 節点に拘束あり）、\
-         (2) ピン接合が連続し回転が拘束されない部材がある、\
-         (3) 部材の降伏が進み崩壊機構が形成された。"
+        "{phase}の正定値求解を確認できません。原因は未確定です。\
+         拘束（現在 {n_restrained} 節点に拘束あり）・接合・材料・部材剛性・履歴則の設定と\
+         数値条件を確認してください。この診断だけでは耐力ピーク・耐力劣化・崩壊機構への\
+         到達を判定できません。"
     )
 }
 
@@ -209,7 +206,6 @@ mod tests {
         assert!(msg.contains("Rx"), "msg={msg}");
     }
 
-    /// 対角が負の自由度がある場合は、耐力劣化・機構形成としての診断になる。
     #[test]
     fn test_diagnosis_reports_negative_diagonal() {
         let model = two_node_beam_model();
@@ -224,8 +220,17 @@ mod tests {
             .collect();
         let k = assemble_csc(n, triplets);
         let reducer = Reducer::build(&model, &dofmap);
-        let msg = tangent_singular_diagnosis(&model, &dofmap, &reducer, &k, "接線剛性");
-        assert!(msg.contains("対角が負"), "msg={msg}");
+        for phase in ["初期接線剛性", "接線剛性"] {
+            let msg = tangent_singular_diagnosis(&model, &dofmap, &reducer, &k, phase);
+            assert!(msg.starts_with(phase), "msg={msg}");
+            assert!(msg.contains("対角が負"), "msg={msg}");
+            assert!(msg.contains("Uz"), "msg={msg}");
+            assert!(msg.contains("原因は未確定"), "msg={msg}");
+            assert!(
+                msg.contains("耐力ピーク・耐力劣化・崩壊機構への到達を判定できません"),
+                "msg={msg}"
+            );
+        }
     }
 
     /// 剛床の代表節点を「剛性がありません」と誤って名指ししない。

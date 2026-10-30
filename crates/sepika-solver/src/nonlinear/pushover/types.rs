@@ -74,7 +74,7 @@ pub enum PushoverTermination {
     /// 完了して終了した（目標判定は未成立）。
     ScheduleCompleted,
     /// 増分半減を尽くしても釣合い反復が収束せず打ち切った。
-    /// **Qu が過小評価の可能性がある**（目標未到達のまま性能曲線が途切れている）。
+    /// 性能曲線は確定済みの範囲に限られ、耐力ピークへの到達を意味しない。
     NonConvergence {
         /// 打ち切ったフェーズ（"荷重制御"・"変位制御"）。
         phase: String,
@@ -95,7 +95,7 @@ pub enum PushoverTermination {
 }
 
 impl PushoverTermination {
-    /// 目標未到達のまま途中で打ち切られた（Qu が過小評価の可能性がある）か。
+    /// 目標未到達のまま途中で打ち切られたか。
     pub fn is_premature(&self) -> bool {
         matches!(
             self,
@@ -132,7 +132,7 @@ impl PushoverTermination {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PushoverControl {
     /// 荷重制御（λ=1 まで）→変位制御の段階切替（既定）。
-    /// 耐力ピーク（崩壊機構形成）を変位制御で通過し、頭打ち・低下も追跡できる。
+    /// 頂部変位が単調に進む釣合い経路を追跡する。耐力ピークへの到達は保証しない。
     #[default]
     Phased,
     /// 荷重増分のみ。変位制御へは移行せず、
