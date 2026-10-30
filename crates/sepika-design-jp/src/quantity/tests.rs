@@ -16,6 +16,100 @@ use sepika_core::section_shape::{
 
 use super::*;
 
+fn steel_members_fixture() -> Model {
+    let mut section = SectionShape::SteelH {
+        height: 500.0,
+        width: 250.0,
+        web_thick: 9.0,
+        flange_thick: 16.0,
+        root_r: Some(20.0),
+    }
+    .to_section(SectionId(0), "G".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    section.material = Some(MaterialId(0));
+    Model {
+        nodes: vec![node(0, 0.0, 0.0, 1000.0), node(1, 4000.0, 0.0, 1000.0)],
+        elements: vec![line_elem(0, 0, 1, 0)],
+        sections: vec![section],
+        materials: vec![steel_material(0)],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn fixed_steel_matches_the_same_member_in_complete_whole_model_takeoff() {
+    let model = steel_members_fixture();
+    let fixed = steel_members::try_compute_steel_members(&model, &[ElemId(0)]).unwrap();
+    let whole = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+    let actual = &fixed[0];
+    let expected = whole.items[0].steel.as_ref().unwrap();
+    assert_eq!(actual.length_mm, 4000.0);
+    assert_eq!(actual.steel.length_m, expected.length_m);
+    assert_eq!(actual.steel.weight_t, expected.weight_t);
+    assert_eq!(actual.area_basis, sepika_core::model::PropertyBasis::Shape);
+    assert!((actual.volume_m3 - 0.05022145175425633).abs() < 1e-12);
+}
+
+#[test]
+fn fixed_steel_stays_available_when_another_members_nonfinite_length_makes_whole_takeoff_unavailable(
+) {
+    for cft in [false, true] {
+        for x in [f64::NAN, 1e160] {
+            let mut model = steel_members_fixture();
+            let section = if cft {
+                let mut section = SectionShape::CftBox {
+                    height: 500.0,
+                    width: 300.0,
+                    thick: 12.0,
+                    horizontal_thick: 12.0,
+                    corner_r: Some(20.0),
+                }
+                .to_section(SectionId(1), "CFT".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                section.material = Some(MaterialId(1));
+                section.steel_material = Some(MaterialId(0));
+                model.materials.push(rc_material(1));
+                model.sections.push(section);
+                1
+            } else {
+                0
+            };
+            model
+                .nodes
+                .extend([node(2, x, 0.0, 1000.0), node(3, 4000.0, 0.0, 1000.0)]);
+            model.elements.push(line_elem(1, 2, 3, section));
+            let fixed = steel_members::try_compute_steel_members(&model, &[ElemId(0)]).unwrap();
+            assert_eq!(fixed.len(), 1);
+            assert!((fixed[0].volume_m3 - 0.05022145175425633).abs() < 1e-12);
+            let reason = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap_err();
+            assert!(reason.contains("有限"), "S/CFT={cft}, x={x}: {reason}");
+        }
+    }
+}
+
+#[test]
+fn fixed_steel_rejects_missing_duplicate_or_invalid_target_without_using_other_members() {
+    let model = steel_members_fixture();
+    for ids in [vec![], vec![ElemId(1)], vec![ElemId(0), ElemId(0)]] {
+        assert!(steel_members::try_compute_steel_members(&model, &ids).is_err());
+    }
+    let invalid: [fn(&mut Model); 8] = [
+        |m| m.elements[0].section = None,
+        |m| m.sections[0].material = None,
+        |m| m.sections[0].frame_use = None,
+        |m| m.materials[0].category = MaterialCategory::Concrete,
+        |m| m.materials[0].young = f64::NAN,
+        |m| m.elements[0].nodes.push(NodeId(0)),
+        |m| m.nodes[0].coord[0] = f64::INFINITY,
+        |m| m.nodes[1].coord = m.nodes[0].coord,
+    ];
+    for alter in invalid {
+        let mut malformed = model.clone();
+        alter(&mut malformed);
+        assert!(steel_members::try_compute_steel_members(&malformed, &[ElemId(0)]).is_err());
+    }
+}
+
 fn node(id: u32, x: f64, y: f64, z: f64) -> Node {
     Node {
         id: NodeId(id),

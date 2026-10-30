@@ -10,6 +10,51 @@ use sepika_core::model::{
 use sepika_core::section_shape::SectionShape;
 use smallvec::smallvec;
 
+#[test]
+fn unused_steel_sections_keep_declared_frame_use_without_inference() {
+    use sepika_core::model::FrameSectionUse;
+    for (tag, kind, figure, expected) in [
+        (
+            "StbSecBeam_S",
+            " kind_beam=\"GIRDER\"",
+            "StbSecSteelBeam_S_Straight",
+            Some(FrameSectionUse::Girder),
+        ),
+        (
+            "StbSecBeam_S",
+            " kind_beam=\"BEAM\"",
+            "StbSecSteelBeam_S_Straight",
+            None,
+        ),
+        ("StbSecBeam_S", "", "StbSecSteelBeam_S_Straight", None),
+        (
+            "StbSecColumn_S",
+            "",
+            "StbSecSteelColumn_S_Same",
+            Some(FrameSectionUse::Column),
+        ),
+        (
+            "StbSecBrace_S",
+            "",
+            "StbSecSteelBrace_S_Same",
+            Some(FrameSectionUse::Brace),
+        ),
+    ] {
+        let xml = format!(
+            r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
+        <StbNodes><StbNode id="1" X="0" Y="0" Z="0"/></StbNodes>
+        <StbSections><{tag} id="1" name="未割当候補"{kind}><{figure} shape="H" strength_main="SN400B"/></{tag}>
+        <StbSecSteel><StbSecRoll-H name="H" type="H" A="450" B="200" t1="9" t2="14"/></StbSecSteel></StbSections>
+        </StbModel></ST_BRIDGE>"#
+        );
+        let model = import_stbridge(&xml).unwrap();
+        assert!(model.elements.is_empty());
+        assert_eq!(model.sections.len(), 1);
+        assert_eq!(model.sections[0].frame_use, expected, "{tag}{kind}");
+        assert_eq!(model.sections[0].name, "未割当候補");
+    }
+}
+
 /// 標準グレード名 `SN400B` の材料（物性は `material_std` の標準表と一致させる）。
 fn sn400b(id: u32) -> Material {
     Material {

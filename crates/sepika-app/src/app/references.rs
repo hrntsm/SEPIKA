@@ -3271,7 +3271,7 @@ mod tests {
     }
 }
 
-pub(crate) const QUANTITY_EVIDENCE_CONTRACT_VERSION: u32 = 1;
+pub(crate) const QUANTITY_EVIDENCE_CONTRACT_VERSION: u32 = 2;
 
 /// 保存結果または対象範囲を固定した数量入力を指す。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -3320,6 +3320,43 @@ impl QuantityEvidenceScope {
 
 impl QuantityEvidenceReference {
     #[cfg(any(feature = "gui", test))]
+    pub(crate) fn steel_takeoff(&self) -> Result<FixedSteelQuantity, String> {
+        let QuantityEvidenceScope::Members(ids) = &self.scope else {
+            return Err("固定した主架構S造部材の鋼材範囲が必要です".into());
+        };
+        let items =
+            sepika_design_jp::quantity::steel_members::try_compute_steel_members(&self.model, ids)?;
+        if !items
+            .iter()
+            .map(|item| item.volume_m3)
+            .sum::<f64>()
+            .is_finite()
+            || !items
+                .iter()
+                .map(|item| item.steel.weight_t)
+                .sum::<f64>()
+                .is_finite()
+        {
+            return Err("固定対象の鋼材数量合計が有限範囲を超えています".into());
+        }
+        let whole_quantity_error = sepika_design_jp::quantity::try_compute_quantity_takeoff(
+            &self.model,
+            &self.model.quantity_cfg,
+        )
+        .err();
+        Ok(FixedSteelQuantity {
+            items,
+            whole_quantity_error,
+        })
+    }
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn validate_available(&self) -> Result<(), String> {
+        match &self.scope {
+            QuantityEvidenceScope::Members(_) => self.steel_takeoff().map(|_| ()),
+            QuantityEvidenceScope::WholeModel => self.takeoff().map(|_| ()),
+        }
+    }
+    #[cfg(any(feature = "gui", test))]
     pub(crate) fn takeoff(&self) -> Result<sepika_design_jp::quantity::QuantityTakeoff, String> {
         let mut takeoff = sepika_design_jp::quantity::try_compute_quantity_takeoff(
             &self.model,
@@ -3350,6 +3387,19 @@ impl QuantityEvidenceReference {
                     .expect("数量根拠の直列化")
             )
         )
+    }
+}
+
+#[cfg(any(feature = "gui", test))]
+pub(crate) struct FixedSteelQuantity {
+    pub items: Vec<sepika_design_jp::quantity::steel_members::SteelMemberQuantity>,
+    pub whole_quantity_error: Option<String>,
+}
+
+#[cfg(any(feature = "gui", test))]
+impl FixedSteelQuantity {
+    pub fn volume_m3(&self) -> f64 {
+        self.items.iter().map(|item| item.volume_m3).sum()
     }
 }
 

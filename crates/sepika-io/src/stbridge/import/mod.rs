@@ -41,6 +41,7 @@ enum SecMatRef {
 /// 取り込み途中の断面（id 整列・形鋼名解決の前）。
 struct PendingSec {
     file_id: SectionKey,
+    declared_use: Option<FrameSectionUse>,
     name: String,
     /// 断面の階（`floor` 属性）。ST-Bridge は同じ符号の断面を階ごとに別定義として
     /// 持つため、符号と併せて断面の同一性キーになる。属性がなければ `None`。

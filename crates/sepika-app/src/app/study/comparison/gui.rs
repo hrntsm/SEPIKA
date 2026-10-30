@@ -39,6 +39,7 @@ struct Entry {
     retained_run: Option<usize>,
     case_evidence: Vec<ReferencedResult>,
     volume: Result<f64, String>,
+    whole_quantity_error: Option<String>,
     quantity: references::QuantityEvidenceReference,
     cases: Vec<ResultInputKey>,
     failures: Vec<String>,
@@ -111,8 +112,13 @@ impl Entry {
             )
         };
         let quantity = app.member_quantity_evidence_reference(fixed.to_vec());
-        let volume = quantity.takeoff().and_then(|q| {
-            let value = q.totals().steel_t / sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3;
+        let steel = quantity.steel_takeoff();
+        let whole_quantity_error = steel
+            .as_ref()
+            .ok()
+            .and_then(|q| q.whole_quantity_error.clone());
+        let volume = steel.and_then(|q| {
+            let value = q.volume_m3();
             if value.is_finite() {
                 Ok(value)
             } else {
@@ -172,6 +178,7 @@ impl Entry {
             retained_run,
             case_evidence: run.map(|r| r.comparison_checks.clone()).unwrap_or_default(),
             volume,
+            whole_quantity_error,
             quantity,
             cases,
             failures,
@@ -558,6 +565,9 @@ impl ComparisonView {
                             if ui.button(format!("固定対象 {} 部材の鋼材体積 {value:.6} m³{delta} / 根拠", self.fixed.len())).clicked() { evidence = Some(EvidenceReference::Quantity(Box::new(entry.quantity.clone()))); }
                         }
                         Err(reason) => { ui.label(format!("対象鋼材体積: {reason}")); }
+                    }
+                    if let Some(reason)=&entry.whole_quantity_error {
+                        ui.label(format!("全体数量は未算定: {reason}。上記は固定対象の鋼材のみです"));
                     }
                 });
                 match &self.displacements[p] {

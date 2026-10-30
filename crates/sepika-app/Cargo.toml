@@ -17,6 +17,10 @@ required-features = ["gui"]
 name = "ai_connection_fixture"
 required-features = ["gui"]
 
+[[example]]
+name = "issue985_fixture"
+required-features = ["gui"]
+
 [dependencies]
 sepika-ai-connection = { path = "../sepika-ai-connection" }
 serde_json = { workspace = true }

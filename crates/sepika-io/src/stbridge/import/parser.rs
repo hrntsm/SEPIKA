@@ -57,6 +57,7 @@ pub(super) enum CurSec {
     None,
     Steel {
         file_id: SectionKey,
+        declared_use: Option<FrameSectionUse>,
         name: String,
         /// 断面の階（`floor` 属性）。符号と併せて断面の同一性キーになる。
         floor: Option<String>,
@@ -513,6 +514,16 @@ impl StbParser {
             "StbSecColumn_S" | "StbSecBeam_S" | "StbSecBrace_S" => {
                 self.cur = CurSec::Steel {
                     file_id: section_key(tag, a)?,
+                    declared_use: match tag {
+                        "StbSecColumn_S" => Some(FrameSectionUse::Column),
+                        "StbSecBrace_S" => Some(FrameSectionUse::Brace),
+                        "StbSecBeam_S"
+                            if a.get("kind_beam").is_some_and(|kind| kind == "GIRDER") =>
+                        {
+                            Some(FrameSectionUse::Girder)
+                        }
+                        _ => None,
+                    },
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     shape_name: None,
@@ -1055,6 +1066,7 @@ impl StbParser {
             "StbSecColumn_S" | "StbSecBeam_S" | "StbSecBrace_S" => {
                 if let CurSec::Steel {
                     file_id,
+                    declared_use,
                     name,
                     floor,
                     shape_name,
@@ -1063,6 +1075,7 @@ impl StbParser {
                 {
                     self.pending_secs.push(PendingSec {
                         file_id,
+                        declared_use,
                         name,
                         floor,
                         kind: PendingSecKind::SteelRef(shape_name),
@@ -1121,6 +1134,7 @@ impl StbParser {
                             if let Some(shape) = shape {
                                 self.pending_secs.push(PendingSec {
                                     file_id,
+                                    declared_use: None,
                                     name,
                                     floor,
                                     kind: PendingSecKind::Shape(shape),
@@ -1151,6 +1165,7 @@ impl StbParser {
                 {
                     self.pending_secs.push(PendingSec {
                         file_id,
+                        declared_use: None,
                         name,
                         floor,
                         kind: PendingSecKind::CftRef(steel_name),
@@ -1187,6 +1202,7 @@ impl StbParser {
                             };
                             self.pending_secs.push(PendingSec {
                                 file_id,
+                                declared_use: None,
                                 name,
                                 floor,
                                 mat,
