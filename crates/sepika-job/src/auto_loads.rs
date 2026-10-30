@@ -4,7 +4,9 @@
 //! `SyncSlabLoadsToCase` で書き込む。MCP 等のエフェメラルな作業コピーは
 //! [`apply_auto_load_cases`] で直接反映する。
 
-use sepika_core::ids::{ElemId, LoadCaseId, NodeId};
+use sepika_core::ids::LoadCaseId;
+#[cfg(test)]
+use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{
     LoadCase, LoadCaseKind, LoadPurpose, MemberLoad, MemberLoadKind, Model, NodalLoad,
     DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME, LL_FRAME_CASE_NAME, LL_SEISMIC_CASE_NAME,
@@ -199,12 +201,6 @@ fn perimeter_beam_loads(
 pub fn compute_dl_beam_loads(
     model: &Model,
 ) -> Result<Vec<BeamLoad>, sepika_load::floor::FloorDistributionError> {
-    compute_dl_beam_loads_checked(model)
-}
-
-fn compute_dl_beam_loads_checked(
-    model: &Model,
-) -> Result<Vec<BeamLoad>, sepika_load::floor::FloorDistributionError> {
     let beam_map = beam_elem_map(model);
     let extra_intensity = sepika_load::wall_attached::floor_region_wall_extra_intensity(model)
         .map_err(sepika_load::floor::FloorDistributionError::SelfWeight)?;
@@ -368,7 +364,7 @@ fn compute_gravity_auto_load_cases_impl(
     sepika_load::story_gen::validate_cft_steel_materials(model)
         .map_err(crate::error::JobError::InvalidInput)?;
     let beam_map = beam_elem_map(model);
-    let mut dl_beam_loads = compute_dl_beam_loads_checked(model)
+    let mut dl_beam_loads = compute_dl_beam_loads(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     dl_beam_loads.extend(perimeter_beam_loads(model, None)?);
 
@@ -574,21 +570,16 @@ pub fn compute_auto_load_cases(
     })
 }
 
-fn node_exists(model: &Model, id: NodeId) -> bool {
-    id.index() < model.nodes.len()
-}
-
-fn elem_exists(model: &Model, id: ElemId) -> bool {
-    model.element(id).is_some()
-}
-
 /// `cases` の内容を model の同名ケースへ Auto 分として書き込む（無ければ作成）。undo なし。
 pub fn apply_auto_load_cases(model: &mut Model, cases: &[AutoLoadCaseContent]) {
     use sepika_core::ids::LoadCaseId;
 
     for case in cases {
-        if !case.nodal.iter().all(|l| node_exists(model, l.node))
-            || !case.member.iter().all(|l| elem_exists(model, l.elem))
+        if !case
+            .nodal
+            .iter()
+            .all(|l| l.node.index() < model.nodes.len())
+            || !case.member.iter().all(|l| model.element(l.elem).is_some())
         {
             continue;
         }
@@ -1088,8 +1079,7 @@ mod tests {
         models.push(ambiguous_support);
         for model in models {
             let expected = model.validate_attached_slabs().unwrap_err().to_string();
-            let result = std::panic::catch_unwind(|| compute_tip_loads(&model))
-                .expect("不正入力で panic しないこと");
+            let result = compute_tip_loads(&model);
             let Err(crate::error::JobError::InvalidInput(actual)) = result else {
                 panic!("共通の理由付き入力エラーで拒否すること");
             };
@@ -1771,35 +1761,29 @@ mod tests {
     }
 
     #[test]
-    fn compute_gravity_creates_dl_with_slab_loads() {
-        let mut model = make_square_slab_model();
-        model.validate().expect("valid model");
-        resolve_massless_slab_sections(&mut model);
-        let result = compute_gravity_auto_load_cases(&model).unwrap();
-        assert_eq!(result.cases.len(), 3);
-        let dl = result
-            .cases
-            .iter()
-            .find(|c| c.name == DL_CASE_NAME)
-            .expect("DL");
-        assert_eq!(dl.kind, LoadCaseKind::Dead);
-        assert_eq!(dl.member.len(), 8, "4辺 × 三角形2区間");
-    }
-
-    #[test]
     fn apply_auto_load_cases_creates_dl_case() {
         let mut model = make_square_slab_model();
         model.validate().expect("valid model");
         resolve_massless_slab_sections(&mut model);
         let computed = compute_gravity_auto_load_cases(&model).unwrap();
+        assert_eq!(computed.cases.len(), 3);
         apply_auto_load_cases(&mut model, &computed.cases);
         let dl = model
             .load_cases
             .iter()
             .find(|lc| lc.name == DL_CASE_NAME)
             .expect("DL case exists");
-        assert_eq!(dl.member.len(), 8);
-        assert!(dl.nodal.iter().all(|nl| nl.source.is_auto()));
+        assert_eq!(dl.kind, LoadCaseKind::Dead);
+        let total_n: f64 = dl
+            .member
+            .iter()
+            .map(|load| match load.kind {
+                MemberLoadKind::Distributed { a, b, w1, w2 } => (b - a) * (w1 + w2) / 2.0,
+                MemberLoadKind::Point { p, .. } => p,
+            })
+            .sum();
+        assert!((total_n - 80000.0).abs() < 1e-6, "{total_n}");
+        assert!(dl.member.iter().all(|load| load.source.is_auto()));
     }
 
     /// 取り付く壁版（パラペット等）の自重が「DL」ケースへ合流すること
@@ -2460,192 +2444,62 @@ mod attached_anchor_tests {
         assert!((total - W * L * D).abs() / (W * L * D) < 1e-9, "{total}");
     }
 
-    /// 取付き線の部分区間（`span != [0, 1]`）は、区間が覆う長さだけへ載る
-    /// （取付き線の全長ではない）。区間の両端は実節点ではなく大梁のスパン中間に
-    /// 幾何解決される。
     #[test]
     fn test_attached_anchor_partial_span_loads_only_covered_segment() {
         const L: f64 = 4000.0;
         const D: f64 = 1500.0;
         const W: f64 = 0.003;
-        const T: [f64; 2] = [0.25, 0.75]; // 覆う区間: x=1000..3000
-
-        let mut model = Model {
-            nodes: vec![node(0, 0.0), node(1, L)],
-            elements: vec![beam(0, 0, 1)],
-            ..Default::default()
-        };
-        model.slabs = vec![Slab {
-            id: SlabId(0),
-            shape: SlabShape::Attached {
-                anchor: RegionAnchor::Line {
-                    nodes: [NodeId(0), NodeId(1)],
-                    span: T,
-                    transfer: LoadTransfer::Anchor,
-                },
-                extent: [D, D],
-            },
-            plate: SlabPlate {
-                loads: vec![AreaLoad {
-                    kind: "DL".into(),
-                    value: W,
-                }],
+        for (span, a_expected, b_expected) in [
+            ([0.25, 0.75], 1000.0, 3000.0),
+            ([0.0, 0.5], 0.0, 2000.0),
+            ([0.5, 1.0], 2000.0, 4000.0),
+        ] {
+            let mut model = Model {
+                nodes: vec![node(0, 0.0), node(1, L)],
+                elements: vec![beam(0, 0, 1)],
                 ..Default::default()
-            },
-            reference_story: None,
-            vertical_eccentricity_mm: None,
-            tip_loads: Vec::new(),
-        }];
-
-        let beam_map = beam_elem_map(&model);
-        let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
-                .unwrap();
-        let (nodal, member) = slab_load_case_content(&model, &beam_loads);
-
-        assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
-        assert_eq!(member.len(), 1, "区間全体が1本の梁に載る: {member:?}");
-
-        let MemberLoadKind::Distributed { a, b, w1, w2 } = member[0].kind else {
-            panic!("分布荷重でない: {:?}", member[0]);
-        };
-        let (a_expected, b_expected) = (L * T[0], L * T[1]);
-        assert!((a - a_expected).abs() < 1e-6, "a={a} expected={a_expected}");
-        assert!((b - b_expected).abs() < 1e-6, "b={b} expected={b_expected}");
-        assert!((w1 - W * D).abs() < 1e-12 && (w2 - W * D).abs() < 1e-12);
-
-        // 総和保存: w × 覆う区間の長さ × 跳ね出し量（取付き線の全長ではない）。
-        let covered_len = b_expected - a_expected;
-        let total = (b - a) * (w1 + w2) / 2.0;
-        assert!(
-            (total - W * covered_len * D).abs() / (W * covered_len * D) < 1e-9,
-            "{total}"
-        );
-    }
-
-    /// 区間の始端が取付き線の始端節点にちょうど一致する場合（`t = [0.0, 0.5]`）。
-    /// `beam_span_position` は節点近傍（`tol` 以内）の点を「梁のスパン中間」から除外するため、
-    /// 区間の始端では `hit0` が得られず、`emit_along_segment` の幾何割付側へ落ちる。
-    /// その経路でも正しい区間へ載ることを確認する（節点ちょうどに一致するケースの回帰）。
-    #[test]
-    fn test_attached_anchor_partial_span_touches_start_node() {
-        const L: f64 = 4000.0;
-        const D: f64 = 1500.0;
-        const W: f64 = 0.003;
-        const T: [f64; 2] = [0.0, 0.5]; // 覆う区間: x=0..2000（始端が節点0に一致）
-
-        let mut model = Model {
-            nodes: vec![node(0, 0.0), node(1, L)],
-            elements: vec![beam(0, 0, 1)],
-            ..Default::default()
-        };
-        model.slabs = vec![Slab {
-            id: SlabId(0),
-            shape: SlabShape::Attached {
-                anchor: RegionAnchor::Line {
-                    nodes: [NodeId(0), NodeId(1)],
-                    span: T,
-                    transfer: LoadTransfer::Anchor,
+            };
+            model.slabs = vec![Slab {
+                id: SlabId(0),
+                shape: SlabShape::Attached {
+                    anchor: RegionAnchor::Line {
+                        nodes: [NodeId(0), NodeId(1)],
+                        span,
+                        transfer: LoadTransfer::Anchor,
+                    },
+                    extent: [D, D],
                 },
-                extent: [D, D],
-            },
-            plate: SlabPlate {
-                loads: vec![AreaLoad {
-                    kind: "DL".into(),
-                    value: W,
-                }],
-                ..Default::default()
-            },
-            reference_story: None,
-            vertical_eccentricity_mm: None,
-            tip_loads: Vec::new(),
-        }];
-
-        let beam_map = beam_elem_map(&model);
-        let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
-                .unwrap();
-        let (nodal, member) = slab_load_case_content(&model, &beam_loads);
-
-        assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
-        assert_eq!(member.len(), 1, "区間全体が1本の梁に載る: {member:?}");
-
-        let MemberLoadKind::Distributed { a, b, w1, w2 } = member[0].kind else {
-            panic!("分布荷重でない: {:?}", member[0]);
-        };
-        let (a_expected, b_expected) = (L * T[0], L * T[1]);
-        assert!((a - a_expected).abs() < 1e-6, "a={a} expected={a_expected}");
-        assert!((b - b_expected).abs() < 1e-6, "b={b} expected={b_expected}");
-        assert!((w1 - W * D).abs() < 1e-12 && (w2 - W * D).abs() < 1e-12);
-
-        let covered_len = b_expected - a_expected;
-        let total = (b - a) * (w1 + w2) / 2.0;
-        assert!(
-            (total - W * covered_len * D).abs() / (W * covered_len * D) < 1e-9,
-            "{total}"
-        );
-    }
-
-    /// 区間の終端が取付き線の終端節点にちょうど一致する場合（`t = [0.5, 1.0]`）。
-    /// `test_attached_anchor_partial_span_touches_start_node` の対称ケース。処理コードは
-    /// `p0`／`p1` を対称に扱うため通るはずだが、始端側しか確認していなかったため追加する。
-    #[test]
-    fn test_attached_anchor_partial_span_touches_end_node() {
-        const L: f64 = 4000.0;
-        const D: f64 = 1500.0;
-        const W: f64 = 0.003;
-        const T: [f64; 2] = [0.5, 1.0]; // 覆う区間: x=2000..4000（終端が節点1に一致）
-
-        let mut model = Model {
-            nodes: vec![node(0, 0.0), node(1, L)],
-            elements: vec![beam(0, 0, 1)],
-            ..Default::default()
-        };
-        model.slabs = vec![Slab {
-            id: SlabId(0),
-            shape: SlabShape::Attached {
-                anchor: RegionAnchor::Line {
-                    nodes: [NodeId(0), NodeId(1)],
-                    span: T,
-                    transfer: LoadTransfer::Anchor,
+                plate: SlabPlate {
+                    loads: vec![AreaLoad {
+                        kind: "DL".into(),
+                        value: W,
+                    }],
+                    ..Default::default()
                 },
-                extent: [D, D],
-            },
-            plate: SlabPlate {
-                loads: vec![AreaLoad {
-                    kind: "DL".into(),
-                    value: W,
-                }],
-                ..Default::default()
-            },
-            reference_story: None,
-            vertical_eccentricity_mm: None,
-            tip_loads: Vec::new(),
-        }];
+                reference_story: None,
+                vertical_eccentricity_mm: None,
+                tip_loads: Vec::new(),
+            }];
 
-        let beam_map = beam_elem_map(&model);
-        let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
-                .unwrap();
-        let (nodal, member) = slab_load_case_content(&model, &beam_loads);
+            let beam_map = beam_elem_map(&model);
+            let beam_loads =
+                slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                    .unwrap();
+            let (nodal, member) = slab_load_case_content(&model, &beam_loads);
 
-        assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
-        assert_eq!(member.len(), 1, "区間全体が1本の梁に載る: {member:?}");
+            assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
+            assert_eq!(member.len(), 1, "区間全体が1本の梁に載る: {member:?}");
 
-        let MemberLoadKind::Distributed { a, b, w1, w2 } = member[0].kind else {
-            panic!("分布荷重でない: {:?}", member[0]);
-        };
-        let (a_expected, b_expected) = (L * T[0], L * T[1]);
-        assert!((a - a_expected).abs() < 1e-6, "a={a} expected={a_expected}");
-        assert!((b - b_expected).abs() < 1e-6, "b={b} expected={b_expected}");
-        assert!((w1 - W * D).abs() < 1e-12 && (w2 - W * D).abs() < 1e-12);
+            let MemberLoadKind::Distributed { a, b, w1, w2 } = member[0].kind else {
+                panic!("分布荷重でない: {:?}", member[0]);
+            };
+            assert!((a - a_expected).abs() < 1e-6, "a={a} expected={a_expected}");
+            assert!((b - b_expected).abs() < 1e-6, "b={b} expected={b_expected}");
+            assert!((w1 - 4.5).abs() < 1e-12 && (w2 - 4.5).abs() < 1e-12);
 
-        let covered_len = b_expected - a_expected;
-        let total = (b - a) * (w1 + w2) / 2.0;
-        assert!(
-            (total - W * covered_len * D).abs() / (W * covered_len * D) < 1e-9,
-            "{total}"
-        );
+            let total = (b - a) * (w1 + w2) / 2.0;
+            assert!((total - 9000.0).abs() < 1e-6, "{total}");
+        }
     }
 
     /// `LoadTransfer::Columns`（出隅・雑壁の柱伝達に相当）で部分区間を使う場合、

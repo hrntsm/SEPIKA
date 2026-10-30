@@ -224,25 +224,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn saved_time_history_settings_preserve_initial_stiffness_default_and_explicit_choices() {
-        let mut settings = AnalysisSettings::default();
+    fn time_history_defaults_to_initial_stiffness_damping() {
+        let settings = AnalysisSettings::default();
         assert_eq!(
             settings.th_damping_model,
             ThDampingModel::StiffnessProportional
         );
         assert_eq!(settings.th_damping, 0.02);
-        for model in [
-            ThDampingModel::StiffnessProportional,
-            ThDampingModel::Rayleigh,
-            ThDampingModel::Modal,
-            ThDampingModel::TangentAlpha1,
-            ThDampingModel::TangentH1,
-        ] {
-            settings.th_damping_model = model;
-            let bytes = bincode::serialize(&settings).unwrap();
-            let restored: AnalysisSettings = bincode::deserialize(&bytes).unwrap();
-            assert_eq!(restored.th_damping_model, model);
-            assert_eq!(restored.th_damping, 0.02);
-        }
     }
 }

@@ -18,47 +18,26 @@ pub fn check_at(root: &Path) -> anyhow::Result<Report> {
     let summary = docs_dir.join("SUMMARY.md");
     let mut report = Report::default();
 
-    if summary.is_file() {
-        let text = std::fs::read_to_string(&summary)?;
-        let base = summary.parent().unwrap_or(docs_dir.as_path());
-        let rel = rel_display(root, &summary);
-        for target in markdown_links(&text) {
-            report.summary_links += 1;
-            if !resolve_link(base, &target).is_file() {
-                report
-                    .errors
-                    .push(format!("BROKEN SUMMARY LINK: {} -> {}", rel, target));
-            }
-        }
-
-        for token in impl_refs(&text) {
-            report.impl_refs += 1;
-            if !root.join(&token).is_file() {
-                report
-                    .errors
-                    .push(format!("BROKEN IMPL REF: {} -> {}", rel, token));
-            }
-        }
-    }
-
     let mut files = Vec::new();
     collect_md_files(&docs_dir, &mut files)?;
-    files.sort();
+    files.sort_by(|a, b| (a != &summary, a).cmp(&(b != &summary, b)));
 
     for file in &files {
-        if file == &summary {
-            continue;
-        }
+        let is_summary = file == &summary;
         let text = std::fs::read_to_string(file)?;
         let rel = rel_display(root, file);
         let base = file.parent().unwrap_or(docs_dir.as_path());
-
+        let (links, label) = if is_summary {
+            (&mut report.summary_links, "SUMMARY")
+        } else {
+            (&mut report.doc_links, "DOC")
+        };
         for target in markdown_links(&text) {
-            report.doc_links += 1;
+            *links += 1;
             if !resolve_link(base, &target).is_file() {
                 report
                     .errors
-                    .push(format!("BROKEN DOC LINK: {} -> {}", rel, target));
+                    .push(format!("BROKEN {label} LINK: {rel} -> {target}"));
             }
         }
 
@@ -67,7 +46,7 @@ pub fn check_at(root: &Path) -> anyhow::Result<Report> {
             if !root.join(&token).is_file() {
                 report
                     .errors
-                    .push(format!("BROKEN IMPL REF: {} -> {}", rel, token));
+                    .push(format!("BROKEN IMPL REF: {rel} -> {token}"));
             }
         }
     }

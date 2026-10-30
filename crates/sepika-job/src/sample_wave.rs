@@ -117,14 +117,10 @@ mod tests {
         let wave_y = build_ground_motion(0.01, ThDir::Y, accel.clone());
         assert_eq!(wave_y.accel_x, vec![0.0; 3]);
         assert_eq!(wave_y.accel_y.as_deref(), Some(accel.as_slice()));
-    }
 
-    #[test]
-    fn build_ground_motion_xy_duplicates_wave() {
-        let accel = vec![1.0, 2.0];
-        let wave = build_ground_motion(0.01, ThDir::Xy, accel.clone());
-        assert_eq!(wave.accel_x, accel);
-        assert_eq!(wave.accel_y.as_deref(), Some(accel.as_slice()));
+        let wave_xy = build_ground_motion(0.01, ThDir::Xy, accel.clone());
+        assert_eq!(wave_xy.accel_x, accel);
+        assert_eq!(wave_xy.accel_y.as_deref(), Some(accel.as_slice()));
     }
 
     #[test]

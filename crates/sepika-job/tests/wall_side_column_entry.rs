@@ -26,22 +26,20 @@ fn time_history_job_preserves_actual_wall_connection_reason_before_damping_eigen
             .elements
             .retain(|element| element.kind != ElementKind::Wall);
         model.generated_wall_origins.clear();
-        let result = std::panic::catch_unwind(|| {
-            compute_time_history(
-                model,
-                AnalysisSettings {
-                    th_nonlinear: true,
-                    ..Default::default()
-                },
-                GroundMotion {
-                    dt: 0.01,
-                    accel_x: vec![0.0, 0.0],
-                    accel_y: None,
-                    accel_theta: None,
-                },
-            )
-        });
-        let error = result.unwrap().unwrap_err().to_string();
+        let result = compute_time_history(
+            model,
+            AnalysisSettings {
+                th_nonlinear: true,
+                ..Default::default()
+            },
+            GroundMotion {
+                dt: 0.01,
+                accel_x: vec![0.0, 0.0],
+                accel_y: None,
+                accel_theta: None,
+            },
+        );
+        let error = result.unwrap_err().to_string();
         assert!(error.contains(&expected), "{error}");
         assert!(!error.contains("固有値解析"));
     }

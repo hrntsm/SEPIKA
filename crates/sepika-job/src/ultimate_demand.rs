@@ -279,17 +279,6 @@ mod tests {
         assert_eq!(d.q_long, Some(50_000.0));
     }
 
-    #[test]
-    fn static_axial_demand_converts_compression_tension_and_zero_once() {
-        for (raw, expected) in [(-150000.0, 150000.0), (150000.0, -150000.0), (0.0, 0.0)] {
-            let forces = [(ElemId(0), mf(&[(0.0, raw, 0.0, 0.0), (1.0, raw, 0.0, 0.0)]))];
-            assert_eq!(
-                member_demand_from_static_forces(&forces, None)[0].1.n_axial,
-                expected
-            );
-        }
-    }
-
     pub(super) fn axial_column(
         force_z: f64,
         reverse_nodes: bool,

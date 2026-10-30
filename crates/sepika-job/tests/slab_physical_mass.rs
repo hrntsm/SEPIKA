@@ -142,16 +142,16 @@ fn finish_live_load_and_shared_material_are_preserved_once() {
                 93500.0,
             );
         }
-        let mut model = fixture::one_cubic_metre(true);
-        let mut shared = model.slabs[0].clone();
-        shared.id = SlabId(1);
-        if let SlabShape::Attached { extent, .. } = &mut shared.shape {
-            *extent = extent.map(|v| -v);
-        }
-        model.slabs.push(shared);
-        prepare_model(&mut model, &Default::default(), None, true).unwrap();
-        close(physical_weight(&model), 153964.405);
     }
+    let mut model = fixture::one_cubic_metre(true);
+    let mut shared = model.slabs[0].clone();
+    shared.id = SlabId(1);
+    if let SlabShape::Attached { extent, .. } = &mut shared.shape {
+        *extent = extent.map(|v| -v);
+    }
+    model.slabs.push(shared);
+    prepare_model(&mut model, &Default::default(), None, true).unwrap();
+    close(physical_weight(&model), 153964.405);
 }
 
 #[test]
