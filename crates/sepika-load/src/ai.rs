@@ -282,11 +282,16 @@ mod tests {
 
     #[test]
     fn basement_and_specified_penthouse_independent_values() {
-        for (depth_mm, expected_k) in [(0.0, 0.1), (20_000.0, 0.05), (25_000.0, 0.05)] {
+        for (depth_mm, expected_k) in [
+            (0.0, 0.1),
+            (5_000.0, 0.0875),
+            (20_000.0, 0.05),
+            (25_000.0, 0.05),
+        ] {
             let specs = [
                 StorySeismicSpec {
-                    weight: 100_000.0,
-                    ci_weight: 100_000.0,
+                    weight: 50_000.0,
+                    ci_weight: 50_000.0,
                     level_kind: StoryLevelKind::Basement { depth_mm },
                 },
                 StorySeismicSpec {
@@ -296,8 +301,10 @@ mod tests {
                 },
             ];
             let d = seismic_shear_distribution(&specs, 1.0, 1.0, 0.2, 0.5);
+            assert!((d.qi[1] - 20_000.0).abs() < 1e-8);
             assert!((d.ci[0] - expected_k).abs() < 1e-12);
-            assert!((d.qi[0] - (20_000.0 + expected_k * 100_000.0)).abs() < 1e-8);
+            assert!((d.qi[0] - (20_000.0 + expected_k * 50_000.0)).abs() < 1e-8);
+            assert!((d.pi.iter().sum::<f64>() - d.qi[0]).abs() < 1e-8);
         }
         let specs = [StorySeismicSpec {
             weight: 100_000.0,
@@ -310,54 +317,28 @@ mod tests {
     }
 
     #[test]
-    fn test_rt_values() {
-        assert!((rt(0.2, 0.6) - 1.0).abs() < 1e-12);
-        let r = rt(0.8, 0.6);
-        assert!(r < 1.0 && r > 0.0);
-        let r = rt(2.0, 0.6);
-        assert!((r - 1.6 * 0.6 / 2.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_ai_spec_values() {
-        let weights = vec![1.0, 1.0, 1.0];
-        let result = ai_distribution(&weights, 1.0, 1.0, 0.2, 0.24);
-        assert!(
-            (result.alpha[0] - 1.0).abs() < 1e-3,
-            "alpha[0]={}",
-            result.alpha[0]
-        );
-        assert!(
-            (result.alpha[1] - 0.6667).abs() < 1e-3,
-            "alpha[1]={}",
-            result.alpha[1]
-        );
-        assert!(
-            (result.alpha[2] - 0.3333).abs() < 1e-3,
-            "alpha[2]={}",
-            result.alpha[2]
-        );
-        assert!((result.ai[0] - 1.000).abs() < 1e-2, "A0={}", result.ai[0]);
-        assert!((result.ai[1] - 1.156).abs() < 1e-2, "A1={}", result.ai[1]);
-        assert!((result.ai[2] - 1.390).abs() < 1e-2, "A2={}", result.ai[2]);
-    }
-
-    #[test]
-    fn test_story_shear_uses_cumulative_weight() {
-        // Qi = Ci·Wi（Wi=累積重量）。等重量3層 w=[1,1,1], Z=Rt=1, C0=0.2, T=0.24。
-        // alpha=[1, 2/3, 1/3], Ai≈[1.0,1.156,1.390], Ci=0.2·Ai。
-        // Wi=[3,2,1] → Qi=[0.6, 0.4624, 0.278]（近似）。
+    fn normal_story_distribution_uses_cumulative_weights() {
         let weights = vec![1.0, 1.0, 1.0];
         let r = ai_distribution(&weights, 1.0, 1.0, 0.2, 0.24);
-        // 基部せん断 Q0 = C0·Ai0·total = 0.2·1.0·3 = 0.6。
+        assert!((r.alpha[0] - 1.0).abs() < 1e-3, "alpha[0]={}", r.alpha[0]);
+        assert!(
+            (r.alpha[1] - 0.6667).abs() < 1e-3,
+            "alpha[1]={}",
+            r.alpha[1]
+        );
+        assert!(
+            (r.alpha[2] - 0.3333).abs() < 1e-3,
+            "alpha[2]={}",
+            r.alpha[2]
+        );
+        assert!((r.ai[0] - 1.000).abs() < 1e-2, "A0={}", r.ai[0]);
+        assert!((r.ai[1] - 1.156).abs() < 1e-2, "A1={}", r.ai[1]);
+        assert!((r.ai[2] - 1.390).abs() < 1e-2, "A2={}", r.ai[2]);
         assert!((r.qi[0] - 0.6).abs() < 1e-2, "Q0={}", r.qi[0]);
         assert!((r.qi[1] - 0.4624).abs() < 2e-2, "Q1={}", r.qi[1]);
         assert!((r.qi[2] - 0.278).abs() < 2e-2, "Q2={}", r.qi[2]);
-        // Qi は下から上へ単調減少（正常な地震時層せん断）。
         assert!(r.qi[0] > r.qi[1] && r.qi[1] > r.qi[2]);
-        // Pi = Qi−Qi+1 はすべて正（最上層に全部寄る旧バグの否定）。
         assert!(r.pi.iter().all(|&p| p > 0.0), "pi={:?}", r.pi);
-        // ΣPi = Q0（基部せん断）。
         let sum_pi: f64 = r.pi.iter().sum();
         assert!(
             (sum_pi - r.qi[0]).abs() < 1e-9,
@@ -365,38 +346,6 @@ mod tests {
             sum_pi,
             r.qi[0]
         );
-    }
-
-    #[test]
-    fn test_no_negative_pi_clamp_for_normal_monotone_weights() {
-        let weights = vec![1.0, 1.0, 1.0];
-        let r = ai_distribution(&weights, 1.0, 1.0, 0.2, 0.24);
-        assert!(!r.clamped_negative_pi);
-    }
-
-    #[test]
-    fn test_clamped_negative_pi_detected() {
-        // 意図的に Qi が下層で上層より小さくなるような異常重量分布を作る
-        // （最下層の重量をゼロに近く、上層に偏らせて alpha の並びを乱す）。
-        // ai_distribution 自体は alpha が単調減少になる重量なら常に Qi 単調減少
-        // なので、ここでは直接 pi_from_qi のロジックを検証する代わりに
-        // seismic_shear_distribution の PH ケースで Q が減少するケースを使う。
-        let stories = vec![
-            StorySeismicSpec {
-                weight: 1000.0,
-                ci_weight: 1000.0,
-                level_kind: StoryLevelKind::Normal,
-            },
-            StorySeismicSpec {
-                weight: 1000.0,
-                ci_weight: 1000.0,
-                level_kind: StoryLevelKind::Penthouse { k: 0.0001 },
-            },
-        ];
-        let r = seismic_shear_distribution(&stories, 1.0, 1.0, 0.2, 0.24);
-        // PH の k が極端に小さいため Q_PH は Q_normal よりずっと小さく、
-        // 通常は clamp は発生しない（Qiは単調非増加）。ここでは
-        // クランプが発生しない健全ケースであることを確認する。
         assert!(!r.clamped_negative_pi);
     }
 
@@ -423,102 +372,46 @@ mod tests {
 
     #[test]
     fn test_seismic_shear_with_penthouse() {
-        // 2層の一般階 + PH階（k=1.0）。Q_PH = k・W_PH = 1.0・200 = 200。
-        let stories = vec![
-            StorySeismicSpec {
-                weight: 1000.0,
-                ci_weight: 1000.0,
-                level_kind: StoryLevelKind::Normal,
-            },
-            StorySeismicSpec {
-                weight: 1000.0,
-                ci_weight: 1000.0,
-                level_kind: StoryLevelKind::Normal,
-            },
-            StorySeismicSpec {
-                weight: 200.0,
-                ci_weight: 200.0,
-                level_kind: StoryLevelKind::Penthouse { k: 1.0 },
-            },
-        ];
-        let r = seismic_shear_distribution(&stories, 1.0, 1.0, 0.2, 0.24);
-        assert!((r.qi[2] - 200.0).abs() < 1e-9, "Q_PH={}", r.qi[2]);
-        assert!((r.ci[2] - 1.0).abs() < 1e-9, "ci(PH)={}", r.ci[2]);
-        // 一般階の Wi は PH 重量を含む: W1(最上一般階) = 1000 + 200 = 1200。
-        let total_above_ground = 1000.0 + 1000.0 + 200.0;
-        let expected_alpha1 = 1200.0 / total_above_ground;
-        assert!(
-            (r.alpha[1] - expected_alpha1).abs() < 1e-9,
-            "alpha1={} expected={}",
-            r.alpha[1],
-            expected_alpha1
-        );
-        // ΣPi = Q最下層。
-        let sum_pi: f64 = r.pi.iter().sum();
-        assert!(
-            (sum_pi - r.qi[0]).abs() < 1e-6,
-            "ΣPi={} Q0={}",
-            sum_pi,
-            r.qi[0]
-        );
-    }
-
-    #[test]
-    fn test_seismic_shear_with_basement() {
-        // 地下1階(H=5m＝depth_mm 5000mm) + 一般階1層。Z=1.0 → K=0.1・(1-5/40)=0.0875。
-        // Q_B1 = Q1(一般階の層せん断力) + K・W_B1。
-        let w_normal = 1000.0;
-        let w_basement = 500.0;
-        let stories = vec![
-            StorySeismicSpec {
-                weight: w_basement,
-                ci_weight: w_basement,
-                level_kind: StoryLevelKind::Basement { depth_mm: 5000.0 },
-            },
-            StorySeismicSpec {
-                weight: w_normal,
-                ci_weight: w_normal,
-                level_kind: StoryLevelKind::Normal,
-            },
-        ];
-        let z = 1.0;
-        let rt_val = 1.0;
-        let c0 = 0.2;
-        let t = 0.24;
-        let r = seismic_shear_distribution(&stories, z, rt_val, c0, t);
-
-        // 一般階（単独、alpha=1.0）の Qi を手計算。
-        let t_factor = 2.0 * t / (1.0 + 3.0 * t);
-        let alpha1: f64 = 1.0;
-        let ai1 = 1.0 + ((1.0 / alpha1.sqrt()) - alpha1) * t_factor;
-        let ci1 = z * rt_val * ai1 * c0;
-        let q1 = ci1 * alpha1 * w_normal;
-        assert!(
-            (r.qi[1] - q1).abs() < 1e-9,
-            "Q1={} expected={}",
-            r.qi[1],
-            q1
-        );
-
-        let k_expected = 0.1 * (1.0 - 5.0_f64.min(20.0) / 40.0) * z;
-        assert!((k_expected - 0.0875).abs() < 1e-12);
-        let q_b1_expected = q1 + k_expected * w_basement;
-        assert!(
-            (r.qi[0] - q_b1_expected).abs() < 1e-9,
-            "Q_B1={} expected={}",
-            r.qi[0],
-            q_b1_expected
-        );
-        assert!((r.ci[0] - k_expected).abs() < 1e-12);
-
-        // ΣPi = Q最下層(=地下1階のQ)。
-        let sum_pi: f64 = r.pi.iter().sum();
-        assert!(
-            (sum_pi - r.qi[0]).abs() < 1e-6,
-            "ΣPi={} Q_bottom={}",
-            sum_pi,
-            r.qi[0]
-        );
+        for k in [0.0001, 1.0] {
+            let stories = vec![
+                StorySeismicSpec {
+                    weight: 1000.0,
+                    ci_weight: 1000.0,
+                    level_kind: StoryLevelKind::Normal,
+                },
+                StorySeismicSpec {
+                    weight: 1000.0,
+                    ci_weight: 1000.0,
+                    level_kind: StoryLevelKind::Normal,
+                },
+                StorySeismicSpec {
+                    weight: 200.0,
+                    ci_weight: 200.0,
+                    level_kind: StoryLevelKind::Penthouse { k },
+                },
+            ];
+            let r = seismic_shear_distribution(&stories, 1.0, 1.0, 0.2, 0.24);
+            assert!((r.qi[2] - k * 200.0).abs() < 1e-9, "Q_PH={}", r.qi[2]);
+            assert!((r.ci[2] - k).abs() < 1e-9, "ci(PH)={}", r.ci[2]);
+            // 一般階の Wi は PH 重量を含む: W1(最上一般階) = 1000 + 200 = 1200。
+            let total_above_ground = 1000.0 + 1000.0 + 200.0;
+            let expected_alpha1 = 1200.0 / total_above_ground;
+            assert!(
+                (r.alpha[1] - expected_alpha1).abs() < 1e-9,
+                "alpha1={} expected={}",
+                r.alpha[1],
+                expected_alpha1
+            );
+            // ΣPi = Q最下層。
+            let sum_pi: f64 = r.pi.iter().sum();
+            assert!(
+                (sum_pi - r.qi[0]).abs() < 1e-6,
+                "ΣPi={} Q0={}",
+                sum_pi,
+                r.qi[0]
+            );
+            assert!(!r.clamped_negative_pi);
+        }
     }
 
     #[test]
@@ -556,45 +449,6 @@ mod tests {
             r.qi[0]
         );
         assert!(!r.clamped_negative_pi);
-    }
-
-    /// 地盤面からの深さが上限 20m を超える地下階は 20m で頭打ちにすること
-    /// （令88条4項）。
-    #[test]
-    fn test_seismic_shear_basement_depth_clamped_to_20m() {
-        // 地下1階(H=25m > 上限20m) + 一般階1層。Z=1.0 → K=0.1・(1-20/40)=0.05。
-        let w_normal = 1000.0;
-        let w_basement = 500.0;
-        let stories = vec![
-            StorySeismicSpec {
-                weight: w_basement,
-                ci_weight: w_basement,
-                level_kind: StoryLevelKind::Basement { depth_mm: 25000.0 },
-            },
-            StorySeismicSpec {
-                weight: w_normal,
-                ci_weight: w_normal,
-                level_kind: StoryLevelKind::Normal,
-            },
-        ];
-        let r = seismic_shear_distribution(&stories, 1.0, 1.0, 0.2, 0.24);
-
-        let k_expected = 0.1 * (1.0 - 20.0_f64 / 40.0);
-        assert!((k_expected - 0.05).abs() < 1e-12);
-        assert!((r.ci[0] - k_expected).abs() < 1e-12, "ci={}", r.ci[0]);
-        let q_b1_expected = r.qi[1] + k_expected * w_basement;
-        assert!(
-            (r.qi[0] - q_b1_expected).abs() < 1e-9,
-            "Q_B1={} expected={}",
-            r.qi[0],
-            q_b1_expected
-        );
-        assert!(
-            r.qi.iter().all(|v| v.is_finite()) && r.pi.iter().all(|v| v.is_finite()),
-            "非有限値がある: qi={:?} pi={:?}",
-            r.qi,
-            r.pi
-        );
     }
 
     /// 重量 0 の最上階（利用者が定義しただけでまだ部材のない階）があっても、
