@@ -6,21 +6,13 @@ use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{ElementKind, MemberLoad, MemberLoadKind, Model, NodalLoad, Slab};
 use std::collections::HashMap;
 
-/// 節点対の順不同キー（`(min,max)`）。
-fn beam_key(a: NodeId, b: NodeId) -> (NodeId, NodeId) {
-    if a.0 <= b.0 {
-        (a, b)
-    } else {
-        (b, a)
-    }
-}
-
 /// 節点対 (min,max) → 実 `Beam`（2 節点）要素の `ElemId` を引く索引。
 pub fn beam_elem_map(model: &Model) -> HashMap<(NodeId, NodeId), ElemId> {
     let mut map = HashMap::new();
     for e in &model.elements {
         if e.kind == ElementKind::Beam && e.nodes.len() == 2 {
-            map.entry(beam_key(e.nodes[0], e.nodes[1])).or_insert(e.id);
+            map.entry(floor::span_node_key(e.nodes[0], e.nodes[1]))
+                .or_insert(e.id);
         }
     }
     map
@@ -33,8 +25,9 @@ fn push_resolved_loads(
     beam_map: &HashMap<(NodeId, NodeId), ElemId>,
     out: &mut Vec<BeamLoad>,
 ) {
-    let find_beam =
-        |n0: NodeId, n1: NodeId| -> Option<ElemId> { beam_map.get(&beam_key(n0, n1)).copied() };
+    let find_beam = |n0: NodeId, n1: NodeId| -> Option<ElemId> {
+        beam_map.get(&floor::span_node_key(n0, n1)).copied()
+    };
     for mut bl in loads {
         match bl.target {
             LoadTarget::Node(_) => out.push(bl),
