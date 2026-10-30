@@ -1472,12 +1472,20 @@ fn build_sections(
                 .transpose()
         };
         let new_id = SectionId(model.sections.len() as u32);
+        let used_as = section_uses.get(&file_id).copied();
+        if let (Some(declared), Some(used)) = (ps.declared_use, used_as) {
+            if declared != used {
+                return Err(section_error(&format!(
+                    "断面の明示用途 {declared:?} と参照用途 {used:?} が競合"
+                )));
+            }
+        }
         let section = match ps.kind {
             PendingSecKind::Shape(shape) => {
                 let mut section = shape
                     .input_section(new_id, ps.name)
                     .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
-                section.frame_use = section_uses.get(&file_id).copied();
+                section.frame_use = used_as.or(ps.declared_use);
                 section
             }
             PendingSecKind::SteelRef(shape_name) => match resolve_steel(shape_name.as_deref())? {
@@ -1485,7 +1493,7 @@ fn build_sections(
                     let mut section = shape
                         .input_section(new_id, ps.name)
                         .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
-                    section.frame_use = section_uses.get(&file_id).copied();
+                    section.frame_use = used_as.or(ps.declared_use);
                     section
                 }
                 None => {
@@ -1589,7 +1597,7 @@ fn build_sections(
             }
         };
         let mut section = section;
-        section.frame_use = section_uses.get(&file_id).copied();
+        section.frame_use = used_as.or(ps.declared_use);
         section.floor = floor;
         section.material = ps.mat.as_ref().and_then(|r| resolve_sec_material(model, r));
         section.rebar_material =

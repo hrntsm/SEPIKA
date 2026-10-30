@@ -537,11 +537,18 @@ impl App {
             "quantity"=> {
                 let pagination:Page=args(&request)?;
                 let quantity=self.ai_quantity_reference(s,p,task_id,&expected)?;
+                if matches!(quantity.scope,references::QuantityEvidenceScope::Members(_)) {
+                    let steel=quantity.steel_takeoff().map_err(|e|reject("quantity_unavailable",e))?;
+                    let volume=steel.volume_m3();
+                    let rows=steel.items.iter().map(|item|json!({"member":item.elem,"section":item.section,"steel_t":item.steel.weight_t,"label":item.steel.section_name,"steel_volume_m3":item.volume_m3,"area_mm2":item.area_mm2,"area_basis":item.area_basis,"length_mm":item.length_mm})).collect();
+                    json!({"source":quantity.source,"identity":quantity.identity,"scope":quantity.scope.label(),"scope_members":steel.items.iter().map(|item|item.elem).collect::<Vec<_>>(),"contract":quantity.contract,"components":"鋼材のみ","whole_quantity_error":steel.whole_quantity_error,"whole_scope_totals":{"steel_t":volume*sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3,"steel_volume_m3":volume,"members":steel.items.len()},"page":page(rows,pagination.offset,pagination.limit)?})
+                } else {
                 let takeoff=quantity.takeoff().map_err(|e|reject("quantity_unavailable",e))?;
                 let totals=takeoff.totals();
                 let rows=takeoff.items.iter().map(|item|json!({"member":item.elem,"section":item.section,"steel_t":item.steel_weight_t(),"label":item.label,"steel_volume_m3":item.steel_weight_t()/sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3})).collect();
                 let scope_members=match &quantity.scope {references::QuantityEvidenceScope::WholeModel=>None,references::QuantityEvidenceScope::Members(members)=>Some(members)};
                 json!({"source":quantity.source,"identity":quantity.identity,"scope":quantity.scope.label(),"scope_members":scope_members,"contract":quantity.contract,"whole_scope_totals":{"steel_t":totals.steel_t,"steel_volume_m3":totals.steel_t/sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3,"members":totals.member_count},"page":page(rows,pagination.offset,pagination.limit)?})
+                }
             }
             "evidence"=> {
                 let evidence:Evidence=args(&request)?;
@@ -582,7 +589,7 @@ impl App {
                 for identity in &submission.quantity_references {
                     let quantity=self.ai_quantity_reference(s,p,task_id,&expected)?;
                     if *identity!=quantity.identity {return Err(reject("quantity_reference_invalid","対象入力版と固定対象の数量根拠が一致しません"));}
-                    quantity.takeoff().map_err(|e|reject("quantity_unavailable",e))?;
+                    quantity.validate_available().map_err(|e|reject("quantity_unavailable",e))?;
                     quantities.push(quantity);
                 }
                 let run_index=submission.run_index;
@@ -893,7 +900,7 @@ impl App {
                         ));
                     }
                     quantity
-                        .takeoff()
+                        .validate_available()
                         .map_err(|e| reject("quantity_unavailable", e))?;
                     return Ok(());
                 }
@@ -1076,7 +1083,7 @@ impl App {
                 ));
             }
             quantity
-                .takeoff()
+                .validate_available()
                 .map_err(|e| reject("quantity_unavailable", e))?;
         }
         if let Some(index) = submission.run_index {
@@ -1231,9 +1238,12 @@ impl App {
         let app = comparison::projection::result_app(&run.prepared, bundle, run.last_static);
         let fixed = comparison::projection::fixed_members(&self.studies.items[s]);
         let quantity = app.member_quantity_evidence_reference(fixed.clone());
-        let volume = quantity
-            .takeoff()
-            .map(|q| q.totals().steel_t / sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3);
+        let steel = quantity.steel_takeoff();
+        let whole_quantity_error = steel
+            .as_ref()
+            .ok()
+            .and_then(|q| q.whole_quantity_error.clone());
+        let volume = steel.map(|q| q.volume_m3());
         let mut rows = Vec::new();
         let (checks, unavailable) = ai_check_rows(run, &fixed);
         for check in &checks {
@@ -1269,7 +1279,7 @@ impl App {
             json!({"checked":verification.checked,"unchecked":verification.unchecked,"confirmed_ng":verification.confirmed_ng,"observed_counts":verification.observed_counts,"count_unit":CHECK_COUNT_UNIT,"evaluated_maximum":summary.maximum.as_ref().and_then(|r|r.ratio),"maximum":if verification.scope_available && summary.skipped==0 {summary.maximum.and_then(|r|r.ratio)} else {None},"scope_complete":verification.scope_available,"unit":"無次元"})
         };
         Ok(
-            json!({"state":run.calculation_state(),"input":input,"run_index":args.run_index,"conditions":run.input.settings,"error":run.error,"notice":run.notice,"unavailable":unavailable,"whole_checks":summary_json(summary),"fixed_checks":summary_json(fixed_summary),"fixed_steel_volume":{"value_m3":volume.as_ref().ok(),"error":volume.as_ref().err(),"members":fixed,"identity":quantity.identity},"page":page(rows,args.offset,args.limit)?}),
+            json!({"state":run.calculation_state(),"input":input,"run_index":args.run_index,"conditions":run.input.settings,"error":run.error,"notice":run.notice,"unavailable":unavailable,"whole_checks":summary_json(summary),"fixed_checks":summary_json(fixed_summary),"fixed_steel_volume":{"value_m3":volume.as_ref().ok(),"error":volume.as_ref().err(),"members":fixed,"identity":quantity.identity,"whole_quantity_error":whole_quantity_error},"page":page(rows,args.offset,args.limit)?}),
         )
     }
 

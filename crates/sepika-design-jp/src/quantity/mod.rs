@@ -22,6 +22,7 @@
 mod contact;
 pub mod member;
 pub mod rebar;
+pub mod steel_members;
 
 #[cfg(test)]
 mod tests;
@@ -144,7 +145,7 @@ pub struct RebarItem {
 }
 
 /// 鉄骨数量 1 件。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct SteelItem {
     /// 断面名（種類別集計のキー）。
     pub section_name: String,
@@ -239,6 +240,14 @@ pub struct MemberQuantity {
 }
 
 impl MemberQuantity {
+    fn quantities_are_finite(&self) -> bool {
+        self.concrete_m3.is_finite()
+            && self.formwork_m2.is_finite()
+            && self.steel_weight_t().is_finite()
+            && self.rebar_weight_t().is_finite()
+            && self.rebar_joints.is_finite()
+    }
+
     pub fn rebar_status(&self) -> QuantityStatus {
         if self.rebar_issues.is_empty() {
             QuantityStatus::Complete
@@ -434,12 +443,20 @@ fn cft_infill_area(shape: &SectionShape) -> Option<f64> {
 }
 
 fn quantity_area(section: &Section) -> Result<f64, String> {
+    quantity_area_with_basis(section).map(|(area, _)| area)
+}
+
+fn quantity_area_with_basis(
+    section: &Section,
+) -> Result<(f64, sepika_core::model::PropertyBasis), String> {
     let Some(shape) = &section.shape else {
-        return section.resolved_area();
+        return section
+            .resolved_area()
+            .map(|area| (area, section.property_basis.area));
     };
     shape.validate_surface_radius()?;
     match shape.try_calc_area() {
-        Ok(area) => Ok(area),
+        Ok(area) => Ok((area, sepika_core::model::PropertyBasis::Shape)),
         Err(_)
             if matches!(
                 shape,
@@ -447,10 +464,22 @@ fn quantity_area(section: &Section) -> Result<f64, String> {
                     | SectionShape::SteelBox { corner_r: None, .. }
             ) && section.property_basis.area == sepika_core::model::PropertyBasis::Supplied =>
         {
-            section.resolved_area()
+            section
+                .resolved_area()
+                .map(|area| (area, section.property_basis.area))
         }
         Err(error) => Err(error),
     }
+}
+
+fn steel_item(section: &Section, length_mm: f64) -> Result<SteelItem, String> {
+    let area_mm2 = quantity_area(section)?;
+    let weight_t = area_mm2 * length_mm * STEEL_UNIT_WEIGHT_T_PER_MM3;
+    Ok(SteelItem {
+        section_name: section.name.clone(),
+        length_m: length_mm / 1000.0,
+        weight_t,
+    })
 }
 
 fn validate_circular_rc_posts(model: &Model) -> Result<(), String> {
@@ -766,13 +795,16 @@ pub fn try_compute_quantity_takeoff(
             .story
             .map(|id| model.stories[id.index()].name.clone())
             .unwrap_or_else(|| "-".into());
-        if !item.concrete_m3.is_finite()
-            || !item.formwork_m2.is_finite()
-            || !item.steel_weight_t().is_finite()
-            || !item.rebar_weight_t().is_finite()
-            || !item.rebar_joints.is_finite()
-        {
+        if !item.quantities_are_finite() {
             return Err(format!("{:?}: 数量が有限範囲を超えています", sm.id));
+        }
+    }
+    for item in &out.items {
+        if !item.quantities_are_finite() {
+            return Err(format!(
+                "部材 {:?} / 床板 {:?} / 壁版 {:?}: 数量が有限範囲を超えています",
+                item.elem, item.slab, item.wall_plate
+            ));
         }
     }
     Ok(out)
@@ -1292,12 +1324,7 @@ fn column_quantity(
             }
         }
         (StructureKind::S, _) => {
-            let a = quantity_area(sec).expect("数量積算の断面積を解決できません");
-            item.steel = Some(SteelItem {
-                section_name: sec.name.clone(),
-                length_m: h / 1_000.0,
-                weight_t: a * h * STEEL_UNIT_WEIGHT_T_PER_MM3,
-            });
+            item.steel = Some(steel_item(sec, h).expect("数量積算の鋼材を解決できません"));
         }
         (StructureKind::Cft, shape) => {
             let a = quantity_area(sec).expect("数量積算の断面積を解決できません");
@@ -1359,12 +1386,7 @@ fn beam_quantity(
     };
 
     if structure == StructureKind::S || structure == StructureKind::Cft {
-        let a = quantity_area(sec).expect("数量積算の断面積を解決できません");
-        item.steel = Some(SteelItem {
-            section_name: sec.name.clone(),
-            length_m: len / 1_000.0,
-            weight_t: a * len * STEEL_UNIT_WEIGHT_T_PER_MM3,
-        });
+        item.steel = Some(steel_item(sec, len).expect("数量積算の鋼材を解決できません"));
         return item;
     }
 

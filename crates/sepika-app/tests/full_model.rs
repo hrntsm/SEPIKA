@@ -57,6 +57,9 @@ use sepika_solver::statics::analysis::SeismicDir;
 mod frame_gravity;
 use frame_gravity::select_frame_gravity;
 
+#[path = "support/issue985.rs"]
+mod issue985;
+
 // ===================== フィクスチャと共通ヘルパー =====================
 
 /// 固定フィクスチャ（実建物の ST-Bridge）のパス。

@@ -99,6 +99,9 @@ jobs:
       - name: GUI検討通信テストビルド
         if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo test -p sepika-app --lib --features gui --locked --no-run
+      - name: 実モデル検討E2Eテストビルド
+        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-app --features gui --test full_model issue985 --locked --no-run
       - name: MCP中継テストビルド
         if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked --no-run
@@ -108,6 +111,9 @@ jobs:
       - name: GUI検討の実通信・編集・計算テスト
         if: github.event_name == 'pull_request'
         run: cargo test -p sepika-app --lib --features gui --locked app::study::ai::operations::tests -- --test-threads=1
+      - name: 実モデル検討の実通信E2Eテスト
+        if: github.event_name == 'pull_request'
+        run: cargo test -p sepika-app --features gui --test full_model issue985 --locked
       - name: MCP stdio中継テスト
         if: github.event_name == 'pull_request'
         run: cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked

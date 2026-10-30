@@ -125,7 +125,7 @@ impl App {
                 {
                     return Err("依頼元の数量根拠の範囲・契約が失効しています".into());
                 }
-                quantity.takeoff()?;
+                quantity.validate_available()?;
                 Some(quantity.as_ref().clone())
             }
             _ => None,

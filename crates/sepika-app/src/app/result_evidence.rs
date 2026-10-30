@@ -488,17 +488,40 @@ impl App {
         if quantity.contract != QUANTITY_EVIDENCE_CONTRACT_VERSION {
             return Err("数量集計の計算契約が異なるため取得不能です。".into());
         }
-        let takeoff = quantity.takeoff()?;
-        let totals = takeoff.totals();
-        let unit_weight = sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3;
-        let mut lines = vec![format!("集計対象: {} / 明細 {} 件 / コンクリート {:.6} m³ / 鋼材体積 {:.6} m³ / 鉄骨 {:.6} t", quantity.scope.label(), takeoff.items.len(), totals.concrete_m3, totals.steel_t / unit_weight, totals.steel_t), "鋼材体積は鉄骨重量を数量用単位重量7.85 t/m³で換算した値です。鉄筋を含みません。".into(), format!("鉄筋の状態: {}", totals.rebar_status().label())];
-        for item in &takeoff.items {
-            lines.push(format!("要素 {:?} / 床板 {:?} / 二次部材 {:?} / 壁版 {:?} / {} / {} / 断面 {:?} / コンクリート {:.6} m³ / 鋼材体積 {:.6} m³ / 鉄筋 {}", item.elem, item.slab, item.secondary, item.wall_plate, item.story, item.label, item.section, item.concrete_m3, item.steel_weight_t() / unit_weight, item.rebar_status().label()));
-            for issue in &item.rebar_issues {
-                lines.push(issue.description());
+        let lines = if matches!(
+            quantity.scope,
+            references::QuantityEvidenceScope::Members(_)
+        ) {
+            let steel = quantity.steel_takeoff()?;
+            let mut lines = vec![format!(
+                "集計対象: {} / 鋼材のみ / 明細 {} 件 / 鋼材体積 {:.6} m³",
+                quantity.scope.label(),
+                steel.items.len(),
+                steel.volume_m3()
+            )];
+            for item in steel.items {
+                lines.push(format!("部材 {:?} / 断面 {:?} / 断面積 {:.6} mm² / 面積算定元 {:?} / 節点間材長 {:.6} mm / 鋼材体積 {:.9} m³ / 鉄骨 {:.9} t",item.elem,item.section,item.area_mm2,item.area_basis,item.length_mm,item.volume_m3,item.steel.weight_t));
             }
-        }
-        lines.extend(takeoff.notes);
+            if let Some(reason) = steel.whole_quantity_error {
+                lines.push(format!(
+                    "全体数量は未算定: {reason}。他の材料・型枠の数量を0や算定済みにしません"
+                ));
+            }
+            lines
+        } else {
+            let takeoff = quantity.takeoff()?;
+            let totals = takeoff.totals();
+            let unit_weight = sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3;
+            let mut lines = vec![format!("集計対象: {} / 明細 {} 件 / コンクリート {:.6} m³ / 鋼材体積 {:.6} m³ / 鉄骨 {:.6} t", quantity.scope.label(), takeoff.items.len(), totals.concrete_m3, totals.steel_t / unit_weight, totals.steel_t), "鋼材体積は鉄骨重量を数量用単位重量7.85 t/m³で換算した値です。鉄筋を含みません。".into(), format!("鉄筋の状態: {}", totals.rebar_status().label())];
+            for item in &takeoff.items {
+                lines.push(format!("要素 {:?} / 床板 {:?} / 二次部材 {:?} / 壁版 {:?} / {} / {} / 断面 {:?} / コンクリート {:.6} m³ / 鋼材体積 {:.6} m³ / 鉄筋 {}", item.elem, item.slab, item.secondary, item.wall_plate, item.story, item.label, item.section, item.concrete_m3, item.steel_weight_t() / unit_weight, item.rebar_status().label()));
+                for issue in &item.rebar_issues {
+                    lines.push(issue.description());
+                }
+            }
+            lines.extend(takeoff.notes);
+            lines
+        };
         self.ui.scoped.result_evidence = Some(ResultEvidence {
             title: "数量の集計元".into(),
             source: Some(quantity.source.clone()),
@@ -1765,6 +1788,34 @@ mod tests {
         assert!(app
             .open_result_evidence(EvidenceReference::Quantity(Box::new(tampered)))
             .is_err());
+    }
+
+    #[test]
+    fn fixed_steel_quantity_evidence_retains_its_value_and_whole_error_for_an_invalid_other_member()
+    {
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        let mut element = app.core.model.elements[0].clone();
+        element.id = ElemId(app.core.model.elements.len() as u32);
+        for index in 0..2 {
+            let mut node = app.core.model.nodes[element.nodes[index].index()].clone();
+            node.id = NodeId(app.core.model.nodes.len() as u32);
+            if index == 0 {
+                node.coord[0] = f64::NAN;
+            }
+            element.nodes[index] = node.id;
+            app.core.model.nodes.push(node);
+        }
+        app.core.model.elements.push(element);
+        let quantity = app.member_quantity_evidence_reference(vec![ElemId(2)]);
+        let steel = quantity.steel_takeoff().unwrap();
+        assert!(steel.volume_m3() > 0.0);
+        assert!(steel.whole_quantity_error.unwrap().contains("有限範囲"));
+        app.open_result_evidence(EvidenceReference::Quantity(Box::new(quantity)))
+            .unwrap();
+        let lines = &app.ui.scoped.result_evidence.as_ref().unwrap().lines;
+        assert!(lines[0].contains("鋼材のみ"));
+        assert!(lines.iter().any(|line| line.contains("全体数量は未算定")));
     }
     #[test]
     fn malformed_check_components_stay_unrated_in_common_member_and_joint_evidence() {
