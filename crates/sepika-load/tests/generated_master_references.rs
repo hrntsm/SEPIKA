@@ -32,14 +32,13 @@ fn baseline() -> Model {
     }
 }
 #[test]
-fn public_generation_rejects_absent_and_mismatched_owners_without_mutation() {
+fn public_generation_rejects_absent_and_mismatched_owners() {
     for id in [3, u32::MAX, 1] {
         let mut model = baseline();
         model.generated_masters.push(NodeId(id));
         if id == 1 {
             model.nodes[1].id = NodeId(9);
         }
-        let before = format!("{model:?}");
         for result in [
             generate_stories(&model, None),
             generate_stories_multi(&model, &[]),
@@ -50,14 +49,11 @@ fn public_generation_rejects_absent_and_mismatched_owners_without_mutation() {
             assert!(error.contains("generated_masters[1]"), "{error}");
             assert!(error.contains(&id.to_string()), "{error}");
         }
-        assert_eq!(format!("{model:?}"), before);
     }
 }
 #[test]
-fn existing_inactive_owner_is_reusable_without_mutating_input() {
+fn existing_inactive_owner_is_reusable() {
     let model = baseline();
-    let before = format!("{model:?}");
     let result = generate_stories(&model, None).unwrap();
     assert!(result.generated_masters.contains(&NodeId(2)));
-    assert_eq!(format!("{model:?}"), before);
 }

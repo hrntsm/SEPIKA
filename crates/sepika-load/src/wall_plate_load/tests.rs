@@ -250,6 +250,7 @@ fn 領域を覆っても断面が無ければ分配の対象になる() {
 #[test]
 fn 間柱で分割された壁は左右の鉛直辺へ半分ずつ配る() {
     let m = split_by_post();
+    assert!(wall_plates_without_load_path(&m).is_empty());
     let out = distribute_enclosed_wall_plates(&m).unwrap();
 
     let post = out
@@ -344,54 +345,25 @@ fn 指定した辺の負担率どおりに壁自重を配る() {
     assert!((out[1].total - full_weight() * 0.25).abs() < 1e-6);
 }
 
-/// 負担率を明示すれば、下辺のみ梁際スリットの非要素壁版は切れていない上辺の梁へ自重を配る。
-///
-/// `beam_face` の添字は 0 が下辺・1 が上辺に対応し、負担率の辺の並び（境界の順）と
-/// 同じであることを、非要素壁版の `edge_shares_with` で固定する。
 #[test]
-fn 負担率を明示すれば下辺のみ梁際スリットの非要素壁版は切れていない上辺の梁へ自重を配る() {
-    let mut m = bay();
-    add_plate(&mut m, 0, [0, 1, 2, 3], [0.0, 0.0, 1.0, 0.0]);
-    m.wall_plates[0].slit.beam_face = [true, false];
-
-    let out = edge_shares_with(
-        &m,
-        &m.wall_plates[0],
-        crate::cascade::SelfWeightBasis::Design,
-    );
-    assert_eq!(out.len(), 1);
-    assert_eq!(out[0].support, SupportMemberId::Primary(ElemId(3)));
-    assert!(out[0].post().is_none(), "上辺は大梁が受ける");
-    assert!(
-        (out[0].total - full_weight()).abs() / full_weight() < 1e-9,
-        "全量が切れていない上辺へ渡る: {}",
-        out[0].total
-    );
-}
-
-/// 負担率を明示すれば、上辺のみ梁際スリットの非要素壁版は切れていない下辺の梁へ自重を配る。
-///
-/// 上記の下辺のみ梁際スリットのテストと対にし、`beam_face` の添字 0 が下辺・1 が上辺に
-/// 対応することを両方向から固定する（添字の取り違えを検出する）。
-#[test]
-fn 負担率を明示すれば上辺のみ梁際スリットの非要素壁版は切れていない下辺の梁へ自重を配る() {
-    let mut m = bay();
-    add_plate(&mut m, 0, [0, 1, 2, 3], [1.0, 0.0, 0.0, 0.0]);
-    m.wall_plates[0].slit.beam_face = [false, true];
-
-    let out = edge_shares_with(
-        &m,
-        &m.wall_plates[0],
-        crate::cascade::SelfWeightBasis::Design,
-    );
-    assert_eq!(out.len(), 1);
-    assert_eq!(out[0].support, SupportMemberId::Primary(ElemId(2)));
-    assert!(out[0].post().is_none(), "下辺は大梁が受ける");
-    assert!(
-        (out[0].total - full_weight()).abs() / full_weight() < 1e-9,
-        "全量が切れていない下辺へ渡る: {}",
-        out[0].total
-    );
+fn 負担率を明示した壁版は梁際スリットで切れていない上下の梁へ自重を配る() {
+    for (shares, beam_face, support) in [
+        ([0.0, 0.0, 1.0, 0.0], [true, false], ElemId(3)),
+        ([1.0, 0.0, 0.0, 0.0], [false, true], ElemId(2)),
+    ] {
+        let mut m = bay();
+        add_plate(&mut m, 0, [0, 1, 2, 3], shares);
+        m.wall_plates[0].slit.beam_face = beam_face;
+        let out = edge_shares_with(
+            &m,
+            &m.wall_plates[0],
+            crate::cascade::SelfWeightBasis::Design,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].support, SupportMemberId::Primary(support));
+        assert!(out[0].post().is_none());
+        assert!((out[0].total - full_weight()).abs() / full_weight() < 1e-9);
+    }
 }
 
 /// 自重を持つ壁版は、負担率の未指定・不正値を解析前エラーとし、幾何から配らない。
@@ -572,12 +544,6 @@ fn 柱に並走する間柱は柱の荷重を奪わない() {
         "柱に並走する間柱は荷重を受けない"
     );
     assert_eq!(out.primary.len(), 2, "柱側の鉛直辺は主架構が受け続ける");
-}
-
-/// 支持部材のある辺を持つ壁版は診断の対象にならない。
-#[test]
-fn 行き先のある壁版は診断に出ない() {
-    assert!(wall_plates_without_load_path(&split_by_post()).is_empty());
 }
 
 /// 中央間柱が梁の材軸中間にアンカーし、その位置にモデル節点が無い 1 構面。
