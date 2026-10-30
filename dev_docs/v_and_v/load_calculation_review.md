@@ -209,6 +209,8 @@ test result: ok. 15 passed; 0 failed
 
 （テスト再編後: `floor::tests::test_fem_uniform` は `test_fixed_end_moments_matches_fem_uniform` に統合。Issue #314 のテスト整理で `ai::tests::test_ai_distribution_3story` は削除（`test_ai_spec_values` と `test_story_shear_uses_cumulative_weight` が同一保証を包含）。実行結果は当時の記録のため上記ログは原文のまま。）
 
+現行の Ai 回帰テストでは、`test_ai_spec_values`・`test_story_shear_uses_cumulative_weight`・`test_no_negative_pi_clamp_for_normal_monotone_weights` の保証を `normal_story_distribution_uses_cumulative_weights` に統合した。`test_rt_values` の各分岐は `standard_formula_independent_values_and_boundaries` の独立値・境界照合で確認する。地下深さの通常値・20 m 上限は `basement_and_specified_penthouse_independent_values`、微小な PH 指定震度で負 Pi を生じない契約は `test_seismic_shear_with_penthouse` が引き継ぐ。
+
 ただし現行テストは実装済み範囲のみを検証しており、§1・§3 の各項目
 （壁・ダンパー自重、仕上げ荷重、柱面間長さ、多剛床、±地震組合せ等）への回帰テストは存在しない。
 

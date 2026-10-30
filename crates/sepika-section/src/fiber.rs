@@ -143,13 +143,10 @@ mod tests {
             },
             &mut mats,
         );
-        // 離散断面積 A_disc = Σ area
-        let a_disc: f64 = sec.fibers.iter().map(|f| f.area).sum();
-        let expected_n = 0.001 * 205000.0 * a_disc;
-        assert_relative_eq!(force.n, expected_n, max_relative = 1e-9);
+        assert_relative_eq!(force.n, 4_100_000.0, max_relative = 1e-9);
         assert_relative_eq!(force.my, 0.0, epsilon = 1e-9);
         assert_relative_eq!(force.mz, 0.0, epsilon = 1e-9);
-        assert_relative_eq!(stiff.d[0][0], 205000.0 * a_disc, max_relative = 1e-9);
+        assert_relative_eq!(stiff.d[0][0], 4_100_000_000.0, max_relative = 1e-9);
     }
 
     #[test]
@@ -166,12 +163,10 @@ mod tests {
             },
             &mut mats,
         );
-        // 離散 Iy = Σ area·z²。弾性域はファイバ積分が厳密に E·Iy_disc に一致する。
-        let iy_disc: f64 = sec.fibers.iter().map(|f| f.area * f.z * f.z).sum();
-        let expected_my = ky * 205000.0 * iy_disc;
-        assert_relative_eq!(force.my, expected_my, max_relative = 1e-9);
+        // 中点則の Iy = b*d³/12*(1 - 1/nd²) = 66,625,000 mm⁴。
+        assert_relative_eq!(force.my, 13_658_125.0, max_relative = 1e-9);
         assert_relative_eq!(force.n, 0.0, epsilon = 1e-9);
-        assert_relative_eq!(stiff.d[1][1], 205000.0 * iy_disc, max_relative = 1e-9);
+        assert_relative_eq!(stiff.d[1][1], 13_658_125_000_000.0, max_relative = 1e-9);
     }
 
     #[test]

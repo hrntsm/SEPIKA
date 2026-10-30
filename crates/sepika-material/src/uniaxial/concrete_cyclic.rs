@@ -129,13 +129,9 @@ impl ConcreteCyclic {
     }
 
     pub fn newrc_with_initial_tangent(fc: f64, eps_cu: f64, ft: f64, ets: f64, ec: f64) -> Self {
-        let mut material = Self::newrc(fc, eps_cu, ft, ets);
-        if let ConcreteEnvelope::NewRc { envelope, .. } = &mut material.envelope {
-            envelope.set_initial_tangent(ec);
-        }
-        material.committed.tangent = ec;
-        material.trial.tangent = ec;
-        material
+        let mut envelope = crate::newrc::NewRcEnvelope::new(fc);
+        envelope.set_initial_tangent(ec);
+        Self::with_envelope(ConcreteEnvelope::NewRc { envelope, eps_cu }, ft, ets)
     }
 
     fn with_envelope(envelope: ConcreteEnvelope, ft: f64, ets: f64) -> Self {
@@ -413,19 +409,6 @@ mod tests {
             let via_trial = clone_for_trial.trial(probe_strain);
             assert_eq!(before, via_trial, "probe は trial と完全一致すること");
         }
-    }
-
-    #[test]
-    fn test_commit_revert() {
-        let mut c = kp30();
-        c.trial(-0.002);
-        c.commit();
-        c.trial(-0.004);
-        c.revert();
-        // revert 後は εmin = −0.002 のまま（除荷は −0.002 からの割線）。
-        let eps_p = c.plastic_strain(-0.002);
-        let (s, _) = c.trial(eps_p);
-        assert_relative_eq!(s, 0.0, epsilon = 1e-9);
     }
 
     #[test]

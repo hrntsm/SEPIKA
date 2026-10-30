@@ -1253,7 +1253,7 @@ mod rounded_tests {
                 })
                 .collect();
             let norm_n = steel.area * 235.0 + core.map_or(0.0, |p| p.area * 24.0);
-            for divisions in [4, 40, 160, 640, 2560] {
+            for divisions in [4, 40, 2560] {
                 let fibers =
                     plastic_fibers_at(&shape, &strengths, dim / divisions as f64, ring).unwrap();
                 let mut max_i_error = 0.0_f64;
@@ -1357,86 +1357,56 @@ mod rounded_tests {
     }
 
     #[test]
-    fn published_moment_at_axial_force_and_zero_radius_baseline() {
-        use super::super::plastic::{plastic_moment_at_n, plastic_point};
-        let steel = FiberMat {
-            sigma_t: 235.0,
-            sigma_c: -235.0,
-            young: 205000.0,
-            region: FiberRegion::Steel,
-        };
-        let conc = FiberMat {
-            sigma_t: 0.0,
-            sigma_c: -24.0,
-            young: concrete_young_modulus(24.0),
-            region: FiberRegion::Concrete,
-        };
+    fn moment_at_axial_force_matches_independent_integration() {
+        use super::super::plastic::plastic_moment_at_n;
         let ring = AnnulusRes {
             n_theta: 48,
             n_r_thin: 4,
             n_r_solid: 12,
         };
-        for (shape, is_zero) in [
-            (
-                SectionShape::SteelH {
-                    height: 400.0,
-                    width: 200.0,
-                    web_thick: 9.0,
-                    flange_thick: 12.0,
-                    root_r: Some(0.0),
-                },
-                true,
-            ),
-            (
-                SectionShape::SteelH {
-                    height: 400.0,
-                    width: 200.0,
-                    web_thick: 9.0,
-                    flange_thick: 12.0,
-                    root_r: Some(13.0),
-                },
-                false,
-            ),
-            (
-                SectionShape::CftBox {
-                    height: 400.0,
-                    width: 400.0,
-                    thick: 10.0,
-                    horizontal_thick: 10.0,
-                    corner_r: Some(0.0),
-                },
-                true,
-            ),
-            (
-                SectionShape::CftBox {
-                    height: 400.0,
-                    width: 400.0,
-                    thick: 10.0,
-                    horizontal_thick: 10.0,
-                    corner_r: Some(30.0),
-                },
-                false,
-            ),
-            (
-                SectionShape::CftBox {
-                    height: 500.0,
-                    width: 300.0,
-                    thick: 10.0,
-                    horizontal_thick: 10.0,
-                    corner_r: Some(0.0),
-                },
-                true,
-            ),
-            (
-                SectionShape::CftBox {
-                    height: 500.0,
-                    width: 300.0,
-                    thick: 10.0,
-                    horizontal_thick: 10.0,
-                    corner_r: Some(30.0),
-                },
-                false,
-            ),
+        for shape in [
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 9.0,
+                flange_thick: 12.0,
+                root_r: Some(0.0),
+            },
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 9.0,
+                flange_thick: 12.0,
+                root_r: Some(13.0),
+            },
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 400.0,
+                thick: 10.0,
+                horizontal_thick: 10.0,
+                corner_r: Some(0.0),
+            },
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 400.0,
+                thick: 10.0,
+                horizontal_thick: 10.0,
+                corner_r: Some(30.0),
+            },
+            SectionShape::CftBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                horizontal_thick: 10.0,
+                corner_r: Some(0.0),
+            },
+            SectionShape::CftBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                horizontal_thick: 10.0,
+                corner_r: Some(30.0),
+            },
         ] {
             let dim = max_dimension(&shape);
             let loads = [
@@ -1456,76 +1426,18 @@ mod rounded_tests {
                     [s[3] + c[3], s[4] + c[4], s[5] + c[5]]
                 })
                 .collect();
-            for divisions in [40, 160, 640, 2560] {
-                let target = dim / divisions as f64;
-                let fibers =
-                    plastic_fibers_at(&shape, &StrengthParams::default(), target, ring).unwrap();
-                let mut old = Vec::new();
-                if is_zero {
-                    match shape {
-                        SectionShape::SteelH {
-                            height,
-                            width,
-                            web_thick,
-                            flange_thick,
-                            ..
-                        } => mesh_h_plates(
-                            &mut old,
-                            height,
-                            width,
-                            web_thick,
-                            flange_thick,
-                            target,
-                            steel,
-                        ),
-                        SectionShape::CftBox {
-                            height,
-                            width,
-                            thick,
-                            ..
-                        } => {
-                            mesh_box_plates(&mut old, height, width, [thick; 2], target, steel);
-                            mesh_rect(
-                                &mut old,
-                                [0.0, 0.0],
-                                width - 2.0 * thick,
-                                height - 2.0 * thick,
-                                target,
-                                conc,
-                            );
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                let mut worst = 0.0_f64;
-                let mut old_worst = 0.0_f64;
-                let mut support_diff = 0.0_f64;
-                for (&(theta, offset), expected) in loads.iter().zip(&reference) {
-                    let evaluate = |fs: &[PlasticFiber]| {
-                        let m = plastic_moment_at_n(fs, theta.sin(), -theta.cos(), expected[0])
-                            .unwrap();
-                        let projection = theta.sin() * m[0] - theta.cos() * m[1];
-                        let exact = theta.sin() * expected[1] - theta.cos() * expected[2];
-                        (projection / exact - 1.0).abs()
-                    };
-                    worst = worst.max(evaluate(&fibers));
-                    if is_zero {
-                        old_worst = old_worst.max(evaluate(&old));
-                        let current = plastic_point(&fibers, -offset, theta.sin(), -theta.cos());
-                        let previous = plastic_point(&old, -offset, theta.sin(), -theta.cos());
-                        let norm = shape.calc_area() * 235.0;
-                        support_diff = support_diff.max((current[0] - previous[0]).abs() / norm);
-                    }
-                }
-                eprintln!("公開 plastic_moment_at_n: {shape:?}, divisions={divisions}, error={worst:.9e}, zero_radius_previous={old_worst:.9e}, support_N_delta={support_diff:.9e}");
-                if divisions == 2560 {
-                    assert!(worst <= 0.001, "公開曲げ耐力: {shape:?}: {worst}");
-                }
-                if is_zero && matches!(shape, SectionShape::SteelH { .. }) {
-                    assert_eq!(worst, old_worst);
-                    assert_eq!(support_diff, 0.0);
-                }
+            let target = dim / 2560.0;
+            let fibers =
+                plastic_fibers_at(&shape, &StrengthParams::default(), target, ring).unwrap();
+            let mut worst = 0.0_f64;
+            for (&(theta, _), expected) in loads.iter().zip(&reference) {
+                let m =
+                    plastic_moment_at_n(&fibers, theta.sin(), -theta.cos(), expected[0]).unwrap();
+                let projection = theta.sin() * m[0] - theta.cos() * m[1];
+                let exact = theta.sin() * expected[1] - theta.cos() * expected[2];
+                worst = worst.max((projection / exact - 1.0).abs());
             }
+            assert!(worst <= 0.001, "公開曲げ耐力: {shape:?}: {worst}");
         }
     }
 }

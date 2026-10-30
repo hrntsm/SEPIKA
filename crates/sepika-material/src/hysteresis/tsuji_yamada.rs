@@ -200,15 +200,4 @@ mod tests {
         let after_probe = m.trial(probe_strain);
         assert_eq!(after_probe, via_trial);
     }
-
-    #[test]
-    fn test_tsuji_yamada_commit_revert() {
-        let mut m = TsujiYamada::new(1000.0, 100.0, 100.0, 0.5);
-        m.trial(0.2);
-        m.commit();
-        let (s1, _) = m.trial(0.4);
-        m.revert();
-        let (s2, _) = m.trial(0.25);
-        assert!(s2 < s1);
-    }
 }

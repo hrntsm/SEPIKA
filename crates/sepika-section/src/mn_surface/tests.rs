@@ -31,27 +31,19 @@ fn test_axial_capacity_steel_rect() {
 }
 
 #[test]
-fn test_plastic_moment_steel_rect() {
-    // 矩形鋼断面の全塑性モーメント Mp = fy·b·d²/4
-    let (b, d, fy) = (100.0, 200.0, 235.0);
-    let fibers = steel_rect_fibers(b, d, fy, 200);
-    let m = plastic_moment_at_n(&fibers, 1.0, 0.0, 0.0).unwrap();
-    let mp_exact = fy * b * d * d / 4.0;
-    assert_relative_eq!(m[0], mp_exact, max_relative = 1e-2);
-    assert_relative_eq!(m[1], 0.0, epsilon = mp_exact * 1e-9);
-}
-
-#[test]
 fn test_mn_interaction_steel_rect() {
     // 矩形鋼断面の厳密解: M/Mp = 1 − (N/Npl)²
     let (b, d, fy) = (100.0, 200.0, 235.0);
     let fibers = steel_rect_fibers(b, d, fy, 400);
     let npl = b * d * fy;
     let mp = fy * b * d * d / 4.0;
-    for ratio in [0.25, 0.5, 0.75] {
+    for ratio in [0.0, 0.25, 0.5, 0.75] {
         let m = plastic_moment_at_n(&fibers, 1.0, 0.0, ratio * npl).unwrap();
         let m_exact = mp * (1.0 - ratio * ratio);
         assert_relative_eq!(m[0], m_exact, max_relative = 1e-2);
+        if ratio == 0.0 {
+            assert_relative_eq!(m[1], 0.0, epsilon = mp * 1e-9);
+        }
     }
 }
 
@@ -250,23 +242,13 @@ fn test_m_phi_with_axial_force_reduces_plateau() {
 
 #[test]
 fn test_m_theta_elastic_slope_and_plastic_rotation() {
-    // 弾性域: θ = M·L/(6EI₀)。塑性域: θp = Lp·(φ - M/EI₀) が加算される。
-    let fibers = steel_rect_fibers(100.0, 200.0, 235.0, 200);
-    let curve = m_phi_curve(&fibers, 1.0, 0.0, 0.0, 60).unwrap();
-    let (span, lp) = (4000.0, 100.0);
-    let mtheta = m_theta_curve(&curve, span, lp);
-    assert_eq!(mtheta.len(), curve.points.len());
-    // 弾性域の点（最初の非零点）: 傾き 6EI₀/L
-    let [th1, m1] = mtheta[1];
-    assert_relative_eq!(m1 / th1, 6.0 * curve.ei0 / span, max_relative = 1e-6);
-    // 最終点（全塑性近傍）: θ = M·L/6EI₀ + Lp·(φ - M/EI₀) を満たす
-    let [phi_l, m_l] = *curve.points.last().unwrap();
-    let [th_l, m_l2] = *mtheta.last().unwrap();
-    assert_relative_eq!(m_l2, m_l, max_relative = 1e-12);
-    let expected = m_l * span / (6.0 * curve.ei0) + lp * (phi_l - m_l / curve.ei0);
-    assert_relative_eq!(th_l, expected, max_relative = 1e-9);
-    // 塑性回転分は正
-    assert!(th_l > m_l * span / (6.0 * curve.ei0));
+    let curve = MPhiCurve {
+        points: vec![[0.0, 0.0], [0.001, 1.0], [0.02, 10.0]],
+        ei0: 1000.0,
+    };
+    let actual = m_theta_curve(&curve, 6000.0, 100.0);
+    // 最終点は弾性回転10と塑性回転1の和。
+    assert_eq!(actual, vec![[0.0, 0.0], [1.0, 1.0], [11.0, 10.0]]);
 }
 
 #[test]

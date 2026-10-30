@@ -68,9 +68,6 @@ pub fn floors_supported_by_column(
     let Some(max_story) = node_story.iter().filter_map(|s| *s).max() else {
         return 0;
     };
-    if max_story.0 < top_story.0 {
-        return 0;
-    }
     (max_story.0 - top_story.0) as usize + 1
 }
 

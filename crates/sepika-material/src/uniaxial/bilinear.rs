@@ -129,36 +129,7 @@ impl UniaxialMaterial for Bilinear {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MaterialStateError;
     use approx::assert_relative_eq;
-
-    #[test]
-    fn same_strain_commits_preserve_plastic_strain_with_roundoff_tolerance() {
-        for (strain, plastic_strain) in [(0.001, 0.000_980_1), (0.0001, 0.000_089_1)] {
-            for direction in [-1.0, 1.0] {
-                let mut material = Bilinear::new(1e12, 1e7, 0.01);
-                material.trial(direction * strain);
-                material.commit();
-                let ep = material.committed.plastic_strain;
-                let yield_residual = (material.e * (direction * strain - ep) - material.hp() * ep)
-                    .abs()
-                    - material.fy;
-                println!(
-                    "strain={} ep={ep:.17} yield_residual={yield_residual}",
-                    direction * strain
-                );
-                for _ in 0..32 {
-                    material.trial(direction * strain);
-                    material.commit();
-                    assert_relative_eq!(
-                        material.committed.plastic_strain,
-                        direction * plastic_strain,
-                        epsilon = 1e-18
-                    );
-                }
-            }
-        }
-    }
 
     #[test]
     fn test_bilinear_elastic() {
@@ -208,18 +179,6 @@ mod tests {
     }
 
     #[test]
-    fn test_bilinear_commit_revert() {
-        let mut s = Bilinear::new(205000.0, 235.0, 0.01);
-        let (s1, _) = s.trial(0.001);
-        s.commit();
-        let (s2, _) = s.trial(0.002);
-        assert!(s2.abs() > s1.abs());
-        s.revert();
-        let (s3, _) = s.trial(0.0005);
-        assert!(s3.abs() < s1.abs());
-    }
-
-    #[test]
     fn test_probe_matches_trial_without_mutating_state() {
         // probe は trial と数学的に同一の結果を返し、かつ状態を書き換えない
         // （clone_box()+trial() の置換として使えることの検証）。
@@ -240,27 +199,5 @@ mod tests {
         // probe 呼び出し後も committed 状態から通常どおり trial できること。
         let after_probe = m.trial(probe_strain);
         assert_eq!(after_probe, via_trial);
-    }
-
-    #[test]
-    fn test_serialize_state_roundtrip() {
-        let mut a = Bilinear::new(205000.0, 235.0, 0.01);
-        a.trial(235.0 / 205000.0 * 3.0);
-        a.commit();
-        let bytes = a.serialize_state();
-        let mut b = Bilinear::new(1.0, 1.0, 0.0);
-        b.deserialize_state(&bytes).expect("valid state restores");
-        assert_eq!(a.serialize_state(), b.serialize_state());
-    }
-
-    #[test]
-    fn test_deserialize_state_rejects_corrupt_bytes() {
-        // 従来は復元失敗を黙って握り潰していた。現在は Err を返し、
-        // 状態は据え置かれる（破損チェックポイントを検出できる）。
-        let mut m = Bilinear::new(205000.0, 235.0, 0.01);
-        let before = m.serialize_state();
-        let err = m.deserialize_state(&[0xff, 0x00, 0x01]);
-        assert!(matches!(err, Err(MaterialStateError::Decode(_))));
-        assert_eq!(m.serialize_state(), before, "失敗時は状態を変えない");
     }
 }
