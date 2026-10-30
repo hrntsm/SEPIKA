@@ -249,9 +249,6 @@ impl RcBeamRebar {
         if !self.bottom.is_empty() && bottom_inner_y >= 0.0 {
             return Err(RebarGeometryError::LayerCollision);
         }
-        if !self.top.is_empty() && !self.bottom.is_empty() && top_inner_y <= bottom_inner_y {
-            return Err(RebarGeometryError::LayerCollision);
-        }
 
         let mut points = Vec::new();
         for (layer, &count) in self.top.iter().enumerate() {
@@ -267,11 +264,6 @@ impl RcBeamRebar {
             }
         }
 
-        let expected = self.top.iter().map(|&c| c as usize).sum::<usize>()
-            + self.bottom.iter().map(|&c| c as usize).sum::<usize>();
-        if points.len() != expected {
-            return Err(RebarGeometryError::CountMismatch);
-        }
         ensure_min_spacing(&points, s)?;
         ensure_in_bounds(&points, b, d)?;
         Ok(points)
@@ -710,8 +702,6 @@ mod tests {
         assert_eq!(count_at_y(&pts, 184.0), 2);
         assert_eq!(count_at_y(&pts, -239.0), 3);
         assert_eq!(count_at_y(&pts, -184.0), 2);
-        // 段中心間は s = 55。
-        assert!((239.0_f64 - 184.0 - 55.0).abs() < 1e-9);
 
         let xs = |y: f64| -> Vec<f64> {
             let mut v: Vec<f64> = pts
@@ -1019,14 +1009,6 @@ mod tests {
         assert_eq!(r.y_direction_area_mm2(), 0.0);
     }
 
-    /// 円形柱: 総本数と総面積。
-    #[test]
-    fn test_circle_section_properties() {
-        let r = circle(8);
-        assert_eq!(r.main_count(), 8);
-        assert!((r.total_main_area() - 8.0 * one_bar_area(22.0)).abs() < 1e-9);
-    }
-
     /// 矩形柱: 辺別の最外段 1 列のみを引張側鉄筋量として返す。
     #[test]
     fn test_rect_column_edge_steel() {
@@ -1076,16 +1058,13 @@ mod tests {
     #[test]
     fn test_circle_equivalent_square() {
         let r = circle(8);
+        assert_eq!(r.main_count(), 8);
         let a1 = one_bar_area(22.0);
         assert!((r.total_main_area() - 8.0 * a1).abs() < 1e-9);
         assert!((r.equivalent_tension_area_mm2() - 2.0 * a1).abs() < 1e-9);
 
-        let side = (std::f64::consts::PI * 600.0 * 600.0 / 4.0).sqrt();
+        let side = 600.0 * std::f64::consts::PI.sqrt() / 2.0;
         assert!((r.equivalent_square_side_mm(600.0) - side).abs() < 1e-9);
-        assert!(
-            (r.equivalent_square_side_mm(600.0) - 600.0 * std::f64::consts::PI.sqrt() / 2.0).abs()
-                < 1e-9
-        );
         assert!((r.equivalent_effective_depth_mm(600.0) - (side - 61.0)).abs() < 1e-9);
         assert_eq!(r.equivalent_square_side_mm(0.0), 0.0);
     }

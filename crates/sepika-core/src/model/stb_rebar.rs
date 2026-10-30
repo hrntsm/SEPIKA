@@ -98,7 +98,6 @@ impl StbRebarArrangement {
                             "center_top_bottom" => {
                                 vec!["center_top".into(), "center_bottom".into()]
                             }
-                            "depth_cover_side" | "center_side" => vec![key.clone()],
                             _ => vec![key.clone()],
                         }
                     } else if matches!(key.as_str(), "depth_cover" | "center") {
@@ -163,8 +162,8 @@ impl StbRebarArrangement {
             actual.push(pos);
             let beam = self.family().starts_with("Beam");
             let circle = tag.contains("Circle");
-            let required = if beam {
-                vec![
+            let required: &[&str] = if beam {
+                &[
                     "D_main",
                     "N_main_top_1st",
                     "N_main_bottom_1st",
@@ -173,9 +172,9 @@ impl StbRebarArrangement {
                     "pitch_stirrup",
                 ]
             } else if circle {
-                vec!["D_main", "D_band", "N_main", "N_band", "pitch_band"]
+                &["D_main", "D_band", "N_main", "N_band", "pitch_band"]
             } else {
-                vec![
+                &[
                     "D_main",
                     "D_band",
                     "N_main_X_1st",
@@ -186,7 +185,7 @@ impl StbRebarArrangement {
                     "N_band_direction_Y",
                 ]
             };
-            for key in required {
+            for &key in required {
                 if !part.attributes.contains_key(key) {
                     return Err(format!(
                         "{} / {pos}: 必須属性 {key} がありません",
@@ -434,8 +433,8 @@ impl Model {
                     "{prefix}: スパイラル帯筋は現解析モデルで表現できません"
                 ));
             }
-            for pos in &raw.positions {
-                let effective = raw.effective_attributes(pos, &self.stb_strengths.apply_conditions);
+            for (pos, resolved) in raw.positions.iter().zip(&effective) {
+                let effective = &resolved.attributes;
                 if pos.element.contains("Rect") && raw.known_main_total(pos).is_none() {
                     errors.push(format!(
                         "{prefix}: 隅筋共有位相とN_main_totalを独立に解決できません"
