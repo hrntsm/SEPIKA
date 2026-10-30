@@ -77,3 +77,5 @@ OSS としてコードまで追えるよう、既存の `実装参照` を本文
 
 - [ST-Bridgeの内部表現とAPI](stbridge_internals.md)：用途と解析定式化、識別・属性報告、XML検証とRust利用例。
 - [建物指標のGUI非提供計算](secondary_design_api.md)：D値による柱剛性略算の式とモデル抽出。GUIのRs・Reを補う計算ではない。
+
+- [MCPサーバの開発者向け仕様](mcp_server.md)：GUI要求・応答、独立起動の設定・全ツール契約、ジョブ・結果ストア・生成元と版の検査。GUI利用手順は製品文書を参照。

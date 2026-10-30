@@ -156,9 +156,9 @@
 
 ## 外部AI連携の正本境界
 
-MCPの6ページは本再編では配置を維持する。GUIから使う接続・許可・検討操作は製品マニュアルを正本とする。独立起動とAPI開発契約をまとめる既存文書はないため、分割先を `dev_docs/mcp_server.md` とし、以下の見出しを使用する。同ファイルは未作成であり、リンクにはしていない。本文の分離は [Issue #1030](https://github.com/hrntsm/SEPIKA/issues/1030) の対象で、ここでは配置と責務だけを定める。
+MCPの6ページは本再編では配置を維持する。GUIから使う接続・許可・検討操作は製品マニュアルを正本とする。独立起動とAPI開発契約は [MCPサーバの開発者向け仕様](../mcp_server.md)へ分離した（[Issue #1030](https://github.com/hrntsm/SEPIKA/issues/1030)）。以下はページ・節ごとの正本の対応を示す。
 
-| 現在のページ・節 | 製品側に保持する正本 | 開発側の正本先（未作成）・既存の実装入口 |
+| 現在のページ・節 | 製品側に保持する正本 | 開発側の正本先・既存の実装入口 |
 | --- | --- | --- |
 | `mcp_server/README.md`：概要・機能フラグ・この章の内容 | [外部AI連携の入口](../../docs/mcp_server/README.md)：GUI接続の入口と公開操作の概要 | `dev_docs/mcp_server.md#構成と起動方式`：stdio、機能フラグ、独立サーバの構成。[クレート構成](../architecture.md) |
 | `01_ビルドと起動.md`：開いているGUIの検討への接続 | [GUI接続の起動手順](../../docs/mcp_server/01_ビルドと起動.md#開いているguiの検討への接続) | GUIブリッジの通信実装は [gui_bridge.rs](../../crates/sepika-mcp/src/gui_bridge.rs) |
