@@ -11,7 +11,6 @@ use super::ResultWriter;
 
 pub struct ParquetWriter {
     inner: ArrowWriter<File>,
-    rows: u64,
 }
 
 impl ParquetWriter {
@@ -26,14 +25,12 @@ impl ParquetWriter {
             .build();
         Ok(Self {
             inner: ArrowWriter::try_new(file, schema, Some(props))?,
-            rows: 0,
         })
     }
 }
 
 impl ResultWriter for ParquetWriter {
     fn write_rows(&mut self, batch: &RecordBatch) -> std::io::Result<()> {
-        self.rows += batch.num_rows() as u64;
         self.inner.write(batch).map_err(std::io::Error::other)
     }
 

@@ -30,7 +30,7 @@ pub enum ConcreteComposition {
 /// 軽量コンクリートで表の範囲を超える Fc は最上段の値で頭打ちとする。
 pub fn concrete_unit_weight_kn_m3(fc: f64, class: ConcreteClass, comp: ConcreteComposition) -> f64 {
     let gamma_c = match class {
-        ConcreteClass::Normal => {
+        ConcreteClass::Normal | ConcreteClass::UserDefined => {
             if fc <= 36.0 {
                 23.0
             } else if fc <= 48.0 {
@@ -49,17 +49,6 @@ pub fn concrete_unit_weight_kn_m3(fc: f64, class: ConcreteClass, comp: ConcreteC
             }
         }
         ConcreteClass::Lightweight2 => 17.0,
-        ConcreteClass::UserDefined => {
-            if fc <= 36.0 {
-                23.0
-            } else if fc <= 48.0 {
-                23.5
-            } else if fc <= 120.0 {
-                24.0
-            } else {
-                24.5
-            }
-        }
     };
     match (class, comp) {
         (ConcreteClass::Lightweight1, ConcreteComposition::Rc) if fc > 27.0 => 22.0,
@@ -269,14 +258,15 @@ mod tests {
     fn test_concrete_unit_weight_table() {
         use ConcreteClass::*;
         use ConcreteComposition::*;
-        // 普通コンクリート（単位体積重量表の代表値）
-        assert_eq!(concrete_unit_weight_kn_m3(24.0, Normal, Plain), 23.0);
-        assert_eq!(concrete_unit_weight_kn_m3(24.0, Normal, Rc), 24.0);
-        assert_eq!(concrete_unit_weight_kn_m3(24.0, Normal, Src), 25.0);
-        assert_eq!(concrete_unit_weight_kn_m3(42.0, Normal, Rc), 24.5);
-        assert_eq!(concrete_unit_weight_kn_m3(60.0, Normal, Rc), 25.0);
-        assert_eq!(concrete_unit_weight_kn_m3(100.0, Normal, Rc), 25.0);
-        assert_eq!(concrete_unit_weight_kn_m3(150.0, Normal, Rc), 25.5);
+        for class in [Normal, UserDefined] {
+            assert_eq!(concrete_unit_weight_kn_m3(24.0, class, Plain), 23.0);
+            assert_eq!(concrete_unit_weight_kn_m3(24.0, class, Rc), 24.0);
+            assert_eq!(concrete_unit_weight_kn_m3(24.0, class, Src), 25.0);
+            assert_eq!(concrete_unit_weight_kn_m3(42.0, class, Rc), 24.5);
+            assert_eq!(concrete_unit_weight_kn_m3(60.0, class, Rc), 25.0);
+            assert_eq!(concrete_unit_weight_kn_m3(100.0, class, Rc), 25.0);
+            assert_eq!(concrete_unit_weight_kn_m3(150.0, class, Rc), 25.5);
+        }
         // 軽量コンクリート
         assert_eq!(concrete_unit_weight_kn_m3(24.0, Lightweight1, Rc), 20.0);
         assert_eq!(concrete_unit_weight_kn_m3(30.0, Lightweight1, Rc), 22.0);

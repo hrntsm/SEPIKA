@@ -121,6 +121,14 @@ mod tests {
         let name = register_wave(&lib_dir, &src).unwrap();
         assert_eq!(name, "elcentro.csv");
         assert!(wave_exists(&lib_dir, "elcentro.csv"));
+        assert_eq!(
+            std::fs::read_to_string(lib_dir.join(&name)).unwrap(),
+            "1.0\n2.0\n3.0\n"
+        );
+        assert_eq!(
+            wave_sha256(&lib_dir, &name).unwrap(),
+            "a932ce8aee84b1b20cf8849bf3a596676b0fd98c1b56bd4dcfddc3127c73370d"
+        );
 
         let names = list_wave_library(&lib_dir).unwrap();
         assert_eq!(names, vec!["elcentro.csv".to_string()]);
@@ -159,18 +167,5 @@ mod tests {
 
         let names = list_wave_library(&dir).unwrap();
         assert_eq!(names, vec!["a.txt".to_string(), "b.csv".to_string()]);
-    }
-
-    #[test]
-    fn test_wave_sha256_matches_direct_hash() {
-        let dir = unique_dir("hash");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("w.csv"), "42.0\n").unwrap();
-
-        let got = wave_sha256(&dir, "w.csv").unwrap();
-        let mut hasher = Sha256::new();
-        hasher.update(b"42.0\n");
-        let expected = format!("{:x}", hasher.finalize());
-        assert_eq!(got, expected);
     }
 }
