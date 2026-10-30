@@ -38,18 +38,18 @@ pub(crate) fn compute_linear_static_job(
     } else {
         None
     };
-    let result = sepika_job::compute::compute_linear_static(work.clone(), lc_id).map_err(
-        |error| match (error, seismic_notice) {
-            (JobError::InvalidInput(message), Some(notice)) => {
-                JobError::InvalidInput(format!("{message}\n{notice}"))
+    let node_ids: Vec<u32> = work.nodes.iter().map(|n| n.id.0).collect();
+    let result =
+        sepika_job::compute::compute_linear_static(work, lc_id).map_err(|error| {
+            match (error, seismic_notice) {
+                (JobError::InvalidInput(message), Some(notice)) => {
+                    JobError::InvalidInput(format!("{message}\n{notice}"))
+                }
+                (error, _) => error,
             }
-            (error, _) => error,
-        },
-    )?;
-    let model = &work;
+        })?;
     let lc_id = lc_id.0;
 
-    let node_ids: Vec<u32> = model.nodes.iter().map(|n| n.id.0).collect();
     let member_force_rows = flatten_member_force_rows(&result.member_forces);
     let max_abs_disp = result
         .disp

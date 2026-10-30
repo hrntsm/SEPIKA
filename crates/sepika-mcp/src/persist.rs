@@ -499,11 +499,11 @@ mod tests {
     }
 
     #[test]
-    fn old_missing_future_and_current_contracts_control_analysis_and_design_rows() {
+    fn contract_versions_and_missing_metadata_preserve_analysis_and_design_rows() {
         use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
         let model = Model::default();
         for kind in [JobKind::LinearStatic, JobKind::DesignCheck] {
-            let dir = test_dir("member-load-direction-contract");
+            let dir = test_dir("contract-versions");
             let mut store = sepika_io::results::FsResultStore::open(&dir).unwrap();
             let outcome = if kind == JobKind::DesignCheck {
                 JobOutcome::DesignCheck {
@@ -522,75 +522,101 @@ mod tests {
                 .iter()
                 .map(|entry| (entry.path.clone(), std::fs::read(&entry.path).unwrap()))
                 .collect();
+            if kind == JobKind::DesignCheck {
+                assert!(store.manifest().entries.iter().all(|entry| entry
+                    .provenance
+                    .as_ref()
+                    .unwrap()
+                    .design_contract_version
+                    == Some(DESIGN_CONTRACT_VERSION)));
+            }
             drop(store);
-            let mut cases: Vec<_> = (22..=26)
-                .map(|version| (Some(version), Some(DESIGN_CONTRACT_VERSION), "old_contract"))
-                .collect();
-            cases.extend([
-                (None, Some(DESIGN_CONTRACT_VERSION), "unknown_provenance"),
+            let mut cases = vec![
+                ("analysis_contract_version", Some(0), "old_contract"),
                 (
+                    "analysis_contract_version",
+                    Some(ANALYSIS_CONTRACT_VERSION - 1),
+                    "old_contract",
+                ),
+                ("analysis_contract_version", None, "unknown_provenance"),
+                (
+                    "analysis_contract_version",
                     Some(ANALYSIS_CONTRACT_VERSION + 1),
-                    Some(DESIGN_CONTRACT_VERSION),
                     "unsupported_contract",
                 ),
                 (
+                    "analysis_contract_version",
                     Some(ANALYSIS_CONTRACT_VERSION),
-                    Some(DESIGN_CONTRACT_VERSION),
                     "current",
                 ),
-            ]);
+                ("provenance", None, "unknown_provenance"),
+            ];
             if kind == JobKind::DesignCheck {
                 cases.extend([
-                    (Some(ANALYSIS_CONTRACT_VERSION), Some(17), "old_contract"),
-                    (Some(ANALYSIS_CONTRACT_VERSION), Some(18), "old_contract"),
+                    ("design_contract_version", Some(0), "old_contract"),
                     (
-                        Some(ANALYSIS_CONTRACT_VERSION),
+                        "design_contract_version",
+                        Some(DESIGN_CONTRACT_VERSION - 1),
+                        "old_contract",
+                    ),
+                    (
+                        "design_contract_version",
                         Some(DESIGN_CONTRACT_VERSION + 1),
                         "unsupported_contract",
                     ),
-                    (Some(ANALYSIS_CONTRACT_VERSION), None, "unknown_provenance"),
+                    ("design_contract_version", None, "unknown_provenance"),
                 ]);
             }
-            for (version, design_version, reason) in cases {
+            for (field, version, reason) in cases {
                 let mut manifest = original.clone();
                 for entry in manifest["entries"].as_array_mut().unwrap() {
-                    if kind == JobKind::DesignCheck {
-                        assert_eq!(
-                            entry["provenance"]["design_contract_version"],
-                            DESIGN_CONTRACT_VERSION
-                        );
-                    }
-                    let provenance = entry["provenance"].as_object_mut().unwrap();
-                    if kind == JobKind::DesignCheck {
-                        match design_version {
+                    if field == "provenance" {
+                        entry.as_object_mut().unwrap().remove("provenance");
+                    } else {
+                        let provenance = entry["provenance"].as_object_mut().unwrap();
+                        match version {
                             Some(version) => {
-                                provenance.insert("design_contract_version".into(), version.into());
+                                provenance.insert(field.into(), version.into());
                             }
                             None => {
-                                provenance.remove("design_contract_version");
+                                provenance.remove(field);
                             }
-                        }
-                    }
-                    match version {
-                        Some(version) => {
-                            provenance.insert("analysis_contract_version".into(), version.into());
-                        }
-                        None => {
-                            provenance.remove("analysis_contract_version");
                         }
                     }
                 }
                 let serialized = serde_json::to_vec(&manifest).unwrap();
                 std::fs::write(dir.join("manifest.json"), &serialized).unwrap();
                 let mut reopened = sepika_io::results::FsResultStore::open(&dir).unwrap();
-                let result = get(&reopened, &model, "MemberForce");
-                if reason == "current" {
-                    assert_eq!(result["status"], "current");
-                    assert_eq!(result["rows"][0]["n"], 12.5);
+                let row_kinds: &[(&str, &str)] = if kind == JobKind::LinearStatic {
+                    &[("MemberForce", "n"), ("NodalDisp", "ux")]
                 } else {
-                    assert_eq!(result["status"], "unavailable");
-                    assert_eq!(result["reason"], reason);
-                    assert!(result.get("rows").is_none());
+                    &[("MemberForce", "n")]
+                };
+                for &(result_kind, value_key) in row_kinds {
+                    let result = get(&reopened, &model, result_kind);
+                    if reason == "current" {
+                        assert_eq!(result["status"], "current");
+                        assert_eq!(result["rows"][0][value_key], 12.5);
+                    } else {
+                        assert_eq!(result["status"], "unavailable");
+                        assert_eq!(result["reason"], reason);
+                        assert!(result.get("rows").is_none());
+                    }
+                    if let Some(evidence_dir) = std::env::var_os("SEPIKA687_EVIDENCE_DIR") {
+                        let evidence_dir = std::path::PathBuf::from(evidence_dir);
+                        std::fs::create_dir_all(&evidence_dir).unwrap();
+                        let label = format!("{kind:?}-{field}{version:?}");
+                        std::fs::write(
+                            evidence_dir.join(format!("{label}-manifest.json")),
+                            &serialized,
+                        )
+                        .unwrap();
+                        std::fs::write(
+                            evidence_dir.join(format!("{label}-{result_kind}-response.json")),
+                            serde_json::to_vec_pretty(&result).unwrap(),
+                        )
+                        .unwrap();
+                    }
                 }
                 reopened.sync().unwrap();
                 assert_eq!(
@@ -600,82 +626,7 @@ mod tests {
                 for (path, bytes) in &files {
                     assert_eq!(&std::fs::read(path).unwrap(), bytes);
                 }
-                if let Some(evidence_dir) = std::env::var_os("SEPIKA687_EVIDENCE_DIR") {
-                    let evidence_dir = std::path::PathBuf::from(evidence_dir);
-                    std::fs::create_dir_all(&evidence_dir).unwrap();
-                    let label = format!("{kind:?}-analysis{version:?}-design{design_version:?}");
-                    std::fs::write(
-                        evidence_dir.join(format!("{label}-manifest.json")),
-                        &serialized,
-                    )
-                    .unwrap();
-                    std::fs::write(
-                        evidence_dir.join(format!("{label}-response.json")),
-                        serde_json::to_vec_pretty(&result).unwrap(),
-                    )
-                    .unwrap();
-                }
             }
-        }
-    }
-
-    #[test]
-    fn manifest_contract_versions_and_missing_metadata_reopen_without_restamping() {
-        let model = Model::default();
-        let dir = test_dir("versions");
-        let mut store = sepika_io::results::FsResultStore::open(&dir).unwrap();
-        persist_job_outcome(
-            &mut store,
-            static_outcome(12.5),
-            &source(&model, JobKind::LinearStatic),
-        )
-        .unwrap();
-        let original = serde_json::to_value(store.manifest()).unwrap();
-        let path = original["entries"][0]["path"].as_str().unwrap();
-        let bytes = std::fs::read(path).unwrap();
-        for (version, reason) in [
-            (None, "unknown_provenance"),
-            (Some(0), "old_contract"),
-            (Some(51), "old_contract"),
-            (
-                Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
-                "current",
-            ),
-            (
-                Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION + 1),
-                "unsupported_contract",
-            ),
-        ] {
-            let mut manifest = original.clone();
-            match version {
-                Some(version) => {
-                    manifest["entries"][0]["provenance"]["analysis_contract_version"] =
-                        version.into()
-                }
-                None => {
-                    manifest["entries"][0]
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("provenance");
-                }
-            }
-            let serialized = serde_json::to_vec(&manifest).unwrap();
-            std::fs::write(dir.join("manifest.json"), &serialized).unwrap();
-            let mut reopened = sepika_io::results::FsResultStore::open(&dir).unwrap();
-            let result = get(&reopened, &model, "NodalDisp");
-            if reason == "current" {
-                assert_eq!(result["status"], reason);
-                assert_eq!(result["rows"][0]["ux"], 12.5);
-            } else {
-                assert_eq!(result["reason"], reason);
-                assert!(result.get("rows").is_none());
-            }
-            reopened.sync().unwrap();
-            assert_eq!(
-                std::fs::read(dir.join("manifest.json")).unwrap(),
-                serialized
-            );
-            assert_eq!(std::fs::read(path).unwrap(), bytes);
         }
     }
 
