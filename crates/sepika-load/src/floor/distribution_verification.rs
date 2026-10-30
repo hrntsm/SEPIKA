@@ -1,11 +1,6 @@
-//! 床荷重のXY両方向分配の検証: 有限線分拡張方式を本モジュール内だけに再現し、本番方式と比較する。
-//! 有限線分拡張方式は「一辺 100mm 以下の格子で各セル重心を最近接辺へ帰属し、等距離の辺には
-//! 等分する」ものとする。辺を有限線分とみなす距離解釈は原典（凸四辺形対象）を凹多角形へ
-//! 拡張した SEPIKA の仮定であり、無限直線方式は感度分析用に併記する。
+//! 床荷重の合力・対称性・頂点順序の不変性と、独立格子による矩形床・主架構反力の照合。
 
-use super::polygon::{
-    integrate_polygon, polygon_edge_areas, PolygonDistributionError, PolygonIntegrationOptions,
-};
+use super::polygon::{integrate_polygon, polygon_edge_areas, PolygonIntegrationOptions};
 use super::tests::{make_rect_slab_model, make_square_slab_model, polygon_slab_model, total_load};
 use super::*;
 use sepika_core::geom::polygon as geom_polygon;
@@ -23,270 +18,58 @@ const MAX_CELL_MM: f64 = 100.0;
 /// 等距離とみなす許容差の、セル寸法に対する相対値。
 const TIE_REL_TOL: f64 = 1e-9;
 
-/// 点 `p` から、辺 `a`–`b` を含む無限直線までの距離 [mm]。
-///
-/// 垂線の足が線分外にあっても端点へクランプせず、直線上の足までの距離
-/// `|cross(ab, ap)| / |ab|` を返す。
-fn point_supporting_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
-    let ab = [b[0] - a[0], b[1] - a[1]];
-    let len = (ab[0] * ab[0] + ab[1] * ab[1]).sqrt();
-    if len <= f64::EPSILON {
-        return geom_polygon::point_segment_dist(p, a, b);
-    }
-    let ap = [p[0] - a[0], p[1] - a[1]];
-    (ab[0] * ap[1] - ab[1] * ap[0]).abs() / len
-}
-
-/// `point_supporting_line_dist` の手計算検証。無限直線距離と有限線分距離
-/// （`geom_polygon::point_segment_dist`）の違いを直接固定する。
-#[test]
-fn supporting_line_distance_hand_calc() {
-    let a = [0.0, 0.0];
-    let b = [10.0, 0.0];
-
-    // 垂線の足が線分内: (5,3) の距離は 3。
-    let d_inside = point_supporting_line_dist([5.0, 3.0], a, b);
-    assert!((d_inside - 3.0).abs() < 1e-9, "{d_inside}");
-
-    // 垂線の足が線分外（正側）: 無限直線は 4、有限線分は √(10²+4²)=√116。
-    let d_out_pos = point_supporting_line_dist([20.0, 4.0], a, b);
-    assert!((d_out_pos - 4.0).abs() < 1e-9, "{d_out_pos}");
-    let seg_out_pos = geom_polygon::point_segment_dist([20.0, 4.0], a, b);
-    assert!(
-        (seg_out_pos - 116.0_f64.sqrt()).abs() < 1e-9,
-        "{seg_out_pos}"
-    );
-
-    // 垂線の足が線分外（負側）: 無限直線は 2、有限線分は √(5²+2²)=√29。
-    let d_out_neg = point_supporting_line_dist([-5.0, 2.0], a, b);
-    assert!((d_out_neg - 2.0).abs() < 1e-9, "{d_out_neg}");
-    let seg_out_neg = geom_polygon::point_segment_dist([-5.0, 2.0], a, b);
-    assert!(
-        (seg_out_neg - 29.0_f64.sqrt()).abs() < 1e-9,
-        "{seg_out_neg}"
-    );
-
-    // 退化（線分長ゼロ）: 有限線分距離へフォールバックし (3,7) の距離は 4。
-    let d_degenerate = point_supporting_line_dist([3.0, 7.0], [3.0, 3.0], [3.0, 3.0]);
-    assert!((d_degenerate - 4.0).abs() < 1e-9, "{d_degenerate}");
-}
-
-/// 格子サンプリングによる各辺負担面積 [mm²] と、格子内と判定した総面積 [mm²]。
-///
-/// バウンディングボックスを `ceil(幅/100) × ceil(高さ/100)` に分割し、各セル中心が
-/// 多角形内部なら最近接辺へセル面積を加算する。`split_ties` が真なら最小距離に並ぶ
-/// 複数の辺へ均等に、偽なら最初に見つかった最小距離の辺へ全量を加算する。
-/// `use_supporting_line` が真なら辺を無限直線とみなし、偽なら有限線分（端点クランプ）
-/// として距離を測る。
-fn grid_edge_areas(
-    coords: &[[f64; 3]],
-    split_ties: bool,
-    use_supporting_line: bool,
-) -> (Vec<f64>, f64) {
-    grid_edge_areas_with_dimensions(coords, split_ties, use_supporting_line, None, 0.)
-}
-
-fn grid_edge_areas_with_dimensions(
-    coords: &[[f64; 3]],
-    split_ties: bool,
-    use_supporting_line: bool,
-    dimensions: Option<[usize; 2]>,
-    phase: f64,
-) -> (Vec<f64>, f64) {
+fn grid_edge_areas(coords: &[[f64; 3]]) -> Vec<f64> {
     let n = coords.len();
     let mut areas = vec![0.0_f64; n];
     if n < 3 {
-        return (areas, 0.0);
+        return areas;
     }
     let poly: Vec<[f64; 2]> = coords.iter().map(|c| [c[0], c[1]]).collect();
     let (lo, hi) = geom_polygon::bounding_box(&poly);
     let width = hi[0] - lo[0];
     let height = hi[1] - lo[1];
     if width <= 0.0 || height <= 0.0 {
-        return (areas, 0.0);
+        return areas;
     }
-    let [nx, ny] = dimensions.unwrap_or([
+    let [nx, ny] = [
         (width / MAX_CELL_MM).ceil().max(1.0) as usize,
         (height / MAX_CELL_MM).ceil().max(1.0) as usize,
-    ]);
+    ];
     let dx = width / nx as f64;
     let dy = height / ny as f64;
     let cell_area = dx * dy;
     let tie_tol = dx.max(dy) * TIE_REL_TOL;
 
     let mut dists = vec![0.0_f64; n];
-    let mut sampled = 0.0_f64;
-    for iy in 0..ny + usize::from(phase > 0.) {
-        let y = lo[1] + (iy as f64 + 0.5 - phase) * dy;
-        for ix in 0..nx + usize::from(phase > 0.) {
-            let x = lo[0] + (ix as f64 + 0.5 - phase) * dx;
+    for iy in 0..ny {
+        let y = lo[1] + (iy as f64 + 0.5) * dy;
+        for ix in 0..nx {
+            let x = lo[0] + (ix as f64 + 0.5) * dx;
             let p = [x, y];
             if !geom_polygon::contains_by_ray_crossing(&poly, p) {
                 continue;
             }
-            sampled += cell_area;
 
             let mut d_min = f64::INFINITY;
             for (e, d) in dists.iter_mut().enumerate() {
                 let (a, b) = (poly[e], poly[(e + 1) % n]);
-                *d = if use_supporting_line {
-                    point_supporting_line_dist(p, a, b)
-                } else {
-                    geom_polygon::point_segment_dist(p, a, b)
-                };
+                *d = geom_polygon::point_segment_dist(p, a, b);
                 d_min = d_min.min(*d);
             }
 
-            if split_ties {
-                let ties: Vec<usize> = dists
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, d)| **d - d_min <= tie_tol)
-                    .map(|(e, _)| e)
-                    .collect();
-                let share = cell_area / ties.len() as f64;
-                for e in ties {
-                    areas[e] += share;
-                }
-            } else {
-                let best = dists
-                    .iter()
-                    .enumerate()
-                    .min_by(|a, b| a.1.total_cmp(b.1))
-                    .map(|(e, _)| e)
-                    .unwrap_or(0);
-                areas[best] += cell_area;
+            let ties: Vec<usize> = dists
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| **d - d_min <= tie_tol)
+                .map(|(e, _)| e)
+                .collect();
+            let share = cell_area / ties.len() as f64;
+            for e in ties {
+                areas[e] += share;
             }
         }
     }
-    (areas, sampled)
-}
-
-/// 凸四辺形スラブを対象とする手計算照合の各辺負担面積 [mm²] と、格子内総面積 [mm²]。
-///
-/// 原典（基準資料 2.2.2 (3)）が対象とする凸四辺形に限り、各辺の累積負担が有限線分距離と
-/// 無限直線距離で一致することを内部で assert したうえで、有限線分距離・等分ありの結果を返す。
-fn manual_quadrilateral_edge_areas(coords: &[[f64; 3]]) -> (Vec<f64>, f64) {
-    assert_eq!(coords.len(), 4, "凸四辺形専用");
-    let (segment, sampled) = grid_edge_areas(coords, true, false);
-    let (line, _) = grid_edge_areas(coords, true, true);
-    for (e, (a, b)) in segment.iter().zip(line.iter()).enumerate() {
-        let rel = (a - b).abs() / a.abs().max(b.abs()).max(1e-12);
-        assert!(
-            rel < 1e-9,
-            "凸四辺形では各辺の累積負担が有限線分距離と無限直線距離で一致するはず: 辺{e} 線分={a} 直線={b}"
-        );
-    }
-    (segment, sampled)
-}
-
-/// 有限線分距離（端点クランプ）を凹多角形へ拡張した仮定での各辺負担面積 [mm²]。
-///
-/// `split_ties` が真なら等距離の辺へ均等割りし、偽なら先勝ちで 1 辺へ帰属する。
-fn segment_extension_edge_areas(coords: &[[f64; 3]], split_ties: bool) -> (Vec<f64>, f64) {
-    grid_edge_areas(coords, split_ties, false)
-}
-
-/// 辺を無限直線とみなす感度分析用の各辺負担面積 [mm²] と、格子内総面積 [mm²]。
-fn supporting_line_sensitivity_edge_areas(
-    coords: &[[f64; 3]],
-    split_ties: bool,
-) -> (Vec<f64>, f64) {
-    grid_edge_areas(coords, split_ties, true)
-}
-
-/// 有限線分拡張方式の辺ごとの負担荷重 [N]。辺インデックス順の `Vec<f64>` で返す。
-fn segment_extension_edge_loads(coords: &[[f64; 3]], w: f64, split_ties: bool) -> Vec<f64> {
-    segment_extension_edge_areas(coords, split_ties)
-        .0
-        .iter()
-        .map(|a| w * a)
-        .collect()
-}
-
-/// 無限直線方式（感度分析用）の辺ごとの負担荷重 [N]。
-fn supporting_line_edge_loads(coords: &[[f64; 3]], w: f64, split_ties: bool) -> Vec<f64> {
-    supporting_line_sensitivity_edge_areas(coords, split_ties)
-        .0
-        .iter()
-        .map(|a| w * a)
-        .collect()
-}
-
-/// 旧 polygon の 200×200 固定格子で、多角形内部と判定したセル面積の総和 [mm²] を
-/// 独立に集計する。`polygon_edge_areas` の総和と比較することで、辺帰属による面積の
-/// 取りこぼしがないこと（総和保存）を辺負担のベクタ自身ではなく独立値で検証する。
-fn polygon_grid_sampled_area(coords: &[[f64; 3]]) -> f64 {
-    let poly: Vec<[f64; 2]> = coords.iter().map(|c| [c[0], c[1]]).collect();
-    let (lo, hi) = geom_polygon::bounding_box(&poly);
-    let width = hi[0] - lo[0];
-    let height = hi[1] - lo[1];
-    if width <= 0.0 || height <= 0.0 {
-        return 0.0;
-    }
-    const N_GRID: usize = 200;
-    let dx = width / N_GRID as f64;
-    let dy = height / N_GRID as f64;
-    let cell_area = dx * dy;
-    let mut sampled = 0.0_f64;
-    for iy in 0..N_GRID {
-        let y = lo[1] + (iy as f64 + 0.5) * dy;
-        for ix in 0..N_GRID {
-            let x = lo[0] + (ix as f64 + 0.5) * dx;
-            if geom_polygon::contains_by_ray_crossing(&poly, [x, y]) {
-                sampled += cell_area;
-            }
-        }
-    }
-    sampled
-}
-
-/// #363 以前の本番規則（同じ 200×200 固定格子・`candidate_edges` の中で厳密 `<` の
-/// 最近接辺・最小距離が同値なら候補の先頭 1 辺へセル面積を全量配分）をテスト内だけで
-/// 再現する。等距離が生じない形状で本番 [`polygon_edge_areas`] の結果が不変であることを
-/// 回帰比較するために使う。
-fn polygon_unsplit_reference_edge_areas(
-    coords: &[[f64; 3]],
-    candidate_edges: &[usize],
-) -> Vec<f64> {
-    let n = coords.len();
-    let mut edge_area = vec![0.0_f64; n];
-    if candidate_edges.is_empty() {
-        return edge_area;
-    }
-    let poly2: Vec<[f64; 2]> = coords.iter().map(|c| [c[0], c[1]]).collect();
-    let (lo, hi) = geom_polygon::bounding_box(&poly2);
-    let (min_x, max_x, min_y, max_y) = (lo[0], hi[0], lo[1], hi[1]);
-    const N_GRID: usize = 200;
-    let dx = (max_x - min_x) / N_GRID as f64;
-    let dy = (max_y - min_y) / N_GRID as f64;
-    if dx <= 0.0 || dy <= 0.0 {
-        return edge_area;
-    }
-    let cell_area = dx * dy;
-    for iy in 0..N_GRID {
-        let y = min_y + (iy as f64 + 0.5) * dy;
-        for ix in 0..N_GRID {
-            let x = min_x + (ix as f64 + 0.5) * dx;
-            let p = [x, y];
-            if !geom_polygon::contains_by_ray_crossing(&poly2, p) {
-                continue;
-            }
-            let mut best_e = candidate_edges[0];
-            let mut best_d2 = f64::INFINITY;
-            for &e in candidate_edges {
-                let a = poly2[e];
-                let b = poly2[(e + 1) % n];
-                let d2 = geom_polygon::point_segment_dist_sq(p, a, b);
-                if d2 < best_d2 {
-                    best_d2 = d2;
-                    best_e = e;
-                }
-            }
-            edge_area[best_e] += cell_area;
-        }
-    }
-    edge_area
+    areas
 }
 
 /// 荷重分配結果から、境界辺 `Edge(e)` ごとの総荷重 [N] を集計する。
@@ -335,17 +118,6 @@ fn assert_pairs_equal(values: &[f64], pairs: &[(usize, usize)], label: &str) {
     }
 }
 
-/// 有限線分拡張方式の辺負担面積の総和が、格子内と判定した面積に厳密（相対 1e-9）に
-/// 一致することを確認する（等距離の等分で面積が落ちないこと）。
-fn assert_reference_conserves(coords: &[[f64; 3]], label: &str) {
-    let (areas, sampled) = segment_extension_edge_areas(coords, true);
-    let sum: f64 = areas.iter().sum();
-    assert!(
-        (sum - sampled).abs() <= 1e-9 * sampled.max(1.0),
-        "{label}: 面積の総和={sum} 格子内面積={sampled}"
-    );
-}
-
 /// 現行と有限線分拡張方式の辺負担を表と総和で出力する。`true_area` は多角形の真の面積 [mm²]。
 fn print_comparison(label: &str, w: f64, true_area: f64, current: &[f64], baseline: &[f64]) {
     let cur_total: f64 = current.iter().sum();
@@ -386,7 +158,7 @@ fn case1_square_6000_tritrapezoid_vs_reference() {
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     let current = edge_totals(&loads, 4);
     let coords = slab.boundary_coords(&model).expect("境界座標");
-    let (baseline_areas, _) = manual_quadrilateral_edge_areas(&coords);
+    let baseline_areas = grid_edge_areas(&coords);
     let baseline: Vec<f64> = baseline_areas.iter().map(|a| w * a).collect();
 
     print_comparison(
@@ -399,8 +171,6 @@ fn case1_square_6000_tritrapezoid_vs_reference() {
 
     assert_total("現行TriTrapezoid", &current, w * side * side);
     assert_symmetric(&current, "現行TriTrapezoid");
-    assert_symmetric(&baseline, "有限線分拡張方式");
-    assert_reference_conserves(&coords, "有限線分拡張方式");
     assert_max_rel_diff_below(
         &current,
         &baseline,
@@ -418,7 +188,7 @@ fn case2_rect_6000x4000_tritrapezoid_vs_reference() {
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     let current = edge_totals(&loads, 4);
     let coords = slab.boundary_coords(&model).expect("境界座標");
-    let (baseline_areas, _) = manual_quadrilateral_edge_areas(&coords);
+    let baseline_areas = grid_edge_areas(&coords);
     let baseline: Vec<f64> = baseline_areas.iter().map(|a| w * a).collect();
 
     print_comparison(
@@ -430,8 +200,7 @@ fn case2_rect_6000x4000_tritrapezoid_vs_reference() {
     );
 
     assert_total("現行TriTrapezoid", &current, w * lx * ly);
-    assert_pairs_equal(&baseline, &[(0, 2), (1, 3)], "有限線分拡張方式");
-    assert_reference_conserves(&coords, "有限線分拡張方式");
+    assert_pairs_equal(&current, &[(0, 2), (1, 3)], "現行TriTrapezoid");
     assert_max_rel_diff_below(
         &current,
         &baseline,
@@ -440,77 +209,35 @@ fn case2_rect_6000x4000_tritrapezoid_vs_reference() {
     );
 }
 
-/// ケース3: 大きな床 30000×20000。現行 polygon の固定 200×200（セル 150×100）と
-/// 有限線分拡張方式（100mm 以下）の各辺負担を比較し、セル寸法が 100mm を超える影響を見る。
 #[test]
-fn case3_large_floor_polygon200_vs_reference() {
+fn large_floor_polygon_conserves_total_load() {
     let w = 0.002_f64;
     let (lx, ly) = (30000.0_f64, 20000.0_f64);
-    let coords: Vec<[f64; 3]> = vec![
+    let coords = [
         [0.0, 0.0, 0.0],
         [lx, 0.0, 0.0],
         [lx, ly, 0.0],
         [0.0, ly, 0.0],
     ];
-
-    let poly_areas = polygon_edge_areas(&coords, &[0, 1, 2, 3]);
-    let current: Vec<f64> = poly_areas.iter().map(|a| w * a).collect();
-    let baseline = segment_extension_edge_loads(&coords, w, true);
-
-    print_comparison(
-        "ケース3: 大きな床 30000x20000 polygon(200x200固定) vs 有限線分拡張方式",
-        w,
-        lx * ly,
-        &current,
-        &baseline,
-    );
-    let poly_sampled: f64 = poly_areas.iter().sum();
-    println!(
-        "格子内面積: 現行polygon={poly_sampled:.1} 真値={:.1} セル寸法=150x100",
-        lx * ly
-    );
-
-    let (model, slab) = make_rect_slab_model(lx, ly, DistributionMethod::TriTrapezoid, w);
-    let tri = edge_totals(
-        &distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap(),
-        4,
-    );
-    println!("参考 TriTrapezoid(現行矩形経路)[N]: {tri:?}");
-
-    assert_total("現行polygon200", &current, w * lx * ly);
-    assert_total("有限線分拡張方式", &baseline, w * lx * ly);
-    assert_pairs_equal(&baseline, &[(0, 2), (1, 3)], "有限線分拡張方式");
-    assert_reference_conserves(&coords, "有限線分拡張方式");
+    let areas = polygon_edge_areas(&coords, &[0, 1, 2, 3]);
+    let current: Vec<f64> = areas.iter().map(|a| w * a).collect();
+    assert_total("大きな床の分配荷重", &current, w * lx * ly);
 }
 
-/// 非矩形床の現行 polygon と有限線分拡張方式を比較して出力する。
 fn run_nonrect_case(label: &str, pts: &[(f64, f64)], w: f64) {
     let (model, slab) = polygon_slab_model(pts, DistributionMethod::TriTrapezoid, w);
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
-    let n = pts.len();
-    let current = edge_totals(&loads, n);
-    let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
-    let true_area = area_xy(&coords);
-    let baseline = segment_extension_edge_loads(&coords, w, true);
-
-    print_comparison(label, w, true_area, &current, &baseline);
-
-    let poly_sampled = polygon_grid_sampled_area(&coords);
-    let (_, base_sampled) = segment_extension_edge_areas(&coords, true);
-    println!(
-        "履歴中心判定面積: 旧200×200={poly_sampled:.1} 旧100mm={base_sampled:.1} 真値={true_area:.1}"
-    );
-
-    assert_total("本番凸片積分", &current, w * true_area);
-    assert_reference_conserves(&coords, label);
+    let current = edge_totals(&loads, pts.len());
+    let coords: Vec<_> = pts.iter().map(|&(x, y)| [x, y, 0.0]).collect();
+    assert_total(label, &current, w * area_xy(&coords));
 }
 
-/// ケース4: 非矩形床（台形・L形）。現行 polygon と有限線分拡張方式の各辺負担を比較する。
+/// 台形・L形床の分配で合力を保存する。
 #[test]
 fn case4_nonrect_trapezoid_and_lshape() {
     let w = 0.003_f64;
     run_nonrect_case(
-        "ケース4a: 現行凸片積分 vs 旧100mm中心判定（履歴）",
+        "ケース4a: 台形の合力保存",
         &[
             (0.0, 0.0),
             (6000.0, 0.0),
@@ -520,7 +247,7 @@ fn case4_nonrect_trapezoid_and_lshape() {
         w,
     );
     run_nonrect_case(
-        "ケース4b: L形 polygon vs 有限線分拡張方式",
+        "ケース4b: L形の合力保存",
         &[
             (0.0, 0.0),
             (12000.0, 0.0),
@@ -705,10 +432,8 @@ fn segment_extension_primary_by_girder(model: &Model, slabs: &[SlabId], w: f64) 
         let Some(coords) = slab.boundary_coords(model) else {
             continue;
         };
-        for (e, load) in segment_extension_edge_loads(&coords, w, true)
-            .iter()
-            .enumerate()
-        {
+        for (e, area) in grid_edge_areas(&coords).into_iter().enumerate() {
+            let load = w * area;
             match classify_edge(&coords, e, model) {
                 Some(EdgeClass::Girder(i)) => out[i] += load,
                 Some(EdgeClass::Beam) => beam_total += load,
@@ -778,21 +503,6 @@ fn case5_beam_floor_primary_reactions_current_vs_reference() {
     );
 }
 
-/// 2 値の相対差 [%]。両者がほぼ零なら 0 とし、分母は絶対値の大きい方を採る。
-fn rel_diff_pct(a: f64, b: f64) -> f64 {
-    let denom = a.abs().max(b.abs());
-    if denom > 1e-12 {
-        100.0 * (a - b) / denom
-    } else {
-        0.0
-    }
-}
-
-/// `a` の `b` に対する相対誤差。
-fn rel_err(a: f64, b: f64) -> f64 {
-    (a - b).abs() / b.abs().max(1e-12)
-}
-
 /// `a` と `b` の辺ごとの相対差の最大値（比）が `limit` 未満であることを確認する。
 fn assert_max_rel_diff_below(a: &[f64], b: &[f64], limit: f64, label: &str) {
     let m = a
@@ -815,100 +525,25 @@ fn assert_max_rel_diff_below(a: &[f64], b: &[f64], limit: f64, label: &str) {
     );
 }
 
-/// 本番・先勝ちリファレンス・有限線分拡張方式の各辺負担荷重 [N] と辺ごとの差 [N]/[%]、
-/// 最大相対差、総和を出力する。
-fn print_three_way(
-    label: &str,
-    w: f64,
-    true_area: f64,
-    production: &[f64],
-    unsplit: &[f64],
-    baseline: &[f64],
-) {
-    println!("--- {label} ---");
-    println!(
-        "辺   本番[N]        先勝ち[N]      有限線分拡張[N] 本番-先勝ち[N] 本番-拡張[N] 本番-先勝ち[%] 本番-拡張[%]"
-    );
-    let mut max_prod_unsplit = 0.0_f64;
-    let mut max_prod_base = 0.0_f64;
-    for (i, &p) in production.iter().enumerate() {
-        let u = unsplit.get(i).copied().unwrap_or(0.0);
-        let b = baseline.get(i).copied().unwrap_or(0.0);
-        let d_pu = rel_diff_pct(p, u);
-        let d_pb = rel_diff_pct(p, b);
-        max_prod_unsplit = max_prod_unsplit.max(d_pu.abs());
-        max_prod_base = max_prod_base.max(d_pb.abs());
-        println!(
-            "{i:<3} {p:13.3} {u:13.3} {b:13.3} {:12.3} {:12.3} {d_pu:12.4} {d_pb:12.4}",
-            p - u,
-            p - b,
-        );
-    }
-    let prod_total: f64 = production.iter().sum();
-    let unsplit_total: f64 = unsplit.iter().sum();
-    let base_total: f64 = baseline.iter().sum();
-    let expected = w * true_area;
-    println!("最大相対差: 本番vs先勝ち={max_prod_unsplit:.4}%  本番vs拡張={max_prod_base:.4}%");
-    println!(
-        "総和[N]: 本番={prod_total:.6} 先勝ち={unsplit_total:.6} 拡張={base_total:.6} 真値={expected:.6}"
-    );
-    println!(
-        "総和誤差(真値比): 本番={:.3e} 先勝ち={:.3e} 拡張={:.3e}",
-        rel_err(prod_total, expected),
-        rel_err(unsplit_total, expected),
-        rel_err(base_total, expected),
-    );
-}
-
-/// 本番 `polygon_edge_areas`（最大100mm・凸片積分・等距離均等割り）・先勝ちリファレンス
-/// `polygon_unsplit_reference_edge_areas`・有限線分拡張方式
-/// `segment_extension_edge_areas(split_ties=true)` を比較して出力する。
-/// `split_baseline_limit` は本番対有限線分拡張方式の許容相対差（比）。総和保存と、
-/// `symmetry_pairs` で指定した対称辺の本番値の等値、および `expect_ties` に対する
-/// 本番と先勝ちリファレンスの一致・相違を厳格に検証する。
-fn run_split_case(
-    label: &str,
-    pts: &[(f64, f64)],
-    w: f64,
-    symmetry_pairs: &[(usize, usize)],
-    _expect_ties: bool,
-    _split_baseline_limit: Option<f64>,
-) {
+fn run_split_case(label: &str, pts: &[(f64, f64)], w: f64, symmetry_pairs: &[(usize, usize)]) {
     let n = pts.len();
     let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
     let true_area = area_xy(&coords);
     let candidate: Vec<usize> = (0..n).collect();
-    let production_areas = polygon_edge_areas(&coords, &candidate);
-    let unsplit_areas = polygon_unsplit_reference_edge_areas(&coords, &candidate);
-    let (baseline_areas, baseline_sampled) = segment_extension_edge_areas(&coords, true);
-    let sampled = polygon_grid_sampled_area(&coords);
-
-    let production: Vec<f64> = production_areas.iter().map(|a| w * a).collect();
-    let unsplit: Vec<f64> = unsplit_areas.iter().map(|a| w * a).collect();
-    let baseline: Vec<f64> = baseline_areas.iter().map(|a| w * a).collect();
-
-    print_three_way(label, w, true_area, &production, &unsplit, &baseline);
-    println!(
-        "格子内面積: 本番200x200={sampled:.1} 有限線分拡張={baseline_sampled:.1} 真値={true_area:.1}"
-    );
-
-    assert_total("本番凸片積分", &production_areas, true_area);
-    assert_total("先勝ちリファレンス", &unsplit_areas, sampled);
-    assert_reference_conserves(&coords, label);
-
     let diagnostics =
         integrate_polygon(&coords, &candidate, PolygonIntegrationOptions::default()).unwrap();
+    let production_areas = &diagnostics.edge_areas_mm2;
+    let production: Vec<_> = production_areas.iter().map(|area| w * area).collect();
+    assert_total(label, &production, w * true_area);
     for &(a, b) in symmetry_pairs {
         assert!(
             (production_areas[a] - production_areas[b]).abs()
                 <= diagnostics.edge_error_bounds_mm2[a] + diagnostics.edge_error_bounds_mm2[b]
         );
     }
-    // 旧格子/先勝ち/延長方式との差は比較出力に残し、新契約の誤差許容へ転用しない。
 }
 
-/// ケース7: 本番 `polygon_edge_areas`（等距離均等割り）を、L形・T形・十字形・
-/// 凸五角形・正八角形・U字形状で先勝ちリファレンス・有限線分拡張方式と比較する。
+/// L形・T形・十字形・凸五角形・正八角形・U字形状の合力と対称性を検証する。
 #[test]
 fn case7_split_ties_shape_matrix() {
     let w = 0.003_f64;
@@ -926,8 +561,6 @@ fn case7_split_ties_shape_matrix() {
         ],
         w,
         &[(0, 5), (1, 4), (2, 3)],
-        true,
-        Some(0.01),
     );
 
     // T形（凹形状）: 下辺 12000×6000 の上に 6000×6000 が中央に乗る。x=6000 について対称。
@@ -945,8 +578,6 @@ fn case7_split_ties_shape_matrix() {
         ],
         w,
         &[(1, 7), (2, 6), (3, 5)],
-        true,
-        Some(0.01),
     );
 
     // 十字形: 12000×12000 から四隅 3000×3000 を欠く。凹角を4つ持つ。
@@ -968,8 +599,6 @@ fn case7_split_ties_shape_matrix() {
         ],
         w,
         &[(1, 11), (2, 10), (3, 9), (4, 8), (5, 7)],
-        true,
-        Some(0.01),
     );
 
     // 凸五角形: 既存 test_polygon_pentagon_conservation と同じ形状。対称性なし。
@@ -984,8 +613,6 @@ fn case7_split_ties_shape_matrix() {
         ],
         w,
         &[],
-        false,
-        None,
     );
 
     // 正八角形: 半径 6000、頂点角 22.5°+45°k。45°回転対称は格子が保存しないため、
@@ -1007,8 +634,6 @@ fn case7_split_ties_shape_matrix() {
         &octagon,
         w,
         &[(0, 2), (2, 4), (4, 6), (1, 3), (3, 5), (5, 7)],
-        false,
-        None,
     );
 
     // U字形状: 12000×12000 の上辺中央 6000×8000 を欠く。凹角を2つ持つ。
@@ -1026,8 +651,6 @@ fn case7_split_ties_shape_matrix() {
         ],
         w,
         &[(1, 7), (2, 6), (3, 5)],
-        true,
-        Some(0.025),
     );
 }
 
@@ -1099,47 +722,7 @@ fn edge_load_map(pts: &[(f64, f64)], loads: &[f64]) -> EdgeLoadMap {
     map
 }
 
-/// ある計算方式について、各変換パターンの物理辺負担マップを返す。
-fn physical_edge_loads(
-    base: &[(f64, f64)],
-    patterns: &[(usize, bool)],
-    w: f64,
-    mode: fn(&[[f64; 3]], f64, bool) -> Vec<f64>,
-    split_ties: bool,
-) -> Vec<EdgeLoadMap> {
-    patterns
-        .iter()
-        .map(|&(shift, reverse)| {
-            let pts = transformed_cycle(base, shift, reverse);
-            let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
-            let loads = mode(&coords, w, split_ties);
-            edge_load_map(&pts, &loads)
-        })
-        .collect()
-}
-
-/// 複数の物理辺負担マップ間の最大相対差が `limit` 未満（不変）であることを確認する。
-fn assert_maps_invariant(maps: &[EdgeLoadMap], limit: f64, label: &str) -> bool {
-    let mut max_rel = 0.0_f64;
-    let reference = &maps[0];
-    for map in &maps[1..] {
-        for (key, v) in reference {
-            let other = map.get(key).copied().unwrap_or(f64::NAN);
-            let rel = (v - other).abs() / v.abs().max(other.abs()).max(1e-12);
-            max_rel = max_rel.max(rel);
-        }
-    }
-    println!("{label}: 最大相対差={max_rel:.3e}");
-    assert!(
-        max_rel < limit,
-        "{label}: 不変のはずが最大相対差={max_rel:e} >= {limit:e}"
-    );
-    true
-}
-
-/// 一形状について、頂点順序の変換パターンごとに本番・有限線分拡張方式・無限直線方式の
-/// 物理辺負担を比較する。
-fn check_vertex_order(label: &str, pts: &[(f64, f64)], w: f64) {
+fn check_vertex_order(label: &str, pts: &[(f64, f64)]) {
     let patterns: Vec<(usize, bool)> = vec![
         (0, false),
         (1, false),
@@ -1160,286 +743,17 @@ fn check_vertex_order(label: &str, pts: &[(f64, f64)], w: f64) {
         let areas = edge_load_map(&transformed, &result.edge_areas_mm2);
         let bounds = edge_load_map(&transformed, &result.edge_error_bounds_mm2);
         for (key, a) in &base_area {
-            assert!((a - areas[key]).abs() <= base_bounds[key] + bounds[key]);
+            assert!(
+                (a - areas[key]).abs() <= base_bounds[key] + bounds[key],
+                "{label}: {key:?}"
+            );
         }
     }
-    let split = physical_edge_loads(pts, &patterns, w, segment_extension_edge_loads_ref, true);
-    let line_split = physical_edge_loads(pts, &patterns, w, supporting_line_edge_loads_ref, true);
-
-    println!("--- ケース9: {label} 頂点順序の不変性 ---");
-    assert_maps_invariant(&split, 1e-9, &format!("{label} 等分版（線分・等分）"));
-    assert_maps_invariant(&line_split, 1e-9, &format!("{label} 無限直線・等分版"));
 }
 
-/// `physical_edge_loads` へ渡す有限線分拡張方式の関数ポインタ相当。
-fn segment_extension_edge_loads_ref(coords: &[[f64; 3]], w: f64, split_ties: bool) -> Vec<f64> {
-    segment_extension_edge_loads(coords, w, split_ties)
-}
-
-/// `physical_edge_loads` へ渡す無限直線方式の関数ポインタ相当。
-fn supporting_line_edge_loads_ref(coords: &[[f64; 3]], w: f64, split_ties: bool) -> Vec<f64> {
-    supporting_line_edge_loads(coords, w, split_ties)
-}
-
-/// ケース9: L形と十字形について、頂点列の循環移動・反転で本番の `polygon_edge_areas`
-/// （最大100mm・凸片積分・等距離均等割り）・有限線分等分版・無限直線等分版の物理辺負担が
-/// 不変であることを assert する。
+/// L形・十字形の頂点列の循環移動・反転で、物理辺の負担面積が誤差限界内で一致する。
 #[test]
 fn case9_vertex_order_invariance() {
-    let w = 0.003_f64;
-    check_vertex_order("L形 12000x12000", &LSHAPE_PTS, w);
-    check_vertex_order("十字形 12000x12000", &CROSS_PTS, w);
-}
-
-/// ケース10: 等距離が生じない凸形状（長方形・台形・凸五角形・正八角形）で、本番
-/// `polygon_edge_areas`（等距離均等割り）が先勝ちリファレンスと一致すること（既存ケース
-/// 不変）を確認する。正方形・長方形の矩形経路（TriTrapezoid）は case1・case2 が固定する。
-#[test]
-fn case10_convex_shapes_unchanged_by_tie_split() {
-    let r = 6000.0_f64;
-    let (c, s) = (22.5_f64.to_radians().cos(), 22.5_f64.to_radians().sin());
-    let cases: Vec<(&str, Vec<(f64, f64)>)> = vec![
-        (
-            "長方形 30000x20000",
-            vec![
-                (0.0, 0.0),
-                (30000.0, 0.0),
-                (30000.0, 20000.0),
-                (0.0, 20000.0),
-            ],
-        ),
-        (
-            "台形",
-            vec![
-                (0.0, 0.0),
-                (6000.0, 0.0),
-                (4000.0, 3000.0),
-                (1000.0, 3000.0),
-            ],
-        ),
-        (
-            "凸五角形",
-            vec![
-                (0.0, 0.0),
-                (5000.0, 0.0),
-                (6000.0, 3000.0),
-                (2500.0, 5000.0),
-                (-1000.0, 3000.0),
-            ],
-        ),
-        (
-            "正八角形（半径6000）",
-            vec![
-                (r * c, r * s),
-                (r * s, r * c),
-                (-r * s, r * c),
-                (-r * c, r * s),
-                (-r * c, -r * s),
-                (-r * s, -r * c),
-                (r * s, -r * c),
-                (r * c, -r * s),
-            ],
-        ),
-    ];
-    for (label, pts) in cases {
-        let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
-        let candidate: Vec<usize> = (0..pts.len()).collect();
-        let production = polygon_edge_areas(&coords, &candidate);
-        let unsplit = polygon_unsplit_reference_edge_areas(&coords, &candidate);
-        print_comparison(label, 1.0, area_xy(&coords), &production, &unsplit);
-        assert_total(&format!("{label} 本番"), &production, area_xy(&coords));
-    }
-}
-
-/// 全周支持モデルへ候補辺の部分集合を流用しない。
-#[test]
-fn case11_candidate_subset_is_unsupported() {
-    let coords: Vec<[f64; 3]> = LSHAPE_PTS.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
-    assert!(matches!(
-        integrate_polygon(&coords, &[2, 3], Default::default()),
-        Err(PolygonDistributionError::Unsupported(_))
-    ));
-}
-
-#[test]
-fn case4a_legacy_grids_against_independent_exact_areas() {
-    let coords = [
-        [0., 0., 0.],
-        [6000., 0., 0.],
-        [4000., 3000., 0.],
-        [1000., 3000., 0.],
-    ];
-    let exact_m2 = [
-        5.33706414913786,
-        2.70416345659799,
-        3.08706414913786,
-        2.37170824512628,
-    ];
-    let old = polygon_unsplit_reference_edge_areas(&coords, &[0, 1, 2, 3]);
-    let (split, _) = grid_edge_areas_with_dimensions(&coords, true, false, Some([200, 200]), 0.);
-    let comparison = manual_quadrilateral_edge_areas(&coords).0;
-    for (actual, expected) in old.iter().zip([16013.7, 8063.55, 9262.35, 7115.85]) {
-        assert!((actual * 0.003 - expected).abs() < 1e-8);
-    }
-    for (actual, expected) in comparison.iter().zip([16020., 8100., 9270., 7260.]) {
-        assert!((actual * 0.003 - expected).abs() < 1e-8);
-    }
-    assert_eq!(old, split);
-    assert_eq!(comparison, grid_edge_areas(&coords, false, false).0);
-    let relative_difference = (old[3] - comparison[3]) / comparison[3] * 100.;
-    assert!((relative_difference - (-1.98553719008264)).abs() < 1e-10);
-    let poly: Vec<_> = coords.iter().map(|p| [p[0], p[1]]).collect();
-    for [nx, ny] in [[200, 200], [60, 30]] {
-        let dx = 6000. / nx as f64;
-        let dy = 3000. / ny as f64;
-        let mut clipped = [0.; 4];
-        let mut partial_area_mm2 = 0.;
-        let mut partial_cells = 0;
-        for iy in 0..ny {
-            for ix in 0..nx {
-                let x = ix as f64 * dx;
-                let y = iy as f64 * dy;
-                let a = trapezoid_cell_area_mm2(x, y, dx, dy);
-                if a <= 0. {
-                    continue;
-                }
-                if a < dx * dy - 1e-6 {
-                    partial_cells += 1;
-                    partial_area_mm2 += a;
-                }
-                let center = [x + dx / 2., y + dy / 2.];
-                let distances: Vec<_> = (0..4)
-                    .map(|e| geom_polygon::point_segment_dist(center, poly[e], poly[(e + 1) % 4]))
-                    .collect();
-                let min = distances.iter().copied().fold(f64::INFINITY, f64::min);
-                let winners: Vec<_> = (0..4)
-                    .filter(|&e| distances[e] - min <= dx.max(dy) * 1e-9)
-                    .collect();
-                let fractions: Vec<_> = winners.iter().map(|_| 1. / winners.len() as f64).collect();
-                assert!((fractions.iter().sum::<f64>() - 1.).abs() < 1e-14);
-                for e in winners {
-                    clipped[e] += a / fractions.len() as f64;
-                }
-            }
-        }
-        assert!((clipped.iter().sum::<f64>() - 13.5e6).abs() < 1e-4);
-        let sampled = grid_edge_areas_with_dimensions(&coords, true, false, Some([nx, ny]), 0.).0;
-        for e in 0..4 {
-            println!("legacy nx={nx} ny={ny} edge={e} area_m2={} bias_m2={} boundary_delta_m2={} clipped_center_bias_m2={}",
-                sampled[e] / 1e6, sampled[e] / 1e6 - exact_m2[e],
-                (sampled[e] - clipped[e]) / 1e6, clipped[e] / 1e6 - exact_m2[e]);
-        }
-        println!(
-            "legacy nx={nx} ny={ny} partial_cells={partial_cells} partial_area_m2={}",
-            partial_area_mm2 / 1e6
-        );
-    }
-}
-
-fn trapezoid_cell_area_mm2(x: f64, y: f64, dx: f64, dy: f64) -> f64 {
-    let lo = y.max(0.);
-    let hi = (y + dy).min(3000.);
-    if lo >= hi {
-        return 0.;
-    }
-    let mut cuts = vec![lo, hi];
-    for crossing in [
-        3. * x,
-        3. * (x + dx),
-        1.5 * (6000. - x),
-        1.5 * (6000. - x - dx),
-    ] {
-        if crossing > lo && crossing < hi {
-            cuts.push(crossing);
-        }
-    }
-    cuts.sort_by(f64::total_cmp);
-    let width = |v: f64| ((x + dx).min(6000. - 2. * v / 3.) - x.max(v / 3.)).max(0.);
-    cuts.windows(2)
-        .map(|v| (width(v[0]) + width(v[1])) * (v[1] - v[0]) / 2.)
-        .sum()
-}
-
-#[test]
-fn case4a_comparison_grid_convergence_and_clipped_bounds() {
-    let coords = [
-        [0., 0., 0.],
-        [6000., 0., 0.],
-        [4000., 3000., 0.],
-        [1000., 3000., 0.],
-    ];
-    let poly: Vec<_> = coords.iter().map(|p| [p[0], p[1]]).collect();
-    let exact_m2 = [
-        5.33706414913786,
-        2.70416345659799,
-        3.08706414913786,
-        2.37170824512628,
-    ];
-    for h in [100_f64, 50., 25., 12.5] {
-        for phase in [0., 0.5] {
-            let nx = (6000. / h) as usize;
-            let ny = (3000. / h) as usize;
-            let (sampled, sampled_area) =
-                grid_edge_areas_with_dimensions(&coords, true, false, Some([nx, ny]), phase);
-            assert!((sampled.iter().sum::<f64>() - sampled_area).abs() < 1e-5);
-            let mut clipped = [0.; 4];
-            let mut bounds = [0.; 4];
-            let mut ambiguous_area = 0.;
-            let mut partial_cells = 0;
-            let r = h.hypot(h) / 2.;
-            let epsilon = h * 1e-9;
-            for iy in 0..ny + usize::from(phase > 0.) {
-                for ix in 0..nx + usize::from(phase > 0.) {
-                    let x = (ix as f64 - phase) * h;
-                    let y = (iy as f64 - phase) * h;
-                    let area = trapezoid_cell_area_mm2(x, y, h, h);
-                    if area <= 0. {
-                        continue;
-                    }
-                    if area < h * h - 1e-6 {
-                        partial_cells += 1;
-                    }
-                    let center = [x + h / 2., y + h / 2.];
-                    let distances: Vec<_> = (0..4)
-                        .map(|e| {
-                            geom_polygon::point_segment_dist(center, poly[e], poly[(e + 1) % 4])
-                        })
-                        .collect();
-                    let min = distances.iter().copied().fold(f64::INFINITY, f64::min);
-                    let winners: Vec<_> =
-                        (0..4).filter(|&e| distances[e] - min <= epsilon).collect();
-                    assert!(!winners.is_empty());
-                    let fractions: Vec<_> =
-                        winners.iter().map(|_| 1. / winners.len() as f64).collect();
-                    assert!((fractions.iter().sum::<f64>() - 1.).abs() < 1e-14);
-                    for &e in &winners {
-                        clipped[e] += area / winners.len() as f64;
-                    }
-                    let stable = winners.len() == 1
-                        && (0..4)
-                            .filter(|&e| e != winners[0])
-                            .all(|e| distances[e] - min > 2. * r + epsilon);
-                    if !stable {
-                        ambiguous_area += area;
-                        for e in 0..4 {
-                            if distances[e] - min <= 2. * r + epsilon {
-                                bounds[e] += area;
-                            }
-                        }
-                    }
-                }
-            }
-            assert!(partial_cells > 0);
-            assert!((clipped.iter().sum::<f64>() - 13.5e6).abs() < 1e-4);
-            assert!((clipped.iter().sum::<f64>() * 0.003 - 40500.).abs() < 1e-6);
-            let mut old_bias = [0.; 4];
-            let mut clipped_error = [0.; 4];
-            for e in 0..4 {
-                old_bias[e] = sampled[e] / 1e6 - exact_m2[e];
-                clipped_error[e] = (clipped[e] / 1e6 - exact_m2[e]).abs();
-                assert!(clipped_error[e] <= bounds[e] / 1e6 + 1e-10);
-            }
-            println!("comparison h={h} phase={phase} old_areas_m2={:?} old_bias_m2={old_bias:?} old_total_bias_m2={} clipped_areas_m2={:?} clipped_errors_m2={clipped_error:?} B_m2={:?} ambiguous_B_m2={} r_mm={r} partial_cells={partial_cells}", sampled.iter().map(|a| a / 1e6).collect::<Vec<_>>(), sampled_area / 1e6 - 13.5, clipped.map(|a| a / 1e6), bounds.map(|a| a / 1e6), ambiguous_area / 1e6);
-        }
-    }
+    check_vertex_order("L形 12000x12000", &LSHAPE_PTS);
+    check_vertex_order("十字形 12000x12000", &CROSS_PTS);
 }

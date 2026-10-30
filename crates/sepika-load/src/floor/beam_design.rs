@@ -392,19 +392,6 @@ fn lerp3(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
     ]
 }
 
-#[cfg(test)]
-fn shift_member_load(load: &MemberLoadKind, s0: f64) -> MemberLoadKind {
-    match *load {
-        MemberLoadKind::Point { a, p } => MemberLoadKind::Point { a: a + s0, p },
-        MemberLoadKind::Distributed { a, b, w1, w2 } => MemberLoadKind::Distributed {
-            a: a + s0,
-            b: b + s0,
-            w1,
-            w2,
-        },
-    }
-}
-
 /// 分配辺の局所長さ `loaded_len` 上の荷重を、材軸区間 `[s0, s1]` へ写す。
 /// 合計力は保存する（長さが変われば線荷重強度を逆比でスケールする）。
 fn map_loads_onto_axis(
@@ -1039,21 +1026,6 @@ mod tests {
     }
 
     #[test]
-    fn distribution_loads_on_shared_beam_match_average_width() {
-        let model = square_model_with_shared_beam();
-        let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_beam_distribution_loads(&model, w_of).unwrap();
-        let key = sepika_core::ids::SecondaryMemberId(4);
-        let entry = map.get(&key).expect("共有辺小梁に Span 荷重がある");
-        let ex = simple_beam_extremes(&entry.member_loads, 4000.0, 205_000.0, 1.0e8);
-        // 2000×4000 の 2 枚が x=2000 の辺を共有。三角/台形分配の辺荷重を重ね合わせると
-        // 合計 30000 N / 4000 mm = 7.5 N/mm（旧 w×spacing=15 とは分配形状が異なる）。
-        // 小梁断面の需要は負担幅一様より小さくなる。解析の大梁伝達と同じ 45° 分配を
-        // 検定に使うためであり、負担幅一様は小梁に対して過大評価（安全側）になりうる。
-        assert!((ex.w_equiv - 7.5).abs() < 0.1, "w_equiv={}", ex.w_equiv);
-    }
-
-    #[test]
     fn simple_beam_extremes_uniform_matches_closed_form() {
         let w = 10.0_f64;
         let l = 4000.0_f64;
@@ -1284,14 +1256,14 @@ mod tests {
 
     #[test]
     fn distribution_mq_vs_uniform_tributary_width() {
-        // 共有辺: 分配重ね合わせ w_equiv=7.5。負担幅一様なら w=面荷重×間隔=0.005×3000=15。
-        // （左右各 2000 の半分合計 2000 ではなく、2 枚×2000 の合計半分=2000… ここでは
-        // 旧略算の代表として spacing=3000 → w=15 を使う。テストコメントと一致。）
         let model = square_model_with_shared_beam();
         let w_of = |_: &Slab| 0.005_f64;
         let map = secondary_beam_distribution_loads(&model, w_of).unwrap();
         let key = sepika_core::ids::SecondaryMemberId(4);
         let entry = map.get(&key).expect("共有辺");
+        assert_eq!(entry.expected_slab_ids.len(), 2);
+        assert_eq!(entry.contributed_slab_ids.len(), 2);
+        assert!(beam_distribution_is_ready(entry, 4000.0));
         let l = 4000.0_f64;
         let ex = simple_beam_extremes(&entry.member_loads, l, 205_000.0, 1.0e8);
         let w_trib = 15.0_f64;
@@ -1393,26 +1365,6 @@ mod tests {
     }
 
     #[test]
-    fn partial_span_t_maps_onto_beam_interior() {
-        let model = square_model_with_shared_beam();
-        let a = coord(&model, NodeId(4)).unwrap();
-        let b = coord(&model, NodeId(5)).unwrap();
-        let p0 = lerp3(a, b, 0.375);
-        let p1 = lerp3(a, b, 0.625);
-        let s0 = project_on_segment(p0, a, b, MEMBER_AXIS_TOL_MM).unwrap();
-        let s1 = project_on_segment(p1, a, b, MEMBER_AXIS_TOL_MM).unwrap();
-        assert!((s0 - 1500.0).abs() < 1e-6, "s0={s0}");
-        assert!((s1 - 2500.0).abs() < 1e-6, "s1={s1}");
-        let piece = load_shape_to_member_loads(&LoadShape::Uniform { w: 2.0 }, s1 - s0, false);
-        let shifted = shift_member_load(&piece[0], s0);
-        let MemberLoadKind::Distributed { a, b, w1, w2 } = shifted else {
-            panic!("{shifted:?}");
-        };
-        assert!((a - 1500.0).abs() < 1e-9 && (b - 2500.0).abs() < 1e-9);
-        assert!((w1 - 2.0).abs() < 1e-12 && (w2 - 2.0).abs() < 1e-12);
-    }
-
-    #[test]
     fn beam_distribution_cover_rejects_half_span() {
         let l = 4000.0;
         let half = vec![MemberLoadKind::Distributed {
@@ -1434,21 +1386,32 @@ mod tests {
 
     #[test]
     fn map_loads_onto_axis_preserves_total_force() {
-        let loaded_len = 1000.0;
-        let loads = vec![MemberLoadKind::Distributed {
-            a: 0.0,
-            b: loaded_len,
-            w1: 4.0,
-            w2: 4.0,
-        }];
-        let mapped = map_loads_onto_axis(&loads, loaded_len, 100.0, 900.0);
-        let total: f64 = mapped.iter().map(member_load_total).sum();
-        assert!((total - 4000.0).abs() < 1e-6, "total={total}");
-        let MemberLoadKind::Distributed { a, b, w1, w2 } = mapped[0] else {
-            panic!("{:?}", mapped[0]);
-        };
-        assert!((a - 100.0).abs() < 1e-9 && (b - 900.0).abs() < 1e-9);
-        assert!((w1 - 5.0).abs() < 1e-9 && (w2 - 5.0).abs() < 1e-9);
+        let model = square_model_with_shared_beam();
+        let a = coord(&model, NodeId(4)).unwrap();
+        let b = coord(&model, NodeId(5)).unwrap();
+        let s0 = project_on_segment(lerp3(a, b, 0.375), a, b, MEMBER_AXIS_TOL_MM).unwrap();
+        let s1 = project_on_segment(lerp3(a, b, 0.625), a, b, MEMBER_AXIS_TOL_MM).unwrap();
+        assert!((s0 - 1500.0).abs() < 1e-6);
+        assert!((s1 - 2500.0).abs() < 1e-6);
+        for (intensity, start_mm, end_mm, expected_intensity, intensity_tolerance) in
+            [(4.0, 100.0, 900.0, 5.0, 1e-9), (2.0, s0, s1, 2.0, 1e-12)]
+        {
+            let loaded_len = 1000.0;
+            let loads =
+                load_shape_to_member_loads(&LoadShape::Uniform { w: intensity }, loaded_len, false);
+            let mapped = map_loads_onto_axis(&loads, loaded_len, start_mm, end_mm);
+            let total: f64 = mapped.iter().map(member_load_total).sum();
+            assert!(
+                (total - intensity * loaded_len).abs() < 1e-6,
+                "total={total}"
+            );
+            let MemberLoadKind::Distributed { a, b, w1, w2 } = mapped[0] else {
+                panic!("{:?}", mapped[0]);
+            };
+            assert!((a - start_mm).abs() < 1e-9 && (b - end_mm).abs() < 1e-9);
+            assert!((w1 - expected_intensity).abs() < intensity_tolerance);
+            assert!((w2 - expected_intensity).abs() < intensity_tolerance);
+        }
     }
 
     #[test]
@@ -1502,18 +1465,6 @@ mod tests {
             beam_distribution_is_sufficient(&map[&k_shared].member_loads, 4000.0),
             "共有辺のカバーが足りない"
         );
-    }
-
-    #[test]
-    fn shared_beam_expects_both_slabs() {
-        let model = square_model_with_shared_beam();
-        let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_beam_distribution_loads(&model, w_of).unwrap();
-        let key = sepika_core::ids::SecondaryMemberId(4);
-        let entry = map.get(&key).expect("共有辺");
-        assert_eq!(entry.expected_slab_ids.len(), 2);
-        assert_eq!(entry.contributed_slab_ids.len(), 2);
-        assert!(beam_distribution_is_ready(entry, 4000.0));
     }
 
     #[test]

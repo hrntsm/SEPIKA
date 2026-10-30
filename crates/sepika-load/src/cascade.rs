@@ -622,11 +622,6 @@ pub fn secondary_crossings(model: &Model) -> Vec<(SecondaryKey, SecondaryKey)> {
     crossings(&axes(model))
 }
 
-/// キーから二次部材の実体を引く。
-fn secondary_of(model: &Model, key: SecondaryKey) -> Option<&SecondaryMember> {
-    model.secondary_member(key)
-}
-
 /// 逐次伝達の順序（架け側 → 受け側）と、循環に含まれる二次部材を返す。
 ///
 /// 受け側は架け側の反力を受け取ってから解く必要があるため、支持グラフ
@@ -682,7 +677,7 @@ fn transfer_order(
 
 /// 種別を問わず二次部材を数える（診断のメッセージ用）。
 pub fn secondary_kind_of(model: &Model, key: SecondaryKey) -> Option<SecondaryMemberKind> {
-    secondary_of(model, key).map(|sm| sm.kind)
+    model.secondary_member(key).map(|sm| sm.kind)
 }
 
 #[cfg(test)]

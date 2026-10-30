@@ -1201,12 +1201,6 @@ fn materialized_beam_is_skipped() {
     assert!(t.members.is_empty(), "実部材化済みは対象外");
 }
 
-/// 片持ち小梁を作る（`free_at` は自由端の位置。幾何から自由端を推定するため
-/// `_free_at` は使わない。自由端が幾何的に支持されるテストは配置を調整する）。
-fn cantilever(model: &Model, a: u32, b: u32, _free_at: usize, name: &str) -> SecondaryMember {
-    secondary_beam(model, a, b, name)
-}
-
 /// 大梁 0-1 に載る片持ち小梁の自重は、基端の反力だけになって主架構へ渡る。
 #[test]
 fn cantilever_beam_transfers_to_base_only() {
@@ -1223,7 +1217,7 @@ fn cantilever_beam_transfers_to_base_only() {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
     m.elements.push(element_beam(0, 0, 1));
-    m.unassigned_beams.push(cantilever(&m, 2, 3, 1, "SB"));
+    m.unassigned_beams.push(secondary_beam(&m, 2, 3, "SB"));
 
     let t = solved(&mut m);
     let key = sepika_core::ids::SecondaryMemberId(2);
@@ -1256,7 +1250,7 @@ fn cantilever_beam_base_at_second_node() {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
     m.elements.push(element_beam(0, 0, 1));
-    m.unassigned_beams.push(cantilever(&m, 2, 3, 0, "SB"));
+    m.unassigned_beams.push(secondary_beam(&m, 2, 3, "SB"));
 
     let t = solved(&mut m);
     let key = sepika_core::ids::SecondaryMemberId(2);
@@ -1287,8 +1281,8 @@ fn tip_rib_on_cantilever_free_ends_cascades_to_bases() {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
     m.elements.push(element_beam(0, 0, 1));
-    m.unassigned_beams.push(cantilever(&m, 2, 3, 1, "CA"));
-    m.unassigned_beams.push(cantilever(&m, 4, 5, 1, "CB"));
+    m.unassigned_beams.push(secondary_beam(&m, 2, 3, "CA"));
+    m.unassigned_beams.push(secondary_beam(&m, 4, 5, "CB"));
     m.unassigned_beams.push(secondary_beam(&m, 3, 5, "RIB"));
 
     let t = solved(&mut m);
@@ -1341,7 +1335,7 @@ fn attached_slab_load_ignores_side_beam() {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
     m.elements.push(element_beam(0, 0, 1));
-    m.unassigned_beams.push(cantilever(&m, 0, 2, 1, "J"));
+    m.unassigned_beams.push(secondary_beam(&m, 0, 2, "J"));
     m.slabs.push(Slab {
         id: SlabId(0),
         shape: SlabShape::Attached {

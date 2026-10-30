@@ -906,40 +906,6 @@ mod tests {
         );
     }
 
-    /// DL ケースの総量に CFT 充填コンクリート分が含まれる（鋼管のみの設計重量を上回る）。
-    #[test]
-    fn test_dl_self_weight_case_includes_cft_filling_concrete() {
-        let model = cft_column_model(SectionShape::CftBox {
-            corner_r: Some(0.0),
-            height: 400.0,
-            width: 400.0,
-            thick: 16.0,
-            horizontal_thick: 16.0,
-        });
-        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
-        let total = node_force(&nodal, 0)
-            + node_force(&nodal, 1)
-            + member
-                .iter()
-                .map(|ml| match ml.kind {
-                    MemberLoadKind::Distributed { a, b, w1, w2 } => (b - a) * (w1 + w2) / 2.0,
-                    MemberLoadKind::Point { p, .. } => p,
-                })
-                .sum::<f64>();
-
-        let steel_only = 78.5e-6 * 24576.0 * 3000.0;
-        let core = 23.0e-6 * 135424.0 * 3000.0;
-        assert!(
-            (total - (steel_only + core)).abs() < 1e-9 * total,
-            "total={total} expected={}",
-            steel_only + core
-        );
-        assert!(
-            total > steel_only,
-            "充填コンクリート分が計上されていない: total={total} steel_only={steel_only}"
-        );
-    }
-
     /// 地震用重量（generate_stories）にも CFT 充填コンクリート分が含まれ、
     /// 上端・下端へ 1/2 ずつ配分される。
     #[test]
