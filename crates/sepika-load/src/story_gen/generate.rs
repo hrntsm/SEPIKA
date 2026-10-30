@@ -596,12 +596,10 @@ fn generate_stories_impl(
         let story_id = StoryId(si as u32);
         let node_ids: Vec<NodeId> = std::mem::take(&mut nodes_by_story[si]);
 
-        let prev = model.stories.get(si);
-        let name = prev
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| sepika_core::model::default_story_name(si));
-        let level_kind = prev.map(|s| s.level_kind).unwrap_or_default();
-        let weight_override = prev.and_then(|s| s.weight_override);
+        let prev = &model.stories[si];
+        let name = prev.name.clone();
+        let level_kind = prev.level_kind;
+        let weight_override = prev.weight_override;
 
         let weight: f64 =
             node_ids.iter().map(|n| node_weight[n.index()]).sum::<f64>() + wall_design;
@@ -736,9 +734,7 @@ fn generate_stories_impl(
             }
         }
 
-        let existing: Vec<_> = prev
-            .map(|story| model.diaphragms_of(story.id).collect())
-            .unwrap_or_default();
+        let existing: Vec<_> = model.diaphragms_of(prev.id).collect();
         let groups: Vec<_> = if existing.is_empty() {
             if slaves.is_empty() {
                 Vec::new()
@@ -956,18 +952,18 @@ fn generate_stories_impl(
             wall_weights: wall.clone(),
             id: story_id,
             name,
-            elevation: prev.and_then(|s| s.elevation),
-            sl_offset_mm: prev.and_then(|s| s.sl_offset_mm),
-            source_story: prev.and_then(|s| s.source_story),
+            elevation: prev.elevation,
+            sl_offset_mm: prev.sl_offset_mm,
+            source_story: prev.source_story,
             node_ids,
             seismic_weight: Some(weight_override.unwrap_or(weight)),
             weight_override,
             structure: Default::default(),
             level_kind,
             dynamic_mass: Some(dynamic_mass),
-            standard_floor_load: prev.and_then(|s| s.standard_floor_load),
-            column_finish_area_weight: prev.map_or(0.0, |s| s.column_finish_area_weight),
-            fireproof: prev.map_or_else(Default::default, |s| s.fireproof),
+            standard_floor_load: prev.standard_floor_load,
+            column_finish_area_weight: prev.column_finish_area_weight,
+            fireproof: prev.fireproof,
         });
     }
 

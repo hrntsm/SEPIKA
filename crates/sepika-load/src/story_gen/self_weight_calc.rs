@@ -3,7 +3,6 @@
 //! - [`SelfWeightItem`] — 自重 1 件分の設計重量・物理質量相当と帰属の中間表現
 //! - [`enumerate_self_weight`] — モデル全要素の自重を列挙する
 //! - [`finish_perimeter`] — 仕上げ周長 φ
-//! - [`wall_clear_area`] — 耐震壁の内法面積
 
 use std::collections::HashMap;
 
@@ -11,16 +10,6 @@ use sepika_core::section_shape::SectionShape;
 
 use super::geom::{dist3, is_vertical_pair, polygon_area_3d};
 use super::*;
-
-/// 節点対の順不同キー（`(min,max)`）。`node_adjacency`/`beam_pair_map` で
-/// ノード順に依存しない同じキーを使うための共通ヘルパー。
-fn ordered_pair(a: NodeId, b: NodeId) -> (NodeId, NodeId) {
-    if a.0 <= b.0 {
-        (a, b)
-    } else {
-        (b, a)
-    }
-}
 
 /// 節点 → その節点に取り付く線材（Beam/Fiber/MultiSpring/Brace、2 節点以上）の `model.elements`
 /// 添字一覧。`has_column_below`/`max_depth`（柱脚に接続する部材の探索）を
@@ -38,34 +27,6 @@ fn node_adjacency(model: &Model) -> HashMap<NodeId, Vec<usize>> {
         }
     }
     adj
-}
-
-/// 節点対 (min,max)（辺の両端。線材が3節点以上でも先頭・末尾を辺とみなす。
-/// `wall_clear_area_factor` の元の照合と同じ）→ Beam/Fiber/MultiSpring 要素の `model.elements`
-/// 添字。壁の各辺→柱梁対応付けを O(壁の辺数×要素数) から O(1) 参照へ落とすための
-/// 事前索引（`enumerate_self_weight` で1回構築し使い回す）。同一節点対に複数の
-/// 候補がある場合は断面を持つ要素を優先し、どちらも同じなら要素順で最初に
-/// 見つかったものを採用する（断面未割当の仮の支持部材が実際の柱梁の内法控除を
-/// 打ち消さないようにするため）。
-fn beam_pair_map(model: &Model) -> HashMap<(NodeId, NodeId), usize> {
-    let mut map = HashMap::new();
-    for (idx, e) in model.elements.iter().enumerate() {
-        if e.kind.is_weight_frame() && e.nodes.len() >= 2 {
-            let (a, b) = (e.nodes[0], e.nodes[e.nodes.len() - 1]);
-            match map.entry(ordered_pair(a, b)) {
-                std::collections::hash_map::Entry::Vacant(v) => {
-                    v.insert(idx);
-                }
-                std::collections::hash_map::Entry::Occupied(mut o) => {
-                    let prev = &model.elements[*o.get()];
-                    if prev.section.is_none() && e.section.is_some() {
-                        o.insert(idx);
-                    }
-                }
-            }
-        }
-    }
-    map
 }
 
 /// 解析の質量行列が線材へ与える単位長さ当たり質量 [t/mm]。
@@ -198,7 +159,6 @@ pub(crate) fn enumerate_self_weight(
     validate_cft_steel_materials(model)?;
     let mut items = Vec::new();
     let node_adj = node_adjacency(model);
-    let beam_pairs = beam_pair_map(model);
     let story_spans = model.story_spans();
     for (elem_idx, elem) in model.elements.iter().enumerate() {
         if let Some(damper) = load_cfg.dampers.iter().find(|d| d.elem == elem.id) {
@@ -433,7 +393,7 @@ pub(crate) fn enumerate_self_weight(
                     .iter()
                     .map(|n| model.nodes[n.index()].coord)
                     .collect();
-                let area = wall_clear_area(model, elem, &pts, &beam_pairs);
+                let area = polygon_area_3d(&pts);
 
                 let attr = model.wall_attrs.iter().find(|a| a.elem == elem.id);
                 let opening_area = attr.map(|a| a.total_opening_area()).unwrap_or(0.0);
@@ -512,21 +472,6 @@ pub fn validate_cft_steel_materials(model: &Model) -> Result<(), String> {
     Ok(())
 }
 
-/// 耐震壁の自重面積算定用の**内法係数**（芯々面積に乗じる係数、(0,1]）。
-///
-/// 耐震壁の重量は周辺の柱梁の内法寸法で計算する扱いに対応。
-/// 対象は 4 節点の `ElementKind::Wall` のみ（シェル床・多角形壁は 1.0）。
-/// 各辺を鉛直辺（側柱候補）・水平辺（上下梁候補）に分類し、辺の節点対に一致する
-/// 線材（Beam/Fiber/MultiSpring）の断面寸法の半分を芯々寸法から控除する:
-/// - 水平辺（上下梁）: 梁せい `sec.depth` の半分を高さから控除
-/// - 鉛直辺（側柱）: 平面内の向きが特定できないため `min(width, depth)` の半分を
-///   長さから控除（控除を小さくとる保守側の近似）
-///
-/// ハンチ・セットバック等で柱梁が斜めの場合の個別考慮は行わない。控除相手の
-/// 部材が見つからない辺は控除なし（芯々のまま＝保守側）。
-///
-/// `beam_pairs` は `beam_pair_map` が返す節点対→`Beam` 要素添字の索引（呼び出し側
-/// `enumerate_self_weight` が壁ループの前に 1 回だけ構築したものを使い回す）。
 /// 壁エレメントの自重を頂点へ配る（§壁自重）。
 ///
 /// 縁が切れていない梁際の辺へ伝える。上下とも一体なら四隅へ等分し、片側だけ切れて
@@ -573,27 +518,4 @@ fn wall_corner_shares(
         return equal(all);
     }
     equal(idx)
-}
-
-fn wall_clear_area(
-    model: &Model,
-    elem: &ElementData,
-    pts: &[[f64; 3]],
-    beam_pairs: &HashMap<(NodeId, NodeId), usize>,
-) -> f64 {
-    if elem.kind != ElementKind::Wall || elem.nodes.len() != 4 {
-        return polygon_area_3d(pts);
-    }
-    let Some(geom) = sepika_core::model::wall_element_geometry(elem, model) else {
-        return 0.0;
-    };
-    let boundary = [geom.bottom[0], geom.bottom[1], geom.top[1], geom.top[0]];
-    let points = boundary.map(|node| model.nodes[node.index()].coord);
-    let dimensions = std::array::from_fn(|i| {
-        beam_pairs
-            .get(&ordered_pair(boundary[i], boundary[(i + 1) % 4]))
-            .and_then(|&idx| model.element_section(&model.elements[idx]))
-            .map(|sec| [sec.width, sec.depth])
-    });
-    polygon_area_3d(&points) * sepika_core::model::wall_clear_area_factor(&points, &dimensions)
 }
