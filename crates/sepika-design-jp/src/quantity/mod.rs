@@ -482,6 +482,55 @@ fn steel_item(section: &Section, length_mm: f64) -> Result<SteelItem, String> {
     })
 }
 
+fn validate_girder_haunches(model: &Model, quantities: &QuantityTakeoff) -> Result<(), String> {
+    for item in &quantities.items {
+        if !matches!(
+            item.category,
+            MemberCategory::Girder | MemberCategory::FoundationGirder
+        ) || !matches!(item.structure, StructureKind::Rc | StructureKind::Src)
+        {
+            continue;
+        }
+        let Some(elem) = item
+            .elem
+            .and_then(|id| model.elements.iter().find(|e| e.id == id))
+        else {
+            continue;
+        };
+        let Some(detail) = model.member_detail(elem.id) else {
+            continue;
+        };
+        let mut haunch_length_mm = 0.0;
+        for (end, haunch) in [("i", detail.haunch_i), ("j", detail.haunch_j)] {
+            let Some(h) = haunch else { continue };
+            if !h.length.is_finite()
+                || h.length <= 0.0
+                || !h.depth_increase.is_finite()
+                || h.depth_increase < 0.0
+                || !h.width_increase.is_finite()
+                || h.width_increase < 0.0
+            {
+                return Err(format!("{:?}: {end}端ハンチは有限かつ正の長さと有限かつ非負のせい・幅増分 [mm] が必要です", elem.id));
+            }
+            haunch_length_mm += h.length;
+        }
+        if haunch_length_mm > 0.0 {
+            let length_mm = dist3(
+                model.nodes[elem.nodes[0].index()].coord,
+                model.nodes[elem.nodes[1].index()].coord,
+            );
+            let clear_length_mm = elem
+                .rigid_zone
+                .clear_span_from(length_mm)
+                .unwrap_or(length_mm);
+            if !clear_length_mm.is_finite() || haunch_length_mm > clear_length_mm {
+                return Err(format!("{:?}: ハンチ長の合計は内法長以下で、両端のハンチ区間が重ならない必要があります", elem.id));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_circular_rc_posts(model: &Model) -> Result<(), String> {
     for sm in model
         .beams()
@@ -782,6 +831,7 @@ pub fn try_compute_quantity_takeoff(
         }
     }
     let mut out = compute_quantity_takeoff_validated(model, cfg, &contacts, &secondary);
+    validate_girder_haunches(model, &out)?;
     for sm in model.beams().chain(model.posts()) {
         let item = out
             .items
@@ -1019,7 +1069,7 @@ fn build_notes(model: &Model, cfg: &QuantityCfg) -> Vec<String> {
         "梁の腹筋・幅止筋は段数情報がモデルにないため計上しない。".to_string(),
         format!("壁筋は明示方向比（全厚内の両面合計）による概算。仮定径 {} mm・定着係数 {}。面積 πd²/4 と呼び径表の単位質量で換算する。開口欠損・開口補強・端部配置は詳細に反映せず、実配筋数量の照合済みではない。", cfg.assumed_wall_bar_dia, cfg.anchorage_dia_factor),
         "基礎フーチングはモデルに定義がないため計上しない。".to_string(),
-        "梁端ハンチは部材付帯情報（ハンチ長・せい増分・幅増分）から平均断面×ハンチ長で加算する（未入力の部材はハンチなし）。".to_string(),
+        "梁端ハンチは部材付帯情報（ハンチ長・せい増分・幅増分）から幅・せいが線形変化する区間の増分体積を積分して加算する（未入力の部材はハンチなし）。".to_string(),
         "鉄筋継手は個所数（圧接個所数）として集計する（梁 0.5 個所/本＋5m 毎 0.5、柱 1 個所/本＋7m 毎 1）。".to_string(),
         "二次部材の小梁・間柱は解決端点間の実長で数量に含める。完全端点対・用途・断面・解決材料が一致する一意の実材がある場合は線材側へ集約する。".to_string(),
         "鉄骨継手（部材付帯情報の継手位置）は位置・種別の保持のみで、プレート・ボルト重量は計上しない。".to_string(),
@@ -1418,19 +1468,13 @@ fn beam_quantity(
         });
     } else {
         let to_haunch = |h: &sepika_core::model::Haunch| Haunch {
-            b: b + h.width_increase.max(0.0),
-            d: d + h.depth_increase.max(0.0),
+            b: b + h.width_increase,
+            d: d + h.depth_increase,
             len: h.length,
         };
         let detail = model.member_detail(elem.id);
-        let haunch_i: Option<Haunch> = detail
-            .and_then(|dt| dt.haunch_i.as_ref())
-            .filter(|h| h.length > 0.0)
-            .map(to_haunch);
-        let haunch_j: Option<Haunch> = detail
-            .and_then(|dt| dt.haunch_j.as_ref())
-            .filter(|h| h.length > 0.0)
-            .map(to_haunch);
+        let haunch_i: Option<Haunch> = detail.and_then(|dt| dt.haunch_i.as_ref()).map(to_haunch);
+        let haunch_j: Option<Haunch> = detail.and_then(|dt| dt.haunch_j.as_ref()).map(to_haunch);
         let vol = member::girder_concrete_volume(b, d, lo, haunch_i, haunch_j);
         item.concrete_m3 = vol * 1e-9;
 

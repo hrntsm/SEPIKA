@@ -821,7 +821,7 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
 }
 
 /// 大梁（i 端ハンチ）・基礎梁（両端ハンチ）のハンチが部材付帯情報から
-/// 平均断面で体積・型枠へ加算される。
+/// 増分体積・投影型枠面積へ反映される。
 #[test]
 fn test_haunch_from_member_detail() {
     use sepika_core::model::{Haunch as CoreHaunch, MemberDetailAttr};
@@ -845,10 +845,8 @@ fn test_haunch_from_member_detail() {
         .find(|i| i.category == MemberCategory::Girder)
         .unwrap();
 
-    // 体積: 基準 0.4×0.8×5.3 に平均断面 (400+600)(800+1000)/4×1000 を加算。
-    let base_m3 = 0.4 * 0.8 * 5.3;
-    let haunch_m3 = (400.0 + 600.0) * (800.0 + 1_000.0) / 4.0 * 1_000.0 * 1e-9;
-    assert!((g.concrete_m3 - (base_m3 + haunch_m3)).abs() < 1e-9);
+    // ハンチ区間の端・中央・端の面積 0.32, 0.45, 0.60 m² にシンプソン則を適用した幾何体積。
+    assert!((g.concrete_m3 - 1.829_333_333_333_333_3).abs() < 1e-9);
 
     // 型枠（スラブなし）: 基準 (0.8×2+0.4)×5.3 に側面 (Di−D)/2×Li×2 と
     // 底面 (Bi−B)/2×Li を加算。
@@ -885,16 +883,174 @@ fn test_haunch_from_member_detail() {
         .find(|i| i.category == MemberCategory::FoundationGirder)
         .unwrap();
 
-    // 体積: 基準 0.4×0.8×5.3 に (400+400)(800+1100)/4×800 を両端分加算。
-    let base_m3 = 0.4 * 0.8 * 5.3;
-    let haunch_m3 = (400.0 + 400.0) * (800.0 + 1_100.0) / 4.0 * 800.0 * 2.0 * 1e-9;
-    assert!((fg.concrete_m3 - (base_m3 + haunch_m3)).abs() < 1e-9);
+    assert!((fg.concrete_m3 - 1.792).abs() < 1e-9);
 
     // 型枠: 側面 1 面＋底面 (0.8+0.4)×5.3 に側面 (Di−D)/2×Li を両端分加算
     // （幅増分 0 のため底面の加算なし）。
     let base_m2 = 1.2 * 5.3;
     let haunch_m2 = (1_100.0 - 800.0) / 2.0 * 800.0 * 2.0 * 1e-6;
     assert!((fg.formwork_m2 - (base_m2 + haunch_m2)).abs() < 1e-9);
+}
+
+#[test]
+fn linear_haunch_concrete_matches_geometric_volumes_in_public_takeoff() {
+    use sepika_core::model::{Haunch, MemberDetailAttr};
+    let depth = Haunch {
+        length: 1000.0,
+        depth_increase: 200.0,
+        width_increase: 0.0,
+    };
+    let width = Haunch {
+        length: 1000.0,
+        depth_increase: 0.0,
+        width_increase: 200.0,
+    };
+    let both = Haunch {
+        length: 1000.0,
+        depth_increase: 600.0,
+        width_increase: 300.0,
+    };
+    // 両寸法2倍の角錐台は0.42 m³、同区間の基準角柱は0.18 m³。
+    let cases = [
+        (None, None, 1.08),
+        (
+            Some(Haunch {
+                depth_increase: 0.0,
+                ..depth
+            }),
+            None,
+            1.08,
+        ),
+        (Some(depth), None, 1.11),
+        (None, Some(depth), 1.11),
+        (Some(depth), Some(depth), 1.14),
+        (Some(width), None, 1.14),
+        (Some(depth), Some(width), 1.17),
+        (Some(width), Some(depth), 1.17),
+        (Some(both), None, 1.32),
+        (Some(both), Some(both), 1.56),
+        (
+            Some(Haunch {
+                length: 3000.0,
+                ..depth
+            }),
+            Some(Haunch {
+                length: 3000.0,
+                ..depth
+            }),
+            1.26,
+        ),
+    ];
+    for elem in [ElemId(2), ElemId(3)] {
+        for (haunch_i, haunch_j, expected_m3) in cases {
+            let mut model = rc_portal_model();
+            model.nodes[1].coord[0] = 6700.0;
+            model.nodes[3].coord[0] = 6700.0;
+            model.sections[0] = with_rc_materials(
+                SectionShape::RcBeamRect {
+                    b: 300.0,
+                    d: 600.0,
+                    rebar: rc_beam_rebar(),
+                }
+                .to_section(SectionId(0), "G".into()),
+            );
+            model.member_detail_attrs.push(MemberDetailAttr {
+                elem,
+                haunch_i,
+                haunch_j,
+                joints: vec![],
+            });
+            let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+            let item = q.items.iter().find(|item| item.elem == Some(elem)).unwrap();
+            assert!(
+                (item.concrete_m3 - expected_m3).abs() < 1e-12,
+                "{elem:?}: {haunch_i:?}, {haunch_j:?}"
+            );
+            model
+                .elements
+                .iter_mut()
+                .find(|e| e.id == elem)
+                .unwrap()
+                .nodes
+                .reverse();
+            model.member_detail_attrs[0].haunch_i = haunch_j;
+            model.member_detail_attrs[0].haunch_j = haunch_i;
+            let reversed = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+            let item = reversed
+                .items
+                .iter()
+                .find(|item| item.elem == Some(elem))
+                .unwrap();
+            assert!((item.concrete_m3 - expected_m3).abs() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn invalid_haunch_dimensions_and_overlapping_intervals_make_quantity_unavailable() {
+    use sepika_core::model::{Haunch, MemberDetailAttr};
+    let valid = Haunch {
+        length: 1000.0,
+        depth_increase: 200.0,
+        width_increase: 0.0,
+    };
+    for invalid in [
+        Haunch {
+            length: 0.0,
+            ..valid
+        },
+        Haunch {
+            length: -1.0,
+            ..valid
+        },
+        Haunch {
+            length: f64::NAN,
+            ..valid
+        },
+        Haunch {
+            length: f64::INFINITY,
+            ..valid
+        },
+        Haunch {
+            depth_increase: -1.0,
+            ..valid
+        },
+        Haunch {
+            width_increase: -1.0,
+            ..valid
+        },
+        Haunch {
+            depth_increase: f64::NAN,
+            ..valid
+        },
+        Haunch {
+            width_increase: f64::INFINITY,
+            ..valid
+        },
+        Haunch {
+            length: 5301.0,
+            ..valid
+        },
+        Haunch {
+            length: 4301.0,
+            ..valid
+        },
+    ] {
+        for elem in [ElemId(2), ElemId(3)] {
+            let mut model = rc_portal_model();
+            model.member_detail_attrs.push(MemberDetailAttr {
+                elem,
+                haunch_i: Some(invalid),
+                haunch_j: Some(valid),
+                joints: vec![],
+            });
+            let reason = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap_err();
+            assert!(
+                reason.contains(&format!("{elem:?}")) && reason.contains("ハンチ"),
+                "{reason}"
+            );
+        }
+    }
 }
 
 fn girder_formwork(model: &Model) -> f64 {
