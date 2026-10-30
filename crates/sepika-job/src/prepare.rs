@@ -936,7 +936,7 @@ mod tests {
             slab.vertical_eccentricity_mm = Some(0.);
         }
         assert_eq!(model.slabs.len(), 2);
-        let _ = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
+        prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
         assert_eq!(model.slabs.len(), 2, "床板は畳まずそのまま残る");
         assert_eq!(
             model.floor_regions.len(),
@@ -952,7 +952,7 @@ mod tests {
         // 2 回連続で実行しても結果が変わらない（割当領域を先に再構築してから
         // 旧床領域・壁領域を再構築する順序が、実行回数に依存しないことの回帰）。
         let after_first = model.clone();
-        let _ = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
+        prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
         assert!(
             after_first.eq_ignoring_dofmap(&model),
             "前処理が 2 回目で結果を変えている"

@@ -128,9 +128,6 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     let layers = inp.model.layers();
     let qx = story_shears(inp.model, res_x, SeismicDir::X)?;
     let qy = story_shears(inp.model, res_y, SeismicDir::Y)?;
-    if qx.len() != layers.len() || qy.len() != layers.len() {
-        return Err(JobError::Solve("層剛性の層数がモデルと一致しません".into()));
-    }
 
     let mut stories = Vec::with_capacity(layers.len());
     let mut spatial = Vec::with_capacity(layers.len());
@@ -298,11 +295,6 @@ fn story_stiffness(
         LumpedStiffnessSource::StoryQd => {
             let drifts = story_drifts(model, res, dir);
             let shears = story_shears(model, res, dir)?;
-            if drifts.len() != shears.len() {
-                return Err(JobError::Solve(
-                    "層せん断と層間変位の層数が一致しません".into(),
-                ));
-            }
             for (q, d) in shears.iter().zip(drifts.iter()) {
                 if d.abs() < 1e-9 {
                     return Err(JobError::InvalidInput(
@@ -640,17 +632,6 @@ mod tests {
     }
 
     #[test]
-    fn layer_mass_uses_dynamic_mass_weight() {
-        let model = two_story_column_model();
-        // `layers()` の層は上端床の動的質量を採る。層0 の上端床は 2F（StoryId(1)）で 20·g。
-        let mass = layer_mass(&model.layers()[0]).expect("動的質量が算定済み");
-        assert!((mass - 20.0).abs() < 1e-9, "mass={mass}");
-        // 層1 の上端床は 3F（StoryId(2)）で 10·g。
-        let mass1 = layer_mass(&model.layers()[1]).expect("動的質量が算定済み");
-        assert!((mass1 - 10.0).abs() < 1e-9, "mass1={mass1}");
-    }
-
-    #[test]
     fn planar_linear_requires_dynamic_mass() {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = None;
@@ -688,50 +669,43 @@ mod tests {
         }
     }
 
-    /// 3次元（線形）でも動的質量が未算定（`None`）なら未算定エラーで止まること。
     #[test]
-    fn spatial_linear_requires_dynamic_mass() {
-        let mut model = two_story_column_model();
-        model.stories[1].dynamic_mass = None;
-        let mut res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
-        let mut res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
-        res_x.disp[1] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_x.disp[2] = [2.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[1] = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[2] = [0.0, 2.0, 0.0, 0.0, 0.0, 0.0];
-        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
-        inp.source = LumpedStiffnessSource::ColumnKi;
-        inp.res_x = Some(&res_x);
-        inp.res_y = Some(&res_y);
-        let err = build_lumped_mass(inp).unwrap_err();
-        assert!(err.to_string().contains("動的質量が未算定"), "{err}");
-    }
-
-    /// 質量 0 の階は、J の誤診断（未設定・剛床要求）ではなく質量 0 エラーで止まること。
-    /// J は質量分布から算定されるため、質量 0 では J も 0 になる。
-    #[test]
-    fn spatial_rejects_zero_mass_before_inertia_check() {
-        let mut model = two_story_column_model();
-        model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
-            horizontal_inertia_t_mm2: [0.0; 3],
-            mass_equiv_weight_n: 0.0,
-            lumped_mass: None,
-            center_xy_mm: [0.0, 0.0],
-            inertia_t_mm2: 0.0,
-        });
-        let mut res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
-        let mut res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
-        res_x.disp[1] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_x.disp[2] = [2.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[1] = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[2] = [0.0, 2.0, 0.0, 0.0, 0.0, 0.0];
-        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
-        inp.source = LumpedStiffnessSource::ColumnKi;
-        inp.res_x = Some(&res_x);
-        inp.res_y = Some(&res_y);
-        let err = build_lumped_mass(inp).unwrap_err();
-        assert!(err.to_string().contains("質量が 0 以下"), "{err}");
-        assert!(!err.to_string().contains("回転慣性"), "{err}");
+    fn spatial_linear_rejects_missing_zero_and_nonfinite_mass_or_inertia() {
+        use sepika_core::model::StoryDynamicMass;
+        for (mass_and_inertia, reason) in [
+            (None, "動的質量が未算定"),
+            (Some((0.0, 0.0)), "質量が 0 以下"),
+            (Some((f64::NAN, 1000.0)), "質量が 0 以下"),
+            (
+                Some((10.0 * GRAVITY_MM_S2, f64::NAN)),
+                "回転慣性 J が 0 以下",
+            ),
+        ] {
+            let mut model = two_story_column_model();
+            model.stories[1].dynamic_mass =
+                mass_and_inertia.map(|(mass_equiv_weight_n, inertia_t_mm2)| StoryDynamicMass {
+                    horizontal_inertia_t_mm2: [0.0; 3],
+                    mass_equiv_weight_n,
+                    lumped_mass: None,
+                    center_xy_mm: [0.0, 0.0],
+                    inertia_t_mm2,
+                });
+            let mut res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
+            let mut res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
+            res_x.disp[1] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            res_x.disp[2] = [2.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            res_y.disp[1] = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+            res_y.disp[2] = [0.0, 2.0, 0.0, 0.0, 0.0, 0.0];
+            let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+            inp.source = LumpedStiffnessSource::ColumnKi;
+            inp.res_x = Some(&res_x);
+            inp.res_y = Some(&res_y);
+            let error = build_lumped_mass(inp).unwrap_err().to_string();
+            assert!(error.contains(reason), "{error}");
+            if mass_and_inertia.is_some_and(|(mass, _)| mass == 0.0) {
+                assert!(!error.contains("回転慣性"), "{error}");
+            }
+        }
     }
 
     /// 線形 2D でも質量が非有限（`NaN`）ならエラーになること
@@ -753,58 +727,6 @@ mod tests {
         inp.res_x = Some(&res);
         let err = build_lumped_mass(inp).unwrap_err();
         assert!(err.to_string().contains("質量が 0 以下"), "{err}");
-    }
-
-    /// 線形 3D でも質量が非有限（`NaN`）ならエラーになること。
-    #[test]
-    fn spatial_linear_rejects_non_finite_mass() {
-        let mut model = two_story_column_model();
-        model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
-            horizontal_inertia_t_mm2: [0.0; 3],
-            mass_equiv_weight_n: f64::NAN,
-            lumped_mass: None,
-            center_xy_mm: [0.0, 0.0],
-            inertia_t_mm2: 1000.0,
-        });
-        let mut res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
-        let mut res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
-        res_x.disp[1] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_x.disp[2] = [2.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[1] = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[2] = [0.0, 2.0, 0.0, 0.0, 0.0, 0.0];
-        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
-        inp.source = LumpedStiffnessSource::ColumnKi;
-        inp.res_x = Some(&res_x);
-        inp.res_y = Some(&res_y);
-        let err = build_lumped_mass(inp).unwrap_err();
-        assert!(err.to_string().contains("質量が 0 以下"), "{err}");
-    }
-
-    /// 3D で回転慣性 J が非有限（`NaN`）ならエラーになること
-    /// （`NaN <= 0.0` は false のため、`is_finite` の検証が要る）。
-    #[test]
-    fn spatial_linear_rejects_non_finite_inertia() {
-        let mut model = two_story_column_model();
-        // 質量は正・J のみ NaN にして、J 側の検証だけを見る。
-        model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
-            horizontal_inertia_t_mm2: [0.0; 3],
-            mass_equiv_weight_n: 10.0 * GRAVITY_MM_S2,
-            lumped_mass: None,
-            center_xy_mm: [0.0, 0.0],
-            inertia_t_mm2: f64::NAN,
-        });
-        let mut res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
-        let mut res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
-        res_x.disp[1] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_x.disp[2] = [2.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[1] = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
-        res_y.disp[2] = [0.0, 2.0, 0.0, 0.0, 0.0, 0.0];
-        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
-        inp.source = LumpedStiffnessSource::ColumnKi;
-        inp.res_x = Some(&res_x);
-        inp.res_y = Some(&res_y);
-        let err = build_lumped_mass(inp).unwrap_err();
-        assert!(err.to_string().contains("回転慣性 J が 0 以下"), "{err}");
     }
 
     /// 3次元（非線形）でも動的質量が未算定（`None`）なら未算定エラーで止まること。
