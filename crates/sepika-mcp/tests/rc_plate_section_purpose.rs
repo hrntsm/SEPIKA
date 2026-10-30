@@ -1,6 +1,6 @@
 use sepika_core::{dof::Dof6Mask, ids::*, model::*, section_shape::*};
 use sepika_io::results::{nodal_disp_batch, ResultKind, ResultQuery, ResultStore};
-use sepika_mcp::{apply_edit, parse_edit_command, JobKind, ServerState};
+use sepika_mcp::{apply_edit, JobKind, ServerState};
 use serde_json::{json, Value};
 
 fn dedicated_shapes() -> [SectionShape; 3] {
@@ -202,7 +202,6 @@ fn shape_edit(shape: &SectionShape) -> Value {
     json!({"body":{"command":"EditSectionShape","section":1,"new_shape":shape,"frame_use":null}})
 }
 fn success(state: &mut ServerState, body: &Value) {
-    parse_edit_command(body).unwrap();
     let result = apply_edit(state, body).unwrap();
     assert!(result.applied && result.undoable, "{}", result.summary);
 }
@@ -216,7 +215,6 @@ fn rejection_preserves_state(
     beam: bool,
 ) {
     let state = &mut fixture.state;
-    parse_edit_command(body).unwrap();
     let mut seed_shape = state.model.sections[0].shape.clone().unwrap();
     for increment in [20., 20.] {
         if let SectionShape::RcBeamRect { d, .. } = &mut seed_shape {

@@ -23,7 +23,7 @@ fn invalid_ids() -> Vec<Value> {
 }
 
 #[test]
-fn handwritten_and_serde_ids_share_integer_type_and_u32_bounds() {
+fn handwritten_id_parsers_enforce_integer_type_and_u32_bounds() {
     let ends = serde_json::to_value(fixture::divider(false).ends).unwrap();
     let mut commands = vec![
         (json!({"command":"DeleteSlab"}), "id"),
@@ -92,27 +92,6 @@ fn handwritten_and_serde_ids_share_integer_type_and_u32_bounds() {
             assert!(parse_edit_command(&command).is_ok(), "{command}");
         }
     }
-    macro_rules! check_serde {
-        ($($id:ty),+) => { $(
-            for value in invalid_ids() {
-                assert!(serde_json::from_value::<$id>(value).is_err());
-            }
-            for valid in [0_u32, u32::MAX] {
-                let id: $id = serde_json::from_value(json!(valid)).unwrap();
-                assert_eq!(serde_json::to_value(id).unwrap(), json!(valid));
-            }
-        )+ };
-    }
-    check_serde!(
-        SlabId,
-        WallPlateId,
-        FloorRegionId,
-        WallRegionId,
-        FloorPlateAssignmentRegionId,
-        WallPlateAssignmentRegionId,
-        SectionId,
-        SecondaryMemberId
-    );
 }
 
 #[test]

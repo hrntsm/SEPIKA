@@ -143,8 +143,8 @@ pub(crate) fn compute_design_check_job(
     };
     let q0_by_elem = sepika_job::simple_beam_q0_by_terms(model, &gravity_terms)
         .map_err(JobError::InvalidInput)?;
-    let check_forces = result.member_forces.clone();
-    let member_force_rows = flatten_member_force_rows(&check_forces);
+    let check_forces = &result.member_forces;
+    let member_force_rows = flatten_member_force_rows(check_forces);
 
     let wall_case = match params.load_combination {
         Some(index) => format!("combo:{index}:{}", work.combinations[index].name),
@@ -155,7 +155,7 @@ pub(crate) fn compute_design_check_job(
     };
     let mut report = sepika_design_jp::run_member_design_checks(
         model,
-        &check_forces,
+        check_forces,
         &result.panel_moments,
         &MemberDesignCheckOptions {
             term,
@@ -177,7 +177,7 @@ pub(crate) fn compute_design_check_job(
         report.skip_for_load_state(reason);
     }
     let mut summary =
-        assemble_design_check_summary(&report, case, term, long_member_forces.is_some(), 0);
+        assemble_design_check_summary(&report, case, term, long_member_forces.is_some());
     summary["load_target"] = serde_json::json!({ "source": source, "combination_index": params.load_combination, "requested_case": lc_id.map(|id| id.0), "terms": terms, "gravity_reference_terms": gravity_terms, "state": state.as_ref().ok(), "diagnostic": load_error, "legal_conditions_verified": false });
     summary["floor_scope"] = serde_json::json!({ "selected_combination_checked": false, "long_term_approximation": "GUIの固定＋用途別積載の独立略算。MCPでは未実行" });
     if state.is_err() {
@@ -196,7 +196,6 @@ fn assemble_design_check_summary(
     case: Option<u32>,
     term: LoadTerm,
     qd_wired: bool,
-    gravity_failed: usize,
 ) -> serde_json::Value {
     let mut n_checks = 0usize;
     let mut n_ng = 0usize;
@@ -279,7 +278,7 @@ fn assemble_design_check_summary(
         "joint_skipped": joint_skipped,
         "max_ratio": max_ratio,
         "qd_wired": qd_wired,
-        "gravity_failed": gravity_failed,
+        "gravity_failed": 0,
     })
 }
 
@@ -595,7 +594,7 @@ mod tests {
             },
             Some(WallSkipKind::NotImplemented),
         ));
-        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false, 0);
+        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false);
         assert_eq!(summary["wall_summary"]["n_ok"], 1);
         assert_eq!(summary["wall_summary"]["n_skipped"], 1);
         assert_eq!(summary["wall_summary"]["n_walls"], 2);
@@ -611,17 +610,17 @@ mod tests {
             },
             Some(WallSkipKind::MissingInput),
         ));
-        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false, 0);
+        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false);
         assert_eq!(summary["wall_summary"]["n_skipped"], 2);
         report.wall_checks[0].outcome = CheckOutcome::Skipped {
             reason: "壁応答欠落".into(),
         };
         report.wall_checks[0].skip_kind = Some(WallSkipKind::MissingResponse);
-        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false, 0);
+        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false);
         assert!(summary["max_ratio"].is_null());
         assert!(summary["wall_summary_by_kind"]["AllowableShear"]["max_ratio"].is_null());
         let empty =
-            assemble_design_check_summary(&Default::default(), Some(5), LoadTerm::Short, false, 0);
+            assemble_design_check_summary(&Default::default(), Some(5), LoadTerm::Short, false);
         assert!(empty["max_ratio"].is_null());
         assert_eq!(empty["all_checked_and_ok"], false);
     }
@@ -652,7 +651,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let summary = assemble_design_check_summary(&report, Some(0), LoadTerm::Short, false, 0);
+        let summary = assemble_design_check_summary(&report, Some(0), LoadTerm::Short, false);
         assert_eq!(summary["all_checked_and_ok"], false);
         assert_eq!(summary["n_joint_checks"], 2);
         assert_eq!(summary["n_joint_skipped"], 1);

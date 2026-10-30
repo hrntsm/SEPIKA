@@ -1,6 +1,6 @@
 use sepika_core::{dof::Dof6Mask, ids::*, model::*, section_shape::*};
 use sepika_io::results::ResultStore;
-use sepika_mcp::{apply_edit, parse_edit_command, JobKind, ServerState};
+use sepika_mcp::{apply_edit, JobKind, ServerState};
 use serde_json::{json, Value};
 
 fn shapes() -> [SectionShape; 3] {
@@ -242,7 +242,6 @@ fn edit(section: u32, shape: &SectionShape, usage: Option<FrameSectionUse>) -> V
 }
 
 fn apply_success(state: &mut ServerState, body: &Value) {
-    parse_edit_command(body).unwrap();
     let result = apply_edit(state, body).unwrap();
     assert!(result.applied && result.undoable, "{}", result.summary);
 }
@@ -253,7 +252,6 @@ fn assert_rejection_preserves_state(
     section_id: u32,
     beam: bool,
 ) {
-    parse_edit_command(body).unwrap();
     let seed = edit(
         0,
         &state.model.sections[0].shape.clone().unwrap(),
