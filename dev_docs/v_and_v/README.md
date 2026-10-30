@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## 階重量・物理質量試験の現役参照整理（#1059）
+
+[現役回帰の対応表](階重量と物理質量の試験整理_Issue1059.md#現役の保証)に、設計重量と物理質量、CFT割増、両質量方式、壁スリット、柱脚4接続、Kブレース3設定の統合先を記録した。独立期待値・入力ケース・観測フィールドを保持し、既存のV&V状態は変更しない。
+
 ## 荷重試験の現役参照整理（#1059）
 
 床配分の現役試験は[格子比較記録の現役参照](床荷重XY両方向分配_格子方式比較_2026-09.md#現役の試験参照1059)、台形の精度判定は[独立幾何記録の現役参照](凸台形の独立幾何と格子差_Issue438_2026-10.md#現役の回帰参照1059)を参照する。旧比較専用実装の整理でVerificationの対象範囲や✅/🔶の状態は変更しない。独立連続解・精度上界・支持材への荷重保存の保証を保持し、過去の出力・固定コミットの履歴を現役回帰と区別する。
@@ -701,7 +705,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 945 | USD685主筋の認定条件 | sepika-core / sepika-design-jp | material_grade.rs・material_strength/rebar.rs・rc/beam.rs | [指定値・入力経路・直接観測](USD685主筋_Issue945_認定条件照合.md) | 一次設計・入力 | 🔶（MSRB-0117長期差#991、他認定・使用条件・Validation未） |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
-| 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
+| 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_wall_slits_preserve_geometric_story_weight`（柱際・上下梁際によらず幾何階帯の重量を保持。DL支持先の配分は別保証） | 横断 | 🔶 |
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
 | 30a | RC壁線形軸・面内曲げの調査 | sepika-element / sepika-solver | wall/wall_element.rs・factory/mod.rs・tests/wall_system_linear.rs | [Issue652の実入口と独立条件](RC壁線形軸曲げ剛性_Issue652_調査記録.md#独立期待値と実入口) | 要素／線形 | 🔶（指定原典の役割限定照合。現行7試験成功、総断面候補未採用・未検証） |
 | 30b | RC開口壁の線形モデル監査 | sepika-core / sepika-element / sepika-solver | tests/wall_system_linear.rs、data/issue821_axial_energy_bound.py | [直接48条件・壁版展開24条件と独立軸上界](RC開口壁_Issue821_モデル監査.md#壁版展開からの実入口と不成立分岐) | 要素／線形 | 🔶（入口Verification・独立上界の限定比較。実RC Validation・曲げ独立解・採否未了） |
