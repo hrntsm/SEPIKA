@@ -2,10 +2,12 @@
 
 SEPIKA は構造モデルを 2 つのファイル形式で入出力します。
 
-| 形式 | 拡張子 | 用途 | 往復精度 |
+| 形式 | 拡張子 | 用途 | 保持・受け渡しの範囲 |
 |---|---|---|---|
 | OVIKA（SEPIKA Project File） | `.ovika` | SEPIKA ネイティブの保存形式。モデルを欠損なく保存・読込する | 完全一致 |
-| [ST-Bridge](https://www.building-smart.or.jp/meeting/buildingsmart/st-bridge/) | `.stb` / `.xml` | 他社の一貫計算プログラムや BIM ツールとのモデル受け渡し | サブセットのみ意味的一致 |
+| [ST-Bridge](https://www.building-smart.or.jp/meeting/buildingsmart/st-bridge/) | `.stb` / `.xml` | 他社の一貫計算プログラムや BIM ツールとのモデル受け渡し | 書出は開発中。対応要素でも欠落・近似・再読込の制限あり |
+
+ST-Bridgeは[取込前・直後の確認・再出力](02_ST-Bridge_形式.md#取込前guiから読み込む)の順に確認してください。注意と属性の取込状況は下ドックの「ログ」に表示します。失敗時は現在のモデルを置き換えません。
 
 いずれも GUI のファイルメニューから利用できます。**日常的な保存・読込は `.ovika`**、**他ツール連携は `.stb`** と使い分けます。
 

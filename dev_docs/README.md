@@ -74,4 +74,6 @@ OSS としてコードまで追えるよう、既存の `実装参照` を本文
 - [許容応力度検定のGUI非提供API](allowable_design_api.md)：1973年版の許容曲げ式と方向を区別しない柱座屈長さ。
 
 - [OVIKA・波形ライブラリの内部形式とAPI](ovika_internals.md)：コンテナ・直列化・スキーマ変更の確認とRust利用例。
+
+- [ST-Bridgeの内部表現とAPI](stbridge_internals.md)：用途と解析定式化、識別・属性報告、XML検証とRust利用例。
 - [建物指標のGUI非提供計算](secondary_design_api.md)：D値による柱剛性略算の式とモデル抽出。GUIのRs・Reを補う計算ではない。
