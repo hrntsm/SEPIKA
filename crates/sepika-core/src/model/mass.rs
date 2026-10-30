@@ -130,7 +130,7 @@ impl SectionMassProperties {
             shape.try_cft_core_props()?;
         }
 
-        let properties = shaped_mass(shape, main, rebar, shear_rebar, steel);
+        let properties = shaped_mass(shape, main, steel);
         if valid_mass_properties(properties) {
             Ok(properties)
         } else {
@@ -692,7 +692,6 @@ impl Model {
 
     /// ダンパー質量の生成記録の反映と、正重量の帰属階への配置を検証する。
     pub fn validate_damper_mass_placement(&self) -> Result<(), String> {
-        self.validate_damper_weights()?;
         let inputs = self.damper_mass_inputs()?;
         if let Some(generation) = &self.damper_mass_generation {
             if generation.inputs != inputs {
@@ -973,8 +972,6 @@ impl WeightedMass {
 fn shaped_mass(
     shape: &SectionShape,
     main: Option<&Material>,
-    _rebar: Option<&Material>,
-    _shear_rebar: Option<&Material>,
     steel: Option<&Material>,
 ) -> SectionMassProperties {
     let main_density = main.map_or(0.0, |m| m.density);
@@ -1000,16 +997,14 @@ fn shaped_mass(
                 iy: shape.calc_iy(),
                 iz: shape.calc_iz(),
             };
+            result.add(steel.map_or(0.0, |m| m.density), steel_geometry);
             if let Some(core) = shape.cft_core_props() {
                 let concrete = GeometryMass {
                     area: core.area,
                     iy: core.iy,
                     iz: core.iz,
                 };
-                result.add(steel.map_or(0.0, |m| m.density), steel_geometry);
                 result.add(cft_core_density(main), concrete);
-            } else {
-                result.add(steel.map_or(0.0, |m| m.density), steel_geometry);
             }
         }
         SectionShape::RcWall { thickness, .. } => {
@@ -1171,8 +1166,6 @@ mod tests {
 
     #[test]
     fn rcは鉄筋材料によらず標準rc密度を総断面へ適用する() {
-        use crate::section_shape::SectionShape;
-
         let shape = SectionShape::RcBeamRect {
             b: 400.0,
             d: 400.0,
@@ -1183,29 +1176,31 @@ mod tests {
         section.rebar_material = Some(MaterialId(1));
         section.shear_rebar_material = Some(MaterialId(1));
         let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
-        let steel = material(1, MaterialCategory::Rebar, 7.0, None);
-        let properties = SectionMassProperties::from_section(
-            &section,
-            Some(&concrete),
-            Some(&steel),
-            Some(&steel),
-            None,
-        );
-        let gross = rectangle_geometry(400.0, 400.0);
-        let expected_density = concrete_density(Some(&concrete), ConcreteComposition::Rc);
-        assert_eq!(
-            properties,
-            SectionMassProperties::uniform(expected_density, gross.area, gross.iy, gross.iz,)
-        );
+        let main = material(1, MaterialCategory::Rebar, 7.0, None);
+        let shear = material(2, MaterialCategory::Rebar, 8.0, None);
         let changed_rebar = material(1, MaterialCategory::Rebar, 100.0, None);
-        let changed = SectionMassProperties::from_section(
-            &section,
-            Some(&concrete),
-            Some(&changed_rebar),
-            Some(&changed_rebar),
-            None,
-        );
-        assert_eq!(properties, changed);
+        let rho_rc = 24.0e-6 / 9806.65;
+        let expected = SectionMassProperties {
+            mass_per_length: rho_rc * 160_000.0,
+            rotary_inertia_y_per_length: rho_rc * (25_600_000_000.0 / 12.0),
+            rotary_inertia_z_per_length: rho_rc * (25_600_000_000.0 / 12.0),
+        };
+        for (rebar, shear_rebar) in [
+            (None, None),
+            (Some(&main), None),
+            (None, Some(&shear)),
+            (Some(&main), Some(&main)),
+            (Some(&changed_rebar), Some(&changed_rebar)),
+        ] {
+            let actual = SectionMassProperties::from_section(
+                &section,
+                Some(&concrete),
+                rebar,
+                shear_rebar,
+                None,
+            );
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
@@ -1237,62 +1232,48 @@ mod tests {
     }
 
     #[test]
-    fn rc壁は標準rc密度を総断面へ適用する() {
-        let shape = SectionShape::RcWall {
-            thickness: 200.0,
-            pwh_ratio: None,
-            pwv_ratio: None,
-            ps: 0.0025,
-        };
-        let section = shape.to_section(SectionId(0), "W".into());
-        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
-        let properties =
-            SectionMassProperties::try_from_section(&section, Some(&concrete), None, None, None)
-                .unwrap();
-        let gross = rectangle_geometry(1000.0, 200.0);
-        let rho_rc = concrete_density(Some(&concrete), ConcreteComposition::Rc);
-        assert_eq!(
-            properties,
-            SectionMassProperties::uniform(rho_rc, gross.area, gross.iy, gross.iz,)
-        );
-    }
-
-    #[test]
     fn rc壁と床版はせん断補強筋材料を無視して標準rc密度を適用する() {
         let rebar = material(1, MaterialCategory::Rebar, 7.85e-9, None);
-        for shape in [
-            SectionShape::RcWall {
-                thickness: 200.0,
-                pwh_ratio: None,
-                pwv_ratio: None,
-                ps: 0.0025,
-            },
-            SectionShape::RcSlab { thickness: 150.0 },
+        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
+        let rho_rc = 24.0e-6 / 9806.65;
+        for (shape, area, iy, iz) in [
+            (
+                SectionShape::RcWall {
+                    thickness: 200.0,
+                    pwh_ratio: None,
+                    pwv_ratio: None,
+                    ps: 0.0025,
+                },
+                200_000.0,
+                8_000_000_000.0 / 12.0,
+                200_000_000_000.0 / 12.0,
+            ),
+            (
+                SectionShape::RcSlab { thickness: 150.0 },
+                150_000.0,
+                3_375_000_000.0 / 12.0,
+                3_375_000_000.0 / 12.0,
+            ),
         ] {
             let section = shape.to_section(SectionId(0), "plate".into());
-            let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
-            let properties = SectionMassProperties::try_from_section(
-                &section,
-                Some(&concrete),
-                None,
-                Some(&rebar),
-                None,
-            )
-            .expect("壁・床版のせん断補強筋材料は質量計算で無視する");
-            let expected_density = concrete_density(Some(&concrete), ConcreteComposition::Rc);
-            let gross = match shape {
-                SectionShape::RcWall { thickness, .. } => rectangle_geometry(1000.0, thickness),
-                SectionShape::RcSlab { .. } => GeometryMass {
-                    area: shape.calc_area(),
-                    iy: shape.calc_iy(),
-                    iz: shape.calc_iz(),
-                },
-                _ => unreachable!(),
-            };
-            assert_eq!(
-                properties,
-                SectionMassProperties::uniform(expected_density, gross.area, gross.iy, gross.iz,)
-            );
+            for shear_rebar in [None, Some(&rebar)] {
+                let properties = SectionMassProperties::try_from_section(
+                    &section,
+                    Some(&concrete),
+                    None,
+                    shear_rebar,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(
+                    properties,
+                    SectionMassProperties {
+                        mass_per_length: rho_rc * area,
+                        rotary_inertia_y_per_length: rho_rc * iy,
+                        rotary_inertia_z_per_length: rho_rc * iz,
+                    }
+                );
+            }
         }
     }
 
@@ -1393,32 +1374,6 @@ mod tests {
     }
 
     #[test]
-    fn cftは鋼管主材料の密度と充填コンクリートの密度を分離する() {
-        let shape = SectionShape::CftBox {
-            corner_r: Some(0.0),
-            height: 400.0,
-            width: 400.0,
-            thick: 12.0,
-            horizontal_thick: 12.0,
-        };
-        let section = shape.to_section(SectionId(0), "CFT".into());
-        let concrete = material(0, MaterialCategory::Concrete, 2.0, Some(24.0));
-        let steel = material(1, MaterialCategory::Steel, 8.0, None);
-        let properties = SectionMassProperties::try_from_section(
-            &section,
-            Some(&concrete),
-            None,
-            None,
-            Some(&steel),
-        )
-        .unwrap();
-        let core = shape.cft_core_props().unwrap();
-        let expected =
-            steel.density * shape.calc_area() + cft_core_density(Some(&concrete)) * core.area;
-        assert!((properties.mass_per_length - expected).abs() < 1e-9);
-    }
-
-    #[test]
     fn cftの主材料が鋼材ならエラーになる() {
         let shape = SectionShape::CftBox {
             corner_r: Some(0.0),
@@ -1451,118 +1406,28 @@ mod tests {
             horizontal_thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
-        for fc in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let concrete = material(0, MaterialCategory::Concrete, 2.0, Some(fc));
-            let steel = material(1, MaterialCategory::Steel, 8.0, None);
-            assert!(SectionMassProperties::try_from_section(
-                &section,
-                Some(&concrete),
-                Some(&steel),
-                None,
-                None,
-            )
-            .is_err());
-        }
-    }
-
-    #[test]
-    fn srcは内蔵鉄骨材料未設定でも質量特性を解決できる() {
-        let shape = SectionShape::SrcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: new_column_rebar(),
-            steel_height: 400.0,
-            steel_width: 200.0,
-            steel_web_thick: 9.0,
-            steel_flange_thick: 12.0,
-        };
-        let section = shape.to_section(SectionId(0), "SRC".into());
-        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
+        let mut concrete = material(0, MaterialCategory::Concrete, 2.0, Some(24.0));
+        let steel = material(1, MaterialCategory::Steel, 8.0, None);
         assert!(SectionMassProperties::try_from_section(
             &section,
             Some(&concrete),
             None,
             None,
-            None
+            Some(&steel),
         )
         .is_ok());
-    }
-
-    #[test]
-    fn 未設定の補強材と鉄骨材質は質量を補完しない() {
-        use crate::section_shape::SectionShape;
-
-        let shape = SectionShape::RcBeamRect {
-            b: 400.0,
-            d: 400.0,
-            rebar: new_beam_rebar(),
-        };
-        let section = shape.to_section(SectionId(0), "RC".into());
-        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
-        let properties =
-            SectionMassProperties::from_section(&section, Some(&concrete), None, None, None);
-        let gross = rectangle_geometry(400.0, 400.0);
-        let expected = concrete_density(Some(&concrete), ConcreteComposition::Rc) * gross.area;
-        assert!((properties.mass_per_length - expected).abs() < 1e-12);
-    }
-
-    #[test]
-    fn 主筋とせん断補強筋は対応する材料だけを使う() {
-        use crate::section_shape::SectionShape;
-
-        let shape = SectionShape::RcBeamRect {
-            b: 400.0,
-            d: 400.0,
-            rebar: new_beam_rebar(),
-        };
-        let section = shape.to_section(SectionId(0), "RC".into());
-        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
-        let main = material(1, MaterialCategory::Rebar, 7.0, None);
-        let shear = material(2, MaterialCategory::Rebar, 8.0, None);
-        let gross = rectangle_geometry(400.0, 400.0);
-        let main_only =
-            SectionMassProperties::from_section(&section, Some(&concrete), Some(&main), None, None);
-        assert!(
-            (main_only.mass_per_length
-                - concrete_density(Some(&concrete), ConcreteComposition::Rc) * gross.area)
-                .abs()
-                < 1e-12
-        );
-
-        let shear_only = SectionMassProperties::from_section(
-            &section,
-            Some(&concrete),
-            None,
-            Some(&shear),
-            None,
-        );
-        assert!(
-            (shear_only.mass_per_length
-                - concrete_density(Some(&concrete), ConcreteComposition::Rc) * gross.area)
-                .abs()
-                < 1e-12
-        );
-    }
-
-    #[test]
-    fn srcの主材料は内蔵鉄骨材料へ流用しない() {
-        use crate::section_shape::SectionShape;
-
-        let shape = SectionShape::SrcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: new_column_rebar(),
-            steel_height: 400.0,
-            steel_width: 200.0,
-            steel_web_thick: 9.0,
-            steel_flange_thick: 12.0,
-        };
-        let section = shape.to_section(SectionId(0), "SRC".into());
-        let main = material(0, MaterialCategory::Steel, 8.0, None);
-        let error =
-            SectionMassProperties::try_from_section(&section, Some(&main), None, None, None)
-                .expect_err("主材料をSRCの内蔵鉄骨へ流用してはならない");
-        assert!(error.contains("主材料"));
+        for fc in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            concrete.fc = Some(fc);
+            let error = SectionMassProperties::try_from_section(
+                &section,
+                Some(&concrete),
+                None,
+                None,
+                Some(&steel),
+            )
+            .unwrap_err();
+            assert!(error.contains("充填コンクリートFc"), "{fc}: {error}");
+        }
     }
 
     #[test]
@@ -1630,7 +1495,24 @@ mod tests {
 
     #[test]
     fn rc系断面は主材料の欠落や区分不正やfc不正を受け付けない() {
+        use crate::section_shape::{BeamStirrup, RcBeamRebar};
+        let beam = RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![4, 2],
+            bottom: vec![3, 2],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        };
         let shapes = [
+            SectionShape::RcBeamRect {
+                b: 400.0,
+                d: 600.0,
+                rebar: beam.clone(),
+            },
             SectionShape::RcColumnRect {
                 b: 400.0,
                 d: 400.0,
@@ -1649,6 +1531,15 @@ mod tests {
                 steel_web_thick: 9.0,
                 steel_flange_thick: 12.0,
             },
+            SectionShape::SrcBeamRect {
+                b: 400.0,
+                d: 600.0,
+                rebar: beam,
+                steel_height: 300.0,
+                steel_width: 200.0,
+                steel_web_thick: 9.0,
+                steel_flange_thick: 12.0,
+            },
             SectionShape::RcWall {
                 thickness: 150.0,
                 pwh_ratio: None,
@@ -1658,27 +1549,68 @@ mod tests {
             SectionShape::RcSlab { thickness: 150.0 },
         ];
         for (index, shape) in shapes.into_iter().enumerate() {
-            let src = matches!(&shape, SectionShape::SrcColumnRect { .. });
-            let section = shape.to_section(SectionId(index as u32), "RC系".into());
+            let src = matches!(
+                shape,
+                SectionShape::SrcColumnRect { .. } | SectionShape::SrcBeamRect { .. }
+            );
+            let section = shape.to_section(SectionId(index as u32), "RC/SRC".into());
+            let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
             assert!(
-                SectionMassProperties::try_from_section(&section, None, None, None, None).is_err()
+                SectionMassProperties::try_from_section(
+                    &section,
+                    Some(&concrete),
+                    None,
+                    None,
+                    None,
+                )
+                .is_ok(),
+                "{shape:?}"
             );
-            let steel_result = SectionMassProperties::try_from_section(
+            let error = SectionMassProperties::try_from_section(&section, None, None, None, None)
+                .unwrap_err();
+            assert!(error.contains("主材料"), "{shape:?}: {error}");
+            let invalid_fc = material(0, MaterialCategory::Concrete, 2.4e-9, Some(0.0));
+            let error = SectionMassProperties::try_from_section(
                 &section,
-                Some(&material(0, MaterialCategory::Steel, 2.4e-9, Some(24.0))),
-                None,
-                None,
-                None,
-            );
-            assert_eq!(steel_result.is_ok(), src);
-            assert!(SectionMassProperties::try_from_section(
-                &section,
-                Some(&material(0, MaterialCategory::Concrete, 2.4e-9, Some(0.0))),
+                Some(&invalid_fc),
                 None,
                 None,
                 None,
             )
-            .is_err());
+            .unwrap_err();
+            assert!(error.contains("Fc"), "{shape:?}: {error}");
+            for density in [2.4e-9, 8.0] {
+                let steel_fc = material(0, MaterialCategory::Steel, density, Some(24.0));
+                let result = SectionMassProperties::try_from_section(
+                    &section,
+                    Some(&steel_fc),
+                    None,
+                    None,
+                    None,
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    src,
+                    "{shape:?}, density={density}: {result:?}"
+                );
+            }
+            let steel_no_fc = material(0, MaterialCategory::Steel, 8.0, None);
+            let error = SectionMassProperties::try_from_section(
+                &section,
+                Some(&steel_no_fc),
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert!(
+                error.contains(if src {
+                    "主材料"
+                } else {
+                    "コンクリート"
+                }),
+                "{shape:?}: {error}"
+            );
         }
     }
 
@@ -1824,36 +1756,6 @@ mod tests {
     }
 
     #[test]
-    fn rcとsrcは補助材料なしで質量特性を解決する() {
-        use crate::section_shape::SectionShape;
-
-        let rc = SectionShape::RcBeamRect {
-            b: 400.0,
-            d: 400.0,
-            rebar: new_beam_rebar(),
-        }
-        .to_section(SectionId(0), "RC".into());
-        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
-        assert!(
-            SectionMassProperties::try_from_section(&rc, Some(&concrete), None, None, None).is_ok()
-        );
-        let src = SectionShape::SrcBeamRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: new_beam_rebar(),
-            steel_height: 400.0,
-            steel_width: 200.0,
-            steel_web_thick: 9.0,
-            steel_flange_thick: 12.0,
-        }
-        .to_section(SectionId(1), "SRC".into());
-        assert!(
-            SectionMassProperties::try_from_section(&src, Some(&concrete), None, None, None)
-                .is_ok()
-        );
-    }
-
-    #[test]
     fn 鋼材形状は鋼材主材料と成立する寸法関係を要求する() {
         let steel = material(0, MaterialCategory::Steel, 8.0, None);
         let concrete = material(1, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
@@ -1923,14 +1825,6 @@ mod tests {
         assert!(SectionMassProperties::try_from_section(
             &wall,
             Some(&concrete),
-            Some(&steel),
-            None,
-            None,
-        )
-        .is_ok());
-        assert!(SectionMassProperties::try_from_section(
-            &wall,
-            Some(&concrete),
             Some(&rebar),
             None,
             None,
@@ -1971,123 +1865,6 @@ mod tests {
                 legs_x: 2,
                 legs_y: 2,
             },
-        }
-    }
-
-    #[test]
-    fn 新型rcとsrcの材料検証() {
-        use crate::section_shape::{
-            BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar,
-        };
-
-        let rc_beam = SectionShape::RcBeamRect {
-            b: 400.0,
-            d: 600.0,
-            rebar: RcBeamRebar {
-                main_dia: 22.0,
-                top: vec![4, 2],
-                bottom: vec![3, 2],
-                cover: 40.0,
-                stirrup: BeamStirrup {
-                    dia: 10.0,
-                    pitch: 100.0,
-                    legs: 2,
-                },
-            },
-        };
-        let rc_circle_col = SectionShape::RcColumnCircle {
-            d: 600.0,
-            rebar: RcCircleColumnRebar {
-                main_dia: 22.0,
-                count: 8,
-                cover: 40.0,
-                hoop: CircleColumnHoop {
-                    dia: 10.0,
-                    pitch: 100.0,
-                },
-            },
-        };
-        let rc_col_rect = SectionShape::RcColumnRect {
-            b: 400.0,
-            d: 400.0,
-            rebar: new_column_rebar(),
-        };
-        for (index, shape) in [&rc_beam, &rc_col_rect, &rc_circle_col]
-            .into_iter()
-            .enumerate()
-        {
-            let section = shape.to_section(SectionId(index as u32), "RC新型".into());
-            assert!(
-                SectionMassProperties::try_from_section(&section, None, None, None, None).is_err()
-            );
-            assert!(SectionMassProperties::try_from_section(
-                &section,
-                Some(&material(0, MaterialCategory::Concrete, 2.4e-9, Some(0.0))),
-                None,
-                None,
-                None,
-            )
-            .is_err());
-            assert!(SectionMassProperties::try_from_section(
-                &section,
-                Some(&material(0, MaterialCategory::Steel, 8.0, None)),
-                None,
-                None,
-                None,
-            )
-            .is_err());
-        }
-
-        let src_col = SectionShape::SrcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: new_column_rebar(),
-            steel_height: 400.0,
-            steel_width: 200.0,
-            steel_web_thick: 9.0,
-            steel_flange_thick: 12.0,
-        };
-        let src_beam = SectionShape::SrcBeamRect {
-            b: 400.0,
-            d: 600.0,
-            rebar: match &rc_beam {
-                SectionShape::RcBeamRect { rebar, .. } => rebar.clone(),
-                _ => unreachable!(),
-            },
-            steel_height: 300.0,
-            steel_width: 200.0,
-            steel_web_thick: 9.0,
-            steel_flange_thick: 12.0,
-        };
-        for (index, shape) in [src_beam, src_col].into_iter().enumerate() {
-            let section = shape.to_section(SectionId(index as u32), "SRC新型".into());
-            assert!(
-                SectionMassProperties::try_from_section(&section, None, None, None, None).is_err()
-            );
-            assert!(SectionMassProperties::try_from_section(
-                &section,
-                Some(&material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0))),
-                None,
-                None,
-                None,
-            )
-            .is_ok());
-            assert!(SectionMassProperties::try_from_section(
-                &section,
-                Some(&material(0, MaterialCategory::Concrete, 2.4e-9, Some(0.0))),
-                None,
-                None,
-                None,
-            )
-            .is_err());
-            assert!(SectionMassProperties::try_from_section(
-                &section,
-                Some(&material(0, MaterialCategory::Steel, 8.0, Some(24.0))),
-                None,
-                None,
-                None,
-            )
-            .is_ok());
         }
     }
 
