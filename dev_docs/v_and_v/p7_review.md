@@ -98,6 +98,7 @@ Xs を求めるには Y 方向に効く構面（X 位置に並ぶ）の剛性が
 - 影響範囲: 線形地震解析（`analysis.rs`）・プッシュオーバー荷重パターン（`pushover.rs`）・P7 Qud。
 - 修正: `qi = ci·αi·total_w`（αi=Wi/total_w）。`test_story_shear_uses_cumulative_weight`
   で ΣPi=基部せん断・単調減少を照合。squid-n-load 11 / squid-n-solver 58 passed。
+  現行の同契約は `ai::tests::normal_story_distribution_uses_cumulative_weights` に統合して保持する。
 
 ## 7. なお残る限界（テックリード作業・将来）
 
