@@ -1,4 +1,4 @@
-# 形状係数 Fes（剛性率 Fs・偏心率 Fe）
+# 剛性率 Rs・偏心率 Re と形状係数 Fes
 
 ## 算定方法と適用範囲
 
@@ -17,7 +17,7 @@ Rs≧0.6・Re≦0.15ではそれぞれの係数が1となります。この境�
 本機能が算定するのは通常式によるFesです。個別評価による割増しの除外・別値の採用や、その適用可否、法規上の設計ルートは判定しません。
 個別評価が必要な案件では、別途その検討を行ってください。
 
-## 剛性率 Rs・Fs
+## 剛性率 Rs と係数 Fs
 
 告示第1792号第7表1に対応する次式で、剛性率 Rs から Fs を算定します。
 
@@ -43,17 +43,9 @@ Rs≧0.6・Re≦0.15ではそれぞれの係数が1となります。この境�
 
 自立壁のn倍法を使用する場合は、一次解析結果から求めた壁の付加剛性を壁の位置・方向に応じて上下階へ組み込み、Rs評価用の再解析を行います。同じ地震荷重に対する評価用変位から重心位置の層間変位を求め、床の並進・回転の連成を考慮します。元の応力と[最大層間変形角](05_層間変形角.md)は一次解析結果から求めます。
 
-<div class="impl-ref">
+剛性率に使う層間変位は、柱の最大変位ではなく、重心位置の水平変位差です。上下階それぞれのSL上の節点変位を質量で重み付けして平均し、その差の絶対値を用います。中間節点は床レベルにないため平均に入れません。質量未設定の節点の重みは0、床レベル上の全質量が0なら節点変位の単純平均を用います。階高 h は上下階FL間高さです。
 
-**実装参照**：`sepika_design_jp::secondary::holding_capacity::{stiffness_ratios, fs}` が算定し、δg は `sepika_design_jp::secondary::stiffness_ratio::cog_story_drifts` です。
-自立壁を考慮する評価用変位は `sepika_job::stiffness_ratio::{attach_evaluations, attach_single_evaluation}`（`crates/sepika-job/src/stiffness_ratio.rs`）が生成します。
-剛性率に使う層間変位は、柱の最大変位ではなく、重心位置の水平変位 δg です。
-各層の δg は、上端の床レベル上の節点と下端の床レベル上の節点について、重心位置の水平変位の差として求めます。
-δg は柱の層間変位とは別の量であり、中間節点は床レベルにないため平均には入れません。
-
-</div>
-
-## 偏心率 Re・Fe
+## 偏心率 Re と係数 Fe
 
 告示第1792号第7表2に対応する次式で、偏心率 Re から Fe を算定します。
 計算結果の偏心率は、X・Y 両方向の地震時弾性応力解析結果による柱の水平剛性から剛心を求めて算定します。
@@ -62,25 +54,31 @@ Rs≧0.6・Re≦0.15ではそれぞれの係数が1となります。この境�
 
 **算定式**
 
-D 値（一般階）:
+柱 i の方向別水平剛性は、X加力結果のX成分、Y加力結果のY成分から別々に求めます。
 
-\\[ D = a \cdot K\_{c0} \\]
+\\[ \delta_{i,d}=|u_{\mathrm{top},i,d}-u_{\mathrm{bottom},i,d}|,\qquad k_{i,d}=\frac{|Q_{i,d}|}{\delta_{i,d}}\quad(d=X,Y) \\]
 
-\\[ K\_{c0} = 12EI\_c/h^3 \\]
+上下階SLの節点の水平変位差を用い、中間節点で分割された柱は上下階を結ぶ連なりを1本とします。せん断力は最上部の分割材の始端断面力を全体座標へ変換した加力方向成分を用い、柱位置は柱頭の平面位置とします。分割材単体の変位差や材長で剛性を求めません。上下階SLを結ぶ柱を対象とし、複数層をまたぎ途中階SLに節点を持たない柱を、変位の補間によって追加することはありません。
 
-\\[ a = \bar{k}/(2+\bar{k}) \\]
+重心は、長期の常時G+P組合せ結果のうち先頭のものを用い、各柱の圧縮軸力の大きさで重み付けします。分割柱は同じ最上部材の始端軸力を用います。引張軸力は重みに入れません。
 
-剛心と偏心距離:
+\\[ X_g=\frac{\sum_i N_{c,i}x_i}{\sum_i N_{c,i}},\qquad Y_g=\frac{\sum_i N_{c,i}y_i}{\sum_i N_{c,i}} \\]
 
-\\[ X\_s = \sum(D\_y \cdot x)/\sum D\_y \\]
+長期結果がない場合又は全柱の圧縮軸力合計が0の場合は節点の質量重心を用い、全質量が0なら節点座標の幾何重心を用います。存在する長期結果が不正な場合は、この代用を行わず算定不能とします。
 
-\\[ e\_x = |X\_g - X\_s| \\]
+柱の方向別剛性に、使用を指定した自立壁のn倍法の方向別剛性を加えた各位置の剛性を以下の \\(D_x,D_y\\) とします。n倍法を使わない場合は柱の \\(k_{i,X},k_{i,Y}\\) です。Dはここでは方向別剛性を表し、D値略算法による値ではありません。
 
-弾力半径:
+\\[ X_s=\frac{\sum D_y x}{\sum D_y},\qquad Y_s=\frac{\sum D_x y}{\sum D_x} \\]
 
-\\[ r\_{ex} = \sqrt{K\_R/\sum D\_x} \\]
+\\[ e_x=|X_g-X_s|,\qquad e_y=|Y_g-Y_s| \\]
 
-\\[ K\_R = \sum(D\_x \cdot \bar{y}^2) + \sum(D\_y \cdot \bar{x}^2) \\]
+\\[ K_R=\sum D_x(y-Y_s)^2+\sum D_y(x-X_s)^2 \\]
+
+\\[ r_{ex}=\sqrt{K_R/\sum D_x},\qquad r_{ey}=\sqrt{K_R/\sum D_y} \\]
+
+X加力時は直交するY方向の偏心距離、Y加力時はX方向の偏心距離を用います。
+
+\\[ R_{eX}=e_y/r_{ex},\qquad R_{eY}=e_x/r_{ey} \\]
 
 偏心率と Fe:
 
@@ -91,37 +89,16 @@ D 値（一般階）:
 **記号・単位**
 
 | 記号 | 意味 | 単位 |
-|------|------|------|
-| \\( R\_e \\) | 層の偏心率 | - |
-| \\( F\_e \\) | 偏心率による形状係数 | - |
-| \\( D \\) | 柱の水平剛性（D 値） | N/mm |
-| \\( a \\) | D 値の係数（\\( \bar{k}/(2+\bar{k}) \\)） | - |
-| \\( K\_{c0} \\) | 柱の標準剛性 | N/mm |
-| \\( E \\) | ヤング係数 | N/mm² |
-| \\( I\_c \\) | 柱の断面二次モーメント | mm⁴ |
-| \\( X\_g, X\_s \\) | 重心位置・剛心位置 | mm |
-| \\( e\_x \\) | X 方向の偏心距離 | mm |
-| \\( r\_{ex} \\) | X 方向の弾力半径 | mm |
-| \\( K\_R \\) | 層のねじり剛性 | N·mm |
-| \\( D\_x, D\_y \\) | X・Y 方向の層剛性 | N/mm |
-| \\( \bar{x}, \bar{y} \\) | 剛心から各柱までの距離 | mm |
+| --- | --- | --- |
+| \\(R_e,F_e\\) | 偏心率・偏心率による形状係数 | - |
+| \\(Q_{i,d},N_{c,i}\\) | 柱の方向別水平力・圧縮長期軸力の大きさ | N |
+| \\(\delta_{i,d}\\) | 柱の上下階SL間の方向別水平変位差の絶対値 | mm |
+| \\(k_{i,d},D_x,D_y\\) | 柱の方向別剛性・壁を含む各位置の方向別剛性 | N/mm |
+| \\(x_i,y_i,X_g,Y_g,X_s,Y_s\\) | 柱位置・重心・剛心の平面座標 | mm |
+| \\(e_x,e_y,r_{ex},r_{ey}\\) | 偏心距離・方向別弾力半径 | mm |
+| \\(K_R\\) | 剛心まわりのねじり剛性 | N·mm |
 
-<div class="impl-ref">
-
-**実装参照**：`sepika_design_jp::secondary::holding_capacity::fe` が Fe を算定します。
-地震時の応力解析結果があるときは、柱の水平剛性を \\( k\_i = |Q\_i|/|\delta\_i| \\) として剛心を求めます。
-ここでの \\( \delta\_i \\) は、その柱の上下階SL節点の水平変位差です。各柱の剛性算定と、層間変形角の最大値の集計は別に行います。
-中間節点で柱を分割するとセグメント単体の変位差は層高より短くなるため、連なりを 1 本の柱とみなします。
-重心は、鉛直荷重を支持する柱の長期軸力を重みにして求めます。
-引張の柱は鉛直荷重を支持しないため、重みに入れません。
-この精算は `sepika_design_jp::secondary::eccentricity_analysis`（`crates/sepika-design-jp/src/secondary/eccentricity_analysis.rs`）です。
-武藤 D 値法の略算は `sepika_design_jp::secondary::eccentricity` です。計算結果の偏心率表示で不足する解析結果を補うものではありません。
-略算でも中間節点で分割された鉛直材は連なりを 1 本の柱とみなし、層の上下端の高さを \\( h \\) として D 値を求めます。
-セグメントの材長を \\( h \\) にすると \\( 12EI/h^3 \\) が過大になるためです。
-
-</div>
-
-**雑壁の剛性（n 倍法）**
+## 自立壁の剛性（n 倍法）
 
 柱・梁に囲まれていない壁も、階と階をつないでいれば層の剛性に効き、剛心を偏らせます。
 これを等価な剛性要素としてRs・Reへ算入する方法が n 倍法です。
@@ -181,12 +158,6 @@ Rs評価用再解析にはこのばねのXY連成と位置による回転連成�
 | \\( D\_x, D\_y \\) | 壁の X・Y 方向の層剛性 | N/mm |
 | \\( c\_x, c\_y \\) | 壁面内方向の方向余弦 | - |
 
-<div class="impl-ref">
-
-**実装参照**：`sepika_design_jp::secondary::eccentricity::{misc_wall_stiffness, append_misc_wall_stiffnesses}`（`crates/sepika-design-jp/src/secondary/eccentricity/misc_wall.rs`）が算定します。
-
-</div>
-
 ## 算定できない場合
 
 設計画面とレポート CSV では、Rs は選択方向の地震静的結果、Re は X・Y 両方向の地震静的結果について、現在のモデル・関連計算条件と解析時の入力および計算契約の対応を確認します。
@@ -218,12 +189,6 @@ Re には有限な偏心距離と正の有限な弾力半径が必要です。�
 Rs 又は Re を算定できなければ Fes と、それに依存する必要保有水平耐力・合否の算定を止めます。
 再計算や保存後の再読込みでも、欠ける入力を既定値や前回の値で補いません。
 
-<div class="impl-ref">
-
-**実装参照**：`sepika_design_jp::secondary::holding_capacity` と `sepika_app::summary::{seismic_story_metrics, compute_story_metrics_with}`（`crates/sepika-app/src/summary.rs`）。
-
-</div>
-
 ## 形状係数 Fes
 
 形状係数 Fes は、剛性率による Fs と偏心率による Fe の積として算定します。
@@ -234,8 +199,9 @@ Re=0.15、0.225、0.30 に対して Fe=1.0、1.25、1.5 です。Rs=0.15、Re=0.
 
 \\[ F\_{es} = F\_s \cdot F\_e \\]
 
+
 <div class="impl-ref">
 
-**実装参照**：`sepika_design_jp::secondary::holding_capacity::fes` が算定します。
+**実装参照**：GUI・CSV集計は `sepika_app::summary::seismic_story_metrics`（`crates/sepika-app/src/summary.rs`）、解析剛性・重心は `sepika_design_jp::secondary::eccentricity_analysis`（`crates/sepika-design-jp/src/secondary/eccentricity_analysis.rs`）、n倍法の評価用再解析は `sepika_job::stiffness_ratio`（`crates/sepika-job/src/stiffness_ratio.rs`）。
 
 </div>
