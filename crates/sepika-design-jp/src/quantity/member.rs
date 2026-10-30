@@ -13,27 +13,21 @@
 //! - [`beam_concrete_volume`] / [`beam_formwork_area`] — 小梁
 //! - [`wall_bar_length`] — 壁筋（横筋・縦筋）総長さ
 
-/// 梁端ハンチの寸法（ハンチ端の全幅 Bi・全せい Di とハンチ長さ Li）`[mm]`。
-///
-/// 寸法は部材付帯情報（`Model::member_detail_attrs` のハンチ長・せい増分・
-/// 幅増分。剛性には影響しない）から、走査側（`super::try_compute_quantity_takeoff`）
-/// が基準断面 B×D への増分を全幅・全せいへ換算して渡す（未入力は `None`）。
+/// フェイスでの全幅 Bi・全せい Di と、フェイスから内側へのハンチ長 Li `[mm]`。
+/// 未入力端は呼出側で `None` とする。全寸法は基準断面への増分を含む。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Haunch {
-    /// ハンチ端の幅 Bi `[mm]`。
+    /// フェイスでの全幅 Bi `[mm]`。
     pub b: f64,
-    /// ハンチ端のせい Di `[mm]`。
+    /// フェイスでの全せい Di `[mm]`。
     pub d: f64,
     /// ハンチ長さ Li `[mm]`。
     pub len: f64,
 }
 
-/// 大梁・基礎梁のコンクリート体積 `[mm³]`。
-///
-/// - ハンチなし: `B×D×L`
-/// - ハンチ付き: `B×D×L + [(B+Bi)×(D+Di)]×Li/4 + [(B+Bj)×(D+Dj)]×Lj/4`
-///   （ハンチ部は平均断面 `(B+Bi)/2 × (D+Di)/2` × ハンチ長さで加算する。
-///   分母 4 は平均断面の展開 `(B+Bi)/2 × (D+Di)/2` による）
+/// 大梁・基礎梁のコンクリート体積 `[mm³]`。寸法・内法全長は `[mm]`。
+/// ハンチの幅・せいはフェイスの全寸法から基準寸法へ線形に変化する。
+/// 有限・非負の増分、正のハンチ長、内法内で重ならない両端区間を前提とする。
 pub fn girder_concrete_volume(
     b: f64,
     d: f64,
@@ -43,7 +37,9 @@ pub fn girder_concrete_volume(
 ) -> f64 {
     let mut v = b * d * l;
     for h in [haunch_i, haunch_j].into_iter().flatten() {
-        v += (b + h.b) * (d + h.d) / 4.0 * h.len;
+        let delta_b = h.b - b;
+        let delta_d = h.d - d;
+        v += ((b * delta_d + d * delta_b) / 2.0 + delta_b * delta_d / 3.0) * h.len;
     }
     v
 }

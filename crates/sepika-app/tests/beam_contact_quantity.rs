@@ -348,3 +348,101 @@ fn beam_contact_no_plate_fixture() -> sepika_core::model::Model {
         });
     model
 }
+
+fn haunched_girder_fixture() -> sepika_core::model::Model {
+    use sepika_core::ids::{ElemId, NodeId, SectionId};
+    use sepika_core::model::{FrameSectionUse, Haunch, MemberDetailAttr};
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    let mut model = beam_contact_fixture();
+    model.slabs.clear();
+    let mut column = SectionShape::RcColumnRect {
+        b: 200.0,
+        d: 200.0,
+        rebar: RcRectColumnRebar {
+            main_dia: 0.0,
+            x: vec![],
+            y: vec![],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: 0.0,
+                pitch: 0.0,
+                legs_x: 0,
+                legs_y: 0,
+            },
+        },
+    }
+    .to_section(SectionId(3), "C".into());
+    column.material = model.sections[0].material;
+    column.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(column);
+    let mut bottom = model.nodes[0].clone();
+    bottom.id = NodeId(2);
+    bottom.coord[2] = 0.0;
+    model.nodes.push(bottom);
+    let mut column = model.elements[0].clone();
+    column.id = ElemId(1);
+    column.nodes = smallvec::smallvec![NodeId(2), NodeId(0)];
+    column.section = Some(SectionId(3));
+    model.elements.push(column);
+    model.member_detail_attrs.push(MemberDetailAttr {
+        elem: ElemId(0),
+        haunch_i: Some(Haunch {
+            length: 1000.0,
+            depth_increase: 200.0,
+            width_increase: 0.0,
+        }),
+        haunch_j: None,
+        joints: vec![],
+    });
+    model
+}
+
+#[test]
+fn haunched_girder_csv_uses_incremental_volume_for_details_and_totals() {
+    let mut model = haunched_girder_fixture();
+    let csv = sepika_app::summary::build_quantity_csv(&model);
+    for expected in ["\"G451\",1.110,", "\"大梁\",1.110,", "\"合計\",1.230,"] {
+        assert!(csv.contains(expected), "{csv}");
+    }
+    model.member_detail_attrs[0].haunch_j = model.member_detail_attrs[0].haunch_i;
+    model.member_detail_attrs[0]
+        .haunch_i
+        .as_mut()
+        .unwrap()
+        .length = 5500.0;
+    let csv = sepika_app::summary::build_quantity_csv(&model);
+    assert!(
+        csv.starts_with("[数量積算 未算定]") && csv.contains("重ならない"),
+        "{csv}"
+    );
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn haunched_girder_gui_uses_incremental_volume_in_details_and_subtotals() {
+    use sepika_app::quantity_view::QuantityGrouping;
+    for (grouping, expected) in [
+        (QuantityGrouping::Detail, "1.110"),
+        (QuantityGrouping::ByCategory, "1.11"),
+    ] {
+        let mut app = sepika_app::app::App::default();
+        app.core.model = haunched_girder_fixture();
+        app.ui.view.quantity_view.grouping = grouping;
+        let context = egui::Context::default();
+        let text = context
+            .run_ui(egui::RawInput::default(), |root| {
+                egui::CentralPanel::default().show_inside(root, |ui| {
+                    sepika_app::quantity_view::quantity_panel(ui, &mut app)
+                });
+            })
+            .shapes
+            .into_iter()
+            .filter_map(|shape| match shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains(expected), "{text}");
+    }
+}
