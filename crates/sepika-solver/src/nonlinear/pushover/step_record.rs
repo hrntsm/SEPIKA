@@ -244,7 +244,6 @@ impl<'a> StepRecorder<'a> {
     }
 
     /// 性能曲線上の最大ベースシア [N]。目的別の採用層耐力とは区別する。
-    /// 単調載荷では崩壊機構形成後に頭打ちとなるため、ピーク値を採る。
     pub(super) fn qu(&self) -> f64 {
         self.capacity_curve
             .iter()
