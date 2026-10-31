@@ -111,8 +111,7 @@ pub fn steel_height_ratio(model: &Model) -> f64 {
     (steel_h / total_h).clamp(0.0, 1.0)
 }
 
-/// [`distribute_pi_over_diaphragms`] の中核ロジック。剛床の列（階全体、
-/// または主系統サブセットのいずれか）を受け取り Pi を重量比で分配する。
+/// 剛床の列（階全体または主系統）へ Pi を重量比で分配する。
 fn distribute_pi_over_slice(diaphragms: &[DiaphragmRef<'_>], pi: f64) -> Vec<(NodeId, f64)> {
     let n = diaphragms.len();
     if n == 0 {
@@ -176,15 +175,12 @@ pub(super) fn main_system_weight(model: &Model, story: &Story) -> f64 {
 /// 階の水平力 Pi を剛床へ分配する（地震荷重版。副剛床の Ci 直接入力に対応）。
 ///
 /// - `ci_override` を持たない剛床（主系統）: Pi を重量比で分配する
-///   （[`distribute_pi_over_diaphragms`] と同じ規則）。
+///   （[`distribute_pi_over_slice`] と同じ規則）。
 /// - `ci_override` を持つ剛床（副剛床）: Pi の分配対象から除外し、代わりに
 ///   水平力 = `ci_override` × その剛床の `weight`（`weight=None` なら 0）を
 ///   別途作用させる（等価震度扱い。上階に同一系統の剛床が積み上がらない
 ///   副剛床を想定。副剛床の Ci を直接入力した場合の扱い）。
-/// - 剛床がない階: [`distribute_pi_over_diaphragms`] と同じく階の節点へ直接分配する。
-///
-/// 全剛床が `ci_override` 無しなら [`distribute_pi_over_diaphragms`] と
-/// 厳密に一致する。
+/// - 剛床がない階: [`distribute_pi_over_story_nodes`] で階の節点へ直接分配する。
 pub(crate) fn distribute_seismic_forces(
     model: &Model,
     story: &Story,
