@@ -83,11 +83,8 @@ fn condense_expanded(
             n: NA,
             data: k_elem.data.clone(),
         };
-        let m = m_elem.map_or_else(
-            || LocalMat::zeros(NA),
-            |m| mass_without_end_releases(m, properties, li, lj),
-        );
-        return Some((m_elem.map(|_| m), k));
+        let m = m_elem.map(|m| mass_without_end_releases(m, properties, li, lj));
+        return Some((m, k));
     }
 
     let nb = releases.len();
@@ -141,10 +138,10 @@ fn condense_expanded(
             }
         }
     }
-    let rigid = crate::frame::rigid_arm::rigid_zone_mass(properties, li, lj);
-    for i in 0..NA {
-        for j in 0..NA {
-            if m_elem.is_some() {
+    if m_elem.is_some() {
+        let rigid = crate::frame::rigid_arm::rigid_zone_mass(properties, li, lj);
+        for i in 0..NA {
+            for j in 0..NA {
                 m[i * n + j] += rigid.get(i, j);
             }
         }
@@ -190,28 +187,31 @@ fn condense_expanded(
             kstar.set(i, j, value);
         }
     }
-    let mut r = [[0.0_f64; NA]; 18];
-    for i in 0..NA {
-        r[i][i] = 1.0;
-    }
-    for (a, &index) in active.iter().enumerate() {
-        for j in 0..NA {
-            r[NA + index][j] = -solution[a * NA + j];
+    let mstar = m_elem.map(|_| {
+        let mut r = [[0.0_f64; NA]; 18];
+        for i in 0..NA {
+            r[i][i] = 1.0;
         }
-    }
-    let mut mstar = LocalMat::zeros(NA);
-    for i in 0..NA {
-        for j in 0..NA {
-            let mut s = 0.0;
-            for a in 0..n {
-                for b in 0..n {
-                    s += r[a][i] * m[a * n + b] * r[b][j];
-                }
+        for (a, &index) in active.iter().enumerate() {
+            for j in 0..NA {
+                r[NA + index][j] = -solution[a * NA + j];
             }
-            mstar.set(i, j, s);
         }
-    }
-    Some((Some(mstar), kstar))
+        let mut mstar = LocalMat::zeros(NA);
+        for i in 0..NA {
+            for j in 0..NA {
+                let mut s = 0.0;
+                for a in 0..n {
+                    for b in 0..n {
+                        s += r[a][i] * m[a * n + b] * r[b][j];
+                    }
+                }
+                mstar.set(i, j, s);
+            }
+        }
+        mstar
+    });
+    Some((mstar, kstar))
 }
 
 fn free_common_torsion_gauge(k: &LocalMat, releases: &[(usize, f64)]) -> Option<usize> {
@@ -313,13 +313,8 @@ pub(crate) fn consistent_mass(mass: f64, l: f64, torsion_term: f64) -> LocalMat 
     if l <= 0.0 {
         return LocalMat::zeros(12);
     }
-    let properties = SectionMassProperties {
-        mass_per_length: mass / l,
-        rotary_inertia_y_per_length: 0.0,
-        rotary_inertia_z_per_length: 0.0,
-    };
     consistent_mass_components(
-        properties.mass_per_length,
+        mass / l,
         0.0,
         0.0,
         (torsion_term * 6.0 / l).max(0.0),
@@ -735,59 +730,38 @@ mod tests {
     }
 
     #[test]
-    fn ティモシェンコ質量は回転慣性とphiを曲げ面へ反映する() {
+    fn ティモシェンコ質量はphi正と零で独立参照の全成分と一致する() {
         let properties = SectionMassProperties {
             mass_per_length: 2.0,
             rotary_inertia_y_per_length: 3.0,
             rotary_inertia_z_per_length: 4.0,
         };
-        let actual = consistent_mass_timoshenko(properties, 1000.0, 0.8, 0.6);
-        let expected = independent_timoshenko_mass(properties, 1000.0, 0.8, 0.6);
-        for i in 0..12 {
-            for j in 0..12 {
-                assert!(
-                    (actual.get(i, j) - expected[i][j]).abs()
-                        < 2e-10 * (1.0 + expected[i][j].abs()),
-                    "M({i},{j}) actual={} expected={}",
-                    actual.get(i, j),
-                    expected[i][j]
-                );
+        for (phi_xy, phi_xz, tolerance) in [(0.8, 0.6, 2e-10), (0.0, 0.0, 1e-10)] {
+            let actual = consistent_mass_timoshenko(properties, 1000.0, phi_xy, phi_xz);
+            let expected = independent_timoshenko_mass(properties, 1000.0, phi_xy, phi_xz);
+            for i in 0..12 {
+                for j in 0..12 {
+                    assert!(
+                        (actual.get(i, j) - expected[i][j]).abs()
+                            < tolerance * (1.0 + expected[i][j].abs()),
+                        "phi=({phi_xy},{phi_xz}) M({i},{j}) actual={} expected={}",
+                        actual.get(i, j),
+                        expected[i][j]
+                    );
+                }
             }
+            assert_mass_is_positive_semidefinite(&actual);
         }
-        assert_mass_is_positive_semidefinite(&actual);
-    }
-
-    #[test]
-    fn ティモシェンコ質量のphi零極限は全成分で標準係数に一致する() {
-        let properties = SectionMassProperties {
-            mass_per_length: 2.0,
-            rotary_inertia_y_per_length: 3.0,
-            rotary_inertia_z_per_length: 4.0,
-        };
-        let actual = consistent_mass_timoshenko(properties, 1000.0, 0.0, 0.0);
-        let expected = independent_timoshenko_mass(properties, 1000.0, 0.0, 0.0);
-        for i in 0..12 {
-            for j in 0..12 {
-                assert!(
-                    (actual.get(i, j) - expected[i][j]).abs()
-                        < 1e-10 * (1.0 + expected[i][j].abs()),
-                    "M({i},{j}) actual={} expected={}",
-                    actual.get(i, j),
-                    expected[i][j]
-                );
-            }
-        }
-        assert_mass_is_positive_semidefinite(&actual);
     }
 
     fn assert_mass_is_positive_semidefinite(mass: &LocalMat) {
-        let mut vectors = Vec::with_capacity(36);
+        let mut vectors = Vec::with_capacity(25);
         for i in 0..12 {
             let mut vector = [0.0; 12];
             vector[i] = 1.0;
             vectors.push(vector);
         }
-        for shift in 0..24 {
+        for shift in 0..13 {
             let mut vector = [0.0; 12];
             for i in 0..12 {
                 vector[i] = ((i * 7 + shift * 11) % 13) as f64 - 6.0;

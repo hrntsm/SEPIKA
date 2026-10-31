@@ -138,6 +138,23 @@ impl PanelOffsetMember {
         inner
     }
 
+    fn transform_load_response(
+        &self,
+        mut response: crate::behavior::LoadedFrameResponse,
+    ) -> Result<crate::behavior::LoadedFrameResponse, String> {
+        if response.nodal_residual.data.len() != 12 {
+            return Err("仕口パネル接続部材の内側荷重応答は12自由度が必要です".into());
+        }
+        response.nodal_residual.data.resize(self.n_dof(), 0.0);
+        for (r, c, z) in coupling(&self.ends) {
+            response.nodal_residual.data[c] += z * response.nodal_residual.data[r];
+        }
+        if response.nodal_residual.data.iter().any(|v| !v.is_finite()) {
+            return Err("仕口パネル接続部材の荷重応答が非有限です".into());
+        }
+        Ok(response)
+    }
+
     /// 内側 12×12 の行列を要素自由度へ写す（`K_elem = Tᵀ · K_inner · T`）。
     fn transform_matrix(&self, k: &LocalMat) -> LocalMat {
         let n = self.n_dof();
@@ -197,41 +214,21 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
         if u_elem.len() != self.n_dof() || u_elem.iter().any(|v| !v.is_finite()) {
             return Err("仕口パネル接続部材の荷重応答変位が不正です".into());
         }
-        let Some(mut response) = self.inner.frame_load_response(&self.to_inner(u_elem), loads)? else {
+        let Some(response) = self.inner.frame_load_response(&self.to_inner(u_elem), loads)? else {
             return if self.owns_frame_member_loads() {
                 Err("部材荷重所有要素が応答を返しませんでした".into())
             } else { Ok(None) };
         };
-        if response.nodal_residual.data.len() != 12 {
-            return Err("仕口パネル接続部材の内側荷重応答は12自由度が必要です".into());
-        }
-        response.nodal_residual.data.resize(self.n_dof(), 0.0);
-        for (r, c, z) in coupling(&self.ends) {
-            response.nodal_residual.data[c] += z * response.nodal_residual.data[r];
-        }
-        if response.nodal_residual.data.iter().any(|v| !v.is_finite()) {
-            return Err("仕口パネル接続部材の荷重応答が非有限です".into());
-        }
-        Ok(Some(response))
+        self.transform_load_response(response).map(Some)
     }
 
     fn state_frame_load_response(&self) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
-        let Some(mut response) = self.inner.state_frame_load_response()? else {
+        let Some(response) = self.inner.state_frame_load_response()? else {
             return if self.owns_frame_member_loads() {
                 Err("部材荷重所有要素が状態応答を返しませんでした".into())
             } else { Ok(None) };
         };
-        if response.nodal_residual.data.len() != 12 {
-            return Err("仕口パネル接続部材の内側荷重応答は12自由度が必要です".into());
-        }
-        response.nodal_residual.data.resize(self.n_dof(), 0.0);
-        for (r, c, z) in coupling(&self.ends) {
-            response.nodal_residual.data[c] += z * response.nodal_residual.data[r];
-        }
-        if response.nodal_residual.data.iter().any(|v| !v.is_finite()) {
-            return Err("仕口パネル接続部材の荷重応答が非有限です".into());
-        }
-        Ok(Some(response))
+        self.transform_load_response(response).map(Some)
     }
 
     fn update_state_with_member_loads(&mut self, du: &LocalVec, loads: &[sepika_core::model::MemberLoad], commit: bool, ctx: &Ctx) -> Result<(), crate::behavior::ElementUpdateError> {

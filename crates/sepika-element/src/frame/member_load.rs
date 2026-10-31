@@ -1391,6 +1391,18 @@ mod tests {
             ((q[1] + q[7]) - (qc[1] + qc[7])).abs() < 1e-6,
             "合力が方式で変わってはいけない"
         );
+        for &xi in &[0.0, 0.25, 0.5, 0.75, 1.0] {
+            let f = fixed_internal_local(
+                &loads,
+                &frame,
+                l,
+                xi,
+                SpanLoadTransfer::StaticallyEquivalent,
+            );
+            for &k in &[1usize, 2, 3, 4, 5] {
+                assert!(f[k].abs() < 1e-9, "xi={xi} f[{k}]={} は 0 のはず", f[k]);
+            }
+        }
     }
 
     /// 材軸上の集中荷重は、作用位置によらず単純梁反力と同じ配分（てこの原理）で
@@ -1447,28 +1459,6 @@ mod tests {
             qc[1] + qc[7]
         );
         assert!(((qs[1] + qs[7]).abs() - 1250.0).abs() < 1e-6);
-    }
-
-    /// ブレースは材軸直交成分を負担しないため、固定端内力はどの断面でも
-    /// 曲げ・せん断が 0 になる（荷重ベクトル側で両端へ流し切っている）。
-    #[test]
-    fn brace_fixed_internal_has_no_bending() {
-        let l = 1000.0;
-        let w = 2.0;
-        let frame = horiz_frame();
-        let loads = vec![udl(w, l)];
-        for &xi in &[0.0, 0.25, 0.5, 0.75, 1.0] {
-            let f = fixed_internal_local(
-                &loads,
-                &frame,
-                l,
-                xi,
-                SpanLoadTransfer::StaticallyEquivalent,
-            );
-            for &k in &[1usize, 2, 3, 4, 5] {
-                assert!(f[k].abs() < 1e-9, "xi={xi} f[{k}]={} は 0 のはず", f[k]);
-            }
-        }
     }
 
     #[test]
