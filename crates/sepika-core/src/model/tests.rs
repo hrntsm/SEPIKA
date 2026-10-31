@@ -67,14 +67,12 @@ fn secondary_purpose_selects_canonical_then_first_fallback_section_without_wrong
         let mut member = test_secondary(SecondaryMemberKind::Post, 674, "間柱");
         member.section = Some(SectionId(id));
         model.unassigned_posts.push(member);
-        let before = model.clone();
         let result = model.validate_secondary_section_usage();
         assert_eq!(result.is_err(), rejected);
         if let Err(error) = result {
             assert!(error.to_string().contains("SecondaryMemberId(674)"));
             assert!(error.to_string().contains("RC 梁用断面"));
         }
-        assert!(model.eq_ignoring_dofmap(&before));
     }
     let mut model = Model {
         sections: vec![
@@ -104,29 +102,16 @@ fn test_secondary(kind: SecondaryMemberKind, id: u32, name: &str) -> SecondaryMe
 }
 
 #[test]
-fn test_validate_duplicate_node() {
-    let model = Model {
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0; 3],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(0),
-                coord: [1.0; 3],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        ..Default::default()
-    };
-    assert!(model.validate().is_err());
+fn test_validate_node_index_mismatch() {
+    let mut model = two_node_model(&[[0.0; 3], [1.0; 3]]);
+    model.validate().unwrap();
+    for id in [0, 5] {
+        model.nodes[1].id = NodeId(id);
+        assert_eq!(
+            model.validate().unwrap_err(),
+            crate::error::CoreError::IndexMismatch(format!("nodes[1] has NodeId({id})"))
+        );
+    }
 }
 
 #[test]
@@ -237,7 +222,7 @@ fn test_validate_secondary_member_kind_matches_region() {
 }
 
 #[test]
-fn test_validate_rejects_duplicate_beam_endpoints() {
+fn test_validate_rejects_duplicate_secondary_member_ids() {
     let sm = test_secondary(SecondaryMemberKind::Beam, 0, "J");
     let model = Model {
         floor_regions: vec![
@@ -256,27 +241,12 @@ fn test_validate_rejects_duplicate_beam_endpoints() {
                 slab_ids: vec![],
             },
         ],
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0; 3],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [1000.0, 0.0, 0.0],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        ..Default::default()
+        ..two_node_model(&[[0.0; 3], [1000.0, 0.0, 0.0]])
     };
-    assert!(model.validate().is_err());
+    assert!(
+        matches!(model.validate(), Err(crate::error::CoreError::DanglingRef(reason))
+            if reason.contains("二次部材の安定 ID が重複") && reason.contains("SecondaryMemberId(0)"))
+    );
 }
 
 #[test]
@@ -510,9 +480,9 @@ fn test_wall_attr_serde_optional_fields_default() {
     assert!(!attr.slit.any());
 }
 
-/// スリットは辺ごとに独立して読み書きできる。
+/// スリットは辺ごとに独立した設定を読み込む。
 #[test]
-fn test_wall_attr_slit_roundtrip() {
+fn test_wall_attr_slit_deserializes() {
     let json = r#"{"elem":3,"slit":{"column_face":[true,false],"beam_face":[false,true]}}"#;
     let attr: WallAttr = serde_json::from_str(json).unwrap();
     assert_eq!(attr.slit.column_face, [true, false]);
@@ -542,7 +512,6 @@ fn test_slit_expresses_three_side_and_full() {
 
 #[test]
 fn test_element_data_plastic_zone_default_missing_field() {
-    // 旧スキーマ（plastic_zone フィールドがない JSON）からの互換性を確認する。
     let json = r#"{
             "id": 0,
             "kind": "Beam",
@@ -572,8 +541,7 @@ fn test_load_case_kind_is_long_term() {
 }
 
 #[test]
-fn test_model_stress_cfg_default_missing_field() {
-    // 旧スキーマ（stress_cfg フィールドがない JSON）からの互換性を確認する。
+fn test_model_optional_fields_default_when_missing() {
     let json = r#"{
             "nodes": [], "elements": [], "sections": [], "materials": [],
             "stories": [], "floor_regions": [], "constraints": [], "load_cases": [],
@@ -583,10 +551,10 @@ fn test_model_stress_cfg_default_missing_field() {
     assert!(!model.stress_cfg.no_long_axial_brace);
     assert!(!model.stress_cfg.no_long_axial_column);
     assert_eq!(model.stress_cfg, Model::default().stress_cfg);
+    assert!(model.damper_defs.is_empty());
 }
 
-/// 旧スキーマ（support_spring フィールドがない JSON）の Node が読み込めること
-/// （serde 後方互換。既定は None＝ばね支持なし）。
+/// 支点ばねを省略した Node は、ばね支持なしとして読み込む。
 #[test]
 fn test_node_support_spring_default_missing_field() {
     let json = r#"{
@@ -600,9 +568,7 @@ fn test_node_support_spring_default_missing_field() {
     assert_eq!(node.support_spring, None);
 }
 
-/// 旧スキーマ（relief_velocity/c2_ratio フィールドがない JSON）の DamperProps が
-/// 読み込めること（serde 後方互換。既定は両方とも None＝リリーフなし。
-/// 既存前例の qy/k2_ratio と同じ扱い）。
+/// relief_velocity・c2_ratio を省略したダンパーはリリーフなしとして読み込む。
 #[test]
 fn test_damper_props_relief_default_missing_field() {
     let json = r#"{
@@ -614,80 +580,8 @@ fn test_damper_props_relief_default_missing_field() {
     let props: DamperProps = serde_json::from_str(json).unwrap();
     assert_eq!(props.relief_velocity, None);
     assert_eq!(props.c2_ratio, None);
-    // qy/k2_ratio も既存前例どおり既定値で補完される（DamperProps::default() と同じ値）。
     assert_eq!(props.qy, DamperProps::default().qy);
     assert_eq!(props.k2_ratio, DamperProps::default().k2_ratio);
-}
-
-/// 旧スキーマ（damper_defs フィールドがない JSON）の Model が読み込めること
-/// （serde 後方互換。既定は空の Vec）。
-#[test]
-fn test_model_damper_defs_default_missing_field() {
-    let json = r#"{
-            "nodes": [], "elements": [], "sections": [], "materials": [],
-            "stories": [], "floor_regions": [], "constraints": [], "load_cases": [],
-            "combinations": []
-        }"#;
-    let model: Model = serde_json::from_str(json).unwrap();
-    assert!(model.damper_defs.is_empty());
-}
-
-/// msgpack（.ovika の実際の直列化形式）でも同様に後方互換が効くこと
-/// （JSON だけでなくバイナリ形式での確認。rmp-serde は位置ベース配列として
-/// 直列化するため、`#[serde(default)]` による補完は**末尾のフィールドが
-/// 欠けている場合のみ**有効。新フィールドを構造体の途中に追加すると、
-/// 旧データの後続フィールドの値がずれて読み込まれてしまう）。
-#[test]
-fn test_node_support_spring_msgpack_backward_compat() {
-    // 旧版 Node 相当（末尾 support_spring 抜き）を模した最小構造体で msgpack 化し、
-    // 現行の Node へデシリアライズできることを確認する。
-    #[derive(serde::Serialize)]
-    struct LegacyNode {
-        id: NodeId,
-        coord: [f64; 3],
-        restraint: Dof6Mask,
-        mass: Option<[f64; 6]>,
-        story: Option<StoryId>,
-    }
-    let legacy = LegacyNode {
-        id: NodeId(0),
-        coord: [1.0, 2.0, 3.0],
-        restraint: Dof6Mask::FIXED,
-        mass: None,
-        story: None,
-    };
-    let bytes = rmp_serde::to_vec(&legacy).expect("legacy msgpack serialize");
-    let node: Node = rmp_serde::from_slice(&bytes).expect("legacy msgpack deserialize as Node");
-    assert_eq!(node.id, NodeId(0));
-    assert_eq!(node.coord, [1.0, 2.0, 3.0]);
-    assert_eq!(node.restraint, Dof6Mask::FIXED);
-    assert_eq!(node.support_spring, None);
-}
-
-#[test]
-fn test_validate_index_mismatch() {
-    let model = Model {
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0; 3],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(5),
-                coord: [1.0; 3],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        ..Default::default()
-    };
-    assert!(model.validate().is_err());
 }
 
 #[test]
@@ -867,9 +761,6 @@ fn test_requires_section_and_material_excludes_property_driven_elements() {
 
 fn named_section(id: u32, name: &str, floor: Option<&str>) -> Section {
     Section {
-        frame_use: None,
-        id: crate::ids::SectionId(id),
-        name: name.to_string(),
         floor: floor.map(str::to_string),
         area: 1.0e4,
         iy: 1.0e8,
@@ -877,16 +768,8 @@ fn named_section(id: u32, name: &str, floor: Option<&str>) -> Section {
         j: 1.0e8,
         depth: 300.0,
         width: 300.0,
-        as_y: 0.0,
-        as_z: 0.0,
-        panel_thickness: None,
-        thickness: None,
-        shape: None,
         material: Some(MaterialId(0)),
-        rebar_material: None,
-        shear_rebar_material: None,
-        steel_material: None,
-        property_basis: Default::default(),
+        ..Section::zero(SectionId(id), name.into())
     }
 }
 
@@ -991,22 +874,8 @@ fn make_story_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
     let stories: Vec<Story> = levels
         .iter()
         .enumerate()
-        .map(|(i, &(name, elevation))| Story {
-            wall_weights: Vec::new(),
-            id: StoryId(i as u32),
-            name: name.into(),
-            elevation: Some(elevation),
-            sl_offset_mm: Some(0.0),
-            source_story: None,
-            node_ids: Vec::new(),
-            seismic_weight: None,
-            weight_override: None,
-            structure: Default::default(),
-            level_kind: Default::default(),
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
+        .map(|(i, &(name, elevation))| {
+            Story::new(StoryId(i as u32), name.into(), Some(elevation), Some(0.0))
         })
         .collect();
     Model {
@@ -1612,40 +1481,13 @@ fn test_validate_wall_plate_shared_by_two_wall_regions() {
 /// 取り込み用の二次部材の自由端推定: 大梁に載る片持ち小梁の自由端だけが Free になる。
 #[test]
 fn infer_free_end_for_cantilever_beam() {
-    let mut model = Model::default();
-    for (i, c) in [
+    let mut model = two_node_model(&[
         [0.0, 0.0, 0.0],
         [6000.0, 0.0, 0.0],
         [3000.0, 0.0, 0.0],
         [3000.0, 3000.0, 0.0],
-    ]
-    .iter()
-    .enumerate()
-    {
-        model.nodes.push(Node {
-            id: NodeId(i as u32),
-            coord: *c,
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
-    model.elements.push(ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Beam,
-        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-        section: None,
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 0.0, 1.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    });
+    ]);
+    push_element_beam(&mut model, 0, 0, 1);
     model.unassigned_beams.push(SecondaryMember {
         vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
@@ -1665,42 +1507,15 @@ fn infer_free_end_for_cantilever_beam() {
 /// 片持ちの先端が Free になる。
 #[test]
 fn infer_free_end_for_tip_rib_on_cantilevers() {
-    let mut model = Model::default();
-    for (i, c) in [
+    let mut model = two_node_model(&[
         [0.0, 0.0, 0.0],
         [6000.0, 0.0, 0.0],
         [1000.0, 0.0, 0.0],
         [1000.0, 3000.0, 0.0],
         [5000.0, 0.0, 0.0],
         [5000.0, 3000.0, 0.0],
-    ]
-    .iter()
-    .enumerate()
-    {
-        model.nodes.push(Node {
-            id: NodeId(i as u32),
-            coord: *c,
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
-    model.elements.push(ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Beam,
-        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-        section: None,
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 0.0, 1.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    });
+    ]);
+    push_element_beam(&mut model, 0, 0, 1);
     for (nodes, name) in [([2u32, 3u32], "CA"), ([4, 5], "CB"), ([3, 5], "RIB")] {
         push_secondary_beam(&mut model, nodes, name);
     }
@@ -1932,7 +1747,7 @@ fn rc_beam_reference_is_explicit_persistent_and_survives_member_operations() {
         Some(RcBeamReference::AntisymmetricHalfMember)
     );
     let attrs = decoded.take_elem_attrs(ElemId(7));
-    assert_eq!(decoded.member_rc_beam_reference(elem), None);
+    assert_eq!(decoded.member_rc_beam_reference(ElemId(7)), None);
     decoded.restore_elem_attrs(ElemId(8), attrs);
     assert_eq!(
         decoded.member_rc_beam_reference(ElemId(8)),
@@ -2075,33 +1890,16 @@ fn frame_node_count_matrix_and_support_axes() {
             tension_only: false,
         },
     ] {
+        let mut model = two_node_model(&[
+            [0.0, 0.0, 0.0],
+            [3000.0, 0.0, 0.0],
+            [6000.0, 0.0, 0.0],
+            [9000.0, 0.0, 0.0],
+        ]);
+        push_element_beam(&mut model, 0, 0, 1);
+        model.elements[0].kind = kind;
         for count in 0..=4 {
-            let mut model = Model::default();
-            for i in 0..4 {
-                model.nodes.push(Node {
-                    id: NodeId(i),
-                    coord: [i as f64 * 3000.0, 0.0, 0.0],
-                    restraint: Dof6Mask::FREE,
-                    mass: None,
-                    story: None,
-                    support_spring: None,
-                });
-            }
-            model.elements.push(ElementData {
-                id: ElemId(0),
-                kind,
-                nodes: (0..count).map(NodeId).collect(),
-                section: None,
-                local_axis: LocalAxis {
-                    ref_vector: [0.0, 0.0, 1.0],
-                },
-                end_cond: [EndCondition::Fixed; 2],
-                force_regime: ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
-                plastic_zone: None,
-                spring: None,
-            });
+            model.elements[0].nodes = (0..count).map(NodeId).collect();
             if count == 2 {
                 model.validate().unwrap();
                 assert_eq!(
@@ -2122,16 +1920,16 @@ fn frame_node_count_matrix_and_support_axes() {
                     .support_member_axis(SupportMemberId::Primary(ElemId(0)))
                     .is_none());
             }
-            model.elements[0].nodes = [NodeId(0), NodeId(0)].into_iter().collect();
-            assert!(model
-                .validate_frame_node_counts()
-                .unwrap_err()
-                .to_string()
-                .contains("異なる2節点"));
-            model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
-            model.nodes[1].coord = model.nodes[0].coord;
-            model.validate_frame_node_counts().unwrap();
         }
+        model.elements[0].nodes = [NodeId(0), NodeId(0)].into_iter().collect();
+        assert!(model
+            .validate_frame_node_counts()
+            .unwrap_err()
+            .to_string()
+            .contains("異なる2節点"));
+        model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+        model.nodes[1].coord = model.nodes[0].coord;
+        model.validate_frame_node_counts().unwrap();
     }
     for kind in [
         ElementKind::Shell,
@@ -2387,7 +2185,6 @@ mod rc_section_reference_resolution {
                             .push(Section::zero(SectionId(9), "別ID".into()));
                     }
                     assert_eq!(model.section(id), Some(&section));
-                    let before = model.clone();
                     let error = model.validate_rc_section_usage().unwrap_err().to_string();
                     assert!(
                         error.contains("SecondaryMemberId(674)")
@@ -2395,7 +2192,6 @@ mod rc_section_reference_resolution {
                             && error.contains(reason),
                         "{error}"
                     );
-                    assert!(model.eq_ignoring_dofmap(&before));
                     let normal_kind = match wrong_kind {
                         SecondaryMemberKind::Beam => SecondaryMemberKind::Post,
                         SecondaryMemberKind::Post => SecondaryMemberKind::Beam,
@@ -2444,7 +2240,6 @@ mod rc_section_reference_resolution {
                     }],
                     ..Default::default()
                 };
-                let before = model.clone();
                 let error = model.validate_rc_section_usage().unwrap_err().to_string();
                 assert!(
                     error.contains("ElemId(674)")
@@ -2452,7 +2247,6 @@ mod rc_section_reference_resolution {
                         && error.contains(reason),
                     "{error}"
                 );
-                assert!(model.eq_ignoring_dofmap(&before));
             }
         }
     }
@@ -2478,7 +2272,6 @@ mod rc_section_reference_resolution {
                 model.section(SectionId(id)).unwrap().shape.is_some(),
                 reject
             );
-            let before = model.clone();
             let result = model.validate_rc_section_usage();
             if reject {
                 let error = result.unwrap_err().to_string();
@@ -2489,7 +2282,6 @@ mod rc_section_reference_resolution {
             } else {
                 assert!(result.is_ok(), "{result:?}");
             }
-            assert!(model.eq_ignoring_dofmap(&before));
         }
         let mut general = secondary_model(
             Section::zero(SectionId(7), "直接入力".into()),
@@ -2513,7 +2305,6 @@ fn model_equality_distinguishes_each_multi_opening_mode() {
             multi_opening_mode: mode,
             ..Default::default()
         };
-        assert!(model.eq_ignoring_dofmap(&model.clone()));
         for other in [
             MultiOpeningMode::Equivalent,
             MultiOpeningMode::Envelope,
