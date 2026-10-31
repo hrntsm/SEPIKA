@@ -446,7 +446,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [主架構支持の解析表現不変性_Issue597_2026-10.md](主架構支持の解析表現不変性_Issue597_2026-10.md) | 明示Beam/Fiber/MSの床壁境界・割当・荷重合力/一次モーメント・編集/Undo/実OVIKA | 🔶（直接Verification、freshレビュー・最終head全CIは後続） |
 | [未割当線材のSTB出力拒否_Issue625_2026-10.md](未割当線材のSTB出力拒否_Issue625_2026-10.md) | 両公開export・実Appの未割当拒否／状態保持／明示割当回復、正常5部材の独立属性 | 🔶（直接Verification、固定公式XSD取得403・全文未検証） |
 | [外部ID入力拒否_Issue603_2026-10.md](外部ID入力拒否_Issue603_2026-10.md) | MCP/手書き/serde・STB全文書・境界/省略・正常編集/Undo | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
-| [二次CFT入口拒否_Issue539_2026-10.md](二次CFT入口拒否_Issue539_2026-10.md) | 共通用途・raw保存読込・App状態保持・数量/解析入口・正常主柱対照 | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
+| [二次CFT入口拒否_Issue539_2026-10.md](二次CFT入口拒否_Issue539_2026-10.md) | 共通用途・raw保存読込・App状態保持・数量/解析入口・正常主柱対照・編集の通常断面陽性対照/CFTのNoop観測 | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
 | [直接線形求解_Issue598_2026-10.md](直接線形求解_Issue598_2026-10.md) | Cholesky適用・独立f64残差・LU別契約・52,920DOF前後実測・OVIKA旧6失効 | 🔶（Verification、一試行実測、Validation・freshレビュー・最終head全CIは後続） |
 | [静的設定採用_Issue595_2026-10.md](静的設定採用_Issue595_2026-10.md) | 公開静的経路・独立スカラー・自然未収束・GUI保存/MCP拒否 | 🔶（Verification、実験Validation・freshレビュー・最終head全CIは後続） |
 | [SRC材料領域_Issue552_2026-10.md](SRC材料領域_Issue552_2026-10.md) | 中心直角Hの非重複A/I/EA/EI・実Fiber/MS/MN/Mφ/保存/表示・旧版3 | 🔶（限定幾何Verification、実験Validation・freshレビュー・最終head全CIは後続） |
