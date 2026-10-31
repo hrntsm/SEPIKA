@@ -103,13 +103,6 @@ impl BeamElement {
                 .map_err(section_error)?;
         }
         let (e, g) = match sec.shape.as_ref() {
-            Some(
-                SectionShape::RcBeamRect { .. }
-                | SectionShape::RcColumnRect { .. }
-                | SectionShape::RcColumnCircle { .. }
-                | SectionShape::SrcBeamRect { .. }
-                | SectionShape::SrcColumnRect { .. },
-            ) => (mat.young, mat.shear_modulus()),
             Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => {
                 let steel =
                     steel_mat.ok_or_else(|| "CFT 断面の鋼管材料が未設定です".to_string())?;

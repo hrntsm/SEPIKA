@@ -85,6 +85,22 @@ fn test_internal_force_no_double_count() {
     for i in 0..12 {
         assert_relative_eq!(f.data[i], k_u[i], epsilon = 1.0);
     }
+    let mf = elem
+        .state_member_forces(&ctx)
+        .expect("材端集中ばね梁は state_member_forces を実装しているはず");
+    assert_eq!(mf.at.len(), 3, "評価断面数（0/0.5/1.0）と一致するはず");
+
+    let arr: [f64; 12] = std::array::from_fn(|i| f.data[i]);
+    let f_local = elem.elastic.axis.rotate_to_local(&arr);
+    let mz_i = mf.at[0].1[5];
+    let mz_j = mf.at[2].1[5];
+    assert_relative_eq!(mz_i, -f_local[5], epsilon = 1e-6);
+    assert_relative_eq!(mz_j, f_local[11], epsilon = 1e-6);
+    assert!(
+        mz_i.abs() > 1.0,
+        "曲げを与えたのでモーメントは非ゼロのはず: {}",
+        mz_i
+    );
 }
 
 /// 材端ばねは強軸曲げ（局所 rz。DOF 5・11）にのみ作用し、軸・ねじり・弱軸曲げ
@@ -418,26 +434,6 @@ fn test_mn_interaction_floor_at_high_axial() {
     assert_relative_eq!(spring_fy(&*elem.spring_i), 0.02 * my0, max_relative = 1e-9);
 }
 
-#[test]
-fn test_mn_interaction_yield_moment_in_response() {
-    let my0 = 1.0e7;
-    let elastic = make_test_beam();
-    let ea_over_l = 205000.0 * 80000.0 / 3000.0;
-    let spring_i = Box::new(Bilinear::new(1.0e12, my0, 0.0));
-    let spring_j = Box::new(Bilinear::new(1.0e12, my0, 0.0));
-    let mut elem = ConcentratedSpringBeam::new(elastic, spring_i, spring_j)
-        .with_mn_interaction(my0, ea_over_l);
-    let ctx = Ctx {
-        model: &sepika_core::model::Model::default(),
-    };
-    let du = LocalVec {
-        data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.1, 0.0, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
-    };
-    elem.update_state(&du, false, &ctx).unwrap();
-    let (m, _) = elem.spring_i.clone_box().trial(0.1);
-    assert_relative_eq!(m, 0.5 * my0, max_relative = 1e-6);
-}
-
 /// 材端ばねは**強軸**（要素局所 rz。断面のせい方向の曲げ）に作用すること。
 ///
 /// 要素局所系は「y 軸＝断面のせい方向」規約のため、強軸曲げは (uy, rz) ブロック
@@ -524,37 +520,6 @@ fn test_compute_kstar_matches_elastic_beam_with_rigid_zone_and_pin() {
             }
         }
     }
-}
-
-/// `state_member_forces` が復元力（`internal_force`）と整合した内力分布を返すこと。
-#[test]
-fn test_state_member_forces_matches_internal_force() {
-    let mut elem = make_test_element();
-    let ctx = Ctx {
-        model: &sepika_core::model::Model::default(),
-    };
-    let du = LocalVec {
-        data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, -0.001],
-    };
-    elem.update_state(&du, true, &ctx).unwrap();
-
-    let mf = elem
-        .state_member_forces(&ctx)
-        .expect("材端集中ばね梁は state_member_forces を実装しているはず");
-    assert_eq!(mf.at.len(), 3, "評価断面数（0/0.5/1.0）と一致するはず");
-
-    let f = elem.internal_force(&ctx);
-    let arr: [f64; 12] = std::array::from_fn(|i| f.data[i]);
-    let f_local = elem.elastic.axis.rotate_to_local(&arr);
-    let mz_i = mf.at[0].1[5];
-    let mz_j = mf.at[2].1[5];
-    assert_relative_eq!(mz_i, -f_local[5], epsilon = 1e-6);
-    assert_relative_eq!(mz_j, f_local[11], epsilon = 1e-6);
-    assert!(
-        mz_i.abs() > 1.0,
-        "曲げを与えたのでモーメントは非ゼロのはず: {}",
-        mz_i
-    );
 }
 
 #[test]

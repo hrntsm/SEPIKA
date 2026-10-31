@@ -585,19 +585,7 @@ fn test_build_nonlinear_behavior_concentrated_spring_uses_spring_beam() {
         AnalysisKind::Incremental,
         None,
     );
-    let snap = behavior.snapshot_state();
-    let is_spring = snap
-        .downcast_ref::<(
-            Vec<Box<dyn sepika_material::uniaxial::UniaxialMaterial>>,
-            [f64; 4],
-            [f64; 4],
-            crate::frame::beam::state::ElasticLoadState,
-        )>()
-        .is_some();
-    assert!(
-        is_spring,
-        "nonlinear ConcentratedSpring should be ConcentratedSpringBeam"
-    );
+    assert_eq!(behavior.end_spring_rotations(), Some([0.0, 0.0]));
 }
 
 #[test]
@@ -625,11 +613,10 @@ fn test_build_nonlinear_behavior_fiber_uses_fiber_beam() {
         AnalysisKind::Incremental,
         None,
     );
-    let snap = behavior.snapshot_state();
-    let is_fiber = snap
-        .downcast_ref::<crate::frame::fiber::FiberBeamSnapshot>()
-        .is_some();
-    assert!(is_fiber, "nonlinear Fiber should be FiberBeam");
+    let sections = behavior
+        .fiber_section_states()
+        .expect("ファイバー断面の状態");
+    assert!(!sections.is_empty());
 }
 
 /// ブレース要素の生成モデル用（2 節点・軸方向 4000mm・断面積 2000mm2）。
