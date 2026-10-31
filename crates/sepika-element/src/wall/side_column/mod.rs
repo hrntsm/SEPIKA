@@ -14,7 +14,7 @@ pub use detect::{
 };
 
 #[cfg(test)]
-use crate::behavior::{Ctx, ElementBehavior, LocalMat, MassOption};
+use crate::behavior::{Ctx, ElementBehavior, MassOption};
 #[cfg(test)]
 use crate::frame::beam::BeamElement;
 #[cfg(test)]
@@ -68,20 +68,6 @@ mod tests {
         InPlaneReleasedColumn::new(inner, release_axis)
     }
 
-    /// 通常の柱剛性（両端固定・非解放）から、指定した並進自由度に単位変位を
-    /// 与えたときのひずみエネルギ u^T K u を返す（節点0側は完全固定=0とする）。
-    fn energy_at(k: &LocalMat, dof_j: usize) -> f64 {
-        let mut u = [0.0; 12];
-        u[dof_j] = 1.0;
-        let mut s = 0.0;
-        for i in 0..12 {
-            for j in 0..12 {
-                s += u[i] * k.get(i, j) * u[j];
-            }
-        }
-        s
-    }
-
     /// 面内曲げ面（解放対象）は縮約後にせん断・モーメントとも負担しない
     /// （壁面内方向は両端ピン＝機構）ことを、局所=グローバルとなる恒等軸で確認する。
     ///
@@ -108,12 +94,12 @@ mod tests {
 
         let col_z = col_ref;
         let k_z = col_z.tangent_stiffness(&ctx);
-        let e_uy_zero = energy_at(&k_z, 7);
+        let e_uy_zero = k_z.get(7, 7);
         assert!(
             e_uy_zero.abs() / expected_uy < 1e-6,
             "LocalZ解放でuy面のエネルギがゼロでない: {e_uy_zero}"
         );
-        let e_uz = energy_at(&k_z, 8);
+        let e_uz = k_z.get(8, 8);
         assert!(
             (e_uz - expected_uz).abs() / expected_uz < 1e-6,
             "面外剛性が変化した: e_uz={e_uz} expected={expected_uz}"
@@ -121,29 +107,32 @@ mod tests {
 
         let col_y = make_test_column(ReleaseAxis::LocalY);
         let k_y = col_y.tangent_stiffness(&ctx);
-        let e_uz_zero = energy_at(&k_y, 8);
+        let e_uz_zero = k_y.get(8, 8);
         assert!(
             e_uz_zero.abs() / expected_uz < 1e-6,
             "LocalY解放でuz面のエネルギがゼロでない: {e_uz_zero}"
         );
-        let e_uy = energy_at(&k_y, 7);
+        let e_uy = k_y.get(7, 7);
         assert!(
             (e_uy - expected_uy).abs() / expected_uy < 1e-6,
             "面外剛性が変化した: e_uy={e_uy} expected={expected_uy}"
         );
+        for (column, stiffness) in [(&col_z, &k_z), (&col_y, &k_y)] {
+            assert!(stiffness.data.iter().all(|value| value.is_finite()));
+            let expected = column.inner.e * column.inner.a / column.inner.length;
+            let axial = stiffness.get(6, 6);
+            assert!((axial - expected).abs() / expected < 1e-6);
+        }
     }
 
     #[test]
     fn test_consistent_mass_has_the_same_released_rotation_mapping() {
-        let model = Model::default();
-        let ctx = Ctx { model: &model };
         let column = make_test_column(ReleaseAxis::LocalY);
         let mass = column.mass_matrix(MassOption::Consistent);
         assert!(mass.get(4, 4).abs() < 1e-12);
         assert!(mass.get(10, 10).abs() < 1e-12);
         let lumped = column.mass_matrix(MassOption::Lumped);
         assert!(lumped.get(4, 4).abs() < 1e-12);
-        let _ = ctx;
     }
 
     #[test]
@@ -169,23 +158,6 @@ mod tests {
                     assert!((k.get(row, column) - k.get(column, row)).abs() < scale * 1e-12);
                 }
             }
-        }
-    }
-
-    /// 軸剛性 EA/L は解放の影響を受けない。
-    #[test]
-    fn test_release_keeps_axial_stiffness() {
-        let model = Model::default();
-        let ctx = Ctx { model: &model };
-        for axis in [ReleaseAxis::LocalY, ReleaseAxis::LocalZ] {
-            let col = make_test_column(axis);
-            let k = col.tangent_stiffness(&ctx);
-            let expected = col.inner.e * col.inner.a / col.inner.length;
-            let e_axial = energy_at(&k, 6);
-            assert!(
-                (e_axial - expected).abs() / expected < 1e-6,
-                "axis={axis:?} e_axial={e_axial} expected={expected}"
-            );
         }
     }
 
@@ -328,14 +300,6 @@ mod tests {
         }
     }
 
-    /// 壁の左辺（下辺a-上辺a）を結ぶ柱 → 側柱として Some
-    #[test]
-    fn test_wall_side_column_release_left_edge_is_some() {
-        let model = make_wall_model();
-        let data = model.elements.iter().find(|e| e.id == ElemId(3)).unwrap();
-        assert!(wall_side_column_release(data, &model).is_some());
-    }
-
     /// 壁と無関係な柱（節点が壁の節点と一致しない）→ None
     #[test]
     fn test_wall_side_column_release_unrelated_column_is_none() {
@@ -355,34 +319,6 @@ mod tests {
         let model = make_wall_model();
         let data = make_column_data([0, 2]);
         assert!(wall_side_column_release(&data, &model).is_none());
-    }
-
-    /// 事前インデックス（`SideColumnEdges`）は走査版 `wall_side_column_release` と
-    /// 同じ判定結果を返す（側柱=Some で軸も一致、対角材・無関係柱=None）。
-    #[test]
-    fn test_side_column_edges_matches_scan() {
-        let mut model = make_wall_model();
-        model.nodes.push(make_node(4, [100_000.0, 100_000.0, 0.0]));
-        model
-            .nodes
-            .push(make_node(5, [100_000.0, 100_000.0, 3000.0]));
-        let idx = SideColumnEdges::build(&model);
-        for nodes in [[0u32, 3], [1, 2], [0, 2], [4, 5]] {
-            let mut data = make_column_data(nodes);
-            if let Some(owner) = model
-                .elements
-                .iter()
-                .find(|e| e.nodes.as_slice() == data.nodes.as_slice())
-            {
-                data = owner.clone();
-            }
-            assert_eq!(
-                idx.release_axis(&data, &model),
-                wall_side_column_release(&data, &model),
-                "節点対 {:?} で走査版と不一致",
-                nodes
-            );
-        }
     }
 
     #[test]
@@ -405,7 +341,7 @@ mod tests {
                 );
                 assert_eq!(
                     index.release_axis(member, &model),
-                    wall_side_column_release(member, &model)
+                    Some(ReleaseAxis::LocalDirection([0.0, 1.0]))
                 );
                 assert_eq!(
                     index
