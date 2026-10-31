@@ -312,9 +312,11 @@ impl FloorPlateAssignmentRegions {
                 .find(|(i, region)| !used[*i] && same_boundary(&region.boundary, &boundary))
             {
                 used[index] = true;
-                let mut preserved = region.clone();
-                preserved.boundary = boundary;
-                self.regions.push(preserved);
+                self.regions.push(FloorPlateAssignmentRegion {
+                    id: region.id,
+                    boundary,
+                    assignment: region.assignment,
+                });
             } else {
                 let id = FloorPlateAssignmentRegionId(self.next_id);
                 self.next_id += 1;
@@ -449,9 +451,11 @@ impl WallPlateAssignmentRegions {
                 .find(|(i, region)| !used[*i] && same_boundary(&region.boundary, &boundary))
             {
                 used[index] = true;
-                let mut preserved = region.clone();
-                preserved.boundary = boundary;
-                self.regions.push(preserved);
+                self.regions.push(WallPlateAssignmentRegion {
+                    id: region.id,
+                    boundary,
+                    assignment: region.assignment,
+                });
             } else {
                 let id = WallPlateAssignmentRegionId(self.next_id);
                 self.next_id += 1;
@@ -743,6 +747,7 @@ fn scan_bounded_regions<'a>(
         let origin = points[from];
         edges.sort_by(|a, b| angle(origin, points[a.to]).total_cmp(&angle(origin, points[b.to])));
     }
+    let edge_count = around.values().map(Vec::len).sum::<usize>();
     let mut starts: Vec<(usize, usize)> = around
         .iter()
         .flat_map(|(&from, edges)| edges.iter().map(move |edge| (from, edge.to)))
@@ -759,7 +764,7 @@ fn scan_bounded_regions<'a>(
         let mut boundary = Vec::new();
         let mut vertices = Vec::new();
         let mut closed = false;
-        for _ in 0..=around.values().map(Vec::len).sum::<usize>() {
+        for _ in 0..=edge_count {
             if !visited.insert(current) {
                 break;
             }
@@ -1570,8 +1575,7 @@ impl Model {
         let first = coords[0];
         let last = *coords.last()?;
         let tol = crate::geom::MEMBER_AXIS_TOL_MM;
-        if coords.len() >= 2
-            && (first[0] - last[0]).abs() <= tol
+        if (first[0] - last[0]).abs() <= tol
             && (first[1] - last[1]).abs() <= tol
             && (first[2] - last[2]).abs() <= tol
         {
@@ -1596,14 +1600,7 @@ impl Model {
         id: FloorPlateAssignmentRegionId,
     ) -> Option<Vec<NodeId>> {
         let coords = self.floor_assignment_region_coords(id)?;
-        let mut nodes = Vec::with_capacity(coords.len());
-        for coord in coords {
-            let node = self.nodes.iter().find(|n| {
-                crate::geom::vec3::dist(n.coord, coord) <= crate::geom::MEMBER_AXIS_TOL_MM
-            })?;
-            nodes.push(node.id);
-        }
-        Some(nodes)
+        self.assignment_boundary_nodes(&coords)
     }
 
     /// 壁版割当領域 ID から境界の頂点座標 `[mm]` を解決する。領域が無ければ `None`。
@@ -1622,8 +1619,12 @@ impl Model {
         id: WallPlateAssignmentRegionId,
     ) -> Option<Vec<NodeId>> {
         let coords = self.wall_assignment_region_coords(id)?;
+        self.assignment_boundary_nodes(&coords)
+    }
+
+    fn assignment_boundary_nodes(&self, coords: &[[f64; 3]]) -> Option<Vec<NodeId>> {
         let mut nodes = Vec::with_capacity(coords.len());
-        for coord in coords {
+        for &coord in coords {
             let node = self.nodes.iter().find(|n| {
                 crate::geom::vec3::dist(n.coord, coord) <= crate::geom::MEMBER_AXIS_TOL_MM
             })?;
@@ -1810,12 +1811,10 @@ mod tests {
     fn 自動生成した割当領域は支持部材の検証を通る() {
         let mut floor = square_model_with_beam();
         floor.rebuild_floor_assignment_regions();
-        assert_eq!(floor.floor_assignment_regions.validate(&floor), Ok(()));
         assert_eq!(floor.validate(), Ok(()));
 
         let mut wall = wall_model();
         wall.rebuild_wall_assignment_regions();
-        assert_eq!(wall.wall_assignment_regions.validate(&wall), Ok(()));
         assert_eq!(wall.validate(), Ok(()));
     }
 
@@ -1969,6 +1968,8 @@ mod tests {
         assert_eq!(overlaps[0].second, SupportMemberId::Primary(ElemId(4)));
         assert!((overlaps[0].midpoint[0] - 2000.0).abs() < 1e-9);
         assert!(overlaps[0].midpoint[1].abs() < 1e-9);
+        model.elements.rotate_left(2);
+        assert_eq!(model.same_kind_support_overlaps(), overlaps);
 
         // 平行に並ぶだけ（別の材軸）の大梁は検出しない。
         for (id, coord) in [
@@ -1990,18 +1991,6 @@ mod tests {
             1,
             "平行に並ぶだけの部材は対象外"
         );
-    }
-
-    /// 同種の重なり検出は、要素を追加した順・配列順に依存しない。
-    #[test]
-    fn 同種の支持部材の重なり検出は要素順に依存しない() {
-        let mut model = mm_square_model_with_beam();
-        model.elements.push(beam_element(4, 0, 1));
-        model.elements.rotate_left(2);
-        let overlaps = model.same_kind_support_overlaps();
-        assert_eq!(overlaps.len(), 1, "{overlaps:?}");
-        assert_eq!(overlaps[0].first, SupportMemberId::Primary(ElemId(0)));
-        assert_eq!(overlaps[0].second, SupportMemberId::Primary(ElemId(4)));
     }
 
     /// 同じ材軸に重なった同種の小梁も検出する。
@@ -2123,24 +2112,7 @@ mod tests {
             });
         }
         for (i, (a, b)) in [(0, 1), (1, 2), (2, 3), (3, 0)].into_iter().enumerate() {
-            model.elements.push(crate::model::ElementData {
-                id: ElemId(i as u32),
-                kind: crate::model::ElementKind::Beam,
-                nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
-                section: None,
-                local_axis: crate::model::LocalAxis {
-                    ref_vector: [0.0, 0.0, 1.0],
-                },
-                end_cond: [
-                    crate::model::EndCondition::Fixed,
-                    crate::model::EndCondition::Fixed,
-                ],
-                force_regime: crate::model::ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
-                plastic_zone: None,
-                spring: None,
-            });
+            model.elements.push(beam_element(i as u32, a, b));
         }
         model.unassigned_beams.push(member(
             0,
@@ -2209,24 +2181,7 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            model.elements.push(crate::model::ElementData {
-                id: ElemId(i as u32),
-                kind: crate::model::ElementKind::Beam,
-                nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
-                section: None,
-                local_axis: crate::model::LocalAxis {
-                    ref_vector: [0.0, 0.0, 1.0],
-                },
-                end_cond: [
-                    crate::model::EndCondition::Fixed,
-                    crate::model::EndCondition::Fixed,
-                ],
-                force_regime: crate::model::ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
-                plastic_zone: None,
-                spring: None,
-            });
+            model.elements.push(beam_element(i as u32, a, b));
         }
         let slab_id = model.add_enclosed_slab_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
@@ -2425,24 +2380,7 @@ mod tests {
             });
         }
         for (i, (a, b)) in [(0, 3), (1, 2), (3, 2), (0, 1)].into_iter().enumerate() {
-            model.elements.push(crate::model::ElementData {
-                id: ElemId(i as u32),
-                kind: crate::model::ElementKind::Beam,
-                nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
-                section: None,
-                local_axis: crate::model::LocalAxis {
-                    ref_vector: [0.0, 0.0, 1.0],
-                },
-                end_cond: [
-                    crate::model::EndCondition::Fixed,
-                    crate::model::EndCondition::Fixed,
-                ],
-                force_regime: crate::model::ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
-                plastic_zone: None,
-                spring: None,
-            });
+            model.elements.push(beam_element(i as u32, a, b));
         }
         model
     }
@@ -2524,26 +2462,11 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            model.elements.push(crate::model::ElementData {
-                id: ElemId(elem_base + i as u32),
-                kind: crate::model::ElementKind::Beam,
-                nodes: [NodeId(node_base + a), NodeId(node_base + b)]
-                    .into_iter()
-                    .collect(),
-                section: None,
-                local_axis: crate::model::LocalAxis {
-                    ref_vector: [0.0, 0.0, 1.0],
-                },
-                end_cond: [
-                    crate::model::EndCondition::Fixed,
-                    crate::model::EndCondition::Fixed,
-                ],
-                force_regime: crate::model::ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
-                plastic_zone: None,
-                spring: None,
-            });
+            model.elements.push(beam_element(
+                elem_base + i as u32,
+                node_base + a,
+                node_base + b,
+            ));
         }
     }
 

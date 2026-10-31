@@ -42,9 +42,6 @@ pub fn validate_simple(poly: &[[f64; 2]]) -> Result<(), &'static str> {
         if !length_squared.is_finite() || length_squared < f64::MIN_POSITIVE {
             return Err("辺長の数値精度不足");
         }
-        if poly[i] == poly[(i + 1) % n] {
-            return Err("退化辺");
-        }
         for j in i + 1..n {
             if j == i + 1 || (i == 0 && j == n - 1) {
                 continue;

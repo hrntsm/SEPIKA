@@ -44,10 +44,6 @@
 //! 柱脚位置の全ペアから直線候補を作るため、柱の本数を N とすると候補数は O(N²) になる。
 //! 実建物の柱本数（数百〜数千本程度）では実用上問題にならないが、極端に柱本数が多い
 //! モデルでは遅くなりうる。
-//!
-//! # 未結線
-//!
-//! 本モジュールは幾何の検出のみを提供する。`WallRegion`/`WallPlate` への統合は未対応。
 
 use super::{scan_faces, Edge};
 use crate::geom::{is_vertical_pair, MEMBER_AXIS_TOL_MM};

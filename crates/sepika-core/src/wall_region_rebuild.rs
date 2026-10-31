@@ -262,15 +262,7 @@ fn match_candidate(
 }
 
 fn assign_posts(model: &mut Model, boundaries: &[WallRegionBoundary]) -> usize {
-    let posts: Vec<_> = model
-        .wall_regions
-        .iter_mut()
-        .flat_map(|r| r.posts.drain(..))
-        .chain(model.unassigned_posts.drain(..))
-        .collect();
-    for region in &mut model.wall_regions {
-        region.posts.clear();
-    }
+    let posts = std::mem::take(&mut model.unassigned_posts);
     let mut unassigned = 0;
     for sm in posts {
         let Some((a, b)) = model.secondary_member_end_points(&sm) else {
