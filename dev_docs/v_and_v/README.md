@@ -4,6 +4,10 @@
 
 [現役回帰の対応表](線材と集中ばねの試験整理_Issue1059.md#現役の保証)に、剛域ねじり・キャッシュ・壁条件・骨格表示・集中ばね断面力の統合先を記録した。独立期待値と状態遷移を保持し、既存のV&V状態と固定SHA・raw履歴は変更しない。
 
+## ファイバー共通処理の現役参照整理（#1059）
+
+[現役回帰の対応表](ファイバー共通処理の試験整理_Issue1059.md#現役の保証)に、公称初期剛性・材料解決・部材荷重と偏心連成試験の統合先を記録した。独立期待値・元の精度・状態確定と復元を保持し、既存のV&V状態と固定SHA/raw履歴は変更しない。
+
 ## 要素共通処理の現役参照整理（#1059）
 
 [現役回帰の対応表](要素共通処理の試験整理_Issue1059.md#現役の保証)に、DOF順序・ばね剛性・ダンパー断面力の統合先とシェル感度・免震状態確定の保証を記録した。数値契約・状態遷移と既存V&Vの状態を維持し、固定SHAと過去の出力は履歴として保持する。
@@ -381,6 +385,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [共通局所座標の参照方向_Issue762_2026-10.md](共通局所座標の参照方向_Issue762_2026-10.md) | 一般線材の断面参照方向、公開計算入口、解析38・検定24 | 🔶（変更前再現、対象RC Q0 8件・限定helper後App GUI lib880件、旧直接検定23の実OVIKA失効、未参照梁の保持と実使用部材の拒否をVerification。先行878件・880件と途中失敗、#769の未対応、Validation・最終ゲートは記録を参照） |
 | [CFT鋼管材料GUI_Issue766_2026-10.md](CFT鋼管材料GUI_Issue766_2026-10.md) | CFT角形・円形の鋼管材料表示・編集・Undo/保存・重量検定再計算 | 🔶（egui実表・App直接Verification。手動GUI・Validation・独立レビュー・最終ゲート未実施） |
 | [鋼材F選択と入力停止_Issue601_2026-10.md](鋼材F選択と入力停止_Issue601_2026-10.md) | 通常鋼材・鋼小梁・S/CFTの材料/実厚/Fと不備停止・検定23 | 🔶（変更前再現と材料/パネルdesign674・core対象49・Clippy成功。App全479成功/既存1ignore、直接4成功。MCP feature144成功。GUI971成功/既存1ignoreはいずれも形状不足追補前。追補後design675/App4/MCP1とClippy成功。文書検査/build/fmt成功。Validation・最終ゲートは未確認） |
+| [ファイバー共通処理の試験整理_Issue1059.md](ファイバー共通処理の試験整理_Issue1059.md) | 公称初期K・材料解決・部材荷重・偏心連成試験の現役対応 | 🔶（既存Verificationの保持。Validationの新規確認なし） |
 | [微小相似Fiber初期断面_Issue783_2026-10.md](微小相似Fiber初期断面_Issue783_2026-10.md) | 微小断面分割・無次元化・局所後退誤差、公開Auto時刻歴と解析42失効 | 🔶（独立A/両軸I・連成弾性解・尺度変更・失敗復元のVerification。Validationと最終ゲートは記録を参照） |
 | [仕口パネル接合面距離_Issue759_2026-10.md](仕口パネル接合面距離_Issue759_2026-10.md) | 一意な実接合面の方向別距離・剛体接続・公開入口と保存失効 | 🔶（all-targets1716/IO240と追補App全tests1024成功。荷重対照と壁fixtureを記録、既存strictdoc警告#800・Validation・最終ゲートは同記録） |
 | [仕口パネル実軸力比_Issue761_2026-10.md](仕口パネル実軸力比_Issue761_2026-10.md) | 実材長・実基準軸耐力による軸力比と小寸法・相似尺度 | 🔶（公開要素Verification、solver・保存成果と最終ゲートは同記録。Validation未） |
@@ -682,7 +687,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
 | 19 | 部材履歴則（武田・原点指向・標準・逆行・最大点指向） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs`、`zero_increment_*`と実factory/壁/質点系solver（[Issue596検証](ゼロ増分履歴保持_Issue596_2026-10.md)） | P4 | 🔶（ゼロ増分Verification済み、全履歴Validation未） |
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
-| 20a | 微小相似Fiber初期断面 | sepika-math / sepika-element / sepika-solver | dense_lu.rs, frame/fiber/constitutive_tests.rs, panel_zone.rs | `near_diagonal_coupling_roundoff_*`・`similar_*`・`panel_753_public_nonlinear_time_history_*`（[Issue #783検証](微小相似Fiber初期断面_Issue783_2026-10.md)） | P4 | 🔶（数値Verification。実験Validation未） |
+| 20a | 微小相似Fiber初期断面 | sepika-math / sepika-element / sepika-solver | dense_lu.rs, frame/fiber/constitutive_tests.rs, panel_zone.rs | `near_diagonal_coupling_roundoff_*`・`similar_*`・`panel_753_public_nonlinear_time_history_*`（[Issue #783検証](微小相似Fiber初期断面_Issue783_2026-10.md)）。偏心試験の現役統合先は[共通処理の対応表](ファイバー共通処理の試験整理_Issue1059.md#現役の保証) | P4 | 🔶（数値Verification。実験Validation未） |
 | 20b | 物理曲率・非対称断面・剛域付き軸履歴 | sepika-element | frame/fiber/physical_curvature_tests.rs、distributed_curvature_tests.rs、rigid_axial_tests.rs | [保存成果の補完と端部解放の収束検証](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | P4 | 🔶（有限Verification。実験Validation未） |
 | 20c | 保存/失敗時の全要素復元と全固定時刻歴 | sepika-element / sepika-io / sepika-solver | springs/isolator/tests.rs、checkpoint/preserved_tests.rs、common/elem_loop/preserved_tests.rs、timehistory/tests/loaded_recording.rs、tests/general_member_loads.rs | [保存ブランチの残りの復元検証](保存ブランチ496の変更採否_2026-10.md) | 横断 | 🔶（有限Verification。実験Validation未） |
 | 21 | 参考骨格算定（M–φ→M–θ、廃止済み） | — | — | 現行の試験対象なし。上記#436の履歴記録を参照 | P4 / #436 / #849 | 廃止済み（単位・拒否契約の検証履歴を保持） |
