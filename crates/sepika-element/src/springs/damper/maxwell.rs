@@ -308,24 +308,6 @@ mod tests {
         assert_eq!(d.axial_tangent(), 0.0);
     }
 
-    #[test]
-    fn test_maxwell_state_member_forces_matches_axial_force() {
-        let mut d = damper(100.0, 1000.0, 1.0, 0.01);
-        d.trial_elong = 1.0;
-        let n = d.axial_force(1.0);
-        assert!(n > 0.0);
-        let mf = d
-            .state_member_forces(&Ctx {
-                model: &sepika_core::model::Model::default(),
-            })
-            .expect("マクスウェルダンパーは状態から内力を返す");
-        assert_eq!(mf.at.len(), 2);
-        for (_, v) in &mf.at {
-            assert!((v[0] - n).abs() < 1e-12);
-            assert_eq!(v[5], 0.0);
-        }
-    }
-
     /// 中-2: commit 直後（`trial_elong == committed_elong`）の `state_member_forces`
     /// が「commit 直前（committed_ud 更新前）の `axial_force`」と一致すること。
     /// 過渡状態（ダッシュポットが定常に達していない各ステップ）では、
@@ -433,6 +415,14 @@ mod tests {
         assert!(n > 0.0);
         assert!((f.data[0] + n).abs() < 1e-9);
         assert!((f.data[6] - n).abs() < 1e-9);
+        let mf = d
+            .state_member_forces(&ctx)
+            .expect("マクスウェルダンパーの状態内力");
+        assert_eq!(mf.at.len(), 2);
+        for (_, v) in &mf.at {
+            assert!((v[0] - n).abs() < 1e-12);
+            assert_eq!(v[5], 0.0);
+        }
     }
 
     /// リリーフ特性: リリーフ速度 Vr の前後でダッシュポット力則が連続であり、

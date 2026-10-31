@@ -24,8 +24,8 @@ impl ShellElement {
                 let eta = GAUSS_PTS_2[gp].1;
                 let dNc = dshape_cart(xi, eta, &lc);
 
-                let bm = self.membrane_b(xi, eta, &dNc);
-                let bb = self.bending_b(xi, eta, &dNc);
+                let bm = self.membrane_b(&dNc);
+                let bb = self.bending_b(&dNc);
                 let bs = self.shear_b_mitc4(xi, eta, &lc);
 
                 let mut eps_m = [0.0; 3];

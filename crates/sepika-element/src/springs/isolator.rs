@@ -334,10 +334,6 @@ impl ElementBehavior for IsolatorElement {
             ShearModel::Laminated { sy, sz } => {
                 sy.trial(uy);
                 sz.trial(uz);
-                if commit {
-                    sy.commit();
-                    sz.commit();
-                }
             }
             ShearModel::Friction {
                 k1,
@@ -367,10 +363,6 @@ impl ElementBehavior for IsolatorElement {
                     *tr_pl_z = uz - *tr_fz / *k1;
                     *tr_slip = true;
                 }
-                if commit {
-                    *pl_y = *tr_pl_y;
-                    *pl_z = *tr_pl_z;
-                }
             }
             ShearModel::StrainDependent {
                 sy,
@@ -386,15 +378,10 @@ impl ElementBehavior for IsolatorElement {
                 let k2 = *k2_0 * poly3(ckd, gamma);
                 sy.trial(uy, qd, k2);
                 sz.trial(uz, qd, k2);
-                if commit {
-                    sy.commit();
-                    sz.commit();
-                }
             }
         }
         if commit {
-            self.committed_disp = self.trial_disp;
-            self.committed_shear = self.shear.clone();
+            self.commit_state();
         }
         Ok(())
     }

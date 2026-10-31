@@ -9,7 +9,7 @@ use super::shape::{dshape_cart, jacobian, jacobian_inv_transpose, shape_2d};
 
 impl ShellElement {
     #[allow(non_snake_case)]
-    pub(crate) fn membrane_b(&self, _xi: f64, _eta: f64, dNc: &[[f64; 4]; 2]) -> Vec<f64> {
+    pub(crate) fn membrane_b(&self, dNc: &[[f64; 4]; 2]) -> Vec<f64> {
         let ncols = 24;
         let mut b = vec![0.0; 3 * ncols];
         for i in 0..4 {
@@ -23,7 +23,7 @@ impl ShellElement {
     }
 
     #[allow(non_snake_case)]
-    pub(crate) fn bending_b(&self, _xi: f64, _eta: f64, dNc: &[[f64; 4]; 2]) -> Vec<f64> {
+    pub(crate) fn bending_b(&self, dNc: &[[f64; 4]; 2]) -> Vec<f64> {
         let ncols = 24;
         let mut b = vec![0.0; 3 * ncols];
         for i in 0..4 {
