@@ -213,11 +213,12 @@ pub(crate) fn fiber_young_moduli(
         _ => 0.0,
     };
     let steel_e = match shape {
-        Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }) => model
-            .element_steel_material(data)
-            .map(|m| m.young)
-            .unwrap_or(0.0),
-        Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => model
+        Some(
+            SectionShape::SrcBeamRect { .. }
+            | SectionShape::SrcColumnRect { .. }
+            | SectionShape::CftBox { .. }
+            | SectionShape::CftPipe { .. },
+        ) => model
             .element_steel_material(data)
             .map(|m| m.young)
             .unwrap_or(0.0),
@@ -297,9 +298,6 @@ pub(crate) fn resolve_steel_fiber_fy(
                 let thick = box_shape
                     .box_thicknesses()
                     .map_or(*thick, |(t1, t2)| t1.max(t2));
-                if sepika_core::material_grade::steel_f_value_issue(&m.name, thick).is_some() {
-                    return None;
-                }
                 sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
             .or(mat_fy),
@@ -879,6 +877,41 @@ impl FiberBeam {
         k
     }
 
+    fn nominal_elastic_stiffness(&self, d_nom: [f64; 3]) -> LocalMat {
+        let mut k_el = LocalMat::zeros(12);
+        for sgn in [-1.0_f64, 1.0] {
+            let xi = sgn / 3.0_f64.sqrt();
+            let w_phys = self.flex_length / 2.0;
+            let b = Self::compute_b_matrix(xi, self.flex_length, self.phi_y, self.phi_z);
+            for i in 0..12 {
+                for j in 0..12 {
+                    let mut val = 0.0;
+                    for (p, dp) in d_nom.iter().enumerate() {
+                        val += b[p][i] * dp * b[p][j];
+                    }
+                    if val != 0.0 {
+                        k_el.set(i, j, k_el.get(i, j) + val * w_phys);
+                    }
+                }
+            }
+        }
+        for i in 0..12 {
+            for j in 0..12 {
+                let v = self.k_shear.get(i, j);
+                if v != 0.0 {
+                    k_el.set(i, j, k_el.get(i, j) + v);
+                }
+            }
+        }
+        if let Some(kt) = self.torsion_stiffness() {
+            k_el.set(3, 3, k_el.get(3, 3) + kt);
+            k_el.set(9, 9, k_el.get(9, 9) + kt);
+            k_el.set(3, 9, k_el.get(3, 9) - kt);
+            k_el.set(9, 3, k_el.get(9, 3) - kt);
+        }
+        k_el
+    }
+
     /// 諸元は要素座標系で与える。両端剛接としてヒンジを両端有効にする。剛域なし。
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_raw_parts(
@@ -945,37 +978,7 @@ impl FiberBeam {
             trial_disp: [0.0; 12],
         };
         let d_nom = [e * area, e * iy_elem, e * iz_elem];
-        let mut k_el = LocalMat::zeros(12);
-        for sgn in [-1.0_f64, 1.0] {
-            let xi = sgn / 3.0_f64.sqrt();
-            let w_phys = flex_length / 2.0;
-            let b = Self::compute_b_matrix(xi, flex_length, fb.phi_y, fb.phi_z);
-            for i in 0..12 {
-                for j in 0..12 {
-                    let mut val = 0.0;
-                    for (p, dp) in d_nom.iter().enumerate() {
-                        val += b[p][i] * dp * b[p][j];
-                    }
-                    if val != 0.0 {
-                        k_el.set(i, j, k_el.get(i, j) + val * w_phys);
-                    }
-                }
-            }
-        }
-        for i in 0..12 {
-            for j in 0..12 {
-                let v = fb.k_shear.get(i, j);
-                if v != 0.0 {
-                    k_el.set(i, j, k_el.get(i, j) + v);
-                }
-            }
-        }
-        if let Some(kt) = fb.torsion_stiffness() {
-            k_el.set(3, 3, k_el.get(3, 3) + kt);
-            k_el.set(9, 9, k_el.get(9, 9) + kt);
-            k_el.set(3, 9, k_el.get(3, 9) - kt);
-            k_el.set(9, 3, k_el.get(9, 3) - kt);
-        }
+        let k_el = fb.nominal_elastic_stiffness(d_nom);
         fb.initial_elastic_stiffness = k_el.clone();
         fb.hinge = Some(HingeState::new(lp, k_el, &fb.gauss_points));
         fb
@@ -1026,37 +1029,7 @@ impl FiberBeam {
         ];
 
         let d_nom = [beam.e * beam.a, beam.e * beam.iy, beam.e * beam.iz];
-        let mut k_el = LocalMat::zeros(12);
-        for sgn in [-1.0_f64, 1.0] {
-            let xi = sgn / 3.0_f64.sqrt();
-            let w_phys = l / 2.0;
-            let b = Self::compute_b_matrix(xi, l, fb.phi_y, fb.phi_z);
-            for i in 0..12 {
-                for j in 0..12 {
-                    let mut val = 0.0;
-                    for (p, dp) in d_nom.iter().enumerate() {
-                        val += b[p][i] * dp * b[p][j];
-                    }
-                    if val != 0.0 {
-                        k_el.set(i, j, k_el.get(i, j) + val * w_phys);
-                    }
-                }
-            }
-        }
-        for i in 0..12 {
-            for j in 0..12 {
-                let v = fb.k_shear.get(i, j);
-                if v != 0.0 {
-                    k_el.set(i, j, k_el.get(i, j) + v);
-                }
-            }
-        }
-        if let Some(kt) = fb.torsion_stiffness() {
-            k_el.set(3, 3, k_el.get(3, 3) + kt);
-            k_el.set(9, 9, k_el.get(9, 9) + kt);
-            k_el.set(3, 9, k_el.get(3, 9) - kt);
-            k_el.set(9, 3, k_el.get(9, 3) - kt);
-        }
+        let mut k_el = fb.nominal_elastic_stiffness(d_nom);
         let axial_stiffness = d_nom[0] / fb.length;
         for (i, j, sign) in [(0, 0, 1.0), (0, 6, -1.0), (6, 0, -1.0), (6, 6, 1.0)] {
             k_el.set(i, j, sign * axial_stiffness);
@@ -1341,7 +1314,7 @@ impl FiberBeam {
                             .max(f_elem[rel.dof].abs())
                             .max(uncancelled)
                             .max(qf[rel.dof].abs());
-                        if self.hinge.is_some() && rel.dof % 6 != 3 {
+                        if rel.dof % 6 != 3 {
                             let gp = &self.gauss_points[rel.dof / 6];
                             let fiber_moment: f64 = gp
                                 .section
@@ -1366,11 +1339,7 @@ impl FiberBeam {
                 return Ok(());
             }
 
-            let k_elem = if let Some(h) = &self.hinge {
-                self.hinge_tangent(h)?
-            } else {
-                self.elem_tangent()
-            };
+            let k_elem = self.hinge_tangent(self.hinge.as_ref().unwrap())?;
             let mut kbb = [0.0_f64; 36];
             for (a, &index) in indices.iter().enumerate() {
                 let ra = &self.releases[index];
@@ -1583,18 +1552,12 @@ impl ElementBehavior for FiberBeam {
         _u_elem: &[f64],
         _absolute_loads: &[MemberLoad],
     ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
-        if !self.owns_frame_member_loads() {
-            return Ok(None);
-        }
         Err(format!("Fiber/MS 要素 {:?}: 非線形要素の線形荷重応答は未対応です。状態更新後の試行応答を使用してください", self.element_id))
     }
 
     fn state_frame_load_response(
         &self,
     ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
-        if !self.owns_frame_member_loads() {
-            return Ok(None);
-        }
         let map = FrameDeadLoadMap::new(
             &self.member_load_state.trial_member_loads,
             &self.axis,

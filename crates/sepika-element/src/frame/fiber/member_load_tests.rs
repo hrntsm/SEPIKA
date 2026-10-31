@@ -172,7 +172,7 @@ fn flex_point_wall_equilibrium_keeps_nonzero_raw_moments_and_zero_released_face_
     let ctx = Ctx { model: &model };
     let recovered = m.state_member_forces(&ctx).unwrap();
     let direct = response.section.recover(&m.eval_sections).unwrap();
-    assert_eq!(format!("{recovered:?}"), format!("{direct:?}"));
+    assert_eq!(recovered, direct);
 }
 
 fn equivalent_beam(

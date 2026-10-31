@@ -5,11 +5,7 @@ use sepika_core::model::{AnalysisKind, ElementKind, EndCondition, Model};
 use sepika_material::uniaxial::Bilinear;
 
 pub(super) fn bilinear_member() -> FiberBeam {
-    bilinear_member_at(0.0, 0.0)
-}
-
-fn bilinear_member_at(y_offset: f64, z_offset: f64) -> FiberBeam {
-    similar_bilinear_member(1.0, y_offset, z_offset)
+    similar_bilinear_member(1.0, 0.0, 0.0)
 }
 
 fn similar_bilinear_member(scale: f64, y_offset: f64, z_offset: f64) -> FiberBeam {
@@ -349,33 +345,6 @@ fn public_fiber_and_ms_factories_keep_axial_plasticity_for_fixed_pinned_and_semi
             assert_relative_eq!(member.internal_force(&ctx).data[6], force, epsilon = 1e-5);
         }
     }
-}
-
-#[test]
-fn noncentroidal_initial_section_retains_full_axial_biaxial_coupling_without_extra_elastic_compliance(
-) {
-    let model = Model::default();
-    let ctx = Ctx { model: &model };
-    let mut member = bilinear_member_at(3.0, 7.0);
-    let mut previous = [0.0; 12];
-    assert_relative_eq!(
-        axial(&mut member, 1.5, &mut previous, false, &ctx),
-        100000.0,
-        epsilon = 1e-6
-    );
-    let h = member.hinge.as_ref().unwrap();
-    assert!(h.d0[0][0][1].abs() > 1.0 && h.d0[0][0][2].abs() > 1.0 && h.d0[0][1][2].abs() > 1.0);
-    for end in 0..2 {
-        for (a, expected) in [0.00060625, -8.75e-6, 15e-6].into_iter().enumerate() {
-            assert_relative_eq!(h.trial_eta[end * 3 + a], expected, epsilon = 1e-12);
-            assert_relative_eq!(h.trial_plastic[end * 3 + a], 0.0, epsilon = 1e-12);
-        }
-    }
-    assert_relative_eq!(
-        member.tangent_stiffness(&ctx).get(6, 6),
-        66666.66666666667,
-        epsilon = 1e-5
-    );
 }
 
 #[test]
@@ -776,8 +745,28 @@ fn similar_sections_retain_independent_coupled_elastic_solution_and_failed_trial
     for scale in [1.0, 1e-4, 1e-8, 1e4] {
         let mut member = similar_bilinear_member(scale, 3.0, 7.0);
         let mut previous = [0.0; 12];
+        let force = axial(&mut member, 1.5 * scale, &mut previous, false, &ctx);
+        if scale == 1.0 {
+            assert_relative_eq!(force, 100000.0, epsilon = 1e-6);
+            let h = member.hinge.as_ref().unwrap();
+            assert!(
+                h.d0[0][0][1].abs() > 1.0 && h.d0[0][0][2].abs() > 1.0 && h.d0[0][1][2].abs() > 1.0
+            );
+            for end in 0..2 {
+                for (a, expected) in [0.00060625, -8.75e-6, 15e-6].into_iter().enumerate() {
+                    assert_relative_eq!(h.trial_eta[end * 3 + a], expected, epsilon = 1e-12);
+                    assert_relative_eq!(h.trial_plastic[end * 3 + a], 0.0, epsilon = 1e-12);
+                }
+            }
+            assert_relative_eq!(
+                member.tangent_stiffness(&ctx).get(6, 6),
+                66666.66666666667,
+                epsilon = 1e-5
+            );
+        }
+        member.commit_state();
         assert_relative_eq!(
-            axial(&mut member, 1.5 * scale, &mut previous, true, &ctx),
+            member.internal_force(&ctx).data[6],
             100000.0 * scale.powi(2),
             max_relative = 1e-9
         );

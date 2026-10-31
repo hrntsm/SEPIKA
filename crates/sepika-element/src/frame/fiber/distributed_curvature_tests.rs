@@ -1,3 +1,4 @@
+use super::physical_curvature_tests::CompressionYield;
 use super::*;
 use approx::assert_relative_eq;
 use sepika_core::model::Model;
@@ -108,42 +109,6 @@ fn distributed_pure_bending_has_physical_fiber_strain_at_every_gauss_point_and_p
                     );
                 }
             }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct CompressionYield;
-
-impl UniaxialMaterial for CompressionYield {
-    fn trial(&mut self, strain: f64) -> (f64, f64) {
-        self.probe(strain)
-    }
-    fn probe(&self, strain: f64) -> (f64, f64) {
-        if strain < -0.00005 {
-            (-10.0 + 20000.0 * (strain + 0.00005), 20000.0)
-        } else {
-            (200000.0 * strain, 200000.0)
-        }
-    }
-    fn commit(&mut self) {}
-    fn revert(&mut self) {}
-    fn clone_box(&self) -> Box<dyn UniaxialMaterial> {
-        Box::new(self.clone())
-    }
-    fn serialize_state(&self) -> Vec<u8> {
-        vec![]
-    }
-    fn deserialize_state(
-        &mut self,
-        data: &[u8],
-    ) -> Result<(), sepika_material::uniaxial::MaterialStateError> {
-        if data.is_empty() {
-            Ok(())
-        } else {
-            Err(sepika_material::uniaxial::MaterialStateError::Decode(
-                "人工材料の状態は空です".into(),
-            ))
         }
     }
 }

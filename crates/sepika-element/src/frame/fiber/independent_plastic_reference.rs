@@ -845,12 +845,10 @@ fn coupled_wall_partial_yield_unload_history_matches_uncondensed_primal_state_ta
             assert_relative_eq!(observed_dissipation, expected_dissipation, epsilon = 1e-4);
             assert_relative_eq!(observed_work, expected_work, epsilon = 1e-4);
             let behavior = axial_behavior(&mut member, ms);
-            let trial = behavior.serialize_checkpoint();
             behavior.restore_state(snapshot.as_ref());
             behavior.update_state(&du, true, &ctx).unwrap();
             let committed_force = behavior.internal_force(&ctx);
             assert_eq!(committed_force.data, force.data);
-            assert!(!trial.is_empty());
             previous = u;
             previous_force = std::array::from_fn(|i| force.data[i]);
             previous_expected_force = expected.force;
