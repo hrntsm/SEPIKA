@@ -254,7 +254,7 @@ pub fn fit_story_trilinear(curve: &[(f64, f64)], secant_ratio: f64) -> StoryTril
     let d_max = curve.iter().map(|&(d, _)| d).fold(0.0, f64::max);
     let tol = d_max * 1e-9;
     let mut pts: Vec<(f64, f64)> = curve.iter().copied().filter(|&(d, _)| d > tol).collect();
-    pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
     pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-12);
 
     if pts.is_empty() {
@@ -270,11 +270,7 @@ pub fn fit_story_trilinear(curve: &[(f64, f64)], secant_ratio: f64) -> StoryTril
     }
     let (d_first, q_first) = pts[0];
     let (d3, q3) = *pts.last().unwrap();
-    let k1 = if d_first > 0.0 {
-        q_first / d_first
-    } else {
-        0.0
-    };
+    let k1 = q_first / d_first;
     if k1 <= 0.0 || d3 <= d_first {
         return StoryTrilinear {
             k1,
@@ -286,35 +282,18 @@ pub fn fit_story_trilinear(curve: &[(f64, f64)], secant_ratio: f64) -> StoryTril
             q3,
         };
     }
-    let k3 = if pts.len() >= 2 {
-        let (dp, qp) = pts[pts.len() - 2];
-        if d3 > dp {
-            ((q3 - qp) / (d3 - dp)).clamp(0.0, k1)
-        } else {
-            0.0
-        }
-    } else {
-        (q3 / d3).clamp(0.0, k1)
-    };
+    let (dp, qp) = pts[pts.len() - 2];
+    let k3 = ((q3 - qp) / (d3 - dp)).clamp(0.0, k1);
     let thr = secant_ratio * k1;
     let mut d1 = d3 * 0.5;
     let mut prev = (0.0, 0.0);
-    let mut found = false;
     for &(d, q) in &pts {
-        let tan = if d > prev.0 {
-            (q - prev.1) / (d - prev.0)
-        } else {
-            k1
-        };
+        let tan = (q - prev.1) / (d - prev.0);
         if tan < thr && prev.0 > 0.0 {
             d1 = prev.0;
-            found = true;
             break;
         }
         prev = (d, q);
-    }
-    if !found {
-        d1 = d3 * 0.5;
     }
     let d1 = d1.clamp(d_first, d3 * 0.9);
     let q1 = k1 * d1;

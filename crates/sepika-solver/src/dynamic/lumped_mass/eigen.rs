@@ -15,7 +15,7 @@ use sepika_math::solver::SolveError;
 pub struct LumpedMassModal {
     /// 固有値 ω²（昇順、1次から）。
     pub omega2: Vec<f64>,
-    /// 固有周期 T=2π/ω `[s]`（昇順、1次から）。
+    /// 固有周期 T=2π/ω `[s]`（降順、`omega2` と同順で1次から）。
     pub period: Vec<f64>,
     /// モード形状（各層の相対変位、下層→上層。最上階の値を 1.0 に正規化）。
     /// 2 次元は加力方向変位。3 次元は頂部水平ノルムで正規化した水平合成。
@@ -23,7 +23,7 @@ pub struct LumpedMassModal {
     /// 3 次元のモード形状（各層 [Ux, Uy, θz]。2 次元では空）。
     #[serde(default)]
     pub shapes_xyz: Vec<Vec<[f64; 3]>>,
-    /// 各モードの各階曲げ回転 [θx, θy] [rad]。
+    /// 各モードの各階曲げ回転 [θx, θy] `[rad]`。
     pub bending_rotations: Vec<Vec<[f64; 2]>>,
 }
 

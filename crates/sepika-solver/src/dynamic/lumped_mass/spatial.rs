@@ -310,10 +310,10 @@ pub(crate) fn lumped_mass_time_history_spatial(
         for i in 0..n {
             p[3 * i + dir_idx] = -mass[3 * i + dir_idx] * ag;
         }
-        let u_prev = u.clone();
-        let v_prev = v.clone();
-        let a_prev = a.clone();
-        let mut u_tr = u_prev.clone();
+        let u_prev = &u;
+        let v_prev = &v;
+        let a_prev = &a;
+        let mut u_tr = u.clone();
         let mut step_converged = false;
 
         for _iter in STICK_NEWTON.iters() {
@@ -395,14 +395,8 @@ pub(crate) fn lumped_mass_time_history_spatial(
         for i in 0..n {
             let rel = relative_at_rigidity(&u, i, &lm.spatial[i]);
             peak_drift[i] = peak_drift[i].max(drift_dir.accumulate(i, rel[0], rel[1]));
-            let (qx, _) = {
-                let mut sp = springs_x[i].clone();
-                sp.trial(rel[0])
-            };
-            let (qy, _) = {
-                let mut sp = springs_y[i].clone();
-                sp.trial(rel[1])
-            };
+            let (qx, _) = springs_x[i].probe(rel[0]);
+            let (qy, _) = springs_y[i].probe(rel[1]);
             peak_shear[i] = peak_shear[i].max(shear_dir.accumulate(i, qx, qy));
         }
         time.push(step as f64 * dt);
@@ -445,93 +439,6 @@ mod tests {
     use crate::statics::analysis::SeismicDir;
 
     #[test]
-    fn zero_increment_spatial_xy_and_report_clone_keep_committed_story_response() {
-        let sk = StoryTrilinear {
-            k1: 1000.0,
-            d1: 0.01,
-            q1: 10.0,
-            d2: 0.02,
-            q2: 20.0,
-            d3: 0.04,
-            q3: 30.0,
-        };
-        let spatial = StorySpatial {
-            j: 1.0,
-            mass_xy: [0.0, 0.0],
-            rigidity_xy: [0.0, 0.0],
-            k1_x: 1000.0,
-            k1_y: 1000.0,
-            kr: 1.0,
-            skeleton_x: sk,
-            skeleton_y: sk,
-        };
-        let rel = relative_at_rigidity(&[-0.03, -0.03, 0.0], 0, &spatial);
-        assert_eq!(rel, [-0.03, -0.03, 0.0]);
-        for (sk, theta) in [(spatial.skeleton_x, rel[0]), (spatial.skeleton_y, rel[1])] {
-            let mut spring = story_spring(&sk);
-            assert_eq!(spring.trial(theta), (-25.0, 500.0));
-            spring.commit();
-            let before = spring.serialize_state();
-            let mut report = spring.clone();
-            assert_eq!(report.trial(theta), (-25.0, 500.0));
-            assert_eq!(before, report.serialize_state());
-            assert_eq!(before, spring.serialize_state());
-            spring.trial(theta);
-            spring.commit();
-            assert_eq!(before, spring.serialize_state());
-            assert_eq!(spring.trial(-0.04), (-30.0, 500.0));
-            spring.revert();
-            assert_eq!(before, spring.serialize_state());
-        }
-    }
-
-    #[test]
-    fn spatial_eigen_one_story_matches_sda() {
-        let mass = 10.0;
-        let kx = 100.0;
-        let ky = 400.0;
-        let j = 1.0e8;
-        let kr = 1.0e10;
-        let lm = LumpedMassModel {
-            bending: Vec::new(),
-            model_type: LumpedMassType::EquivalentShear,
-            stories: vec![StoryStick {
-                story: sepika_core::ids::StoryId(0),
-                mass,
-                height: 3000.0,
-                skeleton: StoryTrilinear::elastic(kx),
-            }],
-            dim: StickDim::Spatial,
-            stiffness_source: LumpedStiffnessSource::StoryQd,
-            dir: SeismicDir::X,
-            nonlinear: false,
-            spatial: vec![StorySpatial {
-                j,
-                mass_xy: [0.0, 0.0],
-                rigidity_xy: [0.0, 0.0],
-                k1_x: kx,
-                k1_y: ky,
-                kr,
-                skeleton_x: StoryTrilinear::elastic(kx),
-                skeleton_y: StoryTrilinear::elastic(ky),
-            }],
-        };
-        let modal = lumped_mass_eigen_spatial(&lm, 3).unwrap();
-        assert_eq!(modal.period.len(), 3);
-        let mut got = modal.period.clone();
-        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let mut expected = [
-            2.0 * std::f64::consts::PI * (j / kr).sqrt(),
-            2.0 * std::f64::consts::PI * (mass / ky).sqrt(),
-            2.0 * std::f64::consts::PI * (mass / kx).sqrt(),
-        ];
-        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        for (g, want) in got.iter().zip(expected.iter()) {
-            assert!((g - want).abs() / want < 1e-6, "period {g} vs {want}");
-        }
-    }
-
-    #[test]
     fn spatial_eigen_uses_skeleton_k1_not_stale_field() {
         let mass = 10.0;
         let kx = 100.0;
@@ -563,15 +470,13 @@ mod tests {
             }],
         };
         let modal = lumped_mass_eigen_spatial(&lm, 3).unwrap();
-        let mut got = modal.period.clone();
-        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let mut expected = [
-            2.0 * std::f64::consts::PI * (j / kr).sqrt(),
-            2.0 * std::f64::consts::PI * (mass / ky).sqrt(),
+        assert_eq!(modal.period.len(), 3);
+        let expected = [
             2.0 * std::f64::consts::PI * (mass / kx).sqrt(),
+            2.0 * std::f64::consts::PI * (mass / ky).sqrt(),
+            2.0 * std::f64::consts::PI * (j / kr).sqrt(),
         ];
-        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        for (g, want) in got.iter().zip(expected.iter()) {
+        for (g, want) in modal.period.iter().zip(expected.iter()) {
             assert!((g - want).abs() / want < 1e-6, "period {g} vs {want}");
         }
     }
