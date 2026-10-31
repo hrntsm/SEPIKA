@@ -78,7 +78,7 @@ pub(super) enum CurSec {
         /// 配筋コンテナ（`StbSecBarArrangement*`）側に付くかぶり [mm]。実 ST-Bridge は
         /// かぶりをコンテナに、本数・径を子の `*_Same` に持つため別枠で控える。
         rebar_cover: Option<f64>,
-        /// 断面のコンクリート材料（数値 id または `strength_concrete` グレード名）。
+        /// 断面のコンクリート材料の `strength_concrete` グレード名。
         mat: Option<String>,
     },
     Cft {
