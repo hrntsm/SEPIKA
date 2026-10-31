@@ -72,20 +72,9 @@ impl WeightedSumGuard {
         Self { cache: None, n: 0 }
     }
 
-    /// `mats: &[(coef, &SparseColMat)]` の重み付き和を組み立てる。結果は常に
+    /// 重み付き和を内部保持する行列への参照として返す。結果は
     /// `sepika_math::sparse::weighted_sum_csc(n, mats)` とビット一致する。
-    #[allow(dead_code)]
-    pub fn combine(
-        &mut self,
-        n: usize,
-        mats: &[(f64, &SparseColMat<usize, f64>)],
-    ) -> SparseColMat<usize, f64> {
-        self.combine_ref(n, mats).clone()
-    }
-
-    /// [`Self::combine`] と同じ結果を、内部保持する行列への参照として返す
-    /// （`.clone()` を伴わない）。[`CscCache::assemble_ref`] と同様、返す参照の
-    /// 寿命は `self` への可変借用と結びつく。
+    /// 返す参照の寿命は `self` への可変借用と結びつく。
     pub fn combine_ref(
         &mut self,
         n: usize,
@@ -181,11 +170,7 @@ mod tests {
         // 4 回目: 非ゼロ数が元に戻る（再度パターンが変わる）。
         let got4 = cache.assemble(n, &t1);
         dense_eq(&got4, &assemble_csc(n, t1), n);
-    }
 
-    /// triplet の個数が同じまま座標だけが変わっても、正しい行列が組み上がること。
-    #[test]
-    fn test_csc_cache_same_len_different_coords() {
         let n = 3;
         let t1 = vec![
             Triplet {
@@ -211,7 +196,6 @@ mod tests {
                 val: 200.0,
             },
         ];
-        let mut cache = CscCache::new();
         let got1 = cache.assemble(n, &t1);
         dense_eq(&got1, &assemble_csc(n, t1), n);
         let got2 = cache.assemble(n, &t2);
@@ -279,25 +263,25 @@ mod tests {
         );
 
         let mut guard = WeightedSumGuard::new();
-        let got1 = guard.combine(n, &[(2.0, &m), (0.05, &k_full)]);
+        let got1 = guard.combine_ref(n, &[(2.0, &m), (0.05, &k_full)]);
         dense_eq(
-            &got1,
+            got1,
             &sepika_math::sparse::weighted_sum_csc(n, &[(2.0, &m), (0.05, &k_full)]),
             n,
         );
 
         // 係数だけ変更（高速パス）。
-        let got2 = guard.combine(n, &[(3.0, &m), (0.02, &k_full)]);
+        let got2 = guard.combine_ref(n, &[(3.0, &m), (0.02, &k_full)]);
         dense_eq(
-            &got2,
+            got2,
             &sepika_math::sparse::weighted_sum_csc(n, &[(3.0, &m), (0.02, &k_full)]),
             n,
         );
 
         // k の非ゼロ数が変わる（安全側フォールバック）。
-        let got3 = guard.combine(n, &[(3.0, &m), (0.02, &k_yielded)]);
+        let got3 = guard.combine_ref(n, &[(3.0, &m), (0.02, &k_yielded)]);
         dense_eq(
-            &got3,
+            got3,
             &sepika_math::sparse::weighted_sum_csc(n, &[(3.0, &m), (0.02, &k_yielded)]),
             n,
         );

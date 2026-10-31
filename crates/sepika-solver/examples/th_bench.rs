@@ -159,12 +159,7 @@ fn sine_decay_wave(dt: f64, n_steps: usize, amp: f64, omega: f64, decay: f64) ->
 
 /// 結果の妥当性チェック: ピーク変位が有限かつ非ゼロで、非現実的な発散値でないこと。
 fn validate(label: &str, result: &ResponseResult) {
-    let peak = result
-        .peak_disp
-        .iter()
-        .flat_map(|p| p.iter())
-        .cloned()
-        .fold(0.0_f64, f64::max);
+    let peak = peak_disp_max(result);
     let all_finite = result
         .peak_disp
         .iter()

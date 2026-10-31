@@ -53,7 +53,7 @@ impl Reducer {
                                 }
                             }
                         }
-                        if s_idx < t_rows.len() && has_term {
+                        if has_term {
                             t_rows[s_idx] = row;
                         }
                     }
@@ -95,9 +95,7 @@ impl Reducer {
                                     Some(ma) => vec![(ma as usize, 1.0)],
                                     None => Vec::new(),
                                 };
-                                if s_idx < t_rows.len() {
-                                    t_rows[s_idx] = row;
-                                }
+                                t_rows[s_idx] = row;
                             }
                         }
                     }
@@ -130,9 +128,7 @@ impl Reducer {
                         if let Some(ma) = dofmap.active(mg_rz) {
                             row.push((ma as usize, -dy));
                         }
-                        if s_idx < t_rows.len() {
-                            t_rows[s_idx] = row;
-                        }
+                        t_rows[s_idx] = row;
                     }
                     let sg_uy = si * DOF_PER_NODE + 1;
                     let mg_uy = mi * DOF_PER_NODE + 1;
@@ -145,17 +141,13 @@ impl Reducer {
                         if let Some(ma) = dofmap.active(mg_rz) {
                             row.push((ma as usize, dx));
                         }
-                        if s_idx < t_rows.len() {
-                            t_rows[s_idx] = row;
-                        }
+                        t_rows[s_idx] = row;
                     }
                     let sg_rz = si * DOF_PER_NODE + 5;
                     if let Some(sa) = dofmap.active(sg_rz) {
                         let s_idx = sa as usize;
                         if let Some(ma) = dofmap.active(mg_rz) {
-                            if s_idx < t_rows.len() {
-                                t_rows[s_idx] = vec![(ma as usize, 1.0)];
-                            }
+                            t_rows[s_idx] = vec![(ma as usize, 1.0)];
                         }
                     }
                 }
@@ -216,7 +208,7 @@ impl Reducer {
         }
         for row in &t_rows {
             for &(idx, _) in row {
-                if idx < new_indep.len() && new_indep[idx] == usize::MAX {
+                if new_indep[idx] == usize::MAX {
                     new_indep[idx] = counter;
                     counter += 1;
                 }
@@ -227,13 +219,7 @@ impl Reducer {
             .into_iter()
             .map(|row| {
                 row.into_iter()
-                    .filter_map(|(idx, val)| {
-                        if idx < new_indep.len() && new_indep[idx] != usize::MAX {
-                            Some((new_indep[idx], val))
-                        } else {
-                            None
-                        }
-                    })
+                    .map(|(idx, val)| (new_indep[idx], val))
                     .collect()
             })
             .collect();
@@ -482,20 +468,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_rigid_link() {
-        let mut model = make_3node_model();
-        model.constraints.push(Constraint::RigidLink {
-            master: NodeId(1),
-            slaves: vec![NodeId(2)],
-            dofs: Dof6Mask::FIXED,
-        });
-        let dofmap = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &dofmap);
-        // スレーブ 6 DOF がマスターに従う
-        assert!(reducer.n_indep < reducer.n_free);
-    }
-
     /// 代表節点（要素非接続・Uz/Rx/Ry 固定の浮遊節点）をマスターとした剛床で、
     /// スレーブの面内変位が ix = Gx − iry·Gθz, iy = Gy + irx·Gθz（剛床仮定に
     /// よる面内剛体変位の運動学）どおりに復元されることを確認する。
@@ -565,38 +537,35 @@ mod tests {
         }
     }
 
-    /// マスター節点の対象 DOF が拘束済み（非 active）の剛リンクでは、スレーブ DOF も
-    /// 0 に縮約される（空行）こと。
     #[test]
-    fn test_rigid_link_fixed_master_forces_slave_to_zero() {
-        let mut model = make_3node_model();
-        // node1 を完全拘束し、node2 を剛リンクで node1 へ従属させる。
-        model.nodes[1].restraint = Dof6Mask::FIXED;
-        model.constraints.push(Constraint::RigidLink {
-            master: NodeId(1),
-            slaves: vec![NodeId(2)],
-            dofs: Dof6Mask::FIXED,
-        });
-        let dofmap = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &dofmap);
-        // node2 の全 DOF はマスター（=0）へ従属し、独立自由度を持たない（空行）。
-        for d in 0..DOF_PER_NODE {
-            let g = 2 * DOF_PER_NODE + d;
-            if let Some(sa) = dofmap.active(g) {
-                assert!(
-                    reducer.t_rows[sa as usize].is_empty(),
-                    "slave dof {} should reduce to zero (empty row), got {:?}",
-                    d,
-                    reducer.t_rows[sa as usize]
-                );
+    fn test_rigid_link_master_constraints_propagate_to_slave() {
+        for fixed_master in [false, true] {
+            let mut model = make_3node_model();
+            if fixed_master {
+                model.nodes[1].restraint = Dof6Mask::FIXED;
             }
-        }
-        // 展開結果も常に 0。
-        let u_free = reducer.expand_u(&vec![1.0; reducer.n_indep]);
-        for d in 0..DOF_PER_NODE {
-            let g = 2 * DOF_PER_NODE + d;
-            if let Some(sa) = dofmap.active(g) {
-                assert_eq!(u_free[sa as usize], 0.0, "slave dof {} must be zero", d);
+            model.constraints.push(Constraint::RigidLink {
+                master: NodeId(1),
+                slaves: vec![NodeId(2)],
+                dofs: Dof6Mask::FIXED,
+            });
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            assert_eq!(reducer.n_indep, reducer.n_free - DOF_PER_NODE);
+            let u_indep: Vec<_> = (0..reducer.n_indep).map(|i| (i + 1) as f64).collect();
+            let u_free = reducer.expand_u(&u_indep);
+            for d in 0..DOF_PER_NODE {
+                let slave = dofmap.active(2 * DOF_PER_NODE + d).unwrap() as usize;
+                let expected = dofmap
+                    .active(DOF_PER_NODE + d)
+                    .map_or(0.0, |a| u_free[a as usize]);
+                assert_eq!(
+                    u_free[slave], expected,
+                    "fixed_master={fixed_master}, dof={d}"
+                );
+                if fixed_master {
+                    assert!(reducer.t_rows[slave].is_empty());
+                }
             }
         }
     }
