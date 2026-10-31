@@ -334,7 +334,8 @@ impl PanelGeometry {
     /// 対象外の断面は `None`。
     pub fn from_column_axes(sec: &Section) -> Option<[Self; 2]> {
         let strong = Self::from_column(sec)?;
-        let weak = match sec.shape.as_ref()? {
+        let shape = sec.shape.as_ref()?;
+        let weak = match shape {
             SectionShape::SteelH {
                 width,
                 flange_thick,
@@ -359,9 +360,7 @@ impl PanelGeometry {
             } => Self {
                 kind: PanelShapeKind::Box { bc: *height },
                 dc: width - thick,
-                tp: sec
-                    .panel_thickness
-                    .unwrap_or(sec.shape.as_ref()?.box_thicknesses()?.1),
+                tp: sec.panel_thickness.unwrap_or(shape.box_thicknesses()?.1),
                 ..strong
             },
             SectionShape::SteelPipe { .. } | SectionShape::CftPipe { .. } => strong,
@@ -1043,12 +1042,9 @@ fn resolve_panel_joint_impl<'a>(
     let selected_section = model.element_section(selected).ok_or_else(|| {
         invalid_column(format!("柱 ID {}: 断面未設定または参照不明", selected.id.0))
     })?;
-    if model.element_material(selected).is_none() {
-        return Err(invalid_column(format!(
-            "柱 ID {}: 材料未設定または参照不明",
-            selected.id.0
-        )));
-    }
+    let selected_material = model.element_material(selected).ok_or_else(|| {
+        invalid_column(format!("柱 ID {}: 材料未設定または参照不明", selected.id.0))
+    })?;
     if columns
         .iter()
         .chain(beams.iter())
@@ -1085,7 +1081,6 @@ fn resolve_panel_joint_impl<'a>(
         )));
     }
 
-    let selected_material = model.element_material(selected).unwrap();
     let axial_stiffness =
         selected_material.young * selected_section.area / model.member_length(selected);
     if !selected_section.area.is_finite()
@@ -1104,10 +1099,7 @@ fn resolve_panel_joint_impl<'a>(
     let mut db = 0.0_f64;
     let mut reasons = Vec::new();
     for beam in &beams {
-        let Some(section) = section_of(beam) else {
-            reasons.push(format!("梁 ID {}: 断面未設定", beam.id.0));
-            continue;
-        };
+        let section = section_of(beam).expect("梁用途の断面を解決済み");
         let properties = beam_panel_properties(section);
         let shape = section
             .shape
@@ -1491,7 +1483,8 @@ mod tests {
         assert!((g.dc - (400.0 - 21.0)).abs() < 1e-9);
         assert!((g.tp - 13.0).abs() < 1e-9);
         let db = 600.0;
-        assert!((g.effective_volume(db) - g.dc * db * g.tp).abs() < 1e-6);
+        assert!((g.effective_volume(db) - 2_956_200.0).abs() < 1e-6);
+        assert!(!g.filled);
     }
 
     /// 角形・円形はウェブ 2 枚相当で Ve が 2 倍になる。
@@ -1510,7 +1503,8 @@ mod tests {
         );
         let g = PanelGeometry::from_column(&b).expect("角形は対象");
         let db = 500.0;
-        assert!((g.effective_volume(db) - 2.0 * g.dc * db * g.tp).abs() < 1e-6);
+        assert!((g.effective_volume(db) - 6_144_000.0).abs() < 1e-6);
+        assert!(!g.filled);
 
         let p = sec(
             SectionShape::SteelPipe {
@@ -1522,7 +1516,8 @@ mod tests {
         );
         let gp = PanelGeometry::from_column(&p).expect("円形は対象");
         assert!((gp.dc - (400.0 - 12.0)).abs() < 1e-9);
-        assert!((gp.effective_volume(db) - 2.0 * gp.dc * db * gp.tp).abs() < 1e-6);
+        assert!((gp.effective_volume(db) - 4_656_000.0).abs() < 1e-6);
+        assert!(!gp.filled);
         assert!((gp.kappa() - 4.0 / std::f64::consts::PI).abs() < 1e-12);
     }
 
@@ -1530,34 +1525,14 @@ mod tests {
     /// （ダイアフラム補強・ダブラープレートによる増厚）。
     #[test]
     fn test_panel_thickness_overrides_shape() {
-        let s = sec(
-            SectionShape::SteelH {
-                root_r: Some(0.0),
-                height: 400.0,
-                width: 400.0,
-                web_thick: 13.0,
-                flange_thick: 21.0,
-            },
-            400.0,
-            Some(25.0),
-        );
-        let g = PanelGeometry::from_column(&s).expect("H 形は対象");
-        assert!((g.tp - 25.0).abs() < 1e-9, "明示入力が優先される: {}", g.tp);
-
-        // 0 以下は未入力扱いとし、断面形状の値へフォールバックする。
-        let z = sec(
-            SectionShape::SteelH {
-                root_r: Some(0.0),
-                height: 400.0,
-                width: 400.0,
-                web_thick: 13.0,
-                flange_thick: 21.0,
-            },
-            400.0,
-            Some(0.0),
-        );
-        let gz = PanelGeometry::from_column(&z).expect("H 形は対象");
-        assert!((gz.tp - 13.0).abs() < 1e-9);
+        for (panel_thickness, expected_mm) in [(Some(25.0), 25.0), (Some(0.0), 13.0)] {
+            let section = sec(h_col(), 400.0, panel_thickness);
+            let geometry = PanelGeometry::from_column(&section).expect("H 形は対象");
+            assert!(
+                (geometry.tp - expected_mm).abs() < 1e-9,
+                "{panel_thickness:?}"
+            );
+        }
     }
 
     /// CFT は諸元を解決できるが、モデル化の対象外とする。断面検定は鋼管部を
@@ -1588,41 +1563,9 @@ mod tests {
             let g = PanelGeometry::from_column(&s).expect("CFT も諸元は解決できる");
             assert_eq!(g.kind, kind);
             assert!(g.filled, "CFT は充填断面");
-            assert!(g.filled, "CFT はモデル化の対象外");
             // 検定に使う Ve・κ は鋼管と同じ式で求まる。
             assert!(g.effective_volume(500.0) > 0.0);
             assert!(g.kappa() > 0.0);
-        }
-    }
-
-    /// CFT でない鋼管（角形・円形）と H 形はモデル化の対象。
-    #[test]
-    fn test_steel_sections_are_modeling_targets() {
-        let shapes = [
-            SectionShape::SteelH {
-                root_r: Some(0.0),
-                height: 400.0,
-                width: 400.0,
-                web_thick: 13.0,
-                flange_thick: 21.0,
-            },
-            SectionShape::SteelBox {
-                height: 400.0,
-                width: 400.0,
-                thick: 16.0,
-                horizontal_thick: 16.0,
-                corner_r: Some(0.0),
-            },
-            SectionShape::SteelPipe {
-                outer_dia: 400.0,
-                thick: 12.0,
-            },
-        ];
-        for shape in shapes {
-            let s = sec(shape, 400.0, None);
-            let g = PanelGeometry::from_column(&s).expect("S 造は対象");
-            assert!(!g.filled);
-            assert!(!g.filled);
         }
     }
 
@@ -2034,6 +1977,10 @@ mod tests {
             horizontal_thick: 16.0,
             corner_r: Some(0.0),
         });
+        let joint = resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .expect("検定の対象にはなる");
+        assert!(joint.has_filled_column, "モデル化からは除外する");
         model.materials[0].name = "直接入力".into();
         assert_eq!(
             resolve_panel_analysis_joint(&model, NodeId(0), &model.elements).unwrap(),
@@ -2386,26 +2333,6 @@ mod tests {
         assert_eq!(after.ve, before.ve);
         assert_eq!(after.db, before.db);
         assert_eq!(m.elements[0].nodes.as_slice(), &[NodeId(3), NodeId(1)]);
-    }
-
-    /// CFT 柱の接合部は解決できるが、モデル化からは除外する目印が立つ。
-    #[test]
-    fn test_cft_column_flags_filled() {
-        let m = joint_model(
-            h_beam(),
-            600.0,
-            SectionShape::CftBox {
-                corner_r: Some(0.0),
-                height: 400.0,
-                width: 400.0,
-                thick: 16.0,
-                horizontal_thick: 16.0,
-            },
-        );
-        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements)
-            .unwrap()
-            .expect("検定の対象にはなる");
-        assert!(joint.has_filled_column, "モデル化からは除外する");
     }
 
     // ===== 接合部の半寸法 =====
