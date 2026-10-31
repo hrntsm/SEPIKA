@@ -10,8 +10,8 @@
 
 | 入力・条件 | 独立期待値 | 試験 |
 | --- | --- | --- |
-| r=(0,0,+100) mm、F=(1000,0,0) N | My=+100000 Nmm、θy=.001 radでuPx=.1 mm、仕事100 Nmm | `frame::eccentric::tests::vertical_arm_keeps_sign_and_virtual_work_and_parallel_force_has_no_moment` |
-| r=(0,0,−100) mm、同じF | uPxとMyの符号反転、e=0は恒等、Fzは移送0 | 同上 |
+| r=(0,0,+100) mm、F=(1000,0,0) N | My=+100000 Nmm、軸力1000 Nを保持 | `frame::eccentric::tests::vertical_arm_keeps_force_sign_and_parallel_force_has_no_moment` |
+| r=(0,0,−100) mm、同じF | Myの符号反転、e=0は恒等、Fzは移送0 | 同上 |
 | E=20000 N/mm²、A=100 mm²、L=1000 mm、端伸び.5 mm | N=1000 N。共有節点のMy=±100000 Nmm、実材軸端の曲げ0 | `eccentric_beam_factory_preserves_work_stiffness_mass_and_committed_member_forces` |
 | 微小剛体回転θy=.001、jのuz=−1 mm | 両端に同じ偏心を加えても部材変形・不要な内力0 | 同上 |
 | 長さ1000、方向=(.8,0,.6)、正負0偏心、i/j交換、片/両端ピン、剛域0/100 | 軸力の全体成分は(800,0,600) N、追加My=e×Fx、実部材曲げ0。既存軸剛性は全長EA/Lを維持 | `eccentric_sloped_and_reversed_members_keep_axial_force_and_released_physical_moment` |
@@ -21,6 +21,8 @@
 | 接続節点Z=3500、SL=3000、e=100 | 実材軸端Z=3600。断面shapeなしでも有効な解析性能なら接続可能 | `eccentric_axis_uses_node_level_and_reports_each_unresolved_input` |
 | 不足・不正な偏心/節点/座標/局所軸/断面/材料 | 部材IDと端、項目、理由付きで停止。柱・ブレースへ適用しない | 同上 |
 | GUI編集、Undo、OVIKA保存再読込 | 編集で入力識別変更・結果陳腐化。Undoで元応答、再読込で編集後応答へ一致 | `app::beam_placement_tests` |
+
+#1059で試験内だけの変位変換・仕事の再計算を整理した。仮想仕事の導出は上記のとおりであり、実ラッパの変位接続は上表の剛体回転・独立軸力と偏心モーメント、および実復元力の有限差分と接線行列の一致で確認する。初回の固定SHA・実行記録は履歴として保持する。
 
 非線形試験は通常Fiber、MultiSpring、およびBeamの集中ばね/ファイバー表現に対し、接線の差分照合、確定・revert・snapshot復元・checkpoint復号を行う。状態へ外側変位を重ねて保存せず、部材荷重を保持した確定状態も照合する。幾何剛性はN=1000 N、L=1000 mmで、偏心により生じるRx-Rx項=1.2e²、Rx-Uy項=−1.2eを独立値で確認する。
 
