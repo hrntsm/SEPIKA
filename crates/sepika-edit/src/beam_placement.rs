@@ -1,7 +1,7 @@
 use crate::{EditCommand, Noop, RejectedEdit};
 use sepika_core::model::{FrameSectionUse, Model, SecondaryMemberKind, SupportMemberId};
 
-/// 大梁・小梁の一律鉛直偏心 [mm] を設定する。None は未指定へ戻し、非有限値は拒否する。
+/// 大梁・小梁の一律鉛直偏心 `[mm]` を設定する。None は未指定へ戻し、非有限値は拒否する。
 pub struct SetBeamVerticalEccentricity {
     pub member: SupportMemberId,
     pub value: Option<f64>,

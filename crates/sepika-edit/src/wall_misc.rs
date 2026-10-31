@@ -1171,7 +1171,7 @@ pub struct SetSlabUsage {
     pub usage: Option<sepika_core::model::SlabUsage>,
 }
 
-/// 床板の基準階とFLからの上面偏心 [mm] を変更する。未入力は保持し、不正値は拒否する。
+/// 床板の基準階とFLからの上面偏心 `[mm]` を変更する。未入力は保持し、不正値は拒否する。
 pub struct SetSlabPlacement {
     pub id: SlabId,
     pub reference_story: Option<sepika_core::ids::StoryId>,
