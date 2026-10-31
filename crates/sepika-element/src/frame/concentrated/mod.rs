@@ -603,7 +603,6 @@ impl ElementBehavior for ConcentratedSpringBeam {
 
     fn commit_state(&mut self) {
         self.elastic.commit_state();
-        self.elastic.committed_member_loads = self.elastic.trial_member_loads.clone();
         self.spring_i.commit();
         self.spring_j.commit();
         self.rot_i = self.trial_rot_i;
@@ -614,7 +613,6 @@ impl ElementBehavior for ConcentratedSpringBeam {
 
     fn revert_state(&mut self) {
         self.elastic.revert_state();
-        self.elastic.trial_member_loads = self.elastic.committed_member_loads.clone();
         self.spring_i.revert();
         self.spring_j.revert();
         self.trial_rot_i = self.rot_i;

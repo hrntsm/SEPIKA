@@ -485,13 +485,17 @@ mod tests {
 
         let view = build_hinge_view(&beam, &model, basis, kind, 0.0, 8, 24).expect("配筋は妥当");
         assert_eq!(view.model, AnalysisHingeModel::ConcentratedSpring);
+        let mn = view.mn_linear.expect("標準型は N-M 線形相関を返す");
+        let (yield_moment, n_allow) = yield_moment_and_axial(&beam, &model, basis);
+        assert!((mn.my0 - yield_moment).abs() < 1e-9);
+        assert!((mn.n_allow - n_allow.max(1.0)).abs() < 1e-9);
+
         let points = view.backbone.expect("集中ばねは骨格を返す");
         assert_eq!(points.len(), 3, "標準型は原点・降伏点・降伏後端点");
         assert_eq!(points[0], [0.0, 0.0]);
 
         let (si, _sj, backbone) =
             build_flexural_springs(&beam, &model, HysteresisModel::Standard, basis);
-        let (yield_moment, _) = yield_moment_and_axial(&beam, &model, basis);
         let theta_y = yield_moment / backbone.k_rot;
         assert!((points[1][0] - theta_y).abs() < 1e-12);
         assert!((points[1][1] - yield_moment).abs() < 1e-9);
@@ -506,19 +510,11 @@ mod tests {
         assert!((m_end - points[2][1]).abs() < 1e-6 * yield_moment);
     }
 
-    /// N-M 線形相関は `yield_moment_and_axial` と一致し、履歴材料では返さない。
+    /// 履歴材料は骨格を返し、N-M 線形相関を返さない。
     #[test]
-    fn concentrated_spring_mn_linear_matches_yield_and_missing_for_history() {
+    fn concentrated_spring_history_returns_backbone_without_mn_linear() {
         let basis = StrengthBasis::Nominal;
         let kind = AnalysisKind::Incremental;
-
-        let model = make_model(None, None);
-        let beam = elem(ElementKind::Beam, [NodeId(0), NodeId(1)]);
-        let view = build_hinge_view(&beam, &model, basis, kind, 0.0, 8, 24).expect("配筋は妥当");
-        let mn = view.mn_linear.expect("標準型は N-M 線形相関を返す");
-        let (my0, n_allow) = yield_moment_and_axial(&beam, &model, basis);
-        assert!((mn.my0 - my0).abs() < 1e-9);
-        assert!((mn.n_allow - n_allow.max(1.0)).abs() < 1e-9);
 
         let mut rc_model = make_model(Some(rc_shape()), Some(24.0));
         rc_model.materials[0].category = MaterialCategory::Concrete;
@@ -563,46 +559,31 @@ mod tests {
         );
     }
 
-    /// 断面未定義の集中ばねは骨格・N-M 線形相関を返さない（既定値で近似しない）。
+    /// 断面または強度未定義の集中ばねは骨格・N-M 線形相関を返さない。
     #[test]
-    fn concentrated_spring_without_section_returns_no_backbone() {
-        let model = make_model(None, None);
-        let mut beam = elem(ElementKind::Beam, [NodeId(0), NodeId(1)]);
-        beam.section = None;
-        let view = build_hinge_view(
-            &beam,
-            &model,
-            StrengthBasis::Nominal,
-            AnalysisKind::Incremental,
-            0.0,
-            8,
-            24,
-        )
-        .expect("配筋は妥当");
-        assert_eq!(view.model, AnalysisHingeModel::ConcentratedSpring);
-        assert!(view.backbone.is_none());
-        assert!(view.mn_linear.is_none());
-    }
-
-    /// 材料強度（fy・Fc）を解決できない集中ばねは骨格・N-M 線形相関を返さない。
-    #[test]
-    fn concentrated_spring_without_strength_returns_no_backbone() {
-        let mut model = make_model(None, None);
-        model.materials[0].fy = None;
-        let beam = elem(ElementKind::Beam, [NodeId(0), NodeId(1)]);
-        let view = build_hinge_view(
-            &beam,
-            &model,
-            StrengthBasis::Nominal,
-            AnalysisKind::Incremental,
-            0.0,
-            8,
-            24,
-        )
-        .expect("配筋は妥当");
-        assert_eq!(view.model, AnalysisHingeModel::ConcentratedSpring);
-        assert!(view.backbone.is_none());
-        assert!(view.mn_linear.is_none());
+    fn concentrated_spring_missing_section_or_strength_returns_no_backbone() {
+        for missing_section in [true, false] {
+            let mut model = make_model(None, None);
+            let mut beam = elem(ElementKind::Beam, [NodeId(0), NodeId(1)]);
+            if missing_section {
+                beam.section = None;
+            } else {
+                model.materials[0].fy = None;
+            }
+            let view = build_hinge_view(
+                &beam,
+                &model,
+                StrengthBasis::Nominal,
+                AnalysisKind::Incremental,
+                0.0,
+                8,
+                24,
+            )
+            .expect("配筋は妥当");
+            assert_eq!(view.model, AnalysisHingeModel::ConcentratedSpring);
+            assert!(view.backbone.is_none());
+            assert!(view.mn_linear.is_none());
+        }
     }
 
     /// 履歴則を変えると use_nm と折れ点が対応して変わる。
@@ -644,7 +625,7 @@ mod tests {
         let mn = view.mn_linear.expect("N-M 線形相関");
         let points = view.backbone.expect("骨格");
         let expected = mn.moment_limit(axial);
-        let (_i, _j, backbone) =
+        let (_i, mut sj, backbone) =
             build_flexural_springs(&beam, &model, HysteresisModel::Standard, basis);
         let theta_y = expected / backbone.k_rot;
         assert!((points[1][1] - expected).abs() < 1e-9 * expected.abs());
@@ -654,8 +635,6 @@ mod tests {
         assert!((points[2][1] - expected_end).abs() < 1e-9 * expected.abs());
 
         // 解析と同じ `set_yield` を通した材料の応答と一致する。
-        let (_i2, mut sj, _b2) =
-            build_flexural_springs(&beam, &model, HysteresisModel::Standard, basis);
         sj.set_yield(expected);
         for p in &points {
             let (m, _) = sj.probe(p[0]);
@@ -1089,53 +1068,53 @@ mod tests {
     }
     #[test]
     fn sm520_fiber_rejects_explicit_steel_and_main_fy_before_surface_generation() {
-        for name in ["SM520", "SM520B", "SM520C"] {
-            for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
-                let mut src = src_shape();
-                if let SectionShape::SrcColumnRect {
-                    steel_flange_thick, ..
-                } = &mut src
-                {
-                    *steel_flange_thick = 100.001;
-                }
-                for shape in [
-                    src,
-                    SectionShape::CftBox {
-                        height: 1000.0,
-                        width: 1000.0,
-                        thick: 100.001,
-                        horizontal_thick: 100.001,
-                        corner_r: Some(0.0),
-                    },
-                    SectionShape::CftPipe {
-                        outer_dia: 1000.0,
-                        thick: 100.001,
-                    },
-                ] {
-                    let mut model = make_model(Some(shape), Some(24.0));
-                    model.materials[0].category = MaterialCategory::Concrete;
-                    model.materials[0].fy = Some(999.0);
-                    let mut steel = model.materials[0].clone();
-                    steel.id = MaterialId(1);
-                    steel.name = name.into();
-                    steel.category = MaterialCategory::Steel;
-                    steel.fy = fy;
-                    let mut rebar = steel.clone();
-                    rebar.id = MaterialId(2);
-                    rebar.name = "SD345".into();
-                    rebar.category = MaterialCategory::Rebar;
-                    rebar.fy = Some(345.0);
-                    model.materials.extend([steel, rebar]);
-                    model.sections[0].steel_material = Some(MaterialId(1));
-                    model.sections[0].rebar_material = Some(MaterialId(2));
-                    model.sections[0].shear_rebar_material = Some(MaterialId(2));
-                    let data = elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]);
-                    model.elements.push(data.clone());
+        let mut src = src_shape();
+        if let SectionShape::SrcColumnRect {
+            steel_flange_thick, ..
+        } = &mut src
+        {
+            *steel_flange_thick = 100.001;
+        }
+        for shape in [
+            src,
+            SectionShape::CftBox {
+                height: 1000.0,
+                width: 1000.0,
+                thick: 100.001,
+                horizontal_thick: 100.001,
+                corner_r: Some(0.0),
+            },
+            SectionShape::CftPipe {
+                outer_dia: 1000.0,
+                thick: 100.001,
+            },
+        ] {
+            let mut model = make_model(Some(shape), Some(24.0));
+            model.materials[0].category = MaterialCategory::Concrete;
+            model.materials[0].fy = Some(999.0);
+            let mut steel = model.materials[0].clone();
+            steel.id = MaterialId(1);
+            steel.category = MaterialCategory::Steel;
+            let mut rebar = steel.clone();
+            rebar.id = MaterialId(2);
+            rebar.name = "SD345".into();
+            rebar.category = MaterialCategory::Rebar;
+            rebar.fy = Some(345.0);
+            model.materials.extend([steel, rebar]);
+            model.sections[0].steel_material = Some(MaterialId(1));
+            model.sections[0].rebar_material = Some(MaterialId(2));
+            model.sections[0].shear_rebar_material = Some(MaterialId(2));
+            let data = elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]);
+            model.elements.push(data.clone());
+            for name in ["SM520", "SM520B", "SM520C"] {
+                model.materials[1].name = name.into();
+                for fy in [None, Some(999.0)] {
+                    model.materials[1].fy = fy;
                     assert!(resolve_fiber_yield(&model, &data).steel.is_none());
                     assert!(crate::frame::fiber::resolve_steel_fiber_fy(
                         model.sections[0].shape.as_ref(),
                         Some(&model.materials[1]),
-                        Some(999.0)
+                        Some(999.0),
                     )
                     .is_none());
                     let reason = crate::factory::ensure_nonlinear_input(&model).unwrap_err();
@@ -1146,16 +1125,17 @@ mod tests {
                         StrengthBasis::Nominal,
                         AnalysisKind::Incremental,
                         12,
-                        20
+                        20,
                     )
                     .unwrap()
                     .is_none());
-                    if fy.is_some() {
-                        model.materials[1].name = "任意鋼材".into();
-                        assert_eq!(resolve_fiber_yield(&model, &data).steel, fy);
-                        assert!(crate::factory::ensure_nonlinear_input(&model).is_ok());
-                    }
                 }
+            }
+            model.materials[1].name = "任意鋼材".into();
+            for fy in [177.0, 235.0, 335.0, 999.0] {
+                model.materials[1].fy = Some(fy);
+                assert_eq!(resolve_fiber_yield(&model, &data).steel, Some(fy));
+                assert!(crate::factory::ensure_nonlinear_input(&model).is_ok());
             }
         }
     }

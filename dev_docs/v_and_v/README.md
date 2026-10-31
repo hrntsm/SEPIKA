@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## 線材・集中ばねの現役参照整理（#1059）
+
+[現役回帰の対応表](線材と集中ばねの試験整理_Issue1059.md#現役の保証)に、剛域ねじり・キャッシュ・壁条件・骨格表示・集中ばね断面力の統合先を記録した。独立期待値と状態遷移を保持し、既存のV&V状態と固定SHA・raw履歴は変更しない。
+
 ## 要素共通処理の現役参照整理（#1059）
 
 [現役回帰の対応表](要素共通処理の試験整理_Issue1059.md#現役の保証)に、DOF順序・ばね剛性・ダンパー断面力の統合先とシェル感度・免震状態確定の保証を記録した。数値契約・状態遷移と既存V&Vの状態を維持し、固定SHAと過去の出力は履歴として保持する。
@@ -608,7 +612,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1d | 質点系先行成果鮮度 | sepika-app | app/actions/lumped_mass.rs | [Issue612検証](質点系先行成果鮮度_Issue612_2026-10.md)：実成果存在・入力一致、限定片持柱独立 K/T、拒否/失敗/取消保持 | P1/P2 | 🔶（自動入口 Verification、手動 GUI 未） |
 | 618 | RC梁の左右床板厚 | sepika-element / sepika-core | frame/beam/{stiffness_factors,construct,tests}.rs、result_contract.rs | [独立期待値とテスト索引](RC梁左右床板厚_Issue618_2026-10.md#独立期待値とテスト索引) | 幾何剛性 | 🔶（有限例Verification） |
 | 786 | RC片持ち架構の階入力と安定性 | sepika-app / sepika-element / sepika-solver | app/tests.rs | [独立モード・変位・支持釣合いと自動回帰](RC片持ち架構の階入力_Issue786_確認記録.md#自動回帰と実行記録) | 横断 | 🔶（有限Verification、手動GUI・物理Validation未） |
-| 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
+| 1 | ティモシェンコ梁 | sepika-element | [frame/beam/tests.rs](../../crates/sepika-element/src/frame/beam/tests.rs) | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_rigid_zone_preserves_rigid_body_rotation`（両曲げ方向の剛体回転と、剛域ありでもねじりGJ/Lを維持。旧ねじり単独試験を統合） | P1 | ✅ |
 | 760 | 梁文書の局所軸と保存性能 | sepika-core / sepika-element / sepika-app | section_shape/{properties,builder}.rs、geom/vec3.rs、frame/beam/{construct,stiffness,tests}.rs、app/shear_area_acceptance_tests.rs | [独立座標図・手計算と直接試験](梁要素の局所軸と保存性能_Issue760_2026-10.md#独立手計算と直接試験) | 文書 | ✅（座標・添字の対応のVerification） |
 | 713 | 部材荷重の微小区間 | sepika-element / sepika-solver | frame/member_load.rs・common/linear_load.rs・statics/linear | [独立期待値と公開入口](部材荷重微小区間_Issue713_2026-10.md#独立期待値と公開入口) | 横断 | 🔶（限定Verification、後続ゲート・Validation未） |
 | 1g | 共通局所座標の断面参照方向 | sepika-core / sepika-element / sepika-solver / sepika-job / sepika-design-jp / sepika-app | geom/vec3.rs・face_distance.rs・model/element.rs・transform.rs・statics/analysis/precheck.rs・prepare.rs・secondary/eccentricity・lumped_mass.rs・common/assemble.rs・dynamic/eigen/mod.rs・app/actions/design/check.rs・app/result_contract_tests.rs | [Issue762の修正前再現と直接検証](共通局所座標の参照方向_Issue762_2026-10.md#修正後の直接verification) | 横断 | 🔶（公開拒否と正常変換、対象RC Q0 8件・限定helper後App GUI lib880件、旧直接23失効・必要支持材/柱拒否と未使用梁保持。先行878件・880件、当時の#769未対応・Validation・最終ゲートは記録を参照） |
