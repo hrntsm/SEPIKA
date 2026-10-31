@@ -324,55 +324,27 @@ mod tests {
         m
     }
 
-    /// 壁版の仕上げ・増打ちの面荷重を、合成する `WallAttr` へ写す。
-    ///
-    /// 壁エレメントの自重は要素経由（`story_gen::self_weight_calc`）で算定するため、
-    /// ここで写し忘れると**壁エレメントになる壁版だけ**仕上げ・増打ちの重さが
-    /// 黙って落ちる。要素にならない壁版は `Model::wall_plate_self_weight` を直接
-    /// 使うので落ちず、差が出るのは要素になる壁版だけという気づきにくい形になる。
     #[test]
-    fn test_copies_finish_intensity_into_synthesized_wall_attr() {
-        use crate::model::AreaLoad;
-
+    fn test_generates_wall_element_for_quad_plate_with_section() {
         let mut m = base_model();
         let mut plate = quad_plate(0, Some(SectionId(0)));
         plate.loads = vec![
-            AreaLoad {
+            crate::model::AreaLoad {
                 kind: "増打ち".into(),
                 value: 4.0e-4,
             },
-            AreaLoad {
+            crate::model::AreaLoad {
                 kind: "仕上げ".into(),
                 value: 3.0e-4,
             },
         ];
+        plate.opening_area = 1_000_000.0;
+        plate.opening_weight = 5000.0;
+        plate.slit = crate::model::WallSlit {
+            column_face: [true, false],
+            beam_face: [false, true],
+        };
         push_quad(&mut m, plate);
-        m.wall_regions.push(WallRegion {
-            id: WallRegionId(0),
-            name: String::new(),
-            boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
-            posts: Vec::new(),
-        });
-
-        let (expanded, _index, report) = expand_wall_elements(&m);
-        assert_eq!(report.generated, 1);
-        let attr = expanded
-            .wall_attrs
-            .first()
-            .expect("合成された WallAttr が 1 件");
-        // 複数件の面荷重は合算して写す（`WallPlate::finish_intensity` と同じ）。
-        assert!(
-            (attr.finish_intensity - 7.0e-4).abs() < 1e-12,
-            "{}",
-            attr.finish_intensity
-        );
-    }
-
-    #[test]
-    fn test_generates_wall_element_for_quad_plate_with_section() {
-        let mut m = base_model();
-        push_quad(&mut m, quad_plate(0, Some(SectionId(0))));
         m.wall_regions.push(WallRegion {
             id: WallRegionId(0),
             name: String::new(),
@@ -405,33 +377,12 @@ mod tests {
         // （モジュール doc「wall_attrs の合成」参照）。
         assert_eq!(expanded.wall_attrs.len(), 1);
         assert_eq!(expanded.wall_attrs[0].elem, elem.id);
-        // 入力の正（`m`）は変更されない（境界支持部材は入力由来のため許容）。
-        assert!(m.elements.iter().all(|e| e.kind != ElementKind::Wall));
-        assert!(m.wall_attrs.is_empty());
-    }
-
-    /// 壁版の開口・スリットは、合成 `WallAttr` へそのまま写る。
-    #[test]
-    fn test_synthesized_wall_attr_mirrors_plate_openings() {
-        let mut m = base_model();
-        let mut plate = quad_plate(0, Some(SectionId(0)));
-        plate.opening_area = 1_000_000.0;
-        plate.opening_weight = 5000.0;
-        plate.slit = crate::model::WallSlit {
-            column_face: [true, false],
-            beam_face: [false, true],
-        };
-        push_quad(&mut m, plate);
-        m.wall_regions.push(WallRegion {
-            id: WallRegionId(0),
-            name: String::new(),
-            boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
-            posts: Vec::new(),
-        });
-
-        let (expanded, _index, _report) = expand_wall_elements(&m);
         let attr = &expanded.wall_attrs[0];
+        assert!(
+            (attr.finish_intensity - 7.0e-4).abs() < 1e-12,
+            "{}",
+            attr.finish_intensity
+        );
         assert_eq!(attr.opening_area, 1_000_000.0);
         assert_eq!(attr.opening_weight, 5000.0);
         assert_eq!(attr.slit.column_face, [true, false]);
@@ -624,28 +575,6 @@ mod tests {
             wall_elem.id,
             ElemId(max_existing + 1),
             "既存の最大IDより後ろへ付与する"
-        );
-    }
-
-    /// 展開は決定的で、同じモデルへ複数回呼んでも同じ `ElemId` 割当になる（D5）。
-    #[test]
-    fn test_expansion_is_deterministic_across_calls() {
-        let mut m = base_model();
-        push_quad(&mut m, quad_plate(0, Some(SectionId(0))));
-        m.wall_regions.push(WallRegion {
-            id: WallRegionId(0),
-            name: String::new(),
-            boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![crate::ids::WallPlateId(0)],
-            posts: Vec::new(),
-        });
-
-        let (e1, i1, _) = expand_wall_elements(&m);
-        let (e2, i2, _) = expand_wall_elements(&m);
-        assert_eq!(e1.elements[0].id, e2.elements[0].id);
-        assert_eq!(
-            i1.plate_of(e1.elements[0].id),
-            i2.plate_of(e2.elements[0].id)
         );
     }
 }

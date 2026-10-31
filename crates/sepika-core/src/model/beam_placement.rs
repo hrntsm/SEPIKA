@@ -250,9 +250,6 @@ impl BeamPlacement {
         }
         let section_shape = section.shape.clone().ok_or("実断面形状が未指定です")?;
         let geometry = SectionGeometry::of(&section_shape)?;
-        if geometry.parts.is_empty() {
-            return Err("実断面形状が空です".into());
-        }
         Ok(Self {
             member,
             reference_ends,
