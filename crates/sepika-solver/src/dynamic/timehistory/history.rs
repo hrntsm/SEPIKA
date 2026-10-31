@@ -85,7 +85,7 @@ fn current_top_drift(model: &Model, dofmap: &DofMap, u_free: &[f64], dir_idx: us
 /// 1 ステップ分の代表応答を記録する。
 /// `dir_idx` は記録方向（0=X, 1=Y）、`rmr` は当該方向の rᵀ·M·r（合計質量、
 /// [`total_mass`] 参照）、`ma_free` は自由 DOF 空間の `M·a_free`
-/// （[`super::common::mass_accel_free`] で 1 ステップに 1 回だけ算定したものを
+/// （[`super::common::sparse_matvec_into`] で 1 ステップに 1 回だけ算定したものを
 /// 呼び出し側から共有する）、`xg` は当該時刻の記録方向の地動加速度。
 ///
 /// ベースシアは「当該方向の並進 DOF の節点慣性力 `f_abs = M·a_free + ẍg・M·r` の総和」

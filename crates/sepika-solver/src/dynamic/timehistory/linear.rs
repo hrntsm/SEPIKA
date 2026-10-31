@@ -5,9 +5,8 @@
 //! - [`linear_time_history_from_state`] — チェックポイントからの再開
 
 use super::common::{
-    accel_dir_at, accel_xy_at, empty_response, expand_peak_disp, mass_accel_free_into,
-    reduced_vec_from, resolve_dt, solve_initial_accel, sparse_matvec_into, GroundInfluence,
-    NewmarkCoeffs,
+    accel_dir_at, accel_xy_at, empty_response, reduced_vec_from, resolve_dt, solve_initial_accel,
+    sparse_matvec_into, GroundInfluence, NewmarkCoeffs,
 };
 use super::config::{GroundMotion, NewmarkCfg};
 use super::history::{
@@ -209,7 +208,6 @@ impl LinearSetup {
         dt: f64,
         use_kg: bool,
     ) -> Result<Self, SolveError> {
-        validate_wall_connection(model, use_kg)?;
         if use_kg {
             return Err(SolveError::InvalidInput(
                 "線形時刻歴応答解析の幾何剛性（P-Δ、use_kg）は未対応です。\
@@ -330,19 +328,10 @@ fn run_steps(
     time.push(start_step as f64 * dt);
 
     let mut ma_free = vec![0.0f64; n_free];
-    mass_accel_free_into(m_free, &a_free, &mut ma_free);
+    sparse_matvec_into(m_free, &a_free, &mut ma_free);
 
-    let mut recorder = ThRecorder::new(model, dofmap, n_steps, model.elements.len(), record_every);
-    let xg_x_init = wave
-        .accel_x
-        .get(start_step as usize)
-        .copied()
-        .unwrap_or(0.0);
-    let xg_y_init = wave
-        .accel_y
-        .as_ref()
-        .and_then(|acc| acc.get(start_step as usize).copied())
-        .unwrap_or(0.0);
+    let mut recorder = ThRecorder::new(model, dofmap, n_steps, record_every);
+    let (xg_x_init, xg_y_init) = accel_xy_at(wave, start_step as usize);
     let mf_init = member_forces_linear(dofmap, behaviors, &u_free);
     recorder.record_step(
         start_step,
@@ -369,17 +358,7 @@ fn run_steps(
         ..Default::default()
     };
     let rmr_record = total_mass(m_r_record, dofmap, model.nodes.len(), dir_idx);
-    let xg_init = if record_dir_y {
-        wave.accel_y
-            .as_ref()
-            .and_then(|a| a.get(start_step as usize).copied())
-            .unwrap_or(0.0)
-    } else {
-        wave.accel_x
-            .get(start_step as usize)
-            .copied()
-            .unwrap_or(0.0)
-    };
+    let xg_init = accel_dir_at(wave, start_step as usize, record_dir_y);
     record_history_step(
         &mut history,
         model,
@@ -435,7 +414,7 @@ fn run_steps(
         update_story_drift(model, dofmap, &u_free, &mut story_drift_angle);
         reducer.expand_u_into(&v, &mut v_free);
         reducer.expand_u_into(&a, &mut a_free);
-        mass_accel_free_into(m_free, &a_free, &mut ma_free);
+        sparse_matvec_into(m_free, &a_free, &mut ma_free);
         let xg_next = accel_dir_at(wave, n + 1, record_dir_y);
         record_history_step(
             &mut history,
@@ -472,12 +451,12 @@ fn run_steps(
     let final_state = TimeStepState {
         step: final_step,
         time: final_time,
-        disp_red: u.clone(),
-        vel_red: v.clone(),
-        accel_red: a.clone(),
+        disp_red: u,
+        vel_red: v,
+        accel_red: a,
     };
 
-    let peak_disp = expand_peak_disp(model, dofmap, &peak_disp_free);
+    let peak_disp = dofmap.expand_to_nodes(&peak_disp_free, model.nodes.len());
 
     Ok((
         ResponseResult {
