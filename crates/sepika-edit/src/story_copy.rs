@@ -488,8 +488,8 @@ fn copy_one(
 ) {
     let from = cmd.from;
     let (Some(src_story), Some(dst_story)) = (
-        model.stories.get(from.index()).cloned(),
-        model.stories.get(to.index()).cloned(),
+        model.stories.get(from.index()),
+        model.stories.get(to.index()),
     ) else {
         return;
     };
@@ -497,17 +497,18 @@ fn copy_one(
         return;
     };
     let dz = dst_sl - src_sl;
+    let dst_story_name = dst_story.name.clone();
 
     let created_slabs = if cmd.targets.slabs {
-        copy_slabs(model, ctx, cmd, to, dz, &dst_story.name, report)
+        copy_slabs(model, ctx, cmd, to, dz, &dst_story_name, report)
     } else {
         Vec::new()
     };
     if cmd.targets.secondary {
-        copy_secondary(model, ctx, cmd, to, dz, &dst_story.name, report);
+        copy_secondary(model, ctx, cmd, to, dz, &dst_story_name, report);
     }
     if cmd.targets.sections {
-        copy_sections(model, ctx, cmd, to, &dst_story.name, report);
+        copy_sections(model, ctx, cmd, to, &dst_story_name, report);
     }
     if cmd.targets.loads {
         copy_slab_loads(model, ctx, cmd, to, &created_slabs, report);
@@ -943,17 +944,16 @@ fn copy_slabs(
     dst_story_name: &str,
     report: &mut CopyStoryReport,
 ) -> Vec<SlabId> {
-    let src_keys: HashSet<PlanKey> = model
-        .slabs
-        .iter()
-        .filter(|sl| slab_story(model, sl) == Some(cmd.from))
-        .filter_map(|sl| {
-            let boundary = sl.boundary_nodes(model)?;
-            ctx.key(model, cmd.from, &boundary)
-        })
-        .collect();
-
     if cmd.overwrite {
+        let src_keys: HashSet<PlanKey> = model
+            .slabs
+            .iter()
+            .filter(|sl| slab_story(model, sl) == Some(cmd.from))
+            .filter_map(|sl| {
+                let boundary = sl.boundary_nodes(model)?;
+                ctx.key(model, cmd.from, &boundary)
+            })
+            .collect();
         let doomed: Vec<SlabId> = model
             .slabs
             .iter()
@@ -1030,6 +1030,7 @@ fn copy_slabs(
             one_way: sl.one_way(),
             ..Default::default()
         };
+        // 3点未満でも既存領域に一致し得るため、長さをassertする追加helperより先に照合する。
         let id = match model.assign_enclosed_slab_to_matching_region(&boundary, plate.clone()) {
             Some(id) => id,
             None => model.add_enclosed_slab_from_nodes(&boundary, plate),
@@ -1094,7 +1095,6 @@ fn copy_slab_loads(
 fn should_delete_copied_secondary(
     model: &Model,
     ctx: &Ctx,
-    _cmd: &CopyStory,
     to: StoryId,
     dz: f64,
     sm: &SecondaryMember,
@@ -1123,24 +1123,23 @@ fn copy_secondary(
     dst_story_name: &str,
     report: &mut CopyStoryReport,
 ) {
-    let src_keys: HashSet<SecondaryPlanKey> = all_secondary_slots(model)
-        .into_iter()
-        .filter_map(|slot| {
-            let sm = secondary_at(model, slot)?;
-            if secondary_story(model, sm) != Some(cmd.from) {
-                return None;
-            }
-            ctx.key(model, cmd.from, &secondary_nodes(model, sm)?)
-                .map(|k| (sm.kind, k))
-        })
-        .collect();
-
     if cmd.overwrite {
+        let src_keys: HashSet<SecondaryPlanKey> = all_secondary_slots(model)
+            .into_iter()
+            .filter_map(|slot| {
+                let sm = secondary_at(model, slot)?;
+                if secondary_story(model, sm) != Some(cmd.from) {
+                    return None;
+                }
+                ctx.key(model, cmd.from, &secondary_nodes(model, sm)?)
+                    .map(|k| (sm.kind, k))
+            })
+            .collect();
         let before = secondary_count(model);
         let delete_beams: Vec<bool> = model
             .unassigned_beams
             .iter()
-            .map(|sm| should_delete_copied_secondary(model, ctx, cmd, to, dz, sm, &src_keys))
+            .map(|sm| should_delete_copied_secondary(model, ctx, to, dz, sm, &src_keys))
             .collect();
         let mut ji = 0usize;
         model.unassigned_beams.retain(|_| {
@@ -1151,7 +1150,7 @@ fn copy_secondary(
         let delete_posts: Vec<bool> = model
             .unassigned_posts
             .iter()
-            .map(|sm| should_delete_copied_secondary(model, ctx, cmd, to, dz, sm, &src_keys))
+            .map(|sm| should_delete_copied_secondary(model, ctx, to, dz, sm, &src_keys))
             .collect();
         let mut pi = 0usize;
         model.unassigned_posts.retain(|_| {
@@ -1166,9 +1165,7 @@ fn copy_secondary(
                 region
                     .secondary_beams
                     .iter()
-                    .map(|sm| {
-                        should_delete_copied_secondary(model, ctx, cmd, to, dz, sm, &src_keys)
-                    })
+                    .map(|sm| should_delete_copied_secondary(model, ctx, to, dz, sm, &src_keys))
                     .collect()
             })
             .collect();
@@ -1187,9 +1184,7 @@ fn copy_secondary(
                 region
                     .posts
                     .iter()
-                    .map(|sm| {
-                        should_delete_copied_secondary(model, ctx, cmd, to, dz, sm, &src_keys)
-                    })
+                    .map(|sm| should_delete_copied_secondary(model, ctx, to, dz, sm, &src_keys))
                     .collect()
             })
             .collect();
@@ -1207,8 +1202,9 @@ fn copy_secondary(
     let existing = secondary_by_plan(model, ctx, to);
     let src: Vec<SecondaryMember> = all_secondary_slots(model)
         .into_iter()
-        .filter_map(|slot| secondary_at(model, slot).cloned())
+        .filter_map(|slot| secondary_at(model, slot))
         .filter(|sm| secondary_story(model, sm) == Some(cmd.from))
+        .cloned()
         .collect();
     let mut mapped: HashMap<SectionId, SectionId> = HashMap::new();
     for sm in src {
@@ -1325,7 +1321,7 @@ fn copy_case_loads(
         .into_iter()
         .filter_map(|n| Some((n, ctx.mapped_node(model, n, dz)?)))
         .collect();
-    let elem_map: HashMap<ElemId, (ElemId, f64, f64)> = model
+    let elem_map: HashMap<ElemId, (ElemId, f64)> = model
         .elements
         .iter()
         .filter(|e| model.member_story(e) == Some(cmd.from))
@@ -1333,14 +1329,11 @@ fn copy_case_loads(
             let k = ctx.key(model, cmd.from, &e.nodes)?;
             let &dst = dst_members.get(&k)?;
             let dst_elem = model.elements.get(dst.index())?;
-            Some((
-                e.id,
-                (dst, model.member_length(e), model.member_length(dst_elem)),
-            ))
+            Some((e.id, (dst, model.member_length(dst_elem))))
         })
         .collect();
     let dst_nodes: HashSet<NodeId> = node_map.values().copied().collect();
-    let dst_elems: HashSet<ElemId> = elem_map.values().map(|(e, _, _)| *e).collect();
+    let dst_elems: HashSet<ElemId> = elem_map.values().map(|(e, _)| *e).collect();
 
     let mut unfit = 0usize;
     for lc in &mut model.load_cases {
@@ -1355,7 +1348,7 @@ fn copy_case_loads(
         }
         let mut add_member = Vec::new();
         for ml in lc.member.iter().filter(|l| !l.source.is_auto()) {
-            let Some(&(e, _src_len, dst_len)) = elem_map.get(&ml.elem) else {
+            let Some(&(e, dst_len)) = elem_map.get(&ml.elem) else {
                 continue;
             };
             match fit_member_load(ml, dst_len) {
