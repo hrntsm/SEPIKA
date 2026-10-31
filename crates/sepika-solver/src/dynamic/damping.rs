@@ -285,6 +285,7 @@ mod tests {
             omega: 10.0,
             basis: StiffnessKind::Initial,
         };
+        assert!(!damping.is_tangent_based());
         let c = damping.assemble_c(&m, &k);
         assert!((*c.get(0, 0).unwrap_or(&0.0) - 10.0).abs() < 1e-12);
         assert!((*c.get(1, 1).unwrap_or(&0.0) - 20.0).abs() < 1e-12);
@@ -301,15 +302,15 @@ mod tests {
             h2: 0.05,
             w2: 20.0,
         };
-        let (a0, a1) = Damping::rayleigh_coeffs(10.0, 20.0, 0.05, 0.05);
+        assert!(!damping.is_tangent_based());
         let c = damping.assemble_c(&m, &k);
         assert!(
-            (*c.get(0, 0).unwrap_or(&0.0) - (a0 * 1.0 + a1 * 100.0)).abs() < 1e-9,
+            (*c.get(0, 0).unwrap_or(&0.0) - 1.0).abs() < 1e-9,
             "c00={}",
             *c.get(0, 0).unwrap_or(&0.0)
         );
         assert!(
-            (*c.get(1, 1).unwrap_or(&0.0) - (a0 * 1.0 + a1 * 400.0)).abs() < 1e-9,
+            (*c.get(1, 1).unwrap_or(&0.0) - 2.0).abs() < 1e-9,
             "c11={}",
             *c.get(1, 1).unwrap_or(&0.0)
         );
@@ -396,22 +397,5 @@ mod tests {
         // uᵀKt u=250, uᵀKe u=1000 → ω1=10·√0.25=5。C=2·0.05/5·Kt=0.02·Kt。
         let c = d.assemble_c_tangent(&m, &kt, &ke, &u);
         assert!((*c.get(0, 0).unwrap_or(&0.0) - 0.02 * 250.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_non_tangent_is_not_tangent_based() {
-        assert!(!Damping::Rayleigh {
-            h1: 0.05,
-            w1: 1.0,
-            h2: 0.05,
-            w2: 2.0
-        }
-        .is_tangent_based());
-        assert!(!Damping::StiffnessProportional {
-            h: 0.05,
-            omega: 10.0,
-            basis: StiffnessKind::Initial
-        }
-        .is_tangent_based());
     }
 }

@@ -52,8 +52,7 @@ const DECAYED_SCALE_FLOOR_RATIO: f64 = 1.0e-2;
 /// この時刻の力のスケール。動的釣り合い `p = f_int + C·v + M·a` の**動的な 3 項の
 /// ノルムの最大**を返す（長期荷重 f0 は含めない）。
 pub fn dynamic_force_scale(p: &[f64], m_a: &[f64], c_v: &[f64]) -> f64 {
-    let norm = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
-    norm(p).max(norm(m_a)).max(norm(c_v))
+    l2_norm(p).max(l2_norm(m_a)).max(l2_norm(c_v))
 }
 
 /// 動的解析（時刻歴）の収束判定に用いる基準ノルム。
@@ -67,17 +66,13 @@ pub fn dynamic_reference_norm(scale: f64, peak_scale: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// 外力が 0 でも、慣性力・減衰力があれば力のスケールはそちらを採る。
-    /// 地動加速度がゼロを横切る時刻に相当する。
-    #[test]
-    fn 外力がゼロでも慣性力を力のスケールに採る() {
-        let scale = dynamic_force_scale(&[0.0, 0.0, 0.0], &[3.0, 4.0, 0.0], &[1.0, 0.0, 0.0]);
-        assert_eq!(scale, 5.0);
-    }
-
     /// 3 項のうち最大のものを採る。
     #[test]
     fn 動的釣り合いの各項の最大を採る() {
+        assert_eq!(
+            dynamic_force_scale(&[0.0, 0.0, 0.0], &[3.0, 4.0, 0.0], &[1.0, 0.0, 0.0]),
+            5.0
+        );
         assert_eq!(dynamic_force_scale(&[7.0], &[3.0], &[5.0]), 7.0);
         assert_eq!(dynamic_force_scale(&[3.0], &[7.0], &[5.0]), 7.0);
         assert_eq!(dynamic_force_scale(&[3.0], &[5.0], &[7.0]), 7.0);

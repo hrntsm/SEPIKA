@@ -4,6 +4,7 @@ use sepika_core::dof::DofMap;
 use sepika_core::model::Model;
 use sepika_element::behavior::MassOption;
 use sepika_math::solver::{make_solver, LinearSolver, SolveError, SolverBackend};
+use sepika_math::sparse::sparse_matvec;
 
 const EIGEN_TOL: f64 = 1e-10;
 const EIGEN_MAX_ITER: usize = 200;
@@ -69,7 +70,14 @@ pub fn solve_eigen(
         other => other,
     })?;
 
-    solve_eigen_with_solver(model, dofmap, reducer, n_modes, solver.as_ref())
+    solve_eigen_prevalidated(
+        model,
+        dofmap,
+        reducer,
+        n_modes,
+        solver.as_ref(),
+        Some(k_red),
+    )
 }
 
 /// `solver` は縮約後剛性行列 K_red に対して呼び出し側で既に `factorize` 済みであることを前提とする。
@@ -90,6 +98,17 @@ pub fn solve_eigen_with_solver(
     )
     .map_err(SolveError::InvalidInput)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
+    solve_eigen_prevalidated(model, dofmap, reducer, n_modes, solver, None)
+}
+
+fn solve_eigen_prevalidated(
+    model: &Model,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    n_modes: usize,
+    solver: &dyn LinearSolver,
+    k_red: Option<faer::sparse::SparseColMat<usize, f64>>,
+) -> Result<ModalResult, SolveError> {
     let m_free = assemble_global_m(model, dofmap, MassOption::Consistent)?;
     let m_red = reducer.reduce_k(&m_free);
     let n = m_red.nrows();
@@ -121,8 +140,10 @@ pub fn solve_eigen_with_solver(
         ));
     }
 
-    let k_free = assemble_global_k(model, dofmap);
-    let k_red = reducer.reduce_k(&k_free);
+    let k_red = k_red.unwrap_or_else(|| {
+        let k_free = assemble_global_k(model, dofmap);
+        reducer.reduce_k(&k_free)
+    });
 
     let q = subspace_size(n, n_modes);
 
@@ -266,14 +287,6 @@ node.mass や材料の密度(ρ)で並進質量を追加するか、要求モー
     })
 }
 
-/// 展開済み（`Reducer::expand_u` 済み）のモード形状を節点×6成分へ散布する。
-///
-/// `phi_free` は呼び出し側で 1 回だけ計算した値を渡す。
-/// 剛床のスレーブ自由度にはマスターに従属した値が入る。fixed・非構造自由度は 0。
-fn scatter_node_shape(phi_free: &[f64], dofmap: &DofMap, n_nodes: usize) -> Vec<[f64; 6]> {
-    dofmap.expand_to_nodes(phi_free, n_nodes)
-}
-
 /// 部分空間サイズ q = min(n, max(2p, p+8))。
 ///
 /// p は要求モード数を縮約後自由度数 n で切り詰めた値（Bathe 2013 式(19)）。
@@ -315,11 +328,6 @@ fn init_subspace(n: usize, q: usize, k_diag: &[f64], m_diag: &[f64]) -> Vec<f64>
     x
 }
 
-/// 疎行列とベクトルの積 y = A·x。
-fn spmv(mat: &faer::sparse::SparseColMat<usize, f64>, x: &[f64]) -> Vec<f64> {
-    sepika_math::sparse::sparse_matvec(mat, x)
-}
-
 /// Y^T·A·Y（q×q 対称行列）を、A の非ゼロ要素だけを使って計算する。
 ///
 /// `col_buf`（長さ n）・`z_buf`（長さ n*q）・`result`（長さ q*q）は呼び出し側が確保して使い回す作業バッファ。
@@ -353,7 +361,7 @@ fn proj_yty(
 
 /// φᵀ·M·φ を M の非ゼロ要素だけを使って計算する。
 fn m_norm(phi: &[f64], m_red: &faer::sparse::SparseColMat<usize, f64>) -> f64 {
-    let m_phi = spmv(m_red, phi);
+    let m_phi = sparse_matvec(m_red, phi);
     phi.iter().zip(m_phi.iter()).map(|(p, mp)| p * mp).sum()
 }
 
@@ -548,7 +556,7 @@ fn compute_participation(
     for (m_idx, phi_red) in shapes.iter().enumerate() {
         let phi_free = reducer.expand_u(phi_red);
 
-        let m_phi = spmv(m_free, &phi_free);
+        let m_phi = sparse_matvec(m_free, &phi_free);
 
         let mut phi_m_phi = 0.0;
         for a in 0..n_free {
@@ -567,7 +575,7 @@ fn compute_participation(
             }
         }
 
-        node_shapes.push(scatter_node_shape(&phi_free, dofmap, n_nodes));
+        node_shapes.push(dofmap.expand_to_nodes(&phi_free, n_nodes));
     }
 
     (participation, effective_mass, node_shapes)

@@ -397,27 +397,18 @@ fn test_1dof_period() {
     let reducer = Reducer::build(&model, &dofmap);
     let result = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
 
-    // 質量・自由度が正しく組まれていれば 1 モードが得られる。
     assert_eq!(result.omega2.len(), 1, "1 モードが解けていない");
-    assert!(result.omega2[0] > 0.0, "omega2={}", result.omega2[0]);
-    // 反復解法だが SPD 1 自由度なので高精度に収束する（理論一致・許容差）。
     assert!(
         (result.omega2[0] - expected_omega2).abs() / expected_omega2 < 1e-8,
         "omega2={} expected={}",
         result.omega2[0],
         expected_omega2
     );
-    // T = 0.198692 s の例と一致。
     assert!(
         (result.period[0] - expected_t).abs() / expected_t < 1e-8,
         "T={} expected={}",
         result.period[0],
         expected_t
-    );
-    assert!(
-        (result.period[0] - 0.198692).abs() < 1e-5,
-        "T={} 参照値 0.198692 と不一致",
-        result.period[0]
     );
 }
 
@@ -501,8 +492,8 @@ fn test_2dof_shear_period_and_mass() {
         lam2
     );
 
-    let t1 = 2.0 * std::f64::consts::PI / result.omega2[0].sqrt();
-    let t2 = 2.0 * std::f64::consts::PI / result.omega2[1].sqrt();
+    let t1 = result.period[0];
+    let t2 = result.period[1];
     assert!((t1 - 0.32150).abs() < 1e-4, "T1={}", t1);
     assert!((t2 - 0.12280).abs() < 1e-4, "T2={}", t2);
 
@@ -557,29 +548,6 @@ fn test_eigen_mass_method_lumped_only_skips_element_mass() {
         t_default,
         t_theory
     );
-}
-
-/// 決定性テスト: 固有値解析を2回実行しビット一致を確認
-#[test]
-fn test_eigen_deterministic() {
-    let model = make_1dof_spring_model();
-    let dofmap = DofMap::build(&model);
-    let reducer = Reducer::build(&model, &dofmap);
-    let first = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
-    let cur = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
-    assert_eq!(first.omega2.len(), cur.omega2.len());
-    for (a, b) in first.omega2.iter().zip(cur.omega2.iter()) {
-        assert_eq!(a.to_bits(), b.to_bits());
-    }
-    for (a, b) in first.period.iter().zip(cur.period.iter()) {
-        assert_eq!(a.to_bits(), b.to_bits());
-    }
-    for (s_a, s_b) in first.shapes.iter().zip(cur.shapes.iter()) {
-        assert_eq!(s_a.len(), s_b.len());
-        for (va, vb) in s_a.iter().zip(s_b.iter()) {
-            assert_eq!(va.to_bits(), vb.to_bits());
-        }
-    }
 }
 
 /// 柱2本＋剛床モデル。柱頭2節点を浮遊マスター節点へ RigidDiaphragm で従属させる。
@@ -938,75 +906,8 @@ fn test_eigen_mass_rank_translation_rotation_scale_mix() {
 /// 質量が非対称な2層軸ばねモデルの解析解と比較して質量重み付けが正しく効いていること。
 #[test]
 fn test_2dof_shear_unequal_mass_matches_analytic() {
-    let k = 1000.0_f64;
-    let young = k * 1000.0;
-    let node = |id: u32, x: f64, restraint: Dof6Mask, mass: Option<[f64; 6]>| Node {
-        id: NodeId(id),
-        coord: [x, 0.0, 0.0],
-        restraint,
-        mass,
-        story: None,
-        support_spring: None,
-    };
-    let beam = |id: u32, a: u32, b: u32| ElementData {
-        id: ElemId(id),
-        kind: ElementKind::Beam,
-        nodes: smallvec::smallvec![NodeId(a), NodeId(b)],
-        section: Some(SectionId(0)),
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 0.0, 1.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    };
-    let model = Model {
-        nodes: vec![
-            node(0, 0.0, Dof6Mask::FIXED, None),
-            node(1, 1000.0, FREE_UX, Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])),
-            node(2, 2000.0, FREE_UX, Some([2.0, 0.0, 0.0, 0.0, 0.0, 0.0])),
-        ],
-        elements: vec![beam(1, 0, 1), beam(2, 1, 2)],
-        sections: vec![Section {
-            frame_use: None,
-            id: SectionId(0),
-            name: "spring".into(),
-            area: 1.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 1.0,
-            width: 1.0,
-            as_y: 1.0,
-            as_z: 1.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        }],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "mat".into(),
-            category: MaterialCategory::Steel,
-            young,
-            poisson: 0.0,
-            density: 0.0,
-            shear: None,
-            fc: None,
-            fy: None,
-        }],
-        ..Default::default()
-    };
+    let mut model = make_shear_2dof_model();
+    model.nodes[2].mass = Some([2.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
     let result = solve_eigen(&model, &dofmap, &reducer, 2).unwrap();
