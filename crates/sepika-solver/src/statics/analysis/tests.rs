@@ -1,6 +1,4 @@
-use super::seismic::{
-    distribute_pi_over_diaphragms, distribute_seismic_forces, main_system_weight,
-};
+use super::seismic::{distribute_seismic_forces, main_system_weight};
 use super::*;
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
@@ -1066,21 +1064,8 @@ fn test_model_issues_warns_story_without_diaphragm() {
         .stories
         .push(Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0)));
     model.stories.push(Story {
-        wall_weights: Vec::new(),
-        id: StoryId(1),
-        name: "2F".into(),
-        elevation: Some(3000.0),
-        sl_offset_mm: Some(0.0),
-        source_story: None,
         node_ids: vec![NodeId(1)],
-        seismic_weight: None,
-        weight_override: None,
-        structure: Default::default(),
-        level_kind: Default::default(),
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
+        ..Story::new(StoryId(1), "2F".into(), Some(3000.0), Some(0.0))
     });
 
     let issues = model_issues(&model);
@@ -1105,22 +1090,8 @@ fn test_model_issues_errors_on_duplicate_story_names() {
     use sepika_core::model::Story;
 
     let mut model = make_cantilever_model();
-    let story = |id: u32, name: &str, elevation: f64| Story {
-        wall_weights: Vec::new(),
-        id: StoryId(id),
-        name: name.into(),
-        elevation: Some(elevation),
-        sl_offset_mm: Some(0.0),
-        source_story: None,
-        node_ids: Vec::new(),
-        seismic_weight: None,
-        weight_override: None,
-        structure: Default::default(),
-        level_kind: Default::default(),
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
+    let story = |id: u32, name: &str, elevation: f64| {
+        Story::new(StoryId(id), name.into(), Some(elevation), Some(0.0))
     };
     // 見た目で区別できない差（末尾の空白）でも同名として扱う。
     model.stories.push(story(0, "2F", 3000.0));
@@ -1174,38 +1145,16 @@ fn make_two_story_diaphragm_model(
         nodes,
         stories: vec![
             Story {
-                wall_weights: Vec::new(),
-                id: StoryId(0),
-                name: "1F".into(),
-                elevation: Some(0.0),
-                sl_offset_mm: Some(0.0),
-                source_story: None,
                 node_ids: vec![NodeId(0)],
                 seismic_weight: Some(500.0),
-                weight_override: None,
                 structure: StoryStructure::Rc,
-                level_kind: StoryLevelKind::Normal,
-                dynamic_mass: None,
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
+                ..Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0))
             },
             Story {
-                wall_weights: Vec::new(),
-                id: StoryId(1),
-                name: "2F".into(),
-                elevation: Some(3000.0),
-                sl_offset_mm: Some(0.0),
-                source_story: None,
                 node_ids: vec![NodeId(1)],
                 seismic_weight,
-                weight_override: None,
                 structure: StoryStructure::Rc,
-                level_kind: StoryLevelKind::Normal,
-                dynamic_mass: None,
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
+                ..Story::new(StoryId(1), "2F".into(), Some(3000.0), Some(0.0))
             },
         ],
         elements: vec![ElementData {
@@ -1553,21 +1502,8 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
         support_spring: None,
     }];
     let mut stories = vec![Story {
-        wall_weights: Vec::new(),
-        id: StoryId(0),
-        name: "F1".to_string(),
-        elevation: Some(0.0),
-        sl_offset_mm: Some(0.0),
-        source_story: None,
         node_ids: vec![NodeId(0)],
-        seismic_weight: None,
-        weight_override: None,
-        structure: StoryStructure::default(),
-        level_kind: StoryLevelKind::Normal,
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
+        ..Story::new(StoryId(0), "F1".to_string(), Some(0.0), Some(0.0))
     }];
     for (i, s) in structures.iter().enumerate() {
         let elev = (i as f64 + 1.0) * 1000.0;
@@ -1581,21 +1517,15 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
             support_spring: None,
         });
         stories.push(Story {
-            wall_weights: Vec::new(),
-            id: StoryId((i + 1) as u32),
-            name: format!("F{}", i + 2),
-            elevation: Some(elev),
-            sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids: vec![nid],
             seismic_weight: Some(1000.0),
-            weight_override: None,
             structure: *s,
-            level_kind: StoryLevelKind::Normal,
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
+            ..Story::new(
+                StoryId((i + 1) as u32),
+                format!("F{}", i + 2),
+                Some(elev),
+                Some(0.0),
+            )
         });
     }
     Model {
@@ -1630,21 +1560,8 @@ fn test_steel_height_ratio() {
 #[test]
 fn test_ground_elevation_from_basement_and_fallback() {
     let story = |id: u32, z: f64, kind: StoryLevelKind| Story {
-        wall_weights: Vec::new(),
-        id: StoryId(id),
-        name: format!("S{id}"),
-        elevation: Some(z),
-        sl_offset_mm: Some(0.0),
-        source_story: None,
-        node_ids: Vec::new(),
-        seismic_weight: None,
-        weight_override: None,
-        structure: StoryStructure::default(),
         level_kind: kind,
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
+        ..Story::new(StoryId(id), format!("S{id}"), Some(z), Some(0.0))
     };
     // 地下2層。各層の「床レベル + 深さ」がともに 0（GL）になる。
     // B2(-9000) B1(-5000, 深さ5000) B0(-1000, 深さ1000) 1F(3000)。
@@ -1700,21 +1617,9 @@ fn test_ground_elevation_from_basement_and_fallback() {
 fn make_diaphragm_model(diaphragms: Vec<(NodeId, Option<f64>, Option<f64>)>) -> Model {
     let mut model = Model {
         stories: vec![Story {
-            wall_weights: Vec::new(),
-            id: StoryId(0),
-            name: "F1".into(),
-            elevation: Some(1000.0),
-            sl_offset_mm: Some(0.0),
-            source_story: None,
-            node_ids: Vec::new(),
             seismic_weight: Some(400.0),
-            weight_override: None,
             structure: StoryStructure::Rc,
-            level_kind: StoryLevelKind::Normal,
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
+            ..Story::new(StoryId(0), "F1".into(), Some(1000.0), Some(0.0))
         }],
         ..Default::default()
     };
@@ -1736,7 +1641,7 @@ fn test_distribute_pi_over_diaphragms() {
     // 剛床が 1 つなら全量がその剛床に載る。
     let model = make_diaphragm_model(vec![(NodeId(10), None, None)]);
     assert_eq!(
-        distribute_pi_over_diaphragms(&model, &model.stories[0], 40.0),
+        distribute_seismic_forces(&model, &model.stories[0], 40.0),
         vec![(NodeId(10), 40.0)]
     );
 
@@ -1746,7 +1651,7 @@ fn test_distribute_pi_over_diaphragms() {
         (NodeId(11), Some(100.0), None),
     ]);
     let pi = 40.0;
-    let shares = distribute_pi_over_diaphragms(&model, &model.stories[0], pi);
+    let shares = distribute_seismic_forces(&model, &model.stories[0], pi);
     let s10 = shares.iter().find(|(n, _)| *n == NodeId(10)).unwrap().1;
     let s11 = shares.iter().find(|(n, _)| *n == NodeId(11)).unwrap().1;
     assert!((s10 - 30.0).abs() < 1e-9, "s10={s10}");
@@ -1756,7 +1661,7 @@ fn test_distribute_pi_over_diaphragms() {
 
     // 重量が設定されていなければ等分割（総量は保つ）。
     let model = make_diaphragm_model(vec![(NodeId(10), None, None), (NodeId(11), None, None)]);
-    let shares = distribute_pi_over_diaphragms(&model, &model.stories[0], pi);
+    let shares = distribute_seismic_forces(&model, &model.stories[0], pi);
     for (_, v) in &shares {
         assert!((*v - 20.0).abs() < 1e-9, "share={v}");
     }
@@ -1791,7 +1696,7 @@ fn test_distribute_pi_without_diaphragm_uses_story_nodes() {
     model.stories[0].node_ids = vec![NodeId(0), NodeId(1)];
 
     let pi = 40.0;
-    let shares = distribute_pi_over_diaphragms(&model, &model.stories[0], pi);
+    let shares = distribute_seismic_forces(&model, &model.stories[0], pi);
     let s0 = shares.iter().find(|(n, _)| *n == NodeId(0)).unwrap().1;
     let s1 = shares.iter().find(|(n, _)| *n == NodeId(1)).unwrap().1;
     assert!((s0 - 30.0).abs() < 1e-9, "s0={s0}");
@@ -1806,7 +1711,7 @@ fn test_distribute_pi_without_diaphragm_uses_story_nodes() {
     for n in &mut model.nodes {
         n.mass = None;
     }
-    let shares = distribute_pi_over_diaphragms(&model, &model.stories[0], pi);
+    let shares = distribute_seismic_forces(&model, &model.stories[0], pi);
     for (_, v) in &shares {
         assert!((*v - 20.0).abs() < 1e-9, "share={v}");
     }
@@ -1837,14 +1742,13 @@ fn test_ci_override_separates_main_system_weight_and_force() {
     assert!((s10 - 60.0).abs() < 1e-9, "s10={}", s10);
     assert!((s11 - 30.0).abs() < 1e-9, "s11={}", s11);
 
-    // 全剛床が ci_override 無しなら、地震荷重版の分配は通常の Pi 分配と一致する。
     let model = make_diaphragm_model(vec![
         (NodeId(10), Some(300.0), None),
         (NodeId(11), Some(100.0), None),
     ]);
     assert_eq!(
         distribute_seismic_forces(&model, &model.stories[0], 40.0),
-        distribute_pi_over_diaphragms(&model, &model.stories[0], 40.0)
+        vec![(NodeId(10), 30.0), (NodeId(11), 10.0)]
     );
 }
 

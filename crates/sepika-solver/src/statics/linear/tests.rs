@@ -40,96 +40,20 @@ fn no_long_axial_column_targets_fiber_and_multispring_by_section_use() {
 fn simply_supported_udl_midspan_moment() {
     let l = 1000.0_f64;
     let w = 2.0_f64;
-    let model = Model {
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                // Ux,Uy,Uz,Rx 拘束（並進ピン＋ねじり剛体モード除去）
-                restraint: Dof6Mask(0b001111),
-                mass: None,
-                story: None,
-                support_spring: None,
+    let mut model = ss_beam(
+        l,
+        vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: l,
+                w1: w,
+                w2: w,
             },
-            Node {
-                id: NodeId(1),
-                coord: [l, 0.0, 0.0],
-                // Uy,Uz 拘束（ローラ。Ux 自由）
-                restraint: Dof6Mask(0b000110),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Beam,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 0.0, 1.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        }],
-        sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "s".into(),
-            area: 1000.0,
-            iy: 1.0e7,
-            iz: 1.0e7,
-            j: 1.0e6,
-            depth: 200.0,
-            width: 100.0,
-            as_y: 800.0,
-            as_z: 800.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        }],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "m".into(),
-            category: MaterialCategory::Steel,
-            young: 205000.0,
-            poisson: 0.3,
-            density: 0.0,
-            shear: None,
-            fc: None,
-            fy: None,
-        }],
-        load_cases: vec![LoadCase {
-            origin: Default::default(),
-            kind: Default::default(),
-            id: LoadCaseId(1),
-            name: "udl".into(),
-            nodal: vec![],
-            member: vec![MemberLoad::manual(
-                ElemId(0),
-                [0.0, 0.0, -1.0],
-                MemberLoadKind::Distributed {
-                    a: 0.0,
-                    b: l,
-                    w1: w,
-                    w2: w,
-                },
-            )],
-        }],
-        ..Default::default()
-    };
+        )],
+    );
+    model.load_cases[0].name = "udl".into();
 
     let res = linear_static_once(&model, LoadCaseId(1)).expect("solve");
     let (_, mf) = res
@@ -856,88 +780,10 @@ fn test_linear_static_vertical_cantilever_bending() {
     // 鉛直柱: (0,0,0)固定 → (0,0,1000)自由。頂部に水平荷重 P=1000 (global X)。
     // 座標変換が正しく適用されれば曲げ片持ち応答 δx ≈ PL³/3E·Iz + せん断 ≈ 333,364。
     // 回転変換が欠落していると軸剛性を誤用して δx≈10 になる（回帰防止）。
-    let model = Model {
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                restraint: Dof6Mask::FIXED,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [0.0, 0.0, 1000.0],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Beam,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [1.0, 0.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        }],
-        sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "sec".to_string(),
-            area: 100.0,
-            iy: 1000.0,
-            iz: 1000.0,
-            j: 100.0,
-            depth: 100.0,
-            width: 100.0,
-            as_y: 83.33,
-            as_z: 83.33,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        }],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "mat".to_string(),
-            category: MaterialCategory::Steel,
-            young: 1000.0,
-            poisson: 0.3,
-            density: 0.0,
-            shear: None,
-            fc: None,
-            fy: None,
-        }],
-        load_cases: vec![LoadCase {
-            origin: Default::default(),
-            kind: Default::default(),
-            id: LoadCaseId(1),
-            name: "h".to_string(),
-            nodal: vec![NodalLoad::manual(
-                NodeId(1),
-                [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            )],
-            member: vec![],
-        }],
-        ..Default::default()
-    };
+    let mut model = make_axial_cantilever();
+    model.nodes[1].coord = [0.0, 0.0, 1000.0];
+    model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
+    model.load_cases[0].name = "h".into();
     let result = linear_static_once(&model, LoadCaseId(1)).unwrap();
     let ux = result.disp[1][0];
     // 曲げ主成分 333,333 + せん断 ~31。軸剛性誤用(=10)を確実に弾く帯域で判定。
