@@ -92,6 +92,13 @@ pub struct PanelZone {
     trial_disp: [f64; 2],
 }
 
+type PanelState = (
+    [f64; 2],
+    [f64; 2],
+    ([f64; 12], [f64; 12]),
+    Option<[Vec<u8>; 2]>,
+);
+
 /// パネルに取り付く柱・梁から解決した諸元。
 struct ResolvedPanel {
     geom: [PanelGeometry; 2],
@@ -281,6 +288,19 @@ impl PanelZone {
             committed_disp: [0.0; 2],
             trial_disp: [0.0; 2],
         }
+    }
+
+    fn state_data(&self) -> PanelState {
+        let col = self
+            .column
+            .as_ref()
+            .map(|c| (c.committed, c.trial))
+            .unwrap_or(([0.0; 12], [0.0; 12]));
+        let springs = self
+            .springs
+            .as_ref()
+            .map(|sp| [sp[0].serialize_state(), sp[1].serialize_state()]);
+        (self.committed_disp, self.trial_disp, col, springs)
     }
 
     fn to_panel_frame(&self, gamma: [f64; 2]) -> [f64; 2] {
@@ -478,27 +498,12 @@ impl ElementBehavior for PanelZone {
     }
 
     fn snapshot_state(&self) -> Box<dyn std::any::Any> {
-        let col = self
-            .column
-            .as_ref()
-            .map(|c| (c.committed, c.trial))
-            .unwrap_or(([0.0; 12], [0.0; 12]));
-        let springs = self
-            .springs
-            .as_ref()
-            .map(|sp| [sp[0].serialize_state(), sp[1].serialize_state()]);
-        Box::new((self.committed_disp, self.trial_disp, col, springs))
+        Box::new(self.state_data())
     }
 
     fn restore_state(&mut self, state: &dyn std::any::Any) {
-        type Snapshot = (
-            [f64; 2],
-            [f64; 2],
-            ([f64; 12], [f64; 12]),
-            Option<[Vec<u8>; 2]>,
-        );
         let (committed, trial, col, springs) =
-            crate::behavior::downcast_snapshot::<Snapshot>("PanelZone", state);
+            crate::behavior::downcast_snapshot::<PanelState>("PanelZone", state);
         self.committed_disp = *committed;
         self.trial_disp = *trial;
         if let Some(c) = self.column.as_mut() {
@@ -516,17 +521,7 @@ impl ElementBehavior for PanelZone {
     }
 
     fn serialize_checkpoint(&self) -> Vec<u8> {
-        let col = self
-            .column
-            .as_ref()
-            .map(|c| (c.committed, c.trial))
-            .unwrap_or(([0.0; 12], [0.0; 12]));
-        let springs = self
-            .springs
-            .as_ref()
-            .map(|sp| [sp[0].serialize_state(), sp[1].serialize_state()]);
-        bincode::serialize(&(self.committed_disp, self.trial_disp, col, springs))
-            .expect("serialize checkpoint")
+        bincode::serialize(&self.state_data()).expect("serialize checkpoint")
     }
 
     fn deserialize_checkpoint(
@@ -536,13 +531,7 @@ impl ElementBehavior for PanelZone {
         if data.is_empty() {
             return Ok(());
         }
-        type Checkpoint = (
-            [f64; 2],
-            [f64; 2],
-            ([f64; 12], [f64; 12]),
-            Option<[Vec<u8>; 2]>,
-        );
-        let (committed, trial, col, springs): Checkpoint = bincode::deserialize(data)
+        let (committed, trial, col, springs): PanelState = bincode::deserialize(data)
             .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
         self.committed_disp = committed;
         self.trial_disp = trial;
@@ -823,12 +812,10 @@ mod tests {
         (model, panel)
     }
 
-    /// 諸元の解決: dc は柱（鉛直材）から、db は梁（水平材）から取る。
-    /// 取り違えると Ve が誤り、剛性・降伏耐力の双方が狂う（回帰テスト）。
     #[test]
-    fn test_resolve_takes_dc_from_column_and_db_from_beam() {
+    fn test_linear_panel_geometry_stiffness_and_trial_moments() {
         let (model, data) = cross_joint_model();
-        let pz = PanelZone::new(&data, &model);
+        let mut pz = PanelZone::new(&data, &model);
         assert!(
             (pz.dc[0] - (400.0 - 21.0)).abs() < 1e-9,
             "dc は柱: {}",
@@ -845,16 +832,10 @@ mod tests {
             pz.tp[0]
         );
         assert!((pz.ve[0] - pz.dc[0] * pz.db[0] * pz.tp[0]).abs() / pz.ve[0] < 1e-12);
-    }
-
-    /// 各方向の弾性剛性は G·Ve で、自由度は 2 個。
-    #[test]
-    fn test_elastic_stiffness_is_g_times_ve() {
-        let (model, data) = cross_joint_model();
-        let pz = PanelZone::new(&data, &model);
+        let ctx = Ctx { model: &model };
         assert_eq!(pz.n_dof(), 2, "弾性パネルは 2 自由度");
 
-        let k = pz.tangent_stiffness(&Ctx { model: &model });
+        let k = pz.tangent_stiffness(&ctx);
         let expected = pz.g * pz.ve[0];
         assert!((k.get(0, 0) - expected).abs() / expected < 1e-12);
         let weak_expected = pz.g * pz.ve[1];
@@ -863,15 +844,6 @@ mod tests {
             k.get(0, 1).abs() < 1e-6,
             "柱主軸と全体軸が一致すると非対角は 0"
         );
-    }
-
-    /// 内力は M = K·γ（弾性）。トライアル変位に追従する。
-    #[test]
-    fn test_internal_force_follows_trial_rotation() {
-        let (model, data) = cross_joint_model();
-        let ctx = Ctx { model: &model };
-        let mut pz = PanelZone::new(&data, &model);
-        let k = pz.g * pz.ve[0];
 
         let mut du = LocalVec {
             data: SmallVec::from_elem(0.0, 2),
@@ -880,7 +852,7 @@ mod tests {
         pz.update_state(&du, false, &ctx).unwrap();
 
         let f = pz.internal_force(&ctx);
-        assert!((f.data[0] - k * 1.0e-4).abs() / (k * 1.0e-4) < 1e-12);
+        assert!((f.data[0] - expected * 1.0e-4).abs() / (expected * 1.0e-4) < 1e-12);
         assert!(f.data[1].abs() < 1e-6);
         assert!((pz.panel_moments()[0] - f.data[0]).abs() < 1e-6);
     }
@@ -1934,7 +1906,6 @@ mod tests {
 
     #[test]
     fn panel_761_actual_dimensions_control_public_axial_ratio() {
-        let mut observations = vec![];
         for (length, area, shortening) in [
             (0.5, 0.001, 0.00025),
             (0.5, 100.0, 0.00025),
@@ -1957,9 +1928,8 @@ mod tests {
                 panel.axial_ratio(),
                 std::array::from_fn::<_, 2, _>(|i| panel.yield_moment()[i] / panel.pmy0[i])
             );
-            observations.push((panel.axial_ratio(), panel.yield_moment()[0] / panel.pmy0[0]));
-        }
-        for (ratios, reduction) in observations {
+            let ratios = panel.axial_ratio();
+            let reduction = panel.yield_moment()[0] / panel.pmy0[0];
             assert!((ratios[0] - 0.5).abs() < 1e-12);
             assert!((ratios[1] - 0.5).abs() < 1e-12);
             assert!((reduction - 0.8660254037844386).abs() < 1e-12);

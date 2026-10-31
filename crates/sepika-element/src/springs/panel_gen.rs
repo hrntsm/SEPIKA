@@ -382,20 +382,16 @@ mod tests {
         }
     }
 
-    /// S 造の柱梁接合節点にパネルが 1 つ生成され、モデルの不変条件
-    /// （配列添字 == ElemId）が保たれる。
     #[test]
-    fn test_generates_panel_at_steel_joint() {
+    fn test_panel_generation_offsets_and_disabled_mode_lifecycle() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
         let panels = apply_auto_panel_zones(&mut model).unwrap();
-
         assert_eq!(panels.len(), 1);
         assert_eq!(panels[0].node, NodeId(0));
         assert!((panels[0].dc[0] - (400.0 - 21.0)).abs() < 1e-9);
         assert!((panels[0].db[0] - (600.0 - 17.0)).abs() < 1e-9);
         assert!((panels[0].tp[0] - 13.0).abs() < 1e-9);
         assert!(panels[0].k_panel[0] > 0.0);
-
         let panel_elems: Vec<_> = model
             .elements
             .iter()
@@ -404,14 +400,18 @@ mod tests {
         assert_eq!(panel_elems.len(), 1);
         assert_eq!(panel_elems[0].nodes[0], NodeId(0), "先頭は接合部の節点");
         assert!(panel_elems[0].nodes.len() >= 2);
+        assert_eq!(model.elements.len(), 3);
+        let beam = &model.elements[0].rigid_zone;
+        assert!((beam.panel_offset_i - 200.0).abs() < 1e-9);
+        assert_eq!(beam.panel_offset_j, 0.0, "接合部でない端は 0");
+        assert_eq!(beam.length_i, 0.0, "剛域長そのものは変えない");
+        assert!((beam.rigid_length_i() - 200.0).abs() < 1e-9);
+        let col = &model.elements[1].rigid_zone;
+        assert!((col.panel_offset_j - 300.0).abs() < 1e-9);
+        assert_eq!(col.panel_offset_i, 0.0);
+        assert!((col.rigid_length_j() - 300.0).abs() < 1e-9);
         model.validate().expect("配列添字 == ElemId が保たれる");
-    }
 
-    /// 冪等性: 繰り返し適用してもパネルは増えず、要素 ID も動かない。
-    #[test]
-    fn test_is_idempotent() {
-        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model).unwrap();
         let first = model.elements.clone();
         apply_auto_panel_zones(&mut model).unwrap();
         assert_eq!(model.elements.len(), first.len());
@@ -419,16 +419,10 @@ mod tests {
             assert_eq!(a.id, b.id);
             assert_eq!(a.kind, b.kind);
             assert_eq!(a.nodes, b.nodes);
+            assert_eq!(a.rigid_zone.panel_offset_i, b.rigid_zone.panel_offset_i);
+            assert_eq!(a.rigid_zone.panel_offset_j, b.rigid_zone.panel_offset_j);
         }
         model.validate().expect("不変条件");
-    }
-
-    /// モデル化を OFF にすると既存のパネルが取り除かれ、要素 ID が詰め直される。
-    #[test]
-    fn test_disabled_mode_removes_panels() {
-        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model).unwrap();
-        assert_eq!(model.elements.len(), 3);
 
         model.panel_zone = PanelZoneMode::None;
         let panels = apply_auto_panel_zones(&mut model).unwrap();
@@ -438,6 +432,13 @@ mod tests {
             .elements
             .iter()
             .any(|e| matches!(e.kind, ElementKind::PanelZone)));
+        assert!(
+            model
+                .elements
+                .iter()
+                .all(|e| e.rigid_zone.panel_offset_i == 0.0 && e.rigid_zone.panel_offset_j == 0.0),
+            "モデル化を OFF にするとオフセットは消える"
+        );
         model.validate().expect("不変条件");
     }
 
@@ -587,25 +588,6 @@ mod tests {
 
         let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert!(panels.is_empty(), "RC 梁が 1 本でも混じれば対象外");
-    }
-
-    /// パネル分のオフセットが `panel_offset_i/j` へ書き込まれる。
-    /// 梁の端は柱せいの 1/2、柱の端は梁せいの 1/2。剛域長 `length_i/j` は触らない。
-    #[test]
-    fn test_offsets_are_written_into_rigid_zones() {
-        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model).unwrap();
-
-        let beam = &model.elements[0].rigid_zone;
-        assert!((beam.panel_offset_i - 200.0).abs() < 1e-9);
-        assert_eq!(beam.panel_offset_j, 0.0, "接合部でない端は 0");
-        assert_eq!(beam.length_i, 0.0, "剛域長そのものは変えない");
-        assert!((beam.rigid_length_i() - 200.0).abs() < 1e-9);
-
-        let col = &model.elements[1].rigid_zone;
-        assert!((col.panel_offset_j - 300.0).abs() < 1e-9);
-        assert_eq!(col.panel_offset_i, 0.0);
-        assert!((col.rigid_length_j() - 300.0).abs() < 1e-9);
     }
 
     #[test]
@@ -845,36 +827,6 @@ mod tests {
             .collect();
         assert_eq!(before, after, "剛域の再算定でオフセットが消えてはいけない");
         assert!((model.elements[0].rigid_zone.rigid_length_i() - 200.0).abs() < 1e-9);
-    }
-
-    /// 繰り返し適用してもオフセットは増えず、OFF にすると 0 へ戻る。
-    #[test]
-    fn test_offset_write_is_idempotent() {
-        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model).unwrap();
-        let first: Vec<_> = model
-            .elements
-            .iter()
-            .map(|e| (e.rigid_zone.panel_offset_i, e.rigid_zone.panel_offset_j))
-            .collect();
-        apply_auto_panel_zones(&mut model).unwrap();
-        let second: Vec<_> = model
-            .elements
-            .iter()
-            .map(|e| (e.rigid_zone.panel_offset_i, e.rigid_zone.panel_offset_j))
-            .collect();
-        assert_eq!(first, second);
-        assert!(first.iter().any(|(i, j)| *i > 0.0 || *j > 0.0));
-
-        model.panel_zone = PanelZoneMode::None;
-        apply_auto_panel_zones(&mut model).unwrap();
-        assert!(
-            model
-                .elements
-                .iter()
-                .all(|e| e.rigid_zone.panel_offset_i == 0.0 && e.rigid_zone.panel_offset_j == 0.0),
-            "モデル化を OFF にするとオフセットは消える"
-        );
     }
 
     #[test]
