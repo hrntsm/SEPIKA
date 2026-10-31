@@ -451,15 +451,12 @@ impl EditCommand for SetAttachedExtent {
         let SlabShape::Attached { extent, .. } = &mut candidate.shape else {
             return Box::new(Noop);
         };
+        let old = *extent;
         *extent = self.extent;
         if let Err(error) = model.validate_attached_slab(&candidate) {
             return Box::new(RejectedEdit(error.to_string()));
         }
-        let SlabShape::Attached { extent, .. } = &mut model.slabs[idx].shape else {
-            return Box::new(Noop);
-        };
-        let old = *extent;
-        *extent = self.extent;
+        model.slabs[idx] = candidate;
         Box::new(SetAttachedExtent {
             id: self.id,
             extent: old,
@@ -487,13 +484,11 @@ impl EditCommand for SetAttachedAnchor {
         if idx >= model.slabs.len() || model.slabs[idx].id != self.id {
             return Box::new(Noop);
         }
-        if !matches!(model.slabs[idx].shape, SlabShape::Attached { .. }) {
-            return Box::new(Noop);
-        }
         let mut candidate = model.slabs[idx].clone();
         let SlabShape::Attached { anchor, .. } = &mut candidate.shape else {
             return Box::new(Noop);
         };
+        let old = *anchor;
         *anchor = self.anchor;
         if let Err(error) = model.validate_attached_slab(&candidate) {
             return Box::new(RejectedEdit(error.to_string()));
@@ -509,11 +504,7 @@ impl EditCommand for SetAttachedAnchor {
         {
             return Box::new(Noop);
         }
-        let SlabShape::Attached { anchor, .. } = &mut model.slabs[idx].shape else {
-            return Box::new(Noop);
-        };
-        let old = *anchor;
-        *anchor = self.anchor;
+        model.slabs[idx] = candidate;
         Box::new(SetAttachedAnchor {
             id: self.id,
             anchor: old,
@@ -1050,20 +1041,20 @@ impl EditCommand for SetAttachedWallPlateAnchor {
         if idx >= model.wall_plates.len() || model.wall_plates[idx].id != self.id {
             return Box::new(Noop);
         }
-        if !matches!(
-            model.wall_plates[idx].shape,
-            WallPlateShape::Attached { .. }
-        ) {
+        let WallPlateShape::Attached {
+            anchor: old,
+            extent,
+        } = model.wall_plates[idx].shape
+        else {
             return Box::new(Noop);
-        }
+        };
         if !wall_anchor_ok(model, &self.anchor) {
             return Box::new(Noop);
         }
-        let WallPlateShape::Attached { anchor, .. } = &mut model.wall_plates[idx].shape else {
-            return Box::new(Noop);
+        model.wall_plates[idx].shape = WallPlateShape::Attached {
+            anchor: self.anchor,
+            extent,
         };
-        let old = *anchor;
-        *anchor = self.anchor;
         Box::new(SetAttachedWallPlateAnchor {
             id: self.id,
             anchor: old,
@@ -1180,7 +1171,7 @@ pub struct SetSlabUsage {
     pub usage: Option<sepika_core::model::SlabUsage>,
 }
 
-/// 床板の基準階とFLからの上面偏心 [mm] を変更する。未入力は保持し、不正値は拒否する。
+/// 床板の基準階とFLからの上面偏心 `[mm]` を変更する。未入力は保持し、不正値は拒否する。
 pub struct SetSlabPlacement {
     pub id: SlabId,
     pub reference_story: Option<sepika_core::ids::StoryId>,

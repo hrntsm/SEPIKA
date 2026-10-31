@@ -34,53 +34,19 @@ impl EditCommand for SetSectionField {
         }
         let sec = &mut model.sections[idx];
         let old = sec.clone();
-        let _old_value = match self.field {
-            SectionField::Area => {
-                let o = sec.area;
-                sec.area = self.value;
-                o
-            }
-            SectionField::Iy => {
-                let o = sec.iy;
-                sec.iy = self.value;
-                o
-            }
-            SectionField::Iz => {
-                let o = sec.iz;
-                sec.iz = self.value;
-                o
-            }
-            SectionField::J => {
-                let o = sec.j;
-                sec.j = self.value;
-                o
-            }
-            SectionField::Depth => {
-                let o = sec.depth;
-                sec.depth = self.value;
-                o
-            }
-            SectionField::Width => {
-                let o = sec.width;
-                sec.width = self.value;
-                o
-            }
-            SectionField::AsY => {
-                let o = sec.as_y;
-                sec.as_y = self.value;
-                o
-            }
-            SectionField::AsZ => {
-                let o = sec.as_z;
-                sec.as_z = self.value;
-                o
-            }
+        match self.field {
+            SectionField::Area => sec.area = self.value,
+            SectionField::Iy => sec.iy = self.value,
+            SectionField::Iz => sec.iz = self.value,
+            SectionField::J => sec.j = self.value,
+            SectionField::Depth => sec.depth = self.value,
+            SectionField::Width => sec.width = self.value,
+            SectionField::AsY => sec.as_y = self.value,
+            SectionField::AsZ => sec.as_z = self.value,
             SectionField::PanelThickness => {
-                let o = sec.panel_thickness.unwrap_or(0.0);
                 sec.panel_thickness = (self.value > 0.0).then_some(self.value);
-                o
             }
-        };
+        }
         use sepika_core::model::PropertyBasis;
         let basis = &mut sec.property_basis;
         match self.field {

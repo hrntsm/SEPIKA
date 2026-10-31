@@ -14,19 +14,6 @@ fn secondary_member_ok(model: &Model, sm: &SecondaryMember) -> bool {
             .is_some_and(|(_, _, len)| len > 1e-9)
 }
 
-fn beams_ok(beams: &[SecondaryMember]) -> bool {
-    beams.iter().all(|sm| sm.kind == SecondaryMemberKind::Beam)
-}
-
-fn posts_ok(posts: &[SecondaryMember]) -> bool {
-    posts.iter().all(|sm| sm.kind == SecondaryMemberKind::Post)
-}
-
-fn unique_ids(sms: &[SecondaryMember]) -> bool {
-    let mut seen = HashSet::new();
-    sms.iter().all(|sm| seen.insert(sm.id))
-}
-
 fn beam_id_in_other_regions(model: &Model, id: SecondaryMemberId, skip: FloorRegionId) -> bool {
     model
         .floor_regions
@@ -275,10 +262,16 @@ impl EditCommand for SetFloorRegionSecondaryBeams {
         if idx >= model.floor_regions.len() || model.floor_regions[idx].id != self.region {
             return Box::new(Noop);
         }
-        if !beams_ok(&self.beams)
+        if !self
+            .beams
+            .iter()
+            .all(|sm| sm.kind == SecondaryMemberKind::Beam)
             || !self.beams.iter().all(|sm| secondary_member_ok(model, sm))
-            || !unique_ids(&self.beams)
         {
+            return Box::new(Noop);
+        }
+        let new_keys: HashSet<_> = self.beams.iter().map(|sm| sm.id).collect();
+        if new_keys.len() != self.beams.len() {
             return Box::new(Noop);
         }
         if self
@@ -288,7 +281,6 @@ impl EditCommand for SetFloorRegionSecondaryBeams {
         {
             return Box::new(Noop);
         }
-        let new_keys: HashSet<_> = self.beams.iter().map(|sm| sm.id).collect();
         let old_beams = std::mem::replace(
             &mut model.floor_regions[idx].secondary_beams,
             self.beams.clone(),
@@ -421,10 +413,16 @@ impl EditCommand for SetWallRegionPosts {
         if idx >= model.wall_regions.len() || model.wall_regions[idx].id != self.region {
             return Box::new(Noop);
         }
-        if !posts_ok(&self.posts)
+        if !self
+            .posts
+            .iter()
+            .all(|sm| sm.kind == SecondaryMemberKind::Post)
             || !self.posts.iter().all(|sm| secondary_member_ok(model, sm))
-            || !unique_ids(&self.posts)
         {
+            return Box::new(Noop);
+        }
+        let new_keys: HashSet<_> = self.posts.iter().map(|sm| sm.id).collect();
+        if new_keys.len() != self.posts.len() {
             return Box::new(Noop);
         }
         if self
@@ -434,7 +432,6 @@ impl EditCommand for SetWallRegionPosts {
         {
             return Box::new(Noop);
         }
-        let new_keys: HashSet<_> = self.posts.iter().map(|sm| sm.id).collect();
         let old_posts = std::mem::replace(&mut model.wall_regions[idx].posts, self.posts.clone());
         let old_unassigned = model.unassigned_posts.clone();
         take_from_unassigned(&mut model.unassigned_posts, &new_keys);
@@ -589,18 +586,10 @@ impl EditCommand for SetSecondaryMemberEndSupport {
         if !secondary_ends_ok(model, &candidate) {
             return Box::new(Noop);
         }
-        let snapshot = snapshot_secondary(model);
-        let action = SecondaryAction::SetEnds(self.member, ends);
-        apply_secondary_action(model, &action);
-        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
-        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
-            restore_secondary(model, snapshot);
-            return Box::new(crate::RejectedEdit(reason));
+        ApplySecondaryAction {
+            action: SecondaryAction::SetEnds(self.member, ends),
         }
-        Box::new(RestoreSecondarySnapshot {
-            snapshot,
-            redo: action,
-        })
+        .apply(model)
     }
 
     fn label(&self) -> &str {
@@ -789,20 +778,10 @@ impl EditCommand for DeleteSecondaryMember {
         if model.secondary_member(self.member).is_none() {
             return Box::new(Noop);
         }
-        let snapshot = snapshot_secondary(model);
-        let action = SecondaryAction::Delete(self.member);
-        if !apply_secondary_action(model, &action) {
-            return Box::new(Noop);
+        ApplySecondaryAction {
+            action: SecondaryAction::Delete(self.member),
         }
-        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
-        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
-            restore_secondary(model, snapshot);
-            return Box::new(crate::RejectedEdit(reason));
-        }
-        Box::new(RestoreSecondarySnapshot {
-            snapshot,
-            redo: action,
-        })
+        .apply(model)
     }
 
     fn label(&self) -> &str {
@@ -846,20 +825,10 @@ impl EditCommand for SetSecondaryMemberEnds {
         {
             return Box::new(Noop);
         }
-        let snapshot = snapshot_secondary(model);
-        let action = SecondaryAction::SetEnds(self.member, self.ends);
-        if !apply_secondary_action(model, &action) {
-            return Box::new(Noop);
+        ApplySecondaryAction {
+            action: SecondaryAction::SetEnds(self.member, self.ends),
         }
-        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
-        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
-            restore_secondary(model, snapshot);
-            return Box::new(crate::RejectedEdit(reason));
-        }
-        Box::new(RestoreSecondarySnapshot {
-            snapshot,
-            redo: action,
-        })
+        .apply(model)
     }
 
     fn label(&self) -> &str {
@@ -1041,7 +1010,7 @@ impl EditCommand for RestoreSecondarySnapshot {
     }
 }
 
-/// [`RestoreSecondarySnapshot`] の逆操作。操作を再適用して割当領域を再構築する。
+/// 二次部材操作と割当領域の再構築を実行し、復元用の逆操作を返す。
 struct ApplySecondaryAction {
     action: SecondaryAction,
 }
