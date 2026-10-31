@@ -83,7 +83,7 @@ IO は unit 177 成功・1 ignored、integration 9＋1＋1＋2 が成功・外�
 | テスト | 観測する契約 |
 | --- | --- |
 | `model::tests::element_section_uses_canonical_id_then_first_matching_id` | 7形態で同 ID 実体の優先順位、欠落・未割当 |
-| `model::tests::secondary_purpose_selects_canonical_then_first_fallback_section_without_wrong_slot_rejection` | 二次用途の canonical 優先・先頭 fallback、wrong-slot 誤拒否解消、検査前後モデル不変 |
+| `model::tests::secondary_purpose_selects_canonical_then_first_fallback_section_without_wrong_slot_rejection` | 二次用途の canonical 優先・先頭 fallback、wrong-slot 誤拒否解消 |
 | `ovika::reference_tests::all_member_locations_reject_noncanonical_section_references_and_keep_incomplete_models` | 5参照元×7形態、未完成正常保存、安定 ID 674 と全所属横断重複拒否 |
 | `ovika::reference_tests::indexed_ids_and_existing_reference_families_are_checked_before_persistence` | 正常対照と24変異、9種添字 ID、材料4役・節点/版/断面/一本部材の参照、元ファイル/モデル/正hash入力保持 |
 

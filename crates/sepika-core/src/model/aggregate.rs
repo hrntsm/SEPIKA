@@ -226,8 +226,9 @@ fn wall_plate_node_refs(model: &Model, plate: &WallPlate) -> Vec<NodeId> {
     match &plate.shape {
         WallPlateShape::Enclosed => plate.boundary_nodes(model).unwrap_or_default(),
         WallPlateShape::Attached { anchor, .. } => match anchor {
-            RegionAnchor::Line { nodes, .. } => nodes.to_vec(),
-            RegionAnchor::FloorRegion { nodes, .. } => nodes.to_vec(),
+            RegionAnchor::Line { nodes, .. } | RegionAnchor::FloorRegion { nodes, .. } => {
+                nodes.to_vec()
+            }
             RegionAnchor::Point(_) => Vec::new(),
         },
     }
@@ -259,14 +260,13 @@ impl Model {
         use crate::error::CoreError;
 
         check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
-        for (i, elem) in self.elements.iter().enumerate() {
-            if elem.id.index() != i {
-                return Err(CoreError::IndexMismatch(format!(
-                    "elements[{}] has ElemId({})",
-                    i, elem.id.0
-                )));
-            }
-        }
+        check_id_consistency(
+            &self.elements,
+            "elements",
+            "ElemId",
+            |e| e.id.index(),
+            |e| e.id.0,
+        )?;
 
         for elem in &self.elements {
             for &nid in &elem.nodes {
@@ -1276,14 +1276,12 @@ impl Model {
                 .iter()
                 .any(|p| wall_plate_node_refs(self, p).contains(&id))
             || self.constraints.iter().any(|c| match c {
-                Constraint::RigidDiaphragm { master, slaves, .. } => {
+                Constraint::RigidDiaphragm { master, slaves, .. }
+                | Constraint::RigidLink { master, slaves, .. } => {
                     *master == id || slaves.contains(&id)
                 }
                 Constraint::Mpc { master, terms } => {
                     *master == id || terms.iter().any(|(n, _, _)| *n == id)
-                }
-                Constraint::RigidLink { master, slaves, .. } => {
-                    *master == id || slaves.contains(&id)
                 }
             })
     }
@@ -1470,12 +1468,7 @@ impl Model {
             match &mut plate.shape {
                 WallPlateShape::Enclosed => {}
                 WallPlateShape::Attached { anchor, .. } => match anchor {
-                    RegionAnchor::Line { nodes, .. } => {
-                        for n in nodes {
-                            f(n);
-                        }
-                    }
-                    RegionAnchor::FloorRegion { nodes, .. } => {
+                    RegionAnchor::Line { nodes, .. } | RegionAnchor::FloorRegion { nodes, .. } => {
                         for n in nodes {
                             f(n);
                         }
@@ -2484,27 +2477,8 @@ impl SeismicWeightGeneration {
 
     /// 自動生成の剛床設定が利用者に変更されていないかを確認する。
     pub fn is_automatic_diaphragm(&self, constraint: &Constraint) -> bool {
-        self.automatic_diaphragms
-            .iter()
-            .any(|generated| match (generated, constraint) {
-                (
-                    Constraint::RigidDiaphragm {
-                        story: a,
-                        master: b,
-                        slaves: c,
-                        ci_override: d,
-                        weight: e,
-                    },
-                    Constraint::RigidDiaphragm {
-                        story: x,
-                        master: y,
-                        slaves: z,
-                        ci_override: w,
-                        weight: v,
-                    },
-                ) => a == x && b == y && c == z && d == w && e == v,
-                _ => false,
-            })
+        matches!(constraint, Constraint::RigidDiaphragm { .. })
+            && self.automatic_diaphragms.contains(constraint)
     }
 }
 
