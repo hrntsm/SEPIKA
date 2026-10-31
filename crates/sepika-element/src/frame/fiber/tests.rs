@@ -265,36 +265,6 @@ fn make_test_beam_element(as_val: f64) -> crate::frame::beam::BeamElement {
 }
 
 #[test]
-fn beamとfiberは同じ断面なら整合質量が一致する() {
-    let density = 2.4e-9;
-    let as_val = 15000.0;
-    let mut model = build_test_model(Some(78846.15));
-    model.materials[0].density = density;
-    model.sections[0].as_y = as_val;
-    model.sections[0].as_z = as_val;
-    let fiber = FiberBeam::new(
-        &model.elements[0],
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
-
-    let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
-    let mass_beam = beam.mass_matrix(crate::behavior::MassOption::Consistent);
-    let mass_fiber = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
-    for i in 0..12 {
-        for j in 0..12 {
-            assert!(
-                (mass_beam.get(i, j) - mass_fiber.get(i, j)).abs() < 1e-10,
-                "M({i},{j}) が Beam/Fiber で不一致: beam={}, fiber={}",
-                mass_beam.get(i, j),
-                mass_fiber.get(i, j)
-            );
-        }
-    }
-}
-
-#[test]
 fn cftの鋼管fyはsteel_materialの板厚区分を使う() {
     let shape = SectionShape::CftBox {
         corner_r: Some(0.0),
@@ -382,14 +352,13 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             legs_y: 2,
         },
     };
-    for (shape, main_category, with_rebar, with_steel) in [
+    for (shape, with_rebar, with_steel) in [
         (
             SectionShape::RcColumnRect {
                 b: 500.0,
                 d: 600.0,
                 rebar: rebar.clone(),
             },
-            MaterialCategory::Concrete,
             true,
             false,
         ),
@@ -403,7 +372,6 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
                 steel_web_thick: 10.0,
                 steel_flange_thick: 16.0,
             },
-            MaterialCategory::Concrete,
             true,
             true,
         ),
@@ -415,7 +383,6 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
                 thick: 16.0,
                 horizontal_thick: 16.0,
             },
-            MaterialCategory::Concrete,
             false,
             true,
         ),
@@ -423,17 +390,12 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         let mut model = build_test_model(Some(78846.15));
         model.sections[0].shape = Some(shape);
         model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Shape;
-        model.sections[0].material =
-            Some(MaterialId(if main_category == MaterialCategory::Steel {
-                0
-            } else {
-                1
-            }));
+        model.sections[0].material = Some(MaterialId(1));
         model.sections[0].rebar_material = with_rebar.then_some(MaterialId(2));
         model.sections[0].shear_rebar_material = with_rebar.then_some(MaterialId(2));
         model.sections[0].steel_material = with_steel.then_some(MaterialId(3));
         model.materials[0].density = 2.4e-9;
-        model.materials[0].category = main_category;
+        model.materials[0].category = MaterialCategory::Concrete;
         model.materials[0].fc = Some(30.0);
         model.materials[0].young = 205000.0;
         model.materials.push(Material {
@@ -462,12 +424,6 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         });
         for (index, material) in model.materials.iter_mut().enumerate() {
             material.id = MaterialId(index as u32);
-        }
-        for material in &mut model.materials {
-            material.fc.get_or_insert(24.0);
-            if material.density <= 0.0 {
-                material.density = 2.4e-9;
-            }
         }
         model.materials[1].young = if matches!(
             model.sections[0].shape.as_ref(),
@@ -862,6 +818,14 @@ fn 端部解放質量は独立縮約結果の全成分と一致する() {
 
         for i in 0..12 {
             for j in 0..12 {
+                if matches!(end_condition, EndCondition::Fixed) {
+                    assert!(
+                        (actual_beam.get(i, j) - actual_fiber.get(i, j)).abs() < 1e-10,
+                        "M({i},{j}) が Beam/Fiber で不一致: beam={}, fiber={}",
+                        actual_beam.get(i, j),
+                        actual_fiber.get(i, j)
+                    );
+                }
                 let expected_beam_ij = expected_beam[i][j];
                 let expected_fiber_ij = expected_fiber[i][j];
                 assert!(
@@ -1069,77 +1033,11 @@ pub(super) fn build_test_model(shear_mod: Option<f64>) -> Model {
 
 /// 指定した2節点座標・参照ベクトルで FiberBeam を生成するヘルパ（座標変換テスト用）。
 fn make_oriented_fiber(p0: [f64; 3], p1: [f64; 3], ref_vec: [f64; 3]) -> FiberBeam {
-    let model = Model {
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: p0,
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: p1,
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Fiber,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: ref_vec,
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        }],
-        sections: vec![Section {
-            frame_use: None,
-            id: SectionId(0),
-            name: "s".to_string(),
-            area: 20000.0,
-            iy: 66666666.66666667,
-            iz: 16666666.66666667,
-            j: 0.0,
-            depth: 200.0,
-            width: 100.0,
-            as_y: 0.0,
-            as_z: 0.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        }],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "steel".to_string(),
-            category: MaterialCategory::Steel,
-            young: 205000.0,
-            poisson: 0.3,
-            density: 0.0,
-            shear: None,
-            fc: None,
-            fy: Some(1e20),
-        }],
-        ..Default::default()
-    };
+    let mut model = build_test_model(None);
+    model.nodes[0].coord = p0;
+    model.nodes[1].coord = p1;
+    model.elements[0].local_axis.ref_vector = ref_vec;
+    model.sections[0].name = "s".into();
     FiberBeam::new(
         &model.elements[0],
         &model,
@@ -1150,77 +1048,9 @@ fn make_oriented_fiber(p0: [f64; 3], p1: [f64; 3], ref_vec: [f64; 3]) -> FiberBe
 
 /// 降伏応力 fy を指定した鋼材ファイバ梁（X 整列・恒等フレーム）を生成するヘルパ。
 fn make_steel_fiber_with_fy(fy: Option<f64>) -> FiberBeam {
-    let model = Model {
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [3000.0, 0.0, 0.0],
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Fiber,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        }],
-        sections: vec![Section {
-            frame_use: None,
-            id: SectionId(0),
-            name: "s".to_string(),
-            area: 20000.0,
-            iy: 66666666.66666667,
-            iz: 16666666.66666667,
-            j: 0.0,
-            depth: 200.0,
-            width: 100.0,
-            as_y: 0.0,
-            as_z: 0.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        }],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "steel".to_string(),
-            category: MaterialCategory::Steel,
-            young: 205000.0,
-            poisson: 0.3,
-            density: 0.0,
-            shear: None,
-            fc: None,
-            fy,
-        }],
-        ..Default::default()
-    };
+    let mut model = build_test_model(None);
+    model.sections[0].name = "s".into();
+    model.materials[0].fy = fy;
     FiberBeam::new(
         &model.elements[0],
         &model,
@@ -1274,12 +1104,24 @@ fn test_global_rotation_vertical_column() {
 
 #[test]
 fn 任意方向材の整合質量は独立な座標変換と一致する() {
-    let fiber = make_oriented_fiber([0.0, 0.0, 0.0], [3000.0, 1200.0, 2400.0], [0.0, 1.0, 0.0]);
+    let mut fiber = make_oriented_fiber([0.0, 0.0, 0.0], [3000.0, 1200.0, 2400.0], [0.0, 1.0, 0.0]);
+    fiber.mass_properties = SectionMassProperties {
+        mass_per_length: 4.8e-5,
+        rotary_inertia_y_per_length: 0.16,
+        rotary_inertia_z_per_length: 0.04,
+    };
+    let length_mm = (3000.0_f64.powi(2) + 1200.0_f64.powi(2) + 2400.0_f64.powi(2)).sqrt();
+    let shear_modulus = 205000.0 / (2.0 * (1.0 + 0.3));
+    let shear_area_mm2 = 20000.0 / 1.2;
+    let phi_xy =
+        12.0 * 205000.0 * 66666666.66666667 / (shear_modulus * shear_area_mm2 * length_mm.powi(2));
+    let phi_xz =
+        12.0 * 205000.0 * 16666666.66666667 / (shear_modulus * shear_area_mm2 * length_mm.powi(2));
     let local = crate::frame::prismatic::consistent_mass_timoshenko(
         fiber.mass_properties,
-        fiber.flex_length,
-        fiber.phi_z,
-        fiber.phi_y,
+        length_mm,
+        phi_xy,
+        phi_xz,
     );
     let expected = {
         let mut result = LocalMat::zeros(12);
@@ -1300,6 +1142,7 @@ fn 任意方向材の整合質量は独立な座標変換と一致する() {
         }
         result
     };
+    assert!(expected.get(0, 1).abs() > 1e-10);
     let actual = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
     for i in 0..12 {
         for j in 0..12 {
@@ -1359,14 +1202,14 @@ fn test_elastic_force_matches_hand_calc() {
         )
     };
 
-    let sample = new_fiber();
-    let a_disc: f64 = sample.gauss_points[0]
+    let mut axial = new_fiber();
+    let a_disc: f64 = axial.gauss_points[0]
         .section
         .fibers
         .iter()
         .map(|f| f.area)
         .sum();
-    let iy_disc: f64 = sample.gauss_points[0]
+    let iy_disc: f64 = axial.gauss_points[0]
         .section
         .fibers
         .iter()
@@ -1374,7 +1217,6 @@ fn test_elastic_force_matches_hand_calc() {
         .sum();
 
     let eps0 = 0.001;
-    let mut axial = new_fiber();
     axial
         .update_state(
             &LocalVec {
@@ -1462,85 +1304,15 @@ fn test_elastic_force_matches_hand_calc() {
 
 #[test]
 fn test_yield_progression() {
-    let mut fiber = {
-        let model = Model {
-            nodes: vec![
-                Node {
-                    id: NodeId(0),
-                    coord: [0.0, 0.0, 0.0],
-                    restraint: Default::default(),
-                    mass: None,
-                    story: None,
-                    support_spring: None,
-                },
-                Node {
-                    id: NodeId(1),
-                    coord: [3000.0, 0.0, 0.0],
-                    restraint: Default::default(),
-                    mass: None,
-                    story: None,
-                    support_spring: None,
-                },
-            ],
-            elements: vec![ElementData {
-                id: ElemId(0),
-                kind: ElementKind::Fiber,
-                nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-                section: Some(SectionId(0)),
-                local_axis: LocalAxis {
-                    ref_vector: [0.0, 1.0, 0.0],
-                },
-                end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-                force_regime: ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
-                plastic_zone: None,
-                spring: None,
-            }],
-            sections: vec![Section {
-                frame_use: None,
-                id: SectionId(0),
-                name: "yield_test".to_string(),
-                area: 20000.0,
-                iy: 66666666.66666667,
-                iz: 16666666.66666667,
-                j: 0.0,
-                depth: 200.0,
-                width: 100.0,
-                as_y: 0.0,
-                as_z: 0.0,
-                floor: None,
-                panel_thickness: None,
-                thickness: None,
-                shape: None,
-                material: Some(MaterialId(0)),
-                rebar_material: None,
-                shear_rebar_material: None,
-                steel_material: None,
-                property_basis: Default::default(),
-            }],
-            materials: vec![Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "steel".to_string(),
-                category: MaterialCategory::Steel,
-                young: 205000.0,
-                poisson: 0.3,
-                density: 0.0,
-                shear: None,
-                fc: None,
-                fy: Some(235.0),
-            }],
-            ..Default::default()
-        };
-        FiberBeam::new(
-            &model.elements[0],
-            &model,
-            StrengthBasis::Nominal,
-            AnalysisKind::Incremental,
-        )
-    };
+    let mut model = build_test_model(None);
+    model.sections[0].name = "yield_test".into();
+    model.materials[0].fy = Some(235.0);
+    let mut fiber = FiberBeam::new(
+        &model.elements[0],
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
 
     let ctx = Ctx {
         model: &Model::default(),
@@ -1815,7 +1587,6 @@ fn test_vertical_column_rz_nonsingular() {
     let g = 78846.0;
     let j = 1.0e6;
     let l = 3000.0;
-    let expected_kt = g * j / l;
 
     let model = Model {
         nodes: vec![
@@ -1916,7 +1687,6 @@ fn test_vertical_column_rz_nonsingular() {
         "global rz_j (k[11][11]) must be > 0 with torsion stiffness, got {}",
         k11_11
     );
-    let _ = expected_kt;
 }
 
 /// 回帰テスト: 剛体回転（両端に同じ回転角 θ、曲率ゼロ）だけを与えても
@@ -1924,13 +1694,7 @@ fn test_vertical_column_rz_nonsingular() {
 #[test]
 fn test_fiber_rigid_rotation_produces_no_force() {
     let mut model = build_test_model(Some(78846.15));
-    model.sections[0].as_y = 208333.0;
-    model.sections[0].as_z = 208333.0;
-    model.sections[0].depth = 500.0;
-    model.sections[0].width = 500.0;
-    model.sections[0].area = 250000.0;
-    model.sections[0].iy = 5.2083333e9;
-    model.sections[0].iz = 5.2083333e9;
+    set_square500_shear_section(&mut model);
 
     let mut fiber = FiberBeam::new(
         &model.elements[0],
@@ -1976,13 +1740,7 @@ fn test_fiber_rigid_rotation_produces_no_force() {
 #[test]
 fn test_fiber_initial_lateral_stiffness_matches_timoshenko_theory() {
     let mut model = build_test_model(Some(78846.15));
-    model.sections[0].as_y = 208333.0;
-    model.sections[0].as_z = 208333.0;
-    model.sections[0].depth = 500.0;
-    model.sections[0].width = 500.0;
-    model.sections[0].area = 250000.0;
-    model.sections[0].iy = 5.2083333e9;
-    model.sections[0].iz = 5.2083333e9;
+    set_square500_shear_section(&mut model);
 
     let mut fiber = FiberBeam::new(
         &model.elements[0],
@@ -2336,14 +2094,7 @@ fn test_plastic_zone_elastic_stiffness_matches_full_fiber_and_axial() {
     let k_axial = pz_axial.tangent_stiffness(&ctx);
     let ea_over_l = 205000.0 * 20000.0 / 3000.0;
     assert_relative_eq!(k_axial.get(0, 0), ea_over_l, max_relative = 1e-9);
-}
-
-/// 塑性増分ヒンジモデルの弾性剛性 `k_el` にも断面→要素座標系のクロス変換
-/// （elem EIz←sec.iy）が効いていることの回帰テスト。
-#[test]
-fn test_plastic_zone_k_el_strong_axis_in_mz_plane() {
-    let pz = make_plastic_zone_fiber(300.0, Some(1e20));
-    let k_el = &pz
+    let k_el = &pz_axial
         .hinge
         .as_ref()
         .expect("plastic zone model has hinge")
@@ -2529,43 +2280,6 @@ fn test_rc_fiber_section_includes_separated_rebar() {
     assert!(max_abs_z > 180.0, "主筋が最外縁近くにない: {max_abs_z}");
 }
 
-/// ファイバー材料は、**未経験状態でひずみ 0 を与えたとき初期弾性係数を返す**
-/// （[`sepika_material::uniaxial::UniaxialMaterial::trial`] の共通要件）。
-///
-/// `GaussPoint::new` はこの値を断面の初期接線としてキャッシュし、塑性化域考慮
-/// モデルはそこから「弾性状態でヒンジ回転 0」を成立させる基準剛性 `sec_ei` を採る。
-/// 0 を返す材料が 1 つでも混ざると、その断面の弾性曲げ剛性が過小になって
-/// 弾性域でも要素接線剛性が負になる。骨格式は原点で応力 0 になるため、終局域の
-/// ゼロクランプに巻き込まれやすい箇所であり、**実際に使う全材料**を通しで確かめる。
-#[test]
-fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
-    use sepika_core::model::HysteresisModel;
-
-    for rule in [
-        HysteresisModel::Retrograde,
-        HysteresisModel::OriginOriented,
-        HysteresisModel::KarsanJirsa,
-    ] {
-        for fc in [21.0, 60.0, 80.0] {
-            let young = 30000.0;
-            let expected = if fc <= 60.0 {
-                young
-            } else {
-                sepika_material::newrc::NewRcEnvelope::new(fc).ec
-            };
-            let mut m = concrete_fiber_material(Some(fc), young, rule);
-            let (s, t) = m.trial(0.0);
-            assert_eq!(s, 0.0, "rule={rule:?} fc={fc}: ひずみ 0 で応力が 0 でない");
-            assert_relative_eq!(t, expected, max_relative = 1e-9);
-        }
-    }
-
-    let mut steel = steel_fiber_material(205000.0, Some(345.0));
-    let (s, t) = steel.trial(0.0);
-    assert_eq!(s, 0.0);
-    assert_relative_eq!(t, 205000.0, max_relative = 1e-9);
-}
-
 #[test]
 fn fc_at_or_below_60_uses_material_young_in_concrete_materials() {
     for fc in [21.0, 60.0] {
@@ -2576,7 +2290,9 @@ fn fc_at_or_below_60_uses_material_young_in_concrete_materials() {
         ] {
             let young = 30000.0;
             let mut material = concrete_fiber_material(Some(fc), young, rule);
-            assert_relative_eq!(material.trial(0.0).1, young, max_relative = 1e-12);
+            let (stress, tangent) = material.trial(0.0);
+            assert_eq!(stress, 0.0, "rule={rule:?} fc={fc}: ひずみ0の応力");
+            assert_relative_eq!(tangent, young, max_relative = 1e-12);
 
             let (_, eps_c0, _, _) = newrc_reference_parameters(fc);
             let (compression_stress, _) = material.trial(-0.5 * eps_c0);
@@ -2597,6 +2313,11 @@ fn fc_at_or_below_60_uses_material_young_in_concrete_materials() {
             }
         }
     }
+
+    let mut steel = steel_fiber_material(205000.0, Some(345.0));
+    let (stress, tangent) = steel.trial(0.0);
+    assert_eq!(stress, 0.0);
+    assert_relative_eq!(tangent, 205000.0, max_relative = 1e-9);
 }
 
 #[test]
@@ -2605,7 +2326,7 @@ fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
     for rule in [HysteresisModel::Retrograde, HysteresisModel::OriginOriented] {
         let mut actual = concrete_fiber_material(Some(80.0), 30000.0, rule);
         let (stress, tangent) = actual.trial(0.0);
-        assert_relative_eq!(stress, 0.0, epsilon = 1e-12);
+        assert_eq!(stress, 0.0);
         assert_relative_eq!(tangent, ec, max_relative = 1e-12);
 
         let max_strain = -1.2 * eps_c0;
@@ -2647,7 +2368,7 @@ fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
 
     let mut karsan = concrete_fiber_material(Some(80.0), 30000.0, HysteresisModel::KarsanJirsa);
     let (stress, tangent) = karsan.trial(0.0);
-    assert_relative_eq!(stress, 0.0, epsilon = 1e-12);
+    assert_eq!(stress, 0.0);
     assert_relative_eq!(tangent, ec, max_relative = 1e-12);
     let max_strain = -1.5 * eps_c0;
     karsan.trial(max_strain);
