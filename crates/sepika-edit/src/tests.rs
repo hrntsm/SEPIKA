@@ -7,10 +7,6 @@ use sepika_core::model::{ElementData, ElementKind, EndCondition, ForceRegime, Lo
 use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 use smallvec::smallvec;
 
-fn empty_model() -> Model {
-    Model::default()
-}
-
 #[test]
 fn restricted_section_batch_is_atomic_and_one_undo_including_unchanged_assignments() {
     let mut model = seeded_model(4, 3);
@@ -110,7 +106,7 @@ fn restricted_section_batch_is_atomic_and_one_undo_including_unchanged_assignmen
 /// X 方向 1 m 間隔に節点を `n_nodes` 個並べ、隣どうしを梁 `n_elems` 本でつなぐ。
 /// 節点・部材を指す編集コマンドのテストは、参照先が実在するこのモデルから始める。
 fn seeded_model(n_nodes: u32, n_elems: u32) -> Model {
-    let mut model = empty_model();
+    let mut model = Model::default();
     for i in 0..n_nodes {
         model.nodes.push(Node {
             id: NodeId(i),
@@ -143,7 +139,7 @@ fn seeded_model(n_nodes: u32, n_elems: u32) -> Model {
 
 /// 4 辺の大梁で閉じた正方形と、床板割当領域 1 面を持つモデル。
 fn square_with_region() -> Model {
-    let mut model = empty_model();
+    let mut model = Model::default();
     for (i, (x, y)) in [(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (0.0, 1000.0)]
         .into_iter()
         .enumerate()
@@ -192,15 +188,7 @@ fn plate_with_section(section: Option<SectionId>) -> SlabPlate {
 
 #[test]
 fn test_set_node_coord_roundtrip() {
-    let mut model = empty_model();
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
+    let mut model = seeded_model(1, 0);
     let mut stack = UndoStack::new();
 
     let cmd = SetNodeCoord {
@@ -219,7 +207,7 @@ fn test_set_node_coord_roundtrip() {
 
 #[test]
 fn test_set_node_coord_invalid_id_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -235,15 +223,7 @@ fn test_set_node_coord_invalid_id_is_noop() {
 
 #[test]
 fn test_set_node_restraint_roundtrip() {
-    let mut model = empty_model();
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
+    let mut model = seeded_model(1, 0);
     let mut stack = UndoStack::new();
 
     stack.run(
@@ -264,7 +244,7 @@ fn test_set_node_restraint_roundtrip() {
 
 #[test]
 fn test_set_node_restraint_invalid_id_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -280,15 +260,8 @@ fn test_set_node_restraint_invalid_id_is_noop() {
 
 #[test]
 fn test_set_node_support_spring_roundtrip() {
-    let mut model = empty_model();
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0, 0.0, 0.0],
-        restraint: Dof6Mask(0b111110), // Ux のみ自由
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
+    let mut model = seeded_model(1, 0);
+    model.nodes[0].restraint = Dof6Mask(0b111110);
     let mut stack = UndoStack::new();
 
     let spring = [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
@@ -323,15 +296,7 @@ fn test_set_node_support_spring_roundtrip() {
 /// 負のばね剛性は物理的に無意味なため 0 にクランプされること。
 #[test]
 fn test_set_node_support_spring_clamps_negative_to_zero() {
-    let mut model = empty_model();
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
+    let mut model = seeded_model(1, 0);
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -348,7 +313,7 @@ fn test_set_node_support_spring_clamps_negative_to_zero() {
 
 #[test]
 fn test_set_node_support_spring_invalid_id_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -364,7 +329,7 @@ fn test_set_node_support_spring_invalid_id_is_noop() {
 
 #[test]
 fn test_add_node_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
 
     stack.run(
@@ -388,7 +353,7 @@ fn test_add_node_roundtrip() {
 
 #[test]
 fn test_add_node_id_equals_index() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     for i in 0..3 {
         stack.run(
@@ -406,7 +371,7 @@ fn test_add_node_id_equals_index() {
 
 #[test]
 fn test_delete_node_middle_renumbers_and_roundtrips() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     for i in 0..3 {
         model.nodes.push(Node {
@@ -462,7 +427,7 @@ fn test_delete_node_middle_renumbers_and_roundtrips() {
 
 #[test]
 fn test_delete_node_in_use_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     model.nodes.push(Node {
         id: NodeId(0),
@@ -592,8 +557,10 @@ fn test_delete_member_undo_preserves_member_load_order() {
         _ => 0.0,
     };
 
-    let mut model = empty_model();
-    model.elements = vec![mk_elem(0), mk_elem(1), mk_elem(2)];
+    let mut model = Model {
+        elements: vec![mk_elem(0), mk_elem(1), mk_elem(2)],
+        ..Default::default()
+    };
     // 荷重順 [e0:1, e1:2, e2:3, e1:4]。elem1 に 2 つの荷重が離れて存在する。
     model.load_cases.push(LoadCase {
         origin: Default::default(),
@@ -655,7 +622,7 @@ fn test_add_delete_member_roundtrip() {
 
 #[test]
 fn test_add_section_shape_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     let shape = sepika_core::section_shape::SectionShape::SteelH {
         root_r: Some(0.0),
@@ -713,7 +680,7 @@ fn surface_radius_edit_preserves_properties_and_undo() {
             corner_r: None,
         },
     ] {
-        let mut model = empty_model();
+        let mut model = Model::default();
         let mut section = sepika_core::model::Section {
             area: 123.0,
             iy: 456.0,
@@ -813,7 +780,7 @@ fn radius_edit_updates_only_shape_properties_and_restores_basis() {
         section.floor = Some("2F".into());
         section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
         let original = section.clone();
-        let mut model = empty_model();
+        let mut model = Model::default();
         model.sections.push(section);
         let mut stack = UndoStack::new();
         assert!(stack.run(
@@ -916,7 +883,7 @@ fn radius_edit_updates_only_shape_properties_and_restores_basis() {
 
 #[test]
 fn test_edit_section_shape_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
 
     let shape1 = sepika_core::section_shape::SectionShape::SteelH {
@@ -961,7 +928,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         horizontal_thick: 12.0,
         corner_r: Some(0.0),
     };
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut section = shape.to_section(SectionId(0), "S".into());
     section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     model.sections.push(section);
@@ -1040,7 +1007,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
 fn test_edit_rc_slab_section_shape_with_shell_reference() {
     let old_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 };
     let new_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 200.0 };
-    let mut model = empty_model();
+    let mut model = Model::default();
     model
         .sections
         .push(old_shape.to_section(SectionId(0), "S".into()));
@@ -1084,7 +1051,7 @@ fn test_edit_rc_wall_section_shape_with_wall_reference() {
         pwv_ratio: None,
         ps: 0.0,
     };
-    let mut model = empty_model();
+    let mut model = Model::default();
     model
         .sections
         .push(old_shape.to_section(SectionId(0), "W".into()));
@@ -1138,7 +1105,7 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
             thick: 16.0,
             horizontal_thick: 16.0,
         };
-        let mut model = empty_model();
+        let mut model = Model::default();
         let mut section = old_shape.to_section(SectionId(0), "S".into());
         section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
         model.sections.push(section);
@@ -1171,7 +1138,7 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
 
 #[test]
 fn test_duplicate_section_for_member_roundtrip() {
-    let mut model = empty_model();
+    let mut model = seeded_model(2, 0);
     let mut stack = UndoStack::new();
 
     let shape = sepika_core::section_shape::SectionShape::SteelH {
@@ -1184,22 +1151,6 @@ fn test_duplicate_section_for_member_roundtrip() {
     let sec = shape.to_section(SectionId(0), "H-300".into());
     model.sections.push(sec);
 
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
-    model.nodes.push(Node {
-        id: NodeId(1),
-        coord: [1000.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
     model.elements.push(ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,
@@ -1232,7 +1183,7 @@ fn test_duplicate_section_for_member_roundtrip() {
 
 #[test]
 fn test_edit_section_shape_invalid_id_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
 
     let shape = sepika_core::section_shape::SectionShape::SteelBox {
@@ -1255,7 +1206,7 @@ fn test_edit_section_shape_invalid_id_noop() {
 
 #[test]
 fn test_delete_add_section_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
 
     let shape = sepika_core::section_shape::SectionShape::SteelH {
@@ -1282,25 +1233,9 @@ fn test_delete_add_section_roundtrip() {
 
 #[test]
 fn test_duplicate_section_no_section_noop() {
-    let mut model = empty_model();
+    let mut model = seeded_model(2, 0);
     let mut stack = UndoStack::new();
 
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
-    model.nodes.push(Node {
-        id: NodeId(1),
-        coord: [1000.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
     model.elements.push(ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,
@@ -1321,39 +1256,6 @@ fn test_duplicate_section_no_section_noop() {
     stack.run(&mut model, Box::new(cmd));
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
-}
-
-/// 2 節点 + 部材 2 本のモデル（部材削除・再採番テスト用）。
-fn two_member_model() -> Model {
-    let mut model = empty_model();
-    for (i, x) in [0.0, 1000.0, 2000.0].iter().enumerate() {
-        model.nodes.push(Node {
-            id: NodeId(i as u32),
-            coord: [*x, 0.0, 0.0],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
-    for i in 0..2u32 {
-        model.elements.push(ElementData {
-            id: ElemId(i),
-            kind: ElementKind::Beam,
-            nodes: smallvec![NodeId(i), NodeId(i + 1)],
-            section: None,
-            local_axis: LocalAxis {
-                ref_vector: [1.0, 0.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        });
-    }
-    model
 }
 
 /// 形状を持たない最小の断面（材料参照の検証用）。
@@ -1386,7 +1288,7 @@ fn bare_section(id: SectionId, material: Option<MaterialId>) -> sepika_core::mod
 fn test_delete_member_middle_renumbers_and_roundtrips() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{LoadCase, MemberLoad, MemberLoadKind};
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     // 両方の部材に部材荷重を付ける
     model.load_cases.push(LoadCase {
         origin: Default::default(),
@@ -1427,32 +1329,11 @@ fn test_delete_member_middle_renumbers_and_roundtrips() {
 
 #[test]
 fn test_delete_section_in_use_is_noop_and_renumbers() {
-    use sepika_core::model::Section;
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     for i in 0..2u32 {
-        model.sections.push(Section {
-            frame_use: (i == 1).then_some(sepika_core::model::FrameSectionUse::Girder),
-            id: SectionId(i),
-            name: format!("S{}", i),
-            area: 100.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 10.0,
-            width: 10.0,
-            as_y: 80.0,
-            as_z: 80.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            // 断面削除の検証だけを行うため、材料は割り当てない。
-            material: None,
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
+        let mut section = bare_section(SectionId(i), None);
+        section.frame_use = (i == 1).then_some(sepika_core::model::FrameSectionUse::Girder);
+        model.sections.push(section);
     }
     // 部材 0 に断面 1 を割当（断面 0 は未使用）
     model.elements[0].section = Some(SectionId(1));
@@ -1479,44 +1360,12 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
 #[test]
 fn test_delete_section_referenced_by_beam() {
     use sepika_core::ids::WallPlateId;
-    use sepika_core::model::{
-        Node, SecondaryMember, SecondaryMemberKind, Section, WallPlate, WallPlateShape,
-    };
-    let mut model = empty_model();
-    for i in 0..4u32 {
-        model.nodes.push(Node {
-            id: NodeId(i),
-            coord: [i as f64 * 1000.0, 0.0, 0.0],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
+    use sepika_core::model::{SecondaryMember, SecondaryMemberKind, WallPlate, WallPlateShape};
+    let mut model = seeded_model(4, 0);
     for i in 0..2u32 {
-        model.sections.push(Section {
-            frame_use: (i == 1).then_some(sepika_core::model::FrameSectionUse::Girder),
-            id: SectionId(i),
-            name: format!("S{}", i),
-            area: 100.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 10.0,
-            width: 10.0,
-            as_y: 80.0,
-            as_z: 80.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            // 断面削除の検証だけを行うため、材料は割り当てない。
-            material: None,
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
+        let mut section = bare_section(SectionId(i), None);
+        section.frame_use = (i == 1).then_some(sepika_core::model::FrameSectionUse::Girder);
+        model.sections.push(section);
     }
     // 二次部材小梁が断面 1 のみを参照する床領域（要素は断面を参照しない）。
     let mut region = sepika_core::model::FloorRegion::new(
@@ -1536,6 +1385,13 @@ fn test_delete_section_referenced_by_beam() {
         name: "SB1".to_string(),
     }];
     model.floor_regions.push(region);
+
+    let mut stack = UndoStack::new();
+
+    // 小梁が参照中の断面 1 は削除できない（要素だけでなく小梁も参照チェック対象）。
+    stack.run(&mut model, Box::new(DeleteSection { id: SectionId(1) }));
+    assert_eq!(model.sections.len(), 2, "小梁参照中の断面は削除されない");
+
     model.wall_plates.push(WallPlate {
         dl_support: None,
         self_weight_shares: Vec::new(),
@@ -1548,11 +1404,6 @@ fn test_delete_section_referenced_by_beam() {
         loads: Vec::new(),
         slit: Default::default(),
     });
-    let mut stack = UndoStack::new();
-
-    // 小梁が参照中の断面 1 は削除できない（要素だけでなく小梁も参照チェック対象）。
-    stack.run(&mut model, Box::new(DeleteSection { id: SectionId(1) }));
-    assert_eq!(model.sections.len(), 2, "小梁参照中の断面は削除されない");
 
     // 未参照の断面 0 を削除 → 断面 1 が 0 へ繰り上がり、小梁参照も追随する。
     stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
@@ -1567,7 +1418,7 @@ fn test_delete_section_referenced_by_beam() {
 
 #[test]
 fn test_add_delete_material_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -1595,7 +1446,7 @@ fn test_add_delete_material_roundtrip() {
 
 #[test]
 fn test_delete_material_in_use_is_noop() {
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -1621,7 +1472,7 @@ fn test_delete_material_in_use_is_noop() {
 
 #[test]
 fn test_delete_material_middle_renumbers() {
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let mut stack = UndoStack::new();
     for name in ["A", "B"] {
         stack.run(
@@ -1658,7 +1509,7 @@ fn test_delete_material_middle_renumbers() {
 fn test_set_section_material_roundtrip_for_every_role() {
     use crate::{SectionMaterialRole, SetSectionMaterial};
 
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     model.sections.push(bare_section(SectionId(0), None));
     for name in ["Fc24", "SD345"] {
         stack_add_material(&mut model, name);
@@ -1713,7 +1564,7 @@ fn test_set_section_material_roundtrip_for_every_role() {
 fn test_set_section_material_on_missing_section_is_noop() {
     use crate::{SectionMaterialRole, SetSectionMaterial};
 
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     model.sections.push(bare_section(SectionId(0), None));
     stack_add_material(&mut model, "Fc24");
     let before = model.clone();
@@ -1826,7 +1677,7 @@ fn test_commands_reject_dangling_references() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind, NodalLoad};
 
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     model.sections.push(bare_section(SectionId(0), None));
     stack_add_material(&mut model, "Fc24");
     model.load_cases.push(LoadCase {
@@ -2007,7 +1858,7 @@ fn stack_add_material(model: &mut sepika_core::model::Model, name: &str) {
 
 #[test]
 fn test_set_material_field_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -2038,7 +1889,7 @@ fn test_set_material_field_roundtrip() {
 
 #[test]
 fn standard_concrete_young_cannot_be_changed_but_direct_material_can() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -2091,7 +1942,7 @@ fn standard_concrete_young_cannot_be_changed_but_direct_material_can() {
 
 #[test]
 fn steel_and_rebar_young_remain_editable() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     for (category, name) in [
         (MaterialCategory::Steel, "SS400"),
@@ -2128,7 +1979,7 @@ fn steel_and_rebar_young_remain_editable() {
 
 #[test]
 fn test_set_material_strength_factor_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -2169,7 +2020,7 @@ fn test_set_material_strength_factor_roundtrip() {
 #[test]
 fn test_add_delete_load_case_roundtrip() {
     use sepika_core::ids::LoadCaseId;
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddLoadCase { name: "DL".into() }));
     stack.run(&mut model, Box::new(AddLoadCase { name: "LL".into() }));
@@ -2192,7 +2043,7 @@ fn test_add_delete_load_case_roundtrip() {
 fn test_delete_load_case_referenced_by_combo_is_noop() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::LoadCombination;
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddLoadCase { name: "DL".into() }));
     model.combinations.push(LoadCombination {
@@ -2207,7 +2058,7 @@ fn test_delete_load_case_referenced_by_combo_is_noop() {
 fn test_add_delete_combination_roundtrip() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::LoadCombination;
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.combinations.push(LoadCombination {
         name: "既存".into(),
         terms: vec![(LoadCaseId(0), 1.0)],
@@ -2239,7 +2090,7 @@ fn test_add_delete_combination_roundtrip() {
 fn test_delete_combination_roundtrip_restores_position() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::LoadCombination;
-    let mut model = empty_model();
+    let mut model = Model::default();
     for (name, coef) in [("A", 1.0), ("B", 2.0), ("C", 3.0)] {
         model.combinations.push(LoadCombination {
             name: name.into(),
@@ -2268,13 +2119,12 @@ fn test_delete_combination_roundtrip_restores_position() {
 
 #[test]
 fn test_delete_combination_out_of_range_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(DeleteCombination { index: 0 }));
     assert!(model.combinations.is_empty());
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
-    assert!(model.combinations.is_empty());
 }
 
 #[test]
@@ -2372,17 +2222,7 @@ fn test_unset_floor_region_restores_floor_region_membership() {
 #[test]
 fn test_delete_slab_middle_renumbers_and_roundtrips() {
     use sepika_core::model::{AreaLoad, DistributionMethod};
-    let mut model = empty_model();
-    for i in 0..3 {
-        model.nodes.push(Node {
-            id: NodeId(i),
-            coord: [i as f64 * 1000.0, 0.0, 0.0],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
+    let mut model = seeded_model(3, 0);
     let mut stack = UndoStack::new();
     model.elements.push(ElementData {
         id: ElemId(0),
@@ -2457,13 +2297,12 @@ fn test_delete_slab_middle_renumbers_and_roundtrips() {
 
 #[test]
 fn test_delete_slab_out_of_range_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(DeleteSlab { id: SlabId(0) }));
     assert!(model.slabs.is_empty());
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
-    assert!(model.slabs.is_empty());
 }
 
 fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
@@ -2488,7 +2327,7 @@ fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
 
 #[test]
 fn test_set_story_weight_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.stories.push(make_story(0, None));
     let mut stack = UndoStack::new();
 
@@ -2516,7 +2355,7 @@ fn test_set_story_weight_roundtrip() {
 /// 手入力フラグのみ落ちる（次の準備計算で再算定される）。
 #[test]
 fn test_clear_story_weight_override_keeps_auto_value() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.stories.push(make_story(0, Some(500.0)));
     let mut stack = UndoStack::new();
 
@@ -2543,7 +2382,7 @@ fn test_clear_story_weight_override_keeps_auto_value() {
 
 #[test]
 fn test_set_story_weight_invalid_id_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.stories.push(make_story(0, Some(999.0)));
     let mut stack = UndoStack::new();
 
@@ -2557,15 +2396,14 @@ fn test_set_story_weight_invalid_id_is_noop() {
     assert_eq!(model.stories[0].seismic_weight, Some(999.0));
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
-    assert_eq!(model.stories[0].seismic_weight, Some(999.0));
 }
 
 #[test]
 fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     use sepika_core::dof::Dof;
-    use sepika_core::model::{Constraint, Story};
+    use sepika_core::model::Constraint;
 
-    let mut model = empty_model();
+    let mut model = Model::default();
     for i in 0..2u32 {
         model.nodes.push(Node {
             id: NodeId(i),
@@ -2604,23 +2442,10 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     prepared.nodes[0].story = Some(StoryId(0));
     prepared.nodes[1].story = Some(StoryId(0));
     prepared.nodes.push(rep_node);
-    prepared.stories = vec![Story {
-        wall_weights: Vec::new(),
-        level_kind: Default::default(),
-        structure: Default::default(),
-        id: StoryId(0),
-        name: "1F".into(),
-        elevation: Some(3000.0),
-        sl_offset_mm: Some(0.0),
-        source_story: None,
-        node_ids: vec![NodeId(0), NodeId(1)],
-        seismic_weight: Some(1000.0),
-        weight_override: None,
-        dynamic_mass: None,
-        standard_floor_load: None,
-        column_finish_area_weight: 0.0,
-        fireproof: Default::default(),
-    }];
+    let mut story = make_story(0, Some(1000.0));
+    story.elevation = Some(3000.0);
+    story.node_ids = vec![NodeId(0), NodeId(1)];
+    prepared.stories = vec![story];
     prepared.constraints = vec![constraint];
     prepared.generated_masters = vec![NodeId(2)];
     prepared.wall_weight_generation = Some(sepika_core::model::WallWeightGenerationMode::Geometry);
@@ -2661,7 +2486,7 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
 fn test_apply_prepared_model_sets_and_restores_mass_method() {
     use sepika_core::model::MassMethod;
 
-    let mut model = empty_model();
+    let mut model = Model::default();
     assert_eq!(model.mass_method, MassMethod::CorrectedLumped);
     let mut stack = UndoStack::new();
     let mut prepared = model.clone();
@@ -2682,7 +2507,7 @@ fn test_apply_prepared_model_sets_and_restores_mass_method() {
 /// `generated_masters` が（ID 繰り上げ込みで）正しく維持されること。
 #[test]
 fn test_delete_leftover_generated_master_roundtrip() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [0.0, 0.0, 0.0],
@@ -2749,7 +2574,7 @@ fn test_delete_leftover_generated_master_roundtrip() {
 fn test_set_load_case_kind_roundtrip() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::LoadCaseKind;
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddLoadCase { name: "DL".into() }));
     assert_eq!(model.load_cases[0].kind, LoadCaseKind::Other);
@@ -2774,7 +2599,7 @@ fn test_set_load_case_kind_roundtrip() {
 fn test_set_load_case_kind_invalid_id_is_noop() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::LoadCaseKind;
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -2848,34 +2673,34 @@ fn test_nodal_loads_are_indexed_and_allow_duplicates_per_node() {
 #[test]
 fn test_auto_loads_reject_edit_and_delete() {
     use sepika_core::model::NodalLoad;
-    let mut model = empty_model();
+    let mut model = seeded_model(2, 0);
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddLoadCase { name: "DL".into() }));
     let auto = NodalLoad::auto(NodeId(0), [0.0, 0.0, -10.0, 0.0, 0.0, 0.0]);
     // 自動生成分は同期（`replace_auto_loads`）が入れるものなので、そちらで用意する。
     model.load_cases[0].replace_auto_loads(vec![auto.clone()], Vec::new());
 
-    stack.run(
+    assert!(!stack.run(
         &mut model,
         Box::new(SetNodalLoad {
             lc: LoadCaseId(0),
             index: 0,
             load: NodalLoad::manual(NodeId(0), [999.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
         }),
-    );
+    ));
     assert_eq!(
         model.load_cases[0].nodal,
         vec![auto.clone()],
         "変更できない"
     );
 
-    stack.run(
+    assert!(!stack.run(
         &mut model,
         Box::new(DeleteNodalLoad {
             lc: LoadCaseId(0),
             index: 0,
         }),
-    );
+    ));
     assert_eq!(
         model.load_cases[0].nodal,
         vec![auto.clone()],
@@ -2893,6 +2718,31 @@ fn test_auto_loads_reject_edit_and_delete() {
     );
     assert!(!added, "自動生成分は追加コマンドで積めない");
     assert_eq!(model.load_cases[0].nodal, vec![auto], "件数が増えない");
+    assert!(model.validate().is_ok());
+
+    model.load_cases[0].nodal[0] = NodalLoad::manual(NodeId(0), [0.0, 0.0, -10.0, 0.0, 0.0, 0.0]);
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetNodalLoad {
+            lc: LoadCaseId(0),
+            index: 0,
+            load: NodalLoad::manual(NodeId(0), [999.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        })
+    ));
+    assert!(stack.run(
+        &mut model,
+        Box::new(DeleteNodalLoad {
+            lc: LoadCaseId(0),
+            index: 0
+        })
+    ));
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddNodalLoad {
+            lc: LoadCaseId(0),
+            load: NodalLoad::manual(NodeId(1), [0.0, 0.0, -1.0, 0.0, 0.0, 0.0]),
+        })
+    ));
 }
 
 #[test]
@@ -3059,7 +2909,7 @@ fn test_sync_slab_loads_marks_content_as_auto() {
 #[test]
 fn test_set_load_cfg_roundtrip() {
     use sepika_core::model::LoadCfg;
-    let mut model = empty_model();
+    let mut model = Model::default();
     assert!(model.load_cfg.is_none());
     let mut stack = UndoStack::new();
 
@@ -3087,7 +2937,7 @@ fn test_set_load_cfg_roundtrip() {
 fn model_with_enclosed_wall_plate() -> Model {
     use sepika_core::model::{Section, WallPlate, WallPlateShape};
 
-    let mut model = empty_model();
+    let mut model = Model::default();
     for (i, coord) in [
         [0.0, 0.0, 0.0],
         [4000.0, 0.0, 0.0],
@@ -3201,7 +3051,7 @@ fn test_set_wall_plate_attrs_roundtrip() {
 /// 存在しない壁版への属性編集は Noop（undo 履歴に積まれない）。
 #[test]
 fn test_set_wall_plate_attrs_missing_id_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -3257,7 +3107,7 @@ fn test_set_wall_plate_section_roundtrip_and_rejects_dangling() {
 #[test]
 fn test_set_story_level_kind_roundtrip() {
     use sepika_core::model::StoryLevelKind;
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.stories.push(make_story(0, None));
     let mut stack = UndoStack::new();
 
@@ -3280,7 +3130,7 @@ fn test_set_story_level_kind_roundtrip() {
 #[test]
 fn test_set_multi_opening_mode_roundtrip() {
     use sepika_core::model::MultiOpeningMode;
-    let mut model = empty_model();
+    let mut model = Model::default();
     assert_eq!(model.multi_opening_mode, MultiOpeningMode::Equivalent);
     let mut stack = UndoStack::new();
 
@@ -3316,7 +3166,7 @@ fn test_set_multi_opening_mode_roundtrip() {
 #[test]
 fn test_set_multi_opening_mode_same_value_is_symmetric() {
     use sepika_core::model::MultiOpeningMode;
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
 
     stack.run(
@@ -3334,23 +3184,7 @@ fn test_set_multi_opening_mode_same_value_is_symmetric() {
 #[test]
 fn test_set_member_hysteresis_roundtrip() {
     use sepika_core::model::HysteresisModel;
-    let mut model = empty_model();
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0; 3],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
-    model.nodes.push(Node {
-        id: NodeId(1),
-        coord: [1000.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
+    let mut model = seeded_model(2, 0);
     model.elements.push(ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,
@@ -3401,7 +3235,7 @@ fn test_set_member_hysteresis_roundtrip() {
 #[test]
 fn test_set_member_hysteresis_th_roundtrip() {
     use sepika_core::model::HysteresisModel;
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let mut stack = UndoStack::new();
 
     // 増分用スロットを Takeda に設定しておき、時刻歴用スロットの操作で
@@ -3460,7 +3294,7 @@ fn test_set_member_hysteresis_th_roundtrip() {
 #[test]
 fn test_add_damper_creates_element_and_attr_roundtrip() {
     use sepika_core::model::{DamperKind, DamperProps};
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let before = model.clone();
     let new_id = ElemId(model.elements.len() as u32);
     let props = DamperProps {
@@ -3505,7 +3339,7 @@ fn test_add_damper_creates_element_and_attr_roundtrip() {
 #[test]
 fn test_set_damper_props_roundtrip() {
     use sepika_core::model::DamperProps;
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let e = ElemId(1);
     let p1 = DamperProps {
         kd: 100.0,
@@ -3551,7 +3385,7 @@ fn test_set_damper_props_roundtrip() {
 #[test]
 fn test_add_isolator_creates_element_and_attr_roundtrip() {
     use sepika_core::model::{IsolatorKind, IsolatorProps};
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let before = model.clone();
     let new_id = ElemId(model.elements.len() as u32);
     let props = IsolatorProps {
@@ -3613,7 +3447,7 @@ fn test_add_isolator_creates_element_and_attr_roundtrip() {
 #[test]
 fn test_add_isolator_id_mismatch_is_noop() {
     use sepika_core::model::{IsolatorKind, IsolatorProps};
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let before = model.clone();
     let props = IsolatorProps {
         kind: IsolatorKind::LeadRubber,
@@ -3646,7 +3480,7 @@ fn test_add_isolator_id_mismatch_is_noop() {
 #[test]
 fn test_place_support_isolator_roundtrip() {
     use sepika_core::model::{ElementKind, IsolatorKind, IsolatorProps};
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [1000.0, 2000.0, 0.0],
@@ -3715,7 +3549,7 @@ fn test_place_support_isolator_roundtrip() {
 #[test]
 fn test_remove_support_isolator_roundtrip() {
     use sepika_core::model::{ElementKind, IsolatorKind, IsolatorProps};
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.nodes.push(Node {
         id: NodeId(0),
         coord: [1000.0, 2000.0, 0.0],
@@ -3780,23 +3614,7 @@ fn test_remove_support_isolator_noop_when_not_support_isolator() {
     use sepika_core::model::{
         ElementData, ElementKind, EndCondition, ForceRegime, IsolatorProps, LocalAxis,
     };
-    let mut model = empty_model();
-    model.nodes.push(Node {
-        id: NodeId(0),
-        coord: [0.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
-    model.nodes.push(Node {
-        id: NodeId(1),
-        coord: [1000.0, 0.0, 0.0],
-        restraint: Dof6Mask::FREE,
-        mass: None,
-        story: None,
-        support_spring: None,
-    });
+    let mut model = seeded_model(2, 0);
     // 通常の（2つの構造節点間の）免震要素。零長ではないため支点免震要素の形を満たさない。
     model.elements.push(ElementData {
         id: ElemId(0),
@@ -3840,7 +3658,7 @@ fn test_remove_support_isolator_noop_when_not_support_isolator() {
 #[test]
 fn test_place_support_isolator_invalid_node_is_noop() {
     use sepika_core::model::IsolatorProps;
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -3858,7 +3676,7 @@ fn test_place_support_isolator_invalid_node_is_noop() {
 #[test]
 fn test_damper_def_add_update_remove_roundtrip() {
     use sepika_core::model::{DamperDef, DamperKind, DamperProps};
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
 
     let def1 = DamperDef {
@@ -3924,7 +3742,7 @@ fn test_damper_def_removal_does_not_affect_assigned_member() {
     // DamperDef は値コピーで割り当てるため、定義の削除は既存の割当済み部材
     // （Model::damper_attrs）に影響しない。
     use sepika_core::model::{DamperDef, DamperKind, DamperProps};
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     let def = DamperDef {
         name: "テスト用".to_string(),
         props: DamperProps {
@@ -4021,7 +3839,7 @@ fn test_set_member_detail_attr_add_replace_and_remove_roundtrip() {
 
 #[test]
 fn test_remove_member_detail_attr_missing_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -4030,7 +3848,6 @@ fn test_remove_member_detail_attr_missing_is_noop() {
     assert!(model.member_detail_attrs.is_empty());
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
-    assert!(model.member_detail_attrs.is_empty());
 }
 
 #[test]
@@ -4100,7 +3917,7 @@ fn test_set_steel_design_attr_add_replace_and_remove_roundtrip() {
 
 #[test]
 fn test_remove_steel_design_attr_missing_is_noop() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -4109,13 +3926,12 @@ fn test_remove_steel_design_attr_missing_is_noop() {
     assert!(model.steel_design_attrs.is_empty());
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
-    assert!(model.steel_design_attrs.is_empty());
 }
 
 #[test]
 fn test_delete_member_shifts_and_restores_side_table_attrs() {
     use sepika_core::model::{DamperProps, HysteresisModel};
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     // 部材0に履歴則、部材1にダンパー特性を付与。
     model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
     let props = DamperProps {
@@ -4158,7 +3974,7 @@ fn test_delete_member_shifts_and_restores_side_table_attrs() {
 #[test]
 fn test_delete_member_restores_member_detail_attr() {
     use sepika_core::model::{Haunch, MemberDetailAttr};
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     // 部材0にハンチ付帯情報を付与。
     let attr = MemberDetailAttr {
         elem: ElemId(0),
@@ -4194,17 +4010,7 @@ fn test_delete_member_restores_member_detail_attr() {
 /// `AddNode` ＋追加行への `SetNodeCoord`）を 1 undo で丸ごと復元すること。
 #[test]
 fn test_composite_paste_roundtrip() {
-    let mut model = empty_model();
-    for (i, x) in [0.0, 1000.0].iter().enumerate() {
-        model.nodes.push(Node {
-            id: NodeId(i as u32),
-            coord: [*x, 0.0, 0.0],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
+    let mut model = seeded_model(2, 0);
     let before = model.clone();
     let mut stack = UndoStack::new();
 
@@ -4254,17 +4060,7 @@ fn test_composite_paste_roundtrip() {
 /// undo 1 回で、ID の繰り上げ・部材参照の付け替えごと復元すること（§4.6 の前提）。
 #[test]
 fn test_composite_delete_nodes_descending_roundtrip() {
-    let mut model = empty_model();
-    for i in 0..5u32 {
-        model.nodes.push(Node {
-            id: NodeId(i),
-            coord: [i as f64 * 1000.0, 0.0, 0.0],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
+    let mut model = seeded_model(5, 0);
     // 削除対象外の節点 0-4 を結ぶ部材（削除で節点 4 の ID が繰り上がる）。
     model.elements.push(ElementData {
         id: ElemId(0),
@@ -4341,17 +4137,7 @@ fn test_delete_node_used_by_wall_region_boundary_is_noop() {
     use sepika_core::ids::WallRegionId;
     use sepika_core::model::WallRegion;
 
-    let mut model = empty_model();
-    for i in 0..2u32 {
-        model.nodes.push(Node {
-            id: NodeId(i),
-            coord: [f64::from(i) * 1000.0, 0.0, 0.0],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
+    let mut model = seeded_model(2, 0);
     model
         .wall_regions
         .push(WallRegion::new(WallRegionId(0), vec![NodeId(0), NodeId(1)]));
@@ -4364,8 +4150,8 @@ fn test_delete_node_used_by_wall_region_boundary_is_noop() {
 /// 二次部材が参照中の断面・材料は削除ガードで Noop になること。
 #[test]
 fn test_delete_section_material_shift_and_guard_secondary_refs() {
-    use sepika_core::model::{Material, Section};
-    let mut model = empty_model();
+    use sepika_core::model::Material;
+    let mut model = Model::default();
     for i in 0..2u32 {
         model.nodes.push(Node {
             id: NodeId(i),
@@ -4375,29 +4161,9 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
             story: None,
             support_spring: None,
         });
-        model.sections.push(Section {
-            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
-            id: SectionId(i),
-            name: format!("S{}", i),
-            area: 100.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 10.0,
-            width: 10.0,
-            as_y: 80.0,
-            as_z: 80.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            // 材料は断面が持つ。断面 i に材料 i を割り当てる。
-            material: Some(MaterialId(i)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
+        let mut section = bare_section(SectionId(i), Some(MaterialId(i)));
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        model.sections.push(section);
         model.materials.push(Material {
             id: MaterialId(i),
             name: format!("M{}", i),
@@ -4442,7 +4208,7 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
 /// 無関係な部材のモーメントを検定に合成していた。
 #[test]
 fn test_delete_member_cascades_girder_groups_and_restores() {
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     model.girder_groups = vec![vec![ElemId(0), ElemId(1)]];
     let before = model.clone();
     let mut stack = UndoStack::new();
@@ -4460,7 +4226,7 @@ fn test_delete_member_cascades_girder_groups_and_restores() {
 /// `Model::validate` が girder_groups のダングリング参照を検出すること。
 #[test]
 fn test_validate_detects_dangling_girder_group() {
-    let mut model = two_member_model();
+    let mut model = seeded_model(3, 2);
     model.girder_groups = vec![vec![ElemId(5)]];
     assert!(model.validate().is_err());
 }
@@ -4469,7 +4235,7 @@ fn test_validate_detects_dangling_girder_group() {
 /// `undone.clear()` が走り、undo 直後に無効な操作をすると redo が失われていた。
 #[test]
 fn test_failed_command_keeps_redo_history() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -4513,7 +4279,7 @@ fn h_shape() -> sepika_core::section_shape::SectionShape {
 /// GUI 以外の呼び出し元（MCP など）に対しても不変条件を守るため、コマンド側で拒否する。
 #[test]
 fn test_add_section_shape_rejects_duplicate_key() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     let add = |name: &str, floor: Option<&str>, id: u32| AddSectionShape {
         shape: h_shape(),
@@ -4545,7 +4311,7 @@ fn test_add_section_shape_rejects_duplicate_key() {
 /// 符号・階の変更も、他の断面と衝突する場合は適用しない。自分自身は衝突判定から外す。
 #[test]
 fn test_set_section_name_rejects_duplicate_key() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     for (i, floor) in ["1", "2"].iter().enumerate() {
         stack.run(
@@ -4601,7 +4367,7 @@ fn test_set_section_name_rejects_duplicate_key() {
 /// 断面形状を変更しても符号と階は維持する（同一性キーが形状変更で消えない）。
 #[test]
 fn test_edit_section_shape_keeps_name_and_floor() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
@@ -4638,7 +4404,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
 /// カタログ断面の追加も符号の重複を拒否する（同じカタログ断面を 2 回追加できない）。
 #[test]
 fn test_add_catalog_section_rejects_duplicate_key() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut stack = UndoStack::new();
     let sec = h_shape().to_section(SectionId(0), "H-300x150x6.5x9".into());
 
@@ -4661,7 +4427,7 @@ fn test_add_catalog_section_rejects_duplicate_key() {
 /// 階 `levels` と、標高 `zs` の節点を持つモデル。
 fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
     use sepika_core::dof::Dof6Mask;
-    use sepika_core::model::{Node, Story};
+    use sepika_core::model::Node;
 
     Model {
         nodes: zs
@@ -4679,22 +4445,11 @@ fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
         stories: levels
             .iter()
             .enumerate()
-            .map(|(i, &(name, elevation))| Story {
-                wall_weights: Vec::new(),
-                id: StoryId(i as u32),
-                name: name.into(),
-                elevation: Some(elevation),
-                sl_offset_mm: Some(0.0),
-                source_story: None,
-                node_ids: Vec::new(),
-                seismic_weight: None,
-                weight_override: None,
-                structure: Default::default(),
-                level_kind: Default::default(),
-                dynamic_mass: None,
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
+            .map(|(i, &(name, elevation))| {
+                let mut story = make_story(i as u32, None);
+                story.name = name.into();
+                story.elevation = Some(elevation);
+                story
             })
             .collect(),
         ..Default::default()
@@ -5019,16 +4774,17 @@ fn test_stale_story_commands_are_noop() {
     );
     let mut undo = UndoStack::new();
 
+    assert_eq!(model.stories[2].id, StoryId(2));
     // 削除後に残った古いコマンド: 編集と削除の index はどちらも範囲外になる。
     let stale_level = Box::new(SetStoryLevel {
-        story: StoryId(3),
+        story: StoryId(2),
         name: "RF".into(),
         elevation: Some(9000.0),
         sl_offset_mm: Some(0.0),
     });
-    let stale_delete = Box::new(DeleteStory { story: StoryId(3) });
+    let stale_delete = Box::new(DeleteStory { story: StoryId(2) });
 
-    // 先に 2F(=StoryId(1)) を削除すると階数が 2 になり、index 3 は範囲外。
+    // 先に 2F(=StoryId(1)) を削除すると階数が 2 になり、index 2 は範囲外。
     undo.run(&mut model, Box::new(DeleteStory { story: StoryId(1) }));
     assert_eq!(model.stories.len(), 2, "2F を削除すると残り 2 階");
     assert!(undo.can_undo());
@@ -5204,6 +4960,19 @@ fn test_copy_story_replaces_loads_instead_of_stacking() {
     );
 }
 
+fn remove_third_floor_slabs(model: &mut Model) {
+    let levels: std::collections::HashMap<SlabId, f64> = model
+        .slabs
+        .iter()
+        .filter_map(|sl| {
+            let n = *sl.boundary_nodes(model)?.first()?;
+            Some((sl.id, model.nodes[n.index()].coord[2]))
+        })
+        .collect();
+    model.retain_slabs(|sl| !(7000.0..8000.0).contains(&levels[&sl.id]));
+    model.floor_regions.clear();
+}
+
 /// 床の複製で、同じ床を「新規」と「更新」に二重計上しない。
 #[test]
 fn test_copy_story_counts_new_slabs_once() {
@@ -5214,16 +4983,7 @@ fn test_copy_story_counts_new_slabs_once() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     // 3F の床を消して、2F から配り直せる状態にする。
-    let levels: std::collections::HashMap<SlabId, f64> = model
-        .slabs
-        .iter()
-        .filter_map(|sl| {
-            let n = *sl.boundary_nodes(&model)?.first()?;
-            Some((sl.id, model.nodes[n.index()].coord[2]))
-        })
-        .collect();
-    model.retain_slabs(|sl| !(7000.0..8000.0).contains(&levels[&sl.id]));
-    model.floor_regions.clear();
+    remove_third_floor_slabs(&mut model);
     assign_node_stories(&mut model);
     for sl in &mut model.slabs {
         sl.plate.usage = Some(SlabUsage::Office);
@@ -5277,16 +5037,7 @@ fn test_copy_story_reuses_no_plate_region() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     // 3F の床を消し、割当領域は残す（`retain_slabs` が未設定へ戻す）。
-    let levels: std::collections::HashMap<SlabId, f64> = model
-        .slabs
-        .iter()
-        .filter_map(|sl| {
-            let n = *sl.boundary_nodes(&model)?.first()?;
-            Some((sl.id, model.nodes[n.index()].coord[2]))
-        })
-        .collect();
-    model.retain_slabs(|sl| !(7000.0..8000.0).contains(&levels[&sl.id]));
-    model.floor_regions.clear();
+    remove_third_floor_slabs(&mut model);
     assign_node_stories(&mut model);
 
     // コピー先（3F）の未設定の割当領域を「版なし」にする。
@@ -5620,9 +5371,8 @@ fn test_copy_story_reports_mismatched_existing_section() {
     assert_eq!(report.mismatched_sections, vec!["C1 (3F)".to_string()]);
 
     // 中身は書き換えない（対象範囲の外の部材まで変わってしまうため）。
-    let mut m = model.clone();
-    cmd.apply(&mut m);
-    assert_eq!(m.sections[id_3f.index()].area, 500.0);
+    cmd.apply(&mut model);
+    assert_eq!(model.sections[id_3f.index()].area, 500.0);
 }
 
 /// 材長の違う相手（階高の違う柱）へ部材荷重を配るとき、載荷区間を材長へ合わせる。
@@ -5868,16 +5618,7 @@ fn test_copy_story_remaps_slab_section_to_target_floor() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     // 3F の床を消し、2F の床の断面へ階を持たせる。
-    let levels: std::collections::HashMap<SlabId, f64> = model
-        .slabs
-        .iter()
-        .filter_map(|sl| {
-            let n = *sl.boundary_nodes(&model)?.first()?;
-            Some((sl.id, model.nodes[n.index()].coord[2]))
-        })
-        .collect();
-    model.retain_slabs(|sl| !(7000.0..8000.0).contains(&levels[&sl.id]));
-    model.floor_regions.clear();
+    remove_third_floor_slabs(&mut model);
     model.sections[0].floor = Some("2F".into());
     assign_node_stories(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
@@ -6033,12 +5774,6 @@ fn test_copy_story_matches_across_rounding_boundary() {
 
 // ─── 二次部材・壁領域のテスト ────────────────────────────────────────────────
 
-/// 二次部材用の最小モデル（節点 4 個。端点が重ならない小梁を 2 本置ける。
-/// 0-1 の梁は端部支持条件の変更テストで支持部材にする）。
-fn sm_base_model() -> Model {
-    seeded_model(4, 1)
-}
-
 /// `kind` で小梁または間柱の `SecondaryMember` を生成する（テスト用ヘルパー）。
 fn make_sm(
     id: u32,
@@ -6077,28 +5812,9 @@ fn push_cft_section(model: &mut Model) -> SectionId {
 /// 形状を持たない鋼材断面を末尾へ追加し、その ID を返す（テスト用ヘルパー）。
 fn push_steel_section(model: &mut Model) -> SectionId {
     let id = SectionId(model.sections.len() as u32);
-    model.sections.push(sepika_core::model::Section {
-        frame_use: None,
-        id,
-        name: "S".into(),
-        area: 100.0,
-        iy: 1.0,
-        iz: 1.0,
-        j: 1.0,
-        depth: 10.0,
-        width: 10.0,
-        as_y: 80.0,
-        as_z: 80.0,
-        floor: None,
-        panel_thickness: None,
-        thickness: None,
-        shape: None,
-        material: None,
-        rebar_material: None,
-        shear_rebar_material: None,
-        steel_material: None,
-        property_basis: Default::default(),
-    });
+    let mut section = bare_section(id, None);
+    section.name = "S".into();
+    model.sections.push(section);
     id
 }
 
@@ -6106,7 +5822,7 @@ fn push_steel_section(model: &mut Model) -> SectionId {
 #[test]
 fn add_delete_unassigned_beam() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let mut stack = UndoStack::new();
 
     stack.run(
@@ -6136,7 +5852,7 @@ fn add_delete_unassigned_beam() {
 #[test]
 fn set_floor_region_secondary_beams_roundtrip() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
@@ -6159,7 +5875,7 @@ fn set_floor_region_secondary_beams_roundtrip() {
 #[test]
 fn set_floor_region_secondary_beams_empty_moves_to_unassigned() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
@@ -6185,7 +5901,7 @@ fn set_floor_region_secondary_beams_empty_moves_to_unassigned() {
 #[test]
 fn add_unassigned_beam_rejects_duplicate_endpoints() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let sm = make_sm(0, SecondaryMemberKind::Beam);
     model.unassigned_beams.push(sm.clone());
     let mut stack = UndoStack::new();
@@ -6197,7 +5913,7 @@ fn add_unassigned_beam_rejects_duplicate_endpoints() {
 #[test]
 fn set_wall_region_posts_roundtrip() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     model
         .wall_regions
         .push(sepika_core::model::WallRegion::new(WallRegionId(0), vec![]));
@@ -6219,7 +5935,7 @@ fn set_wall_region_posts_roundtrip() {
 #[test]
 fn set_secondary_member_end_support_applies_and_undoes() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     model
         .unassigned_beams
         .push(make_sm(0, SecondaryMemberKind::Beam));
@@ -6249,7 +5965,7 @@ fn set_secondary_member_end_support_applies_and_undoes() {
 #[test]
 fn set_secondary_member_end_support_recovers_detached() {
     use sepika_core::model::{EndSupport, SecondaryMemberEnds, SecondaryMemberKind};
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     model
         .unassigned_beams
         .push(make_sm(0, SecondaryMemberKind::Beam));
@@ -6288,7 +6004,7 @@ fn set_secondary_member_end_support_recovers_detached() {
 #[test]
 fn set_secondary_member_end_support_is_noop_for_unknown_member() {
     use sepika_core::model::EndSupport;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let mut stack = UndoStack::new();
     let applied = stack.run(
         &mut model,
@@ -6304,7 +6020,7 @@ fn set_secondary_member_end_support_is_noop_for_unknown_member() {
 #[test]
 fn set_floor_region_secondary_beams_rejects_post() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
@@ -6323,30 +6039,9 @@ fn set_floor_region_secondary_beams_rejects_post() {
 /// 床領域内小梁の断面変更。
 #[test]
 fn set_floor_region_beam_section() {
-    use sepika_core::model::{SecondaryMemberKind, Section};
-    let mut model = sm_base_model();
-    model.sections.push(Section {
-        frame_use: None,
-        id: SectionId(0),
-        name: "S0".into(),
-        area: 100.0,
-        iy: 1.0,
-        iz: 1.0,
-        j: 1.0,
-        depth: 10.0,
-        width: 10.0,
-        as_y: 80.0,
-        as_z: 80.0,
-        floor: None,
-        panel_thickness: None,
-        thickness: None,
-        shape: None,
-        material: None,
-        rebar_material: None,
-        shear_rebar_material: None,
-        steel_material: None,
-        property_basis: Default::default(),
-    });
+    use sepika_core::model::SecondaryMemberKind;
+    let mut model = seeded_model(4, 1);
+    model.sections.push(bare_section(SectionId(0), None));
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
@@ -6373,17 +6068,8 @@ fn set_floor_region_beam_section() {
 #[test]
 fn set_floor_region_beam_section_rejects_cft() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
-    model.sections.push(
-        sepika_core::section_shape::SectionShape::CftBox {
-            corner_r: Some(0.0),
-            height: 400.0,
-            width: 400.0,
-            thick: 16.0,
-            horizontal_thick: 16.0,
-        }
-        .to_section(SectionId(0), "CFT".into()),
-    );
+    let mut model = seeded_model(4, 1);
+    push_cft_section(&mut model);
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
@@ -6678,7 +6364,7 @@ fn add_member_rejects_horizontal_cft_but_allows_column_and_unassigned() {
 #[test]
 fn set_wall_region_post_section_rejects_cft() {
     use sepika_core::model::{SecondaryMemberKind, WallRegion};
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     model.sections.push(
         sepika_core::section_shape::SectionShape::CftPipe {
             outer_dia: 400.0,
@@ -6708,30 +6394,9 @@ fn set_wall_region_post_section_rejects_cft() {
 /// 鋼材断面は間柱へ設定できる。
 #[test]
 fn set_wall_region_post_section_accepts_steel() {
-    use sepika_core::model::{SecondaryMemberKind, Section, WallRegion};
-    let mut model = sm_base_model();
-    model.sections.push(Section {
-        frame_use: None,
-        id: SectionId(0),
-        name: "S0".into(),
-        area: 100.0,
-        iy: 1.0,
-        iz: 1.0,
-        j: 1.0,
-        depth: 10.0,
-        width: 10.0,
-        as_y: 80.0,
-        as_z: 80.0,
-        floor: None,
-        panel_thickness: None,
-        thickness: None,
-        shape: None,
-        material: None,
-        rebar_material: None,
-        shear_rebar_material: None,
-        steel_material: None,
-        property_basis: Default::default(),
-    });
+    use sepika_core::model::{SecondaryMemberKind, WallRegion};
+    let mut model = seeded_model(4, 1);
+    model.sections.push(bare_section(SectionId(0), None));
     model
         .wall_regions
         .push(WallRegion::new(WallRegionId(0), vec![NodeId(0), NodeId(1)]));
@@ -6755,7 +6420,7 @@ fn set_wall_region_post_section_accepts_steel() {
 #[test]
 fn add_unassigned_beam_rejects_cft_section() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let cft = push_cft_section(&mut model);
     let mut sm = make_sm(0, SecondaryMemberKind::Beam);
     sm.section = Some(cft);
@@ -6768,7 +6433,7 @@ fn add_unassigned_beam_rejects_cft_section() {
 #[test]
 fn add_unassigned_post_rejects_cft_section() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let cft = push_cft_section(&mut model);
     let mut sm = make_sm(0, SecondaryMemberKind::Post);
     sm.section = Some(cft);
@@ -6781,7 +6446,7 @@ fn add_unassigned_post_rejects_cft_section() {
 #[test]
 fn add_unassigned_beam_accepts_steel_section() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let steel = push_steel_section(&mut model);
     let mut sm = make_sm(0, SecondaryMemberKind::Beam);
     sm.section = Some(steel);
@@ -6794,7 +6459,7 @@ fn add_unassigned_beam_accepts_steel_section() {
 #[test]
 fn set_floor_region_secondary_beams_rejects_cft_section() {
     use sepika_core::model::SecondaryMemberKind;
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let cft = push_cft_section(&mut model);
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
@@ -6818,7 +6483,7 @@ fn set_floor_region_secondary_beams_rejects_cft_section() {
 #[test]
 fn set_wall_region_posts_rejects_cft_section() {
     use sepika_core::model::{SecondaryMemberKind, WallRegion};
-    let mut model = sm_base_model();
+    let mut model = seeded_model(4, 1);
     let cft = push_cft_section(&mut model);
     model
         .wall_regions
@@ -8281,7 +7946,7 @@ fn test_delete_wall_plate_cascades_region_ids_and_undoes() {
 /// 間柱の端部負担率を安定 ID で設定し、取り消せる。
 #[test]
 fn 間柱端部負担率を設定し取り消せる() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     model
         .unassigned_posts
         .push(sepika_core::model::SecondaryMember {
@@ -9032,7 +8697,7 @@ fn supplied_rc_depth_edit_preserves_shape_geometry_and_other_properties() {
         },
     };
     let original = shape.to_section(SectionId(0), "RC幾何".into());
-    let mut model = empty_model();
+    let mut model = Model::default();
     model.sections.push(original.clone());
     let mut stack = UndoStack::new();
     assert!(stack.run(
@@ -9061,26 +8726,53 @@ fn secondary_cft_assignment_placement_and_shape_changes_leave_model_and_undo_unc
         SupportMemberId, WallRegion,
     };
     use sepika_core::section_shape::SectionShape;
-    for shape in [
-        SectionShape::CftBox {
-            height: 400.0,
-            width: 400.0,
-            thick: 10.0,
-            horizontal_thick: 10.0,
-            corner_r: Some(0.0),
-        },
-        SectionShape::CftPipe {
-            outer_dia: 400.0,
-            thick: 10.0,
-        },
+    for (shape, allowed_shape) in [
+        (
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 400.0,
+                thick: 10.0,
+                horizontal_thick: 10.0,
+                corner_r: Some(0.0),
+            },
+            SectionShape::SteelBox {
+                height: 400.0,
+                width: 400.0,
+                thick: 10.0,
+                horizontal_thick: 10.0,
+                corner_r: Some(0.0),
+            },
+        ),
+        (
+            SectionShape::CftPipe {
+                outer_dia: 400.0,
+                thick: 10.0,
+            },
+            SectionShape::SteelPipe {
+                outer_dia: 400.0,
+                thick: 10.0,
+            },
+        ),
     ] {
         for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
             for assigned in [false, true] {
-                let mut model = sm_base_model();
+                let mut model = seeded_model(4, 1);
+                model.sections.push(bare_section(SectionId(0), None));
                 let mut section = shape.clone().to_section(SectionId(1), "CFT".into());
                 section.frame_use = Some(FrameSectionUse::Column);
                 model.sections.push(section);
-                let mut sm = make_sm(539, kind);
+                let mut sm = make_sm(0, kind);
+                let ends = SecondaryMemberEnds::Supported([
+                    SecondaryMemberAnchor {
+                        support: SupportMemberId::Primary(ElemId(0)),
+                        position: 0.0,
+                    },
+                    SecondaryMemberAnchor {
+                        support: SupportMemberId::Primary(ElemId(0)),
+                        position: 1.0,
+                    },
+                ]);
+                sm.ends = ends;
                 sm.section = Some(SectionId(0));
                 match (kind, assigned) {
                     (SecondaryMemberKind::Beam, false) => model.unassigned_beams.push(sm),
@@ -9096,59 +8788,81 @@ fn secondary_cft_assignment_placement_and_shape_changes_leave_model_and_undo_unc
                         model.wall_regions.push(r);
                     }
                 }
-                let before = model.clone();
-                let mut stack = UndoStack::new();
-                let mut commands: Vec<Box<dyn EditCommand>> = vec![
-                    Box::new(EditSectionShape {
-                        section: SectionId(0),
-                        new_shape: shape.clone(),
-                        frame_use: Some(FrameSectionUse::Column),
-                    }),
-                    Box::new(PlaceSecondaryMember {
-                        parent: SecondaryParent::Unassigned,
-                        kind,
-                        ends: SecondaryMemberEnds::Supported([
-                            SecondaryMemberAnchor {
-                                support: SupportMemberId::Primary(ElemId(0)),
-                                position: 0.0,
+                assert!(model.validate().is_ok(), "{:?}", model.validate());
+                for cft in [false, true] {
+                    let mut model = model.clone();
+                    if !cft {
+                        model.sections[1].shape = None;
+                    }
+                    let before = model;
+                    let mut commands: Vec<Box<dyn EditCommand>> = vec![
+                        Box::new(EditSectionShape {
+                            section: SectionId(0),
+                            new_shape: if cft {
+                                shape.clone()
+                            } else {
+                                allowed_shape.clone()
                             },
-                            SecondaryMemberAnchor {
-                                support: SupportMemberId::Primary(ElemId(0)),
-                                position: 1.0,
-                            },
-                        ]),
-                        section: Some(SectionId(1)),
-                        name: "禁止二次CFT".into(),
-                    }),
-                ];
-                if assigned {
-                    commands.push(match kind {
-                        SecondaryMemberKind::Beam => Box::new(SetFloorRegionBeamSection {
-                            region: FloorRegionId(0),
-                            index: 0,
-                            section: Some(SectionId(1)),
+                            frame_use: Some(if !cft && kind == SecondaryMemberKind::Beam {
+                                FrameSectionUse::Girder
+                            } else {
+                                FrameSectionUse::Column
+                            }),
                         }),
-                        SecondaryMemberKind::Post => Box::new(SetWallRegionPostSection {
-                            region: WallRegionId(0),
-                            index: 0,
+                        Box::new(PlaceSecondaryMember {
+                            parent: SecondaryParent::Unassigned,
+                            kind,
+                            ends,
                             section: Some(SectionId(1)),
+                            name: "禁止二次CFT".into(),
                         }),
-                    });
-                } else {
-                    let candidate = sepika_core::model::SecondaryMember {
-                        section: Some(SectionId(1)),
-                        ..make_sm(540, kind)
-                    };
-                    commands.push(match kind {
-                        SecondaryMemberKind::Beam => Box::new(AddUnassignedBeam { sm: candidate }),
-                        SecondaryMemberKind::Post => Box::new(AddUnassignedPost { sm: candidate }),
-                    });
-                }
-                for command in commands {
-                    assert!(!stack.run(&mut model, command));
-                    assert!(model.eq_ignoring_dofmap(&before));
-                    assert_eq!(stack.revision(), 0);
-                    assert!(!stack.can_undo());
+                    ];
+                    if assigned {
+                        commands.push(match kind {
+                            SecondaryMemberKind::Beam => Box::new(SetFloorRegionBeamSection {
+                                region: FloorRegionId(0),
+                                index: 0,
+                                section: Some(SectionId(1)),
+                            }),
+                            SecondaryMemberKind::Post => Box::new(SetWallRegionPostSection {
+                                region: WallRegionId(0),
+                                index: 0,
+                                section: Some(SectionId(1)),
+                            }),
+                        });
+                    } else {
+                        let candidate = sepika_core::model::SecondaryMember {
+                            section: Some(SectionId(1)),
+                            ends,
+                            ..make_sm(1, kind)
+                        };
+                        commands.push(match kind {
+                            SecondaryMemberKind::Beam => {
+                                Box::new(AddUnassignedBeam { sm: candidate })
+                            }
+                            SecondaryMemberKind::Post => {
+                                Box::new(AddUnassignedPost { sm: candidate })
+                            }
+                        });
+                    }
+                    for command in commands {
+                        let mut actual = before.clone();
+                        let mut stack = UndoStack::new();
+                        let label = command.label().to_owned();
+                        assert_eq!(
+                            stack.run(&mut actual, command),
+                            !cft,
+                            "{label}: {kind:?}, assigned={assigned}, cft={cft}"
+                        );
+                        if cft {
+                            assert!(actual.eq_ignoring_dofmap(&before));
+                            assert_eq!(stack.revision(), 0);
+                            assert!(!stack.can_undo());
+                        } else {
+                            stack.undo(&mut actual);
+                            assert!(actual.eq_ignoring_dofmap(&before));
+                        }
+                    }
                 }
             }
         }
@@ -9440,7 +9154,7 @@ fn issue635_copy_to_6000mm_keeps_exact_endpoints_and_skips_point_and_interval_ov
 
 #[test]
 fn issue546_material_commands_reject_nonfinite_and_preserve_history() {
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut undo = UndoStack::new();
     assert!(undo.run(
         &mut model,
@@ -9551,7 +9265,7 @@ fn issue546_signed_zero_is_a_material_change_but_same_bits_are_noop() {
         }
         .to_bits()
     }
-    let mut model = empty_model();
+    let mut model = Model::default();
     let mut undo = UndoStack::new();
     assert!(undo.run(
         &mut model,
@@ -9627,7 +9341,7 @@ fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() 
             f64::INFINITY,
             f64::NEG_INFINITY,
         ] {
-            let mut model = empty_model();
+            let mut model = Model::default();
             model.stb_strengths.common = Some(StbCommonStrength {
                 project_name: "repair".into(),
                 app_name: "STB".into(),
@@ -9959,7 +9673,7 @@ mod rc_section_purpose {
         for (shape, correct, wrong_kind, reason) in shapes() {
             for usage in [None, Some(correct)] {
                 for assigned in [false, true] {
-                    let mut model = sm_base_model();
+                    let mut model = seeded_model(4, 1);
                     model.sections.push(bare_section(SectionId(0), None));
                     let mut section = shape.clone().to_section(SectionId(1), "RC".into());
                     section.frame_use = usage;
@@ -9984,7 +9698,7 @@ mod rc_section_purpose {
                             model.wall_regions.push(region);
                         }
                     }
-                    let mut candidate = sm.clone();
+                    let mut candidate = sm;
                     candidate.id = SecondaryMemberId(2);
                     candidate.section = Some(SectionId(1));
                     let mut commands: Vec<Box<dyn EditCommand>> = vec![
