@@ -28,8 +28,6 @@ pub struct LumpedMassResult {
 #[cfg(test)]
 use eigen::stick_omega1;
 #[cfg(test)]
-use model::envelope_area;
-#[cfg(test)]
 use sepika_core::ids::StoryId;
 #[cfg(test)]
 use time_history::fundamental_omega;
@@ -182,6 +180,8 @@ mod tests {
         assert_eq!(direct.serialize_state(), repeated.serialize_state());
         assert_eq!(direct.trial(-0.04), (-30.0, 500.0));
         assert_eq!(repeated.trial(-0.04), (-30.0, 500.0));
+        direct.revert();
+        assert_eq!(before, direct.serialize_state());
         for theta in [-0.04, -0.039, 0.01, 0.03, 0.029, -0.02] {
             assert_eq!(direct.trial(theta), repeated.trial(theta));
             direct.commit();
@@ -217,7 +217,8 @@ mod tests {
         assert!(tri.d1 < tri.d2 && tri.d2 <= tri.d3);
         assert!(tri.q1 <= tri.q2 + 1e-9 && tri.q2 <= tri.q3 + 1e-9);
         // 等包絡面積: トリリニアの面積 = 実曲線の面積。
-        let a_actual = envelope_area(&curve);
+        // 区間面積は50 + 240 + 442.5 = 732.5。
+        let a_actual = 732.5;
         let a_tri = 0.5 * tri.d1 * tri.q1
             + 0.5 * (tri.q1 + tri.q2) * (tri.d2 - tri.d1)
             + 0.5 * (tri.q2 + tri.q3) * (tri.d3 - tri.d2);
@@ -248,29 +249,9 @@ mod tests {
             tri.d1 < tri.d2 && tri.d2 < tri.d3,
             "distinct folds: {tri:?}"
         );
-        assert!(
-            tri.k1 >= tri.k2() && tri.k2() >= tri.k3() - 1e-6,
-            "K1>=K2>=K3: k1={}, k2={}, k3={}",
-            tri.k1,
-            tri.k2(),
-            tri.k3()
-        );
-        assert!(tri.k3() >= 0.0 && tri.k3() <= tri.k1);
-    }
-
-    #[test]
-    fn test_fit_trilinear_bilinear_input_reduces_gracefully() {
-        // バイリニア入力（K1=50→K=5）はトリリニアが縮退（d1≈d2）しても panic せず妥当。
-        let curve: Vec<(f64, f64)> = (1..=30)
-            .map(|s| {
-                let d = s as f64 * 0.1;
-                (d, 50.0 * d.min(2.0) + 5.0 * (d - 2.0).max(0.0))
-            })
-            .collect();
-        let tri = fit_story_trilinear(&curve, 0.9);
-        assert!((tri.k1 - 50.0).abs() < 1.0);
-        assert!(tri.d1 <= tri.d2 && tri.d2 <= tri.d3);
-        assert!((tri.d3 - 3.0).abs() < 1e-6 && (tri.q3 - 105.0).abs() < 1e-6);
+        assert!((tri.k1 - 80.0).abs() < 1e-6);
+        assert!((tri.k2() - 30.0).abs() < 1e-6);
+        assert!((tri.k3() - 8.0).abs() < 1e-6);
     }
 
     #[test]
@@ -304,7 +285,7 @@ mod tests {
     fn test_build_lumped_mass_model_corrects_long_term_origin() {
         use sepika_core::model::{Model, Story};
 
-        let model = Model {
+        let mut model = Model {
             stories: vec![
                 Story {
                     wall_weights: Vec::new(),
@@ -436,73 +417,8 @@ mod tests {
             "mass={}",
             lm.stories[0].mass
         );
-    }
 
-    /// 層の動的質量が未算定（`None`）なら `build_lumped_mass_model` はエラーを返す
-    /// （設計用地震重量へのフォールバックはしない）。
-    #[test]
-    fn test_build_lumped_mass_model_rejects_unset_dynamic_mass() {
-        use sepika_core::model::{Model, Story};
-
-        let model = Model {
-            stories: vec![
-                Story {
-                    wall_weights: Vec::new(),
-                    id: StoryId(0),
-                    name: "1F".to_string(),
-                    elevation: Some(0.0),
-                    sl_offset_mm: Some(0.0),
-                    source_story: None,
-                    node_ids: Vec::new(),
-                    seismic_weight: None,
-                    weight_override: None,
-                    level_kind: Default::default(),
-                    structure: Default::default(),
-                    dynamic_mass: None,
-                    standard_floor_load: None,
-                    column_finish_area_weight: 0.0,
-                    fireproof: Default::default(),
-                },
-                Story {
-                    wall_weights: Vec::new(),
-                    id: StoryId(1),
-                    name: "2F".to_string(),
-                    elevation: Some(3000.0),
-                    sl_offset_mm: Some(0.0),
-                    source_story: None,
-                    node_ids: Vec::new(),
-                    seismic_weight: Some(1.0e6),
-                    weight_override: None,
-                    level_kind: Default::default(),
-                    structure: Default::default(),
-                    dynamic_mass: None,
-                    standard_floor_load: None,
-                    column_finish_area_weight: 0.0,
-                    fireproof: Default::default(),
-                },
-            ],
-            ..Default::default()
-        };
-        let pushover = crate::nonlinear::pushover::PushoverResult {
-            wall_capacities: Vec::new(),
-            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
-            steps: Vec::new(),
-            wall_history: None,
-            wall_run: None,
-            confirmed_history: None,
-            ds_evaluation: None,
-            capacity_evaluation: None,
-            capacity_curve: Vec::new(),
-            hinges: Vec::new(),
-            shear_yields: Vec::new(),
-            mechanism: crate::nonlinear::pushover::MechanismType::Overall,
-            qu: 0.0,
-            member_response: Vec::new(),
-            control: crate::nonlinear::pushover::PushoverControl::default(),
-            member_history: Vec::new(),
-            fiber_states: Vec::new(),
-            termination: crate::nonlinear::pushover::PushoverTermination::TargetReached,
-        };
+        let dynamic_mass = model.stories[1].dynamic_mass.take().unwrap();
         let err = build_lumped_mass_model(&model, &pushover, LumpedMassType::EquivalentShear, 0.75)
             .unwrap_err();
         assert!(matches!(
@@ -510,67 +426,11 @@ mod tests {
             sepika_math::solver::SolveError::InvalidInput(_)
         ));
         assert!(err.to_string().contains("動的質量が未算定"), "{err}");
-    }
-
-    /// 層の質量が 0 以下（または非有限）なら `build_lumped_mass_model` はエラーを返す。
-    /// 非線形経路（`Planar`/`Spatial` + nonlinear）は線形側と違い、この検証が無いと
-    /// 質量 0 が素通りするため、共通の入口で弾く。
-    #[test]
-    fn test_build_lumped_mass_model_rejects_non_positive_mass() {
-        use sepika_core::model::{Model, Story, StoryDynamicMass};
-
-        let base_story = |id: u32, z: f64| Story {
-            wall_weights: Vec::new(),
-            id: StoryId(id),
-            name: format!("{}F", id + 1),
-            elevation: Some(z),
-            sl_offset_mm: Some(0.0),
-            source_story: None,
-            node_ids: Vec::new(),
-            seismic_weight: None,
-            weight_override: None,
-            level_kind: Default::default(),
-            structure: Default::default(),
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
-        };
-        let pushover = crate::nonlinear::pushover::PushoverResult {
-            wall_capacities: Vec::new(),
-            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
-            steps: Vec::new(),
-            wall_history: None,
-            wall_run: None,
-            confirmed_history: None,
-            ds_evaluation: None,
-            capacity_evaluation: None,
-            capacity_curve: Vec::new(),
-            hinges: Vec::new(),
-            shear_yields: Vec::new(),
-            mechanism: crate::nonlinear::pushover::MechanismType::Overall,
-            qu: 0.0,
-            member_response: Vec::new(),
-            control: crate::nonlinear::pushover::PushoverControl::default(),
-            member_history: Vec::new(),
-            fiber_states: Vec::new(),
-            termination: crate::nonlinear::pushover::PushoverTermination::TargetReached,
-        };
-
-        // 質量 0・負値・非有限（NaN）をそれぞれ検証する。
         for weight in [0.0, -1.0, f64::NAN] {
-            let mut top = base_story(1, 3000.0);
-            top.dynamic_mass = Some(StoryDynamicMass {
-                horizontal_inertia_t_mm2: [0.0; 3],
+            model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
                 mass_equiv_weight_n: weight,
-                lumped_mass: None,
-                center_xy_mm: [0.0, 0.0],
-                inertia_t_mm2: 0.0,
+                ..dynamic_mass
             });
-            let model = Model {
-                stories: vec![base_story(0, 0.0), top],
-                ..Default::default()
-            };
             let err =
                 build_lumped_mass_model(&model, &pushover, LumpedMassType::EquivalentShear, 0.75)
                     .unwrap_err();
@@ -626,12 +486,10 @@ mod tests {
             modal.omega2[1],
             expected[1]
         );
-        // 昇順（1次 < 2次）。
-        assert!(modal.omega2[0] < modal.omega2[1]);
-        // 周期は ω=√ω² から算定される（T=2π/ω）。
-        assert!(
-            (modal.period[0] - 2.0 * std::f64::consts::PI / modal.omega2[0].sqrt()).abs() < 1e-9
-        );
+        assert_eq!(modal.period.len(), 2);
+        for (period, omega2) in modal.period.iter().zip(expected) {
+            assert!((period - 2.0 * std::f64::consts::PI / omega2.sqrt()).abs() < 1e-9);
+        }
     }
 
     /// `lumped_mass_eigen` の1次モードと逆反復法 `fundamental_omega` が同じ入力で近い値を返すこと。
@@ -701,19 +559,9 @@ mod tests {
         };
         let w_healthy = stick_omega1(&healthy);
 
-        let with_zero_mass_story = LumpedMassModel {
-            bending: Vec::new(),
-            model_type: LumpedMassType::EquivalentShear,
-            dim: StickDim::Planar,
-            stiffness_source: LumpedStiffnessSource::StoryQd,
-            dir: SeismicDir::X,
-            nonlinear: true,
-            spatial: Vec::new(),
-            stories: vec![
-                stick(2.0, 2000.0, 0.1, 0.3, 250.0, 1.0, 300.0),
-                stick(0.0, 1500.0, 0.1, 0.3, 200.0, 1.0, 260.0),
-            ],
-        };
+        let mut with_zero_mass_story = healthy.clone();
+        with_zero_mass_story.stories[1].mass = 0.0;
+
         let w_zero_mass = stick_omega1(&with_zero_mass_story);
 
         assert!(w_zero_mass.is_finite() && w_zero_mass > 0.0);
@@ -742,19 +590,9 @@ mod tests {
         };
         let w_healthy = stick_omega1(&healthy);
 
-        let with_zero_stiffness_story = LumpedMassModel {
-            bending: Vec::new(),
-            model_type: LumpedMassType::EquivalentShear,
-            dim: StickDim::Planar,
-            stiffness_source: LumpedStiffnessSource::StoryQd,
-            dir: SeismicDir::X,
-            nonlinear: true,
-            spatial: Vec::new(),
-            stories: vec![
-                stick(2.0, 0.0, 0.1, 0.3, 250.0, 1.0, 300.0),
-                stick(1.5, 1500.0, 0.1, 0.3, 200.0, 1.0, 260.0),
-            ],
-        };
+        let mut with_zero_stiffness_story = healthy.clone();
+        with_zero_stiffness_story.stories[0].skeleton.k1 = 0.0;
+
         let w_zero_k1 = stick_omega1(&with_zero_stiffness_story);
 
         assert!(

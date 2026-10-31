@@ -820,6 +820,8 @@ mod tests {
             })
             .collect();
         let sk = crate::dynamic::lumped_mass::fit_story_trilinear(&curve, 0.9);
+        assert!((sk.k1 - 50.0).abs() < 1.0);
+        assert!((sk.d3 - 3.0).abs() < 1e-6 && (sk.q3 - 105.0).abs() < 1e-6);
         assert_eq!(sk.d1, 2.0);
         assert_eq!(sk.d2, 2.0);
         assert!(sk.is_valid_spring());

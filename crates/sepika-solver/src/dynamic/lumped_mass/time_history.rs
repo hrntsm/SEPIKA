@@ -309,10 +309,10 @@ pub fn lumped_mass_time_history(
 
     for (step, &ag) in accel.iter().enumerate().skip(1) {
         let p: Vec<f64> = mass.iter().map(|&mi| -mi * ag).collect();
-        let u_prev = u.clone();
-        let v_prev = v.clone();
-        let a_prev = a.clone();
-        let mut u_tr = u_prev.clone();
+        let u_prev = &u;
+        let v_prev = &v;
+        let a_prev = &a;
+        let mut u_tr = u.clone();
         let mut step_converged = false;
 
         for _iter in STICK_NEWTON.iters() {
@@ -382,10 +382,7 @@ pub fn lumped_mass_time_history(
 
         for i in 0..n {
             let d_signed = drift(&u, i);
-            let (qi, _) = {
-                let mut sp = springs[i].clone();
-                sp.trial(d_signed)
-            };
+            let (qi, _) = springs[i].probe(d_signed);
             let (dx, dy, qx, qy) = match lm.dir {
                 crate::statics::analysis::SeismicDir::X => (d_signed, 0.0, qi, 0.0),
                 crate::statics::analysis::SeismicDir::Y => (0.0, d_signed, 0.0, qi),
@@ -495,19 +492,10 @@ mod damping_tests {
         let kt = [1.0];
         let k_init = [100.0];
         let (a1, c1, c2) = (0.1, 4.0, 2.0);
-        let cd = c2 * a1;
 
         let (_low, diag, _up) = effective_tridiagonal(&mass, &kt, &k_init, a1, c1, c2);
-        // Keff = c1·M + K_t + (c2·a1)·K_init = 8 + 1 + 0.2·100 = 29。
-        let expected = c1 * mass[0] + kt[0] + cd * k_init[0];
-        assert!(
-            (diag[0] - expected).abs() < 1e-12,
-            "diag={} expected={} (減衰は初期剛性ベース)",
-            diag[0],
-            expected
-        );
-        let buggy = c1 * mass[0] + (1.0 + cd) * kt[0];
-        assert!((diag[0] - buggy).abs() > 10.0);
+        // 慣性8・接線1・初期剛性比例減衰20の合計は29。
+        assert!((diag[0] - 29.0).abs() < 1e-12, "diag={}", diag[0]);
     }
 
     /// 減衰力 C·v も初期剛性から評価される（tridiag_stiffness_matvec の直接検証）。
@@ -536,20 +524,14 @@ mod dir_peaks_tests {
         assert!((p.y[0] - 4.0).abs() < 1e-12);
         let want45 = 7.0 * std::f64::consts::FRAC_1_SQRT_2;
         assert!((p.deg45[0] - want45).abs() < 1e-12);
+        let mu = dir_ductility(&p, &[1.0], &[1.0]);
+        assert!((mu.x[0] - 3.0).abs() < 1e-12);
+        assert!((mu.y[0] - 4.0).abs() < 1e-12);
+        // δ45 / (√2 · min δ1) = (7/√2) / √2 = 3.5。
+        assert!((mu.deg45[0] - 3.5).abs() < 1e-12);
         // 135° 側の軌道でも 45° 欄は同じ斜め包絡になる。
         let mut q = StickDirPeaks::zeros(1);
         q.accumulate(0, 3.0, -4.0);
         assert!((q.deg45[0] - want45).abs() < 1e-12);
-    }
-
-    #[test]
-    fn dir_ductility_uses_axis_and_diagonal_yield() {
-        let mut drift = StickDirPeaks::zeros(1);
-        drift.accumulate(0, 3.0, 4.0);
-        let mu = dir_ductility(&drift, &[1.0], &[1.0]);
-        assert!((mu.x[0] - 3.0).abs() < 1e-12);
-        assert!((mu.y[0] - 4.0).abs() < 1e-12);
-        // δ45 / (√2 · min δ1) = (7/√2) / √2 = 3.5
-        assert!((mu.deg45[0] - 3.5).abs() < 1e-12);
     }
 }
