@@ -14,6 +14,12 @@
 
 原階・構造節点の初回編集時のID確保とUndoは `crates/sepika-core/src/model/`、標準強度の参照と再採番は同ディレクトリの `strength.rs`、出力は `crates/sepika-io/src/stbridge/strength_export.rs` を参照します。
 
+## 材料復元の調査入口
+
+断面の主材料参照はグレード名の `Option<String>` として保持し、`assemble.rs` の `build_materials` が空名を除いて初出順に標準物性へ解決します。同名の既存材料を優先し、未知名はこの段階で材料を生成しません。標準物性の正本は `sepika_core::standard_material::standard_material_properties` です。
+
+標準鋼材名と物性は `material_grade::tests::supported_steel_names_restore_stock_properties_and_f_values`、鉄筋の強度・密度、コンクリートのFc別物性、数字を含む未知名は `standard_material::tests` が検証します。空名の未解決は既存の `material_grade::tests::unsupported_steel_names_do_not_restore_stock_properties_or_f_values` が検証します。STBから材料参照へ結ぶ経路はI/Oの標準断面・配筋・強度試験で別に確認します。
+
 ## 属性報告の内部契約
 
 `ImportReport.attributes` は `AttrDisposition` の要素名・属性名ごとの出現件数と取込件数を持ちます。`dropped_attributes()` は取込件数0の属性を返し、属性の未取り込みは `warnings` ではなく属性集計とログへ出します。パーサの属性参照に連動して記録するため、無視リストは設けません。

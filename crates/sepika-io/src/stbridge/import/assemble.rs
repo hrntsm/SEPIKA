@@ -4,9 +4,8 @@ use super::super::StbError;
 use super::parser::SrcRebarData;
 use super::parser::{RawSlabSection, StbParser};
 use super::{
-    material_std, ImportReport, MemberSource, PendingMember, PendingMemberKind, PendingSec,
-    PendingSecKind, PendingSecondary, RawAxisGroup, RawLoadCase, RawNode, RawSlab, RawStory,
-    RawWall, SecMatRef, SectionKey,
+    ImportReport, MemberSource, PendingMember, PendingMemberKind, PendingSec, PendingSecKind,
+    PendingSecondary, RawAxisGroup, RawLoadCase, RawNode, RawSlab, RawStory, RawWall, SectionKey,
 };
 use sepika_core::ids::{
     ElemId, FloorPlateAssignmentRegionId, LoadCaseId, MaterialId, NodeId, SectionId, SlabId,
@@ -19,6 +18,7 @@ use sepika_core::model::{
 };
 use sepika_core::region_rebuild::rebuild_floor_regions;
 use sepika_core::section_shape::SectionShape;
+use sepika_core::standard_material::standard_material_properties;
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
 use std::collections::HashMap;
 
@@ -60,7 +60,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     build_axes(&mut model, raw_axis_groups, &node_index);
 
     let mut guessed_categories: Vec<String> = Vec::new();
-    build_materials(&mut model, &pending_secs, &mut guessed_categories)?;
+    build_materials(&mut model, &pending_secs, &mut guessed_categories);
 
     let mut notes: Vec<String> = Vec::new();
 
@@ -411,44 +411,31 @@ fn build_materials(
     model: &mut Model,
     pending_secs: &[PendingSec],
     guessed_categories: &mut Vec<String>,
-) -> Result<(), StbError> {
-    {
-        use std::collections::HashSet;
-        let mut existing: HashSet<String> =
-            model.materials.iter().map(|m| m.name.clone()).collect();
-        let mut grades: Vec<&str> = Vec::new();
-        for p in pending_secs {
-            if let Some(SecMatRef::Grade(name)) = &p.mat {
-                if !name.is_empty() && !grades.contains(&name.as_str()) {
-                    grades.push(name.as_str());
-                }
-            }
+) {
+    use std::collections::HashSet;
+    let mut seen: HashSet<String> = model.materials.iter().map(|m| m.name.clone()).collect();
+    for name in pending_secs.iter().filter_map(|p| p.mat.as_deref()) {
+        if name.is_empty() || !seen.insert(name.to_string()) {
+            continue;
         }
-        for name in grades {
-            if existing.contains(name) {
-                continue;
-            }
-            if let Some(std) = material_std::resolve_grade(name) {
-                let id = MaterialId(model.materials.len() as u32);
-                let category = resolve_material_category(name, std.fc, std.fy, guessed_categories);
-                model.materials.push(Material {
-                    strength_factor: None,
-                    concrete_class: Default::default(),
-                    id,
-                    name: name.to_string(),
-                    category,
-                    young: std.young,
-                    poisson: std.poisson,
-                    density: std.density,
-                    shear: None,
-                    fc: std.fc,
-                    fy: std.fy,
-                });
-                existing.insert(name.to_string());
-            }
+        if let Some(std) = standard_material_properties(name) {
+            let id = MaterialId(model.materials.len() as u32);
+            let category = resolve_material_category(name, std.fc, std.fy, guessed_categories);
+            model.materials.push(Material {
+                strength_factor: None,
+                concrete_class: Default::default(),
+                id,
+                name: name.to_string(),
+                category,
+                young: std.young,
+                poisson: std.poisson,
+                density: std.density,
+                shear: None,
+                fc: std.fc,
+                fy: std.fy,
+            });
         }
     }
-    Ok(())
 }
 
 /// 部材（柱・大梁・ブレース）を格納する。
@@ -525,8 +512,8 @@ fn build_secondaries(
             gravity_end_shares: None,
             kind: s.kind,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([
-                model.node(NodeId(ni)).map(|n| n.coord).unwrap_or([0.0; 3]),
-                model.node(NodeId(nj)).map(|n| n.coord).unwrap_or([0.0; 3]),
+                model.nodes[ni as usize].coord,
+                model.nodes[nj as usize].coord,
             ]),
             section,
             name: s.name,
@@ -1014,7 +1001,7 @@ pub(super) fn ensure_material_by_grade(model: &mut Model, grade: &str) -> Option
     if let Some(m) = model.materials.iter().find(|m| m.name == grade) {
         return Some(m.id);
     }
-    let std = material_std::resolve_grade(grade)?;
+    let std = standard_material_properties(grade)?;
     let id = MaterialId(model.materials.len() as u32);
     model.materials.push(Material {
         strength_factor: None,
@@ -1159,53 +1146,44 @@ fn assign_imported_walls(
             wall.strength_index,
             sepika_core::model::StrengthTarget::Wall(plate_id),
         );
+        let shape = if region.is_some() {
+            WallPlateShape::Enclosed
+        } else {
+            sepika_core::wall_region_rebuild::wall_attached_shape_from_boundary(
+                model,
+                &wall.boundary,
+            )
+            .ok_or_else(|| {
+                let nodes = wall
+                    .boundary
+                    .iter()
+                    .map(|n| n.0.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                StbError::WallWithoutRegion(format!(
+                    "節点 {nodes} が囲む壁版が、どの壁版割当領域とも一致しません"
+                ))
+            })?
+        };
+        model.wall_plates.push(WallPlate {
+            dl_support: None,
+            self_weight_shares: Vec::new(),
+            id: plate_id,
+            shape,
+            section: wall.section,
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: Vec::new(),
+            loads: vec![],
+            slit: Default::default(),
+        });
         if let Some(region_id) = region {
-            model.wall_plates.push(WallPlate {
-                dl_support: None,
-                self_weight_shares: Vec::new(),
-                id: plate_id,
-                shape: WallPlateShape::Enclosed,
-                section: wall.section,
-                opening_area: 0.0,
-                opening_weight: 0.0,
-                openings: Vec::new(),
-                loads: vec![],
-                slit: Default::default(),
-            });
             model
                 .wall_assignment_regions
                 .get_mut(region_id)
                 .expect("直前に確認した割当領域")
                 .assignment = sepika_core::model::PlateAssignment::Plate(plate_id);
-            continue;
         }
-        if let Some(shape) = sepika_core::wall_region_rebuild::wall_attached_shape_from_boundary(
-            model,
-            &wall.boundary,
-        ) {
-            model.wall_plates.push(WallPlate {
-                dl_support: None,
-                self_weight_shares: Vec::new(),
-                id: plate_id,
-                shape,
-                section: wall.section,
-                opening_area: 0.0,
-                opening_weight: 0.0,
-                openings: Vec::new(),
-                loads: vec![],
-                slit: Default::default(),
-            });
-            continue;
-        }
-        let nodes = wall
-            .boundary
-            .iter()
-            .map(|n| n.0.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
-        return Err(StbError::WallWithoutRegion(format!(
-            "節点 {nodes} が囲む壁版が、どの壁版割当領域とも一致しません"
-        )));
     }
     Ok(())
 }
@@ -1480,22 +1458,10 @@ fn build_sections(
                 )));
             }
         }
-        let section = match ps.kind {
-            PendingSecKind::Shape(shape) => {
-                let mut section = shape
-                    .input_section(new_id, ps.name)
-                    .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
-                section.frame_use = used_as.or(ps.declared_use);
-                section
-            }
+        let shape = match ps.kind {
+            PendingSecKind::Shape(shape) => shape,
             PendingSecKind::SteelRef(shape_name) => match resolve_steel(shape_name.as_deref())? {
-                Some(shape) => {
-                    let mut section = shape
-                        .input_section(new_id, ps.name)
-                        .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
-                    section.frame_use = used_as.or(ps.declared_use);
-                    section
-                }
+                Some(shape) => shape,
                 None => {
                     return Err(section_error(&format!(
                         "鋼断面 (id={file_id}, name=\"{}\") の形鋼参照「{}」を解決できません",
@@ -1525,9 +1491,7 @@ fn build_sections(
                     _ => None,
                 });
                 match cft {
-                    Some(shape) => shape
-                        .input_section(new_id, ps.name)
-                        .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?,
+                    Some(shape) => shape,
                     None => {
                         return Err(section_error(&format!(
                         "CFT 断面 (id={file_id}, name=\"{}\") の充填鋼管参照「{}」を解決できません",
@@ -1571,7 +1535,7 @@ fn build_sections(
                     ))
                 })?;
                 let steel = (sh, sw, sweb, sfl);
-                let shape = match rebar {
+                match rebar {
                     SrcRebarData::Beam(rebar) => SectionShape::SrcBeamRect {
                         b,
                         d,
@@ -1590,16 +1554,21 @@ fn build_sections(
                         steel_web_thick: steel.2,
                         steel_flange_thick: steel.3,
                     },
-                };
-                shape
-                    .input_section(new_id, ps.name)
-                    .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?
+                }
             }
         };
-        let mut section = section;
+        let mut section = shape
+            .input_section(new_id, ps.name)
+            .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
         section.frame_use = used_as.or(ps.declared_use);
         section.floor = floor;
-        section.material = ps.mat.as_ref().and_then(|r| resolve_sec_material(model, r));
+        section.material = ps.mat.as_deref().and_then(|name| {
+            model
+                .materials
+                .iter()
+                .find(|m| m.name == name)
+                .map(|m| m.id)
+        });
         section.rebar_material =
             ps.grades.main_rebar.as_deref().and_then(|g| {
                 find_or_create_bar_material(model, g, MaterialCategory::Rebar, notes)
@@ -1747,17 +1716,6 @@ fn ref_vector_from_rotate(p_i: [f64; 3], p_j: [f64; 3], rotate_deg: f64) -> [f64
     ]
 }
 
-/// 断面側の材料参照（数値 id またはグレード名）を `MaterialId` へ解決する。
-fn resolve_sec_material(model: &Model, r: &SecMatRef) -> Option<MaterialId> {
-    match r {
-        SecMatRef::Grade(name) => model
-            .materials
-            .iter()
-            .find(|m| m.name == *name)
-            .map(|m| m.id),
-    }
-}
-
 /// 鉄筋・内蔵鋼材・CFT鋼管の名前が一致する既存材料を再利用する。
 /// 未登録の既知グレードには標準物性を与え、未知グレードの強度・密度は補完しない。
 fn find_or_create_bar_material(
@@ -1773,7 +1731,7 @@ fn find_or_create_bar_material(
     if let Some(m) = model.materials.iter().find(|m| m.name == grade) {
         return Some(m.id);
     }
-    let standard = material_std::resolve_grade(grade);
+    let standard = standard_material_properties(grade);
     let fy = match category {
         MaterialCategory::Rebar => sepika_core::standard_material::rebar_grade_strength(grade),
         _ => standard.as_ref().and_then(|m| m.fy),

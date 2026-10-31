@@ -5,7 +5,7 @@
 //! `StbSecColumn_SRC`/`StbSecBeam_SRC`/`StbSecSlab_RC`/`StbSecSlabDeck`/`StbSecWall_RC`）＋
 //! 形鋼ライブラリ（`StbSecSteel`）を解釈する。形鋼名から内部の [`SectionShape`] を復元し、
 //! 断面性能を再算定する。材料は断面のグレード名（鋼 `strength_main`、RC/SRC/CFT の
-//! `strength_concrete`）から標準材料表（[`material_std`]）で物性へ解決する。
+//! `strength_concrete`）から標準材料表（[`sepika_core::standard_material`]）で物性へ解決する。
 //!
 //! 標準断面は柱用（`StbSecColumn_*`）と梁用（`StbSecBeam_*`）に型分けされ、柱・梁共有断面の
 //! 分割などで断面 id が文書順に整列しないことがある。取り込み後に断面 id を整列・再採番し、
@@ -21,7 +21,6 @@ use sepika_core::model::{EndCondition, FrameSectionUse, Model};
 use sepika_core::section_shape::SectionShape;
 
 mod assemble;
-mod material_std;
 mod parser;
 mod rebar;
 mod section_key;
@@ -30,13 +29,6 @@ mod strength;
 mod xml;
 
 use section_key::{MemberSource, SectionKey};
-
-/// 断面が持つ材料参照（ST-Bridge は材料を断面側に持つ）。
-/// コンクリート・鋼のグレード名。
-#[derive(Clone)]
-enum SecMatRef {
-    Grade(String),
-}
 
 /// 取り込み途中の断面（id 整列・形鋼名解決の前）。
 struct PendingSec {
@@ -48,7 +40,7 @@ struct PendingSec {
     floor: Option<String>,
     kind: PendingSecKind,
     /// 断面側に付いた材料参照（この断面の主材料になる）。
-    mat: Option<SecMatRef>,
+    mat: Option<String>,
     /// 配筋・内蔵鉄骨の材質（ST-Bridge はグレード名で持つ）。取り込み後に
     /// 材料テーブルへ解決して断面の材料欄へ結ぶ（`resolve_section_materials`）。
     grades: SecGrades,
