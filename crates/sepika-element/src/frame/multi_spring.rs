@@ -173,8 +173,7 @@ mod tests {
     /// MS 経由でも回帰テストとして固定する。
     #[test]
     fn test_ms_phi_positive_objectivity_and_tangent_consistency() {
-        let mut model = make_model(Some(295.0), None);
-        model.materials[0].shear = None;
+        let model = make_model(Some(295.0), None);
         let ctx = Ctx { model: &model };
         let build = || {
             MultiSpringElement::new(
@@ -185,11 +184,10 @@ mod tests {
             )
         };
 
-        assert!(build().inner.phi_y > 0.0 && build().inner.phi_z > 0.0);
-
         let theta = 1.0e-4;
         let l = 3000.0;
         let mut ms = build();
+        assert!(ms.inner.phi_y > 0.0 && ms.inner.phi_z > 0.0);
         let du = LocalVec {
             data: smallvec::smallvec![
                 0.0,
@@ -313,10 +311,7 @@ mod tests {
         elem.update_state(&du, true, &ctx).unwrap();
         let f_committed = elem.internal_force(&ctx);
 
-        let du2 = LocalVec {
-            data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        };
-        elem.update_state(&du2, false, &ctx).unwrap();
+        elem.update_state(&du, false, &ctx).unwrap();
         elem.revert_state();
         let zero = LocalVec {
             data: smallvec::smallvec![0.0; 12],
