@@ -22,7 +22,7 @@
 //! `proj` が `None` を返す節点を含む閉路は捨てる。
 
 use crate::ids::{ElemId, NodeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod floor;
 pub mod wall;
@@ -82,14 +82,14 @@ where
         list.dedup();
     }
 
-    let mut visited: HashMap<(NodeId, NodeId), bool> = HashMap::new();
+    let mut visited: HashSet<(NodeId, NodeId)> = HashSet::new();
     let mut faces = Vec::new();
     let mut unclosed = 0;
     let mut starts: Vec<(NodeId, NodeId)> = half.keys().copied().collect();
     starts.sort_by_key(|(a, b)| (a.0, b.0));
 
     for start in starts {
-        if visited.contains_key(&start) {
+        if visited.contains(&start) {
             continue;
         }
         let mut boundary = Vec::new();
@@ -97,7 +97,7 @@ where
         let mut cur = start;
         let mut closed = false;
         for _ in 0..=half.len() {
-            if visited.insert(cur, true).is_some() {
+            if !visited.insert(cur) {
                 break;
             }
             boundary.push(cur.0);

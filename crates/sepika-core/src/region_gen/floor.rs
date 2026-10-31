@@ -398,6 +398,15 @@ mod tests {
         assert!((boundaries[0].area(&model) - 4000.0 * 4000.0).abs() < 1.0);
         assert!((boundaries[0].level - 0.0).abs() < 1e-9);
         assert_eq!(boundaries[0].edges.len(), 4, "境界の梁が辺と同数");
+        let pts: Vec<[f64; 2]> = boundaries[0]
+            .boundary
+            .iter()
+            .map(|n| {
+                let c = model.nodes[n.index()].coord;
+                [c[0], c[1]]
+            })
+            .collect();
+        assert!(polygon::signed_area(&pts) > 0.0, "反時計回りで返る");
     }
 
     #[test]
@@ -409,22 +418,6 @@ mod tests {
             assert!((p.area(&model) - 3000.0 * 3000.0).abs() < 1.0);
             assert!((p.level - 4000.0).abs() < 1e-9);
         }
-    }
-
-    /// 面の頂点列は反時計回り（符号付き面積が正）で返る。
-    #[test]
-    fn test_boundary_is_counter_clockwise() {
-        let model = grid(1, 1, 4000.0, 0.0);
-        let p = &generate_region_boundaries(&model)[0];
-        let pts: Vec<[f64; 2]> = p
-            .boundary
-            .iter()
-            .map(|n| {
-                let c = model.nodes[n.index()].coord;
-                [c[0], c[1]]
-            })
-            .collect();
-        assert!(polygon::signed_area(&pts) > 0.0, "反時計回りで返る");
     }
 
     /// 片持ち梁（行き止まりの辺）は面を作らず、囲まれた面の数も変えない。

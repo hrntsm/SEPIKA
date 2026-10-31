@@ -190,15 +190,13 @@ fn merge_attached_slabs(model: &mut Model) {
     let tol = MEMBER_AXIS_TOL_MM;
     const SPAN_EPS: f64 = 1e-9;
     let mut removed = std::collections::HashSet::new();
-    let mut merged = 0usize;
-    for group in &groups {
+    for mut group in groups {
         if group.members.len() < 2 {
             continue;
         }
-        let mut members = group.members.clone();
-        members.sort_by(|a, b| a.1[0].total_cmp(&b.1[0]));
-        let (mut keep, mut span, mut extent) = members[0];
-        for &(index, cur_span, cur_extent) in &members[1..] {
+        group.members.sort_by(|a, b| a.1[0].total_cmp(&b.1[0]));
+        let (mut keep, mut span, mut extent) = group.members[0];
+        for &(index, cur_span, cur_extent) in &group.members[1..] {
             let contiguous = (cur_span[0] - span[1]).abs() <= SPAN_EPS;
             let extent_match = (cur_extent[0] - extent[1]).abs() <= tol;
             let span_len = span[1] - span[0];
@@ -219,7 +217,6 @@ fn merge_attached_slabs(model: &mut Model) {
                 span[1] = cur_span[1];
                 extent[1] = cur_extent[1];
                 removed.insert(model.slabs[index].id);
-                merged += 1;
             } else {
                 set_attached_span(model, keep, group.nodes, span, extent);
                 keep = index;
@@ -229,7 +226,7 @@ fn merge_attached_slabs(model: &mut Model) {
         }
         set_attached_span(model, keep, group.nodes, span, extent);
     }
-    if merged == 0 {
+    if removed.is_empty() {
         return;
     }
     model.retain_slabs(|slab| !removed.contains(&slab.id));
@@ -724,15 +721,7 @@ fn regions_containing(model: &Model, regions: &[FloorRegion], xy: [f64; 2], z: f
 }
 
 fn assign_beams(model: &mut Model) -> usize {
-    let beams: Vec<_> = model
-        .floor_regions
-        .iter_mut()
-        .flat_map(|r| r.secondary_beams.drain(..))
-        .chain(model.unassigned_beams.drain(..))
-        .collect();
-    for r in &mut model.floor_regions {
-        r.secondary_beams.clear();
-    }
+    let beams = std::mem::take(&mut model.unassigned_beams);
     let mut unassigned = 0;
     for sm in beams {
         let counted = !sm.is_cantilever() && !model.secondary_member_materialized(&sm);
@@ -932,12 +921,6 @@ mod tests {
         );
         assert_eq!(report.regions, 1);
         assert_eq!(report.slabs_assigned, 2);
-    }
-
-    #[test]
-    fn test_rebuild_is_idempotent_on_two_piece_square() {
-        let mut model = two_piece_square();
-        rebuild_floor_regions(&mut model);
         let first_regions = model.floor_regions.clone();
         let first_slabs = model.slabs.clone();
         let first_nodes = model.nodes.len();
@@ -983,16 +966,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cantilever_rebuild_node_ids_are_compact() {
-        let mut model = cantilever_rect();
-        rebuild_floor_regions(&mut model);
-        assert!(model.validate().is_ok(), "{:?}", model.validate().err());
-        for (i, n) in model.nodes.iter().enumerate() {
-            assert_eq!(n.id, NodeId(i as u32), "nodes[{i}].id");
-        }
-    }
-
-    #[test]
     fn test_cantilever_rebuild_keeps_attached_slab() {
         let mut model = cantilever_rect();
         let report = rebuild_floor_regions(&mut model);
@@ -1013,6 +986,10 @@ mod tests {
             other => panic!("Line の Attached ではない: {other:?}"),
         }
         assert!(report.unassigned_slabs == 0);
+        assert!(model.validate().is_ok(), "{:?}", model.validate().err());
+        for (i, n) in model.nodes.iter().enumerate() {
+            assert_eq!(n.id, NodeId(i as u32), "nodes[{i}].id");
+        }
     }
 
     /// 取り付く床板は、直交して先端まで届く小梁の位置で支持部材の間の床板ごとに
@@ -1370,54 +1347,33 @@ mod tests {
     }
 
     #[test]
-    fn test_floating_slab_stays_enclosed_and_unassigned() {
-        let mut model = Model::default();
-        for (i, (x, y)) in [(0.0, 0.0), (4000.0, 0.0), (4000.0, 4000.0), (0.0, 4000.0)]
-            .into_iter()
-            .enumerate()
-        {
-            model.nodes.push(node(i as u32, x, y, 0.0));
+    fn test_unreferenced_enclosed_slab_stays_unassigned_with_zero_or_two_girders() {
+        for two_girders in [false, true] {
+            let mut model = Model::default();
+            for (i, (x, y)) in [(0.0, 0.0), (4000.0, 0.0), (4000.0, 4000.0), (0.0, 4000.0)]
+                .into_iter()
+                .enumerate()
+            {
+                model.nodes.push(node(i as u32, x, y, 0.0));
+            }
+            if two_girders {
+                model.elements.push(element_beam(0, 0, 1));
+                model.elements.push(element_beam(1, 0, 3));
+            }
+            let sid = push_slab_section(&mut model, 150.0);
+            model.slabs.push(Slab {
+                id: SlabId(0),
+                shape: SlabShape::Enclosed,
+                plate: plate(Some(sid), Vec::new()),
+                reference_story: None,
+                vertical_eccentricity_mm: None,
+                tip_loads: Vec::new(),
+            });
+            let report = rebuild_floor_regions(&mut model);
+            assert_eq!(model.floor_regions.len(), 0, "two_girders={two_girders}");
+            assert_eq!(model.slabs.len(), 1, "床板は削除しない");
+            assert_eq!(model.slabs[0].shape, SlabShape::Enclosed);
+            assert_eq!(report.unassigned_slabs, 1);
         }
-        let sid = push_slab_section(&mut model, 150.0);
-        model.slabs.push(Slab {
-            id: SlabId(0),
-            shape: SlabShape::Enclosed,
-            plate: plate(Some(sid), Vec::new()),
-            reference_story: None,
-            vertical_eccentricity_mm: None,
-            tip_loads: Vec::new(),
-        });
-        let report = rebuild_floor_regions(&mut model);
-        assert_eq!(model.floor_regions.len(), 0, "囲む大梁がないため床領域は 0");
-        assert_eq!(model.slabs.len(), 1, "床板は削除しない");
-        assert!(model.slabs[0].shape == SlabShape::Enclosed);
-        assert_eq!(report.unassigned_slabs, 1);
-    }
-
-    #[test]
-    fn test_slab_on_two_girder_edges_stays_enclosed_and_unassigned() {
-        let mut model = Model::default();
-        model.nodes.push(node(0, 0.0, 0.0, 0.0));
-        model.nodes.push(node(1, 4000.0, 0.0, 0.0));
-        model.nodes.push(node(2, 4000.0, 4000.0, 0.0));
-        model.nodes.push(node(3, 0.0, 4000.0, 0.0));
-        model.elements.push(element_beam(0, 0, 1));
-        model.elements.push(element_beam(1, 0, 3));
-        let sid = push_slab_section(&mut model, 150.0);
-        model.slabs.push(Slab {
-            id: SlabId(0),
-            shape: SlabShape::Enclosed,
-            plate: plate(Some(sid), Vec::new()),
-            reference_story: None,
-            vertical_eccentricity_mm: None,
-            tip_loads: Vec::new(),
-        });
-        let report = rebuild_floor_regions(&mut model);
-        assert_eq!(model.slabs.len(), 1);
-        assert!(
-            matches!(model.slabs[0].shape, SlabShape::Enclosed),
-            "出隅相当は Enclosed のまま"
-        );
-        assert_eq!(report.unassigned_slabs, 1);
     }
 }
