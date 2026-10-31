@@ -291,7 +291,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 数値照合 | 理論解（梁・板・SDOF/MDOF） | 専用ベンチ集 |
 | ベンチマーク照合 | 既往実験・商用ソフト | 検証レポート |
 | 性能 | 速度回帰 | `criterion` + CI 閾値 |
-| 決定性 | 同一入力ビット一致 | 専用テスト |
+| 決定性 | 同一入力ビット一致 | 解析種別ごとの専用試験・実証範囲は[決定性テスト](#決定性テスト)を参照 |
 
 ## 塑性確定点のバイリニア接線（#808）
 
@@ -640,7 +640,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 7g | 仕口パネルの直接revert | sepika-element | springs/panel.rs | [Issue751の復元・再試行契約](仕口パネルrevert復元_Issue751_2026-10.md#直接verification) | 要素 | 🔶（直接Verification成功、実験Validation・最終ゲート未確認） |
 | 7f | 仕口パネルの軸力更新と非線形履歴 | sepika-element / sepika-material | springs/panel.rs / uniaxial/bilinear.rs | [Issue724の状態対応と独立照合](仕口パネル軸力と履歴_Issue724_2026-10.md) | 要素 | 🔶（独立Verification4成功。直接revertは#7gで修正・検証、#752・原典§6・Validation未確認、高nは#7h） |
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
-| 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
+| 9 | 固有値解析 | sepika-solver | [dynamic/eigen/tests.rs](../../crates/sepika-solver/src/dynamic/eigen/tests.rs) | `test_1dof_period` | P2 | ✅ |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
 | 10b | 参照鋼の設計自重密度防護 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | material.rs、self_weight_calc.rs、beam_design.rs、wall_plate_load.rs、wall_attached.rs、prepare.rs | [Issue501の独立期待値・実入口](参照鋼の高密度防護_Issue501_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（同コード公開全構成成功、最終headゲート後続、実験未） |
 | 10d | 床板の同期物理質量 | sepika-core / sepika-load / sepika-job / sepika-app | slab.rs、slab_load.rs、story_gen/generate.rs | [Issue583の独立期待値・実入口](床板の同期物理質量_Issue583_2026-10.md#対象と独立期待値) | 横断 | 🔶（全CI・freshレビュー後続、実験未） |
@@ -763,17 +763,21 @@ Qcの原典条件・開口・要素→用途の静的照合と有限感度は[Is
 
 ## 決定性テスト
 
-全解析種別で「CPU・単一スレッドでビット一致」を検証（R28）。並列／Parquet書込は値一致で検証（ビット一致保証外）。
+全解析種別の「CPU・単一スレッドで同一入力のビット一致」という要求（R28）は維持する。以下は現在の検証範囲であり、全解析種別の実証済みを意味しない。並列／Parquet書込の値一致は、このビット一致の実証とは区別する。
 
 | 解析種別 | 状態 | ファイル |
 |----------|------|----------|
 | 線形静的 | ✅ | linear.rs |
 | 疎行列組立 | ✅ | sparse.rs |
 | Cholesky 分解 | ✅ | cholesky.rs |
-| 固有値 | ✅ | eigen.rs |
+| 固有値 | 🔶（独立数値照合のみ、同一入力ビット一致は未実証） | [eigen/tests.rs](../../crates/sepika-solver/src/dynamic/eigen/tests.rs) |
 | 時刻歴 | 🔶 | timehistory.rs（時刻歴の実装後に本格化） |
 | プッシュオーバー | 🔶 | pushover.rs（増分解析の実装後に本格化） |
 | 並列バッチ（値一致） | ✅ | sepika-solver/tests/parallel_batch.rs（並列時のケース並列バッチが個別解と一致） |
+
+固有値の現役試験は `test_1dof_period` の閉形式固有値・周期、`test_2dof_shear_period_and_mass` の多自由度固有値・有効質量、`test_2dof_shear_unequal_mass_matches_analytic` の不等質量の解析根などを照合する。これらは数値精度のVerificationであり、同一入力を再実行したビット一致を確認する試験ではない。
+
+単一自由度・固定初期値・同一入力を2回解く専用試験は、現行経路の独立数値試験に加わる現実的な不具合の検出対象がないため置かない（#1059）。この試験整理を決定性要求や製品の計算処理の変更と扱わず、固有値のビット一致が実証済みとも主張しない。未実証範囲は[未検証一覧 §9](未検証一覧.md#9-性能決定性)にも記録する。
 
 ## 性能ベンチマーク
 
