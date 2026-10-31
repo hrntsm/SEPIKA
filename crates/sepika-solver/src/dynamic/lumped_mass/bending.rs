@@ -12,8 +12,8 @@ fn invalid(message: impl Into<String>) -> SolveError {
     SolveError::InvalidInput(message.into())
 }
 
-/// 層せん断力 [N] から基部固定の曲げ層間変位 [mm] を下層順に返す。
-/// 階高 [mm]・EI [N·mm²] は正の有限値、配列長は同一であること。
+/// 層せん断力 `[N]` から基部固定の曲げ層間変位 `[mm]` を下層順に返す。
+/// 階高 `[mm]`・EI [N·mm²] は正の有限値、配列長は同一であること。
 pub fn bending_drifts(heights: &[f64], ei: &[f64], shear: &[f64]) -> Result<Vec<f64>, SolveError> {
     if heights.len() != ei.len() || ei.len() != shear.len() {
         return Err(invalid("曲げ変形の配列長が一致しません"));
@@ -49,7 +49,7 @@ pub fn bending_drifts(heights: &[f64], ei: &[f64], shear: &[f64]) -> Result<Vec<
     Ok(drift)
 }
 
-/// [ub, θb, ut, θt] の弾性要素剛性。h [mm]、EI [N·mm²]、Ks [N/mm] は正の有限値。
+/// [ub, θb, ut, θt] の弾性要素剛性。h `[mm]`、EI [N·mm²]、Ks [N/mm] は正の有限値。
 pub fn bending_shear_element(h: f64, ei: f64, ks: f64) -> Result<[[f64; 4]; 4], SolveError> {
     if [h, ei, ks].iter().any(|v| !v.is_finite() || *v <= 0.0) {
         return Err(invalid("曲げせん断要素の h・EI・Ks が不正です"));
@@ -412,7 +412,7 @@ pub(crate) fn eigen(lm: &LumpedMassModel, n_modes: usize) -> Result<LumpedMassMo
     Ok(result)
 }
 
-/// 曲げせん断型の時刻歴。地動加速度 [mm/s²]、dt [s]。不正入力・未収束はエラー。
+/// 曲げせん断型の時刻歴。地動加速度 [mm/s²]、dt `[s]`。不正入力・未収束はエラー。
 pub fn bending_shear_time_history(
     lm: &LumpedMassModel,
     accel: &[f64],

@@ -115,7 +115,7 @@ pub struct StickResponse {
     /// 塑性率の方向内訳。
     #[serde(default)]
     pub ductility_dir: StickDirPeaks,
-    /// 各時刻・各階の曲げ回転 [θx, θy] [rad]。せん断型では空。
+    /// 各時刻・各階の曲げ回転 [θx, θy] `[rad]`。せん断型では空。
     pub bending_rotations: Vec<Vec<[f64; 2]>>,
 }
 

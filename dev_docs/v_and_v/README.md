@@ -798,6 +798,10 @@ Qcの原典条件・開口・要素→用途の静的照合と有限感度は[Is
 
 本時刻歴整理のローカル検証873件成功（solver 438・job 191・load 244、既存ignored 1件）は、基点 `70fc8a0b` の本変更を対象とした実行結果である。main `e9ddd75c` の取り込み後はruntime差分の同一性と文書参照を確認し、全試験を再実行していない。 その後、同mainを基点とする塑性試験統合後のTH焦点34件は成功した。これは旧873件の再実行結果ではない。 さらに同基点の記録試験統合後はTH焦点32件が成功した。公開ピーク保証の修復後も、同基点と未commit差分を対象にTH焦点32件とsolver全ターゲットClippyが成功した。公開層応答と非線形結果フラグの試験統合後は、同基点と未commit差分に対するTH焦点30件とsolver全ターゲットClippyが成功した。
 
+質点系の試験整理（#1059）では、`test_fit_trilinear_equal_area_and_endpoints` の期待面積を独立な732.5、`test_fit_trilinear_k2_k3_helpers` の接線を80/30/8、`test_effective_tridiagonal_damping_uses_initial_stiffness` の有効剛性を29として照合する。動的質量未算定・0・負・NaNの拒否は `test_build_lumped_mass_model_corrects_long_term_origin`、二線形縮約の初期剛性・終端・同一折点と履歴は `bilinear_reduction_keeps_its_coincident_corner_and_existing_hysteresis`、方向別塑性率は `accumulate_splits_xy_diagonal_and_resultant` に統合した。空間固有値の3周期と長周期順は `spatial_eigen_uses_skeleton_k1_not_stale_field`、負側同一変形の状態保持は `zero_increment_planar_story_spring_preserves_negative_peak_and_next_response` と平面・空間両方向の実求解試験に保持する。これらは有限fixtureのVerificationであり、未検証のValidation範囲を拡張しない。
+
+基点 `0853bcc3` に本変更を適用したローカル検証はsolver 433・job 191・load 244の計868件成功（既存ignored 1件）。その後の周期個数assert追加とCopy型fixtureの不要clone除去は、質点系焦点33件と3クレート全ターゲットClippyで再確認した。strict solver Rustdocも警告をエラーとして成功した。報告用評価を既存probeへ置き換えた後は、基点 `7ea16fb4` と本差分で質点系焦点33件、solver 422・job 191・load 244の計857件成功（既存ignored 1件）、3クレート全ターゲットClippy成功を確認した。旧基点の868件とは別の実行結果である。
+
 ## 性能ベンチマーク
 
 `criterion` による性能ベンチマーク（線形静的・固有値・プッシュオーバー1ステップ・時刻歴1ステップ）の計測は CI 導入時に整備予定。
