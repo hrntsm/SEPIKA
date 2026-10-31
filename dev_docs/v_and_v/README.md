@@ -775,13 +775,19 @@ Qcの原典条件・開口・要素→用途の静的照合と有限感度は[Is
 | 疎行列組立 | ✅ | sparse.rs |
 | Cholesky 分解 | ✅ | cholesky.rs |
 | 固有値 | 🔶（独立数値照合のみ、同一入力ビット一致は未実証） | [eigen/tests.rs](../../crates/sepika-solver/src/dynamic/eigen/tests.rs) |
-| 時刻歴 | 🔶 | timehistory.rs（時刻歴の実装後に本格化） |
+| 時刻歴 | 🔶（独立数値・全履歴・再開状態は確認、即時同一入力反復のビット一致は未実証） | [timehistory/tests.rs](../../crates/sepika-solver/src/dynamic/timehistory/tests.rs) / [tests/timeline.rs](../../crates/sepika-solver/src/dynamic/timehistory/tests/timeline.rs) / [tests/rollback.rs](../../crates/sepika-solver/src/dynamic/timehistory/tests/rollback.rs) |
 | プッシュオーバー | 🔶 | pushover.rs（増分解析の実装後に本格化） |
 | 並列バッチ（値一致） | ✅ | sepika-solver/tests/parallel_batch.rs（並列時のケース並列バッチが個別解と一致） |
 
 固有値の現役試験は `test_1dof_period` の閉形式固有値・周期、`test_2dof_shear_period_and_mass` の多自由度固有値・有効質量、`test_2dof_shear_unequal_mass_matches_analytic` の不等質量の解析根などを照合する。これらは数値精度のVerificationであり、同一入力を再実行したビット一致を確認する試験ではない。
 
 単一自由度・固定初期値・同一入力を2回解く専用試験は、現行経路の独立数値試験に加わる現実的な不具合の検出対象がないため置かない（#1059）。この試験整理を決定性要求や製品の計算処理の変更と扱わず、固有値のビット一致が実証済みとも主張しない。未実証範囲は[未検証一覧 §9](未検証一覧.md#9-性能決定性)にも記録する。
+
+時刻歴では `test_sdof_free_vibration_matches_analytical` が独立な減衰自由振動解、`test_nonlinear_time_history_sdof_elastic` と `test_nonlinear_time_history_cumulative_vs_noncumulative` が元の公差による公開 `peak_disp` 比較と全時刻の履歴比較をともに検査する。ピーク集計と履歴は別の公開結果として保証を保持する。`test_checkpoint_restart_bit_exact` は保存・再開後の最終u/v/aのビット一致、`checkpoint_preserves_committed_state_and_absolute_recording_grid` は再開状態と絶対間引き格子、`failed_step_restores_loaded_plastic_snapshot_and_retry_matches_control` は荷重込みtrial/確定状態の復元と次の再試行を確認する。`test_linear_recording_frames_and_stories` は自動1・明示5/7の記録係数・フレーム数・開始末端、全フレームの端部2点・全断面包絡、全分解能から求めた4系列ピークとの比較を保持する。`test_story_shear_sum_matches_base_shear_with_consistent_mass` は2階の階変位と対応節点Uxを全記録で厳密比較し、回転を混ぜない代表値と層せん断力を検査する。非線形結果の長期荷重適用フラグは、支持ばね試験のfalse設定と間引き試験の長期荷重なし・既定true設定で検査する。これらの異なる入力・状態・実行経路の保証は保持する。
+
+単一Fiber・1自由度・ゼロ加振を新規の求解状態で直ちに2回解く専用反復3件は、現在のfixtureに乱数・順序不定の数値集約・求解間の共有trial/cacheがなく、追加の現実的な不具合を検出しないため置かない（#1059）。既存の並列要素処理は要素順に集約され、このfixtureは単一要素である。全履歴の数値一致、保存・再開前後の状態一致、rollback後の再試行一致を、即時同一入力反復のビット一致が実証済みという意味には拡張しない。決定性要求と製品の求解処理は変更しない。
+
+本時刻歴整理のローカル検証873件成功（solver 438・job 191・load 244、既存ignored 1件）は、基点 `70fc8a0b` の本変更を対象とした実行結果である。main `e9ddd75c` の取り込み後はruntime差分の同一性と文書参照を確認し、全試験を再実行していない。 その後、同mainを基点とする塑性試験統合後のTH焦点34件は成功した。これは旧873件の再実行結果ではない。 さらに同基点の記録試験統合後はTH焦点32件が成功した。公開ピーク保証の修復後も、同基点と未commit差分を対象にTH焦点32件とsolver全ターゲットClippyが成功した。公開層応答と非線形結果フラグの試験統合後は、同基点と未commit差分に対するTH焦点30件とsolver全ターゲットClippyが成功した。
 
 ## 性能ベンチマーク
 
