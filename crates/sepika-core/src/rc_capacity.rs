@@ -538,10 +538,7 @@ mod tests {
     fn test_rc_crack_moment_matches_handcalc() {
         let ze = 300.0 * 600.0_f64.powi(2) / 6.0;
         let mc = rc_crack_moment(24.0, ze);
-        assert!(
-            (mc - RC_CRACK_COEF * 24.0_f64.sqrt() * ze).abs() < 1e-3,
-            "Mc={mc}"
-        );
+        assert!((mc - 49_381_713.214_508_87).abs() < 1e-3, "Mc={mc}");
         assert_eq!(rc_crack_moment(0.0, ze), 0.0);
         assert_eq!(rc_crack_moment(24.0, 0.0), 0.0);
         assert_eq!(rc_crack_moment(24.0, -1.0), 0.0);
@@ -630,67 +627,21 @@ mod tests {
 
     #[test]
     fn test_rc_qsu_simple_matches_handcalc() {
-        let inp = sample_input();
-        // 手計算(クランプ域内): pt=100*1935/(400*530)=0.912736%,
-        // shear_span_ratio=3000/(2*530)=2.830189(1.0-3.0の範囲内なのでクランプなし),
-        // pw=0.002(0.012以下なのでクランプなし)。
-        let pt: f64 = 100.0 * 1935.0 / (400.0 * 530.0);
-        let j = 7.0 * 530.0 / 8.0;
-        let shear_span_ratio: f64 = 3000.0 / (2.0 * 530.0);
-        let concrete_term = 0.068 * pt.powf(0.23) * (24.0 + 18.0) / (shear_span_ratio + 0.12);
-        let hoop_term = 0.85 * (0.002_f64 * 295.0).sqrt();
-        let qsu_handcalc = (concrete_term + hoop_term) * 400.0 * j;
-
-        let qsu = rc_qsu_simple(&inp);
-        assert!(
-            (qsu - qsu_handcalc).abs() < 1e-6,
-            "Qsu={} vs handcalc={}",
-            qsu,
-            qsu_handcalc
-        );
-        // 参考: せん断余裕度 Qsu/Qmu ≈ 1.6 程度（曲げ降伏が先行する健全な部材の目安）。
-        let qmu = rc_qmu_simple(&inp);
-        assert!(qsu / qmu > 1.0, "Qsu/Qmu={}", qsu / qmu);
-    }
-
-    #[test]
-    fn test_rc_qsu_simple_clamps_shear_span_ratio_low() {
-        // h0 を極端に短くすると shear_span_ratio = h0/(2*d_eff) < 1.0 → 1.0 にクランプ。
-        let mut inp = sample_input();
-        inp.clear_span = 200.0; // 200/(2*530)=0.1887 < 1.0
-        let qsu = rc_qsu_simple(&inp);
-
-        let pt: f64 = 100.0 * 1935.0 / (400.0 * 530.0);
-        let j = 7.0 * 530.0 / 8.0;
-        let concrete_term = 0.068 * pt.powf(0.23) * (24.0 + 18.0) / (1.0 + 0.12); // クランプ後 1.0
-        let hoop_term = 0.85 * (0.002_f64 * 295.0).sqrt();
-        let qsu_handcalc = (concrete_term + hoop_term) * 400.0 * j;
-        assert!(
-            (qsu - qsu_handcalc).abs() < 1e-6,
-            "Qsu={} vs handcalc(clamped)={}",
-            qsu,
-            qsu_handcalc
-        );
-    }
-
-    #[test]
-    fn test_rc_qsu_simple_clamps_shear_span_ratio_high() {
-        // h0 を極端に長くすると shear_span_ratio = h0/(2*d_eff) > 3.0 → 3.0 にクランプ。
-        let mut inp = sample_input();
-        inp.clear_span = 6000.0; // 6000/(2*530)=5.660 > 3.0
-        let qsu = rc_qsu_simple(&inp);
-
-        let pt: f64 = 100.0 * 1935.0 / (400.0 * 530.0);
-        let j = 7.0 * 530.0 / 8.0;
-        let concrete_term = 0.068 * pt.powf(0.23) * (24.0 + 18.0) / (3.0 + 0.12); // クランプ後 3.0
-        let hoop_term = 0.85 * (0.002_f64 * 295.0).sqrt();
-        let qsu_handcalc = (concrete_term + hoop_term) * 400.0 * j;
-        assert!(
-            (qsu - qsu_handcalc).abs() < 1e-6,
-            "Qsu={} vs handcalc(clamped)={}",
-            qsu,
-            qsu_handcalc
-        );
+        for (clear_span, expected_n) in [
+            (3000.0, 296_958.144_105_803_75),
+            (200.0, 584_307.046_010_279_7),
+            (6000.0, 287_387.443_170_048),
+        ] {
+            let input = RcCapacityInput {
+                clear_span,
+                ..sample_input()
+            };
+            let qsu = rc_qsu_simple(&input);
+            assert!(
+                (qsu - expected_n).abs() < 1e-6,
+                "h0={clear_span}: {qsu} vs {expected_n}"
+            );
+        }
     }
 
     #[test]

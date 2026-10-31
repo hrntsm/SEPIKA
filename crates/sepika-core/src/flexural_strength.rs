@@ -220,14 +220,7 @@ mod tests {
                 rebar: 1.0,
             },
         );
-        let sec = &model.sections[0];
-        let zp = sec
-            .shape
-            .as_ref()
-            .unwrap()
-            .plastic_modulus_strong()
-            .unwrap();
-        assert!((my - 235.0 * 1.1 * zp).abs() < 1e-3 * my.max(1.0));
+        assert!((my - 396_410_784.0).abs() < 1e-3 * my.max(1.0));
     }
 
     #[test]
