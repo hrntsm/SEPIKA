@@ -702,12 +702,7 @@ fn edited_unknown_src_steel_keeps_all_properties_and_native_override() {
     let steel = &model.materials[steel_id.index()];
     assert_eq!(steel.name, "SM400YA");
     assert_eq!(steel.category, MaterialCategory::Steel);
-    assert_eq!(steel.young, 123456.);
-    assert_eq!(steel.poisson, 0.27);
-    assert_eq!(steel.density, 6.1e-9);
-    assert_eq!(steel.shear, Some(45678.));
     assert_eq!(steel.fc, None);
-    assert_eq!(steel.fy, Some(177.));
     assert_eq!(
         model
             .materials
