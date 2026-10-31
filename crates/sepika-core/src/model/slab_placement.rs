@@ -118,13 +118,16 @@ impl Model {
 
     /// 全床板の実配置を検査する。版なし・未設定領域は床板実体を持たない。
     pub fn validate_slab_placements(&self) -> Result<(), String> {
-        for region in &self.floor_assignment_regions.regions {
-            if let PlateAssignment::Plate(id) = region.assignment {
+        let assigned = self
+            .floor_assignment_regions
+            .regions
+            .iter()
+            .filter_map(|region| region.assignment.plate());
+        let mut validated = std::collections::HashSet::new();
+        for id in assigned.chain(self.slabs.iter().map(|slab| slab.id)) {
+            if validated.insert(id) {
                 self.resolved_slab_placement(id)?;
             }
-        }
-        for slab in &self.slabs {
-            self.resolved_slab_placement(slab.id)?;
         }
         Ok(())
     }

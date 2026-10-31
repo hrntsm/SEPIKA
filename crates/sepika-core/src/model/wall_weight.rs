@@ -406,9 +406,6 @@ impl Model {
         if plate.opening_weight > 0.0 {
             reasons.push("開口部重量の位置・分布が未設定");
         }
-        if gross <= 0.0 {
-            return Err("壁実面積がゼロです".into());
-        }
         Ok(WallWeight {
             plate: plate.id,
             totals,
@@ -433,9 +430,18 @@ impl Model {
     }
 }
 
+struct WallBand {
+    weight: WallWeightTotals,
+    region: Vec<Vec<Vec<[f64; 2]>>>,
+}
+
 impl WallWeight {
     /// 水平帯`[lower,upper]` `[mm]`との交差重量 `[N]`。位置不足はID付きエラー。
     pub fn band(&self, lower: f64, upper: f64) -> Result<WallWeightTotals, String> {
+        Ok(self.band_region(lower, upper)?.weight)
+    }
+
+    fn band_region(&self, lower: f64, upper: f64) -> Result<WallBand, String> {
         if let Some(reason) = &self.partition_issue {
             return Err(format!("壁版 {}: 階配分未算定（{reason}）", self.plate.0));
         }
@@ -457,11 +463,10 @@ impl WallWeight {
             [bounds[1] + 1.0, upper],
             [bounds[0] - 1.0, upper],
         ];
-        let a = shapes_area(
-            &self
-                .region
-                .overlay(&clip, OverlayRule::Intersect, FillRule::NonZero),
-        );
+        let region = self
+            .region
+            .overlay(&clip, OverlayRule::Intersect, FillRule::NonZero);
+        let a = shapes_area(&region);
         for v in [
             a,
             self.intensity.design_n * a,
@@ -470,10 +475,13 @@ impl WallWeight {
         ] {
             scalar(v, false, "階帯交差重量")?;
         }
-        Ok(WallWeightTotals {
-            design_n: self.intensity.design_n * a,
-            physical_n: self.intensity.physical_n * a,
-            matrix_n: self.intensity.matrix_n * a,
+        Ok(WallBand {
+            weight: WallWeightTotals {
+                design_n: self.intensity.design_n * a,
+                physical_n: self.intensity.physical_n * a,
+                matrix_n: self.intensity.matrix_n * a,
+            },
+            region,
         })
     }
 }
@@ -493,25 +501,10 @@ pub struct WallStoryWeight {
 impl WallWeight {
     /// 有限階帯との交差総量・面積重心・物理質量の回転慣性を返す。
     pub fn story_band(&self, lower: f64, upper: f64) -> Result<WallStoryWeight, String> {
-        let band = self.band(lower, upper)?;
-        let bounds = self
-            .region
-            .iter()
-            .flatten()
-            .flatten()
-            .map(|p| p[0])
-            .fold([f64::INFINITY, f64::NEG_INFINITY], |r, x| {
-                [r[0].min(x), r[1].max(x)]
-            });
-        let clip = vec![
-            [bounds[0] - 1.0, lower],
-            [bounds[1] + 1.0, lower],
-            [bounds[1] + 1.0, upper],
-            [bounds[0] - 1.0, upper],
-        ];
-        let region = self
-            .region
-            .overlay(&clip, OverlayRule::Intersect, FillRule::NonZero);
+        let WallBand {
+            weight: band,
+            region,
+        } = self.band_region(lower, upper)?;
         let mut m = [0.0; 3];
         for shape in &region {
             for (j, p) in shape.iter().enumerate() {

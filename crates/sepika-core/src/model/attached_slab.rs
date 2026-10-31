@@ -21,17 +21,12 @@ impl Model {
         self.validate_attached_slab_geometry(slab)?;
         let fail = |reason: &str| CoreError::InvalidInput(format!("Slab {}: {reason}", slab.id.0));
         let SlabShape::Attached {
-            anchor: RegionAnchor::Line { span, .. },
+            anchor: RegionAnchor::Line { .. },
             ..
         } = slab.shape
         else {
             return Err(fail("線取付き床板ではありません"));
         };
-        if !span_is_valid(span) {
-            return Err(fail(
-                "取付き線の区間 span が不正（0.0 <= t_i < t_j <= 1.0 であること）",
-            ));
-        }
         let boundary = slab
             .boundary_coords(self)
             .ok_or_else(|| fail("取付き線を生成できません"))?;
@@ -191,7 +186,6 @@ impl Model {
 
     /// 取り付く床板の有限座標・正面積・支持先を検査する。囲まれた床板は対象外。
     pub fn validate_attached_slab(&self, slab: &Slab) -> Result<(), CoreError> {
-        self.validate_attached_slab_geometry(slab)?;
         let SlabShape::Attached { anchor, .. } = slab.shape else {
             return Ok(());
         };
@@ -203,6 +197,7 @@ impl Model {
         {
             self.attached_slab_supports(slab)?;
         } else {
+            self.validate_attached_slab_geometry(slab)?;
             let node_ids: Vec<_> = match anchor {
                 RegionAnchor::Point(node) => vec![node],
                 RegionAnchor::Line { nodes, .. } => nodes.to_vec(),

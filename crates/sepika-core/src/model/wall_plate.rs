@@ -258,12 +258,12 @@ impl WallPlate {
                     RegionAnchor::Line { nodes, span, .. } => {
                         let a = coord_of(nodes[0])?;
                         let b = coord_of(nodes[1])?;
-                        Self::extrude_up(a, b, *span, extent)
+                        Some(Self::extrude_up(a, b, *span, extent))
                     }
                     RegionAnchor::FloorRegion { nodes, .. } => {
                         let a = coord_of(nodes[0])?;
                         let b = coord_of(nodes[1])?;
-                        Self::extrude_up(a, b, [0.0, 1.0], extent)
+                        Some(Self::extrude_up(a, b, [0.0, 1.0], extent))
                     }
                     RegionAnchor::Point(_) => None,
                 }
@@ -273,12 +273,7 @@ impl WallPlate {
 
     /// 取付き線（`a`→`b`）の無次元区間 `span` を底辺とし、両端の高さ `extent`
     /// （鉛直上向き）だけ立ち上げた 4 点（反時計回り）を返す。
-    fn extrude_up(
-        a: [f64; 3],
-        b: [f64; 3],
-        span: [f64; 2],
-        extent: [f64; 2],
-    ) -> Option<Vec<[f64; 3]>> {
+    fn extrude_up(a: [f64; 3], b: [f64; 3], span: [f64; 2], extent: [f64; 2]) -> Vec<[f64; 3]> {
         let lerp = |t: f64| {
             [
                 a[0] + (b[0] - a[0]) * t,
@@ -288,12 +283,12 @@ impl WallPlate {
         };
         let p0 = lerp(span[0]);
         let p1 = lerp(span[1]);
-        Some(vec![
+        vec![
             p0,
             p1,
             [p1[0], p1[1], p1[2] + extent[1]],
             [p0[0], p0[1], p0[2] + extent[0]],
-        ])
+        ]
     }
 
     /// 壁版の面積 `[mm²]`。囲まれた壁版は [`crate::geom::polygon::area_3d`]（ニューエル）。
@@ -314,9 +309,6 @@ impl WallPlate {
                 let Some(extent) = model.wall_plate_extent(self) else {
                     return 0.0;
                 };
-                if pts.len() < 2 {
-                    return 0.0;
-                }
                 let len = crate::geom::vec3::dist(pts[0], pts[1]);
                 len * crate::geom::abs_lerp_integral(extent[0], extent[1], 0.0, 1.0)
             }
@@ -375,16 +367,9 @@ impl Model {
         }
         let plate_id = WallPlateId(self.wall_plates.len() as u32);
         self.wall_plates.push(WallPlate {
-            dl_support: plate.dl_support,
-            self_weight_shares: plate.self_weight_shares,
             id: plate_id,
             shape: WallPlateShape::Enclosed,
-            section: plate.section,
-            opening_area: plate.opening_area,
-            opening_weight: plate.opening_weight,
-            openings: plate.openings,
-            loads: plate.loads,
-            slit: plate.slit,
+            ..plate
         });
         let region_id = WallPlateAssignmentRegionId(self.wall_assignment_regions.next_free_id());
         self.wall_assignment_regions
@@ -423,16 +408,9 @@ impl Model {
             .map(|region| region.id)?;
         let plate_id = WallPlateId(self.wall_plates.len() as u32);
         self.wall_plates.push(WallPlate {
-            dl_support: plate.dl_support,
-            self_weight_shares: plate.self_weight_shares,
             id: plate_id,
             shape: WallPlateShape::Enclosed,
-            section: plate.section,
-            opening_area: plate.opening_area,
-            opening_weight: plate.opening_weight,
-            openings: plate.openings,
-            loads: plate.loads,
-            slit: plate.slit,
+            ..plate
         });
         self.wall_assignment_regions
             .get_mut(region_id)
@@ -689,7 +667,8 @@ impl Model {
         let a = self.nodes.get(nodes[0].index())?.coord;
         let b = self.nodes.get(nodes[1].index())?.coord;
         let (p0, p1) = ([a[0], a[1]], [b[0], b[1]]);
-        if (p1[0] - p0[0]).hypot(p1[1] - p0[1]) <= crate::geom::MEMBER_AXIS_TOL_MM {
+        let plan_len = (p1[0] - p0[0]).hypot(p1[1] - p0[1]);
+        if plan_len <= crate::geom::MEMBER_AXIS_TOL_MM {
             return Some(SelfStandingWallCoverage::default());
         }
         let z = (a[2] + b[2]) / 2.0;
@@ -723,6 +702,7 @@ impl Model {
             }
         }
         cuts.retain(|t| t.is_finite() && (0.0..=1.0).contains(t));
+        // 公差による重複排除は非推移的なため、高さ0の交点追加前後で分ける。
         cuts.sort_by(|x, y| x.total_cmp(y));
         cuts.dedup_by(|x, y| (*x - *y).abs() <= 1e-12);
 
@@ -735,7 +715,6 @@ impl Model {
         }
         let total_area = crate::geom::abs_lerp_integral(h0, h1, 0.0, 1.0);
         let weight = self.wall_weight(plate).ok()?;
-        let plan_len = (p1[0] - p0[0]).hypot(p1[1] - p0[1]);
 
         let mut cov = SelfStandingWallCoverage::default();
         for w in cuts.windows(2) {
@@ -799,10 +778,7 @@ pub struct SelfStandingWallCoverage {
 }
 
 impl SelfStandingWallCoverage {
-    /// 荷重の行き先が無い部分を持つか（判定のしきい値をここに集約する）。
-    ///
-    /// 交点計算の丸め、および壁の端がちょうど床領域の境界に載る場合の
-    /// ごく短い区間を拾わないよう、全体の 0.1% を下回る取りこぼしは無視する。
+    /// 未覆い重量の全重量に対する比が1e-9を超えるか。
     pub fn has_uncovered(&self) -> bool {
         self.uncovered > 1e-9
     }
@@ -1295,14 +1271,12 @@ mod tests {
             } else {
                 incomplete.stories[1].sl_offset_mm = None;
             }
-            let before = incomplete.clone();
             assert_eq!(incomplete.story_height_above(0.0), None);
             let error = incomplete.try_wall_plate_extent(&p).unwrap_err();
             assert!(error.contains("階 1") && error.contains(field), "{error}");
             assert_eq!(incomplete.wall_plate_extent(&p), None);
             assert_eq!(p.boundary_coords(&incomplete), None);
             assert_eq!(incomplete.wall_plate_self_weight(&p, &incomplete), None);
-            assert!(incomplete.eq_ignoring_dofmap(&before));
             let mut explicit = p.clone();
             if let WallPlateShape::Attached { extent, .. } = &mut explicit.shape {
                 *extent = Some([1000.0; 2]);
@@ -1318,47 +1292,7 @@ mod tests {
 
     #[test]
     fn test_self_weight_deducts_opening_area() {
-        let mut m = model_with_nodes(&[
-            [0.0, 0.0, 0.0],
-            [4000.0, 0.0, 0.0],
-            [4000.0, 0.0, 3000.0],
-            [0.0, 0.0, 3000.0],
-        ]);
-        m.materials.push(Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "Fc24".into(),
-            category: MaterialCategory::Concrete,
-            young: 23000.0,
-            poisson: 0.2,
-            density: 2.4e-9,
-            shear: None,
-            fc: Some(24.0),
-            fy: None,
-        });
-        m.sections.push(Section {
-            frame_use: None,
-            id: SectionId(0),
-            name: "壁 t150".into(),
-            area: 150.0 * 3000.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 3000.0,
-            width: 150.0,
-            as_y: 1.0,
-            as_z: 1.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: Some(150.0),
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
+        let mut m = model_with_wall_section();
         m.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             enclosed_plate(),

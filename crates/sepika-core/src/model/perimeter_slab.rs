@@ -391,39 +391,9 @@ mod tests {
         model.floor_regions.push(region);
         model.stories.insert(
             0,
-            Story {
-                wall_weights: Vec::new(),
-                id: StoryId(0),
-                name: "基部".into(),
-                elevation: Some(0.0),
-                sl_offset_mm: Some(0.0),
-                source_story: None,
-                node_ids: Vec::new(),
-                seismic_weight: None,
-                weight_override: None,
-                structure: StoryStructure::default(),
-                level_kind: StoryLevelKind::default(),
-                dynamic_mass: None,
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
-            },
+            Story::new(StoryId(0), "基部".into(), Some(0.0), Some(0.0)),
         );
         model.stories.push(Story {
-            wall_weights: Vec::new(),
-            id: StoryId(1),
-            name: "1F".into(),
-            elevation: Some(3000.0),
-            sl_offset_mm: Some(0.0),
-            source_story: None,
-            node_ids: Vec::new(),
-            seismic_weight: None,
-            weight_override: None,
-            structure: StoryStructure::default(),
-            level_kind: StoryLevelKind::default(),
-            dynamic_mass: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
             standard_floor_load: Some(StandardFloorLoad {
                 dead: 0.005,
                 floor: 0.004,
@@ -431,10 +401,10 @@ mod tests {
                 frame: 0.006,
                 seismic: 0.002,
             }),
+            ..Story::new(StoryId(1), "1F".into(), Some(3000.0), Some(0.0))
         });
         let slabs = perimeter_slabs(&model).unwrap();
         assert_eq!(slabs.len(), 1);
-        assert_eq!((400.0 + 800.0) / 4.0, 300.0);
         assert_eq!(slabs[0].extent_mm, 300.0);
         let standard = model.stories[1].standard_floor_load.unwrap();
         assert_eq!(standard.intensity(None), 0.005);
@@ -500,40 +470,8 @@ mod tests {
                 element(1, [0, 2], SectionId(1), ref_vector),
             ];
             model.stories = vec![
-                Story {
-                    wall_weights: Vec::new(),
-                    id: StoryId(0),
-                    name: "1F".into(),
-                    elevation: Some(-3000.0),
-                    sl_offset_mm: Some(0.0),
-                    source_story: None,
-                    node_ids: Vec::new(),
-                    seismic_weight: None,
-                    weight_override: None,
-                    structure: StoryStructure::default(),
-                    level_kind: StoryLevelKind::default(),
-                    dynamic_mass: None,
-                    standard_floor_load: None,
-                    column_finish_area_weight: 0.0,
-                    fireproof: Default::default(),
-                },
-                Story {
-                    wall_weights: Vec::new(),
-                    id: StoryId(1),
-                    name: "2F".into(),
-                    elevation: Some(0.0),
-                    sl_offset_mm: Some(0.0),
-                    source_story: None,
-                    node_ids: Vec::new(),
-                    seismic_weight: None,
-                    weight_override: None,
-                    structure: StoryStructure::default(),
-                    level_kind: StoryLevelKind::default(),
-                    dynamic_mass: None,
-                    standard_floor_load: None,
-                    column_finish_area_weight: 0.0,
-                    fireproof: Default::default(),
-                },
+                Story::new(StoryId(0), "1F".into(), Some(-3000.0), Some(0.0)),
+                Story::new(StoryId(1), "2F".into(), Some(0.0), Some(0.0)),
             ];
             column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1))
         };
@@ -634,40 +572,8 @@ mod tests {
             element(3, [0, 2], SectionId(1), [1.0, 0.0, 0.0]),
         ];
         model.stories = vec![
-            Story {
-                wall_weights: Vec::new(),
-                id: StoryId(0),
-                name: "1F".into(),
-                elevation: Some(0.0),
-                sl_offset_mm: Some(0.0),
-                source_story: None,
-                node_ids: Vec::new(),
-                seismic_weight: None,
-                weight_override: None,
-                structure: StoryStructure::default(),
-                level_kind: StoryLevelKind::default(),
-                dynamic_mass: None,
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
-            },
-            Story {
-                wall_weights: Vec::new(),
-                id: StoryId(1),
-                name: "2F".into(),
-                elevation: Some(3000.0),
-                sl_offset_mm: Some(0.0),
-                source_story: None,
-                node_ids: Vec::new(),
-                seismic_weight: None,
-                weight_override: None,
-                structure: StoryStructure::default(),
-                level_kind: StoryLevelKind::default(),
-                dynamic_mass: None,
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
-            },
+            Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0)),
+            Story::new(StoryId(1), "2F".into(), Some(3000.0), Some(0.0)),
         ];
         let expected = column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1));
         model.elements.swap(1, 3);
