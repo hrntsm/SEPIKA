@@ -98,3 +98,64 @@ pub fn rebar_grade_strength(name: &str) -> Option<f64> {
     }
     rebar_grade_f_value(n)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+
+    #[test]
+    fn rebar_standard_properties_preserve_strength_and_mass_density() {
+        for (name, fy) in [("SD345", 345.0), ("SR235", 235.0)] {
+            let material = standard_material_properties(name).unwrap();
+            assert_eq!(material.fy, Some(fy), "{name}");
+            assert_eq!(material.density, 7.85e-9, "{name}");
+        }
+    }
+
+    #[test]
+    fn concrete_standard_properties_follow_fc_dependent_unit_weight() {
+        for (name, fc, young_n_mm2, density_ton_mm3) in [
+            (
+                "Fc24",
+                24.0,
+                22_668.945_903_873_48,
+                2.447_318_911_147_028e-9,
+            ),
+            (
+                "Fc36",
+                36.0,
+                25_949.465_239_834_98,
+                2.447_318_911_147_028e-9,
+            ),
+            (
+                "Fc40",
+                40.0,
+                28_058.274_635_930_21,
+                2.498_304_721_795_924e-9,
+            ),
+            ("Fc50", 50.0, 31_524.706_967_514_46, 2.549_290_532_444_82e-9),
+            ("Fc60", 60.0, 33_500.0, 2.549_290_532_444_82e-9),
+        ] {
+            let material = standard_material_properties(name).unwrap();
+            assert_eq!(material.fc, Some(fc), "{name}");
+            assert_relative_eq!(
+                material.young,
+                young_n_mm2,
+                epsilon = 0.0,
+                max_relative = 1e-14
+            );
+            assert_relative_eq!(
+                material.density,
+                density_ton_mm3,
+                epsilon = 0.0,
+                max_relative = 1e-14
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_numeric_name_has_no_standard_properties() {
+        assert!(standard_material_properties("UNKNOWN999").is_none());
+    }
+}
