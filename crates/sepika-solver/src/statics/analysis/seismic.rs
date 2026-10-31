@@ -159,30 +159,6 @@ fn distribute_pi_over_story_nodes(model: &Model, story: &Story, pi: f64) -> Vec<
     }
 }
 
-/// 階の水平力 Pi を階内の剛床（ダイアフラム）ごとに分配する
-/// （多剛床の設計用せん断力：水平力を剛床ごとの重量比で分配する）。
-///
-/// - 剛床が 1 つの階: Pi を全量その剛床へ載せる。
-/// - 剛床が複数の階: 剛床の `weight` の比で按分する（`None` は 0 扱い）。
-///   重量の合計が 0（すべて未設定を含む）の場合は等分割する。
-/// - **剛床がない階**: 階に属する節点へ質量比で直接分配する
-///   （[`distribute_pi_over_story_nodes`]）。
-///
-/// `ci_override`（副剛床の Ci 直接入力）は考慮しない。風荷重など Ci の
-/// 概念がない荷重ケースはこの関数をそのまま使う。地震荷重は
-/// [`distribute_seismic_forces`] を使う。
-pub(crate) fn distribute_pi_over_diaphragms(
-    model: &Model,
-    story: &Story,
-    pi: f64,
-) -> Vec<(NodeId, f64)> {
-    let diaphragms: Vec<DiaphragmRef<'_>> = model.diaphragms_of(story.id).collect();
-    if diaphragms.is_empty() {
-        return distribute_pi_over_story_nodes(model, story, pi);
-    }
-    distribute_pi_over_slice(&diaphragms, pi)
-}
-
 /// 階の主系統（Ai 分布：昭55建告1793号）に用いる地震用重量（副剛床の Ci を
 /// 直接入力した場合の扱い）。`ci_override` を持つ剛床の重量は主系統の Ai 分布から
 /// 除外する（主剛床は全剛床の Ci に従うが、副剛床は指定 Ci で別途計算するため）。
@@ -219,7 +195,7 @@ pub(crate) fn distribute_seismic_forces(
         return distribute_pi_over_story_nodes(model, story, pi);
     }
     if diaphragms.iter().all(|d| d.ci_override.is_none()) {
-        return distribute_pi_over_diaphragms(model, story, pi);
+        return distribute_pi_over_slice(&diaphragms, pi);
     }
     let main_diaphragms: Vec<DiaphragmRef<'_>> = diaphragms
         .iter()
@@ -270,7 +246,7 @@ impl Analysis<'_> {
                 if let Some(&t) = self.semi_precise_t.get() {
                     return Ok(t);
                 }
-                let modal = self.eigen_solver_dispatch(1)?;
+                let modal = self.eigen(1)?;
                 let t = modal
                     .period
                     .first()
@@ -397,15 +373,7 @@ pub fn seismic_distribution_for_model(
             )));
         }
         let rank = match l.level_kind {
-            StoryLevelKind::Basement { depth_mm } => {
-                if !depth_mm.is_finite() || depth_mm < 0.0 {
-                    return Err(SolveError::InvalidInput(format!(
-                        "{} の地下深さ [mm] は有限の非負値が必要です。",
-                        l.name
-                    )));
-                }
-                0
-            }
+            StoryLevelKind::Basement { .. } => 0,
             StoryLevelKind::Normal => 1,
             StoryLevelKind::Penthouse { k } => {
                 if !k.is_finite() || k <= 0.0 {
@@ -481,12 +449,6 @@ pub fn seismic_distribution_for_model(
 
     let tc = sepika_load::ai::tc_of(soil);
     let rt_val = sepika_load::ai::rt(t, tc);
-
-    if layers.iter().all(|l| l.weight.unwrap_or(0.0) == 0.0) {
-        return Err(SolveError::InvalidInput(
-            "階の地震重量(seismic_weight)がすべて 0 です。各階の重量を設定してください。".into(),
-        ));
-    }
 
     let specs: Vec<sepika_load::ai::StorySeismicSpec> = layers
         .iter()
