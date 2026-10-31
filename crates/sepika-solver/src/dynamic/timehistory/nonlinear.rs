@@ -4,9 +4,8 @@
 //! - [`nonlinear_time_history_analysis`] — 非線形時刻歴応答解析
 
 use super::common::{
-    accel_dir_at, accel_xy_at, empty_response, expand_peak_disp, mass_accel_free_into,
-    reduced_vec_from, resolve_dt, solve_initial_accel, sparse_matvec_into, GroundInfluence,
-    NewmarkCoeffs,
+    accel_dir_at, accel_xy_at, empty_response, reduced_vec_from, resolve_dt, solve_initial_accel,
+    sparse_matvec_into, GroundInfluence, NewmarkCoeffs,
 };
 use super::config::{GroundMotion, NewmarkCfg};
 use super::history::{
@@ -265,16 +264,9 @@ pub fn nonlinear_time_history_analysis(
     };
     let rmr_record = total_mass(m_r_record, dofmap, model.nodes.len(), dir_idx);
     let mut ma_free = vec![0.0f64; n_free];
-    mass_accel_free_into(&m_free, &a_free, &mut ma_free);
+    sparse_matvec_into(&m_free, &a_free, &mut ma_free);
     {
-        let xg_init = if record_dir_y {
-            wave.accel_y
-                .as_ref()
-                .and_then(|a| a.first().copied())
-                .unwrap_or(0.0)
-        } else {
-            wave.accel_x.first().copied().unwrap_or(0.0)
-        };
+        let xg_init = accel_dir_at(wave, 0, record_dir_y);
         record_history_step(
             &mut history,
             model,
@@ -289,20 +281,9 @@ pub fn nonlinear_time_history_analysis(
     let mut time = Vec::with_capacity(n_steps + 1);
     time.push(0.0);
 
-    let mut recorder = ThRecorder::new(
-        model,
-        dofmap,
-        n_steps,
-        model.elements.len(),
-        cfg.record_every,
-    );
+    let mut recorder = ThRecorder::new(model, dofmap, n_steps, cfg.record_every);
     {
-        let xg_x_init = wave.accel_x.first().copied().unwrap_or(0.0);
-        let xg_y_init = wave
-            .accel_y
-            .as_ref()
-            .and_then(|a| a.first().copied())
-            .unwrap_or(0.0);
+        let (xg_x_init, xg_y_init) = accel_xy_at(wave, 0);
         let mf_init = member_forces_nonlinear(model, &behaviors)?;
         recorder.record_step(
             0, 0.0, model, dofmap, m_r_x, m_r_y, &ma_free, &u_free, &v_free, &a_free, xg_x_init,
@@ -550,7 +531,7 @@ pub fn nonlinear_time_history_analysis(
             update_story_drift(model, dofmap, &u_free, &mut story_drift_angle);
             reducer.expand_u_into(&v, &mut v_free);
             reducer.expand_u_into(&a, &mut a_free);
-            mass_accel_free_into(&m_free, &a_free, &mut ma_free);
+            sparse_matvec_into(&m_free, &a_free, &mut ma_free);
             let xg_next = accel_dir_at(wave, n + 1, record_dir_y);
             record_history_step(
                 &mut history,
@@ -582,7 +563,7 @@ pub fn nonlinear_time_history_analysis(
         }
     }
 
-    let peak_disp = expand_peak_disp(model, dofmap, &peak_disp_free);
+    let peak_disp = dofmap.expand_to_nodes(&peak_disp_free, model.nodes.len());
 
     let fatigue = crate::damage::FatigueParams::default();
     let cumulative_ductility: Vec<f64> = mu_hist

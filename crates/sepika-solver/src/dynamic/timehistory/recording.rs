@@ -146,11 +146,6 @@ fn trim_member_forces_to_endpoints(forces: &[Option<MemberForces>]) -> Vec<Optio
         .collect()
 }
 
-/// 節点順の全自由度変位（拘束・従属自由度を含む）を組み立てる。
-fn expand_node_disp(model: &Model, dofmap: &DofMap, u_free: &[f64]) -> Vec<[f64; 6]> {
-    dofmap.expand_to_nodes(u_free, model.nodes.len())
-}
-
 /// 階に属する節点の自由 DOF の一覧。
 ///
 /// - `avg`: 階応答の代表値算定に使う当該方向並進 DOF と質量重みの組。
@@ -161,12 +156,6 @@ struct StoryDofGroup {
     force: Vec<usize>,
 }
 
-impl StoryDofGroup {
-    fn is_empty(&self) -> bool {
-        self.avg.is_empty() && self.force.is_empty()
-    }
-}
-
 /// 時刻歴応答の詳細記録（[`ThRecording`]）を組み立てる状態機械。
 ///
 /// 呼び出し側（`linear`・`nonlinear` の各時刻歴ループ）は、各ステップ確定後に
@@ -175,8 +164,6 @@ impl StoryDofGroup {
 pub(crate) struct ThRecorder {
     record_every: usize,
     n_steps: u64,
-    story_ids: Vec<sepika_core::ids::StoryId>,
-    weights: Vec<f64>,
     /// `weight_above[i]` = 当該層以上（i 番目〜最上層）の地震用重量の累積和。
     weight_above: Vec<f64>,
     groups_x: Vec<StoryDofGroup>,
@@ -187,35 +174,17 @@ pub(crate) struct ThRecorder {
     member_forces: Vec<Vec<Option<MemberForces>>>,
     peak_member_forces: Vec<Option<MemberForces>>,
 
-    story_shear_x: Vec<Vec<f64>>,
-    story_shear_y: Vec<Vec<f64>>,
-    floor_accel_x: Vec<Vec<f64>>,
-    floor_accel_y: Vec<Vec<f64>>,
-    floor_vel_x: Vec<Vec<f64>>,
-    floor_vel_y: Vec<Vec<f64>>,
-    floor_disp_x: Vec<Vec<f64>>,
-    floor_disp_y: Vec<Vec<f64>>,
-    peak_shear_coeff_x: Vec<f64>,
-    peak_shear_coeff_y: Vec<f64>,
-    peak_story_shear_x: Vec<f64>,
-    peak_story_shear_y: Vec<f64>,
-    peak_floor_accel_x: Vec<f64>,
-    peak_floor_accel_y: Vec<f64>,
-    peak_floor_vel_x: Vec<f64>,
-    peak_floor_vel_y: Vec<f64>,
-    peak_floor_disp_x: Vec<f64>,
-    peak_floor_disp_y: Vec<f64>,
+    story_x: StoryResponse,
+    story_y: StoryResponse,
 }
 
 impl ThRecorder {
     /// `n_steps` は解析の全積分区間数（地震波のサンプル数 − 1）。`record_every` が
-    /// `None` の場合は [`auto_record_every`] で自動決定する。`n_elems` は
-    /// `model.elements.len()`（部材内力包絡の初期化用）。
+    /// `None` の場合は [`auto_record_every`] で自動決定する。
     pub(crate) fn new(
         model: &Model,
         dofmap: &DofMap,
         n_steps: usize,
-        n_elems: usize,
         record_every: Option<usize>,
     ) -> Self {
         let record_every = record_every
@@ -308,42 +277,35 @@ impl ThRecorder {
             }
         }
 
+        let story = StoryResponse {
+            stories: layers.iter().map(|l| l.bottom).collect(),
+            story_weight: weights,
+            peak_shear_coeff: vec![0.0; n_story],
+            peak_story_shear: vec![0.0; n_story],
+            peak_floor_accel: vec![0.0; n_story],
+            peak_floor_vel: vec![0.0; n_story],
+            peak_floor_disp: vec![0.0; n_story],
+            ..Default::default()
+        };
+
         Self {
             record_every,
             n_steps: n_steps as u64,
-            story_ids: layers.iter().map(|l| l.bottom).collect(),
-            weights,
             weight_above,
             groups_x: build_groups(0),
             groups_y: build_groups(1),
             frame_time: Vec::new(),
             node_disp: Vec::new(),
             member_forces: Vec::new(),
-            peak_member_forces: vec![None; n_elems],
-            story_shear_x: Vec::new(),
-            story_shear_y: Vec::new(),
-            floor_accel_x: Vec::new(),
-            floor_accel_y: Vec::new(),
-            floor_vel_x: Vec::new(),
-            floor_vel_y: Vec::new(),
-            floor_disp_x: Vec::new(),
-            floor_disp_y: Vec::new(),
-            peak_shear_coeff_x: vec![0.0; n_story],
-            peak_shear_coeff_y: vec![0.0; n_story],
-            peak_story_shear_x: vec![0.0; n_story],
-            peak_story_shear_y: vec![0.0; n_story],
-            peak_floor_accel_x: vec![0.0; n_story],
-            peak_floor_accel_y: vec![0.0; n_story],
-            peak_floor_vel_x: vec![0.0; n_story],
-            peak_floor_vel_y: vec![0.0; n_story],
-            peak_floor_disp_x: vec![0.0; n_story],
-            peak_floor_disp_y: vec![0.0; n_story],
+            peak_member_forces: vec![None; model.elements.len()],
+            story_x: story.clone(),
+            story_y: story,
         }
     }
 
     /// 階ごとの層せん断力・階絶対加速度・階速度・階変位を求める（1 方向分）。
     /// `m_r` は当該方向の `M·r`（自由 DOF 空間）、`ma_free` は自由 DOF 空間の
-    /// `M·a_free`（[`super::common::mass_accel_free`] で 1 ステップに 1 回だけ
+    /// `M·a_free`（[`super::common::sparse_matvec_into`] で 1 ステップに 1 回だけ
     /// 算定したものを共有する）、`xg` は当該時刻・当該方向の地動加速度。
     ///
     /// 層せん断力は「当該層以上に属する節点の並進 DOF の慣性力」の累積の符号反転
@@ -365,7 +327,7 @@ impl ThRecorder {
         let mut vel = vec![0.0; n];
         let mut disp = vec![0.0; n];
         for (i, g) in groups.iter().enumerate() {
-            if g.is_empty() {
+            if g.avg.is_empty() && g.force.is_empty() {
                 continue;
             }
             let (mut total_w, mut sum_a, mut sum_v, mut sum_u) = (0.0, 0.0, 0.0, 0.0);
@@ -439,45 +401,46 @@ impl ThRecorder {
         let (shear_y, accel_y, vel_y, disp_y) =
             Self::compute_story_dir(&self.groups_y, m_r_y, u_free, v_free, a_free, ma_free, xg_y);
 
-        for i in 0..self.weights.len() {
+        for i in 0..self.story_x.story_weight.len() {
             let above = self.weight_above[i];
             if above > 0.0 {
                 let ci_x = shear_x[i].abs() / above;
-                if ci_x > self.peak_shear_coeff_x[i] {
-                    self.peak_shear_coeff_x[i] = ci_x;
+                if ci_x > self.story_x.peak_shear_coeff[i] {
+                    self.story_x.peak_shear_coeff[i] = ci_x;
                 }
                 let ci_y = shear_y[i].abs() / above;
-                if ci_y > self.peak_shear_coeff_y[i] {
-                    self.peak_shear_coeff_y[i] = ci_y;
+                if ci_y > self.story_y.peak_shear_coeff[i] {
+                    self.story_y.peak_shear_coeff[i] = ci_y;
                 }
             }
         }
 
-        Self::update_peak_abs(&mut self.peak_story_shear_x, &shear_x);
-        Self::update_peak_abs(&mut self.peak_story_shear_y, &shear_y);
-        Self::update_peak_abs(&mut self.peak_floor_accel_x, &accel_x);
-        Self::update_peak_abs(&mut self.peak_floor_accel_y, &accel_y);
-        Self::update_peak_abs(&mut self.peak_floor_vel_x, &vel_x);
-        Self::update_peak_abs(&mut self.peak_floor_vel_y, &vel_y);
-        Self::update_peak_abs(&mut self.peak_floor_disp_x, &disp_x);
-        Self::update_peak_abs(&mut self.peak_floor_disp_y, &disp_y);
+        Self::update_peak_abs(&mut self.story_x.peak_story_shear, &shear_x);
+        Self::update_peak_abs(&mut self.story_y.peak_story_shear, &shear_y);
+        Self::update_peak_abs(&mut self.story_x.peak_floor_accel, &accel_x);
+        Self::update_peak_abs(&mut self.story_y.peak_floor_accel, &accel_y);
+        Self::update_peak_abs(&mut self.story_x.peak_floor_vel, &vel_x);
+        Self::update_peak_abs(&mut self.story_y.peak_floor_vel, &vel_y);
+        Self::update_peak_abs(&mut self.story_x.peak_floor_disp, &disp_x);
+        Self::update_peak_abs(&mut self.story_y.peak_floor_disp, &disp_y);
 
         if self.frame_time.is_empty()
             || step.is_multiple_of(self.record_every as u64)
             || step == self.n_steps
         {
             self.frame_time.push(time);
-            self.node_disp.push(expand_node_disp(model, dofmap, u_free));
+            self.node_disp
+                .push(dofmap.expand_to_nodes(u_free, model.nodes.len()));
             self.member_forces
                 .push(trim_member_forces_to_endpoints(member_forces_now));
-            self.story_shear_x.push(shear_x);
-            self.story_shear_y.push(shear_y);
-            self.floor_accel_x.push(accel_x);
-            self.floor_accel_y.push(accel_y);
-            self.floor_vel_x.push(vel_x);
-            self.floor_vel_y.push(vel_y);
-            self.floor_disp_x.push(disp_x);
-            self.floor_disp_y.push(disp_y);
+            self.story_x.story_shear.push(shear_x);
+            self.story_y.story_shear.push(shear_y);
+            self.story_x.floor_accel.push(accel_x);
+            self.story_y.floor_accel.push(accel_y);
+            self.story_x.floor_vel.push(vel_x);
+            self.story_y.floor_vel.push(vel_y);
+            self.story_x.floor_disp.push(disp_x);
+            self.story_y.floor_disp.push(disp_y);
         }
     }
 
@@ -497,32 +460,8 @@ impl ThRecorder {
             record_every: self.record_every,
             frame_time: self.frame_time,
             node_disp: self.node_disp,
-            story_x: StoryResponse {
-                stories: self.story_ids.clone(),
-                story_weight: self.weights.clone(),
-                story_shear: self.story_shear_x,
-                floor_accel: self.floor_accel_x,
-                floor_vel: self.floor_vel_x,
-                floor_disp: self.floor_disp_x,
-                peak_shear_coeff: self.peak_shear_coeff_x,
-                peak_story_shear: self.peak_story_shear_x,
-                peak_floor_accel: self.peak_floor_accel_x,
-                peak_floor_vel: self.peak_floor_vel_x,
-                peak_floor_disp: self.peak_floor_disp_x,
-            },
-            story_y: StoryResponse {
-                stories: self.story_ids,
-                story_weight: self.weights,
-                story_shear: self.story_shear_y,
-                floor_accel: self.floor_accel_y,
-                floor_vel: self.floor_vel_y,
-                floor_disp: self.floor_disp_y,
-                peak_shear_coeff: self.peak_shear_coeff_y,
-                peak_story_shear: self.peak_story_shear_y,
-                peak_floor_accel: self.peak_floor_accel_y,
-                peak_floor_vel: self.peak_floor_vel_y,
-                peak_floor_disp: self.peak_floor_disp_y,
-            },
+            story_x: self.story_x,
+            story_y: self.story_y,
             member_forces: self.member_forces,
             peak_member_forces: self.peak_member_forces,
         }
@@ -694,28 +633,7 @@ mod tests {
         }
     }
 
-    /// `StoryDofGroup::force` は当該方向の並進 DOF のみを含み、回転 DOF を含まないこと。
-    #[test]
-    fn test_story_force_dof_group_excludes_rotational_dof() {
-        let model = two_story_density_mass_model(7.85e-9);
-        let dofmap = DofMap::build(&model);
-        let recorder = ThRecorder::new(&model, &dofmap, 1, model.elements.len(), None);
-
-        assert_eq!(recorder.groups_x.len(), 2);
-        for (i, g) in recorder.groups_x.iter().enumerate() {
-            assert_eq!(
-                g.force.len(),
-                1,
-                "story[{i}].force は当該方向の並進 DOF（節点1つ分）のみを含むはず: {:?}",
-                g.force
-            );
-            // avg（階代表値）と force（せん断力集計）の DOF は一致するはず。
-            assert_eq!(g.avg.len(), g.force.len());
-            assert_eq!(g.force[0], g.avg[0].0);
-        }
-    }
-
-    /// 2 層・一貫質量モデルで、1 層目の層せん断力がベースシアと一致すること。
+    /// 2 層・一貫質量モデルの層せん断力と階変位は、並進応答だけを集計する。
     #[test]
     fn test_story_shear_sum_matches_base_shear_with_consistent_mass() {
         let model = two_story_density_mass_model(7.85e-9);
@@ -761,7 +679,13 @@ mod tests {
         .expect("should run");
 
         let recording = result.recording.expect("recording");
-        assert!(!recording.story_x.story_shear.is_empty());
+        assert_eq!(recording.story_x.stories.len(), 2);
+        assert_eq!(
+            recording.story_x.floor_disp.len(),
+            recording.frame_time.len()
+        );
+        assert_eq!(recording.node_disp.len(), recording.frame_time.len());
+        let mut nontrivial_translation = [false; 2];
         let mut checked = 0;
         for (k, &t) in recording.frame_time.iter().enumerate() {
             // frame_time はいずれかの time と一致するはず（浮動小数点の丸めに
@@ -769,6 +693,12 @@ mod tests {
             let Some(step) = result.time.iter().position(|&tt| tt == t) else {
                 continue;
             };
+            assert_eq!(recording.story_x.floor_disp[k].len(), 2);
+            for (layer, nontrivial) in nontrivial_translation.iter_mut().enumerate() {
+                let node = &recording.node_disp[k][layer + 1];
+                assert_eq!(recording.story_x.floor_disp[k][layer], node[0]);
+                *nontrivial |= node[0].abs() > 1e-9 && (node[0] - node[4]).abs() > 1e-9;
+            }
             let layer0_shear = recording.story_x.story_shear[k][0];
             let expected = result.history.base_shear[step];
             assert!(
@@ -777,6 +707,7 @@ mod tests {
             );
             checked += 1;
         }
-        assert!(checked > 0, "比較できたフレームが1件もありません");
+        assert_eq!(checked, recording.frame_time.len());
+        assert_eq!(nontrivial_translation, [true; 2]);
     }
 }

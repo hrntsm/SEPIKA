@@ -4,12 +4,9 @@
 //! - [`theta_influence_m`] — 位相差入力（ねじれ加振）の回転影響ベクトル `M·r_θ`
 //! - [`theta_accel_at`] — ステップ `n` のねじれ地動加速度取得
 //! - [`solve_initial_accel`] — 初期加速度 `M·a₀ = rhs` の求解
-//! - [`mass_accel_free_into`] — 節点慣性力ベクトル算定用の `M·a_free`
-//!   （自由 DOF 空間）
 //! - [`sparse_matvec_into`] — `sepika_math::sparse::sparse_matvec_into` の再エクスポート
 //! - [`accel_xy_at`] — 水平 2 方向の地動加速度 `(ẍg_x, ẍg_y)` の取得
 //! - [`accel_dir_at`] — 記録対象 1 方向の地動加速度の取得
-//! - [`expand_peak_disp`] — 最大応答変位の全節点 × 6 自由度への展開
 //! - [`resolve_dt`] — 時間刻みの解決（設定値と波形の刻みの優先順）
 //! - [`NewmarkCoeffs`] — Newmark-β の積分係数 c1〜c6
 //! - [`GroundInfluence`] — 影響ベクトル束 `M·r` と等価地震力 `p = −M·r·ẍg`
@@ -125,25 +122,6 @@ pub(crate) fn accel_dir_at(wave: &GroundMotion, n: usize, dir_y: bool) -> f64 {
     }
 }
 
-/// 自由 DOF 空間の最大応答変位を、全節点 × 6 自由度の配列へ展開する。
-/// 拘束された自由度は 0 のまま残る。
-pub(crate) fn expand_peak_disp(
-    model: &Model,
-    dofmap: &DofMap,
-    peak_disp_free: &[f64],
-) -> Vec<[f64; 6]> {
-    let mut peak_disp = vec![[0.0f64; 6]; model.nodes.len()];
-    for (ni, row) in peak_disp.iter_mut().enumerate() {
-        for (d, cell) in row.iter_mut().enumerate() {
-            let g = ni * DOF_PER_NODE + d;
-            if let Some(a) = dofmap.active(g) {
-                *cell = peak_disp_free[a as usize];
-            }
-        }
-    }
-    peak_disp
-}
-
 /// 初期加速度 M·a₀ = rhs を解く。
 /// 質量行列は回転自由度などに質量ゼロ行を含み特異になり得るため、
 /// Cholesky → LU の順に試し、いずれも失敗した場合は
@@ -172,17 +150,6 @@ pub(crate) fn solve_initial_accel(
     Err(SolveError::InvalidInput(
         "質量行列が特異で初期加速度を計算できません。地震波の先頭を 0 から始めるか、全自由度に質量を与えてください。".into(),
     ))
-}
-
-/// 節点慣性力ベクトルの算定に使う `M·a_free` を呼び出し側の既存バッファへ書き込む。
-///
-/// `a_free` は呼び出し側で展開済みの自由 DOF 空間の加速度を渡す。
-pub(crate) fn mass_accel_free_into(
-    m_free: &faer::sparse::SparseColMat<usize, f64>,
-    a_free: &[f64],
-    out: &mut [f64],
-) {
-    sparse_matvec_into(m_free, a_free, out);
 }
 
 /// 時刻歴の時間刻み [s] を決める。設定値が正ならそれを、さもなくば波形の刻みを使う。
@@ -271,12 +238,7 @@ impl GroundInfluence {
             self.m_r_x.len(),
             "等価地震力の書き込み先は自由 DOF 空間の長さであること"
         );
-        let xg_x = wave.accel_x.get(n).copied().unwrap_or(0.0);
-        let xg_y = wave
-            .accel_y
-            .as_ref()
-            .map(|a| a.get(n).copied().unwrap_or(0.0))
-            .unwrap_or(0.0);
+        let (xg_x, xg_y) = accel_xy_at(wave, n);
         let xg_theta = theta_accel_at(wave, n);
         for (i, o) in out.iter_mut().enumerate() {
             *o = -(self.m_r_x[i] * xg_x + self.m_r_y[i] * xg_y + self.m_r_theta[i] * xg_theta);

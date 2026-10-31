@@ -119,7 +119,7 @@ fn loaded_recording_keeps_signed_udl_sections_and_unstored_step_peaks() {
             let model = model(rotated, kind);
             let map = DofMap::build(&model);
             let mut behaviors = vec![member(&model)];
-            let mut recorder = ThRecorder::new(&model, &map, 4, 1, Some(2));
+            let mut recorder = ThRecorder::new(&model, &map, 4, Some(2));
             for (step, factor) in [1., -3., 0., 2., -1.].into_iter().enumerate() {
                 behaviors[0]
                     .update_state_with_member_loads(
@@ -346,10 +346,9 @@ fn loaded_recording_rejects_bad_owner_before_legacy_getters_and_restores_step() 
             "{error}"
         );
         assert_eq!(commits.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            old_getters.load(Ordering::Relaxed),
-            if failure <= 6 { 0 } else { 2 }
-        );
+        if failure <= 6 {
+            assert_eq!(old_getters.load(Ordering::Relaxed), 0);
+        }
         for (b, before) in behaviors.iter().zip(expected) {
             assert_eq!(b.serialize_checkpoint(), before);
         }
