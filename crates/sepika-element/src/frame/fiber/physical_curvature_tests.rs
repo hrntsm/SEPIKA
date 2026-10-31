@@ -48,7 +48,7 @@ fn pure_bending_displacement_field_reproduces_physical_fiber_strain_at_both_ends
 }
 
 #[derive(Clone, Debug)]
-struct CompressionYield;
+pub(super) struct CompressionYield;
 
 impl UniaxialMaterial for CompressionYield {
     fn trial(&mut self, strain: f64) -> (f64, f64) {
