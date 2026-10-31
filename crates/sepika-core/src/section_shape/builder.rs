@@ -35,48 +35,39 @@ impl SectionShape {
         self.validate_surface_radius()?;
         self.validate_lip_channel()
             .map_err(|error| format!("断面 {}「{}」: {error}", id.0, name))?;
-        if matches!(
+        let unknown_radius = matches!(
             self,
             Self::SteelH { root_r: None, .. }
                 | Self::SteelBox { corner_r: None, .. }
                 | Self::CftBox { corner_r: None, .. }
-        ) {
-            let j = self.try_calc_j();
-            let mut section = self.build_section(id, name, 0.0, 0.0, 0.0, j.clone().unwrap_or(0.0));
-            section.property_basis.area = crate::model::PropertyBasis::PendingShape;
-            section.property_basis.iy = crate::model::PropertyBasis::PendingShape;
-            section.property_basis.iz = crate::model::PropertyBasis::PendingShape;
-            if j.is_err() {
-                section.property_basis.j = crate::model::PropertyBasis::PendingShape;
-            }
-            if self.has_unequal_box_thickness() {
-                section.as_y = 0.0;
-                section.as_z = 0.0;
-                section.property_basis.as_y = crate::model::PropertyBasis::PendingShape;
-                section.property_basis.as_z = crate::model::PropertyBasis::PendingShape;
-            }
-            Ok(section)
+        );
+        let j = self.try_calc_j();
+        let pending_j = j.is_err();
+        let (area, iy, iz) = if unknown_radius {
+            (0.0, 0.0, 0.0)
         } else {
-            let j = self.try_calc_j();
-            let mut section = self.build_section(
-                id,
-                name,
+            (
                 self.try_calc_area()?,
                 self.try_calc_iy()?,
                 self.try_calc_iz()?,
-                j.clone().unwrap_or(0.0),
-            );
-            if j.is_err() {
-                section.property_basis.j = crate::model::PropertyBasis::PendingShape;
-            }
-            if self.has_unequal_box_thickness() {
-                section.as_y = 0.0;
-                section.as_z = 0.0;
-                section.property_basis.as_y = crate::model::PropertyBasis::PendingShape;
-                section.property_basis.as_z = crate::model::PropertyBasis::PendingShape;
-            }
-            Ok(section)
+            )
+        };
+        let mut section = self.build_section(id, name, area, iy, iz, j.unwrap_or(0.0));
+        if unknown_radius {
+            section.property_basis.area = crate::model::PropertyBasis::PendingShape;
+            section.property_basis.iy = crate::model::PropertyBasis::PendingShape;
+            section.property_basis.iz = crate::model::PropertyBasis::PendingShape;
         }
+        if pending_j {
+            section.property_basis.j = crate::model::PropertyBasis::PendingShape;
+        }
+        if self.has_unequal_box_thickness() {
+            section.as_y = 0.0;
+            section.as_z = 0.0;
+            section.property_basis.as_y = crate::model::PropertyBasis::PendingShape;
+            section.property_basis.as_z = crate::model::PropertyBasis::PendingShape;
+        }
+        Ok(section)
     }
 
     fn build_section(
@@ -95,6 +86,12 @@ impl SectionShape {
                 web_thick,
                 flange_thick,
                 ..
+            }
+            | SectionShape::SteelChannel {
+                height,
+                width,
+                web_thick,
+                flange_thick,
             } => (
                 height,
                 width,
@@ -127,17 +124,6 @@ impl SectionShape {
                 leg_a.min(leg_b),
                 leg_b * thick,
                 leg_a * thick,
-            ),
-            SectionShape::SteelChannel {
-                height,
-                width,
-                web_thick,
-                flange_thick,
-            } => (
-                height,
-                width,
-                2.0 * width * flange_thick,
-                h_web_shear_area(height, web_thick),
             ),
             SectionShape::SteelTee {
                 height,

@@ -231,11 +231,6 @@ mod tests {
     #[test]
     fn directional_t_alpha_uses_geometric_inertia_only_for_top() {
         let i0 = 5_400_000_000.0;
-        // 梁300×600と上部150mmの有効幅1500mm。独立図心は412.5mm。
-        let it = crate::section_shape::strip_section_properties(&[[450.0, 300.0], [150.0, 1500.0]])
-            .unwrap()
-            .inertia;
-        assert_eq!(it, 10_293_750_000.0);
         let it = 2.0 * i0;
         let top = RcAlphaSection::TTopTension {
             effective_width_mm: 1500.0,

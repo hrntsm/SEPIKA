@@ -83,8 +83,20 @@ impl SectionShape {
                 web_thick,
                 flange_thick,
                 ..
+            }
+            | SectionShape::SteelChannel {
+                height,
+                width,
+                web_thick,
+                flange_thick,
             } => 2.0 * width * flange_thick + (height - 2.0 * flange_thick) * web_thick,
             SectionShape::SteelBox {
+                height,
+                width,
+                thick,
+                ..
+            }
+            | SectionShape::CftBox {
                 height,
                 width,
                 thick,
@@ -95,25 +107,22 @@ impl SectionShape {
                 leg_b,
                 thick,
             } => thick * (leg_a + leg_b - thick),
-            SectionShape::SteelChannel {
-                height,
-                width,
-                web_thick,
-                flange_thick,
-            } => 2.0 * width * flange_thick + (height - 2.0 * flange_thick) * web_thick,
             SectionShape::SteelTee {
                 height,
                 width,
                 web_thick,
                 flange_thick,
             } => width * flange_thick + (height - flange_thick) * web_thick,
-            SectionShape::SteelPipe { outer_dia, thick } => {
+            SectionShape::SteelPipe { outer_dia, thick }
+            | SectionShape::CftPipe { outer_dia, thick } => {
                 let r = outer_dia / 2.0;
                 let ri = r - thick;
                 std::f64::consts::PI * (r * r - ri * ri)
             }
             SectionShape::SteelFlatBar { width, thick } => width * thick,
-            SectionShape::SteelRoundBar { dia } => std::f64::consts::PI * dia * dia / 4.0,
+            SectionShape::SteelRoundBar { dia } | SectionShape::RcColumnCircle { d: dia, .. } => {
+                std::f64::consts::PI * dia * dia / 4.0
+            }
             SectionShape::SteelLipChannel {
                 height,
                 width,
@@ -145,18 +154,6 @@ impl SectionShape {
             | SectionShape::RcColumnRect { b, d, .. }
             | SectionShape::SrcBeamRect { b, d, .. }
             | SectionShape::SrcColumnRect { b, d, .. } => b * d,
-            SectionShape::RcColumnCircle { d, .. } => std::f64::consts::PI * d * d / 4.0,
-            SectionShape::CftBox {
-                height,
-                width,
-                thick,
-                ..
-            } => width * height - (width - 2.0 * thick) * (height - 2.0 * thick),
-            SectionShape::CftPipe { outer_dia, thick } => {
-                let r = outer_dia / 2.0;
-                let ri = r - thick;
-                std::f64::consts::PI * (r * r - ri * ri)
-            }
             SectionShape::RcWall { thickness, .. } | SectionShape::RcSlab { thickness } => {
                 thickness * 1000.0
             }
@@ -294,11 +291,23 @@ impl SectionShape {
                 web_thick,
                 flange_thick,
                 ..
+            }
+            | SectionShape::SteelChannel {
+                height,
+                width,
+                web_thick,
+                flange_thick,
             } => {
                 let hw = height - 2.0 * flange_thick;
                 (width * height.powi(3) - (width - web_thick) * hw.powi(3)) / 12.0
             }
             SectionShape::SteelBox {
+                height,
+                width,
+                thick,
+                ..
+            }
+            | SectionShape::CftBox {
                 height,
                 width,
                 thick,
@@ -321,15 +330,6 @@ impl SectionShape {
                 let i2 = (leg_b - thick) * thick.powi(3) / 12.0;
                 (i1 + a1 * (y1 - cy).powi(2)) + (i2 + a2 * (y2 - cy).powi(2))
             }
-            SectionShape::SteelChannel {
-                height,
-                width,
-                web_thick,
-                flange_thick,
-            } => {
-                let hw = height - 2.0 * flange_thick;
-                (width * height.powi(3) - (width - web_thick) * hw.powi(3)) / 12.0
-            }
             SectionShape::SteelTee {
                 height,
                 width,
@@ -345,13 +345,16 @@ impl SectionShape {
                     + a_w * ((height - flange_thick) / 2.0 - y_bar).powi(2);
                 i_f + i_w
             }
-            SectionShape::SteelPipe { outer_dia, thick } => {
+            SectionShape::SteelPipe { outer_dia, thick }
+            | SectionShape::CftPipe { outer_dia, thick } => {
                 let r = outer_dia / 2.0;
                 let ri = r - thick;
                 std::f64::consts::PI / 4.0 * (r.powi(4) - ri.powi(4))
             }
             SectionShape::SteelFlatBar { width, thick } => width * thick.powi(3) / 12.0,
-            SectionShape::SteelRoundBar { dia } => std::f64::consts::PI * dia.powi(4) / 64.0,
+            SectionShape::SteelRoundBar { dia } | SectionShape::RcColumnCircle { d: dia, .. } => {
+                std::f64::consts::PI * dia.powi(4) / 64.0
+            }
             SectionShape::SteelLipChannel {
                 height,
                 width,
@@ -424,21 +427,6 @@ impl SectionShape {
             SectionShape::RcBeamRect { b, d, .. } | SectionShape::RcColumnRect { b, d, .. } => {
                 b * d.powi(3) / 12.0
             }
-            SectionShape::RcColumnCircle { d, .. } => std::f64::consts::PI * d.powi(4) / 64.0,
-            SectionShape::CftBox {
-                height,
-                width,
-                thick,
-                ..
-            } => {
-                let hi = height - 2.0 * thick;
-                (width * height.powi(3) - (width - 2.0 * thick) * hi.powi(3)) / 12.0
-            }
-            SectionShape::CftPipe { outer_dia, thick } => {
-                let r = outer_dia / 2.0;
-                let ri = r - thick;
-                std::f64::consts::PI / 4.0 * (r.powi(4) - ri.powi(4))
-            }
             SectionShape::RcWall { thickness, .. } | SectionShape::RcSlab { thickness } => {
                 1000.0 * thickness.powi(3) / 12.0
             }
@@ -473,6 +461,12 @@ impl SectionShape {
                 (2.0 * flange_thick * width.powi(3) + hw * web_thick.powi(3)) / 12.0
             }
             SectionShape::SteelBox {
+                height,
+                width,
+                thick,
+                ..
+            }
+            | SectionShape::CftBox {
                 height,
                 width,
                 thick,
@@ -524,9 +518,13 @@ impl SectionShape {
                 let iz_w = (height - flange_thick) * web_thick.powi(3) / 12.0;
                 iz + iz_w
             }
-            SectionShape::SteelPipe { .. } => self.calc_iy(),
+            SectionShape::SteelPipe { .. }
+            | SectionShape::SteelRoundBar { .. }
+            | SectionShape::RcColumnCircle { .. }
+            | SectionShape::CftPipe { .. }
+            | SectionShape::RcWall { .. }
+            | SectionShape::RcSlab { .. } => self.calc_iy(),
             SectionShape::SteelFlatBar { width, thick } => thick * width.powi(3) / 12.0,
-            SectionShape::SteelRoundBar { .. } => self.calc_iy(),
             SectionShape::SteelLipChannel {
                 height,
                 width,
@@ -586,18 +584,6 @@ impl SectionShape {
             SectionShape::RcBeamRect { b, d, .. } | SectionShape::RcColumnRect { b, d, .. } => {
                 d * b.powi(3) / 12.0
             }
-            SectionShape::RcColumnCircle { .. } => self.calc_iy(),
-            SectionShape::CftBox {
-                height,
-                width,
-                thick,
-                ..
-            } => {
-                let wi = width - 2.0 * thick;
-                (height * width.powi(3) - (height - 2.0 * thick) * wi.powi(3)) / 12.0
-            }
-            SectionShape::CftPipe { .. } => self.calc_iy(),
-            SectionShape::RcWall { .. } | SectionShape::RcSlab { .. } => self.calc_iy(),
         }
     }
 
@@ -665,12 +651,24 @@ impl SectionShape {
                 web_thick,
                 flange_thick,
                 ..
+            }
+            | SectionShape::SteelChannel {
+                height,
+                width,
+                web_thick,
+                flange_thick,
             } => {
                 (2.0 * width * flange_thick.powi(3)
                     + (height - 2.0 * flange_thick) * web_thick.powi(3))
                     / 3.0
             }
             SectionShape::SteelBox {
+                height,
+                width,
+                thick,
+                ..
+            }
+            | SectionShape::CftBox {
                 height,
                 width,
                 thick,
@@ -685,29 +683,22 @@ impl SectionShape {
                 leg_b,
                 thick,
             } => ((leg_a + leg_b - thick) * thick.powi(3)) / 3.0,
-            SectionShape::SteelChannel {
-                height,
-                width,
-                web_thick,
-                flange_thick,
-            } => {
-                (2.0 * width * flange_thick.powi(3)
-                    + (height - 2.0 * flange_thick) * web_thick.powi(3))
-                    / 3.0
-            }
             SectionShape::SteelTee {
                 height,
                 width,
                 web_thick,
                 flange_thick,
             } => (width * flange_thick.powi(3) + (height - flange_thick) * web_thick.powi(3)) / 3.0,
-            SectionShape::SteelPipe { outer_dia, thick } => {
+            SectionShape::SteelPipe { outer_dia, thick }
+            | SectionShape::CftPipe { outer_dia, thick } => {
                 let r = outer_dia / 2.0;
                 let ri = r - thick;
                 std::f64::consts::PI / 2.0 * (r.powi(4) - ri.powi(4))
             }
             SectionShape::SteelFlatBar { width, thick } => rect_torsion_j(width, thick),
-            SectionShape::SteelRoundBar { dia } => std::f64::consts::PI * dia.powi(4) / 32.0,
+            SectionShape::SteelRoundBar { dia } | SectionShape::RcColumnCircle { d: dia, .. } => {
+                std::f64::consts::PI * dia.powi(4) / 32.0
+            }
             SectionShape::SteelLipChannel {
                 height,
                 width,
@@ -735,22 +726,6 @@ impl SectionShape {
             | SectionShape::RcColumnRect { b, d, .. }
             | SectionShape::SrcBeamRect { b, d, .. }
             | SectionShape::SrcColumnRect { b, d, .. } => rect_torsion_j(b, d),
-            SectionShape::RcColumnCircle { d, .. } => std::f64::consts::PI * d.powi(4) / 32.0,
-            SectionShape::CftBox {
-                height,
-                width,
-                thick,
-                ..
-            } => {
-                let a0 = (height - thick) * (width - thick);
-                let perim = 2.0 * (height + width - 2.0 * thick);
-                4.0 * a0 * a0 * thick / perim
-            }
-            SectionShape::CftPipe { outer_dia, thick } => {
-                let r = outer_dia / 2.0;
-                let ri = r - thick;
-                std::f64::consts::PI / 2.0 * (r.powi(4) - ri.powi(4))
-            }
             SectionShape::RcWall { thickness, .. } | SectionShape::RcSlab { thickness } => {
                 1000.0 * thickness.powi(3) / 3.0
             }

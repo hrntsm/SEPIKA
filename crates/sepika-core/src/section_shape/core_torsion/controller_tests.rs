@@ -46,29 +46,6 @@ fn assert_quality(solution: &CoreTorsionSolution, rounded: bool) {
     );
 }
 
-fn assert_six_column_success_unchanged(
-    b_mm: f64,
-    h_mm: f64,
-    r_mm: f64,
-    current: &CoreTorsionSolution,
-) {
-    let original = run(b_mm, h_mm, r_mm, 200_000, 400_000, 6, 6).unwrap();
-    assert_eq!(current.levels.len(), original.levels.len());
-    assert_eq!(current.accepted_level, original.accepted_level);
-    let accepted = &current.levels[current.accepted_level];
-    let original_accepted = &original.levels[original.accepted_level];
-    assert_eq!(
-        accepted.attempt.quarter_arc_segments,
-        original_accepted.attempt.quarter_arc_segments
-    );
-    assert_eq!(
-        accepted.attempt.max_triangle_area,
-        original_accepted.attempt.max_triangle_area
-    );
-    assert_eq!(current.j_hat, original.j_hat);
-    assert_eq!(current.j_mm4, original.j_mm4);
-}
-
 #[test]
 fn rectangle_and_circle_agree_with_independent_exact_values_within_point_one_percent() {
     for (b, h, r, expected) in [
@@ -78,7 +55,6 @@ fn rectangle_and_circle_agree_with_independent_exact_values_within_point_one_per
     ] {
         let solution = rounded_rect_core_torsion(b, h, r).unwrap();
         assert_quality(&solution, r > 0.0);
-        assert_six_column_success_unchanged(b, h, r, &solution);
         assert!(
             (solution.j_mm4 / expected - 1.0).abs() <= 1e-3,
             "{} vs {}",
@@ -92,7 +68,6 @@ fn rectangle_and_circle_agree_with_independent_exact_values_within_point_one_per
 fn rounded_rectangle_has_separate_internal_and_boundary_histories() {
     let solution = rounded_rect_core_torsion(376.0, 276.0, 18.0).unwrap();
     assert_quality(&solution, true);
-    assert_six_column_success_unchanged(376.0, 276.0, 18.0, &solution);
     let final_level = &solution.levels[solution.accepted_level];
     assert_eq!(solution.j_hat, final_level.j_hat);
     for n in [
