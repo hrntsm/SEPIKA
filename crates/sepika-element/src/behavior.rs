@@ -721,18 +721,9 @@ mod tests {
         }
         // 全拘束の節点 1 は全成分が番兵。
         assert!(g[DOF_PER_NODE..].iter().all(|&v| v == usize::MAX));
-    }
-
-    /// 節点を渡す順がそのまま並びになる（要素の節点順に追随する契約）。
-    #[test]
-    fn node_global_dofs_follows_given_order() {
-        let model = two_node_model();
-        let dof = DofMap::build(&model);
-        let forward = node_global_dofs(&[NodeId(0), NodeId(1)], &dof);
         let reversed = node_global_dofs(&[NodeId(1), NodeId(0)], &dof);
-
-        assert_eq!(forward[..DOF_PER_NODE], reversed[DOF_PER_NODE..]);
-        assert_eq!(forward[DOF_PER_NODE..], reversed[..DOF_PER_NODE]);
+        assert_eq!(g[..DOF_PER_NODE], reversed[DOF_PER_NODE..]);
+        assert_eq!(g[DOF_PER_NODE..], reversed[..DOF_PER_NODE]);
     }
 
     /// `push_*` は末尾へ足す。パネル自由度を持たない節点は番兵になる

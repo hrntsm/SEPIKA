@@ -225,6 +225,7 @@ mod tests {
         let ctx = Ctx { model: &model };
         let f_el = d.internal_force(&ctx).data[6];
         assert!((f_el - k1 * 0.5 * dy).abs() < 1e-6, "elastic: {f_el}");
+        assert!(d.tangent_stiffness(&ctx).get(6, 6) > 0.0);
         drive(&mut d, 5.0 * dy, &model);
         let f_pl = d.internal_force(&ctx).data[6];
         let expect = qy + 0.02 * k1 * (5.0 * dy - dy);
@@ -232,18 +233,6 @@ mod tests {
             (f_pl - expect).abs() < 1.0,
             "plastic: {f_pl}, expect={expect}"
         );
-    }
-
-    #[test]
-    fn test_hysteretic_active_in_static_no_dt() {
-        let mut d = hyst_damper(1000.0, 100.0, 0.02);
-        let model = Model::default();
-        let ctx = Ctx { model: &model };
-        drive(&mut d, 0.05, &model);
-        let n = d.internal_force(&ctx).data[6];
-        assert!(n > 0.0, "hysteretic damper must be active in static: {n}");
-        let kt = d.tangent_stiffness(&ctx).get(6, 6);
-        assert!(kt > 0.0);
     }
 
     #[test]

@@ -16,21 +16,18 @@ pub enum ResolvedRegime {
 /// ForceRegime::Auto をトポロジから判定する。
 /// 剛床所属の梁 → ConcentratedSpring、それ以外 → Fiber
 pub fn resolve_force_regime(data: &ElementData, model: &Model) -> ResolvedRegime {
-    if data.force_regime != ForceRegime::Auto {
-        return match data.force_regime {
-            ForceRegime::UniaxialBendingShear => ResolvedRegime::ConcentratedSpring,
-            ForceRegime::AxialBendingInteract => ResolvedRegime::Fiber,
-            ForceRegime::Auto => unreachable!(),
-        };
-    }
-
-    let is_column = is_column_member(data, model);
-    let on_rigid_diaphragm = is_on_rigid_diaphragm(data, model);
-
-    if on_rigid_diaphragm && !is_column {
-        ResolvedRegime::ConcentratedSpring
-    } else {
-        ResolvedRegime::Fiber
+    match data.force_regime {
+        ForceRegime::UniaxialBendingShear => ResolvedRegime::ConcentratedSpring,
+        ForceRegime::AxialBendingInteract => ResolvedRegime::Fiber,
+        ForceRegime::Auto => {
+            let is_column = is_column_member(data, model);
+            let on_rigid_diaphragm = is_on_rigid_diaphragm(data, model);
+            if on_rigid_diaphragm && !is_column {
+                ResolvedRegime::ConcentratedSpring
+            } else {
+                ResolvedRegime::Fiber
+            }
+        }
     }
 }
 

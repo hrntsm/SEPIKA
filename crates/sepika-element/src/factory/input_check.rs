@@ -401,7 +401,7 @@ pub fn ensure_nonlinear_input_with_basis(
 /// - 線材の材料に鉄筋が割り当てられている。
 fn category_mismatch_issue(
     data: &ElementData,
-    sec: Option<&sepika_core::model::Section>,
+    sec: &sepika_core::model::Section,
     mat: &sepika_core::model::Material,
 ) -> Option<String> {
     use sepika_core::model::MaterialCategory;
@@ -413,7 +413,7 @@ fn category_mismatch_issue(
             data.id.0, mat.name
         ));
     }
-    let has_rebar = sec.and_then(|s| s.shape.as_ref()).is_some_and(|s| {
+    let has_rebar = sec.shape.as_ref().is_some_and(|s| {
         matches!(
             s,
             SectionShape::RcBeamRect { .. }
@@ -450,7 +450,6 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
             data.id.0
         ));
     };
-    let sec = Some(sec);
     let Some(mat) = model.element_material(data) else {
         return Some(format!(
             "部材 ID {} に材料が設定されていません。\
@@ -462,7 +461,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
     if let Some(msg) = category_mismatch_issue(data, sec, mat) {
         return Some(msg);
     }
-    let shear_material = if sec.is_some_and(|section| section.is_cft()) {
+    let shear_material = if sec.is_cft() {
         model.element_steel_material(data)
     } else {
         Some(mat)
@@ -488,7 +487,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
             ));
         }
     };
-    if let Some(shape) = sec.and_then(|s| s.shape.as_ref()) {
+    if let Some(shape) = sec.shape.as_ref() {
         if let Err(error) = shape.rounded_steel_properties() {
             return Some(format!(
                 "部材 ID {} の断面材料領域を解決できません: {error}",
@@ -550,14 +549,12 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                  断面タブで段別本数・かぶり・断面寸法を見直してください。\
                  非線形解析では実配筋から曲げ降伏・せん断終局の各耐力を算定するため解析を開始できません。",
                 data.id.0,
-                sec.map(|s| s.name.as_str()).unwrap_or("名称未設定"),
+                sec.name.as_str(),
                 err
             ));
         }
     }
-    let is_concrete = sec
-        .and_then(|s| s.shape.as_ref())
-        .is_some_and(|s| s.is_concrete_like());
+    let is_concrete = sec.shape.as_ref().is_some_and(|s| s.is_concrete_like());
     if is_concrete {
         match mat.fc {
             None => {
@@ -581,7 +578,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
         if elastic_wall_girder {
             return elastic_member_input_issue(data, model);
         }
-        let has_rebar = sec.and_then(|s| s.shape.as_ref()).is_some_and(|s| {
+        let has_rebar = sec.shape.as_ref().is_some_and(|s| {
             s.beam_rebar().is_some()
                 || s.rect_column_rebar().is_some()
                 || s.circle_column_rebar().is_some()
@@ -597,7 +594,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                 data.id.0
             ));
         }
-        let fiber_shape = sec.and_then(|s| s.shape.as_ref());
+        let fiber_shape = sec.shape.as_ref();
         let is_src = matches!(
             fiber_shape,
             Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. })
@@ -670,7 +667,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
     if elastic_wall_girder {
         return elastic_member_input_issue(data, model);
     }
-    if sec.and_then(|s| s.shape.as_ref()).is_some() {
+    if sec.shape.as_ref().is_some() {
         if !mat.fy.is_some_and(|fy| fy > 0.0) {
             return Some(format!(
                 "部材 ID {} は鋼材断面ですが、材料「{}」に降伏強度 fy が設定されていません。\

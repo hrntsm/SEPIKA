@@ -183,9 +183,8 @@ mod tests {
         make_model_with_k(p0, p1, ref_vec, [1000.0, 2000.0, 3000.0, 0.0, 5.0e6, 6.0e6])
     }
 
-    /// 1) 軸バネ: 一端固定・他端に軸力 P を与えたときの変位 δ = P/kx が剛性行列（局所 0,0 / 6,6 / 0,6 / 6,0 成分）から手計算どおりに再現されること。
     #[test]
-    fn test_axial_spring_local_stiffness_and_displacement() {
+    fn test_axial_and_rotational_spring_stiffness_components() {
         let (model, data) = make_model([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
         let spring = NodalSpringElement::new(&data, &model);
         let k = spring.local_stiffness();
@@ -195,17 +194,6 @@ mod tests {
         assert!((k.get(0, 6) + kx).abs() < 1e-9);
         assert!((k.get(6, 0) + kx).abs() < 1e-9);
 
-        let p = 500.0;
-        let u_j = p / kx;
-        assert!((k.get(6, 6) * u_j - p).abs() < 1e-9);
-    }
-
-    /// 2) 回転バネ kry/krz の剛性行列成分の照合（局所 4,4/5,5 と j 端対応成分）。
-    #[test]
-    fn test_rotational_spring_stiffness_components() {
-        let (model, data) = make_model([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let spring = NodalSpringElement::new(&data, &model);
-        let k = spring.local_stiffness();
         let kry = 5.0e6;
         let krz = 6.0e6;
         assert!((k.get(4, 4) - kry).abs() < 1e-6);

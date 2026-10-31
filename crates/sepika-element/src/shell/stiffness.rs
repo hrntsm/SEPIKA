@@ -50,7 +50,7 @@ impl ShellElement {
                 let dNc = dshape_cart(xi, eta, &lc);
 
                 if self.membrane_active {
-                    let bm = self.membrane_b(xi, eta, &dNc);
+                    let bm = self.membrane_b(&dNc);
                     let dm = d_membrane(self.e, self.nu, self.t);
                     let mut btd = vec![0.0; 24 * 3];
                     for i in 0..24 {
@@ -74,7 +74,7 @@ impl ShellElement {
                 }
 
                 {
-                    let bb = self.bending_b(xi, eta, &dNc);
+                    let bb = self.bending_b(&dNc);
                     let db = d_bending(self.e, self.nu, self.t);
                     let mut btd = vec![0.0; 24 * 3];
                     for i in 0..24 {

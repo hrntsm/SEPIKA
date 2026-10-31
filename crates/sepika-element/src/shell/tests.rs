@@ -103,7 +103,7 @@ fn test_membrane_b_constant_strain() {
 
     // Evaluate B*u at center (xi=0, eta=0)
     let dNc = dshape_cart(0.0, 0.0, coords);
-    let bm = shell.membrane_b(0.0, 0.0, &dNc);
+    let bm = shell.membrane_b(&dNc);
     let mut strain = [0.0; 3];
     for r in 0..3 {
         for j in 0..24 {
@@ -138,7 +138,7 @@ fn test_bending_b_constant_curvature() {
         .collect();
 
     let dNc = dshape_cart(0.0, 0.0, coords);
-    let bb = shell.bending_b(0.0, 0.0, &dNc);
+    let bb = shell.bending_b(&dNc);
     let mut curv = [0.0; 3];
     for r in 0..3 {
         for j in 0..24 {
@@ -216,21 +216,14 @@ fn test_six_rigid_body_modes_zero_energy() {
 
 #[test]
 fn test_drilling_stabilization_insensitivity() {
-    // Compare cantilever plate tip displacement with different drilling factors.
-    // Use a simple one-element cantilever: fix edge nodes 0,1; free 2,3; load node 2 in z.
     let base = make_flat_shell(10.0);
-    let mut k1 = base.local_stiffness();
-    base.add_drilling(&mut k1);
-
+    let k1 = base.local_stiffness();
     let mut base_lo = base.clone();
     base_lo.drilling_factor = DEFAULT_DRILLING_FACTOR * 0.1;
-    let mut k_lo = base_lo.local_stiffness();
-    base_lo.add_drilling(&mut k_lo);
-
+    let k_lo = base_lo.local_stiffness();
     let mut base_hi = base.clone();
     base_hi.drilling_factor = DEFAULT_DRILLING_FACTOR * 10.0;
-    let mut k_hi = base_hi.local_stiffness();
-    base_hi.add_drilling(&mut k_hi);
+    let k_hi = base_hi.local_stiffness();
 
     // Fixed DOFs: nodes 0 and 1 (Ux..Rz all fixed) => active DOFs are nodes 2 and 3 (12 DOFs)
     let active: Vec<usize> = (12..24).collect();
@@ -247,45 +240,16 @@ fn test_drilling_stabilization_insensitivity() {
 
     // Load at node 2 in Uz (active index 2 within node 2 => global index 12+2=14)
     let load_idx_in_active = 14 - 12;
-    let solve = |kred: &[f64], f: &[f64]| -> Vec<f64> {
-        let n = f.len();
-        let mut x = vec![0.0; n];
-        for i in 0..n {
-            let mut s = 0.0;
-            for j in 0..n {
-                s += kred[i * n + j] * x[j];
-            }
-            let r = f[i] - s;
-            x[i] += r / kred[i * n + i];
-        }
-        // one Jacobi sweep is enough for diagonally dominant matrices; do a few
-        for _ in 0..100 {
-            for i in 0..n {
-                let mut s = 0.0;
-                for j in 0..n {
-                    if i != j {
-                        s += kred[i * n + j] * x[j];
-                    }
-                }
-                x[i] = (f[i] - s) / kred[i * n + i];
-                if x[i].is_nan() {
-                    x[i] = 0.0;
-                }
-            }
-        }
-        x
-    };
-
-    let k1r = reduce(&k1);
-    let klor = reduce(&k_lo);
-    let khir = reduce(&k_hi);
+    let mut k1r = reduce(&k1);
+    let mut klor = reduce(&k_lo);
+    let mut khir = reduce(&k_hi);
 
     let mut f = vec![0.0; active.len()];
     f[load_idx_in_active] = 1.0;
 
-    let u1 = solve(&k1r, &f);
-    let ulo = solve(&klor, &f);
-    let uhi = solve(&khir, &f);
+    let u1 = dense_solve(&mut k1r, &mut f.clone(), active.len());
+    let ulo = dense_solve(&mut klor, &mut f.clone(), active.len());
+    let uhi = dense_solve(&mut khir, &mut f, active.len());
 
     let w1 = u1[load_idx_in_active];
     let wlo = ulo[load_idx_in_active];
