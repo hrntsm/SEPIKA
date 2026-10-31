@@ -764,13 +764,18 @@ mod tests {
         // 令別表第1: 事務室 = 床用 2900 / 大梁用 1800 / 地震用 800 [N/m²]。
         // 令85条1項の (い) 欄は「床の構造計算をする場合」で床版と小梁を分けないため、小梁用は床用と同じ値。
         let o = SlabUsage::Office;
-        assert!((o.live_load(LoadPurpose::Floor) - 2900e-6).abs() < 1e-12);
+        for (purpose, expected_n_per_mm2) in [
+            (LoadPurpose::Floor, 2.9e-3),
+            (LoadPurpose::Beam, 2.9e-3),
+            (LoadPurpose::Frame, 1.8e-3),
+            (LoadPurpose::Seismic, 0.8e-3),
+        ] {
+            assert!((o.live_load(purpose) - expected_n_per_mm2).abs() < 1e-16);
+        }
         assert_eq!(
             o.live_load(LoadPurpose::Beam),
             o.live_load(LoadPurpose::Floor)
         );
-        assert!((o.live_load(LoadPurpose::Frame) - 1800e-6).abs() < 1e-12);
-        assert!((o.live_load(LoadPurpose::Seismic) - 800e-6).abs() < 1e-12);
         // 住宅 = 1800 / 1300 / 600。
         let r = SlabUsage::Residential;
         assert!((r.live_load(LoadPurpose::Floor) - 1800e-6).abs() < 1e-12);
@@ -850,6 +855,7 @@ mod tests {
             frame: 2.0e-3,
             seismic: 1.0e-3,
         };
+        let c: SlabUsage = rmp_serde::from_slice(&rmp_serde::to_vec_named(&c).unwrap()).unwrap();
         assert_eq!(c.live_load(LoadPurpose::Floor), 3.0e-3);
         assert_eq!(c.live_load(LoadPurpose::Beam), 2.5e-3);
         assert_eq!(c.live_load(LoadPurpose::Frame), 2.0e-3);
@@ -887,9 +893,5 @@ mod tests {
         assert!((model.slab_intensity(&slab, LoadPurpose::Beam) - 7.5e-3).abs() < 1e-12);
         assert!((model.slab_intensity(&slab, LoadPurpose::Frame) - 6.8e-3).abs() < 1e-12);
         assert!((model.slab_intensity(&slab, LoadPurpose::Seismic) - 5.8e-3).abs() < 1e-12);
-        assert!(
-            (model.slab_intensity(&slab, LoadPurpose::Beam) - 8.0e-3).abs() > 1e-12,
-            "小梁設計用は床用（8.0e-3）とは異なる"
-        );
     }
 }

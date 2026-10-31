@@ -587,7 +587,6 @@ mod tests {
             .unwrap();
         near(range[0], 653.5898384862246);
         near(range[1], 1346.4101615137754);
-        assert!((range[1] - 1259.8076211353316).abs() > 80.0);
         let start = p.vertical_range([0.0, 0.0]).unwrap().unwrap();
         near(start[0], 0.0);
         near(start[1], 346.4101615137754);

@@ -34,15 +34,8 @@ pub struct ComboInput {
     /// `true` の場合、長期に `δ1・S` を加算し、短期地震に `δ3・S` を
     /// 加算した組合せも追加で生成する。
     pub heavy_snow_zone: bool,
-    /// 多雪区域の積雪荷重低減係数。`None` は既定値（δ1=0.7、δ2=δ3=0.35）。
+    /// 多雪区域の積雪荷重低減係数。`None` は既定値（δ1=0.7、δ3=0.35）。
     pub snow_factors: Option<SnowFactors>,
-}
-
-fn push_gp(combos: &mut Vec<LoadCombination>, dl: LoadCaseId, ll: LoadCaseId) {
-    combos.push(LoadCombination {
-        name: "DL + LL".into(),
-        terms: vec![(dl, 1.0), (ll, 1.0)],
-    });
 }
 
 /// 建築基準法施行令82条の標準荷重組合せを生成する。
@@ -61,12 +54,13 @@ fn push_gp(combos: &mut Vec<LoadCombination>, dl: LoadCaseId, ll: LoadCaseId) {
 /// 風荷重は算定・生成の対象外のため、暴風の組合せは作らない。風荷重ケースを
 /// 定義しても、そのケースを含む組合せは自動生成されない。
 pub fn standard_combinations(input: &ComboInput) -> Vec<LoadCombination> {
-    let mut combos = Vec::new();
     let dl = input.dl;
     let ll = input.ll;
     let sf = input.snow_factors.unwrap_or_default();
-
-    push_gp(&mut combos, dl, ll);
+    let mut combos = vec![LoadCombination {
+        name: "DL + LL".into(),
+        terms: vec![(dl, 1.0), (ll, 1.0)],
+    }];
 
     if input.heavy_snow_zone {
         if let Some(snow) = input.snow {
@@ -84,26 +78,8 @@ pub fn standard_combinations(input: &ComboInput) -> Vec<LoadCombination> {
         });
     }
 
-    push_directional(
-        &mut combos,
-        dl,
-        ll,
-        input.seismic_x,
-        "EX",
-        input.snow,
-        input.heavy_snow_zone,
-        sf.delta3,
-    );
-    push_directional(
-        &mut combos,
-        dl,
-        ll,
-        input.seismic_y,
-        "EY",
-        input.snow,
-        input.heavy_snow_zone,
-        sf.delta3,
-    );
+    push_directional(&mut combos, input, input.seismic_x, "EX", sf.delta3);
+    push_directional(&mut combos, input, input.seismic_y, "EY", sf.delta3);
 
     combos
 }
@@ -114,22 +90,19 @@ fn trim_f64(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// 地震・暴風いずれかの片方向（EX/EY/WX/WY）について、`DL+LL±X` と
-/// 多雪区域なら `DL+LL+δ・SL±X`（δ: 暴風時 δ2／地震時 δ3）を追加する共通ヘルパー。
-#[allow(clippy::too_many_arguments)]
+/// 片方向の地震組合せを正・負の順に追加する。多雪区域は積雪込みも追加する。
 fn push_directional(
     combos: &mut Vec<LoadCombination>,
-    dl: LoadCaseId,
-    ll: LoadCaseId,
+    input: &ComboInput,
     case: Option<LoadCaseId>,
     label: &str,
-    snow: Option<LoadCaseId>,
-    heavy_snow_zone: bool,
     delta: f64,
 ) {
     let Some(case) = case else {
         return;
     };
+    let dl = input.dl;
+    let ll = input.ll;
     combos.push(LoadCombination {
         name: format!("DL + LL + {label}"),
         terms: vec![(dl, 1.0), (ll, 1.0), (case, 1.0)],
@@ -138,8 +111,8 @@ fn push_directional(
         name: format!("DL + LL - {label}"),
         terms: vec![(dl, 1.0), (ll, 1.0), (case, -1.0)],
     });
-    if heavy_snow_zone {
-        if let Some(snow) = snow {
+    if input.heavy_snow_zone {
+        if let Some(snow) = input.snow {
             let d = trim_f64(delta);
             combos.push(LoadCombination {
                 name: format!("DL + LL + {d}SL + {label}"),
@@ -529,7 +502,7 @@ mod tests {
 #[cfg(test)]
 mod state_tests {
     use super::*;
-    use crate::model::{LoadCase, LoadCaseKind as K, LoadPurpose, SlabUsage};
+    use crate::model::{LoadCase, LoadCaseKind as K};
 
     fn cases() -> Vec<LoadCase> {
         [
@@ -633,35 +606,5 @@ mod state_tests {
         }
         assert!(case_design_state(K::Other).is_err());
         assert!(case_design_state(K::LiveSeismic).is_err());
-    }
-
-    #[test]
-    fn office_10m2_and_actual_input_keep_purpose_columns() {
-        for (purpose, kn) in [
-            (LoadPurpose::Floor, 29.0),
-            (LoadPurpose::Beam, 29.0),
-            (LoadPurpose::Frame, 18.0),
-            (LoadPurpose::Seismic, 8.0),
-        ] {
-            assert!(
-                (SlabUsage::Office.live_load(purpose) * 10_000_000.0 / 1000.0 - kn).abs() < 1e-12
-            );
-        }
-        let actual = SlabUsage::Custom {
-            floor: 0.0033,
-            beam: 0.0031,
-            frame: 0.0022,
-            seismic: 0.0009,
-        };
-        let saved: SlabUsage =
-            rmp_serde::from_slice(&rmp_serde::to_vec_named(&actual).unwrap()).unwrap();
-        for (purpose, kn) in [
-            (LoadPurpose::Floor, 33.0),
-            (LoadPurpose::Beam, 31.0),
-            (LoadPurpose::Frame, 22.0),
-            (LoadPurpose::Seismic, 9.0),
-        ] {
-            assert!((saved.live_load(purpose) * 10_000_000.0 / 1000.0 - kn).abs() < 1e-12);
-        }
     }
 }

@@ -598,9 +598,7 @@ mod direction_tests {
                 ] {
                     let mut load = MemberLoad::manual(ElemId(0), dir, kind.clone());
                     load.source = source;
-                    let before = format!("{load:?}");
                     assert_eq!(load.validate_direction().is_ok(), valid, "{load:?}");
-                    assert_eq!(format!("{load:?}"), before);
                 }
             }
         }
