@@ -396,12 +396,11 @@ impl WallSideColumnIndex {
             });
             if nonparallel {
                 let walls = bindings.iter().map(|b| b.wall).collect();
-                let valid_walls: Vec<_> = bindings.iter().map(|b| b.wall).collect();
                 let conflict = issue(WallSideColumnReason::NonParallelWalls, walls, vec![column]);
                 for binding in result
                     .bindings
                     .iter_mut()
-                    .filter(|b| b.column == column && valid_walls.contains(&b.wall))
+                    .filter(|b| b.column == column && conflict.walls.contains(&b.wall))
                 {
                     binding.issues.push(conflict.clone());
                 }

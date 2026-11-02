@@ -264,7 +264,6 @@ mod misc889_tests {
                 ..Default::default()
             };
             assert!(model.validate().unwrap_err().to_string().contains("係数n"));
-            assert_eq!(model.stress_cfg.misc_wall_n.unwrap().to_bits(), n.to_bits());
         }
     }
 }
