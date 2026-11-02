@@ -72,8 +72,8 @@ impl RoundedRectangle {
         })
     }
 
-    /// 正側縁から座標 `z` までの領域の (A [mm²], ∫z dA [mm³], ∫z² dA [mm⁴])。
-    /// `z` は図心から正側への有限距離 [mm] が前提。断面外は空領域または全領域となる。
+    /// 正側縁から座標 `z` までの領域の (A `[mm²]`, ∫z dA `[mm³]`, ∫z² dA `[mm⁴]`)。
+    /// `z` は図心から正側への有限距離 `[mm]` が前提。断面外は空領域または全領域となる。
     pub fn above(self, z: f64) -> (f64, f64, f64) {
         let p = rounded_rectangle(self.height, self.width, self.radius);
         let x = z.abs().min(self.height / 2.0);

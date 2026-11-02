@@ -349,11 +349,8 @@ impl Model {
             .filter(|t| *t > 0.0)
     }
 
-    /// 版の自重の面荷重強度 [N/mm²]（板厚 × 断面の主材料の設計単位体積重量）。
-    ///
-    /// 断面または断面の主材料が未割当のときは `None`。自重を面荷重として焼き込まず
-    /// 毎回算定するのは、板厚や材料を変えたときに自重が追随しないという食い違いを
-    /// 作らないためである。
+    /// 床板の主材料。STB 強度指定を優先し、指定がなければ割当断面の材料を返す。
+    /// 対応する材料を解決できなければ `None`。
     pub fn slab_plate_material(&self, slab: &Slab) -> Option<&Material> {
         if self
             .stb_strengths
@@ -368,6 +365,8 @@ impl Model {
             .and_then(|id| self.materials.get(id.index()))
     }
 
+    /// 版の自重の面荷重強度 `[N/mm²]`（板厚 × 主材料の設計単位体積重量）。
+    /// 板厚または主材料を解決できなければ `None`。
     pub fn slab_self_weight_intensity(&self, slab: &Slab) -> Option<f64> {
         let t = self.slab_plate_thickness(slab)?;
         let mat = self.slab_plate_material(slab)?;

@@ -932,7 +932,7 @@ pub struct PostLateralLoad {
     pub case: LoadCaseId,
     /// 全体X/Y方向の単位ベクトル。
     pub direction: [f64; 2],
-    /// 材軸始端からの位置 [mm]、集中荷重 [N]、分布荷重 [N/mm]。
+    /// 材軸始端からの位置 `[mm]`、集中荷重 `[N]`、分布荷重 `[N/mm]`。
     pub load: MemberLoadKind,
 }
 
@@ -941,11 +941,11 @@ pub struct PostLateralLoad {
 pub struct PostDesignInput {
     pub member: SecondaryMemberId,
     pub lateral_support: PostLateralSupport,
-    /// 強軸曲げを生じる横力方向の全体X軸からの角度 [度]。
+    /// 強軸曲げを生じる横力方向の全体X軸からの角度 `[度]`。
     pub strong_direction_deg: Option<f64>,
-    /// 強軸・弱軸の軸圧縮座屈長さ [mm]。
+    /// 強軸・弱軸の軸圧縮座屈長さ `[mm]`。
     pub buckling_lengths_mm: Option<[f64; 2]>,
-    /// 圧縮フランジの横補剛間隔 [mm]。
+    /// 圧縮フランジの横補剛間隔 `[mm]`。
     pub lateral_buckling_length_mm: Option<f64>,
     /// たわみ限界 L/分母。未指定は変位のみ算定。
     pub deflection_limit_denom: Option<f64>,

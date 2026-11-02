@@ -1,5 +1,17 @@
 # V&V レポート（検証・妥当性確認）
 
+## Core生成・未入力配筋試験の現役参照整理（#1059）
+
+同一fixtureの生成を統合し、元入力・期待値・公差を保持する。本番の構造式と演算順、既存のVerification/Validationの範囲、固定SHAと過去の実行結果は変更しない。
+
+| 統合前 | 現役試験と保持する保証 |
+| --- | --- |
+| `test_generated_members_have_no_section` / `test_generated_axes_and_stories` | `frame_gen::tests::test_generated_axes_stories_and_unassigned_members`。同じ既定FrameSpecで全要素の断面未割当、通り名と距離、階名と標高、基部、層名と高さを保持 |
+| 矩形柱の未入力方向別面積 / 辺別諸元、円形柱の未入力等価断面 / 帯筋諸元 | `rc_rebar_geom::tests::test_real_rebar_unset_section_properties`。同じ空配筋fixtureで元の寸法600/700 mm、全ゼロ期待値と既存の梁・柱断面諸元を保持 |
+| 囲まれた壁版の元境界と面積 | `model::wall_plate::tests::test_boundary_coords_with_uses_supplied_coords`。[現役の幾何・描画観測](要素にならない壁版の可視化と耐震スリット_2026-09.md#5-変形後座標で版を描くこと)に元座標と変形後座標の統合を記録 |
+
+[内部参照検査](内部参照検査境界_Issue681_2026-10.md#恒久回帰と独立期待契約)では共有借用後の冗長な不変比較だけを除き、21参照役の正常・未設定・不在入力と診断を保持する。
+
 ## 材料履歴試験の現役参照整理（#1059）
 
 同じ材料諸元・確定履歴を持つ試験を統合した。本番の構成則・確定と復元・公差・6件の履歴snapshot・固定SHAの検証履歴と、既存のVerification/Validation範囲を保持する。
