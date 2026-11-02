@@ -67,29 +67,16 @@ impl App {
         self.ui.scoped.member_place_first = None;
     }
 
-    /// プロジェクトを指定パスへ保存する。成功時は project_path と未保存フラグを更新。
-    ///
-    /// 準備計算・解析結果は最新の場合のみ同梱する。解析が stale でも、
-    /// 現在の生成入力と一致する応力源不要の直接検定は単独で保存できる。
-    /// 生成入力または検定契約が不一致の検定は保存対象から除外する。
-    /// 解析結果を同梱しないときは、振動荷重ケースもモデルから外して書く
-    /// （結果のない空ケースがナビに残らないようにする。メモリ上のケースは残す）。
-    /// 準備が古く自動部材荷重の位置・区間が不正な場合は、保存候補から全自動荷重と成果を除く。
-    /// 未準備の質量設定は保存候補へ反映し、旧設定の準備・解析成果を同梱しない。
-    /// 手入力と編集中モデル・履歴は保持し、保存のための準備計算は実行しない。
-    ///
-    /// 解析結果の直列化サイズが `SAVE_RECORDING_CONFIRM_BYTES` を超え、かつ
-    /// 時刻歴の詳細記録（`ThRecording`）を含む場合は、保存せずに確認保留
-    /// （`pending_save_recording`）をセットして戻る。確認ダイアログの選択に
-    /// 応じて [`Self::save_project_to_opts`] が `Some(true)`（含めて保存）／
-    /// `Some(false)`（除外して保存）で再入する。
+    /// プロジェクトを指定パスへ保存し、成功時に保存先と未保存フラグを更新する。詳細記録の確認条件は [`Self::save_project_to_opts`] に従う。
+    /// 架構応力不要の直接検定は生成入力・検定版が有効なら解析が古い・未実行でも単独保存できるが、古い自動部材荷重が材長を外れる場合や質量設定が未準備の場合は本案成果を除外する。
+    /// 振動荷重ケースは本案結果を同梱する場合、または検討が1件以上ある場合に保存する。
     pub fn save_project_to(&mut self, path: std::path::PathBuf) {
         self.save_project_to_opts(path, None);
     }
 
-    /// [`Self::save_project_to`] の本体。`include_recording` が `None` のとき、
-    /// サイズ超過なら確認保留をセットして保存を中断する。`Some(false)` なら
-    /// 時刻歴の詳細記録を除外して保存する（メモリ上の記録は保持したまま）。
+    /// [`Self::save_project_to`] と同じ条件で保存し、`include_recording` で本案の時刻歴詳細記録の同梱を指定する。
+    /// `None` は詳細記録を含む解析結果が `SAVE_RECORDING_CONFIRM_BYTES` を超える場合に保存を確認待ちとする。
+    /// `Some(true)` は詳細記録を含め、`Some(false)` は除外する。メモリ上の記録は保持する。
     pub fn save_project_to_opts(
         &mut self,
         path: std::path::PathBuf,
@@ -317,8 +304,7 @@ impl App {
         }
     }
 
-    /// 時刻歴の詳細記録を除いた解析結果のみで保存する（確認ダイアログの
-    /// 「除外して保存」）。
+    /// 本案の時刻歴詳細記録を除外して保存する。メモリ上の記録は保持する。
     pub fn save_project_without_recording(&mut self, path: std::path::PathBuf) {
         self.save_project_to_opts(path, Some(false));
     }
