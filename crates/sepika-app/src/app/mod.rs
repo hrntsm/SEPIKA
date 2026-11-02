@@ -1762,9 +1762,9 @@ pub mod study;
 pub use result_validity::HoldingCapacitySource;
 pub(crate) use result_validity::ResultInputKey;
 #[cfg(feature = "gui")]
+pub(crate) use result_validity::{check_is_unrated, checked_ratio};
 pub(crate) use result_validity::{
-    check_is_unrated, checked_ratio, displayed_wall_checks, displayed_wall_summary, evaluate_check,
-    INVALID_CHECK_COMPONENTS,
+    displayed_wall_checks, displayed_wall_summary, evaluate_check, INVALID_CHECK_COMPONENTS,
 };
 mod actions;
 pub mod node_grid;
