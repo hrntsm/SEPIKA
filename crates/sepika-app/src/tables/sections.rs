@@ -14,6 +14,10 @@
 #[path = "cft_material_tests.rs"]
 mod cft_material_tests;
 
+#[cfg(test)]
+#[path = "section_usage_tests.rs"]
+mod section_usage_tests;
+
 use crate::app::App;
 use sepika_core::ids::{MaterialId, SectionId};
 use sepika_core::model::Model;
@@ -223,6 +227,9 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
     for s in &app.core.model.slabs {
         count(s.section(), &mut n_elements);
     }
+    for plate in &app.core.model.wall_plates {
+        count(plate.section, &mut n_elements);
+    }
     for sm in app.core.model.beams().chain(app.core.model.posts()) {
         count(sm.section, &mut n_elements);
     }
@@ -368,7 +375,7 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
             row.col(|ui| {
                 let sec_id = sec.id;
                 let blocked = (n_elements[i] > 0)
-                    .then_some("部材・小梁・二次部材から参照中のため削除できません");
+                    .then_some("部材・小梁・二次部材・床・壁版から参照中のため削除できません");
                 if table_util::delete_cell(ui, "この断面を削除", blocked) {
                     pending_delete = Some(sec_id);
                 }
