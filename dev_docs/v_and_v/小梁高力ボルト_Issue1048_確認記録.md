@@ -25,7 +25,22 @@ F10T M20は円の軸断面積と150 N/mm²から47.1238898038 kN/本、2面94.24
 - `sepika_app::app::beam_bolt_tests`: 同符号の荷重が異なる複数小梁、実荷重の非対称反力と端部比、共通本数変更、異符号への割当変更・階別IDの同符号共有、接合未設定でも曲げたわみを保持する未検定、保存再読込と編集後失効、本番eguiポインタイベントによる種類・面数・本数・条件入力、再検定と両端結果表示、種類変更による摩擦面確認解除。
 - `sepika_app::app::tests` の既存片持ち回帰: 自重・荷重の支持端反力に対応するボルト比と自由端の接合なし、曲げ伝達による総合未検定。
 
-途中の追加試験fixtureには床板入力の欄名誤りによるコンパイルエラー1件があり、欄名を訂正した。数値・動作試験の失敗とは区別する。型のRustdoc整理と摩擦面表示の具体化後、最終検証結果を以下へ追記する。
+途中の追加試験fixtureには床板入力の欄名誤りによるコンパイルエラー1件があり、欄名を訂正した。全関連試験の初回にはWindowsの匿名LLVMシンボル未解決によるリンクエラーがあり、設計クレートの生成物だけを再構築して解消した。原因は断定せず、数値・動作試験の失敗とは区別する。
+
+main `ea44e12f` の統合後、HEAD `38cf1798` と既存回帰2件の期待整合を含む差分を対象に最終freshレビューを行い、修正必須なしを確認した。期待整合は、接合未設定時の新しい未検定状態に合わせたもので、元の重量差・曲げ需要の独立assertを保持する。
+
+共有targetは `C:\Users\hiroa\Desktop\ikkan\target`、Clippyは `0.1.99 (58cf8f9c35 2026-10-13)`。統合後の最終ローカル実行を以下に記録する。
+
+| コマンド | 結果 |
+| --- | --- |
+| `cargo test -p sepika-core -p sepika-edit -p sepika-design-jp --locked` | 28スイート、1610成功・失敗0・既存ignore1（libはcore595、設計692、編集221。統合・doc testを含む） |
+| `cargo test -p sepika-app --lib --features gui --locked` | 1212成功・失敗0・既存ignore3。追加4件・既存片持ち回帰・整合した既存2件を含む |
+| `cargo clippy -p sepika-core -p sepika-edit -p sepika-design-jp -p sepika-app --all-targets --features sepika-app/gui --locked -- -D warnings` | 成功 |
+| `cargo check -p sepika-mcp --tests --locked` | 成功。共有モデルの利用側の型整合を確認 |
+| `cargo run -p xtask --locked -- check-docs` | 成功（summary141・links863・impl refs427） |
+| `cargo fmt --all -- --check` | 成功 |
+| `git diff --check` | 成功 |
+| `mdbook build` | 成功 |
 
 ## 範囲外で発見した課題
 
