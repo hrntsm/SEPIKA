@@ -169,14 +169,10 @@ fn secondary_cft_public_entries_reject_all_kinds_shapes_and_locations() {
                 .unwrap_err()
                 .to_string();
                 assert!(error.contains("SecondaryMemberId(539)"), "{error}");
-                let pushover: sepika_solver::nonlinear::pushover::PushoverResult = serde_json::from_value(serde_json::json!({
-                    "wall_capacities": [], "rc_wall_shear_method": "ArakawaMean", "steps": [], "capacity_curve": [], "hinges": [], "shear_yields": [], "mechanism": "Overall", "qu": 0.0, "member_response": []
-                })).unwrap();
                 let error = sepika_solver::dynamic::lumped_mass::build_lumped_mass_model(
                     &model,
-                    &pushover,
+                    &[],
                     sepika_solver::dynamic::lumped_mass::LumpedMassType::default(),
-                    0.5,
                 )
                 .unwrap_err()
                 .to_string();

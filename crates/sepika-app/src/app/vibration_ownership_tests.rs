@@ -170,7 +170,7 @@ fn lumped_time_history_ownership_distinguishes_current_pushover_generation_condi
     app.run_seismic(SeismicDir::X);
     let mut sources = Vec::new();
     let mut predecessors = Vec::new();
-    for max_disp_mm in [5.0, 100.0] {
+    for max_disp_mm in [30.0, 100.0] {
         app.core.analysis_cfg.push_use_max_disp = true;
         app.core.analysis_cfg.push_use_drift_angle = false;
         app.core.analysis_cfg.push_max_disp = max_disp_mm;
@@ -183,6 +183,7 @@ fn lumped_time_history_ownership_distinguishes_current_pushover_generation_condi
         assert!(app
             .require_result_input(ResultInputKey::Pushover(SeismicDir::X))
             .is_ok());
+        crate::app::tests::install_independent_lumped_backbone(&mut app, max_disp_mm);
         predecessors.push(
             bincode::serialize(
                 app.core
@@ -697,6 +698,7 @@ fn lumped_time_history_ownership_tracks_converted_acceleration_and_settings() {
         Some(JobResult::LumpedMass(
             Box::new(Ok(dummy_lumped(0.31, true))),
             Some(Box::new(rerun.source)),
+            None,
         )),
     );
     app.core.scoped.lumped_wave_library_selection = Some("C.csv".into());
@@ -779,6 +781,7 @@ fn time_history_ownership_rejection_failure_and_disconnection_preserve_results()
                         Ok(dummy_lumped(0.91, true))
                     }),
                     Some(Box::new(source)),
+                    None,
                 ))
             } else {
                 Some(JobResult::TimeHistory(

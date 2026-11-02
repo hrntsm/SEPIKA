@@ -2016,6 +2016,7 @@ mod tests {
         (
             model,
             StaticOnce {
+                story_shears: None,
                 stiffness_ratio_disp: None,
                 disp: vec![[0.0; 6]; 4],
                 member_forces: vec![],

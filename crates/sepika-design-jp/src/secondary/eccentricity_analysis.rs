@@ -321,6 +321,7 @@ mod tests {
             })
             .collect();
         StaticOnce {
+            story_shears: None,
             stiffness_ratio_disp: None,
             disp,
             member_forces,
@@ -570,6 +571,7 @@ mod tests {
         disp_x[2][0] = 10.0; // 上端
         disp_x[0][0] = 0.0; // 下端
         let res_x = StaticOnce {
+            story_shears: None,
             stiffness_ratio_disp: None,
             disp: disp_x,
             member_forces: vec![(
@@ -583,6 +585,7 @@ mod tests {
         let mut disp_y = vec![[0.0; 6]; 3];
         disp_y[2][1] = 10.0;
         let res_y = StaticOnce {
+            story_shears: None,
             stiffness_ratio_disp: None,
             disp: disp_y,
             member_forces: vec![(

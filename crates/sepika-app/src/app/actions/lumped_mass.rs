@@ -118,25 +118,36 @@ impl App {
             self.bind_time_history_source(source, true);
             self.accept_time_history_reference(source, true);
         }
+        let build_identity = source.is_none().then(|| self.lumped_model_input_identity());
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;
         let (res_x, res_y, po_x, po_y) = self.lumped_static_and_pushover();
         self.spawn_analysis_job(label, move || {
-            JobResult::LumpedMass(
-                Box::new(Self::run_compute(|| {
-                    sepika_job::compute::compute_lumped_mass(
-                        model,
-                        cfg,
-                        res_x,
-                        res_y,
-                        po_x,
-                        po_y,
-                        accel.as_deref(),
-                    )
-                    .map_err(|e| e.to_string())
-                })),
-                source.map(Box::new),
-            )
+            let computed = Self::run_compute(|| {
+                match sepika_job::compute::compute_lumped_mass(
+                    model,
+                    cfg,
+                    res_x,
+                    res_y,
+                    po_x,
+                    po_y,
+                    accel.as_deref(),
+                ) {
+                    Ok(result) => Ok(Ok(result)),
+                    Err(sepika_job::JobError::LumpedIdentification(diagnostic)) => {
+                        Ok(Err(diagnostic))
+                    }
+                    Err(error) => Err(error.to_string()),
+                }
+            });
+            match computed {
+                Ok(Err(diagnostic)) => JobResult::LumpedMassUnidentified(diagnostic),
+                other => JobResult::LumpedMass(
+                    Box::new(other.map(|r| r.expect("未同定は別結果として処理済み"))),
+                    source.map(Box::new),
+                    build_identity,
+                ),
+            }
         });
     }
 
@@ -150,13 +161,7 @@ impl App {
         };
         let mut keys = Vec::new();
         for &dir in dirs {
-            if cfg.lumped_dim == StickDim::Spatial
-                || !cfg.lumped_nonlinear
-                || cfg.lumped_mass_type
-                    == sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentBendingShear
-            {
-                keys.push(ResultInputKey::Static(StaticCaseKey::Seismic(dir)));
-            }
+            keys.push(ResultInputKey::Static(StaticCaseKey::Seismic(dir)));
             if cfg.lumped_nonlinear {
                 keys.push(ResultInputKey::Pushover(dir));
             }
@@ -180,6 +185,42 @@ impl App {
             })
             .collect();
         crate::app::vibration::vibration_identity(&inputs)
+    }
+
+    pub(crate) fn lumped_model_input_identity(&self) -> String {
+        let c = self.core.analysis_cfg;
+        crate::app::vibration::vibration_identity(&(
+            self.core.model.calculation_model(),
+            c.lumped_mass_type,
+            c.lumped_dim,
+            c.lumped_stiffness,
+            c.lumped_dir,
+            c.lumped_nonlinear,
+            c.lumped_secant_ratio,
+            c.lumped_target_drift_angle,
+            c.lumped_n_modes,
+            self.lumped_prerequisite_identity(),
+        ))
+    }
+
+    pub(crate) fn lumped_window_is_current(&self) -> bool {
+        self.core.scoped.view_lumped_vibration_case.is_some()
+            || self
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .and_then(|b| b.lumped_input_identity.as_ref())
+                .is_some_and(|identity| *identity == self.lumped_model_input_identity())
+    }
+
+    pub(crate) fn invalidate_lumped_mass_view(&mut self) {
+        if let Some(bundle) = self.core.scoped.results.as_mut() {
+            bundle.lumped = None;
+            bundle.lumped_input_identity = None;
+        }
+        self.core.scoped.stick_response = None;
+        self.core.scoped.view_lumped_vibration_case = None;
     }
 
     fn require_lumped_prerequisites(&self) -> Result<(), String> {
@@ -215,11 +256,46 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn apply_lumped_identification_failure(
+        &mut self,
+        failure: sepika_solver::dynamic::lumped_mass::LumpedMassIdentificationFailure,
+    ) {
+        let reason = failure.reason.clone();
+        let mut bundle = self.take_results_for_analysis();
+        bundle.lumped = None;
+        bundle.lumped_input_identity = None;
+        bundle.lumped_identification_failure = Some(failure);
+        self.core.scoped.stick_response = None;
+        self.core.scoped.view_lumped_vibration_case = None;
+        self.core.scoped.results = Some(bundle);
+        self.core.scoped.staleness.mark_non_calc_edited();
+        self.report_error(reason);
+    }
+
+    #[cfg(test)]
     pub(crate) fn apply_lumped_mass_result(
         &mut self,
         res: Result<LumpedMassResult, String>,
         source: Option<TimeHistorySource>,
     ) {
+        let identity = source.is_none().then(|| self.lumped_model_input_identity());
+        self.apply_lumped_mass_result_with_identity(res, source, identity);
+    }
+
+    pub(crate) fn apply_lumped_mass_result_with_identity(
+        &mut self,
+        res: Result<LumpedMassResult, String>,
+        source: Option<TimeHistorySource>,
+        build_identity: Option<String>,
+    ) {
+        if source.is_none()
+            && build_identity
+                .as_ref()
+                .is_none_or(|identity| *identity != self.lumped_model_input_identity())
+        {
+            self.report_error("質点系の開始後に生成条件が変わったため結果を破棄しました。質点系を再実行してください。");
+            return;
+        }
         match res {
             Ok(result) => {
                 if result.response.is_some() && source.is_none() {
@@ -242,6 +318,8 @@ impl App {
                     return;
                 }
                 let mut bundle = self.take_results_for_analysis();
+                bundle.lumped_identification_failure = None;
+                bundle.lumped_input_identity = build_identity;
                 if let Some(source) = source {
                     let input = self.vibration_result_input(&source);
                     let dir = lumped_vibration_dir_from_seismic(source.cfg.lumped_dir);
@@ -386,6 +464,391 @@ mod tests {
         )));
         #[cfg(not(feature = "gui"))]
         app.start_seismic_job(dir);
+    }
+
+    #[test]
+    fn unidentified_diagnostic_survives_public_save_open_without_old_success_model() {
+        use sepika_core::model::{LumpedSkeletonInterval, LumpedVibrationDir};
+        use sepika_solver::dynamic::lumped_mass::{
+            LumpedMassIdentificationFailure, LumpedMassType,
+        };
+        for failed_dir in [SeismicDir::X, SeismicDir::Y] {
+            let mut app = App::default();
+            app.load_model(crate::sample::portal_frame());
+            app.core.analysis_cfg.lumped_dir = if failed_dir == SeismicDir::X {
+                SeismicDir::Y
+            } else {
+                SeismicDir::X
+            };
+            let interval = LumpedSkeletonInterval {
+                story: sepika_core::ids::StoryId(0),
+                dir: LumpedVibrationDir::Y,
+                interval_mm: [12.0, 25.0],
+            };
+            app.core.model.lumped_skeleton_intervals = vec![interval];
+            app.core.scoped.results = Some(ResultsBundle {
+                lumped: Some(crate::app::tests::dummy_lumped(0.5, true)),
+                ..Default::default()
+            });
+            app.core.scoped.stick_response = Some(Default::default());
+            let failure = LumpedMassIdentificationFailure {
+                reason: format!("{failed_dir:?}方向全層: 同定上限へ未到達"),
+                model_type: LumpedMassType::EquivalentBendingShear,
+                dim: StickDim::Spatial,
+                dir: failed_dir,
+                target_drift_angle: 0.005,
+                secant_ratio: 0.75,
+                manual_intervals: vec![interval],
+                source_targets: vec![(
+                    SeismicDir::Y,
+                    Some(sepika_solver::nonlinear::pushover::PushoverTarget {
+                        max_disp: Some(42.0),
+                        max_drift_angle: Some(1.0 / 150.0),
+                    }),
+                )],
+            };
+            app.apply_lumped_identification_failure(failure.clone());
+            assert!(app.core.scoped.results.as_ref().unwrap().lumped.is_none());
+            assert!(app.core.scoped.stick_response.is_none());
+            let path = crate::app::tests::test_tmp().join("issue1087_unidentified.ovika");
+            app.save_project_to(path.clone());
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            let mut restored = App::default();
+            restored.open_project_from(path.clone());
+            assert!(
+                restored.core.scoped.last_error.is_none(),
+                "{:?}",
+                restored.core.scoped.last_error
+            );
+            let bundle = restored
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .expect("診断を保存する");
+            assert!(bundle.lumped.is_none());
+            assert!(restored.core.scoped.stick_response.is_none());
+            let diagnostic = bundle.lumped_identification_failure.as_ref().unwrap();
+            assert_eq!(diagnostic.reason, failure.reason);
+            assert_eq!(diagnostic.dir, failed_dir);
+            assert_eq!(diagnostic.target_drift_angle, 0.005);
+            assert_eq!(diagnostic.secant_ratio, 0.75);
+            assert_eq!(diagnostic.manual_intervals, vec![interval]);
+            assert_eq!(diagnostic.source_targets[0].1.unwrap().max_disp, Some(42.0));
+            assert_eq!(
+                restored.core.model.lumped_skeleton_intervals,
+                vec![interval]
+            );
+            #[cfg(feature = "gui")]
+            {
+                restored.core.model.lumped_skeleton_intervals[0].interval_mm = [99.0, 100.0];
+                let context = egui::Context::default();
+                crate::app::install_japanese_fonts(&context);
+                let output =
+                    context.run_ui(Default::default(), |ui| restored.lumped_mass_panel(ui));
+                let visible = output
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.text()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert!(
+                    visible.contains("元の下端階ID 0 / Y: [12.000, 25.000] mm"),
+                    "{visible}"
+                );
+                assert!(!visible.contains("99.000"));
+                assert!(
+                    visible.contains(&format!("Spatial / {failed_dir:?}")),
+                    "{visible}"
+                );
+            }
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn identified_bending_metadata_and_both_ductilities_survive_public_project_roundtrip() {
+        use sepika_core::ids::StoryId;
+        use sepika_core::model::Story;
+        use sepika_solver::dynamic::lumped_mass::*;
+        let fit = identify_story_trilinear(
+            &[(1.0, 100.0), (3.0, 140.0), (6.0, 155.0), (10.0, 175.0)],
+            StoryFitOptions {
+                initial_stiffness: 100.0,
+                secant_ratio: 0.75,
+                area_limit: 6.0,
+                identification_limit: 10.0,
+                manual_interval: Some([4.0, 10.0]),
+            },
+        )
+        .unwrap();
+        let mut model = LumpedMassModel::from_stories(
+            LumpedMassType::EquivalentBendingShear,
+            vec![StoryStick {
+                story: StoryId(0),
+                mass: 1.0,
+                height: 3000.0,
+                skeleton: fit.skeleton,
+            }],
+        );
+        model.bending = vec![StoryBending {
+            ei_x: 0.0,
+            ei_y: 1e12,
+            inertia: [0.0, 1e6, 0.0],
+        }];
+        model.identifications = vec![StoryIdentification {
+            story: StoryId(0),
+            dir: SeismicDir::X,
+            fit,
+            source_target: sepika_solver::nonlinear::pushover::PushoverTarget {
+                max_disp: Some(20.0),
+                max_drift_angle: None,
+            },
+            bending_yield_drift: fit.skeleton.q2 * 0.009,
+        }];
+        let modal = lumped_mass_eigen(&model, 2).unwrap();
+        let acceleration = vec![0.0, 10.0, -10.0, 0.0];
+        let response = bending_shear_time_history(&model, &acceleration, 0.01, 0.02).unwrap();
+        let expected_main = response.story_ductility.clone();
+        let expected_total = response.story_total_ductility.clone().unwrap();
+        let mut app = App::default();
+        let building = sepika_core::model::Model {
+            stories: vec![
+                Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0)),
+                Story::new(StoryId(1), "2F".into(), Some(3000.0), Some(0.0)),
+            ],
+            ..Default::default()
+        };
+        app.load_model(building);
+        app.core.analysis_cfg.lumped_mass_type = LumpedMassType::EquivalentBendingShear;
+        app.core.analysis_cfg.lumped_nonlinear = true;
+        app.core.analysis_cfg.lumped_target_drift_angle = 0.002;
+        let mut source = app
+            .lumped_time_history_input(acceleration, "独立骨格".into())
+            .source;
+        app.bind_time_history_source(&mut source, true);
+        app.accept_time_history_reference(&source, true);
+        app.apply_lumped_mass_result(
+            Ok(LumpedMassResult {
+                model,
+                modal,
+                response: Some(response),
+            }),
+            Some(source),
+        );
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let path = crate::app::tests::test_tmp().join("issue1087_identified.ovika");
+        app.save_project_to(path.clone());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mut restored = App::default();
+        restored.open_project_from(path.clone());
+        assert!(
+            restored.core.scoped.last_error.is_none(),
+            "{:?}",
+            restored.core.scoped.last_error
+        );
+        let result = restored
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .lumped
+            .as_ref()
+            .unwrap();
+        assert_eq!(result.model.identifications[0].fit, fit);
+        assert_eq!(
+            result.model.identifications[0].bending_yield_drift,
+            fit.skeleton.q2 * 0.009
+        );
+        assert_eq!(
+            result.model.identifications[0].source_target.max_disp,
+            Some(20.0)
+        );
+        let response = result.response.as_ref().unwrap();
+        assert_eq!(response.story_ductility, expected_main);
+        assert_eq!(
+            response.story_total_ductility.as_ref().unwrap(),
+            &expected_total
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn manual_intervals_invalidate_only_lumped_window_on_edit_undo_redo_display_and_save() {
+        use sepika_core::model::{LumpedSkeletonInterval, LumpedVibrationDir};
+        let mut app = portal_app();
+        app.core.analysis_cfg.lumped_nonlinear = true;
+        app.core.analysis_cfg.lumped_dim = StickDim::Planar;
+        app.core.analysis_cfg.lumped_dir = SeismicDir::X;
+        app.core.analysis_cfg.push_dir = SeismicDir::X;
+        app.core.analysis_cfg.push_use_max_disp = true;
+        app.core.analysis_cfg.push_use_drift_angle = false;
+        app.core.analysis_cfg.push_max_disp = 100.0;
+        app.run_pushover();
+        crate::app::tests::install_independent_lumped_backbone(&mut app, 100.0);
+        let predecessors = bincode::serialize(&(
+            app.core.scoped.results.as_ref().unwrap().statics.clone(),
+            app.core.scoped.results.as_ref().unwrap().pushover_x.clone(),
+        ))
+        .unwrap();
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let old_result = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .lumped
+            .clone()
+            .unwrap();
+        let old_identity = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .lumped_input_identity
+            .clone()
+            .unwrap();
+        assert!(old_result.model.identifications[0]
+            .fit
+            .options
+            .manual_interval
+            .is_none());
+        let interval = LumpedSkeletonInterval {
+            story: sepika_core::ids::StoryId(0),
+            dir: LumpedVibrationDir::X,
+            interval_mm: [8.0, 100.0],
+        };
+        assert!(
+            app.apply_model_edit(Box::new(sepika_edit::SetLumpedSkeletonIntervals {
+                intervals: vec![interval]
+            }))
+        );
+        assert!(app.core.scoped.results.as_ref().unwrap().lumped.is_none());
+        assert!(app.core.scoped.stick_response.is_none());
+        assert!(app.require_lumped_prerequisites().is_ok());
+        app.core.scoped.results.as_mut().unwrap().lumped = Some(old_result.clone());
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .lumped_input_identity = Some(old_identity.clone());
+        assert!(!app.lumped_window_is_current());
+        let context = egui::Context::default();
+        crate::app::install_japanese_fonts(&context);
+        let output = context.run_ui(Default::default(), |ui| app.lumped_mass_panel(ui));
+        fn text(shape: &egui::Shape) -> String {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text().into(),
+                egui::Shape::Vec(v) => v.iter().map(text).collect::<Vec<_>>().join(" "),
+                _ => String::new(),
+            }
+        }
+        let visible = output
+            .shapes
+            .iter()
+            .map(|s| text(&s.shape))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(visible.contains("生成条件が変わっています"), "{visible}");
+        assert!(!visible.contains("第2折点"));
+        let path = crate::app::tests::test_tmp().join("issue1087_manual_stale.ovika");
+        app.save_project_to(path.clone());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mut restored = App::default();
+        restored.open_project_from(path.clone());
+        assert!(restored
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .lumped
+            .is_none());
+        std::fs::remove_file(path).unwrap();
+        app.apply_lumped_mass_result_with_identity(Ok(old_result), None, Some(old_identity));
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("破棄"));
+        app.undo_action();
+        assert!(app.core.model.lumped_skeleton_intervals.is_empty());
+        assert!(app.core.scoped.results.as_ref().unwrap().lumped.is_none());
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.redo_action();
+        assert_eq!(app.core.model.lumped_skeleton_intervals, vec![interval]);
+        assert!(app.core.scoped.results.as_ref().unwrap().lumped.is_none());
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert_eq!(
+            app.core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .lumped
+                .as_ref()
+                .unwrap()
+                .model
+                .identifications[0]
+                .fit
+                .options
+                .manual_interval,
+            Some([8.0, 100.0])
+        );
+        app.undo_action();
+        assert!(app.core.scoped.results.as_ref().unwrap().lumped.is_none());
+        assert_eq!(
+            bincode::serialize(&(
+                app.core.scoped.results.as_ref().unwrap().statics.clone(),
+                app.core.scoped.results.as_ref().unwrap().pushover_x.clone()
+            ))
+            .unwrap(),
+            predecessors
+        );
     }
 
     fn cantilever_app() -> App {
@@ -567,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn lumped_actual_dependencies_accept_only_required_current_results() {
+    fn lumped_prerequisites_allow_current_attempts_and_reject_missing_or_stale_dependencies() {
         let mut app = portal_app();
         let all_results = app.core.scoped.results.as_ref().unwrap().clone();
         for source in [
@@ -590,7 +1053,7 @@ mod tests {
                         .into_iter()
                         .filter(|key| match key {
                             ResultInputKey::Static(StaticCaseKey::Seismic(d)) => {
-                                dim == StickDim::Spatial || (!nonlinear && *d == dir)
+                                dim == StickDim::Spatial || *d == dir
                             }
                             ResultInputKey::Pushover(d) => {
                                 nonlinear && (dim == StickDim::Spatial || *d == dir)
@@ -622,23 +1085,40 @@ mod tests {
                             app.core.scoped.last_error
                         );
                         crate::app::tests::wait_for_job(&mut app);
-                        assert!(
-                            app.core.scoped.last_error.is_none(),
-                            "{source:?}/{dim:?}/{nonlinear}/{dir:?}: {:?}",
-                            app.core.scoped.last_error
-                        );
-                        assert!(!app
-                            .core
-                            .scoped
-                            .results
-                            .as_ref()
-                            .unwrap()
-                            .lumped
-                            .as_ref()
-                            .unwrap()
-                            .modal
-                            .period
-                            .is_empty());
+                        if nonlinear {
+                            let diagnostic = app
+                                .core
+                                .scoped
+                                .results
+                                .as_ref()
+                                .unwrap()
+                                .lumped_identification_failure
+                                .as_ref()
+                                .expect("降伏後枝が不足する元曲線は診断として返す");
+                            assert!(
+                                diagnostic.reason.contains("等価降伏未同定"),
+                                "{diagnostic:?}"
+                            );
+                            assert!(app.core.scoped.results.as_ref().unwrap().lumped.is_none());
+                        } else {
+                            assert!(
+                                app.core.scoped.last_error.is_none(),
+                                "{:?}",
+                                app.core.scoped.last_error
+                            );
+                            assert!(!app
+                                .core
+                                .scoped
+                                .results
+                                .as_ref()
+                                .unwrap()
+                                .lumped
+                                .as_ref()
+                                .unwrap()
+                                .modal
+                                .period
+                                .is_empty());
+                        }
                         for key in &required {
                             for fault in 0..3 {
                                 let mut bad = bundle.clone();
@@ -807,7 +1287,7 @@ mod tests {
         );
     }
     #[test]
-    fn bending_planar_nonlinear_requires_current_static_as_well_as_pushover() {
+    fn both_nonlinear_model_types_require_current_elastic_static_and_pushover() {
         use sepika_solver::dynamic::lumped_mass::LumpedMassType;
         let mut app = portal_app();
         app.core.analysis_cfg.lumped_dim = StickDim::Planar;
@@ -815,7 +1295,10 @@ mod tests {
         app.core.analysis_cfg.lumped_dir = SeismicDir::X;
         let key = ResultInputKey::Static(StaticCaseKey::Seismic(SeismicDir::X));
         remove_slot(app.core.scoped.results.as_mut().unwrap(), &key);
-        assert!(app.require_lumped_prerequisites().is_ok());
+        assert!(app
+            .require_lumped_prerequisites()
+            .unwrap_err()
+            .contains("地震静的 X"));
         app.core.analysis_cfg.lumped_mass_type = LumpedMassType::EquivalentBendingShear;
         let error = app.require_lumped_prerequisites().unwrap_err();
         assert!(error.contains("地震静的 X"), "{error}");

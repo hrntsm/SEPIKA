@@ -15,6 +15,7 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     input.stb_node_ids.clear();
     input.vibration_cases.clear();
     input.lumped_vibration_cases.clear();
+    input.lumped_skeleton_intervals.clear();
     input.combinations.clear();
     input.mass_method = mass_method;
     input

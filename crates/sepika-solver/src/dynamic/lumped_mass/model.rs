@@ -6,10 +6,8 @@
 //! - [`StoryStick`] — 串団子モデルの1質点（層）。
 //! - [`LumpedMassType`] — モデル化タイプ（せん断型多質点系）。
 //! - [`LumpedMassModel`] — 串団子モデル。
-//! - [`fit_story_trilinear`] — 層 Q-δ 曲線を等包絡面積則でトリリニアへ縮約する。
-//! - [`build_lumped_mass_model`] — プッシュオーバー結果から串団子モデルを生成する。
+//! - [`build_lumped_mass_model`] — 指定骨格と物理質量から質点系を構成する。
 
-use crate::nonlinear::pushover::PushoverResult;
 use crate::statics::analysis::SeismicDir;
 use sepika_core::ids::StoryId;
 use sepika_core::model::Model;
@@ -189,6 +187,8 @@ impl LumpedMassType {
 /// 串団子モデル。層ごとの質点と復元力特性を保持する。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LumpedMassModel {
+    /// 層・方向別の等価骨格同定条件と結果。弾性解析時は空。
+    pub identifications: Vec<StoryIdentification>,
     pub model_type: LumpedMassType,
     pub stories: Vec<StoryStick>,
     #[serde(default)]
@@ -205,6 +205,17 @@ pub struct LumpedMassModel {
     pub spatial: Vec<StorySpatial>,
     /// 曲げせん断型の層別諸元。せん断型では空。
     pub bending: Vec<StoryBending>,
+}
+
+/// 層・方向に対応付けた同定結果と元解析条件。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StoryIdentification {
+    pub story: StoryId,
+    pub dir: SeismicDir,
+    pub fit: super::StoryFit,
+    pub source_target: crate::nonlinear::pushover::PushoverTarget,
+    /// 同じ水平力分布の等価降伏荷重時の弾性曲げ層間変位 [mm]。
+    pub bending_yield_drift: f64,
 }
 
 /// 弾性曲げ剛性 [N·mm²] と重心まわりの物理回転慣性 [t·mm²]。
@@ -227,6 +238,7 @@ impl LumpedMassModel {
             dir: SeismicDir::X,
             nonlinear: true,
             spatial: Vec::new(),
+            identifications: Vec::new(),
             bending: Vec::new(),
         }
     }
@@ -236,103 +248,12 @@ impl LumpedMassModel {
     }
 }
 
-/// 台形則で (0,0) から曲線終端までの包絡面積を求める。
-pub(crate) fn envelope_area(pts: &[(f64, f64)]) -> f64 {
-    let mut a = 0.0;
-    let (mut pd, mut pq) = (0.0, 0.0);
-    for &(d, q) in pts {
-        a += 0.5 * (pq + q) * (d - pd);
-        pd = d;
-        pq = q;
-    }
-    a
-}
-
-/// 層 Q-δ 曲線（δ 昇順・正値）を等包絡面積則でトリリニアへ縮約する。
-/// `secant_ratio`（0..1）: 第1折点＝割線剛性が K1 のこの比率以下となる変位。
-pub fn fit_story_trilinear(curve: &[(f64, f64)], secant_ratio: f64) -> StoryTrilinear {
-    let d_max = curve.iter().map(|&(d, _)| d).fold(0.0, f64::max);
-    let tol = d_max * 1e-9;
-    let mut pts: Vec<(f64, f64)> = curve.iter().copied().filter(|&(d, _)| d > tol).collect();
-    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
-    pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-12);
-
-    if pts.is_empty() {
-        return StoryTrilinear {
-            k1: 0.0,
-            d1: 0.0,
-            q1: 0.0,
-            d2: 0.0,
-            q2: 0.0,
-            d3: 0.0,
-            q3: 0.0,
-        };
-    }
-    let (d_first, q_first) = pts[0];
-    let (d3, q3) = *pts.last().unwrap();
-    let k1 = q_first / d_first;
-    if k1 <= 0.0 || d3 <= d_first {
-        return StoryTrilinear {
-            k1,
-            d1: d3,
-            q1: q3,
-            d2: d3,
-            q2: q3,
-            d3,
-            q3,
-        };
-    }
-    let (dp, qp) = pts[pts.len() - 2];
-    let k3 = ((q3 - qp) / (d3 - dp)).clamp(0.0, k1);
-    let thr = secant_ratio * k1;
-    let mut d1 = d3 * 0.5;
-    let mut prev = (0.0, 0.0);
-    for &(d, q) in &pts {
-        let tan = (q - prev.1) / (d - prev.0);
-        if tan < thr && prev.0 > 0.0 {
-            d1 = prev.0;
-            break;
-        }
-        prev = (d, q);
-    }
-    let d1 = d1.clamp(d_first, d3 * 0.9);
-    let q1 = k1 * d1;
-
-    let a_actual = envelope_area(&pts);
-    let a_tri = |d2: f64| {
-        let q2 = q3 - k3 * (d3 - d2);
-        0.5 * d1 * q1 + 0.5 * (q1 + q2) * (d2 - d1) + 0.5 * (q2 + q3) * (d3 - d2)
-    };
-    let slope = 0.5 * ((q1 - q3) + k3 * (d3 - d1));
-    let d2 = if slope.abs() < 1e-30 {
-        0.5 * (d1 + d3)
-    } else {
-        (d1 + (a_actual - a_tri(d1)) / slope).clamp(d1, d3)
-    };
-    let q2 = q3 - k3 * (d3 - d2);
-
-    StoryTrilinear {
-        k1,
-        d1,
-        q1,
-        d2,
-        q2,
-        d3,
-        q3,
-    }
-}
-
-/// プッシュオーバー結果から串団子モデル（層ごとの質点・復元力特性）を生成する。
-/// `secant_ratio`: 第1折点判定の割線剛性比（既定 0.75 程度）。
-///
-/// 層質量は各層の上端床の [`sepika_core::model::Story::dynamic_mass`]（物理質量相当）から採る。
-/// 未算定（`None`）は [`SolveError::InvalidInput`] を返す（設計用地震重量へのフォールバックはしない）。
-/// ダンパー指定・生成質量の配置／反映が不正な場合も `InvalidInput` を返す。
+/// 指定済みの層骨格と動的物理質量から2次元質点系を構成する。
+/// 骨格は下層から順番に与え、層数不一致・非正質量・不正骨格は InvalidInput。
 pub fn build_lumped_mass_model(
     model: &Model,
-    pushover: &PushoverResult,
+    skeletons: &[StoryTrilinear],
     model_type: LumpedMassType,
-    secant_ratio: f64,
 ) -> Result<LumpedMassModel, SolveError> {
     model
         .validate_rc_section_usage()
@@ -346,29 +267,6 @@ pub fn build_lumped_mass_model(
     let layers = model.layers();
     let mut sticks = Vec::with_capacity(layers.len());
     for layer in &layers {
-        let i = layer.index;
-        let baseline: (f64, f64) = pushover
-            .capacity_curve
-            .iter()
-            .zip(pushover.steps.iter())
-            .find(|(_, step)| step.load_factor == 0.0)
-            .and_then(|(cp, _)| {
-                let d0 = cp.story_drift.get(i).copied()?;
-                let q0 = cp.story_shear.get(i).copied()?;
-                Some((d0, q0))
-            })
-            .unwrap_or((0.0, 0.0));
-        let curve: Vec<(f64, f64)> = pushover
-            .capacity_curve
-            .iter()
-            .filter_map(|cp| {
-                let d = (cp.story_drift.get(i).copied()? - baseline.0).abs();
-                let q = (cp.story_shear.get(i).copied()? - baseline.1).abs();
-                Some((d, q))
-            })
-            .collect();
-        let skeleton = fit_story_trilinear(&curve, secant_ratio);
-
         let dynamic_mass = layer.dynamic_mass.ok_or_else(|| {
             SolveError::InvalidInput(format!("層 {:?} の動的質量が未算定です", layer.bottom))
         })?;
@@ -380,12 +278,26 @@ pub fn build_lumped_mass_model(
             )));
         }
 
+        let skeleton = *skeletons
+            .get(layer.index)
+            .ok_or_else(|| SolveError::InvalidInput("層数と指定骨格数が一致しません".into()))?;
+        if !skeleton.is_valid_spring() {
+            return Err(SolveError::InvalidInput(format!(
+                "層 {:?} の指定骨格が不正です",
+                layer.bottom
+            )));
+        }
         sticks.push(StoryStick {
             story: layer.bottom,
             mass,
             height: layer.height.max(0.0),
             skeleton,
         });
+    }
+    if skeletons.len() != sticks.len() {
+        return Err(SolveError::InvalidInput(
+            "層数と指定骨格数が一致しません".into(),
+        ));
     }
     Ok(LumpedMassModel::from_stories(model_type, sticks))
 }

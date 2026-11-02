@@ -14,7 +14,11 @@ impl App {
 
     pub(crate) fn undo_action(&mut self) {
         if self.core.scoped.undo.can_undo() {
+            let previous_lumped_intervals = self.core.model.lumped_skeleton_intervals.clone();
             self.core.scoped.undo.undo(&mut self.core.model);
+            if previous_lumped_intervals != self.core.model.lumped_skeleton_intervals {
+                self.invalidate_lumped_mass_view();
+            }
             self.remap_model_focus();
             self.clear_geometry_selection();
             self.ui.scoped.boundary_node = None;
@@ -29,7 +33,11 @@ impl App {
     pub(crate) fn redo_action(&mut self) {
         if self.core.scoped.undo.can_redo() {
             let revision = self.core.scoped.undo.revision();
+            let previous_lumped_intervals = self.core.model.lumped_skeleton_intervals.clone();
             self.core.scoped.undo.redo(&mut self.core.model);
+            if previous_lumped_intervals != self.core.model.lumped_skeleton_intervals {
+                self.invalidate_lumped_mass_view();
+            }
             if self.core.scoped.undo.revision() == revision {
                 if let Some(reason) = self.core.scoped.undo.last_error().map(str::to_owned) {
                     self.report_error(reason);

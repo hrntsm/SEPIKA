@@ -5,7 +5,7 @@ use sepika_core::dof::DofMap;
 use sepika_core::model::{LoadCase, MemberLoadKind, Model};
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 
-pub(super) struct PhysicalStep {
+pub(crate) struct PhysicalStep {
     pub(super) element_nodal: Vec<Vec<(usize, [f64; 6])>>,
     pub(super) support: Vec<[f64; 6]>,
     pub(super) fixed_dofs: Vec<[bool; 6]>,
@@ -59,7 +59,6 @@ impl PhysicalStep {
             }
         }
         let full = dofmap.including_restrained_node_dofs();
-        let mut residual: Vec<_> = ledger.nodal.iter().map(|v| v.map(|x| -x)).collect();
         let mut element_nodal = Vec::with_capacity(behaviors.len());
         for ((elem, behavior), response) in model.elements.iter().zip(behaviors).zip(responses) {
             let error =
@@ -106,13 +105,34 @@ impl PhysicalStep {
                     }
                 }
             }
-            for (&ni, force) in &nodal {
-                let values = &mut residual[ni];
-                for (value, force) in values.iter_mut().zip(force) {
-                    *value += force;
+            element_nodal.push(nodal.into_iter().collect());
+        }
+        Self::from_nodal(model, dofmap, total_disp, element_nodal, source, reference)
+    }
+
+    pub(crate) fn from_nodal(
+        model: &Model,
+        dofmap: &DofMap,
+        total_disp: &[f64],
+        element_nodal: Vec<Vec<(usize, [f64; 6])>>,
+        source: LoadCase,
+        reference: LoadCase,
+    ) -> Result<Self, String> {
+        let mut residual = vec![[0.0; 6]; model.nodes.len()];
+        for load in &source.nodal {
+            let values = residual
+                .get_mut(load.node.index())
+                .ok_or("物理応答の荷重節点がありません")?;
+            for d in 0..6 {
+                values[d] -= load.values[d];
+            }
+        }
+        for forces in &element_nodal {
+            for &(node, force) in forces {
+                for d in 0..6 {
+                    residual[node][d] += force[d];
                 }
             }
-            element_nodal.push(nodal.into_iter().collect());
         }
         let reducer = Reducer::build(model, dofmap);
         let fixed_dofs: Vec<_> = (0..model.nodes.len())

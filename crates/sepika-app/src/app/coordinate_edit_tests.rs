@@ -68,6 +68,7 @@ fn app() -> App {
     app.ui.view.show_supports = false;
     app.ui.view.show_beam_interpolation = false;
     let result = |sign: f64| sepika_solver::statics::linear::StaticOnce {
+        story_shears: None,
         stiffness_ratio_disp: None,
         // 自動倍率10・手動係数10でN1がN0の原位置に重なる。N0自身は別の位置へ移る。
         disp: vec![

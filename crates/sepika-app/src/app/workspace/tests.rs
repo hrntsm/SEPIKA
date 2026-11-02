@@ -284,6 +284,7 @@ fn each_drawing_keeps_its_static_result_when_the_other_result_changes() {
     let first = StaticKey::Case(StaticCaseKey::User(sepika_core::ids::LoadCaseId(0)));
     let second = StaticKey::Case(StaticCaseKey::User(sepika_core::ids::LoadCaseId(1)));
     let result = |displacement| sepika_solver::statics::linear::StaticOnce {
+        story_shears: None,
         stiffness_ratio_disp: None,
         disp: vec![[displacement; 6]; h.app.core.model.nodes.len()],
         member_forces: Vec::new(),

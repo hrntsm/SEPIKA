@@ -241,7 +241,11 @@ impl App {
             self.report_error("検討の計算条件は作成時に固定されています");
             return false;
         }
+        let lumped_identity = self.lumped_model_input_identity();
         self.core.analysis_cfg = next;
+        if lumped_identity != self.lumped_model_input_identity() {
+            self.invalidate_lumped_mass_view();
+        }
         self.core.scoped.references.advance();
         self.core.scoped.staleness.mark_non_calc_edited();
         true

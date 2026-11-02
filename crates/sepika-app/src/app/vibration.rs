@@ -44,6 +44,7 @@ pub(crate) fn vibration_settings(cfg: AnalysisSettings, lumped: bool) -> Analysi
         relevant.lumped_dir = cfg.lumped_dir;
         relevant.lumped_nonlinear = cfg.lumped_nonlinear;
         relevant.lumped_secant_ratio = cfg.lumped_secant_ratio;
+        relevant.lumped_target_drift_angle = cfg.lumped_target_drift_angle;
         relevant.lumped_n_modes = cfg.lumped_n_modes;
         relevant.lumped_th_dt = cfg.lumped_th_dt;
         relevant.lumped_th_damping = cfg.lumped_th_damping;

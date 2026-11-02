@@ -22,6 +22,9 @@ pub struct ElemAttrs {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Model {
+    /// 質点系骨格の任意の手動同定区間。
+    #[serde(default)]
+    pub lumped_skeleton_intervals: Vec<LumpedSkeletonInterval>,
     #[serde(default)]
     pub post_design_inputs: Vec<PostDesignInput>,
     /// 数量積算専用の設定。解析・検定の計算入力には含めない。
@@ -1331,7 +1334,8 @@ impl Model {
     }
 
     pub fn eq_ignoring_dofmap(&self, other: &Self) -> bool {
-        self.post_design_inputs == other.post_design_inputs
+        self.lumped_skeleton_intervals == other.lumped_skeleton_intervals
+            && self.post_design_inputs == other.post_design_inputs
             && self.quantity_cfg == other.quantity_cfg
             && self.nodes == other.nodes
             && self.elements == other.elements
@@ -1527,6 +1531,9 @@ impl Model {
     /// 階の追加・削除では「ID＝配列位置」の不変条件を保つために ID の繰り上げが
     /// 必要になる。参照箇所を呼び出し側へ散らさないよう、走査はここに集約する。
     pub fn visit_story_ids(&mut self, mut f: impl FnMut(&mut StoryId)) {
+        for interval in &mut self.lumped_skeleton_intervals {
+            f(&mut interval.story);
+        }
         for entry in &mut self.stress_cfg.misc_wall_representatives {
             f(&mut entry.story);
         }

@@ -632,3 +632,22 @@ impl EditCommand for SetQuantityCfg {
         false
     }
 }
+
+/// 層骨格の手動区間の全置換。逆操作は変更前の区間に戻す。
+pub struct SetLumpedSkeletonIntervals {
+    pub intervals: Vec<sepika_core::model::LumpedSkeletonInterval>,
+}
+impl EditCommand for SetLumpedSkeletonIntervals {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let intervals =
+            std::mem::replace(&mut model.lumped_skeleton_intervals, self.intervals.clone());
+        Box::new(Self { intervals })
+    }
+    fn label(&self) -> &str {
+        "層骨格の同定区間変更"
+    }
+    fn affects_calculation(&self) -> bool {
+        // 静的・増分成果を失効させると、同じ元曲線の区間だけを変更できなくなる。
+        false
+    }
+}
