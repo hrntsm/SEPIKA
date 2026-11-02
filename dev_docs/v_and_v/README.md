@@ -1,5 +1,15 @@
 # V&V レポート（検証・妥当性確認）
 
+## 材料履歴試験の現役参照整理（#1059）
+
+同じ材料諸元・確定履歴を持つ試験を統合した。本番の構成則・確定と復元・公差・6件の履歴snapshot・固定SHAの検証履歴と、既存のVerification/Validation範囲を保持する。
+
+| 統合前 | 現役試験と保持する保証 |
+| --- | --- |
+| Bilinearの弾性・単調降伏・弾性除荷3試験 | `uniaxial::bilinear::tests::test_bilinear_elastic_yield_and_unloading_response`。E205000・fy235・硬化率0.01、ひずみ0.001・5εy・確定・4εy。独立応力205/244.4/9.4と接線205000/2050/205000を元の絶対公差1.0で照合 |
+| Takedaのprobe一致と内側ループ | `hysteresis::material::tests::test_takeda_inner_loop_polygon_and_probe_preserve_response`。0.03・0.01を確定した同じ履歴で、−0.005の反復probe・cloneのtrial・実trialを完全一致で照合。そのtrialを確定し、0.008の再反転応力が内側点を上回る保証を保持 |
+| 座屈履歴のprobe一致とRO除荷初期剛性 | `hysteresis::steel_buckling::tests::test_steel_buckling_ro_unloading_and_probe_preserve_response`。k1=1000・Mp100・Mu/Mp1.2、3θyを確定し、2.5θyの反復probe・cloneのtrial・実trialを完全一致で照合。試行を復元し、微小除荷接線は元の絶対公差20で検査 |
+
 ## 小梁端部の高力ボルト（#1048）
 
 [一次根拠・数値・保存とGUI経路の確認記録](小梁高力ボルト_Issue1048_確認記録.md)に有限なVerificationと残るValidationの境界を記録する。せん断成分の適合を接合部全体の安全性へ拡張しない。
@@ -711,8 +721,8 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 17 | 時刻歴 | sepika-solver | timehistory.rs | — | P6 | ❌ |
 | 17b | 時刻歴の入力・応答時間軸 | sepika-solver / sepika-job / sepika-app / sepika-mcp / sepika-io | dynamic/timehistory・lumped_mass、sample_wave.rs、checkpoint.rs | [Issue610の独立fixtureと実入口](時刻歴時間軸_Issue610_2026-10.md#修正後の実入口と観測) | 横断 | 🔶（焦点Verification成功、手動GUI／Validation未） |
 | 17a | GUI 時刻歴の実入力と結果所属 | sepika-core / sepika-app | model/vibration.rs・app/actions/time_history.rs・lumped_mass.rs・result_validity.rs | [Issue611受入表](時刻歴の実入力と結果所属_Issue611_2026-10.md#受入対応表) | 横断 | 🔶（修正後GUI14＋既存617の入口Verification、広域再検査・native操作・Validation未） |
-| 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
-| 19 | 部材履歴則（武田・原点指向・標準・逆行・最大点指向） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs`、`zero_increment_*`と実factory/壁/質点系solver（[Issue596検証](ゼロ増分履歴保持_Issue596_2026-10.md)） | P4 | 🔶（ゼロ増分Verification済み、全履歴Validation未） |
+| 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial/ | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
+| 19 | 部材履歴則（武田・原点指向・標準・逆行・最大点指向） | sepika-material | hysteresis/ | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs`、`zero_increment_*`と実factory/壁/質点系solver（[Issue596検証](ゼロ増分履歴保持_Issue596_2026-10.md)） | P4 | 🔶（ゼロ増分Verification済み、全履歴Validation未） |
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 20a | 微小相似Fiber初期断面 | sepika-math / sepika-element / sepika-solver | dense_lu.rs, frame/fiber/constitutive_tests.rs, panel_zone.rs | `near_diagonal_coupling_roundoff_*`・`similar_*`・`panel_753_public_nonlinear_time_history_*`（[Issue #783検証](微小相似Fiber初期断面_Issue783_2026-10.md)）。偏心試験の現役統合先は[共通処理の対応表](ファイバー共通処理の試験整理_Issue1059.md#現役の保証) | P4 | 🔶（数値Verification。実験Validation未） |
 | 20b | 物理曲率・非対称断面・剛域付き軸履歴 | sepika-element | frame/fiber/physical_curvature_tests.rs、distributed_curvature_tests.rs、rigid_axial_tests.rs | [保存成果の補完と端部解放の収束検証](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | P4 | 🔶（有限Verification。実験Validation未） |
