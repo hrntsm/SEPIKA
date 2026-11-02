@@ -553,6 +553,9 @@ pub struct ResultsBundle {
     /// 質点系解析結果（モデル・固有値・時刻歴）。表示中の窓口。
     #[serde(default)]
     pub lumped: Option<sepika_solver::dynamic::lumped_mass::LumpedMassResult>,
+    pub lumped_input_identity: Option<String>,
+    pub lumped_identification_failure:
+        Option<sepika_solver::dynamic::lumped_mass::LumpedMassIdentificationFailure>,
     /// 質点系結果（振動ケース ID 別）。
     #[serde(default)]
     pub lumped_results: Vec<(
@@ -624,6 +627,10 @@ pub enum JobResult {
     LumpedMass(
         Box<Result<sepika_solver::dynamic::lumped_mass::LumpedMassResult, String>>,
         Option<Box<TimeHistorySource>>,
+        Option<String>,
+    ),
+    LumpedMassUnidentified(
+        Box<sepika_solver::dynamic::lumped_mass::LumpedMassIdentificationFailure>,
     ),
     /// 線形静的・地震静的(Ai)（`StaticCaseKey` で結果格納先を区別）。
     StaticCase {

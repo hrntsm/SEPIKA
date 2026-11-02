@@ -8,6 +8,9 @@ use thiserror::Error;
 /// 解析ジョブのエラー。
 #[derive(Debug, Error)]
 pub enum JobError {
+    /// 等価骨格未同定。モデルを生成せず、元解析条件付き診断を返す。
+    #[error("{0}")]
+    LumpedIdentification(Box<sepika_solver::dynamic::lumped_mass::LumpedMassIdentificationFailure>),
     /// 解析準備（自由度写像・拘束の縮約・モデル整合性）で失敗した。
     #[error("解析準備エラー: {0}")]
     Prepare(String),
@@ -34,6 +37,7 @@ impl JobError {
     /// 文言（`Display`）は変わり得るが、このコードは安定とする。
     pub fn kind(&self) -> &'static str {
         match self {
+            JobError::LumpedIdentification(_) => "lumped_identification",
             JobError::Prepare(_) => "prepare",
             JobError::Solve(_) => "solve",
             JobError::Convergence(_) => "convergence",

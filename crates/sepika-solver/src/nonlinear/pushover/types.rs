@@ -275,6 +275,8 @@ pub struct MemberStepState {
 /// プッシュオーバー解析結果
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PushoverResult {
+    /// 元解析で指定した終了目標。未記録は同定上限を確定できない。
+    pub target: Option<PushoverTarget>,
     /// このrunで初期ばねに採用した壁別の局所正負Qu `[N]`。
     pub wall_capacities: Vec<(ElemId, [f64; 2])>,
     /// 開始時Modelで固定したRC壁終局せん断耐力方式。

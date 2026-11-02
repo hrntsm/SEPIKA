@@ -146,6 +146,12 @@ impl App {
             && !pending_mass_method
             && self.core.scoped.results.is_some()
             && (!self.core.scoped.staleness.results_stale
+                || self
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .is_some_and(|b| b.lumped_identification_failure.is_some())
                 || (self.require_design_input().is_ok()
                     && self
                         .core
@@ -163,6 +169,10 @@ impl App {
                 bundle: {
                     let mut saved = if self.core.scoped.staleness.results_stale {
                         ResultsBundle {
+                            lumped_identification_failure: bundle
+                                .lumped_identification_failure
+                                .clone(),
+                            analysis_contract_version: bundle.analysis_contract_version,
                             reference_sources: bundle
                                 .reference_sources
                                 .iter()
@@ -197,6 +207,10 @@ impl App {
                         saved.clear_design_results();
                     }
                     self.filter_vibration_results(&mut saved);
+                    if !self.lumped_window_is_current() {
+                        saved.lumped = None;
+                        saved.lumped_input_identity = None;
+                    }
                     saved
                 },
                 last_static: self.core.scoped.last_static,

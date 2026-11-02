@@ -551,6 +551,7 @@ mod tests {
             input_unavailable: None,
         };
         let mut po = PushoverResult {
+            target: None,
             wall_capacities: Vec::new(),
             rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: vec![],

@@ -17,6 +17,43 @@ const KINDS: [ElementKind; 3] = [
 ];
 
 #[test]
+fn physical_story_shear_includes_wall_brace_and_support_conditions() {
+    for brace in [false, true] {
+        for spring in [false, true] {
+            let mut model = fixture(ElementKind::Beam, Dof::Ux, 100000.0);
+            if brace {
+                let mut brace_section = model.sections[0].clone();
+                brace_section.id = sepika_core::ids::SectionId(model.sections.len() as u32);
+                brace_section.shape = None;
+                brace_section.frame_use = Some(FrameSectionUse::Brace);
+                model.sections.push(brace_section);
+                let mut diagonal = model.elements[0].clone();
+                diagonal.id = ElemId(model.elements.len() as u32);
+                diagonal.nodes = [NodeId(0), NodeId(3)].into_iter().collect();
+                diagonal.kind = ElementKind::Brace {
+                    tension_only: false,
+                };
+                diagonal.section = Some(model.sections.last().unwrap().id);
+                model.elements.push(diagonal);
+            }
+            if spring {
+                model.nodes[2].support_spring = Some([10000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+            }
+            let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
+            let q = result.story_shears.as_ref().unwrap();
+            assert!((q[0][0] - 100000.0).abs() < 1e-6, "{q:?}");
+            assert!(q[1][0].abs() < 1e-6);
+        }
+    }
+    let mut fixed = fixture(ElementKind::Beam, Dof::Ux, 100000.0);
+    for n in &mut fixed.nodes {
+        n.restraint = Dof6Mask::FIXED;
+    }
+    let result = linear_static_once(&fixed, LoadCaseId(0)).unwrap();
+    assert_eq!(result.story_shears.unwrap()[0], vec![0.0]);
+}
+
+#[test]
 #[ignore = "Issue821の現行モデル監査。開口モデルの妥当性を保証する回帰試験ではない"]
 fn audit_rc_wall_opening_linear_response() {
     let opening = |width, height, x, z| WallOpening {

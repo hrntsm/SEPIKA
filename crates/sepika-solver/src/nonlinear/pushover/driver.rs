@@ -587,6 +587,7 @@ pub fn pushover_analysis_recording(
     run.gravity_terms = gravity_terms;
     run.gravity_applied = apply_long_term;
     Ok(PushoverResult {
+        target: Some(target),
         wall_capacities,
         rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
         steps: recorded.steps,

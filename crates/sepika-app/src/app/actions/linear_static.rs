@@ -1326,6 +1326,7 @@ mod workspace_result_tests {
         let mut app = App::default();
         app.load_model(crate::sample::portal_frame());
         let make = |value| sepika_solver::statics::linear::StaticOnce {
+            story_shears: None,
             stiffness_ratio_disp: None,
             disp: vec![[value; 6]; 4],
             member_forces: Vec::new(),

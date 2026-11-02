@@ -448,6 +448,13 @@ mod tests {
                 .record(1.0, &model, &map, &behaviors, &displacement)
                 .unwrap();
             let expected_capacity = 14000.0;
+            let static_result =
+                crate::statics::linear::linear_static_once(&model, model.load_cases[0].id).unwrap();
+            assert!(
+                (static_result.story_shears.as_ref().unwrap()[0][0] - sign * expected_capacity)
+                    .abs()
+                    < 1e-5
+            );
             let capacity = &recorder.capacity_curve[step];
             assert!((capacity.base_shear - sign * expected_capacity).abs() < 1e-5);
             assert!((capacity.story_shear[0] - sign * expected_capacity).abs() < 1e-5);

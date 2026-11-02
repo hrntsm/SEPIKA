@@ -456,6 +456,7 @@ fn reference_identity_rejected_load_and_correct_hash_open_preserve_app_state_and
 fn pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
     use sepika_solver::nonlinear::pushover::*;
     PushoverResult {
+        target: None,
         wall_capacities: vec![],
         rc_wall_shear_method: Default::default(),
         steps: vec![],

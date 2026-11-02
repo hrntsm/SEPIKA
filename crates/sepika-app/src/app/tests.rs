@@ -11085,6 +11085,7 @@ fn activity_svgs_rasterize() {
 
 fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
     sepika_solver::statics::linear::StaticOnce {
+        story_shears: None,
         stiffness_ratio_disp: None,
         disp: vec![],
         member_forces: vec![],
@@ -11094,6 +11095,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
 
 pub(super) fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
     sepika_solver::nonlinear::pushover::PushoverResult {
+        target: None,
         wall_capacities: Vec::new(),
         rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
         steps: vec![],
@@ -11211,6 +11213,7 @@ fn test_build_result_tree_sections_and_labels() {
             effective_mass: vec![],
         }),
         pushover_x: Some(sepika_solver::nonlinear::pushover::PushoverResult {
+            target: None,
             wall_capacities: Vec::new(),
             rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: vec![],
@@ -15159,4 +15162,70 @@ fn ds871_old_design_is_invalidated_but_analysis_remains_and_ds_stays_on_hold() {
         assert!(reopened.compute_holding_capacity().is_err());
         std::fs::remove_file(path).unwrap();
     }
+}
+
+pub(super) fn install_independent_lumped_backbone(app: &mut App, max_disp_mm: f64) {
+    let reference = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(SeismicDir::X)
+        .unwrap();
+    let qel = reference.story_shears.as_ref().unwrap()[0][0];
+    assert_eq!(app.core.model.layers().len(), 1);
+    let layer = app.core.model.layers()[0].clone();
+    let upper = sepika_solver::nonlinear::pushover::story_reference_node(
+        &app.core.model,
+        &app.core.model.stories[layer.top.index()],
+    )
+    .unwrap();
+    let lower = sepika_solver::nonlinear::pushover::story_reference_node(
+        &app.core.model,
+        &app.core.model.stories[layer.bottom.index()],
+    );
+    let del =
+        reference.disp[upper.index()][0] - lower.map_or(0.0, |n| reference.disp[n.index()][0]);
+    let k0 = qel / del;
+    let po = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_x
+        .as_mut()
+        .unwrap();
+    assert_eq!(po.target.unwrap().max_disp, Some(max_disp_mm));
+    po.capacity_curve = [
+        (0.0, 0.0),
+        (1.0, 1.0),
+        (3.0, 1.4),
+        (6.0, 1.55),
+        (max_disp_mm, 1.25 + 0.05 * max_disp_mm),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(
+        |(step, (d, q))| sepika_solver::nonlinear::pushover::CapacityPoint {
+            step: step as u32,
+            roof_disp: d,
+            base_shear: q * k0,
+            story_drift: vec![d],
+            story_shear: vec![q * k0],
+        },
+    )
+    .collect();
+    po.steps = po
+        .capacity_curve
+        .iter()
+        .map(|p| sepika_solver::nonlinear::pushover::PushoverStep {
+            load_factor: p.base_shear / qel,
+            top_disp: p.roof_disp,
+            base_shear: p.base_shear,
+            story_drifts: p.story_drift.clone(),
+            floor_disp: Vec::new(),
+        })
+        .collect();
 }

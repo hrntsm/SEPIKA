@@ -10062,3 +10062,92 @@ fn undo_rejects_non_finite_old_member_detail_without_consuming_history() {
     assert!(stack.can_undo());
     assert!(!stack.can_redo());
 }
+
+#[test]
+fn lumped_fit_intervals_undo_redo_preserves_other_directions() {
+    use sepika_core::model::{LumpedSkeletonInterval, LumpedVibrationDir};
+    let y = LumpedSkeletonInterval {
+        story: StoryId(0),
+        dir: LumpedVibrationDir::Y,
+        interval_mm: [2.0, 4.0],
+    };
+    let x = LumpedSkeletonInterval {
+        story: StoryId(1),
+        dir: LumpedVibrationDir::X,
+        interval_mm: [3.0, 6.0],
+    };
+    let mut model = Model {
+        lumped_skeleton_intervals: vec![y],
+        ..Default::default()
+    };
+    let mut stack = UndoStack::new();
+    stack.run(
+        &mut model,
+        Box::new(SetLumpedSkeletonIntervals {
+            intervals: vec![y, x],
+        }),
+    );
+    assert_eq!(model.lumped_skeleton_intervals, vec![y, x]);
+    stack.undo(&mut model);
+    assert_eq!(model.lumped_skeleton_intervals, vec![y]);
+    stack.redo(&mut model);
+    assert_eq!(model.lumped_skeleton_intervals, vec![y, x]);
+}
+
+#[test]
+fn story_edits_keep_lumped_intervals_on_their_original_floor_and_restore_deleted_settings() {
+    use sepika_core::model::{LumpedSkeletonInterval, LumpedVibrationDir, Story};
+    let interval = LumpedSkeletonInterval {
+        story: StoryId(1),
+        dir: LumpedVibrationDir::X,
+        interval_mm: [12.0, 30.0],
+    };
+    let mut model = Model {
+        stories: vec![
+            Story::new(StoryId(0), "Base".into(), Some(0.0), Some(0.0)),
+            Story::new(StoryId(1), "Original".into(), Some(3000.0), Some(0.0)),
+            Story::new(StoryId(2), "Top".into(), Some(6000.0), Some(0.0)),
+        ],
+        lumped_skeleton_intervals: vec![interval],
+        ..Default::default()
+    };
+    let mut stack = UndoStack::new();
+    stack.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "Inserted".into(),
+            elevation: Some(1500.0),
+            sl_offset_mm: Some(0.0),
+        }),
+    );
+    assert_eq!(model.stories[2].name, "Original");
+    assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(2));
+    stack.undo(&mut model);
+    assert_eq!(model.lumped_skeleton_intervals, vec![interval]);
+    stack.redo(&mut model);
+    assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(2));
+    stack.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(2),
+            name: "Original".into(),
+            elevation: Some(3500.0),
+            sl_offset_mm: Some(0.0),
+        }),
+    );
+    assert_eq!(model.stories[2].name, "Original");
+    assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(2));
+    stack.undo(&mut model);
+    assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(2));
+    stack.run(&mut model, Box::new(DeleteStory { story: StoryId(1) }));
+    assert_eq!(model.stories[1].name, "Original");
+    assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(1));
+    stack.undo(&mut model);
+    assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(2));
+    stack.run(&mut model, Box::new(DeleteStory { story: StoryId(2) }));
+    assert!(model.lumped_skeleton_intervals.is_empty());
+    stack.undo(&mut model);
+    assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(2));
+    stack.redo(&mut model);
+    assert!(model.lumped_skeleton_intervals.is_empty());
+}

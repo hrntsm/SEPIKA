@@ -3,13 +3,13 @@ use crate::statics::analysis::SeismicDir;
 use sepika_core::dof::DofMap;
 use sepika_core::model::{MemberLoadKind, Model};
 
-pub(super) struct CapacityForces {
-    pub(super) base: f64,
-    pub(super) story: Vec<f64>,
+pub(crate) struct CapacityForces {
+    pub(crate) base: f64,
+    pub(crate) story: Vec<f64>,
 }
 
 impl PhysicalStep {
-    pub(super) fn capacity_forces(
+    pub(crate) fn capacity_forces(
         &self,
         model: &Model,
         dofmap: &DofMap,

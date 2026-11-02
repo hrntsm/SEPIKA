@@ -100,12 +100,16 @@ impl App {
 
     #[cfg(feature = "gui")]
     fn apply_confirmed_model_edit(&mut self, command: Box<dyn sepika_edit::EditCommand>) -> bool {
+        let previous_lumped_intervals = self.core.model.lumped_skeleton_intervals.clone();
         let changes_boundaries = command.changes_assignment_boundaries();
         let applied = self.core.scoped.undo.run(&mut self.core.model, command);
         if let Some(reason) = self.core.scoped.undo.last_error() {
             self.report_error(format!("モデル・履歴は未更新: {reason}"));
         }
         if applied {
+            if previous_lumped_intervals != self.core.model.lumped_skeleton_intervals {
+                self.invalidate_lumped_mass_view();
+            }
             if changes_boundaries {
                 self.clear_generated_member_selection();
             }
@@ -424,8 +428,10 @@ impl App {
                     JobResult::TimeHistory(res, source) => {
                         self.apply_time_history_result(*res, *source)
                     }
-                    JobResult::LumpedMass(res, source) => {
-                        self.apply_lumped_mass_result(*res, source.map(|s| *s))
+                    JobResult::LumpedMass(res, source, identity) => self
+                        .apply_lumped_mass_result_with_identity(*res, source.map(|s| *s), identity),
+                    JobResult::LumpedMassUnidentified(failure) => {
+                        self.apply_lumped_identification_failure(*failure)
                     }
                     JobResult::StaticCase { key, res } => self.apply_static_case_result(key, res),
                     JobResult::Combo { name, res } => self.apply_combo_result(name, res),

@@ -17,6 +17,14 @@ pub enum LumpedVibrationDir {
     Y,
 }
 
+/// 層・方向別の降伏後直線同定区間 [mm]。記録がなければ自動選定する。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LumpedSkeletonInterval {
+    pub story: crate::ids::StoryId,
+    pub dir: LumpedVibrationDir,
+    pub interval_mm: [f64; 2],
+}
+
 /// 質点系振動ケースのモデル次元。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LumpedVibrationDim {

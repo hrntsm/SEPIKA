@@ -65,25 +65,21 @@ impl StickDirPeaks {
 }
 
 fn peak_ratio(num: f64, den: f64) -> f64 {
-    if den > 1e-9 {
-        num / den
-    } else {
-        0.0
-    }
+    num / den
 }
 
-/// 層間ピークから方向別塑性率を作る。欠けた方向の δ1 は `+∞` で μ=0。
-/// 45° の δ1 は軸平行の降伏矩形に沿う斜め距離 `√2 · min(δ1x, δ1y)`。
-pub(crate) fn dir_ductility(drift: &StickDirPeaks, d1x: &[f64], d1y: &[f64]) -> StickDirPeaks {
+/// 層間ピークから方向別塑性率を作る。解析しない方向の等価降伏変位は `+∞` で μ=0。
+/// 45° の等価降伏変位は軸平行の降伏矩形に沿う斜め距離 `√2 · min(dyx, dyy)`。
+pub(crate) fn dir_ductility(drift: &StickDirPeaks, dyx: &[f64], dyy: &[f64]) -> StickDirPeaks {
     let n = drift.x.len();
     let mut out = StickDirPeaks::zeros(n);
     for i in 0..n {
-        let dx1 = d1x.get(i).copied().unwrap_or(f64::INFINITY);
-        let dy1 = d1y.get(i).copied().unwrap_or(f64::INFINITY);
-        out.x[i] = peak_ratio(drift.x[i], dx1);
-        out.y[i] = peak_ratio(drift.y[i], dy1);
-        let d1_45 = std::f64::consts::SQRT_2 * dx1.min(dy1);
-        out.deg45[i] = peak_ratio(drift.deg45[i], d1_45);
+        let dx_yield = dyx.get(i).copied().unwrap_or(f64::INFINITY);
+        let dy_yield = dyy.get(i).copied().unwrap_or(f64::INFINITY);
+        out.x[i] = peak_ratio(drift.x[i], dx_yield);
+        out.y[i] = peak_ratio(drift.y[i], dy_yield);
+        let dy_45 = std::f64::consts::SQRT_2 * dx_yield.min(dy_yield);
+        out.deg45[i] = peak_ratio(drift.deg45[i], dy_45);
     }
     out
 }
@@ -91,6 +87,9 @@ pub(crate) fn dir_ductility(drift: &StickDirPeaks, d1x: &[f64], d1y: &[f64]) -> 
 /// 質点系（せん断型）時刻歴応答解析の結果。
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StickResponse {
+    /// 曲げせん断型の比較用・全層間変位基準の等価層塑性率。未同定時は None。
+    pub total_ductility_dir: Option<StickDirPeaks>,
+    pub story_total_ductility: Option<Vec<f64>>,
     /// 時刻列 `[s]`。
     pub time: Vec<f64>,
     /// 最上階（頂部）質点の加振方向変位時刻歴 `[mm]`（質量重心）。
@@ -99,7 +98,7 @@ pub struct StickResponse {
     pub story_peak_drift: Vec<f64>,
     /// 各層の最大層せん断力 `[N]`。水平合成 √(Qx²+Qy²) の時刻歴最大。
     pub story_peak_shear: Vec<f64>,
-    /// 各層の最大塑性率。並進ばねが経験した `max(μx, μy)`（δ1≤0 の方向は 0）。
+    /// 各層の等価層塑性率。非線形ばねの最大変形を第2折点変位で除した `max(μx, μy)`。
     pub story_ductility: Vec<f64>,
     /// Newton 反復が上限（[`STICK_NEWTON`]）内に収束しなかった時刻ステップ数。
     pub non_converged_steps: usize,
@@ -122,6 +121,8 @@ pub struct StickResponse {
 impl StickResponse {
     pub(crate) fn empty(n: usize) -> Self {
         Self {
+            total_ductility_dir: None,
+            story_total_ductility: None,
             bending_rotations: Vec::new(),
             time: Vec::new(),
             roof_disp: Vec::new(),
@@ -235,9 +236,9 @@ pub(crate) fn fundamental_omega(m: &[f64], k: &[f64]) -> f64 {
 /// 層のトリリニア骨格から最大点指向型（Clough 系トリリニア）の履歴材料を作る。
 pub(crate) fn story_spring(sk: &StoryTrilinear) -> HysteresisMaterial {
     HysteresisMaterial::new(HysteresisRule::MaxPointOriented {
-        crack: (sk.q1.max(1.0), sk.d1.max(1e-6)),
-        yield_point: (sk.q2.max(sk.q1 + 1.0), sk.d2.max(sk.d1 * 1.0001)),
-        ultimate: (sk.q3.max(sk.q2 + 1.0), sk.d3.max(sk.d2 * 1.0001)),
+        crack: (sk.q1, sk.d1),
+        yield_point: (sk.q2, sk.d2),
+        ultimate: (sk.q3, sk.d3),
     })
 }
 
@@ -402,20 +403,22 @@ pub fn lumped_mass_time_history(
         floor_disp.push(frame);
     }
 
-    let (d1x, d1y): (Vec<f64>, Vec<f64>) = match lm.dir {
+    let (dyx, dyy): (Vec<f64>, Vec<f64>) = match lm.dir {
         crate::statics::analysis::SeismicDir::X => (
-            lm.stories.iter().map(|s| s.skeleton.d1).collect(),
+            lm.stories.iter().map(|s| s.skeleton.d2).collect(),
             vec![f64::INFINITY; n],
         ),
         crate::statics::analysis::SeismicDir::Y => (
             vec![f64::INFINITY; n],
-            lm.stories.iter().map(|s| s.skeleton.d1).collect(),
+            lm.stories.iter().map(|s| s.skeleton.d2).collect(),
         ),
     };
-    let ductility_dir = dir_ductility(&drift_dir, &d1x, &d1y);
+    let ductility_dir = dir_ductility(&drift_dir, &dyx, &dyy);
     let ductility = ductility_dir.story_max();
 
     Ok(StickResponse {
+        total_ductility_dir: None,
+        story_total_ductility: None,
         bending_rotations: Vec::new(),
         time,
         roof_disp: roof,
@@ -527,7 +530,7 @@ mod dir_peaks_tests {
         let mu = dir_ductility(&p, &[1.0], &[1.0]);
         assert!((mu.x[0] - 3.0).abs() < 1e-12);
         assert!((mu.y[0] - 4.0).abs() < 1e-12);
-        // δ45 / (√2 · min δ1) = (7/√2) / √2 = 3.5。
+        // δ45 / (√2 · min 等価降伏変位) = (7/√2) / √2 = 3.5。
         assert!((mu.deg45[0] - 3.5).abs() < 1e-12);
         // 135° 側の軌道でも 45° 欄は同じ斜め包絡になる。
         let mut q = StickDirPeaks::zeros(1);
