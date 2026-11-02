@@ -170,12 +170,33 @@ impl App {
                         for p in positions.iter().take(8) {
                             match &p.outcome {
                                 sepika_design_jp::CheckOutcome::Checked(cr) => {
-                                    let ratio = cr.ratio();
-                                    let (color, state) = crate::theme::ratio_status(ratio);
-                                    ui.colored_label(
-                                        color,
-                                        format!("{state} pos={:.2} 検定比={:.3}", p.xi, ratio),
-                                    );
+                                    let evaluation = crate::app::evaluate_check(cr);
+                                    if let Some(ratio) = if evaluation.complete {
+                                        evaluation.valid_max
+                                    } else {
+                                        evaluation.known_ng
+                                    } {
+                                        let (color, state) = crate::theme::ratio_status(ratio);
+                                        let state = if evaluation.complete {
+                                            state
+                                        } else {
+                                            "NG（未評価あり）"
+                                        };
+                                        ui.colored_label(
+                                            color,
+                                            format!("{state} pos={:.2} 検定比={:.3}", p.xi, ratio),
+                                        );
+                                    }
+                                    if !evaluation.complete {
+                                        ui.colored_label(
+                                            crate::theme::GRAY_600,
+                                            format!(
+                                                "pos={:.2} {}",
+                                                p.xi,
+                                                crate::app::INVALID_CHECK_COMPONENTS
+                                            ),
+                                        );
+                                    }
                                 }
                                 sepika_design_jp::CheckOutcome::Skipped { reason } => {
                                     ui.colored_label(

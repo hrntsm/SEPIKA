@@ -866,19 +866,37 @@ fn draw_outcome_row(ui: &mut egui::Ui, pos: f64, outcome: &CheckOutcome) {
         ui.label(format!("ξ={:.2}:", pos));
         match outcome {
             CheckOutcome::Checked(cr) => {
-                let ratio = cr.ratio();
-                ui.colored_label(
-                    theme::status_color(ratio),
-                    format!(
-                        "検定比 {:.3} ({})",
-                        ratio,
-                        if cr.ok() { "OK" } else { "NG" }
-                    ),
-                );
-                for c in &cr.components {
+                let evaluation = crate::app::evaluate_check(cr);
+                if let Some(ratio) = if evaluation.complete {
+                    evaluation.valid_max
+                } else {
+                    evaluation.known_ng
+                } {
                     ui.colored_label(
-                        theme::status_color(c.ratio),
-                        format!("{} {:.2}", c.kind.label(), c.ratio),
+                        theme::status_color(ratio),
+                        format!(
+                            "検定比 {:.3} ({})",
+                            ratio,
+                            if ratio <= 1.0 { "OK" } else { "NG" }
+                        ),
+                    );
+                }
+                if !evaluation.complete {
+                    ui.colored_label(theme::GRAY_600, crate::app::INVALID_CHECK_COMPONENTS);
+                }
+                for c in &cr.components {
+                    let valid = c.ratio.is_finite() && c.ratio >= 0.0;
+                    ui.colored_label(
+                        if valid {
+                            theme::status_color(c.ratio)
+                        } else {
+                            theme::GRAY_600
+                        },
+                        if valid {
+                            format!("{} {:.2}", c.kind.label(), c.ratio)
+                        } else {
+                            format!("{} 未評価", c.kind.label())
+                        },
                     )
                     .on_hover_text(&c.detail);
                 }
@@ -896,6 +914,61 @@ mod signed_q0_acceptance_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_checks_th_detail_renders_unrated_reasons_and_known_ng() {
+        for (ratios, expected) in [
+            (vec![], "未評価:"),
+            (vec![f64::NAN], "未評価:"),
+            (vec![f64::INFINITY], "未評価:"),
+            (vec![f64::NEG_INFINITY], "未評価:"),
+            (vec![-0.5], "未評価:"),
+            (vec![0.4, f64::NAN], "未評価:"),
+            (vec![1.25, f64::NAN], "検定比 1.250 (NG)"),
+            (vec![0.0], "検定比 0.000 (OK)"),
+            (vec![0.5], "検定比 0.500 (OK)"),
+            (vec![1.0], "検定比 1.000 (OK)"),
+            (vec![1.25], "検定比 1.250 (NG)"),
+        ] {
+            let outcome = CheckOutcome::Checked(sepika_design_jp::CheckResult {
+                basis: String::new(),
+                detail: String::new(),
+                components: ratios
+                    .iter()
+                    .map(|ratio| sepika_design_jp::CheckComponent {
+                        kind: sepika_design_jp::CheckKind::AxialBending,
+                        ratio: *ratio,
+                        detail: String::new(),
+                    })
+                    .collect(),
+            });
+            let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+                draw_outcome_row(ui, 0.5, &outcome)
+            });
+            let text = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(expected), "{ratios:?}: {text}");
+            if ratios.is_empty() || ratios.iter().any(|r| !r.is_finite() || *r < 0.0) {
+                assert!(
+                    text.contains(crate::app::INVALID_CHECK_COMPONENTS),
+                    "{text}"
+                );
+                assert!(!text.contains("(OK)"), "{text}");
+            } else {
+                assert!(
+                    !text.contains(crate::app::INVALID_CHECK_COMPONENTS),
+                    "{text}"
+                );
+            }
+        }
+    }
 
     // ── axial_relative_disp ────────────────────────────────────────────
 

@@ -12,6 +12,31 @@ use sepika_solver::statics::linear::StaticOnce;
 
 use crate::app::{App, ResultsBundle, StaticCaseKey, StaticKey};
 
+fn check_csv_fields(check: &sepika_design_jp::CheckResult) -> (String, &'static str, String) {
+    let evaluation = crate::app::evaluate_check(check);
+    if evaluation.complete {
+        let ratio = evaluation.valid_max.unwrap();
+        (
+            format!("{ratio:.4}"),
+            if ratio <= 1.0 { "OK" } else { "NG" },
+            check.basis.clone(),
+        )
+    } else {
+        (
+            evaluation
+                .known_ng
+                .map(|ratio| format!("{ratio:.4}"))
+                .unwrap_or_else(|| "-".into()),
+            if evaluation.known_ng.is_some() {
+                "NG（未評価あり）"
+            } else {
+                "未評価"
+            },
+            format!("{} {}", crate::app::INVALID_CHECK_COMPONENTS, check.basis),
+        )
+    }
+}
+
 /// 層ごとの二次設計指標（層間変形角・剛性率・偏心率・Fes）。
 #[derive(Clone, Debug)]
 pub struct StoryMetric {
@@ -609,13 +634,14 @@ pub fn build_report_csv(app: &App) -> String {
             for p in &m.positions {
                 match &p.outcome {
                     sepika_design_jp::CheckOutcome::Checked(cr) => {
+                        let (ratio, status, basis) = check_csv_fields(cr);
                         out.push_str(&format!(
-                            "{},{:.3},{:.4},{},{}\n",
+                            "{},{:.3},{},{},{}\n",
                             m.elem.0,
                             p.xi,
-                            cr.ratio(),
-                            if cr.ok() { "OK" } else { "NG" },
-                            cr.basis.replace(',', ";")
+                            ratio,
+                            status,
+                            basis.replace(',', ";")
                         ));
                     }
                     sepika_design_jp::CheckOutcome::Skipped { reason } => {
@@ -637,8 +663,8 @@ pub fn build_report_csv(app: &App) -> String {
         } else {
             "\n[耐震壁結果状態]\n計算済み\n"
         });
-        let summary =
-            sepika_design_jp::wall_check::WallCheckSummary::from_checks(&results.wall_checks);
+        let summary = crate::app::displayed_wall_summary(&results.wall_checks);
+        let wall_checks = crate::app::displayed_wall_checks(&results.wall_checks);
         out.push_str("\n[耐震壁検定集計]\n壁枚数,検定件数,合格,NG,未検定,対象外,最大検定比\n");
         out.push_str(&format!(
             "{},{},{},{},{},{},{}\n",
@@ -659,7 +685,7 @@ pub fn build_report_csv(app: &App) -> String {
             sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton,
         ] {
             let s = sepika_design_jp::wall_check::WallCheckSummary::for_kind(
-                &results.wall_checks,
+                wall_checks.as_ref(),
                 kind,
             );
             out.push_str(&format!(
@@ -675,11 +701,7 @@ pub fn build_report_csv(app: &App) -> String {
         out.push_str("\n[耐震壁検定]\n壁版,生成要素,case,種別,検定比,判定,理由区分,根拠\n");
         for check in &results.wall_checks {
             let (ratio, status, reason) = match &check.outcome {
-                sepika_design_jp::CheckOutcome::Checked(cr) => (
-                    format!("{:.4}", cr.ratio()),
-                    if cr.ok() { "OK" } else { "NG" },
-                    cr.basis.as_str(),
-                ),
+                sepika_design_jp::CheckOutcome::Checked(cr) => check_csv_fields(cr),
                 sepika_design_jp::CheckOutcome::Skipped { reason } => (
                     String::new(),
                     if check.seismic_target {
@@ -687,7 +709,7 @@ pub fn build_report_csv(app: &App) -> String {
                     } else {
                         "対象外"
                     },
-                    reason.as_str(),
+                    reason.clone(),
                 ),
             };
             let escape = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
@@ -703,7 +725,7 @@ pub fn build_report_csv(app: &App) -> String {
                     .skip_kind
                     .map(|r| format!("{r:?}"))
                     .unwrap_or_default(),
-                escape(reason)
+                escape(&reason)
             ));
         }
     }
@@ -717,13 +739,14 @@ pub fn build_report_csv(app: &App) -> String {
             }
             match &j.outcome {
                 sepika_design_jp::CheckOutcome::Checked(cr) => {
+                    let (ratio, status, basis) = check_csv_fields(cr);
                     out.push_str(&format!(
-                        "{},{},{:.4},{},{}\n",
+                        "{},{},{},{},{}\n",
                         j.node.0,
                         j.label.replace(',', ";"),
-                        cr.ratio(),
-                        if cr.ok() { "OK" } else { "NG" },
-                        cr.basis.replace(',', ";")
+                        ratio,
+                        status,
+                        basis.replace(',', ";")
                     ));
                 }
                 sepika_design_jp::CheckOutcome::Skipped { reason } => {
@@ -1494,6 +1517,152 @@ pub(crate) fn input_generation_hash(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn incomplete_check_app(ratios: &[f64]) -> App {
+        use crate::app::{JointCheck, MemberChecks, PositionCheck};
+        use sepika_core::ids::{ElemId, NodeId, WallPlateId};
+        use sepika_design_jp::wall_check::{WallCheck, WallCheckKind};
+        use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+        let outcome = CheckOutcome::Checked(CheckResult {
+            basis: "入力に対応する検定根拠".into(),
+            detail: String::new(),
+            components: ratios
+                .iter()
+                .map(|ratio| CheckComponent {
+                    kind: CheckKind::AxialBending,
+                    ratio: *ratio,
+                    detail: String::new(),
+                })
+                .collect(),
+        });
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        app.core.scoped.results = Some(ResultsBundle {
+            member_checks: vec![MemberChecks {
+                elem: ElemId(0),
+                positions: vec![PositionCheck {
+                    xi: 0.5,
+                    outcome: outcome.clone(),
+                }],
+            }],
+            joint_checks: vec![JointCheck {
+                node: NodeId(0),
+                label: "接合部".into(),
+                outcome: outcome.clone(),
+            }],
+            wall_checks: vec![WallCheck {
+                plate: Some(WallPlateId(0)),
+                elem: None,
+                node: None,
+                case: "ケース".into(),
+                kind: WallCheckKind::AllowableShear,
+                shear_method: None,
+                seismic_target: true,
+                skip_kind: None,
+                outcome,
+                reference_skeleton: None,
+            }],
+            ..Default::default()
+        });
+        app.certify_design_fixture();
+        assert!(app.require_design_input().is_ok());
+        app
+    }
+
+    #[test]
+    fn incomplete_checks_csv_preserves_unrated_reasons_and_known_ng() {
+        for ratios in [
+            vec![],
+            vec![f64::NAN],
+            vec![f64::INFINITY],
+            vec![f64::NEG_INFINITY],
+            vec![-0.5],
+            vec![0.4, f64::NAN],
+            vec![1.25, f64::NAN],
+        ] {
+            let csv = build_report_csv(&incomplete_check_app(&ratios));
+            assert!(!csv.contains(",OK,"), "{ratios:?}: {csv}");
+            assert_eq!(
+                csv.matches(crate::app::INVALID_CHECK_COMPONENTS).count(),
+                3,
+                "{csv}"
+            );
+            assert!(csv.contains("入力に対応する検定根拠"));
+            if ratios.first() == Some(&1.25) {
+                assert_eq!(csv.matches("1.2500,NG（未評価あり）").count(), 3, "{csv}");
+                assert!(csv.contains("1,1,0,1,1,0,1.2500"), "{csv}");
+                assert!(csv.contains("許容せん断,1,0,1,1,0"), "{csv}");
+            } else {
+                assert!(csv.contains("1,1,0,0,1,0,\n"), "{csv}");
+                assert!(csv.contains("許容せん断,1,0,0,1,0"), "{csv}");
+            }
+        }
+        for (ratio, status) in [(0.0, "OK"), (0.5, "OK"), (1.0, "OK"), (1.25, "NG")] {
+            let csv = build_report_csv(&incomplete_check_app(&[ratio]));
+            assert_eq!(
+                csv.matches(&format!("{ratio:.4},{status},")).count(),
+                3,
+                "{csv}"
+            );
+            assert!(!csv.contains(crate::app::INVALID_CHECK_COMPONENTS));
+        }
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn incomplete_checks_inspector_renders_unrated_reasons_and_known_ng() {
+        for (ratios, expected) in [
+            (vec![], "未評価:"),
+            (vec![f64::NAN], "未評価:"),
+            (vec![f64::INFINITY], "未評価:"),
+            (vec![f64::NEG_INFINITY], "未評価:"),
+            (vec![-0.5], "未評価:"),
+            (vec![0.4, f64::NAN], "未評価:"),
+            (
+                vec![1.25, f64::NAN],
+                "NG（未評価あり） pos=0.50 検定比=1.250",
+            ),
+            (vec![0.0], "良好 pos=0.50 検定比=0.000"),
+            (vec![0.5], "良好 pos=0.50 検定比=0.500"),
+            (vec![1.0], "注意 pos=0.50 検定比=1.000"),
+            (vec![1.25], "超過 pos=0.50 検定比=1.250"),
+        ] {
+            let mut app = incomplete_check_app(&ratios);
+            app.select_member(sepika_core::ids::ElemId(0));
+            let output = egui::Context::default().run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(2000.0, 10000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.inspector_panel(ui),
+            );
+            let text = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(expected), "{ratios:?}: {text}");
+            if ratios.is_empty() || ratios.iter().any(|r| !r.is_finite() || *r < 0.0) {
+                assert!(
+                    text.contains(crate::app::INVALID_CHECK_COMPONENTS),
+                    "{text}"
+                );
+                assert!(!text.contains("良好"), "{text}");
+            } else {
+                assert!(
+                    !text.contains(crate::app::INVALID_CHECK_COMPONENTS),
+                    "{text}"
+                );
+            }
+        }
+    }
 
     fn metrics_810_app(long_term: bool) -> App {
         let mut app = App::default();

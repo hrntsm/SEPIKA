@@ -108,18 +108,15 @@ pub struct HoldingCapacitySource {
     pub capacity_conditions: AnalysisSettings,
 }
 
-#[cfg(any(feature = "gui", test))]
 pub(crate) const INVALID_CHECK_COMPONENTS: &str =
     "未評価: 検定成分が欠落・非有限・負のため、検定比と合否を確定しません。";
 
-#[cfg(any(feature = "gui", test))]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CheckEvaluation {
     pub complete: bool,
     pub valid_max: Option<f64>,
     pub known_ng: Option<f64>,
 }
-#[cfg(any(feature = "gui", test))]
 pub(crate) fn evaluate_check(check: &sepika_design_jp::CheckResult) -> CheckEvaluation {
     let valid = |r: f64| r.is_finite() && r >= 0.0;
     let complete = !check.components.is_empty() && check.components.iter().all(|c| valid(c.ratio));
@@ -145,7 +142,6 @@ pub(crate) fn checked_ratio(check: &sepika_design_jp::CheckResult) -> Option<f64
     }
 }
 
-#[cfg(any(feature = "gui", test))]
 pub(crate) fn check_is_unrated(outcome: &sepika_design_jp::CheckOutcome) -> bool {
     match outcome {
         sepika_design_jp::CheckOutcome::Checked(check) => !evaluate_check(check).complete,
@@ -153,7 +149,6 @@ pub(crate) fn check_is_unrated(outcome: &sepika_design_jp::CheckOutcome) -> bool
     }
 }
 
-#[cfg(feature = "gui")]
 pub(crate) fn displayed_wall_checks(
     checks: &[sepika_design_jp::wall_check::WallCheck],
 ) -> std::borrow::Cow<'_, [sepika_design_jp::wall_check::WallCheck]> {
@@ -189,7 +184,6 @@ pub(crate) fn displayed_wall_checks(
     std::borrow::Cow::Owned(displayed)
 }
 
-#[cfg(feature = "gui")]
 pub(crate) fn displayed_wall_summary(
     checks: &[sepika_design_jp::wall_check::WallCheck],
 ) -> sepika_design_jp::wall_check::WallCheckSummary {
