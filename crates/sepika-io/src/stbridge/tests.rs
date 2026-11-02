@@ -55,7 +55,7 @@ fn unused_steel_sections_keep_declared_frame_use_without_inference() {
     }
 }
 
-/// 標準グレード名 `SN400B` の材料（物性は `material_std` の標準表と一致させる）。
+/// 標準グレード名 `SN400B` の材料（物性は `sepika_core::standard_material` の標準表と一致させる）。
 fn sn400b(id: u32) -> Material {
     Material {
         strength_factor: None,

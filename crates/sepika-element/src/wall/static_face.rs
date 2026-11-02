@@ -355,39 +355,6 @@ mod tests {
         StaticWallFace::new(&model.elements[4], model)?.recover(&batch)
     }
     #[test]
-    fn same_face_total_forces_and_physical_area_keep_distinct_owners() {
-        let state = recover(&fixture::expanded_model(), &rows()).unwrap();
-        assert_eq!(state.compression_n, 1_200_000.0);
-        assert_eq!(state.shear_n, 200_000.0);
-        assert_eq!(state.moment_nmm, -1.29e9);
-        assert_eq!(state.physical_area_mm2, 1_332_000.0);
-        assert_eq!(state.depth_mm, 4600.0);
-        let mut m = fixture::expanded_model();
-        for (method, expected) in [
-            (
-                sepika_core::model::RcWallShearMethod::ArakawaMin,
-                2_006_534.471365995,
-            ),
-            (
-                sepika_core::model::RcWallShearMethod::ArakawaMean,
-                2_676_420.1354640694,
-            ),
-        ] {
-            m.stress_cfg.rc_wall_shear_method = method;
-            let qu =
-                super::super::wall_element::WallElement::directional_shear_capacity_at_reference(
-                    &m.elements[4],
-                    &m,
-                    crate::factory::StrengthBasis::Nominal,
-                    state.compression_n,
-                    [6450.0 / 4600.0; 2],
-                )
-                .unwrap();
-            assert!((qu[0] - expected).abs() < 1e-6);
-            assert_eq!(qu[0], qu[1]);
-        }
-    }
-    #[test]
     fn axial_cancellation_uses_relative_machine_precision_and_preserves_real_and_single_tiny_forces(
     ) {
         let model = fixture::expanded_model();
@@ -428,6 +395,33 @@ mod tests {
             assert_eq!(state.moment_nmm, -1.29e9);
             assert_eq!(state.physical_area_mm2, 1_332_000.0);
             assert_eq!(state.depth_mm, 4600.0);
+            if kind == ElementKind::Beam {
+                let original_method = model.stress_cfg.rc_wall_shear_method;
+                for (method, expected) in [
+                    (
+                        sepika_core::model::RcWallShearMethod::ArakawaMin,
+                        2_006_534.471365995,
+                    ),
+                    (
+                        sepika_core::model::RcWallShearMethod::ArakawaMean,
+                        2_676_420.1354640694,
+                    ),
+                ] {
+                    model.stress_cfg.rc_wall_shear_method = method;
+                    let qu =
+                    super::super::wall_element::WallElement::directional_shear_capacity_at_reference(
+                        &model.elements[4],
+                        &model,
+                        crate::factory::StrengthBasis::Nominal,
+                        state.compression_n,
+                        [6450.0 / 4600.0; 2],
+                    )
+                    .unwrap();
+                    assert!((qu[0] - expected).abs() < 1e-6);
+                    assert_eq!(qu[0], qu[1]);
+                }
+                model.stress_cfg.rc_wall_shear_method = original_method;
+            }
             model.sections[0].frame_use = None;
             let error = recover(&model, &rows()).unwrap_err();
             assert!(error.contains("側柱には柱用断面が必要"), "{error}");

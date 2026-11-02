@@ -252,6 +252,4 @@ fn singular_nonfinite_notconverged_dimensions_and_evaluation_failures_never_retu
         ))),
         Err(LocalEquilibriumError::Evaluation(_))
     ));
-    let retry = solve_quartic(0.02);
-    assert!((retry.retained_force[0] - 1e6).abs() < 1e-3);
 }

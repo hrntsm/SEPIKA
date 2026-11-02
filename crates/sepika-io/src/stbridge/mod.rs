@@ -16,7 +16,7 @@
 //! # 材料（グレード名）
 //! ST-Bridge 2.0 の `StbModel` は材料テーブル（E・ν・密度）を持たない。日本の構造材料は
 //! 法令・JIS で規格化されており、グレード名（`Fc21`・`SN400B`・`SD345` 等）が決まれば物性は
-//! 一意に定まる。import はグレード名から標準材料表（`import` の `material_std`）で物性を
+//! 一意に定まる。import はグレード名から標準材料表（`sepika_core::standard_material`）で物性を
 //! 復元し、export は断面へグレード名（鋼 `strength_main`、コンクリート `strength_concrete`）を
 //! 付す。材料の E/ν や節点荷重など幾何スコープ外は往復しない（完全一致は `.ovika`）。
 //!

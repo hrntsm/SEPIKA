@@ -136,8 +136,7 @@ fn parse_grades(a: &Attrs, shear_key: &str) -> RebarGrades {
 }
 
 /// 梁の上端筋・下端筋をかぶり側から内側への段別本数として読む。
-pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<String>) {
-    let warnings = Vec::new();
+pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades) {
     let top = stage_counts(a, "N_main_top_", 3);
     let bottom = stage_counts(a, "N_main_bottom_", 3);
     let mut rebar = RcBeamRebar {
@@ -160,12 +159,11 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<Stri
     {
         rebar.cover = center - rebar.stirrup.dia - rebar.main_dia / 2.0;
     }
-    (rebar, parse_grades(a, "strength_stirrup"), warnings)
+    (rebar, parse_grades(a, "strength_stirrup"))
 }
 
 /// 矩形柱の段別主筋本数とX/Y方向の帯筋脚数を読む。
-pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGrades, Vec<String>) {
-    let warnings = Vec::new();
+pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGrades) {
     // 標準Xは縦辺の列数を表し、内部xは横辺の列数を表すため入れ替える。
     let x = stage_counts(a, "N_main_Y_", 2);
     let y = stage_counts(a, "N_main_X_", 2);
@@ -204,14 +202,11 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
     }) {
         rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
     }
-    (rebar, parse_grades(a, "strength_band"), warnings)
+    (rebar, parse_grades(a, "strength_band"))
 }
 
 /// 円形柱の主筋全本数と帯筋径・間隔を読む。
-pub(super) fn parse_circle_column_rebar(
-    a: &Attrs,
-) -> (RcCircleColumnRebar, RebarGrades, Vec<String>) {
-    let warnings = Vec::new();
+pub(super) fn parse_circle_column_rebar(a: &Attrs) -> (RcCircleColumnRebar, RebarGrades) {
     let mut rebar = RcCircleColumnRebar {
         main_dia: attr_dia(a, &["D_main"]),
         count: attr_u32(a, &["N_main"]),
@@ -242,5 +237,5 @@ pub(super) fn parse_circle_column_rebar(
     }) {
         rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
     }
-    (rebar, parse_grades(a, "strength_band"), warnings)
+    (rebar, parse_grades(a, "strength_band"))
 }

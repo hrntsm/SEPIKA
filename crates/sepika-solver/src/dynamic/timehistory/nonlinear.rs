@@ -208,7 +208,6 @@ pub fn nonlinear_time_history_analysis(
     let mut v = reduced_vec_from(n_indep, initial_vel);
 
     let mut f_damp = sparse_matvec(&c_red, &v);
-    let mut c_v_last = vec![0.0; n_indep];
 
     let u_mode1: Vec<f64> = if matches!(damping, Damping::TangentStiffnessConstantH { .. }) {
         crate::dynamic::eigen::solve_eigen(model, dofmap, reducer, 1)
@@ -228,10 +227,9 @@ pub fn nonlinear_time_history_analysis(
         add_support_spring_f_int(model, dofmap, &u0_free, &mut f_int0_free);
     }
     let f_int0_red = reducer.reduce_f(&f_int0_free);
-    let cv0 = sparse_matvec(&c_red, &v);
     let mut rhs_a0 = vec![0.0; n_indep];
     for i in 0..n_indep {
-        rhs_a0[i] = p_red_0[i] + f0_red[i] - cv0[i] - f_int0_red[i];
+        rhs_a0[i] = p_red_0[i] + f0_red[i] - f_damp[i] - f_int0_red[i];
     }
     let mut a = if n_indep == 0 {
         Vec::new()
@@ -382,7 +380,6 @@ pub fn nonlinear_time_history_analysis(
                 }
             };
             let c_v_red = &c_v_red_buf;
-            c_v_last.clone_from(c_v_red);
             sparse_matvec_into(&m_red, &a_trial, &mut m_a_red_buf);
             let m_a_red = &m_a_red_buf;
 
@@ -507,7 +504,7 @@ pub fn nonlinear_time_history_analysis(
                 u[i] += du_total[i];
             }
             if accumulation == DampingAccumulation::Cumulative {
-                f_damp.clone_from(&c_v_last);
+                f_damp.clone_from(&c_v_red_buf);
             }
             v.copy_from_slice(&v_trial);
             a.copy_from_slice(&a_trial);
@@ -628,13 +625,6 @@ fn apply_long_term_static(
     use_kg: bool,
     u_out: &mut [f64],
 ) -> Result<(), SolveError> {
-    let n_indep = reducer.n_indep;
-    let mut solver: Box<dyn LinearSolver> = make_solver(SolverBackend::DirectSparseCholesky);
-    let mut k_free_cache = CscCache::new();
-    let mut k_red_cache = CscCache::new();
-    let mut du_red_buf = vec![0.0f64; n_indep];
-    let mut k_free_triplets_buf: Vec<Triplet> = Vec::new();
-    let mut k_red_triplets_buf: Vec<Triplet> = Vec::new();
     let snap = StateSnapshot::capture(behaviors);
     match newton_static_converge(
         model,
@@ -644,14 +634,7 @@ fn apply_long_term_static(
         f0_red,
         gravity_member_loads,
         use_kg,
-        n_indep,
         u_out,
-        &mut solver,
-        &mut k_free_cache,
-        &mut k_red_cache,
-        &mut du_red_buf,
-        &mut k_free_triplets_buf,
-        &mut k_red_triplets_buf,
     ) {
         Ok(Some(du)) => {
             for b in behaviors.iter_mut() {
@@ -687,15 +670,15 @@ fn newton_static_converge(
     f_target_red: &[f64],
     absolute_loads: &[Vec<sepika_core::model::MemberLoad>],
     use_kg: bool,
-    n_indep: usize,
     u_base_red: &[f64],
-    solver: &mut Box<dyn LinearSolver>,
-    k_free_cache: &mut CscCache,
-    k_red_cache: &mut CscCache,
-    du_red_buf: &mut Vec<f64>,
-    k_free_triplets_buf: &mut Vec<Triplet>,
-    k_red_triplets_buf: &mut Vec<Triplet>,
 ) -> Result<Option<Vec<f64>>, SolveError> {
+    let n_indep = reducer.n_indep;
+    let mut solver: Box<dyn LinearSolver> = make_solver(SolverBackend::DirectSparseCholesky);
+    let mut k_free_cache = CscCache::new();
+    let mut k_red_cache = CscCache::new();
+    let mut du_red_buf = vec![0.0f64; n_indep];
+    let mut k_free_triplets_buf: Vec<Triplet> = Vec::new();
+    let mut k_red_triplets_buf: Vec<Triplet> = Vec::new();
     apply_du_trial_with_member_loads(
         model,
         dofmap,
@@ -711,10 +694,10 @@ fn newton_static_converge(
             dofmap,
             behaviors,
             use_kg,
-            k_free_cache,
-            k_free_triplets_buf,
+            &mut k_free_cache,
+            &mut k_free_triplets_buf,
         );
-        let k_red = reducer.reduce_k_cached_ref(k_free, k_red_cache, k_red_triplets_buf);
+        let k_red = reducer.reduce_k_cached_ref(k_free, &mut k_red_cache, &mut k_red_triplets_buf);
         let mut f_int_free = compute_f_int(model, dofmap, behaviors);
         {
             let u_trial_red: Vec<f64> = (0..n_indep).map(|i| u_base_red[i] + du_total[i]).collect();
@@ -734,7 +717,7 @@ fn newton_static_converge(
         solver
             .factorize(k_red)
             .map_err(|e| SolveError::Backend(format!("factor: {:?}", e)))?;
-        solver.solve_into(&r_red, du_red_buf)?;
+        solver.solve_into(&r_red, &mut du_red_buf)?;
         let du_free = reducer.expand_u(du_red_buf.as_slice());
         for i in 0..n_indep {
             du_total[i] += du_red_buf[i];

@@ -20,6 +20,12 @@
 
 部材コンテナの固定順と空要素の省略、柱の節点と端条件の対応は `export.rs::members_body` を参照します。鉄筋のnative物性の出力可否判定では、解決できた値を一度取得して標準gradeと比較し、この段階の未解決値は判定をスキップします。
 
+## 材料復元の調査入口
+
+断面の主材料参照はグレード名の `Option<String>` として保持し、`assemble.rs` の `build_materials` が空名を除いて初出順に標準物性へ解決します。同名の既存材料を優先し、未知名はこの段階で材料を生成しません。標準物性の正本は `sepika_core::standard_material::standard_material_properties` です。
+
+標準鋼材名と物性は `material_grade::tests::supported_steel_names_restore_stock_properties_and_f_values`、鉄筋の強度・密度、コンクリートのFc別物性、数字を含む未知名は `standard_material::tests` が検証します。空名の未解決は既存の `material_grade::tests::unsupported_steel_names_do_not_restore_stock_properties_or_f_values` が検証します。STBから材料参照へ結ぶ経路はI/Oの標準断面・配筋・強度試験で別に確認します。
+
 ## 属性報告の内部契約
 
 `ImportReport.attributes` は `AttrDisposition` の要素名・属性名ごとの出現件数と取込件数を持ちます。`dropped_attributes()` は取込件数0の属性を返し、属性の未取り込みは `warnings` ではなく属性集計とログへ出します。パーサの属性参照に連動して記録するため、無視リストは設けません。

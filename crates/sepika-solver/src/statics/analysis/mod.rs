@@ -145,10 +145,6 @@ impl<'m> Analysis<'m> {
 
     /// 準備済みの基準剛性の分解を再利用し、指定数の固有モードを返す。
     pub fn eigen(&self, n_modes: usize) -> Result<ModalResult, SolveError> {
-        self.eigen_solver_dispatch(n_modes)
-    }
-
-    pub(crate) fn eigen_solver_dispatch(&self, n_modes: usize) -> Result<ModalResult, SolveError> {
         eigen::solve_eigen_with_solver(
             self.model,
             &self.dofmap,

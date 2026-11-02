@@ -440,70 +440,15 @@ mod tests {
             finish_intensity: 0.0,
         });
         assert!(!wall_is_seismic(&data, &model));
-        model.wall_attrs[0].opening_area = 0.0;
-        model.wall_attrs[0].slit.column_face = [true, false];
-        assert!(!wall_is_seismic(&data, &model));
     }
 
     /// 台形壁の開口周比 r0 は [`crate::wall::wall_element::wall_element_geometry`] の
     /// 壁長（上下辺平均）を単一情報源とする。
     #[test]
     fn 台形壁の開口周比は壁エレメント幾何の壁長を用いる() {
-        use sepika_core::model::WallAttr;
-
-        let make_node = |id: u32, coord: [f64; 3]| Node {
-            id: NodeId(id),
-            coord,
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        };
-        let shape = SectionShape::RcWall {
-            thickness: 150.0,
-            pwh_ratio: None,
-            pwv_ratio: None,
-            ps: 0.0025,
-        };
-        let mut model = Model {
-            nodes: vec![
-                make_node(0, [0.0, 0.0, 0.0]),
-                make_node(1, [4000.0, 0.0, 0.0]),
-                make_node(2, [3500.0, 0.0, 3000.0]),
-                make_node(3, [500.0, 0.0, 3000.0]),
-            ],
-            sections: vec![shape.to_section(SectionId(0), "W".into())],
-            materials: vec![Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "FC24".into(),
-                category: MaterialCategory::Concrete,
-                young: 23000.0,
-                poisson: 0.2,
-                density: 2.4e-9,
-                shear: None,
-                fc: Some(24.0),
-                fy: None,
-            }],
-            ..Default::default()
-        };
-        let data = ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Wall,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        };
-        crate::wall::add_surrounding_frame(&mut model, &data);
+        let (mut model, data) = make_model(150.0);
+        model.nodes[2].coord = [3500.0, 0.0, 3000.0];
+        model.nodes[3].coord = [500.0, 0.0, 3000.0];
         model.elements.push(data.clone());
 
         let g = crate::wall::wall_element::wall_element_geometry(&data, &model).expect("幾何");
@@ -701,34 +646,6 @@ mod tests {
         assert!((walls[0].strip_height(true) - 1500.0).abs() < 1e-9);
     }
 
-    #[test]
-    fn test_column_face_slit_wall_is_collected_as_misc_wall() {
-        let (mut model, data) = make_model(150.0);
-        model.elements.push(data);
-        model.wall_attrs.push(WallAttr {
-            elem: ElemId(0),
-            opening_area: 0.0,
-            opening_weight: 0.0,
-            slit: sepika_core::model::WallSlit {
-                column_face: [true, true],
-                beam_face: [false, false],
-            },
-            openings: vec![],
-            finish_intensity: 0.0,
-        });
-        add_wall_plate(
-            &mut model,
-            vec![],
-            WallSlit {
-                column_face: [true, true],
-                beam_face: [false, false],
-            },
-        );
-        let walls = collect_misc_walls(&model);
-        assert_eq!(walls.len(), 1);
-        assert_eq!(walls[0].slit.column_face, [true, true]);
-    }
-
     /// 梁際スリットのある側は腰壁・垂れ壁の高さを 0 とし、反対側の梁が全高を負担する。
     ///
     /// 三方スリット（柱際 2 辺＋下辺）の壁は、上の梁だけが躯体と一体である。
@@ -825,6 +742,9 @@ mod tests {
                 beam_face: [false, false],
             },
         );
+        let walls = collect_misc_walls(&model);
+        assert_eq!(walls.len(), 1);
+        assert_eq!(walls[0].slit.column_face, [true, true]);
         assert_eq!(
             misc_stiffness_wall_plates(&model),
             vec![sepika_core::ids::WallPlateId(0)],

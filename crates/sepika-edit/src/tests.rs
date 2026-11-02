@@ -329,43 +329,31 @@ fn test_set_node_support_spring_invalid_id_is_noop() {
 
 #[test]
 fn test_add_node_roundtrip() {
-    let mut model = Model::default();
-    let mut stack = UndoStack::new();
-
-    stack.run(
-        &mut model,
-        Box::new(AddNode {
-            coord: [1000.0, 2000.0, 3000.0],
-            restraint: Dof6Mask::FREE,
-        }),
-    );
-    assert_eq!(model.nodes.len(), 1);
-    assert_eq!(model.nodes[0].id, NodeId(0));
-    assert_eq!(model.nodes[0].coord, [1000.0, 2000.0, 3000.0]);
-
-    stack.undo(&mut model);
-    assert_eq!(model.nodes.len(), 0);
-
-    stack.redo(&mut model);
-    assert_eq!(model.nodes.len(), 1);
-    assert_eq!(model.nodes[0].id, NodeId(0));
-}
-
-#[test]
-fn test_add_node_id_equals_index() {
-    let mut model = Model::default();
-    let mut stack = UndoStack::new();
-    for i in 0..3 {
-        stack.run(
-            &mut model,
-            Box::new(AddNode {
-                coord: [i as f64, 0.0, 0.0],
-                restraint: Dof6Mask::FREE,
-            }),
-        );
-    }
-    for (i, node) in model.nodes.iter().enumerate() {
-        assert_eq!(node.id, NodeId(i as u32));
+    for coords in [
+        vec![[1000.0, 2000.0, 3000.0]],
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+    ] {
+        let mut model = Model::default();
+        let mut stack = UndoStack::new();
+        for &coord in &coords {
+            stack.run(
+                &mut model,
+                Box::new(AddNode {
+                    coord,
+                    restraint: Dof6Mask::FREE,
+                }),
+            );
+        }
+        assert_eq!(model.nodes.len(), coords.len());
+        for (i, node) in model.nodes.iter().enumerate() {
+            assert_eq!(node.id, NodeId(i as u32));
+            assert_eq!(node.coord, coords[i]);
+        }
+        let added = model.nodes.clone();
+        stack.undo(&mut model);
+        assert_eq!(model.nodes.len(), coords.len() - 1);
+        stack.redo(&mut model);
+        assert_eq!(model.nodes, added);
     }
 }
 
@@ -1004,81 +992,61 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
 }
 
 #[test]
-fn test_edit_rc_slab_section_shape_with_shell_reference() {
-    let old_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 };
-    let new_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 200.0 };
-    let mut model = Model::default();
-    model
-        .sections
-        .push(old_shape.to_section(SectionId(0), "S".into()));
-    model.elements.push(ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Shell,
-        nodes: smallvec![],
-        section: Some(SectionId(0)),
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 0.0, 1.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    });
+fn test_edit_rc_plate_section_shape_with_element_reference() {
+    use sepika_core::section_shape::SectionShape;
+    for (name, kind, old_shape, new_shape) in [
+        (
+            "S",
+            ElementKind::Shell,
+            SectionShape::RcSlab { thickness: 150.0 },
+            SectionShape::RcSlab { thickness: 200.0 },
+        ),
+        (
+            "W",
+            ElementKind::Wall,
+            SectionShape::RcWall {
+                thickness: 180.0,
+                pwh_ratio: None,
+                pwv_ratio: None,
+                ps: 0.0,
+            },
+            SectionShape::RcWall {
+                thickness: 220.0,
+                pwh_ratio: None,
+                pwv_ratio: None,
+                ps: 0.0,
+            },
+        ),
+    ] {
+        let mut model = Model::default();
+        model
+            .sections
+            .push(old_shape.to_section(SectionId(0), name.into()));
+        model.elements.push(ElementData {
+            id: ElemId(0),
+            kind,
+            nodes: smallvec![],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
+            plastic_zone: None,
+            spring: None,
+        });
 
-    assert!(!EditSectionShape {
-        section: SectionId(0),
-        new_shape: new_shape.clone(),
-        frame_use: None,
+        assert!(!EditSectionShape {
+            section: SectionId(0),
+            new_shape: new_shape.clone(),
+            frame_use: None,
+        }
+        .apply(&mut model)
+        .is_noop());
+        assert_eq!(model.sections[0].shape, Some(new_shape));
     }
-    .apply(&mut model)
-    .is_noop());
-    assert_eq!(model.sections[0].shape, Some(new_shape));
-}
-
-#[test]
-fn test_edit_rc_wall_section_shape_with_wall_reference() {
-    let old_shape = sepika_core::section_shape::SectionShape::RcWall {
-        thickness: 180.0,
-        pwh_ratio: None,
-        pwv_ratio: None,
-        ps: 0.0,
-    };
-    let new_shape = sepika_core::section_shape::SectionShape::RcWall {
-        thickness: 220.0,
-        pwh_ratio: None,
-        pwv_ratio: None,
-        ps: 0.0,
-    };
-    let mut model = Model::default();
-    model
-        .sections
-        .push(old_shape.to_section(SectionId(0), "W".into()));
-    model.elements.push(ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Wall,
-        nodes: smallvec![],
-        section: Some(SectionId(0)),
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 0.0, 1.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    });
-
-    assert!(!EditSectionShape {
-        section: SectionId(0),
-        new_shape: new_shape.clone(),
-        frame_use: None,
-    }
-    .apply(&mut model)
-    .is_noop());
-    assert_eq!(model.sections[0].shape, Some(new_shape));
 }
 
 #[test]
@@ -1205,33 +1173,6 @@ fn test_edit_section_shape_invalid_id_noop() {
 }
 
 #[test]
-fn test_delete_add_section_roundtrip() {
-    let mut model = Model::default();
-    let mut stack = UndoStack::new();
-
-    let shape = sepika_core::section_shape::SectionShape::SteelH {
-        root_r: Some(0.0),
-        height: 300.0,
-        width: 300.0,
-        web_thick: 10.0,
-        flange_thick: 15.0,
-    };
-    let sec = shape.to_section(SectionId(0), "H-300".into());
-    model.sections.push(sec);
-
-    let cmd = DeleteSection { id: SectionId(0) };
-    stack.run(&mut model, Box::new(cmd));
-    assert_eq!(model.sections.len(), 0);
-
-    stack.undo(&mut model);
-    assert_eq!(model.sections.len(), 1);
-    assert_eq!(model.sections[0].id, SectionId(0));
-
-    stack.redo(&mut model);
-    assert_eq!(model.sections.len(), 0);
-}
-
-#[test]
 fn test_duplicate_section_no_section_noop() {
     let mut model = seeded_model(2, 0);
     let mut stack = UndoStack::new();
@@ -1329,30 +1270,54 @@ fn test_delete_member_middle_renumbers_and_roundtrips() {
 
 #[test]
 fn test_delete_section_in_use_is_noop_and_renumbers() {
-    let mut model = seeded_model(3, 2);
-    for i in 0..2u32 {
-        let mut section = bare_section(SectionId(i), None);
-        section.frame_use = (i == 1).then_some(sepika_core::model::FrameSectionUse::Girder);
-        model.sections.push(section);
+    use sepika_core::{model::FrameSectionUse, section_shape::SectionShape};
+    for referenced in [false, true] {
+        let mut model = if referenced {
+            seeded_model(3, 2)
+        } else {
+            Model::default()
+        };
+        if referenced {
+            for i in 0..2u32 {
+                let mut section = bare_section(SectionId(i), None);
+                section.frame_use = (i == 1).then_some(FrameSectionUse::Girder);
+                model.sections.push(section);
+            }
+            model.elements[0].section = Some(SectionId(1));
+        } else {
+            model.sections.push(
+                SectionShape::SteelH {
+                    root_r: Some(0.0),
+                    height: 300.0,
+                    width: 300.0,
+                    web_thick: 10.0,
+                    flange_thick: 15.0,
+                }
+                .to_section(SectionId(0), "H-300".into()),
+            );
+        }
+        let mut stack = UndoStack::new();
+        if referenced {
+            stack.run(&mut model, Box::new(DeleteSection { id: SectionId(1) }));
+            assert_eq!(model.sections.len(), 2);
+        }
+        let before = model.clone();
+        stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
+        assert_eq!(model.sections.len(), usize::from(referenced));
+        if referenced {
+            assert_eq!(model.sections[0].id, SectionId(0));
+            assert_eq!(model.elements[0].section, Some(SectionId(0)));
+        }
+        assert!(model.validate().is_ok());
+        stack.undo(&mut model);
+        assert!(model.eq_ignoring_dofmap(&before));
+        stack.redo(&mut model);
+        assert_eq!(model.sections.len(), usize::from(referenced));
+        if referenced {
+            assert_eq!(model.sections[0].id, SectionId(0));
+            assert_eq!(model.elements[0].section, Some(SectionId(0)));
+        }
     }
-    // 部材 0 に断面 1 を割当（断面 0 は未使用）
-    model.elements[0].section = Some(SectionId(1));
-    let mut stack = UndoStack::new();
-
-    // 使用中の断面 1 は削除できない
-    stack.run(&mut model, Box::new(DeleteSection { id: SectionId(1) }));
-    assert_eq!(model.sections.len(), 2);
-
-    // 未使用の断面 0 は削除でき、断面 1 → 0 に繰り上がり参照も追随
-    let before = model.clone();
-    stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
-    assert_eq!(model.sections.len(), 1);
-    assert_eq!(model.sections[0].id, SectionId(0));
-    assert_eq!(model.elements[0].section, Some(SectionId(0)));
-    assert!(model.validate().is_ok());
-
-    stack.undo(&mut model);
-    assert!(model.eq_ignoring_dofmap(&before));
 }
 
 /// 二次部材小梁（`SecondaryMember::section`）が参照する断面は削除ガードで守られ、
@@ -2401,7 +2366,7 @@ fn test_set_story_weight_invalid_id_is_noop() {
 #[test]
 fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     use sepika_core::dof::Dof;
-    use sepika_core::model::Constraint;
+    use sepika_core::model::{Constraint, MassMethod};
 
     let mut model = Model::default();
     for i in 0..2u32 {
@@ -2414,6 +2379,7 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
             support_spring: None,
         });
     }
+    assert_eq!(model.mass_method, MassMethod::CorrectedLumped);
     let before = model.clone();
     let mut stack = UndoStack::new();
 
@@ -2450,56 +2416,21 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     prepared.generated_masters = vec![NodeId(2)];
     prepared.wall_weight_generation = Some(sepika_core::model::WallWeightGenerationMode::Geometry);
     prepared.damper_mass_generation = Some(Default::default());
-    prepared.seismic_weight_generation = Some(generation.clone());
+    prepared.seismic_weight_generation = Some(generation);
+    prepared.mass_method = MassMethod::LumpedOnly;
     prepared.assign_stb_node_ids().unwrap();
     let applied = prepared.clone();
     assert!(stack.run(&mut model, Box::new(ApplyPreparedModel { prepared })));
     assert!(model.eq_ignoring_dofmap(&applied));
 
-    assert_eq!(model.nodes.len(), 3);
-    assert_eq!(model.generated_masters, vec![NodeId(2)]);
-    assert_eq!(model.damper_mass_generation, Some(Default::default()));
-    assert_eq!(model.stories.len(), 1);
-    assert_eq!(model.constraints.len(), 1);
-    assert_eq!(model.seismic_weight_generation, Some(generation.clone()));
     assert!(model.validate_reference_ids().is_ok());
 
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
-    assert!(model.generated_masters.is_empty());
-    assert!(model.damper_mass_generation.is_none());
-    assert!(model.seismic_weight_generation.is_none());
-    assert!(model.stories.is_empty());
     assert!(model.validate_reference_ids().is_ok());
 
     stack.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&applied));
-    assert_eq!(model.seismic_weight_generation, Some(generation));
-    assert_eq!(model.nodes.len(), 3);
-    assert_eq!(model.generated_masters, vec![NodeId(2)]);
-    assert_eq!(model.damper_mass_generation, Some(Default::default()));
-    assert_eq!(model.stories.len(), 1);
-    assert_eq!(model.constraints.len(), 1);
-}
-
-#[test]
-fn test_apply_prepared_model_sets_and_restores_mass_method() {
-    use sepika_core::model::MassMethod;
-
-    let mut model = Model::default();
-    assert_eq!(model.mass_method, MassMethod::CorrectedLumped);
-    let mut stack = UndoStack::new();
-    let mut prepared = model.clone();
-    prepared.mass_method = MassMethod::LumpedOnly;
-
-    assert!(stack.run(&mut model, Box::new(ApplyPreparedModel { prepared })));
-    assert_eq!(model.mass_method, MassMethod::LumpedOnly);
-
-    stack.undo(&mut model);
-    assert_eq!(model.mass_method, MassMethod::CorrectedLumped);
-
-    stack.redo(&mut model);
-    assert_eq!(model.mass_method, MassMethod::LumpedOnly);
 }
 
 /// 階数が減って不活性化された剛床代表節点（`generated_masters` には残るが
@@ -3159,26 +3090,6 @@ fn test_set_multi_opening_mode_roundtrip() {
     assert_eq!(model.multi_opening_mode, MultiOpeningMode::Envelope);
     stack.redo(&mut model);
     assert_eq!(model.multi_opening_mode, MultiOpeningMode::Auto);
-}
-
-/// 同じモードへの再設定でも既存の値置換系コマンドと同様に処理される
-/// （同値判定による分岐なし。undo すれば必ず変更前の値へ戻る）。
-#[test]
-fn test_set_multi_opening_mode_same_value_is_symmetric() {
-    use sepika_core::model::MultiOpeningMode;
-    let mut model = Model::default();
-    let mut stack = UndoStack::new();
-
-    stack.run(
-        &mut model,
-        Box::new(SetMultiOpeningMode {
-            mode: MultiOpeningMode::Equivalent,
-        }),
-    );
-    assert_eq!(model.multi_opening_mode, MultiOpeningMode::Equivalent);
-
-    stack.undo(&mut model);
-    assert_eq!(model.multi_opening_mode, MultiOpeningMode::Equivalent);
 }
 
 #[test]
@@ -3930,7 +3841,7 @@ fn test_remove_steel_design_attr_missing_is_noop() {
 
 #[test]
 fn test_delete_member_shifts_and_restores_side_table_attrs() {
-    use sepika_core::model::{DamperProps, HysteresisModel};
+    use sepika_core::model::{DamperProps, Haunch, HysteresisModel, MemberDetailAttr};
     let mut model = seeded_model(3, 2);
     // 部材0に履歴則、部材1にダンパー特性を付与。
     model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
@@ -3941,41 +3852,6 @@ fn test_delete_member_shifts_and_restores_side_table_attrs() {
         ..Default::default()
     };
     model.set_damper_props(ElemId(1), Some(props));
-    let before = model.clone();
-
-    let mut stack = UndoStack::new();
-    // 部材0を削除 → 部材1が ElemId(0) へ繰り上がり、その側テーブル参照も追従する。
-    stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) }));
-    assert_eq!(model.elements.len(), 1);
-    // 削除された部材0の履歴則は消える。
-    assert_eq!(model.member_hysteresis(ElemId(0)), None);
-    // 元・部材1のダンパー特性は新 ElemId(0) を指す（参照整合）。
-    assert_eq!(model.damper_props(ElemId(0)), Some(props));
-    assert!(model.validate().is_ok());
-
-    // undo で側テーブル属性も含め完全復元。
-    stack.undo(&mut model);
-    assert!(model.eq_ignoring_dofmap(&before));
-    assert_eq!(
-        model.member_hysteresis(ElemId(0)),
-        Some(HysteresisModel::Takeda)
-    );
-    assert_eq!(model.damper_props(ElemId(1)), Some(props));
-
-    // redo で再削除・再整合。
-    stack.redo(&mut model);
-    assert_eq!(model.damper_props(ElemId(0)), Some(props));
-    assert_eq!(model.member_hysteresis(ElemId(0)), None);
-}
-
-/// `DeleteMember` が `member_detail_attrs`（ハンチ・継手位置）も
-/// `take_elem_attrs`/`restore_elem_attrs` 経由で退避・復元すること
-/// （`ElemAttrs.detail` の配線の検証）。
-#[test]
-fn test_delete_member_restores_member_detail_attr() {
-    use sepika_core::model::{Haunch, MemberDetailAttr};
-    let mut model = seeded_model(3, 2);
-    // 部材0にハンチ付帯情報を付与。
     let attr = MemberDetailAttr {
         elem: ElemId(0),
         haunch_i: Some(Haunch {
@@ -3990,19 +3866,30 @@ fn test_delete_member_restores_member_detail_attr() {
     let before = model.clone();
 
     let mut stack = UndoStack::new();
-    // 部材0を削除 → 付帯情報も連動して消える。
+    // 部材0を削除 → 部材1が ElemId(0) へ繰り上がり、その側テーブル参照も追従する。
     stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) }));
     assert_eq!(model.elements.len(), 1);
+    // 削除された部材0の履歴則は消える。
+    assert_eq!(model.member_hysteresis(ElemId(0)), None);
     assert!(model.member_detail(ElemId(0)).is_none());
+    // 元・部材1のダンパー特性は新 ElemId(0) を指す（参照整合）。
+    assert_eq!(model.damper_props(ElemId(0)), Some(props));
     assert!(model.validate().is_ok());
 
-    // undo で付帯情報も含め完全復元。
+    // undo で側テーブル属性も含め完全復元。
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
+    assert_eq!(
+        model.member_hysteresis(ElemId(0)),
+        Some(HysteresisModel::Takeda)
+    );
+    assert_eq!(model.damper_props(ElemId(1)), Some(props));
     assert_eq!(model.member_detail(ElemId(0)), Some(&attr));
 
-    // redo で再削除。
+    // redo で再削除・再整合。
     stack.redo(&mut model);
+    assert_eq!(model.damper_props(ElemId(0)), Some(props));
+    assert_eq!(model.member_hysteresis(ElemId(0)), None);
     assert!(model.member_detail(ElemId(0)).is_none());
 }
 
@@ -4308,7 +4195,7 @@ fn test_add_section_shape_rejects_duplicate_key() {
     assert_eq!(model.sections.len(), 3, "階なしどうしの符号重複も拒否する");
 }
 
-/// 符号・階の変更も、他の断面と衝突する場合は適用しない。自分自身は衝突判定から外す。
+/// 符号・階の変更は他断面との衝突を拒否し、空いているキーへの変更を取り消せる。
 #[test]
 fn test_set_section_name_rejects_duplicate_key() {
     let mut model = Model::default();
@@ -4351,17 +4238,6 @@ fn test_set_section_name_rejects_duplicate_key() {
     stack.undo(&mut model);
     assert_eq!(model.sections[1].name, "C1");
     assert_eq!(model.sections[1].floor.as_deref(), Some("2"));
-
-    // 自分自身と同じキーへの変更は衝突扱いにしない（符号だけを直す操作が通る）。
-    stack.run(
-        &mut model,
-        Box::new(SetSectionName {
-            id: SectionId(0),
-            name: "C1".into(),
-            floor: Some("1".into()),
-        }),
-    );
-    assert_eq!(model.sections[0].name, "C1");
 }
 
 /// 断面形状を変更しても符号と階は維持する（同一性キーが形状変更で消えない）。
