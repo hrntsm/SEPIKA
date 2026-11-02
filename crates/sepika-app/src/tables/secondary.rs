@@ -114,7 +114,7 @@ pub(crate) fn support_label(model: &Model, support: SupportMemberId) -> String {
     }
 }
 
-/// 配置先に選べる支持部材。主架構の 2 節点梁と、同じ種別の既存二次部材のうち、
+/// 配置先に選べる支持部材。主架構の有効な 2 節点支持材と、同じ種別の既存二次部材のうち、
 /// 材軸の両端が親領域（作業範囲）の内側または境界上にあるもの。
 fn support_candidates(
     model: &Model,
@@ -123,7 +123,7 @@ fn support_candidates(
 ) -> Vec<SupportMemberId> {
     let mut out = Vec::new();
     for e in &model.elements {
-        if e.kind == ElementKind::Beam && e.nodes.len() == 2 {
+        if e.kind.is_primary_frame_support() && e.nodes.len() == 2 {
             out.push(SupportMemberId::Primary(e.id));
         }
     }
@@ -626,6 +626,27 @@ pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: Seco
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sepika_core::model::{
+        ElementData, EndCondition, FloorRegion, ForceRegime, LocalAxis, Node, WallRegion,
+    };
+
+    fn beam(id: u32, a: u32, b: u32) -> ElementData {
+        ElementData {
+            id: ElemId(id),
+            kind: ElementKind::Beam,
+            nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
+            section: None,
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
+            plastic_zone: None,
+            spring: None,
+        }
+    }
 
     fn anchor() -> SecondaryMemberAnchor {
         SecondaryMemberAnchor {
@@ -685,28 +706,6 @@ mod tests {
 
     #[test]
     fn 支持部材候補は親領域内の材軸に絞る() {
-        use sepika_core::model::{
-            ElementData, EndCondition, FloorRegion, ForceRegime, LocalAxis, Node,
-        };
-
-        fn beam(id: u32, a: u32, b: u32) -> ElementData {
-            ElementData {
-                id: ElemId(id),
-                kind: ElementKind::Beam,
-                nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
-                section: None,
-                local_axis: LocalAxis {
-                    ref_vector: [0.0, 0.0, 1.0],
-                },
-                end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-                force_regime: ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
-                plastic_zone: None,
-                spring: None,
-            }
-        }
-
         let mut model = Model::default();
         for (i, (x, y)) in [(0.0, 0.0), (4000.0, 0.0), (4000.0, 4000.0), (0.0, 4000.0)]
             .into_iter()
@@ -756,5 +755,190 @@ mod tests {
             !candidates.contains(&SupportMemberId::Primary(ElemId(4))),
             "親領域の外にある大梁は候補にしない"
         );
+    }
+
+    fn support_model(kind: ElementKind) -> Model {
+        let mut model = Model::default();
+        for (i, coord) in [
+            [0.0, 0.0, 0.0],
+            [4000.0, 0.0, 0.0],
+            [4000.0, 4000.0, 0.0],
+            [0.0, 4000.0, 0.0],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            model.nodes.push(Node {
+                id: NodeId(i as u32),
+                coord,
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            });
+        }
+        for (i, (a, b)) in [(0, 1), (1, 2), (2, 3), (3, 0)].into_iter().enumerate() {
+            let mut element = beam(i as u32, a, b);
+            element.kind = kind;
+            model.elements.push(element);
+        }
+        model.floor_regions.push(FloorRegion::new(
+            FloorRegionId(0),
+            vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+        ));
+        model
+    }
+
+    #[test]
+    fn 支持候補は解析方式によらず有効な主架構だけを含む() {
+        for element_kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            for secondary_kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+                let mut model = support_model(element_kind);
+                let parent = match secondary_kind {
+                    SecondaryMemberKind::Beam => SecondaryParent::Floor(FloorRegionId(0)),
+                    SecondaryMemberKind::Post => {
+                        for node in &mut model.nodes {
+                            node.coord = [node.coord[0], 0.0, node.coord[1]];
+                        }
+                        let boundary = model.floor_regions.remove(0).boundary;
+                        model
+                            .wall_regions
+                            .push(WallRegion::new(WallRegionId(0), boundary));
+                        SecondaryParent::Wall(WallRegionId(0))
+                    }
+                };
+                let support = SupportMemberId::Primary(ElemId(0));
+                assert!(support_candidates(&model, secondary_kind, parent).contains(&support));
+                for nodes in [
+                    vec![],
+                    vec![NodeId(0)],
+                    vec![NodeId(0), NodeId(1), NodeId(2)],
+                    vec![NodeId(0), NodeId(0)],
+                    vec![NodeId(0), NodeId(99)],
+                ] {
+                    model.elements[0].nodes = nodes.into_iter().collect();
+                    assert!(!support_candidates(&model, secondary_kind, parent).contains(&support));
+                }
+                let mut outside = model.nodes[0].clone();
+                outside.id = NodeId(4);
+                outside.coord = [-1000.0, 0.0, 0.0];
+                model.nodes.push(outside);
+                model.elements[0].nodes = [NodeId(4), NodeId(1)].into_iter().collect();
+                assert!(!support_candidates(&model, secondary_kind, parent).contains(&support));
+            }
+        }
+        for kind in [
+            ElementKind::Shell,
+            ElementKind::Wall,
+            ElementKind::PanelZone,
+            ElementKind::Brace {
+                tension_only: false,
+            },
+            ElementKind::NodalSpring,
+            ElementKind::Isolator,
+            ElementKind::Damper,
+        ] {
+            let model = support_model(kind);
+            assert!(
+                support_candidates(
+                    &model,
+                    SecondaryMemberKind::Beam,
+                    SecondaryParent::Unassigned
+                )
+                .is_empty(),
+                "{kind:?}"
+            );
+        }
+    }
+
+    fn text_center(shape: &egui::Shape, text: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(value) if value.galley.text() == text => {
+                Some(value.visual_bounding_rect().center())
+            }
+            egui::Shape::Vec(values) => values.iter().find_map(|s| text_center(s, text)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn フォームの再描画と名前変更で支持を保持し配置とundo_redoに引き継ぐ() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut app = App::default();
+            assert!(app.load_model(support_model(kind)));
+            app.ui.scoped.secondary_draft = SecondaryMemberDraft {
+                parent: Some(0),
+                support_a: Some(SupportMemberId::Primary(ElemId(1))),
+                pos_a: "0.25".into(),
+                support_b: Some(SupportMemberId::Primary(ElemId(3))),
+                pos_b: "0.75".into(),
+                ..Default::default()
+            };
+            let expected = build_ends(&app.ui.scoped.secondary_draft).unwrap();
+            let context = egui::Context::default();
+            crate::app::install_japanese_fonts(&context);
+            let frame = |app: &mut App, events| {
+                context.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| secondary_member_placement_form(app, ui, SecondaryMemberKind::Beam),
+                )
+            };
+            frame(&mut app, vec![]);
+            assert_eq!(build_ends(&app.ui.scoped.secondary_draft), Some(expected));
+            app.ui.scoped.secondary_draft.name = "支持を保持".into();
+            let output = frame(&mut app, vec![]);
+            assert_eq!(build_ends(&app.ui.scoped.secondary_draft), Some(expected));
+            let position = output
+                .shapes
+                .iter()
+                .find_map(|s| text_center(&s.shape, "配置"))
+                .unwrap();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            assert_eq!(
+                app.core.model.floor_regions[0].secondary_beams.len(),
+                1,
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            assert_eq!(
+                app.core.model.floor_regions[0].secondary_beams[0].ends,
+                expected
+            );
+            assert_eq!(
+                app.core.model.floor_regions[0].secondary_beams[0].name,
+                "支持を保持"
+            );
+            app.undo_action();
+            assert!(app.core.model.floor_regions[0].secondary_beams.is_empty());
+            app.redo_action();
+            assert_eq!(
+                app.core.model.floor_regions[0].secondary_beams[0].ends,
+                expected
+            );
+        }
     }
 }
