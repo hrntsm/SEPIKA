@@ -379,6 +379,7 @@ pub fn compute_lumped_mass(
         dir: cfg.lumped_dir,
         nonlinear: cfg.lumped_nonlinear,
         secant_ratio: cfg.lumped_secant_ratio,
+        target_drift_angle: cfg.lumped_target_drift_angle,
         res_x: res_x.as_ref(),
         res_y: res_y.as_ref(),
         po_x: po_x.as_ref(),

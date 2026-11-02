@@ -22,6 +22,8 @@ pub struct ElemAttrs {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Model {
+    /// 質点系骨格の任意の手動同定区間。
+    pub lumped_skeleton_intervals: Vec<LumpedSkeletonInterval>,
     /// 数量積算専用の設定。解析・検定の計算入力には含めない。
     #[serde(default)]
     pub quantity_cfg: QuantityCfg,
@@ -1329,7 +1331,8 @@ impl Model {
     }
 
     pub fn eq_ignoring_dofmap(&self, other: &Self) -> bool {
-        self.quantity_cfg == other.quantity_cfg
+        self.lumped_skeleton_intervals == other.lumped_skeleton_intervals
+            && self.quantity_cfg == other.quantity_cfg
             && self.nodes == other.nodes
             && self.elements == other.elements
             && self.sections == other.sections

@@ -409,13 +409,15 @@ pub(crate) fn lumped_mass_time_history_spatial(
         floor_disp.push(frame);
     }
 
-    let d1x: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_x.d1).collect();
-    let d1y: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_y.d1).collect();
+    let d1x: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_x.d2).collect();
+    let d1y: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_y.d2).collect();
     let ductility_dir = dir_ductility(&drift_dir, &d1x, &d1y);
     let ductility = ductility_dir.story_max();
 
     StickResponse {
-        bending_rotations: Vec::new(),
+        total_ductility_dir: None,
+            story_total_ductility: None,
+            bending_rotations: Vec::new(),
         time,
         roof_disp: roof,
         story_peak_drift: peak_drift,
@@ -446,6 +448,7 @@ mod tests {
         let j = 1.0e8;
         let kr = 1.0e10;
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             stories: vec![StoryStick {
@@ -486,6 +489,7 @@ mod tests {
         let mass = 10.0;
         let k = 100.0;
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             stories: vec![StoryStick {

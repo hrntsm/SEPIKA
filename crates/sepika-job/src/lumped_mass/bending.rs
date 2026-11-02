@@ -1,6 +1,6 @@
 use super::*;
 use sepika_design_jp::secondary::story_columns::checked_story_columns;
-use sepika_solver::dynamic::lumped_mass::{bending_drifts, fit_story_trilinear, StoryBending};
+use sepika_solver::dynamic::lumped_mass::{bending_drifts, StoryBending, StoryIdentification};
 
 fn bad(layer: &Layer, reason: impl std::fmt::Display) -> JobError {
     JobError::InvalidInput(format!("階 {}: {reason}", layer.name))
@@ -289,7 +289,7 @@ fn layer_elements<'a>(
     Ok(elements)
 }
 
-fn signed_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> JobResult<Vec<f64>> {
+pub(super) fn signed_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> JobResult<Vec<f64>> {
     let axis = usize::from(dir == SeismicDir::Y);
     let mut result = Vec::new();
     for layer in model.layers() {
@@ -319,7 +319,7 @@ fn signed_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> JobResult<
     Ok(result)
 }
 
-fn step_drifts(
+pub(super) fn step_drifts(
     inp: &LumpedMassBuildInput<'_>,
     dir: SeismicDir,
     step: &sepika_solver::nonlinear::pushover::PushoverStep,
@@ -375,7 +375,7 @@ fn skeletons(
     ei: &[f64],
     height: &[f64],
     base: &LumpedMassModel,
-) -> JobResult<Vec<StoryTrilinear>> {
+) -> JobResult<(Vec<StoryTrilinear>, Vec<StoryIdentification>)> {
     let layers = inp.model.layers();
     let res = static_of(inp, dir)?;
     if !inp.nonlinear {
@@ -396,84 +396,10 @@ fn skeletons(
             }
             sk.push(StoryTrilinear::elastic(k));
         }
-        return Ok(sk);
+        return Ok((sk,Vec::new()));
     }
-    let po = pushover_of(inp, dir)?;
-    if po.steps.len() != po.capacity_curve.len() || po.steps.is_empty() {
-        return Err(JobError::InvalidInput(
-            "増分解析の確定ステップと性能曲線が不足・不整合です".into(),
-        ));
-    }
-    let baseline = po.steps.iter().rposition(|s| s.load_factor == 0.0);
-    let zeros = vec![0.0; layers.len()];
-    let (d0, q0) = if let Some(i) = baseline {
-        (
-            step_drifts(inp, dir, &po.steps[i], &po.capacity_curve[i], base)?,
-            &po.capacity_curve[i].story_shear,
-        )
-    } else {
-        (zeros.clone(), &zeros)
-    };
-    if d0.len() != layers.len() || q0.len() != layers.len() {
-        return Err(JobError::InvalidInput(
-            "増分解析の水平力ゼロ基準点の層数が一致しません".into(),
-        ));
-    }
-    let mut curves = vec![Vec::new(); layers.len()];
-    for (step, cp) in po.steps.iter().zip(&po.capacity_curve) {
-        if step.load_factor == 0.0 {
-            continue;
-        }
-        if cp.story_drift.len() != layers.len() || cp.story_shear.len() != layers.len() {
-            return Err(JobError::InvalidInput(
-                "増分解析の層変位・せん断力が不足しています".into(),
-            ));
-        }
-        let q: Vec<_> = cp.story_shear.iter().zip(q0).map(|(q, b)| q - b).collect();
-        let db =
-            bending_drifts(height, ei, &q).map_err(|e| JobError::InvalidInput(e.to_string()))?;
-        let sign = step.load_factor.signum();
-        let drift = step_drifts(inp, dir, step, cp, base)?;
-        for i in 0..layers.len() {
-            let ds = sign * (drift[i] - d0[i] - db[i]);
-            let qi = sign * q[i];
-            if !ds.is_finite()
-                || !qi.is_finite()
-                || ds <= 0.0
-                || qi <= 0.0
-                || curves[i].last().is_some_and(|&(d, _)| ds <= d)
-            {
-                return Err(bad(
-                    &layers[i],
-                    format!(
-                        "有効な Q−δs 骨格を作れません: λ={}, Q={} N, δs={} mm",
-                        step.load_factor, qi, ds
-                    ),
-                ));
-            }
-            curves[i].push((ds, qi));
-        }
-    }
-    curves
-        .iter()
-        .enumerate()
-        .map(|(i, curve)| {
-            if curve.len() < 3 {
-                return Err(bad(
-                    &layers[i],
-                    "せん断骨格に必要な確定ステップが3点未満です",
-                ));
-            }
-            let sk = fit_story_trilinear(curve, inp.secant_ratio);
-            if !sk.is_valid_spring() {
-                return Err(bad(
-                    &layers[i],
-                    format!("トリリニア縮約後のせん断骨格が不正です: {:?}", sk),
-                ));
-            }
-            Ok(sk)
-        })
-        .collect()
+    let fits=super::identification::fit(inp,dir,base,Some((ei,height)))?;
+    Ok((fits.iter().map(|f|f.fit.skeleton).collect(),fits))
 }
 
 pub(super) fn build(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
@@ -553,7 +479,7 @@ pub(super) fn build(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel>
             inertia: dm.horizontal_inertia_t_mm2,
         });
     }
-    let skx = skeletons(
+    let (skx, fitx) = skeletons(
         &inp,
         if inp.dim == StickDim::Spatial {
             SeismicDir::X
@@ -564,11 +490,13 @@ pub(super) fn build(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel>
         &heights,
         &lm,
     )?;
-    let sky = if inp.dim == StickDim::Spatial {
+    let (sky, fity) = if inp.dim == StickDim::Spatial {
         skeletons(&inp, SeismicDir::Y, &yi, &heights, &lm)?
     } else {
-        skx.clone()
+        (skx.clone(), Vec::new())
     };
+    lm.identifications.extend(fitx);
+    lm.identifications.extend(fity);
     for i in 0..layers.len() {
         lm.stories[i].skeleton = if inp.dir == SeismicDir::X || inp.dim == StickDim::Planar {
             skx[i]
@@ -725,6 +653,7 @@ mod tests {
             dir,
             nonlinear: false,
             secant_ratio: 0.75,
+            target_drift_angle: 1.0 / 200.0,
             res_x: Some(r),
             res_y: Some(r),
             po_x: None,
@@ -775,50 +704,45 @@ mod tests {
         }
     }
 
-    #[test]
-    fn nonlinear_backbone_subtracts_baseline_and_its_own_load_pattern() {
-        use sepika_solver::nonlinear::pushover::{CapacityPoint, PushoverStep};
-        let (model, res) = fixture(SeismicDir::X, false, false);
-        let mut po = super::super::tests::empty_pushover();
-        for (step, (factor, ds)) in [(0.0, 0.0), (1.0, 0.1), (2.0, 0.2), (3.0, 0.4), (4.0, 0.8)]
-            .into_iter()
-            .enumerate()
-        {
-            let q = vec![1000.0 * factor, 750.0 * factor];
-            let db = bending_drifts(&[3000.0; 2], &[1.2e14; 2], &q).unwrap();
-            let d = vec![2.0 + ds + db[0], 3.0 + ds + db[1]];
-            po.capacity_curve.push(CapacityPoint {
-                step: step as u32,
-                roof_disp: d[0] + d[1],
-                base_shear: q[0] + 100.0,
-                story_shear: vec![q[0] + 100.0, q[1] + 200.0],
-                story_drift: d.clone(),
-            });
-            po.steps.push(PushoverStep {
-                floor_disp: Vec::new(),
-                load_factor: factor,
-                top_disp: d[0] + d[1],
-                base_shear: q[0] + 100.0,
-                story_drifts: d,
-            });
+    fn synthetic_pushover(model: &Model, res: &StaticOnce, dir: SeismicDir, spatial: bool) -> (PushoverResult, f64) {
+        use sepika_solver::nonlinear::pushover::{CapacityPoint,PushoverStep,PushoverTarget};
+        let qel=signed_shears(model,res,dir).unwrap();
+        let ei=ei_values(model,res,dir).unwrap();
+        let db=bending_drifts(&[3000.0;2],&ei,&qel).unwrap();
+        let del=story_drifts(model,res,dir);
+        let ds:Vec<_>=del.iter().zip(&db).map(|(d,b)|d-b).collect();
+        let axis=usize::from(dir==SeismicDir::Y);
+        let mut po=super::super::tests::empty_pushover();
+        for (index,(x,y)) in [(0.0,0.0),(1.0,1.0),(3.0,1.4),(6.0,1.55),(10.0,1.75)].into_iter().enumerate() {
+            let drift:Vec<_>=(0..2).map(|i|[2.0,3.0][i]+x*ds[i]+y*db[i]).collect();
+            let floors=[0.0,drift[0],drift.iter().sum()];
+            let mut floor_disp=Vec::new();
+            for (j,story) in model.stories.iter().enumerate() {
+                let nid=story_reference_node(model,story).unwrap();let xy=model.nodes[nid.index()].coord;
+                let theta=if j==0 {0.0}else{0.0001*j as f64+0.0002*y};
+                let mut u=[0.0;3];u[axis]=floors[j];
+                u[0]-=xy[1]*theta;u[1]+=xy[0]*theta;u[2]=theta;floor_disp.push(u);
+            }
+            let recorded=if spatial {vec![floor_disp[1][axis]-floor_disp[0][axis],floor_disp[2][axis]-floor_disp[1][axis]]}else{drift.clone()};
+            let q:Vec<_>=(0..2).map(|i|[100.0,200.0][i]+y*qel[i]).collect();
+            po.capacity_curve.push(CapacityPoint{step:index as u32,roof_disp:floors[2],base_shear:q[0],story_shear:q,story_drift:recorded.clone()});
+            po.steps.push(PushoverStep{load_factor:y,top_disp:floors[2],base_shear:po.capacity_curve.last().unwrap().base_shear,story_drifts:recorded,floor_disp:if spatial{floor_disp}else{Vec::new()}});
         }
-        let mut inp = input(&model, &res, SeismicDir::X);
-        inp.nonlinear = true;
-        inp.po_x = Some(&po);
-        let lm = build(inp).unwrap();
-        near(lm.stories[0].skeleton.k1, 10000.0);
-        near(lm.stories[1].skeleton.k1, 7500.0);
-        near(lm.stories[0].skeleton.d3, 0.8);
-        near(lm.stories[1].skeleton.q3, 3000.0);
-        assert!(sepika_solver::dynamic::lumped_mass::lumped_mass_eigen(&lm, 2).is_ok());
-        let r = sepika_solver::dynamic::lumped_mass::bending_shear_time_history(
-            &lm,
-            &[0.0, 1.0, -1.0, 0.0],
-            0.01,
-            0.02,
-        )
-        .unwrap();
-        assert_eq!(r.time.len(), 4);
+        po.target=Some(PushoverTarget{max_disp:Some(po.capacity_curve.last().unwrap().roof_disp),max_drift_angle:None});
+        let target=(0..2).map(|i|10.0*ds[i]+1.75*db[i]).fold(f64::INFINITY,f64::min)*0.8/3000.0;
+        (po,target)
+    }
+
+    #[test]
+    fn nonlinear_backbone_preserves_elastic_stiffness_and_subtracts_baseline() {
+        let (model,res)=fixture(SeismicDir::X,false,false);
+        let (po,target)=synthetic_pushover(&model,&res,SeismicDir::X,false);
+        let mut inp=input(&model,&res,SeismicDir::X);inp.nonlinear=true;inp.po_x=Some(&po);inp.target_drift_angle=target;
+        let lm=build(inp).unwrap();
+        for story in &lm.stories {near(story.skeleton.k1,10000.0);assert!(story.skeleton.d2>story.skeleton.d1);}
+        near(lm.stories[0].skeleton.d3,2.0);near(lm.stories[1].skeleton.d3,1.0);
+        let r=sepika_solver::dynamic::lumped_mass::bending_shear_time_history(&lm,&[0.0,1.0,-1.0,0.0],0.01,0.02).unwrap();
+        assert_eq!(r.time.len(),4);assert!(r.story_total_ductility.is_some());
     }
 
     #[test]
@@ -870,57 +794,6 @@ mod tests {
             }
         }
     }
-    fn spatial_pushover(model: &Model, dir: SeismicDir) -> PushoverResult {
-        use sepika_solver::nonlinear::pushover::{CapacityPoint, PushoverStep};
-        let mut po = super::super::tests::empty_pushover();
-        let ei = if dir == SeismicDir::X { 1.2e14 } else { 4.8e14 };
-        for (index, (factor, ds)) in [(0.0, 0.0), (1.0, 0.1), (2.0, 0.2), (3.0, 0.4), (4.0, 0.8)]
-            .into_iter()
-            .enumerate()
-        {
-            let q = [1000.0 * factor, 750.0 * factor];
-            let db = bending_drifts(&[3000.0; 2], &[ei; 2], &q).unwrap();
-            let floor_u = [0.0, 2.0 + ds + db[0], 5.0 + 2.0 * ds + db[0] + db[1]];
-            let mut floor_disp = Vec::new();
-            for (i, story) in model.stories.iter().enumerate() {
-                let node = story_reference_node(model, story).unwrap();
-                let xy = model.nodes[node.index()].coord;
-                let theta = [0.0, 0.0001 + 0.0003 * factor, 0.0002 - 0.0002 * factor][i];
-                let ux = if dir == SeismicDir::X {
-                    floor_u[i]
-                } else {
-                    0.0
-                };
-                let uy = if dir == SeismicDir::Y {
-                    floor_u[i]
-                } else {
-                    0.0
-                };
-                floor_disp.push([ux - xy[1] * theta, uy + xy[0] * theta, theta]);
-            }
-            let axis = usize::from(dir == SeismicDir::Y);
-            let drift = vec![
-                floor_disp[1][axis] - floor_disp[0][axis],
-                floor_disp[2][axis] - floor_disp[1][axis],
-            ];
-            po.capacity_curve.push(CapacityPoint {
-                step: index as u32,
-                roof_disp: floor_disp[2][axis],
-                base_shear: q[0] + 100.0,
-                story_shear: vec![q[0] + 100.0, q[1] + 200.0],
-                story_drift: drift.clone(),
-            });
-            po.steps.push(PushoverStep {
-                load_factor: factor,
-                top_disp: floor_disp[2][axis],
-                base_shear: q[0] + 100.0,
-                story_drifts: drift,
-                floor_disp,
-            });
-        }
-        po
-    }
-
     #[test]
     fn nonlinear_spatial_skeleton_is_independent_of_rigid_floor_master_with_twist() {
         let (mut model, ex) = fixture(SeismicDir::X, false, false);
@@ -936,19 +809,20 @@ mod tests {
                         .collect();
                 }
             }
-            let px = spatial_pushover(&model, SeismicDir::X);
-            let py = spatial_pushover(&model, SeismicDir::Y);
+            let (px, target_x) = synthetic_pushover(&model, &ex, SeismicDir::X, true);
+            let (py, target_y) = synthetic_pushover(&model, &ey, SeismicDir::Y, true);
             let mut inp = input(&model, &ex, SeismicDir::X);
             inp.dim = StickDim::Spatial;
             inp.nonlinear = true;
             inp.res_y = Some(&ey);
             inp.po_x = Some(&px);
             inp.po_y = Some(&py);
+            inp.target_drift_angle = target_x.min(target_y);
             let lm = build(inp).unwrap();
             near(lm.spatial[0].skeleton_x.k1, 10000.0);
             near(lm.spatial[0].skeleton_y.k1, 10000.0);
-            near(lm.spatial[1].skeleton_x.k1, 7500.0);
-            near(lm.spatial[1].skeleton_y.k1, 7500.0);
+            near(lm.spatial[1].skeleton_x.k1, 10000.0);
+            near(lm.spatial[1].skeleton_y.k1, 10000.0);
             if let Some(ref original) = originals {
                 let original: &LumpedMassModel = original;
                 for (left, right) in lm.spatial.iter().zip(&original.spatial) {
@@ -1036,56 +910,23 @@ mod tests {
         near(lm.stories[0].skeleton.k1, 10000.0);
     }
     #[test]
-    fn generated_bilinear_shear_backbone_preserves_reduced_points() {
-        use sepika_solver::nonlinear::pushover::{CapacityPoint, PushoverStep};
-        let (model, res) = fixture(SeismicDir::X, false, false);
-        let mut po = super::super::tests::empty_pushover();
-        for index in 0..=30 {
-            let ds = index as f64 * 0.1;
-            let q = 50.0 * ds.min(2.0) + 5.0 * (ds - 2.0).max(0.0);
-            let db = bending_drifts(&[3000.0; 2], &[1.2e14; 2], &[q, q]).unwrap();
-            let drift = vec![ds + db[0], ds + db[1]];
-            po.capacity_curve.push(CapacityPoint {
-                step: index as u32,
-                roof_disp: drift.iter().sum(),
-                base_shear: q,
-                story_shear: vec![q, q],
-                story_drift: drift.clone(),
-            });
-            po.steps.push(PushoverStep {
-                load_factor: ds,
-                top_disp: drift.iter().sum(),
-                base_shear: q,
-                story_drifts: drift,
-                floor_disp: Vec::new(),
-            });
+    fn elastic_shear_curve_does_not_generate_a_yield_point() {
+        let (model,res)=fixture(SeismicDir::X,false,false);
+        let (mut po,target)=synthetic_pushover(&model,&res,SeismicDir::X,false);
+        for (cp,step) in po.capacity_curve.iter_mut().zip(&mut po.steps) {
+            let x=step.load_factor;
+            let q=vec![2000.0*x,1000.0*x];
+            let db=bending_drifts(&[3000.0;2],&[1.2e14;2],&q).unwrap();
+            cp.story_drift=vec![2.0+0.2*x+db[0],3.0+0.1*x+db[1]];
+            cp.story_shear=vec![100.0+q[0],200.0+q[1]];
+            step.story_drifts=cp.story_drift.clone();
         }
-        let mut inp = input(&model, &res, SeismicDir::X);
-        inp.nonlinear = true;
-        inp.secant_ratio = 0.9;
-        inp.po_x = Some(&po);
-        let lm = build(inp).unwrap();
-        for story in &lm.stories {
-            assert!(story.skeleton.is_valid_spring());
-            near(story.skeleton.k1, 50.0);
-            near(story.skeleton.d1, 2.0);
-            near(story.skeleton.d2, 2.0);
-            near(story.skeleton.q1, 100.0);
-            near(story.skeleton.q2, 100.0);
-            near(story.skeleton.d3, 3.0);
-            near(story.skeleton.q3, 105.0);
-        }
-        assert!(sepika_solver::dynamic::lumped_mass::lumped_mass_eigen(&lm, 4).is_ok());
-        assert!(
-            sepika_solver::dynamic::lumped_mass::bending_shear_time_history(
-                &lm,
-                &[0.0, 10.0, -10.0, 0.0],
-                0.01,
-                0.02
-            )
-            .is_ok()
-        );
+        po.target=Some(sepika_solver::nonlinear::pushover::PushoverTarget{max_disp:None,max_drift_angle:None});
+        let mut inp=input(&model,&res,SeismicDir::X);inp.nonlinear=true;inp.po_x=Some(&po);inp.target_drift_angle=target*0.1;
+        let error=build(inp).unwrap_err().to_string();
+        assert!(error.contains("等価降伏未同定"),"{error}");
     }
+
     #[test]
     fn out_of_scope_elements_are_rejected_without_crossing_story_midpoint() {
         use sepika_core::model::ElementKind;

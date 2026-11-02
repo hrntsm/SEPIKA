@@ -150,13 +150,7 @@ impl App {
         };
         let mut keys = Vec::new();
         for &dir in dirs {
-            if cfg.lumped_dim == StickDim::Spatial
-                || !cfg.lumped_nonlinear
-                || cfg.lumped_mass_type
-                    == sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentBendingShear
-            {
-                keys.push(ResultInputKey::Static(StaticCaseKey::Seismic(dir)));
-            }
+            keys.push(ResultInputKey::Static(StaticCaseKey::Seismic(dir)));
             if cfg.lumped_nonlinear {
                 keys.push(ResultInputKey::Pushover(dir));
             }

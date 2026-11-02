@@ -91,6 +91,9 @@ pub(crate) fn dir_ductility(drift: &StickDirPeaks, d1x: &[f64], d1y: &[f64]) -> 
 /// 質点系（せん断型）時刻歴応答解析の結果。
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StickResponse {
+    /// 曲げせん断型の比較用・全層間変位基準の等価層塑性率。未同定時は None。
+    pub total_ductility_dir: Option<StickDirPeaks>,
+    pub story_total_ductility: Option<Vec<f64>>,
     /// 時刻列 `[s]`。
     pub time: Vec<f64>,
     /// 最上階（頂部）質点の加振方向変位時刻歴 `[mm]`（質量重心）。
@@ -122,6 +125,8 @@ pub struct StickResponse {
 impl StickResponse {
     pub(crate) fn empty(n: usize) -> Self {
         Self {
+            total_ductility_dir: None,
+            story_total_ductility: None,
             bending_rotations: Vec::new(),
             time: Vec::new(),
             roof_disp: Vec::new(),
@@ -235,9 +240,9 @@ pub(crate) fn fundamental_omega(m: &[f64], k: &[f64]) -> f64 {
 /// 層のトリリニア骨格から最大点指向型（Clough 系トリリニア）の履歴材料を作る。
 pub(crate) fn story_spring(sk: &StoryTrilinear) -> HysteresisMaterial {
     HysteresisMaterial::new(HysteresisRule::MaxPointOriented {
-        crack: (sk.q1.max(1.0), sk.d1.max(1e-6)),
-        yield_point: (sk.q2.max(sk.q1 + 1.0), sk.d2.max(sk.d1 * 1.0001)),
-        ultimate: (sk.q3.max(sk.q2 + 1.0), sk.d3.max(sk.d2 * 1.0001)),
+        crack: (sk.q1, sk.d1),
+        yield_point: (sk.q2, sk.d2),
+        ultimate: (sk.q3, sk.d3),
     })
 }
 
@@ -404,19 +409,21 @@ pub fn lumped_mass_time_history(
 
     let (d1x, d1y): (Vec<f64>, Vec<f64>) = match lm.dir {
         crate::statics::analysis::SeismicDir::X => (
-            lm.stories.iter().map(|s| s.skeleton.d1).collect(),
+            lm.stories.iter().map(|s| s.skeleton.d2).collect(),
             vec![f64::INFINITY; n],
         ),
         crate::statics::analysis::SeismicDir::Y => (
             vec![f64::INFINITY; n],
-            lm.stories.iter().map(|s| s.skeleton.d1).collect(),
+            lm.stories.iter().map(|s| s.skeleton.d2).collect(),
         ),
     };
     let ductility_dir = dir_ductility(&drift_dir, &d1x, &d1y);
     let ductility = ductility_dir.story_max();
 
     Ok(StickResponse {
-        bending_rotations: Vec::new(),
+        total_ductility_dir: None,
+            story_total_ductility: None,
+            bending_rotations: Vec::new(),
         time,
         roof_disp: roof,
         story_peak_drift: peak_drift,

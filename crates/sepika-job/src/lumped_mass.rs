@@ -10,7 +10,7 @@ use sepika_design_jp::secondary::eccentricity_analysis::column_stiffnesses_from_
 use sepika_design_jp::secondary::story_columns::story_columns;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::dynamic::lumped_mass::{
-    build_lumped_mass_model, LumpedMassModel, LumpedMassType, LumpedStiffnessSource, StickDim,
+    LumpedMassModel, LumpedMassType, LumpedStiffnessSource, StickDim,
     StorySpatial, StoryStick, StoryTrilinear,
 };
 use sepika_solver::nonlinear::pushover::{story_reference_node, PushoverResult};
@@ -26,6 +26,7 @@ pub struct LumpedMassBuildInput<'a> {
     pub dir: SeismicDir,
     pub nonlinear: bool,
     pub secant_ratio: f64,
+    pub target_drift_angle: f64,
     pub res_x: Option<&'a StaticOnce>,
     pub res_y: Option<&'a StaticOnce>,
     pub po_x: Option<&'a PushoverResult>,
@@ -51,20 +52,14 @@ pub fn build_lumped_mass(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassM
 }
 
 mod bending;
+mod identification;
 
 fn build_planar(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     if inp.nonlinear {
-        let po = pushover_of(&inp, inp.dir)?;
-        let mut lm = build_lumped_mass_model(
-            inp.model,
-            po,
-            LumpedMassType::EquivalentShear,
-            inp.secant_ratio,
-        )
-        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
-        lm.dim = StickDim::Planar;
-        lm.stiffness_source = inp.source;
-        lm.dir = inp.dir;
+        pushover_of(&inp, inp.dir)?;
+        let mut lm = build_planar(LumpedMassBuildInput { nonlinear: false, source: LumpedStiffnessSource::StoryQd, ..inp })?;
+        lm.identifications = identification::fit(&inp, inp.dir, &lm, None)?;
+        for (story, fit) in lm.stories.iter_mut().zip(&lm.identifications) { story.skeleton = fit.fit.skeleton; }
         lm.nonlinear = true;
         Ok(lm)
     } else {
@@ -94,36 +89,6 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     let res_y = inp.res_y.ok_or_else(|| {
         JobError::InvalidInput("3次元質点系には地震静的 EY の結果が必要です".into())
     })?;
-
-    let (sk_x, sk_y) = if inp.nonlinear {
-        let po_x = inp.po_x.ok_or_else(|| {
-            JobError::InvalidInput("3次元の非線形質点系には X 方向の増分解析結果が必要です".into())
-        })?;
-        let po_y = inp.po_y.ok_or_else(|| {
-            JobError::InvalidInput("3次元の非線形質点系には Y 方向の増分解析結果が必要です".into())
-        })?;
-        (
-            build_lumped_mass_model(
-                inp.model,
-                po_x,
-                LumpedMassType::EquivalentShear,
-                inp.secant_ratio,
-            )
-            .map_err(|e| JobError::InvalidInput(e.to_string()))?,
-            build_lumped_mass_model(
-                inp.model,
-                po_y,
-                LumpedMassType::EquivalentShear,
-                inp.secant_ratio,
-            )
-            .map_err(|e| JobError::InvalidInput(e.to_string()))?,
-        )
-    } else {
-        (
-            LumpedMassModel::from_stories(LumpedMassType::EquivalentShear, Vec::new()),
-            LumpedMassModel::from_stories(LumpedMassType::EquivalentShear, Vec::new()),
-        )
-    };
 
     let layers = inp.model.layers();
     let qx = story_shears(inp.model, res_x, SeismicDir::X)?;
@@ -176,16 +141,8 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
                 layer.name
             )));
         }
-        let skeleton_x = if inp.nonlinear {
-            sk_x.stories[i].skeleton
-        } else {
-            StoryTrilinear::elastic(kxi)
-        };
-        let skeleton_y = if inp.nonlinear {
-            sk_y.stories[i].skeleton
-        } else {
-            StoryTrilinear::elastic(kyi)
-        };
+        let skeleton_x = StoryTrilinear::elastic(kxi);
+        let skeleton_y = StoryTrilinear::elastic(kyi);
         let skeleton = match inp.dir {
             SeismicDir::X => skeleton_x,
             SeismicDir::Y => skeleton_y,
@@ -208,7 +165,8 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
         });
     }
 
-    Ok(LumpedMassModel {
+    let mut lm = LumpedMassModel {
+        identifications: Vec::new(),
         bending: Vec::new(),
         model_type: LumpedMassType::EquivalentShear,
         stories,
@@ -217,7 +175,19 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
         dir: inp.dir,
         nonlinear: inp.nonlinear,
         spatial,
-    })
+    };
+    if inp.nonlinear {
+        for dir in [SeismicDir::X, SeismicDir::Y] {
+            let fits = identification::fit(&inp, dir, &lm, None)?;
+            for (i, fit) in fits.iter().enumerate() {
+                let sk = fit.fit.skeleton;
+                match dir { SeismicDir::X => {lm.spatial[i].skeleton_x=sk; lm.spatial[i].k1_x=sk.k1;}, SeismicDir::Y => {lm.spatial[i].skeleton_y=sk;lm.spatial[i].k1_y=sk.k1;} }
+                if dir == inp.dir {lm.stories[i].skeleton=sk;}
+            }
+            lm.identifications.extend(fits);
+        }
+    }
+    Ok(lm)
 }
 
 fn static_of<'a>(inp: &'a LumpedMassBuildInput<'a>, dir: SeismicDir) -> JobResult<&'a StaticOnce> {
@@ -438,6 +408,7 @@ mod tests {
             dir,
             nonlinear,
             secant_ratio: 0.75,
+            target_drift_angle: 1.0 / 200.0,
             res_x: None,
             res_y: None,
             po_x: None,
@@ -648,6 +619,7 @@ mod tests {
 
     pub(super) fn empty_pushover() -> PushoverResult {
         PushoverResult {
+            target: None,
             wall_capacities: Vec::new(),
             rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: Vec::new(),
@@ -734,8 +706,10 @@ mod tests {
     fn spatial_nonlinear_requires_dynamic_mass() {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = None;
-        let res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
-        let res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
+        let mut res_x = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
+        let mut res_y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
+        res_x.disp[1][0]=1.0;res_x.disp[2][0]=2.0;
+        res_y.disp[1][1]=1.0;res_y.disp[2][1]=2.0;
         let po = empty_pushover();
         let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, true);
         inp.res_x = Some(&res_x);
@@ -787,18 +761,13 @@ mod tests {
         res_y.disp[2][1] = 2.0;
         let mut po_x = empty_pushover();
         let mut po_y = empty_pushover();
-        for (po, factor) in [(&mut po_x, 1.0), (&mut po_y, 2.0)] {
-            po.capacity_curve = [(1.0, 100.0), (2.0, 140.0), (4.0, 180.0)]
-                .into_iter()
-                .enumerate()
-                .map(|(i, (d, q))| CapacityPoint {
-                    step: i as u32,
-                    roof_disp: d,
-                    base_shear: q * factor,
-                    story_drift: vec![d, d * 2.0],
-                    story_shear: vec![q * factor, q * factor * 0.5],
-                })
-                .collect();
+        for (po, direction, qel) in [(&mut po_x,0,[100.0,40.0]),(&mut po_y,1,[80.0,30.0])] {
+            po.target=Some(sepika_solver::nonlinear::pushover::PushoverTarget{max_disp:Some(20.0),max_drift_angle:None});
+            for (index,(d,q)) in [(0.0,0.0),(1.0,1.0),(3.0,1.4),(6.0,1.55),(10.0,1.75)].into_iter().enumerate() {
+                po.capacity_curve.push(CapacityPoint{step:index as u32,roof_disp:2.0*d,base_shear:q*qel[0],story_drift:vec![d,d],story_shear:qel.iter().map(|v|v*q).collect()});
+                let mut floors=vec![[0.0;3];3];floors[1][direction]=d;floors[2][direction]=2.0*d;
+                po.steps.push(sepika_solver::nonlinear::pushover::PushoverStep{load_factor:q,top_disp:2.0*d,base_shear:q*qel[0],story_drifts:vec![d,d],floor_disp:floors});
+            }
         }
         for nonlinear in [true, false] {
             for dir in [SeismicDir::X, SeismicDir::Y] {
@@ -808,16 +777,17 @@ mod tests {
                 inp.res_y = Some(&res_y);
                 inp.po_x = Some(&po_x);
                 inp.po_y = Some(&po_y);
+                inp.target_drift_angle = 6.0/3000.0;
                 let lm = build_lumped_mass(inp).unwrap();
                 assert_eq!(lm.stories.len(), 2);
                 assert_eq!(lm.spatial.len(), 2);
                 for (i, (story, spatial)) in lm.stories.iter().zip(&lm.spatial).enumerate() {
                     assert_eq!(story.story, model.layers()[i].bottom);
                     assert_eq!(story.mass, [20.0, 10.0][i]);
-                    for (sk, factor) in [(spatial.skeleton_x, 1.0), (spatial.skeleton_y, 2.0)] {
+                    for (sk, expected_k) in [(spatial.skeleton_x, [100.0,40.0][i]), (spatial.skeleton_y, [80.0,30.0][i])] {
                         if nonlinear {
-                            assert_eq!(sk.k1, [100.0, 25.0][i] * factor);
-                            assert_eq!(sk.q3, [180.0, 90.0][i] * factor);
+                            assert!((sk.k1-expected_k).abs()<1e-10);
+                            assert!((sk.q3-1.75*expected_k).abs()<1e-8);
                             assert!(sk.q3 / sk.d3 < sk.k1);
                         } else {
                             assert_eq!(sk.q1 / sk.d1, sk.k1);

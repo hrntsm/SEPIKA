@@ -549,6 +549,12 @@ impl App {
         }
 
         ui.separator();
+        for identification in &lm.identifications {
+            let fit=&identification.fit;
+            let name=self.core.model.layers().into_iter().find(|l|l.bottom==identification.story).map(|l|l.name).unwrap_or_default();
+            ui.label(format!("{name} / {:?}: {} 区間 [{:.3}, {:.3}] mm / 同定上限 {:.3} mm / 面積上限 {:.3} mm / Kp {:.3} kN/mm / 等価降伏 ({:.3} mm, {:.3} kN) / 規格化誤差 {:.5}",identification.dir,if fit.options.manual_interval.is_some(){"手動"}else{"自動"},fit.interval[0],fit.interval[1],fit.options.identification_limit,fit.options.area_limit,stiffness_kn_per_mm(fit.skeleton.k3()),fit.skeleton.d2,force_kn(fit.skeleton.q2),fit.normalized_rmse));
+            ui.label(format!("元増分終了目標: 頂部変位 {:?} mm / 全層最大層間変形角 {:?} rad",identification.source_target.max_disp,identification.source_target.max_drift_angle));
+        }
         ui.label("固有値");
         if modal.period.is_empty() {
             ui.colored_label(crate::theme::GRAY_600, "モードがありません。");
@@ -622,14 +628,14 @@ impl App {
                     roof_x, roof_y, roof_45, roof_max
                 ));
                 ui.label(format!(
-                    "最大層塑性率 μ  X: {:.2}  Y: {:.2}  45°: {:.2}  最大: {:.2}",
+                    "最大等価層塑性率 μ  X: {:.2}  Y: {:.2}  45°: {:.2}  最大: {:.2}",
                     mu_x, mu_y, mu_45, mu_max
                 ));
             } else {
                 ui.horizontal(|ui| {
                     ui.label(format!("頂部最大変位: {:.2} mm", roof_max));
                     ui.separator();
-                    ui.label(format!("最大層塑性率 μ: {:.2}", mu_max));
+                    ui.label(format!("最大等価層塑性率 μ: {:.2}", mu_max));
                 });
             }
             if res.non_converged_steps > 0 {
@@ -678,9 +684,9 @@ impl App {
                     ui,
                     &LumpedDirTable {
                         salt: "stick_th_mu",
-                        title: "塑性率 μ",
+                        title: if lm.bending.is_empty() {"等価層塑性率（全層間変位）"} else {"等価層塑性率（せん断成分）"},
                         hover:
-                            "μX=δX/δ1x、μY=δY/δ1y、μ45=δ45/(√2 min(δ1x,δ1y))。最大は max(μX, μY)。",
+                            "μX=dX/d2x、μY=dY/d2y、μ45=d45/(√2 min(d2x,d2y))。最大は max(μX, μY)。",
                         order: &order,
                         names: &names,
                         x: &res.ductility_dir.x,
@@ -717,6 +723,11 @@ impl App {
                         });
                     },
                 );
+            }
+            if let (Some(total),Some(maxv))=(&res.total_ductility_dir,&res.story_total_ductility) {
+                lumped_dir_peak_table(ui,&LumpedDirTable {
+                    salt:"stick_th_total_mu",title:"等価層塑性率（全層間変位）・比較用",hover:"各時刻のせん断＋曲げ変位の最大値 / 同じ静的分布の等価骨格降伏変位＋弾性曲げ変位。",order:&order,names:&names,x:&total.x,y:&total.y,deg45:&total.deg45,maxv,
+                },|v|format!("{v:.2}"));
             }
             let pts: Vec<[f64; 2]> = res
                 .time

@@ -11097,6 +11097,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
 
 pub(super) fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
     sepika_solver::nonlinear::pushover::PushoverResult {
+        target: None,
         wall_capacities: Vec::new(),
         rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
         steps: vec![],
@@ -11214,6 +11215,7 @@ fn test_build_result_tree_sections_and_labels() {
             effective_mass: vec![],
         }),
         pushover_x: Some(sepika_solver::nonlinear::pushover::PushoverResult {
+            target: None,
             wall_capacities: Vec::new(),
             rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: vec![],

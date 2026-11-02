@@ -364,6 +364,7 @@ impl App {
                 });
         });
         self.commit_analysis_settings(cfg);
+
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(!running, egui::Button::new("▶ 実行"))
@@ -740,6 +741,8 @@ impl App {
             ui.add(egui::DragValue::new(&mut cfg.lumped_n_modes).range(1..=30));
             if cfg.lumped_nonlinear {
                 ui.separator();
+                ui.label("面積評価 目標層間変形角 [rad]:");
+                ui.add(egui::DragValue::new(&mut cfg.lumped_target_drift_angle).speed(0.0001).range(0.0001..=0.1));
                 ui.label("第1折点 割線比:");
                 ui.add(
                     egui::DragValue::new(&mut cfg.lumped_secant_ratio)
@@ -879,6 +882,22 @@ impl App {
         });
 
         self.commit_analysis_settings(cfg);
+        if cfg.lumped_nonlinear {
+            let mut intervals = self.core.model.lumped_skeleton_intervals.clone();
+            ui.collapsing("降伏後直線の同定区間（任意の層・方向だけ変更）", |ui| {
+                ui.label("未指定は自動選定。変位は層ばねの変形 [mm]。変更後に質点系を再実行してください。");
+                for layer in self.core.model.layers() {
+                    for dir in [sepika_core::model::LumpedVibrationDir::X, sepika_core::model::LumpedVibrationDir::Y] {
+                        lumped_fit_interval_editor(ui, &mut intervals, layer.bottom, &layer.name, dir, cfg.lumped_target_drift_angle * layer.height);
+                    }
+                }
+            });
+            if intervals != self.core.model.lumped_skeleton_intervals && self.study_is_main() {
+                self.core.model.lumped_skeleton_intervals = intervals;
+                self.core.scoped.references.advance();
+                self.core.scoped.staleness.mark_non_calc_edited();
+            }
+        }
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(!running, egui::Button::new("▶ 固有値を実行"))
@@ -940,4 +959,31 @@ impl App {
             }
         });
     }
+}
+
+
+pub(crate) fn lumped_fit_interval_editor(
+    ui: &mut egui::Ui,
+    intervals: &mut Vec<sepika_core::model::LumpedSkeletonInterval>,
+    story: sepika_core::ids::StoryId,
+    name: &str,
+    dir: sepika_core::model::LumpedVibrationDir,
+    target_mm: f64,
+) {
+    ui.push_id((story.0, format!("{dir:?}")), |ui| {
+        ui.horizontal(|ui| {
+            let position=intervals.iter().position(|s|s.story==story && s.dir==dir);
+            let mut manual=position.is_some();
+            if ui.checkbox(&mut manual,format!("{name} / {dir:?} 手動")).changed() {
+                if manual { intervals.push(sepika_core::model::LumpedSkeletonInterval {story,dir,interval_mm:[target_mm,target_mm*1.5]}); }
+                else if let Some(i)=position {intervals.remove(i);}
+            }
+            if let Some(interval)=intervals.iter_mut().find(|s|s.story==story && s.dir==dir) {
+                ui.label("開始 [mm]");
+                ui.add(egui::DragValue::new(&mut interval.interval_mm[0]).speed(0.1));
+                ui.label("終了 [mm]");
+                ui.add(egui::DragValue::new(&mut interval.interval_mm[1]).speed(0.1));
+            }
+        });
+    });
 }

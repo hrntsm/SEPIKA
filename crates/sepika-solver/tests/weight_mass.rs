@@ -396,9 +396,8 @@ fn gravity_cases_onlyでも不正ダンパー入力を拒否し直接質量組�
         assert!((assembled_translation_mass(&valid, Dof::Ux) - 1.0).abs() < 1e-10);
         let lumped = sepika_solver::dynamic::lumped_mass::build_lumped_mass_model(
             &valid,
-            &sample_pushover(),
+            &sample_skeletons(),
             sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
-            0.75,
         )
         .unwrap();
         assert!((lumped.stories[0].mass - 1.0).abs() < 1e-10);
@@ -407,7 +406,7 @@ fn gravity_cases_onlyでも不正ダンパー入力を拒否し直接質量組�
         assert_eq!(assembled_translation_mass(&valid, Dof::Ux), 0.0);
         assert!(
             matches!(sepika_solver::dynamic::lumped_mass::build_lumped_mass_model(
-            &valid, &sample_pushover(), sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear, 0.75,
+            &valid, &sample_skeletons(), sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
         ), Err(sepika_math::solver::SolveError::InvalidInput(message)) if message.contains("質量が 0 以下"))
         );
     }
@@ -499,9 +498,8 @@ fn assert_public_mass_error(model: &Model) {
     check(
         sepika_solver::dynamic::lumped_mass::build_lumped_mass_model(
             model,
-            &sample_pushover(),
+            &sample_skeletons(),
             sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
-            0.75,
         )
         .unwrap_err(),
     );
@@ -558,45 +556,15 @@ fn assert_public_mass_error(model: &Model) {
     );
 }
 
-fn sample_pushover() -> sepika_solver::nonlinear::pushover::PushoverResult {
-    use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType, PushoverResult};
-    PushoverResult {
-        wall_capacities: Vec::new(),
-        rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
-        steps: vec![],
-        wall_history: None,
-        wall_run: None,
-        confirmed_history: None,
-        ds_evaluation: None,
-        capacity_evaluation: None,
-        capacity_curve: [(1.0, 100.0), (2.0, 200.0), (3.0, 250.0)]
-            .into_iter()
-            .enumerate()
-            .map(|(step, (d, q))| CapacityPoint {
-                step: step as u32,
-                roof_disp: d,
-                base_shear: q,
-                story_shear: vec![q],
-                story_drift: vec![d],
-            })
-            .collect(),
-        hinges: vec![],
-        shear_yields: vec![],
-        mechanism: MechanismType::Overall,
-        qu: 250.0,
-        member_response: vec![],
-        control: Default::default(),
-        member_history: vec![],
-        fiber_states: vec![],
-        termination: Default::default(),
-    }
+fn sample_skeletons() -> Vec<sepika_solver::dynamic::lumped_mass::StoryTrilinear> {
+    vec![sepika_solver::dynamic::lumped_mass::StoryTrilinear::elastic(100.0)]
 }
 
 #[test]
 fn 質点系solverもダンパー編集後の古い動的質量を拒否する() {
     use sepika_math::solver::SolveError;
     use sepika_solver::dynamic::lumped_mass::{build_lumped_mass_model, LumpedMassType};
-    let po = sample_pushover();
+    let po = sample_skeletons();
     for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
         for synced in [false, true] {
             let mut model = separated_dampers();
@@ -619,7 +587,7 @@ fn 質点系solverもダンパー編集後の古い動的質量を拒否する()
                 generate_stories_with_opts(&model, &[], true, method).unwrap()
             };
             apply_stories(&mut model, gen, method);
-            let valid = build_lumped_mass_model(&model, &po, LumpedMassType::EquivalentShear, 0.75)
+            let valid = build_lumped_mass_model(&model, &po, LumpedMassType::EquivalentShear)
                 .unwrap();
             assert!((valid.stories[0].mass - 4.0).abs() < 1e-10);
             for case in 0..8 {
@@ -648,7 +616,7 @@ fn 質点系solverもダンパー編集後の古い動的質量を拒否する()
                 }
                 let expected = edited.validate_damper_mass_placement().unwrap_err();
                 let error =
-                    build_lumped_mass_model(&edited, &po, LumpedMassType::EquivalentShear, 0.75)
+                    build_lumped_mass_model(&edited, &po, LumpedMassType::EquivalentShear)
                         .unwrap_err();
                 assert!(matches!(error, SolveError::InvalidInput(_)));
                 assert_eq!(error.to_string(), expected);
@@ -702,9 +670,8 @@ fn 全量物理重量と重心と慣性の生成データ単独不整合も全�
             assert!((assembled_translation_mass(&baseline, Dof::Ux) - mass).abs() < 1e-10);
             let lumped = sepika_solver::dynamic::lumped_mass::build_lumped_mass_model(
                 &baseline,
-                &sample_pushover(),
+                &sample_skeletons(),
                 sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
-                0.75,
             )
             .unwrap();
             assert!((lumped.stories[0].mass - mass).abs() < 1e-10);

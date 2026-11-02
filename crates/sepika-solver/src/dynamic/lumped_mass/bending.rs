@@ -564,16 +564,30 @@ pub fn bending_shear_time_history(
     let mut d1y = d1x.clone();
     for i in 0..n {
         if ns == 5 {
-            d1x[i] = ax[i * 2].sk.d1;
-            d1y[i] = ax[i * 2 + 1].sk.d1;
+            d1x[i] = ax[i * 2].sk.d2;
+            d1y[i] = ax[i * 2 + 1].sk.d2;
         } else if lm.dir == SeismicDir::X {
-            d1x[i] = ax[i].sk.d1;
+            d1x[i] = ax[i].sk.d2;
         } else {
-            d1y[i] = ax[i].sk.d1;
+            d1y[i] = ax[i].sk.d2;
         }
     }
     out.ductility_dir = dir_ductility(&shear_drift, &d1x, &d1y);
     out.story_ductility = out.ductility_dir.story_max();
+    if !lm.identifications.is_empty() {
+        let mut total_x=vec![f64::INFINITY;n];
+        let mut total_y=total_x.clone();
+        for fit in &lm.identifications {
+            let i=lm.stories.iter().position(|s|s.story==fit.story).ok_or_else(||SolveError::InvalidInput("同定結果の層が一致しません".into()))?;
+            let dy=fit.fit.skeleton.d2+fit.bending_yield_drift;
+            if !dy.is_finite() || dy<=0.0 {return Err(SolveError::InvalidInput("全層間変位基準の等価降伏変位が非正です".into()));}
+            match fit.dir {SeismicDir::X=>total_x[i]=dy,SeismicDir::Y=>total_y[i]=dy}
+        }
+        let total=dir_ductility(&out.drift_dir,&total_x,&total_y);
+        out.story_total_ductility=Some(total.story_max());
+        out.total_ductility_dir=Some(total);
+    }
+
     Ok(out)
 }
 #[cfg(test)]
@@ -812,18 +826,8 @@ mod tests {
         assert!(eigen(&lm, 1).is_err());
     }
     #[test]
-    fn bilinear_reduction_keeps_its_coincident_corner_and_existing_hysteresis() {
-        let curve: Vec<_> = (1..=30)
-            .map(|i| {
-                let d = i as f64 * 0.1;
-                (d, 50.0 * d.min(2.0) + 5.0 * (d - 2.0).max(0.0))
-            })
-            .collect();
-        let sk = crate::dynamic::lumped_mass::fit_story_trilinear(&curve, 0.9);
-        assert!((sk.k1 - 50.0).abs() < 1.0);
-        assert!((sk.d3 - 3.0).abs() < 1e-6 && (sk.q3 - 105.0).abs() < 1e-6);
-        assert_eq!(sk.d1, 2.0);
-        assert_eq!(sk.d2, 2.0);
+    fn explicitly_specified_coincident_corner_preserves_hysteresis() {
+        let sk=StoryTrilinear{k1:50.0,d1:2.0,q1:100.0,d2:2.0,q2:100.0,d3:3.0,q3:105.0};
         assert!(sk.is_valid_spring());
         let mut lm = model(false);
         lm.nonlinear = true;

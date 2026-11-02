@@ -4,15 +4,17 @@
 
 mod bending;
 mod eigen;
+mod identification;
 mod model;
 mod spatial;
 mod time_history;
 
 pub use bending::{bending_drifts, bending_shear_element, bending_shear_time_history};
 pub use eigen::{lumped_mass_eigen, LumpedMassModal};
+pub use identification::{identify_story_trilinear, StoryFit, StoryFitError, StoryFitOptions};
 pub use model::{
-    build_lumped_mass_model, fit_story_trilinear, LumpedMassModel, LumpedMassType,
-    LumpedStiffnessSource, StickDim, StoryBending, StorySpatial, StoryStick, StoryTrilinear,
+    build_lumped_mass_model, LumpedMassModel, LumpedMassType,
+    LumpedStiffnessSource, StickDim, StoryBending, StoryIdentification, StorySpatial, StoryStick, StoryTrilinear,
 };
 pub use time_history::{lumped_mass_time_history, StickDirPeaks, StickResponse, STICK_NEWTON};
 
@@ -36,7 +38,6 @@ use time_history::fundamental_omega;
 mod tests {
     use super::*;
     use crate::statics::analysis::SeismicDir;
-    use sepika_core::units::GRAVITY_MM_S2;
 
     #[test]
     fn zero_increment_actual_planar_and_spatial_xy_solvers_report_independent_shear() {
@@ -54,7 +55,8 @@ mod tests {
         for dim in [StickDim::Planar, StickDim::Spatial] {
             for dir in [SeismicDir::X, SeismicDir::Y] {
                 let lm = LumpedMassModel {
-                    bending: Vec::new(),
+                    identifications: Vec::new(),
+            bending: Vec::new(),
                     model_type: LumpedMassType::EquivalentShear,
                     stories: vec![StoryStick {
                         story: StoryId(0),
@@ -192,77 +194,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_fit_trilinear_equal_area_and_endpoints() {
-        // 実曲線: 折れ点のあるなめらかな軟化曲線を細かくサンプル。
-        // 0→(1,100) K1=100、(1,100)→(3,140) K2=20、(3,140)→(6,155) K3=5。
-        let mut curve = Vec::new();
-        for step in 1..=60 {
-            let d = step as f64 * 0.1;
-            let q = if d <= 1.0 {
-                100.0 * d
-            } else if d <= 3.0 {
-                100.0 + 20.0 * (d - 1.0)
-            } else {
-                140.0 + 5.0 * (d - 3.0)
-            };
-            curve.push((d, q));
-        }
-        let tri = fit_story_trilinear(&curve, 0.9);
-        // K1 = 初期剛性 100。
-        assert!((tri.k1 - 100.0).abs() < 1.0, "k1={}", tri.k1);
-        // 終端 (6, 155)。
-        assert!((tri.d3 - 6.0).abs() < 1e-6 && (tri.q3 - 155.0).abs() < 1e-6);
-        // 折点は昇順・耐力単調増加。
-        assert!(tri.d1 < tri.d2 && tri.d2 <= tri.d3);
-        assert!(tri.q1 <= tri.q2 + 1e-9 && tri.q2 <= tri.q3 + 1e-9);
-        // 等包絡面積: トリリニアの面積 = 実曲線の面積。
-        // 区間面積は50 + 240 + 442.5 = 732.5。
-        let a_actual = 732.5;
-        let a_tri = 0.5 * tri.d1 * tri.q1
-            + 0.5 * (tri.q1 + tri.q2) * (tri.d2 - tri.d1)
-            + 0.5 * (tri.q2 + tri.q3) * (tri.d3 - tri.d2);
-        assert!(
-            (a_tri - a_actual).abs() < 1e-3 * a_actual,
-            "equal-area: a_tri={a_tri}, a_actual={a_actual}"
-        );
-    }
-
-    #[test]
-    fn test_fit_trilinear_k2_k3_helpers() {
-        // 3勾配（K1=80 > K2=30 > K3=8）の軟化曲線。
-        let curve: Vec<(f64, f64)> = (1..=50)
-            .map(|s| {
-                let d = s as f64 * 0.1;
-                let q = if d <= 1.0 {
-                    80.0 * d
-                } else if d <= 2.5 {
-                    80.0 + 30.0 * (d - 1.0)
-                } else {
-                    125.0 + 8.0 * (d - 2.5)
-                };
-                (d, q)
-            })
-            .collect();
-        let tri = fit_story_trilinear(&curve, 0.9);
-        assert!(
-            tri.d1 < tri.d2 && tri.d2 < tri.d3,
-            "distinct folds: {tri:?}"
-        );
-        assert!((tri.k1 - 80.0).abs() < 1e-6);
-        assert!((tri.k2() - 30.0).abs() < 1e-6);
-        assert!((tri.k3() - 8.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_fit_trilinear_empty_and_degenerate() {
-        let tri = fit_story_trilinear(&[], 0.75);
-        assert_eq!(tri.k1, 0.0);
-        // 1点のみ（弾性）。
-        let tri1 = fit_story_trilinear(&[(2.0, 200.0)], 0.75);
-        assert!((tri1.k1 - 100.0).abs() < 1e-9);
-    }
-
     fn stick(mass: f64, k1: f64, d1: f64, d2: f64, q2: f64, d3: f64, q3: f64) -> StoryStick {
         StoryStick {
             story: StoryId(0),
@@ -280,185 +211,10 @@ mod tests {
         }
     }
 
-    /// `build_lumped_mass_model` は、長期荷重のみを載荷した初期点の (δ,Q) を層 Q-δ 曲線の原点として差し引くこと。
-    #[test]
-    fn test_build_lumped_mass_model_corrects_long_term_origin() {
-        use sepika_core::model::{Model, Story};
-
-        let mut model = Model {
-            stories: vec![
-                Story {
-                    wall_weights: Vec::new(),
-                    id: StoryId(0),
-                    name: "1F".to_string(),
-                    elevation: Some(0.0),
-                    sl_offset_mm: Some(0.0),
-                    source_story: None,
-                    node_ids: Vec::new(),
-                    seismic_weight: None,
-                    weight_override: None,
-                    level_kind: Default::default(),
-                    structure: Default::default(),
-                    dynamic_mass: None,
-                    standard_floor_load: None,
-                    column_finish_area_weight: 0.0,
-                    fireproof: Default::default(),
-                },
-                Story {
-                    wall_weights: Vec::new(),
-                    id: StoryId(1),
-                    name: "2F".to_string(),
-                    elevation: Some(3000.0),
-                    sl_offset_mm: Some(0.0),
-                    source_story: None,
-                    node_ids: Vec::new(),
-                    seismic_weight: Some(1.0e6),
-                    weight_override: None,
-                    level_kind: Default::default(),
-                    structure: Default::default(),
-                    dynamic_mass: Some(sepika_core::model::StoryDynamicMass {
-                        horizontal_inertia_t_mm2: [0.0; 3],
-                        mass_equiv_weight_n: 1.0e6,
-                        lumped_mass: None,
-                        center_xy_mm: [0.0, 0.0],
-                        inertia_t_mm2: 0.0,
-                    }),
-                    standard_floor_load: None,
-                    column_finish_area_weight: 0.0,
-                    fireproof: Default::default(),
-                },
-            ],
-            ..Default::default()
-        };
-
-        // 層0の Q-δ 曲線: λ=0（長期のみ、水平力ゼロ）で残留変形 -0.2mm。以降の
-        // 各点は「残留変形 -0.2mm + K=100000 N/mm の弾性直線」の累積値
-        // （`total_disp` が長期・水平力増分の両フェーズを通じて累積するのと同じ
-        // 構成）とし、原点補正後に純粋な弾性直線（K=100000）へ戻ることを見る。
-        let capacity_curve = vec![
-            crate::nonlinear::pushover::CapacityPoint {
-                step: 0,
-                roof_disp: -0.1,
-                base_shear: 0.0,
-                story_shear: vec![1e-11],
-                story_drift: vec![-0.2],
-            },
-            crate::nonlinear::pushover::CapacityPoint {
-                step: 1,
-                roof_disp: 5.0,
-                base_shear: 500_000.0,
-                story_shear: vec![500_000.0],
-                story_drift: vec![-0.2 + 5.0],
-            },
-            crate::nonlinear::pushover::CapacityPoint {
-                step: 2,
-                roof_disp: 10.0,
-                base_shear: 1_000_000.0,
-                story_shear: vec![1_000_000.0],
-                story_drift: vec![-0.2 + 10.0],
-            },
-        ];
-        let steps = vec![
-            crate::nonlinear::pushover::PushoverStep {
-                floor_disp: Vec::new(),
-                load_factor: 0.0,
-                top_disp: -0.1,
-                base_shear: 0.0,
-                story_drifts: vec![-0.2],
-            },
-            crate::nonlinear::pushover::PushoverStep {
-                floor_disp: Vec::new(),
-                load_factor: 0.5,
-                top_disp: 5.0,
-                base_shear: 500_000.0,
-                story_drifts: vec![-0.2 + 5.0],
-            },
-            crate::nonlinear::pushover::PushoverStep {
-                floor_disp: Vec::new(),
-                load_factor: 1.0,
-                top_disp: 10.0,
-                base_shear: 1_000_000.0,
-                story_drifts: vec![-0.2 + 10.0],
-            },
-        ];
-        let pushover = crate::nonlinear::pushover::PushoverResult {
-            wall_capacities: Vec::new(),
-            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
-            steps,
-            wall_history: None,
-            wall_run: None,
-            confirmed_history: None,
-            ds_evaluation: None,
-            capacity_evaluation: None,
-            capacity_curve,
-            hinges: Vec::new(),
-            shear_yields: Vec::new(),
-            mechanism: crate::nonlinear::pushover::MechanismType::Overall,
-            qu: 1_000_000.0,
-            member_response: Vec::new(),
-            control: crate::nonlinear::pushover::PushoverControl::default(),
-            member_history: Vec::new(),
-            fiber_states: Vec::new(),
-            termination: crate::nonlinear::pushover::PushoverTermination::TargetReached,
-        };
-
-        let lm = build_lumped_mass_model(&model, &pushover, LumpedMassType::EquivalentShear, 0.75)
-            .expect("動的質量が算定済みなら成功する");
-        assert_eq!(lm.stories.len(), 1);
-        let k1 = lm.stories[0].skeleton.k1;
-        assert!(
-            (k1 - 100_000.0).abs() < 1.0,
-            "長期のみ載荷点の残留変形を原点補正した純粋な弾性剛性になっていること: k1={k1}"
-        );
-        // 層質量は物理質量相当重量 / g。
-        let expected = 1.0e6 / GRAVITY_MM_S2;
-        assert!(
-            (lm.stories[0].mass - expected).abs() < 1e-9 * expected,
-            "mass={}",
-            lm.stories[0].mass
-        );
-
-        let dynamic_mass = model.stories[1].dynamic_mass.take().unwrap();
-        let err = build_lumped_mass_model(&model, &pushover, LumpedMassType::EquivalentShear, 0.75)
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            sepika_math::solver::SolveError::InvalidInput(_)
-        ));
-        assert!(err.to_string().contains("動的質量が未算定"), "{err}");
-        for weight in [0.0, -1.0, f64::NAN] {
-            model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
-                mass_equiv_weight_n: weight,
-                ..dynamic_mass
-            });
-            let err =
-                build_lumped_mass_model(&model, &pushover, LumpedMassType::EquivalentShear, 0.75)
-                    .unwrap_err();
-            assert!(matches!(
-                err,
-                sepika_math::solver::SolveError::InvalidInput(_)
-            ));
-            assert!(
-                err.to_string().contains("質量が 0 以下"),
-                "weight={weight}: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_fundamental_omega_sdof() {
-        // 1 質点: ω1=√(k/m)。
-        let w = fundamental_omega(&[2.0], &[800.0]);
-        assert!((w - (800.0_f64 / 2.0).sqrt()).abs() < 1e-6, "w={w}");
-    }
-
-    /// `lumped_mass_eigen` の解析解検証（構造力学）: 2 質点・等質量 m・等剛性 k の
-    /// せん断型 [[2k,-k],[-k,k]] は特性方程式 λ²-3λ+1=0（λ=ω²/(k/m)）より
-    /// λ=(3∓√5)/2 = 0.381966… / 2.618034…。faer の固有値が昇順であることと
-    /// 数値の妥当性の両方を同時に検証する。
     #[test]
     fn test_lumped_mass_eigen_two_dof_analytic() {
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -496,6 +252,7 @@ mod tests {
     #[test]
     fn test_lumped_mass_eigen_matches_power_iteration_omega1() {
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -525,6 +282,7 @@ mod tests {
     #[test]
     fn test_lumped_mass_eigen_rejects_non_positive_mass() {
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -545,6 +303,7 @@ mod tests {
     #[test]
     fn test_stick_omega1_survives_zero_mass_story_without_blowing_up() {
         let healthy = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -576,6 +335,7 @@ mod tests {
     #[test]
     fn test_stick_omega1_survives_zero_stiffness_story_without_blowing_up() {
         let healthy = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -611,6 +371,7 @@ mod tests {
     #[test]
     fn test_lumped_mass_eigen_truncates_to_story_count() {
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -630,6 +391,7 @@ mod tests {
     #[test]
     fn test_stick_th_zero_input_zero_response() {
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -648,6 +410,7 @@ mod tests {
     fn test_stick_th_responds_and_bounded() {
         // 正弦地動で応答が非ゼロかつ有限。
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
@@ -686,6 +449,7 @@ mod tests {
     fn test_stick_th_yields_under_strong_input() {
         // 強い地動で層が降伏（塑性率 μ>1）。
         let lm = LumpedMassModel {
+            identifications: Vec::new(),
             bending: Vec::new(),
             model_type: LumpedMassType::EquivalentShear,
             dim: StickDim::Planar,
