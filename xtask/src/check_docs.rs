@@ -403,37 +403,22 @@ mod tests {
     }
 
     #[test]
-    fn detects_missing_impl_ref() {
-        let root = temp_root("missing_impl");
-        let docs = root.join("docs");
-        std::fs::create_dir_all(&docs).unwrap();
-        std::fs::write(docs.join("a.md"), "実装 `crates/a/b.rs`\n").unwrap();
+    fn detects_missing_impl_ref_in_pages_and_summary() {
+        for file in ["a.md", "SUMMARY.md"] {
+            let root = temp_root("missing_impl");
+            let docs = root.join("docs");
+            std::fs::create_dir_all(&docs).unwrap();
+            std::fs::write(docs.join(file), "実装 `crates/a/b.rs`\n").unwrap();
 
-        let report = check_at(&root).unwrap();
-        assert_eq!(report.impl_refs, 1);
-        assert!(report
-            .errors
-            .iter()
-            .any(|e| e == "BROKEN IMPL REF: docs/a.md -> crates/a/b.rs"));
+            let report = check_at(&root).unwrap();
+            assert_eq!(report.impl_refs, 1);
+            assert!(report
+                .errors
+                .iter()
+                .any(|e| e == &format!("BROKEN IMPL REF: docs/{file} -> crates/a/b.rs")));
 
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn detects_missing_impl_ref_in_summary() {
-        let root = temp_root("summary_missing_impl");
-        let docs = root.join("docs");
-        std::fs::create_dir_all(&docs).unwrap();
-        std::fs::write(docs.join("SUMMARY.md"), "実装 `crates/a/b.rs`\n").unwrap();
-
-        let report = check_at(&root).unwrap();
-        assert_eq!(report.impl_refs, 1);
-        assert!(report
-            .errors
-            .iter()
-            .any(|e| e == "BROKEN IMPL REF: docs/SUMMARY.md -> crates/a/b.rs"));
-
-        let _ = std::fs::remove_dir_all(&root);
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     #[test]

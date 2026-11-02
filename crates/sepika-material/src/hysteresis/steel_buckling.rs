@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn test_steel_buckling_ro_unload_initial_stiffness() {
+    fn test_steel_buckling_ro_unloading_and_probe_preserve_response() {
         // RO 除荷は反転点で初期剛性 k1 から立ち上がる。
         let k1 = 1000.0;
         let mp = 100.0;
@@ -417,6 +417,18 @@ mod tests {
         let theta_y = mp / k1;
         m.trial(3.0 * theta_y);
         m.commit();
+        let probe_theta = 2.5 * theta_y; // 除荷（RO 枝）
+        let before = m.probe(probe_theta);
+        assert_eq!(before, m.probe(probe_theta));
+
+        let mut clone_for_trial = m.clone();
+        let via_trial = clone_for_trial.trial(probe_theta);
+        assert_eq!(before, via_trial, "probe は trial と完全一致すること");
+
+        let after_probe = m.trial(probe_theta);
+        assert_eq!(after_probe, via_trial);
+        m.revert();
+
         // 反転直後の微小除荷: 接線 ≈ k1。
         let (_, k) = m.trial(3.0 * theta_y - 1e-6 * theta_y);
         assert_relative_eq!(k, k1, epsilon = k1 * 0.02);
@@ -448,26 +460,5 @@ mod tests {
             energy > 0.0,
             "dissipated energy should be positive: {energy}"
         );
-    }
-
-    #[test]
-    fn test_probe_matches_trial_without_mutating_state() {
-        // probe は trial と数学的に同一の結果を返し、状態を書き換えない
-        // （RO 除荷枝を経た状態で確認）。
-        let mut m = SteelBuckling::with_defaults(1000.0, 100.0, 1.2);
-        let theta_y = 100.0 / 1000.0;
-        m.trial(3.0 * theta_y);
-        m.commit();
-
-        let probe_theta = 2.5 * theta_y; // 除荷（RO 枝）
-        let before = m.probe(probe_theta);
-        assert_eq!(before, m.probe(probe_theta));
-
-        let mut clone_for_trial = m.clone();
-        let via_trial = clone_for_trial.trial(probe_theta);
-        assert_eq!(before, via_trial, "probe は trial と完全一致すること");
-
-        let after_probe = m.trial(probe_theta);
-        assert_eq!(after_probe, via_trial);
     }
 }
