@@ -909,7 +909,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
 }
 
 /// 床の中での小梁・スラブ設計の表示（`ResultsBundle.beam_checks`/`slab_checks`）。
-/// 小梁は単純梁または片持ち梁として曲げ・たわみを検定し、スラブは一方向版として設計曲げ
+/// 小梁は曲げ・たわみ・端部せん断伝達を検定し、スラブは一方向版として設計曲げ
 /// モーメント・必要鉄筋量を表示する（いずれも全体 FEM から独立）。
 fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     use crate::table_util::Col;
@@ -924,9 +924,9 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     ui.strong("小梁・床の長期略算／鋼製間柱の独立検定");
     ui.colored_label(
         crate::theme::GRAY_600,
-        "小梁は大梁を分割せず、床の中で単純梁または片持ち梁として曲げ・たわみを検定します\
+        "小梁は大梁を分割せず、曲げ・たわみ・高力ボルト端部せん断伝達の3項目を検定します\
          （反力は大梁へ CMQ として伝達）。スラブは一方向版として設計曲げと必要鉄筋量を算定します。\
-         鋼小梁の E・長期 ft は断面材料（未設定時 E=205000・F=235）。鉄筋は SD295（長期 ft=195）です。",
+         鋼小梁の E・長期 ft は断面材料に基づき、材料・板厚・強度不足時は停止します。鉄筋は SD295（長期 ft=195）です。",
     );
 
     ui.label(
@@ -1008,6 +1008,80 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                 });
             },
         );
+    }
+
+    for (_, target, row) in &r.beam_checks {
+        let crate::app::BeamCheckTarget::SecondaryBeam { member } = target else {
+            continue;
+        };
+        let name = secondary_label(app.core.model.beams(), *member);
+        let Some(bolts) = &row.bolts else {
+            ui.label(format!(
+                "{name} 接合部せん断: 未検定（部材力・適用対象を確認できません）"
+            ));
+            continue;
+        };
+        ui.strong(format!(
+            "{name} / 断面符号 {} / 曲げ比 {:.4}・たわみ比 {:.4}",
+            bolts.symbol, row.bending_ratio, row.deflection_ratio
+        ));
+        if let Some(i) = &bolts.input {
+            ui.label(format!(
+                "{} M{}・{}面摩擦・各支持端{}本 / 摩擦面条件{}・引張なし/偏心付加力不要{}",
+                i.bolt.label(),
+                i.diameter_mm,
+                i.friction_surfaces,
+                i.count,
+                if i.surface_treatment_confirmed {
+                    "確認済み"
+                } else {
+                    "未確認"
+                },
+                if i.concentric_shear_only_confirmed {
+                    "確認済み"
+                } else {
+                    "未確認"
+                }
+            ));
+        }
+        for end in 0..2 {
+            if !bolts.supported[end] {
+                ui.label(format!(
+                    "{}端: 自由端（接合なし）",
+                    if end == 0 { "始" } else { "終" }
+                ));
+                continue;
+            }
+            let force = |v: Option<f64>| {
+                v.map(|v| format!("{:.3}", v / 1000.0))
+                    .unwrap_or_else(|| "—".into())
+            };
+            let ratio = bolts.ratios[end]
+                .map(|v| {
+                    format!(
+                        "{v:.4} {}",
+                        if !bolts.complete() {
+                            "参考・未検定"
+                        } else if v <= 1.0 {
+                            "せん断伝達OK"
+                        } else {
+                            "せん断伝達NG"
+                        }
+                    )
+                })
+                .unwrap_or_else(|| "未検定".into());
+            ui.label(format!(
+                "{}端 Q={:.3} kN / qa={} kN/本 / Qa={} kN / RQ={ratio}",
+                if end == 0 { "始" } else { "終" },
+                bolts.q_n[end] / 1000.0,
+                force(bolts.qa_per_bolt_n),
+                force(bolts.qa_n)
+            ));
+        }
+        for reason in &bolts.reasons {
+            ui.label(format!("接合部せん断 未検定: {reason}"));
+        }
+        ui.label("3項目の総合判定は接合部全体の安全性を示しません。");
     }
 
     for (_, target, row) in &r.beam_checks {

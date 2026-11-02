@@ -12,6 +12,8 @@
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BeamDesignResult {
     #[serde(default)]
+    pub bolts: Option<crate::floor_bolt::BeamBoltResult>,
+    #[serde(default)]
     pub post: Option<crate::post::PostDesignResult>,
     /// スパン（支持間距離）`[mm]`。
     pub span: f64,
@@ -33,11 +35,11 @@ pub struct BeamDesignResult {
     pub deflection_span_ratio: f64,
     /// たわみ検定比 (δ/L)/(1/limit_denom)。
     pub deflection_ratio: f64,
-    /// 総合検定比（曲げ・たわみの最大）。未検定は 0。
+    /// 評価済み項目の最大検定比。接合条件不足時もこの値だけで適合としない。
     pub ratio: f64,
-    /// 判定（`ratio <= 1`）。未検定は `false`。
+    /// 必要な検定が成立し、最大検定比が1以下のとき適合。
     pub ok: bool,
-    /// 分配荷重が無い・断面/材料不足などで部材力を算定していない（表には残し、判定は「未」）。
+    /// 部材力や必要な接合検定が不足している場合は総合未検定。
     #[serde(default)]
     pub unchecked: bool,
 }
@@ -116,6 +118,7 @@ fn judge_beam(
     }
     let ratio = bending_ratio.max(deflection_ratio);
     Ok(BeamDesignResult {
+        bolts: None,
         post: None,
         span,
         w,
@@ -136,6 +139,7 @@ fn judge_beam(
 /// 分配結果が無く断面検定できない小梁の表行（判定は「未」。OK と誤認しない）。
 pub fn beam_unchecked(span: f64) -> BeamDesignResult {
     BeamDesignResult {
+        bolts: None,
         post: None,
         span,
         w: 0.0,

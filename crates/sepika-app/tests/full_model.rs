@@ -2503,12 +2503,13 @@ fn beam_design_checks_cover_imported_secondary_members() {
     );
 
     let mut checked = 0;
+    let mut checked_on_same_level = 0;
     for (slab_id, target, jr) in &results.beam_checks {
         let sepika_app::app::BeamCheckTarget::SecondaryBeam { member } = target else {
             continue; // 間柱は検定対象外（軸力・面外曲げが未対応）。
         };
         checked += 1;
-        if jr.unchecked {
+        if jr.bolts.is_none() {
             continue;
         }
         let sm = app.core.model.secondary_member(*member).expect("小梁");
@@ -2535,10 +2536,15 @@ fn beam_design_checks_cover_imported_secondary_members() {
             member.0,
             slab_id
         );
+        checked_on_same_level += 1;
     }
     assert_eq!(
         checked, n_beams,
         "取り込んだ小梁がすべて検定されていない（{checked}/{n_beams}）"
+    );
+    assert!(
+        checked_on_same_level > 0,
+        "曲げ・たわみ算定済みの小梁と床板を照合する"
     );
 }
 
@@ -3079,15 +3085,37 @@ fn snapshot_key_scalars() {
     assert_eq!(checked_positions, 345, "Checked 位置数");
     line("design.checked_positions", checked_positions.to_string());
     line("design.skipped_positions", skipped_positions.to_string());
-    // 小梁の最大検定比。件数だけでは「どのスラブで検定したか」の変化を捉えられないため、
-    // 値そのものも固定する（負担幅・床荷重強度の取り違えはここに現れる）。
-    let beam_max_ratio = results
+    // 接合条件不足の総合未検定で除外すると、算定済みの曲げ・たわみの数値回帰が空振りする。
+    let beam_results: Vec<_> = results
         .beam_checks
         .iter()
-        .filter(|(_, _, r)| !r.unchecked)
-        .map(|(_, _, r)| r.ratio)
+        .filter(|(_, target, r)| {
+            matches!(
+                target,
+                sepika_app::app::BeamCheckTarget::SecondaryBeam { .. }
+            ) && r.bolts.is_some()
+        })
+        .map(|(_, _, r)| r)
+        .collect();
+    assert!(!beam_results.is_empty(), "曲げ・たわみ算定済みの小梁がある");
+    assert!(
+        beam_results.iter().all(|r| {
+            r.unchecked
+                && !r.ok
+                && r.bolts.as_ref().is_some_and(|bolts| {
+                    bolts.input.is_none() && !bolts.complete() && !bolts.reasons.is_empty()
+                })
+        }),
+        "接合条件未設定の小梁は理由付きの総合未検定となる"
+    );
+    let beam_max_ratio = beam_results
+        .iter()
+        .map(|r| r.bending_ratio.max(r.deflection_ratio))
         .fold(0.0_f64, f64::max);
-    line("design.beam_max_ratio", sig4(beam_max_ratio));
+    line(
+        "design.beam_bending_deflection_max_ratio",
+        sig4(beam_max_ratio),
+    );
 
     // --- 層指標 ---
     let ctx = sepika_app::summary::metrics_ctx_from_results(&app.core.model, Some(results));
