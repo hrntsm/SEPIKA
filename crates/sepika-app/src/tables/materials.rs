@@ -317,9 +317,39 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 }
             });
             row.col(|ui| {
-                let mut name = mat.name.clone();
-                if table_util::cell_text_edit(ui, &mut name).lost_focus() && name != mat.name {
-                    pending_name = Some((mat_id.0, name));
+                let cell_id = material_name_id(app, mat_id);
+                let mut name = ui
+                    .data(|d| d.get_temp::<String>(cell_id))
+                    .unwrap_or_else(|| mat.name.clone());
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut name)
+                        .id(cell_id)
+                        .desired_width(ui.available_width()),
+                );
+                crate::theme::focus_outline(ui, &resp);
+                if resp.changed() {
+                    ui.data_mut(|d| d.insert_temp(cell_id.with("changed"), true));
+                }
+                if resp.lost_focus() {
+                    let dirty =
+                        ui.data(|d| d.get_temp::<bool>(cell_id.with("changed")).unwrap_or(false));
+                    if dirty && name != mat.name {
+                        pending_name = Some((mat_id.0, name));
+                    }
+                    ui.data_mut(|d| {
+                        d.remove::<String>(cell_id);
+                        d.remove::<bool>(cell_id.with("changed"));
+                    });
+                } else if resp.has_focus() {
+                    ui.data_mut(|d| {
+                        d.insert_temp(cell_id, name);
+                        let cells = d.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(
+                            "material_cell_ids",
+                        ));
+                        if !cells.contains(&cell_id) {
+                            cells.push(cell_id);
+                        }
+                    });
                 }
             });
             row.col(|ui| {
@@ -500,6 +530,17 @@ pub(super) fn material_cell_id(
     revision: u64,
 ) -> egui::Id {
     egui::Id::new(("mat_cell", revision, id.0, field as u8))
+}
+
+pub(super) fn material_name_id(app: &App, id: sepika_core::ids::MaterialId) -> egui::Id {
+    egui::Id::new((
+        "mat_name",
+        &app.core.scoped.references.project,
+        &app.core.scoped.references.proposal,
+        format!("{:?}", app.studies.active),
+        app.ui.scoped.material_id_revision,
+        id.0,
+    ))
 }
 
 fn parse_material_draft(draft: &[String; 7]) -> Result<[Option<f64>; 6], String> {
