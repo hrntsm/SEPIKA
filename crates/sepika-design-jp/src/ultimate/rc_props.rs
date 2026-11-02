@@ -406,7 +406,7 @@ mod tests {
     /// 円形柱の帯筋（1 組 2 本）が pw に反映され、許容・終局せん断が増える。
     #[test]
     fn test_rc_column_circle_hoop_contributes_to_shear() {
-        use crate::rc::{axis_props_from_shape, rc_allow, shear_capacity_for};
+        use crate::rc::{axis_props_from_shape, rc_allow, shear_capacity};
         use crate::ultimate::UltimateShearOptions;
         use crate::LoadTerm;
         use sepika_core::units::ConcreteClass;
@@ -431,8 +431,8 @@ mod tests {
         let allow = rc_allow(24.0, ConcreteClass::Normal, "SD345", false);
         let props = axis_props_from_shape(&with_hoop, RcDirection::Strong, true).unwrap();
         let props0 = axis_props_from_shape(&without_hoop, RcDirection::Strong, true).unwrap();
-        let qa = shear_capacity_for(&props, &allow, 1.5, LoadTerm::Short, true, true);
-        let qa0 = shear_capacity_for(&props0, &allow, 1.5, LoadTerm::Short, true, true);
+        let qa = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, true, true);
+        let qa0 = shear_capacity(&props0, &allow, 1.5, LoadTerm::Short, true, true);
         assert!(qa > qa0, "許容せん断: with={qa}, without={qa0}");
 
         let opts = UltimateShearOptions::default();

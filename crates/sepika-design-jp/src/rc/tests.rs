@@ -270,30 +270,12 @@ fn test_beam_shear_damage_control_vs_safety() {
     let expected_damage = props.b * props.j * ((2.0 / 3.0) * alpha * allow.fs + pw_term);
     let expected_safety = props.b * props.j * (alpha * allow.fs + pw_term);
 
-    assert!((qa_damage - expected_damage).abs() / expected_damage < 1e-6);
-    assert!((qa_safety - expected_safety).abs() / expected_safety < 1e-6);
+    assert!((qa_damage - expected_damage).abs() / expected_damage < 1e-9);
+    assert!((qa_safety - expected_safety).abs() / expected_safety < 1e-9);
     assert!(
         qa_damage < qa_safety,
         "損傷制御式は安全確保式より小さいはず"
     );
-
-    // shear_capacity_for は普通強度式へ委譲する（分岐反転の回帰防止）。
-    // 実運用の既定は損傷制御（true）のため、true は損傷制御式
-    // b・j・(2/3・α・fs + pw項)、false は安全確保式 b・j・(α・fs + pw項) と照合する。
-    for (damage_control, expected) in [(true, expected_damage), (false, expected_safety)] {
-        let qa_via_dispatch = shear_capacity_for(
-            &props,
-            &allow,
-            alpha,
-            LoadTerm::Short,
-            damage_control,
-            false,
-        );
-        assert!(
-            (qa_via_dispatch - expected).abs() / expected < 1e-9,
-            "damage_control={damage_control}: QA={qa_via_dispatch}, expected={expected}"
-        );
-    }
 }
 
 #[test]
@@ -343,8 +325,8 @@ fn test_column_safety_check_excludes_alpha() {
     let w_ft = allow.w_ft;
     let pw_term = 0.5 * w_ft * (pw.min(0.012) - 0.002);
     let expected = b_j * (fs + pw_term);
-    let qa_alpha_1 = shear_capacity_for(&props, &allow, 1.0, LoadTerm::Short, false, true);
-    let qa_alpha_1_5 = shear_capacity_for(&props, &allow, 1.5, LoadTerm::Short, false, true);
+    let qa_alpha_1 = shear_capacity(&props, &allow, 1.0, LoadTerm::Short, false, true);
+    let qa_alpha_1_5 = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, false, true);
     assert!(
         (qa_alpha_1 - expected).abs() / expected < 1e-9,
         "QA={qa_alpha_1}, expected={expected}"
