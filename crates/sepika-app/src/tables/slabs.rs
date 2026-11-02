@@ -61,6 +61,64 @@ impl Default for SlabDraft {
     }
 }
 
+impl SlabDraft {
+    pub(crate) fn plate(&self) -> Result<sepika_core::model::SlabPlate, String> {
+        let area_value = |text: &str, field: &str| {
+            let value = to_internal::area_load_kn_per_m2(crate::load_editor::parse_load_number(
+                text, field,
+            )?);
+            if !value.is_finite() {
+                return Err(format!(
+                    "{field}: 単位換算後に有限な数値となる値を入力してください"
+                ));
+            }
+            Ok(value)
+        };
+        let value = area_value(&self.load_value, "荷重 [kN/m²]")?;
+        let usage = if matches!(self.usage, Some(SlabUsage::Custom { .. })) {
+            let mut values = [0.0; 4];
+            for (i, field) in ["床用", "小梁用", "大梁用", "地震用"].iter().enumerate() {
+                values[i] = area_value(&self.custom_live_kn_m2[i], field)?;
+            }
+            Some(custom_usage(values))
+        } else {
+            self.usage
+        };
+        let kind = self.load_kind.trim();
+        Ok(sepika_core::model::SlabPlate {
+            section: self.section,
+            loads: vec![AreaLoad {
+                kind: if kind.is_empty() { "DL" } else { kind }.into(),
+                value,
+            }],
+            usage,
+            method: self.method,
+            one_way: self.one_way,
+        })
+    }
+}
+
+pub(crate) fn assign_slab_draft(
+    app: &mut App,
+    region: FloorPlateAssignmentRegionId,
+) -> Result<(), String> {
+    let plate = app.ui.scoped.slab_draft.plate()?;
+    if !app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(AssignSlabToFloorPlateRegion { region, plate }),
+    ) {
+        return Err(app
+            .core
+            .scoped
+            .undo
+            .last_error()
+            .unwrap_or("床板を割り当てられません")
+            .to_owned());
+    }
+    app.core.scoped.staleness.mark_edited();
+    Ok(())
+}
+
 /// 用途選択で提示するプリセット（令別表第1／国交省営繕基準・令和3年度版）。
 /// `None` は「なし（積載寄与なし）」。任意入力（`Custom`）は値を保持するため
 /// ここには入れず、コンボ内の特別な項目から初期化する。並びは国交省営繕基準の表に概ね沿う。
@@ -687,15 +745,6 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
                     ui.add(egui::TextEdit::singleline(slot).desired_width(55.0));
                 }
             });
-            let v: [f64; 4] = std::array::from_fn(|i| {
-                to_internal::area_load_kn_per_m2(
-                    app.ui.scoped.slab_draft.custom_live_kn_m2[i]
-                        .trim()
-                        .parse::<f64>()
-                        .unwrap_or(0.0),
-                )
-            });
-            app.ui.scoped.slab_draft.usage = Some(custom_usage(v));
         } else if let Some(u) = app.ui.scoped.slab_draft.usage {
             ui.label(usage_values_text(u));
         }
@@ -737,25 +786,10 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
             });
     });
 
-    let value_kn_m2 = app
-        .ui
-        .scoped
-        .slab_draft
-        .load_value
-        .trim()
-        .parse::<f64>()
-        .unwrap_or(0.0);
-    let value = to_internal::area_load_kn_per_m2(value_kn_m2);
-    let kind = app.ui.scoped.slab_draft.load_kind.trim();
-    let kind = if kind.is_empty() { "DL" } else { kind }.to_string();
-    let plate = sepika_core::model::SlabPlate {
-        section: app.ui.scoped.slab_draft.section,
-        loads: vec![AreaLoad { kind, value }],
-        usage: app.ui.scoped.slab_draft.usage,
-        method: app.ui.scoped.slab_draft.method,
-        one_way: app.ui.scoped.slab_draft.one_way,
-    };
-
+    let plate = app.ui.scoped.slab_draft.plate();
+    if let Err(reason) = &plate {
+        ui.colored_label(crate::theme::ERROR_RED, reason);
+    }
     let mut pending_assign: Vec<FloorPlateAssignmentRegionId> = Vec::new();
     let mut pending_no_plate: Vec<FloorPlateAssignmentRegionId> = Vec::new();
     let mut pending_unset: Vec<FloorPlateAssignmentRegionId> = Vec::new();
@@ -773,7 +807,10 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
                 ui.label(format!("領域 R{}", region_id.0));
                 if let sepika_core::model::PlateAssignment::Plate(sid) = state {
                     ui.label(format!("床板 #{}", sid.0));
-                } else if ui.button("この仕様で割当").clicked() {
+                } else if ui
+                    .add_enabled(plate.is_ok(), egui::Button::new("この仕様で割当"))
+                    .clicked()
+                {
                     pending_assign.push(region_id);
                 }
                 if !state.is_no_plate() && ui.button("版なし").clicked() {
@@ -785,16 +822,11 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
             });
         }
     });
-    let pending =
-        !pending_assign.is_empty() || !pending_no_plate.is_empty() || !pending_unset.is_empty();
+    let pending = !pending_no_plate.is_empty() || !pending_unset.is_empty();
     for &region in &pending_assign {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(AssignSlabToFloorPlateRegion {
-                region,
-                plate: plate.clone(),
-            }),
-        );
+        if let Err(reason) = assign_slab_draft(app, region) {
+            ui.colored_label(crate::theme::ERROR_RED, reason);
+        }
     }
     for &region in &pending_no_plate {
         app.core.scoped.undo.run(
@@ -1328,6 +1360,142 @@ fn queue_attached_extent(
 mod tip_load_tests {
     use super::*;
     use sepika_core::model::{LoadTransfer, Slab, SlabPlate, TipLoadDirection};
+
+    fn assignment_app() -> App {
+        use sepika_core::ids::ElemId;
+        use sepika_core::model::*;
+        let mut app = App::default();
+        for (i, coord) in [
+            [0.0, 0.0, 0.0],
+            [1000.0, 0.0, 0.0],
+            [1000.0, 1000.0, 0.0],
+            [0.0, 1000.0, 0.0],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.core.model.nodes.push(Node {
+                id: NodeId(i as u32),
+                coord,
+                restraint: sepika_core::dof::Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            });
+        }
+        for (i, (a, b)) in [(0, 1), (1, 2), (2, 3), (3, 0)].into_iter().enumerate() {
+            app.core.model.elements.push(ElementData {
+                id: ElemId(i as u32),
+                kind: ElementKind::Beam,
+                nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
+                section: None,
+                local_axis: LocalAxis {
+                    ref_vector: [0.0, 0.0, 1.0],
+                },
+                end_cond: [EndCondition::Fixed; 2],
+                force_regime: ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
+                plastic_zone: None,
+                spring: None,
+            });
+        }
+        app.core.model.rebuild_floor_assignment_regions();
+        let region = app.core.model.floor_assignment_regions.regions[0].id;
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(SetFloorPlateRegionNoPlate { region })
+        ));
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(UnsetFloorPlateRegion { region })
+        ));
+        app.core.scoped.undo.undo(&mut app.core.model);
+        app.core.scoped.staleness = crate::app::Staleness::default();
+        app.core.scoped.results = Some(crate::app::ResultsBundle::default());
+        app
+    }
+
+    #[test]
+    fn invalid_assignment_numbers_preserve_inputs_model_history_and_results() {
+        for text in ["", " ", "abc", "NaN", "inf", "-inf", "1e309"] {
+            for field in 0..5 {
+                let mut app = assignment_app();
+                app.ui.scoped.slab_draft.usage = Some(custom_usage([0.0; 4]));
+                let label = if field == 0 {
+                    app.ui.scoped.slab_draft.load_value = text.into();
+                    "荷重"
+                } else {
+                    app.ui.scoped.slab_draft.custom_live_kn_m2[field - 1] = text.into();
+                    ["床用", "小梁用", "大梁用", "地震用"][field - 1]
+                };
+                let draft = format!("{:?}", app.ui.scoped.slab_draft);
+                let model = rmp_serde::to_vec_named(&app.core.model).unwrap();
+                let stale = format!("{:?}", app.core.scoped.staleness);
+                let results = format!("{:?}", app.core.scoped.results);
+                let revision = app.core.scoped.undo.revision();
+                let region = app.core.model.floor_assignment_regions.regions[0].id;
+                let reason = assign_slab_draft(&mut app, region).unwrap_err();
+                assert!(reason.contains(label), "{reason}");
+                assert!(
+                    reason.contains(if text.trim().is_empty() {
+                        "必須"
+                    } else if text == "abc" {
+                        "数値"
+                    } else {
+                        "有限"
+                    }),
+                    "{reason}"
+                );
+                assert_eq!(format!("{:?}", app.ui.scoped.slab_draft), draft);
+                assert_eq!(format!("{:?}", app.core.scoped.results), results);
+                assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), model);
+                assert_eq!(format!("{:?}", app.core.scoped.staleness), stale);
+                assert_eq!(app.core.scoped.undo.revision(), revision);
+                assert!(app.core.scoped.undo.can_undo());
+                assert!(app.core.scoped.undo.can_redo());
+                app.core.scoped.undo.redo(&mut app.core.model);
+                assert!(app.core.model.floor_assignment_regions.regions[0]
+                    .assignment
+                    .is_unset());
+            }
+        }
+    }
+
+    #[test]
+    fn assignment_applies_signed_load_and_custom_values_with_units() {
+        let mut app = assignment_app();
+        app.ui.scoped.slab_draft.load_value = " -2.5 ".into();
+        app.ui.scoped.slab_draft.custom_live_kn_m2 = ["+1", "2", "3", "4"].map(String::from);
+        app.ui.scoped.slab_draft.usage = Some(custom_usage([0.0; 4]));
+        let region = app.core.model.floor_assignment_regions.regions[0].id;
+        assign_slab_draft(&mut app, region).unwrap();
+        assert_eq!(app.core.model.slabs[0].plate.loads[0].value, -0.0025);
+        assert_eq!(
+            usage_custom_values(app.core.model.slabs[0].usage()),
+            [0.001, 0.002, 0.003, 0.004]
+        );
+        app.core.scoped.undo.undo(&mut app.core.model);
+        assert!(app.core.model.slabs.is_empty());
+        app.core.scoped.undo.redo(&mut app.core.model);
+        assert_eq!(app.core.model.slabs[0].plate.loads[0].value, -0.0025);
+        app.ui.scoped.slab_draft.usage = None;
+        app.ui.scoped.slab_draft.custom_live_kn_m2 =
+            [String::new(), "abc".into(), "NaN".into(), "inf".into()];
+        assert!(app.ui.scoped.slab_draft.plate().is_ok());
+    }
+
+    #[test]
+    fn rejected_assignment_command_preserves_draft_and_staleness() {
+        let mut app = assignment_app();
+        let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        let stale = format!("{:?}", app.core.scoped.staleness);
+        assert!(assign_slab_draft(&mut app, FloorPlateAssignmentRegionId(999)).is_err());
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
+        assert_eq!(format!("{:?}", app.core.scoped.staleness), stale);
+        assert!(app.core.scoped.undo.can_undo());
+        assert!(app.core.scoped.undo.can_redo());
+    }
 
     #[test]
     fn attached_creation_distinguishes_missing_input_from_invalid_complete_candidate() {
