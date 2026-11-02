@@ -309,7 +309,16 @@ impl App {
         use sepika_design_jp::floor as fd;
 
         for beam in self.core.model.beams() {
-            fd::secondary_beam_steel_e_and_ft(&self.core.model, beam)?;
+            if let Some((sec, _, _)) = fd::secondary_beam_steel_e_and_ft(&self.core.model, beam)? {
+                for (name, value) in [
+                    ("断面せい [mm]", sec.depth),
+                    ("断面二次モーメント [mm⁴]", sec.iy),
+                ] {
+                    if !value.is_finite() || value <= 0.0 {
+                        return Err(format!("小梁 {}: {name}は正の有限値が必要です", beam.id.0));
+                    }
+                }
+            }
         }
         let mut beam_checks = Vec::new();
         let mut slab_checks = Vec::new();
@@ -438,11 +447,7 @@ impl App {
                 beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             };
-            let z = if sec.depth > 0.0 {
-                sec.iy / (sec.depth / 2.0)
-            } else {
-                0.0
-            };
+            let z = sec.iy / (sec.depth / 2.0);
 
             let Some(entry) = entry.filter(|e| e.distribution_ready) else {
                 beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
@@ -467,7 +472,8 @@ impl App {
                 z,
                 ft,
                 fd::DEFLECTION_LIMIT_DENOM,
-            );
+            )
+            .map_err(|reason| format!("小梁 {}: {reason}", sm.id.0))?;
             let bolts = sepika_design_jp::floor_bolt::design_beam_bolts(
                 &sec.name,
                 self.core.model.secondary_beam_bolts.get(&sec.name),

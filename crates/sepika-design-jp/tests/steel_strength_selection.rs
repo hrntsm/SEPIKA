@@ -188,7 +188,7 @@ fn issue601_thick_secondary_and_primary_use_the_same_table_strength() {
     };
     let (_, ft) = floor::beam_steel_e_and_ft(&section, Some(&material)).unwrap();
     let secondary =
-        floor::design_beam_from_forces(4_000.0, 0.0, 150.0e6, 0.0, 0.0, 1.0e6, ft, 250.0);
+        floor::design_beam_from_forces(4_000.0, 0.0, 150.0e6, 0.0, 0.0, 1.0e6, ft, 250.0).unwrap();
     assert!((secondary.bending_ratio - 1.0465116279069768).abs() < 1e-12);
     assert!(!secondary.ok);
     assert_eq!(
