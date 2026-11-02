@@ -115,7 +115,7 @@ pub struct ResponseInterval {
     pub cumulative_load: Polynomial,
 }
 
-/// 単純支持・片持ちの閉形式積分応答。反力は端番号順 [N]、固定端モーメント [N mm]。
+/// 単純支持・片持ちの閉形式積分応答。反力は端番号順 `[N]`、固定端モーメント [N mm]。
 #[derive(Clone, Debug)]
 pub struct BeamResponse {
     pub intervals: Vec<ResponseInterval>,
@@ -123,7 +123,7 @@ pub struct BeamResponse {
     pub support_moments: [f64; 2],
 }
 
-/// 荷重位置は [0,L]、分布荷重は a < b、EI は正であること。
+/// 荷重位置は `[0,L]`、分布荷重は a < b、EI は正であること。
 pub fn beam_response(
     loads: &[MemberLoadKind],
     l: f64,

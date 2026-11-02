@@ -7,7 +7,7 @@ use sepika_core::model::{
 };
 use sepika_core::section_shape::SectionShape;
 
-/// 矩形RC/SRC大梁の自重内訳 [N]。仕上げ・付加重量・嵩上げは含まない。
+/// 矩形RC/SRC大梁の自重内訳 `[N]`。仕上げ・付加重量・嵩上げは含まない。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GirderSelfWeightBreakdown {
     pub element: ElemId,
