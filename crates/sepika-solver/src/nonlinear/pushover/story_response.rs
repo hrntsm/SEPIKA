@@ -337,6 +337,7 @@ pub(super) fn record_cuts(
     let physical = super::physical_response::PhysicalStep::recover(
         model,
         dofmap,
+        super::physical_response::fixed_dofs(model, dofmap),
         behaviors,
         &responses,
         &vec![0.; dofmap.n_active()],
@@ -855,6 +856,7 @@ mod tests {
             let heights = [3000.0, 3000.0];
             let mut recorder = super::super::step_record::StepRecorder::new(
                 &m,
+                &map,
                 SeismicDir::X,
                 &heights,
                 Default::default(),

@@ -229,7 +229,14 @@ pub fn pushover_analysis_recording(
     }
 
     let heights = story_heights(model);
-    let mut recorder = StepRecorder::new(model, dir, &heights, ductility_method, physical_loads)?;
+    let mut recorder = StepRecorder::new(
+        model,
+        dofmap,
+        dir,
+        &heights,
+        ductility_method,
+        physical_loads,
+    )?;
     let mut total_disp = vec![0.0; n_active];
     let n_steps = max_steps.clamp(1, 100);
     let dlambda = 1.0 / n_steps as f64;

@@ -612,6 +612,7 @@ fn recover_static(
     let state = crate::nonlinear::pushover::physical_response::PhysicalStep::from_nodal(
         model,
         dofmap,
+        crate::nonlinear::pushover::physical_response::fixed_dofs(model, dofmap),
         u_free,
         vec![nodal],
         physical.source.clone(),

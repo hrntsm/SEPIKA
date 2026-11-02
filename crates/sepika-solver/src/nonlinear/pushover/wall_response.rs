@@ -592,6 +592,7 @@ mod tests {
         b[0].commit_state();
         let mut recorder = super::super::step_record::StepRecorder::new(
             &m,
+            &map,
             SeismicDir::X,
             &[3000.0],
             super::super::types::DuctilityMethod::default(),

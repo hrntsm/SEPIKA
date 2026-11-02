@@ -16,6 +16,10 @@ Issue #1023で製品本文から分離した開発補助情報。現在の実行
 
 立体時刻歴は確定状態を基点に反復し、失敗した時刻の試行状態を取り消す。材料履歴だけでなく部材荷重・内部変形・応答も復元対象とする。記録の検査を終えてから履歴を確定する。入口は `crates/sepika-solver/src/dynamic/timehistory/nonlinear.rs`。利用者が確認する停止・結果の採否は製品本文に置く。
 
+## 増分解析の確定応答記録
+
+`StepRecorder` は、記録対象のモデル・自由度対応から固定自由度を解析ごとに一度判定し、各確定ステップで共有する。呼び出し元が渡す解析用 `Reducer` は内部配列を変更できるため、記録用の判定には独立して構築した `Reducer` を使う。変位・確定内力・荷重倍率・支持反力・性能曲線は各ステップの状態から算定する。入口は `crates/sepika-solver/src/nonlinear/pushover/step_record.rs` と `physical_response.rs`。
+
 ## GUI未接続の線形時刻歴再開API
 
 `linear_time_history_from_state`（`crates/sepika-solver/src/dynamic/timehistory/linear.rs`）へ渡すステップsは、時刻sdtの確定状態を意味する。変位・速度・相対加速度を引き継ぎ、初期加速度を再計算しない。全積分区間数Tに対し残りはT−s区間、s=Tなら更新なし、s>Tは拒否する。

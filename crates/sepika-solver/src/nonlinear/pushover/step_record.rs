@@ -29,6 +29,7 @@ pub(super) struct RecordedStep {
 ///
 /// 蓄積したものは解析の最後に [`StepRecorder::finish`] で受け取る。
 pub(super) struct StepRecorder<'a> {
+    fixed_dofs: std::sync::Arc<[[bool; 6]]>,
     /// 加力方向（ベースシア・層せん断・層間変位の射影に使う）。
     dir: SeismicDir,
     /// 各層の階高 [mm]（層間変形角の分母）。
@@ -75,6 +76,7 @@ pub(super) struct RecordedSteps {
 impl<'a> StepRecorder<'a> {
     pub(super) fn new(
         model: &Model,
+        dofmap: &DofMap,
         dir: SeismicDir,
         heights: &'a [f64],
         ductility_method: DuctilityMethod,
@@ -99,6 +101,7 @@ impl<'a> StepRecorder<'a> {
             reference_external: vec![],
             constant_external: vec![],
             physical_loads,
+            fixed_dofs: super::physical_response::fixed_dofs(model, dofmap),
             confirmed_history: vec![],
         })
     }
@@ -122,6 +125,7 @@ impl<'a> StepRecorder<'a> {
         let physical = super::physical_response::PhysicalStep::recover(
             model,
             dofmap,
+            self.fixed_dofs.clone(),
             behaviors,
             &responses,
             total_disp,
@@ -288,6 +292,7 @@ mod tests {
         let heights = super::super::response::story_heights(&model);
         let mut recorder = StepRecorder::new(
             &model,
+            &map,
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
@@ -338,6 +343,7 @@ mod tests {
         let heights = super::super::response::story_heights(&model);
         let mut recorder = StepRecorder::new(
             &model,
+            &map,
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
