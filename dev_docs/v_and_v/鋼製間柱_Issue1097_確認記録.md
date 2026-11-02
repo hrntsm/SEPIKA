@@ -20,7 +20,7 @@
 
 ## 実行状態と境界
 
-2026-11-03、当該worktreeの最終ソースで以下を実行した。共有targetは `C:\Users\hiroa\Desktop\ikkan\target`、Clippyは `0.1.99 (58cf8f9c35 2026-10-13)`。
+2026-11-03、初回実装時に当該worktreeで以下を実行した。共有targetは `C:\Users\hiroa\Desktop\ikkan\target`、Clippyは `0.1.99 (58cf8f9c35 2026-10-13)`。
 
 | コマンド | 結果 |
 | --- | --- |
@@ -47,3 +47,19 @@
 | sepika-mcp（mcp feature） | 129 | 15 | 0 |
 
 Windows実機ウィンドウの取得・手操作は未実施であり、本番eguiウィジェットへの合成ポインタイベントと区別する。全モデル・全荷重・全GUI画面条件、規準の専門家確認、層間追従・接合部・終局・実験Validationは未確認。
+
+
+## PR #1120 の既定feature構成の是正
+
+CIの `cargo test --workspace --locked` ではGUI featureが有効にならず、保存・失効の共通試験がGUI限定の編集メソッドを呼んでコンパイルエラーになった。共通試験の編集を、GUI・非GUIで利用できるUndoStack経由の編集と編集済み状態の更新へ置き換えた。保存再読込・入力不一致による失効・明示再検定・旧契約拒否の確認は維持し、本番GUIポインタイベントの試験は変更していない。計算・製品コードの変更はない。
+
+修正後、同じ共有targetで次の構成を直接確認した。先行した他7クレートの2424成功と、その計算・保存・編集の対象ソースは変更していない。CI全workspace実行の成否はローカルの構成別確認とは区別する。
+
+| コマンド | 結果 |
+| --- | --- |
+| `cargo test -p sepika-app --locked --quiet` | 非GUI：lib481成功・既存ignore1、統合等104成功・既存ignore1。計585成功、失敗0、ignore2 |
+| `cargo test -p sepika-app --features gui --lib --locked --quiet` | GUI：1199成功、失敗0、既存ignore3 |
+| `cargo clippy -p sepika-app --all-targets --locked -- -D warnings` | 非GUIで成功 |
+| `cargo clippy -p sepika-app --features gui --all-targets --locked -- -D warnings` | GUIで成功 |
+| `cargo fmt --all -- --check` | 成功 |
+| `git diff --check` | 成功 |
