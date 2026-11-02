@@ -74,7 +74,7 @@
 | `calc_basis/08_部材終局耐力/02_RC_終局せん断.md` | [calc_basis/08_部材終局耐力/02_RC_終局せん断.md](../../docs/calc_basis/08_部材終局耐力/02_RC_終局せん断.md) | 維持・全節維持 |
 | `calc_basis/08_部材終局耐力/03_RC_柱梁接合部_終局耐力.md` | [calc_basis/08_部材終局耐力/03_RC_柱梁接合部_終局耐力.md](../../docs/calc_basis/08_部材終局耐力/03_RC_柱梁接合部_終局耐力.md) | 維持・全節維持 |
 | `calc_basis/08_部材終局耐力/04_RC_部材_非線形復元力特性.md` | [nonlinear/05_RC_部材_非線形復元力特性.md](../../docs/nonlinear/05_RC_部材_非線形復元力特性.md) | 移動・全節維持 |
-| `calc_basis/08_部材終局耐力/05_SRC_SRRC_梁_せん断終局.md` | [calc_basis/08_部材終局耐力/05_SRC_SRRC_梁_せん断終局.md](../../docs/calc_basis/08_部材終局耐力/05_SRC_SRRC_梁_せん断終局.md) | 維持・全節維持 |
+| `calc_basis/08_部材終局耐力/05_SRC_梁_せん断終局.md` | [calc_basis/08_部材終局耐力/05_SRC_梁_せん断終局.md](../../docs/calc_basis/08_部材終局耐力/05_SRC_梁_せん断終局.md) | 維持・全節維持 |
 | `calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md` | [calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md](../../docs/calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md) | 維持・全節維持 |
 | `calc_basis/08_部材終局耐力/07_終局検定の統括.md` | [calc_basis/08_部材終局耐力/07_終局検定の統括.md](../../docs/calc_basis/08_部材終局耐力/07_終局検定の統括.md) | 維持・全節維持 |
 | `calc_basis/08_部材終局耐力/README.md` | [calc_basis/08_部材終局耐力/README.md](../../docs/calc_basis/08_部材終局耐力/README.md) | 章入口・案内を更新 |
