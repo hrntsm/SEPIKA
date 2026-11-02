@@ -271,21 +271,6 @@ mod tests {
     }
 
     #[test]
-    fn test_h_400x200x9x12x13_matches_known_properties() {
-        let list = entries_in(CatalogShape::H, "H(const)");
-        let e = list
-            .iter()
-            .find(|e| e.name == "H-400x200x9x12x13")
-            .expect("section not found");
-        assert!((e.depth - 400.0).abs() < 1e-6);
-        assert!((e.width - 200.0).abs() < 1e-6);
-        // CSV: A=83.29070842 cm^2 -> mm^2
-        assert!((e.area - 8329.070842).abs() < 1e-3);
-        // CSV: Iy=22554.95086 cm^4 -> mm^4
-        assert!((e.iy - 225549508.6).abs() < 10.0);
-    }
-
-    #[test]
     fn test_pipe_width_falls_back_to_outer_diameter() {
         let list = entries_in(CatalogShape::Pipe, "P-385");
         let e = list
@@ -315,6 +300,12 @@ mod tests {
             .iter()
             .find(|e| e.name == "H-400x200x9x12x13")
             .expect("section not found");
+        assert!((e.depth - 400.0).abs() < 1e-6);
+        assert!((e.width - 200.0).abs() < 1e-6);
+        // CSV: A=83.29070842 cm^2 -> mm^2
+        assert!((e.area - 8329.070842).abs() < 1e-3);
+        // CSV: Iy=22554.95086 cm^4 -> mm^4
+        assert!((e.iy - 225549508.6).abs() < 10.0);
         let sec = to_section(e, SectionId(0));
         assert_eq!(sec.area, e.area);
         assert_eq!(sec.iy, e.iy);
