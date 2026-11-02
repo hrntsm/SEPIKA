@@ -3,7 +3,6 @@
 //!
 //! - [`ShearThreshold`] / [`DirThreshold`] / [`ShearDir`] — 方向別 Qy しきい値
 //! - [`compute_shear_yield_thresholds`] — 全部材のしきい値を組み立て
-//! - [`effective_clear_span`] — 剛域控除後の内法スパン h0
 //! - [`track_shear_yield`] — 各ステップのせん断降伏を軸力 σ0 を反映して判定
 
 use super::geom::member_local_frame;
