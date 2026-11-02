@@ -862,3 +862,77 @@ fn rounded_allowable_bending_converges_at_radius_boundaries() {
         }
     }
 }
+
+#[test]
+fn rounded_cft_qd1_min_use_calculated_moment_on_the_same_axis() {
+    use crate::{QdMethod, SeismicQd};
+
+    let (height, width, thick) = (400.0, 300.0, 9.0);
+    let sec = cft_box_section(height, width, thick)
+        .with_surface_radius(Some(40.0))
+        .unwrap();
+    let mat = make_material(24.0, "SN400B");
+    let design = CftDesign;
+
+    let f_value = steel_f_value_prefix("SN400B", thick).unwrap();
+    let s_fs = steel_fs(f_value, LoadTerm::Short);
+    let s_aw = 2.0 * thick * (height - 2.0 * thick);
+    let s_qa = s_aw * s_fs;
+
+    // 解析せん断を大きくして QD2 = n・Q を QD1 より大きくする。
+    let q_test = s_qa * 0.6;
+    let forces = MemberForcesAt {
+        qy: q_test,
+        ..zero_forces()
+    };
+
+    let n_factor = 1.5;
+    let h_clear = 4000.0;
+    let length = 4000.0;
+    let ctx_qd = DesignCtx {
+        term: LoadTerm::Short,
+        kind: crate::MemberKind::Column,
+        steel_material: Some(make_material_no_fc("SN400B")),
+        length,
+        seismic_qd: Some(SeismicQd {
+            long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])], // QL=0
+            n_factor,
+            n_mechanism: 1.0,
+            q_simple: None,
+            clear_length: h_clear,
+            method: QdMethod::Min,
+        }),
+        ..Default::default()
+    };
+    let r_qd = design.check(&forces, &sec, &mat, &ctx_qd).unwrap_checked();
+
+    // 期待値: QD1 = 2·Mu(N=0)/h′（強軸。qy に対応）。
+    let shape = SectionShape::CftBox {
+        corner_r: Some(40.0),
+        height,
+        width,
+        thick,
+        horizontal_thick: thick,
+    };
+    let mu = crate::ultimate::cft_mu_nm(&shape, 24.0, f_value, 0.0, length, false).unwrap();
+    let qd1 = 2.0 * mu / h_clear;
+    assert!(
+        qd1 < n_factor * q_test,
+        "前提: QD1({qd1}) < QD2({})",
+        n_factor * q_test
+    );
+    let expected_ratio = qd1 / s_qa;
+    assert!(
+        (r_qd.ratio() - expected_ratio).abs() / expected_ratio < 1e-6,
+        "ratio={}, expected={}",
+        r_qd.ratio(),
+        expected_ratio
+    );
+    let mut qd1_ctx = ctx_qd;
+    qd1_ctx.seismic_qd.as_mut().unwrap().method = QdMethod::Qd1;
+    let direct_qd1 = design.check(&forces, &sec, &mat, &qd1_ctx).unwrap_checked();
+    let mu_weak = crate::ultimate::cft_mu_nm(&shape, 24.0, f_value, 0.0, length, true).unwrap();
+    let s_qa_weak = 2.0 * thick * (width - 2.0 * thick) * s_fs;
+    let expected_qd1 = expected_ratio.max((2.0 * mu_weak / h_clear) / s_qa_weak);
+    assert!((direct_qd1.ratio() - expected_qd1).abs() / expected_qd1 < 1e-6);
+}
