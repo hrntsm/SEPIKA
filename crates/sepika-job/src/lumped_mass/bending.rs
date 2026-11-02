@@ -289,34 +289,12 @@ fn layer_elements<'a>(
     Ok(elements)
 }
 
-pub(super) fn signed_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> JobResult<Vec<f64>> {
-    let axis = usize::from(dir == SeismicDir::Y);
-    let mut result = Vec::new();
-    for layer in model.layers() {
-        let mut q = 0.0;
-        for e in layer_elements(model, &layer)? {
-            let p0 = model.nodes[e.nodes[0].index()].coord;
-            let p1 = model.nodes[e.nodes[1].index()].coord;
-            let frame = LocalFrame::from_nodes(p0, p1, e.local_axis.ref_vector)
-                .map_err(|e| bad(&layer, e))?;
-            let local = res
-                .member_forces
-                .iter()
-                .find(|(id, _)| *id == e.id)
-                .and_then(|(_, f)| f.at.first())
-                .ok_or_else(|| bad(&layer, format!("部材 {} の層せん断力がありません", e.id.0)))?
-                .1;
-            q += frame.rot[0][2].signum()
-                * (local[0] * frame.rot[0][axis]
-                    - local[1] * frame.rot[1][axis]
-                    - local[2] * frame.rot[2][axis]);
-        }
-        if !q.is_finite() {
-            return Err(bad(&layer, format!("層せん断力 Q={} が不正です", q)));
-        }
-        result.push(q);
-    }
-    Ok(result)
+pub(super) fn signed_shears(
+    model: &Model,
+    res: &StaticOnce,
+    dir: SeismicDir,
+) -> JobResult<Vec<f64>> {
+    super::story_shears(model, res, dir)
 }
 
 pub(super) fn step_drifts(
@@ -396,10 +374,10 @@ fn skeletons(
             }
             sk.push(StoryTrilinear::elastic(k));
         }
-        return Ok((sk,Vec::new()));
+        return Ok((sk, Vec::new()));
     }
-    let fits=super::identification::fit(inp,dir,base,Some((ei,height)))?;
-    Ok((fits.iter().map(|f|f.fit.skeleton).collect(),fits))
+    let fits = super::identification::fit(inp, dir, base, Some((ei, height)))?;
+    Ok((fits.iter().map(|f| f.fit.skeleton).collect(), fits))
 }
 
 pub(super) fn build(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
@@ -637,6 +615,7 @@ mod tests {
         (
             model,
             StaticOnce {
+                story_shears: Some([vec![2000.0, 1000.0], vec![2000.0, 1000.0]]),
                 stiffness_ratio_disp: None,
                 disp,
                 member_forces,
@@ -665,6 +644,264 @@ mod tests {
     }
 
     #[test]
+    fn solved_frame_static_modes_and_plastic_response_comparison() {
+        use sepika_core::ids::{LoadCaseId, MaterialId, SectionId};
+        use sepika_core::model::{
+            ElementKind, FrameSectionUse, MassMethod, Material, MaterialCategory,
+        };
+        use sepika_solver::dynamic::lumped_mass::{bending_shear_element, lumped_mass_eigen};
+        let (mut model, _) = fixture(SeismicDir::X, false, false);
+        model.mass_method = MassMethod::LumpedOnly;
+        model.materials.push(Material {
+            id: MaterialId(0),
+            name: "steel".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fy: Some(50.0),
+            fc: None,
+            strength_factor: None,
+            concrete_class: Default::default(),
+        });
+        let section = &mut model.sections[0];
+        section.material = Some(MaterialId(0));
+        section.area = 40000.0;
+        section.iy = 1.0e9;
+        section.iz = 1.0e9;
+        section.j = 5.0e8;
+        section.depth = 500.0;
+        section.width = 400.0;
+        section.as_y = 30000.0;
+        section.as_z = 30000.0;
+        let mut girder = section.clone();
+        girder.id = SectionId(1);
+        girder.frame_use = Some(FrameSectionUse::Girder);
+        model.sections.push(girder);
+        for level in 1..=2 {
+            for (a, b) in [(0, 1), (1, 3), (3, 2), (2, 0)] {
+                let mut e = model.elements[0].clone();
+                e.id = ElemId(model.elements.len() as u32);
+                e.section = Some(SectionId(1));
+                e.nodes = [NodeId(level * 4 + a), NodeId(level * 4 + b)]
+                    .into_iter()
+                    .collect();
+                e.local_axis.ref_vector = [0.0, 0.0, 1.0];
+                model.elements.push(e);
+            }
+        }
+        for e in &mut model.elements {
+            e.kind = ElementKind::Beam;
+        }
+        let mut upper_material = model.materials[0].clone();
+        upper_material.id = MaterialId(1);
+        upper_material.fy = Some(20.0);
+        model.materials.push(upper_material);
+        for id in 0..2 {
+            let mut s = model.sections[id].clone();
+            s.id = SectionId((id + 2) as u32);
+            s.material = Some(MaterialId(1));
+            model.sections.push(s);
+        }
+        for e in &mut model.elements {
+            if e.nodes
+                .iter()
+                .all(|id| model.nodes[id.index()].coord[2] >= 3000.0)
+            {
+                e.section = Some(SectionId(e.section.unwrap().0 + 2));
+            }
+        }
+        for n in model.nodes.iter_mut().filter(|n| n.coord[2] > 0.0) {
+            let m = if n.coord[2] < 4000.0 { 5.0 } else { 2.5 };
+            n.mass = Some([m, m, m, 0.0, 0.0, 0.0]);
+        }
+        model.load_cases = sepika_core::model::default_load_cases();
+        model.combinations = sepika_core::model::default_combinations();
+        model.ultimate_gravity_combination = Some(0);
+        let mut cfg = crate::AnalysisSettings {
+            push_apply_long_term: false,
+            push_steps: 100,
+            push_drift_denom: 75.0,
+            th_apply_long_term: false,
+            ..Default::default()
+        };
+        let generated = crate::auto_loads::compute_seismic_auto_load_cases(&model, &cfg, None);
+        crate::auto_loads::apply_auto_load_cases(&mut model, &generated.cases);
+        let ex_id = model
+            .load_cases
+            .iter()
+            .find(|c| c.name == "EX")
+            .map(|c| c.id)
+            .unwrap_or(LoadCaseId(4));
+        let res = sepika_solver::statics::linear::linear_static_once(&model, ex_id).unwrap();
+        let mut inp = input(&model, &res, SeismicDir::X);
+        let bending_model = build(inp).unwrap();
+        inp.model_type = LumpedMassType::EquivalentShear;
+        let shear_model = super::super::build_lumped_mass(inp).unwrap();
+        let q = signed_shears(&model, &res, SeismicDir::X).unwrap();
+        let d = story_drifts(&model, &res, SeismicDir::X);
+        let mut matrix = vec![0.0; 16];
+        for (i, story) in bending_model.stories.iter().enumerate() {
+            let local = bending_shear_element(
+                story.height,
+                bending_model.bending[i].ei_y,
+                story.skeleton.k1,
+            )
+            .unwrap();
+            let map = if i == 0 {
+                [None, None, Some(0), Some(1)]
+            } else {
+                [Some(0), Some(1), Some(2), Some(3)]
+            };
+            for a in 0..4 {
+                for b in 0..4 {
+                    if let (Some(a_global), Some(b_global)) = (map[a], map[b]) {
+                        matrix[a_global * 4 + b_global] += local[a][b];
+                    }
+                }
+            }
+            near(q[i] / shear_model.stories[i].skeleton.k1, d[i]);
+        }
+        let u = sepika_math::dense_lu::CheckedDenseLu::factorize(&matrix, 4)
+            .unwrap()
+            .solve(&[q[0] - q[1], 0.0, q[1], 0.0], 1)
+            .unwrap();
+        near(u[0], d[0]);
+        near(u[2] - u[0], d[1]);
+        let fem = crate::compute::compute_eigen(model.clone(), 6).unwrap();
+        let bs = lumped_mass_eigen(&bending_model, 4).unwrap();
+        let ss = lumped_mass_eigen(&shear_model, 2).unwrap();
+        println!("FRAME static Q={q:?} d={d:?}; FEM T={:?}; shear T={:?} modes={:?}; bending T={:?} modes={:?}",fem.period,ss.period,ss.shapes,bs.period,bs.shapes);
+        for (i, shape) in fem.node_shapes.iter().enumerate() {
+            println!(
+                "FRAME mode {} T={} effective mass {:?} X-floor-ratio={} Y-floor-ratio={}",
+                i + 1,
+                fem.period[i],
+                fem.effective_mass[i],
+                shape[4][0] / shape[8][0],
+                shape[4][1] / shape[8][1]
+            );
+        }
+        let ey_id = model.load_cases.iter().find(|c| c.name == "EY").unwrap().id;
+        let ey = sepika_solver::statics::linear::linear_static_once(&model, ey_id).unwrap();
+        for dir in [SeismicDir::X, SeismicDir::Y] {
+            let mut spatial_input = input(&model, &res, dir);
+            spatial_input.res_y = Some(&ey);
+            spatial_input.dim = StickDim::Spatial;
+            let spatial = build(spatial_input).unwrap();
+            let reference = if dir == SeismicDir::X { &res } else { &ey };
+            let qref = signed_shears(&model, reference, dir).unwrap();
+            let ei = ei_values(&model, reference, dir).unwrap();
+            let db = bending_drifts(&[3000.0; 2], &ei, &qref).unwrap();
+            for (i, layer) in model.layers().iter().enumerate() {
+                let total = story_drift_at(
+                    &model,
+                    reference,
+                    dir,
+                    layer,
+                    spatial.spatial[i].rigidity_xy,
+                );
+                near(qref[i] / spatial.stories[i].skeleton.k1 + db[i], total);
+            }
+        }
+        let po = crate::compute::compute_pushover(model.clone(), cfg).unwrap();
+        println!(
+            "FRAME pushover points={} end={:?}",
+            po.capacity_curve.len(),
+            po.termination
+        );
+        inp.model_type = LumpedMassType::EquivalentBendingShear;
+        inp.nonlinear = true;
+        inp.po_x = Some(&po);
+        let failure = build(inp).unwrap_err().to_string();
+        assert!(failure.contains("第1折点の割線交点が未同定"), "{failure}");
+        let mut plastic_frame = model.clone();
+        plastic_frame.elements.retain(|e| {
+            e.nodes
+                .iter()
+                .all(|id| model.nodes[id.index()].coord[2] <= 3000.0)
+        });
+        for (i, e) in plastic_frame.elements.iter_mut().enumerate() {
+            e.id = ElemId(i as u32);
+        }
+        plastic_frame.nodes.truncate(8);
+        plastic_frame.stories.truncate(2);
+        plastic_frame.constraints.truncate(2);
+        plastic_frame.load_cases = sepika_core::model::default_load_cases();
+        let generated =
+            crate::auto_loads::compute_seismic_auto_load_cases(&plastic_frame, &cfg, None);
+        crate::auto_loads::apply_auto_load_cases(&mut plastic_frame, &generated.cases);
+        let plastic_res =
+            sepika_solver::statics::linear::linear_static_once(&plastic_frame, ex_id).unwrap();
+        let plastic_po = crate::compute::compute_pushover(plastic_frame.clone(), cfg).unwrap();
+        let mut plastic_input = input(&plastic_frame, &plastic_res, SeismicDir::X);
+        plastic_input.nonlinear = true;
+        plastic_input.po_x = Some(&plastic_po);
+        let nonlinear = build(plastic_input).unwrap();
+        for steps in [25, 50, 100] {
+            let mut sensitivity_cfg = cfg;
+            sensitivity_cfg.push_steps = steps;
+            let sensitivity_po =
+                crate::compute::compute_pushover(plastic_frame.clone(), sensitivity_cfg).unwrap();
+            for target in [1.0 / 250.0, 1.0 / 200.0, 1.0 / 150.0] {
+                let sensitivity_input = LumpedMassBuildInput {
+                    po_x: Some(&sensitivity_po),
+                    target_drift_angle: target,
+                    ..plastic_input
+                };
+                let identified = build(sensitivity_input).unwrap();
+                let fit = identified.identifications[0].fit;
+                near(fit.skeleton.k1, nonlinear.stories[0].skeleton.k1);
+                println!("SENSITIVITY steps={steps} R={target} dy={} Kp={} interval={:?} Darea={} Dfit={} error={}",fit.skeleton.d2,fit.skeleton.k3(),fit.interval,fit.options.area_limit,fit.options.identification_limit,fit.normalized_rmse);
+            }
+        }
+
+        println!("FRAME identified {:?}", nonlinear.identifications);
+        let wave: Vec<_> = (0..1001)
+            .map(|i| 35000.0 * (i as f64 * 0.002 * std::f64::consts::TAU / 0.11).sin())
+            .collect();
+        let response = sepika_solver::dynamic::lumped_mass::bending_shear_time_history(
+            &nonlinear, &wave, 0.002, 0.02,
+        )
+        .unwrap();
+        println!(
+            "FRAME nonlinear μ={:?}, total μ={:?}, peak drift={:?}",
+            response.story_ductility, response.story_total_ductility, response.story_peak_drift
+        );
+        assert!(response.story_ductility.iter().any(|x| *x > 1.0));
+        plastic_input.model_type = LumpedMassType::EquivalentShear;
+        let nonlinear_shear = super::super::build_lumped_mass(plastic_input).unwrap();
+        let shear_response = sepika_solver::dynamic::lumped_mass::lumped_mass_time_history(
+            &nonlinear_shear,
+            &wave,
+            0.002,
+            0.02,
+        )
+        .unwrap();
+        cfg.th_nonlinear = true;
+        let fem_response = crate::compute::compute_time_history(
+            plastic_frame.clone(),
+            cfg,
+            sepika_solver::dynamic::timehistory::GroundMotion {
+                dt: 0.002,
+                accel_x: wave,
+                accel_y: None,
+                accel_theta: None,
+            },
+        )
+        .unwrap();
+        println!(
+            "FRAME dynamic FEM peak={} drift_angle={:?}; shear peak={:?} μ={:?}",
+            fem_response.peak_disp[4][0],
+            fem_response.story_drift_angle,
+            shear_response.story_peak_drift,
+            shear_response.story_ductility
+        );
+        assert!(fem_response.peak_disp[4][0] > 15.0);
+    }
+
+    #[test]
     fn column_axial_work_recovers_ei_axes_units_and_split_columns() {
         for dir in [SeismicDir::X, SeismicDir::Y] {
             for reverse in [false, true] {
@@ -682,6 +919,9 @@ mod tests {
                     near(lm.stories[0].skeleton.k1, 10000.0);
                     near(lm.stories[1].skeleton.k1, 10000.0);
                     let mut opposite = res.clone();
+                    for q in opposite.story_shears.as_mut().unwrap().iter_mut().flatten() {
+                        *q = -*q;
+                    }
                     for u in &mut opposite.disp {
                         for v in u {
                             *v = -*v;
@@ -704,45 +944,110 @@ mod tests {
         }
     }
 
-    fn synthetic_pushover(model: &Model, res: &StaticOnce, dir: SeismicDir, spatial: bool) -> (PushoverResult, f64) {
-        use sepika_solver::nonlinear::pushover::{CapacityPoint,PushoverStep,PushoverTarget};
-        let qel=signed_shears(model,res,dir).unwrap();
-        let ei=ei_values(model,res,dir).unwrap();
-        let db=bending_drifts(&[3000.0;2],&ei,&qel).unwrap();
-        let del=story_drifts(model,res,dir);
-        let ds:Vec<_>=del.iter().zip(&db).map(|(d,b)|d-b).collect();
-        let axis=usize::from(dir==SeismicDir::Y);
-        let mut po=super::super::tests::empty_pushover();
-        for (index,(x,y)) in [(0.0,0.0),(1.0,1.0),(3.0,1.4),(6.0,1.55),(10.0,1.75)].into_iter().enumerate() {
-            let drift:Vec<_>=(0..2).map(|i|[2.0,3.0][i]+x*ds[i]+y*db[i]).collect();
-            let floors=[0.0,drift[0],drift.iter().sum()];
-            let mut floor_disp=Vec::new();
-            for (j,story) in model.stories.iter().enumerate() {
-                let nid=story_reference_node(model,story).unwrap();let xy=model.nodes[nid.index()].coord;
-                let theta=if j==0 {0.0}else{0.0001*j as f64+0.0002*y};
-                let mut u=[0.0;3];u[axis]=floors[j];
-                u[0]-=xy[1]*theta;u[1]+=xy[0]*theta;u[2]=theta;floor_disp.push(u);
+    fn synthetic_pushover(
+        model: &Model,
+        res: &StaticOnce,
+        dir: SeismicDir,
+        spatial: bool,
+    ) -> (PushoverResult, f64) {
+        use sepika_solver::nonlinear::pushover::{CapacityPoint, PushoverStep, PushoverTarget};
+        let qel = signed_shears(model, res, dir).unwrap();
+        let ei = ei_values(model, res, dir).unwrap();
+        let db = bending_drifts(&[3000.0; 2], &ei, &qel).unwrap();
+        let del = story_drifts(model, res, dir);
+        let ds: Vec<_> = del.iter().zip(&db).map(|(d, b)| d - b).collect();
+        let axis = usize::from(dir == SeismicDir::Y);
+        let mut po = super::super::tests::empty_pushover();
+        for (index, (x, y)) in [
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (3.0, 1.4),
+            (6.0, 1.55),
+            (10.0, 1.75),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let drift: Vec<_> = (0..2)
+                .map(|i| [2.0, 3.0][i] + x * ds[i] + y * db[i])
+                .collect();
+            let floors = [0.0, drift[0], drift.iter().sum()];
+            let mut floor_disp = Vec::new();
+            for (j, story) in model.stories.iter().enumerate() {
+                let nid = story_reference_node(model, story).unwrap();
+                let xy = model.nodes[nid.index()].coord;
+                let theta = if j == 0 {
+                    0.0
+                } else {
+                    0.0001 * j as f64 + 0.0002 * y
+                };
+                let mut u = [0.0; 3];
+                u[axis] = floors[j];
+                u[0] -= xy[1] * theta;
+                u[1] += xy[0] * theta;
+                u[2] = theta;
+                floor_disp.push(u);
             }
-            let recorded=if spatial {vec![floor_disp[1][axis]-floor_disp[0][axis],floor_disp[2][axis]-floor_disp[1][axis]]}else{drift.clone()};
-            let q:Vec<_>=(0..2).map(|i|[100.0,200.0][i]+y*qel[i]).collect();
-            po.capacity_curve.push(CapacityPoint{step:index as u32,roof_disp:floors[2],base_shear:q[0],story_shear:q,story_drift:recorded.clone()});
-            po.steps.push(PushoverStep{load_factor:y,top_disp:floors[2],base_shear:po.capacity_curve.last().unwrap().base_shear,story_drifts:recorded,floor_disp:if spatial{floor_disp}else{Vec::new()}});
+            let recorded = if spatial {
+                vec![
+                    floor_disp[1][axis] - floor_disp[0][axis],
+                    floor_disp[2][axis] - floor_disp[1][axis],
+                ]
+            } else {
+                drift.clone()
+            };
+            let q: Vec<_> = (0..2).map(|i| [100.0, 200.0][i] + y * qel[i]).collect();
+            po.capacity_curve.push(CapacityPoint {
+                step: index as u32,
+                roof_disp: floors[2],
+                base_shear: q[0],
+                story_shear: q,
+                story_drift: recorded.clone(),
+            });
+            po.steps.push(PushoverStep {
+                load_factor: y,
+                top_disp: floors[2],
+                base_shear: po.capacity_curve.last().unwrap().base_shear,
+                story_drifts: recorded,
+                floor_disp: if spatial { floor_disp } else { Vec::new() },
+            });
         }
-        po.target=Some(PushoverTarget{max_disp:Some(po.capacity_curve.last().unwrap().roof_disp),max_drift_angle:None});
-        let target=(0..2).map(|i|10.0*ds[i]+1.75*db[i]).fold(f64::INFINITY,f64::min)*0.8/3000.0;
-        (po,target)
+        po.target = Some(PushoverTarget {
+            max_disp: Some(po.capacity_curve.last().unwrap().roof_disp),
+            max_drift_angle: None,
+        });
+        let target = (0..2)
+            .map(|i| 10.0 * ds[i] + 1.75 * db[i])
+            .fold(f64::INFINITY, f64::min)
+            * 0.8
+            / 3000.0;
+        (po, target)
     }
 
     #[test]
     fn nonlinear_backbone_preserves_elastic_stiffness_and_subtracts_baseline() {
-        let (model,res)=fixture(SeismicDir::X,false,false);
-        let (po,target)=synthetic_pushover(&model,&res,SeismicDir::X,false);
-        let mut inp=input(&model,&res,SeismicDir::X);inp.nonlinear=true;inp.po_x=Some(&po);inp.target_drift_angle=target;
-        let lm=build(inp).unwrap();
-        for story in &lm.stories {near(story.skeleton.k1,10000.0);assert!(story.skeleton.d2>story.skeleton.d1);}
-        near(lm.stories[0].skeleton.d3,2.0);near(lm.stories[1].skeleton.d3,1.0);
-        let r=sepika_solver::dynamic::lumped_mass::bending_shear_time_history(&lm,&[0.0,1.0,-1.0,0.0],0.01,0.02).unwrap();
-        assert_eq!(r.time.len(),4);assert!(r.story_total_ductility.is_some());
+        let (model, res) = fixture(SeismicDir::X, false, false);
+        let (po, target) = synthetic_pushover(&model, &res, SeismicDir::X, false);
+        let mut inp = input(&model, &res, SeismicDir::X);
+        inp.nonlinear = true;
+        inp.po_x = Some(&po);
+        inp.target_drift_angle = target;
+        let lm = build(inp).unwrap();
+        for story in &lm.stories {
+            near(story.skeleton.k1, 10000.0);
+            assert!(story.skeleton.d2 > story.skeleton.d1);
+        }
+        near(lm.stories[0].skeleton.d3, 2.0);
+        near(lm.stories[1].skeleton.d3, 1.0);
+        let r = sepika_solver::dynamic::lumped_mass::bending_shear_time_history(
+            &lm,
+            &[0.0, 1.0, -1.0, 0.0],
+            0.01,
+            0.02,
+        )
+        .unwrap();
+        assert_eq!(r.time.len(), 4);
+        assert!(r.story_total_ductility.is_some());
     }
 
     #[test]
@@ -911,20 +1216,26 @@ mod tests {
     }
     #[test]
     fn elastic_shear_curve_does_not_generate_a_yield_point() {
-        let (model,res)=fixture(SeismicDir::X,false,false);
-        let (mut po,target)=synthetic_pushover(&model,&res,SeismicDir::X,false);
-        for (cp,step) in po.capacity_curve.iter_mut().zip(&mut po.steps) {
-            let x=step.load_factor;
-            let q=vec![2000.0*x,1000.0*x];
-            let db=bending_drifts(&[3000.0;2],&[1.2e14;2],&q).unwrap();
-            cp.story_drift=vec![2.0+0.2*x+db[0],3.0+0.1*x+db[1]];
-            cp.story_shear=vec![100.0+q[0],200.0+q[1]];
-            step.story_drifts=cp.story_drift.clone();
+        let (model, res) = fixture(SeismicDir::X, false, false);
+        let (mut po, target) = synthetic_pushover(&model, &res, SeismicDir::X, false);
+        for (cp, step) in po.capacity_curve.iter_mut().zip(&mut po.steps) {
+            let x = step.load_factor;
+            let q = vec![2000.0 * x, 1000.0 * x];
+            let db = bending_drifts(&[3000.0; 2], &[1.2e14; 2], &q).unwrap();
+            cp.story_drift = vec![2.0 + 0.2 * x + db[0], 3.0 + 0.1 * x + db[1]];
+            cp.story_shear = vec![100.0 + q[0], 200.0 + q[1]];
+            step.story_drifts = cp.story_drift.clone();
         }
-        po.target=Some(sepika_solver::nonlinear::pushover::PushoverTarget{max_disp:None,max_drift_angle:None});
-        let mut inp=input(&model,&res,SeismicDir::X);inp.nonlinear=true;inp.po_x=Some(&po);inp.target_drift_angle=target*0.1;
-        let error=build(inp).unwrap_err().to_string();
-        assert!(error.contains("等価降伏未同定"),"{error}");
+        po.target = Some(sepika_solver::nonlinear::pushover::PushoverTarget {
+            max_disp: None,
+            max_drift_angle: None,
+        });
+        let mut inp = input(&model, &res, SeismicDir::X);
+        inp.nonlinear = true;
+        inp.po_x = Some(&po);
+        inp.target_drift_angle = target * 0.1;
+        let error = build(inp).unwrap_err().to_string();
+        assert!(error.contains("等価降伏未同定"), "{error}");
     }
 
     #[test]

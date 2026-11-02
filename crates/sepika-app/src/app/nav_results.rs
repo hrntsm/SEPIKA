@@ -500,6 +500,7 @@ mod workspace_navigation_tests {
                 statics: vec![(
                     StaticCaseKey::User(LoadCaseId(0)),
                     sepika_solver::statics::linear::StaticOnce {
+                        story_shears: None,
                         stiffness_ratio_disp: None,
                         disp: vec![[1.0; 6]; 4],
                         member_forces: vec![],

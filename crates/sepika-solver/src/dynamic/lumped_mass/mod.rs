@@ -13,8 +13,8 @@ pub use bending::{bending_drifts, bending_shear_element, bending_shear_time_hist
 pub use eigen::{lumped_mass_eigen, LumpedMassModal};
 pub use identification::{identify_story_trilinear, StoryFit, StoryFitError, StoryFitOptions};
 pub use model::{
-    build_lumped_mass_model, LumpedMassModel, LumpedMassType,
-    LumpedStiffnessSource, StickDim, StoryBending, StoryIdentification, StorySpatial, StoryStick, StoryTrilinear,
+    build_lumped_mass_model, LumpedMassModel, LumpedMassType, LumpedStiffnessSource, StickDim,
+    StoryBending, StoryIdentification, StorySpatial, StoryStick, StoryTrilinear,
 };
 pub use time_history::{lumped_mass_time_history, StickDirPeaks, StickResponse, STICK_NEWTON};
 
@@ -25,6 +25,29 @@ pub struct LumpedMassResult {
     pub modal: LumpedMassModal,
     #[serde(default)]
     pub response: Option<StickResponse>,
+}
+
+/// 非線形質点系を成立させられなかった診断。解析モデル・応答値を含まない。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct LumpedMassIdentificationFailure {
+    pub reason: String,
+    pub model_type: LumpedMassType,
+    pub dim: StickDim,
+    /// 同定に失敗した対象方向。入力の加振方向とは独立。
+    pub dir: crate::statics::analysis::SeismicDir,
+    pub target_drift_angle: f64,
+    pub secant_ratio: f64,
+    pub manual_intervals: Vec<sepika_core::model::LumpedSkeletonInterval>,
+    pub source_targets: Vec<(
+        crate::statics::analysis::SeismicDir,
+        Option<crate::nonlinear::pushover::PushoverTarget>,
+    )>,
+}
+
+impl std::fmt::Display for LumpedMassIdentificationFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
 }
 
 #[cfg(test)]
@@ -56,7 +79,7 @@ mod tests {
             for dir in [SeismicDir::X, SeismicDir::Y] {
                 let lm = LumpedMassModel {
                     identifications: Vec::new(),
-            bending: Vec::new(),
+                    bending: Vec::new(),
                     model_type: LumpedMassType::EquivalentShear,
                     stories: vec![StoryStick {
                         story: StoryId(0),

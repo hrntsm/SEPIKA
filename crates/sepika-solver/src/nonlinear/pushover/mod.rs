@@ -21,7 +21,7 @@ mod hinge;
 mod loads;
 mod mechanism;
 pub(crate) mod member_response;
-mod physical_response;
+pub(crate) mod physical_response;
 mod response;
 mod shear_yield;
 mod step_record;

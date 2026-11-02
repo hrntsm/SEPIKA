@@ -151,6 +151,7 @@ pub struct SetStoryLevel {
 ///
 /// `model.stories` を丸ごと差し替え、`StoryId` の参照も復元前の対応へ戻す。
 pub struct RestoreStoryDefs {
+    pub lumped_skeleton_intervals: Vec<sepika_core::model::LumpedSkeletonInterval>,
     pub misc_wall_representatives: Vec<sepika_core::model::MiscWallRepresentativeColumn>,
     pub seismic_weight_generation: Option<sepika_core::model::SeismicWeightGeneration>,
     pub source_stories_initialized: bool,
@@ -167,6 +168,7 @@ pub struct RestoreStoryDefs {
 /// 現在の階定義・階参照のスナップショットを撮る。
 pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
     RestoreStoryDefs {
+        lumped_skeleton_intervals: model.lumped_skeleton_intervals.clone(),
         misc_wall_representatives: model.stress_cfg.misc_wall_representatives.clone(),
         seismic_weight_generation: model.seismic_weight_generation.clone(),
         source_stories_initialized: model.source_stories_initialized,
@@ -430,6 +432,9 @@ impl EditCommand for DeleteStory {
             model.source_stories.remove(index);
         }
         model.stories.remove(idx);
+        model
+            .lumped_skeleton_intervals
+            .retain(|interval| interval.story != self.story);
         model.constraints.retain(|c| {
             !matches!(
                 c,
@@ -488,6 +493,7 @@ impl EditCommand for DeleteStory {
 impl EditCommand for RestoreStoryDefs {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let redo = snapshot(model);
+        model.lumped_skeleton_intervals = self.lumped_skeleton_intervals.clone();
         model.stress_cfg.misc_wall_representatives = self.misc_wall_representatives.clone();
         model.seismic_weight_generation = self.seismic_weight_generation.clone();
         model.stories = self.stories.clone();

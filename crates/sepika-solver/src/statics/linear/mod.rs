@@ -108,6 +108,8 @@ impl StaticStiffness {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticOnce {
+    /// 性能曲線と同じ物理節点力・支持反力による全層せん断 [N]。要素種別によらず X/Y 順。
+    pub story_shears: Option<[Vec<f64>; 2]>,
     /// 自立壁の付加剛性を反映したRs評価専用の節点変位 [mm, rad]。Errは評価不能理由。
     /// Noneは評価未実施であり、通常変位で補完しない。
     #[serde(default)]
@@ -125,6 +127,7 @@ pub struct StaticOnce {
 pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
     let Some((first, _)) = terms.first() else {
         return StaticOnce {
+            story_shears: None,
             stiffness_ratio_disp: None,
             disp: Vec::new(),
             member_forces: Vec::new(),
@@ -169,6 +172,23 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
         }
     }
     StaticOnce {
+        story_shears: terms.iter().try_fold(
+            std::array::from_fn(|axis| {
+                vec![0.0; first.story_shears.as_ref().map_or(0, |q| q[axis].len())]
+            }),
+            |mut sum, (result, factor)| {
+                let q = result.story_shears.as_ref()?;
+                for axis in 0..2 {
+                    if sum[axis].len() != q[axis].len() {
+                        return None;
+                    }
+                    for (out, value) in sum[axis].iter_mut().zip(&q[axis]) {
+                        *out += factor * value;
+                    }
+                }
+                Some(sum)
+            },
+        ),
         stiffness_ratio_disp: None,
         disp,
         member_forces,
@@ -583,8 +603,34 @@ fn recover_static(
         }
     }
     ensure_line_member_forces(model, &member_forces)?;
+    let nodal = reactions
+        .iter()
+        .zip(&physical.nodal)
+        .enumerate()
+        .map(|(i, (r, p))| (i, std::array::from_fn(|d| r[d] + p[d])))
+        .collect();
+    let state = crate::nonlinear::pushover::physical_response::PhysicalStep::from_nodal(
+        model,
+        dofmap,
+        u_free,
+        vec![nodal],
+        physical.source.clone(),
+        physical.source.clone(),
+    )
+    .map_err(SolveError::InvalidInput)?;
+    let story_shears = Some([
+        state
+            .capacity_forces(model, dofmap, crate::statics::analysis::SeismicDir::X)
+            .map_err(SolveError::InvalidInput)?
+            .story,
+        state
+            .capacity_forces(model, dofmap, crate::statics::analysis::SeismicDir::Y)
+            .map_err(SolveError::InvalidInput)?
+            .story,
+    ]);
     Ok((
         StaticOnce {
+            story_shears,
             stiffness_ratio_disp: None,
             disp: dofmap.expand_to_nodes(u_free, model.nodes.len()),
             member_forces,

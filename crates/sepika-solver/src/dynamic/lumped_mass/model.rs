@@ -278,8 +278,15 @@ pub fn build_lumped_mass_model(
             )));
         }
 
-        let skeleton = *skeletons.get(layer.index).ok_or_else(|| SolveError::InvalidInput("層数と指定骨格数が一致しません".into()))?;
-        if !skeleton.is_valid_spring() { return Err(SolveError::InvalidInput(format!("層 {:?} の指定骨格が不正です", layer.bottom))); }
+        let skeleton = *skeletons
+            .get(layer.index)
+            .ok_or_else(|| SolveError::InvalidInput("層数と指定骨格数が一致しません".into()))?;
+        if !skeleton.is_valid_spring() {
+            return Err(SolveError::InvalidInput(format!(
+                "層 {:?} の指定骨格が不正です",
+                layer.bottom
+            )));
+        }
         sticks.push(StoryStick {
             story: layer.bottom,
             mass,
@@ -287,6 +294,10 @@ pub fn build_lumped_mass_model(
             skeleton,
         });
     }
-    if skeletons.len()!=sticks.len() {return Err(SolveError::InvalidInput("層数と指定骨格数が一致しません".into()));}
+    if skeletons.len() != sticks.len() {
+        return Err(SolveError::InvalidInput(
+            "層数と指定骨格数が一致しません".into(),
+        ));
+    }
     Ok(LumpedMassModel::from_stories(model_type, sticks))
 }

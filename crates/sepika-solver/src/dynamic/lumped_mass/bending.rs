@@ -208,22 +208,17 @@ fn axes(lm: &LumpedMassModel) -> Result<Vec<Axis>, SolveError> {
                 3
             };
             let sign = if ns == 5 && !x { -1.0 } else { 1.0 };
-            let mut b = vec![(i * ns + t, 1.0), (i * ns + r, -s.height / 2.0 * sign)];
+            let mut b = if ns == 5 {
+                super::spatial::rigidity_translation_coefficients(&lm.spatial, i, axis, ns)
+            } else {
+                vec![(i * ns + t, 1.0)]
+            };
+            b.push((i * ns + r, -s.height / 2.0 * sign));
             let mut rv = vec![(i * ns + r, sign)];
-            if ns == 5 {
-                let sp = lm.spatial[i];
-                let ecc = if x {
-                    -(sp.rigidity_xy[1] - sp.mass_xy[1])
-                } else {
-                    sp.rigidity_xy[0] - sp.mass_xy[0]
-                };
-                b.push((i * ns + 2, ecc));
-                if i > 0 {
-                    b.push(((i - 1) * ns + 2, -ecc));
-                }
-            }
             if i > 0 {
-                b.push(((i - 1) * ns + t, -1.0));
+                if ns == 2 {
+                    b.push(((i - 1) * ns + t, -1.0));
+                }
                 b.push(((i - 1) * ns + r, -s.height / 2.0 * sign));
                 rv.push(((i - 1) * ns + r, -sign));
             }
@@ -532,13 +527,8 @@ pub fn bending_shear_time_history(
             } else {
                 frame[i].copy_from_slice(&u[i * ns..i * ns + 3]);
                 rot[i] = [u[i * ns + 3], u[i * ns + 4]];
-                let sp = lm.spatial[i];
-                let dz = u[i * ns + 2] - if i > 0 { u[(i - 1) * ns + 2] } else { 0.0 };
-                let dx = u[i * ns]
-                    - if i > 0 { u[(i - 1) * ns] } else { 0.0 }
-                    - (sp.rigidity_xy[1] - sp.mass_xy[1]) * dz;
-                let dy = u[i * ns + 1] - if i > 0 { u[(i - 1) * ns + 1] } else { 0.0 }
-                    + (sp.rigidity_xy[0] - sp.mass_xy[0]) * dz;
+                let dx = super::spatial::rigidity_translation(&u, &lm.spatial, i, 0, ns);
+                let dy = super::spatial::rigidity_translation(&u, &lm.spatial, i, 1, ns);
                 (
                     dx,
                     dy,
@@ -560,32 +550,43 @@ pub fn bending_shear_time_history(
         out.floor_disp.push(frame);
         out.bending_rotations.push(rot);
     }
-    let mut d1x = vec![f64::INFINITY; n];
-    let mut d1y = d1x.clone();
+    let mut dyx = vec![f64::INFINITY; n];
+    let mut dyy = dyx.clone();
     for i in 0..n {
         if ns == 5 {
-            d1x[i] = ax[i * 2].sk.d2;
-            d1y[i] = ax[i * 2 + 1].sk.d2;
+            dyx[i] = ax[i * 2].sk.d2;
+            dyy[i] = ax[i * 2 + 1].sk.d2;
         } else if lm.dir == SeismicDir::X {
-            d1x[i] = ax[i].sk.d2;
+            dyx[i] = ax[i].sk.d2;
         } else {
-            d1y[i] = ax[i].sk.d2;
+            dyy[i] = ax[i].sk.d2;
         }
     }
-    out.ductility_dir = dir_ductility(&shear_drift, &d1x, &d1y);
+    out.ductility_dir = dir_ductility(&shear_drift, &dyx, &dyy);
     out.story_ductility = out.ductility_dir.story_max();
     if !lm.identifications.is_empty() {
-        let mut total_x=vec![f64::INFINITY;n];
-        let mut total_y=total_x.clone();
+        let mut total_x = vec![f64::INFINITY; n];
+        let mut total_y = total_x.clone();
         for fit in &lm.identifications {
-            let i=lm.stories.iter().position(|s|s.story==fit.story).ok_or_else(||SolveError::InvalidInput("同定結果の層が一致しません".into()))?;
-            let dy=fit.fit.skeleton.d2+fit.bending_yield_drift;
-            if !dy.is_finite() || dy<=0.0 {return Err(SolveError::InvalidInput("全層間変位基準の等価降伏変位が非正です".into()));}
-            match fit.dir {SeismicDir::X=>total_x[i]=dy,SeismicDir::Y=>total_y[i]=dy}
+            let i = lm
+                .stories
+                .iter()
+                .position(|s| s.story == fit.story)
+                .ok_or_else(|| SolveError::InvalidInput("同定結果の層が一致しません".into()))?;
+            let dy = fit.fit.skeleton.d2 + fit.bending_yield_drift;
+            if !dy.is_finite() || dy <= 0.0 {
+                return Err(SolveError::InvalidInput(
+                    "全層間変位基準の等価降伏変位が非正です".into(),
+                ));
+            }
+            match fit.dir {
+                SeismicDir::X => total_x[i] = dy,
+                SeismicDir::Y => total_y[i] = dy,
+            }
         }
-        let total=dir_ductility(&out.drift_dir,&total_x,&total_y);
-        out.story_total_ductility=Some(total.story_max());
-        out.total_ductility_dir=Some(total);
+        let total = dir_ductility(&out.drift_dir, &total_x, &total_y);
+        out.story_total_ductility = Some(total.story_max());
+        out.total_ductility_dir = Some(total);
     }
 
     Ok(out)
@@ -629,6 +630,58 @@ mod tests {
     }
     fn near(a: f64, b: f64) {
         assert!((a - b).abs() < 1e-9 * b.abs().max(1.0), "{a} != {b}");
+    }
+
+    #[test]
+    fn different_floor_centers_preserve_rigid_rotation_and_bending_shear_static_drift() {
+        let mut lm = model(true);
+        lm.stories.push(lm.stories[0]);
+        lm.bending.push(lm.bending[0]);
+        lm.spatial.push(lm.spatial[0]);
+        for i in 0..2 {
+            lm.stories[i].height = 3000.0;
+            lm.bending[i].ei_y = 1e12;
+            lm.bending[i].ei_x = 1e12;
+            lm.spatial[i].mass_xy = [0.0, 1000.0 * i as f64];
+            lm.spatial[i].rigidity_xy = [0.0, 500.0];
+            lm.spatial[i].kr = 1e6;
+            lm.spatial[i].skeleton_x = StoryTrilinear::elastic(100.0 * (i + 1) as f64);
+        }
+        let mut ax = axes(&lm).unwrap();
+        let rigid = [0.0, 0.0, 0.001, 0.0, 0.0, -1.0, 0.0, 0.001, 0.0, 0.0];
+        near(dot(&ax[2].b, &rigid), 0.0);
+        let (_, k) = restoring(&lm, &mut ax, &[0.0; 10], false).unwrap();
+        let u = solve(
+            &k,
+            &[
+                100.0, 0.0, -50000.0, 0.0, 0.0, 100.0, 0.0, 50000.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let bending = bending_drifts(&[3000.0; 2], &[1e12; 2], &[200.0, 100.0]).unwrap();
+        near(u[0] - 500.0 * u[2], 2.0 + bending[0]);
+        near(
+            (u[5] + 500.0 * u[7]) - (u[0] - 500.0 * u[2]),
+            0.5 + bending[1],
+        );
+        near(u[2], 0.0);
+        near(u[7], 0.0);
+        for i in 0..2 {
+            lm.spatial[i].j = 1e8;
+            lm.bending[i].inertia = [5e7, 5e7, 0.0];
+        }
+        let accel: Vec<_> = (0..200).map(|i| 500.0 * (i as f64 * 0.03).sin()).collect();
+        let response = bending_shear_time_history(&lm, &accel, 0.002, 0.02).unwrap();
+        assert_eq!(response.non_converged_steps, 0);
+        let peak = response
+            .floor_disp
+            .iter()
+            .map(|floor| {
+                ((floor[1][0] + 500.0 * floor[1][2]) - (floor[0][0] - 500.0 * floor[0][2])).abs()
+            })
+            .fold(0.0, f64::max);
+        assert!(peak > 1e-6);
+        near(response.drift_dir.x[1], peak);
     }
 
     #[test]
@@ -827,7 +880,15 @@ mod tests {
     }
     #[test]
     fn explicitly_specified_coincident_corner_preserves_hysteresis() {
-        let sk=StoryTrilinear{k1:50.0,d1:2.0,q1:100.0,d2:2.0,q2:100.0,d3:3.0,q3:105.0};
+        let sk = StoryTrilinear {
+            k1: 50.0,
+            d1: 2.0,
+            q1: 100.0,
+            d2: 2.0,
+            q2: 100.0,
+            d3: 3.0,
+            q3: 105.0,
+        };
         assert!(sk.is_valid_spring());
         let mut lm = model(false);
         lm.nonlinear = true;

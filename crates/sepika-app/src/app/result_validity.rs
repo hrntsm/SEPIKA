@@ -207,6 +207,7 @@ impl ResultsBundle {
             || self.time_history.is_some()
             || !self.time_histories.is_empty()
             || self.lumped.is_some()
+            || self.lumped_identification_failure.is_some()
             || !self.lumped_results.is_empty()
     }
 
@@ -613,6 +614,9 @@ impl App {
             relevant.ductility_method = cfg.ductility_method;
         }
         let mut model = self.calculation_model();
+        if !matches!(key, ResultInputKey::LumpedTimeHistory(_)) {
+            model.lumped_skeleton_intervals.clear();
+        }
         if matches!(key, ResultInputKey::Pushover(_)) {
             let generated = sepika_job::auto_loads::compute_seismic_auto_load_cases(
                 &model,

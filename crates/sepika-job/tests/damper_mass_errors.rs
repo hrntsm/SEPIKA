@@ -249,6 +249,7 @@ fn assert_lumped_input_error(model: &Model) {
                 dir: SeismicDir::X,
                 nonlinear,
                 secant_ratio: 0.75,
+                target_drift_angle: 1.0 / 200.0,
                 res_x: None,
                 res_y: None,
                 po_x: None,
@@ -272,27 +273,44 @@ fn assert_lumped_input_error(model: &Model) {
 
 fn sample_pushover() -> sepika_solver::nonlinear::pushover::PushoverResult {
     use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType, PushoverResult};
+    let capacity_curve: Vec<_> = [
+        (0.0, 0.0),
+        (1.0, 100.0),
+        (3.0, 140.0),
+        (6.0, 155.0),
+        (20.0, 225.0),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(step, (d, q))| CapacityPoint {
+        step: step as u32,
+        roof_disp: d,
+        base_shear: q,
+        story_shear: vec![q],
+        story_drift: vec![d],
+    })
+    .collect();
+    let steps = capacity_curve
+        .iter()
+        .map(|p| sepika_solver::nonlinear::pushover::PushoverStep {
+            load_factor: p.base_shear / 100.0,
+            top_disp: p.roof_disp,
+            base_shear: p.base_shear,
+            story_drifts: p.story_drift.clone(),
+            floor_disp: Vec::new(),
+        })
+        .collect();
     PushoverResult {
-        target: None,
+        target: Some(sepika_solver::nonlinear::pushover::PushoverTarget::from_max_disp(20.0)),
         wall_capacities: Vec::new(),
         rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
-        steps: vec![],
+        steps,
         wall_history: None,
         wall_run: None,
         confirmed_history: None,
         ds_evaluation: None,
         capacity_evaluation: None,
-        capacity_curve: [(1.0, 100.0), (2.0, 200.0), (3.0, 250.0)]
-            .into_iter()
-            .enumerate()
-            .map(|(step, (d, q))| CapacityPoint {
-                step: step as u32,
-                roof_disp: d,
-                base_shear: q,
-                story_shear: vec![q],
-                story_drift: vec![d],
-            })
-            .collect(),
+        capacity_curve,
         hinges: vec![],
         shear_yields: vec![],
         mechanism: MechanismType::Overall,
@@ -313,6 +331,19 @@ fn 質点系job入口も不正指定と編集後の古い質量を拒否する()
     for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
         let model = separated_model(method);
         let po = sample_pushover();
+        let mut reference = sepika_solver::statics::linear::StaticOnce {
+            story_shears: Some([vec![100.0], vec![0.0]]),
+            disp: vec![[0.0; 6]; model.nodes.len()],
+            stiffness_ratio_disp: None,
+            member_forces: Vec::new(),
+            panel_moments: Vec::new(),
+        };
+        for node in &model.nodes {
+            if node.coord[2] > 0.0 {
+                reference.disp[node.id.index()][0] = 1.0;
+            }
+        }
+
         let input = LumpedMassBuildInput {
             model_type: sepika_solver::dynamic::lumped_mass::LumpedMassType::EquivalentShear,
             model: &model,
@@ -321,7 +352,8 @@ fn 質点系job入口も不正指定と編集後の古い質量を拒否する()
             dir: SeismicDir::X,
             nonlinear: true,
             secant_ratio: 0.75,
-            res_x: None,
+            target_drift_angle: 1.0 / 200.0,
+            res_x: Some(&reference),
             res_y: None,
             po_x: Some(&po),
             po_y: None,
@@ -334,8 +366,16 @@ fn 質点系job入口も不正指定と編集後の古い質量を拒否する()
             lumped_n_modes: 1,
             ..Default::default()
         };
-        let result =
-            compute_lumped_mass(model.clone(), cfg, None, None, Some(po), None, None).unwrap();
+        let result = compute_lumped_mass(
+            model.clone(),
+            cfg,
+            Some(reference),
+            None,
+            Some(po),
+            None,
+            None,
+        )
+        .unwrap();
         assert!((result.model.stories[0].mass - 4.0).abs() < 1e-10);
         for total_weight in [
             model.load_cfg.as_ref().unwrap().dampers[0].total_weight * 2.0,

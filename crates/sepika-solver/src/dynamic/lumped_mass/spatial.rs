@@ -10,48 +10,69 @@ use faer::Side;
 use sepika_material::{HysteresisMaterial, UniaxialMaterial};
 use sepika_math::solver::SolveError;
 
-/// 剛心位置の 3×3 層剛性（質量重心座標へ変換済み）。
-///
-/// 剛心相対位置 `rx = Xs−Xg`, `ry = Ys−Yg`。DOF は質量重心の (Ux, Uy, θz)。
-pub(crate) fn story_k_at_mass_center(s: &StorySpatial) -> [[f64; 3]; 3] {
-    let rx = s.rigidity_xy[0] - s.mass_xy[0];
-    let ry = s.rigidity_xy[1] - s.mass_xy[1];
-    let kx = s.skeleton_x.k1.max(0.0);
-    let ky = s.skeleton_y.k1.max(0.0);
-    let kr = s.kr.max(0.0);
-    [
-        [kx, 0.0, -kx * ry],
-        [0.0, ky, ky * rx],
-        [-kx * ry, ky * rx, kx * ry * ry + ky * rx * rx + kr],
-    ]
+pub(crate) fn rigidity_translation_coefficients(
+    spatial: &[StorySpatial],
+    i: usize,
+    axis: usize,
+    stride: usize,
+) -> Vec<(usize, f64)> {
+    let point = spatial[i].rigidity_xy;
+    let arm = |center: [f64; 2]| {
+        if axis == 0 {
+            -(point[1] - center[1])
+        } else {
+            point[0] - center[0]
+        }
+    };
+    let mut coefficients = vec![
+        (i * stride + axis, 1.0),
+        (i * stride + 2, arm(spatial[i].mass_xy)),
+    ];
+    if i > 0 {
+        coefficients.extend([
+            ((i - 1) * stride + axis, -1.0),
+            ((i - 1) * stride + 2, -arm(spatial[i - 1].mass_xy)),
+        ]);
+    }
+    coefficients
+}
+
+pub(crate) fn rigidity_translation(
+    u: &[f64],
+    spatial: &[StorySpatial],
+    i: usize,
+    axis: usize,
+    stride: usize,
+) -> f64 {
+    rigidity_translation_coefficients(spatial, i, axis, stride)
+        .iter()
+        .map(|&(index, coefficient)| u[index] * coefficient)
+        .sum()
 }
 
 fn assemble_spatial_k(spatial: &[StorySpatial], k_scale: impl Fn(usize, usize) -> f64) -> Vec<f64> {
-    let n = spatial.len();
-    let nd = 3 * n;
+    let nd = 3 * spatial.len();
     let mut k = vec![0.0; nd * nd];
-    let add = |k: &mut [f64], i: usize, j: usize, v: f64| {
-        k[i * nd + j] += v;
-    };
-    for i in 0..n {
-        let mut s = spatial[i];
-        s.skeleton_x.k1 *= k_scale(i, 0);
-        s.skeleton_y.k1 *= k_scale(i, 1);
-        s.kr *= k_scale(i, 2);
-        let ks = story_k_at_mass_center(&s);
-        let top = 3 * i;
-        for a in 0..3 {
-            for b in 0..3 {
-                add(&mut k, top + a, top + b, ks[a][b]);
+    for (i, story) in spatial.iter().enumerate() {
+        for axis in 0..3 {
+            let stiffness = match axis {
+                0 => story.skeleton_x.k1,
+                1 => story.skeleton_y.k1,
+                _ => story.kr,
             }
-        }
-        if i > 0 {
-            let bot = 3 * (i - 1);
-            for a in 0..3 {
-                for b in 0..3 {
-                    add(&mut k, bot + a, bot + b, ks[a][b]);
-                    add(&mut k, top + a, bot + b, -ks[a][b]);
-                    add(&mut k, bot + a, top + b, -ks[a][b]);
+            .max(0.0)
+                * k_scale(i, axis);
+            let mut coefficients = if axis < 2 {
+                rigidity_translation_coefficients(spatial, i, axis, 3)
+            } else {
+                vec![(i * 3 + 2, 1.0)]
+            };
+            if axis == 2 && i > 0 {
+                coefficients.push(((i - 1) * 3 + 2, -1.0));
+            }
+            for &(a, ca) in &coefficients {
+                for &(b, cb) in &coefficients {
+                    k[a * nd + b] += stiffness * ca * cb;
                 }
             }
         }
@@ -211,38 +232,23 @@ fn solve_dense(a: &[f64], b: &[f64], nd: usize) -> Vec<f64> {
     x
 }
 
-fn relative_at_rigidity(u: &[f64], i: usize, s: &StorySpatial) -> [f64; 3] {
-    let rx = s.rigidity_xy[0] - s.mass_xy[0];
-    let ry = s.rigidity_xy[1] - s.mass_xy[1];
-    let top = 3 * i;
-    let (ux, uy, rz) = if i == 0 {
-        (u[top], u[top + 1], u[top + 2])
-    } else {
-        let bot = 3 * (i - 1);
-        (
-            u[top] - u[bot],
-            u[top + 1] - u[bot + 1],
-            u[top + 2] - u[bot + 2],
-        )
-    };
-    [ux - ry * rz, uy + rx * rz, rz]
+fn relative_at_rigidity(u: &[f64], i: usize, spatial: &[StorySpatial]) -> [f64; 3] {
+    [
+        rigidity_translation(u, spatial, i, 0, 3),
+        rigidity_translation(u, spatial, i, 1, 3),
+        u[i * 3 + 2] - if i > 0 { u[(i - 1) * 3 + 2] } else { 0.0 },
+    ]
 }
 
-fn add_story_force(f: &mut [f64], i: usize, s: &StorySpatial, fx: f64, fy: f64, mz: f64) {
-    let rx = s.rigidity_xy[0] - s.mass_xy[0];
-    let ry = s.rigidity_xy[1] - s.mass_xy[1];
-    let fx_g = fx;
-    let fy_g = fy;
-    let mz_g = mz + fy * rx - fx * ry;
-    let top = 3 * i;
-    f[top] += fx_g;
-    f[top + 1] += fy_g;
-    f[top + 2] += mz_g;
+fn add_story_force(f: &mut [f64], i: usize, spatial: &[StorySpatial], fx: f64, fy: f64, mz: f64) {
+    for (axis, force) in [fx, fy].into_iter().enumerate() {
+        for (index, coefficient) in rigidity_translation_coefficients(spatial, i, axis, 3) {
+            f[index] += coefficient * force;
+        }
+    }
+    f[i * 3 + 2] += mz;
     if i > 0 {
-        let bot = 3 * (i - 1);
-        f[bot] -= fx_g;
-        f[bot + 1] -= fy_g;
-        f[bot + 2] -= mz_g;
+        f[(i - 1) * 3 + 2] -= mz;
     }
 }
 
@@ -321,13 +327,13 @@ pub(crate) fn lumped_mass_time_history_spatial(
             let mut kt_x = vec![0.0; n];
             let mut kt_y = vec![0.0; n];
             for i in 0..n {
-                let rel = relative_at_rigidity(&u_tr, i, &lm.spatial[i]);
+                let rel = relative_at_rigidity(&u_tr, i, &lm.spatial);
                 let (qx, kx) = springs_x[i].trial(rel[0]);
                 let (qy, ky) = springs_y[i].trial(rel[1]);
                 kt_x[i] = kx.max(1e-6);
                 kt_y[i] = ky.max(1e-6);
                 let mz = lm.spatial[i].kr.max(0.0) * rel[2];
-                add_story_force(&mut f_int, i, &lm.spatial[i], qx, qy, mz);
+                add_story_force(&mut f_int, i, &lm.spatial, qx, qy, mz);
             }
             let a_tr: Vec<f64> = (0..nd)
                 .map(|i| {
@@ -393,7 +399,7 @@ pub(crate) fn lumped_mass_time_history_spatial(
         a = a_new;
 
         for i in 0..n {
-            let rel = relative_at_rigidity(&u, i, &lm.spatial[i]);
+            let rel = relative_at_rigidity(&u, i, &lm.spatial);
             peak_drift[i] = peak_drift[i].max(drift_dir.accumulate(i, rel[0], rel[1]));
             let (qx, _) = springs_x[i].probe(rel[0]);
             let (qy, _) = springs_y[i].probe(rel[1]);
@@ -409,15 +415,15 @@ pub(crate) fn lumped_mass_time_history_spatial(
         floor_disp.push(frame);
     }
 
-    let d1x: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_x.d2).collect();
-    let d1y: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_y.d2).collect();
-    let ductility_dir = dir_ductility(&drift_dir, &d1x, &d1y);
+    let dyx: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_x.d2).collect();
+    let dyy: Vec<f64> = lm.spatial.iter().map(|s| s.skeleton_y.d2).collect();
+    let ductility_dir = dir_ductility(&drift_dir, &dyx, &dyy);
     let ductility = ductility_dir.story_max();
 
     StickResponse {
         total_ductility_dir: None,
-            story_total_ductility: None,
-            bending_rotations: Vec::new(),
+        story_total_ductility: None,
+        bending_rotations: Vec::new(),
         time,
         roof_disp: roof,
         story_peak_drift: peak_drift,
@@ -439,6 +445,40 @@ mod tests {
     };
     use super::*;
     use crate::statics::analysis::SeismicDir;
+
+    #[test]
+    fn different_floor_centers_preserve_rigid_rotation_and_common_point_static_drift() {
+        let spatial: Vec<_> = [0.0, 1000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, y)| StorySpatial {
+                mass_xy: [0.0, y],
+                rigidity_xy: [0.0, 500.0],
+                j: 1e8,
+                kr: 1e6,
+                k1_x: 100.0 * (i + 1) as f64,
+                k1_y: 100.0,
+                skeleton_x: StoryTrilinear::elastic(100.0 * (i + 1) as f64),
+                skeleton_y: StoryTrilinear::elastic(100.0),
+            })
+            .collect();
+        let rigid = [0.0, 0.0, 0.001, -1.0, 0.0, 0.001];
+        assert_eq!(relative_at_rigidity(&rigid, 1, &spatial), [0.0; 3]);
+        let mut internal = vec![0.0; 6];
+        add_story_force(&mut internal, 1, &spatial, 100.0, 0.0, 0.0);
+        assert_eq!(internal, vec![-100.0, 0.0, 50000.0, 100.0, 0.0, 50000.0]);
+        assert_eq!(
+            internal.iter().zip(rigid).map(|(f, u)| f * u).sum::<f64>(),
+            0.0
+        );
+        let k = assemble_spatial_k(&spatial, |_, _| 1.0);
+        let u = solve_dense(&k, &[100.0, 0.0, -50000.0, 100.0, 0.0, 50000.0], 6);
+        for (actual, expected) in u.iter().zip([2.0, 0.0, 0.0, 2.5, 0.0, 0.0]) {
+            assert!((actual - expected).abs() < 1e-8, "{u:?}");
+        }
+        assert!((relative_at_rigidity(&u, 0, &spatial)[0] - 2.0).abs() < 1e-8);
+        assert!((relative_at_rigidity(&u, 1, &spatial)[0] - 0.5).abs() < 1e-8);
+    }
 
     #[test]
     fn spatial_eigen_uses_skeleton_k1_not_stale_field() {

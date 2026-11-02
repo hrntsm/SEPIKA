@@ -742,7 +742,11 @@ impl App {
             if cfg.lumped_nonlinear {
                 ui.separator();
                 ui.label("面積評価 目標層間変形角 [rad]:");
-                ui.add(egui::DragValue::new(&mut cfg.lumped_target_drift_angle).speed(0.0001).range(0.0001..=0.1));
+                ui.add(
+                    egui::DragValue::new(&mut cfg.lumped_target_drift_angle)
+                        .speed(0.0001)
+                        .range(0.0001..=0.1),
+                );
                 ui.label("第1折点 割線比:");
                 ui.add(
                     egui::DragValue::new(&mut cfg.lumped_secant_ratio)
@@ -893,9 +897,9 @@ impl App {
                 }
             });
             if intervals != self.core.model.lumped_skeleton_intervals && self.study_is_main() {
-                self.core.model.lumped_skeleton_intervals = intervals;
-                self.core.scoped.references.advance();
-                self.core.scoped.staleness.mark_non_calc_edited();
+                self.apply_model_edit(Box::new(sepika_edit::SetLumpedSkeletonIntervals {
+                    intervals,
+                }));
             }
         }
         ui.horizontal_wrapped(|ui| {
@@ -961,7 +965,6 @@ impl App {
     }
 }
 
-
 pub(crate) fn lumped_fit_interval_editor(
     ui: &mut egui::Ui,
     intervals: &mut Vec<sepika_core::model::LumpedSkeletonInterval>,
@@ -972,13 +975,28 @@ pub(crate) fn lumped_fit_interval_editor(
 ) {
     ui.push_id((story.0, format!("{dir:?}")), |ui| {
         ui.horizontal(|ui| {
-            let position=intervals.iter().position(|s|s.story==story && s.dir==dir);
-            let mut manual=position.is_some();
-            if ui.checkbox(&mut manual,format!("{name} / {dir:?} 手動")).changed() {
-                if manual { intervals.push(sepika_core::model::LumpedSkeletonInterval {story,dir,interval_mm:[target_mm,target_mm*1.5]}); }
-                else if let Some(i)=position {intervals.remove(i);}
+            let position = intervals
+                .iter()
+                .position(|s| s.story == story && s.dir == dir);
+            let mut manual = position.is_some();
+            if ui
+                .checkbox(&mut manual, format!("{name} / {dir:?} 手動"))
+                .changed()
+            {
+                if manual {
+                    intervals.push(sepika_core::model::LumpedSkeletonInterval {
+                        story,
+                        dir,
+                        interval_mm: [target_mm, target_mm * 1.5],
+                    });
+                } else if let Some(i) = position {
+                    intervals.remove(i);
+                }
             }
-            if let Some(interval)=intervals.iter_mut().find(|s|s.story==story && s.dir==dir) {
+            if let Some(interval) = intervals
+                .iter_mut()
+                .find(|s| s.story == story && s.dir == dir)
+            {
                 ui.label("開始 [mm]");
                 ui.add(egui::DragValue::new(&mut interval.interval_mm[0]).speed(0.1));
                 ui.label("終了 [mm]");
@@ -986,4 +1004,108 @@ pub(crate) fn lumped_fit_interval_editor(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod lumped_fit_gui_tests {
+    use super::*;
+    use sepika_core::ids::StoryId;
+    use sepika_core::model::{LumpedSkeletonInterval, LumpedVibrationDir};
+
+    fn text_position(shape: &egui::Shape, predicate: &dyn Fn(&str) -> bool) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(t) if predicate(t.galley.text()) => {
+                Some(t.visual_bounding_rect().center())
+            }
+            egui::Shape::Vec(v) => v.iter().find_map(|s| text_position(s, predicate)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn production_interval_editor_changes_only_selected_story_and_direction_by_events() {
+        let ctx = egui::Context::default();
+        crate::app::install_japanese_fonts(&ctx);
+        let untouched = LumpedSkeletonInterval {
+            story: StoryId(1),
+            dir: LumpedVibrationDir::Y,
+            interval_mm: [1.0, 2.0],
+        };
+        let mut intervals = vec![untouched];
+        let frame = |intervals: &mut Vec<LumpedSkeletonInterval>, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    lumped_fit_interval_editor(
+                        ui,
+                        intervals,
+                        StoryId(0),
+                        "1F",
+                        LumpedVibrationDir::X,
+                        10.0,
+                    );
+                },
+            )
+        };
+        let locate = |out: &egui::FullOutput, predicate: &dyn Fn(&str) -> bool| {
+            out.shapes
+                .iter()
+                .find_map(|s| text_position(&s.shape, predicate))
+                .expect("本番UIの入力が描画される")
+        };
+        frame(&mut intervals, vec![]);
+        let out = frame(&mut intervals, vec![]);
+        let pos = locate(&out, &|s| s == "1F / X 手動");
+        let click = |intervals: &mut Vec<LumpedSkeletonInterval>, pos| {
+            for pressed in [true, false] {
+                frame(
+                    intervals,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+        };
+        click(&mut intervals, pos);
+        assert_eq!(intervals.len(), 2);
+        assert_eq!(intervals[0], untouched);
+        let out = frame(&mut intervals, vec![]);
+        let value_pos = locate(&out, &|s| s.parse::<f64>().ok() == Some(10.0));
+        click(&mut intervals, value_pos);
+        click(&mut intervals, value_pos);
+        frame(
+            &mut intervals,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+                egui::Event::Text("12.5".into()),
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Default::default(),
+                },
+            ],
+        );
+        assert_eq!(intervals[1].interval_mm[0], 12.5);
+        assert_eq!(intervals[0], untouched);
+        let out = frame(&mut intervals, vec![]);
+        click(&mut intervals, locate(&out, &|s| s == "1F / X 手動"));
+        assert_eq!(intervals, vec![untouched]);
+    }
 }

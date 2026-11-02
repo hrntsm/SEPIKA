@@ -587,8 +587,8 @@ fn 質点系solverもダンパー編集後の古い動的質量を拒否する()
                 generate_stories_with_opts(&model, &[], true, method).unwrap()
             };
             apply_stories(&mut model, gen, method);
-            let valid = build_lumped_mass_model(&model, &po, LumpedMassType::EquivalentShear)
-                .unwrap();
+            let valid =
+                build_lumped_mass_model(&model, &po, LumpedMassType::EquivalentShear).unwrap();
             assert!((valid.stories[0].mass - 4.0).abs() < 1e-10);
             for case in 0..8 {
                 let mut edited = model.clone();
@@ -615,9 +615,8 @@ fn 質点系solverもダンパー編集後の古い動的質量を拒否する()
                     }
                 }
                 let expected = edited.validate_damper_mass_placement().unwrap_err();
-                let error =
-                    build_lumped_mass_model(&edited, &po, LumpedMassType::EquivalentShear)
-                        .unwrap_err();
+                let error = build_lumped_mass_model(&edited, &po, LumpedMassType::EquivalentShear)
+                    .unwrap_err();
                 assert!(matches!(error, SolveError::InvalidInput(_)));
                 assert_eq!(error.to_string(), expected);
             }
