@@ -178,6 +178,9 @@ fn begin_material_cell_edit(
 ) {
     let id =
         super::materials::material_cell_id(material_id, field, app.ui.scoped.material_id_revision);
+    begin_material_text_edit(ctx, app, id, text);
+}
+fn begin_material_text_edit(ctx: &egui::Context, app: &mut App, id: egui::Id, text: &str) {
     frame(ctx, app, true, vec![]);
     let resp = ctx.read_response(id).expect("実材料TextEdit");
     let pos = resp.rect.center();
@@ -234,6 +237,260 @@ fn begin_material_cell_edit(
 fn edit_cell(ctx: &egui::Context, app: &mut App, field: sepika_edit::MaterialField, text: &str) {
     begin_cell_edit(ctx, app, field, text);
     lose_focus(ctx, app);
+}
+
+fn material_name_id(app: &App, id: u32) -> egui::Id {
+    super::materials::material_name_id(app, sepika_core::ids::MaterialId(id))
+}
+
+fn assert_material_name_display(ctx: &egui::Context, app: &mut App, expected: &str) {
+    let out = frame(ctx, app, true, vec![]);
+    let rect = ctx.read_response(material_name_id(app, 0)).unwrap().rect;
+    assert!(out.shapes.iter().any(|shape| match &shape.shape {
+        egui::epaint::Shape::Text(text) => {
+            text.galley.job.text == expected && rect.intersects(text.visual_bounding_rect())
+        }
+        _ => false,
+    }));
+}
+
+#[test]
+fn issue998_name_draft_survives_frames_and_commits_with_history_and_save() {
+    use sepika_core::model::MaterialCategory;
+    for (category, key) in [
+        (MaterialCategory::Steel, Some(egui::Key::Enter)),
+        (MaterialCategory::Concrete, Some(egui::Key::Tab)),
+        (MaterialCategory::Rebar, None),
+    ] {
+        let ctx = egui::Context::default();
+        let mut app = App::default();
+        let mut model = crate::sample::portal_frame();
+        model.materials[0].category = category;
+        assert!(app.load_model(model));
+        frame(&ctx, &mut app, true, vec![]);
+        let before = snapshot(&app);
+        let original = app.core.model.materials[0].name.clone();
+        let id = material_name_id(&app, 0);
+        begin_material_text_edit(&ctx, &mut app, id, "材料");
+        for _ in 0..3 {
+            assert_material_name_display(&ctx, &mut app, "材料");
+            assert_eq!(snapshot(&app), before);
+        }
+        frame(
+            &ctx,
+            &mut app,
+            true,
+            vec![egui::Event::Text("-改名".into())],
+        );
+        for _ in 0..3 {
+            assert_material_name_display(&ctx, &mut app, "材料-改名");
+            assert_eq!(snapshot(&app), before);
+        }
+        let path = std::env::temp_dir().join(format!(
+            "sepika-998-{}-{category:?}.ovika",
+            std::process::id()
+        ));
+        app.save_project_to(path.clone());
+        assert_eq!(
+            sepika_io::ovika::load_ovika(&path).unwrap().model.materials[0].name,
+            original
+        );
+        if let Some(key) = key {
+            frame(
+                &ctx,
+                &mut app,
+                true,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        } else {
+            lose_focus(&ctx, &mut app);
+        }
+        assert_eq!(app.core.model.materials[0].name, "材料-改名");
+        assert_eq!(app.core.scoped.undo.revision(), before.1 + 1);
+        assert!(app.core.scoped.staleness.unsaved_changes);
+        assert!(ctx.data(|d| d.get_temp::<String>(id)).is_none());
+        app.undo_action();
+        assert_eq!(app.core.model.materials[0].name, original);
+        assert_material_name_display(&ctx, &mut app, &original);
+        app.redo_action();
+        assert_material_name_display(&ctx, &mut app, "材料-改名");
+        app.save_project_to(path.clone());
+        let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        assert_eq!(saved.materials[0].name, "材料-改名");
+        assert!(app.load_model(saved));
+        assert_material_name_display(&ctx, &mut app, "材料-改名");
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn issue998_name_draft_does_not_cross_model_load_or_material_id_reassignment() {
+    use sepika_core::ids::MaterialId;
+    use sepika_edit::DeleteMaterial;
+    for delete in [None, Some(0), Some(1)] {
+        let ctx = egui::Context::default();
+        let mut app = App::default();
+        let mut model = sepika_core::Model::with_default_load_cases();
+        model.materials = crate::sample::portal_frame().materials;
+        model.materials.truncate(1);
+        let mut second = model.materials[0].clone();
+        second.id = MaterialId(1);
+        second.name = "別材料".into();
+        model.materials.push(second);
+        assert!(app.load_model(model.clone()));
+        let id = material_name_id(&app, 1);
+        begin_material_text_edit(&ctx, &mut app, id, "未確定");
+        if let Some(deleted) = delete {
+            assert!(app.apply_model_edit(Box::new(DeleteMaterial {
+                id: MaterialId(deleted)
+            })));
+        } else {
+            model.materials[1].name = "読込後".into();
+            assert!(app.load_model(model));
+        }
+        let before = snapshot(&app);
+        lose_focus(&ctx, &mut app);
+        frame(&ctx, &mut app, true, vec![]);
+        assert_eq!(snapshot(&app), before);
+        assert!(app.core.model.materials.iter().all(|m| m.name != "未確定"));
+        if delete.is_some() {
+            app.undo_action();
+            frame(&ctx, &mut app, true, vec![]);
+            let before = snapshot(&app);
+            lose_focus(&ctx, &mut app);
+            assert_eq!(snapshot(&app), before);
+            assert_eq!(app.core.model.materials[1].name, "別材料");
+            app.redo_action();
+            frame(&ctx, &mut app, true, vec![]);
+            assert!(app.core.model.materials.iter().all(|m| m.name != "未確定"));
+        } else {
+            assert!(ctx.data(|d| d.get_temp::<String>(id)).is_none());
+            assert_eq!(app.core.model.materials[1].name, "読込後");
+            let id = material_name_id(&app, 0);
+            begin_material_text_edit(&ctx, &mut app, id, "新規前");
+            assert!(app.load_model(sepika_core::Model::with_default_load_cases()));
+            frame(&ctx, &mut app, true, vec![]);
+            assert!(ctx.data(|d| d.get_temp::<String>(id)).is_none());
+            assert!(app.core.model.materials.is_empty());
+        }
+    }
+}
+
+#[test]
+fn issue998_name_and_numeric_drafts_commit_independently() {
+    use sepika_edit::MaterialField::Fy;
+    let ctx = egui::Context::default();
+    let mut app = App::default();
+    assert!(app.load_model(crate::sample::portal_frame()));
+    let original_fy = app.core.model.materials[0].fy;
+    begin_cell_edit(&ctx, &mut app, Fy, "NaN");
+    lose_focus(&ctx, &mut app);
+    let id = material_name_id(&app, 0);
+    begin_material_text_edit(&ctx, &mut app, id, "SN400B-改名");
+    lose_focus(&ctx, &mut app);
+    assert_eq!(app.core.model.materials[0].name, "SN400B-改名");
+    assert_eq!(app.core.model.materials[0].fy, original_fy);
+    let fy_id = super::materials::material_cell_id(
+        sepika_core::ids::MaterialId(0),
+        Fy,
+        app.ui.scoped.material_id_revision,
+    );
+    assert_eq!(
+        ctx.data(|d| d.get_temp::<String>(fy_id)).as_deref(),
+        Some("NaN")
+    );
+    edit_cell(&ctx, &mut app, Fy, "236");
+    assert_eq!(app.core.model.materials[0].fy, Some(236.0));
+    assert_eq!(app.core.model.materials[0].name, "SN400B-改名");
+}
+
+#[test]
+fn issue998_name_draft_is_owned_by_the_active_study() {
+    use crate::app::study::Location;
+    let ctx = egui::Context::default();
+    let mut app = App::default();
+    assert!(app.load_model(crate::sample::portal_frame()));
+    let study = app.create_study("材料名入力".into(), vec![]).unwrap();
+    let comparison = app.create_comparison(study, "案A".into()).unwrap();
+    let main_name = app.core.model.materials[0].name.clone();
+    let main_id = material_name_id(&app, 0);
+    begin_material_text_edit(&ctx, &mut app, main_id, "本案の未確定名");
+    app.switch_study(Location::Proposal(study, comparison))
+        .unwrap();
+    let proposal_id = material_name_id(&app, 0);
+    assert_ne!(main_id, proposal_id);
+    assert_material_name_display(&ctx, &mut app, &main_name);
+    begin_material_text_edit(&ctx, &mut app, proposal_id, "比較案の未確定名");
+    app.switch_study(Location::Main).unwrap();
+    let before = snapshot(&app);
+    lose_focus(&ctx, &mut app);
+    assert_eq!(snapshot(&app), before);
+    assert_material_name_display(&ctx, &mut app, &main_name);
+    assert_eq!(app.core.model.materials[0].name, main_name);
+    app.switch_study(Location::Proposal(study, comparison))
+        .unwrap();
+    assert_eq!(app.core.model.materials[0].name, main_name);
+    assert_material_name_display(&ctx, &mut app, "比較案の未確定名");
+    app.switch_study(Location::Main).unwrap();
+    assert_eq!(app.core.model.materials[0].name, main_name);
+    begin_material_text_edit(&ctx, &mut app, main_id, "本案で確定");
+    lose_focus(&ctx, &mut app);
+    assert_eq!(app.core.model.materials[0].name, "本案で確定");
+    app.switch_study(Location::Proposal(study, comparison))
+        .unwrap();
+    assert_eq!(app.core.model.materials[0].name, main_name);
+}
+
+#[test]
+fn issue998_name_draft_survives_scrolling_out_of_visible_rows() {
+    use sepika_core::ids::MaterialId;
+    let ctx = egui::Context::default();
+    let mut app = App::default();
+    let mut model = sepika_core::Model::with_default_load_cases();
+    let material = crate::sample::portal_frame().materials[0].clone();
+    for index in 0..100 {
+        let mut material = material.clone();
+        material.id = MaterialId(index);
+        material.name = format!("材料{index}");
+        model.materials.push(material);
+    }
+    assert!(app.load_model(model));
+    let id = material_name_id(&app, 0);
+    begin_material_text_edit(&ctx, &mut app, id, "スクロール途中");
+    let before = snapshot(&app);
+    let pos = ctx.read_response(id).unwrap().rect.center();
+    let scroll = |delta| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, delta),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ]
+    };
+    frame(&ctx, &mut app, true, scroll(-2000.0));
+    for _ in 0..30 {
+        frame(&ctx, &mut app, true, vec![]);
+    }
+    assert!(ctx.read_response(id).is_none());
+    assert_eq!(snapshot(&app), before);
+    frame(&ctx, &mut app, true, scroll(2000.0));
+    for _ in 0..30 {
+        frame(&ctx, &mut app, true, vec![]);
+    }
+    assert_material_name_display(&ctx, &mut app, "スクロール途中");
+    assert_eq!(snapshot(&app), before);
+    begin_material_text_edit(&ctx, &mut app, id, "スクロール後に確定");
+    lose_focus(&ctx, &mut app);
+    assert_eq!(app.core.model.materials[0].name, "スクロール後に確定");
 }
 #[test]
 fn issue546_real_node_add_matrix_preserves_redo_results_and_draft() {
