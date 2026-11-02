@@ -3,17 +3,38 @@
 use super::*;
 use sepika_core::ids::*;
 
-/// 部材の付帯情報（`MemberDetailAttr`）を追加/更新する。`attr.elem` に一致する
-/// 既存エントリがあれば置換し、なければ末尾に追加する。逆操作は変更前の状態への
-/// 復元（既存エントリの置換なら変更前の `MemberDetailAttr` で
-/// [`SetMemberDetailAttr`] を再実行、新規追加なら [`RemoveMemberDetailAttr`]
-/// で取り消す）。[`SetSteelDesignAttr`](crate::SetSteelDesignAttr) と同じパターン。
+/// 部材の付帯情報を追加・更新する。寸法・継手位置の単位は mm。
+/// ハンチ寸法・継手位置に非有限値があれば、理由付きで拒否しモデルを変更しない。
+/// 対象部材が存在しない場合は何も変更しない。
 pub struct SetMemberDetailAttr {
     pub attr: sepika_core::model::MemberDetailAttr,
 }
 
 impl EditCommand for SetMemberDetailAttr {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        for (end, haunch) in [("i端", &self.attr.haunch_i), ("j端", &self.attr.haunch_j)] {
+            if let Some(haunch) = haunch {
+                for (label, value) in [
+                    ("ハンチ長", haunch.length),
+                    ("せい増分", haunch.depth_increase),
+                    ("幅増分", haunch.width_increase),
+                ] {
+                    if !value.is_finite() {
+                        return Box::new(RejectedEdit(format!(
+                            "{end}{label}は有限の値で入力してください"
+                        )));
+                    }
+                }
+            }
+        }
+        if self
+            .attr
+            .joints
+            .iter()
+            .any(|joint| !joint.distance.is_finite())
+        {
+            return Box::new(RejectedEdit("継手位置は有限の値で入力してください".into()));
+        }
         if !crate::refs::elem_exists(model, self.attr.elem) {
             return Box::new(Noop);
         }
