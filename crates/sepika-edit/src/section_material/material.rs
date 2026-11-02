@@ -243,17 +243,10 @@ impl EditCommand for SetMaterialName {
         if idx >= model.materials.len() || model.materials[idx].id != self.id {
             return Box::new(Noop);
         }
-        let strength_input = model.stb_strengths.clone();
-        let strength_stories = model.source_stories.clone();
         let old = std::mem::replace(&mut model.materials[idx].name, self.name.clone());
-        // 材料名は表示名。元の標準強度指定と数値を変更しない。
-        Box::new(crate::strength::RestoreStrengthInput {
-            input: strength_input,
-            stories: strength_stories,
-            inverse: Box::new(SetMaterialName {
-                id: self.id,
-                name: old,
-            }),
+        Box::new(SetMaterialName {
+            id: self.id,
+            name: old,
         })
     }
 

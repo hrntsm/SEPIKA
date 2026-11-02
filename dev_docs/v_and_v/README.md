@@ -494,7 +494,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [床板の同期物理質量_Issue583_2026-10.md](床板の同期物理質量_Issue583_2026-10.md) | 両形状・材料由来physical・同期置換・仕上LL/先端保持・STB優先・層モデル・Undo/鮮度 | 🔶（直接Verification、最終head全CI・freshレビュー後続、実験未） |
 | [鋼床板の高密度防護_Issue581_2026-10.md](鋼床板の高密度防護_Issue581_2026-10.md) | 囲み/取付き・境界・設計拒否/LL・STB優先・共通準備/GUI/MCP | 🔶（床板階physical質量は別課題#583、最終headゲート未完） |
 | [参照鋼の高密度防護_Issue501_2026-10.md](参照鋼の高密度防護_Issue501_2026-10.md) | 境界/単位・参照対象・設計拒否/物理許可・共通準備/旧Auto失効・GUI/MCP/Undo | 🔶（同コード公開全構成成功、最終headゲート後続。CFTは柱専用、実験Validationは対象外） |
-| [標準強度_Issue520_2026-10.md](標準強度_Issue520_2026-10.md) | 標準2.0.2強度の元省略・優先解決・径別/部位別・編集/保存/出力 | ✅（Scope内強度Verification、全相互運用/Validationは未対応） |
+| [標準強度_Issue520_2026-10.md](標準強度_Issue520_2026-10.md) | 標準2.0.2強度の元省略・優先解決・径別/部位別・編集/保存/出力。名称編集のUndo/Redoで元強度・原階入力を保持 | ✅（Scope内強度Verification、全相互運用/Validationは未対応） |
 | [割当領域同一性_Issue506_2026-10.md](割当領域同一性_Issue506_2026-10.md) | 支持 ID/span・版と入力荷重の保持、孤立版診断、確認付き編集と原子的拒否・Undo/Redo | ✅（Scope内の状態契約Verification。力学・描画Validationは対象外） |
 | [地震重量の鮮度と共通準備_Issue439_2026-10.md](地震重量の鮮度と共通準備_Issue439_2026-10.md) | 入力/生成出力一致・GUI/MCP実EX・atomic失敗・Modal世代・Undo/保存・追加/挿入階マスター一意・公開編集ID/Undo | 🔶（入口Verification、#486適用制限と実測Validationは残る） |
 | [荷重状態と検定対象_Issue487_2026-10.md](荷重状態と検定対象_Issue487_2026-10.md) | 荷重状態・用途別P・選択重力参照・GUI/MCP・組合せ非保存/単独結果保護・CSV・小梁床長期略算/選択短期未検定 | 🔶（Verification、現行法原文再取得・Validation未） |

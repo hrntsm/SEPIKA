@@ -2221,6 +2221,16 @@ fn stb_strength_native_name_and_numeric_edits_keep_grade_value_consistent() {
             name: "Fc99".into()
         })
     ));
+    assert_eq!(model.materials[id.index()].name, "Fc99");
+    assert_eq!(model.stb_strengths, initial.stb_strengths);
+    assert_eq!(model.source_stories, initial.source_stories);
+    assert_eq!(model.materials[id.index()].fc, Some(36.));
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&initial));
+    undo.redo(&mut model);
+    assert_eq!(model.materials[id.index()].name, "Fc99");
+    assert_eq!(model.stb_strengths, initial.stb_strengths);
+    assert_eq!(model.source_stories, initial.source_stories);
     let resolved = model
         .resolve_stb_concrete(&model.stb_strengths.members[0])
         .unwrap();
