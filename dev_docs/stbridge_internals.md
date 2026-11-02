@@ -14,6 +14,12 @@
 
 原階・構造節点の初回編集時のID確保とUndoは `crates/sepika-core/src/model/`、標準強度の参照と再採番は同ディレクトリの `strength.rs`、出力は `crates/sepika-io/src/stbridge/strength_export.rs` を参照します。
 
+## 出力組み立ての調査入口
+
+`section_std.rs::standard_sections` が断面用途別のID写像と出力順を決め、保存済みの断面強度・配筋は同関数の `preserve_strength` から `strength_export.rs::section` へ渡します。配筋の書式生成関数はXML文字列を返し、必須値・段数の拒否と用途によるフォールバック通知は `standard_sections` が扱います。
+
+部材コンテナの固定順と空要素の省略、柱の節点と端条件の対応は `export.rs::members_body` を参照します。鉄筋のnative物性の出力可否判定では、解決できた値を一度取得して標準gradeと比較し、この段階の未解決値は判定をスキップします。
+
 ## 属性報告の内部契約
 
 `ImportReport.attributes` は `AttrDisposition` の要素名・属性名ごとの出現件数と取込件数を持ちます。`dropped_attributes()` は取込件数0の属性を返し、属性の未取り込みは `warnings` ではなく属性集計とログへ出します。パーサの属性参照に連動して記録するため、無視リストは設けません。
