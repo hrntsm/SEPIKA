@@ -863,7 +863,7 @@ fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     );
     let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
 
-    for version in [23, 24, 29, 47, DESIGN_CONTRACT_VERSION - 1] {
+    for version in [23, 24, 29, 46, 47, DESIGN_CONTRACT_VERSION - 1] {
         let (mut loaded, path) = restore(
             &app,
             None,
@@ -2797,4 +2797,91 @@ fn misc740_旧解析契約63の通常応力をrs評価結果として再採用�
     assert!(loaded.core.scoped.staleness.results_stale);
     assert!(loaded.core.scoped.last_static.is_none());
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn secondary_beam_invalid_section_clears_previous_design_with_reason() {
+    for (field, expected) in [("depth", "断面せい"), ("iy", "断面二次モーメント")] {
+        for value in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut app = direct_secondary_beam_app();
+            app.run_design_check();
+            assert!(app.current_design_results().is_some());
+            let section_id = app.core.model.beams().next().unwrap().section.unwrap();
+            let section = &mut app.core.model.sections[section_id.index()];
+            match field {
+                "depth" => section.depth = value,
+                "iy" => section.iy = value,
+                _ => unreachable!(),
+            }
+            app.run_design_check();
+            let error = app.core.scoped.last_error.as_deref().unwrap();
+            assert!(
+                error.contains("小梁 0") && error.contains(expected),
+                "{error}"
+            );
+            let bundle = app.core.scoped.results.as_ref().unwrap();
+            assert!(bundle.beam_checks.is_empty() && bundle.slab_checks.is_empty());
+            assert_eq!(bundle.design_contract_version, None);
+            assert!(app.core.scoped.staleness.design_stale);
+            assert!(app.current_design_results().is_none());
+        }
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn secondary_beam_design_button_event_rejects_invalid_section() {
+    let mut app = direct_secondary_beam_app();
+    app.run_design_check();
+    assert!(app.current_design_results().is_some());
+    let section_id = app.core.model.beams().next().unwrap().section.unwrap();
+    app.core.model.sections[section_id.index()].iy = 0.0;
+    let context = egui::Context::default();
+    let render = |app: &mut App, events| {
+        context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(4000.0, 4000.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| crate::design_view::design_table(ui, app),
+        )
+    };
+    let output = render(&mut app, vec![]);
+    let pointer = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "検定を再実行" => {
+                Some(text.pos + text.galley.size() / 2.0)
+            }
+            _ => None,
+        })
+        .expect("本番の検定ボタン");
+    for pressed in [true, false] {
+        render(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(pointer),
+                egui::Event::PointerButton {
+                    pos: pointer,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+    }
+    let error = app.core.scoped.last_error.as_deref().unwrap();
+    assert!(
+        error.contains("小梁 0") && error.contains("断面二次モーメント"),
+        "{error}"
+    );
+    assert!(app.current_design_results().is_none());
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert!(bundle.beam_checks.is_empty() && bundle.slab_checks.is_empty());
+    assert_eq!(bundle.design_contract_version, None);
 }
