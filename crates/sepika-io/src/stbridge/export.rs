@@ -119,19 +119,17 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     }
     for section in &model.stb_strengths.sections {
         for bar in &section.reinforcement {
-            if model
-                .resolve_stb_rebar(bar)
-                .is_ok_and(|r| r.native_override)
-            {
-                let resolved = model.resolve_stb_rebar(bar).map_err(StbError::Unmappable)?;
-                if sepika_core::standard_material::rebar_grade_strength(&resolved.grade)
+            let Ok(resolved) = model.resolve_stb_rebar(bar) else {
+                continue;
+            };
+            if resolved.native_override
+                && sepika_core::standard_material::rebar_grade_strength(&resolved.grade)
                     != Some(resolved.value)
-                {
-                    return Err(StbError::Unmappable(format!(
-                        "断面 {} のnative鉄筋物性を標準grade {} で表現できません",
-                        section.section.0, resolved.grade
-                    )));
-                }
+            {
+                return Err(StbError::Unmappable(format!(
+                    "断面 {} のnative鉄筋物性を標準grade {} で表現できません",
+                    section.section.0, resolved.grade
+                )));
             }
         }
     }
@@ -276,14 +274,12 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
         s.push_str(
             "  <StbCommon project_name=\"SEPIKA\" app_name=\"SEPIKA\" app_version=\"0.0.1\">\n",
         );
-        if !apply_conditions.is_empty() {
-            s.push_str("    <StbApplyConditionsList>\n");
-            for condition in &apply_conditions {
-                s.push_str(&super::strength_export::raw_element(condition));
-                s.push('\n');
-            }
-            s.push_str("    </StbApplyConditionsList>\n");
+        s.push_str("    <StbApplyConditionsList>\n");
+        for condition in &apply_conditions {
+            s.push_str(&super::strength_export::raw_element(condition));
+            s.push('\n');
         }
+        s.push_str("    </StbApplyConditionsList>\n");
         s.push_str("  </StbCommon>\n");
     }
 
@@ -479,27 +475,16 @@ fn members_body(
                 let rot = rotate_of(e, n0.coord, n1.coord);
                 let ks = kind_structure(model, e);
                 if is_col {
-                    let (bot, top) = if model
+                    let (bot, top, cb, ct) = if model
                         .stb_strengths
                         .members
                         .iter()
                         .any(|m| m.target == StrengthTarget::Element(e.id))
                         || n0.coord[2] <= n1.coord[2]
                     {
-                        (e.nodes[0], e.nodes[1])
+                        (e.nodes[0], e.nodes[1], e.end_cond[0], e.end_cond[1])
                     } else {
-                        (e.nodes[1], e.nodes[0])
-                    };
-                    let (cb, ct) = if model
-                        .stb_strengths
-                        .members
-                        .iter()
-                        .any(|m| m.target == StrengthTarget::Element(e.id))
-                        || n0.coord[2] <= n1.coord[2]
-                    {
-                        (e.end_cond[0], e.end_cond[1])
-                    } else {
-                        (e.end_cond[1], e.end_cond[0])
+                        (e.nodes[1], e.nodes[0], e.end_cond[1], e.end_cond[0])
                     };
                     columns.push_str(&format!(
                         "        <StbColumn id=\"{}\" name=\"C{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
@@ -685,40 +670,18 @@ fn members_body(
     }
 
     let mut body = String::new();
-    if !columns.is_empty() {
-        body.push_str("      <StbColumns>\n");
-        body.push_str(&columns);
-        body.push_str("      </StbColumns>\n");
-    }
-    if !posts.is_empty() {
-        body.push_str("      <StbPosts>\n");
-        body.push_str(&posts);
-        body.push_str("      </StbPosts>\n");
-    }
-    if !girders.is_empty() {
-        body.push_str("      <StbGirders>\n");
-        body.push_str(&girders);
-        body.push_str("      </StbGirders>\n");
-    }
-    if !sec_beams.is_empty() {
-        body.push_str("      <StbBeams>\n");
-        body.push_str(&sec_beams);
-        body.push_str("      </StbBeams>\n");
-    }
-    if !braces.is_empty() {
-        body.push_str("      <StbBraces>\n");
-        body.push_str(&braces);
-        body.push_str("      </StbBraces>\n");
-    }
-    if !slabs.is_empty() {
-        body.push_str("      <StbSlabs>\n");
-        body.push_str(&slabs);
-        body.push_str("      </StbSlabs>\n");
-    }
-    if !walls.is_empty() {
-        body.push_str("      <StbWalls>\n");
-        body.push_str(&walls);
-        body.push_str("      </StbWalls>\n");
+    for (tag, content) in [
+        ("StbColumns", columns),
+        ("StbPosts", posts),
+        ("StbGirders", girders),
+        ("StbBeams", sec_beams),
+        ("StbBraces", braces),
+        ("StbSlabs", slabs),
+        ("StbWalls", walls),
+    ] {
+        if !content.is_empty() {
+            body.push_str(&format!("      <{tag}>\n{content}      </{tag}>\n"));
+        }
     }
     if !unexported_secondary_ids.is_empty() {
         return Err(StbError::SecondaryWithoutNode(format!(

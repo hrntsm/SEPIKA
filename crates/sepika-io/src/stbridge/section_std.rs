@@ -482,11 +482,7 @@ fn stage_ordinal(stage: u32) -> &'static str {
 /// 実配筋の梁（[`RcBeamRebar`]）を `StbSecBarBeam_RC_Same` の属性文字列へ整形する。
 /// 上端筋・下端筋を `N_main_top_*`/`N_main_bottom_*` の段別（最大 3 段）で書き出す。
 /// 標準段数を超える入力は出力入口で拒否する。
-fn beam_rebar_attrs(
-    r: &RcBeamRebar,
-    grades: BarGrades<'_>,
-    _sec_name: &str,
-) -> (String, Vec<String>) {
+fn beam_rebar_attrs(r: &RcBeamRebar, grades: BarGrades<'_>) -> String {
     let mut s = format!("D_main=\"{}\"", num(r.main_dia));
     for (i, n) in r.top.iter().take(3).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
@@ -514,17 +510,13 @@ fn beam_rebar_attrs(
     if let Some(g) = grades.main {
         s.push_str(&format!(" strength_main=\"{}\"", esc(g)));
     }
-    (s, Vec::new())
+    s
 }
 
 /// 実配筋の矩形柱（[`RcRectColumnRebar`]）を `StbSecBarColumn_RC_RectSame` の属性文字列へ
 /// 整形する。X 方向・Y 方向を `N_main_X_*`/`N_main_Y_*` の段別（最大 2 段）で書き出し、
 /// 帯筋の X/Y 脚数を別々に出す。標準段数は入口で検査する。
-fn rect_column_rebar_attrs(
-    r: &RcRectColumnRebar,
-    grades: BarGrades<'_>,
-    _sec_name: &str,
-) -> (String, Vec<String>) {
+fn rect_column_rebar_attrs(r: &RcRectColumnRebar, grades: BarGrades<'_>) -> String {
     let mut s = format!(
         "D_main=\"{}\" N_main_total=\"{}\"",
         num(r.main_dia),
@@ -557,7 +549,7 @@ fn rect_column_rebar_attrs(
     if let Some(g) = grades.main {
         s.push_str(&format!(" strength_main=\"{}\"", esc(g)));
     }
-    (s, Vec::new())
+    s
 }
 
 /// 実配筋の円形柱（[`RcCircleColumnRebar`]）を `StbSecBarColumn_RC_CircleSame` の属性文字列へ
@@ -605,65 +597,46 @@ fn cover_attr_column(cover: f64) -> String {
 
 /// RC 柱断面の配筋 `StbSecBarArrangementColumn_RC`（矩形/円形）。配筋のない形状は空文字。
 /// 標準段数は入口で検査する。
-fn rebar_arrangement_column(
-    shape: &SectionShape,
-    grades: BarGrades<'_>,
-    sec_name: &str,
-) -> (String, Vec<String>) {
-    let (child, cover, attrs, warnings) = match shape {
-        SectionShape::RcColumnRect { rebar, .. } => {
-            let (a, w) = rect_column_rebar_attrs(rebar, grades, sec_name);
-            (
-                "StbSecBarColumn_RC_RectSame",
-                rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
-                a,
-                w,
-            )
-        }
+fn rebar_arrangement_column(shape: &SectionShape, grades: BarGrades<'_>) -> String {
+    let (child, cover, attrs) = match shape {
+        SectionShape::RcColumnRect { rebar, .. } => (
+            "StbSecBarColumn_RC_RectSame",
+            rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
+            rect_column_rebar_attrs(rebar, grades),
+        ),
         SectionShape::RcColumnCircle { rebar, .. } => (
             "StbSecBarColumn_RC_CircleSame",
             rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
             circle_column_rebar_attrs(rebar, grades),
-            Vec::new(),
         ),
-        _ => return (String::new(), Vec::new()),
+        _ => return String::new(),
     };
-    (
-        format!(
-            "        <StbSecBarArrangementColumn_RC{}>\n\
+    format!(
+        "        <StbSecBarArrangementColumn_RC{}>\n\
              \x20         <{} {}/>\n\
              \x20       </StbSecBarArrangementColumn_RC>\n",
-            cover_attr_column(cover),
-            child,
-            attrs
-        ),
-        warnings,
+        cover_attr_column(cover),
+        child,
+        attrs
     )
 }
 
 /// RC 梁断面の配筋 `StbSecBarArrangementBeam_RC`（矩形）。配筋のない形状は空文字。
 /// 上端筋・下端筋の段別本数を書き出す。標準段数は入口で検査する。
-fn rebar_arrangement_beam(
-    shape: &SectionShape,
-    grades: BarGrades<'_>,
-    sec_name: &str,
-) -> (String, Vec<String>) {
-    let (cover, attrs, warnings) = match shape {
-        SectionShape::RcBeamRect { rebar, .. } => {
-            let (a, w) = beam_rebar_attrs(rebar, grades, sec_name);
-            (rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0, a, w)
-        }
-        _ => return (String::new(), Vec::new()),
+fn rebar_arrangement_beam(shape: &SectionShape, grades: BarGrades<'_>) -> String {
+    let (cover, attrs) = match shape {
+        SectionShape::RcBeamRect { rebar, .. } => (
+            rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0,
+            beam_rebar_attrs(rebar, grades),
+        ),
+        _ => return String::new(),
     };
-    (
-        format!(
-            "        <StbSecBarArrangementBeam_RC{}>\n\
+    format!(
+        "        <StbSecBarArrangementBeam_RC{}>\n\
              \x20         <StbSecBarBeam_RC_Same {}/>\n\
              \x20       </StbSecBarArrangementBeam_RC>\n",
-            cover_attr_beam(cover),
-            attrs
-        ),
-        warnings,
+        cover_attr_beam(cover),
+        attrs
     )
 }
 
@@ -676,25 +649,22 @@ fn rc_column(
     grades: BarGrades<'_>,
     figure_body: &str,
     id_mat: &str,
-) -> (String, Vec<String>) {
+) -> String {
     let id = sid(id);
-    let (rebar, warnings) = rebar_arrangement_column(shape, grades, &sec.name);
-    (
-        format!(
-            "      <StbSecColumn_RC id=\"{}\" name=\"{}\"{}{}>\n\
+    let rebar = rebar_arrangement_column(shape, grades);
+    format!(
+        "      <StbSecColumn_RC id=\"{}\" name=\"{}\"{}{}>\n\
              \x20       <StbSecFigureColumn_RC>\n\
              \x20         {}\n\
              \x20       </StbSecFigureColumn_RC>\n\
              {}\
              \x20     </StbSecColumn_RC>\n",
-            id,
-            esc(&sec.name),
-            floor_attr(sec),
-            id_mat,
-            figure_body,
-            rebar,
-        ),
-        warnings,
+        id,
+        esc(&sec.name),
+        floor_attr(sec),
+        id_mat,
+        figure_body,
+        rebar,
     )
 }
 
@@ -706,25 +676,22 @@ fn rc_beam(
     grades: BarGrades<'_>,
     figure_body: &str,
     id_mat: &str,
-) -> (String, Vec<String>) {
+) -> String {
     let id = sid(id);
-    let (rebar, warnings) = rebar_arrangement_beam(shape, grades, &sec.name);
-    (
-        format!(
-            "      <StbSecBeam_RC id=\"{}\" name=\"{}\"{}{}>\n\
+    let rebar = rebar_arrangement_beam(shape, grades);
+    format!(
+        "      <StbSecBeam_RC id=\"{}\" name=\"{}\"{}{}>\n\
              \x20       <StbSecFigureBeam_RC>\n\
              \x20         {}\n\
              \x20       </StbSecFigureBeam_RC>\n\
              {}\
              \x20     </StbSecBeam_RC>\n",
-            id,
-            esc(&sec.name),
-            floor_attr(sec),
-            id_mat,
-            figure_body,
-            rebar,
-        ),
-        warnings,
+        id,
+        esc(&sec.name),
+        floor_attr(sec),
+        id_mat,
+        figure_body,
+        rebar,
     )
 }
 
@@ -750,21 +717,18 @@ fn cft_figure(shape: &SectionShape, steel: &mut SteelLibrary) -> Option<String> 
 /// `strength_concrete` 属性、`steel_mat` は鋼管の `strength` 属性（いずれも空可）。
 fn cft_column(id: u32, sec: &Section, figure: &str, id_mat: &str, steel_mat: &str) -> String {
     let id = sid(id);
-    let xml = format!(
+    format!(
         "      <StbSecColumn_CFT id=\"{}\" name=\"{}\"{}{}>\n\
          \x20       <StbSecSteelFigureColumn_CFT>\n\
-         \x20         <StbSecSteelColumn_CFT_Same shape=\"{}\"/>\n\
+         \x20         <StbSecSteelColumn_CFT_Same shape=\"{}\"{}/>\n\
          \x20       </StbSecSteelFigureColumn_CFT>\n\
          \x20     </StbSecColumn_CFT>\n",
         id,
         esc(&sec.name),
         floor_attr(sec),
         id_mat,
-        esc(figure)
-    );
-    xml.replace(
-        &format!("shape=\"{}\"", esc(figure)),
-        &format!("shape=\"{}\"{}", esc(figure), steel_mat),
+        esc(figure),
+        steel_mat,
     )
 }
 
@@ -809,17 +773,15 @@ fn src_section(
     grades: BarGrades<'_>,
     steel_fig: &str,
     id_mat: &str,
-) -> (String, Vec<String>) {
-    let steel_grade = grades.steel.unwrap_or("");
+) -> String {
+    let grade = grades.steel.unwrap_or("");
     let (b, d) = match shape {
         SectionShape::SrcBeamRect { b, d, .. } | SectionShape::SrcColumnRect { b, d, .. } => {
             (*b, *d)
         }
-        _ => return (raw(id, sec), Vec::new()),
+        _ => return raw(id, sec),
     };
-    let (rebar_arrangement, warnings) =
-        rebar_arrangement_generic(shape, grades, is_beam, "SRC", &sec.name);
-    let grade = steel_grade.to_string();
+    let rebar_arrangement = rebar_arrangement_src(shape, grades, is_beam);
     let (elem, fig_wrap, fig_body, steel_wrap) = if is_beam {
         (
             "StbSecBeam_SRC",
@@ -849,9 +811,8 @@ fn src_section(
         "StbSecSteelColumn_SRC_Same"
     };
     let id = sid(id);
-    (
-        format!(
-            "      <{elem} id=\"{id}\" name=\"{name}\"{floor}{id_mat}>\n\
+    format!(
+        "      <{elem} id=\"{id}\" name=\"{name}\"{floor}{id_mat}>\n\
              \x20       <{fig_wrap}>\n\
              \x20         {fig_body}\n\
              \x20       </{fig_wrap}>\n\
@@ -860,57 +821,46 @@ fn src_section(
              {steel_reference}\n\
              \x20       </{steel_wrap}>\n\
              \x20     </{elem}>\n",
-            elem = elem,
-            id = id,
-            name = esc(&sec.name),
-            floor = floor_attr(sec),
-            id_mat = id_mat,
-            fig_wrap = fig_wrap,
-            fig_body = fig_body,
-            steel_wrap = steel_wrap,
-            steel_reference = if is_beam {
-                format!(
-                    "        <{steel_same} shape=\"{steel_fig}\" strength_main=\"{}\"/>",
-                    esc(&grade)
-                )
-            } else {
-                format!("        <{steel_same}><StbSecColumn_SRC_SameShapeH shape=\"{steel_fig}\" direction_type=\"H\" strength_main=\"{}\"/></{steel_same}>",esc(&grade))
-            },
-            rebar_arrangement = rebar_arrangement,
-        ),
-        warnings,
+        elem = elem,
+        id = id,
+        name = esc(&sec.name),
+        floor = floor_attr(sec),
+        id_mat = id_mat,
+        fig_wrap = fig_wrap,
+        fig_body = fig_body,
+        steel_wrap = steel_wrap,
+        steel_reference = if is_beam {
+            format!(
+                "        <{steel_same} shape=\"{steel_fig}\" strength_main=\"{}\"/>",
+                esc(grade)
+            )
+        } else {
+            format!("        <{steel_same}><StbSecColumn_SRC_SameShapeH shape=\"{steel_fig}\" direction_type=\"H\" strength_main=\"{}\"/></{steel_same}>",esc(grade))
+        },
+        rebar_arrangement = rebar_arrangement,
     )
 }
 
 /// SRC の配筋要素 `StbSecBarArrangement{Column,Beam}_SRC`。配筋のない形状は空文字。
-/// `kind` は要素名の中置（"SRC"）。実配筋型は段別本数を書き出す。標準段数は入口で検査する。
-fn rebar_arrangement_generic(
-    shape: &SectionShape,
-    grades: BarGrades<'_>,
-    is_beam: bool,
-    kind: &str,
-    sec_name: &str,
-) -> (String, Vec<String>) {
-    let (cover, attrs, warnings) = match shape {
-        SectionShape::SrcBeamRect { rebar, .. } => {
-            let (a, w) = beam_rebar_attrs(rebar, grades, sec_name);
-            (rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0, a, w)
-        }
-        SectionShape::SrcColumnRect { rebar, .. } => {
-            let (a, w) = rect_column_rebar_attrs(rebar, grades, sec_name);
-            (rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0, a, w)
-        }
-        _ => return (String::new(), Vec::new()),
+/// 実配筋型は段別本数を書き出す。標準段数は入口で検査する。
+fn rebar_arrangement_src(shape: &SectionShape, grades: BarGrades<'_>, is_beam: bool) -> String {
+    let (cover, attrs) = match shape {
+        SectionShape::SrcBeamRect { rebar, .. } => (
+            rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0,
+            beam_rebar_attrs(rebar, grades),
+        ),
+        SectionShape::SrcColumnRect { rebar, .. } => (
+            rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
+            rect_column_rebar_attrs(rebar, grades),
+        ),
+        _ => return String::new(),
     };
     let (wrap, child) = if is_beam {
-        (
-            format!("StbSecBarArrangementBeam_{kind}"),
-            format!("StbSecBarBeam_{kind}_Same"),
-        )
+        ("StbSecBarArrangementBeam_SRC", "StbSecBarBeam_SRC_Same")
     } else {
         (
-            format!("StbSecBarArrangementColumn_{kind}"),
-            format!("StbSecBarColumn_{kind}_RectSame"),
+            "StbSecBarArrangementColumn_SRC",
+            "StbSecBarColumn_SRC_RectSame",
         )
     };
     let cover_attr = if is_beam {
@@ -918,14 +868,11 @@ fn rebar_arrangement_generic(
     } else {
         cover_attr_column(cover)
     };
-    (
-        format!(
-            "        <{}{}>\n\
+    format!(
+        "        <{}{}>\n\
              \x20         <{} {}/>\n\
              \x20       </{}>\n",
-            wrap, cover_attr, child, attrs, wrap
-        ),
-        warnings,
+        wrap, cover_attr, child, attrs, wrap
     )
 }
 
@@ -1097,12 +1044,12 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
     };
 
     for sec in &model.sections {
-        let source = model
+        let strength_input = model
             .stb_strengths
             .sections
             .iter()
-            .find(|s| s.section == sec.id)
-            .and_then(|s| s.rebar.as_ref());
+            .find(|s| s.section == sec.id);
+        let source = strength_input.and_then(|s| s.rebar.as_ref());
         if let Some(raw) = source {
             raw.validate_standard().map_err(|reason| {
                 super::StbError::Unmappable(format!("断面 {}: {reason}", sec.id.0))
@@ -1113,13 +1060,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     sec.id.0
                 )));
             }
-        } else if model
-            .stb_strengths
-            .sections
-            .iter()
-            .find(|s| s.section == sec.id)
-            .is_none_or(|s| s.native_rebar || !s.reinforcement.is_empty())
-        {
+        } else if strength_input.is_none_or(|s| s.native_rebar || !s.reinforcement.is_empty()) {
             if let Some(shape) = &sec.shape {
                 let valid = match shape {
                     SectionShape::RcBeamRect { rebar, .. }
@@ -1214,17 +1155,9 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 None => {}
             }
         }
-        let need_col = used_col;
-        let need_beam = used_beam;
-        let need_brace = used_brace;
 
         let preserve_strength = |xml: String| -> Result<String, super::StbError> {
-            if let Some(input) = model
-                .stb_strengths
-                .sections
-                .iter()
-                .find(|s| s.section == sec.id)
-            {
+            if let Some(input) = strength_input {
                 super::strength_export::section(&xml, input)
             } else {
                 Ok(xml)
@@ -1233,23 +1166,23 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         let steel_fig = sec.shape.as_ref().and_then(steel_figure);
         if let Some((fig_name, fig_body)) = steel_fig {
             steel.add(&fig_name, fig_body);
-            if need_col {
+            if used_col {
                 parts.push((
                     1,
                     preserve_strength(steel_column(base, sec, &fig_name, &strength_attr(base)))?,
                 ));
                 col_map.insert(base, base);
             }
-            if need_beam {
-                let bid = if need_col { alloc() } else { base };
+            if used_beam {
+                let bid = if used_col { alloc() } else { base };
                 parts.push((
                     5,
                     preserve_strength(steel_beam(bid, sec, &fig_name, &strength_attr(base)))?,
                 ));
                 beam_map.insert(base, bid);
             }
-            if need_brace {
-                let bid = if need_col || need_beam { alloc() } else { base };
+            if used_brace {
+                let bid = if used_col || used_beam { alloc() } else { base };
                 parts.push((
                     7,
                     preserve_strength(steel_brace(bid, sec, &fig_name, &strength_attr(base)))?,
@@ -1264,7 +1197,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })
         ) {
             let shape = sec.shape.as_ref().unwrap();
-            if need_col {
+            if used_col {
                 let fig = cft_figure(shape, &mut steel).expect("CFT 図形");
                 parts.push((
                     3,
@@ -1278,7 +1211,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 ));
                 col_map.insert(base, base);
             }
-            if need_beam {
+            if used_beam {
                 let bid = if col_map.contains_key(&base) {
                     alloc()
                 } else {
@@ -1297,8 +1230,8 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             let shape = sec.shape.as_ref().unwrap();
             let steel_fig = src_steel_figure(shape, &mut steel).expect("SRC 内蔵鉄骨図形");
             let grades = bar_grades(model, sec);
-            if need_col {
-                let (xml, w) = src_section(
+            if used_col {
+                let xml = src_section(
                     base,
                     sec,
                     false,
@@ -1307,29 +1240,17 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     &steel_fig,
                     &id_mat_attr(base),
                 );
-                parts.push((
-                    2,
-                    if let Some(input) = model
-                        .stb_strengths
-                        .sections
-                        .iter()
-                        .find(|s| s.section.0 == base)
-                    {
-                        super::strength_export::section(&xml, input)?
-                    } else {
-                        xml
-                    },
-                ));
-                warnings.extend(w);
+                parts.push((2, preserve_strength(xml)?));
+
                 col_map.insert(base, base);
             }
-            if need_beam {
+            if used_beam {
                 let bid = if col_map.contains_key(&base) {
                     alloc()
                 } else {
                     base
                 };
-                let (xml, w) = src_section(
+                let xml = src_section(
                     bid,
                     sec,
                     true,
@@ -1338,20 +1259,8 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     &steel_fig,
                     &id_mat_attr(base),
                 );
-                parts.push((
-                    6,
-                    if let Some(input) = model
-                        .stb_strengths
-                        .sections
-                        .iter()
-                        .find(|s| s.section.0 == base)
-                    {
-                        super::strength_export::section(&xml, input)?
-                    } else {
-                        xml
-                    },
-                ));
-                warnings.extend(w);
+                parts.push((6, preserve_strength(xml)?));
+
                 beam_map.insert(base, bid);
             }
             continue;
@@ -1362,23 +1271,11 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         if rc_col_fig.is_some() || rc_beam_fig.is_some() {
             let shape = sec.shape.as_ref().expect("RC 図形がある＝shape は Some");
             let grades = bar_grades(model, sec);
-            if need_col {
+            if used_col {
                 if let Some(fig) = &rc_col_fig {
-                    let (xml, w) = rc_column(base, sec, shape, grades, fig, &id_mat_attr(base));
-                    parts.push((
-                        0,
-                        if let Some(input) = model
-                            .stb_strengths
-                            .sections
-                            .iter()
-                            .find(|s| s.section.0 == base)
-                        {
-                            super::strength_export::section(&xml, input)?
-                        } else {
-                            xml
-                        },
-                    ));
-                    warnings.extend(w);
+                    let xml = rc_column(base, sec, shape, grades, fig, &id_mat_attr(base));
+                    parts.push((0, preserve_strength(xml)?));
+
                     col_map.insert(base, base);
                 } else {
                     warnings.push(format!(
@@ -1390,28 +1287,16 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     col_map.insert(base, base);
                 }
             }
-            if need_beam {
+            if used_beam {
                 if let Some(fig) = &rc_beam_fig {
                     let bid = if col_map.contains_key(&base) {
                         alloc()
                     } else {
                         base
                     };
-                    let (xml, w) = rc_beam(bid, sec, shape, grades, fig, &id_mat_attr(base));
-                    parts.push((
-                        4,
-                        if let Some(input) = model
-                            .stb_strengths
-                            .sections
-                            .iter()
-                            .find(|s| s.section.0 == base)
-                        {
-                            super::strength_export::section(&xml, input)?
-                        } else {
-                            xml
-                        },
-                    ));
-                    warnings.extend(w);
+                    let xml = rc_beam(bid, sec, shape, grades, fig, &id_mat_attr(base));
+                    parts.push((4, preserve_strength(xml)?));
+
                     beam_map.insert(base, bid);
                 } else if matches!(shape, SectionShape::RcColumnCircle { .. }) {
                     let bid = if col_map.contains_key(&base) {
