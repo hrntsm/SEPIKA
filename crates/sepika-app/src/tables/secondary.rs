@@ -510,6 +510,9 @@ pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: Seco
             .cloned()
             .collect(),
     };
+    if kind == SecondaryMemberKind::Post {
+        post_design_inputs(app, ui, &members);
+    }
     let mut pending_end_support: Vec<(SecondaryMemberId, [EndSupport; 2])> = Vec::new();
     let mut pending_delete: Vec<SecondaryMemberId> = Vec::new();
     let owner_of = |app: &App, id: SecondaryMemberId| -> Option<String> {
@@ -620,6 +623,229 @@ pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: Seco
     if edited {
         app.clear_generated_member_selection();
         app.core.scoped.staleness.mark_edited();
+    }
+}
+
+fn optional_number(ui: &mut egui::Ui, label: &str, value: &mut Option<f64>, initial: f64) {
+    ui.horizontal(|ui| {
+        let mut enabled = value.is_some();
+        if ui.checkbox(&mut enabled, label).changed() {
+            *value = enabled.then_some(initial);
+        }
+        if let Some(v) = value {
+            ui.add(egui::DragValue::new(v).speed(1.0));
+        }
+    });
+}
+
+fn post_design_inputs(app: &mut App, ui: &mut egui::Ui, members: &[SecondaryMember]) {
+    use sepika_core::model::{
+        MemberLoadKind, PostDesignInput, PostLateralLoad, PostLateralSupport,
+    };
+    ui.label("間柱の独立検定条件（局部横荷重は主架構へ自動転送しません。端部反力を別途主架構へ考慮してください）");
+    for sm in members {
+        let mut input = app
+            .core
+            .model
+            .post_design_inputs
+            .iter()
+            .find(|i| i.member == sm.id)
+            .cloned()
+            .unwrap_or(PostDesignInput {
+                member: sm.id,
+                ..Default::default()
+            });
+        let old = input.clone();
+        let mut shares = sm.gravity_end_shares;
+        let mut save = false;
+        egui::CollapsingHeader::new(format!("{} SM{} 検定入力", sm.name, sm.id.0))
+            .id_salt(("post_design", sm.id.0))
+            .show(ui, |ui| {
+                ui.label("横支持は鉛直端部負担率・軸座屈長さ・横補剛とは独立です。");
+                ui.horizontal(|ui| {
+                    ui.label("横支持");
+                    ui.selectable_value(
+                        &mut input.lateral_support,
+                        PostLateralSupport::Pinned,
+                        "両端ピン",
+                    );
+                    ui.selectable_value(
+                        &mut input.lateral_support,
+                        PostLateralSupport::FixedStart,
+                        "始端固定・終端自由",
+                    );
+                    ui.selectable_value(
+                        &mut input.lateral_support,
+                        PostLateralSupport::FixedEnd,
+                        "始端自由・終端固定",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    let mut enabled = shares.is_some();
+                    if ui.checkbox(&mut enabled, "鉛直荷重の端部負担率").changed() {
+                        shares = enabled.then_some([1.0, 0.0]);
+                    }
+                    if let Some(v) = &mut shares {
+                        ui.label("始端");
+                        ui.add(egui::DragValue::new(&mut v[0]).speed(0.01));
+                        ui.label("終端");
+                        ui.add(egui::DragValue::new(&mut v[1]).speed(0.01));
+                        ui.label("合計1.0");
+                    }
+                });
+                optional_number(
+                    ui,
+                    "強軸曲げを生じる荷重方向角 [度、全体Xから反時計回り]",
+                    &mut input.strong_direction_deg,
+                    0.0,
+                );
+                ui.horizontal(|ui| {
+                    let mut enabled = input.buckling_lengths_mm.is_some();
+                    if ui.checkbox(&mut enabled, "軸圧縮座屈長さ [mm]").changed() {
+                        input.buckling_lengths_mm = enabled.then_some([3000.0, 3000.0]);
+                    }
+                    if let Some(v) = &mut input.buckling_lengths_mm {
+                        ui.label("強軸");
+                        ui.add(egui::DragValue::new(&mut v[0]));
+                        ui.label("弱軸");
+                        ui.add(egui::DragValue::new(&mut v[1]));
+                    }
+                });
+                optional_number(
+                    ui,
+                    "横補剛間隔 [mm]",
+                    &mut input.lateral_buckling_length_mm,
+                    3000.0,
+                );
+                optional_number(
+                    ui,
+                    "たわみ限界 L/分母（未指定は変位のみ）",
+                    &mut input.deflection_limit_denom,
+                    250.0,
+                );
+                ui.label("検定対象組合せと許容応力度の期間を明示してください。");
+                for (idx, combo) in app.core.model.combinations.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let mut selected = input.combinations.iter().any(|(i, _)| *i == idx);
+                        if ui.checkbox(&mut selected, &combo.name).changed() {
+                            input.combinations.retain(|(i, _)| *i != idx);
+                            if selected {
+                                input.combinations.push((idx, false));
+                            }
+                        }
+                        if let Some((_, short)) =
+                            input.combinations.iter_mut().find(|(i, _)| *i == idx)
+                        {
+                            ui.checkbox(short, "短期（解除=長期）");
+                        }
+                    });
+                }
+                ui.label("局部横荷重：入力は N・mm・N/mm。方向は全体XY水平面内の角度です。");
+                let span = app
+                    .core
+                    .model
+                    .secondary_member_axis(sm)
+                    .map(|(_, _, l)| l)
+                    .unwrap_or(3000.0);
+                let mut remove = None;
+                for (idx, load) in input.lateral_loads.iter_mut().enumerate() {
+                    ui.push_id(idx, |ui| {
+                        ui.horizontal(|ui| {
+                            egui::ComboBox::from_id_salt("case")
+                                .selected_text(
+                                    app.core
+                                        .model
+                                        .load_cases
+                                        .iter()
+                                        .find(|c| c.id == load.case)
+                                        .map(|c| c.name.as_str())
+                                        .unwrap_or("ケース未解決"),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for c in &app.core.model.load_cases {
+                                        ui.selectable_value(&mut load.case, c.id, &c.name);
+                                    }
+                                });
+                            let mut angle = load.direction[1].atan2(load.direction[0]).to_degrees();
+                            ui.label("方向角[度]");
+                            if ui.add(egui::DragValue::new(&mut angle)).changed() {
+                                load.direction =
+                                    [angle.to_radians().cos(), angle.to_radians().sin()];
+                            }
+                            if ui.button("荷重削除").clicked() {
+                                remove = Some(idx);
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            let mut point = matches!(load.load, MemberLoadKind::Point { .. });
+                            if ui.checkbox(&mut point, "集中荷重（解除=等分布）").changed()
+                            {
+                                load.load = if point {
+                                    MemberLoadKind::Point {
+                                        a: span / 2.0,
+                                        p: 0.0,
+                                    }
+                                } else {
+                                    MemberLoadKind::Distributed {
+                                        a: 0.0,
+                                        b: span,
+                                        w1: 0.0,
+                                        w2: 0.0,
+                                    }
+                                };
+                            }
+                            match &mut load.load {
+                                MemberLoadKind::Point { a, p } => {
+                                    ui.label("位置[mm]");
+                                    ui.add(egui::DragValue::new(a));
+                                    ui.label("荷重[N]");
+                                    ui.add(egui::DragValue::new(p));
+                                }
+                                MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                                    ui.label("始点[mm]");
+                                    ui.add(egui::DragValue::new(a));
+                                    ui.label("終点[mm]");
+                                    ui.add(egui::DragValue::new(b));
+                                    ui.label("強度[N/mm]");
+                                    if ui.add(egui::DragValue::new(w1).speed(0.1)).changed() {
+                                        *w2 = *w1;
+                                    }
+                                }
+                            }
+                        });
+                    });
+                }
+                if let Some(idx) = remove {
+                    input.lateral_loads.remove(idx);
+                }
+                if ui.button("局部横荷重を追加").clicked() {
+                    if let Some(c) = app.core.model.load_cases.first() {
+                        input.lateral_loads.push(PostLateralLoad {
+                            case: c.id,
+                            direction: [1.0, 0.0],
+                            load: MemberLoadKind::Distributed {
+                                a: 0.0,
+                                b: span,
+                                w1: 0.0,
+                                w2: 0.0,
+                            },
+                        });
+                    }
+                }
+                save = ui.button("間柱検定条件を保存").clicked();
+            });
+        if input != old || save {
+            app.apply_model_edit(Box::new(sepika_edit::SetPostDesignInput {
+                member: sm.id,
+                input: Some(input),
+            }));
+        }
+        if shares != sm.gravity_end_shares {
+            app.apply_model_edit(Box::new(sepika_edit::SetPostGravityEndShares {
+                member: sm.id,
+                shares,
+            }));
+        }
     }
 }
 

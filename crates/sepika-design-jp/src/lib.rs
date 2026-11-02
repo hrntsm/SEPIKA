@@ -156,6 +156,7 @@ pub struct SeismicQd {
 ///
 /// 許容応力度は [N/mm²] で与えられるため、応力算定は
 /// `σ = M[N·mm] / Z[mm³]` のように単位を N·mm 系で揃えること。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MemberForcesAt {
     pub pos: f64,
     pub n: f64,
@@ -215,7 +216,7 @@ pub struct CheckComponent {
 /// `components` は **必ず 1 件以上**（検定不能の退化ケースは
 /// [`CheckOutcome::Skipped`] で表現するため、`CheckResult` を返す時点で
 /// 検定式が確定している）。
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct CheckResult {
     pub basis: String,
     /// 全検定式に共通の数値根拠（断面諸元など）。式固有の情報は各
@@ -245,7 +246,7 @@ impl CheckResult {
 ///
 /// `Skipped` は「検定比 0・OK」という偽の安全側結果を排除するために導入した
 /// （表示側は未検定として扱い、検定比図・検定表のいずれでも NG 件数に含めない）。
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum CheckOutcome {
     Checked(CheckResult),
     /// 検定不能（理由の例: 「Fc 未設定」「配筋情報なし」「断面形状不一致」）。
@@ -548,3 +549,5 @@ pub fn checker_for(kind: sepika_core::structure_kind::StructureKind) -> Box<dyn 
 }
 
 pub mod wall_check;
+
+pub mod post;

@@ -180,6 +180,7 @@ pub(crate) fn compute_design_check_job(
         assemble_design_check_summary(&report, case, term, long_member_forces.is_some());
     summary["load_target"] = serde_json::json!({ "source": source, "combination_index": params.load_combination, "requested_case": lc_id.map(|id| id.0), "terms": terms, "gravity_reference_terms": gravity_terms, "state": state.as_ref().ok(), "diagnostic": load_error, "legal_conditions_verified": false });
     summary["floor_scope"] = serde_json::json!({ "selected_combination_checked": false, "long_term_approximation": "GUIの固定＋用途別積載の独立略算。MCPでは未実行" });
+    summary["secondary_post_scope"] = serde_json::json!({"checked":false,"reason":"鋼製間柱の独立検定はGUI専用です。MCPの主架構検定には含まれません"});
     if state.is_err() {
         summary["term"] = serde_json::Value::Null;
     }

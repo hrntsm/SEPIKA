@@ -21,6 +21,17 @@ fn radius(value: Option<f64>, limit: f64) -> Result<(), String> {
 }
 
 impl SectionShape {
+    /// 断面設定時の角形鋼管・角形CFTの角部外半径。未指定はエラー、明示0は許容する。
+    pub fn validate_corner_radius_input(&self) -> Result<(), String> {
+        if matches!(
+            self,
+            Self::SteelBox { corner_r: None, .. } | Self::CftBox { corner_r: None, .. }
+        ) {
+            return Err("角形断面の角部外半径（角R）が未設定です。実寸を入力してください。溶接組立BOXの直角は0を明示してください".into());
+        }
+        self.validate_surface_radius()
+    }
+
     /// 被覆用半径とその適用寸法を検証する。未知半径は保持を許容する。
     pub fn validate_surface_radius(&self) -> Result<(), String> {
         match *self {

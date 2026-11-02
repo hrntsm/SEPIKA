@@ -916,3 +916,55 @@ mod tests {
         assert!(model.unassigned_posts[0].is_detached());
     }
 }
+
+/// 間柱の独立検定に用いる横支持。端番号は二次部材の端点順。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PostLateralSupport {
+    #[default]
+    Pinned,
+    FixedStart,
+    FixedEnd,
+}
+
+/// 間柱検定専用の局部横荷重。主架構へは転送しない。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PostLateralLoad {
+    pub case: LoadCaseId,
+    /// 全体X/Y方向の単位ベクトル。
+    pub direction: [f64; 2],
+    /// 材軸始端からの位置 [mm]、集中荷重 [N]、分布荷重 [N/mm]。
+    pub load: MemberLoadKind,
+}
+
+/// 間柱の独立検定条件。未指定の設計長さ・向き・限界は未検定。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PostDesignInput {
+    pub member: SecondaryMemberId,
+    pub lateral_support: PostLateralSupport,
+    /// 強軸曲げを生じる横力方向の全体X軸からの角度 [度]。
+    pub strong_direction_deg: Option<f64>,
+    /// 強軸・弱軸の軸圧縮座屈長さ [mm]。
+    pub buckling_lengths_mm: Option<[f64; 2]>,
+    /// 圧縮フランジの横補剛間隔 [mm]。
+    pub lateral_buckling_length_mm: Option<f64>,
+    /// たわみ限界 L/分母。未指定は変位のみ算定。
+    pub deflection_limit_denom: Option<f64>,
+    pub lateral_loads: Vec<PostLateralLoad>,
+    /// 検定対象の保存荷重組合せと短期指定。falseは長期。
+    pub combinations: Vec<(usize, bool)>,
+}
+
+impl Default for PostDesignInput {
+    fn default() -> Self {
+        Self {
+            member: SecondaryMemberId(0),
+            lateral_support: PostLateralSupport::Pinned,
+            strong_direction_deg: None,
+            buckling_lengths_mm: None,
+            lateral_buckling_length_mm: None,
+            deflection_limit_denom: None,
+            lateral_loads: Vec::new(),
+            combinations: Vec::new(),
+        }
+    }
+}

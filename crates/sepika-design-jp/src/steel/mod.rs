@@ -16,6 +16,7 @@ mod brace;
 pub mod buckling;
 pub mod cold_formed;
 mod column;
+pub(crate) use column::column_allowables;
 pub mod lateral_bracing;
 mod lip_channel;
 pub mod panel_zone;

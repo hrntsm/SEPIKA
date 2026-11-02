@@ -200,7 +200,19 @@ pub fn secondary_self_weight_interval(
                     support
                         .section
                         .and_then(|id| model.sections.get(id.index())),
-                    [0.0, 0.0, 1.0],
+                    if support.kind == SecondaryMemberKind::Post {
+                        let angle = model
+                            .post_design_inputs
+                            .iter()
+                            .find(|i| i.member == id)
+                            .and_then(|i| i.strong_direction_deg)
+                            .filter(|v| v.is_finite())
+                            .ok_or_else(|| format!("支持間柱 {} の断面の向きが未設定です", id.0))?
+                            .to_radians();
+                        [angle.cos(), angle.sin(), 0.0]
+                    } else {
+                        [0.0, 0.0, 1.0]
+                    },
                 )
             }
         };
@@ -212,8 +224,7 @@ pub fn secondary_self_weight_interval(
         })?;
         let support_axis = axis_direction(sa, sb)?;
         let inward = vec3::scale(direction, if end == 0 { 1.0 } else { -1.0 });
-        let column = matches!(anchor.support, SupportMemberId::Primary(_))
-            && section.frame_use == Some(FrameSectionUse::Column);
+        let column = section.frame_use == Some(FrameSectionUse::Column);
         deductions[end] = if column {
             if sa[0] != sb[0] || sa[1] != sb[1] {
                 Err("傾斜柱の支持側面には対応していません".into())
@@ -322,7 +333,22 @@ pub fn wall_support_face(
                 .and_then(|id| model.sections.get(id.index()))
                 .ok_or("壁二次支持材の断面が未設定です")?;
             let axis = axis_direction(a, b)?;
-            let reference = if axis[2].abs() < 0.99 {
+            let reference = if e.kind == SecondaryMemberKind::Post {
+                if let Some(angle) = model
+                    .post_design_inputs
+                    .iter()
+                    .find(|i| i.member == id)
+                    .and_then(|i| i.strong_direction_deg)
+                {
+                    if !angle.is_finite() {
+                        return Err("支持間柱の断面の向きが不正です".into());
+                    }
+                    let theta = angle.to_radians();
+                    [theta.cos(), theta.sin(), 0.0]
+                } else {
+                    [1.0, 0.0, 0.0]
+                }
+            } else if axis[2].abs() < 0.99 {
                 [0.0, 0.0, 1.0]
             } else {
                 [1.0, 0.0, 0.0]

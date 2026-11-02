@@ -510,7 +510,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         ui.separator();
 
         let shape = build_shape(draft);
-        let rebar_validation = shape.validate_rebar().map_err(|e| e.to_string())
+        let rebar_validation = shape.validate_corner_radius_input().and_then(|()|shape.validate_rebar().map_err(|e| e.to_string()))
             .and_then(|()| shape.rounded_steel_properties().map(|_| ()));
         if let Err(error) = &rebar_validation {
             ui.colored_label(egui::Color32::RED, format!("断面入力エラー: {error}"));

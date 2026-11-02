@@ -27,6 +27,7 @@ mod fem;
 mod geometry;
 mod polygon;
 mod rect;
+pub mod response;
 mod types;
 
 pub use beam_design::{
