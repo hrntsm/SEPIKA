@@ -1119,6 +1119,9 @@ pub struct UiModelScoped {
     /// 材料IDの挿入・削除を反映したUndo revision。セルドラフトを別材料へ引き継がない。
     #[cfg(feature = "gui")]
     pub material_id_revision: u64,
+    /// 荷重ケース名称の編集中入力。モデル切替時に破棄する。
+    #[cfg(feature = "gui")]
+    pub(crate) load_case_name_draft: Option<crate::tables::loads::LoadCaseNameDraft>,
     /// モデル切替後、材料表の一時入力だけを初回描画で破棄する。
     #[cfg(feature = "gui")]
     pub reset_material_inputs: bool,
@@ -1272,6 +1275,8 @@ impl Default for UiModelScoped {
             nav: Navigator::default(),
             #[cfg(feature = "gui")]
             material_id_revision: 0,
+            #[cfg(feature = "gui")]
+            load_case_name_draft: None,
             #[cfg(feature = "gui")]
             reset_material_inputs: true,
             #[cfg(feature = "gui")]

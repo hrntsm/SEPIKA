@@ -19,6 +19,17 @@ const LOAD_CASE_KINDS: [LoadCaseKind; 7] = [
 
 use crate::app::load_case_kind_label;
 
+#[derive(Clone, Debug)]
+pub(crate) struct LoadCaseNameDraft {
+    id: LoadCaseId,
+    original: String,
+    text: String,
+}
+
+fn load_case_name_id(id: LoadCaseId) -> egui::Id {
+    egui::Id::new(("load_case_name", id.0))
+}
+
 pub fn loads_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::{self, Col};
 
@@ -48,13 +59,14 @@ pub fn loads_table(ui: &mut egui::Ui, app: &mut App) {
     let mut pending_name: Vec<(usize, String)> = Vec::new();
     let mut pending_kind: Vec<(LoadCaseId, LoadCaseKind)> = Vec::new();
     let mut pending_delete: Option<LoadCaseId> = None;
-    let mut name_bufs: Vec<String> = app
-        .core
-        .model
-        .load_cases
-        .iter()
-        .map(|lc| lc.name.clone())
-        .collect();
+    let name_draft = app.ui.scoped.load_case_name_draft.take().filter(|draft| {
+        app.core
+            .model
+            .load_cases
+            .iter()
+            .any(|lc| lc.id == draft.id && lc.name == draft.original)
+    });
+    let mut next_name_draft = name_draft.clone();
 
     table_util::standard_table(
         ui,
@@ -78,14 +90,36 @@ pub fn loads_table(ui: &mut egui::Ui, app: &mut App) {
                 }
             });
             row.col(|ui| {
-                if i < name_bufs.len() {
-                    let resp = table_util::cell_text_edit(ui, &mut name_bufs[i]);
-                    if resp.lost_focus() && resp.changed() {
-                        let trimmed = name_bufs[i].trim().to_string();
-                        if trimmed != lc.name && !trimmed.is_empty() {
-                            pending_name.push((i, trimmed));
-                        }
+                let mut text = name_draft
+                    .as_ref()
+                    .filter(|draft| draft.id == lc.id && draft.original == lc.name)
+                    .map_or_else(|| lc.name.clone(), |draft| draft.text.clone());
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut text)
+                        .id(load_case_name_id(lc.id))
+                        .desired_width(ui.available_width()),
+                );
+                crate::theme::focus_outline(ui, &response);
+                let cancelled = (response.has_focus() || response.lost_focus())
+                    && ui.input(|input| input.key_pressed(egui::Key::Escape));
+                let was_editing = name_draft.as_ref().is_some_and(|draft| draft.id == lc.id);
+                if (response.lost_focus() || (was_editing && !response.has_focus())) && !cancelled {
+                    let name = text.trim();
+                    if !name.is_empty() && name != lc.name {
+                        pending_name.push((i, name.to_owned()));
                     }
+                }
+                if response.has_focus() && !cancelled {
+                    next_name_draft = Some(LoadCaseNameDraft {
+                        id: lc.id,
+                        original: lc.name.clone(),
+                        text,
+                    });
+                } else if next_name_draft
+                    .as_ref()
+                    .is_some_and(|draft| draft.id == lc.id)
+                {
+                    next_name_draft = None;
                 }
             });
             row.col(|ui| {
@@ -125,6 +159,24 @@ pub fn loads_table(ui: &mut egui::Ui, app: &mut App) {
         },
     );
 
+    if let Some(draft) = &next_name_draft {
+        if !ui.memory(|memory| memory.has_focus(load_case_name_id(draft.id))) {
+            let name = draft.text.trim();
+            if !name.is_empty() && name != draft.original {
+                if let Some(index) = app
+                    .core
+                    .model
+                    .load_cases
+                    .iter()
+                    .position(|lc| lc.id == draft.id)
+                {
+                    pending_name.push((index, name.to_owned()));
+                }
+            }
+            next_name_draft = None;
+        }
+    }
+    app.ui.scoped.load_case_name_draft = next_name_draft;
     let had_name = !pending_name.is_empty() || !pending_kind.is_empty();
     for (i, name) in pending_name {
         let lc_id = LoadCaseId(app.core.model.load_cases[i].id.0);
@@ -624,3 +676,7 @@ fn combinations_section(ui: &mut egui::Ui, app: &mut App) {
         ui.colored_label(crate::theme::ERROR_RED, err);
     }
 }
+
+#[cfg(test)]
+#[path = "load_case_name_tests.rs"]
+mod load_case_name_tests;
