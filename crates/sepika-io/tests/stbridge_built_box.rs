@@ -1,5 +1,5 @@
 use sepika_core::{model::Model, section_shape::SectionShape};
-use sepika_io::stbridge::{import_stbridge, import_stbridge_with_report};
+use sepika_io::stbridge::{export_stbridge, import_stbridge, import_stbridge_with_report};
 
 const STEEL: &str = include_str!("fixtures/built_box_standard.stb");
 const CFT: &str = include_str!("fixtures/cft_standard_steel.stb");
@@ -277,6 +277,22 @@ fn same_symbol_and_floor_sections_keep_distinct_thicknesses_and_references_after
                 sepika_io::ovika::save_ovika(&file, &model, Default::default()).unwrap();
                 let loaded = sepika_io::ovika::load_ovika(&file).unwrap().model;
                 assert!(model.eq_ignoring_dofmap(&loaded));
+                let reimported = import_stbridge(&export_stbridge(&loaded).unwrap()).unwrap();
+                let roundtrip_thicknesses: Vec<_> = reimported
+                    .elements
+                    .iter()
+                    .map(|element| {
+                        reimported
+                            .section(element.section.unwrap())
+                            .unwrap()
+                            .shape
+                            .as_ref()
+                            .unwrap()
+                            .box_thicknesses()
+                            .unwrap()
+                    })
+                    .collect();
+                assert_eq!(roundtrip_thicknesses, thicknesses);
                 std::fs::remove_file(file).unwrap();
             }
             let (_, report) = import_stbridge_with_report(base).unwrap();
@@ -306,5 +322,175 @@ fn rolled_box_import_conditions_are_unchanged() {
                 ..
             })
         ));
+    }
+}
+
+#[test]
+fn built_box_standard_export_preserves_steel_and_cft_shapes_with_or_without_members() {
+    for (base, member, family) in [
+        (STEEL, "StbGirder", "StbSecBeam_S"),
+        (CFT, "StbColumn", "StbSecColumn_CFT"),
+    ] {
+        for t2 in ["6", "9", "12", "9.000000000000002"] {
+            let xml = dimension(base, "t2", Some(t2));
+            for mut model in both_imports(&xml) {
+                for unused in [false, true] {
+                    if unused {
+                        model.elements.clear();
+                    }
+                    let expected = model.sections[0].shape.clone();
+                    let exported = export_stbridge(&model).unwrap();
+                    assert!(exported.contains("<StbSecBuild-BOX "), "{exported}");
+                    assert!(exported.contains(&format!("<{family} ")), "{exported}");
+                    assert!(!exported.contains("<StbSecRoll-BOX "));
+                    assert!(!exported.contains("<StbSecRaw "));
+                    let loaded = import_stbridge(&exported).unwrap();
+                    assert_eq!(loaded.sections[0].shape, expected);
+                    assert_eq!(loaded.elements.len(), model.elements.len(), "{member}");
+                    assert_eq!(loaded.stb_strengths.sections[0].built_box, expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn built_box_provenance_survives_ovika_and_rejects_edited_geometry() {
+    for base in [STEEL, CFT] {
+        let model = import_stbridge(&dimension(base, "t2", Some("6"))).unwrap();
+        let file =
+            std::env::temp_dir().join(format!("sepika1056-box-{}.ovika", std::process::id()));
+        sepika_io::ovika::save_ovika(&file, &model, Default::default()).unwrap();
+        let loaded = sepika_io::ovika::load_ovika(&file).unwrap().model;
+        std::fs::remove_file(file).unwrap();
+        assert!(model.eq_ignoring_dofmap(&loaded));
+        assert_eq!(
+            import_stbridge(&export_stbridge(&loaded).unwrap())
+                .unwrap()
+                .sections[0]
+                .shape,
+            model.sections[0].shape
+        );
+        for (height, width, side, horizontal, radius) in [
+            (301.0, 200.0, 9.0, 6.0, Some(0.0)),
+            (300.0, 200.0, 9.0, 9.0, Some(12.0)),
+            (300.0, 200.0, 9.0, 6.0, None),
+            (0.0, 200.0, 9.0, 6.0, Some(0.0)),
+        ] {
+            let mut edited = loaded.clone();
+            let shape = edited.sections[0].shape.as_mut().unwrap();
+            match shape {
+                SectionShape::SteelBox {
+                    height: h,
+                    width: w,
+                    thick: t,
+                    horizontal_thick: t2,
+                    corner_r: r,
+                }
+                | SectionShape::CftBox {
+                    height: h,
+                    width: w,
+                    thick: t,
+                    horizontal_thick: t2,
+                    corner_r: r,
+                } => {
+                    *h = height;
+                    *w = width;
+                    *t = side;
+                    *t2 = horizontal;
+                    *r = radius;
+                }
+                _ => unreachable!(),
+            }
+            assert!(export_stbridge(&edited)
+                .unwrap_err()
+                .to_string()
+                .contains("原組立BOXと編集後形状が一致しません"));
+        }
+    }
+}
+
+#[test]
+fn rolled_box_export_still_requires_known_valid_positive_radius() {
+    for base in [STEEL, CFT] {
+        let rolled = base
+            .replace("StbSecBuild-BOX", "StbSecRoll-BOX")
+            .replace("t1=\"9\" t2=\"9\"", "t=\"9\"");
+        for (attr, accepted) in [("", false), (" r=\"0\"", false), (" r=\"12\"", true)] {
+            let xml = rolled.replace("t=\"9\"/>", &format!("t=\"9\"{attr}/>"));
+            let model = import_stbridge(&xml).unwrap();
+            assert!(model
+                .stb_strengths
+                .sections
+                .iter()
+                .all(|s| s.built_box.is_none()));
+            let result = export_stbridge(&model);
+            assert_eq!(result.is_ok(), accepted);
+            if accepted {
+                assert!(result.unwrap().contains("<StbSecRoll-BOX "));
+            } else {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("未知または0の半径"));
+            }
+        }
+        for radius in [Some(-1.0), Some(f64::NAN), Some(f64::INFINITY), Some(101.0)] {
+            let mut model = import_stbridge(&rolled).unwrap();
+            match model.sections[0].shape.as_mut().unwrap() {
+                SectionShape::SteelBox { corner_r, .. } | SectionShape::CftBox { corner_r, .. } => {
+                    *corner_r = radius
+                }
+                _ => unreachable!(),
+            }
+            assert!(export_stbridge(&model)
+                .unwrap_err()
+                .to_string()
+                .contains("半径が不正"));
+        }
+    }
+}
+
+#[test]
+fn invalid_built_box_dimensions_and_nonzero_radius_are_never_exported() {
+    for base in [STEEL, CFT] {
+        for (height, width, side, horizontal, radius, message) in [
+            (f64::INFINITY, 200.0, 9.0, 9.0, Some(0.0), "有限な正値"),
+            (300.0, 0.0, 9.0, 9.0, Some(0.0), "有限な正値"),
+            (300.0, 200.0, -1.0, 9.0, Some(0.0), "有限な正値"),
+            (300.0, 200.0, 9.0, 0.0, Some(0.0), "有限な正値"),
+            (300.0, 200.0, 100.0, 9.0, Some(0.0), "内法寸法"),
+            (300.0, 200.0, 9.0, 150.0, Some(0.0), "内法寸法"),
+            (300.0, 200.0, 9.0, 9.0, Some(12.0), "角R=0"),
+        ] {
+            let mut model = import_stbridge(base).unwrap();
+            let shape = model.sections[0].shape.as_mut().unwrap();
+            match shape {
+                SectionShape::SteelBox {
+                    height: h,
+                    width: w,
+                    thick: t1,
+                    horizontal_thick: t2,
+                    corner_r: r,
+                }
+                | SectionShape::CftBox {
+                    height: h,
+                    width: w,
+                    thick: t1,
+                    horizontal_thick: t2,
+                    corner_r: r,
+                } => {
+                    *h = height;
+                    *w = width;
+                    *t1 = side;
+                    *t2 = horizontal;
+                    *r = radius;
+                }
+                _ => unreachable!(),
+            }
+            model.stb_strengths.sections[0].built_box = Some(shape.clone());
+            let error = export_stbridge(&model).unwrap_err().to_string();
+            assert!(error.contains(message), "{error}");
+        }
     }
 }

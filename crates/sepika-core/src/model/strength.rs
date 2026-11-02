@@ -60,6 +60,9 @@ pub struct StbSteelStrength {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StbSectionStrength {
+    /// ST-Bridge組立BOXの原形状。現在形状と一致する間だけ製法の来歴として有効。
+    #[serde(default)]
+    pub built_box: Option<crate::section_shape::SectionShape>,
     #[serde(default)]
     pub native_rebar: bool,
     #[serde(default)]

@@ -14,6 +14,7 @@ pub(super) struct StrengthInputs {
     current_member: Option<usize>,
 }
 struct RawSection {
+    built_box: Option<sepika_core::section_shape::SectionShape>,
     key: SectionKey,
     bound: Option<SectionId>,
     concrete: Option<String>,
@@ -38,7 +39,11 @@ impl StrengthInputs {
         let (Some(a), Some(b)) = (source(a), source(b)) else {
             return false;
         };
-        a.concrete == b.concrete && a.bars == b.bars && a.rebar == b.rebar && a.steel == b.steel
+        a.concrete == b.concrete
+            && a.bars == b.bars
+            && a.rebar == b.rebar
+            && a.steel == b.steel
+            && a.built_box == b.built_box
     }
 
     pub(super) fn start(&mut self, tag: &str, a: &Attrs) -> Result<(), StbError> {
@@ -88,6 +93,7 @@ impl StrengthInputs {
             self.sections.push(RawSection {
                 key: section_key(tag, a)?,
                 bound: None,
+                built_box: None,
                 concrete: a.get("strength_concrete").cloned(),
                 bars: Vec::new(),
                 rebar: None,
@@ -261,6 +267,15 @@ impl StrengthInputs {
             }
         }
     }
+    pub(super) fn set_built_box(
+        &mut self,
+        key: SectionKey,
+        shape: Option<sepika_core::section_shape::SectionShape>,
+    ) {
+        if let Some(source) = self.sections.iter_mut().find(|s| s.key == key) {
+            source.built_box = shape;
+        }
+    }
     pub(super) fn bind_section(&mut self, key: SectionKey, target: SectionId) {
         for source in &mut self.sections {
             if source.key == key {
@@ -317,6 +332,7 @@ impl StrengthInputs {
                     .any(|s| s.section == section)
                 {
                     model.stb_strengths.sections.push(StbSectionStrength {
+                        built_box: source.built_box.clone(),
                         section,
                         native_rebar: false,
                         rebar: source.rebar.clone(),

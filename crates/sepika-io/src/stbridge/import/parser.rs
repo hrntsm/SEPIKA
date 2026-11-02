@@ -222,7 +222,7 @@ pub(super) struct StbParser {
     pub(super) pending_members: Vec<PendingMember>,
     pub(super) pending_secondaries: Vec<PendingSecondary>,
     /// 形鋼ライブラリ（形鋼名 → 断面形状）。
-    pub(super) steel_lib: HashMap<String, Result<SectionShape, String>>,
+    pub(super) steel_lib: HashMap<String, (bool, Result<SectionShape, String>)>,
     /// 現在パース中の標準断面要素。
     pub(super) cur: CurSec,
     pub(super) raw_slabs: Vec<RawSlab>,
@@ -763,7 +763,9 @@ impl StbParser {
                 || t == "StbSecPipe" =>
             {
                 if let (Some(nm), Some(shape)) = (a.get("name").cloned(), steel_shape_from(t, a)) {
-                    self.steel_lib.entry(nm).or_insert(shape);
+                    self.steel_lib
+                        .entry(nm)
+                        .or_insert((t == "StbSecBuild-BOX", shape));
                 }
             }
             "StbSecSlab_RC" | "StbSecSlabDeck" => {

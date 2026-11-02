@@ -1521,6 +1521,7 @@ mod tests {
             concrete: None,
         });
         model.stb_strengths.sections.push(StbSectionStrength {
+            built_box: None,
             section: SectionId(0),
             concrete: None,
             native_material: None,

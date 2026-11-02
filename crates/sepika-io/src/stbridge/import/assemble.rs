@@ -1416,7 +1416,7 @@ fn section_uses(
 fn build_sections(
     model: &mut Model,
     mut pending: Vec<PendingSec>,
-    steel_lib: &HashMap<String, Result<SectionShape, String>>,
+    steel_lib: &HashMap<String, (bool, Result<SectionShape, String>)>,
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
     section_uses: &HashMap<SectionKey, FrameSectionUse>,
@@ -1444,6 +1444,7 @@ fn build_sections(
             name.and_then(|name| steel_lib.get(name).map(|entry| (name, entry)))
                 .map(|(name, entry)| {
                     entry
+                        .1
                         .clone()
                         .map_err(|reason| section_error(&format!("形鋼「{name}」: {reason}")))
                 })
@@ -1458,6 +1459,13 @@ fn build_sections(
                 )));
             }
         }
+        let built_box = match &ps.kind {
+            PendingSecKind::SteelRef(name) | PendingSecKind::CftRef(name) => name
+                .as_ref()
+                .and_then(|n| steel_lib.get(n))
+                .is_some_and(|entry| entry.0),
+            _ => false,
+        };
         let shape = match ps.kind {
             PendingSecKind::Shape(shape) => shape,
             PendingSecKind::SteelRef(shape_name) => match resolve_steel(shape_name.as_deref())? {
@@ -1557,6 +1565,7 @@ fn build_sections(
                 }
             }
         };
+        strengths.set_built_box(file_id, built_box.then(|| shape.clone()));
         let mut section = shape
             .input_section(new_id, ps.name)
             .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;

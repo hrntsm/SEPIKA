@@ -193,6 +193,7 @@ pub fn moved_ends() -> SecondaryMemberEnds {
 
 pub fn with_stb_strengths(mut model: Model, id: SecondaryMemberId) -> Model {
     model.stb_strengths.sections.push(StbSectionStrength {
+        built_box: None,
         section: SectionId(0),
         concrete: Some("Fc24".into()),
         native_material: None,

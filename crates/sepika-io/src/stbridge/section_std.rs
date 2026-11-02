@@ -224,6 +224,42 @@ fn box_figure(height: f64, width: f64, thick: f64, corner_r: f64) -> (String, St
     (name, body)
 }
 
+fn built_box_figure(shape: &SectionShape) -> Option<(String, String)> {
+    let (height, width, thick, horizontal_thick) = match *shape {
+        SectionShape::SteelBox {
+            height,
+            width,
+            thick,
+            horizontal_thick,
+            corner_r: Some(0.0),
+        }
+        | SectionShape::CftBox {
+            height,
+            width,
+            thick,
+            horizontal_thick,
+            corner_r: Some(0.0),
+        } => (height, width, thick, horizontal_thick),
+        _ => return None,
+    };
+    let name = format!(
+        "BBOX-{}x{}x{}x{}",
+        num(height),
+        num(width),
+        num(thick),
+        num(horizontal_thick)
+    );
+    let body = format!(
+        "<StbSecBuild-BOX name=\"{}\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\"/>",
+        esc(&name),
+        num(height),
+        num(width),
+        num(thick),
+        num(horizontal_thick)
+    );
+    Some((name, body))
+}
+
 /// 鋼管の形鋼図形名と `StbSecSteel` エントリ（鋼断面・CFT 円形で共用）。
 fn pipe_figure(outer_dia: f64, thick: f64) -> (String, String) {
     let name = format!("P-{}x{}", num(outer_dia), num(thick));
@@ -237,7 +273,10 @@ fn pipe_figure(outer_dia: f64, thick: f64) -> (String, String) {
 }
 
 /// 鋼断面 → 形鋼図形名 と `StbSecSteel` エントリ。対応しない形状は `None`。
-fn steel_figure(shape: &SectionShape) -> Option<(String, String)> {
+fn steel_figure(shape: &SectionShape, built_box: bool) -> Option<(String, String)> {
+    if built_box && matches!(shape, SectionShape::SteelBox { .. }) {
+        return built_box_figure(shape);
+    }
     let e = |name: &str, body: String| (name.to_string(), body);
     match *shape {
         SectionShape::SteelH {
@@ -697,17 +736,21 @@ fn rc_beam(
 
 /// CFT 断面の充填鋼管図形（角形/円形）。`SteelLibrary` に登録し、参照名を返す。
 /// CFT 以外は `None`。
-fn cft_figure(shape: &SectionShape, steel: &mut SteelLibrary) -> Option<String> {
-    let (name, body) = match *shape {
-        SectionShape::CftBox {
-            height,
-            width,
-            thick,
-            horizontal_thick: _,
-            corner_r,
-        } => box_figure(height, width, thick, corner_r?),
-        SectionShape::CftPipe { outer_dia, thick } => pipe_figure(outer_dia, thick),
-        _ => return None,
+fn cft_figure(shape: &SectionShape, built_box: bool, steel: &mut SteelLibrary) -> Option<String> {
+    let (name, body) = if built_box {
+        built_box_figure(shape)?
+    } else {
+        match *shape {
+            SectionShape::CftBox {
+                height,
+                width,
+                thick,
+                horizontal_thick: _,
+                corner_r,
+            } => box_figure(height, width, thick, corner_r?),
+            SectionShape::CftPipe { outer_dia, thick } => pipe_figure(outer_dia, thick),
+            _ => return None,
+        }
     };
     steel.add(&name, body);
     Some(name)
@@ -1118,6 +1161,20 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 }
             }
         }
+        let built_box = strength_input.and_then(|s| s.built_box.as_ref());
+        if built_box.is_some_and(|original| Some(original) != sec.shape.as_ref()) {
+            return Err(super::StbError::Unmappable(format!(
+                "断面 {}: 原組立BOXと編集後形状が一致しません",
+                sec.name
+            )));
+        }
+        let built_box = built_box.is_some();
+        if built_box && sec.shape.as_ref().and_then(built_box_figure).is_none() {
+            return Err(super::StbError::Unmappable(format!(
+                "断面 {}: 原組立BOXは角R=0の鋼BOX・角形CFTでなければなりません",
+                sec.name
+            )));
+        }
         let base = sec.id.0;
         if let Some(shape) = &sec.shape {
             shape.validate_surface_radius().map_err(|error| {
@@ -1130,7 +1187,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 }
                 _ => None,
             };
-            if radius.is_some_and(|r| !r.is_some_and(|v| v > 0.0)) {
+            if !built_box && radius.is_some_and(|r| !r.is_some_and(|v| v > 0.0)) {
                 return Err(super::StbError::Unmappable(format!(
                     "断面 {} の未知または0の半径はST-Bridge圧延断面で表現できません",
                     sec.name
@@ -1163,7 +1220,10 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 Ok(xml)
             }
         };
-        let steel_fig = sec.shape.as_ref().and_then(steel_figure);
+        let steel_fig = sec
+            .shape
+            .as_ref()
+            .and_then(|shape| steel_figure(shape, built_box));
         if let Some((fig_name, fig_body)) = steel_fig {
             steel.add(&fig_name, fig_body);
             if used_col {
@@ -1198,7 +1258,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         ) {
             let shape = sec.shape.as_ref().unwrap();
             if used_col {
-                let fig = cft_figure(shape, &mut steel).expect("CFT 図形");
+                let fig = cft_figure(shape, built_box, &mut steel).expect("CFT 図形");
                 parts.push((
                     3,
                     preserve_strength(cft_column(

@@ -419,6 +419,7 @@ fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
         strength: None,
     };
     model.stb_strengths.sections.push(StbSectionStrength {
+        built_box: None,
         section: SectionId(2),
         concrete: None,
         native_material: None,
