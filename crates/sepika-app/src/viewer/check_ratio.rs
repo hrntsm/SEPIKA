@@ -654,44 +654,42 @@ pub(super) fn draw_check_ratio_with_view(
     }
 
     for (idx, node) in app.core.model.nodes.iter().enumerate() {
+        if idx >= pts.len() || !frame_filter.shows_node(idx) {
+            continue;
+        }
         if incomplete_nodes.contains(&node.id) {
-            if idx < pts.len() && frame_filter.shows_node(idx) {
-                let p = pts[idx];
-                let r = NODE_MARKER_RADIUS;
-                let diamond = vec![
-                    egui::pos2(p.x, p.y - r),
-                    egui::pos2(p.x + r, p.y),
-                    egui::pos2(p.x, p.y + r),
-                    egui::pos2(p.x - r, p.y),
-                ];
-                let known_ng = node_ratios
-                    .get(&node.id)
-                    .filter(|(_, ok)| !ok)
-                    .map(|(ratio, _)| *ratio);
-                painter.add(egui::Shape::convex_polygon(
-                    diamond,
-                    known_ng.map_or(theme::GRAY_600, theme::check_ratio_color),
-                    egui::Stroke::new(1.5_f32, theme::VIEW_BG),
-                ));
-                painter.text(
-                    p + egui::vec2(r + 2.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    known_ng.map_or_else(
-                        || "未算定".into(),
-                        |ratio| format!("{ratio:.2} NG（未算定あり）"),
-                    ),
-                    egui::FontId::proportional(11.0),
-                    theme::GRAY_700,
-                );
-            }
+            let p = pts[idx];
+            let r = NODE_MARKER_RADIUS;
+            let diamond = vec![
+                egui::pos2(p.x, p.y - r),
+                egui::pos2(p.x + r, p.y),
+                egui::pos2(p.x, p.y + r),
+                egui::pos2(p.x - r, p.y),
+            ];
+            let known_ng = node_ratios
+                .get(&node.id)
+                .filter(|(_, ok)| !ok)
+                .map(|(ratio, _)| *ratio);
+            painter.add(egui::Shape::convex_polygon(
+                diamond,
+                known_ng.map_or(theme::GRAY_600, theme::check_ratio_color),
+                egui::Stroke::new(1.5_f32, theme::VIEW_BG),
+            ));
+            painter.text(
+                p + egui::vec2(r + 2.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                known_ng.map_or_else(
+                    || "未算定".into(),
+                    |ratio| format!("{ratio:.2} NG（未算定あり）"),
+                ),
+                egui::FontId::proportional(11.0),
+                theme::GRAY_700,
+            );
             continue;
         }
         let Some(&(ratio, ok)) = node_ratios.get(&node.id) else {
             continue;
         };
-        if idx >= pts.len() {
-            continue;
-        }
         let p = pts[idx];
         let color = theme::check_ratio_color(ratio);
         let r = if ok {
@@ -1613,6 +1611,200 @@ mod tests {
             .expect("ヒット");
         assert_eq!(hit.0, 2);
         assert!(hit.1 <= NODE_HOVER_THRESHOLD);
+    }
+
+    #[test]
+    fn node_markers_and_hover_follow_story_and_axis_frames() {
+        use sepika_core::frame::{build_frame, FrameTarget};
+        use sepika_core::ids::StoryId;
+        use sepika_core::model::{Axis, AxisGroup, AxisGroupKind, AxisSource, Node, Story};
+
+        let mut app = App::default();
+        app.ui.view.check_ratio_label_all = true;
+        app.core.model.nodes = (0..8)
+            .map(|id| Node {
+                id: NodeId(id),
+                coord: [
+                    if id < 4 { 0.0 } else { 4000.0 },
+                    f64::from(id % 4) * 2000.0,
+                    if id < 4 { 3000.0 } else { 0.0 },
+                ],
+                restraint: sepika_core::dof::Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect();
+        app.core.model.stories = vec![
+            Story::new(StoryId(0), "1FL".into(), Some(0.0), Some(0.0)),
+            Story::new(StoryId(1), "2FL".into(), Some(3000.0), Some(0.0)),
+        ];
+        app.core.model.axes = vec![AxisGroup {
+            name: "X".into(),
+            kind: AxisGroupKind::Parallel {
+                origin: [0.0, 0.0],
+                angle_deg: 270.0,
+            },
+            axes: vec![Axis {
+                name: "X1".into(),
+                distance: Some(0.0),
+                nodes: vec![],
+                source: AxisSource::Auto,
+            }],
+        }];
+        let mut results = crate::app::ResultsBundle::default();
+        for id in 0..8 {
+            results.joint_checks.push(crate::app::JointCheck {
+                node: NodeId(id),
+                label: format!("検討面{id}"),
+                outcome: match id % 4 {
+                    0 => checked(0.6, vec![]),
+                    1 | 3 => checked(1.2, vec![]),
+                    _ => skipped("接合部の入力不足"),
+                },
+            });
+            if id % 4 == 3 {
+                results.joint_checks.push(crate::app::JointCheck {
+                    node: NodeId(id),
+                    label: format!("未評価面{id}"),
+                    outcome: skipped("接合部の入力不足"),
+                });
+            }
+        }
+        app.core.scoped.results = Some(results);
+        app.certify_design_fixture();
+        let before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+        let pts: Vec<_> = (0..8)
+            .map(|id| {
+                egui::pos2(
+                    300.0 + (id % 4) as f32 * 200.0,
+                    400.0 + (id / 4) as f32 * 200.0,
+                )
+            })
+            .collect();
+        let frames = [
+            None,
+            build_frame(&app.core.model, FrameTarget::Story(StoryId(1))),
+            build_frame(&app.core.model, FrameTarget::Axis { group: 0, axis: 0 }),
+        ];
+        assert!(frames[1..].iter().all(Option::is_some));
+        for (view_index, frame) in frames.iter().enumerate() {
+            let filter = super::super::FrameFilter::new(frame.as_ref());
+            let visible_count = if view_index == 0 { 8 } else { 4 };
+            let ctx = egui::Context::default();
+            let output = ctx.run_ui(Default::default(), |ui| {
+                draw_check_ratio_with_view(
+                    &app.ui.view.viewport,
+                    ui.painter(),
+                    &app,
+                    &app.core.model,
+                    &pts,
+                    filter,
+                );
+            });
+            let markers: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Path(path) = &shape.shape {
+                        (path.points.len() == 4 && path.closed).then_some(path)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(markers.len(), visible_count);
+            for (index, &point) in pts.iter().enumerate() {
+                let marker = markers
+                    .iter()
+                    .find(|path| path.visual_bounding_rect().center() == point);
+                assert_eq!(marker.is_some(), index < visible_count);
+                if let Some(marker) = marker {
+                    let color = match index % 4 {
+                        0 => theme::check_ratio_color(0.6),
+                        2 => theme::GRAY_600,
+                        _ => theme::check_ratio_color(1.2),
+                    };
+                    assert_eq!(marker.fill, color);
+                }
+                let ctx = egui::Context::default();
+                let mut text = String::new();
+                let mut hovered = None;
+                for _ in 0..2 {
+                    let output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1600.0, 1000.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(point)],
+                            ..Default::default()
+                        },
+                        |ui| {
+                            if let Some((hit, distance)) = pick_nearest_checked_node(
+                                &app,
+                                &pts,
+                                ui.input(|i| i.pointer.hover_pos()).unwrap(),
+                                filter,
+                            ) {
+                                if distance <= NODE_HOVER_THRESHOLD {
+                                    hovered = Some(hit);
+                                    show_node_check_tooltip(ui, &app, app.core.model.nodes[hit].id);
+                                }
+                            }
+                        },
+                    );
+                    for shape in &output.shapes {
+                        if let egui::Shape::Text(t) = &shape.shape {
+                            text.push_str(t.galley.text());
+                        }
+                    }
+                }
+                assert_eq!(hovered, (index < visible_count).then_some(index));
+                if index < visible_count {
+                    assert!(text.contains(&format!("検討面{index}")), "{text}");
+                    match index % 4 {
+                        0 => assert!(text.contains("0.60") && text.contains("OK"), "{text}"),
+                        1 => assert!(text.contains("1.20") && text.contains("NG"), "{text}"),
+                        2 => assert!(
+                            text.contains("検定不能") && text.contains("接合部の入力不足"),
+                            "{text}"
+                        ),
+                        _ => assert!(
+                            text.contains("1.20")
+                                && text.contains("NG")
+                                && text.contains("接合部の入力不足"),
+                            "{text}"
+                        ),
+                    }
+                } else {
+                    assert!(text.is_empty(), "{text}");
+                }
+            }
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                labels
+                    .iter()
+                    .filter(|text| **text == "1.20 NG（未算定あり）")
+                    .count(),
+                visible_count / 4
+            );
+            assert_eq!(
+                labels.iter().filter(|text| **text == "未算定").count(),
+                visible_count / 4
+            );
+        }
+        assert_eq!(
+            before,
+            rmp_serde::to_vec_named(&app.core.scoped.results).unwrap()
+        );
     }
 
     /// 検定結果がまったくなければホバー候補もない。
