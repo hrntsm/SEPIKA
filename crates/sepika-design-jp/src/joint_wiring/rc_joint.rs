@@ -4,7 +4,14 @@ use super::common::MemberInfo;
 use crate::rc::joint::{rc_joint_shear_check, JointShape, RcJointInput};
 use crate::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
 use sepika_core::ids::NodeId;
-use sepika_core::section_shape::SectionShape;
+use sepika_core::section_shape::{RcBeamRebar, SectionShape};
+
+struct RcBeam<'a> {
+    member: &'a MemberInfo<'a>,
+    width: f64,
+    depth: f64,
+    rebar: &'a RcBeamRebar,
+}
 
 /// RC 柱梁接合部（許容応力度・終局）の検定を `out` へ追加する。
 pub(super) fn check_rc_joint(
@@ -20,9 +27,17 @@ pub(super) fn check_rc_joint(
             Some(SectionShape::RcColumnRect { .. }) | Some(SectionShape::RcColumnCircle { .. })
         ) && c.mat.fc.unwrap_or(0.0) > 0.0
     });
-    let rc_beams: Vec<&&MemberInfo> = beams
+    let rc_beams: Vec<RcBeam<'_>> = beams
         .iter()
-        .filter(|b| matches!(b.sec.shape, Some(SectionShape::RcBeamRect { .. })))
+        .filter_map(|b| match &b.sec.shape {
+            Some(SectionShape::RcBeamRect { b: width, d, rebar }) => Some(RcBeam {
+                member: b,
+                width: *width,
+                depth: *d,
+                rebar,
+            }),
+            _ => None,
+        })
         .collect();
     if let (Some(col), false) = (rc_col, rc_beams.is_empty()) {
         if let Some(reason) = joint_rebar_issue(model, col, &rc_beams) {
@@ -43,56 +58,40 @@ pub(super) fn check_rc_joint(
             (true, false) => JointShape::Knee,
             (false, false) => JointShape::Corner,
         };
-        let beam0 = rc_beams[0];
-        let beam_j = match beam0.sec.shape {
-            Some(SectionShape::RcBeamRect { d, ref rebar, .. }) => {
-                let tension_is_top = beam_tension_is_top(beam0, nid);
-                let dt = if tension_is_top {
-                    rebar.top_centroid_from_edge()
-                } else {
-                    rebar.bottom_centroid_from_edge()
-                };
-                7.0 / 8.0 * (d - dt)
-            }
-            _ => 0.8 * beam0.sec.depth,
+        let beam0 = &rc_beams[0];
+        let dt = if beam_tension_is_top(beam0, nid) {
+            beam0.rebar.top_centroid_from_edge()
+        } else {
+            beam0.rebar.bottom_centroid_from_edge()
         };
+        let beam_j = 7.0 / 8.0 * (beam0.depth - dt);
         let sum_beam_moments: f64 = rc_beams
             .iter()
             .map(|b| {
-                if let Some(SectionShape::RcBeamRect {
-                    b: bw,
-                    d,
-                    ref rebar,
-                    ..
-                }) = b.sec.shape
-                {
-                    let tension_is_top = beam_tension_is_top(b, nid);
-                    let at = if tension_is_top {
-                        rebar.top_area()
-                    } else {
-                        rebar.bottom_area()
-                    };
-                    let dt = if tension_is_top {
-                        rebar.top_centroid_from_edge()
-                    } else {
-                        rebar.bottom_centroid_from_edge()
-                    };
-                    let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
-                        b: bw,
-                        d,
-                        at,
-                        d_eff: d - dt,
-                        sigma_y: crate::material_strength::rebar_sigma_y_of(b.rebar_mat),
-                        fc: b.mat.fc.unwrap_or(0.0),
-                        pw: 0.0,
-                        sigma_wy: 0.0,
-                        clear_span: 0.0,
-                        sigma_0: 0.0,
-                    };
-                    sepika_core::rc_capacity::rc_mu_simple(&mu_inp)
+                let tension_is_top = beam_tension_is_top(b, nid);
+                let at = if tension_is_top {
+                    b.rebar.top_area()
                 } else {
-                    b.end_forces(nid).map(|f| f[5].abs()).unwrap_or(0.0)
-                }
+                    b.rebar.bottom_area()
+                };
+                let dt = if tension_is_top {
+                    b.rebar.top_centroid_from_edge()
+                } else {
+                    b.rebar.bottom_centroid_from_edge()
+                };
+                let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
+                    b: b.width,
+                    d: b.depth,
+                    at,
+                    d_eff: b.depth - dt,
+                    sigma_y: crate::material_strength::rebar_sigma_y_of(b.member.rebar_mat),
+                    fc: b.member.mat.fc.unwrap_or(0.0),
+                    pw: 0.0,
+                    sigma_wy: 0.0,
+                    clear_span: 0.0,
+                    sigma_0: 0.0,
+                };
+                sepika_core::rc_capacity::rc_mu_simple(&mu_inp)
             })
             .sum();
         let col_shear = cols
@@ -101,14 +100,15 @@ pub(super) fn check_rc_joint(
             .map(|f| f[1].abs().max(f[2].abs()))
             .fold(0.0, f64::max);
         let col_height = cols.iter().map(|c| c.length).sum::<f64>() / cols.len() as f64;
-        let beam_span = rc_beams.iter().map(|b| b.length).sum::<f64>() / rc_beams.len() as f64;
+        let beam_span =
+            rc_beams.iter().map(|b| b.member.length).sum::<f64>() / rc_beams.len() as f64;
         let inp = RcJointInput {
             shape,
             fc: col.mat.fc.unwrap_or(0.0),
             concrete_class: col.mat.concrete_class,
             col_depth: col.sec.depth,
             col_width: col.sec.width,
-            beam_width: beam0.sec.width,
+            beam_width: beam0.member.sec.width,
             beam_j,
             sum_beam_moments,
             col_shear,
@@ -121,16 +121,14 @@ pub(super) fn check_rc_joint(
             CheckOutcome::Checked(rc_joint_shear_check(&inp)),
         ));
 
-        let bi = (col.sec.width - beam0.sec.width) / 2.0;
+        let bi = (col.sec.width - beam0.member.sec.width) / 2.0;
         let bai = (bi / 2.0).min(col.sec.depth / 4.0).max(0.0);
-        let bj = beam0.sec.width + 2.0 * bai;
-        let (t_top, t_bottom) =
-            if let Some(SectionShape::RcBeamRect { rebar, .. }) = &beam0.sec.shape {
-                let sigma_y = crate::material_strength::rebar_sigma_y_of(beam0.rebar_mat);
-                (rebar.top_area() * sigma_y, rebar.bottom_area() * sigma_y)
-            } else {
-                (0.0, 0.0)
-            };
+        let bj = beam0.member.sec.width + 2.0 * bai;
+        let sigma_y = crate::material_strength::rebar_sigma_y_of(beam0.member.rebar_mat);
+        let (t_top, t_bottom) = (
+            beam0.rebar.top_area() * sigma_y,
+            beam0.rebar.bottom_area() * sigma_y,
+        );
         let col_shears: Vec<f64> = cols
             .iter()
             .filter_map(|c| c.end_forces(nid))
@@ -182,10 +180,10 @@ pub(super) fn check_rc_joint(
 fn joint_rebar_issue(
     model: &sepika_core::model::Model,
     col: &MemberInfo<'_>,
-    beams: &[&&MemberInfo<'_>],
+    beams: &[RcBeam<'_>],
 ) -> Option<String> {
     // この接合部で配筋を消費する選択柱とRC梁だけを検査する。
-    for section in std::iter::once(col.sec.id).chain(beams.iter().map(|beam| beam.sec.id)) {
+    for section in std::iter::once(col.sec.id).chain(beams.iter().map(|beam| beam.member.sec.id)) {
         if let Err(reason) = model.ensure_stb_rebar_supported(section) {
             return Some(reason);
         }
@@ -204,15 +202,8 @@ fn joint_rebar_issue(
         _ => {}
     }
     for b in beams {
-        if let Some(SectionShape::RcBeamRect {
-            b: bw,
-            d,
-            ref rebar,
-        }) = b.sec.shape
-        {
-            if let Err(err) = rebar.validate(bw, d) {
-                return Some(format!("梁の実配筋の幾何が不整合です（{err}）。断面タブで段別本数・かぶり・断面寸法を見直してください。"));
-            }
+        if let Err(err) = b.rebar.validate(b.width, b.depth) {
+            return Some(format!("梁の実配筋の幾何が不整合です（{err}）。断面タブで段別本数・かぶり・断面寸法を見直してください。"));
         }
     }
     None
@@ -220,16 +211,13 @@ fn joint_rebar_issue(
 
 /// 新 `RcBeamRect` の曲げ引張側。`mz>0` は下端引張、`mz<0` は上端引張、
 /// `mz==0` は引張鉄筋量が小さい側を引張とする。
-fn beam_tension_is_top(b: &MemberInfo<'_>, nid: NodeId) -> bool {
-    let mz = b.end_forces(nid).map(|f| f[5]).unwrap_or(0.0);
+fn beam_tension_is_top(b: &RcBeam<'_>, nid: NodeId) -> bool {
+    let mz = b.member.end_forces(nid).map(|f| f[5]).unwrap_or(0.0);
     if mz < 0.0 {
         return true;
     }
     if mz > 0.0 {
         return false;
     }
-    if let Some(SectionShape::RcBeamRect { rebar, .. }) = &b.sec.shape {
-        return rebar.top_area() < rebar.bottom_area();
-    }
-    false
+    b.rebar.top_area() < b.rebar.bottom_area()
 }

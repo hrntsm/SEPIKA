@@ -1018,21 +1018,35 @@ fn rc_cross_joint_new_types_emits_checks() {
         (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 2.0e8]),
         (1.0, [0.0, 0.0, 0.0, 0.0, 0.0, 2.0e8]),
     ];
-    let member_forces: Vec<(ElemId, ForcesAt)> = vec![
-        (ElemId(0), &col_f),
-        (ElemId(1), &col_f),
-        (ElemId(2), &beam_f),
-        (ElemId(3), &beam_f),
-    ];
-
-    let checks = collect_joint_checks(&model, &member_forces, LoadTerm::Short);
-    for label in ["接合部(RC)", "接合部終局(RC)"] {
-        let found = checks
-            .iter()
-            .find(|(_, l, _)| l == label)
-            .unwrap_or_else(|| panic!("{label} が出力されるはず"));
-        let cr = found.2.clone().unwrap_checked();
-        assert!(cr.ratio().is_finite(), "{label} ratio={}", cr.ratio());
+    // 梁下端dt=87.5、上端dt=250/3 mm。QAj=1,785,000 N、終局Qdu=1,762,898.768 N。
+    for (moment, expected_ratio, qdj1) in [
+        (2.0e8, 0.22621293415325314, "Qdj1=1396141.7 N"),
+        (-2.0e8, 0.22430593859165293, "Qdj1=1672547.5 N"),
+        (0.0, 0.22621293415325314, "Qdj1=1396141.7 N"),
+    ] {
+        let beam_f = beam_f.map(|(pos, mut f)| {
+            f[5] = moment;
+            (pos, f)
+        });
+        let member_forces = [
+            (ElemId(0), col_f.as_slice()),
+            (ElemId(1), col_f.as_slice()),
+            (ElemId(2), beam_f.as_slice()),
+            (ElemId(3), beam_f.as_slice()),
+        ];
+        let checks = collect_joint_checks(&model, &member_forces, LoadTerm::Short);
+        assert_eq!(
+            checks
+                .iter()
+                .map(|(n, l, _)| (*n, l.as_str()))
+                .collect::<Vec<_>>(),
+            [(NodeId(0), "接合部(RC)"), (NodeId(0), "接合部終局(RC)")]
+        );
+        let allowable = checks[0].2.clone().unwrap_checked();
+        assert!((allowable.ratio() - expected_ratio).abs() < 1e-12);
+        assert!(allowable.components[0].detail.contains(qdj1));
+        let ultimate = checks[1].2.clone().unwrap_checked();
+        assert!((ultimate.ratio() - 0.9342031585473682).abs() < 1e-12);
     }
 }
 
@@ -1178,11 +1192,10 @@ fn src_cross_panel_new_types_emits_check() {
         .find(|(_, l, _)| l == "柱梁接合部(SRC)")
         .expect("SRC 十字形接合部はパネルゾーン検定が出力されるはず");
     let cr = found.2.clone().unwrap_checked();
-    assert!(
-        cr.ratio().is_finite() && cr.ratio() > 0.0,
-        "ratio={}",
-        cr.ratio()
-    );
+    // mBd=2575/6、mCd=475 mm、sCd=384 mm、β=0.18189473684210527。
+    assert!((cr.ratio() - 0.8423158554214742).abs() < 1e-12);
+    assert_eq!(found.0, NodeId(0));
+    assert!(cr.components[0].detail.contains("cV=122312500.0 mm3"));
 }
 
 fn all_wall_outcomes(model: &Model) -> Vec<(NodeId, String, CheckOutcome)> {
@@ -3762,5 +3775,88 @@ fn panel_892_invalid_area_capacity_and_unrepresentable_ratio_are_skipped_with_re
                 }
             }
         }
+    }
+}
+
+#[test]
+fn cold_formed_selected_box_sections_keep_capacity_and_missing_force_fallbacks() {
+    for shape in [
+        SectionShape::SteelBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 19.0,
+            horizontal_thick: 19.0,
+            corner_r: Some(0.0),
+        },
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 19.0,
+            horizontal_thick: 19.0,
+            corner_r: Some(0.0),
+        },
+    ] {
+        let beam = SectionShape::SteelH {
+            height: 500.0,
+            width: 200.0,
+            web_thick: 9.0,
+            flange_thick: 16.0,
+            root_r: Some(0.0),
+        };
+        let mut model = cross_joint_model(shape, beam);
+        model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+        model.sections[0].material = Some(MaterialId(2));
+        model.sections[1].material = Some(MaterialId(2));
+        model.materials[2].name = "BCR295".into();
+        model.materials[2].fy = Some(295.0);
+        // 梁は別材料のSS400、柱Zp=4,140,518 mm³、梁Mp=479,776,940 N mm。
+        let mut beam_mat = model.materials[2].clone();
+        beam_mat.id = MaterialId(3);
+        beam_mat.name = "SS400".into();
+        beam_mat.fy = Some(235.0);
+        model.materials.push(beam_mat);
+        model.sections[1].material = Some(MaterialId(3));
+        let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+        let forces: [(ElemId, ForcesAt); 3] =
+            [(ElemId(0), &zero), (ElemId(1), &zero), (ElemId(2), &zero)];
+        let mut members = member_infos(&model, &forces);
+        for missing_current in [false, true] {
+            if missing_current {
+                members[0].forces = &[];
+            }
+            for cols in [vec![&members[0]], vec![&members[0], &members[1]]] {
+                for long in [None, Some([].as_slice())] {
+                    let mut out = vec![];
+                    cold_formed::check_cold_formed(
+                        &cols,
+                        &[&members[2]],
+                        NodeId(0),
+                        long,
+                        &mut out,
+                    );
+                    assert_eq!(out.len(), 1);
+                    assert_eq!((out[0].0, out[0].1.as_str()), (NodeId(0), "冷間成形耐力比"));
+                    let checked = out[0].2.clone().unwrap_checked();
+                    assert!((checked.ratio() - 0.29459402938374674).abs() < 1e-12);
+                }
+            }
+        }
+        if let Some(
+            SectionShape::SteelBox {
+                horizontal_thick, ..
+            }
+            | SectionShape::CftBox {
+                horizontal_thick, ..
+            },
+        ) = &mut model.sections[0].shape
+        {
+            *horizontal_thick = 20.0;
+        }
+        let members = member_infos(&model, &forces);
+        let mut out = vec![];
+        cold_formed::check_cold_formed(&[&members[0]], &[&members[2]], NodeId(0), None, &mut out);
+        assert!(
+            matches!(&out[0].2, CheckOutcome::Skipped { reason } if reason == "異厚BOXは一様厚を前提とする冷間成形耐力比の適用外です")
+        );
     }
 }
