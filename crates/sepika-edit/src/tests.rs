@@ -8,6 +8,49 @@ use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 use smallvec::smallvec;
 
 #[test]
+fn section_strength_reference_blocks_delete_without_losing_input_or_redo() {
+    use sepika_core::model::StbSectionStrength;
+
+    let mut model = Model::default();
+    model.sections.push(bare_section(SectionId(0), None));
+    model.stb_strengths.sections.push(StbSectionStrength {
+        section: SectionId(0),
+        concrete: Some("Fc30".into()),
+        native_material: None,
+        reinforcement: vec![],
+        steel: vec![],
+        built_box: None,
+        native_rebar: false,
+        rebar: None,
+    });
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetSectionName {
+            id: SectionId(0),
+            name: "変更後".into(),
+            floor: None,
+        })
+    ));
+    stack.undo(&mut model);
+    let before = model.clone();
+    let revision = stack.revision();
+    let delete = DeleteSection { id: SectionId(0) };
+    assert_eq!(
+        delete.blocked_reason(&model),
+        Some("ST-Bridge断面強度入力から参照中のため削除できません")
+    );
+    assert!(!stack.run(&mut model, Box::new(delete)));
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert_eq!(stack.revision(), revision);
+    assert!(!stack.can_undo());
+    assert!(stack.can_redo());
+    stack.redo(&mut model);
+    assert_eq!(model.sections[0].name, "変更後");
+    assert_eq!(model.stb_strengths, before.stb_strengths);
+}
+
+#[test]
 fn restricted_section_batch_is_atomic_and_one_undo_including_unchanged_assignments() {
     let mut model = seeded_model(4, 3);
     let mut setup = UndoStack::new();

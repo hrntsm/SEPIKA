@@ -15,6 +15,10 @@
 mod cft_material_tests;
 
 #[cfg(test)]
+#[path = "section_delete_tests.rs"]
+mod section_delete_tests;
+
+#[cfg(test)]
 #[path = "section_usage_tests.rs"]
 mod section_usage_tests;
 
@@ -374,8 +378,7 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
             });
             row.col(|ui| {
                 let sec_id = sec.id;
-                let blocked = (n_elements[i] > 0)
-                    .then_some("部材・小梁・二次部材・床・壁版から参照中のため削除できません");
+                let blocked = DeleteSection { id: sec_id }.blocked_reason(&app.core.model);
                 if table_util::delete_cell(ui, "この断面を削除", blocked) {
                     pending_delete = Some(sec_id);
                 }
