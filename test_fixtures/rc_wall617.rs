@@ -191,7 +191,6 @@ pub fn expanded_model() -> Model {
         ],
         member: Vec::new(),
     }];
-    model.combinations.clear();
     model
 }
 

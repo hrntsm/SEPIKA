@@ -132,36 +132,22 @@ mod tests {
     use approx::assert_relative_eq;
 
     #[test]
-    fn test_bilinear_elastic() {
+    fn test_bilinear_elastic_yield_and_unloading_response() {
         let mut s = Bilinear::new(205000.0, 235.0, 0.01);
         let (stress, t) = s.trial(0.001);
         assert_relative_eq!(stress, 205.0, epsilon = 1.0);
         assert_relative_eq!(t, 205000.0, epsilon = 1.0);
-    }
 
-    #[test]
-    fn test_bilinear_yield_monotonic() {
-        let mut s = Bilinear::new(205000.0, 235.0, 0.01);
         let eps_y = 235.0 / 205000.0;
         let (stress, t) = s.trial(eps_y * 5.0);
-        // 降伏後: stress = fy + hardening·e·(ε - εy)
-        let expected = 235.0 + 0.01 * 205000.0 * (eps_y * 5.0 - eps_y);
-        assert_relative_eq!(stress, expected, epsilon = 1.0);
-        assert_relative_eq!(t, 0.01 * 205000.0, epsilon = 1.0);
-    }
-
-    #[test]
-    fn test_bilinear_unload_elastic() {
-        let mut s = Bilinear::new(205000.0, 235.0, 0.01);
-        let eps_y = 235.0 / 205000.0;
-        s.trial(eps_y * 5.0);
+        // 5εyでは235 + 0.01×235×4 = 244.4、4εyへ除荷すると244.4 − 235 = 9.4。
+        assert_relative_eq!(stress, 244.4, epsilon = 1.0);
+        assert_relative_eq!(t, 2050.0, epsilon = 1.0);
         s.commit();
-        // 除荷: 弾性勾配 E
+
         let (stress, t) = s.trial(eps_y * 4.0);
         assert_relative_eq!(t, 205000.0, epsilon = 1.0);
-        // 応力は直前コミット点から E·Δε だけ戻る
-        let prev = 235.0 + 0.01 * 205000.0 * (eps_y * 5.0 - eps_y);
-        assert_relative_eq!(stress, prev - 205000.0 * eps_y, epsilon = 1.0);
+        assert_relative_eq!(stress, 9.4, epsilon = 1.0);
     }
 
     #[test]

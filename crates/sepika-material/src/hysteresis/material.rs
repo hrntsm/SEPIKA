@@ -685,15 +685,14 @@ mod tests {
     }
 
     #[test]
-    fn test_probe_matches_trial_without_mutating_state() {
-        // probe は trial と数学的に同一の結果を返し、状態を書き換えない
-        // （反転・内側ループを経た複雑な分岐状態で確認）。
+    fn test_takeda_inner_loop_polygon_and_probe_preserve_response() {
+        // 外側ループ途中で反転 → 内側ループ → 再反転でポリゴン則。
         let mut mat = HysteresisMaterial::new(takeda());
+        // +0.03（降伏後ピーク）→ 0.01（除荷途中・M=0 未満）→ -0.005（内側反転）
         mat.trial(0.03);
         mat.commit();
         mat.trial(0.01);
         mat.commit();
-
         let probe_theta = -0.005; // 内側ループへ入る反転
         let before = mat.probe(probe_theta);
         assert_eq!(before, mat.probe(probe_theta));
@@ -704,19 +703,7 @@ mod tests {
 
         let after_probe = mat.trial(probe_theta);
         assert_eq!(after_probe, via_trial);
-    }
-
-    #[test]
-    fn test_takeda_inner_loop_polygon() {
-        // 外側ループ途中で反転 → 内側ループ → 再反転でポリゴン則。
-        let mut mat = HysteresisMaterial::new(takeda());
-        // +0.03（降伏後ピーク）→ 0.01（除荷途中・M=0 未満）→ -0.005（内側反転）
-        mat.trial(0.03);
-        mat.commit();
-        mat.trial(0.01);
-        mat.commit();
-        // 内側ループに入る反転
-        let (m_inner, _) = mat.trial(-0.005);
+        let (m_inner, _) = after_probe;
         mat.commit();
         // 再反転で target（直前の反転点 θ=0.01 側）へ向かう直線
         let (m_back, _) = mat.trial(0.008);
