@@ -79,7 +79,6 @@ where
             continue;
         };
         list.sort_by(|x, y| angle_at(&proj, origin, *x).total_cmp(&angle_at(&proj, origin, *y)));
-        list.dedup();
     }
 
     let mut visited: HashSet<(NodeId, NodeId)> = HashSet::new();
