@@ -49,12 +49,14 @@ fn post_inputs_results_roundtrip_and_design_edit_invalidates() {
     );
     let mut changed = loaded.core.model.post_design_inputs[0].clone();
     changed.lateral_support = PostLateralSupport::FixedStart;
-    assert!(
-        loaded.apply_model_edit(Box::new(sepika_edit::SetPostDesignInput {
+    assert!(loaded.core.scoped.undo.run(
+        &mut loaded.core.model,
+        Box::new(sepika_edit::SetPostDesignInput {
             member: changed.member,
             input: Some(changed)
-        }))
-    );
+        })
+    ));
+    loaded.core.scoped.staleness.mark_edited();
     assert!(loaded.current_design_results().is_none());
     loaded.run_design_check();
     assert!(loaded.current_design_results().unwrap().beam_checks[0]
