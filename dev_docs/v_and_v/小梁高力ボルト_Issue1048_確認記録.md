@@ -42,6 +42,20 @@ main `ea44e12f` の統合後、HEAD `38cf1798` と既存回帰2件の期待整�
 | `git diff --check` | 成功 |
 | `mdbook build` | 成功 |
 
+## CIで判明した実モデル回帰の追従
+
+PR #1127の初回MCP/GUI/Parquet構成では、実モデルの `snapshot_key_scalars` が失敗した。小梁の総合未検定を部材力未算定と同じ条件で集計から除外したため、旧曲げ・たわみの最大比0.3065が0へ消えていた。数値スナップショットを0へ更新せず、評価済みの曲げ・たわみを明示して従来値を保持し、接合条件未設定による総合未検定を別のassertで確認する。同階床板との対応を調べる既存回帰にも同じ除外があったため、算定済みの需要を照合対象に戻す。製品の計算・判定は変更しない。
+
+修正差分のfresh独立sourceレビューは修正必須なし。Reviewer自身のcargo再実行は共有target競合回避のため行っていない。修正後のローカル検証は次のとおりで、生成物の削除は行っていない。
+
+| コマンド | 結果 |
+| --- | --- |
+| `cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked --test full_model` | 42成功・失敗0。Windows専用の実パイプ検討経路を含む |
+| `cargo clippy -p sepika-mcp -p sepika-app -p sepika-io --all-targets --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked -- -D warnings` | 成功 |
+| `cargo fmt --all -- --check` / `git diff --check` | 成功 |
+
+上記の実パイプ検証はネイティブGUI窓の手操作とは区別する。同一feature構成の全package・全testをローカルで再実行した記録ではなく、変更した実モデル試験全件と関連静的解析の記録である。修正後HEADのCIは別に確認する。
+
 ## 範囲外で発見した課題
 
 既存の曲げ・たわみAPIが不足入力を比0・適合とする契約は[Issue #1126](https://github.com/hrntsm/SEPIKA/issues/1126)へ分離した。既存の `floor::tests::test_beam_zero_section_is_safe` を当該作業で生成したテストバイナリから単独実行し、1件成功を確認した。GUIへの不正値到達や実建物での影響を実証したものではなく、本部分検定の追加へ修正を混在させていない。
