@@ -10,5 +10,5 @@ fn triangle_area(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
 }
 
 pub(crate) fn element_area(coords: &[[f64; 3]; 4]) -> f64 {
-    triangle_area(coords[0], coords[1], coords[2]) + triangle_area(coords[1], coords[2], coords[3])
+    triangle_area(coords[0], coords[1], coords[2]) + triangle_area(coords[0], coords[2], coords[3])
 }
