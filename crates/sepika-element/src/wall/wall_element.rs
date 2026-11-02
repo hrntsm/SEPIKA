@@ -1416,26 +1416,22 @@ impl ElementBehavior for WallElement {
         if data.is_empty() {
             return Ok(());
         }
-        if let Ok(cp) = bincode::deserialize::<WallElementCheckpoint>(data) {
-            self.committed_disp = cp.committed_disp;
-            self.trial_disp = cp.trial_disp;
-            self.committed_slip = cp.committed_slip;
-            self.trial_slip = cp.trial_slip;
-            if let (Some(f), Some(bytes)) = (&mut self.fiber_column, cp.fiber.as_ref()) {
-                f.deserialize_checkpoint(bytes)?;
-            }
-            self.fiber_u12_trial = cp.fiber_u12_trial;
-            self.fiber_u12_committed = cp.fiber_u12_committed;
-            if let (Some(sp), Some(bytes)) = (&mut self.shear_spring, cp.shear_spring.as_ref()) {
-                sp.deserialize_state(bytes)
-                    .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
-            }
-            return Ok(());
-        }
-        let (committed, trial): ([f64; 24], [f64; 24]) = bincode::deserialize(data)
+        let cp: WallElementCheckpoint = bincode::deserialize(data)
             .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
-        self.committed_disp = committed;
-        self.trial_disp = trial;
+        self.committed_disp = cp.committed_disp;
+        self.trial_disp = cp.trial_disp;
+        self.committed_slip = cp.committed_slip;
+        self.trial_slip = cp.trial_slip;
+        if let (Some(f), Some(bytes)) = (&mut self.fiber_column, cp.fiber.as_ref()) {
+            f.deserialize_checkpoint(bytes)?;
+        }
+        self.fiber_u12_trial = cp.fiber_u12_trial;
+        self.fiber_u12_committed = cp.fiber_u12_committed;
+        if let (Some(sp), Some(bytes)) = (&mut self.shear_spring, cp.shear_spring.as_ref()) {
+            sp.deserialize_state(bytes)
+                .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
+        }
+
         Ok(())
     }
 
@@ -1724,6 +1720,15 @@ mod tests {
         assert_eq!(wall.serialize_checkpoint(), committed);
         wall.update_state(&du, false, &ctx).unwrap();
         assert_eq!(wall.serialize_checkpoint(), trial);
+        wall.revert_state();
+        wall.deserialize_checkpoint(&trial).unwrap();
+        assert_eq!(wall.serialize_checkpoint(), trial);
+        assert_eq!(wall.internal_force(&ctx).data, force);
+        assert_eq!(wall.tangent_stiffness(&ctx).data, tangent);
+        assert!(wall
+            .deserialize_checkpoint(&trial[..trial.len() / 2])
+            .is_err());
+        assert_eq!(wall.serialize_checkpoint(), trial);
     }
 
     #[test]
@@ -1763,7 +1768,31 @@ mod tests {
             assert_eq!(state, wall.shear_spring.as_ref().unwrap().serialize_state());
             assert_eq!(force, wall.internal_force(&ctx).data);
             let tangent = wall.tangent_stiffness(&ctx).data;
+            let unloading = LocalVec {
+                data: du.data.iter().map(|d| -0.25 * d).collect(),
+            };
+            wall.update_state(&unloading, false, &ctx).unwrap();
+            assert_ne!(wall.committed_slip, 0.0);
+            assert_ne!(wall.trial_slip, 0.0);
+            assert_ne!(wall.trial_slip, wall.committed_slip);
+            let trial = wall.serialize_checkpoint();
+            let trial_force = wall.internal_force(&ctx).data;
+            let trial_tangent = wall.tangent_stiffness(&ctx).data;
+            assert_ne!(trial_force, force);
+            let spring_response = wall.shear_spring.as_ref().unwrap().probe(target * 0.5);
+            assert!(spring_response.1 > 0.0);
+            assert_ne!(state, wall.shear_spring.as_ref().unwrap().serialize_state());
+            wall.commit_state();
             wall.update_state(&du, false, &ctx).unwrap();
+            assert_ne!(wall.serialize_checkpoint(), trial);
+            wall.deserialize_checkpoint(&trial).unwrap();
+            assert_eq!(wall.serialize_checkpoint(), trial);
+            assert_eq!(wall.internal_force(&ctx).data, trial_force);
+            assert_eq!(wall.tangent_stiffness(&ctx).data, trial_tangent);
+            assert_eq!(
+                wall.shear_spring.as_ref().unwrap().probe(target * 0.5),
+                spring_response
+            );
             wall.revert_state();
             assert_eq!(force, wall.internal_force(&ctx).data);
             assert_eq!(tangent, wall.tangent_stiffness(&ctx).data);
@@ -1854,16 +1883,9 @@ mod tests {
 
     #[test]
     fn test_wall_mass_preserves_section_mass_with_rebar() {
-        let (mut model, mut data) = make_wall_model();
-        let mut rebar = model.materials[0].clone();
-        rebar.id = MaterialId(1);
-        rebar.name = "SD345".into();
-        rebar.category = MaterialCategory::Rebar;
-        rebar.density = 7.85e-9;
-        rebar.fy = Some(345.0);
-        model.materials.push(rebar);
-        model.sections[0].rebar_material = Some(MaterialId(1));
-        data.nodes = smallvec::smallvec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)];
+        let (model, data) = make_wall_model();
+        let rebar = model.element_rebar_material(&data).unwrap();
+        assert!(rebar.density > 0.0);
         let wall = WallElement::try_new(&data, &model).unwrap();
         let rc_density = sepika_core::units::to_internal::mass_density_from_unit_weight_kn_m3(24.0);
         let expected = rc_density * 150.0 * 4000.0 * 3000.0;
@@ -3225,7 +3247,6 @@ mod capacity_issue_tests {
     /// 実配筋モデルの矩形柱側柱は総主筋量（`total_main_area`）を at として方向別耐力を与える。
     #[test]
     fn test_new_rect_column_side_column_uses_total_main_area() {
-        use sepika_core::section_shape::one_bar_area;
         let new_rebar = RcRectColumnRebar {
             main_dia: 22.0,
             x: vec![5],
@@ -3238,12 +3259,7 @@ mod capacity_issue_tests {
                 legs_y: 2,
             },
         };
-        let expected_at = 12.0 * one_bar_area(22.0);
-        assert!(
-            (new_rebar.total_main_area() - expected_at).abs() < 1e-9,
-            "テスト前提: 総主筋量が12本分であること"
-        );
-
+        assert!((new_rebar.total_main_area() - 4_561.592_533_012_38).abs() < 1e-9);
         let new_shape = SectionShape::RcColumnRect {
             b: 600.0,
             d: 600.0,
@@ -3268,7 +3284,9 @@ mod capacity_issue_tests {
             crate::factory::StrengthBasis::Nominal,
         )
         .unwrap();
-        assert!(new_qu[0] > 0.0 && new_qu[1] > 0.0, "{new_qu:?}");
+        for qu in new_qu {
+            assert!((qu - 3_125_854.945_849_06).abs() < 1e-6, "Qu={qu}");
+        }
     }
 
     /// SRC 側柱を含む壁モデル。弾性断面を構築できるよう内蔵鉄骨材料まで与える。

@@ -436,6 +436,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [CMQのM成分塗り分割_Issue500_2026-10.md](CMQのM成分塗り分割_Issue500_2026-10.md) | サンプルを保持した塗り分割・独立面積・本番描画・数値と状態の保持 | 🔶（独立算術・自動描画・App広域回帰・両Clippy・strict Rustdoc成功。手動GUI未実施。最終ゲートは[PR #662](https://github.com/hrntsm/SEPIKA/pull/662)） |
 | [未変形編集入力_Issue475_2026-10.md](未変形編集入力_Issue475_2026-10.md) | 編集開始直後の未変形pick／snap、既存入口とモデル・履歴・結果の保持 | 🔶（独立算術・自動egui 7件・広域回帰成功。手動GUI未実施。最終ゲートは[PR #661](https://github.com/hrntsm/SEPIKA/pull/661)） |
 | [RC壁せん断耐力方式_Issue572_2026-10.md](RC壁せん断耐力方式_Issue572_2026-10.md) | 建物共通min/mean・両consumer・開始時固定・採用run値・保存/Undo/失効・対象材種の方式識別 | 🔶（独立算術/原本照合、最終Windows広域回帰・関連feature・Clippy成功、fresh独立レビュー修正必須0。既存#645除外、Validation未実施。最終ゲートは[PR #656](https://github.com/hrntsm/SEPIKA/pull/656)） |
+| [壁の質量と配筋観測_Issue1059.md](壁の質量と配筋観測_Issue1059.md) | 実参照鉄筋密度・12-D22独立容量の観測修復と壁checkpointの現在経路 | 🔶（限定Verification。既存Validation状態は変更しない） |
 | [RC壁同一faceと初期耐力_Issue617_2026-10.md](RC壁同一faceと初期耐力_Issue617_2026-10.md) | 同一face全体M/Q/N・物理A・静的一次参照・run採用Quと入力一致 | 🔶（独立算術/人工入力/実求解・App/MCP/Ds/表示とローカルchecks、既知#645除外を区別。独立レビュー指摘なし、Validation未実施。最終ゲートは[PR #655](https://github.com/hrntsm/SEPIKA/pull/655)） |
 | [RC壁方向別入力_Issue535_2026-10.md](RC壁方向別入力_Issue535_2026-10.md) | 方向比・材料役割・物理壁Fc/再ID・GUI保存/Undo/失効・MCP開始拒否 | 🔶（入力Verification、手動GUI/実験Validation未） |
 | [STB書出の開発中表示_Issue647_2026-10.md](STB書出の開発中表示_Issue647_2026-10.md) | 実ファイルメニューの操作前表示・閉鎖時状態保持・既存入出力回帰 | 🔶（自動描画・既存入出力Verification成功、手動native取消未実施。最終ゲートは[PR #650](https://github.com/hrntsm/SEPIKA/pull/650)） |
