@@ -2526,6 +2526,7 @@ fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
         attributes: raw.effective_attributes(&position, &model.stb_strengths.apply_conditions),
     });
     let record = StbSectionStrength {
+        built_box: None,
         section: SectionId(3),
         native_rebar: false,
         rebar: Some(raw),

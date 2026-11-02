@@ -74,13 +74,18 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
         .validate_lip_channels()
         .map_err(|e| StbError::Unmappable(e.to_string()))?;
     if let Some(section) = model.sections.iter().find(|section| {
-        section
-            .shape
-            .as_ref()
-            .is_some_and(|shape| shape.has_unequal_box_thickness())
+        !model
+            .stb_strengths
+            .sections
+            .iter()
+            .any(|input| input.section == section.id && input.built_box.is_some())
+            && section
+                .shape
+                .as_ref()
+                .is_some_and(|shape| shape.has_unequal_box_thickness())
     }) {
         return Err(StbError::Unmappable(format!(
-            "断面「{}」: 異厚BOXのSTB出力は未対応です。両板厚を保持するにはOVIKAを使用してください",
+            "断面「{}」: 異厚BOXのSTB出力は未対応です。原組立BOXの来歴が必要です。両板厚を保持するにはOVIKAを使用してください",
             section.name
         )));
     }
