@@ -188,6 +188,7 @@ fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() 
         let heights = super::super::response::story_heights(&model);
         let mut recorder = super::super::step_record::StepRecorder::new(
             &model,
+            &map,
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),

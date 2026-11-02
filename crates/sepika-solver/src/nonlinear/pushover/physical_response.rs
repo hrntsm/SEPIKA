@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::loads::{scale_member, PhysicalPushoverLoads};
 use crate::common::constraint::Reducer;
 use crate::common::linear_load::{legacy_member_force, PhysicalLoadLedger};
@@ -5,18 +7,33 @@ use sepika_core::dof::DofMap;
 use sepika_core::model::{LoadCase, MemberLoadKind, Model};
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 
+pub(crate) fn fixed_dofs(model: &Model, dofmap: &DofMap) -> Arc<[[bool; 6]]> {
+    let reducer = Reducer::build(model, dofmap);
+    (0..model.nodes.len())
+        .map(|node| {
+            std::array::from_fn(|d| {
+                dofmap
+                    .active(node * 6 + d)
+                    .is_none_or(|active| reducer.t_rows[active as usize].is_empty())
+            })
+        })
+        .collect()
+}
+
 pub(crate) struct PhysicalStep {
     pub(super) element_nodal: Vec<Vec<(usize, [f64; 6])>>,
     pub(super) support: Vec<[f64; 6]>,
-    pub(super) fixed_dofs: Vec<[bool; 6]>,
+    pub(super) fixed_dofs: Arc<[[bool; 6]]>,
     pub(super) source: LoadCase,
     pub(super) reference: LoadCase,
 }
 
 impl PhysicalStep {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn recover(
         model: &Model,
         dofmap: &DofMap,
+        fixed_dofs: Arc<[[bool; 6]]>,
         behaviors: &[Box<dyn ElementBehavior>],
         responses: &[Option<LoadedFrameResponse>],
         total_disp: &[f64],
@@ -107,12 +124,21 @@ impl PhysicalStep {
             }
             element_nodal.push(nodal.into_iter().collect());
         }
-        Self::from_nodal(model, dofmap, total_disp, element_nodal, source, reference)
+        Self::from_nodal(
+            model,
+            dofmap,
+            fixed_dofs,
+            total_disp,
+            element_nodal,
+            source,
+            reference,
+        )
     }
 
     pub(crate) fn from_nodal(
         model: &Model,
         dofmap: &DofMap,
+        fixed_dofs: Arc<[[bool; 6]]>,
         total_disp: &[f64],
         element_nodal: Vec<Vec<(usize, [f64; 6])>>,
         source: LoadCase,
@@ -134,16 +160,6 @@ impl PhysicalStep {
                 }
             }
         }
-        let reducer = Reducer::build(model, dofmap);
-        let fixed_dofs: Vec<_> = (0..model.nodes.len())
-            .map(|node| {
-                std::array::from_fn(|d| {
-                    dofmap
-                        .active(node * 6 + d)
-                        .is_none_or(|active| reducer.t_rows[active as usize].is_empty())
-                })
-            })
-            .collect();
         let mut support = vec![[0.; 6]; model.nodes.len()];
         for (ni, values) in support.iter_mut().enumerate() {
             for (d, value) in values.iter_mut().enumerate() {

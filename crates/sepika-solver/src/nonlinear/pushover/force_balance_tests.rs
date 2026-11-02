@@ -137,6 +137,7 @@ fn fixed_loaded_member_keeps_nonzero_total_resistance_with_zero_displacement() {
             .unwrap();
         let mut recorder = super::step_record::StepRecorder::new(
             &model,
+            &map,
             SeismicDir::X,
             &[3000.],
             DuctilityMethod::default(),
@@ -192,6 +193,7 @@ fn fixed_member_response(
     super::physical_response::PhysicalStep::recover(
         model,
         &map,
+        super::physical_response::fixed_dofs(model, &map),
         &behaviors,
         &responses,
         &[],
@@ -372,6 +374,7 @@ fn concentrated_load_at_midcut_preserves_material_i_side_limit_under_end_reversa
                 let state = super::physical_response::PhysicalStep::recover(
                     &model,
                     &map,
+                    super::physical_response::fixed_dofs(&model, &map),
                     &behaviors,
                     &responses,
                     &[],
@@ -434,6 +437,7 @@ fn invalid_physical_load_keeps_all_previous_confirmed_records() {
     )];
     let mut recorder = super::step_record::StepRecorder::new(
         &model,
+        &map,
         SeismicDir::X,
         &[3000.],
         DuctilityMethod::default(),
@@ -574,6 +578,7 @@ fn eccentric_confirmed_member_load_response_keeps_support_transfer_moment() {
             let physical = super::physical_response::PhysicalStep::recover(
                 &model,
                 &map,
+                super::physical_response::fixed_dofs(&model, &map),
                 &behaviors,
                 &responses,
                 &[],
@@ -658,6 +663,7 @@ fn eccentric_physical_path_cuts_include_arms_actual_load_position_and_plane_endp
                 let physical = super::physical_response::PhysicalStep::recover(
                     &model,
                     &map,
+                    super::physical_response::fixed_dofs(&model, &map),
                     &behaviors,
                     &responses,
                     &[],
@@ -707,6 +713,7 @@ fn eccentric_physical_path_cuts_include_arms_actual_load_position_and_plane_endp
                     let physical = super::physical_response::PhysicalStep::recover(
                         &model,
                         &map,
+                        super::physical_response::fixed_dofs(&model, &map),
                         &behaviors,
                         &responses,
                         &[],
@@ -765,6 +772,7 @@ fn eccentric_member_endpoint_load_is_not_a_direct_fixed_node_load() {
             let physical = super::physical_response::PhysicalStep::recover(
                 &model,
                 &map,
+                super::physical_response::fixed_dofs(&model, &map),
                 &behaviors,
                 &responses,
                 &[],
