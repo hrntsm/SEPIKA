@@ -29,7 +29,11 @@
 
 ## 質量と結果
 
+平面凸四角形の面積 A [mm²] は、節点を周に沿って1〜4としたとき、共通対角線1–3で分けた三角形1–2–3と1–3–4の面積の和です。各三角形の面積は2辺の外積の大きさの1/2で求めます。節点の開始位置・周回方向、板の剛体移動によらず同じ面積を用い、集中質量とドリリング安定化の両方へ適用します。反りや凹形状に対する面積近似・適用範囲の拡張を意味しません。
+
 集中質量は総質量 ρtA を4節点の各並進へ均等配分します。整合質量は双一次形状関数の積に ρt を掛けて面積積分し、並進成分へ配分します。どちらも回転慣性の成分を加えません。密度は t/mm³、総質量は t です。膜力は単位長さあたりの力 [N/mm]、板の曲げ・ねじりモーメントは単位長さあたりのモーメント [N·mm/mm] であり、線材の断面力とは単位が異なります。
+
+平面上の座標 (0,0), (4000,0), (3000,3000), (0,2000) mm の面積は9,000,000 mm²です。板厚100 mm・密度2.4×10⁻⁹ t/mm³では総質量2.16 t、集中質量の各節点各並進は0.54 tです。これは3方向の合計を総質量とする意味ではありません。
 
 **記号・単位**
 
@@ -47,6 +51,6 @@
 
 <div class="impl-ref">
 
-**実装参照**：`sepika_element::shell::ShellElement::{local_stiffness, add_drilling}`（`crates/sepika-element/src/shell/stiffness.rs`）と `sepika_element::shell::ShellElement::shear_b_mitc4`（`crates/sepika-element/src/shell/bmatrix.rs`）が算定します。
+**実装参照**：`sepika_element::shell::ShellElement::{local_stiffness, add_drilling}`（`crates/sepika-element/src/shell/stiffness.rs`）と `sepika_element::shell::ShellElement::shear_b_mitc4`（`crates/sepika-element/src/shell/bmatrix.rs`）が算定します。面積は `shell::geom::element_area`（`crates/sepika-element/src/shell/geom.rs`）、質量は `shell::element_behavior`（`crates/sepika-element/src/shell/element_behavior.rs`）で扱います。
 
 </div>

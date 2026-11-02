@@ -360,6 +360,10 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 [独立算術・公開検定入口・保存契約の確認](仕口パネル静的実断面積_Issue892_確認記録.md)は、S/CFTの正の有限面積の実値使用と算定不能の理由をVerificationする。状態🔶。原典N/A/F・現行式の採用根拠・CFT全適用条件・実験Validationは#723で継続する。
 
+## 平面凸四角形シェルの面積（#1154）
+
+[独立面積・質量・ドリリング剛性の確認記録](平面凸四角形シェル面積_Issue1154.md)に公開入口48入力と解析契約68による旧成果失効を記録する。有限なVerificationと、未確認の全体応答・反り／凹形状・実験Validationを区別する。
+
 ## レポート目録
 
 各レポートの照合結果・修正履歴・残課題の詳細。**未完了の要約**は
@@ -367,6 +371,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [平面凸四角形シェル面積_Issue1154.md](平面凸四角形シェル面積_Issue1154.md) | 独立面積・集中/整合質量・法線回転剛性、保存成果の失効 | 🔶（有限Verification、全体応答・実験Validation未） |
 | [RC接合部許容せん断_Issue948_照合記録.md](RC接合部許容せん断_Issue948_照合記録.md) | 有効幅の限定一致、許容係数・内力・適用条件の原典待ち | 🔶（調査記録完了。規準本体・設計採用・Validation未、数値応答維持） |
 | [UI検討_Issue973_接続確認.md](UI検討_Issue973_接続確認.md) | Windows名前付きパイプの往復/切断/不在、現行モデルと既存2断面の一連検証データ | 🔶（接続小実験のみ、製品GUI/MCP・構造計算・権限検証は#982/#985） |
 | [主作業領域_Issue975_確認記録.md](主作業領域_Issue975_確認記録.md) | 単独／左右・上下二分割、独立視点・表示、入力・選択・配置保持、Windows実画面 | 🔶（有限GUI Verification。比較案・外部AIの一連操作は対象外） |
@@ -683,6 +688,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 3 | 端部ばね（ピン・半剛） | sepika-element | beam.rs | `test_pinned_end_rotation_stiffness_exactly_zero`（テスト再編により旧 `test_pinned_end_releases_moment` を統合） | P1 | 🔶 |
 | 4 | MITC4 シェル（膜） | sepika-element | shell.rs | `test_patch_membrane_distorted`（歪みメッシュ・機械精度） | P1.5 | ✅ |
 | 5 | MITC4 シェル（曲げ） | sepika-element | shell.rs | `test_patch_bending_distorted`（歪みメッシュ定曲率・機械精度） | P1.5 | ✅ |
+| 5a | 平面凸四角形シェル（面積・質量・ドリリング） | sepika-element / sepika-app | tests/shell_quadrilateral.rs・result_contract_tests.rs | [Issue1154の独立値・公開入口](平面凸四角形シェル面積_Issue1154.md#公開入口と観測) | P1.5 | 🔶（有限Verification、全体応答・Validation未） |
 | 6 | MITC4 シェル（せん断/収束） | sepika-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
 | 916 | CFT充填コンクリートの法定Fc下限 | sepika-design-jp / sepika-core / sepika-app | cft/mod.rs・result_contract.rs・app/result_contract_tests.rs | [独立境界と製品入口](CFT充填Fc下限_Issue916_2026-10.md#独立境界と製品入口) | 公開／App／保存 | 🔶（下限Verification、手動GUI・Validation未） |
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
