@@ -15,6 +15,7 @@ pub mod cft;
 /// 危険断面位置（断面検定を行う部材軸上の位置）。GUI と MCP が共通で用いる。
 pub mod design_position;
 pub mod floor;
+pub mod floor_bolt;
 pub mod girder_group;
 /// 免震支承材のマルチシアスプリング低減率・摩擦力（各免震部材指針）。
 pub mod isolator;

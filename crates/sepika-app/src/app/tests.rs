@@ -4796,7 +4796,7 @@ fn 丸め差を含む支持参照でも直接小梁検定は直交断面と同�
         let result = app.current_design_results().unwrap();
         assert_eq!((result.beam_checks.len(), result.slab_checks.len()), (1, 2));
         let beam = &result.beam_checks[0].2;
-        assert!(!beam.unchecked);
+        assert!(beam.bending_ratio > 0.0);
         assert!(beam.m_max > 0.0 && beam.q_max > 0.0);
         beam.clone()
     };
@@ -4922,7 +4922,7 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
             check_app.core.scoped.last_error
         );
         let checked = &check_app.current_design_results().unwrap().beam_checks[0].2;
-        assert!(!checked.unchecked);
+        assert!(checked.unchecked, "接合条件未設定でも曲げ結果を保持");
         assert!((checked.sigma_allow - expected_f / 1.5).abs() < 1e-10);
         assert!((checked.bending_ratio - checked.sigma / (expected_f / 1.5)).abs() < 1e-10);
     }
@@ -5196,7 +5196,10 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     assert_eq!(short_beams[0].2.m_max, beams[0].2.m_max);
     assert_eq!(short_beams[0].2.ratio, beams[0].2.ratio);
     assert_eq!(short_slabs[0].1.moment, slabs[0].1.moment);
-    assert!(!short_beams[0].2.unchecked, "既存長期略算を保持");
+    assert!(
+        short_beams[0].2.bending_ratio > 0.0,
+        "既存長期曲げ略算を保持"
+    );
     #[cfg(feature = "gui")]
     {
         app.core.scoped.results = Some(ResultsBundle {
@@ -5311,6 +5314,15 @@ fn test_floor_design_checks_cantilever_beam() {
     });
     set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
+    model.secondary_beam_bolts.insert(
+        "H-400".into(),
+        sepika_core::model::SecondaryBeamBoltConnection {
+            count: 4,
+            surface_treatment_confirmed: true,
+            concentric_shear_only_confirmed: true,
+            ..Default::default()
+        },
+    );
     let app = App {
         core: AppCore {
             model,
@@ -5322,6 +5334,14 @@ fn test_floor_design_checks_cantilever_beam() {
     let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "片持ち小梁が1件設計される");
     let (_sid, _target, jr) = &beams[0];
+    let bolts = jr.bolts.as_ref().unwrap();
+    assert_eq!(bolts.supported, [true, false]);
+    assert!(bolts.ratios[0].is_some());
+    assert!(bolts.ratios[1].is_none());
+    assert!(bolts.q_n[0] > 0.0);
+    assert_eq!(bolts.q_n[1], 0.0);
+    assert!(jr.unchecked && !jr.ok);
+    assert!(bolts.reasons.iter().any(|r| r.contains("曲げ伝達")));
     let simple = 11.85 * 4000.0_f64.powi(2) / 8.0;
     assert!(
         jr.m_max > simple * 3.0,

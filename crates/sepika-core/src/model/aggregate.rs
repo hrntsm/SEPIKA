@@ -22,6 +22,9 @@ pub struct ElemAttrs {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Model {
+    /// 断面符号ごとの小梁端部接合条件。未登録の符号は接合部未検定。
+    #[serde(default)]
+    pub secondary_beam_bolts: std::collections::BTreeMap<String, SecondaryBeamBoltConnection>,
     /// 質点系骨格の任意の手動同定区間。
     #[serde(default)]
     pub lumped_skeleton_intervals: Vec<LumpedSkeletonInterval>,
@@ -1336,6 +1339,7 @@ impl Model {
     pub fn eq_ignoring_dofmap(&self, other: &Self) -> bool {
         self.lumped_skeleton_intervals == other.lumped_skeleton_intervals
             && self.post_design_inputs == other.post_design_inputs
+            && self.secondary_beam_bolts == other.secondary_beam_bolts
             && self.quantity_cfg == other.quantity_cfg
             && self.nodes == other.nodes
             && self.elements == other.elements

@@ -1447,6 +1447,35 @@ mod tests {
     }
 }
 
+/// 断面符号共通の小梁接合条件を設定・解除する。逆操作は変更前の条件を復元する。
+pub struct SetSecondaryBeamBolts {
+    pub symbol: String,
+    pub input: Option<sepika_core::model::SecondaryBeamBoltConnection>,
+}
+
+impl EditCommand for SetSecondaryBeamBolts {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let old = model.secondary_beam_bolts.get(&self.symbol).cloned();
+        if old == self.input {
+            return Box::new(Noop);
+        }
+        if let Some(input) = &self.input {
+            model
+                .secondary_beam_bolts
+                .insert(self.symbol.clone(), input.clone());
+        } else {
+            model.secondary_beam_bolts.remove(&self.symbol);
+        }
+        Box::new(Self {
+            symbol: self.symbol.clone(),
+            input: old,
+        })
+    }
+    fn label(&self) -> &str {
+        "断面符号の小梁端部ボルト接合条件"
+    }
+}
+
 /// 間柱の独立検定条件を設定・解除する。逆操作は変更前の条件を復元する。
 pub struct SetPostDesignInput {
     pub member: SecondaryMemberId,

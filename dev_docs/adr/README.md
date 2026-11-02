@@ -141,6 +141,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0097](0097-secondary-steel-post-check.md) | accepted | 鋼製間柱の独立検定条件を鉛直荷重伝達と分離する |
 | [0098](0098-fixed-elastic-story-yield.md) | accepted | 共通弾性静的応答を固定した層骨格と未同定診断を分離する |
 | [0100](0100-rounded-cft-flexure.md) | accepted | 角形CFTの許容・終局曲げで同じ角部材料領域を積分する |
+| [0101](0101-secondary-beam-bolt-symbol.md) | accepted | 小梁のボルト条件を断面符号名で共有し、部分検定と総合判定を分ける |
 
 ## 規約
 

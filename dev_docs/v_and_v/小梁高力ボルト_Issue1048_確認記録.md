@@ -1,0 +1,67 @@
+# 小梁端部の高力ボルトによるせん断伝達（#1048）
+
+状態: 🔶。公開根拠の数値照合と有限fixtureによるVerificationを扱い、実建物・実験・施工によるValidationと区別する。採用式・条件・操作・未検定範囲の正本は[製品文書](../../docs/calc_basis/06_一次設計/05_小梁・床の断面検定.md#小梁端部の高力ボルトによるせん断伝達)。
+
+## 一次根拠の照合
+
+2026-11-03に公開元を直接確認した。本文抽出物はリポジトリへ保存していない。
+
+| 根拠 | 確認対象 | 結果 |
+| --- | --- | --- |
+| [建築基準法施行令](https://laws.e-gov.go.jp/law/325CO0000000338)、[公式法令XML](https://laws.e-gov.go.jp/api/1/lawdata/325CO0000000338) 第92条の2 | 長期の摩擦接合・引張併用の扱い | 軸断面の長期1面0.3To、2面0.6To。外力引張併用は低減が必要で、無条件の本数倍を適用しない |
+| [高力ボルト協会Q&A](https://www.kouriki-bolt.jp/qa/faq) 設計編Q4・Q11 | F10Tの基準張力・代表値・摩擦面 | To=500 N/mm²、M20長期1面47.1 kN。すべり係数0.45を確保し、自然発錆又はブラスト等の所定処理を要する |
+| [日本製鉄の公開技術資料](https://www.nipponsteel.com/product/construction/handbook/pdf/10-10.pdf) 2025年9月改訂、1頁長期表・2頁摩擦面処理 | F8Tを溶融亜鉛めっきとして扱う根拠、面数別数値と条件 | M20長期1面35.4 kN・2面70.8 kN、M24の2面102 kN。すべり係数0.4、ブラスト及びりん酸塩処理、50 μmRz以上と亜鉛合金層残存の条件を確認 |
+| [告示第2466号の法令沿革](https://hourei.ndl.go.jp/simple/detail?current=-1&lawId=0000088678) | 告示名・改正履歴 | 令和元年国土交通省告示第203号の改正履歴を確認。協会Q4の旧告示番号の記載を現行告示名の根拠へ流用しない |
+
+F10T M20は円の軸断面積と150 N/mm²から47.1238898038 kN/本、2面94.2477796077 kN/本となり、公表47.1 kNの丸め幅内で一致する。F8Tは公表長期表を面数別に用い、M24の2面を1面51.2 kNの2倍102.4 kNへ置き換えない。表の採用と短期すべり耐力の式を混同しない。
+
+## 現役の保証と実行
+
+2026-11-03のfresh独立sourceレビューは修正必須なし。Issue全文と未追跡を含む差分、公開数値、端部反力の元計算、片持ちの未検定、符号共有、GUI到達・保存・失効と契約版47を対象とした。共有targetの初回ビルドと競合するため、Reviewer自身のcargo再実行は行っていない。
+
+現役の保証は次のとおり。
+
+- `sepika_design_jp::floor_bolt::tests`: 独立公表値によるF10T/F8T・1/2面、F8T M24の面数別丸め、各端需要・比1と超過、未設定・0本・未対応径・面数・条件未確認・非有限需要、片持ち支持端の参考値。
+- `sepika_app::app::beam_bolt_tests`: 同符号の荷重が異なる複数小梁、実荷重の非対称反力と端部比、共通本数変更、異符号への割当変更・階別IDの同符号共有、接合未設定でも曲げたわみを保持する未検定、保存再読込と編集後失効、本番eguiポインタイベントによる種類・面数・本数・条件入力、再検定と両端結果表示、種類変更による摩擦面確認解除。
+- `sepika_app::app::tests` の既存片持ち回帰: 自重・荷重の支持端反力に対応するボルト比と自由端の接合なし、曲げ伝達による総合未検定。
+
+途中の追加試験fixtureには床板入力の欄名誤りによるコンパイルエラー1件があり、欄名を訂正した。全関連試験の初回にはWindowsの匿名LLVMシンボル未解決によるリンクエラーがあり、設計クレートの生成物だけを再構築して解消した。原因は断定せず、数値・動作試験の失敗とは区別する。
+
+main `ea44e12f` の統合後、HEAD `38cf1798` と既存回帰2件の期待整合を含む差分を対象に最終freshレビューを行い、修正必須なしを確認した。期待整合は、接合未設定時の新しい未検定状態に合わせたもので、元の重量差・曲げ需要の独立assertを保持する。
+
+共有targetは `C:\Users\hiroa\Desktop\ikkan\target`、Clippyは `0.1.99 (58cf8f9c35 2026-10-13)`。統合後の最終ローカル実行を以下に記録する。
+
+| コマンド | 結果 |
+| --- | --- |
+| `cargo test -p sepika-core -p sepika-edit -p sepika-design-jp --locked` | 28スイート、1610成功・失敗0・既存ignore1（libはcore595、設計692、編集221。統合・doc testを含む） |
+| `cargo test -p sepika-app --lib --features gui --locked` | 1212成功・失敗0・既存ignore3。追加4件・既存片持ち回帰・整合した既存2件を含む |
+| `cargo clippy -p sepika-core -p sepika-edit -p sepika-design-jp -p sepika-app --all-targets --features sepika-app/gui --locked -- -D warnings` | 成功 |
+| `cargo check -p sepika-mcp --tests --locked` | 成功。共有モデルの利用側の型整合を確認 |
+| `cargo run -p xtask --locked -- check-docs` | 成功（summary141・links863・impl refs427） |
+| `cargo fmt --all -- --check` | 成功 |
+| `git diff --check` | 成功 |
+| `mdbook build` | 成功 |
+
+## CIで判明した実モデル回帰の追従
+
+PR #1127の初回MCP/GUI/Parquet構成では、実モデルの `snapshot_key_scalars` が失敗した。小梁の総合未検定を部材力未算定と同じ条件で集計から除外したため、旧曲げ・たわみの最大比0.3065が0へ消えていた。数値スナップショットを0へ更新せず、評価済みの曲げ・たわみを明示して従来値を保持し、接合条件未設定による総合未検定を別のassertで確認する。同階床板との対応を調べる既存回帰にも同じ除外があったため、算定済みの需要を照合対象に戻す。製品の計算・判定は変更しない。
+
+修正差分のfresh独立sourceレビューは修正必須なし。Reviewer自身のcargo再実行は共有target競合回避のため行っていない。修正後のローカル検証は次のとおりで、生成物の削除は行っていない。
+
+| コマンド | 結果 |
+| --- | --- |
+| `cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked --test full_model` | 42成功・失敗0。Windows専用の実パイプ検討経路を含む |
+| `cargo clippy -p sepika-mcp -p sepika-app -p sepika-io --all-targets --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked -- -D warnings` | 成功 |
+| `cargo fmt --all -- --check` / `git diff --check` | 成功 |
+
+上記の実パイプ検証はネイティブGUI窓の手操作とは区別する。同一feature構成の全package・全testをローカルで再実行した記録ではなく、変更した実モデル試験全件と関連静的解析の記録である。修正後HEADのCIは別に確認する。
+
+## 範囲外で発見した課題
+
+既存の曲げ・たわみAPIが不足入力を比0・適合とする契約は[Issue #1126](https://github.com/hrntsm/SEPIKA/issues/1126)へ分離した。既存の `floor::tests::test_beam_zero_section_is_safe` を当該作業で生成したテストバイナリから単独実行し、1件成功を確認した。GUIへの不正値到達や実建物での影響を実証したものではなく、本部分検定の追加へ修正を混在させていない。
+
+## 検証境界
+
+所定の摩擦面・締付け・外力引張なし・偏心付加力不要は入力確認であり、実施工の自動認定ではない。ガセット・ウェブの支圧破断、配置・縁端距離、溶接、接合部の曲げ・引張、短期終局は本部分検定の対象外。片持ち支持端のせん断参考比を、接合部全体又は総合の適合としない。
+
+Windows専用窓の取得制約によりネイティブ実機手操作は未確認で、本番eguiへ送る合成ポインタイベントの検証と区別する。実建物・実験Validation、全DPI・全モデルの網羅は行っていない。PRのCIとmergeはローカル検証から分離する。
