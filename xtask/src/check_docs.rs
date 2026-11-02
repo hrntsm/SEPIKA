@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+
 /// check-docs の検査結果。
 ///
 /// `summary_links`・`doc_links`・`impl_refs` は検査した件数、`errors` は 1 件 1 行の
@@ -13,7 +15,15 @@ pub struct Report {
 }
 
 /// リポジトリルートの `docs/` を走査し、リンク切れと実装参照の欠落を報告する。
+/// ルートまたは `docs/` がディレクトリでない場合や、読み取りに失敗した場合はエラーを返す。
 pub fn check_at(root: &Path) -> anyhow::Result<Report> {
+    let metadata = std::fs::metadata(root)
+        .with_context(|| format!("文書検査ルートを確認できません: {}", root.display()))?;
+    anyhow::ensure!(
+        metadata.is_dir(),
+        "文書検査ルートがディレクトリではありません: {}",
+        root.display()
+    );
     let docs_dir = root.join("docs");
     let summary = docs_dir.join("SUMMARY.md");
     let mut report = Report::default();
@@ -55,10 +65,13 @@ pub fn check_at(root: &Path) -> anyhow::Result<Report> {
 }
 
 fn collect_md_files(dir: &Path, out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(dir)? {
+    let entries = std::fs::read_dir(dir).with_context(|| {
+        format!(
+            "文書検査対象ディレクトリを読み取れません: {}",
+            dir.display()
+        )
+    })?;
+    for entry in entries {
         let path = entry?.path();
         if path.is_dir() {
             collect_md_files(&path, out)?;
@@ -228,6 +241,59 @@ fn content_lines(text: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_missing_root_or_docs_with_target_path_and_reason() {
+        for missing_root in [true, false] {
+            let root = temp_root(if missing_root {
+                "missing_root"
+            } else {
+                "missing_docs"
+            });
+            let target = if missing_root {
+                root.clone()
+            } else {
+                std::fs::create_dir_all(&root).unwrap();
+                root.join("docs")
+            };
+
+            let error = check_at(&root).err().expect("不存在は検査失敗になる");
+            assert!(error.to_string().contains(&target.display().to_string()));
+            assert_eq!(
+                error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                std::io::ErrorKind::NotFound
+            );
+
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
+    fn rejects_file_as_root_or_docs_with_target_path_and_reason() {
+        for file_root in [true, false] {
+            let root = temp_root(if file_root { "file_root" } else { "file_docs" });
+            let target = if file_root {
+                root.clone()
+            } else {
+                std::fs::create_dir_all(&root).unwrap();
+                root.join("docs")
+            };
+            std::fs::write(&target, "").unwrap();
+
+            let error = check_at(&root).err().expect("ファイルは検査対象にできない");
+            assert!(error.to_string().contains(&target.display().to_string()));
+            if file_root {
+                assert!(error.to_string().contains("ディレクトリではありません"));
+                std::fs::remove_file(&root).unwrap();
+            } else {
+                assert_eq!(
+                    error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                    std::io::ErrorKind::NotADirectory
+                );
+                std::fs::remove_dir_all(&root).unwrap();
+            }
+        }
+    }
 
     #[test]
     fn parses_links_and_impl_refs_outside_fences() {
