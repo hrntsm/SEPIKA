@@ -1,27 +1,29 @@
-name: 調査・仕様確定（Investigation / Specification）
-labels: ["調査"]
-description: 実装前の調査・規準照合・仕様確定・設計検討の目的と確認事項を整理する
+name: 調査・検証（Investigation / Verification）
+labels: ["調査・検証"]
+description: 原典照合・仕様検討・独立検証・テスト追加の目的と確認事項を整理する
 body:
   - type: markdown
     attributes:
       value: |
-        なぜ調査するか、何を明らかにするか、どこまで確認するかを記載してください。
-        完了条件は実装完了ではなく、仕様・根拠・後続作業が明確になることを基本とします。
+        何を明らかにするか、どの結果を何と比べるか、どこまで確認するかを記載してください。
+        結論と根拠を得ることや、確定した仕様を継続して検証できる状態を完了条件にしてください。
+        1 Issueで独立して完了を判断できる成果を1つに絞り、必要なテスト・文書更新も含めてください。
+        種類ラベル「調査・検証」は自動付与されます。対象分野は[分類ルール](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の種類分野)に沿って手動設定してください。
         詳細な実装方法を先に決める必要はありません。
         [Issue の書き方](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の書き方) に従い、タイトルと冒頭は一般的な用語で記述し、内部実装用語は補足へ分けてください。
   - type: textarea
     id: background
     attributes:
       label: 背景
-      description: 現状の疑問・課題と、調査や仕様確定が必要な理由を記載してください。
+      description: 現状の疑問・課題と、調査や検証が必要な理由を記載してください。
       placeholder: "例: 規準の適用条件と現在の実装の対応が明確でなく、計算結果の妥当性を判断できない。"
     validations:
       required: true
   - type: textarea
     id: purpose
     attributes:
-      label: 調査目的
-      description: 調査によって何を明らかにし、どの判断ができる状態を目指すかを記載してください。
+      label: 調査・検証の目的
+      description: 明らかにしたいことや、確認できるようにしたい仕様・計算結果を記載してください。
       placeholder: "例: 適用すべき規準と条件を特定し、現在の実装に変更が必要か判断できる。"
     validations:
       required: true
@@ -49,8 +51,8 @@ body:
   - type: textarea
     id: decisions
     attributes:
-      label: 調査後に決めるべき事項
-      description: 調査結果を踏まえて決める仕様・採否・後続作業があれば記載してください。結論が未定でも構いません。
+      label: 結果を踏まえて決める事項
+      description: 調査・検証の結果から決める仕様・採否・後続作業があれば記載してください。結論が未定でも構いません。
       placeholder: |
         - どの規準と適用条件を採用するか。
         - 実装変更や追加検証の Issue が必要か。
@@ -60,11 +62,11 @@ body:
     id: acceptance
     attributes:
       label: 完了条件
-      description: 仕様・根拠・後続作業について、何が明確になれば調査を完了とするかを記載してください。
+      description: 得られる結論・根拠・検証結果や追加する試験について、何を確認できれば完了とするかを記載してください。
       placeholder: |
         - [ ] 確認事項への結論と出典・根拠が整理されている。
-        - [ ] 採用する仕様と、追加調査や実装変更の要否が明確になっている。
-        - [ ] 必要な文書更新や後続 Issue に結果が反映されている。
+        - [ ] 検証・試験を追加する場合は、独立した期待値から対象の仕様を確認できる。
+        - [ ] 追加調査や実装変更の要否が明確で、必要な文書や後続 Issue に結果が反映されている。
     validations:
       required: true
   - type: textarea

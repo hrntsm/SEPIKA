@@ -1,11 +1,12 @@
-name: 機能追加・変更（Feature / Change）
-description: 機能追加・仕様変更・リファクタリング・文書や開発環境の変更を整理する
+name: 機能追加・変更・整備（Change）
+description: 機能・文書・内部構造・性能・開発基盤の変更目的と完了条件を整理する
 body:
   - type: markdown
     attributes:
       value: |
         なぜ必要か、何を達成するか、今回扱う範囲を記載してください。
-        文書改善・性能改善・リファクタリング・開発環境変更もこのフォームで扱います。
+        1 Issueで独立して完了を判断できる成果を1つに絞り、必要なテスト・文書更新も含めてください。
+        種類ラベルと対象分野は[分類ルール](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の種類分野)に沿って手動設定してください。
         詳細な実装手順やクラス・関数構成は不要です。
         [Issue の書き方](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の書き方) に従い、タイトルと冒頭は一般的な用語で記述し、内部実装用語は補足へ分けてください。
   - type: textarea
@@ -29,7 +30,7 @@ body:
     attributes:
       label: Scope（今回扱う範囲）
       description: 今回変更する機能・対象・条件を記載してください。実装方法ではなく、達成する内容と境界を示してください。
-      placeholder: "例: 不具合修正・機能追加や変更・調査や仕様確定の3種類を対象とする。"
+      placeholder: "例: Issue フォームの入力項目と分類案内を対象とする。"
     validations:
       required: true
   - type: textarea
@@ -46,7 +47,7 @@ body:
       label: 完了条件
       description: どのような結果を確認できれば、この変更を完了とするかを記載してください。
       placeholder: |
-        - [ ] 対象の3種類について、日本語で目的・範囲・完了条件を入力できる。
+        - [ ] 各フォームで、日本語で目的・範囲・完了条件を入力できる。
         - [ ] 分類しづらい内容は blank issue で起票できる。
     validations:
       required: true

@@ -1,5 +1,5 @@
 name: 不具合修正（Bug / Fix）
-labels: ["不具合"]
+labels: ["不具合修正"]
 description: 不具合の現象・期待する挙動・影響と修正の完了条件を整理する
 body:
   - type: markdown
@@ -7,6 +7,8 @@ body:
       value: |
         分かっている現象と、修正によって達成したい状態を記載してください。
         再現条件や影響が未判明でも起票できます。詳細な実装手順は不要です。
+        1 Issueで独立して完了を判断できる成果を1つに絞り、必要なテスト・文書更新も含めてください。
+        種類ラベル「不具合修正」は自動付与されます。対象分野は[分類ルール](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の種類分野)に沿って手動設定してください。
         [Issue の書き方](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md#issue-の書き方) に従い、タイトルと冒頭は一般的な用語で記述し、内部実装用語は補足へ分けてください。
   - type: textarea
     id: background
