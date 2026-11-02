@@ -213,8 +213,6 @@ pub fn design_slab_oneway(
     }
 }
 
-/// 鋼小梁の既定ヤング係数 [N/mm²]（材料未設定時）。
-pub const STEEL_YOUNG: f64 = 205_000.0;
 /// たわみ制限の既定分母（δ/L ≤ 1/250）。
 pub const DEFLECTION_LIMIT_DENOM: f64 = 250.0;
 /// スラブ設計の既定かぶり `[mm]`（圧縮縁〜鉄筋重心）。
@@ -225,14 +223,17 @@ pub const SLAB_J_RATIO: f64 = 7.0 / 8.0;
 pub const REBAR_FT_LONG_SD295: f64 = 195.0;
 
 /// 小梁略算に使うヤング係数 E [N/mm²] と長期許容曲げ応力度 [N/mm²]。
-/// 長期 `ft = F/1.5` を用い、材料・必要実板厚・強度の不備は理由付きエラー。
+/// 長期 `ft = F/1.5` を用い、材料・必要実板厚・強度の不備、正の有限値でないEは理由付きエラー。
 pub fn beam_steel_e_and_ft(
     sec: &sepika_core::model::Section,
     mat: Option<&sepika_core::model::Material>,
 ) -> Result<(f64, f64), String> {
     let f = crate::material_strength::section_steel_f(sec, mat)?;
     let m = mat.ok_or("小梁の鋼材が未割当です")?;
-    let e = if m.young > 0.0 { m.young } else { STEEL_YOUNG };
+    if !m.young.is_finite() || m.young <= 0.0 {
+        return Err("ヤング係数Eは正の有限値が必要です".into());
+    }
+    let e = m.young;
     Ok((e, f / 1.5))
 }
 

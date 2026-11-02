@@ -307,7 +307,8 @@ fn 丸め差を含む参照でも支持面と自重荷重は直交断面に一�
                 member.span,
                 205_000.0,
                 1.0e8,
-            );
+            )
+            .unwrap();
             assert!((extremes.m_max - expected_intensity * 1_980_000.0).abs() < 1e-6);
         }
     }
@@ -425,8 +426,10 @@ fn secondary_fireproof_support_reactions_design_loads_and_mass() {
             crate::floor::simple_beam_extremes
         };
         assert!(
-            extremes(loads, member.span, 205000.0, 1.0e8).m_max
-                > extremes(old_loads, member.span, 205000.0, 1.0e8).m_max
+            extremes(loads, member.span, 205000.0, 1.0e8).unwrap().m_max
+                > extremes(old_loads, member.span, 205000.0, 1.0e8)
+                    .unwrap()
+                    .m_max
         );
         let new_gen = crate::story_gen::generate_stories(&model, None).unwrap();
         let old_gen = crate::story_gen::generate_stories(&baseline, None).unwrap();

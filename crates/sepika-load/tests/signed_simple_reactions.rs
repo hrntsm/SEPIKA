@@ -101,7 +101,7 @@ fn signed_reactions_and_moments_match_independent_equilibrium() {
     ] {
         close(simple_beam_moment_at(&loads, l, x), m, 1e-6);
     }
-    let forces = simple_beam_extremes(&loads, l, 200000.0, 1e8);
+    let forces = simple_beam_extremes(&loads, l, 200000.0, 1e8).unwrap();
     close(forces.q_max, 1000.0, 1e-8);
     assert!(forces.m_max >= 562500.0 && forces.m_max < 580000.0);
     // EI*y''=1000x-x²/2+x³/18000 の独立積分。既存80分割近似の誤差を許容。
