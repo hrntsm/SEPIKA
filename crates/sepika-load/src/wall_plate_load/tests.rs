@@ -460,11 +460,7 @@ fn edge_len(model: &Model, bl: &BeamLoad) -> f64 {
 /// 壁エレメントの頂点等分配と一致する。
 #[test]
 fn dl支持反力は総和を保存する() {
-    let mut m = split_by_post();
-    // 壁版自重の分配だけを確認するため、間柱自身の自重は外す。
-    for p in m.wall_regions.iter_mut().flat_map(|r| r.posts.iter_mut()) {
-        p.section = Some(SectionId(1));
-    }
+    let m = split_by_post();
     let mut node_weight = vec![0.0; m.nodes.len()];
     accumulate_wall_and_secondary_dl_weight(&m, &mut node_weight).unwrap();
 

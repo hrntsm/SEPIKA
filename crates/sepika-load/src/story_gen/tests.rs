@@ -145,14 +145,9 @@ fn gen_slaves(gen: &StoryGenResult, story: StoryId) -> Vec<NodeId> {
         .unwrap_or_default()
 }
 
-/// 階が未定義のモデルから初期化したときの既定の階名は**床基準**である。
-///
-/// 階は床であり、最下レベル（基部）も階として作る。したがって下から順に
-/// `1F`・`2F` … となる。ST-Bridge の `StbStory` も床基準のため、取り込んだ
-/// モデルとアプリ内で作ったモデルで階名の意味が一致する。
-/// 利用者が名前を付けた階は上書きしない。
+/// 明示階の既定名と通常上階の変更名を再生成後も保持する。
 #[test]
-fn test_generated_story_names_are_floor_based() {
+fn test_regeneration_preserves_default_and_renamed_story_names() {
     let model = two_story_model();
     assert_eq!(model.stories.len(), 3);
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -2607,24 +2602,6 @@ fn wall_model() -> Model {
 }
 
 #[test]
-fn test_wall_self_weight_included_in_story_weight() {
-    // §1.2: 壁自重 w=ρ·t·A·g を全頂点に等分配。
-    // 基部(z=0)側 2 節点は基部の床に属し、層の重量には入らない。上の床
-    // （層の上端）の地震用重量に算入されるのは上端 2 節点分(w/2)のみになる。
-    let model = wall_model();
-    let gen = generate_stories(&model, None).unwrap();
-    assert_eq!(gen.stories.len(), 2, "基部の床 + 上の床");
-    let area = 4000.0 * 3000.0;
-    let w_total = 2.4e-9 * 150.0 * area * GRAVITY_MM_S2;
-    let expected = w_total / 2.0;
-    assert!(
-        (gen.stories[1].seismic_weight.unwrap() - expected).abs() < 1e-6,
-        "{}",
-        gen.stories[1].seismic_weight.unwrap()
-    );
-}
-
-#[test]
 fn test_wall_finish_load_included_in_weight_and_corrected_lumped_mass() {
     use sepika_core::model::AreaLoad;
 
@@ -3112,9 +3089,9 @@ fn test_wall_opening_larger_than_body_is_rejected() {
 
 #[test]
 fn test_wall_slits_preserve_geometric_story_weight() {
-    let base = generate_stories(&wall_model(), None).unwrap().stories[1]
-        .seismic_weight
-        .unwrap();
+    let generated = generate_stories(&wall_model(), None).unwrap();
+    assert_eq!(generated.stories.len(), 2, "基部の床 + 上の床");
+    let base = generated.stories[1].seismic_weight.unwrap();
     let w_total = 2.4e-9 * 150.0 * (4000.0 * 3000.0) * GRAVITY_MM_S2;
     assert!((base - w_total / 2.0).abs() < 1e-6);
     for (column_face, beam_face) in [
