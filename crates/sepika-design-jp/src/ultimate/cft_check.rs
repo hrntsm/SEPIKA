@@ -214,7 +214,7 @@ pub fn collect_cft_ultimate_checks(
 ///   （円形は同値。柱分類・軸終局は断面代表せい `d_section` のまま評価する近似）。
 ///
 /// 許容応力度検定の設計用せん断力 `QD1 = ΣcMy/h′` の cMy（=Mu(N)）にも用いる
-/// （[`crate::cft`]）。対象外・不正入力・未知角R・正の角Rは理由付きエラー。
+/// （[`crate::cft`]）。対象外・不正入力・未知角Rは理由付きエラー。
 pub fn cft_mu_nm(
     shape: &SectionShape,
     fc: f64,
@@ -229,16 +229,8 @@ pub fn cft_mu_nm(
     if !fc.is_finite() || !fy.is_finite() || fc <= 0.0 || fy <= 0.0 {
         return Err("CFT 終局 N–M の Fc/Fy が未設定または不正です".into());
     }
-    let (circular, d_section, c_area, s_area, c_inertia, s_inertia) =
+    let (circular, d_section, c_area, s_area, mut c_inertia, mut s_inertia) =
         cft_section_props(shape)?.ok_or("CFT 終局 N–M の対象形状ではありません")?;
-    if let SectionShape::CftBox {
-        corner_r: Some(r), ..
-    } = shape
-    {
-        if *r > 0.0 {
-            return Err("角形 CFT の角Rが正の終局 N–M は未対応です（内角Rが 0 でも対象）".into());
-        }
-    }
     if shape.has_unequal_box_thickness() {
         return Err("異厚BOXのCFT終局曲げ耐力は一様厚式の適用外です".into());
     }
@@ -258,6 +250,23 @@ pub fn cft_mu_nm(
         SectionShape::CftPipe { outer_dia, thick } => (outer_dia, outer_dia, thick),
         _ => return Err("CFT 終局 N–M の対象形状ではありません".into()),
     };
+    if !circular {
+        let core = shape
+            .rounded_core_properties()?
+            .ok_or("コア性能がありません")?;
+        let steel = shape
+            .rounded_steel_properties()?
+            .ok_or("鋼管性能がありません")?;
+        (c_inertia, s_inertia) = if weak_axis {
+            (core.iz, steel.iz)
+        } else {
+            (core.iy, steel.iy)
+        };
+    }
+    let corner_r = match *shape {
+        SectionShape::CftBox { corner_r, .. } => corner_r.ok_or("角Rが未知です")?,
+        _ => 0.0,
+    };
     let inp = cft::CftAxialInput {
         circular,
         d_section,
@@ -271,6 +280,15 @@ pub fn cft_mu_nm(
         lk,
     };
     let r = cft_axial_ultimate(&inp);
+    if !circular
+        && corner_r > 0.0
+        && r.class != CftColumnClass::Short
+        && (fc > 58.8399 || lk / d_section > 30.0)
+    {
+        return Err(
+            "角部の丸みを考慮した CFT 中長柱の適用域外です（Fc≤58.8399 N/mm²、Lk/D≤30）".into(),
+        );
+    }
     let square_long_case2 = !circular
         && bd == bb
         && r.class == CftColumnClass::Long
@@ -278,8 +296,12 @@ pub fn cft_mu_nm(
     if square_long_case2 && (fc > 58.8399 || lk / d_section > 30.0) {
         return Err("正方形 CFT 長柱 Case2 の適用域外です（Fc≤58.8399 N/mm²、12<Lk/D≤30）".into());
     }
+    if !circular && (n_design < -r.ntu || n_design > r.ncu) {
+        return Err("角形 CFT の軸終局耐力を超えています（軸NG）".into());
+    }
     let bending = CftBendingInput {
         circular,
+        corner_r,
         d_steel: bd,
         b_steel: bb,
         c_d: (bd - 2.0 * thick).max(0.0),
@@ -308,6 +330,9 @@ pub fn cft_mu_nm(
             n_design,
         )?,
     };
+    if !mu.is_finite() {
+        return Err("CFT 終局曲げ耐力が有限値として算定できません".into());
+    }
     Ok(mu)
 }
 
@@ -322,6 +347,107 @@ mod tests {
             thick: 4.5,
             horizontal_thick: 4.5,
             corner_r: Some(0.0),
+        }
+    }
+
+    fn rounded_shape(h: f64, b: f64, r: f64) -> SectionShape {
+        SectionShape::CftBox {
+            height: h,
+            width: b,
+            thick: 16.0,
+            horizontal_thick: 16.0,
+            corner_r: Some(r),
+        }
+    }
+
+    #[test]
+    fn rounded_long_column_matches_independent_section_and_buckling_fixture() {
+        let shape = rounded_shape(400.0, 400.0, 40.0);
+        for weak in [false, true] {
+            let mu = cft_mu_nm(&shape, 30.0, 325.0, 6168447.55432, 8000.0, weak).unwrap();
+            assert!((mu - 380701610.601).abs() < 0.01, "{mu}");
+        }
+    }
+
+    #[test]
+    fn rounded_bending_is_continuous_at_zero_and_thickness_on_both_axes_and_all_classes() {
+        for (h, b) in [(400.0, 400.0), (600.0, 400.0)] {
+            for lk in [1000.0, 3000.0, 8000.0] {
+                for weak in [false, true] {
+                    for boundary in [0.0, 16.0] {
+                        let at =
+                            cft_mu_nm(&rounded_shape(h, b, boundary), 30.0, 325.0, 1e6, lk, weak)
+                                .unwrap();
+                        let mut previous = f64::INFINITY;
+                        for eps in [0.1_f64, 0.01, 0.001] {
+                            let mut difference: f64 = 0.0;
+                            for r in [(boundary - eps).max(0.0), boundary + eps] {
+                                let mu =
+                                    cft_mu_nm(&rounded_shape(h, b, r), 30.0, 325.0, 1e6, lk, weak)
+                                        .unwrap();
+                                difference = difference.max((mu - at).abs());
+                            }
+                            assert!(
+                                difference < previous * 0.2,
+                                "{h}/{b},Lk={lk},axis={weak},R={boundary}: {difference}/{previous}"
+                            );
+                            previous = difference;
+                        }
+                        assert!(previous / at < 1e-5);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rectangular_both_axes_use_their_own_inertia_and_buckling_length() {
+        for r in [0.0, 8.0, 16.0, 40.0] {
+            let shape = rounded_shape(600.0, 400.0, r);
+            let rotated = rounded_shape(400.0, 600.0, r);
+            for lk in [1000.0, 3000.0, 8000.0] {
+                let strong = cft_mu_nm(&shape, 30.0, 325.0, 1e6, lk, false).unwrap();
+                let weak = cft_mu_nm(&shape, 30.0, 325.0, 1e6, lk, true).unwrap();
+                assert!(strong > weak);
+                assert!(
+                    (strong - cft_mu_nm(&rotated, 30.0, 325.0, 1e6, lk, true).unwrap()).abs()
+                        < 1e-5
+                );
+                assert!(
+                    (weak - cft_mu_nm(&rotated, 30.0, 325.0, 1e6, lk, false).unwrap()).abs() < 1e-5
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rounded_bending_rejects_unknown_invalid_and_outside_model_inputs() {
+        for radius in [
+            None,
+            Some(-1.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+            Some(201.0),
+        ] {
+            let shape = SectionShape::CftBox {
+                height: 400.0,
+                width: 400.0,
+                thick: 16.0,
+                horizontal_thick: 16.0,
+                corner_r: radius,
+            };
+            assert!(cft_mu_nm(&shape, 30.0, 325.0, 1e6, 1000.0, false).is_err());
+        }
+        let shape = rounded_shape(400.0, 400.0, 40.0);
+        for (fc, lk) in [(58.84, 3000.0), (30.0, 12000.01)] {
+            assert!(cft_mu_nm(&shape, fc, 325.0, 0.0, lk, false)
+                .unwrap_err()
+                .contains("適用域外"));
+        }
+        for n in [-1e9, 1e9] {
+            assert!(cft_mu_nm(&shape, 30.0, 325.0, n, 1000.0, false)
+                .unwrap_err()
+                .contains("軸NG"));
         }
     }
 
@@ -398,7 +524,7 @@ mod tests {
             assert!(cft_mu_nm(&shape, fc, 235.0, 0.0, lk, false).is_ok());
             assert!(cft_mu_nm(&shape, fc, 235.0, -1e5, lk, false).is_ok());
         }
-        for corner_r in [None, Some(1.0)] {
+        for corner_r in [None, Some(-1.0), Some(f64::NAN)] {
             let bad = SectionShape::CftBox {
                 height: 150.0,
                 width: 150.0,
@@ -406,9 +532,7 @@ mod tests {
                 horizontal_thick: 4.5,
                 corner_r,
             };
-            assert!(cft_mu_nm(&bad, 30.0, 235.0, 8e5, 2700.0, false)
-                .unwrap_err()
-                .contains("角R"));
+            assert!(cft_mu_nm(&bad, 30.0, 235.0, 8e5, 2700.0, false).is_err());
         }
         for bad in [
             SectionShape::CftBox {

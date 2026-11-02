@@ -289,7 +289,7 @@ fn pending_geometry_queries_and_quantity_are_not_reported_as_zero() {
 }
 
 #[test]
-fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
+fn rounded_cft_jobs_publish_allowable_and_ultimate_capacities() {
     use sepika_core::section_shape::SectionShape;
     let mut model = rc_column_model();
     model.load_cases.push(sepika_core::model::LoadCase {
@@ -336,28 +336,18 @@ fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
     model.sections[0] = section;
     match compute_job(&model, JobKind::DesignCheck, &JobParams::default()).unwrap() {
         JobOutcome::DesignCheck { summary, .. } => {
-            assert!(summary["n_skipped"].as_u64().unwrap() > 0);
-            assert_eq!(summary["all_members_checked_and_ok"], false);
-            assert!(summary["member_skipped"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|row| row["reason"].as_str().unwrap().contains("#418")));
+            assert_eq!(summary["n_skipped"], 0);
         }
         _ => panic!("断面検定の結果が必要"),
     }
     match compute_job(&model, JobKind::UltimateCheck, &JobParams::default()).unwrap() {
         JobOutcome::UltimateCheck { summary } => {
-            assert_eq!(summary["n_cft_mu_unavailable"], 1);
+            assert_eq!(summary["n_cft_mu_unavailable"], 0);
             let row = &summary["cft_members"][0];
-            assert!(row["mu_nm"].is_null());
-            assert!(row["mu_nm_unavailable_reason"]
-                .as_str()
-                .unwrap()
-                .contains("角Rが正の終局 N–M は未対応"));
+            assert!(row["mu_nm"].as_f64().unwrap() > 0.0);
+            assert!(row["mu_nm_unavailable_reason"].is_null());
             assert!(row["ncu"].as_f64().unwrap() > 0.0);
             assert!(!row["axial_ok"].is_null());
-            assert_eq!(summary["all_checks_calculated_and_ok"], false);
         }
         _ => panic!("終局検定の結果が必要"),
     }

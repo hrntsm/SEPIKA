@@ -10160,7 +10160,7 @@ fn test_preparation_rejects_cft_with_zero_core() {
 }
 
 #[test]
-fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
+fn cft_ultimate_app_exposes_axial_and_rounded_bending_capacity() {
     use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
     use sepika_core::section_shape::SectionShape;
     let mut model = crate::sample::portal_frame();
@@ -10200,14 +10200,43 @@ fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
     analyze_frame_gravity(&mut app);
     let rows = app.compute_cft_ultimate_checks().unwrap();
     assert!(!rows.is_empty());
+    let previous_mu = *rows[0].mu_nm.as_ref().unwrap();
     for row in rows {
         assert!(row.ncu > 0.0 && row.ntu > 0.0);
-        assert!(row
-            .mu_nm
-            .unwrap_err()
-            .contains("角Rが正の終局 N–M は未対応"));
-        assert!(row.detail.contains("未算定"));
+        assert!(row.mu_nm.unwrap() > 0.0);
+        assert!(!row.detail.contains("未算定"));
     }
+    app.run_design_check();
+    assert!(app.require_design_input().is_ok());
+    #[cfg(feature = "gui")]
+    assert!(
+        app.apply_model_edit(Box::new(sepika_edit::SetSectionSurfaceRadius {
+            section: SectionId(0),
+            radius_mm: Some(40.0),
+        }))
+    );
+    #[cfg(not(feature = "gui"))]
+    {
+        app.core.model.sections[0] = app.core.model.sections[0]
+            .with_surface_radius(Some(40.0))
+            .unwrap();
+        app.core.scoped.staleness.mark_edited();
+    }
+    assert!(app.require_design_input().is_err());
+    assert!(app.current_design_results().is_none());
+    assert!(app.compute_cft_ultimate_checks().is_err());
+    let path = test_tmp().join("rounded-cft-stale-radius.ovika");
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    assert!(reopened.current_design_results().is_none());
+    analyze_frame_gravity(&mut reopened);
+    let current = reopened.compute_cft_ultimate_checks().unwrap();
+    assert!(*current[0].mu_nm.as_ref().unwrap() > 0.0);
+    assert_ne!(*current[0].mu_nm.as_ref().unwrap(), previous_mu);
+    std::fs::remove_file(path).unwrap();
 }
 
 pub(super) fn cft_long_case2_app(n_compression_n: f64) -> App {

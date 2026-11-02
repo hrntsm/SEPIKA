@@ -16,13 +16,14 @@ use crate::{
     DesignCtx, LoadTerm, MemberForcesAt,
 };
 use sepika_core::model::{Material, Section};
-use sepika_core::section_shape::SectionShape;
+use sepika_core::section_shape::{RoundedRectangle, SectionShape};
 
 use crate::ratio_or_large;
 
 /// 矩形充填コンクリート部分の (cN, cM) を弾性三角形応力分布の閉形式で求める。
 /// `xn`: 中立軸位置（圧縮縁からの距離）[mm]、`cb`/`cd`: 検討方向の充填断面
 /// 幅・せい [mm]。
+#[cfg(test)]
 fn cft_rect_cn_cm(cb: f64, cd: f64, fc: f64, xn: f64) -> (f64, f64) {
     if cb <= 0.0 || cd <= 0.0 || fc <= 0.0 || xn <= 0.0 {
         return (0.0, 0.0);
@@ -41,6 +42,7 @@ fn cft_rect_cn_cm(cb: f64, cd: f64, fc: f64, xn: f64) -> (f64, f64) {
 
 /// 設計軸力 `n_design`（0≤N<cNc）に対する矩形充填コンクリート部分の cM を、
 /// 閉形式の逆算（cN(xn)=N となる xn を解く）で求める。
+#[cfg(test)]
 fn cft_rect_ma(cb: f64, cd: f64, fc: f64, n_design: f64) -> f64 {
     let cnc = cb * cd * fc;
     if cnc <= 0.0 || n_design <= 0.0 {
@@ -55,6 +57,33 @@ fn cft_rect_ma(cb: f64, cd: f64, fc: f64, n_design: f64) -> f64 {
     let xn = xr * cd;
     let (_, cm) = cft_rect_cn_cm(cb, cd, fc, xn);
     cm
+}
+
+fn cft_rounded_ma(core: RoundedRectangle, cd: f64, fc: f64, n: f64) -> f64 {
+    let p = core.properties();
+    let cnc = p.area * fc;
+    if n <= 0.0 || n >= cnc {
+        return 0.0;
+    }
+    if n >= cnc / 2.0 {
+        return 2.0 * (cnc - n) * p.iy / (p.area * cd);
+    }
+    let mut lo = 0.0;
+    let mut hi = cd;
+    for _ in 0..80 {
+        let xn = (lo + hi) / 2.0;
+        let z = cd / 2.0 - xn;
+        let (a, q, _) = core.above(z);
+        if fc * (q - z * a) / xn < n {
+            lo = xn;
+        } else {
+            hi = xn;
+        }
+    }
+    let xn = (lo + hi) / 2.0;
+    let z = cd / 2.0 - xn;
+    let (_, q, i) = core.above(z);
+    (fc * (i - z * q) / xn).max(0.0)
 }
 
 /// 縁応力 `fc` 一定・線形分布（コンクリート引張無視）を断面内で数値積分し、
@@ -259,17 +288,6 @@ fn cft_box_check(
         .rounded_steel_properties()?
         .ok_or("角形 CFT の鋼管性能を解決できません")?;
     let r = corner_r.ok_or("角形 CFT の角Rが未知です")?;
-    if r > thick {
-        return Err("角形 CFT の内角Rが正の許容曲げは未対応です（設計仕様は #418 で策定）".into());
-    }
-    if r > 0.0
-        && ctx
-            .seismic_qd
-            .as_ref()
-            .is_some_and(|qd| qd.method != crate::QdMethod::Qd2)
-    {
-        return Err("角形 CFT の角Rが正の終局 N–M は未対応のため、Mu に依存する設計用せん断 QD1/min を算定できません（#418）。QD2 へ自動切替しません".into());
-    }
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
 
@@ -297,13 +315,15 @@ fn cft_box_check(
     let c_area = c_core.area;
     let cnc = c_area * fc_allow;
 
+    let core_z = RoundedRectangle::new(c_d_z, c_b_z, (r - thick).max(0.0))?;
+    let core_y = RoundedRectangle::new(c_d_y, c_b_y, (r - thick).max(0.0))?;
     let n_design = -forces.n;
 
     let ma_z = cft_axis_capacity(n_design, cnc, sa, s_ft, s_fc, sz_z, |n| {
-        cft_rect_ma(c_b_z, c_d_z, fc_allow, n)
+        cft_rounded_ma(core_z, c_d_z, fc_allow, n)
     });
     let ma_y = cft_axis_capacity(n_design, cnc, sa, s_ft, s_fc, sz_y, |n| {
-        cft_rect_ma(c_b_y, c_d_y, fc_allow, n)
+        cft_rounded_ma(core_y, c_d_y, fc_allow, n)
     });
 
     let ratio_z = ratio_or_large(forces.mz, ma_z);
