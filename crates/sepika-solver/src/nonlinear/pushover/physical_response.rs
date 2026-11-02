@@ -1,4 +1,4 @@
-use super::loads::PhysicalPushoverLoads;
+use super::loads::{scale_member, PhysicalPushoverLoads};
 use crate::common::constraint::Reducer;
 use crate::common::linear_load::{legacy_member_force, PhysicalLoadLedger};
 use sepika_core::dof::DofMap;
@@ -191,16 +191,6 @@ pub(super) fn current_case(loads: &PhysicalPushoverLoads, mu: f64, lambda: f64) 
             load
         }));
     source
-}
-
-fn scale_member(load: &mut sepika_core::model::MemberLoad, factor: f64) {
-    match &mut load.kind {
-        MemberLoadKind::Point { p, .. } => *p *= factor,
-        MemberLoadKind::Distributed { w1, w2, .. } => {
-            *w1 *= factor;
-            *w2 *= factor;
-        }
-    }
 }
 
 pub(super) fn load_above(

@@ -136,7 +136,7 @@ impl<'a> StepRecorder<'a> {
 
         let mut cuts = super::story_response::record_cuts_with_responses(
             model, dofmap, behaviors, self.dir, &responses, &physical,
-        )?;
+        );
         let external: Vec<_> = (0..dofmap.n_active())
             .map(|a| {
                 self.reference_external.get(a).copied().unwrap_or(0.) * load_factor

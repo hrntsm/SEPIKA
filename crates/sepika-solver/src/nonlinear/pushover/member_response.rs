@@ -201,9 +201,6 @@ pub(crate) fn compute_member_response_with_responses(
     let ctx = Ctx { model };
     let mut out = Vec::with_capacity(model.elements.len());
     for ((elem, b), response) in model.elements.iter().zip(behaviors).zip(responses) {
-        if elem.nodes.len() < 2 {
-            continue;
-        }
         if elem.nodes.len() != 2 {
             continue;
         }

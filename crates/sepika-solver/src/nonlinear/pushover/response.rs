@@ -93,19 +93,10 @@ pub(crate) fn get_roof_disp(
     dofmap: &DofMap,
     dir: SeismicDir,
 ) -> f64 {
-    if let Some(story) = model.stories.last() {
-        if let Some(node) = story_reference_node(model, story) {
-            let dof_idx = dir_index(dir);
-            let g = node.index() * 6 + dof_idx;
-            if let Some(a) = dofmap.active(g) {
-                let idx = a as usize;
-                if idx < total_disp.len() {
-                    return total_disp[idx];
-                }
-            }
-        }
-    }
-    0.0
+    get_roof_dof(model, dofmap, dir)
+        .and_then(|idx| total_disp.get(idx))
+        .copied()
+        .unwrap_or(0.0)
 }
 
 pub(crate) fn get_roof_dof(model: &Model, dofmap: &DofMap, dir: SeismicDir) -> Option<usize> {
