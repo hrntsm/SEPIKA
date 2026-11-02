@@ -898,13 +898,6 @@ fn radius_edit_updates_only_shape_properties_and_restores_basis() {
                         original.resolved_j().unwrap()
                     );
                 }
-                SectionShape::SteelBox { corner_r, .. } | SectionShape::CftBox { corner_r, .. } => {
-                    assert_eq!(*corner_r, None);
-                    assert_eq!(unknown.property_basis.j, PropertyBasis::PendingShape);
-                    let reason = unknown.resolved_j().unwrap_err();
-                    assert!(reason.contains("未算定"), "{reason}");
-                    assert!(reason.contains("未知"), "{reason}");
-                }
                 _ => unreachable!(),
             }
             let reason = unknown.ensure_properties_resolved().unwrap_err();
@@ -4070,21 +4063,6 @@ fn test_composite_delete_nodes_descending_roundtrip() {
 // 二次部材（小梁・間柱）・一本部材指定（girder_groups）の参照整合
 // ============================================================================
 
-fn sample_secondary(n0: u32, n1: u32) -> sepika_core::model::SecondaryMember {
-    sepika_core::model::SecondaryMember {
-        vertical_eccentricity: Some(0.0),
-        gravity_end_shares: None,
-        id: sepika_core::ids::SecondaryMemberId(n0),
-        kind: sepika_core::model::SecondaryMemberKind::Beam,
-        ends: sepika_core::model::SecondaryMemberEnds::Detached([
-            [f64::from(n0) * 1000.0, 0.0, 0.0],
-            [f64::from(n1) * 1000.0, 0.0, 0.0],
-        ]),
-        section: None,
-        name: "小梁".into(),
-    }
-}
-
 /// 壁領域の境界だけが参照する節点（部材からは参照されない）は削除できない
 /// （敵対的レビューで発覚: `node_referenced_outside_elements` が `wall_regions` を
 /// 見ていなかった。実運用では壁領域の境界節点は必ず柱・梁からも参照されるため
@@ -4135,7 +4113,8 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
             strength_factor: None,
         });
     }
-    let mut sm = sample_secondary(0, 1);
+    let mut sm = make_sm(0, sepika_core::model::SecondaryMemberKind::Beam);
+    sm.name = "小梁".into();
     sm.section = Some(SectionId(1));
     model.unassigned_beams.push(sm);
     let mut stack = UndoStack::new();
@@ -6902,22 +6881,31 @@ fn test_add_attached_slab_roundtrip() {
     });
     let mut undo = UndoStack::default();
 
-    let cmd = crate::AddAttachedSlab {
-        anchor: RegionAnchor::Line {
-            nodes: [NodeId(0), NodeId(1)],
-            span: [0.0, 1.0],
-            transfer: LoadTransfer::Anchor,
-        },
-        extent: [1500.0, 1500.0],
-        plate: SlabPlate::default(),
-    };
-    assert!(undo.run(&mut model, Box::new(cmd)));
-    assert_eq!(model.slabs.len(), 1);
-    assert!(model.slabs[0].is_attached());
-    assert!(model.validate().is_ok(), "{:?}", model.validate());
+    for extent in [[1500.0, 1500.0], [1000.0, 1000.0]] {
+        let cmd = crate::AddAttachedSlab {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent,
+            plate: SlabPlate::default(),
+        };
+        assert!(undo.run(&mut model, Box::new(cmd)));
+        assert_eq!(model.slabs.len(), 1);
+        assert!(model.slabs[0].is_attached());
+        assert!(model.slabs[0].plate.section.is_none());
+        match &model.slabs[0].shape {
+            sepika_core::model::SlabShape::Attached { extent: actual, .. } => {
+                assert_eq!(*actual, extent);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-    undo.undo(&mut model);
-    assert!(model.slabs.is_empty(), "undo で消える");
+        undo.undo(&mut model);
+        assert!(model.slabs.is_empty(), "undo で消える");
+    }
 
     // 実在しない節点を指す取り付く床板は作らない。
     let bad = crate::AddAttachedSlab {
@@ -6954,61 +6942,6 @@ fn test_add_attached_slab_roundtrip() {
     let before = model.slabs.len();
     assert!(!undo.run(&mut model, Box::new(reversed)));
     assert_eq!(model.slabs.len(), before, "逆順の区間は追加されない");
-}
-
-/// 断面未割当、extent 1000,1000 の取り付く床板の追加が往復する。
-#[test]
-fn test_add_attached_slab_sectionless_extent_1000_roundtrip() {
-    use sepika_core::ids::NodeId;
-    use sepika_core::model::{LoadTransfer, RegionAnchor, SlabPlate, SlabShape};
-
-    let mut model = Model::default();
-    for i in 0..2u32 {
-        model.nodes.push(sepika_core::model::Node {
-            id: NodeId(i),
-            coord: [i as f64 * 4000.0, 0.0, 0.0],
-            restraint: Default::default(),
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
-    model.elements.push(sepika_core::model::ElementData {
-        id: sepika_core::ids::ElemId(0),
-        kind: sepika_core::model::ElementKind::Beam,
-        nodes: vec![NodeId(0), NodeId(1)].into(),
-        section: None,
-        local_axis: sepika_core::model::LocalAxis {
-            ref_vector: [0.0, 0.0, 1.0],
-        },
-        end_cond: [sepika_core::model::EndCondition::Fixed; 2],
-        force_regime: sepika_core::model::ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
-        plastic_zone: None,
-        spring: None,
-    });
-    let mut undo = UndoStack::default();
-    assert!(undo.run(
-        &mut model,
-        Box::new(crate::AddAttachedSlab {
-            anchor: RegionAnchor::Line {
-                nodes: [NodeId(0), NodeId(1)],
-                span: [0.0, 1.0],
-                transfer: LoadTransfer::Anchor,
-            },
-            extent: [1000.0, 1000.0],
-            plate: SlabPlate::default(),
-        })
-    ));
-    assert_eq!(model.slabs.len(), 1);
-    assert!(model.slabs[0].plate.section.is_none());
-    match &model.slabs[0].shape {
-        SlabShape::Attached { extent, .. } => assert_eq!(*extent, [1000.0, 1000.0]),
-        other => panic!("{other:?}"),
-    }
-    undo.undo(&mut model);
-    assert!(model.slabs.is_empty());
 }
 
 /// SetAttachedExtent / SetAttachedAnchor の Noop。
