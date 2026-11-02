@@ -307,9 +307,20 @@ fn brace_axis_dir(model: &Model, elem: ElemId) -> [f64; 3] {
     }
 }
 
-/// 入力欄の文字列を数値へ。空欄・解釈できない文字列は 0 とする。
-fn parse(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
+pub(crate) fn parse_load_number(s: &str, field: &str) -> Result<f64, String> {
+    if s.trim().is_empty() {
+        return Err(format!(
+            "{field}: 必須入力です（0 の場合も入力してください）"
+        ));
+    }
+    let value = s
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| format!("{field}: 数値を入力してください"))?;
+    if !value.is_finite() {
+        return Err(format!("{field}: 有限な数値を入力してください"));
+    }
+    Ok(value)
 }
 
 impl App {
@@ -666,19 +677,21 @@ impl App {
                 if node.index() >= self.core.model.nodes.len() {
                     return Err(format!("節点 N{} は存在しません", node.0));
                 }
+                let mut values = [0.0; 6];
+                for (k, field) in ["Fx", "Fy", "Fz", "Mx", "My", "Mz"].iter().enumerate() {
+                    values[k] = parse_load_number(&d.values[k], field)?;
+                }
                 let load = NodalLoad {
                     node,
-                    values: std::array::from_fn(|k| parse(&d.values[k])),
+                    values,
                     name: d.name.trim().to_string(),
                     source: sepika_core::model::LoadSource::Manual,
                 };
-                match &editor.target {
-                    LoadEditTarget::New => {
-                        self.core.scoped.undo.run(
-                            &mut self.core.model,
-                            Box::new(sepika_edit::AddNodalLoad { lc, load }),
-                        );
-                    }
+                let applied = match &editor.target {
+                    LoadEditTarget::New => self.core.scoped.undo.run(
+                        &mut self.core.model,
+                        Box::new(sepika_edit::AddNodalLoad { lc, load }),
+                    ),
                     LoadEditTarget::ExistingNodal { index, snapshot } => {
                         self.verify_nodal_snapshot(lc, *index, snapshot)?;
                         self.core.scoped.undo.run(
@@ -688,11 +701,20 @@ impl App {
                                 index: *index,
                                 load,
                             }),
-                        );
+                        )
                     }
                     LoadEditTarget::ExistingMember { .. } => {
                         return Err("編集対象の種類が一致しません".to_string())
                     }
+                };
+                if !applied {
+                    return Err(self
+                        .core
+                        .scoped
+                        .undo
+                        .last_error()
+                        .unwrap_or("節点荷重を変更できません")
+                        .to_owned());
                 }
             }
             LoadDraft::Member(d) => {
@@ -721,20 +743,23 @@ impl App {
                 };
                 let kind = match d.kind {
                     0 => MemberLoadKind::Point {
-                        a: parse(&d.a),
-                        p: parse(&d.p),
+                        a: parse_load_number(&d.a, "a [mm]")?,
+                        p: parse_load_number(&d.p, "P [N]")?,
                     },
-                    1 => MemberLoadKind::Distributed {
-                        a: 0.0,
-                        b: length,
-                        w1: parse(&d.w1),
-                        w2: parse(&d.w1),
-                    },
+                    1 => {
+                        let w = parse_load_number(&d.w1, "w [N/mm]")?;
+                        MemberLoadKind::Distributed {
+                            a: 0.0,
+                            b: length,
+                            w1: w,
+                            w2: w,
+                        }
+                    }
                     _ => MemberLoadKind::Distributed {
-                        a: parse(&d.a),
-                        b: parse(&d.b),
-                        w1: parse(&d.w1),
-                        w2: parse(&d.w2),
+                        a: parse_load_number(&d.a, "a [mm]")?,
+                        b: parse_load_number(&d.b, "b [mm]")?,
+                        w1: parse_load_number(&d.w1, "w1 [N/mm]")?,
+                        w2: parse_load_number(&d.w2, "w2 [N/mm]")?,
                     },
                 };
                 let load = MemberLoad {
@@ -889,6 +914,193 @@ mod tests {
                 kind: LoadCaseKind::Other,
             }],
             ..Default::default()
+        }
+    }
+
+    fn history_app() -> App {
+        let mut app = App::default();
+        app.load_model(beam_and_brace_model());
+        for value in [1.0, 2.0] {
+            assert!(app.core.scoped.undo.run(
+                &mut app.core.model,
+                Box::new(sepika_edit::AddNodalLoad {
+                    lc: LoadCaseId(0),
+                    load: NodalLoad::manual(NodeId(0), [value; 6]),
+                })
+            ));
+        }
+        app.core.scoped.undo.undo(&mut app.core.model);
+        app.core.scoped.staleness = crate::app::Staleness::default();
+        app.core.scoped.results = Some(crate::app::ResultsBundle::default());
+        app
+    }
+
+    #[test]
+    fn invalid_load_numbers_preserve_draft_model_history_and_result_validity() {
+        for text in ["", " ", "abc", "NaN", "inf", "-inf", "1e309"] {
+            for editing in [false, true] {
+                for field in 0..11 {
+                    let mut app = history_app();
+                    let mut editor = if field < 6 {
+                        if editing {
+                            LoadEditor::edit_nodal(
+                                LoadCaseId(0),
+                                0,
+                                &app.core.model.load_cases[0].nodal[0],
+                            )
+                        } else {
+                            LoadEditor::new_nodal(LoadCaseId(0), Some(NodeId(0)))
+                        }
+                    } else {
+                        let load = MemberLoad::manual(
+                            ElemId(0),
+                            [0.0, 0.0, -1.0],
+                            MemberLoadKind::Point { a: 0.0, p: 1.0 },
+                        );
+                        if editing {
+                            app.core.model.load_cases[0].member.push(load.clone());
+                            LoadEditor::edit_member(LoadCaseId(0), 0, &load, &app.core.model)
+                        } else {
+                            LoadEditor::new_member(LoadCaseId(0), Some(ElemId(0)))
+                        }
+                    };
+                    let label = match &mut editor.draft {
+                        LoadDraft::Nodal(d) => {
+                            d.values[field] = text.into();
+                            ["Fx", "Fy", "Fz", "Mx", "My", "Mz"][field]
+                        }
+                        LoadDraft::Member(d) => {
+                            d.kind = if field == 6 || field == 8 { 0 } else { 2 };
+                            d.b = "6000".into();
+                            let (slot, label) = match field {
+                                6 => (&mut d.a, "a [mm]"),
+                                7 => (&mut d.b, "b [mm]"),
+                                8 => (&mut d.p, "P [N]"),
+                                9 => (&mut d.w1, "w1 [N/mm]"),
+                                _ => (&mut d.w2, "w2 [N/mm]"),
+                            };
+                            *slot = text.into();
+                            label
+                        }
+                    };
+                    let draft = editor.clone();
+                    let model = rmp_serde::to_vec_named(&app.core.model).unwrap();
+                    let revision = app.core.scoped.undo.revision();
+                    let staleness = format!("{:?}", app.core.scoped.staleness);
+                    let results = format!("{:?}", app.core.scoped.results);
+                    let err = app.commit_load_editor(&editor).unwrap_err();
+                    assert!(err.contains(label), "{err}");
+                    assert!(
+                        err.contains(if text.trim().is_empty() {
+                            "必須"
+                        } else if text == "abc" {
+                            "数値"
+                        } else {
+                            "有限"
+                        }),
+                        "{err}"
+                    );
+                    assert_eq!(editor, draft);
+                    assert_eq!(format!("{:?}", app.core.scoped.results), results);
+                    assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), model);
+                    assert_eq!(app.core.scoped.undo.revision(), revision);
+                    assert!(app.core.scoped.undo.can_undo());
+                    assert!(app.core.scoped.undo.can_redo());
+                    assert_eq!(format!("{:?}", app.core.scoped.staleness), staleness);
+                    app.core.scoped.undo.redo(&mut app.core.model);
+                    assert_eq!(app.core.model.load_cases[0].nodal[1].values, [2.0; 6]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_modal_keeps_input_and_displays_field_and_reason() {
+        let mut app = history_app();
+        let mut editor = LoadEditor::new_nodal(LoadCaseId(0), Some(NodeId(0)));
+        if let LoadDraft::Nodal(d) = &mut editor.draft {
+            d.values[2] = "abc".into();
+        }
+        editor.error = Some(app.commit_load_editor(&editor).unwrap_err());
+        app.ui.scoped.load_editor = Some(editor.clone());
+        let context = egui::Context::default();
+        let _ = context.run_ui(Default::default(), |ui| app.load_editor_ui(ui.ctx()));
+        let output = context.run_ui(Default::default(), |ui| app.load_editor_ui(ui.ctx()));
+        fn text(shape: &egui::epaint::Shape) -> String {
+            match shape {
+                egui::epaint::Shape::Text(t) => t.galley.job.text.clone(),
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().map(text).collect::<Vec<_>>().join(" ")
+                }
+                _ => String::new(),
+            }
+        }
+        let visible = output
+            .shapes
+            .iter()
+            .map(|s| text(&s.shape))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(visible.contains("Fz: 数値を入力してください"), "{visible}");
+        assert_eq!(app.ui.scoped.load_editor, Some(editor));
+    }
+
+    #[test]
+    fn rejected_nodal_command_does_not_mark_results_stale() {
+        let mut app = history_app();
+        app.core.scoped.undo.restrict_sections(Vec::new());
+        let editor = LoadEditor::new_nodal(LoadCaseId(0), Some(NodeId(0)));
+        let model = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        let stale = format!("{:?}", app.core.scoped.staleness);
+        let revision = app.core.scoped.undo.revision();
+        assert!(app.commit_load_editor(&editor).is_err());
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), model);
+        assert_eq!(format!("{:?}", app.core.scoped.staleness), stale);
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert!(app.core.scoped.undo.can_redo());
+    }
+
+    #[test]
+    fn signed_load_values_and_unused_member_fields_are_accepted() {
+        for editing in [false, true] {
+            let mut app = history_app();
+            let mut editor = if editing {
+                LoadEditor::edit_nodal(LoadCaseId(0), 0, &app.core.model.load_cases[0].nodal[0])
+            } else {
+                LoadEditor::new_nodal(LoadCaseId(0), Some(NodeId(0)))
+            };
+            if let LoadDraft::Nodal(d) = &mut editor.draft {
+                d.values = [" -2.5 ", "+3", "0", "-4", "5e2", "-6"].map(String::from);
+            }
+            app.commit_load_editor(&editor).unwrap();
+            assert_eq!(
+                app.core.model.load_cases[0].nodal[if editing { 0 } else { 1 }].values,
+                [-2.5, 3.0, 0.0, -4.0, 500.0, -6.0]
+            );
+            let mut editor = if editing {
+                let load =
+                    MemberLoad::full_length_uniform(ElemId(0), [0.0, 0.0, -1.0], 6000.0, 1.0);
+                app.core.model.load_cases[0].member.push(load.clone());
+                LoadEditor::edit_member(LoadCaseId(0), 0, &load, &app.core.model)
+            } else {
+                LoadEditor::new_member(LoadCaseId(0), Some(ElemId(0)))
+            };
+            if let LoadDraft::Member(d) = &mut editor.draft {
+                d.w1 = "-2.5".into();
+                d.a = "abc".into();
+                d.b.clear();
+                d.p = "NaN".into();
+                d.w2 = "inf".into();
+            }
+            app.commit_load_editor(&editor).unwrap();
+            assert!(matches!(
+                app.core.model.load_cases[0].member[0].kind,
+                MemberLoadKind::Distributed {
+                    w1: -2.5,
+                    w2: -2.5,
+                    ..
+                }
+            ));
         }
     }
 
@@ -1055,7 +1267,8 @@ mod tests {
                 if !expected {
                     let reason = result.as_ref().unwrap_err();
                     assert!(
-                        reason.contains("member[0] 部材 0") && reason.contains("mm"),
+                        (reason.contains("member[0] 部材 0") || reason.contains("有限"))
+                            && reason.contains("mm"),
                         "{reason}"
                     );
                     assert_eq!(format!("{:?}", app.core.model), before);

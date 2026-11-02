@@ -362,7 +362,7 @@ impl App {
         ui: &mut egui::Ui,
         region_id: sepika_core::ids::FloorPlateAssignmentRegionId,
     ) -> bool {
-        use sepika_core::model::{AreaLoad, DistributionMethod, PlateAssignment};
+        use sepika_core::model::{DistributionMethod, PlateAssignment};
 
         let Some(region) = self.core.model.floor_assignment_region(region_id) else {
             ui.label("この床板割当領域は存在しません（モデルが変更されました）");
@@ -473,29 +473,29 @@ impl App {
             });
         }
 
+        if matches!(
+            self.ui.scoped.slab_draft.usage,
+            Some(sepika_core::model::SlabUsage::Custom { .. })
+        ) {
+            ui.horizontal(|ui| {
+                for (label, text) in ["床用", "小梁用", "大梁用", "地震用"]
+                    .iter()
+                    .zip(self.ui.scoped.slab_draft.custom_live_kn_m2.iter_mut())
+                {
+                    ui.label(*label);
+                    ui.add(egui::TextEdit::singleline(text).desired_width(55.0));
+                }
+            });
+        }
         let section = self.ui.scoped.slab_draft.section;
-        let value_kn_m2 = self
-            .ui
-            .scoped
-            .slab_draft
-            .load_value
-            .trim()
-            .parse::<f64>()
-            .unwrap_or(0.0);
-        let value = sepika_core::units::to_internal::area_load_kn_per_m2(value_kn_m2);
-        let kind = self.ui.scoped.slab_draft.load_kind.trim();
-        let kind = if kind.is_empty() { "DL" } else { kind }.to_string();
-        let plate = sepika_core::model::SlabPlate {
-            section,
-            loads: vec![AreaLoad { kind, value }],
-            usage: self.ui.scoped.slab_draft.usage,
-            method: self.ui.scoped.slab_draft.method,
-            one_way: self.ui.scoped.slab_draft.one_way,
-        };
+        let plate = self.ui.scoped.slab_draft.plate();
+        if let Err(reason) = &plate {
+            ui.colored_label(crate::theme::ERROR_RED, reason);
+        }
 
         let mut close = false;
         ui.horizontal(|ui| {
-            let can_assign = section.is_some();
+            let can_assign = section.is_some() && plate.is_ok();
             if ui
                 .add_enabled(can_assign, egui::Button::new("この仕様で割当"))
                 .on_hover_text(
@@ -503,15 +503,12 @@ impl App {
                 )
                 .clicked()
             {
-                self.core.scoped.undo.run(
-                    &mut self.core.model,
-                    Box::new(sepika_edit::AssignSlabToFloorPlateRegion {
-                        region: region_id,
-                        plate: plate.clone(),
-                    }),
-                );
-                self.core.scoped.staleness.mark_edited();
-                close = true;
+                match crate::tables::slabs::assign_slab_draft(self, region_id) {
+                    Ok(()) => close = true,
+                    Err(reason) => {
+                        ui.colored_label(crate::theme::ERROR_RED, reason);
+                    }
+                }
             }
             if !state.is_no_plate() && ui.button("版なしにする").clicked() {
                 self.core.scoped.undo.run(
