@@ -789,13 +789,6 @@ mod tests {
         assert!(model.validate().is_ok(), "{:?}", model.validate());
     }
 
-    /// 部材の断面は割り当てない（利用者が決めるため）。
-    #[test]
-    fn test_generated_members_have_no_section() {
-        let model = frame_model(&FrameSpec::default()).unwrap();
-        assert!(model.elements.iter().all(|e| e.section.is_none()));
-    }
-
     /// 柱脚の既定はピンで、並進 3 自由度だけが拘束される。
     #[test]
     fn test_pinned_base_is_default() {
@@ -808,10 +801,11 @@ mod tests {
         assert!(!base.restraint.is_fixed(Dof::Rx));
     }
 
-    /// 通り芯と階が入力どおりに作られ、通り名は座標の昇順に 1 から振られる。
+    /// 通り芯と階を入力どおりに作り、通り名は座標の昇順に1から振り、部材断面は未割当にする。
     #[test]
-    fn test_generated_axes_and_stories() {
+    fn test_generated_axes_stories_and_unassigned_members() {
         let model = frame_model(&FrameSpec::default()).unwrap();
+        assert!(model.elements.iter().all(|e| e.section.is_none()));
         let names: Vec<&str> = model.axes[0].axes.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, vec!["X1", "X2", "X3"]);
         let dists: Vec<f64> = model.axes[0]

@@ -1001,14 +1001,6 @@ mod tests {
         assert!((r.y_direction_area_mm2() - 8.0 * a1).abs() < 1e-9);
     }
 
-    /// 矩形柱: 未入力の方向別主筋総面積は 0。
-    #[test]
-    fn test_rect_column_direction_areas_unset() {
-        let r = rect_column(vec![], vec![]);
-        assert_eq!(r.x_direction_area_mm2(), 0.0);
-        assert_eq!(r.y_direction_area_mm2(), 0.0);
-    }
-
     /// 矩形柱: 辺別の最外段 1 列のみを引張側鉄筋量として返す。
     #[test]
     fn test_rect_column_edge_steel() {
@@ -1043,17 +1035,6 @@ mod tests {
         assert_ne!(top.count, (r.x[0] + r.x[1]) as usize);
     }
 
-    /// 矩形柱: 未入力の辺別諸元はすべて 0。
-    #[test]
-    fn test_rect_column_edge_steel_unset() {
-        let r = rect_column(vec![], vec![]);
-        let side = r.edge_steel(RectEdge::Bottom, 600.0, 700.0);
-        assert_eq!(side.count, 0);
-        assert_eq!(side.area_mm2, 0.0);
-        assert_eq!(side.centroid_from_edge_mm, 0.0);
-        assert_eq!(side.effective_depth_mm, 0.0);
-    }
-
     /// 円形柱: 等価正方形断面の辺長・引張側鉄筋量・有効せい。
     #[test]
     fn test_circle_equivalent_square() {
@@ -1069,14 +1050,6 @@ mod tests {
         assert_eq!(r.equivalent_square_side_mm(0.0), 0.0);
     }
 
-    /// 円形柱: 未入力の等価正方形諸元は 0。
-    #[test]
-    fn test_circle_equivalent_square_unset() {
-        let r = circle(0);
-        assert_eq!(r.equivalent_tension_area_mm2(), 0.0);
-        assert_eq!(r.equivalent_effective_depth_mm(600.0), 0.0);
-    }
-
     /// 円形柱: 帯筋 1 組 2 本の Aw と、等価正方形の幅で算定する pw。
     #[test]
     fn test_circle_hoop_aw_and_pw() {
@@ -1086,14 +1059,6 @@ mod tests {
         assert!((r.aw_mm2() - 2.0 * a10).abs() < 1e-12);
         assert!((r.pw(side) - 2.0 * a10 / (side * 100.0)).abs() < 1e-15);
         assert_eq!(r.pw(0.0), 0.0);
-    }
-
-    /// 円形柱: 未入力の Aw・pw は 0。
-    #[test]
-    fn test_circle_hoop_aw_and_pw_unset() {
-        let r = circle(0);
-        assert_eq!(r.aw_mm2(), 0.0);
-        assert_eq!(r.pw(600.0), 0.0);
     }
 
     /// 未入力の各型: 諸元 API が 0 または空を返す。
@@ -1112,9 +1077,20 @@ mod tests {
 
         let c = rect_column(vec![], vec![]);
         assert_eq!(c.total_main_area(), 0.0);
+        let side = c.edge_steel(RectEdge::Bottom, 600.0, 700.0);
+        assert_eq!(side.count, 0);
+        assert_eq!(side.area_mm2, 0.0);
+        assert_eq!(side.centroid_from_edge_mm, 0.0);
+        assert_eq!(side.effective_depth_mm, 0.0);
+        assert_eq!(c.x_direction_area_mm2(), 0.0);
+        assert_eq!(c.y_direction_area_mm2(), 0.0);
 
         let ci = circle(0);
         assert_eq!(ci.main_count(), 0);
         assert_eq!(ci.total_main_area(), 0.0);
+        assert_eq!(ci.aw_mm2(), 0.0);
+        assert_eq!(ci.pw(600.0), 0.0);
+        assert_eq!(ci.equivalent_tension_area_mm2(), 0.0);
+        assert_eq!(ci.equivalent_effective_depth_mm(600.0), 0.0);
     }
 }

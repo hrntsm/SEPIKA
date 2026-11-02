@@ -870,6 +870,9 @@ mod tests {
             enclosed_plate(),
         );
         let p = m.wall_plate(plate_id).expect("壁版");
+        let coords = p.boundary_coords(&m).expect("境界座標");
+        assert_eq!(coords.len(), 4);
+        assert!((p.area(&m) - 4000.0 * 3000.0).abs() < 1e-6);
         // 全節点を +100 mm ずらした「変形後」の座標を渡す。
         let moved: Vec<[f64; 3]> = m
             .nodes
@@ -935,24 +938,6 @@ mod tests {
 
         m.wall_plates[0].section = Some(SectionId(0));
         assert!(m.wall_plate_becomes_element(&m.wall_plates[0]));
-    }
-
-    #[test]
-    fn test_enclosed_boundary_coords_and_area() {
-        let mut m = model_with_nodes(&[
-            [0.0, 0.0, 0.0],
-            [4000.0, 0.0, 0.0],
-            [4000.0, 0.0, 3000.0],
-            [0.0, 0.0, 3000.0],
-        ]);
-        let plate_id = m.add_enclosed_wall_plate_from_nodes(
-            &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            enclosed_plate(),
-        );
-        let p = m.wall_plate(plate_id).expect("壁版");
-        let coords = p.boundary_coords(&m).expect("境界座標");
-        assert_eq!(coords.len(), 4);
-        assert!((p.area(&m) - 4000.0 * 3000.0).abs() < 1e-6);
     }
 
     /// `has_quad_boundary` は境界がちょうど4節点の `Enclosed` 壁版のみ `true`。

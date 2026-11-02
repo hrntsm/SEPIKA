@@ -150,7 +150,7 @@ mod tests {
     use crate::ids::{ElemId, MaterialId, SectionId};
     use crate::model::{
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, MaterialCategory,
-        Model, Node, RigidZone,
+        Model, RigidZone,
     };
     use crate::section_shape::SectionShape;
     #[test]
@@ -179,24 +179,6 @@ mod tests {
         .to_section(SectionId(0), "H-400".into());
         sec.material = Some(MaterialId(0));
         model.sections.push(sec);
-        model.nodes.extend([
-            Node {
-                id: crate::ids::NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: crate::ids::NodeId(1),
-                coord: [3000.0, 0.0, 0.0],
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ]);
         let elem = ElementData {
             id: ElemId(0),
             kind: ElementKind::Beam,
@@ -262,24 +244,6 @@ mod tests {
         .to_section(SectionId(0), "C1".into());
         sec.material = Some(MaterialId(0));
         model.sections.push(sec);
-        model.nodes.extend([
-            Node {
-                id: crate::ids::NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: crate::ids::NodeId(1),
-                coord: [0.0, 0.0, 3000.0],
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ]);
         let elem = ElementData {
             id: ElemId(0),
             kind: ElementKind::Beam,
