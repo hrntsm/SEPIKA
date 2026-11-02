@@ -45,6 +45,79 @@ pub(super) fn rounded_rectangle(h: f64, b: f64, r: f64) -> RoundedSectionPropert
     }
 }
 
+/// 図心原点の角丸矩形。寸法・半径の単位は mm。
+#[derive(Clone, Copy, Debug)]
+pub struct RoundedRectangle {
+    height: f64,
+    width: f64,
+    radius: f64,
+}
+
+impl RoundedRectangle {
+    /// 正の有限寸法と `0≤radius≤min(height,width)/2` が必要。不正値はエラー。
+    pub fn new(height: f64, width: f64, radius: f64) -> Result<Self, String> {
+        if ![height, width, radius].into_iter().all(f64::is_finite)
+            || height <= 0.0
+            || width <= 0.0
+            || radius < 0.0
+            || radius > height.min(width) / 2.0
+        {
+            return Err("角丸矩形の寸法・半径が不正です".into());
+        }
+        rounded_rectangle(height, width, radius).validate()?;
+        Ok(Self {
+            height,
+            width,
+            radius,
+        })
+    }
+
+    /// 正側縁から座標 `z` までの領域の (A [mm²], ∫z dA [mm³], ∫z² dA [mm⁴])。
+    /// `z` は図心から正側への有限距離 [mm] が前提。断面外は空領域または全領域となる。
+    pub fn above(self, z: f64) -> (f64, f64, f64) {
+        let p = rounded_rectangle(self.height, self.width, self.radius);
+        let x = z.abs().min(self.height / 2.0);
+        let a = self.height / 2.0 - self.radius;
+        let flat = x.min(a);
+        let mut moments = [
+            self.width * flat,
+            self.width * flat.powi(2) / 2.0,
+            self.width * flat.powi(3) / 3.0,
+        ];
+        if x > a && self.radius > 0.0 {
+            let r = self.radius;
+            let u = (x - a).min(r);
+            let root = (r * r - u * u).max(0.0).sqrt();
+            let angle = (u / r).clamp(0.0, 1.0).asin();
+            let f0 = (u * root + r * r * angle) / 2.0;
+            let f1 = (r.powi(3) - root.powi(3)) / 3.0;
+            let f2 = (u * (2.0 * u * u - r * r) * root + r.powi(4) * angle) / 8.0;
+            let base = self.width - 2.0 * r;
+            moments[0] += base * (x - a) + 2.0 * f0;
+            moments[1] += base * (x * x - a * a) / 2.0 + 2.0 * (a * f0 + f1);
+            moments[2] +=
+                base * (x.powi(3) - a.powi(3)) / 3.0 + 2.0 * (a * a * f0 + 2.0 * a * f1 + f2);
+        }
+        if z >= self.height / 2.0 {
+            return (0.0, 0.0, 0.0);
+        }
+        if z <= -self.height / 2.0 {
+            return (p.area, 0.0, p.iy);
+        }
+        let sign = if z >= 0.0 { 1.0 } else { -1.0 };
+        (
+            p.area / 2.0 - sign * moments[0],
+            p.plastic_modulus_strong / 2.0 - moments[1],
+            p.iy / 2.0 - sign * moments[2],
+        )
+    }
+
+    /// 全領域の A・両軸 I・せい方向の Zp。単位は [`RoundedSectionProperties`] と同じ。
+    pub fn properties(self) -> RoundedSectionProperties {
+        rounded_rectangle(self.height, self.width, self.radius)
+    }
+}
+
 impl SectionShape {
     /// H のフィレット、角形鋼管・角形 CFT の角Rを反映した鋼材性能。
     /// 対象外は `Ok(None)`。必要な寸法が未知・不正ならエラー。
@@ -172,6 +245,102 @@ mod tests {
                 "{name}: actual={actual:.12e}, reference={expected:.12e}, relative={error:.12e}"
             );
             assert!(error < 2.0e-8, "{name}: {error}");
+        }
+    }
+
+    #[test]
+    fn material_properties_converge_as_radius_steps_shrink() {
+        for (h, b) in [(400.0_f64, 400.0_f64), (600.0, 400.0), (400.0, 600.0)] {
+            let props = |r| {
+                let shape = SectionShape::CftBox {
+                    height: h,
+                    width: b,
+                    thick: 16.0,
+                    horizontal_thick: 16.0,
+                    corner_r: Some(r),
+                };
+                let steel = shape.rounded_steel_properties().unwrap().unwrap();
+                let core = shape.rounded_core_properties().unwrap().unwrap();
+                [
+                    steel.area,
+                    steel.iy,
+                    steel.iz,
+                    steel.iy * 2.0 / h,
+                    steel.iz * 2.0 / b,
+                    steel.plastic_modulus_strong,
+                    core.area,
+                    core.iy,
+                    core.iz,
+                    core.plastic_modulus_strong,
+                ]
+            };
+            for boundary in [0.0, 16.0] {
+                let at = props(boundary);
+                let mut previous = [f64::INFINITY; 10];
+                for eps in [0.1_f64, 0.01, 0.001] {
+                    for j in 0..at.len() {
+                        let error = (props((boundary - eps).max(0.0))[j] - at[j])
+                            .abs()
+                            .max((props(boundary + eps)[j] - at[j]).abs());
+                        assert!(error == 0.0 || error < previous[j] * 0.2);
+                        previous[j] = error;
+                    }
+                }
+                for j in 0..at.len() {
+                    assert!(previous[j] / at[j] < 1e-5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn clipped_moments_match_independent_width_quadrature() {
+        for (h, b) in [(400.0_f64, 400.0_f64), (600.0, 400.0), (400.0, 600.0)] {
+            for r in [0.0, 8.0, 16.0, 40.0, b.min(h) / 2.0] {
+                let domain = RoundedRectangle::new(h, b, r).unwrap();
+                for z in [
+                    -h / 2.0,
+                    -h / 2.0 + r,
+                    -1.0,
+                    0.0,
+                    1.0,
+                    h / 2.0 - r,
+                    h / 2.0 - 0.01,
+                    h / 2.0,
+                ] {
+                    let actual = domain.above(z);
+                    let mut previous = None;
+                    for n in [65_536, 131_072] {
+                        let start = (z / (h / 2.0)).clamp(-1.0, 1.0).asin();
+                        let dt = (PI / 2.0 - start) / n as f64;
+                        let mut expected = [0.0; 3];
+                        for k in 0..n {
+                            let theta = start + (k as f64 + 0.5) * dt;
+                            let y = h / 2.0 * theta.sin();
+                            let da = width(h, b, r, y) * h / 2.0 * theta.cos() * dt;
+                            for (j, m) in expected.iter_mut().enumerate() {
+                                *m += da * y.powi(j as i32);
+                            }
+                        }
+                        for (j, (a, e)) in [actual.0, actual.1, actual.2]
+                            .into_iter()
+                            .zip(expected)
+                            .enumerate()
+                        {
+                            let tolerance = 1e-9 * b * h.powi(j as i32 + 1);
+                            assert!(
+                                (a - e).abs() < tolerance,
+                                "h={h},b={b},r={r},z={z},k={j}: {a}/{e}"
+                            );
+                            if let Some(prev) = previous {
+                                let prev: [f64; 3] = prev;
+                                assert!((e - prev[j]).abs() < tolerance);
+                            }
+                        }
+                        previous = Some(expected);
+                    }
+                }
+            }
         }
     }
 

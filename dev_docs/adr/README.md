@@ -139,8 +139,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0095](0095-fixed-steel-quantity-evidence.md) | accepted | 固定したS造部材の鋼材数量と全体数量の算定状態を分離する |
 | [0096](0096-stbridge-built-box-provenance.md) | accepted | ST-Bridge組立BOXの再出力は原形状の来歴で区別する |
 | [0097](0097-secondary-steel-post-check.md) | accepted | 鋼製間柱の独立検定条件を鉛直荷重伝達と分離する |
-
 | [0098](0098-fixed-elastic-story-yield.md) | accepted | 共通弾性静的応答を固定した層骨格と未同定診断を分離する |
+| [0100](0100-rounded-cft-flexure.md) | accepted | 角形CFTの許容・終局曲げで同じ角部材料領域を積分する |
 
 ## 規約
 
