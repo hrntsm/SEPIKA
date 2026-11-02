@@ -249,6 +249,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-pushover-support-resistance", Some(48), "旧契約"),
         ("old-fiber-end-release-equilibrium", Some(49), "旧契約"),
         ("old-checkpoint-and-fixed-time-history", Some(50), "旧契約"),
+        ("old-shell-quadrilateral-area", Some(67), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
