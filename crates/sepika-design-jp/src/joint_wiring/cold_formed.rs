@@ -27,17 +27,25 @@ pub(super) fn check_cold_formed(
     long_member_forces: Option<&[(ElemId, ForcesAt<'_>)]>,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
 ) {
-    let cf_cols: Vec<&&MemberInfo> = cols
+    let cf_cols: Vec<_> = cols
         .iter()
-        .filter(|c| {
-            is_cold_formed(&c.mat.name)
-                && matches!(
-                    c.sec.shape,
-                    Some(SectionShape::SteelBox { .. }) | Some(SectionShape::CftBox { .. })
-                )
+        .filter_map(|c| match c.sec.shape {
+            Some(SectionShape::SteelBox {
+                height,
+                width,
+                thick,
+                ..
+            })
+            | Some(SectionShape::CftBox {
+                height,
+                width,
+                thick,
+                ..
+            }) if is_cold_formed(&c.mat.name) => Some((*c, height, width, thick)),
+            _ => None,
         })
         .collect();
-    if cf_cols.iter().any(|c| {
+    if cf_cols.iter().any(|(c, ..)| {
         c.sec
             .shape
             .as_ref()
@@ -93,22 +101,8 @@ pub(super) fn check_cold_formed(
                 })
                 .map(|(_, f)| f[0])
         };
-        let zp_f_n = |c: &MemberInfo| -> Option<(f64, f64, f64)> {
-            let (h, b, t) = match c.sec.shape {
-                Some(SectionShape::SteelBox {
-                    height,
-                    width,
-                    thick,
-                    ..
-                })
-                | Some(SectionShape::CftBox {
-                    height,
-                    width,
-                    thick,
-                    ..
-                }) => (height, width, thick),
-                _ => return None,
-            };
+        let zp_f_n = |(c, h, b, t): &(&MemberInfo, f64, f64, f64)| {
+            let (h, b, t) = (*h, *b, *t);
             let f = crate::steel::steel_f_value_prefix(&c.mat.name, t)
                 .or(c.mat.fy)
                 .unwrap_or(295.0);
@@ -126,65 +120,58 @@ pub(super) fn check_cold_formed(
                     n_exist.max(0.0) / (f * c.sec.area.max(1e-9))
                 })
                 .unwrap_or(0.0);
-            Some((box_zp(h, b, t), f, n))
+            (box_zp(h, b, t), f, n)
         };
-        let upper = zp_f_n(cf_cols[0]);
-        let lower = cf_cols.get(1).and_then(|c| zp_f_n(c)).or(upper);
-        if let (Some((zp_u, f_u, n_u)), Some((zp_l, f_l, n_l))) = (upper, lower) {
-            let sum_beam_mp: f64 = beams
+        let (zp_u, f_u, n_u) = zp_f_n(&cf_cols[0]);
+        let (zp_l, f_l, n_l) = cf_cols.get(1).map(zp_f_n).unwrap_or((zp_u, f_u, n_u));
+        let sum_beam_mp: f64 = beams
+            .iter()
+            .filter(|b| b.kind.is_steel_like())
+            .filter_map(|b| match b.sec.shape {
+                Some(SectionShape::SteelH {
+                    height,
+                    width,
+                    web_thick,
+                    flange_thick,
+                    ..
+                }) => {
+                    let fb = crate::steel::steel_f_value_prefix(
+                        &b.mat.name,
+                        flange_thick.max(web_thick),
+                    )
+                    .unwrap_or(235.0);
+                    Some(fb * h_zp(height, width, web_thick, flange_thick))
+                }
+                _ => None,
+            })
+            .sum();
+        if sum_beam_mp > 0.0 {
+            let (_, height, _, thick) = cf_cols[0];
+            let (dc, tp) = (height - thick, thick);
+            let db = beams
                 .iter()
-                .filter(|b| b.kind.is_steel_like())
-                .filter_map(|b| match b.sec.shape {
-                    Some(SectionShape::SteelH {
-                        height,
-                        width,
-                        web_thick,
-                        flange_thick,
-                        ..
-                    }) => {
-                        let fb = crate::steel::steel_f_value_prefix(
-                            &b.mat.name,
-                            flange_thick.max(web_thick),
-                        )
-                        .unwrap_or(235.0);
-                        Some(fb * h_zp(height, width, web_thick, flange_thick))
-                    }
-                    _ => None,
+                .map(|b| match b.sec.shape {
+                    Some(SectionShape::SteelH { flange_thick, .. }) => b.sec.depth - flange_thick,
+                    _ => 0.9 * b.sec.depth,
                 })
-                .sum();
-            if sum_beam_mp > 0.0 {
-                let (dc, tp) = match cf_cols[0].sec.shape {
-                    Some(SectionShape::SteelBox { height, thick, .. })
-                    | Some(SectionShape::CftBox { height, thick, .. }) => (height - thick, thick),
-                    _ => (0.0, 0.0),
-                };
-                let db = beams
-                    .iter()
-                    .map(|b| match b.sec.shape {
-                        Some(SectionShape::SteelH { flange_thick, .. }) => {
-                            b.sec.depth - flange_thick
-                        }
-                        _ => 0.9 * b.sec.depth,
-                    })
-                    .fold(0.0, f64::max);
-                let n_panel = (n_u + n_l) / 2.0;
-                let mpp = panel_mpp(dc, db, tp, f_l, n_panel);
-                let inp = ColdFormedInput {
-                    zp_col_upper: zp_u,
-                    zp_col_lower: zp_l,
-                    f_col_upper: f_u,
-                    f_col_lower: f_l,
-                    n_upper: n_u,
-                    n_lower: n_l,
-                    sum_beam_mp,
-                    panel_mpp: mpp,
-                };
-                out.push((
-                    nid,
-                    "冷間成形耐力比".to_string(),
-                    CheckOutcome::Checked(cold_formed_column_ratio_check(&inp)),
-                ));
-            }
+                .fold(0.0, f64::max);
+            let n_panel = (n_u + n_l) / 2.0;
+            let mpp = panel_mpp(dc, db, tp, f_l, n_panel);
+            let inp = ColdFormedInput {
+                zp_col_upper: zp_u,
+                zp_col_lower: zp_l,
+                f_col_upper: f_u,
+                f_col_lower: f_l,
+                n_upper: n_u,
+                n_lower: n_l,
+                sum_beam_mp,
+                panel_mpp: mpp,
+            };
+            out.push((
+                nid,
+                "冷間成形耐力比".to_string(),
+                CheckOutcome::Checked(cold_formed_column_ratio_check(&inp)),
+            ));
         }
     }
 }
