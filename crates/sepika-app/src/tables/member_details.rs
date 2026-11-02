@@ -44,6 +44,44 @@ pub struct MemberDetailDraft {
     pub joints: String,
 }
 
+impl MemberDetailDraft {
+    fn load(&mut self, attr: &MemberDetailAttr) {
+        self.elem = Some(attr.elem);
+        self.synced_for = Some(attr.elem);
+        self.haunch_i_enabled = attr.haunch_i.is_some();
+        (
+            self.haunch_i_length,
+            self.haunch_i_depth,
+            self.haunch_i_width,
+        ) = attr
+            .haunch_i
+            .map(|h| {
+                (
+                    h.length.to_string(),
+                    h.depth_increase.to_string(),
+                    h.width_increase.to_string(),
+                )
+            })
+            .unwrap_or_default();
+        self.haunch_j_enabled = attr.haunch_j.is_some();
+        (
+            self.haunch_j_length,
+            self.haunch_j_depth,
+            self.haunch_j_width,
+        ) = attr
+            .haunch_j
+            .map(|h| {
+                (
+                    h.length.to_string(),
+                    h.depth_increase.to_string(),
+                    h.width_increase.to_string(),
+                )
+            })
+            .unwrap_or_default();
+        self.joints = format_joints(&attr.joints);
+    }
+}
+
 /// 継手種別のラベル（往復変換に使う固定表記）。
 fn joint_kind_label(kind: JointKind) -> &'static str {
     match kind {
@@ -77,6 +115,9 @@ fn parse_single_joint(entry: &str) -> Result<MemberJoint, String> {
         .trim()
         .parse()
         .map_err(|_| format!("不正な継手位置「{}」: 数値ではありません", dist_str.trim()))?;
+    if !distance.is_finite() {
+        return Err("継手位置は有限の値で入力してください".to_string());
+    }
     if distance <= 0.0 {
         return Err(format!(
             "継手位置「{entry}」: 距離(始端節点芯から)は正の値で入力してください"
@@ -110,7 +151,7 @@ pub fn format_joints(joints: &[MemberJoint]) -> String {
 
 /// ハンチ1端分の入力（有効フラグ・長さ・せい増分・幅増分）をパースする
 /// （egui 非依存の純関数）。無効なら `Ok(None)`。長さは正の値が必須、
-/// せい増分・幅増分は空欄なら 0 とする。
+/// 各寸法は有限値を要し、せい増分・幅増分は空欄なら 0 とする。
 pub fn parse_haunch(
     enabled: bool,
     length: &str,
@@ -124,6 +165,9 @@ pub fn parse_haunch(
         .trim()
         .parse()
         .map_err(|_| format!("不正なハンチ長「{}」: 数値ではありません", length.trim()))?;
+    if !length.is_finite() {
+        return Err("ハンチ長は有限の値で入力してください".to_string());
+    }
     if length <= 0.0 {
         return Err("ハンチ長は正の値で入力してください".to_string());
     }
@@ -132,8 +176,13 @@ pub fn parse_haunch(
         if s.is_empty() {
             Ok(0.0)
         } else {
-            s.parse()
-                .map_err(|_| format!("不正な{label}「{s}」: 数値ではありません"))
+            let value: f64 = s
+                .parse()
+                .map_err(|_| format!("不正な{label}「{s}」: 数値ではありません"))?;
+            if !value.is_finite() {
+                return Err(format!("{label}は有限の値で入力してください"));
+            }
+            Ok(value)
         }
     };
     let depth_increase = parse_opt(depth_increase, "せい増分")?;
@@ -207,37 +256,7 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
         }
     }
     if let Some(attr) = pending_edit {
-        app.ui.scoped.member_detail_draft.elem = Some(attr.elem);
-        app.ui.scoped.member_detail_draft.synced_for = Some(attr.elem);
-        app.ui.scoped.member_detail_draft.haunch_i_enabled = attr.haunch_i.is_some();
-        let (li, di, wi) = attr
-            .haunch_i
-            .map(|h| {
-                (
-                    format!("{:.0}", h.length),
-                    format!("{:.0}", h.depth_increase),
-                    format!("{:.0}", h.width_increase),
-                )
-            })
-            .unwrap_or_default();
-        app.ui.scoped.member_detail_draft.haunch_i_length = li;
-        app.ui.scoped.member_detail_draft.haunch_i_depth = di;
-        app.ui.scoped.member_detail_draft.haunch_i_width = wi;
-        app.ui.scoped.member_detail_draft.haunch_j_enabled = attr.haunch_j.is_some();
-        let (lj, dj, wj) = attr
-            .haunch_j
-            .map(|h| {
-                (
-                    format!("{:.0}", h.length),
-                    format!("{:.0}", h.depth_increase),
-                    format!("{:.0}", h.width_increase),
-                )
-            })
-            .unwrap_or_default();
-        app.ui.scoped.member_detail_draft.haunch_j_length = lj;
-        app.ui.scoped.member_detail_draft.haunch_j_depth = dj;
-        app.ui.scoped.member_detail_draft.haunch_j_width = wj;
-        app.ui.scoped.member_detail_draft.joints = format_joints(&attr.joints);
+        app.ui.scoped.member_detail_draft.load(&attr);
     }
     if let Some(elem) = pending_remove {
         app.core.scoped.undo.run(
@@ -277,38 +296,18 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
     });
     if app.ui.scoped.member_detail_draft.elem != app.ui.scoped.member_detail_draft.synced_for {
         if let Some(eid) = app.ui.scoped.member_detail_draft.elem {
-            let existing = app.core.model.member_detail(eid).cloned();
-            let (haunch_i, haunch_j, joints) = existing
-                .map(|a| (a.haunch_i, a.haunch_j, a.joints))
-                .unwrap_or((None, None, Vec::new()));
-            app.ui.scoped.member_detail_draft.haunch_i_enabled = haunch_i.is_some();
-            let (li, di, wi) = haunch_i
-                .map(|h| {
-                    (
-                        format!("{:.0}", h.length),
-                        format!("{:.0}", h.depth_increase),
-                        format!("{:.0}", h.width_increase),
-                    )
-                })
-                .unwrap_or_default();
-            app.ui.scoped.member_detail_draft.haunch_i_length = li;
-            app.ui.scoped.member_detail_draft.haunch_i_depth = di;
-            app.ui.scoped.member_detail_draft.haunch_i_width = wi;
-            app.ui.scoped.member_detail_draft.haunch_j_enabled = haunch_j.is_some();
-            let (lj, dj, wj) = haunch_j
-                .map(|h| {
-                    (
-                        format!("{:.0}", h.length),
-                        format!("{:.0}", h.depth_increase),
-                        format!("{:.0}", h.width_increase),
-                    )
-                })
-                .unwrap_or_default();
-            app.ui.scoped.member_detail_draft.haunch_j_length = lj;
-            app.ui.scoped.member_detail_draft.haunch_j_depth = dj;
-            app.ui.scoped.member_detail_draft.haunch_j_width = wj;
-            app.ui.scoped.member_detail_draft.joints = format_joints(&joints);
-            app.ui.scoped.member_detail_draft.synced_for = Some(eid);
+            let existing = app
+                .core
+                .model
+                .member_detail(eid)
+                .cloned()
+                .unwrap_or(MemberDetailAttr {
+                    elem: eid,
+                    haunch_i: None,
+                    haunch_j: None,
+                    joints: Vec::new(),
+                });
+            app.ui.scoped.member_detail_draft.load(&existing);
         }
     }
 
@@ -457,6 +456,87 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_finite_fields_are_rejected_with_reasons() {
+        for text in ["NaN", "inf", "+inf", "-inf", "Infinity", "1e309", "-1e309"] {
+            assert!(parse_joints(text).unwrap_err().contains("継手位置は有限"));
+            for (fields, label) in [
+                ([text, "0", "0"], "ハンチ長"),
+                (["700", text, "0"], "せい増分"),
+                (["700", "0", text], "幅増分"),
+            ] {
+                let error = parse_haunch(true, fields[0], fields[1], fields[2]).unwrap_err();
+                assert!(error.contains(&format!("{label}は有限")), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn finite_decimal_and_signed_increases_keep_existing_contract() {
+        assert_eq!(
+            parse_haunch(true, "7.0025e2", "-0.125", "+0.0625").unwrap(),
+            Some(Haunch {
+                length: 700.25,
+                depth_increase: -0.125,
+                width_increase: 0.0625,
+            })
+        );
+        assert_eq!(parse_haunch(false, "NaN", "inf", "-inf").unwrap(), None);
+        assert_eq!(parse_joints("1.00025e3").unwrap()[0].distance, 1000.25);
+    }
+
+    #[test]
+    fn loading_and_applying_other_fields_then_undo_preserves_both_decimal_haunches() {
+        let mut model = crate::sample::portal_frame();
+        let original = MemberDetailAttr {
+            elem: ElemId(0),
+            haunch_i: Some(Haunch {
+                length: 700.25,
+                depth_increase: 200.125,
+                width_increase: 50.0625,
+            }),
+            haunch_j: Some(Haunch {
+                length: 600.375,
+                depth_increase: -100.625,
+                width_increase: 25.875,
+            }),
+            joints: Vec::new(),
+        };
+        model.member_detail_attrs.push(original.clone());
+        let mut draft = MemberDetailDraft::default();
+        draft.load(model.member_detail(original.elem).unwrap());
+        draft.joints = "1000.25/工場".into();
+        let updated = MemberDetailAttr {
+            elem: draft.elem.unwrap(),
+            haunch_i: parse_haunch(
+                draft.haunch_i_enabled,
+                &draft.haunch_i_length,
+                &draft.haunch_i_depth,
+                &draft.haunch_i_width,
+            )
+            .unwrap(),
+            haunch_j: parse_haunch(
+                draft.haunch_j_enabled,
+                &draft.haunch_j_length,
+                &draft.haunch_j_depth,
+                &draft.haunch_j_width,
+            )
+            .unwrap(),
+            joints: parse_joints(&draft.joints).unwrap(),
+        };
+        let mut undo = sepika_edit::UndoStack::new();
+        assert!(undo.run(&mut model, Box::new(SetMemberDetailAttr { attr: updated })));
+        let actual = model.member_detail(original.elem).unwrap();
+        assert_eq!(actual.haunch_i, original.haunch_i);
+        assert_eq!(actual.haunch_j, original.haunch_j);
+        assert_eq!(actual.joints[0].distance, 1000.25);
+        undo.undo(&mut model);
+        assert_eq!(model.member_detail(original.elem), Some(&original));
+        draft.load(model.member_detail(original.elem).unwrap());
+        assert_eq!(draft.haunch_i_length, "700.25");
+        assert_eq!(draft.haunch_j_length, "600.375");
+    }
 
     /// 空文字列は「継手なし」を表し、空の Vec になること。
     #[test]

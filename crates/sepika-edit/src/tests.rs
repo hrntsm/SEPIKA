@@ -9940,3 +9940,98 @@ fn misc740_階挿入とundoで代表内柱の対象階を維持する() {
         StoryId(1)
     );
 }
+
+#[test]
+fn non_finite_member_details_leave_model_and_both_histories_unchanged() {
+    use sepika_core::model::{Haunch, JointKind, MemberDetailAttr, MemberJoint};
+    let valid = MemberDetailAttr {
+        elem: ElemId(0),
+        haunch_i: Some(Haunch {
+            length: 700.25,
+            depth_increase: -200.125,
+            width_increase: 0.0,
+        }),
+        haunch_j: Some(Haunch {
+            length: 500.75,
+            depth_increase: 100.625,
+            width_increase: 25.875,
+        }),
+        joints: vec![MemberJoint {
+            distance: 1000.25,
+            kind: JointKind::Site,
+        }],
+    };
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for field in 0..7 {
+            let mut model = seeded_model(2, 1);
+            let mut stack = UndoStack::new();
+            assert!(stack.run(
+                &mut model,
+                Box::new(SetMemberDetailAttr {
+                    attr: valid.clone()
+                })
+            ));
+            assert!(stack.run(
+                &mut model,
+                Box::new(RemoveMemberDetailAttr { elem: valid.elem })
+            ));
+            stack.undo(&mut model);
+            let baseline = model.clone();
+            let revision = stack.revision();
+            let mut invalid = valid.clone();
+            match field {
+                0 => invalid.haunch_i.as_mut().unwrap().length = value,
+                1 => invalid.haunch_i.as_mut().unwrap().depth_increase = value,
+                2 => invalid.haunch_i.as_mut().unwrap().width_increase = value,
+                3 => invalid.haunch_j.as_mut().unwrap().length = value,
+                4 => invalid.haunch_j.as_mut().unwrap().depth_increase = value,
+                5 => invalid.haunch_j.as_mut().unwrap().width_increase = value,
+                _ => invalid.joints[0].distance = value,
+            }
+            let command = SetMemberDetailAttr { attr: invalid };
+            let inverse = command.apply(&mut model);
+            assert!(inverse.rejection().unwrap().contains("有限"));
+            assert!(model.eq_ignoring_dofmap(&baseline));
+            assert!(!stack.run(&mut model, Box::new(command)));
+            assert!(stack.last_error().unwrap().contains("有限"));
+            assert!(model.eq_ignoring_dofmap(&baseline));
+            assert_eq!(stack.revision(), revision);
+            assert!(stack.can_undo());
+            assert!(stack.can_redo());
+            stack.redo(&mut model);
+            assert!(model.member_detail_attrs.is_empty());
+            stack.undo(&mut model);
+            assert!(model.eq_ignoring_dofmap(&baseline));
+            stack.undo(&mut model);
+            assert!(model.member_detail_attrs.is_empty());
+        }
+    }
+}
+
+#[test]
+fn undo_rejects_non_finite_old_member_detail_without_consuming_history() {
+    use sepika_core::model::{Haunch, MemberDetailAttr};
+    let mut model = seeded_model(2, 1);
+    let mut old = MemberDetailAttr {
+        elem: ElemId(0),
+        haunch_i: Some(Haunch {
+            length: f64::NAN,
+            depth_increase: 0.0,
+            width_increase: 0.0,
+        }),
+        haunch_j: None,
+        joints: Vec::new(),
+    };
+    model.member_detail_attrs.push(old.clone());
+    old.haunch_i.as_mut().unwrap().length = 700.25;
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(SetMemberDetailAttr { attr: old })));
+    let baseline = model.clone();
+    let revision = stack.revision();
+    stack.undo(&mut model);
+    assert!(stack.last_error().unwrap().contains("i端ハンチ長は有限"));
+    assert!(model.eq_ignoring_dofmap(&baseline));
+    assert_eq!(stack.revision(), revision);
+    assert!(stack.can_undo());
+    assert!(!stack.can_redo());
+}

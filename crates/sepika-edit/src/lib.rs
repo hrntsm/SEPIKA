@@ -394,9 +394,16 @@ impl UndoStack {
             }
         }
         self.id_changes.clear();
-        if let Some(cmd) = self.done.pop() {
+        if let Some(cmd) = self.done.last() {
+            let mut candidate = model.clone();
+            let redo_cmd = cmd.apply(&mut candidate);
+            if let Some(reason) = redo_cmd.rejection() {
+                self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+                return;
+            }
             self.affects_calculation = cmd.affects_calculation();
-            let redo_cmd = cmd.apply(model);
+            *model = candidate;
+            let cmd = self.done.pop().expect("Undo対象");
             self.id_changes = redo_cmd.inverse_id_changes();
             self.undone.push(redo_cmd);
             self.revision += 1;
