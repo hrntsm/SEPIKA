@@ -305,6 +305,7 @@ pub fn catalog_section_panel(ui: &mut egui::Ui, app: &mut App) {
 
 /// 断面作成パネル。モデルタブの断面サブタブに併置。
 pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
+    secondary_beam_bolt_panel(ui, app);
     let mut pending_tp: Option<(SectionId, f64)> = None;
 
     let focused = focused_section_index(app.ui.scoped.nav.focus_section, &app.core.model.sections)
@@ -710,12 +711,93 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
     }
 }
 
-/// `focus_section`（ナビゲータで選択中の断面）が現在も存在するか確認し、
-/// 存在すれば `sections` 内のインデックスを返す。断面テーブル側での削除等で
-/// 参照が古くなっている場合は `None`（ボタン無効化用）。
-/// `App` 全体ではなく個別フィールドを引数に取ることで、呼び出し側の
-/// `ui.group` クロージャが `app.ui.scoped.section_draft` と `app.core.model` を disjoint に
-/// 借用できるようにしている。
+pub(crate) fn secondary_beam_bolt_panel(ui: &mut egui::Ui, app: &mut App) {
+    let Some(index) =
+        focused_section_index(app.ui.scoped.nav.focus_section, &app.core.model.sections)
+    else {
+        return;
+    };
+    let symbol = app.core.model.sections[index].name.clone();
+    let old = app.core.model.secondary_beam_bolts.get(&symbol).cloned();
+    let mut input = old.clone();
+    egui::CollapsingHeader::new(format!("小梁端部の高力ボルト（断面符号 {symbol}）"))
+        .id_salt(("secondary_beam_bolts", &symbol))
+        .show(ui, |ui| {
+            ui.label(
+                "同じ符号の全小梁・各支持端に共通です（階が異なっても共通）。本数は片端分です。",
+            );
+            let mut enabled = input.is_some();
+            if ui.checkbox(&mut enabled, "接合条件を設定").changed() {
+                input = enabled.then(Default::default);
+            }
+            if let Some(i) = &mut input {
+                beam_bolt_fields(ui, i);
+            }
+        });
+    if input != old
+        && app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(sepika_edit::SetSecondaryBeamBolts { symbol, input }),
+        )
+    {
+        app.core.scoped.staleness.mark_edited();
+    }
+}
+
+pub(crate) fn beam_bolt_fields(
+    ui: &mut egui::Ui,
+    i: &mut sepika_core::model::SecondaryBeamBoltConnection,
+) {
+    use sepika_core::model::HighStrengthBolt;
+    let previous_bolt = i.bolt;
+    egui::ComboBox::from_id_salt("bolt_grade")
+        .selected_text(i.bolt.label())
+        .show_ui(ui, |ui| {
+            for bolt in [HighStrengthBolt::F10T, HighStrengthBolt::F8TGalvanized] {
+                ui.selectable_value(&mut i.bolt, bolt, bolt.label());
+            }
+        });
+    if previous_bolt != i.bolt {
+        i.surface_treatment_confirmed = false;
+    }
+    egui::ComboBox::from_id_salt("bolt_diameter")
+        .selected_text(format!("M{}", i.diameter_mm))
+        .show_ui(ui, |ui| {
+            let diameters: &[u32] = if i.bolt == HighStrengthBolt::F10T {
+                &[12, 16, 20, 22, 24, 27, 30]
+            } else {
+                &[16, 20, 22, 24, 27, 30]
+            };
+            for d in diameters {
+                ui.selectable_value(&mut i.diameter_mm, *d, format!("M{d}"));
+            }
+        });
+    egui::ComboBox::from_id_salt("bolt_surfaces")
+        .selected_text(format!("{}面摩擦", i.friction_surfaces))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut i.friction_surfaces, 1, "1面摩擦");
+            ui.selectable_value(&mut i.friction_surfaces, 2, "2面摩擦");
+        });
+    ui.horizontal(|ui| {
+        ui.label("片端本数（正の整数・0は未設定）");
+        ui.add(egui::DragValue::new(&mut i.count).range(0..=u32::MAX));
+    });
+    ui.label(match i.bolt {
+        HighStrengthBolt::F10T => "摩擦面：自然発錆またはブラスト（粗さ50μmRz以上）で、すべり係数0.45以上を確保",
+        HighStrengthBolt::F8TGalvanized => "摩擦面：溶融亜鉛めっき鋼板をブラスト＋りん酸塩処理（粗さ50μmRz以上、亜鉛合金層を残す）。すべり係数0.4以上",
+    });
+    ui.checkbox(
+        &mut i.surface_treatment_confirmed,
+        "上記の摩擦面処理・すべり係数を確認済み",
+    );
+    ui.checkbox(
+        &mut i.concentric_shear_only_confirmed,
+        "外力によるボルト引張なし・偏心付加力不要を確認済み",
+    );
+    ui.label("接合部全体の検定ではありません。支圧・破断・溶接・配置・縁端距離・曲げ引張は別途確認してください。片持ち支持端は曲げ伝達のため総合未検定です。");
+}
+
+/// 選択断面が存在すればインデックスを返し、失われた参照は `None`。
 fn focused_section_index(
     focus_section: Option<SectionId>,
     sections: &[sepika_core::model::Section],

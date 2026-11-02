@@ -458,7 +458,7 @@ impl App {
                 continue;
             }
 
-            let r = fd::design_beam_from_forces(
+            let mut r = fd::design_beam_from_forces(
                 span,
                 ex.w_equiv,
                 ex.m_max,
@@ -468,6 +468,19 @@ impl App {
                 ft,
                 fd::DEFLECTION_LIMIT_DENOM,
             );
+            let bolts = sepika_design_jp::floor_bolt::design_beam_bolts(
+                &sec.name,
+                self.core.model.secondary_beam_bolts.get(&sec.name),
+                entry.reactions,
+                [true, !sm.is_cantilever()],
+                sm.is_cantilever(),
+            );
+            if let Some(ratio) = bolts.max_ratio() {
+                r.ratio = r.ratio.max(ratio);
+            }
+            r.ok = r.ok && bolts.complete() && r.ratio <= 1.0;
+            r.unchecked = !bolts.complete();
+            r.bolts = Some(bolts);
             beam_checks.push((slab_id, target, r));
         }
         Ok(())
