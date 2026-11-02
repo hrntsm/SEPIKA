@@ -306,15 +306,36 @@ impl FrameSpec {
     }
 
     /// 入力の不備を日本語で返す（`None` なら生成できる）。
-    ///
-    /// スパン・階高は正の値でなければならない。0 以下を許すと同じ位置に節点が
-    /// 重なり、長さ 0 の部材ができて剛性行列が特異になる。
+    /// 原点は有限値、スパン・階高と床生成時の板厚は有限な正値が必要。
+    /// 導出する座標・通り芯の距離・FL・SL も有限値でなければならない。
     pub fn validate(&self) -> Option<String> {
         if self.story_heights.is_empty() {
             return Some("階高を 1 つ以上入力してください。".into());
         }
-        if self.x_spans.iter().chain(&self.y_spans).any(|s| *s <= 0.0) {
-            return Some("スパンは正の値で入力してください。".into());
+        if self.origin.iter().any(|v| !v.is_finite()) {
+            return Some("平面の原点は有限値で入力してください。".into());
+        }
+        if self
+            .x_spans
+            .iter()
+            .chain(&self.y_spans)
+            .any(|s| !s.is_finite() || *s <= 0.0)
+        {
+            return Some("スパンは有限な正の値で入力してください。".into());
+        }
+        for (origin, coords) in self
+            .origin
+            .into_iter()
+            .zip([self.x_coords(), self.y_coords()])
+        {
+            if coords
+                .iter()
+                .any(|coord| !coord.is_finite() || !(coord - origin).is_finite())
+            {
+                return Some(
+                    "通り芯の座標と原点からの距離は有限値になるよう入力してください。".into(),
+                );
+            }
         }
         if !self.base_elevation.is_finite()
             || self
@@ -337,8 +358,8 @@ impl FrameSpec {
         if fls.iter().any(|v| !v.is_finite()) {
             return Some("FL の導出結果は有限値が必要です".into());
         }
-        if self.with_slabs && self.slab_thickness <= 0.0 {
-            return Some("床の板厚は正の値で入力してください。".into());
+        if self.with_slabs && (!self.slab_thickness.is_finite() || self.slab_thickness <= 0.0) {
+            return Some("床の板厚は有限な正の値で入力してください。".into());
         }
         if self.with_slabs && self.slab_concrete_preset().is_none() {
             return Some(format!(
@@ -869,6 +890,167 @@ mod tests {
             ..FrameSpec::default()
         };
         assert!(frame_model(&no_slabs).is_ok());
+    }
+
+    fn assert_generation_error(spec: &FrameSpec, expected: &str) {
+        assert_eq!(spec.validate().as_deref(), Some(expected));
+        assert_eq!(generate_frame(spec).unwrap_err(), expected);
+        assert_eq!(frame_model(spec).unwrap_err(), expected);
+    }
+
+    #[test]
+    fn non_finite_plan_inputs_are_rejected_before_generation() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for direction in 0..2 {
+                let mut spec = FrameSpec::default();
+                spec.origin[direction] = value;
+                assert_generation_error(&spec, "平面の原点は有限値で入力してください。");
+
+                let mut spec = FrameSpec::default();
+                if direction == 0 {
+                    spec.x_spans[1] = value;
+                } else {
+                    spec.y_spans[0] = value;
+                }
+                assert_generation_error(&spec, "スパンは有限な正の値で入力してください。");
+            }
+        }
+    }
+
+    #[test]
+    fn slab_thickness_requires_finite_positive_values_only_when_enabled() {
+        for thickness in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.0] {
+            let mut spec = FrameSpec {
+                slab_thickness: thickness,
+                ..FrameSpec::default()
+            };
+            assert_generation_error(&spec, "床の板厚は有限な正の値で入力してください。");
+            spec.with_slabs = false;
+            assert!(spec.validate().is_none());
+            let generated = generate_frame(&spec).unwrap();
+            let model = frame_model(&spec).unwrap();
+            assert!(generated.slabs.is_empty());
+            assert!(model.slabs.is_empty());
+            assert!(model.sections.is_empty());
+            assert!(model.materials.is_empty());
+        }
+    }
+
+    #[test]
+    fn finite_plan_inputs_cannot_overflow_coordinates_or_axis_distances() {
+        for direction in 0..2 {
+            for (origin, spans) in [
+                (f64::MAX, vec![f64::MAX]),
+                (0.0, vec![f64::MAX, f64::MAX]),
+                (-f64::MAX, vec![f64::MAX, f64::MAX]),
+            ] {
+                let mut spec = FrameSpec::default();
+                spec.origin[direction] = origin;
+                if direction == 0 {
+                    spec.x_spans = spans;
+                } else {
+                    spec.y_spans = spans;
+                }
+                assert_generation_error(
+                    &spec,
+                    "通り芯の座標と原点からの距離は有限値になるよう入力してください。",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn non_finite_height_and_level_inputs_remain_rejected() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let spec = FrameSpec {
+                base_elevation: value,
+                ..FrameSpec::default()
+            };
+            assert_generation_error(&spec, "階高は正の値で入力してください。");
+            let spec = FrameSpec {
+                story_heights: vec![value, 3500.0, 3500.0],
+                ..FrameSpec::default()
+            };
+            assert_generation_error(&spec, "階高は正の値で入力してください。");
+            let spec = FrameSpec {
+                sl_offsets_mm: vec![Some(value); 4],
+                ..FrameSpec::default()
+            };
+            assert_generation_error(&spec, "階 0: FL・ΔSL・SL は有限な入力が必要です");
+        }
+    }
+
+    #[test]
+    fn finite_inputs_cannot_overflow_floor_or_structural_levels() {
+        let overflowing_fl = FrameSpec {
+            base_elevation: f64::MAX,
+            story_heights: vec![f64::MAX],
+            sl_offsets_mm: vec![Some(0.0); 2],
+            ..FrameSpec::default()
+        };
+        assert_generation_error(&overflowing_fl, "階 1: FL・ΔSL・SL は有限な入力が必要です");
+        let overflowing_sl = FrameSpec {
+            base_elevation: f64::MAX / 2.0,
+            story_heights: vec![f64::MAX / 4.0],
+            sl_offsets_mm: vec![Some(f64::MAX); 2],
+            ..FrameSpec::default()
+        };
+        assert_generation_error(&overflowing_sl, "階 0: FL・ΔSL・SL は有限な入力が必要です");
+    }
+
+    #[test]
+    fn finite_offset_origin_preserves_nodes_axes_and_slab_thickness() {
+        let spec = FrameSpec {
+            origin: [-250.0, 100.0],
+            x_spans: vec![1000.0, 2500.0],
+            y_spans: vec![2000.0],
+            story_heights: vec![3000.0],
+            sl_offsets_mm: vec![Some(0.0); 2],
+            slab_thickness: 180.0,
+            ..FrameSpec::default()
+        };
+        let generated = generate_frame(&spec).unwrap();
+        let model = frame_model(&spec).unwrap();
+        assert_eq!(generated.nodes, model.nodes);
+        assert_eq!(
+            model
+                .nodes
+                .iter()
+                .map(|node| node.coord)
+                .collect::<Vec<_>>(),
+            vec![
+                [-250.0, 100.0, 0.0],
+                [-250.0, 100.0, 3000.0],
+                [-250.0, 2100.0, 0.0],
+                [-250.0, 2100.0, 3000.0],
+                [750.0, 100.0, 0.0],
+                [750.0, 100.0, 3000.0],
+                [750.0, 2100.0, 0.0],
+                [750.0, 2100.0, 3000.0],
+                [3250.0, 100.0, 0.0],
+                [3250.0, 100.0, 3000.0],
+                [3250.0, 2100.0, 0.0],
+                [3250.0, 2100.0, 3000.0],
+            ]
+        );
+        assert_eq!(
+            model.axes[0]
+                .axes
+                .iter()
+                .map(|axis| axis.distance)
+                .collect::<Vec<_>>(),
+            vec![Some(0.0), Some(1000.0), Some(3500.0)]
+        );
+        assert_eq!(
+            model.axes[1]
+                .axes
+                .iter()
+                .map(|axis| axis.distance)
+                .collect::<Vec<_>>(),
+            vec![Some(0.0), Some(2000.0)]
+        );
+        assert_eq!(model.sections[0].thickness, Some(180.0));
+        assert_eq!(model.slabs.len(), 4);
     }
 
     /// 床は各レベルの各格子区画に 1 枚ずつ作り、板厚 150 mm の断面 `S15` を共有する。
