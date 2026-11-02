@@ -170,24 +170,21 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(
+        expected = "section_response: mats.len() must equal fibers.len() (per-fiber state)"
+    )]
     fn test_section_mismatched_mats_panics() {
         let sec = rect_fiber_section(100.0, 200.0, 10, 20, 0);
         let mut mats: Vec<Box<dyn UniaxialMaterial>> =
             vec![Box::new(Bilinear::new(205000.0, 235.0, 0.01))];
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            section_response(
-                &sec,
-                SectionStrain {
-                    eps0: 0.0,
-                    ky: 0.0,
-                    kz: 0.0,
-                },
-                &mut mats,
-            )
-        }));
-        assert!(
-            result.is_err(),
-            "must panic when mats.len() != fibers.len()"
+        section_response(
+            &sec,
+            SectionStrain {
+                eps0: 0.0,
+                ky: 0.0,
+                kz: 0.0,
+            },
+            &mut mats,
         );
     }
 
