@@ -4,18 +4,21 @@
 //! [`super::cft`] が軸方向終局耐力（Ncu/Ntu）を扱うのに対し、本モジュールは軸方向力と
 //! 曲げモーメントを同時に受ける柱の終局曲げ耐力 `Mu(N)` を算定する。
 //! - **短柱**（[`cft_short_column_mu`]）: 中立軸位置をパラメータとする耐力曲線を軸力 N に
-//!   整合させ、中立軸がコンクリート断面外の場合は Ncu1・Ntu との直線補間で求める。
+//!   整合させる。角形は鋼管の全断面で応力ブロックを積分する。
 //! - **中柱・長柱**（[`cft_long_medium_column_mu`]）: 座屈による曲げ低減 R=(1−cNcu/Nk) を
 //!   考慮し、コンクリート放物線 cMu＋鋼管の曲げ耐力（低減後）を重ね合わせる。
 
+use sepika_core::section_shape::RoundedRectangle;
 use std::f64::consts::PI;
 
 /// CFT 短柱の N-M 相互作用の算定入力。
-/// 角形は鋼管・コアとも直角モデルに限る。角Rを持つ形状は上位入口で適用を検証する。
+/// 角形は同厚鋼管の外内領域を用いる。寸法・材料は上位入口で検証する。
 #[derive(Clone, Copy, Debug)]
 pub struct CftBendingInput {
     /// 円形断面なら true（角型なら false）。
     pub circular: bool,
+    /// 角形鋼管の外角半径 [mm]。円形では使用しない。
+    pub corner_r: f64,
     /// 鋼管のせい D `[mm]`（円形は外径）。
     pub d_steel: f64,
     /// 鋼管の幅 B `[mm]`（円形は外径と同値）。
@@ -32,20 +35,29 @@ pub struct CftBendingInput {
     pub fy: f64,
 }
 
-/// 角形短柱: 中立軸深さ `xn`（圧縮縁からの距離 [mm]）における (Nu, Mu)（**圧縮正**）。
-///
-/// ```text
-/// cNu = xn·cB·Fc,  cMu = (1/2)·xn·cB·(cD − xn)·Fc
-/// sNu = 2t·(2xn − cD)·Fy
-/// sMu = B·t·(D − t)·Fy + 2t·xn·(cD − xn)·Fy   （第2項はウェブ全塑性、Fy）
-/// ```
+fn angular_regions(inp: &CftBendingInput) -> Result<(RoundedRectangle, RoundedRectangle), String> {
+    Ok((
+        RoundedRectangle::new(inp.d_steel, inp.b_steel, inp.corner_r)?,
+        RoundedRectangle::new(inp.c_d, inp.c_b, (inp.corner_r - inp.t).max(0.0))?,
+    ))
+}
+
+fn angular_material_forces(inp: &CftBendingInput, z: f64) -> (f64, f64, f64, f64) {
+    let (outer, core) = angular_regions(inp).expect("検証済みの角形CFT幾何");
+    let (ao, qo, _) = outer.above(z);
+    let (ac, qc, _) = core.above(z);
+    let sa = outer.properties().area - core.properties().area;
+    (
+        ac * inp.fc,
+        qc * inp.fc,
+        (2.0 * (ao - ac) - sa) * inp.fy,
+        2.0 * (qo - qc) * inp.fy,
+    )
+}
+
 fn angular_nu_mu(inp: &CftBendingInput, xn: f64) -> (f64, f64) {
-    let c_nu = xn * inp.c_b * inp.fc;
-    let c_mu = 0.5 * xn * inp.c_b * (inp.c_d - xn) * inp.fc;
-    let s_nu = 2.0 * inp.t * (2.0 * xn - inp.c_d) * inp.fy;
-    let s_mu = inp.b_steel * inp.t * (inp.d_steel - inp.t) * inp.fy
-        + 2.0 * inp.t * xn * (inp.c_d - xn) * inp.fy;
-    (c_nu + s_nu, c_mu + s_mu)
+    let (cn, cm, sn, sm) = angular_material_forces(inp, inp.c_d / 2.0 - xn);
+    (cn + sn, cm + sm)
 }
 
 /// 円形短柱: パラメータ角 `θ`（[0, π]、`θ = cos⁻¹(1 − 2xn/cD)`）における (Nu, Mu)。
@@ -82,19 +94,34 @@ fn nu_mu_at(inp: &CftBendingInput, p: f64) -> (f64, f64) {
     }
 }
 
-/// CFT **短柱**の N-M 相互作用による終局曲げ耐力 `Mu` [N·mm]（CFT 指針）。
-///
-/// `n_design`: 設計軸力 `[N]`（**圧縮正**）。`ncu1`: 短柱の軸圧縮終局耐力 `[N]`、
-/// `ntu`: 軸引張終局耐力の**大きさ** `[N]`（引張は −ntu に対応）。
-///
-/// 中立軸をパラメータとする耐力曲線（角形 xn∈`[0,cD]`、円形 θ∈`[0,π]`）を軸力に整合させて
-/// Mu を求め、曲線の N 範囲外（中立軸がコンクリート断面外）は端点と (Ncu1, 0)・(−Ntu, 0) を
-/// 直線補間する。不正入力（せい・板厚・Fc・Fy のいずれか 0 以下）は 0.0。
+/// 短柱の Mu [N·mm]。軸力 [N] は圧縮正。角形は全材料領域の応力ブロックを用いる。
+/// 円形のコア外は `ncu1`・`ntu` の端点との直線補間。不正な非正寸法・強度は 0。
 pub fn cft_short_column_mu(inp: &CftBendingInput, n_design: f64, ncu1: f64, ntu: f64) -> f64 {
     if inp.d_steel <= 0.0 || inp.c_d <= 0.0 || inp.t <= 0.0 || inp.fc <= 0.0 || inp.fy <= 0.0 {
         return 0.0;
     }
-    let p_max = if inp.circular { PI } else { inp.c_d };
+    if !inp.circular {
+        let Ok((outer, core)) = angular_regions(inp) else {
+            return 0.0;
+        };
+        let sa = outer.properties().area - core.properties().area;
+        let nc = core.properties().area * inp.fc + sa * inp.fy;
+        if n_design <= -sa * inp.fy || n_design >= nc {
+            return 0.0;
+        }
+        let mut lo = -inp.t;
+        let mut hi = inp.c_d + inp.t;
+        for _ in 0..80 {
+            let mid = (lo + hi) / 2.0;
+            if angular_nu_mu(inp, mid).0 < n_design {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        return angular_nu_mu(inp, (lo + hi) / 2.0).1.max(0.0);
+    }
+    let p_max = PI;
     let (n_lo, m_lo) = nu_mu_at(inp, 0.0);
     let (n_hi, m_hi) = nu_mu_at(inp, p_max);
 
@@ -186,7 +213,11 @@ pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> Res
         let r2 = (b.d_steel - b.t) / 2.0;
         4.0 * r2 * r2 * b.t * b.fy
     } else {
-        b.b_steel * b.t * (b.d_steel - b.t) * b.fy + b.t * b.c_d * b.c_d / 2.0 * b.fy
+        {
+            let (outer, core) = angular_regions(b)?;
+            (outer.properties().plastic_modulus_strong - core.properties().plastic_modulus_strong)
+                * b.fy
+        }
     };
     if inp.is_long && !b.circular && b.d_steel == b.b_steel && n_design > inp.c_ncr {
         return cft_square_long_case2_mu(inp.c_ncr, inp.s_ncr, inp.s_ne, inp.nk, s_mu0, n_design);
@@ -195,7 +226,7 @@ pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> Res
     let cmmax0 = if b.circular {
         b.fc * b.c_d.powi(3) / 12.0
     } else {
-        b.fc * b.c_d.powi(3) / 8.0
+        b.fc * angular_regions(b)?.1.properties().plastic_modulus_strong / 2.0
     };
     let denom_cb = cb + inp.c_lambda1 * inp.c_lambda1;
     let cmmax = if denom_cb > 0.0 {
@@ -234,9 +265,15 @@ pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> Res
             (s_mu0 * (1.0 - (n_design - inp.c_ncr) / (inp.ncu_axial - inp.c_ncr)) * r_factor)
                 .max(0.0)
         } else {
-            0.0
+            return Err(
+                "CFT 中長柱の軸圧縮耐力がコンクリート座屈耐力以下のため高軸力曲げを算定できません"
+                    .into(),
+            );
         }
     };
+    if !mu.is_finite() {
+        return Err("CFT 中長柱の曲げ耐力が有限値として算定できません".into());
+    }
     Ok(mu)
 }
 
@@ -276,6 +313,99 @@ fn cft_square_long_case2_mu(
 mod tests {
     use super::*;
 
+    fn independent_compression(h: f64, b: f64, r: f64, z: f64) -> (f64, f64) {
+        let start = (z / (h / 2.0)).clamp(-1.0, 1.0).asin();
+        let steps = 65_536;
+        let dt = (PI / 2.0 - start) / steps as f64;
+        let mut a = 0.0;
+        let mut q = 0.0;
+        for k in 0..steps {
+            let theta = start + (k as f64 + 0.5) * dt;
+            let y = h / 2.0 * theta.sin();
+            let edge = h / 2.0 - y.abs();
+            let w = if edge >= r {
+                b
+            } else {
+                b - 2.0 * r + 2.0 * (2.0 * r * edge - edge * edge).max(0.0).sqrt()
+            };
+            let da = w * h / 2.0 * theta.cos() * dt;
+            a += da;
+            q += da * y;
+        }
+        (a, q)
+    }
+
+    #[test]
+    fn angular_material_blocks_match_independent_integration_and_axial_equilibrium() {
+        for (d, b) in [(400.0, 400.0), (600.0, 400.0), (400.0, 600.0)] {
+            for r in [0.0_f64, 8.0, 16.0, 40.0] {
+                let mut inp = box_input();
+                inp.d_steel = d;
+                inp.b_steel = b;
+                inp.t = 16.0;
+                inp.c_d = d - 32.0;
+                inp.c_b = b - 32.0;
+                inp.corner_r = r;
+                let ri = (r - 16.0).max(0.0);
+                let sa = d * b - (4.0 - PI) * r * r - (inp.c_d * inp.c_b - (4.0 - PI) * ri * ri);
+                for z in [
+                    -d / 2.0,
+                    -d / 2.0 + 1.0,
+                    -d / 2.0 + r,
+                    -inp.c_d / 2.0,
+                    -inp.c_d / 2.0 + ri,
+                    0.0,
+                    inp.c_d / 2.0 - ri,
+                    inp.c_d / 2.0,
+                    d / 2.0 - r,
+                    d / 2.0 - 1.0,
+                    d / 2.0,
+                ] {
+                    let (ao, qo) = independent_compression(d, b, r, z);
+                    let (ac, qc) = independent_compression(inp.c_d, inp.c_b, ri, z);
+                    let expected = [
+                        ac * inp.fc,
+                        qc * inp.fc,
+                        (2.0 * (ao - ac) - sa) * inp.fy,
+                        2.0 * (qo - qc) * inp.fy,
+                    ];
+                    let (cn, cm, sn, sm) = angular_material_forces(&inp, z);
+                    for (j, (v, e)) in [cn, cm, sn, sm].into_iter().zip(expected).enumerate() {
+                        let scale = if j % 2 == 0 {
+                            inp.fy * d * b
+                        } else {
+                            inp.fy * d * b * d
+                        };
+                        assert!(
+                            (v - e).abs() < 2e-9 * scale,
+                            "D={d},B={b},R={r},z={z}: {v} != {e}"
+                        );
+                    }
+                    let mu = cft_short_column_mu(&inp, cn + sn, 0.0, 0.0);
+                    assert!((mu - cm - sm).abs() < 1e-12 * inp.fy * d * b * d);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rounded_short_matches_printed_equations_in_their_neutral_axis_range() {
+        let mut inp = box_input();
+        inp.t = 16.0;
+        inp.c_d = 368.0;
+        inp.c_b = 368.0;
+        inp.corner_r = 40.0;
+        let (cn, cm, sn, sm) = angular_material_forces(&inp, 84.0);
+        for (v, e) in [
+            (cn, 1096583.3605270158),
+            (cm, 146611097.68432254),
+            (sn, -1747200.0),
+            (sm, 1020860058.9516826),
+        ] {
+            assert!((v - e).abs() < 1e-5, "{v} != {e}");
+        }
+    }
+
     #[test]
     fn square_long_case2_independent_30_knm_fixture_and_limits() {
         let mu = |n, ne, nk| cft_square_long_case2_mu(1e6, 2e6, ne, nk, 100e6, n).unwrap();
@@ -283,6 +413,7 @@ mod tests {
         let fixture = CftLongMediumInput {
             bending: CftBendingInput {
                 circular: false,
+                corner_r: 0.0,
                 d_steel: 2.0,
                 b_steel: 2.0,
                 c_d: 1.0,
@@ -369,6 +500,7 @@ mod tests {
     fn box_input() -> CftBendingInput {
         CftBendingInput {
             circular: false,
+            corner_r: 0.0,
             d_steel: 400.0,
             b_steel: 400.0,
             c_d: 376.0,
@@ -383,6 +515,7 @@ mod tests {
     fn pipe_input() -> CftBendingInput {
         CftBendingInput {
             circular: true,
+            corner_r: 0.0,
             d_steel: 400.0,
             b_steel: 400.0,
             c_d: 376.0,

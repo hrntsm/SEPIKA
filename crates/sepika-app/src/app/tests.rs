@@ -10140,7 +10140,7 @@ fn test_preparation_rejects_cft_with_zero_core() {
 }
 
 #[test]
-fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
+fn cft_ultimate_app_exposes_axial_and_rounded_bending_capacity() {
     use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
     use sepika_core::section_shape::SectionShape;
     let mut model = crate::sample::portal_frame();
@@ -10182,11 +10182,8 @@ fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
     assert!(!rows.is_empty());
     for row in rows {
         assert!(row.ncu > 0.0 && row.ntu > 0.0);
-        assert!(row
-            .mu_nm
-            .unwrap_err()
-            .contains("角Rが正の終局 N–M は未対応"));
-        assert!(row.detail.contains("未算定"));
+        assert!(row.mu_nm.unwrap() > 0.0);
+        assert!(!row.detail.contains("未算定"));
     }
 }
 
