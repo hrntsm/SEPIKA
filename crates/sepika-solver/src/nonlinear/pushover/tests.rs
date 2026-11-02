@@ -2015,7 +2015,7 @@ fn test_effective_clear_span_falls_back_when_non_positive() {
         length_j: 1500.0,
         ..Default::default()
     };
-    assert_eq!(effective_clear_span(3000.0, &rz_over), 3000.0);
+    assert_eq!(rz_over.flexible_length_from(3000.0), 3000.0);
 
     // ちょうど0（または極小の浮動小数点誤差域）でもフォールバック。
     let rz_zero = RigidZone {
@@ -2023,7 +2023,7 @@ fn test_effective_clear_span_falls_back_when_non_positive() {
         length_j: 1500.0,
         ..Default::default()
     };
-    assert_eq!(effective_clear_span(3000.0, &rz_zero), 3000.0);
+    assert_eq!(rz_zero.flexible_length_from(3000.0), 3000.0);
 }
 
 /// RC矩形断面 + 配筋情報を持つ要素モデル（剛域テスト共通）。

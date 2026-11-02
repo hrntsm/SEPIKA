@@ -387,7 +387,6 @@ fn concentrated_load_at_midcut_preserves_material_i_side_limit_under_end_reversa
                     &responses,
                     &state,
                 )
-                .unwrap()
                 .remove(0);
                 assert!(cut.unavailable.is_none());
                 close(cut.forces[0].force_n, actual_load + state.support[1][0]);
@@ -676,8 +675,7 @@ fn eccentric_physical_path_cuts_include_arms_actual_load_position_and_plane_endp
                     SeismicDir::X,
                     &responses,
                     &physical,
-                )
-                .unwrap();
+                );
                 let cut = &cuts[0];
                 assert!(cut.unavailable.is_none(), "{:?}", cut.unavailable);
                 assert_eq!(cut.forces.len(), 1);
@@ -725,7 +723,6 @@ fn eccentric_physical_path_cuts_include_arms_actual_load_position_and_plane_endp
                         &responses,
                         &physical,
                     )
-                    .unwrap()
                     .remove(0);
                     assert_eq!(cut.forces.len(), 1);
                     close(cut.forces[0].force_n, 0.0);

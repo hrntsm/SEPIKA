@@ -10,7 +10,7 @@ use super::geom::member_local_frame;
 use super::geom::{axial_compression, dot3, recording_force};
 use super::types::ShearYieldEvent;
 use sepika_core::material_grade::{material_strength_factor_rebar, material_strength_factor_steel};
-use sepika_core::model::{ElementData, Material, Model, RigidZone, Section};
+use sepika_core::model::{ElementData, Material, Model, Section};
 use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
@@ -286,11 +286,6 @@ fn elem_length(model: &Model, elem: &ElementData) -> Option<f64> {
     (len > 0.0).then_some(len)
 }
 
-/// 剛域控除後の内法スパン h0 [mm]。
-pub(crate) fn effective_clear_span(raw_length: f64, rigid_zone: &RigidZone) -> f64 {
-    rigid_zone.flexible_length_from(raw_length)
-}
-
 pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearThreshold>, String> {
     for elem in &model.elements {
         if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
@@ -341,7 +336,9 @@ pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearT
             };
             let (as_y, as_z) = sec.map(|s| (s.as_y, s.as_z)).unwrap_or((0.0, 0.0));
             let raw_length = elem_length(model, elem).unwrap_or(0.0);
-            let clear_span = effective_clear_span(raw_length, &model.analysis_rigid_zone(elem));
+            let clear_span = model
+                .analysis_rigid_zone(elem)
+                .flexible_length_from(raw_length);
             ShearThreshold {
                 y: build_dir_threshold(as_z, mats, sec, ShearDir::Y, clear_span),
                 z: build_dir_threshold(as_y, mats, sec, ShearDir::Z, clear_span),

@@ -315,7 +315,6 @@ pub fn pushover_analysis_recording(
                 &gravity_member_loads,
                 &format!("増分解析・荷重制御 λ={current_lambda}"),
                 use_kg,
-                n_active,
                 &total_disp,
                 &mut st,
             );
@@ -650,7 +649,6 @@ fn apply_initial_load(
         gravity_member_loads,
         "増分解析・重力初期載荷 μ=1",
         use_kg,
-        total_disp.len(),
         total_disp,
         st,
     ) {
@@ -697,11 +695,10 @@ fn newton_converge(
     absolute_loads: &[Vec<MemberLoad>],
     phase: &str,
     use_kg: bool,
-    n_active: usize,
     total_disp_base: &[f64],
     st: &mut SolverState,
 ) -> Result<Option<Vec<f64>>, String> {
-    let mut step_du_free = vec![0.0; n_active];
+    let mut step_du_free = vec![0.0; total_disp_base.len()];
     apply_du_trial_with_member_loads(model, dofmap, behaviors, &step_du_free, absolute_loads)
         .map_err(|e| format!("{phase}・初期荷重更新: {e}"))?;
     for iter in STATIC_NEWTON.iters() {

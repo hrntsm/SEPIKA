@@ -146,11 +146,10 @@ impl super::types::PushoverResult {
         if let Some(reason) = record.unavailable {
             return Err(reason);
         }
-        let response = record.response.as_ref().ok_or(
-            record
-                .unavailable
-                .unwrap_or(WallUnavailableReason::LegacyNotRecorded),
-        )?;
+        let response = record
+            .response
+            .as_ref()
+            .ok_or(WallUnavailableReason::LegacyNotRecorded)?;
         if [
             response.qw_n,
             response.qdir_n,

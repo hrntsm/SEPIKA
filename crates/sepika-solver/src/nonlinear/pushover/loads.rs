@@ -62,25 +62,23 @@ impl PhysicalPushoverLoads {
                     }
                     load
                 }));
-            combined.member.extend(
-                source
-                    .member
-                    .iter()
-                    .map(|load| scaled_member(load, *factor)),
-            );
+            combined
+                .member
+                .extend(source.member.iter().cloned().map(|mut load| {
+                    scale_member(&mut load, *factor);
+                    load
+                }));
         }
         combined
     }
 }
 
-fn scaled_member(load: &MemberLoad, factor: f64) -> MemberLoad {
-    let mut scaled = load.clone();
-    match &mut scaled.kind {
+pub(super) fn scale_member(load: &mut MemberLoad, factor: f64) {
+    match &mut load.kind {
         MemberLoadKind::Point { p, .. } => *p *= factor,
         MemberLoadKind::Distributed { w1, w2, .. } => {
             *w1 *= factor;
             *w2 *= factor;
         }
     }
-    scaled
 }

@@ -344,7 +344,7 @@ pub(super) fn record_cuts(
         empty,
     )
     .unwrap();
-    record_cuts_with_responses(model, dofmap, behaviors, dir, &responses, &physical).unwrap()
+    record_cuts_with_responses(model, dofmap, behaviors, dir, &responses, &physical)
 }
 
 pub(super) fn record_cuts_with_responses(
@@ -354,11 +354,11 @@ pub(super) fn record_cuts_with_responses(
     dir: SeismicDir,
     responses: &[Option<sepika_element::behavior::LoadedFrameResponse>],
     physical: &super::physical_response::PhysicalStep,
-) -> Result<Vec<StoryCut>, String> {
+) -> Vec<StoryCut> {
     let d = usize::from(dir == SeismicDir::Y);
     let ctx = Ctx { model };
     let index = sepika_core::model::WallSideColumnIndex::build(model);
-    Ok(model
+    model
         .layers()
         .iter()
         .map(|layer| {
@@ -512,7 +512,7 @@ pub(super) fn record_cuts_with_responses(
             }
             cut
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
