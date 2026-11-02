@@ -140,6 +140,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0096](0096-stbridge-built-box-provenance.md) | accepted | ST-Bridge組立BOXの再出力は原形状の来歴で区別する |
 | [0097](0097-secondary-steel-post-check.md) | accepted | 鋼製間柱の独立検定条件を鉛直荷重伝達と分離する |
 
+| [0098](0098-fixed-elastic-story-yield.md) | accepted | 共通弾性静的応答を固定した層骨格と未同定診断を分離する |
+
 ## 規約
 
 - ADR にするのは「後から覆すコストが高い」「背景を知らないと意外に見える」「実際のトレードオフがあった」の 3 条件をすべて満たす**現在有効な判断**だけ。単なる実装手順・容易に変えられる選択・未実装の計画・自明な判断は書かない。
