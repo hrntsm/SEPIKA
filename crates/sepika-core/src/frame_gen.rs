@@ -307,7 +307,7 @@ impl FrameSpec {
 
     /// 入力の不備を日本語で返す（`None` なら生成できる）。
     /// 原点は有限値、スパン・階高と床生成時の板厚は有限な正値が必要。
-    /// 導出する座標・通り芯の距離・FL・SL も有限値でなければならない。
+    /// 導出する座標・通り芯の距離・FL・SL は有限値、隣接する通り芯座標は厳密な増加が必要。
     pub fn validate(&self) -> Option<String> {
         if self.story_heights.is_empty() {
             return Some("階高を 1 つ以上入力してください。".into());
@@ -334,6 +334,11 @@ impl FrameSpec {
             {
                 return Some(
                     "通り芯の座標と原点からの距離は有限値になるよう入力してください。".into(),
+                );
+            }
+            if coords.windows(2).any(|pair| pair[1] <= pair[0]) {
+                return Some(
+                    "隣接する通り芯の座標が増加するよう、原点とスパンを入力してください。".into(),
                 );
             }
         }
@@ -954,6 +959,25 @@ mod tests {
                 assert_generation_error(
                     &spec,
                     "通り芯の座標と原点からの距離は有限値になるよう入力してください。",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn positive_spans_cannot_produce_duplicate_coordinates() {
+        for direction in 0..2 {
+            for (origin, spans) in [(1e20, vec![1.0]), (0.0, vec![1e20, 1.0])] {
+                let mut spec = FrameSpec::default();
+                spec.origin[direction] = origin;
+                if direction == 0 {
+                    spec.x_spans = spans;
+                } else {
+                    spec.y_spans = spans;
+                }
+                assert_generation_error(
+                    &spec,
+                    "隣接する通り芯の座標が増加するよう、原点とスパンを入力してください。",
                 );
             }
         }
