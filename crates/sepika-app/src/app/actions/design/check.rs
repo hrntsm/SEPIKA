@@ -363,31 +363,7 @@ impl App {
         Ok((beam_checks, slab_checks))
     }
 
-    /// 領域内小梁および未割当の片持ち小梁を、二次部材の反力の逐次伝達
-    /// （[`sepika_load::cascade`]）が求めた荷重で検定する。
-    ///
-    /// 荷重は床板分配の辺荷重・自重・**架け側の二次部材から渡された集中荷重**の
-    /// 重ね合わせである。**荷重同期（`sepika-job::auto_loads`）と同じ経路を使う**
-    /// （判定が 2 か所に分かれると解析と検定で荷重が食い違うため）。
-    ///
-    /// ただし**荷重の値そのものは一致しない**。共有するのは支持関係の判定と伝達の
-    /// 手順であって、面荷重強度は用途ごとに違う。小梁検定は小梁用（`LoadPurpose::Beam`。
-    /// 固定＋小梁用積載）、荷重同期は固定荷重ケースと積載荷重ケースへ分けて解く。
-    ///
-    /// 鋼小梁の入力不備はエラーを返し、対象外の二次部材や分配不足は表に「未」として残す。
-    /// 所属先がない小梁のうち、片持ち小梁以外は検定の対象にしない（表に「未」として
-    /// 残す。片持ち小梁は取付き線の支持辺として荷重を受けるため検定する）。
-    ///
-    /// # 検定できない二次部材（表には「未」の行として残す）
-    ///
-    /// - **間柱**。壁版から受ける荷重は材軸方向の軸力であり、地震時には壁の面外
-    ///   地震力による弱軸曲げも受ける。軸力・面外曲げのいずれも本検定は扱わない。
-    /// - **剛床でない床の小梁**。分配 Span 検定は曲げ・せん断・たわみだけを見て
-    ///   軸力を見ない。これは「その小梁が載る床面が 1 枚の剛体で、面内力を剛床が
-    ///   処理している」ことを前提にしている。剛床でない床の小梁は面内力を負担する
-    ///   ため前提が成り立たない（`Model::floor_region_on_single_diaphragm`）。
-    ///
-    /// 表から消すと検定されていないことに気づけないため、行は残す。
+    /// 二次部材の独立検定。小梁は長期略算、間柱は保存した検定専用の条件を使う。
     fn design_secondary_beam_checks(
         &self,
         beam_checks: &mut Vec<crate::app::BeamCheck>,
@@ -410,10 +386,24 @@ impl App {
             let Some((_, _, span)) = self.core.model.secondary_member_axis(sm) else {
                 continue;
             };
+            let post = sepika_design_jp::post::design_post(&self.core.model, sm);
+            let mut row = fd::beam_unchecked(span);
+            row.ratio = post.ratio();
+            row.unchecked = !post.complete();
+            row.ok = !row.unchecked && row.ratio <= 1.0;
+            for c in &post.combinations {
+                row.deflection = row.deflection.max(c.resultant_displacement_mm);
+                for p in &c.positions {
+                    row.m_max = row.m_max.max(p.forces.mz.abs().max(p.forces.my.abs()));
+                    row.q_max = row.q_max.max(p.forces.qy.abs().max(p.forces.qz.abs()));
+                }
+            }
+            row.deflection_span_ratio = row.deflection / span;
+            row.post = Some(post);
             beam_checks.push((
                 None,
                 crate::app::BeamCheckTarget::SecondaryPost { member: sm.id },
-                fd::beam_unchecked(span),
+                row,
             ));
         }
 

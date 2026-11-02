@@ -22,6 +22,8 @@ pub struct ElemAttrs {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Model {
+    #[serde(default)]
+    pub post_design_inputs: Vec<PostDesignInput>,
     /// 数量積算専用の設定。解析・検定の計算入力には含めない。
     #[serde(default)]
     pub quantity_cfg: QuantityCfg,
@@ -1329,7 +1331,8 @@ impl Model {
     }
 
     pub fn eq_ignoring_dofmap(&self, other: &Self) -> bool {
-        self.quantity_cfg == other.quantity_cfg
+        self.post_design_inputs == other.post_design_inputs
+            && self.quantity_cfg == other.quantity_cfg
             && self.nodes == other.nodes
             && self.elements == other.elements
             && self.sections == other.sections

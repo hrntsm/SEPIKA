@@ -26,52 +26,28 @@ pub(crate) fn check_column(
     term: LoadTerm,
 ) -> Result<CheckResult, String> {
     let h = sec.depth;
-    let b = sec.width;
-    let area = nonzero(sec.area);
-    let z_strong = nonzero(section_modulus(sec.iy, h / 2.0));
-    let z_weak = nonzero(section_modulus(sec.iz, b / 2.0));
+    let (shape, tf, tw) = shape_of(sec);
+    let a = column_allowables(sec, mat, ctx, f, term)?;
+    let ColumnAllowables {
+        area,
+        z_strong,
+        z_weak,
+        ft: ft_val,
+        fc: fc_val,
+        fb_strong,
+        fb_weak,
+        fs: fs_val,
+        ..
+    } = a;
     let sigma_bx = forces.mz.abs() / z_strong;
     let sigma_by = forces.my.abs() / z_weak;
-
-    let (shape, tf, tw) = shape_of(sec);
-
-    let ft_val = steel_ft(f, term);
-    let fs_val = steel_fs(f, term);
-
-    let lk_y_resolved = ctx.lk_y.unwrap_or(ctx.length);
-    let lk_z_resolved = ctx.lk_z.unwrap_or(ctx.length);
-    let buckling_note = if lk_y_resolved <= 1e-9 && lk_z_resolved <= 1e-9 {
-        "（座屈長さ0のため座屈無視 λ=0）"
-    } else {
-        ""
-    };
     let lambda = effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z);
-    let fc_val = steel_fc(f, mat.young, lambda, term);
-
-    let c = steel_c_factor(ctx, false);
-    let fb_strong = match shape {
-        ShapeCategory::H => match ctx.steel_fb_basis {
-            SteelFbBasis::Standard1973 => {
-                let af = b * tf;
-                let i_t = steel_i_t(b, tf, h, tw);
-                steel_fb_h(f, term, ctx.length, i_t, h, af, c)
-            }
-            SteelFbBasis::Asd2019 if ctx.length <= 1e-9 => ft_val,
-            SteelFbBasis::Asd2019 => {
-                let iz = sec.iz;
-                let iw = steel_warping_constant(sec, tf);
-                let j = sec.resolved_j()?;
-                let e = mat.young;
-                let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
-                let p_lambda_b = steel_p_lambda_b(ctx, false);
-                steel_fb_h_asd2019(
-                    f, term, ctx.length, iz, iw, j, e, g, z_strong, c, p_lambda_b,
-                )
-            }
-        },
-        _ => ft_val,
-    };
-    let fb_weak = ft_val;
+    let buckling_note =
+        if ctx.lk_y.unwrap_or(ctx.length) <= 1e-9 && ctx.lk_z.unwrap_or(ctx.length) <= 1e-9 {
+            "（座屈長さ0のため座屈無視 λ=0）"
+        } else {
+            ""
+        };
 
     let sigma_b_pipe = (forces.mz.powi(2) + forces.my.powi(2)).sqrt() / z_strong;
 
@@ -171,6 +147,86 @@ fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
         components,
     })
 }
+
+#[derive(Clone, Copy)]
+pub(crate) struct ColumnAllowables {
+    pub area: f64,
+    pub z_strong: f64,
+    pub z_weak: f64,
+    pub ft: f64,
+    pub fc: f64,
+    pub fb_strong: f64,
+    pub fb_weak: f64,
+    pub fs: f64,
+    pub shear_areas: [f64; 2],
+    pub h_web_factor: f64,
+}
+
+pub(crate) fn column_allowables(
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+    f: f64,
+    term: LoadTerm,
+) -> Result<ColumnAllowables, String> {
+    let h = sec.depth;
+    let b = sec.width;
+    let area = nonzero(sec.area);
+    let z_strong = nonzero(section_modulus(sec.iy, h / 2.0));
+    let z_weak = nonzero(section_modulus(sec.iz, b / 2.0));
+
+    let (shape, tf, tw) = shape_of(sec);
+
+    let ft_val = steel_ft(f, term);
+    let fs_val = steel_fs(f, term);
+
+    let lambda = effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z);
+    let fc_val = steel_fc(f, mat.young, lambda, term);
+
+    let c = steel_c_factor(ctx, false);
+    let fb_strong = match shape {
+        ShapeCategory::H => match ctx.steel_fb_basis {
+            SteelFbBasis::Standard1973 => {
+                let af = b * tf;
+                let i_t = steel_i_t(b, tf, h, tw);
+                steel_fb_h(f, term, ctx.length, i_t, h, af, c)
+            }
+            SteelFbBasis::Asd2019 if ctx.length <= 1e-9 => ft_val,
+            SteelFbBasis::Asd2019 => {
+                let iz = sec.iz;
+                let iw = steel_warping_constant(sec, tf);
+                let j = sec.resolved_j()?;
+                let e = mat.young;
+                let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
+                let p_lambda_b = steel_p_lambda_b(ctx, false);
+                steel_fb_h_asd2019(
+                    f, term, ctx.length, iz, iw, j, e, g, z_strong, c, p_lambda_b,
+                )
+            }
+        },
+        _ => ft_val,
+    };
+    let fb_weak = ft_val;
+
+    let (ay, az) = shear_area_2d(shape, sec, tf, tw);
+    Ok(ColumnAllowables {
+        area,
+        z_strong,
+        z_weak,
+        ft: ft_val,
+        fc: fc_val,
+        fb_strong,
+        fb_weak,
+        fs: fs_val,
+        shear_areas: [ay, az],
+        h_web_factor: if shape == ShapeCategory::H {
+            (h - 2.0 * tf).max(0.0) / safe_denom(h)
+        } else {
+            1.0
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

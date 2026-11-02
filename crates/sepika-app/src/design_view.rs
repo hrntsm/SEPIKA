@@ -921,7 +921,7 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     }
 
     ui.add_space(12.0);
-    ui.strong("小梁・床の長期略算（固定＋用途別積載）");
+    ui.strong("小梁・床の長期略算／鋼製間柱の独立検定");
     ui.colored_label(
         crate::theme::GRAY_600,
         "小梁は大梁を分割せず、床の中で単純梁または片持ち梁として曲げ・たわみを検定します\
@@ -930,7 +930,7 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     );
 
     ui.label(
-        "小梁・床は選択中の雪・風・地震・任意組合せについて未検定です。以下は長期略算の結果です。",
+        "小梁・床は選択中の雪・風・地震・任意組合せについて未検定です。間柱は明示した検定用組合せの結果です。",
     );
 
     if !r.beam_checks.is_empty() {
@@ -1008,6 +1008,46 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                 });
             },
         );
+    }
+
+    for (_, target, row) in &r.beam_checks {
+        let Some(post) = &row.post else {
+            continue;
+        };
+        let crate::app::BeamCheckTarget::SecondaryPost { member } = target else {
+            continue;
+        };
+        let sm = app.core.model.posts().find(|sm| sm.id == *member);
+        let name = sm.map(|sm| sm.name.as_str()).unwrap_or("間柱");
+        let section = sm
+            .and_then(|sm| sm.section)
+            .and_then(|id| app.core.model.section(id))
+            .map(|s| s.display_name())
+            .unwrap_or_else(|| "断面未設定".into());
+        egui::CollapsingHeader::new(format!("間柱 {} SM{} / {} / {}",name,member.0,section,match post.support {sepika_core::model::PostLateralSupport::Pinned=>"両端ピン",sepika_core::model::PostLateralSupport::FixedStart=>"始端固定・終端自由",sepika_core::model::PostLateralSupport::FixedEnd=>"始端自由・終端固定"})).id_salt(("post_result",member.0)).show(ui,|ui|{
+            ui.label("局部横荷重は独立検定専用です。主架構へ自動転送しません。以下の端部反力を別途扱ってください。");
+            for reason in &post.reasons{ui.colored_label(crate::theme::GRAY_600,format!("未検定: {reason}"));}
+            for (ci,c)in post.combinations.iter().enumerate(){
+                ui.strong(format!("{} / {}",c.name,if c.short_term{"短期"}else{"長期"}));
+                for reason in &c.reasons{ui.colored_label(crate::theme::GRAY_600,format!("未検定: {reason}"));}
+                ui.label(format!("鉛直端部反力 始 {:.3} / 終 {:.3} kN",c.gravity_reactions[0]/1000.0,c.gravity_reactions[1]/1000.0));
+                for k in 0..2{ui.label(format!("{}端: 横反力 X {:.3} / Y {:.3} kN、固定端曲げ（強/弱）{:.3}/{:.3} kN·m",if k==0{"始"}else{"終"},c.lateral_reactions[k][0]/1000.0,c.lateral_reactions[k][1]/1000.0,c.support_moments[k][0]/1e6,c.support_moments[k][1]/1e6));}
+                ui.label(format!("変位 強軸方向 {:.4} / 弱軸方向 {:.4} / 同位置合成最大 {:.4} mm、δ/L={:.6}、たわみ検定比 {}",c.displacement_mm[0],c.displacement_mm[1],c.resultant_displacement_mm,c.resultant_displacement_mm/row.span,c.deflection_ratio.map(|r|format!("{r:.4} {}",if r<=1.0{"OK"}else{"NG"})).unwrap_or_else(||"未検定".into())));
+                crate::table_util::standard_table(ui,&format!("post_positions_{}_{}",member.0,ci),&[Col::num("位置[mm]"),Col::num("N[kN] 引張+"),Col::num("Mz[kN·m]"),Col::num("My[kN·m]"),Col::num("Qy[kN]"),Col::num("Qz[kN]"),Col::wide_num("項目別比・判定・許容値")],c.positions.len(),|row|{
+                    let p=&c.positions[row.index()];
+                    for v in [p.position,p.forces.n/1000.0,p.forces.mz/1e6,p.forces.my/1e6,p.forces.qy/1000.0,p.forces.qz/1000.0]{row.col(|ui|{ui.label(format!("{v:.4}"));});}
+                    row.col(|ui|{match &p.check{
+                        sepika_design_jp::CheckOutcome::Skipped{reason}=>{ui.label(format!("未検定: {reason}"));}
+                        sepika_design_jp::CheckOutcome::Checked(r)=>{let summary=r.components.iter().map(|component|format!("{} {:.4} {}",component.kind.label(),component.ratio,if component.ratio<=1.0{"OK"}else{"NG"})).collect::<Vec<_>>().join(" / ");
+                            let details=r.components.iter().map(|component|component.detail.as_str()).collect::<Vec<_>>().join("\n");
+                            ui.label(summary).on_hover_text(format!("{}\n{}",r.basis,details));}
+                    }});
+                });
+            }
+            let has_evaluated=post.combinations.iter().any(|c|c.deflection_ratio.is_some()||c.positions.iter().any(|p|matches!(p.check,sepika_design_jp::CheckOutcome::Checked(_))));
+            let ratio=if has_evaluated{format!("評価済み最大比 {:.4}",post.ratio())}else{"評価済み項目なし".into()};
+            ui.label(format!("総合: {}（{}）",if !post.complete(){"未検定"}else if post.ratio()<=1.0{"OK"}else{"NG"},ratio));
+        });
     }
 
     if !r.slab_checks.is_empty() {

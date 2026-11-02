@@ -2568,3 +2568,6 @@ impl std::ops::DerefMut for UiViewState {
         &mut self.viewport
     }
 }
+
+#[cfg(test)]
+mod post_design_tests;

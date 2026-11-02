@@ -11,6 +11,8 @@
 /// 小梁（単純梁・片持ち梁）の設計結果。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BeamDesignResult {
+    #[serde(default)]
+    pub post: Option<crate::post::PostDesignResult>,
     /// スパン（支持間距離）`[mm]`。
     pub span: f64,
     /// 代表等分布荷重 w [N/mm]（合計荷重 / スパン。表示用であり検定には使わない）。
@@ -100,6 +102,7 @@ fn judge_beam(
     };
     let ratio = bending_ratio.max(deflection_ratio);
     BeamDesignResult {
+        post: None,
         span,
         w,
         m_max,
@@ -119,6 +122,7 @@ fn judge_beam(
 /// 分配結果が無く断面検定できない小梁の表行（判定は「未」。OK と誤認しない）。
 pub fn beam_unchecked(span: f64) -> BeamDesignResult {
     BeamDesignResult {
+        post: None,
         span,
         w: 0.0,
         m_max: 0.0,
