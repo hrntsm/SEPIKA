@@ -42,13 +42,9 @@ pub struct BeamDesignResult {
     pub unchecked: bool,
 }
 
-/// 部材力（曲げ・せん断・たわみ）を直接与えて小梁を検定する。
-///
-/// 逐次伝達（`sepika_load::cascade`）が重ね合わせた荷重から求めた部材力を渡す。
-/// `m_max` / `q_max` / `deflection` が設計値。`w` は表示用の代表等分布（合計/スパン）。
-///
-/// `section_modulus`・`sigma_allow`・`defl_limit_denom` が 0 以下の場合は該当検定比を
-/// 0 とする（断面情報が不足する場合の安全なフォールバック）。
+/// N-mm 単位の部材力を用いて小梁の曲げ・たわみを検定する（符号は絶対値で評価）。
+/// スパン[mm]・断面係数[mm³]・許容応力度[N/mm²]・たわみ限界分母は正の有限値が必要。
+/// 荷重・部材力・たわみの非有限値、または計算結果を表現できない場合は理由付きエラー。
 #[allow(clippy::too_many_arguments)]
 pub fn design_beam_from_forces(
     span: f64,
@@ -59,7 +55,7 @@ pub fn design_beam_from_forces(
     section_modulus: f64,
     sigma_allow: f64,
     defl_limit_denom: f64,
-) -> BeamDesignResult {
+) -> Result<BeamDesignResult, String> {
     judge_beam(
         span,
         w,
@@ -83,25 +79,43 @@ fn judge_beam(
     section_modulus: f64,
     sigma_allow: f64,
     defl_limit_denom: f64,
-) -> BeamDesignResult {
-    let sigma = if section_modulus > 0.0 {
-        m_max / section_modulus
-    } else {
-        0.0
-    };
-    let bending_ratio = if sigma_allow > 0.0 {
-        sigma / sigma_allow
-    } else {
-        0.0
-    };
-    let deflection_span_ratio = if span > 0.0 { deflection / span } else { 0.0 };
-    let deflection_ratio = if defl_limit_denom > 0.0 {
-        deflection_span_ratio * defl_limit_denom
-    } else {
-        0.0
-    };
+) -> Result<BeamDesignResult, String> {
+    for (name, value) in [
+        ("スパン [mm]", span),
+        ("断面係数 [mm³]", section_modulus),
+        ("許容曲げ応力度 [N/mm²]", sigma_allow),
+        ("たわみ限界分母", defl_limit_denom),
+    ] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(format!("{name}は正の有限値が必要です"));
+        }
+    }
+    for (name, value) in [
+        ("代表等分布荷重 [N/mm]", w),
+        ("最大曲げモーメント [N·mm]", m_max),
+        ("最大せん断力 [N]", q_max),
+        ("たわみ [mm]", deflection),
+    ] {
+        if !value.is_finite() {
+            return Err(format!("{name}は有限値が必要です"));
+        }
+    }
+    let sigma = m_max / section_modulus;
+    let bending_ratio = sigma / sigma_allow;
+    let deflection_span_ratio = deflection / span;
+    let deflection_ratio = deflection_span_ratio * defl_limit_denom;
+    for (name, value, has_demand) in [
+        ("曲げ応力度", sigma, m_max > 0.0),
+        ("曲げ検定比", bending_ratio, m_max > 0.0),
+        ("たわみ比", deflection_span_ratio, deflection > 0.0),
+        ("たわみ検定比", deflection_ratio, deflection > 0.0),
+    ] {
+        if !value.is_finite() || (has_demand && value == 0.0) {
+            return Err(format!("{name}を有限精度で表現できません"));
+        }
+    }
     let ratio = bending_ratio.max(deflection_ratio);
-    BeamDesignResult {
+    Ok(BeamDesignResult {
         post: None,
         span,
         w,
@@ -116,7 +130,7 @@ fn judge_beam(
         ratio,
         ok: ratio <= 1.0,
         unchecked: false,
-    }
+    })
 }
 
 /// 分配結果が無く断面検定できない小梁の表行（判定は「未」。OK と誤認しない）。
@@ -251,27 +265,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_beam_bending_and_deflection_ratio() {
-        // 等分布 w=10 N/mm・L=4000mm 相当の部材力（M=wL²/8、Q=wL/2、δ=5wL⁴/(384EI)）。
-        let defl = 5.0 * 10.0 * 4000.0_f64.powi(4) / (384.0 * STEEL_YOUNG * 1.0e8);
-        let r = design_beam_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, defl, 1.0e6, 156.0, 250.0);
-        assert!((r.m_max - 2.0e7).abs() < 1.0, "M={}", r.m_max);
-        assert!((r.q_max - 2.0e4).abs() < 1.0, "Q={}", r.q_max);
-        // σ = M/Z = 2e7/1e6 = 20。
-        assert!((r.sigma - 20.0).abs() < 1e-9);
-        assert!((r.bending_ratio - 20.0 / 156.0).abs() < 1e-9);
-        // δ/L に対する検定比は (δ/L)/(1/250)。
-        assert!((r.deflection_span_ratio - defl / 4000.0).abs() < 1e-15);
-        assert!((r.deflection_ratio - defl / 4000.0 * 250.0).abs() < 1e-9);
+    fn beam_normal_values_and_signed_forces() {
+        let positive =
+            design_beam_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, 8.0, 1.0e6, 160.0, 250.0).unwrap();
+        assert_eq!(positive.sigma, 20.0);
+        assert_eq!(positive.bending_ratio, 0.125);
+        assert_eq!(positive.deflection_span_ratio, 0.002);
+        assert_eq!(positive.deflection_ratio, 0.5);
+        assert_eq!(positive.ratio, 0.5);
+        assert!(positive.ok);
+        assert!(!positive.unchecked);
+        let negative =
+            design_beam_from_forces(4000.0, 10.0, -2.0e7, -2.0e4, -8.0, 1.0e6, 160.0, 250.0)
+                .unwrap();
+        assert_eq!(negative, positive);
     }
 
     #[test]
-    fn test_beam_zero_section_is_safe() {
-        // 断面情報ゼロでもパニックせず、検定比 0。
-        let r = design_beam_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, 10.0, 0.0, 0.0, 0.0);
-        assert_eq!(r.bending_ratio, 0.0);
-        assert_eq!(r.deflection_ratio, 0.0);
-        assert!(r.ok);
+    fn beam_limit_is_inclusive_for_each_check() {
+        for (moment, deflection, ratio, ok) in [
+            (160.0e6, 0.0, 1.0, true),
+            (0.0, 16.0, 1.0, true),
+            (176.0e6, 0.0, 1.1, false),
+            (0.0, 17.6, 1.1, false),
+            (0.0, 0.0, 0.0, true),
+        ] {
+            let r =
+                design_beam_from_forces(4000.0, 0.0, moment, 0.0, deflection, 1.0e6, 160.0, 250.0)
+                    .unwrap();
+            assert!((r.ratio - ratio).abs() < 1e-12);
+            assert_eq!(r.ok, ok);
+        }
+    }
+
+    #[test]
+    fn beam_invalid_inputs_return_named_errors() {
+        let names = [
+            "スパン",
+            "代表等分布荷重",
+            "最大曲げモーメント",
+            "最大せん断力",
+            "たわみ",
+            "断面係数",
+            "許容曲げ応力度",
+            "たわみ限界分母",
+        ];
+        for (index, name) in names.iter().enumerate() {
+            let invalid = if [0, 5, 6, 7].contains(&index) {
+                vec![0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+            } else {
+                vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+            };
+            for value in invalid {
+                let mut args = [4000.0, 10.0, 2.0e7, 2.0e4, 10.0, 1.0e6, 160.0, 250.0];
+                args[index] = value;
+                let error = design_beam_from_forces(
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                )
+                .unwrap_err();
+                assert!(error.contains(name), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn beam_unrepresentable_ratios_return_errors() {
+        for (moment, deflection, modulus, stress, span, limit) in [
+            (f64::MAX, 0.0, f64::MIN_POSITIVE, 160.0, 4000.0, 250.0),
+            (f64::MAX, 0.0, 1.0, f64::MIN_POSITIVE, 4000.0, 250.0),
+            (0.0, f64::MAX, 1.0e6, 160.0, f64::MIN_POSITIVE, 250.0),
+            (0.0, f64::MAX, 1.0e6, 160.0, 1.0, 250.0),
+            (f64::MIN_POSITIVE, 0.0, f64::MAX, 160.0, 4000.0, 250.0),
+            (1.0, 0.0, f64::MAX, f64::MAX, 4000.0, 250.0),
+            (0.0, f64::MIN_POSITIVE, 1.0e6, 160.0, f64::MAX, 250.0),
+            (0.0, 1.0, 1.0e6, 160.0, f64::MAX, f64::MIN_POSITIVE),
+        ] {
+            assert!(design_beam_from_forces(
+                span, 0.0, moment, 0.0, deflection, modulus, stress, limit
+            )
+            .is_err());
+        }
     }
 
     #[test]
