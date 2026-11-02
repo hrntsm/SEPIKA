@@ -71,10 +71,8 @@ pub struct WallPlateDraft {
     /// `幅x高さ` または `幅x高さ@x,z`（位置指定付き）を入力する。
     /// 空文字列は「個別開口なし（`opening_area` を使用）」を表す。
     pub openings: String,
-    /// 仕上げ・増打ちの面荷重 [kN/m²] の入力バッファ。
-    pub load_value: String,
-    /// 仕上げ・増打ちの面荷重の名称（空欄は「仕上げ」）。
-    pub load_kind: String,
+    /// 仕上げ・増打ちの面荷重を入力順に保持する。
+    pub loads: Vec<WallAreaLoadDraft>,
 
     /// 追加フォーム: 取付き先を床領域（自立壁）にするか。false は線（大梁・柱頭）。
     pub add_to_floor_region: bool,
@@ -97,6 +95,39 @@ pub struct WallPlateDraft {
     pub add_enclosed_section: Option<SectionId>,
 }
 
+/// 付加荷重1行分の名称と強度 [kN/m²]。
+#[derive(Clone, Debug)]
+pub struct WallAreaLoadDraft {
+    pub kind: String,
+    pub value: String,
+    original: AreaLoad,
+}
+
+impl WallAreaLoadDraft {
+    fn new(load: AreaLoad) -> Self {
+        Self {
+            kind: load.kind.clone(),
+            value: to_display::area_load_kn_per_m2(load.value).to_string(),
+            original: load,
+        }
+    }
+
+    fn parsed(&self) -> Option<AreaLoad> {
+        let display = parse_area_load_kn_per_m2(&self.value)?;
+        // 単位変換を往復すると未編集の強度も丸め誤差で変わり得る。
+        let value =
+            if self.value == to_display::area_load_kn_per_m2(self.original.value).to_string() {
+                self.original.value
+            } else {
+                to_internal::area_load_kn_per_m2(display)
+            };
+        value.is_finite().then(|| AreaLoad {
+            kind: self.kind.clone(),
+            value,
+        })
+    }
+}
+
 /// 個別開口の入力バッファ1件分の書式エラー。
 /// `parse_openings` が返すメッセージには不正箇所の文字列を含める。
 fn parse_single_opening(entry: &str) -> Result<WallOpening, String> {
@@ -115,6 +146,11 @@ fn parse_single_opening(entry: &str) -> Result<WallOpening, String> {
         .trim()
         .parse()
         .map_err(|_| format!("不正な高さ「{}」: 数値ではありません", h_str.trim()))?;
+    if !width.is_finite() || !height.is_finite() {
+        return Err(format!(
+            "開口寸法「{entry}」: 幅・高さは有限の数値で入力してください"
+        ));
+    }
     if width <= 0.0 || height <= 0.0 {
         return Err(format!(
             "開口寸法「{entry}」: 幅・高さは正の値で入力してください"
@@ -133,6 +169,11 @@ fn parse_single_opening(entry: &str) -> Result<WallOpening, String> {
                 .trim()
                 .parse()
                 .map_err(|_| format!("不正な位置z「{}」: 数値ではありません", z_str.trim()))?;
+            if !x.is_finite() || !z.is_finite() {
+                return Err(format!(
+                    "開口位置「{o}」: x・zは有限の数値で入力してください"
+                ));
+            }
             Some([x, z])
         }
         None => None,
@@ -859,20 +900,18 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
                 plate.slit,
                 plate.openings.clone(),
             );
-            app.ui.scoped.wall_plate_draft.opening_area = format!("{area:.0}");
-            app.ui.scoped.wall_plate_draft.opening_weight = format!("{weight:.0}");
+            app.ui.scoped.wall_plate_draft.opening_area = area.to_string();
+            app.ui.scoped.wall_plate_draft.opening_weight = weight.to_string();
             app.ui.scoped.wall_plate_draft.slit = slit;
             app.ui.scoped.wall_plate_draft.self_weight_shares = plate.self_weight_shares.clone();
             app.ui.scoped.wall_plate_draft.dl_support = plate.dl_support;
             app.ui.scoped.wall_plate_draft.openings = format_openings(&openings);
-            let total = plate.finish_intensity();
-            app.ui.scoped.wall_plate_draft.load_value =
-                format!("{:.3}", to_display::area_load_kn_per_m2(total));
-            app.ui.scoped.wall_plate_draft.load_kind = plate
+            app.ui.scoped.wall_plate_draft.loads = plate
                 .loads
-                .first()
-                .map(|l| l.kind.clone())
-                .unwrap_or_else(|| "仕上げ".to_string());
+                .iter()
+                .cloned()
+                .map(WallAreaLoadDraft::new)
+                .collect();
             app.ui.scoped.wall_plate_draft.synced_for = app.ui.scoped.wall_plate_draft.target;
         }
     }
@@ -979,18 +1018,37 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
         );
     });
 
-    ui.horizontal(|ui| {
-        ui.label("仕上げ・増打ち:");
-        ui.add(egui::TextEdit::singleline(&mut app.ui.scoped.wall_plate_draft.load_kind).desired_width(80.0));
-        ui.add(
-            egui::TextEdit::singleline(&mut app.ui.scoped.wall_plate_draft.load_value).desired_width(70.0),
-        );
-        ui.label("kN/m²");
-    })
-    .response
-    .on_hover_text(
-        "コンクリートの増打ち・仕上げの重さを面荷重として加えます。躯体の自重は         断面の板厚と材料から別に求めるため、ここには含めません。増打ちは構造厚に         含めない扱いなので、剛性・耐力には算入しません。",
-    );
+    ui.label("仕上げ・増打ち:");
+    let mut remove_load = None;
+    for (index, load) in app.ui.scoped.wall_plate_draft.loads.iter_mut().enumerate() {
+        ui.push_id(("wall_area_load", index), |ui| {
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut load.kind).desired_width(80.0));
+                ui.add(egui::TextEdit::singleline(&mut load.value).desired_width(100.0));
+                ui.label("kN/m²");
+                if ui.button("削除").clicked() {
+                    remove_load = Some(index);
+                }
+            });
+        });
+    }
+    if let Some(index) = remove_load {
+        app.ui.scoped.wall_plate_draft.loads.remove(index);
+    }
+    if ui
+        .button("+ 面荷重を追加")
+        .on_hover_text("躯体の自重とは別に加える面荷重です。増打ちは剛性・耐力には算入しません。")
+        .clicked()
+    {
+        app.ui
+            .scoped
+            .wall_plate_draft
+            .loads
+            .push(WallAreaLoadDraft::new(AreaLoad {
+                kind: "仕上げ".to_string(),
+                value: 0.0,
+            }));
+    }
 
     if !is_attached {
         let quad = app
@@ -1090,32 +1148,49 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
         .wall_plate_draft
         .opening_area
         .trim()
-        .parse::<f64>();
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite());
     let parsed_weight = app
         .ui
         .scoped
         .wall_plate_draft
         .opening_weight
         .trim()
-        .parse::<f64>();
-    let parsed_load = parse_area_load_kn_per_m2(&app.ui.scoped.wall_plate_draft.load_value);
-    if parsed_load.is_none() {
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite());
+    let parsed_loads: Option<Vec<_>> = app
+        .ui
+        .scoped
+        .wall_plate_draft
+        .loads
+        .iter()
+        .map(WallAreaLoadDraft::parsed)
+        .collect();
+    if parsed_loads.is_none() {
         ui.colored_label(
             crate::theme::ERROR_RED,
             "仕上げ・増打ちの面荷重は数値で入力してください（空欄は 0）",
         );
     }
-    let can_apply = parsed_area.is_ok()
-        && parsed_weight.is_ok()
+    if parsed_area.is_none() || parsed_weight.is_none() {
+        ui.colored_label(
+            crate::theme::ERROR_RED,
+            "開口面積・開口部重量は有限の数値で入力してください",
+        );
+    }
+    let can_apply = parsed_area.is_some()
+        && parsed_weight.is_some()
         && parsed_openings.is_ok()
-        && parsed_load.is_some();
+        && parsed_loads.is_some();
     if ui
         .add_enabled(can_apply, egui::Button::new("✔ 適用"))
         .on_hover_text("選択した壁版に開口・スリットを設定します（undo可）")
         .clicked()
     {
-        if let (Ok(opening_area), Ok(opening_weight), Ok(openings)) =
-            (parsed_area, parsed_weight, parsed_openings)
+        if let (Some(opening_area), Some(opening_weight), Ok(openings), Some(loads)) =
+            (parsed_area, parsed_weight, parsed_openings, parsed_loads)
         {
             let slit = if is_attached {
                 app.core
@@ -1125,14 +1200,6 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
                     .unwrap_or_default()
             } else {
                 app.ui.scoped.wall_plate_draft.slit
-            };
-            let value = to_internal::area_load_kn_per_m2(parsed_load.unwrap_or(0.0));
-            let kind = app.ui.scoped.wall_plate_draft.load_kind.trim();
-            let kind = if kind.is_empty() { "仕上げ" } else { kind }.to_string();
-            let loads = if value == 0.0 {
-                Vec::new()
-            } else {
-                vec![AreaLoad { kind, value }]
             };
             app.core.scoped.undo.run(
                 &mut app.core.model,
@@ -1590,6 +1657,205 @@ mod tests {
             posts: Vec::new(),
         });
         model.validate_assignment_region_identity().unwrap();
+    }
+
+    fn attrs_frame(
+        ctx: &egui::Context,
+        app: &mut App,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 1400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| attrs_form(ui, app),
+        )
+    }
+
+    fn attrs_click(ctx: &egui::Context, app: &mut App, label: &str) -> egui::FullOutput {
+        attrs_frame(ctx, app, vec![]);
+        let output = attrs_frame(ctx, app, vec![]);
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("表示されないラベル: {label}"));
+        attrs_frame(
+            ctx,
+            app,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        attrs_frame(
+            ctx,
+            app,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )
+    }
+
+    fn attrs_app(individual_openings: bool) -> App {
+        let (mut model, boundary) = plate_model();
+        let mut plate = enclosed(0, None);
+        plate.dl_support = Some(sepika_core::model::WallDlSupport::LowerBeam);
+        plate.opening_area = 123456.78912345678;
+        plate.opening_weight = 123.45678912345678;
+        plate.loads = vec![
+            AreaLoad {
+                kind: "  増打ち  ".into(),
+                value: 0.0012345678912345678,
+            },
+            AreaLoad {
+                kind: "仕上げ".into(),
+                value: -0.0009876543219876543,
+            },
+            AreaLoad {
+                kind: String::new(),
+                value: 0.0,
+            },
+        ];
+        if individual_openings {
+            plate.openings = vec![WallOpening {
+                width: 800.1234567891234,
+                height: 900.9876543219876,
+                offset: Some([300.1234567891234, 500.9876543219876]),
+            }];
+        }
+        model.add_enclosed_wall_plate_from_nodes(&boundary, plate);
+        let mut app = App::default();
+        app.core.model = model;
+        app.ui.scoped.wall_plate_draft.target = Some(WallPlateId(0));
+        app
+    }
+
+    #[test]
+    fn attrs_gui_preserves_loads_and_fractional_openings_through_undo_redo_and_ovika() {
+        for individual in [false, true] {
+            let ctx = egui::Context::default();
+            let mut app = attrs_app(individual);
+            let before = app.core.model.wall_plates[0].clone();
+            attrs_click(&ctx, &mut app, "下辺");
+            attrs_click(&ctx, &mut app, "✔ 適用");
+            let after = app.core.model.wall_plates[0].clone();
+            assert!(after.slit.beam_face[0]);
+            assert_eq!(after.loads, before.loads);
+            assert_eq!(after.opening_area, before.opening_area);
+            assert_eq!(after.opening_weight, before.opening_weight);
+            assert_eq!(after.openings, before.openings);
+            app.core.scoped.undo.undo(&mut app.core.model);
+            assert_eq!(app.core.model.wall_plates[0], before);
+            app.core.scoped.undo.redo(&mut app.core.model);
+            assert_eq!(app.core.model.wall_plates[0], after);
+            let path = std::env::temp_dir()
+                .join(format!("sepika-wall-attrs-{}.ovika", uuid::Uuid::new_v4()));
+            sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
+            let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(restored.wall_plates[0], after);
+            let mut reopened = App::default();
+            reopened.core.model = restored;
+            reopened.ui.scoped.wall_plate_draft.target = Some(WallPlateId(0));
+            let ctx = egui::Context::default();
+            attrs_click(&ctx, &mut reopened, "✔ 適用");
+            assert_eq!(reopened.core.model.wall_plates[0], after);
+        }
+    }
+
+    #[test]
+    fn attrs_gui_edits_load_rows_independently() {
+        let ctx = egui::Context::default();
+        let mut app = attrs_app(false);
+        let before = app.core.model.wall_plates[0].loads.clone();
+        attrs_click(
+            &ctx,
+            &mut app,
+            &to_display::area_load_kn_per_m2(before[1].value).to_string(),
+        );
+        attrs_frame(
+            &ctx,
+            &mut app,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+                egui::Event::Text("2.3456789".into()),
+            ],
+        );
+        attrs_click(&ctx, &mut app, "✔ 適用");
+        let loads = &app.core.model.wall_plates[0].loads;
+        assert_eq!(loads.len(), 3);
+        assert_eq!(loads[0], before[0]);
+        assert_eq!(loads[1].kind, before[1].kind);
+        assert_eq!(loads[1].value, to_internal::area_load_kn_per_m2(2.3456789));
+        assert_eq!(loads[2], before[2]);
+        attrs_click(&ctx, &mut app, "+ 面荷重を追加");
+        attrs_click(&ctx, &mut app, "✔ 適用");
+        assert_eq!(app.core.model.wall_plates[0].loads.len(), 4);
+        attrs_click(&ctx, &mut app, "削除");
+        attrs_click(&ctx, &mut app, "✔ 適用");
+        assert_eq!(app.core.model.wall_plates[0].loads[0].kind, before[1].kind);
+    }
+
+    #[test]
+    fn attrs_gui_rejects_nonfinite_openings_without_model_or_history_changes() {
+        for invalid in ["NaN", "inf", "-inf", "1e309"] {
+            for field in 0..6 {
+                let ctx = egui::Context::default();
+                let mut app = attrs_app(false);
+                attrs_click(&ctx, &mut app, "下辺");
+                attrs_click(&ctx, &mut app, "✔ 適用");
+                app.core.scoped.undo.undo(&mut app.core.model);
+                let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
+                let revision = app.core.scoped.undo.revision();
+                let undo = app.core.scoped.undo.undo_label().map(str::to_owned);
+                let redo = app.core.scoped.undo.redo_label().map(str::to_owned);
+                let draft = &mut app.ui.scoped.wall_plate_draft;
+                match field {
+                    0 => draft.opening_area = invalid.into(),
+                    1 => draft.opening_weight = invalid.into(),
+                    2 => draft.openings = format!("{invalid}x900"),
+                    3 => draft.openings = format!("800x{invalid}"),
+                    4 => draft.openings = format!("800x900@{invalid},500"),
+                    _ => draft.openings = format!("800x900@300,{invalid}"),
+                }
+                let output = attrs_click(&ctx, &mut app, "✔ 適用");
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.job.text.contains("有限の数値"))));
+                assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
+                assert_eq!(app.core.scoped.undo.revision(), revision);
+                assert_eq!(app.core.scoped.undo.undo_label(), undo.as_deref());
+                assert_eq!(app.core.scoped.undo.redo_label(), redo.as_deref());
+            }
+        }
     }
 
     #[test]
