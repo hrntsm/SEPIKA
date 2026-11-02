@@ -603,7 +603,7 @@ impl EditCommand for RestoreElementSectionAndDeleteSection {
 }
 
 id_indexed_delete_insert!(
-    /// 断面削除。部材から参照中の断面は削除すると参照が壊れるため Noop とする
+    /// 断面削除。部材・床板・壁版・ST-Bridge断面強度入力から参照中は Noop とする
     /// （先に割当を解除するか、UI 側でボタンを無効化する）。
     /// ID＝配列インデックスの不変条件を保つため、削除後は後続の断面 ID と
     /// 部材からの参照を 1 つずつ繰り上げる。
@@ -627,16 +627,35 @@ fn shift_section_ids(model: &mut Model, f: impl FnMut(&mut SectionId)) {
     model.visit_section_ids(f);
 }
 
-/// 指定断面を参照している要素・床板・壁版・二次部材が存在するか（削除ガード用）。
 fn section_in_use(model: &Model, id: SectionId) -> bool {
-    model.stb_strengths.sections.iter().any(|s| s.section == id)
-        || model.elements.iter().any(|e| e.section == Some(id))
-        || model.slabs.iter().any(|s| s.section() == Some(id))
-        || model.wall_plates.iter().any(|p| p.section == Some(id))
-        || model
-            .beams()
-            .chain(model.posts())
-            .any(|sm| sm.section == Some(id))
+    DeleteSection { id }.blocked_reason(model).is_some()
+}
+
+impl DeleteSection {
+    /// 参照中で削除できない場合は理由を返す。参照がなければ `None` を返す。
+    /// 断面 ID の実在は検証しない。
+    pub fn blocked_reason(&self, model: &Model) -> Option<&'static str> {
+        let strength = model
+            .stb_strengths
+            .sections
+            .iter()
+            .any(|s| s.section == self.id);
+        let member = model.elements.iter().any(|e| e.section == Some(self.id))
+            || model.slabs.iter().any(|s| s.section() == Some(self.id))
+            || model.wall_plates.iter().any(|p| p.section == Some(self.id))
+            || model
+                .beams()
+                .chain(model.posts())
+                .any(|sm| sm.section == Some(self.id));
+        match (member, strength) {
+            (false, false) => None,
+            (true, false) => Some("部材・小梁・二次部材から参照中のため削除できません"),
+            (false, true) => Some("ST-Bridge断面強度入力から参照中のため削除できません"),
+            (true, true) => {
+                Some("部材・小梁・二次部材とST-Bridge断面強度入力から参照中のため削除できません")
+            }
+        }
+    }
 }
 
 #[cfg(test)]
