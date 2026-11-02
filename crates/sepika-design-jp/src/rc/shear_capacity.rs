@@ -2,8 +2,6 @@
 //!
 //! [`shear_alpha`] — せん断スパン比による割増係数 α。
 //! [`shear_capacity`] — 許容せん断力 QA（普通強度）。
-//! [`shear_capacity_generic`] — 許容せん断力 QA の汎用式。
-//! [`shear_capacity_for`] — 許容せん断力 QA の入口。
 
 use super::allowable::*;
 use super::section_props::*;
@@ -57,40 +55,11 @@ pub(crate) fn shear_capacity(
     } else {
         allow.w_ft
     };
-    shear_capacity_generic(
-        props,
-        allow,
-        w_ft,
-        alpha,
-        term,
-        damage_control,
-        is_column,
-        pw_cap,
-        0.002,
-    )
-}
-
-/// 許容せん断力 QA の汎用式。`pw_cap`（pw の上限値）・`pw_offset`
-/// （せん断補強筋項のオフセット、通常は 0.002）を外部から指定できる。
-/// `w_ft`（せん断補強筋の許容引張応力度）は呼び出し側が与える。
-/// [`shear_capacity`] はこの関数をオフセット 0.002 固定で呼び出すラッパーである。
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn shear_capacity_generic(
-    props: &AxisProps,
-    allow: &RcAllow,
-    w_ft: f64,
-    alpha: f64,
-    term: LoadTerm,
-    damage_control: bool,
-    is_column: bool,
-    pw_cap: f64,
-    pw_offset: f64,
-) -> f64 {
     let pw = props.pw.min(pw_cap);
-    let pw_term = if props.pw < pw_offset {
+    let pw_term = if props.pw < 0.002 {
         0.0
     } else {
-        0.5 * w_ft * (pw - pw_offset)
+        0.5 * w_ft * (pw - 0.002)
     };
 
     match term {
@@ -111,17 +80,4 @@ pub(crate) fn shear_capacity_generic(
             }
         }
     }
-}
-
-/// 許容せん断力 QA の入口。せん断補強筋は対応グレードのみを対象とするため、
-/// 普通強度式 [`shear_capacity`] を呼ぶ。
-pub(crate) fn shear_capacity_for(
-    props: &AxisProps,
-    allow: &RcAllow,
-    alpha: f64,
-    term: LoadTerm,
-    damage_control: bool,
-    is_column: bool,
-) -> f64 {
-    shear_capacity(props, allow, alpha, term, damage_control, is_column)
 }

@@ -4,7 +4,7 @@
 use super::{
     axis_props_from_shape, main_rebar_grade, rc_allow, rc_beam_bond_check_1991_with_rebar,
     rc_beam_bond_check_with_rebar, rebar_allowable_tension, rebar_info_from_shape,
-    rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity_for, shear_rebar_grade,
+    rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity, shear_rebar_grade,
     AxisProps,
 };
 use crate::ultimate::rc_props::RcDirection;
@@ -117,7 +117,7 @@ pub(crate) fn beam_check(
     let (m_for_alpha, q_for_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
     let alpha = shear_alpha(m_for_alpha, q_for_alpha, props.d, 2.0);
     let damage_control = ctx.rc_damage_control;
-    let qa = shear_capacity_for(&props, &allow, alpha, ctx.term, damage_control, false);
+    let qa = shear_capacity(&props, &allow, alpha, ctx.term, damage_control, false);
     let q_design = if ctx.seismic_qd.is_some() {
         let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
             b: props.b,

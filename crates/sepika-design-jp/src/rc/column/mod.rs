@@ -2,7 +2,7 @@
 
 use super::{
     axis_props_from_shape, main_rebar_grade, rc_allow, rebar_allowable_tension,
-    rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity_for,
+    rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity,
     shear_rebar_grade, AxisProps,
 };
 use crate::ultimate::rc_props::RcDirection;
@@ -77,7 +77,7 @@ pub(crate) fn column_check(
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
         let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, axis.props.d, 1.5);
-        let qay = shear_capacity_for(&axis.props, &allow, alpha_y, ctx.term, damage_control, true);
+        let qay = shear_capacity(&axis.props, &allow, alpha_y, ctx.term, damage_control, true);
         let (q_design_y, q_design_z) = if ctx.seismic_qd.is_some() {
             let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
                 b: gross_area / d_full,
@@ -110,7 +110,7 @@ pub(crate) fn column_check(
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, axis.props.d, 1.5);
-        let qaz = shear_capacity_for(&axis.props, &allow, alpha_z, ctx.term, damage_control, true);
+        let qaz = shear_capacity(&axis.props, &allow, alpha_z, ctx.term, damage_control, true);
         let ratio_qz = if qaz > 0.0 { q_design_z / qaz } else { 0.0 };
 
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
@@ -218,7 +218,7 @@ pub(crate) fn column_check(
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
         let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, axis_z.props.d, 1.5);
-        let qay = shear_capacity_for(
+        let qay = shear_capacity(
             &axis_z.props,
             &allow,
             alpha_y,
@@ -262,7 +262,7 @@ pub(crate) fn column_check(
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, axis_y.props.d, 1.5);
-        let qaz = shear_capacity_for(
+        let qaz = shear_capacity(
             &axis_y.props,
             &allow,
             alpha_z,
@@ -355,7 +355,7 @@ pub(crate) fn column_check(
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
         let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, axis.props.d, 1.5);
-        let qay = shear_capacity_for(&axis.props, &allow, alpha_y, ctx.term, damage_control, true);
+        let qay = shear_capacity(&axis.props, &allow, alpha_y, ctx.term, damage_control, true);
         let (q_design_y, q_design_z) = if ctx.seismic_qd.is_some() {
             let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
                 b: gross_area / d_full,
@@ -388,7 +388,7 @@ pub(crate) fn column_check(
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, axis.props.d, 1.5);
-        let qaz = shear_capacity_for(&axis.props, &allow, alpha_z, ctx.term, damage_control, true);
+        let qaz = shear_capacity(&axis.props, &allow, alpha_z, ctx.term, damage_control, true);
         let ratio_qz = if qaz > 0.0 { q_design_z / qaz } else { 0.0 };
 
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
@@ -497,7 +497,7 @@ pub(crate) fn column_check(
     let (m_for_alpha_y, q_for_alpha_y) =
         ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
     let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, axis_z.props.d, 1.5);
-    let qay = shear_capacity_for(
+    let qay = shear_capacity(
         &axis_z.props,
         &allow,
         alpha_y,
@@ -541,7 +541,7 @@ pub(crate) fn column_check(
         .shear_span_y
         .unwrap_or((forces.my.abs(), forces.qz.abs()));
     let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, axis_y.props.d, 1.5);
-    let qaz = shear_capacity_for(
+    let qaz = shear_capacity(
         &axis_y.props,
         &allow,
         alpha_z,
