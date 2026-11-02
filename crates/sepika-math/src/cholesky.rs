@@ -592,18 +592,16 @@ mod acceptance_tests {
     }
 
     #[test]
-    fn non_spd_matrices_are_rejected_even_with_unexcited_or_zero_loads() {
+    fn singular_and_indefinite_matrices_are_rejected_before_solving() {
         for values in [
             [&[1.0, 0.0][..], &[0.0, 0.0][..]],
             [&[1.0, 2.0][..], &[2.0, 1.0][..]],
         ] {
-            for rhs in [[1.0, 0.0], [1.0, 1.0], [0.0, 0.0]] {
-                let mut solver = CholeskySolver::default();
-                let result = solver
-                    .factorize(&matrix(&values))
-                    .and_then(|()| solver.solve(&rhs));
-                assert!(matches!(result, Err(SolveError::NotPositiveDefinite)));
-            }
+            let mut solver = CholeskySolver::default();
+            assert!(matches!(
+                solver.factorize(&matrix(&values)),
+                Err(SolveError::NotPositiveDefinite)
+            ));
         }
     }
 
