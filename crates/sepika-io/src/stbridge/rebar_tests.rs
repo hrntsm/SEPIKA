@@ -68,6 +68,54 @@ fn standard_rebar_invalid_values_and_semantics_are_rejected() {
 }
 
 #[test]
+fn export_rejects_invalid_saved_rebar_and_edited_geometry() {
+    let original = import_stbridge(&fixture("normal_same")).unwrap();
+    for (attribute, value, diagnostic) in [
+        ("N_main_top_1st", None, "必須属性 N_main_top_1st"),
+        ("N_stirrup", Some("0"), "N_stirrup"),
+        ("N_main_top_4th", Some("1"), "標準段数"),
+    ] {
+        let mut model = original.clone();
+        let raw = model.stb_strengths.sections[1].rebar.as_mut().unwrap();
+        if let Some(value) = value {
+            raw.positions[0]
+                .attributes
+                .insert(attribute.into(), value.into());
+        } else {
+            raw.positions[0].attributes.remove(attribute);
+        }
+        let error = export_stbridge(&model).unwrap_err().to_string();
+        assert!(error.contains(diagnostic), "{attribute}: {error}");
+    }
+
+    let mut duplicate = original.clone();
+    let raw = duplicate.stb_strengths.sections[1].rebar.as_mut().unwrap();
+    raw.positions.push(raw.positions[0].clone());
+    let error = export_stbridge(&duplicate).unwrap_err().to_string();
+    assert!(
+        error.contains("配筋pos") && error.contains("重複"),
+        "{error}"
+    );
+
+    let mut edited = original;
+    let beam_id = edited.stb_strengths.sections[1].section;
+    let beam = edited
+        .sections
+        .iter_mut()
+        .find(|s| s.id == beam_id)
+        .unwrap();
+    let Some(SectionShape::RcBeamRect { b, .. }) = &mut beam.shape else {
+        panic!("RC梁断面が必要です");
+    };
+    *b += 10.0;
+    let error = export_stbridge(&edited).unwrap_err().to_string();
+    assert!(
+        error.contains("原配筋と編集後形状が一致しません"),
+        "{error}"
+    );
+}
+
+#[test]
 fn standard_roles_positions_and_omissions_remain_distinct() {
     let model = import_stbridge(&fixture("normal_same")).unwrap();
     let beam = &model.stb_strengths.sections[1];

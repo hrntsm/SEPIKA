@@ -202,8 +202,6 @@ fn replace_rebar(xml: &str, input: &StbSectionStrength) -> Result<String, StbErr
     let Some(raw) = &input.rebar else {
         return Ok(xml.into());
     };
-    raw.validate_standard()
-        .map_err(|e| StbError::Unmappable(format!("断面 {}: {e}", input.section.0)))?;
     let mut result = xml.to_owned();
     let start = result.find("<StbSecBarArrangement").ok_or_else(|| {
         StbError::Unmappable(format!(
