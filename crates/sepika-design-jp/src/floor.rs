@@ -199,8 +199,6 @@ pub fn design_slab_oneway(
     }
 }
 
-/// 鋼小梁の既定ヤング係数 [N/mm²]（材料未設定時）。
-pub const STEEL_YOUNG: f64 = 205_000.0;
 /// たわみ制限の既定分母（δ/L ≤ 1/250）。
 pub const DEFLECTION_LIMIT_DENOM: f64 = 250.0;
 /// スラブ設計の既定かぶり `[mm]`（圧縮縁〜鉄筋重心）。
@@ -211,14 +209,17 @@ pub const SLAB_J_RATIO: f64 = 7.0 / 8.0;
 pub const REBAR_FT_LONG_SD295: f64 = 195.0;
 
 /// 小梁略算に使うヤング係数 E [N/mm²] と長期許容曲げ応力度 [N/mm²]。
-/// 長期 `ft = F/1.5` を用い、材料・必要実板厚・強度の不備は理由付きエラー。
+/// 長期 `ft = F/1.5` を用い、材料・必要実板厚・強度の不備、正の有限値でないEは理由付きエラー。
 pub fn beam_steel_e_and_ft(
     sec: &sepika_core::model::Section,
     mat: Option<&sepika_core::model::Material>,
 ) -> Result<(f64, f64), String> {
     let f = crate::material_strength::section_steel_f(sec, mat)?;
     let m = mat.ok_or("小梁の鋼材が未割当です")?;
-    let e = if m.young > 0.0 { m.young } else { STEEL_YOUNG };
+    if !m.young.is_finite() || m.young <= 0.0 {
+        return Err("ヤング係数Eは正の有限値が必要です".into());
+    }
+    let e = m.young;
     Ok((e, f / 1.5))
 }
 
@@ -257,7 +258,7 @@ mod tests {
     #[test]
     fn test_beam_bending_and_deflection_ratio() {
         // 等分布 w=10 N/mm・L=4000mm 相当の部材力（M=wL²/8、Q=wL/2、δ=5wL⁴/(384EI)）。
-        let defl = 5.0 * 10.0 * 4000.0_f64.powi(4) / (384.0 * STEEL_YOUNG * 1.0e8);
+        let defl = 5.0 * 10.0 * 4000.0_f64.powi(4) / (384.0 * 205_000.0 * 1.0e8);
         let r = design_beam_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, defl, 1.0e6, 156.0, 250.0);
         assert!((r.m_max - 2.0e7).abs() < 1.0, "M={}", r.m_max);
         assert!((r.q_max - 2.0e4).abs() < 1.0, "Q={}", r.q_max);

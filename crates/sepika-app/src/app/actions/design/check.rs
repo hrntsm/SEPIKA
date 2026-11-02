@@ -452,7 +452,8 @@ impl App {
                 cantilever_extremes(&entry.member_loads, span, e, sec.iy)
             } else {
                 simple_beam_extremes(&entry.member_loads, span, e, sec.iy)
-            };
+            }
+            .map_err(|reason| format!("小梁 {}: {reason}", sm.id.0))?;
             if ex.w_equiv <= 1e-9 && ex.m_max <= 1e-9 {
                 beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;

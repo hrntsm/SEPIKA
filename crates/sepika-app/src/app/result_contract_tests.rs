@@ -764,6 +764,67 @@ pub(super) fn direct_secondary_beam_app() -> App {
 }
 
 #[test]
+fn direct_secondary_beam_design_rejects_invalid_young_and_overflowed_rigidity() {
+    for (young, inertia, reason) in [
+        (0.0, None, "ヤング係数E"),
+        (-1.0, None, "ヤング係数E"),
+        (f64::NAN, None, "ヤング係数E"),
+        (f64::INFINITY, None, "ヤング係数E"),
+        (f64::NEG_INFINITY, None, "ヤング係数E"),
+        (205_000.0, Some(f64::MAX), "曲げ剛性EI"),
+    ] {
+        let mut app = direct_secondary_beam_app();
+        app.run_design_check();
+        assert!(app.current_design_results().is_some());
+        app.core.model.materials[0].young = young;
+        if let Some(inertia) = inertia {
+            app.core.model.sections[0].iy = inertia;
+        }
+        app.run_design_check();
+        let error = app
+            .core
+            .scoped
+            .last_error
+            .as_deref()
+            .expect("不正な剛性を拒否");
+        assert!(
+            error.contains("小梁 0") && error.contains(reason),
+            "{error}"
+        );
+        assert!(app.current_design_results().is_none());
+        let failed = app.core.scoped.results.as_ref().unwrap();
+        assert!(failed.beam_checks.is_empty() && failed.slab_checks.is_empty());
+        assert!(failed.design_contract_version.is_none());
+    }
+}
+
+#[test]
+fn direct_secondary_beam_material_has_explicit_standard_young_and_no_unset_fallback() {
+    let mut app = direct_secondary_beam_app();
+    assert_eq!(app.core.model.materials[0].young, 205_000.0);
+    app.run_design_check();
+    let standard_deflection = app.current_design_results().unwrap().beam_checks[0]
+        .2
+        .deflection;
+    assert!(standard_deflection > 0.0);
+    app.core.model.materials[0].young = 102_500.0;
+    app.run_design_check();
+    let half_young_deflection = app.current_design_results().unwrap().beam_checks[0]
+        .2
+        .deflection;
+    assert!((half_young_deflection - 2.0 * standard_deflection).abs() < 1e-10);
+    app.core.model.sections[0].material = None;
+    app.run_design_check();
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .is_some_and(|error| error.contains("小梁 0")));
+    assert!(app.current_design_results().is_none());
+}
+
+#[test]
 fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     let mut app = direct_secondary_beam_app();
     for region in &mut app.core.model.floor_regions {
@@ -802,7 +863,7 @@ fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     );
     let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
 
-    for version in [23, 24, 29, DESIGN_CONTRACT_VERSION - 1] {
+    for version in [23, 24, 29, 47, DESIGN_CONTRACT_VERSION - 1] {
         let (mut loaded, path) = restore(
             &app,
             None,

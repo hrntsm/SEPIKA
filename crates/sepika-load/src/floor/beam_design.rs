@@ -167,22 +167,39 @@ pub const JOIST_FORCE_SAMPLE_DIVISIONS: usize = 64;
 /// たわみ積分・最大値探索の分割数。
 pub const JOIST_DEFLECTION_SAMPLE_DIVISIONS: usize = 80;
 
+fn beam_flexural_rigidity(young: f64, inertia: f64) -> Result<f64, &'static str> {
+    if !young.is_finite() || young <= 0.0 {
+        return Err("ヤング係数Eは正の有限値が必要です");
+    }
+    if !inertia.is_finite() || inertia <= 0.0 {
+        return Err("断面二次モーメントIyは正の有限値が必要です");
+    }
+    let ei = young * inertia;
+    if !ei.is_finite() || ei <= 0.0 {
+        return Err("曲げ剛性EIを正の有限値として算定できません");
+    }
+    Ok(ei)
+}
+
 /// 単純梁（両端ピン）の最大たわみ [mm]。
 fn simple_beam_max_deflection(
     loads: &[MemberLoadKind],
     span: f64,
     young: f64,
     inertia: f64,
-) -> f64 {
-    let ei = young * inertia;
-    if span <= 1e-9 || ei <= 1e-9 || loads.is_empty() {
-        return 0.0;
+) -> Result<f64, &'static str> {
+    let ei = beam_flexural_rigidity(young, inertia)?;
+    if span <= 1e-9 || loads.is_empty() {
+        return Ok(0.0);
     }
     const N: usize = JOIST_DEFLECTION_SAMPLE_DIVISIONS;
     let h = span / N as f64;
     let kappa: Vec<f64> = (0..=N)
         .map(|i| simple_beam_moment_at(loads, span, i as f64 * h) / ei)
         .collect();
+    if kappa.iter().any(|v| !v.is_finite()) {
+        return Err("曲率を有限値として算定できません");
+    }
     let mut integral_kappa_l = 0.0;
     for j in 0..N {
         integral_kappa_l += (kappa[j] + kappa[j + 1]) / 2.0 * (span - (j as f64 + 0.5) * h) * h;
@@ -197,9 +214,12 @@ fn simple_beam_max_deflection(
             area += kap * (x - s_mid) * h;
         }
         let d = area - x / span * integral_kappa_l;
+        if !d.is_finite() {
+            return Err("たわみ積分を有限値として算定できません");
+        }
         max_d = max_d.max(d.abs());
     }
-    max_d
+    Ok(max_d)
 }
 
 /// 梁の設計部材力（重ね合わせ）。支持条件（両端支持／片持ち）は算定側が選ぶ。
@@ -216,19 +236,24 @@ pub struct BeamExtremes {
 }
 
 /// `loads` を単純梁として重ね合わせ、設計に用いる最大値を返す。
+/// E [N/mm²]・Iy [mm⁴]・EIが正の有限値でない場合、たわみ算定が非有限になる場合はエラー。
 pub fn simple_beam_extremes(
     loads: &[MemberLoadKind],
     span: f64,
     young: f64,
     inertia: f64,
-) -> BeamExtremes {
+) -> Result<BeamExtremes, &'static str> {
+    beam_flexural_rigidity(young, inertia)?;
+    if !span.is_finite() {
+        return Err("スパンが有限値ではありません");
+    }
     if span <= 1e-9 || loads.is_empty() {
-        return BeamExtremes {
+        return Ok(BeamExtremes {
             m_max: 0.0,
             q_max: 0.0,
             deflection: 0.0,
             w_equiv: 0.0,
-        };
+        });
     }
     const N: usize = JOIST_FORCE_SAMPLE_DIVISIONS;
     let r_i: f64 = loads.iter().map(|l| simple_reactions(l, span).0).sum();
@@ -240,12 +265,12 @@ pub fn simple_beam_extremes(
         q_max = q_max.max(simple_beam_shear_at(loads, x, r_i).abs());
     }
     let total: f64 = loads.iter().map(member_load_total).sum();
-    BeamExtremes {
+    Ok(BeamExtremes {
         m_max,
         q_max,
-        deflection: simple_beam_max_deflection(loads, span, young, inertia),
+        deflection: simple_beam_max_deflection(loads, span, young, inertia)?,
         w_equiv: total / span,
-    }
+    })
 }
 
 /// `MemberLoadKind` 1件のみが作用する片持ち梁（基端 i、先端 j 自由）の、
@@ -312,16 +337,24 @@ fn cantilever_shear_at(loads: &[MemberLoadKind], x: f64) -> f64 {
 }
 
 /// 片持ち梁（基端固定・先端自由）の最大たわみ [mm]。
-fn cantilever_max_deflection(loads: &[MemberLoadKind], span: f64, young: f64, inertia: f64) -> f64 {
-    let ei = young * inertia;
-    if span <= 1e-9 || ei <= 1e-9 || loads.is_empty() {
-        return 0.0;
+fn cantilever_max_deflection(
+    loads: &[MemberLoadKind],
+    span: f64,
+    young: f64,
+    inertia: f64,
+) -> Result<f64, &'static str> {
+    let ei = beam_flexural_rigidity(young, inertia)?;
+    if span <= 1e-9 || loads.is_empty() {
+        return Ok(0.0);
     }
     const N: usize = JOIST_DEFLECTION_SAMPLE_DIVISIONS;
     let h = span / N as f64;
     let kappa: Vec<f64> = (0..=N)
         .map(|i| cantilever_moment_at(loads, span, i as f64 * h) / ei)
         .collect();
+    if kappa.iter().any(|v| !v.is_finite()) {
+        return Err("曲率を有限値として算定できません");
+    }
     let mut slope = vec![0.0_f64; N + 1];
     for j in 0..N {
         slope[j + 1] = slope[j] + (kappa[j] + kappa[j + 1]) / 2.0 * h;
@@ -330,25 +363,33 @@ fn cantilever_max_deflection(loads: &[MemberLoadKind], span: f64, young: f64, in
     let mut v = 0.0_f64;
     for j in 0..N {
         v += (slope[j] + slope[j + 1]) / 2.0 * h;
+        if !v.is_finite() {
+            return Err("たわみ積分を有限値として算定できません");
+        }
         max_d = max_d.max(v.abs());
     }
-    max_d
+    Ok(max_d)
 }
 
 /// `loads` を片持ち梁（基端固定・先端自由）として重ね合わせ、設計に用いる最大値を返す。
+/// E [N/mm²]・Iy [mm⁴]・EIが正の有限値でない場合、たわみ算定が非有限になる場合はエラー。
 pub fn cantilever_extremes(
     loads: &[MemberLoadKind],
     span: f64,
     young: f64,
     inertia: f64,
-) -> BeamExtremes {
+) -> Result<BeamExtremes, &'static str> {
+    beam_flexural_rigidity(young, inertia)?;
+    if !span.is_finite() {
+        return Err("スパンが有限値ではありません");
+    }
     if span <= 1e-9 || loads.is_empty() {
-        return BeamExtremes {
+        return Ok(BeamExtremes {
             m_max: 0.0,
             q_max: 0.0,
             deflection: 0.0,
             w_equiv: 0.0,
-        };
+        });
     }
     const N: usize = JOIST_FORCE_SAMPLE_DIVISIONS;
     let mut m_max = 0.0_f64;
@@ -359,12 +400,12 @@ pub fn cantilever_extremes(
         q_max = q_max.max(cantilever_shear_at(loads, x).abs());
     }
     let total: f64 = loads.iter().map(member_load_total).sum();
-    BeamExtremes {
+    Ok(BeamExtremes {
         m_max,
         q_max,
-        deflection: cantilever_max_deflection(loads, span, young, inertia),
+        deflection: cantilever_max_deflection(loads, span, young, inertia)?,
         w_equiv: total / span,
-    }
+    })
 }
 
 /// 二次部材小梁 1 本ぶんの分配荷重。
@@ -1026,6 +1067,35 @@ mod tests {
     }
 
     #[test]
+    fn beam_deflection_rejects_invalid_stiffness_and_nonfinite_integration() {
+        let loads = [MemberLoadKind::Point {
+            a: 2000.0,
+            p: 1000.0,
+        }];
+        for extremes in [simple_beam_extremes, cantilever_extremes] {
+            for young in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert_eq!(
+                    extremes(&loads, 4000.0, young, 1.0e8),
+                    Err("ヤング係数Eは正の有限値が必要です")
+                );
+            }
+            for inertia in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert!(extremes(&loads, 4000.0, 205_000.0, inertia).is_err());
+            }
+            assert_eq!(
+                extremes(&loads, 4000.0, 205_000.0, f64::MAX),
+                Err("曲げ剛性EIを正の有限値として算定できません")
+            );
+            assert_eq!(
+                extremes(&loads, 4000.0, 1.0e-300, 1.0),
+                Err("たわみ積分を有限値として算定できません")
+            );
+            assert!(extremes(&loads, 4000.0, f64::MIN_POSITIVE, 1.0).is_err());
+            assert!(extremes(&loads, 4000.0, f64::MIN_POSITIVE, f64::MIN_POSITIVE).is_err());
+        }
+    }
+
+    #[test]
     fn simple_beam_extremes_uniform_matches_closed_form() {
         let w = 10.0_f64;
         let l = 4000.0_f64;
@@ -1037,7 +1107,7 @@ mod tests {
         }];
         let e = 205_000.0;
         let i = 1.0e8;
-        let ex = simple_beam_extremes(&loads, l, e, i);
+        let ex = simple_beam_extremes(&loads, l, e, i).unwrap();
         let m = w * l * l / 8.0;
         let q = w * l / 2.0;
         let d = 5.0 * w * l.powi(4) / (384.0 * e * i);
@@ -1064,7 +1134,7 @@ mod tests {
         }];
         let e = 205_000.0;
         let i = 1.0e8;
-        let ex = cantilever_extremes(&loads, l, e, i);
+        let ex = cantilever_extremes(&loads, l, e, i).unwrap();
         let m = w * l * l / 2.0;
         let q = w * l;
         let d = w * l.powi(4) / (8.0 * e * i);
@@ -1086,7 +1156,7 @@ mod tests {
         let loads = vec![MemberLoadKind::Point { a: l, p }];
         let e = 205_000.0;
         let i = 1.0e8;
-        let ex = cantilever_extremes(&loads, l, e, i);
+        let ex = cantilever_extremes(&loads, l, e, i).unwrap();
         let m = p * l;
         let d = p * l.powi(3) / (3.0 * e * i);
         assert!((ex.m_max - m).abs() / m < 1e-6, "m_max={}", ex.m_max);
@@ -1109,8 +1179,8 @@ mod tests {
         let base_at_node1 = vec![MemberLoadKind::Point { a: 1000.0, p }];
         let flipped = flip_member_loads(&base_at_node1, l);
         let expected = vec![MemberLoadKind::Point { a: 3000.0, p }];
-        let a = cantilever_extremes(&flipped, l, e, i);
-        let b = cantilever_extremes(&expected, l, e, i);
+        let a = cantilever_extremes(&flipped, l, e, i).unwrap();
+        let b = cantilever_extremes(&expected, l, e, i).unwrap();
         assert!((a.m_max - b.m_max).abs() / b.m_max < 1e-9);
         assert!((a.deflection - b.deflection).abs() / b.deflection < 1e-9);
     }
@@ -1265,7 +1335,7 @@ mod tests {
         assert_eq!(entry.contributed_slab_ids.len(), 2);
         assert!(beam_distribution_is_ready(entry, 4000.0));
         let l = 4000.0_f64;
-        let ex = simple_beam_extremes(&entry.member_loads, l, 205_000.0, 1.0e8);
+        let ex = simple_beam_extremes(&entry.member_loads, l, 205_000.0, 1.0e8).unwrap();
         let w_trib = 15.0_f64;
         let m_trib = w_trib * l * l / 8.0;
         let q_trib = w_trib * l / 2.0;
