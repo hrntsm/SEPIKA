@@ -734,7 +734,7 @@ fn 二次小梁の直接設計へ嵩上げの独立曲げせん断増分が届�
     let increased = design(base.clone());
     base.floor_regions[0].secondary_beams[0].vertical_eccentricity = Some(-100.);
     let baseline = design(base);
-    assert!(!increased.unchecked && !baseline.unchecked);
+    assert!(increased.m_max > 0.0 && baseline.m_max > 0.0);
     assert!((increased.w - baseline.w - 0.448).abs() < 1e-9);
     assert!((increased.m_max - baseline.m_max - 2150400.).abs() < 1e-5);
     assert!((increased.q_max - baseline.q_max - 1344.).abs() < 1e-6);

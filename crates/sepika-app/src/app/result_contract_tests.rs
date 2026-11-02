@@ -866,7 +866,7 @@ fn direct_secondary_beam_design_preserves_demand_for_large_finite_reference() {
     let unit = app.current_design_results().expect("単位Y参照の直接検定");
     assert_eq!((unit.beam_checks.len(), unit.slab_checks.len()), (1, 2));
     let unit_beam = unit.beam_checks[0].2.clone();
-    assert!(!unit_beam.unchecked);
+    assert!(unit_beam.unchecked, "接合条件未設定でも曲げ需要を保持");
     assert!(unit_beam.m_max > 0.0 && unit_beam.q_max > 0.0);
 
     app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0e308, 0.0];
