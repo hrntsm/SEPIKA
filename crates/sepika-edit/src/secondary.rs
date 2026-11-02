@@ -168,20 +168,10 @@ impl EditCommand for DeleteUnassignedPost {
         if self.index >= model.unassigned_posts.len() {
             return Box::new(Noop);
         }
-        let strength_input = model.stb_strengths.clone();
-        let removed = model.unassigned_posts.remove(self.index);
-        model
-            .stb_strengths
-            .members
-            .retain(|m| m.target != sepika_core::model::StrengthTarget::Secondary(removed.id));
-        Box::new(crate::strength::RestoreStrengthInput {
-            input: strength_input,
-            stories: model.source_stories.clone(),
-            inverse: Box::new(InsertUnassignedPost {
-                index: self.index,
-                sm: removed,
-            }),
-        })
+        DeleteSecondaryMember {
+            member: model.unassigned_posts[self.index].id,
+        }
+        .apply(model)
     }
 
     fn label(&self) -> &str {
@@ -854,6 +844,7 @@ enum SecondaryAction {
 /// 割当領域の再構築と孤児版の除去で変化するモデル部分（undo 用）。
 #[derive(Clone)]
 struct SecondarySnapshot {
+    post_design_inputs: Vec<sepika_core::model::PostDesignInput>,
     strengths: sepika_core::model::StbStrengthInput,
     floor_regions: Vec<sepika_core::model::FloorRegion>,
     wall_regions: Vec<sepika_core::model::WallRegion>,
@@ -868,6 +859,7 @@ struct SecondarySnapshot {
 
 fn snapshot_secondary(model: &Model) -> SecondarySnapshot {
     SecondarySnapshot {
+        post_design_inputs: model.post_design_inputs.clone(),
         strengths: model.stb_strengths.clone(),
         floor_regions: model.floor_regions.clone(),
         wall_regions: model.wall_regions.clone(),
@@ -882,6 +874,7 @@ fn snapshot_secondary(model: &Model) -> SecondarySnapshot {
 }
 
 fn restore_secondary(model: &mut Model, snapshot: SecondarySnapshot) {
+    model.post_design_inputs = snapshot.post_design_inputs;
     model.stb_strengths = snapshot.strengths;
     model.floor_regions = snapshot.floor_regions;
     model.wall_regions = snapshot.wall_regions;
@@ -895,6 +888,7 @@ fn restore_secondary(model: &mut Model, snapshot: SecondarySnapshot) {
 }
 
 fn remove_secondary(model: &mut Model, id: SecondaryMemberId) -> bool {
+    model.post_design_inputs.retain(|i| i.member != id);
     model
         .stb_strengths
         .members
@@ -1450,5 +1444,138 @@ mod tests {
         undo.redo(&mut model);
         assert_eq!(model.slabs.len(), 0);
         assert!(model.validate().is_ok(), "{:?}", model.validate());
+    }
+}
+
+/// 間柱の独立検定条件を設定・解除する。逆操作は変更前の条件を復元する。
+pub struct SetPostDesignInput {
+    pub member: SecondaryMemberId,
+    pub input: Option<sepika_core::model::PostDesignInput>,
+}
+impl EditCommand for SetPostDesignInput {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if !model.posts().any(|p| p.id == self.member)
+            || self.input.as_ref().is_some_and(|i| i.member != self.member)
+        {
+            return Box::new(Noop);
+        }
+        let old = model
+            .post_design_inputs
+            .iter()
+            .find(|i| i.member == self.member)
+            .cloned();
+        if old == self.input {
+            return Box::new(Noop);
+        }
+        model.post_design_inputs.retain(|i| i.member != self.member);
+        if let Some(input) = &self.input {
+            model.post_design_inputs.push(input.clone());
+        }
+        Box::new(Self {
+            member: self.member,
+            input: old,
+        })
+    }
+    fn label(&self) -> &str {
+        "間柱の独立検定条件"
+    }
+}
+
+#[cfg(test)]
+mod post_design_tests {
+    use super::*;
+    use crate::{AddCombination, AddLoadCase, DeleteCombination, DeleteLoadCase};
+    use sepika_core::model::{LoadCombination, MemberLoadKind, PostDesignInput, PostLateralLoad};
+    #[test]
+    fn selected_combination_and_term_survive_deletion_and_undo() {
+        let mut m = Model::default();
+        m.post_design_inputs.push(PostDesignInput {
+            member: SecondaryMemberId(0),
+            combinations: vec![(1, true)],
+            ..Default::default()
+        });
+        for name in ["A", "B", "C"] {
+            AddCombination {
+                combo: LoadCombination {
+                    name: name.into(),
+                    terms: Vec::new(),
+                },
+            }
+            .apply(&mut m);
+        }
+        let undo = DeleteCombination { index: 0 }.apply(&mut m);
+        assert_eq!(m.post_design_inputs[0].combinations, vec![(0, true)]);
+        assert_eq!(m.combinations[0].name, "B");
+        let redo = undo.apply(&mut m);
+        assert_eq!(m.post_design_inputs[0].combinations, vec![(1, true)]);
+        assert_eq!(m.combinations[1].name, "B");
+        redo.apply(&mut m);
+        let undo = DeleteCombination { index: 0 }.apply(&mut m);
+        assert!(m.post_design_inputs[0].combinations.is_empty());
+        undo.apply(&mut m);
+        assert_eq!(m.post_design_inputs[0].combinations, vec![(0, true)]);
+    }
+    #[test]
+    fn referenced_case_is_guarded_and_other_case_deletion_shifts_local_load() {
+        let mut m = Model::default();
+        for name in ["A", "B", "C"] {
+            AddLoadCase { name: name.into() }.apply(&mut m);
+        }
+        m.post_design_inputs.push(PostDesignInput {
+            member: SecondaryMemberId(0),
+            lateral_loads: vec![PostLateralLoad {
+                case: LoadCaseId(1),
+                direction: [1.0, 0.0],
+                load: MemberLoadKind::Point { a: 100.0, p: 500.0 },
+            }],
+            ..Default::default()
+        });
+        assert!(DeleteLoadCase { id: LoadCaseId(1) }.apply(&mut m).is_noop());
+        let undo = DeleteLoadCase { id: LoadCaseId(0) }.apply(&mut m);
+        assert_eq!(m.post_design_inputs[0].lateral_loads[0].case, LoadCaseId(0));
+        assert_eq!(m.load_cases[0].name, "B");
+        undo.apply(&mut m);
+        assert_eq!(m.post_design_inputs[0].lateral_loads[0].case, LoadCaseId(1));
+        assert_eq!(m.load_cases[1].name, "B");
+    }
+    #[test]
+    fn deleting_post_removes_local_conditions_and_undo_redo_preserves_case_references() {
+        mod fixture {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-core/tests/support/steel_secondary_post_model.rs"
+            ));
+        }
+        for unassigned in [false, true] {
+            let mut m = fixture::steel_post_model();
+            m.combinations.clear();
+            m.post_design_inputs[0].combinations.clear();
+            if unassigned {
+                let post = m.wall_regions[0].posts.pop().unwrap();
+                m.unassigned_posts.push(post);
+            }
+            let old = m.post_design_inputs.clone();
+            let mut history = crate::UndoStack::new();
+            assert!(DeleteLoadCase { id: LoadCaseId(0) }.apply(&mut m).is_noop());
+            let command: Box<dyn EditCommand> = if unassigned {
+                Box::new(DeleteUnassignedPost { index: 0 })
+            } else {
+                Box::new(DeleteSecondaryMember {
+                    member: SecondaryMemberId(0),
+                })
+            };
+            assert!(history.run(&mut m, command));
+            assert!(m.post_design_inputs.is_empty());
+            assert!(history.run(&mut m, Box::new(DeleteLoadCase { id: LoadCaseId(0) })));
+            history.undo(&mut m);
+            history.undo(&mut m);
+            assert_eq!(m.post_design_inputs, old);
+            assert!(m.secondary_member(SecondaryMemberId(0)).is_some());
+            assert!(DeleteLoadCase { id: LoadCaseId(0) }.apply(&mut m).is_noop());
+            history.redo(&mut m);
+            assert!(m.post_design_inputs.is_empty());
+            history.redo(&mut m);
+            assert_eq!(m.load_cases[0].name, "LL(架構用)");
+        }
     }
 }

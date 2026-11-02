@@ -153,10 +153,19 @@ fn load_case_in_use(model: &Model, id: LoadCaseId) -> bool {
         .combinations
         .iter()
         .any(|c| c.terms.iter().any(|(lc, _)| *lc == id))
+        || model
+            .post_design_inputs
+            .iter()
+            .any(|i| i.lateral_loads.iter().any(|load| load.case == id))
 }
 
 /// モデル内の全ての `LoadCaseId` 参照（ケース自身の ID を含む）に `f` を適用する。
 fn shift_load_case_ids(model: &mut Model, mut f: impl FnMut(&mut LoadCaseId)) {
+    for input in &mut model.post_design_inputs {
+        for load in &mut input.lateral_loads {
+            f(&mut load.case);
+        }
+    }
     for lc in &mut model.load_cases {
         f(&mut lc.id);
     }
@@ -204,6 +213,19 @@ impl EditCommand for DeleteCombination {
         if self.index >= model.combinations.len() {
             return Box::new(Noop);
         }
+        let post_combinations = model
+            .post_design_inputs
+            .iter()
+            .map(|i| (i.member, i.combinations.clone()))
+            .collect();
+        for input in &mut model.post_design_inputs {
+            input.combinations.retain(|(idx, _)| *idx != self.index);
+            for (idx, _) in &mut input.combinations {
+                if *idx > self.index {
+                    *idx -= 1;
+                }
+            }
+        }
         let selection = model.ultimate_gravity_combination;
         let combo = model.combinations.remove(self.index);
         model.ultimate_gravity_combination = selection.and_then(|index| {
@@ -217,6 +239,7 @@ impl EditCommand for DeleteCombination {
             index: self.index,
             combo,
             selection,
+            post_combinations,
         })
     }
     fn label(&self) -> &str {
@@ -229,11 +252,27 @@ pub struct InsertCombination {
     pub index: usize,
     pub combo: sepika_core::model::LoadCombination,
     selection: Option<usize>,
+    post_combinations: Vec<(SecondaryMemberId, Vec<(usize, bool)>)>,
 }
 impl EditCommand for InsertCombination {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if self.index > model.combinations.len() {
             return Box::new(Noop);
+        }
+        for input in &mut model.post_design_inputs {
+            if let Some((_, combinations)) = self
+                .post_combinations
+                .iter()
+                .find(|(id, _)| *id == input.member)
+            {
+                input.combinations = combinations.clone();
+            } else {
+                for (idx, _) in &mut input.combinations {
+                    if *idx >= self.index {
+                        *idx += 1;
+                    }
+                }
+            }
         }
         model.combinations.insert(self.index, self.combo.clone());
         model.ultimate_gravity_combination = self.selection;

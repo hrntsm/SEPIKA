@@ -120,6 +120,9 @@ pub struct AddSectionShape {
 
 impl EditCommand for AddSectionShape {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Err(reason) = self.shape.validate_corner_radius_input() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         let non_frame = matches!(
             &self.shape,
             sepika_core::section_shape::SectionShape::RcWall { .. }
@@ -189,6 +192,20 @@ impl EditCommand for SetSectionSurfaceRadius {
         if section.id != self.section {
             return Box::new(Noop);
         }
+        if self.radius_mm.is_none()
+            && matches!(
+                section.shape,
+                Some(
+                    sepika_core::section_shape::SectionShape::SteelBox { .. }
+                        | sepika_core::section_shape::SectionShape::CftBox { .. }
+                )
+            )
+        {
+            return Box::new(crate::RejectedEdit(
+                "角形断面の角部外半径（角R）が未設定です。溶接組立BOXの直角は0を明示してください"
+                    .into(),
+            ));
+        }
         let old = section.clone();
         let Ok(updated) = section.with_surface_radius(self.radius_mm) else {
             return Box::new(Noop);
@@ -204,6 +221,9 @@ impl EditCommand for SetSectionSurfaceRadius {
 
 impl EditCommand for EditSectionShape {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Err(reason) = self.new_shape.validate_corner_radius_input() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if self.new_shape.validate_surface_radius().is_err() {
             return Box::new(Noop);
         }
@@ -456,6 +476,11 @@ pub struct AddCatalogSection {
 
 impl EditCommand for AddCatalogSection {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(shape) = &self.section.shape {
+            if let Err(reason) = shape.validate_corner_radius_input() {
+                return Box::new(crate::RejectedEdit(reason));
+            }
+        }
         let mut sec = self.section.clone();
         if let Err(reason) = sec.validate_rc_frame_use() {
             return Box::new(crate::RejectedEdit(reason));
@@ -612,4 +637,140 @@ fn section_in_use(model: &Model, id: SectionId) -> bool {
             .beams()
             .chain(model.posts())
             .any(|sm| sm.section == Some(id))
+}
+
+#[cfg(test)]
+mod corner_radius_input_tests {
+    use super::*;
+    use sepika_core::{model::FrameSectionUse, section_shape::SectionShape};
+    #[test]
+    fn box_radius_missing_rejects_all_setting_commands_without_changing_model_or_history() {
+        for cft in [false, true] {
+            let shape = if cft {
+                SectionShape::CftBox {
+                    height: 300.0,
+                    width: 300.0,
+                    thick: 12.0,
+                    horizontal_thick: 12.0,
+                    corner_r: Some(0.0),
+                }
+            } else {
+                SectionShape::SteelBox {
+                    height: 300.0,
+                    width: 300.0,
+                    thick: 12.0,
+                    horizontal_thick: 12.0,
+                    corner_r: Some(0.0),
+                }
+            };
+            let mut m = Model::default();
+            let mut history = crate::UndoStack::new();
+            assert!(history.run(
+                &mut m,
+                Box::new(AddSectionShape {
+                    shape: shape.clone(),
+                    new_id: SectionId(0),
+                    name: "BOX".into(),
+                    floor: None,
+                    frame_use: Some(FrameSectionUse::Column)
+                })
+            ));
+            assert!(history.run(
+                &mut m,
+                Box::new(SetSectionName {
+                    id: SectionId(0),
+                    name: "変更".into(),
+                    floor: None
+                })
+            ));
+            history.undo(&mut m);
+            let mut unknown = shape;
+            match &mut unknown {
+                SectionShape::SteelBox { corner_r, .. } | SectionShape::CftBox { corner_r, .. } => {
+                    *corner_r = None
+                }
+                _ => unreachable!(),
+            }
+            let mut catalog = m.sections[0].clone();
+            catalog.id = SectionId(1);
+            catalog.name = "CAT".into();
+            catalog.shape = Some(unknown.clone());
+            let commands: Vec<Box<dyn EditCommand>> = vec![
+                Box::new(AddSectionShape {
+                    shape: unknown.clone(),
+                    new_id: SectionId(1),
+                    name: "追加".into(),
+                    floor: None,
+                    frame_use: Some(FrameSectionUse::Column),
+                }),
+                Box::new(EditSectionShape {
+                    section: SectionId(0),
+                    new_shape: unknown,
+                    frame_use: Some(FrameSectionUse::Column),
+                }),
+                Box::new(SetSectionSurfaceRadius {
+                    section: SectionId(0),
+                    radius_mm: None,
+                }),
+                Box::new(AddCatalogSection { section: catalog }),
+            ];
+            for command in commands {
+                let before = m.clone();
+                let revision = history.revision();
+                let states = (history.can_undo(), history.can_redo());
+                assert!(!history.run(&mut m, command));
+                assert!(history.last_error().unwrap().contains("角部外半径"));
+                assert!(m.eq_ignoring_dofmap(&before));
+                assert_eq!(history.revision(), revision);
+                assert_eq!((history.can_undo(), history.can_redo()), states);
+            }
+            history.redo(&mut m);
+            assert_eq!(m.sections[0].name, "変更");
+            history.undo(&mut m);
+            assert_eq!(m.sections[0].name, "BOX");
+        }
+    }
+    #[test]
+    fn explicit_zero_box_and_shapes_without_corner_radius_remain_settable() {
+        assert!(SectionShape::SteelH {
+            height: 300.0,
+            width: 150.0,
+            web_thick: 8.0,
+            flange_thick: 12.0,
+            root_r: None
+        }
+        .validate_corner_radius_input()
+        .is_ok());
+        let shapes = [
+            SectionShape::SteelBox {
+                height: 300.0,
+                width: 300.0,
+                thick: 12.0,
+                horizontal_thick: 12.0,
+                corner_r: Some(0.0),
+            },
+            SectionShape::SteelPipe {
+                outer_dia: 216.3,
+                thick: 8.2,
+            },
+        ];
+        for shape in shapes {
+            let mut m = Model::default();
+            let mut history = crate::UndoStack::new();
+            assert!(history.run(
+                &mut m,
+                Box::new(AddSectionShape {
+                    shape: shape.clone(),
+                    new_id: SectionId(0),
+                    name: "入力".into(),
+                    floor: None,
+                    frame_use: Some(FrameSectionUse::Column)
+                })
+            ));
+            history.undo(&mut m);
+            assert!(m.sections.is_empty());
+            history.redo(&mut m);
+            assert_eq!(m.sections[0].shape, Some(shape));
+        }
+    }
 }
