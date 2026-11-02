@@ -236,7 +236,7 @@ pub struct BeamExtremes {
 }
 
 /// `loads` を単純梁として重ね合わせ、設計に用いる最大値を返す。
-/// E [N/mm²]・Iy [mm⁴]・EIが正の有限値でない場合、たわみ算定が非有限になる場合はエラー。
+/// E [N/mm²]・Iy `[mm⁴]`・EIが正の有限値でない場合、たわみ算定が非有限になる場合はエラー。
 pub fn simple_beam_extremes(
     loads: &[MemberLoadKind],
     span: f64,
@@ -372,7 +372,7 @@ fn cantilever_max_deflection(
 }
 
 /// `loads` を片持ち梁（基端固定・先端自由）として重ね合わせ、設計に用いる最大値を返す。
-/// E [N/mm²]・Iy [mm⁴]・EIが正の有限値でない場合、たわみ算定が非有限になる場合はエラー。
+/// E [N/mm²]・Iy `[mm⁴]`・EIが正の有限値でない場合、たわみ算定が非有限になる場合はエラー。
 pub fn cantilever_extremes(
     loads: &[MemberLoadKind],
     span: f64,

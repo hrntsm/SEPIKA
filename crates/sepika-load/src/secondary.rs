@@ -308,11 +308,8 @@ pub const SPAN_TOL_MM: f64 = sepika_core::geom::MEMBER_AXIS_TOL_MM;
 mod tests {
     use super::*;
     use sepika_core::dof::Dof6Mask;
-    use sepika_core::ids::{NodeId, SectionId};
-    use sepika_core::model::{
-        ElementData, EndCondition, ForceRegime, LocalAxis, Node, SecondaryMember,
-        SecondaryMemberKind,
-    };
+    use sepika_core::ids::NodeId;
+    use sepika_core::model::{ElementData, EndCondition, ForceRegime, LocalAxis, Node};
 
     fn node(id: u32, x: f64, y: f64, z: f64) -> Node {
         Node {
@@ -354,18 +351,6 @@ mod tests {
                 node(2, 2000.0, 0.0, 0.0),
             ],
             elements: vec![beam(0, 0, 1)],
-            unassigned_beams: vec![SecondaryMember {
-                id: sepika_core::ids::SecondaryMemberId(0),
-                vertical_eccentricity: Some(0.0),
-                gravity_end_shares: None,
-                kind: SecondaryMemberKind::Beam,
-                ends: sepika_core::model::SecondaryMemberEnds::Detached([
-                    [2000.0, 0.0, 0.0],
-                    [2000.0, 0.0, 0.0],
-                ]),
-                section: Some(SectionId(0)),
-                name: "b1".into(),
-            }],
             ..Default::default()
         };
         let nodal = vec![

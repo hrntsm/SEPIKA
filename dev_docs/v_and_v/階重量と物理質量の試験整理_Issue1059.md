@@ -1,6 +1,6 @@
 # 階重量と物理質量の現役回帰（#1059）
 
-`sepika-load/src/story_gen/` の試験整理に伴う現役参照を示す。独立期待値、入力ケース、比較フィールド、許容誤差を維持する。計算方式・精度・安全性の変更や Validation の追加を意味せず、既存の V&V 状態は変更しない。
+`sepika-load/src/story_gen/` と `self_weight.rs` の試験整理に伴う現役参照を示す。独立期待値、入力ケース、比較フィールド、許容誤差を維持する。計算方式・精度・安全性の変更や Validation の追加を意味せず、既存の V&V 状態は変更しない。
 
 ## 現役の保証
 
@@ -15,11 +15,25 @@
 | 鋼材の補正質点へ残す割増増分も物理密度が基準 | `test_steel_weight_factor_increment_is_physical_based_in_corrected_lumped` |
 | 壁の仕上げ荷重を設計重量と補正質点に残す | `test_wall_finish_load_included_in_weight_and_corrected_lumped_mass` |
 | GravityCasesOnly は手入力 DL の Other / Dead を自重と推定して置換しない | `test_gravity_cases_only_uses_case_content_without_replacement`。ケースなしの両方式・全階ゼロ重量・非負質量も保持 |
-| 柱際・下梁際・上梁際のスリットが、幾何による上下の階帯重量を変えない | `test_wall_slits_preserve_geometric_story_weight`。DL の支持先への配分とは別の保証 |
+| 無スリットの基準階数 2・上階重量と、柱際・下梁際・上梁際のスリットが幾何による上下の階帯重量を変えない | `test_wall_slits_preserve_geometric_story_weight`。旧壁自重試験の同一入力・期待値と許容差 1e-6 を保持。DL の支持先への配分とは別の保証 |
 | Anchor / Columns のどちらも取付き線の高さに壁の全重量を残す | `test_attached_wall_transfers_keep_total_weight_at_anchor_line` |
 | 集中・等分布・三角分布の単純梁反力が独立した手計算値と一致 | `test_static_reactions_match_hand_calculated_loads`。符号・範囲検証と公開配分経路の試験は別に保持 |
 | 柱脚に下階接続なし・鉛直ブレース・3節点梁なら梁せい分を付加し、2節点柱なら付加しない | `test_base_column_depth_addition_depends_on_lower_connection`。4 ケースの節点・断面・要素の順序を保持 |
 | K ブレースの無指定 / InternalNodes / BaseNodesOnly で独立期待重心と重量保存が成立 | `test_k_brace_rules_preserve_weight_and_expected_centroids` |
+
+## CFT 柱の DL と階重量
+
+`crates/sepika-load/src/self_weight.rs` の
+`test_square_cft_column_dl_and_seismic_weight_include_filling_concrete` は、
+角形 CFT 400×400×16・角 R=0・Fc36 の同一入力で、DL の部材荷重なしと上下節点反力、
+生成階数 2 と上下階の地震用重量を検証する。独立断面積 As=24576 mm²・Ac=135424 mm²、
+設計単位体積重量 78.5e-6 / 23.0e-6 N/mm³、柱長 3000 mm から求めた全重量の半分を、
+従来どおり全重量に対する許容差 1e-9 で照合する。旧 DL 試験と階重量試験の観測をここへまとめる。
+
+柱脚梁付き fixture は同じ CFT 柱 fixture に 2 節点・面積 0 の梁断面と梁要素を加える。
+階・材料・断面・要素の既存入力を維持し、最大梁せい 800 mm の下端付加と、
+鋼管だけへの 1.3 倍の割増は `test_cft_base_column_extra_bottom_includes_filling_concrete` に保持する。
+円形 CFT、角丸断面、設計重量と物理質量の区別も別試験を保持する。
 
 ## 実装整理の範囲
 

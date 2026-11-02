@@ -852,10 +852,11 @@ mod tests {
     }
 
     /// 角形 CFT 柱（400×400×16, Fc36）の単位長さ設計自重が
-    /// `78.5e-6·As + 23.0e-6·Ac`（As=鋼管断面積, Ac=充填部断面積）に一致する。
+    /// `78.5e-6·As + 23.0e-6·Ac`（As=鋼管断面積, Ac=充填部断面積）に一致し、
+    /// DL と地震用重量のいずれも上下端へ半分ずつ配分される。
     /// As=24576, Ac=368²=135424、普通コンクリート Fc36 の γC=23.0 kN/m³。
     #[test]
-    fn test_square_cft_column_design_weight_includes_filling_concrete() {
+    fn test_square_cft_column_dl_and_seismic_weight_include_filling_concrete() {
         let model = cft_column_model(SectionShape::CftBox {
             corner_r: Some(0.0),
             height: 400.0,
@@ -866,10 +867,7 @@ mod tests {
         let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         assert!(member.is_empty(), "柱のみなので部材荷重は出ない");
 
-        let as_area: f64 = 400.0 * 400.0 - 368.0 * 368.0;
-        let ac_area: f64 = 368.0 * 368.0;
-        assert!((as_area - 24576.0).abs() < 1e-9);
-        assert!((ac_area - 135424.0).abs() < 1e-9);
+        let (as_area, ac_area) = (24576.0, 135424.0);
         let per_mm = 78.5e-6 * as_area + 23.0e-6 * ac_area;
         let w_col = per_mm * 3000.0;
         assert!(
@@ -881,6 +879,18 @@ mod tests {
             (node_force(&nodal, 0) - w_col / 2.0).abs() < 1e-9 * w_col,
             "下端={}",
             node_force(&nodal, 0)
+        );
+        let gen = crate::story_gen::generate_stories(&model, None).unwrap();
+        assert_eq!(gen.stories.len(), 2);
+        assert!(
+            (gen.stories[1].seismic_weight.unwrap() - w_col / 2.0).abs() < 1e-9 * w_col,
+            "地震用重量 上端階={}",
+            gen.stories[1].seismic_weight.unwrap()
+        );
+        assert!(
+            (gen.stories[0].seismic_weight.unwrap() - w_col / 2.0).abs() < 1e-9 * w_col,
+            "地震用重量 基部階={}",
+            gen.stories[0].seismic_weight.unwrap()
         );
     }
 
@@ -903,33 +913,6 @@ mod tests {
         assert!(
             (total - w_col).abs() < 1e-9 * w_col,
             "total={total} expected={w_col}"
-        );
-    }
-
-    /// 地震用重量（generate_stories）にも CFT 充填コンクリート分が含まれ、
-    /// 上端・下端へ 1/2 ずつ配分される。
-    #[test]
-    fn test_generate_stories_seismic_weight_includes_cft_filling_concrete() {
-        let model = cft_column_model(SectionShape::CftBox {
-            corner_r: Some(0.0),
-            height: 400.0,
-            width: 400.0,
-            thick: 16.0,
-            horizontal_thick: 16.0,
-        });
-        let per_mm = 78.5e-6 * 24576.0 + 23.0e-6 * 135424.0;
-        let w_col = per_mm * 3000.0;
-        let gen = crate::story_gen::generate_stories(&model, None).unwrap();
-        assert_eq!(gen.stories.len(), 2);
-        assert!(
-            (gen.stories[1].seismic_weight.unwrap() - w_col / 2.0).abs() < 1e-9 * w_col,
-            "地震用重量 上端階={}",
-            gen.stories[1].seismic_weight.unwrap()
-        );
-        assert!(
-            (gen.stories[0].seismic_weight.unwrap() - w_col / 2.0).abs() < 1e-9 * w_col,
-            "地震用重量 基部階={}",
-            gen.stories[0].seismic_weight.unwrap()
         );
     }
 
@@ -977,20 +960,20 @@ mod tests {
     /// CFT 柱 1 本（基部 z=0・上端 z=3000）と、柱脚節点に取り付く水平梁 2 本
     /// （area=0・せい `depths`）を持つモデル。主材料は鋼材区分＋充填 Fc36。
     fn cft_base_column_with_base_beams(depths: &[f64]) -> Model {
-        let mut column = SectionShape::CftBox {
+        let mut model = cft_column_model(SectionShape::CftBox {
             corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
             horizontal_thick: 16.0,
-        }
-        .to_section(SectionId(0), "CFT".into());
-        column.material = Some(MaterialId(0));
-        column.steel_material = Some(MaterialId(1));
-        let mut sections = vec![column];
+        });
+        model.nodes.extend([
+            simple_node(2, [4000.0, 0.0, 0.0]),
+            simple_node(3, [0.0, 4000.0, 0.0]),
+        ]);
         let beam_nodes = [NodeId(2), NodeId(3)];
         for (k, &depth) in depths.iter().enumerate() {
-            sections.push(Section {
+            model.sections.push(Section {
                 frame_use: None,
                 id: SectionId((k + 1) as u32),
                 name: format!("Beam{depth}"),
@@ -1013,66 +996,12 @@ mod tests {
                 property_basis: Default::default(),
             });
         }
-        let mut elements = vec![beam_elem(0, 0, 1)];
         for (k, node) in beam_nodes.iter().enumerate().take(depths.len()) {
             let mut e = beam_elem((k + 1) as u32, 0, node.0);
             e.section = Some(SectionId((k + 1) as u32));
-            e.local_axis = LocalAxis {
-                ref_vector: [0.0, 0.0, 1.0],
-            };
-            elements.push(e);
+            model.elements.push(e);
         }
-        Model {
-            stories: [0.0, 3000.0]
-                .into_iter()
-                .enumerate()
-                .map(|(i, fl)| {
-                    sepika_core::model::Story::new(
-                        sepika_core::ids::StoryId(i as u32),
-                        format!("{}F", i + 1),
-                        Some(fl),
-                        Some(0.0),
-                    )
-                })
-                .collect(),
-            nodes: vec![
-                simple_node(0, [0.0, 0.0, 0.0]),
-                simple_node(1, [0.0, 0.0, 3000.0]),
-                simple_node(2, [4000.0, 0.0, 0.0]),
-                simple_node(3, [0.0, 4000.0, 0.0]),
-            ],
-            sections,
-            materials: vec![
-                Material {
-                    strength_factor: None,
-                    concrete_class: Default::default(),
-                    id: MaterialId(0),
-                    name: "CFT".into(),
-                    category: MaterialCategory::Concrete,
-                    young: sepika_core::section_shape::concrete_young_modulus(36.0),
-                    poisson: 0.3,
-                    density: 7.85e-9,
-                    shear: None,
-                    fc: Some(36.0),
-                    fy: None,
-                },
-                Material {
-                    strength_factor: None,
-                    concrete_class: Default::default(),
-                    id: MaterialId(1),
-                    name: "SN490B".into(),
-                    category: MaterialCategory::Steel,
-                    young: 205000.0,
-                    poisson: 0.3,
-                    density: 7.85e-9,
-                    shear: None,
-                    fc: None,
-                    fy: Some(325.0),
-                },
-            ],
-            elements,
-            ..Default::default()
-        }
+        model
     }
 
     /// 下階柱なし CFT 柱: 柱脚に水平梁（最大せい 800）が接続するとき、下端付加の
