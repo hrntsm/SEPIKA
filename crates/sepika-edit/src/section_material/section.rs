@@ -649,10 +649,10 @@ impl DeleteSection {
                 .any(|sm| sm.section == Some(self.id));
         match (member, strength) {
             (false, false) => None,
-            (true, false) => Some("部材・小梁・二次部材から参照中のため削除できません"),
+            (true, false) => Some("部材・小梁・二次部材・床・壁版から参照中のため削除できません"),
             (false, true) => Some("ST-Bridge断面強度入力から参照中のため削除できません"),
             (true, true) => {
-                Some("部材・小梁・二次部材とST-Bridge断面強度入力から参照中のため削除できません")
+                Some("部材・小梁・二次部材・床・壁版とST-Bridge断面強度入力から参照中のため削除できません")
             }
         }
     }

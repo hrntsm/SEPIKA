@@ -18,6 +18,10 @@ mod cft_material_tests;
 #[path = "section_delete_tests.rs"]
 mod section_delete_tests;
 
+#[cfg(test)]
+#[path = "section_usage_tests.rs"]
+mod section_usage_tests;
+
 use crate::app::App;
 use sepika_core::ids::{MaterialId, SectionId};
 use sepika_core::model::Model;
@@ -226,6 +230,9 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
     }
     for s in &app.core.model.slabs {
         count(s.section(), &mut n_elements);
+    }
+    for plate in &app.core.model.wall_plates {
+        count(plate.section, &mut n_elements);
     }
     for sm in app.core.model.beams().chain(app.core.model.posts()) {
         count(sm.section, &mut n_elements);

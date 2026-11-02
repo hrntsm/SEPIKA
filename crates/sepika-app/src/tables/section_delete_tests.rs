@@ -1,8 +1,11 @@
 use super::sections_table;
 use crate::app::App;
 use sepika_core::{
-    ids::{SectionId, SlabId},
-    model::{SecondaryMember, SecondaryMemberKind, Slab, SlabPlate, SlabShape, StbSectionStrength},
+    ids::{SectionId, SlabId, WallPlateId},
+    model::{
+        SecondaryMember, SecondaryMemberKind, Slab, SlabPlate, SlabShape, StbSectionStrength,
+        WallPlate, WallPlateShape,
+    },
 };
 use sepika_edit::{DeleteSection, UndoStack};
 
@@ -11,11 +14,11 @@ fn app_with_reference(reference: &str, strength: bool) -> App {
     let mut model = crate::sample::portal_frame();
     model.sections.truncate(1);
     model.elements.truncate(1);
-    if reference != "element" {
+    if !matches!(reference, "element" | "mixed") {
         model.elements.clear();
     }
-    match reference {
-        "slab" => model.slabs.push(Slab {
+    if matches!(reference, "slab" | "mixed") {
+        model.slabs.push(Slab {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: SlabPlate {
@@ -25,21 +28,38 @@ fn app_with_reference(reference: &str, strength: bool) -> App {
             reference_story: None,
             vertical_eccentricity_mm: None,
             tip_loads: vec![],
-        }),
-        "beam" | "post" => {
-            let mut member = SecondaryMember {
+        });
+    }
+    for (name, kind) in [
+        ("beam", SecondaryMemberKind::Beam),
+        ("post", SecondaryMemberKind::Post),
+    ] {
+        if reference == name || reference == "mixed" {
+            let member = SecondaryMember {
+                kind,
                 section: Some(SectionId(0)),
                 ..Default::default()
             };
-            if reference == "post" {
-                member.kind = SecondaryMemberKind::Post;
+            if kind == SecondaryMemberKind::Post {
                 model.unassigned_posts.push(member);
             } else {
                 model.unassigned_beams.push(member);
             }
         }
-        "none" | "element" => {}
-        _ => panic!("未知の参照: {reference}"),
+    }
+    if reference == "mixed" {
+        model.wall_plates.push(WallPlate {
+            id: WallPlateId(0),
+            shape: WallPlateShape::Enclosed,
+            section: Some(SectionId(0)),
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+            dl_support: None,
+            self_weight_shares: vec![],
+        });
     }
     if strength {
         model.stb_strengths.sections.push(StbSectionStrength {
@@ -108,9 +128,12 @@ fn click(ctx: &egui::Context, app: &mut App, pos: egui::Pos2) {
 
 #[test]
 fn section_table_reference_counts_disabled_delete_and_hover_reasons_match_command() {
-    for reference in ["none", "element", "slab", "beam", "post"] {
+    for reference in ["none", "element", "slab", "beam", "post", "mixed"] {
         for strength in [false, true] {
             if reference == "none" && !strength {
+                continue;
+            }
+            if reference == "mixed" && !strength {
                 continue;
             }
             let mut app = app_with_reference(reference, strength);
@@ -124,7 +147,11 @@ fn section_table_reference_counts_disabled_delete_and_hover_reasons_match_comman
             let output = draw(&ctx, &mut app, vec![]);
             let labels = texts(&output);
             let count_column = labels.iter().find(|(s, _)| s == "部材数").unwrap().1;
-            let expected = if reference == "none" { "0" } else { "1" };
+            let expected = match reference {
+                "none" => "0",
+                "mixed" => "5",
+                _ => "1",
+            };
             assert!(
                 labels.iter().any(|(s, rect)| s == expected
                     && (rect.center().x - count_column.center().x).abs() < 35.0),
@@ -142,7 +169,7 @@ fn section_table_reference_counts_disabled_delete_and_hover_reasons_match_comman
                 .unwrap();
             assert_eq!(reason.0.contains("ST-Bridge断面強度入力"), strength);
             assert_eq!(
-                reason.0.contains("部材・小梁・二次部材"),
+                reason.0.contains("部材・小梁・二次部材・床・壁版"),
                 reference != "none"
             );
             click(&ctx, &mut app, delete_pos);
