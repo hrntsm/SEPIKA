@@ -170,7 +170,6 @@ fn test_beam_new_src_cft_composite_props() {
         ],
         ..Default::default()
     };
-    model.sections[0].material = Some(MaterialId(0));
     let make_elem = |sec: u32| ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,

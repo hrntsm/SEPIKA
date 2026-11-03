@@ -454,8 +454,7 @@ mod tests {
         far.id = NodeId(3);
         far.coord[1] = 4000.0;
         model.nodes.push(far);
-        let mut added = member(3, 1, 3, 0);
-        added.id = ElemId(3);
+        let added = member(3, 1, 3, 0);
         model.elements.push(added);
         model.girder_groups = vec![vec![ElemId(3)]];
 

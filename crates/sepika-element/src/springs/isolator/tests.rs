@@ -140,20 +140,6 @@ fn test_laminated_elastic_stiffness() {
 }
 
 #[test]
-fn test_laminated_yields_past_qd() {
-    let model = iso_model(laminated());
-    let ctx = Ctx { model: &model };
-    let mut elem = IsolatorElement::new(&model.elements[0], &model);
-    let f = push_horizontal(&mut elem, &ctx, 150.0);
-    let fr = horiz_resultant(&f);
-    assert!(fr < 2000.0 * 150.0, "降伏で剛性低下: {fr}");
-    assert!(
-        (fr - 120_000.0).abs() < 500.0,
-        "バイリニア降伏後 |F|={fr} 期待 120kN"
-    );
-}
-
-#[test]
 fn test_friction_slips_at_qmax() {
     let model = iso_model(friction());
     let ctx = Ctx { model: &model };
@@ -237,6 +223,12 @@ fn test_checkpoint_roundtrip_restores_hysteresis() {
     let ctx = Ctx { model: &model };
     let mut elem = IsolatorElement::new(&model.elements[0], &model);
     let f_before = push_horizontal(&mut elem, &ctx, 150.0);
+    let fr = horiz_resultant(&f_before);
+    assert!(fr < 2000.0 * 150.0, "降伏で剛性低下: {fr}");
+    assert!(
+        (fr - 120_000.0).abs() < 500.0,
+        "バイリニア降伏後 |F|={fr} 期待 120kN"
+    );
 
     let cp = elem.serialize_checkpoint();
     assert!(!cp.is_empty(), "チェックポイントに状態が直列化されるべき");
