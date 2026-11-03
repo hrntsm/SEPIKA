@@ -659,6 +659,8 @@ impl GaussPoint {
 }
 
 /// ファイバー梁要素。
+/// 試行は確定済み材料履歴を基点とし、局所収束だけでは履歴を確定しない。
+/// 試行の破棄では材料・断面応答・部材荷重・変位・内力・接線を確定状態へ戻す。
 pub struct FiberBeam {
     element_id: Option<sepika_core::ids::ElemId>,
     /// 節点間長 L `[mm]`。

@@ -15,19 +15,19 @@
 | [.github/pull_request_template.md](../.github/pull_request_template.md) | PR で記録する内容。実際にローカルで実行した検証と結果 |
 | [.github/workflows/ci.yml](../.github/workflows/ci.yml) | CI で実行する網羅的検証のコマンド・構成 |
 | [CONTEXT.md](../CONTEXT.md) | ドメイン語彙 |
-| [docs/](../docs/) | GUI から利用する構造設計者向けの製品ドキュメント。現在仕様・理論・計算根拠と、分離した実装参照 |
+| [docs/](../docs/) | 製品の現在仕様・理論・計算根拠。外部AIの通信仕様・保存形式と、分離した実装参照 |
 | [docs_authoring.md](docs_authoring.md) | 製品ドキュメントの執筆・検証・プレビュー手順 |
 | [adr/](adr/README.md) | 設計判断と理由。現在有効かどうかは Status で管理 |
 | [handoff/](handoff/README.md) | 過去の実装経緯・判断の履歴。未完了作業の状態はGitHub Issuesで管理 |
 | [v_and_v/](v_and_v/README.md) | V&V の証拠・未検証項目。目録・要素→テスト索引と更新手順はリンク先で管理 |
 | [architecture.md](architecture.md) | クレート構成・依存方向等のアーキテクチャ |
-| [GUIの文字と状態表示](ui_readability.md) | 共通の文字・余白・選択・フォーカス・状態表示規約 |
 | [theme.rs](../crates/sepika-app/src/theme.rs)・[table_util.rs](../crates/sepika-app/src/table_util.rs) | UI のテーマ・frame helper・表の規約と実装 |
 | [full_model.rs](../crates/sepika-app/tests/full_model.rs)・[wall_model.rs](../crates/sepika-app/tests/wall_model.rs) | 実モデル統合テスト固有の情報・実行方法。既知不具合・経緯は [既存 handoff](handoff/実モデル統合テスト_申し送り.md) |
-| [book.toml](../book.toml)・[theme/](../theme/)・[docs workflow](../.github/workflows/docs.yml) | mdBook 設定、表示・フッター、公開と API リファレンス生成の実装 |
+| [book.toml](../docs/book.toml)・[theme/](../docs/theme/)・[docs workflow](../.github/workflows/docs.yml) | mdBook 設定、表示・フッター、公開と API リファレンス生成の実装 |
 
-`docs/` は **GUI から SEPIKA を利用する構造設計者向け**の製品ドキュメントとする。
+`docs/` は **GUIから利用する構造設計者と外部連携の利用者向け**の製品ドキュメントとする。
 本文は、理論・計算根拠・利用者から見える現在仕様・制約を中心とする。
+外部AIの通信仕様と保存形式は、専用の節で要求・応答・形式の契約を説明する。
 実装上の注意事項も「関数 A が X を Y として扱う」ではなく「この機能では X は Y として扱われる」
 という利用者向け仕様として説明する。
 OSS としてコードまで追えるよう、既存の `実装参照` を本文と分離して維持する。
@@ -69,13 +69,15 @@ OSS としてコードまで追えるよう、既存の `実装参照` を本文
 
 - [章再編のページ・節対応](handoff/利用マニュアル章再編_Issue1016_配置対応.md)：各内容の正本と、操作・剛性・復元力・耐力・建物評価の境界。
 
-- [非線形モデルの内部契約とGUI未接続計算](nonlinear_model_api.md)：材料・履歴の内部契約、未接続の全長ファイバーと免震ライブラリ式。
-- [構造解析の内部実装と旧性能記録](structural_analysis_internals.md)：疎行列・分解再利用、試行状態、GUI未接続の再開API、並列配分と旧測定値。
-- [許容応力度検定のGUI非提供API](allowable_design_api.md)：1973年版の許容曲げ式と方向を区別しない柱座屈長さ。
+## 直下の文書と情報の振り分け
 
-- [OVIKA・波形ライブラリの内部形式とAPI](ovika_internals.md)：コンテナ・直列化・スキーマ変更の確認とRust利用例。
+直下には本索引・配置ルール、執筆規約、全体アーキテクチャを置く。
+分野別の現在仕様やコードの処理説明を、別の開発者向け仕様書として増やさない。
 
-- [ST-Bridgeの内部表現とAPI](stbridge_internals.md)：用途と解析定式化、識別・属性報告、XML検証とRust利用例。
-- [建物指標のGUI非提供計算](secondary_design_api.md)：D値による柱剛性略算の式とモデル抽出。GUIのRs・Reを補う計算ではない。
+- 設計判断と理由は `adr/`、必要な実装経緯は `handoff/`、検証証跡は `v_and_v/` に置く。
+- API利用者が必要とする契約はRustdocへ記載し、コードから読める実装手順を別文書へ複製しない。
+- GUI未接続の計算は機能不足としてGitHub Issuesで管理する。必要な計算資料・適用条件・未確認事項をIssueへ集約し、GUI実装時に確定した根拠を `docs/` へ反映する。
+- 一時的な作業資料を `issue-*` 等の作業名のままGitで追跡しない。残す必要のある証跡は用途に対応する管理場所と内容を示す名前で保存する。
 
-- [MCPサーバの開発者向け仕様](mcp_server.md)：GUI要求・応答、独立起動の設定・全ツール契約、ジョブ・結果ストア・生成元と版の検査。GUI利用手順は製品文書を参照。
+外部AIの現行契約は[MCPの通信仕様と独立サーバ](../docs/mcp_server/06_通信仕様と独立サーバ.md)、
+GUIの表示は[文字と状態表示](../docs/model_edit/15_文字と状態表示.md)を参照する。

@@ -45,7 +45,7 @@ jobs:
           mdbook --version
 
       - name: Build book
-        run: mdbook build
+        run: mdbook build docs
 
       - name: Build API docs (rustdoc)
         run: |

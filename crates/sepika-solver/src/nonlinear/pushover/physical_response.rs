@@ -8,6 +8,7 @@ use sepika_core::model::{LoadCase, MemberLoadKind, Model};
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 
 pub(crate) fn fixed_dofs(model: &Model, dofmap: &DofMap) -> Arc<[[bool; 6]]> {
+    // 解析用Reducerの公開配列は変更されうるため、記録の固定自由度判定には共有しない。
     let reducer = Reducer::build(model, dofmap);
     (0..model.nodes.len())
         .map(|node| {

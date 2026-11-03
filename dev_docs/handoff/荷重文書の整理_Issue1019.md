@@ -16,7 +16,7 @@
 
 - 層生成APIの `Density` は材料自重を直接算入する。`SyncedGravityCases` は同期自重を識別して設計自重を物理質量へ置換する。`GravityCasesOnly` はケース内容だけを集計し、手入力を自重へ読み替えない。`generate_stories_with_synced_self_weight` の呼出前にDL自重同期が必要で、`generate_stories_with_opts` の `include_density_self_weight = false` は置換を行わない。通常GUIは自重同期済み経路を使う。入口は `crates/sepika-load/src/story_gen/generate.rs`。
 - 多角形床の格子寸法・位相・辺別要求誤差と積分診断はAPI用で、GUIには設定・結果表示がない。製品本文には採用する数値積分条件と確認限界を残した。
-- MCPの保存組合せ応答は単体保存結果とは異なり、`case: null`・`store.persisted: false`。自動G+P+Kや取得件数等のツール契約は `dev_docs/mcp_server.md` と実装を参照する。
+- MCPの保存組合せ応答は単体保存結果とは異なり、`case: null`・`store.persisted: false`。自動G+P+Kや取得件数等のツール契約は `docs/mcp_server/06_通信仕様と独立サーバ.md` と実装を参照する。
 
 ## 符号付き反力の旧値比較
 
