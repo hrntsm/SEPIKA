@@ -411,10 +411,9 @@ pub(super) fn time_history_deform_scale_with_view(
     let auto_scale = if reuse {
         view.th_scale_cache.expect("reuse implies Some").auto_scale
     } else {
-        let peak_disp_field: Vec<[f64; 6]> = result.peak_disp.clone();
         let auto = deform_display_scale(
             &app.core.model,
-            Some(&peak_disp_field),
+            Some(&result.peak_disp),
             model_size,
             use_beam_interpolation,
             1.0,

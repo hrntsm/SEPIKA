@@ -1920,7 +1920,7 @@ mod tests {
     }
 
     #[test]
-    fn 外周スラブは大梁フィルタと変形後座標を使い輪郭を閉じる() {
+    fn 外周スラブは大梁フィルタと変形後座標を使う() {
         use sepika_core::ids::{ElemId, NodeId};
         use sepika_core::model::PerimeterSlab;
         let perimeter = PerimeterSlab {
@@ -1985,31 +1985,6 @@ mod tests {
         assert_eq!(coords[1], moved[1]);
         assert_eq!(coords[2], [1020.0, 500.0, 30.0]);
         assert_eq!(coords[3], [10.0, 500.0, 20.0]);
-        let projected = coords.to_vec();
-        let mut closed = projected.clone();
-        closed.push(closed[0]);
-        assert_eq!(closed.first(), closed.last());
-    }
-
-    #[test]
-    fn 仕口パネルと面要素は部材線として描かない() {
-        // 仕口パネルの節点列は「接合部の節点 ＋ 取り付く部材の他端」なので、先頭
-        // 2 節点を結ぶと取り付く柱・梁と同じ線分になる。全部材が直線のうちは実部材と
-        // 重なって見えないが、内部たわみ表示で梁・柱を曲線にすると弦の直線だけが
-        // 残り、部材が二重に描かれてしまうため線材として扱わない。
-        assert!(!draws_as_line(ElementKind::PanelZone));
-        assert!(!draws_as_line(ElementKind::Wall));
-        assert!(!draws_as_line(ElementKind::Shell));
-        // 材軸を持つ 2 節点要素は線で描く。
-        assert!(draws_as_line(ElementKind::Beam));
-        assert!(draws_as_line(ElementKind::Fiber));
-        assert!(draws_as_line(ElementKind::MultiSpring));
-        assert!(draws_as_line(ElementKind::Brace {
-            tension_only: false
-        }));
-        assert!(draws_as_line(ElementKind::NodalSpring));
-        assert!(draws_as_line(ElementKind::Isolator));
-        assert!(draws_as_line(ElementKind::Damper));
     }
 
     #[test]
@@ -2018,9 +1993,12 @@ mod tests {
         // 柱・梁と同じ節点対になるため、線を引くと選択していない柱・梁が
         // 選択されているように見えてしまう。
         assert_eq!(element_draw_shape(ElementKind::PanelZone), DrawShape::None);
+        assert!(!draws_as_line(ElementKind::PanelZone));
         // 面要素は多角形（ハイライトはその輪郭）。
         assert_eq!(element_draw_shape(ElementKind::Wall), DrawShape::Polygon);
         assert_eq!(element_draw_shape(ElementKind::Shell), DrawShape::Polygon);
+        assert!(!draws_as_line(ElementKind::Wall));
+        assert!(!draws_as_line(ElementKind::Shell));
         // 材軸を持つ要素は線分。
         for kind in [
             ElementKind::Beam,
@@ -2034,6 +2012,7 @@ mod tests {
             ElementKind::Damper,
         ] {
             assert_eq!(element_draw_shape(kind), DrawShape::Line, "{kind:?}");
+            assert!(draws_as_line(kind), "{kind:?}");
         }
     }
 }

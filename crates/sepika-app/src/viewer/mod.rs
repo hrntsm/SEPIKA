@@ -1784,12 +1784,19 @@ mod wall_expanded_view_model_tests {
         );
         // 入力の正（`model`）は変更されない（D5。壁の解析要素はモデルに残さない）。
         assert!(model.elements.iter().all(|e| e.kind != ElementKind::Wall));
-        let wall_id = view
+        let wall = view
             .elements
             .iter()
             .find(|e| e.kind == ElementKind::Wall)
-            .unwrap()
-            .id;
+            .expect("壁エレメント");
+        let wall_id = wall.id;
+        let axis = member_axis_endpoints(wall, view.as_ref()).expect("axis");
+        assert!((axis.p_i[2] - 0.0).abs() < 1e-6);
+        assert!((axis.p_j[2] - 3000.0).abs() < 1e-6);
+        assert!((axis.length - 3000.0).abs() < 1e-6);
+        // 下辺中点 (2000, 0, 0)
+        assert!((axis.p_i[0] - 2000.0).abs() < 1e-6);
+
         let mut app = App::default();
         app.load_model(model);
         app.select_member(wall_id);
@@ -1799,76 +1806,6 @@ mod wall_expanded_view_model_tests {
             .is_some());
         app.clear_generated_member_selection();
         assert!(app.ui.scoped.selection.members().is_empty());
-    }
-
-    /// 展開された耐震壁の材軸端点は上下辺中点（壁柱）になる。
-    #[test]
-    fn member_axis_endpoints_uses_wall_column_midpoints() {
-        let mut model = Model::default();
-        for (id, (x, y, z)) in [
-            (0, (0.0, 0.0, 0.0)),
-            (1, (4000.0, 0.0, 0.0)),
-            (2, (4000.0, 0.0, 3000.0)),
-            (3, (0.0, 0.0, 3000.0)),
-        ] {
-            model.nodes.push(node(id, x, y, z));
-        }
-        model.sections.push(Section {
-            id: SectionId(0),
-            name: "壁 t150".into(),
-            frame_use: None,
-            area: 150.0 * 3000.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 3000.0,
-            width: 150.0,
-            as_y: 1.0,
-            as_z: 1.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: Some(150.0),
-            shape: None,
-            material: None,
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
-        model.add_enclosed_wall_plate_from_nodes(
-            &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            WallPlate {
-                dl_support: None,
-                self_weight_shares: Vec::new(),
-                id: WallPlateId(0),
-                shape: WallPlateShape::Enclosed,
-                section: Some(SectionId(0)),
-                opening_area: 0.0,
-                opening_weight: 0.0,
-                openings: Vec::new(),
-                loads: vec![],
-                slit: Default::default(),
-            },
-        );
-        model.wall_regions.push(WallRegion {
-            id: WallRegionId(0),
-            name: String::new(),
-            boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            wall_plate_ids: vec![WallPlateId(0)],
-            posts: Vec::new(),
-        });
-        let view = wall_expanded_view_model(&model);
-        let wall = view
-            .elements
-            .iter()
-            .find(|e| e.kind == ElementKind::Wall)
-            .expect("壁エレメント");
-        let axis = member_axis_endpoints(wall, view.as_ref()).expect("axis");
-        assert!((axis.p_i[2] - 0.0).abs() < 1e-6);
-        assert!((axis.p_j[2] - 3000.0).abs() < 1e-6);
-        assert!((axis.length - 3000.0).abs() < 1e-6);
-        // 下辺中点 (2000, 0, 0)
-        assert!((axis.p_i[0] - 2000.0).abs() < 1e-6);
     }
 }
 

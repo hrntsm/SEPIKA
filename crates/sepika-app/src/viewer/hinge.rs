@@ -209,11 +209,10 @@ pub(super) fn show_hinge_tooltip(
         return;
     };
     let markers = aggregate_hinges_at(&po.hinges, viewport.hinge_step);
-    let mut rows: Vec<&HingeMarker> = markers.iter().filter(|m| m.elem == elem_id).collect();
+    let rows: Vec<&HingeMarker> = markers.iter().filter(|m| m.elem == elem_id).collect();
     if rows.is_empty() {
         return;
     }
-    rows.sort_by_key(|m| m.end_j);
 
     #[allow(deprecated)]
     egui::show_tooltip_at_pointer(
@@ -294,14 +293,6 @@ fn draw_hinge_legend(painter: &egui::Painter, counts: &[usize; 3]) {
 pub struct HingeViewCache {
     key: HingeViewKey,
     view: Result<HingeView, RebarGeometryError>,
-}
-
-impl HingeViewCache {
-    /// 保存時のキー。テスト用に公開する。
-    #[cfg(test)]
-    fn key(&self) -> &HingeViewKey {
-        &self.key
-    }
 }
 
 /// [`HingeViewCache`] のキー。骨格・曲面の生成に影響する入力を識別する。
@@ -1671,21 +1662,13 @@ mod tests {
 
     // ── n_m_response_path ───────────────────────────────────────────────
 
-    /// 先頭に原点 [0,0]（無載荷状態）が前置される。
-    #[test]
-    fn n_m_response_path_prepends_origin() {
-        let records = vec![step(-80.0, 30.0, 0.0, 0.0, 1000.0)];
-        let path = n_m_response_path(&records, true);
-        assert_eq!(path.len(), 2);
-        assert_eq!(path[0], [0.0, 0.0]);
-    }
-
     /// 強軸採用時、i端・j端のうち絶対値が大きい方の符号付き Mz を採用する。
     #[test]
     fn n_m_response_path_picks_larger_end_signed() {
         let records = vec![step(-80.0, 30.0, 0.0, 0.0, 1000.0)];
         let path = n_m_response_path(&records, true);
         assert_eq!(path.len(), 2);
+        assert_eq!(path[0], [0.0, 0.0]);
         // -80 N·mm -> kN·m、n=1000N -> 1kN。原点の次（[1]）が実データ点。
         assert!((path[1][0] - moment_kn_m(-80.0)).abs() < 1e-12);
         assert!((path[1][1] - 1.0).abs() < 1e-9);
@@ -1788,18 +1771,12 @@ mod tests {
         FiberSectionState { xi, fibers: vec![] }
     }
 
-    /// i端（end_j=false）は最小 xi の断面を選ぶ。
+    /// i端は最小 xi、j端は最大 xi の断面を選ぶ。
     #[test]
-    fn pick_fiber_section_i_end_picks_min_xi() {
+    fn pick_fiber_section_picks_min_and_max_xi() {
         let sections = vec![fiber_section(0.2), fiber_section(-0.9), fiber_section(0.9)];
         let picked = pick_fiber_section(&sections, false).unwrap();
         assert!((picked.xi - (-0.9)).abs() < 1e-9);
-    }
-
-    /// j端（end_j=true）は最大 xi の断面を選ぶ。
-    #[test]
-    fn pick_fiber_section_j_end_picks_max_xi() {
-        let sections = vec![fiber_section(0.2), fiber_section(-0.9), fiber_section(0.9)];
         let picked = pick_fiber_section(&sections, true).unwrap();
         assert!((picked.xi - 0.9).abs() < 1e-9);
     }
@@ -1912,24 +1889,6 @@ mod tests {
         (min, max)
     }
 
-    /// SteelBox（角形鋼管）は外形線・内側輪郭（中空）の両方が生成され、
-    /// それぞれのバウンディングボックスが height×width／(height−2t)×(width−2t)
-    /// と一致する。
-    #[test]
-    fn fiber_frame_outline_steel_box_has_outer_and_inner() {
-        let sec = steel_box_section();
-        let (outer, inner) = fiber_frame_outline(&sec).expect("箱形は外形線を持つ");
-        let inner = inner.expect("箱形は中空断面のため内側輪郭を持つ");
-
-        let (omin, omax) = bbox(&outer);
-        assert!((omax[0] - omin[0] - 300.0).abs() < 1e-6);
-        assert!((omax[1] - omin[1] - 200.0).abs() < 1e-6);
-
-        let (imin, imax) = bbox(&inner);
-        assert!((imax[0] - imin[0] - (300.0 - 18.0)).abs() < 1e-6);
-        assert!((imax[1] - imin[1] - (200.0 - 18.0)).abs() < 1e-6);
-    }
-
     /// SteelBox のファイバー（`sepika_section::mn_surface::plastic_fibers` に
     /// `build_gauss_fibers` と同じ 90°回転を適用したもの＝要素座標系）は、
     /// すべて外形線のバウンディングボックス内に収まり、かつ内側輪郭（中空部）の
@@ -1939,10 +1898,16 @@ mod tests {
         let sec = steel_box_section();
         let (outer, inner) = fiber_frame_outline(&sec).unwrap();
         let inner = inner.unwrap();
-        let (_, outer_max) = bbox(&outer);
-        let (_, inner_max) = bbox(&inner);
-        let (outer_half_y, outer_half_z) = (outer_max[0], outer_max[1]);
-        let (inner_half_y, inner_half_z) = (inner_max[0], inner_max[1]);
+        let (omin, omax) = bbox(&outer);
+        assert!((omax[0] - omin[0] - 300.0).abs() < 1e-6);
+        assert!((omax[1] - omin[1] - 200.0).abs() < 1e-6);
+
+        let (imin, imax) = bbox(&inner);
+        assert!((imax[0] - imin[0] - (300.0 - 18.0)).abs() < 1e-6);
+        assert!((imax[1] - imin[1] - (200.0 - 18.0)).abs() < 1e-6);
+
+        let (outer_half_y, outer_half_z) = (omax[0], omax[1]);
+        let (inner_half_y, inner_half_z) = (imax[0], imax[1]);
 
         let shape = sec.shape.clone().unwrap();
         let strength = StrengthParams {
@@ -2693,44 +2658,6 @@ mod tests {
         );
     }
 
-    /// 軸力が大きいほど集中ばね骨格の降伏モーメントが低下する
-    /// （ステップ変更で軸力引数が変わる＝表示骨格が再生成されることの根拠）。
-    #[test]
-    fn concentrated_backbone_follows_axial_force() {
-        let model = key_test_model();
-        let elem = key_test_elem(ElementKind::Beam, ForceRegime::UniaxialBendingShear);
-        let basis = StrengthBasis::MaterialStrength;
-        let kind = AnalysisKind::Incremental;
-        let b0 = build_hinge_view(
-            &elem,
-            &model,
-            basis,
-            kind,
-            0.0,
-            mn_draw::N_ALPHA,
-            mn_draw::N_BETA,
-        )
-        .expect("配筋は妥当")
-        .backbone
-        .expect("集中ばねは骨格を返す");
-        let b1 = build_hinge_view(
-            &elem,
-            &model,
-            basis,
-            kind,
-            1.0e5,
-            mn_draw::N_ALPHA,
-            mn_draw::N_BETA,
-        )
-        .expect("配筋は妥当")
-        .backbone
-        .expect("集中ばねは骨格を返す");
-        assert!(
-            b0[1][1] > b1[1][1],
-            "軸力が大きいほど降伏モーメントが低下する"
-        );
-    }
-
     /// 引張（圧縮正で負値）でも集中ばねの N-M 線形相関の降伏モーメントが
     /// 低減される（`build_hinge_view` は `moment_limit` の絶対値を用いる）。
     /// 解析側の軸力（引張正）と `MemberStepState.n`（圧縮正・引張負）で
@@ -2758,6 +2685,10 @@ mod tests {
         let b0 = backbone(0.0);
         let b_tension = backbone(-1.0e5);
         let b_compression = backbone(1.0e5);
+        assert!(
+            b0[1][1] > b_compression[1][1],
+            "軸力が大きいほど降伏モーメントが低下する"
+        );
         assert!(
             b_tension[1][1] < b0[1][1],
             "引張でも降伏モーメントが低下する"
@@ -3070,29 +3001,6 @@ mod tests {
                 )
             );
         }
-    }
-
-    /// キャッシュは同じキーのときだけ再利用され、キーが変われば作り直される
-    /// （`ensure_hinge_view` の一致判定）。
-    #[test]
-    fn hinge_view_cache_reuses_only_matching_key() {
-        let model = key_test_model();
-        let elem = key_test_elem(ElementKind::Beam, ForceRegime::UniaxialBendingShear);
-        let k0 = key_of(&model, &elem, 0);
-        let cache = HingeViewCache {
-            key: k0.clone(),
-            view: Ok(HingeView {
-                model: AnalysisHingeModel::Other,
-                backbone: None,
-                total_backbone: None,
-                unavailability_reason: None,
-                mn_linear: None,
-                mn_surface: None,
-            }),
-        };
-        assert_eq!(cache.key(), &k0);
-        let k1 = key_of(&model, &elem, 1);
-        assert_ne!(cache.key(), &k1);
     }
 
     /// 表示方向を切り替えるとキャッシュを破棄する。集中ばねの M-θ 骨格は表示中の
