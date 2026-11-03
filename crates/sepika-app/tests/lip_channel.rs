@@ -394,9 +394,10 @@ fn lip_channel_geometry_shared_mass_and_beam_fiber_ms_reject_without_fallback() 
                 .err()
                 .unwrap()
                 .contains("H=150"));
-            assert!(FiberBeam::try_new(
+            assert!(FiberBeam::try_with_plastic_zone(
                 &element,
                 &model,
+                300.0,
                 sepika_element::factory::StrengthBasis::default(),
                 AnalysisKind::Incremental
             )

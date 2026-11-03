@@ -10,9 +10,10 @@ use sepika_core::model::{
 
 fn make_test_fiber_beam(shear_mod: Option<f64>) -> FiberBeam {
     let model = build_test_model(shear_mod);
-    FiberBeam::new(
+    FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )
@@ -116,9 +117,10 @@ fn rounded_beam_fiber_mass_and_default_fiber_geometry_follow_independent_propert
         section.steel_material = cft.then_some(MaterialId(0));
         model.sections[0] = section;
         let beam = crate::frame::beam::BeamElement::try_new(&model.elements[0], &model).unwrap();
-        let mut fiber = FiberBeam::new(
+        let mut fiber = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -319,9 +321,10 @@ fn 有効断面性能を使うbeamとfiberのphiと整合質量が一致する()
     model.materials[0].density = 7.85e-9;
     model.materials[0].fc = Some(24.0);
     let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
-    let fiber = FiberBeam::new(
+    let fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -436,9 +439,10 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         let expected_young = model.materials[1].young;
 
         let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
-        let fiber = FiberBeam::new(
+        let fiber = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -655,9 +659,10 @@ fn 非対称断面のbeamとfiberは各曲げブロックが一致する() {
     model.elements[0].rigid_zone.length_i = 300.0;
     model.elements[0].rigid_zone.length_j = 200.0;
 
-    let fiber = FiberBeam::new(
+    let fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -694,9 +699,10 @@ fn 端部解放質量はbeamとfiberで一致し剛体並進質量を保存す�
         model.elements[0].end_cond = [end_condition, EndCondition::Fixed];
         model.elements[0].rigid_zone.length_i = 300.0;
         model.elements[0].rigid_zone.length_j = 200.0;
-        let fiber = FiberBeam::new(
+        let fiber = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -788,9 +794,10 @@ fn 端部解放質量は独立縮約結果の全成分と一致する() {
         model.elements[0].end_cond = [end_condition, EndCondition::Fixed];
 
         let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
-        let fiber = FiberBeam::new(
+        let fiber = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -803,9 +810,10 @@ fn 端部解放質量は独立縮約結果の全成分と一致する() {
         let base_mass = base_beam.mass_matrix(crate::behavior::MassOption::Consistent);
         let expected_beam =
             independent_released_mass(&base_beam.local_stiffness_raw(), &base_mass, end_condition);
-        let base_fiber = FiberBeam::new(
+        let base_fiber = FiberBeam::with_plastic_zone(
             &unreleased,
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -924,9 +932,10 @@ fn fiberはkbb特異時に端部解放質量を明示的に失敗させる() {
     let mut model = build_test_model(Some(78846.15));
     model.materials[0].young = 0.0;
     model.elements[0].end_cond = [EndCondition::Pinned, EndCondition::Fixed];
-    let fiber = FiberBeam::new(
+    let fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -938,9 +947,10 @@ fn fiberは残差ゼロでもkbb特異な試行と縮約を拒否する() {
     let mut model = build_test_model(Some(78846.15));
     model.materials[0].young = 0.0;
     model.elements[0].end_cond = [EndCondition::Pinned, EndCondition::Fixed];
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1038,9 +1048,10 @@ fn make_oriented_fiber(p0: [f64; 3], p1: [f64; 3], ref_vec: [f64; 3]) -> FiberBe
     model.nodes[1].coord = p1;
     model.elements[0].local_axis.ref_vector = ref_vec;
     model.sections[0].name = "s".into();
-    FiberBeam::new(
+    FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )
@@ -1051,9 +1062,10 @@ fn make_steel_fiber_with_fy(fy: Option<f64>) -> FiberBeam {
     let mut model = build_test_model(None);
     model.sections[0].name = "s".into();
     model.materials[0].fy = fy;
-    FiberBeam::new(
+    FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )
@@ -1065,9 +1077,10 @@ fn make_torsion_fiber_beam(g: f64, j: f64) -> FiberBeam {
     let mut model = build_test_model(Some(g));
     model.sections[0].j = j;
     model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
-    FiberBeam::new(
+    FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )
@@ -1187,129 +1200,15 @@ fn test_elastic_stiffness_matches_beam() {
     }
 }
 
-/// 弾性応答の手計算照合: 軸力は N=E·A_disc·ε、曲げは M=E·I_disc·κ となり、
-/// 軸と曲げを同時に与えても互いに連成しないこと（断面格子の図心・対称性）。
-#[test]
-fn test_elastic_force_matches_hand_calc() {
-    let model = build_test_model(None);
-    let ctx = Ctx { model: &model };
-    let new_fiber = || {
-        FiberBeam::new(
-            &model.elements[0],
-            &model,
-            StrengthBasis::Nominal,
-            AnalysisKind::Incremental,
-        )
-    };
-
-    let mut axial = new_fiber();
-    let a_disc: f64 = axial.gauss_points[0]
-        .section
-        .fibers
-        .iter()
-        .map(|f| f.area)
-        .sum();
-    let iy_disc: f64 = axial.gauss_points[0]
-        .section
-        .fibers
-        .iter()
-        .map(|f| f.area * f.z * f.z)
-        .sum();
-
-    let eps0 = 0.001;
-    axial
-        .update_state(
-            &LocalVec {
-                data: SmallVec::from_slice(&[
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    eps0 * 3000.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                ]),
-            },
-            true,
-            &ctx,
-        )
-        .unwrap();
-    let f = axial.internal_force(&ctx);
-    let expected_n = eps0 * 205000.0 * a_disc;
-    assert_relative_eq!(f.data[0], -expected_n, epsilon = 1.0);
-    assert_relative_eq!(f.data[6], expected_n, epsilon = 1.0);
-
-    let ky = 1e-6;
-    let mut bending = new_fiber();
-    bending
-        .update_state(
-            &LocalVec {
-                data: SmallVec::from_slice(&[
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    ky * 3000.0 / 2.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    -ky * 3000.0 / 2.0,
-                    0.0,
-                ]),
-            },
-            true,
-            &ctx,
-        )
-        .unwrap();
-    let f = bending.internal_force(&ctx);
-    let expected_my = ky * 205000.0 * iy_disc;
-    assert_relative_eq!(f.data[4], expected_my, epsilon = 1.0);
-    assert_relative_eq!(f.data[10], -expected_my, epsilon = 1.0);
-
-    let eps0_combined = 0.0005;
-    let mut combined = new_fiber();
-    combined
-        .update_state(
-            &LocalVec {
-                data: SmallVec::from_slice(&[
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    ky * 3000.0 / 2.0,
-                    0.0,
-                    eps0_combined * 3000.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    -ky * 3000.0 / 2.0,
-                    0.0,
-                ]),
-            },
-            true,
-            &ctx,
-        )
-        .unwrap();
-    let f = combined.internal_force(&ctx);
-    assert_relative_eq!(f.data[0], -eps0_combined * 205000.0 * a_disc, epsilon = 1.0);
-    assert_relative_eq!(f.data[4], expected_my, epsilon = 1.0);
-}
-
 #[test]
 fn test_yield_progression() {
     let mut model = build_test_model(None);
     model.sections[0].name = "yield_test".into();
     model.materials[0].fy = Some(235.0);
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1324,12 +1223,7 @@ fn test_yield_progression() {
     let z_max = 50.0;
     let ky_y = eps_y / z_max;
 
-    let iy_disc: f64 = fiber.gauss_points[0]
-        .section
-        .fibers
-        .iter()
-        .map(|f| f.area * f.z * f.z)
-        .sum();
+    let iy_nominal = model.sections[0].iz;
 
     let mut prev_ky = 0.0;
     for ratio in [0.5, 1.0, 2.0, 3.0] {
@@ -1355,7 +1249,7 @@ fn test_yield_progression() {
         fiber.update_state(&du, true, &ctx).unwrap();
 
         let my = fiber.internal_force(&ctx).data[4];
-        let elastic_pred = ky * 205000.0 * iy_disc;
+        let elastic_pred = ky * 205000.0 * iy_nominal;
         // 鋼ファイバはなめらか降伏（MenegottoPinto）のため、ratio=1.0 では
         // 最外縁が降伏ひずみの約 0.92 倍に達し、既に弾性予測を下回る。
         // 弾性とみなす境界は section 側（Bilinear の ratio<=1.0）より手前になる。
@@ -1531,9 +1425,10 @@ fn 不正な質量特性でもfiberは静的用に生成でき両質量形式で
         },
     });
     model.materials[0].fc = Some(30.0);
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1562,9 +1457,10 @@ fn fiberの純ねじり行列は質量極二次モーメントを使う() {
     model.sections[0].iy = iy;
     model.sections[0].iz = iz;
     model.materials[0].density = density;
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1660,9 +1556,10 @@ fn test_vertical_column_rz_nonsingular() {
         ..Default::default()
     };
 
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1696,9 +1593,10 @@ fn test_fiber_rigid_rotation_produces_no_force() {
     let mut model = build_test_model(Some(78846.15));
     set_square500_shear_section(&mut model);
 
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1742,9 +1640,10 @@ fn test_fiber_initial_lateral_stiffness_matches_timoshenko_theory() {
     let mut model = build_test_model(Some(78846.15));
     set_square500_shear_section(&mut model);
 
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1802,9 +1701,10 @@ fn test_fiber_elastic_stiffness_matches_timoshenko_beam_element() {
     model.sections[0].j = j;
     model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
 
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -1977,9 +1877,10 @@ fn test_fiber_tangent_consistent_with_internal_force() {
         0.1, 0.2, -0.1, 0.0005, 0.001, -0.0005, -0.05, 0.15, 0.1, -0.0005, 0.0008, 0.0002,
     ];
 
-    let mut b0 = FiberBeam::new(
+    let mut b0 = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2001,9 +1902,10 @@ fn test_fiber_tangent_consistent_with_internal_force() {
     for j in 0..12 {
         let mut up = u0;
         up[j] += h;
-        let mut bp = FiberBeam::new(
+        let mut bp = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -2029,33 +1931,6 @@ fn test_fiber_tangent_consistent_with_internal_force() {
     }
 }
 
-#[test]
-fn test_fiber_beam_checkpoint_roundtrip() {
-    let mut fiber = make_test_fiber_beam(None);
-    let ctx = Ctx {
-        model: &build_test_model(None),
-    };
-    let du = LocalVec {
-        data: SmallVec::from_slice(&[
-            0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0005, 0.0,
-        ]),
-    };
-    fiber.update_state(&du, true, &ctx).unwrap();
-
-    let snap_before = fiber.snapshot_state();
-    let checkpoint = fiber.serialize_checkpoint();
-
-    let mut restored = make_test_fiber_beam(None);
-    restored.deserialize_checkpoint(&checkpoint).unwrap();
-    let snap_after = restored.snapshot_state();
-
-    let before = snap_before.downcast_ref::<FiberBeamSnapshot>().unwrap();
-    let after = snap_after.downcast_ref::<FiberBeamSnapshot>().unwrap();
-    for i in 0..12 {
-        assert_relative_eq!(before.0[i], after.0[i], epsilon = 1e-12);
-        assert_relative_eq!(before.1[i], after.1[i], epsilon = 1e-12);
-    }
-}
 /// plastic_zone 付きのテストモデルから塑性化域考慮 FiberBeam を生成する。
 fn make_plastic_zone_fiber(lp: f64, fy: Option<f64>) -> FiberBeam {
     let mut model = build_test_model(None);
@@ -2070,35 +1945,15 @@ fn make_plastic_zone_fiber(lp: f64, fy: Option<f64>) -> FiberBeam {
     )
 }
 
-/// 塑性化域考慮モデルの弾性剛性は、軸が EA/L（厳密）、曲げ・せん断が
-/// 全長ファイバー積分モデル（`FiberBeam`）に近いこと。
 #[test]
-fn test_plastic_zone_elastic_stiffness_matches_full_fiber_and_axial() {
+fn test_plastic_zone_elastic_axial_and_timoshenko_stiffness() {
     let model = build_test_model(None);
     let ctx = Ctx { model: &model };
-    let full = FiberBeam::new(
-        &model.elements[0],
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
-    let k_full = full.tangent_stiffness(&ctx);
-
-    let pz = make_plastic_zone_fiber(150.0, Some(1e20));
-    let k_pz = pz.tangent_stiffness(&ctx);
-    for (i, j) in [(1usize, 1usize), (2, 2), (4, 4), (5, 5), (1, 5), (2, 4)] {
-        assert_relative_eq!(k_pz.get(i, j), k_full.get(i, j), max_relative = 5e-2);
-    }
-
     let pz_axial = make_plastic_zone_fiber(300.0, Some(1e20));
     let k_axial = pz_axial.tangent_stiffness(&ctx);
     let ea_over_l = 205000.0 * 20000.0 / 3000.0;
     assert_relative_eq!(k_axial.get(0, 0), ea_over_l, max_relative = 1e-9);
-    let k_el = &pz_axial
-        .hinge
-        .as_ref()
-        .expect("plastic zone model has hinge")
-        .k_el;
+    let k_el = &pz_axial.hinge.k_el;
     let ratio = k_el.get(1, 1) / k_el.get(2, 2);
     // E/G=2.6、A_s=20000/1.2、L=3000よりφ強=26/1875、φ弱=13/3750。
     let expected = 4.0 * (1.0 + 13.0 / 3750.0) / (1.0 + 26.0 / 1875.0);
@@ -2253,9 +2108,10 @@ pub(super) fn rc_fiber_model() -> Model {
 #[test]
 fn test_rc_fiber_section_includes_separated_rebar() {
     let model = rc_fiber_model();
-    let fb = FiberBeam::new(
+    let fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2449,7 +2305,7 @@ fn test_rc_plastic_zone_fiber_tangent_stays_positive_in_elastic_range() {
         AnalysisKind::Incremental,
     );
 
-    let h = fb.hinge.as_ref().expect("塑性化域ヒンジが構築されていない");
+    let h = &fb.hinge;
     let d0 = fb.gauss_points[0].cached_stiff;
     assert_relative_eq!(h.d0[0][2][2], d0[2][2], max_relative = 1e-12);
     let nominal_eiz = 25000.0 * model.sections[0].iy;
@@ -2543,9 +2399,10 @@ fn 剛域ありの弾性剛性は軸以外が弾性梁と厳密一致する() {
     let zero = LocalVec {
         data: SmallVec::from_elem(0.0, 12),
     };
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2584,7 +2441,7 @@ fn 剛域ありの弾性剛性は軸以外が弾性梁と厳密一致する() {
     }
     let ea = 205000.0 * area;
     assert_relative_eq!(k_be.get(0, 0), ea / l, max_relative = 1e-9);
-    assert_relative_eq!(k_fb.get(0, 0), ea / l_flex, max_relative = 1e-9);
+    assert_relative_eq!(k_fb.get(0, 0), ea / l, max_relative = 1e-9);
     assert_relative_eq!(k_fb.get(3, 3), g * j / l, max_relative = 1e-9);
     assert_relative_eq!(k_be.get(3, 3), g * j / l, max_relative = 1e-9);
 }
@@ -2602,9 +2459,10 @@ fn 剛域は片持ち先端の曲げ剛性を増大させる() {
 
     let tip_stiffness = |model: &Model| -> f64 {
         let ctx = Ctx { model };
-        let mut fb = FiberBeam::new(
+        let mut fb = FiberBeam::with_plastic_zone(
             &model.elements[0],
             model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -2636,9 +2494,10 @@ fn 剛域は片持ち先端の曲げ剛性を増大させる() {
 fn 剛域ありでも剛体回転で内力が生じない() {
     let model = build_rigid_zone_model(400.0, 250.0);
     let ctx = Ctx { model: &model };
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2682,9 +2541,10 @@ fn 剛域ありでも接線剛性が内力の勾配と一致する() {
         0.1, 0.2, -0.1, 0.0005, 0.001, -0.0005, -0.05, 0.15, 0.1, -0.0005, 0.0008, 0.0002,
     ];
 
-    let mut b0 = FiberBeam::new(
+    let mut b0 = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2706,9 +2566,10 @@ fn 剛域ありでも接線剛性が内力の勾配と一致する() {
     for j in 0..12 {
         let mut up = u0;
         up[j] += h;
-        let mut bp = FiberBeam::new(
+        let mut bp = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -2734,8 +2595,6 @@ fn 剛域ありでも接線剛性が内力の勾配と一致する() {
     }
 }
 
-/// 塑性化域考慮モデルでは、端部積分点（ξ=∓1）が剛域フェイスに置かれ、
-/// その積分重み（＝塑性化域長 Lp）と中央弾性部が可撓長基準になること。
 #[test]
 fn 剛域ありの塑性化域は可撓長基準になる() {
     let (li, lj) = (400.0, 250.0);
@@ -2752,12 +2611,11 @@ fn 剛域ありの塑性化域は可撓長基準になる() {
     );
 
     assert_relative_eq!(fb.flex_length, l_flex, max_relative = 1e-12);
+    assert_relative_eq!(fb.hinge.lp, lp, max_relative = 1e-12);
     assert_eq!(fb.gauss_points.len(), 2);
     for gp in &fb.gauss_points {
         assert_relative_eq!(gp.xi.abs(), 1.0, max_relative = 1e-12);
-        assert_relative_eq!(gp.weight, 2.0 * lp / l_flex, max_relative = 1e-12);
     }
-    assert!(fb.hinge.is_some(), "塑性増分ヒンジが構築されていない");
 }
 
 /// 剛域長の合計が節点間長以上になる病的な入力は、剛域なしとして扱う
@@ -2765,9 +2623,10 @@ fn 剛域ありの塑性化域は可撓長基準になる() {
 #[test]
 fn 可撓長が残らない剛域は無視される() {
     let model = build_rigid_zone_model(2000.0, 1500.0);
-    let fb = FiberBeam::new(
+    let fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2787,9 +2646,10 @@ pub(super) fn build_release_model(end_cond: [EndCondition; 2]) -> Model {
 /// 弾性状態で `FiberBeam` を組み、初期接線をキャッシュしたうえで返す。
 fn elastic_fiber(model: &Model) -> FiberBeam {
     let ctx = Ctx { model };
-    let mut fb = FiberBeam::new(
+    let mut fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
         model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2876,16 +2736,19 @@ fn 材端ピンの弾性剛性が弾性梁と一致する() {
 /// 剛接端との比較で、解放が実際に効いていることを確認する。
 #[test]
 fn 材端ピンでは当該端の曲げモーメントがゼロになる() {
-    let pinned = build_release_model([EndCondition::Pinned, EndCondition::Fixed]);
-    let fixed = build_release_model([EndCondition::Fixed, EndCondition::Fixed]);
+    let mut pinned = build_test_model(None);
+    pinned.elements[0].end_cond = [EndCondition::Pinned, EndCondition::Fixed];
+    let mut fixed = pinned.clone();
+    fixed.elements[0].end_cond = [EndCondition::Fixed; 2];
     let du = |uy: f64| LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, uy, 0.0, 0.0, 0.0, 0.0]),
     };
 
     let ctx_p = Ctx { model: &pinned };
-    let mut fb_p = FiberBeam::new(
+    let mut fb_p = FiberBeam::with_plastic_zone(
         &pinned.elements[0],
         &pinned,
+        crate::factory::plastic_zone_length(&pinned.elements[0], &pinned),
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2893,9 +2756,10 @@ fn 材端ピンでは当該端の曲げモーメントがゼロになる() {
     let f_p = fb_p.internal_force(&ctx_p);
 
     let ctx_f = Ctx { model: &fixed };
-    let mut fb_f = FiberBeam::new(
+    let mut fb_f = FiberBeam::with_plastic_zone(
         &fixed.elements[0],
         &fixed,
+        crate::factory::plastic_zone_length(&fixed.elements[0], &fixed),
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2981,9 +2845,10 @@ fn 材端解放ありでも接線剛性が内力の勾配と一致する() {
         0.1, 0.2, -0.1, 0.0005, 0.001, -0.0005, -0.05, 0.15, 0.1, -0.0005, 0.0008, 0.0002,
     ];
 
-    let mut b0 = FiberBeam::new(
+    let mut b0 = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -3005,9 +2870,10 @@ fn 材端解放ありでも接線剛性が内力の勾配と一致する() {
     for j in 0..12 {
         let mut up = u0;
         up[j] += h;
-        let mut bp = FiberBeam::new(
+        let mut bp = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
@@ -3038,9 +2904,10 @@ fn 材端解放ありでも接線剛性が内力の勾配と一致する() {
 fn 材端解放ありでも剛体回転で内力が生じない() {
     let model = build_release_model([EndCondition::Pinned, EndCondition::Fixed]);
     let ctx = Ctx { model: &model };
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -3077,15 +2944,19 @@ fn 材端解放ありでも剛体回転で内力が生じない() {
 /// 「ピン端の要素モーメント = 0」が維持される。
 #[test]
 fn 降伏後もピン端のモーメント解放が保たれる() {
-    let mut model = build_release_model([EndCondition::Pinned, EndCondition::Fixed]);
+    let mut model = build_test_model(None);
+    model.elements[0].end_cond = [EndCondition::Pinned, EndCondition::Fixed];
     model.materials[0].fy = Some(235.0);
     let ctx = Ctx { model: &model };
-    let mut fb = FiberBeam::new(
+    let mut fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        crate::factory::plastic_zone_length(&model.elements[0], &model),
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
+
+    let k0 = fb.tangent_stiffness(&ctx);
 
     for _ in 0..40 {
         let du = LocalVec {
@@ -3095,6 +2966,7 @@ fn 降伏後もピン端のモーメント解放が保たれる() {
         };
         fb.update_state(&du, true, &ctx).unwrap();
     }
+    assert!(fb.ductility_probe().unwrap().max_yield_ratio > 1.0);
     let f = fb.internal_force(&ctx);
     let m_fixed = f.data[11].abs().max(1.0);
     assert!(
@@ -3104,11 +2976,6 @@ fn 降伏後もピン端のモーメント解放が保たれる() {
         f.data[11]
     );
     let k = fb.tangent_stiffness(&ctx);
-    let k0 = elastic_fiber(&build_release_model([
-        EndCondition::Pinned,
-        EndCondition::Fixed,
-    ]))
-    .tangent_stiffness(&ctx);
     assert!(
         k.get(7, 7) < 0.95 * k0.get(7, 7),
         "降伏していない（接線剛性が低下していない）: {} vs {}",
@@ -3124,9 +2991,10 @@ fn ねじり剛性がない部材はrxを解放しない() {
     let mut model = build_release_model([EndCondition::Pinned, EndCondition::Pinned]);
     model.sections[0].j = 0.0;
     model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
-    let fb = FiberBeam::new(
+    let fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -3138,9 +3006,10 @@ fn ねじり剛性がない部材はrxを解放しない() {
     assert_eq!(fb.releases.len(), 4);
 
     model.sections[0].j = 1.0e6;
-    let fb = FiberBeam::new(
+    let fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -3152,9 +3021,10 @@ fn ねじり剛性がない部材はrxを解放しない() {
 fn 材端解放の内部自由度がチェックポイントで往復する() {
     let model = build_release_model([EndCondition::Pinned, EndCondition::Fixed]);
     let ctx = Ctx { model: &model };
-    let mut fb = FiberBeam::new(
+    let mut fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -3174,9 +3044,10 @@ fn 材端解放の内部自由度がチェックポイントで往復する() {
     );
 
     let checkpoint = fb.serialize_checkpoint();
-    let mut restored = FiberBeam::new(
+    let mut restored = FiberBeam::with_plastic_zone(
         &model.elements[0],
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -3451,20 +3322,6 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
     assert!((beam.mass_properties.total_mass(beam.length) - 1.3766168875202032).abs() < 1e-12);
     assert_ne!(beam.iz, model.sections[0].iy);
 
-    let full = FiberBeam::try_new(
-        data,
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    )
-    .unwrap();
-    assert_eq!(full.torsion_j, beam.j);
-    assert_eq!(
-        full.torsion_stiffness().unwrap(),
-        beam.g * beam.j / beam.length
-    );
-    assert!(full.torsion_j > model.sections[0].j);
-
     let plastic = FiberBeam::with_plastic_zone(
         data,
         &model,
@@ -3472,6 +3329,8 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
+    assert_eq!(plastic.hinge.k_el.get(3, 3), beam.g * beam.j / beam.length);
+    assert!(plastic.torsion_j > model.sections[0].j);
     let multi = MultiSpringElement::new(
         data,
         &model,
@@ -3479,7 +3338,7 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
         AnalysisKind::Incremental,
     );
     for fiber in [&plastic, &multi.inner] {
-        let h = fiber.hinge.as_ref().unwrap();
+        let h = &fiber.hinge;
         assert_relative_eq!(
             h.k_el.get(4, 4),
             expected_d[1] * (4.0 + fiber.phi_z) / (fiber.flex_length * (1.0 + fiber.phi_z)),
@@ -3580,9 +3439,10 @@ fn src_nonlinear_entries_reject_invalid_materials_instead_of_provisional_propert
     cases.push(unassigned);
     for model in cases {
         let data = &model.elements[0];
-        assert!(FiberBeam::try_new(
+        assert!(FiberBeam::try_with_plastic_zone(
             data,
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental
         )
@@ -3620,7 +3480,7 @@ fn src_nonlinear_entries_reject_invalid_materials_instead_of_provisional_propert
 }
 
 #[test]
-fn fiber分割数とgauss積分形式はsrcの両質量形式の算定元にならない() {
+fn fiber分割数はsrcの両質量形式の算定元にならない() {
     let model = src_analysis_ratio_model();
     let data = &model.elements[0];
     for (nw, nd) in [(2, 5), (6, 10), (12, 20)] {
@@ -3655,9 +3515,10 @@ fn src552_direct_fiber_ms_material_regions_and_micro_tangent() {
     use sepika_section::fiber::{integrate_fibers, section_response, SectionStrain};
     let model = src_analysis_ratio_model();
     let data = &model.elements[0];
-    let full = FiberBeam::try_new(
+    let plastic = FiberBeam::try_with_plastic_zone(
         data,
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )
@@ -3668,7 +3529,7 @@ fn src552_direct_fiber_ms_material_regions_and_micro_tangent() {
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
-    for mut fiber in [full, multi.inner] {
+    for mut fiber in [plastic, multi.inner] {
         let gp = &mut fiber.gauss_points[0];
         for (tag, expected) in [(0, 172192.0), (2, 7808.0)] {
             assert_relative_eq!(
@@ -3763,9 +3624,10 @@ fn src552_preparation_and_direct_entries_reject_bad_h() {
         Err(error) => error,
     };
     assert!(direct_error.contains("部材 ID 0") && direct_error.contains("断面 ID 0"));
-    assert!(FiberBeam::try_new(
+    assert!(FiberBeam::try_with_plastic_zone(
         data,
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental
     )

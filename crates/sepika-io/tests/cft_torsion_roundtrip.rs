@@ -117,9 +117,10 @@ fn roundtrip(model: &Model) -> Model {
 
 fn actual_gj(model: &Model) -> [f64; 2] {
     let beam = BeamElement::try_new(&model.elements[0], model).unwrap();
-    let fiber = FiberBeam::try_new(
+    let fiber = FiberBeam::try_with_plastic_zone(
         &model.elements[0],
         model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )

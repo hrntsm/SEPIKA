@@ -390,9 +390,10 @@ fn adopted_shear_modulus_is_checked_for_regular_rc_src_and_cft_beams() {
                             Some(error.clone())
                         );
                     }
-                    let fiber_error = match crate::frame::fiber::FiberBeam::try_new(
+                    let fiber_error = match crate::frame::fiber::FiberBeam::try_with_plastic_zone(
                         &invalid.elements[0],
                         &invalid,
+                        300.0,
                         crate::factory::StrengthBasis::Nominal,
                         sepika_core::model::AnalysisKind::Incremental,
                     ) {

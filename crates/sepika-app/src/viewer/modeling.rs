@@ -59,7 +59,7 @@ pub(super) enum ModelClass {
     Elastic,
     /// 材端集中塑性（材端回転ばね）。剛床上で軸力変動が小さい梁のモデル化。
     ConcentratedPlastic,
-    /// ファイバー要素（分布塑性・軸-曲げ連成）。軸力変動する柱などのモデル化。
+    /// ファイバー要素（端部塑性化域・軸-曲げ連成）。軸力変動する柱などのモデル化。
     Fiber,
     /// 線形解析の耐震壁側柱。壁法線まわりの両端回転を解放する。
     SideColumnPin,
@@ -100,7 +100,7 @@ impl ModelClass {
         match self {
             ModelClass::Elastic => "弾性材",
             ModelClass::ConcentratedPlastic => "材端集中塑性",
-            ModelClass::Fiber => "ファイバー(分布塑性)",
+            ModelClass::Fiber => "ファイバー(塑性化域考慮)",
             ModelClass::SideColumnPin => "側柱(壁法線回転解放)",
             ModelClass::Wall => "壁エレメント",
             ModelClass::WallMisc => "フレーム内雑壁(周辺部材へ剛性算入)",

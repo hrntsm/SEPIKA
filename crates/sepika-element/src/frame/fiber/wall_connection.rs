@@ -170,7 +170,8 @@ impl FiberBeam {
         };
         let mut evaluate = |b: &[f64]| {
             self.trial_int = SmallVec::from_slice(b);
-            if let Some(h) = &mut self.hinge {
+            {
+                let h = &mut self.hinge;
                 h.trial_eta = h.committed_eta;
                 h.trial_plastic = h.committed_plastic;
             }
@@ -179,12 +180,9 @@ impl FiberBeam {
                 .map_err(|error| LocalEquilibriumError::Evaluation(error.to_string()))?;
             self.update_trial_state(&e)
                 .map_err(LocalEquilibriumError::Evaluation)?;
-            let tangent = if let Some(h) = &self.hinge {
-                self.hinge_tangent(h)
-                    .map_err(LocalEquilibriumError::Evaluation)?
-            } else {
-                self.elem_tangent()
-            };
+            let tangent = self
+                .hinge_tangent(&self.hinge)
+                .map_err(LocalEquilibriumError::Evaluation)?;
             self.wall_connection_response(&connection, &tangent)
                 .map_err(LocalEquilibriumError::Evaluation)
         };

@@ -366,9 +366,10 @@ fn assert_mass(matrix: &LocalMat, expected_t: f64, opt: MassOption) {
 fn verify_direct_and_public(model: &Model, mass_t: f64) {
     let data = &model.elements[0];
     let beam = BeamElement::try_new(data, model).unwrap();
-    let fiber = FiberBeam::try_new(
+    let fiber = FiberBeam::try_with_plastic_zone(
         data,
         model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )
@@ -476,9 +477,10 @@ fn reinforcement_and_src_steel_area_do_not_change_inclusive_mass() {
 fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
     let model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
     let data = &model.elements[0];
-    let mut fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::with_plastic_zone(
         data,
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -500,7 +502,6 @@ fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
         .unwrap();
     for gp in &mut fiber.gauss_points {
         gp.xi = 0.0;
-        gp.weight = 100.0;
         gp.trial_stress.fill(1.0e8);
         gp.trial_et.fill(0.0);
         for fiber in &mut gp.section.fibers {
@@ -679,9 +680,10 @@ fn direct_mass_api_retains_errors_instead_of_density_or_zero_fallbacks() {
     model.materials[0].density = f64::NAN;
     let data = &model.elements[0];
     let beam = BeamElement::try_new(data, &model).unwrap();
-    let fiber = FiberBeam::try_new(
+    let fiber = FiberBeam::try_with_plastic_zone(
         data,
         &model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )
