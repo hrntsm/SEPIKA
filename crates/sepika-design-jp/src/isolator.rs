@@ -126,26 +126,6 @@ pub fn rolling_bearing_yield_force(pv: f64, po: f64) -> f64 {
     rolling_bearing_friction(pv, po) * pv.max(0.0)
 }
 
-/// 球面すべり支承 MN タイプの標準摩擦係数 `μ0`（面圧依存）。
-/// `μ0 = 0.043·(2.03·σ^−0.19 + 0.068)`（σ=長期支持面圧）。
-pub fn spherical_bearing_mu0_mn(sigma: f64) -> f64 {
-    let s = sigma.max(1e-9);
-    0.043 * (2.03 * s.powf(-0.19) + 0.068)
-}
-
-/// 球面すべり支承 LN タイプの標準摩擦係数 `μ0`（面圧依存）。
-/// `μ0 = 0.013·(20·σ^−0.9 + 0.5)`。
-pub fn spherical_bearing_mu0_ln(sigma: f64) -> f64 {
-    let s = sigma.max(1e-9);
-    0.013 * (20.0 * s.powf(-0.9) + 0.5)
-}
-
-/// 球面すべり支承 MN タイプの速度依存摩擦係数 `μ = μ0·(1.0 − 0.55·e^(−0.019·|V|))`。
-/// `v`=層間速度 [mm/s]。
-pub fn spherical_bearing_mu_mn(mu0: f64, v: f64) -> f64 {
-    mu0 * (1.0 - 0.55 * (-0.019 * v.abs()).exp())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,19 +222,5 @@ mod tests {
         let mu = rolling_bearing_friction(1.0e6, 5.0e6);
         assert!((mu - 0.00276).abs() < 1e-9, "mu={mu}");
         assert!((rolling_bearing_yield_force(1.0e6, 5.0e6) - 2760.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_spherical_bearing_handcalc() {
-        // μ0(MN, σ=18) = 0.043·(2.03·18^−0.19 + 0.068)。
-        let mu0 = spherical_bearing_mu0_mn(18.0);
-        let expect = 0.043 * (2.03 * 18.0f64.powf(-0.19) + 0.068);
-        assert!((mu0 - expect).abs() < 1e-12, "mu0={mu0}");
-        // V=0 で μ = μ0·(1−0.55) = 0.45·μ0（静止時）。
-        assert!((spherical_bearing_mu_mn(mu0, 0.0) - 0.45 * mu0).abs() < 1e-12);
-        // 高速では μ → μ0（速度依存項が減衰）。
-        assert!(spherical_bearing_mu_mn(mu0, 1000.0) > spherical_bearing_mu_mn(mu0, 0.0));
-        // LN タイプ μ0 も正。
-        assert!(spherical_bearing_mu0_ln(10.0) > 0.0);
     }
 }
