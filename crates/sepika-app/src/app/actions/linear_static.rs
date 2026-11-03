@@ -758,16 +758,13 @@ impl App {
                     .statics
                     .iter()
                     .find(|(k, _)| *k == case_key)
-                    .map(|(_, s)| (s.member_forces.clone(), s.panel_moments.clone(), None)),
-                StaticKey::Combo(idx) => bundle.combos.get(idx).map(|(name, s)| {
-                    (
-                        s.member_forces.clone(),
-                        s.panel_moments.clone(),
-                        Some(name.clone()),
-                    )
-                }),
+                    .map(|(_, s)| (s.member_forces.clone(), s.panel_moments.clone())),
+                StaticKey::Combo(idx) => bundle
+                    .combos
+                    .get(idx)
+                    .map(|(_, s)| (s.member_forces.clone(), s.panel_moments.clone())),
             });
-        let Some((member_forces, panel_moments, _combo_name)) = resolved else {
+        let Some((member_forces, panel_moments)) = resolved else {
             return;
         };
         self.ui.scoped.nav.focus_result = Some(key);

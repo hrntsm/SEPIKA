@@ -2207,6 +2207,14 @@ fn test_parse_wave_csv_xy_two_columns() {
     let (xs, ys) = parse_wave_csv("x,y\n10.0,5.0\n20.0,15.0\n", ThDir::Xy).unwrap();
     assert_eq!(xs, vec![100.0, 200.0]);
     assert_eq!(ys, Some(vec![50.0, 150.0]));
+
+    let (xs, ys) = parse_wave_csv(
+        "\n x,y,ignored\n1, \n ,2\n 1.5, -2.5,unused\n -3,4,999\n",
+        ThDir::Xy,
+    )
+    .unwrap();
+    assert_eq!(xs, vec![15.0, -30.0]);
+    assert_eq!(ys, Some(vec![-25.0, 40.0]));
 }
 
 #[test]
@@ -2219,6 +2227,14 @@ fn test_parse_wave_csv_errors() {
     assert_eq!(err, "X+Y には2列のCSVが必要です");
     // X+Y でも 2 点未満ならエラー。
     assert!(parse_wave_csv("10.0,5.0\n", ThDir::Xy).is_err());
+    assert_eq!(
+        parse_wave_csv("header\n1,2\n3,4\n", ThDir::Xy).unwrap_err(),
+        "X+Y には2列のCSVが必要です"
+    );
+    assert_eq!(
+        parse_wave_csv("1,\n,2\n", ThDir::Xy).unwrap_err(),
+        "波形データが読み取れませんでした（数値が 2 点未満）。X+Y には2列のCSVが必要です。"
+    );
 }
 
 #[test]
@@ -11686,7 +11702,11 @@ fn test_hydrate_saved_vibration_views_fills_graph_data() {
 
     let mut model = sepika_core::model::Model::default();
     let id = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false, None);
-    let th = dummy_th(vec![0.0, 0.1, 0.2]);
+    let mut th = dummy_th(vec![0.0, 0.1, 0.2]);
+    th.history.node_disp = vec![0.25, -0.5, 0.75];
+    th.history.base_shear = vec![100.0, -200.0, 300.0];
+    th.history.top_drift_angle = vec![0.001, -0.002, 0.003];
+    th.history.node = Some(NodeId(2));
     let mut app = App {
         core: AppCore {
             model,
@@ -11709,6 +11729,28 @@ fn test_hydrate_saved_vibration_views_fills_graph_data() {
     #[cfg(feature = "gui")]
     {
         assert_eq!(app.ui.scoped.time_history_data.time, vec![0.0, 0.1, 0.2]);
+        app.ui.scoped.time_history_data = crate::time_history_view::TimeHistoryData::default();
+    }
+    app.hydrate_saved_vibration_views(None, None);
+    #[cfg(feature = "gui")]
+    {
+        let data = &app.ui.scoped.time_history_data;
+        assert_eq!(data.time, vec![0.0, 0.1, 0.2]);
+        assert_eq!(data.node_disp, vec![0.25, -0.5, 0.75]);
+        assert_eq!(data.story_shear, vec![100.0, -200.0, 300.0]);
+        assert_eq!(data.story_drift_angle, vec![0.001, -0.002, 0.003]);
+        assert_eq!(data.node, Some(NodeId(2)));
+    }
+    app.core.scoped.results.as_mut().unwrap().time_history = None;
+    app.hydrate_saved_vibration_views(None, None);
+    #[cfg(feature = "gui")]
+    {
+        let data = &app.ui.scoped.time_history_data;
+        assert!(data.time.is_empty());
+        assert!(data.node_disp.is_empty());
+        assert!(data.story_shear.is_empty());
+        assert!(data.story_drift_angle.is_empty());
+        assert_eq!(data.node, None);
     }
 }
 

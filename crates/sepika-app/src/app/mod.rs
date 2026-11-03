@@ -1638,14 +1638,11 @@ fn parse_wave_csv(content: &str, dir: ThDir) -> Result<(Vec<f64>, Option<Vec<f64
                 if line.is_empty() {
                     continue;
                 }
-                let fields: Vec<&str> = line.split(',').collect();
-                if fields.len() < 2 {
+                let mut fields = line.split(',');
+                let (Some(x), Some(y)) = (fields.next(), fields.next()) else {
                     return Err("X+Y には2列のCSVが必要です".to_string());
-                }
-                let (Ok(x), Ok(y)) = (
-                    fields[0].trim().parse::<f64>(),
-                    fields[1].trim().parse::<f64>(),
-                ) else {
+                };
+                let (Ok(x), Ok(y)) = (x.trim().parse::<f64>(), y.trim().parse::<f64>()) else {
                     continue;
                 };
                 xs.push(x * 10.0);
