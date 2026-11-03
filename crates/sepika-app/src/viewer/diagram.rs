@@ -346,7 +346,7 @@ pub(super) fn draw_force_diagram_with_view(
     frame_filter: super::FrameFilter,
     frame_normal: Option<[f64; 3]>,
 ) {
-    let Some(results) = &app.core.scoped.results else {
+    let Some(_) = &app.core.scoped.results else {
         return;
     };
     let mut maxes = [0.0_f64; 6];
@@ -374,7 +374,6 @@ pub(super) fn draw_force_diagram_with_view(
                 disp,
                 deform_scale,
                 proj,
-                results,
                 frame_filter,
                 frame_normal,
             );
@@ -402,7 +401,6 @@ fn draw_component_with_view(
     disp: Option<&[[f64; 6]]>,
     deform_scale: f64,
     proj: &Projector,
-    _results: &crate::app::ResultsBundle,
     frame_filter: super::FrameFilter,
     frame_normal: Option<[f64; 3]>,
 ) {
