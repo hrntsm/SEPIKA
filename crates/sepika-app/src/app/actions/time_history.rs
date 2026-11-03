@@ -43,6 +43,8 @@ impl App {
             .map(|c| c.id.0);
         Ok(TimeHistoryInput {
             data: wave,
+            checkpoint_step: (!cfg.th_nonlinear && self.core.scoped.checkpoint_stop_step > 0)
+                .then_some(self.core.scoped.checkpoint_stop_step),
             source: TimeHistorySource {
                 raw_identity,
                 cfg,
@@ -124,6 +126,17 @@ impl App {
         if input.source.cfg.th_nonlinear {
             self.notice_steel_seismic_walls();
         }
+        if let Some(step) = input.checkpoint_step {
+            let result = sepika_job::time_history_restart::compute_checkpoint(
+                self.core.model.clone(),
+                input.source.cfg,
+                input.data,
+                step,
+            )
+            .map_err(|e| e.to_string());
+            self.apply_linear_checkpoint(result);
+            return;
+        }
         let res = sepika_job::compute::compute_time_history(
             self.core.model.clone(),
             input.source.cfg,
@@ -160,6 +173,7 @@ impl App {
         }
         let TimeHistoryInput {
             data: wave,
+            checkpoint_step,
             mut source,
         } = input;
         self.bind_time_history_source(&mut source, false);
@@ -174,6 +188,15 @@ impl App {
         } else {
             "時刻歴応答(線形)"
         };
+        if let Some(step) = checkpoint_step {
+            self.spawn_analysis_job("時刻歴応答(途中状態)", move || {
+                JobResult::LinearCheckpoint(Box::new(Self::run_compute(|| {
+                    sepika_job::time_history_restart::compute_checkpoint(model, cfg, wave, step)
+                        .map_err(|e| e.to_string())
+                })))
+            });
+            return;
+        }
         self.spawn_analysis_job(label, move || {
             JobResult::TimeHistory(
                 Box::new(Self::run_compute(|| {
@@ -181,6 +204,83 @@ impl App {
                         .map_err(|e| e.to_string())
                 })),
                 Box::new(source),
+            )
+        });
+    }
+
+    pub(crate) fn apply_linear_checkpoint(
+        &mut self,
+        result: Result<sepika_job::time_history_restart::LinearTimeHistoryCheckpoint, String>,
+    ) {
+        match result {
+            Ok(checkpoint) => {
+                let (step, time) = checkpoint.progress();
+                self.core.scoped.linear_checkpoint = Some(checkpoint);
+                self.report_info(format!("線形時刻歴の確定状態: ステップ{step}、{time:.6}s。状態を保存して再開できます。"));
+            }
+            Err(error) => self.report_error(error),
+        }
+    }
+
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn save_linear_checkpoint(&mut self, path: &std::path::Path) {
+        let result = self
+            .core
+            .scoped
+            .linear_checkpoint
+            .as_ref()
+            .ok_or_else(|| "保存する途中状態がありません。".to_owned())
+            .and_then(|c| c.to_bytes().map_err(|e| e.to_string()))
+            .and_then(|bytes| std::fs::write(path, bytes).map_err(|e| e.to_string()));
+        match result {
+            Ok(()) => self.report_info("線形時刻歴の途中状態を保存しました。"),
+            Err(error) => self.report_error(error),
+        }
+    }
+
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn load_linear_checkpoint(&mut self, path: &std::path::Path) {
+        self.core.scoped.linear_checkpoint = None;
+        let result = std::fs::read(path)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| {
+                sepika_job::time_history_restart::LinearTimeHistoryCheckpoint::from_bytes(&bytes)
+                    .map_err(|e| e.to_string())
+            });
+        self.apply_linear_checkpoint(result);
+    }
+
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn start_resume_linear_checkpoint(&mut self) {
+        let Some(checkpoint) = self.core.scoped.linear_checkpoint.clone() else {
+            self.report_error("再開する途中状態がありません。");
+            return;
+        };
+        if !self.begin_analysis_job() {
+            return;
+        }
+        let mut input = match self.time_history_input(checkpoint.wave(), "保存波形".into()) {
+            Ok(input) => input,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
+        self.bind_time_history_source(&mut input.source, false);
+        self.accept_time_history_reference(&input.source, false);
+        let model = self.core.model.clone();
+        self.spawn_analysis_job("時刻歴応答(線形再開)", move || {
+            JobResult::TimeHistory(
+                Box::new(Self::run_compute(|| {
+                    sepika_job::time_history_restart::resume_checkpoint(
+                        model,
+                        input.source.cfg,
+                        input.data,
+                        checkpoint,
+                    )
+                    .map_err(|e| e.to_string())
+                })),
+                Box::new(input.source),
             )
         });
     }

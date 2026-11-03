@@ -73,11 +73,47 @@ pub fn linear_time_history_with_state(
     use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
+    linear_time_history_until(
+        model,
+        dofmap,
+        reducer,
+        wave,
+        newmark,
+        damping,
+        initial_disp,
+        initial_vel,
+        use_kg,
+        record_every,
+        None,
+    )
+}
+
+/// 全波形の記録方向・間引き格子を保ち、指定した確定ステップまで計算する。
+/// `end_step == None` は波形終端。終端を超える指定は拒否する。
+#[allow(clippy::too_many_arguments)]
+pub fn linear_time_history_until(
+    model: &Model,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    wave: &GroundMotion,
+    newmark: &NewmarkCfg,
+    damping: &Damping,
+    initial_disp: &[f64],
+    initial_vel: &[f64],
+    use_kg: bool,
+    record_every: Option<usize>,
+    end_step: Option<u64>,
+) -> Result<(ResponseResult, TimeStepState), SolveError> {
     validate_wall_connection(model, use_kg)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
     let dt = resolve_dt(newmark.dt, wave)?;
+    if end_step.is_some_and(|step| step > (wave.accel_x.len() - 1) as u64) {
+        return Err(SolveError::InvalidInput(
+            "停止ステップが波形の終端を超えています。".into(),
+        ));
+    }
 
     let n_indep = reducer.n_indep;
     if n_indep == 0 {
@@ -120,6 +156,7 @@ pub fn linear_time_history_with_state(
         v,
         a,
         record_every,
+        end_step,
     )
 }
 
@@ -150,14 +187,31 @@ pub fn linear_time_history_from_state(
 
     let dt = resolve_dt(newmark.dt, wave)?;
 
+    if state.step > (wave.accel_x.len() - 1) as u64 {
+        return Err(SolveError::InvalidInput(
+            "再開ステップが波形の終端を超えています。".into(),
+        ));
+    }
+    if state.time != state.step as f64 * dt
+        || state
+            .disp_red
+            .iter()
+            .chain(&state.vel_red)
+            .chain(&state.accel_red)
+            .any(|v| !v.is_finite())
+    {
+        return Err(SolveError::InvalidInput(
+            "再開状態の時刻または応答値が不正です。".into(),
+        ));
+    }
     let n_indep = reducer.n_indep;
     if n_indep == 0
         || state.disp_red.len() != n_indep
         || state.vel_red.len() != n_indep
         || state.accel_red.len() != n_indep
     {
-        return Err(SolveError::Backend(
-            "time history restart: state dimension mismatch".into(),
+        return Err(SolveError::InvalidInput(
+            "再開状態の自由度数が解析モデルと一致しません。".into(),
         ));
     }
 
@@ -179,6 +233,7 @@ pub fn linear_time_history_from_state(
         v,
         a,
         record_every,
+        None,
     )
 }
 
@@ -277,6 +332,7 @@ fn run_steps(
     mut v: Vec<f64>,
     mut a: Vec<f64>,
     record_every: Option<usize>,
+    end_step: Option<u64>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
     let LinearSetup {
         behaviors,
@@ -319,7 +375,8 @@ fn run_steps(
     update_story_drift(model, dofmap, &u_free, &mut story_drift_angle);
 
     let n_steps = wave.accel_x.len() - 1;
-    if start_step > n_steps as u64 {
+    let end_step = end_step.unwrap_or(n_steps as u64);
+    if start_step > end_step || end_step > n_steps as u64 {
         return Err(SolveError::InvalidInput(
             "再開ステップが波形の終端を超えています。".into(),
         ));
@@ -379,7 +436,7 @@ fn run_steps(
     let mut p_eff_buf = vec![0.0f64; n_indep];
     let mut u_next_buf = vec![0.0f64; n_indep];
 
-    for n in start_step as usize..n_steps {
+    for n in start_step as usize..end_step as usize {
         let t_next = (n + 1) as f64 * dt;
         infl.force_at_into(wave, n + 1, &mut p_free_buf);
         reducer.reduce_f_into(&p_free_buf, &mut p_red_buf);
@@ -446,7 +503,7 @@ fn run_steps(
         );
     }
 
-    let final_step = n_steps as u64;
+    let final_step = end_step;
     let final_time = final_step as f64 * dt;
     let final_state = TimeStepState {
         step: final_step,

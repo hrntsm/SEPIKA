@@ -22,7 +22,8 @@ mod result;
 
 pub use config::{GroundMotion, NewmarkCfg};
 pub use linear::{
-    linear_time_history_analysis, linear_time_history_from_state, linear_time_history_with_state,
+    linear_time_history_analysis, linear_time_history_from_state, linear_time_history_until,
+    linear_time_history_with_state,
 };
 pub use nonlinear::{nonlinear_time_history_analysis, NonlinearThCfg};
 pub use result::{ResponseHistory, ResponseResult, StoryResponse, ThRecording, TimeStepState};

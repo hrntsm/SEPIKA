@@ -17,7 +17,7 @@ fn expand_walls(model: sepika_core::model::Model) -> sepika_core::model::Model {
     sepika_core::wall_expand::expand_wall_elements_owned(model).0
 }
 
-fn dynamic_solve_error(error: sepika_math::solver::SolveError) -> JobError {
+pub(crate) fn dynamic_solve_error(error: sepika_math::solver::SolveError) -> JobError {
     match error {
         sepika_math::solver::SolveError::InvalidInput(message) => JobError::InvalidInput(message),
         other => JobError::Solve(other.to_string()),
@@ -226,9 +226,24 @@ pub fn compute_time_history(
     )
     .map_err(JobError::InvalidInput)?;
     let analysis = Analysis::prepare(&model).map_err(|e| JobError::Prepare(e.to_string()))?;
-    let damping = match cfg.th_damping_model {
+    let damping = time_history_damping(&analysis, cfg)?;
+    if cfg.th_nonlinear {
+        return compute_nonlinear_time_history(model, cfg, wave, damping);
+    }
+    let record_every = (cfg.th_record_every > 0).then_some(cfg.th_record_every);
+    let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
+    analysis
+        .time_history(&wave, newmark, damping, record_every)
+        .map_err(dynamic_solve_error)
+}
+
+pub(crate) fn time_history_damping(
+    analysis: &Analysis<'_>,
+    cfg: AnalysisSettings,
+) -> JobResult<sepika_solver::dynamic::damping::Damping> {
+    Ok(match cfg.th_damping_model {
         ThDampingModel::StiffnessProportional => {
-            let omega1 = first_angular_frequency(&analysis)?;
+            let omega1 = first_angular_frequency(analysis)?;
             sepika_solver::dynamic::damping::Damping::StiffnessProportional {
                 h: cfg.th_damping,
                 omega: omega1,
@@ -278,7 +293,7 @@ pub fn compute_time_history(
             sepika_solver::dynamic::damping::Damping::modal(&modal.shapes, &omegas, &ratios)
         }
         ThDampingModel::TangentAlpha1 | ThDampingModel::TangentH1 => {
-            let omega1 = first_angular_frequency(&analysis)?;
+            let omega1 = first_angular_frequency(analysis)?;
             if cfg.th_damping_model == ThDampingModel::TangentAlpha1 {
                 sepika_solver::dynamic::damping::Damping::StiffnessProportional {
                     h: cfg.th_damping,
@@ -292,15 +307,7 @@ pub fn compute_time_history(
                 }
             }
         }
-    };
-    if cfg.th_nonlinear {
-        return compute_nonlinear_time_history(model, cfg, wave, damping);
-    }
-    let record_every = (cfg.th_record_every > 0).then_some(cfg.th_record_every);
-    let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
-    analysis
-        .time_history(&wave, newmark, damping, record_every)
-        .map_err(dynamic_solve_error)
+    })
 }
 
 /// 非線形時刻歴応答解析（[`compute_time_history`] の非線形分岐）。
