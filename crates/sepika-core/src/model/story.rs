@@ -76,10 +76,7 @@ pub enum StoryStructure {
 
 impl StoryStructure {
     /// 部材の構造種別を階の構造種別へ畳み込む。
-    ///
-    /// CFT は SRC へ寄せる。略算周期 T = h(0.02 + 0.01α) は S の階が増えるほど
-    /// T が長く Rt が小さくなって地震力が下がるため、鋼管にコンクリートを充填した
-    /// CFT を S へ寄せないのが安全側になる。
+    /// CFT は SRC と同じ区分とし、S には算入しない。
     pub fn of_structure_kind(kind: crate::structure_kind::StructureKind) -> Self {
         use crate::structure_kind::StructureKind;
         match kind {
@@ -90,11 +87,7 @@ impl StoryStructure {
     }
 
     /// 種別ごとの部材本数から階の主要構造種別を決める。最多の種別を採用し、
-    /// 同数の場合は RC → SRC → S の順で優先する。
-    ///
-    /// 略算周期 T = h(0.02 + 0.01α) は S の階が増えるほど T が長く、Rt が
-    /// 小さくなって地震力が下がるため、判定が割れた場合は S を採らないのが
-    /// 安全側になる（同数時の優先順の根拠）。対象部材が 1 本もない階は RC。
+    /// 同数の場合は RC → SRC → S の順で優先し、対象部材がない場合は RC を返す。
     pub fn majority(n_rc: usize, n_s: usize, n_src: usize) -> Self {
         let max = n_rc.max(n_s).max(n_src);
         if max == 0 || n_rc == max {
