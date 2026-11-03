@@ -112,20 +112,6 @@ pub fn equivalent_damping(k1: f64, kd: f64, qd: f64, disp: f64) -> f64 {
     (2.0 / std::f64::consts::PI) * qd * (d - qd / ((beta - 1.0) * kd)) / (keq * d * d)
 }
 
-/// 転がり支承の摩擦係数 `μ = (1.2 + 7.8·Pv/Po)/1000`。
-/// `Pv`=長期軸力、`Po`=静定格圧縮荷重。
-pub fn rolling_bearing_friction(pv: f64, po: f64) -> f64 {
-    if po.abs() < 1e-12 {
-        return 0.0;
-    }
-    (1.2 + 7.8 * pv / po) / 1000.0
-}
-
-/// 転がり支承の折れ点耐力 `Q1 = μ·Pv`（軸力一定・長期軸力と摩擦係数から）。
-pub fn rolling_bearing_yield_force(pv: f64, po: f64) -> f64 {
-    rolling_bearing_friction(pv, po) * pv.max(0.0)
-}
-
 /// 球面すべり支承 MN タイプの標準摩擦係数 `μ0`（面圧依存）。
 /// `μ0 = 0.043·(2.03·σ^−0.19 + 0.068)`（σ=長期支持面圧）。
 pub fn spherical_bearing_mu0_mn(sigma: f64) -> f64 {
@@ -234,14 +220,6 @@ mod tests {
         let expect = (2.0 / std::f64::consts::PI) * 100.0 * (200.0 - 100.0 / 9.0) / (1.5 * 40000.0);
         assert!((heq - expect).abs() < 1e-9, "heq={heq}");
         assert!((heq - 0.2004).abs() < 5e-4, "heq≈0.2004, got {heq}");
-    }
-
-    #[test]
-    fn test_rolling_bearing_handcalc() {
-        // Pv=1e6, Po=5e6 → μ=(1.2+7.8·0.2)/1000=0.00276、Q1=μ·Pv=2760。
-        let mu = rolling_bearing_friction(1.0e6, 5.0e6);
-        assert!((mu - 0.00276).abs() < 1e-9, "mu={mu}");
-        assert!((rolling_bearing_yield_force(1.0e6, 5.0e6) - 2760.0).abs() < 1e-6);
     }
 
     #[test]
