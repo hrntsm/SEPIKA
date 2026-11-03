@@ -321,12 +321,18 @@ fn nonlinear_input_issues_with_basis(
                         if !fiber {
                             return None;
                         }
-                        crate::frame::fiber::FiberBeam::try_new(elem, model, basis, kind)
-                            .and_then(|beam| beam.validate_initial_section_stiffness())
-                            .err()
-                            .map(|reason| {
-                                format!("部材 ID {} のファイバー初期断面: {reason}", elem.id.0)
-                            })
+                        crate::frame::fiber::FiberBeam::try_with_plastic_zone(
+                            elem,
+                            model,
+                            super::springs::plastic_zone_length(elem, model),
+                            basis,
+                            kind,
+                        )
+                        .and_then(|beam| beam.validate_initial_section_stiffness())
+                        .err()
+                        .map(|reason| {
+                            format!("部材 ID {} のファイバー初期断面: {reason}", elem.id.0)
+                        })
                     })
             }
             _ => None,

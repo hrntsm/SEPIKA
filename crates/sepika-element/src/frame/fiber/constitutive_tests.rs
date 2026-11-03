@@ -187,13 +187,9 @@ fn axial_biaxial_fiber_forces_and_plastic_work_are_conjugate() {
     }
     for end in 0..2 {
         for a in 0..3 {
+            assert_relative_eq!(member.hinge.trial_eta[end * 3 + a], eta[a], epsilon = 1e-12);
             assert_relative_eq!(
-                member.hinge.as_ref().unwrap().trial_eta[end * 3 + a],
-                eta[a],
-                epsilon = 1e-12
-            );
-            assert_relative_eq!(
-                member.hinge.as_ref().unwrap().trial_plastic[end * 3 + a],
+                member.hinge.trial_plastic[end * 3 + a],
                 plastic[a],
                 epsilon = 1e-12
             );
@@ -369,7 +365,7 @@ fn overflow_in_uncancelled_residual_scale_is_rejected_without_committing() {
     let model = Model::default();
     let ctx = Ctx { model: &model };
     let mut member = bilinear_member();
-    let h = member.hinge.as_mut().unwrap();
+    let h = &mut member.hinge;
     for (i, j, sign) in [(0, 0, 1.0), (0, 6, -1.0), (6, 0, -1.0), (6, 6, 1.0)] {
         h.k_el.set(i, j, sign * f64::MAX);
     }
@@ -489,7 +485,7 @@ fn finite_torsion_rotation_overflow_is_rejected_before_commit_with_exact_rollbac
     let mut member = small_member(Box::new(Bilinear::new(128.0, 1.0, 0.5)), 128.0, true);
     let mut previous = [0.0; 12];
     axial(&mut member, 23.0 / 128.0, &mut previous, true, &ctx);
-    assert_eq!(member.torsion_stiffness(), Some(1e9));
+    assert_eq!(member.hinge.k_el.get(3, 3), 1e9);
     let checkpoint = member.serialize_checkpoint();
     let force = member.internal_force(&ctx).data;
     let tangent = member.tangent_stiffness(&ctx).data;
@@ -637,108 +633,6 @@ fn usual_factory_fiber_and_ms_failed_trials_keep_exact_committed_and_trial_state
 }
 
 #[test]
-fn distributed_double_pin_removes_torsion_gauge_and_condenses_all_bending_releases() {
-    let mut model = super::tests::build_test_model(Some(78846.15));
-    model.sections[0].j = 1e6;
-    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
-    model.elements[0].end_cond = [EndCondition::Pinned; 2];
-    let ctx = Ctx { model: &model };
-    let mut member = FiberBeam::new(
-        &model.elements[0],
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
-    assert!(member.hinge.is_none());
-    assert!(member.torsion_stiffness().unwrap() > 0.0);
-    let zero = LocalVec {
-        data: smallvec::smallvec![0.0;12],
-    };
-    member.update_state(&zero, false, &ctx).unwrap();
-    let k = member.tangent_stiffness(&ctx);
-    for slot in [1, 2, 3, 4, 5, 7, 8, 9, 10, 11] {
-        assert!(
-            k.get(slot, slot).abs() < 1e-6,
-            "slot={slot}, K={}",
-            k.get(slot, slot)
-        );
-    }
-    let mut du = zero;
-    du.data[7] = 1.0;
-    member.update_state(&du, false, &ctx).unwrap();
-    assert!(member
-        .internal_force(&ctx)
-        .data
-        .iter()
-        .all(|force| force.abs() < 1e-5));
-}
-
-#[test]
-fn distributed_zero_release_residual_with_singular_tangent_is_error_and_restores_trial_and_cache() {
-    let mut model = super::tests::build_test_model(Some(78846.15));
-    model.sections[0].j = 1e6;
-    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
-    model.elements[0].end_cond = [EndCondition::Pinned; 2];
-    let ctx = Ctx { model: &model };
-    let mut member = FiberBeam::new(
-        &model.elements[0],
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
-    for gp in &mut member.gauss_points {
-        gp.section.fibers = [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)]
-            .into_iter()
-            .map(|(y, z)| Fiber {
-                y,
-                z,
-                area: 1.0,
-                material: 2,
-            })
-            .collect();
-        gp.mats = (0..4)
-            .map(|_| Box::new(Bilinear::new(205000.0, 200.0, 0.0)) as Box<dyn UniaxialMaterial>)
-            .collect();
-        gp.trial_stress = vec![0.0; 4];
-        gp.trial_et = vec![205000.0; 4];
-    }
-    let mut previous = [0.0; 12];
-    axial(&mut member, 0.1, &mut previous, true, &ctx);
-    let committed = member.serialize_checkpoint();
-    axial(&mut member, 0.2, &mut previous, false, &ctx);
-    let trial = member.serialize_checkpoint();
-    let snapshot = member.snapshot_state();
-    let force = member.internal_force(&ctx).data;
-    let tangent = member.tangent_stiffness(&ctx).data;
-    member.trial_disp[6] = 6.0;
-    let u = member.elem_disp(&member.flex_disp());
-    member.update_section_trial(&u);
-    let plastic_force = member.elem_internal_force(&u);
-    for release in &member.releases {
-        assert_eq!(plastic_force[release.dof], 0.0);
-    }
-    member.restore_state(snapshot.as_ref());
-    let mut du = LocalVec {
-        data: smallvec::smallvec![0.0;12],
-    };
-    du.data[6] = 5.8;
-    let error = member
-        .update_state(&du, true, &ctx)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("分布断面の外側端部接続釣合い"), "{error}");
-    assert_eq!(member.serialize_checkpoint(), trial);
-    assert_eq!(member.internal_force(&ctx).data, force);
-    assert_eq!(member.tangent_stiffness(&ctx).data, tangent);
-    member.revert_state();
-    assert_eq!(member.serialize_checkpoint(), committed);
-    previous = [0.0; 12];
-    previous[6] = 0.1;
-    axial(&mut member, 0.2, &mut previous, false, &ctx);
-    assert_eq!(member.serialize_checkpoint(), trial);
-}
-
-#[test]
 fn similar_sections_retain_independent_coupled_elastic_solution_and_failed_trial_state() {
     let model = Model::default();
     let ctx = Ctx { model: &model };
@@ -748,7 +642,7 @@ fn similar_sections_retain_independent_coupled_elastic_solution_and_failed_trial
         let force = axial(&mut member, 1.5 * scale, &mut previous, false, &ctx);
         if scale == 1.0 {
             assert_relative_eq!(force, 100000.0, epsilon = 1e-6);
-            let h = member.hinge.as_ref().unwrap();
+            let h = &member.hinge;
             assert!(
                 h.d0[0][0][1].abs() > 1.0 && h.d0[0][0][2].abs() > 1.0 && h.d0[0][1][2].abs() > 1.0
             );
@@ -770,7 +664,7 @@ fn similar_sections_retain_independent_coupled_elastic_solution_and_failed_trial
             100000.0 * scale.powi(2),
             max_relative = 1e-9
         );
-        let h = member.hinge.as_ref().unwrap();
+        let h = &member.hinge;
         for end in 0..2 {
             for (a, expected) in [0.00060625, -8.75e-6 / scale, 15e-6 / scale]
                 .into_iter()
@@ -786,7 +680,7 @@ fn similar_sections_retain_independent_coupled_elastic_solution_and_failed_trial
         );
         let before = member.serialize_checkpoint();
         for invalid in [0.0, f64::NAN] {
-            member.hinge.as_mut().unwrap().d0[0] = [[invalid; 3]; 3];
+            member.hinge.d0[0] = [[invalid; 3]; 3];
             let error = member
                 .update_state(
                     &LocalVec {
@@ -822,9 +716,10 @@ fn similar_h_shape_fibers_match_independent_midpoint_area_and_biaxial_inertia() 
         section.area = 7680.0 * scale.powi(2);
         section.iy *= scale.powi(4);
         section.iz *= scale.powi(4);
-        let beam = FiberBeam::try_new(
+        let beam = FiberBeam::try_with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::TimeHistory,
         )

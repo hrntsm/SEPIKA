@@ -156,7 +156,7 @@ fn independent_plastic_axial_event_partition_preserves_work_at_every_history_com
                                     LP_AREA * FY * (ep - observed_epc[index]).abs();
                             }
                         }
-                        let hinge = member.inner.hinge.as_ref().unwrap();
+                        let hinge = &member.inner.hinge;
                         for i in 0..6 {
                             let p = if i % 3 == 0 { next_p_mm / 2.0 } else { 0.0 };
                             let eta = if i % 3 == 0 {
@@ -789,7 +789,7 @@ fn coupled_wall_partial_yield_unload_history_matches_uncondensed_primal_state_ta
                 expected_work +=
                     0.5 * (expected.force[i] + previous_expected_force[i]) * (u[i] - previous[i]);
             }
-            let hinge = member.inner.hinge.as_ref().unwrap();
+            let hinge = &member.inner.hinge;
             for i in 0..6 {
                 assert_relative_eq!(hinge.trial_eta[i], expected.eta[i], epsilon = 1e-11);
                 assert_relative_eq!(hinge.trial_plastic[i], expected.plastic[i], epsilon = 1e-9);
@@ -903,7 +903,7 @@ fn ordinary_fixed_fiber_and_ms_biaxial_history_matches_uncondensed_primal() {
                     );
                 }
             }
-            let hinge = member.inner.hinge.as_ref().unwrap();
+            let hinge = &member.inner.hinge;
             for i in 0..6 {
                 assert_relative_eq!(hinge.trial_eta[i], expected.eta[i], epsilon = 1e-11);
                 assert_relative_eq!(hinge.trial_plastic[i], expected.plastic[i], epsilon = 1e-9);

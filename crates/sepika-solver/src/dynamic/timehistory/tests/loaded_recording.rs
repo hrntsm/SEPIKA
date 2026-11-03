@@ -178,9 +178,10 @@ fn loaded_recording_keeps_signed_udl_sections_and_unstored_step_peaks() {
 fn loaded_recording_point_force_keeps_left_limit_and_both_ends() {
     for rotated in [false, true] {
         let model = model(rotated, ElementKind::Beam);
-        let mut beam = FiberBeam::new(
+        let mut beam = FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::TimeHistory,
         );
@@ -313,9 +314,10 @@ fn loaded_recording_rejects_bad_owner_before_legacy_getters_and_restores_step() 
         let mut behaviors: Vec<Box<dyn ElementBehavior>> = (0..2)
             .map(|i| {
                 Box::new(Probe {
-                    inner: FiberBeam::new(
+                    inner: FiberBeam::with_plastic_zone(
                         &model.elements[i],
                         &model,
+                        300.0,
                         StrengthBasis::Nominal,
                         AnalysisKind::TimeHistory,
                     ),
@@ -360,9 +362,10 @@ fn loaded_recording_rejects_count_mismatch_and_preserves_nonowner_sections() {
     let model = model(false, ElementKind::Beam);
     assert!(member_forces_nonlinear(&model, &[]).is_err());
     let b = Probe {
-        inner: FiberBeam::new(
+        inner: FiberBeam::with_plastic_zone(
             &model.elements[0],
             &model,
+            300.0,
             StrengthBasis::Nominal,
             AnalysisKind::TimeHistory,
         ),

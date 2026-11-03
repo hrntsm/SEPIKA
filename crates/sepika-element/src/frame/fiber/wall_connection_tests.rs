@@ -13,7 +13,7 @@ fn raw_member(torsion: bool) -> FiberBeam {
         let kt = member.g * member.torsion_j / member.length;
         for (i, j, sign) in [(3, 3, 1.0), (9, 9, 1.0), (3, 9, -1.0), (9, 3, -1.0)] {
             member.initial_elastic_stiffness.set(i, j, sign * kt);
-            member.hinge.as_mut().unwrap().k_el.set(i, j, sign * kt);
+            member.hinge.k_el.set(i, j, sign * kt);
         }
     }
     member

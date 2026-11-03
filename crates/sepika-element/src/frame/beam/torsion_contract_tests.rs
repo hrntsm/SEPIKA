@@ -78,9 +78,10 @@ fn model(shape: SectionShape, cft: bool) -> Model {
 }
 
 fn fiber(model: &Model) -> Result<FiberBeam, String> {
-    FiberBeam::try_new(
+    FiberBeam::try_with_plastic_zone(
         &model.elements[0],
         model,
+        300.0,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     )

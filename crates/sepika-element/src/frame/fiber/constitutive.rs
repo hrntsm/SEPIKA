@@ -80,7 +80,7 @@ impl FiberBeam {
     }
 
     fn hinge_section_system(&self, eta: &[f64; 6], u: &[f64; 12]) -> Result<SectionTrial, String> {
-        let h = self.hinge.as_ref().unwrap();
+        let h = &self.hinge;
         let mut result = SectionTrial {
             force: [0.0; 6],
             plastic: [0.0; 6],
@@ -214,12 +214,12 @@ impl FiberBeam {
     }
 
     fn hinge_scales(&self) -> [f64; 6] {
-        let h = self.hinge.as_ref().unwrap();
+        let h = &self.hinge;
         std::array::from_fn(|a| h.d0[a / 3][a % 3][a % 3].abs().sqrt())
     }
 
     pub(super) fn solve_hinges(&mut self, u: &[f64; 12]) -> Result<(), String> {
-        let mut eta = self.hinge.as_ref().unwrap().trial_eta;
+        let mut eta = self.hinge.trial_eta;
         for iteration in 0..80 {
             for end in 0..2 {
                 self.update_hinge_section_trial(end, &eta[end * 3..end * 3 + 3]);
@@ -236,7 +236,7 @@ impl FiberBeam {
                 )
             })?;
             if response.normalized_residual <= 1.0e-10 {
-                let h = self.hinge.as_mut().unwrap();
+                let h = &mut self.hinge;
                 h.trial_eta = eta;
                 h.trial_plastic = response.plastic;
                 return Ok(());

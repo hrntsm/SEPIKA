@@ -75,7 +75,7 @@ fn apply(m: &mut FiberBeam, w: f64, axis: usize, commit: bool) {
         .unwrap();
 }
 fn raw_force(m: &FiberBeam) -> [f64; 12] {
-    FiberBeam::hinge_internal_force(m.hinge.as_ref().unwrap(), &m.elem_disp(&m.flex_disp()))
+    FiberBeam::hinge_internal_force(&m.hinge, &m.elem_disp(&m.flex_disp()))
 }
 fn q(m: &FiberBeam, end: usize) -> [f64; 3] {
     m.gauss_points[end].cached_force
@@ -109,7 +109,7 @@ fn set_rigid_geometry(m: &mut FiberBeam) {
     m.rigid_j = 100.;
     for (i, j, sign) in [(0, 0, 1.), (6, 6, 1.), (0, 6, -1.), (6, 0, -1.)] {
         m.initial_elastic_stiffness.set(i, j, sign * 200000.);
-        m.hinge.as_mut().unwrap().k_el.set(i, j, sign * 200000.);
+        m.hinge.k_el.set(i, j, sign * 200000.);
     }
 }
 fn point(a: f64) -> MemberLoad {
