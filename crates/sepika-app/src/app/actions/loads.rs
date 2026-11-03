@@ -411,14 +411,14 @@ mod tests {
         app.run_static_all();
         assert!(app.core.scoped.last_error.is_none());
         app.select_displayed_result(StaticKey::Combo(1));
-        let before = app.current_static().unwrap().disp.clone();
+        assert!(app.current_static().is_some());
         let ex_loads = app.core.model.load_cases[ex.index()].nodal.clone();
         let result = AutoLoadComputeResult {
             cases: vec![
                 AutoLoadCaseContent {
                     name: EX_CASE_NAME,
                     kind: sepika_core::model::LoadCaseKind::Seismic,
-                    nodal: ex_loads.clone(),
+                    nodal: ex_loads,
                     member: Vec::new(),
                 },
                 AutoLoadCaseContent {
@@ -444,7 +444,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["無関係"]
         );
-        let _ = before;
         assert!(app.current_static().is_none());
         assert!(app.core.model.load_cases[ex.index()].nodal.is_empty());
         assert_eq!(app.core.model.load_cases[ey.index()].nodal.len(), 1);

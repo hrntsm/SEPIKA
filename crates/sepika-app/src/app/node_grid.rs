@@ -120,8 +120,7 @@ impl GridAdapter for NodeGridAdapter<'_> {
             })
             .collect::<Result<_, String>>()?;
         let revision = self.undo.revision();
-        let existing: Vec<_> = parsed.iter().filter(|(r, _, _)| *r < n0).copied().collect();
-        let updates = self.coord_updates(&existing);
+        let updates = self.coord_updates(&parsed);
         let mut added = vec![[0.0f64; 3]; append_rows];
         for (r, c, v) in parsed.iter().filter(|(r, _, _)| *r >= n0) {
             if let Some(coord) = added.get_mut(r - n0) {

@@ -104,16 +104,16 @@ impl App {
         if let Some(bundle) = &mut self.core.scoped.results {
             bundle.time_history = Some(res.clone());
         }
-        self.fill_time_history_data(res);
+        Self::fill_time_history_data(&mut self.ui.scoped, res);
     }
 
     fn fill_time_history_data(
-        &mut self,
+        ui: &mut UiModelScoped,
         res: &sepika_solver::dynamic::timehistory::ResponseResult,
     ) {
         #[cfg(feature = "gui")]
         {
-            self.ui.scoped.time_history_data = crate::time_history_view::TimeHistoryData {
+            ui.time_history_data = crate::time_history_view::TimeHistoryData {
                 time: res.time.clone(),
                 node_disp: res.history.node_disp.clone(),
                 story_shear: res.history.base_shear.clone(),
@@ -122,7 +122,7 @@ impl App {
             };
         }
         #[cfg(not(feature = "gui"))]
-        let _ = res;
+        let _ = (ui, res);
     }
 
     fn fill_time_history_from_window(&mut self) {
@@ -131,7 +131,7 @@ impl App {
             .scoped
             .results
             .as_ref()
-            .and_then(|b| b.time_history.clone())
+            .and_then(|b| b.time_history.as_ref())
         else {
             #[cfg(feature = "gui")]
             {
@@ -140,7 +140,7 @@ impl App {
             }
             return;
         };
-        self.fill_time_history_data(&res);
+        Self::fill_time_history_data(&mut self.ui.scoped, res);
     }
 
     /// 保存済みの表示ケース ID から、時刻歴グラフと質点系窓口を復元する。

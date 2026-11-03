@@ -192,7 +192,6 @@ fn study_switch_keeps_main_name_draft_out_of_the_other_model() {
     use crate::app::study::Location;
     let ctx = egui::Context::default();
     let mut app = App::default();
-    assert!(app.load_model(sepika_core::Model::with_default_load_cases()));
     app.load_model(crate::sample::portal_frame());
     let s = app
         .create_study("名称入力の分離".into(), vec![sepika_core::ids::ElemId(2)])

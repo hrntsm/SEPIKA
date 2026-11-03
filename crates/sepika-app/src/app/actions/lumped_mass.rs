@@ -704,8 +704,8 @@ mod tests {
         app.run_pushover();
         crate::app::tests::install_independent_lumped_backbone(&mut app, 100.0);
         let predecessors = bincode::serialize(&(
-            app.core.scoped.results.as_ref().unwrap().statics.clone(),
-            app.core.scoped.results.as_ref().unwrap().pushover_x.clone(),
+            &app.core.scoped.results.as_ref().unwrap().statics,
+            &app.core.scoped.results.as_ref().unwrap().pushover_x,
         ))
         .unwrap();
         start_eigen(&mut app);
@@ -843,8 +843,8 @@ mod tests {
         assert!(app.core.scoped.results.as_ref().unwrap().lumped.is_none());
         assert_eq!(
             bincode::serialize(&(
-                app.core.scoped.results.as_ref().unwrap().statics.clone(),
-                app.core.scoped.results.as_ref().unwrap().pushover_x.clone()
+                &app.core.scoped.results.as_ref().unwrap().statics,
+                &app.core.scoped.results.as_ref().unwrap().pushover_x
             ))
             .unwrap(),
             predecessors
@@ -1062,12 +1062,7 @@ mod tests {
                         })
                         .collect();
                         let mut bundle = all_results.clone();
-                        for key in &all_results
-                            .input_records
-                            .iter()
-                            .map(|(k, _)| k.clone())
-                            .collect::<Vec<_>>()
-                        {
+                        for (key, _) in &all_results.input_records {
                             if matches!(
                                 key,
                                 ResultInputKey::Static(_) | ResultInputKey::Pushover(_)
