@@ -214,7 +214,7 @@ pub struct StoryIdentification {
     pub dir: SeismicDir,
     pub fit: super::StoryFit,
     pub source_target: crate::nonlinear::pushover::PushoverTarget,
-    /// 同じ水平力分布の等価降伏荷重時の弾性曲げ層間変位 [mm]。
+    /// 同じ水平力分布の等価降伏荷重時の弾性曲げ層間変位 `[mm]`。
     pub bending_yield_drift: f64,
 }
 

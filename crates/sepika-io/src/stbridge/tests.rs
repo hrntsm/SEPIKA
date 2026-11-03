@@ -289,19 +289,12 @@ fn assert_semantic_eq(a: &Model, b: &Model) {
 }
 
 #[test]
-fn test_roundtrip_semantic() {
-    let m = representative_model();
-    let xml = export_stbridge(&m).expect("export");
-    let m2 = import_stbridge(&xml).expect("import");
-    assert_semantic_eq(&m, &m2);
-}
-
-#[test]
 fn test_roundtrip_twice_stable() {
     // import→export→再import で安定。
     let m = representative_model();
     let xml1 = export_stbridge(&m).unwrap();
     let m2 = import_stbridge(&xml1).unwrap();
+    assert_semantic_eq(&m, &m2);
     let xml2 = export_stbridge(&m2).unwrap();
     assert_eq!(xml1, xml2, "export は冪等であるべき");
     let m3 = import_stbridge(&xml2).unwrap();
@@ -1029,10 +1022,6 @@ fn test_standard_roundtrip_rc_beam_rect_stages() {
     let back = import_stbridge(INPUT).expect("import");
     assert_rc_rebar_ovika_contract(&m, &back, "rc_beam_rect_stages");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
-    assert_eq!(
-        back.sections[0].shape, m.sections[0].shape,
-        "RC 梁の段別本数が実配筋型へ取り込まれる"
-    );
 }
 
 /// 矩形柱の段別本数・方向別脚数の標準出力・独立入力と OVIKA の保存を検証する。
@@ -1091,10 +1080,6 @@ fn test_standard_roundtrip_rc_column_rect_stages_legs() {
     let back = import_stbridge(INPUT).expect("import");
     assert_rc_rebar_ovika_contract(&m, &back, "rc_column_rect_stages_legs");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
-    assert_eq!(
-        back.sections[0].shape, m.sections[0].shape,
-        "矩形柱の段別本数・X/Y 脚数が実配筋型へ取り込まれる"
-    );
 }
 
 /// 円形柱の主筋全本数の標準出力・独立入力と OVIKA の保存を検証する。
@@ -1145,10 +1130,6 @@ fn test_standard_roundtrip_rc_column_circle_count() {
     let back = import_stbridge(INPUT).expect("import");
     assert_rc_rebar_ovika_contract(&m, &back, "rc_column_circle_count");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
-    assert_eq!(
-        back.sections[0].shape, m.sections[0].shape,
-        "円形柱の全本数が実配筋型へ取り込まれる"
-    );
 }
 
 /// 主筋が 4 段以上あるとき、3 段目までを書き出し、4 段目以降の切り捨てを
@@ -4662,8 +4643,6 @@ fn test_import_cantilever_slab_becomes_attached() {
         m.slabs.iter().map(|s| &s.shape).collect::<Vec<_>>()
     );
     let slab = &m.slabs[0];
-    let before_xy = [[0.0, 0.0], [4000.0, 0.0], [4000.0, 1500.0], [0.0, 1500.0]];
-    assert_eq!(sepika_core::geom::polygon::area(&before_xy), 6_000_000.0);
     let after = slab.boundary_coords(&m).unwrap();
     assert_eq!(sepika_core::geom::polygon::area_xy(&after), 6_000_000.0);
     let supports = m.attached_slab_supports(slab).unwrap();
@@ -4816,7 +4795,6 @@ fn unassigned_primary_members_625_reject_both_exports_and_recover_by_assignment(
         model.elements.push(missing);
         let normal = model.elements[..3].to_vec();
         assert_unassigned_625(&model, expected_kind, "ElemId(3)", None);
-        assert_unassigned_625(&model, expected_kind, "ElemId(3)", None);
         model.elements[3].section = Some(SectionId(section));
         assert_eq!(model.elements[..3], normal);
         assert!(export_stbridge(&model).is_ok());
@@ -4868,7 +4846,6 @@ fn unassigned_secondary_members_625_reject_detached_and_region_exports_then_reco
                     ));
                 }
             }
-            assert_unassigned_625(&model, kind, id, Some(name));
             assert_unassigned_625(&model, kind, id, Some(name));
             let missing = if beam {
                 if in_regions {

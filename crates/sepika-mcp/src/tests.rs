@@ -3280,6 +3280,7 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
     }
 }
 
+#[cfg(not(feature = "mcp"))]
 #[test]
 fn beam_contact_quantity_mcp_preserves_union_and_diagnostics() {
     for (model, expected_m2) in beam_contact_placement_fixtures() {

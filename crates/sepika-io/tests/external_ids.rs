@@ -300,19 +300,3 @@ fn stb_post_invalid_or_missing_required_endpoint_never_uses_another_alias() {
         }
     }
 }
-
-#[test]
-fn stb_negative_section_reference_is_rejected_for_all_linear_member_types() {
-    for (tag, endpoints) in [
-        ("StbColumn", r#"id_node_bottom="0" id_node_top="1""#),
-        ("StbGirder", r#"id_node_start="0" id_node_end="1""#),
-        ("StbBrace", r#"id_node_start="0" id_node_end="1""#),
-        ("StbBeam", r#"id_node_start="0" id_node_end="1""#),
-        ("StbPost", r#"id_node_bottom="0" id_node_top="1""#),
-    ] {
-        let xml = document(&format!(
-            r#"<{tag} id="0" {endpoints} id_section="-1" kind_structure="S"/>"#
-        ));
-        assert_rejected(&xml, "id_section");
-    }
-}

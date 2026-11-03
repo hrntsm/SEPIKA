@@ -199,10 +199,8 @@ impl HysteresisMaterial {
             } else {
                 s.branch = Branch::Skeleton;
             }
-            s.dir = dir_new;
-        } else {
-            s.dir = dir_new;
         }
+        s.dir = dir_new;
 
         let (m, kt, branch_out) = self.eval_on_branch(theta, &s);
         s.theta = theta;

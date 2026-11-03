@@ -177,21 +177,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             let region = parse_floor_assignment_region_id(
                 value.get("region").ok_or("region が必要です")?,
             )?;
-            let plate: SlabPlate = if let Some(v) = value.get("plate") {
-                serde_json::from_value(v.clone()).map_err(|e| format!("plate の解析に失敗: {e}"))?
-            } else {
-                SlabPlate {
-                    section: parse_optional_section_id(value.get("section"))?,
-                    loads: match value.get("loads") {
-                        None | Some(serde_json::Value::Null) => Vec::new(),
-                        Some(v) => serde_json::from_value(v.clone())
-                            .map_err(|e| format!("loads の解析に失敗: {e}"))?,
-                    },
-                    usage: parse_optional_enum::<SlabUsage>(value.get("usage"))?,
-                    method: parse_distribution_method(value.get("method"))?,
-                    one_way: parse_optional_enum::<OneWayDir>(value.get("one_way"))?,
-                }
-            };
+            let plate = parse_slab_plate(value)?;
             Ok(Box::new(AssignSlabToFloorPlateRegion { region, plate }))
         }
         "SetFloorPlateRegionNoPlate" => Ok(Box::new(SetFloorPlateRegionNoPlate {
@@ -209,21 +195,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
                 serde_json::from_value(value.get("anchor").ok_or("anchor が必要です")?.clone())
                     .map_err(|e| format!("anchor の解析に失敗: {e}"))?;
             let extent = parse_f64_pair(value.get("extent"), "extent")?;
-            let plate: SlabPlate = if let Some(v) = value.get("plate") {
-                serde_json::from_value(v.clone()).map_err(|e| format!("plate の解析に失敗: {e}"))?
-            } else {
-                SlabPlate {
-                    section: parse_optional_section_id(value.get("section"))?,
-                    loads: match value.get("loads") {
-                        None | Some(serde_json::Value::Null) => Vec::new(),
-                        Some(v) => serde_json::from_value(v.clone())
-                            .map_err(|e| format!("loads の解析に失敗: {e}"))?,
-                    },
-                    usage: parse_optional_enum::<SlabUsage>(value.get("usage"))?,
-                    method: parse_distribution_method(value.get("method"))?,
-                    one_way: parse_optional_enum::<OneWayDir>(value.get("one_way"))?,
-                }
-            };
+            let plate = parse_slab_plate(value)?;
             Ok(Box::new(AddAttachedSlab {
                 anchor,
                 extent,
@@ -480,6 +452,24 @@ pub fn apply_edit(
             format!("{label} は適用されませんでした（参照検証等で Noop）")
         },
     })
+}
+
+fn parse_slab_plate(value: &serde_json::Value) -> Result<SlabPlate, String> {
+    if let Some(v) = value.get("plate") {
+        serde_json::from_value(v.clone()).map_err(|e| format!("plate の解析に失敗: {e}"))
+    } else {
+        Ok(SlabPlate {
+            section: parse_optional_section_id(value.get("section"))?,
+            loads: match value.get("loads") {
+                None | Some(serde_json::Value::Null) => Vec::new(),
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("loads の解析に失敗: {e}"))?,
+            },
+            usage: parse_optional_enum::<SlabUsage>(value.get("usage"))?,
+            method: parse_distribution_method(value.get("method"))?,
+            one_way: parse_optional_enum::<OneWayDir>(value.get("one_way"))?,
+        })
+    }
 }
 
 /// `command` がトップレベルに無いとき、ネストした `body` をコマンド JSON とみなす。

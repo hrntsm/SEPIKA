@@ -303,10 +303,11 @@ pub fn quantity_takeoff_json(
             })
             .collect(),
     };
+    let totals = q.totals();
     Ok(json!({
-        "status": q.totals().rebar_status(),
+        "status": totals.rebar_status(),
         "rows": rows,
-        "totals": totals_json(&q.totals()),
+        "totals": totals_json(&totals),
         "notes": q.notes,
     }))
 }

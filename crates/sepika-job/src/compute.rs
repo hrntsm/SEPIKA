@@ -187,6 +187,16 @@ pub fn compute_pushover(
     Ok(result)
 }
 
+fn first_angular_frequency(analysis: &Analysis<'_>) -> JobResult<f64> {
+    let modal = analysis.eigen(1).map_err(dynamic_solve_error)?;
+    match modal.omega2.first() {
+        Some(&w2) if w2 > 0.0 => Ok(w2.sqrt()),
+        _ => Err(JobError::InvalidInput(
+            "固有値が得られず減衰を設定できません。".to_string(),
+        )),
+    }
+}
+
 /// 時刻歴応答解析。減衰モデル・積分法は `cfg` に従う。前処理を通したモデルを渡すこと。
 pub fn compute_time_history(
     model: sepika_core::model::Model,
@@ -218,17 +228,7 @@ pub fn compute_time_history(
     let analysis = Analysis::prepare(&model).map_err(|e| JobError::Prepare(e.to_string()))?;
     let damping = match cfg.th_damping_model {
         ThDampingModel::StiffnessProportional => {
-            let omega1 = match analysis.eigen(1) {
-                Ok(modal) => match modal.omega2.first() {
-                    Some(&w2) if w2 > 0.0 => w2.sqrt(),
-                    _ => {
-                        return Err(JobError::InvalidInput(
-                            "固有値が得られず減衰を設定できません。".to_string(),
-                        ))
-                    }
-                },
-                Err(e) => return Err(dynamic_solve_error(e)),
-            };
+            let omega1 = first_angular_frequency(&analysis)?;
             sepika_solver::dynamic::damping::Damping::StiffnessProportional {
                 h: cfg.th_damping,
                 omega: omega1,
@@ -278,17 +278,7 @@ pub fn compute_time_history(
             sepika_solver::dynamic::damping::Damping::modal(&modal.shapes, &omegas, &ratios)
         }
         ThDampingModel::TangentAlpha1 | ThDampingModel::TangentH1 => {
-            let omega1 = match analysis.eigen(1) {
-                Ok(modal) => match modal.omega2.first() {
-                    Some(&w2) if w2 > 0.0 => w2.sqrt(),
-                    _ => {
-                        return Err(JobError::InvalidInput(
-                            "固有値が得られず減衰を設定できません。".to_string(),
-                        ))
-                    }
-                },
-                Err(e) => return Err(dynamic_solve_error(e)),
-            };
+            let omega1 = first_angular_frequency(&analysis)?;
             if cfg.th_damping_model == ThDampingModel::TangentAlpha1 {
                 sepika_solver::dynamic::damping::Damping::StiffnessProportional {
                     h: cfg.th_damping,

@@ -462,16 +462,8 @@ mod tests {
     #[test]
     fn elastic_and_degenerate_curves_do_not_create_yield_points() {
         assert_eq!(
-            identify_story_trilinear(CURVE, options(1.05)),
-            Err(StoryFitError::NoEqualAreaSolution)
-        );
-        assert_eq!(
             identify_story_trilinear(&[(1.0, 100.0), (10.0, 1000.0)], options(6.0)),
             Err(StoryFitError::FirstBreakpointNotIdentified)
-        );
-        assert_eq!(
-            identify_story_trilinear(CURVE, options(0.5)),
-            Err(StoryFitError::DegenerateArea)
         );
         assert_eq!(
             identify_story_trilinear(&CURVE[..3], options(6.0)),

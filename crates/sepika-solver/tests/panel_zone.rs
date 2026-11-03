@@ -654,7 +654,7 @@ fn spmv(k: &faer::sparse::SparseColMat<usize, f64>, u: &[f64]) -> Vec<f64> {
 /// あわせて、パネルの内力が「部材がパネル自由度へ寄せるモーメント」と符号反転で
 /// 釣り合う（資料 (2.10.3-3)）ことも確認する。
 #[test]
-fn test_panel_shear_angle_matches_closed_form() {
+fn test_panel_shear_angle_and_dof_equilibrium_match_closed_form() {
     let model = l_frame(true);
     let (ve, k_panel) = panel_stiffness(&model);
     assert!(ve.iter().all(|v| *v > 0.0) && k_panel.iter().all(|k| *k > 0.0));
@@ -695,20 +695,8 @@ fn test_panel_shear_angle_matches_closed_form() {
             "成分 {i}: M={mi} は K·γ={expected} と一致すべき"
         );
     }
-}
-
-/// 3: 釣り合い（資料 (2.10.3-3)）。
-///
-/// パネル自由度には外力が加わらないため、平衡方程式の当該行の残差
-/// `(K·u − f)` は数値誤差の範囲で 0 でなければならない。これは
-/// 「パネル要素の `M^p_S` ＋ 各部材が寄せる `M^i_S` の総和が 0」と同値である。
-#[test]
-fn test_panel_dof_equilibrium_residual_is_zero() {
-    let model = l_frame(true);
-    let dofmap = DofMap::build(&model);
     let k = sepika_solver::common::assemble::assemble_global_k(&model, &dofmap);
     let f = sepika_solver::common::assemble::assemble_global_f(&model, &dofmap, LoadCaseId(1));
-    let u = solve_free(&model, &dofmap);
     let ku = spmv(&k, &u);
 
     let gx = dofmap.panel_dof(0, 0).expect("γX") as usize;

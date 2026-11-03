@@ -268,7 +268,7 @@ fn attr_dispositions(
     v
 }
 
-/// 節点と階を id 正規化してモデルへ格納する（階所属の解決・補完を含む）。
+/// 節点と階を id 正規化してモデルへ格納する（階所属の解決を含む）。
 fn build_nodes_and_stories(
     model: &mut Model,
     mut raw_nodes: Vec<RawNode>,
@@ -357,15 +357,6 @@ fn build_nodes_and_stories(
                 .map(StoryId),
             support_spring: None,
         });
-    }
-
-    for node in &model.nodes {
-        if let Some(sid) = node.story {
-            let list = &mut model.stories[sid.index()].node_ids;
-            if !list.contains(&node.id) {
-                list.push(node.id);
-            }
-        }
     }
 }
 

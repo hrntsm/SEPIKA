@@ -7,7 +7,7 @@ use sepika_core::model::{
 use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 const LENGTH_MM: f64 = 3000.0;
 
-fn rebar(count: u32) -> RcRectColumnRebar {
+pub fn rebar(count: u32) -> RcRectColumnRebar {
     RcRectColumnRebar {
         main_dia: if count == 0 { 0.0 } else { 19.0 },
         x: if count == 0 { vec![] } else { vec![count] },
@@ -22,7 +22,7 @@ fn rebar(count: u32) -> RcRectColumnRebar {
     }
 }
 
-fn fixture(shape: Option<SectionShape>, category: MaterialCategory) -> Model {
+pub fn fixture(shape: Option<SectionShape>, category: MaterialCategory) -> Model {
     let mut section = shape.map_or_else(
         || Section {
             area: 12345.0,

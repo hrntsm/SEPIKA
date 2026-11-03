@@ -7,10 +7,8 @@
 //! - (b) 非線形時刻歴（`NonlinearThCfg` 既定、集中ばね系・`ForceRegime::Auto`）
 //!
 //! 各ケースは 3 回実行して最小値を採用する（OS ノイズの影響を減らすため）。
-//! さらに、詳細記録（[`sepika_solver::dynamic::timehistory::ThRecording`]）を
-//! 間引く `record_every` を極端に大きくした場合との差分から、記録コストの
-//! 概算を分離する（record_every=None は自動間引き〜1000フレーム、
-//! 大きな値を渡すと最終フレームのみが記録される＝記録をほぼ無効化した近似）。
+//! 大きな `record_every` と通常設定の時間差を、フレーム保存コストの概算として比較する。
+//! 大きな値でも初期・最終フレームは保持し、包絡・層ピークの集計は毎step行う。
 //!
 //! ```bash
 //! cargo run -p sepika-solver --example th_bench --release
@@ -34,11 +32,7 @@ use sepika_solver::dynamic::timehistory::{
 #[path = "common/mod.rs"]
 mod common;
 
-/// 記録をほぼ無効化した近似として使う `record_every`。ステップ数を大きく
-/// 上回る値を渡すと、フレーム記録は最終ステップのみになる
-/// （`ThRecorder::record_step` は `step % record_every == 0 || step == n_steps` の
-/// ときだけフレームを積むため）。API に「記録無効化」の専用フラグはないため、
-/// この近似を用いる。
+/// 初期・最終以外のフレーム保存を省くための記録間隔。毎stepの包絡・ピーク集計は残る。
 const RECORD_EVERY_DISABLED: usize = 1_000_000_000;
 
 /// nx×ny スパン・nz 層の S造立体ラーメン（柱・X/Y 大梁）を生成する。

@@ -35,7 +35,7 @@ pub struct AnalysisSettings {
     pub lumped_mass_type: sepika_solver::dynamic::lumped_mass::LumpedMassType,
     /// 質点系モデル生成: 第1折点判定の割線剛性比（0..1、既定 0.75）。
     pub lumped_secant_ratio: f64,
-    /// 等面積を評価する全層間変形角 [rad]。既定は1/200。
+    /// 等面積を評価する全層間変形角 `[rad]`。既定は1/200。
     pub lumped_target_drift_angle: f64,
     /// 時刻歴: 減衰比
     pub th_damping: f64,

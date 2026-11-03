@@ -136,15 +136,7 @@ fn slab_cooperating_width(
     if !matched || bf <= b {
         return None;
     }
-    let t = if t_used > 0.0 {
-        t_used
-    } else {
-        model.slab_thickness
-    };
-    if t <= 0.0 {
-        return None;
-    }
-    Some((bf, t))
+    Some((bf, t_used))
 }
 
 #[derive(Clone, Copy, Debug)]
