@@ -694,7 +694,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
 | 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像と現行式の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、新規数値試験なし | 原典 | 🔶（N/A/F・式の採否未確定、Validation未） |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
-| 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（釣合い残差がゼロ）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
+| 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_and_dof_equilibrium_match_closed_form`（同じ解でM=K·γと釣合い残差ゼロを別assertで確認）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
 | 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
 | 7l | 仕口パネルの方向別接合面距離 | sepika-core / sepika-element / sepika-job / sepika-solver / sepika-app | panel_zone.rs / panel_gen.rs / prepare.rs / modeling.rs / result_contract_tests.rs | [Issue759の公開再現・独立距離・釣合いと仕事](仕口パネル接合面距離_Issue759_2026-10.md) | 横断 | 🔶（Verification、Validation未） |
 | 892 | 静的仕口パネルの実断面積 | sepika-design-jp / sepika-core / sepika-app | joint_wiring/steel_panel.rs・joint_wiring/tests.rs・result_contract.rs・result_contract_tests.rs | [独立値と公開入口の対応](仕口パネル静的実断面積_Issue892_確認記録.md#要素から証拠への索引) | 横断 | 🔶（算術Verification、原典採用・Validation未） |
@@ -888,3 +888,7 @@ RC壁の二方式とGUI/採用run値/失効の横断入口は[Issue572検証](RC
 [原典照合・要素→確認索引](RC材料構造細則_Issue881_原典照合.md)の原典対応表と独立数値表を参照。公開材料関数の一時probeと、柱のソース読取を区別する。法令表との残る相違は原典照合リストを参照し、鉄筋径・未指定強度は[#947の追加調査](RC鉄筋径と未指定強度_Issue947_照合記録.md)の未確認・再判定条件へ接続する。原典限定照合を是正済みと扱わない。状態は🔶。
 
 USD685は[#945の認定条件照合](USD685主筋_Issue945_認定条件照合.md)で、MSRB-0117の長期195に対する現行215の差と、A/B・用途・設計条件・入力経路を区別した。是正は#991、他認定と現在の有効性・Fc/定着/付着条件は再判定条件に残す。補強筋の未対応は維持し、状態は🔶。
+
+## 共有入力と反復処理の整理（#1059）
+
+[現役の保証と信頼境界](共有入力と反復処理の整理_Issue1059.md)に、非App38候補と単位誤リンクの整理、非mcp/mcp構成、独立質量期待値と残るValidationの境界を記録する。固定SHA・過去実測・原典未照合の状態は保持する。

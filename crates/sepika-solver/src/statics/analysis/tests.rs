@@ -2099,7 +2099,7 @@ fn test_crossing_beams_reported_as_warning() {
     );
 }
 
-/// どの床領域にも属さない小梁は警告し、解析は止めない。
+/// 所属未解決の小梁はエラーで解析を拒否し、取付き線で支持される片持ち小梁は受理する。
 #[test]
 fn test_model_issues_warns_unassigned_beam() {
     use super::precheck::{model_issues, precheck_model, IssueSeverity};
@@ -3159,7 +3159,7 @@ fn test_model_issues_warns_ignored_slit_without_boundary_nodes() {
     assert_eq!(hit.severity, IssueSeverity::Warning, "{}", hit.message);
 }
 
-/// 4 節点でない壁版・断面未割当の壁版は警告し、解析は止めない。
+/// 非4節点壁版の存在自体は警告せず、断面未割当を警告し、壁厚未解決なら解析を拒否する。
 #[test]
 fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
     use super::precheck::{model_issues, precheck_model, IssueSeverity};

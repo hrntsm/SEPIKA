@@ -6,7 +6,7 @@
 
 ## 質量fixtureの実参照
 
-`wall::wall_element::tests::test_wall_mass_preserves_section_mass_with_rebar`は、`make_wall_model`が既に割り当てたSD345/ID1を使う。vec index2へ追加されて参照されなかった重複ID1材料と同じ節点順の再代入を除去した。実参照した鉄筋密度が正であることを確認し、元の4000×3000×150、筋比0.0025とLumped質量の独立体積値・相対1e-12を保持する。鉄筋密度7.85e-9による追加質量を誤って足すと0.035325（内部質量単位、35.325 kg）の差が出るため、二重加算はゼロ密度に隠れない。
+`wall::wall_element::tests::test_wall_mass_and_column_properties_preserve_section_mass_with_rebar`は、`make_wall_model`が既に割り当てたSD345/ID1を使う。vec index2へ追加されて参照されなかった重複ID1材料と同じ節点順の再代入を除去した。実参照した鉄筋密度が正であることを確認し、元の4000×3000×150、筋比0.0025とLumped質量の独立体積値・相対1e-12を保持する。鉄筋密度7.85e-9による追加質量を誤って足すと0.035325（内部質量単位、35.325 kg）の差が出るため、二重加算はゼロ密度に隠れない。
 
 ## 12-D22側柱の独立容量
 
@@ -61,3 +61,5 @@ check-docsはsummary141 / links860 / impl refs419。開発者文書の相対リ�
 関連するAppの`viewer/modeling.rs`でも、「側柱がなくても耐震壁として描く」試験のRustdocからQu代用に関する旧説明1行だけを除去した。描画分類の契約行と試験本体は完全保持し、弾性壁の分類を変えていない。製品正本の弾性分類の説明と過去レビュー記事は保持する。
 
 AppのRustdoc1行削除後もfmt・diffcheck・check-docsは全exit0。HEADとの差分が当該1行だけであることを比較し、App全suiteは繰り返していない。crates/docsの同じ旧Qu説明は検索0件。
+
+単位長質量・両回転慣性・極慣性とConsistent/Lumped差の同一fixture統合は[共有入力の現役対応表](共有入力と反復処理の整理_Issue1059.md#現役の保証)を参照する。元の体積質量期待値と公差、実参照鉄筋密度の観測を保持する。

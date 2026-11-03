@@ -108,7 +108,7 @@ impl StaticStiffness {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticOnce {
-    /// 性能曲線と同じ物理節点力・支持反力による全層せん断 [N]。要素種別によらず X/Y 順。
+    /// 性能曲線と同じ物理節点力・支持反力による全層せん断 `[N]`。要素種別によらず X/Y 順。
     pub story_shears: Option<[Vec<f64>; 2]>,
     /// 自立壁の付加剛性を反映したRs評価専用の節点変位 [mm, rad]。Errは評価不能理由。
     /// Noneは評価未実施であり、通常変位で補完しない。

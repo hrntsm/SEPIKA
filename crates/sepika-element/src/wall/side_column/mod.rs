@@ -71,10 +71,6 @@ mod tests {
     /// 面内曲げ面（解放対象）は縮約後にせん断・モーメントとも負担しない
     /// （壁面内方向は両端ピン＝機構）ことを、局所=グローバルとなる恒等軸で確認する。
     ///
-    /// `BeamElement::local_stiffness` は端部固定条件を巨大ペナルティばねの静的縮約で
-    /// 近似する（`condense_end_springs`）ため、縮約前後の値は理論値と厳密には一致せず
-    /// 相対 1e-8 程度の誤差を持つ。「ゼロになる」判定はこの誤差の影響を受けないよう、
-    /// 非解放面の公称剛性（12·az / 12·ay）を基準とした相対値で行う。
     #[test]
     fn test_release_zeroes_inplane_bending_plane() {
         let model = Model::default();
