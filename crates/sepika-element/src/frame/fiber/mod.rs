@@ -1072,6 +1072,15 @@ impl FiberBeam {
         for (a, &index) in indices.iter().enumerate() {
             self.trial_int[index] -= predictor[a];
         }
+        let merit_scales: Vec<_> = (0..n)
+            .map(|a| initial_kbb[a * n + a].abs().sqrt())
+            .collect();
+        if merit_scales
+            .iter()
+            .any(|scale| !scale.is_finite() || *scale == 0.0)
+        {
+            return Err("外側端部接続の初期剛性尺度が非正または非有限です".into());
+        }
         for _ in 0..MAX_ITER {
             let u_elem = self.elem_disp(&u_flex);
             self.update_trial_state(&u_elem)?;
@@ -1138,8 +1147,50 @@ impl FiberBeam {
             let du = lu
                 .solve(&r[..n], 1)
                 .map_err(|error| format!("端部接続の外側釣合い: {error}"))?;
-            for (k, d) in du[..n].iter().enumerate() {
-                self.trial_int[indices[k]] -= d;
+            let merit: f64 = (0..n).map(|k| (r[k] / merit_scales[k]).powi(2)).sum();
+            if !merit.is_finite() {
+                return Err("外側端部接続の残差評価が非有限です".into());
+            }
+            let initial_int = self.trial_int.clone();
+            let initial_eta = self.hinge.trial_eta;
+            let initial_plastic = self.hinge.trial_plastic;
+            let mut accepted = false;
+            let mut step = 1.0;
+            for _ in 0..30 {
+                for (k, &index) in indices.iter().enumerate() {
+                    self.trial_int[index] = initial_int[index] - step * du[k];
+                }
+                // 棄却した候補の局所解を次の初期値にすると、線探索の比較条件が変わる。
+                self.hinge.trial_eta = initial_eta;
+                self.hinge.trial_plastic = initial_plastic;
+                let candidate_u = self.elem_disp(&u_flex);
+                if self.update_trial_state(&candidate_u).is_ok() {
+                    let candidate_force = self.elem_internal_force(&candidate_u);
+                    let trial_merit: f64 = indices
+                        .iter()
+                        .enumerate()
+                        .map(|(k, &index)| {
+                            let release = &self.releases[index];
+                            let residual = candidate_force[release.dof]
+                                + release.spring * (candidate_u[release.dof] - u_flex[release.dof])
+                                - qf[release.dof];
+                            (residual / merit_scales[k]).powi(2)
+                        })
+                        .sum();
+                    if trial_merit < merit {
+                        accepted = true;
+                        break;
+                    }
+                }
+                step *= 0.5;
+            }
+            if !accepted {
+                // 応力が不連続に変わる材料分岐では、残差単調減少だけで反復を打ち切れない。
+                for (k, &index) in indices.iter().enumerate() {
+                    self.trial_int[index] = initial_int[index] - du[k];
+                }
+                self.hinge.trial_eta = initial_eta;
+                self.hinge.trial_plastic = initial_plastic;
             }
         }
         Err("端部接続の外側釣合いが20反復で収束しません".into())

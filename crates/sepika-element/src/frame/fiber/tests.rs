@@ -2947,11 +2947,15 @@ fn 降伏後もピン端のモーメント解放が保たれる() {
     let mut model = build_test_model(None);
     model.elements[0].end_cond = [EndCondition::Pinned, EndCondition::Fixed];
     model.materials[0].fy = Some(235.0);
-    let ctx = Ctx { model: &model };
+    postyield_pinned_member(&model);
+}
+
+fn postyield_pinned_member(model: &Model) -> FiberBeam {
+    let ctx = Ctx { model };
     let mut fb = FiberBeam::with_plastic_zone(
         &model.elements[0],
-        &model,
-        crate::factory::plastic_zone_length(&model.elements[0], &model),
+        model,
+        crate::factory::plastic_zone_length(&model.elements[0], model),
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
@@ -2982,6 +2986,99 @@ fn 降伏後もピン端のモーメント解放が保たれる() {
         k.get(7, 7),
         k0.get(7, 7)
     );
+    fb
+}
+
+#[test]
+fn ピン端の500角断面は降伏後の釣合いと接線と履歴を保持する() {
+    let mut model = build_release_model([EndCondition::Pinned, EndCondition::Fixed]);
+    model.materials[0].fy = Some(235.0);
+    let ctx = Ctx { model: &model };
+    let mut member = postyield_pinned_member(&model);
+    assert_eq!(member.hinge.lp, 250.0);
+    let mut previous = [0.0; 12];
+    previous[7] = 80.0;
+    for target_mm in [78.0, 60.0, 0.0, -40.0, -80.0, -60.0, 0.0, 80.0] {
+        let committed = member.snapshot_state();
+        let checkpoint = member.serialize_checkpoint();
+        let committed_u = previous;
+        let target = {
+            let mut u = previous;
+            u[7] = target_mm;
+            u
+        };
+        super::constitutive_tests::set_displacement(
+            &mut member,
+            target,
+            &mut previous,
+            false,
+            &ctx,
+        );
+        let force = member.internal_force(&ctx);
+        let tangent = member.tangent_stiffness(&ctx);
+        let trial = member.serialize_checkpoint();
+        let raw = member.elem_internal_force(&member.elem_disp(&member.flex_disp()));
+        for (end, point) in member.gauss_points.iter().enumerate() {
+            for a in 0..3 {
+                let q = HINGE_SIGN[end * 3 + a] * raw[HINGE_SLOTS[end * 3 + a]];
+                assert_relative_eq!(
+                    q,
+                    point.cached_force[a],
+                    epsilon = if a == 0 {
+                        1e-5
+                    } else {
+                        1e-10 * raw[11].abs().max(1.0)
+                    },
+                    max_relative = 1e-10
+                );
+            }
+        }
+        assert!(raw[4].abs() < 1e-10 * raw[11].abs().max(1.0));
+        assert!(raw[5].abs() < 1e-10 * raw[11].abs().max(1.0));
+        assert!(force.data[5].abs() < 1e-5);
+        for j in [6, 7, 8, 10, 11] {
+            let step = if j < 9 { 1e-4 } else { 1e-7 };
+            let mut forces = Vec::new();
+            for sign in [-1.0, 1.0] {
+                member.restore_state(committed.as_ref());
+                previous = committed_u;
+                let mut u = target;
+                u[j] += sign * step;
+                super::constitutive_tests::set_displacement(
+                    &mut member,
+                    u,
+                    &mut previous,
+                    false,
+                    &ctx,
+                );
+                forces.push(member.internal_force(&ctx));
+            }
+            for i in 0..12 {
+                let derivative = (forces[1].data[i] - forces[0].data[i]) / (2.0 * step);
+                assert_relative_eq!(
+                    tangent.get(i, j),
+                    derivative,
+                    epsilon = 0.5,
+                    max_relative = 2e-6
+                );
+            }
+        }
+        member.deserialize_checkpoint(&trial).unwrap();
+        assert_eq!(member.internal_force(&ctx).data, force.data);
+        assert_eq!(member.tangent_stiffness(&ctx).data, tangent.data);
+        member.revert_state();
+        assert_eq!(member.serialize_checkpoint(), checkpoint);
+        previous = committed_u;
+        super::constitutive_tests::set_displacement(
+            &mut member,
+            target,
+            &mut previous,
+            false,
+            &ctx,
+        );
+        assert_eq!(member.serialize_checkpoint(), trial);
+        member.commit_state();
+    }
 }
 
 /// ねじり剛性を持たない部材（J=0）ではピン端でも rx を解放しない

@@ -47,7 +47,7 @@ fn similar_bilinear_member(scale: f64, y_offset: f64, z_offset: f64) -> FiberBea
     )
 }
 
-fn set_displacement(
+pub(super) fn set_displacement(
     member: &mut dyn ElementBehavior,
     u: [f64; 12],
     previous: &mut [f64; 12],

@@ -63,33 +63,57 @@ pub fn integrate_fibers(
     let mut my = 0.0;
     let mut mz = 0.0;
     let mut d = [[0.0; 3]; 3];
+    let mut force_error = [0.0; 3];
+    let mut stiffness_error = [[0.0; 3]; 3];
 
     for (i, fiber) in sec.fibers.iter().enumerate() {
         let (sigma, et) = per_fiber(i, fiber);
         let a = fiber.area;
 
-        n += sigma * a;
-        my += sigma * a * fiber.z;
-        mz += -sigma * a * fiber.y;
+        add_compensated(&mut n, &mut force_error[0], sigma * a);
+        add_compensated(&mut my, &mut force_error[1], sigma * a * fiber.z);
+        add_compensated(&mut mz, &mut force_error[2], -sigma * a * fiber.y);
 
         let ea = et * a;
         let ey = ea * fiber.y;
         let ez = ea * fiber.z;
 
-        d[0][0] += ea;
-        d[0][1] += ez;
-        d[0][2] += -ey;
+        add_compensated(&mut d[0][0], &mut stiffness_error[0][0], ea);
+        add_compensated(&mut d[0][1], &mut stiffness_error[0][1], ez);
+        add_compensated(&mut d[0][2], &mut stiffness_error[0][2], -ey);
 
-        d[1][0] += ez;
-        d[1][1] += ez * fiber.z;
-        d[1][2] += -ey * fiber.z;
+        add_compensated(&mut d[1][0], &mut stiffness_error[1][0], ez);
+        add_compensated(&mut d[1][1], &mut stiffness_error[1][1], ez * fiber.z);
+        add_compensated(&mut d[1][2], &mut stiffness_error[1][2], -ey * fiber.z);
 
-        d[2][0] += -ey;
-        d[2][1] += -ey * fiber.z;
-        d[2][2] += ey * fiber.y;
+        add_compensated(&mut d[2][0], &mut stiffness_error[2][0], -ey);
+        add_compensated(&mut d[2][1], &mut stiffness_error[2][1], -ey * fiber.z);
+        add_compensated(&mut d[2][2], &mut stiffness_error[2][2], ey * fiber.y);
     }
 
-    (SectionForce { n, my, mz }, SectionStiffness { d })
+    for i in 0..3 {
+        for j in 0..3 {
+            d[i][j] += stiffness_error[i][j];
+        }
+    }
+    (
+        SectionForce {
+            n: n + force_error[0],
+            my: my + force_error[1],
+            mz: mz + force_error[2],
+        },
+        SectionStiffness { d },
+    )
+}
+
+fn add_compensated(sum: &mut f64, error: &mut f64, value: f64) {
+    let next = *sum + value;
+    *error += if sum.abs() >= value.abs() {
+        (*sum - next) + value
+    } else {
+        (value - next) + *sum
+    };
+    *sum = next;
 }
 
 /// 矩形断面をファイバに分割する。`material` は材料種別タグ。
@@ -128,6 +152,32 @@ mod tests {
         (0..sec.fibers.len())
             .map(|_| Box::new(Bilinear::new(205000.0, 235.0, 0.01)) as Box<dyn UniaxialMaterial>)
             .collect()
+    }
+
+    #[test]
+    fn cancelling_fiber_contributions_retain_small_force_and_coupling() {
+        let sec = FiberSection {
+            fibers: [1e16, 1.0, -1e16, 1.0]
+                .into_iter()
+                .map(|y| Fiber {
+                    y,
+                    z: 2.0,
+                    area: 1.0,
+                    material: 0,
+                })
+                .collect(),
+        };
+        let (force, stiffness) = integrate_fibers(&sec, |_, _| (1.0, 1.0));
+        assert_eq!(force.n, 4.0);
+        assert_eq!(force.my, 8.0);
+        assert_eq!(force.mz, -2.0);
+        assert_eq!(stiffness.d[0][2], -2.0);
+        assert_eq!(stiffness.d[1][2], -4.0);
+        assert_eq!(stiffness.d[2][0], -2.0);
+        assert_eq!(stiffness.d[2][1], -4.0);
+        let (force, _) = integrate_fibers(&sec, |i, _| ([1e16, 1.0, -1e16, 1.0][i], 1.0));
+        assert_eq!(force.n, 2.0);
+        assert_eq!(force.my, 4.0);
     }
 
     #[test]
