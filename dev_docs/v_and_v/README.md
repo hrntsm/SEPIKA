@@ -530,7 +530,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [フィレット_角R_断面整合_Issue413_2026-10.md](フィレット_角R_断面整合_Issue413_2026-10.md) | H・角形 CFT の領域性能、公開耐力・実要素、重量質量、項目別算定元、設計ゲートと公開結果。受入 P2 の Truss 質量源の回帰を含む | ✅ |
 | [鋼材名の厳密な強度割増認識_Issue599_2026-10.md](鋼材名の厳密な強度割増認識_Issue599_2026-10.md) | 対応済名称と自動割増・factory/曲げ/せん断・旧解析版7のOVIKA失効 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | [符号付き単純梁反力_Issue633_2026-10.md](符号付き単純梁反力_Issue633_2026-10.md) | 床／story／elementの符号付き反力・独立積分・利用側・adapter・旧成果失効 | 🔶（直接Verification、原本／Validation・freshレビュー・最終CIは後続） |
-| [保存成果の計算契約版_Issue587_2026-10.md](保存成果の計算契約版_Issue587_2026-10.md) | OVIKA解析/検定版・実入力・部分再実行・GUI/CSV・直接床板/小梁 | 🔶（直接Verification、freshレビュー・最終全構成は後続。MCP別ストアは#589） |
+| [保存成果の計算契約版_Issue587_2026-10.md](保存成果の計算契約版_Issue587_2026-10.md) | OVIKA解析/検定版・実入力・部分再実行・GUI/CSV・直接床板/小梁。[同一fixture回帰の現役対応](保存成果の計算契約版_Issue587_2026-10.md#現役の同一fixture回帰の対応1059) | 🔶（直接Verification、freshレビュー・最終全構成は後続。MCP別ストアは#589） |
 | [MCP保存成果の生成元_Issue589_2026-10.md](MCP保存成果の生成元_Issue589_2026-10.md) | 静的/固有値の開始入力・契約版・公開path/hash・stale・保存失敗保持 | 🔶（直接Verification、最終ゲートは[PR #651](https://github.com/hrntsm/SEPIKA/pull/651)） |
 | [静的検定の生成入力_Issue602_2026-10.md](静的検定の生成入力_Issue602_2026-10.md) | 同版の検定入力・部分解析非復活・独立0.8→1.6・GUI/CSV/OVIKA/Undo/失敗 | 🔶（直接Verification、freshレビュー・最終全CIは進行担当が確認） |
 | [OVIKA_named_MessagePack_2026-10.md](OVIKA_named_MessagePack_2026-10.md) | 4 payload の named 保存・復元、順序独立・default・破損・モデル検証、実 STB モデル単体の codec 時間と最終 OVIKA サイズ | ✅ |
