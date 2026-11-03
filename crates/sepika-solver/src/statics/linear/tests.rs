@@ -1928,7 +1928,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
 /// 当該梁が `member_forces` から丸ごと欠落し、応力図・検定比図に
 /// 何も表示されなくなる（RC 基礎梁など剛床に載らない梁だけが残る）。
 #[test]
-fn test_rigid_floor_beam_member_forces_are_recovered() {
+fn test_rigid_floor_linear_results_and_missing_force_diagnostics() {
     let model = rigid_floor_portal(true);
     let res = linear_static_once(&model, LoadCaseId(1)).unwrap();
 
@@ -1965,18 +1965,10 @@ fn test_rigid_floor_beam_member_forces_are_recovered() {
         m_mid.abs() > m_simple * 0.1 && m_mid.abs() < m_simple,
         "梁中央の曲げが妥当な範囲にない: M={m_mid} (wL²/8={m_simple})"
     );
-}
-
-/// 自由度を拘束しない剛床（スレーブなしの `Constraint::RigidDiaphragm`）を加えても、
-/// 線形解析の結果が一切変わらないこと。要素種別が `ForceRegime` の剛床判定に依存すると、
-/// 材端ばねが直列に入って梁の曲げ剛性が落ち、応力・変形が変わってしまう。
-#[test]
-fn test_rigid_floor_definition_does_not_change_linear_result() {
     let without = linear_static_once(&rigid_floor_portal(false), LoadCaseId(1)).unwrap();
-    let with = linear_static_once(&rigid_floor_portal(true), LoadCaseId(1)).unwrap();
 
-    assert_eq!(without.member_forces.len(), with.member_forces.len());
-    for ((id_a, mf_a), (id_b, mf_b)) in without.member_forces.iter().zip(&with.member_forces) {
+    assert_eq!(without.member_forces.len(), res.member_forces.len());
+    for ((id_a, mf_a), (id_b, mf_b)) in without.member_forces.iter().zip(&res.member_forces) {
         assert_eq!(id_a, id_b);
         assert_eq!(mf_a.at.len(), mf_b.at.len());
         for ((xi_a, fa), (xi_b, fb)) in mf_a.at.iter().zip(&mf_b.at) {
@@ -1992,7 +1984,7 @@ fn test_rigid_floor_definition_does_not_change_linear_result() {
             }
         }
     }
-    for (ua, ub) in without.disp.iter().zip(&with.disp) {
+    for (ua, ub) in without.disp.iter().zip(&res.disp) {
         for k in 0..6 {
             assert!(
                 (ua[k] - ub[k]).abs() <= ua[k].abs() * 1e-12 + 1e-12,
@@ -2002,15 +1994,6 @@ fn test_rigid_floor_definition_does_not_change_linear_result() {
             );
         }
     }
-}
-
-/// 線材の部材内力が回収できないモデルは、黙って結果から欠落させず解析エラーにする
-/// （[`ensure_line_member_forces`]）。要素実装が `recover_forces` を持たないと、
-/// 応力図・断面検定・接合部検定の入力から当該部材が無言で消えるため。
-#[test]
-fn test_ensure_line_member_forces_detects_missing() {
-    let model = rigid_floor_portal(true);
-    let res = linear_static_once(&model, LoadCaseId(1)).unwrap();
 
     // 全線材が揃っていれば OK。
     assert!(ensure_line_member_forces(&model, &res.member_forces).is_ok());

@@ -742,7 +742,6 @@ mod tests {
             let mut mat = mk(name, Some(1.07));
             mat.fy = Some(200.0);
             assert_eq!(material_strength_factor_steel(&mat), 1.07, "{name:?}");
-            assert_eq!(mat.fy, Some(200.0));
         }
         // 鋼材文脈: 名称から自動判定。
         assert_eq!(material_strength_factor_steel(&mk("SS400", None)), 1.1);

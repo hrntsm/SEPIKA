@@ -323,21 +323,17 @@ impl WallElement {
         let rc_mass_properties_valid = !is_rc_wall
             || sepika_core::model::validate_section_materials(sec, Some(mat), None, None, None)
                 .is_ok();
-        let section_mass_properties = if is_rc_wall && rc_mass_properties_valid {
-            sepika_core::model::SectionMassProperties::uniform(
-                rc_density,
-                area,
-                lw * t.powi(3) / 12.0,
-                t * lw.powi(3) / 12.0,
-            )
+        let mass_density = if is_rc_wall && rc_mass_properties_valid {
+            rc_density
         } else {
-            sepika_core::model::SectionMassProperties::uniform(
-                mat.density,
-                area,
-                lw * t.powi(3) / 12.0,
-                t * lw.powi(3) / 12.0,
-            )
+            mat.density
         };
+        let section_mass_properties = sepika_core::model::SectionMassProperties::uniform(
+            mass_density,
+            area,
+            lw * t.powi(3) / 12.0,
+            t * lw.powi(3) / 12.0,
+        );
         let column = BeamElement {
             id: data.id,
             e: young * stiffness_scale,
@@ -723,15 +719,12 @@ impl WallElement {
         let Some(geom) = wall_element_geometry(data, model) else {
             return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
         };
-        if model.element_section(data).is_none() {
+        let Some(sec) = model.element_section(data) else {
             return Err(wall_input_error(data, "断面", "断面が設定されていません"));
-        }
+        };
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
             return Err(wall_input_error(data, "断面", "RC壁以外は対象外です"));
         }
-        let Some(sec) = model.element_section(data) else {
-            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
-        };
         if Some(sec.id) != data.section {
             return Err(wall_input_error(data, "断面", "参照IDが破損しています"));
         }
@@ -895,24 +888,21 @@ impl WallElement {
                 data.id.0
             ));
         };
-        if !crate::wall::misc_wall::is_rc_wall(data, model) {
-            if !mat.fy.is_some_and(|fy| fy > 0.0) {
-                return Some(format!(
-                    "鋼板耐震壁 ID {} の材料「{}」に降伏強度 fy が設定されていません。\
-                     材料タブで fy を設定してください。\
-                     保有水平耐力計算では鋼板のせん断降伏 Qy=t·lw·F/√3 で面内せん断を頭打ちにします。",
-                    data.id.0, mat.name
-                ));
-            }
-            if Self::steel_shear_capacity_of(data, model) <= 0.0 {
-                return Some(format!(
-                    "鋼板耐震壁 ID {} の終局せん断強度 Qy を算定できません（算定結果が 0 以下）。\
-                     壁の板厚・壁長さの入力を確認してください。\
-                     保有水平耐力計算では Qy が定まらない壁を弾性として扱えません。",
-                    data.id.0
-                ));
-            }
-            return None;
+        if !mat.fy.is_some_and(|fy| fy > 0.0) {
+            return Some(format!(
+                "鋼板耐震壁 ID {} の材料「{}」に降伏強度 fy が設定されていません。\
+                 材料タブで fy を設定してください。\
+                 保有水平耐力計算では鋼板のせん断降伏 Qy=t·lw·F/√3 で面内せん断を頭打ちにします。",
+                data.id.0, mat.name
+            ));
+        }
+        if Self::steel_shear_capacity_of(data, model) <= 0.0 {
+            return Some(format!(
+                "鋼板耐震壁 ID {} の終局せん断強度 Qy を算定できません（算定結果が 0 以下）。\
+                 壁の板厚・壁長さの入力を確認してください。\
+                 保有水平耐力計算では Qy が定まらない壁を弾性として扱えません。",
+                data.id.0
+            ));
         }
         None
     }
@@ -1882,7 +1872,7 @@ mod tests {
     }
 
     #[test]
-    fn test_wall_mass_preserves_section_mass_with_rebar() {
+    fn test_wall_mass_and_column_properties_preserve_section_mass_with_rebar() {
         let (model, data) = make_wall_model();
         let rebar = model.element_rebar_material(&data).unwrap();
         assert!(rebar.density > 0.0);
@@ -1895,28 +1885,6 @@ mod tests {
             (actual - expected).abs() < expected * 1e-12,
             "actual={actual} expected={expected}"
         );
-    }
-
-    #[test]
-    fn test_rc_wall_mass_uses_fc_standard_unit_weight() {
-        let (mut model, data) = make_wall_model();
-        model.materials[0].density = 2.4e-9;
-        let fc24 = WallElement::try_new(&data, &model)
-            .unwrap()
-            .mass_matrix(MassOption::Lumped);
-        model.materials[0].fc = Some(42.0);
-        let fc42 = WallElement::try_new(&data, &model)
-            .unwrap()
-            .mass_matrix(MassOption::Lumped);
-        let total = |mass: &LocalMat| (0..4).map(|i| mass.get(i * 6, i * 6)).sum::<f64>();
-        assert!(total(&fc42) > total(&fc24));
-        assert!((total(&fc24) / total(&fc42) - 24.0 / 24.5).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_rc_wall_column_mass_properties_use_wall_length() {
-        let (model, data) = make_wall_model();
-        let wall = WallElement::try_new(&data, &model).unwrap();
         let density = sepika_core::units::to_internal::mass_density_from_unit_weight_kn_m3(24.0);
         let t: f64 = 150.0;
         let lw: f64 = 4000.0;
@@ -1936,6 +1904,32 @@ mod tests {
                 .abs()
                 < 1e-12
         );
+        let consistent = wall.mass_matrix(MassOption::Consistent);
+        let lumped = wall.mass_matrix(MassOption::Lumped);
+        let total_consistent: f64 = (0..24)
+            .map(|i| (0..24).map(|j| consistent.get(i, j)).sum::<f64>())
+            .sum();
+        let total_lumped: f64 = (0..24)
+            .map(|i| (0..24).map(|j| lumped.get(i, j)).sum::<f64>())
+            .sum();
+        assert!((total_consistent - total_lumped).abs() < total_lumped * 1e-12);
+        assert!((consistent.get(0, 6) - lumped.get(0, 6)).abs() > 1e-12);
+    }
+
+    #[test]
+    fn test_rc_wall_mass_uses_fc_standard_unit_weight() {
+        let (mut model, data) = make_wall_model();
+        model.materials[0].density = 2.4e-9;
+        let fc24 = WallElement::try_new(&data, &model)
+            .unwrap()
+            .mass_matrix(MassOption::Lumped);
+        model.materials[0].fc = Some(42.0);
+        let fc42 = WallElement::try_new(&data, &model)
+            .unwrap()
+            .mass_matrix(MassOption::Lumped);
+        let total = |mass: &LocalMat| (0..4).map(|i| mass.get(i * 6, i * 6)).sum::<f64>();
+        assert!(total(&fc42) > total(&fc24));
+        assert!((total(&fc24) / total(&fc42) - 24.0 / 24.5).abs() < 1e-12);
     }
 
     #[test]
@@ -1953,22 +1947,6 @@ mod tests {
         let wall = WallElement::try_new(&data, &model).unwrap();
         let expected = model.materials[0].young;
         assert!((wall.column.e - expected).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_wall_consistent_mass_preserves_total_mass_and_differs_from_lumped() {
-        let (model, data) = make_wall_model();
-        let wall = WallElement::try_new(&data, &model).unwrap();
-        let consistent = wall.mass_matrix(MassOption::Consistent);
-        let lumped = wall.mass_matrix(MassOption::Lumped);
-        let total_consistent: f64 = (0..24)
-            .map(|i| (0..24).map(|j| consistent.get(i, j)).sum::<f64>())
-            .sum();
-        let total_lumped: f64 = (0..24)
-            .map(|i| (0..24).map(|j| lumped.get(i, j)).sum::<f64>())
-            .sum();
-        assert!((total_consistent - total_lumped).abs() < total_lumped * 1e-12);
-        assert!((consistent.get(0, 6) - lumped.get(0, 6)).abs() > 1e-12);
     }
 
     #[test]
@@ -2817,40 +2795,21 @@ mod capacity_issue_tests {
     }
 
     pub(super) fn rc_col(with_rebar: bool) -> Section {
-        let shape = if with_rebar {
-            SectionShape::RcColumnRect {
-                b: 600.0,
-                d: 600.0,
-                rebar: RcRectColumnRebar {
-                    main_dia: 22.0,
-                    x: vec![4],
-                    y: vec![3],
-                    cover: 40.0,
-                    hoop: RectColumnHoop {
-                        dia: 10.0,
-                        pitch: 100.0,
-                        legs_x: 2,
-                        legs_y: 2,
-                    },
+        let shape = SectionShape::RcColumnRect {
+            b: 600.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 22.0,
+                x: if with_rebar { vec![4] } else { vec![] },
+                y: if with_rebar { vec![3] } else { vec![] },
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs_x: 2,
+                    legs_y: 2,
                 },
-            }
-        } else {
-            SectionShape::RcColumnRect {
-                b: 600.0,
-                d: 600.0,
-                rebar: RcRectColumnRebar {
-                    main_dia: 22.0,
-                    x: vec![],
-                    y: vec![],
-                    cover: 40.0,
-                    hoop: RectColumnHoop {
-                        dia: 10.0,
-                        pitch: 100.0,
-                        legs_x: 2,
-                        legs_y: 2,
-                    },
-                },
-            }
+            },
         };
         shape.to_section(SectionId(1), "C600".into())
     }

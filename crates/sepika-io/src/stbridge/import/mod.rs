@@ -248,9 +248,10 @@ pub fn read_stbridge_file(path: &std::path::Path) -> Result<String, StbError> {
         return String::from_utf8(bytes[3..].to_vec())
             .map_err(|e| StbError::Decode(format!("UTF-8 デコードエラー: {e}")));
     }
-    if let Ok(s) = String::from_utf8(bytes.clone()) {
-        return Ok(s);
-    }
+    let bytes = match String::from_utf8(bytes) {
+        Ok(s) => return Ok(s),
+        Err(error) => error.into_bytes(),
+    };
     let (cow, _, had_errors) = SHIFT_JIS.decode(&bytes);
     if had_errors {
         return Err(StbError::Decode(

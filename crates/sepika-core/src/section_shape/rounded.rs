@@ -278,10 +278,10 @@ mod tests {
                 let at = props(boundary);
                 let mut previous = [f64::INFINITY; 10];
                 for eps in [0.1_f64, 0.01, 0.001] {
+                    let left = props((boundary - eps).max(0.0));
+                    let right = props(boundary + eps);
                     for j in 0..at.len() {
-                        let error = (props((boundary - eps).max(0.0))[j] - at[j])
-                            .abs()
-                            .max((props(boundary + eps)[j] - at[j]).abs());
+                        let error = (left[j] - at[j]).abs().max((right[j] - at[j]).abs());
                         assert!(error == 0.0 || error < previous[j] * 0.2);
                         previous[j] = error;
                     }

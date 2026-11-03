@@ -869,7 +869,11 @@ fn wall_system_signed_rotated_and_reordered_states_match_independent_reference()
 }
 
 #[test]
-fn rc_wall_physical_reactions_and_linear_work_match_independent_reference() {
+fn rc_wall_stiffness_forces_reactions_and_work_match_independent_reference() {
+    // 区分多項式のせん断流積分As=785670.7448491786 mm²と壁板EIから得た閉式基準。
+    const STIFFNESS_N_MM: f64 = 2_668_279.578_323_177_5;
+    const DISPLACEMENT_MM: f64 = 0.037_477_332_140_300_995;
+
     for kind in KINDS {
         let model = fixture(kind, Dof::Ux, 100_000.0);
         let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
@@ -896,6 +900,44 @@ fn rc_wall_physical_reactions_and_linear_work_match_independent_reference() {
             close(*value, 0.0, 1e-6);
         }
         println!("{kind:?}: RC wall work={} Nmm", work[4]);
+        check_displacements(&result, Dof::Ux, DISPLACEMENT_MM);
+        close(100_000.0 / result.disp[2][0], STIFFNESS_N_MM, 0.003);
+        close(projected_stiffness(&model, Dof::Ux), STIFFNESS_N_MM, 0.003);
+        assert_eq!(result.member_forces.len(), 5);
+        for id in [ElemId(0), ElemId(1)] {
+            let forces = &result
+                .member_forces
+                .iter()
+                .find(|(i, _)| *i == id)
+                .unwrap()
+                .1;
+            assert!(forces.at.len() >= 2);
+            for (_, f) in &forces.at {
+                close(f[1], 0.0, 1e-5);
+                close(f[5], 0.0, 0.01);
+            }
+        }
+        let virtual_column = &result
+            .member_forces
+            .iter()
+            .find(|(id, _)| *id == ElemId(4))
+            .unwrap()
+            .1;
+        assert!(virtual_column.at.len() >= 2);
+        for (xi, f) in &virtual_column.at {
+            close(f[0], 0.0, 1e-5);
+            close(f[1], -100_000.0, 1e-5);
+            close(f[5], 150_000_000.0 - 300_000_000.0 * xi, 0.01);
+        }
+        let wall_force = wall_nodal_force(&model, &result);
+        close(wall_force[2][0] + wall_force[3][0], 100_000.0, 1e-5);
+        close(wall_force[0][0] + wall_force[1][0], -100_000.0, 1e-5);
+        println!(
+            "{kind:?}: lateral K={}, ux={}, Qw={}",
+            100_000.0 / result.disp[2][0],
+            result.disp[2][0],
+            wall_force[2][0] + wall_force[3][0]
+        );
     }
 }
 
@@ -956,55 +998,6 @@ fn steel_plate_and_unreleased_boundary_columns_match_independent_reference() {
             result.disp[2][0],
             forces[4][2][0] + forces[4][3][0],
             work.iter().sum::<f64>()
-        );
-    }
-}
-
-#[test]
-fn rc_wall_lateral_stiffness_and_force_partition_match_independent_reference() {
-    // 区分多項式のせん断流積分As=785670.7448491786 mm²と壁板EIから得た閉式基準。
-    const STIFFNESS_N_MM: f64 = 2_668_279.578_323_177_5;
-    const DISPLACEMENT_MM: f64 = 0.037_477_332_140_300_995;
-    for kind in KINDS {
-        let model = fixture(kind, Dof::Ux, 100_000.0);
-        let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
-        check_displacements(&result, Dof::Ux, DISPLACEMENT_MM);
-        close(100_000.0 / result.disp[2][0], STIFFNESS_N_MM, 0.003);
-        close(projected_stiffness(&model, Dof::Ux), STIFFNESS_N_MM, 0.003);
-        assert_eq!(result.member_forces.len(), 5);
-        for id in [ElemId(0), ElemId(1)] {
-            let forces = &result
-                .member_forces
-                .iter()
-                .find(|(i, _)| *i == id)
-                .unwrap()
-                .1;
-            assert!(forces.at.len() >= 2);
-            for (_, f) in &forces.at {
-                close(f[1], 0.0, 1e-5);
-                close(f[5], 0.0, 0.01);
-            }
-        }
-        let virtual_column = &result
-            .member_forces
-            .iter()
-            .find(|(id, _)| *id == ElemId(4))
-            .unwrap()
-            .1;
-        assert!(virtual_column.at.len() >= 2);
-        for (xi, f) in &virtual_column.at {
-            close(f[0], 0.0, 1e-5);
-            close(f[1], -100_000.0, 1e-5);
-            close(f[5], 150_000_000.0 - 300_000_000.0 * xi, 0.01);
-        }
-        let wall_force = wall_nodal_force(&model, &result);
-        close(wall_force[2][0] + wall_force[3][0], 100_000.0, 1e-5);
-        close(wall_force[0][0] + wall_force[1][0], -100_000.0, 1e-5);
-        println!(
-            "{kind:?}: lateral K={}, ux={}, Qw={}",
-            100_000.0 / result.disp[2][0],
-            result.disp[2][0],
-            wall_force[2][0] + wall_force[3][0]
         );
     }
 }

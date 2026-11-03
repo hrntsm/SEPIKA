@@ -1,10 +1,10 @@
 use sepika_core::dof::{Dof6Mask, DofMap};
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
-    AnalysisKind, ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LoadCaseKind,
-    LocalAxis, MassMethod, Material, MaterialCategory, Model, Node, Section,
+    AnalysisKind, ElementKind, EndCondition, LoadCase, LoadCaseKind, MassMethod, MaterialCategory,
+    Model, Node,
 };
-use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+use sepika_core::section_shape::SectionShape;
 use sepika_element::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
 use sepika_element::factory::StrengthBasis;
 use sepika_element::frame::{
@@ -24,7 +24,7 @@ const SRC_MASS_T: f64 = 1.3766168875202032;
 
 #[path = "support/wall_side_column.rs"]
 mod wall_side_column_fixture;
-use wall_side_column_fixture::wall_connection_fixture;
+use wall_side_column_fixture::{fixture, rebar, wall_connection_fixture};
 
 #[test]
 fn mass_assembly_rejects_invalid_wall_side_column_frame_before_building_behavior() {
@@ -332,21 +332,6 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
     }
 }
 
-fn rebar(count: u32) -> RcRectColumnRebar {
-    RcRectColumnRebar {
-        main_dia: if count == 0 { 0.0 } else { 19.0 },
-        x: if count == 0 { vec![] } else { vec![count] },
-        y: if count == 0 { vec![] } else { vec![count] },
-        cover: 40.0,
-        hoop: RectColumnHoop {
-            dia: 10.0,
-            pitch: 100.0,
-            legs_x: 2,
-            legs_y: 2,
-        },
-    }
-}
-
 fn src(count: u32, steel_height: f64) -> SectionShape {
     SectionShape::SrcColumnRect {
         b: 300.0,
@@ -356,112 +341,6 @@ fn src(count: u32, steel_height: f64) -> SectionShape {
         steel_width: 100.0,
         steel_web_thick: 6.0,
         steel_flange_thick: 9.0,
-    }
-}
-
-fn fixture(shape: Option<SectionShape>, category: MaterialCategory) -> Model {
-    let mut section = shape.map_or_else(
-        || Section {
-            area: 12345.0,
-            width: 300.0,
-            depth: 600.0,
-            iy: 8.0e8,
-            iz: 2.0e8,
-            j: 1.0e6,
-            as_y: 10000.0,
-            as_z: 10000.0,
-            ..Section::zero(SectionId(0), "保存AとbDが異なる".into())
-        },
-        |shape| shape.to_section(SectionId(0), "独立質量fixture".into()),
-    );
-    section.frame_use = match section.shape {
-        Some(SectionShape::RcBeamRect { .. }) => Some(sepika_core::model::FrameSectionUse::Girder),
-        Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }) => {
-            Some(sepika_core::model::FrameSectionUse::Column)
-        }
-        _ => section.frame_use,
-    };
-    section.material = Some(MaterialId(0));
-    section.rebar_material = Some(MaterialId(1));
-    section.shear_rebar_material = Some(MaterialId(1));
-    section.steel_material = Some(MaterialId(2));
-    let material = |id, category, density, young, fc, fy| Material {
-        id: MaterialId(id),
-        name: format!("material-{id}"),
-        category,
-        density,
-        young,
-        poisson: 0.3,
-        fc,
-        fy,
-        shear: None,
-        strength_factor: None,
-        concrete_class: Default::default(),
-    };
-    Model {
-        nodes: [[0.0, 0.0, 0.0], [LENGTH_MM, 0.0, 0.0]]
-            .into_iter()
-            .enumerate()
-            .map(|(i, coord)| Node {
-                id: NodeId(i as u32),
-                coord,
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            })
-            .collect(),
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Beam,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed; 2],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
-            plastic_zone: None,
-            spring: None,
-        }],
-        sections: vec![section],
-        materials: vec![
-            material(
-                0,
-                category,
-                if category == MaterialCategory::Steel {
-                    7.85e-9
-                } else {
-                    2.4e-9
-                },
-                205000.0,
-                if category == MaterialCategory::Steel {
-                    None
-                } else {
-                    Some(24.0)
-                },
-                Some(235.0),
-            ),
-            material(
-                1,
-                MaterialCategory::Rebar,
-                7.85e-9,
-                200000.0,
-                None,
-                Some(400.0),
-            ),
-            material(
-                2,
-                MaterialCategory::Steel,
-                7.85e-9,
-                205000.0,
-                None,
-                Some(235.0),
-            ),
-        ],
-        ..Default::default()
     }
 }
 

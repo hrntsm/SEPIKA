@@ -206,7 +206,7 @@ impl BeamElement {
         );
         let mut beam = self.clone();
         beam.length = l;
-        beam.end_cond = [EndCondition::Fixed, EndCondition::Fixed];
+
         beam.a = self.a * (l / self.length);
         beam.j = self.j * (l / self.length);
         let phi_y = 12.0 * beam.e * beam.iy / (beam.g * beam.as_z * l * l);
@@ -219,7 +219,7 @@ impl BeamElement {
         if l_flex > 1e-12 {
             let mut beam = self.clone();
             beam.length = l_flex;
-            beam.end_cond = [EndCondition::Fixed, EndCondition::Fixed];
+
             beam.a = self.a * (l_flex / self.length);
             beam.j = self.j * (l_flex / self.length);
             beam.local_stiffness_raw()

@@ -206,8 +206,8 @@ pub fn apply_auto_panel_zones(model: &mut Model) -> Result<Vec<GeneratedPanel>, 
 
     let mut generated = Vec::new();
     let mut new_elements = Vec::new();
-    let node_ids: Vec<NodeId> = model.nodes.iter().map(|n| n.id).collect();
-    for node in node_ids {
+    for node in &model.nodes {
+        let node = node.id;
         let Some((panel, connected)) = panel_at(model, &adjacency, node)? else {
             continue;
         };

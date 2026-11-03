@@ -1786,17 +1786,10 @@ mod tests {
         assert!(dl.member.iter().all(|load| load.source.is_auto()));
     }
 
-    /// 取り付く壁版（パラペット等）の自重が「DL」ケースへ合流すること
-    /// （`sepika_load::wall_attached` の結線。dig 2026-08-27 Q2=A・Q3=B）。
-    #[test]
-    fn compute_gravity_includes_attached_wall_plate_self_weight() {
-        use sepika_core::ids::{MaterialId, SectionId, WallPlateId};
-        use sepika_core::model::{
-            LoadTransfer, Material, MaterialCategory, RegionAnchor, Section, WallPlate,
-            WallPlateShape,
-        };
+    fn add_wall_self_weight_section(model: &mut Model) {
+        use sepika_core::ids::{MaterialId, SectionId};
+        use sepika_core::model::{Material, MaterialCategory, Section};
 
-        let mut model = make_square_slab_model();
         model.materials.push(Material {
             strength_factor: None,
             concrete_class: Default::default(),
@@ -1832,6 +1825,17 @@ mod tests {
             steel_material: None,
             property_basis: Default::default(),
         });
+    }
+
+    /// 取り付く壁版（パラペット等）の自重が「DL」ケースへ合流すること
+    /// （`sepika_load::wall_attached` の結線。dig 2026-08-27 Q2=A・Q3=B）。
+    #[test]
+    fn compute_gravity_includes_attached_wall_plate_self_weight() {
+        use sepika_core::ids::{SectionId, WallPlateId};
+        use sepika_core::model::{LoadTransfer, RegionAnchor, WallPlate, WallPlateShape};
+
+        let mut model = make_square_slab_model();
+        add_wall_self_weight_section(&mut model);
         // 辺0（節点0-1、大梁として実在）に全長載るパラペット（立ち上がり500mm）。
         let plate = WallPlate {
             dl_support: None,
@@ -1905,48 +1909,11 @@ mod tests {
     /// 台形の取り付く壁版が DL の部材荷重まで線形変化として届き、強度比と総和が保存される。
     #[test]
     fn compute_gravity_preserves_trapezoid_linear_shape_on_beam() {
-        use sepika_core::ids::{MaterialId, SectionId, WallPlateId};
-        use sepika_core::model::{
-            LoadTransfer, Material, MaterialCategory, RegionAnchor, Section, WallPlate,
-            WallPlateShape,
-        };
+        use sepika_core::ids::{SectionId, WallPlateId};
+        use sepika_core::model::{LoadTransfer, RegionAnchor, WallPlate, WallPlateShape};
 
         let mut model = make_square_slab_model();
-        model.materials.push(Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "Fc24".into(),
-            category: MaterialCategory::Concrete,
-            young: 23000.0,
-            poisson: 0.2,
-            density: 2.4e-9,
-            shear: None,
-            fc: Some(24.0),
-            fy: None,
-        });
-        model.sections.push(Section {
-            frame_use: Some(FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "壁 t150".into(),
-            area: 0.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 0.0,
-            width: 0.0,
-            as_y: 1.0,
-            as_z: 1.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: Some(150.0),
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
+        add_wall_self_weight_section(&mut model);
         let plate = WallPlate {
             dl_support: None,
             self_weight_shares: Vec::new(),
@@ -2016,47 +1983,11 @@ mod tests {
     /// 自立壁（床領域アンカー）の自重が、床の固定荷重分配経由で DL の総和に乗る。
     #[test]
     fn compute_gravity_includes_floor_region_attached_wall_as_slab_extra() {
-        use sepika_core::ids::{MaterialId, SectionId, WallPlateId};
-        use sepika_core::model::{
-            Material, MaterialCategory, RegionAnchor, Section, WallPlate, WallPlateShape,
-        };
+        use sepika_core::ids::{SectionId, WallPlateId};
+        use sepika_core::model::{RegionAnchor, WallPlate, WallPlateShape};
 
         let mut model = make_square_slab_model();
-        model.materials.push(Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "Fc24".into(),
-            category: MaterialCategory::Concrete,
-            young: 23000.0,
-            poisson: 0.2,
-            density: 2.4e-9,
-            shear: None,
-            fc: Some(24.0),
-            fy: None,
-        });
-        model.sections.push(Section {
-            frame_use: Some(FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "壁 t150".into(),
-            area: 0.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 0.0,
-            width: 0.0,
-            as_y: 1.0,
-            as_z: 1.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: Some(150.0),
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
+        add_wall_self_weight_section(&mut model);
         // 自立壁は床領域の**内側**に置く（境界の辺上に置くと、厳密内包の判定で
         // 「床に載っていない」＝解析前チェックのエラー対象になる）。
         let n = model.nodes.len() as u32;

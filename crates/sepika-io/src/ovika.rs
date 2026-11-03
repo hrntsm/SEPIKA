@@ -144,12 +144,13 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
         name: "model.msgpack".to_string(),
         sha256: model_hash,
     }];
-    for (name, data) in [
+    let extra_entries = [
         (PREPARATION_ENTRY, extras.preparation),
         (RESULTS_ENTRY, extras.results),
         (ANALYSIS_SETTINGS_ENTRY, extras.analysis_settings),
         (STUDIES_ENTRY, extras.studies),
-    ] {
+    ];
+    for (name, data) in extra_entries {
         if let Some(data) = data {
             entries.push(crate::manifest::EntryHash {
                 name: name.to_string(),
@@ -182,12 +183,7 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
             .map_err(|e| IoError::Zip(e.to_string()))?;
         zip.write_all(&model_bytes)?;
 
-        for (name, data) in [
-            (PREPARATION_ENTRY, extras.preparation),
-            (RESULTS_ENTRY, extras.results),
-            (ANALYSIS_SETTINGS_ENTRY, extras.analysis_settings),
-            (STUDIES_ENTRY, extras.studies),
-        ] {
+        for (name, data) in extra_entries {
             if let Some(data) = data {
                 zip.start_file(name, opts)
                     .map_err(|e| IoError::Zip(e.to_string()))?;

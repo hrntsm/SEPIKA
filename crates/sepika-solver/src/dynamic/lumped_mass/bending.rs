@@ -1,11 +1,13 @@
 //! 弾性曲げ要素と履歴せん断ばねの直列接続。
 
 use super::model::{LumpedMassModel, StickDim, StoryTrilinear};
-use super::time_history::{dir_ductility, StickDirPeaks, StickResponse, STICK_NEWTON};
+use super::time_history::{
+    dir_ductility, story_spring, StickDirPeaks, StickResponse, STICK_NEWTON,
+};
 use super::LumpedMassModal;
 use crate::statics::analysis::SeismicDir;
 use faer::Side;
-use sepika_material::{HysteresisMaterial, HysteresisRule, UniaxialMaterial};
+use sepika_material::{HysteresisMaterial, UniaxialMaterial};
 use sepika_math::{dense_lu::CheckedDenseLu, solver::SolveError};
 
 fn invalid(message: impl Into<String>) -> SolveError {
@@ -61,14 +63,6 @@ pub fn bending_shear_element(h: f64, ei: f64, ks: f64) -> Result<[[f64; 4]; 4], 
     Ok(std::array::from_fn(|i| {
         std::array::from_fn(|j| kt * b[i] * b[j] + ei / h * r[i] * r[j])
     }))
-}
-
-fn spring(sk: &StoryTrilinear) -> HysteresisMaterial {
-    HysteresisMaterial::new(HysteresisRule::MaxPointOriented {
-        crack: (sk.q1, sk.d1),
-        yield_point: (sk.q2, sk.d2),
-        ultimate: (sk.q3, sk.d3),
-    })
 }
 
 fn stride(lm: &LumpedMassModel) -> usize {
@@ -228,7 +222,7 @@ fn axes(lm: &LumpedMassModel) -> Result<Vec<Axis>, SolveError> {
                 ei,
                 h: s.height,
                 sk,
-                spring: spring(&sk),
+                spring: story_spring(&sk),
                 shear: 0.0,
                 deformation: 0.0,
             });
@@ -821,7 +815,7 @@ mod tests {
             q3: 7.5,
         };
         let mut ax = axes(&lm).unwrap();
-        let mut reference = spring(&lm.stories[0].skeleton);
+        let mut reference = story_spring(&lm.stories[0].skeleton);
         for s in [0.5, 2.0, 4.0, 1.0, -2.0, -4.0, 0.0, 3.0] {
             let (q, _) = reference.trial(s);
             let d = s + q / 12.0;

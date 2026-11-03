@@ -358,15 +358,6 @@ fn build_nodes_and_stories(
             support_spring: None,
         });
     }
-
-    for node in &model.nodes {
-        if let Some(sid) = node.story {
-            let list = &mut model.stories[sid.index()].node_ids;
-            if !list.contains(&node.id) {
-                list.push(node.id);
-            }
-        }
-    }
 }
 
 /// 通り芯グループを id 正規化してモデルへ格納する（`Manual` 扱い・離れの昇順に整列）。

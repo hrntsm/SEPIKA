@@ -112,21 +112,23 @@ pub(crate) fn validate_entries(
                 "応答要素の順序または自由度対応が一致しません",
             ));
         }
-        let mut actual_nodes: Vec<_> = behavior
-            .global_dofs(&full)
-            .iter()
-            .filter(|&&a| a != usize::MAX)
-            .map(|&a| full.global(a as u32))
-            .filter(|&g| full.is_node_dof(g))
-            .map(|g| g / DOF_PER_NODE)
-            .collect();
-        actual_nodes.sort_unstable();
-        actual_nodes.dedup();
-        let mut expected_nodes: Vec<_> = elem.nodes.iter().map(|node| node.index()).collect();
-        expected_nodes.sort_unstable();
-        expected_nodes.dedup();
-        if behavior.owns_frame_member_loads() && actual_nodes != expected_nodes {
-            return Err(element_error(elem.id, "応答要素の物理節点が一致しません"));
+        if behavior.owns_frame_member_loads() {
+            let mut actual_nodes: Vec<_> = behavior
+                .global_dofs(&full)
+                .iter()
+                .filter(|&&a| a != usize::MAX)
+                .map(|&a| full.global(a as u32))
+                .filter(|&g| full.is_node_dof(g))
+                .map(|g| g / DOF_PER_NODE)
+                .collect();
+            actual_nodes.sort_unstable();
+            actual_nodes.dedup();
+            let mut expected_nodes: Vec<_> = elem.nodes.iter().map(|node| node.index()).collect();
+            expected_nodes.sort_unstable();
+            expected_nodes.dedup();
+            if actual_nodes != expected_nodes {
+                return Err(element_error(elem.id, "応答要素の物理節点が一致しません"));
+            }
         }
     }
     Ok(())
