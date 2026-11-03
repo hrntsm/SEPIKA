@@ -64,63 +64,30 @@ fn 旧解析契約39の成果は読込時に失効し再計算で現行版にな
 }
 
 #[test]
-fn panel_761_旧解析契約40の成果は読込時に失効し再計算で現行版になる() {
+fn panel_旧解析契約40と41の成果は読込時に失効し再計算で現行版になる() {
     let app = panel_757_calculated();
-    let (mut loaded, path) = restore(
-        &app,
-        Some(40),
-        Some(DESIGN_CONTRACT_VERSION),
-        "761-analysis40",
-    );
-    let stale = loaded.core.scoped.results.as_ref().unwrap();
-    assert!(!stale.has_analysis_results());
-    assert!(!stale.has_design_results());
-    assert!(loaded.core.scoped.staleness.results_stale);
-    assert!(loaded.core.scoped.last_static.is_none());
-    loaded.run_linear_static(LoadCaseId(0));
-    assert!(
-        loaded.core.scoped.last_error.is_none(),
-        "{:?}",
-        loaded.core.scoped.last_error
-    );
-    let fresh = loaded.core.scoped.results.as_ref().unwrap();
-    assert!(fresh.has_analysis_results());
-    assert_eq!(
-        fresh.analysis_contract_version,
-        Some(ANALYSIS_CONTRACT_VERSION)
-    );
-    assert_eq!(fresh.design_contract_version, Some(DESIGN_CONTRACT_VERSION));
-    std::fs::remove_file(path).unwrap();
-}
-
-#[test]
-fn fiber_783_旧解析契約41の成果は読込時に失効し再計算で現行版になる() {
-    let app = panel_757_calculated();
-    let (mut loaded, path) = restore(
-        &app,
-        Some(41),
-        Some(DESIGN_CONTRACT_VERSION),
-        "783-analysis41",
-    );
-    let stale = loaded.core.scoped.results.as_ref().unwrap();
-    assert!(!stale.has_analysis_results());
-    assert!(!stale.has_design_results());
-    assert!(loaded.core.scoped.staleness.results_stale);
-    assert!(loaded.core.scoped.last_static.is_none());
-    loaded.run_linear_static(LoadCaseId(0));
-    assert!(
-        loaded.core.scoped.last_error.is_none(),
-        "{:?}",
-        loaded.core.scoped.last_error
-    );
-    let fresh = loaded.core.scoped.results.as_ref().unwrap();
-    assert!(fresh.has_analysis_results());
-    assert_eq!(
-        fresh.analysis_contract_version,
-        Some(ANALYSIS_CONTRACT_VERSION)
-    );
-    assert_eq!(fresh.design_contract_version, Some(DESIGN_CONTRACT_VERSION));
-    std::fs::remove_file(path).unwrap();
+    for (version, name) in [(40, "761-analysis40"), (41, "783-analysis41")] {
+        let (mut loaded, path) = restore(&app, Some(version), Some(DESIGN_CONTRACT_VERSION), name);
+        let stale = loaded.core.scoped.results.as_ref().unwrap();
+        assert!(!stale.has_analysis_results());
+        assert!(!stale.has_design_results());
+        assert!(loaded.core.scoped.staleness.results_stale);
+        assert!(loaded.core.scoped.last_static.is_none());
+        loaded.run_linear_static(LoadCaseId(0));
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        let fresh = loaded.core.scoped.results.as_ref().unwrap();
+        assert!(fresh.has_analysis_results());
+        assert_eq!(
+            fresh.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(fresh.design_contract_version, Some(DESIGN_CONTRACT_VERSION));
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 struct ContractFixture<'a>(&'a SavedResults);
@@ -235,6 +202,9 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-skew-rectangle", Some(10), "旧契約"),
         ("old-fixed-distance-extents", Some(11), "旧契約"),
         ("old-frame-node-counts", Some(12), "旧契約"),
+        ("old-lip-geometry13", Some(13), "旧契約"),
+        ("old-lip-geometry14", Some(14), "旧契約"),
+        ("old-lip-geometry15", Some(15), "旧契約"),
         ("old-time-history-timeline", Some(19), "旧契約"),
         ("old-column-self-weight-faces", Some(20), "旧契約"),
         ("old-member-load-direction", Some(22), "旧契約"),
@@ -243,6 +213,12 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-before-wall-side-column-contract", Some(26), "旧契約"),
         ("old-unconverged-time-history", Some(27), "旧契約"),
         ("old-panel-reference-column", Some(28), "旧契約"),
+        ("old-shear-modulus", Some(29), "旧契約"),
+        ("old-member-load", Some(30), "旧契約"),
+        ("old-panel-g", Some(31), "旧契約"),
+        ("old-member-history", Some(32), "旧契約"),
+        ("old-beam-stiffness", Some(33), "旧契約"),
+        ("old-panel-yield", Some(35), "旧契約"),
         ("old-local-frame-reference", Some(37), "旧契約"),
         ("old-face-direction-reference", Some(38), "旧契約"),
         ("old-secondary-materialization", Some(44), "旧契約"),
@@ -261,6 +237,12 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         assert_eq!(loaded.core.analysis_cfg.threads, 1);
         let bundle = loaded.core.scoped.results.as_ref().unwrap();
         if reason.is_empty() {
+            assert!(bundle.has_analysis_results());
+            assert!(bundle.has_design_results());
+            assert_eq!(
+                bundle.analysis_contract_version,
+                Some(ANALYSIS_CONTRACT_VERSION)
+            );
             assert_eq!(
                 bundle.statics[0].1.disp,
                 app.core.scoped.results.as_ref().unwrap().statics[0].1.disp
@@ -1347,118 +1329,6 @@ fn issue635_invalid_correct_hash_project_keeps_app_model_and_undo() {
 }
 
 #[test]
-fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
-    let app = calculated();
-    for (version, keep) in [
-        (13, false),
-        (14, false),
-        (15, false),
-        (ANALYSIS_CONTRACT_VERSION, true),
-    ] {
-        let (loaded, path) = restore(
-            &app,
-            Some(version),
-            Some(DESIGN_CONTRACT_VERSION),
-            &format!("lip544-contract-{version}"),
-        );
-        let bundle = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(bundle.has_analysis_results(), keep);
-        if keep {
-            assert_eq!(
-                bundle.analysis_contract_version,
-                Some(ANALYSIS_CONTRACT_VERSION)
-            );
-        }
-        std::fs::remove_file(path).unwrap();
-    }
-}
-
-#[test]
-fn shear_modulus_gate_expires_analysis29_and_keeps_current_results() {
-    let app = calculated();
-    for (version, keep) in [(29, false), (ANALYSIS_CONTRACT_VERSION, true)] {
-        let (loaded, path) = restore(
-            &app,
-            Some(version),
-            Some(DESIGN_CONTRACT_VERSION),
-            &format!("shear712-contract-{version}"),
-        );
-        let results = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(results.has_analysis_results(), keep);
-        assert_eq!(results.has_design_results(), keep);
-        std::fs::remove_file(path).unwrap();
-    }
-}
-
-#[test]
-fn member_load_gate_expires_analysis30_and_keeps_current_results() {
-    let app = calculated();
-    for (version, keep) in [(30, false), (ANALYSIS_CONTRACT_VERSION, true)] {
-        let (loaded, path) = restore(
-            &app,
-            Some(version),
-            Some(DESIGN_CONTRACT_VERSION),
-            &format!("member-load713-contract-{version}"),
-        );
-        let results = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(results.has_analysis_results(), keep);
-        assert_eq!(results.has_design_results(), keep);
-        std::fs::remove_file(path).unwrap();
-    }
-}
-
-#[test]
-fn member_history_gate_expires_analysis32_and_keeps_current_results() {
-    let app = calculated();
-    for (version, keep) in [(32, false), (ANALYSIS_CONTRACT_VERSION, true)] {
-        let (loaded, path) = restore(
-            &app,
-            Some(version),
-            Some(DESIGN_CONTRACT_VERSION),
-            &format!("member-history732-contract-{version}"),
-        );
-        let results = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(results.has_analysis_results(), keep);
-        assert_eq!(results.has_design_results(), keep);
-        std::fs::remove_file(path).unwrap();
-    }
-}
-
-#[test]
-fn beam_stiffness_gate_expires_analysis33_and_keeps_current_results() {
-    let app = calculated();
-    for (version, keep) in [(33, false), (ANALYSIS_CONTRACT_VERSION, true)] {
-        let (loaded, path) = restore(
-            &app,
-            Some(version),
-            Some(DESIGN_CONTRACT_VERSION),
-            &format!("beam736-contract-{version}"),
-        );
-        let results = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(results.has_analysis_results(), keep);
-        assert_eq!(results.has_design_results(), keep);
-        std::fs::remove_file(path).unwrap();
-    }
-}
-
-#[test]
-fn panel_g_gate_expires_analysis31_and_keeps_current_results() {
-    let app = calculated();
-    for (version, keep) in [(31, false), (ANALYSIS_CONTRACT_VERSION, true)] {
-        let (loaded, path) = restore(
-            &app,
-            Some(version),
-            Some(DESIGN_CONTRACT_VERSION),
-            &format!("panel728-contract-{version}"),
-        );
-        let results = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(results.has_analysis_results(), keep);
-        assert_eq!(results.has_design_results(), keep);
-        std::fs::remove_file(path).unwrap();
-    }
-}
-
-#[test]
 fn cft_case2_design12_expires_while_current_analysis_survives_and_design_can_be_recomputed() {
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();
@@ -1683,23 +1553,6 @@ fn sm520_old_335_success_expires_without_save_or_display_reauthentication() {
             assert!(bundle.has_design_results());
             std::fs::remove_file(path).unwrap();
         }
-    }
-}
-
-#[test]
-fn panel_753_yield_gate_expires_analysis35_and_keeps_current_results() {
-    let app = calculated();
-    for (version, keep) in [(35, false), (ANALYSIS_CONTRACT_VERSION, true)] {
-        let (loaded, path) = restore(
-            &app,
-            Some(version),
-            Some(DESIGN_CONTRACT_VERSION),
-            &format!("panel753-contract-{version}"),
-        );
-        let results = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(results.has_analysis_results(), keep);
-        assert_eq!(results.has_design_results(), keep);
-        std::fs::remove_file(path).unwrap();
     }
 }
 

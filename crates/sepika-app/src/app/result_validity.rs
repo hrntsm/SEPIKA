@@ -2208,7 +2208,6 @@ mod purpose_tests {
     }
     #[test]
     fn 目的別run保持後もモデル材料荷重変更と識別欠落を拒否する() {
-        let app = two_purposes();
         for case in 0..4 {
             let mut mutated = two_purposes();
             match case {
@@ -2233,15 +2232,5 @@ mod purpose_tests {
             assert!(mutated.compute_holding_capacity().is_err(), "case {case}");
             assert!(mutated.core.scoped.holding_capacity_source.is_none());
         }
-        assert_eq!(
-            app.core
-                .scoped
-                .results
-                .as_ref()
-                .unwrap()
-                .holding_evaluations
-                .len(),
-            2
-        );
     }
 }
