@@ -3660,10 +3660,8 @@ fn test_rc_capacity_input_from_rect_uses_main_x() {
     assert_eq!(input.fc, 24.0);
 }
 
-/// UI-13(RC): 実配筋矩形 + fc 付き材料（コンクリート、is_steel=false）を
-/// 持つ小さな門型ラーメンを組み、rank-auto で member_ranks に RC 部材のランクが入り、
-/// 告示の部材種別表（`rc_column_type`/`rc_beam_type`）の手計算と一致することを
-/// 確認する。
+/// RC矩形門型の自動部材ランクを観測する。梁は部材種別表、柱は固定FDと照合する。
+/// 柱ランクと独立した手計算の整合は未確認であり、規準適合・安全性の確認とは扱わない。
 #[test]
 fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     use sepika_core::dof::Dof6Mask;
@@ -9071,8 +9069,7 @@ mod grid_headless {
         );
     }
 
-    /// 参照中の節点を含む行削除は validate_row_deletion が拒否し、
-    /// （widget が delete_rows を呼ばないため）モデルは一切変化しない
+    /// 行削除の事前検証は参照中の節点を拒否し、未参照節点を受理する。
     #[test]
     fn test_grid_delete_referenced_row_is_rejected() {
         let mut app = app_with_nodes(3);

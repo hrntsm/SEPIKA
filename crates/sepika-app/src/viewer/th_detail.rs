@@ -19,8 +19,8 @@
 //! 当該関数は `app` モジュール内の非公開関数（`is_steel` 等）に
 //! 依存しビューア側からは呼べないため、必要な部分だけ本ファイルへ複製する。
 //! 長期静的結果がある場合は地震時 QD / 柱メカニズムを部分配線する。
-//! 座屈長さの自動算定・鋼継手欠損・一本部材グループ合成・BRB 属性差し替え・
-//! Q0（単純梁せん断）は簡略化のため含まない（概算検定）。
+//! 長期静的結果に対応するQ0（単純梁せん断）も用いる。座屈長さの自動算定・
+//! 鋼継手欠損・一本部材グループ合成・BRB属性差し替えは対象外（概算検定）。
 
 use crate::app::App;
 use crate::theme;
@@ -233,7 +233,7 @@ fn elem_has_force_recording(rec: &ThRecording, elem_idx: usize) -> bool {
 }
 
 /// 断面検定の対象になる部材種別か（軸力のみの減衰・免震・節点ばね要素、
-/// シェル・パネルゾーンは対象外）。耐震壁は壁柱軸で柱として簡易検定する。
+/// 耐震壁・シェル・パネルゾーンは対象外）。
 fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
     match elem.kind {
         ElementKind::Brace { .. } => Some(MemberKind::Brace),

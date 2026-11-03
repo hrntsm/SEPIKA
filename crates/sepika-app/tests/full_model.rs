@@ -2609,15 +2609,7 @@ fn floor_regions_and_slabs_are_consistent() {
     );
 }
 
-/// 柱・梁が実建物データで壁側の鉛直構面をどれだけ検出できるかを実測して固定する。
-///
-/// `crates/sepika-app/tests/wall_model.rs`（壁 1 パネル・雑壁 1 本の最小フィクスチャ）は
-/// 頂部にしか梁がなく（`柱脚 4 節点は固定支点`、梁は「頂部で閉路」の 4 本のみ）、
-/// 各鉛直構面が「柱 2 本＋頂部の梁 1 本」という開いた U 字にしかならないため、
-/// `region_gen::wall` の境界検出を一切通らない（面が 0 件になる）。壁領域検出の
-/// 実データによる検証は、本テストが唯一の経路である（`region_gen::wall` は
-/// `ElementKind::Wall` の有無を見ず、柱・梁の幾何だけで構面を検出するため、
-/// 壁要素が 0 件のこの実フィクスチャでも検出は成立する）。
+/// 実建物の柱・梁から壁側鉛直構面を検出し、境界の数・軸方向・面積・非重複を確認する。
 #[test]
 fn region_gen_finds_wall_bounded_regions() {
     use sepika_core::region_gen::scan_wall_region_boundaries;
