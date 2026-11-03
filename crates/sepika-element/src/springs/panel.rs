@@ -1199,6 +1199,21 @@ mod tests {
         let (model, data) = cross_joint_model();
         let ctx = Ctx { model: &model };
         let mut pz = PanelZone::new_nonlinear(&data, &model);
+        assert_eq!(pz.n_dof(), 14, "パネル 2 ＋ 柱 12");
+
+        let k = pz.tangent_stiffness(&ctx);
+        for i in 0..14 {
+            for j in 0..14 {
+                if i < 2 && j < 2 {
+                    continue;
+                }
+                assert_eq!(
+                    k.get(i, j),
+                    0.0,
+                    "柱自由度へ剛性を与えてはならない ({i},{j})"
+                );
+            }
+        }
 
         let expected_pmy0 = (pz.ve[0] / pz.kappa[0]) * pz.fy[0] / 3.0_f64.sqrt();
         assert!((pz.pmy0[0] - expected_pmy0).abs() / expected_pmy0 < 1e-12);
@@ -1233,30 +1248,6 @@ mod tests {
             m,
             pz.pmy0[0]
         );
-    }
-
-    /// 弾塑性パネルは軸力比の追従のため柱の 12 自由度を自由度写像へ含めるが、
-    /// 剛性寄与は 0（全体剛性行列に一切影響しない）。
-    #[test]
-    fn test_nonlinear_panel_tracks_column_without_stiffness() {
-        let (model, data) = cross_joint_model();
-        let ctx = Ctx { model: &model };
-        let pz = PanelZone::new_nonlinear(&data, &model);
-        assert_eq!(pz.n_dof(), 14, "パネル 2 ＋ 柱 12");
-
-        let k = pz.tangent_stiffness(&ctx);
-        for i in 0..14 {
-            for j in 0..14 {
-                if i < 2 && j < 2 {
-                    continue;
-                }
-                assert_eq!(
-                    k.get(i, j),
-                    0.0,
-                    "柱自由度へ剛性を与えてはならない ({i},{j})"
-                );
-            }
-        }
     }
 
     /// 軸力比 n の増加で降伏モーメントが pMy0·√(1−n²) へ低下する。

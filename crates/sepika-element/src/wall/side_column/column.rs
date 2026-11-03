@@ -135,8 +135,8 @@ crate::behavior::forward_element_behavior!(InPlaneReleasedColumn, inner, {
     geometric_stiffness: forward,
     snapshot_state: custom,
     restore_state: custom,
-    commit_state: custom,
-    revert_state: custom,
+    commit_state: forward,
+    revert_state: forward,
     serialize_checkpoint: custom,
     deserialize_checkpoint: custom,
     panel_moments_from: forward,
@@ -150,15 +150,6 @@ crate::behavior::forward_element_behavior!(InPlaneReleasedColumn, inner, {
     fn restore_state(&mut self, state: &dyn std::any::Any) {
         self.inner.restore_elastic_load_state(crate::behavior::downcast_snapshot::<crate::frame::beam::state::ElasticLoadState>("InPlaneReleasedColumn", state).clone());
     }
-    fn commit_state(&mut self) {
-        self.inner.committed_disp = self.inner.trial_disp;
-        self.inner.committed_member_loads = self.inner.trial_member_loads.clone();
-    }
-    fn revert_state(&mut self) {
-        self.inner.trial_disp = self.inner.committed_disp;
-        self.inner.trial_member_loads = self.inner.committed_member_loads.clone();
-    }
-
     fn frame_load_response(&self, u_elem: &[f64], loads: &[sepika_core::model::MemberLoad]) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
         self.inner.loaded_response(u_elem, loads, Some(self.try_release_connection()?)).map(Some)
     }

@@ -688,13 +688,6 @@ mod tests {
             }
         }
         assert!((total - M).abs() < 1e-9, "整合質量の並進総和 {total}");
-    }
-
-    /// `torsion_term` を 0 にすると、ねじれ自由度の質量が消える。
-    /// ファイバー梁は 0 を渡してねじれ質量を持たない（弾性梁は ρ·J·l/6 を渡す）。
-    #[test]
-    fn ねじれ項零なら回転自由度の質量は零() {
-        let cm = consistent_mass(12.5, 3000.0, 0.0);
         for d in [3usize, 9] {
             assert_eq!(cm.get(d, d), 0.0, "DOF {d} にねじれ質量が残る");
         }

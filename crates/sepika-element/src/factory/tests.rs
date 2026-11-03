@@ -1181,9 +1181,8 @@ fn test_resolve_wall_shear_hysteresis_defaults_and_overrides() {
 
 /// 材端曲げバネの降伏時剛性低下率 αy。
 /// - 形状未設定・非 RC 矩形・鉛直材（柱）は既定 0.3。
-/// - RC 矩形の梁は菅野式。b=400・D=700・4-D22（1 段）・かぶり 50・帯筋 D10・
-///   可撓長 5000・Ec=20000 のときの独立値 αy≈0.33475
-///   （pt=0.002715、a/D=3.571、d/D=629/700、n=10.25）。
+/// - RC 矩形の梁は菅野式。b=400・D=700・上下各2-D22（1 段）・かぶり 50・帯筋 D10・
+///   可撓長 5000・Ec=20000 のときの独立値 αy≈0.33475。
 #[test]
 fn test_flexural_alpha_y_sugano_for_rc_beam() {
     use sepika_core::section_shape::{RcBeamRebar, SectionShape};

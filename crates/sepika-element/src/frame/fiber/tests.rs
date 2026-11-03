@@ -3138,7 +3138,6 @@ fn ねじり剛性がない部材はrxを解放しない() {
     assert_eq!(fb.releases.len(), 4);
 
     model.sections[0].j = 1.0e6;
-    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     let fb = FiberBeam::new(
         &model.elements[0],
         &model,

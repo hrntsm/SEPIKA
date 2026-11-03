@@ -261,7 +261,8 @@ fn distributed_history_work_tangent_and_rollback_match_independent_uniaxial_hist
                 member
                     .update_state(&increment(perturbed), false, &ctx)
                     .unwrap();
-                forces[side] = std::array::from_fn(|i| member.internal_force(&ctx).data[i]);
+                let perturbed_force = member.internal_force(&ctx);
+                forces[side] = std::array::from_fn(|i| perturbed_force.data[i]);
             }
             for row in 0..12 {
                 let fd = (forces[1][row] - forces[0][row]) / (2.0 * h);
@@ -295,12 +296,9 @@ fn distributed_history_work_tangent_and_rollback_match_independent_uniaxial_hist
         member
             .update_state(&increment([0.0; 12]), false, &ctx)
             .unwrap();
+        let unchanged_force = member.internal_force(&ctx);
         for i in 0..12 {
-            assert_relative_eq!(
-                member.internal_force(&ctx).data[i],
-                force.data[i],
-                epsilon = 1e-8
-            );
+            assert_relative_eq!(unchanged_force.data[i], force.data[i], epsilon = 1e-8);
         }
         previous_u = u;
         previous_force = std::array::from_fn(|i| force.data[i]);

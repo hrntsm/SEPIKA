@@ -526,13 +526,12 @@ mod tests {
     fn 鋼板耐震壁にはrc固有の成立条件を課さない() {
         use sepika_core::model::WallAttr;
 
-        let (mut model, mut data) = make_model(9.0);
+        let (mut model, data) = make_model(9.0);
         model.materials[0].category = MaterialCategory::Steel;
         model.materials[0].fc = None;
         model.materials[0].fy = Some(235.0);
         model.sections[0].shape = None;
         model.sections[0].thickness = Some(9.0);
-        data.section = Some(SectionId(0));
         model.wall_attrs.push(WallAttr {
             elem: ElemId(0),
             opening_area: 3.0e6,
@@ -552,7 +551,6 @@ mod tests {
             !wall_is_seismic(&data, &model),
             "スリットは材種を問わず課す"
         );
-        model.wall_attrs[0].slit = sepika_core::model::WallSlit::default();
 
         let (model, data) = make_model(9.0);
         assert!(is_rc_wall(&data, &model));

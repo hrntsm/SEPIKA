@@ -386,8 +386,7 @@ mod tests {
 
     #[test]
     fn test_maxwell_nonlinear_alpha_solves() {
-        let mut d = damper(100.0, 500.0, 0.5, 0.02);
-        d.committed_ud = 0.0;
+        let d = damper(100.0, 500.0, 0.5, 0.02);
         let elong = 2.0;
         let ud = d.solve_ud(elong);
         let v = (ud - 0.0) / d.dt;

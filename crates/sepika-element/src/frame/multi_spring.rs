@@ -145,27 +145,6 @@ mod tests {
         }
     }
 
-    /// MS 要素も `fiber_section_states` で各ガウス点のファイバー断面状態を返すこと。
-    #[test]
-    fn fiber_section_states_are_delegated_to_inner_fiber_beam() {
-        let model = make_model(Some(295.0), None);
-        let elem = MultiSpringElement::new(
-            &model.elements[0],
-            &model,
-            crate::factory::StrengthBasis::Nominal,
-            AnalysisKind::Incremental,
-        );
-
-        let states = elem
-            .fiber_section_states()
-            .expect("MS 要素はファイバー断面の状態を返す");
-        assert!(states.len() >= 2, "複数ガウス点の状態を返す");
-        assert!(
-            states.iter().all(|s| !s.fibers.is_empty()),
-            "各ガウス点はファイバーを持つ"
-        );
-    }
-
     /// MS 要素でも φ>0（G>0・as>0）の Timoshenko 適合内挿が機能すること:
     /// 剛体回転で内力ゼロ（客観性）と、代表自由度（軸・強軸回転の両端）での
     /// 接線と内力の FD 整合を検証する。
@@ -187,6 +166,14 @@ mod tests {
         let theta = 1.0e-4;
         let l = 3000.0;
         let mut ms = build();
+        let states = ms
+            .fiber_section_states()
+            .expect("MS 要素はファイバー断面の状態を返す");
+        assert!(states.len() >= 2, "複数ガウス点の状態を返す");
+        assert!(
+            states.iter().all(|s| !s.fibers.is_empty()),
+            "各ガウス点はファイバーを持つ"
+        );
         assert!(ms.inner.phi_y > 0.0 && ms.inner.phi_z > 0.0);
         let du = LocalVec {
             data: smallvec::smallvec![

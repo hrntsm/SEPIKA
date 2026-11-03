@@ -2,7 +2,7 @@
 //!
 //! - [`resolve_force_regime`] — `ForceRegime::Auto` をトポロジから判定
 //! - [`ResolvedRegime`] — 判定結果（集中ばね / ファイバー）
-//! - [`is_vertical_member`] — 鉛直材（柱）かどうか
+//! - [`is_column_member`] — 柱用断面を持つ部材かどうか
 //! - [`is_on_rigid_diaphragm`] — 剛床に所属するか
 
 use sepika_core::model::{ElementData, ForceRegime, FrameSectionUse, Model};
