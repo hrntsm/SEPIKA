@@ -146,26 +146,6 @@ pub fn spherical_bearing_mu_mn(mu0: f64, v: f64) -> f64 {
     mu0 * (1.0 - 0.55 * (-0.019 * v.abs()).exp())
 }
 
-fn poly(coeffs: &[f64], x: f64) -> f64 {
-    coeffs.iter().rev().fold(0.0, |acc, &c| acc * x + c)
-}
-
-/// ブリヂストン高減衰ゴム E6 タイプの `(Geq, Heq, U)`（歪 γ）。
-pub fn hdr_bridgestone_e6(gamma: f64) -> (f64, f64, f64) {
-    let g = poly(&[2.309, -4.327, 4.456, -2.379, 0.630, -0.0649], gamma);
-    let h = poly(&[0.1894, 0.0664, -0.0353, 0.0041], gamma);
-    let u = poly(&[0.3726, 0.0956, -0.0741, 0.0113], gamma);
-    (g, h, u)
-}
-
-/// ブリヂストン高減衰ゴム E4 タイプの `(Geq, Heq, U)`（歪 γ）。
-pub fn hdr_bridgestone_e4(gamma: f64) -> (f64, f64, f64) {
-    let g = poly(&[1.308, -2.438, 2.640, -1.483, 0.4086, -0.043], gamma);
-    let h = poly(&[0.227, 0.0120, -0.0088, 0.0037], gamma);
-    let u = poly(&[0.379, 0.0069, -0.0046, 0.0026], gamma);
-    (g, h, u)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,28 +256,5 @@ mod tests {
         assert!(spherical_bearing_mu_mn(mu0, 1000.0) > spherical_bearing_mu_mn(mu0, 0.0));
         // LN タイプ μ0 も正。
         assert!(spherical_bearing_mu0_ln(10.0) > 0.0);
-    }
-
-    #[test]
-    fn test_hdr_bridgestone_e6_handcalc() {
-        // γ=1.0 での多項式値（昇冪係数の総和）。
-        let (g, h, u) = hdr_bridgestone_e6(1.0);
-        assert!(
-            (g - (2.309 - 4.327 + 4.456 - 2.379 + 0.630 - 0.0649)).abs() < 1e-9,
-            "G={g}"
-        );
-        assert!(
-            (h - (0.1894 + 0.0664 - 0.0353 + 0.0041)).abs() < 1e-9,
-            "H={h}"
-        );
-        assert!(
-            (u - (0.3726 + 0.0956 - 0.0741 + 0.0113)).abs() < 1e-9,
-            "U={u}"
-        );
-        // Heq は正の減衰定数。
-        assert!(h > 0.0 && g > 0.0);
-        // E4 も評価可能。
-        let (g4, _, _) = hdr_bridgestone_e4(1.0);
-        assert!(g4 > 0.0);
     }
 }
