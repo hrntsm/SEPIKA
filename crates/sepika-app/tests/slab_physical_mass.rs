@@ -1,4 +1,4 @@
-#[path = "../../sepika-job/tests/fixtures/steel_slab.rs"]
+#[path = "../../sepika-job/tests/fixtures/steel_slab_model.rs"]
 mod fixture;
 use sepika_core::{ids::*, model::*};
 use sepika_edit::{MaterialField, SetMaterialField, SetSlabSection, UndoStack};

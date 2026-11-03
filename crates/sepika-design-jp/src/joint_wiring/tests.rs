@@ -1902,14 +1902,14 @@ fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
     );
 }
 
-#[path = "../../../../test_fixtures/rc_wall617.rs"]
-mod rc_wall617_fixture;
+#[path = "../../../sepika-solver/tests/support/rc_wall_side_column_model.rs"]
+mod rc_wall_side_column_model;
 
 #[test]
 fn reference_skeleton_report_caps_horizontal_rebar_and_diagnoses_missing_vertical_input() {
     use crate::wall_check::WallCheckKind;
     use sepika_element::frame::beam::MemberForces;
-    let mut model = rc_wall617_fixture::expanded_model();
+    let mut model = rc_wall_side_column_model::expanded_model();
     let forces = vec![
         (
             ElemId(4),
@@ -1992,7 +1992,7 @@ fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_mi
 fn reference_skeleton_for_frame_representation(kind: ElementKind) {
     use crate::wall_check::WallCheckKind;
     use sepika_element::frame::beam::MemberForces;
-    let mut m = rc_wall617_fixture::expanded_model();
+    let mut m = rc_wall_side_column_model::expanded_model();
     for frame in &mut m.elements[..4] {
         frame.kind = kind;
     }
@@ -2608,13 +2608,15 @@ fn sm520_wall_side_column_out_of_range_is_not_dropped_from_allowable_and_referen
     }
 }
 
-#[path = "../../../../test_fixtures/rc_wall534.rs"]
-mod rc_wall534_fixture;
+#[path = "../../tests/fixtures/rc_wall_cracking_model.rs"]
+mod rc_wall_cracking_model;
+#[path = "../../tests/fixtures/rc_wall_cracking_reference.rs"]
+mod rc_wall_cracking_reference;
 
 #[test]
 fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
     use sepika_element::frame::beam::MemberForces;
-    let input = rc_wall534_fixture::input_model(rc_wall617_fixture::input_model());
+    let input = rc_wall_cracking_model::input_model(rc_wall_side_column_model::input_model());
     let (mut model, index, _) = sepika_core::wall_expand::expand_wall_elements(&input);
     let wall = model
         .elements
@@ -2662,7 +2664,7 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         "{:?}",
         reference
     );
-    rc_wall534_fixture::assert_reference(reference.reference_skeleton.as_ref().unwrap());
+    rc_wall_cracking_reference::assert_reference(reference.reference_skeleton.as_ref().unwrap());
     assert!(report
         .wall_checks
         .iter()

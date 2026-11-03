@@ -95,7 +95,7 @@ fn pushover_summary(
 
 #[cfg(test)]
 mod tests {
-    use super::super::rc_wall617_fixture;
+    use super::super::rc_wall_side_column_model;
     use super::*;
     use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, WallPlateId};
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
@@ -139,7 +139,7 @@ mod tests {
             sepika_core::model::RcWallShearMethod::ArakawaMean,
             sepika_core::model::RcWallShearMethod::ArakawaMin,
         ] {
-            let mut m = with_saved_gravity(rc_wall617_fixture::input_model());
+            let mut m = with_saved_gravity(rc_wall_side_column_model::input_model());
             m.stress_cfg.rc_wall_shear_method = method;
             let before = serde_json::to_vec(&m).unwrap();
             let params = JobParams {
@@ -191,7 +191,7 @@ mod tests {
                 serde_json::to_value(method).unwrap()
             );
             assert_eq!(direct.rc_wall_shear_method, method);
-            let mut missing = with_saved_gravity(rc_wall617_fixture::input_model());
+            let mut missing = with_saved_gravity(rc_wall_side_column_model::input_model());
             missing.stress_cfg.rc_wall_shear_method = method;
             missing.sections[2].shear_rebar_material = None;
             let error = compute_pushover_job(missing, &params)

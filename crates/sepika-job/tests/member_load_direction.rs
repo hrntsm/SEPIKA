@@ -1,4 +1,4 @@
-#[path = "fixtures/high_density_steel.rs"]
+#[path = "fixtures/high_density_steel_model.rs"]
 mod fixture;
 
 use sepika_core::{ids::*, model::*};

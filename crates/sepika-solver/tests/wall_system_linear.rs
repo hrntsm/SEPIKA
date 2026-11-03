@@ -7,8 +7,8 @@ use sepika_element::factory::{build_behavior, StrengthBasis};
 use sepika_element::wall::wall_element::WallElement;
 use sepika_solver::statics::linear::{linear_static_once, StaticOnce};
 
-#[path = "../../../test_fixtures/rc_wall617.rs"]
-mod rc_wall617;
+#[path = "support/rc_wall_side_column_model.rs"]
+mod rc_wall_side_column_model;
 
 const KINDS: [ElementKind; 3] = [
     ElementKind::Beam,
@@ -332,7 +332,7 @@ fn rc_wall_capacity_keeps_explicit_local_directional_span_ratios() {
 }
 
 fn fixture(kind: ElementKind, dof: Dof, total_force_n: f64) -> Model {
-    let mut model = rc_wall617::expanded_model();
+    let mut model = rc_wall_side_column_model::expanded_model();
     model.materials[0].young = 30_000.0;
     model.materials[0].shear = Some(12_500.0);
     model.materials[1].name = "SD295A".into();

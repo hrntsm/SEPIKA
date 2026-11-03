@@ -1,6 +1,6 @@
 #[allow(dead_code)]
 mod seismic {
-    include!("seismic_freshness.rs");
+    include!("seismic_freshness_model.rs");
 }
 
 pub fn steel_frame() -> sepika_core::model::Model {

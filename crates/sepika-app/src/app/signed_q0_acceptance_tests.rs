@@ -1,5 +1,5 @@
 use super::*;
-#[path = "signed_q0_acceptance_fixture.rs"]
+#[path = "../../../sepika-design-jp/tests/fixtures/signed_beam_gravity_model.rs"]
 pub(crate) mod fixture;
 
 fn app() -> App {

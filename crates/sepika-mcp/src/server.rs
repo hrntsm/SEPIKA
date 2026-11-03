@@ -402,7 +402,8 @@ pub async fn run_stdio_server(state: ServerState) -> Result<(), Box<dyn std::err
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::job::rc_wall534_fixture as crack_fixture;
+    use crate::job::rc_wall_cracking_model as crack_fixture;
+    use crate::job::rc_wall_cracking_reference as crack_reference;
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, StoryId};
     use sepika_core::model::{
@@ -752,7 +753,8 @@ mod tests {
             CheckOutcome,
         };
         let dir = test_store_dir("534-crack-reference");
-        let model = crack_fixture::input_model(crate::job::rc_wall617_fixture::input_model());
+        let model =
+            crack_fixture::input_model(crate::job::rc_wall_side_column_model::input_model());
         let server = SepikaServer::new(make_state(model.clone(), &dir));
         let result = server
             .analysis_run(Parameters(run_args(JobKind::DesignCheck)))
@@ -770,7 +772,7 @@ mod tests {
             "{:?}",
             reference
         );
-        crack_fixture::assert_reference(reference.reference_skeleton.as_ref().unwrap());
+        crack_reference::assert_reference(reference.reference_skeleton.as_ref().unwrap());
         {
             let mut state = server.state.lock().await;
             state.model.wall_plates[0]
@@ -1547,7 +1549,7 @@ mod tests {
     mod seismic_freshness_fixture {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../sepika-job/tests/fixtures/seismic_freshness.rs"
+            "/../sepika-job/tests/fixtures/seismic_freshness_model.rs"
         ));
     }
 
@@ -1620,14 +1622,14 @@ mod tests {
     mod high_density_steel_fixture {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../sepika-job/tests/fixtures/high_density_steel.rs"
+            "/../sepika-job/tests/fixtures/high_density_steel_model.rs"
         ));
     }
 
     mod steel_slab_density_fixture {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../sepika-job/tests/fixtures/steel_slab.rs"
+            "/../sepika-job/tests/fixtures/steel_slab_model.rs"
         ));
     }
 

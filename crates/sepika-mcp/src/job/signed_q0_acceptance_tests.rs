@@ -1,5 +1,5 @@
 use super::*;
-#[path = "../../../sepika-app/src/app/signed_q0_acceptance_fixture.rs"]
+#[path = "../../../sepika-design-jp/tests/fixtures/signed_beam_gravity_model.rs"]
 mod fixture;
 
 fn summary(model: &Model, automatic: bool) -> serde_json::Value {

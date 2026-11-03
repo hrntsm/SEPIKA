@@ -321,7 +321,7 @@ impl StaticWallFace {
 }
 
 #[cfg(test)]
-#[path = "../../../../test_fixtures/rc_wall617.rs"]
+#[path = "../../../sepika-solver/tests/support/rc_wall_side_column_model.rs"]
 pub(super) mod fixture;
 
 #[cfg(test)]

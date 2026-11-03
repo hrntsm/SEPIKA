@@ -15,11 +15,14 @@ mod time_history;
 mod ultimate;
 
 #[cfg(test)]
-#[path = "../../../../test_fixtures/rc_wall534.rs"]
-pub(crate) mod rc_wall534_fixture;
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_wall_cracking_model.rs"]
+pub(crate) mod rc_wall_cracking_model;
 #[cfg(test)]
-#[path = "../../../../test_fixtures/rc_wall617.rs"]
-pub(crate) mod rc_wall617_fixture;
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_wall_cracking_reference.rs"]
+pub(crate) mod rc_wall_cracking_reference;
+#[cfg(test)]
+#[path = "../../../sepika-solver/tests/support/rc_wall_side_column_model.rs"]
+pub(crate) mod rc_wall_side_column_model;
 
 use design_check::compute_design_check_job;
 use eigen::compute_eigen_job;

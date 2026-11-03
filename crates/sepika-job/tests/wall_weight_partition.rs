@@ -8,8 +8,8 @@ use sepika_load::story_gen::{
     generate_stories, generate_stories_with_opts, generate_stories_with_synced_self_weight,
 };
 
-#[path = "../../../test_fixtures/rc_wall617.rs"]
-mod rc_wall617;
+#[path = "../../sepika-solver/tests/support/rc_wall_side_column_model.rs"]
+mod rc_wall_side_column_model;
 
 const WALL_SYSTEM_KINDS: [ElementKind; 3] = [
     ElementKind::Beam,
@@ -19,9 +19,9 @@ const WALL_SYSTEM_KINDS: [ElementKind; 3] = [
 
 fn wall_system_mass_fixture(kind: ElementKind, steel: bool, generated: bool) -> Model {
     let mut model = if generated {
-        rc_wall617::input_model()
+        rc_wall_side_column_model::input_model()
     } else {
-        rc_wall617::expanded_model()
+        rc_wall_side_column_model::expanded_model()
     };
     model.materials[0].young = if steel { 205_000.0 } else { 30_000.0 };
     model.materials[0].shear = Some(if steel { 80_000.0 } else { 12_500.0 });

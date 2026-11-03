@@ -285,8 +285,9 @@ fn assemble_design_check_summary(
 
 #[cfg(test)]
 mod tests {
-    use super::super::rc_wall534_fixture as crack_fixture;
-    use super::super::rc_wall617_fixture as fixture;
+    use super::super::rc_wall_cracking_model as crack_fixture;
+    use super::super::rc_wall_cracking_reference as crack_reference;
+    use super::super::rc_wall_side_column_model as fixture;
     use super::*;
     use sepika_core::ids::{ElemId, NodeId, WallPlateId};
     use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
@@ -413,7 +414,7 @@ mod tests {
             "{:?}",
             reference
         );
-        crack_fixture::assert_reference(reference.reference_skeleton.as_ref().unwrap());
+        crack_reference::assert_reference(reference.reference_skeleton.as_ref().unwrap());
         assert!(checks
             .iter()
             .filter(|w| w.kind == WallCheckKind::AllowableShear)
