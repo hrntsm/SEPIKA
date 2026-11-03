@@ -259,6 +259,17 @@ impl IsolatorElement {
             }
         }
     }
+
+    fn relative_forces(&self) -> [f64; 6] {
+        let kv = self.props.kv.max(0.0);
+        let ((fy, fz), _) = self.shear_forces();
+        let rel = |d: usize| self.trial_disp[d + 6] - self.trial_disp[d];
+        let fx = kv * rel(0);
+        let mrx = RIGID_ROT * rel(3);
+        let mry = RIGID_ROT * rel(4);
+        let mrz = RIGID_ROT * rel(5);
+        [fx, fy, fz, mrx, mry, mrz]
+    }
 }
 
 impl ElementBehavior for IsolatorElement {
@@ -288,13 +299,7 @@ impl ElementBehavior for IsolatorElement {
     }
 
     fn internal_force(&self, _ctx: &Ctx) -> LocalVec {
-        let kv = self.props.kv.max(0.0);
-        let ((fy, fz), _) = self.shear_forces();
-        let rel = |d: usize| self.trial_disp[d + 6] - self.trial_disp[d];
-        let fx = kv * rel(0);
-        let mrx = RIGID_ROT * rel(3);
-        let mry = RIGID_ROT * rel(4);
-        let mrz = RIGID_ROT * rel(5);
+        let [fx, fy, fz, mrx, mry, mrz] = self.relative_forces();
         let f_local = [-fx, -fy, -fz, -mrx, -mry, -mrz, fx, fy, fz, mrx, mry, mrz];
         let f_global = self.axis.rotate_to_global(&f_local);
         LocalVec {
@@ -303,13 +308,7 @@ impl ElementBehavior for IsolatorElement {
     }
 
     fn state_member_forces(&self, _ctx: &Ctx) -> Option<crate::frame::beam::MemberForces> {
-        let kv = self.props.kv.max(0.0);
-        let ((fy, fz), _) = self.shear_forces();
-        let rel = |d: usize| self.trial_disp[d + 6] - self.trial_disp[d];
-        let fx = kv * rel(0);
-        let mrx = RIGID_ROT * rel(3);
-        let mry = RIGID_ROT * rel(4);
-        let mrz = RIGID_ROT * rel(5);
+        let [fx, fy, fz, mrx, mry, mrz] = self.relative_forces();
         let v = [fx, -fy, -fz, mrx, mry, mrz];
         Some(crate::frame::beam::MemberForces {
             at: vec![(0.0, v), (1.0, v)],
