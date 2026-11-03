@@ -1,4 +1,4 @@
-#[path = "fixtures/seismic_freshness.rs"]
+#[path = "fixtures/seismic_freshness_model.rs"]
 mod fixture;
 use sepika_core::model::*;
 use sepika_job::{prepare::prepare_model, weight_preparation::*, AnalysisSettings};

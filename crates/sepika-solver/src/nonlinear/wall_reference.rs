@@ -218,7 +218,7 @@ fn resolve_inputs(
 }
 
 #[cfg(test)]
-#[path = "../../../../test_fixtures/rc_wall617.rs"]
+#[path = "../../tests/support/rc_wall_side_column_model.rs"]
 mod fixture;
 
 #[cfg(test)]

@@ -11892,7 +11892,7 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
 mod seismic_freshness_fixture {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../sepika-job/tests/fixtures/seismic_freshness.rs"
+        "/../sepika-job/tests/fixtures/seismic_freshness_model.rs"
     ));
 }
 
@@ -12660,14 +12660,14 @@ fn public_node_deletion_and_undo_remap_automatic_master_and_slave_snapshots() {
 mod high_density_steel_fixture {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../sepika-job/tests/fixtures/high_density_steel.rs"
+        "/../sepika-job/tests/fixtures/high_density_steel_model.rs"
     ));
 }
 
 mod steel_slab_density_fixture {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../sepika-job/tests/fixtures/steel_slab.rs"
+        "/../sepika-job/tests/fixtures/steel_slab_model.rs"
     ));
 }
 
@@ -13083,7 +13083,7 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
 pub(super) mod lateral_bracing_fixture {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../sepika-design-jp/tests/fixtures/lateral_bracing.rs"
+        "/../sepika-design-jp/tests/fixtures/lateral_bracing_model.rs"
     ));
 }
 

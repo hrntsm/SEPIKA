@@ -57,8 +57,8 @@ use sepika_solver::statics::analysis::SeismicDir;
 mod frame_gravity;
 use frame_gravity::select_frame_gravity;
 
-#[path = "support/issue985.rs"]
-mod issue985;
+#[path = "support/full_model_study.rs"]
+mod full_model_study;
 
 // ===================== フィクスチャと共通ヘルパー =====================
 

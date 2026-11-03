@@ -1,5 +1,7 @@
 # RC部材・耐震壁の力学モデルと終局耐力（Issue #883）
 
+> 配置整理（#1175）：現行の共有幾何入力は `crates/sepika-solver/tests/support/rc_wall_side_column_model.rs`。保存probe `data/issue883/source_probe.rs` は記録時点のソースで、当時のチェックアウトで再現する証跡として保持し、現行HEADで実行する入口にはしない。 本文の旧パス・実行コマンド・ハッシュは記録時点の情報を保持する。現在の利用元・実行範囲は[開発規約](../../CONTRIBUTING.md#クレートをまたぐ共有の管理先)を参照。
+
 ## 対象と証拠の区別
 
 2026-10-27、main基点 `de1d4ba67e6695df8d17baf8eb9d7d8d993438b2` の現行機能を有限の重点項目に絞って確認した。

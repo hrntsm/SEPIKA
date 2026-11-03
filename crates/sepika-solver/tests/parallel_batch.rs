@@ -178,10 +178,10 @@ fn test_parallel_combination_batch() {
     }
 }
 
-mod static595_fixture {
+mod static_analysis_model {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../test_fixtures/static595.rs"
+        "/tests/support/static_analysis_model.rs"
     ));
 }
 
@@ -193,7 +193,7 @@ fn parallel_settings_use_case_local_active_sets_and_two_stiffness_classes() {
         ElementKind::Fiber,
         ElementKind::Brace { tension_only: true },
     ] {
-        let mut model = static595_fixture::scalar_model(kind);
+        let mut model = static_analysis_model::scalar_model(kind);
         model.stress_cfg.no_long_axial_column = true;
         model.stress_cfg.no_long_axial_brace = true;
         model.stress_cfg.tension_only_iteration = true;
@@ -233,7 +233,7 @@ fn parallel_settings_use_case_local_active_sets_and_two_stiffness_classes() {
 fn public_static_nonconvergence_is_case_local_and_combinations_propagate_failure() {
     use sepika_math::solver::SolveError;
     set_parallelism(Parallelism::Threads(2));
-    let mut model = static595_fixture::cycling_brace_model();
+    let mut model = static_analysis_model::cycling_brace_model();
     let mut zero = model.load_cases[0].clone();
     zero.id = LoadCaseId(1);
     zero.name = "zero".into();
@@ -272,7 +272,7 @@ fn loaded_frame_and_legacy_brace_cases_remain_independent_in_parallel() {
     ] {
         for iterative in [false, true] {
             for fixed in [false, true] {
-                let mut model = static595_fixture::scalar_model(frame_kind);
+                let mut model = static_analysis_model::scalar_model(frame_kind);
                 let mut brace = model.elements[0].clone();
                 brace.id = ElemId(1);
                 brace.kind = ElementKind::Brace { tension_only: true };

@@ -1,11 +1,13 @@
 use super::*;
-#[path = "../../../../test_fixtures/rc_wall534.rs"]
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_wall_cracking_model.rs"]
 mod crack_fixture;
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_wall_cracking_reference.rs"]
+mod crack_reference;
 
 fn crack_ready() -> App {
     let mut app = App::default();
     app.load_model(crack_fixture::input_model(
-        super::rc_wall617_tests::fixture::input_model(),
+        super::rc_wall_side_column_tests::fixture::input_model(),
     ));
     app.run_preparation();
     app.run_linear_static(LoadCaseId(0));
@@ -35,7 +37,7 @@ fn gui_design_crack_points_match_independent_fixture_and_saved_component() {
         "{:?}",
         reference
     );
-    crack_fixture::assert_reference(reference.reference_skeleton.as_ref().unwrap());
+    crack_reference::assert_reference(reference.reference_skeleton.as_ref().unwrap());
     let expected = reference.reference_skeleton.clone();
     let path =
         std::env::temp_dir().join(format!("sepika534-reference-{}.ovika", std::process::id()));
@@ -172,7 +174,7 @@ fn crack_reference_input_edits_undo_redo_and_save_never_reauthenticate_old_resul
         );
         // 同じ生成入力へUndoした結果を使う場合も、再認証は入力・計算契約の完全一致に限る。
         if let Some(results) = app.current_design_results() {
-            crack_fixture::assert_reference(
+            crack_reference::assert_reference(
                 results
                     .wall_checks
                     .iter()

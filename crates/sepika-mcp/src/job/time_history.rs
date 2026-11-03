@@ -48,7 +48,7 @@ pub(crate) fn compute_time_history_job(
 
 #[cfg(test)]
 mod tests {
-    use super::super::rc_wall617_fixture as fixture;
+    use super::super::rc_wall_side_column_model as fixture;
     use super::*;
     #[test]
     fn linear_mcp_time_history_does_not_require_rc_wall_capacity() {

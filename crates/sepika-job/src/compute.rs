@@ -550,7 +550,7 @@ mod static_settings_tests {
     use super::*;
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../test_fixtures/static595.rs"
+        "/../sepika-solver/tests/support/static_analysis_model.rs"
     ));
 
     #[test]

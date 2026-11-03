@@ -3906,7 +3906,7 @@ fn stb_strength_incompatible_steel_parts_do_not_supply_a_single_material() {
 mod lateral_bracing_fixture {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../sepika-design-jp/tests/fixtures/lateral_bracing.rs"
+        "/../sepika-design-jp/tests/fixtures/lateral_bracing_model.rs"
     ));
 }
 
@@ -4296,10 +4296,10 @@ fn rebar_cover_center_notice_query_is_nonblocking_and_distinct_from_strength_err
         .unwrap();
 }
 
-mod static595_fixture {
+mod static_analysis_model {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../test_fixtures/static595.rs"
+        "/../sepika-solver/tests/support/static_analysis_model.rs"
     ));
 }
 
@@ -4311,7 +4311,7 @@ fn static595_mcp_linear_static_job_adopts_column_and_tension_settings() {
         ElementKind::MultiSpring,
         ElementKind::Brace { tension_only: true },
     ] {
-        let mut model = static595_fixture::scalar_model(kind);
+        let mut model = static_analysis_model::scalar_model(kind);
         model.stress_cfg.no_long_axial_column = true;
         model.stress_cfg.no_long_axial_brace = true;
         model.stress_cfg.tension_only_iteration = true;
@@ -4337,7 +4337,7 @@ fn static595_mcp_linear_static_job_adopts_column_and_tension_settings() {
 
 #[test]
 fn static595_mcp_static_and_required_design_cases_reject_real_nonconvergence() {
-    let model = static595_fixture::cycling_brace_model();
+    let model = static_analysis_model::cycling_brace_model();
     for kind in [JobKind::LinearStatic, JobKind::DesignCheck] {
         let error = compute_job(&model, kind, &JobParams::default())
             .err()
@@ -4351,7 +4351,7 @@ fn static595_mcp_static_and_required_design_cases_reject_real_nonconvergence() {
 fn static595_mcp_tension_case_superposition_remains_unchecked() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{LoadCaseKind, LoadCombination};
-    let mut model = static595_fixture::scalar_model(ElementKind::Brace { tension_only: true });
+    let mut model = static_analysis_model::scalar_model(ElementKind::Brace { tension_only: true });
     model.stress_cfg.tension_only_iteration = true;
     let mut live = model.load_cases[0].clone();
     live.id = LoadCaseId(1);

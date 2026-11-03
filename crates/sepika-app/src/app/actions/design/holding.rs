@@ -1314,7 +1314,7 @@ mod tests {
 
     fn single_wall_619_model(clear_height_mm: f64) -> sepika_core::model::Model {
         use sepika_core::section_shape::SectionShape;
-        let mut model = crate::app::rc_wall617_tests::fixture::input_model();
+        let mut model = crate::app::rc_wall_side_column_tests::fixture::input_model();
         for node in &mut model.nodes {
             if node.coord[0] == 4000.0 {
                 node.coord[0] = 3000.0;

@@ -68,6 +68,48 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 使用量をログへ記録します。`rust-cache` はこれらの profile 環境変数を復元キーへ含めるため、
 デバッグ情報を含む旧 Linux キャッシュは復元しません。
 
+## テスト入力と補助コードの配置
+
+- `src/` 内の単体テストは、対象モジュールの契約・内部状態を検証する。GUI操作・描画に依存する補助だけをGUI内部に置く。
+- `tests/*.rs` はクレートの公開入口・複数機能を接続する統合テストを置く。テスト本体を別ファイルから読み込む場合も、親の統合テストを実行入口とする。
+- `tests/support/` はモデル構築・操作・通信などのRust/Python補助コードを置く。固定入力ファイルは `tests/fixtures/` に置き、読み込み側で期待結果を検証する。
+- 新しいフォルダを増やさず既存の検証責務を維持するため、`sepika-job/tests/fixtures/` と `sepika-design-jp/tests/fixtures/` のRust補助コードは既存位置で管理する。モデル生成は `*_model.rs`、独立期待値とassertは `*_reference.rs` とし、読み込むSTB・JSON・TSV等と区別する。
+- 管理先は検証対象を所有するクレートで決める。core型だけを使う入力でも、解析・耐力・数量などの仕様を検証するものはその責務側に置く。共有のための製品API・依存・共有クレートは追加しない。
+- 共有入力は一か所で構築し、各利用側のテスト・独立期待値・許容誤差を保持する。共通の期待契約を使う場合も、入力構築とは別ファイルにする。
+
+### クレートをまたぐ共有の管理先
+
+以下のパスは `crates/` からの相対パス。利用元は直接のソース参照に加え、親モジュール経由の入口も示す。
+
+| 管理先 | 共有する検証対象・管理理由 | 利用元・実行入口 |
+| --- | --- | --- |
+| `sepika-core/tests/support/assignment_identity_model.rs` | 割当領域の識別・外部ID。coreのモデル契約を各入口でも維持 | core `model/assignment_identity_tests`、edit/job/mcp `tests/assignment_identity.rs`、mcp `tests/external_ids.rs`・`src/server_external_ids.rs`、app `src/app/assignment_identity_tests.rs` |
+| `sepika-core/tests/support/frame_support_model.rs` | 主架構支持の解析表現。coreの物理支持契約を編集・入出力・準備で維持 | core/edit/io/job `tests/frame_support_representation.rs` |
+| `sepika-core/tests/support/secondary_materialization_model.rs` | 二次部材の解析要素化。coreの生成契約をジョブ・GUI入口で維持 | core/job `tests/secondary_materialization.rs`、app `src/app/tests.rs` |
+| `sepika-core/tests/support/steel_secondary_post_model.rs` | 鋼製間柱のモデル属性・材料対応。編集・検定・GUIで同じ入力を保持 | edit `src/secondary.rs`、design-jp `src/post.rs`、app `src/app/post_design_tests.rs` |
+| `sepika-solver/tests/support/static_analysis_model.rs` | 柱の軸剛性設定と引張専用ブレース反復。solverの静的解析契約を各実行入口で維持 | solver `tests/parallel_batch.rs`、job `src/compute.rs`、app `src/app/actions/linear_static.rs`、mcp `src/tests.rs` |
+| `sepika-solver/tests/support/rc_wall_side_column_model.rs` | 側柱付きRC壁の共通face・剛性・力の分担。solverの壁系解析を要素・検定・重量・GUI/MCPでも検証 | solver `tests/wall_system_linear.rs`・`src/nonlinear/wall_reference.rs`、element `src/wall/static_face.rs`、design-jp `src/joint_wiring/tests.rs`、job `tests/wall_weight_partition.rs`、app `src/app/rc_wall_side_column_tests.rs`（holding・viewerからも利用）、mcp `src/job/mod.rs`経由のdesign_check・pushover・time_history・server |
+| `sepika-solver/tests/support/wall_side_column.rs` | 共通断面の質量・慣性。solverの解析質量を準備・GUI入口でも検証 | solver `tests/common_section_mass.rs`、job `tests/wall_side_column_entry.rs`、app `src/app/tests.rs` |
+| `sepika-design-jp/tests/fixtures/rc_wall_cracking_model.rs`・`rc_wall_cracking_reference.rs` | RC壁のひび割れ耐力の入力と独立期待契約。design-jpの耐力計算をGUI・MCPでも照合 | design-jp `src/joint_wiring/tests.rs`、app `src/app/rc_wall_cracking_tests.rs`、mcp `src/job/design_check.rs`・`src/server.rs`（`src/job/mod.rs`から共有） |
+| `sepika-design-jp/tests/fixtures/signed_beam_gravity_model.rs` | RC梁の符号付き重力端反力と検定組合せ。design-jpのせん断需要算定に共通の入力 | app `src/app/signed_q0_acceptance_tests.rs`（viewerからも利用）、mcp `src/job/signed_q0_acceptance_tests.rs` |
+| `sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs`・`nonnodal_quantity_reference.rs` | 非節点小梁の材料別数量。design-jpの数量計算とassertをGUI・MCPの編集操作から検証 | app `src/app/nonnodal_quantity_acceptance_tests.rs`、mcp `src/nonnodal_quantity_acceptance_tests.rs` |
+| `sepika-design-jp/tests/fixtures/lateral_bracing_model.rs` | 横補剛の検定入力。GUI・MCPからdesign-jpの同一検定契約を検証 | app `src/app/tests.rs`、mcp `src/tests.rs` |
+| `sepika-job/tests/fixtures/steel_slab_model.rs` | 鋼床板の密度・物理質量。jobの重量準備をGUI・MCP入口でも検証 | job `tests/steel_slab_density.rs`・`tests/slab_physical_mass.rs`、app `tests/slab_physical_mass.rs`・`src/app/tests.rs`、mcp `src/server.rs` |
+| `sepika-job/tests/fixtures/seismic_freshness_model.rs`・`high_density_steel_model.rs` | 地震荷重の更新と高密度鋼材。jobの荷重準備・検証契約をGUI・MCPからも検証。鋼床板モデルもこの入力を使用 | job `tests/seismic_freshness.rs`・`tests/high_density_steel.rs`・`tests/member_load_direction.rs`、app `src/app/tests.rs`、mcp `src/server.rs` |
+
+appの `tests/support/frame_gravity.rs` は `full_model.rs`・`wall_model.rs` の保存重力組合せ選択、
+`full_model_study.rs`・`full_model_study_wire.rs` は `full_model.rs` のGUI検討・Windows実通信テストを管理する。
+mcpの `tests/support/gui_probe.py` はGUI中継の外部プロセス操作を管理する。
+これらはGUI・通信固有なので計算用の共有入力へ移さない。
+
+### 参照元と検証の追跡
+
+`#[path]` と `include!(concat!(env!("CARGO_MANIFEST_DIR"), ...))` によるソース共有はCargo依存だけでは追跡できない。
+変更ファイル名を `rg 'static_analysis_model.rs' crates` のように検索し、親モジュールから使う入口も上表で確認する。
+共有先を移動・追加したら上表を更新する。入力変更時には利用元すべての単体・統合テストを実行し、
+appの `gui`、mcpの `mcp` など利用元のfeature経路も確認する。具体的なコマンド構成は[CI workflow](.github/workflows/ci.yml)を正とする。
+過去のV&V文書・保存ログ内のパス・コマンド・ハッシュは記録時点の証跡であり、現行の入口とは区別する。
+
 ## Issue の起票
 
 GitHub の Issue 作成画面で、目的に合う [Issue Forms](.github/ISSUE_TEMPLATE/) を選んでください。

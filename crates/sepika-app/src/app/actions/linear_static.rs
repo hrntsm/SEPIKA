@@ -1101,11 +1101,11 @@ mod tests {
 }
 
 #[cfg(test)]
-mod static595_tests {
+mod static_analysis_settings_tests {
     use super::*;
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../test_fixtures/static595.rs"
+        "/../sepika-solver/tests/support/static_analysis_model.rs"
     ));
 
     fn settings_app(kind: sepika_core::model::ElementKind) -> App {
@@ -1194,8 +1194,8 @@ mod static595_tests {
 }
 
 #[cfg(test)]
-mod static595_failure_tests {
-    use super::static595_tests::cycling_brace_model;
+mod static_analysis_failure_tests {
+    use super::static_analysis_settings_tests::cycling_brace_model;
     use super::*;
 
     #[test]

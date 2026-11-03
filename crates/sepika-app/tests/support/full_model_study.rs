@@ -3,7 +3,7 @@ use sepika_app::app::study::Location;
 use sepika_core::ids::{ElemId, SectionId};
 
 #[cfg(all(windows, feature = "gui"))]
-#[path = "issue985_wire.rs"]
+#[path = "full_model_study_wire.rs"]
 mod wire;
 
 fn fixture_content_hash(bytes: &[u8]) -> String {

@@ -1,6 +1,6 @@
 #[allow(dead_code)]
 mod frame {
-    include!("high_density_steel.rs");
+    include!("high_density_steel_model.rs");
 }
 
 pub fn one_cubic_metre(attached: bool) -> sepika_core::model::Model {

@@ -1424,7 +1424,7 @@ mod tests {
         use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, DL_CASE_NAME};
         for method in [ArakawaMin, ArakawaMean] {
             let mut app = App::default();
-            app.load_model(crate::app::rc_wall617_tests::fixture::input_model());
+            app.load_model(crate::app::rc_wall_side_column_tests::fixture::input_model());
             app.core.model.stress_cfg.rc_wall_shear_method = method;
             app.core.analysis_cfg.push_steps = 2;
             app.core.analysis_cfg.push_use_max_disp = true;

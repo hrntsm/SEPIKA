@@ -1,4 +1,4 @@
-#[path = "fixtures/steel_slab.rs"]
+#[path = "fixtures/steel_slab_model.rs"]
 mod fixture;
 use sepika_core::{ids::*, model::*};
 use sepika_job::{auto_loads, prepare::prepare_model, weight_preparation::weights_are_current};

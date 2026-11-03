@@ -1,6 +1,8 @@
 use super::*;
+#[path = "../../sepika-design-jp/tests/fixtures/nonnodal_quantity_reference.rs"]
+mod quantity_reference;
 use sepika_core::ids::*;
-#[path = "../../sepika-app/tests/support/nonnodal_quantity_model.rs"]
+#[path = "../../sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs"]
 mod fixture;
 
 fn value(result: CallToolResult) -> serde_json::Value {
@@ -119,7 +121,7 @@ async fn nonnodal557_mcp_supported_edit_handler_undo_redo_and_save_roundtrip() {
                 .fc,
             Some(30.0)
         );
-        fixture::assert_quantity(&st.model, id, 0.54, 4.5);
+        quantity_reference::assert_quantity(&st.model, id, 0.54, 4.5);
         (id, st.model.clone())
     };
     let q = quantity(&server, "detail").await;
@@ -144,7 +146,7 @@ async fn nonnodal557_mcp_supported_edit_handler_undo_redo_and_save_roundtrip() {
     assert_eq!(result["applied"], true, "{result}");
     let moved = {
         let mut st = server.state.lock().await;
-        fixture::assert_quantity(&st.model, id, 0.675, 5.625);
+        quantity_reference::assert_quantity(&st.model, id, 0.675, 5.625);
         let moved = st.model.clone();
         {
             let ServerState { undo, model, .. } = &mut *st;
@@ -152,7 +154,7 @@ async fn nonnodal557_mcp_supported_edit_handler_undo_redo_and_save_roundtrip() {
         }
         assert!(st.model.eq_ignoring_dofmap(&placed));
         assert_eq!(st.model.stb_strengths, placed.stb_strengths);
-        fixture::assert_quantity(&st.model, id, 0.54, 4.5);
+        quantity_reference::assert_quantity(&st.model, id, 0.54, 4.5);
         moved
     };
     assert!(
@@ -170,7 +172,7 @@ async fn nonnodal557_mcp_supported_edit_handler_undo_redo_and_save_roundtrip() {
             undo.redo(model);
         }
         assert!(st.model.eq_ignoring_dofmap(&moved));
-        fixture::assert_quantity(&st.model, id, 0.675, 5.625);
+        quantity_reference::assert_quantity(&st.model, id, 0.675, 5.625);
         let revision = st.undo.revision();
         let path = dir.join("edited.ovika");
         sepika_io::ovika::save_ovika(&path, &st.model, Default::default()).unwrap();
@@ -188,7 +190,7 @@ async fn nonnodal557_mcp_supported_edit_handler_undo_redo_and_save_roundtrip() {
             loaded.secondary_member(id).unwrap().ends,
             fixture::moved_ends()
         );
-        fixture::assert_quantity(&loaded, id, 0.675, 5.625);
+        quantity_reference::assert_quantity(&loaded, id, 0.675, 5.625);
         assert_eq!(st.undo.revision(), revision);
     }
     let q = quantity(&server, "detail").await;

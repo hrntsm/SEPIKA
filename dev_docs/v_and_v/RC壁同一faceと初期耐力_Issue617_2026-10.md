@@ -1,5 +1,7 @@
 # RC壁の同一face内力と初期耐力 — Issue #617
 
+> 配置整理（#1175）：現行の共有入力は `crates/sepika-solver/tests/support/rc_wall_side_column_model.rs`、GUI試験は `crates/sepika-app/src/app/rc_wall_side_column_tests.rs`。 本文の旧パス・実行コマンド・ハッシュは記録時点の情報を保持する。現在の利用元・実行範囲は[開発規約](../../CONTRIBUTING.md#クレートをまたぐ共有の管理先)を参照。
+
 > **記録時点**：以下の試験値・件数・未実施範囲と「後続」「未完了」は、各節に示すローカル検証・レビュー記録時点の履歴である。
 > 最新の最終ゲートは [PR #655](https://github.com/hrntsm/SEPIKA/pull/655) と [索引の最終ゲート参照](README.md#記録時点と最終ゲート)を参照する。CI・mergeの完了は、未実施のGUI・Validation等の完了を意味しない。
 

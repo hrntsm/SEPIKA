@@ -1,6 +1,8 @@
 use super::*;
+#[path = "../../../sepika-design-jp/tests/fixtures/nonnodal_quantity_reference.rs"]
+mod quantity_reference;
 use sepika_core::{ids::*, model::*};
-#[path = "../../tests/support/nonnodal_quantity_model.rs"]
+#[path = "../../../sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs"]
 mod fixture;
 
 fn panel_text(app: &mut App, grouping: crate::quantity_view::QuantityGrouping) -> String {
@@ -29,7 +31,7 @@ fn nonnodal557_gui_csv_and_common_entry_preserve_id_quantity_and_model() {
     app.core.model.validate().unwrap();
     let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
     let revision = app.core.scoped.undo.revision();
-    fixture::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
+    quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
     for grouping in [ByCategory, ByStory, SteelBySection, Detail] {
         let text = panel_text(&mut app, grouping);
         assert!(!text.contains("未算定"), "{text}");
@@ -127,7 +129,7 @@ fn nonnodal557_app_supported_edits_undo_redo_and_ovika_preserve_quantities() {
         app.core.scoped.last_error
     );
     let id = app.core.model.beams().next().unwrap().id;
-    fixture::assert_quantity(&app.core.model, id, 0.54, 4.5);
+    quantity_reference::assert_quantity(&app.core.model, id, 0.54, 4.5);
     let placed = app.core.model.clone();
     assert!(
         app.apply_model_edit(Box::new(sepika_edit::SetSecondaryMemberEnds {
@@ -135,16 +137,16 @@ fn nonnodal557_app_supported_edits_undo_redo_and_ovika_preserve_quantities() {
             ends: fixture::moved_ends()
         }))
     );
-    fixture::assert_quantity(&app.core.model, id, 0.675, 5.625);
+    quantity_reference::assert_quantity(&app.core.model, id, 0.675, 5.625);
     let moved = app.core.model.clone();
     let text = panel_text(&mut app, crate::quantity_view::QuantityGrouping::Detail);
     assert!(text.contains("0.675") && text.contains("5.62"), "{text}");
     app.undo_action();
     assert!(app.core.model.eq_ignoring_dofmap(&placed));
-    fixture::assert_quantity(&app.core.model, id, 0.54, 4.5);
+    quantity_reference::assert_quantity(&app.core.model, id, 0.54, 4.5);
     app.redo_action();
     assert!(app.core.model.eq_ignoring_dofmap(&moved));
-    fixture::assert_quantity(&app.core.model, id, 0.675, 5.625);
+    quantity_reference::assert_quantity(&app.core.model, id, 0.675, 5.625);
     let revision = app.core.scoped.undo.revision();
     let path = std::env::temp_dir().join(format!("sepika557-app-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
@@ -166,7 +168,7 @@ fn nonnodal557_app_supported_edits_undo_redo_and_ovika_preserve_quantities() {
         loaded.secondary_member(id).unwrap().ends,
         fixture::moved_ends()
     );
-    fixture::assert_quantity(loaded, id, 0.675, 5.625);
+    quantity_reference::assert_quantity(loaded, id, 0.675, 5.625);
     assert_eq!(app.core.scoped.undo.revision(), revision);
     std::fs::remove_file(path).unwrap();
     app.undo_action();
@@ -207,7 +209,7 @@ fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
         control.stories[0].node_ids.push(NodeId(id));
     }
     control.validate().unwrap();
-    fixture::assert_quantity(&control, SecondaryMemberId(557), 0.54, 4.5);
+    quantity_reference::assert_quantity(&control, SecondaryMemberId(557), 0.54, 4.5);
     assert_eq!(
         control
             .secondary_material(control.secondary_member(SecondaryMemberId(557)).unwrap())
@@ -219,7 +221,7 @@ fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
     let mut app = App::default();
     app.core.model = model;
     let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
-    fixture::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
+    quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
     let text = panel_text(&mut app, crate::quantity_view::QuantityGrouping::Detail);
     assert!(text.contains("SM557") && text.contains("0.540"), "{text}");
     let csv = crate::summary::build_quantity_csv(&app.core.model);
@@ -231,13 +233,13 @@ fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
             ends: fixture::moved_ends()
         }))
     );
-    fixture::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.675, 5.625);
+    quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.675, 5.625);
     assert_eq!(app.core.model.stb_strengths, original_strengths);
     app.undo_action();
-    fixture::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
+    quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
     assert_eq!(app.core.model.stb_strengths, original_strengths);
     app.redo_action();
-    fixture::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.675, 5.625);
+    quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.675, 5.625);
     assert_eq!(app.core.model.stb_strengths, original_strengths);
     let path = std::env::temp_dir().join(format!("sepika557-stb-app-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
@@ -262,6 +264,6 @@ fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
             .fc,
         Some(30.0)
     );
-    fixture::assert_quantity(loaded, SecondaryMemberId(557), 0.675, 5.625);
+    quantity_reference::assert_quantity(loaded, SecondaryMemberId(557), 0.675, 5.625);
     std::fs::remove_file(path).unwrap();
 }
