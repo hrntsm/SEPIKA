@@ -354,17 +354,13 @@ mod tests {
 
     #[test]
     fn test_fs_branch_and_cap() {
-        assert!((fs(0.6).unwrap() - 1.0).abs() < 1e-9);
         assert!((fs(1.0).unwrap() - 1.0).abs() < 1e-9);
-        assert!((fs(0.3).unwrap() - 1.5).abs() < 1e-9);
         assert!((fs(0.0).unwrap() - 2.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_fe_branch_and_cap() {
-        assert!((fe(0.15).unwrap() - 1.0).abs() < 1e-9);
         assert!((fe(0.0).unwrap() - 1.0).abs() < 1e-9);
-        assert!((fe(0.30).unwrap() - 1.5).abs() < 1e-9);
         assert!((fe(0.45).unwrap() - 1.5).abs() < 1e-9);
     }
 

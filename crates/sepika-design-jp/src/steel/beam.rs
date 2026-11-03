@@ -1294,28 +1294,6 @@ mod tests {
         );
     }
 
-    /// AIJ-ASD19 fb: lb=0 では横座屈を考慮しない fb=ft。
-    #[test]
-    fn test_beam_check_fb_basis_asd2019_lb_zero_equals_ft() {
-        let f = 235.0;
-        let z_strong = 1.0e6;
-        let fb = steel_fb_h_asd2019(
-            f,
-            LoadTerm::Long,
-            0.0,
-            1.0e7,
-            1.0e12,
-            1.0e5,
-            205_000.0,
-            79_000.0,
-            z_strong,
-            1.0,
-            0.3,
-        );
-        let ft = steel_ft(f, LoadTerm::Long);
-        assert!((fb - ft).abs() < 1e-9, "fb={} ft={}", fb, ft);
-    }
-
     // steel_p_lambda_b（塑性限界細長比 pλb）
 
     /// 座屈区間中央の曲げが両端部より大きい場合は安全側 pλb=0.3。

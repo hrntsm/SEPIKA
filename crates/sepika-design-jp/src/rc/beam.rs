@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn test_beam_check_via_design_check_trait() {
+    fn test_beam_check_trait_reports_ratio_basis_components_and_details() {
         let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
         let sec = make_section(shape);
         let mat = make_material(24.0, "SD345");
@@ -463,27 +463,7 @@ mod tests {
         let result = design.check(&forces, &sec, &mat, &ctx).unwrap_checked();
         assert!(result.ratio() > 0.0);
         assert!(result.basis.contains("13条"));
-    }
 
-    /// components に曲げ・せん断（付着は ctx.length=0 のため省略）の内訳が入る
-    /// ことを確認する（`ratio()`/`ok()` が components から導出される不変条件は
-    /// 型で保証されるため、ここでは内訳の内容のみ検証する）。
-    #[test]
-    fn test_beam_check_components_bending_and_shear() {
-        let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
-        let sec = make_section(shape);
-        let mat = make_material(24.0, "SD345");
-        let ctx = ctx_beam(LoadTerm::Long);
-        let forces = MemberForcesAt {
-            pos: 0.0,
-            n: 0.0,
-            qy: 20_000.0,
-            qz: 0.0,
-            my: 0.0,
-            mz: 30_000_000.0,
-        };
-        let design = crate::rc::RcDesign;
-        let result = design.check(&forces, &sec, &mat, &ctx).unwrap_checked();
         assert!(!result.components.is_empty());
         assert!(result
             .components
@@ -493,6 +473,23 @@ mod tests {
             .components
             .iter()
             .any(|c| c.kind == crate::CheckKind::Shear));
+
+        let bending = result
+            .components
+            .iter()
+            .find(|c| c.kind == crate::CheckKind::Bending)
+            .expect("Bending component が存在するはず");
+        let shear = result
+            .components
+            .iter()
+            .find(|c| c.kind == crate::CheckKind::Shear)
+            .expect("Shear component が存在するはず");
+        assert!(bending.detail.contains("MA_t="));
+        assert!(!shear.detail.contains("MA_t="));
+        assert!(shear.detail.contains("QA="));
+        assert!(!bending.detail.contains("QA="));
+        // 断面諸元（at・d・j）は共通 detail 側にある。
+        assert!(result.detail.contains("at="));
     }
 
     /// 軽量1種の RcDesign 検定は、普通コンクリートより検定比が大きくなる
@@ -626,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn test_beam_check_via_design_check_trait_includes_bond_detail() {
+    fn test_beam_check_trait_reports_ratio_basis_components_and_details_includes_bond_detail() {
         let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
         let sec = make_section(shape);
         let mat = make_material(24.0, "SD345");
@@ -831,41 +828,5 @@ mod tests {
         assert!(detail("SD345").contains("fa=2.310"));
         assert!(detail("SR235").contains("fa=1.350"));
         assert!(detail("任意名称").contains("fa=2.310"));
-    }
-
-    /// 断片が意図した component に配置されていることの確認
-    /// （Bending の detail に "MA_t=" が含まれ、Shear の detail には含まれない）。
-    #[test]
-    fn test_beam_check_detail_fragments_assigned_to_intended_components() {
-        let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
-        let sec = make_section(shape);
-        let mat = make_material(24.0, "SD345");
-        let ctx = ctx_beam(LoadTerm::Long);
-        let forces = MemberForcesAt {
-            pos: 0.0,
-            n: 0.0,
-            qy: 20_000.0,
-            qz: 0.0,
-            my: 0.0,
-            mz: 30_000_000.0,
-        };
-        let design = crate::rc::RcDesign;
-        let result = design.check(&forces, &sec, &mat, &ctx).unwrap_checked();
-        let bending = result
-            .components
-            .iter()
-            .find(|c| c.kind == crate::CheckKind::Bending)
-            .expect("Bending component が存在するはず");
-        let shear = result
-            .components
-            .iter()
-            .find(|c| c.kind == crate::CheckKind::Shear)
-            .expect("Shear component が存在するはず");
-        assert!(bending.detail.contains("MA_t="));
-        assert!(!shear.detail.contains("MA_t="));
-        assert!(shear.detail.contains("QA="));
-        assert!(!bending.detail.contains("QA="));
-        // 断面諸元（at・d・j）は共通 detail 側にある。
-        assert!(result.detail.contains("at="));
     }
 }

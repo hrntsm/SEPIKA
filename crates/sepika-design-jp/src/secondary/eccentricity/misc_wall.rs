@@ -9,7 +9,7 @@ use sepika_core::model::{
 use super::core::ColumnStiffness;
 
 /// 1以上の有限なn、正の有限な壁面積・柱面積と非負有限の柱剛性から付加剛性 [N/mm] を返す。
-/// aw・sum_acは [mm²]、sum_kcは [N/mm]、nは無次元。入力不正又は非有限な結果はErr。
+/// aw・sum_acは `[mm²]`、sum_kcは `[N/mm]`、nは無次元。入力不正又は非有限な結果はErr。
 pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> Result<f64, String> {
     if !n.is_finite() || n < 1.0 {
         return Err("n倍法: 係数nは1以上の有限値にしてください".into());
@@ -27,7 +27,7 @@ pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> Result<
     Ok(stiffness)
 }
 
-/// 層内同一断面の柱の総面積 [mm²]。断面・材料・面積の欠落や不正はErr。
+/// 層内同一断面の柱の総面積 `[mm²]`。断面・材料・面積の欠落や不正はErr。
 pub fn sum_column_area(model: &Model, story: StoryId) -> Result<f64, String> {
     let mut sum = 0.0;
     for col in crate::secondary::story_columns::story_columns(model, story) {

@@ -746,16 +746,6 @@ fn test_ultimate_check_pushover_demand() {
     );
 
     // (2) 部材別 Rp を上げると（塑性理論式）柱の Qsu は低下する（ν・cotφ 低減）。
-    let d_rp0 = vec![
-        (
-            ElemId(0),
-            MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.0),
-        ),
-        (
-            ElemId(1),
-            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        ),
-    ];
     let d_rp3 = vec![
         (
             ElemId(0),
@@ -766,9 +756,8 @@ fn test_ultimate_check_pushover_demand() {
             MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         ),
     ];
-    let c0 = collect_rc_ultimate_checks(&model, &d_rp0, &UltimateShearOptions::default()).unwrap();
     let c3 = collect_rc_ultimate_checks(&model, &d_rp3, &UltimateShearOptions::default()).unwrap();
-    let q0 = c0.iter().find(|c| c.elem == ElemId(0)).unwrap().qsu;
+    let q0 = col.qsu;
     let q3 = c3.iter().find(|c| c.elem == ElemId(0)).unwrap().qsu;
     assert!(
         q3 < q0,
@@ -1187,7 +1176,7 @@ fn test_ultimate_new_columns_mu_matches_handcalc() {
 
 /// 梁の上下非対称では曲げモーメントの符号で引張側が変わり Mu に反映される。
 #[test]
-fn test_ultimate_beam_rect_tension_side_affects_mu() {
+fn test_ultimate_beam_rect_tension_side_affects_mu_and_qbu() {
     let opts = UltimateShearOptions::default();
     let model = single_shape_model(beam_rect_shape(), 400.0, 600.0, true);
 
@@ -1207,8 +1196,10 @@ fn test_ultimate_beam_rect_tension_side_affects_mu() {
             ..Default::default()
         },
     )];
-    let mu_top = collect_rc_ultimate_checks(&model, &top_demand, &opts).unwrap()[0].mu;
-    let mu_bottom = collect_rc_ultimate_checks(&model, &bottom_demand, &opts).unwrap()[0].mu;
+    let top = collect_rc_ultimate_checks(&model, &top_demand, &opts).unwrap();
+    let bottom = collect_rc_ultimate_checks(&model, &bottom_demand, &opts).unwrap();
+    let mu_top = top[0].mu;
+    let mu_bottom = bottom[0].mu;
     assert!(mu_top > 0.0 && mu_bottom > 0.0);
     assert!(
         (mu_top - mu_bottom).abs() > 1.0,
@@ -1216,33 +1207,9 @@ fn test_ultimate_beam_rect_tension_side_affects_mu() {
     );
     // 上端筋 6 本 > 下端筋 5 本のため上端引張の Mu が大きい。
     assert!(mu_top > mu_bottom, "mu_top={mu_top} mu_bottom={mu_bottom}");
-}
 
-/// 新型 RC 梁の付着検定では、上端引張のとき上端筋低減（αt）を反映する。
-/// 上端筋 6 本 > 下端筋 5 本でも、αt 低減により上端引張の Qbu が下端引張より小さくなる。
-#[test]
-fn test_ultimate_beam_rect_top_tension_reduces_qbu() {
-    let opts = UltimateShearOptions::default();
-    let model = single_shape_model(beam_rect_shape(), 400.0, 600.0, true);
-
-    let top_demand = vec![(
-        ElemId(0),
-        MemberDemand {
-            q_long: Some(0.0),
-            mz: -1.0e8,
-            ..Default::default()
-        },
-    )];
-    let bottom_demand = vec![(
-        ElemId(0),
-        MemberDemand {
-            q_long: Some(0.0),
-            mz: 1.0e8,
-            ..Default::default()
-        },
-    )];
-    let qbu_top = collect_rc_ultimate_checks(&model, &top_demand, &opts).unwrap()[0].qbu;
-    let qbu_bottom = collect_rc_ultimate_checks(&model, &bottom_demand, &opts).unwrap()[0].qbu;
+    let qbu_top = top[0].qbu;
+    let qbu_bottom = bottom[0].qbu;
     assert!(qbu_top > 0.0 && qbu_bottom > 0.0);
     assert!(
         qbu_top < qbu_bottom,

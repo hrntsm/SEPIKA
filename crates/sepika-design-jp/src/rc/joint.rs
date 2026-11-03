@@ -187,24 +187,14 @@ mod tests {
 
     #[test]
     fn rc_joint_bj_uses_min_of_bi_half_and_d_quarter() {
-        // マニュアル「bi/2 または D/4 の小さい方」（2026-08-12 照合）。
-        // col_width が大きく (bi/2) > D/4 となるケースで min=D/4 が選ばれること。
-        // bi = (1200-300)/2 = 450, bi/2=225, D/4=150 -> bai=min=150
-        // bj = 300 + 2*150 = 600（もし max なら bj = 300+2*225=750）
         let mut inp = base_joint_input(JointShape::Cross);
+        let base = rc_joint_shear_check(&inp);
         inp.col_width = 1200.0;
-        let res = rc_joint_shear_check(&inp);
-        let fs = crate::rc::concrete_allowable_shear(inp.fc, false);
-        let kappa_a = 10.0;
-        let bj_min = 600.0;
-        let bj_max = 750.0;
-        let qaj_min = kappa_a * (fs - 0.5) * bj_min * inp.col_depth;
-        let qaj_max = kappa_a * (fs - 0.5) * bj_max * inp.col_depth;
-        let qdj = res.ratio() * qaj_min;
-        let ratio_if_max = qdj / qaj_max;
-        assert!((res.ratio() - ratio_if_max).abs() > 1e-9);
-        // min の方が bj・QAj が小さく、ratio は max 仮定より大きい（安全側）。
-        assert!(res.ratio() > ratio_if_max);
+        let wide = rc_joint_shear_check(&inp);
+        assert!(base.ratio() > 0.0 && base.ratio().is_finite());
+        assert!(wide.ratio() > 0.0 && wide.ratio().is_finite());
+        // 柱幅600/1200 mmに対する独立幾何値bjは450/600 mm。
+        assert!((wide.ratio() / base.ratio() - 0.75).abs() < 1e-9);
     }
 
     #[test]

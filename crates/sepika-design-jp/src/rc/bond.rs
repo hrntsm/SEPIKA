@@ -241,7 +241,6 @@ mod tests {
             cover: 40.0,
             main_dia: 22.0,
             main_count: 6,
-            main_count_per_side: 6,
             main_area: 6.0 * one_bar_area(22.0),
             tension_count: 6,
             tension_layers: 1,
@@ -404,7 +403,6 @@ mod tests {
         let n1 = 6.0;
         let db = 22.0;
         let expected_spacing = (b - 2.0 * (40.0 + 10.0) - n1 * db) / (n1 - 1.0); // = 13.6
-        assert!(expected_spacing < 3.0 * 40.0 && expected_spacing < 5.0 * db);
 
         // 長期は K=0.3・C/db+0.4（W 項なし）なので C を逆算で検証できる。
         let result = rc_beam_bond_check_with_rebar(
@@ -480,7 +478,6 @@ mod tests {
             cover: 100.0,
             main_dia: 10.0,
             main_count: 2,
-            main_count_per_side: 2,
             main_area: 2.0 * one_bar_area(10.0),
             tension_count: 2,
             tension_layers: 1,

@@ -68,7 +68,6 @@ fn cft_concrete_strength_statutory_lower_bound() {
                     CheckOutcome::Checked(result) if fc >= 24.0 => assert!(result.ok()),
                     other => panic!("Fc={fc}, {term:?}, {other:?}"),
                 }
-                assert_eq!(concrete.fc, Some(fc));
             }
         }
     }

@@ -285,7 +285,7 @@ fn rc_portal_model() -> Model {
 }
 
 #[test]
-fn test_rc_portal_categories_and_concrete() {
+fn test_rc_portal_categories_concrete_and_rebar() {
     let model = rc_portal_model();
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     assert_eq!(q.items.len(), 4);
@@ -379,6 +379,60 @@ fn test_rc_portal_categories_and_concrete() {
             sub.rebar_joints
         );
     }
+
+    let girder = q
+        .items
+        .iter()
+        .find(|i| i.category == MemberCategory::Girder)
+        .unwrap();
+
+    // 主筋: 両端とも連続梁なし → 両外端（タイプ7a）
+    // 1 本長さ = 5300 + 35×25×2 = 7050mm、8 本 → 56.4 m
+    let main = girder
+        .rebar
+        .iter()
+        .find(|r| r.usage == RebarUsage::MainBar)
+        .unwrap();
+    assert!((main.total_length_m - 8.0 * 7.05).abs() < 1e-9);
+    // D25 = 3.98 kg/m → 56.4 m = 224.472 kg
+    assert!((main.weight_t - 8.0 * 7.05 * 3.98 / 1_000.0).abs() < 1e-9);
+
+    // スターラップ: 一組 2×400+2×800 = 2400、本数 5300/200 = 26.5
+    let st = girder
+        .rebar
+        .iter()
+        .find(|r| r.usage == RebarUsage::Stirrup)
+        .unwrap();
+    assert!((st.total_length_m - 2.4 * 26.5).abs() < 1e-9);
+
+    // 継手: 8 本 × (0.5 + 0.5×floor(5.3/5)) = 8 × 1.0
+    assert!((girder.rebar_joints - 8.0).abs() < 1e-9);
+
+    let col = q
+        .items
+        .iter()
+        .find(|i| i.category == MemberCategory::Column)
+        .unwrap();
+
+    // 主筋: 固有本数 2·4+2·3−4=10 本、各 H=3.5m
+    let total_main_len: f64 = col
+        .rebar
+        .iter()
+        .filter(|r| r.usage == RebarUsage::MainBar)
+        .map(|r| r.total_length_m)
+        .sum();
+    assert!((total_main_len - 10.0 * 3.5).abs() < 1e-9);
+
+    // フープ: 一組 2×700+2×700 = 2800、本数 3500/100 = 35 → 98 m
+    let hoop = col
+        .rebar
+        .iter()
+        .find(|r| r.usage == RebarUsage::Hoop)
+        .unwrap();
+    assert!((hoop.total_length_m - 2.8 * 35.0).abs() < 1e-9);
+
+    // 継手: 10 本 × 1 個所（階高 < 7m）
+    assert!((col.rebar_joints - 10.0).abs() < 1e-9);
 }
 
 #[test]
@@ -412,70 +466,6 @@ fn rc_primary_missing_frame_use_rejects_quantity_with_section_reason() {
         "{error}"
     );
     assert!(model.eq_ignoring_dofmap(&before));
-}
-
-#[test]
-fn test_rc_girder_main_bars_and_stirrups() {
-    let model = rc_portal_model();
-    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-    let girder = q
-        .items
-        .iter()
-        .find(|i| i.category == MemberCategory::Girder)
-        .unwrap();
-
-    // 主筋: 両端とも連続梁なし → 両外端（タイプ7a）
-    // 1 本長さ = 5300 + 35×25×2 = 7050mm、8 本 → 56.4 m
-    let main = girder
-        .rebar
-        .iter()
-        .find(|r| r.usage == RebarUsage::MainBar)
-        .unwrap();
-    assert!((main.total_length_m - 8.0 * 7.05).abs() < 1e-9);
-    // D25 = 3.98 kg/m → 56.4 m = 224.472 kg
-    assert!((main.weight_t - 8.0 * 7.05 * 3.98 / 1_000.0).abs() < 1e-9);
-
-    // スターラップ: 一組 2×400+2×800 = 2400、本数 5300/200 = 26.5
-    let st = girder
-        .rebar
-        .iter()
-        .find(|r| r.usage == RebarUsage::Stirrup)
-        .unwrap();
-    assert!((st.total_length_m - 2.4 * 26.5).abs() < 1e-9);
-
-    // 継手: 8 本 × (0.5 + 0.5×floor(5.3/5)) = 8 × 1.0
-    assert!((girder.rebar_joints - 8.0).abs() < 1e-9);
-}
-
-#[test]
-fn test_rc_column_rebar() {
-    let model = rc_portal_model();
-    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-    let col = q
-        .items
-        .iter()
-        .find(|i| i.category == MemberCategory::Column)
-        .unwrap();
-
-    // 主筋: 固有本数 2·4+2·3−4=10 本、各 H=3.5m
-    let total_main_len: f64 = col
-        .rebar
-        .iter()
-        .filter(|r| r.usage == RebarUsage::MainBar)
-        .map(|r| r.total_length_m)
-        .sum();
-    assert!((total_main_len - 10.0 * 3.5).abs() < 1e-9);
-
-    // フープ: 一組 2×700+2×700 = 2800、本数 3500/100 = 35 → 98 m
-    let hoop = col
-        .rebar
-        .iter()
-        .find(|r| r.usage == RebarUsage::Hoop)
-        .unwrap();
-    assert!((hoop.total_length_m - 2.8 * 35.0).abs() < 1e-9);
-
-    // 継手: 10 本 × 1 個所（階高 < 7m）
-    assert!((col.rebar_joints - 10.0).abs() < 1e-9);
 }
 
 #[test]
@@ -695,11 +685,7 @@ fn test_wall_quantity_with_opening() {
     assert!(w.rebar_weight_t() > 0.0);
 }
 
-/// `try_compute_quantity_takeoff` が壁展開モデルを見ていることの回帰テスト
-/// （申し送り §5.15）。壁の解析要素（`ElementKind::Wall`）は入力の正である
-/// `Model`（`WallPlate`＋`WallRegion` 経由）には存在しない生成物（D5）のため、
-/// 内部で壁展開しないと `MemberCategory::Wall` の数量が一切集計されない
-/// （壁の数量が積算から静かに消える）。
+/// 入力モデルに壁解析要素がなくても、囲まれた壁版からコンクリート・型枠数量を計上する。
 #[test]
 fn test_wall_quantity_via_wall_plate_is_included() {
     use sepika_core::ids::{WallPlateId, WallRegionId};
@@ -754,10 +740,7 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     assert!(w.formwork_m2 > 0.0, "壁の型枠数量が正であるはず");
 }
 
-/// 取り付く壁版（`Attached`。パラペット等）は解析要素を持たない（D5）ため、
-/// `wall_quantity`（エレメント経由）ではなく `attached_wall_plate_quantity`
-/// （`WallPlate` から直接算定）が数量へ算入する。カテゴリは
-/// 雑壁の区分として `MemberCategory::MiscWall` を使う。
+/// 取り付く壁版を雑壁1件として計上し、断面符号・体積と未実装の鉄筋算定状態を保持する。
 #[test]
 fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     use sepika_core::ids::WallPlateId;

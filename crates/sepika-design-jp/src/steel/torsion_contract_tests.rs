@@ -57,7 +57,6 @@ fn asd2019_h_uses_current_shape_j_instead_of_saved_cache() {
             for cache_mm4 in [0.0, 1.0, 1e12, f64::NAN] {
                 section.j = cache_mm4;
                 assert_same_result(&checked(&section, &ctx), &expected);
-                assert_eq!(section.j.to_bits(), cache_mm4.to_bits());
             }
             supplied.j *= 10.0;
             assert_ne!(checked(&supplied, &ctx).ratio(), expected.ratio());

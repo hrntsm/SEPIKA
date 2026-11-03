@@ -26,7 +26,7 @@ pub(crate) fn check_column(
     term: LoadTerm,
 ) -> Result<CheckResult, String> {
     let h = sec.depth;
-    let (shape, tf, tw) = shape_of(sec);
+    let (shape, tf, _) = shape_of(sec);
     let a = column_allowables(sec, mat, ctx, f, term)?;
     let ColumnAllowables {
         area,
@@ -37,6 +37,7 @@ pub(crate) fn check_column(
         fb_strong,
         fb_weak,
         fs: fs_val,
+        shear_areas: [as_y, as_z],
         ..
     } = a;
     let sigma_bx = forces.mz.abs() / z_strong;
@@ -79,7 +80,6 @@ pub(crate) fn check_column(
         (sigma_t, ratio, "引張+曲げ: σt/ft+ΣσB/fb")
     };
 
-    let (as_y, as_z) = shear_area_2d(shape, sec, tf, tw);
     let (ay, az) = if matches!(
         sec.shape,
         Some(sepika_core::section_shape::SectionShape::SteelBox { .. })

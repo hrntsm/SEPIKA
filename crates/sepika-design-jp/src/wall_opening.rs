@@ -100,11 +100,8 @@ mod tests {
         let openings = [(1000.0, 1000.0), (500.0, 500.0)];
         let (l0p, h0p) = equivalent_opening(&openings, 6000.0, 3000.0);
 
-        let sum_area: f64 = 1000.0 * 1000.0 + 500.0 * 500.0;
-        assert!((sum_area - 1_250_000.0).abs() < 1e-6);
-
         // 面積保存: l0'・h0' = Σ(li・hi)
-        assert!((l0p * h0p - sum_area).abs() < 1e-6);
+        assert!((l0p * h0p - 1_250_000.0).abs() < 1e-6);
         // 辺長比: l0'/h0' = lw/hw = 2
         assert!((l0p / h0p - 2.0).abs() < 1e-9);
 

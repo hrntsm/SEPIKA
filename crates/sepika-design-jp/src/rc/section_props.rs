@@ -26,7 +26,7 @@ pub(crate) struct AxisProps {
     pub(crate) d: f64,
     /// 引張鉄筋断面積 at [mm²]（片側）。
     pub(crate) at: f64,
-    /// 圧縮鉄筋断面積 ac [mm²]（片側、at と同値の対称複筋仮定）。
+    /// 圧縮側主筋の断面積 ac [mm²]。
     pub(crate) ac: f64,
     /// 応力中心間距離 j = 7d/8 [mm]。
     pub(crate) j: f64,
@@ -65,8 +65,6 @@ pub(crate) struct RcRebarInfo {
     pub main_dia: f64,
     /// 全主筋本数（柱の最小本数規定・主筋比に用いる）。
     pub main_count: u32,
-    /// 片側 1 列あたりの本数（円形柱は ng/4+1 相当）。表示・付着の補助。
-    pub main_count_per_side: u32,
     /// 全主筋断面積 [mm²]。
     pub main_area: f64,
     /// 検定方向の引張側主筋本数（付着検定の本数）。
@@ -115,7 +113,6 @@ pub(crate) fn rebar_info_from_shape(
                 cover: rebar.cover,
                 main_dia: rebar.main_dia,
                 main_count: top_count + bottom_count,
-                main_count_per_side: tension_count,
                 main_area: rebar.total_main_area(),
                 tension_count,
                 tension_layers,
@@ -141,7 +138,6 @@ pub(crate) fn rebar_info_from_shape(
                 cover: rebar.cover,
                 main_dia: rebar.main_dia,
                 main_count,
-                main_count_per_side: rebar.x.first().copied().unwrap_or(0),
                 main_area: rebar.total_main_area(),
                 tension_count: main_count,
                 tension_layers: 1,
@@ -162,7 +158,6 @@ pub(crate) fn rebar_info_from_shape(
                 cover: rebar.cover,
                 main_dia: rebar.main_dia,
                 main_count: rebar.count,
-                main_count_per_side: rebar.count / 4 + 1,
                 main_area: rebar.total_main_area(),
                 tension_count: rebar.count,
                 tension_layers: 1,
@@ -381,7 +376,6 @@ mod tests {
         let info = rebar_info_from_shape(&rect_layered_shape(), true).unwrap();
         assert!((info.main_dia - 22.0).abs() < 1e-9);
         assert_eq!(info.main_count, 12);
-        assert_eq!(info.main_count_per_side, 4);
         assert!((info.main_area - 12.0 * one_bar_area(22.0)).abs() < 1e-9);
         assert_eq!(info.tension_count, 12);
         assert_eq!(info.tension_layers, 1);
@@ -414,7 +408,6 @@ mod tests {
     fn test_rebar_info_from_shape_column_rect() {
         let info = rebar_info_from_shape(&column_rect_shape(), true).unwrap();
         assert_eq!(info.main_count, 12);
-        assert_eq!(info.main_count_per_side, 4);
         assert!((info.main_area - 12.0 * one_bar_area(22.0)).abs() < 1e-9);
         assert_eq!(info.tension_first_layer_count, 12.0);
         assert_eq!(info.tension_count_1991, 12.0);
@@ -426,7 +419,6 @@ mod tests {
     fn test_rebar_info_from_shape_column_circle() {
         let info = rebar_info_from_shape(&column_circle_shape(), true).unwrap();
         assert_eq!(info.main_count, 8);
-        assert_eq!(info.main_count_per_side, 3);
         assert!((info.main_area - 8.0 * one_bar_area(22.0)).abs() < 1e-9);
         assert_eq!(info.tension_count, 8);
         assert_eq!(info.tension_first_layer_count, 8.0);
@@ -452,7 +444,6 @@ mod tests {
         let info = rebar_info_from_shape(&circle, true).unwrap();
         assert!((info.main_dia - 22.0).abs() < 1e-9);
         assert_eq!(info.main_count, 6);
-        assert_eq!(info.main_count_per_side, 2);
         assert!((info.main_area - 6.0 * one_bar_area(22.0)).abs() < 1e-9);
         assert_eq!(info.tension_count, 6);
         assert_eq!(info.tension_layers, 1);

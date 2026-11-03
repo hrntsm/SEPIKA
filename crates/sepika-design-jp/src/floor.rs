@@ -45,7 +45,7 @@ pub struct BeamDesignResult {
 }
 
 /// N-mm 単位の部材力を用いて小梁の曲げ・たわみを検定する（符号は絶対値で評価）。
-/// スパン[mm]・断面係数[mm³]・許容応力度[N/mm²]・たわみ限界分母は正の有限値が必要。
+/// スパン`[mm]`・断面係数`[mm³]`・許容応力度`[N/mm²]`・たわみ限界分母は正の有限値が必要。
 /// 荷重・部材力・たわみの非有限値、または計算結果を表現できない場合は理由付きエラー。
 #[allow(clippy::too_many_arguments)]
 pub fn design_beam_from_forces(
@@ -58,30 +58,9 @@ pub fn design_beam_from_forces(
     sigma_allow: f64,
     defl_limit_denom: f64,
 ) -> Result<BeamDesignResult, String> {
-    judge_beam(
-        span,
-        w,
-        m_max.abs(),
-        q_max.abs(),
-        deflection.abs(),
-        section_modulus,
-        sigma_allow,
-        defl_limit_denom,
-    )
-}
-
-/// 共通の検定判定（曲げ応力度・たわみ制限）。
-#[allow(clippy::too_many_arguments)]
-fn judge_beam(
-    span: f64,
-    w: f64,
-    m_max: f64,
-    q_max: f64,
-    deflection: f64,
-    section_modulus: f64,
-    sigma_allow: f64,
-    defl_limit_denom: f64,
-) -> Result<BeamDesignResult, String> {
+    let m_max = m_max.abs();
+    let q_max = q_max.abs();
+    let deflection = deflection.abs();
     for (name, value) in [
         ("スパン [mm]", span),
         ("断面係数 [mm³]", section_modulus),

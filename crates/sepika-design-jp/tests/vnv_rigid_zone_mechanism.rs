@@ -166,23 +166,6 @@ fn run_pushover(rigid: f64, seismic_weight: f64, steps: usize) -> PushoverResult
 }
 
 #[test]
-fn 剛域つきプッシュオーバーが解析上の機構に達する() {
-    let result = run_pushover(300.0, 600_000.0, 400);
-
-    // 柱両端の 4 ヒンジで運動学的機構が成立している。
-    let yielded = result
-        .hinges
-        .iter()
-        .filter(|h| !matches!(h.level, HingeLevel::Crack))
-        .count();
-    assert!(yielded >= 4, "降伏ヒンジが不足: {yielded}");
-    assert!(
-        !matches!(result.mechanism, MechanismType::Partial),
-        "剛域つきで崩壊機構が成立しない（Partial）"
-    );
-}
-
-#[test]
 fn 未降伏のフレームを解析上の機構成立と扱わない() {
     let result = run_pushover(300.0, 1_000.0, 20);
     assert!(
@@ -216,7 +199,19 @@ fn 剛域は保有水平耐力を可撓長基準へ引き上げる() {
         None
     };
     let q0 = collapse_shear(&run_pushover(0.0, 600_000.0, 400)).expect("剛域なしで機構不成立");
-    let q1 = collapse_shear(&run_pushover(300.0, 600_000.0, 400)).expect("剛域ありで機構不成立");
+    let result = run_pushover(300.0, 600_000.0, 400);
+    // 柱両端の 4 ヒンジで運動学的機構が成立している。
+    let yielded = result
+        .hinges
+        .iter()
+        .filter(|h| !matches!(h.level, HingeLevel::Crack))
+        .count();
+    assert!(yielded >= 4, "降伏ヒンジが不足: {yielded}");
+    assert!(
+        !matches!(result.mechanism, MechanismType::Partial),
+        "剛域つきで崩壊機構が成立しない（Partial）"
+    );
+    let q1 = collapse_shear(&result).expect("剛域ありで機構不成立");
     let theory = 3000.0 / (3000.0 - 2.0 * 300.0);
     let ratio = q1 / q0;
     assert!(
