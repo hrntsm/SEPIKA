@@ -87,7 +87,7 @@ pub mod to_internal {
     pub fn force_kn(kn: f64) -> f64 {
         kn * 1_000.0
     }
-    /// バネ定数 kN/mm → N/mm。
+    /// 並進ばね定数 kN/mm → N/mm。
     pub fn stiffness_kn_per_mm(kn_per_mm: f64) -> f64 {
         kn_per_mm * 1_000.0
     }
@@ -152,7 +152,7 @@ pub mod to_display {
     pub const LABEL_MODULUS: &str = "cm³";
     /// 断面二次半径の表示単位ラベル。
     pub const LABEL_RADIUS: &str = "cm";
-    /// 線剛性・バネ定数の表示単位ラベル。
+    /// 並進ばね剛性（力／並進変位）の表示単位ラベル。
     pub const LABEL_STIFFNESS: &str = "kN/mm";
     /// 面荷重（床・雑壁）の表示単位ラベル。
     pub const LABEL_AREA_LOAD: &str = "kN/m²";
@@ -176,7 +176,7 @@ pub mod to_display {
         mm / 1_000.0
     }
 
-    /// バネ定数 N/mm → kN/mm。
+    /// 並進ばね定数 N/mm → kN/mm。
     pub fn stiffness_kn_per_mm(n_per_mm: f64) -> f64 {
         n_per_mm / 1_000.0
     }
