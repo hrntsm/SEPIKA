@@ -20,6 +20,7 @@
     - [床板の入力](./model_edit/12_床板の入力.md)
     - [壁版の入力](./model_edit/13_壁版の入力.md)
     - [免震支承の配置](./model_edit/14_免震支承の配置.md)
+    - [文字と状態表示](model_edit/15_文字と状態表示.md)
 - [準備・解析の実行・結果の確認](./workflow/README.md)
     - [準備計算](./preparation/README.md)
         - [階の分布](./preparation/01_階の分布.md)
@@ -145,3 +146,4 @@
         - [依頼できる操作](./mcp_server/03_ツール一覧.md)
         - [計算と成果の確認](./mcp_server/04_解析ジョブと結果取得.md)
         - [共有範囲と制約](./mcp_server/05_制約・注意点.md)
+        - [MCPの通信仕様と独立サーバ](mcp_server/06_通信仕様と独立サーバ.md)

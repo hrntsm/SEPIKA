@@ -156,22 +156,22 @@
 
 ## 外部AI連携の正本境界
 
-MCPの6ページは本再編では配置を維持する。GUIから使う接続・許可・検討操作は製品マニュアルを正本とする。独立起動とAPI開発契約は [MCPサーバの開発者向け仕様](../mcp_server.md)へ分離した（[Issue #1030](https://github.com/hrntsm/SEPIKA/issues/1030)）。以下はページ・節ごとの正本の対応を示す。
+MCPの6ページは本再編では配置を維持する。GUIから使う接続・許可・検討操作は製品マニュアルを正本とする。独立起動とAPI開発契約は [MCPサーバの開発者向け仕様](../../docs/mcp_server/06_通信仕様と独立サーバ.md)へ分離した（[Issue #1030](https://github.com/hrntsm/SEPIKA/issues/1030)）。以下はページ・節ごとの正本の対応を示す。
 
 | 現在のページ・節 | 製品側に保持する正本 | 開発側の正本先・既存の実装入口 |
 | --- | --- | --- |
-| `mcp_server/README.md`：概要・機能フラグ・この章の内容 | [外部AI連携の入口](../../docs/mcp_server/README.md)：GUI接続の入口と公開操作の概要 | `dev_docs/mcp_server.md#構成と起動方式`：stdio、機能フラグ、独立サーバの構成。[クレート構成](../architecture.md) |
+| `mcp_server/README.md`：概要・機能フラグ・この章の内容 | [外部AI連携の入口](../../docs/mcp_server/README.md)：GUI接続の入口と公開操作の概要 | `docs/mcp_server/06_通信仕様と独立サーバ.md#構成と起動方式`：stdio、機能フラグ、独立サーバの構成。[クレート構成](../architecture.md) |
 | `01_ビルドと起動.md`：開いているGUIの検討への接続 | [GUI接続の起動手順](../../docs/mcp_server/01_ビルドと起動.md#開いているguiの検討への接続) | GUIブリッジの通信実装は [gui_bridge.rs](../../crates/sepika-mcp/src/gui_bridge.rs) |
-| `01_ビルドと起動.md`：独立したモデルでの起動・環境変数・stdout・起動エラー | GUIの接続方式との違いだけを参照する | `dev_docs/mcp_server.md#ビルドと独立起動`。[main.rs](../../crates/sepika-mcp/src/main.rs)、[Cargo.toml](../../crates/sepika-mcp/Cargo.toml) |
+| `01_ビルドと起動.md`：独立したモデルでの起動・環境変数・stdout・起動エラー | GUIの接続方式との違いだけを参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#ビルドと独立起動`。[main.rs](../../crates/sepika-mcp/src/main.rs)、[Cargo.toml](../../crates/sepika-mcp/Cargo.toml) |
 | `02_クライアント設定例.md`：開いているGUIへ接続する場合 | [GUI接続設定](../../docs/mcp_server/02_クライアント設定例.md#開いているguiへ接続する場合) | 独立サーバの設定と混在させない |
-| `02_クライアント設定例.md`：Claude Code・Claude Desktop | GUI接続の設定例から独立起動の開発文書へ案内する | `dev_docs/mcp_server.md#独立起動クライアント設定`：両クライアントの独立起動設定 |
+| `02_クライアント設定例.md`：Claude Code・Claude Desktop | GUI接続の設定例から独立起動の開発文書へ案内する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動クライアント設定`：両クライアントの独立起動設定 |
 | `03_ツール一覧.md`：開いているGUIへの接続 | [GUIで公開する検討操作](../../docs/mcp_server/03_ツール一覧.md#開いているguiへの接続) | GUIの要求・応答型は [sepika-ai-connection](../../crates/sepika-ai-connection/src/lib.rs) |
-| `03_ツール一覧.md`：model_query・model_edit（全下位節）・quantity_takeoff・analysis_run・analysis_status・result_get | GUIの公開範囲と利用者が確認する結果の意味を参照する | `dev_docs/mcp_server.md#独立起動ツール契約` 以下に同名ツールの小見出し。[server.rs](../../crates/sepika-mcp/src/server.rs)、[query.rs](../../crates/sepika-mcp/src/query.rs)、[edit.rs](../../crates/sepika-mcp/src/edit.rs)、[JobParams](../../crates/sepika-mcp/src/job/mod.rs) |
-| `04_解析ジョブと結果取得.md`：解析ジョブのフロー | GUIの実行と結果確認は [準備・解析の実行・結果の確認](../../docs/workflow/README.md) | `dev_docs/mcp_server.md#ジョブと結果取得`。[JobRegistry・JobStatus](../../crates/sepika-mcp/src/lib.rs) |
-| `04_解析ジョブと結果取得.md`：保存成果の生成元と利用可否 | OViKAの保存成果の扱いは [保存結果の計算契約と再実行](../../docs/model_io/01_プロジェクト形式_ovika.md#保存結果の計算契約と再実行) | `dev_docs/mcp_server.md#保存成果の生成元と利用可否`：result_getのstatus/entry/provenance/reason契約。[persist.rs](../../crates/sepika-mcp/src/persist.rs) |
-| `04_解析ジョブと結果取得.md`：結果ストアのスキーマ（NodalDisp・MemberForce・Modal・TimeHistory） | GUIで読む量・単位は各結果表示ページを参照する | `dev_docs/mcp_server.md#結果ストアのスキーマ`。IOの公開型は [results/mod.rs](../../crates/sepika-io/src/results/mod.rs)、[APIリファレンス](https://hrntsm.github.io/SEPIKA/api/) |
+| `03_ツール一覧.md`：model_query・model_edit（全下位節）・quantity_takeoff・analysis_run・analysis_status・result_get | GUIの公開範囲と利用者が確認する結果の意味を参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動ツール契約` 以下に同名ツールの小見出し。[server.rs](../../crates/sepika-mcp/src/server.rs)、[query.rs](../../crates/sepika-mcp/src/query.rs)、[edit.rs](../../crates/sepika-mcp/src/edit.rs)、[JobParams](../../crates/sepika-mcp/src/job/mod.rs) |
+| `04_解析ジョブと結果取得.md`：解析ジョブのフロー | GUIの実行と結果確認は [準備・解析の実行・結果の確認](../../docs/workflow/README.md) | `docs/mcp_server/06_通信仕様と独立サーバ.md#ジョブと結果取得`。[JobRegistry・JobStatus](../../crates/sepika-mcp/src/lib.rs) |
+| `04_解析ジョブと結果取得.md`：保存成果の生成元と利用可否 | OViKAの保存成果の扱いは [保存結果の計算契約と再実行](../../docs/model_io/01_プロジェクト形式_ovika.md#保存結果の計算契約と再実行) | `docs/mcp_server/06_通信仕様と独立サーバ.md#保存成果の生成元と利用可否`：result_getのstatus/entry/provenance/reason契約。[persist.rs](../../crates/sepika-mcp/src/persist.rs) |
+| `04_解析ジョブと結果取得.md`：結果ストアのスキーマ（NodalDisp・MemberForce・Modal・TimeHistory） | GUIで読む量・単位は各結果表示ページを参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#結果ストアのスキーマ`。IOの公開型は [results/mod.rs](../../crates/sepika-io/src/results/mod.rs)、[APIリファレンス](https://hrntsm.github.io/SEPIKA/api/) |
 | `05_制約・注意点.md`：GUI接続の共有と許可・保持結果・提出・要求ID | [GUI接続の共有と許可](../../docs/mcp_server/05_制約・注意点.md#gui接続の共有と許可) | GUI通信・受理台帳の型の契約は [sepika-ai-connection](../../crates/sepika-ai-connection/src/lib.rs) |
-| `05_制約・注意点.md`：独立モデル読込・編集範囲・2節点条件・質点系対象外・ジョブの永続化制限・DesignCheck応答 | 入力不足の構造計算上の影響は各モデル入力・解析の正本を参照する | `dev_docs/mcp_server.md#独立起動のモデル入力制約` と上記ツール/保存成果の節。実装入口は [main.rs](../../crates/sepika-mcp/src/main.rs)、[server.rs](../../crates/sepika-mcp/src/server.rs)、[persist.rs](../../crates/sepika-mcp/src/persist.rs) |
+| `05_制約・注意点.md`：独立モデル読込・編集範囲・2節点条件・質点系対象外・ジョブの永続化制限・DesignCheck応答 | 入力不足の構造計算上の影響は各モデル入力・解析の正本を参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動のモデル入力制約` と上記ツール/保存成果の節。実装入口は [main.rs](../../crates/sepika-mcp/src/main.rs)、[server.rs](../../crates/sepika-mcp/src/server.rs)、[persist.rs](../../crates/sepika-mcp/src/persist.rs) |
 
 ## 分割ページの節対応
 
@@ -312,7 +312,7 @@ MCPの6ページは本再編では配置を維持する。GUIから使う接続�
 | 移動元の節・範囲 | 正本先 | 扱い |
 | --- | --- | --- |
 | 鋼構造断面検定の「S 造柱梁接合部」「冷間成形角形鋼管柱の柱梁耐力比」 | [鋼構造の柱梁接合部](../../docs/calc_basis/06_一次設計/07_鋼構造の柱梁接合部.md) | 接合部の検定用途で分割。既存の全式・条件を保持し、軸力条件等を本文へ記載 |
-| 鋼構造断面検定の1973年版許容曲げ式と方向を区別しない座屈長さAPI | [GUI非提供API](../allowable_design_api.md) | GUI採用方式と分離。1973年版の式・T形断面二次半径・単位を保持。現在の製品採用値は製品文書を正本とする |
+| 鋼構造断面検定の1973年版許容曲げ式と方向を区別しない座屈長さAPI | [GUI非提供API](https://github.com/hrntsm/SEPIKA/issues/1166) | GUI採用方式と分離。1973年版の式・T形断面二次半径・単位を保持。現在の製品採用値は製品文書を正本とする |
 | SRC/CFT断面検定の実装参照にあったSRC接合部式 | [SRC 柱梁接合部](../../docs/calc_basis/06_一次設計/04_SRC_CFT_断面検定.md#src-柱梁接合部) | 式・記号・GUIの代表寸法と階高比を本文へ記載 |
 
 小梁の合否にせん断比が含まれない現在の実装範囲を本文に明示した。機能と未検定表示の扱いの追跡は[Issue #1048](https://github.com/hrntsm/SEPIKA/issues/1048)。RC柱の短期軸応力度警告は[Issue #1008](https://github.com/hrntsm/SEPIKA/issues/1008)の未解決注意を維持した。
@@ -325,7 +325,7 @@ MCPの6ページは本再編では配置を維持する。GUIから使う接続�
 | --- | --- | --- |
 | 部材ランク：部材群としての種別、RC／SのDs表、部材群種別・βuの算定、背景資料 | [構造特性係数 Ds](../../docs/calc_basis/07_二次設計/02_構造特性係数_Ds.md) | 個別部材の分類から群集計を分離。式・表・未対応条件を保持 |
 | Fes：実装参照内の解析剛性、上下階変位差、分割柱、圧縮長期軸力重心 | [剛性率 Rs・偏心率 Re と形状係数 Fes](../../docs/calc_basis/07_二次設計/04_形状係数_Fes.md)本文 | 採用計算を本文で説明。n倍法の評価用変位と元応力の区別を維持 |
-| Fes：D値の一般階の略算式、略算の分割柱の扱い | [GUI非提供計算](../secondary_design_api.md) | 式・単位・制約を保持し、解析不足時の代用と区別 |
+| Fes：D値の一般階の略算式、略算の分割柱の扱い | [GUI非提供計算](https://github.com/hrntsm/SEPIKA/issues/1167) | 式・単位・制約を保持し、解析不足時の代用と区別 |
 | 主軸の計算：画面・入力方向・結果 | [主軸の計算](../../docs/calc_basis/07_二次設計/06_主軸の計算.md) | レポートタブのプレビューとCSVへの導線、共通荷重分布の前提を明記 |
 
 主軸の導線は `report_tab_panel` → `build_report_csv` → `principal_axis_from_results` のソース確認による。GUI通し実行による確認ではない。X設定から作る荷重分布と保持X／Y結果を用いるため、両方向の同一分布・再解析の前提を利用者へ明示した。主軸の結果有効性診断はRs・Reと同じではない。

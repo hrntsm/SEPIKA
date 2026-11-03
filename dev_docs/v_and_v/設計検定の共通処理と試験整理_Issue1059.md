@@ -35,7 +35,7 @@
 
 | 対象 | 契約として保持する内容と既存の正本 |
 | --- | --- |
-| `steel/section.rs` の `steel_i_t`、`steel_lateral_buckling_i_af`、`steel_fb_h`、`steel_lateral_buckling_c`、`end_moment_ratio_m2_m1`、`steel_c_factor`、`steel_fb_h_asd2019`、`steel_p_lambda_b`、`steel_warping_constant`、`steel_h_z_with_loss`、`resolve_lb` | 単位・戻り順・shape選択・C直接入力優先・C/pλb既定・端部比符号・横座屈長さ入力優先/位置区間・端部欠損適用。式と制約は[鋼構造の正本](../../docs/calc_basis/06_一次設計/03_鋼構造_断面検定.md#許容曲げ応力度と横座屈)、GUI非提供1973式は[既存API文書](../allowable_design_api.md#1973年版の許容曲げ応力度)を保持 |
+| `steel/section.rs` の `steel_i_t`、`steel_lateral_buckling_i_af`、`steel_fb_h`、`steel_lateral_buckling_c`、`end_moment_ratio_m2_m1`、`steel_c_factor`、`steel_fb_h_asd2019`、`steel_p_lambda_b`、`steel_warping_constant`、`steel_h_z_with_loss`、`resolve_lb` | 単位・戻り順・shape選択・C直接入力優先・C/pλb既定・端部比符号・横座屈長さ入力優先/位置区間・端部欠損適用。式と制約は[鋼構造の正本](../../docs/calc_basis/06_一次設計/03_鋼構造_断面検定.md#許容曲げ応力度と横座屈)、GUI非提供1973式は[GUI改善Issueの計算資料](https://github.com/hrntsm/SEPIKA/issues/1166)へ集約 |
 | `quantity/mod.rs` の出力単位・数量用単位重量、矩形/円形配筋helper、壁内法寸法、壁版数量と `quantity/tests.rs` の壁版2試験Rustdoc | 出力単位、固定荷重と数量の単位重量の用途区別、対象・寸法単位・配筋未入力時不変更・内法戻り順/対象外・壁区分/断面符号/鉄筋未算定状態。[数量正本](../../docs/calc_basis/10_数量積算/01_数量積算の算定式.md)の既存式・全本数/周長・未算定制約を保持 |
 
 bj試験は中央取付き有効幅minのVerificationであり、許容式全体のValidationではない。κA/fs/Qdjの規準本文未照合・設計採用保留、RCせん断のkst代表式全域採用と円形換算の安全性未確認、CFT長方形準用等の制約を維持する。原典照合や新たな安全側判定は行わない。半径None/明示0、Add/Edit/SetRadius/Catalogの拒否と原子性を検証する対象外試験は変更していない。

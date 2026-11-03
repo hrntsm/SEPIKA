@@ -3,10 +3,10 @@ title = "SEPIKA ドキュメント"
 description = "日本の建築構造計算一貫プログラム SEPIKA の利用者向けドキュメント（計算根拠・理論・出典）"
 authors = ["SEPIKA contributors"]
 language = "ja"
-src = "docs"
+src = "."
 
 [build]
-build-dir = "book"
+build-dir = "../book"
 create-missing = false
 
 [output.html]

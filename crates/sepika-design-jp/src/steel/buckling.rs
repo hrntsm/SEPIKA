@@ -167,16 +167,10 @@ fn g_ratio_at_with_index(
     sum_col / sum_beam
 }
 
-/// 柱 `elem` の座屈長さ係数 K（水平移動が拘束されない場合、方向を考慮しない
-/// 簡略版・互換用）を、モデルの節点まわり剛度比から算定する（インデックス版）。
-///
-/// 断面用途に基づく設計上の部材種別が柱でない、または線材でない場合は None。
-/// 呼び出し側は `lk = K・L` を [`crate::DesignCtx::lk_y`]/[`crate::DesignCtx::lk_z`]
-/// （両軸同値）に渡すことを想定する。強軸・弱軸を個別に評価する場合は
-/// [`steel_column_k_axes_with_index`] を使うこと。
-///
-/// `index` は事前に `NodeAdjacency::build(model)` で一度だけ構築し、
-/// 全部材ぶんのループで使い回すこと（全部材×全要素の O(n²) 線形探索を回避）。
+/// 水平移動非拘束の柱の座屈長さ係数K（無次元）を、方向を区別せず返す。
+/// 柱・線材でない場合や幾何を解決できない場合は `None`。
+/// 全部材の強軸剛性を用い、梁の端部結合・剛域・支点境界・梁遠端条件は考慮しない。
+/// `index` は同じ `model` から構築する。軸別評価は [`steel_column_k_axes_with_index`] を使う。
 pub fn steel_column_k_with_index(
     model: &Model,
     index: &NodeAdjacency,
@@ -194,16 +188,10 @@ pub fn steel_column_k_with_index(
     Some(sway_buckling_k(ga, gb))
 }
 
-/// 柱 `elem` の座屈長さ係数 K（水平移動が拘束されない場合、方向を考慮しない
-/// 簡略版・互換用）を、モデルの節点まわり剛度比から算定する。
-///
-/// 断面用途に基づく設計上の部材種別が柱でない、または線材でない場合は None。
-/// 呼び出し側は `lk = K・L` を [`crate::DesignCtx::lk_y`]/[`crate::DesignCtx::lk_z`]
-/// （両軸同値）に渡すことを想定する。
-///
-/// 単発呼び出し用の互換 API（内部で [`NodeAdjacency`] を都度構築する）。
-/// 部材数ぶんループで呼ぶ場合は [`NodeAdjacency::build`] を一度だけ構築して
-/// [`steel_column_k_with_index`] を使うこと（O(n²) を避けられる）。
+/// 水平移動非拘束の柱の座屈長さ係数K（無次元）を、方向を区別せず返す。
+/// 柱・線材でない場合や幾何を解決できない場合は `None`。
+/// 全部材の強軸剛性を用い、梁の端部結合・剛域・支点境界・梁遠端条件は考慮しない。
+/// 軸別評価は [`steel_column_k_axes_with_index`] を使う。
 pub fn steel_column_k(model: &Model, elem: &ElementData) -> Option<f64> {
     let index = NodeAdjacency::build(model);
     steel_column_k_with_index(model, &index, elem)
