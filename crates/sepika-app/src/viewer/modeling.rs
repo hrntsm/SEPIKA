@@ -2016,30 +2016,6 @@ mod tests {
     #[test]
     fn 壁の上下大梁だけを付帯梁として判定する() {
         let (mut model, _) = wall_model(150.0);
-        // 付帯梁の判定には断面・材料が要る（`stiffness_breakdown` の前提）。
-        model.materials[0] = sepika_core::model::Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "FC24".into(),
-            category: sepika_core::model::MaterialCategory::Concrete,
-            young: 23000.0,
-            poisson: 0.2,
-            density: 2.4e-9,
-            shear: None,
-            fc: Some(24.0),
-            fy: None,
-        };
-        // 材料は断面が持つ（`depth_section` が材料 0 を割り当てる）。
-        model.sections[1] = depth_section(1, 600.0);
-        for e in model
-            .elements
-            .iter_mut()
-            .filter(|e| matches!(e.id.0, 1 | 2))
-        {
-            e.section = Some(SectionId(1));
-        }
-
         let girders: Vec<u32> = model
             .elements
             .iter()

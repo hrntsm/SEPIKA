@@ -2220,6 +2220,38 @@ mod issue901_tests {
 #[cfg(test)]
 mod incomplete_evidence_tests {
     use super::*;
+
+    fn rendered_wall_checks(
+        app: &App,
+        checks: &[sepika_design_jp::wall_check::WallCheck],
+        surface: usize,
+    ) -> String {
+        let ctx = egui::Context::default();
+        let mut labels = String::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(Default::default(), |ui| {
+                if surface == 0 {
+                    crate::design_view::wall_checks_ui(ui, checks);
+                } else {
+                    draw_legend(
+                        ui.painter(),
+                        app,
+                        &HashMap::new(),
+                        &HashMap::new(),
+                        CheckRatioFilter::Max,
+                        true,
+                        false,
+                    );
+                }
+            });
+            for shape in &output.shapes {
+                if let egui::Shape::Text(t) = &shape.shape {
+                    labels.push_str(t.galley.text());
+                }
+            }
+        }
+        labels
+    }
     #[test]
     fn malformed_components_are_unrated_in_diagram_filters_and_tooltips() {
         for ratio in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.5)] {
@@ -2281,6 +2313,19 @@ mod incomplete_evidence_tests {
                     elem: ElemId(2),
                     positions,
                 }];
+                let incomplete = incomplete_joint_nodes(
+                    checks[0].positions.iter().map(|p| (NodeId(3), &p.outcome)),
+                );
+                assert!(incomplete.contains(&NodeId(3)));
+                let joints: Vec<_> = checks[0]
+                    .positions
+                    .iter()
+                    .map(|p| crate::app::JointCheck {
+                        node: NodeId(3),
+                        label: String::new(),
+                        outcome: p.outcome.clone(),
+                    })
+                    .collect();
                 for filter in [
                     CheckRatioFilter::Max,
                     CheckRatioFilter::Kind(CheckKind::Bending),
@@ -2290,19 +2335,6 @@ mod incomplete_evidence_tests {
                     if ratios[0] == Some(1.2) {
                         assert_eq!(members.get(&ElemId(2)), Some(&(1.2, false)));
                     }
-                    let incomplete = incomplete_joint_nodes(
-                        checks[0].positions.iter().map(|p| (NodeId(3), &p.outcome)),
-                    );
-                    assert!(incomplete.contains(&NodeId(3)));
-                    let joints: Vec<_> = checks[0]
-                        .positions
-                        .iter()
-                        .map(|p| crate::app::JointCheck {
-                            node: NodeId(3),
-                            label: String::new(),
-                            outcome: p.outcome.clone(),
-                        })
-                        .collect();
                     let (nodes, unrated) = joint_ratios_for_filter(&joints, filter);
                     assert!(unrated.contains(&NodeId(3)));
                     assert!(!nodes.get(&NodeId(3)).is_some_and(|(_, ok)| *ok));
@@ -2431,30 +2463,7 @@ mod incomplete_evidence_tests {
                     ..Default::default()
                 });
                 for surface in 0..2 {
-                    let ctx = egui::Context::default();
-                    let mut labels = String::new();
-                    for _ in 0..2 {
-                        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                            if surface == 0 {
-                                crate::design_view::wall_checks_ui(ui, &checks);
-                            } else {
-                                draw_legend(
-                                    ui.painter(),
-                                    &app,
-                                    &HashMap::new(),
-                                    &HashMap::new(),
-                                    CheckRatioFilter::Max,
-                                    true,
-                                    false,
-                                );
-                            }
-                        });
-                        for shape in &output.shapes {
-                            if let egui::Shape::Text(t) = &shape.shape {
-                                labels.push_str(t.galley.text());
-                            }
-                        }
-                    }
+                    let labels = rendered_wall_checks(&app, &checks, surface);
                     assert!(
                         labels.contains(&format!(
                             "合格 {}・NG {}・未検定 {}",
@@ -2615,30 +2624,7 @@ mod incomplete_evidence_tests {
                     ..Default::default()
                 });
                 for surface in 0..2 {
-                    let ctx = egui::Context::default();
-                    let mut labels = String::new();
-                    for _ in 0..2 {
-                        let output = ctx.run_ui(Default::default(), |ui| {
-                            if surface == 0 {
-                                crate::design_view::wall_checks_ui(ui, &checks);
-                            } else {
-                                draw_legend(
-                                    ui.painter(),
-                                    &app,
-                                    &HashMap::new(),
-                                    &HashMap::new(),
-                                    CheckRatioFilter::Max,
-                                    true,
-                                    false,
-                                );
-                            }
-                        });
-                        for shape in output.shapes {
-                            if let egui::Shape::Text(t) = shape.shape {
-                                labels.push_str(t.galley.text());
-                            }
-                        }
-                    }
+                    let labels = rendered_wall_checks(&app, &checks, surface);
                     assert!(labels.contains("壁 1 枚 / 検定 1 件"), "{labels}");
                     assert!(
                         labels.contains(&format!(
@@ -2705,30 +2691,7 @@ mod incomplete_evidence_tests {
                 ..Default::default()
             });
             for surface in 0..2 {
-                let ctx = egui::Context::default();
-                let mut labels = String::new();
-                for _ in 0..2 {
-                    let output = ctx.run_ui(Default::default(), |ui| {
-                        if surface == 0 {
-                            crate::design_view::wall_checks_ui(ui, &checks);
-                        } else {
-                            draw_legend(
-                                ui.painter(),
-                                &app,
-                                &HashMap::new(),
-                                &HashMap::new(),
-                                CheckRatioFilter::Max,
-                                true,
-                                false,
-                            );
-                        }
-                    });
-                    for shape in output.shapes {
-                        if let egui::Shape::Text(t) = shape.shape {
-                            labels.push_str(t.galley.text());
-                        }
-                    }
-                }
+                let labels = rendered_wall_checks(&app, &checks, surface);
                 assert!(
                     labels.contains(&format!(
                         "壁 {} 枚 / 検定 {count} 件",

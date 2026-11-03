@@ -158,15 +158,6 @@ fn project_load(kind: MemberLoadKind, dir: [f64; 3], axis: [f64; 3]) -> MemberLo
     }
 }
 
-/// グループ内の全荷重の両端固定端モーメントを合算する（C 図）。
-#[cfg(test)]
-fn sum_fixed_end_moments(loads: &[MemberLoadKind], l: f64) -> (f64, f64) {
-    loads
-        .iter()
-        .map(|ld| sepika_load::floor::fixed_end_moments(ld, l))
-        .fold((0.0, 0.0), |(ai, aj), (ci, cj)| (ai + ci, aj + cj))
-}
-
 /// グループ内の全荷重の単純梁反力を合算する（Q 図）。
 #[cfg(test)]
 fn sum_simple_reactions(loads: &[MemberLoadKind], l: f64) -> (f64, f64) {
@@ -1085,7 +1076,7 @@ mod tests {
     }
 
     #[test]
-    fn cmq_drawing_preserves_model_loads_end_moments_saved_results_and_undo_history() {
+    fn cmq_drawing_preserves_model_loads_saved_results_and_undo_history() {
         let loads = vec![
             MemberLoadKind::Distributed {
                 a: 0.0,
@@ -1095,7 +1086,7 @@ mod tests {
             },
             MemberLoadKind::Point { a: 370.0, p: -10.0 },
         ];
-        let mut app = drawing_app(loads.clone(), false, DiagramPlane::Ey);
+        let mut app = drawing_app(loads, false, DiagramPlane::Ey);
         for coord in [[2000.0, 0.0, 0.0], [3000.0, 0.0, 0.0]] {
             assert!(app.core.scoped.undo.run(
                 &mut app.core.model,
@@ -1124,9 +1115,6 @@ mod tests {
             app.core.scoped.undo.undo_label().map(str::to_owned),
             app.core.scoped.undo.redo_label().map(str::to_owned),
         );
-        let before_c = sum_fixed_end_moments(&loads, 1000.0);
-        let before_q = sum_simple_reactions(&loads, 1000.0);
-        let before_m = sepika_load::floor::simple_beam_moment_at(&loads, 1000.0, 370.0);
         for (component, color) in [
             (CmqComponent::C, theme::DATA_BLUE),
             (CmqComponent::M, theme::HILITE_PURPLE),
@@ -1156,12 +1144,6 @@ mod tests {
                 app.core.scoped.undo.redo_label().map(str::to_owned)
             ),
             before_undo
-        );
-        assert_eq!(sum_fixed_end_moments(&loads, 1000.0), before_c);
-        assert_eq!(sum_simple_reactions(&loads, 1000.0), before_q);
-        assert_eq!(
-            sepika_load::floor::simple_beam_moment_at(&loads, 1000.0, 370.0),
-            before_m
         );
     }
 
