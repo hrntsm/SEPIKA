@@ -425,6 +425,7 @@ impl App {
                 match result {
                     JobResult::Pushover(res) => self.apply_pushover_result(*res),
                     JobResult::Modal(res) => self.apply_eigen_result(res),
+                    JobResult::LinearCheckpoint(res) => self.apply_linear_checkpoint(*res),
                     JobResult::TimeHistory(res, source) => {
                         self.apply_time_history_result(*res, *source)
                     }

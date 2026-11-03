@@ -178,6 +178,7 @@ pub enum PendingAnalysis {
 /// 生成済み波形と、その生成・実行条件。
 pub struct TimeHistoryInput<T> {
     pub(crate) data: T,
+    pub(crate) checkpoint_step: Option<u64>,
     pub(crate) source: TimeHistorySource,
 }
 
@@ -623,6 +624,9 @@ pub enum JobResult {
         Box<Result<sepika_solver::dynamic::timehistory::ResponseResult, String>>,
         Box<TimeHistorySource>,
     ),
+    LinearCheckpoint(
+        Box<Result<sepika_job::time_history_restart::LinearTimeHistoryCheckpoint, String>>,
+    ),
     /// 質点系（固有値・時刻歴）。方向別ピークを含み大きいため Box で運ぶ。
     LumpedMass(
         Box<Result<sepika_solver::dynamic::lumped_mass::LumpedMassResult, String>>,
@@ -955,6 +959,8 @@ pub struct ModelScoped {
     /// stale 警告なしに表示される（受信側 `Receiver` の破棄だけでよい。ワーカー
     /// スレッドの送信は失敗して静かに終了する）。
     pub job: Option<AnalysisJob>,
+    pub linear_checkpoint: Option<sepika_job::time_history_restart::LinearTimeHistoryCheckpoint>,
+    pub checkpoint_stop_step: u64,
     /// 保存サイズ超過時の保存保留（保存先パス, 解析結果の直列化サイズ `[MB]`）。
     /// セットされている間は「時刻歴の詳細記録を保存に含めますか？」の確認
     /// ダイアログを表示し、選択に応じて含めて保存／除外して保存／キャンセル。
@@ -1051,6 +1057,8 @@ impl Default for ModelScoped {
             last_notice: None,
             result_contract_notice: None,
             job: None,
+            linear_checkpoint: None,
+            checkpoint_stop_step: 0,
             pending_save_recording: None,
             #[cfg(feature = "gui")]
             pending_plate_loss_edit: None,
@@ -2538,6 +2546,8 @@ mod rc_wall_cracking_tests;
 #[cfg(test)]
 pub(crate) mod rc_wall_side_column_tests;
 
+#[cfg(test)]
+mod time_history_restart_tests;
 #[cfg(test)]
 mod vibration_ownership_tests;
 

@@ -218,6 +218,64 @@ fn empty_input_is_rejected_by_both_spatial_solvers() {
 }
 
 #[test]
+fn stopped_linear_state_keeps_full_wave_direction_and_rejects_invalid_restart_values() {
+    let model = model();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let mut input = wave(&[0.0, 100.0, -30.0, 20.0, 0.0, 0.0]);
+    input.accel_y = Some(vec![0.0, 0.0, 0.0, 0.0, 500.0, -500.0]);
+    let (prefix, state) = linear_time_history_until(
+        &model,
+        &dofmap,
+        &reducer,
+        &input,
+        &NewmarkCfg::average_accel(),
+        &damping(),
+        &[0.0],
+        &[0.0],
+        false,
+        Some(3),
+        Some(2),
+    )
+    .unwrap();
+    assert_eq!(state.step, 2);
+    assert_eq!(state.time, 0.2);
+    assert!(prefix.history.record_dir_y);
+    assert_eq!(prefix.recording.unwrap().frame_time, vec![0.0]);
+    for invalid in [
+        TimeStepState {
+            time: 0.3,
+            ..state.clone()
+        },
+        TimeStepState {
+            accel_red: vec![f64::NAN],
+            ..state.clone()
+        },
+        TimeStepState {
+            vel_red: vec![f64::INFINITY],
+            ..state.clone()
+        },
+        TimeStepState {
+            disp_red: vec![],
+            ..state.clone()
+        },
+    ] {
+        assert!(linear_time_history_from_state(
+            &model,
+            &dofmap,
+            &reducer,
+            &input,
+            &NewmarkCfg::average_accel(),
+            &damping(),
+            &invalid,
+            false,
+            Some(3),
+        )
+        .is_err());
+    }
+}
+
+#[test]
 fn singular_initial_mass_keeps_existing_zero_near_zero_and_error_contract() {
     let mut model = model();
     let mut massless = model.nodes[1].clone();

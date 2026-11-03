@@ -76,6 +76,7 @@ impl App {
             .map(|c| c.id.0);
         TimeHistoryInput {
             data: accel,
+            checkpoint_step: None,
             source: TimeHistorySource {
                 raw_identity,
                 cfg,

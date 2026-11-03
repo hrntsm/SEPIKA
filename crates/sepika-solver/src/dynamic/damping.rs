@@ -5,7 +5,7 @@ type SparseMat = SparseColMat<usize, f64>;
 
 /// モード別減衰の 1 モード分（モード別減衰、構造動力学）。
 /// `shape` は質量正規化した固有ベクトル（φᵀMφ=1、縮約空間）。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ModalDampingMode {
     /// 固有円振動数 ω [rad/s]。
     pub omega: f64,
@@ -16,6 +16,7 @@ pub struct ModalDampingMode {
 }
 
 /// 減衰モデル。
+#[derive(serde::Serialize)]
 pub enum Damping {
     /// 質量比例減衰 C = a0·M。a0 = 2·h·ω で対象振動数 ω に減衰比 h を与える。
     MassProportional { h: f64, omega: f64 },
@@ -37,7 +38,7 @@ pub enum Damping {
 }
 
 /// 剛性比例減衰がどの剛性を基準にするか。
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize)]
 pub enum StiffnessKind {
     /// 初期剛性比例（`[C]`=α1`[Se]`、α1=2h/ω）。
     Initial,

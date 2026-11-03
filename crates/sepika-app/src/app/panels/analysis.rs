@@ -541,6 +541,59 @@ impl App {
             });
         });
         self.commit_analysis_settings(cfg);
+        if !cfg.th_nonlinear {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("途中保存ステップ（0: 全区間）");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut self.core.scoped.checkpoint_stop_step)
+                        .range(0..=u64::MAX),
+                );
+            });
+            ui.label("1以上を指定すると、その確定状態まで計算して停止します。結果表示は再開完了後の全区間です。");
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(
+                        !running && self.core.scoped.linear_checkpoint.is_some(),
+                        egui::Button::new("途中状態を保存…"),
+                    )
+                    .clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("線形時刻歴の途中状態", &["sepika-th"])
+                        .save_file()
+                    {
+                        self.save_linear_checkpoint(&path);
+                    }
+                }
+                if ui
+                    .add_enabled(!running, egui::Button::new("途中状態を読込…"))
+                    .clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("線形時刻歴の途中状態", &["sepika-th"])
+                        .pick_file()
+                    {
+                        self.load_linear_checkpoint(&path);
+                    }
+                }
+                if ui
+                    .add_enabled(
+                        !running && self.core.scoped.linear_checkpoint.is_some(),
+                        egui::Button::new("保存波形で照合・再開"),
+                    )
+                    .clicked()
+                {
+                    self.start_resume_linear_checkpoint();
+                }
+            });
+            if let Some(checkpoint) = &self.core.scoped.linear_checkpoint {
+                let (step, time) = checkpoint.progress();
+                ui.label(format!(
+                    "再開状態: ステップ{step}、{time:.6}s（保存した全波形を使用）"
+                ));
+            }
+        }
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(!running, egui::Button::new("▶ サンプル波で実行"))

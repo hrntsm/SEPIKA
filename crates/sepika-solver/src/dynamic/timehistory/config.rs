@@ -34,6 +34,7 @@ impl NewmarkCfg {
 /// `accel_x`/`accel_y` は同長さとし、空入力は拒否、1 点は初期状態のみを返す。
 /// `accel_theta` は位相差入力によるねじれ地動加速度 [rad/s²]（鉛直軸まわり。
 /// `None` はねじれ加振なし）。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GroundMotion {
     pub dt: f64,
     pub accel_x: Vec<f64>,
