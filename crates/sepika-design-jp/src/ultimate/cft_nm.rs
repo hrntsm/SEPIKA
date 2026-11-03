@@ -17,7 +17,7 @@ use std::f64::consts::PI;
 pub struct CftBendingInput {
     /// 円形断面なら true（角型なら false）。
     pub circular: bool,
-    /// 角形鋼管の外角半径 [mm]。円形では使用しない。
+    /// 角形鋼管の外角半径 `[mm]`。円形では使用しない。
     pub corner_r: f64,
     /// 鋼管のせい D `[mm]`（円形は外径）。
     pub d_steel: f64,
@@ -60,14 +60,7 @@ fn angular_nu_mu(inp: &CftBendingInput, xn: f64) -> (f64, f64) {
     (cn + sn, cm + sm)
 }
 
-/// 円形短柱: パラメータ角 `θ`（[0, π]、`θ = cos⁻¹(1 − 2xn/cD)`）における (Nu, Mu)。
-///
-/// ```text
-/// cσcB = Fc + 0.78·(2t/(D−2t))·Fy,  r1 = cD/2,  r2 = (D−t)/2
-/// cNu = r1²·(θ − sinθcosθ)·cσcB,     cMu = (2/3)·r1³·sin³θ·cσcB
-/// sNu = 2·r2·t·(β1·θ − β2·(θ−π))·Fy,  sMu = 2·r2²·t·(β1 − β2)·sinθ·Fy
-/// β1 = 0.89,  β2 = −1.08
-/// ```
+/// 円形短柱のパラメータ角θ `[rad]`（0〜π）に対応する軸力 `[N]`・曲げ耐力 `[N·mm]` をこの順で返す。
 fn circular_nu_mu(inp: &CftBendingInput, theta: f64) -> (f64, f64) {
     let r1 = inp.c_d / 2.0;
     let r2 = (inp.d_steel - inp.t) / 2.0;
@@ -145,8 +138,8 @@ pub fn cft_short_column_mu(inp: &CftBendingInput, n_design: f64, ncu1: f64, ntu:
     }
 }
 
-/// 座屈補助軸力 `Nk = π²·(cE'·cI/5 + sE·sI)/lk²`（CFT 指針、長柱）。
-/// `cE' = (3.32·√Fc + 6.90)×10³`。`lk ≤ 0` は `f64::INFINITY`（座屈しない）。
+/// cI・sI `[mm⁴]`、sE・Fc `[N/mm²]`、座屈長さlk `[mm]` から座屈補助軸力Nk `[N]` を返す。
+/// lkが0以下なら `f64::INFINITY`。
 pub fn cft_nk(c_inertia: f64, s_inertia: f64, s_young: f64, fc: f64, lk: f64) -> f64 {
     if lk <= 0.0 {
         return f64::INFINITY;

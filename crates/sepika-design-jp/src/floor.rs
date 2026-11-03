@@ -45,7 +45,7 @@ pub struct BeamDesignResult {
 }
 
 /// N-mm 単位の部材力を用いて小梁の曲げ・たわみを検定する（符号は絶対値で評価）。
-/// スパン[mm]・断面係数[mm³]・許容応力度[N/mm²]・たわみ限界分母は正の有限値が必要。
+/// スパン`[mm]`・断面係数`[mm³]`・許容応力度`[N/mm²]`・たわみ限界分母は正の有限値が必要。
 /// 荷重・部材力・たわみの非有限値、または計算結果を表現できない場合は理由付きエラー。
 #[allow(clippy::too_many_arguments)]
 pub fn design_beam_from_forces(

@@ -26,7 +26,7 @@ pub(crate) struct AxisProps {
     pub(crate) d: f64,
     /// 引張鉄筋断面積 at [mm²]（片側）。
     pub(crate) at: f64,
-    /// 圧縮鉄筋断面積 ac [mm²]（片側、at と同値の対称複筋仮定）。
+    /// 圧縮側主筋の断面積 ac [mm²]。
     pub(crate) ac: f64,
     /// 応力中心間距離 j = 7d/8 [mm]。
     pub(crate) j: f64,

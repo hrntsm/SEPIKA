@@ -35,14 +35,8 @@ pub fn cft_column_class(lk: f64, d: f64) -> CftColumnClass {
     }
 }
 
-/// 充填コンクリートの座屈応力度 `cσcr` [N/mm²]（CFT 指針）。
-///
-/// ```text
-/// cσcr/Fc = { 2/(1 + √(cλ1⁴ + 1))          (cλ1 ≤ 1.0)
-///             2(√2 − 1)·exp(Cc(1 − cλ1))    (cλ1 ≥ 1.0) }
-/// ```
-/// 両分岐は `cλ1 = 1.0` で連続する（いずれも `2/(1+√2)·Fc`）。
-/// `Fc ≤ 0` の不正入力は 0 を返す。`Cc` は [`cft_cc`]。
+/// Fc `[N/mm²]`・規準化細長比cλ1・係数Ccから座屈応力度 `[N/mm²]` を返す。
+/// Fcが0以下なら0。cλ1の負値と結果の負値は0に制限する。
 pub fn cft_concrete_buckling_stress(fc: f64, c_lambda1: f64, cc: f64) -> f64 {
     if fc <= 0.0 {
         return 0.0;
@@ -56,13 +50,12 @@ pub fn cft_concrete_buckling_stress(fc: f64, c_lambda1: f64, cc: f64) -> f64 {
     (factor * fc).max(0.0)
 }
 
-/// 係数 `Cc = 0.568 + 0.00612·Fc`（CFT 指針）。
+/// Fc `[N/mm²]` に対応する充填コンクリート座屈曲線の係数Ccを返す。
 pub fn cft_cc(fc: f64) -> f64 {
     0.568 + 0.00612 * fc
 }
 
-/// 圧縮強度時ひずみ `εu = 0.93·Fc^(1/4)·10⁻³`（CFT 指針）。
-/// `Fc ≤ 0` は 0。
+/// Fc `[N/mm²]` に対応する圧縮強度時ひずみεuを返す。Fcが0以下なら0。
 pub fn cft_epsilon_u(fc: f64) -> f64 {
     if fc <= 0.0 {
         return 0.0;
@@ -70,8 +63,8 @@ pub fn cft_epsilon_u(fc: f64) -> f64 {
     0.93 * fc.powf(0.25) * 1.0e-3
 }
 
-/// 充填コンクリートの規準化細長比 `cλ1 = cλ/π·√εu`（`cλ = lk/ci`, `ci = √(cI/cA)`）。
-/// 不正入力（cA・cI・lk のいずれか 0 以下）は 0。
+/// 断面二次モーメントcI `[mm⁴]`・面積cA `[mm²]`・Fc `[N/mm²]`・座屈長さlk `[mm]` から規準化細長比を返す。
+/// cA・cI・lkのいずれかが0以下なら0。
 pub fn cft_concrete_slenderness(c_inertia: f64, c_area: f64, fc: f64, lk: f64) -> f64 {
     if c_area <= 0.0 || c_inertia <= 0.0 || lk <= 0.0 {
         return 0.0;
@@ -84,8 +77,8 @@ pub fn cft_concrete_slenderness(c_inertia: f64, c_area: f64, fc: f64, lk: f64) -
     c_lambda / std::f64::consts::PI * cft_epsilon_u(fc).sqrt()
 }
 
-/// 充填コンクリートの座屈軸耐力 `cNcr = cσcr·cA`（CFT 指針）。
-/// 不正入力（cA・cI のいずれか 0 以下）は 0。`lk ≤ 0` は無座屈として `cA·Fc`。
+/// 充填コンクリートの座屈軸耐力 `[N]` を返す。cI `[mm⁴]`・cA `[mm²]`・Fc `[N/mm²]`・lk `[mm]` を用いる。
+/// cA・cI・Fcのいずれかが0以下なら0。lkが0以下なら無座屈の圧縮耐力。
 pub fn cft_concrete_buckling_axial(c_inertia: f64, c_area: f64, fc: f64, lk: f64) -> f64 {
     if c_area <= 0.0 || c_inertia <= 0.0 || fc <= 0.0 {
         return 0.0;
@@ -146,8 +139,7 @@ pub struct CftLongBuckling {
     pub s_ne: f64,
 }
 
-/// 短柱の軸圧縮終局耐力 `Ncu1 = cNc + (1+ξ)·sNc`（CFT 指針）。
-/// `ξ = 0.27`（円形）/ `0`（角型）、`cNc = cA·Fc`、`sNc = sA·Fy`。
+/// CFT短柱の軸圧縮終局耐力 `[N]` を返す。円形と角形を区別する。
 pub fn cft_ncu1(inp: &CftAxialInput) -> f64 {
     let xi = if inp.circular { 0.27 } else { 0.0 };
     let cnc = inp.c_area.max(0.0) * inp.fc.max(0.0);
@@ -175,16 +167,8 @@ fn cft_ncu3_at_lk(inp: &CftAxialInput, lk: f64) -> CftLongBuckling {
     CftLongBuckling { c_ncr, s_ncr, s_ne }
 }
 
-/// CFT 柱の軸終局耐力（圧縮 Ncu・引張 Ntu）を算定する（CFT 指針）。
-///
-/// ```text
-/// 短柱: Ncu = Ncu1 = cNc + (1+ξ)·sNc
-/// 長柱: Ncu = Ncu3 = cNcr + sNcr
-/// 中柱: Ncu = Ncu2 = Ncu1 − 0.125·(Ncu1 − Ncu3|lk/D=12)·(lk/D − 4)
-/// 引張: Ntu = sNt = sA·Fy
-/// ```
-/// 中柱の `Ncu3` は `lk/D = 12` として算定した値を用いる（CFT 指針）。
-/// 引張低減係数は `β2 = 1.0`（鋼管全断面降伏）とする。
+/// CFT柱の分類に応じた軸圧縮耐力と引張耐力の大きさ `[N]` を返す。
+/// 中柱の補間には座屈長さを断面せいの12倍とした長柱成分を用いる。
 pub fn cft_axial_ultimate(inp: &CftAxialInput) -> CftAxialUltimate {
     let class = cft_column_class(inp.lk, inp.d_section);
     let long_buckling = (class == CftColumnClass::Long).then(|| cft_ncu3_at_lk(inp, inp.lk));

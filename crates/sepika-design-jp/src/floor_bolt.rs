@@ -59,7 +59,7 @@ pub fn allowable_bolt_shear(input: &SecondaryBeamBoltConnection) -> Result<f64, 
     }
 }
 
-/// 各端の反力 [N] と支持端フラグから検定する。片持ち支持端は曲げ伝達が対象外。
+/// 各端の反力 `[N]` と支持端フラグから検定する。片持ち支持端は曲げ伝達が対象外。
 pub fn design_beam_bolts(
     symbol: &str,
     input: Option<&SecondaryBeamBoltConnection>,

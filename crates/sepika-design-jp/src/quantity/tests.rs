@@ -685,11 +685,7 @@ fn test_wall_quantity_with_opening() {
     assert!(w.rebar_weight_t() > 0.0);
 }
 
-/// `try_compute_quantity_takeoff` が壁展開モデルを見ていることの回帰テスト
-/// （申し送り §5.15）。壁の解析要素（`ElementKind::Wall`）は入力の正である
-/// `Model`（`WallPlate`＋`WallRegion` 経由）には存在しない生成物（D5）のため、
-/// 内部で壁展開しないと `MemberCategory::Wall` の数量が一切集計されない
-/// （壁の数量が積算から静かに消える）。
+/// 入力モデルに壁解析要素がなくても、囲まれた壁版からコンクリート・型枠数量を計上する。
 #[test]
 fn test_wall_quantity_via_wall_plate_is_included() {
     use sepika_core::ids::{WallPlateId, WallRegionId};
@@ -744,10 +740,7 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     assert!(w.formwork_m2 > 0.0, "壁の型枠数量が正であるはず");
 }
 
-/// 取り付く壁版（`Attached`。パラペット等）は解析要素を持たない（D5）ため、
-/// `wall_quantity`（エレメント経由）ではなく `attached_wall_plate_quantity`
-/// （`WallPlate` から直接算定）が数量へ算入する。カテゴリは
-/// 雑壁の区分として `MemberCategory::MiscWall` を使う。
+/// 取り付く壁版を雑壁1件として計上し、断面符号・体積と未実装の鉄筋算定状態を保持する。
 #[test]
 fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     use sepika_core::ids::WallPlateId;

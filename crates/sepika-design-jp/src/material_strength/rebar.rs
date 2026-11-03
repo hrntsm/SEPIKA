@@ -4,7 +4,7 @@ use sepika_core::model::Material;
 
 /// 異形鉄筋の許容引張・圧縮応力度 ft [N/mm²]。
 ///
-/// `dia` は正の有限な径 [mm]。SD345・SD390・SD490 は長期に径28 mm超で低減する。
+/// `dia` は正の有限な径 `[mm]`。SD345・SD390・SD490 は長期に径28 mm超で低減する。
 /// USD685 は長期 215・短期 685。
 pub fn rebar_allowable_tension(grade: &str, dia: f64, long_term: bool) -> f64 {
     let g = grade.trim();

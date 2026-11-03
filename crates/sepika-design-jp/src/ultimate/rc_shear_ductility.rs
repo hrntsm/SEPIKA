@@ -4,11 +4,8 @@
 
 use super::rc_shear::plastic_nu0;
 
-/// トラス機構の角度係数 `μ = 2 − 20·Rp`（AIJ 靭性指針 6.4）。
-///
-/// `Rp ≤ 0`（塑性化前）は `μ = 2.0`（`Rp→0` の極限）とする。トラス斜材角 ≤ 45°
-/// （`cotφ = μ ≥ 1`）に対応するよう下限 1.0 でクランプする（[`super::rc_shear::plastic_cot_phi`]
-/// と同じ扱い。`Rp=0.05` で `μ=1.0`）。
+/// ヒンジ回転角Rp `[rad]` から靭性指針式のトラス角度係数μを返す。
+/// Rpが0以下なら2、結果の下限は1。
 pub fn ductility_mu(rp: f64) -> f64 {
     if rp <= 0.0 {
         2.0
@@ -17,11 +14,8 @@ pub fn ductility_mu(rp: f64) -> f64 {
     }
 }
 
-/// コンクリート圧縮強度の有効係数 `ν = (1 − 20·Rp)·ν0`（AIJ 靭性指針 6.4）。
-///
-/// `ν0 = 0.7 − σB/200`（[`super::rc_shear::plastic_nu0`] と共通）。`Rp ≤ 0`（塑性化前）は
-/// `ν = ν0`。`(1 − 20·Rp)` は `Rp=0.05` で 0 に達するため、下限 0 でクランプする
-/// （靭性指針式は塑性理論式の `0.25·ν0` 頭打ちを持たない。有効範囲は概ね `Rp ≤ 0.05`）。
+/// Fc `[N/mm²]`・ヒンジ回転角Rp `[rad]` から靭性指針式の有効係数νを返す。
+/// Rpが0以下ならν0を用い、結果の下限は0。
 pub fn ductility_nu(fc: f64, rp: f64) -> f64 {
     let nu0 = plastic_nu0(fc);
     let factor = if rp <= 0.0 {
@@ -32,16 +26,8 @@ pub fn ductility_nu(fc: f64, rp: f64) -> f64 {
     (factor * nu0).max(0.0)
 }
 
-/// アーチ機構の圧縮束角度のタンジェント `tanθ`（AIJ 靭性指針 6.4.10/6.4.11）。
-///
-/// ```text
-/// tanθ = { 0                 （引張軸力を受ける柱: tensile_axial=true）
-///          0.9·D/(2L)        （L/D ≥ 1.5, 6.4.10）
-///          (√(L²+D²) − L)/D  （L/D < 1.5, 6.4.11） }
-/// ```
-/// `L`: クリアスパン長さ、`D`: 部材せい `[mm]`。`D ≤ 0` または `L ≤ 0` の不正入力は 0。
-///
-/// (6.4.11) の平方根内は `L²+D²`。境界 `L/D=1.5` で (6.4.10) と連続する。
+/// 内法長さL・部材せいD `[mm]` からアーチ機構の角度係数tanθを返す。
+/// 引張軸力の柱、またはD・Lのいずれかが0以下なら0。
 pub fn arch_tan_theta(l_clear: f64, d_full: f64, tensile_axial: bool) -> f64 {
     if tensile_axial {
         return 0.0;
@@ -57,11 +43,8 @@ pub fn arch_tan_theta(l_clear: f64, d_full: f64, tensile_axial: bool) -> f64 {
     }
 }
 
-/// トラス機構の有効係数 `λ = 1 − s/(2·je) − bs/(4·je)`（AIJ 靭性指針 6.4.8）。
-///
-/// `bs = be/(Ns+1)`（6.4.9、`Ns`＝中子筋の本数）。`s`＝横補強筋間隔、`je`＝トラス機構
-/// 有効せい、`be`＝トラス機構有効幅 `[mm]`。`je ≤ 0` の不正入力は 0 を返す。結果は
-/// `[0, 1]` にクランプする（横補強筋が密なほど 1 に近づく）。
+/// 横補強筋間隔s・有効せいje・有効幅be `[mm]` と中子筋本数Nsから有効係数λを返す。
+/// jeが0以下なら0。結果は `[0, 1]` に制限する。
 pub fn truss_lambda(s: f64, je: f64, be: f64, n_s: u32) -> f64 {
     if je <= 0.0 {
         return 0.0;
@@ -101,19 +84,8 @@ pub struct RcDuctilityShearInput {
     pub lightweight: bool,
 }
 
-/// 靭性指針式による終局せん断信頼強度 `Vu = min(Vu1, Vu2, Vu3)` `[N]`（AIJ 靭性指針 6.4）。
-///
-/// ```text
-/// Vu1 = μ·pwe·σwy·be·je + (ν·σB − 5·pwe·σwy/λ)·(b·D/2)·tanθ        (6.4.1)
-/// Vu2 = (λ·ν·σB + pwe·σwy)/3 · be·je                               (6.4.2)
-/// Vu3 = (λ·ν·σB/2)·be·je                                           (6.4.3)
-/// ```
-/// - Vu1 はトラス機構＋アーチ機構、Vu2・Vu3 はコンクリート圧壊で頭打ちの候補。
-/// - (6.4.1) 第 2 項（アーチ機構）の応力 `ν·σB − 5·pwe·σwy/λ` は負にならないよう
-///   下限 0 でクランプする（横補強筋が過密でアーチ寄与が消える場合。塑性理論式で
-///   `k2 ≤ 1` によりアーチ項を 0 以上に保つのと同型）。
-/// - `lightweight` が true の場合、算定値を 0.9 倍に低減する（共通事項）。
-/// - 不正入力（b・D・be・je・Fc のいずれかが 0 以下）は 0.0 を返す。
+/// 靭性指針式の終局せん断信頼強度Vu `[N]` を返す。
+/// 軽量コンクリートは0.9倍。b・D・be・je・Fcのいずれかが0以下なら0。
 pub fn rc_shear_vu_ductility(inp: &RcDuctilityShearInput) -> f64 {
     if inp.b <= 0.0 || inp.d_full <= 0.0 || inp.be <= 0.0 || inp.je <= 0.0 || inp.fc <= 0.0 {
         return 0.0;
@@ -144,14 +116,8 @@ pub fn rc_shear_vu_ductility(inp: &RcDuctilityShearInput) -> f64 {
     }
 }
 
-/// 部材単位長さあたりに負担できる付着力 `Tx` [N/mm]（AIJ 靭性指針 6.8.16）。
-///
-/// ```text
-/// Tx = τbu·Σφ1 + τbu2·Σφ2                     （降伏ヒンジを計画しない部材, 6.8.16a）
-/// Tx = (1 − 10·Rp)·(τbu·Σφ1 + τbu2·Σφ2)       （降伏ヒンジを計画する部材,   6.8.16b）
-/// ```
-/// `yield_hinge=true` で (6.8.16b)（ヒンジ域の付着劣化を `(1−10·Rp)` で反映、下限 0）。
-/// `τbu`・`τbu2` は 1・2 段目主筋の付着信頼強度、`Σφ1`・`Σφ2` はその周長合計。
+/// 1・2段目の付着強度 `[N/mm²]` と周長和 `[mm]` から単位長さ当たり付着力Tx `[N/mm]` を返す。
+/// 各強度・周長和の負値は0。降伏ヒンジを計画する場合は回転角Rp `[rad]` に応じて低減する。
 pub fn bond_force_tx(
     tau_bu: f64,
     sum_phi1: f64,
@@ -205,19 +171,8 @@ pub struct RcVbuInput {
     pub lightweight: bool,
 }
 
-/// 付着破壊の影響を考慮した終局せん断信頼強度 `Vbu = min(Vbu1, Vbu2)` `[N]`
-/// （AIJ 靭性指針 6.8）。
-///
-/// ```text
-/// Vbu1 = Tx·je + (ν·σB − 2.5·Tx/(λ·be))·(b·D/2)·tanθ        (6.8.14)
-/// Vbu2 = (λ·ν·σB/2)·be·je                                    (6.8.15)
-/// ```
-/// - トラス機構をせん断補強筋（[`rc_shear_vu_ductility`] の `pwe·σwy`）ではなく付着力
-///   `Tx`（[`bond_force_tx`]）で置き換えた式。付着割裂が支配する場合のせん断信頼強度。
-/// - Vbu2 は [`rc_shear_vu_ductility`] の Vu3（6.4.3）と同型（コンクリート圧壊の頭打ち）。
-/// - (6.8.14) 第 2 項の応力 `ν·σB − 2.5·Tx/(λ·be)` は負にならないよう下限 0 でクランプ。
-/// - `lightweight` が true の場合 0.9 倍に低減する。
-/// - 不正入力（b・D・be・je・Fc のいずれかが 0 以下）は 0.0 を返す。
+/// 付着破壊を考慮した終局せん断信頼強度Vbu `[N]` を返す。
+/// 軽量コンクリートは0.9倍。b・D・be・je・Fcのいずれかが0以下なら0。
 pub fn rc_shear_vbu_ductility(inp: &RcVbuInput) -> f64 {
     if inp.b <= 0.0 || inp.d_full <= 0.0 || inp.be <= 0.0 || inp.je <= 0.0 || inp.fc <= 0.0 {
         return 0.0;

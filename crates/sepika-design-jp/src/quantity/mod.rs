@@ -16,8 +16,6 @@
 //!
 //! モデルの内部単位系は N-mm-s だが、集計結果は実務慣用単位で持つ:
 //! コンクリート体積 `[m³]`・型枠面積 `[m²]`・鉄筋/鉄骨重量 `[t]`・長さ `[m]`。
-//! 鉄骨重量は `W = L×A×7.85`（鉄骨単位重量 7.85 t/m³ 固定。
-//! 各部位共通事項）による。
 
 mod contact;
 pub mod member;
@@ -40,9 +38,7 @@ use sepika_core::section_shape::{
 
 use member::{BeamBarEnd, Haunch};
 
-/// 鉄骨・鉄筋の単位重量 [t/m³]（数量積算の慣用値 7.85 t/m³。各部位共通事項）。
-/// 固定荷重の設計用単位体積重量 γs=78.5 kN/m³（`sepika_core::units::STEEL_UNIT_WEIGHT_KN_M3`）
-/// とは用途が別の独立値である（`sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3` 参照）。
+/// 数量積算用の鉄骨・鉄筋単位重量 `[t/m³]`。固定荷重用の設計単位体積重量とは区別する。
 const STEEL_UNIT_WEIGHT_T_PER_M3: f64 = sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3;
 
 /// 鉄骨単位重量 [t/mm³]（[`STEEL_UNIT_WEIGHT_T_PER_M3`] の内部単位系換算）。
@@ -1239,11 +1235,8 @@ fn push_rect_column_rebar(
     item.rebar_joints = main_bars as f64 * member::column_joint_count(h);
 }
 
-/// 新型円形柱（`RcColumnCircle`）の主筋・帯筋数量を追加する。
-///
-/// 主筋本数は総本数 `count`。帯筋は 1 リング 1 周分の長さ `π·d` で算定する
-/// （`RcCircleColumnRebar::aw_mm2()` の 2 本はせん断耐力上の脚数であり、
-/// 物理数量の周長ではない）。未入力なら数量 0。
+/// 円形RC柱の主筋・帯筋数量と継手数をitemへ追加する。
+/// d・hはmm。配筋未入力ならitemを変更しない。
 fn push_circle_column_rebar(
     item: &mut MemberQuantity,
     rebar: &RcCircleColumnRebar,
@@ -1591,12 +1584,8 @@ fn brace_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     Some(item)
 }
 
-/// 4 節点壁の内法寸法 (長さ L, 高さ H) [mm]。
-///
-/// 周辺の柱・梁の断面寸法の半分を芯々寸法から控除する
-/// （`sepika-load::story_gen::wall_clear_area_factor` と同じ規則。
-/// 側柱は `min(width, depth)/2`、上下梁は `depth/2` を控除）。
-/// 4 節点壁でない場合は None。
+/// 4節点壁の内法長さ・内法高さ `[mm]` をこの順で返す。
+/// 4節点の壁要素と4点の座標が揃わない場合はNone。
 fn wall_clear_dims(model: &Model, elem: &ElementData, pts: &[[f64; 3]]) -> Option<(f64, f64)> {
     if elem.kind != ElementKind::Wall || elem.nodes.len() != 4 || pts.len() != 4 {
         return None;
@@ -1789,13 +1778,8 @@ fn wall_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     Some(item)
 }
 
-/// 取り付く壁版（`WallPlateShape::Attached`。パラペット・腰壁・垂れ壁・自立壁）の数量。
-///
-/// 解析要素を持たない（D5）ため `WallPlate` から直接算定する（[`slab_quantity`] と
-/// 同じ位置づけ。エレメント経由の [`wall_quantity`] は `Enclosed`（4 節点の耐震壁）
-/// のみを数える）。取り付く壁版はフレーム外雑壁にあたる
-/// ため、カテゴリは同じ `MemberCategory::MiscWall` を使う。
-/// ラベルは囲まれた壁と同じく割り当てた断面の符号（`wall_quantity` と同じ）。
+/// 壁版の数量を `MemberCategory::MiscWall` として返す。
+/// ラベルは割り当てた断面の符号。鉄筋数量は理由付き未算定とする。
 fn wall_plate_quantity(ctx: &Ctx, plate: &WallPlate) -> Option<MemberQuantity> {
     let model = ctx.model;
     let anchor_nodes: Vec<sepika_core::ids::NodeId> = match &plate.shape {

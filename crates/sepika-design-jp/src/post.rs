@@ -20,7 +20,7 @@ pub struct PostCombinationResult {
     pub name: String,
     pub short_term: bool,
     pub positions: Vec<PostPositionResult>,
-    /// 鉛直反力 [N]、全体X/Y方向横反力 [N]、固定端曲げ反力 [N mm]。
+    /// 鉛直反力 `[N]`、全体X/Y方向横反力 `[N]`、固定端曲げ反力 `[N mm]`。
     pub gravity_reactions: [f64; 2],
     pub lateral_reactions: [[f64; 2]; 2],
     pub support_moments: [[f64; 2]; 2],
