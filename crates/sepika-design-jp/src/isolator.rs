@@ -112,26 +112,6 @@ pub fn equivalent_damping(k1: f64, kd: f64, qd: f64, disp: f64) -> f64 {
     (2.0 / std::f64::consts::PI) * qd * (d - qd / ((beta - 1.0) * kd)) / (keq * d * d)
 }
 
-/// 球面すべり支承 MN タイプの標準摩擦係数 `μ0`（面圧依存）。
-/// `μ0 = 0.043·(2.03·σ^−0.19 + 0.068)`（σ=長期支持面圧）。
-pub fn spherical_bearing_mu0_mn(sigma: f64) -> f64 {
-    let s = sigma.max(1e-9);
-    0.043 * (2.03 * s.powf(-0.19) + 0.068)
-}
-
-/// 球面すべり支承 LN タイプの標準摩擦係数 `μ0`（面圧依存）。
-/// `μ0 = 0.013·(20·σ^−0.9 + 0.5)`。
-pub fn spherical_bearing_mu0_ln(sigma: f64) -> f64 {
-    let s = sigma.max(1e-9);
-    0.013 * (20.0 * s.powf(-0.9) + 0.5)
-}
-
-/// 球面すべり支承 MN タイプの速度依存摩擦係数 `μ = μ0·(1.0 − 0.55·e^(−0.019·|V|))`。
-/// `v`=層間速度 [mm/s]。
-pub fn spherical_bearing_mu_mn(mu0: f64, v: f64) -> f64 {
-    mu0 * (1.0 - 0.55 * (-0.019 * v.abs()).exp())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,19 +200,5 @@ mod tests {
         let expect = (2.0 / std::f64::consts::PI) * 100.0 * (200.0 - 100.0 / 9.0) / (1.5 * 40000.0);
         assert!((heq - expect).abs() < 1e-9, "heq={heq}");
         assert!((heq - 0.2004).abs() < 5e-4, "heq≈0.2004, got {heq}");
-    }
-
-    #[test]
-    fn test_spherical_bearing_handcalc() {
-        // μ0(MN, σ=18) = 0.043·(2.03·18^−0.19 + 0.068)。
-        let mu0 = spherical_bearing_mu0_mn(18.0);
-        let expect = 0.043 * (2.03 * 18.0f64.powf(-0.19) + 0.068);
-        assert!((mu0 - expect).abs() < 1e-12, "mu0={mu0}");
-        // V=0 で μ = μ0·(1−0.55) = 0.45·μ0（静止時）。
-        assert!((spherical_bearing_mu_mn(mu0, 0.0) - 0.45 * mu0).abs() < 1e-12);
-        // 高速では μ → μ0（速度依存項が減衰）。
-        assert!(spherical_bearing_mu_mn(mu0, 1000.0) > spherical_bearing_mu_mn(mu0, 0.0));
-        // LN タイプ μ0 も正。
-        assert!(spherical_bearing_mu0_ln(10.0) > 0.0);
     }
 }
