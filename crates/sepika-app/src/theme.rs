@@ -163,7 +163,7 @@ pub fn lighten(c: Color32, t: f32) -> Color32 {
 /// テーブルのヘッダ・本文に共通する上下余白の合計 [pt]。
 const TABLE_ROW_PADDING_PT: f32 = 6.0;
 
-/// ヘッダ・本文共通の行高 [pt]。本文フォントの行高に上下余白を加える。
+/// ヘッダ・本文共通の行高 `[pt]`。本文フォントの行高に上下余白を加える。
 pub fn table_row_height(ui: &egui::Ui) -> f32 {
     ui.text_style_height(&TextStyle::Body) + TABLE_ROW_PADDING_PT
 }

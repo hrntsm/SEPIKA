@@ -48,3 +48,42 @@ READMEのティモシェンコ梁✅はBernoulli極限と剛域GJ/Lの数値照�
 SRC複合性能試験の同一area_ax再計算を除去し、先行する同じ出力・同公差1e-6の比較を保持した。ねじりhelperは同じKから逆算したthetaの再比較だけを除き、thetaは実update入力に保持する。独立GJ/Lの全4成分1e-10と実要素の±1000000 Nmmの照合1e-8は残る。
 
 変更後、`test_beam_new_src_cft_composite_props`とtorsion_contract_testsのH・丸角Box・CFT角/円の3試験をそれぞれexact実行し、計4成功・失敗0（各1成功・542除外）を確認した。fmt対象クレートcheck・check-docs・diffcheckも成功。全543件や利用側・clippyの再実行結果ではない。
+
+
+## ビューアの現役参照（2026-11-03）
+
+基点 `8f5079c0de6ced62fca171f6b46fa04760ddd3b9` の同一入力を対照し、次の観測を既存試験へ統合する。各入力・期待値・公差を保持し、構造式・演算順・表示仕様を変更しない。固定SHA付きhandoffと過去件数は履歴として保持する。
+
+| 整理対象 | 現役の試験・観測 |
+| --- | --- |
+| `member_axis_endpoints_uses_wall_column_midpoints` | `viewer::wall_expanded_view_model_tests::wall_plates_expand_into_wall_elements`。同じ4節点・断面・壁版・壁領域で、壁柱下端Z=0、上端Z=3000、長さ3000、下端X=2000を各1e-6で照合。Owned・壁1要素・入力不変・生成壁選択とclearも保持 |
+| `n_m_response_path_prepends_origin` | `viewer::hinge::tests::n_m_response_path_picks_larger_end_signed`。同じ1レコードで点数2・原点[0,0]を移設し、符号付きモーメントと1000 Nの換算値・元公差を保持 |
+| `pick_fiber_section_i_end_picks_min_xi` / `pick_fiber_section_j_end_picks_max_xi` | `viewer::hinge::tests::pick_fiber_section_picks_min_and_max_xi`。同じ3断面からi端−0.9、j端0.9を各1e-9で照合 |
+| `fiber_frame_outline_steel_box_has_outer_and_inner` | `viewer::hinge::tests::fiber_frame_outline_steel_box_fibers_lie_between_outer_and_inner`。同じBOXの外形300×200・内形282×182を各1e-6で照合。非空fiberの外形内・中空部外の全照合も保持 |
+| `concentrated_backbone_follows_axial_force` | `viewer::hinge::tests::concentrated_backbone_reduces_under_tension`。同じモデルの軸力0・±100000 Nを使用し、圧縮・引張の各低減比較と引張/圧縮差1e-9未満を保持 |
+| `hinge_view_cache_reuses_only_matching_key` | 構造体のキーを比較するだけでキャッシュ処理を呼ばない試験を除去。stepによるキー変化は `hinge_view_key_changes_with_step`、実際の再生成・復帰は `stale_wall_side_column_cache_tracks_regime_rejection_and_return_to_fiber` / `stale_girder_cache_tracks_elastic_wall_role_and_return_to_fiber_or_ms` 等へ保持。キャッシュhitの実行証拠とは扱わない |
+| `仕口パネルと面要素は部材線として描かない` | `viewer::scene::tests::要素の描き方は種別ごとに一意に決まる`。同じ10種別についてNone/Polygon/Lineの分類と部材線判定を保持 |
+| 外周スラブ試験内だけのVec閉輪郭操作 | `viewer::scene::tests::外周スラブは大梁フィルタと変形後座標を使う`。本番描画を呼ばないVec操作だけを除去。大梁フィルタと変形後4点の期待座標を保持し、閉輪郭描画を検証済みとは主張しない |
+| `viewer::check_ratio::incomplete_evidence_tests` の実描画driver | 異なる入力の3試験を保持し、壁表/凡例の2面×2passと文字抽出だけを共有。未評価・部分NG・対象外の全入力、表/凡例文言、結果不変assertを保持 |
+| 不要コピー・引数・再設定 | `viewer::{deform,diagram,modeling}`。ピーク変位の直接借用、未使用結果引数の除去、同値の初期再設定除去のみ。結果存在の描画ガード・選択結果の取得先を保持 |
+
+ヒンジtooltipは集約結果が一意な `(部材ID, 材端)` 順で整列済みであり、同じ部材IDを選んだ後も材端順は不変である。再sortだけを除去し、表示順は変えない。
+
+CMQの現役観測は[対応表](CMQのM成分塗り分割_Issue500_2026-10.md#現役の観測範囲1059)に記録する。これらは有限fixtureのVerificationの維持であり、手動GUI操作・実験Validationの証拠を追加しない。
+
+
+### ビューア整理のローカル検証
+
+上記基点に変更を載せ、開発・試験profileのデバッグ情報を0として実行した。最終ソースに対するviewer全試験は304成功・失敗0・ignore0（912件はviewer外のため対象外）。同一fixtureの6試験統合と、実処理を呼ばないキー比較1試験の除去により7件減少した。件数維持のための代替試験は追加しない。
+
+| 検証 | 結果 |
+| --- | --- |
+| `cargo test -p sepika-app --features gui --lib viewer:: --locked` | 304成功・失敗0・ignore0 |
+| `cargo test -p sepika-app --features gui --doc --locked` | 対象0件、成功 |
+| `cargo clippy -p sepika-app --all-targets --features gui --locked -- -D warnings` | 成功（Clippy 0.1.99） |
+| `RUSTDOCFLAGS="-D warnings" cargo doc -p sepika-app --features gui --no-deps --locked` | 成功。共通行高の単位 `[pt]` をinline codeにする最小修正を含む |
+| `cargo fmt --all -- --check` / `mdbook build` | 成功 |
+| `cargo run -p xtask --locked -- check-docs` | 現worktreeの専用targetで成功（summary141・links863・impl refs429） |
+| 新規追加したV&V相互リンクと見出し | 3件成功 |
+
+非既定 `gui` featureを有効にしてviewerを直接検証した。手動native GUI操作、viewer外の全app試験、構造式の新規Validationは実施していない。
