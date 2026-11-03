@@ -267,7 +267,6 @@ mod tests {
             cover,
             main_dia: dia,
             main_count: count,
-            main_count_per_side: count,
             main_area: count as f64 * one_bar_area(dia),
             tension_count: count,
             tension_layers: 1,

@@ -1184,7 +1184,7 @@ fn line_member_quantity(ctx: &Ctx, elem_idx: usize, elem: &ElementData) -> Optio
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
 
     if vertical {
-        Some(column_quantity(ctx, elem, sec, mat, ni, nj, len, structure))
+        Some(column_quantity(ctx, elem, sec, ni, nj, len, structure))
     } else {
         Some(beam_quantity(
             ctx, elem_idx, elem, sec, ni, nj, ci, cj, len, structure,
@@ -1198,15 +1198,8 @@ enum ColumnRebar<'a> {
     Circle(&'a RcCircleColumnRebar),
 }
 
-/// 梁の実配筋情報。
-enum BeamRebar<'a> {
-    Actual(&'a RcBeamRebar),
-}
-
-/// 新型矩形柱（`RcColumnRect`/`SrcColumnRect`）の主筋・帯筋数量を追加する。
-///
-/// 主筋本数は段別本数の固有本数 `2·Σx + 2·Σy − 4·nx·ny`（`nx`/`ny`: X/Y 段数）。
-/// 帯筋は X/Y 方向の脚数で一組長さを算定する。未入力なら数量 0。
+/// 矩形RC/SRC柱の主筋・帯筋数量と継手数をitemへ追加する。
+/// b・d・hはmm。配筋未入力ならitemを変更しない。
 fn push_rect_column_rebar(
     item: &mut MemberQuantity,
     rebar: &RcRectColumnRebar,
@@ -1290,7 +1283,6 @@ fn column_quantity(
     ctx: &Ctx,
     elem: &ElementData,
     sec: &sepika_core::model::Section,
-    _mat: &sepika_core::model::Material,
     ni: usize,
     nj: usize,
     h: f64,
@@ -1441,11 +1433,9 @@ fn beam_quantity(
     }
 
     let lo = elem.rigid_zone.clear_span_from(len).unwrap_or(len);
-    let (b, d, rebar): (f64, f64, Option<BeamRebar>) = match sec.shape.as_ref() {
-        Some(SectionShape::RcBeamRect { b, d, rebar }) => (*b, *d, Some(BeamRebar::Actual(rebar))),
-        Some(SectionShape::SrcBeamRect { b, d, rebar, .. }) => {
-            (*b, *d, Some(BeamRebar::Actual(rebar)))
-        }
+    let (b, d, rebar): (f64, f64, Option<&RcBeamRebar>) = match sec.shape.as_ref() {
+        Some(SectionShape::RcBeamRect { b, d, rebar }) => (*b, *d, Some(rebar)),
+        Some(SectionShape::SrcBeamRect { b, d, rebar, .. }) => (*b, *d, Some(rebar)),
         _ => (sec.width, sec.depth, None),
     };
 
@@ -1486,7 +1476,7 @@ fn beam_quantity(
         item.formwork_m2 = form * 1e-6;
 
         match rebar {
-            Some(BeamRebar::Actual(rebar)) if !rebar.is_unset() => {
+            Some(rebar) if !rebar.is_unset() => {
                 let main_bars: u32 =
                     rebar.top.iter().sum::<u32>() + rebar.bottom.iter().sum::<u32>();
                 if main_bars > 0 && rebar.main_dia > 0.0 {
@@ -1534,7 +1524,7 @@ fn beam_quantity(
                 }
                 item.rebar_joints = main_bars as f64 * member::beam_joint_count(lo);
             }
-            Some(BeamRebar::Actual(_)) | None => {}
+            Some(_) | None => {}
         }
 
         if structure == StructureKind::Src {

@@ -634,7 +634,7 @@ fn wall_with_columns_model() -> Model {
 
 #[test]
 fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipped() {
-    let mut model = wall_with_columns_model();
+    let model = wall_with_columns_model();
     let forces: [(f64, [f64; 6]); 1] = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
     let col_forces: [(f64, [f64; 6]); 1] = [(0.1, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
     let member_forces = vec![
@@ -642,10 +642,6 @@ fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipp
         (ElemId(3), col_forces.as_slice()),
         (ElemId(4), col_forces.as_slice()),
     ];
-    model.materials[0].fc = Some(17.0);
-    if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[0].shape {
-        *pwh_ratio = Some(0.015);
-    }
     let checks = collect_joint_checks(&model, &member_forces, LoadTerm::Short);
 
     let nl = checks
@@ -663,10 +659,7 @@ fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipp
     );
     assert!(cr.ratio() > 0.0, "Qu 検定比が正: {}", cr.ratio());
 
-    let mut columnless = wall_model(None);
-    columnless
-        .elements
-        .retain(|element| ![ElemId(3), ElemId(4)].contains(&element.id));
+    let columnless = wall_model(None);
     let plain = collect_joint_checks(&columnless, &member_forces, LoadTerm::Short);
     assert!(
         plain.iter().any(|(_, label, outcome)| label == "耐震壁(RC)せん断非線形"

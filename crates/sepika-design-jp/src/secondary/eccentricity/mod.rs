@@ -248,18 +248,7 @@ pub(crate) mod test_support {
             });
         }
 
-        let sections = if section_iy_override.is_some() {
-            vec![sec_base, sec_right, sec_beam]
-        } else {
-            vec![
-                sec_base,
-                Section {
-                    id: SectionId(1),
-                    ..sec_right
-                },
-                sec_beam,
-            ]
-        };
+        let sections = vec![sec_base, sec_right, sec_beam];
 
         let model = Model {
             nodes,

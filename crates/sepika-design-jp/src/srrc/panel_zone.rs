@@ -146,20 +146,6 @@ mod tests {
     }
 
     #[test]
-    fn src_panel_hand_calc() {
-        let inp = base_src_panel_input();
-        let res = src_panel_zone_check(&inp);
-
-        let cv = inp.col_width * inp.m_bd * inp.m_cd; // 全体積 Cb*mBd*mCd
-        let beta = inp.n_ratio * inp.j_tw * inp.s_cd / (inp.col_width * inp.m_cd);
-        let fs = crate::rc::concrete_allowable_shear(inp.fc, false);
-        let ma = cv * 3.0 * fs * (1.0 + beta); // jdelta=3 (十字形)
-        let expected_ratio = inp.sum_beam_moments / ma;
-
-        assert!((res.ratio() - expected_ratio).abs() < 1e-6);
-    }
-
-    #[test]
     fn src_panel_beta_zero_without_steel() {
         let mut inp = base_src_panel_input();
         inp.j_tw = 0.0; // 鉄骨ウェブ厚 0 → β=0

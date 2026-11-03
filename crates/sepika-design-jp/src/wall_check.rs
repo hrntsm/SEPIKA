@@ -101,15 +101,12 @@ pub struct WallCheckSummary {
 }
 impl WallCheckSummary {
     pub fn for_kind(checks: &[WallCheck], kind: WallCheckKind) -> Self {
-        Self::from_checks(
-            &checks
-                .iter()
-                .filter(|w| w.kind == kind)
-                .cloned()
-                .collect::<Vec<_>>(),
-        )
+        Self::from_iter(checks.iter().filter(|w| w.kind == kind))
     }
     pub fn from_checks(checks: &[WallCheck]) -> Self {
+        Self::from_iter(checks.iter())
+    }
+    fn from_iter<'a>(checks: impl Iterator<Item = &'a WallCheck>) -> Self {
         let mut summary = Self::default();
         let mut walls = std::collections::HashMap::<_, (bool, bool)>::new();
         for check in checks {

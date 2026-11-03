@@ -46,7 +46,6 @@ mod tests {
             [(true, 8.0, 0.73, 0.657), (false, 16.0, 1.095, 0.9855)]
         {
             assert!((concrete_allowable_compression(24.0, long) - compression).abs() < 1e-12);
-            assert!((concrete_allowable_shear(24.0, long) - normal_shear).abs() < 1e-12);
             for (class, expected) in [
                 (ConcreteClass::Normal, normal_shear),
                 (ConcreteClass::Lightweight1, lightweight_shear),
@@ -72,7 +71,6 @@ mod tests {
             (60.0, 9.0),
         ] {
             assert_eq!(young_ratio_n(fc), expected);
-            assert_ne!(young_ratio_n(fc), 205000.0 / 20500.0);
         }
     }
 

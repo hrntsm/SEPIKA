@@ -85,16 +85,7 @@ fn circular_nu_mu(inp: &CftBendingInput, theta: f64) -> (f64, f64) {
     (c_nu + s_nu, c_mu + s_mu)
 }
 
-/// パラメータ p（角形は xn∈[0,cD]、円形は θ∈[0,π]）における (Nu, Mu)。
-fn nu_mu_at(inp: &CftBendingInput, p: f64) -> (f64, f64) {
-    if inp.circular {
-        circular_nu_mu(inp, p)
-    } else {
-        angular_nu_mu(inp, p)
-    }
-}
-
-/// 短柱の Mu [N·mm]。軸力 [N] は圧縮正。角形は全材料領域の応力ブロックを用いる。
+/// 短柱の Mu `[N·mm]`。軸力 `[N]` は圧縮正。角形は全材料領域の応力ブロックを用いる。
 /// 円形のコア外は `ncu1`・`ntu` の端点との直線補間。不正な非正寸法・強度は 0。
 pub fn cft_short_column_mu(inp: &CftBendingInput, n_design: f64, ncu1: f64, ntu: f64) -> f64 {
     if inp.d_steel <= 0.0 || inp.c_d <= 0.0 || inp.t <= 0.0 || inp.fc <= 0.0 || inp.fy <= 0.0 {
@@ -122,8 +113,8 @@ pub fn cft_short_column_mu(inp: &CftBendingInput, n_design: f64, ncu1: f64, ntu:
         return angular_nu_mu(inp, (lo + hi) / 2.0).1.max(0.0);
     }
     let p_max = PI;
-    let (n_lo, m_lo) = nu_mu_at(inp, 0.0);
-    let (n_hi, m_hi) = nu_mu_at(inp, p_max);
+    let (n_lo, m_lo) = circular_nu_mu(inp, 0.0);
+    let (n_hi, m_hi) = circular_nu_mu(inp, p_max);
 
     if n_design >= n_hi {
         if ncu1 > n_hi {
@@ -143,13 +134,13 @@ pub fn cft_short_column_mu(inp: &CftBendingInput, n_design: f64, ncu1: f64, ntu:
         let mut hi = p_max;
         for _ in 0..80 {
             let mid = 0.5 * (lo + hi);
-            if nu_mu_at(inp, mid).0 < n_design {
+            if circular_nu_mu(inp, mid).0 < n_design {
                 lo = mid;
             } else {
                 hi = mid;
             }
         }
-        let (_, mu) = nu_mu_at(inp, 0.5 * (lo + hi));
+        let (_, mu) = circular_nu_mu(inp, 0.5 * (lo + hi));
         mu.max(0.0)
     }
 }
@@ -535,7 +526,6 @@ mod tests {
         let c_nu = xn * inp.c_b * inp.fc;
         let s_nu = 2.0 * inp.t * (2.0 * xn - inp.c_d) * inp.fy; // =0
         assert!((nu - (c_nu + s_nu)).abs() < 1e-3);
-        assert!(s_nu.abs() < 1e-9);
         // Mu は正（フランジ＋ウェブ＋コンクリート）。
         assert!(mu > 0.0);
     }

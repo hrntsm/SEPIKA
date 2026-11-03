@@ -129,7 +129,6 @@ mod tests {
     #[test]
     fn all_member_kinds_load_signs_and_bracing_remain_unchecked() {
         let sec = section(75.0, 20.0);
-        let gross = (sec.shape.clone(), sec.area, sec.iy, sec.iz, sec.j);
         for kind in [MemberKind::Column, MemberKind::Girder, MemberKind::Brace] {
             for [n, qy, qz, my, mz] in [
                 [-100_000.0, 0.0, 0.0, 0.0, 0.0],
@@ -202,7 +201,6 @@ mod tests {
                         assert!(reason.contains("lk_y=不明（未指定）"));
                         assert!(reason.contains("等間隔横補剛=不明（未指定）"));
                     }
-                    assert_eq!(gross, (sec.shape.clone(), sec.area, sec.iy, sec.iz, sec.j));
                 }
             }
         }

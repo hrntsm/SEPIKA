@@ -170,13 +170,13 @@ impl DesignCheck for RcDesign {
             shape,
             SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }
         ) {
-            column::column_check(forces, sec, mat, ctx, shape, fc_raw)
+            column::column_check(forces, mat, ctx, shape, fc_raw)
         } else {
             match ctx.kind {
                 MemberKind::Girder | MemberKind::Brace => {
                     beam::beam_check(forces, sec, mat, ctx, shape, fc_raw)
                 }
-                MemberKind::Column => column::column_check(forces, sec, mat, ctx, shape, fc_raw),
+                MemberKind::Column => column::column_check(forces, mat, ctx, shape, fc_raw),
             }
         };
         CheckOutcome::Checked(cr)

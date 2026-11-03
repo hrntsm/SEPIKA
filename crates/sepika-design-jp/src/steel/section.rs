@@ -485,17 +485,6 @@ mod tests {
         let z = 1.0e6;
         let c = 1.0;
         let p_lambda_b = 0.3;
-        let my = f * z;
-        let pi = std::f64::consts::PI;
-
-        let me_elastic = (pi.powi(4) * e * iz * e * iw / 20_000.0_f64.powi(4)
-            + pi.powi(2) * e * iz * g * j / 20_000.0_f64.powi(2))
-        .sqrt();
-        let lambda_elastic = (my / me_elastic).sqrt();
-        let nu_elastic = 1.5 + (2.0 / 3.0) * (lambda_elastic / 1.29).powi(2);
-        assert!((me_elastic - 25_601_692.792823333).abs() < 1e-6);
-        assert!((lambda_elastic - 3.0296997435179636).abs() < 1e-12);
-        assert!((nu_elastic - 5.177295249032635).abs() < 1e-12);
         let fb_elastic = steel_fb_h_asd2019(
             f,
             LoadTerm::Long,
@@ -511,14 +500,6 @@ mod tests {
         );
         assert!((fb_elastic - 11.798015111900156).abs() < 1e-12);
 
-        let me_inelastic = (pi.powi(4) * e * iz * e * iw / 5_000.0_f64.powi(4)
-            + pi.powi(2) * e * iz * g * j / 5_000.0_f64.powi(2))
-        .sqrt();
-        let lambda_inelastic = (my / me_inelastic).sqrt();
-        let nu_inelastic = 1.5 + (2.0 / 3.0) * (lambda_inelastic / 1.29).powi(2);
-        assert!((me_inelastic - 268_125_721.52311108).abs() < 1e-6);
-        assert!((lambda_inelastic - 0.9361914963947816).abs() < 1e-12);
-        assert!((nu_inelastic - 1.8511225358740062).abs() < 1e-12);
         let fb_inelastic = steel_fb_h_asd2019(
             f,
             LoadTerm::Long,
@@ -800,12 +781,6 @@ mod tests {
         let (h, b, tw, tf): (f64, f64, f64, f64) = (500.0, 200.0, 9.0, 14.0);
         let z_no_scallop = steel_h_z_with_loss(h, b, tw, tf, 0.0, 0.0, 0.0, true);
         let z_scallop = steel_h_z_with_loss(h, b, tw, tf, 0.0, 0.0, 50.0, true);
-
-        let hw = h - 2.0 * tf;
-        let i_w_no_scallop = tw * hw.powi(3) / 12.0;
-        let i_w_scallop = tw * (hw * 0.5).powi(3) / 12.0;
-        // (1-0.5)^3 = 0.125 倍。
-        assert!((i_w_scallop / i_w_no_scallop - 0.125).abs() < 1e-9);
 
         assert!(
             z_scallop < z_no_scallop,

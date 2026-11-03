@@ -285,7 +285,7 @@ fn rc_portal_model() -> Model {
 }
 
 #[test]
-fn test_rc_portal_categories_and_concrete() {
+fn test_rc_portal_categories_concrete_and_rebar() {
     let model = rc_portal_model();
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     assert_eq!(q.items.len(), 4);
@@ -379,6 +379,60 @@ fn test_rc_portal_categories_and_concrete() {
             sub.rebar_joints
         );
     }
+
+    let girder = q
+        .items
+        .iter()
+        .find(|i| i.category == MemberCategory::Girder)
+        .unwrap();
+
+    // 主筋: 両端とも連続梁なし → 両外端（タイプ7a）
+    // 1 本長さ = 5300 + 35×25×2 = 7050mm、8 本 → 56.4 m
+    let main = girder
+        .rebar
+        .iter()
+        .find(|r| r.usage == RebarUsage::MainBar)
+        .unwrap();
+    assert!((main.total_length_m - 8.0 * 7.05).abs() < 1e-9);
+    // D25 = 3.98 kg/m → 56.4 m = 224.472 kg
+    assert!((main.weight_t - 8.0 * 7.05 * 3.98 / 1_000.0).abs() < 1e-9);
+
+    // スターラップ: 一組 2×400+2×800 = 2400、本数 5300/200 = 26.5
+    let st = girder
+        .rebar
+        .iter()
+        .find(|r| r.usage == RebarUsage::Stirrup)
+        .unwrap();
+    assert!((st.total_length_m - 2.4 * 26.5).abs() < 1e-9);
+
+    // 継手: 8 本 × (0.5 + 0.5×floor(5.3/5)) = 8 × 1.0
+    assert!((girder.rebar_joints - 8.0).abs() < 1e-9);
+
+    let col = q
+        .items
+        .iter()
+        .find(|i| i.category == MemberCategory::Column)
+        .unwrap();
+
+    // 主筋: 固有本数 2·4+2·3−4=10 本、各 H=3.5m
+    let total_main_len: f64 = col
+        .rebar
+        .iter()
+        .filter(|r| r.usage == RebarUsage::MainBar)
+        .map(|r| r.total_length_m)
+        .sum();
+    assert!((total_main_len - 10.0 * 3.5).abs() < 1e-9);
+
+    // フープ: 一組 2×700+2×700 = 2800、本数 3500/100 = 35 → 98 m
+    let hoop = col
+        .rebar
+        .iter()
+        .find(|r| r.usage == RebarUsage::Hoop)
+        .unwrap();
+    assert!((hoop.total_length_m - 2.8 * 35.0).abs() < 1e-9);
+
+    // 継手: 10 本 × 1 個所（階高 < 7m）
+    assert!((col.rebar_joints - 10.0).abs() < 1e-9);
 }
 
 #[test]
@@ -412,70 +466,6 @@ fn rc_primary_missing_frame_use_rejects_quantity_with_section_reason() {
         "{error}"
     );
     assert!(model.eq_ignoring_dofmap(&before));
-}
-
-#[test]
-fn test_rc_girder_main_bars_and_stirrups() {
-    let model = rc_portal_model();
-    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-    let girder = q
-        .items
-        .iter()
-        .find(|i| i.category == MemberCategory::Girder)
-        .unwrap();
-
-    // 主筋: 両端とも連続梁なし → 両外端（タイプ7a）
-    // 1 本長さ = 5300 + 35×25×2 = 7050mm、8 本 → 56.4 m
-    let main = girder
-        .rebar
-        .iter()
-        .find(|r| r.usage == RebarUsage::MainBar)
-        .unwrap();
-    assert!((main.total_length_m - 8.0 * 7.05).abs() < 1e-9);
-    // D25 = 3.98 kg/m → 56.4 m = 224.472 kg
-    assert!((main.weight_t - 8.0 * 7.05 * 3.98 / 1_000.0).abs() < 1e-9);
-
-    // スターラップ: 一組 2×400+2×800 = 2400、本数 5300/200 = 26.5
-    let st = girder
-        .rebar
-        .iter()
-        .find(|r| r.usage == RebarUsage::Stirrup)
-        .unwrap();
-    assert!((st.total_length_m - 2.4 * 26.5).abs() < 1e-9);
-
-    // 継手: 8 本 × (0.5 + 0.5×floor(5.3/5)) = 8 × 1.0
-    assert!((girder.rebar_joints - 8.0).abs() < 1e-9);
-}
-
-#[test]
-fn test_rc_column_rebar() {
-    let model = rc_portal_model();
-    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-    let col = q
-        .items
-        .iter()
-        .find(|i| i.category == MemberCategory::Column)
-        .unwrap();
-
-    // 主筋: 固有本数 2·4+2·3−4=10 本、各 H=3.5m
-    let total_main_len: f64 = col
-        .rebar
-        .iter()
-        .filter(|r| r.usage == RebarUsage::MainBar)
-        .map(|r| r.total_length_m)
-        .sum();
-    assert!((total_main_len - 10.0 * 3.5).abs() < 1e-9);
-
-    // フープ: 一組 2×700+2×700 = 2800、本数 3500/100 = 35 → 98 m
-    let hoop = col
-        .rebar
-        .iter()
-        .find(|r| r.usage == RebarUsage::Hoop)
-        .unwrap();
-    assert!((hoop.total_length_m - 2.8 * 35.0).abs() < 1e-9);
-
-    // 継手: 10 本 × 1 個所（階高 < 7m）
-    assert!((col.rebar_joints - 10.0).abs() < 1e-9);
 }
 
 #[test]

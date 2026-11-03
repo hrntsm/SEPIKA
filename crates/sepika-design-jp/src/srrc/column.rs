@@ -413,30 +413,6 @@ mod tests {
     use sepika_core::section_shape::SectionShape;
     use sepika_core::units::ConcreteClass;
 
-    #[test]
-    fn test_src_column_n0_matches_smo_plus_rm0() {
-        let shape = src_column_shape();
-        let sec = make_section(shape);
-        let mat = make_material(24.0, "SD345");
-        let ctx = ctx_column(LoadTerm::Long);
-
-        let forces = MemberForcesAt {
-            mz: 1.0,
-            ..zero_forces()
-        };
-        let design = crate::SrcDesign;
-        let r0 = design.check(&forces, &sec, &mat, &ctx).unwrap_checked();
-        let ma_z = 1.0 / r0.ratio();
-        assert!(ma_z > 0.0 && ma_z.is_finite());
-
-        let (_sa, sz_z, _) = steel_h_props(300.0, 200.0, 9.0, 14.0);
-        let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
-        let s_ft = steel_ft(f_value, LoadTerm::Long);
-        let s_mo = sz_z * s_ft;
-        // N=0 の MA は少なくとも鋼骨単体の sMo 以上であるはず（RC 分は正で加算）。
-        assert!(ma_z >= s_mo * 0.99, "ma_z={ma_z}, s_mo={s_mo}");
-    }
-
     /// components に AxialBending・Shear が入ることを確認する。
     #[test]
     fn test_src_column_components_axial_bending_and_shear() {
@@ -518,6 +494,14 @@ mod tests {
         };
         let r0 = design.check(&forces_z, &sec, &mat, &ctx).unwrap_checked();
         let ma_z = 1.0 / r0.ratio();
+        assert!(ma_z > 0.0 && ma_z.is_finite());
+
+        let (_sa, sz_z, _) = steel_h_props(300.0, 200.0, 9.0, 14.0);
+        let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
+        let s_ft = steel_ft(f_value, LoadTerm::Long);
+        let s_mo = sz_z * s_ft;
+        // N=0 の MA は少なくとも鋼骨単体の sMo 以上であるはず（RC 分は正で加算）。
+        assert!(ma_z >= s_mo * 0.99, "ma_z={ma_z}, s_mo={s_mo}");
 
         let mz_test = ma_z * 0.3;
         let forces = MemberForcesAt {
