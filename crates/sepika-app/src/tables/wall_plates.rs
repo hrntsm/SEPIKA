@@ -894,18 +894,13 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
             .target
             .and_then(|pid| app.core.model.wall_plate(pid))
         {
-            let (area, weight, slit, openings) = (
-                plate.opening_area,
-                plate.opening_weight,
-                plate.slit,
-                plate.openings.clone(),
-            );
+            let (area, weight, slit) = (plate.opening_area, plate.opening_weight, plate.slit);
             app.ui.scoped.wall_plate_draft.opening_area = area.to_string();
             app.ui.scoped.wall_plate_draft.opening_weight = weight.to_string();
             app.ui.scoped.wall_plate_draft.slit = slit;
             app.ui.scoped.wall_plate_draft.self_weight_shares = plate.self_weight_shares.clone();
             app.ui.scoped.wall_plate_draft.dl_support = plate.dl_support;
-            app.ui.scoped.wall_plate_draft.openings = format_openings(&openings);
+            app.ui.scoped.wall_plate_draft.openings = format_openings(&plate.openings);
             app.ui.scoped.wall_plate_draft.loads = plate
                 .loads
                 .iter()

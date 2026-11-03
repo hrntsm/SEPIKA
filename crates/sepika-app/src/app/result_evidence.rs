@@ -121,7 +121,7 @@ impl App {
         self.ui.scoped.result_evidence = Some(ResultEvidence {
             title: "参照した結果の根拠".into(),
             source: Some(reference.source.clone()),
-            reference: Some(EvidenceReference::Calculation(reference.clone())),
+            reference: Some(EvidenceReference::Calculation(reference)),
             input: Ok(input),
             lines,
             return_to: None,
@@ -168,39 +168,39 @@ impl App {
         }
         for outcome in outcomes {
             match outcome {
-                sepika_design_jp::CheckOutcome::Checked(check)
-                    if !result_validity::evaluate_check(check).complete =>
-                {
-                    lines.push(
+                sepika_design_jp::CheckOutcome::Checked(check) => {
+                    let evaluation = result_validity::evaluate_check(check);
+                    if !evaluation.complete {
+                        lines.push(
                         "未評価: 検定成分が欠落・非有限・負のため、検定比と合否を確定しません。"
                             .into(),
                     );
-                    if let Some(ratio) = result_validity::evaluate_check(check).known_ng {
-                        lines.push(format!("確認済みNG: 検定比 {ratio:.4}（未評価あり）"));
-                        for component in check
-                            .components
-                            .iter()
-                            .filter(|c| c.ratio.is_finite() && c.ratio > 1.0)
-                        {
+                        if let Some(ratio) = evaluation.known_ng {
+                            lines.push(format!("確認済みNG: 検定比 {ratio:.4}（未評価あり）"));
+                            for component in check
+                                .components
+                                .iter()
+                                .filter(|c| c.ratio.is_finite() && c.ratio > 1.0)
+                            {
+                                lines.push(format!(
+                                    "{} / 確認済みNG {:.4} / {}",
+                                    component.kind.label(),
+                                    component.ratio,
+                                    component.detail
+                                ));
+                            }
+                        }
+                    } else {
+                        lines.push(check.basis.clone());
+                        lines.push(check.detail.clone());
+                        for c in &check.components {
                             lines.push(format!(
-                                "{} / 確認済みNG {:.4} / {}",
-                                component.kind.label(),
-                                component.ratio,
-                                component.detail
+                                "{} / 比 {} / {}",
+                                c.kind.label(),
+                                c.ratio,
+                                c.detail
                             ));
                         }
-                    }
-                }
-                sepika_design_jp::CheckOutcome::Checked(check) => {
-                    lines.push(check.basis.clone());
-                    lines.push(check.detail.clone());
-                    for c in &check.components {
-                        lines.push(format!(
-                            "{} / 比 {} / {}",
-                            c.kind.label(),
-                            c.ratio,
-                            c.detail
-                        ));
                     }
                 }
                 sepika_design_jp::CheckOutcome::Skipped { reason } => {
@@ -287,46 +287,46 @@ impl App {
                 .and_then(|m| m.positions.iter().find(|p| p.xi == position))
             {
                 match &check.outcome {
-                    sepika_design_jp::CheckOutcome::Checked(check)
-                        if !result_validity::evaluate_check(check).complete =>
-                    {
-                        lines.push(result_validity::INVALID_CHECK_COMPONENTS.into());
-                        if let Some(ratio) = result_validity::evaluate_check(check).known_ng {
-                            lines.push(format!("確認済みNG: 検定比 {ratio:.4}（未評価あり）"));
-                            for component in check
-                                .components
-                                .iter()
-                                .filter(|c| c.ratio.is_finite() && c.ratio > 1.0)
-                            {
+                    sepika_design_jp::CheckOutcome::Checked(check) => {
+                        let evaluation = result_validity::evaluate_check(check);
+                        if !evaluation.complete {
+                            lines.push(result_validity::INVALID_CHECK_COMPONENTS.into());
+                            if let Some(ratio) = evaluation.known_ng {
+                                lines.push(format!("確認済みNG: 検定比 {ratio:.4}（未評価あり）"));
+                                for component in check
+                                    .components
+                                    .iter()
+                                    .filter(|c| c.ratio.is_finite() && c.ratio > 1.0)
+                                {
+                                    lines.push(format!(
+                                        "{} / 確認済みNG {:.4} / {}",
+                                        component.kind.label(),
+                                        component.ratio,
+                                        component.detail
+                                    ));
+                                }
+                            }
+                        } else {
+                            checked = true;
+                            lines.push(format!(
+                                "検定比 {:.4} / {} / 式名・根拠: {}",
+                                check.ratio(),
+                                if check.ok() { "OK" } else { "NG" },
+                                check.basis
+                            ));
+                            lines.push(if check.detail.is_empty() {
+                                "既存詳細は記録がなく取得不能です。".into()
+                            } else {
+                                check.detail.clone()
+                            });
+                            for component in &check.components {
                                 lines.push(format!(
-                                    "{} / 確認済みNG {:.4} / {}",
+                                    "{} / 比 {:.4} / {}",
                                     component.kind.label(),
                                     component.ratio,
                                     component.detail
                                 ));
                             }
-                        }
-                    }
-                    sepika_design_jp::CheckOutcome::Checked(check) => {
-                        checked = true;
-                        lines.push(format!(
-                            "検定比 {:.4} / {} / 式名・根拠: {}",
-                            check.ratio(),
-                            if check.ok() { "OK" } else { "NG" },
-                            check.basis
-                        ));
-                        lines.push(if check.detail.is_empty() {
-                            "既存詳細は記録がなく取得不能です。".into()
-                        } else {
-                            check.detail.clone()
-                        });
-                        for component in &check.components {
-                            lines.push(format!(
-                                "{} / 比 {:.4} / {}",
-                                component.kind.label(),
-                                component.ratio,
-                                component.detail
-                            ));
                         }
                     }
                     sepika_design_jp::CheckOutcome::Skipped { reason } => {

@@ -467,13 +467,11 @@ impl App {
                 .elements
                 .iter()
                 .filter(|e| !self.core.model.uses_damper_total_weight(e))
-                .map(|e| {
+                .filter_map(|e| {
                     sepika_load::self_weight::girder_self_weight_breakdown(&self.core.model, e)
+                        .transpose()
                 })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
             computed_at: SystemTime::now(),
             summary: self.build_prep_summary(),
             stories: self.build_prep_stories(),
@@ -1215,12 +1213,13 @@ mod tests {
 
     fn section_app(shape: SectionShape, cft: bool) -> App {
         let mut model = crate::sample::portal_frame();
-        let previous = model.sections[0].clone();
+        let previous_material = model.sections[0].material;
+        let previous_frame_use = model.sections[0].frame_use;
         model.sections[0] = shape
             .input_section(SectionId(0), "J観測断面".into())
             .unwrap();
-        model.sections[0].material = previous.material;
-        model.sections[0].frame_use = previous.frame_use;
+        model.sections[0].material = previous_material;
+        model.sections[0].frame_use = previous_frame_use;
         if cft {
             let mut concrete = model.materials[0].clone();
             concrete.id = MaterialId(model.materials.len() as u32);

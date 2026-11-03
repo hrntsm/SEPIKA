@@ -625,7 +625,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         );
 
         (
-            view.wall_index.clone(),
+            view.wall_index,
             pending_section,
             pending_hysteresis,
             pending_hysteresis_th,

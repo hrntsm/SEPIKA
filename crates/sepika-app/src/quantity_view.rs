@@ -150,15 +150,15 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                 totals_table(
                     ui,
                     "部位",
-                    rows.iter()
-                        .map(|(c, t)| (c.label().to_string(), t.clone()))
+                    rows.into_iter()
+                        .map(|(c, t)| (c.label().to_string(), t))
                         .collect(),
-                    totals.clone(),
+                    &totals,
                 );
             }
             QuantityGrouping::ByStory => {
                 let rows = takeoff.totals_by_story();
-                totals_table(ui, "階", rows, totals.clone());
+                totals_table(ui, "階", rows, &totals);
             }
             QuantityGrouping::ByStructure => {
                 totals_table(
@@ -169,7 +169,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                         .into_iter()
                         .map(|(k, t)| (k.label().to_string(), t))
                         .collect(),
-                    totals.clone(),
+                    &totals,
                 );
             }
             QuantityGrouping::SteelBySection => {
@@ -362,7 +362,7 @@ fn totals_table(
     ui: &mut egui::Ui,
     key_label: &str,
     rows: Vec<(String, QuantityTotals)>,
-    totals: QuantityTotals,
+    totals: &QuantityTotals,
 ) {
     let n = rows.len();
     crate::table_util::standard_table(

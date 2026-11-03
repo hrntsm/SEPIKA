@@ -637,6 +637,5 @@ fn native_first_story_edit_preserves_both_membership_forms_and_conflict_diagnost
         assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), before);
         undo.redo(&mut m);
         assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), after);
-        assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), after);
     }
 }

@@ -827,6 +827,7 @@ impl InternalReference {
 
 #[test]
 fn internal_reference_app_entries_accept_existing_targets_and_preserve_rejected_state_and_files() {
+    let existing_node_count = existing_app().core.model.nodes.len() as u32;
     for reference in InternalReference::ALL {
         let normal = reference.model(crate::sample::portal_frame(), None);
         let mut control = App::default();
@@ -854,7 +855,7 @@ fn internal_reference_app_entries_accept_existing_targets_and_preserve_rejected_
         let next_absent = if reference.target_kind() == "Story" {
             1
         } else {
-            existing_app().core.model.nodes.len() as u32
+            existing_node_count
         };
         for absent in [next_absent, u32::MAX] {
             let invalid = reference.model(crate::sample::portal_frame(), Some(absent));

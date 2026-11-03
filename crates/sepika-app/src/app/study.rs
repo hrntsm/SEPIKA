@@ -1250,10 +1250,10 @@ impl App {
                 let mut calculate = None;
                 let mut quantity = None;
                 let mut compare = None;
+                let current_main = self.main_study_input();
                 for s in 0..self.studies.items.len() {
                     ui.separator();
                     let main_changed = self.study_main_changed(s);
-                    let current_main = self.main_study_input();
                     let study = &mut self.studies.items[s];
                     let mut changed = ui.text_edit_singleline(&mut study.purpose).changed();
                     ui.label(format!("固定対象: {} 部材", study.fixed.len()));

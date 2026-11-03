@@ -767,9 +767,6 @@ impl App {
                             .ok_or_else(|| {
                                 format!("壁 ID {}: 採用runの初期Quが未解決です", elem.id.0)
                             })?;
-                        let wall = po
-                            .wall_response_at(elem.id, ds_step)
-                            .map_err(|reason| reason.description().to_string())?;
                         let qu = capacities[usize::from(wall.qw_n < 0.0)];
                         if !qu.is_finite() || qu <= 0.0 {
                             return Err(format!(
@@ -1020,7 +1017,7 @@ impl App {
             ds_point: ds_point.clone(),
             capacity_point: capacity_point.clone(),
             ds_forces,
-            capacity_forces: capacity_forces.clone(),
+            capacity_forces,
             termination: po.termination.clone(),
             capacity_termination: capacity_po.termination.clone(),
             ds_mechanism: mechanism.clone(),
@@ -1066,10 +1063,10 @@ fn rank_new_rc_column_rect(
         .ok_or_else(|| error("せん断補強筋の降伏強度を解決できません"))?;
     let ag = rebar.total_main_area();
     let eval = |strong: bool, shear: f64| {
-        let (bd, dd, edge, aw, legs) = if strong {
-            (b, d, RectEdge::Top, rebar.aw_x_mm2(), rebar.hoop.legs_x)
+        let (bd, dd, edge, aw) = if strong {
+            (b, d, RectEdge::Top, rebar.aw_x_mm2())
         } else {
-            (d, b, RectEdge::Left, rebar.aw_y_mm2(), rebar.hoop.legs_y)
+            (d, b, RectEdge::Left, rebar.aw_y_mm2())
         };
         let steel = rebar.edge_steel(edge, b, d);
         let pitch = rebar.hoop.pitch;
@@ -1092,15 +1089,13 @@ fn rank_new_rc_column_rect(
         };
         let qmu = 2.0 * rc_column_mu_simple(&input, ag, response.axial) / clear_span;
         let qsu = rc_qsu_simple(&input);
-        let rank = rc_column_type(
+        rc_column_type(
             clear_span / dd,
             response.axial / (b * d * fc),
             100.0 * input.at / (bd * input.d_eff),
             (shear / (bd)) / fc,
             qsu < qmu,
-        );
-        let _ = legs;
-        rank
+        )
     };
     Ok(sepika_design_jp::secondary::member_rank::worst_rank(&[
         eval(true, response.shear_strong.abs()),

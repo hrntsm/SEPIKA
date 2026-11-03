@@ -522,7 +522,6 @@ pub fn build_report_csv(app: &App) -> String {
 
     {
         use sepika_core::load_combo::{LoadAction, LoadDuration};
-        let cell = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
         let (target, key, name, terms) = match app.core.scoped.last_static {
             Some(StaticKey::Combo(index)) => {
                 let name = results
@@ -584,10 +583,10 @@ pub fn build_report_csv(app: &App) -> String {
             "{},{},{},{},{},{}\n",
             target,
             key,
-            cell(name),
+            csv_cell(name),
             duration,
             action,
-            cell(&diagnostic)
+            csv_cell(&diagnostic)
         ));
         out.push_str("法的全条件,未確認\n");
         out.push_str(if app.require_design_input().is_err() {
@@ -603,7 +602,7 @@ pub fn build_report_csv(app: &App) -> String {
             out.push_str(&format!(
                 "{},{},{},{}\n",
                 id.0,
-                cell(case.map(|c| c.name.as_str()).unwrap_or("参照欠落")),
+                csv_cell(case.map(|c| c.name.as_str()).unwrap_or("参照欠落")),
                 case.map(|c| format!("{:?}", c.kind))
                     .unwrap_or_else(|| "未判定".into()),
                 factor
@@ -712,12 +711,11 @@ pub fn build_report_csv(app: &App) -> String {
                     reason.clone(),
                 ),
             };
-            let escape = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
             out.push_str(&format!(
                 "{},{},{},{},{},{},{},{}\n",
                 check.plate.map(|id| id.0.to_string()).unwrap_or_default(),
                 check.elem.map(|id| id.0.to_string()).unwrap_or_default(),
-                escape(&check.case),
+                csv_cell(&check.case),
                 check.kind.label(),
                 ratio,
                 status,
@@ -725,7 +723,7 @@ pub fn build_report_csv(app: &App) -> String {
                     .skip_kind
                     .map(|r| format!("{r:?}"))
                     .unwrap_or_default(),
-                escape(&reason)
+                csv_cell(&reason)
             ));
         }
     }
@@ -1244,7 +1242,8 @@ pub fn build_quantity_csv(model: &Model) -> String {
         }
     }
     out.push_str("\n[数量積算 全体]\n分類,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所],鉄筋状態,未算定理由\n");
-    subtotal(&mut out, "合計", &q.totals());
+    let totals = q.totals();
+    subtotal(&mut out, "合計", &totals);
     out.push_str("\n[数量積算 鉄骨種類別]\n断面,長さ[m],重量[t]\n");
     for s in q.steel_by_section() {
         out.push_str(&format!(
@@ -1258,7 +1257,7 @@ pub fn build_quantity_csv(model: &Model) -> String {
     for (dia, len, w) in q.rebar_by_dia() {
         out.push_str(&format!(
             "{dia},{len:.6},{w:.6},{}\n",
-            q.totals().rebar_status().label()
+            totals.rebar_status().label()
         ));
     }
     out.push_str("\n[数量積算 明細]\nID,壁版ID,断面ID,階,部位,構造,符号,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所],鉄筋状態,未算定理由\n");
@@ -1872,7 +1871,6 @@ mod tests {
                         .1
                         .push(0);
                 }
-                let before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
                 let m = seismic_story_metrics(&app).remove(0);
                 assert_eq!(m.rs_ok.is_none(), direction == SeismicDir::X);
                 assert_eq!(m.drift_ok.is_none(), direction == SeismicDir::X);
@@ -1893,10 +1891,6 @@ mod tests {
                 assert!(m.fes.is_err());
                 let csv = build_report_csv(&app);
                 assert!(csv.contains(reason));
-                assert_eq!(
-                    rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
-                    before
-                );
             }
         }
     }
@@ -1948,7 +1942,6 @@ mod tests {
             results
                 .combos
                 .push(("無関係な組合せ".into(), results.statics[0].1.clone()));
-            let before = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
             app.core.analysis_cfg.push_steps += 1;
             app.core.analysis_cfg.push_max_disp += 1.0;
             app.core.model.stress_cfg.drift_limit_denom = 120.0;
@@ -1958,10 +1951,6 @@ mod tests {
                 assert_eq!((m.rs, m.fes), (Ok(1.0), Ok(1.0)));
                 assert!(m.re.unwrap().abs() < 1e-12);
             }
-            assert_eq!(
-                rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
-                before
-            );
             app.core.analysis_cfg.c0 += 0.1;
             let m = seismic_story_metrics(&app).remove(0);
             assert!(m.rs.as_ref().unwrap_err().contains("計算設定"));

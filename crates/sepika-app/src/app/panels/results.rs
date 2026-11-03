@@ -442,6 +442,7 @@ impl App {
         let lm = &lm_res.model;
         let modal = &lm_res.modal;
         let spatial = lm.is_spatial();
+        let layers = self.core.model.layers();
 
         let total_mass: f64 = lm.stories.iter().map(|s| s.mass).sum();
         ui.horizontal(|ui| {
@@ -506,10 +507,7 @@ impl App {
                     let i = order[row.index()];
                     let stick = &lm.stories[i];
                     let sp = &lm.spatial[i];
-                    let name = self
-                        .core
-                        .model
-                        .layers()
+                    let name = layers
                         .get(i)
                         .map(|l| l.name.clone())
                         .unwrap_or_else(|| "-".to_string());
@@ -561,10 +559,7 @@ impl App {
                 |row| {
                     let i = order[row.index()];
                     let stick = &lm.stories[i];
-                    let name = self
-                        .core
-                        .model
-                        .layers()
+                    let name = layers
                         .get(i)
                         .map(|l| l.name.clone())
                         .unwrap_or_else(|| "-".to_string());
@@ -603,13 +598,10 @@ impl App {
         ui.separator();
         for identification in &lm.identifications {
             let fit = &identification.fit;
-            let name = self
-                .core
-                .model
-                .layers()
-                .into_iter()
+            let name = layers
+                .iter()
                 .find(|l| l.bottom == identification.story)
-                .map(|l| l.name)
+                .map(|l| l.name.clone())
                 .unwrap_or_default();
             ui.label(format!("{name} / {:?}: {} 区間 [{:.3}, {:.3}] mm / 同定上限 {:.3} mm / 面積上限 {:.3} mm / Kp {:.3} kN/mm / 等価降伏 ({:.3} mm, {:.3} kN) / 規格化誤差 {:.5}",identification.dir,if fit.options.manual_interval.is_some(){"手動"}else{"自動"},fit.interval[0],fit.interval[1],fit.options.identification_limit,fit.options.area_limit,stiffness_kn_per_mm(fit.skeleton.k3()),fit.skeleton.d2,force_kn(fit.skeleton.q2),fit.normalized_rmse));
             ui.label(format!(
@@ -666,9 +658,7 @@ impl App {
         {
             let names: Vec<String> = (0..res.story_peak_drift.len())
                 .map(|i| {
-                    self.core
-                        .model
-                        .layers()
+                    layers
                         .get(i)
                         .map(|l| l.name.clone())
                         .unwrap_or_else(|| "-".to_string())

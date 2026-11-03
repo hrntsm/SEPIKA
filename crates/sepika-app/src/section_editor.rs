@@ -451,7 +451,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                 steel_channel_fields(ui, draft);
             }
             ShapeKind::SteelTee => {
-                steel_tee_fields(ui, draft);
+                steel_channel_fields(ui, draft);
             }
             ShapeKind::SteelPipe => {
                 steel_pipe_fields(ui, draft);
@@ -879,19 +879,6 @@ fn steel_channel_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
     });
 }
 
-fn steel_tee_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
-    ui.horizontal(|ui| {
-        ui.label("H せい:");
-        num_field(ui, &mut d.h);
-        ui.label("B 幅:");
-        num_field(ui, &mut d.b);
-        ui.label("tw:");
-        num_field(ui, &mut d.tw);
-        ui.label("tf:");
-        num_field(ui, &mut d.tf);
-    });
-}
-
 fn steel_pipe_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
     ui.horizontal(|ui| {
         ui.label("D 外径:");
@@ -961,12 +948,7 @@ fn rc_rect_dimensions(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
 }
 
 fn rc_beam_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
-    ui.horizontal(|ui| {
-        ui.label("B 幅:");
-        num_field(ui, &mut d.rc_b);
-        ui.label("D せい:");
-        num_field(ui, &mut d.rc_d);
-    });
+    rc_rect_dimensions(ui, d);
     rc_common_fields(ui, d);
     rebar_layers(ui, "上端筋", &mut d.main_top);
     rebar_layers(ui, "下端筋", &mut d.main_bottom);
@@ -1522,10 +1504,6 @@ mod tests {
         assert_eq!((b, depth), (400.0, 800.0));
         assert_eq!(rebar.top, vec![4, 2]);
         assert_eq!(rebar.bottom, vec![3, 3]);
-        let mut layers = rebar.top;
-        layers.push(5);
-        layers.remove(1);
-        assert_eq!(layers, vec![4, 5]);
 
         let d = SectionEditorDraft {
             kind: ShapeKind::RcColumnRect,

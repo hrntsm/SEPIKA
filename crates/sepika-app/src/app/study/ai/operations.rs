@@ -508,8 +508,9 @@ impl App {
                 self.start_study_calculation(s,p).map_err(|e|reject("calculation_busy",e))?;
                 self.studies.running.as_mut().expect("開始した計算").ai_job=Some(request.id.clone());
                 let job=AiJob {id:request.id.clone(),request:task_id.into(),input:current.clone(),state:"running".into(),error:None,run_index:None};
-                self.studies.items[s].ai.jobs.push(job.clone());
-                json!(job)
+                let output = json!(&job);
+                self.studies.items[s].ai.jobs.push(job);
+                output
             }
             "job"=> {
                 let id:Id=args(&request)?;
@@ -595,8 +596,9 @@ impl App {
                 let run_index=submission.run_index;
                 let verification=self.ai_verification_at(s,run_index);
                 let submitted=Submission{receipt_id:request.id.clone(),run_index,job_id,input:expected.clone(),explanation:submission.explanation,unchecked:submission.unchecked,references:submission.references,quantity_references:quantities,calculation_state:state,verification,submitted:SystemTime::now()};
-                self.studies.items[s].ai.tasks.iter_mut().find(|t|t.id==task_id).unwrap().submissions.push(submitted.clone());
-                json!({"status":"submitted","submission":{"input":submitted.input,"source":if submitted.run_index.is_some(){"run"}else if submitted.job_id.is_some(){"job"}else{"none"},"run_index":submitted.run_index,"job_id":submitted.job_id,"calculation_state":submitted.calculation_state,"verification":submitted.verification,"result_reference_count":submitted.references.len(),"quantity_reference_count":submitted.quantity_references.len(),"submitted":submitted.submitted},"notice":"状態は提出時に選んだ元の観測です。成果提出は計算成功・検定合格・人による採用とは別です"})
+                let output = json!({"status":"submitted","submission":{"input":submitted.input,"source":if submitted.run_index.is_some(){"run"}else if submitted.job_id.is_some(){"job"}else{"none"},"run_index":submitted.run_index,"job_id":submitted.job_id,"calculation_state":submitted.calculation_state,"verification":submitted.verification,"result_reference_count":submitted.references.len(),"quantity_reference_count":submitted.quantity_references.len(),"submitted":submitted.submitted},"notice":"状態は提出時に選んだ元の観測です。成果提出は計算成功・検定合格・人による採用とは別です"});
+                self.studies.items[s].ai.tasks.iter_mut().find(|t|t.id==task_id).unwrap().submissions.push(submitted);
+                output
             }
             _=>return Err(reject("unsupported_operation","この操作は公開していません。本案更新・採用・警告承諾・取消・任意ファイル操作は実行できません")),
         };
