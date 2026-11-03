@@ -26,10 +26,10 @@ pub(crate) enum SectionGroupKey {
 /// 二次部材が参照する断面を `Secondary` グループにまとめ、残りを末尾の
 /// 「（階なし）」グループへ集約する。階名がある断面は二次部材・床板から参照されて
 /// いても階グループに残す。
-pub(crate) fn section_floor_groups(
+pub(crate) fn section_floor_groups<'a>(
     stories: &[Story],
     sections: &[Section],
-    secondary_members: &[SecondaryMember],
+    secondary_members: impl IntoIterator<Item = &'a SecondaryMember>,
     slabs: &[Slab],
 ) -> Vec<(SectionGroupKey, Vec<SectionId>)> {
     let mut groups = Vec::new();
@@ -74,7 +74,7 @@ pub(crate) fn section_floor_groups(
     }
 
     let secondary_referenced_ids: HashSet<_> = secondary_members
-        .iter()
+        .into_iter()
         .filter_map(|member| member.section)
         .chain(slabs.iter().filter_map(|slab| slab.section()))
         .collect();
@@ -134,17 +134,10 @@ pub(crate) fn material_category_groups(
 impl App {
     /// 断面一覧ツリー（階ごとにグループ化）。
     pub(crate) fn nav_sections(&mut self, ui: &mut egui::Ui) {
-        let secondary: Vec<_> = self
-            .core
-            .model
-            .beams()
-            .chain(self.core.model.posts())
-            .cloned()
-            .collect();
         let groups = section_floor_groups(
             &self.core.model.stories,
             &self.core.model.sections,
-            &secondary,
+            self.core.model.beams().chain(self.core.model.posts()),
             &self.core.model.slabs,
         );
         let mut jump: Option<SectionId> = None;

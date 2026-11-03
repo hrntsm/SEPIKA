@@ -318,7 +318,7 @@ impl App {
 
     fn misc_wall_conditions(&mut self, ui: &mut egui::Ui) {
         use sepika_core::model::{MiscWallRepresentativeColumn, MiscWallStiffnessMethod};
-        let previous = self.core.model.stress_cfg.clone();
+        let previous = &self.core.model.stress_cfg;
         let mut cfg = previous.clone();
         let mut enabled = cfg.misc_wall_n.is_some();
         if ui
@@ -397,7 +397,7 @@ impl App {
                 "無開口・スリットなしで層高さに達するRC自立壁を対象とし、Rs・Reに反映します。",
             );
         });
-        if cfg != previous {
+        if &cfg != previous {
             self.core.scoped.undo.run(
                 &mut self.core.model,
                 Box::new(sepika_edit::SetMiscWallConditions {
@@ -837,7 +837,7 @@ impl App {
                             level_kind,
                         ) = &story_rows[row.index()];
                         let story = *story;
-                        let current = self.core.model.stories[story.index()].clone();
+                        let current = &self.core.model.stories[story.index()];
                         let is_base = story.index() == 0;
 
                         row.col(|ui| {

@@ -49,7 +49,7 @@ impl App {
                 .on_hover_text("クリックで3Dビューにハイライト")
                 .clicked()
                 {
-                    self.select_members(steel_ids.clone(), None);
+                    self.select_members(steel_ids, None);
                 }
                 let is_rc_sel = member_group_selected(&self.ui.scoped.selection, &rc_ids);
                 if crate::theme::selectable_name(
@@ -60,7 +60,7 @@ impl App {
                 .on_hover_text("クリックで3Dビューにハイライト")
                 .clicked()
                 {
-                    self.select_members(rc_ids.clone(), None);
+                    self.select_members(rc_ids, None);
                 }
             });
 
@@ -81,16 +81,17 @@ impl App {
                     n,
                     |row| {
                         let idx = row.index();
-                        let elem = self.core.model.elements[idx].clone();
-                        let is_focus = self.ui.scoped.selection.active_member() == Some(elem.id);
+                        let elem = &self.core.model.elements[idx];
+                        let (id, kind) = (elem.id, elem.kind);
+                        let is_focus = self.ui.scoped.selection.active_member() == Some(id);
                         row.col(|ui| {
-                            if table_util::id_cell(ui, is_focus, elem.id.0, "クリックで部材を選択")
+                            if table_util::id_cell(ui, is_focus, id.0, "クリックで部材を選択")
                             {
-                                self.select_member(elem.id);
+                                self.select_member(id);
                             }
                         });
                         row.col(|ui| {
-                            ui.label(format!("{:?}", elem.kind));
+                            ui.label(format!("{:?}", kind));
                         });
                     },
                 );

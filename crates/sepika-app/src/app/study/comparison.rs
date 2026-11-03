@@ -225,24 +225,22 @@ pub(in crate::app::study) mod projection {
         {
             return false;
         }
-        let mut candidate = input.core();
+        let mut candidate = input.model.clone();
         for id in fixed {
             let Some(before) = baseline.model.element(*id) else {
                 return false;
             };
-            let Some(after) = candidate.model.elements.iter_mut().find(|e| e.id == *id) else {
+            let Some(after) = candidate.elements.iter_mut().find(|e| e.id == *id) else {
                 return false;
             };
             after.section = before.section;
         }
         let mut baseline_model = baseline.model.clone();
-        if baseline_model.assign_stb_node_ids().is_err()
-            || candidate.model.assign_stb_node_ids().is_err()
+        if baseline_model.assign_stb_node_ids().is_err() || candidate.assign_stb_node_ids().is_err()
         {
             return false;
         }
-        bincode::serialize(&baseline_model).unwrap()
-            == bincode::serialize(&candidate.model).unwrap()
+        bincode::serialize(&baseline_model).unwrap() == bincode::serialize(&candidate).unwrap()
     }
 
     pub(in crate::app::study) fn condition_differences(
@@ -351,20 +349,7 @@ pub(in crate::app::study) mod projection {
         pub governing_items: Vec<sepika_design_jp::CheckKind>,
         pub evidence: Option<references::ResultReference>,
     }
-    fn ratio(outcome: &sepika_design_jp::CheckOutcome) -> (Option<f64>, String) {
-        match outcome {
-            sepika_design_jp::CheckOutcome::Checked(check) => {
-                let ratio = result_validity::checked_ratio(check);
-                let reason = if result_validity::evaluate_check(check).complete {
-                    check.basis.clone()
-                } else {
-                    result_validity::INVALID_CHECK_COMPONENTS.into()
-                };
-                (ratio, reason)
-            }
-            sepika_design_jp::CheckOutcome::Skipped { reason } => (None, reason.clone()),
-        }
-    }
+
     pub(in crate::app::study) fn fixed_coverage(
         evidence: &ReferencedResult,
         fixed: &[ElemId],
@@ -425,7 +410,25 @@ pub(in crate::app::study) mod projection {
                        position: Option<f64>,
                        key: String,
                        outcome: &sepika_design_jp::CheckOutcome| {
-            let (mut ratio, mut reason) = ratio(outcome);
+            let (mut ratio, mut reason, unrated, invalid_components) = match outcome {
+                sepika_design_jp::CheckOutcome::Checked(check) => {
+                    let evaluation = result_validity::evaluate_check(check);
+                    let ratio = if evaluation.complete {
+                        evaluation.valid_max
+                    } else {
+                        evaluation.known_ng
+                    };
+                    let reason = if evaluation.complete {
+                        check.basis.clone()
+                    } else {
+                        result_validity::INVALID_CHECK_COMPONENTS.into()
+                    };
+                    (ratio, reason, !evaluation.complete, !evaluation.complete)
+                }
+                sepika_design_jp::CheckOutcome::Skipped { reason } => {
+                    (None, reason.clone(), true, false)
+                }
+            };
             if position.is_some_and(|p: f64| !p.is_finite() || !(0.0..=1.0).contains(&p)) {
                 ratio = None;
                 reason = "検定位置の欠落・不正".into();
@@ -464,8 +467,8 @@ pub(in crate::app::study) mod projection {
                 target,
                 position,
                 ratio,
-                complete: !result_validity::check_is_unrated(outcome) && ratio.is_some(),
-                invalid_components: matches!(outcome, sepika_design_jp::CheckOutcome::Checked(check) if !result_validity::evaluate_check(check).complete),
+                complete: !unrated && ratio.is_some(),
+                invalid_components,
                 reason,
                 items,
                 governing_items,
@@ -638,6 +641,8 @@ pub(in crate::app::study) mod projection {
                         items.push(item.label());
                     }
                 }
+            }
+            for items in scopes.values_mut() {
                 items.sort();
             }
             scopes

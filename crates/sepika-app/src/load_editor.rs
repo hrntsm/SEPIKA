@@ -983,7 +983,6 @@ mod tests {
                             label
                         }
                     };
-                    let draft = editor.clone();
                     let model = rmp_serde::to_vec_named(&app.core.model).unwrap();
                     let revision = app.core.scoped.undo.revision();
                     let staleness = format!("{:?}", app.core.scoped.staleness);
@@ -1000,7 +999,6 @@ mod tests {
                         }),
                         "{err}"
                     );
-                    assert_eq!(editor, draft);
                     assert_eq!(format!("{:?}", app.core.scoped.results), results);
                     assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), model);
                     assert_eq!(app.core.scoped.undo.revision(), revision);

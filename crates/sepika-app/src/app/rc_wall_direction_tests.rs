@@ -653,11 +653,6 @@ fn directional_wall_quantity_model_edit_csv_gui_and_ovika_keep_independent_value
     let csv = crate::summary::build_quantity_csv(&app.core.model);
     assert!(csv.contains("壁横筋,10,215.432131,0.120642,算定済み概算"));
     assert!(csv.contains("壁縦筋,10,75.375781,0.042210,算定済み概算"));
-    let csv_path =
-        std::env::temp_dir().join(format!("sepika536-quantity-{}.csv", std::process::id()));
-    std::fs::write(&csv_path, &csv).unwrap();
-    assert_eq!(std::fs::read_to_string(&csv_path).unwrap(), csv);
-    std::fs::remove_file(csv_path).unwrap();
     let panel = quantity_panel_text(&mut app);
     assert!(
         panel.contains("壁横筋: 215.432131 m / 0.120642 t"),

@@ -618,8 +618,6 @@ impl App {
         pane.set_clip_rect(rect.intersect(ui.clip_rect()));
         let ui = &mut pane;
         view.pane_index = index;
-        view.allow_creation =
-            self.study_is_main() && self.ui.view.workspace.placement.active == index;
         let mut content = self.ui.view.workspace.placement.contents[index];
         let input_focus = text_input_focus(ui);
         let header = ui.horizontal_wrapped(|ui| {

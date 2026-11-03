@@ -140,8 +140,9 @@ pub fn story_copy_window(ctx: &egui::Context, app: &mut App) {
     if let (true, Some(from), Some(cache)) = (
         run,
         app.ui.scoped.story_copy.from,
-        app.ui.scoped.story_copy.preview.clone(),
+        app.ui.scoped.story_copy.preview.as_ref(),
     ) {
+        let report = cache.report.clone();
         let cmd = CopyStory {
             from,
             to: app.ui.scoped.story_copy.targets_to(),
@@ -150,8 +151,8 @@ pub fn story_copy_window(ctx: &egui::Context, app: &mut App) {
         };
         if app.core.scoped.undo.run(&mut app.core.model, Box::new(cmd)) {
             app.core.scoped.staleness.mark_edited();
-            app.report_notice(format!("階へ複製しました: {}", cache.report.summary()));
-            app.ui.scoped.story_copy.report = Some(cache.report);
+            app.report_notice(format!("階へ複製しました: {}", report.summary()));
+            app.ui.scoped.story_copy.report = Some(report);
         } else {
             app.report_notice("複製するものがありませんでした");
         }
@@ -306,7 +307,7 @@ fn preview_section(ui: &mut egui::Ui, app: &mut App) -> bool {
         return false;
     }
 
-    let cache = refresh_preview(app, from, to).clone();
+    let cache = refresh_preview(app, from, to);
     if cache.report.removes_input() {
         ui.colored_label(
             crate::theme::WARN_TEXT,

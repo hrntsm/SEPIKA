@@ -969,16 +969,18 @@ fn fixture() -> (App, usize) {
 }
 fn request(app: &App, s: usize, p: usize, operation: &str, arguments: Value) -> Request {
     let permission = app.ai_connection.permission.as_ref().unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let input = app.ai_proposal_reference(s, p);
     Request {
         version: VERSION,
-        id: uuid::Uuid::new_v4().to_string(),
+        id,
         operation: operation.into(),
         session: Some(permission.session.clone()),
         project: Some(permission.project.clone()),
         study: Some(permission.study.clone()),
         request: Some("task-1".into()),
-        proposal: Some(app.ai_proposal_reference(s, p).proposal),
-        input: Some(json!(app.ai_proposal_reference(s, p))),
+        proposal: Some(input.proposal.clone()),
+        input: Some(json!(input)),
         arguments,
     }
 }

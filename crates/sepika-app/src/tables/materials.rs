@@ -211,10 +211,11 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 "保有水平耐力計算（増分解析）の材料強度割増係数。\
                  空欄=自動（鋼材1.1、590N級1.05、RC主筋1.1）",
             );
-        if let Err(reason) = parse_material_draft(&draft) {
+        let parsed = parse_material_draft(&draft);
+        if let Err(reason) = &parsed {
             ui.colored_label(crate::theme::ERROR_RED, reason);
         }
-        let ok = parse_material_draft(&draft).is_ok();
+        let ok = parsed.is_ok();
         if ui
             .add_enabled(ok, egui::Button::new("+ 追加"))
             .on_hover_text("E・ν・ρ は必須。Fc・Fy・割増は空欄可")

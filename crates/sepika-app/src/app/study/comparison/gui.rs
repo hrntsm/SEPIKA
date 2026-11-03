@@ -551,6 +551,11 @@ impl ComparisonView {
         let mut evidence = None;
         let mut target = None;
         egui::ScrollArea::vertical().id_salt("comparison_metrics").max_height(310.0).show(ui, |ui| {
+            let baseline_rows: Vec<_> = self.entries[0].rows.iter().filter(|row| self.envelope || self.case.as_ref().is_some_and(|case| row.case == case_label(case, &self.entries[0].app.core.model))).collect();
+            let fixed_baseline = fixed_rows(baseline_rows.iter().copied(), &self.fixed);
+            let fixed_base_summary = summarize(fixed_baseline.iter().copied());
+            let baseline_summary = summarize(baseline_rows.iter().copied());
+
             for (p, entry) in self.entries.iter().enumerate() {
                 ui.separator(); ui.strong(&entry.name); ui.label(&entry.state);
                 ui.label(if entry.current { "数量の集計元: 保持した計算の準備後入力" } else { "数量の集計元: 表示中の固定入力（未計算または古い履歴。解析・検定成功とは別）" });
@@ -578,11 +583,8 @@ impl ComparisonView {
                     Err(reason) => { ui.label(format!("指定変位: {reason}")); }
                 }
                 let selected: Vec<_> = entry.rows.iter().filter(|row| self.envelope || self.case.as_ref().is_some_and(|case| row.case == case_label(case, &entry.app.core.model))).collect();
-                let baseline_rows: Vec<_> = self.entries[0].rows.iter().filter(|row| self.envelope || self.case.as_ref().is_some_and(|case| row.case == case_label(case, &self.entries[0].app.core.model))).collect();
                 let fixed_selected = fixed_rows(selected.iter().copied(), &self.fixed);
-                let fixed_baseline = fixed_rows(baseline_rows.iter().copied(), &self.fixed);
                 let fixed_summary = summarize(fixed_selected.iter().copied());
-                let fixed_base_summary = summarize(fixed_baseline.iter().copied());
                 if !entry.failures.is_empty() { ui.colored_label(crate::theme::WARN_TEXT,"取得不能の範囲は行数も未確定です。以下の件数は取得できた行のみで、欠落範囲を未検定0行として扱いません。"); }
                 ui.strong(format!("検討の固定対象 {} 部材の検定比（主架構全体とは別）", self.fixed.len()));
                 ui.label("NGと未検定は同じ行に併存します。不完全な行は差・新規NGを判定しません。");
@@ -602,7 +604,7 @@ impl ComparisonView {
                     if compatible {
 
                         if !same_evaluation_range(baseline_rows.iter().copied(), selected.iter().copied()) { ui.label("検定項目・対象・ケース集合または実算定／未検定位置の範囲が異なるため最大値の差・支配ケース変化は比較しません"); }
-                        else if let Some(base) = summarize(baseline_rows.iter().copied()).maximum {
+                        else if let Some(base) = &baseline_summary.maximum {
                             ui.label(format!("最大検定比 案−基準 {:+.6} / {}", max.ratio.unwrap()-base.ratio.unwrap(), if max.case != base.case { "支配ケース変更（集合・定義は同じ）" } else { "支配ケースは同じ" }));
                         }
                     }

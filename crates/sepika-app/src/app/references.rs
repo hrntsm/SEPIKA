@@ -932,15 +932,10 @@ impl App {
         if let Some(mode) = reference.display.mode {
             self.ui.view.view_mode_idx = mode as usize;
         }
-        if let Some(step) = reference.display.step {
-            if reference.display.diagram == Some(ReferenceDiagram::Hinge) {
-                self.ui.view.hinge_step = Some(step as usize);
-            } else {
-                self.ui.view.th_frame = step as usize;
-            }
-        }
         if reference.display.diagram == Some(ReferenceDiagram::Hinge) {
             self.ui.view.hinge_step = reference.display.step.map(|step| step as usize);
+        } else if let Some(step) = reference.display.step {
+            self.ui.view.th_frame = step as usize;
         }
         match reference.kind {
             ResultInputKey::Pushover(dir) => self.ui.view.viewport.pushover_dir = Some(dir),
@@ -3383,13 +3378,9 @@ impl QuantityEvidenceReference {
         Ok(takeoff)
     }
     pub(crate) fn identity(&self) -> String {
-        use sha2::{Digest, Sha256};
-        format!(
-            "{:x}",
-            Sha256::digest(
-                bincode::serialize(&(&self.source, &self.model, self.contract, &self.scope))
-                    .expect("数量根拠の直列化")
-            )
+        digest(
+            &bincode::serialize(&(&self.source, &self.model, self.contract, &self.scope))
+                .expect("数量根拠の直列化"),
         )
     }
 }
@@ -3415,24 +3406,28 @@ impl App {
     ) -> QuantityEvidenceReference {
         members.sort_by_key(|id| id.0);
         members.dedup();
-        let EvidenceReference::Quantity(mut quantity) = self.quantity_evidence_reference() else {
-            unreachable!()
-        };
-        quantity.scope = QuantityEvidenceScope::Members(members);
-        quantity.identity = quantity.identity();
-        *quantity
+        self.build_quantity_evidence_reference(QuantityEvidenceScope::Members(members))
     }
 
     /// 現在表示の入力とモデル全体の集計対象を同時に固定する。
     pub fn quantity_evidence_reference(&self) -> EvidenceReference {
+        EvidenceReference::Quantity(Box::new(
+            self.build_quantity_evidence_reference(QuantityEvidenceScope::WholeModel),
+        ))
+    }
+
+    fn build_quantity_evidence_reference(
+        &self,
+        scope: QuantityEvidenceScope,
+    ) -> QuantityEvidenceReference {
         let mut quantity = QuantityEvidenceReference {
             source: self.input_reference(),
             model: self.core.model.clone(),
             contract: QUANTITY_EVIDENCE_CONTRACT_VERSION,
-            scope: QuantityEvidenceScope::WholeModel,
+            scope,
             identity: String::new(),
         };
         quantity.identity = quantity.identity();
-        EvidenceReference::Quantity(Box::new(quantity))
+        quantity
     }
 }

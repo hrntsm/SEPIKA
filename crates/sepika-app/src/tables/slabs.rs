@@ -1810,36 +1810,50 @@ mod tip_load_tests {
             vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         };
-        let visible = |app: &App| {
-            app.core
-                .model
-                .slabs
-                .iter()
-                .filter(|slab| slab.supports_tip_loads())
-                .count()
-        };
         app.core.model.slabs.push(slab);
-        assert_eq!(visible(&app), 1);
-        let context = egui::Context::default();
-        let _ = context.run_ui(egui::RawInput::default(), |ui| {
-            tip_load_section(ui, &mut app);
-        });
-        app.core.model.slabs[0].shape = SlabShape::Attached {
-            anchor: RegionAnchor::Point(NodeId(0)),
-            extent: [1000.0; 2],
-        };
-        assert_eq!(visible(&app), 0);
-        app.core.model.slabs[0].shape = SlabShape::Enclosed;
-        assert_eq!(visible(&app), 0);
-        app.core.model.slabs[0].shape = shape;
-        if let SlabShape::Attached { anchor, .. } = &mut app.core.model.slabs[0].shape {
-            *anchor = RegionAnchor::Line {
-                nodes: [NodeId(0), NodeId(1)],
-                span: [0.0, 1.0],
-                transfer: LoadTransfer::Columns,
-            };
+        for (shape, expected_visible) in [
+            (shape, true),
+            (
+                SlabShape::Attached {
+                    anchor: RegionAnchor::Point(NodeId(0)),
+                    extent: [1000.0; 2],
+                },
+                false,
+            ),
+            (SlabShape::Enclosed, false),
+            (
+                SlabShape::Attached {
+                    anchor: RegionAnchor::Line {
+                        nodes: [NodeId(0), NodeId(1)],
+                        span: [0.0, 1.0],
+                        transfer: LoadTransfer::Columns,
+                    },
+                    extent: [1000.0; 2],
+                },
+                false,
+            ),
+        ] {
+            app.core.model.slabs[0].shape = shape;
+            let context = egui::Context::default();
+            let output = context.run_ui(egui::RawInput::default(), |ui| {
+                tip_load_section(ui, &mut app);
+            });
+            let text = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(
+                text.contains("床板 #0 の先端荷重"),
+                expected_visible,
+                "{text}"
+            );
+            assert_eq!(text.contains("先端荷重を追加"), expected_visible, "{text}");
         }
-        assert_eq!(visible(&app), 0);
         assert_eq!(tip_direction_label(TipLoadDirection::NegY), "-Y");
     }
 }

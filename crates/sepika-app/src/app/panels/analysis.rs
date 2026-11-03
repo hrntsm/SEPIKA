@@ -108,14 +108,9 @@ impl App {
                 .selected_text(text)
                 .show_ui(ui, |ui| {
                     ui.label(egui::RichText::new("荷重ケース").color(crate::theme::GRAY_600));
-                    let cases: Vec<(LoadCaseId, String)> = self
-                        .core
-                        .model
-                        .load_cases
-                        .iter()
-                        .map(|c| (c.id, format!("[{}] {}", c.id.0, c.name)))
-                        .collect();
-                    for (id, label) in cases {
+                    for case in &self.core.model.load_cases {
+                        let id = case.id;
+                        let label = format!("[{}] {}", case.id.0, case.name);
                         let t = StaticTarget::Case(id);
                         if ui.selectable_label(target == Some(t), label).clicked() {
                             self.ui.scoped.analysis_target = Some(t);
@@ -126,14 +121,8 @@ impl App {
                         ui.separator();
                         ui.label(egui::RichText::new("荷重組合せ").color(crate::theme::GRAY_600));
                     }
-                    let combos: Vec<String> = self
-                        .core
-                        .model
-                        .combinations
-                        .iter()
-                        .map(|c| c.name.clone())
-                        .collect();
-                    for (i, name) in combos.into_iter().enumerate() {
+                    for (i, combo) in self.core.model.combinations.iter().enumerate() {
+                        let name = &combo.name;
                         let t = StaticTarget::Combo(i);
                         if ui.selectable_label(target == Some(t), name).clicked() {
                             self.ui.scoped.analysis_target = Some(t);
