@@ -1043,8 +1043,7 @@ fn test_src_beam_slab_stiffness_falls_back_to_one() {
     );
 }
 
-/// S 造合成梁の剛性（スラブ考慮換算断面と鉄骨単独の平均。計算編 02「合成梁の
-/// 断面性能」）。
+/// S造合成梁の強軸断面二次モーメント [mm⁴] は、鋼材基準の完全合成換算断面と鉄骨単独断面の平均。
 #[test]
 fn test_beam_new_composite_steel_beam_averages_stiffness() {
     use sepika_core::dof::Dof6Mask;
