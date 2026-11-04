@@ -2,7 +2,7 @@
 //!
 //! - [`MemberDemand`] — 部材の設計用需要（軸力・二軸曲げ・せん断・Rp 等）。
 //! - [`ShearMethod`] — 終局せん断強度の算定方法（塑性理論式 / 靭性指針式）。
-//! - [`UltimateShearOptions`] — 終局検定（塑性理論式）の算定オプション。
+//! - [`UltimateShearOptions`] — 終局検定の算定オプション。
 
 /// 終局需要の評価方式。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -85,7 +85,7 @@ pub enum ShearMethod {
     Ductility,
 }
 
-/// 終局検定（塑性理論式）の算定オプション。
+/// 終局検定の算定オプション。
 #[derive(Clone, Debug)]
 pub struct UltimateShearOptions {
     /// 終局限界状態でのヒンジ領域の回転角 Rp `[rad]`（ν・cotφ に用いる。既定 0）。
