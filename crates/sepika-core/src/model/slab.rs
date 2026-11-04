@@ -629,11 +629,6 @@ pub enum LoadPurpose {
 
 /// 室の用途（積載荷重プリセット）。`live_load` で用途別の積載荷重 [N/mm²] を返す。
 /// `Custom` は 4 区分（床用／小梁用／大梁・柱・基礎用／地震力用）を直接持つ（内部単位 N/mm²）。
-///
-/// 出典: 建築基準法施行令 第85条第1項・令別表第1、および国土交通省官庁営繕部
-/// 「建築構造設計基準」令和3年度版（同資料は令85条を準用しつつ、官庁施設に特有の
-/// 室用途〔書庫・実験室・電算室・機械室・体育館等〕を追加する）。値は N/m² を
-/// 内部単位 N/mm²（×1e-6）へ換算して返す。
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SlabUsage {
     /// 住宅の居室、住宅以外の建築物における寝室又は病室。
@@ -691,7 +686,7 @@ pub enum SlabUsage {
 }
 
 impl SlabUsage {
-    /// 用途別の積載荷重 [N/mm²]（令別表第1）。
+    /// 用途別の積載荷重 [N/mm²]。任意入力以外では床用と小梁用は同じ値を返す。
     pub fn live_load(self, purpose: LoadPurpose) -> f64 {
         let (floor, frame, seismic) = match self {
             SlabUsage::Residential => (1800.0, 1300.0, 600.0),
