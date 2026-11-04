@@ -56,7 +56,7 @@ pub(crate) fn rc_beam_bond_check_1991_with_rebar(
 pub struct BondCheckResult {
     /// 検定比 = ldb / ld。
     pub ratio: f64,
-    /// 付着長さ ld `[mm]`（カットオフ無しを仮定した表値）。
+    /// 付着長さ ld `[mm]`（通し筋・カットオフ無しを仮定し、部材長から算定）。
     pub ld: f64,
     /// 必要付着長さ ldb `[mm]`。
     pub ldb: f64,
