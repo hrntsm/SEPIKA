@@ -30,7 +30,7 @@ pub struct UltimateCheck {
     pub mu: f64,
     /// 比較用せん断需要 Qmu `[N]`。静的は上限強度倍率·2·Mu/内法、確定総応答は総せん断力の絶対値。
     pub qmu: f64,
-    /// 塑性理論式による終局せん断強度 Qsu `[N]`。
+    /// 選択された [`ShearMethod`] に応じた終局せん断強度 Qsu/Vu `[N]`。
     pub qsu: f64,
     /// 付着割裂による終局せん断耐力 Qbu `[N]`（`include_bond=false` なら 0）。
     pub qbu: f64,

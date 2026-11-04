@@ -32,8 +32,8 @@ pub fn biaxial_margin(rx: f64, ry: f64, alpha: f64) -> f64 {
     }
 }
 
-/// 指定方向の諸元 `props` から柱の終局せん断強度 `Qsu`（塑性理論式）と両端ヒンジ時
-/// せん断力 `Qmu` を算定する（2 軸せん断用）。有効せいが 0 以下なら `(0.0, 0.0)`。
+/// 指定方向の諸元 `props` から柱の終局せん断強度 `Qsu`/`Vu` と両端ヒンジ時せん断力 `Qmu` を算定する（2 軸せん断用）。
+/// 終局せん断強度は選択された [`ShearMethod`] に従う。有効せいが 0 以下なら `(0.0, 0.0)`。
 pub(super) fn column_axis_shear(
     props: &RcBarProps,
     fc: f64,
