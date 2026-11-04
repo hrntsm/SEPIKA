@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 480" role="img" aria-labelledby="title desc">
+<style>text{font-family:sans-serif;font-size:19px;fill:#172b3a}.small{font-size:16px}.axis{stroke:#245b85;stroke-width:2;fill:none}.force{stroke:#b73c23;stroke-width:3;fill:none}.dim{stroke:#45596b;stroke-width:1.5;fill:none}.dash{stroke:#617684;stroke-width:1.5;stroke-dasharray:6 5;fill:none}</style>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="#45596b"/></marker><marker id="force" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="#b73c23"/></marker></defs>
+<rect width="900" height="480" fill="white"/>
+<title id="title">側柱付きRC壁の耐力用水平断面</title><desc id="desc">同寸の正方形柱を壁板両端に配置する。中央壁板は柱中心間を占め、柱内の半幅が重複する。図心Oは中央にある。</desc>
+<text x="28" y="32">水平断面（図示例：右柱が圧縮側、寸法は模式的）</text>
+<path d="M120 145 H230 V182 H670 V145 H780 V255 H670 V218 H230 V255 H120 Z" fill="#dce8ef" stroke="#172b3a" stroke-width="2"/>
+<rect x="175" y="182" width="550" height="36" fill="none" stroke="#245b85" stroke-width="2" stroke-dasharray="5 4"/>
+<path d="M175 100 V290 M725 100 V290 M450 145 V270" class="dash"/>
+<circle cx="450" cy="200" r="4" fill="#172b3a"/><text x="460" y="178">O</text>
+<text x="114" y="284">引張側柱</text><text x="665" y="284">圧縮側柱</text>
+<text x="320" y="242" class="small">破線矩形：中央壁板 t × lw</text>
+<path d="M175 115 H725 M175 106 V125 M725 106 V125" class="dim"/><text x="393" y="100">柱中心間 lw</text>
+<path d="M120 330 H780 M120 318 V342 M780 318 V342" class="dim"/><text x="370" y="359">全長 D = lw + Dc</text>
+<path d="M120 76 H230 M120 65 V87 M230 65 V87" class="dim"/><text x="160" y="65">Dc</text>
+<path d="M802 145 V255 M791 145 H813 M791 255 H813" class="dim"/><text x="820" y="208">Dc</text>
+<path d="M594 182 V218 M582 182 H606 M582 218 H606" class="dim"/><text x="610" y="205">t</text>
+<path d="M450 304 H175 M450 304 H725" class="dim"/><text x="270" y="299" class="small">rL = −lw/2</text><text x="530" y="299" class="small">rR = +lw/2</text>
+<path d="M380 398 H540" class="axis" marker-end="url(#arrow)"/><text x="552" y="405">+y（a→b）</text>
+<text x="30" y="445" class="small">柱と壁板の重なりは物理面積 A で一度だけ数える。柱主筋 ag は引張側柱の全主筋。</text>
+</svg>
