@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 410" role="img" aria-labelledby="title desc">
+<title id="title">元骨格と等面積トリリニア</title>
+<desc id="desc">正側の単調骨格の模式図。実線は原点から初期剛性K0で第1折点dc,Qcへ進み、第2勾配K2で等価降伏点dy,Qyへ達し、その後は直線Kp d+bとなる。破線は元骨格。面積評価上限Dareaは第2折点より後、同定上限Dfitより前に描くが、この位置関係は一例である。両上限は終局点ではない。</desc>
+<style>text{font-family:sans-serif;font-size:18px;fill:#172b3a}.small{font-size:16px}.axis{stroke:#172b3a;stroke-width:2;fill:none}.tri{stroke:#245b85;stroke-width:3;fill:none}.original{stroke:#a84226;stroke-width:2.5;stroke-dasharray:7 5;fill:none}.guide{stroke:#617684;stroke-width:1.5;stroke-dasharray:4 5;fill:none}</style>
+<rect width="820" height="410" fill="white"/>
+<path d="M80 310 L180 175 L330 115 L520 96 V310 Z" fill="#dce8ef"/>
+<path d="M80 35 V310 H770 M74 45 L80 35 L86 45 M760 304 L770 310 L760 316" class="axis"/>
+<path d="M180 175 V310 M330 115 V310 M520 96 V310 M680 80 V310" class="guide"/>
+<path d="M80 310 L150 215.5 L250 133.1087 L380 110 L730 75" class="original"/>
+<path d="M80 310 L180 175 L330 115 L730 75" class="tri"/>
+<circle cx="180" cy="175" r="5" fill="#245b85"/>
+<circle cx="330" cy="115" r="5" fill="#245b85"/>
+<text x="24" y="31">Q [N]</text>
+<text x="693" y="349">d [mm]</text>
+<text x="58" y="335">0</text>
+<text x="116" y="255">K₀</text>
+<text x="220" y="104">K₂</text>
+<text x="148" y="156">(d_c, Q_c)</text>
+<text x="287" y="89">(d_y, Q_y)</text>
+<text x="490" y="62">Q = K_p d + b</text>
+<text x="162" y="337">d_c</text>
+<text x="312" y="337">d_y</text>
+<text x="485" y="337">D_area</text>
+<text x="653" y="337">D_fit</text>
+<text x="269" y="248">A_tri = A_original</text>
+<path d="M90 377 H135" class="tri"/><text x="145" y="383" class="small">Q_tri：トリリニア</text>
+<path d="M355 377 H400" class="original"/><text x="410" y="383" class="small">Q_original：元骨格</text>
+</svg>
