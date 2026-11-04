@@ -113,6 +113,9 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             Ok(Box::new(UnsetWallPlateRegion { region }))
         }
         "AddAttachedWallPlate" => {
+            if value.get("self_weight_shares").is_some() {
+                return Err("AddAttachedWallPlate は self_weight_shares に対応していません。取り付く壁版の自重は取付き先と伝達規則で分配します".into());
+            }
             let anchor: RegionAnchor =
                 serde_json::from_value(value.get("anchor").ok_or("anchor が必要です")?.clone())
                     .map_err(|e| format!("anchor の解析に失敗: {e}"))?;
