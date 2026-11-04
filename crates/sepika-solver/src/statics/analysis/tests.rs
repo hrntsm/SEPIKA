@@ -387,9 +387,6 @@ fn public_dynamic_and_pushover_entries_reject_direction_before_early_returns() {
 
 /// 解析前チェックの入口 `Analysis::prepare` が、代表的な入力不備を日本語の
 /// エラーとして返すこと（診断の生成自体は `model_issues` 側の各テストで検証する）。
-///
-/// 有効せん断断面積 As=0 は、入力不足が「せん断について無限に強い部材」として
-/// 黙って通ってしまう（危険側）ため、エラーとして止めることをここでも確認する。
 #[test]
 fn test_prepare_reports_diagnostics() {
     let expect = |model: &Model, needle: &str| {
