@@ -5,7 +5,7 @@
 //! 曲げモーメントを同時に受ける柱の終局曲げ耐力 `Mu(N)` を算定する。
 //! - **短柱**（[`cft_short_column_mu`]）: 中立軸位置をパラメータとする耐力曲線を軸力 N に
 //!   整合させる。角形は鋼管の全断面で応力ブロックを積分する。
-//! - **中柱・長柱**（[`cft_long_medium_column_mu`]）: 座屈による曲げ低減 R=(1−cNcu/Nk) を
+//! - **中柱・長柱**（[`cft_long_medium_column_mu`]）: 座屈による曲げ低減 χb=max(1−cNcr/Nk,0) を
 //!   考慮し、コンクリート放物線 cMu＋鋼管の曲げ耐力（低減後）を重ね合わせる。
 
 use sepika_core::section_shape::RoundedRectangle;
