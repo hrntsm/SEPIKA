@@ -191,7 +191,7 @@ enum SrcShearMode {
     ///   `rQAS2 = b·rj·(2(b′/b)·fs + pw·wft)` を分担 `sQD`/`rQD` と比較する。
     ///
     /// `beta` は鉄骨ウェブの形式と寸法による係数
-    /// （充腹 `β = n·tw·sd/(b·rj)`、弱軸・非充腹 `β = 1.33·n·bf·tf/(b·rj)`）。
+    /// （充腹 `β = n·tw·sd/(b·rj)`、H 形弱軸 `β = 1.33·n·bf·tf/(b·rj)`）。
     Column { beta: f64 },
 }
 
