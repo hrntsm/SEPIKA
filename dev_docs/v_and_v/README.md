@@ -1,5 +1,7 @@
 # V&V レポート（検証・妥当性確認）
 
+P–Δの軸力による幾何剛性は[ADR 0104](../adr/0104-remove-axial-geometric-stiffness.md)で削除しました。専用試験は現行検証対象に含めません。過去のV&V・実行ログと索引の旧分類は実行時点の履歴として保持します。
+
 ## ピン端ファイバー梁の数値釣合い（#1182）
 
 [再現・丸めと実際の未収束の切分け](ピン端ファイバー梁の数値釣合い_Issue1182.md)に、500角の初回微小残差、外側Newtonの振動、補償和と線探索による修正、および精度・履歴・原子的失敗の回帰を記録する。物理モデル・収束許容値・反復上限は保持し、実験Validationや任意の載荷での収束保証には拡張しない。
@@ -679,7 +681,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 619 | 単独RC壁のDs応力度と側柱寸法 | sepika-design-jp / sepika-app / sepika-core | secondary/ds_group.rs・actions/design/holding.rs・result_contract.rs | [独立期待値と実入口](単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md#独立期待値と試験への対応) | 横断 | 🔶（Source焦点Verification成功、広域・Validation・最終ゲート別確認） |
 | 28a | 鉛直Column支持の小梁自重 | sepika-core / sepika-edit / sepika-load | face_distance.rs, tests/column_support_faces.rs | [Issue423の独立値・公開入口・全5Done](鉛直柱支持小梁の自重フェース_Issue423_2026-10.md) | 横断 | 🔶（公開8試験/MassEquiv節点加算/旧20保存回帰Verification、Validation未実施） |
 | 1d | 質点系先行成果鮮度 | sepika-app | app/actions/lumped_mass.rs | [Issue612検証](質点系先行成果鮮度_Issue612_2026-10.md)：実成果存在・入力一致、限定片持柱独立 K/T、拒否/失敗/取消保持 | P1/P2 | 🔶（自動入口 Verification、手動 GUI 未） |
-| 618 | RC梁の左右床板厚 | sepika-element / sepika-core | frame/beam/{stiffness_factors,construct,tests}.rs、result_contract.rs | [独立期待値とテスト索引](RC梁左右床板厚_Issue618_2026-10.md#独立期待値とテスト索引) | 幾何剛性 | 🔶（有限例Verification） |
+| 618 | RC梁の左右床板厚 | sepika-element / sepika-core | frame/beam/{stiffness_factors,construct,tests}.rs、result_contract.rs | [独立期待値とテスト索引](RC梁左右床板厚_Issue618_2026-10.md#独立期待値とテスト索引) | 幾何剛性（旧分類） | 🔶（有限例Verification） |
 | 786 | RC片持ち架構の階入力と安定性 | sepika-app / sepika-element / sepika-solver | app/tests.rs | [独立モード・変位・支持釣合いと自動回帰](RC片持ち架構の階入力_Issue786_確認記録.md#自動回帰と実行記録) | 横断 | 🔶（有限Verification、手動GUI・物理Validation未） |
 | 1 | ティモシェンコ梁 | sepika-element | [frame/beam/tests.rs](../../crates/sepika-element/src/frame/beam/tests.rs) | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_rigid_zone_preserves_rigid_body_rotation`（両曲げ方向の剛体回転と、剛域ありでもねじりGJ/Lを維持。旧ねじり単独試験を統合） | P1 | ✅ |
 | 760 | 梁文書の局所軸と保存性能 | sepika-core / sepika-element / sepika-app | section_shape/{properties,builder}.rs、geom/vec3.rs、frame/beam/{construct,stiffness,tests}.rs、app/shear_area_acceptance_tests.rs | [独立座標図・手計算と直接試験](梁要素の局所軸と保存性能_Issue760_2026-10.md#独立手計算と直接試験) | 文書 | ✅（座標・添字の対応のVerification） |

@@ -1,6 +1,6 @@
 //! 非線形時刻歴応答解析（Newmark-β + Newton 反復 + commit/rollback）。
 //!
-//! - [`NonlinearThCfg`] — 解析設定（Newton 収束条件・幾何剛性・長期荷重初期化・記録間引き）
+//! - [`NonlinearThCfg`] — 解析設定（Newton 収束条件・長期荷重初期化・記録間引き）
 //! - [`nonlinear_time_history_analysis`] — 非線形時刻歴応答解析
 
 use super::common::{
@@ -32,14 +32,12 @@ use sepika_element::factory::{build_nonlinear_behavior, StrengthBasis};
 use sepika_math::solver::{make_solver, LinearSolver, SolveError, SolverBackend};
 use sepika_math::sparse::{sparse_matvec, Triplet};
 
-/// 非線形時刻歴応答解析の設定（Newton 収束条件・幾何剛性・長期荷重初期化・記録間引き）。
+/// 非線形時刻歴応答解析の設定（Newton 収束条件・長期荷重初期化・記録間引き）。
 #[derive(Clone, Copy, Debug)]
 pub struct NonlinearThCfg {
     /// 各時刻ステップの Newton 反復の収束規約（反復上限・相対許容誤差）。
     /// 基準ノルムは長期荷重を除いた動的外力ノルムと 1.0 の大きい方。
     pub newton: NewtonCriteria,
-    /// 幾何剛性（P-Δ、Kg）を接線剛性に含めるか。
-    pub use_kg: bool,
     /// 時刻歴開始前に長期荷重（固定・積載等、`LoadCaseKind::is_long_term`）を
     /// 静的 Newton 反復で載荷し、その変位・応力状態を時刻歴の初期条件とするか
     /// （プッシュオーバーの長期載荷フェーズと同じ考え方）。長期系荷重ケースが
@@ -51,12 +49,11 @@ pub struct NonlinearThCfg {
 }
 
 impl NonlinearThCfg {
-    /// 既定値: 長期荷重初期化あり・幾何剛性なし・記録間引きは自動決定。
+    /// 既定値: 長期荷重初期化あり・記録間引きは自動決定。
     /// Newton 反復の上限・相対許容誤差のみ呼び出し側で指定する。
     pub fn new(max_iter: usize, tol: f64) -> Self {
         Self {
             newton: NewtonCriteria::new(max_iter, tol),
-            use_kg: false,
             apply_long_term: true,
             record_every: None,
         }
@@ -64,7 +61,7 @@ impl NonlinearThCfg {
 }
 
 impl Default for NonlinearThCfg {
-    /// Newton 反復 20 回・相対許容誤差 1e-6・長期荷重初期化あり・幾何剛性なし・
+    /// Newton 反復 20 回・相対許容誤差 1e-6・長期荷重初期化あり・
     /// 記録間引きは自動決定。
     fn default() -> Self {
         Self::new(20, 1e-6)
@@ -174,7 +171,7 @@ pub fn nonlinear_time_history_analysis(
     let f0_red = reducer.reduce_f(&f0_free);
     let has_long_term = !gravity_case.nodal.is_empty() || !gravity_case.member.is_empty();
 
-    let k_initial_free = assemble_k(model, dofmap, &behaviors, cfg.use_kg);
+    let k_initial_free = assemble_k(model, dofmap, &behaviors);
     let k_initial_red = reducer.reduce_k(&k_initial_free);
     let c_red = damping.assemble_c(&m_red, &k_initial_red);
 
@@ -187,7 +184,6 @@ pub fn nonlinear_time_history_analysis(
             &mut behaviors,
             &f0_red,
             &gravity_member_loads,
-            cfg.use_kg,
             &mut u,
         )?;
     }
@@ -338,7 +334,6 @@ pub fn nonlinear_time_history_analysis(
                     model,
                     dofmap,
                     &behaviors,
-                    cfg.use_kg,
                     &mut k_t_free_cache,
                     &mut k_t_free_triplets_buf,
                 );
@@ -420,7 +415,6 @@ pub fn nonlinear_time_history_analysis(
                         model,
                         dofmap,
                         &behaviors,
-                        cfg.use_kg,
                         &mut k_t_free_cache,
                         &mut k_t_free_triplets_buf,
                     );
@@ -622,7 +616,6 @@ fn apply_long_term_static(
     behaviors: &mut [Box<dyn ElementBehavior>],
     f0_red: &[f64],
     gravity_member_loads: &[Vec<sepika_core::model::MemberLoad>],
-    use_kg: bool,
     u_out: &mut [f64],
 ) -> Result<(), SolveError> {
     let snap = StateSnapshot::capture(behaviors);
@@ -633,7 +626,6 @@ fn apply_long_term_static(
         behaviors,
         f0_red,
         gravity_member_loads,
-        use_kg,
         u_out,
     ) {
         Ok(Some(du)) => {
@@ -669,7 +661,6 @@ fn newton_static_converge(
     behaviors: &mut [Box<dyn ElementBehavior>],
     f_target_red: &[f64],
     absolute_loads: &[Vec<sepika_core::model::MemberLoad>],
-    use_kg: bool,
     u_base_red: &[f64],
 ) -> Result<Option<Vec<f64>>, SolveError> {
     let n_indep = reducer.n_indep;
@@ -693,7 +684,6 @@ fn newton_static_converge(
             model,
             dofmap,
             behaviors,
-            use_kg,
             &mut k_free_cache,
             &mut k_free_triplets_buf,
         );

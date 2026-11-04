@@ -1477,16 +1477,6 @@ impl ElementBehavior for FiberBeam {
         }
     }
 
-    fn geometric_stiffness(&self, n: f64) -> LocalMat {
-        let kg_node = crate::frame::prismatic::geometric_stiffness(
-            n,
-            self.flex_length,
-            self.rigid_i,
-            self.rigid_j,
-        );
-        self.axis.to_global(&kg_node)
-    }
-
     fn snapshot_state(&self) -> Box<dyn Any> {
         let gauss_data: Vec<Vec<Box<dyn UniaxialMaterial>>> = self
             .gauss_points

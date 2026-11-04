@@ -338,7 +338,7 @@ fn public_dynamic_and_pushover_entries_reject_direction_before_early_returns() {
                 {
                     let Err(error) = linear_time_history_analysis(
                         &model, &dofmap, &reducer, &wave, &newmark, &damping, &initial, &initial,
-                        false, None,
+                        None,
                     ) else {
                         panic!("線形時刻歴入口も全ケースを検査する");
                     };
@@ -369,7 +369,6 @@ fn public_dynamic_and_pushover_entries_reject_direction_before_early_returns() {
                         SeismicDir::X,
                         1,
                         1.0,
-                        false,
                     ) else {
                         panic!("増分解析は長期載荷前に拒否する");
                     };

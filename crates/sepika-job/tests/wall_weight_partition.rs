@@ -314,7 +314,6 @@ fn wall_mass_rejects_inertial_torsion_gauge_and_nonlinear_time_history() {
             &expanded,
             Some(AnalysisKind::TimeHistory),
             "非線形時刻歴解析",
-            false,
             None,
         )
         .unwrap_err();

@@ -254,7 +254,6 @@ pub fn compute_checkpoint(
         &damping,
         &zero,
         &zero,
-        false,
         (cfg.th_record_every > 0).then_some(cfg.th_record_every),
         Some(step),
     )
@@ -312,7 +311,6 @@ pub fn resume_checkpoint(
         &NewmarkCfg::average_accel(),
         &damping,
         &checkpoint.state,
-        false,
         (cfg.th_record_every > 0).then_some(cfg.th_record_every),
     )
     .map_err(crate::compute::dynamic_solve_error)?;

@@ -712,13 +712,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         );
     }
 
-    if let Err(reason) = sepika_element::factory::ensure_wall_side_column_analysis(
-        model,
-        None,
-        "線形解析",
-        false,
-        None,
-    ) {
+    if let Err(reason) =
+        sepika_element::factory::ensure_wall_side_column_analysis(model, None, "線形解析", None)
+    {
         issues.push(ModelIssue::model(reason));
     }
     let side_edges = sepika_element::wall::side_column::SideColumnEdges::build(model);

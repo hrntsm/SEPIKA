@@ -105,7 +105,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0073](0073-panel-connection-face-distance.md) | accepted | 仕口パネルの梁端接合面を既存入力から一意に解決する |
 | [0075](0075-rc-beam-length-weighted-slab-thickness.md) | accepted | RC梁の床板厚を各側の取付長で加重平均する |
-| [0076](0076-beam-eccentric-connection.md) | accepted | 梁の実材軸への偏心接続を既存要素の外側で合成する |
+| [0076](0076-beam-eccentric-connection.md) | partially superseded by ADR-0104 | 梁の実材軸への偏心接続を既存要素の外側で合成する |
 | [0077](0077-beam-centerline-slab-upstand.md) | accepted | 梁の床板嵩上げを中心線上端と水平投影幅で算定する |
 
 | [0078](0078-equilibrated-cholesky-condition-estimate.md) | accepted | 平衡化後の推定逆条件数で正定値求解の数値条件を診断する |
@@ -123,7 +123,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0085](0085-misc-wall-methods-and-rs-analysis.md) | accepted | 自立壁の基準剛性を二方式から選択し、Rsは付加剛性を反映して再解析する |
 
-| [0086](0086-initial-stiffness-damping.md) | accepted | 非線形時刻歴の既定減衰を未載荷の初期剛性比例とする |
+| [0086](0086-initial-stiffness-damping.md) | partially superseded by ADR-0104 | 非線形時刻歴の既定減衰を未載荷の初期剛性比例とする |
 | [0087](0087-gui-owned-study-and-local-ai.md) | accepted | GUIを検討の所有者とし、外部AIは名前付きパイプで比較案を操作する |
 
 | [0088](0088-version-scoped-references.md) | accepted | 対象参照を入力版内で照合し、計算開始時の案版を保存する |
@@ -145,6 +145,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0102](0102-secondary-beam-invalid-input.md) | accepted | 小梁の必要入力が不正な場合は検定全体をエラーにする |
 
 | [0103](0103-linear-timehistory-restart.md) | accepted | 線形時刻歴の再開状態に前半結果と生成条件を保持する |
+
+| [0104](0104-remove-axial-geometric-stiffness.md) | accepted | 軸力による幾何剛性を削除し、材料非線形と軸力を維持する |
 
 ## 規約
 

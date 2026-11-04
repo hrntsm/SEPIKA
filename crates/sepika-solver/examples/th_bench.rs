@@ -262,7 +262,6 @@ fn main() {
                 &damping,
                 &[],
                 &[],
-                false,
                 None,
             )
         },
@@ -346,7 +345,6 @@ fn main() {
                 &damping,
                 &[],
                 &[],
-                false,
                 Some(RECORD_EVERY_DISABLED),
             )
         },

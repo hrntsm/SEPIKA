@@ -46,7 +46,6 @@ fn instantaneous_samples_match_independent_newmark_displacements_and_initial_equ
             &damping(),
             &[0.0],
             &[0.0],
-            false,
             Some(1),
         )
         .unwrap();
@@ -114,7 +113,6 @@ fn checkpoint_preserves_committed_state_and_absolute_recording_grid() {
             &damping(),
             &[0.0],
             &[0.0],
-            false,
             Some(3),
         )
         .unwrap()
@@ -134,7 +132,6 @@ fn checkpoint_preserves_committed_state_and_absolute_recording_grid() {
             &NewmarkCfg::average_accel(),
             &damping(),
             &anchor,
-            false,
             Some(3),
         )
         .unwrap();
@@ -163,7 +160,6 @@ fn checkpoint_preserves_committed_state_and_absolute_recording_grid() {
         &NewmarkCfg::average_accel(),
         &damping(),
         &sentinel,
-        false,
         Some(3),
     )
     .unwrap();
@@ -178,7 +174,6 @@ fn checkpoint_preserves_committed_state_and_absolute_recording_grid() {
         &NewmarkCfg::average_accel(),
         &damping(),
         &beyond,
-        false,
         None,
     )
     .is_err());
@@ -198,7 +193,6 @@ fn empty_input_is_rejected_by_both_spatial_solvers() {
         &damping(),
         &[0.0],
         &[0.0],
-        false,
         None,
     )
     .is_err());
@@ -233,7 +227,6 @@ fn stopped_linear_state_keeps_full_wave_direction_and_rejects_invalid_restart_va
         &damping(),
         &[0.0],
         &[0.0],
-        false,
         Some(3),
         Some(2),
     )
@@ -268,7 +261,6 @@ fn stopped_linear_state_keeps_full_wave_direction_and_rejects_invalid_restart_va
             &NewmarkCfg::average_accel(),
             &damping(),
             &invalid,
-            false,
             Some(3),
         )
         .is_err());
@@ -306,7 +298,6 @@ fn singular_initial_mass_keeps_existing_zero_near_zero_and_error_contract() {
             &damping(),
             &[0.0; 2],
             &[0.0; 2],
-            false,
             Some(1),
         );
         let nonlinear = nonlinear_time_history_analysis(

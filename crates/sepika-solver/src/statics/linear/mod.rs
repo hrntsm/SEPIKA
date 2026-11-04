@@ -211,7 +211,7 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
                 .map_err(|reason| SolveError::InvalidInput(reason.to_string()))?;
         }
     }
-    sepika_element::factory::ensure_wall_side_column_analysis(model, None, "線形解析", false, None)
+    sepika_element::factory::ensure_wall_side_column_analysis(model, None, "線形解析", None)
         .map_err(SolveError::InvalidInput)?;
     model
         .validate_member_load_directions()

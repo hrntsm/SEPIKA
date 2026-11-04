@@ -294,7 +294,6 @@ mod tests {
                 PushoverTarget::default(),
                 PushoverControl::default(),
                 false,
-                false,
                 DuctilityMethod::default(),
             )
             .unwrap();
@@ -335,7 +334,6 @@ mod tests {
             1,
             PushoverTarget::default(),
             PushoverControl::default(),
-            false,
             false,
             DuctilityMethod::default(),
         )

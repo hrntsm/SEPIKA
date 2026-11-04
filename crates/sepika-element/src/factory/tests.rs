@@ -2241,9 +2241,6 @@ fn eccentric_beam_factory_preserves_work_stiffness_mass_and_committed_member_for
                 );
                 assert!(response.physical_frame_end_force_global[index + 4].abs() < 1e-6);
             }
-            let geometric = behavior.geometric_stiffness(1000.0);
-            assert!((geometric.get(3, 3) - 1.2 * offset * offset).abs() < 1e-8);
-            assert!((geometric.get(3, 1) + 1.2 * offset).abs() < 1e-8);
             let saved = behavior.serialize_checkpoint();
             let snapshot = behavior.snapshot_state();
             behavior.update_state(&stretch, false, &ctx).unwrap();

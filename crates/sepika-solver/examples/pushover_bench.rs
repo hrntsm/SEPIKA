@@ -158,8 +158,7 @@ fn run_case(control: PushoverControl) -> (f64, PushoverResult) {
         50, // max_steps
         target,
         control,
-        true,  // apply_long_term
-        false, // use_kg
+        true, // 長期荷重の初期載荷
         DuctilityMethod::default(),
     )
     .expect("pushover should converge");

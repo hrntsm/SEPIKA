@@ -163,7 +163,6 @@ fn test_sdof_free_vibration_matches_analytical() {
         &damping,
         &[1.0],
         &[0.0],
-        false,
         Some(1),
     )
     .expect("time history should converge");
@@ -238,7 +237,6 @@ fn test_2dof_mode_superposition_consistency() {
         &damping,
         &[1.0, phi_ratio],
         &[0.0, 0.0],
-        false,
         None,
     )
     .expect("mode superposition test");
@@ -286,7 +284,6 @@ fn test_newmark_schemes_in_stable_ranges() {
             &damping,
             &[1.0],
             &[0.0],
-            false,
             None,
         )
         .expect("Newmark scheme should remain stable in its tested range");
@@ -335,7 +332,6 @@ fn test_checkpoint_restart_bit_exact() {
         &damping,
         &[1.0],
         &[0.0],
-        false,
         None,
     )
     .expect("continuous run");
@@ -351,7 +347,6 @@ fn test_checkpoint_restart_bit_exact() {
         &damping,
         &[1.0],
         &[0.0],
-        false,
         None,
     )
     .expect("first half");
@@ -370,7 +365,6 @@ fn test_checkpoint_restart_bit_exact() {
         &newmark,
         &damping,
         &state_loaded,
-        false,
         None,
     )
     .expect("restart");
@@ -452,7 +446,6 @@ fn test_y_direction_wave_selects_y_record_dir() {
         &damping,
         &[0.0],
         &[0.0],
-        false,
         None,
     )
     .expect("Y-direction time history should converge");
@@ -521,7 +514,6 @@ fn test_phase_diff_torsion_excites_eccentric_node() {
         &damping,
         &[0.0],
         &[0.0],
-        false,
         None,
     )
     .expect("torsion time history should converge");
@@ -542,7 +534,6 @@ fn test_phase_diff_torsion_excites_eccentric_node() {
         &damping,
         &[0.0],
         &[0.0],
-        false,
         None,
     )
     .expect("zero input should converge");
@@ -729,7 +720,6 @@ fn test_nonlinear_time_history_sdof_elastic() {
         &damping,
         &[1.0],
         &[0.0],
-        false,
         None,
     )
     .expect("linear should run");
@@ -1079,7 +1069,6 @@ fn test_linear_recording_frames_and_stories() {
         &damping,
         &[10.0],
         &[0.0],
-        false,
         None,
     )
     .expect("linear recording should run");
@@ -1167,7 +1156,6 @@ fn test_linear_recording_frames_and_stories() {
             &damping,
             &[10.0],
             &[0.0],
-            false,
             Some(record_every),
         )
         .expect("linear recording with explicit record_every should run");
@@ -1451,7 +1439,6 @@ fn test_support_spring_free_vibration_matches_linear() {
         &damping,
         &[5.0],
         &[0.0],
-        false,
         None,
     )
     .expect("linear reference");
@@ -1579,7 +1566,6 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
             crate::statics::analysis::SeismicDir::X,
             2,
             0.0,
-            false,
         )
         .unwrap_err();
         assert!(reason.contains("My"), "{reason}");

@@ -132,7 +132,6 @@ crate::behavior::forward_element_behavior!(InPlaneReleasedColumn, inner, {
     state_frame_load_response: custom,
     recover_forces: custom,
     state_member_forces: custom,
-    geometric_stiffness: forward,
     snapshot_state: custom,
     restore_state: custom,
     commit_state: forward,

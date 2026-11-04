@@ -197,7 +197,6 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
     state_frame_load_response: custom,
     recover_forces: custom,
     state_member_forces: forward,
-    geometric_stiffness: custom,
     snapshot_state: forward,
     restore_state: forward,
     commit_state: forward,
@@ -263,9 +262,7 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
         self.transform_matrix(&self.inner.tangent_stiffness(ctx))
     }
 
-    fn geometric_stiffness(&self, n: f64) -> LocalMat {
-        self.transform_matrix(&self.inner.geometric_stiffness(n))
-    }
+
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
         self.try_mass_matrix(opt).unwrap_or_else(|error| panic!("{error}"))
@@ -789,10 +786,6 @@ mod tests {
                     (
                         wrapped.tangent_stiffness(&ctx),
                         control.tangent_stiffness(&ctx),
-                    ),
-                    (
-                        wrapped.geometric_stiffness(200.0),
-                        control.geometric_stiffness(200.0),
                     ),
                     (
                         wrapped.mass_matrix(MassOption::Consistent),

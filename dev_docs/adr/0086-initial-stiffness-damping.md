@@ -1,8 +1,10 @@
 # 非線形時刻歴の既定減衰を未載荷の初期剛性比例とする
 
-- Status: accepted
+- Status: partially superseded by ADR-0104
 - Date: 2026-10-27
 - Related: [Issue #808](https://github.com/hrntsm/SEPIKA/issues/808)
+
+幾何剛性の転送・利用可能性に関する部分は[ADR 0104](0104-remove-axial-geometric-stiffness.md)で撤回しました。以下は判断時点の記録であり、その他の判断は維持します。
 
 ## Context
 

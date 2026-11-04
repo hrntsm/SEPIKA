@@ -212,7 +212,6 @@ impl<'m> Analysis<'m> {
             &damping,
             &init,
             &init,
-            false,
             record_every,
         )
     }

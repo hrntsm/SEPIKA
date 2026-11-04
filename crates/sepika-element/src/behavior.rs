@@ -371,10 +371,7 @@ pub trait ElementBehavior: Send + Sync {
     fn state_member_forces(&self, _ctx: &Ctx) -> Option<crate::frame::beam::MemberForces> {
         None
     }
-    /// 線形化幾何剛性 Kg。軸力 N（引張正）。
-    fn geometric_stiffness(&self, _n: f64) -> LocalMat {
-        LocalMat::zeros(12)
-    }
+
     fn snapshot_state(&self) -> Box<dyn Any> {
         Box::new(())
     }
@@ -439,7 +436,6 @@ macro_rules! forward_element_behavior {
         state_frame_load_response: $m_state_frame_load_response:ident,
         recover_forces: $m_recover_forces:ident,
         state_member_forces: $m_state_member_forces:ident,
-        geometric_stiffness: $m_geometric_stiffness:ident,
         snapshot_state: $m_snapshot_state:ident,
         restore_state: $m_restore_state:ident,
         commit_state: $m_commit_state:ident,
@@ -569,13 +565,6 @@ macro_rules! forward_element_behavior {
                     #[allow(unused_imports)]
                     use $crate::behavior::ElementBehavior as _;
                     self.$inner.state_member_forces(ctx)
-                }
-            );
-            $crate::forward_element_behavior!(@opt $m_geometric_stiffness
-                fn geometric_stiffness(&self, n: f64) -> $crate::behavior::LocalMat {
-                    #[allow(unused_imports)]
-                    use $crate::behavior::ElementBehavior as _;
-                    self.$inner.geometric_stiffness(n)
                 }
             );
             $crate::forward_element_behavior!(@opt $m_snapshot_state

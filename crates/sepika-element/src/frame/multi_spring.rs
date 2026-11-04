@@ -44,7 +44,6 @@ crate::behavior::forward_element_behavior!(MultiSpringElement, inner, {
     state_frame_load_response: forward,
     recover_forces: forward,
     state_member_forces: forward,
-    geometric_stiffness: forward,
     snapshot_state: forward,
     restore_state: forward,
     commit_state: forward,

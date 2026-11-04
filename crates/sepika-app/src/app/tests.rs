@@ -13669,7 +13669,6 @@ fn wall_connection_gui_diagnostic_preserves_shared_stop_reason() {
             &expanded,
             None,
             "線形解析",
-            false,
             None,
         )
         .unwrap_err();
