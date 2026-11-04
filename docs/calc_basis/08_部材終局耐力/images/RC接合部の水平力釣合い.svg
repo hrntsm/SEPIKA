@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 470" role="img" aria-labelledby="title desc">
+<title id="title">RC接合部の水平切断面での力の釣合い</title>
+<desc id="desc">左に両側梁・上下柱のある接合部、右に水平切断した上半分の自由体を示す。左梁上端の引張力Tと右梁上端の圧縮合力C′=T′は左向き。上柱のせん断力Qcuと切断面が受けるせん断力Qjは右向き。右向きを正としてQj+Qcu−T−C′=0となる。</desc>
+<style>text{font-family:sans-serif;font-size:20px;fill:#172b3a}.small{font-size:17px}.force{stroke:#b73c23;stroke-width:3;fill:none}.cut{stroke:#245b85;stroke-width:2;stroke-dasharray:7 5;fill:none}.axis{stroke:#45596b;stroke-width:2;fill:none}</style>
+<defs><marker id="force" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="#b73c23"/></marker><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="#45596b"/></marker></defs>
+<rect width="1040" height="470" fill="white"/>
+<text x="25" y="30">一方の加力方向の理想化（水平力成分のみ）</text>
+<text x="25" y="66">両側梁・上下柱の接合部</text>
+<path d="M200 90 H360 V150 H490 V340 H360 V400 H200 V340 H60 V150 H200 Z" fill="#edf1f4" stroke="#617684" stroke-width="2"/>
+<rect x="200" y="150" width="160" height="190" fill="#d7eaf6" stroke="#245b85" stroke-width="2"/>
+<path d="M200 180 H85 M475 180 H360 M85 310 H200 M360 310 H475 M230 100 H330 M330 390 H230" class="force" marker-end="url(#force)"/>
+<text x="95" y="163">T（引張）</text><text x="362" y="163">C′=T′</text>
+<text x="86" y="337">C=T</text><text x="370" y="337">T′（引張）</text>
+<text x="257" y="88">Qcu</text><text x="257" y="425">Qcu</text>
+<path d="M35 245 H510" class="cut"/><text x="65" y="270" class="small">水平切断</text>
+<text x="555" y="66">上半分の自由体</text>
+<path d="M720 90 H880 V150 H1005 V245 H585 V150 H720 Z" fill="#edf1f4" stroke="#617684" stroke-width="2"/>
+<path d="M720 150 H880 V245 H720 Z" fill="#d7eaf6" stroke="#245b85" stroke-width="2"/>
+<path d="M720 180 H600 M995 180 H880 M750 100 H850" class="force" marker-end="url(#force)"/>
+<text x="635" y="163">T</text><text x="900" y="163">C′=T′</text><text x="777" y="88">Qcu</text>
+<path d="M565 245 H1020" class="cut"/>
+<path d="M750 245 H850" class="force" marker-end="url(#force)"/>
+<text x="780" y="277">Qj</text>
+<text x="595" y="310" class="small">切断面から上半分が受ける力：右向きを正</text>
+<path d="M735 345 H865" class="axis" marker-end="url(#arrow)"/><text x="885" y="352">正方向</text>
+<text x="615" y="395">Qj + Qcu − T − C′ = 0</text>
+<text x="25" y="456" class="small">C=T、C′=T′：梁軸力を無視。上下柱のせん断力の大きさを等しいQcuとして図示。</text>
+</svg>
