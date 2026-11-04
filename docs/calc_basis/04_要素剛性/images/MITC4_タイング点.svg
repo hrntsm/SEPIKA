@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 390" role="img" aria-labelledby="title desc">
+<title id="title">MITC4 の自然座標とタイング点</title>
+<desc id="desc">節点1は左下、2は右下、3は右上、4は左上。辺中央のAとCでξ方向の横せん断共変成分、BとDでη方向の成分を採る。</desc>
+<rect width="640" height="390" fill="white"/>
+<g stroke="#243746" stroke-width="2" fill="none">
+<path d="M150 90H490V300H150Z"/>
+<path d="M110 195H550M320 335V40" stroke="#8b969e"/>
+<path d="m540 190 10 5-10 5M315 50l5-10 5 10" stroke="#8b969e"/>
+</g>
+<g fill="#243746"><circle cx="150" cy="300" r="5"/><circle cx="490" cy="300" r="5"/><circle cx="490" cy="90" r="5"/><circle cx="150" cy="90" r="5"/></g>
+<g fill="#b33b20"><circle cx="320" cy="90" r="6"/><circle cx="150" cy="195" r="6"/><circle cx="320" cy="300" r="6"/><circle cx="490" cy="195" r="6"/></g>
+<g font-family="sans-serif" font-size="18" fill="#243746">
+<text x="80" y="326">1 (−1,−1)</text><text x="470" y="326">2 (+1,−1)</text>
+<text x="470" y="78">3 (+1,+1)</text><text x="80" y="78">4 (−1,+1)</text>
+<text x="560" y="201">ξ</text><text x="330" y="40">η</text><text x="330" y="217">(0,0)</text>
+</g>
+<g font-family="sans-serif" font-size="18" fill="#b33b20">
+<text x="338" y="116">A (0,+1)：ξ 成分</text>
+<text x="10" y="177">B (−1,0)</text><text x="30" y="219">η 成分</text>
+<text x="338" y="282">C (0,−1)：ξ 成分</text>
+<text x="505" y="177">D (+1,0)</text><text x="520" y="219">η 成分</text>
+</g>
+<text x="320" y="372" text-anchor="middle" font-family="sans-serif" font-size="17" fill="#243746">自然座標上の配置（タイング点は Gauss 積分点とは異なる）</text>
+</svg>
