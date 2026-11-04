@@ -116,8 +116,8 @@ pub fn approx_t(height_m: f64, steel_ratio: f64) -> f64 {
 
 /// [`seismic_shear_distribution`] への入力層データ。
 pub struct StorySeismicSpec {
-    /// 当該層のうち主系統（Ai 分布に従う剛床）が負担する地震用重量 Wi `[N]`。
-    /// 層せん断力 Qi = Ci・ΣWj の重量にはこちらを用いる。
+    /// 当該層のうち主系統（Ai 分布に従う剛床）が負担する地震用重量 wi `[N]`。
+    /// 層せん断力 Qi の算定には、当該層以上のこの重量を累積して用いる。
     pub weight: f64,
     /// α・Ai・Ci の算定に用いる階全体の地震用重量 `[N]`。
     /// 「主剛床は全剛床の場合の Ci に従って層せん断力を計算する」規定に対応し、
