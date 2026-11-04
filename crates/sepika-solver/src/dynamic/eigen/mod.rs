@@ -523,10 +523,10 @@ fn gevd_jacobi(k_in: &[f64], m_in: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
 }
 
 /// [`compute_participation`] の戻り値
-/// （刺激係数・有効質量比・節点単位のモード形状のタプル）。
+/// （刺激係数・有効質量・節点単位のモード形状のタプル）。
 type ParticipationResult = (Vec<[f64; 3]>, Vec<[f64; 3]>, Vec<Vec<[f64; 6]>>);
 
-/// モード刺激係数・有効質量比を計算し、あわせて節点単位のモード形状も返す。
+/// モード刺激係数・有効質量を計算し、あわせて節点単位のモード形状も返す。
 fn compute_participation(
     shapes: &[Vec<f64>],
     m_free: &faer::sparse::SparseColMat<usize, f64>,
