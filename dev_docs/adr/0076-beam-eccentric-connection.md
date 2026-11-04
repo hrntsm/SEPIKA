@@ -1,6 +1,8 @@
 # 梁の実材軸への偏心接続を既存要素の外側で合成する
 
-Status: accepted
+Status: partially superseded by ADR-0104
+
+幾何剛性の転送・利用可能性に関する部分は[ADR 0104](0104-remove-axial-geometric-stiffness.md)で撤回しました。以下は判断時点の記録であり、その他の判断は維持します。
 
 ## Context
 
