@@ -1013,7 +1013,7 @@ fn make_mass_chain_model(n_masses: usize) -> Model {
     }
 }
 
-/// `subspace_size` が Bathe 2013 式(19) の q = min(n, max(2p, p+8)) を
+/// `subspace_size` が q = min(n, max(2p, p+8)) を
 /// （p = min(p_req, n)）満たすこと。
 #[test]
 fn test_subspace_size_table() {

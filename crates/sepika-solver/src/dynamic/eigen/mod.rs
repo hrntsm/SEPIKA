@@ -289,7 +289,7 @@ node.mass や材料の密度(ρ)で並進質量を追加するか、要求モー
 
 /// 部分空間サイズ q = min(n, max(2p, p+8))。
 ///
-/// p は要求モード数を縮約後自由度数 n で切り詰めた値（Bathe 2013 式(19)）。
+/// p は要求モード数を縮約後自由度数 n で切り詰めた値。要求数0では q = 0。
 fn subspace_size(n: usize, requested_modes: usize) -> usize {
     let p = requested_modes.min(n);
     if p == 0 {
