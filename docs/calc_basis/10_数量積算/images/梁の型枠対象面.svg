@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1020" height="720" viewBox="0 0 1020 720" role="img" aria-labelledby="title desc">
+  <title id="title">梁の型枠対象面と控除面</title>
+  <desc id="desc">Aは側面の基準長方形とせいハンチの三角形、Bは底面投影の基準長方形と幅ハンチの三角形。Cはハンチなしの左右側面から床接触を控除する断面。Dは基礎梁で側面1面と底面を数える仮定で、施工上の不要面は特定しない。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto-start-reverse"><path d="M0,0 L7,3.5 L0,7" fill="none" stroke="#334155"/></marker>
+  </defs>
+  <rect width="1020" height="720" fill="#fff"/>
+  <g font-family="sans-serif" font-size="16" fill="#172b4d" stroke-linejoin="round">
+    <g stroke="#cbd5e1" fill="none"><rect x="10" y="10" width="495" height="330" rx="8"/><rect x="515" y="10" width="495" height="330" rx="8"/><rect x="10" y="350" width="495" height="360" rx="8"/><rect x="515" y="350" width="495" height="360" rx="8"/></g>
+    <text x="30" y="42" font-size="19" font-weight="bold">A　側面への投影（片側を表示）</text>
+    <rect x="100" y="105" width="340" height="100" fill="#d9eaff" stroke="#2563a6" stroke-width="2"/>
+    <path d="M100,205 L100,260 L210,205 Z" fill="#ffe0ac" stroke="#a75b00" stroke-width="2"/>
+    <text x="245" y="163">基準側面 DL</text>
+    <text x="128" y="286">せい増分 ΔDi＝Di−D</text>
+    <g stroke="#334155" fill="none" marker-start="url(#arrow)" marker-end="url(#arrow)"><path d="M100,81 H440"/><path d="M72,105 V205"/><path d="M40,105 V260"/><path d="M100,238 H210"/></g>
+    <text x="263" y="72">L</text><text x="78" y="158">D</text><text x="20" y="185">Di</text><text x="146" y="231">Li</text>
+    <text x="30" y="316">大梁：左右2面／基礎梁：1面分を計上</text>
+    <text x="535" y="42" font-size="19" font-weight="bold">B　底面への投影（下面から見る）</text>
+    <rect x="620" y="130" width="340" height="70" fill="#d9eaff" stroke="#2563a6" stroke-width="2"/>
+    <path d="M620,130 L620,100 L730,130 Z M620,200 L620,230 L730,200 Z" fill="#ffe0ac" stroke="#a75b00" stroke-width="2"/>
+    <text x="790" y="171">基準底面 BL</text>
+    <g stroke="#334155" fill="none" marker-start="url(#arrow)" marker-end="url(#arrow)"><path d="M620,77 H960"/><path d="M592,130 V200"/><path d="M555,100 V230"/><path d="M620,253 H730"/></g>
+    <text x="785" y="68">L</text><text x="598" y="171">B</text><text x="533" y="171">Bi</text><text x="666" y="247">Li</text>
+    <text x="580" y="283">全幅増分 ΔBi＝Bi−B（上下の合計）</text>
+    <text x="535" y="311">橙の合計：ΔBi Li / 2（大梁の底面加算）</text>
+    <text x="30" y="383" font-size="19" font-weight="bold">C　床接触の控除（ハンチなし断面）</text>
+    <rect x="65" y="445" width="125" height="42" fill="#eee" stroke="#64748b"/>
+    <rect x="310" y="445" width="125" height="28" fill="#eee" stroke="#64748b"/>
+    <rect x="190" y="445" width="120" height="150" fill="#f8fafc"/>
+    <path d="M190,445 V595 H310 V445" fill="none" stroke="#2563a6" stroke-width="6"/>
+    <path d="M190,445 V487 M310,445 V473" fill="none" stroke="#be123c" stroke-width="8"/>
+    <path d="M190,445 H310" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5"/>
+    <text x="85" y="433">左床</text><text x="348" y="433">右床</text><text x="230" y="527">梁</text>
+    <text x="50" y="521" fill="#be123c">左接触</text><path d="M120,516 L181,473" stroke="#be123c" fill="none"/>
+    <text x="345" y="510" fill="#be123c">右接触</text><path d="M340,501 L318,463" stroke="#be123c" fill="none"/>
+    <text x="30" y="630">赤：左右側面の接触高さ×取付き区間を控除</text>
+    <text x="30" y="658">青：残る側面・底面　破線：上面は対象外</text>
+    <text x="30" y="687">同側で重なる接触は和集合で1回だけ控除</text>
+    <text x="535" y="383" font-size="19" font-weight="bold">D　基礎梁の片面算定（面数の模式図）</text>
+    <rect x="710" y="445" width="120" height="150" fill="#f8fafc"/>
+    <path d="M710,445 V595 H830" fill="none" stroke="#2563a6" stroke-width="6"/>
+    <path d="M710,445 H830 V595" fill="none" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5"/>
+    <text x="750" y="527">梁</text>
+    <text x="545" y="498">側面1面 DL</text><path d="M645,502 H702" stroke="#334155"/>
+    <text x="840" y="498">他面は</text><text x="840" y="523">計上せず</text>
+    <text x="712" y="622">底面 BL</text>
+    <text x="535" y="651">計上側を便宜上左に表示。左右の指定はない。</text>
+    <text x="535" y="678">型枠不要な施工面を判定した図ではない。</text>
+    <text x="535" y="701" font-size="14">幅ハンチ項は図Bの橙の2倍（面の対応未確認）</text>
+  </g>
+</svg>
