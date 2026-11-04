@@ -41,9 +41,9 @@ pub struct RcJointUltimateInput {
     pub fc: f64,
     /// 接合部有効幅 bj `[mm]`（= bb + ba1 + ba2）。
     pub bj: f64,
-    /// 下側柱せい Dj `[mm]`。
+    /// 検討方向の柱せい Dj `[mm]`。
     pub dj: f64,
-    /// 上端鉄筋引張力 T `[N]`（スラブ筋を含む）。
+    /// 上端鉄筋引張力 T `[N]`。協力スラブ筋を算入する場合は入力値に含める。
     pub t_top: f64,
     /// 下端鉄筋引張力 T′ `[N]`。
     pub t_bottom: f64,
@@ -74,7 +74,7 @@ pub struct RcJointUltimateResult {
 /// ```text
 /// Vju = κ·φ·Fj·bj·Dj
 /// Fj  = 0.8·Fc^0.7
-/// Qdu = α·(T + T′ − Qcu)
+/// Qdu = max{α·(T + T′ − Qcu), 0}
 /// 余裕率 = Vju/Qdu
 /// ```
 /// `Qdu ≤ 0`（設計用せん断力が非正）のときは余裕率を `f64::INFINITY` とする。

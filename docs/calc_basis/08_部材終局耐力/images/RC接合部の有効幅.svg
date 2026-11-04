@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" role="img" aria-labelledby="title desc">
+<title id="title">RC接合部の有効幅を定める平面寸法</title>
+<desc id="desc">矩形柱に梁が中央で接続する平面図。柱幅Bcは左突出幅b1、梁幅bb、右突出幅b2の和。有効幅bjはba1、bb、ba2の和で、各baiはbiの半分とDjの4分の1の小さい方。Djは梁の検討方向の柱せい。</desc>
+<style>text{font-family:sans-serif;font-size:20px;fill:#172b3a}.small{font-size:17px}.dim{stroke:#45596b;stroke-width:1.5;fill:none}.dash{stroke:#617684;stroke-width:1.5;stroke-dasharray:6 5;fill:none}</style>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="#45596b"/></marker></defs>
+<rect width="900" height="470" fill="white"/>
+<text x="25" y="30">矩形柱と梁の平面図（中央接続の例、寸法は模式的）</text>
+<rect x="340" y="80" width="160" height="340" fill="#edf1f4" stroke="#617684" stroke-width="2"/>
+<rect x="220" y="150" width="400" height="200" fill="#f5f5f5" stroke="#172b3a" stroke-width="2"/>
+<rect x="280" y="150" width="280" height="200" fill="#d7eaf6" stroke="#245b85" stroke-width="2"/>
+<path d="M340 150 V350 M500 150 V350" class="dash"/>
+<text x="395" y="245">梁幅</text><text x="395" y="274">bb</text>
+<text x="230" y="322" class="small">柱</text><text x="345" y="405" class="small">梁（材軸は上下方向）</text>
+<path d="M220 60 H620 M220 50 V70 M620 50 V70" class="dim"/>
+<text x="405" y="52">Bc</text>
+<path d="M220 115 H620 M220 105 V125 M340 105 V125 M500 105 V125 M620 105 V125" class="dim"/>
+<text x="265" y="106">b1</text><text x="405" y="106">bb</text><text x="545" y="106">b2</text>
+<path d="M280 180 H560 M280 170 V190 M340 170 V190 M500 170 V190 M560 170 V190" class="dim"/>
+<text x="288" y="207" class="small">ba1</text><text x="508" y="207" class="small">ba2</text>
+<path d="M280 375 H560 M280 365 V385 M560 365 V385" class="dim"/>
+<text x="405" y="368">bj</text>
+<path d="M660 150 V350 M650 150 H670 M650 350 H670" class="dim"/>
+<text x="673" y="257">Dj</text>
+<path d="M790 335 V160" class="dim" marker-end="url(#arrow)"/>
+<text x="727" y="365" class="small">梁の検討方向</text>
+<text x="25" y="453" class="small">青色：耐力に算入する有効面積 bj × Dj。突出幅biの全幅を算入しない。</text>
+</svg>
