@@ -88,7 +88,7 @@ pub struct FiberSectionState {
     pub fibers: Vec<FiberStateSample>,
 }
 
-/// ファイバー 1 本の状態（断面内位置・ひずみ・降伏比。[`FiberSectionState`] の要素）。
+/// ファイバー 1 本の状態（断面内位置・ひずみ・基準ひずみ比。[`FiberSectionState`] の要素）。
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FiberStateSample {
     /// 断面内位置（要素局所 y）`[mm]`。
@@ -99,7 +99,8 @@ pub struct FiberStateSample {
     pub area: f64,
     /// 軸ひずみ（引張正）。
     pub strain: f64,
-    /// 降伏比 |ε|/εref（≧1 で降伏。基準ひずみを持たない材料は 0）。
+    /// 無次元の |ε|/εref。鋼材・鉄筋は降伏ひずみ、コンクリートは圧縮ピークひずみを基準とする。
+    /// 基準ひずみを持たない材料は 0。
     pub yield_ratio: f64,
     /// 材料区分（0=コンクリート、1=主筋、2=鋼材）。
     pub material: usize,
@@ -114,7 +115,7 @@ pub struct DuctilityProbe {
     pub max_tension_strain: f64,
     /// 断面内の最大圧縮ひずみの大きさ（正で返す）。
     pub max_compression_strain: f64,
-    /// 各ファイバの塑性率 μi=|ε|/εref の最大値。
+    /// 各ファイバーの基準ひずみ比 μi=|ε|/εref の最大値（無次元）。
     pub max_yield_ratio: f64,
     /// 重み付け平均塑性率 Jm。
     pub jm: f64,
