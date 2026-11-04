@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 480" role="img" aria-labelledby="title desc">
+<style>text{font-family:sans-serif;font-size:19px;fill:#172b3a}.small{font-size:16px}.axis{stroke:#245b85;stroke-width:2;fill:none}.force{stroke:#b73c23;stroke-width:3;fill:none}.dim{stroke:#45596b;stroke-width:1.5;fill:none}.dash{stroke:#617684;stroke-width:1.5;stroke-dasharray:6 5;fill:none}</style>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="#45596b"/></marker><marker id="force" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="#b73c23"/></marker></defs>
+<rect width="900" height="480" fill="white"/>
+<title id="title">壁脚の下側自由体と実フェイスへの移送</title><desc id="desc">下側自由体の上切断面に圧縮軸力は下向き、正のせん断力は左向き、正の曲げモーメントは紙面奥に作用する。梁心から上方のフェイスへ中央壁柱のモーメントをQy掛ける距離だけ加算する。</desc>
+<text x="25" y="30">壁脚切断面より下側の自由体（各作用矢印は正値の場合）</text>
+<path d="M145 145 V310 H705 V145" fill="#edf1f4" stroke="#617684" stroke-width="2"/>
+<path d="M115 145 H735" stroke="#172b3a" stroke-width="3"/>
+<text x="30" y="129" class="small">共通フェイス</text>
+<path d="M115 265 H735" class="dash"/><text x="30" y="258" class="small">下梁心</text>
+<path d="M165 65 V145 M425 65 V145 M685 65 V145" class="force" marker-end="url(#force)"/>
+<text x="118" y="57">Nc,L</text><text x="372" y="57">Nc,wall</text><text x="642" y="57">Nc,R</text>
+<path d="M414 172 H305" class="force" marker-end="url(#force)"/><text x="288" y="202">Qy 正</text>
+<circle cx="455" cy="174" r="14" fill="white" stroke="#b73c23" stroke-width="2"/><path d="M446 165 L464 183 M464 165 L446 183" class="force"/>
+<text x="480" y="184" class="small">Mz,wall,face 正（+z：紙面奥）</text>
+<circle cx="425" cy="145" r="4" fill="#172b3a"/><text x="437" y="137">O</text>
+<path d="M165 228 H425 H685 M165 220 V236 M425 220 V236 M685 220 V236" class="dim"/>
+<text x="238" y="221" class="small">rL &lt; 0</text><text x="519" y="221" class="small">rR &gt; 0</text>
+<path d="M763 265 V145" class="axis" marker-end="url(#arrow)"/><text x="774" y="213">ℓ</text>
+<text x="287" y="292" class="small">下梁心の Mz,wall,center</text>
+<text x="25" y="349" class="small">中央壁柱：Mface = Mcenter + Qy ℓ</text>
+<text x="25" y="380" class="small">壁全体：Mz,O,face = Mz,wall,face + rL Nc,L + rR Nc,R</text>
+<text x="25" y="411" class="small">側柱の面内Q・Mは解放により零。側柱軸力はフェイスの値を使い、再移送しない。</text>
+<path d="M766 432 V346 M766 432 H858" class="axis" marker-end="url(#arrow)"/>
+<path d="M766 432 V346" class="axis" marker-end="url(#arrow)"/>
+<text x="748" y="335">+x</text><text x="835" y="458">+y</text>
+<text x="25" y="452" class="small">座標+yは右向き。上切断面で正のQyが作用する向きは左向き。</text>
+</svg>
