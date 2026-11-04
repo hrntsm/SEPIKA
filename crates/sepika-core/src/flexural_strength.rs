@@ -35,7 +35,7 @@ pub fn section_elastic_modulus(sec: &Section) -> f64 {
 
 /// 部材の曲げ降伏（終局）モーメント My [N·mm]。
 ///
-/// - RC 配筋形状: `0.9·at·σy·j`（[`rc_mu_simple`]）
+/// - RC 配筋形状: `0.9·at·σy·d`（[`rc_mu_simple`]）
 /// - 塑性断面係数を持つ形状: `Zp·σy`（全塑性 Mp）
 /// - それ以外: `σy·Ze`（弾性断面係数フォールバック）
 pub fn member_flexural_yield_moment(

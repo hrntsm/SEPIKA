@@ -18,8 +18,8 @@ use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 /// 部材塑性率の終局ヒンジ判定値（既定値 4.0）。この値以上のヒンジを Ultimate と分類する。
 const ULTIMATE_DUCTILITY: f64 = 4.0;
 
-/// ヒンジ判定のモーメント閾値（実スケルトンの折れ点）。
-/// RC はひび割れ Mc=κ·Fc·Ze・降伏 My、鉄骨は全塑性 Mp（Mc=My）。
+/// ヒンジ表示判定のモーメント閾値 [N·mm]。
+/// RC はひび割れ Mc=κ·√Fc·Ze・降伏 My、鉄骨は全塑性 Mp（Mc=My）。
 pub(crate) struct HingeThreshold {
     /// 曲げひび割れモーメント Mc [N·mm]（RC のみ有意。鉄骨は My と同値）。
     pub(crate) mc: f64,
