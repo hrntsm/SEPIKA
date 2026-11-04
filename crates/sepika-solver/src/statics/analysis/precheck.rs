@@ -491,7 +491,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             zero_shear,
             "断面の有効せん断断面積 As が 0 です",
             "断面タブで As（Asy・Asz）を設定してください。\
-             As=0 はせん断変形が生じず、せん断降伏も判定されない部材となります。",
+             As は正の値が必要です。As=0 はせん断剛直の指定値には使えません。",
         ));
     }
 

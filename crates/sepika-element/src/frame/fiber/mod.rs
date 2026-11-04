@@ -664,7 +664,7 @@ pub struct FiberBeam {
     pub torsion_j: f64,
     /// せん断弾性係数 G [N/mm²]。
     pub g: f64,
-    /// せん断変形係数 φy。GAs ≤ 0 なら 0。
+    /// せん断変形係数 φy（無次元）。
     pub phi_y: f64,
     /// せん断変形係数 φz。
     pub phi_z: f64,
