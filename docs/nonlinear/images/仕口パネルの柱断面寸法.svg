@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 1190" role="img" aria-labelledby="title desc">
+<title id="title">仕口パネルの柱断面寸法と方向別抵抗板</title>
+<desc id="desc">H強軸はウェブ1枚、dcはフランジ中心間、bcはフランジ全幅、tfはフランジ実厚。H弱軸はフランジ2枚、dcはフランジ全幅。角形鋼管は当該方向に沿う壁2枚、dcは対向壁中心間、bcは直交方向の外幅。円形鋼管はdcが外径から実壁厚を引いた距離。tpは有効厚で図の実厚とは別に指定できる。</desc>
+<style>text{font-family:sans-serif;font-size:20px;fill:#172b3a}.small{font-size:17px}.dim{stroke:#45596b;stroke-width:1.5;fill:none}.dash{stroke:#617684;stroke-width:1.5;stroke-dasharray:6 5;fill:none}.steel{fill:#edf1f4;stroke:#172b3a;stroke-width:2}.plate{fill:#d7eaf6;stroke:#245b85;stroke-width:2}</style>
+<rect width="620" height="1190" fill="white"/>
+<text x="20" y="30">柱断面と抵抗板（青色、寸法は模式的）</text>
+<text x="20" y="65">H 形鋼・強軸</text>
+<path d="M170 110 H370 V130 H280 V280 H370 V300 H170 V280 H260 V130 H170 Z" class="steel"/>
+<rect x="260" y="130" width="20" height="150" class="plate"/>
+<path d="M170 90 H370 M170 82 V98 M370 82 V98 M400 120 V290 M390 120 H410 M390 290 H410 M160 120 H380 M160 290 H380" class="dash"/>
+<text x="260" y="83">bc</text><text x="413" y="212">dc</text>
+<path d="M370 110 H490 M370 130 H490 M480 110 V130" class="dim"/>
+<text x="495" y="127">tf</text>
+<path d="M270 205 H470" class="dim"/><text x="480" y="212">tw</text>
+<text x="20" y="330" class="small">tp 未指定時：tp = tw（ウェブ実厚）</text>
+<text x="20" y="375">H 形鋼・弱軸</text>
+<path d="M170 420 H370 V440 H280 V570 H370 V590 H170 V570 H260 V440 H170 Z" class="steel"/>
+<rect x="170" y="420" width="200" height="20" class="plate"/>
+<rect x="170" y="570" width="200" height="20" class="plate"/>
+<path d="M170 400 H370 M170 392 V408 M370 392 V408" class="dim"/>
+<text x="260" y="393">dc</text>
+<path d="M370 420 H470 M370 440 H470 M460 420 V440" class="dim"/>
+<text x="480" y="438">tf</text>
+<text x="20" y="620" class="small">tp 未指定時：tp = tf（各フランジ1枚の実厚）</text>
+<text x="20" y="665">角形鋼管・当該方向</text>
+<path d="M170 710 H370 V910 H170 Z M190 730 V890 H350 V730 Z" fill-rule="evenodd" class="steel"/>
+<rect x="170" y="730" width="20" height="160" class="plate"/>
+<rect x="350" y="730" width="20" height="160" class="plate"/>
+<path d="M170 690 H370 M170 682 V698 M370 682 V698" class="dim"/>
+<text x="260" y="683">bc（外幅）</text>
+<path d="M160 720 H380 M160 900 H380 M400 720 V900 M390 720 H410 M390 900 H410" class="dash"/>
+<text x="412" y="815">dc</text>
+<path d="M180 810 H475" class="dim"/><text x="485" y="817">t</text>
+<path d="M80 860 V755 L74 767 M80 755 L86 767" class="dim"/>
+<text x="25" y="742" class="small">当該方向</text>
+<text x="20" y="940" class="small">tp 未指定時：tp = t（各抵抗壁1枚の実厚）</text>
+<text x="20" y="985">円形鋼管・両軸共通</text>
+<circle cx="270" cy="1075" r="65" class="plate"/>
+<circle cx="270" cy="1075" r="47" fill="white" stroke="#245b85" stroke-width="2"/>
+<circle cx="270" cy="1075" r="56" class="dash"/>
+<path d="M214 1075 H326 M214 1067 V1083 M326 1067 V1083" class="dim"/>
+<text x="257" y="1066">dc</text>
+<path d="M318 1038 L405 1025" class="dim"/><text x="416" y="1031">t</text>
+<text x="20" y="1175" class="small">tp 未指定時：tp = t（管壁1枚の実厚）</text>
+</svg>
