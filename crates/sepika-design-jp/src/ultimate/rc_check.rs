@@ -28,13 +28,13 @@ pub struct UltimateCheck {
     pub kind: MemberKind,
     /// 曲げ終局強度 Mu [N·mm]。
     pub mu: f64,
-    /// 両端ヒンジ時せん断力 Qmu = 上限強度倍率·2·Mu/内法 `[N]`。
+    /// 比較用せん断需要 Qmu `[N]`。静的は上限強度倍率·2·Mu/内法、確定総応答は総せん断力の絶対値。
     pub qmu: f64,
     /// 塑性理論式による終局せん断強度 Qsu `[N]`。
     pub qsu: f64,
     /// 付着割裂による終局せん断耐力 Qbu `[N]`（`include_bond=false` なら 0）。
     pub qbu: f64,
-    /// せん断余裕度 Qsu/Qmu（強軸）。
+    /// 強軸のせん断余裕度。静的は max(Qsu−QL, 0)/Qmu、確定総応答は Qsu/Qmu。
     pub shear_margin: f64,
     /// 2 軸せん断余裕度（柱かつ `biaxial_shear=true` のとき Some）。
     /// `1/((Qmx/Qsux)^2+(Qmy/Qsuy)^2)^(1/2)`。
@@ -42,7 +42,8 @@ pub struct UltimateCheck {
     /// 2 軸曲げ余裕度（柱かつ `biaxial_bending=true` のとき Some）。
     /// `1/((Mmx/Mux)^2+(Mmy/Muy)^2)^(1/2)`。設計用曲げ需要が 0 なら `f64::INFINITY`。
     pub biaxial_bending_margin: Option<f64>,
-    /// 付着余裕度 Qbu/Qmu（`include_bond=false` なら `f64::INFINITY`）。
+    /// 付着余裕度。静的は max(Qbu−QL, 0)/Qmu、確定総応答は Qbu/Qmu。
+    /// `include_bond=false` なら `f64::INFINITY`。
     pub bond_margin: f64,
     /// 軸終局耐力（柱のみ Some）。
     pub axial: Option<RcAxialUltimate>,
