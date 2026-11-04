@@ -18,7 +18,6 @@ fn time_history_job_preserves_actual_wall_connection_reason_before_damping_eigen
             &model,
             Some(AnalysisKind::TimeHistory),
             "非線形時刻歴解析",
-            false,
             Some(MassOption::Consistent),
         )
         .unwrap_err();
@@ -63,7 +62,6 @@ fn linear_time_history_job_preserves_consistent_mass_reason_before_damping_eigen
             &model,
             None,
             "線形時刻歴解析",
-            false,
             Some(MassOption::Consistent),
         )
         .unwrap_err();

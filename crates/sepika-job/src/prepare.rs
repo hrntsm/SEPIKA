@@ -487,7 +487,6 @@ mod tests {
             Default::default(),
             Default::default(),
             false,
-            false,
             Default::default(),
         )
         .unwrap_err();

@@ -1,4 +1,4 @@
-//! [`ElementBehavior`] トレイト実装（自由度写像・接線/幾何剛性・内力・質量行列）。
+//! [`ElementBehavior`] トレイト実装（自由度写像・接線剛性・内力・質量行列）。
 
 use super::element::BeamElement;
 use crate::behavior::{Ctx, ElementBehavior, LocalMat, MassOption};
@@ -16,13 +16,6 @@ impl ElementBehavior for BeamElement {
 
     fn tangent_stiffness(&self, _ctx: &Ctx) -> LocalMat {
         self.axis.to_global(&self.local_stiffness())
-    }
-
-    fn geometric_stiffness(&self, n: f64) -> LocalMat {
-        let (li, lj) = self.rigid_lengths();
-        let kg_node =
-            crate::frame::prismatic::geometric_stiffness(n, self.length - li - lj, li, lj);
-        self.axis.to_global(&kg_node)
     }
 
     fn owns_frame_member_loads(&self) -> bool {

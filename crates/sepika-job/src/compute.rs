@@ -175,7 +175,6 @@ pub fn compute_pushover(
         target,
         cfg.push_control,
         cfg.push_apply_long_term,
-        false,
         cfg.ductility_method,
     )
     .map_err(|e| JobError::Convergence(e.to_string()))?;
@@ -221,7 +220,6 @@ pub fn compute_time_history(
         } else {
             "線形時刻歴解析"
         },
-        false,
         Some(sepika_element::behavior::MassOption::Consistent),
     )
     .map_err(JobError::InvalidInput)?;
@@ -311,7 +309,7 @@ pub(crate) fn time_history_damping(
 }
 
 /// 非線形時刻歴応答解析（[`compute_time_history`] の非線形分岐）。
-/// `use_kg`（幾何剛性）は `false`、`DampingAccumulation` は既定を用いる。
+/// `DampingAccumulation` は既定を用いる。
 fn compute_nonlinear_time_history(
     model: sepika_core::model::Model,
     cfg: AnalysisSettings,
@@ -334,7 +332,7 @@ fn compute_nonlinear_time_history(
     let record_every = (cfg.th_record_every > 0).then_some(cfg.th_record_every);
     let nl_cfg = sepika_solver::dynamic::timehistory::NonlinearThCfg {
         newton: sepika_solver::common::newton::NewtonCriteria::new(cfg.th_max_iter, cfg.th_tol),
-        use_kg: false,
+
         apply_long_term: cfg.th_apply_long_term,
         record_every,
     };

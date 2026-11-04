@@ -9,13 +9,12 @@ use sepika_core::section_shape::SectionShape;
 /// エラーメッセージへ列挙する不備の最大件数（超過分は件数のみを示す）。
 const MAX_LISTED: usize = 5;
 
-/// 実解析名・幾何剛性・要素質量形式に対する壁側柱接続の適用条件を検証する。
+/// 実解析名・要素質量形式に対する壁側柱接続の適用条件を検証する。
 /// `kind=None` は線形構造、`mass=None` は要素質量を使わない解析を表す。
 pub fn ensure_wall_side_column_analysis(
     model: &Model,
     kind: Option<sepika_core::model::AnalysisKind>,
     analysis: &str,
-    use_kg: bool,
     mass: Option<crate::behavior::MassOption>,
 ) -> Result<(), String> {
     let index = sepika_core::model::WallSideColumnIndex::build(model);
@@ -55,11 +54,7 @@ pub fn ensure_wall_side_column_analysis(
                 data.id.0
             )
         };
-        if use_kg {
-            return Err(failure(
-                "壁法線まわりの解放と幾何剛性（P-Δ）の連成は未定式化です。",
-            ));
-        }
+
         if matches!(mass, Some(crate::behavior::MassOption::Consistent))
             && model.mass_method != sepika_core::model::MassMethod::LumpedOnly
             && !model.uses_damper_total_weight(data)

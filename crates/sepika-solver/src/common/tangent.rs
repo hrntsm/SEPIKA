@@ -1,6 +1,6 @@
 //! 非線形反復の接線剛性行列と内力ベクトルの組み立て。
 //!
-//! - [`assemble_k`] — 全体接線剛性行列（幾何剛性対応）
+//! - [`assemble_k`] — 全体接線剛性行列
 //! - [`compute_f_int`] — 全自由節点の内力ベクトル
 //! - [`add_support_spring_f_int`] — 支点ばね（`Node::support_spring`）の内力寄与
 //!
@@ -19,10 +19,9 @@ pub(crate) fn assemble_k(
     model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
-    use_kg: bool,
 ) -> faer::sparse::SparseColMat<usize, f64> {
     use sepika_math::sparse::assemble_csc;
-    let triplets = assemble_k_triplets(model, dofmap, behaviors, use_kg);
+    let triplets = assemble_k_triplets(model, dofmap, behaviors);
     assemble_csc(dofmap.n_active(), triplets)
 }
 
@@ -31,10 +30,9 @@ pub(crate) fn assemble_k_cached(
     model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
-    use_kg: bool,
     cache: &mut CscCache,
 ) -> faer::sparse::SparseColMat<usize, f64> {
-    let triplets = assemble_k_triplets(model, dofmap, behaviors, use_kg);
+    let triplets = assemble_k_triplets(model, dofmap, behaviors);
     cache.assemble(dofmap.n_active(), &triplets)
 }
 
@@ -48,11 +46,10 @@ pub(crate) fn assemble_k_cached_ref<'a>(
     model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
-    use_kg: bool,
     cache: &'a mut CscCache,
     buf: &mut Vec<sepika_math::sparse::Triplet>,
 ) -> &'a faer::sparse::SparseColMat<usize, f64> {
-    assemble_k_triplets_into(model, dofmap, behaviors, use_kg, buf);
+    assemble_k_triplets_into(model, dofmap, behaviors, buf);
     cache.assemble_ref(dofmap.n_active(), buf)
 }
 
@@ -61,10 +58,9 @@ fn assemble_k_triplets(
     model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
-    use_kg: bool,
 ) -> Vec<sepika_math::sparse::Triplet> {
     let mut triplets = Vec::new();
-    assemble_k_triplets_into(model, dofmap, behaviors, use_kg, &mut triplets);
+    assemble_k_triplets_into(model, dofmap, behaviors, &mut triplets);
     triplets
 }
 
@@ -76,33 +72,19 @@ fn assemble_k_triplets_into(
     model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
-    use_kg: bool,
     out: &mut Vec<sepika_math::sparse::Triplet>,
 ) {
     out.clear();
     let ctx = Ctx { model };
-    let elem_triplets = |elem: &sepika_core::model::ElementData,
-                         b: &dyn ElementBehavior|
-     -> Vec<sepika_math::sparse::Triplet> {
+    let elem_triplets = |b: &dyn ElementBehavior| -> Vec<sepika_math::sparse::Triplet> {
         let gdofs = b.global_dofs(dofmap);
-        let mut k = b.tangent_stiffness(&ctx);
-        if use_kg {
-            let f = b.internal_force(&ctx);
-            let n = axial_force_tension_positive(model, elem, &f);
-            let kg = b.geometric_stiffness(n);
-            for i in 0..12 {
-                for j in 0..12 {
-                    let sum = k.get(i, j) + kg.get(i, j);
-                    k.set(i, j, sum);
-                }
-            }
-        }
+        let k = b.tangent_stiffness(&ctx);
         k.to_triplets(&gdofs)
     };
     crate::common::elem_loop::fold_behaviors_ordered(
         behaviors,
         |i, b| match model.elements.get(i) {
-            Some(elem) => elem_triplets(elem, b),
+            Some(_) => elem_triplets(b),
             None => Vec::new(),
         },
         |triplets| out.extend(triplets),
@@ -114,35 +96,6 @@ fn assemble_k_triplets_into(
             val: k,
         });
     }
-}
-
-/// 材端力（グローバル成分）から部材軸力 N [N]（**引張正**）を求める。
-/// 2 節点未満・退化長さの要素は 0（幾何剛性は既定でゼロ行列）。
-fn axial_force_tension_positive(
-    model: &Model,
-    elem: &sepika_core::model::ElementData,
-    f: &sepika_element::behavior::LocalVec,
-) -> f64 {
-    if elem.nodes.len() < 2 || f.data.len() < 12 {
-        return 0.0;
-    }
-    let (Some(pi), Some(pj)) = (
-        model.nodes.get(elem.nodes[0].index()),
-        model.nodes.get(elem.nodes[1].index()),
-    ) else {
-        return 0.0;
-    };
-    let d = [
-        pj.coord[0] - pi.coord[0],
-        pj.coord[1] - pi.coord[1],
-        pj.coord[2] - pi.coord[2],
-    ];
-    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-    if len <= 0.0 {
-        return 0.0;
-    }
-    let ex = [d[0] / len, d[1] / len, d[2] / len];
-    f.data[6] * ex[0] + f.data[7] * ex[1] + f.data[8] * ex[2]
 }
 
 pub(crate) fn compute_f_int(

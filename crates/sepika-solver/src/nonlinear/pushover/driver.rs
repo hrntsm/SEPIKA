@@ -87,7 +87,6 @@ pub fn pushover_analysis(
     dir: SeismicDir,
     max_steps: usize,
     max_disp: f64,
-    use_kg: bool,
 ) -> Result<PushoverResult, String> {
     pushover_analysis_recording(
         model,
@@ -98,7 +97,6 @@ pub fn pushover_analysis(
         PushoverTarget::from_max_disp(max_disp),
         PushoverControl::default(),
         true,
-        use_kg,
         DuctilityMethod::default(),
     )
 }
@@ -115,7 +113,6 @@ pub fn pushover_analysis_recording(
     target: PushoverTarget,
     control: PushoverControl,
     apply_long_term: bool,
-    use_kg: bool,
     ductility_method: DuctilityMethod,
 ) -> Result<PushoverResult, String> {
     sepika_core::panel_zone::validate_panel_connection_offsets(model)?;
@@ -123,7 +120,6 @@ pub fn pushover_analysis_recording(
         model,
         Some(sepika_core::model::AnalysisKind::Incremental),
         "増分解析",
-        use_kg,
         None,
     )?;
     model.validate_member_load_directions()?;
@@ -215,7 +211,7 @@ pub fn pushover_analysis_recording(
     }
 
     if reducer.n_indep > 0 {
-        let k_free = assemble_k_cached(model, dofmap, &behaviors, use_kg, &mut st.k_free_cache);
+        let k_free = assemble_k_cached(model, dofmap, &behaviors, &mut st.k_free_cache);
         let k_red = reducer.reduce_k_cached(&k_free, &mut st.k_red_cache);
         if st.solver.factorize(&k_red).is_err() {
             return Err(tangent_singular_diagnosis(
@@ -259,9 +255,8 @@ pub fn pushover_analysis_recording(
     let du_uniform = (matches!(control, PushoverControl::Phased) && roof_bound.is_finite())
         .then(|| roof_bound / n_steps as f64)
         .filter(|du| *du > 0.0);
-    let mut roof_slope = du_uniform.and_then(|_| {
-        elastic_roof_slope(model, dofmap, reducer, &behaviors, use_kg, dir, &q, &mut st)
-    });
+    let mut roof_slope = du_uniform
+        .and_then(|_| elastic_roof_slope(model, dofmap, reducer, &behaviors, dir, &q, &mut st));
     let adaptive = du_uniform.is_some() && roof_slope.is_some();
 
     let lambda_cap = match control {
@@ -282,7 +277,6 @@ pub fn pushover_analysis_recording(
             &mut behaviors,
             &f0,
             &gravity_member_loads,
-            use_kg,
             &mut total_disp,
             &mut st,
         )?;
@@ -321,7 +315,6 @@ pub fn pushover_analysis_recording(
                 &f_ext,
                 &gravity_member_loads,
                 &format!("増分解析・荷重制御 λ={current_lambda}"),
-                use_kg,
                 &total_disp,
                 &mut st,
             );
@@ -420,13 +413,8 @@ pub fn pushover_analysis_recording(
                         continue;
                     }
                     for iter in STATIC_NEWTON.iters() {
-                        let k_free = assemble_k_cached(
-                            model,
-                            dofmap,
-                            &behaviors,
-                            use_kg,
-                            &mut st.k_free_cache,
-                        );
+                        let k_free =
+                            assemble_k_cached(model, dofmap, &behaviors, &mut st.k_free_cache);
                         let k_red = reducer.reduce_k_cached(&k_free, &mut st.k_red_cache);
                         let mut f_int = compute_f_int(model, dofmap, &behaviors);
                         let u_trial: Vec<f64> = total_disp
@@ -537,15 +525,8 @@ pub fn pushover_analysis_recording(
     }
 
     if recorder.is_empty() {
-        let detail = current_failure_detail(
-            model,
-            dofmap,
-            reducer,
-            &behaviors,
-            use_kg,
-            &mut st,
-            "接線剛性",
-        );
+        let detail =
+            current_failure_detail(model, dofmap, reducer, &behaviors, &mut st, "接線剛性");
         return Err(format!(
             "水平力の増分が 1 ステップも収束しませんでした（性能曲線が得られません）。{detail}"
         ));
@@ -625,11 +606,10 @@ fn current_failure_detail(
     dofmap: &DofMap,
     reducer: &Reducer,
     behaviors: &[Box<dyn ElementBehavior>],
-    use_kg: bool,
     st: &mut SolverState,
     phase: &str,
 ) -> String {
-    let k_free = assemble_k_cached(model, dofmap, behaviors, use_kg, &mut st.k_free_cache);
+    let k_free = assemble_k_cached(model, dofmap, behaviors, &mut st.k_free_cache);
     let k_red = reducer.reduce_k_cached(&k_free, &mut st.k_red_cache);
     let factorizable = st.solver.factorize(&k_red).is_ok();
     nonconvergence_detail(model, dofmap, reducer, &k_red, factorizable, phase)
@@ -643,7 +623,6 @@ fn apply_initial_load(
     behaviors: &mut [Box<dyn ElementBehavior>],
     f0: &[f64],
     gravity_member_loads: &[Vec<MemberLoad>],
-    use_kg: bool,
     total_disp: &mut [f64],
     st: &mut SolverState,
 ) -> Result<(), String> {
@@ -656,7 +635,6 @@ fn apply_initial_load(
         f0,
         gravity_member_loads,
         "増分解析・重力初期載荷 μ=1",
-        use_kg,
         total_disp,
         st,
     ) {
@@ -678,7 +656,6 @@ fn apply_initial_load(
                     dofmap,
                     reducer,
                     behaviors,
-                    use_kg,
                     st,
                     "長期荷重の初期載荷における接線剛性",
                 ),
@@ -702,7 +679,6 @@ fn newton_converge(
     f_ext: &[f64],
     absolute_loads: &[Vec<MemberLoad>],
     phase: &str,
-    use_kg: bool,
     total_disp_base: &[f64],
     st: &mut SolverState,
 ) -> Result<Option<Vec<f64>>, String> {
@@ -710,7 +686,7 @@ fn newton_converge(
     apply_du_trial_with_member_loads(model, dofmap, behaviors, &step_du_free, absolute_loads)
         .map_err(|e| format!("{phase}・初期荷重更新: {e}"))?;
     for iter in STATIC_NEWTON.iters() {
-        let k_free = assemble_k_cached(model, dofmap, behaviors, use_kg, &mut st.k_free_cache);
+        let k_free = assemble_k_cached(model, dofmap, behaviors, &mut st.k_free_cache);
         let k_red = reducer.reduce_k_cached(&k_free, &mut st.k_red_cache);
         let mut f_int = compute_f_int(model, dofmap, behaviors);
         let u_trial: Vec<f64> = total_disp_base
@@ -751,13 +727,12 @@ fn elastic_roof_slope(
     dofmap: &DofMap,
     reducer: &Reducer,
     behaviors: &[Box<dyn ElementBehavior>],
-    use_kg: bool,
     dir: SeismicDir,
     q: &[f64],
     st: &mut SolverState,
 ) -> Option<f64> {
     let roof_active = get_roof_dof(model, dofmap, dir)?;
-    let k_free = assemble_k_cached(model, dofmap, behaviors, use_kg, &mut st.k_free_cache);
+    let k_free = assemble_k_cached(model, dofmap, behaviors, &mut st.k_free_cache);
     let k_red = reducer.reduce_k_cached(&k_free, &mut st.k_red_cache);
     st.solver.factorize(&k_red).ok()?;
     reducer.reduce_f_into(q, &mut st.r_red);

@@ -673,7 +673,6 @@ mod tests {
             &damping,
             &[0.0],
             &[0.0],
-            false,
             None,
         )
         .expect("should run");

@@ -1494,10 +1494,6 @@ impl ElementBehavior for WallElement {
         mm
     }
 
-    fn geometric_stiffness(&self, _n: f64) -> LocalMat {
-        LocalMat::zeros(24)
-    }
-
     fn state_member_forces(&self, ctx: &Ctx) -> Option<crate::frame::beam::MemberForces> {
         if let Some(fiber) = &self.fiber_column {
             return fiber.state_member_forces(ctx);

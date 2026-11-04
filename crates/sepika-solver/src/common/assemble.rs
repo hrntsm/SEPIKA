@@ -166,7 +166,6 @@ pub fn assemble_global_m(
         model,
         None,
         "質量行列組立",
-        false,
         Some(opt),
     )
     .map_err(sepika_math::solver::SolveError::InvalidInput)?;

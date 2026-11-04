@@ -568,10 +568,6 @@ impl ElementBehavior for ConcentratedSpringBeam {
         }
     }
 
-    fn geometric_stiffness(&self, n: f64) -> LocalMat {
-        self.elastic.geometric_stiffness(n)
-    }
-
     fn snapshot_state(&self) -> Box<dyn Any> {
         let materials: Vec<Box<dyn UniaxialMaterial>> =
             vec![self.spring_i.clone_box(), self.spring_j.clone_box()];

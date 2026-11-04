@@ -1293,31 +1293,6 @@ fn test_rigid_zone_preserves_rigid_body_rotation() {
 }
 
 #[test]
-fn test_geometric_stiffness_consistent_with_rigid_zone() {
-    use crate::behavior::ElementBehavior;
-    let n = 1000.0;
-    let kg = make_test_beam().geometric_stiffness(n);
-    let expected_full = n / 3000.0 * 6.0 / 5.0;
-    assert!((kg.get(1, 1) - expected_full).abs() / expected_full < 1e-9);
-
-    let mut beam_rz = make_test_beam();
-    beam_rz.rigid = RigidZone {
-        length_i: 300.0,
-        length_j: 300.0,
-        ..Default::default()
-    };
-    let kg_rz = beam_rz.geometric_stiffness(n);
-    let expected_flex = n / 2400.0 * 6.0 / 5.0;
-    assert!(
-        (kg_rz.get(1, 1) - expected_flex).abs() / expected_flex < 1e-9,
-        "剛域ありは可撓長基準: got {}, want {}",
-        kg_rz.get(1, 1),
-        expected_flex
-    );
-    assert!(kg_rz.get(1, 1) > kg.get(1, 1));
-}
-
-#[test]
 fn test_fixed_ends_exact_equals_raw() {
     let beam = make_test_beam();
     let k = beam.local_stiffness();

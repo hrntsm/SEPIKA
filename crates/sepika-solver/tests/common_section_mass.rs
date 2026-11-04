@@ -67,7 +67,6 @@ fn mass_assembly_rejects_invalid_wall_side_column_frame_before_building_behavior
             &model,
             None,
             "質量行列組立",
-            false,
             Some(MassOption::Consistent),
         )
         .unwrap_err();
@@ -79,9 +78,6 @@ fn mass_assembly_rejects_invalid_wall_side_column_frame_before_building_behavior
 fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
     use sepika_element::factory::{build_behavior, ensure_wall_side_column_analysis};
     use sepika_element::frame::panel_offset::{PanelEnd, PanelOffsetMember};
-    use sepika_solver::nonlinear::pushover::{
-        pushover_analysis_recording, PushoverControl, PushoverTarget,
-    };
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
@@ -90,29 +86,18 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
         let mut model = wall_connection_fixture(kind);
         let index = sepika_core::model::WallSideColumnIndex::build(&model);
         assert_eq!(index.replacement_bindings(ElemId(0)).unwrap().len(), 1);
-        assert!(ensure_wall_side_column_analysis(&model, None, "線形解析", false, None).is_ok());
+        assert!(ensure_wall_side_column_analysis(&model, None, "線形解析", None).is_ok());
         assert!(ensure_wall_side_column_analysis(
             &model,
             Some(AnalysisKind::Incremental),
             "増分解析",
-            false,
             None
         )
         .is_ok());
-        let pdelta = ensure_wall_side_column_analysis(
-            &model,
-            Some(AnalysisKind::Incremental),
-            "増分解析",
-            true,
-            None,
-        )
-        .unwrap_err();
-        assert!(pdelta.contains("増分解析: 部材 ID 0・壁 ID [4]") && pdelta.contains("P-Δ"));
         assert!(ensure_wall_side_column_analysis(
             &model,
             None,
             "固有値解析",
-            false,
             Some(MassOption::Consistent)
         )
         .is_ok());
@@ -120,21 +105,6 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             element.end_cond = [EndCondition::Fixed, EndCondition::Pinned];
         }
         let dofmap = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &dofmap);
-        let actual = pushover_analysis_recording(
-            &model,
-            &dofmap,
-            &reducer,
-            sepika_solver::statics::analysis::SeismicDir::X,
-            1,
-            PushoverTarget::from_max_disp(1.0),
-            PushoverControl::default(),
-            false,
-            true,
-            Default::default(),
-        )
-        .unwrap_err();
-        assert_eq!(actual, pdelta);
         assemble_global_m(&model, &dofmap, MassOption::Lumped).unwrap();
         let direct =
             build_behavior(&model.elements[0], &model).try_mass_matrix(MassOption::Consistent);
@@ -142,7 +112,6 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             &model,
             None,
             "固有値解析",
-            false,
             Some(MassOption::Consistent),
         );
         let direct_reason = direct
@@ -204,7 +173,6 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
                 },
                 &[],
                 &[],
-                false,
                 None,
             );
             assert!(
@@ -228,7 +196,6 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
                     omega: 1.0,
                 },
                 &state,
-                false,
                 None,
             );
             assert!(
@@ -240,7 +207,6 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             &model,
             None,
             "固有値解析",
-            false,
             Some(MassOption::Consistent)
         )
         .is_ok());
@@ -272,7 +238,6 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             &model,
             None,
             "固有値解析",
-            false,
             Some(MassOption::Consistent)
         )
         .is_ok());
@@ -323,7 +288,6 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
                     &model,
                     kind,
                     "実解析",
-                    true,
                     Some(MassOption::Consistent)
                 )
                 .is_ok());
@@ -636,7 +600,7 @@ fn assert_public_dynamic_mass_error(model: &Model) {
     let init = vec![0.0; reducer.n_indep];
     check(
         linear_time_history_analysis(
-            model, &dofmap, &reducer, &wave, &newmark, &damping, &init, &init, false, None,
+            model, &dofmap, &reducer, &wave, &newmark, &damping, &init, &init, None,
         )
         .unwrap_err(),
     );
@@ -790,7 +754,6 @@ fn public_eigen_and_timehistories_use_projected_common_mass_for_elastic_axial_re
             &damping,
             &u0,
             &v0,
-            false,
             Some(1),
         )
         .unwrap();
@@ -1055,7 +1018,6 @@ fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_suc
                                 &damping,
                                 &[],
                                 &[],
-                                false,
                                 None,
                             )
                             .map(|_| ())
@@ -1073,7 +1035,6 @@ fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_suc
                                 &damping,
                                 &[],
                                 &[],
-                                false,
                                 None,
                             )
                             .map(|_| ())
@@ -1083,8 +1044,7 @@ fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_suc
                         "linear_time_history_from_state",
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             linear_time_history_from_state(
-                                &model, &dofmap, &reducer, &wave, &newmark, &damping, &state,
-                                false, None,
+                                &model, &dofmap, &reducer, &wave, &newmark, &damping, &state, None,
                             )
                             .map(|_| ())
                         })),
@@ -1165,7 +1125,6 @@ fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_suc
                 &damping,
                 &[],
                 &[],
-                false,
                 None
             )
             .is_ok());
@@ -1206,42 +1165,36 @@ fn linear_time_history_with_state_and_analysis_preserve_actual_wall_options_reas
             accel_theta: None,
         };
         let damping = Damping::MassProportional { h: 0.0, omega: 1.0 };
-        for use_kg in [false, true] {
-            let expected = ensure_wall_side_column_analysis(
-                &model,
-                None,
-                "線形時刻歴解析",
-                use_kg,
-                Some(MassOption::Consistent),
-            )
-            .unwrap_err();
-            let error = linear_time_history_with_state(
-                &model,
-                &dofmap,
-                &reducer,
+        let expected = ensure_wall_side_column_analysis(
+            &model,
+            None,
+            "線形時刻歴解析",
+            Some(MassOption::Consistent),
+        )
+        .unwrap_err();
+        let error = linear_time_history_with_state(
+            &model,
+            &dofmap,
+            &reducer,
+            &wave,
+            &NewmarkCfg::average_accel(),
+            &damping,
+            &[],
+            &[],
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(error, SolveError::InvalidInput(reason) if reason == expected));
+        let error = Analysis::prepare(&model)
+            .unwrap()
+            .time_history(
                 &wave,
-                &NewmarkCfg::average_accel(),
-                &damping,
-                &[],
-                &[],
-                use_kg,
+                NewmarkCfg::average_accel(),
+                Damping::MassProportional { h: 0.0, omega: 1.0 },
                 None,
             )
             .unwrap_err();
-            assert!(matches!(error, SolveError::InvalidInput(reason) if reason == expected));
-            if !use_kg {
-                let error = Analysis::prepare(&model)
-                    .unwrap()
-                    .time_history(
-                        &wave,
-                        NewmarkCfg::average_accel(),
-                        Damping::MassProportional { h: 0.0, omega: 1.0 },
-                        None,
-                    )
-                    .unwrap_err();
-                assert!(matches!(error, SolveError::InvalidInput(reason) if reason == expected));
-            }
-        }
+        assert!(matches!(error, SolveError::InvalidInput(reason) if reason == expected));
     }
 }
 
@@ -1286,18 +1239,6 @@ fn beam_736_wall_column_mass_gate_returns_finite_input_stiffness_diagnostics() {
                     );
                 }
             }
-            let pdelta = sepika_element::factory::ensure_wall_side_column_analysis(
-                &model,
-                None,
-                "固有値解析",
-                true,
-                Some(MassOption::Consistent),
-            )
-            .unwrap_err();
-            assert!(
-                pdelta.contains("部材 ID 0・壁 ID [4]") && pdelta.contains("P-Δ"),
-                "{pdelta}"
-            );
         }
     }
 }
@@ -1359,7 +1300,6 @@ fn eccentric_ground_motion_drives_free_rotation_with_restrained_translations() {
                 &Damping::MassProportional { h: 0.0, omega: 1.0 },
                 &[],
                 &[],
-                false,
                 Some(1),
             )
             .unwrap();
@@ -1429,7 +1369,6 @@ fn consistent_ground_motion_keeps_fixed_end_mass_and_nodal_only_input_is_unchang
             &Damping::MassProportional { h: 0.0, omega: 1.0 },
             &[],
             &[],
-            false,
             Some(1),
         )
         .unwrap();

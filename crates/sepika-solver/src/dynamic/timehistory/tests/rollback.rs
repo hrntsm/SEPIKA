@@ -280,7 +280,6 @@ fn long_term_full_load_commits_fixed_member_state_once_and_failure_restores_all_
             &mut actual,
             &[],
             &[vec![udl()]],
-            false,
             &mut [],
         )
         .unwrap();
@@ -310,7 +309,6 @@ fn long_term_full_load_commits_fixed_member_state_once_and_failure_restores_all_
             &mut actual,
             &[],
             &[vec![udl()], vec![invalid]],
-            false,
             &mut [],
         )
         .unwrap_err()
@@ -364,7 +362,6 @@ fn initial_newton_factor_failure_restores_preexisting_trial_and_committed_state(
             &mut actual,
             &[1.],
             &[vec![udl()]],
-            false,
             &mut displacement,
         )
         .unwrap_err()

@@ -119,7 +119,6 @@ crate::behavior::forward_element_behavior!(EccentricMember, inner, {
     state_frame_load_response: custom,
     recover_forces: custom,
     state_member_forces: forward,
-    geometric_stiffness: custom,
     snapshot_state: forward,
     restore_state: forward,
     commit_state: forward,
@@ -135,9 +134,7 @@ crate::behavior::forward_element_behavior!(EccentricMember, inner, {
     fn tangent_stiffness(&self, ctx: &Ctx) -> LocalMat {
         self.transform_matrix(&self.inner.tangent_stiffness(ctx))
     }
-    fn geometric_stiffness(&self, n: f64) -> LocalMat {
-        self.transform_matrix(&self.inner.geometric_stiffness(n))
-    }
+
     fn internal_force(&self, ctx: &Ctx) -> LocalVec {
         self.to_node(&self.inner.internal_force(ctx))
     }

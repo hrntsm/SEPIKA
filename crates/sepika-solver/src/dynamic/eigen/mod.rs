@@ -41,7 +41,6 @@ pub fn solve_eigen(
         model,
         None,
         "固有値解析",
-        false,
         Some(MassOption::Consistent),
     )
     .map_err(SolveError::InvalidInput)?;
@@ -93,7 +92,6 @@ pub fn solve_eigen_with_solver(
         model,
         None,
         "固有値解析",
-        false,
         Some(MassOption::Consistent),
     )
     .map_err(SolveError::InvalidInput)?;

@@ -522,7 +522,7 @@ fn assert_public_mass_error(model: &Model) {
     let init = vec![0.0; reducer.n_indep];
     check(
         linear_time_history_analysis(
-            model, &dofmap, &reducer, &wave, &newmark, &damping, &init, &init, false, None,
+            model, &dofmap, &reducer, &wave, &newmark, &damping, &init, &init, None,
         )
         .unwrap_err(),
     );
@@ -550,7 +550,7 @@ fn assert_public_mass_error(model: &Model) {
     };
     check(
         linear_time_history_from_state(
-            model, &dofmap, &reducer, &wave, &newmark, &damping, &state, false, None,
+            model, &dofmap, &reducer, &wave, &newmark, &damping, &state, None,
         )
         .unwrap_err(),
     );

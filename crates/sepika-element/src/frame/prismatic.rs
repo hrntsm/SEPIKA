@@ -238,55 +238,6 @@ fn free_common_torsion_gauge(k: &LocalMat, releases: &[(usize, f64)]) -> Option<
     Some(i.max(j))
 }
 
-/// 軸力 `n_axial` による幾何剛性を局所 12×12 で返す。
-///
-/// 可撓長 `flex_len`（= L − λi − λj）で組み、可撓端自由度を剛体アームで節点自由度へ写す。
-/// 可撓長が実質ゼロの部材はゼロ行列を返す。
-///
-/// xz 面（uz・ry）では並進-回転の結合項の符号が xy 面（uy・rz）と逆になる。
-pub(crate) fn geometric_stiffness(
-    n_axial: f64,
-    flex_len: f64,
-    rigid_i: f64,
-    rigid_j: f64,
-) -> LocalMat {
-    let l = flex_len;
-    if l < 1e-12 {
-        return LocalMat::zeros(12);
-    }
-    let c = n_axial / l;
-    let mut kg = LocalMat::zeros(12);
-    {
-        let mut s = |i: usize, j: usize, v: f64| {
-            kg.set(i, j, v);
-            if i != j {
-                kg.set(j, i, v);
-            }
-        };
-        s(1, 1, c * 6.0 / 5.0);
-        s(7, 7, c * 6.0 / 5.0);
-        s(1, 7, -c * 6.0 / 5.0);
-        s(1, 5, c * l / 10.0);
-        s(1, 11, c * l / 10.0);
-        s(5, 7, -c * l / 10.0);
-        s(7, 11, -c * l / 10.0);
-        s(5, 5, c * 2.0 * l * l / 15.0);
-        s(11, 11, c * 2.0 * l * l / 15.0);
-        s(5, 11, -c * l * l / 30.0);
-        s(2, 2, c * 6.0 / 5.0);
-        s(8, 8, c * 6.0 / 5.0);
-        s(2, 8, -c * 6.0 / 5.0);
-        s(2, 4, -c * l / 10.0);
-        s(2, 10, -c * l / 10.0);
-        s(4, 8, c * l / 10.0);
-        s(8, 10, c * l / 10.0);
-        s(4, 4, c * 2.0 * l * l / 15.0);
-        s(10, 10, c * 2.0 * l * l / 15.0);
-        s(4, 10, -c * l * l / 30.0);
-    }
-    crate::frame::rigid_arm::transform_stiffness(&kg, rigid_i, rigid_j)
-}
-
 /// 集中質量（対角）の局所 12×12。並進 3 成分へ `mass/2` ずつ配る。
 ///
 /// 並進 3 成分が等しい対角行列は回転不変（Rᵀ·(m/2)I·R = (m/2)I）のため、
@@ -649,26 +600,6 @@ mod tests {
             &[],
         )
         .is_some());
-    }
-
-    /// 軸力ゼロなら幾何剛性はゼロ行列。可撓長が実質ゼロでもゼロ行列。
-    #[test]
-    fn 幾何剛性は軸力零と可撓長零で零行列() {
-        let kg = geometric_stiffness(0.0, 3000.0, 0.0, 0.0);
-        assert!(kg.data.iter().all(|v| *v == 0.0), "軸力零で非零");
-        let kg = geometric_stiffness(1.0e5, 0.0, 0.0, 0.0);
-        assert!(kg.data.iter().all(|v| *v == 0.0), "可撓長零で非零");
-    }
-
-    /// 幾何剛性は剛体並進に対して力を生じない（列和が零）。
-    /// 剛域なしの場合に、横方向の剛体並進 uy（DOF 1・7）で確認する。
-    #[test]
-    fn 幾何剛性は剛体並進で力を生じない() {
-        let kg = geometric_stiffness(1.0e5, 3000.0, 0.0, 0.0);
-        for row in 0..12 {
-            let f = kg.get(row, 1) + kg.get(row, 7);
-            assert!(f.abs() < 1e-9, "uy 剛体並進で行 {row} に力 {f}");
-        }
     }
 
     /// 集中質量・整合質量とも、並進自由度の総和が部材質量に一致する

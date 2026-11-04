@@ -25,7 +25,7 @@ fn equal_frame_and_ground_spring_keep_total_resistance_distinct_from_frame_cut()
     model.nodes[1].support_spring = Some([stiffness, 0., 0., 0., 0., 0.]);
     let map = DofMap::build(&model);
     let reducer = Reducer::build(&model, &map);
-    let result = pushover_analysis(&model, &map, &reducer, SeismicDir::X, 1, 0., false).unwrap();
+    let result = pushover_analysis(&model, &map, &reducer, SeismicDir::X, 1, 0.).unwrap();
     let point = result.capacity_curve.last().unwrap();
     close(point.base_shear, 16000.);
     close(point.story_shear[0], 16000.);
@@ -55,16 +55,8 @@ fn diaphragm_master_load_and_direct_slave_load_have_the_same_force_and_work() {
         model.nodes.push(master);
         let direct_map = DofMap::build(&model);
         let direct_reducer = Reducer::build(&model, &direct_map);
-        let direct = pushover_analysis(
-            &model,
-            &direct_map,
-            &direct_reducer,
-            direction,
-            1,
-            0.,
-            false,
-        )
-        .unwrap();
+        let direct =
+            pushover_analysis(&model, &direct_map, &direct_reducer, direction, 1, 0.).unwrap();
         model.constraints.push(Constraint::RigidDiaphragm {
             story: StoryId(1),
             master: NodeId(2),
@@ -74,8 +66,7 @@ fn diaphragm_master_load_and_direct_slave_load_have_the_same_force_and_work() {
         });
         let map = DofMap::build(&model);
         let reducer = Reducer::build(&model, &map);
-        let master_result =
-            pushover_analysis(&model, &map, &reducer, direction, 1, 0., false).unwrap();
+        let master_result = pushover_analysis(&model, &map, &reducer, direction, 1, 0.).unwrap();
         let point = master_result.capacity_curve.last().unwrap();
         close(point.base_shear, 16000.);
         close(point.story_shear[0], 16000.);

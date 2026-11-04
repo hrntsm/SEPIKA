@@ -135,7 +135,6 @@ fn public_dynamic_entries_reject_invalid_beam_g_before_initial_resume_and_cached
                     &damping,
                     &[],
                     &[],
-                    false,
                     None,
                 )
                 .map(|_| ()),
@@ -148,12 +147,11 @@ fn public_dynamic_entries_reject_invalid_beam_g_before_initial_resume_and_cached
                     &damping,
                     &[],
                     &[],
-                    false,
                     None,
                 )
                 .map(|_| ()),
                 linear_time_history_from_state(
-                    &model, &dofmap, &reducer, &wave, &newmark, &damping, &state, false, None,
+                    &model, &dofmap, &reducer, &wave, &newmark, &damping, &state, None,
                 )
                 .map(|_| ()),
                 assemble_global_m(&model, &dofmap, MassOption::Consistent).map(|_| ()),

@@ -41,7 +41,6 @@ pub fn linear_time_history_analysis(
     damping: &Damping,
     initial_disp: &[f64],
     initial_vel: &[f64],
-    use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<ResponseResult, SolveError> {
     let (result, _state) = linear_time_history_with_state(
@@ -53,7 +52,6 @@ pub fn linear_time_history_analysis(
         damping,
         initial_disp,
         initial_vel,
-        use_kg,
         record_every,
     )?;
     Ok(result)
@@ -70,7 +68,6 @@ pub fn linear_time_history_with_state(
     damping: &Damping,
     initial_disp: &[f64],
     initial_vel: &[f64],
-    use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
     linear_time_history_until(
@@ -82,7 +79,6 @@ pub fn linear_time_history_with_state(
         damping,
         initial_disp,
         initial_vel,
-        use_kg,
         record_every,
         None,
     )
@@ -100,11 +96,10 @@ pub fn linear_time_history_until(
     damping: &Damping,
     initial_disp: &[f64],
     initial_vel: &[f64],
-    use_kg: bool,
     record_every: Option<usize>,
     end_step: Option<u64>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
-    validate_wall_connection(model, use_kg)?;
+    validate_wall_connection(model)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
@@ -129,7 +124,7 @@ pub fn linear_time_history_until(
         ));
     }
 
-    let mut setup = LinearSetup::build(model, dofmap, reducer, newmark, damping, dt, use_kg)?;
+    let mut setup = LinearSetup::build(model, dofmap, reducer, newmark, damping, dt)?;
 
     let u = reduced_vec_from(n_indep, initial_disp);
     let v = reduced_vec_from(n_indep, initial_vel);
@@ -178,10 +173,9 @@ pub fn linear_time_history_from_state(
     newmark: &NewmarkCfg,
     damping: &Damping,
     state: &TimeStepState,
-    use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
-    validate_wall_connection(model, use_kg)?;
+    validate_wall_connection(model)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
@@ -215,7 +209,7 @@ pub fn linear_time_history_from_state(
         ));
     }
 
-    let mut setup = LinearSetup::build(model, dofmap, reducer, newmark, damping, dt, use_kg)?;
+    let mut setup = LinearSetup::build(model, dofmap, reducer, newmark, damping, dt)?;
 
     let u = state.disp_red.clone();
     let v = state.vel_red.clone();
@@ -261,15 +255,7 @@ impl LinearSetup {
         newmark: &NewmarkCfg,
         damping: &Damping,
         dt: f64,
-        use_kg: bool,
     ) -> Result<Self, SolveError> {
-        if use_kg {
-            return Err(SolveError::InvalidInput(
-                "線形時刻歴応答解析の幾何剛性（P-Δ、use_kg）は未対応です。\
-                 P-Δ を考慮する場合は非線形時刻歴応答解析を使用してください。"
-                    .into(),
-            ));
-        }
         let m_free = assemble_global_m(model, dofmap, MassOption::Consistent)?;
         let behaviors: Vec<Box<dyn ElementBehavior>> = model
             .elements
@@ -305,12 +291,11 @@ impl LinearSetup {
     }
 }
 
-fn validate_wall_connection(model: &Model, use_kg: bool) -> Result<(), SolveError> {
+fn validate_wall_connection(model: &Model) -> Result<(), SolveError> {
     sepika_element::factory::ensure_wall_side_column_analysis(
         model,
         None,
         "線形時刻歴解析",
-        use_kg,
         Some(MassOption::Consistent),
     )
     .map_err(SolveError::InvalidInput)

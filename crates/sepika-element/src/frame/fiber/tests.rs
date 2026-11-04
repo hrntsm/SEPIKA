@@ -1323,19 +1323,6 @@ fn test_snapshot_restore() {
     assert_relative_eq!(fiber.committed_disp[4], 0.001, epsilon = 1e-12);
 }
 
-#[test]
-fn test_geometric_stiffness() {
-    let fiber = make_test_fiber_beam(None);
-    let n = 100000.0;
-    let kg = fiber.geometric_stiffness(n);
-    let l = fiber.length;
-    let c = n / l;
-    assert_relative_eq!(kg.get(1, 1), c * 6.0 / 5.0, epsilon = 1e-9);
-    assert_relative_eq!(kg.get(5, 5), c * 2.0 * l * l / 15.0, epsilon = 1e-9);
-    assert_relative_eq!(kg.get(4, 4), c * 2.0 * l * l / 15.0, epsilon = 1e-9);
-    assert_relative_eq!(kg.get(2, 4), -c * l / 10.0, epsilon = 1e-9);
-}
-
 /// ねじり剛性が G·J/L、ねじり内力が Mx = (G·J/L)·(θi − θj) となること（手計算照合）。
 #[test]
 fn test_torsional_stiffness_and_internal_force() {

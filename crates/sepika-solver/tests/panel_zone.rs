@@ -435,7 +435,6 @@ fn panel_759_public_pushover_prepares_panels_with_and_without_gravity_member_loa
             sepika_solver::nonlinear::pushover::PushoverTarget::from_max_disp(10.0),
             Default::default(),
             gravity,
-            false,
             Default::default(),
         )
         .unwrap();
@@ -843,7 +842,6 @@ fn panel_585_public_linear_and_nonlinear_reject_invalid_lower_with_joint_reason(
         sepika_solver::statics::analysis::SeismicDir::X,
         1,
         10.0,
-        false,
     )
     .err()
     .unwrap();
@@ -885,7 +883,6 @@ fn panel_585_public_inputs_reject_invalid_adopted_column_area_and_axial_stiffnes
             sepika_solver::statics::analysis::SeismicDir::X,
             1,
             10.0,
-            false,
         )
         .err()
         .unwrap();
@@ -928,7 +925,6 @@ fn panel_585_explicit_panel_without_column_is_not_a_successful_rigid_panel() {
         sepika_solver::statics::analysis::SeismicDir::X,
         1,
         10.0,
-        false,
     )
     .err()
     .unwrap();
@@ -1025,7 +1021,6 @@ fn panel_728_public_entry_matrix() {
             1,
             sepika_solver::nonlinear::pushover::PushoverTarget::from_max_disp(10.0),
             Default::default(),
-            false,
             false,
             Default::default(),
         );
@@ -1166,7 +1161,6 @@ fn panel_728_public_dynamic_entries() {
             &Damping::MassProportional { h: 0.0, omega: 1.0 },
             &[],
             &[],
-            false,
             None,
         );
         let state = sepika_solver::dynamic::timehistory::TimeStepState {
@@ -1184,7 +1178,6 @@ fn panel_728_public_dynamic_entries() {
             &NewmarkCfg::average_accel(),
             &Damping::MassProportional { h: 0.0, omega: 1.0 },
             &state,
-            false,
             None,
         );
         println!(
@@ -1271,7 +1264,6 @@ fn beam_736_public_dynamic_entries() {
                     &damping,
                     &[],
                     &[],
-                    false,
                     None,
                 );
                 let state = sepika_solver::dynamic::timehistory::TimeStepState {
@@ -1289,7 +1281,6 @@ fn beam_736_public_dynamic_entries() {
                     &NewmarkCfg::average_accel(),
                     &damping,
                     &state,
-                    false,
                     None,
                 );
                 let linear =
@@ -1388,7 +1379,6 @@ fn beam_736_preparation_and_nonlinear_entries_return_stiffness_diagnostics() {
                 1,
                 sepika_solver::nonlinear::pushover::PushoverTarget::from_max_disp(10.0),
                 Default::default(),
-                false,
                 false,
                 Default::default(),
             )

@@ -134,7 +134,6 @@ fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() 
             &mut behaviors,
             &rhs,
             &loads,
-            false,
             &mut displacement,
             &mut solver,
         )
@@ -212,8 +211,7 @@ fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() 
         close(recorded.member_history_steps[0][3].mz_i.abs() as f64, 0.);
         close(recorded.member_history_steps[0][3].mz_j.abs() as f64, 0.);
         close(recorded.member_history_steps[0][6].n as f64, -2000.);
-        let error =
-            pushover_analysis(&model, &map, &reducer, SeismicDir::X, 1, 0., false).unwrap_err();
+        let error = pushover_analysis(&model, &map, &reducer, SeismicDir::X, 1, 0.).unwrap_err();
         assert!(
             error.contains("壁 ID 0")
                 && error.contains("部材 ID 3")
@@ -240,7 +238,6 @@ fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() 
             SeismicDir::X,
             1,
             0.,
-            false,
         )
         .unwrap();
         assert_eq!(result.steps[0].load_factor, 0.);
@@ -310,7 +307,6 @@ fn fixed_member_full_initial_load_matches_one_committed_trial_and_restores_on_fa
             &mut actual,
             &[],
             &loads,
-            false,
             &mut [],
             &mut solver,
         )
@@ -341,7 +337,6 @@ fn fixed_member_full_initial_load_matches_one_committed_trial_and_restores_on_fa
             &mut actual,
             &[],
             &[vec![load], vec![invalid]],
-            false,
             &mut [],
             &mut solver,
         )
@@ -408,7 +403,6 @@ fn initial_newton_factor_failure_preserves_displacement_and_loaded_element_snaps
         &mut behaviors,
         &[1.],
         &[vec![load]],
-        false,
         &mut displacement,
         &mut solver,
     )
