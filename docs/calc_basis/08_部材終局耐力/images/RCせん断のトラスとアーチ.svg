@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 650" role="img" aria-labelledby="title desc">
+<title id="title">RCせん断のトラス機構とアーチ機構</title>
+<desc id="desc">上段は上下の主筋、鉛直なせん断補強筋の引張と斜めのコンクリート圧縮束からなるトラス機構。圧縮束と材軸の角がφ、上下の応力中心距離がjt。下段は部材両端を結ぶコンクリート圧縮束のアーチ機構。内法長さLと全せいDが幾何係数k1を定め、有効圧縮強度νFcのうち1−k2の割合をアーチ項へ用いる。</desc>
+<style>text{font-family:sans-serif;font-size:19px;fill:#172b3a}.small{font-size:17px}.outline{stroke:#617684;stroke-width:2;fill:#f8fafb}.steel{stroke:#b73c23;stroke-width:4;fill:none}.concrete{stroke:#245b85;stroke-width:8;fill:none}.dim{stroke:#45596b;stroke-width:1.5;fill:none}</style>
+<rect width="940" height="650" fill="white"/>
+<text x="25" y="32">トラス機構：補強筋の引張＋斜めコンクリート圧縮束</text>
+<rect x="75" y="72" width="560" height="175" class="outline"/>
+<path d="M85 97 H625 M85 222 H625 M205 97 V222 M345 97 V222 M485 97 V222" class="steel"/>
+<path d="M85 97 L225 222 M225 97 L365 222 M365 97 L505 222 M505 97 L625 204" class="concrete"/>
+<path d="M122 97 A37 37 0 0 1 112 122" class="dim"/>
+<text x="129" y="129">φ</text>
+<path d="M660 97 V222 M650 97 H670 M650 222 H670" class="dim"/>
+<text x="675" y="165">jt</text>
+<path d="M485 155 H700" class="steel"/>
+<text x="710" y="161" class="small">補強筋の引張</text>
+<path d="M571 155 L700 205" class="concrete"/>
+<text x="710" y="211" class="small">圧縮束</text>
+<text x="75" y="280" class="small">トラス項 Qtr = b jt w cotφ　　w は νFc/2 を上限とする</text>
+<text x="25" y="335">アーチ機構：部材両端を結ぶコンクリート圧縮束</text>
+<rect x="75" y="375" width="560" height="175" class="outline"/>
+<path d="M90 532 L620 393" stroke="#c7ddea" stroke-width="32"/>
+<path d="M90 532 L620 393" class="concrete"/>
+<path d="M75 570 H635 M75 560 V580 M635 560 V580 M660 375 V550 M650 375 H670 M650 550 H670" class="dim"/>
+<text x="345" y="595">L</text><text x="675" y="470">D</text>
+<text x="700" y="412" class="small">有効圧縮強度 νFc</text>
+<text x="700" y="443" class="small">アーチ側の割合 1−k2</text>
+<text x="75" y="630" class="small">アーチ項 Qar = k1 (1−k2) bD νFc　　k1 は L/D による幾何係数</text>
+</svg>
