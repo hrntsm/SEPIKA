@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-labelledby="title desc">
+<title id="title">RC壁の純せん断参考骨格と終局割線</title>
+<desc id="desc">荷重QはkN。実線は原点O、ひび割れ点C（δ2.016mm、Q2016kN）、終局点U（δ約26.4361mm、Q4000kN）を結ぶ。破線O–Uの終局割線βsK0は第2区間C–Uの勾配K2と異なる。高さ3000mmで、δの下軸とγ=δ/hの上軸が対応する。実解析の骨格ではない。</desc>
+<style>text{font-family:sans-serif;font-size:19px;fill:#172b3a}.small{font-size:17px}.axis{stroke:#45596b;stroke-width:1.5;fill:none}.guide{stroke:#aab6bf;stroke-width:1;stroke-dasharray:4 5;fill:none}.backbone{stroke:#245b85;stroke-width:4;fill:none}.secant{stroke:#a25112;stroke-width:2.5;stroke-dasharray:9 6;fill:none}.point{fill:#245b85}</style>
+<rect width="900" height="520" fill="white"/>
+<text x="25" y="30">断面検定の参考骨格（接続例、実解析とは別）</text>
+<text x="285" y="66">γ = δ/h [無次元・rad相当]、h = 3000 mm</text>
+<path d="M95 115 V390 H815 M95 105 H815" class="axis"/>
+<text x="20" y="95">Q [kN]</text>
+<path d="M143.425 105 V390 M730 105 V390 M95 260.976 H143.425 M95 134 H730" class="guide"/>
+<path d="M88 134 H95 M88 260.976 H95 M143.425 105 V97 M730 105 V97 M143.425 390 V398 M730 390 V398" class="axis"/>
+<text x="35" y="140">4000</text>
+<text x="35" y="267">2016</text>
+<text x="72" y="413">O</text>
+<text x="85" y="91">0</text>
+<text x="110" y="91">0.000672</text>
+<text x="670" y="91">約0.00881203</text>
+<text x="89" y="433">0</text>
+<text x="119" y="433">2.016</text>
+<text x="682" y="433">約26.4361</text>
+<text x="620" y="466">δ [mm]（純せん断変位）</text>
+<path d="M95 390 L730 134" class="secant"/>
+<path d="M95 390 L143.425 260.976 L730 134" class="backbone"/>
+<circle cx="95" cy="390" r="5" class="point"/>
+<circle cx="143.425" cy="260.976" r="5" class="point"/>
+<circle cx="730" cy="134" r="5" class="point"/>
+<text x="154" y="248">C：ひび割れ点</text>
+<text x="738" y="128">U：終局点</text>
+<text x="25" y="340" class="small">第1区間</text>
+<text x="25" y="363" class="small">K0</text>
+<text x="365" y="177">第2区間 K2（C–U）</text>
+<text x="390" y="317" fill="#a25112">終局割線 βsK0（O–U）</text>
+<text x="390" y="343" class="small">破線は第2区間の勾配ではない</text>
+<path d="M455 295 L480 235" class="axis"/>
+<text x="25" y="503" class="small">同じ荷重をδまたはγで表示。Q–γの勾配はQ–δの勾配のh倍。点の値は本文の表を参照。</text>
+</svg>
