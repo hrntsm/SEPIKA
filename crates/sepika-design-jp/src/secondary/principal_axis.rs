@@ -10,8 +10,7 @@ use sepika_solver::statics::linear::StaticOnce;
 /// 主軸角 Θ `[rad]`。`tan2Θ = −Pᵗ(uy+vx) / Pᵗ(vy−ux)` を `atan2` で解く。
 ///
 /// 各ベクトルは同一節点順で対応していること。全体が等方（分母分子とも 0）の
-/// 場合は 0 を返す（任意の方向が主軸）。返り値は (−π/4, π/4] を中心とする
-/// `0.5·atan2` の範囲 (−π/2, π/2]。
+/// 場合は 0 を返す（任意の方向が主軸）。返り値の範囲は [−π/2, π/2] で、両端は同じ軸を示す。
 pub fn principal_axis_angle(p: &[f64], ux: &[f64], vx: &[f64], uy: &[f64], vy: &[f64]) -> f64 {
     let dot = |a: &[f64], b: &[f64]| -> f64 { a.iter().zip(b).map(|(x, y)| x * y).sum() };
     let num = -(dot(p, uy) + dot(p, vx));
