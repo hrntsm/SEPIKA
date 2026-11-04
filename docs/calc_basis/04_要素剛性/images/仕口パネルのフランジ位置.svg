@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 510" role="img" aria-labelledby="title desc">
+<title id="title">梁の鉛直偏心とフランジ板厚中心位置</title>
+<desc id="desc">接合部節点Oを高さゼロとし上向きを正とする。梁の実材軸端はOからzだけ上にある。外寸せいDの上端から上フランジ板厚の半分下が上フランジ中心z_top、下端から下フランジ板厚の半分上が下フランジ中心z_bottom。両中心間がdb。相対する梁も同じOから測る。</desc>
+<style>text{font-family:sans-serif;font-size:20px;fill:#172b3a}.small{font-size:17px}.dim{stroke:#45596b;stroke-width:1.5;fill:none}.dash{stroke:#617684;stroke-width:1.5;stroke-dasharray:6 5;fill:none}.steel{fill:#edf1f4;stroke:#172b3a;stroke-width:2}.plate{fill:#d7eaf6;stroke:#245b85;stroke-width:2}</style>
+<rect width="700" height="510" fill="white"/>
+<text x="20" y="30">梁端の立面（z が正の例、寸法は模式的）</text>
+<rect x="90" y="60" width="85" height="370" class="steel"/>
+<rect x="175" y="110" width="300" height="240" class="steel"/>
+<rect x="175" y="110" width="300" height="30" class="plate"/>
+<rect x="175" y="330" width="300" height="20" class="plate"/>
+<path d="M70 290 H490 M175 230 H490 M160 125 H500 M160 340 H500" class="dash"/>
+<circle cx="132" cy="290" r="5" fill="#172b3a"/>
+<circle cx="175" cy="230" r="5" fill="#245b85"/>
+<text x="20" y="283" class="small">節点 O</text><text x="20" y="312" class="small">高さ 0</text>
+<text x="215" y="215">実材軸端（高さ z）</text>
+<path d="M193 230 V290 M185 230 H201 M185 290 H201" class="dim"/>
+<text x="205" y="271">z</text>
+<path d="M515 125 V340 M505 125 H525 M505 340 H525" class="dim"/>
+<text x="523" y="247">db</text>
+<path d="M580 110 V350 M570 110 H590 M570 350 H590" class="dim"/>
+<text x="590" y="245">D</text>
+<text x="215" y="94">上端</text><text x="215" y="382">下端</text>
+<text x="290" y="164">上中心 z_top</text><text x="290" y="322">下中心 z_bottom</text>
+<path d="M470 110 H650 M470 140 H650 M630 110 V140" class="dim"/>
+<text x="595" y="94" class="small">tf上</text>
+<path d="M470 330 H650 M470 350 H650 M630 330 V350" class="dim"/>
+<text x="595" y="382" class="small">tf下</text>
+<path d="M40 220 V95 L34 107 M40 95 L46 107" class="dim"/>
+<text x="25" y="79">+Z</text>
+<text x="20" y="463" class="small">相対する梁も節点 O を共通原点とし、上同士・下同士を比較。</text>
+<text x="20" y="490" class="small">db の一致だけでは、上下フランジ中心位置の一致は決まらない。</text>
+</svg>
