@@ -827,7 +827,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                             .unwrap_or_else(|| format!("{}", layer + 1));
                         (format!("層崩壊形 ({name})"), false)
                     }
-                    MechanismType::Partial => ("部分崩壊形（機構未形成）".to_string(), true),
+                    MechanismType::Partial => (
+                        "部分崩壊形（分類条件未達・機構成立未確認）".to_string(),
+                        true,
+                    ),
                 };
                 ui.colored_label(
                     if warn {
