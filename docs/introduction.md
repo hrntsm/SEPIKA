@@ -1,13 +1,9 @@
 # SEPIKA
 Integrated Structural Analysis
 
-SEPIKAは、日本語の「一貫計算（IKKAN）」から生まれた構造設計ソフトウェアです。名前はイカに由来し、コウイカを意味するSepiaと日本語のIKAを組み合わせています。
-
-SEPIKA takes its name from Sepia (cuttlefish) and IKA, inspired by the Japanese phrase "Ikkan Keisan" (integrated structural calculation).
-
 ## はじめに
 
-**SEPIKA** は、Rust で実装された日本の建築構造計算一貫プログラムです。
+**SEPIKA** は、日本の建築構造計算一貫プログラムです。モデルを入力し、準備計算で階・剛性・荷重を確認して、解析・部材検定と結果の確認へ進みます。
 
 このサイトは、SEPIKA を利用する方に向けたドキュメントです。
 
@@ -64,6 +60,12 @@ SEPIKA は、国土交通大臣の認定を受けた構造計算プログラム�
 - [dev_docs/v_and_v/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs/v_and_v)：各要素・各設計式の Verification & Validation レポート（[未検証一覧](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/未検証一覧.md)）。法令・規準の埋め込み値の照合チェックリスト [原典照合リスト](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/原典照合リスト.md) も同ディレクトリにあります
 - [GitHub Issues](https://github.com/hrntsm/SEPIKA/issues)：未完了の開発作業・不具合報告・提案
 - [dev_docs/handoff/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs/handoff)：過去の実装経緯・判断の履歴と申し送り目録。[ROADMAP.md](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/handoff/ROADMAP.md) は 2026-07 完了済みの歴史的記録
+
+## 名前について
+
+SEPIKAは、日本語の「一貫計算（IKKAN）」から生まれた構造設計ソフトウェアです。名前はイカに由来し、コウイカを意味するSepiaと日本語のIKAを組み合わせています。
+
+SEPIKA takes its name from Sepia (cuttlefish) and IKA, inspired by the Japanese phrase "Ikkan Keisan" (integrated structural calculation).
 
 ## リポジトリ
 
