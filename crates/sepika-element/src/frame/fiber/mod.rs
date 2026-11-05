@@ -38,7 +38,7 @@ pub(crate) fn steel_fiber_material(e: f64, fy: Option<f64>) -> Box<dyn UniaxialM
 
 /// コンクリートのファイバ材料を生成する。
 ///
-/// `rule` は逆行型・原点指向型・Karsan–Jirsa 型のいずれかを渡す。
+/// `rule` は逆行型・原点指向型のいずれかを渡す。
 ///
 /// # Panics
 ///
@@ -55,25 +55,6 @@ pub(crate) fn concrete_fiber_material(
         );
     };
     match rule {
-        HysteresisModel::KarsanJirsa => {
-            if fc <= 60.0 {
-                Box::new(sepika_material::ConcreteCyclic::newrc_with_initial_tangent(
-                    fc,
-                    0.01,
-                    2.0,
-                    young / 10.0,
-                    young,
-                ))
-            } else {
-                let ec = sepika_material::newrc::NewRcEnvelope::new(fc).ec;
-                Box::new(sepika_material::ConcreteCyclic::newrc(
-                    fc,
-                    0.01,
-                    2.0,
-                    ec / 10.0,
-                ))
-            }
-        }
         HysteresisModel::Retrograde | HysteresisModel::OriginOriented => {
             let mut m = sepika_material::ConcreteNewRc::new(fc, 2.0);
             if fc <= 60.0 {
@@ -84,7 +65,7 @@ pub(crate) fn concrete_fiber_material(
         }
         other => panic!(
             "コンクリートのファイバ材料の除荷則として解釈できません: {other:?}\
-            （逆行型・原点指向型・Karsan-Jirsa型のみ。\
+            （逆行型・原点指向型のみ。\
              factory::resolve_fiber_concrete_hysteresis で解決した値を渡してください）"
         ),
     }

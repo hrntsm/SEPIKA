@@ -1591,3 +1591,86 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
 }
 
 mod loaded_recording;
+
+#[test]
+fn concrete_auto_time_history_unloads_and_reloads_like_explicit_origin_oriented() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{HysteresisModel, LoadCase, LoadCaseKind, LoadSource, NodalLoad};
+    let mut model = sdof_model();
+    model.elements[0].kind = ElementKind::Fiber;
+    model.elements[0].plastic_zone = Some(400.0);
+    model.materials[0].category = MaterialCategory::Concrete;
+    model.materials[0].young = 30000.0;
+    model.materials[0].fc = Some(30.0);
+    model.materials[0].fy = None;
+    model.load_cases = vec![LoadCase {
+        origin: Default::default(),
+        id: LoadCaseId(0),
+        name: "圧縮一定荷重".into(),
+        kind: LoadCaseKind::Dead,
+        nodal: vec![NodalLoad {
+            node: NodeId(1),
+            values: [-10.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            name: String::new(),
+            source: LoadSource::Manual,
+        }],
+        member: vec![],
+    }];
+    let run = |model: &Model| {
+        let map = DofMap::build(model);
+        let reducer = Reducer::build(model, &map);
+        let dt = 0.005;
+        nonlinear_time_history_analysis(
+            model,
+            &map,
+            &reducer,
+            &zero_wave(dt, 300),
+            &NewmarkCfg {
+                beta: 0.25,
+                gamma: 0.5,
+                dt,
+            },
+            &Damping::StiffnessProportional {
+                h: 0.0,
+                omega: 1.0,
+                basis: StiffnessKind::Initial,
+            },
+            DampingAccumulation::NonCumulative,
+            &[],
+            &[0.2],
+            NonlinearThCfg {
+                record_every: Some(1),
+                ..NonlinearThCfg::new(50, 1e-8)
+            },
+        )
+        .unwrap()
+    };
+    let automatic = run(&model);
+    model.set_member_hysteresis_th(ElemId(1), Some(HysteresisModel::OriginOriented));
+    let explicit = run(&model);
+    model.set_member_hysteresis_th(ElemId(1), Some(HysteresisModel::Retrograde));
+    let retrograde = run(&model);
+    assert_eq!(automatic.non_converged_steps, 0);
+    let displacements = |result: &ResponseResult| {
+        result
+            .recording
+            .as_ref()
+            .unwrap()
+            .node_disp
+            .iter()
+            .map(|frame| frame[1][0])
+            .collect::<Vec<_>>()
+    };
+    let automatic = displacements(&automatic);
+    assert_eq!(automatic, displacements(&explicit));
+    assert!(automatic.iter().all(|u| u.is_finite() && *u < 0.0));
+    assert!(automatic.windows(2).any(|u| u[1] > u[0] + 1e-5), "圧縮除荷");
+    assert!(
+        automatic.windows(2).any(|u| u[1] < u[0] - 1e-5),
+        "圧縮再載荷"
+    );
+    assert!(automatic
+        .iter()
+        .zip(displacements(&retrograde))
+        .any(|(a, r)| (a - r).abs() > 1e-5));
+}
