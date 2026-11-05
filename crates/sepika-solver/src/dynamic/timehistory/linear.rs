@@ -508,7 +508,6 @@ fn run_steps(
             time,
             peak_disp,
             story_drift_angle,
-            cumulative_ductility: vec![0.0; model.elements.len()],
             history,
             recording: Some(recorder.finish()),
             nonlinear: false,

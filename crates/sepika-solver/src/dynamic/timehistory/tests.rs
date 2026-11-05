@@ -852,12 +852,6 @@ fn test_nonlinear_time_history_cumulative_vs_noncumulative() {
     let non = run(&const_c, DampingAccumulation::NonCumulative);
     assert_eq!(non.non_converged_steps, 0);
     assert!(non.peak_disp[1][0].is_finite() && non.peak_disp[1][0] >= 1.0);
-    assert_eq!(non.cumulative_ductility.len(), base.elements.len());
-    assert!(
-        non.cumulative_ductility.iter().any(|&damage| damage > 0.0),
-        "塑性化した要素の累積損傷度が非ゼロであるべき: {:?}",
-        non.cumulative_ductility
-    );
     let cum = run(&const_c, DampingAccumulation::Cumulative);
     let non_peak = non.peak_disp[1][0];
     let cum_peak = cum.peak_disp[1][0];

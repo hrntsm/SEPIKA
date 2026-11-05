@@ -53,9 +53,9 @@
 | `calc_basis/05_構造解析/04_減衰.md` | [calc_basis/05_構造解析/04_減衰.md](../../docs/calc_basis/05_構造解析/04_減衰.md) | 維持・全節維持 |
 | `calc_basis/05_構造解析/05_時刻歴応答解析.md` | [calc_basis/05_構造解析/05_時刻歴応答解析.md](../../docs/calc_basis/05_構造解析/05_時刻歴応答解析.md) | 維持・全節維持 |
 | `calc_basis/05_構造解析/07_プッシュオーバー解析.md` | [calc_basis/05_構造解析/07_プッシュオーバー解析.md](../../docs/calc_basis/05_構造解析/07_プッシュオーバー解析.md) | 維持・全節維持 |
-| `calc_basis/05_構造解析/08_累積損傷度.md` | [calc_basis/05_構造解析/08_累積損傷度.md](../../docs/calc_basis/05_構造解析/08_累積損傷度.md) | 維持・全節維持 |
-| `calc_basis/05_構造解析/09_並列計算.md` | [calc_basis/05_構造解析/09_並列計算.md](../../docs/calc_basis/05_構造解析/09_並列計算.md) | 維持・全節維持 |
-| `calc_basis/05_構造解析/10_質点系解析.md` | [calc_basis/05_構造解析/10_質点系解析.md](../../docs/calc_basis/05_構造解析/10_質点系解析.md) | 維持・全節維持 |
+| `calc_basis/05_構造解析/08_累積損傷度.md` | `calc_basis/05_構造解析/08_累積損傷度.md`（#1341で廃止） | 維持・全節維持 |
+| `calc_basis/05_構造解析/09_並列計算.md` | [calc_basis/05_構造解析/09_並列計算.md](../../docs/calc_basis/05_構造解析/08_並列計算.md) | 維持・全節維持 |
+| `calc_basis/05_構造解析/10_質点系解析.md` | [calc_basis/05_構造解析/10_質点系解析.md](../../docs/calc_basis/05_構造解析/09_質点系解析.md) | 維持・全節維持 |
 | `calc_basis/05_構造解析/README.md` | [calc_basis/05_構造解析/README.md](../../docs/calc_basis/05_構造解析/README.md) | 章入口・案内を更新 |
 | `calc_basis/06_一次設計/01_材料の許容応力度.md` | [calc_basis/06_一次設計/01_材料の許容応力度.md](../../docs/calc_basis/06_一次設計/01_材料の許容応力度.md) | 維持・全節維持 |
 | `calc_basis/06_一次設計/02_RC_断面検定.md` | [calc_basis/06_一次設計/02_RC_断面検定.md](../../docs/calc_basis/06_一次設計/02_RC_断面検定.md) | 維持・全節維持 |

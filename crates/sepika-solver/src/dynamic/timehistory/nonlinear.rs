@@ -127,7 +127,6 @@ pub fn nonlinear_time_history_analysis(
         b.set_time_step(dt);
     }
     let mut peak_force_scale = 0.0_f64;
-    let mut mu_hist: Vec<Vec<f64>> = vec![Vec::new(); model.elements.len()];
 
     let m_free = assemble_global_m(model, dofmap, MassOption::Consistent)?;
     let m_red = reducer.reduce_k(&m_free);
@@ -507,12 +506,6 @@ pub fn nonlinear_time_history_analysis(
                 b.commit_state();
             }
 
-            for (i, b) in behaviors.iter().enumerate() {
-                if let Some(p) = b.ductility_probe() {
-                    mu_hist[i].push(p.max_yield_ratio);
-                }
-            }
-
             time.push(t_next);
 
             reducer.expand_u_into(&u, &mut u_free);
@@ -556,12 +549,6 @@ pub fn nonlinear_time_history_analysis(
 
     let peak_disp = dofmap.expand_to_nodes(&peak_disp_free, model.nodes.len());
 
-    let fatigue = crate::damage::FatigueParams::default();
-    let cumulative_ductility: Vec<f64> = mu_hist
-        .iter()
-        .map(|series| crate::damage::cumulative_damage_rainflow(series, fatigue))
-        .collect();
-
     Ok(ResponseResult {
         wall_capacities,
         rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
@@ -569,7 +556,6 @@ pub fn nonlinear_time_history_analysis(
         time,
         peak_disp,
         story_drift_angle,
-        cumulative_ductility,
         history,
         recording: Some(recorder.finish()),
         nonlinear: true,

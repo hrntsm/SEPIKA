@@ -11072,7 +11072,6 @@ pub(super) fn dummy_th(time: Vec<f64>) -> sepika_solver::dynamic::timehistory::R
         time,
         peak_disp: vec![],
         story_drift_angle: vec![],
-        cumulative_ductility: vec![],
         history: Default::default(),
         recording: None,
         nonlinear: false,
