@@ -1062,7 +1062,7 @@ fn test_resolve_member_hysteresis_two_slots() {
 }
 
 /// ファイバー・MS のコンクリート除荷則の解決を検証する。
-/// - 既定: 増分=逆行型、時刻歴=Karsan–Jirsa 型（壁は増分=原点指向型）
+/// - 既定: 増分=逆行型、時刻歴=原点指向型（壁は増分=原点指向型）
 /// - コンクリート履歴として解釈できない指定（武田型等）は既定へフォールバック
 #[test]
 fn test_resolve_fiber_concrete_hysteresis_defaults_and_overrides() {
@@ -1092,7 +1092,7 @@ fn test_resolve_fiber_concrete_hysteresis_defaults_and_overrides() {
     );
     assert_eq!(
         resolve_fiber_concrete_hysteresis(&col, &model, AnalysisKind::TimeHistory),
-        HysteresisModel::KarsanJirsa
+        HysteresisModel::OriginOriented
     );
     assert_eq!(
         resolve_wall_concrete_hysteresis(&col, &model, AnalysisKind::Incremental),
@@ -1100,34 +1100,50 @@ fn test_resolve_fiber_concrete_hysteresis_defaults_and_overrides() {
     );
     assert_eq!(
         resolve_wall_concrete_hysteresis(&col, &model, AnalysisKind::TimeHistory),
-        HysteresisModel::KarsanJirsa
-    );
-
-    model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
-    assert_eq!(
-        resolve_fiber_concrete_hysteresis(&col, &model, AnalysisKind::Incremental),
-        HysteresisModel::Retrograde
-    );
-
-    model.set_member_hysteresis(ElemId(0), HysteresisModel::OriginOriented);
-    assert_eq!(
-        resolve_fiber_concrete_hysteresis(&col, &model, AnalysisKind::Incremental),
         HysteresisModel::OriginOriented
     );
-    assert_eq!(
-        resolve_fiber_concrete_hysteresis(&col, &model, AnalysisKind::TimeHistory),
-        HysteresisModel::OriginOriented
-    );
-
-    model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::KarsanJirsa));
-    assert_eq!(
-        resolve_fiber_concrete_hysteresis(&col, &model, AnalysisKind::Incremental),
-        HysteresisModel::OriginOriented
-    );
-    assert_eq!(
-        resolve_fiber_concrete_hysteresis(&col, &model, AnalysisKind::TimeHistory),
-        HysteresisModel::KarsanJirsa
-    );
+    for element_kind in [
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Wall,
+    ] {
+        let mut data = col.clone();
+        data.kind = element_kind;
+        for incremental in HysteresisModel::ALL {
+            for time_history in
+                std::iter::once(None).chain(HysteresisModel::ALL.into_iter().map(Some))
+            {
+                model.set_member_hysteresis(data.id, incremental);
+                model.set_member_hysteresis_th(data.id, time_history);
+                for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+                    let specified = if kind == AnalysisKind::Incremental {
+                        incremental
+                    } else {
+                        time_history.unwrap_or(incremental)
+                    };
+                    let default =
+                        if kind == AnalysisKind::Incremental && element_kind != ElementKind::Wall {
+                            HysteresisModel::Retrograde
+                        } else {
+                            HysteresisModel::OriginOriented
+                        };
+                    let expected = match specified {
+                        HysteresisModel::Retrograde | HysteresisModel::OriginOriented => specified,
+                        _ => default,
+                    };
+                    let actual = if element_kind == ElementKind::Wall {
+                        resolve_wall_concrete_hysteresis(&data, &model, kind)
+                    } else {
+                        resolve_fiber_concrete_hysteresis(&data, &model, kind)
+                    };
+                    assert_eq!(
+                        actual, expected,
+                        "{element_kind:?} {kind:?} {incremental:?} {time_history:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// 耐震壁の面内せん断ばねの履歴則解決を検証する。
@@ -1162,14 +1178,14 @@ fn test_resolve_wall_shear_hysteresis_defaults_and_overrides() {
         );
     }
 
-    model.set_member_hysteresis(ElemId(0), HysteresisModel::KarsanJirsa);
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::OriginOriented);
     assert_eq!(
         resolve_wall_shear_hysteresis(&wall, &model, AnalysisKind::Incremental),
-        HysteresisModel::MaxPointOriented
+        HysteresisModel::OriginOriented
     );
     assert_eq!(
         resolve_wall_concrete_hysteresis(&wall, &model, AnalysisKind::Incremental),
-        HysteresisModel::KarsanJirsa
+        HysteresisModel::OriginOriented
     );
 
     model.set_member_hysteresis(ElemId(0), HysteresisModel::Standard);

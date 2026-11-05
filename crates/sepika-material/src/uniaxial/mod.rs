@@ -3,12 +3,10 @@ use std::fmt::Debug;
 
 pub mod bilinear;
 pub mod concrete;
-pub mod concrete_cyclic;
 pub mod menegotto_pinto;
 
 pub use bilinear::Bilinear;
 pub use concrete::Concrete;
-pub use concrete_cyclic::{ConcreteCyclic, ConcreteEnvelope};
 pub use menegotto_pinto::MenegottoPinto;
 
 /// 材料状態の直列化・復元に関するエラー。

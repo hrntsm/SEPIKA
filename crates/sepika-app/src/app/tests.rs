@@ -13863,7 +13863,7 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
         .unwrap()
         .contains("旧契約"));
     let legacy = original.core.scoped.results.as_mut().unwrap();
-    legacy.analysis_contract_version = Some(34);
+    legacy.analysis_contract_version = Some(ANALYSIS_CONTRACT_VERSION - 1);
     legacy.design_contract_version = Some(DESIGN_CONTRACT_VERSION);
     save_legacy(&original);
     reopened.open_project_from(path.clone());
@@ -13876,7 +13876,11 @@ fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_desig
         .result_contract_notice
         .as_deref()
         .unwrap();
-    assert!(reason.contains("解析") && reason.contains("旧契約") && reason.contains("保存版=34"));
+    assert!(
+        reason.contains("解析")
+            && reason.contains("旧契約")
+            && reason.contains(&format!("保存版={}", ANALYSIS_CONTRACT_VERSION - 1))
+    );
     let metrics = crate::summary::seismic_story_metrics(&reopened);
     assert!(!metrics.is_empty());
     assert!(metrics

@@ -139,11 +139,7 @@ pub fn resolve_fiber_concrete_hysteresis(
     kind: AnalysisKind,
 ) -> HysteresisModel {
     match specified_hysteresis(data, model, kind) {
-        Some(
-            r @ (HysteresisModel::Retrograde
-            | HysteresisModel::OriginOriented
-            | HysteresisModel::KarsanJirsa),
-        ) => r,
+        Some(r @ (HysteresisModel::Retrograde | HysteresisModel::OriginOriented)) => r,
         _ => default_fiber_concrete_hysteresis(kind),
     }
 }
@@ -155,15 +151,8 @@ pub fn resolve_wall_concrete_hysteresis(
     kind: AnalysisKind,
 ) -> HysteresisModel {
     match specified_hysteresis(data, model, kind) {
-        Some(
-            r @ (HysteresisModel::Retrograde
-            | HysteresisModel::OriginOriented
-            | HysteresisModel::KarsanJirsa),
-        ) => r,
-        _ => match kind {
-            AnalysisKind::Incremental => HysteresisModel::OriginOriented,
-            AnalysisKind::TimeHistory => HysteresisModel::KarsanJirsa,
-        },
+        Some(r @ (HysteresisModel::Retrograde | HysteresisModel::OriginOriented)) => r,
+        _ => HysteresisModel::OriginOriented,
     }
 }
 

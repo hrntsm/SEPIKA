@@ -1130,10 +1130,10 @@ fn unsupported_concentrated_rc_law_never_falls_through_to_takeda_without_basis()
     use sepika_core::model::{AnalysisKind, HysteresisModel};
     let mut model = explicit_rc_reference_fixture();
     model.set_member_rc_beam_reference(ElemId(0), None);
-    model.set_member_hysteresis(ElemId(0), HysteresisModel::KarsanJirsa);
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::OriginOriented);
     for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
         let reason = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
-        assert!(reason.contains("Karsan"), "{reason}");
+        assert!(reason.contains("原点指向型"), "{reason}");
         assert!(reason.contains("未対応"), "{reason}");
         assert_eq!(public_generation_diagnostic_for_kind(&model, kind), reason);
         let view = crate::factory::build_hinge_view(
@@ -1148,7 +1148,7 @@ fn unsupported_concentrated_rc_law_never_falls_through_to_takeda_without_basis()
         .unwrap();
         assert!(view.backbone.is_none());
         assert!(view.total_backbone.is_none());
-        assert!(view.unavailability_reason.unwrap().contains("Karsan"));
+        assert!(view.unavailability_reason.unwrap().contains("原点指向型"));
     }
     // 未実行側の指定が対応済みの実行側を拒否する根拠にはならない。
     model.set_member_rc_beam_reference(

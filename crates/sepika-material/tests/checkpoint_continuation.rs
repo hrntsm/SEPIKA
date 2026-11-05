@@ -1,6 +1,6 @@
 use sepika_material::{
-    Bilinear, Concrete, ConcreteCyclic, ConcreteNewRc, HysteresisMaterial, HysteresisRule,
-    TsujiYamada, UniaxialMaterial,
+    Bilinear, Concrete, ConcreteNewRc, HysteresisMaterial, HysteresisRule, TsujiYamada,
+    UniaxialMaterial,
 };
 
 #[test]
@@ -8,13 +8,12 @@ fn checkpoints_preserve_committed_and_outstanding_trial_history() {
     let mut materials: Vec<Box<dyn UniaxialMaterial>> = vec![
         Box::new(Bilinear::new(205000.0, 235.0, 0.01)),
         Box::new(Concrete::new(30.0, 2.0)),
-        Box::new(ConcreteCyclic::kent_park(
-            30.0, 0.002, 6.0, 0.006, 2.0, 1000.0,
-        )),
-        Box::new(ConcreteCyclic::newrc(30.0, 0.01, 2.0, 1000.0)),
         Box::new(ConcreteNewRc::new(30.0, 2.0)),
         Box::new(TsujiYamada::new(205000.0, 235.0, 2050.0, 0.5)),
     ];
+    let mut origin = ConcreteNewRc::new(30.0, 2.0);
+    origin.set_concrete_hysteresis(true);
+    materials.push(Box::new(origin));
     for rule in [
         HysteresisRule::Takeda {
             crack: (40.0, 0.002),

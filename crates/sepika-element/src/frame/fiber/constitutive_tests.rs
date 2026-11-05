@@ -432,9 +432,8 @@ fn committed_bilinear_and_concrete_extrema_preserve_exact_trial_caches_on_all_re
             1.0 / 32.0,
         ),
         (
-            Box::new(sepika_material::ConcreteCyclic::newrc_with_initial_tangent(
-                30.0, 0.01, 2.0, 2500.0, 25000.0,
-            )) as Box<dyn UniaxialMaterial>,
+            concrete_fiber_material(Some(30.0), 25000.0, HysteresisModel::OriginOriented)
+                as Box<dyn UniaxialMaterial>,
             25000.0,
             -0.001,
         ),

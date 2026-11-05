@@ -3227,12 +3227,12 @@ fn test_set_member_hysteresis_th_roundtrip() {
         &mut model,
         Box::new(SetMemberHysteresisTh {
             elem: ElemId(0),
-            rule_th: Some(HysteresisModel::KarsanJirsa),
+            rule_th: Some(HysteresisModel::OriginOriented),
         }),
     );
     assert_eq!(
         model.member_hysteresis_th_raw(ElemId(0)),
-        Some(HysteresisModel::KarsanJirsa)
+        Some(HysteresisModel::OriginOriented)
     );
     // 増分用スロットは影響を受けない。
     assert_eq!(
@@ -3250,7 +3250,7 @@ fn test_set_member_hysteresis_th_roundtrip() {
     stack.redo(&mut model);
     assert_eq!(
         model.member_hysteresis_th_raw(ElemId(0)),
-        Some(HysteresisModel::KarsanJirsa)
+        Some(HysteresisModel::OriginOriented)
     );
 
     // 存在しない部材は Noop。

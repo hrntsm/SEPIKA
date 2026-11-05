@@ -303,6 +303,34 @@ mod tests {
     use sepika_core::model::*;
     use sepika_core::section_shape::*;
 
+    #[test]
+    fn removed_concrete_hysteresis_is_rejected_in_both_saved_slots() {
+        for slot in ["rule", "rule_th"] {
+            let path =
+                crate::test_util::test_tmp().join(format!("removed-hysteresis-{slot}.ovika"));
+            let mut model = Model::default();
+            model.set_member_hysteresis(ElemId(0), HysteresisModel::OriginOriented);
+            let mut value = serde_json::to_value(&model).unwrap();
+            value["member_hysteresis_attrs"][0][slot] = serde_json::json!("KarsanJirsa");
+            let bytes = rmp_serde::to_vec_named(&value).unwrap();
+            let manifest = Manifest {
+                schema_version: CURRENT_SCHEMA_VERSION,
+                units: "internal: N-mm-s".into(),
+                created_by: "legacy-hysteresis-fixture".into(),
+                entries: vec![crate::manifest::EntryHash {
+                    name: "model.msgpack".into(),
+                    sha256: sha256_of(&bytes),
+                }],
+            };
+            write_zip_with_manifest(&path, &manifest, &bytes);
+            let error = load_ovika(&path).err().unwrap();
+            assert!(
+                matches!(&error, IoError::Decode(reason) if reason.contains("KarsanJirsa") && reason.contains("unknown variant")),
+                "{error}"
+            );
+        }
+    }
+
     fn rc_purpose_shapes() -> Vec<(
         SectionShape,
         FrameSectionUse,

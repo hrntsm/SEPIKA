@@ -29,9 +29,6 @@ pub enum HysteresisModel {
     TsujiYamada,
     /// 鉄骨大梁の座屈考慮履歴（耐力劣化型＋RO 除荷。局部/横/連成座屈）。
     SteelBuckling,
-    /// Karsan–Jirsa 型（Yassin 1994 / Concrete02 系。残留塑性ひずみを通る割線
-    /// 除荷・ひび割れ開閉。ファイバー断面・MS のコンクリートの時刻歴既定）。
-    KarsanJirsa,
 }
 
 impl HysteresisModel {
@@ -46,12 +43,11 @@ impl HysteresisModel {
             HysteresisModel::Takeda => "武田型",
             HysteresisModel::TsujiYamada => "辻・山田型",
             HysteresisModel::SteelBuckling => "座屈考慮型",
-            HysteresisModel::KarsanJirsa => "Karsan-Jirsa型",
         }
     }
 
     /// UI・列挙用の全候補。
-    pub const ALL: [HysteresisModel; 9] = [
+    pub const ALL: [HysteresisModel; 8] = [
         HysteresisModel::Auto,
         HysteresisModel::Retrograde,
         HysteresisModel::Standard,
@@ -60,7 +56,6 @@ impl HysteresisModel {
         HysteresisModel::Takeda,
         HysteresisModel::TsujiYamada,
         HysteresisModel::SteelBuckling,
-        HysteresisModel::KarsanJirsa,
     ];
 }
 
@@ -87,13 +82,11 @@ pub fn default_member_hysteresis(rc_like: bool) -> HysteresisModel {
 }
 
 /// ファイバー断面・MS 要素のコンクリート除荷則の既定。
-/// - 増分解析: 逆行型（除荷が稀で骨格追従が主目的のため、包絡線を可逆に辿る）
-/// - 時刻歴応答解析: Karsan–Jirsa 型（Yassin 1994。残留塑性ひずみ・ひび割れ開閉を
-///   表現し、履歴吸収エネルギーの評価が原点指向型より現実的）
+/// 増分解析は逆行型、時刻歴応答解析は原点指向型。
 pub fn default_fiber_concrete_hysteresis(kind: AnalysisKind) -> HysteresisModel {
     match kind {
         AnalysisKind::Incremental => HysteresisModel::Retrograde,
-        AnalysisKind::TimeHistory => HysteresisModel::KarsanJirsa,
+        AnalysisKind::TimeHistory => HysteresisModel::OriginOriented,
     }
 }
 
