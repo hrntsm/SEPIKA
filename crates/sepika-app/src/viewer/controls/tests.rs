@@ -326,7 +326,6 @@ fn mode_menu_includes_conditional_results_and_keeps_time_history_playback() {
             time: vec![0.0, 1.0],
             peak_disp: vec![],
             story_drift_angle: vec![],
-            cumulative_ductility: vec![],
             history: Default::default(),
             recording: Some(ThRecording {
                 frame_time: vec![0.0, 1.0],

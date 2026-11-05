@@ -10,13 +10,13 @@
 //! - [`statics`] —   静的解析（線形静的・地震/風荷重）
 //! - [`nonlinear`] — 非線形（漸増）静的解析（プッシュオーバー）
 //! - [`dynamic`] —   動的解析（時刻歴・減衰・固有値）
-//! - [`damage`] —    損傷指標
+//! - [`rainflow`] —  波形の繰返し計数
 //!
 //! モジュールパスは階層をそのまま辿る（例: `sepika_solver::nonlinear::pushover`）。
 //! 再エクスポートによる平坦なパスは設けない。
 
 pub mod common;
-pub mod damage;
 pub mod dynamic;
 pub mod nonlinear;
+pub mod rainflow;
 pub mod statics;

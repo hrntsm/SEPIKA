@@ -17,7 +17,6 @@ pub struct ResponseResult {
     pub time: Vec<f64>,
     pub peak_disp: Vec<[f64; 6]>,
     pub story_drift_angle: Vec<f64>,
-    pub cumulative_ductility: Vec<f64>,
     pub history: ResponseHistory,
     /// 3D アニメーション・層応答グラフ・部材履歴用の詳細記録（間引きあり）。
     /// 読込時は `None` で補う。

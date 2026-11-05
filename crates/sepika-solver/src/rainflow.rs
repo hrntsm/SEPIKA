@@ -1,21 +1,4 @@
-//! 鉄骨梁端部の累積損傷度（レインフロー法（ASTM E1049-85）・Miner 則）。
-
-/// 鉄骨疲労特性（`Nf = (μ/C)^(−1/β)`）。
-///
-/// `c`・`beta` の既定値は C=20.0・β=0.5（鋼種・接合形式に依存）。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FatigueParams {
-    /// 疲労強度係数 C。
-    pub c: f64,
-    /// 疲労指数 β。
-    pub beta: f64,
-}
-
-impl Default for FatigueParams {
-    fn default() -> Self {
-        Self { c: 20.0, beta: 0.5 }
-    }
-}
+//! 時系列のレインフロー計数。
 
 /// レインフローで抽出した 1 サイクル。`range` は振れ幅（peak-to-peak）、
 /// `count` は回数（全サイクル=1.0、半サイクル=0.5）。
@@ -88,22 +71,6 @@ pub fn rainflow_cycles(series: &[f64]) -> Vec<RainflowCycle> {
     cycles
 }
 
-/// レインフロー法による累積損傷度 `D = Σ Nei/Nfi`。
-pub fn cumulative_damage_rainflow(ductility_series: &[f64], p: FatigueParams) -> f64 {
-    if p.c <= 0.0 || p.beta <= 0.0 {
-        return 0.0;
-    }
-    let mut d = 0.0;
-    for cyc in rainflow_cycles(ductility_series) {
-        let mu = cyc.range * 0.5;
-        if mu <= 0.0 {
-            continue;
-        }
-        d += cyc.count * (mu / p.c).powf(1.0 / p.beta);
-    }
-    d
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,22 +107,5 @@ mod tests {
             .map(|x| x.count)
             .sum();
         assert!((half4 - 1.0).abs() < 1e-9, "range-4 total count: {half4}");
-    }
-
-    #[test]
-    fn test_cumulative_damage_rainflow_handcalc() {
-        // [0,4,0]: 半サイクル range4 ×2（合計1回）、μ=2。C=20,β=0.5。
-        // 1/Nf = (2/20)^(1/0.5) = 0.1^2 = 0.01。D = 1.0·0.01 = 0.01。
-        let p = FatigueParams { c: 20.0, beta: 0.5 };
-        let d = cumulative_damage_rainflow(&[0.0, 4.0, 0.0], p);
-        assert!((d - 0.01).abs() < 1e-9, "D={d}");
-    }
-
-    #[test]
-    fn test_damage_increases_with_amplitude() {
-        let p = FatigueParams::default();
-        let small = cumulative_damage_rainflow(&[0.0, 2.0, 0.0, 2.0, 0.0], p);
-        let large = cumulative_damage_rainflow(&[0.0, 6.0, 0.0, 6.0, 0.0], p);
-        assert!(large > small, "larger amplitude → larger damage");
     }
 }

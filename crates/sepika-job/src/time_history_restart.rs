@@ -122,7 +122,6 @@ impl LinearTimeHistoryCheckpoint {
             || self.result.history.top_drift_angle.len() != step + 1
             || self.result.peak_disp.len() != self.model.nodes.len()
             || self.result.story_drift_angle.len() != self.model.layer_count()
-            || self.result.cumulative_ductility.len() != self.model.elements.len()
             || self.result.recording.is_none()
         {
             return Err(invalid("再開状態の時刻・応答・前半記録が不正です。"));

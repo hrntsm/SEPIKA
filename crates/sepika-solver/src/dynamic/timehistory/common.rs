@@ -269,7 +269,6 @@ pub(crate) fn empty_response(
         time: vec![],
         peak_disp: vec![[0.0; 6]; model.nodes.len()],
         story_drift_angle: vec![0.0; model.layer_count()],
-        cumulative_ductility: vec![0.0; model.elements.len()],
         history: ResponseHistory::default(),
         recording: None,
         nonlinear,
