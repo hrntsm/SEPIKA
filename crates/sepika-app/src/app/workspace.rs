@@ -593,7 +593,7 @@ impl App {
                 self.ui.view.workspace.placement.fraction = (p.fraction + delta).clamp(0.2, 0.8);
             }
             ui.painter()
-                .rect_filled(divider, 0.0, crate::theme::GRAY_600);
+                .rect_filled(divider, 0.0, crate::theme::UI_MUTED);
             self.workspace_pane(ui, first, 0, &mut primary);
             self.workspace_pane(ui, second, 1, &mut secondary);
         }
@@ -620,6 +620,7 @@ impl App {
         view.pane_index = index;
         let mut content = self.ui.view.workspace.placement.contents[index];
         let input_focus = text_input_focus(ui);
+        let heading_background = ui.painter().add(egui::Shape::Noop);
         let header = ui.horizontal_wrapped(|ui| {
             let active = self.ui.view.workspace.placement.active == index;
             if crate::theme::selectable_name(
@@ -650,6 +651,10 @@ impl App {
                 self.ui.view.workspace.placement.arrangement = Arrangement::Single;
             }
         });
+        ui.painter().set(
+            heading_background,
+            egui::Shape::rect_filled(header.response.rect, 3, crate::theme::UI_HEADER),
+        );
         retain_input_focus(ui, input_focus, header.response.rect);
         if content != Content::Drawing
             && self.ui.view.workspace.placement.contents[1 - index] == content
@@ -711,6 +716,7 @@ impl App {
             Content::Design => self.design_tab_panel(ui),
             Content::Report => self.report_tab_panel(ui),
         }
+        crate::theme::group_outline(&pane, rect.shrink(1.5), pane.id().with("outline"));
     }
 
     pub(crate) fn workspace_table(&mut self, ui: &mut egui::Ui, content: Content) {

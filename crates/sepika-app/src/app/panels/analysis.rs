@@ -46,7 +46,7 @@ impl App {
             ui.label("計算時入力・結果は読取専用です");
             return;
         }
-        ui.heading("静的解析");
+        crate::theme::panel_heading(ui, "静的解析", "条件・実行結果");
         ui.separator();
         self.analysis_status_header(ui);
         ui.separator();
@@ -56,7 +56,7 @@ impl App {
 
     /// 右ドック「固有値」パネル。
     pub(crate) fn eigen_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("固有値");
+        crate::theme::panel_heading(ui, "固有値", "条件・実行結果");
         ui.separator();
         self.analysis_status_header(ui);
         ui.separator();
@@ -66,7 +66,7 @@ impl App {
 
     /// 右ドック「増分解析」パネル。
     pub(crate) fn pushover_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("増分解析");
+        crate::theme::panel_heading(ui, "増分解析", "条件・実行結果");
         ui.separator();
         self.analysis_status_header(ui);
         ui.separator();
@@ -76,7 +76,7 @@ impl App {
 
     /// 右ドック「時刻歴応答」パネル。
     pub(crate) fn time_history_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("時刻歴応答");
+        crate::theme::panel_heading(ui, "時刻歴応答", "条件・実行結果");
         ui.separator();
         self.analysis_status_header(ui);
         ui.separator();
@@ -107,7 +107,7 @@ impl App {
             egui::ComboBox::from_id_salt("analysis_target")
                 .selected_text(text)
                 .show_ui(ui, |ui| {
-                    ui.label(egui::RichText::new("荷重ケース").color(crate::theme::GRAY_600));
+                    ui.label(egui::RichText::new("荷重ケース").color(crate::theme::UI_MUTED));
                     for case in &self.core.model.load_cases {
                         let id = case.id;
                         let label = format!("[{}] {}", case.id.0, case.name);
@@ -119,7 +119,7 @@ impl App {
                     }
                     if !self.core.model.combinations.is_empty() {
                         ui.separator();
-                        ui.label(egui::RichText::new("荷重組合せ").color(crate::theme::GRAY_600));
+                        ui.label(egui::RichText::new("荷重組合せ").color(crate::theme::UI_MUTED));
                     }
                     for (i, combo) in self.core.model.combinations.iter().enumerate() {
                         let name = &combo.name;
@@ -132,7 +132,7 @@ impl App {
             if ui
                 .add_enabled(
                     target.is_some() && !running,
-                    egui::Button::new("▶ 単体実行"),
+                    egui::Button::new("▶ 単体実行").fill(crate::theme::UI_ACTION),
                 )
                 .on_hover_text(
                     "選択した荷重ケース／荷重組合せを 1 件だけ解析します\
@@ -153,7 +153,10 @@ impl App {
         });
         ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(!running, egui::Button::new("▶▶ 一括解析"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("▶▶ 一括解析").fill(crate::theme::UI_ACTION),
+                )
                 .on_hover_text(
                     "全ての荷重ケースを解析し、全ての荷重組合せをその結果の線形和で\
                              求めます（並列スレッド数設定を使用）",
@@ -171,12 +174,12 @@ impl App {
         });
         if self.core.model.load_cases.is_empty() {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "荷重ケースがありません。荷重タブで作成してください。",
             );
         } else {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "EX/EY（地震力）は準備計算が自動生成します。\
                      荷重組合せは荷重ケース単体の解析結果の線形和として求めます。",
             );
@@ -238,14 +241,17 @@ impl App {
             cfg.n_modes = n;
             self.commit_analysis_settings(cfg);
             if ui
-                .add_enabled(!running, egui::Button::new("▶ 実行"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("▶ 実行").fill(crate::theme::UI_ACTION),
+                )
                 .clicked()
             {
                 self.request_analysis(PendingAnalysis::Eigen(cfg.n_modes));
             }
         });
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "質量方式は準備計算の「計算条件」で設定します。",
         );
     }
@@ -282,7 +288,7 @@ impl App {
         });
         if !cfg.push_use_max_disp && !cfg.push_use_drift_angle {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "目標未設定: 荷重制御(λ=1)までで終了します。",
             );
         }
@@ -356,7 +362,10 @@ impl App {
 
         ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(!running, egui::Button::new("▶ 実行"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("▶ 実行").fill(crate::theme::UI_ACTION),
+                )
                 .clicked()
             {
                 self.request_analysis(PendingAnalysis::Pushover);
@@ -596,7 +605,10 @@ impl App {
         }
         ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(!running, egui::Button::new("▶ サンプル波で実行"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("▶ サンプル波で実行").fill(crate::theme::UI_ACTION),
+                )
                 .on_hover_text("正弦減衰波を生成して時刻歴解析を実行します")
                 .clicked()
             {
@@ -611,7 +623,10 @@ impl App {
                 }
             }
             if ui
-                .add_enabled(!running, egui::Button::new("📂 波形CSVを開いて実行…"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("📂 波形CSVを開いて実行…").fill(crate::theme::UI_ACTION),
+                )
                 .on_hover_text("1 行 1 値(加速度 gal)の CSV/テキスト。dt は上の設定値を使用します")
                 .clicked()
             {
@@ -635,7 +650,7 @@ impl App {
                 .and_then(|d| sepika_io::wave_library::list_wave_library(d).ok())
                 .unwrap_or_default();
             if names.is_empty() {
-                ui.colored_label(crate::theme::GRAY_600, "登録された波形がありません");
+                ui.colored_label(crate::theme::UI_MUTED, "登録された波形がありません");
             } else {
                 let selected_text = self
                     .core
@@ -656,7 +671,7 @@ impl App {
             if ui
                 .add_enabled(
                     !running && self.core.scoped.wave_library_selection.is_some(),
-                    egui::Button::new("▶ 選択した波形で実行"),
+                    egui::Button::new("▶ 選択した波形で実行").fill(crate::theme::UI_ACTION),
                 )
                 .on_hover_text("dt は上の設定値を使用します")
                 .clicked()
@@ -667,7 +682,7 @@ impl App {
         ui.label(
             egui::RichText::new("応答グラフは入力の大きい方向を記録")
                 .small()
-                .color(crate::theme::GRAY_600),
+                .color(crate::theme::UI_MUTED),
         );
     }
 
@@ -717,7 +732,7 @@ impl App {
             LumpedMassType, LumpedStiffnessSource, StickDim,
         };
 
-        ui.heading("質点系");
+        crate::theme::panel_heading(ui, "質点系", "条件・実行結果");
         ui.separator();
         self.analysis_status_header(ui);
         ui.separator();
@@ -769,7 +784,7 @@ impl App {
             });
             if !stiff_enabled {
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     if cfg.lumped_nonlinear {
                         "非線形時の並進剛性は増分の初期剛性です"
                     } else {
@@ -885,7 +900,7 @@ impl App {
         }
         if spatial {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "3 次元のねじりばね（KR）は常に線形です。",
             );
         }
@@ -946,13 +961,19 @@ impl App {
         }
         ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(!running, egui::Button::new("▶ 固有値を実行"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("▶ 固有値を実行").fill(crate::theme::UI_ACTION),
+                )
                 .clicked()
             {
                 self.request_analysis(PendingAnalysis::LumpedMassEigen);
             }
             if ui
-                .add_enabled(!running, egui::Button::new("▶ サンプル波で時刻歴"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("▶ サンプル波で時刻歴").fill(crate::theme::UI_ACTION),
+                )
                 .clicked()
             {
                 self.start_lumped_mass_sample_th_job();
@@ -976,7 +997,7 @@ impl App {
                 .and_then(|d| sepika_io::wave_library::list_wave_library(d).ok())
                 .unwrap_or_default();
             if names.is_empty() {
-                ui.colored_label(crate::theme::GRAY_600, "登録された波形がありません");
+                ui.colored_label(crate::theme::UI_MUTED, "登録された波形がありません");
             } else {
                 let selected_text = self
                     .core
@@ -997,7 +1018,7 @@ impl App {
             if ui
                 .add_enabled(
                     !running && self.core.scoped.lumped_wave_library_selection.is_some(),
-                    egui::Button::new("▶ 選択波形で時刻歴"),
+                    egui::Button::new("▶ 選択波形で時刻歴").fill(crate::theme::UI_ACTION),
                 )
                 .clicked()
             {

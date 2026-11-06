@@ -560,7 +560,7 @@ impl App {
         };
         let mut open = true;
         let state = self.evidence_state(&evidence);
-        egui::Window::new(&evidence.title).id(egui::Id::new("result_evidence")).default_width(680.0).open(&mut open).show(ctx, |ui| {
+        let window = egui::Window::new(&evidence.title).id(egui::Id::new("result_evidence")).default_width(680.0).open(&mut open).show(ctx, |ui| {
             ui.strong("結果生成時の根拠（読み取り専用）");
             if let Some(source) = &evidence.source {
                 ui.label(format!("案 {} / 入力世代 {} / 入力識別 {}", source.proposal, source.generation, source.input));
@@ -618,6 +618,9 @@ impl App {
             });
             ui.label("閲覧後はこの窓を閉じると元の図表に戻ります。AIの説明は補足であり、検定や計算値の保証を置き換えません。");
         });
+        if let Some(window) = window {
+            crate::theme::window_outline(&window.response);
+        }
         if open {
             self.ui.scoped.result_evidence = Some(evidence);
         } else if let Some(return_to) = evidence.return_to {

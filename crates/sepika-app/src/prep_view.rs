@@ -70,7 +70,7 @@ pub fn preparation_panel(ui: &mut egui::Ui, app: &mut App) {
             .and_then(|p| p.computed_at.elapsed().ok())
         {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 format!("最終実行: {:.0} 秒前", elapsed.as_secs_f64()),
             );
         }
@@ -86,7 +86,7 @@ pub fn preparation_panel(ui: &mut egui::Ui, app: &mut App) {
 
     let Some(prep) = app.core.scoped.preparation.as_ref() else {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "準備計算が未実行です。「▶ 準備計算 実行」を押すと、\
              階の分布・剛域・Ai 分布・荷重集計を確認できます。",
         );
@@ -203,7 +203,7 @@ fn stories_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 
     if prep.stories.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "階が定義されていません（地震力・増分解析には階の定義が必要です）",
         );
         return;
@@ -336,7 +336,7 @@ fn seismic_section(ui: &mut egui::Ui, prep: &PreparationResult) {
             });
             ui.end_row();
         });
-    ui.colored_label(crate::theme::GRAY_600, "Zの地方区分・地盤種別の実態条件は利用者による確認が必要です。地域自動判定・Rt/Ai特例・突出部局部検討は未対応です。");
+    ui.colored_label(crate::theme::UI_MUTED, "Zの地方区分・地盤種別の実態条件は利用者による確認が必要です。地域自動判定・Rt/Ai特例・突出部局部検討は未対応です。");
     if sm.clamped_negative_pi {
         ui.colored_label(
             crate::theme::ERROR_RED,
@@ -404,7 +404,7 @@ fn seismic_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     );
     ui.add_space(4.0);
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "Ci は一般階が層せん断力係数、PH 階は震度 k、地下階は水平震度 K を表します。\
          αi・Ai は一般階のみ算定します（令88条・昭55建告1793号）。",
     );
@@ -420,7 +420,7 @@ fn seismic_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 fn torsion_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     if !prep.torsion_release_enabled {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "「部材 i 端のねじりをピン（梁・柱）」が OFF のため、全部材でねじり剛性 GJ/L を             保持しています（準備計算パネルの「部材のモデル化」で切り替えます）。",
         );
         return;
@@ -430,7 +430,7 @@ fn torsion_section(ui: &mut egui::Ui, prep: &PreparationResult) {
         prep.torsion_skipped.len()
     ));
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "既定では線材（梁・柱）の i 端ねじれをピンとし、部材全長で Mx=0 とします。         ただし、ねじりを解放すると材軸まわりの回転を拘束するものがなくなる節点を持つ部材は、         剛性行列が特異になるため自動的に対象外とし、ねじり剛性 GJ/L を保持します。         材軸まわりの回転は「非平行な線材の曲げ」「線材以外の要素（壁・シェル・ばね類）」         「支点拘束」「支点ばねの回転成分」のいずれかで拘束されている必要があります。         仕口パネルは接合部のせん断変形角にのみ剛性を与え、節点の回転自由度には         寄与しないため、この判定には含めません。",
     );
     ui.add_space(6.0);
@@ -482,7 +482,7 @@ fn torsion_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 fn panel_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     if !prep.panel_modeling_enabled {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "「仕口パネルをモデル化（柱梁接合部）」が OFF のため、接合部を剛節点として\
              扱っています（準備計算パネルの「部材のモデル化」で切り替えます）。\
              柱梁接合部の断面算定は、この設定によらず常に行います。",
@@ -491,7 +491,7 @@ fn panel_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     }
     ui.label(format!("仕口パネル: {} 箇所", prep.panels.len()));
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "柱の強軸・弱軸に対応する2方向の諸元を表示します。\
          各方向のせん断剛性は G・Ve です。\
          H 形柱の弱軸側はフランジ2枚の純せん断モデルで、曲げによる耐力低下を\
@@ -503,7 +503,7 @@ fn panel_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 
     if prep.panels.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "生成されたパネルはありません（対象となる S 造の柱梁接合部がない、または\
              柱・梁の断面が未割当です）。",
         );
@@ -562,12 +562,12 @@ fn rigid_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
         ));
         ui.separator();
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "3D の形状はモデル化ビュー（結果タブ「モデル化」）でも確認できます",
         );
     });
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "剛域長 λ は剛性計算に、フェース距離は断面算定の危険断面位置に用います\
          （S 造の仕口では λ = 0 でもフェース距離は付きます）。",
     );
@@ -575,7 +575,7 @@ fn rigid_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 
     if prep.rigid_zones.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "剛域・危険断面位置を持つ部材がありません（節点に直交部材が\
              接続していない場合、剛域長 λ もフェース距離も 0 になります）",
         );
@@ -654,7 +654,7 @@ fn rigid_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 /// 断面性能（断面諸量）。
 fn sections_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     if prep.sections.is_empty() {
-        ui.colored_label(crate::theme::GRAY_600, "断面が定義されていません");
+        ui.colored_label(crate::theme::UI_MUTED, "断面が定義されていません");
         return;
     }
     let rows = &prep.sections;
@@ -699,7 +699,7 @@ fn sections_section(ui: &mut egui::Ui, prep: &PreparationResult) {
             });
             row.col(|ui| {
                 if r.n_elements == 0 {
-                    ui.colored_label(crate::theme::GRAY_600, "0");
+                    ui.colored_label(crate::theme::UI_MUTED, "0");
                 } else {
                     ui.label(format!("{}", r.n_elements));
                 }
@@ -761,7 +761,7 @@ fn sections_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     );
     ui.add_space(4.0);
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "A・I・J・As は弾性解析に用いる断面諸量です。断面二次半径 i = √(I/A) は\
          座屈長さ比・細長比の確認用に併記しています。",
     );
@@ -771,7 +771,7 @@ fn sections_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 fn width_thickness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     if prep.width_thickness.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "対象となる鋼部材がありません（形状定義を持つ断面が割り当てられた\
              鋼材の部材が対象です）",
         );
@@ -807,7 +807,7 @@ fn width_thickness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
             row.col(|ui| {
                 match r.max_ratio {
                     Some(v) => ui.label(format!("{:.1}", v)),
-                    None => ui.colored_label(crate::theme::GRAY_600, "—"),
+                    None => ui.colored_label(crate::theme::UI_MUTED, "—"),
                 };
             });
             row.col(|ui| {
@@ -821,7 +821,7 @@ fn width_thickness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                     }
                     Some(rank) => ui.label(member_rank_label(rank)),
                     None => ui
-                        .colored_label(crate::theme::GRAY_600, "判定不可")
+                        .colored_label(crate::theme::UI_MUTED, "判定不可")
                         .on_hover_text(
                             r.reason
                                 .as_deref()
@@ -833,7 +833,7 @@ fn width_thickness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     );
     ui.add_space(4.0);
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "断面・用途（柱／梁）・鋼種が同じ部材は 1 行にまとめています。ランクは\
          保有水平耐力の Ds 算定に用いるものと同じ判定です（円形鋼管は径厚比の\
          体系が異なるため「判定不可」）。筋かいは有効細長比で種別（BA〜BC）を\
@@ -852,7 +852,7 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 
     if prep.member_stiffness.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "該当する部材がありません（スラブ協力幅は「剛性計算用のスラブ厚」が\
              0 のとき無効、壁エレメント上下大梁は耐震壁が成立した壁がある場合、\
              等価換算は SRC/CFT 断面がある場合に生じます）",
@@ -929,14 +929,14 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 if let Some(iy) = r.effective_iy.filter(|_| r.section_iy > 0.0) {
                     ui.label(format!("{:.2} 倍", iy / r.section_iy));
                 } else {
-                    ui.colored_label(crate::theme::GRAY_600, "—");
+                    ui.colored_label(crate::theme::UI_MUTED, "—");
                 }
             });
         },
     );
     ui.add_space(4.0);
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "「スラブ」は RC 矩形梁のスラブ協力幅（T 形断面）・H 形鋼梁の合成梁による\
          強軸曲げの増大率、「壁上下梁」は壁エレメント上下大梁の一律倍率です。\
          「実効 Iy」は等価換算とこれらをすべて適用した強軸曲げ剛性用の値で、\
@@ -949,7 +949,7 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 /// 増大率のセル。1.0（割増しなし）は淡色、大きい倍率は強調する。
 fn label_factor(ui: &mut egui::Ui, factor: f64) {
     if factor <= 1.0 {
-        ui.colored_label(crate::theme::GRAY_600, "1.00");
+        ui.colored_label(crate::theme::UI_MUTED, "1.00");
     } else if factor >= 10.0 {
         ui.colored_label(crate::theme::BEST_YELLOW, format!("{:.0} 倍", factor));
     } else {
@@ -1042,7 +1042,7 @@ fn loads_section(ui: &mut egui::Ui, prep: &PreparationResult) {
         ui.add_space(4.0);
     }
     if prep.load_cases.is_empty() {
-        ui.colored_label(crate::theme::GRAY_600, "荷重ケースがありません");
+        ui.colored_label(crate::theme::UI_MUTED, "荷重ケースがありません");
         return;
     }
     let rows = &prep.load_cases;
@@ -1078,7 +1078,7 @@ fn loads_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 row.col(|ui| {
                     let text = format!("{:.1}", force_kn(r.sum_force[k]));
                     if empty {
-                        ui.colored_label(crate::theme::GRAY_600, text);
+                        ui.colored_label(crate::theme::UI_MUTED, text);
                     } else {
                         ui.label(text);
                     }
@@ -1088,7 +1088,7 @@ fn loads_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     );
     ui.add_space(4.0);
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "ΣF は節点荷重と部材荷重（分布荷重は合力）を全体座標系で積算した外力の総和です。\
          鉛直下向きが負のため、重力系のケースでは ΣFz が負値になります。",
     );

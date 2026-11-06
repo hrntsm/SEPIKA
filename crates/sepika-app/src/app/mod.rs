@@ -692,7 +692,7 @@ impl LogLevel {
         match self {
             LogLevel::Error => crate::theme::ERROR_RED,
             LogLevel::Notice => crate::theme::WARN_TEXT,
-            LogLevel::Info => crate::theme::GRAY_700,
+            LogLevel::Info => crate::theme::UI_TEXT,
         }
     }
 }
@@ -766,7 +766,7 @@ impl EventLog {
     #[cfg(feature = "gui")]
     pub fn show(&self, ui: &mut egui::Ui) {
         if self.entries.is_empty() {
-            ui.colored_label(crate::theme::GRAY_600, "ログはまだありません");
+            ui.colored_label(crate::theme::UI_MUTED, "ログはまだありません");
             return;
         }
 
@@ -789,7 +789,7 @@ impl EventLog {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (i, entry) in self.entries.iter().enumerate() {
                     let bg = if i % 2 == 1 {
-                        crate::theme::lighten(crate::theme::GRAY_100, 0.6)
+                        crate::theme::lighten(crate::theme::UI_BACKGROUND, 0.6)
                     } else {
                         crate::theme::WHITE
                     };
@@ -1901,7 +1901,7 @@ impl App {
 #[cfg(feature = "gui")]
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        crate::theme::BLUE_200.to_normalized_gamma_f32()
+        crate::theme::UI_BACKGROUND.to_normalized_gamma_f32()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -1980,7 +1980,7 @@ impl App {
             let mut choice: Option<bool> = None;
             let mut do_cancel = false;
             let mut open = true;
-            egui::Window::new("保存サイズの確認")
+            let window = egui::Window::new("保存サイズの確認")
                 .title_bar(true)
                 .collapsible(false)
                 .resizable(false)
@@ -2007,6 +2007,9 @@ impl App {
                         }
                     });
                 });
+            if let Some(window) = window {
+                crate::theme::window_outline(&window.response);
+            }
             if !open || do_cancel {
                 self.resolve_pending_save_recording(None);
             } else if choice.is_some() {
@@ -2026,7 +2029,7 @@ impl App {
                 .and_then(|p| p.file_name())
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            egui::Window::new("波形ライブラリの上書き確認")
+            let window = egui::Window::new("波形ライブラリの上書き確認")
                 .title_bar(true)
                 .collapsible(false)
                 .resizable(false)
@@ -2045,6 +2048,9 @@ impl App {
                         }
                     });
                 });
+            if let Some(window) = window {
+                crate::theme::window_outline(&window.response);
+            }
             if !open || do_cancel {
                 self.cancel_register_wave();
             } else if do_confirm {
@@ -2054,7 +2060,7 @@ impl App {
 
         if self.core.scoped.pending_plate_loss_edit.is_some() {
             let mut choice = None;
-            egui::Window::new("境界変更で旧版を取り除きます")
+            let window = egui::Window::new("境界変更で旧版を取り除きます")
                 .collapsible(false).resizable(true).show(ui.ctx(), |ui| {
                     if let Some((_, message, _)) = &self.core.scoped.pending_plate_loss_edit {
                         ui.label(message);
@@ -2065,6 +2071,9 @@ impl App {
                         if ui.button("キャンセル").clicked() { choice = Some(false); }
                     });
                 });
+            if let Some(window) = window {
+                crate::theme::window_outline(&window.response);
+            }
             if let Some(confirmed) = choice {
                 self.resolve_plate_loss_edit(confirmed);
             }
@@ -2075,7 +2084,7 @@ impl App {
             let mut do_confirm = false;
             let mut do_cancel = false;
             let mut open = true;
-            egui::Window::new("未設定の割当領域の確認")
+            let window = egui::Window::new("未設定の割当領域の確認")
                 .title_bar(true)
                 .collapsible(false)
                 .resizable(false)
@@ -2116,6 +2125,9 @@ impl App {
                         }
                     });
                 });
+            if let Some(window) = window {
+                crate::theme::window_outline(&window.response);
+            }
             if !open || do_cancel {
                 self.cancel_pending_analysis();
             } else if do_confirm {
@@ -2219,6 +2231,7 @@ impl App {
                 .size_range(180.0..=520.0)
                 .frame(crate::theme::content_panel_frame())
                 .show_inside(ui, |ui| {
+                    crate::theme::panel_outline(ui, "dock Outline");
                     egui::ScrollArea::both()
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.ui.view.left_panel {
@@ -2245,6 +2258,7 @@ impl App {
                 .size_range(220.0..=560.0)
                 .frame(crate::theme::content_panel_frame())
                 .show_inside(ui, |ui| {
+                    crate::theme::panel_outline(ui, "dock Outline");
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.ui.view.right_panel {
@@ -2417,7 +2431,7 @@ impl App {
                                                     DiagSeverity::Warning => {
                                                         crate::theme::WARN_TEXT
                                                     }
-                                                    DiagSeverity::Info => crate::theme::GRAY_700,
+                                                    DiagSeverity::Info => crate::theme::UI_TEXT,
                                                 };
                                                 let icon = match d.severity {
                                                     DiagSeverity::Error | DiagSeverity::Warning => {

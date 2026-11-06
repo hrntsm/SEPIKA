@@ -22,7 +22,7 @@ impl App {
             if self.core.model.vibration_cases.is_empty()
                 && self.core.model.lumped_vibration_cases.is_empty()
             {
-                ui.colored_label(crate::theme::GRAY_600, "（なし）");
+                ui.colored_label(crate::theme::UI_MUTED, "（なし）");
                 return;
             }
 
@@ -31,7 +31,7 @@ impl App {
                 .id_salt("nav_vibration_spatial");
             spatial_header.show(ui, |ui| {
                 if self.core.model.vibration_cases.is_empty() {
-                    ui.colored_label(crate::theme::GRAY_600, "（なし）");
+                    ui.colored_label(crate::theme::UI_MUTED, "（なし）");
                 }
                 for case in &self.core.model.vibration_cases {
                     let is_sel = self.ui.scoped.nav.focus_vibration_case == Some(case.id);
@@ -46,7 +46,7 @@ impl App {
                 .id_salt("nav_vibration_lumped");
             lumped_header.show(ui, |ui| {
                 if self.core.model.lumped_vibration_cases.is_empty() {
-                    ui.colored_label(crate::theme::GRAY_600, "（なし）");
+                    ui.colored_label(crate::theme::UI_MUTED, "（なし）");
                 }
                 for case in &self.core.model.lumped_vibration_cases {
                     let is_sel = self.ui.scoped.nav.focus_lumped_vibration_case == Some(case.id);

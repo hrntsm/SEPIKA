@@ -157,7 +157,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 if has_po {
                     ui.colored_label(crate::theme::GOOD_GREEN, "● 応答反映中");
                 } else {
-                    ui.colored_label(crate::theme::GRAY_600, "（確定総応答が不足・未検定）");
+                    ui.colored_label(crate::theme::UI_MUTED, "（確定総応答が不足・未検定）");
                 }
             }
         });
@@ -165,7 +165,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     });
     match app.compute_ultimate_checks() {
         Err(msg) => {
-            ui.colored_label(crate::theme::GRAY_600, &msg);
+            ui.colored_label(crate::theme::UI_MUTED, &msg);
             let needs_analysis = msg.contains("静的") || msg.contains("解析");
             if needs_analysis && ui.button("▶ 解析タブへ").clicked() {
                 app.ui.view.active_tab = crate::app::Tab::Analysis;
@@ -274,7 +274,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 "Qmu=上限強度倍率·2·Mu/内法（両端ヒンジ）"
             };
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 format!(
                     "{source}。{shear_demand}。{shear_note}、{bond_note}。\
                      余裕度<1.0（赤）はせん断・付着が曲げ降伏に先行することを示す。\
@@ -289,7 +289,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     ui.add_space(4.0);
     match app.compute_cft_ultimate_checks() {
         Err(msg) => {
-            ui.colored_label(crate::theme::GRAY_600, &msg);
+            ui.colored_label(crate::theme::UI_MUTED, &msg);
         }
         Ok(checks) => {
             let ng = checks.iter().filter(|c| !c.ok).count();
@@ -361,7 +361,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             let source = demand_source_note(app)
                 .unwrap_or_else(|reason| format!("需要由来は未検定: {reason}"));
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 format!("Ncu=軸圧縮終局耐力（短柱=cNc+(1+ξ)sNc、長柱=座屈耐力、中柱=線形補間）、\
                  Ntu=軸引張終局耐力（sA·Fy）。N は採用需要の軸力（圧縮正）。{source}。座屈長さは幾何長（K=1）。"),
             );

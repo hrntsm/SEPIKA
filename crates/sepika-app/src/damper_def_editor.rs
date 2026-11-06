@@ -106,7 +106,7 @@ pub fn damper_def_panel(ui: &mut egui::Ui, app: &mut App) {
                 "断面のように、あらかじめ諸元を登録した制振ダンパーの定義（製品プリセット）を、\
                  「部材」タブの「制振ダンパー追加」フォームで選んで部材に割り当てられます。",
             )
-            .color(crate::theme::GRAY_600)
+            .color(crate::theme::UI_MUTED)
             .small(),
         );
         ui.separator();
@@ -131,7 +131,7 @@ pub fn damper_def_panel(ui: &mut egui::Ui, app: &mut App) {
                     ui.label(damper_kind_label(def.props.kind));
                     ui.label(
                         egui::RichText::new(damper_summary(&def.props))
-                            .color(crate::theme::GRAY_600)
+                            .color(crate::theme::UI_MUTED)
                             .small(),
                     );
                     if ui

@@ -63,7 +63,7 @@ pub fn frame_wizard_window(ctx: &egui::Context, app: &mut App) {
     let mut open = true;
     let mut generate = false;
     let body_max_height = ctx.content_rect().height() * 0.85;
-    egui::Window::new("新規（架構ウィザード）")
+    let window = egui::Window::new("新規（架構ウィザード）")
         .open(&mut open)
         .resizable(true)
         .default_width(520.0)
@@ -116,6 +116,9 @@ pub fn frame_wizard_window(ctx: &egui::Context, app: &mut App) {
                     }
                 });
         });
+    if let Some(window) = window {
+        crate::theme::window_outline(&window.response);
+    }
 
     if generate {
         match sepika_core::frame_gen::frame_model(&app.ui.view.frame_wizard.spec) {

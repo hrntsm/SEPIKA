@@ -75,7 +75,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
 
     if takeoff.items.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "集計対象の部材がありません。モデルタブで部材（断面・材料の割当）を作成してください。",
         );
         return;

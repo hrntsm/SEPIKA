@@ -295,7 +295,7 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
         let mut do_add = false;
         let mut do_cancel = false;
         let mut open = true;
-        egui::Window::new("節点座標の重複")
+        let window = egui::Window::new("節点座標の重複")
             .title_bar(true)
             .collapsible(false)
             .resizable(false)
@@ -318,6 +318,9 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
                     }
                 });
             });
+        if let Some(window) = window {
+            crate::theme::window_outline(&window.response);
+        }
         if !open || do_cancel {
             app.ui.scoped.pending_duplicate_node_coord = None;
         }
@@ -504,7 +507,7 @@ fn support_spring_section(ui: &mut egui::Ui, app: &mut App, node_id: NodeId) {
                 return;
             }
             if !enabled {
-                ui.colored_label(crate::theme::GRAY_600, "無効（自由 or 固定のみ）");
+                ui.colored_label(crate::theme::UI_MUTED, "無効（自由 or 固定のみ）");
                 return;
             }
 
@@ -531,7 +534,7 @@ fn support_spring_section(ui: &mut egui::Ui, app: &mut App, node_id: NodeId) {
                             .range(0.0..=1.0e12),
                     );
                     if fixed {
-                        ui.colored_label(crate::theme::GRAY_600, "(固定)");
+                        ui.colored_label(crate::theme::UI_MUTED, "(固定)");
                     }
                     if resp.drag_stopped() || resp.lost_focus() {
                         commit = true;

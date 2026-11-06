@@ -54,7 +54,7 @@ pub fn axes_table(ui: &mut egui::Ui, app: &mut App) {
             app.generate_axes_action();
         }
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "通り芯は各通りを識別するための呼称です。構造計算には用いません。",
         );
     });
@@ -62,7 +62,7 @@ pub fn axes_table(ui: &mut egui::Ui, app: &mut App) {
 
     if app.core.model.axes.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "通り芯はありません。「柱位置から自動生成」で作成するか、\
              ST-Bridge ファイル（StbAxes）を読み込むと取り込まれます。",
         );
@@ -76,7 +76,7 @@ pub fn axes_table(ui: &mut egui::Ui, app: &mut App) {
     for (gi, group) in app.core.model.axes.iter().enumerate() {
         ui.strong(format!("{} — {}", group.name, kind_label(group.kind)));
         if group.axes.is_empty() {
-            ui.colored_label(crate::theme::GRAY_600, "  （通りなし）");
+            ui.colored_label(crate::theme::UI_MUTED, "  （通りなし）");
             continue;
         }
         let draft = &mut app.ui.scoped.axis_name_draft;
@@ -144,7 +144,7 @@ pub fn axes_table(ui: &mut egui::Ui, app: &mut App) {
     }
 
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "出所が「自動」の通りは自動生成のたびに作り直されます。名前を変更した通りは\
          「手動」に変わり、以後の自動生成で保護されます。",
     );

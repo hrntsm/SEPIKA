@@ -147,7 +147,7 @@ impl Default for MnViewState {
 pub fn mn_surface_panel(ui: &mut egui::Ui, app: &mut App) {
     if app.core.model.sections.is_empty() {
         ui.colored_label(
-            theme::GRAY_600,
+            theme::UI_MUTED,
             "断面が定義されていません。モデルタブの「断面」で断面を追加してください。",
         );
         return;
@@ -339,11 +339,11 @@ fn control_panel(ui: &mut egui::Ui, app: &mut App) {
                     "M-θ は逆対称曲げ・反曲点中央・端部塑性化領域 Lp の仮定による骨格曲線",
                 )
                 .size(11.0)
-                .color(theme::GRAY_600),
+                .color(theme::UI_MUTED),
             ));
         }
     } else {
-        ui.colored_label(theme::GRAY_600, "断面形状が未定義です。");
+        ui.colored_label(theme::UI_MUTED, "断面形状が未定義です。");
     }
 }
 
@@ -530,7 +530,7 @@ fn visualization(ui: &mut egui::Ui, app: &mut App) {
     };
     let Some(shape) = sec.shape.clone() else {
         ui.colored_label(
-            theme::GRAY_600,
+            theme::UI_MUTED,
             "断面形状が未定義です。断面エディタで形状を設定してください。",
         );
         return;

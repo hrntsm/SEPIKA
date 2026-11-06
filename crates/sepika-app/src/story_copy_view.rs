@@ -108,7 +108,7 @@ pub fn story_copy_window(ctx: &egui::Context, app: &mut App) {
 
     let mut open = true;
     let mut run = false;
-    egui::Window::new("階への複製")
+    let window = egui::Window::new("階への複製")
         .open(&mut open)
         .resizable(true)
         .default_width(460.0)
@@ -136,6 +136,9 @@ pub fn story_copy_window(ctx: &egui::Context, app: &mut App) {
             ui.separator();
             run = preview_section(ui, app);
         });
+    if let Some(window) = window {
+        crate::theme::window_outline(&window.response);
+    }
 
     if let (true, Some(from), Some(cache)) = (
         run,
@@ -294,16 +297,16 @@ fn refresh_preview(app: &mut App, from: StoryId, to: Vec<StoryId>) -> &PreviewCa
 #[must_use]
 fn preview_section(ui: &mut egui::Ui, app: &mut App) -> bool {
     let Some(from) = app.ui.scoped.story_copy.from else {
-        ui.colored_label(crate::theme::GRAY_600, "複製元の階を選んでください。");
+        ui.colored_label(crate::theme::UI_MUTED, "複製元の階を選んでください。");
         return false;
     };
     let to = app.ui.scoped.story_copy.targets_to();
     if to.is_empty() {
-        ui.colored_label(crate::theme::GRAY_600, "複製先の階を選んでください。");
+        ui.colored_label(crate::theme::UI_MUTED, "複製先の階を選んでください。");
         return false;
     }
     if !app.ui.scoped.story_copy.targets.any() {
-        ui.colored_label(crate::theme::GRAY_600, "複製する対象を選んでください。");
+        ui.colored_label(crate::theme::UI_MUTED, "複製する対象を選んでください。");
         return false;
     }
 

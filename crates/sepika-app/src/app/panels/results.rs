@@ -53,7 +53,7 @@ impl App {
                 });
                 ui.label(format!("検定結果数: {}", n_checks));
             } else {
-                ui.colored_label(crate::theme::GRAY_600, "▷ 未実行");
+                ui.colored_label(crate::theme::UI_MUTED, "▷ 未実行");
             }
             if !result_options.is_empty() {
                 ui.separator();
@@ -130,7 +130,7 @@ impl App {
     pub(crate) fn pushover_results_panel(&mut self, ui: &mut egui::Ui) {
         if self.displayed_pushover().is_none() {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "増分解析結果がありません。解析タブから実行してください。",
             );
             return;
@@ -194,7 +194,7 @@ impl App {
                 }
             }
             Err(reason) => {
-                ui.colored_label(crate::theme::GRAY_600, reason);
+                ui.colored_label(crate::theme::UI_MUTED, reason);
             }
             Ok(_) => {}
         }
@@ -434,7 +434,7 @@ impl App {
             .and_then(|r| r.lumped.as_ref())
         else {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "質点系の結果がありません。右バー「質点系」から実行してください。",
             );
             return;
@@ -611,7 +611,7 @@ impl App {
         }
         ui.label("固有値");
         if modal.period.is_empty() {
-            ui.colored_label(crate::theme::GRAY_600, "モードがありません。");
+            ui.colored_label(crate::theme::UI_MUTED, "モードがありません。");
         } else {
             crate::table_util::standard_table(
                 ui,
@@ -805,7 +805,7 @@ impl App {
                 });
         } else {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "時刻歴は未実行です。右バー「質点系」から実行できます。",
             );
         }

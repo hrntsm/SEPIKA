@@ -137,7 +137,7 @@ impl App {
                             ));
                             let n_used = section_member_ids(&display_model, sec_id).len();
                             ui.colored_label(
-                                crate::theme::BLUE_500,
+                                crate::theme::UI_ACCENT,
                                 format!("この断面を使う {} 部材に影響", n_used),
                             );
                             ui.label("編集操作: 断面を複製して割当");
@@ -189,7 +189,7 @@ impl App {
                                     }
                                     if !evaluation.complete {
                                         ui.colored_label(
-                                            crate::theme::GRAY_600,
+                                            crate::theme::UI_MUTED,
                                             format!(
                                                 "pos={:.2} {}",
                                                 p.xi,
@@ -200,7 +200,7 @@ impl App {
                                 }
                                 sepika_design_jp::CheckOutcome::Skipped { reason } => {
                                     ui.colored_label(
-                                        crate::theme::GRAY_600,
+                                        crate::theme::UI_MUTED,
                                         format!("  pos={:.2} 検定不能（{reason}）", p.xi),
                                     );
                                 }
@@ -211,10 +211,10 @@ impl App {
                         }
                     }
                 } else {
-                    ui.colored_label(crate::theme::GRAY_600, "部材を選択してください");
+                    ui.colored_label(crate::theme::UI_MUTED, "部材を選択してください");
                 }
             } else {
-                ui.colored_label(crate::theme::GRAY_600, "部材を選択してください");
+                ui.colored_label(crate::theme::UI_MUTED, "部材を選択してください");
             }
 
             if let Some(sec_id) = self.ui.scoped.nav.focus_section {
