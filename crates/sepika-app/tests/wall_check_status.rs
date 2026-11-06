@@ -193,7 +193,6 @@ fn fixture() -> App {
             posts: vec![],
         });
     }
-    // 明示した無載荷Pを含む保存G+P+Wで、壁の検定状態を検証する。
     let mut live = model.load_cases[0].clone();
     live.id = LoadCaseId(2);
     live.kind = sepika_core::model::LoadCaseKind::Live;

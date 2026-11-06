@@ -477,7 +477,6 @@ fn test_member_material_groups_excludes_generated_panel_zones() {
     assert_eq!(steel_before.len(), 3, "柱 2 本・梁 1 本はすべて S");
     assert!(rc_before.is_empty(), "純 S 造モデルに RC 部材はない");
 
-    // 実際の導線と同じく準備計算を通し、仕口パネルを自動生成させる。
     app.ensure_preparation();
     assert!(
         app.core
@@ -522,7 +521,6 @@ fn test_event_log_caps_entries() {
         log.push(LogLevel::Info, format!("msg{i}"));
     }
     assert_eq!(log.entries.len(), 1000);
-    // 先頭（msg0）が捨てられ、msg1 が先頭に繰り上がっている。
     assert_eq!(log.entries.first().unwrap().message, "msg1");
     assert_eq!(log.entries.last().unwrap().message, "msg1000");
 }
@@ -1192,7 +1190,6 @@ fn aligned_portal_frame() -> sepika_core::model::Model {
         fc: None,
         fy: Some(345.0),
     });
-    // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
     for sec in &mut model.sections {
         sec.material = Some(sepika_core::ids::MaterialId(0));
         sec.rebar_material = Some(sepika_core::ids::MaterialId(1));
@@ -1250,7 +1247,6 @@ fn test_run_linear_static_applies_auto_rigid_zones() {
     let mut app = App::default();
     app.load_model(aligned_portal_frame());
 
-    // 適用前は既定の 0（apply_auto_rigid_zones 未実行）。
     assert_eq!(app.core.model.elements[1].rigid_zone.length_i, 0.0);
     assert_eq!(app.core.model.elements[1].rigid_zone.face_i_or_zero(), 0.0);
 
@@ -1261,7 +1257,6 @@ fn test_run_linear_static_applies_auto_rigid_zones() {
         app.core.scoped.last_error
     );
 
-    // 梁(id=1)の i端(node1, 柱と直交)。
     // λ_i = D_orth/2 − D_self/4 = 柱せい/2 − 梁せい/4 = 150 − 100 = 50
     // face_i = D_orth/2 = 柱せい/2 = 150
     let beam = &app.core.model.elements[1];
@@ -1276,7 +1271,6 @@ fn test_run_linear_static_applies_auto_rigid_zones() {
         beam.rigid_zone.face_i_or_zero()
     );
 
-    // 柱(id=0)の j端(node1, 梁と直交)。
     // λ_j = D_orth/2 − D_self/4 = 梁せい/2 − 柱せい/4 = 200 − 75 = 125
     // face_j = D_orth/2 = 梁せい/2 = 200
     let col = &app.core.model.elements[0];
@@ -1290,7 +1284,6 @@ fn test_run_linear_static_applies_auto_rigid_zones() {
         "face_j={}",
         col.rigid_zone.face_j_or_zero()
     );
-    // 柱脚(node0)は他要素と接続しないため face_i は 0 のまま。
     assert_eq!(col.rigid_zone.face_i_or_zero(), 0.0);
 }
 
@@ -1361,7 +1354,6 @@ fn test_run_design_check_includes_member_detail_positions() {
     use sepika_core::model::{Haunch, JointKind, MemberDetailAttr, MemberJoint};
 
     let mut model = aligned_portal_frame();
-    // 梁(id=1, i端-j端: node1-node2, 全長4000mm)にハンチ(i端)と継手を追加する。
     // i端は柱と直交(face_i=150、自動剛域算定後)のため、ハンチ端位置は
     // (150+700)/4000 = 0.2125、継手位置は 1000/4000 = 0.25 になる。
     model.member_detail_attrs.push(MemberDetailAttr {
@@ -1418,7 +1410,6 @@ fn test_analysis_runs_with_non_structural_nodes_on_base_floor() {
     use sepika_core::ids::StoryId;
 
     let mut model = crate::sample::portal_frame();
-    // 基部レベル（柱脚と同じ Z）へ小梁の支持点を足す。
     let free_id = NodeId(model.nodes.len() as u32);
     model.nodes.push(sepika_core::model::Node {
         id: free_id,
@@ -1428,10 +1419,7 @@ fn test_analysis_runs_with_non_structural_nodes_on_base_floor() {
         story: None,
         support_spring: None,
     });
-    // 二次部材は置かない。階の所属は節点の標高だけで決まる（`story_gen`）ので、
-    // 「要素が接続しない節点が基部の剛床スレーブに混じる」状況はこれで再現できる。
-    // 小梁を置くと、どの床領域にも属さない二次部材として解析前チェックが止める
-    // （この平面ラーメンには閉じた床領域が存在しないため）。
+    // この架構に小梁を置くと、閉じた床領域がないため未所属エラーで解析前チェックが止まる。
 
     let mut app = App::default();
     app.load_model(model);
@@ -1482,11 +1470,9 @@ fn test_seismic_flow_requires_then_uses_stories() {
     app.load_model(crate::sample::portal_frame());
     app.core.model.stories.clear();
 
-    // 階なし → 明示エラー（サイレントゼロ結果ではない）
     app.run_seismic(SeismicDir::X);
     assert!(app.core.scoped.last_error.is_some());
 
-    // 階の自動生成 → 地震静的が成功する
     app.core.model.stories = explicit_story_inputs(&[0.0, 3500.0]);
     app.generate_stories_action();
     assert!(
@@ -1497,7 +1483,6 @@ fn test_seismic_flow_requires_then_uses_stories() {
     assert_eq!(app.core.model.stories.len(), 2, "基部の床 + 上の床");
     assert!(app.core.model.stories[1].seismic_weight.unwrap() > 0.0);
 
-    // ユーザー荷重ケース0("長期")を先に実行しておく。
     app.run_linear_static(LoadCaseId(0));
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1515,9 +1500,6 @@ fn test_seismic_flow_requires_then_uses_stories() {
         "{:?}",
         app.core.scoped.last_error
     );
-
-    // 地震静的の結果は StaticCaseKey::Seismic(X) に格納され、直前に実行した
-    // ユーザーケース0(StaticCaseKey::User)の結果を上書きしない
 
     let r = app.core.scoped.results.as_ref().unwrap();
     assert_eq!(
@@ -1545,29 +1527,24 @@ fn test_seismic_flow_requires_then_uses_stories() {
         kept_user_disp, user_disp,
         "ユーザーケース0の結果は地震静的の実行後も変わらないはず（衝突していない）"
     );
-    // 柱頭が X 方向へ変位している(地震静的の結果)
     assert!(seismic_disp[2][0].abs() > 1e-3, "{}", seismic_disp[2][0]);
 
-    // ナビゲータでそれぞれのキーを選択すれば current_static が個別に引ける
     app.ui.scoped.nav.focus_result = Some(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
     assert_eq!(app.current_static().unwrap().disp, kept_user_disp);
     app.ui.scoped.nav.focus_result = Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)));
     assert_eq!(app.current_static().unwrap().disp, seismic_disp);
 
-    // undo で EY・EX の同期 → 階定義 → DL(自重)の同期の順に戻る
-    // （generate_stories_action が DL 同期 → 階適用 → EX/EY 同期の順に
-    // undo 履歴を積む。以降の解析実行時の同期は冪等で履歴を積まない）
-    app.core.scoped.undo.undo(&mut app.core.model); // EY
-    app.core.scoped.undo.undo(&mut app.core.model); // EX
+    app.core.scoped.undo.undo(&mut app.core.model);
+    app.core.scoped.undo.undo(&mut app.core.model);
     assert!(app
         .core
         .model
         .load_cases
         .iter()
         .all(|lc| lc.name != EX_CASE_NAME && lc.name != EY_CASE_NAME));
-    app.core.scoped.undo.undo(&mut app.core.model); // 階定義
+    app.core.scoped.undo.undo(&mut app.core.model);
     assert!(app.core.model.stories.is_empty());
-    app.core.scoped.undo.undo(&mut app.core.model); // DL(自重)
+    app.core.scoped.undo.undo(&mut app.core.model);
     assert!(app
         .core
         .model
@@ -1953,7 +1930,6 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
 fn test_sync_seismic_semiprecise_without_eigen_sets_notice_and_skips() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
-    // まず既定(略算)で EX/EY を生成しておく。
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1969,7 +1945,6 @@ fn test_sync_seismic_semiprecise_without_eigen_sets_notice_and_skips() {
         .cloned()
         .expect("EXケースが同期されているはず");
 
-    // 精算周期へ切り替え、固有値解析は実行しない。
     app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
     app.core.scoped.last_notice = None;
     app.sync_seismic_load_cases_action();
@@ -1989,7 +1964,6 @@ fn test_sync_seismic_semiprecise_without_eigen_sets_notice_and_skips() {
     assert!(!ex_before.nodal.is_empty());
     assert!(ex_after.nodal.is_empty());
 
-    // run_seismic も同様に、解析を行わず last_error で案内する。
     app.core.scoped.last_error = None;
     app.run_seismic(SeismicDir::X);
     assert!(
@@ -2022,7 +1996,6 @@ fn test_manual_load_in_auto_case_survives_sync() {
     let auto_before = ex.nodal.len();
     assert!(auto_before > 0, "Ai 分布の水平力が入っているはず");
 
-    // 利用者が EX へ手入力の節点荷重を 1 件足す。
     let mut manual = sepika_core::model::NodalLoad::manual(
         sepika_core::ids::NodeId(0),
         [1234.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -2036,7 +2009,6 @@ fn test_manual_load_in_auto_case_survives_sync() {
         }),
     );
 
-    // モデルが変わったので次の同期は実際に走る（ハッシュ不一致）。
     app.sync_auto_load_cases_action();
 
     let ex = app
@@ -2072,13 +2044,11 @@ fn test_generate_stories_action_reuses_rep_node_on_regenerate() {
         app.core.scoped.last_error
     );
     let n1 = app.core.model.nodes.len();
-    // 階は床であり、基部の床にも剛床代表節点が作られる（基部の床と 2FL の 2 つ）。
     assert_eq!(n1, n0 + 2, "剛床代表節点が階の数だけ新規生成される");
     assert_eq!(app.core.model.generated_masters.len(), 2);
     let masters_after_first = app.core.model.generated_masters.clone();
     assert!(app.core.model.validate().is_ok());
 
-    // 再生成しても代表節点は再利用され、節点数は増えない。
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -2093,7 +2063,6 @@ fn test_generate_stories_action_reuses_rep_node_on_regenerate() {
     assert_eq!(app.core.model.generated_masters, masters_after_first);
     assert!(app.core.model.validate().is_ok());
 
-    // 固有値解析・地震静的解析が正常に動作する（生成された剛床を含む縮約の統合確認）。
     app.run_eigen(1);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -2142,7 +2111,6 @@ fn test_time_history_y_direction_flow() {
         "代表応答の記録節点が設定されていません"
     );
 
-    // X+Y: 同一波形を 2 成分として与え、両方向の応答が時歴に現れる。
     app.core.analysis_cfg.th_dir = ThDir::Xy;
     app.run_time_history_sample();
     assert!(
@@ -2167,8 +2135,6 @@ fn test_time_history_y_direction_flow() {
     );
 }
 
-// ===== parse_wave_csv テスト =====
-
 #[test]
 fn test_parse_wave_csv_single_column_x_or_y() {
     let content = "10.0\n20.0\n30.0\n";
@@ -2176,13 +2142,11 @@ fn test_parse_wave_csv_single_column_x_or_y() {
     assert_eq!(accel, vec![100.0, 200.0, 300.0]); // gal→mm/s²(×10)
     assert!(second.is_none());
 
-    // カンマ区切りなら最後の列を使う。
     let content_csv = "0.0,10.0\n0.01,20.0\n0.02,30.0\n";
     let (accel, second) = parse_wave_csv(content_csv, ThDir::Y).unwrap();
     assert_eq!(accel, vec![100.0, 200.0, 300.0]);
     assert!(second.is_none());
 
-    // 数値化できない行（ヘッダ等）は無視される。
     let (accel, _) = parse_wave_csv("acc\n10.0\n20.0\n", ThDir::X).unwrap();
     assert_eq!(accel, vec![100.0, 200.0]);
 }
@@ -2194,7 +2158,6 @@ fn test_parse_wave_csv_xy_two_columns() {
     assert_eq!(xs, vec![100.0, 200.0, 300.0]);
     assert_eq!(ys, Some(vec![50.0, 150.0, 250.0]));
 
-    // ヘッダ行（数値化不可）は無視され、残りの2行が (X, Y) として読める。
     let (xs, ys) = parse_wave_csv("x,y\n10.0,5.0\n20.0,15.0\n", ThDir::Xy).unwrap();
     assert_eq!(xs, vec![100.0, 200.0]);
     assert_eq!(ys, Some(vec![50.0, 150.0]));
@@ -2210,13 +2173,10 @@ fn test_parse_wave_csv_xy_two_columns() {
 
 #[test]
 fn test_parse_wave_csv_errors() {
-    // 有効なデータ点が 2 点未満ならエラー（空も同じ）。
     assert!(parse_wave_csv("10.0\n", ThDir::X).is_err());
     assert!(parse_wave_csv("", ThDir::X).is_err());
-    // X+Y は 2 列に満たない行があるとエラー。
     let err = parse_wave_csv("10.0,5.0\n20.0\n30.0,25.0\n", ThDir::Xy).unwrap_err();
     assert_eq!(err, "X+Y には2列のCSVが必要です");
-    // X+Y でも 2 点未満ならエラー。
     assert!(parse_wave_csv("10.0,5.0\n", ThDir::Xy).is_err());
     assert_eq!(
         parse_wave_csv("header\n1,2\n3,4\n", ThDir::Xy).unwrap_err(),
@@ -2579,7 +2539,6 @@ fn test_nonlinear_time_history_with_long_term_flow() {
         peak_uz > 1e-6,
         "長期載荷による鉛直変位が結果に反映されていません: {peak_uz}"
     );
-    // 初期フレーム（長期載荷完了時点）の軸力（[n, qy, qz, mx, my, mz] の先頭）。
     let frame0_axial = recording
         .member_forces
         .first()
@@ -2751,7 +2710,6 @@ fn test_async_time_history_job_flow() {
         "応答がゼロのままです"
     );
 
-    // 非線形設定ではジョブラベルが切り替わる（実行中スピナー・完了ログの判別に使う）。
     app.generate_stories_action();
     app.core.analysis_cfg.th_nonlinear = true;
     app.core.analysis_cfg.th_duration = 1.0;
@@ -2778,7 +2736,6 @@ fn test_start_job_while_running_is_rejected() {
     app.start_pushover_job();
     assert!(app.core.scoped.job.is_some());
 
-    // 実行中に再度 start しても2つ目は無視され、job は上書きされない。
     app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg).unwrap());
     assert!(app.core.scoped.job.is_some());
     assert_eq!(app.core.scoped.job.as_ref().unwrap().label, "増分解析");
@@ -3089,15 +3046,12 @@ fn test_export_and_import_stbridge_roundtrip() {
 
     let mut app2 = App::default();
     app2.import_stbridge_from(path.clone());
-    // ST-Bridge は支点を持たないため、支点の自動設定の通知だけが出る
-    // （それ以外の欠落警告はない）。
     let msg = app2.core.scoped.last_error.as_deref().unwrap_or("");
     assert!(
         msg.contains("ピン支点に設定"),
         "支点自動設定の通知が出るはず: {msg}"
     );
     assert!(app2.core.model.validate().is_ok());
-    // プロジェクトファイルとは別物なので project_path は更新されない。
     assert!(app2.core.scoped.project_path.is_none());
 
     // 標準 ST-Bridge は幾何サブセットのため完全一致は求めない（拘束・荷重・材料の
@@ -3220,7 +3174,6 @@ fn test_select_displayed_result_switches_forces_and_term() {
             nodal: vec![],
             member: vec![],
         });
-    // 長期 DL+LL（重力 LC0 のみ）と短期 DL+LL+EX（地震 LC1 入り）の 2 組合せ。
     for combo in [
         sepika_core::model::LoadCombination {
             name: "DL + LL".into(),
@@ -3246,10 +3199,8 @@ fn test_select_displayed_result_switches_forces_and_term() {
         "{:?}",
         app.core.scoped.last_error
     );
-    // 一括解析後は最後の組合せ（短期 DL+LL+EX）が表示対象。
     assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(1)));
     assert_eq!(app.core.design_term, LoadTerm::Short);
-    // 長期・短期で部材内力が異なる（表示切替が実質的に効く前提）。
     {
         let b = app.core.scoped.results.as_ref().unwrap();
         assert!(!b.member_forces.is_empty());
@@ -3259,7 +3210,6 @@ fn test_select_displayed_result_switches_forces_and_term() {
         );
     }
 
-    // 長期組合せ（Combo(0)）へ表示切替 → focus/last/member_forces/design_term が長期へ。
     app.select_displayed_result(StaticKey::Combo(0));
     assert_eq!(app.ui.scoped.nav.focus_result, Some(StaticKey::Combo(0)));
     assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(0)));
@@ -3269,7 +3219,6 @@ fn test_select_displayed_result_switches_forces_and_term() {
         assert_eq!(b.member_forces[0].1.at, b.combos[0].1.member_forces[0].1.at);
     }
 
-    // 短期組合せ（Combo(1)）へ戻す → design_term が短期へ、member_forces も一致。
     app.select_displayed_result(StaticKey::Combo(1));
     assert_eq!(app.core.design_term, LoadTerm::Short);
     {
@@ -3277,7 +3226,6 @@ fn test_select_displayed_result_switches_forces_and_term() {
         assert_eq!(b.member_forces[0].1.at, b.combos[1].1.member_forces[0].1.at);
     }
 
-    // 存在しないキーは no-op（表示対象は変わらない）。
     app.select_displayed_result(StaticKey::Combo(99));
     assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(1)));
 }
@@ -3311,7 +3259,6 @@ fn test_run_static_all_without_combos_solves_load_cases_or_errors() {
         Some(StaticKey::Case(_))
     ));
 
-    // 荷重ケースが 1 件もない場合はエラーメッセージを設定し、結果は変更しない。
     let mut empty = App::default();
     empty.load_model(sepika_core::model::Model::default());
     assert!(empty.core.model.load_cases.is_empty());
@@ -3385,14 +3332,12 @@ fn test_current_static_priority() {
         .disp
         .clone();
 
-    // ナビゲータで存在しない Combo を選択していても last_static にフォールバックする
     app.ui.scoped.nav.focus_result = Some(StaticKey::Combo(9));
     let fallback = app
         .current_static()
         .expect("無効な選択時は last_static にフォールバックするはず");
     assert_eq!(fallback.disp, expected_disp);
 
-    // Case を選択すれば該当ケースの結果が返る
     app.ui.scoped.nav.focus_result = Some(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
     let by_case = app
         .current_static()
@@ -3405,7 +3350,6 @@ fn test_holding_capacity_flow() {
     let mut app = App::default();
     app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
 
-    // 階が未定義 → Err
     assert!(app.compute_holding_capacity().is_err());
 
     app.generate_stories_action();
@@ -3423,7 +3367,6 @@ fn test_holding_capacity_flow() {
         app.core.scoped.last_error
     );
 
-    // プッシュオーバー未実行 → Err
     assert!(app.compute_holding_capacity().is_err());
 
     app.core.analysis_cfg.push_steps = 10;
@@ -3440,9 +3383,7 @@ fn test_holding_capacity_flow() {
         .expect("前提が揃えば Ok のはず");
     assert_eq!(result.stories.len(), 1);
     assert!(result.stories[0].qun > 0.0);
-    // 明示採用点の層切断面力を用いる。
     assert!(result.stories[0].qu > 0.0, "{}", result.stories[0].qu);
-    // 手動ランクは明示設計入力。
     assert_eq!(story_ranks, vec![app.core.design_rank]);
     assert!(result.member_ranks.is_empty());
 }
@@ -3454,7 +3395,7 @@ fn test_holding_capacity_rejects_declared_brace_when_undetected() {
     use sepika_design_jp::secondary::holding_capacity::{FrameType, MemberRank};
 
     let mut app = App::default();
-    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame())); // 筋かいのないラーメン
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
     app.run_seismic(SeismicDir::Y);
@@ -3551,10 +3492,8 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
             elem_id.0
         );
     }
-    // 唯一の層の代表ランクは柱・梁のうち最悪値（FD 寄り）。
     assert_eq!(story_ranks.len(), 1);
     assert_eq!(story_ranks[0], worst_rank(&[col_rank, beam_rank]).unwrap());
-    // 全部材のランクを算定できているため、選択ランクへのフォールバック層はない。
     assert!(
         app.core.scoped.ds_rank_fallback_stories.is_empty(),
         "{:?}",
@@ -3583,7 +3522,6 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
         app.core.scoped.last_error
     );
 
-    // 全断面の形状情報を外し、幅厚比・RC 略算のいずれも算定不能にする。
     for sec in &mut app.core.model.sections {
         sec.shape = None;
         sec.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
@@ -3597,7 +3535,6 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("確定評価データが不足"), "{reason}");
 
-    // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
     app.core.design_rank_auto = false;
     let _ = app
         .compute_unconfirmed_holding_capacity()
@@ -3745,8 +3682,6 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
                 support_spring: None,
             },
         ],
-        // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
-        // 柱（0・1）と梁（2）で用途別の実配筋断面を使い分ける。
         sections: vec![
             sepika_core::model::Section {
                 frame_use: Some(sepika_core::model::FrameSectionUse::Column),
@@ -3862,10 +3797,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         app.core.scoped.last_error
     );
 
-    // RC の簡易断面・fy 未設定材料はヒンジ耐力の既定値(鋼材既定 235N/mm²)を用いる
-    // 都合上、既定の push_max_disp=500mm では機構形成後に特異行列となり得るため、
-    // 微小変位のみを対象とする(ここではランク判定経路の配線確認が目的で、
-    // 崩壊形の精算は対象外)。
+    // 既定の押込み量では機構形成後に特異となり得るため、ランクの接続検証には微小変位を使う。
     app.core.analysis_cfg.push_steps = 3;
     app.core.analysis_cfg.push_use_max_disp = true;
     app.core.analysis_cfg.push_max_disp = 3.0;
@@ -3955,18 +3887,14 @@ fn cmq_display_load_case_falls_back_to_first_case() {
     };
 
     let mut app = App::default();
-    // 荷重ケースが1つもなければ None。
     assert!(app.cmq_display_load_case().is_none());
 
     app.core.model.load_cases = vec![mk_case(0, "DL"), mk_case(1, "LL")];
-    // 未選択（None）なら先頭ケース。
     assert_eq!(app.cmq_display_load_case().unwrap().name, "DL");
 
-    // 選択中なら選択中のケース。
     app.ui.scoped.nav.focus_load_case = Some(LoadCaseId(1));
     assert_eq!(app.cmq_display_load_case().unwrap().name, "LL");
 
-    // 選択中IDが失効（削除済み）していれば先頭ケースへフォールバック。
     app.ui.scoped.nav.focus_load_case = Some(LoadCaseId(99));
     assert_eq!(app.cmq_display_load_case().unwrap().name, "DL");
 }
@@ -4220,7 +4148,6 @@ fn test_sync_gravity_load_cases_action_square_slab_triangle_distribution() {
     assert_eq!(case.member.len(), 8, "4辺 × 2区間（三角形分布）= 8件");
     assert!(case.nodal.is_empty(), "小梁がないので節点荷重は空のはず");
 
-    // 各梁にちょうど2区間ずつ入っていることを確認
     for elem_id in 0..4u32 {
         let n_segs = case
             .member
@@ -4233,7 +4160,6 @@ fn test_sync_gravity_load_cases_action_square_slab_triangle_distribution() {
         }
     }
 
-    // 鉛直合計 = w × 面積（保存則）
     let total: f64 = case
         .member
         .iter()
@@ -4248,7 +4174,6 @@ fn test_sync_gravity_load_cases_action_square_slab_triangle_distribution() {
         "total={total} expected={expected}"
     );
 
-    // 再同期しても重複しない（全置換）
     app.sync_gravity_load_cases_action();
     let cases: Vec<_> = app
         .core
@@ -4260,7 +4185,6 @@ fn test_sync_gravity_load_cases_action_square_slab_triangle_distribution() {
     assert_eq!(cases.len(), 1, "再同期でケースが重複してはいけない");
     assert_eq!(cases[0].member.len(), 8, "再同期で荷重が重複してはいけない");
 
-    // undo で元に戻る（新規作成だったケースが丸ごと消える）
     app.core.scoped.undo.undo(&mut app.core.model);
     assert!(
         !app.core
@@ -4315,7 +4239,6 @@ fn test_sync_gravity_load_cases_action_separates_dead_and_live() {
             .unwrap_or(0.0)
     }
 
-    // DL ケース: loads(0.005) を分配。
     let dl = app
         .core
         .model
@@ -4327,7 +4250,6 @@ fn test_sync_gravity_load_cases_action_separates_dead_and_live() {
     let area = 4000.0 * 4000.0;
     assert!((sum_vertical(&app.core.model, DL_CASE_NAME) - 0.005 * area).abs() < 1e-6);
 
-    // LL ケース: 骨組用積載 1.8e-3 N/mm² を分配（DL とは別ケース・kind=Live）。
     let ll = app
         .core
         .model
@@ -4338,7 +4260,6 @@ fn test_sync_gravity_load_cases_action_separates_dead_and_live() {
     assert_eq!(ll.kind, LoadCaseKind::Live);
     assert!((sum_vertical(&app.core.model, LL_FRAME_CASE_NAME) - 1.8e-3 * area).abs() < 1e-6);
 
-    // 用途を外すと LL ケースは空同期され、寄与がなくなる（新規なら作られない）。
     app.core.model.slabs[0].plate.usage = None;
     app.sync_gravity_load_cases_action();
     assert!(
@@ -4359,7 +4280,6 @@ fn test_floor_design_checks_slab() {
     let mut model = make_square_slab_test_model();
     // 事務室用途（床用積載 2900 N/m² = 2.9e-3 N/mm²）＋固定荷重 0.005。
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
-    // 板厚はスラブ断面が持つ（材料は割り当てないので自重は算定されない）。
     let slab_sec_id = SectionId(model.sections.len() as u32);
     model.sections.push(
         sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
@@ -4538,7 +4458,6 @@ fn test_floor_design_skips_materialized_beam() {
             section: Some(SectionId(0)),
             name: "SB1".to_string(),
         });
-    // 両端 N4–N5 を持つ実 Beam を追加（実部材化相当）。
     let next = model.elements.len() as u32;
     model.elements.push(ElementData {
         id: ElemId(next),
@@ -4936,7 +4855,7 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     assert_eq!((direct.beam_checks.len(), direct.slab_checks.len()), (1, 2));
     for stale in [true, false] {
         app.core.scoped.staleness.results_stale = stale;
-        app.core.design_term = LoadTerm::Short; // 直接床板・小梁は実効長期のまま。
+        app.core.design_term = LoadTerm::Short;
         app.run_design_check();
         let direct = app.core.scoped.results.as_ref().unwrap();
         assert_eq!(direct.analysis_contract_version, None);
@@ -4947,7 +4866,6 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
         assert_eq!((direct.beam_checks.len(), direct.slab_checks.len()), (1, 2));
     }
     assert!(app.require_design_input().is_ok());
-    // 最新の直接検定は保存できる。staleな保持THを同梱しない。
     let mut history = App::default();
     history.load_model(crate::sample::portal_frame());
     history.core.analysis_cfg.th_duration = 0.02;
@@ -5059,7 +4977,6 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     model.nodes.push(mk_mid(5, 2000.0, 4000.0));
     let mut plate = model.slabs[0].plate.clone();
     plate.section = Some(slab_sid);
-    // 固定 DL 5.0、床用 3.0、小梁用 2.5、大梁用 1.8、地震用 0.8 kN/m²。
     plate.usage = Some(SlabUsage::Custom {
         floor: 3.0e-3,
         beam: 2.5e-3,
@@ -5172,7 +5089,6 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
             slab_checks: short_slabs,
             ..Default::default()
         });
-        // この試験は表示用の直接床検定fixtureを構築する。
         let selected = app.core.scoped.last_static.take();
         let _ = app.compute_unconfirmed_holding_capacity();
         app.certify_design_fixture();
@@ -5245,14 +5161,12 @@ fn test_floor_design_checks_cantilever_beam() {
     };
     model.nodes.push(mk_mid(4, 2000.0, 0.0));
     model.nodes.push(mk_mid(5, 2000.0, 4000.0));
-    // 中央線を 2 要素に分ける節点。中央線の大梁を 1 要素で置くと、片持ち小梁の
-    // 両端を結ぶ実梁とみなされ（`secondary_member_materialized`）設計対象から外れる。
+    // 中央の大梁を1要素にすると、片持ち小梁が実部材化済みと判定され設計対象から外れる。
     model.nodes.push(mk_mid(6, 2000.0, 2000.0));
     let plate = model.slabs[0].plate.clone();
     model.slabs.clear();
     model.floor_assignment_regions = Default::default();
-    // 片持ち小梁は両端支持の境界にならないため、割当領域の分割は中央の大梁
-    // （囲まれた床板の支持辺として新設される）で作る。小梁は分割後へ置く。
+    // 片持ち小梁は両端支持の境界を作れないため、床板の分割には中央の大梁を使う。
     let first = model.add_enclosed_slab_from_nodes(
         &[NodeId(0), NodeId(4), NodeId(6), NodeId(5), NodeId(3)],
         plate.clone(),
@@ -5314,7 +5228,6 @@ fn test_floor_design_checks_cantilever_beam() {
         jr.m_max
     );
 
-    // 非片持ちの未割当小梁は検定対象外（表に「未」として残る）。
     let mut model2 = app.core.model.clone();
     model2.unassigned_beams[0].ends = sepika_core::model::SecondaryMemberEnds::Detached([
         [2000.0, 0.0, 0.0],
@@ -5338,7 +5251,6 @@ fn test_floor_design_checks_secondary_beam_without_section_is_input_error() {
     use sepika_core::model::{SecondaryMember, SecondaryMemberKind};
 
     let mut model = make_square_slab_test_model();
-    // 共有辺になるよう床板を 2 枚に割る（分配 Span は出るが断面が無い）。
     let plate = model.slabs[0].plate.clone();
     model.nodes.push(sepika_core::model::Node {
         id: NodeId(4),
@@ -5445,7 +5357,6 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
         steel_material: None,
         property_basis: Default::default(),
     });
-    // 下階スラブ（Z=0、室用途なし）は既にモデルにある。同じ平面形の上階スラブを足す。
     let mk_node = |id: u32, x: f64, y: f64, z: f64| Node {
         id: NodeId(id),
         coord: [x, y, z],
@@ -5460,7 +5371,6 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
     {
         model.nodes.push(mk_node(4 + i as u32, x, y, Z_UPPER));
     }
-    // 下階と同じ仕上げ荷重を持たせ、室用途だけ変えて上下を区別する。
     let mut plate = model.slabs[0].plate.clone();
     plate.usage = Some(SlabUsage::Office);
     model.nodes.push(mk_node(8, 2000.0, 0.0, Z_UPPER));
@@ -5607,7 +5517,6 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
         story: None,
         support_spring: None,
     };
-    // 幅 2000 の帯と幅 4000 の帯を、x=2000 の辺で隣り合わせる。
     model.nodes.push(mk(4, 2000.0, 0.0));
     model.nodes.push(mk(5, 2000.0, 4000.0));
     model.nodes.push(mk(6, 6000.0, 0.0));
@@ -5674,7 +5583,6 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
         r.secondary_beams.push(beam);
         r
     }];
-    // 床領域の境界を変えたので、剛床のスレーブも新しい境界節点へ揃える。
     model.constraints = vec![sepika_core::model::Constraint::RigidDiaphragm {
         story: sepika_core::ids::StoryId(0),
         master: NodeId(0),
@@ -5725,7 +5633,6 @@ fn test_floor_design_checks_secondary_beam_on_slab_edge() {
 fn test_slab_design_span_respects_one_way() {
     use sepika_core::model::{AreaLoad, DistributionMethod, OneWayDir};
 
-    // lx=6000（辺0方向, X）、ly=3000（辺3方向, Y）の矩形スラブ。
     let mk_node = |id: u32, x: f64, y: f64| sepika_core::model::Node {
         id: NodeId(id),
         coord: [x, y, 0.0],
@@ -5751,7 +5658,6 @@ fn test_slab_design_span_respects_one_way() {
         m.add_enclosed_slab_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             SlabPlate {
-                // 板厚はスラブ断面が持つ（設計にはこの厚さを使う）。
                 section: Some(sepika_core::ids::SectionId(0)),
                 loads: vec![AreaLoad {
                     kind: "DL".into(),
@@ -5765,7 +5671,6 @@ fn test_slab_design_span_respects_one_way() {
         m
     };
 
-    // 一方向 X → スパン = lx = 6000（長辺）。
     let app_x = App {
         core: AppCore {
             model: mk_model(6000.0, 3000.0, Some(OneWayDir::X)),
@@ -5779,7 +5684,6 @@ fn test_slab_design_span_respects_one_way() {
         "X一方向は長辺6000で設計"
     );
 
-    // 一方向 Y → スパン = ly = 3000（短辺）。
     let app_y = App {
         core: AppCore {
             model: mk_model(6000.0, 3000.0, Some(OneWayDir::Y)),
@@ -5793,7 +5697,6 @@ fn test_slab_design_span_respects_one_way() {
         "Y一方向は短辺3000で設計"
     );
 
-    // 指定なし → 短辺 min(6000,3000)=3000（安全側）。
     let app_n = App {
         core: AppCore {
             model: mk_model(6000.0, 3000.0, None),
@@ -6075,9 +5978,7 @@ fn test_auto_generate_combinations_from_kinds() {
         app.core.scoped.last_error
     );
 
-    // 多雪区域=false: DL+LL(1) + DL+LL+SL(1) = 2 ケース
-    // （地震(EX/EY)は kind だけでは方向を判別できないため対象外の仕様。
-    // 風は種別 Wind のケースがあっても生成しない）。
+    // 地震ケースはkindだけではEX・EYの方向を判別できないため、自動組合せの対象にできない。
     let names: Vec<&str> = app
         .core
         .model
@@ -6087,13 +5988,11 @@ fn test_auto_generate_combinations_from_kinds() {
         .collect();
     assert_eq!(names, vec!["DL + LL", "DL + LL + SL"]);
 
-    // DL+LL の中身は Dead(0)+Live(1) を各1.0で参照する。
     assert_eq!(
         app.core.model.combinations[0].terms,
         vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)]
     );
 
-    // 各組合せは個別コマンドで追加されているため、全 undo で消える。
     for _ in 0..app.core.model.combinations.len() {
         app.core.scoped.undo.undo(&mut app.core.model);
     }
@@ -6130,7 +6029,6 @@ fn test_auto_generate_combinations_heavy_snow() {
         .map(|c| c.name.as_str())
         .collect();
     assert!(names.contains(&"DL + LL + 0.7SL"), "{names:?}");
-    // 風は生成対象外のため、暴風の組合せは多雪区域でも作られない。
     assert!(!names.iter().any(|n| n.contains('W')), "{names:?}");
 }
 
@@ -6140,7 +6038,6 @@ fn test_auto_generate_combinations_heavy_snow() {
 fn test_auto_generate_combinations_missing_dead_or_live_is_error() {
     use sepika_core::model::LoadCaseKind;
 
-    // Dead 無し
     let mut app = App::default();
     app.core.model.load_cases = vec![kind_lc(0, "積載", LoadCaseKind::Live)];
     app.auto_generate_combinations_action();
@@ -6151,11 +6048,9 @@ fn test_auto_generate_combinations_missing_dead_or_live_is_error() {
         .as_deref()
         .unwrap()
         .contains("固定荷重"));
-    // 荷重組合せ欄に表示する専用スロットにも同じエラーが入る。
     assert_eq!(app.core.scoped.combo_error, app.core.scoped.last_error);
     assert!(app.core.model.combinations.is_empty());
 
-    // Live 無し
     let mut app = App::default();
     app.core.model.load_cases = vec![kind_lc(0, "固定", LoadCaseKind::Dead)];
     app.auto_generate_combinations_action();
@@ -6169,7 +6064,6 @@ fn test_auto_generate_combinations_missing_dead_or_live_is_error() {
     assert_eq!(app.core.scoped.combo_error, app.core.scoped.last_error);
     assert!(app.core.model.combinations.is_empty());
 
-    // Dead/Live が揃えば生成に成功し、組合せ欄のエラーは消える。
     app.core
         .model
         .load_cases
@@ -6189,7 +6083,6 @@ fn test_column_live_load_factors_three_story() {
     };
 
     let mut model = sepika_core::model::Model::default();
-    // 4節点(z=0,3000,6000,9000)。z>0 の節点に所属階(1F=story0..3F=story2)を設定。
     for (i, z) in [0.0, 3000.0, 6000.0, 9000.0].iter().enumerate() {
         model.nodes.push(Node {
             id: NodeId(i as u32),
@@ -6208,7 +6101,6 @@ fn test_column_live_load_factors_three_story() {
             support_spring: None,
         });
     }
-    // 柱3本（各階1本）＋ 水平の梁1本（柱でないため集計対象外の確認用）
     let mut push_elem = |id: u32, a: u32, b: u32| {
         model.elements.push(ElementData {
             id: ElemId(id),
@@ -6229,7 +6121,6 @@ fn test_column_live_load_factors_three_story() {
     push_elem(0, 0, 1);
     push_elem(1, 1, 2);
     push_elem(2, 2, 3);
-    // 水平材（同一 Z の節点を追加して繋ぐ）
     model.nodes.push(Node {
         id: NodeId(4),
         coord: [4000.0, 0.0, 9000.0],
@@ -6255,7 +6146,6 @@ fn test_column_live_load_factors_three_story() {
     });
 
     let factors = column_live_load_factors(&model);
-    // 水平梁(ElemId(3))は含まれない。
     assert_eq!(
         factors,
         vec![
@@ -6280,7 +6170,6 @@ fn test_run_preparation_is_idempotent() {
         app.core.scoped.last_error
     );
 
-    // 解析まで済ませて結果を最新状態にする。
     app.run_linear_static(LoadCaseId(0));
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -6292,7 +6181,6 @@ fn test_run_preparation_is_idempotent() {
     let stories_before = app.core.model.stories.clone();
     let nodes_before = app.core.model.nodes.len();
 
-    // 2 回目の準備計算ではモデルが変わらない。
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -6415,7 +6303,6 @@ fn test_run_preparation_regenerates_stories_keeping_manual_input() {
     let auto_weight = app.core.model.stories[0].seismic_weight.unwrap();
     assert!(auto_weight > 0.0);
 
-    // 地震用重量の手入力と階の種別（PH）を設定する。
     let story = app.core.model.stories[0].id;
     app.core.scoped.undo.run(
         &mut app.core.model,
@@ -6432,7 +6319,6 @@ fn test_run_preparation_regenerates_stories_keeping_manual_input() {
         }),
     );
 
-    // 再度の準備計算でも手入力は失われない。
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -6452,7 +6338,6 @@ fn test_run_preparation_regenerates_stories_keeping_manual_input() {
         StoryLevelKind::Penthouse { k: 0.6 }
     );
 
-    // 手入力を解除すると次の準備計算で自動算定値へ戻る。
     let story = app.core.model.stories[0].id;
     app.core.scoped.undo.run(
         &mut app.core.model,
@@ -6468,7 +6353,6 @@ fn test_run_preparation_regenerates_stories_keeping_manual_input() {
         app.core.scoped.last_error
     );
     assert_eq!(app.core.model.stories[0].weight_override, None);
-    // PH 階でも階自体の重量集計は変わらない（Ai 分布での扱いだけが変わる）。
     assert!((app.core.model.stories[0].seismic_weight.unwrap() - auto_weight).abs() < 1e-6);
 }
 
@@ -6502,7 +6386,6 @@ fn test_load_case_job_routes_standard_lateral_cases() {
     );
     assert_eq!(app.standard_lateral_case(dl), None, "DL は通常の線形静的");
 
-    // EX の実行は地震静的ジョブとして走り、結果は Seismic(X) へ格納される。
     app.start_load_case_job(ex);
     assert_eq!(app.core.scoped.job.as_ref().unwrap().label, "地震静的解析");
     wait_for_job(&mut app);
@@ -6516,7 +6399,6 @@ fn test_load_case_job_routes_standard_lateral_cases() {
         Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)))
     );
 
-    // DL の実行は線形静的ジョブとして走り、結果は User キーへ格納される。
     app.start_load_case_job(dl);
     assert_eq!(app.core.scoped.job.as_ref().unwrap().label, "線形静的解析");
     wait_for_job(&mut app);
@@ -7437,7 +7319,6 @@ fn test_auto_generate_combinations_uses_standard_case_names() {
         .collect();
     assert!(names.contains(&"DL + LL + EX"), "{names:?}");
     assert!(names.contains(&"DL + LL - EY"), "{names:?}");
-    // 風荷重ケースを定義していないため、暴風の組合せは生成されない。
     assert!(!names.iter().any(|n| n.contains('W')), "{names:?}");
 }
 
@@ -7512,7 +7393,6 @@ fn rc_cantilever_frame() -> sepika_core::model::Model {
                 support_spring: None,
             },
         ],
-        // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
         sections: vec![
             Section {
                 frame_use: Some(sepika_core::model::FrameSectionUse::Column),
@@ -7560,8 +7440,8 @@ fn rc_cantilever_frame() -> sepika_core::model::Model {
         ..Default::default()
     };
     let members = [
-        (0u32, 0u32, 1u32, 0u32, [1.0, 0.0, 0.0]), // 柱（鉛直）
-        (1, 1, 2, 1, [0.0, 0.0, 1.0]),             // 梁（水平）
+        (0u32, 0u32, 1u32, 0u32, [1.0, 0.0, 0.0]),
+        (1, 1, 2, 1, [0.0, 0.0, 1.0]),
     ];
     for (id, i, j, sec, ref_vector) in members {
         model.elements.push(ElementData {
@@ -7611,11 +7491,9 @@ fn test_compute_ultimate_checks_rc_frame() {
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert_eq!(col.kind, MemberKind::Column);
     assert_eq!(beam.kind, MemberKind::Girder);
-    // 各耐力・余裕度が正常に算定される。
     assert!(col.qsu > 0.0 && col.qmu > 0.0 && col.shear_margin > 0.0);
     assert!(col.axial.is_some(), "柱は軸終局耐力を持つ");
     assert!(beam.axial.is_none(), "梁は軸終局耐力なし");
-    // 付着検定 ON（既定）なので Qbu も算定される。
     assert!(col.qbu > 0.0 && col.bond_margin.is_finite());
 }
 
@@ -7656,7 +7534,6 @@ fn test_compute_cft_ultimate_checks() {
                 support_spring: None,
             },
         ],
-        // 材料は断面が持つ。
         sections: vec![Section {
             frame_use: Some(sepika_core::model::FrameSectionUse::Column),
             material: Some(MaterialId(0)),
@@ -7724,8 +7601,6 @@ fn test_compute_cft_ultimate_checks() {
     assert!(checks[0].ncu > 0.0 && checks[0].ntu > 0.0);
 }
 
-// 標準荷重ケース（DL・LL(架構用)・LL(地震用)・EX・EY）
-
 /// DL の自動同期にスラブ固定荷重と躯体自重の両方が含まれることを確認する
 /// （DL＝自重＋スラブ重量の自動計算。「自重(自動)」ケースは作られない）。
 #[test]
@@ -7734,7 +7609,6 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     use sepika_core::model::{Material, MemberLoadKind, Section};
 
     let mut model = make_square_slab_test_model();
-    // 全梁に断面・材料（密度あり）を与え、自重を発生させる。
     model.sections.push(Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
@@ -7773,7 +7647,6 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     for e in &mut model.elements {
         e.section = Some(SectionId(0));
     }
-    // 材料は断面が持つ。
     model.sections[0].material = Some(MaterialId(0));
     model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::RcBeamRect {
         b: 400.0,
@@ -7844,7 +7717,6 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
         (total - (slab_dl + self_weight)).abs() < 1e-6,
         "DL 合計 {total} = スラブ {slab_dl} + 自重 {self_weight} のはず"
     );
-    // 旧「自重(自動)」ケースは作られない。
     assert!(app
         .core
         .model
@@ -7871,7 +7743,6 @@ fn test_generate_stories_seismic_weight_no_double_count() {
 
     // 自重の節点配分（等分布荷重の静定反力 = 両端 1/2 ずつ）のうち、
     // 階レベル（z=3500 の節点 2,3）へ配分される分だけが階重量に算入される
-    // （柱の下半分は基部 z=0 へ配分され階に属さない）。
     let (sw_nodal, sw_member) = sepika_load::self_weight::self_weight_case_content(
         &app.core.model,
         &sepika_core::model::LoadCfg::default(),
@@ -7914,7 +7785,6 @@ fn test_generate_stories_seismic_weight_no_double_count() {
         "階重量 {w} = 自重(階配分) {self_weight_at_story} + ケース荷重 {case_loads} のはず（二重計上なし）"
     );
 
-    // 再生成しても増えない（冪等）。
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -7963,7 +7833,6 @@ fn test_generate_stories_syncs_ex_ey_cases() {
         .expect("EYケースが作られるはず");
     let fy: f64 = ey.nodal.iter().map(|nl| nl.values[1]).sum();
     assert!(fy > 0.0, "EY は +Y 方向の水平力を持つはず: {fy}");
-    // 層せん断力の総和は方向によらず同じ（同じ Ai 分布）。
     assert!((fx - fy).abs() < 1e-9, "fx={fx} fy={fy}");
 }
 
@@ -7975,7 +7844,6 @@ fn test_run_combination_errors_on_empty_seismic_case() {
 
     let mut model = crate::sample::portal_frame();
     model.stories.clear();
-    // 空の EX ケース（階未生成のため内容なし）と、それを参照する組合せ。
     let ex_id = LoadCaseId(model.load_cases.len() as u32);
     model.load_cases.push(LoadCase {
         origin: Default::default(),
@@ -8066,7 +7934,6 @@ fn test_import_stbridge_then_run_dl_succeeds() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("run_dl.stb");
 
-    // 1 層立体フレーム: 柱脚 4 節点（矩形配置, z=0）＋柱頭 4 節点（z=3000）。
     let mut model = sepika_core::model::Model::default();
     let plan = [(0.0, 0.0), (6000.0, 0.0), (6000.0, 4000.0), (0.0, 4000.0)];
     for (k, z) in [0.0, 3000.0].into_iter().enumerate() {
@@ -8095,7 +7962,6 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         horizontal_thick: 10.0,
         corner_r: Some(13.0),
     };
-    // 材料は断面が持つ。
     model.sections.push(sepika_core::model::Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Column),
         material: Some(MaterialId(0)),
@@ -8119,7 +7985,6 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         fc: None,
         fy: Some(235.0),
     });
-    // 柱 4 本（i→i+4）＋外周梁 4 本（柱頭を一周）。
     let conn: [(u32, u32); 8] = [
         (0, 4),
         (1, 5),
@@ -8234,7 +8099,6 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         .statics
         .iter()
         .any(|(k, _)| *k == StaticCaseKey::User(dl_id)));
-    // DL には自重が同期され、柱に軸力（鉛直変位）が生じている。
     let dl = app2
         .core
         .model
@@ -8279,7 +8143,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         story: None,
         support_spring: None,
     };
-    // 柱脚 0-3（固定）、柱頭 4-7、小梁支持点 8-9（大梁スパン中間・要素非接続）。
     let plan = [(0.0, 0.0), (8000.0, 0.0), (8000.0, 6000.0), (0.0, 6000.0)];
     let mut nodes = Vec::new();
     for (i, (x, y)) in plan.iter().enumerate() {
@@ -8310,7 +8173,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         plastic_zone: None,
         spring: None,
     };
-    // 柱 4 本 + 外周大梁 4 本（大梁 y=0 は ElemId(4)、節点 4→5）。
     let elements = vec![
         mk_beam(0, 0, 4),
         mk_beam(1, 1, 5),
@@ -8322,7 +8184,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         mk_beam(7, 7, 4),
     ];
     let plate = SlabPlate {
-        // 板厚と自重はスラブ断面（`SectionId(1)`）から解決する。
         section: Some(SectionId(1)),
         loads: vec![AreaLoad {
             kind: "DL".into(),
@@ -8362,7 +8223,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
                 property_basis: Default::default(),
             },
             {
-                // スラブ断面（板厚 150 mm・Fc24）。板厚と自重はここから解決する。
                 let mut sec = sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
                     .to_section(SectionId(1), "S15".into());
                 sec.material = Some(MaterialId(0));
@@ -8396,7 +8256,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
             fc: Some(24.0),
             fy: None,
         }],
-        // 小梁: 大梁 y=0 の中間 (4000,0) と大梁 y=6000 の中間 (4000,6000) を結ぶ。
         unassigned_beams: vec![SecondaryMember {
             vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
@@ -8415,7 +8274,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
             section: Some(SectionId(2)),
             name: "B1".into(),
         }],
-        // 床領域は大梁の 1 区画（8000×6000）。小梁で区切られた 2 枚の床板を持つ。
         floor_regions: vec![{
             let mut region = FloorRegion::new(
                 FloorRegionId(0),
@@ -8514,7 +8372,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         .find(|lc| lc.name == DL_CASE_NAME)
         .expect("DLケースが作られるはず");
 
-    // 鉛直荷重の総和保存: スラブ DL + 躯体自重（小梁自重を含む）。
     let dl_total: f64 = dl
         .member
         .iter()
@@ -8549,7 +8406,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         }
     }
     // スラブの固定荷重は「仕上げ（AreaLoad 0.005）＋スラブ自重（板厚×材料密度）」。
-    // 自重は断面から都度算定するため、期待値もモデルから引く。
     let slab_area = 8000.0 * 6000.0;
     let slab_w: f64 = app
         .core
@@ -8565,7 +8421,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         "DL 合計 {dl_total} = スラブ {slab_dl} + 自重 {sw_total} のはず（荷重を捨てない）"
     );
 
-    // 小梁反力（+小梁自重の半分）が大梁 y=0（ElemId(4)）の中間集中荷重 a=4000 に載る。
     let point_on_girder = dl
         .member
         .iter()
@@ -8582,7 +8437,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     );
     assert!(point_on_girder.1 > 0.0);
 
-    // 要素非接続の小梁支持節点（8, 9）への節点荷重は残らない（全て CMQ 変換済み）。
     assert!(
         dl.nodal
             .iter()
@@ -8681,9 +8535,6 @@ fn test_diagnostics_errors_agree_with_analysis_precheck() {
                 n.restraint = sepika_core::dof::Dof6Mask::FREE;
             }
         }),
-        // モデル検証が見る不変条件の破壊。解析側は Analysis::prepare が別途
-        // validate を呼んでいたため、共通判定へ取り込む前は診断だけが
-        // 挙げる不備になりかねなかった（実際は両者とも止めていた）。
         ("ID と配列添字の不一致", |m| {
             m.elements[0].id = sepika_core::ids::ElemId(99)
         }),
@@ -8692,7 +8543,6 @@ fn test_diagnostics_errors_agree_with_analysis_precheck() {
         }),
     ];
 
-    // 健全なモデルは診断 Error 0 件・解析前チェック通過。
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     app.run_diagnostics();
@@ -8753,8 +8603,6 @@ fn test_run_diagnostics_ignores_generated_panel_zones() {
 
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
-    // 実際の導線と同じく準備計算を通す（内部で仕口パネルを自動生成してから
-    // 診断を実行する）。
     app.ensure_preparation();
 
     let panels: Vec<_> = app
@@ -8810,10 +8658,6 @@ fn test_mark_edited_marks_preparation_and_diagnostics_stale() {
     app.run_preparation();
     assert!(!app.core.scoped.staleness.preparation_stale);
 }
-
-// グリッド操作のヘッドレス UI テスト
-// widget（egui）を介さず、grid_core の純ロジックと NodeGridAdapter を
-// widget と同じ順序で呼び、モデル・undo の挙動を検証する。
 
 mod grid_headless {
     use super::super::node_grid::NodeGridAdapter;
@@ -8893,7 +8737,6 @@ mod grid_headless {
     fn test_grid_paste_composite_single_undo_restores_appended_rows() {
         let mut app = app_with_nodes(2);
         let before = app.core.model.clone();
-        // 2 行の表に 3 行 ×2 列を貼る → 1 行はみ出し（自動追加）
         let plan = paste(
             &mut app,
             &block(&[&["10", "20"], &["30", "40"], &["50", "60"]]),
@@ -8912,7 +8755,6 @@ mod grid_headless {
             app.core.scoped.undo.undo_label(),
             Some("節点座標の貼り付け")
         );
-        // undo 1 回で行追加ごと元に戻る
         app.core.scoped.undo.undo(&mut app.core.model);
         assert!(app.core.model.eq_ignoring_dofmap(&before));
     }
@@ -8989,7 +8831,6 @@ mod grid_headless {
                 undo: &mut app.core.scoped.undo,
                 edited: false,
             };
-            // プレースホルダ行（row == rows()）の Y 列に確定
             commit_cell_text(&mut adapter, CellRef { row: 1, col: 1 }, "6000")
         };
         assert_eq!(outcome, CommitOutcome::Applied { appended: true });
@@ -9044,7 +8885,7 @@ mod grid_headless {
     #[test]
     fn test_grid_delete_rows_single_undo_restores_ids() {
         let mut app = app_with_nodes(5);
-        push_beam(&mut app, 0, 4); // 削除対象外の節点を結ぶ梁（ID 繰り上げの検証用）
+        push_beam(&mut app, 0, 4);
         let before = app.core.model.clone();
         {
             let mut adapter = NodeGridAdapter {
@@ -9145,8 +8986,6 @@ fn test_rigid_floor_beam_has_forces_and_checks() {
     );
 }
 
-// ── 準備計算（解析前の前処理） ──────────────────────────────────────
-
 /// 準備計算は階が未定義なら自動生成し、階の分布・剛域・Ai 分布・荷重集計を
 /// 揃えて `preparation` へ格納する（解析前に内容を確認できるようにする）。
 #[test]
@@ -9175,20 +9014,15 @@ fn test_run_preparation_populates_result() {
         .expect("準備計算の結果があるはず");
     use sepika_core::model::StoryStructure;
 
-    // 階が未定義だったので自動生成される（基部の床 + 2FL の 2 階、層は 1 つ）。
     assert_eq!(app.core.model.stories.len(), 2);
-    // 構造種別は層の属性で、層の上端の階が持つ。鋼断面の柱梁だけの層は S。
     assert_eq!(app.core.model.stories[1].structure, StoryStructure::S);
     assert_eq!(prep.stories.len(), 1, "分布表の単位は層");
     let story = &prep.stories[0];
     assert!(story.weight > 0.0, "地震用重量が算定される");
     assert_eq!(story.cumulative_weight, story.weight, "最上層の ΣWj = Wi");
-    // 階高は GL（柱脚レベル 0）から梁レベル 3500mm まで。
     assert!((story.height - 3500.0).abs() < 1e-6, "{}", story.height);
 
-    // 建物概要。
     assert_eq!(prep.summary.n_nodes, app.core.model.nodes.len());
-    // 剛床代表節点（面外拘束を持つ）は支点として数えない。
     assert_eq!(prep.summary.n_supports, 2, "柱脚 2 点が固定");
     assert!((prep.summary.height_mm - 3500.0).abs() < 1e-6);
     assert!(prep.summary.total_seismic_weight > 0.0);
@@ -9208,7 +9042,6 @@ fn test_run_preparation_populates_result() {
     assert!((sm.base_shear - sm.rows[0].qi).abs() < 1e-9);
     assert!(!sm.clamped_negative_pi);
 
-    // 荷重集計（DL には自重・床荷重が同期されるので鉛直下向き = 負）。
     let dl = prep
         .load_cases
         .iter()
@@ -9287,7 +9120,6 @@ fn test_preparation_generates_panel_zones() {
             assert!(p.k_panel[direction] > 0.0, "各方向のせん断剛性 G・Ve が正");
         }
     }
-    // パネル節点には γX・γY の 2 自由度が増える。
     let dofmap = sepika_core::dof::DofMap::build(&app.core.model);
     let panel_nodes: Vec<usize> = app
         .core
@@ -9301,7 +9133,6 @@ fn test_preparation_generates_panel_zones() {
         assert!(dofmap.has_panel_dof(*ni), "節点 {ni} にパネル自由度");
     }
 
-    // OFF にすると生成済みのパネルが取り除かれ、モデルの不変条件も保たれる。
     app.core.model.panel_zone = PanelZoneMode::None;
     app.run_preparation();
     assert!(!app
@@ -9333,8 +9164,6 @@ fn test_preparation_lists_rigid_zones() {
     app.run_preparation();
 
     let prep = app.core.scoped.preparation.as_ref().unwrap();
-    // 準備計算は柱梁接合部へ仕口パネル要素も生成するため、剛域の候補数は
-    // 全要素数ではなく梁要素（線材）の数と一致する。
     let n_beams = app
         .core
         .model
@@ -9346,8 +9175,6 @@ fn test_preparation_lists_rigid_zones() {
         prep.rigid_zone_candidates, n_beams,
         "剛域の候補は梁要素（線材）"
     );
-    // サンプルは S 造のため剛域長 λ は 0 だが、危険断面位置の基準となる
-    // 柱フェース距離は付く（λ とフェース距離は別概念）。
     assert!(
         !prep.rigid_zones.is_empty(),
         "柱梁が直交接続するのでフェース距離が付く"
@@ -9360,12 +9187,10 @@ fn test_preparation_lists_rigid_zones() {
     );
     for r in &prep.rigid_zones {
         assert!(r.length > 0.0);
-        // 可とう長は剛体アーム長（剛域長と仕口パネル分オフセットの大きい方）を控除する。
         let arm_i = r.zone_i.max(r.panel_offset_i);
         let arm_j = r.zone_j.max(r.panel_offset_j);
         assert!((r.clear_length - (r.length - arm_i - arm_j)).abs() < 1e-9);
         assert!((r.ratio - (arm_i + arm_j) / r.length).abs() < 1e-12);
-        // モデル側の値と一致する（表示が実際の解析入力と同じであること）。
         let elem = app
             .core
             .model
@@ -9385,7 +9210,6 @@ fn test_preparation_lists_rigid_zones() {
 #[test]
 fn test_preparation_without_stories_reports_notes() {
     let mut app = App::default();
-    // 階を作らずに解析だけ実行する経路（`ensure_preparation`）を通す。
     app.load_model(crate::sample::portal_frame());
     app.core.model.stories.clear();
     app.run_linear_static(LoadCaseId(0));
@@ -9399,7 +9223,6 @@ fn test_preparation_without_stories_reports_notes() {
     assert!(prep.stories.is_empty());
     assert!(prep.seismic.is_none());
     assert!(prep.seismic_note.as_ref().unwrap().contains("階"));
-    // 剛域・荷重集計は階に依存しないので算定される。
     assert!(!prep.rigid_zones.is_empty());
     assert!(!prep.load_cases.is_empty());
 }
@@ -9475,7 +9298,6 @@ fn test_load_model_resets_model_derived_state() {
     app.load_model(crate::sample::portal_frame());
     app.run_preparation();
 
-    // 差し替え前のモデル由来の状態を擬似的に残す。
     app.core.scoped.stick_response = Some(sepika_solver::dynamic::lumped_mass::StickResponse {
         bending_rotations: Vec::new(),
         time: vec![0.0],
@@ -9505,9 +9327,7 @@ fn test_load_model_resets_model_derived_state() {
         app.ui.view.th_frame = 42;
         app.ui.view.th_playing = true;
     }
-    // 波形ライブラリの選択も差し替え前のモデル由来の状態。ここが漏れていると、
-    // プロジェクトAで選んだ波形が、一度も選んでいないプロジェクトBへ
-    // 持ち越されたまま保存されてしまう。
+    // 選択波形が残ると、別プロジェクトで未選択の波形を保存してしまう。
     app.core.scoped.wave_library_selection = Some("elcentro.csv".to_string());
     app.core.scoped.wave_library_selected_sha256 = Some("deadbeef".to_string());
     app.core.scoped.view_vibration_case = Some(sepika_core::ids::VibrationCaseId(99));
@@ -9544,14 +9364,12 @@ fn test_set_wave_library_selection_clears_hash_only_on_change() {
     app.core.scoped.wave_library_selection = Some("a.csv".to_string());
     app.core.scoped.wave_library_selected_sha256 = Some("hash_a".to_string());
 
-    // 同じ値を選び直してもハッシュは維持する（実行済みの状態は壊さない）。
     app.set_wave_library_selection(Some("a.csv".to_string()));
     assert_eq!(
         app.core.scoped.wave_library_selected_sha256.as_deref(),
         Some("hash_a")
     );
 
-    // 別の波形へ選び直すと、まだ実行していないためハッシュを破棄する。
     app.set_wave_library_selection(Some("b.csv".to_string()));
     assert_eq!(
         app.core.scoped.wave_library_selection.as_deref(),
@@ -9574,7 +9392,6 @@ fn test_open_legacy_project_without_analysis_settings_syncs_mass_method() {
 
     let mut model = crate::sample::portal_frame();
     model.mass_method = MassMethod::LumpedOnly;
-    // analysis_settings を同梱しない、本機能追加前のプロジェクトを模擬する。
     sepika_io::ovika::save_ovika(&path, &model, sepika_io::ovika::OvikaExtras::default())
         .expect(".ovika の保存");
 
@@ -9621,7 +9438,6 @@ fn test_build_preparation_csv() {
         assert!(csv.contains(section), "{section} がない:\n{csv}");
     }
     assert!(csv.contains("階,Wi[kN],ΣWj[kN],αi,Ai,Ci,Qi[kN],Pi[kN],種別"));
-    // 断面性能・幅厚比のセクションも出る。
     assert!(csv.contains("[断面性能]"), "{csv}");
     assert!(csv.contains("[幅厚比・部材ランク]"), "{csv}");
     assert!(csv.contains("H 形鋼"), "{csv}");
@@ -9644,7 +9460,6 @@ fn test_prep_sections_count_slab_reference() {
         sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
             .to_section(slab_sec, "S15".into()),
     );
-    // 水平な全周支持床だけが S15 を参照し、支持梁は別断面を使う。
     model.slabs[0].plate = SlabPlate {
         section: Some(slab_sec),
         loads: Vec::new(),
@@ -9689,7 +9504,6 @@ fn test_preparation_lists_section_properties() {
     let prep = app.core.scoped.preparation.as_ref().unwrap();
     assert_eq!(prep.sections.len(), app.core.model.sections.len());
     for (row, sec) in prep.sections.iter().zip(app.core.model.sections.iter()) {
-        // 表示値はモデルが持つ解析入力そのもの（ここで再計算はしない）。
         assert_eq!(row.section, sec.id);
         assert_eq!(row.area, Some(sec.area));
         assert_eq!(row.iy, Some(sec.iy));
@@ -9697,12 +9511,10 @@ fn test_preparation_lists_section_properties() {
         assert_eq!(row.j, sec.resolved_j().ok());
         assert!(row.shape_label.is_some(), "形状定義を持つ断面");
         assert!(row.n_elements > 0, "サンプルは全断面が使われている");
-        // 断面二次半径 i = √(I/A)。
         assert!((row.ry.unwrap() - (sec.iy / sec.area).sqrt()).abs() < 1e-9);
         assert!((row.rz.unwrap() - (sec.iz / sec.area).sqrt()).abs() < 1e-9);
         assert_eq!(row.material.as_deref(), Some("SN400B"));
     }
-    // 柱 H-300x300 は 2 本、梁 H-400x200 は 1 本。
     assert_eq!(prep.sections[0].n_elements, 2);
     assert_eq!(prep.sections[1].n_elements, 1);
 }
@@ -9718,7 +9530,6 @@ fn test_preparation_lists_width_thickness() {
     app.run_preparation();
 
     let prep = app.core.scoped.preparation.as_ref().unwrap();
-    // 柱（H-300x300）2 本 + 梁（H-400x200）1 本 → 2 行にまとまる。
     assert_eq!(prep.width_thickness.len(), 2, "{:?}", prep.width_thickness);
 
     let col = prep
@@ -9728,7 +9539,6 @@ fn test_preparation_lists_width_thickness() {
         .expect("柱の行");
     assert_eq!(col.n_elements, 2);
     assert_eq!(col.material, "SN400B");
-    // 幅厚比の値そのものは Design-JP の所有テストで確認する（ここでは行が埋まることのみ）。
     assert!(col.max_ratio.is_some());
     assert!(col.rank.is_some());
 
@@ -9738,7 +9548,6 @@ fn test_preparation_lists_width_thickness() {
         .find(|r| r.member_use == SteelMemberUse::Beam)
         .expect("梁の行");
     assert_eq!(beam.n_elements, 1);
-    // ランク判定は保有水平耐力の Ds 算定と同じ共通関数を通っていること。
     let shape = app.core.model.sections[1].shape.as_ref().unwrap();
     assert_eq!(
         beam.rank,
@@ -9842,8 +9651,6 @@ fn test_preparation_member_stiffness_empty_for_plain_model() {
         "{:?}",
         prep.member_stiffness
     );
-    // 準備計算は柱梁接合部へ仕口パネル要素も生成するため、候補数は全要素数では
-    // なく梁要素（線材）の数と一致する。
     let n_beams = app
         .core
         .model
@@ -9865,7 +9672,6 @@ fn test_preparation_member_stiffness_reports_composite_props() {
     use sepika_core::section_shape::SectionShape;
 
     let mut model = crate::sample::portal_frame();
-    // 柱を CFT 角形に差し替え、充填コンクリート強度 Fc を持つ鋼管材料を割り当てる。
     let cft = SectionShape::CftBox {
         corner_r: Some(32.0),
         height: 400.0,
@@ -9873,7 +9679,6 @@ fn test_preparation_member_stiffness_reports_composite_props() {
         thick: 16.0,
         horizontal_thick: 16.0,
     };
-    // 材料は断面が持つ。差し替えた断面へ元の材料を引き継ぐ。
     model.sections[0] = sepika_core::model::Section {
         material: Some(sepika_core::ids::MaterialId(0)),
         steel_material: Some(sepika_core::ids::MaterialId(0)),
@@ -9901,16 +9706,13 @@ fn test_preparation_member_stiffness_reports_composite_props() {
         .find(|r| r.kind == sepika_design_jp::MemberKind::Column)
         .expect("CFT 柱の行があるはず");
     let c = row.composite.expect("等価断面性能が算定されるはず");
-    // 充填コンクリート分だけ鋼管のみより剛性が大きくなる。
     assert!(c.iy > row.section_iy, "{} vs {}", c.iy, row.section_iy);
     assert!(c.area_ax > 0.0);
-    // 割増しはないので実効値＝等価換算値。
     assert_eq!(row.slab_factor, 1.0);
     assert_eq!(row.wall_girder_factor, 1.0);
     assert_eq!(row.effective_iy, Some(c.iy));
     assert_eq!(row.effective_area, Some(c.area_ax));
 
-    // 要素構築が用いる等価換算と一致する（表示と解析入力の一致）。
     let elem = app
         .core
         .model
@@ -9953,7 +9755,6 @@ fn test_preparation_rejects_src_without_fc() {
     };
 
     let mut model = crate::sample::portal_frame();
-    // 柱を SRC に差し替える。主材料は割り当て済みだが Fc が無い。
     model.sections[0] = sepika_core::model::Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Column),
         material: Some(sepika_core::ids::MaterialId(0)),
@@ -10012,7 +9813,6 @@ fn test_preparation_rejects_cft_with_zero_core() {
     use sepika_core::ids::SectionId;
     use sepika_core::section_shape::SectionShape;
 
-    // 板厚 200 で内法（400 − 2×200）が 0 になる CFT 角形断面。
     let cft = SectionShape::CftBox {
         corner_r: Some(32.0),
         height: 400.0,
@@ -10289,7 +10089,6 @@ fn test_stale_results_not_persisted() {
         "{:?}",
         reopened.core.scoped.last_error
     );
-    // 結果自体が復元されない（`results_stale` は結果がない既定状態のまま）。
     assert!(reopened.core.scoped.results.is_none());
     assert_eq!(reopened.core.scoped.last_static, None);
 
@@ -10375,7 +10174,6 @@ fn test_time_history_recording_saved_and_optional_exclusion() {
         let _ = std::fs::remove_file(&confirmed_path);
     }
 
-    // 既定保存: 小規模モデルは閾値未満なので確認なしで保存され、recording を含む。
     app.save_project_to(path.clone());
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -10417,7 +10215,6 @@ fn test_time_history_recording_saved_and_optional_exclusion() {
     );
     assert!(!restored_th.peak_disp.is_empty());
 
-    // 「除外して保存」: recording を含めずに保存し、メモリ上は保持される。
     app.save_project_without_recording(path_excl.clone());
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -10488,8 +10285,6 @@ fn test_needs_recording_confirm_threshold() {
     assert!(!needs_recording_confirm(0, true));
 }
 
-// ===== 部材ねじり解放（i 端ねじれピン）の設定と準備計算の一覧 =====
-
 /// 既定でねじり解放が有効であること、準備計算が対象外部材を集計すること。
 /// 門型ラーメン（柱脚固定・柱頭に梁）は全部材が解放され、対象外は 0 本になる。
 #[test]
@@ -10526,7 +10321,6 @@ fn test_preparation_lists_no_torsion_skip_for_portal_frame() {
 fn test_preparation_lists_torsion_skip_for_unrestrained_column_base() {
     let mut app = App::default();
     let mut model = crate::sample::portal_frame();
-    // 柱脚 2 節点を並進のみ拘束（回転自由）にする。
     for n in model.nodes.iter_mut().take(2) {
         n.restraint = sepika_core::dof::Dof6Mask::PINNED;
     }
@@ -10591,7 +10385,6 @@ fn test_generate_axes_action_does_not_stale_results() {
     use smallvec::SmallVec;
 
     let mut app = App::default();
-    // (0,0) と (6000,0) に柱を 1 本ずつ立てる。
     for (i, x) in [0.0f64, 6000.0].iter().enumerate() {
         let base = (i * 2) as u32;
         for (k, z) in [0.0f64, 3000.0].iter().enumerate() {
@@ -10624,7 +10417,6 @@ fn test_generate_axes_action_does_not_stale_results() {
         });
     }
 
-    // 解析済み・準備計算済みの状態を作る。
     app.core.scoped.staleness.mark_fresh();
     app.core.scoped.staleness.preparation_stale = false;
     app.core.scoped.staleness.diagnostics_stale = false;
@@ -10632,7 +10424,6 @@ fn test_generate_axes_action_does_not_stale_results() {
 
     app.generate_axes_action();
 
-    // X 方向 2 本・Y 方向 1 本（柱はすべて Y=0）。
     let x = app.core.model.axes.iter().find(|g| g.name == "X").unwrap();
     assert_eq!(
         x.axes.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
@@ -10665,12 +10456,10 @@ fn test_generate_axes_action_does_not_stale_results() {
         "保存は必要になる"
     );
 
-    // 再実行しても増殖せず、モデルは変わらない（冪等）。
     let before = app.core.model.axes.clone();
     app.generate_axes_action();
     assert_eq!(app.core.model.axes, before);
 
-    // undo で通り芯だけが元へ戻る。
     app.core.scoped.undo.undo(&mut app.core.model);
     assert!(app.core.model.axes.is_empty());
     assert!(
@@ -10698,7 +10487,6 @@ fn test_apply_static_result_updates_focus_result() {
         "解析実行後は表示対象も新しい結果を指すべき"
     );
 
-    // 別の結果を表示対象にした状態で再実行しても、表示対象は実行した結果へ移る。
     app.ui.scoped.nav.focus_result = Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)));
     app.run_linear_static(LoadCaseId(0));
     assert_eq!(
@@ -10706,8 +10494,6 @@ fn test_apply_static_result_updates_focus_result() {
         Some(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0)))),
         "再実行後の表示対象は実行した結果へ切り替わるべき"
     );
-    // 表示対象（current_static）と応力図・検定が参照する member_forces が
-    // 同じ結果を指している（食い違いがない）。
     let displayed = app.current_static().unwrap().member_forces.clone();
     assert_eq!(
         app.core.scoped.results.as_ref().unwrap().member_forces,
@@ -10722,7 +10508,6 @@ fn test_time_history_apply_clears_stale() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     app.core.analysis_cfg.th_duration = 1.0;
-    // モデル編集で stale を立ててから時刻歴のみ実行する。
     app.core.scoped.staleness.mark_edited();
     assert!(app.core.scoped.staleness.results_stale);
     assert!(
@@ -10770,7 +10555,6 @@ fn test_time_history_and_pushover_run_preparation() {
         "時刻歴の実行で準備計算が走るべき"
     );
 
-    // 増分解析も同じ入口（begin_analysis）を通ること。
     app.core.scoped.staleness.mark_edited();
     assert!(app.core.scoped.staleness.preparation_stale);
     app.run_pushover();
@@ -10791,8 +10575,6 @@ fn test_wall_has_src_boundary_column() {
     use sepika_core::section_shape::SectionShape;
 
     let mut model = sepika_core::model::Model::default();
-    // 壁エレメント: n0(0,0,0)-n1(2000,0,0)-n2(2000,0,3000)-n3(0,0,3000)。
-    // 柱は x=0 の辺（n0-n3）を共有する鉛直材。
     for (i, c) in [
         [0.0, 0.0, 0.0],
         [2000.0, 0.0, 0.0],
@@ -10879,14 +10661,12 @@ fn test_wall_has_src_boundary_column() {
         "SRC 断面の鉛直材が壁節点を共有 → SRC 耐震壁"
     );
 
-    // 柱を RC 断面へ差し替えると偽（通常の RC 耐力壁として扱う）。
     model.elements[1].section = Some(SectionId(2));
     assert!(
         !wall_has_src_boundary_column(&wall, &model),
         "周辺柱が RC のみなら SRC 耐震壁ではない"
     );
 
-    // 節点を共有しない SRC 柱（別位置）は判定に影響しない。
     model.nodes.push(Node {
         id: NodeId(4),
         coord: [8000.0, 0.0, 0.0],
@@ -10909,8 +10689,6 @@ fn test_wall_has_src_boundary_column() {
         "節点を共有しない SRC 柱は対象外"
     );
 
-    // 壁上辺の隅節点から立ち上がる上階の SRC 柱（片側 1 節点のみ共有）は
-    // 側柱ではないため対象外（SRC 階→RC 階の切替部での誤判定防止）。
     model.nodes.push(Node {
         id: NodeId(6),
         coord: [0.0, 0.0, 6000.0],
@@ -10932,15 +10710,12 @@ fn toggle_dock_icon_closes_when_active_opens_otherwise() {
     use crate::app::panels::toggle_dock_icon;
 
     let mut open = true;
-    // 開いていて対象パネルがアクティブ → 閉じて false
     assert!(!toggle_dock_icon(&mut open, true));
     assert!(!open);
 
-    // 閉じている → 開いて true
     assert!(toggle_dock_icon(&mut open, false));
     assert!(open);
 
-    // 開いているが別パネル → 開いたまま true
     assert!(toggle_dock_icon(&mut open, false));
     assert!(open);
 }
@@ -11173,7 +10948,6 @@ fn test_time_history_upsert_replaces_result_by_case_id() {
     assert_eq!(bundle.time_histories.len(), 1, "同じ ID は 1 スロット");
     assert_eq!(bundle.time_histories[0].1.time.len(), 2, "結果は置き換わる");
 
-    // ID が違えば別スロットになる。
     let id_y = model.upsert_vibration_case("サンプル".into(), VibrationThDir::Y, false, None);
     bundle.upsert_time_history(id_y, dummy_th(vec![0.0]));
     assert_eq!(bundle.time_histories.len(), 2);

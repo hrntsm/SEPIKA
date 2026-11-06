@@ -621,9 +621,7 @@ mod tests {
 
     #[test]
     fn 大梁スパン中間の未参照節点は梁のエルミート変位で追従する() {
-        // 大梁 n0-n1 のスパン 1/4 点に、節点共有なしで載る小梁支持点 n2
-        // （ST-Bridge 取り込みモデルの典型）を置く。梁は変形図で Hermite 曲線として
-        // 描かれるため、直付き節点は端点の線形補間ではなく Hermite 変位で追従する。
+        // 梁はHermite曲線で描くため、直付き節点を線形補間すると描画曲線から離れる。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [8000.0, 0.0, 0.0]));
@@ -633,7 +631,7 @@ mod tests {
         let disp = vec![
             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             [4.0, 8.0, -12.0, 0.0, 0.0, 0.0],
-            [0.0; 6], // 未参照節点は解析結果ではゼロ
+            [0.0; 6],
         ];
         let out = interpolate_unreferenced_disp(&model, disp, true);
         // t = 2000/8000 = 0.25。端部回転は 0 のため、軸方向（+X）は線形（0.25·4=1.0）、
@@ -650,8 +648,6 @@ mod tests {
 
     #[test]
     fn 大梁スパン中間の未参照節点は内部たわみオフで線形補間になる() {
-        // 内部たわみ表示 OFF（梁を直線で描く「全体変形」表示）では、直付き節点も
-        // 端点の線形補間で追従する（梁の直線＝弦の上に載る）。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [8000.0, 0.0, 0.0]));
@@ -664,7 +660,6 @@ mod tests {
             [0.0; 6],
         ];
         let out = interpolate_unreferenced_disp(&model, disp, false);
-        // t = 0.25 の線形補間（全成分）。
         assert!((out[2][0] - 1.0).abs() < 1e-12, "X={}", out[2][0]);
         assert!((out[2][1] - 2.0).abs() < 1e-12, "Y={}", out[2][1]);
         assert!((out[2][2] + 3.0).abs() < 1e-12, "Z={}", out[2][2]);
@@ -672,22 +667,17 @@ mod tests {
 
     #[test]
     fn 梁上の未参照節点は梁の描画曲線に厳密一致する() {
-        // 端部に回転を与えた梁のスパン中央に未参照節点を置く。その補間変位が、同じ
-        // 端部変位で BeamDeflection::polyline を描いた曲線の同一パラメータ位置の変位に
-        // 厳密一致すること（床・二次部材の節点が梁の描画たわみ曲線から浮かない）。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [6000.0, 0.0, 0.0]));
-        model.nodes.push(test_node(2, [3000.0, 0.0, 0.0])); // スパン中央（t=0.5）
-        model.elements.push(test_beam(0, 0, 1)); // ref_vector=[0,0,1]
+        model.nodes.push(test_node(2, [3000.0, 0.0, 0.0]));
+        model.elements.push(test_beam(0, 0, 1));
 
         let d_i = [0.0, 0.0, 0.0, 0.0, 0.0, 0.01];
         let d_j = [0.0, 0.0, 0.0, 0.0, 0.0, -0.01];
         let disp = vec![d_i, d_j, [0.0; 6]];
         let out = interpolate_unreferenced_disp(&model, disp, true);
 
-        // 同じ端部変位で梁曲線を無倍率描画し、中央点（12 分割の index 6=ξ0.5）の
-        // 変位（曲線点 − 未変形材軸点）を取る。
         let poly = BeamDeflection::new(
             [0.0, 0.0, 0.0],
             [6000.0, 0.0, 0.0],
@@ -706,7 +696,6 @@ mod tests {
                 curve_disp[k]
             );
         }
-        // 端部回転で中央がたわむため、直線（線形補間＝0）とは異なる。
         assert!(
             out[2][1].abs() > 1.0,
             "Hermite たわみが出ていない: {}",
@@ -716,8 +705,6 @@ mod tests {
 
     #[test]
     fn 梁軸から外れた未参照節点も最寄り線分の射影位置で補間される() {
-        // 大梁からオフセットした位置の節点（床境界の幾何節点など）は、
-        // 最寄り線分への射影点（クランプ込み）の変位で追従する。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [4000.0, 0.0, 0.0]));
@@ -726,7 +713,6 @@ mod tests {
 
         let disp = vec![[0.0; 6], [10.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0; 6]];
         let out = interpolate_unreferenced_disp(&model, disp, true);
-        // 射影点は t=0.5 → 5.0
         assert!((out[2][0] - 5.0).abs() < 1e-12);
     }
 
@@ -735,20 +721,17 @@ mod tests {
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [1000.0, 0.0, 0.0]));
-        // 要素なし → 補間ソースがなく、変位はゼロのまま
         let out = interpolate_unreferenced_disp(&model, vec![[0.0; 6]; 2], true);
         assert!(out.iter().all(|v| v.iter().all(|&x| x == 0.0)));
     }
 
     #[test]
     fn 剛床マスター節点の変位は補間で上書きされない() {
-        // 剛床代表節点（階自動生成が重心に置く仮想節点）は要素に接続しないが、
-        // 拘束のマスターとして解析自由度を持ち正しい変位が求まる
-        // （`DofMap::build` の structural 判定と同じ規則）。補間対象にしてはいけない。
+        // 剛床マスターは要素に非接続でも解析自由度を持つため、補間で変位を上書きできない。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [8000.0, 0.0, 0.0]));
-        model.nodes.push(test_node(2, [4000.0, 0.0, 0.0])); // 剛床マスター
+        model.nodes.push(test_node(2, [4000.0, 0.0, 0.0]));
         model.elements.push(test_beam(0, 0, 1));
         model
             .constraints
@@ -761,7 +744,7 @@ mod tests {
         let disp = vec![
             [0.0; 6],
             [10.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [7.0, 0.0, 0.0, 0.0, 0.0, 0.0], // マスターの解析変位（補間値 5.0 とは異なる）
+            [7.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ];
         let out = interpolate_unreferenced_disp(&model, disp.clone(), true);
         assert_eq!(out, disp);
@@ -769,8 +752,6 @@ mod tests {
 
     #[test]
     fn 変形曲線の端部は節点変位に一致する() {
-        // 水平梁（i→j が +X）。両端に異なる並進・回転を与え、ξ=0,1 が
-        // 節点変位（scale 倍）に厳密一致することを確認する。
         let p_i = [0.0, 0.0, 0.0];
         let p_j = [1000.0, 0.0, 0.0];
         let d_i = [0.0, 1.0, 0.0, 0.0, 0.0, 0.001];
@@ -780,7 +761,6 @@ mod tests {
             .unwrap()
             .polyline(scale, 12);
         assert_eq!(poly.len(), 13);
-        // i 端 = p_i + scale·d_i(並進)
         for k in 0..3 {
             assert!(
                 (poly[0][k] - (p_i[k] + scale * d_i[k])).abs() < 1e-6,
@@ -809,10 +789,6 @@ mod tests {
 
     #[test]
     fn 端部回転で中央がたわむ() {
-        // 水平梁（i→j が +X）、ref=+Y とすると局所系は全体系と一致
-        // （ex=+X, ey=+Y, ez=+Z）。両端の並進を 0、i 端に正・j 端に負の
-        // θz（全体=局所 z 軸まわり）を与えると、Hermite 内挿で局所 y(=+Y)へ
-        // 中央がふくらむ。直線（節点間）内挿なら中央は原位置のまま（たわみ 0）。
         let p_i = [0.0, 0.0, 0.0];
         let p_j = [1000.0, 0.0, 0.0];
         let d_i = [0.0, 0.0, 0.0, 0.0, 0.0, 0.01];
@@ -821,22 +797,17 @@ mod tests {
             .unwrap()
             .polyline(1.0, 12);
         let mid = poly[6];
-        // 中央の材軸位置は x=500、たわみは局所 y=+Y 方向へ非ゼロ
         assert!((mid[0] - 500.0).abs() < 1e-6, "中央 x={}", mid[0]);
         assert!(
             mid[1].abs() > 1.0,
             "中央のたわみが小さすぎる: dy={}",
             mid[1]
         );
-        // 端部は原位置（並進 0・回転のみ）
         assert!(poly[0][1].abs() < 1e-9 && poly[12][1].abs() < 1e-9);
     }
 
     #[test]
     fn 梁変形後曲線の端点は節点変位に一致し中央は弦から外れる() {
-        // 応力図の基準線に使う BeamDeflection::point_at の検証。端点（ξ=0,1）は
-        // 節点変位（scale 倍）に一致し、中央（ξ=0.5）は端部回転により弦（端点の
-        // 線形補間）から外れてたわむ。
         let p_i = [0.0, 0.0, 0.0];
         let p_j = [6000.0, 0.0, 0.0];
         let d_i = [0.0, 0.0, 0.0, 0.0, 0.0, 0.01];
@@ -870,77 +841,65 @@ mod tests {
 
     #[test]
     fn 大梁に直付きしない二次部材の先端は接続先を辿って追従する() {
-        // 大梁 G1(0-1) は節点 1 に大きな水平変位を持つ。node 2 は G1 のスパン上
-        // （直付きアンカー）。node 3 は G1 から離れた先端で、二次部材 2-3 で node 2 に
-        // つながる。もう 1 本の大梁 G2(4-5)（変位ゼロ）を node 3 の近くに置き、
-        // 「最寄り線分へ射影」だけでは node 3 が G2 へ張り付いて追従しないところを、
-        // 二次部材経由の追従で取り付き先（node 2）へ揃うことを確認する。
+        // 最寄り線分だけなら先端が別梁G2へ追従してしまう配置を使う。
         let mut model = Model::default();
-        model.nodes.push(test_node(0, [0.0, 0.0, 0.0])); // G1 端
-        model.nodes.push(test_node(1, [8000.0, 0.0, 0.0])); // G1 端
-        model.nodes.push(test_node(2, [2000.0, 0.0, 0.0])); // G1 上（直付き）
-        model.nodes.push(test_node(3, [2000.0, 4000.0, 0.0])); // 先端（G1 から 4000, G2 から 1000）
-        model.nodes.push(test_node(4, [0.0, 5000.0, 0.0])); // G2 端
-        model.nodes.push(test_node(5, [8000.0, 5000.0, 0.0])); // G2 端
-        model.elements.push(test_beam(0, 0, 1)); // G1
-        model.elements.push(test_beam(1, 4, 5)); // G2
-        model.unassigned_beams.push(test_secondary(&model, 2, 3)); // 二次部材 2-3
+        model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
+        model.nodes.push(test_node(1, [8000.0, 0.0, 0.0]));
+        model.nodes.push(test_node(2, [2000.0, 0.0, 0.0]));
+        model.nodes.push(test_node(3, [2000.0, 4000.0, 0.0]));
+        model.nodes.push(test_node(4, [0.0, 5000.0, 0.0]));
+        model.nodes.push(test_node(5, [8000.0, 5000.0, 0.0]));
+        model.elements.push(test_beam(0, 0, 1));
+        model.elements.push(test_beam(1, 4, 5));
+        model.unassigned_beams.push(test_secondary(&model, 2, 3));
 
-        // G1 は大きく水平移動、G2 は変位ゼロ。
         let disp = vec![
-            [0.0; 6],                         // 0
-            [100.0, 0.0, 0.0, 0.0, 0.0, 0.0], // 1
-            [0.0; 6],                         // 2（未参照）
-            [0.0; 6],                         // 3（未参照）
-            [0.0; 6],                         // 4
-            [0.0; 6],                         // 5
+            [0.0; 6],
+            [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0; 6],
+            [0.0; 6],
+            [0.0; 6],
+            [0.0; 6],
         ];
         let out = interpolate_unreferenced_disp(&model, disp, true);
-        // node 2 は G1 上 t=0.25 → 25.0
         assert!((out[2][0] - 25.0).abs() < 1e-9, "node2={:?}", out[2]);
-        // node 3 は最寄り大梁 G2（変位 0）ではなく、二次部材で node 2 に追従 → 25.0
         assert!((out[3][0] - 25.0).abs() < 1e-9, "node3={:?}", out[3]);
     }
 
     #[test]
     fn 二次部材の連鎖でも主架構に近い側から順に追従する() {
-        // node 1(大梁 G1 上, 直付き) → 二次部材 → node 2 → 二次部材 → node 3 の連鎖。
-        // node 3 は変位ゼロの別の大梁 G2 に近く、単純射影では G2 へ張り付くが、
-        // 連鎖を辿って node 1 の変位へ揃うことを確認する（伝播がないと誤る配置）。
+        // 単純射影なら終端が別梁G2へ追従してしまうため、連鎖の必要な配置を使う。
         let mut model = Model::default();
-        model.nodes.push(test_node(0, [0.0, 0.0, 0.0])); // G1 端
-        model.nodes.push(test_node(1, [4000.0, 0.0, 0.0])); // G1 端（直付きアンカー元）
-        model.nodes.push(test_node(2, [4000.0, 2000.0, 0.0])); // 連鎖 1 段目
-        model.nodes.push(test_node(3, [4000.0, 4000.0, 0.0])); // 連鎖 2 段目（G2 から 1000）
-        model.nodes.push(test_node(4, [0.0, 5000.0, 0.0])); // G2 端
-        model.nodes.push(test_node(5, [8000.0, 5000.0, 0.0])); // G2 端
-        model.elements.push(test_beam(0, 0, 1)); // G1
-        model.elements.push(test_beam(1, 4, 5)); // G2（変位ゼロ）
+        model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
+        model.nodes.push(test_node(1, [4000.0, 0.0, 0.0]));
+        model.nodes.push(test_node(2, [4000.0, 2000.0, 0.0]));
+        model.nodes.push(test_node(3, [4000.0, 4000.0, 0.0]));
+        model.nodes.push(test_node(4, [0.0, 5000.0, 0.0]));
+        model.nodes.push(test_node(5, [8000.0, 5000.0, 0.0]));
+        model.elements.push(test_beam(0, 0, 1));
+        model.elements.push(test_beam(1, 4, 5));
         model.unassigned_beams.push(test_secondary(&model, 1, 2));
         model.unassigned_beams.push(test_secondary(&model, 2, 3));
 
         let disp = vec![
-            [8.0, 0.0, 0.0, 0.0, 0.0, 0.0], // 0
-            [8.0, 0.0, 0.0, 0.0, 0.0, 0.0], // 1（両端同変位＝剛体移動）
-            [0.0; 6],                       // 2（未参照）
-            [0.0; 6],                       // 3（未参照）
-            [0.0; 6],                       // 4
-            [0.0; 6],                       // 5
+            [8.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [8.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0; 6],
+            [0.0; 6],
+            [0.0; 6],
+            [0.0; 6],
         ];
         let out = interpolate_unreferenced_disp(&model, disp, true);
-        // node 2, 3 とも連鎖を辿って node 1 の変位 8.0 に追従する。
         assert!((out[2][0] - 8.0).abs() < 1e-9, "node2={:?}", out[2]);
         assert!((out[3][0] - 8.0).abs() < 1e-9, "node3={:?}", out[3]);
     }
 
     #[test]
     fn 剛床マスターの鉛直変位はスレーブ平均で補完される() {
-        // マスター（重心）はダミー拘束で Uz=0。スレーブの Uz 平均で表示用に補完し、
-        // 面内（Ux/Uy/Rz）は解析結果のまま維持されることを確認する。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 3000.0]));
         model.nodes.push(test_node(1, [6000.0, 0.0, 3000.0]));
-        model.nodes.push(test_node(2, [3000.0, 0.0, 3000.0])); // マスター（重心）
+        model.nodes.push(test_node(2, [3000.0, 0.0, 3000.0]));
         model
             .constraints
             .push(sepika_core::model::Constraint::rigid_diaphragm(
@@ -951,12 +910,11 @@ mod tests {
         let disp = vec![
             [1.0, 0.0, -4.0, 0.0, 0.0, 0.0],
             [1.0, 0.0, -6.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.02], // マスターの面内変位（Uz は 0）
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.02],
         ];
         let out = fill_diaphragm_master_disp_for_display(&model, disp);
         // Uz は (-4 + -6)/2 = -5 に補完される。
         assert!((out[2][2] + 5.0).abs() < 1e-12, "Uz={}", out[2][2]);
-        // 面内（Ux, Rz）は変更されない。
         assert!((out[2][0] - 1.0).abs() < 1e-12, "Ux={}", out[2][0]);
         assert!((out[2][5] - 0.02).abs() < 1e-12, "Rz={}", out[2][5]);
     }
@@ -981,7 +939,6 @@ mod tests {
 
     #[test]
     fn 変位ゼロなら梁スケール上限は無し() {
-        // たわみが生じない（全変位ゼロ）と制約する梁がなく None を返す。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [6000.0, 0.0, 0.0]));
@@ -1006,20 +963,18 @@ mod tests {
 
     #[test]
     fn 内部たわみオフの表示倍率はbox基準に手動係数を掛ける() {
-        // 梁要素がなく（＝梁スパン基準は無関係）、box 基準 × 手動係数になる。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [10000.0, 0.0, 0.0]));
         let disp = vec![[0.0; 6], [100.0, 0.0, 0.0, 0.0, 0.0, 0.0]];
-        let size = model_bbox_size(&model); // 対角 10000
-                                            // box 基準 = 0.1·10000 / 100 = 10、手動係数 2 → 20。
+        let size = model_bbox_size(&model);
+        // box 基準 = 0.1·10000 / 100 = 10、手動係数 2 → 20。
         let s = deform_display_scale(&model, Some(&disp), size, false, 2.0);
         assert!((s - 20.0).abs() < 1e-9, "s={}", s);
     }
 
     #[test]
     fn 内部たわみオンは梁スパン上限で倍率が制限される() {
-        // box 基準が梁スパン上限より大きい配置。ON では min(box, 梁スパン) になる。
         let mut model = Model::default();
         model.nodes.push(test_node(0, [0.0, 0.0, 0.0]));
         model.nodes.push(test_node(1, [6000.0, 0.0, 0.0]));
@@ -1029,7 +984,7 @@ mod tests {
             [0.0, 0.0, 0.0, 0.0, 0.0, 0.01],
             [0.001, 0.0, 0.0, 0.0, 0.0, -0.01],
         ];
-        let size = model_bbox_size(&model); // 6000
+        let size = model_bbox_size(&model);
         let on = deform_display_scale(&model, Some(&disp), size, true, 1.0);
         let off = deform_display_scale(&model, Some(&disp), size, false, 1.0);
         // OFF は box 基準のみ、ON は梁スパン上限（前掲テストの 40.5）も併用。

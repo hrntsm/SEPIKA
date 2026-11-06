@@ -83,7 +83,6 @@ fn generates_x_y_axes_in_coordinate_order() {
     assert_eq!(names(&groups, "Y"), vec!["Y1", "Y2"]);
     assert_eq!(distances(&groups, "Y"), vec![0.0, 5000.0]);
 
-    // 新設グループの幾何は ST-Bridge の規約（X 群 angle=270 / Y 群 angle=0）。
     let x = groups.iter().find(|g| g.name == "X").unwrap();
     assert_eq!(
         x.kind,
@@ -92,7 +91,6 @@ fn generates_x_y_axes_in_coordinate_order() {
             angle_deg: 270.0
         }
     );
-    // 各通りには、その位置に立つ柱の上下 2 節点（2 本ぶん＝4 節点）が属する。
     assert_eq!(x.axes[0].nodes.len(), 4);
     assert!(x.axes.iter().all(|a| a.source == AxisSource::Auto));
 }
@@ -106,7 +104,6 @@ fn clusters_within_tolerance() {
     push_column(&mut m, 6000.0, 0.0, 3000.0);
     let groups = generate_axes(&m);
     assert_eq!(names(&groups, "X"), vec!["X1", "X2"]);
-    // 代表値はクラスタ先頭の離れ。
     assert_eq!(distances(&groups, "X"), vec![0.0, 6000.0]);
 }
 
@@ -117,8 +114,8 @@ fn ignores_non_vertical_members() {
     let a = push_node(&mut m, 0.0, 0.0, 3000.0);
     let b = push_node(&mut m, 6000.0, 0.0, 3000.0);
     let c = push_node(&mut m, 3000.0, 4000.0, 0.0);
-    push_line(&mut m, a, b); // 梁
-    push_line(&mut m, a, c); // 斜材
+    push_line(&mut m, a, b);
+    push_line(&mut m, a, c);
     let groups = generate_axes(&m);
     assert!(groups.is_empty(), "柱がなければグループを作らない");
 }
@@ -156,13 +153,11 @@ fn keeps_manual_axes_and_avoids_name_collision() {
     let groups = generate_axes(&m);
     let x = groups.iter().find(|g| g.name == "X").unwrap();
     assert_eq!(x.axes.len(), 3, "既存 2 本 + 新規 1 本");
-    // 既存 2 本はそのまま（所属節点も上書きしない）。
     assert_eq!(x.axes[0].name, "X1");
     assert_eq!(x.axes[0].nodes, vec![NodeId(0)]);
     assert_eq!(x.axes[0].source, AxisSource::Manual);
     assert_eq!(x.axes[1].name, "X2");
     assert!(x.axes[1].nodes.is_empty());
-    // 新規は未使用の最小番号 X3、位置は 12000。
     assert_eq!(x.axes[2].name, "X3");
     assert_eq!(x.axes[2].distance, Some(12000.0));
     assert_eq!(x.axes[2].source, AxisSource::Auto);
@@ -234,7 +229,6 @@ fn new_group_name_avoids_collision() {
     let mut m = Model::default();
     push_column(&mut m, 0.0, 0.0, 3000.0);
     m.axes = vec![AxisGroup {
-        // 名前は "X" だが Y 方向（離れは +Y 向き）のグループ。
         name: "X".into(),
         kind: AxisGroupKind::Parallel {
             origin: [0.0, 0.0],
@@ -244,7 +238,6 @@ fn new_group_name_avoids_collision() {
     }];
 
     let groups = generate_axes(&m);
-    // Y 方向は既存の "X" グループ（angle=0）へ入り、X 方向は "X2" として新設される。
     assert_eq!(names(&groups, "X"), vec!["X1"]);
     assert_eq!(names(&groups, "X2"), vec!["X21"]);
     assert_eq!(distances(&groups, "X2"), vec![0.0]);
@@ -254,11 +247,9 @@ fn new_group_name_avoids_collision() {
 #[test]
 fn axis_elements_collects_members_on_the_axis() {
     let mut m = Model::default();
-    // X=0 に柱 2 本（Y=0 と Y=5000）と、それを結ぶ梁（同じ通りの構面）。
     let (_, top_a) = push_column(&mut m, 0.0, 0.0, 3000.0);
     let (_, top_b) = push_column(&mut m, 0.0, 5000.0, 3000.0);
     let beam_on_axis = push_line(&mut m, top_a, top_b);
-    // X=6000 の柱と、通りをまたぐ梁。
     let (_, top_c) = push_column(&mut m, 6000.0, 0.0, 3000.0);
     let beam_across = push_line(&mut m, top_a, top_c);
 
@@ -267,6 +258,5 @@ fn axis_elements_collects_members_on_the_axis() {
     let elems = m.axis_elements(x1);
     assert!(elems.contains(&beam_on_axis), "通り上の梁は所属する");
     assert!(!elems.contains(&beam_across), "通りをまたぐ梁は所属しない");
-    // 柱 2 本 + 梁 1 本。
     assert_eq!(elems.len(), 3);
 }

@@ -630,7 +630,6 @@ mod tests {
 
     #[test]
     fn test_takeda_unloading_stiffness_degraded() {
-        // 降伏後(θ=0.03)で反転 → 除荷剛性 Ku = Ky*(θm/θy)^(-α) < K1
         let mut mat = HysteresisMaterial::new(takeda());
         mat.trial(0.03);
         mat.commit();
@@ -653,13 +652,11 @@ mod tests {
     #[test]
     fn test_takeda_cyclic_returns_near_peak() {
         let mut mat = HysteresisMaterial::new(takeda());
-        // +0.03 → 0 → -0.03 → 0 → +0.03
         for &theta in &[0.03, 0.0, -0.03, 0.0, 0.03] {
             mat.trial(theta);
             mat.commit();
         }
         let (m, _) = mat.trial(0.03);
-        // 再載荷で正側ピークに戻る（降伏後耐力はスケルトン上 ≈ 120 に近い、少なくとも 100 超）
         assert!(
             m > 100.0,
             "cyclic reload should return near positive peak, got M={}",
@@ -684,14 +681,12 @@ mod tests {
 
     #[test]
     fn test_takeda_inner_loop_polygon_and_probe_preserve_response() {
-        // 外側ループ途中で反転 → 内側ループ → 再反転でポリゴン則。
         let mut mat = HysteresisMaterial::new(takeda());
-        // +0.03（降伏後ピーク）→ 0.01（除荷途中・M=0 未満）→ -0.005（内側反転）
         mat.trial(0.03);
         mat.commit();
         mat.trial(0.01);
         mat.commit();
-        let probe_theta = -0.005; // 内側ループへ入る反転
+        let probe_theta = -0.005;
         let before = mat.probe(probe_theta);
         assert_eq!(before, mat.probe(probe_theta));
 
@@ -703,9 +698,7 @@ mod tests {
         assert_eq!(after_probe, via_trial);
         let (m_inner, _) = after_probe;
         mat.commit();
-        // 再反転で target（直前の反転点 θ=0.01 側）へ向かう直線
         let (m_back, _) = mat.trial(0.008);
-        // 内側ループの戻りは、ピーク直前の反転点付近の M に近い値を取る
         assert!(
             m_back > m_inner,
             "inner loop should return toward previous reversal point: inner={}, back={}",
@@ -716,16 +709,13 @@ mod tests {
 
     #[test]
     fn test_retrograde_traces_skeleton_both_ways() {
-        // 逆行型: 除荷・再載荷ともスケルトンを可逆に辿る（履歴ループなし）。
         let mut mat = HysteresisMaterial::new(retrograde());
         mat.trial(0.03);
         mat.commit();
-        // 除荷: 力はスケルトン値に一致（除荷枝を描かない）。
         let (m, _) = mat.trial(0.02);
         let (ms, _) = retrograde().skeleton(0.02);
         assert_relative_eq!(m, ms, epsilon = 1e-6);
         mat.commit();
-        // 原点まで戻れば力は 0（エネルギー吸収なし）。
         let (m0, _) = mat.trial(0.0);
         assert_relative_eq!(m0, 0.0, epsilon = 1e-6);
     }
@@ -737,7 +727,7 @@ mod tests {
         mat.trial(0.03); // スケルトン上 (110, 0.03)
         mat.commit();
         let peak = 110.0_f64;
-        let (m1, k1) = mat.trial(0.0299); // 反転 → Masing 枝
+        let (m1, k1) = mat.trial(0.0299);
         let k1_expected = 40.0 / 0.002;
         let slope = (peak - m1) / (0.03 - 0.0299);
         assert_relative_eq!(slope, k1_expected, epsilon = k1_expected * 0.05);
@@ -746,7 +736,6 @@ mod tests {
 
     #[test]
     fn test_standard_masing_reaches_opposite_skeleton() {
-        // 標準型: 反射点（反対側 |θ|≥|反転点|）でスケルトンへ復帰する。
         let mut mat = HysteresisMaterial::new(standard());
         mat.trial(0.03);
         mat.commit();
@@ -757,7 +746,6 @@ mod tests {
         let (m, _) = mat.trial(-0.03);
         let (ms, _) = standard().skeleton(-0.03);
         assert_relative_eq!(m, ms, epsilon = 2.0);
-        // 途中（θ=0）は履歴枝上にあり、原点指向型のように 0 にはならない。
         let mut mat2 = HysteresisMaterial::new(standard());
         mat2.trial(0.03);
         mat2.commit();
@@ -771,7 +759,6 @@ mod tests {
 
     #[test]
     fn test_max_point_oriented_targets_opposite_peak() {
-        // 最大点指向型: 戻り点から反対側の最大経験点を直線で指向する。
         let mut mat = HysteresisMaterial::new(max_point());
         mat.trial(0.03); // +ピーク (110, 0.03)
         mat.commit();
@@ -779,7 +766,6 @@ mod tests {
             mat.trial(t);
             mat.commit();
         }
-        // -0.025 から再載荷（反転）→ +ピークを直線で指向。
         mat.trial(-0.02);
         mat.commit();
         let (m_mid, _) = mat.trial(0.0);

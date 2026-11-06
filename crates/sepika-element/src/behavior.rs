@@ -705,11 +705,9 @@ mod tests {
         let g = node_global_dofs(&[NodeId(0), NodeId(1)], &dof);
 
         assert_eq!(g.len(), 2 * DOF_PER_NODE);
-        // 自由な節点 0 は全成分が活性番号（重複なし）。
         for (d, &v) in g.iter().take(DOF_PER_NODE).enumerate() {
             assert_eq!(v, dof.active(d).unwrap() as usize);
         }
-        // 全拘束の節点 1 は全成分が番兵。
         assert!(g[DOF_PER_NODE..].iter().all(|&v| v == usize::MAX));
         let reversed = node_global_dofs(&[NodeId(1), NodeId(0)], &dof);
         assert_eq!(g[..DOF_PER_NODE], reversed[DOF_PER_NODE..]);

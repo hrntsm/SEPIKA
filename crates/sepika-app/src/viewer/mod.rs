@@ -1541,7 +1541,6 @@ mod frame_filter_tests {
     /// 面内の向きへ回り、符号は元の向きに従う。
     #[test]
     fn in_plane_offset_flattens_out_of_plane_direction() {
-        // X=0 の構面（法線 +X）に載る、Y 方向の梁。
         let (p_i, p_j) = ([0.0, 0.0, 4000.0], [0.0, 6000.0, 4000.0]);
         let n = [1.0, 0.0, 0.0];
 
@@ -1551,10 +1550,8 @@ mod frame_filter_tests {
         assert!(out[2].abs() > 0.999, "面内（鉛直）へ倒れる: {out:?}");
         assert!(out[0].abs() < 1e-9 && out[1].abs() < 1e-9);
 
-        // 元から面内（+Z）の張り出しは向きが変わらない。
         let keep = scene::in_plane_offset_dir([0.0, 0.0, 1.0], p_i, p_j, n);
         assert!((keep[2] - 1.0).abs() < 1e-9, "{keep:?}");
-        // 逆向き（−Z）なら符号もそのまま保つ。
         let flip = scene::in_plane_offset_dir([0.0, 0.0, -1.0], p_i, p_j, n);
         assert!((flip[2] + 1.0).abs() < 1e-9, "{flip:?}");
     }
@@ -1725,9 +1722,7 @@ mod wall_expanded_view_model_tests {
         ] {
             model.nodes.push(node(id, x, y, z));
         }
-        // `expand_wall_elements` は断面未割当の壁版を要素化しない（自重0・解析前
-        // チェックが止める。`WallPlate` モジュール doc 参照）ため、要素として
-        // 現れることを確認するには断面の割当が要る。
+        // 断面未割当の壁版は要素化されないため、壁解析要素の表示検証には断面割当が要る。
         model.sections.push(Section {
             id: SectionId(0),
             name: "壁 t150".into(),
@@ -1782,7 +1777,6 @@ mod wall_expanded_view_model_tests {
                 .count(),
             1
         );
-        // 入力の正（`model`）は変更されない（D5。壁の解析要素はモデルに残さない）。
         assert!(model.elements.iter().all(|e| e.kind != ElementKind::Wall));
         let wall = view
             .elements
@@ -1794,7 +1788,6 @@ mod wall_expanded_view_model_tests {
         assert!((axis.p_i[2] - 0.0).abs() < 1e-6);
         assert!((axis.p_j[2] - 3000.0).abs() < 1e-6);
         assert!((axis.length - 3000.0).abs() < 1e-6);
-        // 下辺中点 (2000, 0, 0)
         assert!((axis.p_i[0] - 2000.0).abs() < 1e-6);
 
         let mut app = App::default();

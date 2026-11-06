@@ -1229,12 +1229,10 @@ mod tests {
         rebuild_floor_regions(&mut gapped);
         assert_eq!(gapped.slabs.len(), 2, "span が連続しないなら統合しない");
 
-        // 境界の張り出し量が 0 で前後が逆側へ向かう（自己交差）なら統合しない。
         let mut flipped = pair([0.0, 0.5], [500.0, 0.0], [0.5, 1.0], [0.0, -500.0]);
         rebuild_floor_regions(&mut flipped);
         assert_eq!(flipped.slabs.len(), 2, "自己交差になるなら統合しない");
 
-        // 境界に実部材（2 節点 Beam）があるなら統合しない。
         let mut with_beam = pair([0.0, 0.5], [1000.0, 2000.0], [0.5, 1.0], [2000.0, 3000.0]);
         with_beam.nodes.push(node(2, 2000.0, 0.0, 0.0));
         with_beam.nodes.push(node(3, 2000.0, 2000.0, 0.0));
@@ -1242,7 +1240,6 @@ mod tests {
         rebuild_floor_regions(&mut with_beam);
         assert_eq!(with_beam.slabs.len(), 2, "境界に実部材があれば統合しない");
 
-        // 境界の実部材が途中節点で 2 要素に分かれていても統合しない。
         let mut spliced = pair([0.0, 0.5], [1000.0, 2000.0], [0.5, 1.0], [2000.0, 3000.0]);
         spliced.nodes.push(node(2, 2000.0, 0.0, 0.0));
         spliced.nodes.push(node(3, 2000.0, 1000.0, 0.0));

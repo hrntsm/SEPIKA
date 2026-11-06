@@ -395,8 +395,7 @@ mod tests {
 
     #[test]
     fn test_column_n0_moment_close_to_beam_ma_t() {
-        // N=0 のときの柱 MA が、対応する梁の MA_t とおおむね一致すること
-        // （j≒7d/8 の近似差程度、20% 程度の許容）を確認する。
+        // 梁側のj≒7d/8による近似差を含む比較なので、柱と梁の曲げ耐力には20%の差を許容する。
         let b = 400.0;
         let d_full = 400.0;
         let shape = rc_rect_shape(b, d_full, 8, 22.0, 2, 40.0, 10.0, 100.0, 2);
@@ -439,14 +438,7 @@ mod tests {
 
     #[test]
     fn test_column_moment_increases_then_decreases_with_compression() {
-        // 軽配筋（N=0 では引張鉄筋支配）の断面を用いる。RC 規準14条の N-M
-        // 相関曲線は一般に「引張支配の隅（大きな引張軸力・小さな M）→
-        // 釣合点（M最大）→ 全断面圧縮の隅（N=NA, M=0）」という山型になる。
-        // 釣合点（ピーク）の位置は配筋量に依存し、既に N=0 でコンクリート縁
-        // 応力が支配する（過大配筋の）断面ではピークが引張側にずれることも
-        // あるため、ここではピークが正の圧縮軸力側に来る軽配筋断面で検証する
-        // （`test_beam_moment_heavy_reinforcement_compression_governs` が過大
-        // 配筋側の挙動を別途カバーする）。
+        // 過大配筋では耐力のピークが引張側へずれ得るため、圧縮側の山形を確認する入力は軽配筋とする。
         let b = 400.0;
         let d_full = 400.0;
         let shape = rc_rect_shape(b, d_full, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
@@ -498,7 +490,6 @@ mod tests {
         let mat = make_material(24.0, "SD345");
         let ctx = ctx_column(LoadTerm::Long);
 
-        // まず微小な mz を与えて ratio から MA_z を逆算する。
         let forces_z_only = MemberForcesAt {
             pos: 0.0,
             n: 0.0,

@@ -172,7 +172,6 @@ fn test_sdof_free_vibration_matches_analytical() {
     assert_eq!(result.time.len(), n_steps + 1);
     assert!((result.time.last().copied().unwrap_or(0.0) - total_time).abs() < 1e-9);
 
-    // 各フレームの自由節点（node 1）の X 変位を解析解と照合する。
     // 許容値は Newmark-β（平均加速度法）の 1 周期ぶんの積分誤差（オーダー 1e-3）を
     // 吸収しつつ、減衰比・周期の誤り（数 % 以上の差）を検出できる大きさとする。
     let recording = result.recording.expect("recording");
@@ -185,7 +184,6 @@ fn test_sdof_free_vibration_matches_analytical() {
             "t={t}: numerical {u_num} vs analytical {u_ana}"
         );
     }
-    // 減衰系の自由振動なのでピークは初期変位 1.0。
     assert!((result.peak_disp[1][0] - 1.0).abs() < 1e-9);
 }
 
@@ -212,7 +210,6 @@ fn test_2dof_mode_superposition_consistency() {
     let omega1 = lam1.sqrt();
     let phi_ratio = k / (k - lam1);
 
-    // 1次モードの剛性比例減衰
     let damping = Damping::StiffnessProportional {
         h: 0.02,
         omega: omega1,
@@ -241,7 +238,6 @@ fn test_2dof_mode_superposition_consistency() {
     )
     .expect("mode superposition test");
 
-    // ピーク比がモード形状比に一致（モード重ね合わせの一致性）
     let peak_ratio = result.peak_disp[2][0] / result.peak_disp[1][0];
     assert!(
         (peak_ratio - phi_ratio).abs() / phi_ratio < 0.01,
@@ -250,7 +246,6 @@ fn test_2dof_mode_superposition_consistency() {
         phi_ratio
     );
 
-    // 最終状態でもモード形状比が維持されている（1次モードのみ励起）
     let final_ratio = final_state.disp_red[1].abs() / final_state.disp_red[0].abs();
     assert!(
         (final_ratio - phi_ratio).abs() / phi_ratio < 0.02,
@@ -314,7 +309,6 @@ fn test_checkpoint_restart_bit_exact() {
     let n_total = 500;
     let m = 200;
 
-    // 全波形
     let wave_full = zero_wave(dt, n_total);
     let newmark = NewmarkCfg {
         beta: 0.25,
@@ -322,7 +316,6 @@ fn test_checkpoint_restart_bit_exact() {
         dt,
     };
 
-    // 1) 連続実行 0→N
     let (_result_cont, state_cont) = linear_time_history_with_state(
         &model,
         &dofmap,
@@ -336,7 +329,6 @@ fn test_checkpoint_restart_bit_exact() {
     )
     .expect("continuous run");
 
-    // 2) 前半 0→M（短縮波）
     let wave_half = zero_wave(dt, m);
     let (_result_half, state_half) = linear_time_history_with_state(
         &model,
@@ -352,11 +344,9 @@ fn test_checkpoint_restart_bit_exact() {
     .expect("first half");
     assert_eq!(state_half.step, m as u64);
 
-    // 3) チェックポイント経由で bincode 往復（保存→読込をシミュレート）
     let bytes = bincode::serialize(&state_half).expect("serialize state");
     let state_loaded: TimeStepState = bincode::deserialize(&bytes).expect("deserialize state");
 
-    // 4) 再開 M→N
     let (_result_restart, state_restart) = linear_time_history_from_state(
         &model,
         &dofmap,
@@ -369,7 +359,6 @@ fn test_checkpoint_restart_bit_exact() {
     )
     .expect("restart");
 
-    // 5) ビット一致判定
     assert_eq!(state_restart.step, state_cont.step);
     assert_eq!(state_restart.disp_red.len(), state_cont.disp_red.len());
     for i in 0..state_cont.disp_red.len() {
@@ -450,19 +439,15 @@ fn test_y_direction_wave_selects_y_record_dir() {
     )
     .expect("Y-direction time history should converge");
 
-    // accel_x が全ゼロ、accel_y が非ゼロなので記録方向は Y。
     assert!(
         result.history.record_dir_y,
         "record_dir_y should be true when only accel_y is nonzero"
     );
-    // 代表応答（Y 方向変位）が非ゼロ応答を持つ。
     assert!(
         result.history.node_disp.iter().any(|v| v.abs() > 1e-6),
         "node_disp should show nonzero Y-direction response"
     );
-    // X 方向は自由度自体が存在しないため応答なし。
     assert_eq!(result.peak_disp[1][0], 0.0);
-    // Y 方向は実際に応答している。
     assert!(result.peak_disp[1][1] > 0.0);
 }
 
@@ -488,7 +473,6 @@ fn test_phase_diff_torsion_excites_eccentric_node() {
     let theta: Vec<f64> = (0..n_steps)
         .map(|i| {
             let t = i as f64 * dt;
-            // ねじれ地動加速度 [rad/s²]。
             1e-3 * (2.0 * std::f64::consts::PI * 3.0 * t).sin()
         })
         .collect();
@@ -498,7 +482,6 @@ fn test_phase_diff_torsion_excites_eccentric_node() {
         dt,
     };
 
-    // (1) ねじれ入力ありの応答。
     let wave_t = GroundMotion {
         dt,
         accel_x: vec![0.0; n_steps],
@@ -518,7 +501,6 @@ fn test_phase_diff_torsion_excites_eccentric_node() {
     )
     .expect("torsion time history should converge");
 
-    // (2) ねじれ入力なし（並進もゼロ）→ 応答ゼロ。
     let wave_0 = GroundMotion {
         dt,
         accel_x: vec![0.0; n_steps],
@@ -538,13 +520,11 @@ fn test_phase_diff_torsion_excites_eccentric_node() {
     )
     .expect("zero input should converge");
 
-    // ねじれ入力ありは偏心節点の ux を励起（非ゼロ）。
     assert!(
         res_t.peak_disp[1][0] > 1e-9,
         "torsion should excite eccentric node ux: {}",
         res_t.peak_disp[1][0]
     );
-    // 入力ゼロは応答ゼロ。
     assert_eq!(res_0.peak_disp[1][0], 0.0);
 }
 
@@ -622,7 +602,6 @@ fn fiber_column_model(fy: f64) -> Model {
             fy: Some(fy),
         }],
         stories: vec![
-            // 階は床であり、先頭は基部の床（`Model::layers` の不変条件）。
             Story {
                 wall_weights: Vec::new(),
                 level_kind: Default::default(),
@@ -665,18 +644,15 @@ fn fiber_column_model(fy: f64) -> Model {
 /// 弾性 SDOF（降伏しないファイバ柱）の非線形時刻歴が線形解と一致。
 #[test]
 fn test_nonlinear_time_history_sdof_elastic() {
-    // fy を非常に高く設定し、塑性化しないようにする
     let model = fiber_column_model(1e10);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
 
-    // 線形解との比較用: SDOF 線形剛性を計算
     let m_free = assemble_global_m(&model, &dofmap, MassOption::Consistent).unwrap();
     let k_free = assemble_global_k(&model, &dofmap);
     let m_red_lin = reducer.reduce_k(&m_free);
     let k_red_lin = reducer.reduce_k(&k_free);
 
-    // 初期剛性から SDOF 固有円振動数を推定
     let k_val = *k_red_lin.get(0, 0).unwrap_or(&0.0);
     let m_val = *m_red_lin.get(0, 0).unwrap_or(&0.0);
     let omega = (k_val / m_val).sqrt();
@@ -696,7 +672,6 @@ fn test_nonlinear_time_history_sdof_elastic() {
         dt,
     };
 
-    // 非線形解析
     let result_nl = nonlinear_time_history_analysis(
         &model,
         &dofmap,
@@ -843,7 +818,6 @@ fn test_nonlinear_time_history_cumulative_vs_noncumulative() {
         .expect("should converge")
     };
 
-    // C 一定（初期剛性比例）: 累積型 ≈ 非累積型。
     let const_c = Damping::StiffnessProportional {
         h: 0.05,
         omega,
@@ -871,7 +845,6 @@ fn test_nonlinear_time_history_cumulative_vs_noncumulative() {
         );
     }
 
-    // 接線比例（C 変化）でも累積型が収束し有限応答を返す。
     let tangent_c = Damping::StiffnessProportional {
         h: 0.05,
         omega,
@@ -1012,7 +985,6 @@ fn test_maxwell_damper_reduces_free_vibration() {
             NonlinearThCfg::new(30, 1e-8),
         )
         .expect("should converge");
-        // 後半区間の応答振幅（自由振動の減衰を測る）。
         let nd = &result.history.node_disp;
         let n = nd.len();
         nd[n * 3 / 4..].iter().fold(0.0f64, |m, &v| m.max(v.abs()))
@@ -1501,7 +1473,6 @@ fn test_nonlinear_record_every_thinning() {
     let recording = result.recording.expect("recording");
     assert_eq!(recording.record_every, 5);
     assert_eq!(recording.frame_time.len(), 11, "0,5,..,50 の 11 フレーム");
-    // peak 系は全ステップ更新（間引かない）。
     assert!(result.peak_disp[1][0] > 0.0);
     assert!(recording.peak_member_forces.iter().any(|f| f.is_some()));
 }

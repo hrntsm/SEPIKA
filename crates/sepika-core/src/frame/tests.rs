@@ -67,7 +67,6 @@ fn auto_axis(name: &str, distance: f64, nodes: Vec<NodeId>) -> Axis {
 #[test]
 fn axis_frame_uses_exact_geometry_and_selects_in_plane_members() {
     let mut m = Model::default();
-    // X=0 の構面（柱 2 本と、それを結ぶ梁）。
     let a0 = push_node(&mut m, 0.0, 0.0, 0.0);
     let a1 = push_node(&mut m, 0.0, 0.0, 4000.0);
     let b0 = push_node(&mut m, 0.0, 6000.0, 0.0);
@@ -75,7 +74,6 @@ fn axis_frame_uses_exact_geometry_and_selects_in_plane_members() {
     let col_a = push_line(&mut m, a0, a1);
     let col_b = push_line(&mut m, b0, b1);
     let girder = push_line(&mut m, a1, b1);
-    // X=6000 の柱と、通りをまたぐ梁。
     let c0 = push_node(&mut m, 6000.0, 0.0, 0.0);
     let c1 = push_node(&mut m, 6000.0, 0.0, 4000.0);
     let col_c = push_line(&mut m, c0, c1);
@@ -104,14 +102,12 @@ fn axis_frame_includes_split_girder_via_coordinates() {
     let a1 = push_node(&mut m, 0.0, 0.0, 4000.0);
     let b0 = push_node(&mut m, 0.0, 6000.0, 0.0);
     let b1 = push_node(&mut m, 0.0, 6000.0, 4000.0);
-    // 大梁が中間節点で 2 要素に割れている（中間節点は柱節点ではない）。
     let mid = push_node(&mut m, 0.0, 3000.0, 4000.0);
     push_line(&mut m, a0, a1);
     push_line(&mut m, b0, b1);
     let g1 = push_line(&mut m, a1, mid);
     let g2 = push_line(&mut m, mid, b1);
 
-    // 自動生成の通りは柱の材端節点しか持たない。
     m.axes = vec![x_group(vec![auto_axis("X1", 0.0, vec![a0, a1, b0, b1])])];
 
     let f = build_frame(&m, FrameTarget::Axis { group: 0, axis: 0 }).expect("構面");
@@ -125,7 +121,6 @@ fn axis_frame_includes_split_girder_via_coordinates() {
 #[test]
 fn axis_frame_includes_offset_columns_via_node_list() {
     let mut m = Model::default();
-    // 通りは X=3000 だが、柱は X=3500 に立つ。
     let a0 = push_node(&mut m, 3500.0, 0.0, 0.0);
     let a1 = push_node(&mut m, 3500.0, 0.0, 4000.0);
     let col = push_line(&mut m, a0, a1);
@@ -145,7 +140,6 @@ fn axis_frame_includes_offset_columns_via_node_list() {
 #[test]
 fn other_group_fits_plane_from_nodes() {
     let mut m = Model::default();
-    // x = y の鉛直面に並ぶ柱 2 本。
     let a0 = push_node(&mut m, 0.0, 0.0, 0.0);
     let a1 = push_node(&mut m, 0.0, 0.0, 4000.0);
     let b0 = push_node(&mut m, 5000.0, 5000.0, 0.0);
@@ -167,7 +161,6 @@ fn other_group_fits_plane_from_nodes() {
     let s = 1.0 / 2.0_f64.sqrt();
     let dot = f.normal[0] * s - f.normal[1] * s;
     assert!((dot.abs() - 1.0).abs() < 1e-6, "法線: {:?}", f.normal);
-    // 幾何がないため座標では拾えず、所属節点リストだけが頼りになる。
     assert_eq!(f.elem_count(), 2);
 }
 
@@ -183,7 +176,6 @@ fn story_frame_includes_columns_below() {
     let col_a = push_line(&mut m, base_a, top_a);
     let col_b = push_line(&mut m, base_b, top_b);
     let girder = push_line(&mut m, top_a, top_b);
-    // 上階へ伸びる柱（上端は 2 階レベルなので 1 階の伏図には出ない）。
     let up_a = push_node(&mut m, 0.0, 0.0, 8000.0);
     let col_up = push_line(&mut m, top_a, up_a);
 

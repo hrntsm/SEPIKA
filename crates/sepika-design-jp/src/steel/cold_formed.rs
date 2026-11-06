@@ -139,7 +139,6 @@ mod tests {
         let expected_07 = 4.0 * (1.0 - 0.7) / 3.0;
         assert!((nu_07 - expected_07).abs() < 1e-9);
 
-        // 連続性の確認（境界 n=0.5 付近で急変しない）。
         assert!((nu_factor(0.5) - (1.0 - 4.0 * 0.25 / 3.0)).abs() < 1e-9);
     }
 
@@ -152,7 +151,6 @@ mod tests {
 
     #[test]
     fn box_zp_hand_calc() {
-        // H=B=400, t=19 の角形鋼管。
         let h = 400.0;
         let b = 400.0;
         let t = 19.0;

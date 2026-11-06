@@ -634,7 +634,6 @@ mod tests {
         let expected_end = expected + backbone.post_yield_stiffness * 3.0 * theta_y;
         assert!((points[2][1] - expected_end).abs() < 1e-9 * expected.abs());
 
-        // 解析と同じ `set_yield` を通した材料の応答と一致する。
         sj.set_yield(expected);
         for p in &points {
             let (m, _) = sj.probe(p[0]);

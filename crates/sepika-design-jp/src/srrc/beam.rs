@@ -199,7 +199,6 @@ mod tests {
         );
         assert!(result.basis.contains("SRC規準"));
 
-        // components に Bending・Shear が入ることを確認する。
         assert_eq!(result.components.len(), 2);
         assert!(result
             .components

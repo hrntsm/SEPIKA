@@ -159,7 +159,6 @@ mod tests {
 
     #[test]
     fn rc_joint_kappa_a_by_shape() {
-        // fs(短期) = concrete_allowable_shear(24.0,false)
         let fs = crate::rc::concrete_allowable_shear(24.0, false);
         // bi=(600-300)/2=150, bai=min(bi/2=75, D/4=150)=75, bj=300+2*75=450
         let bj = 450.0;
@@ -173,13 +172,10 @@ mod tests {
             let inp = base_joint_input(shape);
             let res = rc_joint_shear_check(&inp);
             let expected_qaj = kappa_a * (fs - 0.5) * bj * d;
-            // QAj は detail 文字列比較ではなく ratio から逆算して照合する。
             let qdj = res.ratio() * expected_qaj;
             assert!(qdj > 0.0, "shape={:?}", shape);
-            // QAj が形状で単調増加することを確認（十字 > T > ト > L）。
             assert!(expected_qaj > 0.0);
         }
-        // 十字形が最も許容せん断力が大きく検定比が最小になるはず。
         let cross = rc_joint_shear_check(&base_joint_input(JointShape::Cross));
         let corner = rc_joint_shear_check(&base_joint_input(JointShape::Corner));
         assert!(cross.ratio() < corner.ratio());

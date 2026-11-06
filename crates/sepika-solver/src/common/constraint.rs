@@ -501,7 +501,6 @@ mod tests {
         let a_ux = dofmap.active(g_master_ux).unwrap() as usize;
         let a_uy = dofmap.active(g_master_uy).unwrap() as usize;
         let a_rz = dofmap.active(g_master_rz).unwrap() as usize;
-        // マスター自身の DOF は独立(恒等写像の行)のはず。
         let idx_ux = reducer.t_rows[a_ux][0].0;
         let idx_uy = reducer.t_rows[a_uy][0].0;
         let idx_rz = reducer.t_rows[a_rz][0].0;
@@ -575,7 +574,6 @@ mod tests {
     #[test]
     fn test_mpc_fixed_master_forces_slave_to_zero() {
         let mut model = make_3node_model();
-        // node0 は FIXED のまま。node2.Ux = 0.5 * node0.Ux（node0.Ux は拘束済み）。
         model.constraints.push(Constraint::Mpc {
             master: NodeId(2),
             terms: vec![(NodeId(0), sepika_core::dof::Dof::Ux, 0.5)],
@@ -611,7 +609,6 @@ mod tests {
         });
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
-        // ダングリング拘束は無効化され、独立自由度は全自由度のまま。
         assert_eq!(reducer.n_indep, reducer.n_free);
     }
 
@@ -622,12 +619,10 @@ mod tests {
     fn test_chained_mpc_constraints_compose_transitively() {
         let mut model = make_3node_model();
         model.nodes[0].restraint = Dof6Mask::FREE;
-        // node1.Ux = node0.Ux
         model.constraints.push(Constraint::Mpc {
             master: NodeId(1),
             terms: vec![(NodeId(0), sepika_core::dof::Dof::Ux, 1.0)],
         });
-        // node2.Ux = node1.Ux（node1 は上の MPC のスレーブ＝連鎖）
         model.constraints.push(Constraint::Mpc {
             master: NodeId(2),
             terms: vec![(NodeId(1), sepika_core::dof::Dof::Ux, 1.0)],
@@ -635,12 +630,10 @@ mod tests {
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
 
-        // 各ノードの Ux グローバル DOF = node_index * DOF_PER_NODE。
         let a0 = dofmap.active(0).unwrap() as usize;
         let a1 = dofmap.active(DOF_PER_NODE).unwrap() as usize;
         let a2 = dofmap.active(2 * DOF_PER_NODE).unwrap() as usize;
 
-        // node0.Ux は独立（行は自身への単位行）。その独立番号にだけ単位値を与える。
         assert_eq!(reducer.t_rows[a0].len(), 1);
         let idx0 = reducer.t_rows[a0][0].0;
         let mut u_indep = vec![0.0; reducer.n_indep];
@@ -658,7 +651,6 @@ mod tests {
             "node2.Ux={} should follow node0 transitively",
             u_free[a2]
         );
-        // 連鎖で独立 DOF が 2 個（node1.Ux, node2.Ux）減る。
         assert_eq!(reducer.n_indep, reducer.n_free - 2);
     }
 }

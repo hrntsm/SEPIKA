@@ -352,11 +352,7 @@ mod tests {
         ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis, NodalLoad, Node,
     };
 
-    /// 支点ばね検証用モデル: 節点0(全固定)-節点1(Ux のみ自由) を、零長節点バネ
-    /// （軸剛性 `kx`）で結ぶ 1 自由度系。`support_kx` は節点1 の水平支点ばね
-    /// （`None` で無指定）。2 節点を同一座標に置くことで
-    /// `NodalSpringElement` の局所軸＝全体座標系（零長特例）となり、
-    /// 軸バネがそのまま水平（全体 X）成分に一致する。
+    /// 節点1のUxだけが自由な零長ばね系。`support_kx`は節点1の水平支点ばね剛性。
     fn spring_model(kx: f64, support_kx: Option<f64>, restraint1: Dof6Mask) -> Model {
         Model {
             nodes: vec![
@@ -407,8 +403,6 @@ mod tests {
         }
     }
 
-    /// 支点ばねが `assemble_global_k` の対角へ、要素剛性と単純加算される形で
-    /// 効くこと（`Node::mass` の対角加算と同じ形の検証）。
     #[test]
     fn test_assemble_global_k_adds_support_spring_diagonal() {
         let kx = 1000.0;
@@ -421,9 +415,6 @@ mod tests {
         assert_eq!(dofmap_baseline.n_active(), 1);
         assert_eq!(dofmap_spring.n_active(), 1);
 
-        // 線形静解析（`crate::statics::linear::linear_static_once`）で節点1に水平力を与え、
-        // 変位 u=F/k から実効剛性を逆算し、要素単独(kx)・要素+支点ばね(kx+ks) の
-        // 理論値と一致することを確認する。
         let lc = LoadCaseId(0);
         let disp_baseline = crate::statics::linear::linear_static_once(&model_baseline, lc)
             .expect("baseline linear static should solve")
@@ -445,12 +436,8 @@ mod tests {
         );
     }
 
-    /// `restraint` で固定した自由度の支点ばねは無視される（固定支持を優先する仕様）。
-    /// 孤立節点（要素非接続）の support_spring だけでは活性自由度が増えないことも
-    /// 合わせて確認する（`structural_nodes` の判定は変更しない仕様）。
     #[test]
     fn test_support_spring_on_fixed_dof_is_ignored() {
-        // 節点0 は全固定。support_spring を与えても活性自由度に影響しないこと。
         let mut model = spring_model(1000.0, None, Dof6Mask(0b111110));
         model.nodes[0].support_spring = Some([1.0e9, 1.0e9, 1.0e9, 1.0e9, 1.0e9, 1.0e9]);
         let dofmap = DofMap::build(&model);
@@ -460,11 +447,8 @@ mod tests {
             "全固定節点の support_spring は活性 DOF を増やさない"
         );
         let k = assemble_global_k(&model, &dofmap);
-        // 活性 DOF はただ1つ（節点1 の Ux）。対角成分は要素剛性 kx のみ
-        // （節点0 は固定のため support_spring は無視される）。
         assert_eq!(k.compute_nnz(), 1, "対角成分1つのみ（節点0 の寄与なし）");
 
-        // 節点1 側でも、restraint で固定した成分（Uy 等）の support_spring は無視される。
         let mut model2 = spring_model(1000.0, None, Dof6Mask(0b111110));
         model2.nodes[1].support_spring = Some([500.0, 999.0, 999.0, 999.0, 999.0, 999.0]);
         let dofmap2 = DofMap::build(&model2);
@@ -478,9 +462,6 @@ mod tests {
         assert!((terms[0].1 - 500.0).abs() < 1e-9, "Ux 成分のみ有効");
     }
 
-    /// 孤立節点（要素・拘束いずれにも参加しない節点）に support_spring だけを
-    /// 与えても、`structural_nodes`（dof.rs）の判定には影響しない
-    /// （支点ばねだけの孤立節点は解析対象外のままでよい仕様）。
     #[test]
     fn test_isolated_node_with_support_spring_stays_inactive() {
         let mut model = spring_model(1000.0, None, Dof6Mask(0b111110));
@@ -493,8 +474,6 @@ mod tests {
             support_spring: Some([100.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
         });
         let dofmap = DofMap::build(&model);
-        // 節点2 は要素・拘束いずれにも参加しないため、support_spring があっても
-        // 活性自由度を持たない（既存節点1の1自由度のみ）。
         assert_eq!(dofmap.n_active(), 1);
         let g2 = NodeId(2).index() * DOF_PER_NODE;
         assert!(dofmap.active(g2).is_none());

@@ -770,7 +770,6 @@ mod tests {
             o.live_load(LoadPurpose::Beam),
             o.live_load(LoadPurpose::Floor)
         );
-        // 住宅 = 1800 / 1300 / 600。
         let r = SlabUsage::Residential;
         assert!((r.live_load(LoadPurpose::Floor) - 1800e-6).abs() < 1e-12);
         assert_eq!(
@@ -804,7 +803,6 @@ mod tests {
             assert!((u.live_load(LoadPurpose::Seismic) - seismic * 1e-6).abs() < 1e-12);
         }
 
-        // 積載は 床用 = 小梁用 ≥ 大梁用 ≥ 地震用 の順（全用途で成り立つ）。
         for u in [
             SlabUsage::Residential,
             SlabUsage::Office,
@@ -842,7 +840,6 @@ mod tests {
 
     #[test]
     fn test_usage_custom_is_internal_units() {
-        // Custom は内部単位 N/mm² をそのまま返す（換算しない）。
         let c = SlabUsage::Custom {
             floor: 3.0e-3,
             beam: 2.5e-3,

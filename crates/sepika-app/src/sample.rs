@@ -154,12 +154,10 @@ mod tests {
         let model = portal_frame();
         assert!(model.validate().is_ok());
         let analysis = sepika_solver::statics::analysis::Analysis::prepare(&model).unwrap();
-        // 長期（等分布）: 梁中央がたわむ → 柱頭に鉛直変位が生じる
         let r0 = analysis
             .linear_static(sepika_core::ids::LoadCaseId(0))
             .unwrap();
         assert!(r0.member_forces.len() == 3);
-        // 地震X: 柱頭が +X に流れる
         let r1 = analysis
             .linear_static(sepika_core::ids::LoadCaseId(1))
             .unwrap();

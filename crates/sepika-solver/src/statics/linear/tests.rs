@@ -501,7 +501,6 @@ fn simply_supported_udl_zplane_moment() {
         mid,
         expected
     );
-    // ねじり・Mz は概ね 0
     assert!(mid_value(mf, 5).abs() < expected * 1e-3, "Mz leak");
 }
 
@@ -710,8 +709,6 @@ fn axial_distributed_gravity_recovers_full_base_compression() {
 /// よって iy≠iz の断面で、δ = PL³/(3E·iz) に一致することを確認する。
 #[test]
 fn test_beam_to_global_transverse_uses_correct_inertia() {
-    // 現実的な鋼材大断面（iz=1e9 級）を用いる：to_global 修正の検証に加え、
-    // 端ばね静縮約のペナルティが大断面でも非正定値化しないこと（堅牢性）も同時に確認。
     let e = 205000.0_f64;
     let l = 1000.0_f64;
     let iy = 2.0e9_f64;
@@ -729,7 +726,6 @@ fn test_beam_to_global_transverse_uses_correct_inertia() {
     let uy = result.disp[1][1];
     let expected = p * l.powi(3) / (3.0 * e * iz);
     let buggy = p * l.powi(3) / (3.0 * e * iy);
-    // iz ベースの値に一致し、iy ベース(1/2)を明確に排除する。
     assert!(
         (uy - expected).abs() / expected < 1e-3,
         "uy={} expected(iz)={} buggy(iy)={}",
@@ -751,11 +747,9 @@ fn test_rigid_zone_affects_analysis() {
     base.sections[0].as_z = 1.0e8;
     base.load_cases[0].nodal[0].values = [0.0, 0.0, 1000.0, 0.0, 0.0, 0.0];
 
-    // 剛域なし
     let r0 = linear_static_once(&base, LoadCaseId(1)).unwrap();
     let uz0 = r0.disp[1][2];
 
-    // 基部に剛域 λ_i=800（可とう長 200）
     let mut rigid = base.clone();
     rigid.elements[0].rigid_zone.length_i = 800.0;
     let r1 = linear_static_once(&rigid, LoadCaseId(1)).unwrap();
@@ -777,9 +771,7 @@ fn test_rigid_zone_affects_analysis() {
 
 #[test]
 fn test_linear_static_vertical_cantilever_bending() {
-    // 鉛直柱: (0,0,0)固定 → (0,0,1000)自由。頂部に水平荷重 P=1000 (global X)。
     // 座標変換が正しく適用されれば曲げ片持ち応答 δx ≈ PL³/3E·Iz + せん断 ≈ 333,364。
-    // 回転変換が欠落していると軸剛性を誤用して δx≈10 になる（回帰防止）。
     let mut model = make_axial_cantilever();
     model.nodes[1].coord = [0.0, 0.0, 1000.0];
     model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
@@ -951,7 +943,6 @@ fn make_ss_plate(n: usize, a: f64, t: f64, e: f64, nu: f64, q: f64, clamped: boo
     for iy in 0..nn {
         for ix in 0..nn {
             let on_boundary = ix == 0 || ix == n || iy == 0 || iy == n;
-            // 常に Ux,Uy,Rz を固定（面内＋ドリリング）。周辺は Uz も固定。
             let mut mask = 0b100011u8;
             if on_boundary {
                 mask |= 1 << 2;
@@ -997,7 +988,6 @@ fn make_ss_plate(n: usize, a: f64, t: f64, e: f64, nu: f64, q: f64, clamped: boo
             eid += 1;
         }
     }
-    // 等分布荷重 q を負担面積で節点 Fz へ（周辺節点の荷重は支点が負担）。
     let mut nodal = Vec::new();
     for iy in 0..nn {
         for ix in 0..nn {
@@ -1090,12 +1080,10 @@ fn test_plate_convergence() {
         let e8 = (w8 - ref_w).abs();
         let e16 = (w16 - ref_w).abs();
 
-        // 細分化で誤差が単調減少して参照解へ近づく
         assert!(
             e8 < e4 && e16 < e8,
             "{label}: 誤差が単調減少しない: e4={e4} e8={e8} e16={e16} (w4={w4} w8={w8} w16={w16} ref={ref_w})"
         );
-        // 16×16 で参照解の ±2% 以内
         assert!(
             e16 / ref_w < 0.02,
             "{label}: 16x16 誤差 {:.2}% > 2% (w16={} ref={})",
@@ -1106,9 +1094,6 @@ fn test_plate_convergence() {
     }
 }
 
-// 1 スパン・2 柱・頂部大梁・対角ブレース 1 本のモデル（ブレース付きラーメン）。
-// 柱・大梁は Fixed-Fixed（曲げ骨組）、ブレースは Pinned-Pinned のトラス要素。
-// 荷重ケースを 2 本（Dead=長期, Seismic=短期）用意し、同一の鉛直荷重を与える。
 fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
     use sepika_core::model::StressAnalysisCfg;
 
@@ -1173,7 +1158,6 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
             node(3, [l, 0.0, h]),
         ],
         elements: vec![
-            // e0: 柱A（鉛直）
             ElementData {
                 id: ElemId(0),
                 kind: ElementKind::Beam,
@@ -1189,7 +1173,6 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
                 plastic_zone: None,
                 spring: None,
             },
-            // e1: 柱B（鉛直）
             ElementData {
                 id: ElemId(1),
                 kind: ElementKind::Beam,
@@ -1205,7 +1188,6 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
                 plastic_zone: None,
                 spring: None,
             },
-            // e2: 頂部大梁（水平）
             ElementData {
                 id: ElemId(2),
                 kind: ElementKind::Beam,
@@ -1221,7 +1203,6 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
                 plastic_zone: None,
                 spring: None,
             },
-            // e3: 対角ブレース（柱Aの脚部 → 柱Bの頂部）
             ElementData {
                 id: ElemId(3),
                 kind: ElementKind::Brace {
@@ -1258,14 +1239,7 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
     }
 }
 
-// 柱の長期軸力無効化テスト用モデル。同一の2節点間に「柱」（`ElementKind::Beam`、
-// 鉛直、Fixed-Fixed）と「鉛直ブレース」（`ElementKind::Brace`、同じ2節点）を
-// 並列に配置する。荷重方向が部材軸と厳密に一致するため、柱の軸剛性が
-// 支配的な baseline では柱・ブレースへほぼ等分に軸力を負担させつつ、
-// 柱側だけ曲げ・せん断剛性（iy/iz/j/as_y/as_z）はそのまま健全に保つ。
-// ブレース側は常に軸剛性のみを保つため、柱の軸力を無効化しても
-// 機構化（特異行列）を起こさず、負担していた軸力がそのままブレースへ
-// 移ることを明快に検証できる。
+// 柱の軸剛性を無効化しても不安定とならないよう、同じ2節点間の鉛直ブレースに軸力を負担させる。
 fn column_with_parallel_vertical_brace() -> Model {
     use sepika_core::model::StressAnalysisCfg;
 
@@ -1329,7 +1303,6 @@ fn column_with_parallel_vertical_brace() -> Model {
             },
         ],
         elements: vec![
-            // e0: 柱（鉛直）。no_long_axial_column の対象。
             ElementData {
                 id: ElemId(0),
                 kind: ElementKind::Beam,
@@ -1345,8 +1318,6 @@ fn column_with_parallel_vertical_brace() -> Model {
                 plastic_zone: None,
                 spring: None,
             },
-            // e1: 同じ2節点間の鉛直ブレース（並列）。常に軸剛性を保ち、
-            // 柱が負担しなくなった軸力の受け皿になる。
             ElementData {
                 id: ElemId(1),
                 kind: ElementKind::Brace {
@@ -1447,8 +1418,6 @@ fn test_no_long_axial_column_zeros_column_force() {
         cut_col <= base_col * 1e-3,
         "column force should collapse to ~0: base={base_col} cut={cut_col}"
     );
-    // 柱が負担しなくなった軸力は並列ブレースへ移り、荷重全体はブレース単体で
-    // 健全に負担される（機構化していないことの確認）。
     assert!(
             cut_brace > base_brace,
             "brace should pick up the load the column no longer carries: base={base_brace} cut={cut_brace}"
@@ -1464,7 +1433,6 @@ fn test_no_long_axial_column_zeros_column_force() {
 #[test]
 fn test_axial_cut_not_applied_to_short_term_case() {
     let mut model = braced_frame(sepika_core::model::LoadCaseKind::Dead);
-    // 同一の鉛直荷重を持つ短期（地震）荷重ケースを追加する。
     model.load_cases.push(LoadCase {
         origin: Default::default(),
         id: LoadCaseId(2),
@@ -1500,7 +1468,6 @@ fn test_axial_cut_applies_to_composite_src_column() {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
     let mut model = column_with_parallel_vertical_brace();
-    // 柱断面を SRC（shape あり・コンクリート材料 fc あり）へ差し替える。
     model.sections[0].shape = Some(SectionShape::SrcColumnRect {
         b: 600.0,
         d: 600.0,
@@ -1576,8 +1543,6 @@ fn test_axial_cut_applies_to_composite_src_column() {
         "荷重はブレースが全量負担するはず: {cut_brace}"
     );
 }
-
-// 引張専用ブレースの active-set 反復（真の引張専用解析）
 
 /// 引張専用ブレース検証用の1スパン門型フレーム。
 ///
@@ -1664,7 +1629,6 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
         elements: vec![
             column(0, 0, 2),
             column(1, 1, 3),
-            // e2: 頂部大梁
             ElementData {
                 id: ElemId(2),
                 kind: ElementKind::Beam,
@@ -1680,7 +1644,6 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
                 plastic_zone: None,
                 spring: None,
             },
-            // e3: 対角ブレース N0→N3
             ElementData {
                 id: ElemId(3),
                 kind: ElementKind::Brace { tension_only },
@@ -1720,7 +1683,6 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
 /// active なブレースは E·A/L の一般ブレースそのものになる、という等価性の検証。
 #[test]
 fn test_tension_only_iteration_tension_side_matches_full_brace() {
-    // 参照: 一般（全剛性）ブレース
     let full = tension_only_portal(1.0e4, false);
     let ref_res = linear_static_once(&full, LoadCaseId(1)).unwrap();
     let ref_brace = axial_force(&ref_res, ElemId(3));
@@ -1729,7 +1691,6 @@ fn test_tension_only_iteration_tension_side_matches_full_brace() {
         "参照ブレース軸力が有意であること: {ref_brace}"
     );
 
-    // 引張専用 + 反復 ON
     let mut model = tension_only_portal(1.0e4, true);
     model.stress_cfg.tension_only_iteration = true;
     let res = linear_static_once(&model, LoadCaseId(1)).unwrap();
@@ -1746,7 +1707,6 @@ fn test_tension_only_iteration_tension_side_matches_full_brace() {
 /// 圧縮の軸力を負担すること。
 #[test]
 fn test_tension_only_iteration_compression_side_is_slack() {
-    // 反復 OFF（既定の一括解析）: 全剛性 E·A/L で圧縮を負担する
     let base = tension_only_portal(-1.0e4, true);
     assert!(!base.stress_cfg.tension_only_iteration);
     let base_res = linear_static_once(&base, LoadCaseId(1)).unwrap();
@@ -1757,7 +1717,6 @@ fn test_tension_only_iteration_compression_side_is_slack() {
     );
     assert!(base_brace < 0.0, "圧縮（負）であること: {base_brace}");
 
-    // 反復 ON: 圧縮ブレースは無効化され軸力ほぼ0
     let mut model = tension_only_portal(-1.0e4, true);
     model.stress_cfg.tension_only_iteration = true;
     let res = linear_static_once(&model, LoadCaseId(1)).unwrap();
@@ -1890,9 +1849,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
     push(2, 2, 3, [0.0, 0.0, 1.0]);
 
     if with_rigid_floor {
-        // 梁の材端節点が剛床上にあることだけを表す剛床（スレーブなし）。
-        // 自由度は何も拘束しないので、線形解析の結果は剛床の有無で変わらないはず
-        // であり、要素種別が剛床判定に引きずられていないかを切り分けられる。
+        // 剛床による拘束の影響を混ぜないため、材端の所属だけを表すスレーブなしの剛床を使う。
         model
             .constraints
             .push(sepika_core::model::Constraint::rigid_diaphragm(
@@ -1995,11 +1952,8 @@ fn test_rigid_floor_linear_results_and_missing_force_diagnostics() {
         }
     }
 
-    // 全線材が揃っていれば OK。
     assert!(ensure_line_member_forces(&model, &res.member_forces).is_ok());
 
-    // 梁 ElemId(2) の内力が欠落した状態を模擬するとエラーになり、
-    // メッセージに欠落した部材 ID が含まれる。
     let missing: Vec<_> = res
         .member_forces
         .iter()

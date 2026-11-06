@@ -69,7 +69,6 @@ fn collinear_horizontal_points_give_vertical_plane() {
     let n = best_fit_plane_normal(&pts).expect("法線");
     // 直線は X 方向 → 直線と Z を含む平面（XZ 平面）の法線は Y。
     assert_parallel(n, [0.0, 1.0, 0.0], "X 方向に並ぶ点");
-    // 法線が鉛直でない（＝構面が鉛直面として読める）ことも確かめる。
     assert!(n[2].abs() < 1e-9, "法線は水平: {n:?}");
 }
 
@@ -121,13 +120,10 @@ fn vertical_pair_uses_horizontal_distance() {
 /// 方向（i→j の向き）と平面内の斜め配置に依存しない。
 #[test]
 fn vertical_axis_uses_45deg_cosine() {
-    // 純鉛直・純水平
     assert!(is_vertical_axis([0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]));
     assert!(!is_vertical_axis([0.0, 0.0, 0.0], [3000.0, 0.0, 0.0]));
-    // 向きに依存しない（上→下でも鉛直）
     assert!(is_vertical_axis([0.0, 0.0, 3000.0], [0.0, 0.0, 0.0]));
-    // 45° ちょうどは鉛直でない（|ez| = 0.7071 > 0.707 は浮動小数点上わずかに真に
-    // なり得るため、明確に 45° 未満/超のケースで確認する）
+    // 45°付近は丸め誤差で判定が揺れ得るため、境界から離れた両側の入力を使う。
     assert!(
         !is_vertical_axis([0.0, 0.0, 0.0], [1000.0, 0.0, 900.0]),
         "42° は水平側"
@@ -136,10 +132,8 @@ fn vertical_axis_uses_45deg_cosine() {
         is_vertical_axis([0.0, 0.0, 0.0], [900.0, 0.0, 1000.0]),
         "48° は鉛直側"
     );
-    // 平面斜め配置（dx=dy）でも余弦で判定する（マンハッタン比のような
-    // 鉛直側への偏りがない）: dz=1.1, dx=dy=1.0 → |ez|=0.61 → 水平側
+    // dz/√(dx²+dy²+dz²)=1.1/√3.21≈0.614なので水平側。
     assert!(!is_vertical_axis([0.0, 0.0, 0.0], [1000.0, 1000.0, 1100.0]));
-    // 長さ 0
     assert!(!is_vertical_axis([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]));
 }
 

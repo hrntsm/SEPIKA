@@ -350,7 +350,6 @@ mod tests {
 
     #[test]
     fn section_floor_groups_orders_story_floors_top_to_bottom() {
-        // 階定義は下階→上階で格納し、表示は上階→下階。
         let stories = vec![story("1F"), story("2F"), story("3F")];
         let sections = vec![
             section(0, "A", Some("1F")),

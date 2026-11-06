@@ -75,7 +75,6 @@ fn test_fem_trapezoid_numeric() {
         cmq.c_i,
         fem_num
     );
-    // せん断 q_i+q_j = 総荷重
     assert!(
         (cmq.q_i + cmq.q_j - total).abs() / total < 1e-4,
         "Q合計={} 総荷重={}",
@@ -104,7 +103,6 @@ fn assert_fem_matches(loads: &[MemberLoadKind], l: f64, expected: Cmq, label: &s
 
 #[test]
 fn test_fixed_end_moments_matches_fem_uniform() {
-    // emit_shape の Uniform{w} と同じ区間分割: 全長1区間
     let w = 10.0_f64;
     let l = 4000.0_f64;
     let loads = vec![MemberLoadKind::Distributed {
@@ -120,8 +118,6 @@ fn test_fixed_end_moments_matches_fem_uniform() {
 
 #[test]
 fn test_fixed_end_moments_matches_fem_trapezoid() {
-    // emit_shape の Trapezoid{w0,a,b}（a: 両端立上り幅、b: 中央フラット幅）と
-    // 同じ区間分割: 3区間 [0,a]:0→w0 / [a,a+b]:w0→w0 / [a+b,L]:w0→0
     let w0 = 7.0_f64;
     let l = 5000.0_f64;
     let a = 1500.0_f64;
@@ -148,7 +144,6 @@ fn test_fixed_end_moments_matches_fem_trapezoid() {
     ];
     assert_fem_matches(&loads, l, fem_trapezoid(w0, a, b, l), "trapezoid");
 
-    // emit_shape の Triangle{w0}（中央ピーク）と同じ区間分割: 2区間
     let mid = l / 2.0;
     let tri_loads = vec![
         MemberLoadKind::Distributed {
@@ -244,7 +239,6 @@ fn test_simple_beam_moment_at_midspan_closed_forms() {
             (mid - expected_mid).abs() / expected_mid < 1e-9,
             "{label}: 中央値={mid} 期待値={expected_mid}"
         );
-        // 端部はゼロ、対称性 M(x)=M(L−x)
         assert!(
             simple_beam_moment_at(&loads, l, 0.0).abs() < 1e-6,
             "{label}"
@@ -263,7 +257,7 @@ fn test_simple_beam_moment_at_midspan_closed_forms() {
 fn test_simple_reactions_and_moment_point_load() {
     let p = 100.0_f64;
     let l = 5000.0_f64;
-    let a = 2000.0_f64; // i 端から 2000 の非対称位置
+    let a = 2000.0_f64;
     let load = MemberLoadKind::Point { a, p };
     // 反力 R_i=P·b/L, R_j=P·a/L
     let b = l - a;
@@ -276,10 +270,8 @@ fn test_simple_reactions_and_moment_point_load() {
     // 荷重点で M = P·a·b/L
     let expected = p * a * b / l;
     assert!((simple_beam_moment_at(&loads, l, a) - expected).abs() / expected < 1e-9);
-    // 端部はゼロ
     assert!(simple_beam_moment_at(&loads, l, 0.0).abs() < 1e-6);
     assert!(simple_beam_moment_at(&loads, l, l).abs() < 1e-6);
-    // 区分線形: 荷重点手前でそれぞれ一定勾配
     let x1 = 0.1 * l;
     let x2 = 0.2 * l;
     let slope = simple_beam_moment_at(&loads, l, x2) - simple_beam_moment_at(&loads, l, x1);
@@ -342,7 +334,6 @@ pub(super) fn make_rect_slab_model(
 }
 
 pub(super) fn total_load(loads: &[BeamLoad]) -> f64 {
-    // 鉛直釣合いより、各梁の総荷重 = 端せん断の和 q_i + q_j。
     loads.iter().map(|l| l.cmq.q_i + l.cmq.q_j).sum()
 }
 
@@ -392,10 +383,6 @@ fn test_slab_conservation_rect_all_methods() {
     }
 }
 
-// ------------------------------------------------------------------
-// §1.13: 一方向スラブの伝達方向指定
-// ------------------------------------------------------------------
-
 #[test]
 fn test_one_way_direction_x_and_y() {
     use sepika_core::model::OneWayDir;
@@ -403,7 +390,6 @@ fn test_one_way_direction_x_and_y() {
     let (lx, ly) = (5000.0_f64, 3000.0_f64);
     let expected = w * lx * ly;
 
-    // one_way=Y: 伝達方向Yに直交する辺0・2（X方向の辺、長さlx）が負担。従来互換と同じ結果。
     let (model, mut slab) = make_rect_slab_model(lx, ly, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::Y);
     let loads_y = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
@@ -418,7 +404,6 @@ fn test_one_way_direction_x_and_y() {
         }
     }
 
-    // one_way=X: 伝達方向Xに直交する辺1・3（Y方向の辺、長さly）が負担。
     slab.plate.one_way = Some(OneWayDir::X);
     let loads_x = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!((total_load(&loads_x) - expected).abs() / expected < 1e-9);
@@ -509,10 +494,6 @@ fn test_one_way_short_direction_rejects_square() {
     }
 }
 
-// ------------------------------------------------------------------
-// 多角形床組（矩形でない4辺形・五角形）
-// ------------------------------------------------------------------
-
 fn mk_node(id: u32, x: f64, y: f64) -> sepika_core::model::Node {
     use sepika_core::ids::NodeId;
     sepika_core::model::Node {
@@ -561,7 +542,6 @@ pub(super) fn polygon_slab_model(
 
 #[test]
 fn test_polygon_trapezoid_conservation() {
-    // 矩形でない台形(4頂点、辺2の閉合条件を満たさない) → 多角形経路
     let pts = [
         (0.0, 0.0),
         (6000.0, 0.0),
@@ -570,7 +550,6 @@ fn test_polygon_trapezoid_conservation() {
     ];
     let w = 0.003_f64;
     let (model, slab) = polygon_slab_model(&pts, DistributionMethod::TriTrapezoid, w);
-    // slab_dimensions が None（多角形経路）になることを確認
     assert!(slab_dimensions(&model, &slab).is_none());
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!(!loads.is_empty());
@@ -585,7 +564,6 @@ fn test_polygon_trapezoid_conservation() {
         true_area
     );
 
-    // X/Y 指定は非矩形でも従来どおり多角形経路へ進む。
     use sepika_core::model::OneWayDir;
     let (model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::X);
@@ -611,7 +589,6 @@ fn test_polygon_trapezoid_conservation() {
 
 #[test]
 fn test_polygon_pentagon_conservation() {
-    // 凸五角形
     let pts = [
         (0.0, 0.0),
         (5000.0, 0.0),
@@ -623,7 +600,6 @@ fn test_polygon_pentagon_conservation() {
     let (model, slab) = polygon_slab_model(&pts, DistributionMethod::TributaryArea, w);
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!(!loads.is_empty());
-    // 辺インデックスが 0..5 の範囲内。
     for l in &loads {
         match l.target {
             LoadTarget::Edge(e) => assert!(e < 5),
@@ -646,10 +622,6 @@ fn test_polygon_pentagon_conservation() {
     );
 }
 
-// ------------------------------------------------------------------
-// 片持ちスラブ
-// ------------------------------------------------------------------
-
 #[test]
 fn test_cantilever_conservation() {
     use sepika_core::ids::{NodeId, SlabId};
@@ -666,7 +638,6 @@ fn test_cantilever_conservation() {
         nodes,
         ..Default::default()
     };
-    // 取付き線 0→1 の左（+Y）側へ `depth` 跳ね出す片持ち床板。
     attach_support(&mut model);
     let slab = Slab {
         id: SlabId(0),
@@ -693,7 +664,7 @@ fn test_cantilever_conservation() {
     assert_eq!(loads.len(), 1);
     let l = &loads[0];
     assert!(matches!(l.target, LoadTarget::Edge(0)));
-    let expected_total = w * l_attach * depth; // 矩形なので厳密に一致
+    let expected_total = w * l_attach * depth;
     assert!(
         (total_load(&loads) - expected_total).abs() / expected_total < 1e-9,
         "総和={} expected={}",
@@ -1055,7 +1026,6 @@ fn test_cantilever_support_edges_do_not_receive_load() {
         name: "J".into(),
     };
 
-    // 全長を覆う実部材（辺から 1mm ずれ）＋小梁があっても取付き辺だけへ分配。
     let mut full = Model {
         nodes: vec![
             mk_node(0, 0.0, 0.0),
@@ -1074,7 +1044,6 @@ fn test_cantilever_support_edges_do_not_receive_load() {
     assert_eq!(loads.len(), 1);
     assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
 
-    // 辺の半分だけ覆う実部材＋全長の小梁があっても取付き辺だけへ分配。
     let mut partial = Model {
         nodes: vec![
             mk_node(0, 0.0, 0.0),
@@ -1108,8 +1077,6 @@ fn test_distribute_region_conserves_total_over_multiple_slabs() {
     use sepika_core::ids::{FloorRegionId, NodeId};
 
     let mut model = Model::default();
-    // 6000×5000 の床領域（節点 0-1-2-3）。中央の小梁位置（節点 4-5）で 2 枚の床板
-    // （0: y=0..2500, 1: y=2500..5000）へ細分されている。
     for (i, c) in [
         [0.0, 0.0, 0.0],
         [6000.0, 0.0, 0.0],

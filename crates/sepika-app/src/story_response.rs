@@ -160,7 +160,6 @@ mod tests {
     /// 記録後に削除された階は「(削除済み階)」になる。
     #[test]
     fn test_story_display_names() {
-        // モデル側は StoryId(1),StoryId(0) の順（記録時と並びが入れ替わっている想定）。
         let model_stories = vec![
             (StoryId(1), "2F".to_string()),
             (StoryId(0), "1F".to_string()),
@@ -188,7 +187,6 @@ mod tests {
         ];
         assert_eq!(story_absmax(&series, 3), vec![3.0, 2.0, 0.9]);
         assert_eq!(story_absmax(&[], 2), vec![0.0, 0.0], "系列なしはゼロ埋め");
-        // フレームの要素数が n_story と異なっても panic せず短い方まで集計する。
         assert_eq!(story_absmax(&[vec![1.0]], 3), vec![1.0, 0.0, 0.0]);
     }
 
@@ -200,14 +198,12 @@ mod tests {
     #[test]
     fn test_story_axis_label() {
         let names = vec!["1F".to_string(), "2F".to_string(), "RF".to_string()];
-        // 整数グリッドのみラベル（0 は地盤面 GL、k は story_names[k-1]）。
         assert_eq!(story_axis_label(&names, 0.0), "GL");
         assert_eq!(story_axis_label(&names, 1.0), "1F");
         assert_eq!(story_axis_label(&names, 2.0), "2F");
         assert_eq!(story_axis_label(&names, 3.0), "RF");
         assert_eq!(story_axis_label(&names, 4.0), "");
         assert_eq!(story_axis_label(&names, -1.0), "");
-        // 非整数（ズーム時の補助グリッド）は空文字。
         assert_eq!(story_axis_label(&names, 0.5), "");
     }
 
@@ -228,12 +224,10 @@ mod tests {
 
     #[test]
     fn test_hover_story_index() {
-        // 層量: y∈[i, i+1) が層 i。
         assert_eq!(hover_story_index(0.4, 3, true), 0);
         assert_eq!(hover_story_index(1.9, 3, true), 1);
         assert_eq!(hover_story_index(-1.0, 3, true), 0, "範囲外は最寄りへ");
         assert_eq!(hover_story_index(10.0, 3, true), 2, "範囲外は最寄りへ");
-        // 階量: y=k の最寄りが層 k-1。
         assert_eq!(hover_story_index(1.0, 3, false), 0);
         assert_eq!(hover_story_index(2.2, 3, false), 1);
         assert_eq!(hover_story_index(0.0, 3, false), 0, "範囲外は最寄りへ");

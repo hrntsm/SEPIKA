@@ -466,16 +466,11 @@ mod tests {
                 node(2, 6000.0, 0.0, 0.0),
                 node(3, 6000.0, 0.0, 4000.0),
             ],
-            elements: vec![
-                line(0, 0, 1, 0), // 柱
-                line(1, 0, 2, 1), // 下梁 SRC
-                line(2, 1, 3, 1), // 上梁 SRC
-            ],
+            elements: vec![line(0, 0, 1, 0), line(1, 0, 2, 1), line(2, 1, 3, 1)],
             sections: vec![col_sec, beam_sec],
             materials,
             ..Default::default()
         };
-        // 柱の強軸たわみ方向 ey が X（梁方向）を向く。
         model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
 
         let adj = NodeAdjacency::build(&model);
@@ -495,7 +490,6 @@ mod tests {
             "SRC 梁付き方向は端軸力の Mu_i+Mu_j で確定: {sum:?}"
         );
         assert!(sum.1.is_some(), "梁無し方向は柱ヒンジで Some: {sum:?}");
-        // 両方向とも柱 Mu 和になるため同値（正方形柱）。
         assert!(
             (sum.0.unwrap() - sum.1.unwrap()).abs() / sum.0.unwrap() < 1e-9,
             "sum={sum:?}"

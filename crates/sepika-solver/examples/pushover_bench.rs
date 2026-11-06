@@ -37,22 +37,18 @@ mod common;
 fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
     let grid = common::FrameGrid::new(nx, ny, nz);
     let (span, height) = (grid.span, grid.height);
-    // 基部以外の節点は階へ帰属させる（剛床・地震用重量の集計対象）。
     let nodes = grid.build_nodes(|node, iz| {
         if iz > 0 {
             node.story = Some(StoryId((iz - 1) as u32));
         }
     });
 
-    // 大梁は長期荷重を載荷する対象として ID を控える。
     let mut elements = Vec::new();
     let mut beam_ids_for_load = Vec::new();
     grid.push_frame_members(&mut elements, SectionId(0), SectionId(1), |id| {
         beam_ids_for_load.push(id)
     });
 
-    // 長期荷重ケース（固定荷重）: 全大梁に等分布荷重 w=10 N/mm（鉛直下向き）。
-    // プッシュオーバーの長期荷重初期載荷（apply_long_term）に使う。
     let member: Vec<MemberLoad> = beam_ids_for_load
         .iter()
         .map(|&elem| {
@@ -87,7 +83,6 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
         },
     ];
 
-    // 階設定: 各階に剛床（隅節点をマスター、残りをスレーブ）と地震用重量を持たせる。
     // 地震用重量は大梁の長期荷重合計（w×スパン長×本数）相当の概算値。
     let beams_per_story = nx * (ny + 1) + ny * (nx + 1);
     let seismic_weight = 10.0 * span * beams_per_story as f64;
@@ -155,10 +150,10 @@ fn run_case(control: PushoverControl) -> (f64, PushoverResult) {
         &dofmap,
         &reducer,
         SeismicDir::X,
-        50, // max_steps
+        50,
         target,
         control,
-        true, // 長期荷重の初期載荷
+        true,
         DuctilityMethod::default(),
     )
     .expect("pushover should converge");

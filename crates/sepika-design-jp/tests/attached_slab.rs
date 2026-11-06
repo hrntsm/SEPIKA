@@ -138,9 +138,6 @@ fn test_beam_has_attached_slab_survives_beam_subdivided_region() {
     use sepika_core::model::{DistributionMethod, FloorRegion};
 
     let mut model = t_shape_model(vec![]);
-    // 6000×2500 の床領域（節点 0-1-2-3）を、中央の小梁（節点 4-5）で 2 枚の床板へ
-    // 細分する。床領域の外周を走る大梁（節点 0→1）の両端は、どちらの床板の境界にも
-    // 同時には含まれない。
     model.nodes.push(node(4, [6000.0, 1250.0, 3000.0]));
     model.nodes.push(node(5, [0.0, 1250.0, 3000.0]));
     let plate = SlabPlate {

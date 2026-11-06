@@ -42,11 +42,9 @@ fn snapshot_menegotto_pinto_loop() {
 
 #[test]
 fn snapshot_concrete_loop() {
-    // コンクリート: 引張ひび割れ〜圧縮降伏の履歴
     let mut mat = Concrete::new(30.0, 2.0);
     let e0 = 2.0 * 30.0 / 0.002;
     let eps_cr = 2.0 / e0;
-    // 引張ひび割れ → 圧縮ピーク → 圧縮軟化 → 引張再載荷
     let hist = vec![
         0.0,
         eps_cr * 0.5,

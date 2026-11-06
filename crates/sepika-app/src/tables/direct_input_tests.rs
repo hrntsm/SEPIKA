@@ -915,7 +915,6 @@ fn issue546_real_model_switch_discards_material_inputs_only() {
             old.materials.push(old.materials[0].clone());
             old.materials.last_mut().unwrap().id = MaterialId(old.materials.len() as u32 - 1);
             assert!(app.load_model(old));
-            // Keep a rejected old-revision draft as well as the active current cell.
             begin_cell_edit(&ctx, &mut app, Young, "abc");
             lose_focus(&ctx, &mut app);
             let original = super::materials::material_cell_id(MaterialId(0), Young, 0);
@@ -1026,7 +1025,6 @@ fn issue546_real_unchanged_blur_tracks_undo_redo_and_other_edits() {
             "current model value must be displayed"
         );
     }
-    // An unchanged revisit of a rejected draft must still retain that draft.
     edit_cell(&ctx, &mut app, Young, "abc");
     let id = super::materials::material_cell_id(
         MaterialId(0),

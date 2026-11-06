@@ -561,7 +561,6 @@ mod tests {
         let c8 = check_ratio_color(0.8);
         assert_ne!(c0, c4);
         assert_ne!(c4, c8);
-        // 検定比が大きいほど濃い（緑成分が減る）方向へ変化する
         assert!(c0.g() > c4.g());
         assert!(c4.g() > c8.g());
     }

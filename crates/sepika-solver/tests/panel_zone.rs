@@ -139,10 +139,7 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
         ..Default::default()
     };
 
-    let elements = vec![
-        member(0, 0, 1, 0, rigid),     // 梁（水平材）: i 端が接合部
-        member(1, 2, 0, 1, col_rigid), // 柱（鉛直材）: j 端が接合部
-    ];
+    let elements = vec![member(0, 0, 1, 0, rigid), member(1, 2, 0, 1, col_rigid)];
 
     let mut model = Model {
         nodes: vec![
@@ -197,7 +194,6 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
             kind: Default::default(),
             id: LoadCaseId(1),
             name: "P".into(),
-            // 梁先端に鉛直下向き荷重（接合部に曲げを与える）
             nodal: vec![NodalLoad::manual(
                 NodeId(1),
                 [0.0, 0.0, -50_000.0, 0.0, 0.0, 0.0],
@@ -601,7 +597,6 @@ fn panel_757_public_solver_whole_rotation_and_simultaneous_loading_preserve_resp
 fn test_panel_adds_exactly_two_dofs() {
     let base_model = l_frame(false);
     let base_map = DofMap::build(&base_model);
-    // 節点 0・1 は面内 3 成分（Ux・Uz・Ry）のみ自由、節点 2 は固定。
     assert_eq!(base_map.n_active(), 6);
     for ni in 0..base_model.nodes.len() {
         assert!(
@@ -665,13 +660,11 @@ fn test_panel_shear_angle_and_dof_equilibrium_match_closed_form() {
     let gy = dofmap.panel_dof(0, 1).expect("γY") as usize;
     let gamma = [u[gx], u[gy]];
 
-    // X-Z 面の載荷では全体 Y 軸まわりのせん断変形 γY が生じる。
     assert!(
         gamma[1].abs() > 1e-12,
         "パネルがせん断変形しているはず: γ={gamma:?}"
     );
 
-    // パネル要素へ解を与えて内力（＝せん断モーメント）を取り出す。
     use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
     let panel_data = model
         .elements
@@ -701,11 +694,9 @@ fn test_panel_shear_angle_and_dof_equilibrium_match_closed_form() {
     let gx = dofmap.panel_dof(0, 0).expect("γX") as usize;
     let gy = dofmap.panel_dof(0, 1).expect("γY") as usize;
 
-    // パネル自由度に外力は加わらない。
     assert_eq!(f[gx], 0.0);
     assert_eq!(f[gy], 0.0);
 
-    // 残差の尺度は系全体の内力スケールで正規化する。
     let scale = ku.iter().fold(0.0_f64, |m, v| m.max(v.abs())).max(1.0);
     for (label, g) in [("γX", gx), ("γY", gy)] {
         let residual = (ku[g] - f[g]).abs() / scale;
@@ -737,7 +728,6 @@ fn test_panel_stiffness_effects() {
     let plain = sepika_solver::statics::linear::linear_static_once(&l_frame(false), LoadCaseId(1))
         .expect("接合部無視モデルの解析");
 
-    // 荷重点（節点 1）の鉛直変位（下向き荷重なので負）。
     let d_panel = with_panel.disp[1][2].abs();
     let d_rigid = rigid_joint.disp[1][2].abs();
     let d_plain = plain.disp[1][2].abs();

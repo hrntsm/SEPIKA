@@ -126,10 +126,6 @@ fn rounded_cft_calculates_allowable_and_all_qd_methods() {
     }
 }
 
-// ------------------------------------------------------------------
-// CFT 矩形: 閉形式
-// ------------------------------------------------------------------
-
 #[test]
 fn test_cft_rect_cn_cm_closed_form() {
     // (xr, cN/(cb·cd·fc), cM/(cb·cd²·fc))。値は三角形応力分布の積分から
@@ -173,10 +169,6 @@ fn test_cft_rect_matches_numeric_integration() {
     }
 }
 
-// ------------------------------------------------------------------
-// CFT 円形
-// ------------------------------------------------------------------
-
 #[test]
 fn test_cft_circle_cn_cm_small_and_asymptotic() {
     let dc = 400.0;
@@ -189,10 +181,6 @@ fn test_cft_circle_cn_cm_small_and_asymptotic() {
     let ca_fc = std::f64::consts::PI * dc * dc / 4.0 * fc;
     assert!((cn - ca_fc).abs() / ca_fc < 1e-3, "cn={cn}, ca_fc={ca_fc}");
 }
-
-// ------------------------------------------------------------------
-// CFT 柱: DesignCheck 経由
-// ------------------------------------------------------------------
 
 #[test]
 fn test_cft_box_n0_ma_equals_sm0() {
@@ -335,7 +323,6 @@ fn test_cft_pipe_biaxial_smoke() {
     assert!(r.ratio().is_finite() && r.ratio() >= 0.0);
     assert!(r.basis.contains("円形"));
 
-    // components に AxialBending・Shear が入ることを確認する。
     assert_eq!(r.components.len(), 2);
     assert!(r
         .components
@@ -360,7 +347,6 @@ fn test_cft_box_lightweight_compression_matches_normal() {
     let ctx = ctx_column(LoadTerm::Long);
     let design = CftDesign;
 
-    // 圧縮容量を大きく超える軸力を与え、ratio_axial = N/(cNc+sNc) を比較する。
     let forces = MemberForcesAt {
         n: -50_000_000.0,
         ..zero_forces()
@@ -422,10 +408,6 @@ fn test_cft_shape_mismatch_skip() {
     }
 }
 
-// ------------------------------------------------------------------
-// 地震時短期の設計用せん断力割増: CFT 柱
-// ------------------------------------------------------------------
-
 /// CFT 柱の設計用せん断力を QD2 = |QL| + n・|Q−QL| に置き換えると
 /// （QL=0 のとき）せん断検定比が n 倍になることを確認する（method=Qd2）。
 #[test]
@@ -460,7 +442,7 @@ fn test_cft_box_seismic_qd2_scales_shear_ratio_by_n() {
         kind: crate::MemberKind::Column,
         steel_material: Some(make_material_no_fc("SN400B")),
         seismic_qd: Some(SeismicQd {
-            long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])], // QL=0
+            long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
             n_factor,
             n_mechanism: 1.0,
             q_simple: None,
@@ -496,7 +478,6 @@ fn test_cft_box_seismic_qd1_governs_when_smaller() {
     let s_aw = 2.0 * thick * (height - 2.0 * thick);
     let s_qa = s_aw * s_fs;
 
-    // 解析せん断を大きくして QD2 = n・Q を QD1 より大きくする。
     let q_test = s_qa * 0.6;
     let forces = MemberForcesAt {
         qy: q_test,
@@ -512,7 +493,7 @@ fn test_cft_box_seismic_qd1_governs_when_smaller() {
         steel_material: Some(make_material_no_fc("SN400B")),
         length,
         seismic_qd: Some(SeismicQd {
-            long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])], // QL=0
+            long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
             n_factor,
             n_mechanism: 1.0,
             q_simple: None,
@@ -568,7 +549,7 @@ fn square_long_case2_qd1_min_use_independent_moments_and_ignore_analysis_concret
         method: crate::QdMethod::Qd1,
     });
     // 独立断面fixtureのMu=12313672.630184587 NmmからQD1=8209.115086789725 N。
-    // QD2=8750 N。旧線形式のQD1=9197.721675236742 NではminはQD2だった。
+    // QD2=8750 Nなので、この入力ではQD1が小さい。
     let s_qa = 1269.0 * steel_fs(235.0, LoadTerm::Short);
     for (method, expected_q) in [
         (crate::QdMethod::Qd1, 8209.115086789725),
@@ -879,7 +860,6 @@ fn rounded_cft_qd1_min_use_calculated_moment_on_the_same_axis() {
     let s_aw = 2.0 * thick * (height - 2.0 * thick);
     let s_qa = s_aw * s_fs;
 
-    // 解析せん断を大きくして QD2 = n・Q を QD1 より大きくする。
     let q_test = s_qa * 0.6;
     let forces = MemberForcesAt {
         qy: q_test,
@@ -895,7 +875,7 @@ fn rounded_cft_qd1_min_use_calculated_moment_on_the_same_axis() {
         steel_material: Some(make_material_no_fc("SN400B")),
         length,
         seismic_qd: Some(SeismicQd {
-            long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])], // QL=0
+            long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
             n_factor,
             n_mechanism: 1.0,
             q_simple: None,

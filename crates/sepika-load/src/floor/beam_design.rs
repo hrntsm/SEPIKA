@@ -1205,7 +1205,6 @@ mod tests {
 
     #[test]
     fn split_slab_edges_compose_onto_full_beam() {
-        // 左を途中節点で 2 枚に割り、右は全長 1 辺。小梁は 4–5 の全長。
         let mut model = square_model_with_shared_beam();
         model.nodes.push(Node {
             id: NodeId(6),
@@ -1259,10 +1258,8 @@ mod tests {
                 MemberLoadKind::Distributed { a, b, w1, w2 } => (w1 + w2) / 2.0 * (b - a),
             })
             .sum();
-        // 左を 2 枚に割ると共有する水平辺へ 45° 分配の一部が逃げるため、
-        // 小梁上の合計は未分割より小さくなりうる。欠落していたのは「節点対不一致で
-        // 左側が 0 になる」ことなので、左右それぞれの半区間に十分な荷重があり、
-        // 右側だけの約半分（15000 N）を十分上回ることを見る。
+        // 左側の分割境界にも荷重が伝わるため、未分割時の総量とは一致しない。
+        // 片側だけの半区間荷重15000 Nを下回らないことを下限とする。
         let half = 2000.0_f64;
         let load_on = |s0: f64, s1: f64| -> f64 {
             entry
@@ -1370,7 +1367,6 @@ mod tests {
     #[test]
     fn span_attaches_to_nearest_beam_only() {
         let mut model = square_model_with_shared_beam();
-        // 共有辺 4–5 に平行で 5 mm ずれた別小梁（近接）。荷重は近い方だけへ。
         model.nodes.push(Node {
             id: NodeId(6),
             coord: [2005.0, 0.0, 0.0],
@@ -1429,7 +1425,6 @@ mod tests {
                     .sum::<f64>()
             })
             .unwrap_or(0.0);
-        // 境界は x=2000 なので 4–5 が近い。J2 には載らない（または無視できる量）。
         assert!(t1 > 10000.0, "近い小梁 t1={t1}");
         assert!(t2 < 1.0, "遠い小梁へ二重計上 t2={t2}");
     }

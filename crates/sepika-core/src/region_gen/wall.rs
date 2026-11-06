@@ -509,7 +509,6 @@ mod tests {
                 ));
             }
         }
-        // 柱（各 ix 列を iz 方向につなぐ）。
         for ix in 0..=n_bay {
             for iz in 0..n_story {
                 model
@@ -518,7 +517,6 @@ mod tests {
                 *next_id += 1;
             }
         }
-        // 梁（各 iz レベルを ix 方向につなぐ）。
         for iz in 0..=n_story {
             for ix in 0..n_bay {
                 model
@@ -608,7 +606,7 @@ mod tests {
     #[test]
     fn test_canonical_direction_is_order_independent_near_seam() {
         let p = [0.0, 0.0];
-        let q = [-1000.0, 0.2]; // 見出し角 ~179.99°
+        let q = [-1000.0, 0.2];
         let d1 = canonical_direction(p, q).expect("方向が求まる");
         let d2 = canonical_direction(q, p).expect("方向が求まる");
         assert!((d1[0] - d2[0]).abs() < 1e-9 && (d1[1] - d2[1]).abs() < 1e-9);
@@ -632,7 +630,6 @@ mod tests {
                 n_story: 1,
             },
         );
-        // 境界節点 (4000,0,3000) から構面に垂直（Y方向）へ張り出す梁。
         let extra_node = model.nodes.len() as u32;
         model.nodes.push(node(extra_node, 4000.0, 2000.0, 3000.0));
         model.elements.push(beam(next_id, 3, extra_node));
@@ -718,7 +715,6 @@ mod tests {
         model.nodes.push(node(1, 1000.0, 1000.0, 3000.0));
         model.elements.push(beam(0, 0, 1));
 
-        // 孤立した柱（この構面上で他のどの部材とも接続しない）。4 節点・3 部材。
         for (k, z) in [200.0, 4700.0, 8700.0, 12700.0].into_iter().enumerate() {
             model.nodes.push(node(2 + k as u32, 13800.0, 7400.0, z));
         }

@@ -21,7 +21,6 @@ fn make_model(n_cases: usize) -> Model {
     let load_cases: Vec<LoadCase> = (0..n_cases)
         .map(|i| {
             let mut values = [0.0; 6];
-            // ケースごとに方向・大きさを変える（x/y/z の集中荷重）
             values[i % 3] = 100.0 * (i as f64 + 1.0);
             LoadCase {
                 origin: Default::default(),

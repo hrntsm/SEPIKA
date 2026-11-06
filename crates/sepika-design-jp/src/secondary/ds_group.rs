@@ -305,27 +305,22 @@ mod tests {
     #[test]
     fn test_member_group_cases() {
         for (members, expected) in [
-            // γA=0.6, γC=0.1 → A
             (
                 vec![(0u8, 60.0), (1u8, 30.0), (2u8, 10.0)],
                 Some(GroupType::A),
             ),
-            // γA=0.4 < 0.5, γC=0.1 < 0.5 → B
             (
                 vec![(0u8, 40.0), (1u8, 50.0), (2u8, 10.0)],
                 Some(GroupType::B),
             ),
-            // γA=0.6 だが γC=0.3 > 0.2 → B
             (
                 vec![(0u8, 60.0), (2u8, 30.0), (1u8, 10.0)],
                 Some(GroupType::B),
             ),
-            // γC=0.5 → C
             (
                 vec![(0u8, 30.0), (2u8, 50.0), (1u8, 20.0)],
                 Some(GroupType::C),
             ),
-            // 種別 D を含む → D
             (vec![(0u8, 90.0), (3u8, 10.0)], Some(GroupType::D)),
             (vec![], None),
             (vec![(0u8, 0.0), (1u8, 0.0)], None),
@@ -338,19 +333,12 @@ mod tests {
     #[test]
     fn test_rc_column_type_cases() {
         for (h0_over_d, sigma0_over_fc, pt_percent, tau_over_fc, brittle, expected) in [
-            // 全項目が FA の境界値ちょうど → FA
             (2.5, 0.35, 0.8, 0.1, false, MemberRank::FA),
-            // τu/Fc だけ FA を超える → FB
             (2.5, 0.35, 0.8, 0.11, false, MemberRank::FB),
-            // h0/D だけ FA 未満 → FB
             (2.4, 0.35, 0.8, 0.1, false, MemberRank::FB),
-            // h0/D=1.5 だが σ0/Fc≦0.55 かつ τu/Fc≦0.15 → FC
             (1.5, 0.5, 1.5, 0.14, false, MemberRank::FC),
-            // τu/Fc が FC 限界超え → FD
             (3.0, 0.3, 0.5, 0.16, false, MemberRank::FD),
-            // 軸力比が FC 限界超え → FD
             (3.0, 0.6, 0.5, 0.05, false, MemberRank::FD),
-            // 脆性破壊は無条件で FD
             (3.0, 0.1, 0.5, 0.05, true, MemberRank::FD),
         ] {
             assert_eq!(
@@ -385,7 +373,6 @@ mod tests {
             (0.125, true, false, MemberRank::FB),
             (0.15, true, false, MemberRank::FC),
             (0.16, true, false, MemberRank::FD),
-            // せん断頭打ち到達時は τu に関わらず WD
             (0.20, false, true, MemberRank::FD),
         ] {
             assert_eq!(rc_wall_type(tau_over_fc, wall_structure, brittle), expected);
@@ -487,7 +474,6 @@ mod tests {
         assert_eq!(steel_brace_type(30.0, 235.0), MemberRank::FA);
         assert_eq!(steel_brace_type(50.0, 235.0), MemberRank::FB);
         assert_eq!(steel_brace_type(100.0, 235.0), MemberRank::FC);
-        // λ ≧ 1980/√F は BB
         assert_eq!(steel_brace_type(130.0, 235.0), MemberRank::FB);
     }
 
@@ -496,33 +482,26 @@ mod tests {
     #[test]
     fn test_ds_rc_table_values() {
         for (wall_group, beta_u, cb_group, expected) in [
-            // βu=0: 純ラーメン行 0.3/0.35/0.4/0.45
             (GroupType::A, 0.0, GroupType::A, 0.30),
             (GroupType::A, 0.0, GroupType::B, 0.35),
             (GroupType::A, 0.0, GroupType::C, 0.40),
             (GroupType::A, 0.0, GroupType::D, 0.45),
-            // 壁群A 低βu、境界 βu=0.3 は Low
             (GroupType::A, 0.2, GroupType::A, 0.30),
             (GroupType::A, 0.2, GroupType::D, 0.45),
             (GroupType::A, 0.3, GroupType::A, 0.30),
             (GroupType::A, 0.31, GroupType::A, 0.35),
-            // 壁群A 中βu、境界 βu=0.7 は Mid
             (GroupType::A, 0.7, GroupType::A, 0.35),
             (GroupType::A, 0.71, GroupType::A, 0.40),
-            // 壁群A 高βu
             (GroupType::A, 0.8, GroupType::A, 0.40),
             (GroupType::A, 0.8, GroupType::C, 0.45),
             (GroupType::A, 0.8, GroupType::D, 0.55),
-            // 壁群B 全帯
             (GroupType::B, 0.2, GroupType::A, 0.35),
             (GroupType::B, 0.5, GroupType::B, 0.40),
             (GroupType::B, 0.8, GroupType::C, 0.50),
-            // 壁群C 低／中βu、高βu
             (GroupType::C, 0.2, GroupType::A, 0.35),
             (GroupType::C, 0.5, GroupType::B, 0.45),
             (GroupType::C, 0.8, GroupType::A, 0.50),
             (GroupType::C, 0.8, GroupType::D, 0.55),
-            // 壁群D 低βu、高βu は全て 0.55、中βu
             (GroupType::D, 0.2, GroupType::A, 0.40),
             (GroupType::D, 0.8, GroupType::A, 0.55),
             (GroupType::D, 0.8, GroupType::B, 0.55),
@@ -543,15 +522,12 @@ mod tests {
     #[test]
     fn test_ds_steel_table_values() {
         for (brace_group, beta_u, cb_group, expected) in [
-            // βu=0 は 0.25/0.30/0.35/0.40
             (GroupType::A, 0.0, GroupType::A, 0.25),
             (GroupType::A, 0.0, GroupType::B, 0.30),
             (GroupType::A, 0.0, GroupType::C, 0.35),
             (GroupType::A, 0.0, GroupType::D, 0.40),
-            // 筋かい群A は βu によらず同表
             (GroupType::A, 0.9, GroupType::A, 0.25),
             (GroupType::A, 0.9, GroupType::D, 0.40),
-            // 筋かい群B 低／中／高βu
             (GroupType::B, 0.0, GroupType::A, 0.25),
             (GroupType::B, 0.0, GroupType::D, 0.40),
             (GroupType::B, 0.2, GroupType::A, 0.25),
@@ -559,7 +535,6 @@ mod tests {
             (GroupType::B, 0.5, GroupType::D, 0.45),
             (GroupType::B, 0.8, GroupType::A, 0.35),
             (GroupType::B, 0.8, GroupType::D, 0.50),
-            // 筋かい群C、境界 βu=0.5 は 0.35 行、0.51 は 0.4 行
             (GroupType::C, 0.2, GroupType::A, 0.30),
             (GroupType::C, 0.4, GroupType::A, 0.35),
             (GroupType::C, 0.5, GroupType::A, 0.35),
@@ -568,7 +543,6 @@ mod tests {
             (GroupType::C, 0.6, GroupType::C, 0.45),
             (GroupType::C, 0.6, GroupType::D, 0.50),
             (GroupType::C, 0.8, GroupType::D, 0.50),
-            // 筋かい群D は βu によらず 0.40/0.40/0.45/0.50
             (GroupType::D, 0.2, GroupType::C, 0.45),
         ] {
             assert!(

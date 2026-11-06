@@ -783,29 +783,23 @@ mod tests {
         assert_eq!(polys.len(), 1);
         let poly = &polys[0];
         assert_eq!(poly.len(), 4);
-        // 材軸上の点（val=0）を含む
         assert!(poly.iter().any(|&(_, v)| v == 0.0));
-        // 片側符号のみ（すべて非負）
         assert!(poly.iter().all(|&(_, v)| v >= 0.0));
     }
 
     /// 符号反転区間は、ゼロ交差で2つの片側符号のみの三角形に分割される。
     #[test]
     fn diagram_fill_polygons_sign_change_splits_at_zero_crossing() {
-        // v0=1, v1=-1 → 中点 xi=0.5 でゼロ交差
         let samples = [(0.0, 1.0), (1.0, -1.0)];
         let polys = diagram_fill_polygons(&samples, 1);
         assert_eq!(polys.len(), 2);
 
-        // 1つ目は正側のみ、2つ目は負側のみ
         assert!(polys[0].iter().all(|&(_, v)| v >= 0.0));
         assert!(polys[1].iter().all(|&(_, v)| v <= 0.0));
 
-        // どちらも材軸上の点（val=0）を含む
         assert!(polys[0].iter().any(|&(_, v)| v == 0.0));
         assert!(polys[1].iter().any(|&(_, v)| v == 0.0));
 
-        // ゼロ交差位置 xi=0.5 がどちらのポリゴンにも現れる
         let xc_in_first = polys[0]
             .iter()
             .any(|&(xi, v)| v == 0.0 && (xi - 0.5).abs() < 1e-9);
@@ -819,14 +813,12 @@ mod tests {
     /// 複数区間・複数符号反転を含む折れ線でまとめて確認する。
     #[test]
     fn diagram_fill_polygons_multi_segment_each_poly_single_sign() {
-        // 両端 hogging（負）・中央 sagging（正）のような M 図の典型形状
         let samples = [(0.0, -2.0), (0.5, 1.0), (1.0, -2.0)];
         let polys = diagram_fill_polygons(&samples, 4);
         assert!(!polys.is_empty());
         for poly in &polys {
             let has_pos = poly.iter().any(|&(_, v)| v > 1e-12);
             let has_neg = poly.iter().any(|&(_, v)| v < -1e-12);
-            // 同一ポリゴン内に正と負が同時に現れてはいけない（片側符号のみ）
             assert!(!(has_pos && has_neg), "poly has mixed sign: {:?}", poly);
         }
     }
@@ -870,13 +862,12 @@ mod tests {
             );
         }
         // ξ=0.25 では理論値 +wL²/96 に対し、直線補間なら −wL²/48（符号が逆）。
-        // 曲率が復元され符号が正しいことを直線補間と対比して確認する。
         let at_quarter = curve
             .iter()
             .find(|(xi, _)| (xi - 0.25).abs() < 1e-9)
             .expect("ξ=0.25 のサンプルがあるはず")
             .1;
-        let straight = 0.5 * (m(0.0) + m(0.5)); // ξ=0..0.5 を直線で結んだ値
+        let straight = 0.5 * (m(0.0) + m(0.5));
         assert!((at_quarter - w * l * l / 96.0).abs() < 1e-6 * w * l * l);
         assert!(at_quarter > 0.0 && straight < 0.0, "直線補間と符号が同じ");
     }
@@ -938,7 +929,6 @@ mod tests {
                 .unwrap_or_else(|| panic!("xi={xi} のサンプルが残っていない"));
             assert!((hit.1 - m).abs() < 1e-9, "xi={xi} val={}", hit.1);
         }
-        // xi は昇順
         assert!(curve.windows(2).all(|w| w[0].0 <= w[1].0));
     }
 
@@ -1003,7 +993,6 @@ mod tests {
         let elem = ElementData {
             id: ElemId(0),
             kind: ElementKind::Wall,
-            // 先頭 2 節点が上辺になる並び。
             nodes: [NodeId(2), NodeId(3), NodeId(0), NodeId(1)]
                 .into_iter()
                 .collect(),
@@ -1028,7 +1017,6 @@ mod tests {
                 && (axis.top_center[2] - 2700.0).abs() < 1e-6
         );
         assert!((axis.model_height - 2700.0).abs() < 1e-6);
-        // 先頭 2 節点（上辺）を結ぶ経路とは z が大きく異なる。
         let old_axis = vec3::midpoint(coords3[2], coords3[3]);
         assert!((axis.bottom_center[2] - old_axis[2]).abs() > 100.0);
     }

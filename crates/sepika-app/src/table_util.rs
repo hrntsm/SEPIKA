@@ -380,11 +380,8 @@ mod tests {
         // φ16 丸鋼（0.3217 cm⁴）・50×6 平鋼の弱軸（6.25 cm⁴）。
         assert_eq!(fmt_section_prop(0.3217), "0.322");
         assert_eq!(fmt_section_prop(6.25), "6.25");
-        // 中間（H 形のせん断有効断面積など）。
         assert_eq!(fmt_section_prop(51.84), "51.8");
-        // 大梁の断面二次モーメント（22965 cm⁴）は小数を出さない。
         assert_eq!(fmt_section_prop(22964.87), "22965");
-        // 負値・ゼロでも破綻しない。
         assert_eq!(fmt_section_prop(0.0), "0.000");
         assert_eq!(fmt_section_prop(-0.5), "-0.500");
     }
@@ -412,7 +409,6 @@ mod tests {
                 w >= text_width(ui, "00000") + cell_padding(ui) * 2.0,
                 "ID 列幅 {w} が 5 桁分に足りない"
             );
-            // 見出し "ID" は 5 桁より狭いので、幅はトークン側で決まる
             assert!(w > text_width(ui, "ID") + cell_padding(ui));
         });
     }

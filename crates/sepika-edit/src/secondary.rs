@@ -1386,7 +1386,6 @@ mod tests {
     #[test]
     fn 片持ち間柱は自由端が解決できなくても支持端が親領域にあれば配置できる() {
         let mut model = wall_model();
-        // 構面を一意に決められないよう、鉛直材を 1 本だけ残す。
         model.elements.retain(|e| e.id != ElemId(1));
         let mut undo = crate::UndoStack::new();
         let applied = undo.run(

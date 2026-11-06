@@ -373,8 +373,6 @@ mod tests {
             .expect("壁エレメント");
         assert_eq!(elem.nodes.len(), 4);
         assert_eq!(index.plate_of(elem.id), Some(crate::ids::WallPlateId(0)));
-        // 既存の壁消費者（自重算定等）が無改修で動くよう、合成 `WallAttr` を積む
-        // （モジュール doc「wall_attrs の合成」参照）。
         assert_eq!(expanded.wall_attrs.len(), 1);
         assert_eq!(expanded.wall_attrs[0].elem, elem.id);
         let attr = &expanded.wall_attrs[0];
@@ -398,11 +396,8 @@ mod tests {
     #[test]
     fn test_becomes_element_agrees_with_generated_elements() {
         let mut m = base_model();
-        // 4 節点・断面あり（要素になる）。
         push_quad(&mut m, quad_plate(0, Some(SectionId(0))));
-        // 4 節点だが断面なし（要素にならない）。
         push_quad(&mut m, quad_plate(1, None));
-        // 壁領域を覆わない（境界の一部しか共有しない）壁版。
         let partial = quad_plate(2, Some(SectionId(0)));
         m.add_enclosed_wall_plate_from_nodes(&[NodeId(0), NodeId(1), NodeId(2)], partial);
         m.wall_regions.push(WallRegion {
@@ -426,7 +421,6 @@ mod tests {
                 plate.id.0
             );
         }
-        // 3 枚のうち要素になるのは 1 枚だけ（テスト自体が退化していないことの確認）。
         assert_eq!(generated.len(), 1);
     }
 
@@ -523,8 +517,6 @@ mod tests {
             loads: vec![],
             slit: Default::default(),
         });
-        // 取り付く壁版はどの壁領域からも参照されない（wall_plate_ids に入らない）ため、
-        // この壁版自体を走査しても generated は増えない。
         let (expanded, _index, report) = expand_wall_elements(&m);
         assert_eq!(report.generated, 0);
         assert!(expanded.elements.is_empty());

@@ -172,7 +172,6 @@ fn crack_reference_input_edits_undo_redo_and_save_never_reauthenticate_old_resul
             serde_json::to_value(&app.core.model).unwrap(),
             serde_json::to_value(&before).unwrap()
         );
-        // 同じ生成入力へUndoした結果を使う場合も、再認証は入力・計算契約の完全一致に限る。
         if let Some(results) = app.current_design_results() {
             crack_reference::assert_reference(
                 results

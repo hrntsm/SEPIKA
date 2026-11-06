@@ -358,7 +358,6 @@ mod tests {
 
     #[test]
     fn test_beam_moment_light_reinforcement_tension_governs() {
-        // 軽配筋（1段筋）: MA_t が支配するはず。
         let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
         let props = crate::rc::section_props::axis_props_from_shape(
             &shape,
@@ -379,7 +378,6 @@ mod tests {
 
     #[test]
     fn test_beam_moment_heavy_reinforcement_compression_governs() {
-        // 重配筋（400×600・D25・上下各8本2段）: MA_c が MA_t を下回り支配するはず。
         let shape = rc_beam_shape(400.0, 600.0, 4, 25.0, 2, 40.0, 10.0, 100.0, 2);
         let props = crate::rc::section_props::axis_props_from_shape(
             &shape,
@@ -398,7 +396,6 @@ mod tests {
 
     #[test]
     fn test_beam_mid_with_slab_uses_ma_t_only() {
-        // 重配筋で MA_c < MA_t のとき、中央+スラブは MA_t のみ → 検定比が下がる。
         let shape = rc_beam_shape(400.0, 600.0, 4, 25.0, 2, 40.0, 10.0, 100.0, 2);
         let sec = make_section(shape.clone());
         let mat = make_material(24.0, "SD345");
@@ -488,7 +485,6 @@ mod tests {
         assert!(!shear.detail.contains("MA_t="));
         assert!(shear.detail.contains("QA="));
         assert!(!bending.detail.contains("QA="));
-        // 断面諸元（at・d・j）は共通 detail 側にある。
         assert!(result.detail.contains("at="));
     }
 
@@ -522,7 +518,6 @@ mod tests {
 
     #[test]
     fn test_beam_check_provision_error_on_cover() {
-        // かぶり 20 mm → 構造規定エラー（中央で付記）。
         let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 20.0, 10.0, 100.0, 2);
         let sec = make_section(shape);
         let mat = make_material(24.0, "SD345");
@@ -554,7 +549,7 @@ mod tests {
         let mut ctx = ctx_beam(LoadTerm::Long);
         ctx.length = 6000.0;
         ctx.end_moments_z = Some((0.0, 0.0));
-        ctx.mid_moment_z = Some(10.0 * 6000.0_f64.powi(2) / 8.0); // w=10 N/mm
+        ctx.mid_moment_z = Some(10.0 * 6000.0_f64.powi(2) / 8.0);
         let forces = MemberForcesAt {
             pos: 0.5,
             n: 0.0,
@@ -576,7 +571,6 @@ mod tests {
 
     #[test]
     fn test_beam_mid_negative_with_slab_keeps_min_ma() {
-        // 中央+スラブでも負曲げ（mz≤0）は T 形略算せず min(MAt,MAc)。
         let shape = rc_beam_shape(400.0, 600.0, 4, 25.0, 2, 40.0, 10.0, 100.0, 2);
         let sec = make_section(shape.clone());
         let mat = make_material(24.0, "SD345");
@@ -641,7 +635,6 @@ mod tests {
         let result = design.check(&forces, &sec, &mat, &ctx).unwrap_checked();
         assert!(crate::full_detail(&result).contains("ld="));
         assert!(crate::full_detail(&result).contains("付着検定比"));
-        // 付着検定が実施される（bond=Some）場合は components に Bond が含まれる。
         assert!(result
             .components
             .iter()
@@ -710,7 +703,6 @@ mod tests {
 
     #[test]
     fn test_beam_check_bond_skipped_without_length_regression() {
-        // ctx.length が既定の 0.0 のままなら付着検定は省略され、曲げ・せん断比が変化しないこと。
         let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
         let sec = make_section(shape);
         let mat = make_material(24.0, "SD345");

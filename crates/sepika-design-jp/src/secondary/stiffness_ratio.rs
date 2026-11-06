@@ -162,7 +162,6 @@ mod tests {
         let base = StoryId(0);
         let s0 = StoryId(1);
         let mut nodes = Vec::new();
-        // 柱脚（z=0, 拘束）
         let feet = [[0.0, 0.0], [6000.0, 0.0], [3000.0, 0.0]];
         for (i, &[x, y]) in feet.iter().enumerate() {
             nodes.push(Node {
@@ -174,9 +173,8 @@ mod tests {
                 support_spring: None,
             });
         }
-        // 柱頭（z=3000, story=S0）。斜め柱の頭は x を 1500 ずらす。
         let heads = [[0.0, 0.0], [6000.0, 0.0], [4500.0, 0.0]];
-        let masses = [2.0, 1.0, 1.0]; // 重心を柱1側へ寄せる
+        let masses = [2.0, 1.0, 1.0];
         for (i, &[x, y]) in heads.iter().enumerate() {
             nodes.push(Node {
                 id: NodeId((i + 3) as u32),
@@ -420,9 +418,9 @@ mod tests {
     fn test_column_drift_uses_full_story_height_for_split_column() {
         let (model, top) = build_split_column_model();
         let mut disp = vec![[0.0; 6]; 3];
-        disp[0][0] = 0.0; // 下端 z=0
-        disp[1][0] = 6.0; // 中間 z=2000（セグメント δ=4 や 6 ではない）
-        disp[2][0] = 10.0; // 上端 z=4000
+        disp[0][0] = 0.0;
+        disp[1][0] = 6.0;
+        disp[2][0] = 10.0;
         let drifts = column_drifts(&model, &disp, 0, top).unwrap();
         assert_eq!(drifts.len(), 1);
         assert!(
@@ -438,8 +436,8 @@ mod tests {
         let (model, top) = build_split_column_model();
         let mut disp = vec![[0.0; 6]; 3];
         disp[0][0] = 0.0;
-        disp[1][0] = 100.0; // 中間: 床レベル外なので除外
-        disp[2][0] = 10.0; // 上端床
+        disp[1][0] = 100.0;
+        disp[2][0] = 10.0;
         let dg = cog_horizontal_disp(&model, &disp, 0, top).unwrap();
         assert!(
             (dg - 10.0).abs() < 1e-12,

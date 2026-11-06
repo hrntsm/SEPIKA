@@ -512,7 +512,6 @@ mod tests {
         let assembled = asm.assemble_into(&triplets);
         assert_dense_bit_eq(&reference, assembled, n);
 
-        // 座標は同一のまま値だけを変えて再組立て（複数回加算パターンを保つ）。
         let triplets2: Vec<Triplet> = triplets
             .iter()
             .map(|t| Triplet {
@@ -546,7 +545,6 @@ mod tests {
             },
         ];
         let mut asm = CscAssembler::new(n, &t1);
-        // 個数は同じ 2 件のまま座標が全て変わる。
         let t2 = vec![
             Triplet {
                 row: 0,
@@ -563,7 +561,6 @@ mod tests {
         let reference = assemble_csc(n, t2.clone());
         let assembled = asm.assemble_into(&t2);
         assert_dense_bit_eq(&reference, assembled, n);
-        // 作り直し後は新パターンで高速パスが復帰する。
         assert!(asm.pattern_matches(&t2));
         let t3: Vec<Triplet> = t2
             .iter()
@@ -619,7 +616,6 @@ mod tests {
                 },
             ],
         );
-        // 非ゼロ数は同じ 2 のまま座標が変わった接線剛性。
         let k2 = assemble_csc(
             n,
             vec![
@@ -640,7 +636,6 @@ mod tests {
         let reference = weighted_sum_csc(n, &[(2.0, &m), (0.5, &k2)]);
         let combined = cache.combine_into(&[(2.0, &m), (0.5, &k2)]);
         assert_dense_bit_eq(&reference, combined, n);
-        // 作り直し後は新パターンで高速パスが復帰する。
         assert!(cache.pattern_matches(&[(9.0, &m), (0.1, &k2)]));
         let reference2 = weighted_sum_csc(n, &[(9.0, &m), (0.1, &k2)]);
         let combined2 = cache.combine_into(&[(9.0, &m), (0.1, &k2)]);
@@ -682,7 +677,6 @@ mod tests {
         let combined = cache.combine_into(&[(2.0, &m), (0.05, &k)]);
         assert_dense_bit_eq(&reference, combined, n);
 
-        // 係数だけを変えて再計算（パターンは m・k とも不変）。
         let reference2 = weighted_sum_csc(n, &[(-1.5, &m), (7.0, &k)]);
         let combined2 = cache.combine_into(&[(-1.5, &m), (7.0, &k)]);
         assert_dense_bit_eq(&reference2, combined2, n);

@@ -111,9 +111,7 @@ mod tests {
             elements: vec![
                 elem(0, ElementKind::Beam, &[0, 1]),
                 elem(1, ElementKind::Beam, &[1, 2]),
-                // 壁は線材ではないため隣接に含めない。
                 elem(2, ElementKind::Wall, &[0, 1, 2, 3]),
-                // 1 節点しか持たない要素も含めない。
                 elem(3, ElementKind::Beam, &[3]),
             ],
             ..Default::default()

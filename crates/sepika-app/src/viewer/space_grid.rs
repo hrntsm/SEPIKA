@@ -278,7 +278,6 @@ mod tests {
         let mut model = frame_model(&spec).unwrap();
         let n_nodes = model.nodes.len();
         let n_elems = model.elements.len();
-        // 格子の外の点を 2 つ選ぶ（どちらも既存節点と重ならない座標）。
         let a = SnapPoint::Grid([20000.0, 0.0, 4000.0]);
         let b = SnapPoint::Grid([20000.0, 6000.0, 4000.0]);
         let (cmd, _) = beam_command(&model, a, b).unwrap();
@@ -287,7 +286,6 @@ mod tests {
         assert_eq!(model.elements.len(), n_elems + 1);
         assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-        // undo 1 回で節点ごと戻る。
         inverse.apply(&mut model);
         assert_eq!(model.nodes.len(), n_nodes);
         assert_eq!(model.elements.len(), n_elems);
@@ -334,7 +332,6 @@ mod tests {
     #[test]
     fn test_vertical_member_uses_x_reference() {
         let mut model = frame_model(&FrameSpec::default()).unwrap();
-        // 同じ平面位置で 2F・3F の格子点を結ぶ（＝柱）。
         let (cmd, id) = beam_command(
             &model,
             SnapPoint::Grid([20000.0, 0.0, 4000.0]),
@@ -347,7 +344,6 @@ mod tests {
             [1.0, 0.0, 0.0]
         );
 
-        // 水平材はこれまでどおりグローバル Z。
         let (cmd, id) = beam_command(
             &model,
             SnapPoint::Grid([20000.0, 0.0, 4000.0]),

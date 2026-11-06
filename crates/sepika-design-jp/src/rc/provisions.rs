@@ -313,9 +313,6 @@ mod tests {
 
     #[test]
     fn column_pw_uses_min_of_both_widths() {
-        // 帯筋 Aw=2·78.5、ピッチ 100 → pw(b)=Aw/(b·s)。
-        // b=800, d=400 → pw_d < pw_b。pw_d = 157/(400·100)=0.003925 ≥ 0.2%。
-        // ピッチを大きくして pw_d だけ 0.2% 未満にする。
         let info = sample_info(40.0, 250.0, 22.0, 4);
         let p = column_provisions_info(
             &info,

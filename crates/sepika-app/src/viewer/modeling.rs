@@ -1602,9 +1602,9 @@ mod tests {
                 depth_section_with_use(1, 400.0, FrameSectionUse::Column),
             ],
             elements: vec![
-                joint_member(0, 0, 1, 0), // X 方向の梁
-                joint_member(1, 0, 2, 0), // Y 方向の梁
-                joint_member(2, 0, 3, 1), // 柱（下向き）
+                joint_member(0, 0, 1, 0),
+                joint_member(1, 0, 2, 0),
+                joint_member(2, 0, 3, 1),
             ],
             ..Default::default()
         };
@@ -1728,10 +1728,10 @@ mod tests {
                 depth_section_with_use(1, 400.0, FrameSectionUse::Column),
             ],
             elements: vec![
-                joint_member(0, 1, 0, 0), // 左梁: j 端が接合部
-                joint_member(1, 0, 2, 0), // 右梁: i 端が接合部
-                joint_member(2, 3, 0, 1), // 下柱: j 端が接合部
-                joint_member(3, 0, 4, 1), // 上柱: i 端が接合部
+                joint_member(0, 1, 0, 0),
+                joint_member(1, 0, 2, 0),
+                joint_member(2, 3, 0, 1),
+                joint_member(3, 0, 4, 1),
             ],
             ..Default::default()
         }
@@ -1831,10 +1831,10 @@ mod tests {
             ],
             elements: vec![
                 wall.clone(),
-                edge(1, 0, 1), // 下辺
-                edge(2, 3, 2), // 上辺
-                edge(3, 0, 3), // 左の鉛直辺
-                edge(4, 1, 2), // 右の鉛直辺
+                edge(1, 0, 1),
+                edge(2, 3, 2),
+                edge(3, 0, 3),
+                edge(4, 1, 2),
             ],
             sections: vec![
                 {
@@ -1866,14 +1866,12 @@ mod tests {
     /// 壁は耐震壁成立で壁エレメント、板厚 120mm 未満（耐震壁不成立）で雑壁。
     #[test]
     fn test_wall_seismic_vs_misc() {
-        // 板厚 150mm・四周あり → 耐震壁成立 → 壁エレメント。
         let (model, wall) = wall_model(150.0);
         assert_eq!(
             classify(&wall, &model, ModelingAnalysis::Static),
             ModelClass::Wall
         );
 
-        // 板厚 100mm → 耐震壁不成立 → 雑壁。
         let (model, wall) = wall_model(100.0);
         assert_eq!(
             classify(&wall, &model, ModelingAnalysis::Static),
@@ -2065,7 +2063,6 @@ mod tests {
         let spring_beam = elem(ElementKind::Beam, ForceRegime::UniaxialBendingShear);
 
         for e in [&fiber, &ms, &spring_beam] {
-            // 静解析は全部材が弾性のため該当しない。
             let class = classify(e, &model, ModelingAnalysis::Static);
             assert!(!is_end_plastic_zone_model(e, class));
         }
@@ -2078,7 +2075,6 @@ mod tests {
             &ms,
             classify(&ms, &model, ModelingAnalysis::Incremental)
         ));
-        // 材端回転ばねの梁は「材端集中塑性」だが端部塑性化域モデルではない。
         assert!(!is_end_plastic_zone_model(
             &spring_beam,
             classify(&spring_beam, &model, ModelingAnalysis::Incremental)
@@ -2089,7 +2085,6 @@ mod tests {
     /// （`plastic_zone` 指定時はその値、未指定なら断面せいの 0.5 倍）。
     #[test]
     fn 塑性化域長は要素生成の既定と一致する() {
-        // 断面せい 600mm → 既定 Lp = 300mm。
         let shape = SectionShape::SteelH {
             root_r: Some(0.0),
             height: 600.0,
@@ -2105,11 +2100,9 @@ mod tests {
         e.section = Some(SectionId(0));
         assert!((plastic_zone_len(&e, &model, 3000.0) - 300.0).abs() < 1e-6);
 
-        // 指定値が優先される。
         e.plastic_zone = Some(600.0);
         assert!((plastic_zone_len(&e, &model, 3000.0) - 600.0).abs() < 1e-6);
 
-        // 可撓長の 45% を超える指定はクランプされる（要素生成と同じ規則）。
         e.plastic_zone = Some(3000.0);
         assert!((plastic_zone_len(&e, &model, 3000.0) - 1350.0).abs() < 1e-6);
     }
@@ -2131,7 +2124,6 @@ mod tests {
         assert!((s_j - (1.0 - 200.0 / 3000.0)).abs() < 1e-6);
         assert!((l_flex - 2400.0).abs() < 1e-9);
 
-        // 可撓長が残らない入力は剛域なし。
         e.rigid_zone = RigidZone {
             length_i: 2000.0,
             length_j: 1500.0,

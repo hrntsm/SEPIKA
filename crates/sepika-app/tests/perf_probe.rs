@@ -34,8 +34,8 @@ use sepika_element::frame::beam::{apply_auto_rigid_zones, RigidZoneRule};
 /// 節点格子: nx * ny 本の通り芯 x n_stories 階 (+ 基部レベル)。
 /// 柱・梁は RC 概算断面。各階各スパンにスラブ (一様 DL) を配置する。
 fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) -> Model {
-    let bay = 6000.0_f64; // mm
-    let story_h = 3500.0_f64; // mm
+    let bay = 6000.0_f64;
+    let story_h = 3500.0_f64;
 
     let mut model = Model {
         stories: (0..=n_stories)
@@ -149,7 +149,6 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
         elem_id += 1;
     };
 
-    // 柱: 全通り芯 x 各階
     for level in 1..=n_stories {
         for j in 0..ny {
             for i in 0..nx {
@@ -159,7 +158,6 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
             }
         }
     }
-    // 梁: 各階の X 通り・Y 通り
     for level in 1..=n_stories {
         for j in 0..ny {
             for i in 0..nx - 1 {
@@ -221,14 +219,10 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
 fn timed_generate_stories(app: &mut App) -> [std::time::Duration; 5] {
     app.core.scoped.last_error = None;
 
-    // --- stage 1: sync_gravity_load_cases_action (pub) ---
     let t0 = Instant::now();
     app.sync_gravity_load_cases_action();
     let d1 = t0.elapsed();
 
-    // --- inputs to stage 2, replicated verbatim from the private
-    // `gravity_cases_for_seismic_weight` / `density_self_weight_for_stories`
-    // (crates/sepika-app/src/app/mod.rs) using only public constants ---
     let gravity_lcs: Vec<LoadCaseId> = {
         let any_kind_set = app
             .core
@@ -283,7 +277,6 @@ fn timed_generate_stories(app: &mut App) -> [std::time::Duration; 5] {
         .iter()
         .any(|lc| lc.kind == LoadCaseKind::Dead && lc.name == DL_CASE_NAME);
 
-    // --- stage 2: sepika_load::story_gen::generate_stories_with_opts (pub) ---
     let t0 = Instant::now();
     let mass_method = sepika_core::model::MassMethod::default();
     let gen = sepika_load::story_gen::generate_stories_with_opts(
@@ -305,17 +298,10 @@ fn timed_generate_stories(app: &mut App) -> [std::time::Duration; 5] {
     let d3 = t0.elapsed();
     app.core.scoped.staleness.mark_edited();
 
-    // --- stage 4: apply_rigid_zones_for_analysis == apply_auto_rigid_zones (pub) ---
     let t0 = Instant::now();
     apply_auto_rigid_zones(&mut app.core.model, &RigidZoneRule::default());
     let d4 = t0.elapsed();
 
-    // --- stage 5 sub-breakdown (diagnostic only, redundant w/ stage 5 itself):
-    // replicate what sync_seismic_load_cases_action does internally --
-    // Analysis::prepare once, then build_seismic_load_case for X and Y --
-    // to see which part of stage 5 dominates. Uses the same public API
-    // (`sepika_solver::statics::analysis::{Analysis, SeismicCfg}`) on the exact same
-    // model state (post rigid-zone application, pre EX/EY sync). ---
     {
         use sepika_solver::statics::analysis::{Analysis, SeismicCfg, SeismicDir};
         let t0 = Instant::now();
@@ -347,7 +333,6 @@ fn timed_generate_stories(app: &mut App) -> [std::time::Duration; 5] {
         }
     }
 
-    // --- stage 5: sync_seismic_load_cases_action (pub) ---
     let t0 = Instant::now();
     app.sync_seismic_load_cases_action();
     let d5 = t0.elapsed();
@@ -375,11 +360,8 @@ fn run_case(label: &str, nx: usize, ny: usize, n_stories: usize, with_slabs: boo
     app.load_model(model);
     let t_load = t_load0.elapsed();
 
-    // 5-stage manual replay (fully instrumented).
     let stages = timed_generate_stories(&mut app);
 
-    // Whole-action cross-check on a fresh copy of the same model (so we can
-    // compare sum(stages) against the real `generate_stories_action` black box).
     let model2 = build_grid_model(nx, ny, n_stories, with_slabs);
     let mut app2 = App::default();
     app2.load_model(model2);
@@ -440,13 +422,11 @@ fn run_case(label: &str, nx: usize, ny: usize, n_stories: usize, with_slabs: boo
 #[test]
 #[ignore = "perf probe, not a correctness test -- run explicitly with --release --ignored"]
 fn perf_probe_generate_stories_action() {
-    // Grid width/depth (nx * ny columns) x story count, with and without slabs.
     run_case("A small     ", 5, 5, 5, true);
     run_case("B medium-w  ", 10, 10, 5, true);
     run_case("C medium-h  ", 10, 10, 10, true);
     run_case("D large     ", 10, 10, 20, true);
     run_case("E wide      ", 15, 15, 10, true);
     run_case("F wide+tall ", 15, 15, 20, true);
-    // No-slab variant at the largest size, to isolate the slab-processing cost.
     run_case("G large,noSlab", 10, 10, 20, false);
 }

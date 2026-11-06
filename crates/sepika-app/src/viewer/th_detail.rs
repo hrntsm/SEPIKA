@@ -970,8 +970,6 @@ mod tests {
         }
     }
 
-    // ── axial_relative_disp ────────────────────────────────────────────
-
     /// X 軸方向部材が両端とも X 方向へ同じだけ動けば相対変位ゼロ（剛体並進）。
     #[test]
     fn axial_relative_disp_rigid_translation_is_zero() {
@@ -1010,13 +1008,7 @@ mod tests {
         assert_eq!(axial_relative_disp(p, p, [0.0; 6], d), 0.0);
     }
 
-    // ── beam_end_rotations ─────────────────────────────────────────────
-
-    // 以下のテストは ref_vector=[0,1,0] を使う。この場合 `LocalFrame::from_nodes`
-    // は X 軸材（p_i→p_j=X 方向）に対し ey=[0,1,0]（グローバル Y）・ez=[0,0,1]
-    // （グローバル Z）となり、グローバル回転成分の添字とローカル軸が素直に対応する
-    // （rz(d[5]) が ez=Z 軸まわりの回転、y方向並進が ey=Y 成分）ため、期待値を
-    // 手計算しやすい。
+    // ref_vector=[0,1,0]のX軸材ではey=全体Y・ez=全体Zとなり、回転成分の手計算をそのまま比較できる。
 
     /// 剛体並進（弦回転も端部回転もゼロ）なら材端回転もゼロ。
     #[test]
@@ -1060,8 +1052,6 @@ mod tests {
         assert!((rz_j - 0.02).abs() < 1e-9);
     }
 
-    // ── loop_kind_of ───────────────────────────────────────────────────
-
     #[test]
     fn loop_kind_of_classifies_axial_and_flexural() {
         assert!(matches!(
@@ -1091,8 +1081,6 @@ mod tests {
             LoopKind::Unsupported
         ));
     }
-
-    // ── end_moments / flexural_points（高-1: i端モーメント符号規約） ──────
 
     /// テスト用の弾性梁要素（X 軸材、ref_vector=[0,1,0]。`beam_end_rotations` の
     /// テストと同じ設定で ey=グローバルY・ez=グローバルZ とし、期待値を
@@ -1156,7 +1144,7 @@ mod tests {
         for f in 0..loads.len() {
             let (pi, _pj) = flexural_points(&rec, 0, 0, 1, p_i, p_j, ref_vector, true, f)
                 .expect("各フレームに内力・変位の記録があるはず");
-            i_pts.push(pi); // [theta_i, m_i]
+            i_pts.push(pi);
         }
 
         for w in i_pts.windows(2) {
@@ -1173,8 +1161,6 @@ mod tests {
             );
         }
     }
-
-    // ── zero_length_local_frame / zero_length_relative_disp（中-2） ───────
 
     /// 免震支承の零長局所軸は局所 x=鉛直（全体 Z）。
     #[test]
@@ -1253,8 +1239,6 @@ mod tests {
         assert!((shear_y - 5.0).abs() < 1e-9, "shear_y={shear_y}");
         assert!((axial - 2.0).abs() < 1e-9, "axial={axial}");
     }
-
-    // ── default_axial_component（中-2） ────────────────────────────────
 
     #[test]
     fn default_axial_component_isolator_is_shear_horizontal_loop() {

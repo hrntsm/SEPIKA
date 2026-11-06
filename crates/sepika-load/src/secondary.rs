@@ -56,7 +56,7 @@ pub(crate) fn best_span_position(
     coord: [f64; 3],
     tol: f64,
 ) -> Option<(ElemId, f64)> {
-    let mut best: Option<(ElemId, f64, f64)> = None; // (elem, a, dist)
+    let mut best: Option<(ElemId, f64, f64)> = None;
     for c in candidates {
         let (a, b) = (c.a, c.b);
         let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -67,8 +67,7 @@ pub(crate) fn best_span_position(
         let ap = [coord[0] - a[0], coord[1] - a[1], coord[2] - a[2]];
         let t = (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2;
         let len = len2.sqrt();
-        // 端点そのもの（節点共有で解決すべき位置）は対象外。端点近傍 tol 以内は
-        // スパン内側へ丸める。
+        // 端点まで対象にすると、節点共有で解決する荷重を梁中間へ重複して割り当てる。
         let a_pos = (t * len).clamp(0.0, len);
         if a_pos <= tol || a_pos >= len - tol {
             continue;
@@ -187,7 +186,6 @@ pub(crate) fn beams_along_segment_with(
         return Vec::new();
     }
     let u = [d[0] / len, d[1] / len, d[2] / len];
-    // 線分の直線からの直交距離。
     let perp_dist = |q: [f64; 3]| -> f64 {
         let v = [q[0] - p0[0], q[1] - p0[1], q[2] - p0[2]];
         let t = v[0] * u[0] + v[1] * u[1] + v[2] * u[2];
@@ -201,16 +199,15 @@ pub(crate) fn beams_along_segment_with(
     let mut out = Vec::new();
     for c in candidates {
         if perp_dist(c.a) > tol || perp_dist(c.b) > tol {
-            continue; // 線分の直線上にない梁。
+            continue;
         }
         let (ta, tb) = (along(c.a), along(c.b));
         let (lo, hi) = (ta.min(tb), ta.max(tb));
         let s0 = lo.max(0.0);
         let s1 = hi.min(len);
         if s1 - s0 <= tol {
-            continue; // 重なっていない（端点で接するだけを含む）。
+            continue;
         }
-        // 梁の i 端からの距離へ写す（梁が線分と逆向きでも `seg` と同じ並びにする）。
         let elem_len = (tb - ta).abs();
         let to_elem = |t: f64| -> f64 {
             if tb >= ta {
@@ -259,9 +256,7 @@ pub fn resolve_nodal_to_primary(
     tol: f64,
 ) -> (Vec<NodalLoad>, Vec<MemberLoad>) {
     let connected = node_connected_flags(model);
-    // 要素独立な梁候補（節点対応付け前の端点座標）を 1 回だけ構築し、荷重ごとの
-    // `beam_span_position` 呼び出し（= 全要素走査＋座標引き直し）を避ける
-    // （性能。候補列・探索ロジックは `beam_span_position` と共通のため挙動は不変）。
+    // 荷重ごとに候補を再構築すると、全要素走査と座標の引き直しが繰り返される。
     let candidates = beam_span_candidates(model);
     let mut out_nodal = Vec::new();
     let mut out_member = Vec::new();
@@ -283,7 +278,6 @@ pub fn resolve_nodal_to_primary(
             continue;
         };
         match best_span_position(&candidates, node.coord, tol) {
-            // 変換後も元の荷重の素性（名称・生成元）を引き継ぐ。
             Some((elem, a)) => out_member.push(MemberLoad {
                 elem,
                 dir: [f[0] / p, f[1] / p, f[2] / p],
@@ -370,7 +364,6 @@ mod tests {
             }
             _ => panic!("Point になるはず"),
         }
-        // 冪等: 変換済み nodal を再度通しても変化しない。
         let (again_nodal, again_member) =
             resolve_nodal_to_primary(&model, out_nodal.clone(), SPAN_TOL_MM);
         assert_eq!(again_nodal, out_nodal);
@@ -384,11 +377,7 @@ mod tests {
     fn test_beam_span_position_skips_dangling_element() {
         let model = Model {
             nodes: vec![node(0, 0.0, 0.0, 0.0), node(1, 6000.0, 0.0, 0.0)],
-            elements: vec![
-                // 存在しない節点(99)を参照するダングリング要素を先頭に置く。
-                beam(0, 99, 98),
-                beam(1, 0, 1),
-            ],
+            elements: vec![beam(0, 99, 98), beam(1, 0, 1)],
             ..Default::default()
         };
         let hit = beam_span_position(&model, [2000.0, 0.0, 0.0], SPAN_TOL_MM);
@@ -496,7 +485,7 @@ mod segment_tests {
     fn test_offset_beam_is_not_covered() {
         let mut m = model_with(&[0.0, 4000.0], &[(0, 1)]);
         for n in &mut m.nodes {
-            n.coord[1] = 1000.0; // 線分から 1m ずらす
+            n.coord[1] = 1000.0;
         }
         let cover = beams_along_segment(&m, [0.0, 0.0, 0.0], [4000.0, 0.0, 0.0], SPAN_TOL_MM);
         assert!(cover.is_empty());

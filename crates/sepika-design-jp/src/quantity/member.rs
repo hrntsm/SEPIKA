@@ -235,12 +235,10 @@ mod tests {
 
     #[test]
     fn test_joint_counts() {
-        // 梁: L<5m → 0.5、5m ≤ L <10m → 1.0、10m → 1.5
         assert!((beam_joint_count(4_000.0) - 0.5).abs() < 1e-12);
         assert!((beam_joint_count(5_000.0) - 1.0).abs() < 1e-12);
         assert!((beam_joint_count(9_999.0) - 1.0).abs() < 1e-12);
         assert!((beam_joint_count(10_000.0) - 1.5).abs() < 1e-12);
-        // 柱: H<7m → 1、7m ≤ H <14m → 2
         assert!((column_joint_count(3_500.0) - 1.0).abs() < 1e-12);
         assert!((column_joint_count(7_000.0) - 2.0).abs() < 1e-12);
     }
@@ -251,7 +249,6 @@ mod tests {
         assert!((stirrup_set_length(400.0, 800.0, 2) - (800.0 + 1_600.0)).abs() < 1e-12);
         // フープ一組 = nx×Dx + ny×Dy
         assert!((hoop_set_length(700.0, 700.0, 2, 2) - 2_800.0).abs() < 1e-12);
-        // 本数 = L/ピッチ
         assert!((shear_bar_count(3_000.0, 100.0) - 30.0).abs() < 1e-12);
         assert_eq!(shear_bar_count(3_000.0, 0.0), 0.0);
     }

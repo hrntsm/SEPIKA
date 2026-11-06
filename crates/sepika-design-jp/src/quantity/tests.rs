@@ -269,12 +269,7 @@ fn rc_portal_model() -> Model {
     let mut fg = line_elem(3, 0, 1, 0);
     fg.rigid_zone.face_i = Some(350.0);
     fg.rigid_zone.face_j = Some(350.0);
-    let elements = vec![
-        line_elem(0, 0, 2, 1), // 柱
-        line_elem(1, 1, 3, 1), // 柱
-        girder,                // 大梁
-        fg,                    // 基礎梁
-    ];
+    let elements = vec![line_elem(0, 0, 2, 1), line_elem(1, 1, 3, 1), girder, fg];
     Model {
         nodes,
         elements,
@@ -321,7 +316,6 @@ fn test_rc_portal_categories_concrete_and_rebar() {
     // 基礎梁の型枠: 側面 1 面＋底面 = (0.8+0.4)×5.3 = 6.36 m²
     assert!((fgs[0].formwork_m2 - 1.2 * 5.3).abs() < 1e-9);
 
-    // 合計（QuantityTotals）は明細の全フィールドの和と一致する。
     let totals = q.totals();
     let concrete_sum: f64 = q.items.iter().map(|i| i.concrete_m3).sum();
     let formwork_sum: f64 = q.items.iter().map(|i| i.formwork_m2).sum();
@@ -334,8 +328,6 @@ fn test_rc_portal_categories_concrete_and_rebar() {
     assert!((totals.steel_t - steel_sum).abs() < 1e-12);
     assert!((totals.rebar_joints - joints_sum).abs() < 1e-12);
 
-    // 部位別小計はカテゴリ明細の全フィールドの和と一致する
-    // （区分は MemberCategory の定義順で基礎梁・柱・大梁の 3 つ）。
     let by_cat = q.totals_by_category();
     assert_eq!(
         by_cat.iter().map(|(c, _)| *c).collect::<Vec<_>>(),
@@ -470,14 +462,12 @@ fn rc_primary_missing_frame_use_rejects_quantity_with_section_reason() {
 
 #[test]
 fn test_girder_formwork_slab_deduction() {
-    // 大梁の両側にスラブが取り付く場合、側面せいからスラブ厚を控除する。
     let mut model = rc_portal_model();
     model.slab_thickness = 150.0;
     let mut slab_sec =
         SectionShape::RcSlab { thickness: 150.0 }.to_section(SectionId(2), "S15".into());
     slab_sec.material = Some(MaterialId(0));
     model.sections.push(slab_sec);
-    // 大梁（節点 2-3）の両側（y=+5000 と y=−5000）に床板を配置する。
     model.nodes.push(node(4, 0.0, 5_000.0, 3_500.0));
     model.nodes.push(node(5, 6_000.0, 5_000.0, 3_500.0));
     model.nodes.push(node(6, 0.0, -5_000.0, 3_500.0));
@@ -509,7 +499,6 @@ fn test_girder_formwork_slab_deduction() {
 
 #[test]
 fn test_beam_by_ratio() {
-    // 柱に取り付かない水平梁は小梁として鉄筋比で概算する。
     let mut model = rc_portal_model();
     model.nodes.push(node(4, 2_000.0, 0.0, 3_500.0));
     model.nodes.push(node(5, 2_000.0, 3_000.0, 3_500.0));
@@ -545,13 +534,11 @@ fn test_steel_member_weight() {
         flange_thick: 13.0,
     };
     let a = shape.calc_area();
-    // 材料は断面が持つ。
     let mut sec = shape.to_section(SectionId(2), "H-400x200x8x13".to_string());
     sec.frame_use = Some(FrameSectionUse::Girder);
     sec.material = Some(MaterialId(2));
     model.sections.push(sec);
     model.materials.push(steel_material(2));
-    // 大梁を S 断面へ差し替え。
     model.elements[2].section = Some(SectionId(2));
 
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -578,7 +565,6 @@ fn test_brace_length_and_weight() {
         thick: 7.0,
     };
     let a = shape.calc_area();
-    // 材料は断面が持つ。
     let mut sec = shape.to_section(SectionId(2), "L-90x90x7".to_string());
     sec.material = Some(MaterialId(2));
     model.sections.push(sec);
@@ -642,7 +628,6 @@ fn test_slab_quantity() {
 #[test]
 fn test_wall_quantity_with_opening() {
     let mut model = rc_portal_model();
-    // 柱・梁で囲まれた 4 節点壁（節点 0-1-3-2）。
     let shape = SectionShape::RcWall {
         thickness: 200.0,
         pwh_ratio: Some(0.0025),
@@ -663,7 +648,7 @@ fn test_wall_quantity_with_opening() {
     model.elements.push(wall);
     model.wall_attrs.push(sepika_core::model::WallAttr {
         elem: ElemId(4),
-        opening_area: 2.0e6, // 2 m²
+        opening_area: 2.0e6,
         opening_weight: 0.0,
         slit: Default::default(),
         openings: vec![],
@@ -680,7 +665,6 @@ fn test_wall_quantity_with_opening() {
     let net = 5.3_f64 * 2.7 - 2.0;
     assert!((w.concrete_m3 - net * 0.2).abs() < 1e-6);
     assert!((w.formwork_m2 - net * 2.0).abs() < 1e-6);
-    // 壁筋: 横筋・縦筋の 2 件が計上される。
     assert_eq!(w.rebar.len(), 2);
     assert!(w.rebar_weight_t() > 0.0);
 }
@@ -700,8 +684,6 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     };
     let sec = shape.to_section(SectionId(2), "W20".to_string());
     model.sections.push(sec);
-    // 柱・梁で囲まれた4節点壁（節点 0-1-3-2）を壁版として構築する
-    // （`test_wall_quantity_with_opening` の直接 `ElementData` 構築と同じ幾何）。
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
         WallPlate {
@@ -724,7 +706,6 @@ fn test_wall_quantity_via_wall_plate_is_included() {
         wall_plate_ids: vec![WallPlateId(0)],
         posts: Vec::new(),
     });
-    // 入力モデル自体には壁の解析要素は一切ない（D5）。
     assert!(model.elements.iter().all(|e| e.kind != ElementKind::Wall));
 
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -755,7 +736,6 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     };
     let sec = shape.to_section(SectionId(2), "W15".to_string());
     model.sections.push(sec);
-    // 頂部の大梁（節点2-3）に載るパラペット（立ち上がり高さ1000mm、全長）。
     model.wall_plates.push(WallPlate {
         dl_support: None,
         self_weight_shares: Vec::new(),
@@ -784,8 +764,6 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
         .filter(|i| i.category == MemberCategory::MiscWall)
         .collect();
     assert_eq!(items.len(), 1, "取り付く壁版1件が雑壁として数量に入るはず");
-    // ラベルは壁版に割り当てた断面の符号（slab_quantity が SlabId を使うのと同じく、
-    // ループ位置ではなく壁版自身に紐づく安定した値を使う）。
     assert_eq!(items[0].label, "W15");
     let expected_m3 = 6_000.0 * 1_000.0 * 150.0 * 1e-9;
     assert!(
@@ -809,7 +787,6 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
 fn test_haunch_from_member_detail() {
     use sepika_core::model::{Haunch as CoreHaunch, MemberDetailAttr};
 
-    // 大梁（ElemId(2)）の i 端にハンチ: 長さ 1000、せい増分 200、幅増分 200。
     let mut model = rc_portal_model();
     model.member_detail_attrs.push(MemberDetailAttr {
         elem: ElemId(2),
@@ -838,7 +815,6 @@ fn test_haunch_from_member_detail() {
         ((1_000.0 - 800.0) / 2.0 * 1_000.0 * 2.0 + (600.0 - 400.0) / 2.0 * 1_000.0) * 1e-6;
     assert!((g.formwork_m2 - (base_m2 + haunch_m2)).abs() < 1e-9);
 
-    // 付帯情報を持たない基礎梁はハンチなし。
     let fg = q
         .items
         .iter()
@@ -846,7 +822,6 @@ fn test_haunch_from_member_detail() {
         .unwrap();
     assert!((fg.formwork_m2 - 1.2 * 5.3).abs() < 1e-9);
 
-    // 基礎梁（ElemId(3)）の両端にハンチ: 長さ 800、せい増分 300（幅増分なし）。
     let mut model = rc_portal_model();
     let haunch = CoreHaunch {
         length: 800.0,
@@ -1309,10 +1284,8 @@ fn test_new_rc_rebar_unset_yields_zero_without_panic() {
         "未入力の新型は鉄筋重量 0"
     );
     assert!(q.items.iter().all(|i| i.rebar_joints == 0.0));
-    // コンクリート・型枠は形状から算定される（未入力でも panic しない）。
     assert!(q.items.iter().any(|i| i.concrete_m3 > 0.0));
 
-    // 円形柱 count=0 も同様に 0。
     let mut model = rc_portal_model();
     model.sections[1] = with_rc_materials(
         SectionShape::RcColumnCircle {
@@ -2049,7 +2022,6 @@ fn beam_contact_sloped_beam_contact_is_direction_independent() {
                 assert!(result.unwrap_err().contains("傾斜梁"));
             } else {
                 let q = result.unwrap();
-                // 非接触区間の床は控除せず、既存の梁長sqrt(6000²+3000²)を保持する。
                 assert!((q.items[0].formwork_m2 - 10.062305898749054).abs() <= 1e-9);
             }
             model.elements[0].nodes.reverse();

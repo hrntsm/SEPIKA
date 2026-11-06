@@ -292,10 +292,6 @@ mod tests {
     use sepika_core::ids::ElemId;
     use sepika_core::model::SteelDesignAttr;
 
-    // -------------------------------------------------------------
-    // fb（横座屈考慮）
-    // -------------------------------------------------------------
-
     #[test]
     fn test_fb_lb_zero_equals_ft() {
         let f = 235.0;
@@ -310,7 +306,7 @@ mod tests {
         let i = 60.0;
         let h = 500.0;
         let af = 4000.0;
-        let lb = 20_000.0; // 十分大きい横座屈長さ
+        let lb = 20_000.0;
         let fb = steel_fb_h(f, LoadTerm::Long, lb, i, h, af, 1.0);
         let fb2 = 89_000.0 / (lb * h / af);
         assert!(
@@ -424,10 +420,6 @@ mod tests {
         assert!((fb_cap_short - 235.0).abs() < 1e-9);
     }
 
-    // -------------------------------------------------------------
-    // 横座屈修正係数 C
-    // -------------------------------------------------------------
-
     /// 複曲率（端部モーメント異符号＝反曲点あり）・等モーメント逆向き相当
     /// （M2/M1=+1）で C=1.75+1.05+0.3=3.1 → 上限 2.3 にクランプされる。
     #[test]
@@ -493,11 +485,11 @@ mod tests {
     #[test]
     fn test_c_factor_diff_sign_gt_same_sign_for_same_ratio() {
         let ctx_diff = DesignCtx {
-            end_moments_z: Some((100.0, -30.0)), // 異符号（複曲率扱い）
+            end_moments_z: Some((100.0, -30.0)),
             ..Default::default()
         };
         let ctx_same = DesignCtx {
-            end_moments_z: Some((100.0, 30.0)), // 同符号（単曲率扱い）
+            end_moments_z: Some((100.0, 30.0)),
             ..Default::default()
         };
         let c_diff = steel_lateral_buckling_c(&ctx_diff);
@@ -510,18 +502,13 @@ mod tests {
         );
     }
 
-    // -------------------------------------------------------------
-    // 横座屈修正係数 C の解決（steel_c_factor: 直接入力 > 部分区間なら1.0 >
-    // 自動算定）
-    // -------------------------------------------------------------
-
     /// c_direct（正値）があれば、自動算定結果や上限 2.3 を無視してその値を
     /// そのまま採用する（自動算定なら異符号端モーメントで C=2.3 になる状況
     /// でも、c_direct=1.5 が優先されること）。
     #[test]
     fn test_c_factor_direct_input_overrides_auto() {
         let ctx = DesignCtx {
-            end_moments_z: Some((100.0, -100.0)), // 自動算定なら C=2.3（上限）
+            end_moments_z: Some((100.0, -100.0)),
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
                 joint_flange_loss: 0.0,
@@ -535,11 +522,9 @@ mod tests {
             }),
             ..Default::default()
         };
-        // 自動算定結果（2.3）とは異なることも併せて確認する。
         let auto = steel_lateral_buckling_c(&ctx);
         assert!((auto - 2.3).abs() < 1e-9, "auto={auto}");
         assert_eq!(steel_c_factor(&ctx, false), 1.5);
-        // 部分区間（横補剛あり）でも直接入力が優先され C=1.0 に落ちないこと。
         assert_eq!(steel_c_factor(&ctx, true), 1.5);
     }
 
@@ -549,11 +534,10 @@ mod tests {
     #[test]
     fn test_c_factor_partial_lb_without_direct_is_1_0() {
         let ctx = DesignCtx {
-            end_moments_z: Some((100.0, -100.0)), // 自動算定なら C=2.3
+            end_moments_z: Some((100.0, -100.0)),
             ..Default::default()
         };
         assert_eq!(steel_c_factor(&ctx, true), 1.0);
-        // 部分区間でなければ自動算定（2.3）になること。
         let auto = steel_c_factor(&ctx, false);
         assert!((auto - 2.3).abs() < 1e-9, "auto={auto}");
     }
@@ -576,9 +560,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        // c_direct=0 は無視され、lb_is_partial=true なら安全側 1.0。
         assert_eq!(steel_c_factor(&ctx_zero, true), 1.0);
-        // lb_is_partial=false なら自動算定（end_moments_z=None → 1.0）。
         assert_eq!(steel_c_factor(&ctx_zero, false), 1.0);
 
         let ctx_neg = DesignCtx {
@@ -626,10 +608,6 @@ mod tests {
             fb_c23
         );
     }
-
-    // -------------------------------------------------------------
-    // 断面欠損（継手部・スカラップ）と横座屈長さ
-    // -------------------------------------------------------------
 
     /// βf=βw=αw=0 のとき、通常の H形強軸断面係数 Z=Iy/(H/2) に一致する
     /// （`Iy` は [`sepika_core::section_shape::SectionShape::SteelH`] と同一の
@@ -689,7 +667,6 @@ mod tests {
             z_scallop,
             z_no_scallop
         );
-        // is_end=false（スカラップ非適用）は αw の影響を受けない。
         let z_mid_with_alpha = steel_h_z_with_loss(h, b, tw, tf, 0.0, 0.0, 50.0, false);
         let z_mid_no_alpha = steel_h_z_with_loss(h, b, tw, tf, 0.0, 0.0, 0.0, false);
         assert!((z_mid_with_alpha - z_mid_no_alpha).abs() < 1e-9);
@@ -711,7 +688,6 @@ mod tests {
     /// resolve_lb: 直接入力がなく等間隔横補剛の本数があれば L/(n+1)。
     #[test]
     fn test_resolve_lb_brace_count_when_no_direct() {
-        // n=2 本の補剛で 3 等分 → 9000/3=3000。
         assert_eq!(resolve_lb(0.5, 9000.0, None, Some(2)), 3000.0);
         assert_eq!(resolve_lb(0.0, 9000.0, None, Some(2)), 3000.0);
     }

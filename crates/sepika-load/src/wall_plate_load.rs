@@ -505,8 +505,7 @@ fn accumulate_wall_and_secondary_with_basis(
     }
     let (nodal, member) = transfer.primary_loads(model);
     if resolve_to_primary {
-        // 重力ケースと同じ帰属にするため、要素が接続しない節点の反力を
-        // 主架構の梁中間集中荷重へ変換してから節点重量へ加算する。
+        // 梁中間への変換前に節点重量へ加算すると、重力ケースと荷重の所属が異なる。
         let loads: Vec<NodalLoad> = nodal
             .into_iter()
             .map(|(node, w)| NodalLoad::auto(node, [0.0, 0.0, -w, 0.0, 0.0, 0.0]))

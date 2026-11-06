@@ -1526,7 +1526,6 @@ mod tests {
         let i_end = markers.iter().find(|m| !m.end_j).unwrap();
         let j_end = markers.iter().find(|m| m.end_j).unwrap();
         assert!(matches!(i_end.level, HingeLevel::Crack));
-        // pos=0.5 は j端側（0.5 は「境界」で j端扱い）に含まれ、Ultimate が最高レベルとして残る。
         assert!(matches!(j_end.level, HingeLevel::Ultimate));
     }
 
@@ -1549,8 +1548,6 @@ mod tests {
         let markers = aggregate_hinges(&[]);
         assert!(markers.is_empty());
     }
-
-    // ── dominant_bend_axis_z ────────────────────────────────────────────
 
     fn step(mz_i: f32, mz_j: f32, my_i: f32, my_j: f32, n: f32) -> MemberStepState {
         MemberStepState {
@@ -1589,8 +1586,6 @@ mod tests {
         assert!(dominant_bend_axis_z(&s));
     }
 
-    // ── m_theta_series ──────────────────────────────────────────────────
-
     /// 2 点列の近似一致（レコードは f32 格納のため f64 リテラルとの完全一致は
     /// 期待できない。f32 の丸め幅を許容する）。
     fn assert_pts_near(actual: &[[f64; 2]], expected: &[[f64; 2]]) {
@@ -1611,7 +1606,6 @@ mod tests {
     #[test]
     fn m_theta_series_extracts_strong_axis_abs_values() {
         let records = vec![step(100.0, -50.0, 1.0, 1.0, 0.0)];
-        // rz_i, rz_j に値を入れたいので直接構築する。
         let mut records = records;
         records[0].rz_i = -0.01;
         records[0].rz_j = 0.02;
@@ -1660,8 +1654,6 @@ mod tests {
         assert!(j_pts.is_empty());
     }
 
-    // ── n_m_response_path ───────────────────────────────────────────────
-
     /// 強軸採用時、i端・j端のうち絶対値が大きい方の符号付き Mz を採用する。
     #[test]
     fn n_m_response_path_picks_larger_end_signed() {
@@ -1700,8 +1692,6 @@ mod tests {
         assert!(path_3d[1][2] > 0.0, "3D は引張正へ符号反転する");
     }
 
-    // ── n_my_mz_response_path_3d ────────────────────────────────────────
-
     /// 先頭に原点 [0,0,0] が前置され、各ステップは合成曲げの大きい方の端を採用する。
     /// N は member_history の圧縮正から引張正（曲面の規約）へ符号反転する。
     #[test]
@@ -1715,8 +1705,6 @@ mod tests {
         assert!((path[1][2] - (-1000.0)).abs() < 1e-9);
     }
 
-    // ── mn_beta_columns ─────────────────────────────────────────────────
-
     /// 弱軸(My)は β=0（j=0）・β=π（j=n_beta/2）を採用する。
     #[test]
     fn mn_beta_columns_weak_axis() {
@@ -1729,16 +1717,11 @@ mod tests {
         assert_eq!(mn_beta_columns(48, true), (12, 36));
     }
 
-    // ── extract_mn_meridian ─────────────────────────────────────────────
-
     /// 弱軸(My)は grid[i][j][1]を抽出し、N の符号を反転（引張正→圧縮正）する。
     #[test]
     fn extract_mn_meridian_weak_axis_flips_n_sign() {
         // grid[i][beta_col] = [N, My, Mz]（引張正の N 規約）。
-        let grid = vec![
-            vec![[1.0e6, 2.0e6, 0.0]],  // N=1e6(引張), My=2e6
-            vec![[-3.0e6, 4.0e6, 0.0]], // N=-3e6(圧縮), My=4e6
-        ];
+        let grid = vec![vec![[1.0e6, 2.0e6, 0.0]], vec![[-3.0e6, 4.0e6, 0.0]]];
         let pts = extract_mn_meridian(&grid, 0, false);
         assert_eq!(pts.len(), 2);
         // M[kN·m] = My/1e6, N[kN] = -N/1e3（圧縮正へ変換）。
@@ -1765,8 +1748,6 @@ mod tests {
         assert_eq!(pts.len(), 1);
     }
 
-    // ── pick_fiber_section ──────────────────────────────────────────────
-
     fn fiber_section(xi: f64) -> FiberSectionState {
         FiberSectionState { xi, fibers: vec![] }
     }
@@ -1787,8 +1768,6 @@ mod tests {
         assert!(pick_fiber_section(&[], false).is_none());
         assert!(pick_fiber_section(&[], true).is_none());
     }
-
-    // ── fiber_category ──────────────────────────────────────────────────
 
     fn fiber_sample(strain: f64, yield_ratio: f64, material: usize) -> FiberStateSample {
         FiberStateSample {
@@ -1818,8 +1797,6 @@ mod tests {
     fn fiber_category_compression_yield() {
         assert_eq!(fiber_category(&fiber_sample(-0.01, 1.2, 0)), 2);
     }
-
-    // --- 断面外形線（ファイバー塑性化マップへの重ね描き）関連のテスト ---
 
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::section_shape::SectionShape;
@@ -1919,7 +1896,6 @@ mod tests {
         let raw = plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber)
             .expect("鋼断面は配筋不要");
         assert!(!raw.is_empty());
-        // build_gauss_fibers と同じ 90°回転 (y,z)←(z,−y) を適用し要素座標系へ。
         let rotated: Vec<[f64; 2]> = raw.iter().map(|f| [f.z, -f.y]).collect();
 
         const EPS: f64 = 1e-6;
@@ -1985,8 +1961,7 @@ mod tests {
         assert!(!raw.is_empty());
         let rotated: Vec<[f64; 2]> = raw.iter().map(|f| [f.z, -f.y]).collect();
 
-        // メッシュ分割の格子中心座標のため、境界セル半分弱の余裕を見込む
-        // （目標寸法は最大寸法/40 = 200/40 = 5mm 程度）。
+        // 目標寸法は最大寸法/40=200/40=約5 mm。格子中心による離散化のため、断面外形線との厳密一致は求められない。
         const MARGIN: f64 = 6.0;
         for [y, z] in &rotated {
             assert!(
@@ -2003,15 +1978,12 @@ mod tests {
             );
         }
 
-        // ウェブ（面積の大部分）は z が負側に寄る配置のため、外形線の z 範囲も
-        // 原点対称ではなく負側へ偏っている（重心補正が効いている証拠）。
+        // 図心がウェブ側に寄るため、回転後のウェブはz正側に位置し、外形はz負側へ長く張り出す。
         assert!(
             (omax[1] + omin[1]) < -1.0,
             "非対称断面なのに外形線が z=0 対称のまま（重心補正が効いていない）: omin={omin:?}, omax={omax:?}"
         );
     }
-
-    // ── ヒンジ表示ビューのキャッシュキー ────────────────────────────────
 
     /// キャッシュキーのテスト用モデル（断面・材料を編集できる最小構成）。
     fn key_test_model() -> Model {

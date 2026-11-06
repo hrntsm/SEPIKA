@@ -267,7 +267,6 @@ mod tests {
             assert_eq!(concrete_unit_weight_kn_m3(100.0, class, Rc), 25.0);
             assert_eq!(concrete_unit_weight_kn_m3(150.0, class, Rc), 25.5);
         }
-        // 軽量コンクリート
         assert_eq!(concrete_unit_weight_kn_m3(24.0, Lightweight1, Rc), 20.0);
         assert_eq!(concrete_unit_weight_kn_m3(30.0, Lightweight1, Rc), 22.0);
         assert_eq!(concrete_unit_weight_kn_m3(30.0, Lightweight1, Src), 23.0);

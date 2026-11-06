@@ -85,7 +85,7 @@ mod tests {
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.5,
-            n: 200_000.0, // 引張
+            n: 200_000.0,
             qy: 0.0,
             qz: 0.0,
             my: 0.0,
@@ -107,13 +107,12 @@ mod tests {
 
     #[test]
     fn test_brace_compression_slender_fails() {
-        // 細長比が大きい（断面が小さく部材長が長い）圧縮ブレースは fc が下がり NG になる。
         let mut sec = rect_section(20.0, 20.0, "L-20x20x3");
         sec.thickness = Some(3.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.5,
-            n: -50_000.0, // 圧縮
+            n: -50_000.0,
             qy: 0.0,
             qz: 0.0,
             my: 0.0,
@@ -122,7 +121,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Brace,
-            length: 6000.0, // 非常に細長い
+            length: 6000.0,
             ..Default::default()
         };
         let result = SteelDesign
@@ -138,7 +137,6 @@ mod tests {
 
     #[test]
     fn test_brace_compression_stocky_passes() {
-        // 太く短いブレースは座屈の影響が小さく OK になりやすい。
         let mut sec = rect_section(300.0, 300.0, "BOX-300x300x16");
         sec.thickness = Some(16.0);
         let mat_v = mat("SN400");

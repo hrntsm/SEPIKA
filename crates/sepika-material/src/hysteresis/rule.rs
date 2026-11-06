@@ -242,27 +242,21 @@ mod tests {
     #[test]
     fn test_skeleton_monotonic_takeda() {
         let rule = takeda();
-        // 原点-ひび割れ線形
         let (m, k) = rule.skeleton(0.001);
         assert_relative_eq!(m, 20.0, epsilon = 1e-6);
         assert_relative_eq!(k, 20000.0, epsilon = 1e-3);
-        // ひび割れ点
         let (m, _) = rule.skeleton(0.002);
         assert_relative_eq!(m, 40.0, epsilon = 1e-6);
-        // 降伏点
         let (m, _) = rule.skeleton(0.01);
         assert_relative_eq!(m, 100.0, epsilon = 1e-6);
-        // 終局点
         let (m, _) = rule.skeleton(0.05);
         assert_relative_eq!(m, 120.0, epsilon = 1e-6);
-        // 負側対称
         let (m, _) = rule.skeleton(-0.01);
         assert_relative_eq!(m, -100.0, epsilon = 1e-6);
     }
 
     #[test]
     fn test_new_rules_skeleton_matches_takeda_trilinear() {
-        // 新規則のスケルトンは武田と同じトリリニア（骨格は履歴則に依存しない）。
         for rule in [retrograde(), standard(), max_point()] {
             let (m, _) = rule.skeleton(0.01);
             assert_relative_eq!(m, 100.0, epsilon = 1e-6);

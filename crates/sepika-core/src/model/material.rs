@@ -160,7 +160,6 @@ mod tests {
 
     #[test]
     fn test_steel_design_unit_weight_is_fixed_regardless_of_density() {
-        // 標準密度、非標準の正密度のいずれでも設計単位体積重量は 78.5 kN/m³ 固定。
         for density in [crate::units::STEEL_MASS_DENSITY_TON_MM3, 5.0e-9, 12.0e-9] {
             assert_relative_eq!(
                 steel(density).design_unit_weight_n_per_mm3(),
@@ -169,7 +168,6 @@ mod tests {
             );
         }
 
-        // 質量密度 0 の材料は自重 0（密度に依らず固定すると荷重が発生してしまうため）。
         assert_eq!(steel(0.0).design_unit_weight_n_per_mm3(), 0.0);
         assert_eq!(steel(-1.0e-9).design_unit_weight_n_per_mm3(), 0.0);
     }

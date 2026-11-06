@@ -132,8 +132,6 @@ pub(super) fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
 
 #[test]
 fn test_pushover_single_column_forms_hinge() {
-    // 降伏応力を低め、地震重量を降伏荷重をやや超える程度に設定し、
-    // 柱脚に曲げヒンジが形成されることを確認する。
     let model = single_column_model(235.0, 80_000.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -141,32 +139,26 @@ fn test_pushover_single_column_forms_hinge() {
     let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 20, 0.0)
         .expect("pushover should run end-to-end");
 
-    // パイプライン全体が収束ステップを生成していること。
     assert!(
         !result.capacity_curve.is_empty(),
         "capacity curve should have at least one converged step"
     );
-    // 荷重−変位曲線の頂部変位は単調に正（水平押し）であること。
     let last = result.capacity_curve.last().unwrap();
     assert!(
         last.roof_disp > 0.0,
         "roof displacement should be positive: {}",
         last.roof_disp
     );
-    // 降伏応力を与えた鋼材ファイバ柱で、柱脚に曲げヒンジが追跡されること
-    //（座標変換＋ファイバ降伏＋降伏追跡のエンドツーエンド検証）。
     assert!(
         !result.hinges.is_empty(),
         "at least one hinge should form in the column under lateral push"
     );
 
-    // steps は capacity_curve と同じ収束ステップ数だけ積まれること。
     assert_eq!(
         result.steps.len(),
         result.capacity_curve.len(),
         "steps should have one entry per capacity_curve point"
     );
-    // 各 step の story_drifts は層数（本モデルは1層）と一致すること。
     for s in &result.steps {
         assert_eq!(
             s.story_drifts.len(),
@@ -175,10 +167,6 @@ fn test_pushover_single_column_forms_hinge() {
         );
     }
 
-    // 終了理由が記録されること。
-    // 本モデルは目標無効（max_disp=0）の荷重制御のみのため、終了理由は
-    // 「目標到達以外の正常系」（λ 上限・スケジュール完了）または「非収束」の
-    // いずれかであり、少なくとも Unknown（未記録）ではないこと。
     assert_ne!(
         result.termination,
         crate::nonlinear::pushover::PushoverTermination::Unknown,
@@ -186,7 +174,6 @@ fn test_pushover_single_column_forms_hinge() {
         result.termination
     );
 
-    // 部材別終局応答（終局検定の設計用応力・部材別 Rp 反映用）が生成されること。
     assert_eq!(
         result.member_response.len(),
         model.elements.len(),
@@ -197,7 +184,6 @@ fn test_pushover_single_column_forms_hinge() {
         .iter()
         .find(|r| r.elem == model.elements[0].id)
         .expect("column member response");
-    // 水平押しで柱脚に曲げ・せん断・変形角が生じる（いずれも正）。
     assert!(
         col.m_strong > 0.0 && col.shear_strong > 0.0 && col.rp > 0.0,
         "column terminal response should be nonzero: Mz={}, Vy={}, Rp={}",
@@ -206,8 +192,7 @@ fn test_pushover_single_column_forms_hinge() {
         col.rp
     );
 
-    // base_shear/roof_disp は実在の力・変位であること: 最初の（弾性）ステップで
-    // 片持ち柱の弾性剛性 3EI/L³ ≈ 189.8 N/mm に一致する。
+    // 片持ち柱の独立期待剛性は3EI/L³≈189.8 N/mm。
     let first = result.capacity_curve.first().unwrap();
     assert!(first.roof_disp > 0.0 && first.base_shear > 0.0);
     let k = first.base_shear / first.roof_disp;
@@ -215,7 +200,6 @@ fn test_pushover_single_column_forms_hinge() {
         (150.0..=230.0).contains(&k),
         "first-step stiffness base_shear/roof_disp={k} should be ~3EI/L^3≈189.8"
     );
-    // Qu はピークベースシア（全点以上）であること。
     for c in &result.capacity_curve {
         assert!(
             result.qu >= c.base_shear - 1e-6,
@@ -265,9 +249,6 @@ fn public_pushover_keeps_transverse_gravity_in_final_physical_member_response() 
 
 #[test]
 fn test_pushover_load_control_endpoint_is_mesh_independent() {
-    // 荷重制御プッシュオーバーの終点（λ=1、base_shear=一定）の頂部変位は、
-    // 物理的には荷重増分ステップ数に依存しない。
-    //
     // 本モデルは弾性降伏変位 ≈69mm（Qy=My/L≈13.05kN、k=3EI/L³≈189.8N/mm）で、
     // λ=1 の base_shear=16000N は降伏後（塑性域）にあり複数反復ステップを含む。
     let run = |steps: usize| -> (f64, f64) {
@@ -282,16 +263,13 @@ fn test_pushover_load_control_endpoint_is_mesh_independent() {
     let (roof_20, base_20) = run(20);
     let (roof_80, base_80) = run(80);
 
-    // 前提: いずれも同一の終局荷重（λ=1）まで到達している。
     assert!((base_20 - 16_000.0).abs() < 1.0, "base_20={base_20}");
     assert!((base_80 - 16_000.0).abs() < 1.0, "base_80={base_80}");
-    // 前提: 終点は弾性降伏変位を超えており、塑性域＝複数反復ステップを含む。
     assert!(
         roof_20 > 69.0,
         "endpoint must be inelastic: roof_20={roof_20}"
     );
 
-    // 本題: 荷重ステップ数によらず終点頂部変位が一致すること（相対差 < 0.1%）。
     let rel_diff = (roof_20 - roof_80).abs() / roof_80;
     assert!(
         rel_diff < 1e-3,
@@ -351,7 +329,6 @@ fn test_pushover_stops_when_concrete_strength_unset() {
         .expect_err("Fc 未設定の RC 部材があれば解析を停止すべき");
     assert!(err.contains("Fc"), "{}", err);
 
-    // Fc を設定すれば解析は通る（チェックが恒常的に解析を妨げないこと）。
     model.materials[0].fc = Some(24.0);
     assert!(
         pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 10, 0.0,).is_ok(),
@@ -361,7 +338,6 @@ fn test_pushover_stops_when_concrete_strength_unset() {
 
 #[test]
 fn test_pushover_requires_seismic_weight() {
-    // 地震重量未定義ではエラーを返す（入力検証）。
     let model = single_column_model(235.0, 0.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -532,13 +508,9 @@ fn test_pushover_support_spring_affects_k_and_f_int() {
          got {actual_ratio} (roof_baseline={roof_baseline}, roof_spring={roof_spring})"
     );
 
-    // restraint で固定した自由度に support_spring を与えても無視されること
-    // （固定支持を優先する仕様。dof.rs の判定に影響しないことの確認を兼ねる）。
     let mut model_fixed_with_spring = spring_column_model(kx, None, weight);
     model_fixed_with_spring.nodes[0].support_spring = Some([1.0e9, 0.0, 0.0, 0.0, 0.0, 0.0]);
     let dofmap_fixed = DofMap::build(&model_fixed_with_spring);
-    // 節点0 は全固定のため、support_spring を与えても活性自由度は増えない
-    // （固定支持を優先しばね値を無視する。孤立節点の扱いは dof.rs 側の現状仕様）。
     assert_eq!(
         dofmap_fixed.n_active(),
         1,
@@ -548,8 +520,6 @@ fn test_pushover_support_spring_affects_k_and_f_int() {
 
 #[test]
 fn test_pushover_computes_member_ductility() {
-    // 変位制御で十分に押し込み、ファイバ柱の部材塑性率 μ が算定されること
-    // （降伏方式では降伏曲率が基点、降伏後 μ≥1 が報告される）。
     let model = single_column_model(235.0, 80_000.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -559,13 +529,12 @@ fn test_pushover_computes_member_ductility() {
         &reducer,
         SeismicDir::X,
         20,
-        PushoverTarget::from_max_disp(300.0), // 目標変位300mm（大変形で確実に降伏させる）
+        PushoverTarget::from_max_disp(300.0),
         PushoverControl::default(),
         true,
         DuctilityMethod::FirstYield,
     )
     .expect("pushover should run");
-    // 降伏したヒンジで塑性率 μ≥1 が算定される（危険断面の曲率塑性率）。
     let max_mu = result
         .hinges
         .iter()
@@ -579,9 +548,6 @@ fn test_pushover_computes_member_ductility() {
 
 #[test]
 fn test_pushover_ductility_method_selection_changes_reference() {
-    // 塑性率方式の選択が塑性率基点を変えることを確認する。降伏方式(3)は降伏時に
-    // 基点到達し μ≥1、基点歪み方式(1)は本押込量では基点ひずみ（鉄骨 0.01）未到達で
-    // μ=0（未評価）となる。
     let run = |method: DuctilityMethod| -> f64 {
         let model = single_column_model(235.0, 80_000.0);
         let dofmap = DofMap::build(&model);
@@ -604,7 +570,6 @@ fn test_pushover_ductility_method_selection_changes_reference() {
             .map(|h| h.ductility)
             .fold(0.0_f64, f64::max)
     };
-    // 3 方式とも降伏後は基点到達し μ≥1 の妥当な塑性率を算定する（機構の検証）。
     for method in [
         DuctilityMethod::FirstYield,
         DuctilityMethod::ReferenceStrain,
@@ -775,7 +740,6 @@ fn hinge(elem: u32, pos: f64, level: HingeLevel) -> HingeEvent {
 #[test]
 fn test_determine_mechanism_partial_when_insufficient() {
     let model = two_story_model();
-    // ひび割れのみ → 降伏ヒンジ0個 < r+1 → Partial
     assert!(matches!(
         determine_mechanism(&[hinge(0, 0.0, HingeLevel::Crack)], &model, SeismicDir::X),
         MechanismType::Partial
@@ -787,7 +751,6 @@ fn test_determine_mechanism_partial_when_insufficient() {
 #[test]
 fn test_determine_mechanism_single_yield_establishes_mechanism() {
     let model = two_story_model();
-    // elem0 端 j (pos=1.0) → node1 = 1F 単独階 → 層崩壊
     match determine_mechanism(&[hinge(0, 1.0, HingeLevel::Yield)], &model, SeismicDir::X) {
         MechanismType::StoryCollapse { layer } => assert_eq!(layer, 0),
         other => panic!(
@@ -987,9 +950,6 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
 #[test]
 fn test_determine_mechanism_story_collapse() {
     let model = two_story_model();
-    // ヒンジの帰属層は**その部材が属する層**（材端節点のうち高い側の所属階を
-    // 上端とする層）で決まる。elem0 は 1FL→2FL の柱なので、その両端のヒンジは
-    // ともに最下層（layer 0）に集中する → 層崩壊。
     let hinges = vec![
         hinge(0, 0.0, HingeLevel::Yield),
         hinge(0, 1.0, HingeLevel::Yield),
@@ -1028,7 +988,6 @@ fn test_foundation_girder_hinge_does_not_veto_story_collapse() {
         ..template
     });
 
-    // 最下層の柱（elem0）の両端が降伏し、あわせて基礎梁も降伏している。
     let hinges = vec![
         hinge(0, 0.0, HingeLevel::Yield),
         hinge(0, 1.0, HingeLevel::Yield),
@@ -1046,10 +1005,9 @@ fn test_foundation_girder_hinge_does_not_veto_story_collapse() {
 #[test]
 fn test_determine_mechanism_overall() {
     let model = two_story_model();
-    // 1F(story0)と2F(story1)に分散して降伏 → 全体崩壊
     let hinges = vec![
-        hinge(0, 1.0, HingeLevel::Yield), // node1 = 1F
-        hinge(1, 1.0, HingeLevel::Yield), // node2 = 2F
+        hinge(0, 1.0, HingeLevel::Yield),
+        hinge(1, 1.0, HingeLevel::Yield),
     ];
     assert!(matches!(
         determine_mechanism(&hinges, &model, SeismicDir::X),
@@ -1207,9 +1165,6 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
     }
 }
 
-// 1層1スパン剛床ラーメン（門形フレーム）で崩壊荷重が手計算値（4・My/H_col）
-// に一致し、柱両端に4つの塑性ヒンジが形成され全体機構となることを検証する。
-//
 // 手計算: Z=I/(depth/2)=166,660, My=σ_y·Z, Qu=4My/H=52,220 N（柱両端降伏・2柱）。
 // seismic_weight は崩壊荷重を上回る値に設定し、真に降伏到達させる。
 #[test]
@@ -1222,7 +1177,6 @@ fn test_portal_frame_collapse_load() {
     let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 80, 0.0)
         .expect("pushover should run end-to-end");
 
-    // 柱両端の降伏ヒンジが実際に形成されていること（運動学的機構: r+1=4）。
     let yielded_hinges = result
         .hinges
         .iter()
@@ -1235,7 +1189,6 @@ fn test_portal_frame_collapse_load() {
         result.hinges.len()
     );
 
-    // 崩壊機構が成立していること（Partial でない）。
     assert!(
         !matches!(result.mechanism, MechanismType::Partial),
         "mechanism should not be Partial for a collapsed portal frame"
@@ -1243,9 +1196,7 @@ fn test_portal_frame_collapse_load() {
 
     assert!(result.qu > 0.0, "qu should be positive, got {}", result.qu);
 
-    // 4番目の降伏ヒンジ（柱両端×2本＝4個で運動学的機構成立）発生ステップの
-    // ベースシアを「観測崩壊荷重」とする（qu=max(base_shear) はまだ弾性最大反力で
-    // plateau を正確に捉えられないため、降伏到達点で照合する）。
+    // 最大ベースシアだけでは降伏到達点を捉えられないため、4番目の柱端降伏ステップで照合する。
     let mut yield_steps: Vec<u32> = result
         .hinges
         .iter()
@@ -1345,7 +1296,6 @@ fn test_compute_shear_yield_qy_static_formulas_and_guards() {
         "qy={qy} should equal as*0.7*sqrt(fc)={expected}"
     );
 
-    // 有効せん断断面積が 0 の断面は判定対象外（Qy=∞扱い）。
     assert_eq!(
         compute_shear_yield_qy(
             0.0,
@@ -1361,7 +1311,6 @@ fn test_compute_shear_yield_qy_static_formulas_and_guards() {
         ),
         f64::INFINITY
     );
-    // 材料未設定でも∞扱い。
     assert_eq!(
         compute_shear_yield_qy(
             1000.0,
@@ -1514,9 +1463,7 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         steel_z
     );
 
-    // 材料に fy が設定されていても（主筋 σy のフォールバック等）、形状から
-    // 精算できる SRC は累加式を使う（fy 先行だと剛性等価換算面積 × fy/√3 の
-    // 桁違いに大きい鋼系式へ流れ、せん断降伏が検出されなくなる危険側）。
+    // fyを先に採用するとSRCの等価面積へ鋼材式を適用し、せん断降伏を検出し損ねるため累加式を使う。
     let mut mat_with_fy = mat.clone();
     mat_with_fy.fy = Some(235.0);
     let qy_with_fy = compute_shear_yield_qy(
@@ -1850,7 +1797,6 @@ fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
         (qy_z - qsu_z_handcalc).abs() < 1e-6,
         "qy_z={qy_z} should equal rc_qsu_simple handcalc={qsu_z_handcalc}"
     );
-    // 断面が非正方形（b≠d、主筋も非対称）なので y・z の Qy は異なるはず。
     assert!((qy_y - qy_z).abs() > 1.0, "qy_y={qy_y} qy_z={qy_z}");
 }
 
@@ -2006,7 +1952,6 @@ fn test_pushover_shear_yield_direction_independent() {
 
 #[test]
 fn test_effective_clear_span_falls_back_when_non_positive() {
-    // 剛域長の合計が節点間長を超える異常入力 → 節点間長へフォールバック。
     let rz_over = RigidZone {
         length_i: 2000.0,
         length_j: 1500.0,
@@ -2014,7 +1959,6 @@ fn test_effective_clear_span_falls_back_when_non_positive() {
     };
     assert_eq!(rz_over.flexible_length_from(3000.0), 3000.0);
 
-    // ちょうど0（または極小の浮動小数点誤差域）でもフォールバック。
     let rz_zero = RigidZone {
         length_i: 1500.0,
         length_j: 1500.0,
@@ -2180,8 +2124,6 @@ fn test_compute_shear_yield_thresholds_rc_rect_uses_rigid_zone_reduced_clear_spa
 
 #[test]
 fn test_compute_shear_yield_thresholds_rc_rect_falls_back_when_rigid_zone_exceeds_length() {
-    // 剛域長の合計(2000+1500=3500)が節点間長(3000)を超える異常入力
-    // → h0 は節点間長3000へフォールバックする。
     let rigid_zone = RigidZone {
         length_i: 2000.0,
         length_j: 1500.0,
@@ -2205,7 +2147,7 @@ fn test_compute_shear_yield_thresholds_rc_rect_falls_back_when_rigid_zone_exceed
         fc: 24.0,
         pw: rebar.aw_x_mm2() / (b * rebar.hoop.pitch),
         sigma_wy: 295.0,
-        clear_span: 3000.0, // フォールバック後の値
+        clear_span: 3000.0,
         sigma_0: 0.0,
     });
     assert!((th.y.qy(0.0) - qsu_y_handcalc).abs() < 1e-6);
@@ -2213,8 +2155,6 @@ fn test_compute_shear_yield_thresholds_rc_rect_falls_back_when_rigid_zone_exceed
 
 #[test]
 fn test_dir_threshold_qy_axial_term_matches_handcalc() {
-    // rc_capacity::tests::sample_input と同一の断面（b=400,D=600,pw=0.002等）で
-    // DirThreshold::RcArakawa を直接構成し、圧縮軸力からの σ0 反映を検算する。
     let b = 400.0;
     let d = 600.0;
     let d_eff = 530.0;
@@ -2228,7 +2168,7 @@ fn test_dir_threshold_qy_axial_term_matches_handcalc() {
         pw: 0.002,
         sigma_wy: 295.0,
         clear_span: 3000.0,
-        sigma_0: 0.0, // プレースホルダ（qy() が上書きする）
+        sigma_0: 0.0,
     };
     let gross_area = b * d;
     let th = DirThreshold::RcArakawa {
@@ -2254,8 +2194,6 @@ fn test_dir_threshold_qy_axial_term_matches_handcalc() {
         expected_delta
     );
 
-    // 引張（n_compress=0、呼び出し側で既にクランプ済みの規約）は σ0=0 のまま、
-    // Qy は base と一致（増えない）。
     assert!((th.qy(0.0) - qy_base).abs() < 1e-9);
 }
 
@@ -2277,7 +2215,6 @@ fn test_axial_compression_sign_convention_handcalc() {
         "compression should be detected as a positive n_compress"
     );
 
-    // 引張（N>0）: 圧縮側の符号が反転 → axial_compression は 0（圧縮なし）。
     let f_i_tension = [0.0, 0.0, -n_compress_mag];
     let f_j_tension = [0.0, 0.0, n_compress_mag];
     assert_eq!(
@@ -2286,8 +2223,6 @@ fn test_axial_compression_sign_convention_handcalc() {
         "pure tension must not be treated as compression (sigma_0=0 for tension)"
     );
 
-    // 片端のみ圧縮成分がある非対称ケース（数値誤差や分布荷重を模擬）:
-    // 両端のうち大きい方（実勢値）を採用する。
     let f_i_asym = [0.0, 0.0, n_compress_mag];
     let f_j_asym = [0.0, 0.0, -0.5 * n_compress_mag];
     assert!(
@@ -2303,23 +2238,18 @@ fn test_axial_force_signed_sign_and_representative_value() {
     let ex = [0.0, 0.0, 1.0];
     let mag = 1000.0;
 
-    // 圧縮（f_i=+|N|·ex, f_j=-|N|·ex）は正値。
     assert!(
         (axial_force_signed([0.0, 0.0, mag], [0.0, 0.0, -mag], ex) - mag).abs() < 1e-9,
         "pure compression must be positive"
     );
-    // 引張は負値のまま返す（0 にクランプしない）。
     assert!(
         (axial_force_signed([0.0, 0.0, -mag], [0.0, 0.0, mag], ex) + mag).abs() < 1e-9,
         "pure tension must stay negative"
     );
-    // 両端で絶対値が異なれば、大きい方を符号付きで採用する
-    // （i端圧縮 300・j端圧縮 1000）。
     assert!(
         (axial_force_signed([0.0, 0.0, 300.0], [0.0, 0.0, -1000.0], ex) - 1000.0).abs() < 1e-9,
         "should take the larger compression magnitude"
     );
-    // 引張側で j端の絶対値が大きい場合も負値で採用する。
     assert!(
         (axial_force_signed([0.0, 0.0, -300.0], [0.0, 0.0, 500.0], ex) + 500.0).abs() < 1e-9,
         "should take the larger tension magnitude with negative sign"
@@ -2400,14 +2330,12 @@ fn test_track_shear_yield_axial_compression_raises_qy_end_to_end() {
     let qy_boosted = rc_qsu_simple(&inp_axial);
     assert!(qy_boosted > qy_base, "axial term should raise Qy");
 
-    // Vz を base と boosted のちょうど中間に設定: base では降伏、boosted では非降伏。
     // モデルは node i=(0,0,0)・j=(0,0,3000)、ref_vector=[1,0,0] のため
     // ex=[0,0,1], ey=[1,0,0], ez=[0,1,0]（既存テストの局所座標系規約と同じ）。
     // よって Vz は global y 成分（f.data[1]/f.data[7]）、N は global z 成分
     // （f.data[2]/f.data[8]）に対応する。
     let vz_demand = (qy_base + qy_boosted) / 2.0;
 
-    // ケースA: 軸圧縮あり（N_compress = sigma_0*gross_area）→ 判定を免れるはず。
     let f_comp = LocalVec {
         data: SmallVec::from_slice(&[
             0.0,
@@ -2440,7 +2368,6 @@ fn test_track_shear_yield_axial_compression_raises_qy_end_to_end() {
         "compression should raise Qy above the shear demand, suppressing the event"
     );
 
-    // ケースB: 軸力なし（同じ Vz デマンド）→ 判定に掛かるはず。
     let f_zero = LocalVec {
         data: SmallVec::from_slice(&[
             0.0, vz_demand, 0.0, 0.0, 0.0, 0.0, 0.0, -vz_demand, 0.0, 0.0, 0.0, 0.0,
@@ -2563,8 +2490,7 @@ fn test_compute_hinge_thresholds_steel_strength_factor_resolution() {
         "SA440（590N級）は未知名称の1.05倍のはず: {my_sa440}/{my_unknown2}"
     );
 
-    // 直接入力係数は名称からグレードを解決できない材料でも最優先で使われる。
-    let my_default = my_of("カスタム材料", 235.0, None); // 未知名称 → 係数 1.0
+    let my_default = my_of("カスタム材料", 235.0, None);
     let my_scaled = my_of("カスタム材料", 235.0, Some(1.25));
     assert!(
         (my_scaled / my_default - 1.25).abs() < 1e-9,
@@ -2800,7 +2726,6 @@ fn test_pushover_displacement_control_reaches_target_and_exceeds_design_load() {
         disp_phase_points
     );
 
-    // 目標変位（200mm）まで到達していること。
     let last_roof = result
         .capacity_curve
         .last()
@@ -2813,7 +2738,6 @@ fn test_pushover_displacement_control_reaches_target_and_exceeds_design_load() {
         last_roof
     );
 
-    // 変位制御により荷重制御頭打ち（≈ 0.2·W = 16kN）を上回る耐力へ到達すること。
     assert!(
         result.qu > load_only.qu * 1.05,
         "displacement control Qu={:.1} should exceed load-only Qu={:.1}",
@@ -2832,8 +2756,6 @@ fn test_pushover_displacement_control_reaches_target_and_exceeds_design_load() {
         vp
     );
 
-    // 均等変位刻み制御: 性能曲線の頂部変位刻みが全域で概ね目標刻み
-    // du = 押込み上限 / ステップ数 に揃うことを検証する。
     let du = max_disp / n_steps as f64;
     let disps: Vec<f64> = result.capacity_curve.iter().map(|c| c.roof_disp).collect();
     // 全域を概ね du 刻みでカバーする（λ=1 到達の端数ステップ等での多少の増減は許容）。
@@ -2852,7 +2774,6 @@ fn test_pushover_displacement_control_reaches_target_and_exceeds_design_load() {
             d
         );
     }
-    // 平均刻みも du と同程度であること（弾性域の点密集＝過小刻みの回帰）。
     let avg = (disps.last().unwrap() - disps.first().unwrap()) / (disps.len() - 1) as f64;
     assert!(
         avg >= du * 0.4,
@@ -2866,7 +2787,6 @@ fn test_pushover_displacement_control_reaches_target_and_exceeds_design_load() {
 /// またいでも性能曲線のベースシアが単調非減少であることを検証する回帰テスト。
 #[test]
 fn test_pushover_elastic_curve_monotonic_across_phase_switch() {
-    // 降伏応力を非現実的に高くし、曲げヒンジ・ファイバー降伏を発生させない。
     let seismic_weight = 80_000.0;
     let n_steps = 20usize;
     let model = single_column_model(100_000.0, seismic_weight);
@@ -2884,7 +2804,6 @@ fn test_pushover_elastic_curve_monotonic_across_phase_switch() {
     )
     .expect("pushover should run");
 
-    // 前提: 弾性のまま（ヒンジ無し）で変位制御フェーズまで進んでいること。
     // ステップ番号は確定順の通し番号のため、フェーズは荷重係数で識別する
     // （変位制御は設計地震力レベル λ=1 を超えて押し込む）。
     assert!(result.hinges.is_empty(), "弾性のままであること");
@@ -2893,7 +2812,6 @@ fn test_pushover_elastic_curve_monotonic_across_phase_switch() {
         "変位制御フェーズの点が確定していること"
     );
 
-    // ベースシアが全区間で単調非減少であること。
     for w in result.capacity_curve.windows(2) {
         assert!(
             w[1].base_shear >= w[0].base_shear * (1.0 - 1e-6),
@@ -2906,7 +2824,6 @@ fn test_pushover_elastic_curve_monotonic_across_phase_switch() {
     }
 
     // 弾性の比例載荷では base_shear = λ·C0·W（C0=0.2）が全フェーズで成り立つこと
-    // （変位制御でも載荷パターン λ·q が保持されている検証）。
     for s in &result.steps {
         let expected = s.load_factor * 0.2 * seismic_weight;
         assert!(
@@ -2917,7 +2834,6 @@ fn test_pushover_elastic_curve_monotonic_across_phase_switch() {
         );
     }
 
-    // 設計地震力レベル（λ=1）を超えて押し込めていること。
     let last_lambda = result.steps.last().map(|s| s.load_factor).unwrap_or(0.0);
     assert!(
         last_lambda > 1.0,
@@ -2948,7 +2864,6 @@ fn test_pushover_load_only_extends_beyond_design_level() {
     )
     .expect("pushover should run");
 
-    // 結果にどの制御方式で解析したかが記録されること（結果画面・CSV の識別用）。
     assert_eq!(result.control, PushoverControl::LoadOnly);
 
     let last = result.steps.last().expect("収束ステップがあること");
@@ -2962,7 +2877,6 @@ fn test_pushover_load_only_extends_beyond_design_level() {
         "目標変位 200mm へ到達すること: {:.1}mm",
         last.top_disp
     );
-    // 荷重増分のみでは λ は単調非減少（変位制御の λ 減少域は存在しない）。
     for w in result.steps.windows(2) {
         assert!(
             w[1].load_factor >= w[0].load_factor - 1e-12,
@@ -2975,7 +2889,6 @@ fn test_pushover_load_only_extends_beyond_design_level() {
         !result.hinges.is_empty(),
         "降伏（ヒンジ発生）後の硬化域まで載荷されていること"
     );
-    // 設計地震力レベル 0.2W を上回る耐力へ到達すること。
     assert!(
         result.qu > 0.2 * seismic_weight * 1.05,
         "Qu={:.1} が設計地震力レベル 0.2W={:.1} を上回ること",
@@ -3024,8 +2937,7 @@ fn test_pushover_long_term_preload_sets_initial_axial_state() {
         result.steps.len() > 1,
         "長期載荷後に水平増分ステップが続くこと"
     );
-    // 終局時の柱軸力（圧縮正）に長期軸力 P が保持されていること
-    // （単柱の水平載荷は軸力を生まないため、軸力 ≒ P のまま）。
+    // 単柱の水平載荷では軸力を生じないため、長期軸力Pが終局まで保持される。
     let axial = result
         .member_response
         .first()
@@ -3042,7 +2954,6 @@ fn test_pushover_long_term_preload_sets_initial_axial_state() {
     assert!(response.m_strong.max(response.m_weak) > 1.0);
     assert!(response.m_strong.is_finite() && response.m_weak.is_finite());
 
-    // 長期荷重を無効にした場合は λ=0 の記録はない。
     let model2 = single_column_model(235.0, 80_000.0);
     let dofmap2 = DofMap::build(&model2);
     let reducer2 = Reducer::build(&model2, &dofmap2);
@@ -3095,12 +3006,11 @@ fn test_pushover_load_only_without_target_stops_at_lambda_1() {
 fn test_horizontal_force_sums_wall_bottom_nodes() {
     use sepika_element::behavior::LocalVec;
 
-    // 4 節点壁: 下辺 a=30kN, b=70kN（合計 100kN）、上辺 a=-40kN, b=-60kN（合計 -100kN）。
     let mut data = smallvec::SmallVec::<[f64; 24]>::from_elem(0.0, 24);
-    data[0] = 30_000.0; // 下辺a Fx
-    data[6] = 70_000.0; // 下辺b Fx
-    data[12] = -40_000.0; // 上辺a Fx
-    data[18] = -60_000.0; // 上辺b Fx
+    data[0] = 30_000.0;
+    data[6] = 70_000.0;
+    data[12] = -40_000.0;
+    data[18] = -60_000.0;
     let f = LocalVec { data };
     let h = super::member_response::horizontal_force_in_dir(&f, 4, 0);
     assert!(
@@ -3109,7 +3019,6 @@ fn test_horizontal_force_sums_wall_bottom_nodes() {
         h
     );
 
-    // 2 節点線材: i 端 +50kN / j 端 -50kN → 50kN。
     let mut data2 = smallvec::SmallVec::<[f64; 24]>::from_elem(0.0, 12);
     data2[0] = 50_000.0;
     data2[6] = -50_000.0;
@@ -3229,7 +3138,6 @@ fn vnv_剛域つき門形フレームの系レベル保証() {
     let r0 = run_rigid_zone_pushover(0.0);
     let r1 = run_rigid_zone_pushover(lam);
 
-    // (1) 崩壊荷重比が可撓長基準 H/L' になる。
     let q0 = observed_collapse_shear(&r0).expect("剛域なしで崩壊機構が成立しない");
     let q1 = observed_collapse_shear(&r1).expect("剛域ありで崩壊機構が成立しない");
     let ratio = q1 / q0;
@@ -3244,7 +3152,6 @@ fn vnv_剛域つき門形フレームの系レベル保証() {
         "剛域が崩壊荷重に反映されていない（比 {ratio:.4}）"
     );
 
-    // (2) 剛域ありでも柱の崩壊機構が成立し、降伏ヒンジは柱だけに生じる。
     let yielded: Vec<&HingeEvent> = r1
         .hinges
         .iter()
@@ -3335,7 +3242,6 @@ fn test_pushover_drift_angle_target_forms_hinge_with_stiffness_reduction() {
     let angle_of = |s: &PushoverStep| s.story_drifts[0].abs() / height;
     let last = result.steps.last().expect("収束ステップがあること");
 
-    // (3) 目標到達で打ち切り: 最終ステップのみが 1/150 以上（初回到達で停止）。
     //     ペナルティ法の相対精度分の緩和（0.1%）を見込む。
     let target_angle = 1.0 / 150.0;
     assert!(
@@ -3351,13 +3257,11 @@ fn test_pushover_drift_angle_target_forms_hinge_with_stiffness_reduction() {
         );
     }
 
-    // (1) 目標到達までに柱脚の曲げヒンジが発生していること。
     assert!(
         !result.hinges.is_empty(),
         "層間変形角 1/150 到達までにヒンジが発生すること"
     );
 
-    // (2) 剛性低下: 初期割線剛性 k0 に対し、最終区間の接線剛性が有意に低下すること。
     let curve = &result.capacity_curve;
     assert!(curve.len() >= 3, "剛性比較に十分な点数があること");
     let first = curve
@@ -3677,8 +3581,6 @@ fn test_pushover_drift_angle_target_runs_with_wall_element() {
         "耐震壁モデルでも層間変形角 1/150 まで到達して打ち切られること: {:.6}",
         last.story_drifts[0].abs() / 3000.0
     );
-    // 壁の弾完全塑性（Qu 頭打ち）により、最終区間の接線剛性は初期割線剛性より
-    // 大幅に低下しているはず。
     let curve = &result.capacity_curve;
     let first = curve
         .iter()
@@ -3731,7 +3633,6 @@ fn test_pushover_fiber_hinge_softens_at_drift_target() {
         "目標到達までにヒンジが発生すること"
     );
 
-    // 剛性低下: 初期割線剛性に対し最終区間の接線剛性が有意に低下すること。
     let curve = &result.capacity_curve;
     let first = curve
         .iter()
@@ -3797,7 +3698,6 @@ fn test_pushover_wall_flexural_yield_softens() {
         kt < 0.5 * k0,
         "細長壁の曲げ降伏で接線剛性が低下すること: k0={k0:.2}, kt={kt:.2}"
     );
-    // 耐力が弾性外挿（k0×最終変位）に対して有意に頭打ちしていること。
     assert!(
         result.qu < 0.7 * k0 * p2.roof_disp,
         "Qu={:.1} が弾性外挿 {:.1} より有意に小さいこと",

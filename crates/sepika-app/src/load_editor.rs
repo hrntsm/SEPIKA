@@ -1111,11 +1111,11 @@ mod tests {
         let model = beam_and_brace_model();
         let mut editor = LoadEditor::new_member(LoadCaseId(0), Some(ElemId(0)));
         if let LoadDraft::Member(d) = &mut editor.draft {
-            d.dir = 2; // X+
+            d.dir = 2;
         }
 
         editor.begin_pick();
-        editor.set_picked_member(ElemId(1), is_brace(&model, ElemId(1))); // ブレース
+        editor.set_picked_member(ElemId(1), is_brace(&model, ElemId(1)));
         match &editor.draft {
             LoadDraft::Member(d) => {
                 assert_eq!(d.elem, Some(ElemId(1)));
@@ -1143,7 +1143,7 @@ mod tests {
 
         let mut editor = LoadEditor::new_member(LoadCaseId(0), Some(ElemId(0)));
         if let LoadDraft::Member(d) = &mut editor.draft {
-            d.dir = DIR_ALONG_AXIS; // 梁なのに材軸方向を指した状態
+            d.dir = DIR_ALONG_AXIS;
             d.w1 = "2.0".into();
         }
         app.commit_load_editor(&editor).expect("追加できるはず");
@@ -1160,7 +1160,7 @@ mod tests {
 
         let mut editor = LoadEditor::new_member(LoadCaseId(0), Some(ElemId(1)));
         if let LoadDraft::Member(d) = &mut editor.draft {
-            d.dir = 0; // 鉛直下向きを指した状態
+            d.dir = 0;
             d.w1 = "1.0".into();
         }
         app.commit_load_editor(&editor).expect("追加できるはず");
@@ -1192,9 +1192,7 @@ mod tests {
             );
         }
 
-        // 添字 1 の荷重を編集するモーダルを開いた状態を作る。
         let editor = LoadEditor::edit_nodal(LoadCaseId(0), 1, &second);
-        // 開いている間に添字 0 が消え、添字 1 が別の荷重を指すようになる。
         app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(sepika_edit::DeleteNodalLoad {

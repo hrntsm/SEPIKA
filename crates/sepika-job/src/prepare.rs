@@ -948,8 +948,6 @@ mod tests {
             "2 枚とも同じ床領域へ帰属"
         );
 
-        // 2 回連続で実行しても結果が変わらない（割当領域を先に再構築してから
-        // 旧床領域・壁領域を再構築する順序が、実行回数に依存しないことの回帰）。
         let after_first = model.clone();
         prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
         assert!(
@@ -1056,8 +1054,6 @@ mod tests {
             }
         }
 
-        // 1 バイの全周 RC 架構（柱 4 本・頂部梁 4 本・柱脚間梁 4 本）。
-        // Y=0 面（節点 0,1,5,4）に耐震壁 1 枚を想定する。
         fn base_frame() -> Model {
             let mut model = Model::default();
             let base = [
@@ -1169,7 +1165,6 @@ mod tests {
         apply_rigid_zones_and_panels(&mut with_wall).unwrap();
         apply_rigid_zones_and_panels(&mut without_wall).unwrap();
 
-        // 壁の側柱（elem 0、Y=0 面）は、壁を考慮すると剛域長が変わる。
         let with_wall_col0 = with_wall.elements[0].rigid_zone;
         let without_wall_col0 = without_wall.elements[0].rigid_zone;
         assert_ne!(
@@ -1183,7 +1178,6 @@ mod tests {
             "壁の有無で側柱の剛域長 length_j が変わらない: with={:?} without={:?}",
             with_wall_col0, without_wall_col0
         );
-        // 壁ありのほうが張り出しの分だけ剛域は長くなる（少なくとも一方の端で）。
         assert!(
             with_wall_col0.length_j > without_wall_col0.length_j,
             "壁を考慮すると剛域長は伸びるはず: with={:?} without={:?}",
@@ -1191,7 +1185,6 @@ mod tests {
             without_wall_col0
         );
 
-        // 壁の頂部大梁（elem 4）も同様。
         let with_wall_beam4 = with_wall.elements[4].rigid_zone;
         let without_wall_beam4 = without_wall.elements[4].rigid_zone;
         assert!(
@@ -1202,9 +1195,6 @@ mod tests {
             without_wall_beam4
         );
 
-        // `apply_rigid_zones_and_panels` 自身は壁要素をモデルへ残さない（D5）。
-        // 壁展開はこの関数の内部だけの一時的な操作であること（書き戻しの実装
-        // ミスで壁要素が漏れ出していないか）を確認する。
         assert!(
             with_wall
                 .elements

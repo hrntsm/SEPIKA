@@ -517,9 +517,8 @@ mod tests {
         let (nu, mu) = angular_nu_mu(&inp, inp.c_d / 2.0);
         let xn = inp.c_d / 2.0;
         let c_nu = xn * inp.c_b * inp.fc;
-        let s_nu = 2.0 * inp.t * (2.0 * xn - inp.c_d) * inp.fy; // =0
+        let s_nu = 2.0 * inp.t * (2.0 * xn - inp.c_d) * inp.fy;
         assert!((nu - (c_nu + s_nu)).abs() < 1e-3);
-        // Mu は正（フランジ＋ウェブ＋コンクリート）。
         assert!(mu > 0.0);
     }
 
@@ -541,7 +540,6 @@ mod tests {
         let inp = pipe_input();
         let (nu, mu) = circular_nu_mu(&inp, PI / 2.0);
         assert!(nu.is_finite() && mu > 0.0);
-        // θ=0（圧縮なし）で cNu=cMu=0。
         let (n0, m0) = circular_nu_mu(&inp, 0.0);
         assert!(m0.abs() < 1e-6 || m0 >= 0.0);
         assert!(n0 < nu, "θ=0 の軸力は θ=π/2 より小さい");
@@ -553,20 +551,16 @@ mod tests {
         let ncu1 = inp.c_d * inp.c_b * inp.fc + (400.0 * 400.0 - inp.c_d * inp.c_b) * inp.fy;
         let ntu = (400.0 * 400.0 - inp.c_d * inp.c_b) * inp.fy;
 
-        // 中央付近の軸力で Mu 正。
         let n_mid = 0.3 * ncu1;
         let mu_mid = cft_short_column_mu(&inp, n_mid, ncu1, ntu);
         assert!(mu_mid > 0.0);
 
-        // 中心圧縮（N=Ncu1）で Mu→0。
         let mu_at_ncu1 = cft_short_column_mu(&inp, ncu1, ncu1, ntu);
         assert!(mu_at_ncu1.abs() < 1e-3, "Mu(Ncu1)={mu_at_ncu1}");
 
-        // 中心引張（N=−Ntu）で Mu→0。
         let mu_at_ntu = cft_short_column_mu(&inp, -ntu, ncu1, ntu);
         assert!(mu_at_ntu.abs() < 1e-3, "Mu(−Ntu)={mu_at_ntu}");
 
-        // 高圧縮域は中央より Mu 小（相関曲線の山型）。
         let mu_high = cft_short_column_mu(&inp, 0.85 * ncu1, ncu1, ntu);
         assert!(mu_high < mu_mid, "mu_high={mu_high} mu_mid={mu_mid}");
     }
@@ -597,13 +591,11 @@ mod tests {
         let c_e = (3.32 * 30.0_f64.sqrt() + 6.90) * 1.0e3;
         let hand = PI * PI * (c_e * c_i / 5.0 + s_e * s_i) / (lk * lk);
         assert!((nk - hand).abs() / hand < 1e-9, "Nk={nk} vs {hand}");
-        // lk=0 は無限大（座屈しない）。
         assert!(cft_nk(c_i, s_i, s_e, fc, 0.0).is_infinite());
     }
 
     fn long_input(circular: bool, is_long: bool) -> (CftLongMediumInput, f64, f64) {
         let bending = if circular { pipe_input() } else { box_input() };
-        // 代表値（cNcr は座屈で短柱 cNc より小さい）。
         let c_area = if circular {
             PI * bending.c_d * bending.c_d / 4.0
         } else {
@@ -614,7 +606,7 @@ mod tests {
         } else {
             400.0 * 400.0 - bending.c_d * bending.c_b
         };
-        let c_ncr = 0.6 * c_area * bending.fc; // 座屈低減の代表
+        let c_ncr = 0.6 * c_area * bending.fc;
         let ncu_axial = c_ncr + 0.8 * s_area * bending.fy;
         let ntu = s_area * bending.fy;
         let nk = 3.0 * c_ncr; // Nk > cNcr（R>0）
@@ -652,15 +644,12 @@ mod tests {
     #[test]
     fn test_cft_long_medium_mu_endpoints_and_reduction() {
         let (inp, _, ntu) = long_input(true, true);
-        // 中心引張 N=−Ntu で Mu→0。
         assert!(cft_long_medium_column_mu(&inp, -ntu).unwrap().abs() < 1e-3);
-        // 圧縮側で Mu 正。
         assert!(cft_long_medium_column_mu(&inp, 0.3 * inp.ncu_axial).unwrap() > 0.0);
-        // Nk を小さくする（座屈が厳しい）と R が下がり Mu が減少する。
         let mut stiff = inp;
-        stiff.nk = 10.0 * inp.c_ncr; // R 大
+        stiff.nk = 10.0 * inp.c_ncr;
         let mut slender = inp;
-        slender.nk = 1.2 * inp.c_ncr; // R 小
+        slender.nk = 1.2 * inp.c_ncr;
         let n = 0.2 * inp.c_ncr;
         assert!(
             cft_long_medium_column_mu(&slender, n).unwrap()
@@ -671,7 +660,6 @@ mod tests {
 
     #[test]
     fn test_cft_medium_less_than_short() {
-        // 中柱の N-M 曲げ耐力は座屈低減により短柱より小さい（同一断面・同一 N）。
         let inp = box_input();
         let c_area = inp.c_d * inp.c_b;
         let s_area = 400.0 * 400.0 - c_area;

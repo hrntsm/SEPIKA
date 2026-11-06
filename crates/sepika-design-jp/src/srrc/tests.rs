@@ -240,10 +240,6 @@ pub(crate) fn ctx_column(term: LoadTerm) -> DesignCtx {
     })
 }
 
-// ------------------------------------------------------------------
-// せん断の鉄骨/RC 弾性分担（src_shear_check）
-// ------------------------------------------------------------------
-
 #[test]
 fn test_src_beam_shear_split_handcalc() {
     let shape = src_beam_rect_shape(
@@ -312,8 +308,6 @@ fn test_src_beam_shear_split_handcalc() {
 /// （「pw が 0.6% を超える場合は 0.6% として算定する」）。
 #[test]
 fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
-    // 過大なせん断補強筋比（pw > 0.6%）を与え、算定に使われる pw が
-    // 0.6% に頭打ちされることを確認する。
     let shape = src_beam_rect_shape(
         400.0,
         700.0,
@@ -492,10 +486,6 @@ fn test_src_column_long_combined_formula() {
     assert!(!shear.used_qd);
 }
 
-// ------------------------------------------------------------------
-// DesignCheck 振り分けの共通経路（Fc未設定・断面形状不一致）
-// ------------------------------------------------------------------
-
 #[test]
 fn test_src_fc_missing_skip() {
     let shape = src_column_shape();
@@ -601,10 +591,6 @@ fn test_src_supported_shear_rebar_fy_missing_skip() {
     }
 }
 
-// ------------------------------------------------------------------
-// 地震時短期の設計用せん断力（構造規定方式）: SRC 梁
-// ------------------------------------------------------------------
-
 /// rQD2 = max(0, n・(|Q|−sQD)) が支配するケース（rMu=0 で rQD1 を無効化し
 /// QdMethod::Qd2 で明示的に検証する）。
 #[test]
@@ -637,8 +623,8 @@ fn test_src_beam_seismic_qd2_handcalc() {
     let fs = concrete_allowable_shear(24.0, false);
     let w_ft = rebar_allowable_shear("SD345", false);
 
-    let ql = 50_000.0; // 長期せん断力
-    let q = 200_000.0; // 当該組合せの短期せん断力
+    let ql = 50_000.0;
+    let q = 200_000.0;
     let n_factor = 1.5;
     let clear_length = 4000.0;
 
@@ -653,7 +639,6 @@ fn test_src_beam_seismic_qd2_handcalc() {
         }),
         ..Default::default()
     };
-    // r_mu=0 とすることで rQD1 を無効化し（doc 参照）、rQD2 のみを検証する。
     let seismic = SrcSeismicCtx {
         ctx: &ctx,
         pos: 0.0,
@@ -740,7 +725,6 @@ fn test_src_beam_seismic_qd1_handcalc() {
     let q = 200_000.0;
     let n_factor = 1.5;
     let clear_length = 4000.0;
-    // rc_mu_simple で機械的に算定した rMu（部材端 1 箇所分）。
     let r_mu = rc_mu_simple(&RcCapacityInput {
         b: props.b,
         d: props.d_full,
@@ -809,10 +793,6 @@ fn test_src_beam_seismic_qd1_handcalc() {
     );
 }
 
-// ------------------------------------------------------------------
-// 実配筋モデル（SrcBeamRect / SrcColumnRect）の SRC 検定
-// ------------------------------------------------------------------
-
 /// 実配筋 SRC 梁で許容応力度検定が動き、鉄骨 sMo に RC 部分 rMA が累加される
 /// （MA > sMo）。
 #[test]
@@ -836,7 +816,6 @@ fn test_src_beam_rect_check_accumulates_steel_and_rc() {
     let mat = make_material(24.0, "SD345");
     let ctx = ctx_beam(LoadTerm::Long);
 
-    // mz>0 は下端引張。
     let forces = MemberForcesAt {
         mz: 1.0,
         ..zero_forces()

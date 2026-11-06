@@ -67,7 +67,6 @@ mod tests {
         let ax = rc_column_axial_ultimate(600.0, 600.0, 24.0, ag, 345.0);
         assert!((ax.nuc - 600.0 * 600.0 * 24.0).abs() < 1e-6);
         assert!((ax.nut - (-ag * 345.0)).abs() < 1e-3);
-        // 圧縮強度は正、引張強度は負。
         assert!(ax.nuc > 0.0 && ax.nut < 0.0);
     }
 
@@ -81,7 +80,6 @@ mod tests {
         assert!((rc_axial_margin(&ax, 4_000_000.0) - 8_640_000.0 / 4_000_000.0).abs() < 1e-9);
         // 引張 N=−500,000 → 余裕率 = |Nut|/|N| = 2.0。
         assert!((rc_axial_margin(&ax, -500_000.0) - 2.0).abs() < 1e-9);
-        // N=0 → 無限大。
         assert!(rc_axial_margin(&ax, 0.0).is_infinite());
     }
 }

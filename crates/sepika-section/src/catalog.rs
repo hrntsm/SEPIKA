@@ -250,7 +250,6 @@ mod tests {
     fn test_catalog_loads_japan_only_shapes() {
         let all = entries();
         assert!(!all.is_empty());
-        // 4大分類（H形鋼／角形鋼管／円形鋼管／フラットバー）が揃っている
         for shape in CatalogShape::ALL {
             assert!(
                 all.iter().any(|e| e.shape == shape),
@@ -294,7 +293,6 @@ mod tests {
 
     #[test]
     fn test_to_section_shape_does_not_override_catalog_values() {
-        // shape を付与しても area 等はカタログ値のまま（再計算しない）ことを確認する。
         let list = entries_in(CatalogShape::H, "H(const)");
         let e = list
             .iter()
@@ -302,9 +300,9 @@ mod tests {
             .expect("section not found");
         assert!((e.depth - 400.0).abs() < 1e-6);
         assert!((e.width - 200.0).abs() < 1e-6);
-        // CSV: A=83.29070842 cm^2 -> mm^2
+        // カタログ値 A=83.29070842 cm² をmm²へ換算。
         assert!((e.area - 8329.070842).abs() < 1e-3);
-        // CSV: Iy=22554.95086 cm^4 -> mm^4
+        // カタログ値 Iy=22554.95086 cm⁴ をmm⁴へ換算。
         assert!((e.iy - 225549508.6).abs() < 10.0);
         let sec = to_section(e, SectionId(0));
         assert_eq!(sec.area, e.area);
@@ -344,7 +342,6 @@ mod tests {
 
     #[test]
     fn test_parse_shape_from_name_cases() {
-        // 末尾の角R・フィレット半径は無視し、フラットバーは形状復元しない。
         let cases: [(CatalogShape, &str, Option<SectionShape>); 5] = [
             (
                 CatalogShape::H,

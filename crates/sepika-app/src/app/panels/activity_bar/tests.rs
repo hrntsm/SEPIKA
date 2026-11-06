@@ -89,7 +89,6 @@ impl Harness {
                 .show_inside(ui, |ui| {
                     ui.label("status");
                 });
-            // 下ドックは本番同様に左右アイコン列より内側へ配置する。
             egui::Panel::right("right_activity_bar")
                 .exact_size(activity_bar_width())
                 .resizable(false)

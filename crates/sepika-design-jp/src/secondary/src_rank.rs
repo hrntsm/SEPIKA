@@ -21,9 +21,9 @@ pub fn src_column_rank(n_over_n0: f64, smo_over_m0: f64, shear_failure: bool) ->
         return MemberRank::FD;
     }
     let base: u8 = match (n_over_n0 > 0.3, smo_over_m0 < 0.4) {
-        (false, false) => 0,                // FA
-        (false, true) | (true, false) => 1, // FB
-        (true, true) => 2,                  // FC
+        (false, false) => 0,
+        (false, true) | (true, false) => 1,
+        (true, true) => 2,
     };
     let idx = base + u8::from(shear_failure);
     match idx {
@@ -40,9 +40,9 @@ pub fn src_column_rank(n_over_n0: f64, smo_over_m0: f64, shear_failure: bool) ->
 /// [`super::ds_group`] の規約と同じく [`MemberRank`] のインデックスで表す）。
 pub fn src_wall_type(shear_failure: bool) -> MemberRank {
     if shear_failure {
-        MemberRank::FC // WC（グループ C）
+        MemberRank::FC
     } else {
-        MemberRank::FA // WA（グループ A）
+        MemberRank::FA
     }
 }
 
@@ -137,13 +137,11 @@ mod tests {
     /// 表 2.6.6-5 の全区分（曲げ破壊・せん断破壊 × 5 列）を検証する。
     #[test]
     fn test_src_column_rank_table_2_6_6_5() {
-        // 曲げ破壊（上段）
         assert_eq!(src_column_rank(0.2, 0.5, false), MemberRank::FA);
         assert_eq!(src_column_rank(0.2, 0.3, false), MemberRank::FB);
         assert_eq!(src_column_rank(0.35, 0.5, false), MemberRank::FB);
         assert_eq!(src_column_rank(0.35, 0.3, false), MemberRank::FC);
         assert_eq!(src_column_rank(0.5, 0.5, false), MemberRank::FD);
-        // せん断破壊（下段）: 同区分で 1 段階不利
         assert_eq!(src_column_rank(0.2, 0.5, true), MemberRank::FB);
         assert_eq!(src_column_rank(0.2, 0.3, true), MemberRank::FC);
         assert_eq!(src_column_rank(0.35, 0.5, true), MemberRank::FC);

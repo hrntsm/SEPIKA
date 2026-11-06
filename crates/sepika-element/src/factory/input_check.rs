@@ -779,7 +779,7 @@ pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Optio
                 )
             );
             if composite {
-                // 材料別・部材群別の既存診断を先取りしない。
+                // ここで診断を確定すると、材料別・部材群別の具体的な不備理由を先取りしてしまう。
                 return None;
             }
             if let Some(reason) = elastic_young_issue(data, material.young) {

@@ -505,7 +505,6 @@ mod tests {
     #[test]
     fn test_check_holding_capacity_uses_peak_not_last_point() {
         use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType};
-        // 1層。層せん断は 100 → 150(ピーク) → 120(劣化) と推移。
         let pushover = PushoverResult {
             target: None,
             wall_capacities: Vec::new(),
@@ -560,19 +559,16 @@ mod tests {
             vec![],
         )
         .unwrap();
-        // Qu はピーク 150（最終点 120 ではない）。
         assert!(
             (result.stories[0].qu - 150.0).abs() < 1e-9,
             "Qu should be peak 150, got {}",
             result.stories[0].qu
         );
-        // 層間変形角は最終点（最大変位 12mm）から。
         assert!((result.stories[0].drift_angle - 12.0 / 3000.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_check_holding_capacity_basic() {
-        // Qu は pushover 性能曲線の層別ピークから取得（単点なので [100,200] がそのまま）。
         let pushover = pushover_with_qu(vec![100.0, 200.0], vec![15.0, 12.0]);
         let qud = vec![80.0, 180.0];
         let ds = vec![0.30, 0.35];
@@ -583,12 +579,11 @@ mod tests {
         let result =
             check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]).unwrap();
         assert_eq!(result.stories.len(), 2);
-        assert!(result.stories[0].ok); // Qu=100 ≥ Qun=24
-        assert!(result.stories[1].ok); // Qu=200 ≥ Qun=63
+        assert!(result.stories[0].ok);
+        assert!(result.stories[1].ok);
         assert!((result.stories[0].qu - 100.0).abs() < 1e-9);
         assert!((result.stories[0].qun - 24.0).abs() < 1e-9);
         assert!((result.stories[1].qun - 63.0).abs() < 1e-9);
-        // Rs/Re が出力に反映されている。
         assert!((result.stories[1].rs - 0.75).abs() < 1e-9);
         assert!((result.stories[0].re - 0.05).abs() < 1e-9);
         // 層間変形角 = drift/height = 15/3000 = 1/200。
@@ -606,8 +601,8 @@ mod tests {
         let heights = vec![3000.0, 3000.0];
         let result =
             check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]).unwrap();
-        assert!(!result.stories[0].ok); // Qu=20 < Qun=24
-        assert!(!result.stories[1].ok); // Qu=50 < Qun=63
+        assert!(!result.stories[0].ok);
+        assert!(!result.stories[1].ok);
     }
 
     /// 境界（Qu = Qun）は ok。
@@ -637,7 +632,6 @@ mod tests {
         let t = 0.24;
         let qud = qud_by_story(weights, z, rt, t);
         let qi_c0_02 = ai_distribution(weights, z, rt, 0.2, t).qi;
-        // C0 に線形なので qud[0] = 5 · qi_c0_02[0]。
         assert!(
             (qud[0] - 5.0 * qi_c0_02[0]).abs() < 1e-9,
             "qud[0]={} vs 5×qi0.2[0]={}",

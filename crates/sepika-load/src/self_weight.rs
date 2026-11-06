@@ -405,7 +405,6 @@ mod tests {
             ],
             sections: vec![rc_section(400.0 * 600.0, 400.0, 600.0)],
             materials: vec![rc_material()],
-            // 柱（鉛直）と梁（水平）
             elements: vec![beam_elem(0, 0, 1), beam_elem(1, 1, 2)],
             ..Default::default()
         };
@@ -424,7 +423,6 @@ mod tests {
             .stories;
         let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
 
-        // 柱は節点荷重（上下 1/2 ずつ、追加なし）。梁は等分布部材荷重。
         assert_eq!(nodal.len(), 2, "柱の上下端に節点荷重が生じる");
         assert_eq!(member.len(), 1, "梁だけが部材荷重になる");
         let nodal_force = |node: u32| {
@@ -476,7 +474,6 @@ mod tests {
             total,
             expected
         );
-        // 梁荷重は重力方向
         assert!(member.iter().all(|ml| ml.dir == [0.0, 0.0, -1.0]));
     }
 
@@ -690,7 +687,6 @@ mod tests {
             node_force(&nodal, 0),
             w_col / 2.0 + wextra
         );
-        // 総量保存: 節点合計 = w×(L+Dmax)。
         let total = node_force(&nodal, 0) + node_force(&nodal, 1);
         let expected = per_mm * (3000.0 + 800.0);
         assert!(
@@ -1048,7 +1044,6 @@ mod tests {
             "extra_bottom_mass_equiv={extra_bottom_mass_equiv} expected={expected_mass}"
         );
 
-        // 鋼管部に割増が掛かり、factor 無し（充填部込み）より大きいこと。
         let no_factor = (78.5e-6 * as_area + 23.0e-6 * ac_area) * dmax;
         assert!(
             extra_bottom_load > no_factor,

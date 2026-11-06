@@ -212,33 +212,26 @@ mod tests {
     #[test]
     fn test_ductility_mu() {
         assert!((ductility_mu(0.0) - 2.0).abs() < 1e-12);
-        assert!((ductility_mu(0.02) - (2.0 - 20.0 * 0.02)).abs() < 1e-12); // 1.6
-        assert!((ductility_mu(0.05) - 1.0).abs() < 1e-12); // 境界で 1.0
-        assert!((ductility_mu(0.1) - 1.0).abs() < 1e-12); // 下限 1.0
-        assert!((ductility_mu(-0.01) - 2.0).abs() < 1e-12); // Rp≤0 → 2.0
+        assert!((ductility_mu(0.02) - (2.0 - 20.0 * 0.02)).abs() < 1e-12);
+        assert!((ductility_mu(0.05) - 1.0).abs() < 1e-12);
+        assert!((ductility_mu(0.1) - 1.0).abs() < 1e-12);
+        assert!((ductility_mu(-0.01) - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn test_ductility_nu() {
-        // Rp=0 → ν = ν0 = 0.7 − 24/200 = 0.58。
         assert!((ductility_nu(24.0, 0.0) - plastic_nu0(24.0)).abs() < 1e-12);
-        // Rp=0.02 → (1−0.4)=0.6 倍。
         assert!((ductility_nu(24.0, 0.02) - 0.6 * plastic_nu0(24.0)).abs() < 1e-12);
-        // Rp=0.05 → 0 に達する。
         assert!(ductility_nu(24.0, 0.05).abs() < 1e-12);
-        // Rp=0.1（>0.05）→ 0 でクランプ。
         assert!(ductility_nu(24.0, 0.1).abs() < 1e-12);
     }
 
     #[test]
     fn test_arch_tan_theta_continuity() {
-        // 引張軸力柱 → 0。
         assert_eq!(arch_tan_theta(3000.0, 600.0, true), 0.0);
-        // 境界 L/D=1.5 で (6.4.10) と (6.4.11) が連続することを確認。
         let d = 600.0_f64;
-        let l = 1.5 * d; // L/D = 1.5（(6.4.10) 側）
+        let l = 1.5 * d;
         let t_640 = arch_tan_theta(l, d, false);
-        // (6.4.11) を境界直下で評価。
         let l_below = 1.4999 * d;
         let t_641 = arch_tan_theta(l_below, d, false);
         assert!(
@@ -252,7 +245,6 @@ mod tests {
         let t = arch_tan_theta(l12, d, false);
         let hand = ((l12 * l12 + d * d).sqrt() - l12) / d;
         assert!((t - hand).abs() < 1e-12 && t > 0.0, "tanθ={t} vs {hand}");
-        // 不正入力。
         assert_eq!(arch_tan_theta(0.0, 600.0, false), 0.0);
         assert_eq!(arch_tan_theta(3000.0, 0.0, false), 0.0);
     }
@@ -264,7 +256,6 @@ mod tests {
         let hand = 1.0 - 100.0 / (2.0 * 525.0) - (350.0 / 2.0) / (4.0 * 525.0);
         assert!((lam - hand).abs() < 1e-12, "λ={lam} vs {hand}");
         assert!((0.0..=1.0).contains(&lam));
-        // 不正入力。
         assert_eq!(truss_lambda(100.0, 0.0, 350.0, 1), 0.0);
     }
 
@@ -331,7 +322,6 @@ mod tests {
         inp.tensile_axial = true;
         let vu = rc_shear_vu_ductility(&inp);
         assert!(vu > 0.0);
-        // アーチ項が消えても Vu2/Vu3 は tanθ 非依存なので min は不変または低下。
         let vu_ref = rc_shear_vu_ductility(&sample());
         assert!(vu <= vu_ref + 1e-6);
     }
@@ -357,7 +347,6 @@ mod tests {
         // 降伏ヒンジ有: (1−10·Rp) 倍（Rp=0.02 → 0.8 倍）。
         let tx_h = bond_force_tx(3.0, 300.0, 2.0, 150.0, 0.02, true);
         assert!((tx_h - 0.8 * (3.0 * 300.0 + 2.0 * 150.0)).abs() < 1e-9);
-        // Rp=0.1 → (1−1.0)=0 でクランプ。
         assert!(bond_force_tx(3.0, 300.0, 0.0, 0.0, 0.1, true).abs() < 1e-9);
     }
 
@@ -368,7 +357,7 @@ mod tests {
             be: 350.0,
             je: 7.0 * 530.0 / 8.0,
             tau_bu: 3.0,
-            sum_phi1: 4.0 * std::f64::consts::PI * 25.0, // 4-D25 の周長合計
+            sum_phi1: 4.0 * std::f64::consts::PI * 25.0,
             tau_bu2: 0.0,
             sum_phi2: 0.0,
             s: 100.0,
@@ -390,7 +379,7 @@ mod tests {
         let je: f64 = 7.0 * 530.0 / 8.0;
         let be: f64 = 350.0;
         let lambda = 1.0 - 100.0 / (2.0 * je) - (be / 2.0) / (4.0 * je);
-        let tan_theta = 0.9 * 600.0 / (2.0 * 3000.0); // L/D=5 ≥ 1.5
+        let tan_theta = 0.9 * 600.0 / (2.0 * 3000.0);
         let tx = 3.0 * (4.0 * std::f64::consts::PI * 25.0);
         let nu_sb = nu * 24.0;
         let arch_stress = (nu_sb - 2.5 * tx / (lambda * be)).max(0.0);
@@ -403,7 +392,6 @@ mod tests {
 
     #[test]
     fn test_rc_shear_vbu_ductility_yield_hinge_reduces() {
-        // 降伏ヒンジ計画（Rp>0）は Tx 低減で Vbu が下がる（トラス項が支配する範囲）。
         let mut inp = sample_vbu();
         inp.rp = 0.03;
         let v_no = rc_shear_vbu_ductility(&inp);

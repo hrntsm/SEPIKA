@@ -182,7 +182,6 @@ fn joint_rebar_issue(
     col: &MemberInfo<'_>,
     beams: &[RcBeam<'_>],
 ) -> Option<String> {
-    // この接合部で配筋を消費する選択柱とRC梁だけを検査する。
     for section in std::iter::once(col.sec.id).chain(beams.iter().map(|beam| beam.member.sec.id)) {
         if let Err(reason) = model.ensure_stb_rebar_supported(section) {
             return Some(reason);

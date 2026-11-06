@@ -165,7 +165,6 @@ mod tests {
 
     #[test]
     fn surface_refs_は圧縮側と引張側の絶対値が大きい方を軸力基準に採る() {
-        // 圧縮軸耐力は負値で持つ。絶対値で比べて大きい方を採る。
         let s = surface(-5000.0, 1200.0, 300.0, 800.0);
         assert_eq!(surface_refs(&s), [300.0, 800.0, 5000.0]);
 
@@ -175,14 +174,11 @@ mod tests {
 
     #[test]
     fn surface_refs_は耐力が0でも1_0を下回らない() {
-        // ゼロ割の防止。曲面が縮退していても投影が発散しない。
         assert_eq!(surface_refs(&surface(0.0, 0.0, 0.0, 0.0)), [1.0, 1.0, 1.0]);
     }
 
     #[test]
     fn to_world_は格子点の並びを画面の並びへ入れ替える() {
-        // 格子点は [N, My, Mz]、ワールドは [My_n, Mz_n, N_n]。
-        // N を第 3 成分へ置いて画面の上下軸に対応させる。
         let w = to_world(&[100.0, 200.0, 400.0], [2.0, 4.0, 5.0]);
         assert_eq!(w, [100.0, 100.0, 20.0]);
     }
@@ -193,7 +189,6 @@ mod tests {
         let cam = CameraState::default();
         assert!((cam.zoom - 3.0).abs() < 1e-6, "既定ズームは 3.0");
         let view = MnView::new(&rect, &cam);
-        // 短辺 250 の 0.32 倍。
         assert!((view.scale - 80.0).abs() < 1e-4, "scale = {}", view.scale);
     }
 }

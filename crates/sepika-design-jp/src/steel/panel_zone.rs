@@ -138,7 +138,6 @@ mod tests {
             ..steel
         };
 
-        // 検定側は充填の有無で結果が変わらない。
         let check = |geometry: PanelGeometry| {
             let mut inp = base_panel_h_input(0.0);
             inp.geometry = geometry;
@@ -171,7 +170,6 @@ mod tests {
             assembled.ratio()
         );
 
-        // 別の値を与えれば検定比は pM に比例して変わる。
         let mut half = base_panel_h_input(0.0);
         half.design_moment = Some(assembled_pm / 2.0);
         let half = s_panel_zone_check(&half).unwrap();
@@ -182,7 +180,6 @@ mod tests {
             assembled.ratio() / 2.0
         );
 
-        // 符号は絶対値で扱う（左右どちら向きのパネルモーメントでも同じ検定比）。
         let mut neg = base_panel_h_input(0.0);
         neg.design_moment = Some(-assembled_pm);
         assert!((s_panel_zone_check(&neg).unwrap().ratio() - assembled.ratio()).abs() < 1e-12);
@@ -197,7 +194,6 @@ mod tests {
         assert!((n08 / n0 - 0.6).abs() < 1e-9);
     }
 
-    // pMy を検定比から逆算するテスト用ヘルパ。
     fn rc_or_s_pmy(inp: &SPanelInput) -> f64 {
         let res = s_panel_zone_check(inp).unwrap();
         let p_m = inp.beam_moment_left + inp.beam_moment_right

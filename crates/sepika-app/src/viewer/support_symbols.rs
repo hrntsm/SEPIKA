@@ -364,8 +364,6 @@ pub(super) fn show_isolator_tooltip(ui: &egui::Ui, elem_id: ElemId, props: &Isol
 mod tests {
     use super::*;
 
-    // ----- zigzag_points -----
-
     #[test]
     fn zigzag_points_preserve_endpoints_and_remain_drawable() {
         let from = egui::pos2(0.0, 0.0);
@@ -379,8 +377,6 @@ mod tests {
             assert_eq!(pts.iter().any(|p| p.y < from.y), bends);
         }
     }
-
-    // ----- spiral_fracs -----
 
     #[test]
     fn spiral_fracs_remain_finite_and_cover_radius() {
@@ -401,8 +397,6 @@ mod tests {
                 .all(|w| w[1].0 >= w[0].0 && w[1].1 >= w[0].1));
         }
     }
-
-    // ----- isolator_marker_geometry -----
 
     #[test]
     fn isolator_marker_geometry_is_centered_and_drawable() {
@@ -430,8 +424,6 @@ mod tests {
             assert!(geo.circle_radius.is_finite() && geo.circle_radius > 0.0);
         }
     }
-
-    // ----- support_isolators -----
 
     use sepika_core::ids::NodeId;
     use sepika_core::model::{
@@ -487,14 +479,13 @@ mod tests {
         let model = ground_and_target(Dof6Mask::FIXED, Dof6Mask::FREE);
         let found = support_isolators(&model);
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].0, 1); // 対象節点（非固定側）の index
+        assert_eq!(found[0].0, 1);
         assert_eq!(found[0].1, ElemId(0));
         assert_eq!(found[0].2.kind, IsolatorKind::LeadRubber);
     }
 
     #[test]
     fn support_isolators_order_independent() {
-        // 接地節点が nodes[1] 側でも対象節点（nodes[0]）を正しく拾う
         let model = ground_and_target(Dof6Mask::FREE, Dof6Mask::FIXED);
         let found = support_isolators(&model);
         assert_eq!(found.len(), 1);

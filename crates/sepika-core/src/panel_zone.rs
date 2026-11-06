@@ -1563,7 +1563,6 @@ mod tests {
             let g = PanelGeometry::from_column(&s).expect("CFT も諸元は解決できる");
             assert_eq!(g.kind, kind);
             assert!(g.filled, "CFT は充填断面");
-            // 検定に使う Ve・κ は鋼管と同じ式で求まる。
             assert!(g.effective_volume(500.0) > 0.0);
             assert!(g.kappa() > 0.0);
         }
@@ -1611,8 +1610,6 @@ mod tests {
         let s = sec(rc_rect_shape(700.0, 700.0), 700.0, None);
         assert!(PanelGeometry::from_column(&s).is_none());
     }
-
-    // ===== 接合部の判定（モデル化・断面検定の共通規則）=====
 
     fn node(id: u32, coord: [f64; 3]) -> crate::model::Node {
         crate::model::Node {
@@ -1734,7 +1731,6 @@ mod tests {
                 node(1, [6000.0, 0.0, 3000.0]),
                 node(2, [0.0, 0.0, 0.0]),
             ],
-            // 材料は断面が持つ。断面 0（梁）・断面 1（柱）へそれぞれ割り当てる。
             sections: vec![beam_sec, col_sec],
             materials: vec![
                 mat(0, MaterialCategory::Steel),
@@ -2334,8 +2330,6 @@ mod tests {
         assert_eq!(after.db, before.db);
         assert_eq!(m.elements[0].nodes.as_slice(), &[NodeId(3), NodeId(1)]);
     }
-
-    // ===== 接合部の半寸法 =====
 
     /// 半寸法は柱せい・梁せいの 1/2。危険断面位置（face）は参照しない。
     #[test]

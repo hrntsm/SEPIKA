@@ -128,8 +128,6 @@ pub(crate) fn ctx_column(term: LoadTerm) -> DesignCtx {
     })
 }
 
-// 地震時短期の設計用せん断力 QD = min(QD1, QD2)
-
 #[test]
 fn test_seismic_design_shear_min_of_qd1_qd2() {
     use crate::{QdMethod, SeismicQd};
@@ -138,7 +136,7 @@ fn test_seismic_design_shear_min_of_qd1_qd2() {
             long_at: vec![(0.0, [0.0, 50_000.0, 0.0, 0.0, 0.0, 0.0])],
             n_factor: 1.5,
             n_mechanism: 1.0,
-            q_simple: None, // 未算定 → QL で代替
+            q_simple: None,
             clear_length: 4000.0,
             method: QdMethod::Min,
         }),
@@ -159,23 +157,18 @@ fn test_seismic_design_shear_min_of_qd1_qd2() {
     // 柱 QD1 = ΣcMy/h′ = 100kN（Q0/QL を加算しない）→ min(100, 200) = 100kN。
     let q_col = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, true);
     assert!((q_col - 100_000.0).abs() < 1e-6, "q_col={q_col}");
-    // QD2 単独選択。
     ctx.seismic_qd.as_mut().unwrap().method = QdMethod::Qd2;
     let q2 = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, false);
     assert!((q2 - 200_000.0).abs() < 1e-6, "q2={q2}");
-    // ΣMy<=0（終局曲げ不明）のとき QD1 は無効で QD2 のみ。
     ctx.seismic_qd.as_mut().unwrap().method = QdMethod::Min;
     let q_no_mu = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 0.0, false);
     assert!((q_no_mu - 200_000.0).abs() < 1e-6);
-    // 評価位置が長期内力にない場合・文脈なしの場合は解析値のまま。
     let q_missing = seismic_design_shear(&ctx, 0.5, 150_000.0, 1, 400.0e6, false);
     assert!((q_missing - 150_000.0).abs() < 1e-6);
     ctx.seismic_qd = None;
     let q_none = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, false);
     assert!((q_none - 150_000.0).abs() < 1e-6);
 }
-
-// 許容応力度（RC 造検定でのみ使う独自カバレッジ分。他は material_strength.rs 側で検証）
 
 #[test]
 fn test_rebar_allowable_tension_table() {
@@ -195,21 +188,17 @@ fn test_rebar_allowable_tension_table() {
 #[test]
 fn test_rebar_allowable_shear_table() {
     assert!((rebar_allowable_shear("SR235", true) - 155.0).abs() < 1e-9);
-    // 短期は基準強度 F=235（令90条表）。フォールバック 295 に落ちて F 値を
-    // 超過していた回帰の防止。
+    // SR235の短期許容応力度は令90条表の基準強度235 N/mm²。
     assert!((rebar_allowable_shear("SR235", false) - 235.0).abs() < 1e-9);
     assert!((rebar_allowable_shear("SR295", false) - 295.0).abs() < 1e-9);
     assert!((rebar_allowable_shear("SD345", true) - 195.0).abs() < 1e-9);
     assert!((rebar_allowable_shear("SD295A", false) - 295.0).abs() < 1e-9);
     assert!((rebar_allowable_shear("SD345", false) - 345.0).abs() < 1e-9);
     assert!((rebar_allowable_shear("SD390", false) - 390.0).abs() < 1e-9);
-    // SD490 の短期は基準強度 490。長期せん断補強筋は 195 の据え置き。
     assert!((rebar_allowable_shear("SD490", true) - 195.0).abs() < 1e-9);
     assert!((rebar_allowable_shear("SD490", false) - 490.0).abs() < 1e-9);
     assert!((rebar_allowable_shear("UNKNOWN", false) - 295.0).abs() < 1e-9);
 }
-
-// せん断スパン比 α・せん断耐力（普通強度せん断補強筋）
 
 #[test]
 fn test_shear_alpha_formula_and_clamps() {
@@ -220,9 +209,9 @@ fn test_shear_alpha_formula_and_clamps() {
         (1.0, 2.0, 2.0),
         (2.0, 2.0, 4.0 / 3.0),
         (3.0, 2.0, 1.0),
-        (0.0, 2.0, 2.0),  // 素の 4.0 → 梁の上限 2.0
-        (10.0, 2.0, 1.0), // 素の約 0.364 → 下限 1.0
-        (0.0, 1.5, 1.5),  // 柱の上限 1.5
+        (0.0, 2.0, 2.0),
+        (10.0, 2.0, 1.0),
+        (0.0, 1.5, 1.5),
     ];
     for (mqd, max_alpha, expected) in cases {
         let alpha = shear_alpha(q * d * mqd, q, d, max_alpha);
@@ -235,7 +224,6 @@ fn test_shear_alpha_formula_and_clamps() {
 
 #[test]
 fn test_pw_ratio_capped_long_term() {
-    // 過大なせん断補強筋比を作り、長期は 0.6% に制限されることを確認する。
     let shape = rc_rect_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 13.0, 30.0, 4);
     let props = axis_props_from_shape(&shape, crate::ultimate::rc_props::RcDirection::Strong, true)
         .unwrap();
@@ -285,7 +273,6 @@ fn test_beam_shear_damage_control_wft_cap_sd490() {
         .unwrap();
     assert!(props.pw > 0.002, "テストの前提として pw > 0.002 が必要");
 
-    // 材料表の w_ft は SD490 短期 = 490 のまま（クランプは検定時のみ）。
     let allow = rc_allow(24.0, ConcreteClass::Normal, "SD490", false);
     assert!((allow.w_ft - 490.0).abs() < 1e-9);
 
@@ -336,7 +323,6 @@ fn test_column_safety_check_excludes_alpha() {
         "α を変えても安全確保式は変化しない"
     );
 
-    // 損傷制御式は α に依存するため異なる値になる。
     allow.w_ft = w_ft;
     let qa_damage_1 = shear_capacity(&props, &allow, 1.0, LoadTerm::Short, true, true);
     let qa_damage_1_5 = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, true, true);
@@ -354,8 +340,6 @@ fn test_column_long_term_shear_has_no_rebar_term() {
     let expected = props.b * props.j * alpha * allow.fs;
     assert!((qal - expected).abs() / expected < 1e-9);
 }
-
-// フォールバック・RcDesign 統合（振り分け全体の確認）
 
 #[test]
 fn test_fc_missing_fallback() {
@@ -393,7 +377,6 @@ fn test_fc_missing_fallback() {
 
 #[test]
 fn test_shape_missing_fallback() {
-    // shape を持たない Section（数値直入力等）。
     let sec = Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Column),
         id: SectionId(0),
@@ -543,7 +526,6 @@ fn test_rc_circle_beam_and_column_smoke() {
     assert!(r_col.ratio().is_finite() && r_col.ratio() >= 0.0);
     assert!(r_col.basis.contains("円形柱"));
 
-    // 円形柱断面を梁部材に割り当てた場合は用途不一致として検定不能。
     let ctx_b = ctx_beam(LoadTerm::Short);
     match design.check(&forces, &sec, &mat, &ctx_b) {
         CheckOutcome::Skipped { reason } => assert!(reason.contains("用途不一致"), "{reason}"),
@@ -764,7 +746,6 @@ fn test_rc_circle_beam_bending_matches_circle_axis_props() {
             .ratio
     };
 
-    // N=0 の円形柱は軸力比 0・曲げ比 (mz/MA)^2 の2乗則に従う。
     let r20 = axial_bending(20_000_000.0);
     let r40 = axial_bending(40_000_000.0);
     assert!(r20 > 0.0 && r20.is_finite(), "r20={r20}");

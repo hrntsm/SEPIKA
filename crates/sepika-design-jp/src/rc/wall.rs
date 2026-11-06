@@ -159,7 +159,7 @@ mod tests {
         let res = rc_wall_shear_check(&inp);
 
         let fs = crate::rc::concrete_allowable_shear(inp.fc, true);
-        let q1 = inp.t * inp.l * fs; // r=1
+        let q1 = inp.t * inp.l * fs;
         let expected_ratio = inp.q_design.abs() / q1;
         assert!((res.ratio() - expected_ratio).abs() < 1e-6);
     }
@@ -171,7 +171,7 @@ mod tests {
 
         let fs = crate::rc::concrete_allowable_shear(inp.fc, false);
         let q1 = inp.t * inp.l * fs;
-        let le = inp.l_clear; // 側柱2本
+        let le = inp.l_clear;
         let qw = inp.ps * inp.t * le * inp.w_ft;
         let sum_qc: f64 = inp
             .side_columns
@@ -211,19 +211,12 @@ mod tests {
         assert!((res_l.ratio() / res_n.ratio() - 1.0 / 0.9).abs() < 1e-9);
     }
 
-    // ------------------------------------------------------------------
-    // RC 造耐震壁（SRC 側柱の鉄骨せん断項）
-    // ------------------------------------------------------------------
-
     #[test]
     fn rc_wall_steel_shear_adds_to_qc() {
         let mut inp = base_wall_input();
-        // 片側柱に鉄骨せん断項 steel_shear=100,000N を追加（SRC 側柱相当）。
         inp.side_columns[0].steel_shear = 100_000.0;
         let res_with_steel = rc_wall_shear_check(&inp);
         let res_without = rc_wall_shear_check(&base_wall_input());
-        // 鉄骨項の分だけ Q2（ひいては Qa）が大きくなり ratio は小さくなる
-        // （安全側の増分であることを確認）。
         assert!(res_with_steel.ratio() < res_without.ratio());
 
         let fs = crate::rc::concrete_allowable_shear(inp.fc, false);

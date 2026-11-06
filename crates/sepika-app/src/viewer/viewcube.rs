@@ -223,22 +223,20 @@ mod tests {
                 (v[0].abs() < 1e-5) && (v[1].abs() < 1e-5) && (v[2] - 1.0).abs() < 1e-5,
                 "{corner:?}: 視線正面を向いていない: {v:?}"
             );
-            // 俯仰はターンテーブルの可動域内（真上〜真下）に収まる
             assert!((-std::f32::consts::PI..=0.0).contains(&cam.pitch));
         }
     }
 
     #[test]
     fn 真上真下へのスナップは正対する() {
-        // Top/Bottom は旋回角 0 の正対ビュー: ワールド X 軸が画面右を向く
         let mut cam = CameraState::default();
-        cam.snap_to_direction([0.0, 0.0, 1.0]); // Top
+        cam.snap_to_direction([0.0, 0.0, 1.0]);
         assert_eq!(cam.yaw, 0.0);
         assert!(cam.pitch.abs() < 1e-6);
         let x = q_rotate(cam.rot, [1.0, 0.0, 0.0]);
         assert!((x[0] - 1.0).abs() < 1e-5, "X 軸が画面右を向かない: {x:?}");
 
-        cam.turntable_drag(100.0, 0.0); // 旋回してから Bottom へ
+        cam.turntable_drag(100.0, 0.0);
         cam.snap_to_direction([0.0, 0.0, -1.0]);
         assert_eq!(cam.yaw, 0.0);
         assert!((cam.pitch + std::f32::consts::PI).abs() < 1e-6);
@@ -265,13 +263,12 @@ mod tests {
 
     #[test]
     fn 裏側の面にはヒットしない() {
-        let cam = CameraState::default(); // yaw=45°, pitch=-45°: Bottom/Back/Left が裏
+        let cam = CameraState::default();
         let layout = layout();
         for (i, (n, label)) in FACES.iter().enumerate() {
             if face_visible(&cam, *n) {
                 continue;
             }
-            // 画面全域を走査しても裏面がヒットすることはない
             for x in (40..160).step_by(4) {
                 for y in (40..160).step_by(4) {
                     let hit = hit_test(&cam, &layout, egui::pos2(x as f32, y as f32));
@@ -285,7 +282,6 @@ mod tests {
     fn 可視コーナーの近傍クリックはコーナーが面より優先される() {
         let cam = CameraState::default();
         let layout = layout();
-        // 既定ビューで手前に見える頂点 [1,-1,1]（Top/Front/Right の共有頂点）
         let idx = CORNERS.iter().position(|c| *c == [1.0, -1.0, 1.0]).unwrap();
         let (p, _) = project_cube(&cam, CORNERS[idx], &layout);
         assert_eq!(
@@ -301,7 +297,6 @@ mod tests {
         let layout = layout();
         let idx = CORNERS.iter().position(|c| *c == [1.0, -1.0, 1.0]).unwrap();
         let (p, _) = project_cube(&cam, CORNERS[idx], &layout);
-        // 半径いっぱいまでずらしてもコーナーにヒットする（押しやすさの担保）
         let off = egui::pos2(p.x + CORNER_HIT_PX - 0.5, p.y);
         assert_eq!(
             hit_test(&cam, &layout, off),

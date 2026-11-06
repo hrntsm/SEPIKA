@@ -87,7 +87,6 @@ mod tests {
         let peak = 6.0e7;
         // 力が 6e-4 N まで落ちた時刻。基準は 6e5（最大の 1%）で止まる。
         assert_eq!(dynamic_reference_norm(6.0e-4, peak), 6.0e5);
-        // 応答が大きい時刻は瞬間値がそのまま基準になる（下限は効かない）。
         assert_eq!(dynamic_reference_norm(1.5e7, peak), 1.5e7);
     }
 

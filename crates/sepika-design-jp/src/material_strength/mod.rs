@@ -165,11 +165,9 @@ mod tests {
             fc: Some(24.0),
             fy: None,
         };
-        // fy が無ければ 0（検定の入口で止まるため耐力算定へは流れない）。
         assert!(rebar_sigma_y_of(Some(&m)).abs() < 1e-9);
         m.fy = Some(400.0);
         assert!((rebar_sigma_y_of(Some(&m)) - 400.0).abs() < 1e-9);
-        // 主筋の材料が未割当でも 0 とし、既定値をでっち上げない。
         assert!(rebar_sigma_y_of(None).abs() < 1e-9);
     }
 
@@ -204,7 +202,6 @@ mod tests {
             below,
             above
         );
-        // λ>Λ 側は λ=Λ（r=1）で 0.277F に一致する。
         assert!((above - 0.277 * f).abs() < 1e-6, "above={}", above);
     }
 

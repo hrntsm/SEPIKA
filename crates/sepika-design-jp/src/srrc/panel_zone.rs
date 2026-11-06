@@ -148,12 +148,12 @@ mod tests {
     #[test]
     fn src_panel_beta_zero_without_steel() {
         let mut inp = base_src_panel_input();
-        inp.j_tw = 0.0; // 鉄骨ウェブ厚 0 → β=0
+        inp.j_tw = 0.0;
         let res = src_panel_zone_check(&inp);
 
         let cv = inp.col_width * inp.m_bd * inp.m_cd;
         let fs = crate::rc::concrete_allowable_shear(inp.fc, false);
-        let ma = cv * 3.0 * fs; // (1+beta) = 1
+        let ma = cv * 3.0 * fs;
         let expected_ratio = inp.sum_beam_moments / ma;
 
         assert!((res.ratio() - expected_ratio).abs() < 1e-6);
@@ -187,16 +187,12 @@ mod tests {
         let expected_ratio = inp.sum_beam_moments / ma;
         assert!((res.ratio() - expected_ratio).abs() < 1e-6);
 
-        // 長期は fs が小さく Ma も小さいため、ratio は短期より大きい。
         let res_short = src_panel_zone_check(&base_src_panel_input());
         assert!(res.ratio() > res_short.ratio());
     }
 
     #[test]
     fn src_panel_cv_uses_full_cb_regardless_of_beam_type() {
-        // cV = Cb・m_bd・mCd（全体積、原典図で確認 2026-07-11）は m_bd に
-        // mBd/sBd のどちらが入っても同じ式なので、beam_is_steel を切り替えても
-        // （m_bd を同値に保てば）検定結果は変わらない。
         let inp_rc = base_src_panel_input();
         let mut inp_s = base_src_panel_input();
         inp_s.beam_is_steel = true;

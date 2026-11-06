@@ -484,7 +484,6 @@ mod tests {
             kind,
         };
 
-        // 種別が一つも設定されていない（全て既定値 Other） → 先頭ケースのみ
         let model_no_kind = Model {
             load_cases: vec![
                 mk_lc(0, "LC0", LoadCaseKind::Other),
@@ -498,8 +497,6 @@ mod tests {
             "種別未設定モデルは従来互換で先頭ケースのみ"
         );
 
-        // LiveSeismic がない → Dead + Live。
-        // 骨組用積載ケースは地震用重量から除外する。
         let model_dead_live = Model {
             load_cases: vec![
                 mk_lc(0, "固定", LoadCaseKind::Dead),
@@ -516,7 +513,6 @@ mod tests {
             "LiveSeismic がなければ Dead+Live（骨組用積載・積雪は除外）"
         );
 
-        // LiveSeismic があれば Live ではなく LiveSeismic を優先
         let model_dead_live_seismic = Model {
             load_cases: vec![
                 mk_lc(0, "固定", LoadCaseKind::Dead),
@@ -531,7 +527,6 @@ mod tests {
             "LiveSeismic があれば Live ではなく LiveSeismic を採用"
         );
 
-        // 複数 Dead ケースも全て対象
         let model_multi_dead = Model {
             load_cases: vec![
                 mk_lc(0, "固定1", LoadCaseKind::Dead),
