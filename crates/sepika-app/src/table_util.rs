@@ -230,6 +230,7 @@ pub(crate) fn standard_table(
         .show(ui, |ui| {
             ui.set_max_width(table_w);
 
+            crate::theme::table_header(ui, table_w, row_h, ui.id().with((salt, "header")));
             let mut tb = TableBuilder::new(ui)
                 .id_salt(salt)
                 .striped(true)
@@ -253,6 +254,13 @@ pub(crate) fn standard_table(
             });
         });
 
+    crate::theme::group_outline(
+        ui,
+        out.inner_rect
+            .expand(2.0)
+            .intersect(ui.clip_rect().shrink(1.0)),
+        ui.id().with((salt, "outline")),
+    );
     let measured = out.content_size.x;
     ui.data_mut(|d| d.insert_temp(width_id, measured));
     if (measured - content_w).abs() > 0.5 {
@@ -271,7 +279,7 @@ pub(crate) fn text_cell(ui: &mut egui::Ui, text: &str) {
 
 /// 値を持たない・対象外であることを示す文字列セル（淡色）。`hover` に理由を書く。
 pub(crate) fn muted_cell(ui: &mut egui::Ui, text: &str, hover: &str) {
-    ui.colored_label(crate::theme::GRAY_600, text)
+    ui.colored_label(crate::theme::UI_MUTED, text)
         .on_hover_text(hover);
 }
 

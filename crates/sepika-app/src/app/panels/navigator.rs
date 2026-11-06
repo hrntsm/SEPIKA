@@ -104,7 +104,7 @@ impl App {
 
             let _ = ui.collapsing("階/レベル", |ui| {
                 if self.core.model.stories.is_empty() {
-                    ui.colored_label(crate::theme::GRAY_600, "未定義");
+                    ui.colored_label(crate::theme::UI_MUTED, "未定義");
                     if ui.small_button("🏢 解析タブで自動生成").clicked() {
                         self.ui.view.active_tab = Tab::Analysis;
                     }

@@ -545,8 +545,8 @@ impl GridWidget {
         let sp = ui.spacing().item_spacing;
         let g = rect.expand2(egui::vec2(sp.x * 0.5, sp.y * 0.5));
         ui.painter()
-            .rect_filled(g, egui::CornerRadius::ZERO, theme::GRAY_100);
-        let grid_stroke = egui::Stroke::new(1.0_f32, theme::GRAY_200);
+            .rect_filled(g, egui::CornerRadius::ZERO, theme::UI_HEADER);
+        let grid_stroke = egui::Stroke::new(1.0_f32, theme::UI_DIVIDER);
         ui.painter()
             .line_segment([g.right_top(), g.right_bottom()], grid_stroke);
         ui.painter()
@@ -568,11 +568,7 @@ impl GridWidget {
                 "＋".to_string()
             },
             font,
-            if is_real {
-                theme::GRAY_700
-            } else {
-                theme::GRAY_600
-            },
+            theme::UI_TEXT,
         );
         let (shift, primary_pressed, primary_down, pointer_pos) = ui.input(|i| {
             (
@@ -611,8 +607,8 @@ impl GridWidget {
         let sp = ui.spacing().item_spacing;
         let g = rect.expand2(egui::vec2(sp.x * 0.5, sp.y * 0.5));
         ui.painter()
-            .rect_filled(g, egui::CornerRadius::ZERO, theme::GRAY_100);
-        let grid_stroke = egui::Stroke::new(1.0_f32, theme::GRAY_200);
+            .rect_filled(g, egui::CornerRadius::ZERO, theme::UI_HEADER);
+        let grid_stroke = egui::Stroke::new(1.0_f32, theme::UI_DIVIDER);
         ui.painter()
             .line_segment([g.right_top(), g.right_bottom()], grid_stroke);
         ui.painter()
@@ -627,7 +623,7 @@ impl GridWidget {
             egui::Align2::LEFT_CENTER,
             "ID",
             font,
-            theme::GRAY_900,
+            theme::UI_TEXT,
         );
         let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
         if primary_pressed && resp.hovered() {
@@ -648,8 +644,8 @@ impl GridWidget {
         let sp = ui.spacing().item_spacing;
         let g = rect.expand2(egui::vec2(sp.x * 0.5, sp.y * 0.5));
         ui.painter()
-            .rect_filled(g, egui::CornerRadius::ZERO, theme::GRAY_100);
-        let grid_stroke = egui::Stroke::new(1.0_f32, theme::GRAY_200);
+            .rect_filled(g, egui::CornerRadius::ZERO, theme::UI_HEADER);
+        let grid_stroke = egui::Stroke::new(1.0_f32, theme::UI_DIVIDER);
         ui.painter()
             .line_segment([g.right_top(), g.right_bottom()], grid_stroke);
         ui.painter()
@@ -667,7 +663,7 @@ impl GridWidget {
             egui::Align2::LEFT_CENTER,
             headers.get(col).copied().unwrap_or(""),
             font,
-            theme::GRAY_900,
+            theme::UI_TEXT,
         );
         let (shift, primary_pressed, primary_down, pointer_pos) = ui.input(|i| {
             (
@@ -707,7 +703,7 @@ impl GridWidget {
         self.focus_ids.push(resp.id);
         let sp = ui.spacing().item_spacing;
         let g = rect.expand2(egui::vec2(sp.x * 0.5, sp.y * 0.5));
-        let grid_stroke = egui::Stroke::new(1.0_f32, theme::GRAY_200);
+        let grid_stroke = egui::Stroke::new(1.0_f32, theme::UI_DIVIDER);
         ui.painter()
             .line_segment([g.right_top(), g.right_bottom()], grid_stroke);
         ui.painter()
@@ -715,7 +711,7 @@ impl GridWidget {
         let is_real = cell.row < adapter.rows();
         if !is_real {
             ui.painter()
-                .rect_filled(g, egui::CornerRadius::ZERO, theme::GRAY_100);
+                .rect_filled(g, egui::CornerRadius::ZERO, theme::UI_BACKGROUND);
         }
         let sel = self.grid.rect();
         let selected = self.grid.active && sel.contains(cell.row, cell.col);
@@ -774,7 +770,7 @@ impl GridWidget {
             )
         };
         ui.painter()
-            .text(position, alignment, &text, font, theme::GRAY_700);
+            .text(position, alignment, &text, font, theme::UI_TEXT);
         let resp = resp.on_hover_text(&text);
         let (shift, primary_pressed, primary_down, pointer_pos) = ui.input(|i| {
             (
@@ -990,6 +986,13 @@ impl GridWidget {
                 });
         });
         self.table_rect = table_scope.response.rect;
+        theme::group_outline(
+            ui,
+            self.table_rect
+                .expand(2.0)
+                .intersect(ui.clip_rect().shrink(1.0)),
+            ui.id().with("grid_outline"),
+        );
 
         if let Some(r) = self.pending_row_delete.take() {
             if adapter.validate_row_deletion(r).is_ok() {

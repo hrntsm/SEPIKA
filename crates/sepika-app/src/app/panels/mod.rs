@@ -252,10 +252,10 @@ impl App {
     }
     /// レポートタブ：CSV レポートのプレビューとエクスポート。
     pub(crate) fn report_tab_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("レポート");
+        crate::theme::panel_heading(ui, "レポート", "条件・実行結果");
         if !crate::summary::has_report_content(&self.core.scoped.results) {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "解析結果がありません。解析タブから実行するとレポートを生成できます。",
             );
             return;

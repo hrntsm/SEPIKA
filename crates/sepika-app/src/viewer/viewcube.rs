@@ -161,9 +161,9 @@ pub(crate) fn draw(
         let (n, label) = FACES[i];
         let quad = face_vertices(n).map(|v| project_cube(cam, v, layout).0);
         let fill = if hover == Some(Hit::Face(i)) {
-            theme::BLUE_300
+            theme::UI_HOVER
         } else {
-            theme::translucent(theme::GRAY_100, 230)
+            theme::translucent(theme::UI_BACKGROUND, 230)
         };
         painter.add(egui::Shape::convex_polygon(
             quad.to_vec(),
@@ -184,7 +184,7 @@ pub(crate) fn draw(
 
     if let Some(Hit::Corner(i)) = hover {
         let (p, _) = project_cube(cam, CORNERS[i], layout);
-        painter.circle_filled(p, 5.0, theme::BLUE_500);
+        painter.circle_filled(p, 5.0, theme::UI_ACCENT);
     }
 }
 #[cfg(test)]

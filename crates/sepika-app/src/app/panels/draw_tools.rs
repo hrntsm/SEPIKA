@@ -338,7 +338,7 @@ impl App {
         };
         let mut close = false;
         let mut open = true;
-        egui::Window::new("割当領域")
+        let window = egui::Window::new("割当領域")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -351,6 +351,9 @@ impl App {
                     crate::app::RegionAssignTarget::Wall(id) => self.wall_region_assign_ui(ui, id),
                 };
             });
+        if let Some(window) = window {
+            crate::theme::window_outline(&window.response);
+        }
         if close || !open {
             self.ui.scoped.region_assign_dialog = None;
         }

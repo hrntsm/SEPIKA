@@ -11,35 +11,48 @@
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
-/// ツールバー／アクティビティバー背景
-pub const BLUE_200: Color32 = Color32::from_rgb(0xC8, 0xD9, 0xED);
-/// 選択ハイライト、ボタンホバー、ヘッダー帯
+/// 画面背景。
+pub const UI_BACKGROUND: Color32 = Color32::from_rgb(0xF4, 0xF7, 0xFA);
+/// グループ見出し・ツールバー。
+pub const UI_HEADER: Color32 = Color32::from_rgb(0xD6, 0xE8, 0xF5);
+/// 別グループ見出し・ステータスバー。
+pub const UI_HEADER_ALT: Color32 = Color32::from_rgb(0xE2, 0xE8, 0xF6);
+/// 主要操作のボタン面。
+pub const UI_ACTION: Color32 = Color32::from_rgb(0xC0, 0xD8, 0xEB);
+/// 白い操作面のホバー。
+pub const UI_HOVER: Color32 = Color32::from_rgb(0xE1, 0xEE, 0xF8);
+/// 操作アクセント・選択印。
+pub const UI_ACCENT: Color32 = Color32::from_rgb(0x52, 0x7A, 0x9A);
+/// グループ外枠。
+pub const UI_OUTLINE: Color32 = Color32::from_rgb(0x46, 0x58, 0x64);
+/// 入力欄の境界。
+pub const UI_INPUT_BORDER: Color32 = Color32::from_rgb(0x7D, 0x91, 0x9F);
+/// 内部の区切り線。
+pub const UI_DIVIDER: Color32 = Color32::from_rgb(0xD6, 0xE0, 0xE7);
+/// 見出し・本文・数値。
+pub const UI_TEXT: Color32 = Color32::from_rgb(0x30, 0x43, 0x4F);
+/// 白〜ごく淡い背景上の補助文字。
+pub const UI_MUTED: Color32 = Color32::from_rgb(0x5D, 0x6E, 0x7A);
+
+/// ソリッド表示の鋼材面。
 pub const BLUE_300: Color32 = Color32::from_rgb(0x8E, 0xB9, 0xE5);
-/// ステータスバー背景
-pub const BLUE_400: Color32 = Color32::from_rgb(0x4A, 0x7A, 0xB5);
-/// メインアクセント。アクティブボタン・枠線・インジケーター・ツールアイコン
+/// モデルのホバー強調。
 pub const BLUE_500: Color32 = Color32::from_rgb(0x21, 0x71, 0xC1);
-/// アクセントのホバー濃色
+/// 結果グラフの青色系列。
 pub const BLUE_600: Color32 = Color32::from_rgb(0x18, 0x5A, 0x9E);
 
-/// 見出し・主要テキスト
+/// 図の注記・寸法文字。
 pub const GRAY_900: Color32 = Color32::from_rgb(0x1A, 0x23, 0x32);
-/// ナビゲーションテキスト・サブテキスト
+/// モデル線・図の文字。
 pub const GRAY_700: Color32 = Color32::from_rgb(0x2D, 0x3A, 0x4A);
-/// 本文テキスト
+/// モデルの補助線・図の文字。
 pub const GRAY_600: Color32 = Color32::from_rgb(0x4A, 0x55, 0x68);
 /// キャンバスのドットグリッド
 pub const GRAY_300: Color32 = Color32::from_rgb(0xA8, 0xB4, 0xC4);
-/// ボーダー・入力欄枠線・テーブルストライプ
-pub const GRAY_200: Color32 = Color32::from_rgb(0xC5, 0xD0, 0xDE);
-/// ドック／パネル内部（ツールバーより一段淡い）
-pub const GRAY_100: Color32 = Color32::from_rgb(0xE6, 0xEC, 0xF5);
 /// 入力欄・2D グラフ背景
 pub const WHITE: Color32 = Color32::WHITE;
 
-/// 重要操作（解析実行・確定）および進捗
-pub const GREEN_500: Color32 = Color32::from_rgb(0x00, 0xB0, 0x50);
-/// アクションのホバー
+/// 結果グラフの緑色系列。
 pub const GREEN_600: Color32 = Color32::from_rgb(0x00, 0x8F, 0x40);
 /// エラー表示（ブランド対象外の固定色）
 pub const ERROR_RED: Color32 = Color32::from_rgb(0xEA, 0x43, 0x35);
@@ -67,10 +80,10 @@ pub const GOOD_TEXT: Color32 = Color32::from_rgb(0x1C, 0x68, 0x34);
 /// キーボードフォーカスの輪郭。
 pub const FOCUS_STROKE: Stroke = Stroke {
     width: 2.0,
-    color: BLUE_600,
+    color: UI_ACCENT,
 };
 /// 選択領域の不透明背景。
-pub const SELECTION_BG: Color32 = Color32::from_rgb(0xDC, 0xE9, 0xF8);
+pub const SELECTION_BG: Color32 = Color32::from_rgb(0xEA, 0xF3, 0xFA);
 
 /// 名称を一行に省略し、ホバーで全文を表示する。
 pub(crate) fn name_label(ui: &mut egui::Ui, name: &str) -> egui::Response {
@@ -106,11 +119,179 @@ pub(crate) fn focus_outline(ui: &egui::Ui, response: &egui::Response) {
 
 /// 補助パネルの見出しを、外枠を増やさず表示する。
 pub(crate) fn panel_heading(ui: &mut egui::Ui, title: &str, access: &str) {
-    ui.horizontal_wrapped(|ui| {
-        ui.strong(title);
-        ui.label(egui::RichText::new(access).small().color(GRAY_600));
-    });
+    let background = ui.painter().add(egui::Shape::Noop);
+    let response = ui
+        .horizontal_wrapped(|ui| {
+            ui.strong(egui::RichText::new(title).color(UI_TEXT));
+            ui.label(egui::RichText::new(access).small().color(UI_TEXT));
+        })
+        .response;
+    let mut rect = response.rect;
+    rect.max.x = ui.max_rect().right().min(ui.clip_rect().right());
+    rect = rect.expand2(egui::vec2(3.0, 2.0));
+    ui.painter()
+        .set(background, egui::Shape::rect_filled(rect, 3, UI_HEADER));
+    pencil_line(
+        ui.painter(),
+        ui.id().with(title),
+        rect.left_bottom(),
+        rect.right_bottom(),
+    );
     ui.add_space(ui.spacing().item_spacing.y);
+}
+
+fn pencil_texture(ctx: &egui::Context) -> egui::TextureHandle {
+    let key = egui::Id::new("pencil_border_texture");
+    if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(key)) {
+        return texture;
+    }
+    let pixels = (0..128 * 16)
+        .map(|i| {
+            let grain = ((i as u32).wrapping_mul(747796405).wrapping_add(2891336453) >> 20) as u8;
+            let alpha = if grain < 35 { 35 } else { 155 + grain / 3 };
+            Color32::from_white_alpha(alpha)
+        })
+        .collect();
+    let texture = ctx.load_texture(
+        "pencil_border",
+        egui::ColorImage::new([128, 16], pixels),
+        egui::TextureOptions::LINEAR_REPEAT,
+    );
+    ctx.data_mut(|data| data.insert_temp(key, texture.clone()));
+    texture
+}
+
+fn pencil_mesh(
+    points: &[egui::Pos2],
+    id: egui::Id,
+    texture: egui::TextureId,
+    pixels_per_point: f32,
+) -> egui::epaint::Mesh {
+    let mut mesh = egui::epaint::Mesh::with_texture(texture);
+    let phase = (id.value() % 1024) as f32 * 0.01;
+    let fringe = 0.7 / pixels_per_point;
+    let mut distance = 0.0;
+    for (i, &point) in points.iter().enumerate() {
+        if i > 0 {
+            distance += point.distance(points[i - 1]);
+        }
+        let tangent = points[(i + 1).min(points.len() - 1)] - points[i.saturating_sub(1)];
+        let normal = egui::vec2(-tangent.y, tangent.x).normalized();
+        let half_width =
+            0.88 + 0.25 * (distance * 0.19 + phase).sin() + 0.12 * (distance * 0.63 + phase).sin();
+        let center = point + normal * (0.12 * (distance * 0.11 + phase).sin());
+        for (offset, v, color) in [
+            (-half_width - fringe, 0.0, Color32::TRANSPARENT),
+            (-half_width, 0.12, UI_OUTLINE),
+            (half_width, 0.88, UI_OUTLINE),
+            (half_width + fringe, 1.0, Color32::TRANSPARENT),
+        ] {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: center + normal * offset,
+                uv: egui::pos2(distance / 64.0 + phase, v),
+                color,
+            });
+        }
+        if i > 0 {
+            let base = (i as u32 - 1) * 4;
+            for band in 0..3 {
+                mesh.add_triangle(base + band, base + band + 1, base + band + 4);
+                mesh.add_triangle(base + band + 1, base + band + 5, base + band + 4);
+            }
+        }
+    }
+    mesh
+}
+
+fn pencil_path(painter: &egui::Painter, id: egui::Id, points: &[egui::Pos2]) {
+    let texture = pencil_texture(painter.ctx());
+    painter.add(pencil_mesh(
+        points,
+        id,
+        texture.id(),
+        painter.ctx().pixels_per_point(),
+    ));
+}
+
+fn pencil_line(painter: &egui::Painter, id: egui::Id, start: egui::Pos2, end: egui::Pos2) {
+    let length = start.distance(end);
+    let steps = (length / 4.0).ceil() as usize;
+    if steps == 0 {
+        return;
+    }
+    let direction = (end - start) / length;
+    let points: Vec<_> = (0..=steps)
+        .map(|i| start + direction * (i as f32 * 4.0).min(length))
+        .collect();
+    pencil_path(painter, id, &points);
+}
+
+/// 安定した識別子で主要グループの枠を描く。操作領域や入力IDは追加しない。
+pub(crate) fn group_outline(ui: &egui::Ui, rect: egui::Rect, id: egui::Id) {
+    pencil_frame(ui.painter(), rect, id);
+}
+
+fn pencil_frame(painter: &egui::Painter, rect: egui::Rect, id: egui::Id) {
+    if !rect.is_finite()
+        || rect.width() < 12.0
+        || rect.height() < 12.0
+        || !painter.clip_rect().intersects(rect)
+    {
+        return;
+    }
+    let radius = 3.0;
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ];
+    for side in 0..4 {
+        let start = corners[side];
+        let end = corners[(side + 1) % 4];
+        let direction = (end - start).normalized();
+        pencil_line(
+            painter,
+            id.with(side),
+            start + direction * radius,
+            end - direction * radius,
+        );
+        let next_direction = (corners[(side + 2) % 4] - end).normalized();
+        let center = end - direction * radius + next_direction * radius;
+        let points: Vec<_> = (0..=6)
+            .map(|i| {
+                let angle = i as f32 / 6.0 * std::f32::consts::FRAC_PI_2;
+                center - next_direction * (radius * angle.cos())
+                    + direction * (radius * angle.sin())
+            })
+            .collect();
+        pencil_path(painter, id.with((side, "corner")), &points);
+    }
+}
+
+/// 表の見出しを塗り、内容面との境界を描く。行高・入力IDは変更しない。
+pub(crate) fn table_header(ui: &egui::Ui, width: f32, height: f32, id: egui::Id) {
+    let rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(width, height));
+    ui.painter().rect_filled(rect, 0, UI_HEADER);
+    pencil_line(ui.painter(), id, rect.left_bottom(), rect.right_bottom());
+}
+
+/// ダイアログの外周を、内容と同じレイヤーに描く。
+pub(crate) fn window_outline(response: &egui::Response) {
+    pencil_frame(
+        &response.ctx.layer_painter(response.layer_id),
+        response.rect.shrink(1.5),
+        response.id.with("outline"),
+    );
+}
+
+/// 補助領域の表示範囲を一つのグループとして囲む。
+pub(crate) fn panel_outline(ui: &egui::Ui, salt: &str) {
+    group_outline(
+        ui,
+        ui.available_rect_before_wrap().expand(4.0),
+        ui.id().with(salt),
+    );
 }
 
 /// 検定比の表示用文字色と状態名。コンターの色には使用しない。
@@ -337,26 +518,28 @@ impl ColorMap {
     }
 }
 
-/// テーマ（ライト基準・スチールブルーのクローム・角丸 4/6px・タイポスケール）を
-/// egui コンテキストへ適用する。アプリ起動時に一度だけ呼ぶ。
+/// 青系パステルの操作面・白い内容面と文字サイズを適用する。起動時に一度呼ぶ。
 pub fn apply_theme(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::light());
 
     let mut style = (*ctx.global_style()).clone();
     let mut v = egui::Visuals::light();
 
-    v.panel_fill = GRAY_100;
-    v.window_fill = GRAY_100;
+    v.panel_fill = UI_BACKGROUND;
+    v.window_fill = WHITE;
+    v.window_stroke = Stroke::new(1.0_f32, UI_OUTLINE);
+    v.window_shadow = egui::epaint::Shadow::NONE;
+    v.popup_shadow = egui::epaint::Shadow::NONE;
     v.extreme_bg_color = WHITE;
     v.text_edit_bg_color = Some(WHITE);
-    v.faint_bg_color = Color32::from_rgb(0xF2, 0xF5, 0xFA);
+    v.faint_bg_color = UI_BACKGROUND;
     v.warn_fg_color = WARN_TEXT;
     v.error_fg_color = ERROR_TEXT;
     v.code_bg_color = WHITE;
-    v.hyperlink_color = BLUE_500;
+    v.hyperlink_color = UI_ACCENT;
 
     v.selection.bg_fill = SELECTION_BG;
-    v.selection.stroke = Stroke::new(1.5_f32, GRAY_900);
+    v.selection.stroke = Stroke::new(1.5_f32, UI_TEXT);
 
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
@@ -364,34 +547,34 @@ pub fn apply_theme(ctx: &egui::Context) {
     let r4 = CornerRadius::same(4);
     let r6 = CornerRadius::same(6);
 
-    v.widgets.noninteractive.bg_fill = GRAY_100;
-    v.widgets.noninteractive.weak_bg_fill = GRAY_100;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, GRAY_200);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, GRAY_700);
+    v.widgets.noninteractive.bg_fill = UI_BACKGROUND;
+    v.widgets.noninteractive.weak_bg_fill = UI_BACKGROUND;
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, UI_DIVIDER);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, UI_TEXT);
     v.widgets.noninteractive.corner_radius = r6;
 
     v.widgets.inactive.bg_fill = WHITE;
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, GRAY_200);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, GRAY_700);
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, UI_INPUT_BORDER);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, UI_TEXT);
     v.widgets.inactive.corner_radius = r4;
 
-    v.widgets.hovered.bg_fill = BLUE_300;
-    v.widgets.hovered.weak_bg_fill = BLUE_300;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, BLUE_500);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, GRAY_900);
+    v.widgets.hovered.bg_fill = UI_HOVER;
+    v.widgets.hovered.weak_bg_fill = UI_HOVER;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, UI_ACCENT);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, UI_TEXT);
     v.widgets.hovered.corner_radius = r4;
 
     v.widgets.active.bg_fill = SELECTION_BG;
     v.widgets.active.weak_bg_fill = SELECTION_BG;
     v.widgets.active.bg_stroke = FOCUS_STROKE;
-    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, GRAY_900);
+    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, UI_TEXT);
     v.widgets.active.corner_radius = r4;
 
     v.widgets.open.bg_fill = WHITE;
-    v.widgets.open.weak_bg_fill = WHITE;
-    v.widgets.open.bg_stroke = Stroke::new(1.0_f32, GRAY_200);
-    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, GRAY_700);
+    v.widgets.open.weak_bg_fill = UI_HEADER;
+    v.widgets.open.bg_stroke = Stroke::new(1.0_f32, UI_DIVIDER);
+    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, UI_TEXT);
     v.widgets.open.corner_radius = r4;
 
     style.visuals = v;
@@ -422,17 +605,17 @@ pub fn apply_theme(ctx: &egui::Context) {
     ctx.set_global_style(style);
 }
 
-/// 上部ツールバーのパネル枠（スチールブルー）。
+/// 上部ツールバーの淡青色の枠。
 pub fn toolbar_frame() -> egui::Frame {
     egui::Frame::new()
         .inner_margin(8)
-        .fill(BLUE_200)
-        .stroke(Stroke::new(1.0_f32, BLUE_300))
+        .fill(UI_HEADER)
+        .stroke(Stroke::new(1.0_f32, UI_DIVIDER))
 }
 
-/// 左右ドックの枠。ツールバーより淡いブルーグレー。
+/// 左右ドックの白い内容面。
 pub fn content_panel_frame() -> egui::Frame {
-    egui::Frame::new().inner_margin(8).fill(GRAY_100)
+    egui::Frame::new().inner_margin(8).fill(WHITE)
 }
 
 /// 中央キャンバスおよび下ドックの枠（白）。
@@ -440,38 +623,35 @@ pub fn central_panel_frame() -> egui::Frame {
     egui::Frame::new()
         .inner_margin(8)
         .fill(WHITE)
-        .stroke(Stroke::new(1.0_f32, GRAY_200))
+        .stroke(Stroke::new(1.0_f32, UI_DIVIDER))
 }
 
-/// 下部ステータスバーのパネル枠（一段濃いスチールブルー。文字は白）。
+/// 下部ステータスバーの淡い青紫色の枠。
 pub fn status_bar_frame() -> egui::Frame {
     egui::Frame::new()
         .inner_margin(4)
-        .fill(BLUE_400)
-        .stroke(Stroke::new(1.0_f32, BLUE_500))
+        .fill(UI_HEADER_ALT)
+        .stroke(Stroke::new(1.0_f32, UI_ACCENT))
 }
 
-/// ステータスバー内の文字・セパレータを白基調にする（青地の上で読むため）。
-///
-/// `override_text_color` は使わない。セマンティック色は下ドック／ログ側に残し、
-/// バー上の文字（実行中・stale・エラー・注意）はすべて白にする。
+/// 淡色のステータスバー上で文字・操作状態を表示する。
 pub fn apply_status_bar_visuals(ui: &mut egui::Ui) {
     let v = ui.visuals_mut();
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, WHITE);
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, BLUE_300);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, WHITE);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, UI_TEXT);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, UI_HOVER);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, UI_TEXT);
     v.widgets.inactive.bg_fill = Color32::TRANSPARENT;
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     v.widgets.inactive.bg_stroke = Stroke::NONE;
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, GRAY_900);
-    v.widgets.hovered.bg_fill = BLUE_300;
-    v.widgets.hovered.weak_bg_fill = BLUE_300;
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, UI_TEXT);
+    v.widgets.hovered.bg_fill = UI_HOVER;
+    v.widgets.hovered.weak_bg_fill = UI_HOVER;
     v.widgets.hovered.bg_stroke = Stroke::NONE;
-    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, WHITE);
-    v.widgets.active.bg_fill = BLUE_500;
-    v.widgets.active.weak_bg_fill = BLUE_500;
-    v.selection.bg_fill = BLUE_500;
-    v.selection.stroke = Stroke::new(1.0_f32, WHITE);
+    v.widgets.active.fg_stroke = Stroke::new(1.5_f32, UI_TEXT);
+    v.widgets.active.bg_fill = UI_ACTION;
+    v.widgets.active.weak_bg_fill = UI_ACTION;
+    v.selection.bg_fill = SELECTION_BG;
+    v.selection.stroke = Stroke::new(1.0_f32, UI_TEXT);
 }
 #[cfg(test)]
 mod tests {
@@ -490,14 +670,112 @@ mod tests {
             };
             0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
         };
-        for background in [WHITE, GRAY_100, SELECTION_BG] {
-            for text in [
-                GRAY_900, GRAY_700, GRAY_600, WARN_TEXT, ERROR_TEXT, GOOD_TEXT,
-            ] {
+        for background in [
+            WHITE,
+            UI_BACKGROUND,
+            SELECTION_BG,
+            UI_HEADER,
+            UI_HEADER_ALT,
+            UI_ACTION,
+        ] {
+            for text in [UI_TEXT, WARN_TEXT, ERROR_TEXT, GOOD_TEXT] {
                 let contrast = (luminance(background) + 0.05) / (luminance(text) + 0.05);
                 assert!(contrast >= 4.5, "{text:?} / {background:?}: {contrast}");
             }
         }
+    }
+
+    #[test]
+    fn pencil_border_stays_stable_on_repaint_and_keeps_existing_grain_when_extended() {
+        let id = egui::Id::new("section_list");
+        let texture = egui::TextureId::Managed(1);
+        for scale in [1.0, 1.5] {
+            let points: Vec<_> = (0..=20).map(|i| egui::pos2(i as f32 * 4.0, 0.0)).collect();
+            let mesh = pencil_mesh(&points, id, texture, scale);
+            assert_eq!(mesh, pencil_mesh(&points, id, texture, scale));
+            let extended: Vec<_> = (0..=30).map(|i| egui::pos2(i as f32 * 4.0, 0.0)).collect();
+            let longer = pencil_mesh(&extended, id, texture, scale);
+            assert_eq!(mesh.vertices, longer.vertices[..mesh.vertices.len()]);
+            assert!(mesh
+                .vertices
+                .iter()
+                .any(|v| v.color == Color32::TRANSPARENT));
+            let widths: Vec<_> = mesh
+                .vertices
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|v| v[1].pos.distance(v[2].pos))
+                .collect();
+            assert!(
+                widths.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+                    - widths.iter().copied().fold(f32::INFINITY, f32::min)
+                    > 0.5
+            );
+            assert!(mesh.vertices.iter().all(|v| v.pos.y.abs() < 2.5));
+        }
+    }
+
+    #[test]
+    fn group_decoration_reuses_texture_and_does_not_allocate_widget_ids() {
+        let ctx = egui::Context::default();
+        apply_theme(&ctx);
+        let mut texture = None;
+        for _ in 0..2 {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let before = ui.next_auto_id();
+                group_outline(
+                    ui,
+                    egui::Rect::from_min_size(ui.cursor().min, egui::vec2(240.0, 100.0)),
+                    ui.id().with("attributes"),
+                );
+                assert_eq!(before, ui.next_auto_id());
+                let current = pencil_texture(ui.ctx()).id();
+                if let Some(previous) = texture {
+                    assert_eq!(current, previous);
+                }
+                texture = Some(current);
+            });
+        }
+        assert_eq!(VIEW_HOVER_STROKE.color, Color32::from_rgb(0x21, 0x71, 0xC1));
+        assert_eq!(BLUE_300, Color32::from_rgb(0x8E, 0xB9, 0xE5));
+    }
+
+    #[test]
+    fn border_texture_and_tessellation_do_not_modify_font_atlas_or_text_meshes() {
+        let ctx = egui::Context::default();
+        apply_theme(&ctx);
+        let render = |decorated: bool| {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.label("日本語の属性・断面寸法 -123.45 mm / 0.001 rad");
+                if decorated {
+                    group_outline(
+                        ui,
+                        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 100.0)),
+                        ui.id().with("group"),
+                    );
+                }
+            });
+            ctx.tessellate(output.shapes, output.pixels_per_point)
+                .into_iter()
+                .filter_map(|primitive| match primitive.primitive {
+                    egui::epaint::Primitive::Mesh(mesh)
+                        if mesh.texture_id == egui::TextureId::default() =>
+                    {
+                        Some(mesh)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        render(false);
+        let baseline = render(false);
+        assert!(!baseline.is_empty());
+        let texture = pencil_texture(&ctx);
+        assert_ne!(texture.id(), egui::TextureId::default());
+        let font_before = ctx.fonts(|fonts| fonts.image());
+        assert_eq!(baseline, render(true));
+        assert_eq!(font_before, ctx.fonts(|fonts| fonts.image()));
     }
 
     #[test]

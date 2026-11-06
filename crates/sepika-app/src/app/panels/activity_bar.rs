@@ -100,8 +100,8 @@ fn activity_icon_texture(ctx: &egui::Context, glyph: ActivityGlyph) -> egui::Tex
 pub(crate) fn activity_bar_frame() -> egui::Frame {
     egui::Frame::new()
         .inner_margin(0)
-        .fill(crate::theme::BLUE_200)
-        .stroke(egui::Stroke::new(1.0_f32, crate::theme::BLUE_300))
+        .fill(crate::theme::UI_HEADER)
+        .stroke(egui::Stroke::new(1.0_f32, crate::theme::UI_HOVER))
 }
 
 /// 正方形スロット 1 辺の長さ（アイコン＋上下余白）。
@@ -132,7 +132,7 @@ fn activity_icon_button(
         {
             let painter = ui.painter();
             let bg = if is_active || response.hovered() {
-                crate::theme::BLUE_300
+                crate::theme::UI_HOVER
             } else {
                 egui::Color32::TRANSPARENT
             };
@@ -150,7 +150,7 @@ fn activity_icon_button(
                         rect.max,
                     ),
                 };
-                painter.rect_filled(accent, 0.0, crate::theme::BLUE_500);
+                painter.rect_filled(accent, 0.0, crate::theme::UI_ACCENT);
             }
         }
         let icon_rect = egui::Rect::from_center_size(

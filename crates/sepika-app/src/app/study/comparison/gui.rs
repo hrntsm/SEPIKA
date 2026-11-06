@@ -778,12 +778,15 @@ impl App {
             return;
         };
         let mut open = true;
-        egui::Window::new("断面変更・計算結果の比較")
+        let window = egui::Window::new("断面変更・計算結果の比較")
             .default_size([1100.0, 780.0])
             .resizable(true)
             .vscroll(true)
             .open(&mut open)
             .show(ctx, |ui| view.show(ui, self));
+        if let Some(window) = window {
+            crate::theme::window_outline(&window.response);
+        }
         if open {
             self.studies.comparison = Some(view);
         }

@@ -196,7 +196,7 @@ impl Default for CatalogDraft {
 /// とは別の独立した UI。
 pub fn catalog_section_panel(ui: &mut egui::Ui, app: &mut App) {
     ui.group(|ui| {
-        ui.strong("断面カタログから選択（日本国内規格）");
+        crate::theme::panel_heading(ui, "断面カタログから選択（日本国内規格）", "形状・寸法");
         ui.separator();
 
         ui.horizontal(|ui| {
@@ -411,7 +411,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
     let draft = &mut app.ui.scoped.section_draft;
 
     ui.group(|ui| {
-        ui.strong("断面作成");
+        crate::theme::panel_heading(ui, "断面作成", "材料・寸法を編集");
         ui.separator();
 
         ui.horizontal(|ui| {

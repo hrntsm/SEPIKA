@@ -78,7 +78,7 @@ pub fn time_history_panel(ui: &mut egui::Ui, app: &mut App) {
 fn waveform_panel(ui: &mut egui::Ui, app: &mut App) {
     if app.ui.scoped.time_history_data.time.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "時刻歴応答データがありません。解析タブの「時刻歴」から実行してください。",
         );
         return;
@@ -190,7 +190,7 @@ fn story_response_panel(ui: &mut egui::Ui, app: &mut App) {
         .and_then(|th| th.recording.as_ref())
     else {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "層応答の詳細記録がありません。時刻歴応答を再実行してください\
              （この記録を持たない旧い結果、または未実行）。",
         );
@@ -222,7 +222,7 @@ fn story_response_panel(ui: &mut egui::Ui, app: &mut App) {
     let n_story = story.stories.len();
     if n_story == 0 {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "階情報がありません（階の自動生成が未実行の可能性があります）。",
         );
         return;

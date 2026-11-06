@@ -650,7 +650,7 @@ pub(crate) fn show_hinge_detail_window(
         return;
     };
     let mut open = true;
-    egui::Window::new(format!("ヒンジ詳細: 部材 #{}", elem_id.0))
+    let window = egui::Window::new(format!("ヒンジ詳細: 部材 #{}", elem_id.0))
         .id(egui::Id::new("hinge_detail_window"))
         .resizable(true)
         .collapsible(true)
@@ -661,6 +661,9 @@ pub(crate) fn show_hinge_detail_window(
                 draw_hinge_detail_content(ui, app, elem_id, viewport);
             });
         });
+    if let Some(window) = window {
+        crate::theme::window_outline(&window.response);
+    }
     if !open {
         app.ui.scoped.hinge_detail_elem = None;
         app.ui.scoped.hinge_view_cache = None;

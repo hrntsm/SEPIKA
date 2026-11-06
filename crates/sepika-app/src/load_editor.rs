@@ -360,7 +360,7 @@ impl App {
         };
         let mut confirm = false;
         let mut cancel = false;
-        egui::Window::new("load_pick_bar")
+        let window = egui::Window::new("load_pick_bar")
             .title_bar(false)
             .resizable(false)
             .movable(false)
@@ -380,7 +380,7 @@ impl App {
                             ui.label(format!("選択中: {}", label));
                         }
                         None => {
-                            ui.colored_label(crate::theme::GRAY_600, "未選択");
+                            ui.colored_label(crate::theme::UI_MUTED, "未選択");
                         }
                     }
                     confirm = ui
@@ -389,6 +389,9 @@ impl App {
                     cancel = ui.button("取消 (Esc)").clicked();
                 });
             });
+        if let Some(window) = window {
+            crate::theme::window_outline(&window.response);
+        }
 
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) && current.is_some() {
             confirm = true;
@@ -437,7 +440,7 @@ impl App {
         };
         let modal = egui::Modal::new(egui::Id::new("load_editor_modal")).show(ctx, |ui| {
             ui.set_width(420.0);
-            ui.heading(title);
+            crate::theme::panel_heading(ui, title, "荷重条件を編集");
             ui.label(format!("荷重ケース: {}", case_label));
             ui.separator();
 
@@ -537,7 +540,7 @@ impl App {
                     });
                     if brace {
                         ui.colored_label(
-                            crate::theme::GRAY_600,
+                            crate::theme::UI_MUTED,
                             "新規ブレース荷重は材軸方向です。既存荷重の保存済み方向は保持できます。\
                              材軸直交方向の荷重は両端の節点へ静定分配されます。",
                         );
@@ -597,7 +600,7 @@ impl App {
                             ui.horizontal(|ui| {
                                 ui.label("w [N/mm]:");
                                 ui.add(egui::TextEdit::singleline(&mut d.w1).desired_width(90.0));
-                                ui.colored_label(crate::theme::GRAY_600, "材長全体に等分布");
+                                ui.colored_label(crate::theme::UI_MUTED, "材長全体に等分布");
                             });
                         }
                         _ => {
@@ -641,6 +644,7 @@ impl App {
                 close = ui.button("キャンセル").clicked();
             });
         });
+        crate::theme::window_outline(&modal.response);
         close |= modal.should_close();
 
         if begin_pick {

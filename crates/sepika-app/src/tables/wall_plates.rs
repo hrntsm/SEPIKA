@@ -1087,7 +1087,7 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
                     "耐震スリットは境界が 4 節点の壁版でのみ指定できます\
                      （辺が柱際か梁際かを決められないため）。",
                 )
-                .color(crate::theme::GRAY_600)
+                .color(crate::theme::UI_MUTED)
                 .small(),
             );
         }
@@ -1096,7 +1096,7 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
                 "三方スリットは柱際 2 辺と上下いずれか 1 辺、完全スリットは 4 辺を切った状態です。\
                  4 辺すべてが一体でなければ耐震壁として成立しません。",
             )
-            .color(crate::theme::GRAY_600)
+            .color(crate::theme::UI_MUTED)
             .small(),
         );
     }

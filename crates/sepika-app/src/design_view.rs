@@ -28,7 +28,7 @@ fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
     }
     if app.core.model.stories.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "階が未定義です。解析タブの「準備計算 実行」を行ってください。",
         );
     } else {
@@ -137,7 +137,7 @@ fn live_load_reduction_section(ui: &mut egui::Ui, app: &App) {
         .default_open(true)
         .show(ui, |ui| {
             ui.colored_label(
-                crate::theme::GRAY_600,
+                crate::theme::UI_MUTED,
                 "支える床の数に応じた低減率の集計値です。断面検定の長期軸力への実適用は未対応（残課題）。",
             );
             let factors = crate::app::column_live_load_factors(&app.core.model);
@@ -316,7 +316,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
 
     if checks.is_empty() {
         ui.colored_label(
-            crate::theme::GRAY_600,
+            crate::theme::UI_MUTED,
             "検定結果がありません。現行応力がある場合は「検定を再実行」、応力が利用不可の場合は解析タブから静的解析を実行してください（部材に断面と材料の割当が必要です）。",
         );
     } else {
@@ -385,7 +385,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                 }
                 None => {
-                    ui.colored_label(crate::theme::GRAY_600, "検定不能");
+                    ui.colored_label(crate::theme::UI_MUTED, "検定不能");
                 }
             });
             row.col(|ui| {
@@ -536,7 +536,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         ui.colored_label(crate::theme::ERROR_TEXT, "NG");
                     }
                     None => {
-                        ui.colored_label(crate::theme::GRAY_600, "検定不能");
+                        ui.colored_label(crate::theme::UI_MUTED, "検定不能");
                     }
                 });
                 row.col(|ui| {
@@ -719,7 +719,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     });
     match app.compute_holding_capacity() {
         Err(msg) => {
-            ui.colored_label(crate::theme::GRAY_600, &msg);
+            ui.colored_label(crate::theme::UI_MUTED, &msg);
             let needs_analysis = msg.contains("増分解析")
                 || msg.contains("静的")
                 || msg.contains("固有値解析")
@@ -836,7 +836,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     if warn {
                         crate::theme::SECONDARY_AMBER
                     } else {
-                        crate::theme::GRAY_600
+                        crate::theme::UI_MUTED
                     },
                     format!(
                         "解析上の崩壊機構: {}（適用条件は別途確認{}）",
@@ -878,7 +878,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     .collect::<Vec<_>>()
                     .join(", ");
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     format!("βu（耐力壁・筋かいの水平耐力比、下階→上階）: {}", list),
                 );
             }
@@ -904,7 +904,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 "Qu は保有耐力比較用の確定点の層切断面力。Ds の候補は明示ランク\
                  （部材ランク自動判定OFF）。"
             };
-            ui.colored_label(crate::theme::GRAY_600, note);
+            ui.colored_label(crate::theme::UI_MUTED, note);
         }
     }
 
@@ -926,7 +926,7 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     ui.add_space(12.0);
     ui.strong("小梁・床の長期略算／鋼製間柱の独立検定");
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "小梁は大梁を分割せず、曲げ・たわみ・高力ボルト端部せん断伝達の3項目を検定します\
          （反力は大梁へ CMQ として伝達）。スラブは一方向版として設計曲げと必要鉄筋量を算定します。\
          鋼小梁の E・長期 ft は断面材料に基づき、材料・板厚・強度不足時は停止します。鉄筋は SD295（長期 ft=195）です。",
@@ -1103,10 +1103,10 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
             .unwrap_or_else(|| "断面未設定".into());
         egui::CollapsingHeader::new(format!("間柱 {} SM{} / {} / {}",name,member.0,section,match post.support {sepika_core::model::PostLateralSupport::Pinned=>"両端ピン",sepika_core::model::PostLateralSupport::FixedStart=>"始端固定・終端自由",sepika_core::model::PostLateralSupport::FixedEnd=>"始端自由・終端固定"})).id_salt(("post_result",member.0)).show(ui,|ui|{
             ui.label("局部横荷重は独立検定専用です。主架構へ自動転送しません。以下の端部反力を別途扱ってください。");
-            for reason in &post.reasons{ui.colored_label(crate::theme::GRAY_600,format!("未検定: {reason}"));}
+            for reason in &post.reasons{ui.colored_label(crate::theme::UI_MUTED,format!("未検定: {reason}"));}
             for (ci,c)in post.combinations.iter().enumerate(){
                 ui.strong(format!("{} / {}",c.name,if c.short_term{"短期"}else{"長期"}));
-                for reason in &c.reasons{ui.colored_label(crate::theme::GRAY_600,format!("未検定: {reason}"));}
+                for reason in &c.reasons{ui.colored_label(crate::theme::UI_MUTED,format!("未検定: {reason}"));}
                 ui.label(format!("鉛直端部反力 始 {:.3} / 終 {:.3} kN",c.gravity_reactions[0]/1000.0,c.gravity_reactions[1]/1000.0));
                 for k in 0..2{ui.label(format!("{}端: 横反力 X {:.3} / Y {:.3} kN、固定端曲げ（強/弱）{:.3}/{:.3} kN·m",if k==0{"始"}else{"終"},c.lateral_reactions[k][0]/1000.0,c.lateral_reactions[k][1]/1000.0,c.support_moments[k][0]/1e6,c.support_moments[k][1]/1e6));}
                 ui.label(format!("変位 強軸方向 {:.4} / 弱軸方向 {:.4} / 同位置合成最大 {:.4} mm、δ/L={:.6}、たわみ検定比 {}",c.displacement_mm[0],c.displacement_mm[1],c.resultant_displacement_mm,c.resultant_displacement_mm/row.span,c.deflection_ratio.map(|r|format!("{r:.4} {}",if r<=1.0{"OK"}else{"NG"})).unwrap_or_else(||"未検定".into())));

@@ -386,7 +386,7 @@ pub fn loads_table(ui: &mut egui::Ui, app: &mut App) {
                         format_args!("dir=({:.1},{:.1},{:.1})", ml.dir[0], ml.dir[1], ml.dir[2]),
                     );
                     if is_auto {
-                        ui.colored_label(crate::theme::GRAY_600, label)
+                        ui.colored_label(crate::theme::UI_MUTED, label)
                             .on_hover_text(AUTO_LOAD_HOVER);
                     } else {
                         ui.label(label);
@@ -411,7 +411,7 @@ pub fn loads_table(ui: &mut egui::Ui, app: &mut App) {
 
     ui.add_space(4.0);
     ui.colored_label(
-        crate::theme::GRAY_600,
+        crate::theme::UI_MUTED,
         "荷重の追加は左パネルのナビゲータで、荷重ケースを右クリックして行います\
          （対象の節点・部材を 3D ビューで選べます）。",
     );

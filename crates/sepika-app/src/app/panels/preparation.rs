@@ -86,7 +86,7 @@ impl App {
     /// 階の定義・剛域・荷重ケース（DL/LL/EX/EY/WX/WY）が確定する。② は
     /// [`App::static_panel`] ほか各解析パネル。
     pub(crate) fn preparation_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("① 準備計算");
+        crate::theme::panel_heading(ui, "① 準備計算", "条件・実行結果");
         for diagnostic in self.core.model.story_level_diagnostics() {
             ui.colored_label(crate::theme::WARN_TEXT, diagnostic);
         }
@@ -104,7 +104,10 @@ impl App {
     fn preparation_section(&mut self, ui: &mut egui::Ui, running: bool) {
         ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(!running, egui::Button::new("🛠 準備計算 実行"))
+                .add_enabled(
+                    !running,
+                    egui::Button::new("🛠 準備計算 実行").fill(crate::theme::UI_ACTION),
+                )
                 .on_hover_text(
                     "解析前の前処理（階の定義・剛域の算定・床荷重/自重/積載の集計・\
                      地震力(Ai分布)の算定・荷重ケース DL/LL/EX/EY の生成・\
@@ -146,7 +149,7 @@ impl App {
                     p.diag_warnings
                 ),
             ),
-            None => ui.colored_label(crate::theme::GRAY_600, "準備計算: 未実行"),
+            None => ui.colored_label(crate::theme::UI_MUTED, "準備計算: 未実行"),
         };
         ui.add_space(6.0);
 
@@ -193,7 +196,7 @@ impl App {
                     self.core.scoped.staleness.mark_edited();
                 }
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     "OFF にすると全部材でねじり剛性 GJ/L を保持します。",
                 );
 
@@ -223,7 +226,7 @@ impl App {
                     self.core.scoped.staleness.mark_edited();
                 }
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     "OFF にすると接合部を剛節点として扱います（パネルのせん断変形を\
                      考慮しません）。柱梁接合部の断面算定は、この設定によらず常に行います。",
                 );
@@ -252,7 +255,7 @@ impl App {
                     self.core.scoped.staleness.mark_edited();
                 }
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     "OFF にすると部材の原断面だけで剛域を算定します。\
                      剛域を設けるのは、その節点に集まる柱・大梁がすべて RC/SRC の\
                      ときだけです（S 造の仕口は仕口パネルでモデル化します）。",
@@ -268,7 +271,7 @@ impl App {
             .id_salt("as_seismic_cfg")
             .show(ui, |ui| {
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     "準備計算で水平力を算定し、荷重ケース EX・EY へ反映します。",
                 );
                 ui.horizontal_wrapped(|ui| {
@@ -468,7 +471,7 @@ impl App {
                     ui.add(egui::DragValue::new(&mut cfg.threads).range(0..=256));
                 });
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     "0=自動(全コア) / 1=単一スレッド(結果の完全再現) / n=固定",
                 );
             });
@@ -766,13 +769,13 @@ impl App {
                 self.story_add_row(ui);
                 if self.core.model.stories.is_empty() {
                     ui.colored_label(
-                        crate::theme::GRAY_600,
+                        crate::theme::UI_MUTED,
                         "未定義です。上の「階を追加」で上下階の FL・ΔSL を入力してください。",
                     );
                     return;
                 }
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     "階名・FL・ΔSL・重量・種別は利用者が決めます。節点数・構造種別は\
                      準備計算が算定します（構造種別は柱・梁の断面から判定）。",
                 );
@@ -955,13 +958,13 @@ impl App {
                                         pending_weight = Some((story, None));
                                     }
                                 } else {
-                                    ui.colored_label(crate::theme::GRAY_600, "自動");
+                                    ui.colored_label(crate::theme::UI_MUTED, "自動");
                                 }
                             });
                         });
                         row.col(|ui| {
                             if is_base {
-                                ui.colored_label(crate::theme::GRAY_600, "—").on_hover_text(
+                                ui.colored_label(crate::theme::UI_MUTED, "—").on_hover_text(
                                     "階種別は層の属性で、層の上端の階が持ちます。\
                                      基部の階はどの層の上端でもないため設定しません",
                                 );

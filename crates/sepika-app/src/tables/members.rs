@@ -234,7 +234,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 });
             if app.core.model.damper_defs.is_empty() {
                 ui.colored_label(
-                    crate::theme::GRAY_600,
+                    crate::theme::UI_MUTED,
                     "（定義がありません。「断面」タブの「制振要素」パネルで作成できます）",
                 );
             }
@@ -377,7 +377,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     "耐震壁（Wall）は壁版から生成された解析要素です。断面の変更は「壁版」タブ、\
                      削除も壁版の削除で行います（履歴則はこの一覧から編集できます）。",
                 )
-                .color(crate::theme::GRAY_600)
+                .color(crate::theme::UI_MUTED)
                 .small(),
             );
             ui.separator();
@@ -395,7 +395,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     "解析要素にならない壁版（腰壁・垂壁・パラペット・自立壁・間柱で分割\
                      された壁など）は、本表には現れません。「壁版」タブで一覧・編集できます。",
                 )
-                .color(crate::theme::GRAY_600)
+                .color(crate::theme::UI_MUTED)
                 .small(),
             );
             ui.separator();
@@ -740,7 +740,7 @@ fn dampers_table(ui: &mut egui::Ui, app: &mut App) {
             "マクスウェル（速度依存）: Kd[kN/mm]・C0[kN·(s/mm)^α]・α。\
              履歴型バイリニア（鋼材系）: Kd=k1[kN/mm]・Qy[kN]・k2/k1。",
         )
-        .color(crate::theme::GRAY_600)
+        .color(crate::theme::UI_MUTED)
         .small(),
     );
 
@@ -965,7 +965,7 @@ fn isolators_table(ui: &mut egui::Ui, app: &mut App) {
             "K1[kN/mm]・K2[kN/mm]・Qd[kN]（積層ゴム系のバイリニア。すべり支承は K2=Qd=0）・\
              Kv[kN/mm]（鉛直剛性）・μ（すべり支承の摩擦係数）。",
         )
-        .color(crate::theme::GRAY_600)
+        .color(crate::theme::UI_MUTED)
         .small(),
     );
 

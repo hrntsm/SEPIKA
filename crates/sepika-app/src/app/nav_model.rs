@@ -147,7 +147,7 @@ impl App {
             .id_salt("nav_sections");
         let _ = header.show(ui, |ui| {
             if self.core.model.sections.is_empty() {
-                ui.colored_label(crate::theme::GRAY_600, "断面がありません");
+                ui.colored_label(crate::theme::UI_MUTED, "断面がありません");
                 return;
             }
 
@@ -197,7 +197,7 @@ impl App {
             .id_salt("nav_materials");
         let _ = header.show(ui, |ui| {
             if self.core.model.materials.is_empty() {
-                ui.colored_label(crate::theme::GRAY_600, "材料がありません");
+                ui.colored_label(crate::theme::UI_MUTED, "材料がありません");
                 return;
             }
 

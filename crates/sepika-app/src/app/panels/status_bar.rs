@@ -26,7 +26,7 @@ impl App {
         let body_font = egui::TextStyle::Body.resolve(ui.style());
         let summary_width = ui
             .painter()
-            .layout_no_wrap(summary.clone(), body_font, crate::theme::WHITE)
+            .layout_no_wrap(summary.clone(), body_font, crate::theme::UI_TEXT)
             .size()
             .x;
 
@@ -123,17 +123,17 @@ impl App {
                 if let Some(job) = &self.core.scoped.job {
                     let elapsed = job.started.elapsed().unwrap_or_default().as_secs_f64();
                     ui.colored_label(
-                        crate::theme::WHITE,
+                        crate::theme::UI_TEXT,
                         format!("⏳ {} 実行中… {:.0}s", job.label, elapsed),
                     );
                     ui.separator();
                 }
                 if self.core.scoped.staleness.results_stale {
-                    ui.colored_label(crate::theme::WHITE, "⚠ stale");
+                    ui.colored_label(crate::theme::UI_TEXT, "⚠ stale");
                 } else if self.core.scoped.results.is_some() {
-                    ui.colored_label(crate::theme::WHITE, "✓ 最新");
+                    ui.colored_label(crate::theme::UI_TEXT, "✓ 最新");
                 } else {
-                    ui.colored_label(crate::theme::WHITE, "▷ 未実行");
+                    ui.colored_label(crate::theme::UI_TEXT, "▷ 未実行");
                 }
                 if let Some(err) = &self.core.scoped.last_error {
                     ui.separator();
@@ -142,7 +142,7 @@ impl App {
                         .add(
                             egui::Label::new(
                                 egui::RichText::new(format!("⚠ {}", one_line))
-                                    .color(crate::theme::WHITE),
+                                    .color(crate::theme::UI_TEXT),
                             )
                             .truncate()
                             .sense(egui::Sense::click()),
@@ -156,7 +156,7 @@ impl App {
                 if let Some(error) = self.core.scoped.undo.last_error() {
                     ui.separator();
                     ui.add(
-                        egui::Label::new(egui::RichText::new(error).color(crate::theme::WHITE))
+                        egui::Label::new(egui::RichText::new(error).color(crate::theme::UI_TEXT))
                             .truncate(),
                     )
                     .on_hover_text(error);
@@ -167,7 +167,7 @@ impl App {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(format!("ℹ {}", one_line))
-                                .color(crate::theme::WHITE),
+                                .color(crate::theme::UI_TEXT),
                         )
                         .truncate(),
                     )

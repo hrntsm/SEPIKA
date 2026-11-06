@@ -251,7 +251,7 @@ pub(crate) fn show_th_detail_window_at(ui: &egui::Ui, app: &mut App, view: &supe
         return;
     };
     let mut open = true;
-    egui::Window::new(format!("時刻歴詳細: 部材 #{}", elem_id.0))
+    let window = egui::Window::new(format!("時刻歴詳細: 部材 #{}", elem_id.0))
         .id(egui::Id::new("th_detail_window"))
         .resizable(true)
         .collapsible(true)
@@ -262,6 +262,9 @@ pub(crate) fn show_th_detail_window_at(ui: &egui::Ui, app: &mut App, view: &supe
                 draw_th_detail_content_at(ui, app, elem_id, view.th_frame, view);
             });
         });
+    if let Some(window) = window {
+        crate::theme::window_outline(&window.response);
+    }
     if !open {
         app.ui.scoped.th_detail_elem = None;
     }

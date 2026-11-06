@@ -1594,7 +1594,7 @@ impl App {
         let mut open = true;
         let mut edit_current = false;
         let mut move_to_current = false;
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
+        let window = egui::Window::new(title).open(&mut open).show(ctx, |ui| {
             ui.strong("読み取り専用・計算時の計算用入力");
             if matches!(input.settings, RecordedSettings::Quantity) {
                 ui.label(format!("数量設定: 壁筋仮定径 {} mm / 定着係数 {} 径倍", model.quantity_cfg.assumed_wall_bar_dia, model.quantity_cfg.anchorage_dia_factor));
@@ -1615,6 +1615,9 @@ impl App {
                 move_to_current = true;
             }
         });
+        if let Some(window) = window {
+            crate::theme::window_outline(&window.response);
+        }
         if move_to_current {
             match self.enter_evidence_editor(self.ui.view.model_tab) {
                 Ok(return_to) => {

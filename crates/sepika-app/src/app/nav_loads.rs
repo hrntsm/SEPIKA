@@ -37,7 +37,7 @@ impl App {
             .id_salt("nav_load_cases");
         let resp = header.show(ui, |ui| {
             if self.core.model.load_cases.is_empty() {
-                ui.colored_label(crate::theme::GRAY_600, "荷重ケースがありません");
+                ui.colored_label(crate::theme::UI_MUTED, "荷重ケースがありません");
             }
             for i in 0..self.core.model.load_cases.len() {
                 self.nav_load_case_node(ui, i, &mut action);
@@ -143,7 +143,7 @@ impl App {
             .id_salt(("nav_lc_group", lc_id.0, group.salt()));
         let resp = header.show(ui, |ui| {
             if entries.is_empty() {
-                ui.colored_label(crate::theme::GRAY_600, "（なし）");
+                ui.colored_label(crate::theme::UI_MUTED, "（なし）");
             }
             for (index, label) in &entries {
                 let leaf = crate::theme::selectable_name(ui, false, label)

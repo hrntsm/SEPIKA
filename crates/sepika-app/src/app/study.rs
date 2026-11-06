@@ -1224,7 +1224,7 @@ impl App {
             return;
         }
         let mut open = true;
-        egui::Window::new("検討・設計案")
+        let window = egui::Window::new("検討・設計案")
             .default_width(620.0)
             .max_width((ctx.content_rect().width()-24.0).max(240.0))
             .open(&mut open)
@@ -1345,6 +1345,9 @@ impl App {
                 }
                 if resume {self.resume_study_calculation();}
             });
+        if let Some(window) = window {
+            crate::theme::window_outline(&window.response);
+        }
         self.studies.window_open = open;
     }
 }
