@@ -742,6 +742,43 @@ mod tests {
     }
 
     #[test]
+    fn border_texture_and_tessellation_do_not_modify_font_atlas_or_text_meshes() {
+        let ctx = egui::Context::default();
+        apply_theme(&ctx);
+        let render = |decorated: bool| {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.label("日本語の属性・断面寸法 -123.45 mm / 0.001 rad");
+                if decorated {
+                    group_outline(
+                        ui,
+                        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 100.0)),
+                        ui.id().with("group"),
+                    );
+                }
+            });
+            ctx.tessellate(output.shapes, output.pixels_per_point)
+                .into_iter()
+                .filter_map(|primitive| match primitive.primitive {
+                    egui::epaint::Primitive::Mesh(mesh)
+                        if mesh.texture_id == egui::TextureId::default() =>
+                    {
+                        Some(mesh)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        render(false);
+        let baseline = render(false);
+        assert!(!baseline.is_empty());
+        let texture = pencil_texture(&ctx);
+        assert_ne!(texture.id(), egui::TextureId::default());
+        let font_before = ctx.fonts(|fonts| fonts.image());
+        assert_eq!(baseline, render(true));
+        assert_eq!(font_before, ctx.fonts(|fonts| fonts.image()));
+    }
+
+    #[test]
     fn ratio_state_is_explicit_at_display_boundaries() {
         assert_eq!(ratio_status(0.8).1, "良好");
         assert_eq!(ratio_status(0.80001).1, "注意");

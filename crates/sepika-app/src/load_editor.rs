@@ -440,7 +440,7 @@ impl App {
         };
         let modal = egui::Modal::new(egui::Id::new("load_editor_modal")).show(ctx, |ui| {
             ui.set_width(420.0);
-            ui.heading(title);
+            crate::theme::panel_heading(ui, title, "荷重条件を編集");
             ui.label(format!("荷重ケース: {}", case_label));
             ui.separator();
 
@@ -644,6 +644,7 @@ impl App {
                 close = ui.button("キャンセル").clicked();
             });
         });
+        crate::theme::window_outline(&modal.response);
         close |= modal.should_close();
 
         if begin_pick {
