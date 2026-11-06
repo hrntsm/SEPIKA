@@ -505,19 +505,15 @@ fn generate_stories_impl(
     }
     match mode {
         SelfWeightMode::Density => {
-            // 設計荷重ケースの鉛直荷重は物理質量としてもそのまま質点へ算入する。
             for i in 0..model.nodes.len() {
                 node_mass_equiv[i] += gravity_weight[i];
             }
         }
         SelfWeightMode::GravityCasesOnly => {
-            // 重力ケースの内容だけを質点質量とする。モデル自重の置換もしない。
             node_mass_equiv.copy_from_slice(&gravity_weight);
         }
         SelfWeightMode::SyncedGravityCases => {
-            // 重力ケースに含まれる設計自重（`design_sw`）を物理質量相当（`physical_sw`）
-            // へ置換する。重力ケースに設計自重が含まれないモデルでは置換後の質量が
-            // 負になるため、clamp で隠さずエラーにする（質量の欠落・過小評価の防止）。
+            // 負の置換質量をclampすると、重力ケースから欠落した設計自重を見逃す。
             let mut design_sw = vec![0.0f64; model.nodes.len()];
             let mut physical_sw = vec![0.0f64; model.nodes.len()];
             for item in &self_weight_items {

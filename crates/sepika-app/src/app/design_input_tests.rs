@@ -181,7 +181,7 @@ fn design602_same_input_metadata_conditions_missing_and_failure() {
     app.run_design_check();
     assert!(app.require_design_input().is_ok());
     edit_fy(&mut app);
-    app.run_design_check(); // 旧静的入力を拒否する失敗。
+    app.run_design_check();
     assert!(app.current_design_results().is_none());
     assert!(app
         .core
@@ -356,7 +356,6 @@ fn design602_combo_source_and_independent_selected_display() {
         app.current_design_results().unwrap().design_source,
         Some(ResultInputKey::Combo("独立長期".into()))
     );
-    // 表示フォーカスを変えても、生成証明は採用した組合せを照合する。
     app.ui.scoped.nav.focus_result = Some(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
     assert!(app.require_design_input().is_ok());
     edit_fy(&mut app);
@@ -401,7 +400,6 @@ fn design602_failed_analysis_and_rejected_job_do_not_make_design_current() {
     });
     assert!(app.core.scoped.last_error.is_some());
     assert!(app.require_design_input().is_err());
-    // 通信路切断は製品のpoll_job異常終了処理を直接通す。
     let (sender, receiver) = std::sync::mpsc::channel();
     drop(sender);
     app.core.scoped.job = Some(AnalysisJob {

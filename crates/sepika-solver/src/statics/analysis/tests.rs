@@ -396,28 +396,23 @@ fn test_prepare_reports_diagnostics() {
         assert!(msg.contains(needle), "期待={needle} 実際={msg}");
     };
 
-    // 節点・部材がない。個別メッセージまでは問わず、入力エラーとして返る。
     let err = Analysis::prepare(&Model::default()).err().unwrap();
     assert!(matches!(err, SolveError::InvalidInput(_)), "{err:?}");
 
-    // 拘束(支点)が 1 つもない。
     let mut model = make_cantilever_model();
     for n in &mut model.nodes {
         n.restraint = Dof6Mask::FREE;
     }
     expect(&model, "拘束");
 
-    // 断面が未割当（部材）。
     let mut model = make_cantilever_model();
     model.elements[0].section = None;
     expect(&model, "i/j端の断面");
 
-    // 材料が未割当（材料は断面が持つ。断面未割当とは別の不備として報告する）。
     let mut model = make_cantilever_model();
     model.sections[0].material = None;
     expect(&model, "i/j端の材料");
 
-    // どの部材にも接続されない節点。
     let mut model = make_cantilever_model();
     model.nodes.push(Node {
         id: NodeId(2),
@@ -429,7 +424,6 @@ fn test_prepare_reports_diagnostics() {
     });
     expect(&model, "接続されていない節点");
 
-    // 存在しない節点への参照（節点削除後の不整合など）は panic せず診断になる。
     let mut model = make_cantilever_model();
     model.constraints.push(Constraint::RigidLink {
         master: NodeId(99),
@@ -438,7 +432,6 @@ fn test_prepare_reports_diagnostics() {
     });
     expect(&model, "constraints[0] RigidLink.master -> Node 99");
 
-    // As=0 は片側だけでもエラー。
     let mut model = make_cantilever_model();
     model.sections[0].as_y = 0.0;
     expect(&model, "有効せん断断面積");
@@ -506,7 +499,6 @@ fn test_model_issues_collects_every_issue() {
         "{messages:?}"
     );
 
-    // 部材を名指しする不備は対象 ID を持ち、UI が 3D 選択へ結び付けられる。
     let section_issue = issues
         .iter()
         .find(|i| i.message.contains("断面が未割当"))
@@ -516,7 +508,6 @@ fn test_model_issues_collects_every_issue() {
         IssueTargets::Members(vec![model.elements[0].id])
     );
 
-    // 健全なモデルでは 1 件も出ない。
     assert!(model_issues(&make_cantilever_model()).is_empty());
 }
 
@@ -993,7 +984,6 @@ fn test_model_issues_rejects_slab_without_section() {
     ));
     model.slabs[0].reference_story = Some(sepika_core::ids::StoryId(0));
     model.slabs[0].vertical_eccentricity_mm = Some(0.);
-    // 断面が未割当。
     let msgs: Vec<String> = model_issues(&model)
         .into_iter()
         .map(|i| i.message)
@@ -1004,7 +994,6 @@ fn test_model_issues_rejects_slab_without_section() {
     );
     assert!(precheck_model(&model).is_err());
 
-    // 断面はあるが材料が未割当。
     let sid = SectionId(model.sections.len() as u32);
     model.sections.push(
         sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
@@ -1020,7 +1009,6 @@ fn test_model_issues_rejects_slab_without_section() {
         "{msgs:?}"
     );
 
-    // 材料を割り当てれば通る。
     let mid = sepika_core::ids::MaterialId(model.materials.len() as u32);
     model.materials.push(sepika_core::model::Material {
         strength_factor: None,
@@ -1071,7 +1059,6 @@ fn test_model_issues_warns_story_without_diaphragm() {
         .unwrap_or_else(|| panic!("剛床のない階の警告が出ていない: {:?}", issues.len()));
     assert_eq!(warning.severity, IssueSeverity::Warning);
     assert!(warning.message.contains("2F"), "{}", warning.message);
-    // 警告だけなら解析前チェックは通す。
     assert!(precheck_model(&model).is_ok());
 }
 
@@ -1089,7 +1076,6 @@ fn test_model_issues_errors_on_duplicate_story_names() {
     let story = |id: u32, name: &str, elevation: f64| {
         Story::new(StoryId(id), name.into(), Some(elevation), Some(0.0))
     };
-    // 見た目で区別できない差（末尾の空白）でも同名として扱う。
     model.stories.push(story(0, "2F", 3000.0));
     model.stories.push(story(1, "2F ", 6000.0));
 
@@ -1100,10 +1086,8 @@ fn test_model_issues_errors_on_duplicate_story_names() {
         .expect("階名の重複が診断に出ていない");
     assert_eq!(issue.severity, IssueSeverity::Error);
     assert!(issue.message.contains("2F"), "{}", issue.message);
-    // エラーなので解析前チェックが止める。
     assert!(precheck_model(&model).is_err());
 
-    // 名前を分ければ通る（剛床のない階の警告だけが残る）。
     model.stories[1].name = "3F".into();
     assert!(precheck_model(&model).is_ok());
 }
@@ -1228,7 +1212,6 @@ fn test_model_issues_diaphragm_master_horizontal_restraint() {
     use super::precheck::{model_issues, precheck_model, IssueSeverity, IssueTargets};
     use sepika_core::dof::Dof;
 
-    // 基部（1F）の水平拘束は正常。
     let mut r = Dof6Mask::FREE;
     r.set_fixed(Dof::Ux);
     r.set_fixed(Dof::Uy);
@@ -1239,7 +1222,6 @@ fn test_model_issues_diaphragm_master_horizontal_restraint() {
         "基部の水平拘束は許容される"
     );
 
-    // 上階のマスターが水平拘束され、地震用重量が正ならエラー。
     let mut r = Dof6Mask::FREE;
     r.set_fixed(Dof::Ux);
     let model = make_two_story_diaphragm_model(1, r, Some(800.0), None);
@@ -1253,7 +1235,6 @@ fn test_model_issues_diaphragm_master_horizontal_restraint() {
     assert!(issue.message.contains("2F"), "{}", issue.message);
     assert_eq!(issue.targets, IssueTargets::Nodes(vec![NodeId(1)]));
 
-    // 上階でも地震用重量が 0 なら対象外。
     let mut r = Dof6Mask::FREE;
     r.set_fixed(Dof::Uy);
     let model = make_two_story_diaphragm_model(1, r, Some(0.0), Some(0.0));
@@ -1277,7 +1258,6 @@ fn test_model_issues_errors_on_member_load_beyond_length() {
     let l = model.member_length(&model.elements[0]);
     assert!(l > 0.0);
 
-    // 全長載荷は不備にしない。
     model.load_cases[0].member.push(MemberLoad::manual(
         elem,
         [0.0, 0.0, -1.0],
@@ -1295,7 +1275,6 @@ fn test_model_issues_errors_on_member_load_beyond_length() {
         "全長載荷は不備ではない"
     );
 
-    // 材長を超える区間はエラー。
     model.load_cases[0].member.push(MemberLoad::manual(
         elem,
         [0.0, 0.0, -1.0],
@@ -1540,14 +1519,12 @@ fn test_steel_height_ratio() {
     let alpha = steel_height_ratio(&model);
     assert!((alpha - 1.0 / 3.0).abs() < 1e-9, "alpha={alpha}");
 
-    // 全 RC は 0、全 S は 1。
     let rc = [StoryStructure::Rc; 3];
     assert_eq!(steel_height_ratio(&make_story_ratio_model(&rc)), 0.0);
     let s = [StoryStructure::S; 3];
     let alpha = steel_height_ratio(&make_story_ratio_model(&s));
     assert!((alpha - 1.0).abs() < 1e-9, "alpha={alpha}");
 
-    // 階が定義されていなければ 0。
     assert_eq!(steel_height_ratio(&Model::default()), 0.0);
 }
 
@@ -1584,7 +1561,6 @@ fn test_ground_elevation_from_basement_and_fallback() {
         ground_elevation(&model)
     );
 
-    // 地下階がなければ最下構造節点レベルを GL とみなす。
     let no_basement = Model {
         nodes: vec![Node {
             id: NodeId(0),
@@ -1634,14 +1610,12 @@ fn make_diaphragm_model(diaphragms: Vec<(NodeId, Option<f64>, Option<f64>)>) -> 
 /// 剛床への Pi 分配の手計算照合（単一剛床の全量、重量比の按分、重量未設定の等分割）。
 #[test]
 fn test_distribute_pi_over_diaphragms() {
-    // 剛床が 1 つなら全量がその剛床に載る。
     let model = make_diaphragm_model(vec![(NodeId(10), None, None)]);
     assert_eq!(
         distribute_seismic_forces(&model, &model.stories[0], 40.0),
         vec![(NodeId(10), 40.0)]
     );
 
-    // 複数剛床は重量比で按分し、合計は階の Pi に一致する（重複載荷しない）。
     let model = make_diaphragm_model(vec![
         (NodeId(10), Some(300.0), None),
         (NodeId(11), Some(100.0), None),
@@ -1655,7 +1629,6 @@ fn test_distribute_pi_over_diaphragms() {
     let total: f64 = shares.iter().map(|(_, v)| v).sum();
     assert!((total - pi).abs() < 1e-9, "total={total}");
 
-    // 重量が設定されていなければ等分割（総量は保つ）。
     let model = make_diaphragm_model(vec![(NodeId(10), None, None), (NodeId(11), None, None)]);
     let shares = distribute_seismic_forces(&model, &model.stories[0], pi);
     for (_, v) in &shares {
@@ -1703,7 +1676,6 @@ fn test_distribute_pi_without_diaphragm_uses_story_nodes() {
         "層せん断力の総量は保たれる: {total}"
     );
 
-    // 質量が設定されていなければ等分割。
     for n in &mut model.nodes {
         n.mass = None;
     }
@@ -1764,13 +1736,11 @@ fn test_linear_static_batch_matches_individual() {
     assert_eq!(b1.disp, r1.disp);
     assert_eq!(b2.disp, r2.disp);
 
-    // 組合せバッチも個別呼び出しとビット一致する
     let combos = vec![model.combinations[0].clone()];
     let cb = analysis.linear_combination_batch(&combos);
     let c1 = analysis.linear_combination(&model.combinations[0]).unwrap();
     assert_eq!(cb[0].as_ref().unwrap().disp, c1.disp);
 
-    // 存在しないケースはバッチ内でも個別にエラーになる（他ケースへ影響しない）
     let with_missing = analysis.linear_static_batch(&[LoadCaseId(1), LoadCaseId(99)]);
     assert!(with_missing[0].is_ok());
     assert!(matches!(with_missing[1], Err(SolveError::InvalidInput(_))));
@@ -1934,7 +1904,6 @@ fn analysis_linear_combination_matches_assembled_load_case() {
         )
     };
 
-    // 節点荷重 2 ケース（軸・せん断）＋部材中間荷重 1 ケースを参照する組合せ。
     let mut model = make_cantilever_model();
     model.load_cases.push(LoadCase {
         origin: Default::default(),
@@ -1953,7 +1922,6 @@ fn analysis_linear_combination_matches_assembled_load_case() {
         ],
     }];
 
-    // 同じ線形結合の荷重を 1 ケースへまとめたモデル（荷重ベクトルを合成して解く経路）。
     let scale_nodal = |lc: &LoadCase, factor: f64| -> Vec<NodalLoad> {
         lc.nodal
             .iter()
@@ -2063,7 +2031,6 @@ fn test_crossing_beams_reported_as_warning() {
             support_spring: None,
         });
     }
-    // 節点を共有せずに X 字に交わる 2 本。
     for (k, (i, j)) in [(0u32, 1u32), (2, 3)].into_iter().enumerate() {
         model.elements.push(ElementData {
             id: ElemId(k as u32),
@@ -2602,7 +2569,6 @@ fn test_model_issues_warns_partial_beam_on_attached_edge() {
 
     let mut model = make_cantilever_model();
     let n = model.nodes.len() as u32;
-    // 先端辺の半分だけを覆う実部材。
     for (i, c) in [[0.0, 1501.0, 0.0], [500.0, 1501.0, 0.0]]
         .into_iter()
         .enumerate()
@@ -2793,7 +2759,6 @@ fn test_model_issues_errors_on_both_beam_face_slit() {
     use sepika_core::model::{WallPlate, WallPlateShape, WallSlit};
 
     let mut model = make_cantilever_model();
-    // 壁の自重が正になるよう、断面へ板厚を、材料へ密度を与える。
     model.sections[0].thickness = Some(200.0);
     model.materials[0].density = 2.4e-9;
     let n = model.nodes.len() as u32;
@@ -2810,7 +2775,6 @@ fn test_model_issues_errors_on_both_beam_face_slit() {
             support_spring: None,
         });
     }
-    // 柱際の鉛直辺（境界 [0,1,n,n+1] の辺 1・辺 3）を柱で支持する。
     for (i, ends) in [[NodeId(0), NodeId(n + 1)], [NodeId(1), NodeId(n)]]
         .into_iter()
         .enumerate()
@@ -2825,7 +2789,6 @@ fn test_model_issues_errors_on_both_beam_face_slit() {
     model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
-            // 切れていない鉛直支持辺（辺 1・辺 3）へ負担率を明示する。
             dl_support: None,
             self_weight_shares: vec![0.0, 0.5, 0.0, 0.5],
             id: WallPlateId(0),
@@ -2875,7 +2838,6 @@ fn test_model_issues_errors_on_both_beam_face_slit_on_element_plate() {
     use sepika_core::model::{WallPlate, WallPlateShape, WallRegion, WallSlit};
 
     let mut model = make_cantilever_model();
-    // 壁の自重が正になるよう、断面へ板厚を、材料へ密度を与える。
     model.sections[0].thickness = Some(200.0);
     model.materials[0].density = 2.4e-9;
     let n = model.nodes.len() as u32;
@@ -2892,7 +2854,6 @@ fn test_model_issues_errors_on_both_beam_face_slit_on_element_plate() {
             support_spring: None,
         });
     }
-    // 柱際の鉛直辺（境界 [0,1,n,n+1] の辺 1・辺 3）を柱で支持する。
     for (i, ends) in [[NodeId(0), NodeId(n + 1)], [NodeId(1), NodeId(n)]]
         .into_iter()
         .enumerate()
@@ -2922,7 +2883,6 @@ fn test_model_issues_errors_on_both_beam_face_slit_on_element_plate() {
             },
         },
     );
-    // 壁領域全体を覆わせて、解析要素になる壁版にする（断面は割当済み）。
     model.wall_regions.push(WallRegion {
         id: WallRegionId(0),
         name: String::new(),
@@ -2977,7 +2937,6 @@ fn test_model_issues_warns_ignored_slit_on_non_quad_plate() {
             support_spring: None,
         });
     }
-    // 境界 5 節点（上辺が中間節点で分割されている）。
     model.add_enclosed_wall_plate_from_nodes(
         &[
             NodeId(0),
@@ -3009,7 +2968,6 @@ fn test_model_issues_warns_ignored_slit_on_non_quad_plate() {
         .find(|i| i.message.contains("耐震スリットの指定が効かない壁版"))
         .expect("警告が出る");
     assert_eq!(warn.severity, IssueSeverity::Warning, "{}", warn.message);
-    // 上下ともスリットでも、効かない壁版はエラーにしない。
     assert!(
         !issues
             .iter()
@@ -3024,7 +2982,6 @@ fn test_model_issues_errors_on_same_kind_support_overlap() {
     use super::precheck::{model_issues, IssueSeverity};
 
     let mut model = make_cantilever_model();
-    // 既存大梁（ElemId 0）とまったく同じ材軸・区間の大梁を重ねる。
     let mut duplicate = model.elements[0].clone();
     duplicate.id = ElemId(1);
     model.elements.push(duplicate);
@@ -3088,7 +3045,6 @@ fn test_model_issues_warns_ignored_slit_without_boundary_nodes() {
     model.elements.push(mk_beam(1, 1, 2));
     model.elements.push(mk_beam(2, 2, 3));
     model.elements.push(mk_beam(3, 3, 0));
-    // 中央間柱は上下の梁の材軸中間にアンカーし、その位置にモデル節点が無い。
     model.unassigned_posts.push(SecondaryMember {
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Post,
@@ -3258,9 +3214,6 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
 
     let issues = model_issues(&model);
     let msgs: Vec<&str> = issues.iter().map(|i| i.message.as_str()).collect();
-    // 解析要素にならない壁版は正常な状態なので知らせない（壁エレメントになるのは
-    // 壁領域全体を覆う 4 節点の壁版だけで、腰壁・垂れ壁・T 字取り付きはそもそも
-    // 要素にする対象ではない）。
     assert!(
         !issues
             .iter()
@@ -3323,7 +3276,6 @@ fn self_standing_wall_off_the_floor_is_an_error() {
     let sec = wall_section.id;
     model.sections.push(wall_section);
     let n = model.nodes.len() as u32;
-    // 床領域からも部材からも離れた位置に置いた自立壁の 2 節点。
     for (i, x) in [50000.0f64, 54000.0].into_iter().enumerate() {
         model.nodes.push(sepika_core::model::Node {
             id: NodeId(n + i as u32),

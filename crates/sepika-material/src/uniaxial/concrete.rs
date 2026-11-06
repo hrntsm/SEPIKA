@@ -205,7 +205,6 @@ mod tests {
 
     #[test]
     fn test_concrete_softening_direction() {
-        // ピーク後ひずみ進行で応力は 0 側へ（|σ| は減少）
         let mut c = Concrete::new(30.0, 2.0);
         c.trial(-0.002);
         c.commit();
@@ -233,13 +232,10 @@ mod tests {
         let mut c = Concrete::new(30.0, 2.0);
         let e0 = 2.0 * 30.0 / 0.002;
         let eps_cr = 2.0 / e0;
-        // ひび割れ前: 弾性
         let (s_el, _) = c.trial(eps_cr * 0.5);
         assert_relative_eq!(s_el, e0 * eps_cr * 0.5, epsilon = 1e-9);
-        // ひび割れ点: σ = ft
         let (s_cr, _) = c.trial(eps_cr);
         assert_relative_eq!(s_cr, 2.0, epsilon = 1e-6);
-        // ひび割れ後: テンションスティフニング（ft から指数減衰、ただし ft 未満）
         c.commit();
         let (s_ts, _) = c.trial(eps_cr * 3.0);
         assert!(s_ts > 0.0 && s_ts < 2.0, "tension stiffening: {}", s_ts);
@@ -247,13 +243,11 @@ mod tests {
 
     #[test]
     fn test_probe_matches_trial_without_mutating_state() {
-        // probe は trial と数学的に同一の結果を返し、状態を書き換えない
-        // （除荷・再載荷の割線分岐を経た状態で確認）。
         let mut c = Concrete::new(30.0, 2.0);
         c.trial(-0.0025);
         c.commit();
 
-        let probe_strain = -0.001; // 除荷側（割線剛性の分岐）
+        let probe_strain = -0.001;
         let before = c.probe(probe_strain);
         assert_eq!(before, c.probe(probe_strain));
 

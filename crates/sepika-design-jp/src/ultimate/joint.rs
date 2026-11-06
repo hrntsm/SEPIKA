@@ -139,7 +139,6 @@ mod tests {
 
     #[test]
     fn test_rc_joint_ultimate_shape_affects_vju() {
-        // 十字形（κ=1.0）は L 形（κ=0.4）より Vju が大きい。
         let cross = rc_joint_ultimate(&sample());
         let mut l = sample();
         l.shape = JointShape::Corner;

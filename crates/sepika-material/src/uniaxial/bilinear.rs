@@ -152,7 +152,6 @@ mod tests {
 
     #[test]
     fn test_bilinear_kinematic_bauschinger() {
-        // 引張降伏→圧縮再載荷で降伏点が負側へ移動（kinematic hardening）
         let mut s = Bilinear::new(205000.0, 235.0, 0.01);
         let eps_y = 235.0 / 205000.0;
         s.trial(eps_y * 5.0);
@@ -160,14 +159,11 @@ mod tests {
         s.trial(-eps_y * 0.5);
         s.commit();
         let (stress, _) = s.trial(-eps_y * 5.0);
-        // kinematic hardening では |σ| が fy を超えてから塑性。完全弾性戻りではない。
         assert!(stress.abs() > 235.0 * 0.9, "kinematic shift expected");
     }
 
     #[test]
     fn test_probe_matches_trial_without_mutating_state() {
-        // probe は trial と数学的に同一の結果を返し、かつ状態を書き換えない
-        // （clone_box()+trial() の置換として使えることの検証）。
         let mut m = Bilinear::new(205000.0, 235.0, 0.01);
         let eps_y = 235.0 / 205000.0;
         m.trial(eps_y * 3.0);
@@ -175,14 +171,12 @@ mod tests {
 
         let probe_strain = eps_y * 10.0;
         let before = m.probe(probe_strain);
-        // probe を何度呼んでも同じ結果（状態不変の確認）。
         assert_eq!(before, m.probe(probe_strain));
 
         let mut clone_for_trial = m.clone();
         let via_trial = clone_for_trial.trial(probe_strain);
         assert_eq!(before, via_trial, "probe は trial と完全一致すること");
 
-        // probe 呼び出し後も committed 状態から通常どおり trial できること。
         let after_probe = m.trial(probe_strain);
         assert_eq!(after_probe, via_trial);
     }

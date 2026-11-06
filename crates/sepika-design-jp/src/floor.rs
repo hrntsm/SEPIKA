@@ -174,7 +174,7 @@ pub fn design_slab_oneway(
     j_ratio: f64,
 ) -> SlabDesignResult {
     let coef = if moment_coef > 0.0 { moment_coef } else { 8.0 };
-    let moment = w * span * span / coef; // N·mm per mm width
+    let moment = w * span * span / coef;
     let d = (thickness - cover).max(0.0);
     let as_req_per_mm = if ft_rebar > 0.0 && j_ratio > 0.0 && d > 0.0 {
         moment / (ft_rebar * j_ratio * d)
@@ -345,7 +345,6 @@ mod tests {
         );
         assert!((r.moment - 0.005 * 3000.0 * 3000.0 / 8.0).abs() < 1e-6);
         assert!((r.effective_depth - 120.0).abs() < 1e-9);
-        // As = M/(ft·j·d)。
         let expect_as = r.moment / (REBAR_FT_LONG_SD295 * SLAB_J_RATIO * 120.0);
         assert!((r.as_req_per_mm - expect_as).abs() / expect_as < 1e-9);
         assert!((r.as_req_per_m - expect_as * 1000.0).abs() / (expect_as * 1000.0) < 1e-9);

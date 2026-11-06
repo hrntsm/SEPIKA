@@ -1567,7 +1567,6 @@ mod tests {
         use sepika_core::model::Model;
         use sepika_edit::UndoStack;
 
-        // 既存断面（H 400x200x8x12）を用意
         let old_draft = SectionEditorDraft {
             r: Some(13.0),
             ..Default::default()
@@ -1580,7 +1579,6 @@ mod tests {
         let mut model = Model::default();
         model.sections.push(old_sec);
 
-        // フォーム（draft）で寸法を変更 → 断面編集パネルの「適用」と同じ経路で shape を構築
         let new_draft = SectionEditorDraft {
             r: Some(20.0),
             h: 500.0,
@@ -1603,11 +1601,9 @@ mod tests {
             }),
         );
 
-        // 再算定された断面性能が反映され、名称は維持される
         assert!((model.sections[0].area - new_area_expected).abs() < 1e-6);
         assert_eq!(model.sections[0].name, "既存断面");
 
-        // undo で元の形状・断面性能に戻る
         undo.undo(&mut model);
         assert!((model.sections[0].area - old_area).abs() < 1e-6);
         assert_eq!(model.sections[0].name, "既存断面");

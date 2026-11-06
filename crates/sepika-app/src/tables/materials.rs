@@ -448,8 +448,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                         pending_field = Some((mat_id, field, buf.clone()));
                     }
                     if resp.lost_focus() && !dirty {
-                        // 無変更の表示キャッシュはUndo/Redoや別入口の更新を隠さない。
-                        // 拒否された変更ドラフトはdirtyのまま保持する。
+                        // 無変更の表示キャッシュを残すと、Undo/Redoや別入口の更新が隠れる。
                         ui.data_mut(|d| {
                             d.remove::<String>(cell_id);
                             d.remove::<bool>(dirty_id);

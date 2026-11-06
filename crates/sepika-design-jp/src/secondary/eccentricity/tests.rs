@@ -1,7 +1,6 @@
 use super::*;
 use test_support::build_symmetric_frame;
 
-// ---- d_value ----
 #[test]
 fn test_d_value_formula_and_degenerate() {
     // 一般階: kc = Ic/h = 1, ΣKb = 4 → k̄ = 2 → a = 2/(2+2) = 0.5 → D = 0.5·12 = 6
@@ -12,12 +11,10 @@ fn test_d_value_formula_and_degenerate() {
     let kc0 = 12.0;
     let d = d_value(1.0, 1.0, 1.0, 1e9, false);
     assert!((d - kc0).abs() / kc0 < 1e-6, "a→1 で D→Kc0, got {d}");
-    // 退化: Ic=0 / h=0 は 0
     assert_eq!(d_value(1.0, 0.0, 1.0, 4.0, false), 0.0);
     assert_eq!(d_value(1.0, 1.0, 0.0, 4.0, false), 0.0);
 }
 
-// 剛心の検算例
 #[test]
 fn test_center_of_rigidity_and_eccentricity_known_values() {
     // 確定値: Dy=[100,300] @ x=[0,6000] → Xs = 4500
@@ -43,9 +40,6 @@ fn test_center_of_rigidity_and_eccentricity_known_values() {
 
 #[test]
 fn test_eccentricity_hand_calc() {
-    // 手計算照合（X 加力時偏心率）。
-    // 柱4本、すべて Dx=Dy=100 とし x=[0,0,6000,6000], y=[0,6000,0,6000]…ではなく
-    // 剛心をずらすため右側を強くする: Dy=[100,100,300,300] @ x=[0,0,6000,6000]
     let cols = vec![
         ColumnStiffness {
             pos: [0.0, 0.0],
@@ -69,7 +63,7 @@ fn test_eccentricity_hand_calc() {
         },
     ];
     let cr = center_of_rigidity(&cols).unwrap();
-    // Xs = (100·0+100·0+300·6000+300·6000)/(100+100+300+300) = 3,600,000/800 = 4500
+    // Xs=(100×0+100×0+300×6000+300×6000)/800=4500 mm。
     assert!((cr[0] - 4500.0).abs() < 1e-9, "Xs {}", cr[0]);
     // Ys = (Σ Dx·y)/ΣDx = 100·(0+6000+0+6000)/400 = 3000
     assert!((cr[1] - 3000.0).abs() < 1e-9, "Ys {}", cr[1]);
@@ -100,8 +94,6 @@ fn test_eccentricity_hand_calc() {
     );
 }
 
-// ===== モデル自動算定テスト =====
-
 /// テスト1: 対称フレーム → 偏心率 ≈ 0、剛心 ≈ [3000, 3000]。
 #[test]
 fn test_story_eccentricity_symmetric_zero() {
@@ -117,7 +109,6 @@ fn test_story_eccentricity_symmetric_zero() {
         "re_y={} (should be ~0)",
         ecc.re_y.as_ref().unwrap()
     );
-    // 剛心確認
     let sc = story_centers(&model, s0).unwrap();
     assert!(
         (sc.center_of_rigidity[0] - 3000.0).abs() < 1.0,
@@ -190,15 +181,12 @@ fn test_story_eccentricity_biased_rigidity() {
 #[test]
 fn test_story_eccentricity_empty_story() {
     let (model, _s0) = build_symmetric_frame(None);
-    // S1 は存在しない（stories は S0 のみ）→ column_stiffnesses は空を返す。
     let s1 = StoryId(2);
     let cols = column_stiffnesses(&model, s1).unwrap();
     assert!(cols.is_empty(), "S1 に柱がないはず、got {} 本", cols.len());
     let cor = center_of_rigidity(&cols).unwrap();
     assert_eq!(cor, [0.0, 0.0], "空時の剛心は [0,0]");
 }
-
-// ===== 雑壁の n 倍法 =====
 
 #[test]
 fn test_misc_wall_stiffness() {
@@ -257,21 +245,16 @@ fn test_append_misc_wall_stiffnesses() {
     let (mut model, s0) = build_symmetric_frame(None);
     model.stress_cfg.misc_wall_n = Some(2.0);
     let wall_sec = push_wall_section(&mut model);
-    // 柱 4 本 × area 100
     assert!((sum_column_area(&model, s0).unwrap() - 400.0).abs() < 1e-12);
 
-    // 対象: x=6000 の Y 方向の自立壁（N1→N3、z=0）。高さは階高（3000）。
     // 長さ 6000 × 厚 100 → Aw' = 6e5、z_mid = 1500 → S0 帰属。
     push_self_standing(&mut model, [NodeId(1), NodeId(3)], None, Some(wall_sec));
-    // 対象外: 腰高（1500 < 階高 3000）の自立壁。階と階をつないでいない。
     push_self_standing(
         &mut model,
         [NodeId(0), NodeId(2)],
         Some([1500.0, 1500.0]),
         Some(wall_sec),
     );
-    // 対象外: 取付き線に取り付く全高の腰壁。フロア間で壁がつながっていないもの
-    // （腰壁・垂れ壁・パラペット）は周辺部材の断面性能へ算入する経路が受け持つ。
     model.wall_plates.push(WallPlate {
         dl_support: None,
         self_weight_shares: Vec::new(),
@@ -323,11 +306,9 @@ fn test_append_misc_wall_stiffnesses() {
     assert!(wall.dx.abs() < 1e-12, "cx=0 なので dx は 0");
     assert_eq!(wall.pos, [6000.0, 3000.0]);
 
-    // 剛心が壁側（x=6000）へ寄ることの確認。
     let cor = center_of_rigidity(&cols).unwrap();
     assert!(cor[0] > 3000.0, "Xs={} は壁側へ寄る", cor[0]);
 
-    // n 未指定なら追加されない。
     let mut model2 = model.clone();
     model2.stress_cfg.misc_wall_n = None;
     let mut cols2 = cols[..4].to_vec();

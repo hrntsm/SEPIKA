@@ -62,7 +62,6 @@ fn wall_post_model() -> Model {
         ..Default::default()
     };
 
-    // 節点: 柱脚 4（固定）・柱頭 4（自由）・間柱の上下端 2（要素非接続）。
     let plan = [[0.0, 0.0], [4000.0, 0.0], [4000.0, 3000.0], [0.0, 3000.0]];
     for (i, c) in plan.iter().enumerate() {
         model.nodes.push(Node {
@@ -88,7 +87,6 @@ fn wall_post_model() -> Model {
         model.nodes.push(Node {
             id: NodeId(8 + i as u32),
             coord: [2000.0, 0.0, z],
-            // 間柱の端部は支点ではない（要素が接続しない幾何節点）。
             restraint: Dof6Mask::FREE,
             mass: None,
             story: None,
@@ -96,7 +94,6 @@ fn wall_post_model() -> Model {
         });
     }
 
-    // 断面: 柱 Box-300x300x10、梁 H-400x200（鋼）、壁 RC t=150、間柱 H-200x100。
     let mut col_section = SectionShape::SteelBox {
         height: 300.0,
         width: 300.0,
@@ -182,7 +179,6 @@ fn wall_post_model() -> Model {
     for i in 0..4u32 {
         model.elements.push(beam(i, i, 4 + i, 0, [1.0, 0.0, 0.0]));
     }
-    // 頂部・柱脚とも閉路にする（`region_gen::wall` が 4 構面を検出するため）。
     // **間柱の位置では大梁を分割しない。** 分割すると壁領域の境界が 5 節点になる。
     for (k, (i, j)) in [(4u32, 5u32), (5, 6), (6, 7), (7, 4)].iter().enumerate() {
         model
@@ -195,8 +191,6 @@ fn wall_post_model() -> Model {
             .push(beam(8 + k as u32, *i, *j, 1, [0.0, 0.0, 1.0]));
     }
 
-    // 間柱（節点 8-9）を安定 ID ＋取付き位置で表し、Y=0 面の壁版割当領域を
-    // 間柱で 2 枚へ分割する。
     model.unassigned_posts.push(SecondaryMember {
         id: SecondaryMemberId(0),
         vertical_eccentricity: Some(0.0),
@@ -475,7 +469,7 @@ fn base_column_axial_sum(app: &App, res: &sepika_solver::statics::linear::Static
             continue;
         };
         if (nb.coord[2] - na.coord[2]).abs() <= 1e-6 {
-            continue; // 鉛直部材（柱）のみ。
+            continue;
         }
         let i_is_base = na.coord[2] < nb.coord[2];
         let base_node = if i_is_base { na } else { nb };

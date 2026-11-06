@@ -75,7 +75,6 @@ fn bench_case(model: &Model, dofmap: &DofMap, reducer: &Reducer, n_modes: usize)
 }
 
 fn main() {
-    // 中規模モデル（数千自由度）。固有値解析の実運用レンジを想定する。
     let model = make_frame(6, 6, 12);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);

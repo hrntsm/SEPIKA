@@ -448,7 +448,6 @@ mod tests {
         let mat = make_material(24.0, "SD345");
         let ctx = ctx_column(LoadTerm::Long);
 
-        // 非常に大きな圧縮軸力 (n<0 は圧縮) を与え、N > rNc となる状況を作る。
         let forces = MemberForcesAt {
             n: -30_000_000.0,
             mz: 10_000_000.0,
@@ -468,7 +467,6 @@ mod tests {
         let mat = make_material(24.0, "SD345");
         let ctx = ctx_column(LoadTerm::Long);
 
-        // n>0 は引張。全主筋の引張耐力を大きく超える引張軸力を与える。
         let forces = MemberForcesAt {
             n: 5_000_000.0,
             mz: 1_000_000.0,
@@ -500,7 +498,6 @@ mod tests {
         let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
         let s_ft = steel_ft(f_value, LoadTerm::Long);
         let s_mo = sz_z * s_ft;
-        // N=0 の MA は少なくとも鋼骨単体の sMo 以上であるはず（RC 分は正で加算）。
         assert!(ma_z >= s_mo * 0.99, "ma_z={ma_z}, s_mo={s_mo}");
 
         let mz_test = ma_z * 0.3;
@@ -556,7 +553,6 @@ mod tests {
         };
         let props_z = column_axis_props(500.0, 500.0, &rebar, true);
         let as_total = rebar.total_main_area();
-        // σy は断面の主筋材料から決まる（検定コンテキストと同じ材料を使う）。
         let rebar_mat = crate::srrc::tests::make_rebar_material("SD345", 345.0);
         let sigma_y = rebar_sigma_y_of(Some(&rebar_mat));
         let fc_raw = 24.0;
@@ -581,7 +577,7 @@ mod tests {
         };
 
         let mu_n0 = mu_at(0.0);
-        let mu_n_comp = mu_at(2_000_000.0); // 中程度の圧縮軸力（釣合軸力未満）
+        let mu_n_comp = mu_at(2_000_000.0);
         assert!(
             mu_n_comp > mu_n0,
             "中程度の圧縮軸力で rMu は増加するはず: mu_n0={mu_n0}, mu_n_comp={mu_n_comp}"

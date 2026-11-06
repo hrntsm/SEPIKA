@@ -270,8 +270,6 @@ mod tests {
     use crate::{DesignCheck, MemberKind};
     use sepika_core::ids::{MaterialId, SectionId};
 
-    // 断片が意図した component に配置されていることの確認
-
     /// Bending の detail に "組合せ比=" が含まれ、Shear の detail には
     /// 含まれない。逆に Shear 固有の "Vy比=" は Bending に含まれない。
     #[test]
@@ -308,15 +306,12 @@ mod tests {
         assert!(!bending.detail.contains("Vy比="));
     }
 
-    // SteelDesignAttr の配線（断面欠損 Z'・横座屈長さ lb）
-
     #[test]
     fn test_check_beam_applies_section_loss_attr() {
         use sepika_core::ids::ElemId;
         use sepika_core::model::SteelDesignAttr;
         let sec = h_section(400.0, 200.0, 8.0, 13.0);
         let m = mat("SN400B");
-        // 端部（pos=0.0）で曲げ支配となる内力。
         let forces = MemberForcesAt {
             pos: 0.0,
             n: 0.0,
@@ -352,7 +347,6 @@ mod tests {
         let with_loss = SteelDesign
             .check(&forces, &sec, &m, &ctx_loss)
             .unwrap_checked();
-        // 欠損で Z′ が減り、曲げ応力度・検定比が大きくなる。
         assert!(
             with_loss.ratio() > base.ratio(),
             "loss ratio={} <= base ratio={}",
@@ -365,7 +359,6 @@ mod tests {
     fn test_check_beam_lb_from_attr_brace_count() {
         use sepika_core::ids::ElemId;
         use sepika_core::model::SteelDesignAttr;
-        // 細長い横座屈支配の梁: lb = L/(n+1) の短縮で fb が上がり検定比が下がる。
         let sec = h_section(600.0, 150.0, 8.0, 10.0);
         let m = mat("SN400B");
         let forces = MemberForcesAt {
@@ -411,8 +404,6 @@ mod tests {
         );
     }
 
-    // 横座屈修正係数 C の直接入力（SteelDesignAttr.c_direct）
-
     /// c_direct=1.5 を与えると、端部モーメント（異符号・自動算定なら
     /// C=2.3）に関わらず fb1 の C=1.5 が採用され、fb・検定比が自動算定時と
     /// 異なることを確認する。
@@ -430,7 +421,6 @@ mod tests {
             my: 0.0,
             mz: 5e7,
         };
-        // 異符号の端部モーメント→自動算定なら C=2.3（上限）。
         let ctx_auto = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
@@ -466,7 +456,6 @@ mod tests {
             .check(&forces, &sec, &m, &ctx_direct)
             .unwrap_checked();
 
-        // C=1.5 < C=2.3（自動算定）→ fb が小さくなり検定比は大きくなる。
         assert!(
             direct.ratio() > auto.ratio(),
             "direct ratio={} <= auto ratio={}",
@@ -501,7 +490,6 @@ mod tests {
             my: 0.0,
             mz: 5e7,
         };
-        // 横補剛 n=1 → lb=6000/2=3000 < length=6000（部分区間）。
         let ctx_no_direct = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
@@ -609,8 +597,6 @@ mod tests {
         );
     }
 
-    // 梁検定
-
     /// 矩形断面の検算例（手計算照合）。
     /// 矩形 B=200, D=400 ⇒ Z=B·D²/6=5.3333e6 mm³, M=1e8 N·mm
     /// σ=18.75 N/mm², fb=F/1.5=156.6667 N/mm²（矩形は横座屈対象外＝fb=ft）,
@@ -649,7 +635,6 @@ mod tests {
         );
         assert!(result.ok());
         assert!(crate::full_detail(&result).contains("18.7500"));
-        // 曲げ単独ケースでも components に Bending・Shear が入ることを確認する。
         assert_eq!(result.components.len(), 2);
         assert!(result
             .components
@@ -697,8 +682,6 @@ mod tests {
             expected_ratio_shear
         );
     }
-
-    // SectionShape 経由の形状解決（tf ≠ tw の実断面）
 
     /// `Section.shape` がある場合は実寸の tw でウェブせん断面積を計算する
     /// （名前推定＋単一板厚近似ではなく、tw=10 が使われること）。
@@ -766,8 +749,6 @@ mod tests {
         );
     }
 
-    // 組合せ検定（軸力+二軸曲げ）
-
     /// 圧縮軸力+二軸曲げ（H形）: σc/fc+σby/fb+σbz/ft を手計算照合する。
     #[test]
     fn test_beam_check_compression_biaxial_bending_hand_calc() {
@@ -804,9 +785,7 @@ mod tests {
         let lambda = 4000.0 / i_min;
         let fc = steel_fc(f, mat_v.young, lambda, LoadTerm::Long);
         let ft = steel_ft(f, LoadTerm::Long);
-        // fb_strong は横座屈考慮（既存ロジック、H形は steel_lateral_buckling_i_af
-        // で (i,af) を解決する）。この内力配分では組合せ式が支配的となる
-        // （σax が大きく、mises 式の σax+σby′ 項に対し fc・fb の分母が効くため）。
+        // この圧縮・二軸曲げ入力では、座屈を反映したfc・fbにより組合せ式が支配する。
         let (i_t, af) = steel_lateral_buckling_i_af(&sec, 13.0, 8.0);
         let fb_strong = steel_fb_h(f, LoadTerm::Long, 4000.0, i_t, 400.0, af, 1.0);
         let expected_comb = sigma_c / fc + sigma_by / fb_strong + sigma_bz / ft;
@@ -866,7 +845,7 @@ mod tests {
     #[test]
     fn test_beam_check_pipe_combines_biaxial_bending() {
         let mut sec = rect_section(300.0, 300.0, "PIPE-300x12");
-        sec.iz = sec.iy; // 円形は iy=iz
+        sec.iz = sec.iy;
         sec.thickness = Some(12.0);
         let mat_v = mat("SN400");
         let forces_mz_only = MemberForcesAt {
@@ -904,8 +883,6 @@ mod tests {
             r2.ratio()
         );
     }
-
-    // せん断検定（弱軸 Qz・角形鋼管）
 
     /// H形の弱軸せん断 Qz: Az=2・B・tf/1.5 の手計算照合。
     #[test]
@@ -1030,8 +1007,6 @@ mod tests {
         );
     }
 
-    // AIJ-ASD19 fb（テスト区分）
-
     /// steel_fb_basis 未指定（既定 Asd2019）では AIJ-ASD19 の式を用いる。
     #[test]
     fn test_beam_check_fb_basis_default_matches_asd2019() {
@@ -1121,7 +1096,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
-            length: 300.0, // 十分短い横座屈長さ→全塑性域
+            length: 300.0,
             steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };
@@ -1137,8 +1112,6 @@ mod tests {
         let p_lambda_b = steel_p_lambda_b(&ctx, false);
         let lb = 300.0_f64;
 
-        // My, Me, λb を独立に計算し、λb ≤ pλb（全塑性域）であることを確認したうえで
-        // fb=F/ν と一致することを検算する。
         let my = f * z_strong;
         let pi2 = std::f64::consts::PI.powi(2);
         let pi4 = std::f64::consts::PI.powi(4);
@@ -1255,7 +1228,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
-            length: 20_000.0, // 十分長い横座屈長さ→弾性域
+            length: 20_000.0,
             steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };
@@ -1293,8 +1266,6 @@ mod tests {
             expected
         );
     }
-
-    // steel_p_lambda_b（塑性限界細長比 pλb）
 
     /// 座屈区間中央の曲げが両端部より大きい場合は安全側 pλb=0.3。
     #[test]
@@ -1383,8 +1354,6 @@ mod tests {
             crate::full_detail(&result)
         );
     }
-
-    // たわみの検定
 
     /// 等分布荷重 w [N/mm] の単純梁相当（端部モーメント無し）を
     /// M0=Mc=wl²/8 として与えると、標準公式 5wl⁴/(384EI) と一致する。

@@ -610,16 +610,12 @@ mod tests {
                 young: 205000.0,
                 poisson: 0.3,
                 density: 0.0,
-                // sepika-solver 側の `single_column_model`（Fiber 要素、ねじり無視）は
-                // shear=Some(0.0) だが、ここは Beam 要素（弾性ねじり剛性 GJ を持つ）なので
-                // shear=None にして young/poisson から G を導出させる
-                // （G=0 のままだと頂部のねじり自由度の剛性が 0 になり特異行列になる）。
+                // G=0ではBeamの頂部ねじり剛性GJがゼロとなり、特異行列になる。
                 shear: None,
                 fc: None,
                 fy: Some(235.0),
             }],
             stories: vec![
-                // 階は床であり、先頭は基部の床（`Model::layers` の不変条件）。
                 Story {
                     wall_weights: Vec::new(),
                     id: StoryId(0),
@@ -980,7 +976,6 @@ mod tests {
         let status = wait_for_terminal(&server, &job_id).await;
         match status {
             JobStatus::Failed { error, kind } => {
-                // 文言は利用者向けの日本語、種別コードは機械可読な安定値。
                 assert!(error.contains("荷重ケース"), "unexpected error: {error}");
                 assert_eq!(kind, "load_case_not_found");
             }
@@ -1070,7 +1065,6 @@ mod tests {
                 .unwrap();
             let job: serde_json::Value =
                 serde_json::from_str(&status.content[0].raw.as_text().unwrap().text).unwrap();
-            // 公開 API の result_ref はオブジェクトではなく JSON 文字列。
             serde_json::from_str(job["status"]["Done"]["result_ref"].as_str().unwrap()).unwrap()
         }
         let dir = test_store_dir("load_state_combination_store");
@@ -1242,8 +1236,7 @@ mod tests {
         let dir = test_store_dir("pushover_basic");
         let server = SepikaServer::new(make_state(pushover_model_with_saved_gravity(), &dir));
         let mut args = run_args(JobKind::Pushover);
-        // 既定(steps=50, 目標層間変形角1/150)だと機構形成後に特異行列となり得るため
-        // (sepika-solver 側の同種テストと同じ配慮)、目標変位を明示して小さめの値にする。
+        // 既定の目標では機構形成後に特異となり得るため、この検証では小さい目標変位を明示する。
         args.steps = Some(10);
         args.max_disp = Some(30.0);
         let result = server.analysis_run(Parameters(args)).await.unwrap();
@@ -1325,7 +1318,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_analysis_run_semi_precise_without_design_period_completes() {
-        // ジョブは完了し、サマリ JSON に notices が載ることを確認する。
         let dir = test_store_dir("semi_precise_no_t");
         let server = SepikaServer::new(make_state(pushover_model_with_saved_gravity(), &dir));
         let mut args = run_args(JobKind::Pushover);

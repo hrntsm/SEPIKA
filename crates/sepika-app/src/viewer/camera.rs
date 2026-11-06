@@ -200,8 +200,6 @@ mod tests {
 
     #[test]
     fn ドラッグ回転を繰り返しても鉛直軸は傾かない() {
-        // アークボール時代の不具合: 斜めドラッグの繰り返しでロールが蓄積し、
-        // 鉛直軸が画面上で斜めに傾いていた。ターンテーブルでは起きないことを確認する。
         let mut cam = CameraState::default();
         let drags = [
             (30.0, -20.0),
@@ -224,9 +222,9 @@ mod tests {
     #[test]
     fn 俯仰は真上と真下でクランプされる() {
         let mut cam = CameraState::default();
-        cam.turntable_drag(0.0, 1e6); // 大きく下ドラッグ → 真上（平面図）で停止
+        cam.turntable_drag(0.0, 1e6);
         assert!((cam.pitch - 0.0).abs() < 1e-6);
-        cam.turntable_drag(0.0, -1e6); // 大きく上ドラッグ → 真下で停止
+        cam.turntable_drag(0.0, -1e6);
         assert!((cam.pitch + std::f32::consts::PI).abs() < 1e-6);
     }
 }

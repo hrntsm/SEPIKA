@@ -477,7 +477,6 @@ fn test_query_model_sections_expose_materials_and_frame_use() {
 #[test]
 fn test_query_model_filter() {
     let m = sample_model();
-    // 名前で絞り込み（断面名 H-400 を含むものだけ）。
     assert_eq!(query_model(&m, "section", Some("H-400")).unwrap().len(), 1);
     assert_eq!(query_model(&m, "section", Some("RC")).unwrap().len(), 0);
 }
@@ -832,7 +831,6 @@ pub(crate) fn rc_column_model() -> Model {
                 support_spring: None,
             },
         ],
-        // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
         sections: vec![Section {
             material: Some(MaterialId(0)),
             rebar_material: Some(MaterialId(1)),
@@ -1042,7 +1040,6 @@ fn test_compute_design_check_job_default_positions() {
 #[test]
 fn test_compute_design_check_job_member_detail_joint() {
     let mut model = rc_column_model();
-    // 節点間距離 3000mm の柱に、始端から 1000mm（正規化 1/3）の現場継手を追加する。
     model.member_detail_attrs.push(MemberDetailAttr {
         elem: ElemId(0),
         haunch_i: None,
@@ -1061,11 +1058,9 @@ fn test_compute_design_check_job_member_detail_joint() {
             ..
         } => {
             assert_eq!(summary["kind"], "DesignCheck");
-            // 継手位置 1000/3000 の断面力行が追加されている。
             assert!(member_force_rows
                 .iter()
                 .any(|(_, pos, _)| (pos - 1000.0 / 3000.0).abs() < 1e-6));
-            // 継手位置分だけ検定数が増える（3 -> 4）。
             assert_eq!(summary["n_checks"], 4);
         }
         _ => panic!("expected DesignCheck outcome"),
@@ -1097,7 +1092,6 @@ fn test_job_registry_lifecycle() {
         &reg.get(&id).unwrap().status,
         JobStatus::Done { result_ref } if result_ref == "r1"
     ));
-    // 異なる ID は別ジョブ。
     let id2 = reg.register(JobKind::Eigen);
     assert_ne!(id, id2);
     assert!(reg.get("nonexistent").is_none());
@@ -1112,12 +1106,10 @@ fn test_quantity_takeoff_json_column() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["category"], "柱");
     assert!((rows[0]["concrete_m3"].as_f64().unwrap() - 1.08).abs() < 1e-9);
-    // 明細: 部材 1 件。合計と注記も返る。
     let detail = quantity_takeoff_json(&model, Some("detail")).unwrap();
     assert_eq!(detail["rows"].as_array().unwrap().len(), 1);
     assert!(detail["totals"]["rebar_t"].as_f64().unwrap() > 0.0);
     assert!(!detail["notes"].as_array().unwrap().is_empty());
-    // 鉄筋径別: D25（主筋）と D10（フープ）。
     let rebar = quantity_takeoff_json(&model, Some("rebar")).unwrap();
     assert_eq!(rebar["rows"].as_array().unwrap().len(), 2);
 }
@@ -1143,12 +1135,10 @@ fn test_query_model_wall_plates() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], 0);
     assert_eq!(items[0]["shape"]["kind"], "Enclosed");
-    // 耐震スリットは辺ごとの真偽値として出す。
     assert_eq!(
         items[0]["slit"],
         serde_json::json!({ "column_face": [false, false], "beam_face": [false, false] })
     );
-    // 壁エレメントになるかも出す（どの壁版が解析に効いているかを引けるようにする）。
     assert_eq!(items[0]["becomes_element"], serde_json::json!(false));
 }
 
@@ -1179,7 +1169,6 @@ fn test_apply_edit_set_wall_plate_slit() {
         slit: Default::default(),
     });
 
-    // 三方スリット（柱際 2 辺 ＋ 下辺）を辺の組み合わせで指定する。
     let body = serde_json::json!({
         "command": "SetWallPlateAttrs",
         "id": 0,
@@ -1194,7 +1183,6 @@ fn test_apply_edit_set_wall_plate_slit() {
     assert_eq!(state.model.wall_plates[0].slit.column_face, [true, true]);
     assert_eq!(state.model.wall_plates[0].slit.beam_face, [true, false]);
 
-    // 片方のキーだけでも指定できる。欠けた側は切れていない扱い。
     let body = serde_json::json!({
         "command": "SetWallPlateAttrs",
         "id": 0,
@@ -1204,13 +1192,10 @@ fn test_apply_edit_set_wall_plate_slit() {
     assert_eq!(state.model.wall_plates[0].slit.column_face, [false, false]);
     assert_eq!(state.model.wall_plates[0].slit.beam_face, [false, true]);
 
-    // 省略すると「どの辺も切れていない」へ戻る（他の属性と同じ既定の扱い）。
     let body = serde_json::json!({ "command": "SetWallPlateAttrs", "id": 0 });
     assert!(apply_edit(&mut state, &body).expect("apply").applied);
     assert!(!state.model.wall_plates[0].slit.any());
 
-    // 要素数が違う配列は誤りとして弾く（片側だけ指定して残りが既定になる、
-    // という黙った解釈をしない）。
     let body = serde_json::json!({
         "command": "SetWallPlateAttrs",
         "id": 0,
@@ -1274,12 +1259,10 @@ fn test_apply_edit_wall_plate_region_assignment() {
         .expect("temp store"),
     };
 
-    // 未設定へ戻すと版も消える。
     let body = serde_json::json!({ "command": "UnsetWallPlateRegion", "region": region.0 });
     assert!(apply_edit(&mut state, &body).expect("apply").applied);
     assert!(state.model.wall_plates.is_empty());
 
-    // 割り当て直すと生成される。
     let body = serde_json::json!({
         "command": "AssignWallPlateToRegion",
         "region": region.0,
@@ -1298,12 +1281,10 @@ fn test_apply_edit_wall_plate_region_assignment() {
         1
     );
 
-    // 版なしへ。
     let body = serde_json::json!({ "command": "SetWallPlateRegionNoPlate", "region": region.0 });
     assert!(apply_edit(&mut state, &body).expect("apply").applied);
     assert!(state.model.wall_plates.is_empty());
 
-    // 領域不在は applied:false。
     let body = serde_json::json!({ "command": "AssignWallPlateToRegion", "region": 99 });
     assert!(!apply_edit(&mut state, &body).expect("parse ok").applied);
     assert!(state.model.wall_plates.is_empty());
@@ -2294,7 +2275,6 @@ fn stb_strength_native_name_and_numeric_edits_keep_grade_value_consistent() {
             material: Some(custom_id)
         })
     ));
-    // Explicit member Fc remains above the intentionally changed section assignment.
     assert_eq!(
         model.element_material(&model.elements[0]).unwrap().fc,
         Some(36.)
@@ -4152,7 +4132,6 @@ fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_no
             assert!(checks.iter().all(|(_, _, result)| matches!(result, CheckOutcome::Skipped { reason: message } if message.contains(reason))));
         }
     }
-    // 未使用断面と別の節点につく梁の配筋は、この接合部へ持ち込まない。
     let unsupported = rebar507_with_explicit_zero_beam_eccentricity(&secondary).unwrap();
     let mut unrelated = normal.clone();
     let mut section = unsupported.sections[1].clone();

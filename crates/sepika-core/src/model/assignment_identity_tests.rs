@@ -237,7 +237,6 @@ fn 同重心同面積同親名でも別支持境界へ版を移さない() {
             model.floor_regions[0].name = "共通名".into();
             model.floor_assignment_regions.regions[0].assignment = PlateAssignment::NoPlate;
         }
-        // 支持 ID だけを変更し、親名の推定対象の座標・面積は不変。
         model.elements.swap(0, 1);
         for (i, elem) in model.elements.iter_mut().enumerate() {
             elem.id = ElemId(i as u32);

@@ -234,10 +234,6 @@ mod tests {
     use crate::steel::SteelDesign;
     use crate::{DesignCheck, MemberKind};
 
-    // -------------------------------------------------------------
-    // 柱検定
-    // -------------------------------------------------------------
-
     /// 断片が意図した component に配置されていることの確認
     /// （AxialBending の detail に "軸曲げ比" が含まれ、Shear の detail には
     /// 含まれない。逆に Shear 固有の "せん断比" は AxialBending に含まれない）。
@@ -282,7 +278,7 @@ mod tests {
     #[test]
     fn test_column_check_pipe_combines_biaxial_sigma_b() {
         let mut sec = rect_section(300.0, 300.0, "PIPE-300x12");
-        sec.iz = sec.iy; // 円形は iy=iz
+        sec.iz = sec.iy;
         sec.thickness = Some(12.0);
         let mat_v = mat("SN400");
         let forces_x_only = MemberForcesAt {
@@ -313,8 +309,6 @@ mod tests {
         let r2 = SteelDesign
             .check(&forces_biaxial, &sec, &mat_v, &ctx)
             .unwrap_checked();
-        // 円形鋼管は sqrt(mz^2+my^2) で合成するため、合成曲げモーメントの大きさが
-        // 同じであれば mz のみと mz/my 分配後で軸+曲げ比はほぼ一致するはず。
         assert!(
             (r1.ratio() - r2.ratio()).abs() < 1e-6,
             "pipe combined sigma_b mismatch: {} vs {}",
@@ -367,10 +361,6 @@ mod tests {
         );
     }
 
-    // -------------------------------------------------------------
-    // 座屈長さ 0 の扱い
-    // -------------------------------------------------------------
-
     #[test]
     fn test_column_length_zero_ignores_buckling() {
         let mut sec = rect_section(300.0, 300.0, "一般断面");
@@ -399,10 +389,6 @@ mod tests {
         let expected = (100_000.0 / sec.area) / ft;
         assert!((result.ratio() - expected).abs() < 1e-6);
     }
-
-    // -------------------------------------------------------------
-    // 座屈長さの軸別化（lk_y/lk_z）
-    // -------------------------------------------------------------
 
     /// lk_y=lk_z=None（=length 共通）の場合、λ=max(lk_y/i_y, lk_z/i_z) が
     /// λ=length/i_min（i_min=√(min(Iy,Iz)/A)）と一致することを、
@@ -476,7 +462,7 @@ mod tests {
             kind: MemberKind::Column,
             length: 3000.0,
             lk_y: Some(3000.0),
-            lk_z: Some(9000.0), // 弱軸のみ座屈長さを 3 倍に
+            lk_z: Some(9000.0),
             ..Default::default()
         };
         let long_z = SteelDesign
@@ -490,9 +476,6 @@ mod tests {
             long_z.ratio()
         );
     }
-
-    // -------------------------------------------------------------
-    // -------------------------------------------------------------
 
     /// `Standard1973` を指定すると 1973 年版の式を用いる。
     #[test]

@@ -259,7 +259,6 @@ fn test_set_node_coord_invalid_id_is_noop() {
             coord: [1.0, 2.0, 3.0],
         }),
     );
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
     assert!(model.nodes.is_empty());
 }
@@ -296,7 +295,6 @@ fn test_set_node_restraint_invalid_id_is_noop() {
             restraint: Dof6Mask::FIXED,
         }),
     );
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
     assert!(model.nodes.is_empty());
 }
@@ -323,7 +321,6 @@ fn test_set_node_support_spring_roundtrip() {
     stack.redo(&mut model);
     assert_eq!(model.nodes[0].support_spring, Some(spring));
 
-    // 解除（None へ）も同様に往復できる。
     stack.run(
         &mut model,
         Box::new(SetNodeSupportSpring {
@@ -365,7 +362,6 @@ fn test_set_node_support_spring_invalid_id_is_noop() {
             spring: Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
         }),
     );
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
     assert!(model.nodes.is_empty());
 }
@@ -414,8 +410,6 @@ fn test_delete_node_middle_renumbers_and_roundtrips() {
             support_spring: None,
         });
     }
-    // 末尾の節点（N2）を使う部材を用意し、中間節点（N1）削除後に
-    // 参照が N1 へ繰り上がることを確認する。
     model.elements.push(ElementData {
         id: sepika_core::ids::ElemId(0),
         kind: ElementKind::Beam,
@@ -437,7 +431,6 @@ fn test_delete_node_middle_renumbers_and_roundtrips() {
     assert_eq!(model.nodes[0].id, NodeId(0));
     assert_eq!(model.nodes[1].id, NodeId(1));
     assert_eq!(model.nodes[1].coord, [2.0, 0.0, 0.0]);
-    // 元 N2 だった部材参照は N1 に繰り上がる
     assert_eq!(model.elements[0].nodes[1], NodeId(1));
     assert!(model.validate().is_ok());
 
@@ -492,7 +485,6 @@ fn test_delete_node_in_use_is_noop() {
         spring: None,
     });
 
-    // 部材に使われている節点の削除は Noop（先に部材を削除する必要がある）
     stack.run(&mut model, Box::new(DeleteNode { id: NodeId(0) }));
     assert_eq!(model.nodes.len(), 2);
     assert!(model.validate().is_ok());
@@ -538,7 +530,6 @@ fn test_add_delete_member_load_roundtrip() {
     stack.redo(&mut model);
     assert_eq!(model.load_cases[0].member.len(), 1);
 
-    // 削除と復元（位置保持）
     stack.run(
         &mut model,
         Box::new(DeleteMemberLoad {
@@ -592,7 +583,6 @@ fn test_delete_member_undo_preserves_member_load_order() {
         elements: vec![mk_elem(0), mk_elem(1), mk_elem(2)],
         ..Default::default()
     };
-    // 荷重順 [e0:1, e1:2, e2:3, e1:4]。elem1 に 2 つの荷重が離れて存在する。
     model.load_cases.push(LoadCase {
         origin: Default::default(),
         kind: Default::default(),
@@ -609,13 +599,10 @@ fn test_delete_member_undo_preserves_member_load_order() {
 
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(DeleteMember { id: ElemId(1) }));
-    // elem1 の荷重（w=2,4）が除去され、残りは [1,3]。
     let after: Vec<f64> = model.load_cases[0].member.iter().map(w1_of).collect();
     assert_eq!(after, vec![1.0, 3.0]);
 
     stack.undo(&mut model);
-    // undo は削除前の順序 [1,2,3,4] を厳密に復元しなければならない
-    // （前方順挿入では [1,2,4,3] と入れ替わっていた）。
     let restored: Vec<f64> = model.load_cases[0].member.iter().map(w1_of).collect();
     assert_eq!(
         restored,
@@ -1230,7 +1217,6 @@ fn test_edit_section_shape_invalid_id_noop() {
         frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
     };
     stack.run(&mut model, Box::new(cmd));
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
     assert!(model.sections.is_empty());
 }
@@ -1258,7 +1244,6 @@ fn test_duplicate_section_no_section_noop() {
 
     let cmd = DuplicateSectionForMember { member: ElemId(0) };
     stack.run(&mut model, Box::new(cmd));
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
 }
 
@@ -1293,7 +1278,6 @@ fn test_delete_member_middle_renumbers_and_roundtrips() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{LoadCase, MemberLoad, MemberLoadKind};
     let mut model = seeded_model(3, 2);
-    // 両方の部材に部材荷重を付ける
     model.load_cases.push(LoadCase {
         origin: Default::default(),
         kind: Default::default(),
@@ -1316,16 +1300,13 @@ fn test_delete_member_middle_renumbers_and_roundtrips() {
     let before = model.clone();
     let mut stack = UndoStack::new();
 
-    // 先頭（中間）の部材を削除 → 後続 ID が繰り上がり、関連荷重も消える
     stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) }));
     assert_eq!(model.elements.len(), 1);
     assert_eq!(model.elements[0].id, ElemId(0));
     assert!(model.validate().is_ok());
     assert_eq!(model.load_cases[0].member.len(), 1);
-    // 残った荷重は旧 ElemId(1) → 新 ElemId(0) を指す
     assert_eq!(model.load_cases[0].member[0].elem, ElemId(0));
 
-    // undo で完全復元
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert!(model.validate().is_ok());
@@ -1395,7 +1376,6 @@ fn test_delete_section_referenced_by_beam() {
         section.frame_use = (i == 1).then_some(sepika_core::model::FrameSectionUse::Girder);
         model.sections.push(section);
     }
-    // 二次部材小梁が断面 1 のみを参照する床領域（要素は断面を参照しない）。
     let mut region = sepika_core::model::FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
@@ -1416,7 +1396,6 @@ fn test_delete_section_referenced_by_beam() {
 
     let mut stack = UndoStack::new();
 
-    // 小梁が参照中の断面 1 は削除できない（要素だけでなく小梁も参照チェック対象）。
     stack.run(&mut model, Box::new(DeleteSection { id: SectionId(1) }));
     assert_eq!(model.sections.len(), 2, "小梁参照中の断面は削除されない");
 
@@ -1433,7 +1412,6 @@ fn test_delete_section_referenced_by_beam() {
         slit: Default::default(),
     });
 
-    // 未参照の断面 0 を削除 → 断面 1 が 0 へ繰り上がり、小梁参照も追随する。
     stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
     assert_eq!(model.sections.len(), 1);
     assert_eq!(
@@ -1490,7 +1468,6 @@ fn test_delete_material_in_use_is_noop() {
             concrete_class: Default::default(),
         }),
     );
-    // 材料は断面が持つ。参照元となる断面を 1 つ足して割り当てる。
     model
         .sections
         .push(bare_section(SectionId(0), Some(MaterialId(0))));
@@ -1570,7 +1547,6 @@ fn test_set_section_material_roundtrip_for_every_role() {
             Some(MaterialId(1)),
             "{role:?} を割り当てる"
         );
-        // ほかの欄は動かない（役割ごとに独立した欄であること）。
         for other in [
             SectionMaterialRole::Main,
             SectionMaterialRole::Rebar,
@@ -1640,7 +1616,6 @@ fn test_set_slab_section_roundtrip() {
     stack.undo(&mut model);
     assert_eq!(model.slabs[0].section(), None, "undo で未割当へ戻る");
 
-    // 実在しない断面の指定は Noop（モデルを壊さない）。
     assert!(!stack.run(
         &mut model,
         Box::new(SetSlabSection {
@@ -1674,13 +1649,11 @@ fn test_slab_section_reference_is_guarded_and_shifted() {
         }),
     ));
 
-    // 参照中の断面は削除できない。
     assert!(
         !stack.run(&mut model, Box::new(DeleteSection { id: SectionId(1) })),
         "床が参照する断面は削除できない"
     );
 
-    // 参照されていない断面を消すと、後続の断面 ID が繰り上がり床の参照も追随する。
     assert!(stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) })));
     assert_eq!(
         model.slabs[0].section(),
@@ -2056,7 +2029,6 @@ fn test_add_delete_load_case_roundtrip() {
     assert_eq!(model.load_cases[0].id, LoadCaseId(0));
     assert_eq!(model.load_cases[1].id, LoadCaseId(1));
 
-    // 先頭を削除 → 後続 ID 繰り上がり
     let before = model.clone();
     stack.run(&mut model, Box::new(DeleteLoadCase { id: LoadCaseId(0) }));
     assert_eq!(model.load_cases.len(), 1);
@@ -2128,13 +2100,11 @@ fn test_delete_combination_roundtrip_restores_position() {
     let before = model.clone();
     let mut stack = UndoStack::new();
 
-    // 中間（B）を削除
     stack.run(&mut model, Box::new(DeleteCombination { index: 1 }));
     assert_eq!(model.combinations.len(), 2);
     assert_eq!(model.combinations[0].name, "A");
     assert_eq!(model.combinations[1].name, "C");
 
-    // undo で元の位置（index 1）に復元
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert_eq!(model.combinations[1].name, "B");
@@ -2151,7 +2121,6 @@ fn test_delete_combination_out_of_range_is_noop() {
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(DeleteCombination { index: 0 }));
     assert!(model.combinations.is_empty());
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
 }
 
@@ -2177,7 +2146,6 @@ fn test_assign_and_unset_slab_roundtrip() {
     );
     assert!(model.validate().is_ok());
 
-    // 未設定へ戻すと床板の削除も同一 Undo 単位に含まれる。
     stack.run(&mut model, Box::new(UnsetFloorPlateRegion { region }));
     assert!(model.slabs.is_empty());
     assert!(model.floor_assignment_regions.regions[0]
@@ -2304,7 +2272,6 @@ fn test_delete_slab_middle_renumbers_and_roundtrips() {
     }
     let before = model.clone();
 
-    // 中間（SlabId(1) = "B"）を削除 → 後続 ID が繰り上がる
     stack.run(&mut model, Box::new(DeleteSlab { id: SlabId(1) }));
     assert_eq!(model.slabs.len(), 2);
     assert_eq!(model.slabs[0].id, SlabId(0));
@@ -2313,7 +2280,6 @@ fn test_delete_slab_middle_renumbers_and_roundtrips() {
     assert_eq!(model.slabs[1].plate.loads[0].kind, "C");
     assert!(model.validate().is_ok());
 
-    // undo で完全復元
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert!(model.validate().is_ok());
@@ -2329,7 +2295,6 @@ fn test_delete_slab_out_of_range_is_noop() {
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(DeleteSlab { id: SlabId(0) }));
     assert!(model.slabs.is_empty());
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
 }
 
@@ -2366,7 +2331,6 @@ fn test_set_story_weight_roundtrip() {
             weight: Some(1234.5),
         }),
     );
-    // 手入力値は実効値（seismic_weight）へも反映される。
     assert_eq!(model.stories[0].weight_override, Some(1234.5));
     assert_eq!(model.stories[0].seismic_weight, Some(1234.5));
 
@@ -2422,7 +2386,6 @@ fn test_set_story_weight_invalid_id_is_noop() {
         }),
     );
     assert_eq!(model.stories[0].seismic_weight, Some(999.0));
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
 }
 
@@ -2510,7 +2473,6 @@ fn test_delete_leftover_generated_master_roundtrip() {
         story: None,
         support_spring: None,
     });
-    // 不活性化された旧代表節点(story_gen.rs の仕様どおり restraint=FIXED, story=None)。
     model.nodes.push(Node {
         id: NodeId(1),
         coord: [3000.0, 0.0, 3000.0],
@@ -2546,11 +2508,9 @@ fn test_delete_leftover_generated_master_roundtrip() {
     let before = model.clone();
     let mut stack = UndoStack::new();
 
-    // 不活性節点は何にも参照されていないため削除できる。
     stack.run(&mut model, Box::new(DeleteNode { id: NodeId(1) }));
     assert_eq!(model.nodes.len(), 2);
     assert!(model.generated_masters.is_empty());
-    // 旧 NodeId(2) だった部材参照は NodeId(1) に繰り上がる
     assert_eq!(model.elements[0].nodes[1], NodeId(1));
     assert!(model.validate().is_ok());
 
@@ -2627,13 +2587,11 @@ fn test_nodal_loads_are_indexed_and_allow_duplicates_per_node() {
             }),
         );
     }
-    // 同じ節点でも 2 件が独立して並ぶ（旧仕様は節点キーの upsert で 1 件に潰れた）。
     assert_eq!(
         model.load_cases[0].nodal,
         vec![first.clone(), second.clone()]
     );
 
-    // 添字指定の変更は対象 1 件だけを差し替える。
     let mut edited = second.clone();
     edited.values[2] = -80.0;
     stack.run(
@@ -2646,7 +2604,6 @@ fn test_nodal_loads_are_indexed_and_allow_duplicates_per_node() {
     );
     assert_eq!(model.load_cases[0].nodal, vec![first.clone(), edited]);
 
-    // 削除 → undo で同じ位置へ戻る。
     stack.run(
         &mut model,
         Box::new(DeleteNodalLoad {
@@ -2658,7 +2615,6 @@ fn test_nodal_loads_are_indexed_and_allow_duplicates_per_node() {
     stack.undo(&mut model);
     assert_eq!(model.load_cases[0].nodal[0], first);
 
-    // 種別は触っていないので既定のまま。
     assert_eq!(model.load_cases[0].kind, LoadCaseKind::Other);
 }
 
@@ -2671,7 +2627,6 @@ fn test_auto_loads_reject_edit_and_delete() {
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddLoadCase { name: "DL".into() }));
     let auto = NodalLoad::auto(NodeId(0), [0.0, 0.0, -10.0, 0.0, 0.0, 0.0]);
-    // 自動生成分は同期（`replace_auto_loads`）が入れるものなので、そちらで用意する。
     model.load_cases[0].replace_auto_loads(vec![auto.clone()], Vec::new());
 
     assert!(!stack.run(
@@ -2774,7 +2729,6 @@ fn test_sync_slab_loads_to_case_creates_new_case() {
     assert_eq!(model.load_cases[0].member, member);
     assert_eq!(model.load_cases[0].nodal, nodal);
 
-    // undo → 新規作成したケースごと消える(DeleteLoadCase を再利用した逆操作)。
     stack.undo(&mut model);
     assert!(model.load_cases.is_empty());
 
@@ -2789,7 +2743,6 @@ fn test_sync_slab_loads_to_case_keeps_manual_and_replaces_auto() {
     let mut model = seeded_model(3, 2);
     let mut stack = UndoStack::new();
 
-    // 既存の同名ケースに、利用者が手で入れた荷重が 1 件ある状態。
     stack.run(
         &mut model,
         Box::new(AddLoadCase {
@@ -2835,7 +2788,6 @@ fn test_sync_slab_loads_to_case_keeps_manual_and_replaces_auto() {
             member: auto_member.clone(),
         }),
     );
-    // 手入力は残り、自動生成分が後ろに付く。
     assert_eq!(model.load_cases.len(), 1);
     assert_eq!(
         model.load_cases[0].member,
@@ -2843,7 +2795,6 @@ fn test_sync_slab_loads_to_case_keeps_manual_and_replaces_auto() {
     );
     assert_eq!(model.load_cases[0].kind, LoadCaseKind::Dead);
 
-    // 再同期しても自動生成分は置き換わるだけで増えない（冪等）。
     stack.run(
         &mut model,
         Box::new(SyncSlabLoadsToCase {
@@ -2856,7 +2807,6 @@ fn test_sync_slab_loads_to_case_keeps_manual_and_replaces_auto() {
     assert_eq!(model.load_cases[0].member.len(), 2);
     assert_eq!(model.load_cases[0].member[0], manual);
 
-    // undo を2回 → 元の手動入力だけの状態に戻る。
     stack.undo(&mut model);
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
@@ -3025,7 +2975,6 @@ fn test_set_wall_plate_attrs_roundtrip() {
     assert_eq!(model.wall_plates[0].opening_weight, 80.0);
     assert_eq!(model.wall_plates[0].openings.len(), 1);
     assert_eq!(model.wall_plates[0].finish_intensity(), 1.0e-3);
-    // 左右を独立に保存する（片側だけのスリットが両側へ広がらない）。
     assert_eq!(model.wall_plates[0].slit.column_face, [true, false]);
     assert_eq!(model.wall_plates[0].slit.beam_face, [false, true]);
 
@@ -3086,7 +3035,6 @@ fn test_set_wall_plate_section_roundtrip_and_rejects_dangling() {
     stack.undo(&mut model);
     assert_eq!(model.wall_plates[0].section, None);
 
-    // 実在しない断面は割り当てない。
     stack.run(
         &mut model,
         Box::new(SetWallPlateSection {
@@ -3194,7 +3142,6 @@ fn test_set_member_hysteresis_roundtrip() {
         Some(HysteresisModel::Takeda)
     );
 
-    // 存在しない部材は Noop。
     let mut stack2 = UndoStack::new();
     stack2.run(
         &mut model,
@@ -3212,8 +3159,6 @@ fn test_set_member_hysteresis_th_roundtrip() {
     let mut model = seeded_model(3, 2);
     let mut stack = UndoStack::new();
 
-    // 増分用スロットを Takeda に設定しておき、時刻歴用スロットの操作で
-    // 影響を受けないことを確認する。
     stack.run(
         &mut model,
         Box::new(SetMemberHysteresis {
@@ -3234,7 +3179,6 @@ fn test_set_member_hysteresis_th_roundtrip() {
         model.member_hysteresis_th_raw(ElemId(0)),
         Some(HysteresisModel::OriginOriented)
     );
-    // 増分用スロットは影響を受けない。
     assert_eq!(
         model.member_hysteresis(ElemId(0)),
         Some(HysteresisModel::Takeda)
@@ -3253,7 +3197,6 @@ fn test_set_member_hysteresis_th_roundtrip() {
         Some(HysteresisModel::OriginOriented)
     );
 
-    // 存在しない部材は Noop。
     let mut stack2 = UndoStack::new();
     stack2.run(
         &mut model,
@@ -3295,17 +3238,14 @@ fn test_add_damper_creates_element_and_attr_roundtrip() {
     };
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddDamper { elem, props }));
-    // 要素と特性が原子的に追加される。
     assert_eq!(model.elements.len(), 3);
     assert_eq!(model.elements[2].kind, ElementKind::Damper);
     assert_eq!(model.damper_props(new_id), Some(props));
 
-    // undo で要素・特性ともに消える（完全復元）。
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert_eq!(model.damper_props(new_id), None);
 
-    // redo で再生成。
     stack.redo(&mut model);
     assert_eq!(model.damper_props(new_id), Some(props));
 }
@@ -3330,7 +3270,6 @@ fn test_set_damper_props_roundtrip() {
         }),
     );
     assert_eq!(model.damper_props(e), Some(p1));
-    // 解除。
     stack.run(
         &mut model,
         Box::new(SetDamperProps {
@@ -3344,7 +3283,6 @@ fn test_set_damper_props_roundtrip() {
     stack.undo(&mut model);
     assert_eq!(model.damper_props(e), None);
 
-    // 存在しない部材は Noop。
     let mut stack2 = UndoStack::new();
     stack2.run(
         &mut model,
@@ -3387,7 +3325,6 @@ fn test_add_isolator_creates_element_and_attr_roundtrip() {
     };
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddIsolator { elem, props }));
-    // 要素と特性が原子的に追加される。
     assert_eq!(model.elements.len(), 3);
     assert_eq!(model.elements[2].kind, ElementKind::Isolator);
     assert_eq!(
@@ -3399,12 +3336,10 @@ fn test_add_isolator_creates_element_and_attr_roundtrip() {
         Some(props)
     );
 
-    // undo で要素・特性ともに消える（完全復元）。
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert!(!model.isolator_attrs.iter().any(|a| a.elem == new_id));
 
-    // redo で再生成。
     stack.redo(&mut model);
     assert_eq!(
         model
@@ -3427,7 +3362,6 @@ fn test_add_isolator_id_mismatch_is_noop() {
         kind: IsolatorKind::LeadRubber,
         ..Default::default()
     };
-    // 末尾の次（あるべき ID）ではなく、既存の 0 番を指定してしまったケース。
     let elem = ElementData {
         id: ElemId(0),
         kind: ElementKind::Isolator,
@@ -3482,14 +3416,11 @@ fn test_place_support_isolator_roundtrip() {
         }),
     );
 
-    // 接地節点（FIXED、対象節点と同一座標）が新規作成される。
     assert_eq!(model.nodes.len(), 2);
     let ground = &model.nodes[1];
     assert_eq!(ground.restraint, Dof6Mask::FIXED);
     assert_eq!(ground.coord, [1000.0, 2000.0, 0.0]);
-    // 対象節点の restraint は FREE に解放される。
     assert_eq!(model.nodes[0].restraint, Dof6Mask::FREE);
-    // 零長 Isolator 要素が i端=接地節点・j端=対象節点で追加される。
     assert_eq!(model.elements.len(), 1);
     assert_eq!(model.elements[0].kind, ElementKind::Isolator);
     assert_eq!(model.elements[0].nodes[0], NodeId(1));
@@ -3503,14 +3434,12 @@ fn test_place_support_isolator_roundtrip() {
         Some(props)
     );
 
-    // undo で節点削除まで含めて完全に元へ戻ること。
     stack.undo(&mut model);
     assert!(
         model.eq_ignoring_dofmap(&before),
         "undo should fully restore the original model (including the ground node)"
     );
 
-    // redo で再度設置される。
     stack.redo(&mut model);
     assert_eq!(model.nodes.len(), 2);
     assert_eq!(model.nodes[0].restraint, Dof6Mask::FREE);
@@ -3555,7 +3484,6 @@ fn test_remove_support_isolator_roundtrip() {
     assert_eq!(model.nodes.len(), 2);
     assert_eq!(model.elements.len(), 1);
 
-    // 撤去: 接地節点・要素・特性が消え、対象節点の拘束は FIXED（撤去仕様）へ戻る。
     stack.run(
         &mut model,
         Box::new(RemoveSupportIsolator { node: NodeId(0) }),
@@ -3566,7 +3494,6 @@ fn test_remove_support_isolator_roundtrip() {
     );
     assert_eq!(model.nodes[0].restraint, Dof6Mask::FIXED);
 
-    // 撤去→undo で配置状態に戻ること（拘束も FREE に戻る＝配置直後の状態と一致）。
     stack.undo(&mut model);
     assert!(
         model.eq_ignoring_dofmap(&placed),
@@ -3575,7 +3502,6 @@ fn test_remove_support_isolator_roundtrip() {
     assert_eq!(model.nodes[0].restraint, Dof6Mask::FREE);
     assert_eq!(model.elements[0].kind, ElementKind::Isolator);
 
-    // 撤去→undo→redo で再度撤去された状態に戻ること。
     stack.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert_eq!(model.nodes[0].restraint, Dof6Mask::FIXED);
@@ -3589,7 +3515,6 @@ fn test_remove_support_isolator_noop_when_not_support_isolator() {
         ElementData, ElementKind, EndCondition, ForceRegime, IsolatorProps, LocalAxis,
     };
     let mut model = seeded_model(2, 0);
-    // 通常の（2つの構造節点間の）免震要素。零長ではないため支点免震要素の形を満たさない。
     model.elements.push(ElementData {
         id: ElemId(0),
         kind: ElementKind::Isolator,
@@ -3621,7 +3546,6 @@ fn test_remove_support_isolator_noop_when_not_support_isolator() {
         "通常の免震要素は Noop のはず"
     );
 
-    // 存在しない節点も Noop。
     stack.run(
         &mut model,
         Box::new(RemoveSupportIsolator { node: NodeId(99) }),
@@ -3689,7 +3613,6 @@ fn test_damper_def_add_update_remove_roundtrip() {
     stack.redo(&mut model);
     assert_eq!(model.damper_defs[0], def1_updated);
 
-    // 削除→undo で同じ位置へ復元。
     let before_remove = model.clone();
     stack.run(&mut model, Box::new(RemoveDamperDef { index: 0 }));
     assert!(model.damper_defs.is_empty());
@@ -3697,7 +3620,6 @@ fn test_damper_def_add_update_remove_roundtrip() {
     assert!(model.eq_ignoring_dofmap(&before_remove));
     assert_eq!(model.damper_defs[0], def1_updated);
 
-    // 範囲外の index は Noop。
     let mut stack2 = UndoStack::new();
     stack2.run(
         &mut model,
@@ -3713,8 +3635,6 @@ fn test_damper_def_add_update_remove_roundtrip() {
 
 #[test]
 fn test_damper_def_removal_does_not_affect_assigned_member() {
-    // DamperDef は値コピーで割り当てるため、定義の削除は既存の割当済み部材
-    // （Model::damper_attrs）に影響しない。
     use sepika_core::model::{DamperDef, DamperKind, DamperProps};
     let mut model = seeded_model(3, 2);
     let def = DamperDef {
@@ -3729,7 +3649,6 @@ fn test_damper_def_removal_does_not_affect_assigned_member() {
     };
     let mut stack = UndoStack::new();
     stack.run(&mut model, Box::new(AddDamperDef { def: def.clone() }));
-    // 部材へは props の値コピーで割り当てる（参照は持たない）。
     stack.run(
         &mut model,
         Box::new(SetDamperProps {
@@ -3741,7 +3660,6 @@ fn test_damper_def_removal_does_not_affect_assigned_member() {
 
     stack.run(&mut model, Box::new(RemoveDamperDef { index: 0 }));
     assert!(model.damper_defs.is_empty());
-    // 定義を削除しても、既に割り当て済みの部材の特性は壊れない。
     assert_eq!(model.damper_props(ElemId(0)), Some(def.props));
 }
 
@@ -3775,7 +3693,6 @@ fn test_set_member_detail_attr_add_replace_and_remove_roundtrip() {
     stack.redo(&mut model);
     assert_eq!(model.member_detail_attrs, vec![attr1.clone()]);
 
-    // 既存エントリを置換
     let attr2 = MemberDetailAttr {
         elem: ElemId(0),
         haunch_i: None,
@@ -3800,7 +3717,6 @@ fn test_set_member_detail_attr_add_replace_and_remove_roundtrip() {
     stack.undo(&mut model);
     assert_eq!(model.member_detail_attrs, vec![attr1.clone()]);
 
-    // 削除
     stack.run(
         &mut model,
         Box::new(RemoveMemberDetailAttr { elem: ElemId(0) }),
@@ -3820,7 +3736,6 @@ fn test_remove_member_detail_attr_missing_is_noop() {
         Box::new(RemoveMemberDetailAttr { elem: ElemId(0) }),
     );
     assert!(model.member_detail_attrs.is_empty());
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
 }
 
@@ -3855,7 +3770,6 @@ fn test_set_steel_design_attr_add_replace_and_remove_roundtrip() {
     stack.redo(&mut model);
     assert_eq!(model.steel_design_attrs, vec![attr1.clone()]);
 
-    // 既存エントリを置換（座屈長さの直接入力を追加）。
     let attr2 = SteelDesignAttr {
         elem: ElemId(0),
         joint_flange_loss: 0.0,
@@ -3878,7 +3792,6 @@ fn test_set_steel_design_attr_add_replace_and_remove_roundtrip() {
     stack.undo(&mut model);
     assert_eq!(model.steel_design_attrs, vec![attr1.clone()]);
 
-    // 削除
     stack.run(
         &mut model,
         Box::new(RemoveSteelDesignAttr { elem: ElemId(0) }),
@@ -3898,7 +3811,6 @@ fn test_remove_steel_design_attr_missing_is_noop() {
         Box::new(RemoveSteelDesignAttr { elem: ElemId(0) }),
     );
     assert!(model.steel_design_attrs.is_empty());
-    // 失敗したコマンド（Noop）は undo 履歴に積まれない。
     assert!(!stack.can_undo());
 }
 
@@ -3906,7 +3818,6 @@ fn test_remove_steel_design_attr_missing_is_noop() {
 fn test_delete_member_shifts_and_restores_side_table_attrs() {
     use sepika_core::model::{DamperProps, Haunch, HysteresisModel, MemberDetailAttr};
     let mut model = seeded_model(3, 2);
-    // 部材0に履歴則、部材1にダンパー特性を付与。
     model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
     let props = DamperProps {
         kd: 90_000.0,
@@ -3929,17 +3840,13 @@ fn test_delete_member_shifts_and_restores_side_table_attrs() {
     let before = model.clone();
 
     let mut stack = UndoStack::new();
-    // 部材0を削除 → 部材1が ElemId(0) へ繰り上がり、その側テーブル参照も追従する。
     stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) }));
     assert_eq!(model.elements.len(), 1);
-    // 削除された部材0の履歴則は消える。
     assert_eq!(model.member_hysteresis(ElemId(0)), None);
     assert!(model.member_detail(ElemId(0)).is_none());
-    // 元・部材1のダンパー特性は新 ElemId(0) を指す（参照整合）。
     assert_eq!(model.damper_props(ElemId(0)), Some(props));
     assert!(model.validate().is_ok());
 
-    // undo で側テーブル属性も含め完全復元。
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert_eq!(
@@ -3949,7 +3856,6 @@ fn test_delete_member_shifts_and_restores_side_table_attrs() {
     assert_eq!(model.damper_props(ElemId(1)), Some(props));
     assert_eq!(model.member_detail(ElemId(0)), Some(&attr));
 
-    // redo で再削除・再整合。
     stack.redo(&mut model);
     assert_eq!(model.damper_props(ElemId(0)), Some(props));
     assert_eq!(model.member_hysteresis(ElemId(0)), None);
@@ -3964,7 +3870,6 @@ fn test_composite_paste_roundtrip() {
     let before = model.clone();
     let mut stack = UndoStack::new();
 
-    // 3 行 ×1 列のペースト相当: 既存 2 行の座標変更＋不足 1 行の追加＋追加行の座標設定。
     stack.run(
         &mut model,
         Box::new(CompositeCommand {
@@ -3982,7 +3887,6 @@ fn test_composite_paste_roundtrip() {
                     coord: [0.0, 0.0, 0.0],
                     restraint: Dof6Mask::FREE,
                 }),
-                // 直前の AddNode が作った節点を同一複合内で参照できること（逐次適用）。
                 Box::new(SetNodeCoord {
                     node: NodeId(2),
                     coord: [70.0, 80.0, 90.0],
@@ -3996,11 +3900,9 @@ fn test_composite_paste_roundtrip() {
     assert_eq!(model.nodes[2].coord, [70.0, 80.0, 90.0]);
     assert_eq!(stack.undo_label(), Some("節点座標の貼り付け"));
 
-    // undo 1 回で追加行の除去も含めて元通り。
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
 
-    // redo 1 回で再適用。
     stack.redo(&mut model);
     assert_eq!(model.nodes.len(), 3);
     assert_eq!(model.nodes[2].coord, [70.0, 80.0, 90.0]);
@@ -4011,7 +3913,6 @@ fn test_composite_paste_roundtrip() {
 #[test]
 fn test_composite_delete_nodes_descending_roundtrip() {
     let mut model = seeded_model(5, 0);
-    // 削除対象外の節点 0-4 を結ぶ部材（削除で節点 4 の ID が繰り上がる）。
     model.elements.push(ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,
@@ -4042,26 +3943,18 @@ fn test_composite_delete_nodes_descending_roundtrip() {
         }),
     );
     assert_eq!(model.nodes.len(), 3);
-    // 残った節点は旧 0・2・4 で、ID は 0・1・2 に詰められている。
     assert_eq!(model.nodes[1].coord, [2000.0, 0.0, 0.0]);
     assert_eq!(model.nodes[2].coord, [4000.0, 0.0, 0.0]);
-    // 部材の参照も旧 4 → 新 2 へ繰り上がっている。
     assert_eq!(model.elements[0].nodes[1], NodeId(2));
     assert!(model.validate().is_ok());
 
-    // undo 1 回で 5 節点・ID・部材参照ごと元通り。
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
 
-    // redo 1 回で再削除。
     stack.redo(&mut model);
     assert_eq!(model.nodes.len(), 3);
     assert_eq!(model.elements[0].nodes[1], NodeId(2));
 }
-
-// ============================================================================
-// 二次部材（小梁・間柱）・一本部材指定（girder_groups）の参照整合
-// ============================================================================
 
 /// 壁領域の境界だけが参照する節点（部材からは参照されない）は削除できない
 /// （敵対的レビューで発覚: `node_referenced_outside_elements` が `wall_regions` を
@@ -4119,15 +4012,12 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
     model.unassigned_beams.push(sm);
     let mut stack = UndoStack::new();
 
-    // 未使用の断面 0・材料 0 を削除 → 二次部材の断面参照と、その断面が持つ
-    // 材料参照がどちらも 1→0 へ繰り上がる。
     stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
     stack.run(&mut model, Box::new(DeleteMaterial { id: MaterialId(0) }));
     assert_eq!(model.unassigned_beams[0].section, Some(SectionId(0)));
     assert_eq!(model.sections[0].material, Some(MaterialId(0)));
     assert!(model.validate().is_ok());
 
-    // 二次部材が参照中の断面と、その断面が参照中の材料は削除できない（Noop）。
     stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
     stack.run(&mut model, Box::new(DeleteMaterial { id: MaterialId(0) }));
     assert_eq!(
@@ -4150,7 +4040,6 @@ fn test_delete_member_cascades_girder_groups_and_restores() {
     let mut stack = UndoStack::new();
 
     stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) }));
-    // グループから削除部材が外れ、旧 ElemId(1) は新 ElemId(0) へ繰り上がる。
     assert_eq!(model.girder_groups, vec![vec![ElemId(0)]]);
     assert!(model.validate().is_ok());
 
@@ -4183,7 +4072,6 @@ fn test_failed_command_keeps_redo_history() {
     stack.undo(&mut model);
     assert!(stack.can_redo(), "undo 直後は redo できる");
 
-    // 無効なコマンド（存在しない節点への座標設定）は適用されず、redo 履歴も残る。
     let applied = stack.run(
         &mut model,
         Box::new(SetNodeCoord {
@@ -4196,10 +4084,6 @@ fn test_failed_command_keeps_redo_history() {
     stack.redo(&mut model);
     assert_eq!(model.nodes.len(), 1, "redo で節点追加が再適用される");
 }
-
-// ---------------------------------------------------------------------------
-// 断面の同一性キー（符号＋階）の不変条件
-// ---------------------------------------------------------------------------
 
 fn h_shape() -> sepika_core::section_shape::SectionShape {
     sepika_core::section_shape::SectionShape::SteelH {
@@ -4228,16 +4112,13 @@ fn test_add_section_shape_rejects_duplicate_key() {
     stack.run(&mut model, Box::new(add("C1", Some("1"), 0)));
     assert_eq!(model.sections.len(), 1);
 
-    // 符号＋階が同じなので追加されない。
     stack.run(&mut model, Box::new(add("C1", Some("1"), 1)));
     assert_eq!(model.sections.len(), 1, "符号＋階の重複は追加できない");
 
-    // 階が違えば別断面として追加できる。
     stack.run(&mut model, Box::new(add("C1", Some("2"), 1)));
     assert_eq!(model.sections.len(), 2);
     assert_eq!(model.sections[1].floor.as_deref(), Some("2"));
 
-    // 階なしも符号だけで一意判定する。
     stack.run(&mut model, Box::new(add("C1", None, 2)));
     assert_eq!(model.sections.len(), 3);
     stack.run(&mut model, Box::new(add("C1", None, 3)));
@@ -4262,7 +4143,6 @@ fn test_set_section_name_rejects_duplicate_key() {
         );
     }
 
-    // C1(2) を C1(1) にしようとしても適用されない。
     stack.run(
         &mut model,
         Box::new(SetSectionName {
@@ -4273,7 +4153,6 @@ fn test_set_section_name_rejects_duplicate_key() {
     );
     assert_eq!(model.sections[1].floor.as_deref(), Some("2"), "衝突は拒否");
 
-    // 空いているキーへは変更でき、undo で戻る。
     stack.run(
         &mut model,
         Box::new(SetSectionName {
@@ -4346,8 +4225,6 @@ fn test_add_catalog_section_rejects_duplicate_key() {
     stack.undo(&mut model);
     assert_eq!(model.sections.len(), 0);
 }
-
-// ---- 階定義の編集（階名・階レベル・追加・削除） ----
 
 /// 階 `levels` と、標高 `zs` の節点を持つモデル。
 fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
@@ -4700,7 +4577,6 @@ fn test_stale_story_commands_are_noop() {
     let mut undo = UndoStack::new();
 
     assert_eq!(model.stories[2].id, StoryId(2));
-    // 削除後に残った古いコマンド: 編集と削除の index はどちらも範囲外になる。
     let stale_level = Box::new(SetStoryLevel {
         story: StoryId(2),
         name: "RF".into(),
@@ -4709,7 +4585,6 @@ fn test_stale_story_commands_are_noop() {
     });
     let stale_delete = Box::new(DeleteStory { story: StoryId(2) });
 
-    // 先に 2F(=StoryId(1)) を削除すると階数が 2 になり、index 2 は範囲外。
     undo.run(&mut model, Box::new(DeleteStory { story: StoryId(1) }));
     assert_eq!(model.stories.len(), 2, "2F を削除すると残り 2 階");
     assert!(undo.can_undo());
@@ -4764,7 +4639,6 @@ fn test_copy_story_assigns_sections_with_target_floor_name() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    // 2F の部材へ、階を持つ断面 C1(2F) を割り当てる。
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
@@ -4813,7 +4687,6 @@ fn test_copy_story_assigns_sections_with_target_floor_name() {
     assert!(assigned.iter().all(|e| e.section == Some(copied.id)));
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-    // undo でモデルが丸ごと戻る。
     stack.undo(&mut model);
     assert_eq!(model.sections.len(), n_sections, "複製した断面が消える");
     assert!(model
@@ -4837,7 +4710,6 @@ fn test_copy_story_replaces_loads_instead_of_stacking() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    // 2F の大梁を 1 本選び、手入力の等分布荷重を載せる。
     let girder = model
         .elements
         .iter()
@@ -4873,7 +4745,6 @@ fn test_copy_story_replaces_loads_instead_of_stacking() {
     assert!(stack.run(&mut model, Box::new(cmd())));
     assert_eq!(model.load_cases[0].member.len(), base_loads + 1);
 
-    // 2 回目は載せ替えになり、件数は増えない。
     let report = cmd().preview(&model);
     assert_eq!(report.loads_copied, 1);
     assert_eq!(report.loads_removed, 1, "複製先の手入力荷重を取り除く");
@@ -4907,7 +4778,6 @@ fn test_copy_story_counts_new_slabs_once() {
     use sepika_core::model::{AreaLoad, SlabUsage};
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
-    // 3F の床を消して、2F から配り直せる状態にする。
     remove_third_floor_slabs(&mut model);
     assign_node_stories(&mut model);
     for sl in &mut model.slabs {
@@ -4961,11 +4831,9 @@ fn test_copy_story_reuses_no_plate_region() {
     use sepika_core::model::PlateAssignment;
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
-    // 3F の床を消し、割当領域は残す（`retain_slabs` が未設定へ戻す）。
     remove_third_floor_slabs(&mut model);
     assign_node_stories(&mut model);
 
-    // コピー先（3F）の未設定の割当領域を「版なし」にする。
     let no_plate_ids: Vec<_> = model
         .floor_assignment_regions
         .regions
@@ -5036,7 +4904,6 @@ fn test_copy_story_overwrite_mirrors_absence() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    // 2F の床を 1 枚だけ消す（3F には両方ある状態にする）。
     let doomed = model
         .slabs
         .iter()
@@ -5056,7 +4923,6 @@ fn test_copy_story_overwrite_mirrors_absence() {
             .count()
     };
     assert_eq!(slabs_3f(&model), 2, "3F には床が 2 枚ある");
-    // 3F の部材へ断面を付ける（2F は未割当のまま）。
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
@@ -5101,7 +4967,6 @@ fn test_copy_story_overwrite_mirrors_absence() {
         .all(|id| model.elements[id.index()].section.is_none()));
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-    // undo 1 回で削除・解除ごと戻る。
     stack.undo(&mut model);
     assert_eq!(slabs_3f(&model), 2);
     assert!(members_3f
@@ -5119,7 +4984,6 @@ fn test_copy_story_without_overwrite_keeps_existing() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    // 2F・3F の同じ位置の大梁へ、別々の手入力荷重を載せる。
     let girder_of = |m: &Model, story: StoryId| {
         m.elements
             .iter()
@@ -5163,7 +5027,6 @@ fn test_copy_story_without_overwrite_keeps_existing() {
     assert_eq!(report.loads_removed, 0, "既存の荷重は消さない");
     assert_eq!(report.loads_copied, 0, "既に荷重がある相手へは載せない");
 
-    // 3F の荷重は 99.0 のまま残る。
     let mut stack = UndoStack::new();
     assert!(!stack.run(&mut model, Box::new(cmd)), "変更がないので Noop");
     let kept = model.load_cases[0]
@@ -5192,7 +5055,6 @@ fn test_copy_story_overwrite_keeps_slabs_outside_source_plan() {
         ..FrameSpec::default()
     })
     .unwrap();
-    // 3F だけに張り出した平面（2F には節点が無い位置）を足し、そこへ床を張る。
     let mut extra = Vec::new();
     for (x, y) in [(0.0, -6000.0), (6000.0, -6000.0)] {
         let id = NodeId(model.nodes.len() as u32);
@@ -5206,7 +5068,6 @@ fn test_copy_story_overwrite_keeps_slabs_outside_source_plan() {
         });
         extra.push(id);
     }
-    // 既存の 3F の 2 節点と合わせて 4 角形にする。
     let corner = |x: f64, y: f64| {
         model
             .nodes
@@ -5258,7 +5119,6 @@ fn test_copy_story_reports_mismatched_existing_section() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    // C1 (2F) と、寸法の違う C1 (3F) を用意する。
     let id_2f = SectionId(model.sections.len() as u32);
     let mut c1_2f = bare_section(id_2f, None);
     c1_2f.name = "C1".into();
@@ -5312,7 +5172,6 @@ fn test_copy_story_fits_member_load_to_target_length() {
     use sepika_core::ids::StoryId;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
 
-    // 2F の階高 4000、3F の階高 3500。
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
     let column_of = |m: &Model, story: StoryId| {
@@ -5333,7 +5192,6 @@ fn test_copy_story_fits_member_load_to_target_length() {
     assert_eq!(model.member_length(&model.elements[c2.index()]), 4000.0);
     assert_eq!(model.member_length(&model.elements[c3.index()]), 3500.0);
 
-    // 全長載荷・収まる部分載荷・収まらない部分載荷の 3 つを載せる。
     let lc = &mut model.load_cases[0];
     lc.member.push(MemberLoad::full_length_uniform(
         c2,
@@ -5409,16 +5267,13 @@ fn test_copy_story_fits_member_load_to_target_length() {
         .filter(|l| l.elem == c3)
         .collect();
     assert_eq!(copied.len(), 4);
-    // 全長載荷は 3500 へ合う。
     assert!(copied.iter().any(|l| matches!(
         l.kind,
         MemberLoadKind::Distributed { a, b, .. } if a == 0.0 && (b - 3500.0).abs() < 1e-9
     )));
-    // 部分載荷は位置をそのまま。
     assert!(copied
         .iter()
         .any(|l| matches!(l.kind, MemberLoadKind::Point { a, .. } if (a - 2000.0).abs() < 1e-9)));
-    // 載荷区間が材長を超える荷重は残らない。
     assert!(copied.iter().all(|l| match l.kind {
         MemberLoadKind::Point { a, .. } => a <= 3500.0,
         MemberLoadKind::Distributed { b, .. } => b <= 3500.0,
@@ -5442,7 +5297,6 @@ fn test_copy_story_distinguishes_brace_from_girder() {
     use sepika_core::model::{ElementKind, EndCondition, ForceRegime, LocalAxis};
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
-    // 各階の同じ構面へブレースを 1 本ずつ足す（下階の隅 → 上階の隣の隅）。
     let node_at = |m: &Model, x: f64, z: f64| {
         m.nodes
             .iter()
@@ -5475,7 +5329,6 @@ fn test_copy_story_distinguishes_brace_from_girder() {
     assign_node_stories(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-    // 2F のブレースにだけ断面を付ける（大梁は未割当のまま）。
     let brace_2f = model
         .elements
         .iter()
@@ -5503,7 +5356,6 @@ fn test_copy_story_distinguishes_brace_from_girder() {
     let mut stack = UndoStack::new();
     assert!(stack.run(&mut model, Box::new(cmd)));
 
-    // 3F のブレースへ BR1 (3F) が付き、3F の大梁は未割当のまま。
     let brace_3f = model
         .elements
         .iter()
@@ -5542,7 +5394,6 @@ fn test_copy_story_remaps_slab_section_to_target_floor() {
     use sepika_core::ids::StoryId;
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
-    // 3F の床を消し、2F の床の断面へ階を持たせる。
     remove_third_floor_slabs(&mut model);
     model.sections[0].floor = Some("2F".into());
     assign_node_stories(&mut model);
@@ -5588,7 +5439,6 @@ fn test_copy_story_counts_new_slabs_once_with_deletion() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    // 床の平面位置（境界の最小 X）とレベルで 1 枚を選ぶ。
     let pick = |m: &Model, z: f64, x0: f64| {
         m.slabs
             .iter()
@@ -5604,7 +5454,6 @@ fn test_copy_story_counts_new_slabs_once_with_deletion() {
             .map(|sl| sl.id)
             .expect("床がある")
     };
-    // 2F は左の床板を、3F は右の床板を消す。複製で 3F の左が作られ、右が消える。
     let doomed = pick(&model, 4000.0, 0.0);
     crate::DeleteSlab { id: doomed }.apply(&mut model);
     let doomed3 = pick(&model, 7500.0, 6000.0);
@@ -5648,7 +5497,6 @@ fn test_copy_story_matches_across_rounding_boundary() {
         ..FrameSpec::default()
     })
     .unwrap();
-    // 3F の節点をわずかにずらす（丸めれば別バケット、実距離は 0.4 mm）。
     for n in &mut model.nodes {
         if (n.coord[2] - 7500.0).abs() < 1.0 && n.coord[0] == 6000.0 {
             n.coord[0] = 6000.4;
@@ -5696,8 +5544,6 @@ fn test_copy_story_matches_across_rounding_boundary() {
         "0.4 mm のずれでも対応が取れる: {report:?}"
     );
 }
-
-// ─── 二次部材・壁領域のテスト ────────────────────────────────────────────────
 
 /// `kind` で小梁または間柱の `SecondaryMember` を生成する（テスト用ヘルパー）。
 fn make_sm(
@@ -6693,7 +6539,6 @@ fn test_copy_story_counts_midspan_secondary_as_skipped() {
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
 
-    // 2F の水平大梁から、材軸中間に節点が無く、材軸上へアンカーできる 2 本を探す。
     let tol = sepika_core::geom::MEMBER_AXIS_TOL_MM;
     let mut mids: Vec<sepika_core::model::SecondaryMemberAnchor> = Vec::new();
     for e in &model.elements {
@@ -6718,7 +6563,6 @@ fn test_copy_story_counts_midspan_secondary_as_skipped() {
         {
             continue;
         }
-        // 2F（`from`）の大梁に限る。mid と同じレベルの節点の所属階で判定する。
         let level_story = model
             .nodes
             .iter()
@@ -6804,8 +6648,6 @@ fn test_copy_story_slab_copy_does_not_touch_floor_regions() {
         .position(|fr| fr.boundary.iter().all(|n| n2f.contains(n)))
         .expect("2F に床領域がある");
     model.floor_regions[src].secondary_beams = vec![beam];
-    // 3F の床板を消して、複製で「新規作成」が起きる状況にする
-    // （`retain_slabs` で床領域の `slab_ids` からの参照も一緒に落とす）。
     let n3f: Vec<NodeId> = model
         .nodes
         .iter()
@@ -6907,7 +6749,6 @@ fn test_add_attached_slab_roundtrip() {
         assert!(model.slabs.is_empty(), "undo で消える");
     }
 
-    // 実在しない節点を指す取り付く床板は作らない。
     let bad = crate::AddAttachedSlab {
         anchor: RegionAnchor::Point(NodeId(9)),
         extent: [1000.0, 1000.0],
@@ -6916,7 +6757,6 @@ fn test_add_attached_slab_roundtrip() {
     assert!(!undo.run(&mut model, Box::new(bad)));
     assert!(model.slabs.is_empty());
 
-    // 部分区間（0.0 <= t_i < t_j <= 1.0）は受け付ける。
     let partial = crate::AddAttachedSlab {
         anchor: RegionAnchor::Line {
             nodes: [NodeId(0), NodeId(1)],
@@ -6929,7 +6769,6 @@ fn test_add_attached_slab_roundtrip() {
     assert!(undo.run(&mut model, Box::new(partial)));
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-    // 区間が逆順（始端 >= 終端）は受け付けない。
     let reversed = crate::AddAttachedSlab {
         anchor: RegionAnchor::Line {
             nodes: [NodeId(0), NodeId(1)],
@@ -7182,7 +7021,6 @@ fn test_set_floor_region_name_roundtrip() {
     undo.undo(&mut model);
     assert_eq!(model.floor_regions[0].name, "");
 
-    // 同じ名前・存在しない ID は Noop。
     assert!(!undo.run(
         &mut model,
         Box::new(crate::SetFloorRegionName {
@@ -7213,7 +7051,6 @@ fn test_copy_story_skips_attached_slabs() {
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
 
-    // 2F に取り付く床板（バルコニー）を足す。
     let src = model
         .slabs
         .iter()
@@ -7418,7 +7255,6 @@ fn test_add_attached_wall_plate_roundtrip() {
     undo.undo(&mut model);
     assert!(model.wall_plates.is_empty(), "undo で消える");
 
-    // 壁の取付き先としては使わない Point は Noop。
     let bad = crate::AddAttachedWallPlate {
         anchor: RegionAnchor::Point(NodeId(0)),
         extent: Some([900.0, 900.0]),
@@ -7429,7 +7265,6 @@ fn test_add_attached_wall_plate_roundtrip() {
     assert!(!undo.run(&mut model, Box::new(bad)));
     assert!(model.wall_plates.is_empty());
 
-    // 区間が逆順（始端 >= 終端）は受け付けない。
     let reversed = crate::AddAttachedWallPlate {
         anchor: RegionAnchor::Line {
             nodes: [NodeId(0), NodeId(1)],
@@ -7444,7 +7279,6 @@ fn test_add_attached_wall_plate_roundtrip() {
     assert!(!undo.run(&mut model, Box::new(reversed)));
     assert!(model.wall_plates.is_empty());
 
-    // 実在しない節点を指す取付き線は作らない。
     let dangling = crate::AddAttachedWallPlate {
         anchor: RegionAnchor::Line {
             nodes: [NodeId(0), NodeId(9)],
@@ -7499,7 +7333,6 @@ fn test_add_attached_wall_plate_floor_region_anchor_roundtrip() {
     undo.undo(&mut model);
     assert!(model.wall_plates.is_empty(), "undo で消える");
 
-    // 実在しない節点を指す自立壁は Noop（節点参照は編集層が検証する）。
     let dangling = crate::AddAttachedWallPlate {
         anchor: RegionAnchor::FloorRegion {
             nodes: [NodeId(0), NodeId(9)],
@@ -7597,7 +7430,6 @@ fn test_set_attached_wall_plate_extent_and_anchor_noop() {
         "非有限の張り出し量は Noop"
     );
 
-    // 取付き先としては使わない Point への変更は Noop。
     assert!(
         !undo.run(
             &mut model,
@@ -7608,7 +7440,6 @@ fn test_set_attached_wall_plate_extent_and_anchor_noop() {
         ),
         "壁の取付き先としては使わない Point は Noop"
     );
-    // 実在する取付き線への変更は通る。
     assert!(undo.run(
         &mut model,
         Box::new(crate::SetAttachedWallPlateAnchor {
@@ -7655,7 +7486,6 @@ fn test_wall_plate_region_assignment_roundtrip() {
         .id;
     let mut undo = UndoStack::default();
 
-    // 未設定へ戻すと版も消える。
     assert!(undo.run(&mut model, Box::new(crate::UnsetWallPlateRegion { region })));
     assert!(model.wall_plates.is_empty());
     assert_eq!(
@@ -7663,7 +7493,6 @@ fn test_wall_plate_region_assignment_roundtrip() {
         PlateAssignment::Unset
     );
 
-    // 割り当て直すと末尾に生成される。
     assert!(undo.run(
         &mut model,
         Box::new(crate::AssignWallPlateToRegion {
@@ -7687,7 +7516,6 @@ fn test_wall_plate_region_assignment_roundtrip() {
         PlateAssignment::Plate(model.wall_plates[0].id)
     );
 
-    // 領域不在は Noop。
     assert!(!undo.run(
         &mut model,
         Box::new(crate::AssignWallPlateToRegion {
@@ -7697,7 +7525,6 @@ fn test_wall_plate_region_assignment_roundtrip() {
             opening_weight: 0.0,
         })
     ));
-    // 既に版ありは Noop。
     assert!(!undo.run(
         &mut model,
         Box::new(crate::AssignWallPlateToRegion {
@@ -7708,7 +7535,6 @@ fn test_wall_plate_region_assignment_roundtrip() {
         })
     ));
 
-    // 版なしへ。版は消え、undo で戻る。
     assert!(undo.run(
         &mut model,
         Box::new(crate::SetWallPlateRegionNoPlate { region })
@@ -9274,7 +9100,6 @@ fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() 
             assert_eq!(bits(&model.materials[0]), after);
             assert_eq!(model.stb_strengths, after_strengths);
             assert_eq!(model.source_stories, after_stories);
-            // A NaN in another unchanged field must not turn a same-value input into a change.
             if field == Density {
                 model.materials[0].young = f64::NAN;
             } else {

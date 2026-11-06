@@ -419,7 +419,6 @@ mod tests {
         let LoadShape::Uniform { w } = bl.shape else {
             panic!("Uniform を期待");
         };
-        // 実際に覆う長さは全長4000mmの半分（span 0.25〜0.75）。
         let len = 4000.0 * (span[1] - span[0]);
         assert!(
             (w * len - total).abs() / total < 1e-9,
@@ -455,7 +454,7 @@ mod tests {
     #[test]
     fn columns_transfer_uses_span_midpoint_ratio() {
         let mut m = model_with_line_anchor_nodes();
-        let span = [0.0, 0.5]; // t_mid = 0.25
+        let span = [0.0, 0.5];
         let plate = line_attached_plate(span, [1000.0, 1000.0], LoadTransfer::Columns);
         m.wall_plates.push(plate.clone());
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
@@ -482,11 +481,11 @@ mod tests {
     #[test]
     fn asymmetric_extent_uses_height_proportional_linear_and_centroid() {
         let mut m = model_with_line_anchor_nodes();
-        let extent = [500.0, 1500.0]; // 台形（始端 500mm・終端 1500mm）。
+        let extent = [500.0, 1500.0];
         let h0 = 500.0;
         let h1 = 1500.0;
         let len = 4000.0;
-        let s = (h0 + 2.0 * h1) / (3.0 * (h0 + h1)); // 7/12
+        let s = (h0 + 2.0 * h1) / (3.0 * (h0 + h1));
 
         let anchor_plate = line_attached_plate([0.0, 1.0], extent, LoadTransfer::Anchor);
         let anchor_total = m
@@ -543,8 +542,8 @@ mod tests {
         let mut m = model_with_line_anchor_nodes();
         let span = [0.0, 0.5];
         let extent = [500.0, 1500.0];
-        let s = (500.0 + 2.0 * 1500.0) / (3.0 * 2000.0); // 7/12
-        let t = span[0] + (span[1] - span[0]) * s; // 7/24
+        let s = (500.0 + 2.0 * 1500.0) / (3.0 * 2000.0);
+        let t = span[0] + (span[1] - span[0]) * s;
         let plate = line_attached_plate(span, extent, LoadTransfer::Columns);
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
@@ -679,7 +678,6 @@ mod tests {
     #[test]
     fn floor_region_anchor_adds_equivalent_intensity_to_slabs() {
         let mut m = model_with_line_anchor_nodes();
-        // 壁（X=0..4000）を完全に含む床領域（X=-1000..5000）。
         push_floor_region(&mut m, [-1000.0, 5000.0], 0, true, 3000.0);
         let plate = self_standing_plate();
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
@@ -699,8 +697,6 @@ mod tests {
     #[test]
     fn floor_region_anchor_splits_across_regions() {
         let mut m = model_with_line_anchor_nodes();
-        // 壁は X=0..4000。床領域を X=-1000..2000 と X=2000..5000 に置き、
-        // 壁は X=2000 で 2:2 に分かれる。
         push_floor_region(&mut m, [-1000.0, 2000.0], 0, true, 3000.0);
         push_floor_region(&mut m, [2000.0, 5000.0], 1, true, 3000.0);
         let plate = self_standing_plate();
@@ -715,7 +711,6 @@ mod tests {
             (sum - total).abs() / total < 1e-9,
             "総重量を保存すること sum={sum} total={total}"
         );
-        // 半分ずつなので強度も等しい。
         let v: Vec<f64> = extra.values().copied().collect();
         assert!((v[0] - v[1]).abs() / v[0] < 1e-9);
     }
@@ -762,7 +757,6 @@ mod tests {
     #[test]
     fn floor_region_anchor_distributes_only_covered_part() {
         let mut m = model_with_line_anchor_nodes();
-        // 壁は X=0..4000。床領域は X=-1000..2000 だけなので半分がはみ出す。
         push_floor_region(&mut m, [-1000.0, 2000.0], 0, true, 3000.0);
         let plate = self_standing_plate();
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");

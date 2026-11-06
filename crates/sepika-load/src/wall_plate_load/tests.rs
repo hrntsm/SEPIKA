@@ -75,7 +75,6 @@ fn bay() -> Model {
     ] {
         m.nodes.push(node(id, x, z));
     }
-    // 柱 2 本・大梁 2 本（間柱の位置では分割しない）。
     m.elements = vec![beam(0, 0, 3), beam(1, 1, 2), beam(2, 0, 1), beam(3, 3, 2)];
     let mut wall_sec = sepika_core::section_shape::SectionShape::RcWall {
         thickness: T,
@@ -117,7 +116,6 @@ fn full_weight() -> f64 {
 /// 間柱で 2 枚に分割された壁領域を作る。
 fn split_by_post() -> Model {
     let mut m = bay();
-    // 割当領域を間柱で分割するため、間柱を安定 ID ＋取付き位置で持たせる。
     m.unassigned_posts.push(SecondaryMember {
         vertical_eccentricity: Some(0.0),
         gravity_end_shares: Some([0.5, 0.5]),
@@ -294,7 +292,6 @@ fn 間柱で分割された壁は左右の鉛直辺へ半分ずつ配る() {
 #[test]
 fn 指定した辺がスリットで切れていれば別の辺へ振り替えない() {
     let mut m = split_by_post();
-    // 左の壁版（節点 0-4-5-3）の柱側（節点 0 から立ち上がる辺 3）を切る。
     let faces = m.wall_plates[0].column_face_nodes(&m).expect("下辺 2 節点");
     let k = usize::from(faces[0] != NodeId(0));
     m.wall_plates[0].slit.column_face[k] = true;
@@ -315,7 +312,6 @@ fn 指定した辺がスリットで切れていれば別の辺へ振り替え�
 #[test]
 fn 梁際スリットで切れた辺に負担率を指定すると振り替えない() {
     let mut m = bay();
-    // 下辺（辺 0）のみ梁際スリットで切る。残る辺 2 は切れていないが、そこへは振り替えない。
     add_plate(&mut m, 0, [0, 1, 2, 3], [1.0, 0.0, 0.0, 0.0]);
     m.wall_plates[0].slit.beam_face = [true, false];
 
@@ -405,7 +401,6 @@ fn 支持区間が重複しても割当領域の支持部材へ配る() {
     let mut m = bay();
     add_plate(&mut m, 0, [0, 1, 2, 3], [1.0, 0.0, 0.0, 0.0]);
 
-    // 下辺を全長で覆う大梁に重ねて、半分だけ覆う大梁を足す。
     m.elements.push(beam(4, 0, 4));
     m.rebuild_wall_assignment_regions();
 
@@ -493,7 +488,6 @@ fn dl支持反力は総和を保存する() {
 #[test]
 fn 柱に並走する間柱は柱の荷重を奪わない() {
     let mut m = split_by_post();
-    // 左の柱（節点 0-3）と同じ材軸に、柱へアンカーした間柱を 1 本足す（重複モデル化）。
     m.wall_regions[0].posts.push(SecondaryMember {
         vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
@@ -546,7 +540,6 @@ fn 柱に並走する間柱は柱の荷重を奪わない() {
 /// ノードは四隅のみで、間柱端は節点を持たない。
 fn midspan_post_bay() -> Model {
     let mut m = bay();
-    // 間柱端の節点（4, 5）を除き、間柱が梁中間にだけ載る状態にする。
     m.nodes.retain(|n| n.id.0 < 4);
     m.unassigned_posts.push(SecondaryMember {
         vertical_eccentricity: Some(0.0),
@@ -600,7 +593,6 @@ fn 間柱端が梁中間にある壁版も割当領域の支持部材へ自重�
             .assignment = sepika_core::model::PlateAssignment::Plate(plate_id);
     }
 
-    // 支持先は割当領域の SupportBoundary（間柱）と一致する。
     let shares = edge_shares_with(
         &m,
         &m.wall_plates[0],

@@ -1838,7 +1838,6 @@ mod tests {
         assert!(with_extent([-900.0, -300.0]), "下向き同士も塗る");
         assert!(!with_extent([900.0, -900.0]), "符号が反転する壁は塗らない");
 
-        // 囲まれた壁版は境界そのものなので、この理由では塗りを止めない。
         assert!(plate_fill_is_valid(&model, &enclosed_plate()));
     }
 
@@ -1854,7 +1853,6 @@ mod tests {
             elem_on: None,
             node_on: Some(&on),
         };
-        // 節点 3 が構面外。
         let (model, id) = model_with_enclosed(&[NodeId(0), NodeId(1), NodeId(2), NodeId(3)]);
         assert!(!wall_plate_visible_on_frame(
             &model,
@@ -1867,7 +1865,6 @@ mod tests {
             model3.wall_plate(id3).unwrap(),
             filter
         ));
-        // 構面表示していないときはすべて描く。
         let all = FrameFilter {
             elem_on: None,
             node_on: None,
@@ -1989,17 +1986,13 @@ mod tests {
 
     #[test]
     fn 要素の描き方は種別ごとに一意に決まる() {
-        // 仕口パネルは部材線も選択ハイライトも描かない。先頭 2 節点が取り付く
-        // 柱・梁と同じ節点対になるため、線を引くと選択していない柱・梁が
-        // 選択されているように見えてしまう。
+        // 仕口パネルと柱梁は同じ節点対を持ち得るため、パネルを線で描くと別部材の選択に見える。
         assert_eq!(element_draw_shape(ElementKind::PanelZone), DrawShape::None);
         assert!(!draws_as_line(ElementKind::PanelZone));
-        // 面要素は多角形（ハイライトはその輪郭）。
         assert_eq!(element_draw_shape(ElementKind::Wall), DrawShape::Polygon);
         assert_eq!(element_draw_shape(ElementKind::Shell), DrawShape::Polygon);
         assert!(!draws_as_line(ElementKind::Wall));
         assert!(!draws_as_line(ElementKind::Shell));
-        // 材軸を持つ要素は線分。
         for kind in [
             ElementKind::Beam,
             ElementKind::Fiber,

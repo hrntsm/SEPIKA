@@ -1836,7 +1836,6 @@ mod tests {
 
         let mut model = make_square_slab_model();
         add_wall_self_weight_section(&mut model);
-        // 辺0（節点0-1、大梁として実在）に全長載るパラペット（立ち上がり500mm）。
         let plate = WallPlate {
             dl_support: None,
             self_weight_shares: Vec::new(),
@@ -1884,8 +1883,6 @@ mod tests {
             "辺0（節点0-1）へ壁の等分布荷重が1件加わるはず"
         );
 
-        // 辺0（節点0-1）に載る分布荷重の合計force（w×区間長の総和）を、壁版追加の
-        // 前後で比較する。増分が壁の自重総量と一致すること（総和保存）。
         let beam0 = beam_elem_map(&model)[&beam_key(NodeId(0), NodeId(1))];
         let member_total_on = |members: &[sepika_core::model::MemberLoad]| -> f64 {
             members
@@ -1958,7 +1955,6 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // 床分配の等分布に、壁の線形変化が 1 件乗る。
         let linear = wall_loads
             .iter()
             .copied()
@@ -2366,12 +2362,10 @@ mod attached_anchor_tests {
             let MemberLoadKind::Distributed { a, b, w1, w2 } = ml.kind else {
                 panic!("分布荷重でない: {ml:?}");
             };
-            // 片持ちの等分布なので、どの区間も強度は w×跳ね出し量で一定。
             assert!((w1 - W * D).abs() < 1e-12 && (w2 - W * D).abs() < 1e-12);
             assert!((b - a - L / 2.0).abs() < 1e-9, "梁の全長に載る");
             total += (b - a) * (w1 + w2) / 2.0;
         }
-        // 総和保存: w × 取付き長さ × 跳ね出し量。
         assert!((total - W * L * D).abs() / (W * L * D) < 1e-9, "{total}");
     }
 
@@ -2515,7 +2509,7 @@ mod attached_anchor_tests {
         const L: f64 = 4000.0;
         const D: f64 = 1500.0;
         const W: f64 = 0.003;
-        const T: [f64; 2] = [0.25, 0.75]; // 覆う区間: x=1000..3000（分割点 x=2000 をまたぐ）
+        const T: [f64; 2] = [0.25, 0.75];
 
         let mut model = Model {
             nodes: vec![node(0, 0.0), node(1, L / 2.0), node(2, L)],
@@ -2579,7 +2573,6 @@ mod attached_anchor_tests {
         const W: f64 = 0.003;
 
         let mut model = Model {
-            // 0—1（半分だけ）に重複した梁 2 本。1—2 には梁が無い。
             nodes: vec![node(0, 0.0), node(1, L / 2.0), node(2, L)],
             elements: vec![beam(0, 0, 1), beam(1, 0, 1)],
             ..Default::default()
@@ -2620,7 +2613,6 @@ mod attached_anchor_tests {
             elements: vec![beam(0, 0, 1), beam(1, 1, 2)],
             ..Default::default()
         };
-        // 2 本の梁の境目（線分の中央）へ集中荷重を載せる。
         let bl = sepika_load::floor::BeamLoad {
             elem: ElemId(u32::MAX),
             target: LoadTarget::Span {
@@ -2669,14 +2661,14 @@ mod cascade_tests {
             support_spring: None,
         };
         let nodes = vec![
-            mk_node(0, 0.0, 0.0),       // 隅
-            mk_node(1, 6000.0, 0.0),    // 隅
-            mk_node(2, 6000.0, 6000.0), // 隅
-            mk_node(3, 0.0, 6000.0),    // 隅
-            mk_node(4, 3000.0, 0.0),    // A の下端（下の大梁上）
-            mk_node(5, 3000.0, 6000.0), // A の上端（上の大梁上）
-            mk_node(6, 3000.0, 3000.0), // A の中央（B の端。大梁の材軸上にない）
-            mk_node(7, 6000.0, 3000.0), // B の端（右の大梁上）
+            mk_node(0, 0.0, 0.0),
+            mk_node(1, 6000.0, 0.0),
+            mk_node(2, 6000.0, 6000.0),
+            mk_node(3, 0.0, 6000.0),
+            mk_node(4, 3000.0, 0.0),
+            mk_node(5, 3000.0, 6000.0),
+            mk_node(6, 3000.0, 3000.0),
+            mk_node(7, 6000.0, 3000.0),
         ];
         let mk_beam = |id: u32, i: u32, j: u32| ElementData {
             id: ElemId(id),
@@ -2747,7 +2739,6 @@ mod cascade_tests {
             section: Some(SectionId(0)),
             name: "B".into(),
         };
-        // 小梁 A で左右 2 枚に分ける（B は床板の境界にしない＝分配は A までで完結する）。
         let mut model = Model {
             nodes,
             elements,
@@ -2825,7 +2816,6 @@ mod cascade_tests {
         model.validate().expect("valid model");
 
         let beam_map = beam_elem_map(&model);
-        // 自重は入れず、床の面荷重だけで総和を見る。
         let beam_loads =
             slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
                 .unwrap();
@@ -2891,7 +2881,6 @@ mod cascade_tests {
             [SupportAt::Primary, SupportAt::Primary],
             "A の両端は大梁で終端する"
         );
-        // A が受けた集中荷重に B の反力が含まれる。
         let has_point = a.member_loads.iter().any(
             |l| matches!(l, MemberLoadKind::Point { p, .. } if (p - b.reactions[i6]).abs() < 1e-9),
         );

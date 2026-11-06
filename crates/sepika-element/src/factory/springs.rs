@@ -347,7 +347,7 @@ fn rc_reference_crack_moment(data: &ElementData, model: &Model) -> Result<f64, S
         .element_material(data)
         .and_then(|material| material.fc)
         .ok_or_else(|| "RC梁のFcが必要です".to_string())?;
-    // αy、My、I0と同じ矩形幾何を使用する。独立のSection.depthへ切り替えない。
+    // 独立のSection.depthを使うと、αy・My・I0とMcで矩形幾何が一致しなくなる。
     let mc = sepika_core::rc_capacity::rc_crack_moment(fc, b * d.powi(2) / 6.0);
     if !mc.is_finite() || mc <= 0.0 {
         return Err("RC梁の幾何断面によるMcは正の有限値が必要です".into());

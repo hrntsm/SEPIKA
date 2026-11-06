@@ -808,11 +808,9 @@ mod tests {
         };
         assert_eq!(face_distances(&model)[0], [0.0, 0.0]);
 
-        // 梁の i 端に直交する壁を足しても変わらない。
         model.elements.push(elem(1, ElementKind::Wall, 0, 1, 1));
         assert_eq!(face_distances(&model)[0], [0.0, 0.0]);
 
-        // 同じ位置に柱（Beam）を足すと、そのせいの半分が効く。
         model.elements.push(elem(2, ElementKind::Beam, 0, 1, 1));
         assert_eq!(face_distances(&model)[0], [4999.5, 0.0]);
     }

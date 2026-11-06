@@ -712,7 +712,6 @@ mod tests {
             v.sort_by(f64::total_cmp);
             v
         };
-        // n>=2 は両端 ±(b/2 - k0) を含む等間隔。
         let top0 = xs(239.0);
         assert!((top0[0] + 139.0).abs() < 1e-9);
         assert!((top0[3] - 139.0).abs() < 1e-9);
@@ -720,7 +719,6 @@ mod tests {
         let top1 = xs(184.0);
         assert_eq!(top1.len(), 2);
         assert!((top1[0] + 139.0).abs() < 1e-9 && (top1[1] - 139.0).abs() < 1e-9);
-        // 下端 1 段目は -139, 0, 139。
         let bottom0 = xs(-239.0);
         assert!(bottom0.iter().any(|x| x.abs() < 1e-9));
         assert_eq!(r.validate(400.0, 600.0), Ok(()));
@@ -1030,7 +1028,6 @@ mod tests {
         assert!((left.centroid_from_edge_mm - 61.0).abs() < 1e-9);
         assert!((left.effective_depth_mm - 539.0).abs() < 1e-9);
 
-        // 中間段 x[1]=2 は最外段の引張側鉄筋量に算入しない。
         assert_eq!(top.count, r.x[0] as usize);
         assert_ne!(top.count, (r.x[0] + r.x[1]) as usize);
     }

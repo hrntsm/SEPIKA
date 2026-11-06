@@ -33,8 +33,7 @@ pub(super) fn check_src_panel(
         _ => None,
     });
     if let Some((col, steel_height, steel_web_thick, steel_flange_thick, rebar)) = src_col {
-        // SRCパネル寸法は選択柱と先頭のRC/SRC梁の配筋重心を消費する。
-        // その他の接続梁は内力だけを渡す。
+        // 全接続梁の配筋を検査すると、内力だけを使う梁の未対応配筋まで検定を妨げる。
         let beam0 = beams[0];
         let rebar_sections = std::iter::once(col.sec.id).chain(
             (!beam0.kind.is_steel_like()

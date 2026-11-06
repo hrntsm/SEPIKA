@@ -377,7 +377,6 @@ mod tests {
             .collect();
         app.core.model.combinations.clear();
 
-        // LC2 を対象にモーダルを開いたまま、LC0 を削除する。
         app.ui.scoped.load_editor = Some(LoadEditor::new_nodal(LoadCaseId(2), None));
         app.delete_load_case_action(LoadCaseId(0));
 
@@ -385,7 +384,6 @@ mod tests {
             app.ui.scoped.load_editor.is_none(),
             "モーダルは閉じているはず"
         );
-        // 削除で ID が繰り上がり、元の LC2 は LoadCaseId(1) になっている。
         assert_eq!(app.core.model.load_cases.len(), 2);
         assert_eq!(app.core.model.load_cases[1].name, "LC2");
         assert_eq!(app.core.model.load_cases[1].id, LoadCaseId(1));

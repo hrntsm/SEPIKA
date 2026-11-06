@@ -232,13 +232,11 @@ mod tests {
         let k2 = spring_chain_3dof(80.0, 260.0);
         let rhs = [1.0, -2.0, 3.5];
 
-        // 1 回目で symbolic を構築し、2 回目（同一パターン・別の値）で再利用させる。
         let mut reused = CholeskySolver::default();
         reused.factorize(&k1).unwrap();
         reused.factorize(&k2).unwrap();
         let x_reused = reused.solve(&rhs).unwrap();
 
-        // 比較対象: k2 のみで新規に factorize したソルバ（symbolic を毎回作り直す）。
         let mut fresh = CholeskySolver::default();
         fresh.factorize(&k2).unwrap();
         let x_fresh = fresh.solve(&rhs).unwrap();
@@ -255,7 +253,6 @@ mod tests {
     fn test_pattern_change_recomputes_symbolic() {
         faer::set_global_parallelism(faer::Par::Seq);
         let k_tridiag = spring_chain_3dof(200.0, 100.0);
-        // (0,2)/(2,0) を追加した別パターン（正定値を保つ対角優位な値）。
         let k_dense = assemble_csc(
             3,
             vec![
@@ -311,7 +308,6 @@ mod tests {
         let mut solver = CholeskySolver::default();
         solver.factorize(&k_tridiag).unwrap();
         let _ = solver.solve(&rhs).unwrap();
-        // パターンが変わる（(0,2)/(2,0) が追加される）→ symbolic を作り直すはず。
         solver.factorize(&k_dense).unwrap();
         let x = solver.solve(&rhs).unwrap();
 

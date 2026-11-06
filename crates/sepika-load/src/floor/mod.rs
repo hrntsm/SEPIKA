@@ -333,10 +333,6 @@ fn distribute_attached(
         } => match transfer {
             LoadTransfer::Anchor => distribute_cantilever(coords, w, loads),
             LoadTransfer::Columns => {
-                // 部分区間（span != [0, 1]）では、総荷重の作用点は取付き線上の区間中点
-                // （無次元位置 t_mid）にある。単純梁の集中荷重の反力公式
-                // （R0 = P(1-t), R1 = P・t）で両端の柱へ按分する。全長（t_mid=0.5）では
-                // 従来どおり半分ずつになる。
                 let t_mid = 0.5 * (span[0] + span[1]);
                 distribute_to_node(nodes[0], coords, w, 1.0 - t_mid, loads);
                 distribute_to_node(nodes[1], coords, w, t_mid, loads);

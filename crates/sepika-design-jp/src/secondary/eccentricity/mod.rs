@@ -52,7 +52,6 @@ pub(crate) mod test_support {
         };
         use smallvec::SmallVec;
 
-        // 断面（共通: iy=iz=1.0e6）
         let sec_base = Section {
             frame_use: Some(sepika_core::model::FrameSectionUse::Column),
             id: SectionId(0),
@@ -75,7 +74,6 @@ pub(crate) mod test_support {
             steel_material: None,
             property_basis: Default::default(),
         };
-        // 右側柱用 section（iy を上書き）
         let sec_right = Section {
             id: SectionId(1),
             name: "col_right".to_string(),
@@ -107,7 +105,6 @@ pub(crate) mod test_support {
             property_basis: Default::default(),
         };
 
-        // 材料（共通）
         let mat = Material {
             strength_factor: None,
             concrete_class: Default::default(),
@@ -122,7 +119,6 @@ pub(crate) mod test_support {
             fy: None,
         };
 
-        // 層
         let s0 = StoryId(1);
         let story = Story {
             wall_weights: Vec::new(),
@@ -142,10 +138,6 @@ pub(crate) mod test_support {
             fireproof: Default::default(),
         };
 
-        // 節点配置:
-        // NodeId 0-3: 底部（z=0、story=None、拘束）
-        // NodeId 4-7: 上部（z=3000、story=Some(S0)、質量有り）
-        // 平面位置: 0→(0,0), 1→(6000,0), 2→(0,6000), 3→(6000,6000)
         let restraint_fixed = Dof6Mask::FIXED;
         let restraint_free = Dof6Mask::FREE;
         let mass_val: Option<[f64; 6]> = Some([1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
@@ -177,10 +169,8 @@ pub(crate) mod test_support {
             });
         }
 
-        // 部材構築ヘルパー
         // 柱の ref_vector = [0,1,0] にすると:
         //   ex=[0,0,1], ey=[0,1,0](Y軸), ez=[1,0,0](X軸)
-        // model_extract.rs は断面→要素座標系のクロス変換（elem iz ← sec.iy）を行うため:
         //   I_globalX = elem_iz·ey[0]² + elem_iy·ez[0]² = elem_iy·1 = sec.iz → Dx ∝ sec.iz
         //   I_globalY = elem_iz·ey[1]² + elem_iy·ez[1]² = elem_iz·1 = sec.iy → Dy ∝ sec.iy（★意図）
         // これにより「右側柱の iy を 3 倍 → Dy が 3 倍 → 剛心 Xs = 4500」が成立。
@@ -192,8 +182,6 @@ pub(crate) mod test_support {
         };
         let end_fixed = [EndCondition::Fixed, EndCondition::Fixed];
 
-        // 柱: bottom i → top i+4
-        // 左側 (x=0): SectionId(0)、右側 (x=6000): SectionId(0 or 1)
         let col_sec = |i: usize| -> SectionId {
             if section_iy_override.is_some() && (xy[i][0] - 6000.0).abs() < 1.0 {
                 SectionId(1)
@@ -223,9 +211,6 @@ pub(crate) mod test_support {
             });
         }
 
-        // 梁: X方向（同 y、異なる x）: top0-top1, top2-top3
-        // 梁: Y方向（同 x、異なる y）: top0-top2, top1-top3
-        // ElemId 4..7
         let beam_pairs: [(usize, usize); 4] = [(4, 5), (6, 7), (4, 6), (5, 7)];
         for (bi, &(na, nb)) in beam_pairs.iter().enumerate() {
             elements.push(ElementData {

@@ -2304,7 +2304,6 @@ mod node_reference_tests {
             model.nodes.push(node(i));
         }
 
-        // 0: 節点荷重。
         model.load_cases.push(LoadCase {
             origin: Default::default(),
             id: LoadCaseId(0),
@@ -2319,8 +2318,6 @@ mod node_reference_tests {
             kind: LoadCaseKind::default(),
         });
 
-        // 1: 床領域の境界。2: 二次部材小梁は節点ではなく支持部材アンカーを参照する
-        // （節点 2 はもう参照されない）。
         let mut region = FloorRegion::new(FloorRegionId(0), vec![NodeId(1)]);
         region.secondary_beams.push(SecondaryMember {
             id: SecondaryMemberId(0),
@@ -2333,8 +2330,6 @@ mod node_reference_tests {
         });
         model.floor_regions.push(region);
 
-        // 3: 囲まれた床板（Enclosed）は節点ではなく割当領域（支持部材）を参照する。
-        // 4: 床板（Attached／Line）。
         model.slabs.push(Slab {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
@@ -2359,13 +2354,10 @@ mod node_reference_tests {
             tip_loads: Vec::new(),
         });
 
-        // 5: 壁領域の境界。
         model
             .wall_regions
             .push(WallRegion::new(WallRegionId(0), vec![NodeId(5)]));
 
-        // 6: 壁版（Enclosed）。7: 壁版（Attached／Line）。
-        // 囲まれた壁版は節点ではなく割当領域（支持部材）を参照する。
         model.wall_plates.push(WallPlate {
             dl_support: None,
             self_weight_shares: Vec::new(),
@@ -2398,7 +2390,6 @@ mod node_reference_tests {
             slit: Default::default(),
         });
 
-        // 8: 二次部材（未割当小梁）。節点ではなく支持部材アンカーを参照する。
         model.unassigned_beams.push(SecondaryMember {
             id: SecondaryMemberId(1),
             vertical_eccentricity: Some(0.0),
@@ -2409,7 +2400,6 @@ mod node_reference_tests {
             name: String::new(),
         });
 
-        // 9: 拘束（剛床マスター）。
         model.constraints.push(Constraint::RigidDiaphragm {
             story: StoryId(0),
             master: NodeId(9),
@@ -2418,7 +2408,6 @@ mod node_reference_tests {
             ci_override: None,
         });
 
-        // 10: 壁版（Attached／FloorRegion。自立壁）。
         model.wall_plates.push(WallPlate {
             dl_support: None,
             self_weight_shares: Vec::new(),
@@ -2443,15 +2432,10 @@ mod node_reference_tests {
                 "node {i} は参照されているはず"
             );
         }
-        // 2 は二次部材小梁の端点だった節点。二次部材は節点ではなくアンカーを参照する。
         assert!(!model.node_referenced_by_regions_or_plates(NodeId(2)));
-        // 8 も未割当小梁の端点だった節点（同じ理由）。
         assert!(!model.node_referenced_by_regions_or_plates(NodeId(8)));
-        // 3 は囲まれた床板の境界だった節点。囲まれた床板は節点を参照しない。
         assert!(!model.node_referenced_by_regions_or_plates(NodeId(3)));
-        // 6 は囲まれた壁版の境界だった節点。囲まれた壁版は節点を参照しない。
         assert!(!model.node_referenced_by_regions_or_plates(NodeId(6)));
-        // 11 はどこからも参照されない対照節点。
         assert!(!model.node_referenced_by_regions_or_plates(NodeId(11)));
     }
 }

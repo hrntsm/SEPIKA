@@ -426,7 +426,7 @@ mod tests {
         let mut model = grid(1, 1, 4000.0, 0.0);
         model.nodes.push(node(4, 6000.0, 0.0, 0.0));
         let eid = model.elements.len() as u32;
-        model.elements.push(beam(eid, 1, 4)); // 節点 1 から外へ跳ね出す片持ち梁
+        model.elements.push(beam(eid, 1, 4));
         let boundaries = generate_region_boundaries(&model);
         assert_eq!(boundaries.len(), 1, "片持ち梁は面を作らない");
         assert!((boundaries[0].area(&model) - 4000.0 * 4000.0).abs() < 1.0);
@@ -467,11 +467,9 @@ mod tests {
     #[test]
     fn test_only_horizontal_beams_are_used() {
         let mut model = grid(1, 1, 4000.0, 0.0);
-        // 節点 0 から立ち上がる柱。
         model.nodes.push(node(4, 0.0, 0.0, 4000.0));
         let eid = model.elements.len() as u32;
         model.elements.push(beam(eid, 0, 4));
-        // 傾斜梁（両端の Z が違う）。
         model.nodes.push(node(5, 4000.0, 0.0, 2000.0));
         model.elements.push(beam(eid + 1, 1, 5));
         assert_eq!(generate_region_boundaries(&model).len(), 1);
@@ -481,7 +479,6 @@ mod tests {
     #[test]
     fn test_crossing_beams_are_reported() {
         let mut model = grid(1, 1, 4000.0, 0.0);
-        // 床領域の内側を斜めに横切る 2 本。互いに交差し、外周とも節点を共有しない。
         model.nodes.push(node(4, 1000.0, 1000.0, 0.0));
         model.nodes.push(node(5, 3000.0, 3000.0, 0.0));
         model.nodes.push(node(6, 1000.0, 3000.0, 0.0));
@@ -493,7 +490,6 @@ mod tests {
         let scan = scan_region_boundaries(&model);
         assert_eq!(scan.crossings.len(), 1, "交差する 1 組を報告する");
         assert_eq!(scan.unclosed, 0, "走査自体は閉じる");
-        // 交差があっても境界の検出は続行する（外周の 1 面は取れる）。
         assert_eq!(scan.boundaries.len(), 1);
     }
 
@@ -501,7 +497,6 @@ mod tests {
     #[test]
     fn test_touching_beam_without_shared_node_is_reported() {
         let mut model = grid(1, 1, 4000.0, 0.0);
-        // 辺 0-1（y=0）の中間へ、節点を共有せずに突き当たる梁。
         model.nodes.push(node(4, 2000.0, 0.0, 0.0));
         model.nodes.push(node(5, 2000.0, 2000.0, 0.0));
         let eid = model.elements.len() as u32;
@@ -528,7 +523,6 @@ mod tests {
     #[test]
     fn test_near_collinear_touch_is_reported() {
         let mut model = grid(1, 1, 4000.0, 0.0);
-        // 辺 0-1（y=0）の中間へ、5mm 手前で止まる梁（節点は共有しない）。
         model.nodes.push(node(4, 2000.0, 5.0, 0.0));
         model.nodes.push(node(5, 2000.0, 2000.0, 0.0));
         let eid = model.elements.len() as u32;
@@ -539,7 +533,6 @@ mod tests {
             "5mm のずれは交差として報告する"
         );
 
-        // 100mm 離れていれば、突き当たっているとはみなさない。
         model.nodes[4].coord[1] = 100.0;
         assert!(scan_region_boundaries(&model).crossings.is_empty());
     }
@@ -559,7 +552,6 @@ mod tests {
     /// L 形（凹多角形）の面も 1 つの面として取れる。
     #[test]
     fn test_concave_boundary() {
-        // 2×2 の格子から 1 床領域ぶんの梁を落として L 形の面を作る。
         let mut model = Model::default();
         let pts = [
             (0.0, 0.0),
@@ -574,7 +566,6 @@ mod tests {
         for (i, (x, y)) in pts.iter().enumerate() {
             model.nodes.push(node(i as u32, *x, *y, 0.0));
         }
-        // 外周: 0-1-2-5-4-7-6-0（L 形）
         let ring = [(0, 1), (1, 2), (2, 5), (5, 4), (4, 7), (7, 6), (6, 0)];
         for (k, (i, j)) in ring.iter().enumerate() {
             model.elements.push(beam(k as u32, *i, *j));

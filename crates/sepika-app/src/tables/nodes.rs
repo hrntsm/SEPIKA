@@ -972,7 +972,6 @@ mod tests {
             .map(|a| a.props);
         assert_eq!(attr_props, Some(props));
 
-        // undo で接地節点・要素が消え、拘束も元（FIXED）に戻る。
         undo.undo(&mut model);
         assert_eq!(model.nodes.len(), 1);
         assert_eq!(model.elements.len(), 0);
@@ -1003,9 +1002,7 @@ mod tests {
         );
         let ground_id = NodeId(1);
         assert_eq!(model.nodes[ground_id.index()].restraint, Dof6Mask::FIXED);
-        // 上部節点（対象節点）側では見つかる。
         assert!(find_support_isolator(&model, NodeId(0)).is_some());
-        // 接地節点側では見つからない。
         assert_eq!(find_support_isolator(&model, ground_id), None);
     }
 

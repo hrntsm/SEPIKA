@@ -16,7 +16,7 @@ use sepika_core::model::{
 const DESIGN_UNIT_WEIGHT_N_PER_MM3: f64 = 78.5e-6;
 /// 物理質量密度 [t/mm³]（鋼）。
 const DENSITY: f64 = 7.85e-9;
-const AREA: f64 = 10_000.0; // mm²
+const AREA: f64 = 10_000.0;
 
 /// 設計重量の等分布荷重 [N/mm]（設計単位体積重量 × 断面積）。
 fn w_self() -> f64 {
@@ -112,7 +112,6 @@ fn base_model() -> Model {
 }
 
 fn solved(model: &mut Model) -> SecondaryTransfer {
-    // 鉄骨重量割増は `load_cfg` 未設定なら 1.0（`beam_self_weight_udl`）。
     model.anchorize_secondary_members();
     solve(model, |_| 0.0, true).unwrap()
 }
@@ -604,7 +603,6 @@ fn 片持ち自重は支持端だけ控除し不正長と未解決参照はエ�
 #[test]
 fn beam_on_girders_terminates_at_primary() {
     let mut m = base_model();
-    // 大梁 0-1（X 方向、y=0）と 2-3（X 方向、y=4000）。小梁は 4-5（Y 方向、x=3000）。
     for (i, c) in [
         [0.0, 0.0, 0.0],
         [6000.0, 0.0, 0.0],
@@ -821,14 +819,14 @@ fn rounded_secondary_supplied_area_mass_reaches_stories_and_unknown_is_error() {
 fn beam_on_beam_cascades_to_primary() {
     let mut m = base_model();
     for (i, c) in [
-        [0.0, 0.0, 0.0],       // 0 大梁端
-        [6000.0, 0.0, 0.0],    // 1 大梁端
-        [0.0, 4000.0, 0.0],    // 2 大梁端
-        [6000.0, 4000.0, 0.0], // 3 大梁端
-        [3000.0, 0.0, 0.0],    // 4 A の端（大梁上）
-        [3000.0, 4000.0, 0.0], // 5 A の端（大梁上）
-        [3000.0, 2000.0, 0.0], // 6 A の中央（B の端。どの大梁にも載らない）
-        [6000.0, 2000.0, 0.0], // 7 B の端（右側の大梁 1-3 のスパン上）
+        [0.0, 0.0, 0.0],
+        [6000.0, 0.0, 0.0],
+        [0.0, 4000.0, 0.0],
+        [6000.0, 4000.0, 0.0],
+        [3000.0, 0.0, 0.0],
+        [3000.0, 4000.0, 0.0],
+        [3000.0, 2000.0, 0.0],
+        [6000.0, 2000.0, 0.0],
     ]
     .iter()
     .enumerate()
@@ -837,7 +835,7 @@ fn beam_on_beam_cascades_to_primary() {
     }
     m.elements.push(element_beam(0, 0, 1));
     m.elements.push(element_beam(1, 2, 3));
-    m.elements.push(element_beam(2, 1, 3)); // 右側の大梁（節点 7 がこのスパン上に載る）
+    m.elements.push(element_beam(2, 1, 3));
     m.unassigned_beams.push(secondary_beam(&m, 4, 5, "A"));
     m.unassigned_beams.push(secondary_beam(&m, 6, 7, "B"));
 
@@ -854,10 +852,8 @@ fn beam_on_beam_cascades_to_primary() {
         "B の端は A に載る: {:?}",
         b.supports
     );
-    // A の両端は大梁上で終端する。
     assert_eq!(a.supports, [SupportAt::Primary, SupportAt::Primary]);
 
-    // 主架構へ渡る総和 = A の自重 + B の自重。
     let (nodal, member) = t.primary_loads(&m);
     let total: f64 = nodal
         .iter()
@@ -878,10 +874,10 @@ fn beam_on_beam_cascades_to_primary() {
 fn beam_anchored_to_girder_midspan_becomes_point_load() {
     let mut m = base_model();
     for (i, c) in [
-        [0.0, 0.0, 0.0],       // 0 大梁 A 端
-        [6000.0, 0.0, 0.0],    // 1 大梁 A 端
-        [0.0, 4000.0, 0.0],    // 2 大梁 B 端
-        [6000.0, 4000.0, 0.0], // 3 大梁 B 端
+        [0.0, 0.0, 0.0],
+        [6000.0, 0.0, 0.0],
+        [0.0, 4000.0, 0.0],
+        [6000.0, 4000.0, 0.0],
     ]
     .iter()
     .enumerate()
@@ -890,7 +886,6 @@ fn beam_anchored_to_girder_midspan_becomes_point_load() {
     }
     m.elements.push(element_beam(0, 0, 1));
     m.elements.push(element_beam(1, 2, 3));
-    // 両端が大梁 A・B の材軸中間（節点の無い位置）に載る小梁。
     m.unassigned_beams.push(SecondaryMember {
         vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
@@ -963,8 +958,8 @@ fn vertical_post_splits_load_by_explicit_shares() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(element_beam(0, 0, 1)); // 下の梁
-    m.elements.push(element_beam(1, 2, 3)); // 上の梁
+    m.elements.push(element_beam(0, 0, 1));
+    m.elements.push(element_beam(1, 2, 3));
     m.unassigned_posts.push(SecondaryMember {
         vertical_eccentricity: Some(0.0),
         gravity_end_shares: Some([0.5, 0.5]),
@@ -986,7 +981,6 @@ fn vertical_post_splits_load_by_explicit_shares() {
         assert!((r - half).abs() / half < 1e-9, "反力 {r} != {half}");
     }
 
-    // 明示した負担率どおりに配る（幾何の等分には戻らない）。
     for (ratios, expected) in [
         ([1.0, 0.0], [2.0 * half, 0.0]),
         ([0.25, 0.75], [0.5 * half, 1.5 * half]),
@@ -1003,7 +997,6 @@ fn vertical_post_splits_load_by_explicit_shares() {
         }
     }
 
-    // 未指定・不正値は逐次伝達の対象から外れ、自重を主架構へ渡さない（解析前エラー）。
     for ratios in [
         None,
         Some([0.0, 0.0]),
@@ -1039,8 +1032,8 @@ fn inclined_beam_reactions_match_simple_beam() {
         [0.0, 1000.0, 0.0],
         [4000.0, -1000.0, 3000.0],
         [4000.0, 1000.0, 3000.0],
-        [0.0, 0.0, 0.0],       // 4 傾斜小梁の下端（下の大梁上）
-        [4000.0, 0.0, 3000.0], // 5 傾斜小梁の上端（上の大梁上）
+        [0.0, 0.0, 0.0],
+        [4000.0, 0.0, 3000.0],
     ]
     .iter()
     .enumerate()
@@ -1072,7 +1065,6 @@ fn inclined_beam_reactions_match_simple_beam() {
     assert!((ri - 0.8 * p).abs() < 1e-9, "R_i={ri}");
     assert!((rj - 0.2 * p).abs() < 1e-9, "R_j={rj}");
 
-    // 端部負担率を両端 1/2 に固定すると、両端の負担は 1/2 ずつになる。
     let (ri, rj) = super::reactions_of(
         &MemberLoadKind::Point { a: 1000.0, p },
         5000.0,
@@ -1102,12 +1094,12 @@ fn floating_beam_is_unresolved() {
 fn cyclic_support_is_reported() {
     let mut m = base_model();
     for (i, c) in [
-        [0.0, 0.0, 0.0],         // 0 A 始点（C の内部に載る）
-        [4000.0, 0.0, 0.0],      // 1 A 終点
-        [2000.0, 0.0, 0.0],      // 2 B 始点（A の内部に載る）
-        [2000.0, 4000.0, 0.0],   // 3 B 終点
-        [2000.0, 2000.0, 0.0],   // 4 C 始点（B の内部に載る）
-        [-2000.0, -2000.0, 0.0], // 5 C 終点
+        [0.0, 0.0, 0.0],
+        [4000.0, 0.0, 0.0],
+        [2000.0, 0.0, 0.0],
+        [2000.0, 4000.0, 0.0],
+        [2000.0, 2000.0, 0.0],
+        [-2000.0, -2000.0, 0.0],
     ]
     .iter()
     .enumerate()
@@ -1209,10 +1201,10 @@ fn materialized_beam_is_skipped() {
 fn cantilever_beam_transfers_to_base_only() {
     let mut m = base_model();
     for (i, c) in [
-        [0.0, 0.0, 0.0],       // 0 大梁端
-        [6000.0, 0.0, 0.0],    // 1 大梁端
-        [3000.0, 0.0, 0.0],    // 2 基端（大梁のスパン上）
-        [3000.0, 4000.0, 0.0], // 3 自由端
+        [0.0, 0.0, 0.0],
+        [6000.0, 0.0, 0.0],
+        [3000.0, 0.0, 0.0],
+        [3000.0, 4000.0, 0.0],
     ]
     .iter()
     .enumerate()
@@ -1242,10 +1234,10 @@ fn cantilever_beam_transfers_to_base_only() {
 fn cantilever_beam_base_at_second_node() {
     let mut m = base_model();
     for (i, c) in [
-        [0.0, 4000.0, 0.0],    // 0 大梁端
-        [6000.0, 4000.0, 0.0], // 1 大梁端
-        [3000.0, 1000.0, 0.0], // 2 自由端
-        [3000.0, 4000.0, 0.0], // 3 基端（大梁のスパン上）
+        [0.0, 4000.0, 0.0],
+        [6000.0, 4000.0, 0.0],
+        [3000.0, 1000.0, 0.0],
+        [3000.0, 4000.0, 0.0],
     ]
     .iter()
     .enumerate()
@@ -1271,12 +1263,12 @@ fn cantilever_beam_base_at_second_node() {
 fn tip_rib_on_cantilever_free_ends_cascades_to_bases() {
     let mut m = base_model();
     for (i, c) in [
-        [0.0, 0.0, 0.0],       // 0 大梁端
-        [6000.0, 0.0, 0.0],    // 1 大梁端
-        [1000.0, 0.0, 0.0],    // 2 片持ち A 基端（大梁のスパン上）
-        [1000.0, 3000.0, 0.0], // 3 片持ち A 自由端
-        [5000.0, 0.0, 0.0],    // 4 片持ち B 基端（大梁のスパン上）
-        [5000.0, 3000.0, 0.0], // 5 片持ち B 自由端
+        [0.0, 0.0, 0.0],
+        [6000.0, 0.0, 0.0],
+        [1000.0, 0.0, 0.0],
+        [1000.0, 3000.0, 0.0],
+        [5000.0, 0.0, 0.0],
+        [5000.0, 3000.0, 0.0],
     ]
     .iter()
     .enumerate()
@@ -1327,13 +1319,9 @@ fn attached_slab_load_ignores_side_beam() {
     use sepika_core::model::{AreaLoad, LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
     let w = 0.005_f64;
     let mut m = base_model();
-    for (i, c) in [
-        [0.0, 0.0, 0.0],    // 0 大梁端（取付き線）
-        [6000.0, 0.0, 0.0], // 1 大梁端
-        [0.0, 1500.0, 0.0], // 2 小梁の自由端
-    ]
-    .iter()
-    .enumerate()
+    for (i, c) in [[0.0, 0.0, 0.0], [6000.0, 0.0, 0.0], [0.0, 1500.0, 0.0]]
+        .iter()
+        .enumerate()
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
@@ -1407,10 +1395,10 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
     let area = 6000.0 * 4000.0;
     let mut m = base_model();
     for (i, c) in [
-        [0.0, 0.0, 0.0],       // 0
-        [6000.0, 0.0, 0.0],    // 1
-        [6000.0, 4000.0, 0.0], // 2
-        [0.0, 4000.0, 0.0],    // 3
+        [0.0, 0.0, 0.0],
+        [6000.0, 0.0, 0.0],
+        [6000.0, 4000.0, 0.0],
+        [0.0, 4000.0, 0.0],
     ]
     .iter()
     .enumerate()
@@ -1421,8 +1409,6 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
     m.elements.push(element_beam(1, 1, 2));
     m.elements.push(element_beam(2, 2, 3));
     m.elements.push(element_beam(3, 3, 0));
-    // 中央小梁は下辺大梁（0-1）と上辺大梁（2-3）の材軸中間にアンカーする。
-    // アンカー位置にはモデル節点が無い。
     let beam_key = sepika_core::ids::SecondaryMemberId(0);
     m.unassigned_beams.push(SecondaryMember {
         vertical_eccentricity: Some(0.0),
@@ -1474,7 +1460,6 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
             .assignment = PlateAssignment::Plate(slab_id);
     }
 
-    // ① 分配（Blocker 1 の経路）だけで総和保存する。
     let resolved: Vec<BeamLoad> = m
         .slabs
         .iter()
@@ -1493,7 +1478,6 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
         "小梁境界の辺荷重は Secondary で小梁を指す: {resolved:?}"
     );
 
-    // ② カスケードを経て主架構へ渡る荷重（残りの辺荷重 + 小梁の反力）の総和。
     let transfer = solve(&m, |_| w, false).unwrap();
     assert!(transfer.unresolved.is_empty(), "{:?}", transfer.unresolved);
     assert!(transfer.cyclic.is_empty());

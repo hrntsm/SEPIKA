@@ -239,7 +239,6 @@ mod tests {
         let h2_actual = (alpha_m / omega2 + beta_k * omega2) / 2.0;
         assert!((h2_actual - 0.05).abs() < 1e-6);
 
-        // h1≠h2 の2点指定でも両振動数で目標減衰比を満たす（α_m と β_k の両方が効く）。
         let (alpha_m, beta_k) = Damping::rayleigh_coeffs(10.0, 50.0, 0.03, 0.05);
         let h1_actual = (alpha_m / 10.0 + beta_k * 10.0) / 2.0;
         assert!((h1_actual - 0.03).abs() < 1e-9, "h1={h1_actual}");
@@ -254,11 +253,9 @@ mod tests {
         assert!(a0.is_finite() && a1.is_finite(), "a0={a0}, a1={a1}");
         let h = (a0 / 10.0 + a1 * 10.0) / 2.0;
         assert!((h - 0.05).abs() < 1e-12, "h={h}");
-        // 相対 1e-9 未満の近接
         let w2 = 10.0 * (1.0 + 1e-12);
         let (a0, a1) = Damping::rayleigh_coeffs(10.0, w2, 0.05, 0.05);
         assert!(a0.is_finite() && a1.is_finite(), "a0={a0}, a1={a1}");
-        // ω1=0 の退化入力は減衰なしへフォールバック（panic・発散しない）
         let (a0, a1) = Damping::rayleigh_coeffs(0.0, 0.0, 0.05, 0.05);
         assert_eq!((a0, a1), (0.0, 0.0));
     }
@@ -294,7 +291,6 @@ mod tests {
 
     #[test]
     fn test_rayleigh_assemble_c() {
-        // C = a0·M + a1·K
         let m = diag_csc(2, &[1.0, 1.0]);
         let k = diag_csc(2, &[100.0, 400.0]);
         let damping = Damping::Rayleigh {

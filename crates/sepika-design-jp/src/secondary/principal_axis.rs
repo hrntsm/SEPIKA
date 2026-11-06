@@ -50,7 +50,6 @@ mod tests {
 
     #[test]
     fn test_symmetric_structure_theta_zero() {
-        // 対称構造: 交差変位がない（uy=vx=0）→ Θ = 0
         let p = vec![1.0, 2.0];
         let ux = vec![1.0, 1.0];
         let vy = vec![2.0, 2.0];
@@ -73,21 +72,16 @@ mod tests {
 
     #[test]
     fn test_rotated_frame_recovers_angle() {
-        // 主軸剛性 kx≠ky の系を角度 φ だけ回した剛性行列に単位荷重を与えた
-        // ときの変位から Θ = φ が復元されることを確認する。
-        // K(φ) = R·diag(kx,ky)·Rᵗ, u = K⁻¹·e1（X加力）, v = K⁻¹·e2（Y加力）
+        // 回転系の独立入力は柔性R·diag(1/kx,1/ky)·Rᵗから組み立てる。
         let (kx, ky) = (2.0, 1.0);
         let phi = 0.3_f64;
         let (c, s) = (phi.cos(), phi.sin());
-        // K⁻¹ = R·diag(1/kx,1/ky)·Rᵗ
         let f11 = c * c / kx + s * s / ky;
         let f12 = c * s / kx - c * s / ky;
         let f22 = s * s / kx + c * c / ky;
-        // X 加力 (P=[1,0]): ux=f11, vx=f12 / Y 加力 (P=[0,1]): uy=f12, vy=f22
         let p = vec![1.0];
         let th = principal_axis_angle(&p, &[f11], &[f12], &[f12], &[f22]);
-        // tan2Θ = −2·f12/(f22−f11)。f12, f22−f11 の符号から Θ = −φ 側の解
-        // （柔性行列の主軸＝剛性行列の主軸なので |Θ| = φ を確認）。
+        // 柔性と剛性は主軸を共有するため、求めた角度の絶対値はφとなる。
         assert!((th.abs() - phi).abs() < 1e-12, "Θ={th}, expected ±{phi}");
     }
 

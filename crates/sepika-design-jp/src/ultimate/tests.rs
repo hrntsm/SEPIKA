@@ -47,7 +47,6 @@ fn rc_beam_rect_section(
         panel_thickness: None,
         thickness: None,
         shape: Some(SectionShape::RcBeamRect { b, d, rebar }),
-        // 材料は断面が持つ。主筋・せん断補強筋も同じ材料（SD345）とする。
         material: Some(MaterialId(0)),
         rebar_material: Some(MaterialId(0)),
         shear_rebar_material: Some(MaterialId(0)),
@@ -154,18 +153,15 @@ fn frame_element(id: u32, sec: u32, n0: u32, n1: u32) -> ElementData {
 pub(super) fn column_and_beam_model() -> Model {
     let nodes = vec![
         node(0, [0.0, 0.0, 0.0]),
-        node(1, [0.0, 0.0, 3000.0]),    // 柱: 鉛直
-        node(2, [6000.0, 0.0, 3000.0]), // 梁: 水平
+        node(1, [0.0, 0.0, 3000.0]),
+        node(2, [6000.0, 0.0, 3000.0]),
     ];
     let sections = vec![
-        rc_column_rect_section(0, 600.0, 600.0, 25.0, 4, 4, 100.0), // 柱断面
-        rc_beam_rect_section(1, 400.0, 700.0, 25.0, 4, 100.0),      // 梁断面
+        rc_column_rect_section(0, 600.0, 600.0, 25.0, 4, 4, 100.0),
+        rc_beam_rect_section(1, 400.0, 700.0, 25.0, 4, 100.0),
     ];
     let materials = vec![material()];
-    let elements = vec![
-        frame_element(0, 0, 0, 1), // 柱
-        frame_element(1, 1, 1, 2), // 梁
-    ];
+    let elements = vec![frame_element(0, 0, 0, 1), frame_element(1, 1, 1, 2)];
     Model {
         load_cases: sepika_core::model::default_load_cases(),
         combinations: sepika_core::model::default_combinations(),
@@ -182,7 +178,6 @@ pub(super) fn column_and_beam_model() -> Model {
 fn test_collect_rc_ultimate_checks_column_and_beam() {
     let model = column_and_beam_model();
     let opts = UltimateShearOptions::default();
-    // 柱に圧縮軸力 2000kN。
     let axial = vec![
         (
             ElemId(0),
@@ -208,18 +203,14 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
     assert_eq!(col.kind, MemberKind::Column);
     assert_eq!(beam.kind, MemberKind::Girder);
 
-    // 各耐力が正。
     assert!(col.mu > 0.0 && col.qmu > 0.0 && col.qsu > 0.0 && col.qbu > 0.0);
     assert!(beam.mu > 0.0 && beam.qmu > 0.0 && beam.qsu > 0.0);
 
-    // 柱は軸終局耐力を持つ。Nuc = 600·600·24。
     let ax = col.axial.expect("柱は軸終局耐力を持つ");
     assert!((ax.nuc - 600.0 * 600.0 * 24.0).abs() < 1e-3);
     assert!(ax.nut < 0.0);
-    // 梁は軸終局耐力なし。
     assert!(beam.axial.is_none());
 
-    // せん断余裕度 = Qsu/Qmu。
     assert!((col.shear_margin - col.qsu / col.qmu).abs() < 1e-9);
 }
 
@@ -244,7 +235,6 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
         ),
     ];
     let opts = UltimateShearOptions::default();
-    // 梁断面（要素 1）の σwy だけを変えた Qsu の手計算値を返す。
     let qsu_with_sigma_wy = |model: &Model, sigma_wy: f64| -> f64 {
         let shape = model.sections[1].shape.clone().unwrap();
         let p = super::rc_props::rc_bar_props(
@@ -266,8 +256,6 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
             },
         )
     };
-    // 梁のせん断補強筋だけ専用材料（fy を指定）に差し替えたモデル。主筋・
-    // コンクリートは既定の material()（SD345・fy=345・Fc=24）を共有する。
     let model_with_shear_fy = |shear_fy: Option<f64>| -> Model {
         let mut model = column_and_beam_model();
         model.materials.push(Material {
@@ -281,7 +269,6 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
         model
     };
 
-    // 標準ケース（fy=345）では材料の fy=345 が σwy に効く。
     let model = model_with_shear_fy(Some(345.0));
     let checks = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
@@ -292,7 +279,6 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
         beam.qsu
     );
 
-    // 材料名の数値が同じでも fy が異なれば fy が効く（fy=490）。
     let model_490 = model_with_shear_fy(Some(490.0));
     let checks_490 = collect_rc_ultimate_checks(&model_490, &demand, &opts).unwrap();
     let beam_490 = checks_490.iter().find(|c| c.elem == ElemId(1)).unwrap();
@@ -304,7 +290,6 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
     );
     assert!(beam_490.qsu > beam.qsu, "fy の増加に伴い Qsu も増える");
 
-    // 対応グレードでも fy 未設定は入力不備として停止する（既定 295 で代替しない）。
     let model_none = model_with_shear_fy(None);
     let err = collect_rc_ultimate_checks(&model_none, &demand, &opts).unwrap_err();
     assert!(err.contains("fy"), "{err}");
@@ -399,7 +384,6 @@ fn test_ultimate_unknown_sd295_is_unsupported() {
 
 #[test]
 fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
-    // 余裕率の QL 控除は `q_long` のみで行う。
     let ql = 50_000.0;
     let demand = vec![
         (
@@ -419,13 +403,11 @@ fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
     ];
     let opts = UltimateShearOptions::default();
 
-    // 普通強度（SD345）: QL 控除。
     let model = column_and_beam_model();
     let checks = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert!((beam.shear_margin - (beam.qsu - ql).max(0.0) / beam.qmu).abs() < 1e-9);
 
-    // 未対応グレード（KH785）は入力不備として理由付きで停止する。
     let mut model_kh = column_and_beam_model();
     model_kh.materials.push(Material {
         id: MaterialId(model_kh.materials.len() as u32),
@@ -465,7 +447,6 @@ fn test_ultimate_check_option_flags() {
     ];
     let model = column_and_beam_model();
 
-    // 軽量コンクリートは Qsu・Qbu を 0.9 倍に低減する。
     let std =
         collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
     let lw = collect_rc_ultimate_checks(
@@ -482,7 +463,6 @@ fn test_ultimate_check_option_flags() {
     assert!((col_lw.qsu - 0.9 * col_std.qsu).abs() < 1e-3);
     assert!((col_lw.qbu - 0.9 * col_std.qbu).abs() < 1e-3);
 
-    // 付着検定を省略すると Qbu=0・付着余裕度は無限大。
     let no_bond = collect_rc_ultimate_checks(
         &model,
         &demand,
@@ -500,7 +480,6 @@ fn test_ultimate_check_option_flags() {
 
 #[test]
 fn test_ultimate_check_skips_non_rc() {
-    // 鋼断面（shape=None 相当）は検定対象外。
     let mut model = column_and_beam_model();
     model.sections[0].shape = None;
     let checks = collect_rc_ultimate_checks(
@@ -515,7 +494,6 @@ fn test_ultimate_check_skips_non_rc() {
         &UltimateShearOptions::default(),
     )
     .unwrap();
-    // 柱がスキップされ梁のみ。
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].elem, ElemId(1));
 }
@@ -525,11 +503,8 @@ fn test_biaxial_margin_handcalc() {
     // rx=ry=0.5, α=2 → 1/√(0.25+0.25)=1/√0.5=√2。
     let m = biaxial_margin(0.5, 0.5, 2.0);
     assert!((m - 2.0_f64.sqrt()).abs() < 1e-9, "m={m}");
-    // 片軸のみ需要（ry=0）→ rx=0.5 の逆数=2.0。
     assert!((biaxial_margin(0.5, 0.0, 2.0) - 2.0).abs() < 1e-9);
-    // 需要ゼロ → 無限大。
     assert!(biaxial_margin(0.0, 0.0, 2.0).is_infinite());
-    // 相互作用が単位に達する（rx²+ry²=1）と余裕度=1.0。
     assert!((biaxial_margin(0.6, 0.8, 2.0) - 1.0).abs() < 1e-9);
 }
 
@@ -565,16 +540,13 @@ fn test_ultimate_check_biaxial_shear() {
     .unwrap();
     let col_uni = uni.iter().find(|c| c.elem == ElemId(0)).unwrap();
     let col_bi = bi.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    // 既定では 2 軸余裕度は None。
     assert!(col_uni.biaxial_shear_margin.is_none());
-    // 2 軸指定で Some。両軸の需要を合成するため強軸単独の余裕度以下になる。
     let bm = col_bi.biaxial_shear_margin.expect("2軸指定で Some");
     assert!(
         bm > 0.0 && bm <= col_bi.shear_margin + 1e-9,
         "bm={bm} uni={}",
         col_bi.shear_margin
     );
-    // 梁は 2 軸せん断の対象外（None のまま）。
     let beam_bi = bi.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert!(beam_bi.biaxial_shear_margin.is_none());
 }
@@ -583,7 +555,6 @@ fn test_ultimate_check_biaxial_shear() {
 #[test]
 fn test_ultimate_check_biaxial_bending() {
     let model = column_and_beam_model();
-    // 柱に軸力＋強軸/弱軸の設計用曲げ需要を与える。
     let demand = vec![
         (
             ElemId(0),
@@ -616,7 +587,6 @@ fn test_ultimate_check_biaxial_bending() {
     .unwrap();
     let col_uni = uni.iter().find(|c| c.elem == ElemId(0)).unwrap();
     let col_bi = bi.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    // 既定では None、指定で Some。
     assert!(col_uni.biaxial_bending_margin.is_none());
     let bm = col_bi.biaxial_bending_margin.expect("2軸曲げ指定で Some");
     assert!(bm > 0.0 && bm.is_finite(), "bm={bm}");
@@ -625,7 +595,6 @@ fn test_ultimate_check_biaxial_bending() {
     // rx=Mmx/Mux>0, ry>0 → bm < min(Mux/Mmx, Muy/Mmy)。
     let rx = 2.0e8 / col_bi.mu;
     assert!(rx > 0.0);
-    // 需要 0 なら無限大。
     let zero_demand = vec![
         (
             ElemId(0),
@@ -653,7 +622,6 @@ fn test_ultimate_check_biaxial_bending() {
     .unwrap();
     let col_z = z.iter().find(|c| c.elem == ElemId(0)).unwrap();
     assert!(col_z.biaxial_bending_margin.unwrap().is_infinite());
-    // 梁は対象外。
     let beam_bi = bi.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert!(beam_bi.biaxial_bending_margin.is_none());
 }
@@ -689,7 +657,6 @@ fn test_ultimate_check_shear_method_ductility() {
         },
     )
     .unwrap();
-    // 両手法とも柱・梁の Qsu/Vu は正値（別定式なので値は一般に異なる）。
     for c in &plastic {
         assert!(c.qsu > 0.0, "塑性 Qsu>0: elem={:?}", c.elem);
     }
@@ -702,10 +669,8 @@ fn test_ultimate_check_shear_method_ductility() {
         col_p.qsu,
         col_d.qsu
     );
-    // basis 文字列に選択した式名が反映される。
     assert!(col_d.basis.contains("靭性指針式"), "basis={}", col_d.basis);
     assert!(col_p.basis.contains("塑性理論式"), "basis={}", col_p.basis);
-    // 付着側も靭性指針式は Vbu（付着考慮せん断信頼強度）を用い、塑性の Qbu と異なる。
     assert!(col_d.qbu > 0.0, "靭性 Vbu>0");
     assert!(col_p.qbu > 0.0, "塑性 Qbu>0");
     assert!(
@@ -722,7 +687,6 @@ fn test_ultimate_check_shear_method_ductility() {
 fn test_ultimate_check_pushover_demand() {
     let model = column_and_beam_model();
 
-    // (1) 設計用せん断力 Qm を直接反映すると Qmu は 2·Mu/内法 ではなく Qm になる。
     let qm = 123_456.0_f64;
     let demand = vec![
         (
@@ -737,7 +701,6 @@ fn test_ultimate_check_pushover_demand() {
     let checks =
         collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
     let col = checks.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    // 上限強度倍率=1.0（既定）なので Qmu = |Qm|。
     assert!(
         (col.qmu - qm).abs() < 1e-3,
         "Qmu={} は応答せん断 Qm={} を反映するはず",
@@ -745,7 +708,6 @@ fn test_ultimate_check_pushover_demand() {
         qm
     );
 
-    // (2) 部材別 Rp を上げると（塑性理論式）柱の Qsu は低下する（ν・cotφ 低減）。
     let d_rp3 = vec![
         (
             ElemId(0),
@@ -764,7 +726,6 @@ fn test_ultimate_check_pushover_demand() {
         "部材別 Rp=0.03 の Qsu={q3} は Rp=0 の Qsu={q0} より小さいはず"
     );
 
-    // (3) shear/rp 未指定（axial のみ）は Qmu=2·Mu/内法（Qm 直接反映なし）。
     let d_axial = vec![
         (
             ElemId(0),
@@ -789,8 +750,6 @@ fn test_ultimate_check_pushover_demand() {
         "shear 未指定時は Qmu が応答せん断と一致しないはず（両端ヒンジ略算）"
     );
 
-    // (4) 2 軸せん断では弱軸の設計用せん断需要（プッシュオーバー弱軸応答）を
-    // 直接反映する。強軸せん断は共通、弱軸せん断需要のみ大小 2 種。
     let opts = UltimateShearOptions {
         biaxial_shear: true,
         ..Default::default()
@@ -830,7 +789,6 @@ fn test_ultimate_check_pushover_demand() {
         .unwrap()
         .biaxial_shear_margin
         .expect("2軸指定で Some");
-    // 弱軸の需要せん断が大きいほど 2 軸せん断余裕度は小さくなる（不利側）。
     assert!(
         ml < ms,
         "弱軸需要大の余裕度 {ml} は弱軸需要小 {ms} より小さいはず"
@@ -905,7 +863,6 @@ fn test_collect_cft_ultimate_checks() {
         elements: vec![frame_element(0, 0, 0, 1)],
         ..Default::default()
     };
-    // 圧縮軸力 3000kN。
     let axial = vec![(ElemId(0), 3_000_000.0)];
     let checks = collect_cft_ultimate_checks(&model, &axial).unwrap();
     assert_eq!(checks.len(), 1);
@@ -914,7 +871,6 @@ fn test_collect_cft_ultimate_checks() {
     assert!((c.axial_margin - c.ncu / 3_000_000.0).abs() < 1e-6);
     // lk=3000, D=400 → lk/D=7.5 → 中柱。
     assert_eq!(c.class, CftColumnClass::Medium);
-    // 短柱 N-M 曲げ耐力 Mu(N) が正（圧縮軸力 3000kN 時）。
     assert!(
         c.mu_nm.as_ref().is_ok_and(|mu| *mu > 0.0),
         "mu_nm={:?}",
@@ -1205,7 +1161,6 @@ fn test_ultimate_beam_rect_tension_side_affects_mu_and_qbu() {
         (mu_top - mu_bottom).abs() > 1.0,
         "上端引張 {mu_top} と下端引張 {mu_bottom} は異なるはず"
     );
-    // 上端筋 6 本 > 下端筋 5 本のため上端引張の Mu が大きい。
     assert!(mu_top > mu_bottom, "mu_top={mu_top} mu_bottom={mu_bottom}");
 
     let qbu_top = top[0].qbu;

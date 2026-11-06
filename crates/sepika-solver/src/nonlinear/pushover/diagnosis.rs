@@ -190,7 +190,6 @@ mod tests {
         let model = two_node_beam_model();
         let dofmap = DofMap::build(&model);
         let n = dofmap.n_active();
-        // 対角に剛性を入れるが、1 自由度（active 3 = 節点 1 の Rx）だけ 0 のままにする。
         let triplets: Vec<Triplet> = (0..n)
             .filter(|a| *a != 3)
             .map(|a| Triplet {
@@ -240,7 +239,6 @@ mod tests {
         use sepika_core::model::Constraint;
 
         let mut model = two_node_beam_model();
-        // 代表節点（要素非接続。Uz/Rx/Ry のみダミー拘束＝階自動生成と同じ規則）。
         let mut rep_restraint = Dof6Mask::FREE;
         rep_restraint.set_fixed(sepika_core::dof::Dof::Uz);
         rep_restraint.set_fixed(sepika_core::dof::Dof::Rx);
@@ -262,7 +260,6 @@ mod tests {
 
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
-        // 縮約前は「要素が与える剛性」だけ、すなわち節点 1 の 6 自由度のみ対角を持つ。
         let triplets: Vec<Triplet> = (0..dofmap.n_active())
             .filter(|&a| {
                 let g = dofmap.global(a as u32);

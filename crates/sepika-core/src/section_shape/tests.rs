@@ -49,7 +49,7 @@ fn cft_initial_shear_rigidity_distinguishes_directional_plates_and_published_coe
     let kc = 10.0 * 1.2 / (12.0 + 11.0 * 0.2);
     assert!((ks / 0.4355108877721943_f64 - 1.0).abs() < 1e-10);
     assert!((kc / 0.8450704225352113_f64 - 1.0).abs() < 1e-10);
-    // Fc60・γ24 では Ec=33500。比較値は全材料面積に対する各文献の係数で独立算定。
+    // Fc60・γ24ではEc=33500。比較値は全材料面積に対する文献係数から独立に算定。
     for (
         height,
         width,

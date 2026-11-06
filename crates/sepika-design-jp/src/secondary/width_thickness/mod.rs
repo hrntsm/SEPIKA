@@ -20,8 +20,6 @@ use super::holding_capacity::MemberRank;
 mod tests {
     use super::*;
 
-    // ===== max_width_thickness テスト =====
-
     use sepika_core::section_shape::{
         CircleColumnHoop, RcCircleColumnRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
     };
@@ -176,8 +174,6 @@ mod tests {
         assert!(max_width_thickness(&shape).is_none());
     }
 
-    // ===== s_member_rank_by_kihon テスト =====
-
     /// 柱 H形フランジのみが効く形状を作る（ウェブは常に FA になるよう十分厚くする）。
     /// flange_wt = width / (2*flange_thick)。web_wt = (height-2*flange_thick)/web_thick
     /// は height=220, flange_thick=10, web_thick=60 で 200/60≈3.33（常に FA）。
@@ -195,10 +191,10 @@ mod tests {
     #[test]
     fn test_s_member_rank_by_kihon_column_h_flange_boundaries() {
         for (width, expected) in [
-            (190.0, MemberRank::FA), // b/t=9.5（境界）
-            (192.0, MemberRank::FB), // 9.6
-            (310.0, MemberRank::FC), // 15.5（境界）
-            (312.0, MemberRank::FD), // 15.6
+            (190.0, MemberRank::FA),
+            (192.0, MemberRank::FB),
+            (310.0, MemberRank::FC),
+            (312.0, MemberRank::FD),
         ] {
             let shape = steel_h_flange_only(width);
             let rank =
@@ -232,9 +228,9 @@ mod tests {
     #[test]
     fn test_s_member_rank_by_kihon_bcr295_box_boundaries() {
         for (height, expected) in [
-            (300.0, MemberRank::FA), // height/thick = 30
-            (430.0, MemberRank::FC), // 43
-            (431.0, MemberRank::FD), // 43.1
+            (300.0, MemberRank::FA),
+            (430.0, MemberRank::FC),
+            (431.0, MemberRank::FD),
         ] {
             let shape = SectionShape::SteelBox {
                 height,
@@ -257,7 +253,7 @@ mod tests {
     fn test_s_member_rank_by_kihon_box_uses_full_height_not_clear() {
         let shape = SectionShape::SteelBox {
             height: 400.0,
-            width: 1000.0, // 幅は d の算定に使わないことを示すため、あえて全く違う値にする
+            width: 1000.0,
             thick: 12.0,
             horizontal_thick: 12.0,
             corner_r: Some(0.0),
@@ -333,7 +329,7 @@ mod tests {
     /// H形フランジで b/t=9.5 は 400級なら FA だが 490級だと FB になる境界値を使う。
     #[test]
     fn test_s_member_rank_by_kihon_unresolvable_grade_falls_back_to_490() {
-        let shape = steel_h_flange_only(190.0); // flange_wt=9.5
+        let shape = steel_h_flange_only(190.0);
         let rank_unknown =
             s_member_rank_by_kihon(&shape, SteelMemberUse::Column, "UNKNOWN999").expect("Some");
         let rank_400 =

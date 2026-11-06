@@ -228,21 +228,17 @@ mod tests {
     fn test_plastic_nu0_and_nu() {
         // ν0 = 0.7 − 24/200 = 0.58。
         assert!((plastic_nu0(24.0) - (0.7 - 24.0 / 200.0)).abs() < 1e-12);
-        // Rp=0 → ν = ν0。
         assert!((plastic_nu(24.0, 0.0) - plastic_nu0(24.0)).abs() < 1e-12);
-        // Rp=0.02 → (1−0.3)=0.7 倍。
         assert!((plastic_nu(24.0, 0.02) - 0.7 * plastic_nu0(24.0)).abs() < 1e-12);
-        // Rp=0.05 → 0.25 倍（両分岐の境界で連続）。
         assert!((plastic_nu(24.0, 0.05) - 0.25 * plastic_nu0(24.0)).abs() < 1e-12);
-        // Rp=0.1（>0.05）→ 0.25 倍で頭打ち。
         assert!((plastic_nu(24.0, 0.1) - 0.25 * plastic_nu0(24.0)).abs() < 1e-12);
     }
 
     #[test]
     fn test_plastic_cot_phi() {
         assert!((plastic_cot_phi(0.0) - 2.0).abs() < 1e-12);
-        assert!((plastic_cot_phi(0.01) - (2.0 - 50.0 * 0.01)).abs() < 1e-12); // 1.5
-        assert!((plastic_cot_phi(0.02) - 1.0).abs() < 1e-12); // 境界で 1.0
+        assert!((plastic_cot_phi(0.01) - (2.0 - 50.0 * 0.01)).abs() < 1e-12);
+        assert!((plastic_cot_phi(0.02) - 1.0).abs() < 1e-12);
         assert!((plastic_cot_phi(0.05) - 1.0).abs() < 1e-12);
     }
 
@@ -252,16 +248,13 @@ mod tests {
         let k1 = plastic_k1(1200.0, 600.0);
         let hand = ((2.0_f64 * 2.0 + 1.0).sqrt() - 2.0) / 2.0;
         assert!((k1 - hand).abs() < 1e-12, "k1={k1} vs {hand}");
-        // 不正入力。
         assert_eq!(plastic_k1(1200.0, 0.0), 0.0);
     }
 
     #[test]
     fn test_plastic_k2_capped_at_one() {
         let nu = plastic_nu0(24.0);
-        // 過大な pw·σwy → k2=1.0 にクランプ。
         assert!((plastic_k2(0.1, 1000.0, nu, 24.0) - 1.0).abs() < 1e-12);
-        // 通常値。
         let k2 = plastic_k2(0.003, 295.0, nu, 24.0);
         assert!((k2 - (2.0 * 0.003 * 295.0 / (nu * 24.0))).abs() < 1e-12);
         assert!(k2 < 1.0);
@@ -301,7 +294,6 @@ mod tests {
 
     #[test]
     fn test_rc_shear_qsu_plastic_rp_reduces() {
-        // Rp を増やすと ν・cotφ が下がり Qsu は減少する。
         let mut inp = sample_qsu();
         let q0 = rc_shear_qsu_plastic(&inp);
         inp.rp = 0.03;
@@ -395,14 +387,13 @@ mod tests {
         let tau_other = bond_reliable_strength_deformed(&inp);
         inp.top_bar = true;
         let tau_top = bond_reliable_strength_deformed(&inp);
-        // 上端筋は αt = 0.75 − Fc/400 < 1.0 倍で低減。
         assert!(tau_top < tau_other, "top={tau_top} other={tau_other}");
     }
 
     #[test]
     fn test_rc_shear_qbu_bond_matches_handcalc() {
         let tau_bu = bond_reliable_strength_deformed(&sample_bond());
-        let sum_phi = 4.0 * std::f64::consts::PI * 25.0; // 4-D25 の周長和
+        let sum_phi = 4.0 * std::f64::consts::PI * 25.0;
         let inp = RcBondSplitInput {
             b: 400.0,
             d_full: 600.0,

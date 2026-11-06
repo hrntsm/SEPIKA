@@ -232,7 +232,6 @@ mod tests {
         assert!((res.tau - tau).abs() < 1e-9);
         assert!((res.fa - fa).abs() < 1e-9);
         assert!((res.ratio - tau / fa).abs() < 1e-9);
-        // 不正入力は None。
         assert!(rc_beam_bond_check_1991(1.0, 0.0, phi, 24.0, true, true).is_none());
     }
 
@@ -402,7 +401,7 @@ mod tests {
         let b = 300.0;
         let n1 = 6.0;
         let db = 22.0;
-        let expected_spacing = (b - 2.0 * (40.0 + 10.0) - n1 * db) / (n1 - 1.0); // = 13.6
+        let expected_spacing = (b - 2.0 * (40.0 + 10.0) - n1 * db) / (n1 - 1.0);
 
         // 長期は K=0.3・C/db+0.4（W 項なし）なので C を逆算で検証できる。
         let result = rc_beam_bond_check_with_rebar(
@@ -472,8 +471,6 @@ mod tests {
 
     #[test]
     fn test_bond_k_clamped_at_2_5() {
-        // C・W ともに上限（5db・2.5db）近くまで大きくし、K が 2.5 にクランプ
-        // されることを確認する。
         let info = RcRebarInfo {
             cover: 100.0,
             main_dia: 10.0,
@@ -572,7 +569,7 @@ mod tests {
         let w = (20.0 * ast / (100.0 * n1)).min(2.5 * db);
         let k = (0.3 * (c + w) / db + 0.4).min(2.5);
         let fb_other = fc / 60.0 + 0.6;
-        let fb = 0.8 * fb_other * 1.5; // 端部・短期
+        let fb = 0.8 * fb_other * 1.5;
         let sigma_t = mz_abs / (at * j);
         let as_bar = std::f64::consts::PI * (db / 2.0).powi(2);
         let phi = std::f64::consts::PI * db;

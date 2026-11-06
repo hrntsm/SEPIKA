@@ -266,7 +266,6 @@ mod tests {
     #[test]
     fn moment_zero_distance_symmetric_beam() {
         // 両端 M1=M2=-100（上側引張）、中央 M0=+100 の対称分布:
-        // M(x) = -100 + 800・x/L − 400・x²/L²…係数確認は解の対称性で行う。
         // M(0)<0, M(L/2)>0 なので (0, L/2) に M=0 があり、対称ゆえ両端から等距離。
         let l = 6000.0;
         let d = moment_zero_distance(-100.0, -100.0, 100.0, l).expect("解があるはず");
@@ -309,7 +308,6 @@ mod tests {
 
     #[test]
     fn pca_ultimate_is_twice_service_strength() {
-        // 同一 μ・p′w・σy に対し、終局の τu は使用限界の 2 倍。
         let service = pca_horizontal_joint_service(&PcaServiceInput {
             q: 1.0,
             s_y: 1.0,
@@ -329,10 +327,6 @@ mod tests {
         assert!(!res.ok());
         assert!(res.ratio().is_infinite());
     }
-
-    // ------------------------------------------------------------------
-    // collect_pca_checks（自動配線）
-    // ------------------------------------------------------------------
 
     /// 矩形 RC 梁 1 本（b=400, D=700, L=6000mm, X 軸方向）のモデル。
     /// `pca_attr` を指定すると `model.pca_attrs` に登録する。
@@ -355,7 +349,6 @@ mod tests {
                 support_spring: None,
             },
         ];
-        // 材料は断面が持つ。主材料 = コンクリート、主筋・せん断補強筋 = SD345。
         let mut sec = shape.to_section(SectionId(0), "beam".to_string());
         sec.material = Some(MaterialId(0));
         sec.rebar_material = Some(MaterialId(1));
@@ -521,8 +514,6 @@ mod tests {
             flange_thick: 24.0,
         };
         let mut model = pca_beam_model(steel_shape, Some(default_pca_attr()));
-        // 鋼材扱いにするため fc=None（steel_h では材料の fc は使わない想定だが、
-        // RC梁判定でスキップされることが本テストの主眼）。
         model.materials[0].fc = None;
         let forces: Vec<(f64, [f64; 6])> = vec![
             (0.0, [0.0, 200_000.0, 0.0, 0.0, 0.0, -100.0e6]),

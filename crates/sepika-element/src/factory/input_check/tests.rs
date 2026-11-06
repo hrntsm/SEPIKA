@@ -139,7 +139,6 @@ fn beam_model_inner(section: Section, materials: Vec<Material>) -> Model {
 /// 有効な入力（耐力算定に必要な強度が揃っている）は不備なしと判定される。
 #[test]
 fn test_valid_inputs_produce_no_issues() {
-    // 鋼材部材（形状未設定）＋ 正の fy
     let mut sec = rc_section();
     sec.shape = None;
     sec.width = 400.0;
@@ -153,21 +152,16 @@ fn test_valid_inputs_produce_no_issues() {
     );
     assert!(ensure_nonlinear_input(&model).is_ok());
 
-    // RC 断面 ＋ 正の Fc
     let model = beam_model(rc_section(), concrete_material());
     assert!(nonlinear_input_issues(&model).is_empty());
 
-    // 鋼断面 ＋ 正の fy
     let model = beam_model(steel_h_section(), steel_material());
     assert!(nonlinear_input_issues(&model).is_empty());
 
-    // SRC 断面 ＋ 内蔵鉄骨の材料（主材料 fy 未設定でも降伏強度を解決できる）
     let model = beam_model(src_section(), concrete_material());
     assert!(nonlinear_input_issues(&model).is_empty());
 
-    // 鋼断面 ＋ コンクリート区分の材料 ＋ fy。
-    // 構造種別は材料の区分で決まる仕様であり、断面形状は力学的な性質ではないため
-    // 区分の矛盾とはしない。
+    // この入力の構造種別は材料区分で決まるため、鋼断面形状だけでは鋼材扱いにできない。
     let mut mat = concrete_material();
     mat.fy = Some(235.0);
     let model = beam_model(steel_h_section(), mat);
@@ -267,7 +261,6 @@ fn test_issue_when_supported_shear_rebar_fy_missing() {
     assert!(issues[0].contains("fy"), "{}", issues[0]);
     assert!(ensure_nonlinear_input(&model).is_err());
 
-    // fy を設定すれば不備なし。
     let model = make(Some(235.0));
     assert!(
         nonlinear_input_issues(&model).is_empty(),
@@ -844,7 +837,6 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
                 assert!(error.contains("部材 ID 0"), "{error}");
                 assert!(error.contains(&reason), "{error}");
                 let factory_error = public_generation_diagnostic(&invalid);
-                // Fiber の既存 Fc 検査は等価性能より先に、同じ不正を理由付きで止める。
                 let expected_reason = if field == "Fc" { "Fc" } else { &reason };
                 assert!(factory_error.contains(expected_reason), "{factory_error}");
             }
@@ -861,7 +853,6 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
             .unwrap_err()
             .contains("材料"));
         let factory_error = public_generation_diagnostic(&missing_material);
-        // Fiber の入口では未割当主材料から Fc を解決できない理由が先に示される。
         assert!(
             factory_error.contains("材料") || factory_error.contains("Fc"),
             "{factory_error}"

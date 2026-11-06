@@ -43,7 +43,6 @@ fn test_local_stiffness_symmetric_and_nonzero_diagonal() {
         assert!(k.get(i, i) > 0.0, "diagonal[{i}] should be positive");
     }
 
-    // ローカルフレームが正規直交（各軸が単位長・相互直交）であること。
     let frame = shell.frame;
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     assert!(dot(frame.e1, frame.e2).abs() < 1e-15, "e1·e2 が 0 でない");
@@ -72,7 +71,6 @@ fn test_rigid_floor_disables_membrane() {
             (k.get(bo + 5, bo + 5) - 1.0).abs() < 1e-12,
             "Rz[{i}] should be 1.0"
         );
-        // Uz, Rx, Ry should remain unchanged (non-zero)
         assert!(k.get(bo + 2, bo + 2) > 0.0, "Uz[{i}] should remain active");
         assert!(k.get(bo + 3, bo + 3) > 0.0, "Rx[{i}] should remain active");
         assert!(k.get(bo + 4, bo + 4) > 0.0, "Ry[{i}] should remain active");
@@ -96,12 +94,10 @@ fn test_membrane_b_constant_strain() {
             let y = coords[i][1];
             let u = eps_x * x + 0.5 * gam_xy * y;
             let v = eps_y * y + 0.5 * gam_xy * x;
-            // DOF order: Ux, Uy, Uz, Rx, Ry, Rz
             [u, v, 0.0, 0.0, 0.0, 0.0]
         })
         .collect();
 
-    // Evaluate B*u at center (xi=0, eta=0)
     let dNc = dshape_cart(0.0, 0.0, coords);
     let bm = shell.membrane_b(&dNc);
     let mut strain = [0.0; 3];
@@ -180,9 +176,9 @@ fn test_six_rigid_body_modes_zero_energy() {
             let y = coords[i][1];
             let bo = i * 6;
             match m {
-                0 => rb[m][bo] = 1.0,     // Tx
-                1 => rb[m][bo + 1] = 1.0, // Ty
-                2 => rb[m][bo + 2] = 1.0, // Tz
+                0 => rb[m][bo] = 1.0,
+                1 => rb[m][bo + 1] = 1.0,
+                2 => rb[m][bo + 2] = 1.0,
                 3 => {
                     // Rx: uz = y, rx = 1
                     rb[m][bo + 2] = y;
@@ -194,7 +190,7 @@ fn test_six_rigid_body_modes_zero_energy() {
                     rb[m][bo + 4] = 1.0;
                 }
                 _ => {
-                    // Rz: ux = -y, uy = x, rz = 1 (drilling rotation)
+                    // 剛体Rzは ux=-y、uy=x、rz=1 の場。
                     rb[m][bo] = -y;
                     rb[m][bo + 1] = x;
                     rb[m][bo + 5] = 1.0;
@@ -225,7 +221,6 @@ fn test_drilling_stabilization_insensitivity() {
     base_hi.drilling_factor = DEFAULT_DRILLING_FACTOR * 10.0;
     let k_hi = base_hi.local_stiffness();
 
-    // Fixed DOFs: nodes 0 and 1 (Ux..Rz all fixed) => active DOFs are nodes 2 and 3 (12 DOFs)
     let active: Vec<usize> = (12..24).collect();
     let reduce = |k: &LocalMat| -> Vec<f64> {
         let n = active.len();
@@ -238,7 +233,7 @@ fn test_drilling_stabilization_insensitivity() {
         kred
     };
 
-    // Load at node 2 in Uz (active index 2 within node 2 => global index 12+2=14)
+    // 節点2のUzは縮約前の自由度14（12+2）。
     let load_idx_in_active = 14 - 12;
     let mut k1r = reduce(&k1);
     let mut klor = reduce(&k_lo);
@@ -266,7 +261,6 @@ fn test_drilling_stabilization_insensitivity() {
 }
 
 fn distorted_patch() -> (Vec<[f64; 3]>, Vec<[usize; 4]>) {
-    // 中央節点を非対称に歪ませた 9 節点・4 要素パッチ。内部=節点4。
     let coords = vec![
         [0.0, 0.0, 0.0],
         [100.0, 0.0, 0.0],
@@ -428,12 +422,10 @@ fn test_mitc4_constant_shear_patch_skewed() {
     ];
     let shell = make_shell_on(coords, [0, 1, 2, 3]);
     let a = 1.0e-3;
-    // 24 自由度ベクトル: 各節点の θy(=Ry, col+4) に a、他は 0。
     let mut u = [0.0f64; 24];
     for node in 0..4 {
         u[node * 6 + 4] = a;
     }
-    // 複数の評価点（ガウス点）で一定せん断が厳密に再現されること。
     for &(xi, eta, _w) in &[
         (-0.577_350_269_2f64, -0.577_350_269_2f64, 1.0),
         (0.577_350_269_2, -0.577_350_269_2, 1.0),
@@ -466,9 +458,9 @@ fn test_patch_bending_distorted() {
     let field = |c: &[f64; 3]| -> [f64; 3] {
         let (x, y) = (c[0], c[1]);
         [
-            0.5 * kx * x * x + 0.5 * ky * y * y + kxy * x * y, // w (Uz)
-            ky * y + kxy * x,                                  // θx (Rx)
-            -(kx * x + kxy * y),                               // θy (Ry)
+            0.5 * kx * x * x + 0.5 * ky * y * y + kxy * x * y,
+            ky * y + kxy * x,
+            -(kx * x + kxy * y),
         ]
     };
     let mut g = vec![0.0; ndof];
@@ -481,7 +473,7 @@ fn test_patch_bending_distorted() {
     let free: Vec<usize> = (0..6).map(|d| 4 * 6 + d).collect();
     let u = solve_prescribed(&k, ndof, &free, &g);
     let exact = field(&coords[4]);
-    let scale = 0.5 * kx * 200.0 * 200.0; // 代表変位スケール
+    let scale = 0.5 * kx * 200.0 * 200.0;
     assert!(
         (u[4 * 6 + 2] - exact[0]).abs() < 1e-8 * scale,
         "曲げパッチ Uz={} exp {}",
@@ -516,7 +508,6 @@ fn test_shell_trial_displacement_tracking() {
     let model = Model::default();
     let ctx = Ctx { model: &model };
 
-    // 面内せん断的な非剛体変位（節点2・3 のみ x 方向）
     let mut du = LocalVec {
         data: smallvec::smallvec![0.0; 24],
     };
@@ -524,7 +515,6 @@ fn test_shell_trial_displacement_tracking() {
     du.data[3 * 6] = 1.0;
     shell.update_state(&du, false, &ctx).unwrap();
 
-    // commit 前でも内力へ反映され、接線剛性·u と厳密に一致する
     let f = shell.internal_force(&ctx);
     let k = shell.tangent_stiffness(&ctx);
     for i in 0..24 {
@@ -540,8 +530,7 @@ fn test_shell_trial_displacement_tracking() {
         "非剛体変位で内力が生じない"
     );
 
-    // 剛体並進（全節点同一変位）では内力ゼロ
-    shell.revert_state(); // trial を committed（=0）へ戻す
+    shell.revert_state();
     let mut du_rigid = LocalVec {
         data: smallvec::smallvec![0.0; 24],
     };

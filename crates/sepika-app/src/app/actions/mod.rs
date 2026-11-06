@@ -248,8 +248,7 @@ impl App {
     /// は `ZoneSource::Auto` の端のみ更新し `Manual` 端を保護するため、
     /// 各解析エントリの先頭で毎回呼んでも冪等で安全。
     fn apply_rigid_zones_for_analysis(&mut self) -> Result<(), String> {
-        // 剛域・仕口パネルの算定規則は MCP サーバと共有する
-        // （`sepika_job::prepare`。前処理が食い違うと同じモデルでも剛性が変わる）。
+        // GUIとMCPで前処理を分けると、同じモデルでも剛性が変わってしまう。
         self.core.scoped.generated_panels =
             sepika_job::prepare::apply_rigid_zones_and_panels(&mut self.core.model)?;
         Ok(())
@@ -416,11 +415,7 @@ impl App {
                 self.core.scoped.applying_result_source =
                     job.as_ref().map(|job| job.reference_source.clone());
 
-                // ジョブ完了は新しい状態の起点なので、ジョブ実行中に発生した無関係の
-                // エラー表示（例: ファイル保存失敗）をここでクリアしてから結果を適用する。
-                // こうしないと成功判定（下の last_error.is_none()）が古いエラーに
-                // 引きずられ、成功したのに完了ログが残らない
-                // （エラー自体はイベントログに残っており失われない）。
+                // 古い無関係のエラーが残ると、成功結果を適用しても完了ログが抑止される。
                 self.core.scoped.last_error = None;
                 match result {
                     JobResult::Pushover(res) => self.apply_pushover_result(*res),
@@ -443,9 +438,7 @@ impl App {
                     } => self.apply_static_all_result(computed, pre_errors, excluded),
                 }
                 self.core.scoped.applying_result_source = None;
-                // 失敗時は各 apply_* が report_error 経由で last_error とログの両方
-                // へ反映済みのため、ここでは成功時のみ完了ログを追加する
-                // （二重ログを避ける）。
+                // 失敗ログは各apply処理で記録済みなので、ここでも記録すると二重になる。
                 if self.core.scoped.last_error.is_none() {
                     self.report_info(format!("✅ {} が完了 ({:.1}s)", label, elapsed_secs));
                 }
@@ -482,8 +475,6 @@ impl App {
             }
             Tab::Analysis => {
                 self.ui.view.right_dock_open = true;
-                // 一貫計算の手順どおり ①（準備計算）から入れるようにする。
-                // 各解析パネルへは右アイコン列から移る。
                 self.ui.view.right_panel = RightPanel::Preparation;
                 self.ui.view.bottom_tab = BottomTab::Log;
             }
@@ -512,21 +503,8 @@ impl App {
     pub fn run_diagnostics(&mut self) {
         let mut diags = Vec::new();
 
-        // 解析を妨げる不備（モデル検証・支点なし・断面/材料の未割当・シェルの板厚なし・As=0・
-        // 耐震壁と周辺架構の種別食い違い・孤立節点など）。判定は解析前チェックと
-        // 同じ `model_issues` を使う。診断と解析前チェックが別々に検査を持つと、
-        // 片方だけに項目を足したときに「診断は通ったのに解析が止まる」状態になる。
-        //
-        // 重大度は `ModelIssue` が持つ判定をそのまま使う。解析が必ず止まる不備は
-        // Error、解析は通るが入力の意図を確かめたい事柄（剛床のない階など）は
-        // Warning になる。準備計算の `PreparationResult::is_ready`
-        // （`diag_errors == 0`）が「解析前に解消すべきか」の判定にそのまま使える。
-        //
-        // `model_issues` は壁展開モデル（壁の解析要素を含む一時的な複製。D5）を
-        // 渡す。`self.core.model` そのままでは壁要素が 0 件のため、耐震壁と周辺架構の
-        // 種別食い違い等、壁関連の診断が一切出なくなる（解析実行時の
-        // `sepika_job::compute` 側の展開と同じ理由。忘れると壁の不備が診断タブに
-        // 現れないまま解析実行時に初めて分かる、という劣化になる）。
+        // 診断と解析前チェックの検査を分けると、一方だけに検査項目が追加されて判定が食い違う。
+        // 入力モデルには壁解析要素がないため、そのままでは耐震壁と周辺架構の種別不整合を診断できない。
         let (wall_expanded_model, _wall_index, _wall_report) =
             sepika_core::wall_expand::expand_wall_elements(&self.core.model);
         for issue in sepika_solver::statics::analysis::precheck::model_issues(&wall_expanded_model)
@@ -534,8 +512,7 @@ impl App {
             push_issue_diagnostics(&mut diags, issue);
         }
 
-        // 空の水平力ケース（地震・風）を参照する荷重組合せ: そのまま解くと水平力の
-        // 項が黙って 0 になるため（`empty_lateral_case_in_combo` と同じ判定を流用）。
+        // 空の水平力ケースを見逃すと、組合せの水平力項が黙ってゼロになる。
         for combo in &self.core.model.combinations {
             if let Some(name) = self.empty_lateral_case_in_combo(combo) {
                 diags.push(Diagnostic {
@@ -550,8 +527,6 @@ impl App {
             }
         }
 
-        // 空の荷重ケース（節点・部材荷重とも未定義）。誤って荷重を入れ忘れた
-        // ケースに気づけるよう情報表示する。
         for lc in &self.core.model.load_cases {
             if lc.nodal.is_empty() && lc.member.is_empty() {
                 diags.push(Diagnostic {

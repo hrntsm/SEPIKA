@@ -2019,13 +2019,11 @@ mod tests {
     fn test_not_element_reason_distinguishes_causes() {
         let (mut m, ids) = plate_model();
 
-        // どの壁領域からも参照されていない。
         m.add_enclosed_wall_plate_from_nodes(&ids, enclosed(0, Some(SectionId(0))));
         assert!(
             not_element_reason(&m.wall_plates[0], &m).contains("どの壁領域にも帰属していません")
         );
 
-        // 壁領域はあるが、覆っていない（境界が 3 節点）。
         m.wall_regions.push(sepika_core::model::WallRegion {
             id: sepika_core::ids::WallRegionId(0),
             name: String::new(),
@@ -2035,12 +2033,10 @@ mod tests {
         });
         assert!(not_element_reason(&m.wall_plates[0], &m).contains("4 節点ではありません"));
 
-        // 覆っているが断面が無い。
         m.wall_regions[0].boundary = ids.clone();
         m.wall_plates[0].section = None;
         assert!(not_element_reason(&m.wall_plates[0], &m).contains("断面が割り当たっていません"));
 
-        // 取り付く壁版。
         let mut attached = enclosed(1, None);
         attached.shape = WallPlateShape::Attached {
             anchor: RegionAnchor::Line {

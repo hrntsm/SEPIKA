@@ -1871,7 +1871,6 @@ mod tests {
     fn 割当領域は種別の合わない支持部材を拒否する() {
         let mut model = square_model_with_beam();
         model.rebuild_floor_assignment_regions();
-        // 床の境界に間柱（Beam でない二次部材）を指す。
         model.unassigned_posts.push(SecondaryMember {
             id: SecondaryMemberId(7),
             kind: SecondaryMemberKind::Post,
@@ -1971,7 +1970,6 @@ mod tests {
         model.elements.rotate_left(2);
         assert_eq!(model.same_kind_support_overlaps(), overlaps);
 
-        // 平行に並ぶだけ（別の材軸）の大梁は検出しない。
         for (id, coord) in [
             (NodeId(4), [1000.0, 0.0, 0.0]),
             (NodeId(5), [1000.0, 4000.0, 0.0]),
@@ -2027,7 +2025,6 @@ mod tests {
     #[test]
     fn 主架構と小梁が重なるときは主架構を支持部材に選ぶ() {
         let mut model = mm_square_model_with_beam();
-        // 大梁 0（節点 0-1）と同じ材軸に、大梁へ両端アンカーした小梁 1 を重ねる。
         model.unassigned_beams.push(member(
             1,
             SecondaryMemberEnds::Supported([
@@ -2247,7 +2244,6 @@ mod tests {
         let mut model = square_model_with_beam();
         model.rebuild_floor_assignment_regions();
         model.rebuild_wall_assignment_regions();
-        // 未設定が 2 面。版なしは警告に含めない。
         let (floors, walls) = model.unset_plate_assignment_regions();
         assert_eq!(floors.len(), 2);
         assert!(walls.is_empty());

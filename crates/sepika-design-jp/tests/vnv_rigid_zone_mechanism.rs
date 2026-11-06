@@ -93,9 +93,9 @@ fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
             node(3, [5000.0, 0.0, 0.0], Dof6Mask::FIXED, None),
         ],
         elements: vec![
-            fiber_elem(0, 0, 1, 0, rigid), // 左柱
-            fiber_elem(1, 1, 2, 1, 0.0),   // はり（強い断面・剛域なし）
-            fiber_elem(2, 3, 2, 0, rigid), // 右柱
+            fiber_elem(0, 0, 1, 0, rigid),
+            fiber_elem(1, 1, 2, 1, 0.0),
+            fiber_elem(2, 3, 2, 0, rigid),
         ],
         sections: vec![sec(0, 100.0, 100.0), sec(1, 300.0, 300.0)],
         materials: vec![Material {
@@ -112,7 +112,6 @@ fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
             fy: Some(235.0),
         }],
         stories: vec![
-            // 階は床であり、先頭は基部の床（`Model::layers` の不変条件）。
             Story {
                 wall_weights: Vec::new(),
                 level_kind: Default::default(),
@@ -200,7 +199,6 @@ fn 剛域は保有水平耐力を可撓長基準へ引き上げる() {
     };
     let q0 = collapse_shear(&run_pushover(0.0, 600_000.0, 400)).expect("剛域なしで機構不成立");
     let result = run_pushover(300.0, 600_000.0, 400);
-    // 柱両端の 4 ヒンジで運動学的機構が成立している。
     let yielded = result
         .hinges
         .iter()

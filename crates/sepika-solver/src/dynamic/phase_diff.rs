@@ -49,15 +49,12 @@ mod tests {
         // t = L·sinθ/Vs。L=20m, θ=30°, Vs=200m/s → 20·0.5/200 = 0.05s。
         let t = phase_lag_time(20.0, 30.0, 200.0);
         assert!((t - 0.05).abs() < 1e-9, "t={t}");
-        // θ=0 → 位相遅れ 0。
         assert_eq!(phase_lag_time(20.0, 0.0, 200.0), 0.0);
-        // Vs<=0 → 0。
         assert_eq!(phase_lag_time(20.0, 30.0, 0.0), 0.0);
     }
 
     #[test]
     fn test_torsional_series_zero_without_lag() {
-        // 位相遅れ 0（shift=0）ならねじれ加振なし。
         let base = vec![1.0, 2.0, 3.0, 4.0];
         let s = torsional_accel_series(&base, 0.01, 0.0, 1000.0);
         assert!(s.iter().all(|&v| v == 0.0));
@@ -68,12 +65,12 @@ mod tests {
         // shift=1, L=10mm。θ̈(k) = (base[k]−base[k−1])/10。
         let base = vec![0.0, 10.0, 30.0, 30.0];
         let dt = 0.01;
-        let lag = dt; // shift=1
+        let lag = dt;
         let s = torsional_accel_series(&base, dt, lag, 10.0);
         assert_eq!(s.len(), 4);
-        assert!((s[0] - 0.0).abs() < 1e-12); // k<shift → delayed=0 → 0/10
-        assert!((s[1] - 1.0).abs() < 1e-12); // (10−0)/10
-        assert!((s[2] - 2.0).abs() < 1e-12); // (30−10)/10
-        assert!((s[3] - 0.0).abs() < 1e-12); // (30−30)/10
+        assert!((s[0] - 0.0).abs() < 1e-12);
+        assert!((s[1] - 1.0).abs() < 1e-12);
+        assert!((s[2] - 2.0).abs() < 1e-12);
+        assert!((s[3] - 0.0).abs() < 1e-12);
     }
 }

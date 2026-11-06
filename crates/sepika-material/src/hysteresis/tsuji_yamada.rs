@@ -134,7 +134,6 @@ mod tests {
 
     #[test]
     fn test_tsuji_yamada_monotonic_bilinear() {
-        // 単調載荷は K2 のバイリニア骨格を辿る。K1=1000, Qy=100, K2=100, δy=0.1。
         let mut m = TsujiYamada::new(1000.0, 100.0, 100.0, 0.5);
         let (s_el, t_el) = m.trial(0.05);
         assert_relative_eq!(s_el, 50.0, epsilon = 1e-6);
@@ -148,8 +147,6 @@ mod tests {
 
     #[test]
     fn test_tsuji_yamada_isotropic_grows_beta1() {
-        // β=1（等方硬化）: 大振幅を経験すると降伏耐力が正負同時に膨張し、
-        // 同一変形での再載荷応力が初回より増大する。
         let mut m = TsujiYamada::new(1000.0, 100.0, 100.0, 1.0);
         let (s1, _) = m.trial(0.3);
         m.commit();
@@ -172,10 +169,8 @@ mod tests {
         let mut m = TsujiYamada::new(1000.0, 100.0, 100.0, 0.0);
         m.trial(0.3);
         m.commit();
-        // δ=0.15 はまだ弾性（初期剛性）。
         let (_s, t_mid) = m.trial(0.15);
         assert_relative_eq!(t_mid, 1000.0, epsilon = 1e-6);
-        // δ=0.05 では逆方向に塑性化（第2剛性・圧縮応力）。
         let (s_rev, t_rev) = m.trial(0.05);
         assert_relative_eq!(t_rev, 100.0, epsilon = 1e-6);
         assert!(s_rev < 0.0, "reverse plastic in compression: {s_rev}");
@@ -183,13 +178,11 @@ mod tests {
 
     #[test]
     fn test_probe_matches_trial_without_mutating_state() {
-        // probe は trial と数学的に同一の結果を返し、状態を書き換えない
-        // （塑性化・除荷後の状態で確認）。
         let mut m = TsujiYamada::new(1000.0, 100.0, 100.0, 0.5);
         m.trial(0.3);
         m.commit();
 
-        let probe_strain = 0.1; // 除荷側
+        let probe_strain = 0.1;
         let before = m.probe(probe_strain);
         assert_eq!(before, m.probe(probe_strain));
 

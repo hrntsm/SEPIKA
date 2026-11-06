@@ -491,7 +491,6 @@ fn test_resolve_force_regime_explicit_and_auto() {
         resolve_force_regime(&col_explicit, &model),
         ResolvedRegime::Fiber
     ));
-    // 柱トポロジ（Auto なら Fiber）でも明示指定が優先されること
     let col_explicit_spring = make(2, [NodeId(0), NodeId(2)], ForceRegime::UniaxialBendingShear);
     assert!(matches!(
         resolve_force_regime(&col_explicit_spring, &model),

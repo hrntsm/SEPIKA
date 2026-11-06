@@ -347,11 +347,6 @@ mod tests {
     };
     use smallvec::SmallVec;
 
-    // ------------------------------------------------------------------
-    // sway_buckling_k（純関数）: 鋼構造塑性設計指針のアラインメントチャート
-    // （水平移動非拘束）の代表値と照合する。
-    // ------------------------------------------------------------------
-
     /// 求めた K が (6.65) 式を満たすことを直接確認するヘルパ。
     fn residual(ga: f64, gb: f64, k: f64) -> f64 {
         let x = std::f64::consts::PI / k;
@@ -396,13 +391,8 @@ mod tests {
         let k15 = sway_buckling_k(1.0, 5.0);
         let k51 = sway_buckling_k(5.0, 1.0);
         assert!((k15 - k51).abs() < 1e-9);
-        // sway 骨組では常に K ≥ 1。
         assert!(k11 >= 1.0 && k15 >= 1.0);
     }
-
-    // ------------------------------------------------------------------
-    // steel_column_k（モデル配線）
-    // ------------------------------------------------------------------
 
     fn node(id: u32, x: f64, y: f64, z: f64) -> Node {
         Node {
@@ -496,11 +486,7 @@ mod tests {
             node(2, beam_len, 0.0, 0.0),
             node(3, beam_len, 0.0, col_len),
         ];
-        let elements = vec![
-            line_elem(0, 0, 1), // 柱
-            line_elem(1, 0, 2), // 下端の梁
-            line_elem(2, 1, 3), // 上端の梁
-        ];
+        let elements = vec![line_elem(0, 0, 1), line_elem(1, 0, 2), line_elem(2, 1, 3)];
         Model {
             nodes,
             elements,
@@ -543,7 +529,6 @@ mod tests {
     #[test]
     fn steel_column_k_none_for_beam() {
         let model = portal_model(4000.0, 8000.0);
-        // elements[1] は水平材（梁）なので None。
         assert!(steel_column_k(&model, &model.elements[1]).is_none());
     }
 
@@ -556,7 +541,6 @@ mod tests {
         rc.name = "Fc24".to_string();
         rc.young = 20_500.0;
         model.materials.push(rc);
-        // 材料は断面が持つ。梁用に RC の断面を足して差し替える。
         let mut rc_sec = model.sections[0].clone();
         rc_sec.id = SectionId(1);
         rc_sec.frame_use = Some(FrameSectionUse::Girder);
@@ -575,10 +559,6 @@ mod tests {
         let expected = sway_buckling_k(20.0, 20.0);
         assert!((k_rc - expected).abs() < 1e-9);
     }
-
-    // ------------------------------------------------------------------
-    // steel_column_k_axes_with_index（軸別精緻化版）
-    // ------------------------------------------------------------------
 
     /// 平面ポータルフレーム（X-Z 面、柱・梁とも `ref_vector=[0,0,1]`）:
     /// 柱は ref_vector が材軸と平行なため `LocalFrame` の縮退フォールバックで
@@ -610,19 +590,19 @@ mod tests {
     #[test]
     fn steel_column_k_axes_orthogonal_beams_pick_matching_axis() {
         let nodes = vec![
-            node(0, 0.0, 0.0, 0.0),       // 柱下端
-            node(1, 0.0, 0.0, 3000.0),    // 柱上端
-            node(2, 6000.0, 0.0, 0.0),    // X 方向梁（下端側）の遠端
-            node(3, 0.0, 9000.0, 0.0),    // Y 方向梁（下端側）の遠端
-            node(4, 6000.0, 0.0, 3000.0), // X 方向梁（上端側）の遠端
-            node(5, 0.0, 9000.0, 3000.0), // Y 方向梁（上端側）の遠端
+            node(0, 0.0, 0.0, 0.0),
+            node(1, 0.0, 0.0, 3000.0),
+            node(2, 6000.0, 0.0, 0.0),
+            node(3, 0.0, 9000.0, 0.0),
+            node(4, 6000.0, 0.0, 3000.0),
+            node(5, 0.0, 9000.0, 3000.0),
         ];
         let elements = vec![
-            line_elem(0, 0, 1), // 柱
-            line_elem(1, 0, 2), // X 方向梁（下端）
-            line_elem(2, 0, 3), // Y 方向梁（下端）
-            line_elem(3, 1, 4), // X 方向梁（上端）
-            line_elem(4, 1, 5), // Y 方向梁（上端）
+            line_elem(0, 0, 1),
+            line_elem(1, 0, 2),
+            line_elem(2, 0, 3),
+            line_elem(3, 1, 4),
+            line_elem(4, 1, 5),
         ];
         let model = Model {
             nodes,
@@ -657,10 +637,7 @@ mod tests {
             node(1, 0.0, 0.0, 4000.0),
             node(2, diag, diag, 0.0),
         ];
-        let elements = vec![
-            line_elem(0, 0, 1), // 柱（ey≈X・ez≈Y）
-            line_elem(1, 0, 2), // 45°梁（水平投影 (1,1,0)/√2 方向、長さ8000）
-        ];
+        let elements = vec![line_elem(0, 0, 1), line_elem(1, 0, 2)];
         let model = Model {
             nodes,
             elements,
@@ -687,20 +664,15 @@ mod tests {
     #[test]
     fn steel_column_k_axes_orthogonal_other_column_projects_i() {
         let nodes = vec![
-            node(0, 0.0, 0.0, 0.0),     // 共有節点（対象柱の下端・他柱の上端）
-            node(1, 0.0, 0.0, 4000.0),  // 対象柱の上端
-            node(2, 0.0, 0.0, -3000.0), // 他柱の下端
-            node(3, 6000.0, 0.0, 0.0),  // X 方向梁の遠端
+            node(0, 0.0, 0.0, 0.0),
+            node(1, 0.0, 0.0, 4000.0),
+            node(2, 0.0, 0.0, -3000.0),
+            node(3, 6000.0, 0.0, 0.0),
         ];
         let mut other_col = line_elem(1, 2, 0);
         other_col.section = Some(SectionId(0));
-        // 強軸たわみ方向を Y に回転（垂直材は ey=ref_vector の水平成分）。
         other_col.local_axis.ref_vector = [0.0, 1.0, 0.0];
-        let elements = vec![
-            line_elem(0, 0, 1), // 対象柱（ey≈X・ez≈Y）
-            other_col,          // 直交配置の他柱（ey≈Y・ez≈X）
-            line_elem(2, 0, 3), // X 方向梁
-        ];
+        let elements = vec![line_elem(0, 0, 1), other_col, line_elem(2, 0, 3)];
         let model = Model {
             nodes,
             elements,
@@ -777,7 +749,6 @@ mod tests {
             (k_y - expected).abs() < 1e-6,
             "k_y={k_y}, expected={expected}"
         );
-        // 剛域控除前（L=8000 のまま）の G=2 より小さいことを確認（L' 短縮で G 減少）。
         let baseline = sway_buckling_k(2.0, 2.0);
         assert!(k_y < baseline, "k_y={k_y}, baseline={baseline}");
     }

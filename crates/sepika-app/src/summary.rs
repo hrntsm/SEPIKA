@@ -2280,7 +2280,6 @@ mod tests {
             app.core.scoped.last_error
         );
 
-        // 層指標
         let ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
         let metrics = compute_story_metrics_with(&app.core.model, SeismicDir::X, &ctx);
         assert_eq!(metrics.len(), 1);
@@ -2297,16 +2296,12 @@ mod tests {
         );
         assert!(*metrics[0].rs.as_ref().unwrap() > 0.0);
 
-        // レポート
         let csv = build_report_csv(&app);
         assert!(csv.contains("[モデル概要]"));
         assert!(csv.contains("[層指標(二次設計)]"));
         assert!(csv.contains("[部材検定]"));
-        // 節点単位の検定（柱梁接合部・仕口パネル・耐震壁）もレポートへ出力する。
-        // サンプルは S 造ラーメンのため、パネルゾーンの検定行が現れる。
         assert!(csv.contains("[接合部検定]"), "{csv}");
         assert!(csv.contains("パネルゾーン"), "{csv}");
-        // 数量積算セクションも常時含まれる。
         assert!(csv.contains("[数量積算 部位別]"));
     }
 
@@ -2362,8 +2357,6 @@ mod tests {
 
     #[test]
     fn test_quantity_csv_from_sample_model() {
-        // サンプルモデル（門型ラーメン）で数量積算 CSV が生成される
-        // エンドツーエンド確認。柱・大梁が分類され、合計行が出力される。
         let model = crate::sample::portal_frame();
         let csv = build_quantity_csv(&model);
         assert!(csv.contains("[数量積算 部位別]"), "{csv}");

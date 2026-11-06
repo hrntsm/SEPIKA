@@ -57,7 +57,6 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
             pwv_ratio: Some(0.006),
             ps: 0.006,
         }),
-        // 材料は断面が持つ。壁筋（縦筋・横筋）は SD345。
         material: Some(MaterialId(0)),
         rebar_material: Some(MaterialId(1)),
         shear_rebar_material: Some(MaterialId(1)),
@@ -139,8 +138,8 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
             plastic_zone: None,
             spring: None,
         },
-        frame_member(1, 0, 1), // 下梁
-        frame_member(2, 3, 2), // 上梁
+        frame_member(1, 0, 1),
+        frame_member(2, 3, 2),
     ];
     Model {
         nodes,
@@ -316,8 +315,6 @@ fn wall_opening_dimension_paths_are_reflected() {
         res_area_only.ratio()
     );
 
-    // 複数開口（2個）は equivalent_opening による等価開口に統合され、
-    // その等価開口を直接 RcWallInput へ供給した場合と同じ検定比になる。
     let dims = [(600.0, 800.0), (500.0, 700.0)];
     let model_multiple = wall_model(Some(WallAttr {
         elem: ElemId(0),
@@ -337,8 +334,6 @@ fn wall_opening_dimension_paths_are_reflected() {
     let res_multiple =
         wall_check_result(&model_multiple, &forces).expect("2個の開口は耐震壁として検定されるはず");
 
-    // 期待値: equivalent_opening を直接呼んで壁と同じ辺長比の等価開口を
-    // 構築し、同一の RcWallInput（側柱なし・l_clear=l）で検定した結果。
     let (l, h) = (4000.0_f64, 3000.0_f64);
     let (l0p, h0p) = equivalent_opening(&dims, l, h);
     let inp = RcWallInput {
@@ -427,7 +422,6 @@ fn wall_auto_mode_envelopes_close_openings_and_differs_from_equivalent() {
         },
     ];
 
-    // 既定（Equivalent）モード: 個別開口のまま equivalent_opening で統合。
     let model_equiv = wall_model_sized(
         8000.0,
         4000.0,
@@ -464,7 +458,6 @@ fn wall_auto_mode_envelopes_close_openings_and_differs_from_equivalent() {
     let res_auto = wall_check_result(&model_auto, &forces)
         .expect("Auto モードで包絡後も耐震壁として検定されるはず");
 
-    // 期待値: 幅2000×高2000の単一開口を実寸法経路で直接検定した結果。
     let model_single = wall_model_sized(
         8000.0,
         4000.0,
@@ -554,7 +547,6 @@ fn wall_envelope_mode_excludes_wall_when_envelope_ratio_too_large() {
 fn wall_with_columns_model() -> Model {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
     let mut model = wall_model(None);
-    // 四周のうち両側の鉛直辺（ElemId 3・4）へ 600×600 RC 側柱の断面を与える。
     let col_shape = SectionShape::RcColumnRect {
         b: 600.0,
         d: 600.0,
@@ -571,7 +563,6 @@ fn wall_with_columns_model() -> Model {
             },
         },
     };
-    // 材料は断面が持つ。
     let mut col_sec = col_shape.to_section(SectionId(1), "C600".into());
     col_sec.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     col_sec.material = Some(MaterialId(0));
@@ -707,13 +698,12 @@ fn rc_cross_joint_emits_ultimate_check() {
         rebar: beam_rebar(vec![4], vec![4], 25.0),
     };
 
-    // 中央節点 0 に上下柱・左右梁が取り付く十字形接合部。
     let coords = [
-        [0.0, 0.0, 3000.0],     // 0: 中央（接合部）
-        [0.0, 0.0, 0.0],        // 1: 柱下端
-        [0.0, 0.0, 6000.0],     // 2: 柱上端
-        [-6000.0, 0.0, 3000.0], // 3: 梁左端
-        [6000.0, 0.0, 3000.0],  // 4: 梁右端
+        [0.0, 0.0, 3000.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 6000.0],
+        [-6000.0, 0.0, 3000.0],
+        [6000.0, 0.0, 3000.0],
     ];
     let mut nodes = Vec::new();
     for (i, c) in coords.iter().enumerate() {
@@ -730,7 +720,6 @@ fn rc_cross_joint_emits_ultimate_check() {
             support_spring: None,
         });
     }
-    // 材料は断面が持つ。主材料 = コンクリート、主筋・せん断補強筋 = SD345。
     let with_mats = |mut sec: Section| {
         sec.frame_use = Some(match &sec.shape {
             Some(
@@ -798,10 +787,10 @@ fn rc_cross_joint_emits_ultimate_check() {
         spring: None,
     };
     let elements = vec![
-        make_elem(0, 0, 1, 0), // 柱下
-        make_elem(1, 0, 0, 2), // 柱上
-        make_elem(2, 1, 3, 0), // 梁左
-        make_elem(3, 1, 0, 4), // 梁右
+        make_elem(0, 0, 1, 0),
+        make_elem(1, 0, 0, 2),
+        make_elem(2, 1, 3, 0),
+        make_elem(3, 1, 0, 4),
     ];
     let model = Model {
         nodes,
@@ -811,7 +800,6 @@ fn rc_cross_joint_emits_ultimate_check() {
         ..Default::default()
     };
 
-    // 各部材の端部内力（[N,Qy,Qz,Mx,My,Mz]）。柱にせん断、梁にモーメント。
     let col_f: [(f64, [f64; 6]); 2] = [
         (0.0, [0.0, 100_000.0, 0.0, 0.0, 0.0, 0.0]),
         (1.0, [0.0, 100_000.0, 0.0, 0.0, 0.0, 0.0]),
@@ -835,7 +823,6 @@ fn rc_cross_joint_emits_ultimate_check() {
     let CheckOutcome::Checked(cr) = &ult.2 else {
         panic!("接合部終局(RC) は検定実施（Checked）のはず: {:?}", ult.2);
     };
-    // Vju/Qdu が有限で、詳細に κ=1.00（十字形）が含まれる。
     assert!(cr.ratio().is_finite());
     let full = crate::full_detail(cr);
     assert!(full.contains("κ=1.00"), "detail={}", full);
@@ -844,11 +831,11 @@ fn rc_cross_joint_emits_ultimate_check() {
 /// 中央節点に上下柱・左右梁が取り付く十字形接合部のモデル。
 fn cross_joint_model(col_shape: SectionShape, beam_shape: SectionShape) -> Model {
     let coords = [
-        [0.0, 0.0, 3000.0],     // 0: 中央（接合部）
-        [0.0, 0.0, 0.0],        // 1: 柱下端
-        [0.0, 0.0, 6000.0],     // 2: 柱上端
-        [-6000.0, 0.0, 3000.0], // 3: 梁左端
-        [6000.0, 0.0, 3000.0],  // 4: 梁右端
+        [0.0, 0.0, 3000.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 6000.0],
+        [-6000.0, 0.0, 3000.0],
+        [6000.0, 0.0, 3000.0],
     ];
     let mut nodes = Vec::new();
     for (i, c) in coords.iter().enumerate() {
@@ -950,10 +937,10 @@ fn cross_joint_model(col_shape: SectionShape, beam_shape: SectionShape) -> Model
         spring: None,
     };
     let elements = vec![
-        make_elem(0, 0, 1, 0), // 柱下
-        make_elem(1, 0, 0, 2), // 柱上
-        make_elem(2, 1, 3, 0), // 梁左
-        make_elem(3, 1, 0, 4), // 梁右
+        make_elem(0, 0, 1, 0),
+        make_elem(1, 0, 0, 2),
+        make_elem(2, 1, 3, 0),
+        make_elem(3, 1, 0, 4),
     ];
     Model {
         nodes,
@@ -1818,7 +1805,6 @@ fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
             section.thickness = Some(20.0);
         }
     }
-    // Q=N=M=0 の独立入力では、正のRC耐力に対する許容検定比は厳密に0。
     let forces: Vec<_> = model
         .elements
         .iter()
@@ -2545,7 +2531,6 @@ fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
     unused.id = SectionId(3);
     model.sections.push(unused);
     model.stb_strengths.sections.push(record);
-    // 未使用の未解決断面は、壁の両検定の数値へ影響させない。
     let unaffected = collect_joint_checks(&model, &forces, LoadTerm::Short);
     assert_eq!(format!("{unaffected:?}"), format!("{baseline:?}"));
     model.stb_strengths.sections[0].section = SectionId(1);

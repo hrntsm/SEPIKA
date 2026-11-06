@@ -449,7 +449,7 @@ impl Model {
         )
     }
 
-    // 元gradeは保存し、材料数値の意図的編集を標準値の解決と区別する。
+    // 元gradeを上書きすると、材料数値の意図的編集と標準値の解決を区別できない。
     fn stb_yield_value(&self, grade: &str, standard: f64) -> Result<(f64, bool), String> {
         let Some(record) = self
             .stb_strengths

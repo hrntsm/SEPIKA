@@ -548,7 +548,6 @@ fn run_split_case(label: &str, pts: &[(f64, f64)], w: f64, symmetry_pairs: &[(us
 fn case7_split_ties_shape_matrix() {
     let w = 0.003_f64;
 
-    // L形: 12000×12000 のうち右上 6000×6000 を欠く。対角線 y=x について対称。
     run_split_case(
         "ケース7a: L形 12000x12000（右上6000x6000欠）",
         &[
@@ -563,7 +562,6 @@ fn case7_split_ties_shape_matrix() {
         &[(0, 5), (1, 4), (2, 3)],
     );
 
-    // T形（凹形状）: 下辺 12000×6000 の上に 6000×6000 が中央に乗る。x=6000 について対称。
     run_split_case(
         "ケース7b: T形（凹形状）12000x12000",
         &[
@@ -580,7 +578,6 @@ fn case7_split_ties_shape_matrix() {
         &[(1, 7), (2, 6), (3, 5)],
     );
 
-    // 十字形: 12000×12000 から四隅 3000×3000 を欠く。凹角を4つ持つ。
     run_split_case(
         "ケース7c: 十字形 12000x12000（四隅3000x3000欠）",
         &[
@@ -601,7 +598,6 @@ fn case7_split_ties_shape_matrix() {
         &[(1, 11), (2, 10), (3, 9), (4, 8), (5, 7)],
     );
 
-    // 凸五角形: 既存 test_polygon_pentagon_conservation と同じ形状。対称性なし。
     run_split_case(
         "ケース7d: 凸五角形",
         &[
@@ -636,7 +632,6 @@ fn case7_split_ties_shape_matrix() {
         &[(0, 2), (2, 4), (4, 6), (1, 3), (3, 5), (5, 7)],
     );
 
-    // U字形状: 12000×12000 の上辺中央 6000×8000 を欠く。凹角を2つ持つ。
     run_split_case(
         "ケース7f: U字形状 12000x12000（上辺中央6000x8000欠）",
         &[

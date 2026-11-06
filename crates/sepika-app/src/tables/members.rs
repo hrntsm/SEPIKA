@@ -1297,7 +1297,6 @@ mod tests {
     /// 選択中の定義より前の定義が削除され、位置がずれた場合は名前で追従する。
     #[test]
     fn test_resolve_damper_def_selection_follows_by_name_after_earlier_delete() {
-        // 元は [A, B]（選択中は index=1 の B）。A が削除されて [B] になった。
         let defs = vec![def("B")];
         let got = resolve_damper_def_selection(&defs, Some((1, "B".to_string())));
         assert_eq!(got, Some((0, "B".to_string())));

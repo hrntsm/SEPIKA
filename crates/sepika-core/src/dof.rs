@@ -318,12 +318,10 @@ mod tests {
         m.set_free(Dof::Ux);
         assert!(!m.is_fixed(Dof::Ux));
         assert!(m.is_fixed(Dof::Uy));
-        // set(false) は解除、set(true) は拘束
         m.set(Dof::Uy, false);
         assert!(!m.is_fixed(Dof::Uy));
         m.set(Dof::Ux, true);
         assert!(m.is_fixed(Dof::Ux));
-        // PINNED から Rz を拘束すると並進3 + Rz が拘束される
         let mut p = Dof6Mask::PINNED;
         p.set(Dof::Rz, true);
         assert!(p.is_fixed(Dof::Ux) && p.is_fixed(Dof::Uy) && p.is_fixed(Dof::Uz));
@@ -359,7 +357,6 @@ mod tests {
             assert!(!map.has_panel_dof(ni));
             assert!(map.panel_dof(ni, 0).is_none());
         }
-        // 全独立自由度が標準自由度（節点 × 6）の範囲に収まる。
         for a in 0..map.n_active() {
             assert!(map.is_node_dof(map.global(a as u32)));
         }
@@ -372,7 +369,6 @@ mod tests {
         let mut model = make_model_with_restraints(&[Dof6Mask::FREE; 3]);
         let base = DofMap::build(&model).n_active();
 
-        // 節点 1 に仕口パネルを設ける（先頭節点が接合部の節点）。
         model.elements.push(ElementData {
             id: ElemId(100),
             kind: ElementKind::PanelZone,
@@ -394,14 +390,12 @@ mod tests {
         assert!(map.has_panel_dof(1));
         assert!(!map.has_panel_dof(0) && !map.has_panel_dof(2));
 
-        // パネル自由度は標準自由度の後ろ（＝既存の番号を押し出さない）。
         let gx = map.panel_dof(1, 0).expect("γX");
         let gy = map.panel_dof(1, 1).expect("γY");
         assert_eq!(gy, gx + 1);
         assert!(gx as usize >= base);
         assert!(map.panel_dof(1, 2).is_none(), "成分は 2 個まで");
 
-        // 逆写像で節点・成分が引ける（増分解析の特異診断が使う）。
         assert!(!map.is_node_dof(map.global(gx)));
         assert_eq!(map.panel_dof_ref(map.global(gx)), Some((1, 0)));
         assert_eq!(map.panel_dof_ref(map.global(gy)), Some((1, 1)));
@@ -428,7 +422,6 @@ mod tests {
     #[test]
     fn test_unreferenced_node_is_inactive() {
         let mut model = make_model_with_restraints(&[Dof6Mask::FREE, Dof6Mask::FREE]);
-        // 要素が接続しない自由節点を追加 → 自由度は増えない。
         model.nodes.push(Node {
             id: NodeId(2),
             coord: [500.0, 0.0, 0.0],
@@ -441,7 +434,6 @@ mod tests {
         assert_eq!(map.n_active(), 12, "孤立自由節点は自由度を持たない");
         assert!(map.active(2 * DOF_PER_NODE).is_none());
 
-        // 剛床マスターに指定すると自由度を持つ（拘束されない DOF 分）。
         model.constraints.push(Constraint::rigid_diaphragm(
             StoryId(0),
             NodeId(2),

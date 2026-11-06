@@ -1043,7 +1043,6 @@ mod tests {
             "Lp は 0.5D で自動設定される"
         );
 
-        // 添字も強度も同じまま、断面せいだけを大きくする。
         ensure_cache(&mut state, 0, &rc_rect(400.0, 900.0)).expect("配筋は妥当");
         let cache = state.cache.as_ref().expect("作り直される");
         assert_eq!(cache.shape, rc_rect(400.0, 900.0), "新しい形状で持ち直す");
@@ -1063,7 +1062,7 @@ mod tests {
     fn cache_is_reused_when_nothing_changes() {
         let mut state = MnViewState::default();
         ensure_cache(&mut state, 0, &rc_rect(400.0, 600.0)).expect("配筋は妥当");
-        state.lp = 123.0; // 利用者が手で変えた値
+        state.lp = 123.0;
         ensure_cache(&mut state, 0, &rc_rect(400.0, 600.0)).expect("配筋は妥当");
         assert!(
             (state.lp - 123.0).abs() < 1e-9,

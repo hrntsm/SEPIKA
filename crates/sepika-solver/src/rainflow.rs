@@ -77,7 +77,6 @@ mod tests {
 
     #[test]
     fn test_turning_points_filters_intermediate() {
-        // 単調増加中の中間点は折返しでない。
         let tp = turning_points(&[0.0, 1.0, 2.0, 1.0, 3.0]);
         assert_eq!(tp, vec![0.0, 2.0, 1.0, 3.0]);
     }
@@ -85,7 +84,6 @@ mod tests {
     #[test]
     fn test_rainflow_single_half_cycle() {
         let c = rainflow_cycles(&[0.0, 2.0, 0.0]);
-        // 1 つの半サイクル（範囲 2）。
         assert_eq!(c.len(), 2);
         let total: f64 = c.iter().map(|x| x.count).sum();
         assert!((total - 1.0).abs() < 1e-9);

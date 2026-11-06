@@ -573,7 +573,6 @@ mod tests {
         ));
         let outside = proj.project([-1000.0, 2000.0, 0.0]);
         assert!(pick_assignment_region(&model, &proj, outside, true, false).is_none());
-        // 壁を含めない指定では床は選ばれない。
         assert!(pick_assignment_region(&model, &proj, inside, false, true).is_none());
     }
 

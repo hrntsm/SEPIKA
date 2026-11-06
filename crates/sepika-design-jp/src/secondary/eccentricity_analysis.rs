@@ -334,7 +334,6 @@ mod tests {
     #[test]
     fn test_column_stiffnesses_from_analysis() {
         let (model, s0) = build_symmetric_frame(None);
-        // xy = [(0,0), (6000,0), (0,6000), (6000,6000)]
         let res_x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
         let res_y = fabricate_static(
             [0.0, 10.0],
@@ -397,7 +396,6 @@ mod tests {
     #[test]
     fn test_center_of_gravity_from_axial() {
         let (model, s0) = build_symmetric_frame(None);
-        // 圧縮は n 負（引張正の符号規約）
         let uniform = fabricate_static([0.0, 0.0], [[-200.0, 0.0, 0.0]; 4]);
         let g = center_of_gravity_from_axial(&model, s0, &uniform)
             .unwrap()
@@ -418,7 +416,6 @@ mod tests {
             .unwrap();
         assert!((g[0] - 4500.0).abs() < 1e-9, "gx={}", g[0]);
 
-        // 全柱引張 → None（質量重心へフォールバックさせる）
         let tension = fabricate_static([0.0, 0.0], [[200.0, 0.0, 0.0]; 4]);
         assert!(center_of_gravity_from_axial(&model, s0, &tension)
             .unwrap()
@@ -568,8 +565,8 @@ mod tests {
             ..Default::default()
         };
         let mut disp_x = vec![[0.0; 6]; 3];
-        disp_x[2][0] = 10.0; // 上端
-        disp_x[0][0] = 0.0; // 下端
+        disp_x[2][0] = 10.0;
+        disp_x[0][0] = 0.0;
         let res_x = StaticOnce {
             story_shears: None,
             stiffness_ratio_disp: None,

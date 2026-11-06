@@ -43,10 +43,7 @@ const RECORD_EVERY_DISABLED: usize = 1_000_000_000;
 fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
     // 1節点あたりの水平・鉛直質量 [N・s²/mm]（床の分担重量を想定した概算値）。
     let node_mass = 800.0;
-    // 回転自由度のダミー質量。非線形時刻歴（集中ばね系の梁要素）は回転自由度に
-    // 慣性を持たないため、並進のみに質量を与えると質量行列が回転DOFで特異になり
-    // 初期加速度が求まらない（solver からの案内メッセージのとおり「全自由度に
-    // 質量を与える」ことで回避する）。応答への影響が無視できる程度の小さな値。
+    // 並進質量だけでは回転DOFの質量行列が特異となり、初期加速度を求められない。
     let node_mass_rot = node_mass * 1.0e-3;
 
     let grid = common::FrameGrid::new(nx, ny, nz);
@@ -65,15 +62,12 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
         }
     });
 
-    // 大梁は長期荷重を載荷する対象として ID を控える。
     let mut elements = Vec::new();
     let mut beam_ids_for_load = Vec::new();
     grid.push_frame_members(&mut elements, SectionId(0), SectionId(1), |id| {
         beam_ids_for_load.push(id)
     });
 
-    // 長期荷重ケース（固定荷重）: 全大梁に等分布荷重 w=10 N/mm（鉛直下向き）。
-    // 非線形時刻歴（`NonlinearThCfg::apply_long_term`）の初期載荷に使う。
     let member: Vec<MemberLoad> = beam_ids_for_load
         .iter()
         .map(|&elem| {
@@ -98,7 +92,6 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
         member,
     }];
 
-    // 階設定（層間変形角の集計に使用。剛床拘束は付けず、節点は独立自由度のまま）。
     let mut stories = Vec::new();
     for iz in 1..=nz {
         let node_ids: Vec<NodeId> = (0..=ny)
@@ -203,7 +196,6 @@ where
 }
 
 fn main() {
-    // --- モデル生成: 5層×3スパン×3スパンのS造立体フレーム ---
     let (nx, ny, nz) = (3, 3, 5);
     let model = make_frame(nx, ny, nz);
     let dofmap = DofMap::build(&model);
@@ -217,7 +209,6 @@ fn main() {
         model.elements.len(),
     );
 
-    // --- 減衰・地震波: 1次固有振動数から Rayleigh 減衰・入力波の卓越振動数を決める ---
     let modal = solve_eigen(&model, &dofmap, &reducer, 1).expect("固有値解析に失敗");
     let omega1 = modal.omega2[0].sqrt();
     let period1 = 2.0 * std::f64::consts::PI / omega1;
@@ -230,19 +221,14 @@ fn main() {
 
     let dt = 0.01;
     let n_steps_linear = 4096;
-    // 非線形は Newton 反復（ステップごと最大 `NonlinearThCfg::newton.max_iter` 回、
-    // 既定 20 回）を伴い、線形時刻歴（1ステップ1回の前進代入のみ）より大幅に
-    // 計算コストが高い。重ければステップ数を落として計測する。
     let n_steps_nonlinear = 1024;
 
-    // 入力波の振幅: 1次固有周期に近い周期で加振し、有意な応答を励起する。
     let wave_linear = sine_decay_wave(dt, n_steps_linear, 800.0, omega1, 0.3);
     let wave_nonlinear = sine_decay_wave(dt, n_steps_nonlinear, 3000.0, omega1, 0.5);
 
     println!();
     println!("--- ベースライン計測（各ケース3回実行、最小値を採用） ---");
 
-    // (a) 線形時刻歴（Newmark-β 平均加速度法）
     let newmark = NewmarkCfg {
         beta: 0.25,
         gamma: 0.5,
@@ -267,7 +253,6 @@ fn main() {
         },
     );
 
-    // (b) 非線形時刻歴（NonlinearThCfg 既定、集中ばね系・ForceRegime::Auto）
     let (t_nonlinear, result_b) = bench_min3(
         "(b) 非線形時刻歴 既定Cfg",
         n_steps_nonlinear,
@@ -288,10 +273,6 @@ fn main() {
         },
     );
 
-    // (b2) 非線形時刻歴（並列、Parallelism::Auto）。要素ループの並列化
-    // （nonlinear.rs の Newton 反復・driver.rs・common/tangent.rs）が
-    // Deterministic 経路とビット一致することを、逐次ケース (b) との
-    // ピーク変位完全一致で検証する（並列化のビット一致検証を兼ねる）。
     set_parallelism(Parallelism::Auto);
     let (t_nonlinear_parallel, result_b2) = bench_min3(
         "(b2) 非線形時刻歴 並列(Auto)",
@@ -312,7 +293,6 @@ fn main() {
             )
         },
     );
-    // 終了後は既定（Deterministic）へ戻す（以降のケースは従来どおり逐次で計測する）。
     set_parallelism(Parallelism::Deterministic);
 
     let peak_b = peak_disp_max(&result_b);
@@ -327,7 +307,6 @@ fn main() {
          （並列化のビット一致検証OK、逐次 {t_nonlinear:.3} s → 並列 {t_nonlinear_parallel:.3} s）"
     );
 
-    // --- 記録コストの内訳（record_every を極端に大きくして詳細記録をほぼ無効化） ---
     println!();
     println!("--- 記録コストの内訳（record_every=大 との差分で概算） ---");
 

@@ -743,7 +743,6 @@ fn asymmetric_real_faces_separate_wall_midpoint_from_floor_midpoint() {
     for e in &mut model.elements {
         e.section = Some(SectionId(if e.id == ElemId(2) { 3 } else { 2 }));
     }
-    // Concrete区分の内法はFcの有無で切り替えない。
     let mut support_material = model.materials[0].clone();
     support_material.id = MaterialId(1);
     support_material.fc = None;
@@ -1255,7 +1254,6 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
         close(synced.stories[1].seismic_weight.unwrap(), 28800.0);
         close(synced.stories[2].seismic_weight.unwrap(), 19200.0);
     }
-    // 任意辺率でも同じ実支持・スリット契約を用いる。
     model.wall_plates[0].dl_support = None;
     model.wall_plates[0].self_weight_shares = vec![0.0, 0.0, 0.0, 1.0];
     assert_eq!(
@@ -1275,7 +1273,6 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
     assert!(dl.primary.is_empty());
     assert!(compute_gravity_auto_load_cases(&model).is_ok());
     bands(&model, &[0.0, 28800.0, 19200.0, 0.0]);
-    // 指定スリットが境界へ解決できない場合は切れていないと推定しない。
     model.wall_plates[0].slit.column_face[0] = true;
     assert!(
         sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0])

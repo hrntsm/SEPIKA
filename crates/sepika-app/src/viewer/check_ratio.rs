@@ -1116,8 +1116,6 @@ mod tests {
         }
     }
 
-    // ── max_ratio_by_elem / max_ratio_by_node ──────────────────────────
-
     /// 同一部材に複数の検定位置がある場合、最大の検定比が採用される。
     #[test]
     fn max_ratio_by_elem_picks_max_ratio() {
@@ -1216,8 +1214,6 @@ mod tests {
         assert!(map.is_empty());
     }
 
-    // ── ratio_for_filter ────────────────────────────────────────────────
-
     /// フィルタ=最大は cr.ratio() / cr.ok() をそのまま返す。
     #[test]
     fn ratio_for_filter_max_returns_ratio_and_ok() {
@@ -1315,8 +1311,6 @@ mod tests {
         );
     }
 
-    // ── dominant_kind ───────────────────────────────────────────────────
-
     /// 最大検定比を与える component の kind を返す。
     #[test]
     fn dominant_kind_picks_max_component() {
@@ -1339,8 +1333,6 @@ mod tests {
         assert_eq!(dominant_kind(&cr), Some(CheckKind::Shear));
     }
 
-    // ── available_check_kinds ───────────────────────────────────────────
-
     /// 出現した kind のみを CheckKind の定義順で返す。
     #[test]
     fn available_check_kinds_returns_present_kinds_in_definition_order() {
@@ -1357,7 +1349,6 @@ mod tests {
             }],
         ];
         let kinds = available_check_kinds(comps.iter().map(|c| c.as_slice()));
-        // 定義順は Bending が Shear より先。
         assert_eq!(kinds, vec![CheckKind::Bending, CheckKind::Shear]);
     }
 
@@ -1380,8 +1371,6 @@ mod tests {
         assert!(kinds.is_empty());
     }
 
-    // ── should_label ────────────────────────────────────────────────────
-
     /// 既定では注意域の境界（0.8）以上の部材にのみ数値ラベルを描く。
     #[test]
     fn should_label_only_at_or_above_threshold_by_default() {
@@ -1400,8 +1389,6 @@ mod tests {
         assert!(should_label(1.5, true));
     }
 
-    // ── mid_label_text ──────────────────────────────────────────────────
-
     /// 支配式が分かる場合は数値と式名を併記する。
     #[test]
     fn mid_label_text_with_dominant() {
@@ -1413,8 +1400,6 @@ mod tests {
     fn mid_label_text_without_dominant() {
         assert_eq!(mid_label_text(0.82, None), "0.82");
     }
-
-    // ── elem_check_positions / build_tooltip_rows ───────────────────────
 
     /// 指定した部材の検定位置のみを xi 順そのままに抽出する。
     #[test]
@@ -1496,7 +1481,6 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].values, vec![Some(0.5), Some(0.4)]);
         assert!(matches!(rows[0].verdict, RowVerdict::Ok));
-        // 2 行目は Bending 式がないため None。
         assert_eq!(rows[1].values, vec![None, Some(1.13)]);
         assert!(matches!(rows[1].verdict, RowVerdict::Ng));
     }
@@ -1563,8 +1547,6 @@ mod tests {
         assert!(rows.is_empty());
     }
 
-    // ── 節点検定のホバー判定 ────────────────────────────────────
-
     /// 節点検定を持つ節点だけがホバー候補になり、最も近い節点が返る。
     /// 検定結果を持たない節点は、より近くても候補にならない。
     #[test]
@@ -1584,7 +1566,6 @@ mod tests {
         app.core.model.nodes = vec![node(0, 0.0), node(1, 1000.0), node(2, 2000.0)];
 
         let mut results = crate::app::ResultsBundle::default();
-        // 節点 0 と 2 のみ検定結果を持つ。
         for id in [0u32, 2] {
             results.joint_checks.push(JointCheck {
                 node: NodeId(id),
@@ -1601,12 +1582,10 @@ mod tests {
             egui::pos2(100.0, 0.0),
         ];
 
-        // 節点 1（検定なし）のすぐ近くでも、候補になるのは検定を持つ節点 0。
         let hit = pick_nearest_checked_node(&app, &pts, egui::pos2(11.0, 0.0), Default::default())
             .expect("ヒット");
         assert_eq!(hit.0, 0, "検定を持たない節点は候補にしない");
 
-        // 節点 2 の近くではその節点が返る。
         let hit = pick_nearest_checked_node(&app, &pts, egui::pos2(98.0, 0.0), Default::default())
             .expect("ヒット");
         assert_eq!(hit.0, 2);

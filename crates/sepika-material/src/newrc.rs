@@ -273,7 +273,6 @@ mod tests {
             let (s, t) = c.trial(0.0);
             assert_relative_eq!(s, 0.0, epsilon = 1e-12);
             assert_relative_eq!(t, c.ec, max_relative = 1e-12);
-            // probe（非破壊評価）も同じ値を返す。
             let (ps, pt) = c.probe(0.0);
             assert_relative_eq!(ps, 0.0, epsilon = 1e-12);
             assert_relative_eq!(pt, c.ec, max_relative = 1e-12);
@@ -297,18 +296,16 @@ mod tests {
         assert!(s_el > 0.0);
         c.commit();
         let (s_cr, _) = c.trial(eps_cr * 2.0);
-        // ひび割れ後は応力ゼロ（脆性）。
         assert_relative_eq!(s_cr, 0.0, epsilon = 1e-9);
     }
 
     #[test]
     fn test_probe_matches_trial_without_mutating_state() {
-        // probe は trial と数学的に同一の結果を返し、状態を書き換えない。
         let mut c = ConcreteNewRc::new(30.0, 2.0);
         c.trial(-c.eps_c0 * 1.2);
         c.commit();
 
-        let probe_strain = -0.0008; // 除荷側（割線剛性の分岐）
+        let probe_strain = -0.0008;
         let before = c.probe(probe_strain);
         assert_eq!(before, c.probe(probe_strain));
 
@@ -322,7 +319,6 @@ mod tests {
 
     #[test]
     fn test_newrc_reference_values() {
-        // 塑性率算定（ファイバー梁）が参照する fc と εc0 をそのまま返すこと。
         let c = ConcreteNewRc::new(30.0, 2.0);
         assert_eq!(c.reference_stress(), 30.0);
         assert_relative_eq!(c.reference_strain(), c.eps_c0);
@@ -330,7 +326,6 @@ mod tests {
 
     #[test]
     fn test_newrc_envelope_peak_at_ec0() {
-        // NewRcEnvelope 単体のピーク: compression(εc0) == (fc, ~0)。
         let env = NewRcEnvelope::new(30.0);
         let (stress, tangent) = env.compression(env.eps_c0);
         assert_relative_eq!(stress, 30.0, max_relative = 1e-6);
@@ -339,11 +334,9 @@ mod tests {
 
     #[test]
     fn test_newrc_envelope_initial_tangent_is_ec() {
-        // NewRcEnvelope 単体の初期接線: x→0 で接線 ≈ Ec。
         let env = NewRcEnvelope::new(30.0);
         let (_, tangent) = env.compression(1e-9);
         assert_relative_eq!(tangent, env.ec, max_relative = 1e-3);
-        // Ec は常識的な範囲（普通コンクリート 2〜3×10⁴ N/mm² 程度）。
         assert!(env.ec > 2.0e4 && env.ec < 3.5e4, "Ec={}", env.ec);
     }
 
@@ -368,8 +361,7 @@ mod tests {
 
     #[test]
     fn test_newrc_refactor_matches_known_values() {
-        // 工学単位系（kgf/cm²）の NewRC 式を独立に解いて得た既知値と、NewRcEnvelope 経由の
-        // ConcreteNewRc の応答が一致することを確認する。
+        // 工学単位系（kgf/cm²）のNewRC式を独立に解いた既知値。
         // fc=30.0, gamma=2.4（既定）のとき εc0 ≈ 0.0021927039678952937。
         let cases: [(f64, f64); 3] = [
             (-0.0005, -13.585629463966358),

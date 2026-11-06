@@ -118,7 +118,6 @@ mod tests {
 
     #[test]
     fn test_stiffness_reduction_matches_reference_table() {
-        // 本数 2/4/6/8/16 → 1.0/0.5/0.33333/0.25/0.125。
         for (n, expect) in [(2, 1.0), (4, 0.5), (6, 1.0 / 3.0), (8, 0.25), (16, 0.125)] {
             assert!(
                 (multi_shear_stiffness_reduction(n) - expect).abs() < 1e-5,
@@ -130,7 +129,6 @@ mod tests {
 
     #[test]
     fn test_strength_reduction_matches_reference_table() {
-        // 本数 2/4/6/8/16 → 1.0/0.41421/0.26795/0.19891/0.09849。
         for (n, expect) in [
             (2, 1.0),
             (4, 0.41421),
@@ -149,7 +147,6 @@ mod tests {
     #[test]
     fn test_friction_max_force() {
         assert!((friction_max_force(0.1, 1_000_000.0) - 100_000.0).abs() < 1e-6);
-        // 引張軸力（浮上り）は摩擦力ゼロ。
         assert_eq!(friction_max_force(0.1, -500_000.0), 0.0);
         assert_eq!(friction_max_force(-0.1, 1_000_000.0), 0.0);
     }
@@ -160,7 +157,6 @@ mod tests {
         assert!((lrb_stiffness_strain_factor(0.1) - 0.779 * 0.1f64.powf(-0.43)).abs() < 1e-9);
         assert!((lrb_stiffness_strain_factor(0.5) - 0.5f64.powf(-0.25)).abs() < 1e-9);
         assert!((lrb_stiffness_strain_factor(2.0) - 2.0f64.powf(-0.12)).abs() < 1e-9);
-        // 単調傾向（大歪で剛性低下）を確認。
         assert!(lrb_stiffness_strain_factor(2.0) < lrb_stiffness_strain_factor(0.5));
         // 分岐点 γ=0.25 での連続性（−0.43 の根拠。相対誤差 0.1% 以内）。
         let lo = lrb_stiffness_strain_factor(0.25 - 1e-9);
@@ -185,7 +181,6 @@ mod tests {
         assert!(
             (lrb_intercept_at_temperature(100.0, 30.0) - 100.0 * (-0.0879f64).exp()).abs() < 1e-9
         );
-        // 20℃ 基準では不変。
         assert!((lrb_stiffness_at_temperature(100.0, 20.0) - 100.0).abs() < 1e-9);
     }
 

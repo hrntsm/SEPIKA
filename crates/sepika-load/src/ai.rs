@@ -402,7 +402,6 @@ mod tests {
                 r.alpha[1],
                 expected_alpha1
             );
-            // ΣPi = Q最下層。
             let sum_pi: f64 = r.pi.iter().sum();
             assert!(
                 (sum_pi - r.qi[0]).abs() < 1e-6,
@@ -416,8 +415,6 @@ mod tests {
 
     #[test]
     fn test_seismic_shear_basement_normal_penthouse_sum_pi() {
-        // 地下1（深さ3m＝depth_mm 3000mm）+ 一般2 + PH1 のフル構成で
-        // ΣPi = Q最下層 を検証。
         let stories = vec![
             StorySeismicSpec {
                 weight: 400.0,
@@ -472,7 +469,6 @@ mod tests {
         );
         assert_eq!(r.qi[2], 0.0, "上に重量がない階の層せん断力は 0");
         assert_eq!(r.pi[2], 0.0);
-        // 下層は重量 0 の階がない場合と同じ結果になる。
         let base = ai_distribution(&[1000.0, 800.0], 1.0, 1.0, 0.2, 0.4);
         for i in 0..2 {
             assert!(

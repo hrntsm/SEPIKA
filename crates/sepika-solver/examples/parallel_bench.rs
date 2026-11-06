@@ -25,12 +25,9 @@ fn make_frame(nx: usize, ny: usize, nz: usize, n_cases: usize) -> Model {
     let grid = common::FrameGrid::new(nx, ny, nz);
     let nodes = grid.build_nodes(|_, _| {});
 
-    // 柱・大梁とも同一断面（このベンチは荷重組合せ一括求解の並列度を測るもので、
-    // 断面の作り分けは測定対象に影響しない）。
     let mut elements = Vec::new();
     grid.push_frame_members(&mut elements, SectionId(0), SectionId(0), |_| {});
 
-    // 荷重ケース: 最上層の全節点に方向・大きさ違いの集中荷重
     let top_nodes: Vec<NodeId> = (0..=ny)
         .flat_map(|iy| (0..=nx).map(move |ix| grid.node_id(ix, iy, nz)))
         .collect();
@@ -52,7 +49,6 @@ fn make_frame(nx: usize, ny: usize, nz: usize, n_cases: usize) -> Model {
         })
         .collect();
 
-    // 荷重組合せ: 隣接 2 ケースの線形和を n_cases 個
     let combinations: Vec<LoadCombination> = (0..n_cases)
         .map(|i| LoadCombination {
             name: format!("combo{}", i + 1),
@@ -108,7 +104,6 @@ fn bench(label: &str, p: Parallelism, model: &Model) -> (f64, f64, f64) {
     let t_batch = t1.elapsed().as_secs_f64();
     let n_ok = results.iter().filter(|r| r.is_ok()).count();
 
-    // ケース数 < コア数のときの自動配分（余りコアを faer 内部並列へ）の確認用
     let t2 = Instant::now();
     let small = analysis.linear_combination_batch(&model.combinations[..2]);
     let t_small = t2.elapsed().as_secs_f64();

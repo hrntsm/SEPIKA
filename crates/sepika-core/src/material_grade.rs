@@ -514,12 +514,9 @@ mod tests {
     /// `SD`/`SR` は鋼材の前方一致（`S…`）より先に判定する必要がある。
     #[test]
     fn test_category_of_grade_order() {
-        // 鉄筋は鋼材より先に判定する。
         assert_eq!(category_of_grade("SD390"), Some(MaterialCategory::Rebar));
-        // 大文字小文字は区別しない。
         assert_eq!(category_of_grade("fc24"), Some(MaterialCategory::Concrete));
         assert_eq!(category_of_grade("sn400b"), Some(MaterialCategory::Steel));
-        // 前後の空白は無視する。
         assert_eq!(
             category_of_grade("  SD345  "),
             Some(MaterialCategory::Rebar)
@@ -743,14 +740,11 @@ mod tests {
             mat.fy = Some(200.0);
             assert_eq!(material_strength_factor_steel(&mat), 1.07, "{name:?}");
         }
-        // 鋼材文脈: 名称から自動判定。
         assert_eq!(material_strength_factor_steel(&mk("SS400", None)), 1.1);
         assert_eq!(material_strength_factor_steel(&mk("SA440", None)), 1.05);
         assert_eq!(material_strength_factor_steel(&mk("カスタム", None)), 1.0);
-        // 主筋文脈: 名称によらず 1.1。
         assert_eq!(material_strength_factor_rebar(&mk("Fc24", None)), 1.1);
         assert_eq!(material_strength_factor_rebar(&mk("SD345", None)), 1.1);
-        // 直接入力の割増係数は両文脈で最優先。
         assert_eq!(
             material_strength_factor_steel(&mk("カスタム", Some(1.2))),
             1.2
@@ -801,13 +795,10 @@ mod tests {
     fn test_rebar_yield_strength_resolution_order() {
         let mut mat = rebar_mat("SD295A", Some(295.0));
         assert_eq!(rebar_yield_strength(Some(&mat)), Some(295.0));
-        // fy 未設定は None（材料名 "SD295A" からは推定しない）。
         mat.fy = None;
         assert_eq!(rebar_yield_strength(Some(&mat)), None);
-        // 非正値も未設定と同じ扱いにする。
         mat.fy = Some(0.0);
         assert_eq!(rebar_yield_strength(Some(&mat)), None);
-        // 主筋の材料が未割当のときも None（呼び出し側が入力不備として扱う）。
         assert_eq!(rebar_yield_strength(None), None);
     }
 
@@ -879,8 +870,6 @@ mod tests {
             let msg = shear_rebar_material_issue(Some(&rebar_mat("SR235", fy))).unwrap();
             assert!(msg.contains("SR235") && msg.contains("fy"), "{msg}");
         }
-        // SD295 の未知名は、fy を設定しても未対応として不備を返す
-        // （終局 σwy にこの fy を使わせない）。
         for name in ["SD295X", "SD295Z", "SD295-FOO"] {
             let msg = shear_rebar_material_issue(Some(&rebar_mat(name, Some(295.0)))).unwrap();
             assert!(msg.contains(name), "{msg}");

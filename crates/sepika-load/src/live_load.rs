@@ -164,7 +164,6 @@ mod tests {
             fc: Some(24.0),
             fy: None,
         });
-        // 柱を3要素(各階1本)に分割: 0-1, 1-2, 2-3
         for (i, (a, b)) in [(0u32, 1u32), (1, 2), (2, 3)].iter().enumerate() {
             model.elements.push(ElementData {
                 id: ElemId(i as u32),
@@ -191,20 +190,16 @@ mod tests {
         let gen = generate_stories(&model, None).unwrap();
         assert_eq!(gen.stories.len(), 4, "基部の床を含めて 4 階（層は 3 つ）");
 
-        // 最下層の柱(節点0-1、上端は story1): 3 層分の床を支える。
         let bottom = &model.elements[0];
         assert_eq!(
             floors_supported_by_column(&model, bottom, &gen.node_story),
             3
         );
-        // 中間層の柱(節点1-2、上端は story2): 2 層分の床を支える。
         let mid = &model.elements[1];
         assert_eq!(floors_supported_by_column(&model, mid, &gen.node_story), 2);
-        // 最上層の柱(節点2-3、上端は story3): 1 層分の床のみを支える。
         let top = &model.elements[2];
         assert_eq!(floors_supported_by_column(&model, top, &gen.node_story), 1);
 
-        // 低減率も対応して確認。
         assert_eq!(
             column_live_load_reduction(floors_supported_by_column(&model, bottom, &gen.node_story)),
             0.90
@@ -217,7 +212,6 @@ mod tests {
 
     #[test]
     fn test_floors_supported_by_column_unassigned_node_is_zero() {
-        // 基部節点(所属階なし)が上端になる異常なケースは 0 を返す(安全側フォールバック)。
         let model = three_story_column_model();
         let node_story: Vec<Option<StoryId>> = vec![None; model.nodes.len()];
         let elem = &model.elements[0];

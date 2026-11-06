@@ -60,8 +60,6 @@ use frame_gravity::select_frame_gravity;
 #[path = "support/full_model_study.rs"]
 mod full_model_study;
 
-// ===================== フィクスチャと共通ヘルパー =====================
-
 /// 固定フィクスチャ（実建物の ST-Bridge）のパス。
 fn fixture_path() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -904,7 +902,6 @@ fn base_column_axials(app: &App, res: &sepika_solver::statics::linear::StaticOnc
         ) else {
             continue;
         };
-        // 鉛直部材（柱）のみ対象。
         if (nb.coord[2] - na.coord[2]).abs() <= 1e-6 {
             continue;
         }
@@ -935,8 +932,6 @@ fn sig4(v: f64) -> String {
     let v = if v == 0.0 { 0.0 } else { v };
     format!("{v:.3e}")
 }
-
-// ===================== 1. 取り込み =====================
 
 /// ST-Bridge の取り込みが、想定どおりのモデル構成（部材・二次部材・床・階・
 /// 荷重ケース・支点）を組み立てる。
@@ -987,7 +982,6 @@ fn import_builds_expected_model() {
         }
     }
 
-    // 荷重は ST-Bridge に含まれないため標準荷重ケースが自動生成される。
     let names: Vec<&str> = m.load_cases.iter().map(|lc| lc.name.as_str()).collect();
     assert_eq!(
         names,
@@ -996,7 +990,6 @@ fn import_builds_expected_model() {
     );
     assert!(!m.combinations.is_empty(), "標準荷重組合せも用意される");
 
-    // 支点情報も含まれないため、最下レベルの柱脚がピン支点として自動設定される。
     let supports = m
         .nodes
         .iter()
@@ -1004,7 +997,6 @@ fn import_builds_expected_model() {
         .count();
     assert_eq!(supports, 12, "自動設定される支点の数");
 
-    // 断面・材料が全部材へ割り当たっている（未割当があると解析前チェックで落ちる）。
     for e in &m.elements {
         assert!(
             e.section.is_some(),
@@ -1141,8 +1133,6 @@ fn import_preserves_stbridge_slab_area_and_weight() {
     );
 }
 
-// ===================== 2. 準備計算 =====================
-
 /// 準備計算が階・地震重量・Ai 分布・剛域・仕口パネルを算定する。
 ///
 /// 地震力については「ΣW から Q1 が令 88 条どおり求まる」ことを式で検算する
@@ -1173,7 +1163,6 @@ fn preparation_computes_stories_and_seismic_forces() {
         "地震用重量の総和が正"
     );
 
-    // 階は下から上へ、床レベルが単調増加する。
     let elevations: Vec<f64> = prep.stories.iter().map(|s| s.elevation).collect();
     assert!(
         elevations.windows(2).all(|w| w[0] < w[1]),
@@ -1206,14 +1195,12 @@ fn preparation_computes_stories_and_seismic_forces() {
         expected_q1
     );
 
-    // 層せん断力 Qi は上階ほど小さい（Ai 分布の性質）。
     let qi: Vec<f64> = seismic.rows.iter().map(|r| r.qi).collect();
     assert!(
         qi.windows(2).all(|w| w[0] >= w[1]),
         "層せん断力 Qi が上階ほど小さくない: {qi:?}"
     );
 
-    // 剛域・仕口パネル・断面性能が算定されている。
     assert!(
         prep.rigid_zone_candidates > 0,
         "剛域の算定対象となる梁がある"
@@ -1280,8 +1267,6 @@ fn preparation_is_idempotent() {
     }
 }
 
-// ===================== 3. 診断 =====================
-
 /// 実建物モデルの整合性チェックがエラー・警告ともに 0 件である。
 ///
 /// 診断が誤検知を出すようになると、利用者は解析前に赤い表示を見ることになる。
@@ -1297,8 +1282,6 @@ fn diagnostics_are_clean() {
         "実建物モデルの診断は (エラー, 警告) = (0, 0) のはず"
     );
 }
-
-// ===================== 4. 静的解析（全荷重ケース・全組合せ） =====================
 
 /// 全荷重ケース・全荷重組合せが解け、すべての解析対象部材に断面力が入る。
 ///
@@ -1425,8 +1408,6 @@ fn combination_is_linear_sum_of_load_cases() {
     }
 }
 
-// ===================== 5. 固有値解析 =====================
-
 /// 固有値解析が指定モード数の正の固有周期を降順で返し、モード形状が全節点分ある。
 #[test]
 fn eigen_returns_descending_positive_periods() {
@@ -1470,8 +1451,6 @@ fn eigen_returns_descending_positive_periods() {
     }
 }
 
-// ===================== 6. 地震静的解析（Ai 分布） =====================
-
 /// 地震静的解析が X・Y 両方向で解け、上階ほど水平変位が大きくなる。
 ///
 /// 剛床が効いていない・水平力が一部の階に載っていないといった配線の破壊は、
@@ -1510,8 +1489,6 @@ fn seismic_static_produces_monotonic_story_displacement() {
         );
     }
 }
-
-// ===================== 7. 一次設計（断面検定） =====================
 
 /// 断面検定が全部材・全接合部・全スラブを対象に実施され、検定比が有限かつ非負。
 #[test]
@@ -1589,8 +1566,6 @@ fn design_check_covers_every_member() {
     eprintln!("full_model member check positions: Checked={checked}, Skipped={skipped}");
 }
 
-// ===================== 8. 二次設計（層指標） =====================
-
 /// 層間変形角・剛性率 Rs・偏心率 Re が全層で算定される。
 #[test]
 fn story_metrics_computed_for_every_layer() {
@@ -1629,8 +1604,6 @@ fn story_metrics_computed_for_every_layer() {
         );
     }
 }
-
-// ===================== 9. 保有水平耐力・Ds・終局検定 =====================
 
 fn select_holding_points(app: &mut App) -> u32 {
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
@@ -1761,8 +1734,6 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     }
 }
 
-// ===================== 10. 増分解析（プッシュオーバー） =====================
-
 /// 鋼構造サンプルの増分解析で性能曲線・層せん断が力学的に整合する。
 #[test]
 fn pushover_reaches_ultimate_state() {
@@ -1819,7 +1790,6 @@ fn pushover_reaches_ultimate_state() {
         )
     );
 
-    // 屋根変位は増分とともに単調増加する。
     let roof: Vec<f64> = push.capacity_curve.iter().map(|c| c.roof_disp).collect();
     assert!(
         roof.windows(2).all(|w| w[1] >= w[0]),
@@ -1834,7 +1804,6 @@ fn pushover_reaches_ultimate_state() {
         push.qu
     );
     assert_eq!(last.story_shear.len(), 4, "4層の層せん断");
-    // 層せん断はベースシアから始まり、上階へ向かって減少する（水平力の累積）。
     assert!(
         (last.story_shear[0] - last.base_shear).abs() <= last.base_shear.abs() * 1e-9,
         "最下層のせん断力がベースシアと一致しない: {:?}",
@@ -1845,7 +1814,6 @@ fn pushover_reaches_ultimate_state() {
         "層せん断力が上階ほど小さくない: {:?}",
         last.story_shear
     );
-    // 最終ステップの部材別応答が記録される（保有水平耐力・部材ランクの入力になる）。
     assert!(
         !push.member_response.is_empty(),
         "最終確定ステップの部材別応答が空"
@@ -1942,8 +1910,6 @@ fn assert_steel_portal_gravity_and_panel_loads(
     }
 }
 
-// ===================== 11. 時刻歴応答解析 =====================
-
 /// 線形時刻歴応答解析（サンプル波）が完走し、応答が有限で層応答が記録される。
 #[test]
 fn time_history_linear_runs() {
@@ -2001,8 +1967,7 @@ fn time_history_nonlinear_long_duration_has_no_false_non_convergence() {
     app.core.analysis_cfg.th_nonlinear = true;
     app.core.analysis_cfg.th_apply_long_term = false;
     app.core.analysis_cfg.th_duration = 120.0;
-    // 刻みは既定より粗くする（この不具合は応答の減衰で決まり、刻みには依らない）。
-    // 既定の 0.01 秒では 12000 ステップになり、テスト時間が 5 倍以上に伸びる。
+    // 既定の刻みでは12000ステップとなるため、長時間の減衰検証は0.05秒刻みで行う。
     app.core.analysis_cfg.th_dt = 0.05;
     app.run_time_history_sample();
     assert_no_error(&app, "非線形時刻歴応答解析（120 秒）");
@@ -2109,8 +2074,6 @@ fn time_history_nonlinear_runs() {
         "ピーク変位に非有限値がある（発散）"
     );
 }
-
-// ===================== 12. 保存・読込の往復 =====================
 
 /// OVIKA へ保存し、読み直してもモデル・準備計算・結果・解析条件が保たれる。
 #[test]
@@ -2446,8 +2409,6 @@ fn stbridge_roundtrip_is_reanalyzable() {
     std::fs::remove_file(&path).ok();
 }
 
-// ===================== 既知の欠落 =====================
-
 /// ST-Bridge から取り込んだ小梁が、床の小梁設計で検定される。
 ///
 /// あわせて、各小梁が**自分と同じレベルのスラブ**で検定されていることを確認する。
@@ -2470,7 +2431,7 @@ fn beam_design_checks_cover_imported_secondary_members() {
     let mut checked_on_same_level = 0;
     for (slab_id, target, jr) in &results.beam_checks {
         let sepika_app::app::BeamCheckTarget::SecondaryBeam { member } = target else {
-            continue; // 間柱は検定対象外（軸力・面外曲げが未対応）。
+            continue;
         };
         checked += 1;
         if jr.bolts.is_none() {
@@ -2573,7 +2534,6 @@ fn floor_regions_and_slabs_are_consistent() {
         );
     }
 
-    // 各床板の重心が、ちょうど 1 つの床領域へ収まる（未割当・床板なし領域なし）。
     let mut by_region: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     let mut unassigned = Vec::new();
     for (si, slab) in app.core.model.slabs.iter().enumerate() {
@@ -2619,16 +2579,8 @@ fn region_gen_finds_wall_bounded_regions() {
     let scan = scan_wall_region_boundaries(&app.core.model);
     assert_eq!(scan.unclosed, 0, "半辺の後続は一意に定まるはず");
 
-    // 単一の観測値（境界数・合計面積）だけでは、直線の重複統合に不具合があって
-    // 同じ構面を 2 回検出していても気づけない。境界どうしが節点集合として
-    // 重複していないこと（構面の重複統合ミスの検出）と、面積が必ず正であること
-    // （外周面の判別・ニューエル面積算定の破綻の検出）を独立の不変条件として確認する。
-    // 本フィクスチャは直交グリッドの S 造建物であり（`import_builds_expected_model` 等
-    // 参照）、正の面積を持つ壁境界の構面はすべて軸方向（X または Y）のはずである。
-    // 斜め方向の構面に正の面積を持つ境界が現れた場合、`wall_planes` が実際には
-    // つながっていない柱の組を誤って直線候補として拾い、構造的に無意味な面を
-    // 検出している疑いが強い（列挙した候補直線ごとに面走査をかけるため、
-    // 実在しない斜めの「構面」でも部材がたまたま条件を満たせば面ができうる）。
+    // 合計面積と境界数だけでは同じ構面の重複検出を見逃すため、節点集合の一意性も照合する。
+    // この直交グリッドでは、正面積を持つ壁構面はX・Y方向に限られる。
     let mut seen: HashSet<Vec<u32>> = HashSet::new();
     for b in &scan.boundaries {
         let area = b.area(&app.core.model);
@@ -2900,8 +2852,6 @@ fn panel_758_real_fixture_keeps_two_axes_and_distinguishes_staggered_and_ms_dept
     assert_panel_505_fixture_geometry_and_states(&app);
 }
 
-// ===================== スナップショット =====================
-
 /// 全解析の代表スカラをスナップショットで固定する。
 ///
 /// 不変量のアサートは「壊れ方」を捕まえるが、「値が静かに変わったこと」自体は
@@ -2925,7 +2875,6 @@ fn snapshot_key_scalars() {
         out.push('\n');
     };
 
-    // --- モデル構成 ---
     line("model.nodes", app.core.model.nodes.len().to_string());
     line("model.elements", app.core.model.elements.len().to_string());
     line("model.beams()", app.core.model.beams().count().to_string());
@@ -2935,7 +2884,6 @@ fn snapshot_key_scalars() {
     );
     line("model.stories", app.core.model.stories.len().to_string());
 
-    // --- 準備計算 ---
     let prep = app
         .core
         .scoped
@@ -2962,7 +2910,6 @@ fn snapshot_key_scalars() {
         line(&format!("prep.seismic[{}].Qi", r.name), sig4(r.qi));
     }
 
-    // --- 固有値 ---
     let modal = app
         .core
         .scoped
@@ -2976,7 +2923,6 @@ fn snapshot_key_scalars() {
         line(&format!("eigen.T[{i}]"), sig4(*t));
     }
 
-    // --- 静的（DL・EX） ---
     let dl = static_of(&app, StaticCaseKey::User(dl_case_id(&app)));
     line(
         "static.DL.min_uz",
@@ -2997,7 +2943,6 @@ fn snapshot_key_scalars() {
         line(&format!("static.EX.story[{}].max_ux", s.name), sig4(mx));
     }
 
-    // --- 断面検定 ---
     let results = app.core.scoped.results.as_ref().expect("解析結果");
     line(
         "design.member_checks",
@@ -3073,7 +3018,6 @@ fn snapshot_key_scalars() {
         sig4(beam_max_ratio),
     );
 
-    // --- 層指標 ---
     let ctx = sepika_app::summary::metrics_ctx_from_results(&app.core.model, Some(results));
     let metrics =
         sepika_app::summary::compute_story_metrics_with(&app.core.model, SeismicDir::X, &ctx);
@@ -3113,7 +3057,6 @@ fn snapshot_key_scalars() {
             .to_string(),
     );
 
-    // --- 時刻歴（線形） ---
     app.core.analysis_cfg.th_dir = ThDir::X;
     app.core.analysis_cfg.th_nonlinear = false;
     app.run_time_history_sample();
@@ -3212,7 +3155,6 @@ fn slab_floor_load_reaches_primary_frame() {
         expected += mat.design_unit_weight_n_per_mm3() * sec.area * len * factor;
     }
 
-    // 実際に主架構へ届く鉛直荷重（非構造節点で捨てられるぶんを除く）。
     let beam_loads = sepika_job::auto_loads::compute_dl_beam_loads(model).expect("DL 分配");
     let (nodal, mut member) = sepika_job::auto_loads::slab_load_case_content(model, &beam_loads);
     let (nodal, extra_member) = resolve_nodal_to_primary(model, nodal, SPAN_TOL_MM);
@@ -3297,7 +3239,6 @@ fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
 #[test]
 fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() {
     use sepika_core::model::StoryLevelKind;
-    // 原階を初期化する前に独立fixtureの床標高を設定する。
     let mut model = four_story_steel_portal();
     let elevations = [-9000.0, -6000.0, -3000.0, 6000.0, 12000.0];
     for (story, fl) in model.stories.iter_mut().zip(elevations) {
@@ -3361,7 +3302,6 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
             app.core.model.nodes[node.index()].coord[2] = elevation;
         }
     }
-    // 上層をRCにする入力は材料・断面で与える。Story.structureは重量準備の算定値。
     let rc = prepared_rectangular_rc_portal().core.model;
     let material_offset = app.core.model.materials.len() as u32;
     for mut material in rc.materials {

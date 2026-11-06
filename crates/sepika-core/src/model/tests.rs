@@ -160,7 +160,6 @@ fn test_validate_dangling_slab_boundary() {
         floor_regions: vec![FloorRegion {
             id: FloorRegionId(0),
             name: String::new(),
-            // 存在しない節点 5 を境界に含む（陳腐化した参照）。
             boundary: vec![NodeId(0), NodeId(5)],
             secondary_beams: vec![],
             slab_ids: vec![],
@@ -318,7 +317,6 @@ fn test_material_serde_defaults_concrete_class() {
     assert_eq!(mat.category, MaterialCategory::Concrete);
     assert_eq!(mat.fc, Some(24.0));
 
-    // 区分がない入力は受け付けない。
     let without_category = r#"{
             "id": 0,
             "name": "FC24",
@@ -329,7 +327,6 @@ fn test_material_serde_defaults_concrete_class() {
         }"#;
     assert!(serde_json::from_str::<Material>(without_category).is_err());
 
-    // ラウンドトリップ（Lightweight1 が保存・復元できること）。
     let mat2 = Material {
         concrete_class: crate::units::ConcreteClass::Lightweight1,
         ..mat
@@ -374,7 +371,6 @@ fn test_wall_attr_total_opening_area_prefers_openings() {
     assert!((attr.total_opening_area() - 999.0).abs() < 1e-9);
     assert_eq!(attr.opening_dims(), None);
 
-    // 面積ゼロの開口だけなら寸法列は None(面積のみ扱い)
     attr.openings.push(WallOpening {
         width: 0.0,
         height: 1000.0,
@@ -409,7 +405,7 @@ fn test_openings_for_mode_envelope() {
     let attr = attr_with(vec![
         op(1000.0, 1000.0, Some([0.0, 0.0])),
         op(500.0, 800.0, Some([2000.0, 1200.0])),
-        op(300.0, 300.0, None), // 位置不明
+        op(300.0, 300.0, None),
     ]);
     let out = attr.openings_for_mode(MultiOpeningMode::Envelope);
     assert_eq!(out.len(), 2);
@@ -418,7 +414,6 @@ fn test_openings_for_mode_envelope() {
     assert!((out[0].height - 2000.0).abs() < 1e-9);
     assert_eq!(out[0].offset, Some([0.0, 0.0]));
     assert!((out[1].width - 300.0).abs() < 1e-9);
-    // 包絡モードの面積は包絡矩形基準(生の面積和より大きい)
     let a_env = attr.total_opening_area_for(MultiOpeningMode::Envelope);
     assert!(a_env > attr.total_opening_area());
 }
@@ -434,10 +429,8 @@ fn test_openings_for_mode_auto_merges_close_pairs_only() {
     ]);
     let out = attr.openings_for_mode(MultiOpeningMode::Auto);
     assert_eq!(out.len(), 2);
-    // 包絡結果: 幅 0..2000
     assert!((out[0].width - 2000.0).abs() < 1e-9);
     assert!((out[1].width - 900.0).abs() < 1e-9);
-    // 等価モードは元のまま
     assert_eq!(
         attr.openings_for_mode(MultiOpeningMode::Equivalent).len(),
         3
@@ -464,7 +457,6 @@ fn test_can_envelope_boundary() {
     let g = op(1000.0, 500.0, Some([2000.0, 0.0])); // l=1000(≥1m かつ ≥1.5h)
     assert!(!e.can_envelope(&g));
 
-    // 位置不明は不可
     let d = op(1000.0, 2000.0, None);
     assert!(!a.can_envelope(&d));
 }
@@ -494,7 +486,6 @@ fn test_wall_attr_slit_deserializes() {
 /// 三方スリット（柱際 2 辺＋下辺）と完全スリット（4 辺）を辺の組み合わせで表せる。
 #[test]
 fn test_slit_expresses_three_side_and_full() {
-    // 三方スリット（垂れ壁型）。上辺だけが躯体と一体なので、自重は上へ向かう。
     let three_side = WallSlit {
         column_face: [true, true],
         beam_face: [true, false],
@@ -502,7 +493,6 @@ fn test_slit_expresses_three_side_and_full() {
     assert!(three_side.any());
     assert!(!three_side.both_beam_faces());
 
-    // 完全スリット。上下の梁際をともに切った納まりは想定しないため、解析前チェックがエラーにする。
     let full = WallSlit {
         column_face: [true, true],
         beam_face: [true, true],
@@ -586,8 +576,6 @@ fn test_damper_props_relief_default_missing_field() {
 
 #[test]
 fn test_default_member_hysteresis_table() {
-    // 本実装の既定の非線形特性（各履歴則の原典）: 梁曲げは
-    // RC/SRC/CFT=武田型、S=標準型。
     assert_eq!(default_member_hysteresis(true), HysteresisModel::Takeda);
     assert_eq!(default_member_hysteresis(false), HysteresisModel::Standard);
 }
@@ -596,7 +584,6 @@ fn test_default_member_hysteresis_table() {
 fn test_set_member_hysteresis_roundtrip() {
     let mut model = Model::default();
     let e = ElemId(3);
-    // 既定は None（＝Auto）。
     assert_eq!(model.member_hysteresis(e), None);
     let old = model.set_member_hysteresis(e, HysteresisModel::OriginOriented);
     assert_eq!(old, None);
@@ -604,10 +591,8 @@ fn test_set_member_hysteresis_roundtrip() {
         model.member_hysteresis(e),
         Some(HysteresisModel::OriginOriented)
     );
-    // 上書き。
     let old = model.set_member_hysteresis(e, HysteresisModel::Takeda);
     assert_eq!(old, Some(HysteresisModel::OriginOriented));
-    // Auto で解除。
     let old = model.set_member_hysteresis(e, HysteresisModel::Auto);
     assert_eq!(old, Some(HysteresisModel::Takeda));
     assert_eq!(model.member_hysteresis(e), None);
@@ -641,7 +626,6 @@ fn test_default_load_cases_and_model() {
             LoadCaseKind::Seismic
         ]
     );
-    // id == 添字の規約・内容は空。
     for (i, c) in cases.iter().enumerate() {
         assert_eq!(c.id.index(), i);
         assert!(c.nodal.is_empty() && c.member.is_empty());
@@ -649,7 +633,6 @@ fn test_default_load_cases_and_model() {
     let model = Model::with_default_load_cases();
     assert!(model.validate().is_ok());
     assert_eq!(model.load_cases.len(), 5);
-    // 新規モデルは標準荷重組合せ（長期 G+P、短期地震 G+P±Kx・G+P±Ky）も持つ。
     assert_eq!(model.combinations, default_combinations());
 }
 
@@ -670,12 +653,10 @@ fn test_default_combinations() {
             "DL + LL - EY"
         ]
     );
-    // 長期 DL+LL: DL(0)+LL(架構用=1) を各1.0で参照する。
     assert_eq!(
         combos[0].terms,
         vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)]
     );
-    // 短期地震: DL+LL に EX(3)/EY(4) を ±1.0 で加える。
     assert_eq!(
         combos[1].terms,
         vec![
@@ -708,7 +689,6 @@ fn test_default_combinations() {
             (LoadCaseId(4), -1.0)
         ]
     );
-    // 参照する荷重ケース ID は default_load_cases() の DL/LL(架構用)/EX/EY に対応する。
     let cases = default_load_cases();
     assert_eq!(cases[0].name, DL_CASE_NAME);
     assert_eq!(cases[1].name, LL_FRAME_CASE_NAME);
@@ -754,10 +734,6 @@ fn test_requires_section_and_material_excludes_property_driven_elements() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// 断面の同一性キー（符号＋階）
-// ---------------------------------------------------------------------------
 
 fn named_section(id: u32, name: &str, floor: Option<&str>) -> Section {
     Section {
@@ -855,8 +831,6 @@ fn test_section_properties_eq_compares_materials() {
     }
 }
 
-// ---- 階と剛床の分離（階帰属は区間・剛床帰属は床面） ----
-
 /// 標高 `z` の節点を並べ、階を `levels` で定義したモデル。
 fn make_story_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
     let nodes: Vec<Node> = zs
@@ -921,7 +895,6 @@ fn test_story_spans_are_half_open_intervals_above_base() {
 /// これがないと、階生成を通す前に伏図を開いた時点で最下階が空になる。
 #[test]
 fn test_lowest_span_starts_at_base_when_invariant_not_yet_established() {
-    // 旧形式: 層の上端の床だけを階として持つ（基部の階がない）。
     let m = make_story_model(&[0.0, 4000.0, 7500.0], &[("2F", 4000.0), ("3F", 7500.0)]);
     assert_eq!(m.base_elevation(), 0.0);
     assert_eq!(
@@ -934,7 +907,6 @@ fn test_lowest_span_starts_at_base_when_invariant_not_yet_established() {
     assert_eq!(stories[1], Some(StoryId(0)));
     assert_eq!(stories[2], Some(StoryId(1)));
 
-    // 基部から許容差以内だが厳密には上にある階でも、柱脚が無所属にならない。
     let m = make_story_model(&[0.0, 4000.0], &[("1F", 0.5), ("2F", 4000.0)]);
     assert_eq!(m.node_stories()[0], Some(StoryId(0)));
 }
@@ -998,7 +970,6 @@ fn test_mid_height_node_belongs_to_story_but_not_to_diaphragm_level() {
         "中間節点は床面ではない"
     );
     assert!(m.on_diaphragm_level(StoryId(1), 4000.0));
-    // 許容差ちょうどは床面に含める。
     assert!(m.on_diaphragm_level(StoryId(1), 4000.0 + DIAPHRAGM_LEVEL_TOL_MM));
     assert!(!m.on_diaphragm_level(StoryId(1), 4000.0 + DIAPHRAGM_LEVEL_TOL_MM * 2.0));
 }
@@ -1080,7 +1051,6 @@ fn test_validate_duplicate_floor_region_boundary() {
         .floor_regions
         .push(FloorRegion::new(FloorRegionId(0), boundary.clone()));
     assert!(model.validate().is_ok());
-    // 同じ床領域を指す 2 枚目。小梁・床板の帰属が二重になるため弾く。
     model
         .floor_regions
         .push(FloorRegion::new(FloorRegionId(1), boundary));
@@ -1111,7 +1081,6 @@ fn test_validate_duplicate_floor_assignment_region_boundary() {
     let boundary = vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)];
     model.add_enclosed_slab_from_nodes(&boundary, SlabPlate::default());
     assert!(model.validate().is_ok());
-    // 同じ境界を指す 2 つ目の割当領域。荷重が二重に分配されるため弾く。
     let duplicate = model.floor_assignment_regions.regions[0].boundary.clone();
     model
         .floor_assignment_regions
@@ -1157,7 +1126,6 @@ fn test_add_enclosed_slab_reuses_no_plate_region() {
     let boundary = vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)];
     let first = model.add_enclosed_slab_from_nodes(&boundary, SlabPlate::default());
     assert_eq!(model.floor_assignment_regions.regions.len(), 1);
-    // 一度床板を取り除くと割当領域は未設定へ戻る。これを「版なし」にする。
     model.retain_slabs(|slab| slab.id != first);
     assert!(model.slabs.is_empty());
     let region = model.floor_assignment_regions.regions[0].id;
@@ -1263,7 +1231,6 @@ fn test_validate_enclosed_wall_plate_requires_assignment_region() {
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
-            // 割当領域が無い＝境界を解決できない（陳腐化した状態）。
             shape: WallPlateShape::Enclosed,
             section: None,
             opening_area: 0.0,
@@ -1310,7 +1277,6 @@ fn test_validate_duplicate_enclosed_wall_plate_boundary() {
     };
     model.add_enclosed_wall_plate_from_nodes(&boundary, empty.clone());
     assert!(model.validate().is_ok(), "{:?}", model.validate().err());
-    // 同じ閉領域を指す 2 枚目。
     model.add_enclosed_wall_plate_from_nodes(&boundary, empty);
     assert!(
         model.validate().is_err(),
@@ -1395,7 +1361,6 @@ fn test_validate_self_standing_wall_checks_only_node_refs() {
     // （荷重を流せる床領域に載っているかは幾何の問題で、解析前チェックが見る）。
     model.wall_plates = vec![mk([NodeId(0), NodeId(1)])];
     assert!(model.validate().is_ok(), "{:?}", model.validate());
-    // 実在しない節点はダングリング参照として検出する。
     model.wall_plates = vec![mk([NodeId(0), NodeId(9)])];
     assert!(
         model.validate().is_err(),
@@ -1588,7 +1553,6 @@ fn push_secondary_beam(model: &mut Model, nodes: [u32; 2], name: &str) {
 /// 材軸が連続する小梁（分割された小梁）の継ぎ目は自由端にしない。
 #[test]
 fn infer_does_not_free_collinear_spliced_beams() {
-    // 継ぎ目はどの大梁の材軸上にもない（幾何支持なし）。両端の大梁だけで支持される。
     let mut model = two_node_model(&[
         [-1000.0, 0.0, 0.0],
         [0.0, 0.0, 0.0],

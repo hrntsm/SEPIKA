@@ -873,7 +873,6 @@ mod tests {
         let coords = p.boundary_coords(&m).expect("境界座標");
         assert_eq!(coords.len(), 4);
         assert!((p.area(&m) - 4000.0 * 3000.0).abs() < 1e-6);
-        // 全節点を +100 mm ずらした「変形後」の座標を渡す。
         let moved: Vec<[f64; 3]> = m
             .nodes
             .iter()
@@ -885,7 +884,6 @@ mod tests {
         assert_eq!(coords[0], [100.0, 0.0, 0.0]);
         assert_eq!(coords[1], [4100.0, 0.0, 0.0]);
 
-        // 取り付く壁版も取付き先の節点座標に追従する。
         let attached = WallPlate {
             dl_support: None,
             self_weight_shares: Vec::new(),
@@ -932,7 +930,6 @@ mod tests {
             posts: Vec::new(),
         });
 
-        // 覆ってはいるが断面が無い。
         assert!(m.wall_plate_covers_region(&m.wall_plates[0]));
         assert!(!m.wall_plate_becomes_element(&m.wall_plates[0]));
 
@@ -1026,7 +1023,6 @@ mod tests {
             slit: WallSlit::default(),
         };
         let coords = p.boundary_coords(&m).expect("境界座標");
-        // 4点とも Y=0（左向き法線方向へは動かない）、上 2 点は Z=3900（+900 立ち上げ）。
         for c in &coords {
             assert_eq!(c[1], 0.0, "Y 方向へは張り出さない: {coords:?}");
         }
@@ -1211,7 +1207,6 @@ mod tests {
         };
         assert_eq!(m.wall_plate_extent(&p), Some([3200.0, 3200.0]));
 
-        // 最上階の床に立つ壁は上端を決める階が無い。
         m.stories.truncate(1);
         assert_eq!(m.wall_plate_extent(&p), None);
         assert_eq!(m.wall_plate_self_weight(&p, &m), None);
@@ -1389,7 +1384,6 @@ mod tests {
     /// 床領域 2 つ（4m ずつ、Z=3000）と、それぞれに床板を持つモデル。
     /// X = 0..8000, Y = 0..4000 を X=4000 で 2 分割した並びとする。
     fn model_two_regions() -> Model {
-        // 床領域の境界節点（0..5）と、自立壁の両端（6, 7）。
         let mut m = model_with_nodes(&[
             [0.0, 0.0, 3000.0],
             [4000.0, 0.0, 3000.0],
@@ -1465,7 +1459,6 @@ mod tests {
     #[test]
     fn coverage_splits_across_regions_by_length() {
         let mut m = model_two_regions();
-        // X=2000..6000 の壁。X=4000 の境界で 2:2 に分かれる。
         let p = push_self_standing(
             &mut m,
             [2000.0, 1000.0, 3000.0],
@@ -1535,7 +1528,6 @@ mod tests {
     #[test]
     fn coverage_reports_uncovered_outside_regions() {
         let mut m = model_two_regions();
-        // X=6000..10000。X=8000 より外は床領域が無い。
         let p = push_self_standing(
             &mut m,
             [6000.0, 1000.0, 3000.0],
@@ -1646,7 +1638,6 @@ mod tests {
     #[test]
     fn coverage_l_shape_notch_is_uncovered() {
         let mut m = model_l_region();
-        // Y=1000..7000。Y=4000 より上が欠け（X=6000）。
         let p = push_self_standing(
             &mut m,
             [6000.0, 1000.0, 3000.0],
@@ -1664,7 +1655,6 @@ mod tests {
     #[test]
     fn coverage_on_region_boundary_is_uncovered() {
         let mut m = model_two_regions();
-        // 領域 0 の南辺（Y=0, X=500..3500）にぴったり載せる。
         let p = push_self_standing(
             &mut m,
             [500.0, 0.0, 3000.0],

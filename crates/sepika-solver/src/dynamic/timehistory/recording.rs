@@ -576,7 +576,6 @@ mod tests {
                 fy: None,
             }],
             stories: vec![
-                // 階は床であり、先頭は基部の床（`Model::layers` の不変条件）。
                 Story {
                     wall_weights: Vec::new(),
                     level_kind: Default::default(),
@@ -687,8 +686,7 @@ mod tests {
         let mut nontrivial_translation = [false; 2];
         let mut checked = 0;
         for (k, &t) in recording.frame_time.iter().enumerate() {
-            // frame_time はいずれかの time と一致するはず（浮動小数点の丸めに
-            // 依存しないよう、記録済みの時刻刻みそのものと突き合わせる）。
+            // 時刻を再計算すると丸め誤差で一致しないため、記録済みの刻みそのものを照合する。
             let Some(step) = result.time.iter().position(|&tt| tt == t) else {
                 continue;
             };

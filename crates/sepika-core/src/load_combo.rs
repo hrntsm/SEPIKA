@@ -323,14 +323,12 @@ mod tests {
             Some(LoadCaseId(4)),
             None,
         );
-        // DL+LL, DL+LL±EX, DL+LL±EY の 5 組合せ
         assert_eq!(combos.len(), 5);
         assert_eq!(combos[0].name, "DL + LL");
         assert_eq!(combos[1].name, "DL + LL + EX");
         assert_eq!(combos[2].name, "DL + LL - EX");
         assert_eq!(combos[3].name, "DL + LL + EY");
         assert_eq!(combos[4].name, "DL + LL - EY");
-        // 負側加力は係数 -1.0
         assert_eq!(combos[2].terms[2].1, -1.0);
         assert_eq!(combos[4].terms[2].1, -1.0);
     }
@@ -411,14 +409,11 @@ mod tests {
                 (LoadCaseId(4), -1.0)
             ]
         );
-        // 風荷重は生成対象外のため、暴風の組合せは 1 件も作られない。
         assert!(combos.iter().all(|c| !c.name.contains('W')));
     }
 
     #[test]
     fn test_snow_factors_direct_input() {
-        // δ1/δ3 の直接入力（デフォルト 0.7/0.35、直接入力可能）。
-        // 名前・係数の両方に反映される。
         let input = ComboInput {
             dl: LoadCaseId(1),
             ll: LoadCaseId(2),
@@ -438,9 +433,7 @@ mod tests {
                 .find(|c| c.name == n)
                 .unwrap_or_else(|| panic!("missing combo {n}"))
         };
-        // 長期積雪: δ1=0.65
         assert_eq!(by_name("DL + LL + 0.65SL").terms[2], (LoadCaseId(7), 0.65));
-        // 地震時: δ3=0.4
         assert_eq!(
             by_name("DL + LL + 0.4SL + EX").terms[2],
             (LoadCaseId(7), 0.4)

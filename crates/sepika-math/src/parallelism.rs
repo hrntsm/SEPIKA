@@ -113,7 +113,6 @@ mod tests {
     // 並列度設定はプロセスグローバルのため、順序依存を避けて1テストに集約する。
     #[test]
     fn test_parallelism_roundtrip_and_run() {
-        // 既定は Deterministic
         assert_eq!(parallelism(), Parallelism::Deterministic);
         assert!(!is_parallel());
 
@@ -123,11 +122,9 @@ mod tests {
 
         set_parallelism(Parallelism::Threads(2));
         assert_eq!(parallelism(), Parallelism::Threads(2));
-        // Threads(n) の run は n スレッドのプールで実行される
         let n = run(rayon::current_num_threads);
         assert_eq!(n, 2);
 
-        // 0/1 は Auto / Deterministic に正規化される
         assert_eq!(Parallelism::from_threads(0), Parallelism::Auto);
         assert_eq!(Parallelism::from_threads(1), Parallelism::Deterministic);
         assert_eq!(Parallelism::from_threads(4), Parallelism::Threads(4));

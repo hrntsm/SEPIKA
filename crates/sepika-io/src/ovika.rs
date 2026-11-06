@@ -1614,7 +1614,6 @@ mod tests {
         save_ovika(&path, &model, OvikaExtras::default()).unwrap();
         let model_bytes = rmp_serde::to_vec_named(&model).unwrap();
 
-        // model.msgpack のエントリだけを manifest から落とす（zip 内には実体を残す）。
         let manifest = Manifest {
             schema_version: CURRENT_SCHEMA_VERSION,
             units: "internal: N-mm-s".to_string(),
@@ -1782,7 +1781,6 @@ mod tests {
         assert_eq!(loaded.results.as_deref(), Some(results.as_slice()));
         assert_eq!(loaded.analysis_settings.as_deref(), Some(cfg.as_slice()));
 
-        // manifest に列挙され、ハッシュ検証の対象になっている。
         let manifest = read_manifest(&path);
         assert_eq!(manifest.schema_version, 1);
         for (name, data) in [

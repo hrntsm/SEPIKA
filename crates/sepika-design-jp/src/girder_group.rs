@@ -202,11 +202,8 @@ mod tests {
 
         let overrides = girder_group_overrides(&model, &member_forces);
         let ov = overrides.get(&ElemId(0)).expect("グループ所属");
-        // 両要素が同じ合成値を共有する。
         assert_eq!(ov, overrides.get(&ElemId(1)).unwrap());
-        // 全長 = 3000+3000。
         assert!((ov.length - 6000.0).abs() < 1e-9);
-        // 端部モーメントは外端（要素0の pos0、要素1の pos1）。
         assert_eq!(ov.end_moments_z, Some((-200.0e6, -200.0e6)));
         // A式: M0 = (50k+50k)・6000/8 = 75e6、Mc_A = 75e6 − 200e6 < 0。
         // B式: グループ中央(3000mm)＝要素0の pos=1.0 の行 → +100e6。
@@ -216,10 +213,8 @@ mod tests {
         let (m_rep, q_rep) = ov.shear_span.unwrap();
         assert!((m_rep - 200.0e6).abs() < 1e-3);
         assert!((q_rep - 50_000.0).abs() < 1e-6);
-        // 剛域なし → 内法長 = 全長。
         assert!((ov.clear_length - 6000.0).abs() < 1e-9);
 
-        // グループ未指定なら空。
         let mut model2 = model;
         model2.girder_groups.clear();
         assert!(girder_group_overrides(&model2, &member_forces).is_empty());

@@ -74,7 +74,6 @@ fn build_grid_model(nx: usize, ny: usize) -> Model {
     }
 
     let mut eid = 0u32;
-    // 柱。
     for j in 0..ny {
         for i in 0..nx {
             model
@@ -83,7 +82,6 @@ fn build_grid_model(nx: usize, ny: usize) -> Model {
             eid += 1;
         }
     }
-    // 梁（X 方向・Y 方向、各階）。
     for level in 0..=1 {
         for j in 0..ny {
             for i in 0..nx - 1 {

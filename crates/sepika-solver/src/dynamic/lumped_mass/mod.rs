@@ -347,7 +347,6 @@ mod tests {
         let w_zero_mass = stick_omega1(&with_zero_mass_story);
 
         assert!(w_zero_mass.is_finite() && w_zero_mass > 0.0);
-        // 健全なケースと同程度のオーダー（1桁以内）に収まること。
         assert!(
             w_zero_mass < w_healthy * 10.0,
             "ω1 が異常に大きい（無減衰化の兆候）: zero_mass={w_zero_mass}, healthy={w_healthy}"
@@ -407,7 +406,6 @@ mod tests {
         let modal = lumped_mass_eigen(&lm, 5).expect("固有値分解に成功する");
         assert_eq!(modal.omega2.len(), 1);
         assert_eq!(modal.shapes.len(), 1);
-        // 単一質点のモード形状は最上階=1.0 に正規化される。
         assert!((modal.shapes[0][0] - 1.0).abs() < 1e-12);
     }
 
@@ -431,7 +429,6 @@ mod tests {
 
     #[test]
     fn test_stick_th_responds_and_bounded() {
-        // 正弦地動で応答が非ゼロかつ有限。
         let lm = LumpedMassModel {
             identifications: Vec::new(),
             bending: Vec::new(),
@@ -470,7 +467,6 @@ mod tests {
 
     #[test]
     fn test_stick_th_yields_under_strong_input() {
-        // 強い地動で層が降伏（塑性率 μ>1）。
         let lm = LumpedMassModel {
             identifications: Vec::new(),
             bending: Vec::new(),
@@ -483,7 +479,6 @@ mod tests {
             stories: vec![stick(2.0, 1000.0, 0.5, 2.0, 700.0, 8.0, 800.0)],
         };
         let dt = 0.01;
-        // 一定方向の強い引き込みで大変形。
         let accel: Vec<f64> = (0..400)
             .map(|i| {
                 let t = i as f64 * dt;

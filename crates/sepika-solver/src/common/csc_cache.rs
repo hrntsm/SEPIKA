@@ -124,7 +124,6 @@ mod tests {
     #[test]
     fn test_csc_cache_matches_assemble_csc_across_pattern_change() {
         let n = 2;
-        // 1 回目: (0,0),(1,1) の 2 要素。
         let t1 = vec![
             Triplet {
                 row: 0,
@@ -141,7 +140,6 @@ mod tests {
         let got1 = cache.assemble(n, &t1);
         dense_eq(&got1, &assemble_csc(n, t1.clone()), n);
 
-        // 2 回目: 同じ座標・並び順で値だけ変更（高速パス）。
         let t2 = vec![
             Triplet {
                 row: 0,
@@ -157,8 +155,6 @@ mod tests {
         let got2 = cache.assemble(n, &t2);
         dense_eq(&got2, &assemble_csc(n, t2.clone()), n);
 
-        // 3 回目: 非ゼロ数が変わる（弾塑性要素の接線剛性が 0.0 を跨いだ想定）。
-        // 安全側で作り直され、結果は変わらない。
         let t3 = vec![Triplet {
             row: 0,
             col: 0,
@@ -167,7 +163,6 @@ mod tests {
         let got3 = cache.assemble(n, &t3);
         dense_eq(&got3, &assemble_csc(n, t3.clone()), n);
 
-        // 4 回目: 非ゼロ数が元に戻る（再度パターンが変わる）。
         let got4 = cache.assemble(n, &t1);
         dense_eq(&got4, &assemble_csc(n, t1), n);
 
@@ -245,7 +240,6 @@ mod tests {
                 },
             ],
         );
-        // 完全塑性化で非対角成分が消えた想定（非ゼロ数が減る）。
         let k_yielded = assemble_csc(
             n,
             vec![
@@ -270,7 +264,6 @@ mod tests {
             n,
         );
 
-        // 係数だけ変更（高速パス）。
         let got2 = guard.combine_ref(n, &[(3.0, &m), (0.02, &k_full)]);
         dense_eq(
             got2,
@@ -278,7 +271,6 @@ mod tests {
             n,
         );
 
-        // k の非ゼロ数が変わる（安全側フォールバック）。
         let got3 = guard.combine_ref(n, &[(3.0, &m), (0.02, &k_yielded)]);
         dense_eq(
             got3,

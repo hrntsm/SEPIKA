@@ -1147,12 +1147,7 @@ mod tests {
         );
     }
 
-    // `ElementKind` は柱・梁を区別しない（幾何で決まる。`sepika_core::frame::is_column`
-    // 参照）ため、`is_primary_beam_for_cmq` が実際に除外するのは非 `Beam` 種別の要素
-    // （壁・仕口パネル等）と実部材化小梁だけ。柱への集中荷重が CMQ 図に出ない理由は
-    // 別にある: `LoadTransfer::Columns`（雑壁・取り付く壁版の柱伝達）は `NodalLoad`
-    // を生成し、`LoadCase.member` に一切入らないため（`sepika_load::wall_attached`）。
-    //
+    // 柱もBeam種別なので、種別だけでCMQ表示から柱を除外することはできない。
     /// 表示中ケースの `member` は、由来を問わず（床分配・自重・取り付く壁版・
     /// 手入力のいずれでも）大梁ごとに束ねられる。非 `Beam` 種別（壁等）への
     /// 部材荷重は対象外（`is_primary_beam_for_cmq`）。
@@ -1170,7 +1165,6 @@ mod tests {
             kind: LoadCaseKind::Dead,
             nodal: Vec::new(),
             member: vec![
-                // 床分配由来（自動）
                 MemberLoad::auto(
                     ElemId(0),
                     [0.0, 0.0, -1.0],
@@ -1181,7 +1175,6 @@ mod tests {
                         w2: 1.0,
                     },
                 ),
-                // 手入力（取り付く壁版・梁自重相当）
                 MemberLoad::manual(
                     ElemId(0),
                     [0.0, 0.0, -1.0],
@@ -1190,7 +1183,6 @@ mod tests {
                         p: 100.0,
                     },
                 ),
-                // 壁（非 Beam 種別）への部材荷重は CMQ 対象外
                 MemberLoad::auto(
                     ElemId(1),
                     [0.0, 0.0, -1.0],
@@ -1218,7 +1210,7 @@ mod tests {
     /// 元の大きさの二乗と一致する（ey・ez は直交単位ベクトルのため）。
     #[test]
     fn project_load_splits_into_orthogonal_components() {
-        let dir = [0.6, 0.0, -0.8]; // 正規化済み（斜め方向）
+        let dir = [0.6, 0.0, -0.8];
         let ey = [0.0, 0.0, -1.0];
         let ez = [1.0, 0.0, 0.0];
         let kind = MemberLoadKind::Point { a: 100.0, p: 10.0 };
@@ -1234,7 +1226,6 @@ mod tests {
             (p_ey * p_ey + p_ez * p_ez - 10.0 * 10.0).abs() < 1e-9,
             "ey成分・ez成分の二乗和は元の大きさの二乗と一致するはず: p_ey={p_ey} p_ez={p_ez}"
         );
-        // dir はほぼ ey 向き（0.8）で ez 成分（0.6）より大きい
         assert!(p_ey.abs() > p_ez.abs());
     }
 
@@ -1263,7 +1254,7 @@ mod tests {
         let ey = [0.0, 0.0, 1.0];
         let kind = MemberLoadKind::Point { a: 0.0, p: 10.0 };
         let unit = project_load(kind.clone(), [0.0, 0.0, -1.0], ey);
-        let scaled = project_load(kind, [0.0, 0.0, -3.5], ey); // 長さ3.5・向きは同じ
+        let scaled = project_load(kind, [0.0, 0.0, -3.5], ey);
         let (MemberLoadKind::Point { p: p_unit, .. }, MemberLoadKind::Point { p: p_scaled, .. }) =
             (unit, scaled)
         else {
@@ -1295,8 +1286,8 @@ mod tests {
     /// 描かれる）。本テストは基準（`s=+1`）を既定ケースで再現し続けることを固定する。
     #[test]
     fn project_load_preserves_legacy_sign_for_default_horizontal_beam_under_gravity() {
-        let ey = [0.0, 0.0, 1.0]; // 標準的な水平梁（ref_vector=[0,0,1]）の局所 ey
-        let dir = [0.0, 0.0, -1.0]; // 鉛直荷重（DIR_DOWN）
+        let ey = [0.0, 0.0, 1.0];
+        let dir = [0.0, 0.0, -1.0];
         let kind = MemberLoadKind::Distributed {
             a: 0.0,
             b: 4000.0,

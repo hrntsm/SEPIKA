@@ -435,8 +435,6 @@ mod tests {
 
     #[test]
     fn test_probe_matches_trial_without_mutating_state() {
-        // probe は trial と数学的に同一の結果を返し、状態を書き換えない
-        // （反転履歴を経た後の非弾性域で確認。反転検知ロジックの再現性が要点）。
         let mut mp = MenegottoPinto::new(205000.0, 235.0);
         let eps_y = 235.0 / 205000.0;
         for &target in &[eps_y * 4.0, -eps_y * 4.0] {
@@ -458,9 +456,7 @@ mod tests {
 
     #[test]
     fn test_r_degrades_after_plastic_excursion() {
-        // 大振幅の反転後は R が小さくなり、遷移曲線が丸くなる。
-        // 丸みの指標として「反転から 1εy 戻った点の応力の弾性除荷直線からの乖離」を
-        // 小振幅反転の場合と比較する。
+        // 弾性除荷直線からの乖離を遷移曲線の丸みの指標とする。
         let e = 205000.0;
         let fy = 235.0;
         let eps_y = fy / e;
@@ -485,7 +481,6 @@ mod tests {
 
     #[test]
     fn test_isotropic_hardening_grows_cyclic_peaks() {
-        // a3 > 0 で対称サイクルのピーク応力がサイクルごとに成長する（等方硬化）。
         let e = 205000.0;
         let fy = 235.0;
         let eps_y = fy / e;
@@ -508,14 +503,10 @@ mod tests {
         };
         let peaks_iso = run_peaks(0.03);
         let peaks_kin = run_peaks(0.0);
-        // 等方硬化ありは、履歴が深まるほど降伏漸近線がシフトし、同一履歴の
-        // 移動硬化のみの場合よりサイクル後のピーク応力が大きくなる。
         assert!(
             peaks_iso.last().unwrap() > peaks_kin.last().unwrap(),
             "iso={peaks_iso:?} kin={peaks_kin:?}"
         );
-        // シフト量は履歴極値の拡大とともに単調に効くため、等方硬化ありの
-        // ピーク増分（対 移動硬化のみ）は最終サイクルほど大きい。
         let gain_first = peaks_iso[1] - peaks_kin[1];
         let gain_last = peaks_iso.last().unwrap() - peaks_kin.last().unwrap();
         assert!(
@@ -526,7 +517,6 @@ mod tests {
 
     #[test]
     fn test_tangent_matches_finite_difference() {
-        // 接線剛性が数値微分と一致する（反転後の遷移曲線上で確認）。
         let e = 205000.0;
         let fy = 235.0;
         let eps_y = fy / e;

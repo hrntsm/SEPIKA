@@ -327,7 +327,6 @@ mod tests {
 
     #[test]
     fn area_xy_projects_and_area_3d_keeps_true_area() {
-        // XZ 平面に立つ 1000×1000 の正方形。XY へ投影すると潰れて 0 になる。
         let pts = [
             [0.0, 0.0, 0.0],
             [1000.0, 0.0, 0.0],
@@ -450,9 +449,7 @@ mod tests {
     fn point_segment_dist_clamps_to_the_segment_ends() {
         let (a, b) = ([0.0, 0.0], [10.0, 0.0]);
         assert!((point_segment_dist([5.0, 3.0], a, b) - 3.0).abs() < 1e-12);
-        // 線分の外側へ出た点は端点までの距離になる。
         assert!((point_segment_dist([14.0, 3.0], a, b) - 5.0).abs() < 1e-12);
-        // 長さ 0 の線分は始点までの距離。
         assert!((point_segment_dist([3.0, 4.0], a, a) - 5.0).abs() < 1e-12);
     }
 
@@ -462,7 +459,6 @@ mod tests {
         let sq = ccw_square(1000.0);
         let inner = [500.0, 500.0];
         let outer = [1500.0, 500.0];
-        // 辺から 0.5mm 内側（BOUNDARY_TOL_MM = 1.0 の帯の中）。
         let on_band = [500.0, 0.5];
 
         for p in [inner, outer, on_band] {

@@ -93,7 +93,6 @@ fn test_rc_rect_capacity() {
 
 #[test]
 fn test_rc_moment_increases_with_moderate_compression() {
-    // RC 断面は適度な圧縮軸力下で曲げ耐力が増す（相関曲線のふくらみ）
     let strength = StrengthParams::default();
     let fibers = plastic_fibers(&sample_rc_shape(), &strength, YieldModelKind::MultiFiber)
         .expect("配筋は妥当");
@@ -114,7 +113,6 @@ fn test_simple_spring_surface_linear_interaction_and_poles() {
     let surf = build_surface(&fibers, YieldModelKind::MultiFiber, 16, 32);
     assert_eq!(surf.grid.len(), 17);
     assert!(surf.grid.iter().all(|row| row.len() == 32));
-    // 極（α=0/π）は純引張/純圧縮で一定
     for p in &surf.grid[0] {
         assert_relative_eq!(p[0], npl, max_relative = 1e-9);
     }
@@ -128,7 +126,6 @@ fn test_simple_spring_surface_linear_interaction_and_poles() {
         .all(|p| p.iter().all(|v| v.is_finite())));
 
     let simp = build_simple_spring_surface(&fibers, 16, 32);
-    // 極は軸耐力に一致
     for p in &simp.grid[0] {
         assert_relative_eq!(p[0], npl, max_relative = 1e-6);
     }
@@ -140,7 +137,6 @@ fn test_simple_spring_surface_linear_interaction_and_poles() {
         .iter()
         .flatten()
         .all(|p| p.iter().all(|v| v.is_finite())));
-    // 全格子点が |N|/N許容 + √((My/Mp_y)² + (Mz/Mp_z)²) = 1 を満たす
     for p in simp.grid.iter().flatten() {
         let n_ref = if p[0] >= 0.0 {
             simp.n_tens
@@ -165,7 +161,6 @@ fn test_slice_at_n_symmetric() {
     // β=0 は純 y 軸まわり曲げ → My = Mp_y
     let mp_y = 235.0 * 100.0 * 200.0 * 200.0 / 4.0;
     assert_relative_eq!(pts[0][0], mp_y, max_relative = 1e-2);
-    // 対称性: β と β+π で符号反転
     assert_relative_eq!(pts[0][0], -pts[8][0], max_relative = 1e-9);
 }
 
@@ -191,7 +186,6 @@ fn test_steel_h_plastic_moment() {
 
 #[test]
 fn test_tee_centroid_correction() {
-    // 非対称断面（T形）: 図心補正後、純軸力で M が出ないこと
     let shape = SectionShape::SteelTee {
         height: 200.0,
         width: 200.0,
@@ -212,17 +206,14 @@ fn test_m_phi_initial_stiffness_and_plateau() {
     let (b, d, fy, e) = (100.0, 200.0, 235.0, 205000.0);
     let fibers = steel_rect_fibers(b, d, fy, 200);
     let curve = m_phi_curve(&fibers, 1.0, 0.0, 0.0, 60).unwrap();
-    // 離散断面の I（ファイバ位置ベース）と比較
     let i_disc: f64 = fibers.iter().map(|f| f.area * f.z * f.z).sum();
     assert_relative_eq!(curve.ei0, e * i_disc, max_relative = 1e-6);
-    // 最終点は Mp = fy·b·d²/4 の 99% 以上
     let mp = fy * b * d * d / 4.0;
     let m_last = curve.points.last().unwrap()[1];
     assert!(
         m_last > 0.99 * mp && m_last <= mp * (1.0 + 1e-9),
         "m_last = {m_last}, mp = {mp}"
     );
-    // 単調非減少
     for w in curve.points.windows(2) {
         assert!(w[1][1] >= w[0][1] - 1e-6);
     }
@@ -247,13 +238,11 @@ fn test_m_theta_elastic_slope_and_plastic_rotation() {
         ei0: 1000.0,
     };
     let actual = m_theta_curve(&curve, 6000.0, 100.0);
-    // 最終点は弾性回転10と塑性回転1の和。
     assert_eq!(actual, vec![[0.0, 0.0], [1.0, 1.0], [11.0, 10.0]]);
 }
 
 #[test]
 fn test_m_phi_rc_section() {
-    // RC断面: 引張側コンクリートが効かない弾完全塑性でも有限・単調な M-φ になる
     let strength = StrengthParams::default();
     let fibers = plastic_fibers(&sample_rc_shape(), &strength, YieldModelKind::MultiFiber)
         .expect("配筋は妥当");
@@ -262,9 +251,8 @@ fn test_m_phi_rc_section() {
     assert!(curve.ei0.is_finite() && curve.ei0 > 0.0);
     for w in curve.points.windows(2) {
         assert!(w[1][1].is_finite());
-        assert!(w[1][1] >= w[0][1] - 1.0); // 数値誤差の微小許容
+        assert!(w[1][1] >= w[0][1] - 1.0);
     }
-    // 終局は全塑性耐力（plastic_moment_at_n）に漸近する
     let mp = plastic_moment_at_n(&fibers, 1.0, 0.0, 0.2 * nc).unwrap()[0];
     let m_last = curve.points.last().unwrap()[1];
     assert!(m_last > 0.95 * mp, "m_last = {m_last}, mp = {mp}");
@@ -272,9 +260,6 @@ fn test_m_phi_rc_section() {
 
 #[test]
 fn test_m_phi_multispring_is_piecewise() {
-    // マルチスプリングの M-φ は少数バネの逐次降伏による折れ線
-    // （= ファイバーより早く初期降伏の折れ点が現れる）。ここでは両者の
-    // 初期剛性がほぼ一致し、終局耐力もほぼ一致することを確認する。
     let strength = StrengthParams::default();
     let shape = sample_rc_shape();
     let ms = plastic_fibers(&shape, &strength, YieldModelKind::MultiSpring).expect("配筋は妥当");
@@ -285,7 +270,6 @@ fn test_m_phi_multispring_is_piecewise() {
         ms.len(),
         fib.len()
     );
-    // 軸耐力は離散化によらず一致する（面積保存）
     let (nc_ms, nt_ms) = axial_capacity(&ms);
     let (nc_f, nt_f) = axial_capacity(&fib);
     assert_relative_eq!(nc_ms, nc_f, max_relative = 1e-9);

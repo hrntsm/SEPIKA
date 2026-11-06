@@ -214,7 +214,6 @@ mod tests {
 
     #[test]
     fn span_is_valid_は規約0_0以上t_i未満t_j以下1_0を判定する() {
-        // 代表的な妥当値。
         assert!(span_is_valid([0.0, 1.0]));
         assert!(span_is_valid([0.25, 0.75]));
 
@@ -224,11 +223,9 @@ mod tests {
         assert!(!span_is_valid([-1e-3, 1.0]));
         assert!(!span_is_valid([0.0, 1.0 + 1e-3]));
 
-        // つぶれた区間・逆転した区間は載る範囲が無い。
         assert!(!span_is_valid([0.5, 0.5]));
         assert!(!span_is_valid([0.75, 0.25]));
 
-        // 非有限は弾く。
         assert!(!span_is_valid([f64::NAN, 1.0]));
         assert!(!span_is_valid([0.0, f64::INFINITY]));
     }

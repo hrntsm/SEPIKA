@@ -105,7 +105,6 @@ fn test_modal_roundtrip_partial() {
         writer.write_rows(&batch).unwrap();
         Box::new(writer).finish().unwrap();
     }
-    // 部分読出し: period 列(=1)のみ射影
     let batches = read_partial(path_str, vec![1]).unwrap();
     let b = &batches[0];
     assert_eq!(b.num_columns(), 1);
@@ -195,13 +194,10 @@ fn test_time_history_write_read_and_node_filter() {
         writer.finish().unwrap();
     }
 
-    // 全行が書かれている。
     let batches = read_all(path_str).unwrap();
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 9);
 
-    // 低レベル API の step_range 境界: 両端を含むステップ 1..=2 の
-    // 2 ステップ × 3 節点 = 6 行（旧テストは 2 節点/step で 4 行だった）。
     let batches = read_time_history_range(path_str, Some((1, 2)), None).unwrap();
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 6, "step_range は両端を含む");
@@ -217,7 +213,6 @@ fn test_time_history_write_read_and_node_filter() {
         }
     }
 
-    // node_filter: 節点 1 の行だけを返す。
     let batches = read_time_history_range(path_str, None, Some(&[1u32])).unwrap();
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 3);
@@ -263,7 +258,6 @@ fn test_fs_result_store_writer_manifest_and_reopen() {
         assert_eq!(entry.rows, 3);
     }
 
-    // 閉じて再度 open しても manifest が復元される。
     let store = FsResultStore::open(&dir).unwrap();
     let manifest = store.manifest();
     assert_eq!(manifest.entries.len(), 1);
@@ -282,10 +276,6 @@ fn test_fs_result_store_discard_pending_drops_partial_results() {
     let _ = std::fs::remove_dir_all(&dir);
     let mut store = FsResultStore::open(&dir).unwrap();
 
-    // 途中失敗ジョブを模擬: 1 種別目（NodalDisp）は finish 済み（保留に積まれる）で、
-    // **2 種別目のライタを取得してから**失敗した想定（複数種別を書くジョブの実際の
-    // 失敗経路。かつては writer() が自動 sync して 1 種別目が manifest へ吸収され、
-    // discard_pending で巻き戻せなかった）。
     {
         let mut writer = store.writer(1, ResultKind::NodalDisp, None).unwrap();
         let batch = nodal_disp_batch(&[1], &[[0.1; 6]]).unwrap();
@@ -293,7 +283,6 @@ fn test_fs_result_store_discard_pending_drops_partial_results() {
         writer.finish().unwrap();
     }
     {
-        // 2 種別目のライタ取得（この時点で 1 種別目が manifest へ漏れてはならない）。
         let _writer = store.writer(1, ResultKind::MemberForce, None).unwrap();
         // finish せず drop ＝ 書き込み失敗の想定。
     }
@@ -304,7 +293,6 @@ fn test_fs_result_store_discard_pending_drops_partial_results() {
         "破棄した保留エントリが manifest へ採用されてはならない"
     );
 
-    // 破棄後の正常な書き込みは通常どおり manifest へ反映される。
     {
         let mut writer = store.writer(2, ResultKind::NodalDisp, None).unwrap();
         let batch = nodal_disp_batch(&[1, 2], &[[0.1; 6], [0.2; 6]]).unwrap();

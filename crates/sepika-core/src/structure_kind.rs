@@ -215,7 +215,6 @@ mod tests {
     }
 
     fn model_with(shape: Option<SectionShape>, category: MaterialCategory) -> Model {
-        // 材料は断面が持つ。
         let sec = Section {
             material: Some(crate::ids::MaterialId(0)),
             ..section(shape)

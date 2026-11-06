@@ -754,16 +754,12 @@ mod tests {
         let counts = spec.counts();
         let model = frame_model(&spec).unwrap();
 
-        // 3 通り × 2 通り × 4 レベル。
         assert_eq!(model.nodes.len(), 3 * 2 * 4);
         assert_eq!(model.nodes.len(), counts.nodes);
-        // 柱 = 格子点 6 × 3 層。梁 = (2×2 + 1×3) × 4 レベル
-        //（基部レベルの基礎梁を含む。基礎梁は常に生成する）。
         assert_eq!(counts.columns, 6 * 3);
         assert_eq!(counts.girders, (2 * 2 + 3) * 4);
         assert_eq!(model.elements.len(), counts.columns + counts.girders);
 
-        // 基礎梁は基部レベルに架かる。
         let base_beams = model
             .elements
             .iter()
@@ -776,7 +772,6 @@ mod tests {
             .count();
         assert_eq!(base_beams, 2 * 2 + 3, "基礎梁が基部レベルに架かる");
 
-        // 柱脚は基部レベルの 6 節点だけが固定。
         let fixed: Vec<&Node> = model
             .nodes
             .iter()
@@ -785,7 +780,6 @@ mod tests {
         assert_eq!(fixed.len(), 6);
         assert!(fixed.iter().all(|n| n.coord[2] == 0.0));
 
-        // ID ＝ 配列添字・参照整合。
         assert!(model.validate().is_ok(), "{:?}", model.validate());
     }
 
@@ -817,7 +811,6 @@ mod tests {
         let names: Vec<&str> = model.axes[1].axes.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, vec!["Y1", "Y2"]);
 
-        // 階は床であり、先頭は基部の床。床基準の既定名で標高の昇順に並ぶ。
         let stories: Vec<(&str, f64)> = model
             .stories
             .iter()
@@ -827,9 +820,7 @@ mod tests {
             stories,
             vec![("1F", 0.0), ("2F", 4000.0), ("3F", 7500.0), ("4F", 11000.0)]
         );
-        // 不変条件: 階の列の先頭は基部。
         assert_eq!(model.stories[0].elevation, Some(model.base_elevation()));
-        // 3 階建ての層は 3 つ。名前は下端の階（法令の「i 階」）。
         let layers: Vec<(String, f64)> = model
             .layers()
             .into_iter()
@@ -876,13 +867,11 @@ mod tests {
             ..FrameSpec::default()
         };
         assert!(frame_model(&zero_thickness).is_err());
-        // 標準材料にないグレードは、床の材料が決まらないため生成しない。
         let unknown_concrete = FrameSpec {
             slab_concrete: "Fc999".into(),
             ..FrameSpec::default()
         };
         assert!(frame_model(&unknown_concrete).is_err());
-        // 床を作らないなら床のコンクリートは使わないので、名称は問わない。
         let no_slabs = FrameSpec {
             with_slabs: false,
             slab_concrete: String::new(),
@@ -1079,7 +1068,6 @@ mod tests {
     fn test_generated_slabs_share_one_section() {
         let spec = FrameSpec::default();
         let model = frame_model(&spec).unwrap();
-        // 2×1 スパン × 4 レベル（基部を含む）= 8 枚。
         assert_eq!(model.floor_regions.len(), 2 * 4);
         assert_eq!(model.floor_regions.len(), spec.counts().slabs);
         assert_eq!(model.sections.len(), 1, "床の断面は 1 枚だけ");
@@ -1132,7 +1120,6 @@ mod tests {
         assert!(mat.density > 0.0, "自重が 0 にならない");
         assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-        // グレードを変えれば、その規格値の材料になる。
         let spec = FrameSpec {
             slab_concrete: "Fc30".into(),
             ..FrameSpec::default()
@@ -1176,7 +1163,6 @@ mod tests {
         let base_beams = model.elements.iter().filter(|e| at_base(e)).count();
         assert_eq!(base_beams, 2 * 2 + 3, "大梁 OFF でも基礎梁は作る");
         assert_eq!(spec.counts().girders, base_beams);
-        // 基部より上には梁がない。
         let upper = model.elements.iter().filter(|e| {
             e.nodes.len() == 2 && {
                 let a = model.nodes[e.nodes[0].index()].coord[2];
@@ -1208,7 +1194,6 @@ mod tests {
                 story.name
             );
         }
-        // 基部の階には基礎梁が属する。
         let base = crate::frame::build_frame(
             &model,
             crate::frame::FrameTarget::Story(model.stories[0].id),
@@ -1266,7 +1251,6 @@ mod tests {
                 ("4F", 11000.0)
             ]
         );
-        // 格子点は 3 × 2 × 4。
         assert_eq!(grid.points().count(), 24);
         assert!(!grid.is_empty());
     }

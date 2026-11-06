@@ -279,7 +279,7 @@ impl Model {
         }
         let mut region = vec![vec![clear.clone()]];
         region.extend(extra_polys.into_iter().map(|p| vec![p]));
-        // 内包検査は開口控除前の全実領域で行い、重複開口も正当とする。
+        // 開口控除後の領域で内包検査すると、重複する正当な開口まで領域外になる。
         let clear_region = region.clone();
         let gross = shapes_area(&region);
         let clear_z_range = region

@@ -249,7 +249,6 @@ mod tests {
         // l0/lw = 0.25、h0/h = 0.33333 → max = 0.33333
         let r = wall_opening_reduction_strength(Some((1000.0, 1000.0, 3000.0, 4000.0)));
         assert!((r - (1.0 - 1.0 / 3.0)).abs() < 1e-9, "r={}", r);
-        // 剛性用 r1 = 1 − 1.25·0.288675 = 0.6392 とは一致しない。
         let r1 = 1.0 - 1.25 * (1.0f64 / 12.0).sqrt();
         assert!((r - r1).abs() > 1e-3, "耐力用 r2 と剛性用 r1 は別式");
     }
@@ -268,15 +267,12 @@ mod tests {
         assert!((r0 - 0.2).abs() < 1e-9, "r0={r0}");
         assert!((wall_opening_reduction_stiffness(r0) - 0.75).abs() < 1e-9);
 
-        // 無開口（h0=l0=0）は r0=0、r1=1。
         assert_eq!(wall_opening_ratio_r0(0.0, 0.0, 3000.0, 6000.0), 0.0);
         assert_eq!(wall_opening_reduction_stiffness(0.0), 1.0);
 
-        // 壁寸法が 0 以下の場合は 0 除算せず 0.0。
         assert_eq!(wall_opening_ratio_r0(100.0, 100.0, 0.0, 1000.0), 0.0);
         assert_eq!(wall_opening_ratio_r0(100.0, 100.0, 1000.0, 0.0), 0.0);
 
-        // 極端な開口は r1 が負にならず 0 にクランプされる。
         let r0_big = wall_opening_ratio_r0(1000.0, 1000.0, 100.0, 100.0);
         assert!(r0_big > 0.8, "r0={r0_big}");
         assert_eq!(wall_opening_reduction_stiffness(r0_big), 0.0);
@@ -306,7 +302,7 @@ mod tests {
         inp.sigma_0 = 5.0;
         let q1 = wall_shear_ultimate(&inp).unwrap();
         assert!(q1 > q0);
-        inp.sigma_0 = 100.0; // 0.4Fc = 9.6 でクランプ
+        inp.sigma_0 = 100.0;
         let q2 = wall_shear_ultimate(&inp).unwrap();
         let mut inp_c = sample();
         inp_c.sigma_0 = 0.4 * 24.0;
@@ -373,7 +369,6 @@ mod tests {
             shear_span_ratio: 1.5,
             opening: None,
         };
-        // 手計算:
         let d = 4600.0 - 600.0 / 2.0;
         let pte: f64 = 100.0 * 3097.0 / (180.0 * d);
         let j = 7.0 / 8.0 * d;

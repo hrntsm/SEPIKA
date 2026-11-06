@@ -47,7 +47,7 @@ mod tests {
     fn test_unit_mass_table() {
         assert_eq!(rebar_unit_mass_kg_per_m(13.0), 0.995);
         assert_eq!(rebar_unit_mass_kg_per_m(22.0), 3.04);
-        // 表にない径は計算値（D14 相当: π/4·14²·7.85e-3 ≈ 1.208）
+        // 表にない径14.5 mmは、円断面積×7.85e-3から単位長さ質量を算定。
         let m = rebar_unit_mass_kg_per_m(14.5);
         assert!((m - std::f64::consts::PI / 4.0 * 14.5 * 14.5 * 7.85e-3).abs() < 1e-12);
     }

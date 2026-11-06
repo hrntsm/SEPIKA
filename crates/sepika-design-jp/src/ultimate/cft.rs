@@ -232,10 +232,9 @@ mod tests {
 
     #[test]
     fn test_cft_column_class() {
-        assert_eq!(cft_column_class(1000.0, 400.0), CftColumnClass::Short); // 2.5D
-        assert_eq!(cft_column_class(2400.0, 400.0), CftColumnClass::Medium); // 6D
-        assert_eq!(cft_column_class(5000.0, 400.0), CftColumnClass::Long); // 12.5D
-                                                                           // 境界: 4D=短柱、12D=中柱。
+        assert_eq!(cft_column_class(1000.0, 400.0), CftColumnClass::Short);
+        assert_eq!(cft_column_class(2400.0, 400.0), CftColumnClass::Medium);
+        assert_eq!(cft_column_class(5000.0, 400.0), CftColumnClass::Long);
         assert_eq!(cft_column_class(1600.0, 400.0), CftColumnClass::Short);
         assert_eq!(cft_column_class(4800.0, 400.0), CftColumnClass::Medium);
     }
@@ -250,7 +249,6 @@ mod tests {
         assert!((lo - hi).abs() < 1e-4, "lo={lo} hi={hi}");
         let expected = 2.0 / (1.0 + 2.0_f64.sqrt()) * fc;
         assert!((cft_concrete_buckling_stress(fc, 1.0, cc) - expected).abs() < 1e-6);
-        // cλ1=0 → 2/(1+1)=1 倍 → cσcr=Fc。
         assert!((cft_concrete_buckling_stress(fc, 0.0, cc) - fc).abs() < 1e-9);
     }
 
@@ -279,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_cft_ncu1_short_column_matches_handcalc() {
-        let inp = box_input(1000.0); // 2.5D → 短柱
+        let inp = box_input(1000.0);
         let r = cft_axial_ultimate(&inp);
         assert_eq!(r.class, CftColumnClass::Short);
         // 角型 ξ=0: Ncu1 = cA·Fc + sA·Fy。
@@ -303,9 +301,8 @@ mod tests {
     #[test]
     fn test_cft_long_column_less_than_short() {
         let short = cft_axial_ultimate(&box_input(1000.0));
-        let long = cft_axial_ultimate(&box_input(6000.0)); // 15D → 長柱
+        let long = cft_axial_ultimate(&box_input(6000.0));
         assert_eq!(long.class, CftColumnClass::Long);
-        // 座屈により長柱の圧縮耐力は短柱の累加耐力より小さい。
         assert!(
             long.ncu < short.ncu,
             "long={} short={}",
@@ -318,9 +315,8 @@ mod tests {
     #[test]
     fn test_cft_medium_column_between_short_and_long() {
         let short = cft_axial_ultimate(&box_input(1000.0)).ncu;
-        let medium = cft_axial_ultimate(&box_input(2400.0)); // 6D → 中柱
+        let medium = cft_axial_ultimate(&box_input(2400.0));
         assert_eq!(medium.class, CftColumnClass::Medium);
-        // 中柱は短柱と（lk/D=12 の）長柱の間を線形補間するため短柱以下。
         assert!(medium.ncu <= short && medium.ncu > 0.0);
     }
 }

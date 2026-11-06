@@ -45,7 +45,7 @@ impl ShellElement {
                 if det_j.abs() < 1e-30 {
                     continue;
                 }
-                let weight = det_j; // product of weights = 1*1 = 1
+                let weight = det_j;
 
                 let dNc = dshape_cart(xi, eta, &lc);
 

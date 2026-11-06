@@ -241,8 +241,7 @@ impl StbRebarArrangement {
         Ok(())
     }
 
-    /// Only independently confirmed shared-corner topologies may reject a declared total.
-    /// Other standard-valid arrangements remain authoritative and are gated at consumption.
+    /// 隅筋の共有配置を確認できる場合だけ主筋総本数を返し、未確定なら`None`を返す。
     fn known_main_total(&self, part: &StbRebarElement) -> Option<u64> {
         if part.attributes.keys().any(|key| key.contains("2nd_main")) {
             return None;
@@ -267,9 +266,7 @@ impl StbRebarArrangement {
             .unwrap_or("NONE");
         let shared = match (corner, x.as_slice(), y.as_slice()) {
             ("NONE", [nx], [ny]) if *nx >= 2 && *ny >= 2 => 4,
-            // Official p124/p125: four shared L-shaped groups of three bars.
             ("NONE" | "DIR_XY", [7, 2], [7, 2]) => 12,
-            // Official p127: four shared 2-by-2 groups; axial bars are separate.
             ("NONE", [7, 7], [7, 6]) => 16,
             _ => return None,
         };

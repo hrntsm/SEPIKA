@@ -490,7 +490,6 @@ mod damping_tests {
     /// 降伏後（kt ≪ k_init）で両者は大きく異なるため、分離を検証する。
     #[test]
     fn test_effective_tridiagonal_damping_uses_initial_stiffness() {
-        // 1 質点、降伏後: 接線 kt=1、初期 k_init=100。
         let mass = [2.0];
         let kt = [1.0];
         let k_init = [100.0];
@@ -532,7 +531,6 @@ mod dir_peaks_tests {
         assert!((mu.y[0] - 4.0).abs() < 1e-12);
         // δ45 / (√2 · min 等価降伏変位) = (7/√2) / √2 = 3.5。
         assert!((mu.deg45[0] - 3.5).abs() < 1e-12);
-        // 135° 側の軌道でも 45° 欄は同じ斜め包絡になる。
         let mut q = StickDirPeaks::zeros(1);
         q.accumulate(0, 3.0, -4.0);
         assert!((q.deg45[0] - want45).abs() < 1e-12);

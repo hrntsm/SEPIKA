@@ -655,7 +655,6 @@ mod tests {
     fn planar_linear_requires_dynamic_mass() {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = None;
-        // 静的結果を用意できれば、未算定の動的質量でエラーになるところまで進む。
         let mut res = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
         // 上層の層間変位が 0 のままだと K=Q/δ で別のエラーになるため、変位を与える。
         res.disp[1] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
@@ -788,7 +787,6 @@ mod tests {
         inp.res_y = Some(&res_y);
         let lm = build_lumped_mass(inp).expect("3次元質点系を生成できる");
 
-        // `spatial[0]` は層1（上端床 = StoryId(1)）。
         let s = &lm.spatial[0];
         let dm = model.stories[1].dynamic_mass.expect("動的質量");
         assert_eq!(s.mass_xy, dm.center_xy_mm, "質量重心は保存値を使う");
@@ -995,7 +993,6 @@ mod tests {
     #[test]
     fn story_drift_at_uses_same_plan_point_on_both_floors() {
         let mut model = two_story_column_model();
-        // 上階マスターを Y 方向へずらす（セットバック）。
         model.nodes[1].coord = [0.0, 5000.0, 3000.0];
         let mut res = static_with_column_qz(3, &[]);
         res.disp[1] = [10.0, 0.0, 0.0, 0.0, 0.0, 0.002];

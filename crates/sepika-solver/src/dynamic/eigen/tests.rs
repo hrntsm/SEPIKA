@@ -309,7 +309,6 @@ fn test_eigen_portal_frame_like_mass_rank_equals_n_modes() {
             t
         );
     }
-    // 周期は昇順のモードで降順（1次が最長周期）。
     assert!(
         result.period[0] > result.period[1],
         "T1={} T2={} は T1>T2 であるべき",
@@ -323,7 +322,6 @@ fn test_eigen_portal_frame_like_mass_rank_equals_n_modes() {
 #[test]
 fn test_eigen_mass_rank_deficient_returns_explicit_error() {
     let mut model = make_portal_frame_like_model(1.0e-3);
-    // node3(柱頭2つ目)の質量を落とし、質量ランクを 1 にする。
     model.nodes[3].mass = None;
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -375,7 +373,6 @@ fn test_gevd_jacobi_2x2_identity_mass() {
     let expected_2 = (5.0 + 5.0_f64.sqrt()) / 2.0;
     assert!((vals[0] - expected_1).abs() < 1e-10, "val0={}", vals[0]);
     assert!((vals[1] - expected_2).abs() < 1e-10, "val1={}", vals[1]);
-    // M=I 正規直交（zᵀz=1）であることを確認する。
     for j in 0..2 {
         let mut norm = 0.0;
         for i in 0..2 {
@@ -497,7 +494,6 @@ fn test_2dof_shear_period_and_mass() {
     assert!((t1 - 0.32150).abs() < 1e-4, "T1={}", t1);
     assert!((t2 - 0.12280).abs() < 1e-4, "T2={}", t2);
 
-    // X 方向有効質量の合計が全質量 2m に一致（有効質量比合計 ≈100%）。
     let total_mass = 2.0 * m;
     let eff_sum: f64 = result.effective_mass.iter().map(|e| e[0]).sum();
     assert!(
@@ -523,7 +519,6 @@ fn test_2dof_shear_period_and_mass() {
 #[test]
 fn test_eigen_mass_method_lumped_only_skips_element_mass() {
     let mut model = make_1dof_spring_model();
-    // 密度を与えて要素質量を発生させる（値は節点質量と同程度のオーダー）。
     model.materials[0].density = 1.0e-3;
 
     let dofmap = DofMap::build(&model);
@@ -590,7 +585,6 @@ fn make_diaphragm_columns_model(top_mass: f64, rot_mass: f64) -> Model {
                 story: None,
                 support_spring: None,
             },
-            // 柱頭(スレーブ1): X方向にオフセット
             Node {
                 id: NodeId(1),
                 coord: [0.0, 0.0, 3500.0],
@@ -599,7 +593,6 @@ fn make_diaphragm_columns_model(top_mass: f64, rot_mass: f64) -> Model {
                 story: None,
                 support_spring: None,
             },
-            // マスター(剛床代表節点): 面内(Ux,Uy,Rz)のみ自由
             Node {
                 id: NodeId(2),
                 coord: [1000.0, 0.0, 3500.0],
@@ -608,7 +601,6 @@ fn make_diaphragm_columns_model(top_mass: f64, rot_mass: f64) -> Model {
                 story: None,
                 support_spring: None,
             },
-            // 柱頭(スレーブ2): Y方向にオフセット（マスターから見て非対称な配置）
             Node {
                 id: NodeId(3),
                 coord: [0.0, 1000.0, 3500.0],
@@ -686,7 +678,6 @@ fn test_eigen_node_shapes_rigid_diaphragm_kinematics() {
     let result = solve_eigen(&model, &dofmap, &reducer, n_modes)
         .expect("質量ランク(Ux,Uy,Rz=3)ちょうどの要求モード数(3)は解けるべき");
 
-    // (a) モード数・節点数の整合
     assert_eq!(
         result.node_shapes.len(),
         result.shapes.len(),
@@ -701,10 +692,8 @@ fn test_eigen_node_shapes_rigid_diaphragm_kinematics() {
     let master_coord = model.nodes[master].coord;
     let slaves = [1usize, 3];
 
-    // (c) 全モードで水平成分が自明にゼロにならないことの確認用
     let mut max_horizontal: f64 = 0.0;
-    // 回転成分についても同様に確認する（θz が全モードでゼロなら、
-    // 剛床の回転項(θz·dx, θz·dy)を実質的に検証していないことになるため）。
+    // 全モードでRz=0なら、剛床の回転項θz·dx・θz·dyを検証できない。
     let mut max_rotation: f64 = 0.0;
 
     for ns in &result.node_shapes {
@@ -714,11 +703,7 @@ fn test_eigen_node_shapes_rigid_diaphragm_kinematics() {
         max_horizontal = max_horizontal.max(ux_m.abs()).max(uy_m.abs());
         max_rotation = max_rotation.max(theta_z.abs());
 
-        // (b) 剛床スレーブの水平成分が剛体条件と整合すること。
-        // 許容誤差は「相対1e-9」を基本としつつ、期待値がモード内の代表的な
-        // 変位スケールに対してほぼ0になる場合でも誤って厳しくなりすぎない
-        // よう、モード内の最大変位スケールに対する絶対誤差1e-9も許容する
-        // （相対誤差1e-9 と 絶対誤差1e-9・(モード内最大スケール) の緩い方）。
+        // ゼロ近傍の成分を相対誤差だけで比較できないため、モード内最大変位に対する絶対誤差も許容する。
         let mode_scale = ux_m
             .abs()
             .max(uy_m.abs())
@@ -748,7 +733,6 @@ fn test_eigen_node_shapes_rigid_diaphragm_kinematics() {
             );
         }
 
-        // (d) 固定(柱脚)節点は全成分0
         for (comp, &v) in ns[0].iter().enumerate() {
             assert_eq!(v, 0.0, "固定節点0 成分{} は0であるべき: {}", comp, v);
         }
@@ -1042,10 +1026,7 @@ fn test_subspace_size_table() {
 /// dense 厳密解と一致することの回帰テスト。
 #[test]
 fn test_eigen_subspace_matches_dense_ground_truth_q_lt_n() {
-    // n_modes=1・n=12 で q=min(12, max(2, 9))=9 < n となる。質量分布を強く
-    // 非一様にしても、部分空間が n を張れない条件で最低次モードへ正しく
-    // 収束することを、同じ K_red/M_red を dense 化して gevd_jacobi に直接
-    // 渡した「厳密解（反復なし）」と比較して確認する。
+    // n=12・n_modes=1では部分空間次元q=9<nとなり、全空間での自明な解決を避けられる。
     let n_masses = 12usize;
     let model = make_mass_chain_model(n_masses);
     let dofmap = DofMap::build(&model);
@@ -1053,7 +1034,6 @@ fn test_eigen_subspace_matches_dense_ground_truth_q_lt_n() {
 
     let result = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
 
-    // 同じ K_red/M_red を dense 化し、gevd_jacobi へ直接渡す（反復なしの厳密解）。
     let k_free = assemble_global_k(&model, &dofmap);
     let k_red = reducer.reduce_k(&k_free);
     let m_free = assemble_global_m(
@@ -1110,7 +1090,6 @@ fn test_eigen_requested_modes_above_n_is_truncated() {
 /// 同一断面・同一長さの片持ち梁をX方向とZ方向に置いたとき、固有周期が一致すること。
 #[test]
 fn test_eigen_consistent_mass_orientation_invariant() {
-    // iy=iz・as_y=as_z の対称断面とし、部材の向きだけが異なるモデルを作る。
     let make_cantilever = |dir: [f64; 3], ref_vector: [f64; 3]| -> Model {
         let l = 3000.0;
         let nodes = vec![

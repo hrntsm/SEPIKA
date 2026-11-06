@@ -355,10 +355,10 @@ mod tests {
         model.nodes.push(node(1, 4000.0, 0.0, 0.0));
         model.nodes.push(node(2, 4000.0, 0.0, 3000.0));
         model.nodes.push(node(3, 0.0, 0.0, 3000.0));
-        model.elements.push(beam(0, 0, 3)); // 柱（左）
-        model.elements.push(beam(1, 1, 2)); // 柱（右）
-        model.elements.push(beam(2, 3, 2)); // 頂部梁
-        model.elements.push(beam(3, 0, 1)); // 柱脚間の梁
+        model.elements.push(beam(0, 0, 3));
+        model.elements.push(beam(1, 1, 2));
+        model.elements.push(beam(2, 3, 2));
+        model.elements.push(beam(3, 0, 1));
         model
     }
 
@@ -395,7 +395,6 @@ mod tests {
             name: "P1".into(),
         });
 
-        // 名前・間柱を付けたあとで、モデル自体は変えずに再構成する。
         let report = rebuild_wall_regions(&mut model);
         assert_eq!(report.inherited, 1, "同じ床領域は引き継がれるはず");
         assert_eq!(model.wall_regions[0].name, "西面耐震壁");
@@ -494,7 +493,6 @@ mod tests {
         let mut model = one_bay_wall_model();
         model.nodes.push(node(4, 0.0, 0.0, 4500.0));
         model.nodes.push(node(5, 4000.0, 0.0, 4500.0));
-        // 下辺 3→2 は頂部梁（beam(2, 3, 2)）と同じ節点対・向き。
         let shape = wall_attached_shape_from_boundary(
             &model,
             &[NodeId(3), NodeId(2), NodeId(5), NodeId(4)],
@@ -572,7 +570,6 @@ mod tests {
         let mut model = one_bay_wall_model();
         model.nodes.push(node(4, 0.0, 0.0, 4500.0));
         model.nodes.push(node(5, 4000.0, 0.0, 4500.0));
-        // 頂部梁と同じ高さだが、構面から Y 方向へ折れた頂点。
         model.nodes.push(node(6, 2000.0, 800.0, 3000.0));
         assert!(
             wall_attached_shape_from_boundary(

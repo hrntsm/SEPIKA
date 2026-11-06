@@ -377,7 +377,6 @@ mod tests {
 
     #[test]
     fn test_lateral_buckling_mu_ratio_slender_reduces() {
-        // 細長比が大きいほど Mu/Mp は小さくなる（横座屈で耐力低下）。
         let stocky = lateral_buckling_mu_ratio(0.3, 0.0, 0.5, 0.3);
         let slender = lateral_buckling_mu_ratio(1.5, 0.0, 0.5, 0.3);
         assert!(stocky > slender, "stocky={stocky}, slender={slender}");
@@ -386,20 +385,16 @@ mod tests {
 
     #[test]
     fn test_steel_buckling_backbone_peak_then_degrade() {
-        // 骨格: 弾性→硬化→最大耐力 Mu→劣化。単調載荷で Mu 到達後に耐力低下。
         let k1 = 1000.0;
         let mp = 100.0;
         let mut m = SteelBuckling::with_defaults(k1, mp, 1.3);
         let theta_y = mp / k1;
-        // 弾性点。
         let (m_el, _) = m.trial(0.5 * theta_y);
         m.commit();
         assert_relative_eq!(m_el, 0.5 * mp, epsilon = 1e-6);
-        // ピーク（θu=2θy 付近）。
         let (m_peak, _) = m.trial(2.0 * theta_y);
         m.commit();
         assert_relative_eq!(m_peak, 1.3 * mp, epsilon = 1e-3);
-        // 劣化域（θ_res=10θy 手前）。耐力が Mu より低下。
         let (m_deg, _) = m.trial(8.0 * theta_y);
         m.commit();
         assert!(
@@ -410,14 +405,13 @@ mod tests {
 
     #[test]
     fn test_steel_buckling_ro_unloading_and_probe_preserve_response() {
-        // RO 除荷は反転点で初期剛性 k1 から立ち上がる。
         let k1 = 1000.0;
         let mp = 100.0;
         let mut m = SteelBuckling::with_defaults(k1, mp, 1.2);
         let theta_y = mp / k1;
         m.trial(3.0 * theta_y);
         m.commit();
-        let probe_theta = 2.5 * theta_y; // 除荷（RO 枝）
+        let probe_theta = 2.5 * theta_y;
         let before = m.probe(probe_theta);
         assert_eq!(before, m.probe(probe_theta));
 
@@ -429,14 +423,12 @@ mod tests {
         assert_eq!(after_probe, via_trial);
         m.revert();
 
-        // 反転直後の微小除荷: 接線 ≈ k1。
         let (_, k) = m.trial(3.0 * theta_y - 1e-6 * theta_y);
         assert_relative_eq!(k, k1, epsilon = k1 * 0.02);
     }
 
     #[test]
     fn test_steel_buckling_hysteretic_energy_positive() {
-        // 1 サイクルで履歴ループ面積（散逸エネルギー）が正。
         let k1 = 1000.0;
         let mp = 100.0;
         let mut m = SteelBuckling::with_defaults(k1, mp, 1.2);
