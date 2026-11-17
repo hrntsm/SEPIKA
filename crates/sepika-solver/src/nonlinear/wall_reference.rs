@@ -257,6 +257,54 @@ mod tests {
             .unwrap()
     }
     #[test]
+    fn restrained_wall_ai_reference_can_approach_zero_face_moment_with_nonzero_shear() {
+        use sepika_core::dof::{Dof, Dof6Mask};
+        let mut model = fixture::expanded_model();
+        for node in &mut model.nodes[..2] {
+            node.restraint.set_free(Dof::Uz);
+            node.support_spring = Some([0.0, 0.0, 923_640.0, 0.0, 0.0, 0.0]);
+        }
+        for node in &mut model.nodes[2..] {
+            node.restraint = Dof6Mask::FIXED;
+            node.restraint.set_free(Dof::Ux);
+        }
+        model.elements[3].end_cond = [sepika_core::model::EndCondition::Pinned; 2];
+        let period = sepika_load::ai::approx_t(
+            building_height_mm(&model) / 1000.0,
+            steel_height_ratio(&model),
+        );
+        let lateral = build_seismic_load_case_from_model(
+            &model,
+            SeismicCfg {
+                dir: SeismicDir::X,
+                ..Default::default()
+            },
+            period,
+        )
+        .unwrap();
+        for sign in [1.0, -1.0] {
+            let mut case = lateral.clone();
+            for load in &mut case.nodal {
+                load.values = load.values.map(|value| value * sign);
+            }
+            let state = direct_state(&model, case);
+            close(state.shear_n, -sign * 200_000.0);
+            assert!(state.moment_nmm.abs() < 1e-4, "{state:?}");
+            assert!(state.moment_nmm.abs() / (state.shear_n.abs() * state.depth_mm) < 1e-12);
+        }
+        let actual = resolve(&model, false, StrengthBasis::Nominal).unwrap();
+        let lower_bound = WallElement::directional_shear_capacity_at_reference(
+            &model.elements[4],
+            &model,
+            StrengthBasis::Nominal,
+            0.0,
+            [1.0; 2],
+        )
+        .unwrap();
+        assert_eq!(actual, vec![(ElemId(4), lower_bound)]);
+    }
+
+    #[test]
     fn public_pushover_preparation_saves_capped_capacity_and_rejects_unknown_vertical_ratio() {
         use crate::common::constraint::Reducer;
         use crate::nonlinear::pushover::{
