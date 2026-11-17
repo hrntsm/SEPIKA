@@ -197,7 +197,7 @@ pub(crate) fn enumerate_self_weight(
                 let ni = elem.nodes[0].index();
                 let nj = elem.nodes[1].index();
                 let [ci, cj] = model
-                    .primary_beam_axis_ends(elem)?
+                    .primary_frame_axis_ends(elem)?
                     .unwrap_or([model.nodes[ni].coord, model.nodes[nj].coord]);
                 let len = dist3(ci, cj);
                 let is_vertical = is_vertical_pair(ci, cj);

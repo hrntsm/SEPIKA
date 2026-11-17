@@ -15,6 +15,7 @@ pub enum PerimeterSlabError {
     MissingColumn { beam: ElemId, node: NodeId },
     MissingColumnSection { beam: ElemId, node: NodeId },
     InvalidColumnDimension { beam: ElemId, node: NodeId },
+    EccentricColumn { beam: ElemId, column: ElemId },
 }
 
 impl std::fmt::Display for PerimeterSlabError {
@@ -30,6 +31,11 @@ impl std::fmt::Display for PerimeterSlabError {
                 f,
                 "大梁 {} の端部柱（節点 {}）の断面が未解決です",
                 beam.0, node.0
+            ),
+            Self::EccentricColumn { beam, column } => write!(
+                f,
+                "外周スラブの大梁 {}・柱 {}: 非0XYZ偏心柱の外周床幅算定は未対応です",
+                beam.0, column.0
             ),
             Self::InvalidColumnDimension { beam, node } => write!(
                 f,
@@ -148,6 +154,12 @@ fn column_dimension(
         beam: beam.id,
         node,
     })?];
+    if column.end_offsets_mm != [[0.0; 3]; 2] {
+        return Err(PerimeterSlabError::EccentricColumn {
+            beam: beam.id,
+            column: column.id,
+        });
+    }
     let section =
         model
             .element_section(column)

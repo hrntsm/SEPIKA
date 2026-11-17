@@ -84,6 +84,11 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
     }
     let p0 = model.nodes.get(elem.nodes[0].index())?.coord;
     let p1 = model.nodes.get(elem.nodes[1].index())?.coord;
+    let [p0, p1] = model
+        .primary_frame_axis_ends(elem)
+        .ok()
+        .flatten()
+        .unwrap_or([p0, p1]);
     geom::vec3::unit_from(p0, p1)
 }
 
@@ -613,7 +618,7 @@ fn model_beam_flanges(
     let sec = model.element_section(beam).ok_or("断面未設定")?;
     beam_panel_depth(sec)?;
     let actual = model
-        .primary_beam_axis_ends(beam)?
+        .primary_frame_axis_ends(beam)?
         .ok_or("大梁用途の実材軸が未解決です")?;
     let side = beam
         .nodes
@@ -932,6 +937,14 @@ pub fn select_panel_column<'a>(
     let invalid_column = |reason: String| {
         PanelJointError::InvalidInput(format!("接合部 ID {} のパネル未算定: {reason}", node.0))
     };
+    for column in columns {
+        if column.end_offsets_mm != [[0.0; 3]; 2] {
+            return Err(invalid_column(format!(
+                "柱 ID {} の非0XYZ偏心は既存の仕口パネル式の適用外です",
+                column.id.0
+            )));
+        }
+    }
     let mut columns = columns.to_vec();
     columns.sort_by_key(|e| e.id);
     let mut lower = Vec::new();
@@ -2946,5 +2959,22 @@ mod tests {
             assert!(reason.contains("未対応"), "{reason}");
             assert!(reason.contains("0"), "{reason}");
         }
+    }
+    #[test]
+    fn column_xyz_offsets_reject_only_eccentric_panel_columns_with_target_reason() {
+        let mut model = joint_model(h_beam(), 600.0, h_col());
+        assert!(resolve_panel_joint(&model, NodeId(0), &model.elements).is_ok());
+        model.elements[1].end_offsets_mm = [[100.0, 0.0, 0.0]; 2];
+        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            reason.contains("接合部 ID 0")
+                && reason.contains("柱 ID 1")
+                && reason.contains("非0XYZ偏心"),
+            "{reason}"
+        );
+        model.elements[1].end_offsets_mm = [[0.0; 3]; 2];
+        assert!(resolve_panel_joint(&model, NodeId(0), &model.elements).is_ok());
     }
 }

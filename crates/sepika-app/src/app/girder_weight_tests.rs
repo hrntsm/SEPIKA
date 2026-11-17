@@ -858,7 +858,7 @@ fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_b
             2880.,
         ),
         (
-            Box::new(SetBeamEndOffsets {
+            Box::new(SetMemberEndOffsets {
                 member: SupportMemberId::Primary(ElemId(0)),
                 value: [[0.0, 0.0, -200.]; 2],
             }),
@@ -956,7 +956,7 @@ fn girder_overlap_edits_undo_redo_and_save_reload_update_weights_and_invalidate_
     let region = base.floor_assignment_regions.regions[0].id;
     let edits: Vec<(Box<dyn EditCommand>, f64)> = vec![
         (
-            Box::new(SetBeamEndOffsets {
+            Box::new(SetMemberEndOffsets {
                 member: SupportMemberId::Primary(ElemId(0)),
                 value: [[0.0, 0.0, -50.]; 2],
             }),

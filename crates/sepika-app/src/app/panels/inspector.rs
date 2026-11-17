@@ -112,7 +112,15 @@ impl App {
             }
             if let Some(id) = self.ui.scoped.selection.active_secondary_member() {
                 if let Some(member) = self.core.model.secondary_member(id) {
-                    ui.strong(format!("小梁 ID: {}", id.0));
+                    ui.strong(format!(
+                        "{} ID: {}",
+                        if member.kind == sepika_core::model::SecondaryMemberKind::Post {
+                            "間柱"
+                        } else {
+                            "小梁"
+                        },
+                        id.0
+                    ));
                     crate::theme::name_label(ui, &format!("符号: {}", member.name));
                     if let Some(section) = member.section.and_then(|id| self.core.model.section(id))
                     {

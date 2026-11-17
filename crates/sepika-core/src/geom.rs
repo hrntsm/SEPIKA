@@ -104,7 +104,12 @@ pub fn element_axis(model: &crate::model::Model, e: &crate::model::ElementData) 
     ) else {
         return [0.0, 0.0, 0.0];
     };
-    vec3::unit_from(n0.coord, n1.coord).unwrap_or([0.0, 0.0, 0.0])
+    let [a, b] = model
+        .primary_frame_axis_ends(e)
+        .ok()
+        .flatten()
+        .unwrap_or([n0.coord, n1.coord]);
+    vec3::unit_from(a, b).unwrap_or([0.0, 0.0, 0.0])
 }
 
 /// 無次元パラメータ `t ∈ [0, 1]` で線形に変わる高さ `h(t) = lerp(h0, h1, t)` の

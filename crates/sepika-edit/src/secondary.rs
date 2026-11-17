@@ -19,9 +19,6 @@ fn secondary_offset_error(model: &Model, sm: &SecondaryMember) -> Option<String>
     if !sm.end_offsets_mm.iter().flatten().all(|v| v.is_finite()) {
         return fail("各成分に有限値が必要です");
     }
-    if sm.kind == SecondaryMemberKind::Post && sm.end_offsets_mm != [[0.0; 3]; 2] {
-        return fail("間柱の非0偏心は未対応です");
-    }
     if let Some((a, b)) = model.secondary_member_end_points(sm) {
         let actual = [
             sepika_core::geom::vec3::add(a, sm.end_offsets_mm[0]),

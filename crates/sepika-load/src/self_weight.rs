@@ -42,6 +42,7 @@ pub fn self_weight_case_content(
     load_cfg: &LoadCfg,
 ) -> Result<(Vec<NodalLoad>, Vec<MemberLoad>), String> {
     let mut node_force = vec![0.0_f64; model.nodes.len()];
+    let mut node_moment = vec![[0.0; 3]; model.nodes.len()];
     let mut member: Vec<MemberLoad> = Vec::new();
 
     for item in enumerate_self_weight(model, load_cfg)? {
@@ -70,11 +71,29 @@ pub fn self_weight_case_content(
                 let elem = &model.elements[elem_idx];
                 let ni = elem.nodes[0].index();
                 let nj = elem.nodes[1].index();
-                let (ci, cj) = (model.nodes[ni].coord, model.nodes[nj].coord);
-                if is_column {
-                    let (top, bottom) = if ci[2] <= cj[2] { (nj, ni) } else { (ni, nj) };
-                    node_force[top] += load / 2.0;
-                    node_force[bottom] += load / 2.0 + extra_bottom_load;
+                let [ci, cj] = model
+                    .primary_frame_axis_ends(elem)?
+                    .unwrap_or([model.nodes[ni].coord, model.nodes[nj].coord]);
+                let lumped_column = is_column
+                    && (elem.end_offsets_mm == [[0.0; 3]; 2] || (ci[0] == cj[0] && ci[1] == cj[1]));
+                if lumped_column {
+                    let bottom = if ci[2] <= cj[2] { ni } else { nj };
+                    for (side, node) in [ni, nj].into_iter().enumerate() {
+                        let weight = load / 2.0
+                            + if node == bottom {
+                                extra_bottom_load
+                            } else {
+                                0.0
+                            };
+                        node_force[node] += weight;
+                        let moment = sepika_core::geom::vec3::cross(
+                            elem.end_offsets_mm[side],
+                            [0.0, 0.0, -weight],
+                        );
+                        for (value, increment) in node_moment[node].iter_mut().zip(moment) {
+                            *value += increment;
+                        }
+                    }
                 } else if load > 0.0 {
                     let len = model.member_length(elem);
                     if len > 0.0 {
@@ -92,6 +111,18 @@ pub fn self_weight_case_content(
                     } else {
                         node_force[ni] += load / 2.0;
                         node_force[nj] += load / 2.0;
+                    }
+                }
+                if is_column && !lumped_column && extra_bottom_load > 0.0 {
+                    let side = usize::from(ci[2] > cj[2]);
+                    let node = [ni, nj][side];
+                    node_force[node] += extra_bottom_load;
+                    let moment = sepika_core::geom::vec3::cross(
+                        elem.end_offsets_mm[side],
+                        [0.0, 0.0, -extra_bottom_load],
+                    );
+                    for (value, increment) in node_moment[node].iter_mut().zip(moment) {
+                        *value += increment;
                     }
                 }
             }
@@ -143,7 +174,14 @@ pub fn self_weight_case_content(
         .map(|(i, w)| {
             NodalLoad::auto(
                 sepika_core::ids::NodeId(i as u32),
-                [0.0, 0.0, -w, 0.0, 0.0, 0.0],
+                [
+                    0.0,
+                    0.0,
+                    -w,
+                    node_moment[i][0],
+                    node_moment[i][1],
+                    node_moment[i][2],
+                ],
             )
         })
         .collect();

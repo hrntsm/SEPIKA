@@ -209,7 +209,7 @@ fn rc_beam_geometry(
         return Ok(None);
     };
     let [p_i, p_j] = model
-        .primary_beam_axis_ends(elem)?
+        .primary_frame_axis_ends(elem)?
         .unwrap_or([ni.coord, nj.coord]);
     let length_mm = vec3::dist(p_i, p_j);
     if p_i.iter().chain(&p_j).any(|v| !v.is_finite()) || length_mm == 0.0 {

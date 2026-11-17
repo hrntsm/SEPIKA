@@ -103,6 +103,27 @@ pub(crate) fn collect_joint_checks_impl(
             .iter()
             .filter(|m| m.is_beam_horiz() && m.elem.nodes.contains(&nid))
             .collect();
+        if !beams.is_empty() {
+            if let Some(column) = model.elements.iter().find(|element| {
+                element.nodes.contains(&nid)
+                    && element.end_offsets_mm != [[0.0; 3]; 2]
+                    && model.element_section(element).is_some_and(|section| {
+                        section.frame_use == Some(sepika_core::model::FrameSectionUse::Column)
+                    })
+            }) {
+                out.push((
+                    nid,
+                    "柱梁接合部".into(),
+                    CheckOutcome::Skipped {
+                        reason: format!(
+                            "接合部 ID {}・柱 ID {}: 非0XYZ偏心柱の柱梁接合部式は未対応です",
+                            nid.0, column.id.0
+                        ),
+                    },
+                ));
+                continue;
+            }
+        }
         let panel_moment = panel_moments
             .iter()
             .find(|(n, _)| *n == nid)

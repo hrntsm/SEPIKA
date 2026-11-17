@@ -985,7 +985,7 @@ fn rc_cross_joint_new_types_emits_checks() {
             },
         },
     };
-    let model = cross_joint_model(col_shape, beam_shape);
+    let mut model = cross_joint_model(col_shape, beam_shape);
 
     let col_f: [(f64, [f64; 6]); 2] = [
         (0.0, [0.0, 100_000.0, 0.0, 0.0, 0.0, 0.0]),
@@ -1026,6 +1026,20 @@ fn rc_cross_joint_new_types_emits_checks() {
             matches!(&checks[1].2, CheckOutcome::Skipped { reason } if reason.contains("検討目的・設計状態"))
         );
     }
+    model.elements[0].end_offsets_mm = [[100.0, 0.0, 0.0]; 2];
+    let forces = [
+        (ElemId(0), col_f.as_slice()),
+        (ElemId(1), col_f.as_slice()),
+        (ElemId(2), beam_f.as_slice()),
+        (ElemId(3), beam_f.as_slice()),
+    ];
+    let eccentric = collect_joint_checks(&model, &forces, LoadTerm::Short);
+    let joint: Vec<_> = eccentric
+        .iter()
+        .filter(|(id, _, _)| *id == NodeId(0))
+        .collect();
+    assert!(!joint.is_empty());
+    assert!(joint.iter().all(|(_,_,check)| matches!(check, CheckOutcome::Skipped { reason } if reason.contains("柱 ID 0") && reason.contains("非0XYZ偏心"))));
 }
 
 /// 実配筋の幾何が不整合な梁が取り付く接合部は、RC 接合部検定を実施せず
@@ -1154,7 +1168,7 @@ fn src_cross_panel_new_types_emits_check() {
         steel_web_thick: 9.0,
         steel_flange_thick: 16.0,
     };
-    let model = cross_joint_model(col_shape, beam_shape);
+    let mut model = cross_joint_model(col_shape, beam_shape);
 
     let col_f: [(f64, [f64; 6]); 2] = [
         (0.0, [-500_000.0, 100_000.0, 0.0, 0.0, 0.0, 0.0]),
@@ -1181,6 +1195,20 @@ fn src_cross_panel_new_types_emits_check() {
     assert!((cr.ratio() - 0.8423158554214742).abs() < 1e-12);
     assert_eq!(found.0, NodeId(0));
     assert!(cr.components[0].detail.contains("cV=122312500.0 mm3"));
+    model.elements[0].end_offsets_mm = [[100.0, 0.0, 0.0]; 2];
+    let forces = [
+        (ElemId(0), col_f.as_slice()),
+        (ElemId(1), col_f.as_slice()),
+        (ElemId(2), beam_f.as_slice()),
+        (ElemId(3), beam_f.as_slice()),
+    ];
+    let eccentric = collect_joint_checks(&model, &forces, LoadTerm::Short);
+    let joint: Vec<_> = eccentric
+        .iter()
+        .filter(|(id, _, _)| *id == NodeId(0))
+        .collect();
+    assert!(!joint.is_empty());
+    assert!(joint.iter().all(|(_,_,check)| matches!(check, CheckOutcome::Skipped { reason } if reason.contains("柱 ID 0") && reason.contains("非0XYZ偏心"))));
 }
 
 fn all_wall_outcomes(model: &Model) -> Vec<(NodeId, String, CheckOutcome)> {

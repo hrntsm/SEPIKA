@@ -361,7 +361,7 @@ pub(super) fn draw_cmq_diagram_with_view(
                     let ends = app
                         .core
                         .model
-                        .primary_beam_axis_ends(data)
+                        .primary_frame_axis_ends(data)
                         .expect("CMQ応答で検証済みの実材軸")
                         .unwrap_or_else(|| {
                             [

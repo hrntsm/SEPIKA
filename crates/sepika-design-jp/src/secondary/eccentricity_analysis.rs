@@ -121,8 +121,18 @@ pub fn column_horizontal_stiffnesses(
     let mut out = Vec::new();
     let mut invalid = None;
     for_each_story_column(model, story, |elem, top, bot| {
-        let p0 = model.nodes[elem.nodes[0].index()].coord;
-        let p1 = model.nodes[elem.nodes[1].index()].coord;
+        let resolved = model.primary_frame_axis_ends(elem);
+        let [p0, p1] = match resolved {
+            Ok(Some(ends)) => ends,
+            Ok(None) => [
+                model.nodes[elem.nodes[0].index()].coord,
+                model.nodes[elem.nodes[1].index()].coord,
+            ],
+            Err(reason) => {
+                invalid = Some(format!("部材 ID {} の局所座標: {reason}", elem.id.0));
+                return;
+            }
+        };
         let k_of = |res: &StaticOnce,
                     forces: &HashMap<
             sepika_core::ids::ElemId,

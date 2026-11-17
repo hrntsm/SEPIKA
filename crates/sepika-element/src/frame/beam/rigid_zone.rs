@@ -121,7 +121,10 @@ fn max_orth_face(
             continue;
         }
         let e = &model.elements[ei];
-        if e.kind != sepika_core::model::ElementKind::Beam {
+        if !e.kind.is_primary_frame_support()
+            || (e.kind != sepika_core::model::ElementKind::Beam
+                && e.end_offsets_mm == [[0.0; 3]; 2])
+        {
             continue;
         }
         let axis = elem_axis(model, e);
@@ -133,7 +136,12 @@ fn max_orth_face(
         let Some(sec) = e.section.and_then(|sid| model.sections.get(sid.index())) else {
             continue;
         };
-        let lf = sec.depth / 2.0 + wall_protrusion(model, e, sec.depth, walls, Some(toward));
+        let target = &model.elements[target_elem_idx];
+        let face =
+            sepika_core::face_distance::eccentric_column_face_distance(model, target, e, node)
+                .unwrap_or_else(|reason| panic!("{reason}"))
+                .unwrap_or(sec.depth / 2.0);
+        let lf = face + wall_protrusion(model, e, sec.depth, walls, Some(toward));
         lf_max = lf_max.max(lf);
     }
     lf_max
@@ -173,6 +181,18 @@ fn rigid_zone_with_adjacency(
         model.nodes[node_i.index()].coord,
         model.nodes[node_j.index()].coord,
     );
+
+    let [ci, cj] = if elem.end_offsets_mm != [[0.0; 3]; 2]
+        && model.element_section(elem).is_some_and(|section| {
+            section.frame_use == Some(sepika_core::model::FrameSectionUse::Column)
+        }) {
+        model
+            .primary_frame_axis_ends(elem)
+            .unwrap_or_else(|reason| panic!("{reason}"))
+            .unwrap_or([ci, cj])
+    } else {
+        [ci, cj]
+    };
 
     let d_self = if rule.consider_walls {
         depth_with_walls(model, elem, walls)
@@ -275,7 +295,10 @@ pub fn apply_auto_rigid_zones(model: &mut Model, rule: &RigidZoneRule) {
         .elements
         .iter()
         .enumerate()
-        .filter(|(_, e)| matches!(e.kind, sepika_core::model::ElementKind::Beam))
+        .filter(|(_, e)| {
+            e.kind == sepika_core::model::ElementKind::Beam
+                || (e.kind.is_primary_frame_support() && e.end_offsets_mm != [[0.0; 3]; 2])
+        })
         .map(|(i, _)| {
             (
                 i,

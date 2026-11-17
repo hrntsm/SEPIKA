@@ -37,6 +37,7 @@ pub fn apply_rigid_zones_and_panels(
     if sepika_core::wall_expand::model_has_wall_plates_to_expand(model) {
         let (mut expanded, _wall_index, _wall_report) =
             sepika_core::wall_expand::expand_wall_elements(model);
+        sepika_core::face_distance::try_face_distances(&expanded)?;
         sepika_element::frame::beam::apply_auto_rigid_zones(&mut expanded, &rule);
         debug_assert!(
             model.elements.len() <= expanded.elements.len()
@@ -52,6 +53,7 @@ pub fn apply_rigid_zones_and_panels(
             dst.rigid_zone = src.rigid_zone;
         }
     } else {
+        sepika_core::face_distance::try_face_distances(model)?;
         sepika_element::frame::beam::apply_auto_rigid_zones(model, &rule);
     }
     sepika_element::springs::panel_gen::apply_auto_panel_zones(model)

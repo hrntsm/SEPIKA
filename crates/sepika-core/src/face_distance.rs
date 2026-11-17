@@ -135,12 +135,22 @@ pub fn girder_self_weight_interval(model: &Model, elem: &ElementData) -> Result<
                 .node(*cj)
                 .ok_or_else(|| format!("柱 {} の節点を解決できません", column.id.0))?
                 .coord;
-            let distance = section_face(
-                sec,
-                axis_direction(ca, cb)?,
-                column.local_axis.ref_vector,
-                vec3::scale(direction, if end == 0 { 1.0 } else { -1.0 }),
-            )
+            let distance = if column.end_offsets_mm != [[0.0; 3]; 2] {
+                let beam_ends = model
+                    .primary_frame_axis_ends(elem)?
+                    .ok_or_else(|| format!("{label} の実材軸が未解決です"))?;
+                let inward = axis_direction(beam_ends[end], beam_ends[1 - end])?;
+                model
+                    .calculation_beam_placement(SupportMemberId::Primary(column.id))?
+                    .connection_face_distance_mm(beam_ends[end], inward)
+            } else {
+                section_face(
+                    sec,
+                    axis_direction(ca, cb)?,
+                    column.local_axis.ref_vector,
+                    vec3::scale(direction, if end == 0 { 1.0 } else { -1.0 }),
+                )
+            }
             .map_err(|error| format!("{label} の端 {}・柱 {}: {error}", end, column.id.0))?;
             minimum = minimum.min(distance);
         }
@@ -149,7 +159,7 @@ pub fn girder_self_weight_interval(model: &Model, elem: &ElementData) -> Result<
         }
     }
     let length_mm = model
-        .primary_beam_axis_ends(elem)?
+        .primary_frame_axis_ends(elem)?
         .map_or_else(|| vec3::dist(a, b), |ends| vec3::dist(ends[0], ends[1]));
     checked_interval(&label, length_mm, deductions)
 }
@@ -228,30 +238,72 @@ pub fn secondary_self_weight_interval(
         let support_axis = axis_direction(sa, sb)?;
         let inward = vec3::scale(direction, if end == 0 { 1.0 } else { -1.0 });
         let column = section.frame_use == Some(FrameSectionUse::Column);
-        deductions[end] = if column {
-            if sa[0] != sb[0] || sa[1] != sb[1] {
-                Err("傾斜柱の支持側面には対応していません".into())
+        deductions[end] = (|| {
+            if let SupportMemberId::Primary(id) = anchor.support {
+                let element = model.element(id).unwrap();
+                if column && element.end_offsets_mm != [[0.0; 3]; 2] {
+                    model
+                        .calculation_beam_placement(anchor.support)?
+                        .connection_face_distance_mm(if end == 0 { a } else { b }, inward)
+                } else {
+                    secondary_support_face(
+                        section,
+                        reference,
+                        support_axis,
+                        [sa, sb],
+                        if end == 0 { a } else { b },
+                        inward,
+                        column,
+                    )
+                }
             } else {
-                section_face(section, support_axis, reference, inward).and_then(|distance| {
-                    let origin = if end == 0 { a } else { b };
-                    let height_mm = origin[2] + distance * inward[2];
-                    if height_mm < sa[2].min(sb[2]) || height_mm > sa[2].max(sb[2]) {
-                        Err(format!(
-                            "最外側面交点の高さ {height_mm} mm が支持柱の有限区間 [{}, {}] mm の外です",
-                            sa[2].min(sb[2]), sa[2].max(sb[2])
-                        ))
-                    } else {
-                        Ok(distance)
-                    }
-                })
+                secondary_support_face(
+                    section,
+                    reference,
+                    support_axis,
+                    [sa, sb],
+                    if end == 0 { a } else { b },
+                    inward,
+                    column,
+                )
             }
-        } else {
-            beam_projected_face(section, support_axis, reference, inward)
-        }
+        })()
         .map_err(|error| format!("{label} の端 {end}・支持材 {:?}: {error}", anchor.support))?;
     }
     checked_interval(&label, len, deductions)
         .map_err(|error| format!("{error}（支持端 {:?}）", member.ends))
+}
+
+fn secondary_support_face(
+    section: &Section,
+    reference: [f64; 3],
+    support_axis: [f64; 3],
+    support_ends: [[f64; 3]; 2],
+    origin: [f64; 3],
+    inward: [f64; 3],
+    column: bool,
+) -> Result<f64, String> {
+    let [sa, sb] = support_ends;
+    if column {
+        if sa[0] != sb[0] || sa[1] != sb[1] {
+            Err("傾斜柱の支持側面には対応していません".into())
+        } else {
+            section_face(section, support_axis, reference, inward).and_then(|distance| {
+                let height_mm = origin[2] + distance * inward[2];
+                if height_mm < sa[2].min(sb[2]) || height_mm > sa[2].max(sb[2]) {
+                    Err(format!(
+                        "最外側面交点の高さ {height_mm} mm が支持柱の有限区間 [{}, {}] mm の外です",
+                        sa[2].min(sb[2]),
+                        sa[2].max(sb[2])
+                    ))
+                } else {
+                    Ok(distance)
+                }
+            })
+        }
+    } else {
+        beam_projected_face(section, support_axis, reference, inward)
+    }
 }
 
 /// 節点 `node` で対象部材と概ね直交する Beam 要素の最大せいの半分 [mm]。
@@ -283,27 +335,92 @@ fn face_at(
     d_max / 2.0
 }
 
+/// 偏心柱を含む接合の実外形から、対象実部材端のフェース距離 `[mm]` を求める。
+/// 関係する部材に非0柱偏心がなければ None。
+pub fn eccentric_column_face_distance(
+    model: &Model,
+    target: &ElementData,
+    other: &ElementData,
+    node: crate::ids::NodeId,
+) -> Result<Option<f64>, String> {
+    let eccentric_column = |e: &ElementData| {
+        e.end_offsets_mm != [[0.0; 3]; 2]
+            && model
+                .element_section(e)
+                .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Column))
+    };
+    if !eccentric_column(target) && !eccentric_column(other) {
+        return Ok(None);
+    }
+    let ends = model
+        .primary_frame_axis_ends(target)?
+        .ok_or_else(|| format!("部材 ID {} の実材軸が未解決です", target.id.0))?;
+    let side = usize::from(target.nodes[0] != node);
+    let inward = axis_direction(ends[side], ends[1 - side])?;
+    model
+        .calculation_beam_placement(SupportMemberId::Primary(other.id))?
+        .connection_face_distance_mm(ends[side], inward)
+        .map(Some)
+        .map_err(|reason| {
+            format!(
+                "部材 ID {}・支持部材 ID {}: {reason}",
+                target.id.0, other.id.0
+            )
+        })
+}
+
 /// モデルの全要素について、両端の柱フェース距離 `[i 端, j 端]` `[mm]` を求める。
 ///
 /// 添字は `model.elements` の並びと一致する。Beam 以外の要素と、節点が 2 つ
 /// 未満の要素は `[0.0, 0.0]`。
 pub fn face_distances(model: &Model) -> Vec<[f64; 2]> {
+    try_face_distances(model).unwrap_or_else(|reason| panic!("{reason}"))
+}
+
+/// 全線材の実接合面距離 `[mm]`。偏心柱の実形状を解決できない接合は対象付きエラー。
+pub fn try_face_distances(model: &Model) -> Result<Vec<[f64; 2]>, String> {
     let adjacency = NodeAdjacency::build(model);
     model
         .elements
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            if e.kind != ElementKind::Beam || e.nodes.len() < 2 {
-                return [0.0, 0.0];
+            if (!e.kind.is_primary_frame_support()
+                || (e.kind != ElementKind::Beam && e.end_offsets_mm == [[0.0; 3]; 2]))
+                || e.nodes.len() < 2
+            {
+                return Ok([0.0, 0.0]);
             }
             let axis = elem_axis(model, e);
             let ni = e.nodes[0];
             let nj = e.nodes[e.nodes.len() - 1];
-            [
+            let mut faces = [
                 face_at(model, ni, axis, i, &adjacency),
                 face_at(model, nj, axis, i, &adjacency),
-            ]
+            ];
+            for (side, node) in [ni, nj].into_iter().enumerate() {
+                let mut exact = 0.0_f64;
+                let mut participated = false;
+                for &index in adjacency.indices_at(node) {
+                    let other = &model.elements[index];
+                    if index == i
+                        || !other.kind.is_primary_frame_support()
+                        || vec3::dot(axis, elem_axis(model, other)).abs() >= ORTHOGONAL_DOT_MAX
+                    {
+                        continue;
+                    }
+                    if let Some(distance) = eccentric_column_face_distance(model, e, other, node)? {
+                        exact = exact.max(distance);
+                        participated = true;
+                    } else if let Some(sec) = model.element_section(other) {
+                        exact = exact.max(sec.depth / 2.0);
+                    }
+                }
+                if participated {
+                    faces[side] = exact;
+                }
+            }
+            Ok(faces)
         })
         .collect()
 }
@@ -320,6 +437,16 @@ pub fn wall_support_face(
     let (section, reference) = match support {
         SupportMemberId::Primary(id) => {
             let e = model.element(id).ok_or("壁支持材が存在しません")?;
+            if e.end_offsets_mm != [[0.0; 3]; 2]
+                && model
+                    .element_section(e)
+                    .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Column))
+            {
+                return Err(format!(
+                    "壁支持柱 ID {}: 非0XYZ偏心の実壁接合面は未対応です",
+                    id.0
+                ));
+            }
             (
                 model
                     .element_section(e)

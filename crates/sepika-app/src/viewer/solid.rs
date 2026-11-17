@@ -486,7 +486,14 @@ pub(super) fn draw_section_solids_with_displacements(
                     if sm.kind == sepika_core::model::SecondaryMemberKind::Beam {
                         [0.0, 0.0, 1.0]
                     } else {
-                        [1.0, 0.0, 0.0]
+                        let angle = model
+                            .post_design_inputs
+                            .iter()
+                            .find(|input| input.member == sm.id)
+                            .and_then(|input| input.strong_direction_deg)
+                            .unwrap_or(0.0)
+                            .to_radians();
+                        [angle.cos(), angle.sin(), 0.0]
                     },
                     sec,
                     theme::BEST_YELLOW,

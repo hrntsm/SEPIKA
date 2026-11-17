@@ -249,7 +249,7 @@ fn resolve(model: &Model, elem_id: ElemId) -> Result<LateralBracingReference, St
     }
     let physical_ends = |element: &ElementData| {
         model
-            .primary_beam_axis_ends(element)?
+            .primary_frame_axis_ends(element)?
             .ok_or_else(|| format!("要素{}の大梁実材軸を解決できません", element.id.0))
     };
     let start = physical_ends(first)?[*start_index];

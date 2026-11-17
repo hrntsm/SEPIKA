@@ -290,7 +290,7 @@ impl Model {
     }
 
     /// 基準端点が丸め誤差（1e-6mm）内で一致する2節点 `Beam` と、断面・用途・解決主材料が一致するとき実部材化済み。
-    /// 実部材化先は偏心0を要し、小梁の表示偏心は比較しない。材端の順序は問わない。
+    /// 実部材化先は偏心0を要し、小梁・間柱の表示偏心は比較しない。材端の順序は問わない。
     pub fn secondary_member_materialized(&self, sm: &SecondaryMember) -> bool {
         let Some(section) = sm.section.and_then(|id| self.section(id)) else {
             return false;
@@ -313,7 +313,7 @@ impl Model {
                 || e.nodes.len() != 2
                 || e.section != Some(section.id)
                 || self.element_material(e).map(|m| m.id) != Some(material.id)
-                || (sm.kind == SecondaryMemberKind::Beam && e.end_offsets_mm != [[0.0; 3]; 2])
+                || (e.end_offsets_mm != [[0.0; 3]; 2])
             {
                 return false;
             }
@@ -641,9 +641,7 @@ pub fn validate_secondary_members(
     use crate::error::CoreError;
     let mut attest: Vec<(SecondaryMemberId, SecondaryMemberEnds)> = Vec::new();
     for sm in members {
-        if !sm.end_offsets_mm.iter().flatten().all(|v| v.is_finite())
-            || (sm.kind == SecondaryMemberKind::Post && sm.end_offsets_mm != [[0.0; 3]; 2])
-        {
+        if !sm.end_offsets_mm.iter().flatten().all(|v| v.is_finite()) {
             return Err(CoreError::DanglingRef(format!(
                 "二次部材 ID {} のXYZ偏心が非有限または非対応です",
                 sm.id.0
