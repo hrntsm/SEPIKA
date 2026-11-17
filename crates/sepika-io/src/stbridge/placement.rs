@@ -32,7 +32,10 @@ pub(super) fn import_placement(
 ) -> Result<([[f64; 3]; 2], [f64; 3]), String> {
     let axes = reference_axes(ends, rotate_deg, usage)?;
     if offsets_mm[0] != offsets_mm[1] {
-        return Err("両端差offsetの断面姿勢変換は仕様確認中です".into());
+        return Err(
+            "両端同一offsetのみ対応しています。異値offsetでの材軸・断面姿勢の対応保持は未対応です"
+                .into(),
+        );
     }
     let shift = centroid_shift(shape, usage, axes)?;
     let offsets_mm = offsets_mm.map(|offset| add(offset, shift));
@@ -49,7 +52,10 @@ pub(super) fn export_placement(
     shape: Option<&SectionShape>,
 ) -> Result<([[f64; 3]; 2], f64), String> {
     if offsets_mm[0] != offsets_mm[1] {
-        return Err("両端差offsetの断面姿勢変換は仕様確認中です".into());
+        return Err(
+            "両端同一offsetのみ対応しています。異値offsetでの材軸・断面姿勢の対応保持は未対応です"
+                .into(),
+        );
     }
     let actual = [add(ends[0], offsets_mm[0]), add(ends[1], offsets_mm[1])];
     let axes = local_frame_axes(actual[0], actual[1], reference).map_err(str::to_owned)?;
