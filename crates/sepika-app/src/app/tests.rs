@@ -12041,6 +12041,19 @@ fn load_state_gui_contract_model() -> sepika_core::model::Model {
     model.nodes = vec![model.nodes[0].clone(), top];
     model.elements.truncate(1);
     model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+    model
+        .steel_design_attrs
+        .push(sepika_core::model::SteelDesignAttr {
+            elem: ElemId(0),
+            lk_y_direct: Some(6000.0),
+            lk_z_direct: Some(6000.0),
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            c_direct: None,
+        });
     model.load_cases = [
         (K::Dead, 100.0),
         (K::Live, 20.0),

@@ -148,9 +148,7 @@ fn parse_lk_direct(s: &str, label: &str) -> Result<Option<f64>, String> {
         .parse()
         .map_err(|_| format!("不正な{label}「{s}」: 数値ではありません"))?;
     if v <= 0.0 {
-        return Err(format!(
-            "{label}は正の値で入力してください（空欄=未指定）"
-        ));
+        return Err(format!("{label}は正の値で入力してください（空欄=未指定）"));
     }
     Ok(Some(v))
 }
