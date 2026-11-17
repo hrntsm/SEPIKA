@@ -126,15 +126,13 @@ async fn mcp_tool_reports_unsupported_add_time_shares_as_invalid_params() {
         }))
         .await
         .unwrap();
-    let queried: Value =
-        serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+    let queried: Value = serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
     assert_eq!(queried, json!({"items": []}));
     let result = server
         .model_edit(Parameters(EditArgs { body: add() }))
         .await
         .unwrap();
-    let response: Value =
-        serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+    let response: Value = serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
     assert_eq!(response["applied"], true);
     assert_eq!(response["undoable"], true);
     assert_eq!(response["op_id"], "op-1");

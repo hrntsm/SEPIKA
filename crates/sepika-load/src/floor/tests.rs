@@ -1455,13 +1455,15 @@ fn issue561_product_entry_preserves_geometry_loads_and_physical_edges() {
                             assert!((areas.iter().sum::<f64>() - expected_area).abs() < 0.01);
                             if let Some(d) = &result.polygon {
                                 assert!((d.polygon_area_mm2 - expected_area).abs() < 0.01);
-                                for (e, error_bound) in d.edge_error_bounds_mm2.iter().enumerate() {
+                                for (e, &bound) in
+                                    d.edge_error_bounds_mm2.iter().enumerate().take(4)
+                                {
                                     let original = if reverse {
                                         (shift + 3 - e) % 4
                                     } else {
                                         (shift + e) % 4
                                     };
-                                    bounds[original] = *error_bound;
+                                    bounds[original] = bound;
                                 }
                             }
                             for e in 0..4 {
