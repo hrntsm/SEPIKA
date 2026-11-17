@@ -1,12 +1,18 @@
 use crate::app::App;
-use sepika_core::model::{FrameSectionUse, SupportMemberId};
-use sepika_edit::SetBeamEndOffsets;
+use sepika_core::model::{ElementKind, FrameSectionUse, SecondaryMemberKind, SupportMemberId};
+use sepika_edit::SetMemberEndOffsets;
 
-pub(super) fn beam_eccentricities(ui: &mut egui::Ui, app: &mut App, secondary: bool) {
+pub(super) fn beam_eccentricities(
+    ui: &mut egui::Ui,
+    app: &mut App,
+    secondary: Option<SecondaryMemberKind>,
+) {
     let model = &app.core.model;
-    let members: Vec<_> = if secondary {
+    let members: Vec<_> = if let Some(kind) = secondary {
         model
             .beams()
+            .chain(model.posts())
+            .filter(|sm| sm.kind == kind)
             .map(|sm| (SupportMemberId::Secondary(sm.id), sm.end_offsets_mm))
             .collect()
     } else {
@@ -14,21 +20,28 @@ pub(super) fn beam_eccentricities(ui: &mut egui::Ui, app: &mut App, secondary: b
             .elements
             .iter()
             .filter(|e| {
-                e.kind.is_primary_frame_support()
-                    && model
-                        .element_section(e)
-                        .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Girder))
+                (e.kind.is_primary_frame_support() || matches!(e.kind, ElementKind::Brace { .. }))
+                    && model.element_section(e).is_some_and(|s| {
+                        matches!(
+                            s.frame_use,
+                            Some(
+                                FrameSectionUse::Girder
+                                    | FrameSectionUse::Column
+                                    | FrameSectionUse::Brace
+                            )
+                        )
+                    })
             })
             .map(|e| (SupportMemberId::Primary(e.id), e.end_offsets_mm))
             .collect()
     };
     let mut pending = Vec::new();
-    egui::CollapsingHeader::new("梁の端別XYZ偏心 [mm]（全体座標）")
-        .id_salt(("beam_eccentricities", secondary)).show(ui, |ui| {
-        ui.label(if secondary { "小梁の偏心は表示専用です。支持先の曲げ・ねじりへの偏心効果は計算しません。" } else { "基準節点から実部材端までの移動量を入力します。0は偏心なしです。" });
+    egui::CollapsingHeader::new("部材の端別XYZ偏心 [mm]（全体座標）")
+        .id_salt(("member_eccentricities", format!("{secondary:?}"))).show(ui, |ui| {
+        ui.label(if secondary.is_some() { "小梁・間柱の偏心は表示専用です。支持先の曲げ・ねじりへの偏心効果は計算しません。" } else { "基準節点から実部材端までの移動量を入力します。0は偏心なしです。" });
         for (member, value) in members {
             ui.push_id(member, |ui| {
-                ui.label(match member { SupportMemberId::Primary(id) => format!("大梁 ID {}", id.0), SupportMemberId::Secondary(id) => format!("小梁 ID {}", id.0) });
+                ui.label(match member { SupportMemberId::Primary(id) => format!("主架構 ID {}", id.0), SupportMemberId::Secondary(id) => format!("二次部材 ID {}", id.0) });
                 let mut next = value;
                 let mut changed = false;
                 for side in 0..2 {
@@ -67,6 +80,6 @@ pub(super) fn beam_eccentricities(ui: &mut egui::Ui, app: &mut App, secondary: b
         }
     });
     for (member, value) in pending {
-        app.apply_model_edit(Box::new(SetBeamEndOffsets { member, value }));
+        app.apply_model_edit(Box::new(SetMemberEndOffsets { member, value }));
     }
 }

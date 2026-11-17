@@ -706,7 +706,7 @@ fn resolve_secondary_quantities(
                 if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
                     return None;
                 }
-                if sm.kind == SecondaryMemberKind::Beam && e.end_offsets_mm != [[0.0; 3]; 2] {
+                if e.end_offsets_mm != [[0.0; 3]; 2] {
                     return None;
                 }
                 let (p, q) = (model.node(e.nodes[0])?.coord, model.node(e.nodes[1])?.coord);
@@ -795,7 +795,6 @@ pub fn try_compute_quantity_takeoff(
             .iter()
             .flatten()
             .all(|v| v.is_finite())
-            || (member.kind == SecondaryMemberKind::Post && member.end_offsets_mm != [[0.0; 3]; 2])
         {
             return Err(format!(
                 "{} ID {} の実配置: XYZ偏心が非有限または非対応です",
@@ -812,7 +811,7 @@ pub fn try_compute_quantity_takeoff(
         if element.section.is_none() && element.end_offsets_mm == [[0.0; 3]; 2] {
             continue;
         }
-        let beam_ends = model.primary_beam_axis_ends(element).map_err(|reason| {
+        let beam_ends = model.primary_frame_axis_ends(element).map_err(|reason| {
             if model
                 .element_section(element)
                 .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Girder))
@@ -1222,7 +1221,7 @@ fn line_member_quantity(ctx: &Ctx, elem_idx: usize, elem: &ElementData) -> Optio
     let ni = elem.nodes[0].index();
     let nj = elem.nodes[1].index();
     let [ci, cj] = model
-        .primary_beam_axis_ends(elem)
+        .primary_frame_axis_ends(elem)
         .ok()?
         .unwrap_or([model.nodes.get(ni)?.coord, model.nodes.get(nj)?.coord]);
     let len = dist3(ci, cj);

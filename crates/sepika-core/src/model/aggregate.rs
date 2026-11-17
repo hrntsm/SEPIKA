@@ -1117,7 +1117,7 @@ impl Model {
         let members: Vec<&SecondaryMember> = self.beams().chain(self.posts()).collect();
         crate::model::validate_secondary_members(&members)?;
         for sm in &members {
-            if sm.kind == SecondaryMemberKind::Beam {
+            {
                 if let Some((a, b)) = self.secondary_member_end_points(sm) {
                     let actual = [
                         crate::geom::vec3::add(a, sm.end_offsets_mm[0]),
@@ -1129,7 +1129,7 @@ impl Model {
                         || length <= 0.0
                     {
                         return Err(crate::error::CoreError::InvalidInput(format!(
-                            "小梁 ID {} の実材軸長は有限な正値が必要です",
+                            "二次部材 ID {} の実材軸長は有限な正値が必要です",
                             sm.id.0
                         )));
                     }
@@ -1346,12 +1346,23 @@ impl Model {
     /// 通り芯・保存波形設定・数量設定・層間変形角の参考比較設定を除いた計算入力照合用モデルを返す。
     pub fn calculation_model(&self) -> Self {
         let mut model = self.clone();
-        for sm in model.unassigned_beams.iter_mut().chain(
-            model
-                .floor_regions
-                .iter_mut()
-                .flat_map(|r| r.secondary_beams.iter_mut()),
-        ) {
+        for sm in model
+            .unassigned_beams
+            .iter_mut()
+            .chain(
+                model
+                    .floor_regions
+                    .iter_mut()
+                    .flat_map(|r| r.secondary_beams.iter_mut()),
+            )
+            .chain(model.unassigned_posts.iter_mut())
+            .chain(
+                model
+                    .wall_regions
+                    .iter_mut()
+                    .flat_map(|r| r.posts.iter_mut()),
+            )
+        {
             sm.end_offsets_mm = [[0.0; 3]; 2];
         }
         model.axes.clear();

@@ -1645,3 +1645,81 @@ fn concrete_auto_time_history_unloads_and_reloads_like_explicit_origin_oriented(
         .zip(displacements(&retrograde))
         .any(|(a, r)| (a - r).abs() > 1e-5));
 }
+
+#[test]
+fn xyz_brace_ground_inertia_retains_restrained_translation_moment() {
+    let mut model = sdof_model();
+    model.elements[0].kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    model.elements[0].end_offsets_mm = [[0.0, 200.0, 300.0]; 2];
+    model.materials[0].density = 0.002;
+    model.sections[0].area = 1.0;
+    model.nodes[0].restraint = Dof6Mask(0b000111);
+    model.nodes[1].restraint = Dof6Mask(0b000111);
+    model.nodes[1].mass = None;
+    let map = DofMap::build(&model);
+    let influence = super::common::GroundInfluence::build(&model, &map).unwrap();
+    for node in 0..2 {
+        approx::assert_relative_eq!(
+            influence.m_r_x[map.active(node * 6 + 4).unwrap() as usize],
+            300.0,
+            epsilon = 1e-10
+        );
+        approx::assert_relative_eq!(
+            influence.m_r_x[map.active(node * 6 + 5).unwrap() as usize],
+            -200.0,
+            epsilon = 1e-10
+        );
+        approx::assert_relative_eq!(
+            influence.m_r_y[map.active(node * 6 + 3).unwrap() as usize],
+            -300.0,
+            epsilon = 1e-10
+        );
+    }
+}
+
+#[test]
+fn xyz_brace_public_time_history_entries_reject_invalid_geometry_without_panicking() {
+    for case in 0..4 {
+        let mut model = sdof_model();
+        model.elements[0].kind = ElementKind::Brace {
+            tension_only: false,
+        };
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        match case {
+            0 => model.elements[0].nodes[0] = NodeId(99),
+            1 => model.elements[0].nodes.clear(),
+            2 => model.elements[0].end_offsets_mm[0][1] = f64::NAN,
+            _ => model.elements[0].end_offsets_mm[1] = [-1000.0, 0.0, 0.0],
+        }
+        let wave = zero_wave(0.001, 2);
+        let mut newmark = NewmarkCfg::average_accel();
+        newmark.dt = 0.001;
+        let damping = Damping::MassProportional { h: 0.0, omega: 1.0 };
+        let zero = vec![0.0; map.n_active()];
+        let linear = linear_time_history_analysis(
+            &model, &map, &reducer, &wave, &newmark, &damping, &zero, &zero, None,
+        );
+        let nonlinear = nonlinear_time_history_analysis(
+            &model,
+            &map,
+            &reducer,
+            &wave,
+            &newmark,
+            &damping,
+            DampingAccumulation::NonCumulative,
+            &zero,
+            &zero,
+            NonlinearThCfg::default(),
+        );
+        for result in [linear, nonlinear] {
+            let error = result.unwrap_err().to_string();
+            assert!(
+                error.contains(["節点", "節点", "偏心", "実材軸長"][case]),
+                "{case}: {error}"
+            );
+        }
+    }
+}

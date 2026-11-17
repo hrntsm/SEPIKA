@@ -46,7 +46,7 @@ impl PhysicalStep {
                     .coord,
             ];
             let actual = model
-                .primary_beam_axis_ends(elem)?
+                .primary_frame_axis_ends(elem)?
                 .unwrap_or([reference[0], reference[1]]);
             let length = sepika_core::geom::vec3::dist(actual[0], actual[1]);
             let projection = load.dir[d] / sepika_core::geom::vec3::norm(load.dir);

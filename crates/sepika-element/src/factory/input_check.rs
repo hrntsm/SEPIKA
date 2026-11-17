@@ -242,7 +242,8 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 ///
 /// 仕口パネルは採用柱の解決に失敗した場合も診断する。
 /// 弾性としてモデル化することが仕様である要素（`Shell` / `NodalSpring`、
-/// および特性を専用の属性で持つ `Isolator` / `Damper` / `Brace`）は対象外。
+/// および特性を専用の属性で持つ `Isolator` / `Damper`）は対象外。
+/// ブレースは弾性トラスに必要な幾何・断面・材料だけを診断する。
 pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {
     nonlinear_input_issues_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
 }
@@ -282,6 +283,7 @@ fn nonlinear_input_issues_with_basis(
             continue;
         }
         let issue = match elem.kind {
+            ElementKind::Brace { .. } => elastic_stiffness_input_issue(elem, model),
             ElementKind::PanelZone => elem.nodes.first().and_then(|node| {
                 sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
                     .err()
@@ -757,6 +759,13 @@ pub fn ensure_rc_beam_reference_loads(
 /// 線材の E・採用 G、弾性梁の剛性・端部縮約が不正なら部材 ID 付きの理由を返す。
 /// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
 pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
+    if matches!(data.kind, ElementKind::Brace { .. }) {
+        return match crate::frame::truss::TrussElement::try_new(data, model) {
+            Ok(member) => elastic_young_issue(data, member.e),
+            Err(reason) => Some(reason),
+        };
+    }
+
     let section = model.element_section(data)?;
     let material = model.element_material(data)?;
     match crate::frame::beam::BeamElement::resolve_properties(data, model) {

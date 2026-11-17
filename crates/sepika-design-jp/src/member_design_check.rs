@@ -265,6 +265,25 @@ pub fn run_member_design_checks(
             .iter()
             .find(|a| a.elem == *elem_id)
             .cloned();
+        if kind == MemberKind::Column
+            && mat.category == sepika_core::model::MaterialCategory::Steel
+            && !steel_attr
+                .as_ref()
+                .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
+        {
+            if let Some(reason) = crate::steel::buckling::eccentric_column_k_reason(model, elem) {
+                for (pos, _) in &mf.at {
+                    member_checks.push((
+                        *elem_id,
+                        *pos,
+                        CheckOutcome::Skipped {
+                            reason: reason.clone(),
+                        },
+                    ));
+                }
+                continue;
+            }
+        }
         let (lk_y_auto, lk_z_auto) = if kind == MemberKind::Column {
             match crate::steel::buckling::steel_column_k_axes_with_index(
                 model,
@@ -409,16 +428,30 @@ pub fn run_member_design_checks(
                     Some(sec),
                     Some(mat.category),
                 ) == sepika_core::structure_kind::StructureKind::Rc
-                    || kind == MemberKind::Girder
-                        && matches!(
-                            sec.shape,
-                            Some(sepika_core::section_shape::SectionShape::SrcBeamRect { .. })
+                    || matches!(
+                        (&sec.shape, kind),
+                        (
+                            Some(sepika_core::section_shape::SectionShape::SrcBeamRect { .. }),
+                            MemberKind::Girder
+                        ) | (
+                            Some(sepika_core::section_shape::SectionShape::SrcColumnRect { .. }),
+                            MemberKind::Column
                         )
-                        && sepika_core::structure_kind::structure_kind_of(
-                            Some(sec),
-                            Some(mat.category),
-                        ) == sepika_core::structure_kind::StructureKind::Src);
-            let mut outcome = if missing_gravity {
+                    ) && sepika_core::structure_kind::structure_kind_of(
+                        Some(sec),
+                        Some(mat.category),
+                    ) == sepika_core::structure_kind::StructureKind::Src);
+            let eccentric_brace_compression = kind == MemberKind::Brace
+                && mfa.n < 0.0
+                && elem.end_offsets_mm != [[0.0; 3]; 2]
+                && !ctx
+                    .steel_attr
+                    .as_ref()
+                    .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
+                && !model.brb_attrs.iter().any(|a| a.elem == *elem_id);
+            let mut outcome = if eccentric_brace_compression {
+                CheckOutcome::Skipped { reason: "非0XYZ偏心ブレースの圧縮検定には強軸・弱軸の座屈長さの直接指定が必要です。実材軸長・剛体接続長からは自動算定しません".into() }
+            } else if missing_gravity {
                 CheckOutcome::Skipped {
                     reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
                 }

@@ -33,7 +33,41 @@ impl TrussElement {
 
     /// 入力 A は軸剛性に用い、物理質量は共通算定を用いる。算定不能なら理由付きエラー。
     pub fn try_new(data: &ElementData, model: &Model) -> Result<Self, String> {
-        let geom = crate::transform::EndGeometry::of_element(data, model);
+        if data.nodes.len() != 2 {
+            return Err(format!(
+                "ブレース ID {}: i/j端の二節点が必要です",
+                data.id.0
+            ));
+        }
+        for (side, id) in data.nodes.iter().enumerate() {
+            let node = model.node(*id).ok_or_else(|| {
+                format!(
+                    "ブレース ID {} {}端の節点がありません",
+                    data.id.0,
+                    ["i", "j"][side]
+                )
+            })?;
+            if !node.coord.iter().all(|v| v.is_finite()) {
+                return Err(format!(
+                    "ブレース ID {} {}端の節点座標が非有限です",
+                    data.id.0,
+                    ["i", "j"][side]
+                ));
+            }
+        }
+        if model.element_section(data).is_none() {
+            return Err(format!(
+                "ブレース ID {}: 断面が未指定または参照先がありません",
+                data.id.0
+            ));
+        }
+        if model.element_material(data).is_none() {
+            return Err(format!(
+                "ブレース ID {}: 材料が未指定または参照先がありません",
+                data.id.0
+            ));
+        }
+        let geom = crate::transform::EndGeometry::try_of_element(data, model)?;
         let [n0, n1] = geom.nodes;
         let len = geom.length;
 
@@ -45,7 +79,7 @@ impl TrussElement {
         let a = sec.resolved_area()?;
         let mass_per_length = model.element_mass_properties(data)?.mass_per_length;
         if !len.is_finite()
-            || len < 0.0
+            || len <= 0.0
             || !mass_per_length.is_finite()
             || mass_per_length < 0.0
             || !(mass_per_length * len).is_finite()
@@ -498,5 +532,175 @@ mod tests {
         let f = truss.internal_force(&ctx);
         assert!((f.data[6] - ea_l).abs() < 1e-6, "f[6]={}", f.data[6]);
         assert!((f.data[0] + ea_l).abs() < 1e-6, "f[0]={}", f.data[0]);
+    }
+    #[test]
+    fn xyz_brace_axes_rigid_arms_and_axial_response_match_independent_values() {
+        use sepika_core::geom::vec3::{cross, dot, sub};
+        for (offsets, direction, length) in [
+            ([[0.0; 3]; 2], [0.6, 0.8, 0.0], 5000.0),
+            ([[100.0, 200.0, 300.0]; 2], [0.6, 0.8, 0.0], 5000.0),
+            (
+                [[100.0, 200.0, 300.0], [1100.0, 2200.0, 3300.0]],
+                [
+                    4.0 / 61.0_f64.sqrt(),
+                    6.0 / 61.0_f64.sqrt(),
+                    3.0 / 61.0_f64.sqrt(),
+                ],
+                1000.0 * 61.0_f64.sqrt(),
+            ),
+        ] {
+            for reverse in [false, true] {
+                let (mut model, mut data) = make_model([0.0; 3], [3000.0, 4000.0, 0.0]);
+                data.end_offsets_mm = offsets;
+                if reverse {
+                    data.nodes.reverse();
+                    data.end_offsets_mm.reverse();
+                }
+                let t = direction.map(|v| if reverse { -v } else { v });
+                let truss = TrussElement::try_new(&data, &model).unwrap();
+                approx::assert_relative_eq!(truss.length, length, epsilon = 1e-9);
+                for (actual, expected) in truss.axis.rot[0].iter().zip(t) {
+                    approx::assert_relative_eq!(*actual, expected, epsilon = 1e-14);
+                }
+                let ka = 205000.0 * 2000.0 / length;
+                approx::assert_relative_eq!(truss.local_stiffness().get(0, 0), ka, epsilon = 1e-9);
+                model.elements.push(data.clone());
+                let reference = [
+                    model.node(data.nodes[0]).unwrap().coord,
+                    model.node(data.nodes[1]).unwrap().coord,
+                ];
+                let mut u = [0.0; 12];
+                u[6] = 0.5;
+                u[4] = 0.001;
+                let actual_i = cross([0.0, 0.001, 0.0], data.end_offsets_mm[0]);
+                let extension = dot(t, sub([0.5, 0.0, 0.0], actual_i));
+                let axial = ka * extension;
+                for nonlinear in [false, true] {
+                    let mut member = if nonlinear {
+                        crate::factory::build_nonlinear_behavior(
+                            &data,
+                            &model,
+                            crate::factory::StrengthBasis::Nominal,
+                            crate::factory::AnalysisKind::Incremental,
+                            None,
+                        )
+                    } else {
+                        crate::factory::build_behavior(&data, &model)
+                    };
+                    let ctx = Ctx { model: &model };
+                    member
+                        .update_state(
+                            &LocalVec {
+                                data: SmallVec::from_slice(&u),
+                            },
+                            true,
+                            &ctx,
+                        )
+                        .unwrap();
+                    let physical = member.recover_forces(&u).unwrap();
+                    let state = member.state_member_forces(&ctx).unwrap();
+                    for (_, forces) in physical.at.iter().chain(&state.at) {
+                        approx::assert_relative_eq!(forces[0], axial, epsilon = 1e-7);
+                        assert_eq!(&forces[1..], &[0.0; 5]);
+                    }
+                    let nodal = member.internal_force(&ctx);
+                    let mut resultant = [0.0; 3];
+                    let mut moment = [0.0; 3];
+                    for side in 0..2 {
+                        let force = t.map(|v| if side == 0 { -axial * v } else { axial * v });
+                        let couple = cross(data.end_offsets_mm[side], force);
+                        let orbital = cross(reference[side], force);
+                        for axis in 0..3 {
+                            approx::assert_relative_eq!(
+                                nodal.data[side * 6 + axis],
+                                force[axis],
+                                epsilon = 1e-7
+                            );
+                            approx::assert_relative_eq!(
+                                nodal.data[side * 6 + 3 + axis],
+                                couple[axis],
+                                epsilon = 1e-4
+                            );
+                            resultant[axis] += force[axis];
+                            moment[axis] += couple[axis] + orbital[axis];
+                        }
+                    }
+                    assert!(resultant.iter().all(|v| v.abs() < 1e-7));
+                    assert!(moment.iter().all(|v| v.abs() < 1e-4));
+                    let k = member.tangent_stiffness(&ctx);
+                    let energy: f64 = (0..12)
+                        .map(|i| (0..12).map(|j| u[i] * k.get(i, j) * u[j]).sum::<f64>())
+                        .sum();
+                    approx::assert_relative_eq!(energy, ka * extension * extension, epsilon = 1e-7);
+                    let mass = member.mass_matrix(MassOption::Lumped);
+                    let total_mass = 7.85e-9 * 2000.0 * length;
+                    for side in 0..2 {
+                        let [x, y, z] = data.end_offsets_mm[side];
+                        for (axis, radius_squared) in [y * y + z * z, x * x + z * z, x * x + y * y]
+                            .into_iter()
+                            .enumerate()
+                        {
+                            approx::assert_relative_eq!(
+                                mass.get(6 * side + 3 + axis, 6 * side + 3 + axis),
+                                total_mass / 2.0 * radius_squared,
+                                epsilon = 1e-8
+                            );
+                        }
+                        let expected =
+                            cross(data.end_offsets_mm[side], [total_mass / 2.0, 0.0, 0.0]);
+                        let consistent = member.mass_matrix(MassOption::Consistent);
+                        for axis in 0..3 {
+                            approx::assert_relative_eq!(
+                                consistent.get(6 * side + 3 + axis, 0)
+                                    + consistent.get(6 * side + 3 + axis, 6),
+                                expected[axis],
+                                epsilon = 1e-10
+                            );
+                        }
+                    }
+
+                    for side in 0..2 {
+                        approx::assert_relative_eq!(
+                            mass.get(6 * side, 6 * side),
+                            total_mass / 2.0,
+                            epsilon = 1e-12
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn xyz_brace_invalid_end_geometry_is_a_checked_error() {
+        let (model, data) = make_model([0.0; 3], [3000.0, 4000.0, 0.0]);
+        let mut invalid = data.clone();
+        invalid.end_offsets_mm = [[0.0; 3], [-3000.0, -4000.0, 0.0]];
+        assert!(TrussElement::try_new(&invalid, &model).is_err());
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut invalid = data.clone();
+            invalid.end_offsets_mm[0][1] = value;
+            assert!(TrussElement::try_new(&invalid, &model)
+                .err()
+                .unwrap()
+                .contains("非有限"));
+        }
+        let mut invalid = data.clone();
+        invalid.nodes[0] = NodeId(99);
+        assert!(TrussElement::try_new(&invalid, &model).is_err());
+        invalid.nodes.clear();
+        assert!(TrussElement::try_new(&invalid, &model).is_err());
+        let mut invalid = data.clone();
+        invalid.section = Some(SectionId(99));
+        assert!(TrussElement::try_new(&invalid, &model)
+            .err()
+            .unwrap()
+            .contains("断面"));
+        let mut invalid = model.clone();
+        invalid.materials.clear();
+        assert!(TrussElement::try_new(&data, &invalid)
+            .err()
+            .unwrap()
+            .contains("材料"));
     }
 }

@@ -126,49 +126,57 @@ fn assembled_translation_mass(model: &Model, dof: Dof) -> f64 {
 
 #[test]
 fn nodal_only_mass_ignores_unused_member_reference_but_consistent_mass_rejects_it() {
-    let mut model = model(ElementKind::Beam, false);
-    model.nodes[1].mass = Some([2.0, 2.0, 2.0, 0.0, 0.0, 0.0]);
-    model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
-    model.mass_method = MassMethod::LumpedOnly;
-    let dofmap = DofMap::build(&model);
-    let mass = assemble_global_m(&model, &dofmap, MassOption::Consistent)
-        .unwrap()
-        .to_dense();
-    let ux = dofmap.active(6 + Dof::Ux as usize).unwrap() as usize;
-    assert_eq!(mass[(ux, ux)], 2.0);
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+    ] {
+        let mut model = model(kind, false);
+        model.nodes[1].mass = Some([2.0, 2.0, 2.0, 0.0, 0.0, 0.0]);
+        model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        model.mass_method = MassMethod::LumpedOnly;
+        let dofmap = DofMap::build(&model);
+        let mass = assemble_global_m(&model, &dofmap, MassOption::Consistent)
+            .unwrap()
+            .to_dense();
+        let ux = dofmap.active(6 + Dof::Ux as usize).unwrap() as usize;
+        assert_eq!(mass[(ux, ux)], 2.0);
 
-    let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dofmap);
-    let error = sepika_solver::dynamic::eigen::solve_eigen(&model, &dofmap, &reducer, 0)
+        let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dofmap);
+        let error = sepika_solver::dynamic::eigen::solve_eigen(&model, &dofmap, &reducer, 0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("非有限"),
+            "{error}"
+        );
+        let solver = sepika_math::solver::make_solver(
+            sepika_math::solver::SolverBackend::DirectSparseCholesky,
+        );
+        let error = sepika_solver::dynamic::eigen::solve_eigen_with_solver(
+            &model,
+            &dofmap,
+            &reducer,
+            0,
+            solver.as_ref(),
+        )
         .unwrap_err()
         .to_string();
-    assert!(
-        error.contains("部材 ID 0") && error.contains("非有限"),
-        "{error}"
-    );
-    let solver =
-        sepika_math::solver::make_solver(sepika_math::solver::SolverBackend::DirectSparseCholesky);
-    let error = sepika_solver::dynamic::eigen::solve_eigen_with_solver(
-        &model,
-        &dofmap,
-        &reducer,
-        0,
-        solver.as_ref(),
-    )
-    .unwrap_err()
-    .to_string();
-    assert!(
-        error.contains("部材 ID 0") && error.contains("非有限"),
-        "{error}"
-    );
+        assert!(
+            error.contains("部材 ID 0") && error.contains("非有限"),
+            "{error}"
+        );
 
-    model.mass_method = MassMethod::CorrectedLumped;
-    let error = assemble_global_m(&model, &dofmap, MassOption::Consistent)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("部材 ID 0") && error.contains("非有限"),
-        "{error}"
-    );
+        model.mass_method = MassMethod::CorrectedLumped;
+        let error = assemble_global_m(&model, &dofmap, MassOption::Consistent)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("非有限"),
+            "{error}"
+        );
+    }
 }
 
 #[test]
@@ -1065,4 +1073,78 @@ fn 通常部材の階生成後のゼロ重量置換追加は再生成するま�
             .compute_nnz(),
         0
     );
+}
+
+#[test]
+fn brace_damper_mass_ignores_unused_section_and_material_but_analysis_requires_them() {
+    for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
+        let mut source = model(
+            ElementKind::Brace {
+                tension_only: false,
+            },
+            true,
+        );
+        let generated = generate_stories_with_opts(&source, &[], true, method).unwrap();
+        apply_stories(&mut source, generated, method);
+        let map = DofMap::build(&source);
+        let expected = assemble_global_m(&source, &map, MassOption::Consistent)
+            .unwrap()
+            .to_dense();
+        for missing in 0..3 {
+            let mut candidate = source.clone();
+            match missing {
+                0 => candidate.elements[0].section = None,
+                1 => candidate.elements[0].section = Some(SectionId(99)),
+                _ => candidate.materials.clear(),
+            }
+            let actual = assemble_global_m(&candidate, &map, MassOption::Consistent)
+                .unwrap()
+                .to_dense();
+            for row in 0..actual.nrows() {
+                for column in 0..actual.ncols() {
+                    assert_eq!(actual[(row, column)], expected[(row, column)]);
+                }
+            }
+            let reducer = sepika_solver::common::constraint::Reducer::build(&candidate, &map);
+            let error = sepika_solver::dynamic::eigen::solve_eigen(&candidate, &map, &reducer, 0)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains(if missing == 2 { "材料" } else { "断面" }),
+                "{method:?}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn brace_element_mass_ignores_unused_young_modulus_but_analysis_rejects_it() {
+    let mut source = model(
+        ElementKind::Brace {
+            tension_only: false,
+        },
+        false,
+    );
+    source.mass_method = MassMethod::CorrectedLumped;
+    let map = DofMap::build(&source);
+    let reducer = sepika_solver::common::constraint::Reducer::build(&source, &map);
+    let expected = assemble_global_m(&source, &map, MassOption::Consistent)
+        .unwrap()
+        .to_dense();
+    for young in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut candidate = source.clone();
+        candidate.materials[0].young = young;
+        let actual = assemble_global_m(&candidate, &map, MassOption::Consistent)
+            .unwrap()
+            .to_dense();
+        for row in 0..actual.nrows() {
+            for column in 0..actual.ncols() {
+                assert_eq!(actual[(row, column)], expected[(row, column)]);
+            }
+        }
+        let error = sepika_solver::dynamic::eigen::solve_eigen(&candidate, &map, &reducer, 0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("ヤング係数 E"), "{error}");
+    }
 }

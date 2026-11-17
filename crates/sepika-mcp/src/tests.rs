@@ -3989,7 +3989,7 @@ fn rebar507_with_explicit_zero_beam_eccentricity(
     for id in beams {
         assert_eq!(model.element(id).unwrap().end_offsets_mm, [[0.0; 3]; 2]);
         sepika_edit::EditCommand::apply(
-            &sepika_edit::SetBeamEndOffsets {
+            &sepika_edit::SetMemberEndOffsets {
                 member: sepika_core::model::SupportMemberId::Primary(id),
                 value: [[0.0, 0.0, 0.0]; 2],
             },
@@ -4783,52 +4783,73 @@ async fn directional_wall_quantity_actual_mcp_tools_edit_settings_and_report_mis
 
 #[test]
 fn xyz_beam_mcp_input_undo_and_result_provenance_distinguish_display_offsets() {
-    let directory =
-        std::env::temp_dir().join(format!("sepika-1362-offsets-{}", std::process::id()));
-    let mut state = ServerState::with_fs_store(beam_offsets_fixture::model(), &directory).unwrap();
-    let baseline = sepika_io::results::model_input_sha256(&state.model).unwrap();
-    let offsets = serde_json::json!([[100.0, 200.0, 300.0], [-100.0, 50.0, 500.0]]);
-    let command = serde_json::json!({"command":"SetBeamEndOffsets", "member":{"Secondary":0}, "end_offsets_mm":offsets});
-    assert!(apply_edit(&mut state, &command).unwrap().applied);
-    assert_eq!(
-        serde_json::to_value(state.model.unassigned_beams[0].end_offsets_mm).unwrap(),
-        offsets
-    );
-    assert_eq!(
-        sepika_io::results::model_input_sha256(&state.model).unwrap(),
-        baseline
-    );
-    state.undo.undo(&mut state.model);
-    assert_eq!(
-        state.model.unassigned_beams[0].end_offsets_mm,
-        [[0.0; 3]; 2]
-    );
-    state.undo.redo(&mut state.model);
-    assert_eq!(
-        sepika_io::results::model_input_sha256(&state.model).unwrap(),
-        baseline
-    );
-    let before = state.model.clone();
-    for invalid in [
-        serde_json::Value::Null,
-        serde_json::json!(""),
-        serde_json::json!([[0, 0, 0]]),
-    ] {
-        let mut rejected = command.clone();
-        rejected["end_offsets_mm"] = invalid;
-        assert!(apply_edit(&mut state, &rejected).is_err());
-        assert!(state.model.eq_ignoring_dofmap(&before));
+    for post in [false, true] {
+        let directory =
+            std::env::temp_dir().join(format!("sepika-xyz-offsets-{}-{post}", std::process::id()));
+        let mut model = beam_offsets_fixture::model();
+        if post {
+            model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+            let mut member = model.unassigned_beams.remove(0);
+            member.kind = sepika_core::model::SecondaryMemberKind::Post;
+            model.unassigned_posts.push(member);
+        }
+        let mut state = ServerState::with_fs_store(model, &directory).unwrap();
+        let baseline = sepika_io::results::model_input_sha256(&state.model).unwrap();
+        let offsets = serde_json::json!([[100.0, 200.0, 300.0], [-100.0, 50.0, 500.0]]);
+        let command = serde_json::json!({"command":"SetMemberEndOffsets", "member":{"Secondary":0}, "end_offsets_mm":offsets});
+        assert!(apply_edit(&mut state, &command).unwrap().applied);
+        assert_eq!(
+            serde_json::to_value(
+                state
+                    .model
+                    .secondary_member(sepika_core::ids::SecondaryMemberId(0))
+                    .unwrap()
+                    .end_offsets_mm
+            )
+            .unwrap(),
+            offsets
+        );
+        assert_eq!(
+            sepika_io::results::model_input_sha256(&state.model).unwrap(),
+            baseline
+        );
+        state.undo.undo(&mut state.model);
+        assert_eq!(
+            state
+                .model
+                .secondary_member(sepika_core::ids::SecondaryMemberId(0))
+                .unwrap()
+                .end_offsets_mm,
+            [[0.0; 3]; 2]
+        );
+        state.undo.redo(&mut state.model);
+        assert_eq!(
+            sepika_io::results::model_input_sha256(&state.model).unwrap(),
+            baseline
+        );
+        let before = state.model.clone();
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!(""),
+            serde_json::json!([[0, 0, 0]]),
+            serde_json::json!([[0, 0, null], [0, 0, 0]]),
+        ] {
+            let mut rejected = command.clone();
+            rejected["end_offsets_mm"] = invalid;
+            assert!(apply_edit(&mut state, &rejected).is_err());
+            assert!(state.model.eq_ignoring_dofmap(&before));
+        }
+        let mut missing = command.clone();
+        missing.as_object_mut().unwrap().remove("end_offsets_mm");
+        assert!(apply_edit(&mut state, &missing).is_err());
+        let primary = serde_json::json!({"command":"SetMemberEndOffsets", "member":{"Primary":0}, "end_offsets_mm":offsets});
+        assert!(apply_edit(&mut state, &primary).unwrap().applied);
+        assert_ne!(
+            sepika_io::results::model_input_sha256(&state.model).unwrap(),
+            baseline
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
-    let mut missing = command.clone();
-    missing.as_object_mut().unwrap().remove("end_offsets_mm");
-    assert!(apply_edit(&mut state, &missing).is_err());
-    let primary = serde_json::json!({"command":"SetBeamEndOffsets", "member":{"Primary":0}, "end_offsets_mm":offsets});
-    assert!(apply_edit(&mut state, &primary).unwrap().applied);
-    assert_ne!(
-        sepika_io::results::model_input_sha256(&state.model).unwrap(),
-        baseline
-    );
-    std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
@@ -4863,5 +4884,53 @@ fn mcp_secondary_add_and_replace_reject_zero_display_length_atomically() {
         assert_eq!(state.undo.revision(), 0);
         assert!(!state.undo.can_undo());
     }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn xyz_brace_mcp_edit_changes_result_identity_and_rejects_invalid_geometry_atomically() {
+    let directory = std::env::temp_dir().join(format!("brace-mcp-xyz-{}", std::process::id()));
+    let mut model = beam_offsets_fixture::model();
+    model.elements[0].kind = sepika_core::model::ElementKind::Brace { tension_only: true };
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Brace);
+    let mut state = ServerState::with_fs_store(model, &directory).unwrap();
+    let baseline = sepika_io::results::model_input_sha256(&state.model).unwrap();
+    let offsets = [[100.0, 200.0, 300.0], [-100.0, 50.0, 500.0]];
+    let command = serde_json::json!({"command":"SetMemberEndOffsets", "member":{"Primary":0}, "end_offsets_mm":offsets});
+    assert!(apply_edit(&mut state, &command).unwrap().applied);
+    assert_eq!(state.model.elements[0].end_offsets_mm, offsets);
+    assert_ne!(
+        sepika_io::results::model_input_sha256(&state.model).unwrap(),
+        baseline
+    );
+    state.undo.undo(&mut state.model);
+    assert_eq!(
+        sepika_io::results::model_input_sha256(&state.model).unwrap(),
+        baseline
+    );
+    state.undo.redo(&mut state.model);
+    assert_eq!(state.model.elements[0].end_offsets_mm, offsets);
+    for value in [
+        serde_json::Value::Null,
+        serde_json::json!([[0, 0, null], [0, 0, 0]]),
+    ] {
+        let mut invalid = command.clone();
+        invalid["end_offsets_mm"] = value;
+        assert!(apply_edit(&mut state, &invalid).is_err());
+        assert_eq!(state.model.elements[0].end_offsets_mm, offsets);
+    }
+    let mut invalid = command.clone();
+    let element = &state.model.elements[0];
+    let i = state.model.node(element.nodes[0]).unwrap().coord;
+    let j = state.model.node(element.nodes[1]).unwrap().coord;
+    invalid["end_offsets_mm"] =
+        serde_json::json!([[0.0, 0.0, 0.0], sepika_core::geom::vec3::sub(i, j)]);
+    assert!(apply_edit(&mut state, &invalid)
+        .unwrap_err()
+        .contains("実材軸長"));
+    assert_eq!(state.model.elements[0].end_offsets_mm, offsets);
+    let restored: sepika_core::model::Model =
+        serde_json::from_value(serde_json::to_value(&state.model).unwrap()).unwrap();
+    assert_eq!(restored.elements[0].end_offsets_mm, offsets);
     std::fs::remove_dir_all(directory).unwrap();
 }

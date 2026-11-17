@@ -371,3 +371,50 @@ fn issue901_compressed_angles_require_principal_axis_effective_lengths() {
         }
     }
 }
+
+#[test]
+fn eccentric_brace_compression_requires_both_explicit_buckling_lengths() {
+    use sepika_element::frame::beam::MemberForces;
+    for offsets in [[[0.0; 3]; 2], [[100.0, 200.0, 300.0]; 2]] {
+        for lengths in [
+            (None, None),
+            (Some(1000.0), None),
+            (Some(1000.0), Some(1500.0)),
+        ] {
+            for n in [-10000.0, 10000.0] {
+                let mut model = model();
+                model.elements[0].kind = ElementKind::Brace {
+                    tension_only: false,
+                };
+                model.elements[0].end_offsets_mm = offsets;
+                model.sections[0].frame_use = Some(FrameSectionUse::Brace);
+                model.steel_design_attrs[0].lk_y_direct = lengths.0;
+                model.steel_design_attrs[0].lk_z_direct = lengths.1;
+                let mf = MemberForces {
+                    at: vec![
+                        (0.0, [n, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                        (1.0, [n, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                    ],
+                };
+                let report = sepika_design_jp::run_member_design_checks(
+                    &model,
+                    &[(ElemId(0), mf)],
+                    &[],
+                    &Default::default(),
+                )
+                .unwrap();
+                assert!(!report.member_checks.is_empty());
+                for (_, _, outcome) in report.member_checks {
+                    let skip = offsets != [[0.0; 3]; 2] && n < 0.0 && lengths.1.is_none();
+                    if skip {
+                        assert!(
+                            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("座屈長さの直接指定"))
+                        );
+                    } else {
+                        assert!(matches!(outcome, CheckOutcome::Checked(_)), "{outcome:?}");
+                    }
+                }
+            }
+        }
+    }
+}

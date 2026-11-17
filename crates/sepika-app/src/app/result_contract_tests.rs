@@ -2202,7 +2202,7 @@ fn beam_eccentricity_edit_and_saved_reload_reject_results_from_previous_connecti
     app.require_result_input(key.clone()).unwrap();
     let original = app.result_input(&key);
     assert!(
-        app.apply_model_edit(Box::new(sepika_edit::SetBeamEndOffsets {
+        app.apply_model_edit(Box::new(sepika_edit::SetMemberEndOffsets {
             member: sepika_core::model::SupportMemberId::Primary(ElemId(2)),
             value: [[0.0, 0.0, 100.0]; 2]
         }))

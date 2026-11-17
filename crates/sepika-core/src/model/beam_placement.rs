@@ -27,12 +27,12 @@ pub struct BeamPlacement {
 }
 
 impl Model {
-    /// 大梁・小梁の実配置を導出する。未指定・不正な偏心、位置、断面は対象と理由付きで失敗する。
+    /// 大梁・柱・ブレース・小梁・間柱の実配置を導出する。未指定・不正な偏心、位置、断面は対象と理由付きで失敗する。
     pub fn beam_placement(&self, member: SupportMemberId) -> Result<BeamPlacement, String> {
         self.resolve_beam_placement(member, false)
     }
 
-    /// 力学計算用の配置。小梁の表示偏心は適用せず、基準端と断面を用いる。
+    /// 力学計算用の配置。小梁・間柱の表示偏心は適用せず、基準端と断面を用いる。
     pub fn calculation_beam_placement(
         &self,
         member: SupportMemberId,
@@ -49,14 +49,24 @@ impl Model {
             let (ends, eccentricity, section, reference) = match member {
                 SupportMemberId::Primary(id) => {
                     let e = self.element(id).ok_or("部材がありません")?;
-                    if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
+                    if !(e.kind.is_primary_frame_support()
+                        || matches!(e.kind, ElementKind::Brace { .. }))
+                        || e.nodes.len() != 2
+                    {
                         return Err("大梁の二節点線材ではありません".to_string());
                     }
                     let section = self
                         .section(e.section.ok_or("断面が未指定です")?)
                         .ok_or("断面がありません")?;
-                    if section.frame_use != Some(FrameSectionUse::Girder) {
-                        return Err("断面用途が大梁ではありません".to_string());
+                    if !matches!(
+                        section.frame_use,
+                        Some(
+                            FrameSectionUse::Girder
+                                | FrameSectionUse::Column
+                                | FrameSectionUse::Brace
+                        )
+                    ) {
+                        return Err("断面用途が大梁・柱・ブレースではありません".to_string());
                     }
                     let a = self.node(e.nodes[0]).ok_or("i端節点がありません")?.coord;
                     let b = self.node(e.nodes[1]).ok_or("j端節点がありません")?.coord;
@@ -64,8 +74,8 @@ impl Model {
                 }
                 SupportMemberId::Secondary(id) => {
                     let sm = self.secondary_member(id).ok_or("小梁がありません")?;
-                    if sm.kind != SecondaryMemberKind::Beam || sm.is_detached() {
-                        return Err("支持アンカーを持つ小梁が必要です".to_string());
+                    if sm.is_detached() {
+                        return Err("支持アンカーを持つ二次部材が必要です".to_string());
                     }
                     self.validate_beam_reference_supports(member)?;
                     let (a, b) = self
@@ -87,7 +97,18 @@ impl Model {
                             sm.end_offsets_mm
                         },
                         section,
-                        [0.0, 0.0, 1.0],
+                        if sm.kind == SecondaryMemberKind::Post {
+                            let angle = self
+                                .post_design_inputs
+                                .iter()
+                                .find(|input| input.member == id)
+                                .and_then(|input| input.strong_direction_deg)
+                                .unwrap_or(0.0)
+                                .to_radians();
+                            [angle.cos(), angle.sin(), 0.0]
+                        } else {
+                            [0.0, 0.0, 1.0]
+                        },
                     )
                 }
             };
@@ -96,8 +117,8 @@ impl Model {
         resolve().map_err(|reason| format!("{} の実配置: {reason}", beam_label(member)))
     }
 
-    /// 梁用途の主架構の実材軸端 `[mm]` を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
-    pub fn primary_beam_axis_ends(
+    /// 大梁・柱・ブレースの実材軸端 `[mm]` を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
+    pub fn primary_frame_axis_ends(
         &self,
         data: &ElementData,
     ) -> Result<Option<[[f64; 3]; 2]>, String> {
@@ -112,7 +133,8 @@ impl Model {
                 ["i端", "j端"][side]
             ));
         }
-        if !data.kind.is_primary_frame_support() {
+        let brace = matches!(data.kind, ElementKind::Brace { .. });
+        if !data.kind.is_primary_frame_support() && !brace {
             if data.end_offsets_mm != [[0.0; 3]; 2] {
                 return Err(format!(
                     "部材 ID {}: この種別の非0偏心は未対応です",
@@ -124,14 +146,53 @@ impl Model {
         let fail = |end: &str, item: &str, reason: &str| {
             format!("部材 ID {} {end}の{item}: {reason}", data.id.0)
         };
+        if brace && data.end_offsets_mm == [[0.0; 3]; 2] {
+            return Ok(None);
+        }
         let section = self
             .element_section(data)
             .ok_or_else(|| fail("i/j端", "断面", "未指定または参照先がありません"))?;
-        if section.frame_use != Some(FrameSectionUse::Girder) {
+        if !brace
+            && !matches!(
+                section.frame_use,
+                Some(FrameSectionUse::Girder | FrameSectionUse::Column)
+            )
+        {
             if data.end_offsets_mm != [[0.0; 3]; 2] {
-                return Err(fail("i/j端", "XYZ偏心", "大梁以外の非0偏心は未対応です"));
+                return Err(fail(
+                    "i/j端",
+                    "XYZ偏心",
+                    "大梁・柱以外の非0偏心は未対応です",
+                ));
             }
             return Ok(None);
+        }
+        if !brace
+            && section.frame_use == Some(FrameSectionUse::Column)
+            && data.end_offsets_mm == [[0.0; 3]; 2]
+        {
+            return Ok(None);
+        }
+        if !brace
+            && section.frame_use == Some(FrameSectionUse::Column)
+            && data.end_offsets_mm != [[0.0; 3]; 2]
+        {
+            for wall in self.elements.iter().filter(|e| e.kind == ElementKind::Wall) {
+                if data.nodes.iter().all(|n| wall.nodes.contains(n)) {
+                    return Err(format!("柱 ID {}・壁要素 ID {}: 非0XYZ偏心を持つ側柱と壁の共通断面・接続は未対応です", data.id.0, wall.id.0));
+                }
+            }
+            for plate in &self.wall_plates {
+                if plate
+                    .boundary_nodes(self)
+                    .is_some_and(|nodes| data.nodes.iter().all(|n| nodes.contains(n)))
+                {
+                    return Err(format!(
+                        "柱 ID {}・壁版 ID {}: 非0XYZ偏心を持つ側柱の壁面・接合面は未対応です",
+                        data.id.0, plate.id.0
+                    ));
+                }
+            }
         }
         if data.nodes.len() != 2 {
             return Err(fail("i/j端", "節点", "二節点が必要です"));
@@ -344,6 +405,27 @@ impl BeamPlacement {
                 Ok(width)
             })
             .map_err(|reason| format!("{}: {reason}", beam_label(self.member)))
+    }
+
+    /// 実部材端から単位方向に進むときの支持実外形の出口距離 `[mm]`。交差なしは0、途中だけの交差は未対応として失敗する。
+    pub fn connection_face_distance_mm(
+        &self,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<f64, String> {
+        let Some([entry, exit]) = self.line_range(origin, direction)? else {
+            return Ok(0.0);
+        };
+        if exit < 0.0 {
+            return Ok(0.0);
+        }
+        if entry > 1e-6 {
+            return Err(format!(
+                "{}: 実材端と離れた位置で支持実形状と交差する接合は未対応です",
+                beam_label(self.member)
+            ));
+        }
+        Ok(exit.max(0.0))
     }
 
     fn line_range(
@@ -904,5 +986,149 @@ mod tests {
         );
         assert_eq!(reversed.length_mm, inclined.length_mm);
         assert_eq!(reversed.axes[0], inclined.axes[0].map(|v| -v));
+    }
+    #[test]
+    fn column_xyz_placement_uses_independent_coordinates_and_reversed_local_axis() {
+        let mut model = Model {
+            sections: vec![section(600.0, false)],
+            ..Default::default()
+        };
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        for (id, coord) in [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]]
+            .into_iter()
+            .enumerate()
+        {
+            model.nodes.push(Node {
+                id: NodeId(id as u32),
+                coord,
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            });
+        }
+        model.elements.push(ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: vec![NodeId(0), NodeId(1)].into(),
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [1.0, 0.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+            end_offsets_mm: [[0.0; 3]; 2],
+        });
+        for (offsets, expected, length, axis) in [
+            (
+                [[0.0; 3]; 2],
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]],
+                3000.0,
+                [0.0, 0.0, 1.0],
+            ),
+            (
+                [[100.0, 200.0, 300.0]; 2],
+                [[100.0, 200.0, 300.0], [100.0, 200.0, 3300.0]],
+                3000.0,
+                [0.0, 0.0, 1.0],
+            ),
+            (
+                [[0.0; 3], [400.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [400.0, 0.0, 3000.0]],
+                3026.549190084311,
+                [0.13216372009101796, 0.0, 0.9912279006826347],
+            ),
+        ] {
+            for reverse in [false, true] {
+                model.elements[0].nodes = if reverse {
+                    vec![NodeId(1), NodeId(0)].into()
+                } else {
+                    vec![NodeId(0), NodeId(1)].into()
+                };
+                model.elements[0].end_offsets_mm = if reverse {
+                    [offsets[1], offsets[0]]
+                } else {
+                    offsets
+                };
+                let expected = if reverse {
+                    [expected[1], expected[0]]
+                } else {
+                    expected
+                };
+                let actual = model
+                    .primary_frame_axis_ends(&model.elements[0])
+                    .unwrap()
+                    .unwrap_or_else(|| {
+                        model.elements[0]
+                            .nodes
+                            .iter()
+                            .map(|id| model.node(*id).unwrap().coord)
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .unwrap()
+                    });
+                assert_eq!(actual, expected);
+                let placement = model
+                    .beam_placement(SupportMemberId::Primary(ElemId(0)))
+                    .unwrap();
+                assert_eq!(placement.actual_ends, expected);
+                near(placement.length_mm, length);
+                for (actual, expected) in placement.axes[0].into_iter().zip(axis) {
+                    near(actual, if reverse { -expected } else { expected });
+                }
+            }
+        }
+    }
+    #[test]
+    fn eccentric_column_support_face_uses_actual_shape_and_rejects_remote_crossings() {
+        let section = section(600.0, false);
+        let placement = BeamPlacement::new(
+            SupportMemberId::Primary(ElemId(7)),
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]],
+            [[50.0, 0.0, 0.0]; 2],
+            &section,
+            [1.0, 0.0, 0.0],
+        )
+        .unwrap();
+        assert_eq!(
+            placement.axes,
+            [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert!(matches!(
+            section.shape,
+            Some(SectionShape::RcBeamRect {
+                b: 400.0,
+                d: 600.0,
+                ..
+            })
+        ));
+        near(
+            placement
+                .connection_face_distance_mm([0.0, 0.0, 1500.0], [1.0, 0.0, 0.0])
+                .unwrap(),
+            350.0,
+        );
+        near(
+            placement
+                .connection_face_distance_mm([0.0, 0.0, 1500.0], [-1.0, 0.0, 0.0])
+                .unwrap(),
+            250.0,
+        );
+        assert_eq!(
+            placement
+                .connection_face_distance_mm([0.0, 1000.0, 1500.0], [1.0, 0.0, 0.0])
+                .unwrap(),
+            0.0
+        );
+        let reason = placement
+            .connection_face_distance_mm([-500.0, 0.0, 1500.0], [1.0, 0.0, 0.0])
+            .unwrap_err();
+        assert!(
+            reason.contains("ID 7") && reason.contains("離れた位置"),
+            "{reason}"
+        );
     }
 }

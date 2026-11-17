@@ -388,7 +388,7 @@ pub(super) fn record_cuts_with_responses(
                     cut.unavailable = Some("切断要素の節点参照が欠落しています".into());
                     continue;
                 };
-                let actual_ends = match model.primary_beam_axis_ends(elem) {
+                let actual_ends = match model.primary_frame_axis_ends(elem) {
                     Ok(ends) => ends,
                     Err(reason) => {
                         cut.unavailable = Some(reason);
@@ -833,56 +833,80 @@ mod tests {
     }
     #[test]
     fn 確定記録は独立外力100と50を上層累積し支持ばねを外部作用として含める() {
-        for support_n in [0.0, 20.0] {
-            let mut m = super::super::tests::two_story_model();
-            m.nodes[1].support_spring = Some([10.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-            let map = sepika_core::dof::DofMap::build(&m);
-            let mut disp = vec![0.0; map.n_active()];
-            disp[map.active(6).unwrap() as usize] = support_n / 10.0;
-            let behaviors: Vec<Box<dyn ElementBehavior>> = m
-                .elements
-                .iter()
-                .zip([150_000.0 - support_n, 50_000.0])
-                .map(|(e, q)| {
-                    let mut forces = vec![0.0; 12];
-                    forces[0] = -q;
-                    forces[6] = q;
-                    Box::new(Prescribed {
-                        nodes: e.nodes.to_vec(),
-                        forces,
-                    }) as Box<dyn ElementBehavior>
-                })
-                .collect();
-            let heights = [3000.0, 3000.0];
-            let mut recorder = super::super::step_record::StepRecorder::new(
-                &m,
-                &map,
-                SeismicDir::X,
-                &heights,
-                Default::default(),
-                super::super::loads::PhysicalPushoverLoads::empty(),
-            )
-            .unwrap();
-            recorder.reference_external = vec![0.0; map.n_active()];
-            recorder.reference_external[map.active(6).unwrap() as usize] = 100_000.0;
-            recorder.reference_external[map.active(12).unwrap() as usize] = 50_000.0;
-            recorder.constant_external = vec![0.0; map.n_active()];
-            recorder.physical_loads.reference.nodal =
-                [(m.nodes[1].id, 100_000.), (m.nodes[2].id, 50_000.)]
-                    .into_iter()
-                    .map(|(node, force)| {
-                        sepika_core::model::NodalLoad::manual(node, [force, 0., 0., 0., 0., 0.])
-                    })
-                    .collect();
-            recorder.record(1.0, &m, &map, &behaviors, &disp).unwrap();
-            let recorded = recorder.finish();
-            let cuts = &recorded.confirmed_history[0].cuts;
-            assert_eq!(cuts[0].reference_n, 150_000.0);
-            assert_eq!(cuts[1].reference_n, 50_000.0);
-            assert_eq!(cuts[0].support_n, support_n);
-            assert_eq!(cuts[0].evaluate().unwrap().qu_n, 150_000.0 - support_n);
-            assert_eq!(cuts[1].evaluate().unwrap().qu_n, 50_000.0);
-            assert_eq!(cuts[0].evaluate().unwrap().residual_n, 0.0);
+        for brace in [false, true] {
+            for offsets in [
+                [[0.0; 3]; 2],
+                [[100.0, 0.0, 2000.0], [-100.0, 0.0, -2000.0]],
+            ] {
+                for support_n in [0.0, 20.0] {
+                    let mut m = super::super::tests::two_story_model();
+                    if offsets != [[0.0; 3]; 2] {
+                        m.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+                    }
+                    if brace {
+                        m.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Brace);
+                    }
+                    for element in &mut m.elements {
+                        if brace {
+                            element.kind = ElementKind::Brace {
+                                tension_only: false,
+                            };
+                        }
+                        element.end_offsets_mm = offsets;
+                    }
+                    m.nodes[1].support_spring = Some([10.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+                    let map = sepika_core::dof::DofMap::build(&m);
+                    let mut disp = vec![0.0; map.n_active()];
+                    disp[map.active(6).unwrap() as usize] = support_n / 10.0;
+                    let behaviors: Vec<Box<dyn ElementBehavior>> = m
+                        .elements
+                        .iter()
+                        .zip([150_000.0 - support_n, 50_000.0])
+                        .map(|(e, q)| {
+                            let mut forces = vec![0.0; 12];
+                            forces[0] = -q;
+                            forces[6] = q;
+                            Box::new(Prescribed {
+                                nodes: e.nodes.to_vec(),
+                                forces,
+                            }) as Box<dyn ElementBehavior>
+                        })
+                        .collect();
+                    let heights = [3000.0, 3000.0];
+                    let mut recorder = super::super::step_record::StepRecorder::new(
+                        &m,
+                        &map,
+                        SeismicDir::X,
+                        &heights,
+                        Default::default(),
+                        super::super::loads::PhysicalPushoverLoads::empty(),
+                    )
+                    .unwrap();
+                    recorder.reference_external = vec![0.0; map.n_active()];
+                    recorder.reference_external[map.active(6).unwrap() as usize] = 100_000.0;
+                    recorder.reference_external[map.active(12).unwrap() as usize] = 50_000.0;
+                    recorder.constant_external = vec![0.0; map.n_active()];
+                    recorder.physical_loads.reference.nodal =
+                        [(m.nodes[1].id, 100_000.), (m.nodes[2].id, 50_000.)]
+                            .into_iter()
+                            .map(|(node, force)| {
+                                sepika_core::model::NodalLoad::manual(
+                                    node,
+                                    [force, 0., 0., 0., 0., 0.],
+                                )
+                            })
+                            .collect();
+                    recorder.record(1.0, &m, &map, &behaviors, &disp).unwrap();
+                    let recorded = recorder.finish();
+                    let cuts = &recorded.confirmed_history[0].cuts;
+                    assert_eq!(cuts[0].reference_n, 150_000.0);
+                    assert_eq!(cuts[1].reference_n, 50_000.0);
+                    assert_eq!(cuts[0].support_n, support_n);
+                    assert_eq!(cuts[0].evaluate().unwrap().qu_n, 150_000.0 - support_n);
+                    assert_eq!(cuts[1].evaluate().unwrap().qu_n, 50_000.0);
+                    assert_eq!(cuts[0].evaluate().unwrap().residual_n, 0.0);
+                }
+            }
         }
     }
     #[test]

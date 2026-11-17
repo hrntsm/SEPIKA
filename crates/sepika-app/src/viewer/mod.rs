@@ -32,7 +32,7 @@ fn primary_display_ends(
         reference
     } else {
         model
-            .primary_beam_axis_ends(elem)
+            .primary_frame_axis_ends(elem)
             .ok()?
             .unwrap_or(reference)
     };
@@ -68,10 +68,16 @@ fn primary_shape_ends(
     elem: &sepika_core::model::ElementData,
 ) -> Option<[[f64; 3]; 2]> {
     use sepika_core::model::{FrameSectionUse, SupportMemberId};
+    if matches!(elem.kind, sepika_core::model::ElementKind::Brace { .. }) {
+        return primary_display_ends(model, elem, None, 0.0);
+    }
     if elem.kind.is_primary_frame_support()
-        && model
-            .element_section(elem)
-            .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Girder))
+        && model.element_section(elem).is_some_and(|s| {
+            matches!(
+                s.frame_use,
+                Some(FrameSectionUse::Girder | FrameSectionUse::Column)
+            )
+        })
     {
         Some(
             model
@@ -91,18 +97,11 @@ fn secondary_shape_ends(
     model: &sepika_core::Model,
     sm: &sepika_core::model::SecondaryMember,
 ) -> Option<[[f64; 3]; 2]> {
-    use sepika_core::model::{SecondaryMemberKind, SupportMemberId};
-    if sm.kind == SecondaryMemberKind::Beam {
-        Some(
-            model
-                .beam_placement(SupportMemberId::Secondary(sm.id))
-                .ok()?
-                .actual_ends,
-        )
-    } else {
-        let (a, b) = model.secondary_member_end_points(sm)?;
-        Some([a, b])
-    }
+    let (a, b) = model.secondary_member_end_points(sm)?;
+    Some([
+        sepika_core::geom::vec3::add(a, sm.end_offsets_mm[0]),
+        sepika_core::geom::vec3::add(b, sm.end_offsets_mm[1]),
+    ])
 }
 
 fn secondary_shape_visible(
@@ -1166,22 +1165,42 @@ pub fn viewer_panel_with_view(
             .core
             .model
             .beams()
+            .chain(app.core.model.posts())
             .filter(|sm| show_secondary && secondary_shape_visible(&app.core.model, sm, filter))
             .map(|sm| SupportMemberId::Secondary(sm.id));
         for member in primary.chain(secondary) {
-            let Ok(placement) = app.core.model.beam_placement(member) else {
-                continue;
+            let (reference_ends, actual_ends) = match member {
+                SupportMemberId::Primary(id) => {
+                    let Some(elem) = app.core.model.element(id) else {
+                        continue;
+                    };
+                    let Ok(Some(actual)) = app.core.model.primary_frame_axis_ends(elem) else {
+                        continue;
+                    };
+                    (
+                        std::array::from_fn(|side| {
+                            app.core.model.node(elem.nodes[side]).unwrap().coord
+                        }),
+                        actual,
+                    )
+                }
+                SupportMemberId::Secondary(_) => {
+                    let Ok(placement) = app.core.model.beam_placement(member) else {
+                        continue;
+                    };
+                    (placement.reference_ends, placement.actual_ends)
+                }
             };
             let (color, dash) = match member {
                 SupportMemberId::Primary(_) => (theme::SECONDARY_AMBER, 6.0),
                 SupportMemberId::Secondary(_) => (theme::SECONDARY_AMBER, 2.0),
             };
             for side in 0..2 {
-                if placement.reference_ends[side] != placement.actual_ends[side] {
+                if reference_ends[side] != actual_ends[side] {
                     painter.extend(egui::Shape::dashed_line(
                         &[
-                            proj.project(placement.reference_ends[side]),
-                            proj.project(placement.actual_ends[side]),
+                            proj.project(reference_ends[side]),
+                            proj.project(actual_ends[side]),
                         ],
                         egui::Stroke::new(1.5_f32, color),
                         dash,

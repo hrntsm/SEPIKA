@@ -233,11 +233,9 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
         .iter()
         .find(|c| c.id == lc)
         .ok_or_else(|| SolveError::InvalidInput(format!("荷重ケース {} が存在しません", lc.0)))?;
-    for elem in model
-        .elements
-        .iter()
-        .filter(|elem| elem.kind.is_primary_frame_support())
-    {
+    for elem in model.elements.iter().filter(|elem| {
+        elem.kind.is_primary_frame_support() || matches!(elem.kind, ElementKind::Brace { .. })
+    }) {
         if matches!(
             elem.kind,
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
@@ -343,11 +341,11 @@ fn solve_tension_only_iterative(
         let (Some(n0), Some(n1)) = (model.nodes.get(ni), model.nodes.get(nj)) else {
             continue;
         };
-        let d = [
-            n1.coord[0] - n0.coord[0],
-            n1.coord[1] - n0.coord[1],
-            n1.coord[2] - n0.coord[2],
-        ];
+        let [p_i, p_j] = model
+            .primary_frame_axis_ends(e)
+            .map_err(SolveError::InvalidInput)?
+            .unwrap_or([n0.coord, n1.coord]);
+        let d = sepika_core::geom::vec3::sub(p_j, p_i);
         let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         if l < 1e-12 {
             continue;
@@ -403,10 +401,19 @@ fn solve_tension_only_iterative(
                     let g = ni * sepika_core::dof::DOF_PER_NODE + d;
                     dofmap.active(g).map(|a| u_free[a as usize]).unwrap_or(0.0)
                 };
-                let dux = du(b.nj, 0) - du(b.ni, 0);
-                let duy = du(b.nj, 1) - du(b.ni, 1);
-                let duz = du(b.nj, 2) - du(b.ni, 2);
-                b.t[0] * dux + b.t[1] * duy + b.t[2] * duz >= 0.0
+                let physical = |node, side| {
+                    let translation = [du(node, 0), du(node, 1), du(node, 2)];
+                    let rotation = [du(node, 3), du(node, 4), du(node, 5)];
+                    sepika_core::geom::vec3::add(
+                        translation,
+                        sepika_core::geom::vec3::cross(
+                            rotation,
+                            model.elements[b.elem].end_offsets_mm[side],
+                        ),
+                    )
+                };
+                let delta = sepika_core::geom::vec3::sub(physical(b.nj, 1), physical(b.ni, 0));
+                sepika_core::geom::vec3::dot(b.t, delta) >= 0.0
             })
             .collect();
 

@@ -4137,3 +4137,42 @@ fn 接線剛性による終了理由は数値的な打切りとして説明す�
     );
     assert!(termination.is_premature());
 }
+
+#[test]
+fn xyz_brace_public_pushover_rejects_invalid_geometry_without_panicking() {
+    for case in 0..5 {
+        let mut model = single_column_model(235.0, 80000.0);
+        model.elements[0].kind = ElementKind::Brace {
+            tension_only: false,
+        };
+        model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Brace);
+        let map = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &map);
+        match case {
+            0 => model.elements[0].nodes[0] = sepika_core::ids::NodeId(99),
+            1 => model.elements[0].nodes.clear(),
+            2 => model.elements[0].end_offsets_mm[0][0] = f64::NAN,
+            3 => {
+                model.elements[0].end_offsets_mm[1] =
+                    sepika_core::geom::vec3::sub(model.nodes[0].coord, model.nodes[1].coord)
+            }
+            _ => model.elements[0].local_axis.ref_vector = [f64::INFINITY, 0.0, 0.0],
+        }
+        let result = pushover_analysis_recording(
+            &model,
+            &map,
+            &reducer,
+            SeismicDir::X,
+            1,
+            PushoverTarget::from_max_disp(1.0),
+            PushoverControl::default(),
+            false,
+            DuctilityMethod::FirstYield,
+        );
+        let error = result.unwrap_err();
+        assert!(
+            error.contains(["節点", "節点", "偏心", "実材軸長", "局所"][case]),
+            "{case}: {error}"
+        );
+    }
+}

@@ -46,11 +46,11 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
         .and_then(|v| v.as_str())
         .ok_or("command が必要です")?;
     match command {
-        "SetBeamEndOffsets" => {
+        "SetMemberEndOffsets" => {
             let member = serde_json::from_value(value.get("member").ok_or("member が必要です")?.clone()).map_err(|e| format!("member: {e}"))?;
             let offsets: [[f64; 3]; 2] = serde_json::from_value(value.get("end_offsets_mm").ok_or("end_offsets_mm はi端・j端のXYZ有限値[mm]が必要です")?.clone()).map_err(|e| format!("end_offsets_mm: {e}"))?;
             if !offsets.iter().flatten().all(|v| v.is_finite()) { return Err("end_offsets_mm の各成分には有限値が必要です".into()); }
-            Ok(Box::new(sepika_edit::SetBeamEndOffsets { member, value: offsets }))
+            Ok(Box::new(sepika_edit::SetMemberEndOffsets { member, value: offsets }))
         }
 
         "EditSectionShape" => {

@@ -84,6 +84,17 @@ pub fn column_stiffnesses(model: &Model, story: StoryId) -> Result<Vec<ColumnSti
         if elem.kind != ElementKind::Beam || elem.nodes.len() != 2 {
             continue;
         }
+        if let Some(e) = col
+            .segments
+            .iter()
+            .filter_map(|id| model.element(*id))
+            .find(|e| e.end_offsets_mm != [[0.0; 3]; 2])
+        {
+            return Err(format!(
+                "層 {}・柱 ID {}: 非0XYZ偏心柱のD値略算法は未対応です",
+                story.0, e.id.0
+            ));
+        }
         let n_top = &model.nodes[col.top.index()];
         let n_bot = &model.nodes[col.bottom.index()];
         let p_top = n_top.coord;

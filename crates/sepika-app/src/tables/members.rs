@@ -109,7 +109,7 @@ fn members_table_view<'a>(model: &'a Model) -> MembersTableView<'a> {
 pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::{self, Col};
 
-    super::beam_placement::beam_eccentricities(ui, app, false);
+    super::beam_placement::beam_eccentricities(ui, app, None);
 
     if app.core.model.nodes.len() < 2 {
         ui.label("梁を追加するには節点が2つ以上必要です");

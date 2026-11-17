@@ -1,20 +1,20 @@
 use crate::{EditCommand, Noop, RejectedEdit};
-use sepika_core::model::{FrameSectionUse, Model, SecondaryMemberKind, SupportMemberId};
+use sepika_core::model::{ElementKind, FrameSectionUse, Model, SupportMemberId};
 
-/// 大梁の解析偏心・小梁の表示偏心を全体XYZ `[mm]`、i端・j端の順で設定する。
-pub struct SetBeamEndOffsets {
+/// 大梁・柱・ブレースの解析偏心、小梁・間柱の表示偏心を全体XYZ `[mm]`、i端・j端の順で設定する。
+pub struct SetMemberEndOffsets {
     pub member: SupportMemberId,
     pub value: [[f64; 3]; 2],
 }
 
-impl EditCommand for SetBeamEndOffsets {
+impl EditCommand for SetMemberEndOffsets {
     fn affects_calculation(&self) -> bool {
         matches!(self.member, SupportMemberId::Primary(_))
     }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let reject = |reason: String| -> Box<dyn EditCommand> {
             Box::new(RejectedEdit(format!(
-                "梁 {:?} のXYZ偏心: {reason}",
+                "部材 {:?} のXYZ偏心: {reason}",
                 self.member
             )))
         };
@@ -26,14 +26,24 @@ impl EditCommand for SetBeamEndOffsets {
                 let Some(e) = model.element(id) else {
                     return reject("部材がありません".into());
                 };
-                if !e.kind.is_primary_frame_support()
-                    || !model
-                        .element_section(e)
-                        .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Girder))
+                if !(e.kind.is_primary_frame_support()
+                    || matches!(e.kind, ElementKind::Brace { .. }))
+                    || !model.element_section(e).is_some_and(|s| {
+                        matches!(
+                            s.frame_use,
+                            Some(
+                                FrameSectionUse::Girder
+                                    | FrameSectionUse::Column
+                                    | FrameSectionUse::Brace
+                            )
+                        )
+                    })
                 {
-                    return reject("大梁ではありません".into());
+                    return reject("大梁・柱・ブレースではありません".into());
                 }
-                if let Err(reason) = model.primary_beam_axis_ends(e) {
+                let mut candidate = e.clone();
+                candidate.end_offsets_mm = self.value;
+                if let Err(reason) = model.primary_frame_axis_ends(&candidate) {
                     return reject(reason);
                 }
                 let ends = e
@@ -50,9 +60,6 @@ impl EditCommand for SetBeamEndOffsets {
                 let Some(sm) = model.secondary_member(id) else {
                     return reject("小梁がありません".into());
                 };
-                if sm.kind != SecondaryMemberKind::Beam {
-                    return reject("間柱の非0偏心は未対応です".into());
-                }
                 let Some((a, b)) = model.secondary_member_end_points(sm) else {
                     return reject("支持アンカーを解決できません".into());
                 };
@@ -110,7 +117,7 @@ impl EditCommand for SetBeamEndOffsets {
         for (case, index, _, load) in loads {
             model.load_cases[case].member[index] = load;
         }
-        Box::new(RestoreBeamEndOffsets {
+        Box::new(RestoreMemberEndOffsets {
             command: Self {
                 member: self.member,
                 value: old,
@@ -119,16 +126,16 @@ impl EditCommand for SetBeamEndOffsets {
         })
     }
     fn label(&self) -> &str {
-        "梁の端別XYZ偏心変更"
+        "部材の端別XYZ偏心変更"
     }
 }
 
-struct RestoreBeamEndOffsets {
-    command: SetBeamEndOffsets,
+struct RestoreMemberEndOffsets {
+    command: SetMemberEndOffsets,
     loads: Vec<(usize, usize, sepika_core::model::MemberLoad)>,
 }
 
-impl EditCommand for RestoreBeamEndOffsets {
+impl EditCommand for RestoreMemberEndOffsets {
     fn affects_calculation(&self) -> bool {
         self.command.affects_calculation()
     }
