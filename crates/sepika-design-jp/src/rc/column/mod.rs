@@ -17,6 +17,15 @@ mod nm_interaction;
 pub(crate) use nm_interaction::interp_ma;
 use nm_interaction::*;
 
+fn column_allowable_moment(curve: &[(f64, f64)], n_design: f64) -> f64 {
+    if n_design < 0.0 && curve.first().is_some_and(|point| n_design < point.0) {
+        // 引張側の算定範囲外では、端点の曲げ耐力を外挿できない。
+        0.0
+    } else {
+        interp_ma(curve, n_design)
+    }
+}
+
 fn column_moment_ratio(
     forces: &MemberForcesAt,
     na_n: f64,
@@ -94,12 +103,15 @@ pub(crate) fn column_check(
             ft,
         };
         let curve = column_nm_curve(&axis, &allow, na);
-        let ma = interp_ma(&curve, n_design);
+        let ma = column_allowable_moment(&curve, n_design);
         let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true) {
             Ok(ratio) => ratio,
             Err(reason) => return CheckOutcome::Skipped { reason },
         };
-        let ratio_axial = if forces.n < 0.0 && na > 0.0 {
+        let nt = as_total * ft;
+        let ratio_axial = if forces.n > 0.0 {
+            forces.n / nt
+        } else if forces.n < 0.0 && na > 0.0 {
             (-forces.n) / na
         } else {
             0.0
@@ -146,8 +158,8 @@ pub(crate) fn column_check(
 
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
         let axial_bending_detail = format!(
-            "NA={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm",
-            na, n_design, ma, forces.mz, forces.my,
+            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm",
+            na, nt, n_design, ma, forces.mz, forces.my,
         );
         let shear_detail = format!(
             "QAy={:.1} N, QAz={:.1} N, αy={:.3}, αz={:.3}, pw={:.5}",
@@ -226,13 +238,16 @@ pub(crate) fn column_check(
 
         let curve_z = column_nm_curve(&axis_z, &allow, na);
         let curve_y = column_nm_curve(&axis_y, &allow, na);
-        let ma_z = interp_ma(&curve_z, n_design);
-        let ma_y = interp_ma(&curve_y, n_design);
+        let ma_z = column_allowable_moment(&curve_z, n_design);
+        let ma_y = column_allowable_moment(&curve_y, n_design);
         let ratio_moment = match column_moment_ratio(forces, na, ma_z, ma_y, false) {
             Ok(ratio) => ratio,
             Err(reason) => return CheckOutcome::Skipped { reason },
         };
-        let ratio_axial = if forces.n < 0.0 && na > 0.0 {
+        let nt = as_total * ft_z;
+        let ratio_axial = if forces.n > 0.0 {
+            forces.n / nt
+        } else if forces.n < 0.0 && na > 0.0 {
             (-forces.n) / na
         } else {
             0.0
@@ -297,8 +312,8 @@ pub(crate) fn column_check(
 
         let basis = "RC 規準14条（柱、軸力+二軸曲げ+せん断）".to_string();
         let axial_bending_detail = format!(
-            "NA={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm",
-            na, n_design, ma_z, ma_y, forces.mz, forces.my,
+            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm",
+            na, nt, n_design, ma_z, ma_y, forces.mz, forces.my,
         );
         let shear_detail = format!(
             "QAy={:.1} N, QAz={:.1} N, αy={:.3}, αz={:.3}, pw_z={:.5}, pw_y={:.5}",
@@ -357,6 +372,15 @@ mod tests {
         ctx_column, make_material, make_section, rc_column_rect_shape, rc_rect_shape,
     };
     use crate::DesignCheck;
+
+    #[test]
+    fn outside_curve_restriction_applies_only_to_tension() {
+        let curve = [(10.0, 20.0), (100.0, 0.0)];
+        assert_eq!(column_allowable_moment(&curve, -1.0), 0.0);
+        assert_eq!(column_allowable_moment(&curve, 0.0), 20.0);
+        assert_eq!(column_allowable_moment(&curve, 5.0), 20.0);
+        assert_eq!(column_allowable_moment(&curve, 110.0), 0.0);
+    }
 
     #[test]
     fn one_zero_capacity_axis_preserves_the_other_axis_demand() {

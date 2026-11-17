@@ -119,3 +119,123 @@ fn common_product_entry_rejects_nonzero_bending_at_zero_capacity() {
         }
     }
 }
+
+#[path = "fixtures/rc_column_tension_model.rs"]
+mod tension_input;
+#[path = "fixtures/rc_column_tension_reference.rs"]
+mod tension_reference;
+
+#[test]
+fn common_product_entry_checks_tension_against_all_main_bars_for_both_load_terms() {
+    for circle in [false, true] {
+        let model = tension_input::tension_model(input::column_model(circle, 0.0), 0.0, [0.0, 0.0]);
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            let nt_n = tension_reference::tension_limit_n(term == LoadTerm::Long);
+            for factor in [-0.1, 0.0, 0.25, 0.99, 1.0, 1.01] {
+                for moments in [
+                    [0.0, 0.0],
+                    [1_000_000.0, 0.0],
+                    [0.0, 2_000_000.0],
+                    [1_000_000.0, 2_000_000.0],
+                ] {
+                    let forces = vec![(
+                        ElemId(0),
+                        MemberForces {
+                            at: [0.0, 0.5, 1.0]
+                                .into_iter()
+                                .map(|pos| {
+                                    (pos, [factor * nt_n, 0.0, 0.0, 0.0, moments[0], moments[1]])
+                                })
+                                .collect(),
+                        },
+                    )];
+                    let report = run_member_design_checks(
+                        &model,
+                        &forces,
+                        &[],
+                        &MemberDesignCheckOptions {
+                            term,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(report.member_checks.len(), 3);
+                    for (_, _, outcome) in report.member_checks {
+                        if factor >= 0.99 && moments != [0.0, 0.0] {
+                            let CheckOutcome::Skipped { reason } = outcome else {
+                                panic!("{circle} {term:?} {factor} {outcome:?}")
+                            };
+                            assert!(
+                                reason.contains("検定不能")
+                                    && reason.contains("MA_z=0")
+                                    && reason.contains("MA_y=0"),
+                                "{reason}"
+                            );
+                        } else {
+                            let CheckOutcome::Checked(result) = outcome else {
+                                panic!("{circle} {term:?} {factor} {outcome:?}")
+                            };
+                            let nm = result
+                                .components
+                                .iter()
+                                .find(|c| c.kind == CheckKind::AxialBending)
+                                .unwrap();
+                            if moments == [0.0, 0.0] {
+                                let expected = if factor >= 0.0 {
+                                    factor
+                                } else {
+                                    let na_long_n = if circle {
+                                        2_515_988.458_924_536
+                                    } else {
+                                        2_254_041.748_339_885
+                                    };
+                                    let na_n =
+                                        na_long_n * if term == LoadTerm::Long { 1.0 } else { 2.0 };
+                                    -factor * nt_n / na_n
+                                };
+                                assert!((nm.ratio - expected).abs() < 1e-12, "{nm:?}");
+                            }
+                            assert_eq!(
+                                result.ok(),
+                                factor <= 1.0,
+                                "{circle} {term:?} {factor} {result:?}"
+                            );
+                            assert!(nm.detail.contains("NT="));
+                        }
+                    }
+                }
+            }
+            let forces = vec![(
+                ElemId(0),
+                MemberForces {
+                    at: [0.0, 0.5, 1.0]
+                        .into_iter()
+                        .map(|pos| (pos, [1_000_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+                        .collect(),
+                },
+            )];
+            let report = run_member_design_checks(
+                &model,
+                &forces,
+                &[],
+                &MemberDesignCheckOptions {
+                    term,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for (_, _, outcome) in report.member_checks {
+                let CheckOutcome::Checked(result) = outcome else {
+                    panic!("{outcome:?}")
+                };
+                assert!(!result.ok());
+                let expected = if term == LoadTerm::Long {
+                    2.0505693885446803
+                } else {
+                    1.2778910682234963
+                };
+                assert!((result.ratio() - expected).abs() < 1e-9, "{result:?}");
+            }
+        }
+    }
+}
