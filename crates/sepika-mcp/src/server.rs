@@ -3,7 +3,7 @@
 use super::*;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content, Implementation, ServerInfo};
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerConfig};
 use rmcp::transport::stdio;
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler, ServiceExt};
 use std::sync::Arc;
@@ -55,7 +55,7 @@ impl SepikaServer {
         let items = super::query_model(&st.model, &args.kind, args.filter.as_deref())
             .map_err(|e| ErrorData::invalid_params(e, None))?;
         let result = QueryResult { items };
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     #[tool(
@@ -68,7 +68,7 @@ impl SepikaServer {
         let mut st = self.state.lock().await;
         let result = super::apply_edit(&mut st, &args.body)
             .map_err(|e| ErrorData::invalid_params(e, None))?;
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     #[tool(description = "数量積算（コンクリート体積・型枠面積・鉄筋/鉄骨重量の概算）を集計する")]
@@ -79,7 +79,7 @@ impl SepikaServer {
         let st = self.state.lock().await;
         let result = super::quantity_takeoff_json(&st.model, args.group_by.as_deref())
             .map_err(|e| ErrorData::invalid_params(e, None))?;
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     #[tool(description = "解析を非同期で実行する")]
@@ -192,7 +192,7 @@ impl SepikaServer {
                 jobs.lock().unwrap().update(&job_id, status);
             }
         });
-        Ok(CallToolResult::success(vec![Content::json(
+        Ok(CallToolResult::success(vec![ContentBlock::json(
             serde_json::json!({ "job_id": id }),
         )?]))
     }
@@ -224,7 +224,7 @@ impl SepikaServer {
             step_range,
         )
         .map_err(|e| ErrorData::invalid_params(e, None))?;
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     /// ジョブの現在状態を返す。
@@ -235,7 +235,7 @@ impl SepikaServer {
     ) -> Result<CallToolResult, ErrorData> {
         let job = self.jobs.lock().unwrap().get(&args.job_id).cloned();
         match job {
-            Some(j) => Ok(CallToolResult::success(vec![Content::json(&j)?])),
+            Some(j) => Ok(CallToolResult::success(vec![ContentBlock::json(&j)?])),
             None => Err(ErrorData::invalid_params("job not found", None)),
         }
     }
@@ -243,8 +243,8 @@ impl SepikaServer {
 
 #[tool_handler]
 impl ServerHandler for SepikaServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::default().with_server_info(Implementation::new("sepika-mcp", "0.1.0"))
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::default().with_server_info(Implementation::new("sepika-mcp", "0.1.0"))
     }
 }
 
@@ -259,6 +259,7 @@ pub struct QueryArgs {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct EditArgs {
+    #[schemars(with = "serde_json::Map<String, serde_json::Value>")]
     pub body: serde_json::Value,
 }
 
@@ -714,7 +715,6 @@ mod tests {
     /// `CallToolResult`（`analysis_run` の戻り値）から `job_id` を取り出す。
     fn extract_job_id(result: &CallToolResult) -> String {
         let text = result.content[0]
-            .raw
             .as_text()
             .expect("analysis_run の応答は text content のはず")
             .text
@@ -822,7 +822,7 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value =
-            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+            serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
         assert_eq!(value, serde_json::json!({"items": []}));
         let error = server
             .quantity_takeoff(Parameters(QuantityTakeoffArgs {
@@ -838,7 +838,7 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value =
-            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+            serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
         assert_eq!(value["status"], "unavailable");
         assert!(value["totals"].is_null());
         assert!(value["reason"].is_string());
@@ -890,7 +890,7 @@ mod tests {
                     .await
                     .unwrap();
                 let value: serde_json::Value =
-                    serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+                    serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
                 assert_eq!(value["status"], "unavailable");
                 assert!(value["totals"].is_null());
                 assert_eq!(value["reason"], reason);
@@ -935,7 +935,7 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value =
-            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+            serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
         assert!(value["items"][0]["unavailable_reason"]
             .as_str()
             .unwrap()
@@ -945,7 +945,7 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value =
-            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+            serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
         assert_eq!(value["status"], "unavailable");
         assert!(value["totals"].is_null());
         assert_eq!(value["reason"], reason);
@@ -1029,7 +1029,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        let text = got.content[0].raw.as_text().unwrap().text.clone();
+        let text = got.content[0].as_text().unwrap().text.clone();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         let rows = value["rows"].as_array().unwrap();
         assert_eq!(rows.len(), 1, "node_ids=[1] で絞り込んだ行数");
@@ -1050,7 +1050,7 @@ mod tests {
                 }))
                 .await
                 .unwrap();
-            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap()
+            serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap()
         }
         async fn run(server: &SepikaServer, args: AnalysisRunArgs) -> serde_json::Value {
             let result = server.analysis_run(Parameters(args)).await.unwrap();
@@ -1064,7 +1064,7 @@ mod tests {
                 .await
                 .unwrap();
             let job: serde_json::Value =
-                serde_json::from_str(&status.content[0].raw.as_text().unwrap().text).unwrap();
+                serde_json::from_str(&status.content[0].as_text().unwrap().text).unwrap();
             serde_json::from_str(job["status"]["Done"]["result_ref"].as_str().unwrap()).unwrap()
         }
         let dir = test_store_dir("load_state_combination_store");
@@ -1224,7 +1224,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        let text = got.content[0].raw.as_text().unwrap().text.clone();
+        let text = got.content[0].as_text().unwrap().text.clone();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         let rows = value["rows"].as_array().unwrap();
         assert_eq!(rows.len(), 1, "n_modes=1 なので1行返るはず");
@@ -1528,7 +1528,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        let text = &result.content[0].raw.as_text().unwrap().text;
+        let text = &result.content[0].as_text().unwrap().text;
         let value: serde_json::Value = serde_json::from_str(text).unwrap();
         let rows = value["rows"].as_array().unwrap();
         assert!(!rows.is_empty());
@@ -1597,7 +1597,7 @@ mod tests {
                 .await
                 .unwrap();
             let value: serde_json::Value =
-                serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+                serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
             let rows = value["rows"].as_array().unwrap();
             let actual: f64 = rows
                 .iter()
@@ -1706,7 +1706,7 @@ mod tests {
                     .await
                     .unwrap();
                 let rows: serde_json::Value =
-                    serde_json::from_str(&forces.content[0].raw.as_text().unwrap().text).unwrap();
+                    serde_json::from_str(&forces.content[0].as_text().unwrap().text).unwrap();
                 assert!(!rows["rows"].as_array().unwrap().is_empty());
                 let stored_model = server.state.lock().await.model.clone();
                 let reopened = SepikaServer::new(make_state(stored_model, &dir));

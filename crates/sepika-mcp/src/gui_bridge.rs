@@ -1,7 +1,7 @@
 //! 開いているGUIの許可済み検討だけへ要求を中継するstdioサーバ。
 use rmcp::{
     handler::server::wrapper::Parameters,
-    model::{CallToolResult, Content, Implementation, ServerInfo},
+    model::{CallToolResult, ContentBlock, Implementation, ServerConfig},
     tool, tool_handler, tool_router, ErrorData, ServerHandler, ServiceExt,
 };
 use sepika_ai_connection::{
@@ -68,7 +68,7 @@ impl GuiBridge {
         }
         .await;
         match result {
-            Ok(response) => Ok(CallToolResult::success(vec![Content::json(response)?])),
+            Ok(response) => Ok(CallToolResult::success(vec![ContentBlock::json(response)?])),
             Err(error) => {
                 *client = None;
                 Err(ErrorData::internal_error(
@@ -81,8 +81,8 @@ impl GuiBridge {
 }
 #[tool_handler]
 impl ServerHandler for GuiBridge {
-    fn get_info(&self) -> ServerInfo {
-        let mut info = ServerInfo::default();
+    fn get_info(&self) -> ServerConfig {
+        let mut info = ServerConfig::default();
         info.server_info = Implementation::new("sepika-gui-bridge", env!("CARGO_PKG_VERSION"));
         info.capabilities = rmcp::model::ServerCapabilities::builder()
             .enable_tools()
