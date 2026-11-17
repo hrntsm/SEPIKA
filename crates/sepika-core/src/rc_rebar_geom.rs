@@ -241,12 +241,10 @@ impl RcBeamRebar {
             return Err(RebarGeometryError::OutOfBounds);
         }
 
-        let top_inner_y = d / 2.0 - (k0 + self.top.len().saturating_sub(1) as f64 * s);
-        let bottom_inner_y = -(d / 2.0 - (k0 + self.bottom.len().saturating_sub(1) as f64 * s));
-        if !self.top.is_empty() && top_inner_y <= 0.0 {
-            return Err(RebarGeometryError::LayerCollision);
-        }
-        if !self.bottom.is_empty() && bottom_inner_y >= 0.0 {
+        let (top_inner, bottom_inner) = self.innermost_bar_distances_from_edges_mm();
+        if top_inner.is_some_and(|distance| distance >= d / 2.0)
+            || bottom_inner.is_some_and(|distance| distance >= d / 2.0)
+        {
             return Err(RebarGeometryError::LayerCollision);
         }
 
@@ -271,6 +269,19 @@ impl RcBeamRebar {
 }
 
 impl RcBeamRebar {
+    /// 最内段の中心までの縁距離 [mm] を (上端, 下端) 順に返す。配筋が空の側は None。
+    pub fn innermost_bar_distances_from_edges_mm(&self) -> (Option<f64>, Option<f64>) {
+        let first_mm = self.cover + self.stirrup.dia + self.main_dia / 2.0;
+        let spacing_mm = center_spacing_mm(self.main_dia);
+        let inner = |layers: &[u32]| {
+            layers
+                .len()
+                .checked_sub(1)
+                .map(|last| first_mm + last as f64 * spacing_mm)
+        };
+        (inner(&self.top), inner(&self.bottom))
+    }
+
     /// 上端筋の段別面積 `[mm²]`。未入力なら空。
     pub fn layer_areas_top(&self) -> Vec<f64> {
         layer_areas(&self.top, self.main_dia)

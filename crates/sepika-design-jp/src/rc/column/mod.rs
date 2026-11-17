@@ -492,7 +492,7 @@ mod tests {
         let ft = rebar_allowable_tension("SD345", 22.0, true);
 
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
-        let bm = beam_moment_capacity(&props_z, ft, allow.fc, allow.n_ratio);
+        let bm = beam_moment_capacity(&props_z, ft, allow.fc, allow.n_ratio).unwrap();
 
         let gross_area = sec.width * sec.depth;
         let as_total = rebar.total_main_area();

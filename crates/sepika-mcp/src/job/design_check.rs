@@ -365,6 +365,67 @@ mod tests {
         ));
     }
 
+    mod asymmetric_beam_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs"
+        ));
+    }
+
+    #[test]
+    fn rc_beam_asymmetric_mcp_case_and_combination_report_unchecked() {
+        for asymmetric in [false, true] {
+            let model = asymmetric_beam_input::model(asymmetric);
+            for combo in [false, true] {
+                let JobOutcome::DesignCheck {
+                    summary,
+                    member_force_rows,
+                    ..
+                } = compute_design_check_job(
+                    &model,
+                    &JobParams {
+                        load_case: (!combo).then_some(0),
+                        load_combination: combo.then_some(0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                else {
+                    panic!()
+                };
+                assert_eq!(summary["n_checks"], 3);
+                assert_eq!(member_force_rows.len(), 3);
+                assert!(
+                    member_force_rows
+                        .iter()
+                        .all(|(_, _, f)| (f[5] - 45e6).abs() < 1e-6),
+                    "{member_force_rows:?}"
+                );
+                assert_eq!(summary["all_checked_and_ok"], false);
+                assert_eq!(summary["all_members_checked_and_ok"], false);
+                if asymmetric {
+                    assert_eq!(summary["n_skipped"], 3);
+                    assert_eq!(summary["n_ng"], 0);
+                    assert!(summary["max_ratio"].is_null());
+                    for row in summary["member_skipped"].as_array().unwrap() {
+                        let reason = row["reason"].as_str().unwrap();
+                        assert!(
+                            reason.contains("正曲げ")
+                                && reason.contains("重心までの距離が一致しません")
+                        );
+                    }
+                } else {
+                    assert_eq!(summary["n_skipped"], 0, "{summary}");
+                    assert_eq!(summary["n_ng"], 3, "{summary}");
+                    assert!(
+                        summary["max_ratio"].as_f64().unwrap()
+                            >= 45e6 / 39_177_363.507_517_874 - 1e-8
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn rc_column_tension_mcp_reports_ng_for_case_and_combination() {
         for circle in [false, true] {

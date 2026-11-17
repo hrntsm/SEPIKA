@@ -164,22 +164,12 @@ impl DesignCheck for RcDesign {
             };
         }
 
-        let cr = if matches!(shape, SectionShape::RcBeamRect { .. }) {
-            beam::beam_check(forces, sec, mat, ctx, shape, fc_raw)
-        } else if matches!(
-            shape,
-            SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }
-        ) {
-            return column::column_check(forces, mat, ctx, shape, fc_raw);
-        } else {
-            match ctx.kind {
-                MemberKind::Girder | MemberKind::Brace => {
-                    beam::beam_check(forces, sec, mat, ctx, shape, fc_raw)
-                }
-                MemberKind::Column => return column::column_check(forces, mat, ctx, shape, fc_raw),
+        match shape {
+            SectionShape::RcBeamRect { rebar, .. } => {
+                beam::beam_check(forces, mat, ctx, shape, rebar, fc_raw)
             }
-        };
-        CheckOutcome::Checked(cr)
+            _ => column::column_check(forces, mat, ctx, shape, fc_raw),
+        }
     }
 }
 

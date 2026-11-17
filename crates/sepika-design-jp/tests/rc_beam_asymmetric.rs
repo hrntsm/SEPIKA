@@ -1,6 +1,11 @@
-use sepika_core::ids::{MaterialId, SectionId};
-use sepika_core::model::{Material, MaterialCategory};
-use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+use sepika_core::ids::ElemId;
+use sepika_core::model::MaterialCategory;
+use sepika_design_jp::{run_member_design_checks, CheckComponent, MemberDesignCheckOptions};
+use sepika_element::frame::beam::MemberForces;
+
+#[path = "fixtures/rc_beam_asymmetric_model.rs"]
+mod input;
+use input::{material, section};
 use sepika_design_jp::{CheckKind, CheckOutcome, DesignCheck, DesignCtx, MemberForcesAt, RcDesign};
 
 struct Case {
@@ -169,66 +174,18 @@ const CASES: &[Case] = &[
     },
 ];
 
-fn material(name: &str, category: MaterialCategory) -> Material {
-    let standard = sepika_core::standard_material::standard_material_properties(name).unwrap();
-    Material {
-        id: MaterialId(if category == MaterialCategory::Concrete {
-            0
-        } else {
-            1
-        }),
-        name: name.into(),
-        category,
-        young: standard.young,
-        poisson: standard.poisson,
-        density: standard.density,
-        shear: None,
-        fc: standard.fc,
-        fy: standard.fy,
-        concrete_class: Default::default(),
-        strength_factor: None,
-    }
-}
-
-fn section(case: &Case) -> sepika_core::model::Section {
-    let shape = SectionShape::RcBeamRect {
-        b: case.width_mm,
-        d: case.depth_mm,
-        rebar: RcBeamRebar {
-            main_dia: case.main_dia_mm,
-            top: case.top.to_vec(),
-            bottom: case.bottom.to_vec(),
-            cover: 40.0,
-            stirrup: BeamStirrup {
-                dia: 10.0,
-                pitch: 100.0,
-                legs: 2,
-            },
-        },
-    };
-    if let SectionShape::RcBeamRect { b, d, rebar } = &shape {
-        rebar.validate(*b, *d).unwrap();
-    }
-    let mut section = shape.to_section(SectionId(0), "G1".into());
-    section.material = Some(MaterialId(0));
-    section.rebar_material = Some(MaterialId(1));
-    section.shear_rebar_material = Some(MaterialId(1));
-    section.frame_use = section.rc_frame_use();
-    section
-}
-
-fn bending(case: &Case, pos: f64, slab: bool, demand_nmm: f64) -> sepika_design_jp::CheckComponent {
+fn beam_check(case: &Case, pos: f64, slab: bool, demand_nmm: f64, shear_n: f64) -> CheckOutcome {
     let ctx = DesignCtx {
         rebar_material: Some(material("SD345", MaterialCategory::Rebar)),
         shear_rebar_material: Some(material("SD345", MaterialCategory::Rebar)),
         beam_has_slab: slab,
         ..Default::default()
     };
-    let outcome = RcDesign.check(
+    RcDesign.check(
         &MemberForcesAt {
             pos,
             n: 0.0,
-            qy: 0.0,
+            qy: shear_n,
             qz: 0.0,
             my: 0.0,
             mz: if case.negative {
@@ -237,10 +194,19 @@ fn bending(case: &Case, pos: f64, slab: bool, demand_nmm: f64) -> sepika_design_
                 demand_nmm
             },
         },
-        &section(case),
+        &section(
+            case.width_mm,
+            case.depth_mm,
+            case.main_dia_mm,
+            case.top,
+            case.bottom,
+        ),
         &material("FC24", MaterialCategory::Concrete),
         &ctx,
-    );
+    )
+}
+
+fn bending(outcome: CheckOutcome) -> CheckComponent {
     let CheckOutcome::Checked(result) = outcome else {
         panic!("{outcome:?}")
     };
@@ -360,53 +326,40 @@ fn asymmetric_beams_compare_virtual_position_real_centroids_and_each_layer() {
                 .sum::<f64>();
         close(values[2][1] - values[1][1], dispersion_mm4);
         close(at_mm2 * 215.0 * 7.0 * d_mm / 8.0, case.ma_t);
-        let current_ma = case.ma_t.min(case.expected[0][2]);
-        for (pos, slab) in [(0.0, false), (0.5, false), (0.0, true), (0.5, true)] {
-            let expected_ma = if pos == 0.5 && slab && !case.negative {
-                case.ma_t
+        for (pos, slab) in [(0.0, false), (0.5, false), (1.0, true), (0.5, true)] {
+            let outcome = beam_check(case, pos, slab, 200e6, 0.0);
+            if pos == 0.5 && slab && !case.negative {
+                let component = bending(outcome);
+                check_capacity(&component, 200e6, case.ma_t, None);
+                assert!(component.detail.contains("中央+スラブ正曲げ"));
+            } else if case.name == "single" {
+                check_capacity(
+                    &bending(outcome),
+                    200e6,
+                    case.ma_t,
+                    Some(case.expected[0][2]),
+                );
             } else {
-                current_ma
-            };
-            let component = bending(case, pos, slab, 200e6);
-            close(component.ratio, 200e6 / expected_ma);
-            for (key, expected) in [
-                ("MA_t=", case.ma_t),
-                ("MA_c=", case.expected[0][2]),
-                ("MA=", expected_ma),
-            ] {
-                let shown: f64 = component
-                    .detail
-                    .split(key)
-                    .nth(1)
-                    .unwrap()
-                    .split_whitespace()
-                    .next()
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                assert!((shown - expected).abs() <= 0.051, "{}", component.detail);
+                assert!(
+                    matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("重心までの距離が一致しません"))
+                );
             }
         }
-        println!(
-            "{} negative={}: xn/Icr/MAc={values:?}, MAt={}, MA(current/centroid/layers)={:?}",
-            case.name,
-            case.negative,
-            case.ma_t,
-            values.map(|v| case.ma_t.min(v[2]))
-        );
     }
 }
 
 #[test]
-fn concrete_governed_asymmetry_can_accept_bending_rejected_by_real_positions() {
+fn standard_asymmetric_beam_is_unchecked_at_the_previous_passing_moment() {
     let case = CASES
         .iter()
         .find(|c| c.name == "two_one_shallow" && !c.negative)
         .unwrap();
     assert!(sepika_core::material_grade::REBAR_NOMINAL_SIZES.contains(&case.main_dia_mm));
     assert!(sepika_core::material_grade::MAIN_REBAR_GRADES.contains(&"SD345"));
-    let current = bending(case, 0.0, false, 45e6);
-    assert!(current.ratio < 1.0);
+    assert!(45e6 / case.ma_t.min(case.expected[0][2]) < 1.0);
+    assert!(
+        matches!(beam_check(case, 0.0, false, 45e6, 0.0), CheckOutcome::Skipped { reason } if reason.contains("正曲げ") && reason.contains("重心までの距離が一致しません"))
+    );
     assert!(45e6 / case.ma_t.min(case.expected[1][2]) > 1.0);
     assert!(45e6 / case.ma_t.min(case.expected[2][2]) > 1.0);
     let reverse = CASES
@@ -419,4 +372,211 @@ fn concrete_governed_asymmetry_can_accept_bending_rejected_by_real_positions() {
         .find(|c| c.name == "two_one" && !c.negative)
         .unwrap();
     assert!(masked.expected.iter().all(|v| v[2] > masked.ma_t));
+}
+
+fn check_capacity(
+    component: &CheckComponent,
+    demand_nmm: f64,
+    ma_t_nmm: f64,
+    ma_c_nmm: Option<f64>,
+) {
+    let ma_nmm = ma_c_nmm.map_or(ma_t_nmm, |ma_c_nmm| ma_t_nmm.min(ma_c_nmm));
+    close(component.ratio, demand_nmm / ma_nmm);
+    let shown = |key: &str| {
+        component.detail.split(key).nth(1).map(|value| {
+            value
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse::<f64>()
+                .unwrap()
+        })
+    };
+    for (key, expected) in [
+        ("MA_t=", Some(ma_t_nmm)),
+        ("MA_c=", ma_c_nmm),
+        ("MA=", Some(ma_nmm)),
+    ] {
+        match expected {
+            Some(expected) => assert!(
+                (shown(key).unwrap() - expected).abs() <= 0.051,
+                "{}",
+                component.detail
+            ),
+            None => assert!(shown(key).is_none(), "{}", component.detail),
+        }
+    }
+}
+
+#[test]
+fn equal_centroid_beams_keep_tension_and_compression_controlled_capacities() {
+    // 圧縮縁を基準にした独立釣合いと、各側の重心から求めた固定期待値。
+    for (top, bottom, signed_expected) in [
+        (
+            &[3, 3][..],
+            &[3, 3][..],
+            [(165_377_084.723_124_9, 174_596_511.723_861_25); 2],
+        ),
+        (
+            &[2, 2][..],
+            &[3, 3][..],
+            [
+                (165_377_084.723_124_9, 165_022_113.044_584_36),
+                (110_251_389.815_416_6, 150_205_067.501_363_5),
+            ],
+        ),
+        (
+            &[2, 6][..],
+            &[2, 1, 1][..],
+            [
+                (107_717_794.742_251_49, 145_175_388.758_810_5),
+                (215_435_589.484_502_97, 171_366_419.468_029_08),
+            ],
+        ),
+    ] {
+        for (negative, (ma_t, ma_c)) in [false, true].into_iter().zip(signed_expected) {
+            let case = Case {
+                name: "same_centroid",
+                top,
+                bottom,
+                negative,
+                main_dia_mm: 19.0,
+                width_mm: 400.0,
+                depth_mm: 600.0,
+                ma_t,
+                expected: [[0.0; 3]; 3],
+            };
+            let outcome = beam_check(&case, 0.0, false, 150e6, 0.0);
+            check_capacity(&bending(outcome), 150e6, ma_t, Some(ma_c));
+        }
+    }
+}
+
+#[test]
+fn equal_centroids_with_bars_crossing_the_neutral_axis_are_unchecked() {
+    // 上下対称でも、重心集約の中立軸102.154 mmを2段目107 mmと3段目154.5 mmが越える。
+    for negative in [false, true] {
+        let case = Case {
+            name: "crosses_neutral_axis",
+            top: &[1, 1, 1],
+            bottom: &[1, 1, 1],
+            negative,
+            main_dia_mm: 19.0,
+            width_mm: 600.0,
+            depth_mm: 450.0,
+            ma_t: 54_885_670.111_303_18,
+            expected: [[0.0; 3]; 3],
+        };
+        assert!(
+            matches!(beam_check(&case, 0.0, false, 45e6, 0.0), CheckOutcome::Skipped { reason } if reason.contains("中立軸"))
+        );
+        if !negative {
+            check_capacity(
+                &bending(beam_check(&case, 0.5, true, 45e6, 0.0)),
+                45e6,
+                case.ma_t,
+                None,
+            );
+        }
+    }
+}
+
+#[test]
+fn singly_reinforced_beams_require_steel_on_the_tension_side() {
+    // 単筋の独立釣合いは中立軸128.564449 mm、コンクリート支配のMA 31.838367 kN·m。
+    for negative in [false, true] {
+        let (top, bottom): (&[u32], &[u32]) = if negative { (&[3], &[]) } else { (&[], &[3]) };
+        let case = Case {
+            name: "singly_reinforced",
+            top,
+            bottom,
+            negative,
+            main_dia_mm: 19.0,
+            width_mm: 250.0,
+            depth_mm: 350.0,
+            ma_t: 46_484_802.237_124_13,
+            expected: [[0.0; 3]; 3],
+        };
+        check_capacity(
+            &bending(beam_check(&case, 0.0, false, 45e6, 0.0)),
+            45e6,
+            case.ma_t,
+            Some(31_838_366.621_351_764),
+        );
+        let opposite = Case {
+            negative: !negative,
+            ..case
+        };
+        for (pos, slab) in [(0.0, false), (0.5, true)] {
+            assert!(matches!(beam_check(&opposite, pos, slab, 45e6, 0.0),
+                CheckOutcome::Skipped { reason } if reason.contains("引張側の主筋がありません")));
+        }
+    }
+}
+
+#[test]
+fn singly_reinforced_beam_with_tension_layers_crossing_the_neutral_axis_is_unchecked() {
+    // 引張側最内段が圧縮縁から174 mm、中立軸が176.238156 mm。
+    let case = Case {
+        name: "tension_layers_cross_neutral_axis",
+        top: &[],
+        bottom: &[2, 2],
+        negative: false,
+        main_dia_mm: 41.0,
+        width_mm: 250.0,
+        depth_mm: 347.0,
+        ma_t: 0.0,
+        expected: [[0.0; 3]; 3],
+    };
+    assert!(matches!(beam_check(&case, 0.0, false, 45e6, 0.0),
+        CheckOutcome::Skipped { reason } if reason.contains("中立軸")));
+}
+
+#[test]
+fn without_bending_demand_asymmetric_beam_retains_shear_check_without_capacity() {
+    let CheckOutcome::Checked(result) = beam_check(&CASES[0], 0.0, false, 0.0, 20_000.0) else {
+        panic!("零曲げはせん断検定を妨げない")
+    };
+    assert!(result
+        .components
+        .iter()
+        .any(|c| c.kind == CheckKind::Shear && c.ratio > 0.0));
+    let bending = result
+        .components
+        .iter()
+        .find(|c| c.kind == CheckKind::Bending)
+        .unwrap();
+    assert_eq!(bending.ratio, 0.0);
+    assert!(!bending.detail.contains("MA"));
+}
+
+#[test]
+fn common_member_check_runner_preserves_unchecked_stations_with_zero_bending_at_one_end() {
+    let model = input::model(true);
+    let forces = MemberForces {
+        at: vec![
+            (0.0, [0.0, 20_000.0, 0.0, 0.0, 0.0, 45e6]),
+            (0.5, [0.0, 20_000.0, 0.0, 0.0, 0.0, 45e6]),
+            (1.0, [0.0, 20_000.0, 0.0, 0.0, 0.0, 0.0]),
+        ],
+    };
+    let report = run_member_design_checks(
+        &model,
+        &[(ElemId(0), forces)],
+        &[],
+        &MemberDesignCheckOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(report.member_checks.len(), 3);
+    for (_, pos, outcome) in report.member_checks {
+        if pos == 1.0 {
+            assert!(
+                matches!(outcome, CheckOutcome::Checked(result) if result.components.iter().any(|c| c.kind == CheckKind::Shear && c.ratio > 0.0))
+            );
+        } else {
+            assert!(
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("正曲げ") && reason.contains("重心までの距離が一致しません"))
+            );
+        }
+    }
 }
