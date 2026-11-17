@@ -117,6 +117,7 @@ fn full_weight() -> f64 {
 fn split_by_post() -> Model {
     let mut m = bay();
     m.unassigned_posts.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: Some([0.5, 0.5]),
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -489,6 +490,7 @@ fn dl支持反力は総和を保存する() {
 fn 柱に並走する間柱は柱の荷重を奪わない() {
     let mut m = split_by_post();
     m.wall_regions[0].posts.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(1),
@@ -542,6 +544,7 @@ fn midspan_post_bay() -> Model {
     let mut m = bay();
     m.nodes.retain(|n| n.id.0 < 4);
     m.unassigned_posts.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: Some([0.5, 0.5]),
         id: SecondaryMemberId(0),

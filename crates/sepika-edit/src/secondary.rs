@@ -595,6 +595,7 @@ impl EditCommand for SetSecondaryMemberEndSupport {
         };
         let ends = model.secondary_ends_from_coords(self.member, kind, [a, b], new_supported);
         let mut candidate = SecondaryMember {
+            display_local_axis: sm.display_local_axis,
             id: self.member,
             end_offsets_mm: sm.end_offsets_mm,
             gravity_end_shares: sm.gravity_end_shares,
@@ -605,11 +606,8 @@ impl EditCommand for SetSecondaryMemberEndSupport {
         };
         if let Some((start, _)) = model.secondary_member_end_points(&candidate) {
             if sepika_core::geom::vec3::dist(start, b) < sepika_core::geom::vec3::dist(start, a) {
-                candidate.end_offsets_mm.reverse();
-                candidate.gravity_end_shares = candidate.gravity_end_shares.map(|mut shares| {
-                    shares.reverse();
-                    shares
-                });
+                candidate.display_local_axis = Some(model.secondary_display_axis(sm));
+                candidate.reverse_end_attributes();
             }
         }
         if let Some(reason) = secondary_offset_error(model, &candidate) {
@@ -754,6 +752,7 @@ impl EditCommand for PlaceSecondaryMember {
             return Box::new(Noop);
         }
         let candidate = SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(u32::MAX),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -844,6 +843,7 @@ impl EditCommand for SetSecondaryMemberEnds {
         }
         let candidate = SecondaryMember {
             id: self.member,
+            display_local_axis: sm.display_local_axis,
             end_offsets_mm: sm.end_offsets_mm,
             gravity_end_shares: sm.gravity_end_shares,
             kind: sm.kind,
@@ -975,6 +975,7 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
                 return false;
             }
             let member = SecondaryMember {
+                display_local_axis: None,
                 id: *id,
                 end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
@@ -1024,6 +1025,7 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
             Some(sm) => {
                 sm.ends = member.ends;
                 sm.end_offsets_mm = member.end_offsets_mm;
+                sm.display_local_axis = member.display_local_axis;
                 sm.gravity_end_shares = member.gravity_end_shares;
                 true
             }

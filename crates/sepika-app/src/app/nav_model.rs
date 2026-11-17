@@ -285,6 +285,7 @@ mod tests {
 
     fn secondary_member(id: u32, section: Option<SectionId>) -> SecondaryMember {
         SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(id),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -413,6 +414,7 @@ mod tests {
         let secondary_members = vec![
             secondary_member(0, Some(SectionId(0))),
             SecondaryMember {
+                display_local_axis: None,
                 id: sepika_core::ids::SecondaryMemberId(1),
                 end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,

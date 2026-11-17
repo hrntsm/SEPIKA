@@ -20,6 +20,7 @@ pub struct BeamPlacement {
     pub reference_ends: [[f64; 3]; 2],
     pub end_offsets_mm: [[f64; 3]; 2],
     pub actual_ends: [[f64; 3]; 2],
+    /// 局所x/y/zの単位直交基底。二次部材の表示幅反転時だけ左手系となる。
     pub axes: [[f64; 3]; 3],
     pub section_shape: crate::section_shape::SectionShape,
     geometry: SectionGeometry,
@@ -97,7 +98,9 @@ impl Model {
                             sm.end_offsets_mm
                         },
                         section,
-                        if sm.kind == SecondaryMemberKind::Post {
+                        if let Some(axis) = sm.display_local_axis.filter(|_| !calculation) {
+                            axis.ref_vector
+                        } else if sm.kind == SecondaryMemberKind::Post {
                             let angle = self
                                 .post_design_inputs
                                 .iter()
@@ -112,7 +115,19 @@ impl Model {
                     )
                 }
             };
-            BeamPlacement::new(member, ends, eccentricity, section, reference)
+            let mut placement = BeamPlacement::new(member, ends, eccentricity, section, reference)?;
+            if !calculation {
+                if let SupportMemberId::Secondary(id) = member {
+                    if self
+                        .secondary_member(id)
+                        .and_then(|sm| sm.display_local_axis)
+                        .is_some_and(|axis| axis.reverse_width)
+                    {
+                        placement.axes[2] = placement.axes[2].map(|value| -value);
+                    }
+                }
+            }
+            Ok(placement)
         };
         resolve().map_err(|reason| format!("{} の実配置: {reason}", beam_label(member)))
     }
@@ -860,6 +875,7 @@ mod tests {
             position,
         });
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported(anchors),
@@ -916,6 +932,7 @@ mod tests {
         assert!(serde_json::from_value::<Model>(null).is_err());
         model.unassigned_beams[0].end_offsets_mm = [[0.0, 0.0, 100.0]; 2];
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(1),
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([0.25, 0.75].map(|position| {

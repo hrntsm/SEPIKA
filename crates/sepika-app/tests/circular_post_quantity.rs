@@ -51,6 +51,7 @@ fn circular_post_model() -> sepika_core::model::Model {
             strength_factor: None,
         }],
         unassigned_posts: vec![SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(448),
             kind: SecondaryMemberKind::Post,
             ends: SecondaryMemberEnds::Detached(ends),

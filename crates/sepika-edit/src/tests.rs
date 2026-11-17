@@ -1001,6 +1001,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
     model
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -1381,6 +1382,7 @@ fn test_delete_section_referenced_by_beam() {
         vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
     );
     region.secondary_beams = vec![SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -5551,6 +5553,7 @@ fn make_sm(
     kind: sepika_core::model::SecondaryMemberKind,
 ) -> sepika_core::model::SecondaryMember {
     sepika_core::model::SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(id),
@@ -6359,6 +6362,7 @@ fn test_copy_story_secondary_creates_unassigned_beam() {
     model
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
@@ -6408,6 +6412,7 @@ fn test_copy_story_rejects_secondary_cft() {
         .collect();
     let cft = push_cft_section(&mut model);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -6583,6 +6588,7 @@ fn test_copy_story_counts_midspan_secondary_as_skipped() {
     model
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
@@ -6631,6 +6637,7 @@ fn test_copy_story_slab_copy_does_not_touch_floor_regions() {
         .map(|n| n.id)
         .collect();
     let beam = sepika_core::model::SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -7655,6 +7662,7 @@ fn 間柱端部負担率を設定し取り消せる() {
     model
         .unassigned_posts
         .push(sepika_core::model::SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,

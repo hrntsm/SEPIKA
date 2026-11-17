@@ -1716,6 +1716,84 @@ mod beam_placement_tests {
     };
 
     #[test]
+    fn original_stb_import_draws_all_75_girders_and_56_beams_as_selectable_bodies() {
+        let mut app = crate::app::App::default();
+        app.import_stbridge_from(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/model.stb"),
+        );
+        let model = &app.core.model;
+        let girders: Vec<_> = model
+            .elements
+            .iter()
+            .filter(|element| {
+                model
+                    .element_section(element)
+                    .and_then(|section| section.frame_use)
+                    == Some(sepika_core::model::FrameSectionUse::Girder)
+            })
+            .collect();
+        let beams: Vec<_> = model.beams().collect();
+        assert_eq!(girders.len(), 75, "{:?}", app.core.scoped.last_error);
+        assert_eq!(beams.len(), 56);
+        let targets: Vec<_> = girders
+            .iter()
+            .map(|element| SupportMemberId::Primary(element.id))
+            .chain(beams.iter().map(|beam| SupportMemberId::Secondary(beam.id)))
+            .collect();
+        for &target in &targets {
+            model.beam_placement(target).unwrap();
+        }
+        let context = egui::Context::default();
+        let mut drawn = None;
+        let camera = CameraState::default();
+        let projector = Projector::new([15000.0, 10000.0, 6000.0], &camera, 0.03, [1000.0, 800.0]);
+        let coords: Vec<_> = model.nodes.iter().map(|node| node.coord).collect();
+        let output = context.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter().clone();
+            let (skipped, bodies) = solid::draw_section_solids(
+                &painter,
+                model,
+                &coords,
+                &projector,
+                true,
+                FrameFilter::default(),
+                true,
+            );
+            assert_eq!(skipped, 0);
+            drawn = Some(bodies);
+        });
+        assert!(!output.shapes.is_empty());
+        let bodies = drawn.unwrap();
+        for target in targets {
+            assert!(bodies.contains_target(target), "{target:?}");
+            let placement = model.beam_placement(target).unwrap();
+            let midpoint = sepika_core::geom::vec3::midpoint(
+                placement.actual_ends[0],
+                placement.actual_ends[1],
+            );
+            let mut isolated = bodies.clone();
+            isolated.retain_target(target);
+            assert_eq!(
+                isolated.pick_member(projector.project(midpoint)),
+                Some(target),
+                "{target:?}"
+            );
+        }
+        let selected = girders.iter().find_map(|element| {
+            let placement = model
+                .beam_placement(SupportMemberId::Primary(element.id))
+                .unwrap();
+            let midpoint = sepika_core::geom::vec3::midpoint(
+                placement.actual_ends[0],
+                placement.actual_ends[1],
+            );
+            let target = SupportMemberId::Primary(element.id);
+            (bodies.pick_member(projector.project(midpoint)) == Some(target)).then_some(target)
+        });
+        assert!(selected.is_some());
+    }
+
+    #[test]
     fn actual_shape_pick_and_nonnodal_secondary_share_placement() {
         let mut model = crate::sample::portal_frame();
         model.elements[2].end_offsets_mm = [[0.0, 0.0, 500.0]; 2];
@@ -1746,6 +1824,7 @@ mod beam_placement_tests {
                 > 10.0
         );
         let sm = SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([0.25, 0.75].map(|position| {

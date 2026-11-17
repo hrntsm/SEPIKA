@@ -10,6 +10,7 @@ fn app() -> App {
     let mut model = crate::sample::portal_frame();
     let support = SupportMemberId::Primary(ElemId(2));
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Supported(
@@ -22,6 +23,57 @@ fn app() -> App {
     });
     assert!(app.load_model(model));
     app
+}
+
+#[test]
+fn changing_cantilever_support_preserves_asymmetric_display_and_end_offsets_through_undo_and_save()
+{
+    let mut app = app();
+    let section_id = SectionId(app.core.model.sections.len() as u32);
+    let section = sepika_core::section_shape::SectionShape::SteelAngle {
+        leg_a: 100.0,
+        leg_b: 80.0,
+        thick: 10.0,
+    }
+    .to_section(section_id, "表示用L".into());
+    app.core.model.sections.push(section);
+    app.core.model.unassigned_beams[0].section = Some(section_id);
+    app.core.model.unassigned_beams[0].end_offsets_mm = [[10.0, 20.0, 30.0], [-40.0, 20.0, 30.0]];
+    let member_id = app.core.model.unassigned_beams[0].id;
+    let target = SupportMemberId::Secondary(member_id);
+    let original = app.core.model.beam_placement(target).unwrap();
+    let original_member = app.core.model.unassigned_beams[0].clone();
+    assert!(
+        app.apply_model_edit(Box::new(sepika_edit::SetSecondaryMemberEndSupport {
+            member: member_id,
+            end_support: [
+                sepika_core::model::EndSupport::Free,
+                sepika_core::model::EndSupport::Supported
+            ],
+        }))
+    );
+    let reversed = app.core.model.beam_placement(target).unwrap();
+    assert_eq!(
+        reversed.actual_ends,
+        [original.actual_ends[1], original.actual_ends[0]]
+    );
+    assert_eq!(reversed.axes[1], original.axes[1]);
+    assert_eq!(reversed.axes[2], original.axes[2]);
+    app.undo_action();
+    assert_eq!(app.core.model.unassigned_beams[0], original_member);
+    app.redo_action();
+    let path = std::env::temp_dir().join(format!(
+        "sepika-stb-display-1367-{}.ovika",
+        std::process::id()
+    ));
+    sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
+    let loaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(loaded.beam_placement(target).unwrap().axes, reversed.axes);
+    assert_eq!(
+        loaded.beam_placement(target).unwrap().actual_ends,
+        reversed.actual_ends
+    );
 }
 
 #[test]

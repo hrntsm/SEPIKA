@@ -678,7 +678,7 @@ fn test_standard_mode_shared_section_split() {
 
 /// 標準モード: 形状を持たない断面（SRC/CFT/未定義含む）は StbSecRaw へフォールバックする。
 #[test]
-fn test_standard_mode_fallback_raw_for_shapeless() {
+fn shapeless_member_rejects_stb_placement_export_and_preserves_ovika_properties() {
     let mut m = frame_nodes();
     m.sections.push(Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Column),
@@ -705,10 +705,18 @@ fn test_standard_mode_fallback_raw_for_shapeless() {
     m.elements.push(member(0, true, 0));
 
     let xml = export_stbridge(&m).unwrap();
+    assert!(xml.contains("<StbSecRaw "));
+    m.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    let error = export_stbridge(&m).unwrap_err().to_string();
     assert!(
-        xml.contains("<StbSecRaw "),
-        "形状のない断面は Raw にフォールバック"
+        error.contains("部材 ID 0") && error.contains("断面形状"),
+        "{error}"
     );
+    let path = crate::test_util::test_tmp().join("stb-shapeless-placement.ovika");
+    crate::ovika::save_ovika(&path, &m, Default::default()).unwrap();
+    let saved = crate::ovika::load_ovika(&path).unwrap().model;
+    assert_eq!(saved.sections, m.sections);
+    std::fs::remove_file(path).unwrap();
 }
 
 /// 標準モードで書き出したファイルを import で読み戻せる（往復）。
@@ -1254,7 +1262,7 @@ fn test_standard_export_src_column_rect_stages() {
 #[test]
 fn test_import_duplicate_node_id_is_error() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="0" X="1000" Y="0" Z="0"/>
@@ -1272,7 +1280,7 @@ fn test_import_duplicate_node_id_is_error() {
 #[test]
 fn test_import_rc_without_bar_arrangement_uses_default() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="600"/></StbSecFigureColumn_RC></StbSecColumn_RC>
   </StbSections>
@@ -1592,7 +1600,7 @@ fn test_standard_roundtrip_shear_rebar_material_with_control_chars() {
 #[test]
 fn test_import_rc_rebar_third_party_names() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_RC>
@@ -1620,7 +1628,7 @@ fn test_import_rc_rebar_third_party_names() {
 #[test]
 fn test_import_rc_rebar_layered_counts() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="700" width_Y="700"/></StbSecFigureColumn_RC>
@@ -1645,7 +1653,7 @@ fn test_import_rc_rebar_layered_counts() {
 #[test]
 fn test_import_rc_beam_rebar_stages() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecBeam_RC id="0" name="G1">
       <StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="700"/></StbSecFigureBeam_RC>
@@ -1674,7 +1682,7 @@ fn test_import_rc_beam_rebar_stages() {
 #[test]
 fn test_import_rc_rect_column_hoop_legs() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="800" width_Y="600"/></StbSecFigureColumn_RC>
@@ -1700,7 +1708,7 @@ fn test_import_rc_rect_column_hoop_legs() {
 #[test]
 fn test_import_rc_circle_column_total_count() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Circle D="800"/></StbSecFigureColumn_RC>
@@ -1728,7 +1736,7 @@ fn test_import_rc_circle_column_total_count() {
 #[test]
 fn test_import_rc_kind_preserved() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_RC>
@@ -1762,7 +1770,7 @@ fn test_import_rc_kind_preserved() {
 #[test]
 fn test_import_rc_circle_beam_unsupported() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecBeam_RC id="0" name="GB">
       <StbSecFigureBeam_RC><StbSecColumn_RC_Circle D="600"/></StbSecFigureBeam_RC>
@@ -1904,7 +1912,7 @@ fn test_standard_export_built_h() {
 #[test]
 fn test_import_symmetric_build_h_is_steel_h() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -1977,7 +1985,7 @@ fn test_standard_roundtrip_steel_box_distinct_corner_r() {
 #[test]
 fn test_import_box_without_r_attr_is_corner_r_zero() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -2094,7 +2102,7 @@ fn test_standard_roundtrip_cft_box() {
 #[test]
 fn test_import_cft_separates_concrete_and_steel_materials() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
   <StbSections>
     <StbSecColumn_CFT id="0" name="CFT" strength_concrete="Fc24">
@@ -2123,7 +2131,7 @@ fn test_import_cft_separates_concrete_and_steel_materials() {
 #[test]
 fn test_import_cft_without_strength_keeps_section_unresolved() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbSections>
     <StbSecColumn_CFT id="0" name="CFT" strength_concrete="Fc24">
       <StbSecSteelFigureColumn_CFT><StbSecSteelColumn_CFT_Same shape="BOX-400"/></StbSecSteelFigureColumn_CFT>
@@ -2541,7 +2549,7 @@ fn test_import_report_lists_unsupported_elements() {
 #[test]
 fn test_import_report_unknown_elements_are_reported() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -2816,7 +2824,7 @@ fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
     use sepika_core::model::{RegionAnchor, WallPlateShape};
 
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -3360,7 +3368,7 @@ fn test_import_rejects_dangling_section_ref() {
 #[test]
 fn test_import_stbsecbrace_s() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="6000" Y="0" Z="3000"/>
@@ -3416,7 +3424,7 @@ fn test_export_strips_illegal_control_chars() {
 #[test]
 fn test_import_auto_fixes_base_level_supports() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="100"/>
     <StbNode id="1" X="6000" Y="0" Z="100.5"/>
@@ -3461,7 +3469,7 @@ fn test_import_auto_fixes_base_level_supports() {
 #[test]
 fn test_import_auto_support_excludes_beam_only_base_nodes() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="6000" Y="0" Z="0"/>
@@ -3521,7 +3529,7 @@ fn test_import_auto_support_excludes_beam_only_base_nodes() {
 fn test_import_stbbeam_as_secondary_member() {
     use sepika_core::model::SecondaryMemberKind;
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="6000" Y="0" Z="0"/>
@@ -3595,7 +3603,7 @@ fn test_import_uses_member_context_without_reinterpreting_rc_purpose_types() {
         };
         let xml = format!(
             r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
   <StbSections>{definition}</StbSections>
   <StbMembers><Stb{member_tag}s><Stb{member_tag} id="0" {node_attributes} id_section="0" kind_structure="RC"/></Stb{member_tag}s></StbMembers>
@@ -3643,6 +3651,7 @@ fn test_secondary_members_roundtrip() {
     let beam_ends =
         sepika_core::model::SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[1].coord]);
     m.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
@@ -3654,6 +3663,7 @@ fn test_secondary_members_roundtrip() {
     let post_ends =
         sepika_core::model::SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[2].coord]);
     m.unassigned_posts.push(SecondaryMember {
+        display_local_axis: None,
         id: sepika_core::ids::SecondaryMemberId(1),
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
@@ -3726,6 +3736,7 @@ fn test_export_secondary_post_uses_column_section_map() {
             SecondaryMemberKind::Post => &mut m.unassigned_posts,
         };
         target.push(SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(id),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -3740,8 +3751,8 @@ fn test_export_secondary_post_uses_column_section_map() {
     assert!(xml.contains("<StbSecColumn_S id=\"1\""), "{xml}");
     assert!(xml.contains("<StbSecBeam_S id=\"2\""), "{xml}");
     assert!(
-        xml.contains("<StbPost id=\"3\" name=\"P3\" id_node_bottom=\"1\" id_node_top=\"2\" rotate=\"0\" id_section=\"1\"")
-            && xml.contains("<StbBeam id=\"2\" name=\"B2\" id_node_start=\"1\" id_node_end=\"2\" rotate=\"0\" id_section=\"2\""),
+        xml.lines().any(|line| line.contains("<StbPost id=\"3\"") && line.contains("id_section=\"1\""))
+            && xml.lines().any(|line| line.contains("<StbBeam id=\"2\"") && line.contains("id_section=\"2\"")),
         "二次部材の種別ごとに断面用途を選ぶ: {xml}"
     );
     let back = import_stbridge(&xml).expect("主架構と二次部材で共有した断面を再取り込み");
@@ -3790,6 +3801,7 @@ fn test_export_post_only_uses_column_section() {
     section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     push_section(&mut m, section);
     m.unassigned_posts.push(SecondaryMember {
+        display_local_axis: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
@@ -3833,6 +3845,7 @@ fn test_export_errors_when_secondary_has_no_end_node() {
         position,
     };
     m.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -4108,7 +4121,7 @@ fn test_import_errors_when_slab_area_stays_unassigned() {
 #[test]
 fn test_import_export_parallel_axes() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="10" X="1000" Y="0" Z="0"/>
     <StbNode id="11" X="3500" Y="0" Z="0"/>
@@ -4180,7 +4193,7 @@ fn test_import_export_parallel_axes() {
 #[test]
 fn test_import_non_parallel_axes_as_other() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="1" X="0" Y="0" Z="0"/>
     <StbNode id="2" X="5000" Y="0" Z="0"/>
@@ -4417,7 +4430,7 @@ fn test_import_reports_attribute_dispositions() {
 #[test]
 fn test_import_sorts_stories_by_elevation() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -4648,6 +4661,7 @@ fn assigned_members_625(in_regions: bool) -> Model {
     brace.nodes = smallvec![NodeId(0), NodeId(3)];
     m.elements.push(brace);
     let beam = SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(40),
         kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Detached([m.nodes[4].coord, m.nodes[5].coord]),
@@ -4657,6 +4671,7 @@ fn assigned_members_625(in_regions: bool) -> Model {
         gravity_end_shares: None,
     };
     let post = SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(73),
         kind: SecondaryMemberKind::Post,
         ends: SecondaryMemberEnds::Detached([m.nodes[6].coord, m.nodes[7].coord]),
@@ -4817,7 +4832,7 @@ fn unassigned_secondary_members_625_reject_detached_and_region_exports_then_reco
 }
 
 #[test]
-fn assigned_members_625_preserve_independent_xml_fields_and_shape_none() {
+fn assigned_members_625_preserve_physical_member_fields_and_reject_shapeless_placement() {
     let model = assigned_members_625(true);
     let before = serde_json::to_value(&model).unwrap();
     let xml = export_stbridge(&model).unwrap();
@@ -4880,7 +4895,7 @@ fn assigned_members_625_preserve_independent_xml_fields_and_shape_none() {
                 ("id_section", "3"),
                 ("id_node_start", "1"),
                 ("id_node_end", "4"),
-                ("rotate", "0"),
+                ("rotate", "270"),
                 ("feature_brace", "TENSION"),
                 ("condition_start", "PIN"),
                 ("condition_end", "PIN"),
@@ -4976,19 +4991,8 @@ fn assigned_members_625_preserve_independent_xml_fields_and_shape_none() {
     for section in &mut no_shape.sections {
         section.shape = None;
     }
-    let raw_xml = export_stbridge(&no_shape).expect("割当済みshape=Noneは従来出力を保持");
-    assert!(raw_xml.contains("<StbSecRaw "));
-    for tag in ["StbColumn", "StbGirder", "StbBrace", "StbBeam", "StbPost"] {
-        let prefix = format!("<{tag} ");
-        assert_eq!(
-            raw_xml
-                .lines()
-                .find(|line| line.trim_start().starts_with(&prefix)),
-            xml.lines()
-                .find(|line| line.trim_start().starts_with(&prefix)),
-            "{tag}: shape=Noneでも正常部材属性を保持"
-        );
-    }
+    let error = export_stbridge(&no_shape).unwrap_err().to_string();
+    assert!(error.contains("配置変換の断面形状"), "{error}");
 }
 
 #[test]

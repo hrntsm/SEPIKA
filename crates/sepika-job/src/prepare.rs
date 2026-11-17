@@ -883,6 +883,7 @@ mod tests {
         model
             .unassigned_beams
             .push(sepika_core::model::SecondaryMember {
+                display_local_axis: None,
                 end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
                 id: sepika_core::ids::SecondaryMemberId(0),

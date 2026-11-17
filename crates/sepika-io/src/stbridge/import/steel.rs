@@ -8,6 +8,9 @@ pub(super) fn steel_shape_from(tag: &str, a: &Attrs) -> Option<Result<SectionSha
     if tag == "StbSecBuild-BOX" {
         return Some(built_box_shape(a));
     }
+    if matches!(tag, "StbSecRoll-L" | "StbSecRoll-C" | "StbSecRoll-T") {
+        return Some(Err(format!("{tag}: 非対称圧延断面の必須の正値半径を保持できないため、正確な図心・基準点配置変換は未対応です")));
+    }
     other_steel_shape(tag, a).map(Ok)
 }
 
@@ -84,23 +87,6 @@ fn other_steel_shape(tag: &str, a: &Attrs) -> Option<SectionShape> {
         "StbSecPipe" => Some(SectionShape::SteelPipe {
             outer_dia: a_("D")?,
             thick: a_("t")?,
-        }),
-        "StbSecRoll-L" => Some(SectionShape::SteelAngle {
-            leg_a: a_("A")?,
-            leg_b: a_("B")?,
-            thick: a_("t1")?,
-        }),
-        "StbSecRoll-C" => Some(SectionShape::SteelChannel {
-            height: a_("A")?,
-            width: a_("B")?,
-            web_thick: a_("t1")?,
-            flange_thick: a_("t2")?,
-        }),
-        "StbSecRoll-T" => Some(SectionShape::SteelTee {
-            height: a_("A")?,
-            width: a_("B")?,
-            web_thick: a_("t1")?,
-            flange_thick: a_("t2")?,
         }),
         _ => None,
     }

@@ -933,6 +933,7 @@ fn enclosed_secondary_beam_receives_all_dl_before_reaction_cascade() {
         model.elements[0].nodes = vec![NodeId(4), NodeId(7)].into();
         let key = SecondaryMemberId(0);
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             id: key,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([
@@ -1181,6 +1182,7 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
     model.wall_regions[0].wall_plate_ids.clear();
     for (id, lower_t, upper_t) in [(0, 1.0 / 6.0, 5.0 / 6.0), (1, 5.0 / 6.0, 1.0 / 6.0)] {
         model.unassigned_posts.push(SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(id),
             kind: SecondaryMemberKind::Post,
             ends: SecondaryMemberEnds::Supported([

@@ -1264,6 +1264,7 @@ fn copy_secondary(
         let id = model.alloc_secondary_member_id();
         let ends = model.secondary_ends_from_coords(id, sm.kind, [ca, cb], supported);
         let new_sm = SecondaryMember {
+            display_local_axis: sm.display_local_axis,
             id,
             end_offsets_mm: sm.end_offsets_mm,
             gravity_end_shares: sm.gravity_end_shares,

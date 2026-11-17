@@ -199,7 +199,8 @@ pub(super) struct AttrCount {
 /// 集めた中間表現は後段の組み立て（`assemble`）が消費する。
 #[derive(Default)]
 pub(super) struct StbParser {
-    /// ルート `ST_BRIDGE` でバージョン 2.x を確認できたか。
+    pub(super) global_transform: super::super::placement::GlobalTransform,
+    /// ルート `ST_BRIDGE` でバージョン2.0.2を確認できたか。
     pub(super) version_ok: bool,
     pub(super) strengths: super::strength::StrengthInputs,
     /// 人間可読の警告（断面図形を認識できず取り込めなかった等）。
@@ -416,6 +417,21 @@ impl StbParser {
 
     /// 開始・自己終了イベントを、意味のまとまりごとの補助メソッドへ振り分ける。
     fn on_start(&mut self, tag: &str, a: &Attrs) -> Result<(), StbError> {
+        if matches!(
+            tag,
+            "StbColumnViaNode" | "StbGirderViaNode" | "StbMemberOffsetList"
+        ) {
+            let source = self.container_stack.last().and_then(|parent| {
+                matches!(parent.as_str(), "StbColumn" | "StbGirder")
+                    .then(|| self.pending_members.last().map(|member| &member.source))
+                    .flatten()
+            });
+            let reason = format!("{tag}: 部材中間節点・中間offsetの配置変換は未対応です");
+            return Err(source.map_or_else(
+                || StbError::Unmappable(reason.clone()),
+                |source| source.error(None, &reason),
+            ));
+        }
         if tag != "StbNodeIdOrder" {
             self.in_node_id_order = false;
         }
@@ -447,13 +463,13 @@ impl StbParser {
         Ok(())
     }
 
-    /// ルート要素 `ST_BRIDGE` を処理する（バージョン 2.x の検証）。担当タグなら true。
+    /// ルート要素`ST_BRIDGE`を検証する。採用版は2.0.2に限る。
     fn start_root(&mut self, tag: &str, a: &Attrs) -> Result<bool, StbError> {
         if tag != "ST_BRIDGE" {
             return Ok(false);
         }
         let v = a.get("version").cloned().unwrap_or_default();
-        if !v.starts_with("2.") {
+        if v != "2.0.2" {
             return Err(StbError::Version(v));
         }
         self.version_ok = true;
@@ -463,6 +479,16 @@ impl StbParser {
     /// 節点・階・材料の開始要素を処理する。担当タグなら true。
     fn start_node_story_material(&mut self, tag: &str, a: &Attrs) -> Result<bool, StbError> {
         match tag {
+            "StbCommon" => {
+                self.global_transform = super::super::placement::GlobalTransform {
+                    translation_mm: [
+                        placement_number(tag, a, "global_offset_X")?,
+                        placement_number(tag, a, "global_offset_Y")?,
+                        placement_number(tag, a, "global_offset_Z")?,
+                    ],
+                    rotation_deg: placement_number(tag, a, "global_rotation")?,
+                };
+            }
             "StbNode" => {
                 self.raw_nodes.push(RawNode {
                     file_id: get_u32(a, "id")?,
@@ -1281,7 +1307,7 @@ fn make_member(
     kind: PendingMemberKind,
 ) -> Result<PendingMember, StbError> {
     let (section, source) = member_section(tag, a)?;
-    let rotate = get_f64(a, "rotate").unwrap_or(0.0);
+    let rotate = placement_number(tag, a, "rotate")?;
     let end_cond = [
         end_condition_of(a, &["condition_bottom", "condition_start"]),
         end_condition_of(a, &["condition_top", "condition_end"]),
@@ -1293,14 +1319,14 @@ fn make_member(
         n_j,
         section,
         rotate,
+        offsets_mm: member_offsets(tag, a)?,
         end_cond,
         source_usage: FrameSectionUse::Girder,
         source,
     })
 }
 
-/// 二次部材（小梁 `StbBeam`・間柱 `StbPost`）の中間表現を作る
-/// （[`make_member`] の二次部材版。端部接合条件・回転角は解析に使わないため持たない）。
+/// 小梁・間柱の断面参照・表示回転・端別XYZオフセットを保持する。
 fn make_secondary(
     tag: &str,
     a: &Attrs,
@@ -1316,9 +1342,41 @@ fn make_secondary(
         n_i,
         n_j,
         section,
+        rotate: placement_number(tag, a, "rotate")?,
+        offsets_mm: member_offsets(tag, a)?,
         name: a.get("name").cloned().unwrap_or_default(),
         source,
     })
+}
+
+fn placement_number(tag: &str, a: &Attrs, name: &str) -> Result<f64, StbError> {
+    let Some(raw) = a.get(name) else {
+        return Ok(0.0);
+    };
+    raw.parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| {
+            StbError::Parse(format!(
+                "{tag} id={:?} @{name}={raw:?}: 有限な数値が必要です",
+                a.get("id")
+            ))
+        })
+}
+
+fn member_offsets(tag: &str, a: &Attrs) -> Result<[[f64; 3]; 2], StbError> {
+    let ends = if matches!(tag, "StbColumn" | "StbPost") {
+        ["bottom", "top"]
+    } else {
+        ["start", "end"]
+    };
+    let mut offsets = [[0.0; 3]; 2];
+    for (side, end) in ends.into_iter().enumerate() {
+        for (component, axis) in ["X", "Y", "Z"].into_iter().enumerate() {
+            offsets[side][component] = placement_number(tag, a, &format!("offset_{end}_{axis}"))?;
+        }
+    }
+    Ok(offsets)
 }
 
 /// 断面の階（`floor` 属性）。空文字列は「階の指定なし」として `None` に落とす
@@ -1395,4 +1453,70 @@ fn sec_mat_ref_of(a: &Attrs) -> Option<String> {
     a.get("strength_concrete")
         .filter(|s| !s.is_empty())
         .cloned()
+}
+
+#[cfg(test)]
+mod placement_input_tests {
+    use super::*;
+
+    #[test]
+    fn omitted_and_explicit_zero_offsets_are_equivalent_for_every_member_kind() {
+        for tag in ["StbColumn", "StbPost", "StbGirder", "StbBeam", "StbBrace"] {
+            let omitted = Attrs::default();
+            assert_eq!(member_offsets(tag, &omitted).unwrap(), [[0.0; 3]; 2]);
+            let ends = if matches!(tag, "StbColumn" | "StbPost") {
+                ["bottom", "top"]
+            } else {
+                ["start", "end"]
+            };
+            let explicit: Attrs = ends
+                .into_iter()
+                .flat_map(|end| {
+                    ["X", "Y", "Z"].map(|axis| (format!("offset_{end}_{axis}"), "0".into()))
+                })
+                .collect();
+            assert_eq!(member_offsets(tag, &explicit).unwrap(), [[0.0; 3]; 2]);
+        }
+    }
+
+    #[test]
+    fn a_single_offset_component_never_changes_the_other_components_or_end() {
+        for (tag, ends) in [
+            ("StbColumn", ["bottom", "top"]),
+            ("StbPost", ["bottom", "top"]),
+            ("StbGirder", ["start", "end"]),
+            ("StbBeam", ["start", "end"]),
+            ("StbBrace", ["start", "end"]),
+        ] {
+            for (side, end) in ends.into_iter().enumerate() {
+                for (component, axis) in ["X", "Y", "Z"].into_iter().enumerate() {
+                    for value in [-37.0, 52.0] {
+                        let attrs: Attrs = [(format!("offset_{end}_{axis}"), value.to_string())]
+                            .into_iter()
+                            .collect();
+                        let mut expected = [[0.0; 3]; 2];
+                        expected[side][component] = value;
+                        assert_eq!(member_offsets(tag, &attrs).unwrap(), expected);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_and_nonfinite_placement_numbers_report_target_and_attribute() {
+        for name in ["rotate", "offset_start_X", "offset_end_Z"] {
+            for value in ["", "broken", "NaN", "inf", "-inf", "1e999"] {
+                let attrs: Attrs = [("id".into(), "42".into()), (name.into(), value.into())]
+                    .into_iter()
+                    .collect();
+                let error = placement_number("StbGirder", &attrs, name)
+                    .unwrap_err()
+                    .to_string();
+                for expected in ["StbGirder", "42", name, "有限"] {
+                    assert!(error.contains(expected), "{error}");
+                }
+            }
+        }
+    }
 }

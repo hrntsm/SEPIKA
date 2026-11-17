@@ -25,13 +25,14 @@ use std::collections::HashMap;
 /// パース済み中間表現からモデルと取り込み報告を組み立てる（後段のエントリポイント）。
 pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbError> {
     let StbParser {
+        global_transform,
         mut warnings,
         mut strengths,
         unsupported,
         attr_usage,
         raw_nodes,
         raw_stories,
-        raw_load_cases,
+        mut raw_load_cases,
         pending_secs,
         pending_members,
         pending_secondaries,
@@ -99,6 +100,22 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &section_index,
         &mut strengths,
     )?;
+    apply_global_transform(&mut model, global_transform)?;
+    for case in &mut raw_load_cases {
+        for (node, values) in &mut case.nodal {
+            let force = global_transform.vector([values[0], values[1], values[2]]);
+            let moment = global_transform.vector([values[3], values[4], values[5]]);
+            *values = [
+                force[0], force[1], force[2], moment[0], moment[1], moment[2],
+            ];
+            if !values.iter().all(|value| value.is_finite()) {
+                return Err(StbError::Unmappable(format!(
+                    "荷重ケース「{}」節点 {node}: global変換後の節点荷重が非有限です",
+                    case.name
+                )));
+            }
+        }
+    }
 
     let (pending_slabs, slab_section_count) = build_slabs(
         &mut model,
@@ -244,6 +261,84 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
             attributes,
         },
     ))
+}
+
+fn apply_global_transform(
+    model: &mut Model,
+    transform: super::super::placement::GlobalTransform,
+) -> Result<(), StbError> {
+    for node in &mut model.nodes {
+        node.coord = transform.point(node.coord);
+        if !node.coord.iter().all(|value| value.is_finite()) {
+            return Err(StbError::Unmappable(format!(
+                "節点 ID {}: global変換後の座標が非有限です",
+                node.id.0
+            )));
+        }
+    }
+    for element in &mut model.elements {
+        element.end_offsets_mm = element
+            .end_offsets_mm
+            .map(|offset| transform.vector(offset));
+        element.local_axis.ref_vector = transform.vector(element.local_axis.ref_vector);
+        if !element
+            .end_offsets_mm
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite())
+        {
+            return Err(StbError::Unmappable(format!(
+                "部材 ID {}: global変換後のXYZ偏心が非有限です",
+                element.id.0
+            )));
+        }
+    }
+    for member in model
+        .unassigned_beams
+        .iter_mut()
+        .chain(&mut model.unassigned_posts)
+    {
+        if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = &mut member.ends {
+            *ends = ends.map(|point| transform.point(point));
+        }
+        member.end_offsets_mm = member.end_offsets_mm.map(|offset| transform.vector(offset));
+        if !member
+            .end_offsets_mm
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite())
+        {
+            return Err(StbError::Unmappable(format!(
+                "二次部材 ID {}: global変換後のXYZ偏心が非有限です",
+                member.id.0
+            )));
+        }
+        if let Some(axis) = &mut member.display_local_axis {
+            axis.ref_vector = transform.vector(axis.ref_vector);
+        }
+    }
+    for story in &mut model.stories {
+        if let Some(elevation) = &mut story.elevation {
+            *elevation += transform.translation_mm[2];
+            if !elevation.is_finite() {
+                return Err(StbError::Unmappable(format!(
+                    "階「{}」: global変換後の高さが非有限です",
+                    story.name
+                )));
+            }
+        }
+    }
+    for story in &mut model.source_stories {
+        story.height += transform.translation_mm[2];
+    }
+    for group in &mut model.axes {
+        if let sepika_core::model::AxisGroupKind::Parallel { origin, angle_deg } = &mut group.kind {
+            let point = transform.point([origin[0], origin[1], 0.0]);
+            *origin = [point[0], point[1]];
+            *angle_deg = (*angle_deg + transform.rotation_deg).rem_euclid(360.0);
+        }
+    }
+    Ok(())
 }
 
 /// 属性の扱いの集計を、要素名・属性名の昇順に整列した報告へ変換する。
@@ -444,7 +539,13 @@ fn build_members(
                 &format!("部材の節点参照を解決できません: {} -> {}", m.n_i, m.n_j),
             ));
         };
-        let section = Some(resolve_frame_section(m.section, &m.source, section_index)?);
+        let section = resolve_frame_section(m.section, &m.source, section_index)?;
+        if ni == nj {
+            return Err(m.source.error(
+                m.section.map(|key| key.family),
+                "異なる2節点が必要です（基準材軸が零長）",
+            ));
+        }
         let id = ElemId(model.elements.len() as u32);
         let (kind, end_cond) = match m.kind {
             PendingMemberKind::Girder => (ElementKind::Beam, m.end_cond),
@@ -453,11 +554,23 @@ fn build_members(
                 [EndCondition::Pinned, EndCondition::Pinned],
             ),
         };
-        let ref_vector = ref_vector_from_rotate(
-            model.nodes[ni as usize].coord,
-            model.nodes[nj as usize].coord,
+        let (end_offsets_mm, ref_vector) = super::super::placement::import_placement(
+            [
+                model.nodes[ni as usize].coord,
+                model.nodes[nj as usize].coord,
+            ],
+            m.offsets_mm,
             m.rotate,
-        );
+            m.source_usage,
+            model.sections[section.index()]
+                .shape
+                .as_ref()
+                .ok_or_else(|| {
+                    m.source
+                        .error(m.section.map(|key| key.family), "断面形状がありません")
+                })?,
+        )
+        .map_err(|reason| m.source.error(m.section.map(|key| key.family), &reason))?;
         strengths.bind_member(
             m.strength_index,
             sepika_core::model::StrengthTarget::Element(id),
@@ -466,12 +579,12 @@ fn build_members(
             id,
             kind,
             nodes: smallvec::smallvec![NodeId(ni), NodeId(nj)],
-            section,
+            section: Some(section),
             local_axis: LocalAxis { ref_vector },
             end_cond,
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            end_offsets_mm: [[0.0; 3]; 2],
+            end_offsets_mm,
             plastic_zone: None,
             spring: None,
         });
@@ -496,17 +609,42 @@ fn build_secondaries(
                 &format!("二次部材の節点参照を解決できません: {} -> {}", s.n_i, s.n_j),
             ));
         };
-        let section = Some(resolve_frame_section(s.section, &s.source, section_index)?);
+        let section = resolve_frame_section(s.section, &s.source, section_index)?;
+        let (end_offsets_mm, ref_vector) = super::super::placement::import_placement(
+            [
+                model.nodes[ni as usize].coord,
+                model.nodes[nj as usize].coord,
+            ],
+            s.offsets_mm,
+            s.rotate,
+            if s.kind == sepika_core::model::SecondaryMemberKind::Post {
+                FrameSectionUse::Column
+            } else {
+                FrameSectionUse::Girder
+            },
+            model.sections[section.index()]
+                .shape
+                .as_ref()
+                .ok_or_else(|| {
+                    s.source
+                        .error(s.section.map(|key| key.family), "断面形状がありません")
+                })?,
+        )
+        .map_err(|reason| s.source.error(s.section.map(|key| key.family), &reason))?;
         let sm = sepika_core::model::SecondaryMember {
+            display_local_axis: Some(sepika_core::model::SecondaryDisplayAxis {
+                ref_vector,
+                reverse_width: false,
+            }),
             id: model.alloc_secondary_member_id(),
-            end_offsets_mm: [[0.0; 3]; 2],
+            end_offsets_mm,
             gravity_end_shares: None,
             kind: s.kind,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([
                 model.nodes[ni as usize].coord,
                 model.nodes[nj as usize].coord,
             ]),
-            section,
+            section: Some(section),
             name: s.name,
         };
         strengths.bind_member(
@@ -1661,55 +1799,6 @@ fn push_section(
     );
     model.sections.push(section);
     idx
-}
-
-/// 部材軸（`p_i`→`p_j`）まわりに断面回転角 `rotate` [deg] を適用した ref_vector を返す。
-/// `rotate=0` の基準は、水平材は鉛直上（グローバル Z）、鉛直材はグローバル X 方向。
-/// これは従来の既定 ref_vector と同一の局所座標系を与える（水平材で [0,0,1]）。
-fn ref_vector_from_rotate(p_i: [f64; 3], p_j: [f64; 3], rotate_deg: f64) -> [f64; 3] {
-    let axis = {
-        let d = [p_j[0] - p_i[0], p_j[1] - p_i[1], p_j[2] - p_i[2]];
-        let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        if l < 1e-9 {
-            [0.0, 0.0, 1.0]
-        } else {
-            [d[0] / l, d[1] / l, d[2] / l]
-        }
-    };
-    let base = if axis[2].abs() > 0.99 {
-        [1.0, 0.0, 0.0]
-    } else {
-        [0.0, 0.0, 1.0]
-    };
-    let bdot = base[0] * axis[0] + base[1] * axis[1] + base[2] * axis[2];
-    let ref0 = {
-        let r = [
-            base[0] - bdot * axis[0],
-            base[1] - bdot * axis[1],
-            base[2] - bdot * axis[2],
-        ];
-        let l = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
-        if l < 1e-9 {
-            base
-        } else {
-            [r[0] / l, r[1] / l, r[2] / l]
-        }
-    };
-    if rotate_deg.abs() < 1e-9 {
-        return ref0;
-    }
-    let th = rotate_deg.to_radians();
-    let (s, c) = (th.sin(), th.cos());
-    let cross = [
-        axis[1] * ref0[2] - axis[2] * ref0[1],
-        axis[2] * ref0[0] - axis[0] * ref0[2],
-        axis[0] * ref0[1] - axis[1] * ref0[0],
-    ];
-    [
-        ref0[0] * c + cross[0] * s,
-        ref0[1] * c + cross[1] * s,
-        ref0[2] * c + cross[2] * s,
-    ]
 }
 
 /// 鉄筋・内蔵鋼材・CFT鋼管の名前が一致する既存材料を再利用する。

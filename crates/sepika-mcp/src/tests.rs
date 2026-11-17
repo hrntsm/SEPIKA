@@ -1791,6 +1791,7 @@ fn test_mcp_set_post_gravity_end_shares() {
     model
         .unassigned_posts
         .push(sepika_core::model::SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -2075,6 +2076,7 @@ fn circular_post_model() -> sepika_core::model::Model {
             strength_factor: None,
         }],
         unassigned_posts: vec![SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(448),
             kind: SecondaryMemberKind::Post,
             ends: SecondaryMemberEnds::Detached(ends),

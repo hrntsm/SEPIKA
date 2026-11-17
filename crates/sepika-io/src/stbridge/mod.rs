@@ -37,6 +37,7 @@
 
 mod export;
 mod import;
+mod placement;
 mod section_std;
 mod strength_export;
 

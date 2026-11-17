@@ -90,6 +90,7 @@ struct PendingMember {
     /// 部材軸まわりの断面回転角 [deg]（ST-Bridge `rotate`）。ref_vector は節点座標が
     /// 揃う構築時に軸と `rotate` から算出する。
     rotate: f64,
+    offsets_mm: [[f64; 3]; 2],
     /// 部材端の接合条件 [i, j]（`condition_bottom`/`top`・`condition_start`/`end`）。
     end_cond: [EndCondition; 2],
     source_usage: FrameSectionUse,
@@ -105,6 +106,8 @@ struct PendingSecondary {
     n_i: u32,
     n_j: u32,
     section: Option<SectionKey>,
+    rotate: f64,
+    offsets_mm: [[f64; 3]; 2],
     source: MemberSource,
     name: String,
 }

@@ -85,6 +85,7 @@ fn rc_purpose_rejects_inverse_primary_and_secondary_uses_before_public_analysis(
             if let Some(usage) = secondary_use {
                 section.frame_use = usage;
                 let sm = SecondaryMember {
+                    display_local_axis: None,
                     id: SecondaryMemberId(674),
                     kind: wrong_kind,
                     ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
