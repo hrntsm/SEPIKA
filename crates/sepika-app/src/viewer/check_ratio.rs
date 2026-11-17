@@ -1031,6 +1031,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rc_column_zero_capacity_is_drawn_as_unchecked_after_real_analysis() {
+        mod input {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"
+            ));
+        }
+        mod reference {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_reference.rs"
+            ));
+        }
+        for circle in [false, true] {
+            let mut app = App::default();
+            app.load_model(input::column_model(
+                circle,
+                1.01 * reference::axial_limit_n(circle),
+            ));
+            app.run_preparation();
+            app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            let ctx = egui::Context::default();
+            let output = ctx.run_ui(Default::default(), |ui| {
+                draw_check_ratio(
+                    ui.painter(),
+                    &app,
+                    &app.core.model,
+                    &[egui::pos2(100.0, 300.0), egui::pos2(100.0, 50.0)],
+                    Default::default(),
+                );
+                show_check_tooltip(ui, &app, ElemId(0));
+            });
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                labels.iter().any(|label| label.contains("未検定")),
+                "{labels:?}"
+            );
+            assert!(
+                !labels.iter().any(|label| label.contains("1.00 OK")),
+                "{labels:?}"
+            );
+            assert!(
+                labels.iter().any(|label| label.contains("検定不能")),
+                "{labels:?}"
+            );
+        }
+    }
+
+    #[test]
     fn eccentric_girder_check_lines_and_position_markers_are_drawn_on_physical_axis() {
         let mut app = crate::app::design_input_tests::pure_bending();
         app.core.model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);

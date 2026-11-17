@@ -6,7 +6,9 @@ use super::{
     shear_rebar_grade, AxisProps,
 };
 use crate::ultimate::rc_props::RcDirection;
-use crate::{CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt};
+use crate::{
+    CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
+};
 use sepika_core::model::Material;
 use sepika_core::section_shape::SectionShape;
 
@@ -14,6 +16,37 @@ mod nm_interaction;
 
 pub(crate) use nm_interaction::interp_ma;
 use nm_interaction::*;
+
+fn column_moment_ratio(
+    forces: &MemberForcesAt,
+    na_n: f64,
+    ma_z_nmm: f64,
+    ma_y_nmm: f64,
+    circle: bool,
+) -> Result<f64, String> {
+    if (ma_z_nmm <= 0.0 && forces.mz != 0.0) || (ma_y_nmm <= 0.0 && forces.my != 0.0) {
+        return Err(format!(
+            "RC柱: 許容曲げが非正で非零の曲げ需要があるため検定不能: NA={na_n} N, N={} N, MA_z={ma_z_nmm} N·mm, MA_y={ma_y_nmm} N·mm, mz={} N·mm, my={} N·mm{}",
+            -forces.n, forces.mz, forces.my,
+            if circle { "（円形柱、等価矩形近似）" } else { "" },
+        ));
+    }
+    let ratio_z = if ma_z_nmm > 0.0 {
+        forces.mz.abs() / ma_z_nmm
+    } else {
+        0.0
+    };
+    let ratio_y = if ma_y_nmm > 0.0 {
+        forces.my.abs() / ma_y_nmm
+    } else {
+        0.0
+    };
+    Ok(if circle {
+        ratio_z.powi(2) + ratio_y.powi(2)
+    } else {
+        ratio_z + ratio_y
+    })
+}
 
 /// 矩形柱の直交方向主筋総断面積 at_perp [mm²]。
 ///
@@ -23,13 +56,14 @@ fn rect_column_at_perp(ag_mm2: f64, at_mm2: f64, ac_mm2: f64) -> f64 {
 }
 
 /// 柱の断面検定（RC 規準 14条）。
+/// 許容曲げが非正の方向に非零需要があれば、理由付き未検定を返す。
 pub(crate) fn column_check(
     forces: &MemberForcesAt,
     mat: &Material,
     ctx: &DesignCtx,
     shape: &SectionShape,
     fc_raw: f64,
-) -> CheckResult {
+) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
     let grade = main_rebar_grade(ctx.rebar_material.as_ref());
     let allow = rc_allow(
@@ -61,14 +95,12 @@ pub(crate) fn column_check(
         };
         let curve = column_nm_curve(&axis, &allow, na);
         let ma = interp_ma(&curve, n_design);
-
+        let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true) {
+            Ok(ratio) => ratio,
+            Err(reason) => return CheckOutcome::Skipped { reason },
+        };
         let ratio_axial = if forces.n < 0.0 && na > 0.0 {
             (-forces.n) / na
-        } else {
-            0.0
-        };
-        let ratio_moment = if ma > 0.0 {
-            (forces.mz / ma).powi(2) + (forces.my / ma).powi(2)
         } else {
             0.0
         };
@@ -155,11 +187,11 @@ pub(crate) fn column_check(
             detail.push_str(&prov.warning_suffix());
         }
 
-        return CheckResult {
+        return CheckOutcome::Checked(CheckResult {
             basis,
             detail,
             components,
-        };
+        });
     }
 
     if let SectionShape::RcColumnRect { b, d, .. } = shape {
@@ -196,23 +228,15 @@ pub(crate) fn column_check(
         let curve_y = column_nm_curve(&axis_y, &allow, na);
         let ma_z = interp_ma(&curve_z, n_design);
         let ma_y = interp_ma(&curve_y, n_design);
-
+        let ratio_moment = match column_moment_ratio(forces, na, ma_z, ma_y, false) {
+            Ok(ratio) => ratio,
+            Err(reason) => return CheckOutcome::Skipped { reason },
+        };
         let ratio_axial = if forces.n < 0.0 && na > 0.0 {
             (-forces.n) / na
         } else {
             0.0
         };
-        let ratio_z = if ma_z > 0.0 {
-            forces.mz.abs() / ma_z
-        } else {
-            0.0
-        };
-        let ratio_y = if ma_y > 0.0 {
-            forces.my.abs() / ma_y
-        } else {
-            0.0
-        };
-        let ratio_moment = ratio_z + ratio_y;
 
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
@@ -315,11 +339,11 @@ pub(crate) fn column_check(
             detail.push_str(&prov.warning_suffix());
         }
 
-        return CheckResult {
+        return CheckOutcome::Checked(CheckResult {
             basis,
             detail,
             components,
-        };
+        });
     }
 
     unreachable!()
@@ -333,6 +357,36 @@ mod tests {
         ctx_column, make_material, make_section, rc_column_rect_shape, rc_rect_shape,
     };
     use crate::DesignCheck;
+
+    #[test]
+    fn one_zero_capacity_axis_preserves_the_other_axis_demand() {
+        for zero_z in [true, false] {
+            let (ma_z, ma_y) = if zero_z { (0.0, 20.0) } else { (20.0, 0.0) };
+            let mut forces = MemberForcesAt {
+                pos: 0.5,
+                n: -100.0,
+                qy: 0.0,
+                qz: 0.0,
+                mz: if zero_z { 0.0 } else { 30.0 },
+                my: if zero_z { 30.0 } else { 0.0 },
+            };
+            assert_eq!(
+                column_moment_ratio(&forces, 100.0, ma_z, ma_y, false),
+                Ok(1.5)
+            );
+            if zero_z {
+                forces.mz = -1.0;
+            } else {
+                forces.my = -1.0;
+            }
+            let reason = column_moment_ratio(&forces, 100.0, ma_z, ma_y, false).unwrap_err();
+            for field in [
+                "NA=100 N", "N=100 N", "MA_z=", "MA_y=", "20 N·mm", "30 N·mm", "-1 N·mm",
+            ] {
+                assert!(reason.contains(field), "{reason}");
+            }
+        }
+    }
 
     #[test]
     fn public_column_check_uses_195_for_nominal_d29_diameter_mm() {

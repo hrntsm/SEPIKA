@@ -110,6 +110,18 @@ pub fn column_model(circle: bool, axial_load_n: f64) -> Model {
         )],
         member: vec![],
     });
+    model.stories = [0.0, 3000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(id, fl)| {
+            Story::new(
+                sepika_core::ids::StoryId(id as u32),
+                format!("{}F", id + 1),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect();
     model.validate().unwrap();
     model
 }
