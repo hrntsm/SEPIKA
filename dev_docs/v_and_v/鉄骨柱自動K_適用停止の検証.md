@@ -38,6 +38,25 @@
 - `cargo fmt --all -- --check`・`git diff --check`：成功。
 - 生成鋼03をheadless Chromeで描画し、変更したK節の本文・適用条件表・実装参照が欠けず表示されることを目視確認した。
 
+## 独立レビュー後の危険断面位置の是正
+
+新しいS柱の早期未検定処理が、生の内力評価位置をそのまま結果へ追加していた。フェースと節点芯が異なる部材では、直接指定時の危険断面選別と一致しなかったため、早期処理にも共通の危険断面選別を適用した。既存の他材種の係数供給・未対応条件は変更していない。
+
+柱長3000mm、始端フェース150mm・終端フェース300mmを明示した公開求解で、内力に節点芯0/1が含まれることを確認した。その同じ内力に対し、未指定による未検定と独立直接長による検定の位置が、両柱とも[0.05, 0.5, 0.9]の3位置で一致する。節点芯はどちらにも含まれない。
+
+実建物fixtureは実際に通常S柱40本を含む。未指定柱の生内力5位置による200行へ期待値を合わせず、フェースと中央の120未検定位置・他部材の225Checked位置を確認した。各未検定は対象の通常S柱・不足理由・フェース位置に対応し、snapshotの最大検定比等の数値は不変で、Checked/Skipped件数だけを225/120へ更新した。柱40本・大梁75本という既存のモデル説明は保持した。
+
+リップ材の実検定・帳票試験は、柱の直接指定不足と梁の局部・ゆがみ・全体座屈未対応理由を区別する。混在描画試験は正常な梁断面と未検定柱を含む入力を用い、実際のChecked/Skipped位置数と表示が一致することを確認する。柱へ根拠のない短い長さを入れて混在状態を作らない。
+
+- `cargo test -p sepika-design-jp --test steel_column_k --test steel_column_k_applicability --locked`：8件成功。
+- `cargo test -p sepika-app --features gui --test full_model design_check_covers_every_member --locked`：1件成功。
+- `cargo test -p sepika-app --features gui --test full_model snapshot_key_scalars --locked`：1件成功。
+- `cargo test -p sepika-app --features gui --test lip_channel --locked`：7件成功。
+- `cargo test -p sepika-app --features gui --lib column_k --locked`：2件成功。新GUI試験の柱位置数を各3位置に固定した。
+- `cargo test -p sepika-mcp --features mcp --lib column_k --locked`：1件成功。両柱の計6位置・各3位置を厳密に確認した。
+- `cargo test -p sepika-mcp --features mcp --lib lateral_bracing_mcp --locked`：既存の2件成功。
+- 位置選別修正後の`cargo clippy -p sepika-design-jp -p sepika-app -p sepika-mcp --features sepika-app/gui,sepika-mcp/mcp --all-targets --locked -- -D warnings`成功。`check-docs`（summary142・links1034・impl refs506）、`mdbook build docs`、fmt・diff確認も成功。
+
 ## 確認範囲と残る制約
 
 状態🔶。今回のVerificationは、危険側反例を成功として採用しない適用制限と、直接入力経路の有限な契約確認に限る。全架構Validation・全規準適合、実験照合、手動GUI操作・MCP実通信は未確認。全条件に対応する新計算法は追加しない。RC・SRC・CFTへの既存係数供給は変更せず、CFTの設計採用域は[#1400](https://github.com/hrntsm/SEPIKA/issues/1400)で追跡する。
