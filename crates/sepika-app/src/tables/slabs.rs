@@ -1092,21 +1092,25 @@ fn attached_section(ui: &mut egui::Ui, app: &mut App) {
         2
     };
     ui.horizontal(|ui| {
-        for k in 0..n_slots {
+        for (k, node) in app
+            .ui
+            .scoped
+            .slab_draft
+            .attached_nodes
+            .iter_mut()
+            .enumerate()
+            .take(n_slots)
+        {
             ui.label(format!("節点{}:", k + 1));
-            let label = app.ui.scoped.slab_draft.attached_nodes[k]
+            let label = node
                 .map(|n| n.0.to_string())
                 .unwrap_or_else(|| "―".to_string());
             egui::ComboBox::from_id_salt(("attached_node", k))
                 .selected_text(label)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut app.ui.scoped.slab_draft.attached_nodes[k], None, "―");
+                    ui.selectable_value(node, None, "―");
                     for id in &node_ids {
-                        ui.selectable_value(
-                            &mut app.ui.scoped.slab_draft.attached_nodes[k],
-                            Some(*id),
-                            id.0.to_string(),
-                        );
+                        ui.selectable_value(node, Some(*id), id.0.to_string());
                     }
                 });
         }

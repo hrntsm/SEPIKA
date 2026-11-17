@@ -1074,9 +1074,9 @@ fn loads_section(ui: &mut egui::Ui, prep: &PreparationResult) {
             row.col(|ui| {
                 ui.label(format!("{}", r.n_member));
             });
-            for k in 0..3 {
+            for force in &r.sum_force {
                 row.col(|ui| {
-                    let text = format!("{:.1}", force_kn(r.sum_force[k]));
+                    let text = format!("{:.1}", force_kn(*force));
                     if empty {
                         ui.colored_label(crate::theme::UI_MUTED, text);
                     } else {
