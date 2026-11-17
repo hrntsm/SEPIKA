@@ -38,7 +38,7 @@ fn isolator_and_fiber_model(kind: sepika_core::model::ElementKind, friction: boo
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: Some(300.0),
         spring: None,
     };

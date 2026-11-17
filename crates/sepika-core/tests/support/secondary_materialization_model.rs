@@ -50,7 +50,7 @@ pub fn model() -> Model {
         end_cond: [EndCondition::Pinned; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(-300.),
+        end_offsets_mm: [[0.0, 0.0, -300.]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -69,7 +69,7 @@ pub fn model() -> Model {
         ]),
         section: Some(SectionId(0)),
         name: "独立小梁794".into(),
-        vertical_eccentricity: Some(0.),
+        end_offsets_mm: [[0.0, 0.0, 0.]; 2],
         ..Default::default()
     });
     for (i, x) in [0., 6000.].into_iter().enumerate() {

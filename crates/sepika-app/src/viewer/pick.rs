@@ -12,7 +12,7 @@ pub(super) struct MemberBodies {
 }
 
 struct MemberBody {
-    id: sepika_core::ids::ElemId,
+    id: sepika_core::model::SupportMemberId,
     points: Vec<egui::Pos2>,
     closed: bool,
     filled: bool,
@@ -28,10 +28,29 @@ impl MemberBodies {
         filled: bool,
         width_px: f32,
     ) {
+        self.push_target(
+            sepika_core::model::SupportMemberId::Primary(id),
+            points,
+            closed,
+            filled,
+            width_px,
+        );
+    }
+
+    pub fn push_target(
+        &mut self,
+        id: sepika_core::model::SupportMemberId,
+        points: Vec<egui::Pos2>,
+        closed: bool,
+        filled: bool,
+        width_px: f32,
+    ) {
         if points.len() < 2 {
             return;
         }
-        self.ids.insert(id);
+        if let sepika_core::model::SupportMemberId::Primary(id) = id {
+            self.ids.insert(id);
+        }
         self.shapes.push(MemberBody {
             id,
             points,
@@ -45,7 +64,50 @@ impl MemberBodies {
         self.ids.contains(&id)
     }
 
+    pub fn push_secondary(
+        &mut self,
+        id: sepika_core::ids::SecondaryMemberId,
+        points: Vec<egui::Pos2>,
+        width_px: f32,
+    ) {
+        self.push_target(
+            sepika_core::model::SupportMemberId::Secondary(id),
+            points,
+            false,
+            false,
+            width_px,
+        );
+    }
+
+    pub fn highlight(
+        &self,
+        id: sepika_core::model::SupportMemberId,
+        painter: &egui::Painter,
+        stroke: egui::Stroke,
+        core: egui::Stroke,
+    ) {
+        for body in self.shapes.iter().filter(|body| body.id == id) {
+            for style in [stroke, core] {
+                painter.add(if body.closed {
+                    egui::Shape::closed_line(body.points.clone(), style)
+                } else if body.points.len() == 2 {
+                    egui::Shape::line_segment([body.points[0], body.points[1]], style)
+                } else {
+                    egui::Shape::line(body.points.clone(), style)
+                });
+            }
+        }
+    }
+
+    #[cfg(test)]
     pub fn pick(&self, pos: egui::Pos2) -> Option<sepika_core::ids::ElemId> {
+        match self.pick_member(pos)? {
+            sepika_core::model::SupportMemberId::Primary(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn pick_member(&self, pos: egui::Pos2) -> Option<sepika_core::model::SupportMemberId> {
         let mut nearest = None;
         let mut nearest_distance = 8.0;
         for body in self.shapes.iter().rev() {
@@ -550,7 +612,7 @@ mod tests {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             });

@@ -137,16 +137,29 @@ pub fn column_stiffnesses(model: &Model, story: StoryId) -> Result<Vec<ColumnSti
                 if !has_top && !has_bot {
                     continue;
                 }
-                let bn0 = &model.nodes[other.nodes[0].index()];
-                let bn1 = &model.nodes[other.nodes[1].index()];
-                let bdx = bn1.coord[0] - bn0.coord[0];
-                let bdy = bn1.coord[1] - bn0.coord[1];
-                let bdz = bn1.coord[2] - bn0.coord[2];
+                let [bp0, bp1] = std::array::from_fn::<_, 2, _>(|side| {
+                    sepika_core::geom::vec3::add(
+                        model.nodes[other.nodes[side].index()].coord,
+                        other.end_offsets_mm[side],
+                    )
+                });
+                let bdx = bp1[0] - bp0[0];
+                let bdy = bp1[1] - bp0[1];
+                let bdz = bp1[2] - bp0[2];
                 let bl = (bdx * bdx + bdy * bdy + bdz * bdz).sqrt();
+                if !other.end_offsets_mm.iter().flatten().all(|v| v.is_finite())
+                    || !bl.is_finite()
+                    || bl <= 0.0
+                {
+                    return Err(format!(
+                        "部材 ID {} の実材軸長・XYZ偏心が不正です",
+                        other.id.0
+                    ));
+                }
                 if bl < 1e-12 {
                     continue;
                 }
-                if sepika_core::geom::is_vertical_axis(bn0.coord, bn1.coord) {
+                if sepika_core::geom::is_vertical_axis(bp0, bp1) {
                     continue;
                 }
                 let bex = [bdx / bl, bdy / bl, bdz / bl];

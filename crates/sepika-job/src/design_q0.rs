@@ -208,11 +208,14 @@ fn rc_beam_geometry(
     let Some(nj) = model.nodes.get(elem.nodes[1].index()) else {
         return Ok(None);
     };
-    let length_mm = vec3::dist(ni.coord, nj.coord);
-    if ni.coord.iter().chain(&nj.coord).any(|v| !v.is_finite()) || length_mm == 0.0 {
+    let [p_i, p_j] = model
+        .primary_beam_axis_ends(elem)?
+        .unwrap_or([ni.coord, nj.coord]);
+    let length_mm = vec3::dist(p_i, p_j);
+    if p_i.iter().chain(&p_j).any(|v| !v.is_finite()) || length_mm == 0.0 {
         return sepika_element::transform::LocalFrame::from_nodes(
-            ni.coord,
-            nj.coord,
+            p_i,
+            p_j,
             elem.local_axis.ref_vector,
         )
         .map(|_| None)
@@ -221,12 +224,9 @@ fn rc_beam_geometry(
     if !length_mm.is_finite() || length_mm <= 1e-9 {
         return Ok(None);
     }
-    let frame = sepika_element::transform::LocalFrame::from_nodes(
-        ni.coord,
-        nj.coord,
-        elem.local_axis.ref_vector,
-    )
-    .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
+    let frame =
+        sepika_element::transform::LocalFrame::from_nodes(p_i, p_j, elem.local_axis.ref_vector)
+            .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
     Ok(Some((length_mm, frame.rot[1])))
 }
 
@@ -660,7 +660,7 @@ mod q0_contract_tests {
             end_cond: [sepika_core::model::EndCondition::Fixed; 2],
             force_regime: sepika_core::model::ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });

@@ -447,9 +447,7 @@ fn generate_stories_impl(
             }
             let ni = elem.nodes[0].index();
             let nj = elem.nodes[1].index();
-            let (ci, cj) = (model.nodes[ni].coord, model.nodes[nj].coord);
-            let len = ((cj[0] - ci[0]).powi(2) + (cj[1] - ci[1]).powi(2) + (cj[2] - ci[2]).powi(2))
-                .sqrt();
+            let len = model.member_length(elem);
             let (ri, rj) = static_reactions(&ml.kind, len);
             let scale = -dz;
             if matches!(elem.kind, ElementKind::Brace { .. })

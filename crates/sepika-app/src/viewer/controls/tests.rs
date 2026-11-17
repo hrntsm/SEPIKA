@@ -108,6 +108,7 @@ fn primary_row_moves_controls_in_order_and_shares_settings_after_resizing() {
         "◀",
         "▶",
         "断面表示",
+        "偏心接続部分",
         "床壁・二次部材",
         "表示設定",
     ];
@@ -122,6 +123,12 @@ fn primary_row_moves_controls_in_order_and_shares_settings_after_resizing() {
         .iter()
         .all(|rect| (rect.center().y - rects[0].center().y).abs() < 2.0));
     assert!(text_rect(&output, "支点").is_none());
+    assert!(h.app.ui.view.show_offset_connections);
+    let output = h.click_text(&output, "偏心接続部分");
+    assert!(!h.app.ui.view.show_offset_connections);
+    h.click_text(&output, "偏心接続部分");
+    assert!(h.app.ui.view.show_offset_connections);
+    assert_eq!(state(&h.app), before);
     let mut navigation_moved = false;
     let mut toggles_moved = false;
     for width in (180..1400).rev().step_by(5) {

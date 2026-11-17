@@ -205,7 +205,7 @@ pub(crate) mod test_support {
                 end_cond: end_fixed,
                 force_regime: ForceRegime::Auto,
                 rigid_zone: RigidZone::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             });
@@ -227,7 +227,7 @@ pub(crate) mod test_support {
                 end_cond: end_fixed,
                 force_regime: ForceRegime::Auto,
                 rigid_zone: RigidZone::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             });

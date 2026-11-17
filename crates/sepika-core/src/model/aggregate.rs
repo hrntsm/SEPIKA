@@ -1117,6 +1117,24 @@ impl Model {
         let members: Vec<&SecondaryMember> = self.beams().chain(self.posts()).collect();
         crate::model::validate_secondary_members(&members)?;
         for sm in &members {
+            if sm.kind == SecondaryMemberKind::Beam {
+                if let Some((a, b)) = self.secondary_member_end_points(sm) {
+                    let actual = [
+                        crate::geom::vec3::add(a, sm.end_offsets_mm[0]),
+                        crate::geom::vec3::add(b, sm.end_offsets_mm[1]),
+                    ];
+                    let length = crate::geom::vec3::dist(actual[0], actual[1]);
+                    if !actual.iter().flatten().all(|v| v.is_finite())
+                        || !length.is_finite()
+                        || length <= 0.0
+                    {
+                        return Err(crate::error::CoreError::InvalidInput(format!(
+                            "小梁 ID {} の実材軸長は有限な正値が必要です",
+                            sm.id.0
+                        )));
+                    }
+                }
+            }
             let ends = sm.ends;
             for anchor in ends.anchors() {
                 if let SupportMemberId::Primary(elem) = anchor.support {
@@ -1328,6 +1346,14 @@ impl Model {
     /// 通り芯・保存波形設定・数量設定・層間変形角の参考比較設定を除いた計算入力照合用モデルを返す。
     pub fn calculation_model(&self) -> Self {
         let mut model = self.clone();
+        for sm in model.unassigned_beams.iter_mut().chain(
+            model
+                .floor_regions
+                .iter_mut()
+                .flat_map(|r| r.secondary_beams.iter_mut()),
+        ) {
+            sm.end_offsets_mm = [[0.0; 3]; 2];
+        }
         model.axes.clear();
         model.quantity_cfg = QuantityCfg::default();
         model.stress_cfg.drift_limit_denom = StressAnalysisCfg::default().drift_limit_denom;
@@ -2321,7 +2347,7 @@ mod node_reference_tests {
         let mut region = FloorRegion::new(FloorRegionId(0), vec![NodeId(1)]);
         region.secondary_beams.push(SecondaryMember {
             id: SecondaryMemberId(0),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
@@ -2392,7 +2418,7 @@ mod node_reference_tests {
 
         model.unassigned_beams.push(SecondaryMember {
             id: SecondaryMemberId(1),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),

@@ -133,7 +133,7 @@ fn elastic_wall_girder_model() -> Model {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -476,7 +476,7 @@ fn test_resolve_force_regime_explicit_and_auto() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -529,7 +529,7 @@ fn test_build_behavior_linear_is_always_elastic_beam() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -573,7 +573,7 @@ fn test_build_nonlinear_behavior_concentrated_spring_uses_spring_beam() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -601,7 +601,7 @@ fn test_build_nonlinear_behavior_fiber_uses_fiber_beam() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -687,7 +687,7 @@ fn make_brace_model(tension_only: bool) -> (Model, ElementData) {
         end_cond: [EndCondition::Pinned, EndCondition::Pinned],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -797,7 +797,7 @@ fn test_build_behavior_wall_opening_reduces_shear_stiffness() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -934,7 +934,7 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1030,7 +1030,7 @@ fn test_resolve_member_hysteresis_two_slots() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1079,7 +1079,7 @@ fn test_resolve_fiber_concrete_hysteresis_defaults_and_overrides() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1164,7 +1164,7 @@ fn test_resolve_wall_shear_hysteresis_defaults_and_overrides() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1222,7 +1222,7 @@ fn test_flexural_alpha_y_sugano_for_rc_beam() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1279,7 +1279,7 @@ fn test_src_beam_alpha_y_falls_back_to_default() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1331,7 +1331,7 @@ fn test_rc_beam_flexural_spring_exhibits_takeda_degradation() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1405,7 +1405,7 @@ fn test_steel_beam_flexural_spring_buckling_degrades() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1473,7 +1473,7 @@ fn axial_factor_preserves_nonaxial_stiffness_and_mass() {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         };
@@ -1522,7 +1522,7 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -2108,7 +2108,7 @@ fn panel_757_valid_steel_joint_couples_each_factory_representation_once() {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -2311,7 +2311,7 @@ fn eccentric_member_model(kind: ElementKind, offset: f64) -> Model {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(offset),
+        end_offsets_mm: [[0.0, 0.0, offset]; 2],
         plastic_zone: Some(100.0),
         spring: None,
     });
@@ -2406,12 +2406,10 @@ fn eccentric_axis_uses_node_level_and_reports_each_unresolved_input() {
     assert!(model.validate_local_frames().is_ok());
     for (item, mutate) in [
         (
-            "鉛直偏心",
-            (|m: &mut Model| m.elements[0].vertical_eccentricity = None) as fn(&mut Model),
+            "XYZ偏心",
+            (|m: &mut Model| m.elements[0].end_offsets_mm = [[0.0, 0.0, f64::INFINITY]; 2])
+                as fn(&mut Model),
         ),
-        ("鉛直偏心", |m: &mut Model| {
-            m.elements[0].vertical_eccentricity = Some(f64::INFINITY)
-        }),
         ("i端の接続節点座標", |m: &mut Model| {
             m.nodes[0].coord[0] = f64::NAN
         }),
@@ -2438,7 +2436,7 @@ fn eccentric_axis_uses_node_level_and_reports_each_unresolved_input() {
         );
     }
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
-    model.elements[0].vertical_eccentricity = None;
+    model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
     assert!(model
         .primary_beam_axis_ends(&model.elements[0])
         .unwrap()
@@ -2511,5 +2509,116 @@ fn eccentric_nonlinear_member_loads_keep_section_forces_separate_from_node_trans
             .unwrap();
         behavior.revert_state();
         assert_eq!(behavior.serialize_checkpoint(), saved);
+    }
+}
+
+#[test]
+fn xyz_end_offsets_keep_axial_equilibrium_and_physical_end_moments_in_all_formulations() {
+    use crate::behavior::MassOption;
+    use sepika_core::geom::vec3::{cross, dist, sub};
+    for (kind, regime) in [
+        (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
+        (ElementKind::Beam, ForceRegime::AxialBendingInteract),
+        (ElementKind::Fiber, ForceRegime::Auto),
+        (ElementKind::MultiSpring, ForceRegime::Auto),
+    ] {
+        for nonlinear in [false, true] {
+            for reversed in [false, true] {
+                let mut model = eccentric_member_model(kind, 0.0);
+                model.elements[0].force_regime = regime;
+                model.nodes[1].coord = [6000.0, 0.0, 0.0];
+                model.elements[0].end_offsets_mm = [[100.0, 200.0, 300.0], [-50.0, 400.0, 600.0]];
+                if reversed {
+                    model.elements[0].nodes.reverse();
+                    model.elements[0].end_offsets_mm.reverse();
+                }
+                let data = &model.elements[0];
+                let ends = model.primary_beam_axis_ends(data).unwrap().unwrap();
+                let length = dist(ends[0], ends[1]);
+                let direction = sub(ends[1], ends[0]).map(|v| v / length);
+                let mut behavior = if nonlinear {
+                    build_nonlinear_behavior(
+                        data,
+                        &model,
+                        StrengthBasis::Nominal,
+                        AnalysisKind::Incremental,
+                        None,
+                    )
+                } else {
+                    build_behavior(data, &model)
+                };
+                let mut displacement = [0.0; 12];
+                for axis in 0..3 {
+                    displacement[6 + axis] = 0.01 * direction[axis];
+                }
+                let ctx = crate::behavior::Ctx { model: &model };
+                behavior
+                    .update_state(
+                        &crate::behavior::LocalVec {
+                            data: smallvec::SmallVec::from_slice(&displacement),
+                        },
+                        true,
+                        &ctx,
+                    )
+                    .unwrap();
+                let force = behavior.internal_force(&ctx);
+                let expected_axial =
+                    model.materials[0].young * model.sections[0].area * 0.01 / length;
+                let mut global_moment = [0.0; 3];
+                for side in 0..2 {
+                    let expected_force = direction.map(|v| {
+                        if side == 0 {
+                            -expected_axial * v
+                        } else {
+                            expected_axial * v
+                        }
+                    });
+                    let expected_moment = cross(data.end_offsets_mm[side], expected_force);
+                    let arm_moment =
+                        cross(model.node(data.nodes[side]).unwrap().coord, expected_force);
+                    for axis in 0..3 {
+                        assert!((force.data[6 * side + axis] - expected_force[axis]).abs() < 1e-6);
+                        assert!(
+                            (force.data[6 * side + 3 + axis] - expected_moment[axis]).abs() < 1e-5
+                        );
+                        global_moment[axis] += force.data[6 * side + 3 + axis] + arm_moment[axis];
+                    }
+                }
+                assert!(global_moment.iter().all(|v| v.abs() < 1e-5));
+                let physical = behavior
+                    .state_member_forces(&ctx)
+                    .or_else(|| behavior.recover_forces(&displacement))
+                    .unwrap();
+                assert!(physical
+                    .at
+                    .iter()
+                    .all(|(_, f)| f[3..].iter().all(|v| v.abs() < 1e-5)));
+                for option in [MassOption::Lumped, MassOption::Consistent] {
+                    let mass = behavior.try_mass_matrix(option).unwrap();
+                    let total_x_mass =
+                        mass.get(0, 0) + mass.get(0, 6) + mass.get(6, 0) + mass.get(6, 6);
+                    let total_mass = model.materials[0].density * model.sections[0].area * length;
+                    assert!((total_x_mass - total_mass).abs() < 1e-10);
+                    let mut inertia_moment = [0.0; 3];
+                    for side in 0..2 {
+                        let force = std::array::from_fn(|axis| {
+                            mass.get(6 * side + axis, 0) + mass.get(6 * side + axis, 6)
+                        });
+                        let arm = cross(model.node(data.nodes[side]).unwrap().coord, force);
+                        for axis in 0..3 {
+                            inertia_moment[axis] += mass.get(6 * side + 3 + axis, 0)
+                                + mass.get(6 * side + 3 + axis, 6)
+                                + arm[axis];
+                        }
+                    }
+                    let centroid =
+                        std::array::from_fn(|axis| (ends[0][axis] + ends[1][axis]) / 2.0);
+                    let expected_moment = cross(centroid, [total_mass, 0.0, 0.0]);
+                    for axis in 0..3 {
+                        assert!((inertia_moment[axis] - expected_moment[axis]).abs() < 1e-8);
+                    }
+                }
+            }
+        }
     }
 }

@@ -196,10 +196,15 @@ pub(crate) fn enumerate_self_weight(
             {
                 let ni = elem.nodes[0].index();
                 let nj = elem.nodes[1].index();
-                let (ci, cj) = (model.nodes[ni].coord, model.nodes[nj].coord);
+                let [ci, cj] = model
+                    .primary_beam_axis_ends(elem)?
+                    .unwrap_or([model.nodes[ni].coord, model.nodes[nj].coord]);
                 let len = dist3(ci, cj);
                 let is_vertical = is_vertical_pair(ci, cj);
-                let is_column = elem.kind.is_weight_frame() && elem.nodes.len() == 2 && is_vertical;
+                let is_column = elem.kind.is_weight_frame()
+                    && elem.nodes.len() == 2
+                    && sec.frame_use != Some(sepika_core::model::FrameSectionUse::Girder)
+                    && is_vertical;
                 let is_concrete = mat.fc.is_some();
                 let is_cft = matches!(
                     sec.shape.as_ref(),

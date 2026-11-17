@@ -224,7 +224,7 @@ fn normal_model(kind: RcKind, shared: bool) -> (Model, SectionId) {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         })
@@ -458,7 +458,7 @@ fn plate_model(wall: bool, numeric: bool) -> Model {
         model.slabs[0].vertical_eccentricity_mm = Some(0.);
         for element in &mut model.elements {
             let section = &model.sections[element.section.unwrap().index()];
-            element.vertical_eccentricity = Some(-section.depth / 2.0);
+            element.end_offsets_mm = [[0.0, 0.0, -section.depth / 2.0]; 2];
         }
     }
     model.validate().unwrap();

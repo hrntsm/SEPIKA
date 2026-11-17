@@ -97,7 +97,10 @@ impl App {
                 .selection
                 .members()
                 .len()
-                .max(self.ui.scoped.selection.nodes().len());
+                .max(self.ui.scoped.selection.nodes().len())
+                .max(usize::from(
+                    self.ui.scoped.selection.active_secondary_member().is_some(),
+                ));
             if count > 0 {
                 ui.label(format!("幾何選択: {count} 件"));
             }
@@ -106,6 +109,42 @@ impl App {
                 && self.ui.scoped.selection.active_node().is_none()
             {
                 ui.label("複数選択中（個別の注目対象なし）");
+            }
+            if let Some(id) = self.ui.scoped.selection.active_secondary_member() {
+                if let Some(member) = self.core.model.secondary_member(id) {
+                    ui.strong(format!("小梁 ID: {}", id.0));
+                    crate::theme::name_label(ui, &format!("符号: {}", member.name));
+                    if let Some(section) = member.section.and_then(|id| self.core.model.section(id))
+                    {
+                        crate::theme::name_label(ui, &format!("断面: {}", section.name));
+                    }
+                    ui.label("偏心は表示専用です。荷重伝達・重量・検定には使いません。");
+                    for (side, offset) in member.end_offsets_mm.iter().enumerate() {
+                        ui.label(format!(
+                            "{}端 XYZ偏心 [mm]: {:.1}, {:.1}, {:.1}",
+                            if side == 0 { "i" } else { "j" },
+                            offset[0],
+                            offset[1],
+                            offset[2]
+                        ));
+                    }
+                    if let Ok(placement) = self
+                        .core
+                        .model
+                        .beam_placement(sepika_core::model::SupportMemberId::Secondary(id))
+                    {
+                        for (side, p) in placement.actual_ends.iter().enumerate() {
+                            ui.label(format!(
+                                "{}端 表示位置 [mm]: {:.1}, {:.1}, {:.1}",
+                                if side == 0 { "i" } else { "j" },
+                                p[0],
+                                p[1],
+                                p[2]
+                            ));
+                        }
+                    }
+                    ui.separator();
+                }
             }
             if let Some(elem_id) = self.ui.scoped.selection.active_member() {
                 if let Some(e) = display_model.element(elem_id) {

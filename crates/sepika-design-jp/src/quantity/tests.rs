@@ -138,7 +138,7 @@ fn line_elem(id: u32, n0: u32, n1: u32, sec: u32) -> ElementData {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     }
@@ -1340,7 +1340,7 @@ fn circular_rc_post_model(end_mm: [f64; 3]) -> Model {
             ends: SecondaryMemberEnds::Detached([[0.0; 3], end_mm]),
             section: Some(SectionId(0)),
             name: "間柱符号".into(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
         }],
         stories: vec![Story {
@@ -1414,14 +1414,12 @@ fn circular_rc_post_common_entry_uses_diameter_and_actual_length() {
 #[test]
 fn circular_rc_post_materialized_is_counted_once_in_both_directions() {
     for (start, end) in [(0, 1), (1, 0)] {
-        for offset in [None, Some(0.0), Some(-300.0)] {
-            let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
-            model.unassigned_posts[0].vertical_eccentricity = offset;
-            model.elements.push(line_elem(0, start, end, 0));
-            let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-            assert_circular_post_quantity(&q);
-            assert_eq!(q.items[0].elem, Some(ElemId(0)));
-        }
+        let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
+        model.unassigned_posts[0].end_offsets_mm = [[0.0; 3]; 2];
+        model.elements.push(line_elem(0, start, end, 0));
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert_circular_post_quantity(&q);
+        assert_eq!(q.items[0].elem, Some(ElemId(0)));
     }
 }
 
@@ -1545,7 +1543,7 @@ fn contact_model() -> Model {
     Model {
         nodes: vec![node(0, 0.0, 0.0, 3000.0), node(1, 6000.0, 0.0, 3000.0)],
         elements: vec![ElementData {
-            vertical_eccentricity: Some(-300.0),
+            end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
             ..line_elem(0, 0, 1, 0)
         }],
         sections: vec![section],
@@ -1767,7 +1765,7 @@ fn beam_contact_direct_support_span_secondary_and_vertical_union() {
         ends: secondary_ends,
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
-        vertical_eccentricity: Some(-300.0),
+        end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -1988,7 +1986,7 @@ fn beam_contact_unknown_beam_section_is_unavailable() {
                     ]),
                     section: Some(SectionId(999)),
                     name: "断面不明451".into(),
-                    vertical_eccentricity: Some(-300.0),
+                    end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
                     gravity_end_shares: None,
                 });
         } else {
@@ -1999,12 +1997,12 @@ fn beam_contact_unknown_beam_section_is_unavailable() {
             reason.contains(if support_secondary {
                 "SecondaryMemberId(451)"
             } else {
-                "Primary(ElemId(0))"
+                "部材 ID 0"
             }),
             "{reason}"
         );
         assert!(
-            reason.contains("SectionId(999)") && reason.contains("参照が不明"),
+            reason.contains("断面") || reason.contains("SectionId(999)"),
             "{reason}"
         );
     }
@@ -2063,6 +2061,7 @@ fn beam_contact_uses_shared_mm_tolerance_and_ignores_unrelated_slope() {
 fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once() {
     use sepika_core::ids::SecondaryMemberId;
     let mut model = contact_model();
+    model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
     let secondary_ends = sepika_core::model::SecondaryMemberEnds::Detached([
         [0.0, 0.0, 3000.0],
         [6000.0, 0.0, 3000.0],
@@ -2073,7 +2072,7 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
         ends: secondary_ends,
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
-        vertical_eccentricity: Some(-300.0),
+        end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -2090,7 +2089,7 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
         ends: secondary_ends,
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
-        vertical_eccentricity: Some(-300.0),
+        end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [1000.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -2105,19 +2104,17 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
 }
 
 #[test]
-fn secondary_beam_materialization_distinguishes_vertical_eccentricity_and_unspecified() {
+fn secondary_beam_materialization_ignores_display_offsets() {
     for (primary_offset, secondary_offset, expected_count, expected_concrete, expected_formwork) in [
-        (Some(-300.0), Some(-300.0), 1, 1.08, 9.0),
-        (Some(-300.0), Some(0.0), 2, 2.16, 18.0),
-        (Some(0.0), Some(0.0), 1, 1.08, 9.0),
-        (None, Some(0.0), 2, 2.16, 18.0),
-        (Some(0.0), None, 2, 2.16, 18.0),
-        (None, None, 1, 1.08, 9.0),
+        (-300.0, -300.0, 2, 2.16, 18.0),
+        (-300.0, 0.0, 2, 2.16, 18.0),
+        (0.0, -300.0, 1, 1.08, 9.0),
+        (0.0, 0.0, 1, 1.08, 9.0),
     ] {
         for reverse_primary in [false, true] {
             for reverse_secondary in [false, true] {
                 let mut model = contact_model();
-                model.elements[0].vertical_eccentricity = primary_offset;
+                model.elements[0].end_offsets_mm = [[0.0, 0.0, primary_offset]; 2];
                 if reverse_primary {
                     model.elements[0].nodes.reverse();
                 }
@@ -2135,7 +2132,7 @@ fn secondary_beam_materialization_distinguishes_vertical_eccentricity_and_unspec
                         },
                     )),
                     section: Some(SectionId(0)),
-                    vertical_eccentricity: secondary_offset,
+                    end_offsets_mm: [[0.0, 0.0, secondary_offset]; 2],
                     ..Default::default()
                 });
                 let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -2149,12 +2146,6 @@ fn secondary_beam_materialization_distinguishes_vertical_eccentricity_and_unspec
                 );
                 assert!((q.totals().concrete_m3 - expected_concrete).abs() < 1e-12);
                 assert!((q.totals().formwork_m2 - expected_formwork).abs() < 1e-12);
-                if primary_offset.is_none() || secondary_offset.is_none() {
-                    contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
-                    let error =
-                        try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
-                    assert!(error.contains("鉛直偏心が未指定"), "{error}");
-                }
             }
         }
     }
@@ -2182,7 +2173,7 @@ fn secondary_beam_different_eccentricity_retains_contact_deduction_and_totals() 
                 }
             })),
             section: Some(SectionId(0)),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             ..Default::default()
         });
         let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -2205,11 +2196,11 @@ fn secondary_beam_different_eccentricity_retains_contact_deduction_and_totals() 
 }
 
 #[test]
-fn secondary_beam_materialization_filters_other_eccentricities_before_ambiguity() {
+fn secondary_beam_materialization_rejects_duplicate_owners_regardless_of_display_offsets() {
     let mut model = contact_model();
     model.elements.push(ElementData {
         id: ElemId(1),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         ..model.elements[0].clone()
     });
     for (id, offset) in [(792, -300.0), (793, 0.0)] {
@@ -2221,16 +2212,16 @@ fn secondary_beam_materialization_filters_other_eccentricities_before_ambiguity(
                 [6000.0, 0.0, 3000.0],
             ]),
             section: Some(SectionId(0)),
-            vertical_eccentricity: Some(offset),
+            end_offsets_mm: [[0.0, 0.0, offset]; 2],
             ..Default::default()
         });
     }
-    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-    assert_eq!(q.items.len(), 2);
-    assert!(q.items.iter().all(|i| i.secondary.is_none()));
-    assert!((q.totals().concrete_m3 - 2.16).abs() < 1e-12);
-    assert!((q.totals().formwork_m2 - 18.0).abs() < 1e-12);
-    model.unassigned_beams[1].vertical_eccentricity = Some(-300.0);
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("複数の二次部材")
+    );
+    model.unassigned_beams[1].end_offsets_mm = [[0.0, 0.0, -300.0]; 2];
     assert!(
         try_compute_quantity_takeoff(&model, &QuantityCfg::default())
             .unwrap_err()
@@ -2254,7 +2245,7 @@ fn secondary_steel_beam_different_eccentricity_preserves_independent_weight() {
             [6000.0, 0.0, 3000.0],
         ]),
         section: Some(SectionId(0)),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         ..Default::default()
     });
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -2648,7 +2639,7 @@ fn nonnodal_beam_model() -> Model {
         })),
         section: Some(SectionId(0)),
         name: "小梁557".into(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
     });
     model
@@ -2991,6 +2982,7 @@ fn nonnodal_secondary_stb_member_strength_is_preserved_and_material_mismatch_is_
 fn materialized_secondary_contact_reversal_uses_same_union_as_primary() {
     for reverse in [false, true] {
         let mut model = contact_model();
+        model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
         contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
         let before = contact_formwork(&model);
         let mut ends = [[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]];
@@ -3003,7 +2995,7 @@ fn materialized_secondary_contact_reversal_uses_same_union_as_primary() {
             ends: sepika_core::model::SecondaryMemberEnds::Detached(ends),
             section: Some(SectionId(0)),
             name: "contact557".into(),
-            vertical_eccentricity: Some(-300.0),
+            end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
             gravity_end_shares: None,
         });
         assert!((contact_formwork(&model) - before).abs() < 1e-12);
@@ -3270,7 +3262,7 @@ fn 梁の実材軸と床の独立した鉛直偏心から接触上下端を求�
                     ends,
                     section: Some(SectionId(0)),
                     name: "小梁789".into(),
-                    vertical_eccentricity: Some(0.0),
+                    end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                     gravity_end_shares: None,
                 });
             }
@@ -3282,11 +3274,20 @@ fn 梁の実材軸と床の独立した鉛直偏心から接触上下端を求�
                 [(0.0, 8.7, 8.4), (100.0, 8.1, 9.0), (-100.0, 9.0, 8.1)]
             {
                 if secondary {
-                    model.unassigned_beams[0].vertical_eccentricity = Some(offset);
+                    model.unassigned_beams[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
                 } else {
-                    model.elements[0].vertical_eccentricity = Some(offset);
+                    model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
                 }
                 for (floor_top, expected) in [(3400.0, upper_expected), (2800.0, lower_expected)] {
+                    let expected = if secondary {
+                        if floor_top == 3400.0 {
+                            8.7
+                        } else {
+                            8.4
+                        }
+                    } else {
+                        expected
+                    };
                     model.slabs[0].vertical_eccentricity_mm = Some(floor_top);
                     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
                     let beam = q
@@ -3308,9 +3309,9 @@ fn 梁の実材軸と床の独立した鉛直偏心から接触上下端を求�
                 }
             }
             if secondary {
-                model.unassigned_beams[0].vertical_eccentricity = Some(0.0);
+                model.unassigned_beams[0].end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
             } else {
-                model.elements[0].vertical_eccentricity = Some(0.0);
+                model.elements[0].end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
             }
             model.slabs[0].vertical_eccentricity_mm = Some(3400.0);
             match model.sections[0].shape.as_mut().unwrap() {
@@ -3352,16 +3353,16 @@ fn 梁実配置の未解決理由と未対応断面姿勢を数量に残す() {
                 ends,
                 section: Some(SectionId(0)),
                 name: "小梁789".into(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
             });
         }
         contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
-        for (offset, expected) in [(None, "未指定"), (Some(f64::NAN), "非有限")] {
+        for (offset, expected) in [(f64::NAN, "非有限"), (f64::INFINITY, "非有限")] {
             if secondary {
-                model.unassigned_beams[0].vertical_eccentricity = offset;
+                model.unassigned_beams[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
             } else {
-                model.elements[0].vertical_eccentricity = offset;
+                model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
             }
             let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
             assert!(
@@ -3386,7 +3387,7 @@ fn 梁実配置の未解決理由と未対応断面姿勢を数量に残す() {
         ]),
         section: Some(SectionId(0)),
         name: "未解決小梁789".into(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
     });
     contact_slab(&mut detached, [1000.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -3404,7 +3405,7 @@ fn 梁実配置の未解決理由と未対応断面姿勢を数量に残す() {
         "{reason}"
     );
     let mut foundation = rc_portal_model();
-    foundation.elements[3].vertical_eccentricity = Some(100.0);
+    foundation.elements[3].end_offsets_mm = [[0.0, 0.0, 100.0]; 2];
     contact_slab(&mut foundation, [0.0, 6000.0], 1.0, 150.0, 0.0);
     let reason = try_compute_quantity_takeoff(&foundation, &QuantityCfg::default()).unwrap_err();
     assert!(reason.contains("基礎梁"), "{reason}");

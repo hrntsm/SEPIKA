@@ -51,7 +51,7 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(-300.0),
+            end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -204,6 +204,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     boundary.id = sepika_core::ids::ElemId(1);
     boundary.nodes = [NodeId(0), NodeId(1)].into_iter().collect();
     boundary.section = None;
+    boundary.end_offsets_mm = [[0.0; 3]; 2];
     model.elements.push(boundary);
     for _ in 0..2 {
         assert_eq!(
@@ -219,7 +220,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
 
     let mut model = base.clone();
     model.elements[0].section = Some(SectionId(999));
-    cases.push((model, "Primary(ElemId(0)): 梁断面 SectionId(999)"));
+    cases.push((model, "部材 ID 0 i/j端の断面"));
     let mut model = base.clone();
     for i in 0..2 {
         let mut node = model.nodes[i].clone();
@@ -278,11 +279,14 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     }
     cases.push((model, "取付き先"));
     for (offset, reason) in [
-        (None, "大梁 ID 0 の実配置: 鉛直偏心が未指定です"),
-        (Some(f64::NAN), "大梁 ID 0 の実配置: 鉛直偏心が非有限です"),
+        (f64::NAN, "大梁 ID 0 の実配置: i端のXYZ偏心が非有限です"),
+        (
+            f64::INFINITY,
+            "大梁 ID 0 の実配置: i端のXYZ偏心が非有限です",
+        ),
     ] {
         let mut model = base.clone();
-        model.elements[0].vertical_eccentricity = offset;
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
         cases.push((model, reason));
     }
     let mut model = base.clone();
@@ -313,7 +317,7 @@ fn beam_contact_placement_fixtures() -> Vec<(sepika_core::model::Model, f64)> {
     .map(|(beam_offset_mm, slab_offset_mm, expected_m2)| {
         let mut model = beam_contact_fixture();
         model.slabs.truncate(1);
-        model.elements[0].vertical_eccentricity = Some(beam_offset_mm);
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, beam_offset_mm]; 2];
         model.slabs[0].vertical_eccentricity_mm = Some(slab_offset_mm);
         (model, expected_m2)
     })
@@ -383,6 +387,7 @@ fn haunched_girder_fixture() -> sepika_core::model::Model {
     column.id = ElemId(1);
     column.nodes = smallvec::smallvec![NodeId(2), NodeId(0)];
     column.section = Some(SectionId(3));
+    column.end_offsets_mm = [[0.0; 3]; 2];
     model.elements.push(column);
     model.member_detail_attrs.push(MemberDetailAttr {
         elem: ElemId(0),

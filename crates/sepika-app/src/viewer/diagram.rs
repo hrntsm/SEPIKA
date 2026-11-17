@@ -441,8 +441,11 @@ fn draw_component_with_view(
             if n0 >= coords3.len() || n1 >= coords3.len() {
                 continue;
             }
-            let p_i = coords3[n0];
-            let p_j = coords3[n1];
+            let Some([p_i, p_j]) =
+                super::primary_display_ends(&app.core.model, elem, disp, deform_scale)
+            else {
+                continue;
+            };
             if member_len3(p_i, p_j) < 1e-9 {
                 continue;
             }
@@ -450,10 +453,9 @@ fn draw_component_with_view(
                 p_i,
                 p_j,
                 elem.local_axis.ref_vector,
-                member_len3(
-                    app.core.model.nodes[n0].coord,
-                    app.core.model.nodes[n1].coord,
-                ),
+                super::primary_display_ends(&app.core.model, elem, None, 0.0)
+                    .map(|[a, b]| member_len3(a, b))
+                    .unwrap_or(0.0),
             )
         };
         let Some(ey) = diagram_offset_dir(p_i, p_j, ref_vec, component.plane()) else {
@@ -463,26 +465,23 @@ fn draw_component_with_view(
             Some(n) => in_plane_offset_dir(ey, p_i, p_j, n),
             None => ey,
         };
-        let deflection: Option<BeamDeflection> =
-            if view.show_beam_interpolation && elem.kind == ElementKind::Beam {
-                let n0 = elem.nodes[0].index();
-                let n1 = elem.nodes[1].index();
-                disp.and_then(|d| {
-                    if n0 < d.len() && n1 < d.len() {
-                        BeamDeflection::new(
-                            app.core.model.nodes[n0].coord,
-                            app.core.model.nodes[n1].coord,
-                            d[n0],
-                            d[n1],
-                            ref_vec,
-                        )
-                    } else {
-                        None
-                    }
-                })
-            } else {
-                None
-            };
+        let deflection: Option<BeamDeflection> = if view.show_beam_interpolation
+            && elem.kind == ElementKind::Beam
+        {
+            let n0 = elem.nodes[0].index();
+            let n1 = elem.nodes[1].index();
+            disp.and_then(|d| {
+                if n0 < d.len() && n1 < d.len() {
+                    let [p_i, p_j] = super::primary_display_ends(&app.core.model, elem, None, 0.0)?;
+                    let [d_i, d_j] = super::physical_end_displacements(elem, d)?;
+                    BeamDeflection::new(p_i, p_j, d_i, d_j, ref_vec)
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
         let p0 = proj.project(p_i);
         let p1 = proj.project(p_j);
 
@@ -1003,7 +1002,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         };

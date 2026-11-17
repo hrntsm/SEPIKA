@@ -100,7 +100,7 @@ fn parallel_beam_model(kind: ElementKind) -> Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -108,7 +108,7 @@ fn parallel_beam_model(kind: ElementKind) -> Model {
     model.unassigned_beams.push(SecondaryMember {
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
-        vertical_eccentricity: Some(-50.0),
+        end_offsets_mm: [[0.0, 0.0, -50.0]; 2],
         ends: anchors(),
         section: Some(SectionId(0)),
         ..Default::default()

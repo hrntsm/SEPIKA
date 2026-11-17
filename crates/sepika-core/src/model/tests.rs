@@ -91,11 +91,11 @@ fn secondary_purpose_selects_canonical_then_first_fallback_section_without_wrong
 /// 形状を持たない二次部材（生座標は原点）。ID・種別の検証用。
 fn test_secondary(kind: SecondaryMemberKind, id: u32, name: &str) -> SecondaryMember {
     SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: SecondaryMemberId(id),
         kind,
-        ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
+        ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
         section: None,
         name: name.into(),
     }
@@ -136,7 +136,7 @@ fn test_validate_dangling_elem_node() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -510,7 +510,8 @@ fn test_element_data_plastic_zone_default_missing_field() {
             "material": null,
             "local_axis": { "ref_vector": [1.0, 0.0, 0.0] },
             "end_cond": ["Fixed", "Fixed"],
-            "force_regime": "Auto"
+            "force_regime": "Auto",
+            "end_offsets_mm": [[0,0,0],[0,0,0]]
         }"#;
     let elem: ElementData = serde_json::from_str(json).unwrap();
     assert_eq!(elem.plastic_zone, None);
@@ -1179,7 +1180,7 @@ fn test_validate_checks_anchor_span_bounds() {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -1453,7 +1454,7 @@ fn infer_free_end_for_cantilever_beam() {
     ]);
     push_element_beam(&mut model, 0, 0, 1);
     model.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -1529,7 +1530,7 @@ fn push_element_beam(model: &mut Model, id: u32, i: u32, j: u32) {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -1540,7 +1541,7 @@ fn push_secondary_beam(model: &mut Model, nodes: [u32; 2], name: &str) {
     let (a, b) = (coord(nodes[0]), coord(nodes[1]));
     let id = model.alloc_secondary_member_id();
     model.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id,
         kind: SecondaryMemberKind::Beam,
@@ -1652,7 +1653,7 @@ fn infer_free_end_for_cantilever_post() {
     let mut model = two_node_model(&[[0.0, 0.0, 0.0], [6000.0, 0.0, 0.0], [0.0, 0.0, 3000.0]]);
     push_element_beam(&mut model, 0, 0, 1);
     model.unassigned_posts.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Post,
@@ -1913,7 +1914,7 @@ fn frame_node_count_matrix_and_support_axes() {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         };
@@ -1951,7 +1952,7 @@ fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_sprin
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1998,7 +1999,7 @@ fn local_frame_guard_distinguishes_zero_length_members_from_spring_and_isolator(
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -2197,7 +2198,7 @@ mod rc_section_reference_resolution {
                         end_cond: [EndCondition::Fixed; 2],
                         force_regime: ForceRegime::Auto,
                         rigid_zone: Default::default(),
-                        vertical_eccentricity: Some(0.0),
+                        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                         plastic_zone: None,
                         spring: None,
                     }],

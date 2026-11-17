@@ -109,7 +109,7 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                 node.mass = Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
             }
             if steel_wall {
-                for (i, current) in model.sections.iter_mut().enumerate().take(2) {
+                for (i, target_section) in model.sections.iter_mut().enumerate().take(2) {
                     let mut section = SectionShape::SteelBox {
                         height: 600.0,
                         width: 600.0,
@@ -118,9 +118,9 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                         corner_r: Some(0.0),
                     }
                     .to_section(SectionId(i as u32), "鋼材".into());
-                    section.frame_use = current.frame_use;
+                    section.frame_use = target_section.frame_use;
                     section.material = Some(MaterialId(2));
-                    *current = section;
+                    *target_section = section;
                 }
                 model.sections[2].shape = None;
                 model.sections[2].property_basis.j = sepika_core::model::PropertyBasis::Supplied;

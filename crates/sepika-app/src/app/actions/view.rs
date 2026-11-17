@@ -57,6 +57,16 @@ impl App {
     }
 
     pub(crate) fn remap_model_focus(&mut self) {
+        if self
+            .ui
+            .scoped
+            .selection
+            .active_secondary_member()
+            .is_some_and(|id| self.core.model.secondary_member(id).is_none())
+        {
+            self.clear_geometry_selection();
+        }
+
         for change in self.core.scoped.undo.id_changes() {
             match *change {
                 sepika_edit::IdChange::MaterialRemoved(id) => {
@@ -116,6 +126,12 @@ impl App {
 
     pub(crate) fn select_member(&mut self, id: ElemId) {
         self.select_members(vec![id], Some(id));
+    }
+
+    pub(crate) fn select_secondary_member(&mut self, id: sepika_core::ids::SecondaryMemberId) {
+        if self.core.model.secondary_member(id).is_some() {
+            self.ui.scoped.selection = GeometrySelection::SecondaryMember { id };
+        }
     }
 
     pub(crate) fn select_nodes(&mut self, ids: Vec<NodeId>, active: Option<NodeId>) {

@@ -323,6 +323,9 @@ pub enum GeometrySelection {
         ids: Vec<ElemId>,
         active: Option<ElemId>,
     },
+    SecondaryMember {
+        id: sepika_core::ids::SecondaryMemberId,
+    },
 }
 
 impl GeometrySelection {
@@ -350,6 +353,13 @@ impl GeometrySelection {
     pub fn active_member(&self) -> Option<ElemId> {
         match self {
             Self::Members { active, .. } => *active,
+            _ => None,
+        }
+    }
+
+    pub fn active_secondary_member(&self) -> Option<sepika_core::ids::SecondaryMemberId> {
+        match self {
+            Self::SecondaryMember { id } => Some(*id),
             _ => None,
         }
     }

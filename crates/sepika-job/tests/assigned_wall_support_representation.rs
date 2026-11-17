@@ -117,7 +117,7 @@ fn fixture(kind: ElementKind) -> Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -476,4 +476,59 @@ fn existing_attached_wall_keeps_its_shape_and_public_solver_still_rejects_isolat
     let error =
         sepika_job::compute::compute_linear_static(model.clone(), dl(&model).id).unwrap_err();
     assert!(error.to_string().contains("接続されていない"), "{error}");
+}
+
+#[test]
+fn wall_to_secondary_beam_transfer_and_mass_ignore_xyz_display_offsets() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut baseline = fixture(kind);
+        baseline.stories = [0.0, 3000.0, 6000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(id, level)| {
+                Story::new(StoryId(id as u32), format!("{id}F"), Some(level), Some(0.0))
+            })
+            .collect();
+        let mut shifted = baseline.clone();
+        let mut changed = 0;
+        for member in shifted.unassigned_beams.iter_mut().chain(
+            shifted
+                .floor_regions
+                .iter_mut()
+                .flat_map(|r| &mut r.secondary_beams),
+        ) {
+            member.end_offsets_mm = [[100.0, 200.0, 300.0], [-400.0, 500.0, -600.0]];
+            changed += 1;
+        }
+        assert!(changed > 0);
+        prepare_model_for_analysis(&mut baseline, &AnalysisSettings::default(), None).unwrap();
+        prepare_model_for_analysis(&mut shifted, &AnalysisSettings::default(), None).unwrap();
+        assert_eq!(
+            bincode::serialize(dl(&baseline)).unwrap(),
+            bincode::serialize(dl(&shifted)).unwrap()
+        );
+        assert_eq!(
+            resultant(&baseline, dl(&baseline), Some(LoadSource::WallSelfWeight)),
+            resultant(&shifted, dl(&shifted), Some(LoadSource::WallSelfWeight))
+        );
+        let mass = |model: &Model| {
+            model
+                .stories
+                .iter()
+                .filter_map(|s| s.dynamic_mass)
+                .map(|m| m.mass_equiv_weight_n)
+                .sum::<f64>()
+        };
+        assert!(mass(&baseline) > 0.0);
+        assert_eq!(mass(&baseline), mass(&shifted));
+        let original =
+            sepika_job::compute::compute_linear_static(baseline.clone(), dl(&baseline).id).unwrap();
+        let actual =
+            sepika_job::compute::compute_linear_static(shifted.clone(), dl(&shifted).id).unwrap();
+        assert_eq!(original.disp, actual.disp);
+    }
 }

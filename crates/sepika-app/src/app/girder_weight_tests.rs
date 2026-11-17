@@ -66,7 +66,7 @@ fn model() -> Model {
         e.id = ElemId(i as u32);
         e.nodes = [NodeId(a), NodeId(b)].into_iter().collect();
         e.section = Some(SectionId(if i == 0 { 1 } else { 0 }));
-        e.vertical_eccentricity = Some(if i == 0 { 0.0 } else { 1000.0 });
+        e.end_offsets_mm = [[0.0, 0.0, if i == 0 { 0.0 } else { 1000.0 }]; 2];
         model.elements.push(e);
     }
     let mut ground = model.nodes[0].clone();
@@ -291,7 +291,7 @@ fn girder_overlap_independent_values_reach_preparation_dl_and_seismic_weight() {
     ] {
         for swap in [false, true] {
             let mut model = model();
-            model.elements[0].vertical_eccentricity = Some(top);
+            model.elements[0].end_offsets_mm = [[0.0, 0.0, top]; 2];
             if let Some((t, z)) = left {
                 slab(&mut model, usize::from(swap), t, z);
             }
@@ -368,7 +368,7 @@ fn girder_overlap_independent_values_reach_preparation_dl_and_seismic_weight() {
 #[test]
 fn girder_overlap_presence_duplicates_and_common_thickness_are_independent() {
     let mut model = model();
-    model.elements[0].vertical_eccentricity = Some(-50.);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, -50.]; 2];
     slab(&mut model, 0, 150., 0.);
     slab(&mut model, 1, 200., 0.);
     model.floor_assignment_regions.regions[1].assignment = PlateAssignment::NoPlate;
@@ -389,7 +389,7 @@ fn girder_overlap_presence_duplicates_and_common_thickness_are_independent() {
     model.floor_assignment_regions.regions.push(duplicate);
     assert!((weight(&model) - 34560.).abs() < 1e-6);
     model.floor_assignment_regions.regions.pop();
-    model.elements[0].vertical_eccentricity = Some(0.);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 0.]; 2];
     model.sections[2].thickness = Some(900.);
     assert!(weight(&model).abs() < 1e-6);
     let mut unrelated = model.elements[0].clone();
@@ -430,7 +430,7 @@ fn girder_overlap_invalid_inputs_do_not_become_zero_overlap() {
         Box::new(|m| m.sections[3].thickness = Some(-1.)),
         Box::new(|m| m.sections[3].thickness = Some(f64::INFINITY)),
         Box::new(|m| m.sections[3].material = None),
-        Box::new(|m| m.elements[0].vertical_eccentricity = None),
+        Box::new(|m| m.elements[0].end_offsets_mm = [[0.0, 0.0, f64::NAN]; 2]),
         Box::new(|m| m.nodes[0].coord[0] = f64::NAN),
         Box::new(|m| m.materials[1].density = f64::NAN),
         Box::new(|m| m.materials[1].density = -1.),
@@ -653,7 +653,7 @@ fn girder_overlap_only_applies_to_rectangular_rc_src_girders() {
 }
 
 #[test]
-fn 二次小梁の直接設計へ嵩上げの独立曲げせん断増分が届く() {
+fn 二次小梁の表示偏心を変えても嵩上げを含む直接設計は変わらない() {
     let mut base = model();
     slab(&mut base, 0, 150., 0.);
     slab(&mut base, 1, 150., 0.);
@@ -697,7 +697,7 @@ fn 二次小梁の直接設計へ嵩上げの独立曲げせん断増分が届�
         secondary_beams: vec![SecondaryMember {
             id: SecondaryMemberId(0),
             section: Some(SectionId(1)),
-            vertical_eccentricity: Some(-150.),
+            end_offsets_mm: [[0.0, 0.0, -150.]; 2],
             ends: SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
                     support: SupportMemberId::Primary(ElemId(2)),
@@ -732,12 +732,10 @@ fn 二次小梁の直接設計へ嵩上げの独立曲げせん断増分が届�
             .2
     };
     let increased = design(base.clone());
-    base.floor_regions[0].secondary_beams[0].vertical_eccentricity = Some(-100.);
+    base.floor_regions[0].secondary_beams[0].end_offsets_mm = [[0.0, 0.0, -100.]; 2];
     let baseline = design(base);
     assert!(increased.m_max > 0.0 && baseline.m_max > 0.0);
-    assert!((increased.w - baseline.w - 0.448).abs() < 1e-9);
-    assert!((increased.m_max - baseline.m_max - 2150400.).abs() < 1e-5);
-    assert!((increased.q_max - baseline.q_max - 1344.).abs() < 1e-6);
+    assert_eq!(increased, baseline);
 }
 
 #[test]
@@ -754,7 +752,7 @@ fn gapのあるs梁も同側床板の矛盾をdlと準備結果で拒否する()
     .to_section(SectionId(1), "S梁".into());
     model.sections[1].frame_use = Some(FrameSectionUse::Girder);
     model.sections[1].material = Some(MaterialId(0));
-    model.elements[0].vertical_eccentricity = Some(-150.);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, -150.]; 2];
     let mut slab = model.slabs[0].clone();
     slab.id = sepika_core::ids::SlabId(1);
     model.slabs.push(slab);
@@ -795,7 +793,7 @@ fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_b
     .to_section(SectionId(1), "嵩上げ対象".into());
     base.sections[1].frame_use = Some(FrameSectionUse::Girder);
     base.sections[1].material = Some(MaterialId(0));
-    base.elements[0].vertical_eccentricity = Some(-150.);
+    base.elements[0].end_offsets_mm = [[0.0, 0.0, -150.]; 2];
     let mut alternate_material = base.materials[1].clone();
     alternate_material.id = MaterialId(2);
     alternate_material.density = 12e-6 / sepika_core::units::GRAVITY_MM_S2;
@@ -860,9 +858,9 @@ fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_b
             2880.,
         ),
         (
-            Box::new(SetBeamVerticalEccentricity {
+            Box::new(SetBeamEndOffsets {
                 member: SupportMemberId::Primary(ElemId(0)),
-                value: Some(-200.),
+                value: [[0.0, 0.0, -200.]; 2],
             }),
             5760.,
         ),
@@ -958,9 +956,9 @@ fn girder_overlap_edits_undo_redo_and_save_reload_update_weights_and_invalidate_
     let region = base.floor_assignment_regions.regions[0].id;
     let edits: Vec<(Box<dyn EditCommand>, f64)> = vec![
         (
-            Box::new(SetBeamVerticalEccentricity {
+            Box::new(SetBeamEndOffsets {
                 member: SupportMemberId::Primary(ElemId(0)),
-                value: Some(-50.),
+                value: [[0.0, 0.0, -50.]; 2],
             }),
             34560.,
         ),

@@ -14,6 +14,27 @@ fn secondary_member_ok(model: &Model, sm: &SecondaryMember) -> bool {
             .is_some_and(|(_, _, len)| len > 1e-9)
 }
 
+fn secondary_offset_error(model: &Model, sm: &SecondaryMember) -> Option<String> {
+    let fail = |reason| Some(format!("二次部材 ID {} のXYZ偏心: {reason}", sm.id.0));
+    if !sm.end_offsets_mm.iter().flatten().all(|v| v.is_finite()) {
+        return fail("各成分に有限値が必要です");
+    }
+    if sm.kind == SecondaryMemberKind::Post && sm.end_offsets_mm != [[0.0; 3]; 2] {
+        return fail("間柱の非0偏心は未対応です");
+    }
+    if let Some((a, b)) = model.secondary_member_end_points(sm) {
+        let actual = [
+            sepika_core::geom::vec3::add(a, sm.end_offsets_mm[0]),
+            sepika_core::geom::vec3::add(b, sm.end_offsets_mm[1]),
+        ];
+        let length = sepika_core::geom::vec3::dist(actual[0], actual[1]);
+        if !actual.iter().flatten().all(|v| v.is_finite()) || !length.is_finite() || length <= 0.0 {
+            return fail("実材軸長は有限な正値が必要です");
+        }
+    }
+    None
+}
+
 fn beam_id_in_other_regions(model: &Model, id: SecondaryMemberId, skip: FloorRegionId) -> bool {
     model
         .floor_regions
@@ -61,6 +82,9 @@ impl EditCommand for AddUnassignedBeam {
         if let Some(reason) =
             crate::refs::rc_secondary_section_error(model, self.sm.kind, self.sm.section)
         {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        if let Some(reason) = secondary_offset_error(model, &self.sm) {
             return Box::new(crate::RejectedEdit(reason));
         }
         if self.sm.kind != SecondaryMemberKind::Beam || !secondary_member_ok(model, &self.sm) {
@@ -140,6 +164,9 @@ impl EditCommand for AddUnassignedPost {
         if let Some(reason) =
             crate::refs::rc_secondary_section_error(model, self.sm.kind, self.sm.section)
         {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        if let Some(reason) = secondary_offset_error(model, &self.sm) {
             return Box::new(crate::RejectedEdit(reason));
         }
         if self.sm.kind != SecondaryMemberKind::Post || !secondary_member_ok(model, &self.sm) {
@@ -242,6 +269,9 @@ impl EditCommand for RestoreFloorRegionSecondaryBeams {
 impl EditCommand for SetFloorRegionSecondaryBeams {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         for sm in &self.beams {
+            if let Some(reason) = secondary_offset_error(model, sm) {
+                return Box::new(crate::RejectedEdit(reason));
+            }
             if let Some(reason) =
                 crate::refs::rc_secondary_section_error(model, sm.kind, sm.section)
             {
@@ -393,6 +423,9 @@ impl EditCommand for RestoreWallRegionPosts {
 impl EditCommand for SetWallRegionPosts {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         for sm in &self.posts {
+            if let Some(reason) = secondary_offset_error(model, sm) {
+                return Box::new(crate::RejectedEdit(reason));
+            }
             if let Some(reason) =
                 crate::refs::rc_secondary_section_error(model, sm.kind, sm.section)
             {
@@ -564,20 +597,32 @@ impl EditCommand for SetSecondaryMemberEndSupport {
             return Box::new(Noop);
         };
         let ends = model.secondary_ends_from_coords(self.member, kind, [a, b], new_supported);
-        let candidate = SecondaryMember {
+        let mut candidate = SecondaryMember {
             id: self.member,
-            vertical_eccentricity: sm.vertical_eccentricity,
-            gravity_end_shares: None,
+            end_offsets_mm: sm.end_offsets_mm,
+            gravity_end_shares: sm.gravity_end_shares,
             kind,
             ends,
             section: sm.section,
             name: sm.name.clone(),
         };
+        if let Some((start, _)) = model.secondary_member_end_points(&candidate) {
+            if sepika_core::geom::vec3::dist(start, b) < sepika_core::geom::vec3::dist(start, a) {
+                candidate.end_offsets_mm.reverse();
+                candidate.gravity_end_shares = candidate.gravity_end_shares.map(|mut shares| {
+                    shares.reverse();
+                    shares
+                });
+            }
+        }
+        if let Some(reason) = secondary_offset_error(model, &candidate) {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if !secondary_ends_ok(model, &candidate) {
             return Box::new(Noop);
         }
         ApplySecondaryAction {
-            action: SecondaryAction::SetEnds(self.member, ends),
+            action: SecondaryAction::SetEnds(self.member, candidate),
         }
         .apply(model)
     }
@@ -713,7 +758,7 @@ impl EditCommand for PlaceSecondaryMember {
         }
         let candidate = SecondaryMember {
             id: SecondaryMemberId(u32::MAX),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind: self.kind,
             ends: self.ends,
@@ -802,21 +847,24 @@ impl EditCommand for SetSecondaryMemberEnds {
         }
         let candidate = SecondaryMember {
             id: self.member,
-            vertical_eccentricity: sm.vertical_eccentricity,
-            gravity_end_shares: None,
+            end_offsets_mm: sm.end_offsets_mm,
+            gravity_end_shares: sm.gravity_end_shares,
             kind: sm.kind,
             ends: self.ends,
             section: sm.section,
             name: sm.name.clone(),
         };
         let parent = secondary_parent_of(model, self.member);
+        if let Some(reason) = secondary_offset_error(model, &candidate) {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if !secondary_ends_ok(model, &candidate)
             || !support_ends_in_parent(model, parent, &self.ends)
         {
             return Box::new(Noop);
         }
         ApplySecondaryAction {
-            action: SecondaryAction::SetEnds(self.member, self.ends),
+            action: SecondaryAction::SetEnds(self.member, candidate),
         }
         .apply(model)
     }
@@ -838,7 +886,7 @@ enum SecondaryAction {
         name: String,
     },
     Delete(SecondaryMemberId),
-    SetEnds(SecondaryMemberId, SecondaryMemberEnds),
+    SetEnds(SecondaryMemberId, SecondaryMember),
 }
 
 /// 割当領域の再構築と孤児版の除去で変化するモデル部分（undo 用）。
@@ -931,7 +979,7 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
             }
             let member = SecondaryMember {
                 id: *id,
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
                 kind: *kind,
                 ends: *ends,
@@ -975,9 +1023,11 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
             applied
         }
         SecondaryAction::Delete(id) => remove_secondary(model, *id),
-        SecondaryAction::SetEnds(id, ends) => match find_secondary_mut(model, *id) {
+        SecondaryAction::SetEnds(id, member) => match find_secondary_mut(model, *id) {
             Some(sm) => {
-                sm.ends = *ends;
+                sm.ends = member.ends;
+                sm.end_offsets_mm = member.end_offsets_mm;
+                sm.gravity_end_shares = member.gravity_end_shares;
                 true
             }
             None => false,
@@ -1085,7 +1135,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }

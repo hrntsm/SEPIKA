@@ -1657,7 +1657,7 @@ impl App {
                 for region in &model.floor_regions { ui.label(format!("床領域 #{} {} / 境界節点 {:?} / 床板 {:?}", region.id.0, region.name, region.boundary, region.slab_ids)); }
                 for region in &model.wall_regions { ui.label(format!("壁領域 #{} {} / 境界節点 {:?} / 壁版 {:?}", region.id.0, region.name, region.boundary, region.wall_plate_ids)); }
                 for member in model.floor_regions.iter().flat_map(|region| &region.secondary_beams).chain(model.wall_regions.iter().flat_map(|region| &region.posts)).chain(&model.unassigned_beams).chain(&model.unassigned_posts) {
-                    ui.label(format!("二次部材 #{} {} / 種別 {:?} / 断面 {:?} / 支持位置 {:?} / 鉛直偏心 {:?} mm", member.id.0, member.name, member.kind, member.section, member.ends, member.vertical_eccentricity));
+                    ui.label(format!("二次部材 #{} {} / 種別 {:?} / 断面 {:?} / 支持位置 {:?} / 端別XYZ偏心 {:?} mm", member.id.0, member.name, member.kind, member.section, member.ends, member.end_offsets_mm));
                     ui.label(format!("二次部材 #{} の両端 [mm]: {}", member.id.0, model.secondary_member_end_points(member).map_or_else(|| "取得不能".into(), |coords| format!("{coords:?}"))));
                     let steel = member.section.and_then(|id| model.section(id)).and_then(|section| {
                         if model.stb_strengths.sections.iter().any(|input| input.section == section.id && !input.steel.is_empty()) { model.stb_steel_material(section.id) }
@@ -1696,7 +1696,7 @@ impl App {
                     member.id, member.nodes, member.section
                 ));
                 for line in recorded_member_material_lines(model, member) { ui.label(line); }
-                ui.label(format!("種別 {:?} / フェース距離 i={:?} mm・j={:?} mm（Noneは未算定） / 鉛直偏心 {:?} mm / 局所軸参照方向 {:?}", member.kind, member.rigid_zone.face_i, member.rigid_zone.face_j, member.vertical_eccentricity, member.local_axis.ref_vector));
+                ui.label(format!("種別 {:?} / フェース距離 i={:?} mm・j={:?} mm（Noneは未算定） / 端別XYZ偏心 {:?} mm / 局所軸参照方向 {:?}", member.kind, member.rigid_zone.face_i, member.rigid_zone.face_j, member.end_offsets_mm, member.local_axis.ref_vector));
                 if let Some(detail) = model.member_detail(member.id) { ui.label(format!("ハンチ i={:?} / j={:?}（長さ・せい増分・幅増分 mm）", detail.haunch_i, detail.haunch_j)); }
                 else { ui.label("ハンチ: 指定なし"); }
                 if let Some(wall) = model.wall_attrs.iter().find(|attr| attr.elem == member.id) { ui.label(format!("壁・シェルの開口面積 {} mm² / 個別開口 {:?}（寸法・位置 mm）", wall.opening_area, wall.openings)); }

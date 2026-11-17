@@ -2,6 +2,27 @@ use super::*;
 use test_support::build_symmetric_frame;
 
 #[test]
+fn d_values_follow_eccentric_physical_beam_direction_and_length() {
+    for (length_mm, expected_y_factor) in [(6000.0, 1.0 / 3.0), (9000.0, 4.0 / 13.0)] {
+        let (mut model, story) = build_symmetric_frame(None);
+        model.elements.truncate(5);
+        model.sections[2].iy = 1.0e6;
+        model.elements[4].end_offsets_mm = [[0.0; 3], [-6000.0, length_mm, 0.0]];
+        let columns = column_stiffnesses(&model, story).unwrap();
+        assert_eq!(columns.len(), 4);
+        for column in &columns {
+            assert!((column.dx - 820.0 / 36.0).abs() < 1e-9);
+            let expected_y = if column.pos[1] == 0.0 {
+                820.0 / 9.0 * expected_y_factor
+            } else {
+                820.0 / 36.0
+            };
+            assert!((column.dy - expected_y).abs() < 1e-9);
+        }
+    }
+}
+
+#[test]
 fn test_d_value_formula_and_degenerate() {
     // 一般階: kc = Ic/h = 1, ΣKb = 4 → k̄ = 2 → a = 2/(2+2) = 0.5 → D = 0.5·12 = 6
     assert!((d_value(1.0, 1.0, 1.0, 4.0, false) - 6.0).abs() < 1e-9);

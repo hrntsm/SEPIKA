@@ -20,7 +20,7 @@ fn 床上面と梁が離れても明示支持へ同じ平面合力を実材長�
     let first = model.slabs[0].boundary_nodes(&model).unwrap()[0];
     model.nodes[first.index()].coord[2] = -3000.;
     for element in &mut model.elements {
-        element.vertical_eccentricity = Some(-500.);
+        element.end_offsets_mm = [[0.0, 0.0, -500.]; 2];
     }
     model.rebuild_assignment_regions().unwrap();
     assert_eq!(*model.slab_assignment_region(id).unwrap(), supports);

@@ -148,7 +148,10 @@ pub fn girder_self_weight_interval(model: &Model, elem: &ElementData) -> Result<
             deductions[end] = minimum;
         }
     }
-    checked_interval(&label, vec3::dist(a, b), deductions)
+    let length_mm = model
+        .primary_beam_axis_ends(elem)?
+        .map_or_else(|| vec3::dist(a, b), |ends| vec3::dist(ends[0], ends[1]));
+    checked_interval(&label, length_mm, deductions)
 }
 
 /// 二次部材の自重作用区間 `[mm]`。間柱・Detached は芯々区間を保持する。
@@ -418,7 +421,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }

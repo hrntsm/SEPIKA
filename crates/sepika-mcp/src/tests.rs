@@ -1,3 +1,5 @@
+#[path = "../../sepika-core/tests/support/secondary_materialization_model.rs"]
+mod beam_offsets_fixture;
 use super::*;
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
@@ -211,7 +213,7 @@ fn sample_model() -> Model {
             ],
             force_regime: sepika_core::model::ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -880,7 +882,7 @@ pub(crate) fn rc_column_model() -> Model {
             ],
             force_regime: sepika_core::model::ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -1364,7 +1366,7 @@ fn test_apply_edit_assign_slab_to_floor_plate_region() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -1436,7 +1438,7 @@ fn four_node_edit_state(name: &str) -> ServerState {
                     end_cond: [EndCondition::Fixed; 2],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
-                    vertical_eccentricity: Some(0.0),
+                    end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                     plastic_zone: None,
                     spring: None,
                 }]
@@ -1745,7 +1747,7 @@ fn test_apply_edit_place_secondary_member() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -1790,7 +1792,7 @@ fn test_mcp_set_post_gravity_end_shares() {
         .unassigned_posts
         .push(sepika_core::model::SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(0),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind: sepika_core::model::SecondaryMemberKind::Post,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -2078,7 +2080,7 @@ fn circular_post_model() -> sepika_core::model::Model {
             ends: SecondaryMemberEnds::Detached(ends),
             section: Some(SectionId(0)),
             name: "間柱符号".into(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
         }],
         ..Default::default()
@@ -3211,7 +3213,7 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(-300.0),
+            end_offsets_mm: [[0.0, 0.0, -300.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -3340,6 +3342,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     boundary.id = sepika_core::ids::ElemId(1);
     boundary.nodes = [NodeId(0), NodeId(1)].into_iter().collect();
     boundary.section = None;
+    boundary.end_offsets_mm = [[0.0; 3]; 2];
     model.elements.push(boundary);
     assert!(model.validate().is_err());
     for _ in 0..2 {
@@ -3349,7 +3352,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
 
     let mut model = base.clone();
     model.elements[0].section = Some(SectionId(999));
-    cases.push((model, "Primary(ElemId(0)): 梁断面 SectionId(999)"));
+    cases.push((model, "部材 ID 0 i/j端の断面"));
     let mut model = base.clone();
     for i in 0..2 {
         let mut node = model.nodes[i].clone();
@@ -3408,11 +3411,14 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     }
     cases.push((model, "取付き先"));
     for (offset, reason) in [
-        (None, "大梁 ID 0 の実配置: 鉛直偏心が未指定です"),
-        (Some(f64::NAN), "大梁 ID 0 の実配置: 鉛直偏心が非有限です"),
+        (f64::NAN, "大梁 ID 0 の実配置: i端のXYZ偏心が非有限です"),
+        (
+            f64::INFINITY,
+            "大梁 ID 0 の実配置: i端のXYZ偏心が非有限です",
+        ),
     ] {
         let mut model = base.clone();
-        model.elements[0].vertical_eccentricity = offset;
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
         cases.push((model, reason));
     }
     let mut model = base.clone();
@@ -3462,7 +3468,7 @@ fn beam_contact_placement_fixtures() -> Vec<(sepika_core::model::Model, f64)> {
     .map(|(beam_offset_mm, slab_offset_mm, expected_m2)| {
         let mut model = beam_contact_fixture();
         model.slabs.truncate(1);
-        model.elements[0].vertical_eccentricity = Some(beam_offset_mm);
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, beam_offset_mm]; 2];
         model.slabs[0].vertical_eccentricity_mm = Some(slab_offset_mm);
         (model, expected_m2)
     })
@@ -3981,15 +3987,18 @@ fn rebar507_with_explicit_zero_beam_eccentricity(
         .collect::<Vec<_>>();
     assert!(!beams.is_empty());
     for id in beams {
-        assert_eq!(model.element(id).unwrap().vertical_eccentricity, None);
+        assert_eq!(model.element(id).unwrap().end_offsets_mm, [[0.0; 3]; 2]);
         sepika_edit::EditCommand::apply(
-            &sepika_edit::SetBeamVerticalEccentricity {
+            &sepika_edit::SetBeamEndOffsets {
                 member: sepika_core::model::SupportMemberId::Primary(id),
-                value: Some(0.0),
+                value: [[0.0, 0.0, 0.0]; 2],
             },
             &mut model,
         );
-        assert_eq!(model.element(id).unwrap().vertical_eccentricity, Some(0.0));
+        assert_eq!(
+            model.element(id).unwrap().end_offsets_mm,
+            [[0.0, 0.0, 0.0]; 2]
+        );
     }
     Ok(model)
 }
@@ -4761,4 +4770,89 @@ async fn directional_wall_quantity_actual_mcp_tools_edit_settings_and_report_mis
     assert!((w["rebar"][0]["weight_t"].as_f64().unwrap() - 0.136012721941872).abs() < 1e-12);
     drop(server);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn xyz_beam_mcp_input_undo_and_result_provenance_distinguish_display_offsets() {
+    let directory =
+        std::env::temp_dir().join(format!("sepika-1362-offsets-{}", std::process::id()));
+    let mut state = ServerState::with_fs_store(beam_offsets_fixture::model(), &directory).unwrap();
+    let baseline = sepika_io::results::model_input_sha256(&state.model).unwrap();
+    let offsets = serde_json::json!([[100.0, 200.0, 300.0], [-100.0, 50.0, 500.0]]);
+    let command = serde_json::json!({"command":"SetBeamEndOffsets", "member":{"Secondary":0}, "end_offsets_mm":offsets});
+    assert!(apply_edit(&mut state, &command).unwrap().applied);
+    assert_eq!(
+        serde_json::to_value(state.model.unassigned_beams[0].end_offsets_mm).unwrap(),
+        offsets
+    );
+    assert_eq!(
+        sepika_io::results::model_input_sha256(&state.model).unwrap(),
+        baseline
+    );
+    state.undo.undo(&mut state.model);
+    assert_eq!(
+        state.model.unassigned_beams[0].end_offsets_mm,
+        [[0.0; 3]; 2]
+    );
+    state.undo.redo(&mut state.model);
+    assert_eq!(
+        sepika_io::results::model_input_sha256(&state.model).unwrap(),
+        baseline
+    );
+    let before = state.model.clone();
+    for invalid in [
+        serde_json::Value::Null,
+        serde_json::json!(""),
+        serde_json::json!([[0, 0, 0]]),
+    ] {
+        let mut rejected = command.clone();
+        rejected["end_offsets_mm"] = invalid;
+        assert!(apply_edit(&mut state, &rejected).is_err());
+        assert!(state.model.eq_ignoring_dofmap(&before));
+    }
+    let mut missing = command.clone();
+    missing.as_object_mut().unwrap().remove("end_offsets_mm");
+    assert!(apply_edit(&mut state, &missing).is_err());
+    let primary = serde_json::json!({"command":"SetBeamEndOffsets", "member":{"Primary":0}, "end_offsets_mm":offsets});
+    assert!(apply_edit(&mut state, &primary).unwrap().applied);
+    assert_ne!(
+        sepika_io::results::model_input_sha256(&state.model).unwrap(),
+        baseline
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn mcp_secondary_add_and_replace_reject_zero_display_length_atomically() {
+    let directory = std::env::temp_dir().join(format!(
+        "sepika-1362-invalid-display-{}",
+        std::process::id()
+    ));
+    let mut model = beam_offsets_fixture::model();
+    model.floor_regions.push(sepika_core::model::FloorRegion {
+        id: sepika_core::ids::FloorRegionId(0),
+        name: String::new(),
+        boundary: vec![],
+        secondary_beams: vec![],
+        slab_ids: vec![],
+    });
+    let mut member = model.unassigned_beams[0].clone();
+    member.id = sepika_core::ids::SecondaryMemberId(10);
+    member.end_offsets_mm = [[0.0; 3], [-6000.0, 0.0, 0.0]];
+    let before = model.clone();
+    let mut state = ServerState::with_fs_store(model, &directory).unwrap();
+    for command in [
+        serde_json::json!({"command":"AddUnassignedBeam", "beam":member}),
+        serde_json::json!({"command":"SetFloorRegionSecondaryBeams", "floor_region":0, "secondary_beams":[member]}),
+    ] {
+        let reason = apply_edit(&mut state, &command).unwrap_err();
+        assert!(
+            reason.contains("ID 10") && reason.contains("実材軸長"),
+            "{reason}"
+        );
+        assert!(state.model.eq_ignoring_dofmap(&before));
+        assert_eq!(state.undo.revision(), 0);
+        assert!(!state.undo.can_undo());
+    }
+    std::fs::remove_dir_all(directory).unwrap();
 }

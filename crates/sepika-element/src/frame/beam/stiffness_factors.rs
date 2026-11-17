@@ -320,7 +320,7 @@ fn rc_slab_sides(
     if candidates.is_empty() {
         return Ok([None, None]);
     }
-    let placement = model.beam_placement(support)?;
+    let placement = model.calculation_beam_placement(support)?;
     let [p0, p1] = placement.actual_ends;
     let dx = p1[0] - p0[0];
     let dy = p1[1] - p0[1];

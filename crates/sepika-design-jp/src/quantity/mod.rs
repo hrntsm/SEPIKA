@@ -511,10 +511,7 @@ fn validate_girder_haunches(model: &Model, quantities: &QuantityTakeoff) -> Resu
             haunch_length_mm += h.length;
         }
         if haunch_length_mm > 0.0 {
-            let length_mm = dist3(
-                model.nodes[elem.nodes[0].index()].coord,
-                model.nodes[elem.nodes[1].index()].coord,
-            );
+            let length_mm = model.member_length(elem);
             let clear_length_mm = elem
                 .rigid_zone
                 .clear_span_from(length_mm)
@@ -701,7 +698,7 @@ fn resolve_secondary_quantities(
                 "解決端点間実長 L [mm] は有限かつ正である必要があります".into(),
             ));
         }
-        let equal = |p, q| dist3(p, q) <= sepika_core::geom::MEMBER_AXIS_TOL_MM;
+        let equal = |p, q| dist3(p, q) <= 1e-6;
         let candidates: Vec<_> = model
             .elements
             .iter()
@@ -709,9 +706,7 @@ fn resolve_secondary_quantities(
                 if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
                     return None;
                 }
-                if sm.kind == SecondaryMemberKind::Beam
-                    && sm.vertical_eccentricity != e.vertical_eccentricity
-                {
+                if sm.kind == SecondaryMemberKind::Beam && e.end_offsets_mm != [[0.0; 3]; 2] {
                     return None;
                 }
                 let (p, q) = (model.node(e.nodes[0])?.coord, model.node(e.nodes[1])?.coord);
@@ -792,6 +787,65 @@ pub fn try_compute_quantity_takeoff(
             model
                 .try_wall_plate_extent(plate)
                 .map_err(|reason| format!("壁版 {}: {reason}", plate.id.0))?;
+        }
+    }
+    for member in model.beams().chain(model.posts()) {
+        if !member
+            .end_offsets_mm
+            .iter()
+            .flatten()
+            .all(|v| v.is_finite())
+            || (member.kind == SecondaryMemberKind::Post && member.end_offsets_mm != [[0.0; 3]; 2])
+        {
+            return Err(format!(
+                "{} ID {} の実配置: XYZ偏心が非有限または非対応です",
+                if member.kind == SecondaryMemberKind::Beam {
+                    "小梁"
+                } else {
+                    "間柱"
+                },
+                member.id.0
+            ));
+        }
+    }
+    for element in &model.elements {
+        if element.section.is_none() && element.end_offsets_mm == [[0.0; 3]; 2] {
+            continue;
+        }
+        let beam_ends = model.primary_beam_axis_ends(element).map_err(|reason| {
+            if model
+                .element_section(element)
+                .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Girder))
+            {
+                format!(
+                    "大梁 ID {} の実配置: {}",
+                    element.id.0,
+                    reason
+                        .strip_prefix(&format!("部材 ID {} ", element.id.0))
+                        .unwrap_or(&reason)
+                )
+            } else {
+                reason
+            }
+        })?;
+        if element.kind.is_primary_frame_support()
+            || matches!(element.kind, ElementKind::Brace { .. })
+        {
+            let ends = beam_ends
+                .or_else(|| {
+                    Some([
+                        model.node(*element.nodes.first()?)?.coord,
+                        model.node(*element.nodes.get(1)?)?.coord,
+                    ])
+                })
+                .ok_or_else(|| format!("部材 ID {} の材端節点を解決できません", element.id.0))?;
+            let length_mm = dist3(ends[0], ends[1]);
+            if !ends.iter().flatten().all(|v| v.is_finite()) || !length_mm.is_finite() {
+                return Err(format!(
+                    "部材 ID {} の実材軸長は有限な正値が必要です",
+                    element.id.0
+                ));
+            }
         }
     }
     validate_circular_rc_posts(model)?;
@@ -1167,7 +1221,10 @@ fn line_member_quantity(ctx: &Ctx, elem_idx: usize, elem: &ElementData) -> Optio
     let mat = model.element_material(elem)?;
     let ni = elem.nodes[0].index();
     let nj = elem.nodes[1].index();
-    let (ci, cj) = (model.nodes.get(ni)?.coord, model.nodes.get(nj)?.coord);
+    let [ci, cj] = model
+        .primary_beam_axis_ends(elem)
+        .ok()?
+        .unwrap_or([model.nodes.get(ni)?.coord, model.nodes.get(nj)?.coord]);
     let len = dist3(ci, cj);
     if len <= 0.0 {
         return None;

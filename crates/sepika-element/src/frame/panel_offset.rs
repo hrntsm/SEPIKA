@@ -378,7 +378,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: rigid,
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         };
@@ -437,7 +437,7 @@ mod tests {
                     end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
-                    vertical_eccentricity: Some(0.0),
+                    end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                     plastic_zone: None,
                     spring: None,
                 },
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn eccentric_load_reaches_panel_rotation_once_and_cancelled_rotation_has_no_strain() {
         let mut model = model_with_panel(200.0);
-        model.elements[0].vertical_eccentricity = Some(100.0);
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, 100.0]; 2];
         let data = &model.elements[0];
         let mut behavior = crate::factory::build_behavior(data, &model);
         let mut load = [0.0; 12];

@@ -46,7 +46,7 @@ fn element_beam(id: u32, i: u32, j: u32) -> ElementData {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     }
@@ -54,7 +54,7 @@ fn element_beam(id: u32, i: u32, j: u32) -> ElementData {
 
 fn secondary_beam(model: &Model, a: u32, b: u32, name: &str) -> SecondaryMember {
     SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(a),
         kind: SecondaryMemberKind::Beam,
@@ -887,7 +887,7 @@ fn beam_anchored_to_girder_midspan_becomes_point_load() {
     m.elements.push(element_beam(0, 0, 1));
     m.elements.push(element_beam(1, 2, 3));
     m.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -961,7 +961,7 @@ fn vertical_post_splits_load_by_explicit_shares() {
     m.elements.push(element_beam(0, 0, 1));
     m.elements.push(element_beam(1, 2, 3));
     m.unassigned_posts.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: Some([0.5, 0.5]),
         id: sepika_core::ids::SecondaryMemberId(4),
         kind: SecondaryMemberKind::Post,
@@ -1162,7 +1162,7 @@ fn floating_beam_without_load_is_not_reported() {
     m.nodes.push(node(0, 0.0, 0.0, 0.0));
     m.nodes.push(node(1, 4000.0, 0.0, 0.0));
     m.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -1411,7 +1411,7 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
     m.elements.push(element_beam(3, 3, 0));
     let beam_key = sepika_core::ids::SecondaryMemberId(0);
     m.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: beam_key,
         kind: SecondaryMemberKind::Beam,

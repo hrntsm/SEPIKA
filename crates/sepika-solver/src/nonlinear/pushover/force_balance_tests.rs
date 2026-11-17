@@ -533,7 +533,7 @@ fn eccentric_confirmed_member_load_response_keeps_support_transfer_moment() {
             model.nodes[1].restraint = Dof6Mask::FIXED;
             model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
             model.elements[0].kind = kind;
-            model.elements[0].vertical_eccentricity = Some(offset);
+            model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
             model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
             let map = DofMap::build(&model);
             let mut behavior = sepika_element::factory::build_nonlinear_behavior(
@@ -614,7 +614,7 @@ fn eccentric_physical_path_cuts_include_arms_actual_load_position_and_plane_endp
                 model.nodes[1].restraint = Dof6Mask::FIXED;
                 model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
                 model.elements[0].kind = kind;
-                model.elements[0].vertical_eccentricity = Some(offset);
+                model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
                 model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
                 if reversed {
                     model.elements[0].nodes.reverse();
@@ -738,7 +738,7 @@ fn eccentric_member_endpoint_load_is_not_a_direct_fixed_node_load() {
             model.nodes[1].coord = [3000.0, 0.0, 0.0];
             model.nodes[1].restraint = Dof6Mask::FIXED;
             model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
-            model.elements[0].vertical_eccentricity = Some(offset);
+            model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
             model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
             let map = DofMap::build(&model);
             let mut behavior = sepika_element::factory::build_behavior(&model.elements[0], &model);

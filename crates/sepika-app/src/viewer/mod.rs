@@ -1,6 +1,68 @@
 use crate::app::App;
 use crate::theme;
 
+fn physical_end_displacements(
+    elem: &sepika_core::model::ElementData,
+    disp: &[[f64; 6]],
+) -> Option<[[f64; 6]; 2]> {
+    let mut result = [
+        *disp.get(elem.nodes.first()?.index())?,
+        *disp.get(elem.nodes.get(1)?.index())?,
+    ];
+    for (side, d) in result.iter_mut().enumerate() {
+        let delta = sepika_core::geom::vec3::cross([d[3], d[4], d[5]], elem.end_offsets_mm[side]);
+        for axis in 0..3 {
+            d[axis] += delta[axis];
+        }
+    }
+    Some(result)
+}
+
+fn primary_display_ends(
+    model: &sepika_core::Model,
+    elem: &sepika_core::model::ElementData,
+    disp: Option<&[[f64; 6]]>,
+    scale: f64,
+) -> Option<[[f64; 3]; 2]> {
+    let reference = [
+        model.node(*elem.nodes.first()?)?.coord,
+        model.node(*elem.nodes.get(1)?)?.coord,
+    ];
+    let mut ends = if elem.end_offsets_mm == [[0.0; 3]; 2] {
+        reference
+    } else {
+        model
+            .primary_beam_axis_ends(elem)
+            .ok()?
+            .unwrap_or(reference)
+    };
+    if let Some(disp) = disp {
+        let displacement = physical_end_displacements(elem, disp)?;
+        for side in 0..2 {
+            for axis in 0..3 {
+                ends[side][axis] += scale * displacement[side][axis];
+            }
+        }
+    }
+    Some(ends)
+}
+
+fn primary_screen_ends(
+    model: &sepika_core::Model,
+    elem: &sepika_core::model::ElementData,
+    pts: &[egui::Pos2],
+    proj: &Projector<'_>,
+) -> Option<[egui::Pos2; 2]> {
+    if elem.end_offsets_mm.iter().flatten().any(|v| *v != 0.0) {
+        return primary_display_ends(model, elem, None, 0.0)
+            .map(|ends| ends.map(|p| proj.project(p)));
+    }
+    Some([
+        *pts.get(elem.nodes.first()?.index())?,
+        *pts.get(elem.nodes.get(1)?.index())?,
+    ])
+}
+
 fn primary_shape_ends(
     model: &sepika_core::Model,
     elem: &sepika_core::model::ElementData,
@@ -852,6 +914,7 @@ pub fn viewer_panel_with_view(
                 frame: frame.as_ref(),
                 mode,
                 member_candidate: None,
+                secondary_candidate: None,
             },
         );
     }
@@ -896,7 +959,7 @@ pub fn viewer_panel_with_view(
     }
 
     let (solids_skipped, mut bodies) = if view.show_sections && !lumped_only {
-        solid::draw_section_solids(
+        solid::draw_section_solids_with_displacements(
             &painter,
             &app.core.model,
             &coords3,
@@ -904,6 +967,8 @@ pub fn viewer_panel_with_view(
             show_secondary,
             filter,
             mode == ViewMode::Shape,
+            disp.as_deref(),
+            deform_scale_actual,
         )
     } else {
         (0, pick::MemberBodies::default())
@@ -1010,11 +1075,16 @@ pub fn viewer_panel_with_view(
             let curved_beam =
                 view.show_beam_interpolation && elem.kind == sepika_core::model::ElementKind::Beam;
             if let (true, Some(d)) = (curved_beam, &disp) {
-                let p_i = app.core.model.nodes[n0].coord;
-                let p_j = app.core.model.nodes[n1].coord;
+                let Some([p_i, p_j]) = primary_display_ends(&app.core.model, elem, None, 0.0)
+                else {
+                    continue;
+                };
+                let Some([d_i, d_j]) = physical_end_displacements(elem, d) else {
+                    continue;
+                };
                 if member_len3(p_i, p_j) > 1e-9 {
                     if let Some(beam) =
-                        BeamDeflection::new(p_i, p_j, d[n0], d[n1], elem.local_axis.ref_vector)
+                        BeamDeflection::new(p_i, p_j, d_i, d_j, elem.local_axis.ref_vector)
                     {
                         let poly3 = beam.polyline(deform_scale_actual, DEFORM_CURVE_SEGMENTS);
                         let screen: Vec<egui::Pos2> =
@@ -1037,7 +1107,15 @@ pub fn viewer_panel_with_view(
                     painter.line_segment(screen, line_stroke);
                 }
             } else {
-                let screen = [pts[n0], pts[n1]];
+                let Some(ends) = primary_display_ends(
+                    &app.core.model,
+                    elem,
+                    disp.as_deref(),
+                    deform_scale_actual,
+                ) else {
+                    continue;
+                };
+                let screen = ends.map(|p| proj.project(p));
                 if !solid_members.contains(&elem.id) {
                     bodies.push(elem.id, screen.to_vec(), false, false, line_stroke.width);
                 }
@@ -1055,7 +1133,9 @@ pub fn viewer_panel_with_view(
                 if mode == ViewMode::Shape {
                     if secondary_shape_visible(&app.core.model, sm, filter) {
                         if let Some(ends) = secondary_shape_ends(&app.core.model, sm) {
-                            painter.line_segment(ends.map(|p| proj.project(p)), secondary_stroke);
+                            let screen = ends.map(|p| proj.project(p));
+                            bodies.push_secondary(sm.id, screen.to_vec(), secondary_stroke.width);
+                            painter.line_segment(screen, secondary_stroke);
                         }
                     }
                     continue;
@@ -1073,11 +1153,58 @@ pub fn viewer_panel_with_view(
         }
     }
 
-    let member_candidate = if normal_selection && cube_hover.is_none() {
-        response.hover_pos().and_then(|pos| bodies.pick(pos))
+    if mode == ViewMode::Shape && view.show_offset_connections {
+        use sepika_core::model::SupportMemberId;
+        let primary = app
+            .core
+            .model
+            .elements
+            .iter()
+            .filter(|e| filter.shows(e.id))
+            .map(|e| SupportMemberId::Primary(e.id));
+        let secondary = app
+            .core
+            .model
+            .beams()
+            .filter(|sm| show_secondary && secondary_shape_visible(&app.core.model, sm, filter))
+            .map(|sm| SupportMemberId::Secondary(sm.id));
+        for member in primary.chain(secondary) {
+            let Ok(placement) = app.core.model.beam_placement(member) else {
+                continue;
+            };
+            let (color, dash) = match member {
+                SupportMemberId::Primary(_) => (theme::SECONDARY_AMBER, 6.0),
+                SupportMemberId::Secondary(_) => (theme::SECONDARY_AMBER, 2.0),
+            };
+            for side in 0..2 {
+                if placement.reference_ends[side] != placement.actual_ends[side] {
+                    painter.extend(egui::Shape::dashed_line(
+                        &[
+                            proj.project(placement.reference_ends[side]),
+                            proj.project(placement.actual_ends[side]),
+                        ],
+                        egui::Stroke::new(1.5_f32, color),
+                        dash,
+                        4.0,
+                    ));
+                }
+            }
+        }
+    }
+
+    let candidate = if normal_selection && cube_hover.is_none() {
+        response.hover_pos().and_then(|pos| bodies.pick_member(pos))
     } else {
         None
     };
+    let member_candidate = candidate.and_then(|target| match target {
+        sepika_core::model::SupportMemberId::Primary(id) => Some(id),
+        _ => None,
+    });
+    let secondary_candidate = candidate.and_then(|target| match target {
+        sepika_core::model::SupportMemberId::Secondary(id) => Some(id),
+        _ => None,
+    });
     let checked_node_hover =
         if cube_hover.is_none() && mode == ViewMode::CheckRatio && design_source_matches {
             response.hover_pos().and_then(|pos| {
@@ -1140,9 +1267,6 @@ pub fn viewer_panel_with_view(
         if !bodies.contains(elem_id) {
             continue;
         }
-        let Some(elem) = display_model.element(elem_id) else {
-            continue;
-        };
         let selected = app.ui.scoped.selection.members().contains(&elem_id);
         let mut stroke = if selected {
             theme::VIEW_SELECTED_STROKE
@@ -1160,42 +1284,29 @@ pub fn viewer_panel_with_view(
                 theme::GRAY_700
             },
         );
-        match element_draw_shape(elem.kind) {
-            DrawShape::None => {}
-            DrawShape::Polygon => {
-                let poly: Vec<egui::Pos2> = elem
-                    .nodes
-                    .iter()
-                    .filter_map(|n| {
-                        let idx = n.index();
-                        (idx < pts.len()).then(|| pts[idx])
-                    })
-                    .collect();
-                if poly.len() >= 3 && poly.len() == elem.nodes.len() {
-                    painter.add(egui::Shape::closed_line(poly.clone(), stroke));
-                    painter.add(egui::Shape::closed_line(poly, core_stroke));
-                }
-            }
-            DrawShape::Line => {
-                if elem.nodes.len() < 2 {
-                    continue;
-                }
-                let n0 = elem.nodes[0].index();
-                let n1 = elem.nodes[1].index();
-                if n0 < pts.len() && n1 < pts.len() {
-                    if mode == ViewMode::Shape {
-                        if let Some(ends) = primary_shape_ends(&app.core.model, elem) {
-                            let screen = ends.map(|p| proj.project(p));
-                            painter.line_segment(screen, stroke);
-                            painter.line_segment(screen, core_stroke);
-                        }
-                    } else {
-                        painter.line_segment([pts[n0], pts[n1]], stroke);
-                        painter.line_segment([pts[n0], pts[n1]], core_stroke);
-                    }
-                }
-            }
-        }
+        bodies.highlight(
+            sepika_core::model::SupportMemberId::Primary(elem_id),
+            &painter,
+            stroke,
+            core_stroke,
+        );
+    }
+    let selected_secondary = app.ui.scoped.selection.active_secondary_member();
+    for id in selected_secondary
+        .into_iter()
+        .chain(secondary_candidate.filter(|id| Some(*id) != selected_secondary))
+    {
+        let stroke = if Some(id) == selected_secondary {
+            theme::VIEW_SELECTED_STROKE
+        } else {
+            theme::VIEW_HOVER_STROKE
+        };
+        bodies.highlight(
+            sepika_core::model::SupportMemberId::Secondary(id),
+            &painter,
+            stroke,
+            egui::Stroke::new(2.0_f32, theme::GRAY_700),
+        );
     }
 
     if mode == ViewMode::Force {
@@ -1249,7 +1360,15 @@ pub fn viewer_panel_with_view(
         );
     }
     if mode == ViewMode::CheckRatio && design_source_matches {
-        check_ratio::draw_check_ratio_with_view(view, &painter, app, &display_model, &pts, filter);
+        check_ratio::draw_check_ratio_with_view(
+            view,
+            &painter,
+            app,
+            &display_model,
+            &pts,
+            &proj,
+            filter,
+        );
         if let Some((idx, _)) = checked_node_hover {
             if let Some(node) = app.core.model.nodes.get(idx) {
                 check_ratio::show_node_check_tooltip(ui, app, node.id);
@@ -1469,6 +1588,7 @@ pub fn viewer_panel_with_view(
                 frame: frame.as_ref(),
                 mode,
                 member_candidate,
+                secondary_candidate,
             },
         );
         ui.ctx().request_repaint();
@@ -1579,7 +1699,7 @@ mod beam_placement_tests {
     #[test]
     fn actual_shape_pick_and_nonnodal_secondary_share_placement() {
         let mut model = crate::sample::portal_frame();
-        model.elements[2].vertical_eccentricity = Some(500.0);
+        model.elements[2].end_offsets_mm = [[0.0, 0.0, 500.0]; 2];
         let actual = primary_shape_ends(&model, &model.elements[2]).unwrap();
         assert_eq!(actual, [[0.0, 0.0, 4000.0], [6000.0, 0.0, 4000.0]]);
         let cam = CameraState::default();
@@ -1618,7 +1738,7 @@ mod beam_placement_tests {
             section: Some(SectionId(1)),
             name: "B1".into(),
             gravity_end_shares: None,
-            vertical_eccentricity: Some(-100.0),
+            end_offsets_mm: [[0.0, 0.0, -100.0]; 2],
         };
         assert!(secondary_end_node_indices(&model, &sm).is_none());
         model.unassigned_beams.push(sm.clone());

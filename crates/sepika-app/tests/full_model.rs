@@ -353,10 +353,10 @@ fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_expl
         assert!(model
             .elements
             .iter()
-            .all(|element| element.vertical_eccentricity.is_none()));
+            .all(|element| element.end_offsets_mm == [[0.0; 3]; 2]));
         assert!(model
             .beams()
-            .all(|beam| beam.vertical_eccentricity.is_none()));
+            .all(|beam| beam.end_offsets_mm == [[0.0; 3]; 2]));
     }
     assert!(
         supported.stb_rebar_analysis_diagnostics().is_empty(),
@@ -412,15 +412,6 @@ fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_expl
         .scoped
         .last_error
         .as_ref()
-        .is_some_and(|message| message.contains("鉛直偏心")));
-    declare_analysis_beam_placements(&mut app.core.model);
-    clear_error(&mut app);
-    app.run_preparation();
-    assert!(app
-        .core
-        .scoped
-        .last_error
-        .as_ref()
         .is_some_and(|message| message.contains("主筋中心位置")));
 }
 
@@ -464,7 +455,9 @@ fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
                 .iter()
                 .find(|s| Some(s.id) == element.section)
                 .unwrap();
-            element.vertical_eccentricity = Some(
+            element.end_offsets_mm = [[
+                0.0,
+                0.0,
                 if matches!(
                     section.shape,
                     Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
@@ -473,7 +466,7 @@ fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
                 } else {
                     0.0
                 },
-            );
+            ]; 2];
         }
     }
     for beam in model
@@ -482,7 +475,7 @@ fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
         .flat_map(|region| region.secondary_beams.iter_mut())
         .chain(model.unassigned_beams.iter_mut())
     {
-        beam.vertical_eccentricity = Some(0.0);
+        beam.end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
     }
 }
 
@@ -2387,12 +2380,12 @@ fn stbridge_roundtrip_is_reanalyzable() {
         .model
         .elements
         .iter()
-        .all(|element| element.vertical_eccentricity.is_none()));
+        .all(|element| element.end_offsets_mm == [[0.0; 3]; 2]));
     assert!(reimported
         .core
         .model
         .beams()
-        .all(|beam| beam.vertical_eccentricity.is_none()));
+        .all(|beam| beam.end_offsets_mm == [[0.0; 3]; 2]));
     declare_analysis_story_levels(&mut reimported.core.model);
     declare_analysis_beam_placements(&mut reimported.core.model);
     declare_analysis_slab_placements(&mut reimported.core.model);

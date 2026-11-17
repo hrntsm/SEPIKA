@@ -37,7 +37,7 @@ fn model(kind: ElementKind, cantilever: bool) -> Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.),
+            end_offsets_mm: [[0.0, 0.0, 0.]; 2],
             plastic_zone: Some(600.),
             spring: None,
         }],
@@ -90,6 +90,59 @@ fn close(actual: f64, expected: f64) {
         (actual - expected).abs() <= 1e-7 * expected.abs().max(1.),
         "{actual} != {expected}"
     );
+}
+
+#[test]
+fn eccentric_vertical_girder_self_weight_keeps_its_physical_line_of_action() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = model(kind, false);
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask::FREE;
+        }
+        model.elements[0].end_offsets_mm = [[1000.0, 0.0, 0.0], [-5000.0, 0.0, 3000.0]];
+        let mut section = sepika_core::section_shape::SectionShape::SteelFlatBar {
+            width: 200.0,
+            thick: 400.0,
+        }
+        .to_section(SectionId(0), "鉛直実材軸の大梁".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        section.material = Some(MaterialId(0));
+        model.sections[0] = section;
+        model.materials[0].density = 7.85e-9;
+        let (nodal, member) =
+            sepika_load::self_weight::self_weight_case_content(&model, &LoadCfg::default())
+                .unwrap();
+        assert!(nodal.is_empty());
+        assert_eq!(member.len(), 1);
+        model.load_cases[0].nodal = nodal;
+        model.load_cases[0].member = member;
+        model.validate_local_frames().unwrap();
+        let map = DofMap::build(&model);
+        let loads = sepika_solver::common::assemble::assemble_global_f(&model, &map, LoadCaseId(0));
+        let mut total_force = [0.0; 3];
+        let mut total_moment = [0.0; 3];
+        for node in &model.nodes {
+            let force = std::array::from_fn(|axis| {
+                loads[map.active(node.id.index() * 6 + axis).unwrap() as usize]
+            });
+            let arm = sepika_core::geom::vec3::cross(node.coord, force);
+            for axis in 0..3 {
+                total_force[axis] += force[axis];
+                total_moment[axis] +=
+                    loads[map.active(node.id.index() * 6 + 3 + axis).unwrap() as usize] + arm[axis];
+            }
+        }
+        close(total_force[0], 0.0);
+        close(total_force[1], 0.0);
+        close(total_force[2], -18840.0);
+        close(total_moment[0], 0.0);
+        close(total_moment[1], 18840000.0);
+        close(total_moment[2], 0.0);
+    }
 }
 
 fn run(model: &Model) -> ResponseResult {

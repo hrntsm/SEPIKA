@@ -26,7 +26,7 @@ fn no_long_axial_column_targets_fiber_and_multispring_by_section_use() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         };
@@ -120,7 +120,7 @@ fn ss_beam(l: f64, member: Vec<MemberLoad>) -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -535,7 +535,7 @@ fn make_axial_cantilever() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -848,7 +848,7 @@ fn test_shell_rigid_floor_membrane_off() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -981,7 +981,7 @@ fn make_ss_plate(n: usize, a: f64, t: f64, e: f64, nu: f64, q: f64, clamped: boo
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             });
@@ -1169,7 +1169,7 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1184,7 +1184,7 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1199,7 +1199,7 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1216,7 +1216,7 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
                 end_cond: [EndCondition::Pinned, EndCondition::Pinned],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1314,7 +1314,7 @@ fn column_with_parallel_vertical_brace() -> Model {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1331,7 +1331,7 @@ fn column_with_parallel_vertical_brace() -> Model {
                 end_cond: [EndCondition::Pinned, EndCondition::Pinned],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1615,7 +1615,7 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1640,7 +1640,7 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1655,7 +1655,7 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
                 end_cond: [EndCondition::Pinned, EndCondition::Pinned],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             },
@@ -1839,7 +1839,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -2315,7 +2315,7 @@ fn eccentric_member_load_reactions_keep_transfer_moment_after_end_releases_and_r
             for rigid in [0.0, 100.0] {
                 for reversed in [false, true] {
                     let mut model = owned_udl_model();
-                    model.elements[0].vertical_eccentricity = Some(e);
+                    model.elements[0].end_offsets_mm = [[0.0, 0.0, e]; 2];
                     model.elements[0].end_cond = released.map(|v| {
                         if v {
                             EndCondition::Pinned

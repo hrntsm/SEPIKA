@@ -315,6 +315,7 @@ pub(super) fn section_inner_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
 
 /// `coords` はモデル節点順の表示座標 [mm]。二次部材は `show_secondary` が真の場合だけ描く。
 /// 戻り値は（表示対象のうち断面を描けなかった本数、描画順の通常部材本体）。
+#[cfg(test)]
 pub(super) fn draw_section_solids(
     painter: &egui::Painter,
     model: &Model,
@@ -324,11 +325,36 @@ pub(super) fn draw_section_solids(
     frame_filter: super::FrameFilter,
     actual_placement: bool,
 ) -> (usize, super::pick::MemberBodies) {
+    draw_section_solids_with_displacements(
+        painter,
+        model,
+        coords,
+        proj,
+        show_secondary,
+        frame_filter,
+        actual_placement,
+        None,
+        0.0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_section_solids_with_displacements(
+    painter: &egui::Painter,
+    model: &Model,
+    coords: &[[f64; 3]],
+    proj: &Projector,
+    show_secondary: bool,
+    frame_filter: super::FrameFilter,
+    actual_placement: bool,
+    disp: Option<&[[f64; 6]]>,
+    deform_scale: f64,
+) -> (usize, super::pick::MemberBodies) {
     let mut bodies = super::pick::MemberBodies::default();
-    let mut prims: Vec<(f32, Option<sepika_core::ids::ElemId>, SolidPrim)> = Vec::new();
+    let mut prims: Vec<(f32, Option<sepika_core::model::SupportMemberId>, SolidPrim)> = Vec::new();
     let mut skipped = 0usize;
 
-    let mut extrude = |id: Option<sepika_core::ids::ElemId>,
+    let mut extrude = |id: Option<sepika_core::model::SupportMemberId>,
                        p_i: [f64; 3],
                        p_j: [f64; 3],
                        ref_vector: [f64; 3],
@@ -423,17 +449,12 @@ pub(super) fn draw_section_solids(
             continue;
         };
         let base = base_color(sec.shape.as_ref());
-        let ends = if actual_placement {
-            let Some(ends) = super::primary_shape_ends(model, elem) else {
-                skipped += 1;
-                continue;
-            };
-            ends
-        } else {
-            [coords[n0], coords[n1]]
+        let Some(ends) = super::primary_display_ends(model, elem, disp, deform_scale) else {
+            skipped += 1;
+            continue;
         };
         if !extrude(
-            Some(elem.id),
+            Some(sepika_core::model::SupportMemberId::Primary(elem.id)),
             ends[0],
             ends[1],
             elem.local_axis.ref_vector,
@@ -459,7 +480,7 @@ pub(super) fn draw_section_solids(
                     continue;
                 };
                 if !extrude(
-                    None,
+                    Some(sepika_core::model::SupportMemberId::Secondary(sm.id)),
                     a,
                     b,
                     if sm.kind == sepika_core::model::SecondaryMemberKind::Beam {
@@ -502,7 +523,7 @@ pub(super) fn draw_section_solids(
         match prim {
             SolidPrim::Quad { pts, fill, stroke } => {
                 if let Some(id) = id {
-                    bodies.push(id, pts.to_vec(), true, true, 0.5);
+                    bodies.push_target(id, pts.to_vec(), true, true, 0.5);
                 }
                 painter.add(egui::Shape::convex_polygon(
                     pts.to_vec(),
@@ -512,7 +533,7 @@ pub(super) fn draw_section_solids(
             }
             SolidPrim::Outline { pts, color } => {
                 if let Some(id) = id {
-                    bodies.push(id, pts.clone(), true, false, 1.0);
+                    bodies.push_target(id, pts.clone(), true, false, 1.0);
                 }
                 painter.add(egui::Shape::closed_line(
                     pts,
