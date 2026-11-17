@@ -221,6 +221,9 @@ fn compression_slenderness_outcome(
     }))
 }
 
+/// 鋼部材の許容応力度検定。
+/// 平鋼の柱・大梁で片方向でもせん断力が非零なら、理由付きの未算定とする。
+/// 圧縮時の法定細長比の判定は先に適用する。
 pub struct SteelDesign;
 
 impl DesignCheck for SteelDesign {
@@ -233,6 +236,14 @@ impl DesignCheck for SteelDesign {
     ) -> CheckOutcome {
         if let Some(outcome) = compression_slenderness_outcome(forces, sec, ctx) {
             return outcome;
+        }
+        if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column)
+            && matches!(sec.shape, Some(SectionShape::SteelFlatBar { .. }))
+            && (forces.qy != 0.0 || forces.qz != 0.0)
+        {
+            return CheckOutcome::Skipped {
+                reason: "平鋼のせん断応力度の評価方法と適用する許容値の組合せが未確定のため、鋼部材検定は未算定です".into(),
+            };
         }
         if let Some(shape) = sec
             .shape
