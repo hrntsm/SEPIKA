@@ -83,7 +83,7 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 
 | 管理先 | 共有する検証対象・管理理由 | 利用元・実行入口 |
 | --- | --- | --- |
-| `sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs`・`rc_column_axial_boundary_reference.rs` | RC柱の圧縮軸力上限と非零曲げ。許容曲げ0の境界を独立軸力・解析・共通検定で観測 | design-jp `tests/rc_column_zero_moment_capacity.rs`、job `tests/rc_column_axial_boundary.rs` |
+| `sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs`・`rc_column_axial_boundary_reference.rs` | RC柱の圧縮軸力上限と非零曲げ。許容曲げ0の境界を独立軸力・解析・共通検定で観測 | design-jp `tests/rc_column_zero_moment_capacity.rs`、job `tests/rc_column_axial_boundary.rs`、app `src/app/rc_column_boundary_tests.rs`・`src/viewer/check_ratio.rs`、mcp `src/job/design_check.rs` |
 | `sepika-core/tests/support/assignment_identity_model.rs` | 割当領域の識別・外部ID。coreのモデル契約を各入口でも維持 | core `model/assignment_identity_tests`、edit/job/mcp `tests/assignment_identity.rs`、mcp `tests/external_ids.rs`・`src/server_external_ids.rs`、app `src/app/assignment_identity_tests.rs` |
 | `sepika-core/tests/support/frame_support_model.rs` | 主架構支持の解析表現。coreの物理支持契約を編集・入出力・準備で維持 | core/edit/io/job `tests/frame_support_representation.rs` |
 | `sepika-core/tests/support/secondary_materialization_model.rs` | 二次部材の解析要素化。coreの生成契約をジョブ・GUI入口で維持 | core/job `tests/secondary_materialization.rs`、app `src/app/tests.rs` |
