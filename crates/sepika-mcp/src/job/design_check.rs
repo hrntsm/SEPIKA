@@ -293,6 +293,52 @@ mod tests {
     use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
 
+    mod steel_column_k_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/steel_column_k_model.rs"
+        ));
+    }
+
+    #[test]
+    fn column_k_mcp_keeps_both_columns_unchecked_for_case_and_combination() {
+        let mut model = steel_column_k_input::portal(1.0);
+        model
+            .combinations
+            .push(sepika_core::model::LoadCombination {
+                name: "長期".into(),
+                terms: vec![(sepika_core::ids::LoadCaseId(0), 1.0)],
+            });
+        for combo in [false, true] {
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: (!combo).then_some(0),
+                    load_combination: combo.then_some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!()
+            };
+            let skipped: Vec<_> = summary["member_skipped"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| row["elem"].as_u64().unwrap() < 2)
+                .collect();
+            assert_eq!(skipped.len(), 6, "{summary}");
+            for id in [0, 1] {
+                assert_eq!(skipped.iter().filter(|row| row["elem"] == id).count(), 3);
+            }
+            assert!(skipped
+                .iter()
+                .all(|row| row["reason"].as_str().unwrap().contains("直接指定")));
+            assert_eq!(summary["all_checked_and_ok"], false);
+            assert_eq!(summary["all_members_checked_and_ok"], false);
+        }
+    }
+
     mod column_input {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),

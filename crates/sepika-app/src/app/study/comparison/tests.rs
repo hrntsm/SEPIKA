@@ -180,9 +180,19 @@ fn fixed_volume_signed_displacement_and_every_case_design_match_normal_results_a
         .flat_map(|e| check_rows(e).unwrap())
         .collect();
     let outside = member_impacts(&baseline_rows, &proposal_rows, &fixed);
-    assert!(outside.iter().any(|impact| impact.after.target
-        == Some(ReferenceTarget::Member(ElemId(0)))
-        && impact.difference.is_some_and(|d| d > 0.0)));
+    for rows in [&baseline_rows, &proposal_rows] {
+        let column_rows: Vec<_> = rows
+            .iter()
+            .filter(|row| row.target == Some(ReferenceTarget::Member(ElemId(0))))
+            .collect();
+        assert!(!column_rows.is_empty());
+        assert!(column_rows
+            .iter()
+            .all(|row| !row.complete && row.ratio.is_none() && row.reason.contains("直接指定")));
+    }
+    assert!(!outside
+        .iter()
+        .any(|impact| impact.after.target == Some(ReferenceTarget::Member(ElemId(0)))));
 }
 
 #[test]
@@ -279,18 +289,35 @@ fn invalid_design_components_and_stale_or_missing_saved_inputs_never_become_vali
     let mut app = computed();
     let run = &mut app.studies.items[0].runs[0];
     let mut evidence = run.comparison_checks[0].clone();
-    let check = &mut evidence.bundle.member_checks[0].positions[0].outcome;
+    let beam = evidence
+        .bundle
+        .member_checks
+        .iter_mut()
+        .find(|member| member.elem == ElemId(2))
+        .unwrap();
+    let check = &mut beam.positions[0].outcome;
     if let sepika_design_jp::CheckOutcome::Checked(check) = check {
         check.components.clear();
     }
     assert!(check_rows(&evidence).is_err());
     let mut evidence = run.comparison_checks[0].clone();
-    if let sepika_design_jp::CheckOutcome::Checked(check) =
-        &mut evidence.bundle.member_checks[0].positions[0].outcome
+    if let sepika_design_jp::CheckOutcome::Checked(check) = &mut evidence
+        .bundle
+        .member_checks
+        .iter_mut()
+        .find(|member| member.elem == ElemId(2))
+        .unwrap()
+        .positions[0]
+        .outcome
     {
         check.components[0].ratio = f64::NAN;
     }
-    assert!(check_rows(&evidence).unwrap()[0].ratio.is_none());
+    assert!(check_rows(&evidence)
+        .unwrap()
+        .iter()
+        .any(|row| row.target == Some(ReferenceTarget::Member(ElemId(2)))
+            && row.ratio.is_none()
+            && row.invalid_components));
     let mut old = run.comparison_checks[0].clone();
     old.bundle.design_contract_version = Some(0);
     assert!(check_rows(&old).is_err());
