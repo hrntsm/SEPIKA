@@ -73,9 +73,21 @@ fn sn400b(id: u32) -> Material {
 }
 
 fn assign_roundtrip_boundary_sections(model: &mut Model) {
+    let columns: std::collections::HashSet<_> = model
+        .elements
+        .iter()
+        .filter(|element| {
+            element.section.is_none() && element.nodes.len() == 2 && {
+                let a = model.node(element.nodes[0]).unwrap().coord;
+                let b = model.node(element.nodes[1]).unwrap().coord;
+                a[0] == b[0] && a[1] == b[1] && a[2] != b[2]
+            }
+        })
+        .map(|element| element.id)
+        .collect();
     let needs_beam = model.elements.iter().any(|e| e.section.is_none())
         || model.beams().any(|sm| sm.section.is_none());
-    let needs_post = model.posts().any(|sm| sm.section.is_none());
+    let needs_post = !columns.is_empty() || model.posts().any(|sm| sm.section.is_none());
     if !needs_beam && !needs_post {
         return;
     }
@@ -111,7 +123,7 @@ fn assign_roundtrip_boundary_sections(model: &mut Model) {
         match frame_use {
             sepika_core::model::FrameSectionUse::Girder => {
                 for element in &mut model.elements {
-                    if element.section.is_none() {
+                    if element.section.is_none() && !columns.contains(&element.id) {
                         element.section = Some(id);
                     }
                 }
@@ -127,6 +139,11 @@ fn assign_roundtrip_boundary_sections(model: &mut Model) {
                 }
             }
             sepika_core::model::FrameSectionUse::Column => {
+                for element in &mut model.elements {
+                    if element.section.is_none() && columns.contains(&element.id) {
+                        element.section = Some(id);
+                    }
+                }
                 for sm in model
                     .unassigned_posts
                     .iter_mut()
@@ -617,6 +634,9 @@ fn h_radii_roundtrip_and_missing_radius_stays_unknown() {
         model
             .elements
             .push(member(index as u32, true, index as u32));
+    }
+    for section in &mut model.sections {
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     }
     let xml = export_stbridge(&model).unwrap();
     let loaded = import_stbridge(&xml).unwrap();
@@ -1297,14 +1317,9 @@ fn test_import_rc_without_bar_arrangement_uses_default() {
     }
 }
 
-/// 標準モードで柱・梁に分割された共有鋼断面が、import で元の 1 断面へ統合され、
-/// 両部材が同じ id を参照する（検証を通る）。
-///
-/// 書き出しは共有断面を柱用（`StbSecColumn_S`）・梁用（`StbSecBeam_S`）へ分割するが、
-/// 分割後の 2 定義は符号も階も同じで断面性能も一致する。断面の同一性キーは符号＋階
-/// なので、取り込みでこの 2 定義は 1 件へ統合され、往復で断面が増えない。
+/// 複数大梁が共有する同一の鋼断面参照を往復で保持する。
 #[test]
-fn test_standard_import_recovers_split_shared_section() {
+fn test_standard_import_preserves_shared_girder_section() {
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
         root_r: Some(13.0),
@@ -1314,17 +1329,13 @@ fn test_standard_import_recovers_split_shared_section() {
         flange_thick: 9.0,
     };
     push_section(&mut m, h.to_section(SectionId(0), "S1".into()));
-    m.elements.push(member(0, true, 0));
+    m.elements.push(member(0, false, 0));
     m.elements.push(member(1, false, 0));
 
     let xml = export_stbridge(&m).unwrap();
     let back = import_stbridge(&xml).expect("import");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
-    assert_eq!(
-        back.sections.len(),
-        1,
-        "分割された 2 定義は符号＋階と断面性能が一致するため 1 断面へ統合される"
-    );
+    assert_eq!(back.sections.len(), 1, "共有断面は1定義を保持する");
     assert!(
         matches!(back.sections[0].shape, Some(SectionShape::SteelH { .. })),
         "H 形鋼として復元される"
@@ -1334,7 +1345,7 @@ fn test_standard_import_recovers_split_shared_section() {
     assert_eq!(
         back.elements[1].section,
         Some(SectionId(0)),
-        "柱・梁とも統合後の同じ断面を参照する"
+        "両大梁が同じ断面を参照する"
     );
 }
 
@@ -1858,6 +1869,9 @@ fn test_standard_export_round_bar() {
     push_section(&mut m, shape.to_section(SectionId(0), "RB1".into()));
     m.elements.push(member(0, true, 0));
 
+    for section in &mut m.sections {
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    }
     let xml = export_stbridge(&m).unwrap();
     assert!(
         xml.contains("<StbSecRoll-RoundBar "),
@@ -1878,6 +1892,9 @@ fn test_standard_export_lip_channel() {
     push_section(&mut m, shape.to_section(SectionId(0), "LipC1".into()));
     m.elements.push(member(0, true, 0));
 
+    for section in &mut m.sections {
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    }
     let xml = export_stbridge(&m).unwrap();
     assert!(
         xml.contains("<StbSecRoll-LipC "),
@@ -1900,6 +1917,9 @@ fn test_standard_export_built_h() {
     push_section(&mut m, shape.to_section(SectionId(0), "BH1".into()));
     m.elements.push(member(0, true, 0));
 
+    for section in &mut m.sections {
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    }
     let xml = export_stbridge(&m).unwrap();
     assert!(
         xml.contains("<StbSecBuild-H "),
@@ -1970,6 +1990,9 @@ fn test_standard_roundtrip_steel_box_distinct_corner_r() {
     m.elements.push(member(0, true, 0));
     m.elements.push(member(1, true, 1));
 
+    for section in &mut m.sections {
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    }
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("r=\"30\""), "角部外半径 r が出力される: {xml}");
     let back = import_stbridge(&xml).expect("import");
@@ -4350,7 +4373,7 @@ fn test_import_renames_conflicting_duplicate_sections() {
 fn test_import_renames_same_name_sections_from_different_families() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
-  <StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes>
+  <StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="6000" Y="0" Z="3000"/></StbNodes>
   <StbSections>
     <StbSecBeam_S id="1" name="共有"><StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H"/></StbSecSteelFigureBeam_S></StbSecBeam_S>
     <StbSecColumn_S id="2" name="共有"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H"/></StbSecSteelFigureColumn_S></StbSecColumn_S>

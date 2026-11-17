@@ -7880,7 +7880,7 @@ fn test_run_combination_errors_on_empty_seismic_case() {
 #[test]
 fn test_import_stbridge_with_loads_keeps_file_cases() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>

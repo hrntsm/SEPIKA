@@ -250,6 +250,11 @@ fn designated_original_node_survives_order_level_and_prepare_changes() {
             .replace("StbSecFigureColumn_RC", if section_tag=="StbSecBeam_RC" {"StbSecFigureBeam_RC"} else {"StbSecFigureColumn_RC"})
             .replace("StbSecBeam_RC_Rect width_X=\"400\" width_Y=\"400\"", "StbSecBeam_RC_Straight width=\"400\" depth=\"400\"")
             .replace("</StbStories>",r#"<StbStory id="2" name="bottom" height="0" kind="GENERAL" strength_concrete="Fc24"><StbNodeIdList><StbNodeId id="1"/></StbNodeIdList></StbStory></StbStories>"#);
+        let source = if matches!(tag, "StbGirder" | "StbBeam") {
+            source.replace("id=\"2\" X=\"0\"", "id=\"2\" X=\"6000\"")
+        } else {
+            source
+        };
         let mut model = import_stbridge(&source).unwrap();
         let section = if matches!(tag, "StbPost" | "StbBeam") {
             model.beams().chain(model.posts()).next().unwrap().section

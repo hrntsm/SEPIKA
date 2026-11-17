@@ -340,7 +340,7 @@ fn analysis_fixture_path() -> std::path::PathBuf {
 }
 
 #[test]
-fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_explicit() {
+fn original_fixture_resolves_beam_positions_and_analysis_derivative_explicitly_supplies_rebar() {
     let original = std::fs::read_to_string(fixture_path()).unwrap();
     let original_model = sepika_io::stbridge::import_stbridge(&original).unwrap();
     assert!(original_model
@@ -350,13 +350,29 @@ fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_expl
     let derivative = std::fs::read_to_string(analysis_fixture_path()).unwrap();
     let supported = sepika_io::stbridge::import_stbridge(&derivative).unwrap();
     for model in [&original_model, &supported] {
-        assert!(model
-            .elements
-            .iter()
-            .all(|element| element.end_offsets_mm == [[0.0; 3]; 2]));
-        assert!(model
-            .beams()
-            .all(|beam| beam.end_offsets_mm == [[0.0; 3]; 2]));
+        for element in &model.elements {
+            let section = model.element_section(element).unwrap();
+            let z_mm = if section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder) {
+                let Some(sepika_core::section_shape::SectionShape::RcBeamRect { d, .. }) =
+                    section.shape
+                else {
+                    panic!("原本の大梁は矩形RC")
+                };
+                -d / 2.0
+            } else {
+                0.0
+            };
+            assert_eq!(element.end_offsets_mm, [[0.0, 0.0, z_mm]; 2]);
+        }
+        for beam in model.beams() {
+            let section = model.section(beam.section.unwrap()).unwrap();
+            let Some(sepika_core::section_shape::SectionShape::RcBeamRect { d, .. }) =
+                section.shape
+            else {
+                panic!("原本の小梁は矩形RC")
+            };
+            assert_eq!(beam.end_offsets_mm, [[0.0, 0.0, -d / 2.0]; 2]);
+        }
     }
     assert!(
         supported.stb_rebar_analysis_diagnostics().is_empty(),
@@ -2375,19 +2391,30 @@ fn stbridge_roundtrip_is_reanalyzable() {
         "STB 再取り込みで小片 82 に戻らない"
     );
 
-    assert!(reimported
+    for (original, reread) in app
         .core
         .model
         .elements
         .iter()
-        .all(|element| element.end_offsets_mm == [[0.0; 3]; 2]));
-    assert!(reimported
-        .core
-        .model
-        .beams()
-        .all(|beam| beam.end_offsets_mm == [[0.0; 3]; 2]));
+        .zip(&reimported.core.model.elements)
+    {
+        assert_eq!(reread.end_offsets_mm, original.end_offsets_mm);
+        let expected = app
+            .core
+            .model
+            .beam_placement(sepika_core::model::SupportMemberId::Primary(original.id))
+            .unwrap();
+        let actual = reimported
+            .core
+            .model
+            .beam_placement(sepika_core::model::SupportMemberId::Primary(reread.id))
+            .unwrap();
+        assert_eq!(actual.actual_ends, expected.actual_ends);
+    }
+    for (original, reread) in app.core.model.beams().zip(reimported.core.model.beams()) {
+        assert_eq!(reread.end_offsets_mm, original.end_offsets_mm);
+    }
     declare_analysis_story_levels(&mut reimported.core.model);
-    declare_analysis_beam_placements(&mut reimported.core.model);
     declare_analysis_slab_placements(&mut reimported.core.model);
     reimported.run_preparation();
     assert_eq!(

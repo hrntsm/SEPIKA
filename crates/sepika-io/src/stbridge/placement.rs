@@ -1,4 +1,4 @@
-use sepika_core::geom::vec3::{add, cross, dot, local_frame_axes, scale, sub};
+use sepika_core::geom::vec3::{add, cross, dot, local_frame_axes, norm, scale, sub};
 use sepika_core::model::FrameSectionUse;
 use sepika_core::section_shape::{face_geometry::SectionGeometry, SectionShape};
 
@@ -90,11 +90,31 @@ fn reference_axes(
     if !ends.iter().flatten().all(|value| value.is_finite()) || !rotate_deg.is_finite() {
         return Err("基準端・断面回転に非有限値があります".into());
     }
+    let corresponding = if usage == FrameSectionUse::Column {
+        [0.0, 1.0, 0.0]
+    } else {
+        [0.0, 0.0, 1.0]
+    };
+    let basis = local_frame_axes(ends[0], ends[1], corresponding).map_err(str::to_owned)?;
+    if norm(sub(
+        corresponding,
+        scale(basis[0], dot(corresponding, basis[0])),
+    )) <= 1e-12
+    {
+        return Err(format!(
+            "基準材軸がSTB対応全体{}軸と平行で断面基底を確定できません",
+            if usage == FrameSectionUse::Column {
+                "Y"
+            } else {
+                "Z"
+            }
+        ));
+    }
     let mut axes = if usage == FrameSectionUse::Column {
-        let column = local_frame_axes(ends[0], ends[1], [0.0, 1.0, 0.0]).map_err(str::to_owned)?;
+        let column = basis;
         [column[0], cross(column[1], column[0]), column[1]]
     } else {
-        local_frame_axes(ends[0], ends[1], [0.0, 0.0, 1.0]).map_err(str::to_owned)?
+        basis
     };
     let (sin, cos) = rotate_deg.to_radians().sin_cos();
     axes[1] = add(scale(axes[1], cos), scale(cross(axes[0], axes[1]), sin));
@@ -158,6 +178,33 @@ mod tests {
         SectionShape::SteelFlatBar {
             width: 400.0,
             thick: 600.0,
+        }
+    }
+
+    #[test]
+    fn parallel_stb_corresponding_axis_rejects_both_directions_without_fallback() {
+        for (usage, endpoint, axis) in [
+            (FrameSectionUse::Column, [0.0, 3000.0, 0.0], "Y"),
+            (FrameSectionUse::Girder, [0.0, 0.0, 3000.0], "Z"),
+            (FrameSectionUse::Brace, [0.0, 0.0, 3000.0], "Z"),
+        ] {
+            let ends = [[0.0; 3], endpoint];
+            let imported =
+                import_placement(ends, [[0.0; 3]; 2], 0.0, usage, &rectangle()).unwrap_err();
+            let exported = export_placement(
+                ends,
+                [[0.0; 3]; 2],
+                [1.0, 0.0, 0.0],
+                usage,
+                Some(&rectangle()),
+            )
+            .unwrap_err();
+            for reason in [imported, exported] {
+                assert!(
+                    reason.contains(&format!("全体{axis}軸")) && reason.contains("断面基底"),
+                    "{reason}"
+                );
+            }
         }
     }
 
