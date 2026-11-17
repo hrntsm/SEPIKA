@@ -81,11 +81,13 @@ fn materialization_matches_element_endpoints_without_selecting_first_nearby_node
 }
 
 #[test]
-fn posts_keep_column_use_and_ignore_beam_eccentricity() {
+fn posts_require_column_use_and_zero_analysis_offset() {
     let mut model = fixture::model();
     model.nodes[1].coord = [0., 0., 6000.];
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
     model.unassigned_beams[0].kind = SecondaryMemberKind::Post;
+    assert!(!model.secondary_member_materialized(&model.unassigned_beams[0]));
+    model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
     assert!(model.secondary_member_materialized(&model.unassigned_beams[0]));
     model.elements[0].kind = ElementKind::Fiber;
     assert!(!model.secondary_member_materialized(&model.unassigned_beams[0]));
@@ -124,4 +126,26 @@ fn materialization_does_not_merge_distinct_resolved_member_materials() {
         Some(MaterialId(0))
     );
     assert!(!model.secondary_member_materialized(&model.unassigned_beams[0]));
+}
+
+#[test]
+fn post_materialization_never_turns_display_offsets_into_analysis_offsets() {
+    let mut model = fixture::model();
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    let mut post = model.unassigned_beams.remove(0);
+    post.kind = SecondaryMemberKind::Post;
+    post.end_offsets_mm = [[100.0, 200.0, 300.0], [-400.0, 500.0, -600.0]];
+    model.unassigned_posts.push(post.clone());
+    let baseline = model.calculation_model();
+    model.unassigned_posts[0].end_offsets_mm = [[0.0; 3]; 2];
+    assert!(model.calculation_model().eq_ignoring_dofmap(&baseline));
+    for reverse in [false, true] {
+        if reverse {
+            model.elements[0].nodes.reverse();
+        }
+        model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
+        assert!(model.secondary_member_materialized(&post));
+        model.elements[0].end_offsets_mm = [[100.0, 0.0, 0.0]; 2];
+        assert!(!model.secondary_member_materialized(&post));
+    }
 }

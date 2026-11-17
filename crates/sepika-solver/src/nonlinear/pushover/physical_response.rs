@@ -262,7 +262,7 @@ pub(super) fn load_above(
             .node(elem.nodes[1])
             .ok_or("増分解析: 部材荷重節点がありません")?;
         let [pi, pj] = model
-            .primary_beam_axis_ends(elem)?
+            .primary_frame_axis_ends(elem)?
             .unwrap_or([pi.coord, pj.coord]);
         let length = sepika_core::geom::vec3::dist(pi, pj);
         load.validate_direction()?;

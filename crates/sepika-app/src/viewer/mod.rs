@@ -32,7 +32,7 @@ fn primary_display_ends(
         reference
     } else {
         model
-            .primary_beam_axis_ends(elem)
+            .primary_frame_axis_ends(elem)
             .ok()?
             .unwrap_or(reference)
     };
@@ -69,9 +69,12 @@ fn primary_shape_ends(
 ) -> Option<[[f64; 3]; 2]> {
     use sepika_core::model::{FrameSectionUse, SupportMemberId};
     if elem.kind.is_primary_frame_support()
-        && model
-            .element_section(elem)
-            .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Girder))
+        && model.element_section(elem).is_some_and(|s| {
+            matches!(
+                s.frame_use,
+                Some(FrameSectionUse::Girder | FrameSectionUse::Column)
+            )
+        })
     {
         Some(
             model
@@ -91,18 +94,11 @@ fn secondary_shape_ends(
     model: &sepika_core::Model,
     sm: &sepika_core::model::SecondaryMember,
 ) -> Option<[[f64; 3]; 2]> {
-    use sepika_core::model::{SecondaryMemberKind, SupportMemberId};
-    if sm.kind == SecondaryMemberKind::Beam {
-        Some(
-            model
-                .beam_placement(SupportMemberId::Secondary(sm.id))
-                .ok()?
-                .actual_ends,
-        )
-    } else {
-        let (a, b) = model.secondary_member_end_points(sm)?;
-        Some([a, b])
-    }
+    let (a, b) = model.secondary_member_end_points(sm)?;
+    Some([
+        sepika_core::geom::vec3::add(a, sm.end_offsets_mm[0]),
+        sepika_core::geom::vec3::add(b, sm.end_offsets_mm[1]),
+    ])
 }
 
 fn secondary_shape_visible(
@@ -1166,6 +1162,7 @@ pub fn viewer_panel_with_view(
             .core
             .model
             .beams()
+            .chain(app.core.model.posts())
             .filter(|sm| show_secondary && secondary_shape_visible(&app.core.model, sm, filter))
             .map(|sm| SupportMemberId::Secondary(sm.id));
         for member in primary.chain(secondary) {

@@ -264,7 +264,7 @@ pub(crate) fn member_load_frame(model: &Model, elem: &ElementData) -> Option<(Lo
         return None;
     }
     let [p_i, p_j] = model
-        .primary_beam_axis_ends(elem)
+        .primary_frame_axis_ends(elem)
         .unwrap_or_else(|reason| panic!("{reason}"))
         .unwrap_or([
             model.nodes.get(elem.nodes[0].index())?.coord,

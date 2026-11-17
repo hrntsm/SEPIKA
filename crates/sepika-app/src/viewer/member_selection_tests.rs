@@ -406,78 +406,111 @@ fn check_ratio_colors_are_painted_over_hover_and_selection_without_changing_resu
 #[test]
 fn secondary_member_click_follows_display_offsets_and_shows_its_properties() {
     use sepika_core::{ids::*, model::*};
-    let mut app = App::default();
-    let mut model = crate::sample::portal_frame();
-    model.unassigned_beams.push(SecondaryMember {
-        id: SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Beam,
-        ends: SecondaryMemberEnds::Supported([0.25, 0.75].map(|position| SecondaryMemberAnchor {
-            support: SupportMemberId::Primary(ElemId(2)),
-            position,
-        })),
-        section: Some(SectionId(1)),
-        name: "選択小梁".into(),
-        ..Default::default()
-    });
-    assert!(app.load_model(model));
-    let ctx = egui::Context::default();
-    let secondary_line = |output: &egui::FullOutput| {
-        output
+    for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+        let mut app = App::default();
+        let mut model = crate::sample::portal_frame();
+        let member = SecondaryMember {
+            id: SecondaryMemberId(0),
+            kind,
+            ends: SecondaryMemberEnds::Supported([0.25, 0.75].map(|position| {
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(if kind == SecondaryMemberKind::Beam {
+                        ElemId(2)
+                    } else {
+                        ElemId(0)
+                    }),
+                    position,
+                }
+            })),
+            section: Some(SectionId(if kind == SecondaryMemberKind::Beam {
+                1
+            } else {
+                0
+            })),
+            name: "選択小梁".into(),
+            ..Default::default()
+        };
+        if kind == SecondaryMemberKind::Beam {
+            model.unassigned_beams.push(member);
+        } else {
+            model.unassigned_posts.push(member);
+        }
+        assert!(app.load_model(model));
+        let ctx = egui::Context::default();
+        let secondary_line = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::LineSegment { points, stroke }
+                        if stroke.color == theme::SECONDARY_AMBER && stroke.width == 1.5 =>
+                    {
+                        Some(*points)
+                    }
+                    _ => None,
+                })
+                .expect("小梁の表示材軸")
+        };
+        frame(&ctx, &mut app, vec![]);
+        let before = secondary_line(&frame(&ctx, &mut app, vec![]));
+        click(&ctx, &mut app, before[0].lerp(before[1], 0.5));
+        assert_eq!(
+            app.ui.scoped.selection.active_secondary_member(),
+            Some(SecondaryMemberId(0))
+        );
+        assert!(
+            app.apply_model_edit(Box::new(sepika_edit::SetMemberEndOffsets {
+                member: SupportMemberId::Secondary(SecondaryMemberId(0)),
+                value: [[0.0, 1000.0, 600.0]; 2]
+            }))
+        );
+        let after = secondary_line(&frame(&ctx, &mut app, vec![]));
+        assert_ne!(before, after);
+        let connection_count = |output: &egui::FullOutput| {
+            output.shapes.iter().filter(|shape| matches!(&shape.shape,egui::Shape::LineSegment { stroke,.. } if stroke.color == theme::SECONDARY_AMBER && stroke.width == 1.5)).count()
+        };
+        app.ui.view.show_offset_connections = true;
+        let shown = frame(&ctx, &mut app, vec![]);
+        app.ui.view.show_offset_connections = false;
+        let hidden = frame(&ctx, &mut app, vec![]);
+        assert!(connection_count(&shown) > connection_count(&hidden));
+        assert_eq!(secondary_line(&shown), secondary_line(&hidden));
+        app.ui.view.show_offset_connections = true;
+        let model = bincode::serialize(&app.core.model).unwrap();
+        let revision = app.core.scoped.undo.revision();
+        click(&ctx, &mut app, before[0].lerp(before[1], 0.5));
+        assert_ne!(
+            app.ui.scoped.selection.active_secondary_member(),
+            Some(SecondaryMemberId(0))
+        );
+        click(&ctx, &mut app, after[0].lerp(after[1], 0.5));
+        assert_eq!(
+            app.ui.scoped.selection.active_secondary_member(),
+            Some(SecondaryMemberId(0))
+        );
+        let selected = frame(&ctx, &mut app, vec![]);
+        assert!(selected.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { points, stroke } if points == &after && *stroke == theme::VIEW_SELECTED_STROKE)));
+        let properties = ctx.run_ui(Default::default(), |ui| app.inspector_panel(ui));
+        let labels = properties
             .shapes
             .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::LineSegment { points, stroke }
-                    if stroke.color == theme::SECONDARY_AMBER && stroke.width == 1.5 =>
-                {
-                    Some(*points)
-                }
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
                 _ => None,
             })
-            .expect("小梁の表示材軸")
-    };
-    frame(&ctx, &mut app, vec![]);
-    let before = secondary_line(&frame(&ctx, &mut app, vec![]));
-    click(&ctx, &mut app, before[0].lerp(before[1], 0.5));
-    assert_eq!(
-        app.ui.scoped.selection.active_secondary_member(),
-        Some(SecondaryMemberId(0))
-    );
-    assert!(
-        app.apply_model_edit(Box::new(sepika_edit::SetBeamEndOffsets {
-            member: SupportMemberId::Secondary(SecondaryMemberId(0)),
-            value: [[0.0, 1000.0, 600.0]; 2]
-        }))
-    );
-    let after = secondary_line(&frame(&ctx, &mut app, vec![]));
-    assert_ne!(before, after);
-    let model = bincode::serialize(&app.core.model).unwrap();
-    let revision = app.core.scoped.undo.revision();
-    click(&ctx, &mut app, before[0].lerp(before[1], 0.5));
-    assert_ne!(
-        app.ui.scoped.selection.active_secondary_member(),
-        Some(SecondaryMemberId(0))
-    );
-    click(&ctx, &mut app, after[0].lerp(after[1], 0.5));
-    assert_eq!(
-        app.ui.scoped.selection.active_secondary_member(),
-        Some(SecondaryMemberId(0))
-    );
-    let selected = frame(&ctx, &mut app, vec![]);
-    assert!(selected.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { points, stroke } if points == &after && *stroke == theme::VIEW_SELECTED_STROKE)));
-    let properties = ctx.run_ui(Default::default(), |ui| app.inspector_panel(ui));
-    let labels = properties
-        .shapes
-        .iter()
-        .filter_map(|shape| match &shape.shape {
-            egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(labels.iter().any(|label| label.contains("小梁 ID: 0")));
-    assert!(labels.iter().any(|label| label.contains("選択小梁")));
-    assert!(labels.iter().any(|label| label.contains("XYZ偏心")));
-    assert_eq!(bincode::serialize(&app.core.model).unwrap(), model);
-    assert_eq!(app.core.scoped.undo.revision(), revision);
+            .collect::<Vec<_>>();
+        assert!(labels.iter().any(
+            |label| label.contains(if kind == SecondaryMemberKind::Beam {
+                "小梁 ID: 0"
+            } else {
+                "間柱 ID: 0"
+            })
+        ));
+        assert!(labels.iter().any(|label| label.contains("選択小梁")));
+        assert!(labels.iter().any(|label| label.contains("XYZ偏心")));
+        assert_eq!(bincode::serialize(&app.core.model).unwrap(), model);
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+    }
 }
 
 #[test]

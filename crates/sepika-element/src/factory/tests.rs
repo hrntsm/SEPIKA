@@ -2398,7 +2398,7 @@ fn eccentric_axis_uses_node_level_and_reports_each_unresolved_input() {
     ));
     assert_eq!(
         model
-            .primary_beam_axis_ends(&model.elements[0])
+            .primary_frame_axis_ends(&model.elements[0])
             .unwrap()
             .unwrap(),
         [[0.0, 0.0, 3600.0], [1000.0, 0.0, 3600.0]]
@@ -2438,7 +2438,7 @@ fn eccentric_axis_uses_node_level_and_reports_each_unresolved_input() {
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
     model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
     assert!(model
-        .primary_beam_axis_ends(&model.elements[0])
+        .primary_frame_axis_ends(&model.elements[0])
         .unwrap()
         .is_none());
     model.elements[0].kind = ElementKind::Brace {
@@ -2446,7 +2446,7 @@ fn eccentric_axis_uses_node_level_and_reports_each_unresolved_input() {
     };
     model.sections[0].frame_use = Some(FrameSectionUse::Girder);
     assert!(model
-        .primary_beam_axis_ends(&model.elements[0])
+        .primary_frame_axis_ends(&model.elements[0])
         .unwrap()
         .is_none());
 }
@@ -2516,106 +2516,136 @@ fn eccentric_nonlinear_member_loads_keep_section_forces_separate_from_node_trans
 fn xyz_end_offsets_keep_axial_equilibrium_and_physical_end_moments_in_all_formulations() {
     use crate::behavior::MassOption;
     use sepika_core::geom::vec3::{cross, dist, sub};
-    for (kind, regime) in [
-        (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
-        (ElementKind::Beam, ForceRegime::AxialBendingInteract),
-        (ElementKind::Fiber, ForceRegime::Auto),
-        (ElementKind::MultiSpring, ForceRegime::Auto),
-    ] {
-        for nonlinear in [false, true] {
-            for reversed in [false, true] {
-                let mut model = eccentric_member_model(kind, 0.0);
-                model.elements[0].force_regime = regime;
-                model.nodes[1].coord = [6000.0, 0.0, 0.0];
-                model.elements[0].end_offsets_mm = [[100.0, 200.0, 300.0], [-50.0, 400.0, 600.0]];
-                if reversed {
-                    model.elements[0].nodes.reverse();
-                    model.elements[0].end_offsets_mm.reverse();
-                }
-                let data = &model.elements[0];
-                let ends = model.primary_beam_axis_ends(data).unwrap().unwrap();
-                let length = dist(ends[0], ends[1]);
-                let direction = sub(ends[1], ends[0]).map(|v| v / length);
-                let mut behavior = if nonlinear {
-                    build_nonlinear_behavior(
-                        data,
-                        &model,
-                        StrengthBasis::Nominal,
-                        AnalysisKind::Incremental,
-                        None,
-                    )
-                } else {
-                    build_behavior(data, &model)
-                };
-                let mut displacement = [0.0; 12];
-                for axis in 0..3 {
-                    displacement[6 + axis] = 0.01 * direction[axis];
-                }
-                let ctx = crate::behavior::Ctx { model: &model };
-                behavior
-                    .update_state(
-                        &crate::behavior::LocalVec {
-                            data: smallvec::SmallVec::from_slice(&displacement),
-                        },
-                        true,
-                        &ctx,
-                    )
-                    .unwrap();
-                let force = behavior.internal_force(&ctx);
-                let expected_axial =
-                    model.materials[0].young * model.sections[0].area * 0.01 / length;
-                let mut global_moment = [0.0; 3];
-                for side in 0..2 {
-                    let expected_force = direction.map(|v| {
-                        if side == 0 {
-                            -expected_axial * v
+    for usage in [FrameSectionUse::Girder, FrameSectionUse::Column] {
+        for offsets in [
+            [[0.0; 3]; 2],
+            [[100.0, 0.0, 0.0]; 2],
+            [[100.0, 200.0, 300.0], [-50.0, 400.0, 600.0]],
+        ] {
+            for (kind, regime) in [
+                (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
+                (ElementKind::Beam, ForceRegime::AxialBendingInteract),
+                (ElementKind::Fiber, ForceRegime::Auto),
+                (ElementKind::MultiSpring, ForceRegime::Auto),
+            ] {
+                for nonlinear in [false, true] {
+                    for reversed in [false, true] {
+                        let mut model = eccentric_member_model(kind, 0.0);
+                        model.sections[0].frame_use = Some(usage);
+                        model.elements[0].force_regime = regime;
+                        model.nodes[1].coord = if usage == FrameSectionUse::Column {
+                            [1000.0, 0.0, 6000.0]
                         } else {
-                            expected_axial * v
+                            [6000.0, 0.0, 0.0]
+                        };
+                        model.elements[0].end_offsets_mm = offsets;
+                        if reversed {
+                            model.elements[0].nodes.reverse();
+                            model.elements[0].end_offsets_mm.reverse();
                         }
-                    });
-                    let expected_moment = cross(data.end_offsets_mm[side], expected_force);
-                    let arm_moment =
-                        cross(model.node(data.nodes[side]).unwrap().coord, expected_force);
-                    for axis in 0..3 {
-                        assert!((force.data[6 * side + axis] - expected_force[axis]).abs() < 1e-6);
-                        assert!(
-                            (force.data[6 * side + 3 + axis] - expected_moment[axis]).abs() < 1e-5
-                        );
-                        global_moment[axis] += force.data[6 * side + 3 + axis] + arm_moment[axis];
-                    }
-                }
-                assert!(global_moment.iter().all(|v| v.abs() < 1e-5));
-                let physical = behavior
-                    .state_member_forces(&ctx)
-                    .or_else(|| behavior.recover_forces(&displacement))
-                    .unwrap();
-                assert!(physical
-                    .at
-                    .iter()
-                    .all(|(_, f)| f[3..].iter().all(|v| v.abs() < 1e-5)));
-                for option in [MassOption::Lumped, MassOption::Consistent] {
-                    let mass = behavior.try_mass_matrix(option).unwrap();
-                    let total_x_mass =
-                        mass.get(0, 0) + mass.get(0, 6) + mass.get(6, 0) + mass.get(6, 6);
-                    let total_mass = model.materials[0].density * model.sections[0].area * length;
-                    assert!((total_x_mass - total_mass).abs() < 1e-10);
-                    let mut inertia_moment = [0.0; 3];
-                    for side in 0..2 {
-                        let force = std::array::from_fn(|axis| {
-                            mass.get(6 * side + axis, 0) + mass.get(6 * side + axis, 6)
-                        });
-                        let arm = cross(model.node(data.nodes[side]).unwrap().coord, force);
+                        let data = &model.elements[0];
+                        let ends =
+                            model
+                                .primary_frame_axis_ends(data)
+                                .unwrap()
+                                .unwrap_or_else(|| {
+                                    [
+                                        model.node(data.nodes[0]).unwrap().coord,
+                                        model.node(data.nodes[1]).unwrap().coord,
+                                    ]
+                                });
+                        let length = dist(ends[0], ends[1]);
+                        let direction = sub(ends[1], ends[0]).map(|v| v / length);
+                        let mut behavior = if nonlinear {
+                            build_nonlinear_behavior(
+                                data,
+                                &model,
+                                StrengthBasis::Nominal,
+                                AnalysisKind::Incremental,
+                                None,
+                            )
+                        } else {
+                            build_behavior(data, &model)
+                        };
+                        let mut displacement = [0.0; 12];
                         for axis in 0..3 {
-                            inertia_moment[axis] += mass.get(6 * side + 3 + axis, 0)
-                                + mass.get(6 * side + 3 + axis, 6)
-                                + arm[axis];
+                            displacement[6 + axis] = 0.01 * direction[axis];
                         }
-                    }
-                    let centroid =
-                        std::array::from_fn(|axis| (ends[0][axis] + ends[1][axis]) / 2.0);
-                    let expected_moment = cross(centroid, [total_mass, 0.0, 0.0]);
-                    for axis in 0..3 {
-                        assert!((inertia_moment[axis] - expected_moment[axis]).abs() < 1e-8);
+                        let ctx = crate::behavior::Ctx { model: &model };
+                        behavior
+                            .update_state(
+                                &crate::behavior::LocalVec {
+                                    data: smallvec::SmallVec::from_slice(&displacement),
+                                },
+                                true,
+                                &ctx,
+                            )
+                            .unwrap();
+                        let force = behavior.internal_force(&ctx);
+                        let expected_axial =
+                            model.materials[0].young * model.sections[0].area * 0.01 / length;
+                        let mut global_moment = [0.0; 3];
+                        for side in 0..2 {
+                            let expected_force = direction.map(|v| {
+                                if side == 0 {
+                                    -expected_axial * v
+                                } else {
+                                    expected_axial * v
+                                }
+                            });
+                            let expected_moment = cross(data.end_offsets_mm[side], expected_force);
+                            let arm_moment =
+                                cross(model.node(data.nodes[side]).unwrap().coord, expected_force);
+                            for axis in 0..3 {
+                                assert!(
+                                    (force.data[6 * side + axis] - expected_force[axis]).abs()
+                                        < 1e-6
+                                );
+                                assert!(
+                                    (force.data[6 * side + 3 + axis] - expected_moment[axis]).abs()
+                                        < 1e-5
+                                );
+                                global_moment[axis] +=
+                                    force.data[6 * side + 3 + axis] + arm_moment[axis];
+                            }
+                        }
+                        assert!(global_moment.iter().all(|v| v.abs() < 1e-5));
+                        let physical = behavior
+                            .state_member_forces(&ctx)
+                            .or_else(|| behavior.recover_forces(&displacement))
+                            .unwrap();
+                        assert!(physical
+                            .at
+                            .iter()
+                            .all(|(_, f)| f[3..].iter().all(|v| v.abs() < 1e-5)));
+                        for option in [MassOption::Lumped, MassOption::Consistent] {
+                            let mass = behavior.try_mass_matrix(option).unwrap();
+                            let total_x_mass =
+                                mass.get(0, 0) + mass.get(0, 6) + mass.get(6, 0) + mass.get(6, 6);
+                            let total_mass =
+                                model.materials[0].density * model.sections[0].area * length;
+                            assert!((total_x_mass - total_mass).abs() < 1e-10);
+                            let mut inertia_moment = [0.0; 3];
+                            for side in 0..2 {
+                                let force = std::array::from_fn(|axis| {
+                                    mass.get(6 * side + axis, 0) + mass.get(6 * side + axis, 6)
+                                });
+                                let arm = cross(model.node(data.nodes[side]).unwrap().coord, force);
+                                for axis in 0..3 {
+                                    inertia_moment[axis] += mass.get(6 * side + 3 + axis, 0)
+                                        + mass.get(6 * side + 3 + axis, 6)
+                                        + arm[axis];
+                                }
+                            }
+                            let centroid =
+                                std::array::from_fn(|axis| (ends[0][axis] + ends[1][axis]) / 2.0);
+                            let expected_moment = cross(centroid, [total_mass, 0.0, 0.0]);
+                            for axis in 0..3 {
+                                assert!(
+                                    (inertia_moment[axis] - expected_moment[axis]).abs() < 1e-8
+                                );
+                            }
+                        }
                     }
                 }
             }

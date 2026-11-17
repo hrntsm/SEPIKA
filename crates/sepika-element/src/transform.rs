@@ -21,7 +21,7 @@ impl EndGeometry {
     }
 
     pub(crate) fn try_of_element(data: &ElementData, model: &Model) -> Result<Self, String> {
-        let resolved = model.primary_beam_axis_ends(data)?;
+        let resolved = model.primary_frame_axis_ends(data)?;
         let nodes = [data.nodes[0], data.nodes[1]];
         let coords = resolved.unwrap_or_else(|| {
             nodes.map(|n| {

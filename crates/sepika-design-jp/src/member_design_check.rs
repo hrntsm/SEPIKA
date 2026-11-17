@@ -265,6 +265,25 @@ pub fn run_member_design_checks(
             .iter()
             .find(|a| a.elem == *elem_id)
             .cloned();
+        if kind == MemberKind::Column
+            && mat.category == sepika_core::model::MaterialCategory::Steel
+            && !steel_attr
+                .as_ref()
+                .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
+        {
+            if let Some(reason) = crate::steel::buckling::eccentric_column_k_reason(model, elem) {
+                for (pos, _) in &mf.at {
+                    member_checks.push((
+                        *elem_id,
+                        *pos,
+                        CheckOutcome::Skipped {
+                            reason: reason.clone(),
+                        },
+                    ));
+                }
+                continue;
+            }
+        }
         let (lk_y_auto, lk_z_auto) = if kind == MemberKind::Column {
             match crate::steel::buckling::steel_column_k_axes_with_index(
                 model,

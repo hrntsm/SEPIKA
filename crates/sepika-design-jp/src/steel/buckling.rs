@@ -47,10 +47,15 @@ pub fn sway_buckling_k(ga: f64, gb: f64) -> f64 {
     (std::f64::consts::PI / x).max(1.0)
 }
 
+/// 自動K算定の節点剛比に非0柱偏心が含まれる場合、対象柱付きで適用外理由を返す。
+pub fn eccentric_column_k_reason(model: &Model, elem: &ElementData) -> Option<String> {
+    model.elements.iter().find(|e| e.end_offsets_mm != [[0.0;3];2] && model.element_section(e).is_some_and(|s| s.frame_use == Some(sepika_core::model::FrameSectionUse::Column)) && e.nodes.iter().any(|n| elem.nodes.contains(n))).map(|column| format!("柱 ID {}: 接続柱 ID {} の非0XYZ偏心に対する自動座屈長さ係数は未対応です。両主軸の座屈長さを明示してください", elem.id.0, column.id.0))
+}
+
 /// 線材（両端 2 節点）の始端・終端座標。
 fn node_coords(model: &Model, elem: &ElementData) -> Option<([f64; 3], [f64; 3])> {
     if let Some([p0, p1]) = model
-        .primary_beam_axis_ends(elem)
+        .primary_frame_axis_ends(elem)
         .unwrap_or_else(|reason| panic!("{reason}"))
     {
         return Some((p0, p1));
@@ -180,7 +185,7 @@ pub fn steel_column_k_with_index(
     index: &NodeAdjacency,
     elem: &ElementData,
 ) -> Option<f64> {
-    if elem.kind != ElementKind::Beam {
+    if elem.kind != ElementKind::Beam || eccentric_column_k_reason(model, elem).is_some() {
         return None;
     }
     line_geometry(model, elem)?;
@@ -311,7 +316,7 @@ pub fn steel_column_k_axes_with_index(
     index: &NodeAdjacency,
     elem: &ElementData,
 ) -> Option<(f64, f64)> {
-    if elem.kind != ElementKind::Beam {
+    if elem.kind != ElementKind::Beam || eccentric_column_k_reason(model, elem).is_some() {
         return None;
     }
     let (p0, p1) = node_coords(model, elem)?;

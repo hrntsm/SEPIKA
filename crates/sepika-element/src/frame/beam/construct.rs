@@ -55,7 +55,8 @@ impl BeamElement {
         data: &sepika_core::model::ElementData,
         model: &Model,
     ) -> Result<Self, String> {
-        if model.primary_beam_axis_ends(data)?.is_some() && model.element_material(data).is_none() {
+        if model.primary_frame_axis_ends(data)?.is_some() && model.element_material(data).is_none()
+        {
             return Err(format!(
                 "部材 ID {} i/j端の材料: 未指定または参照先がありません",
                 data.id.0

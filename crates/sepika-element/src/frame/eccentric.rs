@@ -1,11 +1,11 @@
-//! 梁の実材軸端と接続節点の固定初期幾何による適合。
+//! 大梁・柱の実材軸端と接続節点の固定初期幾何による適合。
 use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
 use sepika_core::model::{ElementData, Model};
 use smallvec::SmallVec;
 
 fn offsets(data: &ElementData, model: &Model) -> Option<[[f64; 3]; 2]> {
     model
-        .primary_beam_axis_ends(data)
+        .primary_frame_axis_ends(data)
         .unwrap_or_else(|reason| panic!("{reason}"))
         .map(|ends| {
             std::array::from_fn(|side| {
@@ -175,6 +175,19 @@ crate::behavior::forward_element_behavior!(EccentricMember, inner, {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn column_gravity_arm_transfers_fifty_kn_with_virtual_work_once() {
+        let mut force = [0.0; 12];
+        force[2] = -50000.0;
+        let r = [[100.0, 0.0, 0.0], [0.0; 3]];
+        let nodal = force_to_node(&force, r);
+        assert_eq!(&nodal[..6], &[0.0, 0.0, -50000.0, 0.0, 5000000.0, 0.0]);
+        let node = [0.2, -0.3, 0.4, 0.001, 0.002, 0.003];
+        let actual_vertical = 0.2;
+        let work: f64 = nodal[..6].iter().zip(node).map(|(f, u)| f * u).sum();
+        assert_eq!(work, -50000.0 * actual_vertical);
+    }
 
     #[test]
     fn vertical_arm_keeps_force_sign_and_parallel_force_has_no_moment() {

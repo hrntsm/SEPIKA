@@ -9983,7 +9983,7 @@ fn xyz_offset_length_edit_preserves_manual_load_extent_intent_and_undo() {
     let mut stack = UndoStack::new();
     assert!(stack.run(
         &mut model,
-        Box::new(crate::SetBeamEndOffsets {
+        Box::new(crate::SetMemberEndOffsets {
             member: SupportMemberId::Primary(ElemId(0)),
             value: [[0.0; 3], [0.0, 0.0, 300.0]]
         })
@@ -9999,7 +9999,7 @@ fn xyz_offset_length_edit_preserves_manual_load_extent_intent_and_undo() {
     let edited = model.clone();
     assert!(!stack.run(
         &mut model,
-        Box::new(crate::SetBeamEndOffsets {
+        Box::new(crate::SetMemberEndOffsets {
             member: SupportMemberId::Primary(ElemId(0)),
             value: [[0.0; 3], [-200.0, 0.0, 0.0]]
         })
@@ -10135,4 +10135,37 @@ fn secondary_support_reversal_keeps_physical_end_offsets_and_undo_redo() {
     assert!(model.eq_ignoring_dofmap(&original));
     stack.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&edited));
+}
+
+#[test]
+fn column_offsets_validate_candidate_and_undo_can_restore_zero_after_a_wall_is_added() {
+    let mut model = beam_offsets_fixture::model();
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
+    let mut stack = UndoStack::default();
+    stack.run(
+        &mut model,
+        Box::new(SetMemberEndOffsets {
+            member: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+            value: [[100.0, 0.0, 0.0]; 2],
+        }),
+    );
+    assert_eq!(model.elements[0].end_offsets_mm, [[100.0, 0.0, 0.0]; 2]);
+    let mut wall = model.elements[0].clone();
+    wall.id = ElemId(3);
+    wall.kind = ElementKind::Wall;
+    wall.nodes = vec![NodeId(0), NodeId(1), NodeId(3), NodeId(2)].into();
+    wall.end_offsets_mm = [[0.0; 3]; 2];
+    model.elements.push(wall);
+    stack.undo(&mut model);
+    assert_eq!(model.elements[0].end_offsets_mm, [[0.0; 3]; 2]);
+    let command = SetMemberEndOffsets {
+        member: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+        value: [[100.0, 0.0, 0.0]; 2],
+    };
+    let rejected = command.apply(&mut model);
+    assert!(rejected
+        .rejection()
+        .is_some_and(|reason| reason.contains("柱 ID 0") && reason.contains("壁要素 ID 3")));
+    assert_eq!(model.elements[0].end_offsets_mm, [[0.0; 3]; 2]);
 }
