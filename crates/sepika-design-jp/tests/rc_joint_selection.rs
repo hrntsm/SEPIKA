@@ -1,4 +1,5 @@
 use sepika_core::dof::Dof6Mask;
+use sepika_core::geom::vec3::local_frame_axes;
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material,
@@ -86,7 +87,11 @@ fn model() -> Model {
                 nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
                 section: Some(SectionId(i as u32)),
                 local_axis: LocalAxis {
-                    ref_vector: [0.0, 1.0, 0.0],
+                    ref_vector: if i < 2 {
+                        [1.0, 0.0, 0.0]
+                    } else {
+                        [0.0, 0.0, 1.0]
+                    },
                 },
                 end_cond: [EndCondition::Fixed; 2],
                 force_regime: ForceRegime::Auto,
@@ -144,6 +149,20 @@ fn outcome(model: &Model, forces: &[(ElemId, ForcesAt<'_>)]) -> Option<CheckOutc
 }
 
 fn checked(model: &Model, forces: &[(ElemId, ForcesAt<'_>)]) -> CheckResult {
+    for element in &model.elements {
+        let axes = local_frame_axes(
+            model.node(element.nodes[0]).unwrap().coord,
+            model.node(element.nodes[1]).unwrap().coord,
+            element.local_axis.ref_vector,
+        )
+        .unwrap();
+        if element.section.unwrap().0 < 2 {
+            assert_eq!(axes[1], [1.0, 0.0, 0.0], "柱Qyは全体X方向");
+            assert_eq!(axes[2].map(f64::abs), [0.0, 1.0, 0.0], "柱Qzは全体Y方向");
+        } else {
+            assert_eq!(axes[1], [0.0, 0.0, 1.0], "梁の上下筋は全体鉛直方向");
+        }
+    }
     match outcome(model, forces).expect("中央接合部の結果") {
         CheckOutcome::Checked(result) => result,
         result => panic!("現行の算定結果を期待: {result:?}"),
@@ -243,6 +262,17 @@ fn upper_column_force_order_changes_adopted_depth_and_capacity() {
 #[test]
 fn transverse_column_shear_is_subtracted_from_the_same_demand() {
     let model = model();
+    for element in &model.elements[..2] {
+        let axes = local_frame_axes(
+            model.node(element.nodes[0]).unwrap().coord,
+            model.node(element.nodes[1]).unwrap().coord,
+            element.local_axis.ref_vector,
+        )
+        .unwrap();
+        let global_shear =
+            std::array::from_fn::<_, 3, _>(|i| 100_000.0 * axes[1][i] + 900_000.0 * axes[2][i]);
+        assert_eq!(global_shear, [100_000.0, 900_000.0, 0.0]);
+    }
     let mut column = COLUMN;
     for (_, f) in &mut column {
         f[2] = 900_000.0;
