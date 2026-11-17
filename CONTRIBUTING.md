@@ -98,7 +98,7 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 | `sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs`・`nonnodal_quantity_reference.rs` | 非節点小梁の材料別数量。design-jpの数量計算とassertをGUI・MCPの編集操作から検証 | app `src/app/nonnodal_quantity_acceptance_tests.rs`、mcp `src/nonnodal_quantity_acceptance_tests.rs` |
 | `sepika-design-jp/tests/fixtures/lateral_bracing_model.rs` | 横補剛の検定入力。GUI・MCPからdesign-jpの同一検定契約を検証 | app `src/app/tests.rs`、mcp `src/tests.rs` |
 | `sepika-job/tests/fixtures/steel_slab_model.rs` | 鋼床板の密度・物理質量。jobの重量準備をGUI・MCP入口でも検証 | job `tests/steel_slab_density.rs`・`tests/slab_physical_mass.rs`、app `tests/slab_physical_mass.rs`・`src/app/tests.rs`、mcp `src/server.rs` |
-| `sepika-job/tests/fixtures/seismic_freshness_model.rs`・`high_density_steel_model.rs` | 地震荷重の更新と高密度鋼材。jobの荷重準備・検証契約をGUI・MCPからも検証。鋼床板モデルもこの入力を使用 | job `tests/seismic_freshness.rs`・`tests/high_density_steel.rs`・`tests/member_load_direction.rs`、app `src/app/tests.rs`、mcp `src/server.rs` |
+| `sepika-job/tests/fixtures/seismic_freshness_model.rs`・`high_density_steel_model.rs` | 地震荷重の更新と高密度鋼材。jobの荷重準備・検証契約をGUI・MCPからも検証。鋼床板モデルもこの入力を使用 | job `tests/seismic_freshness.rs`・`tests/high_density_steel.rs`・`tests/steel_weight_reduction.rs`・`tests/member_load_direction.rs`、app `src/app/tests.rs`、mcp `src/server.rs` |
 
 appの `tests/support/frame_gravity.rs` は `full_model.rs`・`wall_model.rs` の保存重力組合せ選択、
 `full_model_study.rs`・`full_model_study_wire.rs` は `full_model.rs` のGUI検討・Windows実通信テストを管理する。
