@@ -162,7 +162,7 @@ impl AxisGroup {
 }
 
 impl Model {
-    /// 大梁・柱は解決済み実材軸、それ以外は材端節点間の長さ `[mm]`。
+    /// 大梁・柱・ブレースは解決済み実材軸、それ以外は材端節点間の長さ `[mm]`。
     /// 二節点・節点参照が不足する場合は0、実配置未解決の場合は基準節点間の距離を返す。
     pub fn member_length(&self, elem: &ElementData) -> f64 {
         if let Ok(Some([a, b])) = self.primary_frame_axis_ends(elem) {

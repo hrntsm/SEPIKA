@@ -74,7 +74,17 @@ pub(crate) fn validate_global_mass_inputs(
 ) -> Result<(), sepika_math::solver::SolveError> {
     sepika_core::panel_zone::validate_panel_connection_offsets(model)
         .map_err(sepika_math::solver::SolveError::InvalidInput)?;
-    validate_mass_inputs(model, true)
+    validate_mass_inputs(model, true)?;
+    for elem in model
+        .elements
+        .iter()
+        .filter(|elem| matches!(elem.kind, ElementKind::Brace { .. }))
+    {
+        if let Some(reason) = sepika_element::factory::elastic_stiffness_input_issue(elem, model) {
+            return Err(sepika_math::solver::SolveError::InvalidInput(reason));
+        }
+    }
+    Ok(())
 }
 
 fn validate_mass_inputs(
@@ -139,15 +149,22 @@ fn validate_mass_inputs(
         }
     }
     for elem in model.elements.iter().filter(|elem| {
-        matches!(
-            elem.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-        )
+        elem.kind.is_primary_frame_support()
+            || matches!(elem.kind, ElementKind::Brace { .. })
+                && model.mass_method != sepika_core::model::MassMethod::LumpedOnly
+                && !model.uses_damper_total_weight(elem)
     }) {
-        sepika_element::frame::beam::composite_props_of(model, elem)
-            .map_err(sepika_math::solver::SolveError::InvalidInput)?;
-        if let Some(reason) = sepika_element::factory::elastic_stiffness_input_issue(elem, model) {
-            return Err(sepika_math::solver::SolveError::InvalidInput(reason));
+        if elem.kind.is_primary_frame_support() {
+            sepika_element::frame::beam::composite_props_of(model, elem)
+                .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+            if let Some(reason) =
+                sepika_element::factory::elastic_stiffness_input_issue(elem, model)
+            {
+                return Err(sepika_math::solver::SolveError::InvalidInput(reason));
+            }
+        } else {
+            sepika_element::frame::truss::TrussElement::try_new(elem, model)
+                .map_err(sepika_math::solver::SolveError::InvalidInput)?;
         }
     }
     Ok(())

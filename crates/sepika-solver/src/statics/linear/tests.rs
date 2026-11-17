@@ -2310,53 +2310,65 @@ fn invalid_beam_shear_modulus_is_rejected_by_public_static_entries_and_construct
 
 #[test]
 fn eccentric_member_load_reactions_keep_transfer_moment_after_end_releases_and_rigid_zones() {
-    for e in [-100.0, 0.0, 100.0] {
-        for released in [[false, false], [true, false], [true, true]] {
-            for rigid in [0.0, 100.0] {
-                for reversed in [false, true] {
-                    let mut model = owned_udl_model();
-                    model.elements[0].end_offsets_mm = [[0.0, 0.0, e]; 2];
-                    model.elements[0].end_cond = released.map(|v| {
-                        if v {
-                            EndCondition::Pinned
-                        } else {
-                            EndCondition::Fixed
+    for brace in [false, true] {
+        for e in [-100.0, 0.0, 100.0] {
+            for released in [[false, false], [true, false], [true, true]] {
+                for rigid in [0.0, 100.0] {
+                    for reversed in [false, true] {
+                        let mut model = owned_udl_model();
+                        if brace {
+                            model.elements[0].kind = ElementKind::Brace {
+                                tension_only: false,
+                            };
+                            model.sections[0].frame_use = Some(FrameSectionUse::Brace);
                         }
-                    });
-                    model.elements[0].rigid_zone.length_i = rigid;
-                    model.elements[0].rigid_zone.length_j = rigid;
-                    if reversed {
-                        model.elements[0].nodes.reverse();
-                    }
-                    model.load_cases[0].member[0] = MemberLoad::manual(
-                        ElemId(0),
-                        [1.0, 0.0, 0.0],
-                        MemberLoadKind::Distributed {
-                            a: 0.0,
-                            b: 1000.0,
-                            w1: 2.0,
-                            w2: 2.0,
-                        },
-                    );
-                    let map = DofMap::build(&model);
-                    let reducer = Reducer::build(&model, &map);
-                    let stiffness =
-                        StaticStiffness::build(&model, &map, &reducer, model.load_cases[0].kind)
-                            .unwrap();
-                    let entries: Vec<_> = stiffness
-                        .behaviors
-                        .iter()
-                        .map(|(id, b, g)| (*id, b.as_ref(), g.as_slice()))
-                        .collect();
-                    let ledger = PhysicalLoadLedger::new(&model, &model.load_cases[0]).unwrap();
-                    let (result, reactions) =
-                        recover_static(&model, &map, &[], &ledger, &entries).unwrap();
-                    for reaction in reactions {
-                        assert!((reaction[0] + 1000.0).abs() < 1e-7, "{reaction:?}");
-                        assert!((reaction[4] + 1000.0 * e).abs() < 1e-7, "{reaction:?}");
-                    }
-                    for (_, force) in result.member_forces[0].1.at.iter() {
-                        assert!(force[4].abs() < 1e-7 && force[5].abs() < 1e-7);
+                        model.elements[0].end_offsets_mm = [[0.0, 0.0, e]; 2];
+                        model.elements[0].end_cond = released.map(|v| {
+                            if v {
+                                EndCondition::Pinned
+                            } else {
+                                EndCondition::Fixed
+                            }
+                        });
+                        model.elements[0].rigid_zone.length_i = rigid;
+                        model.elements[0].rigid_zone.length_j = rigid;
+                        if reversed {
+                            model.elements[0].nodes.reverse();
+                        }
+                        model.load_cases[0].member[0] = MemberLoad::manual(
+                            ElemId(0),
+                            [1.0, 0.0, 0.0],
+                            MemberLoadKind::Distributed {
+                                a: 0.0,
+                                b: 1000.0,
+                                w1: 2.0,
+                                w2: 2.0,
+                            },
+                        );
+                        let map = DofMap::build(&model);
+                        let reducer = Reducer::build(&model, &map);
+                        let stiffness = StaticStiffness::build(
+                            &model,
+                            &map,
+                            &reducer,
+                            model.load_cases[0].kind,
+                        )
+                        .unwrap();
+                        let entries: Vec<_> = stiffness
+                            .behaviors
+                            .iter()
+                            .map(|(id, b, g)| (*id, b.as_ref(), g.as_slice()))
+                            .collect();
+                        let ledger = PhysicalLoadLedger::new(&model, &model.load_cases[0]).unwrap();
+                        let (result, reactions) =
+                            recover_static(&model, &map, &[], &ledger, &entries).unwrap();
+                        for reaction in reactions {
+                            assert!((reaction[0] + 1000.0).abs() < 1e-7, "{reaction:?}");
+                            assert!((reaction[4] + 1000.0 * e).abs() < 1e-7, "{reaction:?}");
+                        }
+                        for (_, force) in result.member_forces[0].1.at.iter() {
+                            assert!(force[4].abs() < 1e-7 && force[5].abs() < 1e-7);
+                        }
                     }
                 }
             }
@@ -2606,5 +2618,84 @@ fn building_rigid_zone_switch_reaches_incremental_and_timehistory_member_load_st
                 "{kind:?} {regime:?}"
             );
         }
+    }
+}
+
+#[test]
+fn xyz_brace_tension_iteration_uses_rigid_arm_rotation_and_physical_axis() {
+    for moment in [-1000.0, 1000.0] {
+        let mut model = scalar_axial_model(ElementKind::Brace { tension_only: true }, false);
+        model.elements[0].end_offsets_mm = [[0.0; 3], [600.0, 0.0, -200.0]];
+        model.elements[0].end_cond = [EndCondition::Pinned; 2];
+        model.nodes[1].restraint = Dof6Mask(0b101111);
+        model.nodes[1].support_spring = Some([0.0, 0.0, 0.0, 0.0, 2e8, 0.0]);
+        model.load_cases[0].nodal[0].values = [0.0, 0.0, 0.0, 0.0, moment, 0.0];
+        model.stress_cfg.tension_only_iteration = true;
+        let factor = if moment > 0.0 { 1e-6 } else { 1.0 };
+        let theta = moment / (2e8 + factor * 200000.0 * 360000.0);
+        let expected_n = -factor * 200000.0 * 600.0 * theta;
+        let result = linear_static_once(&model, model.load_cases[0].id).unwrap();
+        approx::assert_relative_eq!(result.disp[1][4], theta, max_relative = 1e-10);
+        approx::assert_relative_eq!(
+            axial_force(&result, ElemId(0)),
+            expected_n,
+            max_relative = 1e-10
+        );
+        let forces = &result
+            .member_forces
+            .iter()
+            .find(|(id, _)| *id == ElemId(0))
+            .unwrap()
+            .1;
+        for (_, force) in &forces.at {
+            assert_eq!(&force[1..], &[0.0; 5]);
+        }
+    }
+}
+
+#[test]
+fn xyz_brace_unrestrained_rotation_is_rejected_without_artificial_stiffness() {
+    let mut model = scalar_axial_model(
+        ElementKind::Brace {
+            tension_only: false,
+        },
+        false,
+    );
+    model.elements[0].end_offsets_mm = [[100.0, 200.0, 300.0]; 2];
+    model.nodes[1].restraint = Dof6Mask(0b100011);
+    model.nodes[1].support_spring = None;
+    let error = linear_static_once(&model, model.load_cases[0].id)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("特異") || error.contains("不安定"),
+        "{error}"
+    );
+}
+
+#[test]
+fn xyz_brace_public_static_entries_return_reasons_for_invalid_geometry() {
+    for case in 0..7 {
+        let mut model = scalar_axial_model(
+            ElementKind::Brace {
+                tension_only: false,
+            },
+            false,
+        );
+        match case {
+            0 => model.elements[0].end_offsets_mm = [[0.0; 3], [0.0, 0.0, -1000.0]],
+            1 => model.elements[0].end_offsets_mm[0][0] = f64::NAN,
+            2 => model.elements[0].end_offsets_mm[1][2] = f64::INFINITY,
+            3 => model.elements[0].nodes[0] = NodeId(99),
+            4 => model.elements[0].nodes.clear(),
+            5 => model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0],
+            _ => model.nodes[1].coord[0] = f64::INFINITY,
+        }
+        let error = linear_static_once(&model, model.load_cases[0].id)
+            .unwrap_err()
+            .to_string();
+        let item = ["実材軸長", "偏心", "偏心", "節点", "節点", "局所", "座標"][case];
+        assert!(error.contains(item), "case={case}: {error}");
+        assert!(crate::statics::analysis::Analysis::prepare(&model).is_err());
     }
 }

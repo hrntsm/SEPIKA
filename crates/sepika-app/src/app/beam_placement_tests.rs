@@ -316,3 +316,82 @@ fn column_and_post_xyz_edits_keep_distinct_freshness_and_round_trip_undo() {
     app.undo_action();
     assert_eq!(app.core.model.elements[0].end_offsets_mm, [[0.0; 3]; 2]);
 }
+
+#[test]
+fn xyz_brace_gui_edit_invalidates_results_and_round_trips_undo_save() {
+    let mut app = app();
+    app.core.model.elements[0].kind = sepika_core::model::ElementKind::Brace { tension_only: true };
+    app.core.model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Brace);
+    let nodes = app.core.model.nodes.clone();
+    let offsets = [[100.0, 200.0, 300.0], [-400.0, 500.0, -600.0]];
+    app.core.scoped.staleness.mark_fresh();
+    app.core.scoped.staleness.preparation_stale = false;
+    app.core.scoped.staleness.design_stale = false;
+    assert!(app.apply_model_edit(Box::new(SetMemberEndOffsets {
+        member: SupportMemberId::Primary(ElemId(0)),
+        value: offsets
+    })));
+    assert!(app.core.scoped.staleness.results_stale);
+    assert!(app.core.scoped.staleness.preparation_stale);
+    assert!(app.core.scoped.staleness.design_stale);
+    assert_eq!(app.core.model.nodes, nodes);
+    let path = std::env::temp_dir().join(format!("brace-xyz-{}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
+    let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    assert_eq!(restored.elements[0].end_offsets_mm, offsets);
+    assert_eq!(restored.nodes, nodes);
+    let mut json = serde_json::to_value(&restored).unwrap();
+    json["elements"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("end_offsets_mm");
+    assert!(serde_json::from_value::<sepika_core::model::Model>(json).is_err());
+    std::fs::remove_file(path).unwrap();
+    app.undo_action();
+    assert_eq!(app.core.model.elements[0].end_offsets_mm, [[0.0; 3]; 2]);
+    app.redo_action();
+    assert_eq!(app.core.model.elements[0].end_offsets_mm, offsets);
+}
+
+#[test]
+fn xyz_brace_study_copies_input_rejects_proposal_edits_and_keeps_main_identity() {
+    use super::study::Location;
+    let mut app = app();
+    app.core.model.elements[0].kind = sepika_core::model::ElementKind::Brace {
+        tension_only: false,
+    };
+    app.core.model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Brace);
+    let offsets = [[100.0, 200.0, 300.0]; 2];
+    assert!(app.apply_model_edit(Box::new(SetMemberEndOffsets {
+        member: SupportMemberId::Primary(ElemId(0)),
+        value: offsets
+    })));
+    let main = app.input_reference();
+    let study = app
+        .create_study("偏心入力を保持する検討".into(), vec![ElemId(2)])
+        .unwrap();
+    let proposal = app.create_comparison(study, "比較案".into()).unwrap();
+    app.switch_study(Location::Proposal(study, proposal))
+        .unwrap();
+    assert_eq!(app.core.model.elements[0].end_offsets_mm, offsets);
+    let reference = app.input_reference();
+    let revision = app.core.scoped.undo.revision();
+    assert!(!app.apply_model_edit(Box::new(SetMemberEndOffsets {
+        member: SupportMemberId::Primary(ElemId(0)),
+        value: [[0.0; 3]; 2]
+    })));
+    assert_eq!(app.input_reference(), reference);
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    assert_eq!(app.core.model.elements[0].end_offsets_mm, offsets);
+    app.switch_study(Location::Main).unwrap();
+    assert_eq!(app.input_reference(), main);
+    assert!(app.apply_model_edit(Box::new(SetMemberEndOffsets {
+        member: SupportMemberId::Primary(ElemId(0)),
+        value: [[0.0; 3]; 2]
+    })));
+    assert_ne!(app.input_reference(), main);
+    assert_eq!(
+        app.studies.items[study].baseline.model.elements[0].end_offsets_mm,
+        offsets
+    );
+}

@@ -569,3 +569,31 @@ fn eccentric_deformed_curve_selection_reuses_the_rendered_physical_curve() {
         results
     );
 }
+
+#[test]
+fn xyz_brace_visible_axis_is_selectable_and_rigid_arm_toggle_preserves_body() {
+    let mut app = App::default();
+    let mut model = crate::sample::portal_frame();
+    model.elements[2].kind = sepika_core::model::ElementKind::Brace {
+        tension_only: false,
+    };
+    model.sections[1].frame_use = Some(sepika_core::model::FrameSectionUse::Brace);
+    model.elements[2].end_offsets_mm = [[0.0, 0.0, 500.0]; 2];
+    app.load_model(model);
+    app.ui.view.show_sections = false;
+    let ctx = egui::Context::default();
+    frame(&ctx, &mut app, vec![]);
+    let shown = frame(&ctx, &mut app, vec![]);
+    let point = beam_point(&shown);
+    let count = |output: &egui::FullOutput| {
+        output.shapes.iter().filter(|shape| matches!(shape.shape,
+        egui::Shape::LineSegment { stroke,.. } if stroke.color==theme::SECONDARY_AMBER && stroke.width==1.5)).count()
+    };
+    app.ui.view.show_offset_connections = false;
+    let hidden = frame(&ctx, &mut app, vec![]);
+    assert!(count(&shown) > count(&hidden));
+    assert_eq!(point, beam_point(&hidden));
+    click(&ctx, &mut app, point);
+    assert_eq!(app.ui.scoped.selection.active_member(), Some(ElemId(2)));
+    assert!(highlighted(&frame(&ctx, &mut app, vec![])));
+}
