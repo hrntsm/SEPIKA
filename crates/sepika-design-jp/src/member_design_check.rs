@@ -441,7 +441,17 @@ pub fn run_member_design_checks(
                         Some(sec),
                         Some(mat.category),
                     ) == sepika_core::structure_kind::StructureKind::Src);
-            let mut outcome = if missing_gravity {
+            let eccentric_brace_compression = kind == MemberKind::Brace
+                && mfa.n < 0.0
+                && elem.end_offsets_mm != [[0.0; 3]; 2]
+                && !ctx
+                    .steel_attr
+                    .as_ref()
+                    .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
+                && !model.brb_attrs.iter().any(|a| a.elem == *elem_id);
+            let mut outcome = if eccentric_brace_compression {
+                CheckOutcome::Skipped { reason: "非0XYZ偏心ブレースの圧縮検定には強軸・弱軸の座屈長さの直接指定が必要です。実材軸長・剛体接続長からは自動算定しません".into() }
+            } else if missing_gravity {
                 CheckOutcome::Skipped {
                     reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
                 }

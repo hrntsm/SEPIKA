@@ -27,7 +27,7 @@ pub struct BeamPlacement {
 }
 
 impl Model {
-    /// 大梁・柱・小梁・間柱の実配置を導出する。未指定・不正な偏心、位置、断面は対象と理由付きで失敗する。
+    /// 大梁・柱・ブレース・小梁・間柱の実配置を導出する。未指定・不正な偏心、位置、断面は対象と理由付きで失敗する。
     pub fn beam_placement(&self, member: SupportMemberId) -> Result<BeamPlacement, String> {
         self.resolve_beam_placement(member, false)
     }
@@ -49,7 +49,10 @@ impl Model {
             let (ends, eccentricity, section, reference) = match member {
                 SupportMemberId::Primary(id) => {
                     let e = self.element(id).ok_or("部材がありません")?;
-                    if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
+                    if !(e.kind.is_primary_frame_support()
+                        || matches!(e.kind, ElementKind::Brace { .. }))
+                        || e.nodes.len() != 2
+                    {
                         return Err("大梁の二節点線材ではありません".to_string());
                     }
                     let section = self
@@ -57,9 +60,13 @@ impl Model {
                         .ok_or("断面がありません")?;
                     if !matches!(
                         section.frame_use,
-                        Some(FrameSectionUse::Girder | FrameSectionUse::Column)
+                        Some(
+                            FrameSectionUse::Girder
+                                | FrameSectionUse::Column
+                                | FrameSectionUse::Brace
+                        )
                     ) {
-                        return Err("断面用途が大梁・柱ではありません".to_string());
+                        return Err("断面用途が大梁・柱・ブレースではありません".to_string());
                     }
                     let a = self.node(e.nodes[0]).ok_or("i端節点がありません")?.coord;
                     let b = self.node(e.nodes[1]).ok_or("j端節点がありません")?.coord;
@@ -110,7 +117,7 @@ impl Model {
         resolve().map_err(|reason| format!("{} の実配置: {reason}", beam_label(member)))
     }
 
-    /// 大梁・柱用途の主架構の実材軸端 `[mm]` を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
+    /// 大梁・柱・ブレースの実材軸端 `[mm]` を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
     pub fn primary_frame_axis_ends(
         &self,
         data: &ElementData,
@@ -126,7 +133,8 @@ impl Model {
                 ["i端", "j端"][side]
             ));
         }
-        if !data.kind.is_primary_frame_support() {
+        let brace = matches!(data.kind, ElementKind::Brace { .. });
+        if !data.kind.is_primary_frame_support() && !brace {
             if data.end_offsets_mm != [[0.0; 3]; 2] {
                 return Err(format!(
                     "部材 ID {}: この種別の非0偏心は未対応です",
@@ -138,13 +146,18 @@ impl Model {
         let fail = |end: &str, item: &str, reason: &str| {
             format!("部材 ID {} {end}の{item}: {reason}", data.id.0)
         };
+        if brace && data.end_offsets_mm == [[0.0; 3]; 2] {
+            return Ok(None);
+        }
         let section = self
             .element_section(data)
             .ok_or_else(|| fail("i/j端", "断面", "未指定または参照先がありません"))?;
-        if !matches!(
-            section.frame_use,
-            Some(FrameSectionUse::Girder | FrameSectionUse::Column)
-        ) {
+        if !brace
+            && !matches!(
+                section.frame_use,
+                Some(FrameSectionUse::Girder | FrameSectionUse::Column)
+            )
+        {
             if data.end_offsets_mm != [[0.0; 3]; 2] {
                 return Err(fail(
                     "i/j端",
@@ -154,12 +167,14 @@ impl Model {
             }
             return Ok(None);
         }
-        if section.frame_use == Some(FrameSectionUse::Column)
+        if !brace
+            && section.frame_use == Some(FrameSectionUse::Column)
             && data.end_offsets_mm == [[0.0; 3]; 2]
         {
             return Ok(None);
         }
-        if section.frame_use == Some(FrameSectionUse::Column)
+        if !brace
+            && section.frame_use == Some(FrameSectionUse::Column)
             && data.end_offsets_mm != [[0.0; 3]; 2]
         {
             for wall in self.elements.iter().filter(|e| e.kind == ElementKind::Wall) {

@@ -1,4 +1,4 @@
-//! 大梁・柱の実材軸端と接続節点の固定初期幾何による適合。
+//! 大梁・柱・ブレースの実材軸端と接続節点の固定初期幾何による適合。
 use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
 use sepika_core::model::{ElementData, Model};
 use smallvec::SmallVec;

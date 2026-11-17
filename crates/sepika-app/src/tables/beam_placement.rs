@@ -1,5 +1,5 @@
 use crate::app::App;
-use sepika_core::model::{FrameSectionUse, SecondaryMemberKind, SupportMemberId};
+use sepika_core::model::{ElementKind, FrameSectionUse, SecondaryMemberKind, SupportMemberId};
 use sepika_edit::SetMemberEndOffsets;
 
 pub(super) fn beam_eccentricities(
@@ -20,11 +20,15 @@ pub(super) fn beam_eccentricities(
             .elements
             .iter()
             .filter(|e| {
-                e.kind.is_primary_frame_support()
+                (e.kind.is_primary_frame_support() || matches!(e.kind, ElementKind::Brace { .. }))
                     && model.element_section(e).is_some_and(|s| {
                         matches!(
                             s.frame_use,
-                            Some(FrameSectionUse::Girder | FrameSectionUse::Column)
+                            Some(
+                                FrameSectionUse::Girder
+                                    | FrameSectionUse::Column
+                                    | FrameSectionUse::Brace
+                            )
                         )
                     })
             })

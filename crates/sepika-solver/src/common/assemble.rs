@@ -141,11 +141,16 @@ fn validate_mass_inputs(
     for elem in model.elements.iter().filter(|elem| {
         matches!(
             elem.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            ElementKind::Beam
+                | ElementKind::Fiber
+                | ElementKind::MultiSpring
+                | ElementKind::Brace { .. }
         )
     }) {
-        sepika_element::frame::beam::composite_props_of(model, elem)
-            .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+        if elem.kind.is_primary_frame_support() {
+            sepika_element::frame::beam::composite_props_of(model, elem)
+                .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+        }
         if let Some(reason) = sepika_element::factory::elastic_stiffness_input_issue(elem, model) {
             return Err(sepika_math::solver::SolveError::InvalidInput(reason));
         }

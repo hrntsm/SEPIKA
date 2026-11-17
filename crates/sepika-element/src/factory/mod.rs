@@ -124,7 +124,7 @@ pub fn build_behavior_with_axial_factor(
         ElementKind::Brace { .. } => {
             let mut elem = crate::frame::truss::TrussElement::new(data, model);
             elem.a *= axial_factor;
-            Box::new(elem)
+            crate::frame::eccentric::connect(Box::new(elem), data, model)
         }
         ElementKind::NodalSpring => {
             Box::new(crate::springs::spring::NodalSpringElement::new(data, model))
@@ -308,7 +308,11 @@ pub fn build_nonlinear_behavior(
             }
             with_panel_offset(Box::new(member), data, model)
         }
-        ElementKind::Brace { .. } => Box::new(crate::frame::truss::TrussElement::new(data, model)),
+        ElementKind::Brace { .. } => crate::frame::eccentric::connect(
+            Box::new(crate::frame::truss::TrussElement::new(data, model)),
+            data,
+            model,
+        ),
         ElementKind::Wall => {
             let rc_wall = crate::wall::misc_wall::is_rc_wall(data, model);
             if rc_wall && !crate::wall::misc_wall::wall_is_seismic(data, model) {
