@@ -2614,3 +2614,5 @@ mod post_design_tests;
 
 #[cfg(test)]
 mod rc_column_boundary_tests;
+#[cfg(test)]
+mod steel_column_k_tests;

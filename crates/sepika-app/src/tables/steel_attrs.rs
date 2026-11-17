@@ -40,9 +40,9 @@ pub struct SteelAttrDraft {
     pub lb_end: String,
     /// 等間隔横補剛の本数の入力バッファ（空欄=なし）。
     pub lateral_brace_count: String,
-    /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（空欄=自動算定）。
+    /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（通常S柱は空欄なら未検定）。
     pub lk_y_direct: String,
-    /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（空欄=自動算定）。
+    /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（通常S柱は空欄なら未検定）。
     pub lk_z_direct: String,
     /// 横座屈修正係数 C の直接入力（空欄=自動算定）。
     pub c_direct: String,
@@ -57,7 +57,7 @@ impl SteelAttrDraft {
     ///
     /// 表示桁は項目ごとに固定する。欠損率・スカラップは 0.1% 刻み、長さ [mm] は
     /// 整数、横座屈修正係数 C は 0.01 刻みで、いずれも入力欄の想定精度に合わせる。
-    /// 未設定（`None`）の項目は空欄にし、「自動算定」を意味させる。
+    /// 未設定（`None`）の項目は空欄にする。
     fn sync_from(&mut self, attr: &SteelDesignAttr) {
         self.elem = Some(attr.elem);
         self.synced_for = Some(attr.elem);
@@ -137,7 +137,7 @@ fn parse_brace_count(s: &str) -> Result<Option<u32>, String> {
     Ok(Some(n))
 }
 
-/// 座屈長さ lk_y/lk_z の直接入力をパースする。空欄は `None`（自動算定）、
+/// 座屈長さ lk_y/lk_z の直接入力をパースする。空欄は `None`（未指定）、
 /// 入力があれば正の値を要求する（egui 非依存の純関数）。
 fn parse_lk_direct(s: &str, label: &str) -> Result<Option<f64>, String> {
     let s = s.trim();
@@ -149,7 +149,7 @@ fn parse_lk_direct(s: &str, label: &str) -> Result<Option<f64>, String> {
         .map_err(|_| format!("不正な{label}「{s}」: 数値ではありません"))?;
     if v <= 0.0 {
         return Err(format!(
-            "{label}は正の値で入力してください（空欄=自動算定）"
+            "{label}は正の値で入力してください（空欄=未指定）"
         ));
     }
     Ok(Some(v))
@@ -167,7 +167,7 @@ fn lb_direct_desc(v: Option<(f64, f64, f64)>) -> String {
 fn opt_len_desc(v: Option<f64>) -> String {
     match v {
         Some(x) => format!("{x:.0}"),
-        None => "自動".to_string(),
+        None => "未指定".to_string(),
     }
 }
 
@@ -191,7 +191,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     ui.label(
         "S造部材の断面検定用属性（継手・スカラップ欠損率、横座屈長さ lb の直接入力、\
          等間隔横補剛本数、座屈長さ lk_y/lk_z の直接入力、横座屈修正係数 C の直接入力）\
-         を設定します。lk_y/lk_z の直接入力は柱の自動算定（K・部材長）より優先されます。\
+         を設定します。通常S柱はlk_y/lk_zの両軸直接入力が必要で、空欄があれば未検定です。\
          C の直接入力は自動算定（材端モーメント比・上限2.3）より優先されます。",
     );
     ui.separator();
@@ -214,7 +214,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     let mut pending_edit: Option<SteelDesignAttr> = None;
     if app.core.model.steel_design_attrs.is_empty() {
         ui.label(
-            "設定済みのS造検定属性はありません(未設定の部材は欠損なし・座屈長さ自動として扱われます)。",
+            "設定済みのS造検定属性はありません（通常S柱は座屈長さの両軸直接入力が必要です）。",
         );
     } else {
         for attr in &app.core.model.steel_design_attrs {
@@ -375,7 +375,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     })
     .response
     .on_hover_text(
-        "空欄=自動算定(柱はK・部材長、柱以外は部材長)。指定した場合は柱の自動算定より優先されます。",
+        "通常S柱は両軸とも正の有限値を直接入力してください。空欄があれば未検定です。梁・通常ブレースは未指定なら部材長を用います。",
     );
 
     ui.horizontal(|ui| {
@@ -591,7 +591,7 @@ mod tests {
             lb_direct_desc(Some((1000.0, 2000.0, 3000.0))),
             "1000/2000/3000"
         );
-        assert_eq!(opt_len_desc(None), "自動");
+        assert_eq!(opt_len_desc(None), "未指定");
         assert_eq!(opt_len_desc(Some(3500.0)), "3500");
         assert_eq!(opt_count_desc(None), "なし");
         assert_eq!(opt_count_desc(Some(3)), "3");
