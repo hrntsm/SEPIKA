@@ -1513,6 +1513,24 @@ fn design_check_covers_every_member() {
     assert!(!results.joint_checks.is_empty(), "接合部の検定結果が空");
     assert!(!results.slab_checks.is_empty(), "スラブの検定結果が空");
 
+    let ordinary_steel_columns = app
+        .core
+        .model
+        .elements
+        .iter()
+        .filter(|elem| {
+            let Some(sec) = app.core.model.element_section(elem) else {
+                return false;
+            };
+            let Some(mat) = app.core.model.element_material(elem) else {
+                return false;
+            };
+            sec.frame_use == Some(sepika_core::model::FrameSectionUse::Column)
+                && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
+                    == sepika_core::structure_kind::StructureKind::S
+        })
+        .count();
+    assert_eq!(ordinary_steel_columns, 40);
     let mut checked = 0usize;
     let mut skipped = 0usize;
     let mut rc_src_positions = 0usize;
@@ -1540,6 +1558,7 @@ fn design_check_covers_every_member() {
                         | sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
                 )
             });
+        assert_eq!(mc.positions.len(), 3, "部材 {:?} の危険断面位置数", mc.elem);
         for p in &mc.positions {
             if let sepika_design_jp::CheckOutcome::Checked(r) = &p.outcome {
                 let ratio = r.ratio();
@@ -1557,6 +1576,28 @@ fn design_check_covers_every_member() {
                     mc.elem,
                     p.xi
                 );
+                let elem = app.core.model.element(mc.elem).unwrap();
+                let sec = app.core.model.element_section(elem).unwrap();
+                let mat = app.core.model.element_material(elem).unwrap();
+                assert_eq!(
+                    sec.frame_use,
+                    Some(sepika_core::model::FrameSectionUse::Column)
+                );
+                assert_eq!(
+                    sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
+                    sepika_core::structure_kind::StructureKind::S
+                );
+                assert!(
+                    reason.contains(&format!("柱 ID {}", mc.elem.0)) && reason.contains("直接指定")
+                );
+                let length_mm = app.core.model.member_length(elem);
+                let expected_faces = [
+                    elem.rigid_zone.face_i.unwrap() / length_mm,
+                    0.5,
+                    1.0 - elem.rigid_zone.face_j.unwrap() / length_mm,
+                ];
+                assert!(expected_faces.iter().any(|xi| (p.xi - xi).abs() < 1e-9));
+                assert!(p.xi > 0.0 && p.xi < 1.0);
                 skipped += 1;
             }
             if is_rc_src {
@@ -1564,8 +1605,8 @@ fn design_check_covers_every_member() {
             }
         }
     }
-    assert_eq!(skipped, 0, "Skipped がある（全位置 Checked のはず）");
-    assert_eq!(checked, 345, "Checked 位置数");
+    assert_eq!(skipped, 120, "両軸直接長未指定の通常S柱40本・各3位置");
+    assert_eq!(checked, 225, "通常S柱以外のChecked位置数");
     assert!(
         rc_src_positions > 0,
         "RC/SRC 部材の検定位置がない（フィクスチャに RC 部材があるはず）"
@@ -2998,10 +3039,10 @@ fn snapshot_key_scalars() {
             }
         });
     assert_eq!(
-        skipped_positions, 0,
-        "Skipped がある（全位置 Checked のはず）"
+        skipped_positions, 120,
+        "両軸直接長未指定の通常S柱40本・各3位置"
     );
-    assert_eq!(checked_positions, 345, "Checked 位置数");
+    assert_eq!(checked_positions, 225, "通常S柱以外のChecked位置数");
     line("design.checked_positions", checked_positions.to_string());
     line("design.skipped_positions", skipped_positions.to_string());
     // 接合条件不足の総合未検定で除外すると、算定済みの曲げ・たわみの数値回帰が空振りする。

@@ -327,9 +327,9 @@ mod tests {
                 .iter()
                 .filter(|row| row["elem"].as_u64().unwrap() < 2)
                 .collect();
-            assert!(skipped.len() >= 6, "{summary}");
+            assert_eq!(skipped.len(), 6, "{summary}");
             for id in [0, 1] {
-                assert!(skipped.iter().filter(|row| row["elem"] == id).count() >= 3);
+                assert_eq!(skipped.iter().filter(|row| row["elem"] == id).count(), 3);
             }
             assert!(skipped
                 .iter()

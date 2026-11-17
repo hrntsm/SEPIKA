@@ -303,7 +303,11 @@ pub fn run_member_design_checks(
                 let detail = crate::steel::buckling::eccentric_column_k_reason(model, elem)
                     .unwrap_or_else(|| "支点・柱梁端と梁遠端の回転拘束、層内軸力分布・同時座屈に対する自動Kの設計適用条件が未確定です".into());
                 let reason = format!("柱 ID {}: {}。{}の座屈長さを有限な非負値で直接指定してください（0は当該軸の座屈を無視する指定）", elem.id.0, detail, unresolved.join("・"));
+                let positions = design_positions(elem, model, length);
                 for (pos, _) in &mf.at {
+                    if !is_near_design_position(*pos, &positions) {
+                        continue;
+                    }
                     member_checks.push((
                         *elem_id,
                         *pos,

@@ -185,3 +185,45 @@ fn column_k_eccentric_column_reports_the_missing_axis_after_partial_direct_input
         );
     }
 }
+
+#[test]
+fn column_k_unchecked_and_direct_lengths_use_identical_face_positions() {
+    let mut model = input::portal(1.0);
+    for column in &mut model.elements[..2] {
+        column.rigid_zone.face_i = Some(150.0);
+        column.rigid_zone.face_j = Some(300.0);
+    }
+    let solved =
+        sepika_solver::statics::linear::linear_static_once(&model, sepika_core::ids::LoadCaseId(0))
+            .unwrap();
+    for (id, forces) in &solved.member_forces {
+        if id.0 < 2 {
+            assert!(forces.at.iter().any(|(pos, _)| *pos == 0.0));
+            assert!(forces.at.iter().any(|(pos, _)| *pos == 1.0));
+        }
+    }
+    for direct in [false, true] {
+        for attr in &mut model.steel_design_attrs {
+            attr.lk_y_direct = direct.then_some(6983.630277482522);
+        }
+        let report = run_member_design_checks(
+            &model,
+            &solved.member_forces,
+            &solved.panel_moments,
+            &MemberDesignCheckOptions::default(),
+        )
+        .unwrap();
+        for id in [0, 1] {
+            let positions: Vec<_> = report
+                .member_checks
+                .iter()
+                .filter(|(elem, _, _)| elem.0 == id)
+                .map(|(_, pos, outcome)| {
+                    assert_eq!(matches!(outcome, CheckOutcome::Checked(_)), direct);
+                    *pos
+                })
+                .collect();
+            assert_eq!(positions, vec![0.05, 0.5, 0.9]);
+        }
+    }
+}

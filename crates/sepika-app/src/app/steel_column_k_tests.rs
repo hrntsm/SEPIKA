@@ -17,7 +17,7 @@ fn column_k_gui_keeps_unchecked_reason_and_invalidates_saved_auto_k_contract() {
     let columns: Vec<_> = expected.iter().filter(|member| member.elem.0 < 2).collect();
     assert_eq!(columns.len(), 2);
     for column in columns {
-        assert!(column.positions.len() >= 3);
+        assert_eq!(column.positions.len(), 3);
         assert!(column.positions.iter().all(|position| matches!(&position.outcome, CheckOutcome::Skipped { reason } if reason.contains("直接指定"))));
     }
     for version in [56, sepika_core::result_contract::DESIGN_CONTRACT_VERSION] {
