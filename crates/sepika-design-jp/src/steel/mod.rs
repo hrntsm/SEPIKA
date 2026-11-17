@@ -12,7 +12,7 @@ pub use crate::material_strength::{
 
 mod beam;
 mod brace;
-/// 鉄骨造柱の座屈長さ係数 K（鋼構造塑性設計指針、水平移動非拘束）。
+/// 鉄骨造柱の座屈長さ係数 K（水平移動非拘束）。
 pub mod buckling;
 pub mod cold_formed;
 mod column;

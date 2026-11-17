@@ -1,4 +1,4 @@
-//! S 造柱の座屈長さ係数 K（鋼構造塑性設計指針、水平移動非拘束）。
+//! S 造柱の座屈長さ係数 K（水平移動非拘束）。
 //!
 //! 強軸まわり K_y・弱軸まわり K_z を個別に評価する軸別版と、方向を区別しない
 //! 簡略版を持つ。混合構造の部材剛性はヤング係数比で補正される。
@@ -11,16 +11,9 @@ use sepika_element::transform::LocalFrame;
 /// ピン端・梁無し節点に用いる剛度比 G の規定値（本実装の既定値）。
 const G_PIN: f64 = 10.0;
 
-/// 水平移動が拘束されない場合（sway 骨組）の座屈長さ係数 K を、
-/// 鋼構造塑性設計指針 (6.65) 式
-/// `(GA・GB・x² − 36)/(6(GA+GB)) = x/tan(x)`（`x = π/K`）から数値的に解く。
-///
-/// - `ga`, `gb`: 柱両端の剛度比 G（負値は 0 に丸める）。
-/// - 戻り値は K ≥ 1.0（sway 骨組の理論下限。GA=GB=0 の完全固定端で K=1）。
-///
-/// 左辺は x について単調増加、右辺 `x/tan(x)` は (0, π) で単調減少であり、
-/// `f(x) = 左辺 − 右辺` は単調増加かつ `f(0+) = −6/(GA+GB) − 1 < 0`、
-/// `f(π−) → +∞` なので (0, π) に唯一の根を持つ。二分法で求める。
+/// 水平移動非拘束の整形骨組の剛度比から、無次元の座屈長さ係数 K ≥ 1 を返す。
+/// `ga`, `gb` は無次元・有限の柱両端剛度比。負値は0とし、両端0ではK=1。
+/// 理想ピン・梁なし等の境界条件の適合を、この関数だけでは判定しない。
 pub fn sway_buckling_k(ga: f64, gb: f64) -> f64 {
     let ga = ga.max(0.0);
     let gb = gb.max(0.0);
@@ -356,7 +349,6 @@ mod tests {
     };
     use smallvec::SmallVec;
 
-    /// 求めた K が (6.65) 式を満たすことを直接確認するヘルパ。
     fn residual(ga: f64, gb: f64, k: f64) -> f64 {
         let x = std::f64::consts::PI / k;
         (ga * gb * x * x - 36.0) / (6.0 * (ga + gb)) - x / x.tan()
@@ -370,7 +362,6 @@ mod tests {
 
     #[test]
     fn sway_k_symmetric_g1() {
-        // G_A=G_B=1 → K ≈ 1.31〜1.32（チャート代表値）。
         let k = sway_buckling_k(1.0, 1.0);
         assert!((1.28..=1.35).contains(&k), "k={k}");
         assert!(residual(1.0, 1.0, k).abs() < 1e-6);
@@ -378,7 +369,6 @@ mod tests {
 
     #[test]
     fn sway_k_symmetric_g10() {
-        // G_A=G_B=10 → K ≈ 3.0（チャート代表値）。
         let k = sway_buckling_k(10.0, 10.0);
         assert!((2.9..=3.1).contains(&k), "k={k}");
         assert!(residual(10.0, 10.0, k).abs() < 1e-6);
@@ -512,7 +502,6 @@ mod tests {
         let k = steel_column_k(&model, &model.elements[0]).expect("柱として判定される");
         let expected = sway_buckling_k(2.0, 2.0);
         assert!((k - expected).abs() < 1e-9, "k={k}, expected={expected}");
-        // G=2,2 のチャート代表値はおよそ 1.6。
         assert!((1.5..=1.7).contains(&k), "k={k}");
     }
 
