@@ -2,7 +2,7 @@
 
 use super::common::MemberInfo;
 use crate::rc::joint::{rc_joint_shear_check, JointShape, RcJointInput};
-use crate::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+use crate::CheckOutcome;
 use sepika_core::ids::NodeId;
 use sepika_core::section_shape::{RcBeamRebar, SectionShape};
 
@@ -13,7 +13,7 @@ struct RcBeam<'a> {
     rebar: &'a RcBeamRebar,
 }
 
-/// RC 柱梁接合部（許容応力度・終局）の検定を `out` へ追加する。
+/// RC 柱梁接合部の許容応力度検定を `out` へ追加する。
 pub(super) fn check_rc_joint(
     model: &sepika_core::model::Model,
     cols: &[&MemberInfo<'_>],
@@ -41,15 +41,11 @@ pub(super) fn check_rc_joint(
         .collect();
     if let (Some(col), false) = (rc_col, rc_beams.is_empty()) {
         if let Some(reason) = joint_rebar_issue(model, col, &rc_beams) {
-            for label in ["接合部(RC)", "接合部終局(RC)"] {
-                out.push((
-                    nid,
-                    label.to_string(),
-                    CheckOutcome::Skipped {
-                        reason: reason.clone(),
-                    },
-                ));
-            }
+            out.push((
+                nid,
+                "接合部(RC)".to_string(),
+                CheckOutcome::Skipped { reason },
+            ));
             return;
         }
         let shape = match (cols.len() >= 2, rc_beams.len() >= 2) {
@@ -120,59 +116,6 @@ pub(super) fn check_rc_joint(
             "接合部(RC)".to_string(),
             CheckOutcome::Checked(rc_joint_shear_check(&inp)),
         ));
-
-        let bi = (col.sec.width - beam0.member.sec.width) / 2.0;
-        let bai = (bi / 2.0).min(col.sec.depth / 4.0).max(0.0);
-        let bj = beam0.member.sec.width + 2.0 * bai;
-        let sigma_y = crate::material_strength::rebar_sigma_y_of(beam0.member.rebar_mat);
-        let (t_top, t_bottom) = (
-            beam0.rebar.top_area() * sigma_y,
-            beam0.rebar.bottom_area() * sigma_y,
-        );
-        let col_shears: Vec<f64> = cols
-            .iter()
-            .filter_map(|c| c.end_forces(nid))
-            .map(|f| f[1].abs().max(f[2].abs()))
-            .collect();
-        let qcu = if col_shears.is_empty() {
-            0.0
-        } else {
-            col_shears.iter().sum::<f64>() / col_shears.len() as f64
-        };
-        let phi = if beams.len() >= 4 { 1.0 } else { 0.85 };
-        let u = crate::ultimate::rc_joint_ultimate(&crate::ultimate::RcJointUltimateInput {
-            shape,
-            phi,
-            fc: col.mat.fc.unwrap_or(0.0),
-            bj,
-            dj: col.sec.depth,
-            t_top,
-            t_bottom,
-            qcu,
-            alpha: 1.0,
-        });
-        let ratio = if u.vju > 0.0 {
-            u.qdu / u.vju
-        } else {
-            f64::INFINITY
-        };
-        out.push((
-                nid,
-                "接合部終局(RC)".to_string(),
-                CheckOutcome::Checked(CheckResult {
-                    basis: "靭性保証型指針 柱梁接合部終局(Vju=κ·φ·Fj·bj·Dj)".to_string(),
-                    detail: String::new(),
-                    components: vec![CheckComponent {
-                        kind: CheckKind::Shear,
-                        ratio,
-                        detail: format!(
-                            "κ={:.2}, φ={:.2}, Fj={:.3} N/mm², bj={:.1} mm, Dj={:.1} mm, \
-                             Vju={:.1} N, T={:.1} N, T′={:.1} N, Qcu={:.1} N, Qdu={:.1} N, 余裕率={:.3}",
-                            u.kappa, phi, u.fj, bj, col.sec.depth, u.vju, t_top, t_bottom, qcu, u.qdu, u.margin
-                        ),
-                    }],
-                }),
-            ));
     }
 }
 
@@ -219,4 +162,40 @@ fn beam_tension_is_top(b: &RcBeam<'_>, nid: NodeId) -> bool {
         return false;
     }
     b.rebar.top_area() < b.rebar.bottom_area()
+}
+
+/// 応力の有無によらず、モデルのRC柱・RC矩形梁が接続する節点を未算定として残す。
+pub(super) fn check_rc_joint_ultimate(
+    model: &sepika_core::model::Model,
+    nid: NodeId,
+    out: &mut Vec<(NodeId, String, CheckOutcome)>,
+) {
+    let mut has_column = false;
+    let mut has_beam = false;
+    for element in &model.elements {
+        if !element.nodes.iter().take(2).any(|node| *node == nid) {
+            continue;
+        }
+        let Some(section) = model.element_section(element) else {
+            continue;
+        };
+        match (
+            &section.shape,
+            crate::MemberKind::try_of_element(element, model),
+        ) {
+            (
+                Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }),
+                Ok(crate::MemberKind::Column),
+            ) => has_column = true,
+            (Some(SectionShape::RcBeamRect { .. }), Ok(crate::MemberKind::Girder)) => {
+                has_beam = true
+            }
+            _ => {}
+        }
+    }
+    if has_column && has_beam {
+        out.push((nid, "接合部終局(RC)".to_string(), CheckOutcome::Skipped {
+            reason: "RC柱梁接合部の終局自動算定は未対応です。検討目的・設計状態、検討方向別の柱梁・直交梁と形状・有効幅・せい、左右梁引張力と同一面の上下柱せん断力、材料・配筋・定着条件の成立を一組で確認できません。未指定の材料・配筋・応力を0又は適合とは扱いません。".to_string(),
+        }));
+    }
 }

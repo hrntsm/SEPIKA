@@ -659,9 +659,9 @@ fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipp
     );
 }
 
-/// RC 十字形接合部で終局検定（Vju/Qdu）の「接合部終局(RC)」チェックが出力される。
+/// RC 十字形接合部でも終局自動算定の成立未確認は理由付き未算定になる。
 #[test]
-fn rc_cross_joint_emits_ultimate_check() {
+fn rc_cross_joint_ultimate_is_skipped() {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop};
 
     let col_rebar = |count: u32, dia: f64| RcRectColumnRebar {
@@ -820,12 +820,9 @@ fn rc_cross_joint_emits_ultimate_check() {
         .iter()
         .find(|(_, label, _)| label == "接合部終局(RC)")
         .expect("十字形 RC 接合部は終局検定が出力されるはず");
-    let CheckOutcome::Checked(cr) = &ult.2 else {
-        panic!("接合部終局(RC) は検定実施（Checked）のはず: {:?}", ult.2);
-    };
-    assert!(cr.ratio().is_finite());
-    let full = crate::full_detail(cr);
-    assert!(full.contains("κ=1.00"), "detail={}", full);
+    assert!(
+        matches!(&ult.2, CheckOutcome::Skipped { reason } if reason.contains("検討目的・設計状態"))
+    );
 }
 
 /// 中央節点に上下柱・左右梁が取り付く十字形接合部のモデル。
@@ -998,7 +995,7 @@ fn rc_cross_joint_new_types_emits_checks() {
         (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 2.0e8]),
         (1.0, [0.0, 0.0, 0.0, 0.0, 0.0, 2.0e8]),
     ];
-    // 梁下端dt=87.5、上端dt=250/3 mm。QAj=1,785,000 N、終局Qdu=1,762,898.768 N。
+    // 梁下端dt=87.5、上端dt=250/3 mm。QAj=1,785,000 N。
     for (moment, expected_ratio, qdj1) in [
         (2.0e8, 0.22621293415325314, "Qdj1=1396141.7 N"),
         (-2.0e8, 0.22430593859165293, "Qdj1=1672547.5 N"),
@@ -1025,8 +1022,9 @@ fn rc_cross_joint_new_types_emits_checks() {
         let allowable = checks[0].2.clone().unwrap_checked();
         assert!((allowable.ratio() - expected_ratio).abs() < 1e-12);
         assert!(allowable.components[0].detail.contains(qdj1));
-        let ultimate = checks[1].2.clone().unwrap_checked();
-        assert!((ultimate.ratio() - 0.9342031585473682).abs() < 1e-12);
+        assert!(
+            matches!(&checks[1].2, CheckOutcome::Skipped { reason } if reason.contains("検討目的・設計状態"))
+        );
     }
 }
 
@@ -1097,7 +1095,14 @@ fn rc_joint_with_invalid_beam_rebar_is_skipped() {
             .unwrap_or_else(|| panic!("{label} が出力されるはず"));
         match &found.2 {
             CheckOutcome::Skipped { reason } => {
-                assert!(reason.contains("幾何が不整合"), "{label} reason={reason}");
+                assert!(
+                    reason.contains(if label == "接合部(RC)" {
+                        "幾何が不整合"
+                    } else {
+                        "検討目的・設計状態"
+                    }),
+                    "{label} reason={reason}"
+                );
             }
             CheckOutcome::Checked(_) => panic!("{label} は不整合時に検定してはならない"),
         }

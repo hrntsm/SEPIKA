@@ -4073,9 +4073,19 @@ fn standard_rebar507_query_reports_preserved_source_and_unsupported_analysis() {
 }
 
 #[test]
-fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_normal_ratios() {
+fn standard_rebar507_joint_entries_preserve_allowable_gates_and_skip_unresolved_ultimate() {
     use sepika_core::ids::{ElemId, NodeId, SectionId};
     use sepika_design_jp::{CheckOutcome, LoadTerm};
+    fn outcome<'a>(checks: &'a [(NodeId, String, CheckOutcome)], label: &str) -> &'a CheckOutcome {
+        &checks.iter().find(|(_, name, _)| name == label).unwrap().2
+    }
+    fn assert_ultimate_skipped(checks: &[(NodeId, String, CheckOutcome)]) {
+        assert!(matches!(
+            outcome(checks, "接合部終局(RC)"),
+            CheckOutcome::Skipped { reason }
+                if reason.contains("検討目的・設計状態") && reason.contains("材料・配筋・定着")
+        ));
+    }
     let source =
         include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb");
     let normal = rebar507_with_explicit_zero_beam_eccentricity(source).unwrap();
@@ -4103,13 +4113,8 @@ fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_no
     };
     let baseline = direct(&normal);
     assert_eq!(baseline.len(), 2);
-    assert_eq!(checked_ratio507(&baseline[0].2), 0.0);
-    // 独立期待: D22/SD345が7本、L字形κ=.4、φ=.85、Fc30、bj450、Dj600。
-    // 柱せん断0の終局比を製品計算関数を呼ばずに算出する。
-    let tension = std::f64::consts::PI * 22.0_f64.powi(2) / 4.0 * 7.0 * 345.0;
-    let capacity = 0.4 * 0.85 * (0.8 * 30.0_f64.powf(0.7)) * 450.0 * 600.0;
-    let expected = tension / capacity;
-    assert!((checked_ratio507(&baseline[1].2) - expected).abs() < 1e-12);
+    assert_eq!(checked_ratio507(outcome(&baseline, "接合部(RC)")), 0.0);
+    assert_ultimate_skipped(&baseline);
     let secondary = source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"");
     for (input, reason) in [
         (secondary.as_str(), "副主筋"),
@@ -4138,7 +4143,11 @@ fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_no
         .unwrap();
         for checks in [direct(&unsupported), aggregate.joint_checks] {
             assert_eq!(checks.len(), 2);
-            assert!(checks.iter().all(|(_, _, result)| matches!(result, CheckOutcome::Skipped { reason: message } if message.contains(reason))));
+            assert!(matches!(
+                outcome(&checks, "接合部(RC)"),
+                CheckOutcome::Skipped { reason: message } if message.contains(reason)
+            ));
+            assert_ultimate_skipped(&checks);
         }
     }
     let unsupported = rebar507_with_explicit_zero_beam_eccentricity(&secondary).unwrap();

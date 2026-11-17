@@ -718,3 +718,42 @@ mod tests {
             .contains("上位置差=50"));
     }
 }
+
+#[cfg(test)]
+mod rc_joint_1377_tests {
+    mod fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/rc_joint_model.rs"
+        ));
+    }
+    #[test]
+    fn rc_joint_1377_summary_retains_unresolved_joint_and_denies_all_ok() {
+        let model = fixture::model();
+        let report = sepika_design_jp::MemberDesignCheckReport {
+            joint_checks: sepika_design_jp::joint_wiring::collect_joint_checks(
+                &model,
+                &[],
+                sepika_design_jp::LoadTerm::Short,
+            ),
+            ..Default::default()
+        };
+        let summary = super::assemble_design_check_summary(
+            &report,
+            Some(0),
+            sepika_design_jp::LoadTerm::Short,
+            false,
+        );
+        assert_eq!(summary["all_checked_and_ok"], false);
+        assert_eq!(summary["n_joint_checks"], 1);
+        assert_eq!(summary["n_joint_skipped"], 1);
+        assert_eq!(summary["n_joint_ng"], 0);
+        assert!(summary["max_ratio"].is_null());
+        assert_eq!(summary["joint_skipped"][0]["node"], 0);
+        assert_eq!(summary["joint_skipped"][0]["label"], "接合部終局(RC)");
+        assert!(summary["joint_skipped"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("検討目的・設計状態"));
+    }
+}
