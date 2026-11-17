@@ -653,7 +653,7 @@ impl WallElement {
     }
 
     /// 静的一次参照の圧縮正N `[N]`と局所正負のM/(QD)からQu `[N]`を求める。
-    /// RC壁は両側柱が必須。参照の欠落・非有限・引張N・0.4Fcを超える圧縮は理由付きで拒否する。
+    /// RC壁は両側柱が必須。比は有限非負（0を含む）、Nは0〜0.4Fcの圧縮応力度となる値が必要。
     pub fn directional_shear_capacity_at_reference(
         data: &ElementData,
         model: &Model,
@@ -3702,7 +3702,7 @@ mod wall_method_tests {
                 &model,
                 StrengthBasis::Nominal,
                 0.0,
-                [0.1, 1.0],
+                [0.0, 1.0],
             )
             .unwrap();
             assert_eq!(low[0], low[1]);
