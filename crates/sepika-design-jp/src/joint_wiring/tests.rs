@@ -659,6 +659,61 @@ fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipp
     );
 }
 
+#[test]
+fn wall_reference_entry_limits_zero_face_moment_before_skeleton_validation() {
+    let mut model = wall_with_columns_model();
+    let columns = [(0.1, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
+    for method in [
+        sepika_core::model::RcWallShearMethod::ArakawaMin,
+        sepika_core::model::RcWallShearMethod::ArakawaMean,
+    ] {
+        model.stress_cfg.rc_wall_shear_method = method;
+        for shear_n in [800_000.0, -800_000.0] {
+            let reference = |moment_nmm| {
+                let wall = [(0.0, [-1_000_000.0, shear_n, 0.0, 0.0, 0.0, moment_nmm])];
+                let batch = [
+                    (ElemId(0), wall.as_slice()),
+                    (ElemId(3), columns.as_slice()),
+                    (ElemId(4), columns.as_slice()),
+                ];
+                let state = sepika_element::wall::static_face::StaticWallFace::new(
+                    &model.elements[0],
+                    &model,
+                )
+                .unwrap()
+                .recover(&batch)
+                .unwrap();
+                let mut checks = Vec::new();
+                let members = member_infos(&model, &batch);
+                let mut skeletons = wall::check_walls(
+                    &model,
+                    &batch,
+                    &batch,
+                    None,
+                    &members,
+                    LoadTerm::Short,
+                    &mut checks,
+                );
+                let outcome = checks
+                    .into_iter()
+                    .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
+                    .unwrap()
+                    .2;
+                let CheckOutcome::Checked(result) = outcome else {
+                    panic!("{outcome:?}");
+                };
+                assert!(result.ratio().is_finite());
+                (state, skeletons.remove(&ElemId(0)).unwrap())
+            };
+            let (zero, zero_skeleton) = reference(-shear_n * 300.0);
+            assert_eq!(zero.moment_nmm, 0.0);
+            assert_eq!(zero.shear_n, shear_n);
+            let (_, lower_bound_skeleton) = reference(shear_n * (4600.0 - 300.0));
+            assert_eq!(zero_skeleton, lower_bound_skeleton);
+        }
+    }
+}
+
 /// RC 十字形接合部でも終局自動算定の成立未確認は理由付き未算定になる。
 #[test]
 fn rc_cross_joint_ultimate_is_skipped() {
