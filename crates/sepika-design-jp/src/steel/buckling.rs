@@ -49,6 +49,12 @@ pub fn sway_buckling_k(ga: f64, gb: f64) -> f64 {
 
 /// 線材（両端 2 節点）の始端・終端座標。
 fn node_coords(model: &Model, elem: &ElementData) -> Option<([f64; 3], [f64; 3])> {
+    if let Some([p0, p1]) = model
+        .primary_beam_axis_ends(elem)
+        .unwrap_or_else(|reason| panic!("{reason}"))
+    {
+        return Some((p0, p1));
+    }
     let p0 = model.nodes.get(elem.nodes.first()?.index())?.coord;
     let p1 = model.nodes.get(elem.nodes.get(1)?.index())?.coord;
     Some((p0, p1))
@@ -60,10 +66,8 @@ fn line_geometry(model: &Model, elem: &ElementData) -> Option<(f64, f64)> {
     if len < 1e-9 {
         return None;
     }
-    let axis = sepika_core::geom::element_axis(model, elem);
-    if axis == [0.0, 0.0, 0.0] {
-        return None;
-    }
+    let (p0, p1) = node_coords(model, elem)?;
+    let axis = sepika_core::geom::vec3::unit_from(p0, p1)?;
     Some((len, axis[2].abs()))
 }
 
@@ -422,7 +426,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -581,6 +585,22 @@ mod tests {
             (k_z - expected_kz).abs() < 1e-9,
             "k_z={k_z}, expected={expected_kz}"
         );
+    }
+
+    #[test]
+    fn steel_column_k_axes_follow_eccentric_physical_beam_direction_and_length() {
+        for length_mm in [6000.0, 9000.0] {
+            let mut model = portal_model(3000.0, 6000.0);
+            for beam in &mut model.elements[1..] {
+                beam.end_offsets_mm = [[0.0; 3], [-6000.0, length_mm, 0.0]];
+            }
+            let index = NodeAdjacency::build(&model);
+            let (kx, ky) =
+                steel_column_k_axes_with_index(&model, &index, &model.elements[0]).unwrap();
+            assert!((kx - sway_buckling_k(10.0, 10.0)).abs() < 1e-9);
+            let g_y = 0.1 * length_mm / 3000.0;
+            assert!((ky - sway_buckling_k(g_y, g_y)).abs() < 1e-9);
+        }
     }
 
     /// 直交 2 方向（X・Y）に梁がある立体モデル: 柱は鉛直（`ey≈X`・`ez≈Y`）。

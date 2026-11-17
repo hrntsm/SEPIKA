@@ -111,7 +111,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -134,7 +134,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         },
@@ -782,7 +782,7 @@ fn rc_cross_joint_emits_ultimate_check() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -932,7 +932,7 @@ fn cross_joint_model(col_shape: SectionShape, beam_shape: SectionShape) -> Model
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };

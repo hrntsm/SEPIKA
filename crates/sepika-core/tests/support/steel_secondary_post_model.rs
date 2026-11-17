@@ -68,7 +68,7 @@ pub fn steel_post_model() -> Model {
             rigid_zone: Default::default(),
             plastic_zone: None,
             spring: None,
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         });
     }
     let post = SecondaryMember {

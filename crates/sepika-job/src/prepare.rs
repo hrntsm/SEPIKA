@@ -496,8 +496,8 @@ mod tests {
         prepare_model_for_analysis(&mut stale, &AnalysisSettings::default(), None).unwrap();
         assert_eq!(stale.elements[3].rigid_zone.panel_offset_i, 100.0);
         sepika_solver::statics::analysis::Analysis::prepare(&stale).unwrap();
-        for id in 0..2 {
-            stale.sections[id].shape = Some(SectionShape::SteelH {
+        for section in stale.sections.iter_mut().take(2) {
+            section.shape = Some(SectionShape::SteelH {
                 height: 400.0,
                 width: 200.0,
                 web_thick: 12.0,
@@ -721,7 +721,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -881,7 +881,7 @@ mod tests {
         model
             .unassigned_beams
             .push(sepika_core::model::SecondaryMember {
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
                 id: sepika_core::ids::SecondaryMemberId(0),
                 kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -980,7 +980,7 @@ mod tests {
         model.materials = supports.materials;
         for element in &mut model.elements {
             element.section = Some(SectionId(2));
-            element.vertical_eccentricity = Some(0.0);
+            element.end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
         }
         let error = match prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
         {

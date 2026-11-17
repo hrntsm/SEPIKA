@@ -402,3 +402,137 @@ fn check_ratio_colors_are_painted_over_hover_and_selection_without_changing_resu
     }
     assert_eq!(bincode::serialize(&app.core.scoped.results).unwrap(), saved);
 }
+
+#[test]
+fn secondary_member_click_follows_display_offsets_and_shows_its_properties() {
+    use sepika_core::{ids::*, model::*};
+    let mut app = App::default();
+    let mut model = crate::sample::portal_frame();
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(0),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Supported([0.25, 0.75].map(|position| SecondaryMemberAnchor {
+            support: SupportMemberId::Primary(ElemId(2)),
+            position,
+        })),
+        section: Some(SectionId(1)),
+        name: "選択小梁".into(),
+        ..Default::default()
+    });
+    assert!(app.load_model(model));
+    let ctx = egui::Context::default();
+    let secondary_line = |output: &egui::FullOutput| {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.color == theme::SECONDARY_AMBER && stroke.width == 1.5 =>
+                {
+                    Some(*points)
+                }
+                _ => None,
+            })
+            .expect("小梁の表示材軸")
+    };
+    frame(&ctx, &mut app, vec![]);
+    let before = secondary_line(&frame(&ctx, &mut app, vec![]));
+    click(&ctx, &mut app, before[0].lerp(before[1], 0.5));
+    assert_eq!(
+        app.ui.scoped.selection.active_secondary_member(),
+        Some(SecondaryMemberId(0))
+    );
+    assert!(
+        app.apply_model_edit(Box::new(sepika_edit::SetBeamEndOffsets {
+            member: SupportMemberId::Secondary(SecondaryMemberId(0)),
+            value: [[0.0, 1000.0, 600.0]; 2]
+        }))
+    );
+    let after = secondary_line(&frame(&ctx, &mut app, vec![]));
+    assert_ne!(before, after);
+    let model = bincode::serialize(&app.core.model).unwrap();
+    let revision = app.core.scoped.undo.revision();
+    click(&ctx, &mut app, before[0].lerp(before[1], 0.5));
+    assert_ne!(
+        app.ui.scoped.selection.active_secondary_member(),
+        Some(SecondaryMemberId(0))
+    );
+    click(&ctx, &mut app, after[0].lerp(after[1], 0.5));
+    assert_eq!(
+        app.ui.scoped.selection.active_secondary_member(),
+        Some(SecondaryMemberId(0))
+    );
+    let selected = frame(&ctx, &mut app, vec![]);
+    assert!(selected.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { points, stroke } if points == &after && *stroke == theme::VIEW_SELECTED_STROKE)));
+    let properties = ctx.run_ui(Default::default(), |ui| app.inspector_panel(ui));
+    let labels = properties
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(labels.iter().any(|label| label.contains("小梁 ID: 0")));
+    assert!(labels.iter().any(|label| label.contains("選択小梁")));
+    assert!(labels.iter().any(|label| label.contains("XYZ偏心")));
+    assert_eq!(bincode::serialize(&app.core.model).unwrap(), model);
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+}
+
+#[test]
+fn eccentric_deformed_curve_selection_reuses_the_rendered_physical_curve() {
+    use crate::app::{ResultsBundle, StaticCaseKey, StaticKey};
+    use sepika_core::ids::LoadCaseId;
+    let mut app = App::default();
+    let mut model = crate::sample::portal_frame();
+    model.elements[2].end_offsets_mm = [[0.0, 1000.0, 0.0]; 2];
+    app.load_model(model);
+    let mut disp = vec![[0.0; 6]; 4];
+    disp[2][5] = 0.001;
+    disp[3][5] = -0.002;
+    app.core.scoped.results = Some(ResultsBundle {
+        statics: vec![(
+            StaticCaseKey::User(LoadCaseId(0)),
+            sepika_solver::statics::linear::StaticOnce {
+                story_shears: None,
+                stiffness_ratio_disp: None,
+                disp,
+                member_forces: vec![],
+                panel_moments: vec![],
+            },
+        )],
+        ..Default::default()
+    });
+    app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
+    app.ui.view.view_mode = ViewMode::Deformed;
+    app.ui.view.show_beam_interpolation = true;
+    app.ui.view.fixed_deform_scale = Some(10.0);
+    let ctx = egui::Context::default();
+    frame(&ctx, &mut app, vec![]);
+    let output = frame(&ctx, &mut app, vec![]);
+    let curve = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Path(path)
+                if path.points.len() == 13
+                    && path.stroke.color
+                        == egui::epaint::ColorMode::Solid(theme::HILITE_PURPLE) =>
+            {
+                Some(path.points.clone())
+            }
+            _ => None,
+        })
+        .max_by(|a, b| a[0].distance(a[12]).total_cmp(&b[0].distance(b[12])))
+        .unwrap();
+    let results = bincode::serialize(&app.core.scoped.results).unwrap();
+    click(&ctx, &mut app, curve[6]);
+    assert_eq!(app.ui.scoped.selection.active_member(), Some(ElemId(2)));
+    let selected = frame(&ctx, &mut app, vec![]);
+    assert!(selected.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Path(path) if path.points == curve && path.stroke.width == theme::VIEW_SELECTED_STROKE.width)));
+    assert_eq!(
+        bincode::serialize(&app.core.scoped.results).unwrap(),
+        results
+    );
+}

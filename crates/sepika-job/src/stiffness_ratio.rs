@@ -73,7 +73,7 @@ pub fn evaluation_model(model: &Model, x: &StaticOnce, y: &StaticOnce) -> Result
                 rigid_zone: Default::default(),
                 plastic_zone: None,
                 spring: Some([0.0, stiffness, 0.0, 0.0, 0.0, 0.0]),
-                vertical_eccentricity: None,
+                end_offsets_mm: [[0.0; 3]; 2],
             });
         }
     }
@@ -346,7 +346,7 @@ mod tests {
         });
         for element in &mut model.elements {
             element.section = Some(SectionId(0));
-            element.vertical_eccentricity = Some(0.0);
+            element.end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
         }
         for node in &mut model.nodes {
             node.story = Some(StoryId(node.id.0));

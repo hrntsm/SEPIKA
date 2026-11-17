@@ -471,7 +471,7 @@ fn build_members(
             end_cond,
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: None,
+            end_offsets_mm: [[0.0; 3]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -499,7 +499,7 @@ fn build_secondaries(
         let section = Some(resolve_frame_section(s.section, &s.source, section_index)?);
         let sm = sepika_core::model::SecondaryMember {
             id: model.alloc_secondary_member_id(),
-            vertical_eccentricity: None,
+            end_offsets_mm: [[0.0; 3]; 2],
             gravity_end_shares: None,
             kind: s.kind,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([

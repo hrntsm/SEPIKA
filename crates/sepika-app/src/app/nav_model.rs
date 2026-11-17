@@ -286,7 +286,7 @@ mod tests {
     fn secondary_member(id: u32, section: Option<SectionId>) -> SecondaryMember {
         SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(id),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -414,7 +414,7 @@ mod tests {
             secondary_member(0, Some(SectionId(0))),
             SecondaryMember {
                 id: sepika_core::ids::SecondaryMemberId(1),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
                 kind: SecondaryMemberKind::Post,
                 ends: sepika_core::model::SecondaryMemberEnds::Detached([

@@ -126,7 +126,7 @@ fn beam_model_inner(section: Section, materials: Vec<Material>) -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }],
@@ -706,7 +706,7 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
         tip_loads: vec![],
     });
     model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
-    model.elements[0].vertical_eccentricity = Some(0.0);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
     model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
     model.stories.push(sepika_core::model::Story::new(
         sepika_core::ids::StoryId(0),

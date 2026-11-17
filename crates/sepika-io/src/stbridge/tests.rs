@@ -217,7 +217,7 @@ fn representative_model() -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -401,7 +401,7 @@ fn member(id: u32, kind_col: bool, sec: u32) -> ElementData {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     }
@@ -2372,7 +2372,7 @@ fn test_roundtrip_brace() {
         end_cond: [EndCondition::Pinned, EndCondition::Pinned],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -3232,7 +3232,7 @@ fn test_slab_roundtrip_export_import() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -3644,7 +3644,7 @@ fn test_secondary_members_roundtrip() {
         sepika_core::model::SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[1].coord]);
     m.unassigned_beams.push(SecondaryMember {
         id: sepika_core::ids::SecondaryMemberId(0),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         kind: SecondaryMemberKind::Beam,
         ends: beam_ends,
@@ -3655,7 +3655,7 @@ fn test_secondary_members_roundtrip() {
         sepika_core::model::SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[2].coord]);
     m.unassigned_posts.push(SecondaryMember {
         id: sepika_core::ids::SecondaryMemberId(1),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         kind: SecondaryMemberKind::Post,
         ends: post_ends,
@@ -3727,7 +3727,7 @@ fn test_export_secondary_post_uses_column_section_map() {
         };
         target.push(SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(id),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind,
             ends,
@@ -3791,7 +3791,7 @@ fn test_export_post_only_uses_column_section() {
     push_section(&mut m, section);
     m.unassigned_posts.push(SecondaryMember {
         id: sepika_core::ids::SecondaryMemberId(0),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         kind: SecondaryMemberKind::Post,
         ends: SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[2].coord]),
@@ -3833,7 +3833,7 @@ fn test_export_errors_when_secondary_has_no_end_node() {
         position,
     };
     m.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -4653,7 +4653,7 @@ fn assigned_members_625(in_regions: bool) -> Model {
         ends: SecondaryMemberEnds::Detached([m.nodes[4].coord, m.nodes[5].coord]),
         section: Some(SectionId(1)),
         name: "小梁625".into(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
     };
     let post = SecondaryMember {
@@ -4662,7 +4662,7 @@ fn assigned_members_625(in_regions: bool) -> Model {
         ends: SecondaryMemberEnds::Detached([m.nodes[6].coord, m.nodes[7].coord]),
         section: Some(SectionId(0)),
         name: "間柱625".into(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
     };
     if in_regions {

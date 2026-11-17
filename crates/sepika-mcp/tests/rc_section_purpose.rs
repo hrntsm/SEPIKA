@@ -127,7 +127,7 @@ fn frame(shape: &SectionShape, usage: FrameSectionUse) -> Model {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -213,7 +213,7 @@ fn member(kind: SecondaryMemberKind, section: u32) -> SecondaryMember {
         ]),
         section: Some(SectionId(section)),
         name: "受入二次材".into(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: Some([1., 0.]),
     }
 }

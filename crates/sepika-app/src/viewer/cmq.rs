@@ -742,7 +742,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -1450,7 +1450,7 @@ mod tests {
             app.ui.view.cmq_component = CmqComponent::Q;
             app.core.model.sections[0].frame_use =
                 Some(sepika_core::model::FrameSectionUse::Girder);
-            app.core.model.elements[0].vertical_eccentricity = Some(200.0);
+            app.core.model.elements[0].end_offsets_mm = [[0.0, 0.0, 200.0]; 2];
             app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
             app.core.model.nodes[1].coord = [1000.0, 0.0, 300.0];
             app.core.model.load_cases[0].member[0].dir = [0.0, -1.0, -1.0];

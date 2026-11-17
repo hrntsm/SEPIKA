@@ -41,7 +41,7 @@ fn shell_model(coords: [[f64; 3]; 4], order: [usize; 4]) -> Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: None,
+            end_offsets_mm: [[0.0; 3]; 2],
             plastic_zone: None,
             spring: None,
         }],

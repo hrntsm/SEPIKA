@@ -187,7 +187,7 @@ fn 中間アンカーの両端支持二次材と二分割版は全解析表現�
             ];
             let sm = SecondaryMember {
                 id: SecondaryMemberId(0),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 kind: if wall {
                     SecondaryMemberKind::Post
                 } else {

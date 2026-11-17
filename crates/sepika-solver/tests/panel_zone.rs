@@ -87,7 +87,7 @@ fn member(id: u32, n0: u32, n1: u32, sec: u32, rigid: RigidZone) -> ElementData 
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: rigid,
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     }
@@ -1578,8 +1578,8 @@ fn eccentric_panel_flange_applicability_uses_actual_end_heights_without_extendin
                 [100.0, -100.0],
             ] {
                 let mut model = baseline.clone();
-                model.elements[0].vertical_eccentricity = Some(offsets[0]);
-                model.elements[2].vertical_eccentricity = Some(offsets[1]);
+                model.elements[0].end_offsets_mm = [[0.0, 0.0, offsets[0]]; 2];
+                model.elements[2].end_offsets_mm = [[0.0, 0.0, offsets[1]]; 2];
                 let planes =
                     sepika_core::panel_zone::panel_joint_planes(&model, NodeId(0), &model.elements);
                 assert_eq!(planes.len(), 1);
@@ -1619,24 +1619,16 @@ fn eccentric_panel_flange_applicability_uses_actual_end_heights_without_extendin
                     assert!(solve.err().unwrap().to_string().contains(&reason));
                 }
             }
-            baseline.elements[2].vertical_eccentricity = None;
-            let reason = sepika_core::panel_zone::resolve_panel_joint(
+            baseline.elements[2].end_offsets_mm = [[0.0; 3]; 2];
+            assert!(sepika_core::panel_zone::resolve_panel_joint(
                 &baseline,
                 NodeId(0),
                 &baseline.elements,
             )
-            .unwrap_err()
-            .to_string();
-            assert!(
-                reason.contains("鉛直偏心") && reason.contains("未指定"),
-                "{reason}"
-            );
+            .is_ok());
             assert!(
                 sepika_solver::statics::linear::linear_static_once(&baseline, LoadCaseId(1))
-                    .err()
-                    .unwrap()
-                    .to_string()
-                    .contains("鉛直偏心")
+                    .is_ok()
             );
         }
     }

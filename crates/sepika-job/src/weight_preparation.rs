@@ -75,6 +75,7 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     for region in &mut input.floor_regions {
         region.name.clear();
         for member in &mut region.secondary_beams {
+            member.end_offsets_mm = [[0.0; 3]; 2];
             member.name.clear();
         }
     }
@@ -83,6 +84,9 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
         for member in &mut region.posts {
             member.name.clear();
         }
+    }
+    for member in &mut input.unassigned_beams {
+        member.end_offsets_mm = [[0.0; 3]; 2];
     }
     for member in input
         .unassigned_beams

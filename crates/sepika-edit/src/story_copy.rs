@@ -1265,7 +1265,7 @@ fn copy_secondary(
         let ends = model.secondary_ends_from_coords(id, sm.kind, [ca, cb], supported);
         let new_sm = SecondaryMember {
             id,
-            vertical_eccentricity: sm.vertical_eccentricity,
+            end_offsets_mm: sm.end_offsets_mm,
             gravity_end_shares: sm.gravity_end_shares,
             kind: sm.kind,
             ends,

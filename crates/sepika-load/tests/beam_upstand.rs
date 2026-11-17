@@ -85,7 +85,7 @@ fn model() -> Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.),
+            end_offsets_mm: [[0.0, 0.0, 0.]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -296,7 +296,7 @@ fn 鋼材床の設計重量と物理質量を独立にdlと層質量へ渡す() 
         .sum();
     assert!((total - 53400.).abs() < 1e-7);
     let mut baseline = m.clone();
-    baseline.elements[0].vertical_eccentricity = Some(100.);
+    baseline.elements[0].end_offsets_mm = [[0.0, 0.0, 100.]; 2];
     assert_dynamic_increment(&m, &baseline, 18840., 18475.7286, 1.884);
 }
 
@@ -405,7 +405,7 @@ fn 二次小梁は内法区間の嵩上げを設計荷重と支持反力へ一�
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
         section: Some(SectionId(0)),
-        vertical_eccentricity: Some(0.),
+        end_offsets_mm: [[0.0, 0.0, 0.]; 2],
         ends: SecondaryMemberEnds::Supported([
             SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(2)),
@@ -427,24 +427,22 @@ fn 二次小梁は内法区間の嵩上げを設計荷重と支持反力へ一�
     assert!((beam.reactions.iter().sum::<f64>() - 34944.).abs() < 1e-7);
     assert_eq!(beam.member_loads.len(), 3);
     let mut baseline = m.clone();
-    baseline.unassigned_beams[0].vertical_eccentricity = Some(50.);
+    baseline.unassigned_beams[0].end_offsets_mm = [[0.0, 0.0, 50.]; 2];
     let base = sepika_load::cascade::solve(&baseline, |_| 0., true).unwrap();
-    assert!(
-        (beam.reactions.iter().sum::<f64>()
-            - base.members[&SecondaryMemberId(0)]
-                .reactions
-                .iter()
-                .sum::<f64>()
-            - 2688.)
-            .abs()
-            < 1e-7
+    assert_eq!(
+        beam.reactions,
+        base.members[&SecondaryMemberId(0)].reactions
+    );
+    assert_eq!(
+        beam.member_loads,
+        base.members[&SecondaryMemberId(0)].member_loads
     );
     m.materials[1].category = MaterialCategory::Steel;
     m.materials[1].fc = None;
     m.materials[1].density = 7.85e-9;
     let mut baseline = m.clone();
-    baseline.unassigned_beams[0].vertical_eccentricity = Some(50.);
-    assert_dynamic_increment(&m, &baseline, 8792., 8622.00668, 0.8792);
+    baseline.unassigned_beams[0].end_offsets_mm = [[0.0, 0.0, 50.]; 2];
+    assert_dynamic_increment(&m, &baseline, 0., 0., 0.);
 }
 
 #[test]
@@ -454,7 +452,7 @@ fn 実部材化済み小梁は主架構でのみ嵩上げを持つ() {
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
         section: Some(SectionId(0)),
-        vertical_eccentricity: Some(0.),
+        end_offsets_mm: [[0.0, 0.0, 0.]; 2],
         ends: SecondaryMemberEnds::Supported([
             SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(3)),

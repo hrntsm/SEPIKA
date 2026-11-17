@@ -190,4 +190,35 @@ mod tests {
             assert_eq!(force_to_node(&force, r), force);
         }
     }
+    #[test]
+    fn xyz_arm_transfers_moment_and_preserves_virtual_work() {
+        let r = [[100.0, 200.0, 300.0], [-20.0, 40.0, -60.0]];
+        let mut force = [0.0; 12];
+        force[0] = 1000.0;
+        force[1] = 2000.0;
+        let nodal = force_to_node(&force, r);
+        assert_eq!(
+            &nodal[..6],
+            &[1000.0, 2000.0, 0.0, -600000.0, 300000.0, 0.0]
+        );
+        let node_displacement = [0.5, -0.25, 0.75, 0.001, -0.002, 0.003];
+        let physical_displacement = [-0.7, -0.25, 1.15];
+        let nodal_work: f64 = nodal[..6]
+            .iter()
+            .zip(node_displacement)
+            .map(|(f, u)| f * u)
+            .sum();
+        let physical_work: f64 = force[..3]
+            .iter()
+            .zip(physical_displacement)
+            .map(|(f, u)| f * u)
+            .sum();
+        assert!((nodal_work + 1200.0).abs() < 1e-10);
+        assert!((nodal_work - physical_work).abs() < 1e-10);
+        force[6] = -1000.0;
+        force[7] = -2000.0;
+        let balanced = force_to_node(&force, r);
+        assert_eq!(balanced[0] + balanced[6], 0.0);
+        assert_eq!(balanced[1] + balanced[7], 0.0);
+    }
 }

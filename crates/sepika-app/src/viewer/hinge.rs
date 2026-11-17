@@ -146,7 +146,7 @@ pub(super) fn hinge_marker_screen_pos(
     if n0 >= pts.len() || n1 >= pts.len() {
         return None;
     }
-    let (p0, p1) = (pts[n0], pts[n1]);
+    let [p0, p1] = super::primary_screen_ends(model, elem, pts, proj)?;
     let t = if end_j { 1.0 - INSET_T } else { INSET_T };
     Some(egui::pos2(
         p0.x + (p1.x - p0.x) * t,
@@ -2093,7 +2093,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: regime,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -2314,7 +2314,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         };

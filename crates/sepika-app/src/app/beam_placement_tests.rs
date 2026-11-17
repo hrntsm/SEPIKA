@@ -3,7 +3,7 @@ use sepika_core::model::{
     SecondaryMember, SecondaryMemberAnchor, SecondaryMemberEnds, SecondaryMemberKind,
     SupportMemberId,
 };
-use sepika_edit::SetBeamVerticalEccentricity;
+use sepika_edit::SetBeamEndOffsets;
 
 fn app() -> App {
     let mut app = App::default();
@@ -18,7 +18,7 @@ fn app() -> App {
         section: Some(SectionId(1)),
         name: "B1".into(),
         gravity_end_shares: None,
-        vertical_eccentricity: None,
+        end_offsets_mm: [[0.0; 3]; 2],
     });
     assert!(app.load_model(model));
     app
@@ -35,9 +35,9 @@ fn beam_eccentricity_gui_edit_undo_redo_save_reload_and_missing_are_consistent()
     app.core.scoped.staleness.preparation_stale = false;
     app.core.scoped.staleness.design_stale = false;
     let input = app.result_input(&result_validity::ResultInputKey::Modal);
-    assert!(app.apply_model_edit(Box::new(SetBeamVerticalEccentricity {
+    assert!(app.apply_model_edit(Box::new(SetBeamEndOffsets {
         member: primary,
-        value: Some(100.0)
+        value: [[0.0, 0.0, 100.0]; 2]
     })));
     assert!(app.core.scoped.staleness.results_stale);
     assert!(app.core.scoped.staleness.preparation_stale);
@@ -50,10 +50,10 @@ fn beam_eccentricity_gui_edit_undo_redo_save_reload_and_missing_are_consistent()
         app.core.model.beam_placement(primary).unwrap().actual_ends[0][2],
         3600.0
     );
-    assert!(app.core.model.beam_placement(secondary).is_err());
-    assert!(app.apply_model_edit(Box::new(SetBeamVerticalEccentricity {
+    assert!(app.core.model.beam_placement(secondary).is_ok());
+    assert!(app.apply_model_edit(Box::new(SetBeamEndOffsets {
         member: secondary,
-        value: Some(-100.0)
+        value: [[0.0, 0.0, -100.0]; 2]
     })));
     assert_eq!(
         app.core
@@ -65,23 +65,26 @@ fn beam_eccentricity_gui_edit_undo_redo_save_reload_and_missing_are_consistent()
     );
     app.undo_action();
     assert_eq!(
-        app.core.model.unassigned_beams[0].vertical_eccentricity,
-        None
+        app.core.model.unassigned_beams[0].end_offsets_mm,
+        [[0.0; 3]; 2]
     );
     app.redo_action();
     assert_eq!(
-        app.core.model.unassigned_beams[0].vertical_eccentricity,
-        Some(-100.0)
+        app.core.model.unassigned_beams[0].end_offsets_mm,
+        [[0.0, 0.0, -100.0]; 2]
     );
     assert_eq!(app.core.model.nodes, nodes);
     assert_eq!(app.core.model.unassigned_beams[0].ends, supports);
     let path = std::env::temp_dir().join(format!("sepika-726-{}.ovika", std::process::id()));
-    for value in [Some(-100.0), Some(0.0), None] {
-        app.core.model.unassigned_beams[0].vertical_eccentricity = value;
+    for value in [
+        [[100.0, 200.0, -100.0], [-50.0, 40.0, 300.0]],
+        [[0.0; 3]; 2],
+    ] {
+        app.core.model.unassigned_beams[0].end_offsets_mm = value;
         sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
         let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
-        assert_eq!(restored.unassigned_beams[0].vertical_eccentricity, value);
-        assert_eq!(restored.elements[2].vertical_eccentricity, Some(100.0));
+        assert_eq!(restored.unassigned_beams[0].end_offsets_mm, value);
+        assert_eq!(restored.elements[2].end_offsets_mm, [[0.0, 0.0, 100.0]; 2]);
         assert_eq!(restored.unassigned_beams[0].ends, supports);
     }
     std::fs::remove_file(path).unwrap();
@@ -98,9 +101,9 @@ fn beam_placement_transforms_analysis_and_preserves_connectivity_through_undo_an
         .iter()
         .map(|e| (e.id, e.nodes.clone(), e.end_cond, e.rigid_zone))
         .collect::<Vec<_>>();
-    assert!(app.apply_model_edit(Box::new(SetBeamVerticalEccentricity {
+    assert!(app.apply_model_edit(Box::new(SetBeamEndOffsets {
         member: SupportMemberId::Primary(ElemId(2)),
-        value: Some(750.0)
+        value: [[0.0, 0.0, 750.0]; 2]
     })));
     let model = &app.core.model;
     let after = sepika_solver::statics::linear::linear_static_once(model, LoadCaseId(0)).unwrap();
@@ -141,9 +144,9 @@ fn beam_placement_transforms_analysis_and_preserves_connectivity_through_undo_an
 fn node_and_section_edits_invalidate_results_and_update_placement() {
     let mut app = app();
     let member = SupportMemberId::Primary(ElemId(2));
-    assert!(app.apply_model_edit(Box::new(SetBeamVerticalEccentricity {
+    assert!(app.apply_model_edit(Box::new(SetBeamEndOffsets {
         member,
-        value: Some(100.0)
+        value: [[0.0, 0.0, 100.0]; 2]
     })));
     let initial = app.core.model.beam_placement(member).unwrap().actual_ends;
     assert!(app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
@@ -155,8 +158,8 @@ fn node_and_section_edits_invalidate_results_and_update_placement() {
         3700.0
     );
     assert_eq!(
-        app.core.model.elements[2].vertical_eccentricity,
-        Some(100.0)
+        app.core.model.elements[2].end_offsets_mm,
+        [[0.0, 0.0, 100.0]; 2]
     );
     assert!(app.core.scoped.staleness.results_stale);
     app.undo_action();
@@ -190,15 +193,67 @@ fn node_and_section_edits_invalidate_results_and_update_placement() {
         old_top + 50.0
     );
     assert!(app.core.scoped.staleness.results_stale);
-    assert!(app.apply_model_edit(Box::new(SetBeamVerticalEccentricity {
+    assert!(app.apply_model_edit(Box::new(SetBeamEndOffsets {
         member,
-        value: None
+        value: [[0.0; 3]; 2]
     })));
     let revision = app.core.scoped.undo.revision();
-    assert!(!app.apply_model_edit(Box::new(SetBeamVerticalEccentricity {
+    assert!(!app.apply_model_edit(Box::new(SetBeamEndOffsets {
         member,
-        value: Some(f64::INFINITY)
+        value: [[0.0, 0.0, f64::INFINITY]; 2]
     })));
     assert_eq!(app.core.scoped.undo.revision(), revision);
-    assert!(app.core.model.beam_placement(member).is_err());
+    assert!(app.core.model.beam_placement(member).is_ok());
+}
+
+#[test]
+fn secondary_xyz_display_edits_preserve_calculation_evidence_and_freshness() {
+    let mut app = app();
+    app.core.scoped.staleness.mark_fresh();
+    app.core.scoped.staleness.preparation_stale = false;
+    app.core.scoped.staleness.design_stale = false;
+    let modal = app.result_input(&result_validity::ResultInputKey::Modal);
+    let baseline = app.core.model.calculation_model();
+    let member = SupportMemberId::Secondary(sepika_core::ids::SecondaryMemberId(0));
+    let before = app.core.model.beam_placement(member).unwrap().actual_ends;
+    assert!(app.apply_model_edit(Box::new(SetBeamEndOffsets {
+        member,
+        value: [[100.0, 200.0, 300.0], [-200.0, 50.0, -100.0]]
+    })));
+    assert_ne!(
+        app.core.model.beam_placement(member).unwrap().actual_ends,
+        before
+    );
+    assert_eq!(
+        app.core
+            .model
+            .calculation_beam_placement(member)
+            .unwrap()
+            .actual_ends,
+        before
+    );
+    assert_eq!(
+        app.result_input(&result_validity::ResultInputKey::Modal),
+        modal
+    );
+    assert!(app
+        .core
+        .model
+        .calculation_model()
+        .eq_ignoring_dofmap(&baseline));
+    assert!(!app.core.scoped.staleness.results_stale);
+    assert!(!app.core.scoped.staleness.preparation_stale);
+    assert!(!app.core.scoped.staleness.design_stale);
+    app.undo_action();
+    assert_eq!(
+        app.core.model.beam_placement(member).unwrap().actual_ends,
+        before
+    );
+    assert!(!app.core.scoped.staleness.results_stale);
+    app.redo_action();
+    assert_ne!(
+        app.core.model.beam_placement(member).unwrap().actual_ends,
+        before
+    );
+    assert!(!app.core.scoped.staleness.results_stale);
 }

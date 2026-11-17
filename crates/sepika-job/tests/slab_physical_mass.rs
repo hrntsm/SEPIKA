@@ -276,7 +276,7 @@ fn 梁嵩上げの設計重量と物理質量を両質量方式の層と動的�
         .to_section(SectionId(1), "嵩上げ梁".into());
         model.sections[1].frame_use = Some(FrameSectionUse::Girder);
         model.sections[1].material = Some(MaterialId(0));
-        model.elements[2].vertical_eccentricity = Some(-400.);
+        model.elements[2].end_offsets_mm = [[0.0, 0.0, -400.]; 2];
         let settings = sepika_job::settings::AnalysisSettings {
             mass_method,
             ..Default::default()

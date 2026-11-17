@@ -76,10 +76,7 @@ pub fn self_weight_case_content(
                     node_force[top] += load / 2.0;
                     node_force[bottom] += load / 2.0 + extra_bottom_load;
                 } else if load > 0.0 {
-                    let len = ((cj[0] - ci[0]).powi(2)
-                        + (cj[1] - ci[1]).powi(2)
-                        + (cj[2] - ci[2]).powi(2))
-                    .sqrt();
+                    let len = model.member_length(elem);
                     if len > 0.0 {
                         let w = load / len;
                         member.push(MemberLoad::auto(
@@ -251,7 +248,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }

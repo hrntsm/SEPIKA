@@ -247,15 +247,28 @@ fn resolve(model: &Model, elem_id: ElemId) -> Result<LateralBracingReference, St
     if !column_at(model, first.nodes[*start_index]) || !column_at(model, last.nodes[*end_index]) {
         return Err("柱間両外端の同一NodeIdへの明示Column接続が未確認です".into());
     }
-    let start = model.node(first.nodes[*start_index]).unwrap().coord;
-    let end = model.node(last.nodes[*end_index]).unwrap().coord;
+    let physical_ends = |element: &ElementData| {
+        model
+            .primary_beam_axis_ends(element)?
+            .ok_or_else(|| format!("要素{}の大梁実材軸を解決できません", element.id.0))
+    };
+    let start = physical_ends(first)?[*start_index];
+    let end = physical_ends(last)?[*end_index];
     let delta: [f64; 3] = std::array::from_fn(|k| end[k] - start[k]);
     let length = delta.iter().map(|v| v * v).sum::<f64>().sqrt();
     positive(length, "柱間全長L")?;
     let axis = delta.map(|v| v / length);
+    let mut previous_end = None;
     for (e, start_index, end_index) in &oriented {
-        let a = model.node(e.nodes[*start_index]).unwrap().coord;
-        let b = model.node(e.nodes[*end_index]).unwrap().coord;
+        let ends = physical_ends(e)?;
+        let a = ends[*start_index];
+        let b = ends[*end_index];
+        if previous_end.is_some_and(|previous| {
+            sepika_core::geom::vec3::dist(previous, a) > 1e-6 * model.member_length(e)
+        }) {
+            return Err(format!("要素{}: groupの実材軸が連続していません", e.id.0));
+        }
+        previous_end = Some(b);
         let segment: [f64; 3] = std::array::from_fn(|k| b[k] - a[k]);
         let projection: f64 = segment.iter().zip(axis).map(|(s, d)| s * d).sum();
         let residual = segment
@@ -348,7 +361,7 @@ mod tests {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -429,6 +442,28 @@ mod tests {
             count(25000.0, &sec, &material("SS400")).unwrap(),
             (4, 250.0)
         );
+    }
+
+    #[test]
+    fn reference_uses_physical_group_length_and_rejects_offset_discontinuity() {
+        let mut extended = model(false);
+        extended.elements[0].end_offsets_mm = [[0.0; 3], [5000.0, 0.0, 0.0]];
+        match resolve_lateral_bracing_reference(&extended, ElemId(0)) {
+            LateralBracingReference::Available {
+                required_count,
+                length_mm,
+                lambda_y,
+                ..
+            } => {
+                assert_eq!(required_count, 4);
+                assert_eq!(length_mm, 25000.0);
+                assert_eq!(lambda_y, 250.0);
+            }
+            other => panic!("{other:?}"),
+        }
+        let mut discontinuous = model(true);
+        discontinuous.elements[3].end_offsets_mm = [[0.0, 100.0, 0.0]; 2];
+        unavailable(&discontinuous, "実材軸が連続していません");
     }
     #[test]
     fn reference_material_allowlist_does_not_classify_by_f() {

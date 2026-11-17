@@ -940,7 +940,7 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -1211,7 +1211,7 @@ fn aligned_portal_frame() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -2283,7 +2283,7 @@ fn shear_model(n: usize) -> sepika_core::model::Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -3743,7 +3743,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -3949,7 +3949,7 @@ pub(super) fn make_square_slab_test_model() -> sepika_core::model::Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -4447,7 +4447,7 @@ fn test_floor_design_skips_materialized_beam() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -4470,7 +4470,7 @@ fn test_floor_design_skips_materialized_beam() {
         end_cond: [EndCondition::Pinned, EndCondition::Pinned],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -4613,7 +4613,7 @@ pub(super) fn make_floor_secondary_beam_test_model() -> sepika_core::model::Mode
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -4988,7 +4988,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -5177,7 +5177,7 @@ fn test_floor_design_checks_cantilever_beam() {
     );
     model.floor_regions[0].slab_ids = vec![first, second];
     model.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -5273,7 +5273,7 @@ fn test_floor_design_checks_secondary_beam_without_section_is_input_error() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -5388,13 +5388,13 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
     }
     let beam = SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -5536,13 +5536,13 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
     }
     let beam = SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -6113,7 +6113,7 @@ fn test_column_live_load_factors_three_story() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -6140,7 +6140,7 @@ fn test_column_live_load_factors_three_story() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -7453,7 +7453,7 @@ fn rc_cantilever_frame() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -7581,7 +7581,7 @@ fn test_compute_cft_ultimate_checks() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -8012,7 +8012,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -8041,14 +8041,6 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         .expect("標準荷重ケース DL が自動作成されるはず")
         .id;
 
-    app2.run_linear_static(dl_id);
-    assert!(app2
-        .core
-        .scoped
-        .last_error
-        .as_ref()
-        .unwrap()
-        .contains("鉛直偏心"));
     let imported_beams = app2
         .core
         .model
@@ -8066,16 +8058,9 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         .map(|element| element.id)
         .collect::<Vec<_>>();
     for id in imported_beams {
-        sepika_edit::EditCommand::apply(
-            &sepika_edit::SetBeamVerticalEccentricity {
-                member: sepika_core::model::SupportMemberId::Primary(id),
-                value: Some(0.0),
-            },
-            &mut app2.core.model,
-        );
         assert_eq!(
-            app2.core.model.element(id).unwrap().vertical_eccentricity,
-            Some(0.0)
+            app2.core.model.element(id).unwrap().end_offsets_mm,
+            [[0.0, 0.0, 0.0]; 2]
         );
     }
     app2.core.model.rebuild_assignment_regions().unwrap();
@@ -8169,7 +8154,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -8257,7 +8242,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
             fy: None,
         }],
         unassigned_beams: vec![SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -8334,7 +8319,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     }
     for element in &mut model.elements {
         if element.section == Some(SectionId(2)) {
-            element.vertical_eccentricity = Some(-300.0);
+            element.end_offsets_mm = [[0.0, 0.0, -300.0]; 2];
         }
     }
     model.rebuild_floor_assignment_regions();
@@ -8699,7 +8684,7 @@ mod grid_headless {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -10411,7 +10396,7 @@ fn test_generate_axes_action_does_not_stale_results() {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -10646,7 +10631,7 @@ fn test_wall_has_src_boundary_column() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -13165,7 +13150,7 @@ fn standard_rebar507_import_notice_reports_center_priority_without_refusing_prep
     app.core.scoped.last_error = None;
     app.core.model.stories = explicit_story_inputs(&[0.0, 3000.0]);
     for element in &mut app.core.model.elements {
-        element.vertical_eccentricity = Some(0.0);
+        element.end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
     }
     app.run_preparation();
     assert!(
@@ -14267,10 +14252,10 @@ mod secondary_materialization_fixture;
 
 #[test]
 fn independent_eccentric_beam_remains_in_floor_design_targets() {
-    for (eccentricity, expected_count) in [(Some(-300.), 1), (None, 1), (Some(0.), 0)] {
+    for (eccentricity, expected_count) in [(-300.0, 1), (0.0, 0)] {
         let mut app = App::default();
         app.core.model = secondary_materialization_fixture::model();
-        app.core.model.elements[0].vertical_eccentricity = eccentricity;
+        app.core.model.elements[0].end_offsets_mm = [[0.0, 0.0, eccentricity]; 2];
         let (beams, _) = app.floor_design_checks().unwrap();
         assert_eq!(beams.len(), expected_count, "{eccentricity:?}");
         if expected_count == 1 {
@@ -14282,10 +14267,10 @@ fn independent_eccentric_beam_remains_in_floor_design_targets() {
 #[cfg(feature = "gui")]
 #[test]
 fn independent_eccentric_beam_is_visible_in_secondary_list() {
-    for (eccentricity, visible) in [(Some(-300.), true), (None, true), (Some(0.), false)] {
+    for (eccentricity, visible) in [(-300.0, true), (0.0, false)] {
         let mut app = App::default();
         app.core.model = secondary_materialization_fixture::model();
-        app.core.model.elements[0].vertical_eccentricity = eccentricity;
+        app.core.model.elements[0].end_offsets_mm = [[0.0, 0.0, eccentricity]; 2];
         let context = egui::Context::default();
         let output = context.run_ui(
             egui::RawInput {
@@ -14917,4 +14902,69 @@ pub(super) fn install_independent_lumped_backbone(app: &mut App, max_disp_mm: f6
             floor_disp: Vec::new(),
         })
         .collect();
+}
+
+#[test]
+fn secondary_xyz_display_offsets_preserve_floor_design_demand_results_and_physical_mass_transfer() {
+    let mut app = App::default();
+    app.core.model = make_floor_secondary_beam_test_model();
+    let baseline = app.floor_design_checks().unwrap();
+    assert_eq!(baseline.0.len(), 1);
+    assert!(baseline.0[0].2.m_max > 0.0);
+    let baseline_design = baseline
+        .0
+        .iter()
+        .map(|(_, _, r)| r.clone())
+        .collect::<Vec<_>>();
+    let baseline_mass = sepika_load::cascade::solve_with_basis(
+        &app.core.model,
+        |_| 0.003,
+        true,
+        sepika_load::cascade::SelfWeightBasis::MassEquiv,
+    )
+    .unwrap();
+    let baseline_weight = sepika_load::cascade::solve(&app.core.model, |_| 0.003, true).unwrap();
+    for member in app
+        .core
+        .model
+        .floor_regions
+        .iter_mut()
+        .flat_map(|r| &mut r.secondary_beams)
+    {
+        member.end_offsets_mm = [[100.0, 200.0, 300.0], [-400.0, 500.0, -600.0]];
+    }
+    let actual = app.floor_design_checks().unwrap();
+    assert_eq!(
+        baseline_design,
+        actual
+            .0
+            .iter()
+            .map(|(_, _, r)| r.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(baseline.1, actual.1);
+    for (before, after) in [
+        (
+            baseline_mass,
+            sepika_load::cascade::solve_with_basis(
+                &app.core.model,
+                |_| 0.003,
+                true,
+                sepika_load::cascade::SelfWeightBasis::MassEquiv,
+            )
+            .unwrap(),
+        ),
+        (
+            baseline_weight,
+            sepika_load::cascade::solve(&app.core.model, |_| 0.003, true).unwrap(),
+        ),
+    ] {
+        assert!(!before.members.is_empty());
+        for (id, expected) in before.members {
+            let found = &after.members[&id];
+            assert_eq!(found.end_points, expected.end_points);
+            assert_eq!(found.reactions, expected.reactions);
+            assert_eq!(found.member_loads, expected.member_loads);
+        }
+    }
 }

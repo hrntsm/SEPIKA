@@ -115,9 +115,8 @@ impl Model {
     /// 零長の節点ばねは単位回転、零長の免震支承は仮想鉛直軸を用いる。
     pub fn validate_local_frames(&self) -> Result<(), String> {
         for element in &self.elements {
-            if self.primary_beam_axis_ends(element)?.is_some()
-                && self.element_material(element).is_none()
-            {
+            let beam_ends = self.primary_beam_axis_ends(element)?;
+            if beam_ends.is_some() && self.element_material(element).is_none() {
                 return Err(format!(
                     "部材 ID {} i/j端の材料: 未指定または参照先がありません",
                     element.id.0
@@ -136,7 +135,7 @@ impl Model {
             ) else {
                 continue;
             };
-            let (p_i, mut p_j) = (i.coord, j.coord);
+            let [p_i, mut p_j] = beam_ends.unwrap_or([i.coord, j.coord]);
             if crate::geom::vec3::dist(p_i, p_j) < 1e-9 {
                 match element.kind {
                     ElementKind::NodalSpring => continue,
@@ -348,9 +347,9 @@ pub struct ElementData {
     /// `None` は他要素種別、またはバネ定数未指定（剛性ゼロ扱い）。
     #[serde(default)]
     pub spring: Option<[f64; 6]>,
-    /// 基準材軸からの一律鉛直偏心 `[mm]`。+Z が正、None は未指定。
-    #[serde(default)]
-    pub vertical_eccentricity: Option<f64>,
+    /// 基準端からの全体座標XYZ偏心 `[mm]`。i端・j端の順で、各成分は有限値を要する。
+    #[serde(deserialize_with = "super::beam_placement::deserialize_end_offsets")]
+    pub end_offsets_mm: [[f64; 3]; 2],
 }
 
 impl ElementData {

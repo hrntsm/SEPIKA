@@ -226,6 +226,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-fiber-end-release-equilibrium", Some(49), "旧契約"),
         ("old-checkpoint-and-fixed-time-history", Some(50), "旧契約"),
         ("old-shell-quadrilateral-area", Some(67), "旧契約"),
+        ("old-uniform-vertical-beam-offsets", Some(69), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -812,14 +813,14 @@ fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     let mut app = direct_secondary_beam_app();
     for region in &mut app.core.model.floor_regions {
         for beam in &mut region.secondary_beams {
-            beam.vertical_eccentricity = Some(-500.);
+            beam.end_offsets_mm = [[0.0, 0.0, -500.]; 2];
         }
     }
     for beam in &mut app.core.model.unassigned_beams {
-        beam.vertical_eccentricity = Some(-500.);
+        beam.end_offsets_mm = [[0.0, 0.0, -500.]; 2];
     }
     assert!(
-        sepika_load::self_weight::all_beam_upstand_segments(&app.core.model)
+        !sepika_load::self_weight::all_beam_upstand_segments(&app.core.model)
             .unwrap()
             .iter()
             .any(|segment| matches!(
@@ -2201,9 +2202,9 @@ fn beam_eccentricity_edit_and_saved_reload_reject_results_from_previous_connecti
     app.require_result_input(key.clone()).unwrap();
     let original = app.result_input(&key);
     assert!(
-        app.apply_model_edit(Box::new(sepika_edit::SetBeamVerticalEccentricity {
+        app.apply_model_edit(Box::new(sepika_edit::SetBeamEndOffsets {
             member: sepika_core::model::SupportMemberId::Primary(ElemId(2)),
-            value: Some(100.0)
+            value: [[0.0, 0.0, 100.0]; 2]
         }))
     );
     assert_ne!(app.result_input(&key), original);
@@ -2215,8 +2216,8 @@ fn beam_eccentricity_edit_and_saved_reload_reject_results_from_previous_connecti
         "734-eccentric-old-input",
     );
     assert_eq!(
-        loaded.core.model.elements[2].vertical_eccentricity,
-        Some(100.0)
+        loaded.core.model.elements[2].end_offsets_mm,
+        [[0.0, 0.0, 100.0]; 2]
     );
     assert!(loaded.require_result_input(key.clone()).is_err());
     loaded.run_linear_static(LoadCaseId(0));

@@ -468,7 +468,7 @@ pub(super) fn draw_modeling_with_view(
                 painter,
                 model,
                 pts,
-                coords3,
+                proj,
                 elem,
                 class,
                 &wall_nodes,
@@ -632,7 +632,7 @@ fn draw_line_member(
     painter: &egui::Painter,
     model: &Model,
     pts: &[egui::Pos2],
-    coords3: &[[f64; 3]],
+    proj: &Projector<'_>,
     elem: &ElementData,
     class: ModelClass,
     wall_nodes: &std::collections::HashSet<NodeId>,
@@ -643,11 +643,13 @@ fn draw_line_member(
     }
     let n0 = elem.nodes[0].index();
     let n1 = elem.nodes[1].index();
-    if n0 >= pts.len() || n1 >= pts.len() || n0 >= coords3.len() || n1 >= coords3.len() {
+    if n0 >= pts.len() || n1 >= pts.len() {
         return;
     }
-    let (p0, p1) = (pts[n0], pts[n1]);
-    let l = vec3::dist(coords3[n0], coords3[n1]);
+    let Some([p0, p1]) = super::primary_screen_ends(model, elem, pts, proj) else {
+        return;
+    };
+    let l = model.member_length(elem);
     let color = class.color();
 
     let end_plastic = is_end_plastic_zone_model(elem, class);
@@ -1418,6 +1420,43 @@ mod tests {
     }
 
     #[test]
+    fn eccentric_girder_modeling_and_rigid_zones_use_physical_axis_and_length() {
+        let mut model = crate::sample::portal_frame();
+        model.elements[2].end_offsets_mm = [[0.0, 1000.0, 0.0], [0.0, 1000.0, 300.0]];
+        model.elements[2].rigid_zone.length_i = 300.0;
+        model.elements[2].rigid_zone.length_j = 300.0;
+        let camera = super::super::CameraState::default();
+        let proj =
+            super::super::Projector::new([3000.0, 0.0, 3500.0], &camera, 0.1, [400.0, 300.0]);
+        let pts = model
+            .nodes
+            .iter()
+            .map(|n| proj.project(n.coord))
+            .collect::<Vec<_>>();
+        let expected =
+            super::super::primary_screen_ends(&model, &model.elements[2], &pts, &proj).unwrap();
+        let t = (300.0 / 6007.49531835024) as f32;
+        let ends = [
+            expected[0].lerp(expected[1], t),
+            expected[0].lerp(expected[1], 1.0 - t),
+        ];
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(Default::default(), |ui| {
+            draw_line_member(
+                ui.painter(),
+                &model,
+                &pts,
+                &proj,
+                &model.elements[2],
+                ModelClass::Elastic,
+                &Default::default(),
+                &mut Symbols::default(),
+            )
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { points, stroke } if points[0].distance(ends[0]) < 1e-3 && points[1].distance(ends[1]) < 1e-3 && stroke.width == 3.0)), "expected {ends:?}, shapes {:?}", output.shapes);
+    }
+
+    #[test]
     fn wall_modeling_detail_labels_rc_methods_and_keeps_steel_capacity_untagged() {
         use sepika_core::ids::LoadCaseId;
         use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
@@ -1519,7 +1558,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: regime,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -1699,7 +1738,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }

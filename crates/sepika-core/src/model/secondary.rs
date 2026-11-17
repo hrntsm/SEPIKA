@@ -45,16 +45,16 @@ pub struct SecondaryMember {
     pub section: Option<SectionId>,
     /// 表示名。
     pub name: String,
-    /// 基準材軸からの一律鉛直偏心 `[mm]`。+Z が正、None は未指定。
-    #[serde(default)]
-    pub vertical_eccentricity: Option<f64>,
+    /// 基準端からの全体座標XYZ偏心 `[mm]`。i端・j端の順で、各成分は有限値を要する。
+    #[serde(deserialize_with = "super::beam_placement::deserialize_end_offsets")]
+    pub end_offsets_mm: [[f64; 3]; 2],
 }
 
 impl Default for SecondaryMember {
     fn default() -> Self {
         Self {
             id: SecondaryMemberId(0),
-            vertical_eccentricity: None,
+            end_offsets_mm: [[0.0; 3]; 2],
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
@@ -289,8 +289,8 @@ impl Model {
         (len > 1e-9).then_some((p0, p1, len))
     }
 
-    /// 基準端点が許容差内で一致する2節点 `Beam` と、断面・用途・解決主材料が一致するとき実部材化済み。
-    /// 小梁は鉛直偏心も一致を要し、未指定と明示0を区別する。材端の順序は問わない。
+    /// 基準端点が丸め誤差（1e-6mm）内で一致する2節点 `Beam` と、断面・用途・解決主材料が一致するとき実部材化済み。
+    /// 実部材化先は偏心0を要し、小梁の表示偏心は比較しない。材端の順序は問わない。
     pub fn secondary_member_materialized(&self, sm: &SecondaryMember) -> bool {
         let Some(section) = sm.section.and_then(|id| self.section(id)) else {
             return false;
@@ -313,16 +313,15 @@ impl Model {
                 || e.nodes.len() != 2
                 || e.section != Some(section.id)
                 || self.element_material(e).map(|m| m.id) != Some(material.id)
-                || (sm.kind == SecondaryMemberKind::Beam
-                    && sm.vertical_eccentricity != e.vertical_eccentricity)
+                || (sm.kind == SecondaryMemberKind::Beam && e.end_offsets_mm != [[0.0; 3]; 2])
             {
                 return false;
             }
             let (Some(p), Some(q)) = (self.node(e.nodes[0]), self.node(e.nodes[1])) else {
                 return false;
             };
-            (points_equal(a, p.coord) && points_equal(b, q.coord))
-                || (points_equal(a, q.coord) && points_equal(b, p.coord))
+            let equal = |left, right| crate::geom::vec3::dist(left, right) <= 1e-6;
+            (equal(a, p.coord) && equal(b, q.coord)) || (equal(a, q.coord) && equal(b, p.coord))
         })
     }
 
@@ -642,6 +641,14 @@ pub fn validate_secondary_members(
     use crate::error::CoreError;
     let mut attest: Vec<(SecondaryMemberId, SecondaryMemberEnds)> = Vec::new();
     for sm in members {
+        if !sm.end_offsets_mm.iter().flatten().all(|v| v.is_finite())
+            || (sm.kind == SecondaryMemberKind::Post && sm.end_offsets_mm != [[0.0; 3]; 2])
+        {
+            return Err(CoreError::DanglingRef(format!(
+                "二次部材 ID {} のXYZ偏心が非有限または非対応です",
+                sm.id.0
+            )));
+        }
         attest.push((sm.id, sm.ends));
     }
     let mut ids = std::collections::HashSet::new();
@@ -801,7 +808,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -824,7 +831,7 @@ mod tests {
 
     fn secondary_beam(id: u32, coords: [[f64; 3]; 2]) -> SecondaryMember {
         SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: SecondaryMemberId(id),
             kind: SecondaryMemberKind::Beam,
@@ -901,7 +908,7 @@ mod tests {
     fn 支持のない端は生座標のまま残す() {
         let mut model = two_girder_model();
         model.unassigned_posts.push(SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: SecondaryMemberId(0),
             kind: SecondaryMemberKind::Post,

@@ -262,7 +262,7 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
         ordinary.wall_regions.clear();
         ordinary.wall_assignment_regions = Default::default();
         let mut steel = wall_connection_fixture(representation);
-        for index in 0..2 {
+        for (index, target_section) in steel.sections.iter_mut().enumerate().take(2) {
             let mut section = SectionShape::SteelBox {
                 height: 600.0,
                 width: 600.0,
@@ -271,9 +271,9 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
                 corner_r: Some(0.0),
             }
             .to_section(SectionId(index as u32), "鋼材".into());
-            section.frame_use = steel.sections[index].frame_use;
+            section.frame_use = target_section.frame_use;
             section.material = Some(MaterialId(2));
-            steel.sections[index] = section;
+            *target_section = section;
         }
         steel.sections[2].shape = None;
         steel.sections[2].material = Some(MaterialId(2));
@@ -1262,7 +1262,7 @@ fn eccentric_ground_motion_drives_free_rotation_with_restrained_translations() {
             model.sections[0].as_z = 1e100;
             model.materials[0].fy = Some(1e10);
             model.elements[0].kind = kind;
-            model.elements[0].vertical_eccentricity = Some(offset_mm);
+            model.elements[0].end_offsets_mm = [[0.0, 0.0, offset_mm]; 2];
             model.elements[0].plastic_zone = Some(300.0);
             model.nodes[0].restraint = Dof6Mask::FIXED;
             model.nodes[1].restraint = Dof6Mask(0b101111);

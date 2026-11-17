@@ -48,7 +48,7 @@ pub fn girder_self_weight_breakdown(
         return Err(fail("RC/SRCのコンクリート材料を解決できません"));
     }
     mat.validate_design_self_weight(&format!("大梁 {}", elem.id.0), "床板重複控除")?;
-    let beam = model.beam_placement(SupportMemberId::Primary(elem.id))?;
+    let beam = model.calculation_beam_placement(SupportMemberId::Primary(elem.id))?;
     let len = sepika_core::geom::vec3::dist(beam.actual_ends[0], beam.actual_ends[1]);
     let interval = sepika_core::face_distance::girder_self_weight_interval(model, elem)?;
     for slab in &model.slabs {

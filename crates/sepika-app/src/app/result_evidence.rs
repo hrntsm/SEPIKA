@@ -1313,6 +1313,17 @@ mod tests {
                 |ui| app.reference_snapshot_window(ui.ctx()),
             ));
         }
+        let input = &app.ui.scoped.reference_snapshot.as_ref().unwrap().1;
+        text.push_str(&rendered_text(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1800.0, 1600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| App::recorded_input_contents_ui(ui, input),
+        )));
         for expected in [
             "小梁主筋比 0.007",
             "小梁スターラップ比 0.002",
@@ -1589,7 +1600,7 @@ mod tests {
         model.stories[0].sl_offset_mm = Some(12.0);
         model.elements[0].rigid_zone.face_i = None;
         model.elements[0].rigid_zone.face_j = Some(23.0);
-        model.elements[0].vertical_eccentricity = Some(17.0);
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, 17.0]; 2];
         model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
         model.member_detail_attrs.push(MemberDetailAttr {
             elem: ElemId(0),
@@ -1649,7 +1660,7 @@ mod tests {
             "階 #0 固定1F",
             "ΔSL Some(12.0)",
             "フェース距離 i=None mm・j=Some(23.0)",
-            "鉛直偏心 Some(17.0)",
+            "端別XYZ偏心 [[0.0, 0.0, 17.0], [0.0, 0.0, 17.0]]",
             "局所軸参照方向 [0.0, 1.0, 0.0]",
             "length: 111.0",
             "断面用途 Some(Column) / 幅 444 mm / せい 666 mm / 実板厚 Some(77.0)",
@@ -1814,7 +1825,7 @@ mod tests {
         let quantity = app.member_quantity_evidence_reference(vec![ElemId(2)]);
         let steel = quantity.steel_takeoff().unwrap();
         assert!(steel.volume_m3() > 0.0);
-        assert!(steel.whole_quantity_error.unwrap().contains("有限範囲"));
+        assert!(steel.whole_quantity_error.unwrap().contains("有限"));
         app.open_result_evidence(EvidenceReference::Quantity(Box::new(quantity)))
             .unwrap();
         let lines = &app.ui.scoped.result_evidence.as_ref().unwrap().lines;

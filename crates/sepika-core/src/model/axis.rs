@@ -162,13 +162,12 @@ impl AxisGroup {
 }
 
 impl Model {
-    /// 材端 2 節点の距離 `[mm]`（材長）。
-    ///
-    /// 部材荷重の載荷位置は i 端からの mm で持つため、その妥当性を判定するところと
-    /// 階への複製が材長を必要とする。判定の情報源を 1 つに保つため、材長が要る
-    /// ところは常にこのメソッドを使う。2 節点に満たない要素・節点参照が範囲外の
-    /// 要素は 0 を返す。
+    /// 大梁は解決済み実材軸、それ以外は材端節点間の長さ `[mm]`。
+    /// 二節点・節点参照が不足する場合は0、実配置未解決の場合は基準節点間の距離を返す。
     pub fn member_length(&self, elem: &ElementData) -> f64 {
+        if let Ok(Some([a, b])) = self.primary_beam_axis_ends(elem) {
+            return crate::geom::vec3::dist(a, b);
+        }
         if elem.nodes.len() < 2 {
             return 0.0;
         }

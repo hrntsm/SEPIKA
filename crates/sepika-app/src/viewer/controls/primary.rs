@@ -113,6 +113,8 @@ fn section_toggles_with_view(
     _app: &mut App,
 ) {
     ui.toggle_value(&mut view.show_sections, "断面表示");
+    ui.toggle_value(&mut view.show_offset_connections, "偏心接続部分")
+        .on_hover_text("大梁の剛体接続を破線、小梁の表示専用の接続関係を点線で表示します");
     ui.toggle_value(&mut view.show_floor_secondary, "床壁・二次部材")
         .on_hover_text(
             "床板・小梁・間柱と、解析要素にならない壁版（腰壁・垂壁・パラペット・\
@@ -180,12 +182,17 @@ pub(super) fn primary_controls_with_view(
         + 2.0 * spacing;
     let mut sections = view.show_sections;
     let mut secondary = view.show_floor_secondary;
+    let mut offset_connections = view.show_offset_connections;
     let toggle_width = probe.toggle_value(&mut sections, "断面表示").rect.width()
+        + probe
+            .toggle_value(&mut offset_connections, "偏心接続部分")
+            .rect
+            .width()
         + probe
             .toggle_value(&mut secondary, "床壁・二次部材")
             .rect
             .width()
-        + spacing;
+        + 2.0 * spacing;
     let settings_width = probe.button("表示設定").rect.width();
     let available = ui.available_width();
     let base_width = mode_width + range_width + settings_width + 2.0 * spacing;

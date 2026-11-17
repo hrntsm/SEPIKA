@@ -120,6 +120,7 @@ pub(super) struct ClickContext<'a> {
     pub frame: Option<&'a Frame>,
     pub mode: ViewMode,
     pub member_candidate: Option<sepika_core::ids::ElemId>,
+    pub secondary_candidate: Option<sepika_core::ids::SecondaryMemberId>,
 }
 
 /// 描画領域のクリックを処理する（荷重の対象ピック・作成モードの節点選び・
@@ -140,6 +141,7 @@ pub(super) fn handle_click_with_view(
         frame,
         mode,
         member_candidate,
+        secondary_candidate,
     } = ctx;
     if let Some(click_pos) = response.interact_pointer_pos() {
         if app.load_pick_active() {
@@ -314,6 +316,10 @@ pub(super) fn handle_click_with_view(
                 }
             }
         } else {
+            if let Some(id) = secondary_candidate {
+                app.select_secondary_member(id);
+                return;
+            }
             match member_candidate {
                 Some(id) => {
                     app.select_member(id);
@@ -393,7 +399,7 @@ mod selection_tests {
                     end_cond: [EndCondition::Fixed; 2],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
-                    vertical_eccentricity: Some(0.0),
+                    end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                     plastic_zone: None,
                     spring: None,
                 });
@@ -492,6 +498,7 @@ mod selection_tests {
                             frame: None,
                             mode: ViewMode::Shape,
                             member_candidate: None,
+                            secondary_candidate: None,
                         },
                     );
                 }

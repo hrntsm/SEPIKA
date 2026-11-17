@@ -172,7 +172,7 @@ fn seeded_model(n_nodes: u32, n_elems: u32) -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -211,7 +211,7 @@ fn square_with_region() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -421,7 +421,7 @@ fn test_delete_node_middle_renumbers_and_roundtrips() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -480,7 +480,7 @@ fn test_delete_node_in_use_is_noop() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -558,7 +558,7 @@ fn test_delete_member_undo_preserves_member_load_order() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -626,7 +626,7 @@ fn test_add_delete_member_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -981,7 +981,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -1002,7 +1002,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(0),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind: sepika_core::model::SecondaryMemberKind::Beam,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([[0.0; 3], [1.0, 0.0, 0.0]]),
@@ -1083,7 +1083,7 @@ fn test_edit_rc_plate_section_shape_with_element_reference() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -1138,7 +1138,7 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -1180,7 +1180,7 @@ fn test_duplicate_section_for_member_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -1237,7 +1237,7 @@ fn test_duplicate_section_no_section_noop() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -1381,7 +1381,7 @@ fn test_delete_section_referenced_by_beam() {
         vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
     );
     region.secondary_beams = vec![SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -1703,7 +1703,7 @@ fn test_commands_reject_dangling_references() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -2231,7 +2231,7 @@ fn test_delete_slab_middle_renumbers_and_roundtrips() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -2501,7 +2501,7 @@ fn test_delete_leftover_generated_master_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -3118,7 +3118,7 @@ fn test_set_member_hysteresis_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -3232,7 +3232,7 @@ fn test_add_damper_creates_element_and_attr_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -3319,7 +3319,7 @@ fn test_add_isolator_creates_element_and_attr_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -3373,7 +3373,7 @@ fn test_add_isolator_id_mismatch_is_noop() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -3526,7 +3526,7 @@ fn test_remove_support_isolator_noop_when_not_support_isolator() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -3924,7 +3924,7 @@ fn test_composite_delete_nodes_descending_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -5321,7 +5321,7 @@ fn test_copy_story_distinguishes_brace_from_girder() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         });
@@ -5551,7 +5551,7 @@ fn make_sm(
     kind: sepika_core::model::SecondaryMemberKind,
 ) -> sepika_core::model::SecondaryMember {
     sepika_core::model::SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(id),
         kind,
@@ -6093,7 +6093,7 @@ fn add_member_rejects_horizontal_cft_but_allows_column_and_unassigned() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -6359,7 +6359,7 @@ fn test_copy_story_secondary_creates_unassigned_beam() {
     model
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -6408,7 +6408,7 @@ fn test_copy_story_rejects_secondary_cft() {
         .collect();
     let cft = push_cft_section(&mut model);
     model.unassigned_beams.push(SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -6583,7 +6583,7 @@ fn test_copy_story_counts_midspan_secondary_as_skipped() {
     model
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -6631,7 +6631,7 @@ fn test_copy_story_slab_copy_does_not_touch_floor_regions() {
         .map(|n| n.id)
         .collect();
     let beam = sepika_core::model::SecondaryMember {
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -6717,7 +6717,7 @@ fn test_add_attached_slab_roundtrip() {
         end_cond: [sepika_core::model::EndCondition::Fixed; 2],
         force_regime: sepika_core::model::ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -7656,7 +7656,7 @@ fn 間柱端部負担率を設定し取り消せる() {
         .unassigned_posts
         .push(sepika_core::model::SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(0),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             kind: sepika_core::model::SecondaryMemberKind::Post,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -7820,7 +7820,7 @@ fn attached_slab_rejection_preserves_model_and_undo_redo_history() {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -9951,4 +9951,188 @@ fn story_edits_keep_lumped_intervals_on_their_original_floor_and_restore_deleted
     assert_eq!(model.lumped_skeleton_intervals[0].story, StoryId(2));
     stack.redo(&mut model);
     assert!(model.lumped_skeleton_intervals.is_empty());
+}
+
+#[path = "../../sepika-core/tests/support/secondary_materialization_model.rs"]
+mod beam_offsets_fixture;
+
+#[test]
+fn xyz_offset_length_edit_preserves_manual_load_extent_intent_and_undo() {
+    use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind, SupportMemberId};
+    let mut model = beam_offsets_fixture::model();
+    model.elements[0].end_offsets_mm = [[0.0; 3]; 2];
+    model.load_cases.push(LoadCase {
+        id: sepika_core::ids::LoadCaseId(0),
+        name: "手動".into(),
+        kind: LoadCaseKind::Dead,
+        origin: Default::default(),
+        nodal: vec![],
+        member: vec![
+            MemberLoad::full_length_uniform(ElemId(0), [0.0, 0.0, -1.0], 6000.0, 2.0),
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Point {
+                    a: 5900.0,
+                    p: 1000.0,
+                },
+            ),
+        ],
+    });
+    let original = model.clone();
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(crate::SetBeamEndOffsets {
+            member: SupportMemberId::Primary(ElemId(0)),
+            value: [[0.0; 3], [0.0, 0.0, 300.0]]
+        })
+    ));
+    assert!((model.member_length(&model.elements[0]) - 6007.49531835024).abs() < 1e-10);
+    assert!(
+        matches!(model.load_cases[0].member[0].kind, MemberLoadKind::Distributed { a: 0.0, b, w1: 2.0, w2: 2.0 } if (b - 6007.49531835024).abs() < 1e-10)
+    );
+    assert_eq!(
+        model.load_cases[0].member[1],
+        original.load_cases[0].member[1]
+    );
+    let edited = model.clone();
+    assert!(!stack.run(
+        &mut model,
+        Box::new(crate::SetBeamEndOffsets {
+            member: SupportMemberId::Primary(ElemId(0)),
+            value: [[0.0; 3], [-200.0, 0.0, 0.0]]
+        })
+    ));
+    assert!(model.eq_ignoring_dofmap(&edited));
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&original));
+    stack.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&edited));
+}
+
+#[test]
+fn secondary_add_and_list_replace_reject_zero_display_length_without_model_or_history_changes() {
+    use sepika_core::model::FloorRegion;
+    let mut model = beam_offsets_fixture::model();
+    model.floor_regions.push(FloorRegion {
+        id: FloorRegionId(0),
+        name: String::new(),
+        boundary: vec![],
+        secondary_beams: vec![],
+        slab_ids: vec![],
+    });
+    let original = model.clone();
+    let mut member = model.unassigned_beams[0].clone();
+    member.id = sepika_core::ids::SecondaryMemberId(10);
+    member.end_offsets_mm = [[0.0; 3], [-6000.0, 0.0, 0.0]];
+    let mut stack = UndoStack::new();
+    for command in [
+        Box::new(AddUnassignedBeam { sm: member.clone() }) as Box<dyn EditCommand>,
+        Box::new(SetFloorRegionSecondaryBeams {
+            region: FloorRegionId(0),
+            beams: vec![member],
+        }),
+    ] {
+        assert!(!stack.run(&mut model, command));
+        assert_eq!(stack.revision(), 0);
+        let reason = stack.last_error().unwrap();
+        assert!(
+            reason.contains("ID 10") && reason.contains("実材軸長"),
+            "{reason}"
+        );
+        assert!(model.eq_ignoring_dofmap(&original));
+        assert!(!stack.can_undo());
+    }
+}
+
+#[test]
+fn secondary_anchor_edit_preserves_offsets_and_rejects_zero_display_length_atomically() {
+    use sepika_core::ids::SecondaryMemberId;
+    use sepika_core::model::{SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId};
+    let mut model = beam_offsets_fixture::model();
+    model.unassigned_beams[0].end_offsets_mm = [[0.0; 3], [-3000.0, 0.0, 0.0]];
+    let original = model.clone();
+    let mut stack = UndoStack::new();
+    let ends = |position| {
+        SecondaryMemberEnds::Supported([
+            SecondaryMemberAnchor {
+                support: SupportMemberId::Primary(ElemId(1)),
+                position: 0.0,
+            },
+            SecondaryMemberAnchor {
+                support: SupportMemberId::Primary(ElemId(0)),
+                position,
+            },
+        ])
+    };
+    assert!(!stack.run(
+        &mut model,
+        Box::new(SetSecondaryMemberEnds {
+            member: SecondaryMemberId(0),
+            ends: ends(0.5),
+        })
+    ));
+    let reason = stack.last_error().unwrap();
+    assert!(
+        reason.contains("ID 0") && reason.contains("実材軸長"),
+        "{reason}"
+    );
+    assert_eq!(stack.revision(), 0);
+    assert!(!stack.can_undo());
+    assert!(model.eq_ignoring_dofmap(&original));
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetSecondaryMemberEnds {
+            member: SecondaryMemberId(0),
+            ends: ends(0.75),
+        })
+    ));
+    assert_eq!(
+        model.unassigned_beams[0].end_offsets_mm,
+        original.unassigned_beams[0].end_offsets_mm
+    );
+    let edited = model.clone();
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&original));
+    stack.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&edited));
+}
+
+#[test]
+fn secondary_support_reversal_keeps_physical_end_offsets_and_undo_redo() {
+    use sepika_core::ids::SecondaryMemberId;
+    use sepika_core::model::{EndSupport, SupportMemberId};
+    let mut model = beam_offsets_fixture::model();
+    model.unassigned_beams[0].end_offsets_mm = [[0.0; 3], [6000.0, 0.0, 0.0]];
+    model.unassigned_beams[0].gravity_end_shares = Some([0.0, 1.0]);
+    let member = SupportMemberId::Secondary(SecondaryMemberId(0));
+    let original_ends = model.beam_placement(member).unwrap().actual_ends;
+    let original = model.clone();
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetSecondaryMemberEndSupport {
+            member: SecondaryMemberId(0),
+            end_support: [EndSupport::Free, EndSupport::Supported],
+        })
+    ));
+    model.validate().unwrap();
+    assert_eq!(
+        model.beam_placement(member).unwrap().actual_ends,
+        [original_ends[1], original_ends[0]]
+    );
+    assert_eq!(
+        model.unassigned_beams[0].end_offsets_mm,
+        [[6000.0, 0.0, 0.0], [0.0; 3]]
+    );
+    assert_eq!(
+        model.unassigned_beams[0].gravity_end_shares,
+        Some([1.0, 0.0])
+    );
+    let edited = model.clone();
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&original));
+    stack.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&edited));
 }

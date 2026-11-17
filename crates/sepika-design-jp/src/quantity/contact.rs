@@ -322,7 +322,7 @@ fn add_contact(
             "支持材 {support:?}: 梁の型枠面積・下端高さが有限範囲を超えています"
         ));
     }
-    let placement = model.beam_placement(support)?;
+    let placement = model.calculation_beam_placement(support)?;
     let [actual_a, actual_b] = placement.actual_ends;
     let sloped = actual_a[2] != actual_b[2];
     if !sloped && (placement.axes[1][0] != 0.0 || placement.axes[1][1] != 0.0) {

@@ -148,7 +148,7 @@ pub fn beam_upstand_segments(
                 if sm.section != e.section
                     || model.secondary_material(sm).map(|m| m.id)
                         != model.element_material(e).map(|m| m.id)
-                    || sm.vertical_eccentricity != e.vertical_eccentricity
+                    || e.end_offsets_mm != [[0.0; 3]; 2]
                 {
                     continue;
                 }
@@ -204,7 +204,7 @@ pub fn beam_upstand_segments(
     {
         return Ok(Vec::new());
     }
-    let beam = model.beam_placement(member)?;
+    let beam = model.calculation_beam_placement(member)?;
     let len = sepika_core::geom::vec3::dist(beam.actual_ends[0], beam.actual_ends[1]);
     let plan_ratio = beam.axes[0][0].hypot(beam.axes[0][1]);
     let width = beam.plan_width_mm()?;

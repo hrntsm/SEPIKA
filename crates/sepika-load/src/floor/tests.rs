@@ -695,7 +695,7 @@ fn test_cantilever_with_side_beam_loads_attachment_only() {
     };
     model.unassigned_beams.push(SecondaryMember {
         id: sepika_core::ids::SecondaryMemberId(0),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         kind: SecondaryMemberKind::Beam,
         ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -827,7 +827,7 @@ fn test_cantilever_with_real_beam_edge_loads_attachment_only() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -890,7 +890,7 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -988,7 +988,7 @@ fn test_cantilever_support_edges_do_not_receive_load() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     };
@@ -1015,7 +1015,7 @@ fn test_cantilever_support_edges_do_not_receive_load() {
     };
     let mk_secondary_beam = || SecondaryMember {
         id: sepika_core::ids::SecondaryMemberId(2),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         kind: SecondaryMemberKind::Beam,
         ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -1134,7 +1134,7 @@ fn attach_support(model: &mut Model) {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
-        vertical_eccentricity: Some(0.0),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
     });
@@ -1394,7 +1394,7 @@ fn issue561_product_entry_preserves_geometry_loads_and_physical_edges() {
                                         end_cond: [EndCondition::Fixed; 2],
                                         force_regime: ForceRegime::Auto,
                                         rigid_zone: Default::default(),
-                                        vertical_eccentricity: Some(0.0),
+                                        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                                         plastic_zone: None,
                                         spring: None,
                                     }
@@ -1455,13 +1455,13 @@ fn issue561_product_entry_preserves_geometry_loads_and_physical_edges() {
                             assert!((areas.iter().sum::<f64>() - expected_area).abs() < 0.01);
                             if let Some(d) = &result.polygon {
                                 assert!((d.polygon_area_mm2 - expected_area).abs() < 0.01);
-                                for e in 0..4 {
+                                for (e, error_bound) in d.edge_error_bounds_mm2.iter().enumerate() {
                                     let original = if reverse {
                                         (shift + 3 - e) % 4
                                     } else {
                                         (shift + e) % 4
                                     };
-                                    bounds[original] = d.edge_error_bounds_mm2[e];
+                                    bounds[original] = *error_bound;
                                 }
                             }
                             for e in 0..4 {

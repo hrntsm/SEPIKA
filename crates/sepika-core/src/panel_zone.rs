@@ -622,6 +622,16 @@ fn model_beam_flanges(
         .position(|id| *id == node)
         .ok_or("接続端がありません")?;
     let connection = model.node(node).ok_or("接続節点がありません")?;
+    if beam
+        .end_offsets_mm
+        .iter()
+        .any(|r| r[0] != 0.0 || r[1] != 0.0)
+    {
+        return Err(format!(
+            "接合部 ID {} 梁 ID {}: 水平偏心を持つパネルの標準形式は未対応です",
+            node.0, beam.id.0
+        ));
+    }
     let vertical_offset_mm = actual[side][2] - connection.coord[2];
     let ex = geom::vec3::unit_from(actual[0], actual[1]).ok_or("梁材軸未解決")?;
     if !ex[2].is_finite() || ex[2].abs() > PANEL_DIRECTION_TOL {
@@ -1404,7 +1414,7 @@ mod tests {
                 end_cond: [crate::model::EndCondition::Fixed; 2],
                 force_regime: crate::model::ForceRegime::Auto,
                 rigid_zone: Default::default(),
-                vertical_eccentricity: Some(0.0),
+                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 plastic_zone: None,
                 spring: None,
             };
@@ -1641,7 +1651,7 @@ mod tests {
             ],
             force_regime: crate::model::ForceRegime::Auto,
             rigid_zone: Default::default(),
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,
         }
@@ -2920,5 +2930,21 @@ mod tests {
             .to_string();
         assert!(reason.contains("上位置差=-5 mm"));
         assert!(reason.contains("下位置差=-5 mm"));
+    }
+    #[test]
+    fn xyz_beam_offsets_outside_existing_panel_scope_report_joint_and_member() {
+        for offsets in [
+            [[100.0, 0.0, 0.0]; 2],
+            [[0.0, 100.0, 0.0]; 2],
+            [[0.0; 3], [0.0, 0.0, 300.0]],
+        ] {
+            let mut model = joint_model(h_beam(), 600.0, h_col());
+            model.elements[0].end_offsets_mm = offsets;
+            let reason = resolve_panel_joint(&model, NodeId(0), &model.elements)
+                .unwrap_err()
+                .to_string();
+            assert!(reason.contains("未対応"), "{reason}");
+            assert!(reason.contains("0"), "{reason}");
+        }
     }
 }

@@ -450,6 +450,7 @@ pub(super) fn draw_check_ratio_with_view(
     app: &App,
     model: &sepika_core::model::Model,
     pts: &[egui::Pos2],
+    proj: &super::Projector<'_>,
     frame_filter: super::FrameFilter,
 ) {
     let Some(results) = app.current_design_results() else {
@@ -524,13 +525,10 @@ pub(super) fn draw_check_ratio_with_view(
             .is_some_and(|m| has_unrated_positions(&m.positions));
         let Some(&(ratio, ok)) = elem_ratios.get(&elem.id) else {
             if incomplete && elem.nodes.len() == 2 {
-                if let (Some(p0), Some(p1)) = (
-                    pts.get(elem.nodes[0].index()),
-                    pts.get(elem.nodes[1].index()),
-                ) {
-                    painter.line_segment([*p0, *p1], egui::Stroke::new(4.0_f32, theme::GRAY_600));
+                if let Some([p0, p1]) = super::primary_screen_ends(model, elem, pts, proj) {
+                    painter.line_segment([p0, p1], egui::Stroke::new(4.0_f32, theme::GRAY_600));
                     painter.text(
-                        p0.lerp(*p1, 0.5),
+                        p0.lerp(p1, 0.5),
                         egui::Align2::CENTER_BOTTOM,
                         "未検定",
                         egui::FontId::proportional(11.0),
@@ -569,8 +567,9 @@ pub(super) fn draw_check_ratio_with_view(
         if n0 >= pts.len() || n1 >= pts.len() {
             continue;
         }
-        let p0 = pts[n0];
-        let p1 = pts[n1];
+        let Some([p0, p1]) = super::primary_screen_ends(model, elem, pts, proj) else {
+            continue;
+        };
         let width = if ok { 4.0_f32 } else { 5.0_f32 };
         painter.line_segment([p0, p1], egui::Stroke::new(width, color));
 
@@ -1014,12 +1013,15 @@ pub(super) fn draw_check_ratio(
     pts: &[egui::Pos2],
     frame_filter: super::FrameFilter,
 ) {
+    let camera = super::CameraState::default();
+    let proj = super::Projector::new([0.0; 3], &camera, 1.0, [0.0; 2]);
     draw_check_ratio_with_view(
         &app.ui.view.viewport,
         painter,
         app,
         model,
         pts,
+        &proj,
         frame_filter,
     )
 }
@@ -1027,6 +1029,57 @@ pub(super) fn draw_check_ratio(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eccentric_girder_check_lines_and_position_markers_are_drawn_on_physical_axis() {
+        let mut app = crate::app::design_input_tests::pure_bending();
+        app.core.model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        app.core.model.elements[0].end_offsets_mm = [[0.0, 1000.0, 0.0]; 2];
+        app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+        assert!(app.require_design_input().is_ok());
+        let camera = super::super::CameraState::default();
+        let proj = super::super::Projector::new([3000.0, 0.0, 0.0], &camera, 0.1, [400.0, 300.0]);
+        let pts = app
+            .core
+            .model
+            .nodes
+            .iter()
+            .map(|n| proj.project(n.coord))
+            .collect::<Vec<_>>();
+        let expected = super::super::primary_screen_ends(
+            &app.core.model,
+            &app.core.model.elements[0],
+            &pts,
+            &proj,
+        )
+        .unwrap();
+        assert_ne!(expected, [pts[0], pts[1]]);
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(Default::default(), |ui| {
+            draw_check_ratio_with_view(
+                &app.ui.view.viewport,
+                ui.painter(),
+                &app,
+                &app.core.model,
+                &pts,
+                &proj,
+                Default::default(),
+            )
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { points, stroke } if points == &expected && stroke.width >= 4.0)), "expected {expected:?}, shapes {:?}", output.shapes);
+        let hinges = [false, true].map(|end_j| {
+            super::super::hinge::hinge_marker_screen_pos(
+                &app.core.model.elements[0],
+                &app.core.model,
+                &pts,
+                &proj,
+                end_j,
+            )
+            .unwrap()
+        });
+        assert!(hinges[0].distance(expected[0].lerp(expected[1], 0.1)) < 1e-3);
+        assert!(hinges[1].distance(expected[0].lerp(expected[1], 0.9)) < 1e-3);
+    }
 
     #[test]
     fn unsupported_box_has_no_success_ratio_or_tooltip_value() {
@@ -1678,6 +1731,12 @@ mod tests {
                     &app,
                     &app.core.model,
                     &pts,
+                    &super::super::Projector::new(
+                        [0.0; 3],
+                        &super::super::CameraState::default(),
+                        1.0,
+                        [0.0; 2],
+                    ),
                     filter,
                 );
             });

@@ -1,3 +1,15 @@
+pub(super) fn deserialize_end_offsets<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<[[f64; 3]; 2], D::Error> {
+    let offsets = <[[f64; 3]; 2] as serde::Deserialize>::deserialize(deserializer)?;
+    if !offsets.iter().flatten().all(|v| v.is_finite()) {
+        return Err(serde::de::Error::custom(
+            "XYZ偏心の各成分には有限値が必要です",
+        ));
+    }
+    Ok(offsets)
+}
+
 use super::*;
 use crate::geom::vec3::{add, dist, dot, local_frame_axes, sub};
 use crate::section_shape::face_geometry::{Primitive, SectionGeometry};
@@ -6,7 +18,7 @@ use crate::section_shape::face_geometry::{Primitive, SectionGeometry};
 pub struct BeamPlacement {
     pub member: SupportMemberId,
     pub reference_ends: [[f64; 3]; 2],
-    pub vertical_eccentricity: f64,
+    pub end_offsets_mm: [[f64; 3]; 2],
     pub actual_ends: [[f64; 3]; 2],
     pub axes: [[f64; 3]; 3],
     pub section_shape: crate::section_shape::SectionShape,
@@ -17,6 +29,22 @@ pub struct BeamPlacement {
 impl Model {
     /// 大梁・小梁の実配置を導出する。未指定・不正な偏心、位置、断面は対象と理由付きで失敗する。
     pub fn beam_placement(&self, member: SupportMemberId) -> Result<BeamPlacement, String> {
+        self.resolve_beam_placement(member, false)
+    }
+
+    /// 力学計算用の配置。小梁の表示偏心は適用せず、基準端と断面を用いる。
+    pub fn calculation_beam_placement(
+        &self,
+        member: SupportMemberId,
+    ) -> Result<BeamPlacement, String> {
+        self.resolve_beam_placement(member, true)
+    }
+
+    fn resolve_beam_placement(
+        &self,
+        member: SupportMemberId,
+        calculation: bool,
+    ) -> Result<BeamPlacement, String> {
         let resolve = || {
             let (ends, eccentricity, section, reference) = match member {
                 SupportMemberId::Primary(id) => {
@@ -32,12 +60,7 @@ impl Model {
                     }
                     let a = self.node(e.nodes[0]).ok_or("i端節点がありません")?.coord;
                     let b = self.node(e.nodes[1]).ok_or("j端節点がありません")?.coord;
-                    (
-                        [a, b],
-                        e.vertical_eccentricity,
-                        section,
-                        e.local_axis.ref_vector,
-                    )
+                    ([a, b], e.end_offsets_mm, section, e.local_axis.ref_vector)
                 }
                 SupportMemberId::Secondary(id) => {
                     let sm = self.secondary_member(id).ok_or("小梁がありません")?;
@@ -48,10 +71,24 @@ impl Model {
                     let (a, b) = self
                         .secondary_member_end_points(sm)
                         .ok_or("支持アンカーの基準両端位置を解決できません")?;
+                    let display_ends = actual_beam_axis_ends([a, b], sm.end_offsets_mm)?;
+                    let display_length = dist(display_ends[0], display_ends[1]);
+                    if !display_length.is_finite() || display_length <= 0.0 {
+                        return Err("表示実材軸長が有限な正値ではありません".to_string());
+                    }
                     let section = self
                         .section(sm.section.ok_or("断面が未指定です")?)
                         .ok_or("断面がありません")?;
-                    ([a, b], sm.vertical_eccentricity, section, [0.0, 0.0, 1.0])
+                    (
+                        [a, b],
+                        if calculation {
+                            [[0.0; 3]; 2]
+                        } else {
+                            sm.end_offsets_mm
+                        },
+                        section,
+                        [0.0, 0.0, 1.0],
+                    )
                 }
             };
             BeamPlacement::new(member, ends, eccentricity, section, reference)
@@ -64,7 +101,24 @@ impl Model {
         &self,
         data: &ElementData,
     ) -> Result<Option<[[f64; 3]; 2]>, String> {
+        if let Some(side) = data
+            .end_offsets_mm
+            .iter()
+            .position(|r| r.iter().any(|v| !v.is_finite()))
+        {
+            return Err(format!(
+                "部材 ID {} {}のXYZ偏心が非有限です",
+                data.id.0,
+                ["i端", "j端"][side]
+            ));
+        }
         if !data.kind.is_primary_frame_support() {
+            if data.end_offsets_mm != [[0.0; 3]; 2] {
+                return Err(format!(
+                    "部材 ID {}: この種別の非0偏心は未対応です",
+                    data.id.0
+                ));
+            }
             return Ok(None);
         }
         let fail = |end: &str, item: &str, reason: &str| {
@@ -74,17 +128,15 @@ impl Model {
             .element_section(data)
             .ok_or_else(|| fail("i/j端", "断面", "未指定または参照先がありません"))?;
         if section.frame_use != Some(FrameSectionUse::Girder) {
+            if data.end_offsets_mm != [[0.0; 3]; 2] {
+                return Err(fail("i/j端", "XYZ偏心", "大梁以外の非0偏心は未対応です"));
+            }
             return Ok(None);
         }
         if data.nodes.len() != 2 {
             return Err(fail("i/j端", "節点", "二節点が必要です"));
         }
-        let eccentricity = data
-            .vertical_eccentricity
-            .ok_or_else(|| fail("i/j端", "鉛直偏心", "未指定です"))?;
-        if !eccentricity.is_finite() {
-            return Err(fail("i/j端", "鉛直偏心", "非有限です"));
-        }
+        let eccentricity = data.end_offsets_mm;
         let mut ends = [[0.0; 3]; 2];
         for (side, name) in ["i端", "j端"].iter().enumerate() {
             let node = self
@@ -234,15 +286,12 @@ impl BeamPlacement {
     fn new(
         member: SupportMemberId,
         reference_ends: [[f64; 3]; 2],
-        eccentricity: Option<f64>,
+        eccentricity: [[f64; 3]; 2],
         section: &Section,
         reference: [f64; 3],
     ) -> Result<Self, String> {
-        let vertical_eccentricity = eccentricity.ok_or("鉛直偏心が未指定です")?;
-        if !vertical_eccentricity.is_finite() {
-            return Err("鉛直偏心が非有限です".into());
-        }
-        let actual_ends = actual_beam_axis_ends(reference_ends, vertical_eccentricity)?;
+        let end_offsets_mm = eccentricity;
+        let actual_ends = actual_beam_axis_ends(reference_ends, end_offsets_mm)?;
         let axes = local_frame_axes(actual_ends[0], actual_ends[1], reference)?;
         let length_mm = dist(actual_ends[0], actual_ends[1]);
         if !length_mm.is_finite() || length_mm <= 0.0 {
@@ -253,7 +302,7 @@ impl BeamPlacement {
         Ok(Self {
             member,
             reference_ends,
-            vertical_eccentricity,
+            end_offsets_mm,
             actual_ends,
             axes,
             section_shape,
@@ -420,14 +469,17 @@ impl BeamPlacement {
 
 fn actual_beam_axis_ends(
     reference_ends: [[f64; 3]; 2],
-    eccentricity_mm: f64,
+    eccentricity_mm: [[f64; 3]; 2],
 ) -> Result<[[f64; 3]; 2], String> {
     let mut ends = reference_ends;
     for (side, name) in ["i端", "j端"].iter().enumerate() {
         if !reference_ends[side].iter().all(|v| v.is_finite()) {
             return Err(format!("{name}の基準位置が非有限です"));
         }
-        ends[side] = add(reference_ends[side], [0.0, 0.0, eccentricity_mm]);
+        if !eccentricity_mm[side].iter().all(|v| v.is_finite()) {
+            return Err(format!("{name}のXYZ偏心が非有限です"));
+        }
+        ends[side] = add(reference_ends[side], eccentricity_mm[side]);
         if !ends[side].iter().all(|v| v.is_finite()) {
             return Err(format!("{name}の実材軸端が非有限です"));
         }
@@ -507,7 +559,7 @@ mod tests {
         BeamPlacement::new(
             SupportMemberId::Primary(ElemId(12)),
             ends,
-            Some(offset_mm),
+            [[0.0, 0.0, offset_mm]; 2],
             section,
             reference,
         )
@@ -651,7 +703,7 @@ mod tests {
     #[test]
     fn missing_and_invalid_inputs_report_member_and_reason() {
         let s = section(600.0, false);
-        for e in [None, Some(f64::NAN), Some(f64::INFINITY)] {
+        for e in [[[f64::NAN; 3]; 2], [[f64::INFINITY; 3]; 2]] {
             assert!(BeamPlacement::new(
                 SupportMemberId::Primary(ElemId(12)),
                 [[0.0; 3], [4000.0, 0.0, 0.0]],
@@ -666,7 +718,7 @@ mod tests {
         assert!(BeamPlacement::new(
             SupportMemberId::Primary(ElemId(12)),
             [[0.0; 3], [4000.0, 0.0, 0.0]],
-            Some(0.0),
+            [[0.0; 3]; 2],
             &missing,
             [0.0, 0.0, 1.0]
         )
@@ -680,7 +732,7 @@ mod tests {
         assert!(BeamPlacement::new(
             SupportMemberId::Primary(ElemId(12)),
             [[0.0; 3], [4000.0, 0.0, 0.0]],
-            Some(0.0),
+            [[0.0; 3]; 2],
             &invalid,
             [0.0, 0.0, 1.0]
         )
@@ -719,7 +771,7 @@ mod tests {
             rigid_zone: Default::default(),
             plastic_zone: None,
             spring: None,
-            vertical_eccentricity: Some(1000.0),
+            end_offsets_mm: [[0.0, 0.0, 1000.0]; 2],
         });
         let anchors = [0.25, 0.75].map(|position| SecondaryMemberAnchor {
             support: SupportMemberId::Primary(ElemId(0)),
@@ -732,7 +784,7 @@ mod tests {
             section: Some(SectionId(0)),
             name: "B1".into(),
             gravity_end_shares: None,
-            vertical_eccentricity: Some(100.0),
+            end_offsets_mm: [[0.0, 0.0, 100.0]; 2],
         });
         let primary = SupportMemberId::Primary(ElemId(0));
         let secondary = SupportMemberId::Secondary(SecondaryMemberId(0));
@@ -771,19 +823,16 @@ mod tests {
         encoded["elements"][0]
             .as_object_mut()
             .unwrap()
-            .remove("vertical_eccentricity");
+            .remove("end_offsets_mm");
         encoded["unassigned_beams"][0]
             .as_object_mut()
             .unwrap()
-            .remove("vertical_eccentricity");
-        let restored: Model = serde_json::from_value(encoded).unwrap();
-        assert_eq!(restored.elements[0].vertical_eccentricity, None);
-        assert_eq!(restored.unassigned_beams[0].vertical_eccentricity, None);
-        assert_eq!(restored.nodes, model.nodes);
-        model.unassigned_beams[0].vertical_eccentricity = None;
-        let reason = model.beam_placement(secondary).err().unwrap();
-        assert!(reason.contains("未指定") && reason.contains("小梁 ID 0"));
-        model.unassigned_beams[0].vertical_eccentricity = Some(100.0);
+            .remove("end_offsets_mm");
+        assert!(serde_json::from_value::<Model>(encoded).is_err());
+        let mut null = serde_json::to_value(&model).unwrap();
+        null["elements"][0]["end_offsets_mm"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<Model>(null).is_err());
+        model.unassigned_beams[0].end_offsets_mm = [[0.0, 0.0, 100.0]; 2];
         model.unassigned_beams.push(SecondaryMember {
             id: SecondaryMemberId(1),
             kind: SecondaryMemberKind::Beam,
@@ -796,7 +845,7 @@ mod tests {
             section: Some(SectionId(0)),
             name: "B2".into(),
             gravity_end_shares: None,
-            vertical_eccentricity: Some(0.0),
+            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         });
         for position in [-0.25, 1.1, f64::INFINITY, f64::NAN] {
             let mut invalid_anchors = anchors;
@@ -814,5 +863,46 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn xyz_offsets_preserve_common_translation_and_use_each_physical_end() {
+        let ends = [[0.0, 0.0, 0.0], [6000.0, 0.0, 0.0]];
+        let section = section(600.0, false);
+        let make = |offsets| {
+            BeamPlacement::new(
+                SupportMemberId::Primary(ElemId(0)),
+                ends,
+                offsets,
+                &section,
+                [0.0, 0.0, 1.0],
+            )
+            .unwrap()
+        };
+        let original = make([[0.0; 3]; 2]);
+        let shifted = make([[100.0, 200.0, 300.0]; 2]);
+        assert_eq!(
+            shifted.actual_ends,
+            [[100.0, 200.0, 300.0], [6100.0, 200.0, 300.0]]
+        );
+        assert_eq!(shifted.reference_ends, ends);
+        assert_eq!(shifted.axes, original.axes);
+        assert_eq!(shifted.length_mm, 6000.0);
+        let inclined = make([[0.0; 3], [0.0, 0.0, 300.0]]);
+        assert_eq!(inclined.actual_ends[1], [6000.0, 0.0, 300.0]);
+        assert!((inclined.length_mm - 6007.49531835024).abs() < 1e-10);
+        let reversed = BeamPlacement::new(
+            SupportMemberId::Primary(ElemId(0)),
+            [ends[1], ends[0]],
+            [[0.0, 0.0, 300.0], [0.0; 3]],
+            &section,
+            [0.0, 0.0, 1.0],
+        )
+        .unwrap();
+        assert_eq!(
+            reversed.actual_ends,
+            [inclined.actual_ends[1], inclined.actual_ends[0]]
+        );
+        assert_eq!(reversed.length_mm, inclined.length_mm);
+        assert_eq!(reversed.axes[0], inclined.axes[0].map(|v| -v));
     }
 }

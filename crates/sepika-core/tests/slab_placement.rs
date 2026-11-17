@@ -86,7 +86,7 @@ fn 支持節点z梁偏心梁せいslは床板の実配置と支持関係を変�
     for step in 0..4 {
         match step {
             0 => model.stories[0].sl_offset_mm = Some(-800.),
-            1 => model.elements[0].vertical_eccentricity = Some(500.),
+            1 => model.elements[0].end_offsets_mm = [[0.0, 0.0, 500.]; 2],
             2 => model.nodes[0].coord[2] = 5000.,
             _ => model.sections[1] = beam_section(800.),
         }
