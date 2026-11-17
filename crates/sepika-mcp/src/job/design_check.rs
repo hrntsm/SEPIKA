@@ -306,6 +306,102 @@ mod tests {
         ));
     }
 
+    mod tension_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/rc_column_tension_model.rs"
+        ));
+    }
+    mod tension_reference {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/rc_column_tension_reference.rs"
+        ));
+    }
+
+    #[test]
+    fn rc_column_tension_mcp_reports_ng_for_case_and_combination() {
+        for circle in [false, true] {
+            let mut model = tension_input::tension_model(
+                column_input::column_model(circle, 0.0),
+                1_000_000.0,
+                [0.0, 0.0],
+            );
+            model.load_cases.push(sepika_core::model::LoadCase {
+                origin: Default::default(),
+                id: sepika_core::ids::LoadCaseId(1),
+                name: "架構用積載".into(),
+                kind: sepika_core::model::LoadCaseKind::Live,
+                nodal: vec![],
+                member: vec![],
+            });
+            model
+                .combinations
+                .push(sepika_core::model::LoadCombination {
+                    name: "長期".into(),
+                    terms: vec![
+                        (sepika_core::ids::LoadCaseId(0), 1.0),
+                        (sepika_core::ids::LoadCaseId(1), 1.0),
+                    ],
+                });
+            for combo in [false, true] {
+                let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                    &model,
+                    &JobParams {
+                        load_case: if combo { None } else { Some(0) },
+                        load_combination: if combo { Some(0) } else { None },
+                        ..Default::default()
+                    },
+                )
+                .unwrap() else {
+                    panic!()
+                };
+                assert_eq!(summary["n_checks"], 3);
+                assert_eq!(summary["n_ng"], 3, "{circle} combo={combo}: {summary}");
+                assert_eq!(summary["n_skipped"], 0);
+                assert_eq!(summary["all_checked_and_ok"], false);
+                assert_eq!(summary["all_members_checked_and_ok"], false);
+                let ratio = summary["max_ratio"].as_f64().unwrap();
+                assert!(
+                    ratio > 2.0 && ratio <= 1_000_000.0 / tension_reference::tension_limit_n(true),
+                    "{summary}"
+                );
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&summary.to_string()).unwrap(),
+                    summary
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rc_column_tension_outside_nm_curve_is_not_reported_as_passing_in_mcp() {
+        for circle in [false, true] {
+            let model = tension_input::tension_model(
+                column_input::column_model(circle, 0.0),
+                0.99 * tension_reference::tension_limit_n(true),
+                [1_000_000.0, 2_000_000.0],
+            );
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!()
+            };
+            assert_eq!(summary["n_skipped"], 3);
+            assert_eq!(summary["n_ng"], 0);
+            assert_eq!(summary["all_checked_and_ok"], false);
+            assert!(summary["max_ratio"].is_null());
+            for row in summary["member_skipped"].as_array().unwrap() {
+                assert!(row["reason"].as_str().unwrap().contains("検定不能"));
+            }
+        }
+    }
+
     #[test]
     fn rc_column_boundary_mcp_case_and_combination_are_unchecked_in_json() {
         for circle in [false, true] {
