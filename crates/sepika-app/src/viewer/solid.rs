@@ -358,6 +358,7 @@ pub(super) fn draw_section_solids_with_displacements(
                        p_i: [f64; 3],
                        p_j: [f64; 3],
                        ref_vector: [f64; 3],
+                       reverse_width: bool,
                        sec: &Section,
                        base: egui::Color32|
      -> bool {
@@ -372,7 +373,7 @@ pub(super) fn draw_section_solids_with_displacements(
             return false;
         };
         let ey = frame.rot[1];
-        let ez = frame.rot[2];
+        let ez = frame.rot[2].map(|value| if reverse_width { -value } else { value });
         let ring = |p: [f64; 3]| -> Vec<[f32; 3]> {
             outline
                 .iter()
@@ -458,6 +459,7 @@ pub(super) fn draw_section_solids_with_displacements(
             ends[0],
             ends[1],
             elem.local_axis.ref_vector,
+            false,
             sec,
             base,
         ) {
@@ -471,7 +473,9 @@ pub(super) fn draw_section_solids_with_displacements(
                 if !super::secondary_shape_visible(model, sm, frame_filter) {
                     continue;
                 }
-                let Some([a, b]) = super::secondary_shape_ends(model, sm) else {
+                let Ok(placement) =
+                    model.beam_placement(sepika_core::model::SupportMemberId::Secondary(sm.id))
+                else {
                     skipped += 1;
                     continue;
                 };
@@ -481,20 +485,10 @@ pub(super) fn draw_section_solids_with_displacements(
                 };
                 if !extrude(
                     Some(sepika_core::model::SupportMemberId::Secondary(sm.id)),
-                    a,
-                    b,
-                    if sm.kind == sepika_core::model::SecondaryMemberKind::Beam {
-                        [0.0, 0.0, 1.0]
-                    } else {
-                        let angle = model
-                            .post_design_inputs
-                            .iter()
-                            .find(|input| input.member == sm.id)
-                            .and_then(|input| input.strong_direction_deg)
-                            .unwrap_or(0.0)
-                            .to_radians();
-                        [angle.cos(), angle.sin(), 0.0]
-                    },
+                    placement.actual_ends[0],
+                    placement.actual_ends[1],
+                    placement.axes[1],
+                    sm.display_local_axis.is_some_and(|axis| axis.reverse_width),
                     sec,
                     theme::BEST_YELLOW,
                 ) {
@@ -519,7 +513,7 @@ pub(super) fn draw_section_solids_with_displacements(
             } else {
                 [0.0, 0.0, 1.0]
             };
-            if !extrude(None, p_i, p_j, ref_vector, sec, theme::BEST_YELLOW) {
+            if !extrude(None, p_i, p_j, ref_vector, false, sec, theme::BEST_YELLOW) {
                 skipped += 1;
             }
         }

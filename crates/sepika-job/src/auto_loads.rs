@@ -1732,6 +1732,7 @@ mod tests {
             property_basis: Default::default(),
         });
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: SecondaryMemberId(0),
@@ -2702,6 +2703,7 @@ mod cascade_tests {
             one_way: None,
         };
         let beam_a = SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(4),
@@ -2720,6 +2722,7 @@ mod cascade_tests {
             name: "A".into(),
         };
         let beam_b = SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(6),

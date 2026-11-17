@@ -1364,6 +1364,7 @@ impl Model {
             )
         {
             sm.end_offsets_mm = [[0.0; 3]; 2];
+            sm.display_local_axis = None;
         }
         model.axes.clear();
         model.quantity_cfg = QuantityCfg::default();
@@ -2357,6 +2358,7 @@ mod node_reference_tests {
 
         let mut region = FloorRegion::new(FloorRegionId(0), vec![NodeId(1)]);
         region.secondary_beams.push(SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(0),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -2428,6 +2430,7 @@ mod node_reference_tests {
         });
 
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(1),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,

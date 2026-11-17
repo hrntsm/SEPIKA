@@ -694,6 +694,7 @@ fn test_cantilever_with_side_beam_loads_attachment_only() {
         ..Default::default()
     };
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
@@ -1014,6 +1015,7 @@ fn test_cantilever_support_edges_do_not_receive_load() {
         tip_loads: Vec::new(),
     };
     let mk_secondary_beam = || SecondaryMember {
+        display_local_axis: None,
         id: sepika_core::ids::SecondaryMemberId(2),
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,

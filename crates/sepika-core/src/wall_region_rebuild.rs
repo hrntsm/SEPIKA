@@ -383,6 +383,7 @@ mod tests {
         rebuild_wall_regions(&mut model);
         model.wall_regions[0].name = "西面耐震壁".into();
         model.unassigned_posts.push(crate::model::SecondaryMember {
+            display_local_axis: None,
             id: crate::ids::SecondaryMemberId(0),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -451,6 +452,7 @@ mod tests {
         model.nodes.push(node(4, 2000.0, 0.0, 0.0));
         model.nodes.push(node(5, 2000.0, 0.0, 3000.0));
         model.unassigned_posts.push(crate::model::SecondaryMember {
+            display_local_axis: None,
             id: crate::ids::SecondaryMemberId(0),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,

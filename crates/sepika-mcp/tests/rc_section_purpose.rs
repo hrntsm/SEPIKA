@@ -199,6 +199,7 @@ fn secondary_base(kind: SecondaryMemberKind) -> Model {
 
 fn member(kind: SecondaryMemberKind, section: u32) -> SecondaryMember {
     SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(0),
         kind,
         ends: SecondaryMemberEnds::Supported([

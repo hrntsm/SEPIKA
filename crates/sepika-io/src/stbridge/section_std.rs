@@ -301,10 +301,10 @@ fn steel_figure(shape: &SectionShape, built_box: bool) -> Option<(String, String
         } => {
             let name = format!("L-{}x{}x{}", num(leg_a), num(leg_b), num(thick));
             let body = format!(
-                "<StbSecRoll-L name=\"{}\" type=\"L\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\" r1=\"0\" r2=\"0\"/>",
+                "<StbSecRoll-L name=\"{}\" type=\"SINGLE\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\" r1=\"0\" r2=\"0\"/>",
                 esc(&name),
-                num(leg_a),
                 num(leg_b),
+                num(leg_a),
                 num(thick),
                 num(thick)
             );
@@ -324,7 +324,7 @@ fn steel_figure(shape: &SectionShape, built_box: bool) -> Option<(String, String
                 num(flange_thick)
             );
             let body = format!(
-                "<StbSecRoll-C name=\"{}\" type=\"C\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\" r1=\"0\" r2=\"0\"/>",
+                "<StbSecRoll-C name=\"{}\" type=\"SINGLE\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\" r1=\"0\" r2=\"0\"/>",
                 esc(&name),
                 num(height),
                 num(width),
@@ -383,6 +383,9 @@ fn steel_figure(shape: &SectionShape, built_box: bool) -> Option<(String, String
             lower_thick,
             web_thick,
         } => {
+            if upper_width != lower_width || upper_thick != lower_thick {
+                return None;
+            }
             let name = format!(
                 "BH-{}x{}x{}x{}x{}x{}",
                 num(height),
@@ -393,14 +396,12 @@ fn steel_figure(shape: &SectionShape, built_box: bool) -> Option<(String, String
                 num(web_thick)
             );
             let body = format!(
-                "<StbSecBuild-H name=\"{}\" type=\"H\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\" B2=\"{}\" t2_lower=\"{}\"/>",
+                "<StbSecBuild-H name=\"{}\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\"/>",
                 esc(&name),
                 num(height),
                 num(upper_width),
                 num(web_thick),
-                num(upper_thick),
-                num(lower_width),
-                num(lower_thick)
+                num(upper_thick)
             );
             Some(e(&name, body))
         }

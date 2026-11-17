@@ -134,6 +134,7 @@ pub fn placed() -> Model {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(557),
             kind: SecondaryMemberKind::Beam,
             section: Some(SectionId(0)),

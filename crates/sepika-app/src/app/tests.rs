@@ -4447,6 +4447,7 @@ fn test_floor_design_skips_materialized_beam() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
@@ -4613,6 +4614,7 @@ pub(super) fn make_floor_secondary_beam_test_model() -> sepika_core::model::Mode
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
@@ -4988,6 +4990,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
@@ -5177,6 +5180,7 @@ fn test_floor_design_checks_cantilever_beam() {
     );
     model.floor_regions[0].slab_ids = vec![first, second];
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -5273,6 +5277,7 @@ fn test_floor_design_checks_secondary_beam_without_section_is_input_error() {
     model.floor_regions[0]
         .secondary_beams
         .push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
@@ -5394,6 +5399,7 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
         });
     }
     let beam = SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -5542,6 +5548,7 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
         });
     }
     let beam = SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -7873,7 +7880,7 @@ fn test_run_combination_errors_on_empty_seismic_case() {
 #[test]
 fn test_import_stbridge_with_loads_keeps_file_cases() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -8242,6 +8249,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
             fy: None,
         }],
         unassigned_beams: vec![SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),

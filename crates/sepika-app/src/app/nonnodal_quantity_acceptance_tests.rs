@@ -5,6 +5,48 @@ use sepika_core::{ids::*, model::*};
 #[path = "../../../sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs"]
 mod fixture;
 
+#[test]
+fn secondary_display_pose_preserves_quantity_and_calculation_keys_but_is_saved_in_input() {
+    let mut app = App::default();
+    app.core.model = fixture::placed();
+    let calculation = app.result_input(&result_validity::ResultInputKey::Modal);
+    let weight = sepika_job::weight_preparation::weight_input_key(
+        &app.core.model,
+        app.core.model.mass_method,
+    );
+    let encoded = rmp_serde::to_vec_named(&app.core.model).unwrap();
+    for region in &mut app.core.model.floor_regions {
+        for member in &mut region.secondary_beams {
+            member.display_local_axis = Some(SecondaryDisplayAxis {
+                ref_vector: [1.0, 2.0, 3.0],
+                reverse_width: true,
+            });
+        }
+    }
+    for member in &mut app.core.model.unassigned_beams {
+        member.display_local_axis = Some(SecondaryDisplayAxis {
+            ref_vector: [1.0, 2.0, 3.0],
+            reverse_width: true,
+        });
+    }
+    quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
+    assert_eq!(
+        app.result_input(&result_validity::ResultInputKey::Modal),
+        calculation
+    );
+    assert_eq!(
+        sepika_job::weight_preparation::weight_input_key(
+            &app.core.model,
+            app.core.model.mass_method
+        ),
+        weight
+    );
+    let changed = rmp_serde::to_vec_named(&app.core.model).unwrap();
+    assert_ne!(changed, encoded);
+    let saved: Model = rmp_serde::from_slice(&changed).unwrap();
+    assert!(saved.eq_ignoring_dofmap(&app.core.model));
+}
+
 fn panel_text(app: &mut App, grouping: crate::quantity_view::QuantityGrouping) -> String {
     app.ui.view.quantity_view.grouping = grouping;
     let context = egui::Context::default();

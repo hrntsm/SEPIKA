@@ -452,6 +452,7 @@ mod tests {
                     }
                 } else if mode != 0 {
                     let sm = SecondaryMember {
+                        display_local_axis: None,
                         id: SecondaryMemberId(674),
                         kind: wrong_kind,
                         ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
@@ -533,6 +534,7 @@ mod tests {
                             .push(Section::zero(SectionId(9), "別ID".into()));
                     }
                     let sm = SecondaryMember {
+                        display_local_axis: None,
                         id: SecondaryMemberId(674),
                         kind: wrong_kind,
                         ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
@@ -966,6 +968,7 @@ mod tests {
         model
             .unassigned_posts
             .push(sepika_core::model::SecondaryMember {
+                display_local_axis: None,
                 id: sepika_core::ids::SecondaryMemberId(0),
                 end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: Some([0.75, 0.25]),

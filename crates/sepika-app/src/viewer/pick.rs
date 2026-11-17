@@ -6,11 +6,13 @@ use super::{
 };
 
 #[derive(Default)]
+#[cfg_attr(test, derive(Clone))]
 pub(super) struct MemberBodies {
     shapes: Vec<MemberBody>,
     ids: std::collections::HashSet<sepika_core::ids::ElemId>,
 }
 
+#[cfg_attr(test, derive(Clone))]
 struct MemberBody {
     id: sepika_core::model::SupportMemberId,
     points: Vec<egui::Pos2>,
@@ -20,6 +22,16 @@ struct MemberBody {
 }
 
 impl MemberBodies {
+    #[cfg(test)]
+    pub(super) fn contains_target(&self, target: sepika_core::model::SupportMemberId) -> bool {
+        self.shapes.iter().any(|body| body.id == target)
+    }
+
+    #[cfg(test)]
+    pub(super) fn retain_target(&mut self, target: sepika_core::model::SupportMemberId) {
+        self.shapes.retain(|body| body.id == target);
+    }
+
     pub fn push(
         &mut self,
         id: sepika_core::ids::ElemId,

@@ -572,6 +572,7 @@ mod tests {
     /// 補間テスト用の二次部材（小梁）を作る。両端は節点 `i`・`j` の座標。
     fn test_secondary(model: &Model, i: u32, j: u32) -> SecondaryMember {
         SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(i),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,

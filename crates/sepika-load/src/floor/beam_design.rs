@@ -1026,6 +1026,7 @@ mod tests {
             vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         );
         region.secondary_beams = vec![SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(4),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
@@ -1386,6 +1387,7 @@ mod tests {
         model.floor_regions[0]
             .secondary_beams
             .push(SecondaryMember {
+                display_local_axis: None,
                 id: sepika_core::ids::SecondaryMemberId(6),
                 end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
@@ -1501,6 +1503,7 @@ mod tests {
         model.floor_regions[0]
             .secondary_beams
             .push(SecondaryMember {
+                display_local_axis: None,
                 id: sepika_core::ids::SecondaryMemberId(8),
                 end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
                 gravity_end_shares: None,
@@ -1586,6 +1589,7 @@ mod tests {
             support_spring: None,
         });
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             id: sepika_core::ids::SecondaryMemberId(10),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,

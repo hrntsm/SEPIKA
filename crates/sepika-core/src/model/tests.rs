@@ -91,6 +91,7 @@ fn secondary_purpose_selects_canonical_then_first_fallback_section_without_wrong
 /// 形状を持たない二次部材（生座標は原点）。ID・種別の検証用。
 fn test_secondary(kind: SecondaryMemberKind, id: u32, name: &str) -> SecondaryMember {
     SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: SecondaryMemberId(id),
@@ -1454,6 +1455,7 @@ fn infer_free_end_for_cantilever_beam() {
     ]);
     push_element_beam(&mut model, 0, 0, 1);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: SecondaryMemberId(0),
@@ -1541,6 +1543,7 @@ fn push_secondary_beam(model: &mut Model, nodes: [u32; 2], name: &str) {
     let (a, b) = (coord(nodes[0]), coord(nodes[1]));
     let id = model.alloc_secondary_member_id();
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id,
@@ -1653,6 +1656,7 @@ fn infer_free_end_for_cantilever_post() {
     let mut model = two_node_model(&[[0.0, 0.0, 0.0], [6000.0, 0.0, 0.0], [0.0, 0.0, 3000.0]]);
     push_element_beam(&mut model, 0, 0, 1);
     model.unassigned_posts.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: SecondaryMemberId(0),
