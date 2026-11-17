@@ -1031,6 +1031,80 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rc_column_tension_is_drawn_as_ng_or_unchecked_after_real_analysis() {
+        mod boundary {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"
+            ));
+        }
+        mod input {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-design-jp/tests/fixtures/rc_column_tension_model.rs"
+            ));
+        }
+        for circle in [false, true] {
+            for (moments, checked) in [([0.0, 0.0], true), ([1_000_000.0, 2_000_000.0], false)] {
+                let mut app = App::default();
+                app.load_model(input::tension_model(
+                    boundary::column_model(circle, 0.0),
+                    1_000_000.0,
+                    moments,
+                ));
+                app.run_preparation();
+                app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+                assert!(
+                    app.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    app.core.scoped.last_error
+                );
+                let checks = &app.current_design_results().unwrap().member_checks;
+                let (_, rows) = build_tooltip_rows(&checks[0].positions);
+                assert_eq!(rows.len(), 3);
+                if checked {
+                    assert!(rows.iter().all(|row| matches!(row.verdict, RowVerdict::Ng)));
+                    assert!(
+                        member_ratios_for_filter(checks, CheckRatioFilter::Max)[&ElemId(0)].0 > 2.0
+                    );
+                } else {
+                    assert!(rows.iter().all(|row| matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("検定不能"))));
+                }
+                let output = egui::Context::default().run_ui(Default::default(), |ui| {
+                    draw_check_ratio(
+                        ui.painter(),
+                        &app,
+                        &app.core.model,
+                        &[egui::pos2(100.0, 300.0), egui::pos2(100.0, 50.0)],
+                        Default::default(),
+                    );
+                    show_check_tooltip(ui, &app, ElemId(0));
+                });
+                let labels: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) => Some(text.galley.text()),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(
+                    labels.iter().any(|label| label.contains(if checked {
+                        "NG"
+                    } else {
+                        "未検定"
+                    })),
+                    "{labels:?}"
+                );
+                assert!(
+                    !labels.iter().any(|label| label.contains("0.00 OK")),
+                    "{labels:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn rc_column_zero_capacity_is_drawn_as_unchecked_after_real_analysis() {
         mod input {
             include!(concat!(

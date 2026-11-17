@@ -69,3 +69,70 @@ fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_stat
         );
     }
 }
+
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_column_tension_model.rs"]
+mod tension_input;
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_column_tension_reference.rs"]
+mod tension_reference;
+
+#[test]
+fn rc_column_tension_gui_preserves_ng_and_invalidates_previous_contract() {
+    for circle in [false, true] {
+        let mut app = App::default();
+        app.load_model(tension_input::tension_model(
+            input::column_model(circle, 0.0),
+            1_000_000.0,
+            [0.0, 0.0],
+        ));
+        app.run_preparation();
+        app.run_linear_static(LoadCaseId(0));
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let expected = app.current_design_results().unwrap().member_checks.clone();
+        assert_eq!(expected.len(), 1);
+        assert_eq!(expected[0].positions.len(), 3);
+        for position in &expected[0].positions {
+            let CheckOutcome::Checked(result) = &position.outcome else {
+                panic!("{position:?}")
+            };
+            assert!(!result.ok());
+            assert!(result.ratio() > 2.0);
+            assert!(result.ratio() <= 1_000_000.0 / tension_reference::tension_limit_n(true));
+        }
+        let (mut loaded, path) = super::result_contract_tests::restore(
+            &app,
+            Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
+            Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION),
+            &format!("rc-column1393-current-{circle}"),
+        );
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&loaded.current_design_results().unwrap().member_checks).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        loaded.run_design_check();
+        let (mut stale, path) = super::result_contract_tests::restore(
+            &app,
+            Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
+            Some(55),
+            &format!("rc-column1393-old-{circle}"),
+        );
+        std::fs::remove_file(path).unwrap();
+        assert!(stale
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .has_analysis_results());
+        assert!(stale.current_design_results().is_none());
+        stale.run_design_check();
+        assert_eq!(
+            serde_json::to_value(&stale.current_design_results().unwrap().member_checks).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+    }
+}
