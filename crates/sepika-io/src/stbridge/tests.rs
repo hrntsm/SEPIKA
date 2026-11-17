@@ -1842,7 +1842,7 @@ fn test_import_steel_pipe_library() {
     }
 }
 
-/// 平鋼の既存の出力タグを維持する。
+/// 平鋼を標準にないタグで正常出力しない。
 #[test]
 fn test_standard_export_flat_bar() {
     let mut m = frame_nodes();
@@ -1855,13 +1855,15 @@ fn test_standard_export_flat_bar() {
     push_section(&mut m, sec);
     m.elements.push(member(0, true, 0));
 
-    let xml = export_stbridge(&m).unwrap();
-    assert!(xml.contains("<StbSecColumn_S "), "鋼柱要素: {xml}");
-    assert!(xml.contains("<StbSecRoll-FlatBar "), "平鋼の形鋼ライブラリ");
+    let error = export_stbridge(&m).unwrap_err().to_string();
+    assert!(
+        error.contains("FB1") && error.contains("StbSecFlatBar") && error.contains("未対応"),
+        "{error}"
+    );
     assert!((m.sections[0].area - 1200.0).abs() < 1e-6, "A=width·t");
 }
 
-/// 中実丸鋼の既存の出力タグを維持する。
+/// 中実丸鋼を標準にないタグで正常出力しない。
 #[test]
 fn test_standard_export_round_bar() {
     let mut m = frame_nodes();
@@ -1872,14 +1874,14 @@ fn test_standard_export_round_bar() {
     for section in &mut m.sections {
         section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     }
-    let xml = export_stbridge(&m).unwrap();
+    let error = export_stbridge(&m).unwrap_err().to_string();
     assert!(
-        xml.contains("<StbSecRoll-RoundBar "),
-        "中実丸鋼の形鋼ライブラリ"
+        error.contains("RB1") && error.contains("StbSecRoundBar") && error.contains("未対応"),
+        "{error}"
     );
 }
 
-/// リップ溝形の既存の出力タグを維持する。
+/// リップ溝形を標準にないタグで正常出力しない。
 #[test]
 fn test_standard_export_lip_channel() {
     let mut m = frame_nodes();
@@ -1895,14 +1897,14 @@ fn test_standard_export_lip_channel() {
     for section in &mut m.sections {
         section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     }
-    let xml = export_stbridge(&m).unwrap();
+    let error = export_stbridge(&m).unwrap_err().to_string();
     assert!(
-        xml.contains("<StbSecRoll-LipC "),
-        "リップ溝形の形鋼ライブラリ: {xml}"
+        error.contains("LipC1") && error.contains("StbSecLipC") && error.contains("未対応"),
+        "{error}"
     );
 }
 
-/// 非対称組立 H の既存の出力属性を維持する。
+/// 非対称組立Hを対称化して正常出力しない。
 #[test]
 fn test_standard_export_built_h() {
     let mut m = frame_nodes();
@@ -1920,12 +1922,11 @@ fn test_standard_export_built_h() {
     for section in &mut m.sections {
         section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     }
-    let xml = export_stbridge(&m).unwrap();
+    let error = export_stbridge(&m).unwrap_err().to_string();
     assert!(
-        xml.contains("<StbSecBuild-H "),
-        "組立 H の形鋼ライブラリ: {xml}"
+        error.contains("BH1") && error.contains("非対称組立H") && error.contains("上下差"),
+        "{error}"
     );
-    assert!(xml.contains("B2="), "下フランジの方言属性が付く");
 }
 
 /// import: 対称組立 H も板組輪郭として保持する。

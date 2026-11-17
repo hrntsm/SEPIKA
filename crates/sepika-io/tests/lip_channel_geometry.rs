@@ -17,8 +17,14 @@ fn lip_channel_geometry_ovika_roundtrip_and_public_save_export_rejection() {
     .unwrap();
     section.frame_use = Some(FrameSectionUse::Girder);
     model.sections.push(section);
-    let xml = export_stbridge(&model).unwrap();
-    assert!(xml.contains("LipC"), "{xml}");
+    for result in [
+        export_stbridge(&model),
+        export_stbridge_with_report(&model).map(|(xml, _)| xml),
+    ] {
+        assert!(
+            matches!(result, Err(StbError::Unmappable(reason)) if reason.contains("LC544") && reason.contains("StbSecLipC") && reason.contains("未対応"))
+        );
+    }
     let path = std::env::temp_dir().join(format!(
         "sepika-lip-channel-geometry-{}.ovika",
         std::process::id(),

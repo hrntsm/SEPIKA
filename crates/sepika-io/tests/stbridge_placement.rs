@@ -1,5 +1,6 @@
 use sepika_core::geom::vec3::dist;
 use sepika_core::model::{Model, SupportMemberId};
+use sepika_io::stbridge::export_stbridge_with_report;
 use sepika_io::stbridge::{export_stbridge, import_stbridge, import_stbridge_with_report};
 
 fn input(common: &str, members: &str, steel: &str) -> String {
@@ -22,6 +23,7 @@ fn input(common: &str, members: &str, steel: &str) -> String {
 }
 
 const H: &str = r#"<StbSecRoll-H name="shape" type="H" A="600" B="300" t1="12" t2="20" r="12"/>"#;
+const BUILT_H: &str = r#"<StbSecBuild-H name="shape" A="600" B="300" t1="12" t2="20"/>"#;
 const GIRDER: &str = r#"<StbGirders><StbGirder id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S"/></StbGirders>"#;
 
 fn ends(model: &Model, index: usize) -> [[f64; 3]; 2] {
@@ -47,6 +49,156 @@ fn public_import_uses_top_width_center_and_public_export_preserves_axis() {
     let output = export_stbridge(&model).unwrap();
     let reread = import_stbridge(&output).unwrap();
     assert_ends(ends(&reread, 0), ends(&model, 0));
+}
+
+#[test]
+fn asymmetric_built_h_rejects_both_exports_and_preserves_native_ovika_geometry_and_pose() {
+    for (index, (lower_width, lower_thick)) in [(150.0, 10.0), (150.0, 20.0), (300.0, 10.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut model = import_stbridge(&input("", GIRDER, H)).unwrap();
+        let section_id = model.elements[0].section.unwrap();
+        let old = model.section(section_id).unwrap();
+        let mut section = sepika_core::section_shape::SectionShape::SteelBuiltH {
+            height: 600.0,
+            upper_width: 300.0,
+            upper_thick: 20.0,
+            lower_width,
+            lower_thick,
+            web_thick: 12.0,
+        }
+        .to_section(section_id, "非対称BH".into());
+        section.material = old.material;
+        section.frame_use = old.frame_use;
+        model.sections[section_id.index()] = section;
+        model.elements[0].local_axis.ref_vector = [
+            0.0,
+            -15.0_f64.to_radians().sin(),
+            15.0_f64.to_radians().cos(),
+        ];
+        let original = model
+            .beam_placement(SupportMemberId::Primary(model.elements[0].id))
+            .unwrap();
+        for error in [
+            export_stbridge(&model).unwrap_err(),
+            export_stbridge_with_report(&model).unwrap_err(),
+        ] {
+            let reason = error.to_string();
+            for expected in [
+                "非対称BH",
+                "断面 ID",
+                "非対称組立H",
+                "A/B/t1/t2",
+                "上下差",
+                "OVIKA",
+            ] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+        }
+        let path = std::env::temp_dir().join(format!(
+            "sepika-1367-asymmetric-bh-{}-{index}.ovika",
+            std::process::id()
+        ));
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(saved.sections, model.sections);
+        let placement = saved
+            .beam_placement(SupportMemberId::Primary(saved.elements[0].id))
+            .unwrap();
+        assert_eq!(placement.actual_ends, original.actual_ends);
+        assert_eq!(placement.axes, original.axes);
+    }
+}
+
+#[test]
+fn shapes_without_connected_official_tags_reject_both_exports_and_preserve_ovika() {
+    use sepika_core::section_shape::SectionShape;
+    for (index, (shape, tag)) in [
+        (
+            SectionShape::SteelFlatBar {
+                width: 100.0,
+                thick: 12.0,
+            },
+            "StbSecFlatBar",
+        ),
+        (SectionShape::SteelRoundBar { dia: 32.0 }, "StbSecRoundBar"),
+        (
+            SectionShape::SteelLipChannel {
+                height: 150.0,
+                width: 75.0,
+                lip: 20.0,
+                thick: 2.3,
+            },
+            "StbSecLipC",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut model = import_stbridge(&input("", GIRDER, H)).unwrap();
+        let section_id = model.elements[0].section.unwrap();
+        let old = model.section(section_id).unwrap();
+        let mut section = shape.to_section(section_id, "公式出力未接続".into());
+        section.material = old.material;
+        section.frame_use = old.frame_use;
+        model.sections[section_id.index()] = section;
+        for error in [
+            export_stbridge(&model).unwrap_err(),
+            export_stbridge_with_report(&model).unwrap_err(),
+        ] {
+            let reason = error.to_string();
+            for expected in ["断面 ID", "公式出力未接続", tag, "未対応", "OVIKA"] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+        }
+        let path = std::env::temp_dir().join(format!(
+            "sepika-1367-official-tags-{}-{index}.ovika",
+            std::process::id()
+        ));
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(saved.sections, model.sections);
+        assert_eq!(saved.elements, model.elements);
+    }
+}
+
+#[test]
+fn symmetric_built_h_preserves_rotated_top_reference_and_uses_only_official_attributes() {
+    let members = GIRDER.replace("kind_structure=\"S\"", "kind_structure=\"S\" rotate=\"15\"");
+    let model = import_stbridge(&input("", &members, BUILT_H)).unwrap();
+    let y = 75.0 * (6.0_f64.sqrt() - 2.0_f64.sqrt());
+    let z = 3000.0 - 75.0 * (6.0_f64.sqrt() + 2.0_f64.sqrt());
+    assert_ends(ends(&model, 0), [[0.0, y, z], [6000.0, y, z]]);
+    let xml = export_stbridge(&model).unwrap();
+    assert_eq!(xml, export_stbridge_with_report(&model).unwrap().0);
+    for line in xml.lines().filter(|line| line.contains("<StbSecBuild-H ")) {
+        for forbidden in [" type=", " B2=", " t2_lower="] {
+            assert!(!line.contains(forbidden), "{line}");
+        }
+    }
+    let reread = import_stbridge(&xml).unwrap();
+    assert_ends(ends(&reread, 0), [[0.0, y, z], [6000.0, y, z]]);
+    assert_eq!(
+        model.element_section(&model.elements[0]).unwrap().shape,
+        reread.element_section(&reread.elements[0]).unwrap().shape
+    );
+    for (a, b) in model
+        .beam_placement(SupportMemberId::Primary(model.elements[0].id))
+        .unwrap()
+        .axes
+        .into_iter()
+        .zip(
+            reread
+                .beam_placement(SupportMemberId::Primary(reread.elements[0].id))
+                .unwrap()
+                .axes,
+        )
+    {
+        assert!(dist(a, b) < 1e-12);
+    }
 }
 
 #[test]
@@ -233,13 +385,38 @@ fn write_placement_outputs_for_official_xsd_validation() {
 <StbBeams><StbBeam id="1" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S" rotate="35"/></StbBeams>
 <StbPosts><StbPost id="1" id_node_bottom="5" id_node_top="6" id_section="1" kind_structure="S" rotate="45"/></StbPosts>
 <StbBraces><StbBrace id="1" id_node_start="1" id_node_end="3" id_section="1" kind_structure="S" rotate="55" feature_brace="TENSION"/></StbBraces>"#;
-    for (name, shape) in [("all-five-h", H)] {
+    for (name, shape) in [
+        ("all-five-h", H),
+        ("all-five-built-h", BUILT_H),
+        (
+            "all-five-box",
+            r#"<StbSecRoll-BOX name="shape" type="ELSE" A="600" B="300" t="12" r="36"/>"#,
+        ),
+        (
+            "all-five-pipe",
+            r#"<StbSecPipe name="shape" D="300" t="12"/>"#,
+        ),
+        (
+            "all-five-built-box",
+            r#"<StbSecBuild-BOX name="shape" A="600" B="300" t1="12" t2="20"/>"#,
+        ),
+    ] {
         let model = import_stbridge(&input("", members, shape)).unwrap();
         let xml = export_stbridge(&model).unwrap();
         let reread = import_stbridge(&xml).unwrap();
         assert_eq!(model.elements.len(), reread.elements.len());
         for index in 0..model.elements.len() {
             assert_ends(ends(&reread, index), ends(&model, index));
+            let a = model
+                .beam_placement(SupportMemberId::Primary(model.elements[index].id))
+                .unwrap();
+            let b = reread
+                .beam_placement(SupportMemberId::Primary(reread.elements[index].id))
+                .unwrap();
+            assert_eq!(a.section_shape, b.section_shape);
+            for (a, b) in a.axes.into_iter().zip(b.axes) {
+                assert!(dist(a, b) < 1e-12);
+            }
         }
         let original_secondary: Vec<_> = model
             .beams()
@@ -261,6 +438,53 @@ fn write_placement_outputs_for_official_xsd_validation() {
             .collect();
         for (a, b) in original_secondary.into_iter().zip(reread_secondary) {
             assert_ends(a.actual_ends, b.actual_ends);
+            assert_eq!(a.section_shape, b.section_shape);
+            for (a, b) in a.axes.into_iter().zip(b.axes) {
+                assert!(dist(a, b) < 1e-12);
+            }
+        }
+        std::fs::write(directory.join(format!("{name}.stb")), xml).unwrap();
+    }
+    let cft = include_str!("fixtures/cft_standard_steel.stb");
+    let built_box = r#"<StbSecBuild-BOX name="BOX1" A="300" B="200" t1="9" t2="9"/>"#;
+    for (name, source) in [
+        (
+            "rc-rect",
+            include_str!("fixtures/rebar507/normal_same.stb").to_owned(),
+        ),
+        (
+            "rc-circle",
+            include_str!("fixtures/rebar507/supplemental/circle_same.stb").to_owned(),
+        ),
+        ("cft-built-box", cft.to_owned()),
+        (
+            "cft-box",
+            cft.replace(
+                built_box,
+                r#"<StbSecRoll-BOX name="BOX1" type="ELSE" A="300" B="200" t="9" r="27"/>"#,
+            ),
+        ),
+        (
+            "cft-pipe",
+            cft.replace(built_box, r#"<StbSecPipe name="BOX1" D="300" t="9"/>"#),
+        ),
+    ] {
+        let model = import_stbridge(&source).unwrap();
+        let xml = export_stbridge(&model).unwrap();
+        let reread = import_stbridge(&xml).unwrap();
+        assert_eq!(model.elements.len(), reread.elements.len());
+        for index in 0..model.elements.len() {
+            assert_ends(ends(&reread, index), ends(&model, index));
+            let a = model
+                .beam_placement(SupportMemberId::Primary(model.elements[index].id))
+                .unwrap();
+            let b = reread
+                .beam_placement(SupportMemberId::Primary(reread.elements[index].id))
+                .unwrap();
+            assert_eq!(a.section_shape, b.section_shape);
+            for (a, b) in a.axes.into_iter().zip(b.axes) {
+                assert!(dist(a, b) < 1e-12);
+            }
         }
         std::fs::write(directory.join(format!("{name}.stb")), xml).unwrap();
     }

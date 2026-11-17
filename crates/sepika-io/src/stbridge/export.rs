@@ -64,6 +64,20 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 ///
 /// 断面未割当の線材・用途不一致の RC 専用型・表現不能な配筋はエラーとして報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
+    for section in &model.sections {
+        if let Some(sepika_core::section_shape::SectionShape::SteelBuiltH {
+            upper_width,
+            upper_thick,
+            lower_width,
+            lower_thick,
+            ..
+        }) = &section.shape
+        {
+            if upper_width != lower_width || upper_thick != lower_thick {
+                return Err(StbError::Unmappable(format!("断面 ID {}「{}」: 非対称組立H（上幅={upper_width}, 下幅={lower_width}, 上厚={upper_thick}, 下厚={lower_thick} mm）は公式StbSecBuild-HのA/B/t1/t2で上下差を保持できないため出力は未対応です。OVIKAで保持してください", section.id.0, section.name)));
+            }
+        }
+    }
     if let Some(section) = model.sections.iter().find(|section| {
         matches!(
             section.shape,
@@ -85,6 +99,23 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     model
         .validate_lip_channels()
         .map_err(|e| StbError::Unmappable(e.to_string()))?;
+    for section in &model.sections {
+        let unsupported = match section.shape {
+            Some(sepika_core::section_shape::SectionShape::SteelFlatBar { .. }) => {
+                Some(("平鋼", "StbSecFlatBar"))
+            }
+            Some(sepika_core::section_shape::SectionShape::SteelRoundBar { .. }) => {
+                Some(("中実丸鋼", "StbSecRoundBar"))
+            }
+            Some(sepika_core::section_shape::SectionShape::SteelLipChannel { .. }) => {
+                Some(("リップ溝形", "StbSecLipC"))
+            }
+            _ => None,
+        };
+        if let Some((kind, tag)) = unsupported {
+            return Err(StbError::Unmappable(format!("断面 ID {}「{}」: {kind}の公式{tag}による正確な出力は未対応です。標準にないタグへ置き換えず、OVIKAで保持してください", section.id.0, section.name)));
+        }
+    }
     if let Some(section) = model.sections.iter().find(|section| {
         !model
             .stb_strengths
