@@ -99,13 +99,13 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0070](0070-story-fl-sl.md) | accepted | 階の FL・差分を入力とし SL と用途別の高さを導出する |
 
-| [0071](0071-beam-actual-placement.md) | accepted | 梁の実配置を基準材軸・解析接続から分離する |
+| [0071](0071-beam-actual-placement.md) | partially superseded | 梁の実配置を基準材軸・解析接続から分離する |
 
 | [0072](0072-slab-actual-placement.md) | accepted | 床板の実配置を支持座標から分離する |
 
 | [0073](0073-panel-connection-face-distance.md) | accepted | 仕口パネルの梁端接合面を既存入力から一意に解決する |
 | [0075](0075-rc-beam-length-weighted-slab-thickness.md) | accepted | RC梁の床板厚を各側の取付長で加重平均する |
-| [0076](0076-beam-eccentric-connection.md) | partially superseded by ADR-0104 | 梁の実材軸への偏心接続を既存要素の外側で合成する |
+| [0076](0076-beam-eccentric-connection.md) | partially superseded by ADR-0104, ADR-0105 and ADR-0106 | 梁の実材軸への偏心接続を既存要素の外側で合成する |
 | [0077](0077-beam-centerline-slab-upstand.md) | accepted | 梁の床板嵩上げを中心線上端と水平投影幅で算定する |
 
 | [0078](0078-equilibrated-cholesky-condition-estimate.md) | accepted | 平衡化後の推定逆条件数で正定値求解の数値条件を診断する |
@@ -147,6 +147,10 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0103](0103-linear-timehistory-restart.md) | accepted | 線形時刻歴の再開状態に前半結果と生成条件を保持する |
 
 | [0104](0104-remove-axial-geometric-stiffness.md) | accepted | 軸力による幾何剛性を削除し、材料非線形と軸力を維持する |
+
+| [0105](0105-required-beam-eccentricity.md) | accepted | 梁の鉛直偏心を必須の数値として保持する |
+
+| [0106](0106-beam-end-offsets.md) | accepted | 部材の両端で異なるXYZ方向の並進偏心に段階的に対応する |
 
 ## 規約
 

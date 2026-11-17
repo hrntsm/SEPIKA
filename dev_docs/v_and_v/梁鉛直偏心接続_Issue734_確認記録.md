@@ -2,7 +2,7 @@
 
 ## 対象と判定
 
-対象は [Issue #734](https://github.com/hrntsm/SEPIKA/issues/734) の固定初期幾何に対する微小剛体接続である。基点SHAは `49e83a70c451a98e177a1895f6ad30b074a5863e`。検証対象は初回実装 `2c2eaa12c52ea6c293231226df00a6fa58e4cbbf` と、独立レビュー修正 `193ca93c76be92295553377236bba4df7546e088`。実行結果は下記に記録する。現行の計算契約と適用範囲は[座標変換](../../docs/calc_basis/04_要素剛性/08_座標変換.md#梁の鉛直偏心接続)、設計判断は[ADR 0076](../adr/0076-beam-eccentric-connection.md)を正本とする。本記録は数値Verificationであり、実験・実測によるValidationではない。
+対象は [Issue #734](https://github.com/hrntsm/SEPIKA/issues/734) の固定初期幾何に対する微小剛体接続である。基点SHAは `49e83a70c451a98e177a1895f6ad30b074a5863e`。検証対象は初回実装 `2c2eaa12c52ea6c293231226df00a6fa58e4cbbf` と、独立レビュー修正 `193ca93c76be92295553377236bba4df7546e088`。実行結果は下記に記録する。現行の計算契約と適用範囲は[座標変換](../../docs/calc_basis/04_要素剛性/08_座標変換.md#梁の端別xyz偏心接続)、設計判断は[ADR 0076](../adr/0076-beam-eccentric-connection.md)を正本とする。本記録は数値Verificationであり、実験・実測によるValidationではない。
 
 ## 導出と独立期待値
 

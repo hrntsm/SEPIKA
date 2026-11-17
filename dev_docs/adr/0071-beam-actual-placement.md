@@ -1,6 +1,8 @@
 # 梁の実配置を基準材軸・解析接続から分離する
 
-Status: accepted
+Status: partially superseded by ADR-0105
+
+未指定偏心を許容する判断は[ADR 0105](0105-required-beam-eccentricity.md)で撤回した。以下の該当箇所は判断時点の記録である。
 
 ## Context
 
