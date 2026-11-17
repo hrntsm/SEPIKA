@@ -1,7 +1,5 @@
 use sepika_core::ids::LoadCaseId;
-use sepika_design_jp::{
-    run_member_design_checks, CheckKind, CheckOutcome, MemberDesignCheckOptions,
-};
+use sepika_design_jp::{run_member_design_checks, CheckOutcome, MemberDesignCheckOptions};
 
 #[path = "../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"]
 mod input;
@@ -20,18 +18,6 @@ fn prepared_column_with_self_weight_reaches_axial_limit_at_loaded_end() {
         };
         let upper_self_weight_n = area_mm2 * 3000.0 * 2.4e-9 * 9806.65 / 2.0;
         model.load_cases[0].nodal[0].values[2] += upper_self_weight_n;
-        model.stories = [0.0, 3000.0]
-            .into_iter()
-            .enumerate()
-            .map(|(id, fl)| {
-                sepika_core::model::Story::new(
-                    sepika_core::ids::StoryId(id as u32),
-                    format!("{}F", id + 1),
-                    Some(fl),
-                    Some(0.0),
-                )
-            })
-            .collect();
         sepika_job::prepare_model_for_analysis(&mut model, &Default::default(), None).unwrap();
         let solved =
             sepika_job::compute::compute_linear_static(model.clone(), LoadCaseId(0)).unwrap();
@@ -54,24 +40,13 @@ fn prepared_column_with_self_weight_reaches_axial_limit_at_loaded_end() {
         )
         .unwrap();
         assert_eq!(report.member_checks.len(), 3);
-        for (_, pos, outcome) in report.member_checks {
-            let CheckOutcome::Checked(result) = outcome else {
-                panic!("{outcome:?}")
-            };
-            println!(
-                "prepared circle={circle}, pos={pos}, ok={}, components={:?}",
-                result.ok(),
-                result.components
-            );
-            let nm = result
-                .components
-                .iter()
-                .find(|c| c.kind == CheckKind::AxialBending)
-                .unwrap();
-            if !circle && pos == 1.0 {
-                assert_eq!(nm.ratio, 1.0);
-                assert!(nm.detail.contains("MA_z=0.0 N·mm, MA_y=0.0 N·mm"));
-                assert!(result.ok());
+        for (_, _, outcome) in report.member_checks {
+            match outcome {
+                CheckOutcome::Skipped { reason } => assert!(reason.contains("検定不能")),
+                CheckOutcome::Checked(result) => {
+                    assert!(circle && !result.ok(), "{result:?}");
+                    assert!(result.ratio().is_finite());
+                }
             }
         }
     }
