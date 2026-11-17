@@ -16,11 +16,27 @@
 - 検定契約56の保存結果は失効し、解析結果を保持して新契約57で再検定できる。
 - primary材がSteelのCftBoxは通常S柱に分類せず、既存の自動K長による6位置の比を保持する。これはCFT係数法の安全性を承認する試験ではない。
 
-共有入力は`crates/sepika-design-jp/tests/fixtures/steel_column_k_model.rs`、公開共通検定は`tests/steel_column_k_applicability.rs`、GUIは`sepika-app/src/app/steel_column_k_tests.rs`、MCPは`sepika-mcp/src/job/design_check.rs`の`column_k_mcp_keeps_both_columns_unchecked_for_case_and_combination`で検証する。
+共有入力は`crates/sepika-design-jp/tests/fixtures/steel_column_k_model.rs`、公開共通検定は`tests/steel_column_k.rs`・`tests/steel_column_k_applicability.rs`、GUIは`sepika-app/src/app/steel_column_k_tests.rs`、MCPは`sepika-mcp/src/job/design_check.rs`の`column_k_mcp_keeps_both_columns_unchecked_for_case_and_combination`で検証する。
 
 ## 実行証跡
 
-2026-11-18、`fix/issue-1398-column-k`の変更ソースを再コンパイルし、`cargo test -p sepika-design-jp --locked`成功（単体691件と全統合テスト）。CFT保持試験追加後の`cargo test -p sepika-design-jp --test steel_column_k_applicability --locked`も成功。追加条件とGUI/MCP・静的解析の最終実行は後記する。
+2026-11-18、#1399のmerge `7e228bd3`を取り込んだ `fix/issue-1398-column-k` の変更ソースを再コンパイルした。
+
+| 実行 | 結果 |
+| --- | --- |
+| `cargo test -p sepika-design-jp --locked` | 単体691件＋統合53件、計744件成功。旧観測2試験は是正後契約へ更新 |
+| `cargo test -p sepika-app --features gui --lib --locked` | 初回1228成功・3失敗・3ignore。柱未指定をCheckedと仮定した比較2件・荷重状態1件を更新し、該当3filterの再実行は各1件成功 |
+| `cargo test -p sepika-app --features gui --lib column_k --locked` | 新GUI保存失効と既存primaryCFTの計2件成功 |
+| `cargo test -p sepika-mcp --features mcp --lib --locked` | 初回135成功・2失敗。横補剛試験の全柱Checked前提を更新し、`lateral_bracing_mcp` filter再実行は2件成功 |
+| `cargo test -p sepika-mcp --features mcp --lib column_k --locked` | 単独ケース・保存組合せの新契約1件成功 |
+
+比較試験は、両案の未検定柱を数値差0へ変換せず、不足理由・不完全状態を保持することへ更新した。component破損試験は実際にCheckedの梁を対象に維持し、荷重状態の固定自由単柱は当該境界のK=2に対応する両軸6000mmを直接指定した。横補剛試験は梁のreferenceと検定を維持し、未検定が柱だけで全体成功しないことを確認した。任意の短い直接長による一括補完は行っていない。
+
+- `cargo clippy -p sepika-core -p sepika-design-jp -p sepika-app -p sepika-mcp --features sepika-app/gui,sepika-mcp/mcp --all-targets --locked -- -D warnings`：成功。Clippy 0.1.100（2026-11-09）。既存の未使用workspace依存schemarsのmanifest警告のみ。
+- `cargo run -p xtask -- check-docs`：成功（summary142・links1034・impl refs506）。
+- `mdbook build docs`：成功。生成鋼03 HTMLで両軸直接指定・0のAPIとGUIの区別・CFT境界を静的確認。数式追加はなく、通常S柱に適用しない旧数式の表示を削除した。
+- `cargo fmt --all -- --check`・`git diff --check`：成功。
+- 生成鋼03をheadless Chromeで描画し、変更したK節の本文・適用条件表・実装参照が欠けず表示されることを目視確認した。
 
 ## 確認範囲と残る制約
 
