@@ -591,7 +591,9 @@ fn members_body(
                     sepika_core::model::FrameSectionUse::Brace,
                     Some(shape),
                 )
-                .map_err(StbError::Unmappable)?;
+                .map_err(|reason| {
+                    StbError::Unmappable(format!("ブレース ID {}: {reason}", e.id.0))
+                })?;
                 let placement_attrs = super::placement::offset_attributes(offsets, false);
                 braces.push_str(&format!(
                     "        <StbBrace id=\"{}\" name=\"BR{}\" id_node_start=\"{}\" id_node_end=\"{}\" \

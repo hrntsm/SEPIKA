@@ -53,51 +53,103 @@ fn public_import_uses_top_width_center_and_public_export_preserves_axis() {
 
 #[test]
 fn unequal_end_offsets_report_target_and_current_conversion_limits_at_public_entrances() {
-    for (component, axis, value) in [(0, "X", 10.0), (1, "Y", -20.0), (2, "Z", 30.0)] {
-        let members = GIRDER.replace(
-            "kind_structure=\"S\"",
-            &format!("kind_structure=\"S\" offset_start_{axis}=\"{value}\""),
+    for (kind, container, node_attrs, offset_end, export_target) in [
+        (
+            "Column",
+            "Columns",
+            r#"id_node_bottom="1" id_node_top="2""#,
+            "bottom",
+            "部材 ID 0",
+        ),
+        (
+            "Girder",
+            "Girders",
+            r#"id_node_start="2" id_node_end="3""#,
+            "start",
+            "部材 ID 0",
+        ),
+        (
+            "Brace",
+            "Braces",
+            r#"id_node_start="1" id_node_end="3""#,
+            "start",
+            "ブレース ID 0",
+        ),
+        (
+            "Beam",
+            "Beams",
+            r#"id_node_start="2" id_node_end="3""#,
+            "start",
+            "二次部材 ID 0",
+        ),
+        (
+            "Post",
+            "Posts",
+            r#"id_node_bottom="1" id_node_top="2""#,
+            "bottom",
+            "二次部材 ID 0",
+        ),
+    ] {
+        let members = format!(
+            r#"<Stb{container}><Stb{kind} id="42" {node_attrs} id_section="1" kind_structure="S"/></Stb{container}>"#
         );
-        let xml = input("", &members, H);
-        for error in [
-            import_stbridge(&xml).unwrap_err(),
-            import_stbridge_with_report(&xml).unwrap_err(),
-        ] {
-            let reason = error.to_string();
-            for expected in [
-                "StbGirder id=Some(1)",
-                "両端同一offset",
-                "異値offset",
-                "材軸・断面姿勢の対応保持",
-                "未対応",
-            ] {
-                assert!(reason.contains(expected), "{reason}");
-            }
-            assert!(
-                !reason.contains("仕様確認中") && !reason.contains("ユーザー"),
-                "{reason}"
+        for (component, axis, value) in [(0, "X", 10.0), (1, "Y", -20.0), (2, "Z", 30.0)] {
+            let unequal_members = members.replace(
+                "kind_structure=\"S\"",
+                &format!("kind_structure=\"S\" offset_{offset_end}_{axis}=\"{value}\""),
             );
-        }
-        let mut model = import_stbridge(&input("", GIRDER, H)).unwrap();
-        model.elements[0].end_offsets_mm[0][component] += value;
-        for error in [
-            export_stbridge(&model).unwrap_err(),
-            export_stbridge_with_report(&model).unwrap_err(),
-        ] {
-            let reason = error.to_string();
-            for expected in [
-                "部材 ID 0",
-                "両端同一offset",
-                "異値offset",
-                "材軸・断面姿勢の対応保持",
-                "未対応",
+            let xml = input("", &unequal_members, H);
+            let import_target = format!("Stb{kind} id=Some(42)");
+            for error in [
+                import_stbridge(&xml).unwrap_err(),
+                import_stbridge_with_report(&xml).unwrap_err(),
             ] {
-                assert!(reason.contains(expected), "{reason}");
+                let reason = error.to_string();
+                for expected in [
+                    import_target.as_str(),
+                    "両端同一offset",
+                    "異値offset",
+                    "材軸・断面姿勢の対応保持",
+                    "未対応",
+                ] {
+                    assert!(reason.contains(expected), "{kind}/{axis}: {reason}");
+                }
+                assert!(
+                    !reason.contains("仕様確認中") && !reason.contains("ユーザー"),
+                    "{reason}"
+                );
             }
-            assert!(
-                !reason.contains("仕様確認中") && !reason.contains("ユーザー"),
-                "{reason}"
-            );
+            let mut model = import_stbridge(&input("", &members, H)).unwrap();
+            if let Some(element) = model.elements.first_mut() {
+                element.end_offsets_mm[0][component] += value;
+            } else {
+                model
+                    .unassigned_beams
+                    .iter_mut()
+                    .chain(&mut model.unassigned_posts)
+                    .next()
+                    .unwrap()
+                    .end_offsets_mm[0][component] += value;
+            }
+            for error in [
+                export_stbridge(&model).unwrap_err(),
+                export_stbridge_with_report(&model).unwrap_err(),
+            ] {
+                let reason = error.to_string();
+                for expected in [
+                    export_target,
+                    "両端同一offset",
+                    "異値offset",
+                    "材軸・断面姿勢の対応保持",
+                    "未対応",
+                ] {
+                    assert!(reason.contains(expected), "{kind}/{axis}: {reason}");
+                }
+                assert!(
+                    !reason.contains("仕様確認中") && !reason.contains("ユーザー"),
+                    "{reason}"
+                );
+            }
         }
     }
 }
