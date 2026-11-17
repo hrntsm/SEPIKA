@@ -1,130 +1,13 @@
-use sepika_core::dof::Dof6Mask;
 use sepika_core::geom::vec3::local_frame_axes;
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
-use sepika_core::model::{
-    ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material,
-    MaterialCategory, Model, Node,
-};
-use sepika_core::section_shape::{
-    BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
-};
+use sepika_core::model::{FrameSectionUse, Model};
+use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::joint_wiring::{collect_joint_checks, ForcesAt};
-use sepika_design_jp::{CheckOutcome, CheckResult, LoadTerm};
+use sepika_design_jp::{CheckOutcome, LoadTerm};
 
-fn model() -> Model {
-    let column = SectionShape::RcColumnRect {
-        b: 600.0,
-        d: 600.0,
-        rebar: RcRectColumnRebar {
-            main_dia: 25.0,
-            x: vec![4],
-            y: vec![4],
-            cover: 40.0,
-            hoop: RectColumnHoop {
-                dia: 10.0,
-                pitch: 100.0,
-                legs_x: 2,
-                legs_y: 2,
-            },
-        },
-    };
-    let beam = SectionShape::RcBeamRect {
-        b: 400.0,
-        d: 700.0,
-        rebar: RcBeamRebar {
-            main_dia: 25.0,
-            top: vec![4],
-            bottom: vec![4],
-            cover: 40.0,
-            stirrup: BeamStirrup {
-                dia: 10.0,
-                pitch: 100.0,
-                legs: 2,
-            },
-        },
-    };
-    let sections = [column.clone(), column, beam.clone(), beam]
-        .into_iter()
-        .enumerate()
-        .map(|(i, shape)| {
-            let mut section = shape.to_section(SectionId(i as u32), format!("断面{i}"));
-            section.frame_use = Some(if i < 2 {
-                FrameSectionUse::Column
-            } else {
-                FrameSectionUse::Girder
-            });
-            section.material = Some(MaterialId(0));
-            section.rebar_material = Some(MaterialId(1));
-            section.shear_rebar_material = Some(MaterialId(1));
-            section
-        })
-        .collect();
-    Model {
-        nodes: [
-            [0.0, 0.0, 3000.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 6000.0],
-            [-6000.0, 0.0, 3000.0],
-            [6000.0, 0.0, 3000.0],
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, coord)| Node {
-            id: NodeId(i as u32),
-            coord,
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        })
-        .collect(),
-        elements: [(1, 0), (0, 2), (3, 0), (0, 4)]
-            .into_iter()
-            .enumerate()
-            .map(|(i, (a, b))| ElementData {
-                id: ElemId(i as u32),
-                kind: ElementKind::Beam,
-                nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
-                section: Some(SectionId(i as u32)),
-                local_axis: LocalAxis {
-                    ref_vector: if i < 2 {
-                        [1.0, 0.0, 0.0]
-                    } else {
-                        [0.0, 0.0, 1.0]
-                    },
-                },
-                end_cond: [EndCondition::Fixed; 2],
-                force_regime: ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                end_offsets_mm: [[0.0; 3]; 2],
-                plastic_zone: None,
-                spring: None,
-            })
-            .collect(),
-        sections,
-        materials: [
-            (MaterialCategory::Concrete, "Fc24", Some(24.0), None),
-            (MaterialCategory::Rebar, "SD345", None, Some(345.0)),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (category, name, fc, fy))| Material {
-            id: MaterialId(i as u32),
-            name: name.into(),
-            category,
-            young: 23000.0,
-            poisson: 0.2,
-            density: 0.0,
-            shear: None,
-            fc,
-            fy,
-            concrete_class: Default::default(),
-            strength_factor: None,
-        })
-        .collect(),
-        ..Default::default()
-    }
-}
+#[path = "fixtures/rc_joint_model.rs"]
+mod fixture;
+use fixture::model;
 
 const COLUMN: [(f64, [f64; 6]); 2] = [
     (0.0, [0.0, 100_000.0, 0.0, 0.0, 0.0, 0.0]),
@@ -148,43 +31,27 @@ fn outcome(model: &Model, forces: &[(ElemId, ForcesAt<'_>)]) -> Option<CheckOutc
         .map(|(_, _, result)| result)
 }
 
-fn checked(model: &Model, forces: &[(ElemId, ForcesAt<'_>)]) -> CheckResult {
-    for element in &model.elements {
-        let axes = local_frame_axes(
-            model.node(element.nodes[0]).unwrap().coord,
-            model.node(element.nodes[1]).unwrap().coord,
-            element.local_axis.ref_vector,
-        )
-        .unwrap();
-        if element.section.unwrap().0 < 2 {
-            assert_eq!(axes[1], [1.0, 0.0, 0.0], "柱Qyは全体X方向");
-            assert_eq!(axes[2].map(f64::abs), [0.0, 1.0, 0.0], "柱Qzは全体Y方向");
-        } else {
-            assert_eq!(axes[1], [0.0, 0.0, 1.0], "梁の上下筋は全体鉛直方向");
+fn skipped(model: &Model, forces: &[(ElemId, ForcesAt<'_>)]) -> String {
+    match outcome(model, forces).expect("モデルの中央接合部を保持する") {
+        CheckOutcome::Skipped { reason } => {
+            for required in [
+                "検討目的・設計状態",
+                "検討方向別",
+                "上下柱せん断力",
+                "材料・配筋・定着",
+            ] {
+                assert!(reason.contains(required), "{reason}");
+            }
+            reason
         }
+        result => panic!("成立未確認の終局自動算定は未算定でなければならない: {result:?}"),
     }
-    match outcome(model, forces).expect("中央接合部の結果") {
-        CheckOutcome::Checked(result) => result,
-        result => panic!("現行の算定結果を期待: {result:?}"),
-    }
-}
-
-fn detail_contains(result: &CheckResult, expected: &str) {
-    assert!(
-        result.components[0].detail.contains(expected),
-        "{}",
-        result.components[0].detail
-    );
 }
 
 #[test]
-fn symmetric_joint_matches_independent_arithmetic_and_preserves_registration_and_end_order() {
+fn symmetric_joint_is_skipped_and_preserves_registration_and_end_order() {
     let mut model = model();
-    let result = checked(&model, &forces());
-    // 円面積π×12.5²の8本×345=1,354,811.831860598 N、そこから100 kNを差し引く。
-    detail_contains(&result, "Qdu=1254811.8 N");
-    detail_contains(&result, "Vju=1887026.7 N");
-    assert!((result.ratio() - 0.6649677275288769).abs() < 1e-10);
+    let result = skipped(&model, &forces());
     model.elements.reverse();
     for (index, element) in model.elements.iter_mut().enumerate() {
         element.id = ElemId(index as u32);
@@ -193,25 +60,24 @@ fn symmetric_joint_matches_independent_arithmetic_and_preserves_registration_and
         .into_iter()
         .map(|(id, force)| (ElemId(3 - id.0), force))
         .collect();
-    assert_eq!(checked(&model, &registered_forces).ratio(), result.ratio());
+    assert_eq!(skipped(&model, &registered_forces), result);
     for element in &mut model.elements {
         element.nodes.reverse();
     }
-    assert_eq!(checked(&model, &registered_forces).ratio(), result.ratio());
+    assert_eq!(skipped(&model, &registered_forces), result);
 }
 
 #[test]
-fn perpendicular_second_beam_still_counts_as_cross_and_same_demand() {
+fn perpendicular_one_sided_beams_are_skipped() {
     let mut model = model();
-    let reference = checked(&model, &forces());
+    let reference = skipped(&model, &forces());
     model.nodes[4].coord = [0.0, 6000.0, 3000.0];
-    let result = checked(&model, &forces());
-    detail_contains(&result, "κ=1.00");
-    assert_eq!(result.ratio(), reference.ratio());
+    let result = skipped(&model, &forces());
+    assert_eq!(result, reference);
 }
 
 #[test]
-fn asymmetric_beam_force_order_changes_width_and_rebar_selection() {
+fn asymmetric_beams_are_skipped_independently_of_force_order() {
     let mut model = model();
     let SectionShape::RcBeamRect { d, mut rebar, .. } = model.sections[3].shape.clone().unwrap()
     else {
@@ -225,18 +91,15 @@ fn asymmetric_beam_force_order_changes_width_and_rebar_selection() {
     section.material = Some(MaterialId(0));
     section.rebar_material = Some(MaterialId(1));
     model.sections[3] = section;
-    let first = checked(&model, &forces());
+    let first = skipped(&model, &forces());
     let mut reordered = forces();
     reordered.swap(2, 3);
-    let second = checked(&model, &reordered);
-    detail_contains(&first, "bj=500.0 mm");
-    detail_contains(&second, "bj=550.0 mm");
-    detail_contains(&second, "Qdu=1762866.3 N");
-    assert!(second.ratio() > first.ratio());
+    let second = skipped(&model, &reordered);
+    assert_eq!(first, second);
 }
 
 #[test]
-fn upper_column_force_order_changes_adopted_depth_and_capacity() {
+fn different_column_sections_are_skipped_independently_of_force_order() {
     let mut model = model();
     let SectionShape::RcColumnRect { rebar, .. } = model.sections[1].shape.clone().unwrap() else {
         unreachable!()
@@ -250,17 +113,15 @@ fn upper_column_force_order_changes_adopted_depth_and_capacity() {
     section.frame_use = Some(FrameSectionUse::Column);
     section.material = Some(MaterialId(0));
     model.sections[1] = section;
-    let lower = checked(&model, &forces());
+    let lower = skipped(&model, &forces());
     let mut reordered = forces();
     reordered.swap(0, 1);
-    let upper = checked(&model, &reordered);
-    detail_contains(&lower, "Dj=600.0 mm");
-    detail_contains(&upper, "Dj=800.0 mm");
-    assert!(upper.ratio() < lower.ratio());
+    let upper = skipped(&model, &reordered);
+    assert_eq!(lower, upper);
 }
 
 #[test]
-fn transverse_column_shear_is_subtracted_from_the_same_demand() {
+fn transverse_column_shear_does_not_enable_ultimate_evaluation() {
     let model = model();
     for element in &model.elements[..2] {
         let axes = local_frame_axes(
@@ -283,47 +144,42 @@ fn transverse_column_shear_is_subtracted_from_the_same_demand() {
         (ElemId(2), &BEAM),
         (ElemId(3), &BEAM),
     ];
-    let result = checked(&model, &forces);
-    detail_contains(&result, "Qcu=900000.0 N");
-    detail_contains(&result, "Qdu=454811.8 N");
-    assert!(result.ratio() < checked(&model, &self::forces()).ratio());
+    assert_eq!(skipped(&model, &forces), skipped(&model, &self::forces()));
 }
 
 #[test]
-fn empty_column_forces_are_zero_but_omitted_columns_change_shape_or_remove_result() {
+fn empty_and_omitted_column_forces_preserve_skipped_joint() {
     let model = model();
     let mut forces = forces();
     forces[0].1 = &[];
     forces[1].1 = &[];
-    let empty = checked(&model, &forces);
-    detail_contains(&empty, "Qcu=0.0 N");
-    detail_contains(&empty, "κ=1.00");
+    let empty = skipped(&model, &forces);
+    assert_eq!(empty, skipped(&model, &self::forces()));
     forces.remove(0);
-    detail_contains(&checked(&model, &forces), "κ=0.70");
+    assert_eq!(skipped(&model, &forces), empty);
     forces.remove(0);
-    assert!(outcome(&model, &forces).is_none());
+    assert_eq!(skipped(&model, &forces), empty);
+    assert_eq!(skipped(&model, &[]), empty);
 }
 
 #[test]
-fn missing_rebar_material_or_unset_beam_rebar_still_produces_zero_demand_checked_result() {
+fn missing_rebar_material_or_unset_beam_rebar_is_skipped() {
     let mut model = model();
     model.sections[2].rebar_material = None;
-    let result = checked(&model, &forces());
-    detail_contains(&result, "Qdu=0.0 N");
-    assert_eq!(result.ratio(), 0.0);
+    let result = skipped(&model, &forces());
+    assert!(!result.is_empty());
     model.sections[2].rebar_material = Some(MaterialId(1));
     let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[2].shape else {
         unreachable!()
     };
     rebar.top.clear();
     rebar.bottom.clear();
-    let result = checked(&model, &forces());
-    detail_contains(&result, "Qdu=0.0 N");
-    assert_eq!(result.ratio(), 0.0);
+    let result = skipped(&model, &forces());
+    assert!(!result.is_empty());
 }
 
 #[test]
-fn four_beams_without_both_sided_transverse_restraint_still_receive_phi_one() {
+fn four_beams_do_not_prove_transverse_restraint() {
     let mut model = model();
     let mut forces = forces();
     for (id, coord) in [(4, [0.0, 6000.0, 3000.0]), (5, [3000.0, 6000.0, 3000.0])] {
@@ -337,5 +193,45 @@ fn four_beams_without_both_sided_transverse_restraint_still_receive_phi_one() {
         model.elements.push(beam);
         forces.push((ElemId(id), &BEAM));
     }
-    detail_contains(&checked(&model, &forces), "φ=1.00");
+    skipped(&model, &forces);
+}
+
+#[test]
+fn missing_concrete_and_all_material_assignments_preserve_joint_candidate() {
+    let mut model = model();
+    for section in &mut model.sections {
+        section.material = None;
+        section.rebar_material = None;
+        section.shear_rebar_material = None;
+    }
+    assert_eq!(skipped(&model, &[]), skipped(&self::model(), &forces()));
+}
+
+#[test]
+fn model_without_rc_column_beam_connection_has_no_ultimate_candidate() {
+    let mut model = model();
+    model.elements.truncate(2);
+    assert!(outcome(&model, &[]).is_none());
+}
+
+#[test]
+fn explicit_scalar_arithmetic_does_not_establish_model_joint_applicability() {
+    use sepika_design_jp::rc::joint::JointShape;
+    use sepika_design_jp::ultimate::{rc_joint_ultimate, RcJointUltimateInput};
+    let result = rc_joint_ultimate(&RcJointUltimateInput {
+        shape: JointShape::Cross,
+        phi: 0.85,
+        fc: 24.0,
+        bj: 500.0,
+        dj: 600.0,
+        t_top: 677_405.915_930_299,
+        t_bottom: 677_405.915_930_299,
+        qcu: 100_000.0,
+        alpha: 1.0,
+    });
+    // 径25 mmの円面積×4本×345 N/mm²を各梁の引張力として明示する算術のみ。
+    assert!((result.vju - 1_887_026.663).abs() < 0.001);
+    assert!((result.qdu - 1_254_811.831_860_598).abs() < 1e-6);
+    assert!((result.qdu / result.vju - 0.664_967_727_528_876_9).abs() < 1e-10);
+    skipped(&model(), &forces());
 }

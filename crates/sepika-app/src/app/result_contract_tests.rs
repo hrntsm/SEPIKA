@@ -2740,3 +2740,95 @@ fn secondary_beam_design_button_event_rejects_invalid_section() {
     assert!(bundle.beam_checks.is_empty() && bundle.slab_checks.is_empty());
     assert_eq!(bundle.design_contract_version, None);
 }
+
+#[test]
+fn rc_joint_1377_skipped_survives_json_ovika_and_report_and_design51_expires() {
+    mod fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/rc_joint_model.rs"
+        ));
+    }
+    let mut app = App::default();
+    app.load_model(fixture::model());
+    let joint_checks = sepika_design_jp::joint_wiring::collect_joint_checks(
+        &app.core.model,
+        &[],
+        sepika_design_jp::LoadTerm::Short,
+    )
+    .into_iter()
+    .map(|(node, label, outcome)| JointCheck {
+        node,
+        label,
+        outcome,
+    })
+    .collect();
+    app.core.scoped.results = Some(ResultsBundle {
+        joint_checks,
+        ..Default::default()
+    });
+    app.certify_design_fixture();
+    let original = &app.core.scoped.results.as_ref().unwrap().joint_checks;
+    assert_eq!(original.len(), 1);
+    let json = serde_json::to_value(original).unwrap();
+    assert_eq!(json[0]["node"], 0);
+    assert_eq!(json[0]["label"], "接合部終局(RC)");
+    assert!(json[0]["outcome"]["Skipped"]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("検討目的・設計状態"));
+    assert!(json[0]["outcome"].get("Checked").is_none());
+    let (loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(DESIGN_CONTRACT_VERSION),
+        "rc-joint-1377-current",
+    );
+    assert_eq!(
+        serde_json::to_value(&loaded.core.scoped.results.as_ref().unwrap().joint_checks).unwrap(),
+        json
+    );
+    let csv = crate::summary::build_report_csv(&loaded);
+    assert!(
+        csv.contains("接合部終局(RC),-,検定不能,RC柱梁接合部の終局自動算定は未対応です。"),
+        "{csv}"
+    );
+    #[cfg(feature = "gui")]
+    {
+        let mut loaded = loaded;
+        fn contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
+            match shape {
+                egui::epaint::Shape::Text(text) => text.galley.text().contains(needle),
+                egui::epaint::Shape::Vec(parts) => parts.iter().any(|part| contains(part, needle)),
+                _ => false,
+            }
+        }
+        let context = egui::Context::default();
+        let rendered = context.run_ui(Default::default(), |ui| {
+            crate::design_view::design_table(ui, &mut loaded)
+        });
+        for needle in [
+            "接合部終局(RC)",
+            "検定済み 0 面・項目、検定不能 1 面・項目",
+            "終局自動算定は未対応",
+        ] {
+            assert!(
+                rendered
+                    .shapes
+                    .iter()
+                    .any(|shape| contains(&shape.shape, needle)),
+                "{needle}"
+            );
+        }
+    }
+    std::fs::remove_file(path).unwrap();
+    let (loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(51),
+        "rc-joint-1377-design51",
+    );
+    assert!(loaded.current_design_results().is_none());
+    assert!(!crate::summary::build_report_csv(&loaded).contains("接合部終局(RC),0"));
+    std::fs::remove_file(path).unwrap();
+}
