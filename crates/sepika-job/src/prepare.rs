@@ -496,8 +496,8 @@ mod tests {
         prepare_model_for_analysis(&mut stale, &AnalysisSettings::default(), None).unwrap();
         assert_eq!(stale.elements[3].rigid_zone.panel_offset_i, 100.0);
         sepika_solver::statics::analysis::Analysis::prepare(&stale).unwrap();
-        for id in 0..2 {
-            stale.sections[id].shape = Some(SectionShape::SteelH {
+        for section in stale.sections.iter_mut().take(2) {
+            section.shape = Some(SectionShape::SteelH {
                 height: 400.0,
                 width: 200.0,
                 web_thick: 12.0,

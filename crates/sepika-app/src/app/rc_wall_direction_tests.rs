@@ -66,8 +66,7 @@ fn fixture() -> Model {
             },
         },
     };
-    for index in 0..3 {
-        let old = &model.sections[index];
+    for (index, old) in model.sections.iter_mut().enumerate().take(3) {
         let shape = match index {
             0 => column.clone(),
             1 => beam.clone(),
@@ -83,7 +82,7 @@ fn fixture() -> Model {
         section.material = Some(MaterialId(0));
         section.rebar_material = Some(MaterialId(1));
         section.shear_rebar_material = Some(MaterialId(2));
-        model.sections[index] = section;
+        *old = section;
     }
     for element in &mut model.elements {
         element.force_regime = sepika_core::model::ForceRegime::AxialBendingInteract;

@@ -132,7 +132,7 @@ async fn zero_requested_eigen_modes_remain_known_after_publication_and_reopen() 
 }
 
 fn response_json(result: &CallToolResult) -> serde_json::Value {
-    serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap()
+    serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap()
 }
 
 async fn public_status(server: &SepikaServer, id: &str) -> serde_json::Value {

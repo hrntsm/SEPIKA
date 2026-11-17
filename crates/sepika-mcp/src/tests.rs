@@ -3534,7 +3534,7 @@ async fn beam_contact_quantity_mcp_tool_returns_verified_rows_and_unavailable_re
             }))
             .await
             .unwrap();
-        let text = &result.content[0].raw.as_text().unwrap().text;
+        let text = &result.content[0].as_text().unwrap().text;
         let value: serde_json::Value = serde_json::from_str(text).unwrap();
         if let Some(expected) = expected {
             let beam = value["rows"]
@@ -4444,7 +4444,7 @@ async fn secondary_cft_mcp_tool_returns_unavailable_without_totals() {
         }))
         .await
         .unwrap();
-    let text = &result.content[0].raw.as_text().unwrap().text;
+    let text = &result.content[0].as_text().unwrap().text;
     let value: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(value["status"], "unavailable");
     assert!(value["totals"].is_null());
@@ -4746,7 +4746,7 @@ async fn directional_wall_quantity_actual_mcp_tools_edit_settings_and_report_mis
         .await
         .unwrap();
     let v: serde_json::Value =
-        serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+        serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
     assert_eq!(v["status"], "incomplete");
     let w = v["rows"]
         .as_array()

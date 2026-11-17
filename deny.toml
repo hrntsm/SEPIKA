@@ -4,6 +4,9 @@ yanked = "warn"
 # 以下は推移的依存の「メンテ終了(unmaintained)」勧告で、脆弱性ではない。
 # 直接の対処手段がなく、上流の更新待ちのため除外する。
 ignore = [
+    # Arrow/Parquet経由のchronoは全版メンテ終了で修正版なし（#1371）。
+    # chrono依存の解消または公式勧告の撤回時に除外を解除する。
+    "RUSTSEC-2026-0543", # chrono: unmaintained
     "RUSTSEC-2025-0141", # bincode: unmaintained
     "RUSTSEC-2024-0436", # paste: unmaintained
     "RUSTSEC-2026-0192", # ttf-parser: unmaintained（winit/eframe 経由、修正版なし）

@@ -262,7 +262,7 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
         ordinary.wall_regions.clear();
         ordinary.wall_assignment_regions = Default::default();
         let mut steel = wall_connection_fixture(representation);
-        for index in 0..2 {
+        for (index, current) in steel.sections.iter_mut().enumerate().take(2) {
             let mut section = SectionShape::SteelBox {
                 height: 600.0,
                 width: 600.0,
@@ -271,9 +271,9 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
                 corner_r: Some(0.0),
             }
             .to_section(SectionId(index as u32), "鋼材".into());
-            section.frame_use = steel.sections[index].frame_use;
+            section.frame_use = current.frame_use;
             section.material = Some(MaterialId(2));
-            steel.sections[index] = section;
+            *current = section;
         }
         steel.sections[2].shape = None;
         steel.sections[2].material = Some(MaterialId(2));
