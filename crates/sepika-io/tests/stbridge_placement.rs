@@ -101,6 +101,71 @@ fn global_rotation_changes_force_and_moment_components_without_translating_them(
 }
 
 #[test]
+fn finite_global_translation_that_collapses_a_member_axis_is_rejected_at_both_public_imports() {
+    for (members, target) in [
+        (GIRDER, "部材 ID 0"),
+        (
+            r#"<StbBeams><StbBeam id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S"/></StbBeams>"#,
+            "二次部材 ID 0",
+        ),
+        (
+            r#"<StbBraces><StbBrace id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S"/></StbBraces>"#,
+            "部材 ID 0",
+        ),
+    ] {
+        let xml = input(r#"global_offset_X="1e100""#, members, H);
+        for error in [
+            import_stbridge(&xml).unwrap_err(),
+            import_stbridge_with_report(&xml).unwrap_err(),
+        ] {
+            let reason = error.to_string();
+            for expected in [target, "global変換後", "基準材軸", "零長"] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+        }
+    }
+    for (members, target) in [
+        (
+            r#"<StbColumns><StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S"/></StbColumns>"#,
+            "部材 ID 0",
+        ),
+        (
+            r#"<StbPosts><StbPost id="1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S"/></StbPosts>"#,
+            "二次部材 ID 0",
+        ),
+    ] {
+        let xml = input(r#"global_offset_Z="1e100""#, members, H);
+        for error in [
+            import_stbridge(&xml).unwrap_err(),
+            import_stbridge_with_report(&xml).unwrap_err(),
+        ] {
+            let reason = error.to_string();
+            for expected in [target, "global変換後", "基準材軸", "零長"] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+        }
+    }
+}
+
+#[test]
+fn global_rotation_that_collapses_only_the_actual_axis_is_rejected() {
+    let member = GIRDER.replace(
+        "kind_structure=\"S\"",
+        r#"kind_structure="S" offset_start_Y="1e100" offset_end_Y="1e100""#,
+    );
+    let xml = input(r#"global_rotation="45""#, &member, H);
+    for error in [
+        import_stbridge(&xml).unwrap_err(),
+        import_stbridge_with_report(&xml).unwrap_err(),
+    ] {
+        let reason = error.to_string();
+        for expected in ["部材 ID 0", "global変換後", "実材軸", "零長"] {
+            assert!(reason.contains(expected), "{reason}");
+        }
+    }
+}
+
+#[test]
 fn asymmetric_rolled_sections_reject_unrepresentable_radius_instead_of_silently_losing_it() {
     for (tag, kind, radius) in [
         ("StbSecRoll-L", "SINGLE", "r1=\"5\" r2=\"2\""),

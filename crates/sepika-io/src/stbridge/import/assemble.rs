@@ -292,6 +292,15 @@ fn apply_global_transform(
                 element.id.0
             )));
         }
+        let reference = [
+            model.nodes[element.nodes[0].index()].coord,
+            model.nodes[element.nodes[1].index()].coord,
+        ];
+        validate_global_axis(
+            &format!("部材 ID {}", element.id.0),
+            reference,
+            element.end_offsets_mm,
+        )?;
     }
     for member in model
         .unassigned_beams
@@ -316,6 +325,13 @@ fn apply_global_transform(
         if let Some(axis) = &mut member.display_local_axis {
             axis.ref_vector = transform.vector(axis.ref_vector);
         }
+        if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = member.ends {
+            validate_global_axis(
+                &format!("二次部材 ID {}「{}」", member.id.0, member.name),
+                ends,
+                member.end_offsets_mm,
+            )?;
+        }
     }
     for story in &mut model.stories {
         if let Some(elevation) = &mut story.elevation {
@@ -336,6 +352,28 @@ fn apply_global_transform(
             let point = transform.point([origin[0], origin[1], 0.0]);
             *origin = [point[0], point[1]];
             *angle_deg = (*angle_deg + transform.rotation_deg).rem_euclid(360.0);
+        }
+    }
+    Ok(())
+}
+
+fn validate_global_axis(
+    label: &str,
+    reference: [[f64; 3]; 2],
+    offsets_mm: [[f64; 3]; 2],
+) -> Result<(), StbError> {
+    use sepika_core::geom::vec3::{add, sub};
+    let actual = [
+        add(reference[0], offsets_mm[0]),
+        add(reference[1], offsets_mm[1]),
+    ];
+    for (name, ends) in [("基準材軸", reference), ("実材軸", actual)] {
+        let delta = sub(ends[1], ends[0]);
+        let length_mm = delta[0].hypot(delta[1]).hypot(delta[2]);
+        if !length_mm.is_finite() || length_mm <= 0.0 {
+            return Err(StbError::Unmappable(format!(
+                "{label}: global変換後の{name}長が有限な正値ではありません（零長を含む）"
+            )));
         }
     }
     Ok(())
