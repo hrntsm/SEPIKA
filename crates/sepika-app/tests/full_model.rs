@@ -349,16 +349,16 @@ fn original_fixture_resolves_beam_positions_and_analysis_derivative_explicitly_s
         .any(|m| m.contains("主筋中心位置")));
     let derivative = std::fs::read_to_string(analysis_fixture_path()).unwrap();
     let supported = sepika_io::stbridge::import_stbridge(&derivative).unwrap();
+    let beam_depth_mm = |section: &sepika_core::model::Section| match section.shape.as_ref() {
+        Some(sepika_core::section_shape::SectionShape::RcBeamRect { d, .. }) => *d,
+        Some(sepika_core::section_shape::SectionShape::SteelH { height, .. }) => *height,
+        shape => panic!("原本の梁は矩形RCまたは対称H形: {shape:?}"),
+    };
     for model in [&original_model, &supported] {
         for element in &model.elements {
             let section = model.element_section(element).unwrap();
             let z_mm = if section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder) {
-                let Some(sepika_core::section_shape::SectionShape::RcBeamRect { d, .. }) =
-                    section.shape
-                else {
-                    panic!("原本の大梁は矩形RC")
-                };
-                -d / 2.0
+                -beam_depth_mm(section) / 2.0
             } else {
                 0.0
             };
@@ -366,12 +366,10 @@ fn original_fixture_resolves_beam_positions_and_analysis_derivative_explicitly_s
         }
         for beam in model.beams() {
             let section = model.section(beam.section.unwrap()).unwrap();
-            let Some(sepika_core::section_shape::SectionShape::RcBeamRect { d, .. }) =
-                section.shape
-            else {
-                panic!("原本の小梁は矩形RC")
-            };
-            assert_eq!(beam.end_offsets_mm, [[0.0, 0.0, -d / 2.0]; 2]);
+            assert_eq!(
+                beam.end_offsets_mm,
+                [[0.0, 0.0, -beam_depth_mm(section) / 2.0]; 2]
+            );
         }
     }
     assert!(
