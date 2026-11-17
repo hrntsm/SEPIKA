@@ -350,6 +350,7 @@ fn beam_floor_model(w: f64) -> (Model, SlabId, SlabId) {
         vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
     );
     region.secondary_beams = vec![SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(4),
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,

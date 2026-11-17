@@ -64,6 +64,32 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 ///
 /// 断面未割当の線材・用途不一致の RC 専用型・表現不能な配筋はエラーとして報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
+    for section in &model.sections {
+        if let Some(sepika_core::section_shape::SectionShape::SteelBuiltH {
+            upper_width,
+            upper_thick,
+            lower_width,
+            lower_thick,
+            ..
+        }) = &section.shape
+        {
+            if upper_width != lower_width || upper_thick != lower_thick {
+                return Err(StbError::Unmappable(format!("断面 ID {}「{}」: 非対称組立H（上幅={upper_width}, 下幅={lower_width}, 上厚={upper_thick}, 下厚={lower_thick} mm）は公式StbSecBuild-HのA/B/t1/t2で上下差を保持できないため出力は未対応です。OVIKAで保持してください", section.id.0, section.name)));
+            }
+        }
+    }
+    if let Some(section) = model.sections.iter().find(|section| {
+        matches!(
+            section.shape,
+            Some(
+                sepika_core::section_shape::SectionShape::SteelAngle { .. }
+                    | sepika_core::section_shape::SectionShape::SteelChannel { .. }
+                    | sepika_core::section_shape::SectionShape::SteelTee { .. }
+            )
+        )
+    }) {
+        return Err(StbError::Unmappable(format!("断面「{}」: 非対称圧延断面の必須の正値半径を標準ST-Bridgeで保持できないため出力は未対応です。内部形状はOVIKAで保持してください", section.name)));
+    }
     model
         .validate_frame_node_counts()
         .map_err(|e| StbError::Unmappable(e.to_string()))?;
@@ -73,6 +99,23 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     model
         .validate_lip_channels()
         .map_err(|e| StbError::Unmappable(e.to_string()))?;
+    for section in &model.sections {
+        let unsupported = match section.shape {
+            Some(sepika_core::section_shape::SectionShape::SteelFlatBar { .. }) => {
+                Some(("平鋼", "StbSecFlatBar"))
+            }
+            Some(sepika_core::section_shape::SectionShape::SteelRoundBar { .. }) => {
+                Some(("中実丸鋼", "StbSecRoundBar"))
+            }
+            Some(sepika_core::section_shape::SectionShape::SteelLipChannel { .. }) => {
+                Some(("リップ溝形", "StbSecLipC"))
+            }
+            _ => None,
+        };
+        if let Some((kind, tag)) = unsupported {
+            return Err(StbError::Unmappable(format!("断面 ID {}「{}」: {kind}の公式{tag}による正確な出力は未対応です。標準にないタグへ置き換えず、OVIKAで保持してください", section.id.0, section.name)));
+        }
+    }
     if let Some(section) = model.sections.iter().find(|section| {
         !model
             .stb_strengths
@@ -477,25 +520,35 @@ fn members_body(
                     .ok_or_else(|| StbError::Unmappable(format!(
                         "主架構部材 ElemId({}): 断面未割当のため必須の断面参照を出力できません。適切な断面を割り当てて再出力してください。", e.id.0
                     )))?;
-                let rot = rotate_of(e, n0.coord, n1.coord);
+                let shape = model
+                    .element_section(e)
+                    .and_then(|section| section.shape.as_ref());
+                let (offsets, rot) = super::placement::export_placement(
+                    [n0.coord, n1.coord],
+                    e.end_offsets_mm,
+                    e.local_axis.ref_vector,
+                    if is_col {
+                        sepika_core::model::FrameSectionUse::Column
+                    } else {
+                        sepika_core::model::FrameSectionUse::Girder
+                    },
+                    shape,
+                )
+                .map_err(|reason| StbError::Unmappable(format!("部材 ID {}: {reason}", e.id.0)))?;
+                let placement_attrs = super::placement::offset_attributes(offsets, is_col);
+                let member_attrs = format!(
+                    "{}{}",
+                    placement_attrs,
+                    super::strength_export::member_attr(model, StrengthTarget::Element(e.id))
+                );
                 let ks = kind_structure(model, e);
                 if is_col {
-                    let (bot, top, cb, ct) = if model
-                        .stb_strengths
-                        .members
-                        .iter()
-                        .any(|m| m.target == StrengthTarget::Element(e.id))
-                        || n0.coord[2] <= n1.coord[2]
-                    {
-                        (e.nodes[0], e.nodes[1], e.end_cond[0], e.end_cond[1])
-                    } else {
-                        (e.nodes[1], e.nodes[0], e.end_cond[1], e.end_cond[0])
-                    };
+                    let (bot, top, cb, ct) = (e.nodes[0], e.nodes[1], e.end_cond[0], e.end_cond[1]);
                     columns.push_str(&format!(
                         "        <StbColumn id=\"{}\" name=\"C{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
                          rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" condition_bottom=\"{}\" condition_top=\"{}\"{}/>\n",
                         sid(e.id.0), sid(e.id.0), node_sid(model, bot), node_sid(model, top),
-                        fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
+                        fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct), member_attrs,
                     ));
                 } else {
                     girders.push_str(&format!(
@@ -503,7 +556,7 @@ fn members_body(
                          rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\" \
                          condition_start=\"{}\" condition_end=\"{}\"{}/>\n",
                         sid(e.id.0), sid(e.id.0), node_sid(model, e.nodes[0]), node_sid(model, e.nodes[1]),
-                        fmt(rot), sec_ref(sec), ks, cond(e.end_cond[0]), cond(e.end_cond[1]), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
+                        fmt(rot), sec_ref(sec), ks, cond(e.end_cond[0]), cond(e.end_cond[1]), member_attrs,
                     ));
                 }
             }
@@ -519,12 +572,35 @@ fn members_body(
                 } else {
                     "TENSIONANDCOMPRESSION"
                 };
+                let shape = model
+                    .element_section(e)
+                    .and_then(|section| section.shape.as_ref())
+                    .ok_or_else(|| {
+                        StbError::Unmappable(format!(
+                            "ブレース ID {}: 配置変換の断面形状がありません",
+                            e.id.0
+                        ))
+                    })?;
+                let (offsets, rot) = super::placement::export_placement(
+                    [
+                        model.nodes[e.nodes[0].index()].coord,
+                        model.nodes[e.nodes[1].index()].coord,
+                    ],
+                    e.end_offsets_mm,
+                    e.local_axis.ref_vector,
+                    sepika_core::model::FrameSectionUse::Brace,
+                    Some(shape),
+                )
+                .map_err(|reason| {
+                    StbError::Unmappable(format!("ブレース ID {}: {reason}", e.id.0))
+                })?;
+                let placement_attrs = super::placement::offset_attributes(offsets, false);
                 braces.push_str(&format!(
                     "        <StbBrace id=\"{}\" name=\"BR{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"S\" feature_brace=\"{}\" \
-                     condition_start=\"PIN\" condition_end=\"PIN\"/>\n",
+                     rotate=\"{}\" id_section=\"{}\" kind_structure=\"S\" feature_brace=\"{}\" \
+                     condition_start=\"PIN\" condition_end=\"PIN\"{}/>\n",
                     sid(e.id.0), sid(e.id.0), node_sid(model, e.nodes[0]), node_sid(model, e.nodes[1]),
-                    sec_ref(sec), feature,
+                    fmt(rot), sec_ref(sec), feature, placement_attrs,
                 ));
             }
             _ => {}
@@ -565,36 +641,74 @@ fn members_body(
                 }
             })
             .unwrap_or_else(|| "S".to_string());
-        let Some(nodes) = secondary_end_nodes(model, sm) else {
+        let Some(mut nodes) = secondary_end_nodes(model, sm) else {
             unexported_secondary_ids.push(sm.id.0);
             continue;
         };
+        let mut end_offsets = sm.end_offsets_mm;
+        if sm.display_local_axis.is_some_and(|axis| axis.reverse_width) {
+            nodes.reverse();
+            end_offsets.reverse();
+        }
+        let reference = sm
+            .display_local_axis
+            .map(|axis| axis.ref_vector)
+            .unwrap_or_else(|| {
+                if sm.kind == sepika_core::model::SecondaryMemberKind::Post {
+                    let angle = model
+                        .post_design_inputs
+                        .iter()
+                        .find(|input| input.member == sm.id)
+                        .and_then(|input| input.strong_direction_deg)
+                        .unwrap_or(0.0)
+                        .to_radians();
+                    [angle.cos(), angle.sin(), 0.0]
+                } else {
+                    [0.0, 0.0, 1.0]
+                }
+            });
+        let shape = sm
+            .section
+            .and_then(|section| model.section(section))
+            .and_then(|section| section.shape.as_ref());
+        let (offsets, rotate) = super::placement::export_placement(
+            [
+                model.nodes[nodes[0].index()].coord,
+                model.nodes[nodes[1].index()].coord,
+            ],
+            end_offsets,
+            reference,
+            if sm.kind == sepika_core::model::SecondaryMemberKind::Post {
+                sepika_core::model::FrameSectionUse::Column
+            } else {
+                sepika_core::model::FrameSectionUse::Girder
+            },
+            shape,
+        )
+        .map_err(|reason| StbError::Unmappable(format!("二次部材 ID {}: {reason}", sm.id.0)))?;
+        let placement_attrs = super::placement::offset_attributes(
+            offsets,
+            sm.kind == sepika_core::model::SecondaryMemberKind::Post,
+        );
+        let member_attrs = format!(
+            "{}{}",
+            placement_attrs,
+            super::strength_export::member_attr(model, StrengthTarget::Secondary(sm.id))
+        );
         match sm.kind {
             sepika_core::model::SecondaryMemberKind::Beam => {
                 sec_beams.push_str(&format!(
                     "        <StbBeam id=\"{}\" name=\"B{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), sec_ref(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
+                     rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"{}/>\n",
+                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), fmt(rotate), sec_ref(sec), ks, member_attrs,
                 ));
             }
             sepika_core::model::SecondaryMemberKind::Post => {
-                let n0 = &model.nodes[nodes[0].index()];
-                let n1 = &model.nodes[nodes[1].index()];
-                let (bot, top) = if model
-                    .stb_strengths
-                    .members
-                    .iter()
-                    .any(|m| m.target == StrengthTarget::Secondary(sm.id))
-                    || n0.coord[2] <= n1.coord[2]
-                {
-                    (nodes[0], nodes[1])
-                } else {
-                    (nodes[1], nodes[0])
-                };
+                let (bot, top) = (nodes[0], nodes[1]);
                 posts.push_str(&format!(
                     "        <StbPost id=\"{}\" name=\"P{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), sec_ref(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
+                     rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\"{}/>\n",
+                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), fmt(rotate), sec_ref(sec), ks, member_attrs,
                 ));
             }
         }
@@ -791,54 +905,6 @@ fn kind_structure(
     e: &sepika_core::model::ElementData,
 ) -> &'static str {
     sepika_core::structure_kind::member_structure_kind(model, e).label()
-}
-
-/// 部材の ref_vector と軸から `rotate` 角 [deg] を復元する（import の逆変換）。
-/// `rotate=0` の基準（水平材は鉛直上、鉛直材はグローバル X）に対する軸まわりの回転角。
-fn rotate_of(e: &sepika_core::model::ElementData, p_i: [f64; 3], p_j: [f64; 3]) -> f64 {
-    let axis = {
-        let d = [p_j[0] - p_i[0], p_j[1] - p_i[1], p_j[2] - p_i[2]];
-        let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        if l < 1e-9 {
-            return 0.0;
-        }
-        [d[0] / l, d[1] / l, d[2] / l]
-    };
-    let base = if axis[2].abs() > 0.99 {
-        [1.0, 0.0, 0.0]
-    } else {
-        [0.0, 0.0, 1.0]
-    };
-    let bdot = base[0] * axis[0] + base[1] * axis[1] + base[2] * axis[2];
-    let ref0 = normalize([
-        base[0] - bdot * axis[0],
-        base[1] - bdot * axis[1],
-        base[2] - bdot * axis[2],
-    ]);
-    let r = e.local_axis.ref_vector;
-    let rdot = r[0] * axis[0] + r[1] * axis[1] + r[2] * axis[2];
-    let refv = normalize([
-        r[0] - rdot * axis[0],
-        r[1] - rdot * axis[1],
-        r[2] - rdot * axis[2],
-    ]);
-    let cross = [
-        ref0[1] * refv[2] - ref0[2] * refv[1],
-        ref0[2] * refv[0] - ref0[0] * refv[2],
-        ref0[0] * refv[1] - ref0[1] * refv[0],
-    ];
-    let sin = cross[0] * axis[0] + cross[1] * axis[1] + cross[2] * axis[2];
-    let cos = ref0[0] * refv[0] + ref0[1] * refv[1] + ref0[2] * refv[2];
-    if sin.abs() < 1e-9 && cos.abs() < 1e-9 {
-        return 0.0;
-    }
-    sin.atan2(cos).to_degrees()
-}
-
-/// 単位ベクトル。縮退したベクトル（長さ 0）は方向を決められないため、
-/// ST-Bridge の既定の参照方向として鉛直上向きを返す。
-fn normalize(v: [f64; 3]) -> [f64; 3] {
-    sepika_core::geom::vec3::unit(v).unwrap_or([0.0, 0.0, 1.0])
 }
 
 fn exports_stb_slab(model: &Model, slab: &sepika_core::model::Slab) -> bool {

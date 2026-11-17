@@ -1335,6 +1335,7 @@ fn circular_rc_post_model(end_mm: [f64; 3]) -> Model {
         sections: vec![section],
         materials: vec![rc_material(0), rebar_material(1)],
         unassigned_posts: vec![SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(448),
             kind: SecondaryMemberKind::Post,
             ends: SecondaryMemberEnds::Detached([[0.0; 3], end_mm]),
@@ -1760,6 +1761,7 @@ fn beam_contact_direct_support_span_secondary_and_vertical_union() {
     model.elements.clear();
     let secondary_ends = contact_secondary_ends(&mut model);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(451),
         kind: SecondaryMemberKind::Beam,
         ends: secondary_ends,
@@ -1978,6 +1980,7 @@ fn beam_contact_unknown_beam_section_is_unavailable() {
             model
                 .unassigned_beams
                 .push(sepika_core::model::SecondaryMember {
+                    display_local_axis: None,
                     id: sepika_core::ids::SecondaryMemberId(451),
                     kind: sepika_core::model::SecondaryMemberKind::Beam,
                     ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -2067,6 +2070,7 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
         [6000.0, 0.0, 3000.0],
     ]);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(451),
         kind: SecondaryMemberKind::Beam,
         ends: secondary_ends,
@@ -2084,6 +2088,7 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
     model.nodes.clear();
     let secondary_ends = contact_secondary_ends(&mut model);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(451),
         kind: SecondaryMemberKind::Beam,
         ends: secondary_ends,
@@ -2631,6 +2636,7 @@ fn nonnodal_beam_model() -> Model {
     );
     model.elements = vec![line_elem(0, 0, 1, 0), line_elem(1, 2, 3, 0)];
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(557),
         kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Supported([0, 1].map(|id| SecondaryMemberAnchor {
@@ -2990,6 +2996,7 @@ fn materialized_secondary_contact_reversal_uses_same_union_as_primary() {
             ends.reverse();
         }
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             id: SecondaryMemberId(557),
             kind: SecondaryMemberKind::Beam,
             ends: sepika_core::model::SecondaryMemberEnds::Detached(ends),
@@ -3257,6 +3264,7 @@ fn 梁の実材軸と床の独立した鉛直偏心から接触上下端を求�
                 model.elements.clear();
                 let ends = contact_secondary_ends(&mut model);
                 model.unassigned_beams.push(SecondaryMember {
+                    display_local_axis: None,
                     id: SecondaryMemberId(789),
                     kind: SecondaryMemberKind::Beam,
                     ends,
@@ -3348,6 +3356,7 @@ fn 梁実配置の未解決理由と未対応断面姿勢を数量に残す() {
             model.elements.clear();
             let ends = contact_secondary_ends(&mut model);
             model.unassigned_beams.push(SecondaryMember {
+                display_local_axis: None,
                 id: SecondaryMemberId(789),
                 kind: SecondaryMemberKind::Beam,
                 ends,
@@ -3379,6 +3388,7 @@ fn 梁実配置の未解決理由と未対応断面姿勢を数量に残す() {
     let mut detached = contact_model();
     detached.elements.clear();
     detached.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(789),
         kind: SecondaryMemberKind::Beam,
         ends: sepika_core::model::SecondaryMemberEnds::Detached([

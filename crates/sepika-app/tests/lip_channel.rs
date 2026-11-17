@@ -54,8 +54,23 @@ fn lip_channel_internal_edit_and_ovika_preserve_unsupported_reason_and_gross_pro
     )
     .unwrap();
     let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
-    let xml = sepika_io::stbridge::export_stbridge(&model).unwrap();
-    assert!(xml.contains("<StbSecRoll-LipC "));
+    for error in [
+        sepika_io::stbridge::export_stbridge(&model).unwrap_err(),
+        sepika_io::stbridge::export_stbridge_with_report(&model).unwrap_err(),
+    ] {
+        let reason = error.to_string();
+        for expected in [
+            format!(
+                "断面 ID {}「{}」",
+                model.sections[0].id.0, model.sections[0].name
+            ),
+            "StbSecLipC".into(),
+            "未対応".into(),
+            "OVIKAで保持".into(),
+        ] {
+            assert!(reason.contains(&expected), "{reason}");
+        }
+    }
     let mut edited = sample::portal_frame();
     let mut undo = sepika_edit::UndoStack::new();
     for section in &model.sections {

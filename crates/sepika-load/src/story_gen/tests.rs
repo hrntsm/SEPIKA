@@ -256,6 +256,7 @@ fn test_base_master_ignores_non_structural_slaves() {
         model.nodes[free_id.index()].coord,
     ]);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -1674,6 +1675,7 @@ fn secondary_beam_model() -> Model {
         model.nodes[2].coord,
     ]);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(1),
@@ -1798,6 +1800,7 @@ fn test_secondary_beam_steel_weight_factor_applies_to_design_and_mass() {
         });
     }
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(1),
@@ -1952,6 +1955,7 @@ fn secondary_beam_on_girder_midspan_model(with_beam: bool) -> Model {
     }
     if with_beam {
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),

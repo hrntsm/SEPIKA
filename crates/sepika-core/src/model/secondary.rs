@@ -48,6 +48,18 @@ pub struct SecondaryMember {
     /// 基準端からの全体座標XYZ偏心 `[mm]`。i端・j端の順で、各成分は有限値を要する。
     #[serde(deserialize_with = "super::beam_placement::deserialize_end_offsets")]
     pub end_offsets_mm: [[f64; 3]; 2],
+    /// 表示断面の参照方向。省略時は小梁が全体Z、間柱が検定入力の強軸方向を用いる。
+    /// 力学計算には適用しない。
+    #[serde(default)]
+    pub display_local_axis: Option<SecondaryDisplayAxis>,
+}
+
+/// 可視化専用の断面参照方向と幅向き。力学配置・検定には適用しない。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SecondaryDisplayAxis {
+    pub ref_vector: [f64; 3],
+    /// 材軸と参照方向の外積に対して断面幅方向を反転する。
+    pub reverse_width: bool,
 }
 
 impl Default for SecondaryMember {
@@ -55,6 +67,7 @@ impl Default for SecondaryMember {
         Self {
             id: SecondaryMemberId(0),
             end_offsets_mm: [[0.0; 3]; 2],
+            display_local_axis: None,
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
@@ -65,6 +78,17 @@ impl Default for SecondaryMember {
 }
 
 impl SecondaryMember {
+    /// 端順序を反転した後、偏心・負担率・表示断面を同じ物理端へ対応づける。
+    pub fn reverse_end_attributes(&mut self) {
+        self.end_offsets_mm.reverse();
+        self.gravity_end_shares = self.gravity_end_shares.map(|mut shares| {
+            shares.reverse();
+            shares
+        });
+        if let Some(axis) = &mut self.display_local_axis {
+            axis.reverse_width = !axis.reverse_width;
+        }
+    }
     /// 片持ち（片端が自由端）か。
     pub fn is_cantilever(&self) -> bool {
         matches!(self.ends, SecondaryMemberEnds::Cantilever { .. })
@@ -167,6 +191,27 @@ fn ends_end_support(ends: &SecondaryMemberEnds) -> [EndSupport; 2] {
 }
 
 impl Model {
+    /// 表示参照方向を返す。未指定の小梁は全体Z、間柱は検定入力の強軸方向（省略0度）とする。
+    pub fn secondary_display_axis(&self, member: &SecondaryMember) -> SecondaryDisplayAxis {
+        member.display_local_axis.unwrap_or_else(|| {
+            let ref_vector = if member.kind == SecondaryMemberKind::Post {
+                let angle = self
+                    .post_design_inputs
+                    .iter()
+                    .find(|input| input.member == member.id)
+                    .and_then(|input| input.strong_direction_deg)
+                    .unwrap_or(0.0)
+                    .to_radians();
+                [angle.cos(), angle.sin(), 0.0]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            SecondaryDisplayAxis {
+                ref_vector,
+                reverse_width: false,
+            }
+        })
+    }
     /// 点 `p` が主架構の幾何にあるか（要素が接続する節点、または水平大梁の材軸上）。
     fn point_on_primary_geometry(&self, p: [f64; 3]) -> bool {
         if self.nodes.iter().any(|n| {
@@ -537,6 +582,11 @@ impl Model {
     /// 部材は生座標の [`SecondaryMemberEnds::Detached`] として残し、重量・荷重の欠落を
     /// 避けつつ解析前チェックでエラーにする（片持ちへの読み替えはしない）。
     pub fn anchorize_secondary_members(&mut self) -> SecondaryAnchorizeReport {
+        let display_axes: std::collections::HashMap<_, _> = self
+            .beams()
+            .chain(self.posts())
+            .map(|member| (member.id, self.secondary_display_axis(member)))
+            .collect();
         let members: Vec<(SecondaryMemberId, SecondaryMemberKind, [f64; 3], [f64; 3])> = self
             .beams()
             .chain(self.posts())
@@ -547,8 +597,10 @@ impl Model {
             .collect();
         let free_flags = self.infer_free_ends(&members);
 
-        let mut resolved: std::collections::HashMap<SecondaryMemberId, SecondaryMemberEnds> =
-            std::collections::HashMap::new();
+        let mut resolved: std::collections::HashMap<
+            SecondaryMemberId,
+            (SecondaryMemberEnds, bool),
+        > = std::collections::HashMap::new();
         let mut unresolved = Vec::new();
         let mut inferred_free_ends = Vec::new();
         for (i, (id, kind, a, b)) in members.iter().enumerate() {
@@ -562,11 +614,22 @@ impl Model {
             if matches!(ends, SecondaryMemberEnds::Detached(_)) {
                 unresolved.push(*id);
             }
-            resolved.insert(*id, ends);
+            resolved.insert(
+                *id,
+                (
+                    ends,
+                    free_flags[i] == [true, false]
+                        && !matches!(ends, SecondaryMemberEnds::Detached(_)),
+                ),
+            );
         }
         let apply = |sm: &mut SecondaryMember| {
-            if let Some(ends) = resolved.get(&sm.id) {
+            if let Some((ends, reversed)) = resolved.get(&sm.id) {
                 sm.ends = *ends;
+                if *reversed {
+                    sm.display_local_axis.get_or_insert(display_axes[&sm.id]);
+                    sm.reverse_end_attributes();
+                }
             }
         };
         for sm in &mut self.unassigned_beams {
@@ -641,6 +704,15 @@ pub fn validate_secondary_members(
     use crate::error::CoreError;
     let mut attest: Vec<(SecondaryMemberId, SecondaryMemberEnds)> = Vec::new();
     for sm in members {
+        if sm
+            .display_local_axis
+            .is_some_and(|axis| axis.ref_vector.iter().any(|value| !value.is_finite()))
+        {
+            return Err(CoreError::DanglingRef(format!(
+                "二次部材 ID {} の表示断面参照方向が非有限です",
+                sm.id.0
+            )));
+        }
         if !sm.end_offsets_mm.iter().flatten().all(|v| v.is_finite()) {
             return Err(CoreError::DanglingRef(format!(
                 "二次部材 ID {} のXYZ偏心が非有限または非対応です",
@@ -783,6 +855,72 @@ mod tests {
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node, SecondaryMemberKind,
     };
 
+    #[test]
+    fn anchorizing_a_free_start_preserves_physical_offsets_shares_and_asymmetric_section() {
+        let mut model = Model {
+            nodes: vec![
+                node(0, [0.0, -1000.0, 3000.0]),
+                node(1, [0.0, 1000.0, 3000.0]),
+            ],
+            ..Default::default()
+        };
+        let mut support = element_beam(0, 0, 1);
+        support.section = Some(SectionId(0));
+        model.elements.push(support);
+        let mut section = crate::section_shape::SectionShape::SteelAngle {
+            leg_a: 100.0,
+            leg_b: 80.0,
+            thick: 10.0,
+        }
+        .to_section(SectionId(0), "L".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        model.sections.push(section);
+        model.unassigned_beams.push(SecondaryMember {
+            id: SecondaryMemberId(0),
+            ends: SecondaryMemberEnds::Detached([[3000.0, 0.0, 3000.0], [0.0, 0.0, 3000.0]]),
+            section: Some(SectionId(0)),
+            end_offsets_mm: [[10.0, 20.0, 30.0], [-40.0, 20.0, 30.0]],
+            gravity_end_shares: Some([0.0, 1.0]),
+            display_local_axis: Some(SecondaryDisplayAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+                reverse_width: false,
+            }),
+            ..Default::default()
+        });
+        let report = model.anchorize_secondary_members();
+        assert_eq!(report.inferred_free_ends, [(SecondaryMemberId(0), 0)]);
+        let member = &model.unassigned_beams[0];
+        assert_eq!(
+            member.end_offsets_mm,
+            [[-40.0, 20.0, 30.0], [10.0, 20.0, 30.0]]
+        );
+        assert_eq!(member.valid_gravity_end_shares(), Some([1.0, 0.0]));
+        let target = SupportMemberId::Secondary(member.id);
+        let display = model.beam_placement(target).unwrap();
+        assert_eq!(
+            display.actual_ends,
+            [[-40.0, 20.0, 3030.0], [3010.0, 20.0, 3030.0]]
+        );
+        assert_eq!(
+            display.axes,
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]
+        );
+        let calculation = model.calculation_beam_placement(target).unwrap();
+        assert_eq!(
+            calculation.actual_ends,
+            [[0.0, 0.0, 3000.0], [3000.0, 0.0, 3000.0]]
+        );
+        assert_eq!(calculation.axes[2], [0.0, -1.0, 0.0]);
+        let encoded = serde_json::to_string(&model).unwrap();
+        let mut decoded: Model = serde_json::from_str(&encoded).unwrap();
+        decoded.anchorize_secondary_members();
+        assert_eq!(
+            decoded.beam_placement(target).unwrap().actual_ends,
+            display.actual_ends
+        );
+        assert_eq!(decoded.beam_placement(target).unwrap().axes, display.axes);
+    }
+
     fn node(id: u32, coord: [f64; 3]) -> Node {
         Node {
             id: NodeId(id),
@@ -829,6 +967,7 @@ mod tests {
 
     fn secondary_beam(id: u32, coords: [[f64; 3]; 2]) -> SecondaryMember {
         SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: SecondaryMemberId(id),
@@ -906,6 +1045,7 @@ mod tests {
     fn 支持のない端は生座標のまま残す() {
         let mut model = two_girder_model();
         model.unassigned_posts.push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: SecondaryMemberId(0),

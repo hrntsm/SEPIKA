@@ -2091,6 +2091,7 @@ fn test_model_issues_warns_unassigned_beam() {
         model.nodes[(n + 1) as usize].coord,
     ]);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -2186,6 +2187,7 @@ fn test_model_issues_errors_cft_secondary_section() {
         .push(cft_shape().to_section(SectionId(1), "CFT小梁".into()));
     model.materials[0].fc = Some(24.0);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -2405,6 +2407,7 @@ fn test_model_issues_allows_steel_secondary_section() {
         thick: 10.0,
     });
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -2435,6 +2438,7 @@ fn test_model_issues_errors_unresolved_secondary() {
 
     let mut model = make_cantilever_model();
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -2488,6 +2492,7 @@ fn test_model_issues_warns_free_end_on_support() {
     support.nodes = [NodeId(2), NodeId(3)].into_iter().collect();
     model.elements.push(support);
     model.unassigned_beams.push(SecondaryMember {
+        display_local_axis: None,
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -2530,6 +2535,7 @@ fn test_model_issues_warns_free_end_on_free_tip() {
     });
     for (id, name) in [(0u32, "CA"), (1, "CB")] {
         model.unassigned_beams.push(SecondaryMember {
+            display_local_axis: None,
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(id),

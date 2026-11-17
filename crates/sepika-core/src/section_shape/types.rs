@@ -67,7 +67,7 @@ pub enum SectionShape {
         lower_thick: f64,
         web_thick: f64,
     },
-    /// Steel cold-formed lipped channel (リップ溝形鋼). `StbSecRoll-LipC`。
+    /// Steel cold-formed lipped channel (リップ溝形鋼).
     ///
     /// `height`: せい H `[mm]`（Y 方向）、`width`: フランジ幅 B `[mm]`（Z 方向。ウェブ外面〜
     /// フランジ先端）、`lip`: リップ長 C `[mm]`（Y 方向）、`thick`: 板厚 t `[mm]`（全要素一様）。

@@ -192,6 +192,7 @@ fn wall_post_model() -> Model {
     }
 
     model.unassigned_posts.push(SecondaryMember {
+        display_local_axis: None,
         id: SecondaryMemberId(0),
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         gravity_end_shares: Some([0.5, 0.5]),
