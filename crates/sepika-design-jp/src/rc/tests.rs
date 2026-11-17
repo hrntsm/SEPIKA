@@ -540,7 +540,7 @@ fn rc_beam_rect_shape() -> SectionShape {
         rebar: RcBeamRebar {
             main_dia: 22.0,
             top: vec![4, 2],
-            bottom: vec![3, 2],
+            bottom: vec![2, 1],
             cover: 40.0,
             stirrup: BeamStirrup {
                 dia: 10.0,
@@ -665,8 +665,6 @@ fn test_rc_column_circle_hoop_pw_provision_ok() {
     );
 }
 
-/// 新型 `RcBeamRect` は mz の符号で引張側（上端/下端）が変わり、上下非対称
-/// （上 4+2 / 下 3+2）のため曲げ検定比が変わる。`RcDesign.check` が Checked を返す。
 #[test]
 fn test_rc_beam_rect_bending_depends_on_tension_side() {
     let sec = make_section(rc_beam_rect_shape());

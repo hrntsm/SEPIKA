@@ -1105,6 +1105,57 @@ mod tests {
     }
 
     #[test]
+    fn rc_beam_asymmetric_is_drawn_unchecked_after_real_analysis() {
+        mod input {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs"
+            ));
+        }
+        let mut app = App::default();
+        app.load_model(input::model(true));
+        app.run_preparation();
+        app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let checks = &app.current_design_results().unwrap().member_checks;
+        let (_, rows) = build_tooltip_rows(&checks[0].positions);
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|row| matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("重心までの距離が一致しません"))));
+        assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
+
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(Default::default(), |ui| {
+            draw_check_ratio(
+                ui.painter(),
+                &app,
+                &app.core.model,
+                &[egui::pos2(100.0, 300.0), egui::pos2(350.0, 300.0)],
+                Default::default(),
+            );
+        });
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            labels.iter().any(|label| label.contains("未検定")),
+            "{labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|label| label.contains("OK")),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn rc_column_zero_capacity_is_drawn_as_unchecked_after_real_analysis() {
         mod input {
             include!(concat!(

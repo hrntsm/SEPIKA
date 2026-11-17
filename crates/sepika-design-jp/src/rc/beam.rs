@@ -9,16 +9,19 @@ use super::{
 };
 use crate::ultimate::rc_props::RcDirection;
 use crate::{
-    BondMethod, CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
+    BondMethod, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm,
+    MemberForcesAt,
 };
-use sepika_core::model::{Material, MaterialCategory, Section};
-use sepika_core::section_shape::SectionShape;
+use sepika_core::model::{Material, MaterialCategory};
+use sepika_core::section_shape::{RcBeamRebar, SectionShape};
 
 pub(crate) struct BeamMoment {
     /// 引張鉄筋支配の許容曲げモーメント MA_t = at・ft・j。
     pub(crate) ma_t: f64,
     /// 圧縮縁コンクリート支配の許容曲げモーメント MA_c。
     pub(crate) ma_c: f64,
+    /// 圧縮縁から中立軸までの距離 [mm]。
+    xn_mm: f64,
     /// MA = min(MA_t, MA_c)。
     pub(crate) ma: f64,
 }
@@ -29,7 +32,7 @@ pub(crate) fn beam_moment_capacity(
     ft: f64,
     fc: f64,
     n_ratio: f64,
-) -> BeamMoment {
+) -> Option<BeamMoment> {
     let ma_t = props.at * ft * props.j;
 
     let dc = props.dt;
@@ -38,45 +41,108 @@ pub(crate) fn beam_moment_capacity(
     let ac = props.ac;
     let at = props.at;
 
-    let a_coef = b / 2.0;
     let b_coef = (n_ratio - 1.0) * ac + n_ratio * at;
-    let c_coef = -((n_ratio - 1.0) * ac * dc + n_ratio * at * d);
-
-    let ma_c = if a_coef > 0.0 {
-        let disc = b_coef * b_coef - 4.0 * a_coef * c_coef;
-        if disc >= 0.0 {
-            let xn = (-b_coef + disc.sqrt()) / (2.0 * a_coef);
-            if xn > 0.0 {
-                let icr = b * xn.powi(3) / 3.0
-                    + (n_ratio - 1.0) * ac * (xn - dc).powi(2)
-                    + n_ratio * at * (d - xn).powi(2);
-                fc * icr / xn
-            } else {
-                f64::INFINITY
-            }
-        } else {
-            f64::INFINITY
-        }
-    } else {
-        f64::INFINITY
-    };
-
-    BeamMoment {
+    let c_coef = (n_ratio - 1.0) * ac * dc + n_ratio * at * d;
+    let xn_mm = ((b_coef * b_coef + 2.0 * b * c_coef).sqrt() - b_coef) / b;
+    if !xn_mm.is_finite() || xn_mm <= 0.0 || xn_mm >= d {
+        return None;
+    }
+    let icr = b * xn_mm.powi(3) / 3.0
+        + (n_ratio - 1.0) * ac * (xn_mm - dc).powi(2)
+        + n_ratio * at * (d - xn_mm).powi(2);
+    let ma_c = fc * icr / xn_mm;
+    if !ma_t.is_finite() || !ma_c.is_finite() || ma_t <= 0.0 || ma_c <= 0.0 {
+        return None;
+    }
+    Some(BeamMoment {
         ma_t,
         ma_c,
+        xn_mm,
         ma: ma_t.min(ma_c),
-    }
+    })
+}
+
+fn layer_count_and_first_moment(layers: &[u32]) -> (u128, u128) {
+    layers
+        .iter()
+        .enumerate()
+        .fold((0, 0), |(total, first_moment), (layer, &count)| {
+            let count = u128::from(count);
+            (total + count, first_moment + (layer as u128) * count)
+        })
+}
+
+fn bending_component(
+    forces: &MemberForcesAt,
+    ctx: &DesignCtx,
+    rebar: &RcBeamRebar,
+    props: &AxisProps,
+    tension_is_top: bool,
+    ft: f64,
+    allow: &super::RcAllow,
+) -> Result<CheckComponent, &'static str> {
+    let demand_nmm = forces.mz.abs();
+    let (ratio, detail) = if demand_nmm == 0.0 {
+        (0.0, "強軸曲げ需要=0 N·mm".into())
+    } else if props.at <= 0.0 {
+        return Err("引張側の主筋がありません");
+    } else if (forces.pos - 0.5).abs() < 1e-6 && ctx.beam_has_slab && forces.mz > 0.0 {
+        let ma_t = props.at * ft * props.j;
+        (
+            demand_nmm / ma_t,
+            format!("MA_t={ma_t:.1} N·mm, MA={ma_t:.1} N·mm, |mz|={demand_nmm:.1} N·mm, 中央+スラブ正曲げ: MA=at·ft·j"),
+        )
+    } else {
+        let (tension, compression) = if tension_is_top {
+            (&rebar.top, &rebar.bottom)
+        } else {
+            (&rebar.bottom, &rebar.top)
+        };
+        let (tension_count, tension_moment) = layer_count_and_first_moment(tension);
+        let (compression_count, compression_moment) = layer_count_and_first_moment(compression);
+        // 共通の段間隔を消去すれば、浮動小数点で重心の一致を判定する必要がない。
+        if compression_moment * tension_count != tension_moment * compression_count {
+            return Err(
+                "圧縮縁から圧縮筋重心までの距離と引張縁から引張筋重心までの距離が一致しません",
+            );
+        }
+        let bm = beam_moment_capacity(props, ft, allow.fc, allow.n_ratio)
+            .ok_or("矩形断面の許容曲げを求められません")?;
+        let (top_inner, bottom_inner) = rebar.innermost_bar_distances_from_edges_mm();
+        let (tension_inner, compression_inner) = if tension_is_top {
+            (top_inner, bottom_inner)
+        } else {
+            (bottom_inner, top_inner)
+        };
+        if compression_inner.is_some_and(|distance_mm| distance_mm >= bm.xn_mm)
+            || tension_inner.is_some_and(|distance_mm| props.d_full - distance_mm <= bm.xn_mm)
+        {
+            return Err("主筋の全段が中立軸の想定側に収まりません（中立軸上の段を含む）");
+        }
+        (
+            demand_nmm / bm.ma,
+            format!(
+                "MA_t={:.1} N·mm, MA_c={:.1} N·mm, MA={:.1} N·mm, |mz|={demand_nmm:.1} N·mm",
+                bm.ma_t, bm.ma_c, bm.ma,
+            ),
+        )
+    };
+    Ok(CheckComponent {
+        kind: CheckKind::Bending,
+        ratio,
+        detail,
+    })
 }
 
 /// 梁の断面検定（RC 規準 13条）。強軸曲げ mz とそれに対のせん断 qy のみを扱う。
 pub(crate) fn beam_check(
     forces: &MemberForcesAt,
-    _sec: &Section,
     mat: &Material,
     ctx: &DesignCtx,
     shape: &SectionShape,
+    rebar: &RcBeamRebar,
     fc_raw: f64,
-) -> CheckResult {
+) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
     let grade = main_rebar_grade(ctx.rebar_material.as_ref());
     let deformed_rebar = ctx.rebar_material.as_ref().is_some_and(|m| {
@@ -108,11 +174,17 @@ pub(crate) fn beam_check(
         rebar_info_from_shape(shape, tension_is_top).expect("梁の鉄筋情報を算定できる形状のみ来る");
     let ft = rebar_allowable_tension(grade, info.main_dia, long_term);
 
-    let at_mid = (forces.pos - 0.5).abs() < 1e-6;
-    let bm = beam_moment_capacity(&props, ft, allow.fc, allow.n_ratio);
-    let use_t_flange = at_mid && ctx.beam_has_slab && forces.mz > 0.0;
-    let ma = if use_t_flange { bm.ma_t } else { bm.ma };
-    let ratio_m = if ma > 0.0 { forces.mz.abs() / ma } else { 0.0 };
+    let bending = match bending_component(forces, ctx, rebar, &props, tension_is_top, ft, &allow) {
+        Ok(bending) => bending,
+        Err(reason) => {
+            return CheckOutcome::Skipped {
+                reason: format!(
+                    "RC 梁曲げ検定不能（{}曲げ）: {reason}",
+                    if tension_is_top { "負" } else { "正" }
+                ),
+            };
+        }
+    };
 
     let (m_for_alpha, q_for_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
     let alpha = shear_alpha(m_for_alpha, q_for_alpha, props.d, 2.0);
@@ -210,15 +282,6 @@ pub(crate) fn beam_check(
         };
 
     let basis = "RC 規準13条（梁の曲げ・せん断・付着）".to_string();
-    let mid_slab_note = if use_t_flange {
-        ", 中央+スラブ正曲げ: MA=at·ft·j"
-    } else {
-        ""
-    };
-    let bending_detail = format!(
-        "MA_t={:.1} N·mm, MA_c={:.1} N·mm, MA={:.1} N·mm, |mz|={:.1} N·mm{}",
-        bm.ma_t, bm.ma_c, ma, forces.mz, mid_slab_note,
-    );
     let shear_detail = format!(
         "QA={:.1} N, |qy|={:.1} N, α={:.3}, pw={:.5}",
         qa, forces.qy, alpha, props.pw,
@@ -236,11 +299,7 @@ pub(crate) fn beam_check(
     );
 
     let mut components = vec![
-        CheckComponent {
-            kind: CheckKind::Bending,
-            ratio: ratio_m,
-            detail: bending_detail,
-        },
+        bending,
         CheckComponent {
             kind: CheckKind::Shear,
             ratio: ratio_q,
@@ -286,11 +345,11 @@ pub(crate) fn beam_check(
         }
     }
 
-    CheckResult {
+    CheckOutcome::Checked(CheckResult {
         basis,
         detail,
         components,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -308,6 +367,18 @@ mod tests {
         }
     }
 
+    fn checked_beam(
+        forces: &MemberForcesAt,
+        mat: &Material,
+        ctx: &DesignCtx,
+        shape: &SectionShape,
+    ) -> CheckResult {
+        let SectionShape::RcBeamRect { rebar, .. } = shape else {
+            unreachable!()
+        };
+        beam_check(forces, mat, ctx, shape, rebar, 24.0).unwrap_checked()
+    }
+
     #[test]
     fn test_beam_check_seismic_qd_increases_shear_ratio() {
         use crate::{QdMethod, SeismicQd};
@@ -315,7 +386,6 @@ mod tests {
         // QD2 = 20+1.5×40 = 80kN（QD1 は ΣMy が大きく効かないよう長スパン）。
         let mat = make_material(24.0, "SD345");
         let shape = rc_beam_shape(400.0, 700.0, 6, 22.0, 1, 40.0, 10.0, 100.0, 2);
-        let sec = make_section(shape.clone());
         let forces = MemberForcesAt {
             pos: 0.0,
             n: 0.0,
@@ -330,7 +400,7 @@ mod tests {
             length: 6000.0,
             ..Default::default()
         };
-        let base = beam_check(&forces, &sec, &mat, &ctx_plain, &shape, 24.0);
+        let base = checked_beam(&forces, &mat, &ctx_plain, &shape);
         let ctx_qd = DesignCtx {
             term: LoadTerm::Short,
             kind: crate::MemberKind::Girder,
@@ -345,7 +415,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let with_qd = beam_check(&forces, &sec, &mat, &ctx_qd, &shape, 24.0);
+        let with_qd = checked_beam(&forces, &mat, &ctx_qd, &shape);
         // QD=80kN > 解析値 60kN なのでせん断検定比が 4/3 倍になる
         // （曲げ・付着が支配しない前提の内力設定）。
         assert!(
@@ -368,7 +438,7 @@ mod tests {
         let ft = rebar_allowable_tension("SD345", 19.0, true);
         let fc = super::super::concrete_allowable_compression(24.0, true);
         let n_ratio = super::super::young_ratio_n(24.0);
-        let bm = beam_moment_capacity(&props, ft, fc, n_ratio);
+        let bm = beam_moment_capacity(&props, ft, fc, n_ratio).unwrap();
 
         let expected_ma_t = props.at * ft * props.j;
         assert!((bm.ma_t - expected_ma_t).abs() < 1e-6);
@@ -388,7 +458,7 @@ mod tests {
         let ft = rebar_allowable_tension("SD345", 32.0, true);
         let fc = super::super::concrete_allowable_compression(24.0, true);
         let n_ratio = super::super::young_ratio_n(24.0);
-        let bm = beam_moment_capacity(&props, ft, fc, n_ratio);
+        let bm = beam_moment_capacity(&props, ft, fc, n_ratio).unwrap();
 
         assert!(bm.ma_c < bm.ma_t, "過大配筋では MA_c が支配するはず");
         assert!((bm.ma - bm.ma_c).abs() < 1e-6);
@@ -397,7 +467,6 @@ mod tests {
     #[test]
     fn test_beam_mid_with_slab_uses_ma_t_only() {
         let shape = rc_beam_shape(400.0, 600.0, 4, 25.0, 2, 40.0, 10.0, 100.0, 2);
-        let sec = make_section(shape.clone());
         let mat = make_material(24.0, "SD345");
         let forces = MemberForcesAt {
             pos: 0.5,
@@ -421,8 +490,8 @@ mod tests {
             beam_has_slab: true,
             ..Default::default()
         };
-        let r0 = beam_check(&forces, &sec, &mat, &ctx_plain, &shape, 24.0);
-        let r1 = beam_check(&forces, &sec, &mat, &ctx_slab, &shape, 24.0);
+        let r0 = checked_beam(&forces, &mat, &ctx_plain, &shape);
+        let r1 = checked_beam(&forces, &mat, &ctx_slab, &shape);
         let bend0 = r0
             .components
             .iter()
@@ -572,7 +641,6 @@ mod tests {
     #[test]
     fn test_beam_mid_negative_with_slab_keeps_min_ma() {
         let shape = rc_beam_shape(400.0, 600.0, 4, 25.0, 2, 40.0, 10.0, 100.0, 2);
-        let sec = make_section(shape.clone());
         let mat = make_material(24.0, "SD345");
         let forces = MemberForcesAt {
             pos: 0.5,
@@ -596,8 +664,8 @@ mod tests {
             beam_has_slab: true,
             ..Default::default()
         };
-        let r0 = beam_check(&forces, &sec, &mat, &ctx_plain, &shape, 24.0);
-        let r1 = beam_check(&forces, &sec, &mat, &ctx_slab, &shape, 24.0);
+        let r0 = checked_beam(&forces, &mat, &ctx_plain, &shape);
+        let r1 = checked_beam(&forces, &mat, &ctx_slab, &shape);
         let bend0 = r0
             .components
             .iter()
@@ -641,8 +709,6 @@ mod tests {
             .any(|c| c.kind == crate::CheckKind::Bond));
     }
 
-    /// 新型 `RcBeamRect`（上 4+2 / 下 3+2）の Rc1991 付着で、φ は引張側合計本数
-    /// （上端引張 6 本・下端引張 5 本）× π × dia に一致する（旧モデルのように /2 しない）。
     #[test]
     fn test_beam_bond_1991_phi_uses_total_tension_count_for_new_model() {
         let shape = SectionShape::RcBeamRect {
@@ -651,7 +717,7 @@ mod tests {
             rebar: RcBeamRebar {
                 main_dia: 22.0,
                 top: vec![4, 2],
-                bottom: vec![3, 2],
+                bottom: vec![2, 1],
                 cover: 40.0,
                 stirrup: BeamStirrup {
                     dia: 10.0,
@@ -688,7 +754,7 @@ mod tests {
 
         let dia = 22.0;
         let expected_top = format!("ψ={:.1}", 6.0 * std::f64::consts::PI * dia);
-        let expected_bottom = format!("ψ={:.1}", 5.0 * std::f64::consts::PI * dia);
+        let expected_bottom = format!("ψ={:.1}", 3.0 * std::f64::consts::PI * dia);
         assert!(
             bond_detail(-30_000_000.0).contains(&expected_top),
             "上端引張の φ は 6 本分: {}",
@@ -696,7 +762,7 @@ mod tests {
         );
         assert!(
             bond_detail(30_000_000.0).contains(&expected_bottom),
-            "下端引張の φ は 5 本分: {}",
+            "下端引張の φ は 3 本分: {}",
             bond_detail(30_000_000.0)
         );
     }
