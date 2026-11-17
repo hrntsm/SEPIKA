@@ -409,15 +409,19 @@ pub fn run_member_design_checks(
                     Some(sec),
                     Some(mat.category),
                 ) == sepika_core::structure_kind::StructureKind::Rc
-                    || kind == MemberKind::Girder
-                        && matches!(
-                            sec.shape,
-                            Some(sepika_core::section_shape::SectionShape::SrcBeamRect { .. })
+                    || matches!(
+                        (&sec.shape, kind),
+                        (
+                            Some(sepika_core::section_shape::SectionShape::SrcBeamRect { .. }),
+                            MemberKind::Girder
+                        ) | (
+                            Some(sepika_core::section_shape::SectionShape::SrcColumnRect { .. }),
+                            MemberKind::Column
                         )
-                        && sepika_core::structure_kind::structure_kind_of(
-                            Some(sec),
-                            Some(mat.category),
-                        ) == sepika_core::structure_kind::StructureKind::Src);
+                    ) && sepika_core::structure_kind::structure_kind_of(
+                        Some(sec),
+                        Some(mat.category),
+                    ) == sepika_core::structure_kind::StructureKind::Src);
             let mut outcome = if missing_gravity {
                 CheckOutcome::Skipped {
                     reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
