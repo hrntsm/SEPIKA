@@ -27,7 +27,7 @@ pub struct RcWallShearInput {
     pub pwv_ratio: f64,
     /// 全断面積に対する平均軸方向応力度 σ0 = N/A [N/mm²]（圧縮正）。
     pub sigma_0: f64,
-    /// せん断スパン比 M/(Q·D)（適用範囲 1.0〜3.0 にクランプ）。
+    /// せん断スパン比 M/(Q·D)。有限値は0を含め1.0〜3.0に制限する。適用可否は呼出側で検査。
     pub shear_span_ratio: f64,
     /// 開口（`(l0, h0, h, lw)`。l0・h0: 開口幅・高さ、h: 壁の上下梁中心間高さ、
     /// lw: 付帯柱中心間距離）。`None` は無開口（r=1）。
@@ -386,7 +386,22 @@ mod tests {
         );
     }
 
-    /// M/(Q·D) は適用範囲 1.0〜3.0、pwh は 1.2% にクランプされる。
+    #[test]
+    fn zero_shear_span_has_same_capacity_as_lower_bound_for_both_methods() {
+        for method in [
+            RcWallShearMethod::ArakawaMin,
+            RcWallShearMethod::ArakawaMean,
+        ] {
+            let mut input = sample();
+            input.method = method;
+            input.shear_span_ratio = 1.0;
+            let lower_bound = wall_shear_ultimate(&input).unwrap();
+            input.shear_span_ratio = 0.0;
+            assert!(lower_bound.is_finite() && lower_bound > 0.0);
+            assert_eq!(wall_shear_ultimate(&input).unwrap(), lower_bound);
+        }
+    }
+
     #[test]
     fn test_qu_clamps_shear_span_ratio_and_pwh() {
         let mut low = sample();

@@ -430,6 +430,27 @@ mod tests {
     }
 
     #[test]
+    fn zero_span_capacity_is_available_but_not_a_reference_skeleton_input() {
+        for method in [
+            sepika_core::model::RcWallShearMethod::ArakawaMin,
+            sepika_core::model::RcWallShearMethod::ArakawaMean,
+        ] {
+            let mut input = base_input();
+            input.method = method;
+            input.fc = 17.0;
+            input.te = 270.0;
+            input.pwh_ratio = 0.015;
+            input.shear_span_ratio = 1.0;
+            let accepted = wall_shear_trilinear(&input).unwrap();
+            input.shear_span_ratio = 0.0;
+            assert_eq!(wall_shear_ultimate(&input).unwrap(), accepted.qu);
+            assert!(
+                matches!(wall_shear_trilinear(&input), Err(reason) if reason.contains("せん断スパン比"))
+            );
+        }
+    }
+
+    #[test]
     fn skeleton_requires_finite_positive_shear_span_ratio() {
         let mut input = base_input();
         input.fc = 17.0;
