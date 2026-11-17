@@ -5185,3 +5185,55 @@ fn saved_wall_geometry_reports_missing_levels_without_dropping_band_boundaries()
         .unwrap_err()
         .contains("FL"));
 }
+
+#[test]
+fn xyz_brace_self_weight_and_k_rule_use_physical_length_and_original_connections() {
+    for (rule, center) in [
+        (KBraceWeightRule::InternalNodes, 1800.0),
+        (KBraceWeightRule::BaseNodesOnly, 1600.0),
+    ] {
+        let mut model = k_brace_model(rule);
+        for element in &mut model.elements[2..] {
+            element.end_offsets_mm = [[0.0; 3], [1000.0, 0.0, 0.0]];
+        }
+        let nodes = model.nodes.clone();
+        let connections = model
+            .elements
+            .iter()
+            .map(|e| e.nodes.clone())
+            .collect::<Vec<_>>();
+        let generated = generate_stories(&model, None).unwrap();
+        approx::assert_relative_eq!(
+            generated.stories[1].seismic_weight.unwrap(),
+            3925.0,
+            epsilon = 1e-8
+        );
+        approx::assert_relative_eq!(generated.rep_nodes[1].coord[0], center, epsilon = 1e-8);
+        let cfg = model.load_cfg.as_ref().unwrap();
+        let (nodal, member) = crate::self_weight::self_weight_case_content(&model, cfg).unwrap();
+        let brace_loads = member.iter().filter(|l| l.elem.0 >= 2).collect::<Vec<_>>();
+        assert_eq!(brace_loads.len(), 2);
+        let mut total = 0.0;
+        for (load, length) in brace_loads.into_iter().zip([3000.0, 1000.0]) {
+            match load.kind {
+                MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                    assert_eq!(a, 0.0);
+                    assert_eq!(b, length);
+                    total += (b - a) * (w1 + w2) / 2.0;
+                }
+                _ => panic!("自重は実軸全長の分布荷重"),
+            }
+        }
+        approx::assert_relative_eq!(total, 3925.0, epsilon = 1e-8);
+        assert!(nodal.iter().all(|load| load.values[2] == 0.0));
+        assert_eq!(model.nodes, nodes);
+        assert_eq!(
+            model
+                .elements
+                .iter()
+                .map(|e| e.nodes.clone())
+                .collect::<Vec<_>>(),
+            connections
+        );
+    }
+}

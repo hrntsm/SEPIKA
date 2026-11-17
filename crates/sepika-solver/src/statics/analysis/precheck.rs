@@ -179,7 +179,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     }
     let unresolved_start = issues.len();
     for elem in &model.elements {
-        if elem.kind.is_primary_frame_support() {
+        if elem.kind.is_primary_frame_support() || matches!(elem.kind, ElementKind::Brace { .. }) {
             if let Some(reason) =
                 sepika_element::factory::elastic_stiffness_input_issue(elem, model)
             {

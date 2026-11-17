@@ -1,7 +1,7 @@
 use crate::{EditCommand, Noop, RejectedEdit};
-use sepika_core::model::{FrameSectionUse, Model, SupportMemberId};
+use sepika_core::model::{ElementKind, FrameSectionUse, Model, SupportMemberId};
 
-/// 大梁・柱の解析偏心、小梁・間柱の表示偏心を全体XYZ `[mm]`、i端・j端の順で設定する。
+/// 大梁・柱・ブレースの解析偏心、小梁・間柱の表示偏心を全体XYZ `[mm]`、i端・j端の順で設定する。
 pub struct SetMemberEndOffsets {
     pub member: SupportMemberId,
     pub value: [[f64; 3]; 2],
@@ -26,15 +26,20 @@ impl EditCommand for SetMemberEndOffsets {
                 let Some(e) = model.element(id) else {
                     return reject("部材がありません".into());
                 };
-                if !e.kind.is_primary_frame_support()
+                if !(e.kind.is_primary_frame_support()
+                    || matches!(e.kind, ElementKind::Brace { .. }))
                     || !model.element_section(e).is_some_and(|s| {
                         matches!(
                             s.frame_use,
-                            Some(FrameSectionUse::Girder | FrameSectionUse::Column)
+                            Some(
+                                FrameSectionUse::Girder
+                                    | FrameSectionUse::Column
+                                    | FrameSectionUse::Brace
+                            )
                         )
                     })
                 {
-                    return reject("大梁・柱ではありません".into());
+                    return reject("大梁・柱・ブレースではありません".into());
                 }
                 let mut candidate = e.clone();
                 candidate.end_offsets_mm = self.value;

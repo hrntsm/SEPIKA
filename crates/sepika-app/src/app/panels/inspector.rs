@@ -160,6 +160,21 @@ impl App {
                     let n0 = e.nodes.first().map(|n| n.0).unwrap_or(0);
                     let n1 = e.nodes.get(1).map(|n| n.0).unwrap_or(0);
                     ui.label(format!("節点 I/J: {} / {}", n0, n1));
+                    if let Ok(Some(ends)) = display_model.primary_frame_axis_ends(e) {
+                        for (side, position) in ends.iter().enumerate() {
+                            let offset = e.end_offsets_mm[side];
+                            let end = if side == 0 { "i" } else { "j" };
+                            ui.label(format!(
+                                "{end}端 XYZ偏心 [mm]: {:.1}, {:.1}, {:.1}",
+                                offset[0], offset[1], offset[2]
+                            ));
+                            ui.label(format!(
+                                "{end}端 実材軸位置 [mm]: {:.1}, {:.1}, {:.1}",
+                                position[0], position[1], position[2]
+                            ));
+                        }
+                    }
+
                     if let Some(sec_id) = e.section {
                         if let Some(sec) = self
                             .core
