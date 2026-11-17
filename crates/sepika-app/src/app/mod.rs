@@ -2611,3 +2611,6 @@ impl std::ops::DerefMut for UiViewState {
 mod beam_bolt_tests;
 #[cfg(test)]
 mod post_design_tests;
+
+#[cfg(test)]
+mod rc_column_boundary_tests;

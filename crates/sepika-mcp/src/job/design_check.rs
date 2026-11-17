@@ -293,6 +293,59 @@ mod tests {
     use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
 
+    mod column_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"
+        ));
+    }
+    mod column_reference {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_reference.rs"
+        ));
+    }
+
+    #[test]
+    fn rc_column_boundary_mcp_case_and_combination_are_unchecked_in_json() {
+        for circle in [false, true] {
+            let mut model =
+                column_input::column_model(circle, 1.01 * column_reference::axial_limit_n(circle));
+            model
+                .combinations
+                .push(sepika_core::model::LoadCombination {
+                    name: "長期".into(),
+                    terms: vec![(sepika_core::ids::LoadCaseId(0), 1.0)],
+                });
+            for combo in [false, true] {
+                let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                    &model,
+                    &JobParams {
+                        load_case: if combo { None } else { Some(0) },
+                        load_combination: if combo { Some(0) } else { None },
+                        ..Default::default()
+                    },
+                )
+                .unwrap() else {
+                    panic!()
+                };
+                assert_eq!(summary["n_checks"], 3);
+                assert_eq!(summary["n_skipped"], 3);
+                assert_eq!(summary["n_ng"], 0);
+                assert_eq!(summary["all_checked_and_ok"], false);
+                assert_eq!(summary["all_members_checked_and_ok"], false);
+                assert!(summary["max_ratio"].is_null());
+                for row in summary["member_skipped"].as_array().unwrap() {
+                    assert!(row["reason"].as_str().unwrap().contains("検定不能"));
+                }
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&summary.to_string()).unwrap(),
+                    summary
+                );
+            }
+        }
+    }
+
     #[test]
     fn steel601_mcp_rejects_invalid_assigned_steel_with_target_before_preparation() {
         use sepika_core::ids::{MaterialId, SectionId};

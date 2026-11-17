@@ -11,16 +11,21 @@ mod reference;
 use input::column_model;
 
 #[test]
-fn common_product_entry_observes_zero_capacity_boundary_without_rejecting_bending() {
+fn common_product_entry_rejects_nonzero_bending_at_zero_capacity() {
     for circle in [false, true] {
         let na_n = reference::axial_limit_n(circle);
         let model = column_model(circle, na_n);
         for (factor, moments, expected_ok) in [
+            (0.99, [0.0, 0.0], true),
+            (0.99, [1.0, 0.0], true),
+            (0.99, [0.0, 1.0], true),
             (0.99, [1.0, 1.0], true),
             (1.0, [0.0, 0.0], true),
-            (1.0, [1_000_000.0, 0.0], true),
-            (1.0, [0.0, 2_000_000.0], true),
-            (1.0, [1_000_000.0, 2_000_000.0], true),
+            (1.0, [1_000_000.0, 0.0], false),
+            (1.0, [0.0, 2_000_000.0], false),
+            (1.0, [1_000_000.0, 2_000_000.0], false),
+            (1.01, [1_000_000.0, 0.0], false),
+            (1.01, [0.0, 2_000_000.0], false),
             (1.01, [1_000_000.0, 2_000_000.0], false),
             (1.01, [0.0, 0.0], false),
         ] {
@@ -45,6 +50,15 @@ fn common_product_entry_observes_zero_capacity_boundary_without_rejecting_bendin
             .unwrap();
             assert_eq!(report.member_checks.len(), 3);
             for (_, pos, outcome) in report.member_checks {
+                if factor >= 1.0 && moments != [0.0, 0.0] {
+                    let CheckOutcome::Skipped { reason } = outcome else {
+                        panic!("{outcome:?}")
+                    };
+                    for field in ["NA=", "N=", "MA_z=0", "MA_y=0", "mz=", "my=", "検定不能"] {
+                        assert!(reason.contains(field), "{reason}");
+                    }
+                    continue;
+                }
                 let CheckOutcome::Checked(result) = outcome else {
                     panic!("{outcome:?}")
                 };
@@ -94,26 +108,14 @@ fn common_product_entry_observes_zero_capacity_boundary_without_rejecting_bendin
         )
         .unwrap();
         assert_eq!(report.member_checks.len(), 3);
-        for (_, pos, outcome) in report.member_checks {
-            let CheckOutcome::Checked(result) = outcome else {
-                panic!("{outcome:?}")
-            };
-            let nm = result
-                .components
-                .iter()
-                .find(|c| c.kind == CheckKind::AxialBending)
-                .unwrap();
-            if !circle {
-                assert_eq!(nm.ratio, 1.0);
-                assert!(nm.detail.contains("MA_z=0.0 N·mm, MA_y=0.0 N·mm"));
-                assert!(result.ok());
+        for (_, _, outcome) in report.member_checks {
+            match outcome {
+                CheckOutcome::Skipped { reason } => assert!(reason.contains("検定不能")),
+                CheckOutcome::Checked(result) => {
+                    assert!(circle && !result.ok(), "{result:?}");
+                    assert!(result.ratio().is_finite());
+                }
             }
-            println!(
-                "solved circle={circle}, pos={pos}, ratio={}, ok={}, components={:?}",
-                result.ratio(),
-                result.ok(),
-                result.components
-            );
         }
     }
 }
