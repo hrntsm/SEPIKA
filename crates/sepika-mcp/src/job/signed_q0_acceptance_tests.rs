@@ -2,6 +2,78 @@ use super::*;
 #[path = "../../../sepika-design-jp/tests/fixtures/signed_beam_gravity_model.rs"]
 mod fixture;
 
+#[test]
+fn src_column_mcp_saved_seismic_combination_supplies_both_gravity_directions() {
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    let mut model: Model = serde_json::from_str(include_str!(
+        "../../../sepika-app/tests/fixtures/src_ql_contract.json"
+    ))
+    .unwrap();
+    let old = model.sections[0].clone();
+    let Some(SectionShape::SrcBeamRect {
+        b,
+        d,
+        rebar,
+        steel_height,
+        steel_width,
+        steel_web_thick,
+        steel_flange_thick,
+    }) = old.shape
+    else {
+        panic!("SRC梁入力")
+    };
+    let mut section = SectionShape::SrcColumnRect {
+        b,
+        d,
+        rebar: RcRectColumnRebar {
+            main_dia: rebar.main_dia,
+            x: rebar.top,
+            y: rebar.bottom,
+            cover: rebar.cover,
+            hoop: RectColumnHoop {
+                dia: rebar.stirrup.dia,
+                pitch: rebar.stirrup.pitch,
+                legs_x: 2,
+                legs_y: 2,
+            },
+        },
+        steel_height,
+        steel_width,
+        steel_web_thick,
+        steel_flange_thick,
+    }
+    .to_section(old.id, "SRC柱重力参照".into());
+    section.material = old.material;
+    section.rebar_material = old.rebar_material;
+    section.shear_rebar_material = old.shear_rebar_material;
+    section.steel_material = old.steel_material;
+    section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    model.sections[0] = section;
+    model.nodes[1].coord = [0.0, 0.0, 6000.0];
+    model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
+    model.stories = [0.0, 6000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, fl)| {
+            sepika_core::model::Story::new(
+                sepika_core::ids::StoryId(i as u32),
+                format!("{}F", i + 1),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect();
+    for empty in [false, true] {
+        if empty {
+            model.load_cases[0].member.clear();
+        }
+        let result = summary(&model, false);
+        assert_eq!(result["n_skipped"], 0, "{result}");
+        assert_eq!(result["qd_wired"], true);
+        assert!(result["max_ratio"].as_f64().is_some_and(f64::is_finite));
+    }
+}
+
 fn summary(model: &Model, automatic: bool) -> serde_json::Value {
     let outcome = compute_job(
         model,

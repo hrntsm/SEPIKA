@@ -292,6 +292,7 @@ fn src_shear_check(
 
 /// SRC 梁・SRC 柱の断面検定
 /// （`SectionShape::SrcBeamRect`・`SrcColumnRect` を対象とする）。
+/// 構造規定方式の入力がある柱は、同位置の有限な Qy・Qz 重力参照が必要。不足時は位置全体を未算定とする。
 pub struct SrcDesign;
 
 impl DesignCheck for SrcDesign {
@@ -437,6 +438,21 @@ impl DesignCheck for SrcDesign {
                         reason: "SRC検定: 柱用断面を梁部材に割り当てています（用途不一致）"
                             .to_string(),
                     };
+                }
+                if let Some(qd) = &ctx.seismic_qd {
+                    if !forces.pos.is_finite()
+                        || !qd
+                            .long_at
+                            .iter()
+                            .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
+                            .is_some_and(|(_, values)| {
+                                values[1].is_finite() && values[2].is_finite()
+                            })
+                    {
+                        return CheckOutcome::Skipped {
+                            reason: "SRC柱検定: 設計用せん断力に必要な同位置の重力参照せん断力QL（Qy・Qz）が不足または非有限です".into(),
+                        };
+                    }
                 }
                 if rebar.is_unset() {
                     return CheckOutcome::Skipped {

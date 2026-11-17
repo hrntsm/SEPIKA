@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## SRC柱の重力参照不足（#1274）
+
+[公開入口再現と独立算術](SRC柱重力参照不足_確認記録.md)で、参照欠落による弾性分担への切替えとNaNの有限成功を再現し、要求済み構造規定方式の入力不足を位置全体の理由付き未算定へ是正する。状態🔶。通常GUI/MCPの実解析と人工的な不完全参照を区別し、採用需要式の一般的安全性・規準適合・実験Validationは今回の確認対象外とする。
+
 ## RC接合部終局の方向と入力不足（#1050・#1377）
 
 [公開入口11試験と独立算術](RC接合部終局の方向と入力不足_Issue1050_確認記録.md)で、異方向・非対称梁・上下異断面柱・順序変更・応力欠落・材料配筋不足を検証する。#1377では成立未確認の終局自動算定をモデル候補ごとの理由付きSkippedへ是正し、保存・GUI/MCP集計の伝達も検証する。状態🔶。採用式・規準適合・実験Validationの承認ではない。
@@ -795,6 +799,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 26a | 梁型枠の床接触控除 | sepika-design-jp / sepika-app / sepika-mcp | quantity/contact.rs・tests.rs、tests/beam_contact_quantity.rs | [Issue451検証](梁型枠接触和集合_Issue451_2026-10.md)の独立期待値・診断・実入口対応表 | 横断 | 🔶（限定Verification、一般形状・実施工未検証） |
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
+| 1274 | SRC柱の地震時重力参照不足 | sepika-design-jp / sepika-app / sepika-mcp | srrc/mod.rs・member_design_check.rs、app/src_ql_acceptance_tests.rs、job/signed_q0_acceptance_tests.rs | [独立算術と公開入口](SRC柱重力参照不足_確認記録.md#恒久回帰と確認範囲)、tests/src_column_gravity.rs | 一次設計・入出力 | 🔶（入力不足拒否・代表算術Verification、採用式Validation未） |
 | 912 | SRC梁柱の内蔵鉄骨材料解決 | sepika-design-jp / sepika-app | srrc/{mod,beam,column,tests}.rs、app/src_ql_acceptance_tests.rs | [独立耐力・境界と保存経路](SRC内蔵鉄骨材料_Issue912_確認記録.md#要素から製品経路への証拠索引) | 一次設計・入出力 | 🔶（材料契約Verification、全規準・Validation未） |
 | 871 | Ds条件不足の保留 | sepika-app / sepika-design-jp | actions/design/holding・holding_conditions、member_rank、tests/vnv_rigid_zone_mechanism | [実入口と観測契約](Ds条件不足の保留_Issue871_確認記録.md#実入口と観測契約) | 二次設計 | 🔶（条件不足の保留Verification、全規準・Validation未） |
 | 872 | Ds/Qu採用条件 | sepika-app | actions/design/holding_adoption.rs・holding.rs、summary.rs | [公開入口の要素→試験索引](DsQu採用条件_Issue872_確認記録.md#要素試験索引) | 二次設計 | 🔶（採用保留Verification、証拠保存・Validation未） |
