@@ -5,10 +5,46 @@ use sepika_design_jp::{
 };
 
 #[path = "fixtures/cft_column_buckling_model.rs"]
-mod input;
+mod cft_column_buckling_input;
+#[path = "fixtures/cft_ultimate_strength_model.rs"]
+mod strength_input;
+
+use cft_column_buckling_input as input;
 
 const COLUMN: ElemId = ElemId(0);
 const COMPRESSION_N: f64 = 7_450_000.0;
+
+#[test]
+fn cft_ultimate_rejects_concrete_strength_below_statutory_minimum() {
+    let check = |model| collect_cft_ultimate_checks(model, &[(COLUMN, 100_000.0)]);
+    let below = strength_input::circular_column(23.999);
+    let reason = check(&below).unwrap_err();
+    for message in [
+        "CFT 部材 0",
+        "Fc=23.999 N/mm²",
+        "告示464号第三2",
+        "下限24 N/mm²",
+    ] {
+        assert!(reason.contains(message), "{reason}");
+    }
+    assert_eq!(below.materials[0].fc, Some(23.999));
+
+    let at_minimum = strength_input::circular_column(24.0);
+    let above = strength_input::circular_column(24.001);
+    let at_minimum_rows = check(&at_minimum).unwrap();
+    let above_rows = check(&above).unwrap();
+    for rows in [&at_minimum_rows, &above_rows] {
+        let [row] = rows.as_slice() else {
+            panic!("{rows:?}");
+        };
+        assert_eq!(row.elem, COLUMN);
+        assert!(row.ok && row.ncu > 100_000.0 && row.ntu > 0.0);
+        assert!(*row.mu_nm.as_ref().unwrap() > 0.0);
+    }
+    assert!(above_rows[0].ncu > at_minimum_rows[0].ncu);
+    assert_eq!(at_minimum.materials[0].fc, Some(24.0));
+    assert_eq!(above.materials[0].fc, Some(24.001));
+}
 
 #[test]
 fn cft_requires_two_finite_positive_direct_lengths_in_both_entries() {

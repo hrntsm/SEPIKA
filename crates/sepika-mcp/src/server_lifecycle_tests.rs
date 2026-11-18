@@ -1,9 +1,55 @@
 use super::super::persist::SavePoint;
 use crate::tests::cft_long_case2_model::cft_long_case2_model;
 use crate::tests::cft_long_case2_reference::assert_cft_long_case2_summary;
+use crate::tests::cft_ultimate_strength_input;
 use sepika_io::results::ResultKind;
 use std::future::Future;
 use std::task::Poll;
+
+#[tokio::test]
+async fn cft_ultimate_rejects_concrete_strength_below_statutory_minimum() {
+    for (fc_n_mm2, calculated) in [(23.999, false), (24.0, true), (24.001, true)] {
+        let dir = test_store_dir(&format!("cft-ultimate-strength-{fc_n_mm2}"));
+        let model = cft_ultimate_strength_input::circular_column(fc_n_mm2);
+        let server = SepikaServer::new(make_state(model, &dir));
+        let run = server
+            .analysis_run(Parameters(run_args(JobKind::UltimateCheck)))
+            .await
+            .unwrap();
+        let id = extract_job_id(&run);
+        wait_for_terminal(&server, &id).await;
+        let published = public_status(&server, &id).await;
+        let status = &published["status"];
+        if calculated {
+            let summary: serde_json::Value =
+                serde_json::from_str(status["Done"]["result_ref"].as_str().unwrap()).unwrap();
+            assert_eq!(summary["n_cft_checks"], 1);
+            assert_eq!(summary["n_cft_axial_ng"], 0);
+            assert_eq!(summary["n_cft_mu_unavailable"], 0);
+            assert_eq!(summary["all_checks_calculated_and_ok"], true);
+            let row = &summary["cft_members"][0];
+            assert_eq!(row["axial_ok"], true);
+            assert!((row["n_design"].as_f64().unwrap() - 100_000.0).abs() < 0.01);
+            assert!(row["mu_nm"].as_f64().unwrap() > 0.0);
+        } else {
+            assert!(status.get("Done").is_none(), "{status}");
+            assert_eq!(status["Failed"]["kind"], "invalid_input");
+            let reason = status["Failed"]["error"].as_str().unwrap();
+            for message in [
+                "CFT 部材 0",
+                "Fc=23.999 N/mm²",
+                "告示464号第三2",
+                "下限24 N/mm²",
+            ] {
+                assert!(reason.contains(message), "{reason}");
+            }
+        }
+        assert_eq!(
+            server.state.lock().await.model.materials[0].fc,
+            Some(fc_n_mm2)
+        );
+    }
+}
 
 #[tokio::test]
 async fn cft_long_case2_public_job_keeps_calculated_and_unavailable_diagnostics() {
