@@ -307,6 +307,52 @@ mod tests {
         ));
     }
 
+    mod steel_h_column_combined_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs"
+        ));
+    }
+
+    #[test]
+    fn h_column_combination_reason_reaches_mcp_design_job_summary() {
+        let run = |weak_shear_n: f64| {
+            let model = steel_h_column_combined_input::cantilever(weak_shear_n);
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!()
+            };
+            summary
+        };
+        let summary = run(365_000.0);
+        assert_eq!(summary["n_checks"], 3, "{summary}");
+        assert!(summary["max_ratio"].is_null(), "{summary}");
+        assert_eq!(summary["n_skipped"], 3, "{summary}");
+        assert_eq!(summary["all_members_checked_and_ok"], false);
+        let skipped = summary["member_skipped"].as_array().unwrap();
+        assert_eq!(skipped.len(), 3, "{summary}");
+        for (row, xi) in skipped.iter().zip([0.0, 0.5, 1.0]) {
+            assert_eq!(row["elem"], 0);
+            assert_eq!(row["position"], xi);
+            assert!(
+                row["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("フランジ内の設計用公称応力度の分布を規準から確定できず"),
+                "{row}"
+            );
+        }
+        let without_weak_shear = run(0.0);
+        assert_eq!(without_weak_shear["n_checks"], 3, "{without_weak_shear}");
+        assert_eq!(without_weak_shear["n_skipped"], 0, "{without_weak_shear}");
+    }
+
     #[test]
     fn cft_column_mcp_reports_missing_axis_for_case_and_combination() {
         use crate::tests::cft_column_buckling_input::{cantilever, direct_lengths};

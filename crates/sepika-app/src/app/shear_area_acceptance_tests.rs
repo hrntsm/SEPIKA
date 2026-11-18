@@ -3,6 +3,20 @@ use sepika_core::model::{FrameSectionUse, NodalLoad, PropertyBasis, Section};
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::CheckOutcome;
 
+#[path = "../../../sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs"]
+mod h_column_input;
+
+#[cfg(feature = "gui")]
+fn design_table_contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
+    match shape {
+        egui::epaint::Shape::Text(text) => text.galley.text().contains(needle),
+        egui::epaint::Shape::Vec(parts) => {
+            parts.iter().any(|part| design_table_contains(part, needle))
+        }
+        _ => false,
+    }
+}
+
 fn cantilever(section: Section, load_n: [f64; 6]) -> App {
     let mut model = crate::sample::portal_frame();
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
@@ -231,13 +245,6 @@ fn flat_bar_shear_reason_reaches_report_gui_and_saved_project() {
     assert_eq!(assert_unchecked(&reopened), expected);
     #[cfg(feature = "gui")]
     {
-        fn contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
-            match shape {
-                egui::epaint::Shape::Text(text) => text.galley.text().contains(needle),
-                egui::epaint::Shape::Vec(parts) => parts.iter().any(|part| contains(part, needle)),
-                _ => false,
-            }
-        }
         let context = egui::Context::default();
         let rendered = context.run_ui(Default::default(), |ui| {
             crate::design_view::design_table(ui, &mut reopened)
@@ -248,7 +255,7 @@ fn flat_bar_shear_reason_reaches_report_gui_and_saved_project() {
                 rendered
                     .shapes
                     .iter()
-                    .any(|shape| contains(&shape.shape, needle)),
+                    .any(|shape| design_table_contains(&shape.shape, needle)),
                 "{needle}"
             );
         }
@@ -279,4 +286,108 @@ fn flat_bar_shear_reason_reaches_report_gui_and_saved_project() {
         old.run_design_check();
         assert_eq!(assert_unchecked(&old), expected);
     }
+}
+
+#[test]
+fn h_column_combination_reason_reaches_design_table_report_and_saved_project() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+    use sepika_design_jp::{CheckComponent, CheckKind, CheckResult};
+
+    let model = h_column_input::cantilever(365_000.0);
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+
+    let assert_unchecked = |app: &App| {
+        let results = app.current_design_results().unwrap();
+        assert_eq!(
+            results.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        let [member] = results.member_checks.as_slice() else {
+            panic!("{:?}", results.member_checks);
+        };
+        assert_eq!(member.elem, ElemId(0));
+        assert_eq!(member.positions.len(), 3);
+        let csv = crate::summary::build_report_csv(app);
+        for position in &member.positions {
+            let CheckOutcome::Skipped { reason } = &position.outcome else {
+                panic!("{:?}", position.outcome);
+            };
+            assert!(
+                reason.contains("フランジ内の設計用公称応力度の分布を規準から確定できず"),
+                "{reason}"
+            );
+            assert!(
+                csv.lines()
+                    .any(|line| line == format!("0,{:.3},-,検定不能,{reason}", position.xi)),
+                "{csv}"
+            );
+        }
+        assert!(!csv.contains(",OK,"), "{csv}");
+        rmp_serde::to_vec_named(&results.member_checks).unwrap()
+    };
+    let expected = assert_unchecked(&app);
+    let path =
+        std::env::temp_dir().join(format!("sepika-1454-h-column-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(assert_unchecked(&reopened), expected);
+
+    #[cfg(feature = "gui")]
+    {
+        let context = egui::Context::default();
+        let rendered = context.run_ui(Default::default(), |ui| {
+            crate::design_view::design_table(ui, &mut reopened)
+        });
+        for needle in [
+            "検定済み 0 位置、検定不能 3 位置",
+            "フランジ内の設計用公称応力度",
+        ] {
+            assert!(
+                rendered
+                    .shapes
+                    .iter()
+                    .any(|shape| design_table_contains(&shape.shape, needle)),
+                "{needle}"
+            );
+        }
+    }
+
+    let legacy_basis = "旧版のH形鋼柱の合成応力検定";
+    app.core.scoped.results.as_mut().unwrap().member_checks[0].positions[0].outcome =
+        CheckOutcome::Checked(CheckResult {
+            basis: legacy_basis.into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Shear,
+                ratio: 0.992_447,
+                detail: String::new(),
+            }],
+        });
+    assert!(crate::summary::build_report_csv(&app).contains(&format!(",OK,{legacy_basis}")));
+    let (mut old, path) = super::result_contract_tests::restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(DESIGN_CONTRACT_VERSION - 1),
+        "h-column-combination-1454-old",
+    );
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(
+        old.current_static().unwrap().member_forces,
+        app.current_static().unwrap().member_forces
+    );
+    assert!(old.current_design_results().is_none());
+    assert!(!crate::summary::build_report_csv(&old).contains(legacy_basis));
+    old.run_design_check();
+    assert_eq!(assert_unchecked(&old), expected);
 }
