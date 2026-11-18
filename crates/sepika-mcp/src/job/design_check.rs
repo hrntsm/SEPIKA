@@ -19,11 +19,6 @@ pub(crate) fn compute_design_check_job(
     use sepika_core::load_combo::{
         case_design_state, combination_design_state, LoadAction, LoadDuration,
     };
-    if params.load_case.is_some() && params.load_combination.is_some() {
-        return Err(JobError::InvalidInput(
-            "load_caseとload_combinationは同時指定できません".into(),
-        ));
-    }
     sepika_design_jp::validate_model_steel_inputs(model).map_err(JobError::InvalidInput)?;
     let (work, notices) = model_prepared_for_analysis(model, params)?;
     let (lc_id, terms, source, state) = if let Some(index) = params.load_combination {
