@@ -272,24 +272,41 @@ impl App {
         ])
     }
 
+    pub(crate) fn member_check_positions(&self, elem: Option<ElemId>) -> Vec<(ElemId, f64)> {
+        let mut seen = std::collections::HashSet::new();
+        self.core
+            .scoped
+            .results
+            .iter()
+            .flat_map(|bundle| &bundle.member_checks)
+            .filter(|member| elem.is_none_or(|id| member.elem == id))
+            .flat_map(|member| member.positions.iter().map(|p| (member.elem, p.xi)))
+            .filter(|&(id, xi)| seen.insert((id, xi.to_bits())))
+            .collect()
+    }
+
     pub(crate) fn open_member_check_evidence(&mut self, elem: ElemId, position: f64) {
         let key = ResultInputKey::Design;
-        let mut checked = false;
+        let mut n_checks = 0;
+        let mut complete = true;
         let mut lines = vec![format!(
             "部材 #{} / 材軸位置 ξ={position:.3}（始端0・終端1） / 検定比 [無次元]",
             elem.0
         )];
         if let Some(bundle) = &self.core.scoped.results {
-            if let Some(check) = bundle
+            for check in bundle
                 .member_checks
                 .iter()
-                .find(|m| m.elem == elem)
-                .and_then(|m| m.positions.iter().find(|p| p.xi == position))
+                .filter(|m| m.elem == elem)
+                .flat_map(|m| &m.positions)
+                .filter(|p| p.xi == position)
             {
+                n_checks += 1;
                 match &check.outcome {
                     sepika_design_jp::CheckOutcome::Checked(check) => {
                         let evaluation = result_validity::evaluate_check(check);
                         if !evaluation.complete {
+                            complete = false;
                             lines.push(result_validity::INVALID_CHECK_COMPONENTS.into());
                             if let Some(ratio) = evaluation.known_ng {
                                 lines.push(format!("確認済みNG: 検定比 {ratio:.4}（未評価あり）"));
@@ -307,7 +324,6 @@ impl App {
                                 }
                             }
                         } else {
-                            checked = true;
                             lines.push(format!(
                                 "検定比 {:.4} / {} / 式名・根拠: {}",
                                 check.ratio(),
@@ -330,12 +346,16 @@ impl App {
                         }
                     }
                     sepika_design_jp::CheckOutcome::Skipped { reason } => {
-                        lines.push(format!("未検定・検定不能: {reason}"))
+                        complete = false;
+                        lines.push(format!("未検定・検定不能: {reason}"));
                     }
                 }
-            } else {
-                lines.push("検定詳細は取得不能です。".into());
             }
+        }
+        if n_checks == 0 {
+            lines.push("検定詳細は取得不能です。".into());
+        } else if n_checks > 1 && !complete {
+            lines.insert(1, "材軸位置全体: 未検定の項目あり".into());
         }
         if let Ok((_, input)) = self.recorded_calculation_input(&key) {
             if let references::RecordedSettings::Design { source, .. } = &input.settings {
@@ -345,7 +365,7 @@ impl App {
                             "比較ケース集合: 1件 / {}",
                             load_label(source_key, source_input.as_deref().map(|s| &s.model))
                         ));
-                        if checked {
+                        if n_checks > 0 && complete {
                             lines.push(format!("支配ケース: {}（この1件の応力による検定。複数ケースの包絡比較は行っていません）", load_label(source_key, source_input.as_deref().map(|s| &s.model))));
                         } else {
                             lines.push(format!(
@@ -447,9 +467,9 @@ impl App {
             let design_matches = self.core.scoped.results.as_ref().and_then(|bundle| bundle.reference_sources.iter().find(|(key, _)| *key == ResultInputKey::Design)).is_some_and(|(_, source)| recorded.as_ref().is_ok_and(|(static_source, _)| source == static_source));
             if !design_matches { ui.label("検定の入力版はこの静的結果と異なるか取得不能です。検定表の履歴から計算時の部材・位置を選択してください。"); }
             if let Some(elem) = member.filter(|_| design_matches) {
-                let positions: Vec<_> = self.core.scoped.results.as_ref().and_then(|bundle| bundle.member_checks.iter().find(|m| m.elem == elem)).map(|member| member.positions.iter().map(|p| p.xi).collect()).unwrap_or_default();
+                let positions = self.member_check_positions(Some(elem));
                 if positions.is_empty() { ui.label("選択番号の部材に主架構検定結果はありません（未検定・欠落）。"); }
-                for position in positions {
+                for (_, position) in positions {
                     if ui.button(format!("計算時部材 #{} / ξ={position:.3} の検定根拠", elem.0)).clicked() { self.open_member_check_evidence(elem, position); }
                 }
             }
@@ -1924,6 +1944,81 @@ mod tests {
             assert_eq!(before, bytes(&app.core.scoped.results));
         }
     }
+    #[test]
+    fn member_evidence_keeps_all_checks_and_marks_a_shared_position_incomplete() {
+        use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+
+        let mut app = calculated();
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        let member = &mut bundle.member_checks[0];
+        let elem = member.elem;
+        let xi = 0.5;
+        member.positions.retain(|p| p.xi != xi);
+        for (basis, ratio) in [("RC梁曲げ", 0.6), ("PCa水平接合面", 0.4)] {
+            member.positions.push(PositionCheck {
+                xi,
+                outcome: CheckOutcome::Checked(CheckResult {
+                    basis: basis.into(),
+                    detail: String::new(),
+                    components: vec![CheckComponent {
+                        kind: CheckKind::Bending,
+                        ratio,
+                        detail: String::new(),
+                    }],
+                }),
+            });
+        }
+        let before = bytes(&app.core.scoped.results);
+        app.open_member_check_evidence(elem, xi);
+        let lines = &app.ui.scoped.result_evidence.as_ref().unwrap().lines;
+        assert!(lines.iter().any(|line| line.starts_with("支配ケース: ")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.contains("材軸位置全体: 未検定")));
+        assert_eq!(bytes(&app.core.scoped.results), before);
+
+        app.core.scoped.results.as_mut().unwrap().member_checks[0]
+            .positions
+            .push(PositionCheck {
+                xi,
+                outcome: CheckOutcome::Skipped {
+                    reason: "長期たわみ未算定（部材集中荷重は対象外です）".into(),
+                },
+            });
+        assert_eq!(
+            app.member_check_positions(Some(elem))
+                .iter()
+                .filter(|(_, pos)| *pos == xi)
+                .count(),
+            1
+        );
+        let before = bytes(&app.core.scoped.results);
+        app.open_member_check_evidence(elem, xi);
+        let lines = app
+            .ui
+            .scoped
+            .result_evidence
+            .as_ref()
+            .unwrap()
+            .lines
+            .join("\n");
+        assert!(
+            lines.contains("0.6000 / OK / 式名・根拠: RC梁曲げ"),
+            "{lines}"
+        );
+        assert!(
+            lines.contains("0.4000 / OK / 式名・根拠: PCa水平接合面"),
+            "{lines}"
+        );
+        assert!(
+            lines.contains("長期たわみ未算定（部材集中荷重は対象外です）"),
+            "{lines}"
+        );
+        assert!(lines.contains("材軸位置全体: 未検定の項目あり"), "{lines}");
+        assert!(lines.contains("支配ケース: 未検定のため未確定"), "{lines}");
+        assert_eq!(bytes(&app.core.scoped.results), before);
+    }
+
     #[test]
     fn same_position_partial_ng_remains_visible_in_normal_table_and_common_roots() {
         use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};

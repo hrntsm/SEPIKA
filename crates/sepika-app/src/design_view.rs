@@ -167,7 +167,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     app.result_origin_ui(ui, crate::app::references::ResultInputKey::Design);
     ui.collapsing("保持された検定結果の位置・根拠（履歴を含む）", |ui| {
         let recorded_model = app.calculation_snapshot(&crate::app::references::ResultInputKey::Design).ok().map(|(_, model)| model);
-        let positions: Vec<_> = app.core.scoped.results.as_ref().map(|bundle| bundle.member_checks.iter().flat_map(|member| member.positions.iter().map(move |p| (member.elem, p.xi))).collect()).unwrap_or_default();
+        let positions = app.member_check_positions(None);
         if positions.is_empty() { ui.label("主架構検定: 未検定・結果なし。計算失敗・入力不備の理由はログで確認してください。"); }
         for (elem, position) in positions {
             let section = recorded_model.as_ref().and_then(|model| model.element(elem).and_then(|member| member.section).and_then(|id| model.section(id))).map_or("取得不能", |section| section.name.as_str());

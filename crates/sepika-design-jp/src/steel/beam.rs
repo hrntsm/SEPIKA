@@ -189,19 +189,6 @@ pub(crate) fn check_beam(
         tau_y, tau_z, ratio_vy, ratio_vz
     );
 
-    let mut detail = super::lateral_bracing::UNCONFIRMED_DETAIL.to_string();
-    if let Some(s) = steel_beam_deflection(ctx, sec, mat) {
-        let ratio_str = if s.abs() > 1e-9 {
-            format!("1/{:.0}", ctx.length / s.abs())
-        } else {
-            "1/∞".to_string()
-        };
-        if !detail.is_empty() {
-            detail.push_str(", ");
-        }
-        detail.push_str(&format!("たわみS={:.4} mm (S/l={})", s, ratio_str));
-    }
-
     let ratio_bending = ratio_comb.max(ratio_my).max(ratio_mz).max(mises_ratio);
     let ratio_shear = if shape == ShapeCategory::Pipe {
         ratio_vy.max(ratio_vz)
@@ -223,42 +210,9 @@ pub(crate) fn check_beam(
 
     Ok(CheckResult {
         basis,
-        detail,
+        detail: super::lateral_bracing::UNCONFIRMED_DETAIL.to_string(),
         components,
     })
-}
-
-/// 大梁のたわみ S [mm] を求める（たわみの検定、長期のみ）。
-///
-/// `S = (5·M0·l²)/(48·E·I) − ((ML+MR)·l²)/(16·E·I)`
-/// （`M0 = |Mc| + (|ML| + |MR|) / 2`、`l = DesignCtx.length`、
-/// `E = Material.young`、`I = Section.iy`）。
-/// 変形制限による合否判定は行わず、S の算定値を情報として出力するのみ。
-///
-/// `end_moments_z` または `mid_moment_z` が `None`、`term` が長期以外、
-/// あるいは `length <= 0` の場合は `None`（算定省略）。
-fn steel_beam_deflection(ctx: &DesignCtx, sec: &Section, mat: &Material) -> Option<f64> {
-    if ctx.term != LoadTerm::Long {
-        return None;
-    }
-    let (m_i, m_j) = ctx.end_moments_z?;
-    let mc = ctx.mid_moment_z?;
-    let l = ctx.length;
-    if l <= 1e-9 {
-        return None;
-    }
-    let e = mat.young;
-    let i = sec.iy;
-    if e <= 1e-9 || i <= 1e-9 {
-        return None;
-    }
-
-    let m_l = m_i.abs();
-    let m_r = m_j.abs();
-    let m0 = mc.abs() + (m_l + m_r) / 2.0;
-
-    let s = (5.0 * m0 * l * l) / (48.0 * e * i) - ((m_l + m_r) * l * l) / (16.0 * e * i);
-    Some(s)
 }
 
 #[cfg(test)]
@@ -267,7 +221,6 @@ mod tests {
     use crate::steel::test_support::{h_section, mat, rect_section};
     use crate::steel::SteelDesign;
     use crate::{DesignCheck, MemberKind};
-    use sepika_core::ids::{MaterialId, SectionId};
 
     /// Bending の detail に "組合せ比=" が含まれ、Shear の detail には
     /// 含まれない。逆に Shear 固有の "Vy比=" は Bending に含まれない。
@@ -1351,148 +1304,6 @@ mod tests {
             crate::full_detail(&result).contains("柱間全長・端条件未確認"),
             "detail={}",
             crate::full_detail(&result)
-        );
-    }
-
-    /// 等分布荷重 w [N/mm] の単純梁相当（端部モーメント無し）を
-    /// M0=Mc=wl²/8 として与えると、標準公式 5wl⁴/(384EI) と一致する。
-    #[test]
-    fn test_deflection_matches_uniform_load_formula() {
-        let w = 10.0;
-        let l = 6000.0;
-        let e = 205_000.0;
-        let i = 5.0e7;
-        let mc = w * l * l / 8.0;
-
-        let sec = Section {
-            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "dummy".to_string(),
-            area: 1.0,
-            iy: i,
-            iz: 1.0,
-            j: 0.0,
-            depth: 0.0,
-            width: 0.0,
-            as_y: 0.0,
-            as_z: 0.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        };
-        let material = mat("SN400");
-        let material = Material {
-            concrete_class: Default::default(),
-            young: e,
-            ..material
-        };
-        let ctx = DesignCtx {
-            term: LoadTerm::Long,
-            kind: MemberKind::Girder,
-            length: l,
-            end_moments_z: Some((0.0, 0.0)),
-            mid_moment_z: Some(mc),
-            ..Default::default()
-        };
-        let s = steel_beam_deflection(&ctx, &sec, &material).unwrap();
-        let expected = 5.0 * w * l.powi(4) / (384.0 * e * i);
-        assert!(
-            (s - expected).abs() / expected.abs() < 1e-9,
-            "s={} expected={}",
-            s,
-            expected
-        );
-    }
-
-    /// 短期（term=Short）ではたわみ算定は省略される（None）。
-    #[test]
-    fn test_deflection_none_for_short_term() {
-        let sec = Section {
-            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "dummy".to_string(),
-            area: 1.0,
-            iy: 5.0e7,
-            iz: 1.0,
-            j: 0.0,
-            depth: 0.0,
-            width: 0.0,
-            as_y: 0.0,
-            as_z: 0.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        };
-        let material = mat("SN400");
-        let ctx = DesignCtx {
-            term: LoadTerm::Short,
-            kind: MemberKind::Girder,
-            length: 6000.0,
-            end_moments_z: Some((1e6, 1e6)),
-            mid_moment_z: Some(2e6),
-            ..Default::default()
-        };
-        assert!(steel_beam_deflection(&ctx, &sec, &material).is_none());
-    }
-
-    /// 梁検定 detail に短期ではたわみ出力がないこと（長期では出力されること）
-    /// を確認する。
-    #[test]
-    fn test_beam_check_detail_deflection_only_for_long_term() {
-        let sec = h_section(400.0, 200.0, 10.0, 15.0);
-        let mat_v = mat("SN400");
-        let forces = MemberForcesAt {
-            pos: 0.5,
-            n: 0.0,
-            qy: 0.0,
-            qz: 0.0,
-            my: 0.0,
-            mz: 1e7,
-        };
-        let ctx_long = DesignCtx {
-            term: LoadTerm::Long,
-            kind: MemberKind::Girder,
-            length: 6000.0,
-            end_moments_z: Some((5e6, 5e6)),
-            mid_moment_z: Some(1e7),
-            ..Default::default()
-        };
-        let result_long = SteelDesign
-            .check(&forces, &sec, &mat_v, &ctx_long)
-            .unwrap_checked();
-        assert!(
-            crate::full_detail(&result_long).contains("たわみS="),
-            "detail={}",
-            crate::full_detail(&result_long)
-        );
-
-        let ctx_short = DesignCtx {
-            term: LoadTerm::Short,
-            kind: MemberKind::Girder,
-            length: 6000.0,
-            end_moments_z: Some((5e6, 5e6)),
-            mid_moment_z: Some(1e7),
-            ..Default::default()
-        };
-        let result_short = SteelDesign
-            .check(&forces, &sec, &mat_v, &ctx_short)
-            .unwrap_checked();
-        assert!(
-            !crate::full_detail(&result_short).contains("たわみS="),
-            "detail={}",
-            crate::full_detail(&result_short)
         );
     }
 }

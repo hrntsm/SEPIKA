@@ -14,17 +14,19 @@
 //! 床設計など app 固有の前処理は呼び出し側で行い、本関数は与えられた
 //! オプションをそのまま検定文脈へ反映する。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::Model;
+use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
 
 use crate::design_position::{design_positions, is_near_design_position};
 use crate::{
-    beam_has_attached_slab, checker_for, BondMethod, CheckOutcome, DesignCheck, DesignCtx,
-    LoadTerm, MemberForcesAt, MemberKind, QdMethod, SeismicQd, SteelFbBasis,
+    beam_has_attached_slab, checker_for, girder_deflection, BondMethod, CheckOutcome, CheckResult,
+    DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind, QdMethod, SeismicQd,
+    SteelFbBasis,
 };
 
 /// 一本部材グループ合成値（断面検定の採用応力上書き用）。
@@ -55,8 +57,8 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 検定する荷重ケース・組合せの既存キー。
     pub wall_case: &'a str,
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
-    /// Noneではモデルの全load_casesの未対応部材荷重を保守的に検査する。
-    pub wall_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    /// None では大梁の長期たわみは未算定とし、壁は全荷重ケースの未対応部材荷重を検査する。
+    pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// RC 短期許容せん断力で損傷制御式（2/3·α）を使うか。
     pub rc_damage_control: bool,
     /// RC 梁付着検定の方式（既定は 1999）。
@@ -83,6 +85,8 @@ pub struct MemberDesignCheckReport {
         ElemId,
         crate::steel::lateral_bracing::LateralBracingReference,
     )>,
+    /// 鋼大梁の長期たわみの参考値または理由。検定比・合否には含めない。
+    pub steel_deflection_references: Vec<(ElemId, String)>,
     /// 節点単位検定（柱梁接合部・パネルゾーン・冷間成形耐力比）。
     pub joint_checks: Vec<(NodeId, String, CheckOutcome)>,
     /// 元壁版・生成要素・荷重キー・検定種別ごとの壁検定。
@@ -95,9 +99,13 @@ impl MemberDesignCheckReport {
         let skipped = || CheckOutcome::Skipped {
             reason: reason.into(),
         };
+        for (_, detail) in &mut self.steel_deflection_references {
+            *detail = format!("たわみ参考 未算定（{reason}）");
+        }
         for (_, _, outcome) in &mut self.member_checks {
-            if matches!(outcome, CheckOutcome::Checked(_)) {
-                *outcome = skipped();
+            match outcome {
+                CheckOutcome::Checked(_) => *outcome = skipped(),
+                CheckOutcome::Skipped { reason: prior } => prior.push_str(&format!("。{reason}")),
             }
         }
         for (_, _, outcome) in &mut self.joint_checks {
@@ -166,7 +174,7 @@ pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
 /// 部材内力に対する許容応力度検定を一括実行する。
 ///
 /// 部材ループ（DesignCtx 組み立て → 危険断面位置での検定）のほか、
-/// PCa 水平接合面検定と節点単位検定も含む。床の小梁・スラブ設計は
+/// 大梁の長期たわみ、PCa 水平接合面検定と節点単位検定も含む。床の小梁・スラブ設計は
 /// 呼び出し側（`sepika-app`）の責務とする。鋼材入力不備は対象ID付きエラー。
 pub fn run_member_design_checks(
     model: &Model,
@@ -194,6 +202,9 @@ pub fn run_member_design_checks(
     let column_k_index = sepika_core::adjacency::NodeAdjacency::build(model);
     let mut member_checks: Vec<(ElemId, f64, CheckOutcome)> = Vec::new();
     let mut lateral_bracing_references = Vec::new();
+    let mut steel_deflection_references = Vec::new();
+    let mut standalone_deflection_checks = Vec::new();
+    let grouped_girders: HashSet<_> = model.girder_groups.iter().flatten().copied().collect();
 
     for (elem_id, mf) in member_forces {
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
@@ -435,6 +446,7 @@ pub fn run_member_design_checks(
         let positions = design_positions(elem, model, length);
         let brb_long = options.term == LoadTerm::Long;
 
+        let first_row = member_checks.len();
         for (pos, forces) in &mf.at {
             if !is_near_design_position(*pos, &positions) {
                 continue;
@@ -528,6 +540,78 @@ pub fn run_member_design_checks(
             }
             member_checks.push((*elem_id, *pos, outcome));
         }
+
+        let rc_girder = structure == StructureKind::Rc
+            && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
+        if !brb_long
+            || brb.is_some()
+            || kind != MemberKind::Girder
+            || !(structure == StructureKind::S || rc_girder)
+        {
+            continue;
+        }
+        let deflection = if group.is_some() || grouped_girders.contains(elem_id) {
+            Err("一本部材のたわみは対象外です".into())
+        } else {
+            girder_deflection::maximum(model, elem, sec, mat, mf, options.load_terms)
+        };
+        if structure == StructureKind::S {
+            let detail = match deflection {
+                Ok(value) => value.steel_detail(),
+                Err(reason) => format!("たわみ参考 未算定（{reason}）"),
+            };
+            let nearest = member_checks[first_row..]
+                .iter_mut()
+                .min_by(|(_, a, _), (_, b, _)| (a - 0.5).abs().total_cmp(&(b - 0.5).abs()))
+                .map(|(_, _, outcome)| outcome);
+            match nearest {
+                Some(CheckOutcome::Checked(result)) => {
+                    result.detail.push_str(&format!(", {detail}"))
+                }
+                Some(CheckOutcome::Skipped { reason }) => reason.push_str(&format!("。{detail}")),
+                None => {}
+            }
+            steel_deflection_references.push((*elem_id, detail));
+        } else {
+            let center = member_checks[first_row..]
+                .iter_mut()
+                .find(|(_, pos, _)| *pos == 0.5)
+                .map(|(_, _, outcome)| outcome);
+            let component = deflection.and_then(|value| {
+                value
+                    .rc_component()
+                    .ok_or_else(|| "検定比を有限な数値で算定できません".into())
+            });
+            match (component, center) {
+                (Ok(component), Some(CheckOutcome::Checked(result))) => {
+                    result.components.push(component)
+                }
+                (Ok(component), _) => standalone_deflection_checks.push((
+                    *elem_id,
+                    0.5,
+                    CheckOutcome::Checked(CheckResult {
+                        basis: "RC大梁の長期たわみ".into(),
+                        detail: String::new(),
+                        components: vec![component],
+                    }),
+                )),
+                (
+                    Err(reason),
+                    Some(CheckOutcome::Skipped {
+                        reason: strength_reason,
+                    }),
+                ) => {
+                    strength_reason.push_str(&format!("。長期たわみ未算定（{reason}）"));
+                }
+                (Err(reason), _) => standalone_deflection_checks.push((
+                    *elem_id,
+                    0.5,
+                    CheckOutcome::Skipped {
+                        reason: format!("長期たわみ未算定（{reason}）"),
+                    },
+                )),
+            }
+        }
     }
 
     let mf_slices: Vec<(ElemId, crate::joint_wiring::ForcesAt)> = member_forces
@@ -547,6 +631,9 @@ pub fn run_member_design_checks(
         options.term == LoadTerm::Long,
     ));
 
+    // 同じ位置の既存行を先に置き、たわみ算定可否で比較時の順序を変えない。
+    member_checks.extend(standalone_deflection_checks);
+
     let joint_checks = crate::joint_wiring::collect_joint_checks_impl(
         model,
         &mf_slices,
@@ -562,11 +649,12 @@ pub fn run_member_design_checks(
         options.term,
         options.wall_index,
         options.wall_case,
-        options.wall_load_terms,
+        options.load_terms,
     );
     Ok(MemberDesignCheckReport {
         member_checks,
         lateral_bracing_references,
+        steel_deflection_references,
         joint_checks,
         wall_checks,
     })

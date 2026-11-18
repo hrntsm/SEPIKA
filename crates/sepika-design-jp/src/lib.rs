@@ -16,6 +16,7 @@ pub mod cft;
 pub mod design_position;
 pub mod floor;
 pub mod floor_bolt;
+mod girder_deflection;
 pub mod girder_group;
 /// 免震支承材のマルチシアスプリング低減率・摩擦力（各免震部材指針）。
 pub mod isolator;
@@ -331,7 +332,7 @@ pub struct DesignCtx {
     pub kind: MemberKind,
     /// 部材長 `[mm]`。座屈長さ lk・横座屈長さ lb の既定値として用いる。
     pub length: f64,
-    /// 剛域（フェイス）控除後の内法長 `[mm]`。RC 梁の長期たわみスパン L に用いる。
+    /// フェース控除後の内法長 `[mm]`。
     /// None のときは [`Self::length`]（幾何長）で代替する。
     pub clear_length: Option<f64>,
     /// 圧縮フランジの支点間距離（横座屈長さ）lb `[mm]`。None なら `length`。
@@ -357,12 +358,10 @@ pub struct DesignCtx {
     /// RC 梁付着検定の方式（既定は 1999）。
     pub bond_method: BondMethod,
     /// 部材両端の強軸まわり曲げモーメント `(M_i端, M_j端)` [N·mm]（符号付き）。
-    /// 鋼の横座屈修正係数 C（複曲率正/単曲率負）とたわみ検定に用いる。
-    /// None の場合は C=1.0（安全側）となり、たわみ検定は省略される。
+    /// 鋼の横座屈修正係数 C と RC 梁の構造規定に用いる。None の場合は C=1.0。
     pub end_moments_z: Option<(f64, f64)>,
     /// 部材中央（pos=0.5）の強軸まわり曲げモーメント [N·mm]（符号付き）。
-    /// たわみ検定の単純梁中央モーメント M0 の復元と、横座屈 C 係数の
-    /// 「中央部の曲げモーメントが端部より大きい場合 C=1.0」判定に用いる。
+    /// 鋼の横座屈修正係数 C と RC 梁の構造規定に用いる。
     pub mid_moment_z: Option<f64>,
     /// 地震時短期の設計用せん断力 QD = min(QD1, QD2) の算定文脈（RC）。
     /// None の場合は解析せん断力をそのまま用いる。
@@ -525,6 +524,8 @@ pub(crate) fn full_detail(cr: &CheckResult) -> String {
 }
 
 pub trait DesignCheck {
+    /// 与えられた位置の断面を検定する。荷重ケースと支持条件を要する大梁の
+    /// 長期たわみは [`run_member_design_checks`] で扱う。
     fn check(
         &self,
         forces: &MemberForcesAt,
