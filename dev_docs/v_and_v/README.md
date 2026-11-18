@@ -436,7 +436,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 ## 仕口パネル耐力式の原典調査（#723）
 
-[原典調査と要素→証拠索引](仕口パネル耐力式_Issue723_原典調査.md)に、2025解説書第2版第1刷の原画像・N/A/Fと現行降伏式の対応、全塑性式との区別、CFT調査#888との境界を記録する。状態は🔶。指定原典の関連節は閲覧済みだが、別原典による式・適用条件の採否は未確定で#723は未完了。
+[原典調査・独立算術と要素→証拠索引](仕口パネル耐力式_Issue723_原典調査.md)に、鋼構造接合部設計指針第4版第3刷§5.1–5.3・表C5.1の原画像による降伏/全塑性式の区別、上下柱平均と現行軸力の差、断面・詳細の限界を記録する。状態は🔶。S造正方形等厚の形状係数差は[#1428](https://github.com/hrntsm/SEPIKA/issues/1428)、円形の弾性剛性差は[#1429](https://github.com/hrntsm/SEPIKA/issues/1429)で追跡。CFT専用原典の採否・実験Validationは未完了。
 
 ## 静的仕口パネルの実断面積（#892）
 
@@ -485,7 +485,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [鉄骨材料と許容応力度_Issue879_原典照合.md](鉄骨材料と許容応力度_Issue879_原典照合.md) | 原典指定範囲・F/厚さ境界・ft/fs・fc/Λ・細長比上限 | 🔶（限定原典照合と入口Verification。圧縮式の危険側疑い・上限修正・別原典とValidationは残る） |
 | [鉄骨柱脚接合構造細則_Issue878_原典照合.md](鉄骨柱脚接合構造細則_Issue878_原典照合.md) | 2025年第2版の柱脚・接合詳細・ブレース・防火被覆の現行範囲 | 🔶（重点原画像と有限Verification。詳細専用検定未対応・法令適用/Validation未確認） |
 | [仕口パネル静的実断面積_Issue892_確認記録.md](仕口パネル静的実断面積_Issue892_確認記録.md) | S/CFT静的パネルの実断面積・数値境界・保存検定失効 | 🔶（算術Verification、原典採用・Validationは未確認） |
-| [仕口パネル耐力式_Issue723_原典調査.md](仕口パネル耐力式_Issue723_原典調査.md) | 2025解説書の直接記載と別原典の境界、N/A/F・降伏/全塑性の採否 | 🔶（関連原画像閲覧済み。式全体の原典適合・採否未確定） |
+| [仕口パネル耐力式_Issue723_原典調査.md](仕口パネル耐力式_Issue723_原典調査.md) | 指針第4版第3刷・2025解説書の原画像、N/A/F・降伏/全塑性の比較と独立算術 | 🔶（標準S造の差を確認。CFT専用原典・採否未確定） |
 | [コンクリート長期せん断_Issue922_是正記録.md](コンクリート長期せん断_Issue922_是正記録.md) | 長期告示値の是正、RC/SRC長短期の独立境界と保存旧検定失効 | 🔶（限定Verification、軽量係数・全規準・Validation未） |
 | [RC材料構造細則_Issue881_原典照合.md](RC材料構造細則_Issue881_原典照合.md) | 2025年第2版のRC材料表・柱細則、独立数値と径/材種境界 | 🔶（指定頁原画像・材料関数Verification。相違の是正、別原典・柱条件・専門家サインオフ・Validation未） |
 | [RC断面設計n_Issue944_適用照合.md](RC断面設計n_Issue944_適用照合.md) | 公開改定案12条の区分・境界・用途と刊行原典の未確認範囲 | 🔶（Fc≤60の公開案部分照合。刊行版・高Fc・全材料/SRC適用・Validation未） |
@@ -784,7 +784,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 916 | CFT充填コンクリートの法定Fc下限 | sepika-design-jp / sepika-core / sepika-app | cft/mod.rs・result_contract.rs・app/result_contract_tests.rs | [独立境界と製品入口](CFT充填Fc下限_Issue916_2026-10.md#独立境界と製品入口) | 公開／App／保存 | 🔶（下限Verification、手動GUI・Validation未） |
 | 1400 | CFT柱の座屈長さ | sepika-design-jp / sepika-app / sepika-mcp | tests/cft_column_buckling.rs・app/cft_column_buckling_tests.rs・job/design_check.rs | [原典・独立有限例・回帰](CFT柱の座屈長さ_Issue1400_2026-11.md) | 公開／App／MCP／保存 | 🔶（境界条件と採用式への入力のVerification。耐力式全体のValidationは対象外） |
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
-| 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像と現行式の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、新規数値試験なし | 原典 | 🔶（N/A/F・式の採否未確定、Validation未） |
+| 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像・現行式と独立数値の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、既存回帰 | 原典・有限Verification | 🔶（S造形状係数#1428、CFT採否・Validation未） |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
 | 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_and_dof_equilibrium_match_closed_form`（同じ解でM=K·γと釣合い残差ゼロを別assertで確認）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
 | 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
