@@ -301,6 +301,42 @@ mod tests {
     }
 
     #[test]
+    fn cft_column_mcp_reports_missing_axis_for_case_and_combination() {
+        use crate::tests::cft_column_buckling_input::{cantilever, direct_lengths};
+        let mut model = cantilever(true, 100_000.0);
+        for combo in [false, true] {
+            model.steel_design_attrs = vec![direct_lengths(ElemId(0), None, Some(6000.0))];
+            let run = |model: &Model| {
+                let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                    model,
+                    &JobParams {
+                        load_case: (!combo).then_some(0),
+                        load_combination: combo.then_some(0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap() else {
+                    panic!()
+                };
+                summary
+            };
+            let summary = run(&model);
+            let skipped = summary["member_skipped"].as_array().unwrap();
+            assert_eq!(skipped.len(), 3, "{summary}");
+            for row in skipped {
+                assert_eq!(row["elem"], 0);
+                assert!(row["reason"].as_str().unwrap().contains("強軸の座屈長さ"));
+            }
+            assert_eq!(summary["all_members_checked_and_ok"], false);
+            model.steel_design_attrs[0].lk_y_direct = Some(6000.0);
+            let summary = run(&model);
+            assert_eq!(summary["n_checks"], 3, "{summary}");
+            assert_eq!(summary["n_skipped"], 0, "{summary}");
+            assert_eq!(summary["all_members_checked_and_ok"], true);
+        }
+    }
+
+    #[test]
     fn column_k_mcp_keeps_both_columns_unchecked_for_case_and_combination() {
         let mut model = steel_column_k_input::portal(1.0);
         model

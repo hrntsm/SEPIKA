@@ -795,6 +795,20 @@ fn test_ultimate_check_pushover_demand() {
     );
 }
 
+pub(super) fn cft_test_direct_lengths() -> Vec<sepika_core::model::SteelDesignAttr> {
+    vec![sepika_core::model::SteelDesignAttr {
+        elem: ElemId(0),
+        joint_flange_loss: 0.0,
+        joint_web_loss: 0.0,
+        scallop_web_loss: 0.0,
+        lb_direct: None,
+        lateral_brace_count: None,
+        lk_y_direct: Some(3000.0),
+        lk_z_direct: Some(3000.0),
+        c_direct: None,
+    }]
+}
+
 /// CFT 角形柱 1 本のモデルで軸終局検定ドライバが Ncu/Ntu・軸余裕度を算定する。
 #[test]
 fn test_collect_cft_ultimate_checks() {
@@ -806,7 +820,7 @@ fn test_collect_cft_ultimate_checks() {
         horizontal_thick: 12.0,
     };
     let sec = Section {
-        frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
+        frame_use: Some(sepika_core::model::FrameSectionUse::Column),
         id: SectionId(0),
         name: "CFT400".into(),
         area: cft_shape.calc_area(),
@@ -861,6 +875,7 @@ fn test_collect_cft_ultimate_checks() {
         sections: vec![sec],
         materials: vec![mat, steel],
         elements: vec![frame_element(0, 0, 0, 1)],
+        steel_design_attrs: cft_test_direct_lengths(),
         ..Default::default()
     };
     let axial = vec![(ElemId(0), 3_000_000.0)];

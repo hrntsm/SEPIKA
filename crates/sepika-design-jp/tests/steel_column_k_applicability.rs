@@ -42,7 +42,7 @@ fn column_k_public_analysis_requires_both_direct_lengths() {
 }
 
 #[test]
-fn column_k_cft_keeps_existing_auto_length_even_with_primary_steel_material() {
+fn column_k_cft_does_not_use_the_available_automatic_length_with_primary_steel_material() {
     let mut model = input::portal(1.0);
     model.materials[0].fc = Some(24.0);
     model.sections[0].steel_material = Some(sepika_core::ids::MaterialId(0));
@@ -56,35 +56,31 @@ fn column_k_cft_keeps_existing_auto_length_even_with_primary_steel_material() {
     let solved =
         sepika_solver::statics::linear::linear_static_once(&model, sepika_core::ids::LoadCaseId(0))
             .unwrap();
-    let check = |model: &sepika_core::model::Model| {
-        let report = run_member_design_checks(
-            model,
-            &solved.member_forces,
-            &solved.panel_moments,
-            &MemberDesignCheckOptions::default(),
+    let adjacency = sepika_core::adjacency::NodeAdjacency::build(&model);
+    assert!(
+        sepika_design_jp::steel::buckling::steel_column_k_axes_with_index(
+            &model,
+            &adjacency,
+            &model.elements[0],
         )
-        .unwrap();
-        report
-            .member_checks
-            .into_iter()
-            .filter(|(id, _, _)| id.0 < 2)
-            .map(|(_, _, outcome)| {
-                let CheckOutcome::Checked(result) = outcome else {
-                    panic!("{outcome:?}")
-                };
-                result.ratio()
-            })
-            .collect::<Vec<_>>()
-    };
-    let automatic = check(&model);
-    assert_eq!(automatic.len(), 6);
-    for attr in &mut model.steel_design_attrs {
-        attr.lk_y_direct = Some(5708.907121538976);
-    }
-    let direct = check(&model);
-    for (a, b) in automatic.iter().zip(direct) {
-        assert!((a - b).abs() < 1e-12, "{a} {b}");
-    }
+        .is_some()
+    );
+    let report = run_member_design_checks(
+        &model,
+        &solved.member_forces,
+        &solved.panel_moments,
+        &MemberDesignCheckOptions::default(),
+    )
+    .unwrap();
+    let columns: Vec<_> = report
+        .member_checks
+        .iter()
+        .filter(|(id, _, _)| id.0 < 2)
+        .collect();
+    assert_eq!(columns.len(), 6);
+    assert!(columns.iter().all(|(_, _, outcome)| matches!(outcome,
+        CheckOutcome::Skipped { reason } if reason.contains("強軸の座屈長さを有限な正値で直接指定")
+    )));
 }
 
 #[test]

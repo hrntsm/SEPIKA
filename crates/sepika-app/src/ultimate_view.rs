@@ -289,7 +289,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     ui.add_space(4.0);
     match app.compute_cft_ultimate_checks() {
         Err(msg) => {
-            ui.colored_label(crate::theme::UI_MUTED, &msg);
+            ui.colored_label(crate::theme::UI_MUTED, format!("未検定（{msg}）"));
         }
         Ok(checks) => {
             let ng = checks.iter().filter(|c| !c.ok).count();
@@ -307,10 +307,10 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 "cft_ultimate_checks",
                 &[
                     Col::id_named("部材"),
-                    Col::label("分類"),
+                    Col::label("軸圧縮の支配分類"),
                     Col::num("Ncu[kN]"),
                     Col::num("Ntu[kN]"),
-                    Col::num("Mu(N-M)[kN·m]"),
+                    Col::num("強軸Mu(N-M)[kN·m]"),
                     Col::num("N[kN]"),
                     Col::num("軸余裕度"),
                     Col::label("判定"),
@@ -363,7 +363,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             ui.colored_label(
                 crate::theme::UI_MUTED,
                 format!("Ncu=軸圧縮終局耐力（短柱=cNc+(1+ξ)sNc、長柱=座屈耐力、中柱=線形補間）、\
-                 Ntu=軸引張終局耐力（sA·Fy）。N は採用需要の軸力（圧縮正）。{source}。座屈長さは幾何長（K=1）。"),
+                 Ntu=軸引張終局耐力（sA·Fy）。N は採用需要の軸力（圧縮正）。{source}。座屈長さは両軸の直接入力を用います。"),
             );
         }
     }

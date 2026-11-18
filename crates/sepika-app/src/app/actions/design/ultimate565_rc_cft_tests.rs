@@ -92,6 +92,15 @@ fn column(cft: bool) -> App {
         ],
     }];
     model.ultimate_gravity_combination = Some(0);
+    if cft {
+        model.steel_design_attrs = vec![
+            crate::app::cft_column_buckling_tests::input::direct_lengths(
+                ElemId(0),
+                Some(3000.0),
+                Some(3000.0),
+            ),
+        ];
+    }
     let mut app = App::default();
     app.load_model(model);
     app.core.analysis_cfg.threads = 1;

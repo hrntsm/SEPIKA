@@ -18,6 +18,7 @@ use std::collections::HashMap;
 
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::Model;
+use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
 
 use crate::design_position::{design_positions, is_near_design_position};
@@ -265,10 +266,10 @@ pub fn run_member_design_checks(
             .iter()
             .find(|a| a.elem == *elem_id)
             .cloned();
+        let structure = structure_kind_of(Some(sec), Some(mat.category));
         if kind == MemberKind::Column
             && mat.category == sepika_core::model::MaterialCategory::Steel
-            && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
-                != sepika_core::structure_kind::StructureKind::S
+            && !matches!(structure, StructureKind::S | StructureKind::Cft)
             && !steel_attr
                 .as_ref()
                 .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
@@ -286,10 +287,9 @@ pub fn run_member_design_checks(
                 continue;
             }
         }
-        if kind == MemberKind::Column
-            && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
-                == sepika_core::structure_kind::StructureKind::S
-        {
+        let buckling_reason = if structure == StructureKind::Cft {
+            crate::cft::direct_column_buckling_lengths(*elem_id, steel_attr.as_ref()).err()
+        } else if kind == MemberKind::Column && structure == StructureKind::S {
             let lengths = steel_attr
                 .as_ref()
                 .map(|a| (a.lk_y_direct, a.lk_z_direct))
@@ -299,15 +299,18 @@ pub fn run_member_design_checks(
                 .filter(|(_, length)| !length.is_some_and(|v| v.is_finite() && v >= 0.0))
                 .map(|(axis, _)| axis)
                 .collect();
-            if !unresolved.is_empty() {
+            (!unresolved.is_empty()).then(|| {
                 let detail = crate::steel::buckling::eccentric_column_k_reason(model, elem)
                     .unwrap_or_else(|| "支点・柱梁端と梁遠端の回転拘束、層内軸力分布・同時座屈に対する自動Kの設計適用条件が未確定です".into());
-                let reason = format!("柱 ID {}: {}。{}の座屈長さを有限な非負値で直接指定してください（0は当該軸の座屈を無視する指定）", elem.id.0, detail, unresolved.join("・"));
-                let positions = design_positions(elem, model, length);
-                for (pos, _) in &mf.at {
-                    if !is_near_design_position(*pos, &positions) {
-                        continue;
-                    }
+                format!("柱 ID {}: {}。{}の座屈長さを有限な非負値で直接指定してください（0は当該軸の座屈を無視する指定）", elem.id.0, detail, unresolved.join("・"))
+            })
+        } else {
+            None
+        };
+        if let Some(reason) = buckling_reason {
+            let positions = design_positions(elem, model, length);
+            for (pos, _) in &mf.at {
+                if is_near_design_position(*pos, &positions) {
                     member_checks.push((
                         *elem_id,
                         *pos,
@@ -316,12 +319,11 @@ pub fn run_member_design_checks(
                         },
                     ));
                 }
-                continue;
             }
+            continue;
         }
         let (lk_y_auto, lk_z_auto) = if kind == MemberKind::Column
-            && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
-                != sepika_core::structure_kind::StructureKind::S
+            && !matches!(structure, StructureKind::S | StructureKind::Cft)
         {
             match crate::steel::buckling::steel_column_k_axes_with_index(
                 model,
@@ -427,9 +429,7 @@ pub fn run_member_design_checks(
             steel_fb_basis: options.steel_fb_basis,
         };
 
-        let checker: Box<dyn DesignCheck> = checker_for(
-            sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
-        );
+        let checker: Box<dyn DesignCheck> = checker_for(structure);
 
         let positions = design_positions(elem, model, length);
         let brb_long = options.term == LoadTerm::Long;

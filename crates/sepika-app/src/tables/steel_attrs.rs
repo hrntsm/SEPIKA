@@ -2,9 +2,7 @@
 //! 継手フランジ／ウェブ欠損率・スカラップ欠損率、横座屈長さ lb の直接入力、
 //! 等間隔横補剛本数、座屈長さ lk_y/lk_z の直接入力、横座屈修正係数 C の
 //! 直接入力）の編集 UI。
-//! 対象は `ElementKind::Beam` の部材のみ（本ソフトでは柱も梁もブレースも
-//! `ElementKind::Beam` で表現するフレーム部材のため、実質すべての一般部材が
-//! 対象。座屈長さ lk_y/lk_z の直接入力は柱以外の部材にも有効）。
+//! 対象は `ElementKind::Beam` の部材と、`Fiber`・`MultiSpring` の CFT 柱。
 //! 編集は `sepika_edit::{SetSteelDesignAttr, RemoveSteelDesignAttr}` 経由
 //! （undo 対応）。空（すべて既定値）を適用した場合は削除として扱う
 //! （[`SteelDesignAttr::is_empty`]）。
@@ -14,7 +12,7 @@
 
 use crate::app::App;
 use sepika_core::ids::ElemId;
-use sepika_core::model::{ElementKind, SteelDesignAttr};
+use sepika_core::model::{ElementKind, FrameSectionUse, SteelDesignAttr};
 use sepika_edit::{RemoveSteelDesignAttr, SetSteelDesignAttr};
 
 /// S造検定属性フォームのドラフト状態（GUI 専用）。
@@ -40,9 +38,9 @@ pub struct SteelAttrDraft {
     pub lb_end: String,
     /// 等間隔横補剛の本数の入力バッファ（空欄=なし）。
     pub lateral_brace_count: String,
-    /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（通常S柱は空欄なら未検定）。
+    /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（通常S柱・CFT柱は空欄なら未検定）。
     pub lk_y_direct: String,
-    /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（通常S柱は空欄なら未検定）。
+    /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（通常S柱・CFT柱は空欄なら未検定）。
     pub lk_z_direct: String,
     /// 横座屈修正係数 C の直接入力（空欄=自動算定）。
     pub c_direct: String,
@@ -55,9 +53,7 @@ impl SteelAttrDraft {
     /// バッファは全項目を上書きする（前の対象の値が残ると、編集していない項目まで
     /// 別部材の値で保存されてしまう）。
     ///
-    /// 表示桁は項目ごとに固定する。欠損率・スカラップは 0.1% 刻み、長さ [mm] は
-    /// 整数、横座屈修正係数 C は 0.01 刻みで、いずれも入力欄の想定精度に合わせる。
-    /// 未設定（`None`）の項目は空欄にする。
+    /// 座屈長さ lk_y/lk_z [mm] は元の値を復元できる桁を保持する。未設定は空欄にする。
     fn sync_from(&mut self, attr: &SteelDesignAttr) {
         self.elem = Some(attr.elem);
         self.synced_for = Some(attr.elem);
@@ -75,14 +71,8 @@ impl SteelAttrDraft {
             .lateral_brace_count
             .map(|n| n.to_string())
             .unwrap_or_default();
-        self.lk_y_direct = attr
-            .lk_y_direct
-            .map(|v| format!("{v:.0}"))
-            .unwrap_or_default();
-        self.lk_z_direct = attr
-            .lk_z_direct
-            .map(|v| format!("{v:.0}"))
-            .unwrap_or_default();
+        self.lk_y_direct = attr.lk_y_direct.map(|v| v.to_string()).unwrap_or_default();
+        self.lk_z_direct = attr.lk_z_direct.map(|v| v.to_string()).unwrap_or_default();
         self.c_direct = attr.c_direct.map(|v| format!("{v:.2}")).unwrap_or_default();
     }
 }
@@ -138,7 +128,7 @@ fn parse_brace_count(s: &str) -> Result<Option<u32>, String> {
 }
 
 /// 座屈長さ lk_y/lk_z の直接入力をパースする。空欄は `None`（未指定）、
-/// 入力があれば正の値を要求する（egui 非依存の純関数）。
+/// 入力があれば有限な正値を要求する。
 fn parse_lk_direct(s: &str, label: &str) -> Result<Option<f64>, String> {
     let s = s.trim();
     if s.is_empty() {
@@ -147,8 +137,10 @@ fn parse_lk_direct(s: &str, label: &str) -> Result<Option<f64>, String> {
     let v: f64 = s
         .parse()
         .map_err(|_| format!("不正な{label}「{s}」: 数値ではありません"))?;
-    if v <= 0.0 {
-        return Err(format!("{label}は正の値で入力してください（空欄=未指定）"));
+    if !v.is_finite() || v <= 0.0 {
+        return Err(format!(
+            "{label}は有限な正の値で入力してください（空欄=未指定）"
+        ));
     }
     Ok(Some(v))
 }
@@ -164,7 +156,7 @@ fn lb_direct_desc(v: Option<(f64, f64, f64)>) -> String {
 /// 座屈長さ lk_y/lk_z 直接入力の表示文字列。
 fn opt_len_desc(v: Option<f64>) -> String {
     match v {
-        Some(x) => format!("{x:.0}"),
+        Some(x) => x.to_string(),
         None => "未指定".to_string(),
     }
 }
@@ -189,17 +181,22 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     ui.label(
         "S造部材の断面検定用属性（継手・スカラップ欠損率、横座屈長さ lb の直接入力、\
          等間隔横補剛本数、座屈長さ lk_y/lk_z の直接入力、横座屈修正係数 C の直接入力）\
-         を設定します。通常S柱はlk_y/lk_zの両軸直接入力が必要で、空欄があれば未検定です。\
+         を設定します。通常S柱・CFT柱はlk_y/lk_zの両軸直接入力が必要で、空欄があれば未検定です。\
          C の直接入力は自動算定（材端モーメント比・上限2.3）より優先されます。",
     );
     ui.separator();
 
-    let target_elems: Vec<ElemId> = app
-        .core
-        .model
+    let model = &app.core.model;
+    let target_elems: Vec<ElemId> = model
         .elements
         .iter()
-        .filter(|e| e.kind == ElementKind::Beam)
+        .filter(|e| match e.kind {
+            ElementKind::Beam => true,
+            ElementKind::Fiber | ElementKind::MultiSpring => model
+                .element_section(e)
+                .is_some_and(|sec| sec.frame_use == Some(FrameSectionUse::Column) && sec.is_cft()),
+            _ => false,
+        })
         .map(|e| e.id)
         .collect();
 
@@ -211,9 +208,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     let mut pending_remove: Option<ElemId> = None;
     let mut pending_edit: Option<SteelDesignAttr> = None;
     if app.core.model.steel_design_attrs.is_empty() {
-        ui.label(
-            "設定済みのS造検定属性はありません（通常S柱は座屈長さの両軸直接入力が必要です）。",
-        );
+        ui.label("設定済みのS造検定属性はありません。");
     } else {
         for attr in &app.core.model.steel_design_attrs {
             ui.horizontal(|ui| {
@@ -363,11 +358,13 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         ui.label("座屈長さ lk_y(強軸)直接入力[mm]:");
         ui.add(
             egui::TextEdit::singleline(&mut app.ui.scoped.steel_attr_draft.lk_y_direct)
+                .id(egui::Id::new("steel_attr_lk_y"))
                 .desired_width(80.0),
         );
         ui.label("lk_z(弱軸)直接入力[mm]:");
         ui.add(
             egui::TextEdit::singleline(&mut app.ui.scoped.steel_attr_draft.lk_z_direct)
+                .id(egui::Id::new("steel_attr_lk_z"))
                 .desired_width(80.0),
         );
     })
@@ -375,6 +372,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     .on_hover_text(
         "通常S柱は両軸とも正の有限値を直接入力してください。空欄があれば未検定です。梁・通常ブレースは未指定なら部材長を用います。",
     );
+    ui.label("CFT柱は両軸に有限な正の座屈長さが必要です。空欄や0があると未検定です。");
 
     ui.horizontal(|ui| {
         ui.label("C 係数直接入力（空欄=自動）:");
@@ -496,6 +494,177 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
 mod tests {
     use super::*;
 
+    fn draw(ctx: &egui::Context, app: &mut App, events: Vec<egui::Event>) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1800.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| steel_attrs_table(ui, app),
+        )
+    }
+
+    fn click(ctx: &egui::Context, app: &mut App, pos: egui::Pos2) {
+        for pressed in [true, false] {
+            draw(
+                ctx,
+                app,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    fn click_text(ctx: &egui::Context, app: &mut App, label: &str) {
+        let output = draw(ctx, app, vec![]);
+        let pos = output
+            .shapes
+            .iter()
+            .rev()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("表示なし: {label}"));
+        click(ctx, app, pos);
+    }
+
+    fn type_length(ctx: &egui::Context, app: &mut App, id: &'static str, text: &str) {
+        draw(ctx, app, vec![]);
+        click(
+            ctx,
+            app,
+            ctx.read_response(egui::Id::new(id)).unwrap().rect.center(),
+        );
+        draw(
+            ctx,
+            app,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+                egui::Event::Text(text.into()),
+            ],
+        );
+    }
+
+    #[test]
+    fn cft_column_fiber_and_multi_spring_edit_and_save_both_axes_at_full_precision() {
+        use crate::app::cft_column_buckling_tests::input;
+
+        for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+            let mut model = input::cantilever(false, 1000.0);
+            model.elements[0].kind = kind;
+            let mut app = App::default();
+            assert!(app.load_model(model));
+            let ctx = egui::Context::default();
+            click_text(&ctx, &mut app, "―");
+            click_text(&ctx, &mut app, "部材#0");
+            type_length(&ctx, &mut app, "steel_attr_lk_y", "4799.9");
+            type_length(&ctx, &mut app, "steel_attr_lk_z", "4800.1");
+            click_text(&ctx, &mut app, "✔ 適用");
+            let attr = input::direct_lengths(ElemId(0), Some(4799.9), Some(4800.1));
+            let expected = std::slice::from_ref(&attr);
+            assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
+
+            let path =
+                std::env::temp_dir().join(format!("sepika-cft-lk-{}.ovika", uuid::Uuid::new_v4()));
+            let reload = |app: &mut App| {
+                app.save_project_to(path.clone());
+                assert!(
+                    app.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    app.core.scoped.last_error
+                );
+                let mut reopened = App::default();
+                reopened.open_project_from(path.clone());
+                assert!(
+                    reopened.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    reopened.core.scoped.last_error
+                );
+                assert_eq!(reopened.core.model.elements[0].kind, kind);
+                reopened
+            };
+            let mut app = reload(&mut app);
+            assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
+            let ctx = egui::Context::default();
+            click_text(&ctx, &mut app, "✏");
+            assert_eq!(app.ui.scoped.steel_attr_draft.lk_y_direct, "4799.9");
+            assert_eq!(app.ui.scoped.steel_attr_draft.lk_z_direct, "4800.1");
+            assert!(draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
+                matches!(&s.shape, egui::Shape::Text(text)
+                    if text.galley.text().contains("lk_y=4799.9 lk_z=4800.1"))
+            }));
+
+            let revision = app.core.scoped.undo.revision();
+            for (field, axis, value) in [
+                ("steel_attr_lk_y", "lk_y", "NaN"),
+                ("steel_attr_lk_z", "lk_z", "inf"),
+            ] {
+                type_length(&ctx, &mut app, field, value);
+                let reason = format!("{axis}の入力エラー: {axis}は有限な正の値");
+                assert!(draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
+                    matches!(&s.shape, egui::Shape::Text(text)
+                        if text.galley.text().contains(&reason))
+                }));
+                click_text(&ctx, &mut app, "✔ 適用");
+                assert_eq!(app.core.scoped.undo.revision(), revision);
+                assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
+                click_text(&ctx, &mut app, "✏");
+            }
+
+            type_length(&ctx, &mut app, "steel_attr_lk_y", "5000.25");
+            click_text(&ctx, &mut app, "✔ 適用");
+            let app = reload(&mut app);
+            assert_eq!(
+                app.core.model.steel_design_attrs,
+                [input::direct_lengths(
+                    ElemId(0),
+                    Some(5000.25),
+                    Some(4800.1)
+                )]
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn cft_column_direct_length_guidance_is_displayed_with_the_input() {
+        let mut app = App::default();
+        app.load_model(crate::app::cft_column_buckling_tests::input::cantilever(
+            false, 1000.0,
+        ));
+        let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            steel_attrs_table(ui, &mut app);
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("CFT柱は両軸に有限な正の座屈長さが必要")
+        )));
+    }
+
     /// 空欄は 0（欠損なし）として扱われること。
     #[test]
     fn test_parse_loss_percent_empty_is_zero() {
@@ -572,12 +741,14 @@ mod tests {
         assert_eq!(parse_lk_direct("3500", "lk_y").unwrap(), Some(3500.0));
     }
 
-    /// 0 以下・数値でない入力はエラーになること。
+    /// 0 以下・非有限・数値でない入力はエラーになること。
     #[test]
     fn test_parse_lk_direct_rejects_non_positive_or_invalid() {
         assert!(parse_lk_direct("0", "lk_y").is_err());
         assert!(parse_lk_direct("-100", "lk_y").is_err());
         assert!(parse_lk_direct("abc", "lk_y").is_err());
+        assert!(parse_lk_direct("NaN", "lk_y").is_err());
+        assert!(parse_lk_direct("inf", "lk_z").is_err());
     }
 
     /// 表示用整形（lb 直接入力・座屈長さ・横補剛本数）が None/Some で

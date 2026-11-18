@@ -18,6 +18,7 @@ fn cft_model() -> sepika_core::model::Model {
     steel.fc = None;
     cft.materials.push(steel);
     cft.sections[0].steel_material = Some(sepika_core::ids::MaterialId(1));
+    cft.steel_design_attrs = super::tests::cft_test_direct_lengths();
     cft
 }
 

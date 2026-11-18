@@ -2,7 +2,7 @@
 //!
 //! 強軸まわり K_y・弱軸まわり K_z を個別に評価する軸別版と、方向を区別しない
 //! 簡略版を持つ。混合構造の部材剛性はヤング係数比で補正される。
-//! 通常S柱の共通検定は本係数を採用せず、両軸の座屈長さ直接指定を要求する。
+//! 通常S柱・CFT柱の共通検定は両軸の座屈長さ直接指定を要求する。
 
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::ids::NodeId;
@@ -196,7 +196,7 @@ pub fn steel_column_k_with_index(
 /// 柱・線材でない場合や幾何を解決できない場合は `None`。
 /// 全部材の強軸剛性を用い、梁の端部結合・剛域・支点境界・梁遠端条件は考慮しない。
 /// 軸別評価は [`steel_column_k_axes_with_index`] を使う。
-/// 適用条件を判定しない数値であり、通常S柱の共通検定は両軸直接指定を要求する。
+/// 適用条件を判定しない数値であり、通常S柱・CFT柱の共通検定は両軸直接指定を要求する。
 pub fn steel_column_k(model: &Model, elem: &ElementData) -> Option<f64> {
     let index = NodeAdjacency::build(model);
     steel_column_k_with_index(model, &index, elem)
@@ -307,7 +307,7 @@ fn g_ratio_axis_at(
 /// `index` は事前に `NodeAdjacency::build(model)` で一度だけ構築し、
 /// 全部材ぶんのループで使い回すこと。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
-/// 適用条件を判定しない数値であり、通常S柱の共通検定は両軸直接指定を要求する。
+/// 適用条件を判定しない数値であり、通常S柱・CFT柱の共通検定は両軸直接指定を要求する。
 pub fn steel_column_k_axes_with_index(
     model: &Model,
     index: &NodeAdjacency,
