@@ -213,7 +213,7 @@ impl App {
                 .unwrap_or_else(|| format!("combo:{idx}")),
             None => "未選択".into(),
         };
-        let wall_load_terms = match self.core.scoped.last_static {
+        let load_terms = match self.core.scoped.last_static {
             Some(StaticKey::Case(key)) => match key {
                 StaticCaseKey::User(id) => Some(vec![(id, 1.0)]),
                 StaticCaseKey::Seismic(dir) => self.seismic_case_id(dir).map(|id| vec![(id, 1.0)]),
@@ -237,7 +237,7 @@ impl App {
                     term: self.core.design_term,
                     wall_index: wall_index.as_ref(),
                     wall_case: &wall_case,
-                    wall_load_terms: wall_load_terms.as_deref(),
+                    load_terms: load_terms.as_deref(),
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,
                     qd_method: self.core.analysis_cfg.qd_method,

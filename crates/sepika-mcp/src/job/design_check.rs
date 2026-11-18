@@ -156,7 +156,7 @@ pub(crate) fn compute_design_check_job(
             term,
             wall_index: wall_index.as_ref(),
             wall_case: &wall_case,
-            wall_load_terms: Some(&terms),
+            load_terms: Some(&terms),
             rc_damage_control: true,
             bond_method: BondMethod::default(),
             qd_method: QdMethod::default(),
@@ -197,6 +197,7 @@ fn assemble_design_check_summary(
     let mut n_ng = 0usize;
     let mut n_skipped = 0usize;
     let mut member_skipped = Vec::new();
+    let mut rc_deflection_checks = Vec::new();
     let mut max_ratio: Option<f64> = None;
 
     for (elem, pos, outcome) in &report.member_checks {
@@ -208,6 +209,15 @@ fn assemble_design_check_summary(
                 }
                 if !cr.components.is_empty() {
                     max_ratio = Some(max_ratio.map_or(cr.ratio(), |r| r.max(cr.ratio())));
+                }
+                for component in cr
+                    .components
+                    .iter()
+                    .filter(|c| c.kind == sepika_design_jp::CheckKind::Deflection)
+                {
+                    rc_deflection_checks.push(serde_json::json!({
+                        "elem": elem.0, "position": pos, "ratio": component.ratio, "detail": component.detail,
+                    }));
                 }
             }
             sepika_design_jp::CheckOutcome::Skipped { reason } => {
@@ -250,6 +260,7 @@ fn assemble_design_check_summary(
     }
     serde_json::json!({
         "lateral_bracing_references": report.lateral_bracing_references.iter().map(|(elem, reference)| serde_json::json!({ "elem": elem.0, "reference": reference, "actual_bracing_verified": false })).collect::<Vec<_>>(),
+        "steel_deflection_references": report.steel_deflection_references.iter().map(|(elem, detail)| serde_json::json!({ "elem": elem.0, "detail": detail })).collect::<Vec<_>>(),
         "wall_checks": report.wall_checks,
         "wall_summary": wall_summary,
         "wall_summary_by_kind": {
@@ -266,6 +277,7 @@ fn assemble_design_check_summary(
         "n_ng": n_ng,
         "n_skipped": n_skipped,
         "member_skipped": member_skipped,
+        "rc_deflection_checks": rc_deflection_checks,
         "all_checked_and_ok": n_checks + n_joint_checks + wall_summary.n_checks > 0 && n_skipped + n_joint_skipped + wall_summary.n_skipped == 0 && n_ng + n_joint_ng + wall_summary.n_ng == 0,
         "all_members_checked_and_ok": n_checks > 0 && n_skipped == 0 && n_ng == 0,
         "n_joint_checks": n_joint_checks,
@@ -446,7 +458,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                assert_eq!(summary["n_checks"], 3);
+                assert_eq!(summary["n_checks"], if asymmetric { 3 } else { 4 });
                 assert_eq!(member_force_rows.len(), 3);
                 assert!(
                     member_force_rows
@@ -468,13 +480,144 @@ mod tests {
                         );
                     }
                 } else {
-                    assert_eq!(summary["n_skipped"], 0, "{summary}");
+                    assert_eq!(summary["n_skipped"], 1, "{summary}");
+                    assert!(summary["member_skipped"][0]["reason"]
+                        .as_str()
+                        .unwrap()
+                        .contains("長期たわみ未算定"));
                     assert_eq!(summary["n_ng"], 3, "{summary}");
                     assert!(
                         summary["max_ratio"].as_f64().unwrap()
                             >= 45e6 / 39_177_363.507_517_874 - 1e-8
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_long_term_rc_reports_calculated_deflection_for_case_and_combination() {
+        use sepika_core::dof::{Dof, Dof6Mask};
+        use sepika_core::model::MemberLoad;
+
+        let mut model = asymmetric_beam_input::model(false);
+        model.materials[0].young = 23_000.0;
+        model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask::FIXED;
+            node.restraint.set_free(Dof::Ry);
+        }
+        model.load_cases[0].name = "たわみ検証用固定荷重".into();
+        model.load_cases[0].nodal.clear();
+        model.load_cases[0].member = vec![MemberLoad::full_length_uniform(
+            ElemId(0),
+            [0.0, 0.0, 1.0],
+            3000.0,
+            15.0,
+        )];
+
+        for combo in [false, true] {
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: (!combo).then_some(0),
+                    load_combination: combo.then_some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!("DesignCheck");
+            };
+            let rows = summary["rc_deflection_checks"].as_array().unwrap();
+            assert_eq!(rows.len(), 1, "{summary}");
+            let row = &rows[0];
+            assert_eq!(row["elem"], 0);
+            assert_eq!(row["position"], 0.5);
+            // 単純支持・等分布の閉形式 5wL⁴/(384EI) を 250×8/L 倍。
+            approx::assert_abs_diff_eq!(
+                row["ratio"].as_f64().unwrap(),
+                0.5133730510837876,
+                epsilon = 1e-10
+            );
+            let detail = row["detail"].as_str().unwrap();
+            assert!(detail.contains("δ=0.770060 mm, v=-0.770060 mm"), "{detail}");
+            assert!(detail.contains("x=1500.000 mm"), "{detail}");
+            assert_eq!(summary["member_skipped"], serde_json::json!([]));
+        }
+    }
+
+    #[test]
+    fn mcp_long_term_girder_reports_unavailable_deflection_with_material_specific_status() {
+        use sepika_core::dof::{Dof, Dof6Mask};
+        use sepika_core::ids::{MaterialId, SectionId};
+        use sepika_core::model::{FrameSectionUse, MaterialCategory, MemberLoad, MemberLoadKind};
+        use sepika_core::section_shape::SectionShape;
+
+        let mut model = asymmetric_beam_input::model(false);
+        model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask::FIXED;
+            node.restraint.set_free(Dof::Ry);
+        }
+        model.load_cases[0].nodal.clear();
+        model.load_cases[0].member.push(MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point {
+                a: 1_500.0,
+                p: 1_000.0,
+            },
+        ));
+
+        for steel in [false, true] {
+            if steel {
+                let mut material =
+                    asymmetric_beam_input::material("SN400B", MaterialCategory::Steel);
+                material.id = MaterialId(0);
+                model.materials[0] = material;
+                let mut section = SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 8.0,
+                    flange_thick: 13.0,
+                    root_r: Some(0.0),
+                }
+                .to_section(SectionId(0), "鋼梁".into());
+                section.material = Some(MaterialId(0));
+                section.frame_use = Some(FrameSectionUse::Girder);
+                model.sections[0] = section;
+            }
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_combination: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!("DesignCheck");
+            };
+            assert_eq!(summary["n_ng"], 0, "{summary}");
+            assert_eq!(summary["rc_deflection_checks"], serde_json::json!([]));
+            assert_eq!(summary["all_members_checked_and_ok"], steel, "{summary}");
+            if steel {
+                assert_eq!(summary["n_skipped"], 0, "{summary}");
+                assert_eq!(summary["steel_deflection_references"][0]["elem"], 0);
+                let detail = summary["steel_deflection_references"][0]["detail"]
+                    .as_str()
+                    .unwrap();
+                assert!(
+                    detail.contains("未算定") && detail.contains("集中荷重"),
+                    "{detail}"
+                );
+            } else {
+                assert_eq!(summary["n_skipped"], 1, "{summary}");
+                assert_eq!(summary["member_skipped"][0]["position"], 0.5);
+                let reason = summary["member_skipped"][0]["reason"].as_str().unwrap();
+                assert!(
+                    reason.contains("長期たわみ未算定") && reason.contains("集中荷重"),
+                    "{reason}"
+                );
             }
         }
     }

@@ -475,12 +475,20 @@ pub(in crate::app::study) mod projection {
                 evidence: reference,
             });
         };
+        let mut occurrences = std::collections::HashMap::new();
         for member in &evidence.bundle.member_checks {
             for p in &member.positions {
+                let xi = p.xi.to_bits();
+                let index = occurrences.entry((member.elem, xi)).or_insert(0);
+                let mut key = format!("部材{}/位置{xi:016x}", member.elem.0);
+                if *index > 0 {
+                    key.push_str(&format!("/{}", *index + 1));
+                }
+                *index += 1;
                 add(
                     Some(ReferenceTarget::Member(member.elem)),
                     Some(p.xi),
-                    format!("部材{}/位置{:016x}", member.elem.0, p.xi.to_bits()),
+                    key,
                     &p.outcome,
                 );
             }

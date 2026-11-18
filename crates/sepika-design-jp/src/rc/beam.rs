@@ -338,11 +338,6 @@ pub(crate) fn beam_check(
             components.push(c);
         }
         detail.push_str(&prov.warning_suffix());
-        if let Some(c) =
-            super::provisions::beam_deflection_component(ctx, props.b, props.d_full, mat.young)
-        {
-            components.push(c);
-        }
     }
 
     CheckOutcome::Checked(CheckResult {
@@ -607,35 +602,6 @@ mod tests {
             .iter()
             .any(|c| c.kind == crate::CheckKind::Provision));
         assert!(!result.ok());
-    }
-
-    #[test]
-    fn test_beam_check_long_deflection_component() {
-        let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
-        let sec = make_section(shape);
-        let mut mat = make_material(24.0, "SD345");
-        mat.young = 21_000.0;
-        let mut ctx = ctx_beam(LoadTerm::Long);
-        ctx.length = 6000.0;
-        ctx.end_moments_z = Some((0.0, 0.0));
-        ctx.mid_moment_z = Some(10.0 * 6000.0_f64.powi(2) / 8.0);
-        let forces = MemberForcesAt {
-            pos: 0.5,
-            n: 0.0,
-            qy: 0.0,
-            qz: 0.0,
-            my: 0.0,
-            mz: 0.0,
-        };
-        let result = crate::rc::RcDesign
-            .check(&forces, &sec, &mat, &ctx)
-            .unwrap_checked();
-        let defl = result
-            .components
-            .iter()
-            .find(|c| c.kind == crate::CheckKind::Deflection)
-            .expect("長期たわみ component");
-        assert!(defl.ratio > 0.0);
     }
 
     #[test]

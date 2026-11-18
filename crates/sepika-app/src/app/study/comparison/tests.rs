@@ -525,6 +525,56 @@ fn saved_expected_targets_positions_and_component_multisets_reject_missing_resul
 }
 
 #[test]
+fn comparison_keeps_strength_and_skipped_deflection_at_the_same_position() {
+    use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+    let app = computed();
+    let mut evidence = app.studies.items[0].runs[0].comparison_checks[0].clone();
+    let member = &mut evidence.bundle.member_checks[0];
+    let elem = member.elem;
+    let xi = member.positions[0].xi;
+    let strength = |ratio| {
+        CheckOutcome::Checked(CheckResult {
+            basis: "曲げ検定".into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Bending,
+                ratio,
+                detail: String::new(),
+            }],
+        })
+    };
+    member.positions[0].outcome = strength(0.6);
+    member.positions.push(crate::app::PositionCheck {
+        xi,
+        outcome: CheckOutcome::Skipped {
+            reason: "長期たわみ未算定".into(),
+        },
+    });
+    evidence.expected_checks = Some(ExpectedChecks::capture(&evidence.bundle));
+    let rows = check_rows(&evidence).unwrap();
+    let matching: Vec<_> = rows
+        .iter()
+        .filter(|row| row.target == Some(ReferenceTarget::Member(elem)) && row.position == Some(xi))
+        .collect();
+    assert_eq!(matching.len(), 2);
+    assert_eq!(matching[0].ratio, Some(0.6));
+    assert_eq!(matching[1].reason, "長期たわみ未算定");
+    assert_ne!(matching[0].key, matching[1].key);
+    let counts = summarize(matching);
+    assert_eq!((counts.checked, counts.skipped), (1, 1));
+
+    evidence.bundle.member_checks[0].positions[0].outcome = strength(1.2);
+    let candidate = check_rows(&evidence).unwrap();
+    assert!(same_evaluation_set(&rows, &candidate));
+    assert!(same_evaluation_range(&rows, &candidate));
+    assert_eq!(unmatched_positions(&rows, &candidate), (0, 0));
+    let worsened = worsening(&rows, &candidate, &[]);
+    assert_eq!(worsened.len(), 1);
+    assert_eq!(worsened[0].0.ratio, Some(1.2));
+    assert!(worsened[0].2);
+}
+
+#[test]
 fn same_position_partial_ng_is_both_ng_and_unrated_without_comparable_difference() {
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
     let app = computed();

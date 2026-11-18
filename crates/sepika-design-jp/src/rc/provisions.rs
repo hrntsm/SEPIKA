@@ -9,7 +9,7 @@
 use sepika_core::units::ConcreteClass;
 
 use super::section_props::{AxisProps, RcRebarInfo};
-use crate::{CheckComponent, CheckKind, DesignCtx, LoadTerm};
+use crate::{CheckComponent, CheckKind};
 
 /// 構造規定の判定結果。
 pub(crate) struct ProvisionCheck {
@@ -188,75 +188,6 @@ pub(crate) fn column_provisions_info(
     ProvisionCheck { errors, warnings }
 }
 
-/// 矩形梁の長期たわみ δ [mm]（マニュアル略算・鋼梁と同形）。
-///
-/// \\( M_0 = |M_c| + (|M_i|+|M_j|)/2 \\) とし、
-/// \\( \delta = 5 M_0 L^2/(48 E I) - (|M_i|+|M_j|) L^2/(16 E I) \\)。
-/// 等分布荷重のとき \\( w=(|Q_i|+|Q_j|)/L \\) 形と等価。\\( I = b D^3/12 \\)。
-pub(crate) fn beam_deflection_approx(
-    b: f64,
-    d_full: f64,
-    length: f64,
-    e: f64,
-    m_i: f64,
-    m_j: f64,
-    m_c: f64,
-) -> Option<f64> {
-    if length <= 1e-9 || e <= 1e-9 || b <= 0.0 || d_full <= 0.0 {
-        return None;
-    }
-    let i = b * d_full.powi(3) / 12.0;
-    if i <= 1e-9 {
-        return None;
-    }
-    let m_l = m_i.abs();
-    let m_r = m_j.abs();
-    let m0 = m_c.abs() + (m_l + m_r) / 2.0;
-    let l2 = length * length;
-    let delta = 5.0 * m0 * l2 / (48.0 * e * i) - (m_l + m_r) * l2 / (16.0 * e * i);
-    Some(delta.max(0.0))
-}
-
-/// たわみ検定比 = (α·δ/L) / (1/250)。α 既定 8（平12 告示第1459号）。
-pub(crate) fn beam_deflection_ratio(delta: f64, length: f64, alpha: f64) -> f64 {
-    if length <= 1e-9 {
-        return 0.0;
-    }
-    250.0 * alpha * delta / length
-}
-
-/// 長期たわみの CheckComponent。端部・中央モーメントが揃うときのみ。
-///
-/// スパン L は [`DesignCtx::clear_length`]（内法）を優先し、無ければ `length`。
-pub(crate) fn beam_deflection_component(
-    ctx: &DesignCtx,
-    b: f64,
-    d_full: f64,
-    e: f64,
-) -> Option<CheckComponent> {
-    if ctx.term != LoadTerm::Long {
-        return None;
-    }
-    let (m_i, m_j) = ctx.end_moments_z?;
-    let m_c = ctx.mid_moment_z?;
-    let span = ctx.clear_length.filter(|&l| l > 1e-9).unwrap_or(ctx.length);
-    let alpha = 8.0;
-    let delta = beam_deflection_approx(b, d_full, span, e, m_i, m_j, m_c)?;
-    let ratio = beam_deflection_ratio(delta, span, alpha);
-    Some(CheckComponent {
-        kind: CheckKind::Deflection,
-        ratio,
-        detail: format!(
-            "δ={:.2} mm, L={:.0} mm（内法優先）, α={:.0}, α·δ/L={:.5}, 制限 1/250, 検定比={:.3}",
-            delta,
-            span,
-            alpha,
-            alpha * delta / span,
-            ratio
-        ),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,20 +229,6 @@ mod tests {
     }
 
     #[test]
-    fn deflection_uniform_simple_beam() {
-        let b = 300.0;
-        let d = 600.0;
-        let l = 6000.0;
-        let e = 21_000.0;
-        let w = 10.0;
-        let m0 = w * l * l / 8.0;
-        let delta = beam_deflection_approx(b, d, l, e, 0.0, 0.0, m0).unwrap();
-        let i = b * d.powi(3) / 12.0;
-        let expect = 5.0 * w * l.powi(4) / (384.0 * e * i);
-        assert!((delta - expect).abs() / expect < 1e-9);
-    }
-
-    #[test]
     fn column_pw_uses_min_of_both_widths() {
         let info = sample_info(40.0, 250.0, 22.0, 4);
         let p = column_provisions_info(
@@ -334,23 +251,6 @@ mod tests {
             "warnings={:?}",
             p.warnings
         );
-    }
-
-    #[test]
-    fn deflection_prefers_clear_length() {
-        let mut ctx = DesignCtx {
-            term: LoadTerm::Long,
-            length: 8000.0,
-            clear_length: Some(6000.0),
-            end_moments_z: Some((0.0, 0.0)),
-            mid_moment_z: Some(1.0e8),
-            ..Default::default()
-        };
-        let c = beam_deflection_component(&ctx, 300.0, 600.0, 21_000.0).unwrap();
-        assert!(c.detail.contains("L=6000"), "detail={}", c.detail);
-        ctx.clear_length = None;
-        let c2 = beam_deflection_component(&ctx, 300.0, 600.0, 21_000.0).unwrap();
-        assert!(c2.detail.contains("L=8000"), "detail={}", c2.detail);
     }
 
     #[test]
