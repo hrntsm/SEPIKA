@@ -177,13 +177,17 @@ fn opt_count_desc(v: Option<u32>) -> String {
     }
 }
 
+const STEEL_BUCKLING_GUIDANCE: &str =
+    "通常S部材では各軸の有限な正値を優先します。空欄は柱1.2L・大梁と一般ブレース1.0L（Lは材軸長）。支持条件から求めた座屈長さが既定値を超える場合は直接入力してください。";
+
 pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     ui.label(
         "S造部材の断面検定用属性（継手・スカラップ欠損率、横座屈長さ lb の直接入力、\
          等間隔横補剛本数、座屈長さ lk_y/lk_z の直接入力、横座屈修正係数 C の直接入力）\
-         を設定します。通常S柱・CFT柱はlk_y/lk_zの両軸直接入力が必要で、空欄があれば未検定です。\
+         を設定します。\
          C の直接入力は自動算定（材端モーメント比・上限2.3）より優先されます。",
     );
+    ui.label(STEEL_BUCKLING_GUIDANCE);
     ui.separator();
 
     let model = &app.core.model;
@@ -369,9 +373,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         );
     })
     .response
-    .on_hover_text(
-        "通常S部材では各軸の有限な正値を優先します。空欄は柱1.2L・大梁と一般ブレース1.0L（Lは材軸長）。支持条件から求めた座屈長さが既定値を超える場合は直接入力してください。",
-    );
+    .on_hover_text(STEEL_BUCKLING_GUIDANCE);
     ui.label("CFT柱は両軸に有限な正の座屈長さが必要です。空欄や0があると未検定です。");
 
     ui.horizontal(|ui| {
@@ -651,18 +653,34 @@ mod tests {
     }
 
     #[test]
-    fn cft_column_direct_length_guidance_is_displayed_with_the_input() {
+    fn steel_table_shows_ordinary_defaults_and_cft_direct_lengths() {
         let mut app = App::default();
         app.load_model(crate::app::cft_column_buckling_tests::input::cantilever(
             false, 1000.0,
         ));
-        let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
-            steel_attrs_table(ui, &mut app);
-        });
-        assert!(output.shapes.iter().any(|shape| matches!(
-            &shape.shape,
-            egui::Shape::Text(text) if text.galley.job.text.contains("CFT柱は両軸に有限な正の座屈長さが必要")
-        )));
+        let output = draw(&egui::Context::default(), &mut app, vec![]);
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("各軸の有限な正値を優先"), "{text}");
+        assert!(
+            text.contains("空欄は柱1.2L・大梁と一般ブレース1.0L"),
+            "{text}"
+        );
+        assert!(
+            text.contains("CFT柱は両軸に有限な正の座屈長さが必要"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("通常S柱・CFT柱はlk_y/lk_zの両軸直接入力"),
+            "{text}"
+        );
     }
 
     /// 空欄は 0（欠損なし）として扱われること。

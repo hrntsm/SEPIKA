@@ -1,8 +1,6 @@
 //! 鋼製間柱の独立した許容応力度検定。力・長さは N-mm 系。
 
-use crate::{
-    CheckKind, CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind,
-};
+use crate::{CheckKind, CheckOutcome, DesignCtx, LoadTerm, MemberForcesAt, MemberKind};
 use sepika_core::model::{
     LoadCaseKind, LoadPurpose, MemberLoadKind, Model, PostLateralSupport, SecondaryMember,
 };
@@ -367,11 +365,11 @@ pub fn design_post(model: &Model, sm: &SecondaryMember) -> PostDesignResult {
                         qy: 0.0,
                         qz: 0.0,
                     };
-                    match crate::steel::SteelDesign.check(&zero, sec, mat, &ctx) {
+                    match crate::steel::SteelDesign.check_secondary_post(&zero, sec, mat, &ctx) {
                         CheckOutcome::Skipped { reason } => Err(reason),
-                        CheckOutcome::Checked(_) => f.and_then(|f| {
-                            crate::steel::column_allowables(sec, mat, &ctx, f, ctx.term)
-                        }),
+                        CheckOutcome::Checked(_) => {
+                            f.and_then(|f| crate::steel::column_allowables(sec, mat, &ctx, f, None))
+                        }
                     }
                 } else {
                     Err("断面形式・座屈条件が未確定です".into())
@@ -440,8 +438,8 @@ pub fn design_post(model: &Model, sm: &SecondaryMember) -> PostDesignResult {
                             let check = if let Some(reason) = reason.clone() {
                                 CheckOutcome::Skipped { reason }
                             } else {
-                                let mut check =
-                                    crate::steel::SteelDesign.check(&forces, sec, mat, &ctx);
+                                let mut check = crate::steel::SteelDesign
+                                    .check_secondary_post(&forces, sec, mat, &ctx);
                                 if lk.is_none() || lb.is_none() {
                                     if let CheckOutcome::Checked(r) = &mut check {
                                         r.components.retain(|c| c.kind == CheckKind::Shear);

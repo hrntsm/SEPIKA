@@ -373,6 +373,52 @@ fn issue901_compressed_angles_require_principal_axis_effective_lengths() {
 }
 
 #[test]
+fn ordinary_steel_compression_uses_explicit_lengths_at_the_numerical_cutoff() {
+    use sepika_element::frame::beam::MemberForces;
+
+    for kind in [
+        FrameSectionUse::Column,
+        FrameSectionUse::Girder,
+        FrameSectionUse::Brace,
+    ] {
+        let mut model = model();
+        let sec = &mut model.sections[0];
+        sec.frame_use = Some(kind);
+        // 直接断面性能の数値例。断面二次半径2e-9 mmで、極小の直接長でもλ=0.5となる。
+        sec.iy = 4e-14;
+        sec.iz = 4e-14;
+        if kind == FrameSectionUse::Brace {
+            model.elements[0].kind = ElementKind::Brace {
+                tension_only: false,
+            };
+        }
+        model.steel_design_attrs[0].lk_y_direct = Some(1e-9);
+        model.steel_design_attrs[0].lk_z_direct = Some(5e-10);
+        let mf = MemberForces {
+            at: vec![(0.5, [-300_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+        };
+        let report = sepika_design_jp::run_member_design_checks(
+            &model,
+            &[(ElemId(0), mf)],
+            &[],
+            &Default::default(),
+        )
+        .unwrap();
+        let [(_, _, outcome)] = report.member_checks.as_slice() else {
+            panic!("{report:?}");
+        };
+        let CheckOutcome::Checked(result) = outcome else {
+            panic!("{outcome:?}");
+        };
+        // λ=0.5、E=205000、F=235から長期fc=156.66436177860686 N/mm²。軸応力度は30 N/mm²。
+        assert!(
+            (result.ratio() - 0.19149217894491571).abs() < 1e-12,
+            "{kind:?}: {result:?}"
+        );
+    }
+}
+
+#[test]
 fn girder_and_brace_use_the_eccentric_member_axis_and_keep_direct_axes() {
     use sepika_element::frame::beam::MemberForces;
     for kind in [FrameSectionUse::Girder, FrameSectionUse::Brace] {

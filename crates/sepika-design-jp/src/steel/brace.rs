@@ -2,10 +2,7 @@
 //! 鉄骨ブレースの許容応力度検定）。
 
 use crate::material_strength::{steel_fc, steel_ft};
-use crate::{
-    effective_slenderness, CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm,
-    MemberForcesAt,
-};
+use crate::{CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt};
 use sepika_core::model::{Material, Section};
 
 use super::{nonzero, safe_denom};
@@ -20,6 +17,7 @@ pub(crate) fn check_brace(
     ctx: &DesignCtx,
     f: f64,
     term: LoadTerm,
+    lambda: f64,
 ) -> CheckResult {
     let area = nonzero(sec.area);
     let lk_y_resolved = ctx.lk_y.unwrap_or(ctx.length);
@@ -29,7 +27,6 @@ pub(crate) fn check_brace(
     } else {
         ""
     };
-    let lambda = effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z);
 
     let term_label = match term {
         LoadTerm::Long => "長期",
