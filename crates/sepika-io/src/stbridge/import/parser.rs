@@ -487,6 +487,7 @@ impl StbParser {
                         placement_number(tag, a, "global_offset_Z")?,
                     ],
                     rotation_deg: placement_number(tag, a, "global_rotation")?,
+                    ..Default::default()
                 };
             }
             "StbNode" => {

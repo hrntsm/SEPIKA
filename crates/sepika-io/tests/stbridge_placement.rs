@@ -330,6 +330,49 @@ fn axial_offsets_reject_a_common_rounding_shift_from_centroid_conversion() {
 }
 
 #[test]
+fn src_axial_offsets_are_rejected_without_changing_the_equal_offset_path() {
+    let source = include_str!("fixtures/strength_src.stb");
+    let unequal = source.replace(
+        r#"kind_structure="SRC""#,
+        r#"kind_structure="SRC" offset_top_Z="30""#,
+    );
+    for error in [
+        import_stbridge(&unequal).unwrap_err(),
+        import_stbridge_with_report(&unequal).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in [
+            "StbColumn id=Some(1)",
+            "SRC部材の異値offset",
+            "実半径",
+            "圧延・組立区分",
+        ] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+    let mut model = import_stbridge(source).unwrap();
+    let equal_output = export_stbridge(&model).unwrap();
+    assert_eq!(export_stbridge_with_report(&model).unwrap().0, equal_output);
+    import_stbridge(&equal_output).unwrap();
+
+    model.elements[0].end_offsets_mm[1][2] = 30.0;
+    for error in [
+        export_stbridge(&model).unwrap_err(),
+        export_stbridge_with_report(&model).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in [
+            "部材 ID 0",
+            "SRC部材の異値offset",
+            "実半径",
+            "圧延・組立区分",
+        ] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+}
+
+#[test]
 fn axial_offsets_on_a_shapeless_column_are_rejected_at_both_exports() {
     let members = r#"<StbColumns><StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S" offset_top_Z="-20"/></StbColumns>"#;
     let mut model = import_stbridge(&input("", members, H)).unwrap();
@@ -609,7 +652,7 @@ fn detached_secondary_axial_offsets_require_exact_section_pose() {
 }
 
 #[test]
-fn secondary_axial_offsets_reject_ambiguous_reference_nodes_and_changed_parent_support() {
+fn secondary_axial_offsets_reject_a_changed_direct_parent_support() {
     use sepika_core::model::SecondaryMemberEnds;
 
     let members = r#"<StbGirders><StbGirder id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S"/><StbGirder id="2" id_node_start="10" id_node_end="11" id_section="1" kind_structure="S"/></StbGirders>
@@ -660,14 +703,41 @@ fn secondary_axial_offsets_reject_ambiguous_reference_nodes_and_changed_parent_s
             assert!(error.contains(expected), "{error}");
         }
     }
+}
 
-    let duplicate = xml
-        .replace(
-            "</StbNodes>",
-            r#"<StbNode id="9" X="3000" Y="0" Z="3000"/></StbNodes>"#,
-        )
-        .replace(r#"id_node_start="5""#, r#"id_node_start="9""#);
-    let model = import_stbridge(&duplicate).unwrap();
+#[test]
+fn secondary_axial_offsets_require_unique_reference_nodes_before_and_after_global() {
+    let members = format!(
+        r#"{GIRDER}<StbBeams><StbBeam id="987654321" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S" offset_start_Y="20"/></StbBeams>"#
+    );
+    let duplicate = input("", &members, H).replace(
+        "</StbNodes>",
+        r#"<StbNode id="9" X="3000" Y="-0" Z="3000"/></StbNodes>"#,
+    );
+    let global = input(r#"global_offset_X="18014398509481984""#, &members, H).replace(
+        "</StbNodes>",
+        r#"<StbNode id="9" X="3001" Y="0" Z="3000"/></StbNodes>"#,
+    );
+    for (xml, stage) in [(&duplicate, "STB入力"), (&global, "global変換後")] {
+        for error in [
+            import_stbridge(xml).unwrap_err(),
+            import_stbridge_with_report(xml).unwrap_err(),
+        ] {
+            let error = error.to_string();
+            for expected in [
+                "StbBeam id=Some(987654321)",
+                stage,
+                "異値offset",
+                "節点",
+                "一意",
+            ] {
+                assert!(error.contains(expected), "{error}");
+            }
+        }
+    }
+    let mut model = import_stbridge(&duplicate.replace(r#" offset_start_Y="20""#, "")).unwrap();
+    export_stbridge(&model).unwrap();
+    model.unassigned_beams[0].end_offsets_mm[0][1] = 20.0;
     for error in [
         export_stbridge(&model).unwrap_err(),
         export_stbridge_with_report(&model).unwrap_err(),
@@ -1061,6 +1131,33 @@ fn symmetric_built_h_preserves_rotated_top_reference_and_uses_only_official_attr
         )
     {
         assert!(dist(a, b) < 1e-12);
+    }
+}
+
+#[test]
+fn exact_global_quarter_turn_is_shared_by_the_whole_model_only_for_unequal_offsets() {
+    let girder = GIRDER.replace(r#"kind_structure="S""#, r#"kind_structure="S" rotate="90""#);
+    let both = format!(
+        r#"<StbColumns><StbColumn id="7" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S" offset_top_Z="30"/></StbColumns>{girder}"#
+    );
+    for (members, exact) in [(girder.as_str(), false), (both.as_str(), true)] {
+        let xml = input(r#"global_rotation="90""#, members, H)
+            .replace(r#"<StbNode id="3" X="6000""#, r#"<StbNode id="3" X="100000000000000000000""#)
+            .replace("</StbModel>", r#"<StbLoadCases><StbLoadCase name="L"><StbNodalLoad id_node="3" fx="100000000000000000000"/></StbLoadCase></StbLoadCases></StbModel>"#);
+        let model = import_stbridge(&xml).unwrap();
+        let load = &model.load_cases[0].nodal[0];
+        let node = model.nodes[2].coord;
+        assert_eq!(node[1], 1e20);
+        assert_eq!(load.values[1], 1e20);
+        assert_eq!(node[0], load.values[0]);
+        if exact {
+            assert_eq!(node[0], 0.0);
+        } else {
+            assert!((6123.0..6124.0).contains(&node[0]), "{node:?}");
+        }
+        let girder = model.elements.last().unwrap();
+        assert!((0.0..1e-15).contains(&girder.local_axis.ref_vector[2]));
+        assert!(girder.local_axis.ref_vector[2] > 0.0);
     }
 }
 

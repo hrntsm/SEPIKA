@@ -25,7 +25,7 @@ use std::collections::HashMap;
 /// パース済み中間表現からモデルと取り込み報告を組み立てる（後段のエントリポイント）。
 pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbError> {
     let StbParser {
-        global_transform,
+        mut global_transform,
         mut warnings,
         mut strengths,
         unsupported,
@@ -100,12 +100,22 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &section_index,
         &mut strengths,
     )?;
+    validate_unequal_secondary_nodes(&model, &pending_secondaries, "STB入力")?;
+    global_transform.exact_quarter_turns = pending_members
+        .iter()
+        .any(|member| member.offsets_mm[0] != member.offsets_mm[1])
+        || pending_secondaries
+            .iter()
+            .any(|member| member.offsets_mm[0] != member.offsets_mm[1]);
     apply_global_transform(
         &mut model,
         global_transform,
         &pending_members,
         &pending_secondaries,
     )?;
+    if global_transform.rotation_deg != 0.0 || global_transform.translation_mm != [0.0; 3] {
+        validate_unequal_secondary_nodes(&model, &pending_secondaries, "global変換後")?;
+    }
     for case in &mut raw_load_cases {
         for (node, values) in &mut case.nodal {
             let force = global_transform.vector([values[0], values[1], values[2]]);
@@ -296,6 +306,46 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
             attributes,
         },
     ))
+}
+
+fn validate_unequal_secondary_nodes(
+    model: &Model,
+    pending_secondaries: &[PendingSecondary],
+    stage: &str,
+) -> Result<(), StbError> {
+    let mut members = model
+        .unassigned_beams
+        .iter()
+        .chain(&model.unassigned_posts)
+        .filter(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1])
+        .peekable();
+    if members.peek().is_none() {
+        return Ok(());
+    }
+    let coordinate_key =
+        |point: [f64; 3]| point.map(|value| if value == 0.0 { 0 } else { value.to_bits() });
+    let mut node_counts = HashMap::new();
+    for node in &model.nodes {
+        *node_counts
+            .entry(coordinate_key(node.coord))
+            .or_insert(0_usize) += 1;
+    }
+    for member in members {
+        if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = member.ends {
+            if ends
+                .into_iter()
+                .any(|end| node_counts.get(&coordinate_key(end)) != Some(&1))
+            {
+                return Err(pending_secondaries[member.id.index()].source.error(
+                    None,
+                    &format!(
+                        "{stage}の座標で、異値offsetの基準端に対応する節点を一意に決められません"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn apply_global_transform(

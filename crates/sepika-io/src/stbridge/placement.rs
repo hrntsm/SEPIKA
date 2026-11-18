@@ -12,11 +12,12 @@ const MIN_PRODUCT_FOR_EXACT_RESIDUAL: f64 = 2.0 * f64::MIN_POSITIVE / f64::EPSIL
 pub(super) struct GlobalTransform {
     pub translation_mm: [f64; 3],
     pub rotation_deg: f64,
+    pub exact_quarter_turns: bool,
 }
 
 impl GlobalTransform {
     pub fn vector(self, vector: [f64; 3]) -> [f64; 3] {
-        let (sin, cos) = rotation_sin_cos(self.rotation_deg);
+        let (sin, cos) = rotation_sin_cos(self.rotation_deg, self.exact_quarter_turns);
         [
             cos * vector[0] - sin * vector[1],
             sin * vector[0] + cos * vector[1],
@@ -65,7 +66,7 @@ impl GlobalTransform {
     }
 
     fn exact_vector(self, [x, y, z]: [f64; 3]) -> Result<[f64; 3], &'static str> {
-        let (sin, cos) = rotation_sin_cos(self.rotation_deg);
+        let (sin, cos) = rotation_sin_cos(self.rotation_deg, self.exact_quarter_turns);
         Ok([
             exact_rotation_component(x, cos, y, -sin).ok_or(OFFSET_ROTATION_ERROR)?,
             exact_rotation_component(x, sin, y, cos).ok_or(OFFSET_ROTATION_ERROR)?,
@@ -81,7 +82,11 @@ pub(super) fn import_placement(
     usage: FrameSectionUse,
     shape: &SectionShape,
 ) -> Result<([[f64; 3]; 2], [f64; 3]), String> {
-    let axes = reference_axes(ends, rotate_deg, usage)?;
+    let unequal = offsets_mm[0] != offsets_mm[1];
+    if unequal {
+        validate_unequal_section(Some(shape))?;
+    }
+    let axes = reference_axes(ends, rotate_deg, usage, unequal)?;
     validate_axis_direction(ends, offsets_mm)?;
     validate_offset_end_positions(ends, offsets_mm)?;
     let shift = centroid_shift(shape, usage, axes)?;
@@ -100,15 +105,18 @@ pub(super) fn export_placement(
     usage: FrameSectionUse,
     shape: Option<&SectionShape>,
 ) -> Result<([[f64; 3]; 2], f64), String> {
+    let unequal = offsets_mm[0] != offsets_mm[1];
+    if unequal {
+        validate_unequal_section(shape)?;
+    }
     validate_axis_direction(ends, offsets_mm)?;
     validate_offset_end_positions(ends, offsets_mm)?;
     let actual = [add(ends[0], offsets_mm[0]), add(ends[1], offsets_mm[1])];
     let axes = local_frame_axes(actual[0], actual[1], reference).map_err(str::to_owned)?;
-    let unequal = offsets_mm[0] != offsets_mm[1];
     if shape.is_none() && (usage != FrameSectionUse::Column || unequal) {
         return Err("配置変換の断面形状がありません".into());
     }
-    let nominal = reference_axes(ends, 0.0, usage)?;
+    let nominal = reference_axes(ends, 0.0, usage, unequal)?;
     let rotate_deg = dot(axes[1], nominal[2])
         .atan2(dot(axes[1], nominal[1]))
         .to_degrees()
@@ -122,7 +130,7 @@ pub(super) fn export_placement(
     let shift = match shape {
         Some(shape) => {
             let axes = if unequal {
-                reference_axes(ends, rotate_deg, usage)?
+                reference_axes(ends, rotate_deg, usage, unequal)?
             } else {
                 axes
             };
@@ -149,6 +157,18 @@ pub(super) fn export_placement(
         }
     }
     Ok((offsets_mm, rotate_deg))
+}
+
+fn validate_unequal_section(shape: Option<&SectionShape>) -> Result<(), &'static str> {
+    if matches!(
+        shape,
+        Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. })
+    ) {
+        return Err(
+            "SRC部材の異値offsetは、内蔵鉄骨の実半径と圧延・組立区分を保持できないため未対応です",
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn validate_axis_direction(
@@ -285,6 +305,7 @@ fn reference_axes(
     ends: [[f64; 3]; 2],
     rotate_deg: f64,
     usage: FrameSectionUse,
+    exact_quarter_turns: bool,
 ) -> Result<[[f64; 3]; 3], String> {
     if !ends.iter().flatten().all(|value| value.is_finite()) || !rotate_deg.is_finite() {
         return Err("基準端・断面回転に非有限値があります".into());
@@ -315,7 +336,7 @@ fn reference_axes(
     } else {
         basis
     };
-    let (sin, cos) = rotation_sin_cos(rotate_deg);
+    let (sin, cos) = rotation_sin_cos(rotate_deg, exact_quarter_turns);
     axes[1] = add(scale(axes[1], cos), scale(cross(axes[0], axes[1]), sin));
     axes[2] = cross(axes[0], axes[1]);
     if !axes.iter().flatten().all(|value| value.is_finite())
@@ -326,7 +347,10 @@ fn reference_axes(
     Ok(axes)
 }
 
-fn rotation_sin_cos(degrees: f64) -> (f64, f64) {
+fn rotation_sin_cos(degrees: f64, exact_quarter_turns: bool) -> (f64, f64) {
+    if !exact_quarter_turns {
+        return degrees.to_radians().sin_cos();
+    }
     match degrees % 360.0 {
         0.0 => (0.0, 1.0),
         90.0 | -270.0 => (1.0, 0.0),
