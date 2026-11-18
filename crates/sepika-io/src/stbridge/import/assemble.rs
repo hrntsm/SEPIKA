@@ -133,7 +133,38 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut warnings,
         &mut strengths,
     )?;
+    let unequal_secondary_ends: Vec<_> = model
+        .unassigned_beams
+        .iter()
+        .chain(&model.unassigned_posts)
+        .filter_map(|member| match member.ends {
+            sepika_core::model::SecondaryMemberEnds::Detached(ends)
+                if member.end_offsets_mm[0] != member.end_offsets_mm[1] =>
+            {
+                Some((member.id, ends))
+            }
+            _ => None,
+        })
+        .collect();
     let anchorize = model.anchorize_secondary_members();
+    for (id, mut ends) in unequal_secondary_ends {
+        let reason = || {
+            StbError::Unmappable(format!(
+                "二次部材 ID {}: 異値offsetの基準端を支持アンカー化後に保持できません",
+                id.0
+            ))
+        };
+        let member = model.secondary_member(id).ok_or_else(reason)?;
+        if member
+            .display_local_axis
+            .is_some_and(|axis| axis.reverse_width)
+        {
+            ends.reverse();
+        }
+        if model.secondary_member_end_points(member) != Some((ends[0], ends[1])) {
+            return Err(reason());
+        }
+    }
     model.rebuild_floor_assignment_regions();
     assign_imported_slabs(&mut model, pending_slabs, &mut strengths)?;
     model.rebuild_wall_assignment_regions();
@@ -267,6 +298,43 @@ fn apply_global_transform(
     model: &mut Model,
     transform: super::super::placement::GlobalTransform,
 ) -> Result<(), StbError> {
+    if transform.rotation_deg % 360.0 != 0.0 || transform.translation_mm != [0.0; 3] {
+        for element in model
+            .elements
+            .iter()
+            .filter(|element| element.end_offsets_mm[0] != element.end_offsets_mm[1])
+        {
+            let ends = [
+                model.nodes[element.nodes[0].index()].coord,
+                model.nodes[element.nodes[1].index()].coord,
+            ];
+            transform
+                .validate_end_positions(ends, element.end_offsets_mm)
+                .map_err(|reason| {
+                    StbError::Unmappable(format!(
+                        "部材 ID {}: global変換後の配置: {reason}",
+                        element.id.0
+                    ))
+                })?;
+        }
+        for member in model
+            .unassigned_beams
+            .iter()
+            .chain(&model.unassigned_posts)
+            .filter(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1])
+        {
+            if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = member.ends {
+                transform
+                    .validate_end_positions(ends, member.end_offsets_mm)
+                    .map_err(|reason| {
+                        StbError::Unmappable(format!(
+                            "二次部材 ID {}「{}」: global変換後の配置: {reason}",
+                            member.id.0, member.name
+                        ))
+                    })?;
+            }
+        }
+    }
     for node in &mut model.nodes {
         node.coord = transform.point(node.coord);
         if !node.coord.iter().all(|value| value.is_finite()) {
@@ -277,9 +345,14 @@ fn apply_global_transform(
         }
     }
     for element in &mut model.elements {
-        element.end_offsets_mm = element
-            .end_offsets_mm
-            .map(|offset| transform.vector(offset));
+        element.end_offsets_mm = transform
+            .offsets(element.end_offsets_mm)
+            .map_err(|reason| {
+                StbError::Unmappable(format!(
+                    "部材 ID {}: global変換後の配置: {reason}",
+                    element.id.0
+                ))
+            })?;
         element.local_axis.ref_vector = transform.vector(element.local_axis.ref_vector);
         if !element
             .end_offsets_mm
@@ -310,7 +383,12 @@ fn apply_global_transform(
         if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = &mut member.ends {
             *ends = ends.map(|point| transform.point(point));
         }
-        member.end_offsets_mm = member.end_offsets_mm.map(|offset| transform.vector(offset));
+        member.end_offsets_mm = transform.offsets(member.end_offsets_mm).map_err(|reason| {
+            StbError::Unmappable(format!(
+                "二次部材 ID {}「{}」: global変換後の配置: {reason}",
+                member.id.0, member.name
+            ))
+        })?;
         if !member
             .end_offsets_mm
             .iter()
@@ -376,7 +454,8 @@ fn validate_global_axis(
             )));
         }
     }
-    Ok(())
+    super::super::placement::validate_axis_direction(reference, offsets_mm)
+        .map_err(|reason| StbError::Unmappable(format!("{label}: global変換後の配置: {reason}")))
 }
 
 /// 属性の扱いの集計を、要素名・属性名の昇順に整列した報告へ変換する。

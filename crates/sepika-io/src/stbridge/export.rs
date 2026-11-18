@@ -17,10 +17,10 @@
 
 use super::section_std::standard_sections;
 use super::{StbError, STB_VERSION};
-use sepika_core::ids::{NodeId, SectionId, SlabId};
+use sepika_core::ids::{ElemId, NodeId, SectionId, SlabId};
 use sepika_core::model::{
-    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, StoryLevelKind, StrengthTarget,
-    WallPlateShape,
+    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, SecondaryMember,
+    SecondaryMemberKind, StoryLevelKind, StrengthTarget, SupportMemberId, WallPlateShape,
 };
 
 /// ST-Bridge の id は `positiveInteger`（1 以上）。内部 0 始まり id に +1 して出力する。
@@ -45,7 +45,13 @@ fn secondary_end_nodes(
 ) -> Option<[NodeId; 2]> {
     let (a, b) = model.secondary_member_end_points(sm)?;
     let tol = sepika_core::geom::MEMBER_AXIS_TOL_MM;
+    let unequal = sm.end_offsets_mm[0] != sm.end_offsets_mm[1];
     let find = |p: [f64; 3]| {
+        if unequal {
+            let mut matches = model.nodes.iter().filter(|n| n.coord == p);
+            let node = matches.next()?;
+            return matches.next().is_none().then_some(node.id);
+        }
         model
             .nodes
             .iter()
@@ -440,7 +446,8 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     }
 
     s.push_str("    <StbMembers>\n");
-    s.push_str(&members_body(model, &col_map, &beam_map, &brace_map)?);
+    let (members, primary_order) = members_body(model, &col_map, &beam_map, &brace_map)?;
+    s.push_str(&members);
     s.push_str("    </StbMembers>\n");
 
     let slab_sec_base = slab_section_id_base(model, &col_map, &beam_map);
@@ -456,7 +463,104 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     s.push_str("    <StbJoints/>\n");
     s.push_str("  </StbModel>\n");
     s.push_str("</ST_BRIDGE>\n");
+    validate_secondary_roundtrip(model, &s, &primary_order)?;
     Ok((s, ExportReport { warnings }))
+}
+
+fn secondary_output_name(member: &SecondaryMember, output_id: u32) -> String {
+    let prefix = match member.kind {
+        SecondaryMemberKind::Beam => 'B',
+        SecondaryMemberKind::Post => 'P',
+    };
+    format!("{prefix}{}", sid(output_id))
+}
+
+fn validate_secondary_roundtrip(
+    model: &Model,
+    xml: &str,
+    primary_order: &[ElemId],
+) -> Result<(), StbError> {
+    let members: Vec<_> = model.beams().chain(model.posts()).collect();
+    let Some(first) = members
+        .iter()
+        .find(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1])
+    else {
+        return Ok(());
+    };
+    let error = |member: &SecondaryMember, detail: &str| {
+        StbError::Unmappable(format!(
+            "二次部材 ID {}: 異値offsetの支持関係をSTB再読込で保持できません。{detail}",
+            member.id.0,
+        ))
+    };
+    let reread = super::import_stbridge(xml).map_err(|reason| error(first, &reason.to_string()))?;
+    let reread_by_name: std::collections::HashMap<_, _> = reread
+        .beams()
+        .chain(reread.posts())
+        .map(|member| (member.name.as_str(), member))
+        .collect();
+    let pairs: Vec<_> = members
+        .iter()
+        .enumerate()
+        .map(|(index, &member)| {
+            let name = secondary_output_name(member, model.elements.len() as u32 + index as u32);
+            (member, reread_by_name.get(name.as_str()).copied())
+        })
+        .collect();
+    let originals_by_reread_id: std::collections::HashMap<_, _> = pairs
+        .iter()
+        .filter_map(|&(original, member)| Some((member?.id, original)))
+        .collect();
+    let reverse_width = |member: &SecondaryMember| {
+        member
+            .display_local_axis
+            .is_some_and(|axis| axis.reverse_width)
+    };
+    for (original, member) in pairs
+        .into_iter()
+        .filter(|(member, _)| member.end_offsets_mm[0] != member.end_offsets_mm[1])
+    {
+        let mismatch = || {
+            error(
+                original,
+                "基準端の対応またはアンカーの支持先・位置が変わります",
+            )
+        };
+        let member = member.ok_or_else(mismatch)?;
+        let reversed = reverse_width(original) != reverse_width(member);
+        let (a, b) = reread
+            .secondary_member_end_points(member)
+            .ok_or_else(mismatch)?;
+        let ends = if reversed { (b, a) } else { (a, b) };
+        let expected_anchors = original.ends.anchors();
+        let anchors = member.ends.anchors();
+        if model.secondary_member_end_points(original) != Some(ends)
+            || expected_anchors.len() != anchors.len()
+            || (reversed && anchors.len() == 1)
+        {
+            return Err(mismatch());
+        }
+        for (i, expected) in expected_anchors.iter().enumerate() {
+            let mut anchor = anchors[if reversed { 1 - i } else { i }];
+            anchor.support = match anchor.support {
+                SupportMemberId::Primary(id) => {
+                    SupportMemberId::Primary(*primary_order.get(id.index()).ok_or_else(mismatch)?)
+                }
+                SupportMemberId::Secondary(id) => {
+                    let parent = originals_by_reread_id.get(&id).ok_or_else(mismatch)?;
+                    let reread_parent = reread.secondary_member(id).ok_or_else(mismatch)?;
+                    if reverse_width(parent) != reverse_width(reread_parent) {
+                        anchor.position = 1.0 - anchor.position;
+                    }
+                    SupportMemberId::Secondary(parent.id)
+                }
+            };
+            if anchor != *expected {
+                return Err(mismatch());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 書き出し時に標準スキーマの表現限界で近似・切り捨てが生じた内容の報告。
@@ -498,11 +602,12 @@ fn members_body(
     col_map: &std::collections::HashMap<u32, u32>,
     beam_map: &std::collections::HashMap<u32, u32>,
     brace_map: &std::collections::HashMap<u32, u32>,
-) -> Result<String, StbError> {
+) -> Result<(String, Vec<ElemId>), StbError> {
     let mut columns = String::new();
     let mut girders = String::new();
     let mut unexported_secondary_ids: Vec<u32> = Vec::new();
     let mut braces = String::new();
+    let mut primary_order = [Vec::new(), Vec::new(), Vec::new()];
 
     for e in &model.elements {
         match e.kind {
@@ -543,6 +648,7 @@ fn members_body(
                 );
                 let ks = kind_structure(model, e);
                 if is_col {
+                    primary_order[0].push(e.id);
                     let (bot, top, cb, ct) = (e.nodes[0], e.nodes[1], e.end_cond[0], e.end_cond[1]);
                     columns.push_str(&format!(
                         "        <StbColumn id=\"{}\" name=\"C{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
@@ -551,6 +657,7 @@ fn members_body(
                         fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct), member_attrs,
                     ));
                 } else {
+                    primary_order[1].push(e.id);
                     girders.push_str(&format!(
                         "        <StbGirder id=\"{}\" name=\"G{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                          rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\" \
@@ -561,6 +668,7 @@ fn members_body(
                 }
             }
             ElementKind::Brace { tension_only } if e.nodes.len() == 2 => {
+                primary_order[2].push(e.id);
                 let sec = e
                     .section
                     .map(|s| brace_map.get(&s.0).copied().unwrap_or(s.0))
@@ -642,6 +750,12 @@ fn members_body(
             })
             .unwrap_or_else(|| "S".to_string());
         let Some(mut nodes) = secondary_end_nodes(model, sm) else {
+            if sm.end_offsets_mm[0] != sm.end_offsets_mm[1] {
+                return Err(StbError::Unmappable(format!(
+                    "二次部材 ID {}: 異値offsetの基準端に一致する節点を一意に決められません",
+                    sm.id.0
+                )));
+            }
             unexported_secondary_ids.push(sm.id.0);
             continue;
         };
@@ -695,20 +809,21 @@ fn members_body(
             placement_attrs,
             super::strength_export::member_attr(model, StrengthTarget::Secondary(sm.id))
         );
+        let name = secondary_output_name(sm, mid);
         match sm.kind {
             sepika_core::model::SecondaryMemberKind::Beam => {
                 sec_beams.push_str(&format!(
-                    "        <StbBeam id=\"{}\" name=\"B{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
+                    "        <StbBeam id=\"{}\" name=\"{name}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                      rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), fmt(rotate), sec_ref(sec), ks, member_attrs,
+                    sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), fmt(rotate), sec_ref(sec), ks, member_attrs,
                 ));
             }
             sepika_core::model::SecondaryMemberKind::Post => {
                 let (bot, top) = (nodes[0], nodes[1]);
                 posts.push_str(&format!(
-                    "        <StbPost id=\"{}\" name=\"P{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
+                    "        <StbPost id=\"{}\" name=\"{name}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
                      rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), fmt(rotate), sec_ref(sec), ks, member_attrs,
+                    sid(mid), node_sid(model, bot), node_sid(model, top), fmt(rotate), sec_ref(sec), ks, member_attrs,
                 ));
             }
         }
@@ -814,7 +929,7 @@ fn members_body(
                 .join(", SM")
         )));
     }
-    Ok(body)
+    Ok((body, primary_order.into_iter().flatten().collect()))
 }
 
 /// 割当済み断面の内部 ID を ST-Bridge の参照 ID に変換する。
@@ -1078,7 +1193,7 @@ fn stb_walls_for_export(model: &Model) -> Vec<StbWallOut> {
 }
 
 pub(super) fn fmt(x: f64) -> String {
-    if x == x.trunc() && x.is_finite() {
+    if x == x.trunc() && (i64::MIN as f64..-(i64::MIN as f64)).contains(&x) {
         format!("{}", x as i64)
     } else {
         format!("{x}")
