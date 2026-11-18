@@ -170,16 +170,12 @@ fn test_cft_rect_matches_numeric_integration() {
 }
 
 #[test]
-fn test_cft_circle_cn_cm_small_and_asymptotic() {
+fn test_cft_circle_partial_compression_has_positive_axial_force_and_moment() {
     let dc = 400.0;
     let fc = 8.0;
     let (cn, cm) = cft_circle_cn_cm(dc, fc, 0.05 * dc);
     assert!(cn > 0.0 && cm > 0.0);
-    assert!(cn < std::f64::consts::PI * dc * dc / 4.0 * fc);
-
-    let (cn, _) = cft_circle_cn_cm(dc, fc, 1000.0 * dc);
-    let ca_fc = std::f64::consts::PI * dc * dc / 4.0 * fc;
-    assert!((cn - ca_fc).abs() / ca_fc < 1e-3, "cn={cn}, ca_fc={ca_fc}");
+    assert!(cn < std::f64::consts::PI * dc * dc / 8.0 * fc);
 }
 
 #[test]

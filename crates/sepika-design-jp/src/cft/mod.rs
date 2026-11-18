@@ -136,8 +136,8 @@ fn numeric_cn_cm(cd: f64, fc: f64, xn: f64, width_fn: impl Fn(f64) -> f64) -> (f
     (cn, cm.abs())
 }
 
-/// 円形充填コンクリート部分の (cN, cM)（数値積分、矩形と同じ弾性仮定）。
-/// `dc`: 充填部直径 [mm]。
+/// 部分圧縮時の円形充填コンクリートの (cN, cM) [N, N·mm]。
+/// `dc` は充填部直径 [mm]、`xn` は圧縮縁から中立軸までの距離 [mm]。
 fn cft_circle_cn_cm(dc: f64, fc: f64, xn: f64) -> (f64, f64) {
     numeric_cn_cm(dc, fc, xn, |y| {
         let r = dc / 2.0;
@@ -145,23 +145,20 @@ fn cft_circle_cn_cm(dc: f64, fc: f64, xn: f64) -> (f64, f64) {
     })
 }
 
-/// 設計軸力 `n_design`（0≤N<cNc）に対する円形充填コンクリート部分の cM を、
-/// 二分法で cN(xn)=N となる xn を求めて算定する。
-fn cft_circle_ma(dc: f64, fc: f64, n_design: f64) -> f64 {
-    if dc <= 0.0 || fc <= 0.0 || n_design <= 0.0 {
+/// 円形充填コンクリート部分の許容曲げ [N·mm]。軸力 `c_n` と上限 `c_nc` は圧縮正 [N]。
+fn cft_circle_ma(dc: f64, fc: f64, c_nc: f64, c_n: f64) -> f64 {
+    if c_n <= 0.0 || c_n >= c_nc {
         return 0.0;
     }
-    let cnc = std::f64::consts::PI * dc * dc / 4.0 * fc;
-    if cnc <= 0.0 {
-        return 0.0;
+    if c_n >= c_nc / 2.0 {
+        return (c_nc - c_n) * (dc / 8.0);
     }
-    let target = n_design.min(cnc * (1.0 - 1e-6));
     let mut lo = 1e-6 * dc;
-    let mut hi = 50.0 * dc;
+    let mut hi = dc;
     for _ in 0..60 {
         let mid = 0.5 * (lo + hi);
         let (cn, _) = cft_circle_cn_cm(dc, fc, mid);
-        if cn < target {
+        if cn < c_n {
             lo = mid;
         } else {
             hi = mid;
@@ -466,7 +463,7 @@ fn cft_pipe_check(
     let n_design = -forces.n;
 
     let ma = cft_axis_capacity(n_design, cnc, sa, s_ft, s_fc, sz, |n| {
-        cft_circle_ma(dc, fc_allow, n)
+        cft_circle_ma(dc, fc_allow, cnc, n)
     });
 
     let ratio_z = ratio_or_large(forces.mz, ma);
