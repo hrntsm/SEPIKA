@@ -179,3 +179,104 @@ fn unsupported_box_keeps_input_and_skipped_outcomes_through_recheck_save_and_rep
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn flat_bar_shear_reason_reaches_report_gui_and_saved_project() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+    use sepika_design_jp::{CheckComponent, CheckKind, CheckResult};
+
+    let section = SectionShape::SteelFlatBar {
+        width: 100.0,
+        thick: 10.0,
+    }
+    .to_section(SectionId(0), "平鋼100×10".into());
+    let mut app = cantilever(section, [0.0, 0.0, 100_000.0, 0.0, 0.0, 0.0]);
+    let assert_unchecked = |app: &App| {
+        let results = app.current_design_results().unwrap();
+        assert_eq!(
+            results.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(results.member_checks.len(), 1);
+        let member = &results.member_checks[0];
+        assert_eq!(member.elem, ElemId(0));
+        assert_eq!(member.positions.len(), 3);
+        let csv = crate::summary::build_report_csv(app);
+        for position in &member.positions {
+            let CheckOutcome::Skipped { reason } = &position.outcome else {
+                panic!("{:?}", position.outcome);
+            };
+            assert!(reason.contains("平鋼のせん断応力度"), "{reason}");
+            assert!(reason.contains("許容値の組合せが未確定"), "{reason}");
+            assert!(
+                csv.lines()
+                    .any(|line| line == format!("0,{:.3},-,検定不能,{reason}", position.xi)),
+                "{csv}"
+            );
+        }
+        assert!(!csv.contains(",OK,"), "{csv}");
+        rmp_serde::to_vec_named(&results.member_checks).unwrap()
+    };
+    let expected = assert_unchecked(&app);
+    let path =
+        std::env::temp_dir().join(format!("sepika-1396-flat-bar-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(assert_unchecked(&reopened), expected);
+    reopened.run_design_check();
+    assert_eq!(assert_unchecked(&reopened), expected);
+    #[cfg(feature = "gui")]
+    {
+        fn contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
+            match shape {
+                egui::epaint::Shape::Text(text) => text.galley.text().contains(needle),
+                egui::epaint::Shape::Vec(parts) => parts.iter().any(|part| contains(part, needle)),
+                _ => false,
+            }
+        }
+        let context = egui::Context::default();
+        let rendered = context.run_ui(Default::default(), |ui| {
+            crate::design_view::design_table(ui, &mut reopened)
+        });
+        for needle in ["検定済み 0 位置、検定不能 3 位置", "平鋼のせん断応力度"]
+        {
+            assert!(
+                rendered
+                    .shapes
+                    .iter()
+                    .any(|shape| contains(&shape.shape, needle)),
+                "{needle}"
+            );
+        }
+    }
+    let legacy_basis = "旧版の平鋼せん断検定";
+    app.core.scoped.results.as_mut().unwrap().member_checks[0].positions[0].outcome =
+        CheckOutcome::Checked(CheckResult {
+            basis: legacy_basis.into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Shear,
+                ratio: 0.884_451_476_205_384,
+                detail: String::new(),
+            }],
+        });
+    assert!(crate::summary::build_report_csv(&app).contains(&format!(",OK,{legacy_basis}")));
+    for version in [57, 58] {
+        let (mut old, path) = super::result_contract_tests::restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(version),
+            &format!("flat-bar-shear-1396-design{version}"),
+        );
+        std::fs::remove_file(path).unwrap();
+        assert!(old.current_static().is_some());
+        assert!(old.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&old).contains(legacy_basis));
+        old.run_design_check();
+        assert_eq!(assert_unchecked(&old), expected);
+    }
+}
