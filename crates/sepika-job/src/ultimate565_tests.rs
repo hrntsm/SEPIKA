@@ -41,10 +41,10 @@ fn fixture() -> (Model, Vec<Vec<(ElemId, MemberForces)>>) {
         ..model
     };
     let responses = [
-        [-100000.0, 10000.0, 0.0, 0.0, 2000000.0, 4000000.0],
-        [-20000.0, -3000.0, 0.0, 0.0, 500000.0, 1000000.0],
-        [-30000.0, 5000.0, 0.0, 0.0, 500000.0, 2000000.0],
-        [-10000.0, 1000.0, 0.0, 0.0, 100000.0, 500000.0],
+        [-100000.0, 10000.0, 6000.0, 0.0, 2000000.0, 4000000.0],
+        [-20000.0, -3000.0, -4000.0, 0.0, 500000.0, 1000000.0],
+        [-30000.0, 5000.0, 1000.0, 0.0, 500000.0, 2000000.0],
+        [-10000.0, 1000.0, 8000.0, 0.0, 100000.0, 500000.0],
     ]
     .into_iter()
     .map(|f| {
@@ -70,8 +70,8 @@ fn saved_frame_terms_combine_signed_components_before_demand_conversion() {
         |model: &Model| complete_ultimate_static_demand(model, |id| Ok(forces[id.index()].clone()));
     let d = resolve(&model).unwrap()[0].1;
     assert_eq!(
-        (d.n_axial, d.q_long, d.my, d.mz),
-        (150000.0, Some(12000.0), 3000000.0, 7000000.0)
+        (d.n_axial, d.q_long, d.q_long_weak, d.my, d.mz),
+        (150000.0, Some(12000.0), Some(3000.0), 3000000.0, 7000000.0)
     );
     println!(
         "frame_terms observed N={} QL={:?} My={} Mz={}",
@@ -105,6 +105,7 @@ fn saved_frame_terms_combine_signed_components_before_demand_conversion() {
     .unwrap();
     let ql = q_long_map_from_member_forces(&arithmetic);
     let d = member_demand_from_static_forces(&arithmetic, Some(&ql))[0].1;
+    assert_eq!(d.q_long_weak, None);
     assert_eq!(
         (d.n_axial, d.q_long, d.mz),
         (140000.0, Some(13500.0), 6500000.0)

@@ -207,6 +207,7 @@ fn actual_rc_cft_static_frame_terms_reach_app_checks_with_signed_equilibrium() {
         assert_eq!(d.mode, UltimateDemandMode::StaticHinge);
         close(d.n_axial, 150000.0);
         close(d.q_long.unwrap(), 12000.0);
+        assert_eq!(d.q_long_weak, Some(0.0));
         close(d.mz.abs(), 36000000.0);
         close(d.my, 0.0);
         check_app(&mut app, cft, 150000.0, None);
@@ -232,10 +233,73 @@ fn actual_rc_cft_static_frame_terms_reach_app_checks_with_signed_equilibrium() {
     }
 }
 
+#[cfg(feature = "gui")]
+#[test]
+fn static_rc_biaxial_table_distinguishes_ok_ng_and_unchecked() {
+    for (load, status, margin, summary) in [
+        (
+            0.0,
+            "OK",
+            "二軸 ",
+            "対象部材の限定検定 OK（全体判定は未完了）",
+        ),
+        (12000.0, "未検定", "強軸 ", "未検定 1 本"),
+        (500000.0, "NG", "強軸 ", "NG 1 本"),
+    ] {
+        let mut app = column(false);
+        for case in &mut app.core.model.load_cases {
+            case.nodal[0].values[0] = 0.0;
+        }
+        app.core.model.load_cases[0].nodal[0].values[0] = load;
+        app.core.ultimate_biaxial_shear = true;
+        app.core.ultimate_include_bond = false;
+        solve_statics(&mut app);
+
+        let ctx = egui::Context::default();
+        let frame = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 1000.0),
+            )),
+            ..Default::default()
+        };
+        let mut draw = |ui: &mut egui::Ui| crate::ultimate_view::ultimate_table(ui, &mut app);
+        let _ = ctx.run_ui(frame(), &mut draw);
+        let output = ctx.run_ui(frame(), draw);
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&status), "load={load}: {labels:?}");
+        assert!(labels.contains(&summary), "load={load}: {labels:?}");
+        assert!(labels.iter().any(|s| s.starts_with(margin)), "{labels:?}");
+        assert_eq!(
+            labels
+                .iter()
+                .any(|s| s.starts_with("対象部材の限定検定 OK")),
+            status == "OK",
+            "{labels:?}"
+        );
+        assert_eq!(labels.contains(&"NG 1 本"), status == "NG");
+        assert_eq!(labels.contains(&"未検定 1 本"), status == "未検定");
+        assert_eq!(
+            labels.iter().any(|s| s.starts_with("二軸 ")),
+            status == "OK"
+        );
+    }
+}
+
 #[test]
 fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallback() {
     for cft in [false, true] {
         let mut app = column(cft);
+        if !cft {
+            app.core.model.load_cases[0].nodal[0].values[1] = 6000.0;
+        }
         solve_statics(&mut app);
         app.generate_stories_action();
         app.run_seismic(SeismicDir::X);
@@ -299,6 +363,7 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
         );
         assert_eq!(d.mode, UltimateDemandMode::ConfirmedTotal);
         assert_eq!(d.q_long, None);
+        assert_eq!(d.q_long_weak, None);
         close(d.n_axial, r.axial);
         close(d.n_axial, 150000.0);
         close(d.mz, r.m_strong);
@@ -312,6 +377,14 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
         close(d.shear_weak.unwrap(), r.shear_weak);
         close(d.rp.unwrap(), r.rp);
         check_app(&mut app, cft, 150000.0, d.shear);
+        if !cft {
+            close(d.shear_weak.unwrap().abs(), 6000.0);
+            app.core.ultimate_biaxial_shear = true;
+            let check = &app.compute_ultimate_checks().unwrap()[0];
+            assert_eq!(check.unchecked_reason, None);
+            assert!(check.biaxial_shear_margin.unwrap() < check.shear_margin);
+            close(check.qmu, d.shear.unwrap().abs());
+        }
         let accepted = app.core.scoped.results.clone().unwrap();
         app.core.ultimate_upper_factor = 1.1;
         assert!(app_error(&mut app, cft).contains("倍率"));

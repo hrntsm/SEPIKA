@@ -77,16 +77,135 @@ fn direct_rc_collector_rejects_missing_duplicate_nonfinite_and_unidentified_ql()
 }
 
 #[test]
+fn static_biaxial_shear_requires_explicit_zero_long_term_shear_on_both_axes() {
+    let mut model = super::tests::column_and_beam_model();
+    model.elements.truncate(1);
+    let elem = model.elements[0].id;
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        biaxial_shear: true,
+        ..Default::default()
+    };
+    let missing_weak =
+        "ultimate_gravity_missing: 静的二軸せん断に必要な弱軸の長期せん断力がありません";
+    for (strong, weak, reason) in [
+        (0.0, Some(-0.0), None),
+        (0.0, None, Some(missing_weak)),
+        (12000.0, None, Some(missing_weak)),
+        (12000.0, Some(0.0), Some("適用範囲外")),
+        (0.0, Some(-4000.0), Some("適用範囲外")),
+        (12000.0, Some(4000.0), Some("適用範囲外")),
+    ] {
+        let demand = MemberDemand {
+            q_long: Some(strong),
+            q_long_weak: weak,
+            ..MemberDemand::axial(150000.0)
+        };
+        let checks = collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts).unwrap();
+        let check = &checks[0];
+        assert!(check.shear_margin > 1.0);
+        if let Some(reason) = reason {
+            assert!(!check.ok);
+            assert_eq!(check.biaxial_shear_margin, None);
+            assert_resolved_demand_context(
+                check.unchecked_reason.as_deref().unwrap(),
+                reason,
+                elem.0,
+            );
+        } else {
+            assert!(check.ok);
+            assert_eq!(check.unchecked_reason, None);
+            assert!((check.biaxial_shear_margin.unwrap() - 2.083725).abs() < 1e-6);
+        }
+    }
+    let missing_strong = MemberDemand {
+        q_long_weak: Some(0.0),
+        ..MemberDemand::axial(150000.0)
+    };
+    let reason = collect_rc_ultimate_checks(&model, &[(elem, missing_strong)], &opts).unwrap_err();
+    assert_resolved_demand_context(&reason, "ultimate_gravity_missing", elem.0);
+}
+
+#[test]
+fn static_biaxial_shear_keeps_the_strong_axis_failure_from_issue_1412() {
+    let mut model = super::tests::column_and_beam_model();
+    model.elements.truncate(1);
+    let elem = model.elements[0].id;
+    let mut opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    let demand = MemberDemand {
+        q_long: Some(500000.0),
+        ..MemberDemand::axial(150000.0)
+    };
+    let uniaxial = collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts).unwrap();
+    assert!(!uniaxial[0].ok);
+    assert!((uniaxial[0].shear_margin - 0.916367).abs() < 1e-6);
+    opts.biaxial_shear = true;
+    for weak in [None, Some(0.0), Some(4000.0)] {
+        let demand = MemberDemand {
+            q_long_weak: weak,
+            ..demand
+        };
+        let checks = collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts).unwrap();
+        assert!(!checks[0].ok);
+        assert_eq!(checks[0].unchecked_reason, None);
+        assert_eq!(checks[0].biaxial_shear_margin, None);
+        assert_eq!(checks[0].shear_margin, uniaxial[0].shear_margin);
+    }
+    let gravity_only = MemberDemand {
+        q_long: Some(800000.0),
+        q_long_weak: Some(0.0),
+        ..MemberDemand::axial(20000000.0)
+    };
+    let checks = collect_rc_ultimate_checks(&model, &[(elem, gravity_only)], &opts).unwrap();
+    assert_eq!(checks[0].qmu, 0.0);
+    assert_eq!(checks[0].shear_margin, 0.0);
+    assert!(!checks[0].ok);
+    assert_eq!(checks[0].unchecked_reason, None);
+}
+
+#[test]
+fn static_biaxial_shear_keeps_independently_failed_bending_check() {
+    let mut model = super::tests::column_and_beam_model();
+    model.elements.truncate(1);
+    let elem = model.elements[0].id;
+    let demand = MemberDemand {
+        q_long: Some(0.0),
+        q_long_weak: Some(4000.0),
+        mz: 1.0e9,
+        ..MemberDemand::axial(150000.0)
+    };
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        biaxial_shear: true,
+        biaxial_bending: true,
+        ..Default::default()
+    };
+    let checks = collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts).unwrap();
+    let check = &checks[0];
+    assert!(!check.ok);
+    assert_eq!(check.unchecked_reason, None);
+    assert_eq!(check.biaxial_shear_margin, None);
+    assert!(check.shear_margin >= 1.0);
+    assert!(check.biaxial_bending_margin.unwrap() < 1.0);
+}
+
+#[test]
 fn direct_rc_total_uses_total_q_once_and_rejects_nonunit_amplification_and_added_ql() {
     let model = super::tests::column_and_beam_model();
-    let mut opts = UltimateShearOptions::default();
+    let mut opts = UltimateShearOptions {
+        biaxial_shear: true,
+        ..Default::default()
+    };
     let mut demand: Vec<_> = model
         .elements
         .iter()
         .map(|e| {
             (
                 e.id,
-                MemberDemand::from_pushover(150000.0, 0.0, 0.0, 92000.0, 0.0, 0.0),
+                MemberDemand::from_pushover(150000.0, 0.0, 0.0, 92000.0, -66000.0, 0.0),
             )
         })
         .collect();
@@ -99,10 +218,22 @@ fn direct_rc_total_uses_total_q_once_and_rejects_nonunit_amplification_and_added
             check.elem.0, check.qsu, check.shear_margin
         );
     }
+    let column = &forward[0];
+    assert!(column.ok);
+    assert_eq!(column.unchecked_reason, None);
+    assert!(
+        (column.biaxial_shear_margin.unwrap() - 725654.571 / 92000.0_f64.hypot(66000.0)).abs()
+            < 1e-7
+    );
     for (_, d) in &mut demand {
         d.shear = Some(-68000.0);
+        d.shear_weak = Some(66000.0);
     }
     let reverse = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
+    assert!(
+        (reverse[0].biaxial_shear_margin.unwrap() - 725654.571 / 68000.0_f64.hypot(66000.0)).abs()
+            < 1e-7
+    );
     for (a, b) in forward.iter().zip(&reverse) {
         assert_eq!(b.qmu, 68000.0);
         assert!((b.shear_margin / a.shear_margin - 92000.0 / 68000.0).abs() < 1e-12);
@@ -116,6 +247,16 @@ fn direct_rc_total_uses_total_q_once_and_rejects_nonunit_amplification_and_added
     assert!(collect_rc_ultimate_checks(&model, &demand, &opts)
         .unwrap_err()
         .contains("ultimate_total_unsupported"));
+    demand[0].1.q_long = None;
+    for (weak, cause) in [
+        (Some(0.0), "ultimate_total_unsupported"),
+        (Some(500.0), "ultimate_total_unsupported"),
+        (Some(f64::NAN), "ultimate_demand_nonfinite"),
+    ] {
+        demand[0].1.q_long_weak = weak;
+        let reason = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap_err();
+        assert_resolved_demand_context(&reason, cause, model.elements[0].id.0);
+    }
 }
 
 #[test]

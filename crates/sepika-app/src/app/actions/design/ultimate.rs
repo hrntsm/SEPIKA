@@ -1,7 +1,7 @@
 use super::super::*;
 
 impl App {
-    /// RC部材の終局検定。必要な重力需要・確定応答が不足すればエラーを返す。
+    /// RC部材の終局検定。必須需要の不足はエラー、二軸せん断の適用条件不足は部材別の未検定理由を返す。
     pub fn compute_ultimate_checks(
         &mut self,
     ) -> Result<Vec<sepika_design_jp::ultimate::UltimateCheck>, String> {

@@ -13,19 +13,14 @@ pub fn q_long_map_from_member_forces(
 ) -> HashMap<ElemId, f64> {
     member_forces
         .iter()
-        .map(|(id, mf)| {
-            (
-                *id,
-                mf.at.iter().map(|(_, f)| f[1].abs()).fold(0.0, f64::max),
-            )
-        })
+        .map(|(id, mf)| (*id, max_abs_force(mf, 1)))
         .collect()
 }
 
 /// 静的内力から終局検定用の部材需要を組み立てる。
 ///
 /// 軸力は引張正の始端値を圧縮正へ変換し、曲げは部材内の最大絶対値を採用する。
-/// `q_long_by_elem` は `None` なら未設定。
+/// `q_long_by_elem` がない場合は強軸 QL を未設定とする。弱軸 QL は設定しない。
 pub fn member_demand_from_static_forces(
     member_forces: &[(ElemId, MemberForces)],
     q_long_by_elem: Option<&HashMap<ElemId, f64>>,
@@ -33,21 +28,31 @@ pub fn member_demand_from_static_forces(
     member_forces
         .iter()
         .filter_map(|(id, mf)| {
-            let n_axial = mf.at.first().map(|(_, f)| -f[0])?;
-            let mz = mf.at.iter().map(|(_, f)| f[5].abs()).fold(0.0, f64::max);
-            let my = mf.at.iter().map(|(_, f)| f[4].abs()).fold(0.0, f64::max);
             Some((
                 *id,
                 MemberDemand {
-                    n_axial,
-                    mz,
-                    my,
                     q_long: q_long_by_elem.and_then(|m| m.get(id).copied()),
-                    ..Default::default()
+                    ..static_member_demand(mf)?
                 },
             ))
         })
         .collect()
+}
+
+fn static_member_demand(mf: &MemberForces) -> Option<MemberDemand> {
+    Some(MemberDemand {
+        n_axial: -mf.at.first()?.1[0],
+        mz: max_abs_force(mf, 5),
+        my: max_abs_force(mf, 4),
+        ..Default::default()
+    })
+}
+
+fn max_abs_force(mf: &MemberForces, component: usize) -> f64 {
+    mf.at
+        .iter()
+        .map(|(_, force)| force[component].abs())
+        .fold(0.0, f64::max)
 }
 
 /// 増分解析（プッシュオーバー）応答から終局検定用の部材需要を組み立てる。
@@ -93,7 +98,7 @@ pub fn member_demand_from_pushover(
     )
 }
 
-/// 保存長期termsの同一部材・同一位置6成分から静的ヒンジ需要を作る。
+/// 保存長期termsの同一部材・同一位置6成分から、両軸の QL を含む静的ヒンジ需要を作る。
 /// 必要ケース・部材・評価位置・有限値が不完全なら理由付きで拒否する。
 pub fn complete_ultimate_static_demand<F>(
     model: &sepika_core::model::Model,
@@ -231,8 +236,19 @@ where
             member.0
         ));
     }
-    let ql = q_long_map_from_member_forces(&forces);
-    Ok(member_demand_from_static_forces(&forces, Some(&ql)))
+    Ok(forces
+        .iter()
+        .filter_map(|(id, mf)| {
+            Some((
+                *id,
+                MemberDemand {
+                    q_long: Some(max_abs_force(mf, 1)),
+                    q_long_weak: Some(max_abs_force(mf, 2)),
+                    ..static_member_demand(mf)?
+                },
+            ))
+        })
+        .collect())
 }
 
 #[cfg(test)]

@@ -517,6 +517,7 @@ fn test_ultimate_check_biaxial_shear() {
             ElemId(0),
             MemberDemand {
                 q_long: Some(0.0),
+                q_long_weak: Some(0.0),
                 ..MemberDemand::axial(2_000_000.0)
             },
         ),

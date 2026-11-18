@@ -134,8 +134,8 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
         ui.horizontal(|ui| {
             ui.checkbox(&mut app.core.ultimate_biaxial_shear, "柱を2軸せん断で検定")
                 .on_hover_text(
-                    "RC 柱のせん断余裕度を 2 軸せん断 1/((Qmx/Qux)²+(Qmy/Quy)²)^(1/2) として\
-                 検定します（採用応力）。Qsu/Qmu 列は 2 軸合成値を表示します。",
+                    "静的・両端ヒンジ略算の二軸せん断は、両軸の長期せん断力がゼロの場合に算定します。\
+                     確定総応答では初期重力を含む両軸の総せん断力を使います。",
                 );
             ui.checkbox(&mut app.core.ultimate_biaxial_bending, "柱を2軸曲げで検定")
                 .on_hover_text(
@@ -165,19 +165,30 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     });
     match app.compute_ultimate_checks() {
         Err(msg) => {
-            ui.colored_label(crate::theme::UI_MUTED, &msg);
+            ui.colored_label(crate::theme::UI_MUTED, format!("未検定（{msg}）"));
             let needs_analysis = msg.contains("静的") || msg.contains("解析");
             if needs_analysis && ui.button("▶ 解析タブへ").clicked() {
                 app.ui.view.active_tab = crate::app::Tab::Analysis;
             }
         }
         Ok(checks) => {
-            let ng = checks.iter().filter(|c| !c.ok).count();
+            let unchecked = checks
+                .iter()
+                .filter(|c| c.unchecked_reason.is_some())
+                .count();
+            let ng = checks
+                .iter()
+                .filter(|c| !c.ok && c.unchecked_reason.is_none())
+                .count();
             ui.horizontal(|ui| {
                 ui.label(format!("対象部材 {} 本", checks.len()));
                 if ng > 0 {
                     ui.colored_label(crate::theme::ERROR_RED, format!("NG {} 本", ng));
-                } else {
+                }
+                if unchecked > 0 {
+                    ui.colored_label(crate::theme::UI_MUTED, format!("未検定 {} 本", unchecked));
+                }
+                if ng == 0 && unchecked == 0 {
                     ui.colored_label(
                         crate::theme::GOOD_GREEN,
                         "対象部材の限定検定 OK（全体判定は未完了）",
@@ -187,6 +198,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             ui.add_space(4.0);
 
             let bond = app.core.ultimate_include_bond;
+            let biaxial_shear = app.core.ultimate_biaxial_shear;
             let (qsu_hdr, ratio_hdr, qbu_hdr, bond_ratio_hdr) = if app.core.ultimate_shear_ductility
             {
                 ("Vu[kN]", "Vu/Qmu", "Vbu[kN]", "Vbu/Qmu")
@@ -202,10 +214,14 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     Col::num("Mu[kN·m]"),
                     Col::num("Qmu[kN]"),
                     Col::num(qsu_hdr),
-                    Col::num(ratio_hdr),
+                    Col::num(if biaxial_shear {
+                        "せん断余裕度"
+                    } else {
+                        ratio_hdr
+                    }),
                     Col::num(qbu_hdr),
                     Col::num(bond_ratio_hdr),
-                    Col::label("判定"),
+                    Col::label("検定結果"),
                 ],
                 checks.len(),
                 |row| {
@@ -227,8 +243,20 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                         ui.label(format!("{:.1}", force_kn(c.qsu)));
                     });
                     row.col(|ui| {
-                        let m = c.biaxial_shear_margin.unwrap_or(c.shear_margin);
-                        ui.colored_label(margin_color(m), format!("{m:.2}"));
+                        if let Some(m) = c.biaxial_shear_margin {
+                            ui.colored_label(margin_color(m), format!("二軸 {m:.2}"));
+                        } else if biaxial_shear && c.kind == sepika_design_jp::MemberKind::Column {
+                            let m = c.shear_margin;
+                            let color = if m < 1.0 {
+                                crate::theme::ERROR_RED
+                            } else {
+                                crate::theme::UI_MUTED
+                            };
+                            ui.colored_label(color, format!("強軸 {m:.2}"));
+                        } else {
+                            let m = c.shear_margin;
+                            ui.colored_label(margin_color(m), format!("{m:.2}"));
+                        }
                     });
                     row.col(|ui| {
                         if bond {
@@ -248,7 +276,10 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                         }
                     });
                     row.col(|ui| {
-                        if c.ok {
+                        if let Some(reason) = &c.unchecked_reason {
+                            ui.colored_label(crate::theme::UI_MUTED, "未検定")
+                                .on_hover_text(reason);
+                        } else if c.ok {
                             ui.colored_label(crate::theme::GOOD_GREEN, "OK");
                         } else {
                             ui.colored_label(crate::theme::ERROR_RED, "NG");
