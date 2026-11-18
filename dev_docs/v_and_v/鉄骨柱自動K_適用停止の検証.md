@@ -8,13 +8,13 @@
 
 同じ採用圧縮式で全荷重の軸力曲げ成分比1.014743328291276、両柱3位置の6結果はNG。独立長を保持して荷重のみ半減すると同比0.507371664145638、6結果は有限OKとなる。圧縮式そのものの規準適合、設計荷重での弾性座屈発生は検証対象としない。
 
-## 検証する契約
+## #1398実施時点に検証した契約
 
 - 通常S柱は両軸直接指定のいずれかが不足すれば対象柱・不足軸・理由付き未検定。支持・梁を剛にしただけで層内軸力分布・同時座屈成立としない。
 - 非有限・負の直接値を自動Kまたは部材長へ補完しない。モデル直接入力0は明示的な座屈無視の既存契約を保持する。
 - GUIの解析結果・保存と再読込、MCPの単独ケース・保存組合せは、未検定理由を保ち全体成功へ変換しない。
 - 検定契約56の保存結果は失効し、解析結果を保持して新契約57で再検定できる。
-- primary材がSteelのCftBoxは通常S柱に分類せず、既存の自動K長による6位置の比を保持する。これはCFT係数法の安全性を承認する試験ではない。
+- primary材がSteelのCftBoxは通常S柱に分類せず、既存の自動K長による6位置の比を保持する。これはCFT係数法の安全性を承認する試験ではない。現行のCFT柱の適用条件は[#1400の検証記録](CFT柱の座屈長さ_Issue1400_2026-11.md)を参照。
 
 共有入力は`crates/sepika-design-jp/tests/fixtures/steel_column_k_model.rs`、公開共通検定は`tests/steel_column_k.rs`・`tests/steel_column_k_applicability.rs`、GUIは`sepika-app/src/app/steel_column_k_tests.rs`、MCPは`sepika-mcp/src/job/design_check.rs`の`column_k_mcp_keeps_both_columns_unchecked_for_case_and_combination`で検証する。
 
@@ -59,6 +59,6 @@
 
 ## 確認範囲と残る制約
 
-状態🔶。今回のVerificationは、危険側反例を成功として採用しない適用制限と、直接入力経路の有限な契約確認に限る。全架構Validation・全規準適合、実験照合、手動GUI操作・MCP実通信は未確認。全条件に対応する新計算法は追加しない。RC・SRC・CFTへの既存係数供給は変更せず、CFTの設計採用域は[#1400](https://github.com/hrntsm/SEPIKA/issues/1400)で追跡する。
+状態🔶。今回のVerificationは、危険側反例を成功として採用しない適用制限と、直接入力経路の有限な契約確認に限る。全架構Validation・全規準適合、実験照合、手動GUI操作・MCP実通信は未確認。全条件に対応する新計算法は追加しない。#1398実施時点ではRC・SRC・CFTへの既存係数供給を保持し、CFTの設計採用域の確認は[#1400](https://github.com/hrntsm/SEPIKA/issues/1400)とした。
 
 公開一次資料はAISC Engineering Journal [1967年p.43](https://ej.aisc.org/index.php/engj/article/download/72/71)（基礎G10から理想無摩擦ピンを除く）、[1995年p.65式(2)・Fig.4](https://ej.aisc.org/index.php/engj/article/download/641/640/640)（分母6・層内全柱同時座屈仮定）。公開資料の限定照合を、規準全体の承認へ拡張しない。

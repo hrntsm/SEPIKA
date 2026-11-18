@@ -158,11 +158,13 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0109](0109-stb-reference-placement.md) | accepted | STBの配置基準を材軸偏心へ変換し未確定の幾何を拒否する |
 
-| [0110](0110-steel-column-explicit-buckling-length.md) | accepted | 通常S柱は両軸の座屈長さ直接指定を必要とする |
+| [0110](0110-steel-column-explicit-buckling-length.md) | partially superseded by ADR-0113 | 通常S柱は両軸の座屈長さ直接指定を必要とする |
 
 | [0111](0111-rc-beam-bending-applicability.md) | accepted | RC梁の矩形許容曲げを上下同重心かつ各段が中立軸の想定側にある配筋に制限する |
 
 | [0112](0112-flat-bar-shear-unresolved.md) | accepted | 平鋼の柱・大梁のせん断に検定不能を適用する |
+
+| [0113](0113-cft-column-explicit-buckling-length.md) | accepted | CFT柱は両軸に有限な正の座屈長さ直接指定を必要とする |
 
 ## 規約
 

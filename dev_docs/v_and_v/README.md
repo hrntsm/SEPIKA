@@ -1,8 +1,12 @@
 # V&V レポート（検証・妥当性確認）
 
+## CFT柱の座屈長さ（#1400）
+
+[原典・独立有限例・製品入口](CFT柱の座屈長さ_Issue1400_2026-11.md)に、CFT架構で自動Kを一般採用できない条件、固定自由柱の許容圧縮と軸終局への入力影響、両軸直接指定と旧検定の失効を記録する。状態🔶。耐力式全体と法定適用除外のValidationは対象外。
+
 ## 鉄骨柱自動Kの適用停止（#1398）
 
-[適用停止と直接指定の確認記録](鉄骨柱自動K_適用停止の検証.md)に、理想ピン有限ポータルの理由付き未検定、独立長による6位置NGと低荷重の有限OK、GUI/MCP・保存失効の確認範囲を記録する。状態🔶。通常S柱は自動採用域未確定のため両軸直接指定を要求する。全架構Validationと新係数法は未確認で、CFTの既存採用域は[#1400](https://github.com/hrntsm/SEPIKA/issues/1400)で追跡する。
+[適用停止と直接指定の確認記録](鉄骨柱自動K_適用停止の検証.md)に、理想ピン有限ポータルの理由付き未検定、独立長による6位置NGと低荷重の有限OK、GUI/MCP・保存失効の確認範囲を記録する。状態🔶。通常S柱は自動採用域未確定のため両軸直接指定を要求する。全架構Validationと新係数法は未確認で、CFTの確認は[#1400の記録](CFT柱の座屈長さ_Issue1400_2026-11.md)を参照。
 
 ## 鉄骨柱Kの端部・架構条件（#950）
 
@@ -755,6 +759,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 5a | 平面凸四角形シェル（面積・質量・ドリリング） | sepika-element / sepika-app | tests/shell_quadrilateral.rs・result_contract_tests.rs | [Issue1154の独立値・公開入口](平面凸四角形シェル面積_Issue1154.md#公開入口と観測) | P1.5 | 🔶（有限Verification、全体応答・Validation未） |
 | 6 | MITC4 シェル（せん断/収束） | sepika-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
 | 916 | CFT充填コンクリートの法定Fc下限 | sepika-design-jp / sepika-core / sepika-app | cft/mod.rs・result_contract.rs・app/result_contract_tests.rs | [独立境界と製品入口](CFT充填Fc下限_Issue916_2026-10.md#独立境界と製品入口) | 公開／App／保存 | 🔶（下限Verification、手動GUI・Validation未） |
+| 1400 | CFT柱の座屈長さ | sepika-design-jp / sepika-app / sepika-mcp | tests/cft_column_buckling.rs・app/cft_column_buckling_tests.rs・job/design_check.rs | [原典・独立有限例・回帰](CFT柱の座屈長さ_Issue1400_2026-11.md) | 公開／App／MCP／保存 | 🔶（境界条件と採用式への入力のVerification。耐力式全体のValidationは対象外） |
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
 | 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像と現行式の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、新規数値試験なし | 原典 | 🔶（N/A/F・式の採否未確定、Validation未） |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
