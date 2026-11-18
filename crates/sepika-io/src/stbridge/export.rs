@@ -342,6 +342,21 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     s.push_str("  <StbModel>\n");
 
     s.push_str("    <StbNodes>\n");
+    let preserve_large_coordinates = model
+        .elements
+        .iter()
+        .any(|element| element.end_offsets_mm[0] != element.end_offsets_mm[1])
+        || model
+            .beams()
+            .chain(model.posts())
+            .any(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1]);
+    let node_coordinate = |value: f64| {
+        if preserve_large_coordinates && !(i64::MIN as f64..-(i64::MIN as f64)).contains(&value) {
+            value.to_string()
+        } else {
+            fmt(value)
+        }
+    };
     for n in model
         .nodes
         .iter()
@@ -350,9 +365,9 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
         s.push_str(&format!(
             "      <StbNode id=\"{}\" X=\"{}\" Y=\"{}\" Z=\"{}\" kind=\"ON_GRID\"{} />\n",
             node_sid(model, n.id),
-            fmt(n.coord[0]),
-            fmt(n.coord[1]),
-            fmt(n.coord[2]),
+            node_coordinate(n.coord[0]),
+            node_coordinate(n.coord[1]),
+            node_coordinate(n.coord[2]),
             model
                 .stb_node_ids
                 .iter()
@@ -541,10 +556,7 @@ fn validate_unequal_offset_roundtrip(
             }
         }
     }
-    if secondary.is_some() {
-        validate_secondary_roundtrip(model, &reread, primary_order)?;
-    }
-    Ok(())
+    validate_secondary_roundtrip(model, &reread, primary_order)
 }
 
 fn secondary_roundtrip_error(id: SecondaryMemberId, detail: &str) -> StbError {
@@ -609,10 +621,35 @@ fn validate_secondary_roundtrip(
             .display_local_axis
             .is_some_and(|axis| axis.reverse_width)
     };
-    let mut pending: Vec<_> = pairs
-        .into_iter()
-        .filter(|(member, _)| member.end_offsets_mm[0] != member.end_offsets_mm[1])
+    let mut supports: Vec<_> = model
+        .elements
+        .iter()
+        .filter(|element| element.end_offsets_mm[0] != element.end_offsets_mm[1])
+        .map(|element| SupportMemberId::Primary(element.id))
         .collect();
+    let mut dependents = std::collections::HashMap::<_, Vec<_>>::new();
+    let mut pending = Vec::new();
+    for pair in pairs {
+        let original = pair.0;
+        if original.end_offsets_mm[0] != original.end_offsets_mm[1] {
+            supports.push(SupportMemberId::Secondary(original.id));
+            pending.push(pair);
+        }
+        for anchor in original.ends.anchors() {
+            dependents.entry(anchor.support).or_default().push(pair);
+        }
+    }
+    // 祖先の確認で見つかる同値部材から下流へ広げると、異値に依存しない枝まで対象になる。
+    while let Some(support) = supports.pop() {
+        if let Some(children) = dependents.remove(&support) {
+            supports.extend(
+                children
+                    .iter()
+                    .map(|(child, _)| SupportMemberId::Secondary(child.id)),
+            );
+            pending.extend(children);
+        }
+    }
     let mut checked = std::collections::HashSet::new();
     while let Some((original, member)) = pending.pop() {
         if !checked.insert(original.id) {
@@ -1300,7 +1337,7 @@ fn stb_walls_for_export(model: &Model) -> Vec<StbWallOut> {
 }
 
 pub(super) fn fmt(x: f64) -> String {
-    if x == x.trunc() && (i64::MIN as f64..-(i64::MIN as f64)).contains(&x) {
+    if x == x.trunc() && x.is_finite() {
         format!("{}", x as i64)
     } else {
         format!("{x}")

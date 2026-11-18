@@ -165,7 +165,7 @@ fn axial_offsets_on_large_node_coordinates_roundtrip_without_integer_saturation(
             r#"<StbNode id="3" X="6000""#,
             r#"<StbNode id="3" X="9223372036855824384""#,
         );
-    let model = import_stbridge(&xml).unwrap();
+    let mut model = import_stbridge(&xml).unwrap();
     let expected = [
         [9_223_372_036_854_784_000.0, 0.0, 2700.0],
         [9_223_372_036_855_840_768.0, 0.0, 2700.0],
@@ -173,6 +173,16 @@ fn axial_offsets_on_large_node_coordinates_roundtrip_without_integer_saturation(
     assert_eq!(ends(&model, 0), expected);
     let reread = import_stbridge(&export_stbridge(&model).unwrap()).unwrap();
     assert_eq!(ends(&reread, 0), expected);
+
+    model.elements[0].end_offsets_mm[1] = model.elements[0].end_offsets_mm[0];
+    let output = export_stbridge(&model).unwrap();
+    assert_eq!(output, export_stbridge_with_report(&model).unwrap().0);
+    for id in [2, 3] {
+        assert!(
+            output.contains(&format!(r#"<StbNode id="{id}" X="9223372036854775807""#)),
+            "{output}",
+        );
+    }
 }
 
 #[test]
@@ -694,13 +704,19 @@ fn secondary_axial_offsets_reject_a_changed_direct_parent_support() {
             .actual_ends,
         original.actual_ends
     );
-    for error in [
-        export_stbridge(&model).unwrap_err(),
-        export_stbridge_with_report(&model).unwrap_err(),
-    ] {
-        let error = error.to_string();
-        for expected in ["二次部材 ID 0", "異値offset", "支持先"] {
-            assert!(error.contains(expected), "{error}");
+    for unequal_primary in [false, true] {
+        if unequal_primary {
+            model.unassigned_beams[0].end_offsets_mm[0][1] = 0.0;
+            model.elements[alternate.index()].end_offsets_mm[0][..2].fill(20.0);
+        }
+        for error in [
+            export_stbridge(&model).unwrap_err(),
+            export_stbridge_with_report(&model).unwrap_err(),
+        ] {
+            let error = error.to_string();
+            for expected in ["二次部材 ID 0", "異値offset", "支持先"] {
+                assert!(error.contains(expected), "{error}");
+            }
         }
     }
 }
@@ -848,6 +864,73 @@ fn secondary_axial_offsets_reject_a_changed_support_above_the_direct_parent() {
         .unwrap()
         .end_offsets_mm[0][0] = 0.0;
     export_stbridge(&model).unwrap();
+}
+
+#[test]
+fn equal_offset_secondary_cannot_be_moved_from_an_unequal_parent_on_export() {
+    use sepika_core::model::SecondaryMemberEnds;
+
+    let members = r#"<StbGirders><StbGirder id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S"/><StbGirder id="2" id_node_start="10" id_node_end="11" id_section="1" kind_structure="S"/></StbGirders>
+<StbBeams>
+    <StbBeam id="1" name="parent" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S"/>
+    <StbBeam id="2" name="child" id_node_start="12" id_node_end="13" id_section="1" kind_structure="S"/>
+</StbBeams>"#;
+    let xml = input("", members, H).replace(
+        "</StbNodes>",
+        r#"<StbNode id="10" X="2500" Y="500" Z="3000"/><StbNode id="11" X="3500" Y="1500" Z="3000"/>
+<StbNode id="12" X="3000" Y="1000" Z="3000"/><StbNode id="13" X="4500" Y="1000" Z="3000"/></StbNodes>"#,
+    );
+    let mut model = import_stbridge(&xml).unwrap();
+    let parent = model
+        .beams()
+        .find(|member| member.name == "parent")
+        .unwrap()
+        .id;
+    let child = model
+        .beams()
+        .find(|member| member.name == "child")
+        .unwrap()
+        .id;
+    let alternate = model.elements[1].id;
+    let member = model
+        .unassigned_beams
+        .iter_mut()
+        .find(|member| member.id == child)
+        .unwrap();
+    let SecondaryMemberEnds::Cantilever { support, .. } = &mut member.ends else {
+        panic!("子小梁には一つの支持端がある");
+    };
+    assert_eq!(support.support, SupportMemberId::Primary(alternate));
+    assert_eq!(support.position, 0.5);
+    support.support = SupportMemberId::Secondary(parent);
+    assert_eq!(
+        model
+            .beam_placement(SupportMemberId::Secondary(child))
+            .unwrap()
+            .actual_ends,
+        [[3000.0, 1000.0, 2700.0], [4500.0, 1000.0, 2700.0]],
+    );
+
+    export_stbridge(&model).unwrap();
+    model.elements[alternate.index()].end_offsets_mm[0][..2].fill(20.0);
+    export_stbridge(&model).unwrap();
+    model.elements[alternate.index()].end_offsets_mm[0][..2].fill(0.0);
+
+    model
+        .unassigned_beams
+        .iter_mut()
+        .find(|member| member.id == parent)
+        .unwrap()
+        .end_offsets_mm[0][1] = 20.0;
+    for error in [
+        export_stbridge(&model).unwrap_err(),
+        export_stbridge_with_report(&model).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in ["二次部材 ID 1", "異値offsetの支持関係", "支持先"] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
 }
 
 #[test]
