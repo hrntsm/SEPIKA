@@ -15,6 +15,9 @@ pub(crate) mod cft_long_case2_model;
 #[cfg(feature = "mcp")]
 #[path = "../tests/support/cft_long_case2_reference.rs"]
 pub(crate) mod cft_long_case2_reference;
+#[cfg(feature = "mcp")]
+#[path = "../../sepika-design-jp/tests/fixtures/cft_ultimate_strength_model.rs"]
+pub(crate) mod cft_ultimate_strength_input;
 #[path = "../tests/support/column_model.rs"]
 mod column_model;
 

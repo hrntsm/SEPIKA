@@ -68,6 +68,7 @@ fn cft_section_props(shape: &SectionShape) -> Result<Option<CftSectionProps>, St
 }
 
 /// CFT柱の終局検定。設計軸力 [N] は圧縮正。材料・軸力・両軸の直接座屈長さの不足や不正値は理由付きエラー。
+/// 充填コンクリートのFcが24 N/mm²未満の場合も理由付きエラー。
 /// 各直接長さから求めた軸圧縮耐力の小さい方を採り、同値なら強軸の長さで分類する。
 pub fn collect_cft_ultimate_checks(
     model: &Model,
@@ -96,6 +97,9 @@ pub fn collect_cft_ultimate_checks(
             .fc
             .filter(|v| v.is_finite() && *v > 0.0)
             .ok_or_else(|| format!("CFT 部材 {} の Fc が未設定または不正です", elem.id.0))?;
+        if let Some(reason) = crate::cft::concrete_strength_lower_bound_reason(fc) {
+            return Err(format!("CFT 部材 {}: {reason}", elem.id.0));
+        }
         let thick = match *shape {
             SectionShape::CftBox {
                 thick,

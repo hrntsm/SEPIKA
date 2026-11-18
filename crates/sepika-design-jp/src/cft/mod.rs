@@ -531,6 +531,15 @@ fn cft_pipe_check(
     })
 }
 
+pub(crate) fn concrete_strength_lower_bound_reason(fc_n_mm2: f64) -> Option<String> {
+    const MIN_FC_N_MM2: f64 = 24.0;
+    (fc_n_mm2 < MIN_FC_N_MM2).then(|| {
+        format!(
+            "充填コンクリートのFc={fc_n_mm2} N/mm²は告示464号第三2の下限{MIN_FC_N_MM2} N/mm²未満です"
+        )
+    })
+}
+
 /// CFT柱の断面検定（`CftBox`/`CftPipe`）。`ctx.kind` に依らず柱の式を適用する。
 /// 充填コンクリートのFc [N/mm²] が24未満の場合は理由付き未算定とする。
 /// 鋼管材料のE [N/mm²] は正の有限値を必要とし、数値的に算定不能なら理由付き未算定とする。
@@ -550,11 +559,9 @@ impl DesignCheck for CftDesign {
                 reason: "CFT検定: Fc未設定または不正（有限な正値が必要です）".to_string(),
             };
         }
-        if fc_raw < 24.0 {
+        if let Some(reason) = concrete_strength_lower_bound_reason(fc_raw) {
             return CheckOutcome::Skipped {
-                reason: format!(
-                    "CFT検定: 充填コンクリートのFc={fc_raw} N/mm²は告示464号第三2の下限24 N/mm²未満です"
-                ),
+                reason: format!("CFT検定: {reason}"),
             };
         }
         let Some(steel_mat) = ctx.steel_material.as_ref() else {

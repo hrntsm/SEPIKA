@@ -411,12 +411,67 @@ fn cft_class_label(class: sepika_design_jp::ultimate::CftColumnClass) -> &'stati
 }
 
 #[cfg(test)]
+use crate::app::cft_column_buckling_tests::input as cft_column_buckling_input;
+#[cfg(test)]
+#[path = "../../sepika-design-jp/tests/fixtures/cft_ultimate_strength_model.rs"]
+mod cft_ultimate_strength_input;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination};
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
     use sepika_solver::statics::analysis::SeismicDir;
+
+    #[test]
+    fn cft_ultimate_rejects_concrete_strength_below_statutory_minimum() {
+        for (fc_n_mm2, calculated) in [(23.999, false), (24.0, true), (24.001, true)] {
+            let mut app = App::default();
+            assert!(app.load_model(cft_ultimate_strength_input::circular_column(fc_n_mm2)));
+            app.run_linear_static(LoadCaseId(1));
+            app.run_linear_static(LoadCaseId(0));
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+
+            let output = egui::Context::default().run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1800.0, 1200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| ultimate_table(ui, &mut app),
+            );
+            let text = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            for label in ["全柱 OK", "軸OK", "Ncu[kN]", "Ntu[kN]", "強軸Mu(N-M)[kN·m]"] {
+                assert_eq!(text.contains(label), calculated, "{text}");
+            }
+            if !calculated {
+                for message in [
+                    "未検定（CFT 部材 0",
+                    "Fc=23.999 N/mm²",
+                    "告示464号第三2",
+                    "下限24 N/mm²",
+                ] {
+                    assert!(text.contains(message), "{text}");
+                }
+            }
+            assert_eq!(app.core.model.materials[0].fc, Some(fc_n_mm2));
+        }
+    }
 
     #[test]
     fn source_note_follows_nonfinal_confirmed_adoption_without_legacy_display_response() {
