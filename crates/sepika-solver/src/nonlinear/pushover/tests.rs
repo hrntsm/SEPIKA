@@ -7,6 +7,7 @@ use sepika_core::model::{
     MaterialCategory, Node, Section, Story,
 };
 use sepika_core::section_shape::SectionShape;
+use std::collections::BTreeMap;
 
 /// 基部の床（階の列の先頭）。階は床であり、その先頭が基部であることは
 /// `Model::layers` が依拠する不変条件のため、テストのモデルにも必ず置く。
@@ -1165,11 +1166,57 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
     }
 }
 
-// 手計算: Z=I/(depth/2)=166,660, My=σ_y·Z, Qu=4My/H=52,220 N（柱両端降伏・2柱）。
-// seismic_weight は崩壊荷重を上回る値に設定し、真に降伏到達させる。
+const PORTAL_COLUMN_ENDS: [(ElemId, u8); 4] = [
+    (ElemId(0), 0),
+    (ElemId(0), 1),
+    (ElemId(2), 0),
+    (ElemId(2), 1),
+];
+
+fn first_bending_yield_steps(hinges: &[HingeEvent]) -> BTreeMap<(ElemId, u8), u32> {
+    let mut first_steps = BTreeMap::new();
+    for event in hinges
+        .iter()
+        .filter(|h| matches!(h.level, HingeLevel::Yield | HingeLevel::Ultimate))
+    {
+        let end = (event.elem, u8::from(event.pos >= 0.5));
+        let first_step = first_steps.entry(end).or_insert(event.step);
+        *first_step = (*first_step).min(event.step);
+    }
+    first_steps
+}
+
 #[test]
-fn test_portal_frame_collapse_load() {
-    let qu_theory: f64 = 52_220.0;
+fn first_yield_steps_keep_simultaneous_ends_and_ignore_repeated_yield_and_cracks() {
+    let event = |step, elem, pos, level, ductility| HingeEvent {
+        step,
+        elem: ElemId(elem),
+        pos,
+        level,
+        ductility,
+    };
+    let hinges = [
+        event(2, 10, 0.0, HingeLevel::Crack, 0.5),
+        event(2, 20, 1.0, HingeLevel::Crack, 0.5),
+        event(3, 10, 0.0, HingeLevel::Yield, 1.0),
+        event(3, 10, 1.0, HingeLevel::Yield, 1.0),
+        event(4, 10, 0.0, HingeLevel::Ultimate, 4.0),
+        event(4, 10, 1.0, HingeLevel::Ultimate, 4.0),
+        event(5, 20, 0.0, HingeLevel::Ultimate, 4.0),
+        event(5, 20, 1.0, HingeLevel::Crack, 4.0),
+    ];
+    assert_eq!(
+        first_bending_yield_steps(&hinges),
+        BTreeMap::from([
+            ((ElemId(10), 0), 3),
+            ((ElemId(10), 1), 3),
+            ((ElemId(20), 0), 5),
+        ])
+    );
+}
+
+#[test]
+fn test_portal_frame_column_bases_yield_before_roof_ends() {
     let model = portal_frame_model(235.0, 600_000.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -1177,55 +1224,52 @@ fn test_portal_frame_collapse_load() {
     let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 80, 0.0)
         .expect("pushover should run end-to-end");
 
-    let yielded_hinges = result
-        .hinges
-        .iter()
-        .filter(|h| !matches!(h.level, HingeLevel::Crack))
-        .count();
-    assert!(
-        yielded_hinges >= 4,
-        "at least 4 yielded hinges expected for Overall mechanism, got {} (total hinges={})",
-        yielded_hinges,
-        result.hinges.len()
-    );
-
-    assert!(
-        !matches!(result.mechanism, MechanismType::Partial),
-        "mechanism should not be Partial for a collapsed portal frame"
-    );
-
+    let first_steps = first_bending_yield_steps(&result.hinges);
+    let left_base = first_steps[&(ElemId(0), 0)];
+    let right_base = first_steps[&(ElemId(2), 0)];
+    for end in [
+        (ElemId(0), 1),
+        (ElemId(1), 0),
+        (ElemId(1), 1),
+        (ElemId(2), 1),
+    ] {
+        assert!(
+            first_steps[&end] > left_base.max(right_base),
+            "上部材端 {end:?} は両柱脚の後に降伏する: {first_steps:?}"
+        );
+    }
+    assert!(matches!(result.mechanism, MechanismType::Overall));
     assert!(result.qu > 0.0, "qu should be positive, got {}", result.qu);
+}
 
-    // 最大ベースシアだけでは降伏到達点を捉えられないため、4番目の柱端降伏ステップで照合する。
-    let mut yield_steps: Vec<u32> = result
-        .hinges
-        .iter()
-        .filter(|h| !matches!(h.level, HingeLevel::Crack))
-        .map(|h| h.step)
-        .collect();
-    yield_steps.sort_unstable();
-    yield_steps.dedup();
-    assert!(
-        yield_steps.len() >= 4,
-        "need >=4 distinct yield steps for Overall mechanism, got {}: {:?}",
-        yield_steps.len(),
-        yield_steps
-    );
-    let mech_step = yield_steps[3];
-    let qu_observed = result
-        .capacity_curve
-        .iter()
-        .find(|c| c.step == mech_step)
-        .map(|c| c.base_shear)
-        .unwrap_or(0.0);
-    let rel_err = (qu_observed - qu_theory).abs() / qu_theory;
+#[test]
+fn test_portal_frame_collapse_load() {
+    let mut model = portal_frame_rigid_zone_model(50.0, 30_000.0, 0.0);
+    model.sections[0] = SectionShape::SteelFlatBar {
+        width: 100.0,
+        thick: 100.0,
+    }
+    .to_section(SectionId(0), "column".into());
+    model.sections[0].material = Some(MaterialId(0));
+    for column in [0, 2] {
+        model.elements[column].kind = ElementKind::Beam;
+        model.elements[column].force_regime = ForceRegime::UniaxialBendingShear;
+    }
+    model.materials[0].shear = Some(78_846.0);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 80, 100.0)
+        .expect("pushover should run end-to-end");
+    let point = column_sway_mechanism_point(&result);
+    let mp_nmm = 50.0 * 100.0 * 100.0_f64.powi(2) / 4.0;
+    let theory_n = 4.0 * mp_nmm / 3000.0;
+    let rel_err = (point.base_shear / theory_n - 1.0).abs();
     assert!(
         rel_err < 0.30,
-        "observed_qu={} at step {} deviates from Qu_theory={} by {:.1}% (>30%)",
-        qu_observed,
-        mech_step,
-        qu_theory,
-        rel_err * 100.0
+        "柱4材端が降伏したステップ {} のせん断力 {:.1} N が理論値 {theory_n:.1} N から {:.1}% 離れている",
+        point.step,
+        point.base_shear,
+        rel_err * 100.0,
     );
 }
 
@@ -3035,7 +3079,7 @@ fn test_horizontal_force_sums_wall_bottom_nodes() {
 ///
 /// 柱は 100×100 のファイバー要素で両端固定、はりは柱より十分強い断面
 /// （300×300）として弾性に留め、**柱の両端 4 ヒンジによる崩壊機構**に固定する。
-/// これにより崩壊荷重は手計算 Qu = 4·My/L'（L' = 柱の可撓長）で照合できる。
+/// 4柱端の曲げ降伏がそろったステップのベースシアを比較する。
 /// `rigid` に剛域長 λ [mm] を与えると、柱の上下端に λ の剛域を設定する。
 fn portal_frame_rigid_zone_model(fy: f64, seismic_weight: f64, rigid: f64) -> Model {
     let mut model = portal_frame_model(fy, seismic_weight);
@@ -3077,33 +3121,29 @@ fn portal_frame_rigid_zone_model(fy: f64, seismic_weight: f64, rigid: f64) -> Mo
     model
 }
 
-/// 4 個目の降伏ヒンジ（柱両端×2 本で運動学的機構が成立する）が揃ったステップの
-/// ベースシアを「観測崩壊荷重」として返す。
-///
-/// ヒンジは (部材, 材端) で重複を除いて数える（`determine_mechanism` の
-/// 運動学的ゲートと同じ数え方）。
-fn observed_collapse_shear(result: &PushoverResult) -> Option<f64> {
-    let mut seen: std::collections::BTreeSet<(u32, u8)> = std::collections::BTreeSet::new();
-    let mut mech_step = None;
-    let mut events: Vec<&HingeEvent> = result
-        .hinges
-        .iter()
-        .filter(|h| !matches!(h.level, HingeLevel::Crack))
-        .collect();
-    events.sort_by_key(|h| h.step);
-    for h in events {
-        seen.insert((h.elem.index() as u32, if h.pos < 0.5 { 0 } else { 1 }));
-        if seen.len() >= 4 {
-            mech_step = Some(h.step);
-            break;
-        }
+fn column_sway_mechanism_point(result: &PushoverResult) -> &CapacityPoint {
+    assert!(matches!(result.mechanism, MechanismType::Overall));
+    let first_steps = first_bending_yield_steps(&result.hinges);
+    assert_eq!(
+        first_steps.keys().copied().collect::<Vec<_>>(),
+        PORTAL_COLUMN_ENDS,
+        "両柱の両端だけが曲げ降伏すること"
+    );
+    let step = *first_steps.values().max().expect("両柱の両端が降伏");
+    for (elem, end) in PORTAL_COLUMN_ENDS {
+        assert!(
+            result.hinges.iter().any(|h| h.step == step
+                && h.elem == elem
+                && u8::from(h.pos >= 0.5) == end
+                && matches!(h.level, HingeLevel::Yield | HingeLevel::Ultimate)),
+            "ステップ {step} で柱端 ({elem:?}, {end}) が降伏状態にない"
+        );
     }
-    let mech_step = mech_step?;
     result
         .capacity_curve
         .iter()
-        .find(|c| c.step == mech_step)
-        .map(|c| c.base_shear)
+        .find(|point| point.step == step)
+        .expect("柱4材端の降伏と同じ確定ステップの性能曲線点")
 }
 
 fn run_rigid_zone_pushover(rigid: f64) -> PushoverResult {
@@ -3117,14 +3157,8 @@ fn run_rigid_zone_pushover(rigid: f64) -> PushoverResult {
 /// 系レベル V&V: 剛域つき門形フレームの 3 保証を、剛域なし・ありの 2 解析（1 fixture）
 /// で確認する。
 ///
-/// (1) **崩壊荷重が可撓長基準の理論値**に一致すること。柱両端 4 ヒンジの崩壊機構では
-///     Qu = 4·My/L'（L' = 柱の可撓長）であり、剛域を与えると L' = H − 2λ に短くなる
-///     ぶん崩壊荷重は H/L' 倍になる。断面のファイバー離散化や荷重ステップの量子化に
-///     よる誤差を打ち消すため、**剛域なしとの比**で照合する（絶対値は既存
-///     `test_portal_frame_collapse_load` が別途照合済み）。
-/// (2) **柱の崩壊機構が成立する**こと。はりを強くしているため柱の全体機構になり、
-///     崩壊ヒンジはすべて柱（要素 0・2）に生じる。機構種別は Ds の機構補正
-///     （`sepika_design_jp::secondary::story_ds`）へ直接効く。
+/// (1) **柱4材端が降伏したステップのせん断力比**が可撓長の比 H/L' に一致すること。
+/// (2) **両柱の上下端で曲げ降伏し、全体機構と判定される**こと。
 /// (3) **層の弾性剛性が可撓長の三乗で増大する**こと。両端固定柱の層せん断剛性は
 ///     12EI/L'³（節点変位基準。剛体アームは変形しない）で、剛域を与えると (H/L')³ 倍
 ///     になる。剛性率 Rs・層間変形角の検定
@@ -3138,39 +3172,18 @@ fn vnv_剛域つき門形フレームの系レベル保証() {
     let r0 = run_rigid_zone_pushover(0.0);
     let r1 = run_rigid_zone_pushover(lam);
 
-    let q0 = observed_collapse_shear(&r0).expect("剛域なしで崩壊機構が成立しない");
-    let q1 = observed_collapse_shear(&r1).expect("剛域ありで崩壊機構が成立しない");
+    let q0 = column_sway_mechanism_point(&r0).base_shear;
+    let q1 = column_sway_mechanism_point(&r1).base_shear;
     let ratio = q1 / q0;
     let theory = h / l_flex;
     // 荷重ステップの量子化（最大 100 ステップ）で数 % のばらつきが出るため許容 5%。
     assert!(
         (ratio / theory - 1.0).abs() < 0.05,
-        "崩壊荷重比が可撓長基準の理論値から外れている: 実測 {ratio:.4}（Qu={q0:.0}→{q1:.0} N）, 理論 H/L'={theory:.4}"
+        "柱4材端の降伏がそろったステップのベースシア比 {ratio:.4}（{q0:.0}→{q1:.0} N）が理論値 H/L'={theory:.4} から外れている"
     );
     assert!(
         ratio > 1.1,
-        "剛域が崩壊荷重に反映されていない（比 {ratio:.4}）"
-    );
-
-    let yielded: Vec<&HingeEvent> = r1
-        .hinges
-        .iter()
-        .filter(|h| !matches!(h.level, HingeLevel::Crack))
-        .collect();
-    assert!(
-        yielded.len() >= 4,
-        "柱両端 4 ヒンジの機構に達していない: 降伏ヒンジ {} 個",
-        yielded.len()
-    );
-    assert!(
-        yielded
-            .iter()
-            .all(|h| h.elem == ElemId(0) || h.elem == ElemId(2)),
-        "はりに降伏ヒンジが生じた（柱の崩壊機構になっていない）"
-    );
-    assert!(
-        !matches!(r1.mechanism, MechanismType::Partial),
-        "崩壊機構が Partial のまま（機構が成立していない）"
+        "剛域を与えたときの柱4材端降伏時のベースシアの増加が不足している（比 {ratio:.4}）"
     );
 
     // (3) 層の弾性剛性比が (H/L')³ になる。

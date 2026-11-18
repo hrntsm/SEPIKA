@@ -709,7 +709,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [増分解析_ヒンジ形成と剛性低下_検証_2026-07.md](増分解析_ヒンジ形成と剛性低下_検証_2026-07.md) | ヒンジ・剛性低下 | ✅ |
 | [増分解析_長期載荷の接線剛性破綻_2026-07.md](増分解析_長期載荷の接線剛性破綻_2026-07.md) | 長期荷重接線剛性 | ✅ |
 | [変位制御_荷重パターン保持_2026-07.md](変位制御_荷重パターン保持_2026-07.md) | 変位制御 PO | ✅ |
-| [剛域_保有水平耐力_系レベル検証.md](剛域_保有水平耐力_系レベル検証.md) | 剛域の系レベル影響 | 🔶 |
+| [剛域_保有水平耐力_系レベル検証.md](剛域_保有水平耐力_系レベル検証.md) | 剛域の系レベル影響と柱4材端の形成荷重（#1160） | 🔶 |
 | [小梁設計のスラブ帰属_レベル一致_2026-08.md](小梁設計のスラブ帰属_レベル一致_2026-08.md) | 小梁が負担するスラブの決め方 | 🔶 |
 | [床辺荷重の梁への幾何割付_2026-08.md](床辺荷重の梁への幾何割付_2026-08.md) | 床の辺荷重を覆う梁へ割り付ける経路 | ✅ |
 | [床領域のパネル統合_2026-08.md](床領域のパネル統合_2026-08.md) | ST-Bridge 小片スラブを大梁の床領域へ畳む | 🔶 |
@@ -863,7 +863,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 620 | 自立壁n倍法 | sepika-design-jp / sepika-core / sepika-job / sepika-app | eccentricity::tests::misc620、eccentricity_analysis::misc620_tests、lumped_mass::tests::misc620 | [点検と独立期待値](自立壁n倍法_Issue620_確認記録.md#独立期待値と試験) | 二次設計 | 🔶（有限Verification、2025限定照合は#740、採用整合・Validation未） |
 | 740 | 自立壁二方式とRs再解析 | sepika-core / sepika-edit / sepika-design-jp / sepika-job / sepika-app | stress_cfg、eccentricity::tests::misc740、stiffness_ratio::tests、summary / result_validity | [独立数値・製品経路](自立壁二方式Rs再解析_Issue740_確認記録.md)、[調査と採用決定](自立壁Rs接続_Issue740_調査記録.md) | 二次設計 | 🔶（二方式と再解析の限定Verification。実験Validationは別範囲） |
 | 718 | Fes 算定不能の伝播 | sepika-design-jp / sepika-app / sepika-job | secondary/holding_capacity・stiffness_ratio・eccentricity、summary、actions/design/holding、lumped_mass | [独立期待値と直接入口](Fes算定不能の伝播_Issue718_2026-10.md#独立期待値と直接入口) | 横断 | 🔶（Scope 内の自動 Verification 成功、手動 GUI・原典/Validation・最終ゲートは未確認） |
-| 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
+| 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測)、[柱4材端の形成荷重（#1160）](剛域_保有水平耐力_系レベル検証.md#柱4材端の形成荷重を独立に照合する模型) | P5 | 🔶（弧長削除、固有材端の初回降伏の識別、1層門形架構の柱4材端でVerification。4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
 | 15b | 目的別確定層力 | sepika-solver / sepika-app / sepika-mcp | story_response.rs・result_validity.rs・job/pushover.rs | [Issue442検証](目的別確定層力_Issue442_2026-10.md) | — | ✅（Scope内Verification） |
 | 15c | 増分部材履歴の有限記録 | sepika-solver / sepika-app | nonlinear/pushover/member_response.rs・step_record.rs・tests.rs / result_contract_tests.rs | [Issue732の公開再現と境界](増分部材履歴の有限記録_Issue732_2026-10.md) | 横断 | 🔶（境界・公開Err・正常履歴と既存記録保持・解析32失効/33保持のVerification。最終ゲート・Validation未） |
