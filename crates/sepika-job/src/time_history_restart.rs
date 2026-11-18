@@ -6,13 +6,13 @@ use sepika_solver::{
     common::constraint::Reducer,
     dynamic::timehistory::{
         linear_time_history_from_state, linear_time_history_until, GroundMotion, NewmarkCfg,
-        ResponseResult, StoryResponse, TimeStepState,
+        ResponseResult, StoryResponse, ThRecording, TimeStepState,
     },
     statics::analysis::Analysis,
 };
 use sha2::{Digest, Sha256};
 
-const MAGIC: &[u8] = b"SEPIKA-LINEAR-RESTART\x01";
+const MAGIC: &[u8] = b"SEPIKA-LINEAR-RESTART\x02";
 
 /// 確定状態と開始からの結果。保存波形は全区間の未加工入力 [mm/s²]。
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -61,8 +61,16 @@ impl LinearTimeHistoryCheckpoint {
     /// 専用形式と破損検査値・計算契約を検査する。不一致は読込を拒否する。
     pub fn from_bytes(bytes: &[u8]) -> JobResult<Self> {
         let header = MAGIC.len() + 32;
-        if bytes.len() < header || !bytes.starts_with(MAGIC) {
+        if !bytes.starts_with(MAGIC) {
+            if bytes.starts_with(b"SEPIKA-LINEAR-RESTART") {
+                return Err(invalid(
+                    "線形時刻歴の再開状態の形式版が一致しません。再計算してください。",
+                ));
+            }
             return Err(invalid("線形時刻歴の再開状態ファイルではありません。"));
+        }
+        if bytes.len() < header {
+            return Err(invalid("再開状態ファイルが破損しています。"));
         }
         let payload = &bytes[header..];
         if Sha256::digest(payload)[..] != bytes[MAGIC.len()..header] {
@@ -155,6 +163,7 @@ impl LinearTimeHistoryCheckpoint {
             })
             || recording.member_forces.iter().any(|row| !valid_forces(row))
             || !valid_forces(&recording.peak_member_forces)
+            || !valid_axial_force_peaks(recording, &self.result.time)
             || !valid_story(&recording.story_x, self.model.layer_count(), frames)
             || !valid_story(&recording.story_y, self.model.layer_count(), frames)
             || self
@@ -177,6 +186,85 @@ impl LinearTimeHistoryCheckpoint {
         }
         Ok(())
     }
+}
+
+fn valid_axial_force_peaks(recording: &ThRecording, times: &[f64]) -> bool {
+    recording.axial_force_peaks.len() == recording.peak_member_forces.len()
+        && recording
+            .axial_force_peaks
+            .iter()
+            .zip(&recording.peak_member_forces)
+            .enumerate()
+            .all(|(element, (peaks, envelope))| {
+                let mut frames = recording
+                    .member_forces
+                    .iter()
+                    .filter_map(|frame| frame[element].as_ref());
+                let Some(envelope) = envelope else {
+                    return peaks.snapshots.is_empty() && frames.count() == 0;
+                };
+                let mut extrema = vec![[None; 2]; envelope.at.len()];
+                let valid_snapshots = peaks.snapshots.windows(2).all(|w| w[0].time < w[1].time)
+                    && peaks.snapshots.iter().all(|snapshot| {
+                        times
+                            .binary_search_by(|time| time.total_cmp(&snapshot.time))
+                            .is_ok()
+                            && snapshot.forces.at.len() == envelope.at.len()
+                            && snapshot.forces.at.iter().zip(&envelope.at).all(
+                                |((x, forces), (expected_x, _))| {
+                                    x == expected_x && forces.iter().all(|v| v.is_finite())
+                                },
+                            )
+                            && !snapshot.positions.is_empty()
+                            && snapshot.positions.windows(2).all(|w| w[0] < w[1])
+                            && snapshot.positions.iter().all(|&i| {
+                                let Some((_, forces)) = snapshot.forces.at.get(i) else {
+                                    return false;
+                                };
+                                let n = forces[0];
+                                n != 0.0 && extrema[i][usize::from(n < 0.0)].replace(n).is_none()
+                            })
+                    });
+                let covers = |i: usize, n: f64| {
+                    n == 0.0
+                        || extrema[i][usize::from(n < 0.0)]
+                            .is_some_and(|peak| peak.abs() >= n.abs())
+                };
+                valid_snapshots
+                    && envelope
+                        .at
+                        .iter()
+                        .zip(&extrema)
+                        .all(|((_, forces), extrema)| {
+                            let n = forces[0];
+                            n == 0.0 || extrema[usize::from(n < 0.0)] == Some(n)
+                        })
+                    && peaks.snapshots.iter().all(|snapshot| {
+                        snapshot
+                            .forces
+                            .at
+                            .iter()
+                            .enumerate()
+                            .all(|(i, (_, forces))| covers(i, forces[0]))
+                    })
+                    && frames.all(|frame| {
+                        if frame.at.len() == envelope.at.len() {
+                            frame.at.iter().zip(&envelope.at).enumerate().all(
+                                |(i, ((x, forces), (expected_x, _)))| {
+                                    x == expected_x && covers(i, forces[0])
+                                },
+                            )
+                        } else {
+                            frame.at.iter().all(|(x, forces)| {
+                                envelope
+                                    .at
+                                    .iter()
+                                    .position(|(expected_x, _)| x == expected_x)
+                                    .is_some_and(|i| covers(i, forces[0]))
+                            })
+                        }
+                    })
+            })
 }
 
 fn valid_story(story: &StoryResponse, count: usize, frames: usize) -> bool {
@@ -357,6 +445,9 @@ fn merge(mut a: ResponseResult, b: ResponseResult) -> ResponseResult {
         .extend(br.member_forces.into_iter().skip(1));
     merge_story(&mut ar.story_x, br.story_x);
     merge_story(&mut ar.story_y, br.story_y);
+    for (a, b) in ar.axial_force_peaks.iter_mut().zip(br.axial_force_peaks) {
+        a.merge(b);
+    }
     for (a, b) in ar.peak_member_forces.iter_mut().zip(br.peak_member_forces) {
         match (a.as_mut(), b) {
             (Some(a), Some(b)) => {

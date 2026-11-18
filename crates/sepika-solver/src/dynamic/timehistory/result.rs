@@ -6,6 +6,8 @@
 //!   部材履歴用の詳細記録（間引きあり）
 //! - [`TimeStepState`] — 1 時点の状態（チェックポイント／再開）
 
+use sepika_element::frame::beam::MemberForces;
+
 /// 時刻歴応答解析の結果。
 /// 時系列の全量は結果I/Oへストリーミングし、メモリに全保持しない。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -89,6 +91,83 @@ pub struct ThRecording {
     /// 全ステップ（間引きなし）での部材端力の包絡（各成分の絶対値最大値。
     /// 符号は極値そのものの符号を保持する）。`[elem_idx]`。
     pub peak_member_forces: Vec<Option<sepika_element::frame::beam::MemberForces>>,
+    /// 全確定ステップで軸力の引張・圧縮極値が生じた時刻の記録（要素順）。
+    /// 旧結果では空。
+    #[serde(default)]
+    pub axial_force_peaks: Vec<AxialForcePeaks>,
+}
+
+/// 各評価位置・軸力符号で絶対値最大となった確定ステップの部材内力。
+/// 同値は最初の時刻を採用し、軸力が 0 の時刻は対象外。
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AxialForcePeaks {
+    /// 確定時刻順。同じ時刻に軸力極値を取る位置は一つの内力分布を共有する。
+    pub snapshots: Vec<AxialForcePeakSnapshot>,
+}
+
+/// 軸力極値が生じた時刻の分布と、その時刻を採用する評価位置。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AxialForcePeakSnapshot {
+    /// 確定時刻 [s]。
+    pub time: f64,
+    /// 同時刻の全評価位置の内力分布。
+    pub forces: MemberForces,
+    /// 軸力が極値となった評価位置の `forces.at` 内の添字（昇順）。
+    pub positions: Vec<usize>,
+}
+
+impl AxialForcePeaks {
+    pub(crate) fn record(&mut self, time: f64, forces: &MemberForces) {
+        let mut wins = forces
+            .at
+            .iter()
+            .map(|(_, f)| {
+                let n = f[0];
+                n.is_finite() && n != 0.0
+            })
+            .collect::<Vec<_>>();
+        if !wins.iter().any(|&wins| wins) {
+            return;
+        }
+        self.snapshots.retain_mut(|snapshot| {
+            snapshot.positions.retain(|&i| {
+                let Some(wins) = wins.get_mut(i).filter(|wins| **wins) else {
+                    return true;
+                };
+                let previous_n = snapshot.forces.at[i].1[0];
+                let n = forces.at[i].1[0];
+                if previous_n.is_sign_negative() != n.is_sign_negative() {
+                    return true;
+                }
+                if n.abs() > previous_n.abs() {
+                    false
+                } else {
+                    *wins = false;
+                    true
+                }
+            });
+            !snapshot.positions.is_empty()
+        });
+        let positions: Vec<_> = wins
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, wins)| wins.then_some(i))
+            .collect();
+        if !positions.is_empty() {
+            self.snapshots.push(AxialForcePeakSnapshot {
+                time,
+                forces: forces.clone(),
+                positions,
+            });
+        }
+    }
+
+    /// 直後の区間の記録を合成する。共通の境界時刻がある場合は前半を先に採用する。
+    pub fn merge(&mut self, later: Self) {
+        for snapshot in later.snapshots {
+            self.record(snapshot.time, &snapshot.forces);
+        }
+    }
 }
 
 /// 1 方向（X または Y）の層応答時刻歴（[`ThRecording`] 参照）。

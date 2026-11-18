@@ -7,8 +7,8 @@
 //!   部材長がほぼ 0 の要素（免震・節点ばね）は材軸が定まらないため、要素ローカル軸の
 //!   成分別（軸／せん断y／せん断z）表示に切り替わる（免震は水平せん断が既定）。
 //!   現在フレームの位置をループ上にマーカー表示し、フレームスライダーと連動する。
-//! - 最大応力に対する検定: `ThRecording::peak_member_forces`（全ステップの内力
-//!   包絡）を用いて短期の断面検定を実行する。
+//! - 最大応力に対する検定: 全ステップの内力包絡と引張・圧縮の軸力極値が生じた
+//!   確定時刻の内力で短期の断面検定を実行する。
 //!
 //! ヒンジ詳細ウィンドウ（[`super::hinge`]）と同じ構成方針（`egui::Window` +
 //! `egui_plot`）を踏襲するが、対象データ（時刻歴の全フレーム記録）が異なるため
@@ -644,7 +644,7 @@ fn draw_peak_check(
     th_applied_long_term: bool,
     axis: &super::MemberAxisEndpoints,
 ) {
-    ui.strong("最大応力に対する検定（全ステップの内力包絡・短期）");
+    ui.strong("最大応力に対する検定（短期）");
     draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
@@ -653,8 +653,9 @@ fn draw_peak_check(
              継手欠損・一本部材合成は考慮しません。\
              非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
              （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。\
-             各成分（N・Qy・Qz・My・Mz）の最大値は全ステップ包絡のため、同一時刻に生じたとは限りません\
-             （同時に生じない組合せで過大評価する場合があり、成分の符号や相関によっては過小評価も生じ得ます）。",
+             内力包絡では、異なる時刻の成分の組合せにより過大・過小評価が生じる場合があります。\
+             引張側・圧縮側は、各位置でそれぞれの軸力の絶対値が最大となった確定時刻の内力を使います。\
+             軸力が極値に達していない時刻でも、より厳しい応力の組合せが生じる場合があります。",
         )
         .size(11.0)
         .color(theme::GRAY_600),
@@ -732,27 +733,6 @@ fn draw_peak_check(
     } else {
         length
     };
-    let m_at = |target: f64| {
-        peak.at
-            .iter()
-            .find(|(p, _)| (p - target).abs() < 1e-6)
-            .map(|(_, f)| f[5])
-    };
-    let end_moments_z = match (m_at(0.0), m_at(1.0)) {
-        (Some(a), Some(b)) => Some((a, b)),
-        _ => None,
-    };
-    let shear_span = peak
-        .at
-        .iter()
-        .map(|(_, f)| (f[5].abs(), f[1].abs()))
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let shear_span_y = peak
-        .at
-        .iter()
-        .map(|(_, f)| (f[4].abs(), f[2].abs()))
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
     let wire_qd = th_nonlinear && th_applied_long_term;
     let long_mf = wire_qd
         .then(|| {
@@ -816,70 +796,116 @@ fn draw_peak_check(
         }
         return;
     }
-    let column_sum_my = if kind == MemberKind::Column && seismic_qd.is_some() {
-        let n_at = |mf: &MemberForces, end: usize| {
-            let target = if end == 0 { 0.0 } else { 1.0 };
-            mf.at
-                .iter()
-                .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
-                .map(|(_, f)| f[0])
-                .unwrap_or(0.0)
-        };
-        let (n_combo_i, n_combo_j) = (n_at(peak, 0), n_at(peak, 1));
-        let (n_long_i, n_long_j) = long_mf
-            .and_then(|list| list.iter().find(|(id, _)| *id == elem.id))
-            .map(|(_, mf)| (n_at(mf, 0), n_at(mf, 1)))
-            .unwrap_or((n_combo_i, n_combo_j));
-        let adj = sepika_core::adjacency::NodeAdjacency::build(&app.core.model);
-        sepika_design_jp::rc::compute_column_mechanism_sum_my(
-            &app.core.model,
-            &adj,
-            elem,
-            n_long_i,
-            n_long_j,
-            n_combo_i,
-            n_combo_j,
-            1.0,
-        )
-    } else {
-        None
-    };
+    let adjacency = (kind == MemberKind::Column && seismic_qd.is_some())
+        .then(|| sepika_core::adjacency::NodeAdjacency::build(model));
 
-    let ctx = DesignCtx {
+    let mut ctx = DesignCtx {
         term: LoadTerm::Short,
         kind,
         length,
         lk_y,
         lk_z,
         clear_length: Some(clear_span),
-        shear_span,
-        shear_span_y,
         rc_damage_control: app.core.analysis_cfg.rc_damage_control,
         bond_method: app.core.analysis_cfg.bond_method,
-        end_moments_z,
-        mid_moment_z: m_at(0.5),
         rebar_material: app.core.model.element_rebar_material(elem).cloned(),
         shear_rebar_material: app.core.model.element_shear_rebar_material(elem).cloned(),
         steel_material: app.core.model.element_steel_material(elem).cloned(),
         beam_has_slab: kind == MemberKind::Girder
             && sepika_design_jp::beam_has_attached_slab(&app.core.model, elem),
         seismic_qd,
-        column_sum_my,
         ..Default::default()
     };
     let checker: Box<dyn DesignCheck> = sepika_design_jp::checker_for(structure);
 
-    for (pos, f) in &peak.at {
-        let mfa = MemberForcesAt {
-            pos: *pos,
-            n: f[0],
-            qy: f[1],
-            qz: f[2],
-            my: f[4],
-            mz: f[5],
+    let mut draw_checks =
+        |ui: &mut egui::Ui, forces: &MemberForces, selected: Option<(&[usize], f64)>| {
+            let m_at = |target: f64| {
+                forces
+                    .at
+                    .iter()
+                    .find(|(p, _)| (p - target).abs() < 1e-6)
+                    .map(|(_, f)| f[5])
+            };
+            ctx.end_moments_z = m_at(0.0).zip(m_at(1.0));
+            ctx.mid_moment_z = m_at(0.5);
+            let shear_span = |moment: usize, shear: usize| {
+                forces
+                    .at
+                    .iter()
+                    .map(|(_, f)| (f[moment].abs(), f[shear].abs()))
+                    .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+            };
+            ctx.shear_span = shear_span(5, 1);
+            ctx.shear_span_y = shear_span(4, 2);
+            ctx.column_sum_my = adjacency.as_ref().and_then(|adj| {
+                let axial_at = |at: &[(f64, [f64; 6])], target: f64| {
+                    at.iter()
+                        .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
+                        .map_or(0.0, |(_, f)| f[0])
+                };
+                let qd = ctx.seismic_qd.as_ref()?;
+                sepika_design_jp::rc::compute_column_mechanism_sum_my(
+                    model,
+                    adj,
+                    elem,
+                    axial_at(&qd.long_at, 0.0),
+                    axial_at(&qd.long_at, 1.0),
+                    axial_at(&forces.at, 0.0),
+                    axial_at(&forces.at, 1.0),
+                    1.0,
+                )
+            });
+            for (index, &(pos, f)) in forces.at.iter().enumerate() {
+                if selected.is_some_and(|(positions, _)| positions.binary_search(&index).is_err()) {
+                    continue;
+                }
+                let mfa = MemberForcesAt {
+                    pos,
+                    n: f[0],
+                    qy: f[1],
+                    qz: f[2],
+                    my: f[4],
+                    mz: f[5],
+                };
+                let outcome = checker.check(&mfa, sec, mat, &ctx);
+                if let Some((_, time)) = selected {
+                    let side = if mfa.n < 0.0 {
+                        "圧縮側"
+                    } else {
+                        "引張側"
+                    };
+                    draw_labeled_outcome_row(
+                        ui,
+                        &format!("{side} t={time:.6} s  ξ={pos:.2}:"),
+                        &outcome,
+                    );
+                } else {
+                    draw_outcome_row(ui, pos, &outcome);
+                }
+            }
         };
-        let outcome = checker.check(&mfa, sec, mat, &ctx);
-        draw_outcome_row(ui, *pos, &outcome);
+    if rec.axial_force_peaks.get(elem_idx).is_none() {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "引張側・圧縮側の記録がありません。確認するには解析を再実行してください。",
+        );
+    }
+    ui.label("内力包絡");
+    draw_checks(ui, peak, None);
+    if let Some(peaks) = rec
+        .axial_force_peaks
+        .get(elem_idx)
+        .filter(|peaks| !peaks.snapshots.is_empty())
+    {
+        ui.label("軸力極値が生じた確定ステップ");
+        for snapshot in &peaks.snapshots {
+            draw_checks(
+                ui,
+                &snapshot.forces,
+                Some((&snapshot.positions, snapshot.time)),
+            );
+        }
     }
 }
 
@@ -902,8 +928,12 @@ fn draw_long_term_note(ui: &mut egui::Ui, nonlinear: bool, applied_long_term: bo
 
 /// 1 検定位置分の検定結果を 1 行で表示する（検定比・判定・式別内訳）。
 fn draw_outcome_row(ui: &mut egui::Ui, pos: f64, outcome: &CheckOutcome) {
+    draw_labeled_outcome_row(ui, &format!("ξ={pos:.2}:"), outcome);
+}
+
+fn draw_labeled_outcome_row(ui: &mut egui::Ui, label: &str, outcome: &CheckOutcome) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(format!("ξ={:.2}:", pos));
+        ui.label(label);
         match outcome {
             CheckOutcome::Checked(cr) => {
                 let evaluation = crate::app::evaluate_check(cr);
@@ -1017,6 +1047,119 @@ mod tests {
                 "{text}"
             );
             assert!(!text.contains("検定比"), "{text}");
+        }
+    }
+
+    #[test]
+    fn time_history_detail_shows_compression_ng_even_when_envelope_and_tension_pass() {
+        use crate::app::steel_column_k_tests::input;
+        use sepika_solver::dynamic::timehistory::{
+            AxialForcePeakSnapshot, AxialForcePeaks, ResponseResult,
+        };
+
+        let mut app = App::default();
+        let mut model = input::portal(1.0);
+        model.steel_design_attrs[0].lk_y_direct = Some(6_983.630_277);
+        model.steel_design_attrs[0].lk_z_direct = Some(3000.0);
+        assert!(app.load_model(model));
+        let forces = |n, mz| MemberForces {
+            at: vec![(0.0, [n, 0.0, 0.0, 0.0, 0.0, mz])],
+        };
+        let peak = forces(3_400_000.0, 10_000_000.0);
+        let compression = forces(-3_322_800.0, 10_000_000.0);
+        let tension = forces(3_400_000.0, 0.0);
+        let no_force = forces(0.0, 0.0);
+
+        for (every, frames, old_result) in [
+            (1, vec![0, 1, 2, 3], false),
+            (3, vec![0, 3], false),
+            (3, vec![0, 3], true),
+        ] {
+            let history = [&no_force, &compression, &tension, &no_force];
+            let recording = ThRecording {
+                record_every: every,
+                frame_time: frames.iter().map(|&i| i as f64).collect(),
+                node_disp: vec![vec![[0.0; 6]; app.core.model.nodes.len()]; frames.len()],
+                member_forces: frames
+                    .iter()
+                    .map(|&i| vec![Some(history[i].clone())])
+                    .collect(),
+                peak_member_forces: vec![Some(peak.clone())],
+                axial_force_peaks: if old_result {
+                    Vec::new()
+                } else {
+                    vec![AxialForcePeaks {
+                        snapshots: vec![
+                            AxialForcePeakSnapshot {
+                                time: 1.0,
+                                forces: compression.clone(),
+                                positions: vec![0],
+                            },
+                            AxialForcePeakSnapshot {
+                                time: 2.0,
+                                forces: tension.clone(),
+                                positions: vec![0],
+                            },
+                        ],
+                    }]
+                },
+                ..Default::default()
+            };
+            app.core.scoped.results = Some(crate::app::ResultsBundle {
+                time_history: Some(ResponseResult {
+                    wall_capacities: Vec::new(),
+                    rc_wall_shear_method: Default::default(),
+                    time: vec![0.0, 1.0, 2.0, 3.0],
+                    peak_disp: Vec::new(),
+                    story_drift_angle: Vec::new(),
+                    history: Default::default(),
+                    recording: Some(recording),
+                    nonlinear: false,
+                    applied_long_term: false,
+                    non_converged_steps: 0,
+                }),
+                ..Default::default()
+            });
+            let view = super::super::ViewportState::default();
+            let output = egui::Context::default().run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 1200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| draw_th_detail_content_at(ui, &mut app, ElemId(0), 0, &view),
+            );
+            let text: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert!(text.contains(&"検定比 0.949 (OK)"), "{text:?}");
+            if old_result {
+                assert!(
+                    text.iter().any(|label| label.contains("解析を再実行")),
+                    "{text:?}"
+                );
+                assert!(!text.contains(&"検定比 1.036 (NG)"), "{text:?}");
+            } else {
+                assert!(
+                    text.windows(2)
+                        .any(|labels| labels
+                            == ["圧縮側 t=1.000000 s  ξ=0.00:", "検定比 1.036 (NG)"]),
+                    "{text:?}"
+                );
+                assert!(
+                    text.windows(2)
+                        .any(|labels| labels
+                            == ["引張側 t=2.000000 s  ξ=0.00:", "検定比 0.927 (OK)"]),
+                    "{text:?}"
+                );
+            }
         }
     }
 

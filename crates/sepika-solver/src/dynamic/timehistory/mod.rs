@@ -26,7 +26,10 @@ pub use linear::{
     linear_time_history_with_state,
 };
 pub use nonlinear::{nonlinear_time_history_analysis, NonlinearThCfg};
-pub use result::{ResponseHistory, ResponseResult, StoryResponse, ThRecording, TimeStepState};
+pub use result::{
+    AxialForcePeakSnapshot, AxialForcePeaks, ResponseHistory, ResponseResult, StoryResponse,
+    ThRecording, TimeStepState,
+};
 
 #[cfg(test)]
 pub(crate) use crate::common::assemble::{assemble_global_k, assemble_global_m};
