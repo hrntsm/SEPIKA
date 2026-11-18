@@ -19,7 +19,7 @@
 //! 当該関数は `app` モジュール内の非公開関数（`is_steel` 等）に
 //! 依存しビューア側からは呼べないため、必要な部分だけ本ファイルへ複製する。
 //! 長期静的結果がある場合は地震時 QD / 柱メカニズムを部分配線する。
-//! 長期静的結果に対応するQ0（単純梁せん断）も用いる。座屈長さの自動算定・
+//! 長期静的結果に対応するQ0（単純梁せん断）も用いる。
 //! 鋼継手欠損・一本部材グループ合成・BRB属性差し替えは対象外（概算検定）。
 
 use crate::app::App;
@@ -648,12 +648,13 @@ fn draw_peak_check(
     draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
-            "簡易検定です。CFT柱は両軸の直接入力、その他は部材長を座屈長さに用います。\
+            "簡易検定です。通常S部材の未入力軸の座屈長さは柱1.2L・大梁と一般ブレース1.0Lです。\
+             実効座屈長さが既定値を超える場合は、支持条件に応じた長さを直接入力してください。CFT柱は両軸の直接入力が必要です。\
              継手欠損・一本部材合成は考慮しません。\
              非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
              （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。\
              各成分（N・Qy・Qz・My・Mz）の最大値は全ステップ包絡のため、同一時刻に生じたとは限りません\
-             （実際には同時に生じない組合せを検定している可能性があり、安全側ですが過大評価になり得ます）。",
+             （同時に生じない組合せで過大評価する場合があり、成分の符号や相関によっては過小評価も生じ得ます）。",
         )
         .size(11.0)
         .color(theme::GRAY_600),
@@ -688,26 +689,40 @@ fn draw_peak_check(
         );
         return;
     };
+    use sepika_core::structure_kind::StructureKind;
+    let model = &app.core.model;
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
-    let (lk_y, lk_z) = if structure == sepika_core::structure_kind::StructureKind::Cft {
-        let attr = app
-            .core
-            .model
-            .steel_design_attrs
-            .iter()
-            .find(|a| a.elem == elem.id);
-        match sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr) {
-            Ok((strong, weak)) => (Some(strong), Some(weak)),
-            Err(reason) => {
-                let outcome = CheckOutcome::Skipped { reason };
-                for (pos, _) in &peak.at {
-                    draw_outcome_row(ui, *pos, &outcome);
-                }
-                return;
-            }
+    let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
+    let buckling_lengths = match structure {
+        StructureKind::Cft => {
+            sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
         }
-    } else {
-        (None, None)
+        StructureKind::S if !model.brb_attrs.iter().any(|a| a.elem == elem.id) => {
+            sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
+                elem.id,
+                kind,
+                model.member_length(elem),
+                attr,
+            )
+            .map(Some)
+        }
+        _ => Ok(None),
+    };
+    let (lk_y, lk_z) = match buckling_lengths {
+        Ok(Some((strong, weak))) => {
+            if structure == StructureKind::S {
+                ui.label(format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
+            }
+            (Some(strong), Some(weak))
+        }
+        Ok(None) => (None, None),
+        Err(reason) => {
+            let outcome = CheckOutcome::Skipped { reason };
+            for (pos, _) in &peak.at {
+                draw_outcome_row(ui, *pos, &outcome);
+            }
+            return;
+        }
     };
 
     let length = axis.length;
@@ -939,6 +954,120 @@ mod signed_q0_acceptance_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn peak_check_text(app: &App, index: usize, n: f64, mz: f64) -> String {
+        let mut peak_member_forces = vec![None; index + 1];
+        peak_member_forces[index] = Some(MemberForces {
+            at: vec![(0.0, [n, 0.0, 0.0, 0.0, 0.0, mz])],
+        });
+        let rec = ThRecording {
+            peak_member_forces,
+            ..Default::default()
+        };
+        let elem = &app.core.model.elements[index];
+        let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
+        egui::Context::default()
+            .run_ui(egui::RawInput::default(), |ui| {
+                draw_peak_check(ui, app, elem, index, &rec, false, false, &axis)
+            })
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn steel_peak_check_default_and_independent_column_length_cross_the_limit() {
+        use crate::app::steel_column_k_tests::input;
+        let mut app = App::default();
+        assert!(app.load_model(input::portal(1.0)));
+
+        for (strong, weak, lengths, ratio) in [
+            (None, None, "強軸 3600 ／ 弱軸 3600", "0.956 (OK)"),
+            (None, Some(3000.0), "強軸 3600 ／ 弱軸 3000", "0.956 (OK)"),
+            (
+                Some(6983.630277482522),
+                None,
+                "強軸 6983.630277482522 ／ 弱軸 3600",
+                "1.036 (NG)",
+            ),
+            (
+                Some(6983.630277482522),
+                Some(3000.0),
+                "強軸 6983.630277482522 ／ 弱軸 3000",
+                "1.036 (NG)",
+            ),
+        ] {
+            let attr = &mut app.core.model.steel_design_attrs[0];
+            attr.lk_y_direct = strong;
+            attr.lk_z_direct = weak;
+            let text = peak_check_text(&app, 0, -3_322_800.0, 10_000_000.0);
+            assert!(text.contains(lengths), "{text}");
+            assert!(text.contains(&format!("検定比 {ratio}")), "{text}");
+        }
+        for direct in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            app.core.model.steel_design_attrs[0].lk_z_direct = Some(direct);
+            let text = peak_check_text(&app, 0, -3_322_800.0, 10_000_000.0);
+            assert!(
+                text.contains("部材 ID 0: 弱軸の座屈長さの直接指定"),
+                "{text}"
+            );
+            assert!(!text.contains("検定比"), "{text}");
+        }
+    }
+
+    #[test]
+    fn steel_peak_check_girder_and_ordinary_brace_use_physical_length_and_keep_brb_path() {
+        use crate::app::steel_column_k_tests::input;
+        use sepika_core::model::{BrbAttr, FrameSectionUse};
+
+        let mut model = input::portal(1.0);
+        model.elements[2].end_offsets_mm = [[100.0, 200.0, 0.0], [600.0, 200.0, 0.0]];
+        let mut attr = model.steel_design_attrs[0].clone();
+        attr.elem = ElemId(2);
+        model.steel_design_attrs.push(attr);
+        let mut app = App::default();
+        assert!(app.load_model(model));
+
+        for (kind, usage) in [
+            (ElementKind::Beam, FrameSectionUse::Girder),
+            (
+                ElementKind::Brace {
+                    tension_only: false,
+                },
+                FrameSectionUse::Brace,
+            ),
+        ] {
+            app.core.model.elements[2].kind = kind;
+            app.core.model.sections[1].frame_use = Some(usage);
+            for (weak, expected) in [
+                (None, "強軸 3500 ／ 弱軸 3500"),
+                (Some(1000.0), "強軸 3500 ／ 弱軸 1000"),
+            ] {
+                app.core.model.steel_design_attrs[2].lk_z_direct = weak;
+                let text = peak_check_text(&app, 2, -100_000.0, 0.0);
+                assert!(text.contains(expected), "{text}");
+                assert!(text.contains("検定比"), "{text}");
+            }
+        }
+
+        app.core.model.brb_attrs.push(BrbAttr {
+            elem: ElemId(2),
+            allowable_axial_short: 1_000_000.0,
+            critical_length: 2000.0,
+            length_reduction: 300.0,
+        });
+        let before = peak_check_text(&app, 2, -100_000.0, 0.0);
+        app.core.model.steel_design_attrs[2].lk_z_direct = Some(0.0);
+        let after = peak_check_text(&app, 2, -100_000.0, 0.0);
+        assert_eq!(before, after);
+        assert!(!after.contains("採用座屈長さ"), "{after}");
+        assert!(after.contains("検定比"), "{after}");
+    }
 
     #[test]
     fn cft_peak_check_renders_missing_axis_or_uses_the_direct_lengths() {

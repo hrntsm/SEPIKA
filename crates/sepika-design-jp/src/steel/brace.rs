@@ -24,7 +24,7 @@ pub(crate) fn check_brace(
     let area = nonzero(sec.area);
     let lk_y_resolved = ctx.lk_y.unwrap_or(ctx.length);
     let lk_z_resolved = ctx.lk_z.unwrap_or(ctx.length);
-    let buckling_note = if lk_y_resolved <= 1e-9 && lk_z_resolved <= 1e-9 {
+    let buckling_note = if lk_y_resolved == 0.0 && lk_z_resolved == 0.0 {
         "（座屈長さ0のため座屈無視 λ=0）"
     } else {
         ""

@@ -38,9 +38,9 @@ pub struct SteelAttrDraft {
     pub lb_end: String,
     /// 等間隔横補剛の本数の入力バッファ（空欄=なし）。
     pub lateral_brace_count: String,
-    /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（通常S柱・CFT柱は空欄なら未検定）。
+    /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（空欄は未指定）。
     pub lk_y_direct: String,
-    /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（通常S柱・CFT柱は空欄なら未検定）。
+    /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（空欄は未指定）。
     pub lk_z_direct: String,
     /// 横座屈修正係数 C の直接入力（空欄=自動算定）。
     pub c_direct: String,
@@ -370,7 +370,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     })
     .response
     .on_hover_text(
-        "通常S柱は両軸とも正の有限値を直接入力してください。空欄があれば未検定です。梁・通常ブレースは未指定なら部材長を用います。",
+        "通常S部材では各軸の有限な正値を優先します。空欄は柱1.2L・大梁と一般ブレース1.0L（Lは材軸長）。支持条件から求めた座屈長さが既定値を超える場合は直接入力してください。",
     );
     ui.label("CFT柱は両軸に有限な正の座屈長さが必要です。空欄や0があると未検定です。");
 

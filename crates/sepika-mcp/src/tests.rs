@@ -3945,13 +3945,8 @@ fn lateral_bracing_mcp_job_preserves_typed_reference_and_member_checks() {
         assert_eq!(reference["required_count"], 2);
         assert_eq!(reference["length_mm"], 20000.0);
         assert_eq!(reference["lambda_y"], 200.0);
-        let skipped = summary["member_skipped"].as_array().unwrap();
-        assert!(!skipped.is_empty());
-        assert!(skipped
-            .iter()
-            .all(|row| [1, 2].contains(&row["elem"].as_u64().unwrap())
-                && row["reason"].as_str().unwrap().contains("直接指定")));
-        assert_eq!(summary["all_members_checked_and_ok"], false);
+        assert_eq!(summary["member_skipped"], serde_json::json!([]));
+        assert_eq!(summary["all_members_checked_and_ok"], true);
         assert_eq!(refs[0]["actual_bracing_verified"], false);
         let mut bad = model.clone();
         bad.elements[if split { 4 } else { 0 }].end_cond[1] =
@@ -3978,7 +3973,7 @@ fn lateral_bracing_mcp_job_preserves_typed_reference_and_member_checks() {
             .unwrap()
             .contains("Fixed/Fixed"));
         assert_eq!(unavailable["member_skipped"], summary["member_skipped"]);
-        assert_eq!(unavailable["all_members_checked_and_ok"], false);
+        assert_eq!(unavailable["all_members_checked_and_ok"], true);
         assert_eq!(unavailable["n_checks"], summary["n_checks"]);
     }
 }
@@ -4002,13 +3997,8 @@ fn lateral_bracing_mcp_invalid_group_reference_is_retained_without_fallback() {
             .unwrap()
             .contains("連続"));
     }
-    let skipped = summary["member_skipped"].as_array().unwrap();
-    assert!(!skipped.is_empty());
-    assert!(skipped
-        .iter()
-        .all(|row| [1, 2].contains(&row["elem"].as_u64().unwrap())
-            && row["reason"].as_str().unwrap().contains("直接指定")));
-    assert_eq!(summary["all_members_checked_and_ok"], false);
+    assert_eq!(summary["member_skipped"], serde_json::json!([]));
+    assert_eq!(summary["all_members_checked_and_ok"], true);
 }
 
 fn rebar507_with_explicit_zero_beam_eccentricity(

@@ -337,40 +337,62 @@ mod tests {
     }
 
     #[test]
-    fn column_k_mcp_keeps_both_columns_unchecked_for_case_and_combination() {
+    fn steel_buckling_mcp_distinguishes_defaults_direct_and_invalid_for_case_and_combination() {
+        use sepika_core::ids::LoadCaseId;
+        use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination};
+
         let mut model = steel_column_k_input::portal(1.0);
-        model
-            .combinations
-            .push(sepika_core::model::LoadCombination {
-                name: "長期".into(),
-                terms: vec![(sepika_core::ids::LoadCaseId(0), 1.0)],
-            });
+        model.load_cases.push(LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(1),
+            name: "P=0".into(),
+            kind: LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
+        model.combinations.push(LoadCombination {
+            name: "長期".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+        });
         for combo in [false, true] {
-            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
-                &model,
-                &JobParams {
-                    load_case: (!combo).then_some(0),
-                    load_combination: combo.then_some(0),
-                    ..Default::default()
-                },
-            )
-            .unwrap() else {
-                panic!()
+            let run = |model: &Model| {
+                let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                    model,
+                    &JobParams {
+                        load_case: (!combo).then_some(0),
+                        load_combination: combo.then_some(0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap() else {
+                    panic!()
+                };
+                summary
             };
-            let skipped: Vec<_> = summary["member_skipped"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|row| row["elem"].as_u64().unwrap() < 2)
-                .collect();
-            assert_eq!(skipped.len(), 6, "{summary}");
-            for id in [0, 1] {
-                assert_eq!(skipped.iter().filter(|row| row["elem"] == id).count(), 3);
+            let mut model = model.clone();
+            model.steel_design_attrs[1].lk_z_direct = None;
+            let summary = run(&model);
+            assert_eq!(summary["n_checks"], 9, "{summary}");
+            assert_eq!(summary["n_skipped"], 0, "{summary}");
+            assert_eq!(summary["all_members_checked_and_ok"], true, "{summary}");
+
+            model.steel_design_attrs[0].lk_y_direct = Some(6983.630277482522);
+            let summary = run(&model);
+            assert_eq!(summary["n_skipped"], 0, "{summary}");
+            assert_eq!(summary["n_ng"], 3, "{summary}");
+            assert_eq!(summary["all_members_checked_and_ok"], false, "{summary}");
+
+            model.steel_design_attrs[1].lk_z_direct = Some(0.0);
+            let summary = run(&model);
+            let skipped = summary["member_skipped"].as_array().unwrap();
+            assert_eq!(skipped.len(), 3, "{summary}");
+            for row in skipped {
+                assert_eq!(row["elem"], 1);
+                assert!(row["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("弱軸の座屈長さの直接指定"));
             }
-            assert!(skipped
-                .iter()
-                .all(|row| row["reason"].as_str().unwrap().contains("直接指定")));
-            assert_eq!(summary["all_checked_and_ok"], false);
             assert_eq!(summary["all_members_checked_and_ok"], false);
         }
     }

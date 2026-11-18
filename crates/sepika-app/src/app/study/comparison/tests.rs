@@ -179,20 +179,21 @@ fn fixed_volume_signed_displacement_and_every_case_design_match_normal_results_a
         .iter()
         .flat_map(|e| check_rows(e).unwrap())
         .collect();
-    let outside = member_impacts(&baseline_rows, &proposal_rows, &fixed);
     for rows in [&baseline_rows, &proposal_rows] {
         let column_rows: Vec<_> = rows
             .iter()
             .filter(|row| row.target == Some(ReferenceTarget::Member(ElemId(0))))
             .collect();
-        assert!(!column_rows.is_empty());
+        assert!(
+            column_rows.iter().any(|row| {
+                row.complete && row.ratio.is_some_and(f64::is_finite) && row.evidence.is_some()
+            }),
+            "{column_rows:?}"
+        );
         assert!(column_rows
             .iter()
-            .all(|row| !row.complete && row.ratio.is_none() && row.reason.contains("直接指定")));
+            .all(|row| !row.reason.contains("座屈長さ")));
     }
-    assert!(!outside
-        .iter()
-        .any(|impact| impact.after.target == Some(ReferenceTarget::Member(ElemId(0)))));
 }
 
 #[test]

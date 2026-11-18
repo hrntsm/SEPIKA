@@ -44,7 +44,7 @@ pub(crate) fn check_column(
     let sigma_by = forces.my.abs() / z_weak;
     let lambda = effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z);
     let buckling_note =
-        if ctx.lk_y.unwrap_or(ctx.length) <= 1e-9 && ctx.lk_z.unwrap_or(ctx.length) <= 1e-9 {
+        if ctx.lk_y.unwrap_or(ctx.length) == 0.0 && ctx.lk_z.unwrap_or(ctx.length) == 0.0 {
             "（座屈長さ0のため座屈無視 λ=0）"
         } else {
             ""

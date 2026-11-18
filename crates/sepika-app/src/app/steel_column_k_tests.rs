@@ -1,12 +1,14 @@
 use super::*;
 use sepika_design_jp::CheckOutcome;
 #[path = "../../../sepika-design-jp/tests/fixtures/steel_column_k_model.rs"]
-mod input;
+pub(crate) mod input;
 
 #[test]
-fn column_k_gui_keeps_unchecked_reason_and_invalidates_saved_auto_k_contract() {
+fn steel_column_gui_keeps_resolved_lengths_and_invalidates_old_design_contract() {
     let mut app = App::default();
-    assert!(app.load_model(input::portal(1.0)));
+    let mut model = input::portal(1.0);
+    model.steel_design_attrs[1].lk_z_direct = None;
+    assert!(app.load_model(model));
     app.run_linear_static(LoadCaseId(0));
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -16,16 +18,19 @@ fn column_k_gui_keeps_unchecked_reason_and_invalidates_saved_auto_k_contract() {
     let expected = app.current_design_results().unwrap().member_checks.clone();
     let columns: Vec<_> = expected.iter().filter(|member| member.elem.0 < 2).collect();
     assert_eq!(columns.len(), 2);
-    for column in columns {
+    for (column, lengths) in columns
+        .into_iter()
+        .zip(["強軸 3600 ／ 弱軸 3000", "強軸 3600 ／ 弱軸 3600"])
+    {
         assert_eq!(column.positions.len(), 3);
-        assert!(column.positions.iter().all(|position| matches!(&position.outcome, CheckOutcome::Skipped { reason } if reason.contains("直接指定"))));
+        assert!(column.positions.iter().all(|position| matches!(&position.outcome, CheckOutcome::Checked(result) if result.detail.contains(lengths))));
     }
-    for version in [56, sepika_core::result_contract::DESIGN_CONTRACT_VERSION] {
+    for version in [60, sepika_core::result_contract::DESIGN_CONTRACT_VERSION] {
         let (mut loaded, path) = super::result_contract_tests::restore(
             &app,
             Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
             Some(version),
-            &format!("column-k1398-{version}"),
+            &format!("steel-buckling-length-{version}"),
         );
         std::fs::remove_file(path).unwrap();
         assert!(loaded
@@ -35,7 +40,7 @@ fn column_k_gui_keeps_unchecked_reason_and_invalidates_saved_auto_k_contract() {
             .as_ref()
             .unwrap()
             .has_analysis_results());
-        if version == 56 {
+        if version == 60 {
             assert!(loaded.current_design_results().is_none());
             loaded.run_design_check();
         }
