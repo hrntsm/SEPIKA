@@ -167,17 +167,17 @@ fn nonzero(z: f64) -> f64 {
     }
 }
 
-fn compression_slenderness_outcome(
+fn check_compression_slenderness(
     forces: &MemberForcesAt,
     sec: &Section,
     ctx: &DesignCtx,
-) -> Option<CheckOutcome> {
+) -> Result<Option<f64>, CheckOutcome> {
     use crate::{CheckComponent, CheckKind, CheckResult};
     if forces.n.is_finite() && forces.n >= 0.0 {
-        return None;
+        return Ok(None);
     }
     if forces.n < 0.0 && matches!(sec.shape, Some(SectionShape::SteelAngle { .. })) {
-        return Some(CheckOutcome::Skipped {
+        return Err(CheckOutcome::Skipped {
             reason: "圧縮山形鋼は幾何軸と主軸が異なり、主軸に対応する有効座屈長さが未確認のため、有効細長比の法定上限を含む鋼部材検定は未算定です".into(),
         });
     }
@@ -191,7 +191,7 @@ fn compression_slenderness_outcome(
             .any(|v| !v.is_finite() || *v <= 0.0)
         || lengths_mm.iter().any(|v| !v.is_finite() || *v < 0.0)
     {
-        return Some(CheckOutcome::Skipped {
+        return Err(CheckOutcome::Skipped {
             reason: "有効細長比の法定上限を判定できません。軸力・断面性能・有効座屈長さを確認してください".into(),
         });
     }
@@ -200,7 +200,7 @@ fn compression_slenderness_outcome(
     if radii_mm.iter().any(|v| !v.is_finite() || *v <= 0.0)
         || lambdas.iter().any(|v| !v.is_finite())
     {
-        return Some(CheckOutcome::Skipped {
+        return Err(CheckOutcome::Skipped {
             reason: "有効細長比を有限値で算定できないため法定上限を判定できません".into(),
         });
     }
@@ -210,13 +210,19 @@ fn compression_slenderness_outcome(
     } else {
         250.0
     };
-    (lambda > limit).then(|| CheckOutcome::Checked(CheckResult {
+    if lambda <= limit {
+        return Ok(Some(lambda));
+    }
+    Err(CheckOutcome::Checked(CheckResult {
         basis: "建築基準法施行令第65条 有効細長比上限".into(),
         detail: String::new(),
         components: vec![CheckComponent {
             kind: CheckKind::Provision,
             ratio: lambda / limit,
-            detail: format!("有効細長比λ={lambda} > 法定上限{limit}。λ/上限={ratio}（応力度比ではありません）", ratio=lambda/limit),
+            detail: format!(
+                "有効細長比λ={lambda} > 法定上限{limit}。λ/上限={ratio}（応力度比ではありません）",
+                ratio = lambda / limit
+            ),
         }],
     }))
 }
@@ -234,9 +240,41 @@ impl DesignCheck for SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
-        if let Some(outcome) = compression_slenderness_outcome(forces, sec, ctx) {
-            return outcome;
-        }
+        self.check_section(forces, sec, mat, ctx, false)
+    }
+}
+
+impl SteelDesign {
+    pub(crate) fn check_secondary_post(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> CheckOutcome {
+        self.check_section(forces, sec, mat, ctx, true)
+    }
+
+    fn check_section(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        secondary_post: bool,
+    ) -> CheckOutcome {
+        let lambda = match check_compression_slenderness(forces, sec, ctx) {
+            Ok(Some(lambda)) if !secondary_post => lambda,
+            Ok(_) => crate::effective_slenderness(
+                sec.iy,
+                sec.iz,
+                nonzero(sec.area),
+                ctx.length,
+                ctx.lk_y,
+                ctx.lk_z,
+            ),
+            Err(outcome) => return outcome,
+        };
         if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column)
             && matches!(sec.shape, Some(SectionShape::SteelFlatBar { .. }))
             && (forces.qy != 0.0 || forces.qz != 0.0)
@@ -332,9 +370,9 @@ impl DesignCheck for SteelDesign {
         let term = ctx.term;
 
         let cr = match ctx.kind {
-            MemberKind::Girder => beam::check_beam(forces, sec, mat, ctx, f, term),
-            MemberKind::Column => column::check_column(forces, sec, mat, ctx, f, term),
-            MemberKind::Brace => Ok(brace::check_brace(forces, sec, mat, ctx, f, term)),
+            MemberKind::Girder => beam::check_beam(forces, sec, mat, ctx, f, term, lambda),
+            MemberKind::Column => column::check_column(forces, sec, mat, ctx, f, term, lambda),
+            MemberKind::Brace => Ok(brace::check_brace(forces, sec, mat, ctx, f, term, lambda)),
         };
         match cr {
             Ok(result) => CheckOutcome::Checked(result),

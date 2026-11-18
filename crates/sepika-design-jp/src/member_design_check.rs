@@ -267,6 +267,12 @@ pub fn run_member_design_checks(
             .find(|a| a.elem == *elem_id)
             .cloned();
         let structure = structure_kind_of(Some(sec), Some(mat.category));
+        let brb = model.brb_attrs.iter().find(|a| a.elem == *elem_id);
+        let group = if kind == MemberKind::Girder {
+            options.girder_group_overrides.and_then(|m| m.get(elem_id))
+        } else {
+            None
+        };
         if kind == MemberKind::Column
             && mat.category == sepika_core::model::MaterialCategory::Steel
             && !matches!(structure, StructureKind::S | StructureKind::Cft)
@@ -287,41 +293,37 @@ pub fn run_member_design_checks(
                 continue;
             }
         }
-        let buckling_reason = if structure == StructureKind::Cft {
-            crate::cft::direct_column_buckling_lengths(*elem_id, steel_attr.as_ref()).err()
-        } else if kind == MemberKind::Column && structure == StructureKind::S {
-            let lengths = steel_attr
-                .as_ref()
-                .map(|a| (a.lk_y_direct, a.lk_z_direct))
-                .unwrap_or_default();
-            let unresolved: Vec<_> = [("強軸", lengths.0), ("弱軸", lengths.1)]
-                .into_iter()
-                .filter(|(_, length)| !length.is_some_and(|v| v.is_finite() && v >= 0.0))
-                .map(|(axis, _)| axis)
-                .collect();
-            (!unresolved.is_empty()).then(|| {
-                let detail = crate::steel::buckling::eccentric_column_k_reason(model, elem)
-                    .unwrap_or_else(|| "支点・柱梁端と梁遠端の回転拘束、層内軸力分布・同時座屈に対する自動Kの設計適用条件が未確定です".into());
-                format!("柱 ID {}: {}。{}の座屈長さを有限な非負値で直接指定してください（0は当該軸の座屈を無視する指定）", elem.id.0, detail, unresolved.join("・"))
-            })
+        let buckling_lengths = if structure == StructureKind::Cft {
+            crate::cft::direct_column_buckling_lengths(*elem_id, steel_attr.as_ref()).map(Some)
+        } else if structure == StructureKind::S && brb.is_none() {
+            crate::steel::buckling::resolve_steel_buckling_lengths(
+                *elem_id,
+                kind,
+                group.map_or(length, |g| g.length),
+                steel_attr.as_ref(),
+            )
+            .map(Some)
         } else {
-            None
+            Ok(None)
         };
-        if let Some(reason) = buckling_reason {
-            let positions = design_positions(elem, model, length);
-            for (pos, _) in &mf.at {
-                if is_near_design_position(*pos, &positions) {
-                    member_checks.push((
-                        *elem_id,
-                        *pos,
-                        CheckOutcome::Skipped {
-                            reason: reason.clone(),
-                        },
-                    ));
+        let buckling_lengths = match buckling_lengths {
+            Ok(lengths) => lengths,
+            Err(reason) => {
+                let positions = design_positions(elem, model, group.map_or(length, |g| g.length));
+                for (pos, _) in &mf.at {
+                    if is_near_design_position(*pos, &positions) {
+                        member_checks.push((
+                            *elem_id,
+                            *pos,
+                            CheckOutcome::Skipped {
+                                reason: reason.clone(),
+                            },
+                        ));
+                    }
                 }
+                continue;
             }
-            continue;
-        }
+        };
         let (lk_y_auto, lk_z_auto) = if kind == MemberKind::Column
             && !matches!(structure, StructureKind::S | StructureKind::Cft)
         {
@@ -336,19 +338,18 @@ pub fn run_member_design_checks(
         } else {
             (None, None)
         };
-        let lk_y = steel_attr
-            .as_ref()
-            .and_then(|a| a.lk_y_direct)
-            .or(lk_y_auto);
-        let lk_z = steel_attr
-            .as_ref()
-            .and_then(|a| a.lk_z_direct)
-            .or(lk_z_auto);
-
-        let group = if kind == MemberKind::Girder {
-            options.girder_group_overrides.and_then(|m| m.get(elem_id))
-        } else {
-            None
+        let (lk_y, lk_z) = match buckling_lengths {
+            Some((strong, weak)) => (Some(strong), Some(weak)),
+            None => (
+                steel_attr
+                    .as_ref()
+                    .and_then(|a| a.lk_y_direct)
+                    .or(lk_y_auto),
+                steel_attr
+                    .as_ref()
+                    .and_then(|a| a.lk_z_direct)
+                    .or(lk_z_auto),
+            ),
         };
         let (length, shear_span, end_moments_z, mid_moment_z) = match group {
             Some(g) => (g.length, g.shear_span, g.end_moments_z, g.mid_moment_z),
@@ -479,14 +480,15 @@ pub fn run_member_design_checks(
                         Some(sec),
                         Some(mat.category),
                     ) == sepika_core::structure_kind::StructureKind::Src);
-            let eccentric_brace_compression = kind == MemberKind::Brace
+            let eccentric_brace_compression = structure != StructureKind::S
+                && kind == MemberKind::Brace
                 && mfa.n < 0.0
                 && elem.end_offsets_mm != [[0.0; 3]; 2]
                 && !ctx
                     .steel_attr
                     .as_ref()
                     .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
-                && !model.brb_attrs.iter().any(|a| a.elem == *elem_id);
+                && brb.is_none();
             let mut outcome = if eccentric_brace_compression {
                 CheckOutcome::Skipped { reason: "非0XYZ偏心ブレースの圧縮検定には強軸・弱軸の座屈長さの直接指定が必要です。実材軸長・剛体接続長からは自動算定しません".into() }
             } else if missing_gravity {
@@ -497,7 +499,7 @@ pub fn run_member_design_checks(
                 CheckOutcome::Skipped {
                     reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
                 }
-            } else if let Some(brb) = model.brb_attrs.iter().find(|a| a.elem == *elem_id) {
+            } else if let Some(brb) = brb {
                 CheckOutcome::Checked(crate::brb::brb_check(brb, mfa.n, length, brb_long))
             } else {
                 checker.check(&mfa, sec, mat, &ctx)
@@ -510,6 +512,18 @@ pub fn run_member_design_checks(
                         .replace_range(..unconfirmed.len(), &reference.detail());
                 } else {
                     result.detail.push_str(&format!(", {}", reference.detail()));
+                }
+            }
+            if structure == StructureKind::S {
+                if let (Some((strong, weak)), CheckOutcome::Checked(result)) =
+                    (buckling_lengths, &mut outcome)
+                {
+                    if !result.detail.is_empty() {
+                        result.detail.push_str(", ");
+                    }
+                    result
+                        .detail
+                        .push_str(&format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
                 }
             }
             member_checks.push((*elem_id, *pos, outcome));

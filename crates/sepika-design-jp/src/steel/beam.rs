@@ -9,8 +9,7 @@
 
 use crate::material_strength::{steel_fc, steel_fs, steel_ft};
 use crate::{
-    effective_slenderness, CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm,
-    MemberForcesAt, SteelFbBasis,
+    CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt, SteelFbBasis,
 };
 use sepika_core::model::{Material, Section};
 
@@ -31,6 +30,7 @@ pub(crate) fn check_beam(
     ctx: &DesignCtx,
     f: f64,
     term: LoadTerm,
+    lambda: f64,
 ) -> Result<CheckResult, String> {
     let h = sec.depth;
     let b = sec.width;
@@ -67,7 +67,6 @@ pub(crate) fn check_beam(
     let ft_val = steel_ft(f, term);
     let fs_val = steel_fs(f, term);
 
-    let lambda = effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z);
     let fc_val = steel_fc(f, mat.young, lambda, term);
 
     let fb_weak = ft_val;

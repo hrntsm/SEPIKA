@@ -373,48 +373,179 @@ fn issue901_compressed_angles_require_principal_axis_effective_lengths() {
 }
 
 #[test]
-fn eccentric_brace_compression_requires_both_explicit_buckling_lengths() {
+fn ordinary_steel_compression_uses_explicit_lengths_at_the_numerical_cutoff() {
     use sepika_element::frame::beam::MemberForces;
-    for offsets in [[[0.0; 3]; 2], [[100.0, 200.0, 300.0]; 2]] {
-        for lengths in [
-            (None, None),
-            (Some(1000.0), None),
-            (Some(1000.0), Some(1500.0)),
+
+    for kind in [
+        FrameSectionUse::Column,
+        FrameSectionUse::Girder,
+        FrameSectionUse::Brace,
+    ] {
+        let mut model = model();
+        let sec = &mut model.sections[0];
+        sec.frame_use = Some(kind);
+        // 直接断面性能の数値例。断面二次半径2e-9 mmで、極小の直接長でもλ=0.5となる。
+        sec.iy = 4e-14;
+        sec.iz = 4e-14;
+        if kind == FrameSectionUse::Brace {
+            model.elements[0].kind = ElementKind::Brace {
+                tension_only: false,
+            };
+        }
+        model.steel_design_attrs[0].lk_y_direct = Some(1e-9);
+        model.steel_design_attrs[0].lk_z_direct = Some(5e-10);
+        let mf = MemberForces {
+            at: vec![(0.5, [-300_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+        };
+        let report = sepika_design_jp::run_member_design_checks(
+            &model,
+            &[(ElemId(0), mf)],
+            &[],
+            &Default::default(),
+        )
+        .unwrap();
+        let [(_, _, outcome)] = report.member_checks.as_slice() else {
+            panic!("{report:?}");
+        };
+        let CheckOutcome::Checked(result) = outcome else {
+            panic!("{outcome:?}");
+        };
+        // λ=0.5、E=205000、F=235から長期fc=156.66436177860686 N/mm²。軸応力度は30 N/mm²。
+        assert!(
+            (result.ratio() - 0.19149217894491571).abs() < 1e-12,
+            "{kind:?}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn girder_and_brace_use_the_eccentric_member_axis_and_keep_direct_axes() {
+    use sepika_element::frame::beam::MemberForces;
+    for kind in [FrameSectionUse::Girder, FrameSectionUse::Brace] {
+        for (direct, expected) in [
+            ((None, None), "強軸 3500 ／ 弱軸 3500"),
+            ((Some(1000.0), None), "強軸 1000 ／ 弱軸 3500"),
+            ((None, Some(8000.0)), "強軸 3500 ／ 弱軸 8000"),
+            ((Some(1000.0), Some(1500.0)), "強軸 1000 ／ 弱軸 1500"),
+            ((Some(1000.0), Some(0.0)), "弱軸の座屈長さの直接指定"),
         ] {
-            for n in [-10000.0, 10000.0] {
-                let mut model = model();
+            let mut model = model();
+            model.sections[0].frame_use = Some(kind);
+            if kind == FrameSectionUse::Brace {
                 model.elements[0].kind = ElementKind::Brace {
                     tension_only: false,
                 };
-                model.elements[0].end_offsets_mm = offsets;
-                model.sections[0].frame_use = Some(FrameSectionUse::Brace);
-                model.steel_design_attrs[0].lk_y_direct = lengths.0;
-                model.steel_design_attrs[0].lk_z_direct = lengths.1;
-                let mf = MemberForces {
-                    at: vec![
-                        (0.0, [n, 0.0, 0.0, 0.0, 0.0, 0.0]),
-                        (1.0, [n, 0.0, 0.0, 0.0, 0.0, 0.0]),
-                    ],
-                };
-                let report = sepika_design_jp::run_member_design_checks(
-                    &model,
-                    &[(ElemId(0), mf)],
-                    &[],
-                    &Default::default(),
-                )
-                .unwrap();
-                assert!(!report.member_checks.is_empty());
-                for (_, _, outcome) in report.member_checks {
-                    let skip = offsets != [[0.0; 3]; 2] && n < 0.0 && lengths.1.is_none();
-                    if skip {
-                        assert!(
-                            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("座屈長さの直接指定"))
-                        );
-                    } else {
-                        assert!(matches!(outcome, CheckOutcome::Checked(_)), "{outcome:?}");
-                    }
+            } else {
+                model.elements[0].rigid_zone.face_i = Some(350.0);
+            }
+            model.elements[0].end_offsets_mm = [[100.0, 200.0, 0.0], [600.0, 200.0, 0.0]];
+            model.steel_design_attrs[0].lk_y_direct = direct.0;
+            model.steel_design_attrs[0].lk_z_direct = direct.1;
+            let mf = MemberForces {
+                at: vec![(0.5, [-10000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            };
+            let report = sepika_design_jp::run_member_design_checks(
+                &model,
+                &[(ElemId(0), mf)],
+                &[],
+                &Default::default(),
+            )
+            .unwrap();
+            let [(_, _, outcome)] = report.member_checks.as_slice() else {
+                panic!("{report:?}");
+            };
+            match outcome {
+                CheckOutcome::Checked(result) if direct.1 != Some(0.0) => {
+                    assert!(result.detail.contains(expected), "{result:?}");
                 }
+                CheckOutcome::Skipped { reason } if direct.1 == Some(0.0) => {
+                    assert!(reason.contains(expected), "{reason}");
+                }
+                _ => panic!("{outcome:?}"),
             }
         }
     }
+}
+
+#[test]
+fn girder_group_uses_whole_length_and_preserves_lateral_length() {
+    use sepika_element::frame::beam::MemberForces;
+    let mut model = model();
+    model.steel_design_attrs[0].lk_y_direct = None;
+    model.steel_design_attrs[0].lk_z_direct = None;
+    model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 10.0,
+        flange_thick: 15.0,
+        root_r: Some(0.0),
+    });
+    model.sections[0].j = 600_000.0;
+    let mf = MemberForces {
+        at: vec![(0.5, [0.0, 0.0, 0.0, 0.0, 0.0, 20_000_000.0])],
+    };
+    let group = std::collections::HashMap::from([(
+        ElemId(0),
+        sepika_design_jp::GirderGroupContextOverride {
+            length: 5500.0,
+            clear_length: 5000.0,
+            shear_span: None,
+            end_moments_z: None,
+            mid_moment_z: None,
+        },
+    )]);
+    let mut ratios = Vec::new();
+    for mid_lb_mm in [700.0, 8500.0] {
+        model.steel_design_attrs[0].lb_direct = Some((600.0, mid_lb_mm, 800.0));
+        let report = sepika_design_jp::run_member_design_checks(
+            &model,
+            &[(ElemId(0), mf.clone())],
+            &[],
+            &sepika_design_jp::MemberDesignCheckOptions {
+                girder_group_overrides: Some(&group),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = result(report.member_checks[0].2.clone());
+        assert!(
+            result.detail.contains("強軸 5500 ／ 弱軸 5500"),
+            "{result:?}"
+        );
+        ratios.push(result.components[0].ratio);
+    }
+    assert!(ratios[1] > ratios[0], "{ratios:?}");
+}
+
+#[test]
+fn brb_uses_its_product_check_even_with_invalid_ordinary_lengths() {
+    use sepika_element::frame::beam::MemberForces;
+    let mut model = model();
+    model.elements[0].kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    model.sections[0].frame_use = Some(FrameSectionUse::Brace);
+    model.steel_design_attrs[0].lk_y_direct = Some(0.0);
+    model.brb_attrs.push(BrbAttr {
+        elem: ElemId(0),
+        allowable_axial_short: 1_000_000.0,
+        critical_length: 2000.0,
+        length_reduction: 300.0,
+    });
+    let mf = MemberForces {
+        at: vec![(0.0, [-10000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+    };
+    let report = sepika_design_jp::run_member_design_checks(
+        &model,
+        &[(ElemId(0), mf)],
+        &[],
+        &Default::default(),
+    )
+    .unwrap();
+    let result = result(report.member_checks[0].2.clone());
+    assert!((result.ratio() - 1.2).abs() < 1e-12, "{result:?}");
+    assert!(
+        result.components[0].detail.contains("Lk=2400.0000"),
+        "{result:?}"
+    );
 }

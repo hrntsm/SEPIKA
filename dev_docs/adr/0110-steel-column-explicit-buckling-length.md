@@ -1,6 +1,8 @@
 # 通常S柱は両軸の座屈長さ直接指定を必要とする
 
-Status: partially superseded by ADR-0113
+Status: superseded by ADR-0113 and ADR-0114
+
+通常S柱の直接指定要件は[ADR 0114](0114-steel-buckling-length-defaults.md)で変更した。
 
 [Issue #1398](https://github.com/hrntsm/SEPIKA/issues/1398)では、理想ピン柱脚をG=10へ置換すると独立釣合いの有効長を過小評価し、採用圧縮式でNGの柱をOKとする有限反例が得られた。ピン端だけを除外しても、層内軸力分布・同時座屈を含む設計適用条件を現APIの節点剛度集計から立証できない。
 

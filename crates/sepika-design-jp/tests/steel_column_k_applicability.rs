@@ -3,11 +3,17 @@ use sepika_design_jp::{run_member_design_checks, CheckOutcome, MemberDesignCheck
 mod input;
 
 #[test]
-fn column_k_public_analysis_requires_both_direct_lengths() {
-    for (ly, lz, missing) in [
-        (None, None, "強軸・弱軸"),
-        (Some(3000.0), None, "弱軸"),
-        (None, Some(3000.0), "強軸"),
+fn column_uses_defaults_only_for_unspecified_axes() {
+    for (ly, lz, expected) in [
+        (None, None, "強軸 3600 ／ 弱軸 3600"),
+        (Some(3000.0), None, "強軸 3000 ／ 弱軸 3600"),
+        (None, Some(3000.0), "強軸 3600 ／ 弱軸 3000"),
+        (Some(4700.0), Some(6200.0), "強軸 4700 ／ 弱軸 6200"),
+        (
+            Some(1e-10),
+            Some(1e-10),
+            "強軸 0.0000000001 ／ 弱軸 0.0000000001",
+        ),
     ] {
         let mut model = input::portal(1.0);
         for attr in &mut model.steel_design_attrs {
@@ -32,9 +38,9 @@ fn column_k_public_analysis_requires_both_direct_lengths() {
             .filter(|(id, _, _)| id.0 < 2)
             .collect();
         assert_eq!(columns.len(), 6);
-        for (id, _, outcome) in columns {
+        for (_, _, outcome) in columns {
             assert!(
-                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(&format!("柱 ID {}", id.0)) && reason.contains(missing) && reason.contains("直接指定")),
+                matches!(outcome, CheckOutcome::Checked(result) if result.detail.contains(expected) && !result.basis.contains("座屈長さ0")),
                 "{outcome:?}"
             );
         }
@@ -84,20 +90,16 @@ fn column_k_cft_does_not_use_the_available_automatic_length_with_primary_steel_m
 }
 
 #[test]
-fn column_k_invalid_direct_axis_never_falls_back_and_zero_remains_explicit() {
+fn column_invalid_direct_axis_never_falls_back() {
     let mut model = input::portal(1.0);
     let solved =
         sepika_solver::statics::linear::linear_static_once(&model, sepika_core::ids::LoadCaseId(0))
             .unwrap();
-    for invalid in [None, Some(-1.0), Some(f64::NAN), Some(f64::INFINITY)] {
-        for axis in [0, 1] {
+    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        for axis in ["強軸", "弱軸"] {
             for attr in &mut model.steel_design_attrs {
-                attr.lk_y_direct = if axis == 0 {
-                    invalid
-                } else {
-                    Some(6983.630277482522)
-                };
-                attr.lk_z_direct = if axis == 1 { invalid } else { Some(3000.0) };
+                attr.lk_y_direct = (axis == "強軸").then_some(invalid);
+                attr.lk_z_direct = (axis == "弱軸").then_some(invalid);
             }
             let report = run_member_design_checks(
                 &model,
@@ -112,58 +114,23 @@ fn column_k_invalid_direct_axis_never_falls_back_and_zero_remains_explicit() {
                 .filter(|(id, _, _)| id.0 < 2)
                 .collect();
             assert_eq!(columns.len(), 6);
-            assert!(columns
-                .iter()
-                .all(|(_, _, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
+            for (id, _, outcome) in columns {
+                assert!(
+                    matches!(outcome, CheckOutcome::Skipped { reason }
+                        if reason.contains(&format!("部材 ID {}", id.0))
+                        && reason.contains(&format!("{axis}の座屈長さの直接指定"))
+                        && reason.contains("有限な正値")),
+                    "{outcome:?}"
+                );
+            }
         }
     }
-    for attr in &mut model.steel_design_attrs {
-        attr.lk_y_direct = Some(0.0);
-        attr.lk_z_direct = Some(0.0);
-    }
-    let report = run_member_design_checks(
-        &model,
-        &solved.member_forces,
-        &solved.panel_moments,
-        &MemberDesignCheckOptions::default(),
-    )
-    .unwrap();
-    assert!(report
-        .member_checks
-        .iter()
-        .filter(|(id, _, _)| id.0 < 2)
-        .all(|(_, _, outcome)| matches!(outcome, CheckOutcome::Checked(_))));
 }
 
 #[test]
-fn column_k_fixed_support_and_rigid_beams_do_not_prove_story_buckling_conditions() {
+fn eccentric_column_uses_the_physical_axis_for_the_missing_length() {
     let mut model = input::portal(1.0);
-    for node in &mut model.nodes[..2] {
-        node.restraint = sepika_core::dof::Dof6Mask::FIXED;
-    }
-    let solved =
-        sepika_solver::statics::linear::linear_static_once(&model, sepika_core::ids::LoadCaseId(0))
-            .unwrap();
-    let report = run_member_design_checks(
-        &model,
-        &solved.member_forces,
-        &solved.panel_moments,
-        &MemberDesignCheckOptions::default(),
-    )
-    .unwrap();
-    let columns: Vec<_> = report
-        .member_checks
-        .iter()
-        .filter(|(id, _, _)| id.0 < 2)
-        .collect();
-    assert_eq!(columns.len(), 6);
-    assert!(columns.iter().all(|(_, _, outcome)| matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("層内軸力分布・同時座屈"))));
-}
-
-#[test]
-fn column_k_eccentric_column_reports_the_missing_axis_after_partial_direct_input() {
-    let mut model = input::portal(1.0);
-    model.elements[0].end_offsets_mm = [[1.0, 0.0, 0.0]; 2];
+    model.elements[0].end_offsets_mm = [[0.0; 3], [0.0, 0.0, 500.0]];
     let solved =
         sepika_solver::statics::linear::linear_static_once(&model, sepika_core::ids::LoadCaseId(0))
             .unwrap();
@@ -176,7 +143,7 @@ fn column_k_eccentric_column_reports_the_missing_axis_after_partial_direct_input
     .unwrap();
     for (id, _, outcome) in report.member_checks.iter().filter(|(id, _, _)| id.0 < 2) {
         assert!(
-            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(&format!("柱 ID {}", id.0)) && reason.contains("強軸の座屈長さ") && reason.contains("直接指定")),
+            matches!(outcome, CheckOutcome::Checked(result) if result.detail.contains(if id.0 == 0 { "強軸 4200 ／ 弱軸 3000" } else { "強軸 3600 ／ 弱軸 3000" })),
             "{outcome:?}"
         );
     }
@@ -198,9 +165,13 @@ fn column_k_unchecked_and_direct_lengths_use_identical_face_positions() {
             assert!(forces.at.iter().any(|(pos, _)| *pos == 1.0));
         }
     }
-    for direct in [false, true] {
+    for (direct, checked) in [
+        (None, true),
+        (Some(6983.630277482522), true),
+        (Some(0.0), false),
+    ] {
         for attr in &mut model.steel_design_attrs {
-            attr.lk_y_direct = direct.then_some(6983.630277482522);
+            attr.lk_y_direct = direct;
         }
         let report = run_member_design_checks(
             &model,
@@ -215,7 +186,7 @@ fn column_k_unchecked_and_direct_lengths_use_identical_face_positions() {
                 .iter()
                 .filter(|(elem, _, _)| elem.0 == id)
                 .map(|(_, pos, outcome)| {
-                    assert_eq!(matches!(outcome, CheckOutcome::Checked(_)), direct);
+                    assert_eq!(matches!(outcome, CheckOutcome::Checked(_)), checked);
                     *pos
                 })
                 .collect();

@@ -3,8 +3,7 @@
 
 use crate::material_strength::{steel_fc, steel_fs, steel_ft};
 use crate::{
-    effective_slenderness, CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm,
-    MemberForcesAt, SteelFbBasis,
+    CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt, SteelFbBasis,
 };
 use sepika_core::model::{Material, Section};
 
@@ -24,10 +23,11 @@ pub(crate) fn check_column(
     ctx: &DesignCtx,
     f: f64,
     term: LoadTerm,
+    lambda: f64,
 ) -> Result<CheckResult, String> {
     let h = sec.depth;
     let (shape, tf, _) = shape_of(sec);
-    let a = column_allowables(sec, mat, ctx, f, term)?;
+    let a = column_allowables(sec, mat, ctx, f, Some(lambda))?;
     let ColumnAllowables {
         area,
         z_strong,
@@ -42,9 +42,8 @@ pub(crate) fn check_column(
     } = a;
     let sigma_bx = forces.mz.abs() / z_strong;
     let sigma_by = forces.my.abs() / z_weak;
-    let lambda = effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z);
     let buckling_note =
-        if ctx.lk_y.unwrap_or(ctx.length) <= 1e-9 && ctx.lk_z.unwrap_or(ctx.length) <= 1e-9 {
+        if ctx.lk_y.unwrap_or(ctx.length) == 0.0 && ctx.lk_z.unwrap_or(ctx.length) == 0.0 {
             "（座屈長さ0のため座屈無視 λ=0）"
         } else {
             ""
@@ -167,8 +166,9 @@ pub(crate) fn column_allowables(
     mat: &Material,
     ctx: &DesignCtx,
     f: f64,
-    term: LoadTerm,
+    checked_slenderness: Option<f64>,
 ) -> Result<ColumnAllowables, String> {
+    let term = ctx.term;
     let h = sec.depth;
     let b = sec.width;
     let area = nonzero(sec.area);
@@ -180,7 +180,9 @@ pub(crate) fn column_allowables(
     let ft_val = steel_ft(f, term);
     let fs_val = steel_fs(f, term);
 
-    let lambda = effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z);
+    let lambda = checked_slenderness.unwrap_or_else(|| {
+        crate::effective_slenderness(sec.iy, sec.iz, area, ctx.length, ctx.lk_y, ctx.lk_z)
+    });
     let fc_val = steel_fc(f, mat.young, lambda, term);
 
     let c = steel_c_factor(ctx, false);

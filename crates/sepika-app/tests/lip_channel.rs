@@ -118,16 +118,6 @@ fn lip_channel_actual_member_checks_and_report_remain_unchecked() {
             let CheckOutcome::Skipped { reason } = &position.outcome else {
                 panic!("リップ材の検定位置がChecked")
             };
-            let elem = app.core.model.element(member.elem).unwrap();
-            if app.core.model.element_section(elem).unwrap().frame_use
-                == Some(sepika_core::model::FrameSectionUse::Column)
-            {
-                assert!(
-                    reason.contains(&format!("柱 ID {}", member.elem.0))
-                        && reason.contains("直接指定")
-                );
-                continue;
-            }
             for item in [
                 "[局部座屈]",
                 "[ゆがみ座屈]",

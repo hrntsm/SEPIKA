@@ -2,12 +2,48 @@
 //!
 //! 強軸まわり K_y・弱軸まわり K_z を個別に評価する軸別版と、方向を区別しない
 //! 簡略版を持つ。混合構造の部材剛性はヤング係数比で補正される。
-//! 通常S柱・CFT柱の共通検定は両軸の座屈長さ直接指定を要求する。
 
 use sepika_core::adjacency::NodeAdjacency;
-use sepika_core::ids::NodeId;
-use sepika_core::model::{ElementData, ElementKind, EndCondition, Material, Model, Section};
+use sepika_core::ids::{ElemId, NodeId};
+use sepika_core::model::{
+    ElementData, ElementKind, EndCondition, Material, Model, Section, SteelDesignAttr,
+};
 use sepika_element::transform::LocalFrame;
+
+/// 通常S主架構部材の座屈長さ (強軸, 弱軸) [mm]。L は剛域控除前の実材軸長。
+/// 未指定の軸は柱 1.2L、大梁・一般ブレース L を用い、採用値が有限正でなければ理由を返す。
+pub fn resolve_steel_buckling_lengths(
+    elem: ElemId,
+    kind: crate::MemberKind,
+    length_mm: f64,
+    attr: Option<&SteelDesignAttr>,
+) -> Result<(f64, f64), String> {
+    let default_mm = match kind {
+        crate::MemberKind::Column => 1.2 * length_mm,
+        crate::MemberKind::Girder | crate::MemberKind::Brace => length_mm,
+    };
+    let (strong, weak) = attr
+        .map(|a| (a.lk_y_direct, a.lk_z_direct))
+        .unwrap_or_default();
+    let resolve = |axis, direct: Option<f64>| match direct {
+        Some(v) if v.is_finite() && v > 0.0 => Ok(v),
+        Some(_) => Err(format!(
+            "部材 ID {}: {axis}の座屈長さの直接指定は有限な正値 [mm] が必要です",
+            elem.0
+        )),
+        None if default_mm.is_finite() && default_mm > 0.0 => Ok(default_mm),
+        None => Err(format!(
+            "部材 ID {}: 有効な材軸長が得られず、{axis}の既定座屈長さを算定できません",
+            elem.0
+        )),
+    };
+    let (strong, weak) = (resolve("強軸", strong), resolve("弱軸", weak));
+    match (strong, weak) {
+        (Ok(strong), Ok(weak)) => Ok((strong, weak)),
+        (Err(strong), Err(weak)) => Err(format!("{strong}。{weak}")),
+        (Err(reason), _) | (_, Err(reason)) => Err(reason),
+    }
+}
 
 /// ピン端・梁無し節点に用いる剛度比 G の規定値（本実装の既定値）。
 const G_PIN: f64 = 10.0;
@@ -196,7 +232,7 @@ pub fn steel_column_k_with_index(
 /// 柱・線材でない場合や幾何を解決できない場合は `None`。
 /// 全部材の強軸剛性を用い、梁の端部結合・剛域・支点境界・梁遠端条件は考慮しない。
 /// 軸別評価は [`steel_column_k_axes_with_index`] を使う。
-/// 適用条件を判定しない数値であり、通常S柱・CFT柱の共通検定は両軸直接指定を要求する。
+/// 適用条件を判定しない数値であり、通常S柱・CFT柱の共通検定は採用しない。
 pub fn steel_column_k(model: &Model, elem: &ElementData) -> Option<f64> {
     let index = NodeAdjacency::build(model);
     steel_column_k_with_index(model, &index, elem)
@@ -307,7 +343,7 @@ fn g_ratio_axis_at(
 /// `index` は事前に `NodeAdjacency::build(model)` で一度だけ構築し、
 /// 全部材ぶんのループで使い回すこと。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
-/// 適用条件を判定しない数値であり、通常S柱・CFT柱の共通検定は両軸直接指定を要求する。
+/// 適用条件を判定しない数値であり、通常S柱・CFT柱の共通検定は採用しない。
 pub fn steel_column_k_axes_with_index(
     model: &Model,
     index: &NodeAdjacency,
