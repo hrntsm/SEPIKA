@@ -437,6 +437,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [STB単材形鋼の正値半径_Issue1386_確認記録.md](STB単材形鋼の正値半径_Issue1386_確認記録.md) | 公式輪郭と公開鋼材図、独立断面性能積分、正値半径のXSD検証 | 🔶（要素断片と独立候補の確認。製品接続・意味往復未） |
 | [青系パステルGUI_確認記録.md](青系パステルGUI_確認記録.md) | 配色・枠・文字描画の分離、Windowsの確定編集・荷重Modal・表示値保持 | 🔶（自動回帰・有限実機。倍率別の全代表操作・可読性/性能・最終CI未確認） |
 | [平面凸四角形シェル面積_Issue1154.md](平面凸四角形シェル面積_Issue1154.md) | 独立面積・集中/整合質量・法線回転剛性、保存成果の失効 | 🔶（有限Verification、全体応答・実験Validation未） |
 | [RC接合部許容せん断_Issue948_照合記録.md](RC接合部許容せん断_Issue948_照合記録.md) | 有効幅の限定一致、許容係数・内力・適用条件の原典待ち | 🔶（調査記録完了。規準本体・設計採用・Validation未、数値応答維持） |
@@ -820,6 +821,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
 | 23d | STB組立BOXの入力境界 | sepika-io / sepika-app | tests/stbridge_built_box.rs、app/reference_identity_acceptance_tests.rs | [Issue683の読込結合](STB異厚組立BOX_Issue683_確認記録.md#要素テスト索引) | 横断 | 🔶（異厚の公開入口・参照/属性報告・質量/保存と不正寸法のVerification、Validation・手動GUIは未確認） |
+| 23e | STB単材L・C・Tの正値半径 | sepika-io | tests/stbridge_placement.rs | `asymmetric_rolled_sections_reject_unrepresentable_radius_instead_of_silently_losing_it`、[独立輪郭積分・XSDの再現手順](STB単材形鋼の正値半径_Issue1386_確認記録.md#検証の再現) | #1386 | 🔶（既存の入力拒否・要素断片のXSD・独立候補を確認。製品接続・意味往復未） |
 | 23c | STB CFT鋼管の標準密度 | sepika-io / sepika-core | stbridge/import/assemble.rs、tests/stbridge_cft_steel_density.rs | [Issue741の公開入口と独立面積期待値](STB_CFT鋼管標準密度_Issue741_2026-10.md#独立期待値と公開入口) | 横断 | 🔶（公開入口・独立面積質量のVerification成功、Validation・最終ゲート未確認） |
 | 23a | STB標準入力限定 | sepika-io / sepika-app | stbridge/import、tests/stbridge_standard_input.rs、tests/stbridge_standard_rebar.rs、reference_identity_acceptance_tests.rs | [Issue660の独立入力と観測契約](STB標準入力限定_Issue660_2026-10.md#独立入力と観測契約) | 横断 | 🔶（両入口直接10・IO200・App lib837・文書検査成功。追加feature回帰1失敗後、App試験移行対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
 | 23b | STB断面系列別ID | sepika-io / sepika-app | stbridge/import、tests/stbridge_namespace.rs、tests/stbridge_section_series.rs、tests/stbridge_section_reference_boundaries.rs、reference_identity_acceptance_tests.rs | [Issue571の独立入力と予定観測](STB断面系列別ID_Issue571_2026-10.md#独立入力と予定観測) | 横断 | 🔶（series12・boundary6・namespace9・App自動9・IO227・最終feature1322成功。文書修正後の再検査/レビュー・最終ゲート未確認） |
