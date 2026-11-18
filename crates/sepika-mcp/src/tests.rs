@@ -7,6 +7,9 @@ use sepika_core::model::{
     MemberDetailAttr, MemberJoint, Node, Section,
 };
 
+#[path = "../../sepika-design-jp/tests/fixtures/cft_column_buckling_model.rs"]
+pub(crate) mod cft_column_buckling_input;
+
 #[test]
 fn source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo() {
     let mut model = sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/></StbStories></StbModel></ST_BRIDGE>"#).unwrap();
@@ -336,6 +339,11 @@ fn rounded_cft_jobs_publish_allowable_and_ultimate_capacities() {
     section.material = Some(MaterialId(0));
     section.steel_material = Some(steel_id);
     model.sections[0] = section;
+    model.steel_design_attrs = vec![cft_column_buckling_input::direct_lengths(
+        ElemId(0),
+        Some(3000.0),
+        Some(3000.0),
+    )];
     match compute_job(&model, JobKind::DesignCheck, &JobParams::default()).unwrap() {
         JobOutcome::DesignCheck { summary, .. } => {
             assert_eq!(summary["n_skipped"], 0);
@@ -948,6 +956,11 @@ pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
         [0.0, 0.0, -n_compression_n, 0.0, 0.0, 0.0],
     )];
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model.steel_design_attrs = vec![cft_column_buckling_input::direct_lengths(
+        ElemId(0),
+        Some(7200.0),
+        Some(7200.0),
+    )];
     model
 }
 
@@ -986,6 +999,20 @@ fn cft_long_case2_job_reports_independent_mu_and_never_passes_axial_overload() {
             JobOutcome::UltimateCheck { summary } => assert_cft_long_case2_summary(&summary, ok),
             _ => panic!("終局検定の結果が必要"),
         }
+    }
+}
+
+#[test]
+fn cft_ultimate_job_rejects_missing_or_zero_direct_length_with_axis() {
+    let mut model = cft_long_case2_model(4_000_000.0);
+    for invalid in [None, Some(0.0)] {
+        model.steel_design_attrs[0].lk_z_direct = invalid;
+        let Err(sepika_job::JobError::InvalidInput(reason)) =
+            compute_job(&model, JobKind::UltimateCheck, &JobParams::default())
+        else {
+            panic!("CFT終局検定は片軸で成立しません");
+        };
+        assert!(reason.contains("CFT柱 ID 0: 弱軸の座屈長さ"), "{reason}");
     }
 }
 

@@ -234,10 +234,10 @@ pub struct SteelDesignAttr {
     /// 等間隔横補剛の本数（lb 自動計算: lb = L/(n+1)）
     #[serde(default)]
     pub lateral_brace_count: Option<u32>,
-    /// 強軸まわり座屈長さの直接入力 lk_y `[mm]`（通常S柱は未指定なら未検定）
+    /// 強軸まわり座屈長さの直接入力 lk_y `[mm]`（通常S柱・CFT柱は未指定なら未検定）
     #[serde(default)]
     pub lk_y_direct: Option<f64>,
-    /// 弱軸まわり座屈長さの直接入力 lk_z `[mm]`（通常S柱は未指定なら未検定）
+    /// 弱軸まわり座屈長さの直接入力 lk_z `[mm]`（通常S柱・CFT柱は未指定なら未検定）
     #[serde(default)]
     pub lk_z_direct: Option<f64>,
     /// 横座屈修正係数 C の直接入力（None=自動算定）。

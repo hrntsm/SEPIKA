@@ -21,14 +21,13 @@ use super::cft_nm::{
 pub struct CftUltimateCheck {
     /// 部材 ID。
     pub elem: ElemId,
-    /// 柱分類（短柱/中柱/長柱）。
+    /// 軸圧縮耐力を決めた軸の柱分類（短柱/中柱/長柱）。
     pub class: CftColumnClass,
     /// 軸圧縮終局耐力 Ncu `[N]`。
     pub ncu: f64,
     /// 軸引張終局耐力 Ntu `[N]`。
     pub ntu: f64,
-    /// 設計軸力における N-M 相互作用の終局曲げ耐力 Mu [N·mm]
-    /// （柱分類に応じて短柱／中柱／長柱の式を用いる）。
+    /// 設計軸力における強軸の終局曲げ耐力 Mu [N·mm]。
     pub mu_nm: Result<f64, String>,
     /// 設計軸力 `[N]`（圧縮正）。
     pub n_design: f64,
@@ -68,13 +67,8 @@ fn cft_section_props(shape: &SectionShape) -> Result<Option<CftSectionProps>, St
     })
 }
 
-/// モデルの CFT 柱（`CftBox`/`CftPipe`）について軸終局検定を一括実行する
-/// （CFT指針）。
-///
-/// - `axial_by_elem`: 設計軸力 `[N]`（圧縮正）。必要部材の欠落・重複・非有限値はエラー。
-/// - 座屈長さ lk は部材の幾何長（K=1 相当）を用いる。鋼管の降伏強さ Fy は
-///   `Section.steel_material` の材料名・板厚または有効な fy から解決し、ヤング係数は
-///   205000 N/mm²（鋼）を用いる。Fc未設定はエラー。
+/// CFT柱の終局検定。設計軸力 [N] は圧縮正。材料・軸力・両軸の直接座屈長さの不足や不正値は理由付きエラー。
+/// 各直接長さから求めた軸圧縮耐力の小さい方を採り、同値なら強軸の長さで分類する。
 pub fn collect_cft_ultimate_checks(
     model: &Model,
     axial_by_elem: &[(ElemId, f64)],
@@ -118,24 +112,6 @@ pub fn collect_cft_ultimate_checks(
         }
         let fy = sepika_core::material_grade::cft_steel_f_value(steel_mat, thick)
             .ok_or_else(|| format!("CFT 部材 {} の鋼管 F 値が未設定または不正です", elem.id.0))?;
-        let lk = model.member_length(elem);
-        if !lk.is_finite() || lk < 0.0 {
-            return Err(format!("CFT 部材 {} の座屈長さが不正です", elem.id.0));
-        }
-
-        let inp = cft::CftAxialInput {
-            circular,
-            d_section,
-            c_area,
-            s_area,
-            c_inertia,
-            s_inertia,
-            fc,
-            fy,
-            s_young: 205000.0,
-            lk,
-        };
-        let r = cft_axial_ultimate(&inp);
         let diagnose = |reason| super::demand_diagnostic::demand_diagnostic(model, elem.id, reason);
         sepika_core::load_combo::ultimate_gravity_terms(model)
             .map_err(|reason| diagnose(format!("CFT部材 ID {}: {reason}", elem.id.0)))?;
@@ -153,13 +129,37 @@ pub fn collect_cft_ultimate_checks(
             )));
         }
 
-        let mu_nm = cft_mu_nm(shape, fc, fy, n_design, lk, false);
         if !n_design.is_finite() {
             return Err(diagnose(format!(
                 "ultimate_demand_nonfinite: CFT 部材 {} の設計軸力が非有限値です",
                 elem.id.0
             )));
         }
+        let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
+        let (lk_strong_mm, lk_weak_mm) = crate::cft::direct_column_buckling_lengths(elem.id, attr)?;
+        let axial_capacity = |lk| {
+            cft_axial_ultimate(&cft::CftAxialInput {
+                circular,
+                d_section,
+                c_area,
+                s_area,
+                c_inertia,
+                s_inertia,
+                fc,
+                fy,
+                s_young: 205000.0,
+                lk,
+            })
+        };
+        let strong = axial_capacity(lk_strong_mm);
+        let weak = axial_capacity(lk_weak_mm);
+        // 座屈曲線の丸めた係数で分枝境界に段差があり、長い方だけでは最小耐力が決まらない。
+        let (r, axial_axis) = if weak.ncu < strong.ncu {
+            (weak, "弱軸")
+        } else {
+            (strong, "強軸")
+        };
+        let mu_nm = cft_mu_nm(shape, fc, fy, n_design, lk_strong_mm, false);
         let mu_detail = match &mu_nm {
             Ok(mu) => format!("{mu:.0} N·mm"),
             Err(reason) => format!("未算定（{reason}）"),
@@ -186,9 +186,9 @@ pub fn collect_cft_ultimate_checks(
             CftColumnClass::Long => "長柱",
         };
         let detail = format!(
-            "分類={class_label}, Ncu={:.0} N, Ntu={:.0} N, Mu(N-M)={mu_detail}, N={:.0} N, \
-             lk={:.0} mm, cA={:.0} mm², sA={:.0} mm², Fc={:.1}, Fy={:.1}, 軸余裕度={:.3}",
-            r.ncu, r.ntu, n_design, lk, c_area, s_area, fc, fy, axial_margin
+            "軸圧縮支配={axial_axis}（{class_label}）, Ncu={:.0} N, Ntu={:.0} N, 強軸Mu(N-M)={mu_detail}, N={:.0} N, \
+             lk（強軸・弱軸）={lk_strong_mm}・{lk_weak_mm} mm, cA={:.0} mm², sA={:.0} mm², Fc={:.1}, Fy={:.1}, 軸余裕度={:.3}",
+            r.ncu, r.ntu, n_design, c_area, s_area, fc, fy, axial_margin
         );
         out.push(CftUltimateCheck {
             elem: elem.id,

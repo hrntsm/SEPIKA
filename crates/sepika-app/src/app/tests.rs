@@ -7593,6 +7593,11 @@ fn test_compute_cft_ultimate_checks() {
         spring: None,
     });
 
+    model.steel_design_attrs = vec![super::cft_column_buckling_tests::input::direct_lengths(
+        ElemId(0),
+        Some(3000.0),
+        Some(3000.0),
+    )];
     let mut app = App::default();
     app.load_model(model.clone());
     assert!(app
@@ -9868,6 +9873,18 @@ fn cft_ultimate_app_exposes_axial_and_rounded_bending_capacity() {
     section.material = Some(main_id);
     section.steel_material = Some(MaterialId(0));
     model.sections[0] = section;
+    model.steel_design_attrs = model
+        .elements
+        .iter()
+        .filter(|elem| elem.section == Some(SectionId(0)))
+        .map(|elem| {
+            super::cft_column_buckling_tests::input::direct_lengths(
+                elem.id,
+                Some(3000.0),
+                Some(3000.0),
+            )
+        })
+        .collect();
     let mut app = App::default();
     app.load_model(model.clone());
     assert!(app
@@ -9960,6 +9977,11 @@ pub(super) fn cft_long_case2_app(n_compression_n: f64) -> App {
         [0.0, 0.0, -n_compression_n, 0.0, 0.0, 0.0],
     )];
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model.steel_design_attrs = vec![super::cft_column_buckling_tests::input::direct_lengths(
+        ElemId(0),
+        Some(7200.0),
+        Some(7200.0),
+    )];
     let mut app = App::default();
     app.load_model(with_explicit_frame_gravity(model));
     app.core.analysis_cfg.threads = 1;

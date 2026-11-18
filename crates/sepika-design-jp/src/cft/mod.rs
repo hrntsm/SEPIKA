@@ -15,10 +15,33 @@ use crate::{
     effective_slenderness, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCheck,
     DesignCtx, LoadTerm, MemberForcesAt,
 };
-use sepika_core::model::{Material, Section};
+use sepika_core::ids::ElemId;
+use sepika_core::model::{Material, Section, SteelDesignAttr};
 use sepika_core::section_shape::{RoundedRectangle, SectionShape};
 
 use crate::ratio_or_large;
+
+/// CFT柱の直接座屈長さを mm で返す。順序は強軸・弱軸。
+/// 両軸とも有限な正値が必要。不足・不正の軸は理由に示す。
+pub fn direct_column_buckling_lengths(
+    elem: ElemId,
+    attr: Option<&SteelDesignAttr>,
+) -> Result<(f64, f64), String> {
+    let (strong, weak) = attr
+        .map(|a| (a.lk_y_direct, a.lk_z_direct))
+        .unwrap_or_default();
+    let positive = |v: &f64| v.is_finite() && *v > 0.0;
+    let missing = match (strong.filter(positive), weak.filter(positive)) {
+        (Some(strong), Some(weak)) => return Ok((strong, weak)),
+        (None, Some(_)) => "強軸",
+        (Some(_), None) => "弱軸",
+        (None, None) => "強軸・弱軸",
+    };
+    Err(format!(
+        "CFT柱 ID {}: {}の座屈長さを有限な正値で直接指定してください。自動Kの設計適用条件は未確認です",
+        elem.0, missing
+    ))
+}
 
 /// 矩形充填コンクリート部分の (cN, cM) を弾性三角形応力分布の閉形式で求める。
 /// `xn`: 中立軸位置（圧縮縁からの距離）[mm]、`cb`/`cd`: 検討方向の充填断面

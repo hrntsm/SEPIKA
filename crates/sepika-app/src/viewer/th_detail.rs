@@ -648,7 +648,8 @@ fn draw_peak_check(
     draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
-            "簡易検定です（座屈長さ＝部材長として評価。継手欠損・一本部材合成は考慮しません）。\
+            "簡易検定です。CFT柱は両軸の直接入力、その他は部材長を座屈長さに用います。\
+             継手欠損・一本部材合成は考慮しません。\
              非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
              （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。\
              各成分（N・Qy・Qz・My・Mz）の最大値は全ステップ包絡のため、同一時刻に生じたとは限りません\
@@ -686,6 +687,27 @@ fn draw_peak_check(
             "断面に材料が割り当てられていないため検定対象外です。",
         );
         return;
+    };
+    let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
+    let (lk_y, lk_z) = if structure == sepika_core::structure_kind::StructureKind::Cft {
+        let attr = app
+            .core
+            .model
+            .steel_design_attrs
+            .iter()
+            .find(|a| a.elem == elem.id);
+        match sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr) {
+            Ok((strong, weak)) => (Some(strong), Some(weak)),
+            Err(reason) => {
+                let outcome = CheckOutcome::Skipped { reason };
+                for (pos, _) in &peak.at {
+                    draw_outcome_row(ui, *pos, &outcome);
+                }
+                return;
+            }
+        }
+    } else {
+        (None, None)
     };
 
     let length = axis.length;
@@ -812,6 +834,8 @@ fn draw_peak_check(
         term: LoadTerm::Short,
         kind,
         length,
+        lk_y,
+        lk_z,
         clear_length: Some(clear_span),
         shear_span,
         shear_span_y,
@@ -828,9 +852,7 @@ fn draw_peak_check(
         column_sum_my,
         ..Default::default()
     };
-    let checker: Box<dyn DesignCheck> = sepika_design_jp::checker_for(
-        sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
-    );
+    let checker: Box<dyn DesignCheck> = sepika_design_jp::checker_for(structure);
 
     for (pos, f) in &peak.at {
         let mfa = MemberForcesAt {
@@ -917,6 +939,44 @@ mod signed_q0_acceptance_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cft_peak_check_renders_missing_axis_or_uses_the_direct_lengths() {
+        use crate::app::cft_column_buckling_tests::input;
+        let mut app = App::default();
+        assert!(app.load_model(input::cantilever(false, 7_450_000.0)));
+        let rec = ThRecording {
+            peak_member_forces: vec![Some(MemberForces {
+                at: vec![(0.0, [-7_450_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            })],
+            ..Default::default()
+        };
+        for (weak, expected) in [
+            (None, "弱軸の座屈長さを有限な正値で直接指定"),
+            (Some(6000.0), "検定比 1.185 (NG)"),
+        ] {
+            app.core.model.steel_design_attrs =
+                vec![input::direct_lengths(ElemId(0), Some(1000.0), weak)];
+            let elem = &app.core.model.elements[0];
+            let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
+            let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+                draw_peak_check(ui, &app, elem, 0, &rec, false, false, &axis)
+            });
+            let text = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(expected), "{text}");
+            if weak.is_none() {
+                assert!(!text.contains("検定比"), "{text}");
+            }
+        }
+    }
 
     #[test]
     fn incomplete_checks_th_detail_renders_unrated_reasons_and_known_ng() {
