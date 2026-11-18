@@ -229,6 +229,7 @@ fn check_compression_slenderness(
 
 /// 鋼部材の許容応力度検定。
 /// 平鋼の柱・大梁で片方向でもせん断力が非零なら、理由付きの未算定とする。
+/// H形鋼柱で弱軸せん断・強軸曲げ・引張軸力が同時に作用する位置も理由付きで未算定とする。
 /// 圧縮時の法定細長比の判定は先に適用する。
 pub struct SteelDesign;
 
@@ -281,6 +282,17 @@ impl SteelDesign {
         {
             return CheckOutcome::Skipped {
                 reason: "平鋼のせん断応力度の評価方法と適用する許容値の組合せが未確定のため、鋼部材検定は未算定です".into(),
+            };
+        }
+        if !secondary_post
+            && ctx.kind == MemberKind::Column
+            && forces.n > 0.0
+            && forces.qz != 0.0
+            && forces.mz != 0.0
+            && shape_of(sec).0 == ShapeCategory::H
+        {
+            return CheckOutcome::Skipped {
+                reason: "H形鋼柱に弱軸せん断・強軸曲げ・引張軸力が同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度を求められないため、鋼部材検定は未算定です".into(),
             };
         }
         if let Some(shape) = sec

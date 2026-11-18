@@ -156,13 +156,19 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             };
             for normal_stress in [false, true] {
                 for (sign_y, sign_z) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+                    let n = if !normal_stress {
+                        0.0
+                    } else if category == ShapeCategory::H
+                        && kind == MemberKind::Column
+                        && qz_n != 0.0
+                    {
+                        -100_000.0
+                    } else {
+                        sign_y * 100_000.0
+                    };
                     let forces = MemberForcesAt {
                         pos: 0.5,
-                        n: if normal_stress {
-                            sign_y * 100_000.0
-                        } else {
-                            0.0
-                        },
+                        n,
                         qy: sign_y * qy_n,
                         qz: sign_z * qz_n,
                         my: if normal_stress {
