@@ -1,6 +1,8 @@
 # 偏心ブレースの軸力接続と圧縮座屈長さを分離する
 
-Status: accepted
+Status: partially superseded by ADR-0114
+
+圧縮検定の直接指定要件は[ADR 0114](0114-steel-buckling-length-defaults.md)で変更した。
 
 [Issue #1364](https://github.com/hrntsm/SEPIKA/issues/1364)では、実材軸を既存の弾性トラスに渡し、梁・柱と同じ微小剛体接続を適用する。偏心に由来する節点モーメントをブレースの曲げ耐力として評価するモデルは採らない。非線形解析内のトラスにも同じ初期幾何を使い、新しい材料履歴や幾何剛性は追加しない。
 
