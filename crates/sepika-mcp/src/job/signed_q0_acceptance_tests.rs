@@ -127,9 +127,12 @@ fn signed_q0_mcp_nonstandard_live_factor_is_reasoned_unchecked_and_steel_needs_n
         .unwrap()
         .contains("係数"));
     model.combinations[0].terms[1].1 = 1.0;
-    let mut steel = sepika_core::section_shape::SectionShape::SteelFlatBar {
-        width: 300.0,
-        thick: 600.0,
+    let mut steel = sepika_core::section_shape::SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 8.0,
+        flange_thick: 13.0,
+        root_r: Some(0.0),
     }
     .to_section(sepika_core::ids::SectionId(0), "鋼梁".into());
     steel.material = Some(sepika_core::ids::MaterialId(0));
