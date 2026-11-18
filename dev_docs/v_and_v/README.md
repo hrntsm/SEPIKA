@@ -1,5 +1,9 @@
 # V&V レポート（検証・妥当性確認）
 
+## 鋼・RC大梁の略算たわみ（#1195）
+
+[原典・独立曲率積分・公開検定の照合](鋼RC大梁略算たわみ_Issue1195_照合記録.md)に、等分布荷重で中央たわみが一致する曲げ符号、鋼の参考表示とRCの検定比、面と芯の位置関係を記録する。状態🔶。単純支持・両端固定は限定一致。端部正曲げのRCで表示比0.937・独立比1.066を再現し、最大値・片持ちを含む是正を[#1435](https://github.com/hrntsm/SEPIKA/issues/1435)で追跡する。
+
 ## 終局重力組合せと応力割増し（#958）
 
 [原典・独立有限例の照合](終局重力組合せと応力割増し_Issue958_照合記録.md)に、多雪区域・積雪の実条件、RC保証設計の地震成分、鋼塑性設計と限界耐力計算の専用組合せ、および製品入口の適用範囲を記録する。状態🔶。規準の全適用条件と実験 Validation は未確認。
@@ -737,6 +741,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 978 | 結果から計算時入力への参照と復帰 | sepika-app | app/result_evidence.rs・app/references.rs | [issue978追加14件・関連回帰と実機観測](結果根拠_Issue978_確認記録.md) | GUI | 🔶（参照・有限GUI Verification完了、全モデル・全幅・床壁二次部材配置の実機は未確認、計算Validation対象外） |
 | 878 | 鉄骨柱脚・接合・ブレース・防火被覆 | sepika-design-jp / sepika-load | steel/brace.rs・story_gen/tests.rs | [短命probeと既存焦点試験](鉄骨柱脚接合構造細則_Issue878_原典照合.md#要素テスト索引と残範囲)（新規恒久試験なし） | 横断 | 🔶（部材軸力/重量の有限Verification。接合詳細・防火性能の専用判定未対応） |
 | 880 | 鉄骨耐震ルート・Qun | sepika-design-jp / sepika-app | secondary/holding_capacity.rs・app/actions/design/holding.rs | [独立数値と証拠](鉄骨耐震ルート_Issue880_原典照合.md#独立数値と要素証拠索引)、保存probe3試験 | 原典／二次設計 | 🔶（積・境界Verification、ルート2自動適用なし・Validation未） |
+| 1195 | 鋼・RC大梁の略算たわみ | sepika-element / sepika-design-jp | frame/beam/forces.rs・member_design_check.rs・steel/beam.rs・rc/provisions.rs | [曲率積分と公開入口](鋼RC大梁略算たわみ_Issue1195_照合記録.md#公開入口の有限例)、既存たわみ試験 | 許容応力度 | 🔶（有限Verification、最大値と支持・符号による過小評価は[#1435](https://github.com/hrntsm/SEPIKA/issues/1435)） |
 | 952 | 鉄骨筋かいの一次地震時応力 | sepika-design-jp / sepika-app / sepika-mcp | member_design_check.rs・steel/brace.rs・app/actions/design/check.rs・job/design_check.rs | [公開入口の有限Verification](鉄骨ルート2筋かい応力_Issue952_照合記録.md#現行入口と有限verification)、`tests/steel_route_2_brace.rs` | 原典／許容応力度 | 🔶（固定断面力でOK→NG。増分伝達は原典照合、GUI・MCPはコード追跡） |
 | 731 | 梁の床板嵩上げ | sepika-core / sepika-load / sepika-job / sepika-app | beam_placement.rs・self_weight/beam_upstand.rs・cascade.rs・app/girder_weight_tests.rs | [独立値と実入口](梁の床板嵩上げ_Issue731_2026-10.md#確認した入口) | 横断 | 🔶（数値Verification、手動GUI・Validation未） |
 | 810 | 層指標の生成入力照合 | sepika-app | summary.rs・design_view.rs | [独立期待値と実入口](層指標の生成入力照合_Issue810_2026-10.md#対象と独立期待値) | 横断 | 🔶（手動GUI・Validation未） |
