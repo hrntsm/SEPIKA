@@ -348,6 +348,70 @@ fn axial_offsets_on_a_shapeless_column_are_rejected_at_both_exports() {
 }
 
 #[test]
+fn axial_offsets_reject_lost_coordinates_in_the_common_rotation() {
+    for (degrees, x, y, before_rotation) in [
+        (
+            "45",
+            "120000000000000032768",
+            "120000000000000016384",
+            [120_000_000_000_000_032_768.0, 120_000_000_000_000_016_384.0],
+        ),
+        (
+            "23",
+            "9007199254740992",
+            "0.0009765625",
+            [9_007_199_254_740_992.0, 0.000_976_562_5],
+        ),
+    ] {
+        let members = format!(
+            r#"<StbColumns><StbColumn id="3000000001" id_node_bottom="1" id_node_top="2"
+                id_section="1" kind_structure="S" offset_bottom_X="{x}" offset_top_X="{x}"
+                offset_bottom_Y="{y}" offset_top_Y="{y}" offset_bottom_Z="25"/></StbColumns>"#
+        );
+        let original = import_stbridge(&input("", &members, H)).unwrap();
+        let [x_mm, y_mm] = before_rotation;
+        assert_eq!(
+            ends(&original, 0),
+            [[x_mm, y_mm, 25.0], [x_mm, y_mm, 3000.0]]
+        );
+        let xml = input(&format!(r#"global_rotation="{degrees}""#), &members, H);
+        for error in [
+            import_stbridge(&xml).unwrap_err(),
+            import_stbridge_with_report(&xml).unwrap_err(),
+        ] {
+            let error = error.to_string();
+            for expected in [
+                "StbColumn id=Some(3000000001)",
+                "global変換後",
+                "異値offset",
+                "共通回転の積・加減算",
+            ] {
+                assert!(error.contains(expected), "{degrees}: {error}");
+            }
+        }
+    }
+
+    let members = r#"<StbBeams><StbBeam id="7" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S"/></StbBeams>
+<StbPosts><StbPost id="4000000001" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S"
+    offset_bottom_X="120000000000000032768" offset_top_X="120000000000000032768"
+    offset_bottom_Y="120000000000000016384" offset_top_Y="120000000000000016384" offset_bottom_Z="25"/></StbPosts>"#;
+    let xml = input(r#"global_rotation="45""#, members, H);
+    for error in [
+        import_stbridge(&xml).unwrap_err(),
+        import_stbridge_with_report(&xml).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in [
+            "StbPost id=Some(4000000001)",
+            "global変換後",
+            "共通回転の積・加減算",
+        ] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+}
+
+#[test]
 fn axial_offsets_roundtrip_with_an_oblique_global_rotation_when_ends_are_preserved() {
     let members = GIRDER.replace(
         "kind_structure=\"S\"",
@@ -355,25 +419,29 @@ fn axial_offsets_roundtrip_with_an_oblique_global_rotation_when_ends_are_preserv
     );
     let xml = input(r#"global_rotation="23""#, &members, H)
         .replace(r#"<StbNode id="3" X="6000""#, r#"<StbNode id="3" X="4096""#);
-    let model = import_stbridge(&xml).unwrap();
     let expected = [
         [1885.193939870598, 800.2173511460327, 2700.0],
         [3770.387879741196, 1600.4347022920654, 2700.0],
     ];
-    assert_ends(ends(&model, 0), expected);
-    assert_ends(
-        ends(
-            &import_stbridge(&export_stbridge(&model).unwrap()).unwrap(),
-            0,
-        ),
-        expected,
-    );
+    for model in [
+        import_stbridge(&xml).unwrap(),
+        import_stbridge_with_report(&xml).unwrap().0,
+    ] {
+        assert_ends(ends(&model, 0), expected);
+        assert_ends(
+            ends(
+                &import_stbridge(&export_stbridge(&model).unwrap()).unwrap(),
+                0,
+            ),
+            expected,
+        );
+    }
 }
 
 #[test]
 fn secondary_axial_offsets_preserve_the_support_and_reject_snapping_a_reference_end() {
     let members = format!(
-        r#"{GIRDER}<StbBeams><StbBeam id="1" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S" offset_start_Y="20"/></StbBeams>"#
+        r#"{GIRDER}<StbBeams><StbBeam id="4000000001" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S" offset_start_Y="20"/></StbBeams>"#
     );
     let xml = input("", &members, H);
     let model = import_stbridge(&xml).unwrap();
@@ -421,6 +489,7 @@ fn secondary_axial_offsets_preserve_the_support_and_reject_snapping_a_reference_
         assert_eq!(support.position, 0.5);
     }
     let xml = xml
+        .replace("<StbBeams>", r#"<StbPosts><StbPost id="7001" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S"/></StbPosts><StbBeams>"#)
         .replace(
             r#"<StbNode id="5" X="3000" Y="0""#,
             r#"<StbNode id="5" X="3000" Y="0.25""#,
@@ -429,9 +498,14 @@ fn secondary_axial_offsets_preserve_the_support_and_reject_snapping_a_reference_
             r#"<StbNode id="4" X="3000" Y="2000""#,
             r#"<StbNode id="4" X="3000" Y="2000.25""#,
         );
-    let error = import_stbridge(&xml).unwrap_err().to_string();
-    for expected in ["二次部材 ID 0", "異値offset", "支持アンカー"] {
-        assert!(error.contains(expected), "{error}");
+    for error in [
+        import_stbridge(&xml).unwrap_err(),
+        import_stbridge_with_report(&xml).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in ["StbBeam id=Some(4000000001)", "異値offset", "支持アンカー"] {
+            assert!(error.contains(expected), "{error}");
+        }
     }
 }
 

@@ -4,6 +4,9 @@ use sepika_core::section_shape::{face_geometry::SectionGeometry, SectionShape};
 
 const UNEQUAL_OFFSET_ERROR: &str = "異値offsetは、軸方向差のみで基準材軸と実材軸が同じ向きを保つ場合に対応しています。材軸・断面姿勢の対応保持を確認できません";
 const OFFSET_POSITION_ERROR: &str = "異値offsetの端点位置を数値の丸めで保持できません";
+const OFFSET_ROTATION_ERROR: &str =
+    "異値offsetの端点位置を共通回転の積・加減算の丸めで保持できません";
+const MIN_PRODUCT_FOR_EXACT_RESIDUAL: f64 = 2.0 * f64::MIN_POSITIVE / f64::EPSILON;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct GlobalTransform {
@@ -46,8 +49,9 @@ impl GlobalTransform {
         for ((reference, offset), transformed_offset) in
             ends.into_iter().zip(offsets_mm).zip(transformed)
         {
-            let rotated_reference = self.vector(reference);
-            let rotated_actual = self.vector(add(reference, offset));
+            let rotated_reference = self.exact_vector(reference)?;
+            let rotated_actual = self.exact_vector(add(reference, offset))?;
+            self.exact_vector(offset)?;
             let global_reference = add(rotated_reference, self.translation_mm);
             let global_actual = add(rotated_actual, self.translation_mm);
             if exact_delta([rotated_reference, global_reference]) != Some(self.translation_mm)
@@ -58,6 +62,15 @@ impl GlobalTransform {
             }
         }
         Ok(())
+    }
+
+    fn exact_vector(self, [x, y, z]: [f64; 3]) -> Result<[f64; 3], &'static str> {
+        let (sin, cos) = rotation_sin_cos(self.rotation_deg);
+        Ok([
+            exact_rotation_component(x, cos, y, -sin).ok_or(OFFSET_ROTATION_ERROR)?,
+            exact_rotation_component(x, sin, y, cos).ok_or(OFFSET_ROTATION_ERROR)?,
+            z,
+        ])
     }
 }
 
@@ -211,6 +224,24 @@ fn exact_difference(start: f64, end: f64) -> Option<f64> {
     (delta.is_finite() && smaller == delta - larger).then_some(delta)
 }
 
+fn exact_rotation_component(x: f64, x_factor: f64, y: f64, y_factor: f64) -> Option<f64> {
+    let from_x = exact_product(x, x_factor)?;
+    let from_y = exact_product(y, y_factor)?;
+    let component = from_x + from_y;
+    (exact_difference(from_x, component) == Some(from_y)).then_some(component)
+}
+
+fn exact_product(value: f64, factor: f64) -> Option<f64> {
+    let product = value * factor;
+    (product.is_finite()
+        && (value == 0.0
+            || factor == 0.0
+            || factor.abs() == 1.0
+            || (product.abs() > MIN_PRODUCT_FOR_EXACT_RESIDUAL
+                && value.mul_add(factor, -product) == 0.0)))
+        .then_some(product)
+}
+
 fn exact_products_equal(a: f64, b: f64, c: f64, d: f64) -> bool {
     if a == 0.0 || b == 0.0 || c == 0.0 || d == 0.0 {
         return (a == 0.0 || b == 0.0) && (c == 0.0 || d == 0.0);
@@ -218,7 +249,7 @@ fn exact_products_equal(a: f64, b: f64, c: f64, d: f64) -> bool {
     let product = a * b;
     // 丸め誤差が相殺される場合と、残差を f64 で表せない場合は、丸めた積だけでは比較できない。
     product.is_finite()
-        && product.abs() >= 2.0 * f64::MIN_POSITIVE / f64::EPSILON
+        && product.abs() > MIN_PRODUCT_FOR_EXACT_RESIDUAL
         && product == c * d
         && a.mul_add(b, -product) == c.mul_add(d, -product)
 }
