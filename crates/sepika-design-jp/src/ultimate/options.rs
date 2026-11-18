@@ -13,7 +13,7 @@ pub enum UltimateDemandMode {
 }
 
 /// 圧縮正の軸力 `[N]`、曲げ `[N·mm]` と方式を持つ終局需要。
-/// 静的ヒンジ需要は完全なQLを要し、確定総応答はQLを追加しない。
+/// 静的ヒンジ需要は強軸の QL を要し、二軸せん断の判定には弱軸の QL も参照する。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MemberDemand {
     pub mode: UltimateDemandMode,
@@ -31,8 +31,10 @@ pub struct MemberDemand {
     /// 部材別のヒンジ回転角 Rp `[rad]`（プッシュオーバー終局時の部材変形角）。`Some`
     /// のとき ν・cotφ・μ・tanθ に用いる Rp を [`UltimateShearOptions::rp`] から置き換える。
     pub rp: Option<f64>,
-    /// 長期せん断力 QL `[N]`。静的ヒンジでは必須、確定総応答では `None`（追加なし）。
+    /// 強軸の長期せん断力 QL `[N]`。静的ヒンジでは必須、確定総応答では `None`（追加なし）。
     pub q_long: Option<f64>,
+    /// 弱軸の長期せん断力 QL `[N]`。静的ヒンジの二軸せん断で参照し、確定総応答では `None`。
+    pub q_long_weak: Option<f64>,
 }
 
 impl MemberDemand {
@@ -47,6 +49,7 @@ impl MemberDemand {
             shear_weak: None,
             rp: None,
             q_long: None,
+            q_long_weak: None,
         }
     }
 
@@ -71,6 +74,7 @@ impl MemberDemand {
             shear_weak: Some(shear_weak),
             rp: Some(rp),
             q_long: None,
+            q_long_weak: None,
         }
     }
 }
@@ -102,9 +106,8 @@ pub struct UltimateShearOptions {
     /// 終局せん断強度の算定方法（既定 塑性理論式）。靭性指針式を選ぶと Qsu 列に
     /// Vu=min(Vu1,Vu2,Vu3)（[`crate::ultimate::rc_shear_ductility`]）を用いる。
     pub shear_method: ShearMethod,
-    /// 柱のせん断を 2 軸せん断として検定する場合 true（採用応力：RC のみ
-    /// 指定により 2 軸せん断）。両軸の Qmu/Qsu を相互作用式
-    /// `1/((Qmx/Qux)^αx+(Qmy/Quy)^αy)^(1/α)`（RC は α=2.0）で合成する。
+    /// RC 柱の二軸せん断を検定する場合 true。
+    /// 静的ヒンジでの二軸せん断余裕度は、両軸の QL が明示的に 0 の場合に算定する。
     pub biaxial_shear: bool,
     /// 柱の曲げを 2 軸曲げとして検定する場合 true（採用応力）。
     /// 両軸の設計用曲げ Mm と終局曲げ強度 Mu を相互作用式

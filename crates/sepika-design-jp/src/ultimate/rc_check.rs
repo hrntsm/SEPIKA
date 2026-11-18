@@ -10,7 +10,7 @@ use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::{one_bar_area, SectionShape};
 
 use super::geometry::clear_span;
-use super::options::{MemberDemand, ShearMethod, UltimateShearOptions};
+use super::options::{MemberDemand, ShearMethod, UltimateDemandMode, UltimateShearOptions};
 use super::rc_axial::{rc_column_axial_ultimate, RcAxialUltimate};
 use super::rc_props::{rc_bar_props, RcDirection};
 use super::rc_shear::{
@@ -35,9 +35,9 @@ pub struct UltimateCheck {
     /// 付着割裂による終局せん断耐力 Qbu `[N]`（`include_bond=false` なら 0）。
     pub qbu: f64,
     /// 強軸のせん断余裕度。静的は max(Qsu−QL, 0)/Qmu、確定総応答は Qsu/Qmu。
+    /// 静的二軸指定で Qmu が 0 でも QL が Qsu を超える場合は 0。
     pub shear_margin: f64,
-    /// 2 軸せん断余裕度（柱かつ `biaxial_shear=true` のとき Some）。
-    /// `1/((Qmx/Qsux)^2+(Qmy/Qsuy)^2)^(1/2)`。
+    /// 二軸せん断余裕度。静的では両軸の長期せん断が明示的に 0、確定総応答では両軸の総せん断を使用できる場合に算定。
     pub biaxial_shear_margin: Option<f64>,
     /// 2 軸曲げ余裕度（柱かつ `biaxial_bending=true` のとき Some）。
     /// `1/((Mmx/Mux)^2+(Mmy/Muy)^2)^(1/2)`。設計用曲げ需要が 0 なら `f64::INFINITY`。
@@ -47,8 +47,10 @@ pub struct UltimateCheck {
     pub bond_margin: f64,
     /// 軸終局耐力（柱のみ Some）。
     pub axial: Option<RcAxialUltimate>,
-    /// 判定（せん断余裕度・付着余裕度が共に 1.0 以上で true）。
+    /// 有効にした照査がすべて成立した場合だけ true。
     pub ok: bool,
+    /// 部材・重力用途・組合せを付記した未検定理由。NG が確定した部材では `None`。
+    pub unchecked_reason: Option<String>,
     /// 根拠（表示用）。
     pub basis: String,
     /// 詳細（表示用）。
@@ -223,9 +225,14 @@ fn check_member(
         (0.0, 0.0)
     };
 
+    let biaxial_shear_requested = kind == MemberKind::Column && opts.biaxial_shear;
+    let static_biaxial_shear =
+        biaxial_shear_requested && demand.mode == UltimateDemandMode::StaticHinge;
     let ql = demand.q_long.map(|q| q.abs()).unwrap_or(0.0);
     let shear_margin = if qmu > 0.0 {
-        ((qsu - ql).max(0.0)) / qmu
+        (qsu - ql).max(0.0) / qmu
+    } else if static_biaxial_shear && ql > qsu {
+        0.0
     } else {
         f64::INFINITY
     };
@@ -237,24 +244,31 @@ fn check_member(
         f64::INFINITY
     };
 
-    let biaxial_shear_margin = if kind == MemberKind::Column && opts.biaxial_shear {
-        rc_bar_props(shape, RcDirection::Weak, tension_is_top, need_be).map(|p_y| {
-            let (qsu_y, qmu_y_hinge) = column_axis_shear(&p_y, fc, sigma_y, n_axial, l_clear, opts);
-            let qmu_y = match demand.shear_weak {
-                Some(qmy) => opts.upper_strength_factor * qmy.abs(),
-                None => qmu_y_hinge,
-            };
-            let rx = if qsu > 0.0 { qmu / qsu } else { f64::INFINITY };
-            let ry = if qsu_y > 0.0 {
-                qmu_y / qsu_y
-            } else {
-                f64::INFINITY
-            };
-            biaxial_margin(rx, ry, 2.0)
-        })
-    } else {
-        None
-    };
+    let biaxial_shear = biaxial_shear_requested.then(|| {
+        if static_biaxial_shear {
+            let ql_weak = demand.q_long_weak.ok_or(
+                "ultimate_gravity_missing: 静的二軸せん断に必要な弱軸の長期せん断力がありません",
+            )?;
+            if ql != 0.0 || ql_weak != 0.0 {
+                return Err("長期せん断力がある RC 柱の静的二軸せん断は適用範囲外です");
+            }
+        }
+        let p_y = rc_bar_props(shape, RcDirection::Weak, tension_is_top, need_be)
+            .ok_or("二軸せん断に必要な弱軸の配筋形状または有効せいが不正です")?;
+        let (qsu_y, qmu_y_hinge) = column_axis_shear(&p_y, fc, sigma_y, n_axial, l_clear, opts);
+        let qmu_y = match demand.shear_weak {
+            Some(qmy) => opts.upper_strength_factor * qmy.abs(),
+            None => qmu_y_hinge,
+        };
+        let rx = if qsu > 0.0 { qmu / qsu } else { f64::INFINITY };
+        let ry = if qsu_y > 0.0 {
+            qmu_y / qsu_y
+        } else {
+            f64::INFINITY
+        };
+        Ok(biaxial_margin(rx, ry, 2.0))
+    });
+    let biaxial_shear_margin = biaxial_shear.and_then(Result::ok);
 
     let biaxial_bending_margin = if kind == MemberKind::Column && opts.biaxial_bending {
         rc_bar_props(shape, RcDirection::Weak, tension_is_top, need_be).map(|p_y| {
@@ -288,12 +302,15 @@ fn check_member(
         None
     };
 
-    let effective_shear_ok = match biaxial_shear_margin {
-        Some(m) => m >= 1.0,
-        None => shear_margin >= 1.0,
-    };
+    let shear_ok = shear_margin >= 1.0 && biaxial_shear_margin.is_none_or(|m| m >= 1.0);
     let bending_ok = biaxial_bending_margin.map(|m| m >= 1.0).unwrap_or(true);
-    let ok = effective_shear_ok && bond_margin >= 1.0 && bending_ok;
+    let checked_parts_ok = shear_ok && bond_margin >= 1.0 && bending_ok;
+    let unchecked_reason = if checked_parts_ok {
+        biaxial_shear.and_then(Result::err).map(str::to_owned)
+    } else {
+        None
+    };
+    let ok = checked_parts_ok && unchecked_reason.is_none();
 
     let shear_label = match opts.shear_method {
         ShearMethod::Plastic => "塑性理論式 Qsu",
@@ -307,13 +324,21 @@ fn check_member(
         Some(m) => format!(", 2軸せん断余裕度={m:.3}"),
         None => String::new(),
     };
+    let ql_str = if static_biaxial_shear {
+        let weak = demand
+            .q_long_weak
+            .map_or_else(|| "未取得".into(), |q| q.abs().to_string());
+        format!(", 長期せん断[N] 強軸={ql}, 弱軸={weak}")
+    } else {
+        String::new()
+    };
     let bend_str = match biaxial_bending_margin {
         Some(m) => format!(", 2軸曲げ余裕度={m:.3}"),
         None => String::new(),
     };
     let detail = format!(
         "Mu={:.0} N·mm, Qmu={:.0} N, Qsu={:.0} N, Qbu={:.0} N, τbu={:.3} N/mm², \
-         Qsu/Qmu={:.3}, Qbu/Qmu={:.3}{}{}, pw={:.5}, jt={:.1} mm, L={:.0} mm, Rp={:.4}",
+         Qsu/Qmu={:.3}, Qbu/Qmu={:.3}{}{}{}, pw={:.5}, jt={:.1} mm, L={:.0} mm, Rp={:.4}",
         mu,
         qmu,
         qsu,
@@ -323,6 +348,7 @@ fn check_member(
         bond_margin,
         biaxial_str,
         bend_str,
+        ql_str,
         pw,
         jt,
         l_clear,
@@ -342,13 +368,14 @@ fn check_member(
         bond_margin,
         axial,
         ok,
+        unchecked_reason,
         basis,
         detail,
     }))
 }
 
-/// RC梁・柱の終局検定。必要部材の需要・QL・確定総応答の条件が不足すればエラーを返す。
-/// 対象外断面は除外し、対象部材の材料・配筋・寸法不足は部材ID付きで返す。
+/// RC梁・柱の終局検定。必須需要・材料・配筋・寸法の不足は部材ID付きのエラーを返す。
+/// 二軸せん断の適用条件が不足した部材は、確定した NG がなければ未検定理由を保持する。
 pub fn collect_rc_ultimate_checks(
     model: &Model,
     demand_by_elem: &[(ElemId, MemberDemand)],
@@ -398,10 +425,16 @@ pub fn collect_rc_ultimate_checks(
         if [demand.n_axial, demand.mz, demand.my]
             .iter()
             .any(|v| !v.is_finite())
-            || [demand.shear, demand.shear_weak, demand.rp, demand.q_long]
-                .into_iter()
-                .flatten()
-                .any(|v| !v.is_finite())
+            || [
+                demand.shear,
+                demand.shear_weak,
+                demand.rp,
+                demand.q_long,
+                demand.q_long_weak,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|v| !v.is_finite())
         {
             return Err(diagnose(format!(
                 "ultimate_demand_nonfinite: RC部材 ID {} の需要が非有限です",
@@ -409,7 +442,7 @@ pub fn collect_rc_ultimate_checks(
             )));
         }
         match demand.mode {
-            super::options::UltimateDemandMode::StaticHinge
+            UltimateDemandMode::StaticHinge
                 if demand.q_long.is_none()
                     || demand.shear.is_some()
                     || demand.shear_weak.is_some() =>
@@ -419,11 +452,12 @@ pub fn collect_rc_ultimate_checks(
                     elem.id.0
                 )));
             }
-            super::options::UltimateDemandMode::ConfirmedTotal
+            UltimateDemandMode::ConfirmedTotal
                 if demand.shear.is_none()
                     || demand.shear_weak.is_none()
                     || demand.rp.is_none()
                     || demand.q_long.is_some()
+                    || demand.q_long_weak.is_some()
                     || opts.upper_strength_factor != 1.0 =>
             {
                 return Err(diagnose(format!("ultimate_total_unsupported: RC部材 ID {} の確定総応答は追加QLなし・倍率1の完全な応答が必要です", elem.id.0)));
@@ -431,6 +465,7 @@ pub fn collect_rc_ultimate_checks(
             _ => {}
         }
         if let Some(mut check) = check_member(elem, sec, mat, model, demand, opts)? {
+            check.unchecked_reason = check.unchecked_reason.map(diagnose);
             check.detail = format!(
                 "mode={:?}, gravity_terms={:?}; {}",
                 demand.mode,
