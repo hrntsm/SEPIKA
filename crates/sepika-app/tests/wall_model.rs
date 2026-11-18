@@ -57,18 +57,12 @@
 //! 上下大梁の剛性・自重を実際に変えるため、代表スカラは総じて動く（実測して
 //! スナップショットを更新した。値を予想で決め打ちしていない）。
 //!
-//! **`test_wall_element_changes_eigen_period` は方向を無視した `period[0]` の比較を
-//! やめた。** 本物の RC 矩形に差し替えたところ、壁の有無で `period[0]` が指す
-//! 方向自体が入れ替わり（壁ありは壁の影響を受けない Y 方向が最も柔らかく
-//! `period[0]` を占め、壁なしは壁を失った X 方向が最も柔らかくなって `period[0]`
-//! を占める）、無関係な方向どうしを比較して「壁が効いていない」という誤った
-//! 結論になっていた。`participation`/`effective_mass` の X 成分が卓越するモードの
-//! 周期を比較するよう修正した（`dominant_x_period` 参照。壁は Y=0 面で X 方向に
-//! スパンするため、面内せん断で効くのは X 方向のみ）。
+//! 壁有無の周期比較は、X 方向に同じ節点質量を置いた別条件で行う。
+//! 立体架構の代表周期はスナップショットで照合する。
 
 use sepika_app::app::{App, StaticCaseKey};
 use sepika_core::dof::Dof6Mask;
-use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, WallPlateId};
+use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, WallPlateId};
 use sepika_core::model::{
     AreaLoad, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadTransfer,
     LocalAxis, Material, MaterialCategory, Model, Node, RegionAnchor, RigidZone, Section,
@@ -1013,71 +1007,124 @@ fn snapshot_wall_bay_scalars() {
     insta::assert_snapshot!(out);
 }
 
-/// 固有値解析結果のうち、X 方向（`participation`/`effective_mass` の第 0 成分）が
-/// 卓越するモードの周期を返す（存在しなければ `None`）。
-///
-/// `ModalResult::period[0]` を単純比較してはいけない。**モードの並び順は
-/// 固有値（周期の長い順）で決まり、方向とは無関係**のため、壁の有無で
-/// 架構の X・Y 方向剛性の相対関係が変わると、`period[0]` が指す方向自体が
-/// 入れ替わりうる（本フィクスチャで実測: 壁ありは Y 方向が最も柔らかく
-/// `period[0]` を占め、壁なしは壁を失った X 方向が最も柔らかくなって
-/// `period[0]` を占める。どちらも壁の有無に関係ない Y 方向どうし・
-/// 別モードどうしを比べてしまい、壁の効果を見ていなかった）。
-fn dominant_x_period(modal: &sepika_solver::dynamic::eigen::ModalResult) -> Option<f64> {
-    modal
-        .effective_mass
-        .iter()
-        .enumerate()
-        .max_by(|a, b| a.1[0].partial_cmp(&b.1[0]).unwrap())
-        .map(|(i, _)| modal.period[i])
-}
-
-/// 壁要素が固有周期（＝剛性行列）に確実に寄与していることの確認。
-///
-/// 壁は Y=0 面（X 方向にスパンする面）にあり、面内せん断で効くのは
-/// **X 方向**の水平剛性のみ（Y 方向の面外曲げ剛性は無視できるほど小さい）。
-/// そのため比較対象は「X 方向が卓越するモードの周期」に限定する必要がある
-/// （`dominant_x_period` 参照。単純に `period[0]` を比べると、壁の有無で
-/// `period[0]` が指す方向自体が入れ替わり、Y 方向どうしを比較して
-/// 「壁が効いていない」という誤った結論になる）。
-///
-/// `snapshot_wall_bay_scalars` の DL 側材端力がほぼゼロになる理由の裏付け
-/// （壁が剛性に効いていないのではなく、この対称な架構・鉛直荷重条件では
-/// 壁柱換算の軸力・曲げが小さいだけであること）も兼ねる。
 #[test]
-fn test_wall_element_changes_eigen_period() {
+fn enclosed_wall_shortens_period_with_equal_x_mass() {
+    use sepika_core::dof::{Dof, DofMap, DOF_PER_NODE};
+    use sepika_core::ids::StoryId;
+    use sepika_core::model::{
+        Constraint, LoadCase, LoadCaseKind, MassMethod, NodalLoad, PanelZoneMode, PlateAssignment,
+    };
+    use sepika_element::behavior::MassOption;
+    use sepika_solver::common::{assemble::assemble_global_m, constraint::Reducer};
+
+    const TOP: NodeId = NodeId(4);
+    const TOP_SLAVES: [NodeId; 3] = [NodeId(5), NodeId(6), NodeId(7)];
+    const LOAD: LoadCaseId = LoadCaseId(0);
+    const MASS_T: f64 = 2.0;
+    const FORCE_X_N: f64 = 1000.0;
+
     let mut with_wall = wall_bay_app();
-    with_wall.run_preparation();
-    with_wall.core.scoped.last_error = None;
-    with_wall.run_eigen(3);
-    let t_with = dominant_x_period(
-        with_wall
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .unwrap()
-            .modal
-            .as_ref()
-            .unwrap(),
-    )
-    .expect("X 方向卓越モードが求まるはず");
-
-    let mut model_without = wall_bay_model();
-    // 壁版を削除するときは、壁領域の参照も外さなければダングリング参照となる。
-    // パラペットまで消すと自重質量も変わり、周期差を壁の面内剛性の寄与として比較できない。
-    for r in &mut model_without.wall_regions {
-        r.wall_plate_ids.clear();
+    with_wall.core.analysis_cfg.mass_method = MassMethod::LumpedOnly;
+    let model = &mut with_wall.core.model;
+    model.mass_method = MassMethod::LumpedOnly;
+    model.panel_zone = PanelZoneMode::None;
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
     }
-    model_without.retain_wall_plates(|p| p.id != WallPlateId(0));
-    let mut without_wall = App::default();
-    without_wall.core.analysis_cfg.threads = 1;
-    without_wall.core.model = model_without;
-    without_wall.run_preparation();
-    without_wall.core.scoped.last_error = None;
-    without_wall.run_eigen(3);
-    let t_without = dominant_x_period(
-        without_wall
+    for node in [TOP].into_iter().chain(TOP_SLAVES) {
+        let restraint = &mut model.nodes[node.index()].restraint;
+        restraint.set_free(Dof::Ux);
+        // 階地震力を伝える剛床では、直交方向の水平拘束も解析前チェックで拒否される。
+        restraint.set_free(Dof::Uy);
+    }
+    // 自動生成した剛床代表節点には壁重量を含む質量が入るため、代表節点を直接指定する。
+    model.constraints.push(Constraint::rigid_diaphragm(
+        StoryId(1),
+        TOP,
+        TOP_SLAVES.to_vec(),
+    ));
+    model.nodes[TOP.index()].mass = Some([MASS_T, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    model.load_cases.push(LoadCase {
+        id: LOAD,
+        name: "周期比較用のX方向節点力".into(),
+        // 長期荷重では設定により基準の軸剛性が変わるため、短期の荷重区分を使う。
+        kind: LoadCaseKind::Wind,
+        nodal: vec![NodalLoad {
+            node: TOP,
+            values: [FORCE_X_N, 0.0, 0.0, 0.0, 0.0, 0.0],
+            name: String::new(),
+            source: Default::default(),
+        }],
+        member: vec![],
+        origin: Default::default(),
+    });
+    assert_eq!(model.wall_plates.len(), 1);
+    assert_eq!(model.wall_plates[0].id, WallPlateId(0));
+    assert_eq!(model.wall_plates[0].shape, WallPlateShape::Enclosed);
+
+    let mut without_wall = wall_bay_app();
+    without_wall.core.analysis_cfg.mass_method = MassMethod::LumpedOnly;
+    without_wall.core.model = model.clone();
+    without_wall
+        .core
+        .model
+        .retain_wall_plates(|plate| plate.id != WallPlateId(0));
+    assert!(without_wall.core.model.wall_plates.is_empty());
+    let mut non_wall_input = model.clone();
+    non_wall_input.wall_plates.clear();
+    for region in &mut non_wall_input.wall_regions {
+        region.wall_plate_ids.retain(|&id| id != WallPlateId(0));
+    }
+    for region in &mut non_wall_input.wall_assignment_regions.regions {
+        if region.assignment == PlateAssignment::Plate(WallPlateId(0)) {
+            region.assignment = PlateAssignment::Unset;
+        }
+    }
+    assert!(
+        non_wall_input.eq_ignoring_dofmap(&without_wall.core.model),
+        "耐震壁版とその参照を除いたモデル入力は一致する"
+    );
+
+    let observe = |app: &mut App| {
+        app.run_preparation();
+        assert_eq!(app.core.scoped.last_error, None, "準備計算");
+        assert_eq!(app.core.model.mass_method, MassMethod::LumpedOnly);
+
+        let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
+        let dofmap = DofMap::build(&expanded);
+        let reducer = Reducer::build(&expanded, &dofmap);
+        assert_eq!(reducer.n_indep, 2);
+        let [x, y] = [Dof::Ux, Dof::Uy].map(|dof| {
+            let active = dofmap
+                .active(TOP.index() * DOF_PER_NODE + dof as usize)
+                .unwrap();
+            let [(independent, coefficient)] = reducer.t_rows[active as usize].as_slice() else {
+                panic!("剛床代表節点の {dof:?} が独立していない");
+            };
+            assert_eq!(*coefficient, 1.0);
+            *independent
+        });
+        assert_ne!(x, y);
+        let mass = assemble_global_m(&expanded, &dofmap, MassOption::Consistent).unwrap();
+        let mass = reducer.reduce_k(&mass);
+        let mass_at = |i, j| mass.get(i, j).copied().unwrap_or(0.0);
+        assert_eq!(
+            [mass_at(x, x), mass_at(x, y), mass_at(y, x), mass_at(y, y)],
+            [MASS_T, 0.0, 0.0, 0.0]
+        );
+
+        app.run_linear_static(LOAD);
+        assert_eq!(app.core.scoped.last_error, None, "静的解析");
+        let disp = &static_res_for(app, StaticCaseKey::User(LOAD)).disp;
+        let ux_mm = disp[TOP.index()][0];
+        for node in TOP_SLAVES {
+            assert_eq!(&disp[node.index()][..2], &disp[TOP.index()][..2]);
+        }
+        assert!(ux_mm.is_finite() && ux_mm > 0.0, "X方向変位 {ux_mm}");
+
+        app.run_eigen(1);
+        assert_eq!(app.core.scoped.last_error, None, "固有値解析");
+        let modal = app
             .core
             .scoped
             .results
@@ -1085,15 +1132,37 @@ fn test_wall_element_changes_eigen_period() {
             .unwrap()
             .modal
             .as_ref()
-            .unwrap(),
-    )
-    .expect("X 方向卓越モードが求まるはず");
+            .unwrap();
+        let [period_s] = modal.period.as_slice() else {
+            panic!("X方向の1モードが必要: {:?}", modal.period);
+        };
+        let [[mass_x_t, mass_y_t, mass_z_t]] = modal.effective_mass.as_slice() else {
+            panic!("X方向の1モードが必要: {:?}", modal.effective_mass);
+        };
+        assert!(
+            (mass_x_t / MASS_T - 1.0).abs() < 1e-6,
+            "X方向の解析質量 {mass_x_t} t"
+        );
+        assert_eq!([*mass_y_t, *mass_z_t], [0.0; 2]);
 
-    // この入力の周期差は約27%だが、壁の寄与を検出する下限として10%を採る。
+        let stiffness_n_per_mm = FORCE_X_N / ux_mm;
+        let expected_period_s = std::f64::consts::TAU * (MASS_T / stiffness_n_per_mm).sqrt();
+        assert!(
+            (period_s / expected_period_s - 1.0).abs() < 1e-6,
+            "周期 {period_s} s、静的柔性と節点質量からの期待値 {expected_period_s} s"
+        );
+        (stiffness_n_per_mm, *period_s)
+    };
+
+    let (k_with, t_with) = observe(&mut with_wall);
+    let (k_without, t_without) = observe(&mut without_wall);
     assert!(
-        (t_with - t_without).abs() > t_without * 0.1,
-        "壁の有無で X 方向卓越モードの周期が実質的に変わらない（壁が剛性に寄与していない）: \
-         with={t_with}, without={t_without}"
+        k_with > k_without,
+        "X方向剛性の増加: {k_with} > {k_without} N/mm"
+    );
+    assert!(
+        t_with < t_without,
+        "X方向周期の短縮: {t_with} < {t_without} s"
     );
 }
 

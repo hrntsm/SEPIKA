@@ -840,6 +840,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 7f | 仕口パネルの軸力更新と非線形履歴 | sepika-element / sepika-material | springs/panel.rs / uniaxial/bilinear.rs | [Issue724の状態対応と独立照合](仕口パネル軸力と履歴_Issue724_2026-10.md) | 要素 | 🔶（独立Verification4成功。直接revertは#7gで修正・検証、#752・原典§6・Validation未確認、高nは#7h） |
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | [dynamic/eigen/tests.rs](../../crates/sepika-solver/src/dynamic/eigen/tests.rs) | `test_1dof_period` | P2 | ✅ |
+| 1161 | 耐震壁有無の等質量固有周期 | sepika-app | tests/wall_model.rs | [静的柔性・質点質量との照合](壁有無の固有周期_Issue1161_確認記録.md) | 線形 | 🔶（同じ X 節点質量で剛性増加と短周期化を確認。通常の立体架構への一般化・実験 Validation は未確認） |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
 | 10b | 参照鋼の設計自重密度防護 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | material.rs、self_weight_calc.rs、beam_design.rs、wall_plate_load.rs、wall_attached.rs、prepare.rs | [Issue501の独立期待値・実入口](参照鋼の高密度防護_Issue501_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（同コード公開全構成成功、最終headゲート後続、実験未） |
 | 10d | 床板の同期物理質量 | sepika-core / sepika-load / sepika-job / sepika-app | slab.rs、slab_load.rs、story_gen/generate.rs | [Issue583の独立期待値・実入口](床板の同期物理質量_Issue583_2026-10.md#対象と独立期待値) | 横断 | 🔶（全CI・freshレビュー後続、実験未） |
