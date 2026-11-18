@@ -111,6 +111,13 @@ fn 途中保存を別appで読み込みジョブ再開すると連続実行の�
         resumed.recording.as_ref().unwrap().frame_time,
         vec![0.0, 0.06, 0.1]
     );
+    assert!(resumed
+        .recording
+        .as_ref()
+        .unwrap()
+        .axial_force_peaks
+        .iter()
+        .any(|peaks| !peaks.snapshots.is_empty()));
     assert_eq!(
         bincode::serialize(resumed).unwrap(),
         bincode::serialize(&continuous).unwrap()
@@ -125,6 +132,23 @@ fn 再開はモデル波形刻み設定契約自由度と破損の不一致を�
     let checkpoint = compute_checkpoint(model.clone(), cfg, wave(), 2).unwrap();
     let bytes = checkpoint.to_bytes().unwrap();
     let restored = LinearTimeHistoryCheckpoint::from_bytes(&bytes).unwrap();
+    let mut old_bytes = bytes.clone();
+    old_bytes[b"SEPIKA-LINEAR-RESTART".len()] = 1;
+    let error = LinearTimeHistoryCheckpoint::from_bytes(&old_bytes)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains("形式版が一致しません"), "{error}");
+    let mut saved = serde_json::to_value(&checkpoint).unwrap();
+    saved["result"]["recording"]
+        .as_object_mut()
+        .unwrap()
+        .remove("axial_force_peaks");
+    let invalid: LinearTimeHistoryCheckpoint = serde_json::from_value(saved).unwrap();
+    assert!(resume_checkpoint(model.clone(), cfg, wave(), invalid)
+        .unwrap_err()
+        .to_string()
+        .contains("前半記録・ピークが不正"));
     for (field, value, expected) in [
         ("contract", serde_json::json!(0), "計算契約"),
         (
@@ -203,6 +227,69 @@ fn 再開はモデル波形刻み設定契約自由度と破損の不一致を�
     let mut corrupt = bytes;
     *corrupt.last_mut().unwrap() ^= 1;
     assert!(LinearTimeHistoryCheckpoint::from_bytes(&corrupt).is_err());
+}
+
+#[test]
+fn 再開は保存内力で確認できる圧縮側極値の欠落を拒否する() {
+    use sepika_solver::dynamic::timehistory::{AxialForcePeakSnapshot, ThRecording};
+
+    let app = fixture();
+    let model = app.core.model;
+    for record_every in [1, 3] {
+        let cfg = AnalysisSettings {
+            th_record_every: record_every,
+            ..app.core.analysis_cfg
+        };
+        let checkpoint = compute_checkpoint(model.clone(), cfg, wave(), 2).unwrap();
+        let mut saved = serde_json::to_value(&checkpoint).unwrap();
+        let mut recording: ThRecording =
+            serde_json::from_value(saved["result"]["recording"].take()).unwrap();
+        let envelope = recording.peak_member_forces[0].as_mut().unwrap();
+        for (_, forces) in &mut envelope.at {
+            forces[0] = 3_400_000.0;
+        }
+        let mut compression = envelope.clone();
+        for (_, forces) in &mut compression.at {
+            forces[0] = -3_322_800.0;
+        }
+        let positions: Vec<_> = (0..envelope.at.len()).collect();
+        assert!(positions.len() > 1);
+        let snapshots = &mut recording.axial_force_peaks[0].snapshots;
+        *snapshots = vec![
+            AxialForcePeakSnapshot {
+                time: 0.02,
+                forces: envelope.clone(),
+                positions: positions.clone(),
+            },
+            AxialForcePeakSnapshot {
+                time: 0.04,
+                forces: compression,
+                positions,
+            },
+        ];
+        if record_every == 1 {
+            let last = recording.member_forces[2][0].as_mut().unwrap();
+            last.at[0].1[0] = -3_322_800.0;
+        } else {
+            assert_eq!(recording.frame_time, vec![0.0]);
+        }
+        saved["result"]["recording"] = serde_json::to_value(&recording).unwrap();
+        let valid: LinearTimeHistoryCheckpoint = serde_json::from_value(saved.clone()).unwrap();
+        assert!(valid.to_bytes().is_ok());
+
+        let snapshots = &mut recording.axial_force_peaks[0].snapshots;
+        if record_every == 1 {
+            snapshots.pop();
+        } else {
+            snapshots[1].positions.remove(0);
+        }
+        saved["result"]["recording"] = serde_json::to_value(&recording).unwrap();
+        let invalid: LinearTimeHistoryCheckpoint = serde_json::from_value(saved).unwrap();
+        let error = resume_checkpoint(model.clone(), cfg, wave(), invalid)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("前半記録・ピークが不正"), "{error}");
+    }
 }
 
 #[test]

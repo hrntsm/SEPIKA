@@ -10224,9 +10224,29 @@ fn test_time_history_recording_saved_and_optional_exclusion() {
         .as_ref()
         .and_then(|r| r.time_history.as_ref())
         .expect("time_history 本体は復元されるはず");
-    assert!(
-        restored_th.recording.is_some(),
-        "recording は既定で保存・復元されるはず"
+    let restored_recording = restored_th
+        .recording
+        .as_ref()
+        .expect("詳細記録は既定で保存される");
+    let original_recording = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .as_ref()
+        .unwrap()
+        .recording
+        .as_ref()
+        .unwrap();
+    assert!(original_recording
+        .axial_force_peaks
+        .iter()
+        .any(|p| !p.snapshots.is_empty()));
+    assert_eq!(
+        restored_recording.axial_force_peaks,
+        original_recording.axial_force_peaks
     );
     assert!(!restored_th.peak_disp.is_empty());
 

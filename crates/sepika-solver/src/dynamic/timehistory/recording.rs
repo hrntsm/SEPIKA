@@ -5,7 +5,7 @@
 //! - [`member_forces_linear`] / [`member_forces_nonlinear`] — 部材端力分布の算定
 //!   （線形は `recover_forces`、非線形は `state_member_forces`）
 
-use super::result::{StoryResponse, ThRecording};
+use super::result::{AxialForcePeaks, StoryResponse, ThRecording};
 use sepika_core::dof::{DofMap, DOF_PER_NODE};
 use sepika_core::model::Model;
 use sepika_element::behavior::{Ctx, ElementBehavior};
@@ -173,6 +173,7 @@ pub(crate) struct ThRecorder {
     node_disp: Vec<Vec<[f64; 6]>>,
     member_forces: Vec<Vec<Option<MemberForces>>>,
     peak_member_forces: Vec<Option<MemberForces>>,
+    axial_force_peaks: Vec<AxialForcePeaks>,
 
     story_x: StoryResponse,
     story_y: StoryResponse,
@@ -298,6 +299,7 @@ impl ThRecorder {
             node_disp: Vec::new(),
             member_forces: Vec::new(),
             peak_member_forces: vec![None; model.elements.len()],
+            axial_force_peaks: vec![AxialForcePeaks::default(); model.elements.len()],
             story_x: story.clone(),
             story_y: story,
         }
@@ -395,6 +397,11 @@ impl ThRecorder {
         member_forces_now: &[Option<MemberForces>],
     ) {
         merge_peak_member_forces(&mut self.peak_member_forces, member_forces_now);
+        for (peaks, forces) in self.axial_force_peaks.iter_mut().zip(member_forces_now) {
+            if let Some(forces) = forces {
+                peaks.record(time, forces);
+            }
+        }
 
         let (shear_x, accel_x, vel_x, disp_x) =
             Self::compute_story_dir(&self.groups_x, m_r_x, u_free, v_free, a_free, ma_free, xg_x);
@@ -464,6 +471,7 @@ impl ThRecorder {
             story_y: self.story_y,
             member_forces: self.member_forces,
             peak_member_forces: self.peak_member_forces,
+            axial_force_peaks: self.axial_force_peaks,
         }
     }
 }
@@ -477,6 +485,81 @@ mod tests {
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, MaterialCategory,
         Node, Section, Story,
     };
+
+    #[test]
+    fn axial_force_peaks_keep_both_signs_with_concurrent_forces_without_frame_decimation() {
+        let model = two_story_density_mass_model(7.85e-9);
+        let dofmap = DofMap::build(&model);
+        let zeros = vec![0.0; dofmap.n_active()];
+        let forces = |n, mz, middle_n| {
+            vec![
+                Some(MemberForces {
+                    at: vec![
+                        (0.0, [n, 0.0, 0.0, 0.0, 0.0, mz]),
+                        (0.5, [middle_n, 0.0, 0.0, 0.0, 0.0, -mz]),
+                        (1.0, [n, 0.0, 0.0, 0.0, 0.0, mz]),
+                    ],
+                }),
+                None,
+            ]
+        };
+        let history = [
+            forces(0.0, 0.0, 0.0),
+            forces(-3_322_800.0, 10_000_000.0, -2.0),
+            forces(3_400_000.0, 0.0, 3.0),
+            forces(-3_322_800.0, 11_000_000.0, -4.0),
+            forces(0.0, 0.0, 0.0),
+        ];
+        let record_part = |every, steps: std::ops::RangeInclusive<usize>| {
+            let mut recorder = ThRecorder::new(&model, &dofmap, 4, Some(every));
+            for step in steps {
+                recorder.record_step(
+                    step as u64,
+                    step as f64,
+                    &model,
+                    &dofmap,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    0.0,
+                    0.0,
+                    &history[step],
+                );
+            }
+            recorder.finish()
+        };
+        for (every, expected_frames) in [(1, vec![0.0, 1.0, 2.0, 3.0, 4.0]), (4, vec![0.0, 4.0])] {
+            let recording = record_part(every, 0..=4);
+            assert_eq!(recording.frame_time, expected_frames);
+            let envelope = recording.peak_member_forces[0].as_ref().unwrap();
+            assert_eq!(
+                envelope.at[0].1,
+                [3_400_000.0, 0.0, 0.0, 0.0, 0.0, 11_000_000.0]
+            );
+            let snapshots = &recording.axial_force_peaks[0].snapshots;
+            assert_eq!(snapshots.len(), 3);
+            for (snapshot, step, positions) in [
+                (&snapshots[0], 1, &[0, 2][..]),
+                (&snapshots[1], 2, &[0, 1, 2][..]),
+                (&snapshots[2], 3, &[1][..]),
+            ] {
+                assert_eq!(snapshot.time, step as f64);
+                assert_eq!(&snapshot.forces, history[step][0].as_ref().unwrap());
+                assert_eq!(snapshot.positions, positions);
+            }
+            assert!(recording.axial_force_peaks[1].snapshots.is_empty());
+
+            let mut first = record_part(every, 0..=2).axial_force_peaks;
+            let last = record_part(every, 2..=4).axial_force_peaks;
+            for (before, after) in first.iter_mut().zip(last) {
+                before.merge(after);
+            }
+            assert_eq!(first, recording.axial_force_peaks);
+        }
+    }
 
     /// 密度による一貫質量を持つ 2 層（3 節点）の柱列。曲げ回転（Ry）を解放し、一貫質量行列の並進-回転連成を有効にする。
     fn two_story_density_mass_model(density: f64) -> Model {
