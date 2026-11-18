@@ -2,32 +2,49 @@
 //!
 //! - [`compute_ultimate_check_job`] — 終局検定ジョブ（靭性保証型耐震設計指針）。
 
-use super::{
-    attach_prepare_notices, model_prepared_for_analysis, resolve_load_case, JobOutcome, JobParams,
-};
-use sepika_core::model::Model;
+use super::{attach_prepare_notices, model_prepared_for_analysis, JobOutcome, JobParams};
+use sepika_core::load_combo::ultimate_gravity_terms;
+use sepika_core::model::{ElementKind, Model};
 use sepika_job::JobError;
 
-/// 終局検定ジョブ（靭性保証型耐震設計指針）。
-/// 設計軸力は `load_case`（未指定なら先頭ケース）の線形静的解析の軸力を用いる。
+/// 保存した長期架構用組合せによる静的・両端ヒンジ略算。必要な重力応力が不足すれば拒否する。
 pub(crate) fn compute_ultimate_check_job(
     model: &Model,
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
+    // 荷重同期が不足ケースを自動生成する場合も、利用者が保存した構成だけを採用する。
+    let terms = ultimate_gravity_terms(model).map_err(JobError::InvalidInput)?;
+    let combination_index = model.ultimate_gravity_combination;
     let (work, notices) = model_prepared_for_analysis(model, params)?;
-    let lc_id = resolve_load_case(&work, params.load_case)?.id;
-    let result = sepika_job::compute::compute_linear_static(work.clone(), lc_id)?;
-    let model = &work;
-    let lc_id = lc_id.0;
-
-    let demand = sepika_job::member_demand_from_static_forces(&result.member_forces, None);
+    if work.stress_cfg.tension_only_iteration
+        && work
+            .elements
+            .iter()
+            .any(|e| matches!(e.kind, ElementKind::Brace { tension_only: true }))
+    {
+        return Err(JobError::InvalidInput(
+            "gravity_superposition_unsupported: 引張専用ブレースの反復解析では各ケースの有効状態が同一と確認できないため、長期架構用の重力応力を合成できません"
+                .into(),
+        ));
+    }
+    let mut demand = sepika_job::complete_ultimate_static_demand(&work, |case| {
+        sepika_job::compute::compute_linear_static(work.clone(), case)
+            .map(|result| result.member_forces)
+            .map_err(|error| error.to_string())
+    })
+    .map_err(JobError::InvalidInput)?;
     let axial: Vec<(sepika_core::ids::ElemId, f64)> =
         demand.iter().map(|(id, d)| (*id, d.n_axial)).collect();
 
+    // 絶対値で抽出した曲げでは RC 梁の引張側配筋を選べないため、RC の静的参照は未検定の扱いを維持する。
+    for (_, member) in &mut demand {
+        member.q_long = None;
+        member.q_long_weak = None;
+    }
     let opts = sepika_design_jp::ultimate::UltimateShearOptions::default();
-    let checks = sepika_design_jp::ultimate::collect_rc_ultimate_checks(model, &demand, &opts)
+    let checks = sepika_design_jp::ultimate::collect_rc_ultimate_checks(&work, &demand, &opts)
         .map_err(JobError::InvalidInput)?;
-    let cft_checks = sepika_design_jp::ultimate::collect_cft_ultimate_checks(model, &axial)
+    let cft_checks = sepika_design_jp::ultimate::collect_cft_ultimate_checks(&work, &axial)
         .map_err(JobError::InvalidInput)?;
 
     let n_checks = checks.len();
@@ -73,7 +90,13 @@ pub(crate) fn compute_ultimate_check_job(
 
     let mut summary = serde_json::json!({
         "kind": "UltimateCheck",
-        "case": lc_id,
+        "load_target": {
+            "source": "saved_combination",
+            "combination_index": combination_index,
+            "mode": "static_hinge",
+            "purpose": "frame_long",
+            "terms": terms,
+        },
         "n_checks": n_checks,
         "n_ng": n_ng,
         "min_shear_margin": if min_shear_margin.is_finite() { serde_json::json!(min_shear_margin) } else { serde_json::Value::Null },

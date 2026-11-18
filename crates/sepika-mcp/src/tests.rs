@@ -9,6 +9,17 @@ use sepika_core::model::{
 
 #[path = "../../sepika-design-jp/tests/fixtures/cft_column_buckling_model.rs"]
 pub(crate) mod cft_column_buckling_input;
+#[cfg(feature = "mcp")]
+#[path = "../tests/support/cft_long_case2_model.rs"]
+pub(crate) mod cft_long_case2_model;
+#[cfg(feature = "mcp")]
+#[path = "../tests/support/cft_long_case2_reference.rs"]
+pub(crate) mod cft_long_case2_reference;
+#[path = "../tests/support/column_model.rs"]
+mod column_model;
+
+use column_model::column_stories;
+pub(crate) use column_model::rc_column_model;
 
 #[test]
 fn source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo() {
@@ -149,14 +160,6 @@ fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
     state.undo.undo(&mut state.model);
     assert!(state.model.eq_ignoring_dofmap(&snapshot));
     std::fs::remove_dir_all(directory).unwrap();
-}
-
-fn column_stories() -> Vec<sepika_core::model::Story> {
-    serde_json::from_value(serde_json::json!([
-        {"id": 0, "name": "1F", "elevation": 0.0, "sl_offset_mm": 0.0, "node_ids": [0], "seismic_weight": null},
-        {"id": 1, "name": "2F", "elevation": 3000.0, "sl_offset_mm": 0.0, "node_ids": [1], "seismic_weight": null}
-    ]))
-    .unwrap()
 }
 
 fn sample_model() -> Model {
@@ -797,254 +800,6 @@ pub(crate) fn rc_girder_section(id: SectionId, name: &str) -> Section {
         }
         .to_section(id, name.into())
     }
-}
-
-/// RC 矩形の片持ち柱モデル（終局検定ジョブ用）。長期荷重ケース 1 つ。
-pub(crate) fn rc_column_model() -> Model {
-    use sepika_core::model::{LoadCase, Material, NodalLoad};
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
-
-    let rebar = RcRectColumnRebar {
-        main_dia: 25.0,
-        x: vec![8],
-        y: vec![8],
-        cover: 40.0,
-        hoop: RectColumnHoop {
-            dia: 10.0,
-            pitch: 100.0,
-            legs_x: 2,
-            legs_y: 2,
-        },
-    };
-    let shape = SectionShape::RcColumnRect {
-        b: 600.0,
-        d: 600.0,
-        rebar,
-    };
-    Model {
-        stories: column_stories(),
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0, 0.0, 0.0],
-                restraint: sepika_core::dof::Dof6Mask::FIXED,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [0.0, 0.0, 3000.0],
-                restraint: sepika_core::dof::Dof6Mask::FREE,
-                mass: None,
-                story: Some(sepika_core::ids::StoryId(1)),
-                support_spring: None,
-            },
-        ],
-        sections: vec![Section {
-            material: Some(MaterialId(0)),
-            rebar_material: Some(MaterialId(1)),
-            shear_rebar_material: Some(MaterialId(1)),
-            frame_use: Some(FrameSectionUse::Column),
-            ..shape.to_section(SectionId(0), "C600".into())
-        }],
-        materials: vec![
-            Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "Fc24".into(),
-                category: MaterialCategory::Concrete,
-                young: 23000.0,
-                poisson: 0.2,
-                density: 2.4e-9,
-                shear: None,
-                fc: Some(24.0),
-                fy: None,
-            },
-            Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(1),
-                name: "SD345".into(),
-                category: MaterialCategory::Rebar,
-                young: 205000.0,
-                poisson: 0.3,
-                density: 7.85e-9,
-                shear: None,
-                fc: None,
-                fy: Some(345.0),
-            },
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Beam,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [1.0, 0.0, 0.0],
-            },
-            end_cond: [
-                sepika_core::model::EndCondition::Fixed,
-                sepika_core::model::EndCondition::Fixed,
-            ],
-            force_regime: sepika_core::model::ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
-            plastic_zone: None,
-            spring: None,
-        }],
-        load_cases: vec![LoadCase {
-            origin: Default::default(),
-            kind: sepika_core::model::LoadCaseKind::Dead,
-            id: sepika_core::ids::LoadCaseId(0),
-            name: "長期".into(),
-            nodal: vec![NodalLoad::manual(
-                NodeId(1),
-                [0.0, 0.0, -500_000.0, 0.0, 0.0, 0.0],
-            )],
-            member: Vec::new(),
-        }],
-        ..Default::default()
-    }
-}
-
-pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
-    use sepika_core::section_shape::SectionShape;
-    let mut model = rc_column_model();
-    model.load_cases.push(sepika_core::model::LoadCase {
-        origin: Default::default(),
-        id: sepika_core::ids::LoadCaseId(1),
-        name: "P=0".into(),
-        kind: sepika_core::model::LoadCaseKind::Live,
-        nodal: Vec::new(),
-        member: Vec::new(),
-    });
-    model
-        .combinations
-        .push(sepika_core::model::LoadCombination {
-            name: "G+P".into(),
-            terms: vec![
-                (sepika_core::ids::LoadCaseId(0), 1.0),
-                (sepika_core::ids::LoadCaseId(1), 1.0),
-            ],
-        });
-    model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
-
-    model.nodes[1].coord[2] = 7200.0;
-    model.stories[1].elevation = Some(7200.0);
-    model.materials[0].fc = Some(30.0);
-    model.materials[0].young = 25000.0;
-    model.materials[1].category = MaterialCategory::Steel;
-    model.materials[1].name = "SN400B".into();
-    model.materials[1].fy = Some(235.0);
-    model.sections[0] = Section {
-        frame_use: Some(FrameSectionUse::Column),
-        material: Some(MaterialId(0)),
-        steel_material: Some(MaterialId(1)),
-        ..SectionShape::CftBox {
-            height: 400.0,
-            width: 400.0,
-            thick: 12.0,
-            horizontal_thick: 12.0,
-            corner_r: Some(0.0),
-        }
-        .to_section(SectionId(0), "CFT400長柱Case2".into())
-    };
-    model.load_cases[0].nodal = vec![sepika_core::model::NodalLoad::manual(
-        NodeId(1),
-        [0.0, 0.0, -n_compression_n, 0.0, 0.0, 0.0],
-    )];
-    model.panel_zone = sepika_core::model::PanelZoneMode::None;
-    model.steel_design_attrs = vec![cft_column_buckling_input::direct_lengths(
-        ElemId(0),
-        Some(7200.0),
-        Some(7200.0),
-    )];
-    model
-}
-
-pub(crate) fn assert_cft_long_case2_summary(summary: &serde_json::Value, axial_ok: bool) {
-    assert_eq!(summary["n_cft_checks"], 1);
-    assert_eq!(summary["n_cft_axial_ng"], u64::from(!axial_ok));
-    assert_eq!(summary["n_cft_mu_unavailable"], u64::from(!axial_ok));
-    assert_eq!(summary["all_checks_calculated_and_ok"], axial_ok);
-    let row = &summary["cft_members"][0];
-    assert_eq!(row["class"], "Long");
-    assert_eq!(row["axial_ok"], axial_ok);
-    assert!((row["ncu"].as_f64().unwrap() - 7_468_425.346_669_381).abs() < 0.01);
-    if axial_ok {
-        assert!((row["n_design"].as_f64().unwrap() - 4_000_000.0).abs() < 0.01);
-        assert!((row["mu_nm"].as_f64().unwrap() - 450_915_163.991_432_7).abs() < 0.1);
-        assert!(row["mu_nm_unavailable_reason"].is_null());
-    } else {
-        assert!((row["n_design"].as_f64().unwrap() - 8_000_000.0).abs() < 0.01);
-        assert!(row["mu_nm"].is_null());
-        assert!(row["mu_nm_unavailable_reason"]
-            .as_str()
-            .unwrap()
-            .contains("軸NG"));
-        assert!(row["axial_margin"].as_f64().unwrap() < 1.0);
-    }
-}
-
-#[test]
-fn cft_long_case2_job_reports_independent_mu_and_never_passes_axial_overload() {
-    for (n_n, ok) in [(4_000_000.0, true), (8_000_000.0, false)] {
-        let params = JobParams {
-            load_case: Some(0),
-            ..Default::default()
-        };
-        match compute_job(&cft_long_case2_model(n_n), JobKind::UltimateCheck, &params).unwrap() {
-            JobOutcome::UltimateCheck { summary } => assert_cft_long_case2_summary(&summary, ok),
-            _ => panic!("終局検定の結果が必要"),
-        }
-    }
-}
-
-#[test]
-fn cft_ultimate_job_rejects_missing_or_zero_direct_length_with_axis() {
-    let mut model = cft_long_case2_model(4_000_000.0);
-    for invalid in [None, Some(0.0)] {
-        model.steel_design_attrs[0].lk_z_direct = invalid;
-        let Err(sepika_job::JobError::InvalidInput(reason)) =
-            compute_job(&model, JobKind::UltimateCheck, &JobParams::default())
-        else {
-            panic!("CFT終局検定は片軸で成立しません");
-        };
-        assert!(reason.contains("CFT柱 ID 0: 弱軸の座屈長さ"), "{reason}");
-    }
-}
-
-#[test]
-fn test_compute_ultimate_check_job_rejects_incomplete_rc_gravity_demand() {
-    let mut model = rc_column_model();
-    model.load_cases.push(sepika_core::model::LoadCase {
-        origin: Default::default(),
-        id: sepika_core::ids::LoadCaseId(1),
-        name: "P=0".into(),
-        kind: sepika_core::model::LoadCaseKind::Live,
-        nodal: Vec::new(),
-        member: Vec::new(),
-    });
-    model
-        .combinations
-        .push(sepika_core::model::LoadCombination {
-            name: "G+P".into(),
-            terms: vec![
-                (sepika_core::ids::LoadCaseId(0), 1.0),
-                (sepika_core::ids::LoadCaseId(1), 1.0),
-            ],
-        });
-    model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
-
-    let error = compute_job(&model, JobKind::UltimateCheck, &JobParams::default())
-        .err()
-        .expect("QL未設定のRC終局需要は拒否する");
-    let reason = error.to_string();
-    assert!(reason.contains("ultimate_gravity_missing"), "{reason}");
-    assert!(reason.contains("member=0"), "{reason}");
-    assert!(reason.contains("purpose=frame_long"), "{reason}");
 }
 
 /// DesignCheck ジョブは既定では危険断面位置（柱フェイス [face=0 につき節点芯]・

@@ -35,7 +35,7 @@ use ultimate::compute_ultimate_check_job;
 /// `duration` の既定は GUI（10.0 秒）より短い 2.0 秒とする。
 #[derive(Debug, Clone, Copy)]
 pub struct JobParams {
-    /// 対象荷重ケース ID（未指定なら先頭ケース）。
+    /// LinearStatic・DesignCheck の対象荷重ケース ID（単独ケースで未指定なら先頭ケース）。UltimateCheck では指定不可。
     pub load_case: Option<u32>,
     /// DesignCheck用の保存組合せindex。荷重ケースとの同時指定は禁止。
     pub load_combination: Option<usize>,
@@ -195,17 +195,36 @@ pub enum JobOutcome {
     },
 }
 
-/// `kind` に応じて対応する compute_* 関数へ振り分ける。
+pub(crate) fn validate_analysis_load_target(
+    kind: JobKind,
+    load_case: Option<u32>,
+    load_combination: Option<usize>,
+) -> Result<(), &'static str> {
+    match kind {
+        JobKind::UltimateCheck if load_case.is_some() => Err(
+            "UltimateCheckにload_caseは指定できません。モデルに長期架構用組合せを選択して保存してください",
+        ),
+        JobKind::UltimateCheck if load_combination.is_some() => Err(
+            "UltimateCheckにload_combinationは指定できません。モデルに保存した終局検定用の長期架構用組合せを使用します",
+        ),
+        JobKind::DesignCheck if load_case.is_some() && load_combination.is_some() => {
+            Err("load_caseとload_combinationは同時指定できません")
+        }
+        kind if kind != JobKind::DesignCheck && load_combination.is_some() => {
+            Err("load_combinationはDesignCheck専用です")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// `kind` ごとの解析・検定を行う。UltimateCheck はモデルに保存された長期架構用組合せを使う。
 pub fn compute_job(
     model: &Model,
     kind: JobKind,
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
-    if params.load_combination.is_some() && kind != JobKind::DesignCheck {
-        return Err(JobError::InvalidInput(
-            "load_combinationはDesignCheck専用です".into(),
-        ));
-    }
+    validate_analysis_load_target(kind, params.load_case, params.load_combination)
+        .map_err(|reason| JobError::InvalidInput(reason.into()))?;
     match kind {
         JobKind::LinearStatic => compute_linear_static_job(model, params),
         JobKind::Eigen => compute_eigen_job(model, params),

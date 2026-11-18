@@ -82,7 +82,9 @@ impl SepikaServer {
         Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
-    #[tool(description = "解析を非同期で実行する")]
+    #[tool(
+        description = "解析を非同期で実行する。UltimateCheckはモデルに保存した長期架構用組合せを使用する"
+    )]
     pub async fn analysis_run(
         &self,
         Parameters(args): Parameters<AnalysisRunArgs>,
@@ -277,9 +279,9 @@ pub struct QuantityTakeoffArgs {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AnalysisRunArgs {
     pub kind: JobKind,
-    /// 対象荷重ケース ID（未指定なら先頭ケース）。
+    /// LinearStatic・DesignCheck の対象荷重ケース ID（単独ケースで未指定なら先頭ケース）。UltimateCheck では指定不可。
     pub load_case: Option<u32>,
-    /// DesignCheck用の保存組合せindex。load_caseと同時指定不可。
+    /// DesignCheck 専用の保存組合せ index。load_case と同時指定不可。UltimateCheck はモデルに保存した長期架構用組合せを使用する。
     pub load_combination: Option<usize>,
     /// モード数（既定 3）。
     pub n_modes: Option<usize>,
@@ -317,15 +319,10 @@ pub struct AnalysisRunArgs {
 
 impl AnalysisRunArgs {
     /// 任意パラメータを `super::JobParams`（既定値込み）へ変換する。
-    /// 不正な文字列の場合のみエラーを返す。
+    /// ジョブと荷重指定の組み合わせまたはパラメータ値が不正ならエラーを返す。
     fn to_job_params(&self) -> Result<super::JobParams, String> {
-        if self.load_combination.is_some()
-            && (self.load_case.is_some() || self.kind != JobKind::DesignCheck)
-        {
-            return Err(
-                "load_combinationはDesignCheck専用でload_caseとの同時指定はできません".into(),
-            );
-        }
+        super::job::validate_analysis_load_target(self.kind, self.load_case, self.load_combination)
+            .map_err(str::to_owned)?;
         let dir = match self.dir.as_deref() {
             None => super::JobDir::X,
             Some("X") => super::JobDir::X,

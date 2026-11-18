@@ -1,20 +1,27 @@
 use super::super::persist::SavePoint;
+use crate::tests::cft_long_case2_model::cft_long_case2_model;
+use crate::tests::cft_long_case2_reference::assert_cft_long_case2_summary;
 use sepika_io::results::ResultKind;
 use std::future::Future;
 use std::task::Poll;
 
 #[tokio::test]
 async fn cft_long_case2_public_job_keeps_calculated_and_unavailable_diagnostics() {
-    for (n_n, ok) in [(4_000_000.0, true), (8_000_000.0, false)] {
-        let dir = test_store_dir(&format!("cft325-case2-{n_n}"));
-        let model = crate::tests::cft_long_case2_model(n_n);
+    for (case_load_n, ok) in [(2_000_000.0, true), (4_000_000.0, false)] {
+        let dir = test_store_dir(&format!("cft-case2-{case_load_n}"));
+        let model = cft_long_case2_model(case_load_n, case_load_n);
         let server = SepikaServer::new(make_state(model.clone(), &dir));
-        let mut args = run_args(JobKind::UltimateCheck);
-        args.load_case = Some(0);
-        let run = server.analysis_run(Parameters(args)).await.unwrap();
+        let run = server
+            .analysis_run(Parameters(run_args(JobKind::UltimateCheck)))
+            .await
+            .unwrap();
         let id = extract_job_id(&run);
         let summary = done_summary(&wait_for_terminal(&server, &id).await);
-        crate::tests::assert_cft_long_case2_summary(&summary, ok);
+        assert_cft_long_case2_summary(&summary, ok);
+        assert_eq!(
+            summary["load_target"]["terms"],
+            serde_json::json!([[0, 1.0], [1, 1.0]])
+        );
         let published = public_status(&server, &id).await;
         let published_summary: serde_json::Value =
             serde_json::from_str(published["status"]["Done"]["result_ref"].as_str().unwrap())
@@ -38,6 +45,24 @@ async fn cft_long_case2_public_job_keeps_calculated_and_unavailable_diagnostics(
             .manifest()
             .entries
             .is_empty());
+    }
+}
+
+#[tokio::test]
+async fn ultimate_check_public_job_rejects_explicit_load_overrides() {
+    let dir = test_store_dir("cft-ultimate-check-load-overrides");
+    let model = cft_long_case2_model(4_000_000.0, 4_000_000.0);
+    let server = SepikaServer::new(make_state(model, &dir));
+    for (load_case, load_combination, field) in [
+        (Some(0), None, "load_case"),
+        (None, Some(0), "load_combination"),
+    ] {
+        let mut args = run_args(JobKind::UltimateCheck);
+        args.load_case = load_case;
+        args.load_combination = load_combination;
+        let error = server.analysis_run(Parameters(args)).await.unwrap_err();
+        assert!(error.message.contains(field), "{error:?}");
+        assert!(error.message.contains("長期架構用組合せ"), "{error:?}");
     }
 }
 
