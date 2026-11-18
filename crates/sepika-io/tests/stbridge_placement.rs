@@ -412,6 +412,40 @@ fn axial_offsets_reject_lost_coordinates_in_the_common_rotation() {
 }
 
 #[test]
+fn axial_offsets_on_a_sloped_column_write_the_zero_angle_in_the_standard_range() {
+    let members = r#"<StbColumns><StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S" offset_top_X="5" offset_top_Y="5" offset_top_Z="30"/></StbColumns>"#;
+    let xml = input("", members, H).replace(
+        r#"<StbNode id="2" X="0" Y="0" Z="3000""#,
+        r#"<StbNode id="2" X="500" Y="500" Z="3000""#,
+    );
+    let model = import_stbridge(&xml).unwrap();
+    let output = export_stbridge(&model).unwrap();
+    assert_eq!(export_stbridge_with_report(&model).unwrap().0, output);
+    let column = output
+        .lines()
+        .find(|line| line.contains("<StbColumn "))
+        .unwrap();
+    assert!(column.contains(r#"rotate="0""#), "{column}");
+    let norm_x = 38.0_f64.sqrt();
+    let norm_y = 37.0_f64.sqrt();
+    let norm_z = norm_x * norm_y;
+    let expected_axes = [
+        [1.0 / norm_x, 1.0 / norm_x, 6.0 / norm_x],
+        [6.0 / norm_y, 0.0, -1.0 / norm_y],
+        [-1.0 / norm_z, 37.0 / norm_z, -6.0 / norm_z],
+    ];
+    for model in [model, import_stbridge(&output).unwrap()] {
+        let placement = model
+            .beam_placement(SupportMemberId::Primary(model.elements[0].id))
+            .unwrap();
+        assert_eq!(placement.actual_ends, [[0.0; 3], [505.0, 505.0, 3030.0]]);
+        for (axis, expected) in placement.axes.into_iter().zip(expected_axes) {
+            assert!(dist(axis, expected) < 1e-12, "{axis:?} != {expected:?}");
+        }
+    }
+}
+
+#[test]
 fn axial_offsets_roundtrip_with_an_oblique_global_rotation_when_ends_are_preserved() {
     let members = GIRDER.replace(
         "kind_structure=\"S\"",
@@ -510,6 +544,71 @@ fn secondary_axial_offsets_preserve_the_support_and_reject_snapping_a_reference_
 }
 
 #[test]
+fn detached_secondary_axial_offsets_require_exact_section_pose() {
+    let members = r#"<StbBeams><StbBeam id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S" offset_end_X="20"/></StbBeams>"#;
+    let mut model = import_stbridge(&input("", members, H)).unwrap();
+    let output = export_stbridge(&model).unwrap();
+    assert_eq!(export_stbridge_with_report(&model).unwrap().0, output);
+    let reread = import_stbridge(&output).unwrap();
+    let member = reread.beams().next().unwrap();
+    assert!(member.is_detached());
+    assert_eq!(
+        reread.secondary_member_end_points(member),
+        Some(([0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0])),
+    );
+    assert_eq!(
+        member.end_offsets_mm,
+        [[0.0, 0.0, -300.0], [20.0, 0.0, -300.0]]
+    );
+    assert_eq!(
+        reread.secondary_display_axis(member).ref_vector,
+        [0.0, 0.0, 1.0]
+    );
+    assert_eq!(
+        reread.section(member.section.unwrap()).unwrap().shape,
+        model
+            .section(model.beams().next().unwrap().section.unwrap())
+            .unwrap()
+            .shape,
+    );
+
+    model.unassigned_beams[0]
+        .display_local_axis
+        .as_mut()
+        .unwrap()
+        .reverse_width = true;
+    let reversed = import_stbridge(&export_stbridge(&model).unwrap()).unwrap();
+    let member = reversed.beams().next().unwrap();
+    assert!(member.is_detached());
+    assert_eq!(
+        reversed.secondary_member_end_points(member),
+        Some(([6000.0, 0.0, 3000.0], [0.0, 0.0, 3000.0])),
+    );
+    assert_eq!(
+        member.end_offsets_mm,
+        [[20.0, 0.0, -300.0], [0.0, 0.0, -300.0]]
+    );
+
+    let axis = model.unassigned_beams[0]
+        .display_local_axis
+        .as_mut()
+        .unwrap();
+    axis.reverse_width = false;
+    axis.ref_vector = [0.0, -1.0, 1e-17];
+    for error in [
+        export_stbridge(&model).unwrap_err(),
+        export_stbridge_with_report(&model).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in ["二次部材 ID 0", "異値offset", "断面基底", "回転角"] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+    model.unassigned_beams[0].end_offsets_mm[1][0] = 0.0;
+    export_stbridge(&model).unwrap();
+}
+
+#[test]
 fn secondary_axial_offsets_reject_ambiguous_reference_nodes_and_changed_parent_support() {
     use sepika_core::model::SecondaryMemberEnds;
 
@@ -578,6 +677,107 @@ fn secondary_axial_offsets_reject_ambiguous_reference_nodes_and_changed_parent_s
             assert!(error.contains(expected), "{error}");
         }
     }
+}
+
+#[test]
+fn primary_axial_offsets_report_an_unreadable_standard_section() {
+    use sepika_core::section_shape::SectionShape;
+
+    let mut model = import_stbridge(&input("", GIRDER, H)).unwrap();
+    let section = model.elements[0].section.unwrap();
+    model.sections[section.index()].shape = Some(SectionShape::CftPipe {
+        outer_dia: 600.0,
+        thick: 20.0,
+    });
+    assert!(export_stbridge(&model).unwrap().contains("<StbSecRaw"));
+    model.elements[0].end_offsets_mm[1][0] = 20.0;
+    assert_eq!(ends(&model, 0), [[0.0, 0.0, 2700.0], [6020.0, 0.0, 2700.0]]);
+
+    for error in [
+        export_stbridge(&model).unwrap_err(),
+        export_stbridge_with_report(&model).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in [
+            "主架構部材 ID 0",
+            "異値offsetの配置・断面",
+            "再読込",
+            "StbGirder id=Some(1)",
+            "CFT",
+        ] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+}
+
+#[test]
+fn secondary_axial_offsets_reject_a_changed_support_above_the_direct_parent() {
+    use sepika_core::model::SecondaryMemberEnds;
+
+    let members = r#"<StbGirders><StbGirder id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S"/><StbGirder id="2" id_node_start="10" id_node_end="11" id_section="1" kind_structure="S"/></StbGirders>
+<StbBeams>
+    <StbBeam id="1" name="parent" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S"/>
+    <StbBeam id="2" name="child" id_node_start="12" id_node_end="13" id_section="1" kind_structure="S" offset_start_X="20"/>
+</StbBeams>"#;
+    let xml = input("", members, H).replace(
+        "</StbNodes>",
+        r#"<StbNode id="10" X="2500" Y="-500" Z="3000"/><StbNode id="11" X="3500" Y="500" Z="3000"/>
+<StbNode id="12" X="3000" Y="1000" Z="3000"/><StbNode id="13" X="4500" Y="1000" Z="3000"/></StbNodes>"#,
+    );
+    let mut model = import_stbridge(&xml).unwrap();
+    let parent = model
+        .beams()
+        .find(|member| member.name == "parent")
+        .unwrap()
+        .id;
+    let child = model
+        .beams()
+        .find(|member| member.name == "child")
+        .unwrap()
+        .id;
+    let child_placement = model
+        .beam_placement(SupportMemberId::Secondary(child))
+        .unwrap();
+    assert_eq!(
+        model.secondary_member(child).unwrap().ends.anchors()[0].support,
+        SupportMemberId::Secondary(parent)
+    );
+    export_stbridge(&model).unwrap();
+    let primary = model.elements[0].id;
+    let alternate = model.elements[1].id;
+    let member = model
+        .unassigned_beams
+        .iter_mut()
+        .find(|member| member.id == parent)
+        .unwrap();
+    let SecondaryMemberEnds::Cantilever { support, .. } = &mut member.ends else {
+        panic!("親小梁には主架構の支持端が一つある");
+    };
+    assert_eq!(support.support, SupportMemberId::Primary(primary));
+    support.support = SupportMemberId::Primary(alternate);
+    assert_eq!(
+        model
+            .beam_placement(SupportMemberId::Secondary(child))
+            .unwrap()
+            .actual_ends,
+        child_placement.actual_ends
+    );
+    for error in [
+        export_stbridge(&model).unwrap_err(),
+        export_stbridge_with_report(&model).unwrap_err(),
+    ] {
+        let error = error.to_string();
+        for expected in ["二次部材 ID 0", "異値offsetの支持関係", "支持先"] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+    model
+        .unassigned_beams
+        .iter_mut()
+        .find(|member| member.id == child)
+        .unwrap()
+        .end_offsets_mm[0][0] = 0.0;
+    export_stbridge(&model).unwrap();
 }
 
 #[test]
@@ -1043,7 +1243,7 @@ fn write_placement_outputs_for_official_xsd_validation() {
         std::env::var_os("SEPIKA_STB_XSD_OUTPUT").expect("SEPIKA_STB_XSD_OUTPUT"),
     );
     std::fs::create_dir_all(&directory).unwrap();
-    let members = r#"<StbColumns><StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S" rotate="27" offset_bottom_Z="25"/></StbColumns>
+    let members = r#"<StbColumns><StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S" rotate="27" offset_bottom_Z="25"/><StbColumn id="2" id_node_bottom="1" id_node_top="9" id_section="1" kind_structure="S" offset_top_X="5" offset_top_Y="5" offset_top_Z="30"/></StbColumns>
 <StbGirders><StbGirder id="1" id_node_start="2" id_node_end="3" id_section="1" kind_structure="S" rotate="90" offset_start_X="250" offset_end_X="-200" offset_start_Z="-150" offset_end_Z="-150"/><StbGirder id="2" id_node_start="7" id_node_end="8" id_section="1" kind_structure="S" rotate="15"/></StbGirders>
 <StbBeams><StbBeam id="1" id_node_start="5" id_node_end="4" id_section="1" kind_structure="S" rotate="90" offset_start_Y="20"/></StbBeams>
 <StbPosts><StbPost id="1" id_node_bottom="5" id_node_top="6" id_section="1" kind_structure="S" rotate="45" offset_top_Z="-10"/></StbPosts>
@@ -1064,7 +1264,11 @@ fn write_placement_outputs_for_official_xsd_validation() {
             r#"<StbSecBuild-BOX name="shape" A="600" B="300" t1="12" t2="20"/>"#,
         ),
     ] {
-        let model = import_stbridge(&input("", members, shape)).unwrap();
+        let xml = input("", members, shape).replace(
+            "</StbNodes>",
+            r#"<StbNode id="9" X="500" Y="500" Z="3000"/></StbNodes>"#,
+        );
+        let model = import_stbridge(&xml).unwrap();
         let xml = export_stbridge(&model).unwrap();
         let reread = import_stbridge(&xml).unwrap();
         assert_eq!(model.elements.len(), reread.elements.len());

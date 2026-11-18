@@ -113,6 +113,12 @@ pub(super) fn export_placement(
         .atan2(dot(axes[1], nominal[1]))
         .to_degrees()
         .rem_euclid(360.0);
+    // 負の微小角の剰余は360度に丸まることがあり、標準の角度範囲を外れる。
+    let rotate_deg = if unequal && rotate_deg == 360.0 {
+        0.0
+    } else {
+        rotate_deg
+    };
     let shift = match shape {
         Some(shape) => {
             let axes = if unequal {
@@ -127,13 +133,19 @@ pub(super) fn export_placement(
     let offsets_mm = shift_offsets(offsets_mm, scale(shift, -1.0))?;
     validate_axis_direction(ends, offsets_mm)?;
     if let Some(shape) = shape.filter(|_| unequal) {
-        let (reread_offsets, _) = import_placement(ends, offsets_mm, rotate_deg, usage, shape)?;
-        if [
+        let (reread_offsets, reread_ref) =
+            import_placement(ends, offsets_mm, rotate_deg, usage, shape)?;
+        let reread_actual = [
             add(ends[0], reread_offsets[0]),
             add(ends[1], reread_offsets[1]),
-        ] != actual
-        {
+        ];
+        if reread_actual != actual {
             return Err(UNEQUAL_OFFSET_ERROR.into());
+        }
+        let reread_axes = local_frame_axes(reread_actual[0], reread_actual[1], reread_ref)
+            .map_err(str::to_owned)?;
+        if reread_axes != axes {
+            return Err("異値offsetの断面基底をSTBの回転角で保持できません".into());
         }
     }
     Ok((offsets_mm, rotate_deg))
