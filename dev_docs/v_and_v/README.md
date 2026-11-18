@@ -120,6 +120,10 @@ OS100%/150%別の全代表操作・可読性/性能の条件と最終HEADの全C
 
 [確認記録](角形CFT曲げ_Issue1104_確認記録.md)で角Rの連続性・材料別釣合い・利用側のVerificationと、規準適合・実験Validation・未確定の中長柱許容全式を区別する。
 
+## CFT中柱・長柱の許容曲げ（#1124）
+
+[原典照合と独立有限例](CFT中長柱許容曲げ_Issue1124_原典照合.md)に、6項目の確認範囲と本文待ちの条件を記録する。座屈長さ比30（告示の通常範囲外）の長柱例では、論文本文の短期参照に合わせた現行許容圧縮耐力が、図から読んだ概算の上限を上回る。状態は🔶。
+
 ## 等価層降伏の固定初期剛性（#1087）
 
 [独立骨格・実架構・GUI保存の確認記録](等価層降伏_Issue1087_確認記録.md)に限定Verificationと残るValidationの境界を記録する。静的変位一致や等面積を動的応答一致・一律安全側の保証へ拡張しない。
@@ -806,6 +810,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 916 | CFT充填コンクリートの法定Fc下限 | sepika-design-jp / sepika-core / sepika-app | cft/mod.rs・result_contract.rs・app/result_contract_tests.rs | [独立境界と製品入口](CFT充填Fc下限_Issue916_2026-10.md#独立境界と製品入口) | 公開／App／保存 | 🔶（下限Verification、手動GUI・Validation未） |
 | 1400 | CFT柱の座屈長さ | sepika-design-jp / sepika-app / sepika-mcp | tests/cft_column_buckling.rs・app/cft_column_buckling_tests.rs・job/design_check.rs | [原典・独立有限例・回帰](CFT柱の座屈長さ_Issue1400_2026-11.md) | 公開／App／MCP／保存 | 🔶（境界条件と採用式への入力のVerification。耐力式全体のValidationは対象外） |
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
+| 1124 | CFT中柱・長柱の許容軸力・曲げ | sepika-design-jp | cft/mod.rs | [原典6項目と独立有限例](CFT中長柱許容曲げ_Issue1124_原典照合.md) | 原典／公開入口 | 🔶（許容全式と適用条件の確認・採用保留） |
 | 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像・現行式と独立数値の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、既存回帰 | 原典・有限Verification | 🔶（S造形状係数#1428、CFT採否・Validation未） |
 | 1306 | S造合成梁の強軸曲げ剛性と協力幅 | sepika-element / sepika-app | frame/beam/stiffness_factors.rs / app/preparation.rs | [原典と独立有限例](S造合成梁剛性_Issue1306_原典照合.md#独立した有限計算)、既存合成梁回帰 | 原典・有限Verification | 🔶（合成指針本文・適用域・方式採否・Validationは保留） |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
