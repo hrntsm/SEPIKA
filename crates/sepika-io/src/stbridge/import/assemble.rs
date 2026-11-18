@@ -25,7 +25,7 @@ use std::collections::HashMap;
 /// パース済み中間表現からモデルと取り込み報告を組み立てる（後段のエントリポイント）。
 pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbError> {
     let StbParser {
-        global_transform,
+        mut global_transform,
         mut warnings,
         mut strengths,
         unsupported,
@@ -35,7 +35,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         mut raw_load_cases,
         pending_secs,
         pending_members,
-        pending_secondaries,
+        mut pending_secondaries,
         steel_lib,
         raw_slabs,
         slab_secs,
@@ -88,19 +88,34 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
 
     build_members(
         &mut model,
-        pending_members,
+        &pending_members,
         &node_index,
         &section_index,
         &mut strengths,
     )?;
     let (n_beams, n_posts) = build_secondaries(
         &mut model,
-        pending_secondaries,
+        &mut pending_secondaries,
         &node_index,
         &section_index,
         &mut strengths,
     )?;
-    apply_global_transform(&mut model, global_transform)?;
+    validate_unequal_secondary_nodes(&model, &pending_secondaries, "STB入力")?;
+    global_transform.exact_quarter_turns = pending_members
+        .iter()
+        .any(|member| member.offsets_mm[0] != member.offsets_mm[1])
+        || pending_secondaries
+            .iter()
+            .any(|member| member.offsets_mm[0] != member.offsets_mm[1]);
+    apply_global_transform(
+        &mut model,
+        global_transform,
+        &pending_members,
+        &pending_secondaries,
+    )?;
+    if global_transform.rotation_deg != 0.0 || global_transform.translation_mm != [0.0; 3] {
+        validate_unequal_secondary_nodes(&model, &pending_secondaries, "global変換後")?;
+    }
     for case in &mut raw_load_cases {
         for (node, values) in &mut case.nodal {
             let force = global_transform.vector([values[0], values[1], values[2]]);
@@ -133,7 +148,37 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut warnings,
         &mut strengths,
     )?;
+    let unequal_secondary_ends: Vec<_> = model
+        .unassigned_beams
+        .iter()
+        .chain(&model.unassigned_posts)
+        .filter_map(|member| match member.ends {
+            sepika_core::model::SecondaryMemberEnds::Detached(ends)
+                if member.end_offsets_mm[0] != member.end_offsets_mm[1] =>
+            {
+                Some((member.id, ends))
+            }
+            _ => None,
+        })
+        .collect();
     let anchorize = model.anchorize_secondary_members();
+    for (id, mut ends) in unequal_secondary_ends {
+        let reason = || {
+            pending_secondaries[id.index()]
+                .source
+                .error(None, "異値offsetの基準端を支持アンカー化後に保持できません")
+        };
+        let member = model.secondary_member(id).ok_or_else(reason)?;
+        if member
+            .display_local_axis
+            .is_some_and(|axis| axis.reverse_width)
+        {
+            ends.reverse();
+        }
+        if model.secondary_member_end_points(member) != Some((ends[0], ends[1])) {
+            return Err(reason());
+        }
+    }
     model.rebuild_floor_assignment_regions();
     assign_imported_slabs(&mut model, pending_slabs, &mut strengths)?;
     model.rebuild_wall_assignment_regions();
@@ -263,10 +308,87 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     ))
 }
 
+fn validate_unequal_secondary_nodes(
+    model: &Model,
+    pending_secondaries: &[PendingSecondary],
+    stage: &str,
+) -> Result<(), StbError> {
+    let mut members = model
+        .unassigned_beams
+        .iter()
+        .chain(&model.unassigned_posts)
+        .filter(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1])
+        .peekable();
+    if members.peek().is_none() {
+        return Ok(());
+    }
+    let coordinate_key =
+        |point: [f64; 3]| point.map(|value| if value == 0.0 { 0 } else { value.to_bits() });
+    let mut node_counts = HashMap::new();
+    for node in &model.nodes {
+        *node_counts
+            .entry(coordinate_key(node.coord))
+            .or_insert(0_usize) += 1;
+    }
+    for member in members {
+        if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = member.ends {
+            if ends
+                .into_iter()
+                .any(|end| node_counts.get(&coordinate_key(end)) != Some(&1))
+            {
+                return Err(pending_secondaries[member.id.index()].source.error(
+                    None,
+                    &format!(
+                        "{stage}の座標で、異値offsetの基準端に対応する節点を一意に決められません"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn apply_global_transform(
     model: &mut Model,
     transform: super::super::placement::GlobalTransform,
+    pending_members: &[PendingMember],
+    pending_secondaries: &[PendingSecondary],
 ) -> Result<(), StbError> {
+    if transform.rotation_deg % 360.0 != 0.0 || transform.translation_mm != [0.0; 3] {
+        for element in model
+            .elements
+            .iter()
+            .filter(|element| element.end_offsets_mm[0] != element.end_offsets_mm[1])
+        {
+            let ends = [
+                model.nodes[element.nodes[0].index()].coord,
+                model.nodes[element.nodes[1].index()].coord,
+            ];
+            transform
+                .validate_end_positions(ends, element.end_offsets_mm)
+                .map_err(|reason| {
+                    pending_members[element.id.index()]
+                        .source
+                        .error(None, &format!("global変換後の配置: {reason}"))
+                })?;
+        }
+        for member in model
+            .unassigned_beams
+            .iter()
+            .chain(&model.unassigned_posts)
+            .filter(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1])
+        {
+            if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = member.ends {
+                transform
+                    .validate_end_positions(ends, member.end_offsets_mm)
+                    .map_err(|reason| {
+                        pending_secondaries[member.id.index()]
+                            .source
+                            .error(None, &format!("global変換後の配置: {reason}"))
+                    })?;
+            }
+        }
+    }
     for node in &mut model.nodes {
         node.coord = transform.point(node.coord);
         if !node.coord.iter().all(|value| value.is_finite()) {
@@ -277,9 +399,19 @@ fn apply_global_transform(
         }
     }
     for element in &mut model.elements {
-        element.end_offsets_mm = element
-            .end_offsets_mm
-            .map(|offset| transform.vector(offset));
+        let unequal = element.end_offsets_mm[0] != element.end_offsets_mm[1];
+        let error = |reason: &str| {
+            if unequal {
+                pending_members[element.id.index()]
+                    .source
+                    .error(None, reason)
+            } else {
+                StbError::Unmappable(format!("部材 ID {}: {reason}", element.id.0))
+            }
+        };
+        element.end_offsets_mm = transform
+            .offsets(element.end_offsets_mm)
+            .map_err(|reason| error(&format!("global変換後の配置: {reason}")))?;
         element.local_axis.ref_vector = transform.vector(element.local_axis.ref_vector);
         if !element
             .end_offsets_mm
@@ -287,20 +419,13 @@ fn apply_global_transform(
             .flatten()
             .all(|value| value.is_finite())
         {
-            return Err(StbError::Unmappable(format!(
-                "部材 ID {}: global変換後のXYZ偏心が非有限です",
-                element.id.0
-            )));
+            return Err(error("global変換後のXYZ偏心が非有限です"));
         }
         let reference = [
             model.nodes[element.nodes[0].index()].coord,
             model.nodes[element.nodes[1].index()].coord,
         ];
-        validate_global_axis(
-            &format!("部材 ID {}", element.id.0),
-            reference,
-            element.end_offsets_mm,
-        )?;
+        validate_global_axis(reference, element.end_offsets_mm, error)?;
     }
     for member in model
         .unassigned_beams
@@ -310,27 +435,35 @@ fn apply_global_transform(
         if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = &mut member.ends {
             *ends = ends.map(|point| transform.point(point));
         }
-        member.end_offsets_mm = member.end_offsets_mm.map(|offset| transform.vector(offset));
+        let unequal = member.end_offsets_mm[0] != member.end_offsets_mm[1];
+        let error = |reason: &str| {
+            if unequal {
+                pending_secondaries[member.id.index()]
+                    .source
+                    .error(None, reason)
+            } else {
+                StbError::Unmappable(format!(
+                    "二次部材 ID {}「{}」: {reason}",
+                    member.id.0, member.name
+                ))
+            }
+        };
+        member.end_offsets_mm = transform
+            .offsets(member.end_offsets_mm)
+            .map_err(|reason| error(&format!("global変換後の配置: {reason}")))?;
         if !member
             .end_offsets_mm
             .iter()
             .flatten()
             .all(|value| value.is_finite())
         {
-            return Err(StbError::Unmappable(format!(
-                "二次部材 ID {}: global変換後のXYZ偏心が非有限です",
-                member.id.0
-            )));
+            return Err(error("global変換後のXYZ偏心が非有限です"));
         }
         if let Some(axis) = &mut member.display_local_axis {
             axis.ref_vector = transform.vector(axis.ref_vector);
         }
         if let sepika_core::model::SecondaryMemberEnds::Detached(ends) = member.ends {
-            validate_global_axis(
-                &format!("二次部材 ID {}「{}」", member.id.0, member.name),
-                ends,
-                member.end_offsets_mm,
-            )?;
+            validate_global_axis(ends, member.end_offsets_mm, error)?;
         }
     }
     for story in &mut model.stories {
@@ -358,9 +491,9 @@ fn apply_global_transform(
 }
 
 fn validate_global_axis(
-    label: &str,
     reference: [[f64; 3]; 2],
     offsets_mm: [[f64; 3]; 2],
+    error: impl FnOnce(&str) -> StbError,
 ) -> Result<(), StbError> {
     use sepika_core::geom::vec3::{add, sub};
     let actual = [
@@ -371,12 +504,13 @@ fn validate_global_axis(
         let delta = sub(ends[1], ends[0]);
         let length_mm = delta[0].hypot(delta[1]).hypot(delta[2]);
         if !length_mm.is_finite() || length_mm <= 0.0 {
-            return Err(StbError::Unmappable(format!(
-                "{label}: global変換後の{name}長が有限な正値ではありません（零長を含む）"
+            return Err(error(&format!(
+                "global変換後の{name}長が有限な正値ではありません（零長を含む）"
             )));
         }
     }
-    Ok(())
+    super::super::placement::validate_axis_direction(reference, offsets_mm)
+        .map_err(|reason| error(&format!("global変換後の配置: {reason}")))
 }
 
 /// 属性の扱いの集計を、要素名・属性名の昇順に整列した報告へ変換する。
@@ -565,7 +699,7 @@ fn build_materials(
 /// 部材（柱・大梁・ブレース）を格納する。
 fn build_members(
     model: &mut Model,
-    pending_members: Vec<PendingMember>,
+    pending_members: &[PendingMember],
     node_index: &HashMap<u32, u32>,
     section_index: &HashMap<SectionKey, u32>,
     strengths: &mut super::strength::StrengthInputs,
@@ -633,7 +767,7 @@ fn build_members(
 /// 二次部材（小梁・間柱）を未割当リストへ格納する。
 fn build_secondaries(
     model: &mut Model,
-    pending_secondaries: Vec<PendingSecondary>,
+    pending_secondaries: &mut [PendingSecondary],
     node_index: &HashMap<u32, u32>,
     section_index: &HashMap<SectionKey, u32>,
     strengths: &mut super::strength::StrengthInputs,
@@ -683,7 +817,7 @@ fn build_secondaries(
                 model.nodes[nj as usize].coord,
             ]),
             section: Some(section),
-            name: s.name,
+            name: std::mem::take(&mut s.name),
         };
         strengths.bind_member(
             s.strength_index,

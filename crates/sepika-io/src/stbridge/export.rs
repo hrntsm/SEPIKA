@@ -17,11 +17,13 @@
 
 use super::section_std::standard_sections;
 use super::{StbError, STB_VERSION};
-use sepika_core::ids::{NodeId, SectionId, SlabId};
+use sepika_core::geom::vec3::{add, local_frame_axes};
+use sepika_core::ids::{ElemId, NodeId, SecondaryMemberId, SectionId, SlabId};
 use sepika_core::model::{
-    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, StoryLevelKind, StrengthTarget,
-    WallPlateShape,
+    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, SecondaryMember,
+    SecondaryMemberKind, StoryLevelKind, StrengthTarget, SupportMemberId, WallPlateShape,
 };
+use sepika_core::section_shape::SectionShape;
 
 /// ST-Bridge の id は `positiveInteger`（1 以上）。内部 0 始まり id に +1 して出力する。
 fn sid(internal_id: u32) -> u32 {
@@ -45,7 +47,13 @@ fn secondary_end_nodes(
 ) -> Option<[NodeId; 2]> {
     let (a, b) = model.secondary_member_end_points(sm)?;
     let tol = sepika_core::geom::MEMBER_AXIS_TOL_MM;
+    let unequal = sm.end_offsets_mm[0] != sm.end_offsets_mm[1];
     let find = |p: [f64; 3]| {
+        if unequal {
+            let mut matches = model.nodes.iter().filter(|n| n.coord == p);
+            let node = matches.next()?;
+            return matches.next().is_none().then_some(node.id);
+        }
         model
             .nodes
             .iter()
@@ -334,6 +342,21 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     s.push_str("  <StbModel>\n");
 
     s.push_str("    <StbNodes>\n");
+    let preserve_large_coordinates = model
+        .elements
+        .iter()
+        .any(|element| element.end_offsets_mm[0] != element.end_offsets_mm[1])
+        || model
+            .beams()
+            .chain(model.posts())
+            .any(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1]);
+    let node_coordinate = |value: f64| {
+        if preserve_large_coordinates && !(i64::MIN as f64..-(i64::MIN as f64)).contains(&value) {
+            value.to_string()
+        } else {
+            fmt(value)
+        }
+    };
     for n in model
         .nodes
         .iter()
@@ -342,9 +365,9 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
         s.push_str(&format!(
             "      <StbNode id=\"{}\" X=\"{}\" Y=\"{}\" Z=\"{}\" kind=\"ON_GRID\"{} />\n",
             node_sid(model, n.id),
-            fmt(n.coord[0]),
-            fmt(n.coord[1]),
-            fmt(n.coord[2]),
+            node_coordinate(n.coord[0]),
+            node_coordinate(n.coord[1]),
+            node_coordinate(n.coord[2]),
             model
                 .stb_node_ids
                 .iter()
@@ -440,7 +463,8 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     }
 
     s.push_str("    <StbMembers>\n");
-    s.push_str(&members_body(model, &col_map, &beam_map, &brace_map)?);
+    let (members, primary_order) = members_body(model, &col_map, &beam_map, &brace_map)?;
+    s.push_str(&members);
     s.push_str("    </StbMembers>\n");
 
     let slab_sec_base = slab_section_id_base(model, &col_map, &beam_map);
@@ -456,7 +480,251 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     s.push_str("    <StbJoints/>\n");
     s.push_str("  </StbModel>\n");
     s.push_str("</ST_BRIDGE>\n");
+    validate_unequal_offset_roundtrip(model, &s, &primary_order)?;
     Ok((s, ExportReport { warnings }))
+}
+
+fn secondary_output_name(member: &SecondaryMember, output_id: u32) -> String {
+    let prefix = match member.kind {
+        SecondaryMemberKind::Beam => 'B',
+        SecondaryMemberKind::Post => 'P',
+    };
+    format!("{prefix}{}", sid(output_id))
+}
+
+fn validate_unequal_offset_roundtrip(
+    model: &Model,
+    xml: &str,
+    primary_order: &[ElemId],
+) -> Result<(), StbError> {
+    let mut primary = model
+        .elements
+        .iter()
+        .filter(|element| element.end_offsets_mm[0] != element.end_offsets_mm[1])
+        .peekable();
+    let secondary = model
+        .beams()
+        .chain(model.posts())
+        .find(|member| member.end_offsets_mm[0] != member.end_offsets_mm[1]);
+    let Some(first) = primary
+        .peek()
+        .map(|element| SupportMemberId::Primary(element.id))
+        .or_else(|| secondary.map(|member| SupportMemberId::Secondary(member.id)))
+    else {
+        return Ok(());
+    };
+    let primary_error = |id: ElemId, detail: &str| {
+        StbError::Unmappable(format!(
+            "主架構部材 ID {}: 異値offsetの配置・断面をSTB再読込で保持できません。{detail}",
+            id.0,
+        ))
+    };
+    let reread = super::import_stbridge(xml).map_err(|reason| match first {
+        SupportMemberId::Primary(id) => primary_error(id, &reason.to_string()),
+        SupportMemberId::Secondary(id) => secondary_roundtrip_error(id, &reason.to_string()),
+    })?;
+    let reread_by_original_id: std::collections::HashMap<_, _> = primary_order
+        .iter()
+        .copied()
+        .zip(reread.elements.iter().map(|element| element.id))
+        .collect();
+    for element in primary {
+        let error = |detail: &str| primary_error(element.id, detail);
+        let reread_id = reread_by_original_id
+            .get(&element.id)
+            .ok_or_else(|| error("部材がありません"))?;
+        let original = model
+            .beam_placement(SupportMemberId::Primary(element.id))
+            .map_err(|reason| error(&reason))?;
+        let placement = reread
+            .beam_placement(SupportMemberId::Primary(*reread_id))
+            .map_err(|reason| error(&reason))?;
+        for (attribute, preserved) in [
+            (
+                "基準端",
+                original.reference_ends == placement.reference_ends,
+            ),
+            ("実材軸端", original.actual_ends == placement.actual_ends),
+            ("断面基底", original.axes == placement.axes),
+            (
+                "断面形状",
+                original.section_shape == placement.section_shape,
+            ),
+        ] {
+            if !preserved {
+                return Err(error(&format!("{attribute}が変わります")));
+            }
+        }
+    }
+    validate_secondary_roundtrip(model, &reread, primary_order)
+}
+
+fn secondary_roundtrip_error(id: SecondaryMemberId, detail: &str) -> StbError {
+    StbError::Unmappable(format!(
+        "二次部材 ID {}: 異値offsetの支持関係をSTB再読込で保持できません。{detail}",
+        id.0,
+    ))
+}
+
+fn secondary_shape<'a>(model: &'a Model, member: &SecondaryMember) -> Option<&'a SectionShape> {
+    member
+        .section
+        .and_then(|id| model.section(id))
+        .and_then(|section| section.shape.as_ref())
+}
+
+type SecondaryExportGeometry = ([[f64; 3]; 2], [[f64; 3]; 3]);
+
+fn secondary_export_geometry(
+    model: &Model,
+    member: &SecondaryMember,
+    ends: [[f64; 3]; 2],
+) -> Result<SecondaryExportGeometry, &'static str> {
+    let axis = model.secondary_display_axis(member);
+    let mut actual = [
+        add(ends[0], member.end_offsets_mm[0]),
+        add(ends[1], member.end_offsets_mm[1]),
+    ];
+    // 端正規化の前後で基底を比較するため、STBに書き出す端順序へそろえる。
+    if axis.reverse_width {
+        actual.reverse();
+    }
+    let axes = local_frame_axes(actual[0], actual[1], axis.ref_vector)?;
+    Ok((actual, axes))
+}
+
+fn validate_secondary_roundtrip(
+    model: &Model,
+    reread: &Model,
+    primary_order: &[ElemId],
+) -> Result<(), StbError> {
+    let reread_by_name: std::collections::HashMap<_, _> = reread
+        .beams()
+        .chain(reread.posts())
+        .map(|member| (member.name.as_str(), member))
+        .collect();
+    let pairs: Vec<_> = model
+        .beams()
+        .chain(model.posts())
+        .enumerate()
+        .map(|(index, member)| {
+            let name = secondary_output_name(member, model.elements.len() as u32 + index as u32);
+            (member, reread_by_name.get(name.as_str()).copied())
+        })
+        .collect();
+    let originals_by_reread_id: std::collections::HashMap<_, _> = pairs
+        .iter()
+        .filter_map(|&(original, member)| Some((member?.id, original)))
+        .collect();
+    let reverse_width = |member: &SecondaryMember| {
+        member
+            .display_local_axis
+            .is_some_and(|axis| axis.reverse_width)
+    };
+    let mut supports: Vec<_> = model
+        .elements
+        .iter()
+        .filter(|element| element.end_offsets_mm[0] != element.end_offsets_mm[1])
+        .map(|element| SupportMemberId::Primary(element.id))
+        .collect();
+    let mut dependents = std::collections::HashMap::<_, Vec<_>>::new();
+    let mut pending = Vec::new();
+    for pair in pairs {
+        let original = pair.0;
+        if original.end_offsets_mm[0] != original.end_offsets_mm[1] {
+            supports.push(SupportMemberId::Secondary(original.id));
+            pending.push(pair);
+        }
+        for anchor in original.ends.anchors() {
+            dependents.entry(anchor.support).or_default().push(pair);
+        }
+    }
+    // 祖先の確認で見つかる同値部材から下流へ広げると、異値に依存しない枝まで対象になる。
+    while let Some(support) = supports.pop() {
+        if let Some(children) = dependents.remove(&support) {
+            supports.extend(
+                children
+                    .iter()
+                    .map(|(child, _)| SupportMemberId::Secondary(child.id)),
+            );
+            pending.extend(children);
+        }
+    }
+    let mut checked = std::collections::HashSet::new();
+    while let Some((original, member)) = pending.pop() {
+        if !checked.insert(original.id) {
+            continue;
+        }
+        let mismatch = || {
+            secondary_roundtrip_error(
+                original.id,
+                "基準端の対応またはアンカーの支持先・位置が変わります",
+            )
+        };
+        let member = member.ok_or_else(mismatch)?;
+        let reversed = reverse_width(original) != reverse_width(member);
+        let (a, b) = reread
+            .secondary_member_end_points(member)
+            .ok_or_else(mismatch)?;
+        let (original_a, original_b) = model
+            .secondary_member_end_points(original)
+            .ok_or_else(mismatch)?;
+        let ends = if reversed { (b, a) } else { (a, b) };
+        let expected_anchors = original.ends.anchors();
+        let anchors = member.ends.anchors();
+        if (original_a, original_b) != ends
+            || expected_anchors.len() != anchors.len()
+            || (reversed && anchors.len() == 1)
+        {
+            return Err(mismatch());
+        }
+        if original.end_offsets_mm[0] != original.end_offsets_mm[1] {
+            let error = |detail: &str| {
+                StbError::Unmappable(format!(
+                    "二次部材 ID {}: 異値offsetの表示配置・断面をSTB再読込で保持できません。{detail}",
+                    original.id.0,
+                ))
+            };
+            let (original_actual, original_axes) =
+                secondary_export_geometry(model, original, [original_a, original_b])
+                    .map_err(error)?;
+            let (actual, axes) =
+                secondary_export_geometry(reread, member, [a, b]).map_err(error)?;
+            for (attribute, preserved) in [
+                ("実材軸端", original_actual == actual),
+                ("断面基底", original_axes == axes),
+                (
+                    "断面形状",
+                    secondary_shape(model, original) == secondary_shape(reread, member),
+                ),
+            ] {
+                if !preserved {
+                    return Err(error(&format!("{attribute}が変わります")));
+                }
+            }
+        }
+        for (i, expected) in expected_anchors.iter().enumerate() {
+            let mut anchor = anchors[if reversed { 1 - i } else { i }];
+            anchor.support = match anchor.support {
+                SupportMemberId::Primary(id) => {
+                    SupportMemberId::Primary(*primary_order.get(id.index()).ok_or_else(mismatch)?)
+                }
+                SupportMemberId::Secondary(id) => {
+                    let parent = *originals_by_reread_id.get(&id).ok_or_else(mismatch)?;
+                    let reread_parent = reread.secondary_member(id).ok_or_else(mismatch)?;
+                    if reverse_width(parent) != reverse_width(reread_parent) {
+                        anchor.position = 1.0 - anchor.position;
+                    }
+                    pending.push((parent, Some(reread_parent)));
+                    SupportMemberId::Secondary(parent.id)
+                }
+            };
+            if anchor != *expected {
+                return Err(mismatch());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 書き出し時に標準スキーマの表現限界で近似・切り捨てが生じた内容の報告。
@@ -498,11 +766,12 @@ fn members_body(
     col_map: &std::collections::HashMap<u32, u32>,
     beam_map: &std::collections::HashMap<u32, u32>,
     brace_map: &std::collections::HashMap<u32, u32>,
-) -> Result<String, StbError> {
+) -> Result<(String, Vec<ElemId>), StbError> {
     let mut columns = String::new();
     let mut girders = String::new();
     let mut unexported_secondary_ids: Vec<u32> = Vec::new();
     let mut braces = String::new();
+    let mut primary_order = [Vec::new(), Vec::new(), Vec::new()];
 
     for e in &model.elements {
         match e.kind {
@@ -543,6 +812,7 @@ fn members_body(
                 );
                 let ks = kind_structure(model, e);
                 if is_col {
+                    primary_order[0].push(e.id);
                     let (bot, top, cb, ct) = (e.nodes[0], e.nodes[1], e.end_cond[0], e.end_cond[1]);
                     columns.push_str(&format!(
                         "        <StbColumn id=\"{}\" name=\"C{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
@@ -551,6 +821,7 @@ fn members_body(
                         fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct), member_attrs,
                     ));
                 } else {
+                    primary_order[1].push(e.id);
                     girders.push_str(&format!(
                         "        <StbGirder id=\"{}\" name=\"G{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                          rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\" \
@@ -561,6 +832,7 @@ fn members_body(
                 }
             }
             ElementKind::Brace { tension_only } if e.nodes.len() == 2 => {
+                primary_order[2].push(e.id);
                 let sec = e
                     .section
                     .map(|s| brace_map.get(&s.0).copied().unwrap_or(s.0))
@@ -642,48 +914,34 @@ fn members_body(
             })
             .unwrap_or_else(|| "S".to_string());
         let Some(mut nodes) = secondary_end_nodes(model, sm) else {
+            if sm.end_offsets_mm[0] != sm.end_offsets_mm[1] {
+                return Err(StbError::Unmappable(format!(
+                    "二次部材 ID {}: 異値offsetの基準端に一致する節点を一意に決められません",
+                    sm.id.0
+                )));
+            }
             unexported_secondary_ids.push(sm.id.0);
             continue;
         };
         let mut end_offsets = sm.end_offsets_mm;
-        if sm.display_local_axis.is_some_and(|axis| axis.reverse_width) {
+        let axis = model.secondary_display_axis(sm);
+        if axis.reverse_width {
             nodes.reverse();
             end_offsets.reverse();
         }
-        let reference = sm
-            .display_local_axis
-            .map(|axis| axis.ref_vector)
-            .unwrap_or_else(|| {
-                if sm.kind == sepika_core::model::SecondaryMemberKind::Post {
-                    let angle = model
-                        .post_design_inputs
-                        .iter()
-                        .find(|input| input.member == sm.id)
-                        .and_then(|input| input.strong_direction_deg)
-                        .unwrap_or(0.0)
-                        .to_radians();
-                    [angle.cos(), angle.sin(), 0.0]
-                } else {
-                    [0.0, 0.0, 1.0]
-                }
-            });
-        let shape = sm
-            .section
-            .and_then(|section| model.section(section))
-            .and_then(|section| section.shape.as_ref());
         let (offsets, rotate) = super::placement::export_placement(
             [
                 model.nodes[nodes[0].index()].coord,
                 model.nodes[nodes[1].index()].coord,
             ],
             end_offsets,
-            reference,
+            axis.ref_vector,
             if sm.kind == sepika_core::model::SecondaryMemberKind::Post {
                 sepika_core::model::FrameSectionUse::Column
             } else {
                 sepika_core::model::FrameSectionUse::Girder
             },
-            shape,
+            secondary_shape(model, sm),
         )
         .map_err(|reason| StbError::Unmappable(format!("二次部材 ID {}: {reason}", sm.id.0)))?;
         let placement_attrs = super::placement::offset_attributes(
@@ -695,20 +953,21 @@ fn members_body(
             placement_attrs,
             super::strength_export::member_attr(model, StrengthTarget::Secondary(sm.id))
         );
+        let name = secondary_output_name(sm, mid);
         match sm.kind {
             sepika_core::model::SecondaryMemberKind::Beam => {
                 sec_beams.push_str(&format!(
-                    "        <StbBeam id=\"{}\" name=\"B{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
+                    "        <StbBeam id=\"{}\" name=\"{name}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                      rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), fmt(rotate), sec_ref(sec), ks, member_attrs,
+                    sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), fmt(rotate), sec_ref(sec), ks, member_attrs,
                 ));
             }
             sepika_core::model::SecondaryMemberKind::Post => {
                 let (bot, top) = (nodes[0], nodes[1]);
                 posts.push_str(&format!(
-                    "        <StbPost id=\"{}\" name=\"P{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
+                    "        <StbPost id=\"{}\" name=\"{name}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
                      rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), fmt(rotate), sec_ref(sec), ks, member_attrs,
+                    sid(mid), node_sid(model, bot), node_sid(model, top), fmt(rotate), sec_ref(sec), ks, member_attrs,
                 ));
             }
         }
@@ -814,7 +1073,7 @@ fn members_body(
                 .join(", SM")
         )));
     }
-    Ok(body)
+    Ok((body, primary_order.into_iter().flatten().collect()))
 }
 
 /// 割当済み断面の内部 ID を ST-Bridge の参照 ID に変換する。
