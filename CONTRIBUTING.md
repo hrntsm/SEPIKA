@@ -84,6 +84,7 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 | 管理先 | 共有する検証対象・管理理由 | 利用元・実行入口 |
 | --- | --- | --- |
 | `sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs` | RC梁の標準D19・非対称配筋と正曲げ需要。共通検定・GUI表示と保存・MCP集計で未算定理由を検証 | design-jp `tests/rc_beam_asymmetric.rs`、app `src/app/rc_beam_asymmetric_tests.rs`・`src/viewer/check_ratio.rs`、mcp `src/job/design_check.rs` |
+| `sepika-design-jp/tests/fixtures/brb_model.rs` | 座屈拘束ブレースの製品値と軸力。共通検定・GUI表示と保存・MCP集計で未検定理由と製品限度を検証 | design-jp `tests/brb_product_check.rs`、app `src/app/brb_product_tests.rs`（`src/viewer/check_ratio.rs`からも利用）、mcp `src/job/design_check.rs` |
 | `sepika-design-jp/tests/fixtures/rc_joint_model.rs` | RC終局接合部のモデル候補と未算定理由。応力欠落時の保持を公開入口・保存・GUI/MCP集計で検証 | design-jp `tests/rc_joint_selection.rs`、app `src/app/result_contract_tests.rs`、mcp `src/job/design_check.rs` |
 | `sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs`・`rc_column_axial_boundary_reference.rs` | RC柱の圧縮軸力上限と非零曲げ。許容曲げ0の境界を独立軸力・解析・共通検定で観測 | design-jp `tests/rc_column_zero_moment_capacity.rs`、job `tests/rc_column_axial_boundary.rs`、app `src/app/rc_column_boundary_tests.rs`・`src/viewer/check_ratio.rs`、mcp `src/job/design_check.rs` |
 | `sepika-design-jp/tests/fixtures/rc_column_tension_model.rs`・`rc_column_tension_reference.rs` | RC柱の矩形500角・円形D600、全主筋による純引張許容上限と算定範囲外曲げ。独立期待値と検定伝達を検証 | design-jp `tests/rc_column_zero_moment_capacity.rs`、app `src/app/rc_column_boundary_tests.rs`・`src/viewer/check_ratio.rs`、mcp `src/job/design_check.rs` |
