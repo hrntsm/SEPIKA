@@ -228,7 +228,7 @@ impl App {
                             .find(|m| m.elem == elem_id)
                             .map(|m| m.positions.as_slice())
                             .unwrap_or(&[]);
-                        ui.label(format!("検定結果（{} 位置）", positions.len()));
+                        ui.label(format!("検定結果（{} 件）", positions.len()));
                         for p in positions.iter().take(8) {
                             match &p.outcome {
                                 sepika_design_jp::CheckOutcome::Checked(cr) => {

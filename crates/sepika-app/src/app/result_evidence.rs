@@ -1940,7 +1940,7 @@ mod tests {
                 rendered.push_str(&rendered_text(output));
             }
             assert!(rendered.contains("未評価:"), "{rendered}");
-            assert!(rendered.contains("検定済み 0 位置"), "{rendered}");
+            assert!(rendered.contains("検定済み 0 件"), "{rendered}");
             assert_eq!(before, bytes(&app.core.scoped.results));
         }
     }
@@ -2111,7 +2111,7 @@ mod tests {
                         |ui| crate::design_view::design_table(ui, &mut app),
                     )));
                 }
-                assert!(rendered.contains("検定済み 0 位置"), "{rendered}");
+                assert!(rendered.contains("検定済み 0 件"), "{rendered}");
                 assert!(rendered.contains("未評価:"), "{rendered}");
                 assert_eq!(rendered.contains("1.200"), valid == Some(1.2), "{rendered}");
                 assert_eq!(before, bytes(&app.core.scoped.results));

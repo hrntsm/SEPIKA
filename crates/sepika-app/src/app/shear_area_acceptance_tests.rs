@@ -7,7 +7,7 @@ use sepika_design_jp::CheckOutcome;
 mod h_column_input;
 
 #[cfg(feature = "gui")]
-fn design_table_contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
+pub(super) fn design_table_contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
     match shape {
         egui::epaint::Shape::Text(text) => text.galley.text().contains(needle),
         egui::epaint::Shape::Vec(parts) => {
@@ -249,8 +249,7 @@ fn flat_bar_shear_reason_reaches_report_gui_and_saved_project() {
         let rendered = context.run_ui(Default::default(), |ui| {
             crate::design_view::design_table(ui, &mut reopened)
         });
-        for needle in ["検定済み 0 位置、検定不能 3 位置", "平鋼のせん断応力度"]
-        {
+        for needle in ["検定済み 0 件、検定不能 3 件", "平鋼のせん断応力度"] {
             assert!(
                 rendered
                     .shapes
@@ -362,7 +361,7 @@ fn check_h_column_combination_report(
             crate::design_view::design_table(ui, &mut reopened)
         });
         for needle in [
-            "検定済み 0 位置、検定不能 3 位置",
+            "検定済み 0 件、検定不能 3 件",
             "フランジ内の設計用公称応力度",
         ] {
             assert!(

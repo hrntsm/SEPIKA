@@ -230,7 +230,7 @@ fn lip_channel_egui_design_table_displays_unchecked_reason() {
     results.member_checks.truncate(1);
     results.member_checks[0].positions.truncate(1);
     let text = rendered_design_table(&mut app);
-    assert!(text.contains("検定済み 0 位置、検定不能 1 位置"), "{text}");
+    assert!(text.contains("検定済み 0 件、検定不能 1 件"), "{text}");
     assert!(text.contains("リップ溝形鋼"), "{text}");
     assert!(!text.contains("OK"), "{text}");
 }
@@ -289,7 +289,7 @@ fn lip_channel_egui_reports_statutory_failure_before_unsupported_stress_check() 
     );
     let text = rendered_design_table(&mut app);
     assert!(
-        text.contains("検定済み 1 位置、検定不能 0 位置、NG 1 件"),
+        text.contains("検定済み 1 件、検定不能 0 件、NG 1 件"),
         "{text}"
     );
     assert!(
@@ -362,7 +362,7 @@ fn mixed_egui_design_table_counts_only_checked_positions_as_checked() {
     let text = rendered_design_table(&mut app);
     assert!(
         text.contains(&format!(
-            "検定済み {checked} 位置、検定不能 {skipped} 位置、NG 0 件"
+            "検定済み {checked} 件、検定不能 {skipped} 件、NG 0 件"
         )),
         "{text}"
     );

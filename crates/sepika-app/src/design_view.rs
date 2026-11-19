@@ -324,7 +324,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         let checked_count = checks.iter().filter(|row| row.complete).count();
         let skipped_count = checks.len() - checked_count;
         ui.label(format!(
-            "検定済み {} 位置、検定不能 {} 位置、NG {} 件（部材IDクリックで 3D ビューにハイライト）",
+            "検定済み {} 件、検定不能 {} 件、NG {} 件（部材IDクリックで 3D ビューにハイライト）",
             checked_count, skipped_count, ng_count
         ));
     }

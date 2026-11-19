@@ -370,6 +370,41 @@ mod tests {
     }
 
     #[test]
+    fn cft_torsion_reports_unchecked_positions_and_independent_axial_ng() {
+        use crate::tests::cft_column_buckling_input::{cantilever, direct_lengths};
+        let mut model = cantilever(true, 8_000_000.0);
+        model.girder_torsion = sepika_core::model::GirderTorsionMode::Keep;
+        model.load_cases[0].nodal[0].values[5] = 1.0e6;
+        model.steel_design_attrs = vec![direct_lengths(ElemId(0), Some(6000.0), Some(6000.0))];
+        let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+            &model,
+            &JobParams {
+                load_case: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(summary["n_checks"], 6, "{summary}");
+        assert_eq!(summary["n_ng"], 3, "{summary}");
+        assert_eq!(summary["n_skipped"], 3, "{summary}");
+        assert_eq!(summary["all_members_checked_and_ok"], false);
+        assert!(summary["max_ratio"].as_f64().unwrap() > 1.0);
+        let skipped = summary["member_skipped"].as_array().unwrap();
+        assert_eq!(skipped.len(), 3, "{summary}");
+        for (row, xi) in skipped.iter().zip([0.0, 0.5, 1.0]) {
+            assert_eq!(row["elem"], 0);
+            assert_eq!(row["position"], xi);
+            let reason = row["reason"].as_str().unwrap();
+            assert!(
+                reason.contains("Mx") && reason.contains("同時に作用"),
+                "{row}"
+            );
+        }
+    }
+
+    #[test]
     fn cft_column_mcp_reports_missing_axis_for_case_and_combination() {
         use crate::tests::cft_column_buckling_input::{cantilever, direct_lengths};
         let mut model = cantilever(true, 100_000.0);
