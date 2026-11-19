@@ -160,16 +160,6 @@ fn test_valid_inputs_produce_no_issues() {
 
     let model = beam_model(src_section(), concrete_material());
     assert!(nonlinear_input_issues(&model).is_empty());
-
-    // この入力の構造種別は材料区分で決まるため、鋼断面形状だけでは鋼材扱いにできない。
-    let mut mat = concrete_material();
-    mat.fy = Some(235.0);
-    let model = beam_model(steel_h_section(), mat);
-    assert!(
-        nonlinear_input_issues(&model).is_empty(),
-        "{:?}",
-        nonlinear_input_issues(&model)
-    );
 }
 
 /// 主筋の材料が未割当、または材料はあっても fy が無い RC 部材はエラーとする

@@ -64,6 +64,7 @@ impl HingeView {
 }
 
 /// 解析で実際に使用した非線形特性を返す。
+/// 鋼断面にコンクリート主材料を用いた材端集中ばねの骨格は取得不能の理由を返す。
 ///
 /// `axial_force_compression_positive` `[N]` は材端集中ばねの N-M 線形相関に用いる
 /// 軸力。`MnInteraction::moment_limit` は絶対値のみを使うため引張正・圧縮正の
@@ -88,7 +89,9 @@ pub fn build_hinge_view(
             Some("壁上下の剛梁は弾性高剛性部材です。材料降伏は評価しません。".into());
         return Ok(view);
     }
-    if let Some(reason) = super::springs::rc_reference_target_issue(data, model) {
+    if let Some(reason) = super::steel_section_concrete_material_issue(data, model)
+        .or_else(|| super::springs::rc_reference_target_issue(data, model))
+    {
         let model_kind = match data.kind {
             ElementKind::Beam if resolves_to_concentrated_spring(data, model) => {
                 AnalysisHingeModel::ConcentratedSpring

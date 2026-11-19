@@ -3,7 +3,7 @@
 //! - [`nonlinear_input_issues`] — 部材耐力を算定できない設定不備の列挙
 //! - [`ensure_nonlinear_input`] — 不備があれば是正内容を示すエラーを返す
 
-use sepika_core::model::{ElementData, ElementKind, Model};
+use sepika_core::model::{ElementData, ElementKind, MaterialCategory, Model};
 use sepika_core::section_shape::SectionShape;
 
 /// エラーメッセージへ列挙する不備の最大件数（超過分は件数のみを示す）。
@@ -231,12 +231,13 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
     )
 }
 
-/// 非線形解析で部材耐力を算定できない設定不備を列挙する（是正内容を示す日本語文）。
+/// 非線形解析を開始できない部材の設定不備を列挙する（是正内容を示す日本語文）。
 ///
-/// 検査対象は、非線形解析で降伏を扱う要素に限る:
+/// 線材は、降伏の扱いにかかわらず鋼断面とコンクリート主材料の不一致を診断する。
+/// 非線形解析で降伏を扱う要素は、次の強度入力も検査する:
 /// - 耐震壁（`Wall`）: 面内せん断の終局強度 Qu
 ///   （[`crate::wall::wall_element::WallElement::wall_shear_capacity_issue`]）
-/// - 線材（`Beam` / `Fiber` / `MultiSpring`）: 曲げ・せん断の終局耐力に要する材料強度
+/// - 線材（`Beam` / `Fiber` / `MultiSpring`）: 断面と主材料の適合、曲げ・せん断の終局耐力に要する材料強度
 ///
 /// 壁上下の剛梁は弾性剛性・形状・質量に必要な入力だけを検査する。
 ///
@@ -264,6 +265,10 @@ fn nonlinear_input_issues_with_basis(
     let mut issues = Vec::new();
     let index = sepika_core::model::WallSideColumnIndex::build(model);
     for elem in &model.elements {
+        if let Some(issue) = steel_section_concrete_material_issue(elem, model) {
+            issues.push(issue);
+            continue;
+        }
         if let Some(issue) =
             wall_side_column_input_issue_with_index(elem, model, Some(kind), &index)
         {
@@ -397,6 +402,25 @@ pub fn ensure_nonlinear_input_with_basis(
     Err(format!("{}{}", head.join("\n"), more))
 }
 
+/// 鋼断面の線材がコンクリートを主材料に採用している場合に、部材・断面・材料を特定する。
+pub fn steel_section_concrete_material_issue(data: &ElementData, model: &Model) -> Option<String> {
+    if !data.kind.is_primary_frame_support() && !matches!(data.kind, ElementKind::Brace { .. }) {
+        return None;
+    }
+    let section = model.element_section(data)?;
+    if !section.shape.as_ref().is_some_and(SectionShape::is_steel) {
+        return None;
+    }
+    let material = model.element_material(data)?;
+    (material.category == MaterialCategory::Concrete).then(|| {
+        format!(
+            "部材 ID {} の鋼材断面「{}」（断面 ID {}）の主材料「{}」は区分がコンクリートで、鋼材ではありません。\
+             断面の主材料に鋼材を割り当ててください。",
+            data.id.0, section.name, section.id.0, material.name
+        )
+    })
+}
+
 /// 材料の区分が断面形状と矛盾する場合に、その内容を返す。
 /// 検出するのは次の 2 つに絞る。
 ///
@@ -407,7 +431,6 @@ fn category_mismatch_issue(
     sec: &sepika_core::model::Section,
     mat: &sepika_core::model::Material,
 ) -> Option<String> {
-    use sepika_core::model::MaterialCategory;
     if mat.category == MaterialCategory::Rebar {
         return Some(format!(
             "部材 ID {} の材料「{}」は区分が鉄筋です。\
@@ -756,7 +779,7 @@ pub fn ensure_rc_beam_reference_loads(
     Ok(())
 }
 
-/// 線材の E・採用 G、弾性梁の剛性・端部縮約が不正なら部材 ID 付きの理由を返す。
+/// 線材の鋼断面とコンクリート主材料の不一致、E・採用 G、弾性梁の剛性・端部縮約の不備を部材 ID 付きで返す。
 /// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
 pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
     check_elastic_stiffness(data, model, true)
@@ -772,6 +795,9 @@ fn check_elastic_stiffness(
     model: &Model,
     include_steel_slab: bool,
 ) -> Option<String> {
+    if let Some(reason) = steel_section_concrete_material_issue(data, model) {
+        return Some(reason);
+    }
     if matches!(data.kind, ElementKind::Brace { .. }) {
         return match crate::frame::truss::TrussElement::try_new(data, model) {
             Ok(member) => elastic_young_issue(data, member.e),

@@ -131,6 +131,11 @@ fn prepare_work_model(
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    if let Some(reason) = model.elements.iter().find_map(|element| {
+        sepika_element::factory::steel_section_concrete_material_issue(element, model)
+    }) {
+        return Err(JobError::InvalidInput(reason));
+    }
     model
         .validate_attached_slabs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;

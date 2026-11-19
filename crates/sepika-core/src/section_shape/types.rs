@@ -267,6 +267,31 @@ impl SectionShape {
         Ok(())
     }
 
+    /// 主材料に鋼材を用いる鋼断面形状か。SRC・CFT は含まない。
+    pub fn is_steel(&self) -> bool {
+        match self {
+            Self::SteelH { .. }
+            | Self::SteelBox { .. }
+            | Self::SteelAngle { .. }
+            | Self::SteelChannel { .. }
+            | Self::SteelTee { .. }
+            | Self::SteelPipe { .. }
+            | Self::SteelFlatBar { .. }
+            | Self::SteelRoundBar { .. }
+            | Self::SteelBuiltH { .. }
+            | Self::SteelLipChannel { .. } => true,
+            Self::RcBeamRect { .. }
+            | Self::RcColumnRect { .. }
+            | Self::RcColumnCircle { .. }
+            | Self::SrcBeamRect { .. }
+            | Self::SrcColumnRect { .. }
+            | Self::CftBox { .. }
+            | Self::CftPipe { .. }
+            | Self::RcWall { .. }
+            | Self::RcSlab { .. } => false,
+        }
+    }
+
     /// コンクリート系（RC / SRC / CFT）の断面形状か。
     pub fn is_concrete_like(&self) -> bool {
         matches!(
