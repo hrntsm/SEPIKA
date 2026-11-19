@@ -67,7 +67,7 @@ UNDEFINEDやPRECASTは、要求系列の定義がなければ参照先欠落、�
 
 | ST-Bridge 要素 | 読込 | 書出 | 再読込での保持・欠落・近似 | 保持条件・解析への適用と確認 |
 |---|:--:|:--:|---|---|
-| `StbColumn`（柱） | ✅ | ✅ | 回転・端偏心 | `StbSecColumn_*` を参照する。角度によらず柱用途として扱い、`rotate`・`condition_bottom`/`_top` を読む。端偏心の対応範囲は[基準位置と回転](02_ST-Bridge_形式.md#部材の基準位置と回転) |
+| `StbColumn`（柱） | ✅ | ✅ | 回転・端偏心 | `StbSecColumn_*` を参照する。角度によらず柱用途として扱い、`rotate`・`condition_bottom`/`_top` を読む。対応する一様断面のH形鋼S柱は `isReferenceDirection` による断面の向きも保持する。適用範囲は[基準位置と回転](02_ST-Bridge_形式.md#部材の基準位置と回転) |
 | `StbGirder`（大梁） | ✅ | ✅ | 回転・端偏心 | `StbSecBeam_*` を参照する。角度によらず大梁用途として扱い、`rotate`・`condition_start`/`_end` を読む。端偏心の対応範囲は[基準位置と回転](02_ST-Bridge_形式.md#部材の基準位置と回転) |
 | `StbBeam`（小梁） | ✅ | ✅ | 端点一致等の出力条件を満たす範囲 | `StbSecBeam_*` を参照する二次部材。床荷重・自重を支持先へ伝達する。支持条件・確認先は[小梁の支持と荷重伝達](#小梁の支持と荷重伝達) |
 | `StbPost`（間柱） | ✅ | ✅ | 端点一致等の出力条件を満たす範囲。端部負担率は欠落 | `StbSecColumn_*` を参照する二次部材。節点は標準の `id_node_bottom`/`id_node_top`。端点がモデル節点に一致しない場合の書き出し制限は小梁と同じ |

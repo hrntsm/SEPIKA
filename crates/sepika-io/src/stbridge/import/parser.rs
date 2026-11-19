@@ -63,6 +63,7 @@ pub(super) enum CurSec {
         floor: Option<String>,
         shape_name: Option<String>,
         grade: Option<String>,
+        column_reference_direction: Option<String>,
     },
     Rc {
         file_id: SectionKey,
@@ -219,6 +220,7 @@ pub(super) struct StbParser {
     pub(super) raw_stories: Vec<RawStory>,
     pub(super) raw_load_cases: Vec<RawLoadCase>,
     pub(super) pending_secs: Vec<PendingSec>,
+    pub(super) column_reference_directions: Vec<(SectionKey, String)>,
     pub(super) section_definitions: HashSet<SectionKey>,
     pub(super) pending_members: Vec<PendingMember>,
     pub(super) pending_secondaries: Vec<PendingSecondary>,
@@ -555,6 +557,12 @@ impl StbParser {
                     floor: floor_of(a),
                     shape_name: None,
                     grade: None,
+                    // 形鋼と部材の参照を解決するまで、取り込み済みとして報告できない。
+                    column_reference_direction: if tag == "StbSecColumn_S" {
+                        a.peek(super::REFERENCE_DIRECTION).cloned()
+                    } else {
+                        None
+                    },
                 };
             }
             t if t.starts_with("StbSecSteelColumn_")
@@ -570,10 +578,20 @@ impl StbParser {
                 };
                 match &mut self.cur {
                     CurSec::Steel {
-                        shape_name, grade, ..
+                        file_id,
+                        shape_name,
+                        grade,
+                        column_reference_direction,
+                        ..
                     } => {
                         if shape_name.is_none() {
                             *shape_name = sname;
+                            if let Some(value) = column_reference_direction
+                                .take()
+                                .filter(|_| t == "StbSecSteelColumn_S_Same")
+                            {
+                                self.column_reference_directions.push((*file_id, value));
+                            }
                         }
                         if grade.is_none() {
                             *grade = gr;
@@ -1095,6 +1113,7 @@ impl StbParser {
                     floor,
                     shape_name,
                     grade,
+                    ..
                 } = std::mem::replace(&mut self.cur, CurSec::None)
                 {
                     self.pending_secs.push(PendingSec {

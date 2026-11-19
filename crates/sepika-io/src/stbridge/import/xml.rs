@@ -65,6 +65,10 @@ impl Attrs {
         if !seen {
             self.read.borrow_mut().insert(k.to_string());
         }
+        self.peek(k)
+    }
+
+    pub(super) fn peek(&self, k: &str) -> Option<&String> {
         self.map.get(k)
     }
 

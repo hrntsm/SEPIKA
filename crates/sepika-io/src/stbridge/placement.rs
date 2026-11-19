@@ -122,11 +122,7 @@ pub(super) fn export_placement(
         .to_degrees()
         .rem_euclid(360.0);
     // 負の微小角の剰余は360度に丸まることがあり、標準の角度範囲を外れる。
-    let rotate_deg = if unequal && rotate_deg == 360.0 {
-        0.0
-    } else {
-        rotate_deg
-    };
+    let rotate_deg = if rotate_deg == 360.0 { 0.0 } else { rotate_deg };
     let shift = match shape {
         Some(shape) => {
             let axes = if unequal {
