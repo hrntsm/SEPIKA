@@ -5,7 +5,7 @@ use sepika_core::model::{
     LoadCase, LoadCaseKind, LoadCfg, LoadCombination, LocalAxis, Material, MaterialCategory, Model,
     Node, Story, DL_CASE_NAME,
 };
-use sepika_core::section_shape::SectionShape;
+use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 use sepika_element::factory::{
     build_hinge_view, ensure_nonlinear_input, nonlinear_input_issues_for_kind, AnalysisHingeModel,
     HingeView, StrengthBasis,
@@ -119,6 +119,28 @@ fn concrete(fy: Option<f64>) -> Material {
     }
 }
 
+fn steel() -> Material {
+    Material {
+        name: "SS400".into(),
+        category: MaterialCategory::Steel,
+        young: 205_000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        fc: None,
+        fy: Some(235.0),
+        ..concrete(None)
+    }
+}
+
+fn rebar() -> Material {
+    Material {
+        name: "SD295".into(),
+        category: MaterialCategory::Rebar,
+        fy: Some(295.0),
+        ..steel()
+    }
+}
+
 fn hinge_view(model: &Model) -> HingeView {
     build_hinge_view(
         &model.elements[0],
@@ -132,12 +154,13 @@ fn hinge_view(model: &Model) -> HingeView {
     .unwrap()
 }
 
-fn assert_material_mismatch(reason: &str) {
+fn assert_material_mismatch(reason: &str, material: &Material) {
     for expected in [
         "部材 ID 0",
         "鋼材断面「C1」",
-        "主材料「Fc24」",
-        "区分がコンクリート",
+        "断面 ID 0",
+        &format!("主材料「{}」", material.name),
+        &format!("区分が{}", material.category.label()),
         "鋼材を割り当て",
     ] {
         assert!(reason.contains(expected), "{reason}");
@@ -146,10 +169,10 @@ fn assert_material_mismatch(reason: &str) {
 }
 
 #[test]
-fn 鋼断面とコンクリート主材料の不一致は自重方式とfyによらず診断する() {
+fn 鋼断面と主材料の区分不一致は自重方式とfyによらず診断する() {
     for damper_weight in [false, true] {
-        for fy in [None, Some(100.0)] {
-            let mut model = cantilever(concrete(fy), damper_weight);
+        for material in [rebar(), concrete(None), concrete(Some(100.0))] {
+            let mut model = cantilever(material.clone(), damper_weight);
             model.validate().unwrap();
 
             let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
@@ -158,7 +181,13 @@ fn 鋼断面とコンクリート主材料の不一致は自重方式とfyによ
             let JobError::InvalidInput(reason) = error else {
                 panic!("{error}");
             };
-            assert_material_mismatch(&reason);
+            assert_material_mismatch(&reason, &material);
+
+            let error = compute_linear_static(model.clone(), DL).unwrap_err();
+            let JobError::Prepare(reason) = error else {
+                panic!("{error}");
+            };
+            assert_material_mismatch(&reason, &material);
 
             for error in [
                 Analysis::prepare(&model).err().unwrap(),
@@ -167,40 +196,31 @@ fn 鋼断面とコンクリート主材料の不一致は自重方式とfyによ
                 let SolveError::InvalidInput(reason) = error else {
                     panic!("{error}");
                 };
-                assert_material_mismatch(&reason);
+                assert_material_mismatch(&reason, &material);
             }
             let dofmap = DofMap::build(&model);
             let reducer = Reducer::build(&model, &dofmap);
             assert_material_mismatch(
                 &pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 24, 5.0).unwrap_err(),
+                &material,
             );
 
-            assert_material_mismatch(&ensure_nonlinear_input(&model).unwrap_err());
+            assert_material_mismatch(&ensure_nonlinear_input(&model).unwrap_err(), &material);
             for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
                 let issues = nonlinear_input_issues_for_kind(&model, kind);
                 assert_eq!(issues.len(), 1, "{issues:?}");
-                assert_material_mismatch(&issues[0]);
+                assert_material_mismatch(&issues[0], &material);
             }
             let view = hinge_view(&model);
             assert!(matches!(view.model, AnalysisHingeModel::ConcentratedSpring));
             assert!(view.backbone.is_none() && view.total_backbone.is_none());
-            assert_material_mismatch(&view.unavailability_reason.unwrap());
+            assert_material_mismatch(&view.unavailability_reason.unwrap(), &material);
         }
     }
 }
 
 #[test]
 fn 鋼主材料を割り当てると自重方式ごとに重力を伝え骨格と解析結果を得られる() {
-    let steel = Material {
-        name: "SS400".into(),
-        category: MaterialCategory::Steel,
-        young: 205_000.0,
-        poisson: 0.3,
-        density: 7.85e-9,
-        fc: None,
-        fy: Some(235.0),
-        ..concrete(None)
-    };
     let settings = AnalysisSettings {
         push_steps: 24,
         push_use_max_disp: true,
@@ -213,7 +233,7 @@ fn 鋼主材料を割り当てると自重方式ごとに重力を伝え骨格�
     let self_weight_at_top_n = 919.392;
     for (damper_weight, expected_compression_n) in [(false, self_weight_at_top_n), (true, 10_000.0)]
     {
-        let mut model = cantilever(steel.clone(), damper_weight);
+        let mut model = cantilever(steel(), damper_weight);
         prepare_model_for_analysis(&mut model, &settings, None).unwrap();
         let result = compute_linear_static(model.clone(), DL).unwrap();
         let axial_n = result.member_forces[0].1.at[0].1[0];
@@ -230,6 +250,65 @@ fn 鋼主材料を割り当てると自重方式ごとに重力を伝え骨格�
             result.termination,
             PushoverTermination::TargetReached
         ));
+    }
+}
+
+#[test]
+fn rcとsrcの断面の配筋に鉄筋を割り当てると解析できる() {
+    let rebar_layout = RcRectColumnRebar {
+        main_dia: 19.0,
+        x: vec![3],
+        y: vec![3],
+        cover: 40.0,
+        hoop: RectColumnHoop {
+            dia: 10.0,
+            pitch: 100.0,
+            legs_x: 2,
+            legs_y: 2,
+        },
+    };
+    let rc = SectionShape::RcColumnRect {
+        b: 400.0,
+        d: 600.0,
+        rebar: rebar_layout.clone(),
+    };
+    let src = SectionShape::SrcColumnRect {
+        b: 400.0,
+        d: 600.0,
+        rebar: rebar_layout,
+        steel_height: 300.0,
+        steel_width: 150.0,
+        steel_web_thick: 6.5,
+        steel_flange_thick: 9.0,
+    };
+    // 0.4 m × 0.6 m × 3 m、入力密度 2.4 t/m³ と重力加速度 9.80665 m/s² による自重の半分。
+    let self_weight_at_top_n = 8_472.945_6;
+    for shape in [rc, src] {
+        let mut model = cantilever(concrete(None), false);
+        let is_src = matches!(shape, SectionShape::SrcColumnRect { .. });
+        let mut section = shape.to_section(SectionId(0), "C1".into());
+        section.frame_use = Some(FrameSectionUse::Column);
+        section.material = Some(MaterialId(0));
+        section.rebar_material = Some(MaterialId(1));
+        section.shear_rebar_material = Some(MaterialId(1));
+        model.materials.push(Material {
+            id: MaterialId(1),
+            ..rebar()
+        });
+        if is_src {
+            section.steel_material = Some(MaterialId(2));
+            model.materials.push(Material {
+                id: MaterialId(2),
+                ..steel()
+            });
+        }
+        model.sections[0] = section;
+
+        prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+        ensure_nonlinear_input(&model).unwrap();
+        let result = compute_linear_static(model, DL).unwrap();
+        let axial_n = result.member_forces[0].1.at[0].1[0];
+        assert!((axial_n + self_weight_at_top_n).abs() < 1e-6, "{axial_n}");
     }
 }
 
