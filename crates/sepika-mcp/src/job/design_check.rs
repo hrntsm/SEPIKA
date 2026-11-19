@@ -551,6 +551,40 @@ mod tests {
     }
 
     #[test]
+    fn brb_target_mismatch_is_unchecked_in_mcp_for_column_and_girder() {
+        use sepika_core::model::FrameSectionUse;
+
+        for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+            let model = brb_input::pipe_with_brb_attr(frame_use);
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!()
+            };
+            assert_eq!(summary["n_checks"], 3, "{frame_use:?}: {summary}");
+            assert_eq!(summary["n_skipped"], 3, "{summary}");
+            assert_eq!(summary["n_ng"], 0, "{summary}");
+            assert!(summary["max_ratio"].is_null(), "{summary}");
+            assert_eq!(summary["all_members_checked_and_ok"], false, "{summary}");
+            assert_eq!(summary["all_checked_and_ok"], false, "{summary}");
+            let skipped = summary["member_skipped"].as_array().unwrap();
+            assert_eq!(skipped.len(), 3);
+            for (row, pos) in skipped.iter().zip([0.0, 0.5, 1.0]) {
+                assert_eq!(row["elem"], model.elements[0].id.0);
+                assert_eq!(row["position"].as_f64(), Some(pos));
+                let reason = row["reason"].as_str().unwrap();
+                assert!(reason.contains("BRB属性の参照先"), "{row}");
+                assert!(reason.contains("断面用途がブレース"), "{row}");
+            }
+        }
+    }
+
+    #[test]
     fn rc_beam_asymmetric_mcp_case_and_combination_report_unchecked() {
         for asymmetric in [false, true] {
             let model = asymmetric_beam_input::model(asymmetric);

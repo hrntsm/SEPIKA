@@ -1,4 +1,5 @@
 use super::*;
+use sepika_core::model::{FrameSectionUse, Model};
 use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
 use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
 
@@ -9,6 +10,14 @@ pub(crate) fn analyzed_app(length_reduction: Option<f64>) -> App {
     let mut model = input::model();
     model.brb_attrs[0].length_reduction = length_reduction;
     model.brb_attrs[0].critical_length = Some(5000.0);
+    analyze(model)
+}
+
+pub(crate) fn analyzed_pipe_app(frame_use: FrameSectionUse) -> App {
+    analyze(input::pipe_with_brb_attr(frame_use))
+}
+
+fn analyze(model: Model) -> App {
     let mut app = App::default();
     app.load_model(model);
     app.run_preparation();
@@ -72,6 +81,75 @@ fn brb_product_model_and_check_survive_project_reload() {
             expected,
             "{name}"
         );
+        loaded.run_design_check();
+        assert_eq!(
+            serde_json::to_value(&loaded.current_design_results().unwrap().member_checks).unwrap(),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn brb_target_mismatch_survives_reload_and_invalidates_legacy_pass() {
+    for (frame_use, name) in [
+        (FrameSectionUse::Column, "brb-on-column"),
+        (FrameSectionUse::Girder, "brb-on-girder"),
+    ] {
+        let mut app = analyzed_pipe_app(frame_use);
+        let elem = app.core.model.elements[0].id;
+        let bundle = app.current_design_results().unwrap();
+        assert_eq!(bundle.member_checks.len(), 1, "{name}");
+        let checks = &bundle.member_checks[0];
+        assert_eq!(checks.elem, elem);
+        assert_eq!(checks.positions.len(), 3, "{name}");
+        for position in &checks.positions {
+            assert!(
+                matches!(&position.outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("BRB属性の参照先") && reason.contains("断面用途がブレース")),
+                "{name}: {:?}",
+                position.outcome
+            );
+        }
+        let expected = serde_json::to_value(&bundle.member_checks).unwrap();
+        let path = std::env::temp_dir().join(format!("sepika-{name}-{}.ovika", std::process::id()));
+        app.save_project_to(path.clone());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+        assert!(loaded.current_static().is_some(), "{name}");
+        assert_eq!(
+            serde_json::to_value(&loaded.current_design_results().unwrap().member_checks).unwrap(),
+            expected,
+            "{name}"
+        );
+
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        for position in &mut bundle.member_checks[0].positions {
+            position.outcome = CheckOutcome::Checked(CheckResult {
+                basis: "座屈拘束ブレースの製品検定".into(),
+                detail: String::new(),
+                components: vec![CheckComponent {
+                    kind: CheckKind::Axial,
+                    ratio: 0.5,
+                    detail: String::new(),
+                }],
+            });
+        }
+        let (mut loaded, path) = super::result_contract_tests::restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(69),
+            &format!("{name}-old-design"),
+        );
+        std::fs::remove_file(path).unwrap();
+        assert!(loaded.current_static().is_some(), "{name}");
+        assert!(loaded.current_design_results().is_none(), "{name}");
         loaded.run_design_check();
         assert_eq!(
             serde_json::to_value(&loaded.current_design_results().unwrap().member_checks).unwrap(),
