@@ -88,6 +88,7 @@ fn base(wall: bool, dedicated: &SectionShape) -> Model {
     numeric.id = SectionId(3);
     numeric.name = "数値入力板".into();
     numeric.shape = None;
+    numeric.property_basis = SectionPropertyBasis::default();
     let mut model = Model {
         materials: [MaterialCategory::Concrete, MaterialCategory::Rebar]
             .into_iter()
