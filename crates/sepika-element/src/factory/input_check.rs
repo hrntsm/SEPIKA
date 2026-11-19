@@ -233,7 +233,7 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 
 /// 非線形解析を開始できない部材の設定不備を列挙する（是正内容を示す日本語文）。
 ///
-/// 線材は、降伏の扱いにかかわらず鋼断面とコンクリート主材料の不一致を診断する。
+/// 線材は、降伏の扱いにかかわらず鋼断面と主材料の区分の不一致を診断する。
 /// 非線形解析で降伏を扱う要素は、次の強度入力も検査する:
 /// - 耐震壁（`Wall`）: 面内せん断の終局強度 Qu
 ///   （[`crate::wall::wall_element::WallElement::wall_shear_capacity_issue`]）
@@ -265,7 +265,7 @@ fn nonlinear_input_issues_with_basis(
     let mut issues = Vec::new();
     let index = sepika_core::model::WallSideColumnIndex::build(model);
     for elem in &model.elements {
-        if let Some(issue) = steel_section_concrete_material_issue(elem, model) {
+        if let Some(issue) = steel_section_primary_material_issue(elem, model) {
             issues.push(issue);
             continue;
         }
@@ -402,8 +402,8 @@ pub fn ensure_nonlinear_input_with_basis(
     Err(format!("{}{}", head.join("\n"), more))
 }
 
-/// 鋼断面の線材がコンクリートを主材料に採用している場合に、部材・断面・材料を特定する。
-pub fn steel_section_concrete_material_issue(data: &ElementData, model: &Model) -> Option<String> {
+/// 鋼断面の線材の主材料が鉄筋またはコンクリートの場合に、部材・断面・材料を特定する。
+pub fn steel_section_primary_material_issue(data: &ElementData, model: &Model) -> Option<String> {
     if !data.kind.is_primary_frame_support() && !matches!(data.kind, ElementKind::Brace { .. }) {
         return None;
     }
@@ -412,11 +412,11 @@ pub fn steel_section_concrete_material_issue(data: &ElementData, model: &Model) 
         return None;
     }
     let material = model.element_material(data)?;
-    (material.category == MaterialCategory::Concrete).then(|| {
+    (material.category != MaterialCategory::Steel).then(|| {
         format!(
-            "部材 ID {} の鋼材断面「{}」（断面 ID {}）の主材料「{}」は区分がコンクリートで、鋼材ではありません。\
+            "部材 ID {} の鋼材断面「{}」（断面 ID {}）の主材料「{}」は区分が{}で、鋼材ではありません。\
              断面の主材料に鋼材を割り当ててください。",
-            data.id.0, section.name, section.id.0, material.name
+            data.id.0, section.name, section.id.0, material.name, material.category.label()
         )
     })
 }
@@ -779,7 +779,7 @@ pub fn ensure_rc_beam_reference_loads(
     Ok(())
 }
 
-/// 線材の鋼断面とコンクリート主材料の不一致、E・採用 G、弾性梁の剛性・端部縮約の不備を部材 ID 付きで返す。
+/// 線材の鋼断面と主材料の区分の不一致、E・採用 G、弾性梁の剛性・端部縮約の不備を部材 ID 付きで返す。
 /// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
 pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
     check_elastic_stiffness(data, model, true)
@@ -795,7 +795,7 @@ fn check_elastic_stiffness(
     model: &Model,
     include_steel_slab: bool,
 ) -> Option<String> {
-    if let Some(reason) = steel_section_concrete_material_issue(data, model) {
+    if let Some(reason) = steel_section_primary_material_issue(data, model) {
         return Some(reason);
     }
     if matches!(data.kind, ElementKind::Brace { .. }) {

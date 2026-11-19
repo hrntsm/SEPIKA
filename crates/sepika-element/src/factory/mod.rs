@@ -28,7 +28,7 @@ pub use input_check::{
     ensure_nonlinear_input_with_basis, ensure_rc_beam_reference_loads,
     ensure_wall_side_column_analysis, nodal_mass_frame_input_issue, nonlinear_input_issues,
     nonlinear_input_issues_for_kind, rc_beam_reference_input_issue,
-    steel_section_concrete_material_issue, wall_side_column_input_issue,
+    steel_section_primary_material_issue, wall_side_column_input_issue,
     wall_side_column_input_issue_with_index, wall_side_column_issue_message,
 };
 pub use regime::{resolve_force_regime, ResolvedRegime};
