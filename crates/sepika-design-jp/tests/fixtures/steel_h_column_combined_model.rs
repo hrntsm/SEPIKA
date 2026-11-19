@@ -3,7 +3,7 @@ use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::*;
 use sepika_core::section_shape::SectionShape;
 
-pub fn cantilever(weak_shear_n: f64) -> Model {
+pub fn cantilever(axial_n: f64, strong_moment_nmm: f64, weak_shear_n: f64) -> Model {
     let mut section = SectionShape::SteelH {
         height: 400.0,
         width: 200.0,
@@ -70,7 +70,7 @@ pub fn cantilever(weak_shear_n: f64) -> Model {
             kind: LoadCaseKind::Dead,
             nodal: vec![NodalLoad::manual(
                 NodeId(1),
-                [0.0, weak_shear_n, 77_000.0, 0.0, 167e6, 0.0],
+                [0.0, weak_shear_n, axial_n, 0.0, strong_moment_nmm, 0.0],
             )],
             member: vec![],
         }],

@@ -235,7 +235,8 @@ fn check_compression_slenderness(
 
 /// 鋼部材の許容応力度検定。
 /// 平鋼の柱・大梁で片方向でもせん断力が非零なら、理由付きの未算定とする。
-/// H形鋼柱で弱軸せん断・強軸曲げ・引張軸力が同時に作用する位置も理由付きで未算定とする。
+/// H形鋼柱で弱軸せん断と強軸曲げが同時に作用する位置は理由付きで未算定とする。
+/// 圧縮・軸力なしでは確認済みの不適合を保持し、組合せの未算定理由を併記する。
 /// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
 
@@ -285,6 +286,14 @@ impl SteelDesign {
         } else {
             None
         };
+        let h_combined_reason = (!secondary_post
+            && ctx.kind == MemberKind::Column
+            && torsion_reason.is_none()
+            && forces.n <= 0.0
+            && forces.qz != 0.0
+            && forces.mz != 0.0
+            && shape_of(sec).0 == ShapeCategory::H)
+            .then_some("圧縮軸力または軸力なしのH形鋼柱に弱軸せん断と強軸曲げが同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度は未算定です");
         let lambda = match check_compression_slenderness(forces, sec, ctx, torsion_reason) {
             Ok(Some(lambda)) if !secondary_post => lambda,
             Ok(_) => crate::effective_slenderness(
@@ -301,6 +310,14 @@ impl SteelDesign {
                 {
                     reason.push('。');
                     reason.push_str(torsion_reason);
+                }
+                if let Some(h_combined_reason) = h_combined_reason {
+                    let detail = match &mut outcome {
+                        CheckOutcome::Checked(result) => &mut result.basis,
+                        CheckOutcome::Skipped { reason } => reason,
+                    };
+                    detail.push('。');
+                    detail.push_str(h_combined_reason);
                 }
                 return outcome;
             }
@@ -411,19 +428,34 @@ impl SteelDesign {
         }
         let f = match crate::material_strength::section_steel_f(sec, Some(mat)) {
             Ok(f) => f,
-            Err(reason) => return CheckOutcome::Skipped { reason },
+            Err(reason) => {
+                let reason = match h_combined_reason {
+                    Some(combined) => format!("{reason}。{combined}"),
+                    None => reason,
+                };
+                return CheckOutcome::Skipped { reason };
+            }
         };
         let term = ctx.term;
 
         let cr = match ctx.kind {
-            MemberKind::Girder => beam::check_beam(forces, sec, mat, ctx, f, term, lambda),
-            MemberKind::Column => column::check_column(forces, sec, mat, ctx, f, term, lambda),
-            MemberKind::Brace => Ok(brace::check_brace(forces, sec, mat, ctx, f, term, lambda)),
+            MemberKind::Girder => {
+                beam::check_beam(forces, sec, mat, ctx, f, term, lambda).map(CheckOutcome::Checked)
+            }
+            MemberKind::Column => {
+                column::check_column(forces, sec, mat, ctx, f, lambda, h_combined_reason)
+            }
+            MemberKind::Brace => Ok(CheckOutcome::Checked(brace::check_brace(
+                forces, sec, mat, ctx, f, term, lambda,
+            ))),
         };
         match cr {
-            Ok(result) => CheckOutcome::Checked(result),
+            Ok(outcome) => outcome,
             Err(reason) => CheckOutcome::Skipped {
-                reason: format!("鋼横座屈検定: {reason}"),
+                reason: match h_combined_reason {
+                    Some(combined) => format!("鋼横座屈検定: {reason}。{combined}"),
+                    None => format!("鋼横座屈検定: {reason}"),
+                },
             },
         }
     }

@@ -290,10 +290,20 @@ fn flat_bar_shear_reason_reaches_report_gui_and_saved_project() {
 
 #[test]
 fn h_column_combination_reason_reaches_design_table_report_and_saved_project() {
+    check_h_column_combination_report(77_000.0, 167e6, 365_000.0, "1454");
+    check_h_column_combination_report(-77_000.0, 50e6, 2_000.0, "1483");
+}
+
+fn check_h_column_combination_report(
+    axial_n: f64,
+    strong_moment_nmm: f64,
+    weak_shear_n: f64,
+    issue: &str,
+) {
     use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
     use sepika_design_jp::{CheckComponent, CheckKind, CheckResult};
 
-    let model = h_column_input::cantilever(365_000.0);
+    let model = h_column_input::cantilever(axial_n, strong_moment_nmm, weak_shear_n);
     let mut app = App::default();
     assert!(app.load_model(model));
     app.run_linear_static(LoadCaseId(0));
@@ -333,8 +343,10 @@ fn h_column_combination_reason_reaches_design_table_report_and_saved_project() {
         rmp_serde::to_vec_named(&results.member_checks).unwrap()
     };
     let expected = assert_unchecked(&app);
-    let path =
-        std::env::temp_dir().join(format!("sepika-1454-h-column-{}.ovika", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "sepika-{issue}-h-column-{}.ovika",
+        std::process::id()
+    ));
     app.save_project_to(path.clone());
     assert!(app.core.scoped.last_error.is_none());
     let mut reopened = App::default();
@@ -379,7 +391,7 @@ fn h_column_combination_reason_reaches_design_table_report_and_saved_project() {
         &app,
         Some(ANALYSIS_CONTRACT_VERSION),
         Some(DESIGN_CONTRACT_VERSION - 1),
-        "h-column-combination-1454-old",
+        &format!("h-column-combination-{issue}-old"),
     );
     std::fs::remove_file(path).unwrap();
     assert_eq!(
@@ -390,4 +402,31 @@ fn h_column_combination_reason_reaches_design_table_report_and_saved_project() {
     assert!(!crate::summary::build_report_csv(&old).contains(legacy_basis));
     old.run_design_check();
     assert_eq!(assert_unchecked(&old), expected);
+}
+
+#[test]
+fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
+    let mut app = App::default();
+    assert!(app.load_model(h_column_input::cantilever(-77_000.0, 500e6, 365_000.0)));
+    app.run_linear_static(LoadCaseId(0));
+    let results = app.current_design_results().unwrap();
+    let csv = crate::summary::build_report_csv(&app);
+    for position in &results.member_checks[0].positions {
+        let CheckOutcome::Checked(result) = &position.outcome else {
+            panic!("{:?}", position.outcome);
+        };
+        assert!(!result.ok(), "{result:?}");
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(
+            result.components[0].kind,
+            sepika_design_jp::CheckKind::AxialBending
+        );
+        assert!(
+            csv.lines()
+                .any(|line| line.starts_with(&format!("0,{:.3},", position.xi))
+                    && line.contains(",NG,")
+                    && line.contains("同一点の組合せ応力度は未算定")),
+            "{csv}"
+        );
+    }
 }
