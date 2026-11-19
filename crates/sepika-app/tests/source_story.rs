@@ -494,48 +494,78 @@ fn empty_import_and_last_source_delete_stay_empty_through_edit_prepare_save_and_
 }
 
 #[test]
-fn main_native_model_without_source_fields_keeps_messagepack_export_fallback() {
-    let mut m = model();
-    m.stb_strengths = Default::default();
-    m.source_stories.clear();
-    for story in &mut m.stories {
-        story.source_story = None;
+fn native_model_without_source_fields_exports_analysis_story_membership() {
+    let bytes = rmp_serde::to_vec_named(&model()).unwrap();
+    let mut payload: serde_json::Value = rmp_serde::from_slice(&bytes).unwrap();
+    let fields = payload.as_object_mut().unwrap();
+    for field in [
+        "source_stories",
+        "source_stories_initialized",
+        "stb_node_ids",
+        "stb_strengths",
+    ] {
+        assert!(fields.remove(field).is_some(), "{field}");
     }
-    m.source_stories_initialized = false;
-    m.stb_node_ids.clear();
-    let mut bytes = rmp_serde::to_vec(&m).unwrap();
-    assert_eq!(bytes.pop(), Some(0xc0));
-    assert_eq!(bytes.pop(), Some(0xc0));
+    for story in fields["stories"].as_array_mut().unwrap() {
+        assert!(story
+            .as_object_mut()
+            .unwrap()
+            .remove("source_story")
+            .is_some());
+    }
+
+    let bytes = rmp_serde::to_vec_named(&payload).unwrap();
+    let native: Model = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(native.source_stories.is_empty());
+    assert!(native.stb_node_ids.is_empty());
+    assert!(!native.source_stories_initialized);
     assert_eq!(
-        m.stb_strengths,
+        native.stb_strengths,
         sepika_core::model::StbStrengthInput::default()
     );
-    let strengths = rmp_serde::to_vec(&m.stb_strengths).unwrap();
-    assert!(bytes.ends_with(&strengths));
-    bytes.truncate(bytes.len() - strengths.len());
-    assert_eq!(bytes.pop(), Some(0xc2));
-    assert_eq!(bytes.pop(), Some(0x90));
-    assert_eq!(bytes.pop(), Some(0x90));
-    assert_eq!(bytes[0], 0xdc);
-    let fields = u16::from_be_bytes([bytes[1], bytes[2]]) - 6;
-    bytes[1..3].copy_from_slice(&fields.to_be_bytes());
-    let restored: Model = rmp_serde::from_slice(&bytes).unwrap();
-    assert!(!restored.source_stories_initialized);
+
+    let exported = sepika_io::stbridge::export_stbridge(&native).unwrap();
+    let restored = sepika_io::stbridge::import_stbridge(&exported).unwrap();
+    for (name, height, node) in [
+        ("B1", -3000.0, NodeId(0)),
+        ("1F", 0.0, NodeId(1)),
+        ("RF", 6000.0, NodeId(3)),
+    ] {
+        let story = restored
+            .source_stories
+            .iter()
+            .find(|story| story.name == name)
+            .unwrap();
+        assert_eq!(story.height, height);
+        assert_eq!(story.node_ids.len(), 1, "{name}");
+        assert_eq!(story.node_ids[0].node, Some(node), "{name}");
+    }
+}
+
+#[test]
+fn ovika_roundtrip_preserves_the_steel_girder_composite_connection() {
+    use sepika_core::ids::ElemId;
+    use sepika_core::model::SlabCompositeConnection;
+
+    let mut model = sepika_app::sample::portal_frame();
+    let girder = ElemId(2);
+    assert!(model.is_steel_h_girder(model.element(girder).unwrap()));
     assert_eq!(
-        restored.stb_strengths,
-        sepika_core::model::StbStrengthInput::default()
+        model.set_slab_composite_connection(girder, SlabCompositeConnection::NonComposite),
+        SlabCompositeConnection::Unconfirmed
     );
-    assert!(restored.eq_ignoring_dofmap(&m));
+
+    let path =
+        std::env::temp_dir().join(format!("sepika-composite-{}.ovika", uuid::Uuid::new_v4()));
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+
+    assert!(restored.is_steel_h_girder(restored.element(girder).unwrap()));
     assert_eq!(
-        sepika_io::stbridge::export_stbridge(&restored).unwrap(),
-        sepika_io::stbridge::export_stbridge(&m).unwrap()
+        restored.slab_composite_connection(girder),
+        SlabCompositeConnection::NonComposite
     );
-    assert!(!sepika_io::stbridge::import_stbridge(
-        &sepika_io::stbridge::export_stbridge(&restored).unwrap()
-    )
-    .unwrap()
-    .source_stories
-    .is_empty());
 }
 
 #[test]

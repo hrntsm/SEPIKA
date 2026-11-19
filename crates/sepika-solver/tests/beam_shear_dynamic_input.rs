@@ -72,6 +72,89 @@ fn cantilever(kind: ElementKind) -> Model {
 }
 
 #[test]
+fn nodal_mass_assembly_preserves_the_mass_before_the_girder_connection_is_confirmed() {
+    let mut model = cantilever(ElementKind::Beam);
+    model.nodes[1].coord = [5000.0, 0.0, 0.0];
+    model.nodes[1].mass = Some([2.75, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+    model.sections[0] = SectionShape::SteelH {
+        root_r: Some(0.0),
+        height: 400.0,
+        width: 200.0,
+        web_thick: 8.0,
+        flange_thick: 13.0,
+    }
+    .to_section(SectionId(0), "H-400×200".into());
+    model.sections[0].material = Some(MaterialId(0));
+    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    model.materials.push(Material {
+        id: MaterialId(1),
+        name: "Fc21".into(),
+        category: MaterialCategory::Concrete,
+        young: 21_000.0,
+        fc: Some(21.0),
+        ..model.materials[0].clone()
+    });
+    model.sections.push(Section {
+        material: Some(MaterialId(1)),
+        ..SectionShape::RcSlab { thickness: 100.0 }.to_section(SectionId(1), "S10".into())
+    });
+    for (id, x) in [(2, 5000.0), (3, 0.0)] {
+        model.nodes.push(Node {
+            id: NodeId(id),
+            coord: [x, 2000.0, 0.0],
+            ..model.nodes[0].clone()
+        });
+    }
+    model.add_enclosed_slab_from_nodes(
+        &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+        SlabPlate {
+            section: Some(SectionId(1)),
+            loads: Vec::new(),
+            usage: None,
+            method: DistributionMethod::TriTrapezoid,
+            one_way: None,
+        },
+    );
+    let other_supports: Vec<_> = model.elements[1..]
+        .iter_mut()
+        .map(|elem| {
+            elem.section = Some(SectionId(0));
+            elem.local_axis.ref_vector = [0.0, 0.0, 1.0];
+            elem.id
+        })
+        .collect();
+    for id in other_supports {
+        model.set_slab_composite_connection(id, SlabCompositeConnection::NonComposite);
+    }
+
+    let dofmap = DofMap::build(&model);
+    for option in [MassOption::Lumped, MassOption::Consistent] {
+        let m = assemble_global_m(&model, &dofmap, option)
+            .unwrap()
+            .to_dense();
+        assert_eq!(m[(0, 0)], 2.75);
+    }
+    let reducer = Reducer::build(&model, &dofmap);
+    assert!(matches!(
+        solve_eigen(&model, &dofmap, &reducer, 1),
+        Err(SolveError::InvalidInput(reason)) if reason.contains("RC床板との接合条件が未確認")
+    ));
+    model.mass_method = MassMethod::CorrectedLumped;
+    assert!(matches!(
+        assemble_global_m(&model, &dofmap, MassOption::Consistent),
+        Err(SolveError::InvalidInput(reason)) if reason.contains("RC床板との接合条件が未確認")
+    ));
+
+    model.mass_method = MassMethod::LumpedOnly;
+    model.materials[0].shear = Some(0.0);
+    assert!(matches!(
+        assemble_global_m(&model, &dofmap, MassOption::Consistent),
+        Err(SolveError::InvalidInput(reason)) if reason.contains("せん断弾性係数 G")
+    ));
+}
+
+#[test]
 fn public_dynamic_entries_reject_invalid_beam_g_before_initial_resume_and_cached_solver_builds() {
     for kind in [
         ElementKind::Beam,

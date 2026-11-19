@@ -16,6 +16,7 @@
 //! FL と SL を一致させた階入力を解析用 fixture として明示する。実建物の ΔSL を推測した検証とはしない。
 //! 解析用fixtureの矩形RC梁は床上面へ梁上端を揃え、節点材軸から-D/2 mmと明示する。
 //! その他の梁は節点材軸から0 mmと明示する。
+//! 既存解析の比較条件としてH形鋼大梁の床板合成近似を明示し、実建物の接合条件とは区別する。
 //! 荷重は ST-Bridge に含まれないため、取り込み時に標準荷重ケース
 //! （DL・LL(架構用)・LL(地震用)・EX・EY）が自動生成される。支点情報も
 //! 含まれないため、最下レベルの柱脚 12 箇所がピン支点として自動設定される。
@@ -493,6 +494,16 @@ fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
     }
 }
 
+fn declare_analysis_slab_composite(model: &mut sepika_core::model::Model) {
+    use sepika_core::model::SlabCompositeConnection;
+    model.slab_composite_attrs = model
+        .elements
+        .iter()
+        .filter(|e| model.is_steel_h_girder(e))
+        .map(|e| (e.id, SlabCompositeConnection::Confirmed))
+        .collect();
+}
+
 fn imported() -> App {
     let mut app = App::default();
     // 解析結果の完全再現性を確保する（スナップショット比較の前提）。
@@ -508,6 +519,7 @@ fn imported() -> App {
     declare_analysis_story_levels(&mut app.core.model);
     declare_analysis_beam_placements(&mut app.core.model);
     declare_analysis_slab_placements(&mut app.core.model);
+    declare_analysis_slab_composite(&mut app.core.model);
     app
 }
 
@@ -2453,6 +2465,8 @@ fn stbridge_roundtrip_is_reanalyzable() {
     }
     declare_analysis_story_levels(&mut reimported.core.model);
     declare_analysis_slab_placements(&mut reimported.core.model);
+    assert!(reimported.core.model.slab_composite_attrs.is_empty());
+    declare_analysis_slab_composite(&mut reimported.core.model);
     reimported.run_preparation();
     assert_eq!(
         reimported.core.model.floor_regions.len(),

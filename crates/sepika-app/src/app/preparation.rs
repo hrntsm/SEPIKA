@@ -55,8 +55,7 @@ pub struct PreparationResult {
     /// 鋼断面の幅厚比・部材ランク（断面 × 部材用途 × 材料でまとめる）。
     pub width_thickness: Vec<PrepWidthThicknessRow>,
     /// 部材単位の剛性割増し（スラブ協力幅・合成梁・壁エレメント上下大梁）と
-    /// SRC/CFT 等価断面。割増し・等価換算・既定値フォールバックのいずれもない
-    /// 部材は含まない。
+    /// SRC/CFT 等価断面。H形鋼大梁は床板合成を算入しない場合も含む。
     pub member_stiffness: Vec<PrepMemberStiffnessRow>,
     /// 剛性割増し・等価換算の算定対象となった梁要素の総数。
     pub member_stiffness_candidates: usize,
@@ -89,14 +88,27 @@ pub struct PreparationResult {
     /// 未設定の壁版割当領域（計算前に確認し、結果・帳票へ常時記載する）。
     #[serde(default)]
     pub unset_wall_regions: Vec<sepika_core::ids::WallPlateAssignmentRegionId>,
+    #[serde(default)]
+    pub(crate) analysis_contract_version: u32,
 }
 
 impl PreparationResult {
+    pub(super) fn is_current_contract(&self) -> bool {
+        self.analysis_contract_version == sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION
+    }
+
     /// 解析を進めてよい状態か（整合性チェックにエラーがないか）。
     ///
     /// 必要な床板割当が未設定なら準備結果を生成しない。残る未設定は警告として扱う。
     pub fn is_ready(&self) -> bool {
-        self.diag_errors == 0
+        self.diag_errors == 0 && self.slab_composite_unavailable_reason().is_none()
+    }
+
+    pub(super) fn slab_composite_unavailable_reason(&self) -> Option<&str> {
+        self.member_stiffness
+            .iter()
+            .find(|row| row.slab_factor.is_none())
+            .and_then(|row| row.unavailable_reason.as_deref())
     }
 
     /// 未設定の割当領域が残っているか。
@@ -322,7 +334,7 @@ pub struct PrepWidthThicknessRow {
 /// 値は [`sepika_element::frame::beam::stiffness_breakdown`] ・
 /// [`sepika_element::frame::beam::composite_props_of`] を通した、要素構築が実際に
 /// 適用するものと同じ算定結果。
-/// SRC の算定不能は準備計算を停止する。CFT は未確定理由を保持する。
+/// SRC の算定不能は準備計算を停止する。床板合成剛性と CFT は未確定理由を保持する。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepMemberStiffnessRow {
     pub elem: ElemId,
@@ -331,9 +343,11 @@ pub struct PrepMemberStiffnessRow {
     pub section_name: String,
     pub material: String,
     /// スラブ協力幅（RC 矩形梁）・合成梁（H 形鋼梁）による強軸曲げ剛性の増大率。
-    pub slab_factor: f64,
+    pub slab_factor: Option<f64>,
+    /// H形鋼大梁の床板合成剛性の算入結果。未算定理由は `unavailable_reason` に保持する。
+    pub steel_slab: Option<sepika_element::frame::beam::SteelSlabStiffness>,
     /// 壁エレメントモデルの上下大梁の剛性倍率（軸・曲げ・ねじり・せん断に一律）。
-    pub wall_girder_factor: f64,
+    pub wall_girder_factor: Option<f64>,
     /// SRC/CFT 等価断面性能（対象外・算定不能なら `None`）。
     pub composite: Option<PrepCompositeProps>,
     /// 剛性が未確定の理由。算定できた場合は `None`。
@@ -472,6 +486,7 @@ impl App {
                         .transpose()
                 })
                 .collect::<Result<Vec<_>, _>>()?,
+            analysis_contract_version: sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION,
             computed_at: SystemTime::now(),
             summary: self.build_prep_summary(),
             stories: self.build_prep_stories(),
@@ -929,7 +944,10 @@ impl App {
         let candidates = model
             .elements
             .iter()
-            .filter(|e| matches!(e.kind, ElementKind::Beam) && e.nodes.len() >= 2)
+            .filter(|e| {
+                (matches!(e.kind, ElementKind::Beam) && e.nodes.len() >= 2)
+                    || model.is_steel_h_girder(e)
+            })
             .count();
 
         let slab_stiffness_enabled = (!model.floor_regions.is_empty() || !model.slabs.is_empty())
@@ -948,14 +966,20 @@ impl App {
                 .and_then(sepika_core::structure_kind::shape_composite_kind)
                 .is_some()
         });
-        if !(slab_stiffness_enabled || has_wall_element || has_composite_section) {
+        let has_steel_h_girder = model.elements.iter().any(|e| model.is_steel_h_girder(e));
+        if !(slab_stiffness_enabled
+            || has_wall_element
+            || has_composite_section
+            || has_steel_h_girder)
+        {
             return Ok((Vec::new(), candidates));
         }
 
         let mut rows = Vec::new();
         let mut cft_props = std::collections::HashMap::new();
         for e in &model.elements {
-            if !matches!(e.kind, ElementKind::Beam) || e.nodes.len() < 2 {
+            let is_steel_h_girder = model.is_steel_h_girder(e);
+            if !is_steel_h_girder && (!matches!(e.kind, ElementKind::Beam) || e.nodes.len() < 2) {
                 continue;
             }
             let Some(sec) = model.element_section(e) else {
@@ -968,7 +992,12 @@ impl App {
             if !is_cft && sec.ensure_properties_resolved().is_err() {
                 continue;
             }
-            let factors = sepika_element::frame::beam::stiffness_breakdown(model, e)?;
+            let (factors, stiffness_error) =
+                match sepika_element::frame::beam::stiffness_breakdown(model, e) {
+                    Ok(factors) => (Some(factors), None),
+                    Err(reason) if is_steel_h_girder => (None, Some(reason)),
+                    Err(reason) => return Err(reason),
+                };
             let resolved_composite = if is_cft {
                 let key = (
                     sec.id,
@@ -991,27 +1020,28 @@ impl App {
             } else {
                 sepika_element::frame::beam::composite_props_of(model, e)
             };
-            let (composite, unavailable_reason) = match resolved_composite {
+            let (composite, composite_error) = match resolved_composite {
                 Ok(composite) => (composite, None),
                 Err(error) if is_cft => (None, Some(error)),
                 Err(error) => return Err(error),
             };
             let base_iy = composite.map_or(sec.iy, |p| p.iy);
             let base_area = composite.map_or(sec.area, |p| p.area_ax);
-            if factors.slab == 1.0
-                && factors.wall_girder == 1.0
+            let unavailable_reason = stiffness_error.or(composite_error);
+            if factors
+                .is_some_and(|f| f.slab == 1.0 && f.wall_girder == 1.0 && f.steel_slab.is_none())
                 && composite.is_none()
                 && unavailable_reason.is_none()
                 && base_area == sec.area
             {
                 continue;
             }
-            let effective_iy = unavailable_reason
-                .is_none()
-                .then_some(base_iy * factors.slab * factors.wall_girder);
-            let effective_area = unavailable_reason
-                .is_none()
-                .then_some(base_area * factors.wall_girder);
+            let effective_iy = factors
+                .filter(|_| unavailable_reason.is_none())
+                .map(|f| base_iy * f.slab * f.wall_girder);
+            let effective_area = factors
+                .filter(|_| unavailable_reason.is_none())
+                .map(|f| base_area * f.wall_girder);
             rows.push(PrepMemberStiffnessRow {
                 elem: e.id,
                 kind: sepika_design_jp::MemberKind::of_element(e, model),
@@ -1020,8 +1050,9 @@ impl App {
                     .element_material(e)
                     .map(|m| m.name.clone())
                     .unwrap_or_else(|| "未割当".into()),
-                slab_factor: factors.slab,
-                wall_girder_factor: factors.wall_girder,
+                slab_factor: factors.map(|f| f.slab),
+                steel_slab: factors.and_then(|f| f.steel_slab),
+                wall_girder_factor: factors.map(|f| f.wall_girder),
                 composite: composite.map(|p| PrepCompositeProps {
                     area_ax: p.area_ax,
                     iy: p.iy,

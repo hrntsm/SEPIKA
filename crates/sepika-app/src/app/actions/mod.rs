@@ -278,6 +278,16 @@ impl App {
         self.core.scoped.last_notice = None;
         self.reject_result_contracts();
         self.ensure_preparation();
+        let slab_error = self
+            .core
+            .scoped
+            .preparation
+            .as_ref()
+            .and_then(super::preparation::PreparationResult::slab_composite_unavailable_reason)
+            .map(str::to_owned);
+        if let Some(reason) = slab_error {
+            self.report_error(reason);
+        }
         self.core.scoped.last_error.is_none()
     }
 

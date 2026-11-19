@@ -157,9 +157,12 @@ fn validate_mass_inputs(
         if elem.kind.is_primary_frame_support() {
             sepika_element::frame::beam::composite_props_of(model, elem)
                 .map_err(sepika_math::solver::SolveError::InvalidInput)?;
-            if let Some(reason) =
+            let issue = if uses_element_frames {
                 sepika_element::factory::elastic_stiffness_input_issue(elem, model)
-            {
+            } else {
+                sepika_element::factory::nodal_mass_frame_input_issue(elem, model)
+            };
+            if let Some(reason) = issue {
                 return Err(sepika_math::solver::SolveError::InvalidInput(reason));
             }
         } else {
@@ -174,6 +177,7 @@ fn validate_mass_inputs(
 /// 質量源は「部材密度による要素質量」と「節点集中質量（`Node::mass`）」の 2 つで、
 /// どちらを算入するかはモデルの質量方式（`Model::mass_method`）に従う。
 /// 要素の共通質量特性・ダンパー入力・配置・生成質量が不正なら `InvalidInput` を返す。
+/// 節点集中質量だけの組立は、H形鋼大梁の床板合成剛性の確定を要しない。
 pub fn assemble_global_m(
     model: &Model,
     dofmap: &DofMap,

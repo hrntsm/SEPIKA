@@ -1084,19 +1084,23 @@ pub fn build_preparation_csv(app: &App) -> String {
             p.member_stiffness_candidates
         ));
         out.push_str(
-            "部材ID,種別,断面,材料,スラブ増大率,壁上下梁倍率,元A[mm2],元Iy[mm4],実効A[mm2],実効Iy[mm4],総増大率,等価Aax[mm2],等価Iy[mm4],等価Iz[mm4],等価J[mm4],等価Asy[mm2],等価Asz[mm2],未算定理由\n",
+            "部材ID,種別,断面,材料,スラブ増大率,壁上下梁倍率,元A[mm2],元Iy[mm4],実効A[mm2],実効Iy[mm4],総増大率,等価Aax[mm2],等価Iy[mm4],等価Iz[mm4],等価J[mm4],等価Asy[mm2],等価Asz[mm2],未算定理由,床板合成の判定\n",
         );
         for r in &p.member_stiffness {
             let c = r.composite;
             let fmt = |v: Option<f64>| v.map(|x| format!("{:.4e}", x)).unwrap_or_default();
             out.push_str(&format!(
-                "{},{},{},{},{:.4},{:.1},{:.1},{:.4e},{},{},{},{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{:.1},{:.4e},{},{},{},{},{},{},{},{},{},{},{}\n",
                 r.elem.0,
                 member_kind_label(r.kind),
                 r.section_name,
                 r.material,
-                r.slab_factor,
-                r.wall_girder_factor,
+                r.slab_factor
+                    .map(|v| format!("{v:.4}"))
+                    .unwrap_or_else(|| "未算定".into()),
+                r.wall_girder_factor
+                    .map(|v| format!("{v:.1}"))
+                    .unwrap_or_default(),
                 r.section_area,
                 r.section_iy,
                 r.effective_area
@@ -1116,6 +1120,7 @@ pub fn build_preparation_csv(app: &App) -> String {
                 fmt(c.map(|c| c.as_y)),
                 fmt(c.map(|c| c.as_z)),
                 r.unavailable_reason.as_deref().unwrap_or(""),
+                r.steel_slab.map_or("", |status| status.label()),
             ));
         }
     }

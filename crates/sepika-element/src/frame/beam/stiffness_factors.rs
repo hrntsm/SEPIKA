@@ -1,20 +1,22 @@
 //! スラブ協力幅・合成梁・壁エレメント上下大梁による剛性の増大率算定。
 
-use sepika_core::ids::NodeId;
-use sepika_core::model::Model;
+use sepika_core::ids::{NodeId, SlabId};
+use sepika_core::model::{
+    ElementData, FloorPlateAssignmentRegion, FloorRegion, MaterialCategory, Model, PlateAssignment,
+    RegionAnchor, SlabCompositeConnection, SlabShape, SupportMemberId,
+};
+use sepika_core::section_shape::SectionShape;
 
 /// スラブ協力幅 bf = b + ba(左) + ba(右) [mm]。
 ///
 /// 対象は水平材のみ。適用不能時は None。
 fn slab_cooperating_width(
     model: &Model,
-    data: &sepika_core::model::ElementData,
+    data: &ElementData,
     b: f64,
+    candidates: &[(Vec<NodeId>, f64)],
 ) -> Option<(f64, f64)> {
-    if b <= 0.0
-        || data.nodes.len() < 2
-        || (model.floor_regions.is_empty() && model.slabs.is_empty())
-    {
+    if b <= 0.0 || data.nodes.len() < 2 {
         return None;
     }
     let n0 = data.nodes[0];
@@ -68,44 +70,11 @@ fn slab_cooperating_width(
     let mut a_pos: f64 = 0.0;
     let mut a_neg: f64 = 0.0;
     let mut t_used: f64 = 0.0;
-    let mut matched = false;
-
-    let mut referenced = std::collections::HashSet::new();
-    let mut candidates: Vec<(Vec<NodeId>, f64)> = Vec::new();
-    for region in &model.floor_regions {
-        referenced.extend(region.slab_ids.iter().copied());
-        let t = region
-            .slab_ids
-            .iter()
-            .filter_map(|&id| model.slab(id))
-            .filter_map(|s| model.slab_plate_thickness(s))
-            .fold(0.0_f64, f64::max);
-        if t > 0.0 {
-            candidates.push((region.boundary.clone(), t));
-        }
-    }
-    for slab in &model.slabs {
-        if referenced.contains(&slab.id) {
-            continue;
-        }
-        let Some(boundary) = slab.boundary_nodes(model) else {
-            continue;
-        };
-        let Some(t) = model.slab_plate_thickness(slab) else {
-            continue;
-        };
-        candidates.push((boundary, t));
-    }
-
     for (boundary, t) in candidates {
-        if !(boundary.contains(&n0) && boundary.contains(&n1)) {
-            continue;
-        }
-        matched = true;
-        t_used = t_used.max(t);
+        t_used = t_used.max(*t);
         let mut s_pos: f64 = 0.0;
         let mut s_neg: f64 = 0.0;
-        for nid in &boundary {
+        for nid in boundary {
             let Some(q) = model.nodes.get(nid.index()) else {
                 continue;
             };
@@ -114,11 +83,11 @@ fn slab_cooperating_width(
             s_neg = s_neg.max(-s);
         }
         if s_pos > 0.0 {
-            let far_w = far_beam_width(&boundary, s_pos, 1.0);
+            let far_w = far_beam_width(boundary, s_pos, 1.0);
             a_pos = a_pos.max((s_pos - b / 2.0 - far_w / 2.0).max(0.0));
         }
         if s_neg > 0.0 {
-            let far_w = far_beam_width(&boundary, s_neg, -1.0);
+            let far_w = far_beam_width(boundary, s_neg, -1.0);
             a_neg = a_neg.max((s_neg - b / 2.0 - far_w / 2.0).max(0.0));
         }
     }
@@ -133,7 +102,7 @@ fn slab_cooperating_width(
         }
     };
     let bf = b + ba(a_pos) + ba(a_neg);
-    if !matched || bf <= b {
+    if bf <= b {
         return None;
     }
     Some((bf, t_used))
@@ -188,6 +157,8 @@ struct SlabSide {
     flange: SlabFlange,
 }
 
+const SLAB_SPAN_TOL: f64 = 1e-12;
+
 fn average_slab_side(mut strips: Vec<SlabStrip>) -> Result<Option<SlabSide>, String> {
     if strips.is_empty() {
         return Ok(None);
@@ -207,13 +178,13 @@ fn average_slab_side(mut strips: Vec<SlabStrip>) -> Result<Option<SlabSide>, Str
                 first.slab.0, strip.slab.0
             ));
         }
-        if strip.span[0] < cursor - 1e-12 {
+        if strip.span[0] < cursor - SLAB_SPAN_TOL {
             return Err(format!(
                 "床板 {}: 同じ側の取付区間が重複しています",
                 strip.slab.0
             ));
         }
-        if strip.span[0] > cursor + 1e-12 {
+        if strip.span[0] > cursor + SLAB_SPAN_TOL {
             return Err(format!(
                 "床板 {}: 取付区間に隙間があり梁全長を覆いません",
                 strip.slab.0
@@ -224,7 +195,7 @@ fn average_slab_side(mut strips: Vec<SlabStrip>) -> Result<Option<SlabSide>, Str
         thickness_mm += (strip.span[1] - strip.span[0]) * strip.thickness_mm;
         cursor = strip.span[1];
     }
-    if (cursor - 1.0).abs() > 1e-12 {
+    if (cursor - 1.0).abs() > SLAB_SPAN_TOL {
         return Err(format!(
             "床板 {}: 取付区間が梁全長を覆いません",
             first.slab.0
@@ -495,23 +466,335 @@ fn slab_stiffness_factor(
     Ok(factor)
 }
 
+/// H形鋼大梁での床板合成剛性の算入結果。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SteelSlabStiffness {
+    NoSlab,
+    SteelSlab,
+    NonComposite,
+    Confirmed,
+}
+
+impl SteelSlabStiffness {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NoSlab => "床板なし",
+            Self::SteelSlab => "鋼床板のため算入なし",
+            Self::NonComposite => "非合成指定のため算入なし",
+            Self::Confirmed => "RC床板を算入（適用確認済み）",
+        }
+    }
+}
+
+fn composite_slab_thickness(model: &Model, id: SlabId) -> Result<Option<f64>, String> {
+    let slab = model
+        .slab(id)
+        .ok_or_else(|| format!("床板 {}: 参照先がありません", id.0))?;
+    let thickness_mm = model
+        .slab_plate_thickness(slab)
+        .filter(|t| t.is_finite())
+        .ok_or_else(|| format!("床板 {}: 板厚は正の有限値が必要です", id.0))?;
+    let material = model
+        .slab_plate_material(slab)
+        .ok_or_else(|| format!("床板 {}: 主材料を解決できません", id.0))?;
+    if material.young.is_finite() && material.young > 0.0 {
+        match material.category {
+            MaterialCategory::Steel if material.fc.is_none() => return Ok(None),
+            MaterialCategory::Concrete
+                if material.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) =>
+            {
+                return Ok(Some(thickness_mm));
+            }
+            _ => {}
+        }
+    }
+    Err(format!(
+        "床板 {}: 主材料「{}」の材種または材料入力が不正です",
+        id.0, material.name
+    ))
+}
+
+fn slab_spans_cover_girder(mut spans: Vec<[f64; 2]>) -> bool {
+    for span in &mut spans {
+        if span[0] > span[1] {
+            span.swap(0, 1);
+        }
+        if !span.iter().all(|v| (0.0..=1.0).contains(v)) || span[0] >= span[1] {
+            return false;
+        }
+    }
+    spans.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let mut covered_end: f64 = 0.0;
+    for [start, end] in spans {
+        if start > covered_end + SLAB_SPAN_TOL {
+            return false;
+        }
+        covered_end = covered_end.max(end);
+    }
+    covered_end >= 1.0 - SLAB_SPAN_TOL
+}
+
+fn share_floor_support(
+    first: &FloorPlateAssignmentRegion,
+    second: &FloorPlateAssignmentRegion,
+) -> bool {
+    first.boundary.iter().any(|a| {
+        let [a0, a1] = a.span;
+        second
+            .boundary
+            .iter()
+            .filter(|b| b.support == a.support)
+            .any(|b| {
+                let [b0, b1] = b.span;
+                let start = a0.min(a1).max(b0.min(b1));
+                let end = a0.max(a1).min(b0.max(b1));
+                end - start > SLAB_SPAN_TOL
+            })
+    })
+}
+
+fn composite_floor_assignments<'m>(
+    model: &'m Model,
+    region: &FloorRegion,
+    directly_supported: impl Fn(SlabId) -> bool,
+) -> Result<Vec<&'m FloorPlateAssignmentRegion>, String> {
+    use sepika_core::geom::polygon;
+    let width_error = || {
+        format!(
+            "床領域 {}: 支持が連続する床板割当で全幅を確定できません",
+            region.id.0
+        )
+    };
+    let boundary = region.boundary_coords(model).ok_or_else(width_error)?;
+    let floor_xy: Vec<_> = boundary.iter().map(|p| [p[0], p[1]]).collect();
+    let floor_area_mm2 = polygon::area(&floor_xy);
+    if !floor_area_mm2.is_finite() || floor_area_mm2 <= 0.0 {
+        return Err(width_error());
+    }
+    let projected = |assignment: &'m FloorPlateAssignmentRegion| {
+        let coords = model.assignment_region_boundary_coords(&assignment.boundary)?;
+        let xy: Vec<_> = coords.iter().map(|p| [p[0], p[1]]).collect();
+        let area_mm2 = polygon::area(&xy);
+        (area_mm2.is_finite() && area_mm2 > 0.0 && polygon::interiors_overlap(&xy, &floor_xy))
+            .then_some((assignment, xy))
+    };
+    let mut connected = Vec::new();
+    let mut pending = Vec::new();
+    for assignment in &model.floor_assignment_regions.regions {
+        if matches!(assignment.assignment, PlateAssignment::Plate(id)
+            if region.slab_ids.contains(&id) && directly_supported(id))
+        {
+            connected.push(projected(assignment).ok_or_else(width_error)?);
+        } else {
+            pending.push(assignment);
+        }
+    }
+    if connected.is_empty() {
+        return Err(width_error());
+    }
+
+    // 床領域の代表Zで割当を選ぶと傾斜床を取りこぼし、投影だけでは上下階を区別できない。
+    let mut cursor = 0;
+    while cursor < connected.len() {
+        let link = connected[cursor].0;
+        let mut index = 0;
+        while index < pending.len() {
+            if share_floor_support(link, pending[index]) {
+                if let Some(entry) = projected(pending.remove(index)) {
+                    connected.push(entry);
+                }
+            } else {
+                index += 1;
+            }
+        }
+        cursor += 1;
+    }
+
+    let (assignments, polygons): (Vec<_>, Vec<_>) = connected.into_iter().unzip();
+    if !polygon::forms_partition(&floor_xy, &polygons) {
+        return Err(width_error());
+    }
+    Ok(assignments)
+}
+
+fn steel_slab_stiffness(
+    model: &Model,
+    data: &ElementData,
+    sec: &sepika_core::model::Section,
+    es: f64,
+) -> Result<(f64, SteelSlabStiffness), String> {
+    let [n0, n1] = [data.nodes[0], data.nodes[data.nodes.len() - 1]];
+    let connection = model.slab_composite_connection(data.id);
+    let support = SupportMemberId::Primary(data.id);
+    let bounds_member = |boundary: &[NodeId]| boundary.contains(&n0) && boundary.contains(&n1);
+    let mut adjacent_rc = std::collections::BTreeMap::new();
+    let mut steel = false;
+    let mut attached_rc = None;
+
+    for region in &model.floor_assignment_regions.regions {
+        let edges = region
+            .boundary
+            .iter()
+            .filter(|edge| edge.support == support);
+        if edges.clone().next().is_none() {
+            continue;
+        }
+        let id = match region.assignment {
+            PlateAssignment::NoPlate => continue,
+            PlateAssignment::Unset => {
+                return Err(format!(
+                    "床板割当領域 {}: 床板の有無と材種が未設定です",
+                    region.id.0
+                ))
+            }
+            PlateAssignment::Plate(id) => id,
+        };
+        if let Some(t) = composite_slab_thickness(model, id)? {
+            let spans: Vec<_> = edges.map(|edge| edge.span).collect();
+            if adjacent_rc.insert(id, (region.id, t, spans)).is_some() {
+                return Err(format!("床板 {}: 割当領域が重複しています", id.0));
+            }
+        } else {
+            steel = true;
+        }
+    }
+
+    for slab in &model.slabs {
+        let SlabShape::Attached {
+            anchor: RegionAnchor::Line { nodes, .. },
+            ..
+        } = slab.shape
+        else {
+            continue;
+        };
+        if nodes != [n0, n1]
+            && nodes != [n1, n0]
+            && !model
+                .attached_slab_supports(slab)
+                .is_ok_and(|supports| supports.iter().any(|support| support.elem == data.id))
+        {
+            continue;
+        }
+        match composite_slab_thickness(model, slab.id)? {
+            None => steel = true,
+            Some(_) => {
+                attached_rc = Some(slab.id);
+            }
+        }
+    }
+
+    if adjacent_rc.is_empty() && attached_rc.is_none() {
+        return Ok((
+            1.0,
+            if steel {
+                SteelSlabStiffness::SteelSlab
+            } else {
+                SteelSlabStiffness::NoSlab
+            },
+        ));
+    }
+    if connection == SlabCompositeConnection::NonComposite {
+        return Ok((1.0, SteelSlabStiffness::NonComposite));
+    }
+    if let Some(id) = attached_rc {
+        return Err(format!("床板 {}: 取り付く床板は現行近似の対象外です", id.0));
+    }
+
+    let (Some(p0), Some(p1)) = (model.node(n0), model.node(n1)) else {
+        return Err("梁端の位置を解決できません".into());
+    };
+    let lp = (p1.coord[0] - p0.coord[0]).hypot(p1.coord[1] - p0.coord[1]);
+    if lp < 1e-9 || (p1.coord[2] - p0.coord[2]).abs() > 0.05 * lp {
+        return Err("梁両端の高低差または水平投影長が現行近似の適用範囲外です".into());
+    }
+
+    let mut rc_widths = Vec::new();
+    for region in model
+        .floor_regions
+        .iter()
+        .filter(|r| bounds_member(&r.boundary))
+    {
+        if !region
+            .slab_ids
+            .iter()
+            .any(|id| adjacent_rc.contains_key(id))
+        {
+            continue;
+        }
+        let assignments =
+            composite_floor_assignments(model, region, |id| adjacent_rc.contains_key(&id))?;
+        let mut thickness_mm = 0.0_f64;
+        let mut spans = Vec::new();
+        for area in assignments {
+            let PlateAssignment::Plate(id) = area.assignment else {
+                return Err(format!(
+                    "床領域 {}: 床板割当領域 {} に版なしまたは未設定があり、現行近似の協力幅を確定できません",
+                    region.id.0, area.id.0
+                ));
+            };
+            let Some(t) = composite_slab_thickness(model, id)? else {
+                return Err(format!(
+                    "床領域 {}: RC床板と鋼床板が混在し、現行近似の協力幅を確定できません",
+                    region.id.0
+                ));
+            };
+            thickness_mm = thickness_mm.max(t);
+            if let Some((_, _, slab_spans)) = adjacent_rc.remove(&id) {
+                spans.extend(slab_spans);
+            }
+        }
+        if !slab_spans_cover_girder(spans) {
+            return Err(format!(
+                "床領域 {}: RC床板の取付区間が梁全長を連続して覆いません",
+                region.id.0
+            ));
+        }
+        rc_widths.push((region.boundary.clone(), thickness_mm));
+    }
+    for (id, (region, thickness_mm, spans)) in adjacent_rc {
+        if !slab_spans_cover_girder(spans) {
+            return Err(format!(
+                "床板 {}: 取付区間が梁全長を連続して覆いません",
+                id.0
+            ));
+        }
+        let boundary = model
+            .floor_assignment_region_nodes(region)
+            .filter(|boundary| bounds_member(boundary))
+            .filter(|_| !model.floor_regions.iter().any(|r| r.slab_ids.contains(&id)))
+            .ok_or_else(|| format!("床板 {}: 現行近似の協力幅を確定できません", id.0))?;
+        rc_widths.push((boundary, thickness_mm));
+    }
+    if connection == SlabCompositeConnection::Unconfirmed {
+        return Err(
+            "RC床板との接合条件が未確認です。「部材」の「床板合成」で指定してください".into(),
+        );
+    }
+
+    let Some((bf, t)) = slab_cooperating_width(model, data, sec.width.max(1.0), &rc_widths) else {
+        return Err("現行近似の協力幅を確定できません".into());
+    };
+    let factor = composite_beam_stiffness_factor(sec, es, bf, t);
+    if !factor.is_finite() || factor <= 1.0 {
+        return Err("現行近似の曲げ剛性増大率を算定できません".into());
+    }
+    Ok((factor, SteelSlabStiffness::Confirmed))
+}
+
 /// 床スラブコンクリートの設計基準強度の仮定値 [N/mm²]。
 const COMPOSITE_SLAB_FC: f64 = 21.0;
 
 /// S 造合成梁の強軸曲げ剛性の増大率。適用不能時は 1.0。
-pub(super) fn composite_beam_stiffness_factor(
-    model: &Model,
-    data: &sepika_core::model::ElementData,
+fn composite_beam_stiffness_factor(
     sec: &sepika_core::model::Section,
     es: f64,
+    bf: f64,
+    t: f64,
 ) -> f64 {
     let (sa, si, sh) = (sec.area, sec.iy, sec.depth);
     if sa <= 0.0 || si <= 0.0 || sh <= 0.0 || es <= 0.0 {
         return 1.0;
     }
-    let Some((bf, t)) = slab_cooperating_width(model, data, sec.width.max(1.0)) else {
-        return 1.0;
-    };
     let ec = sepika_core::section_shape::concrete_young_modulus(COMPOSITE_SLAB_FC);
     let hd = 0.0;
     let ca = bf * t;
@@ -534,6 +817,8 @@ pub const WALL_GIRDER_STIFF_FACTOR: f64 = 100.0;
 pub struct StiffnessBreakdown {
     /// 強軸曲げ剛性の増大率。対象外は 1.0。
     pub slab: f64,
+    /// H形鋼大梁の床板合成剛性の算入理由。
+    pub steel_slab: Option<SteelSlabStiffness>,
     /// 上下大梁の剛性倍率（対象外は 1.0）。
     pub wall_girder: f64,
 }
@@ -542,6 +827,7 @@ impl Default for StiffnessBreakdown {
     fn default() -> Self {
         Self {
             slab: 1.0,
+            steel_slab: None,
             wall_girder: 1.0,
         }
     }
@@ -554,15 +840,22 @@ pub(super) fn breakdown_with(
     sec: &sepika_core::model::Section,
     es: f64,
     is_horizontal: bool,
+    include_steel_slab: bool,
 ) -> Result<StiffnessBreakdown, String> {
-    use sepika_core::section_shape::SectionShape;
-    let slab = match &sec.shape {
-        Some(SectionShape::RcBeamRect { .. }) => {
+    let (slab, steel_slab) = match &sec.shape {
+        Some(SectionShape::RcBeamRect { .. }) => (
             slab_stiffness_factor(model, data, sec.width, sec.depth)
-                .map_err(|reason| format!("部材 ID {} の床板協力剛性: {reason}", data.id.0))?
+                .map_err(|reason| format!("部材 ID {} の床板協力剛性: {reason}", data.id.0))?,
+            None,
+        ),
+        Some(SectionShape::SteelH { .. })
+            if include_steel_slab && model.is_steel_h_girder(data) =>
+        {
+            let (factor, reason) = steel_slab_stiffness(model, data, sec, es)
+                .map_err(|reason| format!("部材 ID {} の床板合成剛性: {reason}", data.id.0))?;
+            (factor, Some(reason))
         }
-        Some(SectionShape::SteelH { .. }) => composite_beam_stiffness_factor(model, data, sec, es),
-        _ => 1.0,
+        _ => (1.0, None),
     };
     let wall_girder = if is_horizontal
         && data.nodes.len() >= 2
@@ -572,11 +865,15 @@ pub(super) fn breakdown_with(
     } else {
         1.0
     };
-    Ok(StiffnessBreakdown { slab, wall_girder })
+    Ok(StiffnessBreakdown {
+        slab,
+        steel_slab,
+        wall_girder,
+    })
 }
 
 /// 部材の剛性算定で適用される割増し率を、モデルと要素データから求める。
-/// RC床板の未解決・不正・適用範囲外、SRC材料不正は理由付きエラー。対象外で断面・材料が引けない場合はすべて 1.0。
+/// 床板の協力・合成剛性が未確定、またはSRC材料が不正なときは理由付きエラー。
 pub fn stiffness_breakdown(
     model: &Model,
     data: &sepika_core::model::ElementData,
@@ -616,7 +913,7 @@ pub fn stiffness_breakdown(
     );
     let lp = (dx * dx + dy * dy).sqrt();
     let is_horizontal = lp > 1e-9 && dz.abs() <= 0.05 * lp;
-    breakdown_with(model, data, sec, mat.young, is_horizontal)
+    breakdown_with(model, data, sec, mat.young, is_horizontal, true)
 }
 
 /// 壁上下の弾性剛梁として、壁剛性倍率が適用される線材かを返す。
@@ -762,6 +1059,12 @@ pub(super) fn is_wall_top_bottom_girder(model: &Model, n0: NodeId, n1: NodeId) -
 #[cfg(test)]
 mod slab_geometry_tests {
     use super::*;
+
+    #[test]
+    fn full_girder_support_accepts_adjacent_intervals_in_both_boundary_directions() {
+        assert!(slab_spans_cover_girder(vec![[1.0, 0.5], [0.5, 0.0]]));
+        assert!(!slab_spans_cover_girder(vec![[0.0, 0.4], [1.0, 0.5]]));
+    }
     use sepika_core::ids::SlabId;
 
     #[test]

@@ -18,6 +18,7 @@ pub struct ElemAttrs {
     pub hysteresis: Option<MemberHysteresisAttr>,
     pub damper: Option<DamperAttr>,
     pub detail: Option<MemberDetailAttr>,
+    pub slab_composite: Option<SlabCompositeConnection>,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -182,6 +183,9 @@ pub struct Model {
     /// 壁の階重量生成方式。旧ファイル・未生成はNone（ケース方式へ推定しない）。
     #[serde(default)]
     pub wall_weight_generation: Option<WallWeightGenerationMode>,
+    /// H形鋼大梁の床板合成剛性の入力。記録がない大梁は接合未確認。
+    #[serde(default)]
+    pub slab_composite_attrs: std::collections::BTreeMap<ElemId, SlabCompositeConnection>,
     /// 一時壁展開モデルの生成元。保存モデルには含めない。
     #[serde(skip)]
     pub generated_wall_origins: std::collections::HashMap<ElemId, WallPlateId>,
@@ -292,6 +296,15 @@ impl Model {
                         elem.id.0, sid.0
                     )));
                 }
+            }
+        }
+
+        for &elem in self.slab_composite_attrs.keys() {
+            if self.element(elem).is_none() {
+                return Err(CoreError::DanglingRef(format!(
+                    "床板合成 -> Element {}",
+                    elem.0
+                )));
             }
         }
 
@@ -1408,6 +1421,7 @@ impl Model {
             && self.wall_plates == other.wall_plates
             && self.stress_cfg == other.stress_cfg
             && self.steel_design_attrs == other.steel_design_attrs
+            && self.slab_composite_attrs == other.slab_composite_attrs
             && self.brb_attrs == other.brb_attrs
             && self.pca_attrs == other.pca_attrs
             && self.unassigned_beams == other.unassigned_beams
@@ -1756,6 +1770,13 @@ impl Model {
         for a in &mut self.steel_design_attrs {
             f(&mut a.elem);
         }
+        self.slab_composite_attrs = std::mem::take(&mut self.slab_composite_attrs)
+            .into_iter()
+            .map(|(mut elem, connection)| {
+                f(&mut elem);
+                (elem, connection)
+            })
+            .collect();
         for a in &mut self.brb_attrs {
             f(&mut a.elem);
         }
@@ -1792,6 +1813,7 @@ impl Model {
         ElemAttrs {
             wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
             steel_design: take_first(&mut self.steel_design_attrs, |a| a.elem, elem),
+            slab_composite: self.slab_composite_attrs.remove(&elem),
             brb: take_first(&mut self.brb_attrs, |a| a.elem, elem),
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
             isolator: take_first(&mut self.isolator_attrs, |a| a.elem, elem),
@@ -1811,6 +1833,9 @@ impl Model {
         if let Some(mut a) = attrs.steel_design {
             a.elem = elem;
             self.steel_design_attrs.push(a);
+        }
+        if let Some(connection) = attrs.slab_composite {
+            self.slab_composite_attrs.insert(elem, connection);
         }
         if let Some(mut a) = attrs.brb {
             a.elem = elem;
@@ -1836,6 +1861,44 @@ impl Model {
             a.elem = elem;
             self.member_detail_attrs.push(a);
         }
+    }
+
+    /// H形鋼の主架構大梁か。実部材化された小梁を除く。
+    pub fn is_steel_h_girder(&self, data: &ElementData) -> bool {
+        data.kind.is_primary_frame_support()
+            && data.nodes.len() == 2
+            && self.element_section(data).is_some_and(|section| {
+                section.frame_use == Some(FrameSectionUse::Girder)
+                    && matches!(
+                        section.shape,
+                        Some(crate::section_shape::SectionShape::SteelH { .. })
+                    )
+            })
+            && !self
+                .beams()
+                .any(|member| self.element_represents_secondary_member(data, member))
+    }
+
+    /// 床板合成剛性の指定を返す。未登録は未確認。
+    pub fn slab_composite_connection(&self, elem: ElemId) -> SlabCompositeConnection {
+        self.slab_composite_attrs
+            .get(&elem)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// 床板合成剛性の指定を更新し、更新前の指定を返す。
+    pub fn set_slab_composite_connection(
+        &mut self,
+        elem: ElemId,
+        connection: SlabCompositeConnection,
+    ) -> SlabCompositeConnection {
+        if connection == SlabCompositeConnection::Unconfirmed {
+            self.slab_composite_attrs.remove(&elem)
+        } else {
+            self.slab_composite_attrs.insert(elem, connection)
+        }
+        .unwrap_or_default()
     }
 
     /// 部材の付帯情報（ハンチ・継手位置）を返す（未指定は `None`）。
