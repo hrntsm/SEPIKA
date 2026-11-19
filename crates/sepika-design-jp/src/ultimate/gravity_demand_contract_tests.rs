@@ -325,10 +325,15 @@ fn direct_rc_total_uses_total_q_once_and_rejects_nonunit_amplification_and_added
         assert_eq!(b.qmu, 68000.0);
         assert!((b.shear_margin / a.shear_margin - 92000.0 / 68000.0).abs() < 1e-12);
     }
-    opts.upper_strength_factor = 1.1;
-    assert!(collect_rc_ultimate_checks(&model, &demand, &opts)
-        .unwrap_err()
-        .contains("ultimate_total_unsupported"));
+    for factor in [0.0, 0.5, 1.1, f64::NAN] {
+        opts.upper_strength_factor = factor;
+        let reason = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap_err();
+        assert_resolved_demand_context(
+            &reason,
+            "ultimate_total_unsupported",
+            model.elements[0].id.0,
+        );
+    }
     opts.upper_strength_factor = 1.0;
     demand[0].1.q_long = Some(0.0);
     assert!(collect_rc_ultimate_checks(&model, &demand, &opts)
