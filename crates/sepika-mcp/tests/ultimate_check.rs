@@ -6,6 +6,8 @@ mod cft_long_case2_model;
 mod cft_long_case2_reference;
 #[path = "support/column_model.rs"]
 mod column_model;
+#[path = "../../sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs"]
+mod rc_beam_input;
 
 use cft_long_case2_model::{cft_long_case2_model, tip_compression};
 use cft_long_case2_reference::assert_cft_long_case2_summary;
@@ -220,5 +222,15 @@ fn ultimate_check_keeps_rc_gravity_demand_unavailable_even_with_cft_and_saved_gr
     let reason = ultimate_check_error(&model, &JobParams::default());
     assert!(reason.contains("ultimate_gravity_missing"), "{reason}");
     assert!(reason.contains("member=1"), "{reason}");
+    assert!(reason.contains("purpose=frame_long"), "{reason}");
+}
+
+#[test]
+fn ultimate_check_rejects_static_rc_beam_even_with_saved_gravity() {
+    let mut model = rc_beam_input::model(false);
+    model.ultimate_gravity_combination = Some(0);
+    let reason = ultimate_check_error(&model, &JobParams::default());
+    assert!(reason.contains("ultimate_gravity_missing"), "{reason}");
+    assert!(reason.contains("member=0"), "{reason}");
     assert!(reason.contains("purpose=frame_long"), "{reason}");
 }

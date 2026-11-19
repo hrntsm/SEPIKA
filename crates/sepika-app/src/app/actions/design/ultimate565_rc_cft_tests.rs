@@ -783,13 +783,13 @@ fn beam_forces(app: &App, load_case: u32) -> &sepika_element::frame::beam::Membe
 }
 
 #[test]
-fn actual_rc_beam_static_check_uses_bending_sign_after_gravity_superposition() {
+fn actual_rc_beam_reports_reference_strengths_from_signed_gravity_without_passing_a_free_end() {
     // b/D=400/600、dt=61 mm、SD295・Fc24。引張側の付着信頼強度は上端4-D22で
     // 8.253952 N/mm²（上端筋係数0.69）、下端2-D22・3-D22で12.038422 N/mm²。
-    for (direction, top, bottom, expected_mu, expected_qbu, can_pass) in [
-        (-1.0, 4, 2, 217_594_806.213, 1_091_221.650, true),
-        (1.0, 4, 2, 108_797_403.107, 818_332.214, false),
-        (1.0, 2, 3, 163_196_104.660, 1_185_842.203, true),
+    for (direction, top, bottom, expected_mu, expected_qbu) in [
+        (-1.0, 4, 2, 217_594_806.213, 1_091_221.650),
+        (1.0, 4, 2, 108_797_403.107, 818_332.214),
+        (1.0, 2, 3, 163_196_104.660, 1_185_842.203),
     ] {
         let mut model = beam_model(&[top], &[bottom]);
         for (index, force_n) in [(0, -20_000.0), (2, 30_000.0)] {
@@ -824,19 +824,13 @@ fn actual_rc_beam_static_check_uses_bending_sign_after_gravity_superposition() {
         let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
         close(beam.mu, expected_mu);
         close(beam.qbu, expected_qbu);
-        assert_eq!(beam.ok, can_pass);
-        if can_pass {
-            assert_eq!(beam.unchecked_reason, None);
-            close(beam.qmu, 2.0 * expected_mu / 6000.0);
-            close(beam.bond_margin, (expected_qbu - 10_000.0) / beam.qmu);
-        } else {
-            let reason = beam.unchecked_reason.as_deref().unwrap();
-            assert!(
-                reason.contains("ultimate_beam_hinge_bending_unverified:"),
-                "{reason}"
-            );
-            assert!(beam.qmu.is_nan() && beam.bond_margin.is_nan());
-        }
+        assert!(!beam.ok);
+        let reason = beam.unchecked_reason.as_deref().unwrap();
+        assert!(
+            reason.contains("ultimate_beam_hinge_free_end: j端"),
+            "{reason}"
+        );
+        assert!(beam.qmu.is_nan() && beam.shear_margin.is_nan() && beam.bond_margin.is_nan());
     }
 }
 
@@ -895,7 +889,10 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
     let checks = app.compute_ultimate_checks().unwrap();
     let column = checks.iter().find(|check| check.elem == ElemId(0)).unwrap();
     let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
-    assert_eq!(beam.unchecked_reason, None);
+    assert!(beam
+        .unchecked_reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("ultimate_beam_hinge_free_end:")));
     assert!(beam.qsu.is_finite());
     assert!(!column.ok);
     assert!(column.qsu.is_nan() && column.bond_margin.is_nan());
@@ -1073,11 +1070,10 @@ fn actual_rc_beam_without_reinforcement_on_the_tension_side_leaves_only_the_beam
 }
 
 #[test]
-fn actual_rc_beam_with_stronger_opposite_bending_keeps_capacities_and_static_failure() {
-    // 内法3m、上2-D22・下4-D22、2-D10@250、Rp=.05。上端選択時の旧略算需要は
-    // 72.532 kN。両端が異なる向きに降伏する場合を仮定すると108.797 kNで、
-    // QL=10 kNでは控除後のQsu=107.756 kNとの大小が逆転する。
-    for (ql_n, static_failure) in [(10_000.0, false), (50_000.0, true)] {
+fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand() {
+    // 内法3m、上2-D22・下4-D22、2-D10@250、Rp=.05。かつての比較需要は72.532 kNで、
+    // QL=10 kNではQsu=117.756 kN以下、QL=50 kNでは比較を満たさない。
+    for ql_n in [10_000.0, 50_000.0] {
         let mut model = beam_model(&[2], &[4]);
         model.nodes[3].coord[0] = 3000.0;
         let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[1].shape.as_mut() else {
@@ -1086,12 +1082,16 @@ fn actual_rc_beam_with_stronger_opposite_bending_keeps_capacities_and_static_fai
         rebar.stirrup.pitch = 250.0;
         model.load_cases[0].nodal.push(NodalLoad::manual(
             NodeId(3),
-            [0.0, 0.0, -ql_n, 0.0, 5e6, 0.0],
+            [0.0, 0.0, -ql_n, 0.0, 0.0, 0.0],
+        ));
+        model.load_cases[0].nodal.push(NodalLoad::manual(
+            NodeId(1),
+            [3_000_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ));
         let mut app = solve_beam_model(model);
         app.core.ultimate_rp = 0.05;
-        close(beam_forces(&app, 0).at[0].1[5], -3_000.0 * ql_n - 5e6);
-        close(beam_forces(&app, 0).at.last().unwrap().1[5], -5e6);
+        close(beam_forces(&app, 0).at[0].1[5], -3_000.0 * ql_n);
+        close(beam_forces(&app, 0).at.last().unwrap().1[5], 0.0);
         let checks = app.compute_ultimate_checks().unwrap();
         let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
         let column = checks.iter().find(|check| check.elem == ElemId(0)).unwrap();
@@ -1100,76 +1100,57 @@ fn actual_rc_beam_with_stronger_opposite_bending_keeps_capacities_and_static_fai
         close(beam.qbu, 278_854.410);
         assert!(!beam.ok);
         assert_eq!(column.unchecked_reason, None);
-        assert!(column.mu > 0.0);
-        if static_failure {
-            assert_eq!(beam.unchecked_reason, None);
-            close(beam.qmu, 72_531.602);
-            assert!(beam.shear_margin < 1.0);
-            assert!(beam.bond_margin > 1.0);
-        } else {
-            let reason = beam.unchecked_reason.as_deref().unwrap();
-            assert!(
-                reason.contains("ultimate_beam_hinge_bending_unverified:"),
-                "{reason}"
-            );
-            assert!(beam.qmu.is_nan() && beam.shear_margin.is_nan() && beam.bond_margin.is_nan());
-            #[cfg(feature = "gui")]
-            {
-                let labels = ultimate_table_labels(&mut app);
-                for text in ["108.8", "117.8", "278.9", "未検定"] {
-                    assert!(labels.iter().any(|label| label == text), "{labels:?}");
-                }
-                assert_eq!(
-                    labels.iter().filter(|&label| label == "-").count(),
-                    3,
-                    "{labels:?}"
-                );
+        assert!(!column.ok && column.shear_margin < 1.0);
+        let reason = beam.unchecked_reason.as_deref().unwrap();
+        assert!(
+            reason.contains("ultimate_beam_hinge_free_end: j端"),
+            "{reason}"
+        );
+        assert!(beam.qmu.is_nan() && beam.shear_margin.is_nan() && beam.bond_margin.is_nan());
+        #[cfg(feature = "gui")]
+        {
+            let labels = ultimate_table_labels(&mut app);
+            for text in [
+                "108.8",
+                "117.8",
+                "278.9",
+                "未検定",
+                "未検定 1 本",
+                "NG 1 本",
+            ] {
+                assert!(labels.iter().any(|label| label == text), "{labels:?}");
             }
+            assert_eq!(
+                labels.iter().filter(|&label| label == "-").count(),
+                3,
+                "{labels:?}"
+            );
         }
     }
 }
 
 #[test]
-fn actual_rc_beam_leaves_check_pending_when_opposite_shear_or_bond_capacity_is_insufficient() {
-    // 内法3m、下端引張。上1-D22/下2-D22では QL + Qmu = 422.5 kN に対し
-    // 上端の Qbu = 402.1 kN。上2段各1-D22/下3-D22では QL + Qmu = 563.8 kN に対し
-    // 上端の Qsu = 552.7 kN。どちらも下端の Qsu・Qbu と比較すれば OK になる。
-    for (top, bottom, ql_n, expected_mu, expected_qbu, cause) in [
+fn actual_rc_fixed_beam_reports_an_unconfirmed_mechanism_or_released_end() {
+    use sepika_core::{dof::Dof6Mask, model::EndCondition};
+
+    for (condition, expected) in [
         (
-            &[1][..],
-            &[2][..],
-            350_000.0,
-            108_797_403.107,
-            851_354.788,
-            "ultimate_beam_hinge_bond_unverified:",
+            EndCondition::Fixed,
+            "ultimate_beam_hinge_mechanism_unverified:",
         ),
         (
-            &[1, 1][..],
-            &[3][..],
-            455_000.0,
-            163_196_104.660,
-            1_194_331.084,
-            "ultimate_beam_hinge_shear_unverified:",
+            EndCondition::Pinned,
+            "ultimate_beam_hinge_end_released: j端",
         ),
     ] {
-        let mut model = beam_model(top, bottom);
-        model.nodes[3].coord[0] = 3000.0;
-        model.load_cases[0].nodal.push(NodalLoad::manual(
-            NodeId(3),
-            [0.0, 0.0, ql_n, 0.0, -5e6, 0.0],
-        ));
+        let mut model = beam_model(&[2], &[2]);
+        model.nodes[3].restraint = Dof6Mask::FIXED;
+        model.elements[1].end_cond[1] = condition;
         let mut app = solve_beam_model(model);
-        app.core.ultimate_rp = 0.0;
-        close(beam_forces(&app, 0).at[0].1[5], 3_000.0 * ql_n + 5e6);
-        close(beam_forces(&app, 0).at.last().unwrap().1[5], 5e6);
         let checks = app.compute_ultimate_checks().unwrap();
         let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
-        close(beam.mu, expected_mu);
-        close(beam.qsu, 574_959.528);
-        close(beam.qbu, expected_qbu);
-        assert!(!beam.ok);
+        assert!(!beam.ok && beam.qmu.is_nan());
         let reason = beam.unchecked_reason.as_deref().unwrap();
-        assert!(reason.contains(cause), "{reason}");
-        assert!(beam.qmu.is_nan() && beam.shear_margin.is_nan() && beam.bond_margin.is_nan());
+        assert!(reason.contains(expected), "{reason}");
     }
 }

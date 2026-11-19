@@ -52,7 +52,8 @@ pub use rc_shear_ductility::{
 pub(crate) use cft_check::cft_circular_qd1_mu;
 pub use cft_check::{cft_mu_nm, collect_cft_ultimate_checks, CftUltimateCheck};
 pub use options::{
-    MemberDemand, ShearMethod, StaticBeamBending, UltimateDemandMode, UltimateShearOptions,
+    MemberDemand, ShearMethod, StaticBeamBending, StaticBeamHingeMechanism, UltimateDemandMode,
+    UltimateShearOptions,
 };
 pub use rc_check::{collect_rc_ultimate_checks, UltimateCheck};
 pub use rc_strength::biaxial_margin;
