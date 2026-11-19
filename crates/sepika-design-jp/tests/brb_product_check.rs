@@ -1,4 +1,4 @@
-use sepika_core::ids::LoadCaseId;
+use sepika_core::ids::{ElemId, LoadCaseId};
 use sepika_core::model::{FrameSectionUse, Model};
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions,
@@ -10,25 +10,7 @@ use sepika_solver::statics::linear::linear_static_once;
 mod input;
 
 fn check(model: &Model, axial_n: f64, term: LoadTerm) -> [CheckOutcome; 2] {
-    let results = run_member_design_checks(
-        model,
-        &[(
-            input::BRACE,
-            MemberForces {
-                at: vec![
-                    (0.0, [axial_n, 0.0, 0.0, 0.0, 0.0, 0.0]),
-                    (1.0, [axial_n, 0.0, 0.0, 0.0, 0.0, 0.0]),
-                ],
-            },
-        )],
-        &[],
-        &MemberDesignCheckOptions {
-            term,
-            ..Default::default()
-        },
-    )
-    .unwrap()
-    .member_checks;
+    let results = check_ends(model, [[axial_n, 0.0, 0.0, 0.0, 0.0, 0.0]; 2], term);
     assert_eq!(results.len(), 2, "{results:?}");
     let mut results = results
         .into_iter()
@@ -38,6 +20,29 @@ fn check(model: &Model, axial_n: f64, term: LoadTerm) -> [CheckOutcome; 2] {
             outcome
         });
     std::array::from_fn(|_| results.next().unwrap())
+}
+
+fn check_ends(
+    model: &Model,
+    [start, end]: [[f64; 6]; 2],
+    term: LoadTerm,
+) -> Vec<(ElemId, f64, CheckOutcome)> {
+    run_member_design_checks(
+        model,
+        &[(
+            input::BRACE,
+            MemberForces {
+                at: vec![(0.0, start), (1.0, end)],
+            },
+        )],
+        &[],
+        &MemberDesignCheckOptions {
+            term,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .member_checks
 }
 
 fn assert_ratio(model: &Model, axial_n: f64, term: LoadTerm, expected: f64, ok: bool) {
@@ -165,6 +170,74 @@ fn brb_preserves_short_and_long_axial_limits() {
         1.0_f64.next_up(),
         false,
     );
+}
+
+#[test]
+fn brb_nonfinite_axial_is_unchecked_without_losing_ng_at_another_position() {
+    let mut model = input::model();
+    model.nodes[1].coord[0] = 3000.0;
+    let attr = &mut model.brb_attrs[0];
+    attr.allowable_axial_short = Some(100_000.0);
+    attr.critical_length = Some(6000.0);
+    attr.length_reduction = Some(0.0);
+    for term in [LoadTerm::Short, LoadTerm::Long] {
+        for axial_n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let reason = sepika_design_jp::brb::brb_check(
+                &model.brb_attrs[0],
+                axial_n,
+                3000.0,
+                term == LoadTerm::Long,
+            )
+            .unwrap_err();
+            assert!(reason.contains("設計軸力 N が非有限"), "{reason}");
+            let rows = check_ends(
+                &model,
+                [
+                    [axial_n, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [-200_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                ],
+                term,
+            );
+            let [(start_id, start_xi, CheckOutcome::Skipped { reason }), (end_id, end_xi, CheckOutcome::Checked(end))] =
+                rows.as_slice()
+            else {
+                panic!("{rows:?}");
+            };
+            assert_eq!((*start_id, *start_xi), (input::BRACE, 0.0));
+            assert!(reason.contains("設計軸力 N が非有限"), "{reason}");
+            assert_eq!((*end_id, *end_xi), (input::BRACE, 1.0));
+            assert_eq!(end.ratio(), if term == LoadTerm::Short { 2.0 } else { 3.0 });
+            assert!(!end.ok());
+        }
+    }
+}
+
+#[test]
+fn brb_nonfinite_axial_keeps_independent_length_ng_and_torsion_reason() {
+    let mut model = input::model();
+    model.nodes[1].coord[0] = 3000.0;
+    model.brb_attrs[0].length_reduction = Some(0.0);
+    for (limit_mm, expected_ratio) in [(2400.0, 1.25), (f64::from_bits(1), f64::MAX)] {
+        model.brb_attrs[0].critical_length = Some(limit_mm);
+        let rows = check_ends(
+            &model,
+            [[f64::NAN, 0.0, 0.0, f64::INFINITY, 0.0, 0.0], [0.0; 6]],
+            LoadTerm::Short,
+        );
+        let [(checked_id, checked_xi, CheckOutcome::Checked(length)), (skipped_id, skipped_xi, CheckOutcome::Skipped { reason }), (_, 1.0, CheckOutcome::Checked(_))] =
+            rows.as_slice()
+        else {
+            panic!("{rows:?}");
+        };
+        assert_eq!((*checked_id, *checked_xi), (input::BRACE, 0.0));
+        assert_eq!((*skipped_id, *skipped_xi), (input::BRACE, 0.0));
+        assert_eq!(length.ratio(), expected_ratio);
+        assert!(!length.ok());
+        assert_eq!(length.components[0].kind, CheckKind::BucklingLength);
+        assert!(length.components[0].detail.contains("Lk/限界座屈長"));
+        assert!(reason.contains("設計軸力 N が非有限"), "{reason}");
+        assert!(reason.contains("Mxが非有限"), "{reason}");
+    }
 }
 
 #[test]

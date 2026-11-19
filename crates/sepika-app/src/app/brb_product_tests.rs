@@ -17,6 +17,24 @@ pub(crate) fn analyzed_pipe_app(frame_use: FrameSectionUse) -> App {
     analyze(input::pipe_with_brb_attr(frame_use))
 }
 
+pub(crate) fn app_with_nonfinite_brb_axial(limit_mm: f64) -> App {
+    let mut model = input::model();
+    model.nodes[1].coord[0] = 3000.0;
+    model.brb_attrs[0].critical_length = Some(limit_mm);
+    model.brb_attrs[0].length_reduction = Some(0.0);
+    let mut app = analyze(model);
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    bundle.statics[0].1.member_forces[0].1.at[0].1[0] = f64::NAN;
+    bundle.member_forces[0].1.at[0].1[0] = f64::NAN;
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+
 fn analyze(model: Model) -> App {
     let mut app = App::default();
     app.load_model(model);
@@ -196,6 +214,86 @@ fn brb_product_old_or_unversioned_checks_require_explicit_recheck() {
             expected
         );
     }
+}
+
+#[test]
+fn brb_nonfinite_axial_and_known_length_ng_survive_reload() {
+    let mut app = app_with_nonfinite_brb_axial(2400.0);
+    let bundle = app.current_design_results().unwrap();
+    assert_eq!(
+        bundle.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    let [member] = bundle.member_checks.as_slice() else {
+        panic!("{:?}", bundle.member_checks);
+    };
+    assert_eq!(member.elem, input::BRACE);
+    let [length, axial, finite] = member.positions.as_slice() else {
+        panic!("{:?}", member.positions);
+    };
+    assert_eq!((length.xi, axial.xi, finite.xi), (0.0, 0.0, 1.0));
+    assert!(matches!(&length.outcome, CheckOutcome::Checked(result)
+        if result.components[0].kind == CheckKind::BucklingLength && result.ratio() == 1.25));
+    assert!(matches!(&axial.outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("設計軸力 N が非有限")));
+    let expected = serde_json::to_value(&bundle.member_checks).unwrap();
+
+    let path =
+        std::env::temp_dir().join(format!("sepika-brb-nonfinite-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    std::fs::remove_file(path).unwrap();
+    assert!(loaded.current_static().unwrap().member_forces[0].1.at[0].1[0].is_nan());
+    assert_eq!(
+        serde_json::to_value(&loaded.current_design_results().unwrap().member_checks).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn brb_old_length_only_pass_requires_recheck_using_saved_forces() {
+    let mut app = app_with_nonfinite_brb_axial(6000.0);
+    let expected =
+        serde_json::to_value(&app.current_design_results().unwrap().member_checks).unwrap();
+    let checks = &mut app.core.scoped.results.as_mut().unwrap().member_checks;
+    assert!(matches!(
+        checks[0].positions[0].outcome,
+        CheckOutcome::Skipped { .. }
+    ));
+    checks[0].positions[0].outcome = CheckOutcome::Checked(CheckResult {
+        basis: "座屈補剛ブレース（メーカー許容値による検定）".into(),
+        detail: String::new(),
+        components: vec![CheckComponent {
+            kind: CheckKind::Axial,
+            ratio: 0.5,
+            detail: String::new(),
+        }],
+    });
+    let (mut loaded, path) = super::result_contract_tests::restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(75),
+        "brb-nonfinite-legacy",
+    );
+    std::fs::remove_file(path).unwrap();
+    assert!(loaded.current_static().unwrap().member_forces[0].1.at[0].1[0].is_nan());
+    assert!(loaded.current_design_results().is_none());
+    loaded.run_design_check();
+    let bundle = loaded.current_design_results().unwrap();
+    assert_eq!(
+        bundle.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        serde_json::to_value(&bundle.member_checks).unwrap(),
+        expected
+    );
 }
 
 #[test]

@@ -32,9 +32,8 @@ use super::CheckRatioFilter;
 /// （[`theme::check_ratio_color`]）だけで余裕度を示す。
 pub(super) const LABEL_MIN_RATIO: f64 = 0.8;
 
-/// `CheckKind` の定義順（Bending→…→Deflection→Provision）で
-/// 固定した全種一覧。フィルタ選択肢・ツールチップの列順を安定させるために使う。
-const ALL_KINDS: [CheckKind; 7] = [
+/// `CheckKind` の定義順で、フィルタ選択肢・ツールチップの列順を揃える。
+const ALL_KINDS: [CheckKind; 8] = [
     CheckKind::Bending,
     CheckKind::Shear,
     CheckKind::Bond,
@@ -42,6 +41,7 @@ const ALL_KINDS: [CheckKind; 7] = [
     CheckKind::Axial,
     CheckKind::Deflection,
     CheckKind::Provision,
+    CheckKind::BucklingLength,
 ];
 
 /// フィルタ `filter` を検定結果 `outcome` に適用した結果（検定比, OK か）を
@@ -2374,6 +2374,40 @@ mod issue901_tests {
             .shapes
             .iter()
             .any(|s| has_text(&s.shape, "端部低減距離")));
+    }
+
+    #[test]
+    fn brb_nonfinite_axial_displays_unchecked_and_preserves_length_ng() {
+        for (limit_mm, expected_ng) in [(6000.0, None), (2400.0, Some((1.25, false)))] {
+            let mut app = crate::app::brb_product_tests::app_with_nonfinite_brb_axial(limit_mm);
+            app.ui.view.check_ratio_label_all = true;
+            let checks = &app.current_design_results().unwrap().member_checks;
+            let member = &checks[0];
+            let (_, rows) = build_tooltip_rows(&member.positions);
+            assert!(rows.iter().any(|row| {
+                matches!(&row.verdict, RowVerdict::Skipped(reason)
+                    if reason.contains("設計軸力 N が非有限"))
+            }));
+            for filter in [
+                CheckRatioFilter::Max,
+                CheckRatioFilter::Kind(CheckKind::BucklingLength),
+            ] {
+                let ratios = member_ratios_for_filter(checks, filter);
+                assert_eq!(ratios.get(&member.elem).copied(), expected_ng);
+            }
+            let rendered = render_two_node_checks(&mut app);
+            assert_eq!(is_gray_member(&rendered), expected_ng.is_none());
+            assert!(rendered
+                .shapes
+                .iter()
+                .any(|s| has_text(&s.shape, "設計軸力 N が非有限")));
+            if expected_ng.is_some() {
+                assert!(rendered
+                    .shapes
+                    .iter()
+                    .any(|s| has_text(&s.shape, "座屈長さ 1.25 超過")));
+            }
+        }
     }
 
     #[test]

@@ -81,7 +81,7 @@ pub struct MemberDesignCheckOptions<'a> {
 pub struct MemberDesignCheckReport {
     /// 部材断面検定（危険断面位置・BRB・PCa 水平接合面を含む）。
     /// RC・SRC・CFTでねじりモーメントが非零または非有限の位置には未算定行を返す。
-    /// 同じ位置の既存の検定式による不適合は別行で返す。
+    /// BRBで設計軸力が非有限の位置にも未算定行を返す。同じ位置の既知の不適合は別行で返す。
     pub member_checks: Vec<(ElemId, f64, CheckOutcome)>,
     /// 必要横補剛箇所数の参考結果。検定比・合否には含めない。
     pub lateral_bracing_references: Vec<(
@@ -179,9 +179,9 @@ fn push_strength_outcome(
     elem: ElemId,
     pos: f64,
     outcome: CheckOutcome,
-    torsion_reason: Option<&str>,
+    incomplete_reason: Option<&str>,
 ) {
-    let Some(torsion_reason) = torsion_reason else {
+    let Some(incomplete_reason) = incomplete_reason else {
         checks.push((elem, pos, outcome));
         return;
     };
@@ -192,11 +192,21 @@ fn push_strength_outcome(
             if !result.components.is_empty() {
                 checks.push((elem, pos, CheckOutcome::Checked(result)));
             }
-            torsion_reason.into()
+            incomplete_reason.into()
         }
-        CheckOutcome::Skipped { reason } => format!("{reason}。{torsion_reason}"),
+        CheckOutcome::Skipped { reason } => format!("{reason}。{incomplete_reason}"),
     };
     checks.push((elem, pos, CheckOutcome::Skipped { reason }));
+}
+
+fn brb_torsion_reason(mx: f64) -> Option<&'static str> {
+    if mx == 0.0 {
+        None
+    } else if mx.is_finite() {
+        Some("ねじりモーメントMxが作用しています。BRBの製品許容値による検定の適用範囲は軸力と座屈長さです")
+    } else {
+        Some("ねじりモーメントMxが非有限です")
+    }
 }
 
 struct BrbAxis {
@@ -610,6 +620,19 @@ pub fn run_member_design_checks(
                 continue;
             }
             let mfa = MemberForcesAt::from_local(*pos, *forces);
+            if let Some(brb) = brb.filter(|_| !mfa.n.is_finite()) {
+                let axial_reason = crate::brb::NONFINITE_AXIAL_REASON;
+                let reason = match brb_torsion_reason(mfa.mx) {
+                    Some(torsion_reason) => format!("{axial_reason}。{torsion_reason}"),
+                    None => axial_reason.into(),
+                };
+                let outcome = match crate::brb::brb_length_check(brb, physical_length_mm) {
+                    Ok(result) => CheckOutcome::Checked(result),
+                    Err(reason) => CheckOutcome::Skipped { reason },
+                };
+                push_strength_outcome(&mut member_checks, *elem_id, *pos, outcome, Some(&reason));
+                continue;
+            }
             let missing_q0 = kind == MemberKind::Girder
                 && options.long_member_forces.is_some()
                 && options.qd_method != QdMethod::Qd2
@@ -663,19 +686,14 @@ pub fn run_member_design_checks(
                     reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
                 }
             } else if let Some(brb) = brb {
-                if mfa.mx == 0.0 {
+                if let Some(reason) = brb_torsion_reason(mfa.mx) {
+                    CheckOutcome::Skipped {
+                        reason: reason.into(),
+                    }
+                } else {
                     match crate::brb::brb_check(brb, mfa.n, physical_length_mm, brb_long) {
                         Ok(result) => CheckOutcome::Checked(result),
                         Err(reason) => CheckOutcome::Skipped { reason },
-                    }
-                } else {
-                    CheckOutcome::Skipped {
-                        reason: if mfa.mx.is_finite() {
-                            "ねじりモーメントMxが作用しています。BRBの製品許容値による検定の適用範囲は軸力と座屈長さです"
-                        } else {
-                            "ねじりモーメントMxが非有限です"
-                        }
-                        .into(),
                     }
                 }
             } else {
