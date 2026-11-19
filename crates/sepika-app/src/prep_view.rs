@@ -493,7 +493,8 @@ fn panel_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     ui.colored_label(
         crate::theme::UI_MUTED,
         "柱の強軸・弱軸に対応する2方向の諸元を表示します。\
-         各方向のせん断剛性は G・Ve です。\
+         円形鋼管のせん断剛性は G・db・A/2（A は仕口パネルの全断面積）、\
+         H 形鋼と角形鋼管は G・Ve です。\
          H 形柱の弱軸側はフランジ2枚の純せん断モデルで、曲げによる耐力低下を\
          含めず、耐力を過大評価する可能性があります。\
          RC・SRC・CFT の接合部はモデル化の対象外で、従来どおり剛域で有限寸法を評価します\

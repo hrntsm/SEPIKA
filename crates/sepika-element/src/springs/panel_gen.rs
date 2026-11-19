@@ -53,9 +53,9 @@ pub struct GeneratedPanel {
     pub db: [f64; 2],
     /// 抵抗板 1 枚あたりの有効厚 `tp` `[mm]`。
     pub tp: [f64; 2],
-    /// 実効体積 `Ve` `[mm³]`。
+    /// 降伏耐力の算定に用いる実効体積 `Ve` `[mm³]`。
     pub ve: [f64; 2],
-    /// 柱の強軸・弱軸に対応するせん断剛性 `G・Ve` [N·mm/rad]。
+    /// 柱の強軸・弱軸に対応する初期せん断剛性 [N·mm/rad]。
     pub k_panel: [f64; 2],
 }
 
@@ -112,8 +112,6 @@ fn panel_at(
     let Some(joint) = joint else {
         return Ok(None);
     };
-    let k_panel = joint.panels.map(|panel| joint.g * panel.ve);
-
     let connected: Vec<NodeId> = adjacency
         .elements_at(model, node)
         .filter_map(|e| {
@@ -129,7 +127,7 @@ fn panel_at(
             db: [joint.db; 2],
             tp: joint.panels.map(|panel| panel.geometry.tp),
             ve: joint.panels.map(|panel| panel.ve),
-            k_panel,
+            k_panel: joint.panels.map(|panel| panel.stiffness_n_mm),
         },
         connected,
     )))

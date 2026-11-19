@@ -7,7 +7,7 @@
 
 use crate::app::App;
 use sepika_core::ids::SectionId;
-use sepika_core::model::FrameSectionUse;
+use sepika_core::model::{FrameSectionUse, Section};
 use sepika_core::section_shape::{
     BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
     RectColumnHoop, SectionShape,
@@ -685,8 +685,8 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         );
                         app.core.scoped.staleness.mark_edited();
                     }
-                    let current_tp = app.core.model.sections[idx].panel_thickness.unwrap_or(0.0);
-                    panel_thickness_field(ui, sid, current_tp, &mut pending_tp);
+                    let section = &app.core.model.sections[idx];
+                    panel_thickness_field(ui, sid, section, &mut pending_tp);
                 }
                 None => {
                     apply_resp.on_hover_text("断面テーブルで対象断面を選択してください");
@@ -1211,18 +1211,13 @@ fn nonzero_layers(layers: &[u32]) -> Vec<u32> {
 }
 
 /// 選択中の断面へ仕口パネルの板厚を入力する欄。
-///
-/// ダイアフラム補強・ダブラープレートで接合部の板厚を増した場合に、柱の断面形状から
-/// 算定される値（H 形＝ウェブ厚、角形・円形＝板厚）を上書きする。空欄・0 は未入力で、
-/// 断面形状からの算定値を用いる）。
-///
-/// 仕口パネルのモデル化と S 造パネルゾーンの断面算定の双方がこの値を使う。
 fn panel_thickness_field(
     ui: &mut egui::Ui,
     sid: SectionId,
-    current: f64,
+    section: &Section,
     pending: &mut Option<(SectionId, f64)>,
 ) {
+    let current = section.panel_thickness.unwrap_or(0.0);
     let id_buf = ui.id().with(("panel_thickness", sid.0));
     let mut buf: String = ui.data_mut(|d| d.get_temp(id_buf)).unwrap_or_else(|| {
         if current > 0.0 {
@@ -1235,11 +1230,16 @@ fn panel_thickness_field(
     ui.horizontal(|ui| {
         ui.label("パネル板厚 tp [mm]");
         let resp = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(60.0));
-        let resp = resp.on_hover_text(
+        let help = if matches!(section.shape, Some(SectionShape::SteelPipe { .. })) {
+            "円形鋼管の仕口パネルの板厚。解析では全周で一様な厚さを入力します。\
+             板厚中心径を保ったときに内径が正になる厚さを指定してください。\
+             空欄・0なら鋼管の実壁厚を使います。"
+        } else {
             "柱梁接合部の仕口パネルの板厚。ダイアフラム補強・ダブラープレートで\
-             増厚した場合に入力します。空欄なら柱の断面形状から算定します\
-             （H 形＝ウェブ厚、角形・円形＝板厚）",
-        );
+             増厚した場合に入力します。空欄・0なら柱の断面形状から算定します\
+             （H 形の強軸＝ウェブ厚、弱軸＝フランジ厚、鋼管＝壁厚）。"
+        };
+        let resp = resp.on_hover_text(help);
         if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             let value = buf.trim().parse::<f64>().unwrap_or(0.0).max(0.0);
             if (value - current).abs() > 1e-9 {

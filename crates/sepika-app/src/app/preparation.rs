@@ -238,7 +238,7 @@ pub struct PrepPanelRow {
     pub tp: [f64; 2],
     /// 実効体積 Ve `[mm³]`。要素順は柱の強軸・弱軸。
     pub ve: [f64; 2],
-    /// パネルせん断剛性 G・Ve [N·mm/rad]。要素順は柱の強軸・弱軸。
+    /// パネルの初期せん断剛性 [N·mm/rad]。要素順は柱の強軸・弱軸。
     pub k_panel: [f64; 2],
 }
 
