@@ -189,6 +189,7 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -229,6 +230,7 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -311,6 +313,7 @@ fn test_ultimate_sr235_requires_fy() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -369,6 +372,7 @@ fn test_ultimate_unknown_sd295_is_unsupported() {
                 (
                     ElemId(1),
                     MemberDemand {
+                        mz: 1.0e6,
                         q_long: Some(0.0),
                         ..MemberDemand::axial(0.0)
                     },
@@ -389,6 +393,7 @@ fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(ql),
                 ..MemberDemand::axial(0.0)
             },
@@ -440,6 +445,7 @@ fn test_ultimate_check_option_flags() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -487,6 +493,7 @@ fn test_ultimate_check_skips_non_rc() {
         &[(
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -524,6 +531,7 @@ fn test_ultimate_check_biaxial_shear() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -570,6 +578,7 @@ fn test_ultimate_check_biaxial_bending() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -607,6 +616,7 @@ fn test_ultimate_check_biaxial_bending() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -641,6 +651,7 @@ fn test_ultimate_check_shear_method_ductility() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -738,6 +749,7 @@ fn test_ultimate_check_pushover_demand() {
         (
             ElemId(1),
             MemberDemand {
+                mz: 1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -998,6 +1010,38 @@ fn column_circle_shape() -> SectionShape {
     }
 }
 
+#[test]
+fn static_beam_with_unresolved_bending_direction_still_rejects_invalid_reinforcement() {
+    for (top, bottom) in [(vec![0], vec![2]), (vec![], vec![])] {
+        let mut shape = beam_rect_shape();
+        let SectionShape::RcBeamRect { rebar, .. } = &mut shape else {
+            unreachable!();
+        };
+        rebar.top = top;
+        rebar.bottom = bottom;
+        let model = single_shape_model(shape, 400.0, 600.0, true);
+        for (mz, static_beam_bending) in [
+            (-20e6, StaticBeamBending::Mixed),
+            (20e6, StaticBeamBending::Unverified),
+            (0.0, StaticBeamBending::Signed),
+        ] {
+            let demand = MemberDemand {
+                mz,
+                static_beam_bending,
+                q_long: Some(0.0),
+                ..Default::default()
+            };
+            let reason = collect_rc_ultimate_checks(
+                &model,
+                &[(ElemId(0), demand)],
+                &UltimateShearOptions::default(),
+            )
+            .unwrap_err();
+            assert!(reason.contains("部材 ID 0 の配筋形状が不正"), "{reason}");
+        }
+    }
+}
+
 /// 実配筋モデルの新型バリアント（梁・矩形柱・円形柱）が終局検定の対象になる。
 #[test]
 fn test_ultimate_check_new_rc_shapes_supported() {
@@ -1009,6 +1053,7 @@ fn test_ultimate_check_new_rc_shapes_supported() {
         &[(
             ElemId(0),
             MemberDemand {
+                mz: -1.0e6,
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },

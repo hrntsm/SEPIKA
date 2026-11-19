@@ -12,6 +12,18 @@ pub enum UltimateDemandMode {
     ConfirmedTotal,
 }
 
+/// 静的RC梁の強軸曲げ符号の確認結果。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StaticBeamBending {
+    /// `MemberDemand::mz` の符号で引張側を指定する。
+    #[default]
+    Signed,
+    /// 部材の評価位置に正と負の強軸曲げがある。
+    Mixed,
+    /// 符号を集約前の評価位置から確認できない。
+    Unverified,
+}
+
 /// 圧縮正の軸力 `[N]`、曲げ `[N·mm]` と方式を持つ終局需要。
 /// 静的ヒンジ需要は強軸の QL を要し、二軸せん断の判定には弱軸の QL も参照する。
 #[derive(Clone, Copy, Debug, Default)]
@@ -19,8 +31,10 @@ pub struct MemberDemand {
     pub mode: UltimateDemandMode,
     /// 設計軸力 `[N]`（**圧縮正**）。柱の Mu・軸余裕度に用いる。
     pub n_axial: f64,
-    /// 強軸（せい方向）まわりの設計用曲げモーメント Mmx [N·mm]（符号は内部で abs）。
+    /// 強軸曲げ [N·mm]。符号を確認した静的RC梁は、最大絶対値をとる評価位置の符号を保つ（負が上端引張）。
     pub mz: f64,
+    /// 静的RC梁の強軸曲げ符号。直接の需要入力では既定で符号付きの値を指定する。
+    pub static_beam_bending: StaticBeamBending,
     /// 弱軸（幅方向）まわりの設計用曲げモーメント Mmy [N·mm]（符号は内部で abs）。
     pub my: f64,
     /// 設計用せん断力 Qm `[N]`（プッシュオーバー応答の強軸せん断。`Some` のとき
@@ -43,13 +57,7 @@ impl MemberDemand {
         Self {
             mode: UltimateDemandMode::StaticHinge,
             n_axial,
-            mz: 0.0,
-            my: 0.0,
-            shear: None,
-            shear_weak: None,
-            rp: None,
-            q_long: None,
-            q_long_weak: None,
+            ..Self::default()
         }
     }
 
@@ -73,8 +81,7 @@ impl MemberDemand {
             shear: Some(shear),
             shear_weak: Some(shear_weak),
             rp: Some(rp),
-            q_long: None,
-            q_long_weak: None,
+            ..Self::default()
         }
     }
 }

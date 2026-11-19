@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use sepika_core::ids::ElemId;
 use sepika_core::model::ElementKind;
-use sepika_design_jp::ultimate::MemberDemand;
+use sepika_core::section_shape::SectionShape;
+use sepika_design_jp::ultimate::{MemberDemand, StaticBeamBending};
 use sepika_element::frame::beam::MemberForces;
 use sepika_solver::nonlinear::pushover::PushoverMemberResponse;
 
@@ -21,6 +22,7 @@ pub fn q_long_map_from_member_forces(
 /// 静的内力から終局検定用の部材需要を組み立てる。
 ///
 /// 軸力は引張正の始端値を圧縮正へ変換し、曲げは部材内の最大絶対値を採用する。
+/// この入口の結果は静的RC梁では強軸曲げの符号を未確認として扱う。
 /// `q_long_by_elem` がない場合は強軸 QL を未設定とする。弱軸 QL は設定しない。
 pub fn member_demand_from_static_forces(
     member_forces: &[(ElemId, MemberForces)],
@@ -33,6 +35,7 @@ pub fn member_demand_from_static_forces(
                 *id,
                 MemberDemand {
                     q_long: q_long_by_elem.and_then(|m| m.get(id).copied()),
+                    static_beam_bending: StaticBeamBending::Unverified,
                     ..static_member_demand(mf)?
                 },
             ))
@@ -100,6 +103,7 @@ pub fn member_demand_from_pushover(
 }
 
 /// 保存長期termsの同一部材・同一位置6成分から、両軸の QL を含む静的ヒンジ需要を作る。
+/// RC矩形梁の強軸曲げは最大絶対値をとる位置の符号と、両符号の有無を保持する。
 /// 必要な応力が不完全な場合や、引張専用ブレースを反復解析する場合は理由付きで拒否する。
 pub fn complete_ultimate_static_demand<F>(
     model: &sepika_core::model::Model,
@@ -145,19 +149,16 @@ where
     let required: Vec<_> = model
         .elements
         .iter()
-        .filter(|elem| {
-            matches!(
-                model.element_section(elem).and_then(|s| s.shape.as_ref()),
-                Some(
-                    sepika_core::section_shape::SectionShape::RcBeamRect { .. }
-                        | sepika_core::section_shape::SectionShape::RcColumnRect { .. }
-                        | sepika_core::section_shape::SectionShape::RcColumnCircle { .. }
-                        | sepika_core::section_shape::SectionShape::CftBox { .. }
-                        | sepika_core::section_shape::SectionShape::CftPipe { .. }
-                )
-            )
-        })
-        .map(|elem| elem.id)
+        .filter_map(
+            |elem| match model.element_section(elem).and_then(|s| s.shape.as_ref())? {
+                SectionShape::RcBeamRect { .. } => Some((elem.id, true)),
+                SectionShape::RcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::CftBox { .. }
+                | SectionShape::CftPipe { .. } => Some((elem.id, false)),
+                _ => None,
+            },
+        )
         .collect();
     let mut combined: Option<Vec<(ElemId, MemberForces)>> = None;
     for (case, factor) in terms {
@@ -167,7 +168,7 @@ where
                 case.0, factor
             )
         })?;
-        forces.retain(|(id, _)| required.contains(id));
+        forces.retain(|(id, _)| required.iter().any(|(required_id, _)| required_id == id));
         let mut seen = std::collections::HashSet::new();
         for (id, mf) in &forces {
             if !seen.insert(*id) {
@@ -190,7 +191,7 @@ where
                 ));
             }
         }
-        for id in &required {
+        for (id, _) in &required {
             if !seen.contains(id) {
                 return Err(format!(
                     "gravity_member_missing: case={} member={} purpose=frame_long",
@@ -248,14 +249,19 @@ where
     Ok(forces
         .iter()
         .filter_map(|(id, mf)| {
-            Some((
-                *id,
-                MemberDemand {
-                    q_long: Some(max_abs_force(mf, 1)),
-                    q_long_weak: Some(max_abs_force(mf, 2)),
-                    ..static_member_demand(mf)?
-                },
-            ))
+            let mut demand = static_member_demand(mf)?;
+            demand.q_long = Some(max_abs_force(mf, 1));
+            demand.q_long_weak = Some(max_abs_force(mf, 2));
+            if required.contains(&(*id, true)) {
+                let (min, max) = mf.at.iter().fold((0.0_f64, 0.0_f64), |(min, max), (_, f)| {
+                    (min.min(f[5]), max.max(f[5]))
+                });
+                demand.mz = if -min > max { min } else { max };
+                if min < 0.0 && max > 0.0 {
+                    demand.static_beam_bending = StaticBeamBending::Mixed;
+                }
+            }
+            Some((*id, demand))
         })
         .collect())
 }
