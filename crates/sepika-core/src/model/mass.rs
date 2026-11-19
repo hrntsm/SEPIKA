@@ -248,20 +248,7 @@ pub fn validate_section_materials(
         ));
     }
 
-    let steel_shape = matches!(
-        shape,
-        SectionShape::SteelH { .. }
-            | SectionShape::SteelBox { .. }
-            | SectionShape::SteelAngle { .. }
-            | SectionShape::SteelChannel { .. }
-            | SectionShape::SteelTee { .. }
-            | SectionShape::SteelPipe { .. }
-            | SectionShape::SteelFlatBar { .. }
-            | SectionShape::SteelRoundBar { .. }
-            | SectionShape::SteelBuiltH { .. }
-            | SectionShape::SteelLipChannel { .. }
-    );
-    if steel_shape {
+    if shape.is_steel() {
         let Some(main) = main else {
             return Err(format!("鋼材断面{}の主材料が未設定です", section.name));
         };
