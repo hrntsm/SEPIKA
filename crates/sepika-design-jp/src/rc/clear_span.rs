@@ -1,10 +1,32 @@
-//! RC部材の終局検定に用いる内法長さ。
-
 use sepika_core::geom::vec3::dist;
 use sepika_core::model::{ElementData, Model};
+use std::fmt;
+
+/// RC梁・柱の内法長さを確認できない理由。
+#[derive(Debug)]
+pub enum RcClearSpanError {
+    /// フェース距離が未算定の端。
+    Uncomputed(&'static str),
+    /// 材軸長・フェース距離・控除後の長さのいずれかが不正。
+    Invalid(String),
+}
+
+impl fmt::Display for RcClearSpanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Uncomputed(end) => write!(
+                f,
+                "{end}のフェース距離が未算定のため内法長さを確認できません"
+            ),
+            Self::Invalid(reason) => f.write_str(reason),
+        }
+    }
+}
+
+impl std::error::Error for RcClearSpanError {}
 
 /// 両端フェースが算定済みで、内法長さ [mm] が有限な正値の場合に返す。
-pub(super) fn clear_span(elem: &ElementData, model: &Model) -> Result<f64, String> {
+pub fn rc_member_clear_span(elem: &ElementData, model: &Model) -> Result<f64, RcClearSpanError> {
     let faces = (elem.rigid_zone.face_i, elem.rigid_zone.face_j);
     let (Some(face_i_mm), Some(face_j_mm)) = faces else {
         let missing = match faces {
@@ -12,19 +34,17 @@ pub(super) fn clear_span(elem: &ElementData, model: &Model) -> Result<f64, Strin
             (None, _) => "i端",
             _ => "j端",
         };
-        return Err(format!(
-            "ultimate_clear_span_uncomputed: {missing}のフェース距離が未算定のため内法長さを確認できません"
-        ));
+        return Err(RcClearSpanError::Uncomputed(missing));
     };
     for (end, distance) in [("i端", face_i_mm), ("j端", face_j_mm)] {
         if !distance.is_finite() || distance < 0.0 {
-            return Err(format!(
-                "ultimate_clear_span_invalid: {end}のフェース距離 {distance} mm が有限な非負値ではありません"
-            ));
+            return Err(RcClearSpanError::Invalid(format!(
+                "{end}のフェース距離 {distance} mm が有限な非負値ではありません"
+            )));
         }
     }
     let invalid_axis = |reason: &str| {
-        format!("ultimate_clear_span_invalid: 部材の材軸長を確認できません（{reason}）")
+        RcClearSpanError::Invalid(format!("部材の材軸長を確認できません（{reason}）"))
     };
     let axis_ends = model
         .primary_frame_axis_ends(elem)
@@ -47,9 +67,9 @@ pub(super) fn clear_span(elem: &ElementData, model: &Model) -> Result<f64, Strin
     }
     let span_mm = axis_mm - face_i_mm - face_j_mm;
     if !span_mm.is_finite() || span_mm <= 0.0 {
-        return Err(format!(
-            "ultimate_clear_span_invalid: 材軸長 {axis_mm} mm、i端フェース距離 {face_i_mm} mm、j端フェース距離 {face_j_mm} mm では正の内法長さが成立しません"
-        ));
+        return Err(RcClearSpanError::Invalid(format!(
+            "材軸長 {axis_mm} mm、i端フェース距離 {face_i_mm} mm、j端フェース距離 {face_j_mm} mm では正の内法長さが成立しません"
+        )));
     }
     Ok(span_mm)
 }

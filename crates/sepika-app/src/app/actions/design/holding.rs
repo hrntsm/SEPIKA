@@ -639,6 +639,14 @@ impl App {
                 {
                     return Err(format!("部材 {:?}・断面 {:?}: {reason}", elem.id, sec.id));
                 }
+                let story_index = elem
+                    .nodes
+                    .iter()
+                    .filter_map(|nid| model.nodes.get(nid.index()))
+                    .filter_map(|node| node.story)
+                    .max()
+                    .and_then(|story| story.index().checked_sub(1))
+                    .filter(|&index| index < n_stories);
                 let rank = if is_brace_elem && elem_steel {
                     let len = model.member_length(elem);
                     let i_min = sec.iy.min(sec.iz);
@@ -817,14 +825,10 @@ impl App {
                             elem.id, sec.id
                         ));
                     };
-                    let geom_len = model.member_length(elem);
-                    let face_sum =
-                        elem.rigid_zone.face_i_or_zero() + elem.rigid_zone.face_j_or_zero();
-                    let clear_span = if geom_len - face_sum > 0.0 {
-                        geom_len - face_sum
-                    } else {
-                        geom_len
-                    };
+                    if story_index.is_none() {
+                        continue;
+                    }
+                    let clear_span = rc_rank_clear_span(model, elem, sec)?;
                     rank_new_rc_beam(
                         elem.id, sec.id, *b, *d, rebar, mat, rebar_mat, shear_mat, resp, clear_span,
                     )?
@@ -847,14 +851,10 @@ impl App {
                             elem.id, sec.id
                         ));
                     };
-                    let geom_len = model.member_length(elem);
-                    let face_sum =
-                        elem.rigid_zone.face_i_or_zero() + elem.rigid_zone.face_j_or_zero();
-                    let clear_span = if geom_len - face_sum > 0.0 {
-                        geom_len - face_sum
-                    } else {
-                        geom_len
-                    };
+                    if story_index.is_none() {
+                        continue;
+                    }
+                    let clear_span = rc_rank_clear_span(model, elem, sec)?;
                     match shape {
                         SectionShape::RcColumnRect { b, d, rebar } => rank_new_rc_column_rect(
                             elem.id, sec.id, *b, *d, rebar, mat, rebar_mat, shear_mat, resp,
@@ -868,21 +868,9 @@ impl App {
                 } else {
                     continue;
                 };
-                let Some(story_idx) = elem
-                    .nodes
-                    .iter()
-                    .filter_map(|nid| model.nodes.get(nid.index()))
-                    .filter_map(|n| n.story)
-                    .max()
-                else {
+                let Some(idx) = story_index else {
                     continue;
                 };
-                let Some(idx) = story_idx.index().checked_sub(1) else {
-                    continue;
-                };
-                if idx >= n_stories {
-                    continue;
-                }
                 per_story[idx].push(rank);
                 computed.push((elem.id, rank));
 
@@ -1026,6 +1014,19 @@ impl App {
         });
         Ok((result, story_ranks))
     }
+}
+
+fn rc_rank_clear_span(
+    model: &sepika_core::model::Model,
+    elem: &sepika_core::model::ElementData,
+    section: &sepika_core::model::Section,
+) -> Result<f64, String> {
+    sepika_design_jp::rc::rc_member_clear_span(elem, model).map_err(|reason| {
+        format!(
+            "部材 ID {}・断面 {}（ID {}）: {reason}。自動部材種別・Ds・必要保有水平耐力・合否を保留します",
+            elem.id.0, section.name, section.id.0,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1305,12 +1306,99 @@ fn rank_new_rc_beam_side(
 }
 
 #[cfg(test)]
+#[path = "../../../../tests/support/holding_clear_span.rs"]
+mod holding_clear_span;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use sepika_core::model::Material;
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar};
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
     use sepika_design_jp::secondary::member_rank::worst_rank;
+
+    #[test]
+    fn rc_rank_candidates_use_both_confirmed_faces() {
+        use super::holding_clear_span::rc_rank_portal;
+        use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
+        use MemberRank::{FA, FB, FD};
+
+        // 柱は両端各 300 mm の控除で内法 1350 mm となり、内法高さ比 2.25 で FB。
+        // 梁の内法 300 mm では Qmu 約 1.70 MN が Qsu 約 0.82 MN を上回り FD。
+        for (target, circular, height_mm, beam_faces, expected) in [
+            (ElemId(0), false, 3000.0, None, FA),
+            (ElemId(0), false, 1950.0, None, FB),
+            (ElemId(0), true, 3000.0, None, FA),
+            (ElemId(0), true, 1950.0, None, FB),
+            (ElemId(2), false, 3000.0, Some((Some(0.0), Some(0.0))), FA),
+            (
+                ElemId(2),
+                false,
+                3000.0,
+                Some((Some(1800.0), Some(1900.0))),
+                FD,
+            ),
+        ] {
+            let mut app = rc_rank_portal(expanded_model(), circular, height_mm, beam_faces);
+            let po = app
+                .core
+                .scoped
+                .results
+                .as_mut()
+                .unwrap()
+                .pushover_x
+                .as_mut()
+                .unwrap();
+            let step = po.ds_evaluation.as_ref().unwrap().step;
+            let response = po
+                .confirmed_history
+                .as_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|record| record.step == step)
+                .unwrap()
+                .members
+                .iter_mut()
+                .find(|member| member.elem == target)
+                .unwrap();
+            response.axial = 0.0;
+            response.shear_strong = 0.0;
+            response.shear_weak = 0.0;
+            let (candidate, _) = app.compute_unconfirmed_holding_capacity().unwrap();
+            assert!(
+                candidate.member_ranks.contains(&(target, expected)),
+                "{:?}",
+                candidate.member_ranks
+            );
+        }
+    }
+
+    #[test]
+    fn rc_rank_ignores_uncomputed_faces_of_a_foundation_beam() {
+        use super::holding_clear_span::rc_rank_portal;
+        use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
+        use sepika_core::model::ElementKind;
+
+        let mut model = expanded_model();
+        let foundation_beam = &mut model.elements[3];
+        foundation_beam.kind = ElementKind::Fiber;
+        foundation_beam.rigid_zone.face_i = None;
+        foundation_beam.rigid_zone.face_j = None;
+
+        let mut app = rc_rank_portal(model, false, 3000.0, None);
+        let (candidate, _) = app.compute_unconfirmed_holding_capacity().unwrap();
+        let zone = app.core.model.element(ElemId(3)).unwrap().rigid_zone;
+        assert_eq!((zone.face_i, zone.face_j), (None, None));
+        let mut members: Vec<_> = candidate.member_ranks.iter().map(|(id, _)| *id).collect();
+        members.sort_unstable();
+        assert_eq!(members, [ElemId(0), ElemId(1), ElemId(2)]);
+        let error = app.compute_holding_capacity().err().expect("保留");
+        assert!(
+            error.contains("全体・部分・局部崩壊形は採用保留"),
+            "{error}"
+        );
+        assert!(app.core.scoped.holding_capacity_source.is_none());
+    }
 
     fn single_wall_619_model(clear_height_mm: f64) -> sepika_core::model::Model {
         use sepika_core::section_shape::SectionShape;
