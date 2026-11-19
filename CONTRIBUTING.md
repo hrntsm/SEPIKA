@@ -93,7 +93,7 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 | `sepika-core/tests/support/secondary_materialization_model.rs` | 二次部材の解析要素化。coreの生成契約をジョブ・GUI入口で維持 | core/job `tests/secondary_materialization.rs`、app `src/app/tests.rs` |
 | `sepika-core/tests/support/steel_secondary_post_model.rs` | 鋼製間柱のモデル属性・材料対応。編集・検定・GUIで同じ入力を保持 | edit `src/secondary.rs`、design-jp `src/post.rs`、app `src/app/post_design_tests.rs`、job `tests/secondary_materialization.rs` |
 | `sepika-solver/tests/support/static_analysis_model.rs` | 柱の軸剛性設定と引張専用ブレース反復。solverの静的解析契約を各実行入口で維持 | solver `tests/parallel_batch.rs`、job `src/compute.rs`、app `src/app/actions/linear_static.rs`、mcp `src/tests.rs` |
-| `sepika-solver/tests/support/rc_wall_side_column_model.rs` | 側柱付きRC壁の共通face・剛性・力の分担。solverの壁系解析を要素・検定・重量・GUI/MCPでも検証 | solver `tests/wall_system_linear.rs`・`src/nonlinear/wall_reference.rs`、element `src/wall/static_face.rs`、design-jp `src/joint_wiring/tests.rs`、job `tests/wall_weight_partition.rs`・`tests/rc_wall_zero_span.rs`、app `src/app/rc_wall_side_column_tests.rs`（holding・viewerからも利用）、mcp `src/job/mod.rs`経由のdesign_check・pushover・time_history・server |
+| `sepika-solver/tests/support/rc_wall_side_column_model.rs` | 側柱付きRC壁の共通face・剛性・力の分担。solverの壁系解析を要素・検定・重量・GUI/MCPでも検証 | solver `tests/wall_system_linear.rs`・`src/nonlinear/wall_reference.rs`、element `src/wall/static_face.rs`、design-jp `src/joint_wiring/tests.rs`、job `tests/wall_weight_partition.rs`・`tests/rc_wall_zero_span.rs`、app `src/app/rc_wall_side_column_tests.rs`（holding・viewerからも利用）・`tests/rc_rank_clear_span.rs`、mcp `src/job/mod.rs`経由のdesign_check・pushover・time_history・server |
 | `sepika-solver/tests/support/wall_side_column.rs` | 共通断面の質量・慣性。solverの解析質量を準備・GUI入口でも検証 | solver `tests/common_section_mass.rs`、job `tests/wall_side_column_entry.rs`、app `src/app/tests.rs` |
 | `sepika-design-jp/tests/fixtures/rc_wall_cracking_model.rs`・`rc_wall_cracking_reference.rs` | RC壁のひび割れ耐力の入力と独立期待契約。design-jpの耐力計算をGUI・MCPでも照合 | design-jp `src/joint_wiring/tests.rs`、app `src/app/rc_wall_cracking_tests.rs`、mcp `src/job/design_check.rs`・`src/server.rs`（`src/job/mod.rs`から共有） |
 | `sepika-app/tests/fixtures/src_ql_contract.json` | SRCの重力参照・材料割当・保存契約。既存GUI固定入力をMCPの通常SRC柱検定でも使用 | app `src/app/src_ql_acceptance_tests.rs`、mcp `src/job/signed_q0_acceptance_tests.rs` |
@@ -107,7 +107,7 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 | `sepika-job/tests/fixtures/steel_slab_model.rs` | 鋼床板の密度・物理質量。jobの重量準備をGUI・MCP入口でも検証 | job `tests/steel_slab_density.rs`・`tests/slab_physical_mass.rs`、app `tests/slab_physical_mass.rs`・`src/app/tests.rs`、mcp `src/server.rs` |
 | `sepika-job/tests/fixtures/seismic_freshness_model.rs`・`high_density_steel_model.rs` | 地震荷重の更新と高密度鋼材。jobの荷重準備・検証契約をGUI・MCPからも検証。鋼床板モデルもこの入力を使用 | job `tests/seismic_freshness.rs`・`tests/high_density_steel.rs`・`tests/steel_weight_reduction.rs`・`tests/member_load_direction.rs`、app `src/app/tests.rs`、mcp `src/server.rs` |
 
-appの `tests/support/frame_gravity.rs` は `full_model.rs`・`wall_model.rs` の保存重力組合せ選択、
+appの `tests/support/frame_gravity.rs` は `full_model.rs`・`wall_model.rs` と、`tests/support/holding_clear_span.rs` 経由の `tests/rc_rank_clear_span.rs`・`src/app/actions/design/holding.rs` で保存重力組合せの選択に使う。
 `full_model_study.rs`・`full_model_study_wire.rs` は `full_model.rs` のGUI検討・Windows実通信テストを管理する。
 mcpの `tests/support/gui_probe.py` はGUI中継の外部プロセス操作を管理する。
 これらはGUI・通信固有なので計算用の共有入力へ移さない。
