@@ -91,3 +91,48 @@ fn rc_rank_and_ds_are_held_when_clear_span_is_unconfirmed() {
         );
     }
 }
+
+#[test]
+fn mixed_fiber_frame_reports_eccentricity_and_keeps_holding_capacity_adoption_separate() {
+    use sepika_app::summary::{build_report_csv, seismic_story_metrics};
+    use sepika_core::model::ElementKind;
+    use sepika_solver::statics::analysis::SeismicDir;
+
+    let mut model = rc_fixture::expanded_model();
+    model.elements[0].kind = ElementKind::Fiber;
+    model.elements[0].rigid_zone.face_i = Some(0.0);
+    model.elements[0].rigid_zone.face_j = Some(0.0);
+    let mut app = rc_rank_portal(model, false, 3000.0, None);
+    let metric = seismic_story_metrics(&app).remove(0);
+    assert!(metric.re.unwrap().is_finite());
+    assert!(metric.fes.unwrap().is_finite());
+    app.core.design_rank_auto = false;
+    let holding_reason = app.compute_holding_capacity().err().unwrap();
+    assert!(
+        holding_reason.contains("全体・部分・局部崩壊形は採用保留"),
+        "{holding_reason}"
+    );
+
+    let (_, x) = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .statics
+        .iter_mut()
+        .find(|(key, _)| *key == sepika_app::app::StaticCaseKey::Seismic(SeismicDir::X))
+        .unwrap();
+    x.member_forces.retain(|(id, _)| *id != ElemId(0));
+    let metric = seismic_story_metrics(&app).remove(0);
+    let reason = metric.re.unwrap_err();
+    assert!(
+        reason.contains("柱0") && reason.contains("始端の内力"),
+        "{reason}"
+    );
+    assert_eq!(metric.fes.unwrap_err(), reason);
+    assert!(metric.drift.unwrap().is_some());
+    assert!(build_report_csv(&app).contains(&reason));
+    let holding_reason = app.compute_holding_capacity().err().unwrap();
+    assert!(holding_reason.contains(&reason), "{holding_reason}");
+}

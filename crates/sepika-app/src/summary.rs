@@ -2111,6 +2111,219 @@ mod tests {
     }
 
     #[test]
+    fn reevaluation_holds_re_and_fes_when_a_fiber_column_cannot_be_traced() {
+        use sepika_core::ids::{ElemId, NodeId, StoryId};
+        use sepika_core::model::ElementKind;
+        use sepika_element::frame::beam::MemberForces;
+
+        let (mut model, mut response) = drift_fixture();
+        for (id, original, coord) in [
+            (4, 2, [300.0, 0.0, 1800.0]),
+            (5, 2, [600.0, 0.0, 2000.0]),
+            (6, 1, [0.0, 6000.0, 0.0]),
+            (7, 3, [0.0, 6000.0, 3000.0]),
+        ] {
+            let mut node = model.nodes[original].clone();
+            node.id = NodeId(id);
+            node.coord = coord;
+            model.nodes.push(node);
+            response.disp.push([0.0; 6]);
+        }
+        for node in &mut model.nodes {
+            node.story = match node.coord[2] {
+                0.0 => Some(StoryId(0)),
+                3000.0 => Some(StoryId(1)),
+                _ => None,
+            };
+        }
+        model.elements[0].nodes = [NodeId(2), NodeId(4)].into_iter().collect();
+        for (id, nodes) in [(3, [4, 5]), (4, [5, 0]), (5, [6, 7])] {
+            let mut segment = model.elements[0].clone();
+            segment.id = ElemId(id);
+            segment.nodes = nodes.map(NodeId).into_iter().collect();
+            model.elements.push(segment);
+        }
+        let [x, y] = [0, 1].map(|axis| {
+            let mut result = response.clone();
+            for (node, value) in [(2, 18.0), (3, 10.0), (7, 10.0)] {
+                result.disp[node][axis] = value;
+            }
+            let mut force = [0.0; 6];
+            force[axis + 1] = 1000.0;
+            result.member_forces = [0, 1, 3, 4, 5]
+                .map(|id| {
+                    (
+                        ElemId(id),
+                        MemberForces {
+                            at: vec![(0.0, force)],
+                        },
+                    )
+                })
+                .into();
+            result
+        });
+        let ctx = StoryMetricsCtx {
+            seismic_x: Some(&x),
+            seismic_y: Some(&y),
+            ..Default::default()
+        };
+        let metric =
+            |model: &Model| compute_story_metrics_with(model, SeismicDir::X, &ctx).remove(0);
+        let ordinary = metric(&model);
+        assert!(ordinary.re.unwrap().is_finite());
+        assert!(ordinary.fes.unwrap().is_finite());
+        for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+            model.elements[3].kind = kind;
+            let evaluated = metric(&model);
+            let reason = evaluated.re.unwrap_err();
+            assert!(
+                reason.contains("柱0") && reason.contains("追跡できません"),
+                "{reason}"
+            );
+            assert_eq!(evaluated.fes.unwrap_err(), reason);
+            let drift = evaluated.drift.unwrap().unwrap();
+            assert_eq!(drift.column.elem, ElemId(0));
+            assert_eq!(drift.angle, 18.0 / 3000.0);
+        }
+
+        model.elements[4].nodes = [NodeId(4), NodeId(0)].into_iter().collect();
+        for branch_height_mm in [1000.0, -1000.0, 3500.0] {
+            model.nodes[5].coord[2] = branch_height_mm;
+            for kind in [
+                ElementKind::Beam,
+                ElementKind::Fiber,
+                ElementKind::MultiSpring,
+            ] {
+                model.elements[3].kind = kind;
+                let evaluated = metric(&model);
+                if kind == ElementKind::Beam {
+                    assert!(evaluated.re.unwrap().is_finite());
+                    assert!(evaluated.fes.unwrap().is_finite());
+                } else {
+                    let reason = evaluated.re.unwrap_err();
+                    assert!(
+                        reason.contains("柱0") && reason.contains("中間節点で分岐"),
+                        "{branch_height_mm}: {reason}"
+                    );
+                    assert_eq!(evaluated.fes.unwrap_err(), reason);
+                }
+                let drift = evaluated.drift.unwrap().unwrap();
+                assert_ne!(drift.column.elem, ElemId(0));
+                assert_eq!(drift.angle, 10.0 / 3000.0);
+            }
+        }
+
+        model.nodes[5].coord[2] = -1000.0;
+        model.elements.retain(|elem| elem.id != ElemId(4));
+        let disconnected = metric(&model);
+        assert!(disconnected.re.unwrap().is_finite());
+        assert!(disconnected.fes.unwrap().is_finite());
+    }
+
+    #[test]
+    fn layer_metrics_keep_the_column_reaching_lower_sl_when_a_mixed_branch_cannot() {
+        use sepika_core::ids::{ElemId, NodeId, StoryId};
+        use sepika_core::model::{ElementKind, Story};
+        use sepika_element::frame::beam::MemberForces;
+
+        let (mut model, mut response) = drift_fixture();
+        model.stories = [-3000.0, 0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, z)| Story::new(StoryId(i as u32), format!("{}F", i + 1), Some(z), Some(0.0)))
+            .collect();
+        for (id, original, coord) in [
+            (4, 0, [1000.0, 0.0, -3000.0]),
+            (5, 1, [6000.0, 0.0, -3000.0]),
+            (6, 1, [0.0, 6000.0, 0.0]),
+            (7, 3, [0.0, 6000.0, 3000.0]),
+            (8, 2, [1000.0, 0.0, 1500.0]),
+        ] {
+            let mut node = model.nodes[original].clone();
+            node.id = NodeId(id);
+            node.coord = coord;
+            model.nodes.push(node);
+            response.disp.push([0.0; 6]);
+        }
+        for node in &mut model.nodes {
+            node.story = match node.coord[2] {
+                -3000.0 => Some(StoryId(0)),
+                0.0 => Some(StoryId(1)),
+                3000.0 => Some(StoryId(2)),
+                _ => None,
+            };
+        }
+        for (id, nodes) in [(3, [6, 7]), (4, [4, 0]), (5, [5, 1])] {
+            let mut elem = model.elements[0].clone();
+            elem.id = ElemId(id);
+            elem.nodes = nodes.map(NodeId).into_iter().collect();
+            model.elements.push(elem);
+        }
+        let [x, y] = [0, 1].map(|axis| {
+            let mut result = response.clone();
+            for (node, value) in [
+                (0, 4.0),
+                (1, 4.0),
+                (6, 4.0),
+                (2, 18.0),
+                (3, 10.0),
+                (7, 10.0),
+            ] {
+                result.disp[node][axis] = value;
+            }
+            let mut force = [0.0; 6];
+            force[axis + 1] = 1000.0;
+            result.member_forces = [0, 1, 3, 4, 5]
+                .map(|id| {
+                    (
+                        ElemId(id),
+                        MemberForces {
+                            at: vec![(0.0, force)],
+                        },
+                    )
+                })
+                .into();
+            result
+        });
+        let ctx = StoryMetricsCtx {
+            seismic_x: Some(&x),
+            seismic_y: Some(&y),
+            ..Default::default()
+        };
+        let metric = |model: &Model| {
+            compute_story_metrics_with(model, SeismicDir::X, &ctx)
+                .pop()
+                .unwrap()
+        };
+        let complete = metric(&model);
+        let expected_re = complete.re.unwrap();
+        let expected_fes = complete.fes.unwrap();
+        let mut excluded_branch = model.elements[0].clone();
+        excluded_branch.id = ElemId(6);
+        model.elements.push(excluded_branch);
+        for branch_end in [4, 8] {
+            model.elements[6].nodes = [NodeId(2), NodeId(branch_end)].into_iter().collect();
+            assert_eq!(metric(&model).drift.unwrap().unwrap().angle, 6.0 / 3000.0);
+            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+                for (column_kind, branch_kind) in
+                    [(kind, ElementKind::Beam), (ElementKind::Beam, kind)]
+                {
+                    model.elements[0].kind = column_kind;
+                    model.elements[6].kind = branch_kind;
+                    let evaluated = metric(&model);
+                    assert_eq!(evaluated.re.unwrap(), expected_re);
+                    assert_eq!(evaluated.fes.unwrap(), expected_fes);
+                    let drift = evaluated.drift.unwrap().unwrap();
+                    assert_eq!(drift.column.elem, ElemId(0));
+                    assert_eq!(drift.angle, 14.0 / 3000.0);
+                }
+            }
+            model.elements[0].kind = ElementKind::Beam;
+            model.elements[6].kind = ElementKind::Beam;
+        }
+    }
+
+    #[test]
     fn drift_490_zero_absent_missing_nonfinite_and_bad_setting_are_distinct() {
         let (mut model, mut response) = drift_fixture();
         let zero = drift_result(&model, SeismicDir::X, &response);
