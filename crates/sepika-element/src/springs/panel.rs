@@ -69,7 +69,7 @@ pub struct PanelZone {
     pub db: [f64; 2],
     /// 抵抗板 1 枚あたりの有効厚 `tp` `[mm]`。
     pub tp: [f64; 2],
-    /// パネルの実効体積 `Ve` `[mm³]`。
+    /// 降伏耐力の算定に用いる実効体積 `Ve` `[mm³]`。
     pub ve: [f64; 2],
     /// パネルの形状係数 κ。
     pub kappa: [f64; 2],
@@ -77,7 +77,7 @@ pub struct PanelZone {
     pub g: f64,
     /// パネルの基準強度 `F` [N/mm²]。
     pub fy: [f64; 2],
-    /// 柱の強軸・弱軸に対応するせん断剛性 `G・Ve` [N·mm/rad]。
+    /// 柱の強軸・弱軸に対応する初期せん断剛性 [N·mm/rad]。
     pub k_panel: [f64; 2],
     /// 柱の強軸・弱軸の順に並ぶ、全体座標系での曲げ回転軸。
     pub axes: [[f64; 3]; 2],
@@ -104,6 +104,7 @@ struct ResolvedPanel {
     geom: [PanelGeometry; 2],
     db: f64,
     ve: [f64; 2],
+    k_panel: [f64; 2],
     g: f64,
     fy: [f64; 2],
     axes: [[f64; 3]; 2],
@@ -138,6 +139,7 @@ fn resolve(model: &Model, node: NodeId) -> Result<Option<ResolvedPanel>, String>
         geom: joint.panels.map(|panel| panel.geometry),
         db: joint.db,
         ve: joint.panels.map(|panel| panel.ve),
+        k_panel: joint.panels.map(|panel| panel.stiffness_n_mm),
         g,
         fy,
         axes: joint.moment_axes,
@@ -243,16 +245,11 @@ impl PanelZone {
                 [0.0; 2], [0.0; 2], [0.0; 2], [0.0; 2], [1.0; 2], 0.0, [0.0; 2], None,
             ),
         };
-        let k_panel = ve.map(|volume| {
-            let stiffness = g * volume;
-            if resolution_error.is_some() {
-                0.0
-            } else if stiffness.is_finite() && stiffness > 0.0 {
-                stiffness
-            } else {
-                PANEL_RIGID_STIFFNESS
-            }
-        });
+        let k_panel = match &resolved {
+            Some(r) => r.k_panel,
+            None if resolution_error.is_some() => [0.0; 2],
+            None => [PANEL_RIGID_STIFFNESS; 2],
+        };
         let pmy0 = std::array::from_fn(|i| {
             if kappa[i] > 0.0 {
                 (ve[i] / kappa[i]) * fy[i] / 3.0_f64.sqrt()
@@ -855,6 +852,158 @@ mod tests {
         assert!((f.data[0] - expected * 1.0e-4).abs() / (expected * 1.0e-4) < 1e-12);
         assert!(f.data[1].abs() < 1e-6);
         assert!((pz.panel_moments()[0] - f.data[0]).abs() < 1e-6);
+    }
+
+    fn round_steel_cross_joint_model() -> (Model, ElementData) {
+        let (mut model, data) = cross_joint_model();
+        model.sections[0].shape = Some(SectionShape::SteelH {
+            root_r: Some(0.0),
+            height: 517.0,
+            width: 200.0,
+            web_thick: 11.0,
+            flange_thick: 17.0,
+        });
+        model.sections[0].depth = 517.0;
+        model.sections[1].shape = Some(SectionShape::SteelPipe {
+            outer_dia: 400.0,
+            thick: 16.0,
+        });
+        model.materials[0].shear = Some(78_500.0);
+        (model, data)
+    }
+
+    #[test]
+    fn round_steel_panel_uses_half_the_annular_area_in_elastic_response() {
+        let (model, data) = round_steel_cross_joint_model();
+        let ctx = Ctx { model: &model };
+        // 外径 400 mm・内径 368 mm の環状断面積から式 (5.11) で計算。
+        let k_n_mm = 378_800_675_799.242_9;
+        let pmy_n_mm = 654_709_018.513_983_2;
+        for nonlinear in [false, true] {
+            for axis in 0..2 {
+                let mut panel = if nonlinear {
+                    PanelZone::new_nonlinear(&data, &model)
+                } else {
+                    PanelZone::new(&data, &model)
+                };
+                assert_eq!(panel.resolution_error, None);
+                assert_eq!(panel.axial_ratio(), [0.0; 2]);
+                assert_eq!(panel.ve, [6_144_000.0; 2]);
+                for yield_moment in panel.yield_moment() {
+                    assert!((yield_moment / pmy_n_mm - 1.0).abs() < 1e-12);
+                }
+                let initial = panel.tangent_stiffness(&ctx);
+                let actual = initial.get(axis, axis);
+                assert!(
+                    (actual / k_n_mm - 1.0).abs() < 1e-12,
+                    "非線形={nonlinear}, 軸={axis}: {actual} N·mm/rad"
+                );
+                assert_eq!(initial.get(axis, 1 - axis), 0.0);
+
+                let mut increment = LocalVec {
+                    data: SmallVec::from_elem(0.0, panel.n_dof()),
+                };
+                increment.data[axis] = 0.0017;
+                panel.update_state(&increment, true, &ctx).unwrap();
+                let force = panel.internal_force(&ctx);
+                assert!((force.data[axis] / 643_961_148.858_713 - 1.0).abs() < 1e-12);
+                assert_eq!(force.data[1 - axis], 0.0);
+                assert!(
+                    (panel.tangent_stiffness(&ctx).get(axis, axis) / k_n_mm - 1.0).abs() < 1e-12
+                );
+
+                if nonlinear {
+                    increment.data[axis] = 0.0003;
+                    panel.update_state(&increment, false, &ctx).unwrap();
+                    let force = panel.internal_force(&ctx);
+                    assert!((force.data[axis] / 655_737_941.844_828_2 - 1.0).abs() < 1e-12);
+                    assert!(
+                        (panel.tangent_stiffness(&ctx).get(axis, axis) / 3_788_006_757.992_429
+                            - 1.0)
+                            .abs()
+                            < 1e-12
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn round_steel_panel_preparation_and_analysis_use_the_specified_uniform_thickness() {
+        let (mut model, data) = round_steel_cross_joint_model();
+        model.sections[1].panel_thickness = Some(20.0);
+        let panels = crate::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+        let generated = panels.iter().find(|panel| panel.node == NodeId(0)).unwrap();
+        let panel = PanelZone::new(&data, &model);
+        assert_eq!(panel.resolution_error, None);
+        assert_eq!(generated.dc, [384.0; 2]);
+        assert_eq!(generated.tp, [20.0; 2]);
+        assert_eq!(generated.ve, [7_680_000.0; 2]);
+        assert_eq!(generated.k_panel, panel.k_panel);
+        // 板厚中心径 384 mm のまま外径 404 mm・内径 364 mm とした環状断面積を使用。
+        for stiffness in generated.k_panel {
+            assert!((stiffness / 473_500_844_749.053_65 - 1.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn round_steel_panel_checks_the_finiteness_of_the_stiffness_it_uses() {
+        let (mut model, data) = round_steel_cross_joint_model();
+        model.materials[0].shear = Some(3e301);
+        let panels = crate::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+        let generated = panels.iter().find(|panel| panel.node == NodeId(0)).unwrap();
+        let panel = PanelZone::new(&data, &model);
+        assert_eq!(panel.resolution_error, None);
+        assert_eq!(generated.k_panel, panel.k_panel);
+        assert!(panel.k_panel.iter().all(|k| k.is_finite() && *k > 0.0));
+
+        model.materials[0].shear = Some(4e301);
+        let result = crate::springs::panel_gen::apply_auto_panel_zones(&mut model);
+        let reason = result.unwrap_err();
+        assert!(reason.contains("強軸のせん断剛性 G・db・A/2 は有限の正値が必要です"));
+        assert_eq!(PanelZone::new(&data, &model).resolution_error, Some(reason));
+    }
+
+    #[test]
+    fn round_steel_panel_requires_a_positive_inner_diameter() {
+        let (mut model, data) = round_steel_cross_joint_model();
+        for (thickness, valid) in [(383.0, true), (384.0, false), (385.0, false)] {
+            model.sections[1].panel_thickness = Some(thickness);
+            let result = crate::springs::panel_gen::apply_auto_panel_zones(&mut model);
+            let panel = PanelZone::new(&data, &model);
+            if valid {
+                assert!(result.is_ok());
+                assert_eq!(panel.resolution_error, None);
+            } else {
+                let reason = result.unwrap_err();
+                assert!(reason.contains("接合部 ID 0 のパネル未算定: 柱 ID 2"));
+                assert!(reason.contains("有効板厚から求める内径 dc−tp は正値が必要です"));
+                assert_eq!(panel.resolution_error, Some(reason));
+            }
+        }
+    }
+
+    #[test]
+    fn round_steel_panel_override_cannot_mask_a_nonpositive_pipe_bore() {
+        let (mut model, data) = round_steel_cross_joint_model();
+        model.sections[1].panel_thickness = Some(16.0);
+        for (thick, valid) in [(79.0, true), (80.0, false), (85.0, false)] {
+            model.sections[1].shape = Some(SectionShape::SteelPipe {
+                outer_dia: 160.0,
+                thick,
+            });
+            let result = crate::springs::panel_gen::apply_auto_panel_zones(&mut model);
+            let panel = PanelZone::new(&data, &model);
+            if valid {
+                assert!(result.is_ok());
+                assert_eq!(panel.resolution_error, None);
+            } else {
+                let reason = result.unwrap_err();
+                assert!(reason.contains("接合部 ID 0 のパネル未算定: 柱 ID 2"));
+                assert!(reason.contains("実壁厚から求める内径は正値が必要です"));
+                assert_eq!(panel.resolution_error, Some(reason));
+            }
+        }
     }
 
     #[test]

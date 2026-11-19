@@ -10,7 +10,7 @@
 //!
 //! パネルの諸元は次の 2 箇所で必要になる。
 //!
-//! - **モデル化**（`sepika_element::springs::panel`）— 各柱主軸方向のせん断剛性 `G・Ve`
+//! - **モデル化**（`sepika_element::springs::panel`）— 各柱主軸方向の初期せん断剛性
 //! - **断面検定**（`sepika_design_jp::steel::panel_zone`）— 降伏モーメント
 //!   `pMy = (Ve/κ)・√(1−n²)・Fy/√3`
 //!
@@ -19,8 +19,7 @@
 //!
 //! # パネル板厚 `tp` の解決順
 //!
-//! 1. [`Section::panel_thickness`] が入力されていればその値（ダイアフラム補強・
-//!    ダブラープレートによる増厚の明示指定）
+//! 1. [`Section::panel_thickness`] が入力されていれば、その有効板厚。円形鋼管では全周で一様な板厚とする。
 //! 2. 未入力なら柱の断面形状から算出する（H 強方向＝ウェブ厚、弱方向＝フランジ厚、鋼管＝壁厚）
 //!
 //! # 対象とする接合部
@@ -56,8 +55,7 @@
 //!
 //! CFT を諸元解決の対象に残したまま、モデル化からは
 //! [`PanelJoint::has_filled_column`] で除外する。CFT の接合部では充填コンクリートと
-//! 通しダイアフラムがせん断挙動に関与し、鋼管のみの実効体積による弾性せん断パネル
-//! `G・Ve` では剛性を表せないため、接合部を剛節点として扱う。
+//! 通しダイアフラムがせん断挙動に関与するため、接合部を剛節点として扱う。
 
 use crate::geom;
 use crate::ids::{ElemId, NodeId};
@@ -464,8 +462,10 @@ impl PanelGeometry {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanelAnalysisDirection {
     pub geometry: PanelGeometry,
-    /// 実効体積 `[mm³]`。
+    /// 降伏耐力の算定に用いる実効体積 `[mm³]`。
     pub ve: f64,
+    /// 初期せん断剛性の有限な正値 `[N·mm/rad]`。
+    pub stiffness_n_mm: f64,
     /// 基準強度の表を参照する抵抗板 1 枚の実板厚 `[mm]`。
     pub product_thickness_mm: f64,
     /// 抵抗板の基準強度 `[N/mm²]`。
@@ -883,10 +883,29 @@ fn panel_analysis_joint(
                 "{label}のパネル寸法・実板厚・実効体積 Ve・形状係数 κ は有限の正値が必要です"
             )));
         }
-        let stiffness_n_mm = g * ve;
+        let (elastic_volume_mm3, stiffness_formula) = match geometry.kind {
+            PanelShapeKind::Pipe => {
+                if product_thickness_mm >= geometry.dc {
+                    return Err(invalid(format!(
+                        "{label}の円形鋼管の実壁厚から求める内径は正値が必要です"
+                    )));
+                }
+                if geometry.tp >= geometry.dc {
+                    return Err(invalid(format!(
+                        "{label}の円形鋼管パネルの有効板厚から求める内径 dc−tp は正値が必要です"
+                    )));
+                }
+                (
+                    geometry.dc * joint.db * geometry.tp * std::f64::consts::FRAC_PI_2,
+                    "G・db・A/2",
+                )
+            }
+            _ => (ve, "G・Ve"),
+        };
+        let stiffness_n_mm = g * elastic_volume_mm3;
         if !stiffness_n_mm.is_finite() || stiffness_n_mm <= 0.0 {
             return Err(invalid(format!(
-                "{label}のせん断剛性 G・Ve は有限の正値が必要です"
+                "{label}のせん断剛性 {stiffness_formula} は有限の正値が必要です"
             )));
         }
         let fy = crate::material_grade::resolve_steel_f(Some(material), Some(product_thickness_mm))
@@ -900,6 +919,7 @@ fn panel_analysis_joint(
         Ok(PanelAnalysisDirection {
             geometry,
             ve,
+            stiffness_n_mm,
             product_thickness_mm,
             fy,
         })

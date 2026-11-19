@@ -8593,8 +8593,7 @@ fn test_run_preparation_refreshes_diagnostics_even_if_not_stale() {
 
 /// 準備計算が自動生成した仕口パネル要素は「断面未割当」警告の対象外。
 ///
-/// 仕口パネルの剛性は取り付く柱・梁の断面から求めた実効体積 Ve による（断面参照は
-/// 持たないのが正常）。
+/// 仕口パネルの剛性は取り付く柱・梁の断面諸元と柱材料から求めるため、要素自体に断面の割当は不要。
 #[test]
 fn test_run_diagnostics_ignores_generated_panel_zones() {
     use sepika_core::model::ElementKind;
@@ -9115,7 +9114,7 @@ fn test_preparation_generates_panel_zones() {
                 p.dc[direction] > 0.0 && p.db[direction] > 0.0 && p.tp[direction] > 0.0,
                 "両方向の諸元が解決されている"
             );
-            assert!(p.k_panel[direction] > 0.0, "各方向のせん断剛性 G・Ve が正");
+            assert!(p.k_panel[direction] > 0.0, "各方向の初期せん断剛性が正");
         }
     }
     let dofmap = sepika_core::dof::DofMap::build(&app.core.model);
