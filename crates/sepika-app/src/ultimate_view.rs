@@ -327,9 +327,16 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             ui.horizontal(|ui| {
                 ui.label(format!("対象 CFT 柱 {} 本", checks.len()));
                 if ng > 0 {
-                    ui.colored_label(crate::theme::ERROR_RED, format!("NG {} 本", ng));
+                    ui.colored_label(crate::theme::ERROR_RED, format!("軸NG {} 本", ng));
                 } else {
-                    ui.colored_label(crate::theme::GOOD_GREEN, "全柱 OK");
+                    ui.colored_label(crate::theme::GOOD_GREEN, "全柱 軸OK");
+                }
+                let mu_unavailable = checks.iter().filter(|c| c.mu_nm.is_err()).count();
+                if mu_unavailable > 0 {
+                    ui.colored_label(
+                        crate::theme::UI_MUTED,
+                        format!("曲げ未算定 {} 本", mu_unavailable),
+                    );
                 }
             });
             ui.add_space(4.0);
@@ -424,6 +431,80 @@ mod tests {
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
     use sepika_solver::statics::analysis::SeismicDir;
 
+    fn ultimate_table_text(app: &mut App) -> String {
+        egui::Context::default()
+            .run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1800.0, 1200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| ultimate_table(ui, app),
+            )
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn circular_cft_ultimate_view_distinguishes_axial_status_from_unavailable_mu() {
+        use sepika_core::ids::ElemId;
+
+        for (lk, n, axial_ok, message) in [
+            (7200.0, 6_500_000.0, false, "軸圧縮終局耐力"),
+            (1200.0, -4_000_000.0, false, "軸引張終局耐力"),
+            (
+                1200.0,
+                -std::f64::consts::PI * (200.0_f64.powi(2) - 188.0_f64.powi(2)) * 235.0,
+                true,
+                "純引張限界",
+            ),
+        ] {
+            let mut model = cft_column_buckling_input::cantilever(true, n);
+            // 3000 mmの入力では弾性解析で復元した引張力が1刻み内側となり、端点に達しない。
+            model.nodes[1].coord[2] = 1024.0;
+            model.steel_design_attrs = vec![cft_column_buckling_input::direct_lengths(
+                ElemId(0),
+                Some(lk),
+                Some(lk),
+            )];
+            let mut app = App::default();
+            assert!(app.load_model(model));
+            app.run_linear_static(LoadCaseId(1));
+            app.run_linear_static(LoadCaseId(0));
+            let checks = app.compute_cft_ultimate_checks().unwrap();
+            let row = &checks[0];
+            assert_eq!(row.ok, axial_ok, "{row:?}");
+            if axial_ok {
+                assert_eq!(row.n_design, -row.ntu, "{row:?}");
+            }
+            let reason = row.mu_nm.as_ref().unwrap_err();
+            assert!(
+                reason.contains(message) && row.detail.contains(reason),
+                "{row:?}"
+            );
+
+            let text = ultimate_table_text(&mut app);
+            assert!(
+                text.contains(if axial_ok {
+                    "全柱 軸OK"
+                } else {
+                    "軸NG 1 本"
+                }),
+                "{text}"
+            );
+            assert!(text.lines().any(|s| s == "未算定"), "{text}");
+            assert!(text.contains("曲げ未算定 1 本"), "{text}");
+        }
+    }
+
     #[test]
     fn cft_ultimate_rejects_concrete_strength_below_statutory_minimum() {
         for (fc_n_mm2, calculated) in [(23.999, false), (24.0, true), (24.001, true)] {
@@ -437,26 +518,14 @@ mod tests {
                 app.core.scoped.last_error
             );
 
-            let output = egui::Context::default().run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1800.0, 1200.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| ultimate_table(ui, &mut app),
-            );
-            let text = output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) => Some(text.galley.text()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            for label in ["全柱 OK", "軸OK", "Ncu[kN]", "Ntu[kN]", "強軸Mu(N-M)[kN·m]"] {
+            let text = ultimate_table_text(&mut app);
+            for label in [
+                "全柱 軸OK",
+                "軸OK",
+                "Ncu[kN]",
+                "Ntu[kN]",
+                "強軸Mu(N-M)[kN·m]",
+            ] {
                 assert_eq!(text.contains(label), calculated, "{text}");
             }
             if !calculated {

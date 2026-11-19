@@ -50,6 +50,7 @@ pub use rc_shear_ductility::{
     rc_shear_vu_ductility, truss_lambda, RcDuctilityShearInput, RcVbuInput,
 };
 
+pub(crate) use cft_check::cft_circular_qd1_mu;
 pub use cft_check::{cft_mu_nm, collect_cft_ultimate_checks, CftUltimateCheck};
 pub use options::{MemberDemand, ShearMethod, UltimateDemandMode, UltimateShearOptions};
 pub use rc_check::{collect_rc_ultimate_checks, UltimateCheck};

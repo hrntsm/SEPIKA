@@ -632,6 +632,96 @@ fn square_long_case2_compression_end_does_not_fall_back_from_qd1_or_min() {
     }
 }
 
+#[test]
+fn circular_cft_qd1_and_min_require_interior_axial_demand_at_the_longer_length() {
+    use crate::ultimate::{cft_axial_ultimate, CftAxialInput};
+    use crate::{QdMethod, SeismicQd};
+
+    let sec = cft_pipe_section(400.0, 16.0);
+    let shape = sec.shape.as_ref().unwrap();
+    let mat = make_material(30.0, "Fc30");
+    let mut ctx = ctx_column(LoadTerm::Short);
+    ctx.length = 3000.0;
+    ctx.steel_material = Some(make_material_no_fc("SN490B"));
+    ctx.seismic_qd = Some(SeismicQd {
+        long_at: vec![(0.0, [0.0; 6])],
+        n_factor: 1.5,
+        n_mechanism: 1.0,
+        q_simple: None,
+        clear_length: 3000.0,
+        method: QdMethod::Qd1,
+    });
+    let core = shape.try_cft_core_props().unwrap().unwrap();
+    let axial = CftAxialInput {
+        circular: true,
+        d_section: 400.0,
+        c_area: core.area,
+        s_area: shape.try_calc_area().unwrap(),
+        c_inertia: core.iy,
+        s_inertia: shape.try_calc_iy().unwrap(),
+        fc: 30.0,
+        fy: 325.0,
+        s_young: 205000.0,
+        lk: 7200.0,
+    };
+    for (shorter, longer, compression_connection) in [
+        (1000.0, 1600.0, "Mu=0"),
+        (1600.0, 3600.0, "Mu=0"),
+        (1600.0, 7200.0, "接続"),
+    ] {
+        let limits = cft_axial_ultimate(&CftAxialInput {
+            lk: longer,
+            ..axial
+        });
+        let tension_connection = if longer == 1600.0 { "接続" } else { "Mu=0" };
+        for (ly, lz) in [(shorter, longer), (longer, shorter)] {
+            ctx.lk_y = Some(ly);
+            ctx.lk_z = Some(lz);
+            for (n, expected_skip) in [
+                (limits.ncu - 1.0, None),
+                (limits.ncu, Some(compression_connection)),
+                (limits.ncu + 1.0, Some("軸圧縮終局耐力")),
+                (-limits.ntu + 1.0, None),
+                (-limits.ntu, Some(tension_connection)),
+                (-limits.ntu - 1.0, Some("軸引張終局耐力")),
+            ] {
+                let forces = MemberForcesAt {
+                    n: -n,
+                    qy: 200_000.0,
+                    ..zero_forces()
+                };
+                for method in [QdMethod::Qd1, QdMethod::Min, QdMethod::Qd2] {
+                    ctx.seismic_qd.as_mut().unwrap().method = method;
+                    match (
+                        CftDesign.check(&forces, &sec, &mat, &ctx),
+                        expected_skip,
+                        method,
+                    ) {
+                        (
+                            CheckOutcome::Skipped { reason },
+                            Some(message),
+                            QdMethod::Qd1 | QdMethod::Min,
+                        ) => {
+                            assert!(reason.contains(message), "{reason}");
+                        }
+                        (CheckOutcome::Checked(result), _, QdMethod::Qd2) => {
+                            let shear = result
+                                .components
+                                .iter()
+                                .find(|c| c.kind == CheckKind::Shear)
+                                .unwrap();
+                            // QD2は300 kN。円環面積の半分に325/√3を乗じて許容せん断力を求める。
+                            assert!((shear.ratio - 0.165_663_731).abs() < 1e-9);
+                        }
+                        (CheckOutcome::Checked(_), None, _) => {}
+                        (outcome, _, _) => panic!("Lk={ly}/{lz}, N={n}, {method:?}: {outcome:?}"),
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// ctx.seismic_qd が None のときは CFT も解析せん断力の
 /// ままとなる（回帰確認）。
 #[test]

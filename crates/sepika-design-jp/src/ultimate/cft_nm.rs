@@ -80,6 +80,7 @@ fn circular_nu_mu(inp: &CftBendingInput, theta: f64) -> (f64, f64) {
 
 /// 短柱の Mu `[N·mm]`。軸力 `[N]` は圧縮正。角形は全材料領域の応力ブロックを用いる。
 /// 円形のコア外は `ncu1`・`ntu` の端点との直線補間。不正な非正寸法・強度は 0。
+/// 断面式の評価用。軸力範囲と純軸端点を検定する入口は [`super::cft_mu_nm`]。
 pub fn cft_short_column_mu(inp: &CftBendingInput, n_design: f64, ncu1: f64, ntu: f64) -> f64 {
     if inp.d_steel <= 0.0 || inp.c_d <= 0.0 || inp.t <= 0.0 || inp.fc <= 0.0 || inp.fy <= 0.0 {
         return 0.0;
@@ -175,6 +176,7 @@ pub struct CftLongMediumInput {
 /// 中柱・長柱の終局曲げ耐力 `[N·mm]`。軸力 `[N]` は圧縮正。
 /// 正方形長柱の Case2 は鋼管の座屈・オイラー荷重を別々に用いる。
 /// Case2 の無効荷重・非有限値・純圧縮限界超過は理由付きエラー。
+/// 円形の軸力範囲と純軸端点を検定する入口は [`super::cft_mu_nm`]。
 pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> Result<f64, String> {
     let b = &inp.bending;
     if !n_design.is_finite()
