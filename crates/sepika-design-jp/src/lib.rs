@@ -202,6 +202,8 @@ pub enum CheckKind {
     Deflection,
     /// 構造規定（有効細長比上限・かぶり・補強筋間隔等）
     Provision,
+    /// BRBの製品座屈長さ
+    BucklingLength,
 }
 
 impl CheckKind {
@@ -215,6 +217,7 @@ impl CheckKind {
             CheckKind::Axial => "軸",
             CheckKind::Deflection => "たわみ",
             CheckKind::Provision => "構造規定",
+            CheckKind::BucklingLength => "座屈長さ",
         }
     }
 }

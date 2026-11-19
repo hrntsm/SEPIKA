@@ -17,26 +17,25 @@
 use crate::{CheckComponent, CheckKind, CheckResult};
 use sepika_core::model::BrbAttr;
 
+pub(crate) const NONFINITE_AXIAL_REASON: &str =
+    "BRBの設計軸力 N が非有限のため、軸力検定は未算定です";
+
 /// BRB の断面検定（軸力・座屈長さの 2 項目）。
 ///
 /// `n_design` は部材軸力 `[N]`（絶対値で評価）、`member_length` は実材軸長 `[mm]`。
-/// 製品値の不足・不正、または実材軸長・控除後の長さの不正は理由付きエラー。
+/// 非有限の軸力、製品値の不足・不正、実材軸長・控除後の長さの不正は理由付きエラー。
 pub fn brb_check(
     attr: &BrbAttr,
     n_design: f64,
     member_length: f64,
     long_term: bool,
 ) -> Result<CheckResult, String> {
+    if !n_design.is_finite() {
+        return Err(NONFINITE_AXIAL_REASON.into());
+    }
     let allowable_axial_short_n =
         product_value(attr.allowable_axial_short, "短期許容軸力 Na", false)?;
-    let critical_length_mm = product_value(attr.critical_length, "限界座屈長さ Lc", false)?;
-    let length_reduction_mm = product_value(attr.length_reduction, "端部低減距離 L1", true)?;
-    validate_member_length(member_length)?;
-    let end_reduction_mm = 2.0 * length_reduction_mm;
-    let buckling_length_mm = member_length - end_reduction_mm;
-    if buckling_length_mm <= 0.0 {
-        return Err("BRBの控除後の座屈長さ L−2L1 は正値が必要です".into());
-    }
+    let length = length_check(attr, member_length)?;
 
     let na = if long_term {
         allowable_axial_short_n / 1.5
@@ -58,38 +57,87 @@ pub fn brb_check(
     } else {
         ratio_axial
     };
-    let ratio_length = buckling_length_mm / critical_length_mm;
-    let ratio_length = if ratio_length == 1.0
-        && exceeds_length_limit(member_length, end_reduction_mm, critical_length_mm)
+    let term_label = if long_term { "長期" } else { "短期" };
+    let detail = format!(
+        "{term_label}: |N|={demand_n:.4} N, Na={na:.4} N, N/Na={ratio_axial:.4} / {}",
+        length.detail()
+    );
+    Ok(product_check_result(
+        CheckKind::Axial,
+        ratio_axial.max(length.ratio),
+        detail,
+    ))
+}
+
+pub(crate) fn brb_length_check(
+    attr: &BrbAttr,
+    member_length_mm: f64,
+) -> Result<CheckResult, String> {
+    let length = length_check(attr, member_length_mm)?;
+    Ok(product_check_result(
+        CheckKind::BucklingLength,
+        length.ratio,
+        length.detail(),
+    ))
+}
+
+struct LengthCheck {
+    buckling_length_mm: f64,
+    critical_length_mm: f64,
+    ratio: f64,
+}
+
+impl LengthCheck {
+    fn detail(&self) -> String {
+        format!(
+            "Lk={:.4} mm, 限界座屈長={:.4} mm, Lk/限界座屈長={:.4}",
+            self.buckling_length_mm, self.critical_length_mm, self.ratio
+        )
+    }
+}
+
+fn length_check(attr: &BrbAttr, member_length_mm: f64) -> Result<LengthCheck, String> {
+    let critical_length_mm = product_value(attr.critical_length, "限界座屈長さ Lc", false)?;
+    let length_reduction_mm = product_value(attr.length_reduction, "端部低減距離 L1", true)?;
+    validate_member_length(member_length_mm)?;
+    let end_reduction_mm = 2.0 * length_reduction_mm;
+    let buckling_length_mm = member_length_mm - end_reduction_mm;
+    if buckling_length_mm <= 0.0 {
+        return Err("BRBの控除後の座屈長さ L−2L1 は正値が必要です".into());
+    }
+    let ratio = buckling_length_mm / critical_length_mm;
+    let ratio = if ratio == 1.0
+        && exceeds_length_limit(member_length_mm, end_reduction_mm, critical_length_mm)
     {
         1.0_f64.next_up()
     } else {
-        ratio_length
+        ratio
     };
+    Ok(LengthCheck {
+        buckling_length_mm,
+        critical_length_mm,
+        ratio,
+    })
+}
 
-    let ratio = ratio_axial.max(ratio_length);
+fn product_check_result(kind: CheckKind, ratio: f64, mut detail: String) -> CheckResult {
     // 比を有限値で保持しないと、結果表示が上限超過を未検定として扱う。
-    let ratio_overflow = n_design.is_finite() && ratio.is_infinite();
-    let term_label = if long_term { "長期" } else { "短期" };
-    let mut detail = format!(
-        "{}: |N|={:.4} N, Na={:.4} N, N/Na={:.4} / Lk={:.4} mm, 限界座屈長={:.4} mm, Lk/限界座屈長={:.4}",
-        term_label, demand_n, na, ratio_axial, buckling_length_mm, critical_length_mm, ratio_length
-    );
+    let ratio_overflow = ratio.is_infinite();
     if ratio_overflow {
         detail.push_str(
             "。検定比の演算が数値表現の上限に達したため、総合検定比に表現可能な最大値を表示します",
         );
     }
 
-    Ok(CheckResult {
+    CheckResult {
         basis: "座屈補剛ブレース（メーカー許容値による検定）".to_string(),
         detail: String::new(),
         components: vec![CheckComponent {
-            kind: CheckKind::Axial,
+            kind,
             ratio: if ratio_overflow { f64::MAX } else { ratio },
             detail,
         }],
-    })
+    }
 }
 
 fn exceeds_long_term_limit(demand_n: f64, short_limit_n: f64) -> bool {

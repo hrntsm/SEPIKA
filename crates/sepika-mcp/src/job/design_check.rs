@@ -586,6 +586,82 @@ mod tests {
     }
 
     #[test]
+    fn brb_nonfinite_combination_axial_preserves_unchecked_and_length_ng_in_mcp() {
+        use sepika_core::ids::LoadCaseId;
+        use sepika_core::model::{LoadCase, LoadCombination};
+
+        let mut model = brb_input::model();
+        model.nodes[1].coord[0] = 3000.0;
+        model.brb_attrs[0].length_reduction = Some(0.0);
+        model.load_cases.push(LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(1),
+            name: "架構用積載".into(),
+            kind: LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
+        model.combinations.push(LoadCombination {
+            name: "G+P".into(),
+            terms: vec![
+                (LoadCaseId(0), f64::MAX),
+                (LoadCaseId(0), -f64::MAX),
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(1), 1.0),
+            ],
+        });
+        for (limit_mm, expected_ratio) in [(6000.0, None), (2400.0, Some(1.25))] {
+            model.brb_attrs[0].critical_length = Some(limit_mm);
+            let JobOutcome::DesignCheck {
+                summary,
+                member_force_rows,
+                ..
+            } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_combination: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(member_force_rows.len(), 2);
+            assert!(member_force_rows
+                .iter()
+                .all(|(_, _, forces)| forces[0].is_nan()));
+            assert_eq!(
+                summary["n_checks"],
+                if expected_ratio.is_some() { 4 } else { 2 },
+                "{summary}"
+            );
+            assert_eq!(summary["n_skipped"], 2, "{summary}");
+            assert_eq!(
+                summary["n_ng"],
+                if expected_ratio.is_some() { 2 } else { 0 },
+                "{summary}"
+            );
+            assert_eq!(summary["max_ratio"].as_f64(), expected_ratio);
+            assert_eq!(summary["all_members_checked_and_ok"], false, "{summary}");
+            assert_eq!(summary["all_checked_and_ok"], false, "{summary}");
+            let skipped = summary["member_skipped"].as_array().unwrap();
+            assert_eq!(skipped.len(), 2, "{summary}");
+            for (row, position) in skipped.iter().zip([0.0, 1.0]) {
+                assert_eq!(row["elem"], brb_input::BRACE.0);
+                assert_eq!(row["position"], position);
+                assert!(
+                    row["reason"]
+                        .as_str()
+                        .unwrap()
+                        .contains("設計軸力 N が非有限"),
+                    "{row}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn brb_target_mismatch_is_unchecked_in_mcp_for_column_and_girder() {
         use sepika_core::model::FrameSectionUse;
 
