@@ -11727,20 +11727,11 @@ mod seismic_freshness_fixture {
     ));
 }
 
-fn seismic_freshness_model_with_noncomposite_girders() -> sepika_core::model::Model {
-    use sepika_core::model::SlabCompositeConnection;
-    let mut model = seismic_freshness_fixture::two_storeys_with_weightless_steel_girders();
-    for elem in [ElemId(4), ElemId(5)] {
-        model.set_slab_composite_connection(elem, SlabCompositeConnection::NonComposite);
-    }
-    model
-}
-
 #[test]
 fn edited_density_finish_and_seismic_live_refresh_real_ex_without_preparation_button() {
     use sepika_core::model::{AreaLoad, SlabUsage};
     let mut app = App::default();
-    app.load_model(seismic_freshness_model_with_noncomposite_girders());
+    app.load_model(seismic_freshness_fixture::two_storeys_with_weightless_steel_girders());
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -11852,7 +11843,7 @@ fn freshness_preparation_undo_and_saved_output_tampering_are_detected() {
 #[test]
 fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
     let mut app = App::default();
-    app.load_model(seismic_freshness_model_with_noncomposite_girders());
+    app.load_model(seismic_freshness_fixture::two_storeys_with_weightless_steel_girders());
     app.run_preparation();
     app.run_seismic(SeismicDir::X);
     assert!(app.core.scoped.last_error.is_none());
