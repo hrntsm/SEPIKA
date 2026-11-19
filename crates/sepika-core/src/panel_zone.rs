@@ -59,7 +59,7 @@
 
 use crate::geom;
 use crate::ids::{ElemId, NodeId};
-use crate::model::{ElementData, FrameSectionUse, Model, Section};
+use crate::model::{ElementData, FrameSectionUse, Model, PropertyBasis, Section};
 use crate::section_shape::SectionShape;
 use crate::structure_kind::member_structure_kind;
 
@@ -264,6 +264,19 @@ pub fn panel_connection_offset(
 /// 明示仕口パネルへ接続する部材の保存オフセットが現在の接合面距離と一致するか検証する。
 /// 不一致は再準備が必要な部材・端と実距離を示すエラー。
 pub fn validate_panel_connection_offsets(model: &Model) -> Result<(), String> {
+    validate_explicit_panel_connections(model, PanelValidation::Analysis)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PanelValidation {
+    Analysis,
+    ProjectLoad,
+}
+
+pub(crate) fn validate_explicit_panel_connections(
+    model: &Model,
+    validation: PanelValidation,
+) -> Result<(), String> {
     for panel in model
         .elements
         .iter()
@@ -272,8 +285,9 @@ pub fn validate_panel_connection_offsets(model: &Model) -> Result<(), String> {
         let Some(&node) = panel.nodes.first() else {
             continue;
         };
-        let Some(joint) = resolve_explicit_panel_analysis_joint(model, node, &model.elements)
-            .map_err(|reason| reason.to_string())?
+        let Some(joint) =
+            resolve_explicit_panel_analysis_joint_impl(model, node, &model.elements, validation)
+                .map_err(|reason| reason.to_string())?
         else {
             continue;
         };
@@ -809,7 +823,7 @@ pub fn resolve_explicit_panel_joint<'a>(
 ) -> Result<Option<PanelJoint>, PanelJointError> {
     let joint = resolve_panel_joint_impl(model, node, members, true)?;
     if let Some(joint) = &joint {
-        panel_analysis_joint(model, node, joint)?;
+        panel_analysis_joint(model, node, joint, PanelValidation::Analysis)?;
     }
     Ok(joint)
 }
@@ -822,7 +836,7 @@ pub fn resolve_panel_analysis_joint<'a>(
     members: impl IntoIterator<Item = &'a ElementData>,
 ) -> Result<Option<PanelAnalysisJoint>, PanelJointError> {
     resolve_panel_joint_impl(model, node, members, false)?
-        .map(|joint| panel_analysis_joint(model, node, &joint))
+        .map(|joint| panel_analysis_joint(model, node, &joint, PanelValidation::Analysis))
         .transpose()
         .map(Option::flatten)
 }
@@ -834,8 +848,17 @@ pub fn resolve_explicit_panel_analysis_joint<'a>(
     node: NodeId,
     members: impl IntoIterator<Item = &'a ElementData>,
 ) -> Result<Option<PanelAnalysisJoint>, PanelJointError> {
+    resolve_explicit_panel_analysis_joint_impl(model, node, members, PanelValidation::Analysis)
+}
+
+fn resolve_explicit_panel_analysis_joint_impl<'a>(
+    model: &Model,
+    node: NodeId,
+    members: impl IntoIterator<Item = &'a ElementData>,
+    validation: PanelValidation,
+) -> Result<Option<PanelAnalysisJoint>, PanelJointError> {
     resolve_panel_joint_impl(model, node, members, true)?
-        .map(|joint| panel_analysis_joint(model, node, &joint))
+        .map(|joint| panel_analysis_joint(model, node, &joint, validation))
         .transpose()
         .map(Option::flatten)
 }
@@ -844,6 +867,7 @@ fn panel_analysis_joint(
     model: &Model,
     node: NodeId,
     joint: &PanelJoint,
+    validation: PanelValidation,
 ) -> Result<Option<PanelAnalysisJoint>, PanelJointError> {
     if joint.has_filled_column {
         return Ok(None);
@@ -859,7 +883,8 @@ fn panel_analysis_joint(
     let material = model.element_material(column).unwrap();
     let geometries = PanelGeometry::from_column_axes(section)
         .ok_or_else(|| invalid("強軸・弱軸のパネル諸元に未対応です".into()))?;
-    let product_thicknesses = match section.shape.as_ref().unwrap() {
+    let shape = section.shape.as_ref().unwrap();
+    let product_thicknesses = match shape {
         SectionShape::SteelH {
             web_thick,
             flange_thick,
@@ -891,7 +916,38 @@ fn panel_analysis_joint(
                 "{label}のパネル寸法・実板厚・実効体積 Ve・形状係数 κ は有限の正値が必要です"
             )));
         }
-        let (elastic_volume_mm3, stiffness_formula) = match geometry.kind {
+        let stiffness = |elastic_volume_mm3, formula| {
+            let stiffness_n_mm: f64 = g * elastic_volume_mm3;
+            if !stiffness_n_mm.is_finite() || stiffness_n_mm <= 0.0 {
+                return Err(invalid(format!(
+                    "{label}のせん断剛性 {formula} は有限の正値が必要です"
+                )));
+            }
+            Ok(stiffness_n_mm)
+        };
+        let stiffness_n_mm = match geometry.kind {
+            PanelShapeKind::SquareBox => {
+                let current = if geometry.tp == product_thickness_mm {
+                    let area = match section.property_basis.area {
+                        PropertyBasis::Shape => shape.try_calc_area(),
+                        PropertyBasis::Supplied | PropertyBasis::PendingShape => {
+                            section.resolved_area()
+                        }
+                    };
+                    area.map_err(invalid)
+                        .and_then(|area_mm2| stiffness(joint.db * (area_mm2 / 2.0), "G・db・A/2"))
+                } else {
+                    Err(invalid(
+                        "正方形等厚鋼管のパネル板厚が実板厚と異なり、仕口パネルの全断面積 A を確定できません"
+                            .into(),
+                    ))
+                };
+                if current.is_err() && validation == PanelValidation::ProjectLoad {
+                    stiffness(ve, "G・Ve")
+                } else {
+                    current
+                }
+            }
             PanelShapeKind::Pipe => {
                 if product_thickness_mm >= geometry.dc {
                     return Err(invalid(format!(
@@ -903,19 +959,13 @@ fn panel_analysis_joint(
                         "{label}の円形鋼管パネルの有効板厚から求める内径 dc−tp は正値が必要です"
                     )));
                 }
-                (
+                stiffness(
                     geometry.dc * joint.db * geometry.tp * std::f64::consts::FRAC_PI_2,
                     "G・db・A/2",
                 )
             }
-            _ => (ve, "G・Ve"),
-        };
-        let stiffness_n_mm = g * elastic_volume_mm3;
-        if !stiffness_n_mm.is_finite() || stiffness_n_mm <= 0.0 {
-            return Err(invalid(format!(
-                "{label}のせん断剛性 {stiffness_formula} は有限の正値が必要です"
-            )));
-        }
+            _ => stiffness(ve, "G・Ve"),
+        }?;
         let fy = crate::material_grade::resolve_steel_f(Some(material), Some(product_thickness_mm))
             .map_err(|reason| invalid(format!("{label}: {reason}")))?;
         let reference_yield_n_mm = ve / kappa * fy / 3.0_f64.sqrt();
