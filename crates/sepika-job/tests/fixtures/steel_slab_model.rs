@@ -18,6 +18,7 @@ pub fn one_cubic_metre(attached: bool) -> sepika_core::model::Model {
     model.materials[1].density = 7.85e-9;
     model.materials[1].fc = None;
     model.sections[2].shape = None;
+    model.sections[2].property_basis.area = PropertyBasis::Supplied;
     for node in &mut model.nodes {
         if node.coord[0] != 0.0 {
             node.coord[0] = 5000.0;

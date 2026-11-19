@@ -58,6 +58,7 @@ impl SectionMassProperties {
         steel: Option<&Material>,
     ) -> Result<Self, String> {
         section.validate_lip_channel()?;
+        section.validate_shape_area()?;
         validate_section_materials(section, main, rebar, shear_rebar, steel)?;
 
         validate_section_geometry(section)?;

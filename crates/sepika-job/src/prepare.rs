@@ -88,7 +88,7 @@ pub fn prepare_model(
         .validate_local_frames()
         .map_err(JobError::InvalidInput)?;
     model
-        .validate_lip_channels()
+        .validate_section_properties()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     let rebar_errors = model.stb_rebar_analysis_diagnostics();
     if !rebar_errors.is_empty() {
@@ -511,6 +511,7 @@ mod tests {
                 flange_thick: 20.0,
                 root_r: Some(0.0),
             });
+            section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
         }
         let error = sepika_solver::statics::analysis::Analysis::prepare(&stale)
             .err()
@@ -1283,6 +1284,7 @@ mod tests {
                     flange_thick: 20.0,
                     root_r: Some(0.0),
                 });
+                model.sections[1].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
                 let mut other = model.sections[1].clone();
                 other.id = SectionId(2);
                 other.shape = Some(SectionShape::SteelH {

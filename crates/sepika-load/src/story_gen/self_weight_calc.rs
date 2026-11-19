@@ -185,7 +185,7 @@ pub(crate) fn enumerate_self_weight(
             }
             continue;
         };
-        sec.resolved_area()?;
+        let area_mm2 = sec.resolved_area()?;
 
         match elem.kind {
             ElementKind::Beam
@@ -346,7 +346,7 @@ pub(crate) fn enumerate_self_weight(
                 )?;
                 let design_per_length = steel_mat.map_or(mat.design_unit_weight_n_per_mm3(), |m| {
                     m.design_unit_weight_n_per_mm3()
-                }) * sec.area
+                }) * area_mm2
                     * factor
                     + mat.cft_core_design_unit_weight_n_per_mm3() * core_area
                     + extras_per_length;

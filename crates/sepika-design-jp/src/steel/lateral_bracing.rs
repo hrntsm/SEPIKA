@@ -335,6 +335,7 @@ mod tests {
         sec.frame_use = Some(FrameSectionUse::Girder);
         sec.material = Some(MaterialId(0));
         sec.area = 10000.0;
+        sec.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
         sec.iz = 100_000_000.0;
         sec.iy = 300_000_000.0;
         sec

@@ -425,6 +425,7 @@ fn plate_model(wall: bool, numeric: bool) -> Model {
     plate_section.material = Some(MaterialId(0));
     if numeric {
         plate_section.shape = None;
+        plate_section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     }
     model.sections.push(plate_section);
     let mut stack = UndoStack::new();

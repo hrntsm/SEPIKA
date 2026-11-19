@@ -480,6 +480,8 @@ fn selected_case_and_saved_combo_name_require_matching_input_but_ignore_display_
                     .clear();
             } else {
                 app.core.model.sections[0].area *= 1.1;
+                app.core.model.sections[0].property_basis.area =
+                    sepika_core::model::PropertyBasis::Supplied;
             }
             app.run_design_check();
             let reason = app.core.scoped.last_error.as_ref().unwrap();
@@ -1186,6 +1188,8 @@ fn ovika_current_selected_input_missing_or_mismatched_is_excluded_without_losing
                     .retain(|(key, _)| matches!(key, ResultInputKey::Modal));
             } else {
                 app.core.model.sections[0].area *= 1.1;
+                app.core.model.sections[0].property_basis.area =
+                    sepika_core::model::PropertyBasis::Supplied;
             }
             let (mut loaded, path) = restore(
                 &app,
@@ -1422,6 +1426,7 @@ fn sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons() {
                 section.shape.as_mut()
             {
                 *flange_thick = 100.001;
+                section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
             }
         }
         for _ in 0..2 {
@@ -2246,6 +2251,8 @@ fn steel601_failed_recheck_clears_old_design_and_keeps_valid_analysis() {
         let original = loaded.current_design_results().unwrap().clone();
         loaded.core.model.materials[0].name = "SS400".into();
         loaded.core.model.sections[0].shape = None;
+        loaded.core.model.sections[0].property_basis.area =
+            sepika_core::model::PropertyBasis::Supplied;
         loaded.core.model.sections[0].thickness = thickness_mm;
         loaded.run_design_check();
         let reason = loaded.core.scoped.last_error.as_deref().unwrap();

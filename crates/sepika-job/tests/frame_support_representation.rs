@@ -54,6 +54,7 @@ fn set_plate_section(model: &mut Model, wall: bool) {
     model.materials.push(plate_material);
     section.material = Some(sepika_core::ids::MaterialId(1));
     section.shape = None;
+    section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     model.sections.push(section);
     if wall {
         for plate in &mut model.wall_plates {

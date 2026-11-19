@@ -62,6 +62,7 @@ fn parallel_beam_model(kind: ElementKind) -> Model {
     let mut plate_section = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100. }
         .to_section(SectionId(1), "100mm版".into());
     plate_section.shape = None;
+    plate_section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     plate_section.material = Some(MaterialId(1));
     model.sections.push(plate_section);
     // 最初の近傍節点を選ぶ実部材化判定で、5mm離れた下梁端点を拾わせない。

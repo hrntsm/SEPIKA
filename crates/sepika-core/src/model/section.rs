@@ -150,6 +150,7 @@ impl Section {
                 self.name
             ));
         }
+        self.validate_shape_area()?;
         let basis = self.property_basis;
         for (name, value) in [
             ("A", self.area),
@@ -170,7 +171,9 @@ impl Section {
         }
         if let Some(shape) = &self.shape {
             shape.validate_surface_radius()?;
-            if [basis.area, basis.iy, basis.iz].contains(&PropertyBasis::Shape) {
+            if basis.area != PropertyBasis::Shape
+                && [basis.iy, basis.iz].contains(&PropertyBasis::Shape)
+            {
                 shape.rounded_steel_properties()?;
             }
         }
@@ -230,8 +233,11 @@ impl Section {
         }
     }
 
+    /// 断面積 A `[mm²]`。形状算定では記録値と現在形状の一致を検証し、供給値は記録値を使う。
+    /// 未算定、形状算定値の形状欠落・不一致、不正値はエラー。CFT の形状算定面積は鋼管単体。
     pub fn resolved_area(&self) -> Result<f64, String> {
         self.validate_lip_channel()?;
+        self.validate_shape_area()?;
         if !self.area.is_finite() || self.area < 0.0 {
             return Err(format!(
                 "断面「{}」の A は有限な非負値が必要です",
@@ -240,9 +246,6 @@ impl Section {
         }
         if let Some(shape) = &self.shape {
             shape.validate_surface_radius()?;
-            if self.property_basis.area == PropertyBasis::Shape {
-                shape.rounded_steel_properties()?;
-            }
         }
         if self.property_basis.area == PropertyBasis::PendingShape {
             return Err(format!(
@@ -251,6 +254,39 @@ impl Section {
             ));
         }
         Ok(self.area)
+    }
+
+    pub(super) fn validate_shape_area(&self) -> Result<(), String> {
+        if self.property_basis.area != PropertyBasis::Shape {
+            return Ok(());
+        }
+        let error = |reason| {
+            format!(
+                "断面 {}「{}」の A: {reason}",
+                self.id.0,
+                self.display_name()
+            )
+        };
+        if !self.area.is_finite() || self.area < 0.0 {
+            return Err(error("記録値は有限な非負値が必要です".into()));
+        }
+        let calculated_mm2 = self
+            .shape
+            .as_ref()
+            .ok_or_else(|| error("形状が未設定です".into()))?
+            .try_calc_area()
+            .map_err(error)?;
+        if !calculated_mm2.is_finite() || calculated_mm2 < 0.0 {
+            return Err(error("現在の形状の算定値は有限な非負値が必要です".into()));
+        }
+        let tolerance_mm2 = 8.0 * f64::EPSILON * self.area.max(calculated_mm2);
+        if (self.area - calculated_mm2).abs() > tolerance_mm2 {
+            return Err(error(format!(
+                "形状算定として記録された {} mm² が現在の形状の算定値 {} mm² と一致しません",
+                self.area, calculated_mm2
+            )));
+        }
+        Ok(())
     }
 
     /// フィレット半径・角Rを変更し、形状算定の A・Iy・Iz・J を更新する。

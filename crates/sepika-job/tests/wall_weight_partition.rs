@@ -379,6 +379,7 @@ fn fixture(top: f64) -> Model {
     let mut support = model.sections[0].clone();
     support.id = SectionId(1);
     support.shape = None;
+    support.property_basis.area = PropertyBasis::Supplied;
     support.property_basis.j = PropertyBasis::Supplied;
     support.area = 0.0;
     support.width = 0.0;
@@ -1104,15 +1105,14 @@ fn generated_wall_origin_preserves_plate_identity_and_deduplicates_assignments()
     );
     let mut second = model.wall_plates[0].clone();
     second.id = WallPlateId(1);
-    let mut section = model.sections[0].clone();
-    section.id = SectionId(2);
-    section.thickness = Some(100.0);
-    section.shape = Some(SectionShape::RcWall {
+    let mut section = SectionShape::RcWall {
         thickness: 100.0,
         pwh_ratio: None,
         pwv_ratio: None,
         ps: 0.0025,
-    });
+    }
+    .to_section(SectionId(2), model.sections[0].name.clone());
+    section.material = model.sections[0].material;
     model.sections.push(section);
     second.section = Some(SectionId(2));
     model.wall_plates.push(second);
@@ -1606,6 +1606,7 @@ fn high_density_steel_wall_rejects_all_design_routes_but_preserves_physical_weig
     for attached in [false, true] {
         let mut model = fixture(6000.0);
         model.sections[0].shape = None;
+        model.sections[0].property_basis.area = PropertyBasis::Supplied;
         model.materials[0].category = MaterialCategory::Steel;
         model.materials[0].fc = None;
         model.materials[0].density = 85e-6 / 9806.65;

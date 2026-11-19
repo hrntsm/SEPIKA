@@ -257,6 +257,18 @@ impl Model {
         Ok(())
     }
 
+    /// リップ溝形の寸法と性能、および形状算定の断面積と現在形状の一致を検証する。
+    /// 断面積の未算定とカタログ・直接入力は面積の照合対象外。
+    pub fn validate_section_properties(&self) -> Result<(), crate::error::CoreError> {
+        self.validate_lip_channels()?;
+        for section in &self.sections {
+            section
+                .validate_shape_area()
+                .map_err(crate::error::CoreError::InvalidInput)?;
+        }
+        Ok(())
+    }
+
     /// 主架構線材の対応節点数を検査する。参照先と幾何の検査は含まない。
     pub fn validate_frame_node_counts(&self) -> Result<(), crate::error::CoreError> {
         for element in &self.elements {
@@ -645,7 +657,7 @@ impl Model {
         self.validate_frame_node_counts()?;
         self.validate_secondary_section_usage()?;
         self.validate_rc_section_usage()?;
-        self.validate_lip_channels()?;
+        self.validate_section_properties()?;
         self.validate_attached_slabs()?;
         self.stress_cfg
             .validate_misc_wall_n()

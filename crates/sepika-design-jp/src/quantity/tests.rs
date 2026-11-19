@@ -431,6 +431,7 @@ fn test_rc_portal_categories_concrete_and_rebar() {
 fn test_unset_frame_use_of_supplied_section_is_not_counted_as_beam() {
     let mut model = rc_portal_model();
     model.sections[0].shape = None;
+    model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     model.sections[0].frame_use = None;
 
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -2240,6 +2241,7 @@ fn secondary_steel_beam_different_eccentricity_preserves_independent_weight() {
     model.materials = vec![steel_material(0)];
     model.sections[0].shape = None;
     model.sections[0].area = 10000.0;
+    model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     model.sections[0].rebar_material = None;
     model.sections[0].shear_rebar_material = None;
     model.unassigned_beams.push(SecondaryMember {
@@ -3328,6 +3330,7 @@ fn 梁の実材軸と床の独立した鉛直偏心から接触上下端を求�
                 }
                 _ => unreachable!(),
             }
+            model.sections[0].area = 300.0 * 800.0;
             let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
             let beam = q
                 .items

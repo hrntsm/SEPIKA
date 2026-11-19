@@ -317,6 +317,7 @@ mod tests {
             *b = 300.0;
             *d = 300.0;
         }
+        model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
         if let Some(SectionShape::RcWall {
             thickness,
             pwh_ratio,
@@ -326,6 +327,7 @@ mod tests {
             *thickness = 300.0;
             *pwh_ratio = Some(0.012);
         }
+        model.sections[2].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
         let map = DofMap::build(&model);
         let reducer = Reducer::build(&model, &map);
         for method in [

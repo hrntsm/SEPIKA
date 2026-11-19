@@ -88,6 +88,7 @@ fn bay() -> Model {
     beam_sec.id = SectionId(1);
     beam_sec.area = 0.0;
     beam_sec.shape = None;
+    beam_sec.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     beam_sec.thickness = None;
     beam_sec.width = 0.0;
     beam_sec.depth = 0.0;

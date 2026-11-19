@@ -89,6 +89,38 @@ fn correct_hash_file(path: &Path, model: &Model) {
     writer.finish().unwrap();
 }
 
+#[test]
+fn ovika_rejects_inconsistent_shape_area_and_preserves_supplied_area() {
+    let shape = sepika_core::section_shape::SectionShape::SteelBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 16.0,
+        horizontal_thick: 16.0,
+        corner_r: Some(40.0),
+    };
+    let section = shape.to_section(SectionId(0), "BOX400".into());
+    let mut model = Model {
+        sections: vec![section.clone()],
+        ..Default::default()
+    };
+    assert_roundtrip(&model, "consistent-rounded-box-area");
+
+    model.sections[0].area = 24_576.0;
+    let reason = "断面 0「BOX400」の A: 形状算定として記録された 24576 mm² が現在の形状の算定値";
+    assert_rejected_preserving_input(&model, "stale-rounded-box-area", reason);
+
+    model.sections[0].property_basis.area = PropertyBasis::Supplied;
+    assert_roundtrip(&model, "supplied-rounded-box-area");
+
+    model.sections[0] = section;
+    model.sections[0].shape = None;
+    assert_rejected_preserving_input(
+        &model,
+        "missing-shape-for-area",
+        "断面 0「BOX400」の A: 形状が未設定",
+    );
+}
+
 fn assert_rejected_preserving_input(model: &Model, label: &str, reason: &str) {
     let path = crate::test_util::test_tmp().join(format!("reference-{label}.ovika"));
     save_ovika(
@@ -102,18 +134,24 @@ fn assert_rejected_preserving_input(model: &Model, label: &str, reason: &str) {
     .unwrap();
     let file = std::fs::read(&path).unwrap();
     let before = rmp_serde::to_vec_named(model).unwrap();
-    let error = save_ovika(&path, model, OvikaExtras::default())
-        .unwrap_err()
-        .to_string();
+    let saved = save_ovika(&path, model, OvikaExtras::default());
+    let raw = path.with_extension("raw.ovika");
+    correct_hash_file(&raw, model);
+    let bytes = std::fs::read(&raw).unwrap();
+    let loaded = load_ovika(&raw);
+    assert!(
+        saved.is_err() && loaded.is_err(),
+        "{label}: 保存拒否={}, 読込拒否={}",
+        saved.is_err(),
+        loaded.is_err()
+    );
+    let error = saved.unwrap_err().to_string();
     assert!(error.contains(reason), "{label}: {error}");
     assert_eq!(std::fs::read(&path).unwrap(), file, "{label}");
     let baseline = load_ovika(&path).unwrap();
     assert!(baseline.model.eq_ignoring_dofmap(&Model::default()));
     assert_eq!(baseline.results.as_deref(), Some(b"old-results".as_slice()));
-    let raw = path.with_extension("raw.ovika");
-    correct_hash_file(&raw, model);
-    let bytes = std::fs::read(&raw).unwrap();
-    let error = load_ovika(&raw).err().unwrap().to_string();
+    let error = loaded.err().unwrap().to_string();
     assert!(error.contains(reason), "{label}: {error}");
     assert_eq!(std::fs::read(&raw).unwrap(), bytes, "{label}");
     assert_eq!(rmp_serde::to_vec_named(model).unwrap(), before, "{label}");

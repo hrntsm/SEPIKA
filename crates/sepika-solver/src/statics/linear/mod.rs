@@ -220,7 +220,7 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
         .validate_frame_node_counts()
         .map_err(|e| SolveError::InvalidInput(e.to_string()))?;
     model
-        .validate_lip_channels()
+        .validate_section_properties()
         .map_err(|e| SolveError::InvalidInput(e.to_string()))?;
     model
         .validate_rc_section_usage()

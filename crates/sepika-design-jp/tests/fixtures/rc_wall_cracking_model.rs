@@ -14,6 +14,7 @@ pub fn input_model(mut model: sepika_core::model::Model) -> sepika_core::model::
     {
         *thickness = 200.0;
         *pwh_ratio = Some(0.002);
+        model.sections[2].area = 200.0 * 1000.0;
     }
     model.materials[0].density = 1e-30;
     model.materials[0].shear = Some(3339.437618147448);

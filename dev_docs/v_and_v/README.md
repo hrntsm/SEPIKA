@@ -485,6 +485,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [形状算定面積_Issue1565_確認記録.md](形状算定面積_Issue1565_確認記録.md) | 形状と記録面積の不一致、OVIKA・準備・軸剛性・自重の公開入口 | ✅（丸角鋼管の独立算術と公開入口のVerification） |
 | [上下非対称組立H形鋼柱_Issue1528_照合記録.md](上下非対称組立H形鋼柱_Issue1528_照合記録.md) | 圧縮・強軸曲げの上下縁照査、解析での局所曲げ符号、有限長での不適合保持 | 🔶（断面単独と有限解析例のVerification。座屈耐力・実験Validation未） |
 | [STB中間節点_Issue1366_照合記録.md](STB中間節点_Issue1366_照合記録.md) | 柱・大梁の中間節点とオフセットの原典、XSD、独立幾何、両公開取込 | 🔶（理由付き拒否を有限確認。分割・解析・意味往復は未確定） |
 | [STB単材形鋼の正値半径_Issue1386_確認記録.md](STB単材形鋼の正値半径_Issue1386_確認記録.md) | 公式輪郭と公開鋼材図、独立断面性能積分、正値半径のXSD検証 | 🔶（要素断片と独立候補の確認。製品接続・意味往復未） |
@@ -835,6 +836,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
 | 7l | 仕口パネルの方向別接合面距離 | sepika-core / sepika-element / sepika-job / sepika-solver / sepika-app | panel_zone.rs / panel_gen.rs / prepare.rs / modeling.rs / result_contract_tests.rs | [Issue759の公開再現・独立距離・釣合いと仕事](仕口パネル接合面距離_Issue759_2026-10.md) | 横断 | 🔶（Verification、Validation未） |
 | 892 | 静的仕口パネルの実断面積 | sepika-design-jp / sepika-core / sepika-app | joint_wiring/steel_panel.rs・joint_wiring/tests.rs・result_contract.rs・result_contract_tests.rs | [独立値と公開入口の対応](仕口パネル静的実断面積_Issue892_確認記録.md#要素から証拠への索引) | 横断 | 🔶（算術Verification、原典採用・Validation未） |
+| 1565 | 形状算定の断面積 | sepika-core / sepika-io / sepika-job / sepika-load | model/section.rs・ovika.rs・prepare.rs・story_gen/self_weight_calc.rs | [独立値と公開入口](形状算定面積_Issue1565_確認記録.md#公開入口の確認) | 横断 | ✅（丸角鋼管の保存・読込、軸剛性、自重） |
 | 7k | 仕口パネルの実軸力比 | sepika-element / sepika-solver / sepika-core / sepika-app | springs/panel.rs / tests/panel_zone.rs / result_contract.rs / result_contract_tests.rs | [Issue761の修正前実測と独立期待値](仕口パネル実軸力比_Issue761_2026-10.md) | 横断 | 🔶（限定Verification、Validation・最終ゲート未） |
 | 7j | 仕口パネル検定の柱2軸集約 | sepika-design-jp / sepika-core / sepika-app | joint_wiring/steel_panel.rs / material_grade.rs / result_contract_tests.rs | [Issue758の独立需要・公開検定・未対応域](仕口パネル検定2軸集約_Issue758_2026-10.md) | 横断 | 🔶（極小nz修正後の直接11/design665・App保存3、先行App全475・関連ClippyのVerification。原典適合・Validation・最終ゲートは記録を参照） |
 | 7i | 仕口パネルの柱2軸と座標 | sepika-core / sepika-element / sepika-solver / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / frame/panel_offset.rs / prepare.rs / result_contract_tests.rs | [Issue757の実諸元・公開解析・保存と制約](仕口パネル柱2軸_Issue757_2026-10.md) | 横断 | 🔶（方向別諸元/F・3次元接続・公開釣合い/仕事・不正参照方向拒否/有限fallback・保存失効・job診断のVerification、workspace成功。Validation・最終headゲート未確認） |

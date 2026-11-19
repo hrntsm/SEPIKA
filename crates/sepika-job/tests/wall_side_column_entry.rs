@@ -123,6 +123,7 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                     *target_section = section;
                 }
                 model.sections[2].shape = None;
+                model.sections[2].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
                 model.sections[2].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
                 model.sections[2].material = Some(MaterialId(2));
                 model.sections[2].thickness = Some(6.0);
