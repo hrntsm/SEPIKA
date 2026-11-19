@@ -170,12 +170,12 @@ fn test_cft_rect_matches_numeric_integration() {
 }
 
 #[test]
-fn test_cft_circle_partial_compression_has_positive_axial_force_and_moment() {
-    let dc = 400.0;
-    let fc = 8.0;
-    let (cn, cm) = cft_circle_cn_cm(dc, fc, 0.05 * dc);
-    assert!(cn > 0.0 && cm > 0.0);
-    assert!(cn < std::f64::consts::PI * dc * dc / 8.0 * fc);
+fn test_cft_circle_partial_compression_with_neutral_axis_at_center() {
+    let pi = std::f64::consts::PI;
+    let (axial_ratio, lever_ratio) = cft_circle_axial_ratio_and_lever(0.5);
+    // 半円の断面一次モーメントと断面二次モーメントから求めた比。
+    assert!((axial_ratio - 2.0 / (3.0 * pi)).abs() < 1e-14);
+    assert!((lever_ratio - 3.0 * pi / 32.0).abs() < 1e-14);
 }
 
 #[test]
