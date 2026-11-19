@@ -233,6 +233,123 @@ fn actual_rc_cft_static_frame_terms_reach_app_checks_with_signed_equilibrium() {
     }
 }
 
+#[test]
+fn static_rc_cft_reject_case_superposition_with_iterated_tension_only_brace() {
+    use sepika_core::dof::{Dof, Dof6Mask};
+    use sepika_core::model::{ElementKind, Section};
+
+    for cft in [false, true] {
+        let mut app = column(cft);
+        let model = &mut app.core.model;
+        model.nodes[1].restraint = Dof6Mask::FIXED;
+        model.nodes[1].restraint.set_free(Dof::Uz);
+        let mut brace_base = model.nodes[0].clone();
+        brace_base.id = NodeId(2);
+        brace_base.coord[2] = -3000.0;
+        model.nodes.push(brace_base);
+
+        let mut steel = model.materials[1].clone();
+        steel.id = MaterialId(2);
+        steel.category = MaterialCategory::Steel;
+        steel.name = "SN400B".into();
+        steel.young = 200000.0;
+        steel.fy = Some(235.0);
+        model.materials.push(steel);
+        let mut section = Section::zero(SectionId(1), "引張専用ブレース".into());
+        section.frame_use = Some(FrameSectionUse::Brace);
+        section.material = Some(MaterialId(2));
+        section.area = 60000.0;
+        section.thickness = Some(10.0);
+        model.sections.push(section);
+        let mut brace = model.elements[0].clone();
+        brace.id = ElemId(1);
+        brace.kind = ElementKind::Brace { tension_only: true };
+        brace.nodes = [NodeId(2), NodeId(1)].into_iter().collect();
+        brace.section = Some(SectionId(1));
+        model.elements.push(brace);
+
+        model.load_cases.truncate(2);
+        model.load_cases[1].kind = LoadCaseKind::Live;
+        for (case, axial_load_n) in model.load_cases.iter_mut().zip([-4000.0, 8000.0]) {
+            case.nodal[0].values = [0.0, 0.0, axial_load_n, 0.0, 0.0, 0.0];
+        }
+        model.combinations[0].terms.truncate(2);
+        model.stress_cfg.tension_only_iteration = true;
+
+        let solve_gravity_cases = |app: &mut App| {
+            for case in [LoadCaseId(0), LoadCaseId(1)] {
+                app.run_linear_static(case);
+                assert!(
+                    app.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    app.core.scoped.last_error
+                );
+            }
+        };
+        solve_gravity_cases(&mut app);
+        let axial_forces = |case| {
+            let result = &app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .statics
+                .iter()
+                .find(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(case)))
+                .unwrap()
+                .1;
+            [ElemId(0), ElemId(1)].map(|elem| {
+                result
+                    .member_forces
+                    .iter()
+                    .find(|(id, _)| *id == elem)
+                    .unwrap()
+                    .1
+                    .at[0]
+                    .1[0]
+            })
+        };
+        let [column_g_n, brace_g_n] = axial_forces(0);
+        let [column_p_n, brace_p_n] = axial_forces(1);
+        assert!(brace_g_n.abs() < 0.01);
+        close(column_g_n + brace_g_n, -4000.0);
+        assert!(brace_p_n > 0.0 && column_p_n > 0.0);
+        close(column_p_n + brace_p_n, 8000.0);
+        if !cft {
+            // RC柱とブレースの EA/L が等しいので、引張荷重は等分される。
+            close(brace_p_n, 4000.0);
+            assert!((column_g_n + column_p_n).abs() < 0.01);
+        }
+
+        let error = app_error(&mut app, cft);
+        for expected in [
+            "gravity_superposition_unsupported:",
+            "引張専用ブレースの反復解析",
+            "有効状態が同一と確認できない",
+            "mode=static_hinge",
+            "purpose=frame_long",
+            "selected_terms=[case=0 coefficient=1, case=1 coefficient=1]",
+        ] {
+            assert!(error.contains(expected), "missing {expected}: {error}");
+        }
+
+        app.core.model.stress_cfg.tension_only_iteration = false;
+        solve_gravity_cases(&mut app);
+        let demand = app.ultimate_demand_by_elem().unwrap();
+        assert_eq!(demand[0].1.mode, UltimateDemandMode::StaticHinge);
+        if cft {
+            close(
+                app.compute_cft_ultimate_checks().unwrap()[0].n_design,
+                -column_p_n / 2.0,
+            );
+        } else {
+            close(demand[0].1.n_axial, -2000.0);
+            assert_eq!(app.compute_ultimate_checks().unwrap().len(), 1);
+        }
+    }
+}
+
 #[cfg(feature = "gui")]
 #[test]
 fn static_rc_biaxial_table_distinguishes_ok_ng_and_unchecked() {
