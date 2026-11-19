@@ -80,6 +80,8 @@ pub struct MemberDesignCheckOptions<'a> {
 #[derive(Clone, Debug, Default)]
 pub struct MemberDesignCheckReport {
     /// 部材断面検定（危険断面位置・BRB・PCa 水平接合面を含む）。
+    /// RC・SRC・CFTでねじりモーメントが非零または非有限の位置には未算定行を返す。
+    /// 同じ位置の既存の検定式による不適合は別行で返す。
     pub member_checks: Vec<(ElemId, f64, CheckOutcome)>,
     /// 必要横補剛箇所数の参考結果。検定比・合否には含めない。
     pub lateral_bracing_references: Vec<(
@@ -150,6 +152,51 @@ fn frame_check_target(elem: &ElementData) -> bool {
             | ElementKind::MultiSpring
             | ElementKind::Brace { .. }
     )
+}
+
+fn concrete_member_torsion_reason(
+    structure: StructureKind,
+    [n, qy, qz, mx, my, mz]: [f64; 6],
+) -> Option<&'static str> {
+    if !matches!(
+        structure,
+        StructureKind::Rc | StructureKind::Src | StructureKind::Cft
+    ) || mx == 0.0
+    {
+        return None;
+    }
+    if !mx.is_finite() {
+        Some("ねじりモーメントMxが非有限のため、応力度検定は未算定です")
+    } else if [n, qy, qz, my, mz].into_iter().all(|force| force == 0.0) {
+        Some("純ねじり（Mx）が作用しています。ねじりの許容耐力と適用条件が未確定のため、応力度検定は未算定です")
+    } else {
+        Some("ねじりモーメントMxが作用しています。ねじりと他の断面力が同時に作用する場合の検定条件が未確定のため、応力度検定は未算定です")
+    }
+}
+
+fn push_strength_outcome(
+    checks: &mut Vec<(ElemId, f64, CheckOutcome)>,
+    elem: ElemId,
+    pos: f64,
+    outcome: CheckOutcome,
+    torsion_reason: Option<&str>,
+) {
+    let Some(torsion_reason) = torsion_reason else {
+        checks.push((elem, pos, outcome));
+        return;
+    };
+
+    let reason = match outcome {
+        CheckOutcome::Checked(mut result) => {
+            result.components.retain(|component| component.ratio > 1.0);
+            if !result.components.is_empty() {
+                checks.push((elem, pos, CheckOutcome::Checked(result)));
+            }
+            torsion_reason.into()
+        }
+        CheckOutcome::Skipped { reason } => format!("{reason}。{torsion_reason}"),
+    };
+    checks.push((elem, pos, CheckOutcome::Skipped { reason }));
 }
 
 struct BrbAxis {
@@ -310,18 +357,28 @@ pub fn run_member_design_checks(
         let (Some(sec), Some(mat)) = (sec, mat) else {
             continue;
         };
+        let structure = structure_kind_of(Some(sec), Some(mat.category));
+        let torsion_reason = |forces| {
+            if brb.is_none() {
+                concrete_member_torsion_reason(structure, forces)
+            } else {
+                None
+            }
+        };
         if let Err(reason) = model
             .ensure_stb_rebar_supported(sec.id)
             .and_then(|()| sec.ensure_properties_resolved())
         {
-            for (pos, _) in &mf.at {
-                member_checks.push((
+            for (pos, forces) in &mf.at {
+                push_strength_outcome(
+                    &mut member_checks,
                     *elem_id,
                     *pos,
                     crate::CheckOutcome::Skipped {
                         reason: reason.clone(),
                     },
-                ));
+                    torsion_reason(*forces),
+                );
             }
             continue;
         }
@@ -376,7 +433,6 @@ pub fn run_member_design_checks(
             .iter()
             .find(|a| a.elem == *elem_id)
             .cloned();
-        let structure = structure_kind_of(Some(sec), Some(mat.category));
         let group = if kind == MemberKind::Girder {
             options.girder_group_overrides.and_then(|m| m.get(elem_id))
         } else {
@@ -390,14 +446,16 @@ pub fn run_member_design_checks(
                 .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
         {
             if let Some(reason) = crate::steel::buckling::eccentric_column_k_reason(model, elem) {
-                for (pos, _) in &mf.at {
-                    member_checks.push((
+                for (pos, forces) in &mf.at {
+                    push_strength_outcome(
+                        &mut member_checks,
                         *elem_id,
                         *pos,
                         CheckOutcome::Skipped {
                             reason: reason.clone(),
                         },
-                    ));
+                        torsion_reason(*forces),
+                    );
                 }
                 continue;
             }
@@ -419,15 +477,17 @@ pub fn run_member_design_checks(
             Ok(lengths) => lengths,
             Err(reason) => {
                 let positions = design_positions(elem, model, group.map_or(length, |g| g.length));
-                for (pos, _) in &mf.at {
+                for (pos, forces) in &mf.at {
                     if is_near_design_position(*pos, &positions) {
-                        member_checks.push((
+                        push_strength_outcome(
+                            &mut member_checks,
                             *elem_id,
                             *pos,
                             CheckOutcome::Skipped {
                                 reason: reason.clone(),
                             },
-                        ));
+                            torsion_reason(*forces),
+                        );
                     }
                 }
                 continue;
@@ -643,7 +703,13 @@ pub fn run_member_design_checks(
                         .push_str(&format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
                 }
             }
-            member_checks.push((*elem_id, *pos, outcome));
+            push_strength_outcome(
+                &mut member_checks,
+                *elem_id,
+                *pos,
+                outcome,
+                torsion_reason(*forces),
+            );
         }
 
         let rc_girder = structure == StructureKind::Rc

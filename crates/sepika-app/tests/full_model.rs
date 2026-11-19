@@ -1509,9 +1509,12 @@ fn seismic_static_produces_monotonic_story_displacement() {
     }
 }
 
-/// 全部材の危険断面・全接合部・全スラブが検定対象になり、材軸ねじりを受ける鋼断面は理由付きで未算定。
+/// 全部材の危険断面・全接合部・全スラブが検定対象になり、材軸ねじりが作用する位置は理由付きで未算定。
 #[test]
 fn design_check_covers_every_member() {
+    use sepika_core::structure_kind::{structure_kind_of, StructureKind};
+    use sepika_design_jp::CheckOutcome;
+
     let mut app = analyzed();
     app.run_design_check();
     assert_no_error(&app, "断面検定");
@@ -1538,47 +1541,28 @@ fn design_check_covers_every_member() {
                 return false;
             };
             sec.frame_use == Some(sepika_core::model::FrameSectionUse::Column)
-                && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
-                    == sepika_core::structure_kind::StructureKind::S
+                && structure_kind_of(Some(sec), Some(mat.category)) == StructureKind::S
         })
         .count();
     assert_eq!(ordinary_steel_columns, 40);
     let mut steel_column_positions = 0usize;
     let mut rc_src_positions = 0usize;
+    let mut max_rc_src_mx_nmm = 0.0_f64;
     for mc in &results.member_checks {
-        assert!(
-            !mc.positions.is_empty(),
-            "部材 {:?} の検定位置が空",
-            mc.elem
-        );
-        let is_rc_src = app
-            .core
-            .model
-            .elements
-            .get(mc.elem.index())
-            .and_then(|e| e.section)
-            .and_then(|sid| app.core.model.sections.get(sid.index()))
-            .and_then(|sec| sec.shape.as_ref())
-            .is_some_and(|shape| {
-                matches!(
-                    shape,
-                    sepika_core::section_shape::SectionShape::RcBeamRect { .. }
-                        | sepika_core::section_shape::SectionShape::RcColumnRect { .. }
-                        | sepika_core::section_shape::SectionShape::RcColumnCircle { .. }
-                        | sepika_core::section_shape::SectionShape::SrcBeamRect { .. }
-                        | sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
-                )
-            });
-        assert_eq!(mc.positions.len(), 3, "部材 {:?} の危険断面位置数", mc.elem);
+        let mut positions: Vec<_> = mc.positions.iter().map(|p| p.xi).collect();
+        positions.dedup();
+        assert_eq!(positions.len(), 3, "部材 {:?} の危険断面位置数", mc.elem);
         let elem = app.core.model.element(mc.elem).unwrap();
         let section = app.core.model.element_section(elem).unwrap();
-        let is_steel = sepika_core::structure_kind::structure_kind_of(
+        let structure = structure_kind_of(
             Some(section),
             app.core
                 .model
                 .element_material(elem)
                 .map(|mat| mat.category),
-        ) == sepika_core::structure_kind::StructureKind::S;
+        );
+        let is_rc_src = matches!(structure, StructureKind::Rc | StructureKind::Src);
+        let is_steel = structure == StructureKind::S;
         let is_steel_column =
             is_steel && section.frame_use == Some(sepika_core::model::FrameSectionUse::Column);
         let (_, forces) = results
@@ -1586,7 +1570,7 @@ fn design_check_covers_every_member() {
             .iter()
             .find(|(elem, _)| *elem == mc.elem)
             .unwrap();
-        for p in &mc.positions {
+        for xi in positions {
             if is_steel_column {
                 let length_mm = app.core.model.member_length(elem);
                 let expected_faces = [
@@ -1594,35 +1578,61 @@ fn design_check_covers_every_member() {
                     0.5,
                     1.0 - elem.rigid_zone.face_j.unwrap() / length_mm,
                 ];
-                assert!(expected_faces.iter().any(|xi| (p.xi - xi).abs() < 1e-9));
-                assert!(p.xi > 0.0 && p.xi < 1.0);
+                assert!(expected_faces.iter().any(|face| (xi - face).abs() < 1e-9));
+                assert!(xi > 0.0 && xi < 1.0);
                 steel_column_positions += 1;
             }
             let (_, local_forces) = forces
                 .at
                 .iter()
-                .find(|(xi, _)| (p.xi - xi).abs() < 1e-9)
+                .find(|(pos, _)| (xi - pos).abs() < 1e-9)
                 .unwrap();
-            if is_steel && local_forces[3] != 0.0 {
+            let mx_nmm = local_forces[3];
+            let outcomes: Vec<_> = mc
+                .positions
+                .iter()
+                .filter(|p| p.xi == xi)
+                .map(|p| &p.outcome)
+                .collect();
+            if is_rc_src && mx_nmm != 0.0 {
+                max_rc_src_mx_nmm = max_rc_src_mx_nmm.max(mx_nmm.abs());
+                assert_eq!(
+                    outcomes
+                        .iter()
+                        .filter(|outcome| matches!(outcome, CheckOutcome::Skipped { .. }))
+                        .count(),
+                    1,
+                    "部材 {:?} 位置 {xi} Mx={mx_nmm} N·mm: {outcomes:?}",
+                    mc.elem
+                );
                 assert!(
-                    matches!(&p.outcome, sepika_design_jp::CheckOutcome::Skipped { reason }
-                        if reason.contains("ねじりモーメントMx") && reason.contains("組合せ条件が未確定")),
-                    "部材 {:?} 位置 {}: {:?}",
-                    mc.elem,
-                    p.xi,
-                    p.outcome
+                    outcomes.iter().all(|outcome| match outcome {
+                        CheckOutcome::Checked(result) => !result.ok(),
+                        CheckOutcome::Skipped { reason } =>
+                            reason.contains("Mx") && reason.contains("同時に作用"),
+                    }),
+                    "部材 {:?} 位置 {xi} Mx={mx_nmm} N·mm: {outcomes:?}",
+                    mc.elem
                 );
                 continue;
             }
-            let sepika_design_jp::CheckOutcome::Checked(r) = &p.outcome else {
-                panic!("部材 {:?} 位置 {}: {:?}", mc.elem, p.xi, p.outcome);
+            if is_steel && mx_nmm != 0.0 {
+                assert!(
+                    matches!(&outcomes[..], [CheckOutcome::Skipped { reason }]
+                        if reason.contains("ねじりモーメントMx") && reason.contains("組合せ条件が未確定")),
+                    "部材 {:?} 位置 {xi}: {outcomes:?}",
+                    mc.elem
+                );
+                continue;
+            }
+            let [CheckOutcome::Checked(r)] = &outcomes[..] else {
+                panic!("部材 {:?} 位置 {xi}: {outcomes:?}", mc.elem);
             };
             let ratio = r.ratio();
             assert!(
                 ratio.is_finite() && ratio >= 0.0,
-                "部材 {:?} 位置 {} の検定比が異常: {ratio}",
-                mc.elem,
-                p.xi
+                "部材 {:?} 位置 {xi} の検定比が異常: {ratio}",
+                mc.elem
             );
             if is_steel_column {
                 let length_mm = app.core.model.member_length(elem);
@@ -1641,8 +1651,10 @@ fn design_check_covers_every_member() {
     assert_eq!(steel_column_positions, 120, "通常S柱40本・各3位置");
     assert!(
         rc_src_positions > 0,
-        "RC/SRC 部材の検定位置がない（フィクスチャに RC 部材があるはず）"
+        "RC/SRC 部材に Mx が 0 の検定位置がない"
     );
+    assert!(max_rc_src_mx_nmm > 0.0, "RC/SRC 部材に非零の Mx がない");
+    println!("RC/SRC 部材の検定位置の最大 |Mx| = {max_rc_src_mx_nmm} N·mm");
 }
 
 /// 層間変形角・剛性率 Rs・偏心率 Re が全層で算定される。
