@@ -14,6 +14,7 @@ pub(super) fn steel_wall_model() -> sepika_core::model::Model {
     section.name = "鋼板壁".into();
     section.frame_use = None;
     section.shape = None;
+    section.property_basis.area = PropertyBasis::Supplied;
     section.property_basis.j = PropertyBasis::Supplied;
     section.thickness = Some(6.0);
     model.sections.push(section);

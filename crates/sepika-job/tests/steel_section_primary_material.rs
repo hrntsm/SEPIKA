@@ -317,6 +317,7 @@ fn 形状なし断面のコンクリート主材料は引き続き解析準備�
     for damper_weight in [false, true] {
         let mut model = cantilever(concrete(None), damper_weight);
         model.sections[0].shape = None;
+        model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
         prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
         ensure_nonlinear_input(&model).unwrap();
         let view = hinge_view(&model);

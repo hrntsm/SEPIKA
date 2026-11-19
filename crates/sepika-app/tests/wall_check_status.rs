@@ -36,6 +36,7 @@ fn fixture() -> App {
     let mut steel = rc.clone();
     steel.id = SectionId(3);
     steel.shape = None;
+    steel.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     steel.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     steel.material = Some(MaterialId(0));
     steel.thickness = Some(6.0);
@@ -364,6 +365,7 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         identity
     );
     app.core.model.sections[0].area *= 1.1;
+    app.core.model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     app.run_design_check();
     assert!(app
         .core

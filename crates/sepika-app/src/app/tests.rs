@@ -3524,6 +3524,7 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
 
     for sec in &mut app.core.model.sections {
         sec.shape = None;
+        sec.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
         sec.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     }
     app.run_seismic(SeismicDir::X);
@@ -12756,6 +12757,7 @@ fn steel_h_girder_floor_composite_agrees_in_preparation_and_linear_analysis() {
             explicit.j = explicit.resolved_j().unwrap();
             explicit.shape = None;
             explicit.iy = iy;
+            explicit.property_basis.area = PropertyBasis::Supplied;
             explicit.property_basis.iy = PropertyBasis::Supplied;
             explicit.property_basis.j = PropertyBasis::Supplied;
             reference.elements[elem.index()].section = Some(explicit.id);
@@ -13083,7 +13085,9 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
     assert!(crate::summary::build_report_csv(&reopened).contains("旧標準形式成功"));
 
     let mut staggered = original.core.model.clone();
-    staggered.sections[2].shape = Some(h(500.0));
+    let shape = h(500.0);
+    staggered.sections[2].area = shape.calc_area();
+    staggered.sections[2].shape = Some(shape);
     assert!(staggered.validate().is_ok());
     assert!(!staggered
         .elements

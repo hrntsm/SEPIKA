@@ -25,6 +25,7 @@ fn physical_story_shear_includes_wall_brace_and_support_conditions() {
                 let mut brace_section = model.sections[0].clone();
                 brace_section.id = sepika_core::ids::SectionId(model.sections.len() as u32);
                 brace_section.shape = None;
+                brace_section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
                 brace_section.frame_use = Some(FrameSectionUse::Brace);
                 model.sections.push(brace_section);
                 let mut diagonal = model.elements[0].clone();

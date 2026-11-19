@@ -115,7 +115,7 @@ pub struct OvikaContents {
 }
 
 /// モデルと派生データを .ovika へ保存する。
-/// [`Model::validate_reference_ids`] の不整合は書込前に拒否し、モデルを変更しない。
+/// 参照 ID の不整合と形状算定の断面積の不一致は書込前に拒否し、モデルを変更しない。
 pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result<(), IoError> {
     model
         .validate_reference_ids()
@@ -124,7 +124,7 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
         .validate_frame_node_counts()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
-        .validate_lip_channels()
+        .validate_section_properties()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_rc_section_usage()
@@ -270,7 +270,7 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
         .validate_frame_node_counts()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
-        .validate_lip_channels()
+        .validate_section_properties()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_attached_slabs()

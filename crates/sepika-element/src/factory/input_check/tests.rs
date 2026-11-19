@@ -596,6 +596,7 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
     model.sections[0].iy = 5_400_000_000.0;
     model.sections[0].iz = 1_350_000_000.0;
     model.sections[0].width = 300.0;
+    model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     assert!(ensure_nonlinear_input(&model).is_ok());
     assert!(
         (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.265_720_5).abs()
@@ -1367,6 +1368,7 @@ fn finite_extreme_g_rejects_computed_beam_stiffness_without_a_material_upper_lim
         }
         model.sections[0].shape = None;
         model.sections[0].j = 0.0;
+        model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
         model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
         model.elements[0].end_cond = [EndCondition::Fixed; 2];
         let beam = BeamElement::try_new(&model.elements[0], &model).unwrap();

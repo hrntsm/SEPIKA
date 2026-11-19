@@ -60,6 +60,7 @@ fn fixture(kind: ElementKind) -> Model {
     .to_section(SectionId(2), "壁t150".into());
     wall.material = Some(MaterialId(1));
     wall.shape = None;
+    wall.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     model.sections.push(wall);
     for (i, coord) in [
         [0., 0., 0.],

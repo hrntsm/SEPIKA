@@ -2279,6 +2279,7 @@ mod tests {
             pwh_ratio: Some(0.012),
             pwv_ratio: Some(0.012),
         });
+        section.area = 150.0 * 1000.0;
         let c = std::f64::consts::FRAC_1_SQRT_2;
         for node in &mut app.core.model.nodes {
             let [x, y, z] = node.coord;

@@ -3828,6 +3828,7 @@ fn fireproof_active_unresolved_inputs_are_errors() {
     }
     model.stories[1].fireproof.steel_kind = FireproofKind::None;
     model.sections[0].shape = None;
+    model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     assert!(enumerate_self_weight(&model, model.load_cfg.as_ref().unwrap()).is_ok());
 }
 

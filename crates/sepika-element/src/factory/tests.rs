@@ -335,6 +335,7 @@ fn elastic_wall_girder_requires_positive_finite_actual_young_for_every_section()
             model.sections[0] = shape.to_section(SectionId(0), "G1".into());
         } else {
             model.sections[0].shape = None;
+            model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
             model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
         }
         let mut material = model.materials[0].clone();

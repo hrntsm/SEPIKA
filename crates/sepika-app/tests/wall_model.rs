@@ -575,6 +575,7 @@ fn test_wall_frame_mismatch_appears_in_gui_diagnostics() {
 fn undefined_side_column_shape_is_an_input_error() {
     let mut app = wall_bay_app();
     app.core.model.sections[3].shape = None;
+    app.core.model.sections[3].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     app.core.model.sections[3].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     app.run_diagnostics();
     assert!(app
@@ -612,7 +613,15 @@ fn circular_side_column_shear_section_runs_analysis() {
             pitch: 100.0,
         },
     };
-    app.core.model.sections[3].shape = Some(SectionShape::RcColumnCircle { d: 600.0, rebar });
+    let old = &app.core.model.sections[3];
+    let mut section =
+        SectionShape::RcColumnCircle { d: 600.0, rebar }.to_section(old.id, old.name.clone());
+    section.floor = old.floor.clone();
+    section.frame_use = old.frame_use;
+    section.material = old.material;
+    section.rebar_material = old.rebar_material;
+    section.shear_rebar_material = old.shear_rebar_material;
+    app.core.model.sections[3] = section;
     app.run_preparation();
     app.run_static_all();
     assert!(
