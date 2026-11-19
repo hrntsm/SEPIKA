@@ -12,7 +12,9 @@ use sepika_core::{
     },
 };
 use sepika_design_jp::{
-    ultimate::{collect_rc_ultimate_checks, MemberDemand, UltimateShearOptions},
+    ultimate::{
+        collect_rc_ultimate_checks, MemberDemand, StaticBeamHingeMechanism, UltimateShearOptions,
+    },
     BondMethod, CheckKind, CheckOutcome, CheckResult, DesignCheck, DesignCtx, LoadTerm,
     MemberForcesAt, MemberKind, RcDesign, SrcDesign,
 };
@@ -57,6 +59,7 @@ fn beam_ultimate_checks_use_nominal_areas_in_resistance_and_hinge_demand() {
     let mut model = beam_model();
     let static_demand = MemberDemand {
         mz: -10e6,
+        static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
         q_long: Some(560_400.0),
         ..Default::default()
     };

@@ -4,11 +4,15 @@ mod beam_input;
 mod column_input;
 
 use sepika_core::{
+    dof::Dof6Mask,
     ids::ElemId,
     model::{default_combinations, default_load_cases, Model},
 };
 use sepika_design_jp::{
-    ultimate::{collect_rc_ultimate_checks, MemberDemand, ShearMethod, UltimateShearOptions},
+    ultimate::{
+        collect_rc_ultimate_checks, MemberDemand, ShearMethod, StaticBeamHingeMechanism,
+        UltimateShearOptions,
+    },
     MemberKind,
 };
 
@@ -22,6 +26,9 @@ fn members() -> [(MemberKind, Model); 3] {
         model.load_cases = default_load_cases();
         model.combinations = default_combinations();
         model.ultimate_gravity_combination = Some(0);
+        if kind == MemberKind::Girder {
+            model.nodes[1].restraint = Dof6Mask::FIXED;
+        }
         (kind, model)
     })
 }
@@ -30,6 +37,7 @@ fn demands() -> [MemberDemand; 2] {
     [
         MemberDemand {
             mz: -1e7,
+            static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
             q_long: Some(0.0),
             q_long_weak: Some(0.0),
             ..MemberDemand::axial(0.0)

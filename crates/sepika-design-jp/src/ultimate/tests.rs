@@ -180,7 +180,9 @@ pub(super) fn column_and_beam_model() -> Model {
 
 #[test]
 fn test_collect_rc_ultimate_checks_column_and_beam() {
-    let model = column_and_beam_model();
+    let mut model = column_and_beam_model();
+    model.nodes[1].restraint = Dof6Mask::FIXED;
+    model.nodes[2].restraint = Dof6Mask::FIXED;
     let opts = UltimateShearOptions::default();
     let axial = vec![
         (
@@ -194,6 +196,7 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
             ElemId(1),
             MemberDemand {
                 mz: 1.0e6,
+                static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::IBottomJTop),
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
@@ -398,6 +401,7 @@ fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
             ElemId(1),
             MemberDemand {
                 mz: 1.0e6,
+                static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::IBottomJTop),
                 q_long: Some(ql),
                 ..MemberDemand::axial(0.0)
             },
@@ -412,7 +416,9 @@ fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
     ];
     let opts = UltimateShearOptions::default();
 
-    let model = column_and_beam_model();
+    let mut model = column_and_beam_model();
+    model.nodes[1].restraint = Dof6Mask::FIXED;
+    model.nodes[2].restraint = Dof6Mask::FIXED;
     let checks = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert!((beam.shear_margin - (beam.qsu - ql).max(0.0) / beam.qmu).abs() < 1e-9);
@@ -450,12 +456,15 @@ fn test_ultimate_check_option_flags() {
             ElemId(1),
             MemberDemand {
                 mz: 1.0e6,
+                static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::IBottomJTop),
                 q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
         ),
     ];
-    let model = column_and_beam_model();
+    let mut model = column_and_beam_model();
+    model.nodes[1].restraint = Dof6Mask::FIXED;
+    model.nodes[2].restraint = Dof6Mask::FIXED;
 
     let std =
         collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
@@ -1056,11 +1065,7 @@ fn test_ultimate_check_new_rc_shapes_supported() {
         &beam,
         &[(
             ElemId(0),
-            MemberDemand {
-                mz: -1.0e6,
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
+            MemberDemand::from_pushover(0.0, -1.0e6, 0.0, 30_000.0, 0.0, 0.0),
         )],
         &opts,
     )

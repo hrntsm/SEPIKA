@@ -81,7 +81,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0060](0060-steel-directional-shear-ratio-sum.md) | accepted | 鋼柱・鋼梁の二方向せん断は方向別検定比の和を採用する |
 
-| [0061](0061-ultimate-gravity-demand-modes.md) | accepted | 終局需要を静的ヒンジ略算と初期重力を含む確定総応答に分ける |
+| [0061](0061-ultimate-gravity-demand-modes.md) | partially superseded by ADR-0120 | 終局需要を静的ヒンジ略算と初期重力を含む確定総応答に分ける |
 
 | [0062](0062-cft-core-torsion-resolution.md) | accepted | 断面 J の算定元を解決し、CFT コアの数値ねじりを幾何性能から分離する |
 
@@ -177,6 +177,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0118](0118-asymmetric-column-time-history-peaks.md) | accepted | 上下非対称組立H形鋼柱の時刻歴簡易検定で正負の強軸曲げ極値を抽出する |
 
 | [0119](0119-standard-rebar-designation.md) | accepted | RC・SRC梁柱の標準異形鉄筋の呼び名と数値径を区別する |
+
+| [0120](0120-rc-beam-static-hinge-applicability.md) | accepted | RC矩形梁の静的略算に両端の曲げ降伏機構の確認を求める |
 
 ## 規約
 

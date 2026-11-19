@@ -24,6 +24,15 @@ pub enum StaticBeamBending {
     Unverified,
 }
 
+/// 設計者が対象の載荷方向で確認した、RC梁両端の強軸曲げ降伏時の引張側。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StaticBeamHingeMechanism {
+    /// i端が上端引張、j端が下端引張。
+    ITopJBottom,
+    /// i端が下端引張、j端が上端引張。
+    IBottomJTop,
+}
+
 /// 圧縮正の軸力 `[N]`、曲げ `[N·mm]` と方式を持つ終局需要。
 /// 静的ヒンジ需要は強軸の QL を要し、二軸せん断の判定には弱軸の QL も参照する。
 #[derive(Clone, Copy, Debug, Default)]
@@ -35,6 +44,9 @@ pub struct MemberDemand {
     pub mz: f64,
     /// 静的RC梁の強軸曲げ符号。直接の需要入力では既定で符号付きの値を指定する。
     pub static_beam_bending: StaticBeamBending,
+    /// 静的RC梁で、伝達・定着と他の破壊の先行を照査し、両端の逆符号降伏を確認した場合に指定する。
+    /// 既定の `None` では、長期応力や端部拘束だけから降伏機構を推定しない。
+    pub static_beam_hinge_mechanism: Option<StaticBeamHingeMechanism>,
     /// 弱軸（幅方向）まわりの設計用曲げモーメント Mmy [N·mm]（符号は内部で abs）。
     pub my: f64,
     /// 設計用せん断力 Qm `[N]`（プッシュオーバー応答の強軸せん断。`Some` のとき

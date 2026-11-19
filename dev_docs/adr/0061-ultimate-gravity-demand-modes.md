@@ -1,6 +1,6 @@
 # 終局需要を静的ヒンジ略算と初期重力を含む確定総応答に分ける
 
-- Status: accepted
+- Status: partially superseded by ADR-0120（RC矩形梁の静的略算の適用条件）
 - Date: 2026-10-18
 - Related: [#565](https://github.com/hrntsm/SEPIKA/issues/565)、[#1412](https://github.com/hrntsm/SEPIKA/issues/1412)、[#1476](https://github.com/hrntsm/SEPIKA/issues/1476)、[#1497](https://github.com/hrntsm/SEPIKA/issues/1497)、[#1498](https://github.com/hrntsm/SEPIKA/issues/1498)、[ADR 0041](0041-holding-result-input-validity.md)
 
@@ -23,6 +23,8 @@
 二軸の適用条件を満たさない場合も、長期せん断を考慮した強軸せん断、または独立した照査で確定した NG は保持する。それ以外は部材別の未検定理由を返し、他部材の結果とともに表示する。増分・確定総応答の二軸せん断では、初期重力を含む両軸の総せん断力を一度だけ用いる。[原典照合と不一致の記録](../v_and_v/終局重力組合せと応力割増し_Issue958_照合記録.md#rc-柱の静的二軸せん断)
 
 ### RC矩形梁の静的曲げ方向
+
+この節の判断は [ADR 0120](0120-rc-beam-static-hinge-applicability.md) により置き換えられた。
 
 長期架構用組合せを合成した後に、強軸曲げが一方向の評価結果だけを静的略算に採用する。最大絶対値をとる位置の符号で、曲げ終局耐力と付着条件に使う引張側を揃える。正負が混在する場合、全評価位置でゼロの場合、符号を確認できない需要は、梁単位で理由付き未検定とする。対称配筋でも上端筋の付着条件は異なる。選んだ引張側に主筋がない場合も、曲げ終局耐力と比較需要を決められないため未検定とする。
 

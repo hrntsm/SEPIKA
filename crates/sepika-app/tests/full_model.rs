@@ -51,7 +51,7 @@
 
 use sepika_app::app::{App, StaticCaseKey, ThDampingModel, ThDir, DL_CASE_NAME};
 use sepika_core::dof::Dof6Mask;
-use sepika_core::model::ElementKind;
+use sepika_core::model::{ElementKind, EndCondition, FrameSectionUse};
 use sepika_solver::statics::analysis::SeismicDir;
 
 #[path = "support/frame_gravity.rs"]
@@ -1730,7 +1730,7 @@ fn select_holding_points(app: &mut App) -> u32 {
     selected_step
 }
 
-/// 鋼構造の解析点・Qud・FesとDs保留、および元STBの静的結果によるRC終局検定。
+/// 鋼構造の解析点・Qud・FesとDs保留、および元STBのRC梁の静的終局検定の未検定理由。
 #[test]
 fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     let mut app = prepared_steel_portal(true);
@@ -1819,7 +1819,7 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     analyze_ultimate_gravity(&mut app);
     let ultimate = app
         .compute_ultimate_checks()
-        .expect("終局検定が算定できるはず");
+        .expect("終局検定の対象部材と理由を取得できるはず");
     assert_eq!(
         ultimate
             .iter()
@@ -1832,6 +1832,19 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     assert_no_error(&app, "終局検定用の架構用長期重力組合せ");
     let forces = &app.core.scoped.results.as_ref().unwrap().member_forces;
     for check in &ultimate {
+        let model = &app.core.model;
+        let beam = model.element(check.elem).unwrap();
+        assert_eq!(beam.end_cond, [EndCondition::Fixed; 2]);
+        for &node in &beam.nodes {
+            assert_eq!(model.node(node).unwrap().restraint, Dof6Mask::PINNED);
+            assert!(model.elements.iter().any(|column| {
+                column.nodes.contains(&node)
+                    && model
+                        .element_section(column)
+                        .and_then(|section| section.frame_use)
+                        == Some(FrameSectionUse::Column)
+            }));
+        }
         let at = &forces
             .iter()
             .find(|(id, _)| *id == check.elem)
@@ -1849,14 +1862,17 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
         );
         let reason = check.unchecked_reason.as_deref().unwrap();
         assert!(
-            reason.starts_with("ultimate_beam_mz_mixed_signs:"),
+            reason.starts_with("ultimate_beam_hinge_support_unverified: i端"),
             "{reason}"
         );
+        assert!(reason.contains("ultimate_beam_mz_mixed_signs:"), "{reason}");
         assert!(
             reason.contains(&format!("member={} ", check.elem.0)),
             "{reason}"
         );
-        assert!(!check.ok && check.mu.is_nan() && check.shear_margin.is_nan());
+        assert!(!check.ok);
+        assert!(check.mu.is_nan() && check.qsu.is_nan() && check.qbu.is_nan());
+        assert!(check.qmu.is_nan() && check.shear_margin.is_nan() && check.bond_margin.is_nan());
     }
 }
 
