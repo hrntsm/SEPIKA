@@ -472,6 +472,7 @@ fn check_member(
 }
 
 /// RC梁・柱の終局検定。必須需要・材料・配筋・寸法の不足は部材ID付きのエラーを返す。
+/// 上限強度倍率は静的・両端ヒンジ略算で有限の正値、確定総応答で 1.0 を要し、違反時は部材ID付きのエラーを返す。
 /// 内法長さを確認できない部材や、静的RC梁の引張側・主筋や二軸せん断の適用条件が不足して検定できない部材は、未検定理由を保持する。
 pub fn collect_rc_ultimate_checks(
     model: &Model,
@@ -547,6 +548,14 @@ pub fn collect_rc_ultimate_checks(
                 return Err(diagnose(format!(
                     "ultimate_gravity_missing: RC部材 ID {} の静的N/M/QL参照が不完全です",
                     elem.id.0
+                )));
+            }
+            UltimateDemandMode::StaticHinge
+                if !opts.upper_strength_factor.is_finite() || opts.upper_strength_factor <= 0.0 =>
+            {
+                return Err(diagnose(format!(
+                    "ultimate_upper_strength_factor_invalid: RC部材 ID {} の上限強度倍率は有限かつ正である必要があります（入力値: {}）",
+                    elem.id.0, opts.upper_strength_factor
                 )));
             }
             UltimateDemandMode::ConfirmedTotal
