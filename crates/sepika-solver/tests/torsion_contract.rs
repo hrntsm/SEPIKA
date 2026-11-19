@@ -1,7 +1,9 @@
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::*;
-use sepika_core::section_shape::{concrete_young_modulus_gamma, SectionShape};
+use sepika_core::section_shape::{
+    concrete_young_modulus_gamma, RcRectColumnRebar, RectColumnHoop, SectionShape,
+};
 use sepika_solver::statics::analysis::{
     precheck::{model_issues, IssueSeverity, IssueTargets},
     Analysis,
@@ -157,6 +159,66 @@ fn public_analysis_uses_current_h_and_rounded_box_j_in_tl_over_gj() {
     model.sections[0].j = 8.0e8;
     model.sections[0].property_basis.j = PropertyBasis::Supplied;
     assert_twist(&model, STEEL_G_MPA * 8.0e8);
+}
+
+#[test]
+fn public_src_analysis_uses_gc_of_member_concrete_selected_by_stb_strength() {
+    let mut model = cantilever(
+        SectionShape::SrcColumnRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 0.0,
+                x: vec![],
+                y: vec![],
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 0.0,
+                    pitch: 100.0,
+                    legs_x: 0,
+                    legs_y: 0,
+                },
+            },
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 12.0,
+        },
+        ElementKind::Beam,
+    );
+    model.sections[0].material = Some(MaterialId(1));
+    model.sections[0].steel_material = Some(MaterialId(0));
+    model.sections[0].rebar_material = Some(MaterialId(3));
+    model.sections[0].shear_rebar_material = Some(MaterialId(3));
+    model.materials[1].shear = Some(12_000.0);
+    model.materials.push(Material {
+        id: MaterialId(2),
+        name: "Fc60".into(),
+        young: 33_500.0,
+        fc: Some(60.0),
+        shear: Some(20_000.0),
+        ..model.materials[1].clone()
+    });
+    model.materials.push(Material {
+        id: MaterialId(3),
+        name: "SD345".into(),
+        category: MaterialCategory::Rebar,
+        fy: Some(345.0),
+        ..model.materials[0].clone()
+    });
+    model.stb_strengths.materials.push(StbGradeMaterial {
+        grade: "Fc60".into(),
+        material: MaterialId(2),
+    });
+    model.stb_strengths.members.push(StbMemberStrength {
+        target: StrengthTarget::Element(ElemId(0)),
+        node: NodeId(0),
+        node_order: vec![],
+        concrete: Some("Fc60".into()),
+    });
+    assert_twist(&model, 74_180_413_264_102.56);
+    model.materials[2].shear = None;
+    assert_twist(&model, 51_778_762_873_477.56);
 }
 
 #[test]

@@ -11598,6 +11598,15 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         .unwrap();
     assert_eq!(row.effective_area, Some(p.area_ax));
     assert_eq!(row.effective_iy, Some(p.iy));
+    let displayed = row.composite.unwrap();
+    let gc = 20_500.0 / 2.4;
+    for (actual, expected) in [
+        (gc * displayed.as_z, 1_506_224_358.974359),
+        (gc * displayed.as_y, 1_618_711_538.4615383),
+        (gc * displayed.j, 31_694_524_592_227.566),
+    ] {
+        assert!((actual / expected - 1.0).abs() < 1.0e-12);
+    }
 
     let mut preparation_edits = UndoStack::new();
     preparation_edits.run(
@@ -11619,6 +11628,28 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
     model.materials[1].fc = Some(48.0);
     assert_eq!(composite_props_of(&model, &elem).unwrap(), Some(p));
     model.materials[1].fc = Some(27.0);
+    model.materials[1].shear = Some(20_000.0);
+    app.load_model(model.clone());
+    app.run_preparation();
+    let displayed = app
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .member_stiffness
+        .iter()
+        .find(|r| r.elem == elem.id)
+        .unwrap()
+        .composite
+        .unwrap();
+    for (actual, expected) in [
+        (20_000.0 * displayed.as_z, 3_188_307_692.3076925),
+        (20_000.0 * displayed.as_y, 3_282_461_538.4615383),
+        (20_000.0 * displayed.j, 74_180_413_264_102.56),
+    ] {
+        assert!((actual / expected - 1.0).abs() < 1.0e-12);
+    }
     for shear in [
         0.0,
         -1.0,
@@ -11630,6 +11661,18 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         model.materials[1].shear = Some(shear);
         assert!(composite_props_of(&model, &elem).is_err());
         assert!(BeamElement::try_new(&elem, &model).is_err());
+        app.load_model(model.clone());
+        app.run_preparation();
+        assert!(app.core.scoped.preparation.is_none(), "Gc={shear}");
+        assert!(
+            app.core
+                .scoped
+                .last_error
+                .as_ref()
+                .is_some_and(|error| error.contains("SRC434") && error.contains("正の有限値")),
+            "{:?}",
+            app.core.scoped.last_error
+        );
     }
     model.materials[1].shear = None;
 

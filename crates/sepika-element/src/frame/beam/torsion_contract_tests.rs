@@ -6,14 +6,17 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
     AnalysisKind, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
-    MaterialCategory, Model, Node, PropertyBasis,
+    MaterialCategory, Model, Node, PropertyBasis, StbGradeMaterial, StbMemberStrength,
+    StrengthTarget,
 };
-use sepika_core::section_shape::SectionShape;
+use sepika_core::section_shape::{
+    BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
+};
 
-fn model(shape: SectionShape, cft: bool) -> Model {
+fn model(shape: SectionShape, composite: bool) -> Model {
     let mut section = shape.to_section(SectionId(0), "ねじり断面".into());
-    section.material = Some(MaterialId(if cft { 1 } else { 0 }));
-    section.steel_material = cft.then_some(MaterialId(0));
+    section.material = Some(MaterialId(if composite { 1 } else { 0 }));
+    section.steel_material = composite.then_some(MaterialId(0));
     Model {
         nodes: (0..2)
             .map(|i| Node {
@@ -112,6 +115,111 @@ fn observe_torsion(element: &mut dyn ElementBehavior, model: &Model, gj_n_mm2: f
     relative(force.data[9], torque_n_mm, 1.0e-8);
     relative(force.data[3], -torque_n_mm, 1.0e-8);
     stiffness.get(9, 9) * 3000.0
+}
+
+#[test]
+fn src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution() {
+    for shape in [
+        SectionShape::SrcBeamRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: RcBeamRebar {
+                main_dia: 0.0,
+                top: vec![],
+                bottom: vec![],
+                cover: 40.0,
+                stirrup: BeamStirrup {
+                    dia: 0.0,
+                    pitch: 100.0,
+                    legs: 0,
+                },
+            },
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 12.0,
+        },
+        SectionShape::SrcColumnRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 0.0,
+                x: vec![],
+                y: vec![],
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 0.0,
+                    pitch: 100.0,
+                    legs_x: 0,
+                    legs_y: 0,
+                },
+            },
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 12.0,
+        },
+    ] {
+        let mut m = model(shape, true);
+        m.materials[0].young = 190_000.0;
+        m.materials[0].shear = Some(65_000.0);
+        m.materials[1].young = 33_500.0;
+        m.materials[1].fc = Some(60.0);
+        let mut stb_model = m.clone();
+        stb_model.materials.push(Material {
+            id: MaterialId(2),
+            name: "Fc60".into(),
+            ..m.materials[1].clone()
+        });
+        stb_model.materials[1].shear = Some(12_000.0);
+        stb_model.stb_strengths.materials.push(StbGradeMaterial {
+            grade: "Fc60".into(),
+            material: MaterialId(2),
+        });
+        stb_model.stb_strengths.members.push(StbMemberStrength {
+            target: StrengthTarget::Element(ElemId(0)),
+            node: NodeId(0),
+            node_order: vec![],
+            concrete: Some("Fc60".into()),
+        });
+        // 軸・曲げは三矩形の鉄骨とその領域を除いたコンクリートの合算。
+        let ea = 7_369_072_000.0;
+        let ei_strong = 217_969_493_589_333.33;
+        let ei_weak = 47_971_751_317_333.33;
+        let length_mm: f64 = 3000.0;
+        // 鋼寄与を固定し、外形から鋼せん断面積を除いた分と矩形Jに採用Gcを乗じた値。
+        for (specified_g, gc, ga_strong, ga_weak, gj) in [
+            (
+                None,
+                33_500.0 / 2.4,
+                2_301_391_025.6410255,
+                2_405_211_538.4615383,
+                51_778_762_873_477.56,
+            ),
+            (
+                Some(20_000.0),
+                20_000.0,
+                3_188_307_692.3076925,
+                3_282_461_538.4615383,
+                74_180_413_264_102.56,
+            ),
+        ] {
+            for (model, material_index) in [(&mut m, 1), (&mut stb_model, 2)] {
+                model.materials[material_index].shear = specified_g;
+                let beam = BeamElement::try_new(&model.elements[0], model).unwrap();
+                let k = beam.local_stiffness_raw();
+                relative(beam.g, gc, 1.0e-12);
+                relative(beam.e * beam.iz, ei_strong, 1.0e-12);
+                relative(beam.e * beam.iy, ei_weak, 1.0e-12);
+                relative(k.get(6, 6) * length_mm, ea, 1.0e-12);
+                relative(k.get(9, 9) * length_mm, gj, 1.0e-12);
+                for (dof, ei, ga) in [(7, ei_strong, ga_strong), (8, ei_weak, ga_weak)] {
+                    let compliance = length_mm.powi(3) / (12.0 * ei) + length_mm / ga;
+                    relative(k.get(dof, dof), 1.0 / compliance, 1.0e-12);
+                }
+            }
+        }
+    }
 }
 
 #[test]

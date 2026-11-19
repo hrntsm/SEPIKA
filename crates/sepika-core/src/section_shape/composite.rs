@@ -28,12 +28,13 @@ pub struct CompositeProps {
 }
 
 impl SectionShape {
-    /// SRC 等価性能。Ec [N/mm²] は有限正、νc は −1 < νc < 0.5 を要する。
+    /// SRC 等価性能。Ec・採用 Gc [N/mm²] は有限正、νc は −1 < νc < 0.5 を要する。
     /// 対象外は `Ok(None)`、材料・必要剛性が不正なら理由付きエラーを返す。
     pub fn src_equivalent_props(
         &self,
         ec: f64,
         nu_c: f64,
+        gc_mpa: f64,
     ) -> Result<Option<CompositeProps>, String> {
         let (SectionShape::SrcBeamRect {
             b,
@@ -64,8 +65,12 @@ impl SectionShape {
         if !nu_c.is_finite() || nu_c <= -1.0 || nu_c >= 0.5 {
             return Err("SRC の νc は有限値かつ −1 < νc < 0.5 が必要です".into());
         }
+        if !gc_mpa.is_finite() || gc_mpa <= 0.0 {
+            return Err("SRC の Gc は正の有限値が必要です".into());
+        }
         let ns = E_STEEL / ec;
-        let ngs = ns * (1.0 + nu_c) / (1.0 + NU_STEEL);
+        let gs_mpa = E_STEEL / (2.0 * (1.0 + NU_STEEL));
+        let ngs = gs_mpa / gc_mpa;
 
         if !ns.is_finite() || ns <= 0.0 || !ngs.is_finite() || ngs <= 0.0 {
             return Err("SRC の解析用ヤング係数比・せん断弾性係数比が不正です".into());
@@ -77,15 +82,17 @@ impl SectionShape {
         let s_j = (2.0 * sw * tf.powi(3) + hw * tw.powi(3)) / 3.0;
 
         let rc_as = b * d / KAPPA_RC;
+        let s_as_y = 2.0 * sw * tf;
+        let s_as_z = h_web_shear_area(sh, tw);
         let props = CompositeProps {
             area_ax: b * d + (ns - 1.0) * s_a,
             iy: b * d.powi(3) / 12.0 + (ns - 1.0) * s_iy,
             iz: d * b.powi(3) / 12.0 + (ns - 1.0) * s_iz,
             j: rect_torsion_j(b, d) + ngs * s_j,
-            as_y: rc_as + (ngs - 1.0) * 2.0 * sw * tf,
-            as_z: rc_as + (ngs - 1.0) * h_web_shear_area(sh, tw),
+            // ngs − 1 の形では外形と鋼の有効面積が等しいと微小な換算鋼項が桁落ちする。
+            as_y: (rc_as - s_as_y) + ngs * s_as_y,
+            as_z: (rc_as - s_as_z) + ngs * s_as_z,
         };
-        let gc = ec / (2.0 * (1.0 + nu_c));
         for value in [
             props.area_ax,
             props.iy,
@@ -95,9 +102,9 @@ impl SectionShape {
             ec * props.area_ax,
             ec * props.iy,
             ec * props.iz,
-            gc * props.j,
-            gc * props.as_y,
-            gc * props.as_z,
+            gc_mpa * props.j,
+            gc_mpa * props.as_y,
+            gc_mpa * props.as_z,
         ] {
             if !value.is_finite() || value <= 0.0 {
                 return Err("SRC の等価断面性能または必要剛性が正の有限値ではありません".into());
@@ -403,18 +410,52 @@ mod src_tests {
 
     #[test]
     fn src_analysis_ratio_matches_independent_rectangular_h_section() {
-        let p = shape().src_equivalent_props(20500.0, 0.2).unwrap().unwrap();
+        let p = shape()
+            .src_equivalent_props(20500.0, 0.2, 20500.0 / 2.4)
+            .unwrap()
+            .unwrap();
         assert_eq!(p.area_ax, 250272.0);
         assert!((p.iy - 7345337856.0).abs() < 1e-5);
         assert!((20500.0 * p.iy - 150579426048000.0).abs() < 0.1);
         let p15 = shape()
-            .src_equivalent_props(205000.0 / 15.0, 0.2)
+            .src_equivalent_props(205000.0 / 15.0, 0.2, 205000.0 / 36.0)
             .unwrap()
             .unwrap();
         assert_eq!(p15.area_ax, 289312.0);
         assert!((p15.iy - 8426081109.333333).abs() < 1e-5);
         assert_ne!(p.iy, p15.iy);
         assert_eq!(shape().calc_area(), 180000.0);
+    }
+
+    #[test]
+    fn src_weak_axis_steel_shear_survives_large_concrete_g() {
+        let mut section = shape();
+        let SectionShape::SrcColumnRect {
+            steel_height,
+            steel_width,
+            steel_flange_thick,
+            ..
+        } = &mut section
+        else {
+            unreachable!();
+        };
+        *steel_height = 550.0;
+        *steel_width = 300.0;
+        *steel_flange_thick = 250.0;
+
+        // 外形とフランジの有効面積が共に150000 mm²で、弱軸のGAは鉄骨の分担だけで決まる。
+        let expected_ga_n = 11_826_923_076.923_077;
+        for gc_mpa in [1.0e21, 1.0e22] {
+            let props = section
+                .src_equivalent_props(20500.0, 0.2, gc_mpa)
+                .unwrap()
+                .unwrap();
+            let ga_n = gc_mpa * props.as_y;
+            assert!(
+                (ga_n / expected_ga_n - 1.0).abs() < 1e-12,
+                "Gc={gc_mpa}, GA={ga_n}"
+            );
+        }
     }
 
     #[test]
@@ -428,7 +469,10 @@ mod src_tests {
             f64::MIN_POSITIVE,
             f64::MAX,
         ] {
-            assert!(shape().src_equivalent_props(ec, 0.2).is_err(), "Ec={ec}");
+            assert!(
+                shape().src_equivalent_props(ec, 0.2, 8500.0).is_err(),
+                "Ec={ec}"
+            );
         }
         for nu in [
             -1.0,
@@ -439,20 +483,43 @@ mod src_tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
         ] {
-            assert!(shape().src_equivalent_props(20500.0, nu).is_err(), "ν={nu}");
+            assert!(
+                shape().src_equivalent_props(20500.0, nu, 8500.0).is_err(),
+                "ν={nu}"
+            );
         }
         for nu in [-0.5, 0.0, 0.2, 0.49] {
-            assert!(shape().src_equivalent_props(20500.0, nu).unwrap().is_some());
+            assert!(shape()
+                .src_equivalent_props(20500.0, nu, 8500.0)
+                .unwrap()
+                .is_some());
+        }
+        for gc in [
+            0.0,
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+        ] {
+            assert!(
+                shape().src_equivalent_props(20500.0, 0.2, gc).is_err(),
+                "Gc={gc}"
+            );
         }
         let non_src = SectionShape::CftPipe {
             outer_dia: 400.0,
             thick: 12.0,
         };
-        assert_eq!(non_src.src_equivalent_props(f64::NAN, f64::NAN), Ok(None));
+        assert_eq!(
+            non_src.src_equivalent_props(f64::NAN, f64::NAN, f64::NAN),
+            Ok(None)
+        );
         let mut invalid = shape();
         if let SectionShape::SrcColumnRect { d, .. } = &mut invalid {
             *d = f64::NAN;
         }
-        assert!(invalid.src_equivalent_props(20500.0, 0.2).is_err());
+        assert!(invalid.src_equivalent_props(20500.0, 0.2, 8500.0).is_err());
     }
 }
