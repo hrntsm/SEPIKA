@@ -293,8 +293,9 @@ fn check_member(
     let static_biaxial_shear =
         biaxial_shear_requested && demand.mode == UltimateDemandMode::StaticHinge;
     let ql = demand.q_long.map(|q| q.abs()).unwrap_or(0.0);
+    let gravity_exceeds_capacity = |capacity_n: f64| ql > capacity_n;
     let margin = |capacity_n: f64| {
-        if demand.mode == UltimateDemandMode::StaticHinge && ql > capacity_n {
+        if demand.mode == UltimateDemandMode::StaticHinge && gravity_exceeds_capacity(capacity_n) {
             0.0
         } else if qmu > 0.0 {
             (capacity_n - ql).max(0.0) / qmu
@@ -371,6 +372,8 @@ fn check_member(
     let bending_ok = biaxial_bending_margin.map(|m| m >= 1.0).unwrap_or(true);
     let checked_parts_ok = shear_ok && bond_margin >= 1.0 && bending_ok;
     if checked_parts_ok && static_beam_rebar.is_some() {
+        let insufficient_capacity =
+            |capacity_n| gravity_exceeds_capacity(capacity_n) || (capacity_n - ql).max(0.0) < qmu;
         let opposite = rc_bar_props(shape, RcDirection::Strong, !tension_is_top, need_be)
             .filter(|props| props.at > 0.0);
         let reason = if let Some(opposite) = opposite {
@@ -382,9 +385,9 @@ fn check_member(
             let opposite_qsu = member_shear_strength(&opposite, fc, n_axial, l_clear, opts);
             if opposite_mu > mu {
                 Some("ultimate_beam_hinge_bending_unverified: 反対側の曲げ終局耐力が大きく、同じ耐力を両端に用いる略算の適用を確認できません")
-            } else if (opposite_qsu - ql).max(0.0) < qmu {
+            } else if insufficient_capacity(opposite_qsu) {
                 Some("ultimate_beam_hinge_shear_unverified: 反対側のせん断耐力で比較需要を満たせず、両端ヒンジ略算の適用を確認できません")
-            } else if opts.include_bond && (bond_strength(&opposite).0 - ql).max(0.0) < qmu {
+            } else if opts.include_bond && insufficient_capacity(bond_strength(&opposite).0) {
                 Some("ultimate_beam_hinge_bond_unverified: 反対側の付着耐力で比較需要を満たせず、両端ヒンジ略算の適用を確認できません")
             } else {
                 None
