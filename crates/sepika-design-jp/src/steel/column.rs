@@ -13,7 +13,9 @@ use super::section::{
     steel_c_factor, steel_fb_h, steel_fb_h_asd2019, steel_i_t, steel_p_lambda_b,
     steel_warping_constant,
 };
-use super::{nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, ShapeCategory};
+use super::{
+    has_section_loss, nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, ShapeCategory,
+};
 
 pub(super) fn asymmetric_built_h_shape(sec: &Section) -> Option<&SectionShape> {
     let Some(
@@ -42,15 +44,7 @@ pub(super) fn asymmetric_built_h_section_reason(
     {
         return Some("断面力が非有限です");
     }
-    if ctx.steel_attr.as_ref().is_some_and(|attr| {
-        [
-            attr.joint_flange_loss,
-            attr.joint_web_loss,
-            attr.scallop_web_loss,
-        ]
-        .iter()
-        .any(|&loss| loss != 0.0)
-    }) {
+    if has_section_loss(ctx) {
         return Some("断面欠損を控除した断面係数の適用条件が未確定です");
     }
     let basis = sec.property_basis;
@@ -100,6 +94,7 @@ pub(super) fn check_asymmetric_built_h(
     ctx: &DesignCtx,
     f: f64,
     h_combined_reason: Option<&'static str>,
+    built_h_shear_reason: Option<&'static str>,
 ) -> CheckOutcome {
     let check = || {
         if let Some(reason) = asymmetric_built_h_section_reason(forces, sec, ctx) {
@@ -136,6 +131,7 @@ pub(super) fn check_asymmetric_built_h(
 
         let unavailable: Vec<_> = asymmetric_built_h_combination_reasons(forces, ctx)
             .chain(h_combined_reason)
+            .chain(built_h_shear_reason)
             .collect();
         if !unavailable.is_empty() && ratio <= 1.0 {
             return Ok(CheckOutcome::Skipped {
@@ -173,11 +169,16 @@ pub(super) fn check_asymmetric_built_h(
             }],
         }))
     };
-    check().unwrap_or_else(|reason: String| CheckOutcome::Skipped {
-        reason: match h_combined_reason {
-            Some(combined) => format!("上下非対称組立H形鋼柱は未算定です。{reason}。{combined}"),
-            None => format!("上下非対称組立H形鋼柱は未算定です。{reason}"),
-        },
+    check().unwrap_or_else(|reason: String| {
+        let mut reason = format!("上下非対称組立H形鋼柱は未算定です。{reason}");
+        for shear_reason in [h_combined_reason, built_h_shear_reason]
+            .into_iter()
+            .flatten()
+        {
+            reason.push('。');
+            reason.push_str(shear_reason);
+        }
+        CheckOutcome::Skipped { reason }
     })
 }
 

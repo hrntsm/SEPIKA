@@ -63,7 +63,9 @@ fn simultaneous_strong_bending_and_weak_shear_leave_combination_unchecked_for_h_
     let mut from_name = rolled.clone();
     from_name.shape = None;
     from_name.property_basis.j = PropertyBasis::Supplied;
-    for section in [rolled, &built, &from_name] {
+    for (section, unequal_flange_thickness) in
+        [(rolled, false), (&built, true), (&from_name, false)]
+    {
         for term in [LoadTerm::Long, LoadTerm::Short] {
             for (n, condition) in [
                 (77_000.0, "引張軸力が同時に作用"),
@@ -86,7 +88,10 @@ fn simultaneous_strong_bending_and_weak_shear_leave_combination_unchecked_for_h_
                     let outcome = check(&model, section, &forces, term, MemberKind::Column);
                     assert!(
                         matches!(&outcome, CheckOutcome::Skipped { reason }
-                            if reason.contains(condition) && reason.contains(UNAVAILABLE)),
+                            if reason.contains(condition)
+                                && reason.contains(UNAVAILABLE)
+                                && reason.contains("実ウェブの内法寸法に対する規準上の公称せん断応力度")
+                                    == (unequal_flange_thickness && qy != 0.0)),
                         "{outcome:?}"
                     );
                 }
