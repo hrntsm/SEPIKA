@@ -189,9 +189,9 @@ fn independent_axial_failure(
     f: f64,
 ) -> Option<CheckComponent> {
     if !forces.qy.is_finite()
-        || [forces.qz, forces.my, forces.mz]
-            .iter()
-            .any(|&force| force != 0.0)
+        || !forces.qz.is_finite()
+        || forces.my != 0.0
+        || forces.mz != 0.0
         || sec.property_basis.area != PropertyBasis::Shape
         || has_section_loss(ctx)
     {
@@ -285,6 +285,7 @@ fn check_compression_slenderness(
 /// 鋼部材の許容応力度検定。
 /// 平鋼の柱・大梁で片方向でもせん断力が非零なら、理由付きの未算定とする。
 /// 上下のフランジ厚が異なる組立H形鋼の柱・大梁では、強軸せん断力が非零または非有限の位置のせん断検定を理由付きで未算定とする。
+/// 上下非対称組立H形鋼の柱・大梁では、弱軸せん断力が非零または非有限の位置のせん断検定を理由付きで未算定とする。
 /// H形鋼柱で弱軸せん断と強軸曲げが同時に作用する位置は理由付きで未算定とする。
 /// 圧縮・軸力なしでは確認済みの不適合を保持し、組合せの未算定理由を併記する。
 /// 上下非対称組立H形鋼柱の圧縮・強軸曲げは、無欠損の断面単独照査と独立して確定できる不適合を返す。
@@ -337,8 +338,13 @@ impl SteelDesign {
         } else {
             None
         };
-        let built_h_shear_reason = (!secondary_post
-            && matches!(ctx.kind, MemberKind::Column | MemberKind::Girder)
+        let primary_column_or_girder =
+            !secondary_post && matches!(ctx.kind, MemberKind::Column | MemberKind::Girder);
+        let asymmetric_built_h = sec
+            .shape
+            .as_ref()
+            .filter(|shape| primary_column_or_girder && shape.is_asymmetric_built_h());
+        let built_h_strong_shear_reason = (primary_column_or_girder
             && torsion_reason.is_none()
             && forces.qy != 0.0
             && matches!(
@@ -354,6 +360,15 @@ impl SteelDesign {
         } else {
             "上下のフランジ厚が異なる組立H形鋼の強軸せん断力Qyが非有限のため、強軸せん断検定は未算定です"
         });
+        let built_h_weak_shear_reason =
+            (asymmetric_built_h.is_some() && torsion_reason.is_none() && forces.qz != 0.0)
+                .then_some(if forces.qz.is_finite() {
+                    "上下非対称組立H形鋼では、弱軸せん断に対する規準上の公称せん断応力度の評価方法と材料の許容せん断応力度の適用条件を確定できないため、弱軸せん断検定は未算定です"
+                } else {
+                    "上下非対称組立H形鋼の弱軸せん断力Qzが非有限のため、弱軸せん断検定は未算定です"
+                });
+        let built_h_shear_reasons = [built_h_strong_shear_reason, built_h_weak_shear_reason];
+        let built_h_shear_unavailable = built_h_shear_reasons.iter().any(Option::is_some);
         let h_combined_reason = (!secondary_post
             && ctx.kind == MemberKind::Column
             && torsion_reason.is_none()
@@ -366,17 +381,16 @@ impl SteelDesign {
         } else {
             "圧縮軸力または軸力なしのH形鋼柱に弱軸せん断と強軸曲げが同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度は未算定です"
         });
-        let asymmetric_shape = if !secondary_post
-            && ctx.kind == MemberKind::Column
-            && forces.n < 0.0
-            && forces.mz != 0.0
-        {
-            sec.shape
-                .as_ref()
-                .filter(|shape| shape.is_asymmetric_built_h())
-        } else {
-            None
+        let built_h_unavailable_reasons = || {
+            built_h_shear_reasons
+                .into_iter()
+                .flatten()
+                .chain(h_combined_reason)
+                .collect::<Vec<_>>()
+                .join("。")
         };
+        let asymmetric_shape = asymmetric_built_h
+            .filter(|_| ctx.kind == MemberKind::Column && forces.n < 0.0 && forces.mz != 0.0);
         let lambda = match check_compression_slenderness(forces, sec, ctx, torsion_reason) {
             Ok(Some(lambda)) if !secondary_post => lambda,
             Ok(_) => crate::effective_slenderness(
@@ -394,12 +408,10 @@ impl SteelDesign {
                     reason.push('。');
                     reason.push_str(torsion_reason);
                 }
-                for shear_reason in [
-                    h_combined_reason.filter(|_| forces.n <= 0.0),
-                    built_h_shear_reason,
-                ]
-                .into_iter()
-                .flatten()
+                for shear_reason in h_combined_reason
+                    .filter(|_| forces.n <= 0.0)
+                    .into_iter()
+                    .chain(built_h_shear_reasons.into_iter().flatten())
                 {
                     let detail = match &mut outcome {
                         CheckOutcome::Checked(result) => &mut result.basis,
@@ -433,12 +445,9 @@ impl SteelDesign {
                 reason: "平鋼のせん断応力度の評価方法と適用する許容値の組合せが未確定のため、鋼部材検定は未算定です".into(),
             };
         }
-        if let Some(reason) = h_combined_reason.filter(|_| forces.n > 0.0) {
+        if h_combined_reason.is_some() && forces.n > 0.0 {
             return CheckOutcome::Skipped {
-                reason: match built_h_shear_reason {
-                    Some(shear_reason) => format!("{shear_reason}。{reason}"),
-                    None => reason.into(),
-                },
+                reason: built_h_unavailable_reasons(),
             };
         }
         if let Some(shape) = sec
@@ -525,9 +534,9 @@ impl SteelDesign {
             Ok(f) => f,
             Err(reason) => {
                 let mut reason = reason;
-                for shear_reason in [h_combined_reason, built_h_shear_reason]
+                for shear_reason in h_combined_reason
                     .into_iter()
-                    .flatten()
+                    .chain(built_h_shear_reasons.into_iter().flatten())
                 {
                     reason.push('。');
                     reason.push_str(shear_reason);
@@ -544,26 +553,26 @@ impl SteelDesign {
                 shape,
                 ctx,
                 f,
-                h_combined_reason,
-                built_h_shear_reason,
+                [
+                    h_combined_reason,
+                    built_h_strong_shear_reason,
+                    built_h_weak_shear_reason,
+                ],
             );
         }
-        if let (Some(reason), None) = (built_h_shear_reason, h_combined_reason) {
+        if built_h_shear_unavailable && h_combined_reason.is_none() {
+            let reason = built_h_unavailable_reasons();
             return match independent_axial_failure(forces, sec, ctx, f) {
                 Some(component) => CheckOutcome::Checked(CheckResult {
                     basis: format!("軸応力度が材料の許容上限を超えるため不適合。{reason}"),
                     detail: String::new(),
                     components: vec![component],
                 }),
-                None => CheckOutcome::Skipped {
-                    reason: reason.into(),
-                },
+                None => CheckOutcome::Skipped { reason },
             };
         }
-        let combined_and_strong = h_combined_reason
-            .zip(built_h_shear_reason)
-            .map(|(combined, strong)| format!("{strong}。{combined}"));
-        let h_combined_reason = combined_and_strong.as_deref().or(h_combined_reason);
+        let combined_and_shear = built_h_shear_unavailable.then(built_h_unavailable_reasons);
+        let h_combined_reason = combined_and_shear.as_deref().or(h_combined_reason);
         let cr = match ctx.kind {
             MemberKind::Girder => {
                 beam::check_beam(forces, sec, mat, ctx, f, term, lambda).map(CheckOutcome::Checked)

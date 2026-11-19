@@ -24,13 +24,23 @@ const FORCE: MemberForcesAt = MemberForcesAt {
 const MEMBERS: [MemberKind; 2] = [MemberKind::Column, MemberKind::Girder];
 const UNCHECKED: &str =
     "実ウェブの内法寸法に対する規準上の公称せん断応力度の評価方法と許容値の適用条件を確定できない";
+const WEAK_UNCHECKED: &str = "弱軸せん断検定は未算定です";
+const WEAK_FORCE: MemberForcesAt = MemberForcesAt {
+    qy: 0.0,
+    qz: 450_000.0,
+    ..FORCE
+};
 
 fn section(upper_thick: f64, lower_thick: f64) -> Section {
+    built_h(80.0, upper_thick, 180.0, lower_thick)
+}
+
+fn built_h(upper_width: f64, upper_thick: f64, lower_width: f64, lower_thick: f64) -> Section {
     SectionShape::SteelBuiltH {
         height: 400.0,
-        upper_width: 80.0,
+        upper_width,
         upper_thick,
-        lower_width: 180.0,
+        lower_width,
         lower_thick,
         web_thick: 8.0,
     }
@@ -187,6 +197,7 @@ fn applicability_does_not_depend_on_thin_flange_side_or_shear_sign_and_magnitude
 fn zero_strong_shear_and_equal_flange_thickness_keep_existing_results() {
     let unequal = section(12.0, 20.0);
     let equal = section(12.0, 12.0);
+    let symmetric = built_h(180.0, 12.0, 180.0, 12.0);
     for kind in MEMBERS {
         for (section, forces, expected) in [
             (
@@ -199,7 +210,7 @@ fn zero_strong_shear_and_equal_flange_thickness_keep_existing_results() {
                 0.042_553_191_489_361_7,
             ),
             (
-                &unequal,
+                &symmetric,
                 MemberForcesAt {
                     qy: 0.0,
                     qz: 100_000.0,
@@ -307,18 +318,20 @@ fn axial_material_limit_failure_requires_a_shape_area_and_no_section_loss() {
             ..Default::default()
         };
         for (section, ctx) in [(&supplied, &context), (&intact, &with_loss)] {
-            let outcome = check_with_context(
-                section,
-                MemberForcesAt {
-                    n: 2_000_000.0,
-                    ..FORCE
-                },
-                ctx,
-            );
-            assert!(
-                matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains(UNCHECKED)),
-                "{outcome:?}"
-            );
+            for (forces, expected) in [(FORCE, UNCHECKED), (WEAK_FORCE, WEAK_UNCHECKED)] {
+                let outcome = check_with_context(
+                    section,
+                    MemberForcesAt {
+                        n: 2_000_000.0,
+                        ..forces
+                    },
+                    ctx,
+                );
+                assert!(
+                    matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains(expected)),
+                    "{outcome:?}"
+                );
+            }
         }
     }
 }
@@ -344,6 +357,130 @@ fn strong_shear_unavailability_retains_existing_weak_combination_and_axial_failu
             result.basis.contains("フランジ内の設計用公称応力度"),
             qz != 0.0,
             "{result:?}"
+        );
+        assert_eq!(result.basis.contains(WEAK_UNCHECKED), qz != 0.0);
+    }
+}
+
+#[test]
+fn unequal_built_h_pure_weak_shear_requires_a_stress_evaluation_and_allowable_pairing() {
+    let section = built_h(80.0, 20.0, 240.0, 12.0);
+    for kind in MEMBERS {
+        for term in [LoadTerm::Short, LoadTerm::Long] {
+            let outcome = check(&section, kind, WEAK_FORCE, term, 3_000.0);
+            assert!(
+                matches!(&outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("上下非対称組立H形鋼")
+                        && reason.contains("規準上の公称せん断応力度の評価方法と材料の許容せん断応力度の適用条件を確定できない")
+                        && reason.contains(WEAK_UNCHECKED)),
+                "{kind:?} {outcome:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn weak_shear_condition_applies_to_width_or_thickness_asymmetry() {
+    for section in [
+        built_h(80.0, 12.0, 240.0, 12.0),
+        built_h(180.0, 20.0, 180.0, 12.0),
+    ] {
+        for kind in MEMBERS {
+            for (qz, expected) in [
+                (f64::NAN, "弱軸せん断力Qzが非有限"),
+                (f64::NEG_INFINITY, "弱軸せん断力Qzが非有限"),
+                (-f64::MIN_POSITIVE, WEAK_UNCHECKED),
+            ] {
+                let outcome = check(
+                    &section,
+                    kind,
+                    MemberForcesAt { qz, ..WEAK_FORCE },
+                    LoadTerm::Short,
+                    3_000.0,
+                );
+                assert!(
+                    matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains(expected)),
+                    "{kind:?} {outcome:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn weak_shear_unavailability_preserves_statutory_slenderness_and_torsion_priority() {
+    let section = built_h(80.0, 20.0, 240.0, 12.0);
+    for kind in MEMBERS {
+        let forces = MemberForcesAt {
+            n: -10_000.0,
+            ..WEAK_FORCE
+        };
+        let result = checked(check(
+            &section,
+            kind,
+            forces.clone(),
+            LoadTerm::Short,
+            24_000.0,
+        ));
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].kind, CheckKind::Provision);
+        assert!(result.ratio() > 1.0 && result.basis.contains(WEAK_UNCHECKED));
+
+        let result = checked(check(
+            &section,
+            kind,
+            MemberForcesAt { mx: 1e6, ..forces },
+            LoadTerm::Short,
+            24_000.0,
+        ));
+        assert_eq!(result.components[0].kind, CheckKind::Provision);
+        assert!(result.components[0].detail.contains("ねじりモーメントMx"));
+        assert!(!result.basis.contains(WEAK_UNCHECKED));
+    }
+}
+
+#[test]
+fn weak_shear_retains_only_the_independently_established_axial_material_failure() {
+    let section = built_h(80.0, 20.0, 240.0, 12.0);
+    for kind in MEMBERS {
+        for (qy, qz) in [(0.0, WEAK_FORCE.qz), (FORCE.qy, WEAK_FORCE.qz)] {
+            let shear = MemberForcesAt {
+                qy,
+                qz,
+                ..WEAK_FORCE
+            };
+            for sign in [-1.0, 1.0] {
+                let result = checked(check(
+                    &section,
+                    kind,
+                    MemberForcesAt {
+                        n: sign * 2e6,
+                        ..shear
+                    },
+                    LoadTerm::Short,
+                    0.0,
+                ));
+                assert_eq!(result.components.len(), 1);
+                assert_eq!(result.components[0].kind, CheckKind::Axial);
+                assert!((result.ratio() - 2e6 / 1_744_640.0).abs() < 1e-12);
+                assert!(result.basis.contains(WEAK_UNCHECKED));
+                assert_eq!(result.basis.contains(UNCHECKED), qy != 0.0);
+            }
+        }
+        let outcome = check(
+            &section,
+            kind,
+            MemberForcesAt {
+                n: 2e6,
+                qz: f64::INFINITY,
+                ..WEAK_FORCE
+            },
+            LoadTerm::Short,
+            0.0,
+        );
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains("弱軸せん断力Qzが非有限")),
+            "{kind:?} {outcome:?}"
         );
     }
 }
