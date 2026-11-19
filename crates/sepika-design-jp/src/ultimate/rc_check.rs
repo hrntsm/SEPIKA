@@ -36,16 +36,17 @@ pub struct UltimateCheck {
     pub qsu: f64,
     /// 付着割裂による終局せん断耐力 Qbu `[N]`（`include_bond=false` なら 0）。
     pub qbu: f64,
-    /// 強軸のせん断余裕度。静的は max(Qsu−QL, 0)/Qmu、確定総応答は Qsu/Qmu。
-    /// 静的二軸指定で Qmu が 0 でも QL が Qsu を超える場合は 0。
+    /// 強軸のせん断余裕度。静的は max(Qsu−|QL|, 0)/Qmu、確定総応答は Qsu/Qmu。
+    /// Qmu が 0 の場合は無限大。ただし静的で |QL| が Qsu を超える場合は 0。
     pub shear_margin: f64,
     /// 二軸せん断余裕度。静的では両軸の長期せん断が明示的に 0、確定総応答では両軸の総せん断を使用できる場合に算定。
     pub biaxial_shear_margin: Option<f64>,
     /// 2 軸曲げ余裕度（柱かつ `biaxial_bending=true` のとき Some）。
     /// `1/((Mmx/Mux)^2+(Mmy/Muy)^2)^(1/2)`。設計用曲げ需要が 0 なら `f64::INFINITY`。
     pub biaxial_bending_margin: Option<f64>,
-    /// 付着余裕度。静的は max(Qbu−QL, 0)/Qmu、確定総応答は Qbu/Qmu。
-    /// `include_bond=false` なら `f64::INFINITY`。
+    /// 付着余裕度。静的は max(Qbu−|QL|, 0)/Qmu、確定総応答は Qbu/Qmu。
+    /// `include_bond=false` または Qmu が 0 の場合は無限大。
+    /// 付着が有効かつ静的で、Qmu が 0 でも |QL| が Qbu を超える場合は 0。
     pub bond_margin: f64,
     /// 軸終局耐力（柱のみ Some）。
     pub axial: Option<RcAxialUltimate>,
@@ -283,17 +284,18 @@ fn check_member(
     let static_biaxial_shear =
         biaxial_shear_requested && demand.mode == UltimateDemandMode::StaticHinge;
     let ql = demand.q_long.map(|q| q.abs()).unwrap_or(0.0);
-    let shear_margin = if qmu > 0.0 {
-        (qsu - ql).max(0.0) / qmu
-    } else if static_biaxial_shear && ql > qsu {
-        0.0
-    } else {
-        f64::INFINITY
+    let margin = |capacity_n: f64| {
+        if demand.mode == UltimateDemandMode::StaticHinge && ql > capacity_n {
+            0.0
+        } else if qmu > 0.0 {
+            (capacity_n - ql).max(0.0) / qmu
+        } else {
+            f64::INFINITY
+        }
     };
-    let bond_margin = if !opts.include_bond {
-        f64::INFINITY
-    } else if qmu > 0.0 {
-        ((qbu - ql).max(0.0)) / qmu
+    let shear_margin = margin(qsu);
+    let bond_margin = if opts.include_bond {
+        margin(qbu)
     } else {
         f64::INFINITY
     };

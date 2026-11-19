@@ -167,6 +167,93 @@ fn static_biaxial_shear_keeps_the_strong_axis_failure_from_issue_1412() {
 }
 
 #[test]
+fn static_uniaxial_shear_checks_long_term_shear_when_hinge_demand_is_zero() {
+    let mut model = super::tests::column_and_beam_model();
+    model.elements.truncate(1);
+    let elem = model.elements[0].id;
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    let check = |ql_n| {
+        let demand = MemberDemand {
+            q_long: Some(ql_n),
+            ..MemberDemand::axial(20_000_000.0)
+        };
+        collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts)
+            .unwrap()
+            .remove(0)
+    };
+
+    let qsu_n = check(0.0).qsu;
+    assert!(0.0 < qsu_n && qsu_n < 800_000.0);
+    for (ql_n, margin, ok) in [
+        (800_000.0, 0.0, false),
+        (-800_000.0, 0.0, false),
+        (qsu_n, f64::INFINITY, true),
+        (0.0, f64::INFINITY, true),
+    ] {
+        let result = check(ql_n);
+        assert_eq!(result.qmu, 0.0);
+        assert_eq!(result.shear_margin, margin, "QL={ql_n}");
+        assert_eq!(result.ok, ok, "QL={ql_n}");
+        assert_eq!(result.unchecked_reason, None);
+    }
+}
+
+#[test]
+fn static_bond_split_checks_long_term_shear_when_hinge_demand_is_zero() {
+    let mut model = super::tests::column_and_beam_model();
+    model.elements.truncate(1);
+    let Some(sepika_core::section_shape::SectionShape::RcColumnRect { rebar, .. }) =
+        &mut model.sections[0].shape
+    else {
+        panic!("矩形柱の断面が必要");
+    };
+    rebar.x = vec![2];
+    rebar.y = vec![2];
+    rebar.hoop.pitch = 75.0;
+    model.materials[0].name = "SD490".into();
+    model.materials[0].fy = Some(490.0);
+    let elem = model.elements[0].id;
+    let check = |ql_n, include_bond| {
+        let demand = MemberDemand {
+            q_long: Some(ql_n),
+            ..MemberDemand::axial(20_000_000.0)
+        };
+        let opts = UltimateShearOptions {
+            include_bond,
+            ..Default::default()
+        };
+        collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts)
+            .unwrap()
+            .remove(0)
+    };
+
+    let zero_demand = check(0.0, true);
+    assert!(
+        0.0 < zero_demand.qbu && zero_demand.qbu < zero_demand.qsu,
+        "Qbu={}, Qsu={}",
+        zero_demand.qbu,
+        zero_demand.qsu
+    );
+    for (ql_n, include_bond, margin, ok) in [
+        (zero_demand.qsu, true, 0.0, false),
+        (-zero_demand.qsu, true, 0.0, false),
+        (zero_demand.qsu, false, f64::INFINITY, true),
+        (zero_demand.qbu, true, f64::INFINITY, true),
+        (0.0, true, f64::INFINITY, true),
+    ] {
+        let result = check(ql_n, include_bond);
+        assert_eq!(result.qmu, 0.0);
+        assert_eq!(result.shear_margin, f64::INFINITY, "QL={ql_n}");
+        assert_eq!(result.bond_margin, margin, "QL={ql_n}");
+        assert_eq!(result.ok, ok, "QL={ql_n}");
+        assert_eq!(result.unchecked_reason, None);
+    }
+}
+
+#[test]
 fn static_biaxial_shear_keeps_independently_failed_bending_check() {
     let mut model = super::tests::column_and_beam_model();
     model.elements.truncate(1);
