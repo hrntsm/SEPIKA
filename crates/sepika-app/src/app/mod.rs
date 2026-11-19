@@ -2610,6 +2610,8 @@ impl std::ops::DerefMut for UiViewState {
 #[cfg(test)]
 mod beam_bolt_tests;
 #[cfg(test)]
+pub(crate) mod brb_product_tests;
+#[cfg(test)]
 mod post_design_tests;
 
 #[cfg(test)]

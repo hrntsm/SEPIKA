@@ -221,9 +221,9 @@ fn brb_product_check_rejects_torque_instead_of_returning_axial_only_pass() {
     model.sections[0].frame_use = Some(FrameSectionUse::Brace);
     model.brb_attrs.push(BrbAttr {
         elem: COLUMN,
-        allowable_axial_short: 100_000.0,
-        critical_length: 6000.0,
-        length_reduction: 0.0,
+        allowable_axial_short: Some(100_000.0),
+        critical_length: Some(6000.0),
+        length_reduction: Some(0.0),
     });
     let forces = MemberForces {
         at: vec![
