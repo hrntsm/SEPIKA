@@ -47,6 +47,7 @@ fn cft_concrete_strength_statutory_lower_bound() {
                         n: -1000.0,
                         qy: 0.0,
                         qz: 0.0,
+                        mx: 0.0,
                         my: 0.0,
                         mz: 0.0,
                     },

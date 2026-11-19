@@ -171,6 +171,7 @@ fn check_compression_slenderness(
     forces: &MemberForcesAt,
     sec: &Section,
     ctx: &DesignCtx,
+    torsion_reason: Option<&str>,
 ) -> Result<Option<f64>, CheckOutcome> {
     use crate::{CheckComponent, CheckKind, CheckResult};
     if forces.n.is_finite() && forces.n >= 0.0 {
@@ -213,16 +214,21 @@ fn check_compression_slenderness(
     if lambda <= limit {
         return Ok(Some(lambda));
     }
+    let mut detail = format!(
+        "有効細長比λ={lambda} > 法定上限{limit}。λ/上限={ratio}（応力度比ではありません）",
+        ratio = lambda / limit
+    );
+    if let Some(reason) = torsion_reason {
+        detail.push('。');
+        detail.push_str(reason);
+    }
     Err(CheckOutcome::Checked(CheckResult {
         basis: "建築基準法施行令第65条 有効細長比上限".into(),
         detail: String::new(),
         components: vec![CheckComponent {
             kind: CheckKind::Provision,
             ratio: lambda / limit,
-            detail: format!(
-                "有効細長比λ={lambda} > 法定上限{limit}。λ/上限={ratio}（応力度比ではありません）",
-                ratio = lambda / limit
-            ),
+            detail,
         }],
     }))
 }
@@ -230,7 +236,7 @@ fn check_compression_slenderness(
 /// 鋼部材の許容応力度検定。
 /// 平鋼の柱・大梁で片方向でもせん断力が非零なら、理由付きの未算定とする。
 /// H形鋼柱で弱軸せん断・強軸曲げ・引張軸力が同時に作用する位置も理由付きで未算定とする。
-/// 圧縮時の法定細長比の判定は先に適用する。
+/// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
 
 impl DesignCheck for SteelDesign {
@@ -264,7 +270,22 @@ impl SteelDesign {
         ctx: &DesignCtx,
         secondary_post: bool,
     ) -> CheckOutcome {
-        let lambda = match check_compression_slenderness(forces, sec, ctx) {
+        let torsion_reason = if !forces.mx.is_finite() {
+            Some("ねじりモーメントMxが非有限です")
+        } else if forces.mx != 0.0 {
+            let pure_pipe_torsion = matches!(sec.shape, Some(SectionShape::SteelPipe { .. }))
+                && [forces.n, forces.qy, forces.qz, forces.my, forces.mz]
+                    .iter()
+                    .all(|&force| force == 0.0);
+            Some(if pure_pipe_torsion {
+                "円形鋼管に純ねじり（Mx）が作用しています。規準に基づくねじり耐力と適用条件を確定できないため、鋼部材の応力度検定は未算定です"
+            } else {
+                "ねじりモーメントMxが作用しています。この断面形状・断面力に対するねじりの採用式と、他の断面力がある場合の断面内同一点での組合せ条件が未確定のため、鋼部材の応力度検定は未算定です"
+            })
+        } else {
+            None
+        };
+        let lambda = match check_compression_slenderness(forces, sec, ctx, torsion_reason) {
             Ok(Some(lambda)) if !secondary_post => lambda,
             Ok(_) => crate::effective_slenderness(
                 sec.iy,
@@ -274,8 +295,21 @@ impl SteelDesign {
                 ctx.lk_y,
                 ctx.lk_z,
             ),
-            Err(outcome) => return outcome,
+            Err(mut outcome) => {
+                if let (Some(torsion_reason), CheckOutcome::Skipped { reason }) =
+                    (torsion_reason, &mut outcome)
+                {
+                    reason.push('。');
+                    reason.push_str(torsion_reason);
+                }
+                return outcome;
+            }
         };
+        if let Some(reason) = torsion_reason {
+            return CheckOutcome::Skipped {
+                reason: reason.into(),
+            };
+        }
         if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column)
             && matches!(sec.shape, Some(SectionShape::SteelFlatBar { .. }))
             && (forces.qy != 0.0 || forces.qz != 0.0)
@@ -426,6 +460,7 @@ mod surface_radius_tests {
             n: 0.0,
             qy: 150_000.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };
@@ -464,6 +499,7 @@ mod surface_radius_tests {
             n: 0.0,
             qy: 150_000.0,
             qz: 150_000.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };
@@ -505,6 +541,7 @@ mod surface_radius_tests {
             n: 0.0,
             qy: 1.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };
@@ -583,6 +620,7 @@ mod surface_radius_tests {
                     n: 0.0,
                     qy: 100_000.0,
                     qz: 0.0,
+                    mx: 0.0,
                     my: 0.0,
                     mz: 0.0,
                 };
@@ -706,6 +744,7 @@ mod surface_radius_tests {
             n: 100_000.0,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };
@@ -793,6 +832,7 @@ mod sm520_tests {
             n: 2_200_000.0,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         }

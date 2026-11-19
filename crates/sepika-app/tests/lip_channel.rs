@@ -28,6 +28,7 @@ fn reason(model: &Model) -> String {
         n: -100_000.0,
         qy: 1000.0,
         qz: -2000.0,
+        mx: 0.0,
         my: -1_000_000.0,
         mz: 2_000_000.0,
     };
@@ -200,6 +201,7 @@ fn lip_channel_invalid_geometry_is_rejected_by_existing_mass_input() {
             n: 0.0,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };

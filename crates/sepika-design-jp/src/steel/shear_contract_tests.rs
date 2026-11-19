@@ -171,6 +171,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
                         n,
                         qy: sign_y * qy_n,
                         qz: sign_z * qz_n,
+                        mx: 0.0,
                         my: if normal_stress {
                             sign_z * 30_000_000.0
                         } else {

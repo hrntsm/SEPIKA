@@ -166,6 +166,7 @@ mod tests {
                         n,
                         qy,
                         qz,
+                        mx: 0.0,
                         my,
                         mz,
                     };
@@ -216,6 +217,7 @@ mod tests {
             n: -1.0,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };
@@ -244,6 +246,7 @@ mod tests {
                 n: 0.0,
                 qy: 0.0,
                 qz: 0.0,
+                mx: 0.0,
                 my: f64::NAN,
                 mz: f64::INFINITY,
             };
@@ -272,6 +275,7 @@ mod tests {
             n: f64::NAN,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };

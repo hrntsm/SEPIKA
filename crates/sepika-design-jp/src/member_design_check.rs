@@ -451,14 +451,7 @@ pub fn run_member_design_checks(
             if !is_near_design_position(*pos, &positions) {
                 continue;
             }
-            let mfa = MemberForcesAt {
-                pos: *pos,
-                n: forces[0],
-                qy: forces[1],
-                qz: forces[2],
-                my: forces[4],
-                mz: forces[5],
-            };
+            let mfa = MemberForcesAt::from_local(*pos, *forces);
             let missing_q0 = kind == MemberKind::Girder
                 && options.long_member_forces.is_some()
                 && options.qd_method != QdMethod::Qd2
@@ -512,7 +505,18 @@ pub fn run_member_design_checks(
                     reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
                 }
             } else if let Some(brb) = brb {
-                CheckOutcome::Checked(crate::brb::brb_check(brb, mfa.n, length, brb_long))
+                if mfa.mx == 0.0 {
+                    CheckOutcome::Checked(crate::brb::brb_check(brb, mfa.n, length, brb_long))
+                } else {
+                    CheckOutcome::Skipped {
+                        reason: if mfa.mx.is_finite() {
+                            "ねじりモーメントMxが作用しています。BRBの製品許容値による検定の適用範囲は軸力と座屈長さです"
+                        } else {
+                            "ねじりモーメントMxが非有限です"
+                        }
+                        .into(),
+                    }
+                }
             } else {
                 checker.check(&mfa, sec, mat, &ctx)
             };

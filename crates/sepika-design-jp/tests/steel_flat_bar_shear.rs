@@ -23,6 +23,7 @@ fn forces(qy: f64, qz: f64) -> MemberForcesAt {
         n: 0.0,
         qy,
         qz,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     }

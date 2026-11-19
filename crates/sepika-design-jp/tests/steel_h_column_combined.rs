@@ -14,6 +14,7 @@ const ISSUE_FORCES: MemberForcesAt = MemberForcesAt {
     n: 77_000.0,
     qy: 0.0,
     qz: 365_000.0,
+    mx: 0.0,
     my: 0.0,
     mz: 167e6,
 };
