@@ -468,7 +468,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 ## 仕口パネル耐力式の原典調査（#723）
 
-[原典調査・独立算術と要素→証拠索引](仕口パネル耐力式_Issue723_原典調査.md)に、鋼構造接合部設計指針第4版第3刷§5.1–5.3・表C5.1の原画像による降伏/全塑性式の区別、上下柱平均と現行軸力の差、断面・詳細の限界を記録する。状態は🔶。円形鋼管の初期せん断剛性は[#1429](https://github.com/hrntsm/SEPIKA/issues/1429)で指針式と照合した。S造正方形等厚の形状係数差は[#1428](https://github.com/hrntsm/SEPIKA/issues/1428)、初期剛性差は[#1504](https://github.com/hrntsm/SEPIKA/issues/1504)で追跡する。CFT専用原典の採否・実験Validationは未完了。
+[原典調査・独立算術と要素→証拠索引](仕口パネル耐力式_Issue723_原典調査.md)に、鋼構造接合部設計指針第4版第3刷§5.1–5.3・表C5.1の原画像による降伏/全塑性式の区別、上下柱平均と現行軸力の差、断面・詳細の限界を記録する。状態は🔶。円形鋼管の初期せん断剛性は[#1429](https://github.com/hrntsm/SEPIKA/issues/1429)で指針式と照合した。S造正方形等厚の形状係数は[#1428](https://github.com/hrntsm/SEPIKA/issues/1428)で[公開入口の両軸照合](仕口パネル耐力式_Issue723_原典調査.md#正方形等厚鋼管の形状係数の追加照合issue-1428)済み。初期剛性差は[#1504](https://github.com/hrntsm/SEPIKA/issues/1504)で追跡する。CFT専用原典の採否・実験Validationは未完了。
 
 ## 静的仕口パネルの実断面積（#892）
 
@@ -828,7 +828,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
 | 1124 | CFT中柱・長柱の許容軸力・曲げ | sepika-design-jp | cft/mod.rs | [原典6項目と独立有限例](CFT中長柱許容曲げ_Issue1124_原典照合.md) | 原典／公開入口 | 🔶（許容全式と適用条件の確認・採用保留） |
 | 1365 | 段違い・偏心接合の仕口パネル | sepika-core / sepika-element / sepika-solver / sepika-design-jp / sepika-app | panel_zone.rs / springs/panel.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs | [原典・独立算術と公開入口](仕口パネル段違い偏心_Issue1365_原典照合.md#現行実装とvvの証拠) | 原典・有限Verification | 🔶（対象の採用条件・領域別の仕事・Validation未） |
-| 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像・現行式と独立数値の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、既存回帰 | 原典・有限Verification | 🔶（S造形状係数#1428、CFT採否・Validation未） |
+| 723 | S/CFT仕口パネル耐力式の原典対応 | sepika-element / sepika-design-jp | springs/panel.rs / joint_wiring/steel_panel.rs / steel/panel_zone.rs | [原画像・現行式と独立数値の照合](仕口パネル耐力式_Issue723_原典調査.md#vvと要素証拠索引)、既存回帰 | 原典・有限Verification | 🔶（S造正方形等厚の形状係数照合済み、CFT採否・Validation未） |
 | 1306 | S造合成梁の強軸曲げ剛性と協力幅 | sepika-element / sepika-app | frame/beam/stiffness_factors.rs / app/preparation.rs | [原典と独立有限例](S造合成梁剛性_Issue1306_原典照合.md#独立した有限計算)、既存合成梁回帰 | 原典・有限Verification | 🔶（合成指針本文・適用域・方式採否・Validationは保留） |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
 | 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_and_dof_equilibrium_match_closed_form`（同じ解でM=K·γと釣合い残差ゼロを別assertで確認）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
