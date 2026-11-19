@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use sepika_core::ids::ElemId;
+use sepika_core::model::ElementKind;
 use sepika_design_jp::ultimate::MemberDemand;
 use sepika_element::frame::beam::MemberForces;
 use sepika_solver::nonlinear::pushover::PushoverMemberResponse;
@@ -99,7 +100,7 @@ pub fn member_demand_from_pushover(
 }
 
 /// 保存長期termsの同一部材・同一位置6成分から、両軸の QL を含む静的ヒンジ需要を作る。
-/// 必要ケース・部材・評価位置・有限値が不完全なら理由付きで拒否する。
+/// 必要な応力が不完全な場合や、引張専用ブレースを反復解析する場合は理由付きで拒否する。
 pub fn complete_ultimate_static_demand<F>(
     model: &sepika_core::model::Model,
     force_of: F,
@@ -133,6 +134,14 @@ where
     F: FnMut(sepika_core::ids::LoadCaseId) -> Result<Vec<(ElemId, MemberForces)>, String>,
 {
     let terms = sepika_core::load_combo::ultimate_gravity_terms(model)?;
+    if model.stress_cfg.tension_only_iteration
+        && model
+            .elements
+            .iter()
+            .any(|elem| matches!(elem.kind, ElementKind::Brace { tension_only: true }))
+    {
+        return Err("gravity_superposition_unsupported: 引張専用ブレースの反復解析では、各ケースと長期架構用組合せ荷重に対するブレースの有効状態が同一と確認できないため、重力応力を合成できません".into());
+    }
     let required: Vec<_> = model
         .elements
         .iter()
