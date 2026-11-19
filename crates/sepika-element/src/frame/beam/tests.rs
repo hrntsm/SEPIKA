@@ -188,7 +188,10 @@ fn test_beam_new_src_cft_composite_props() {
 
     let src_beam = BeamElement::new(&make_elem(0), &model);
     let ec = model.materials[0].young;
-    let p = src_shape.src_equivalent_props(ec, 0.2).unwrap().unwrap();
+    let p = src_shape
+        .src_equivalent_props(ec, 0.2, ec / 2.4)
+        .unwrap()
+        .unwrap();
     assert!((src_beam.e - ec).abs() < 1e-9);
     assert!((src_beam.g - ec / (2.0 * (1.0 + 0.2))).abs() < 1e-9);
     assert!(

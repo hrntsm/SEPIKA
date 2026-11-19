@@ -1011,17 +1011,7 @@ pub(super) fn composite_props_with(
             if !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) {
                 return Err("SRC の Fc は設定済みの正の有限値が必要です".into());
             }
-            let props = shape.src_equivalent_props(mat.young, mat.poisson)?;
-            if let Some(p) = props {
-                let g = mat.shear_modulus();
-                if [g, g * p.j, g * p.as_y, g * p.as_z]
-                    .iter()
-                    .any(|v| !v.is_finite() || *v <= 0.0)
-                {
-                    return Err("SRC のせん断剛性は正の有限値が必要です".into());
-                }
-            }
-            Ok(props)
+            shape.src_equivalent_props(mat.young, mat.poisson, mat.shear_modulus())
         }
         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => {
             validate_composite_material(shape, mat, steel)?;

@@ -105,6 +105,12 @@ impl BeamElement {
                 .map_err(section_error)?;
         }
         let (e, g) = match sec.shape.as_ref() {
+            Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }) => {
+                let concrete = model
+                    .element_material(data)
+                    .ok_or_else(|| section_error("SRC 主材料が未割当です".to_string()))?;
+                (mat.young, concrete.shear_modulus())
+            }
             Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => {
                 let steel =
                     steel_mat.ok_or_else(|| "CFT 断面の鋼管材料が未設定です".to_string())?;

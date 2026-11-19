@@ -64,3 +64,31 @@ CFTでは鋼管の環とコア円を別に積分し、軸面積、曲げ・極�
 - `cargo test -p sepika-element --lib --locked test_beam_new_src_cft_composite_props` と `cargo test -p sepika-element --lib --locked cft_box_and_pipe_deliver_supplied_steel_j_plus_core_j_to_both_actual_elements` は各1件成功。
 - `cargo run -p xtask -- check-docs`、`mdbook build docs`、`git diff --check` は成功。生成HTMLで製品文書2頁の表とリンク先の見出しを確認した。
 - 恒久成果は文書のため、製品の計算コード・入力域は変更していない。実測Validation、実建物の全設計、専門家サインオフは今回未実施。
+
+## 採用Gcの是正後の検証（Issue #1424）
+
+2026-11-19、[#1424](https://github.com/hrntsm/SEPIKA/issues/1424)の対象を上記のSRC矩形と同じ形状で確認した。SRC規準第6版第3刷の表10.1（p.9）は標準材料定数、解説11条（p.99）は平面保持によるSRC梁の曲げ剛性および累加、解説12条（p.100）は内蔵鉄骨の影響が小さい矩形部材のせん断変形の概算に対応する。表10.1のGの既定値採否、既存の両方向As・Jの形状式の一般適用、実測値の採用条件と実験Validationは未確認。[製品の算定条件](../../docs/calc_basis/03_断面性能/06_SRC_CFT_の等価断面性能.md#srcのコンクリート基準への換算)
+
+独立計算では、強・弱軸のコンクリート有効面積をそれぞれ146800・145200 mm²、鋼を3200・4800 mm²とし、各材料の抵抗を加算した。ねじりは矩形の近似J=3707859375 mm⁴と三枚の鋼板の薄板近似J=883712/3 mm⁴に各Gを乗じて加算した。両方のGc条件で固定鋼項は252307692.308 N、378461538.462 N、23225764102.564 N·mm²。EAと強・弱軸EIはコンクリートと鋼の非重複領域から算定し、それぞれ7369072000 N、217969493589333.33・47971751317333.33 N·mm²となる。
+
+| 採用Gc [N/mm²] | 強軸 GA [N] | 弱軸 GA [N] | GJ [N·mm²] |
+| --- | ---: | ---: | ---: |
+| 33500/2.4（G省略） | 2301391025.641 | 2405211538.462 | 51778762873477.56 |
+| 20000（主材料に明示） | 3188307692.308 | 3282461538.462 | 74180413264102.56 |
+
+| 観測した入口 | 回帰テストと比較内容 |
+| --- | --- |
+| `BeamElement::try_new` | `src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution`。矩形梁・柱で、採用G、軸・曲げ、両方向の横変位剛性とねじり剛性を比較。横変位自由度の剛性は、両端回転拘束での曲げとせん断の柔性を加算して照合。通常の断面材料とST-Bridgeの部材別強度で選ばれた材料について、導出・明示Gを確認。 |
+| 公開線形静的解析 | `public_src_analysis_uses_gc_of_member_concrete_selected_by_stb_strength`。断面材料Gc=12000の片持ちSRC柱に純ねじりを載荷。部材別強度による主材料で明示Gc=20000と未指定時の導出Gc=33500/2.4を比較し、それぞれ独立GJによる先端ねじれ角と照合。 |
+| `App::run_preparation` | `src_loaded_and_edited_materials_never_use_provisional_analysis_properties`。Ec=20500 N/mm²のSRC柱に対し、準備計算の両方向等価As・Jに採用Gcを乗じて独立の剛性と比較。明示Gが0・負・NaN・正負∞・最大有限値のときに要素生成と準備計算の拒否を確認。 |
+| SRC等価断面性能 | `src_material_errors_are_distinct_from_non_src`。不正なEc・νcと、Gが非正・非有限または必要性能を有限正値で表せない条件を確認。 |
+
+変更前の公開梁試験では、明示Gc=20000 N/mm²のGJが74190466206773.83 N·mm²となり、独立期待との差で失敗した。ST-Bridgeの部材別強度に対する軸・曲げのEの選択は[#1522](https://github.com/hrntsm/SEPIKA/issues/1522)で追跡する。
+
+数値表現の境界試験 `src_weak_axis_steel_shear_survives_large_concrete_g` では矩形300×600 mm、H550×300×8×250 mmを用いた。弱軸の外形と鉄骨の有効面積はともに150000 mm²で、弱軸GAは鋼の分担11826923076.923 Nに一致する。修正前の公開等価断面算定では、換算比から1を引く順序の桁落ちにより、Gc=10²¹ N/mm²で29103830456.734 Nを返し、Gc=10²² N/mm²では等価Asが0となって算定に失敗した。面積差と換算鋼項を別々に算定し、両条件で鋼の分担を確認した。Gcは丸めの影響を確認するための数値入力である。
+
+- `cargo test -p sepika-core -p sepika-element --locked` は成功。elementの単体529件と統合1件を含む。
+- `cargo test -p sepika-solver --test torsion_contract --locked` は7件成功。
+- `cargo test -p sepika-app --features gui --lib --locked src_loaded_and_edited_materials_never_use_provisional_analysis_properties` は1件成功。
+- `cargo clippy -p sepika-core -p sepika-element -p sepika-solver -p sepika-app --features sepika-app/gui --all-targets --locked -- -D warnings` は成功。
+- `cargo run -p xtask --locked -- check-docs` と `mdbook build docs` は成功。生成HTMLのMathJax入力で添字と乗算を確認した。
