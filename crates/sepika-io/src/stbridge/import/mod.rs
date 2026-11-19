@@ -30,6 +30,8 @@ mod xml;
 
 use section_key::{MemberSource, SectionKey};
 
+const REFERENCE_DIRECTION: &str = "isReferenceDirection";
+
 /// 取り込み途中の断面（id 整列・形鋼名解決の前）。
 struct PendingSec {
     file_id: SectionKey,

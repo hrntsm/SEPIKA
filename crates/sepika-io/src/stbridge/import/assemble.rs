@@ -20,7 +20,7 @@ use sepika_core::region_rebuild::rebuild_floor_regions;
 use sepika_core::section_shape::SectionShape;
 use sepika_core::standard_material::standard_material_properties;
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// パース済み中間表現からモデルと取り込み報告を組み立てる（後段のエントリポイント）。
 pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbError> {
@@ -29,11 +29,12 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         mut warnings,
         mut strengths,
         unsupported,
-        attr_usage,
+        mut attr_usage,
         raw_nodes,
         raw_stories,
         mut raw_load_cases,
         pending_secs,
+        column_reference_directions,
         pending_members,
         mut pending_secondaries,
         steel_lib,
@@ -86,13 +87,59 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut strengths,
     )?;
 
+    let mut quarter_turn_columns = HashSet::new();
+    for (key, value) in column_reference_directions {
+        if section_uses.get(&key) != Some(&FrameSectionUse::Column)
+            || !section_index.get(&key).is_some_and(|&id| {
+                matches!(
+                    model.sections[id as usize].shape,
+                    Some(SectionShape::SteelH { .. } | SectionShape::SteelBuiltH { .. })
+                )
+            })
+        {
+            continue;
+        }
+        match value.trim_matches([' ', '\t', '\r', '\n']) {
+            "true" | "1" => {}
+            "false" | "0" => {
+                quarter_turn_columns.insert(key);
+            }
+            _ => {
+                return Err(StbError::Parse(format!(
+                    "{key}: {}={value:?} は true, false, 1, 0 のいずれかが必要です",
+                    super::REFERENCE_DIRECTION
+                )));
+            }
+        }
+        attr_usage
+            .entry((
+                key.family.tag().to_owned(),
+                super::REFERENCE_DIRECTION.to_owned(),
+            ))
+            .or_default()
+            .imported += 1;
+    }
     build_members(
         &mut model,
         &pending_members,
         &node_index,
         &section_index,
+        &quarter_turn_columns,
         &mut strengths,
     )?;
+    for secondary in &pending_secondaries {
+        if let Some(key) = secondary
+            .section
+            .filter(|key| quarter_turn_columns.contains(key))
+        {
+            warnings.push(format!(
+                "{} id={:?}: {key} の {} による90度回転はS間柱では未対応です",
+                secondary.source.tag,
+                secondary.source.id,
+                super::REFERENCE_DIRECTION
+            ));
+        }
+    }
     let (n_beams, n_posts) = build_secondaries(
         &mut model,
         &mut pending_secondaries,
@@ -702,6 +749,7 @@ fn build_members(
     pending_members: &[PendingMember],
     node_index: &HashMap<u32, u32>,
     section_index: &HashMap<SectionKey, u32>,
+    quarter_turn_columns: &HashSet<SectionKey>,
     strengths: &mut super::strength::StrengthInputs,
 ) -> Result<(), StbError> {
     for m in pending_members {
@@ -726,13 +774,21 @@ fn build_members(
                 [EndCondition::Pinned, EndCondition::Pinned],
             ),
         };
+        let rotate = if m
+            .section
+            .is_some_and(|key| quarter_turn_columns.contains(&key))
+        {
+            (m.rotate + 90.0).rem_euclid(360.0)
+        } else {
+            m.rotate
+        };
         let (end_offsets_mm, ref_vector) = super::super::placement::import_placement(
             [
                 model.nodes[ni as usize].coord,
                 model.nodes[nj as usize].coord,
             ],
             m.offsets_mm,
-            m.rotate,
+            rotate,
             m.source_usage,
             model.sections[section.index()]
                 .shape
