@@ -3,7 +3,7 @@ use sepika_core::model::{FrameSectionUse, Model, PropertyBasis, SteelDesignAttr}
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, CheckResult, DesignCheck, DesignCtx,
-    LoadTerm, MemberDesignCheckOptions, MemberForcesAt, MemberKind, SteelDesign,
+    LoadTerm, MemberDesignCheckOptions, MemberForcesAt, MemberKind, SteelDesign, SteelFbBasis,
 };
 use sepika_solver::statics::linear::linear_static_once;
 
@@ -21,6 +21,7 @@ const FORCES: MemberForcesAt = MemberForcesAt {
     my: 0.0,
     mz: MZ,
 };
+const PURE_BENDING: MemberForcesAt = MemberForcesAt { n: 0.0, ..FORCES };
 const NO_STABILITY_CHECK: &str = "横座屈・曲げねじり座屈";
 const NO_WEAK_SHEAR_CHECK: &str = "フランジ内の設計用公称応力度の分布を規準から確定できず";
 
@@ -73,6 +74,271 @@ fn checked(outcome: CheckOutcome) -> CheckResult {
         panic!("{outcome:?}");
     };
     result
+}
+
+#[test]
+fn zero_axial_force_checks_both_edges_for_each_strong_axis_bending_direction() {
+    let model = asymmetric_column(MZ);
+    let ctx = short_column_context();
+    // 3枚の矩形による独立計算。Iy=168019265.000711 mm⁴、図心から上縁まで264.763326226 mm、
+    // 下縁まで135.236673774 mm。160 kN·m に対する各外縁の |σb| を短期 F=235 N/mm² で照査。
+    for (mz, sides, upper_mpa, lower_mpa, expected_c, expected_t) in [
+        (
+            MZ,
+            "上、引張側=下",
+            "-252.1266",
+            "128.7821",
+            1.0728793053780545,
+            0.548008784632117,
+        ),
+        (
+            -MZ,
+            "下、引張側=上",
+            "252.1266",
+            "-128.7821",
+            0.548008784632117,
+            1.0728793053780545,
+        ),
+    ] {
+        for (term, scale) in [(LoadTerm::Short, 1.0), (LoadTerm::Long, 1.5)] {
+            let result = checked(check(
+                &model,
+                &MemberForcesAt {
+                    n: 0.0,
+                    mz,
+                    ..FORCES
+                },
+                &DesignCtx {
+                    term,
+                    ..short_column_context()
+                },
+            ));
+            assert!(!result.ok(), "{result:?}");
+            assert!(result.basis.contains("座屈長さ0の断面照査"));
+            assert_eq!(result.components.len(), 1);
+            let component = &result.components[0];
+            assert_eq!(component.kind, CheckKind::Bending);
+            assert!((component.ratio - f64::max(expected_c, expected_t) * scale).abs() < 1e-12);
+            let allowable_mpa = 235.0 / scale;
+            for expected in [
+                "Z上=634601.7305 mm³".into(),
+                "Z下=1242409.0323 mm³".into(),
+                format!("曲げの圧縮側={sides}"),
+                format!("σb上={upper_mpa} N/mm²"),
+                format!("σb下={lower_mpa} N/mm²"),
+                format!("fb={allowable_mpa:.4} N/mm²"),
+                format!("ft={allowable_mpa:.4} N/mm²"),
+                format!("曲げ比（圧縮側）={:.4}", expected_c * scale),
+                format!("曲げ比（引張側）={:.4}", expected_t * scale),
+            ] {
+                assert!(
+                    component.detail.contains(&expected),
+                    "{component:?}: {expected}"
+                );
+            }
+        }
+    }
+    let result = checked(check(
+        &model,
+        &MemberForcesAt {
+            n: -0.0,
+            mz: -100e6,
+            ..FORCES
+        },
+        &ctx,
+    ));
+    assert!(result.ok(), "{result:?}");
+    assert!((result.ratio() - 0.6705495658612841).abs() < 1e-12);
+}
+
+#[test]
+fn zero_axial_force_preserves_only_independent_bending_failure_in_unsupported_combinations() {
+    let model = asymmetric_column(MZ);
+    let mut direct_lengths = column_flange_loss();
+    direct_lengths.joint_flange_loss = 0.0;
+    direct_lengths.lb_direct = Some((0.0, 1.0, 0.0));
+    for (forces, ctx, reason) in [
+        (
+            PURE_BENDING,
+            DesignCtx {
+                length: 1.0,
+                ..short_column_context()
+            },
+            NO_STABILITY_CHECK,
+        ),
+        (
+            PURE_BENDING,
+            DesignCtx {
+                lb: Some(1e-12),
+                ..short_column_context()
+            },
+            NO_STABILITY_CHECK,
+        ),
+        (
+            PURE_BENDING,
+            DesignCtx {
+                lk_y: Some(1.0),
+                ..short_column_context()
+            },
+            NO_STABILITY_CHECK,
+        ),
+        (
+            PURE_BENDING,
+            DesignCtx {
+                lk_z: Some(1.0),
+                ..short_column_context()
+            },
+            NO_STABILITY_CHECK,
+        ),
+        (
+            PURE_BENDING,
+            DesignCtx {
+                steel_attr: Some(direct_lengths),
+                ..short_column_context()
+            },
+            NO_STABILITY_CHECK,
+        ),
+        (
+            MemberForcesAt {
+                my: 1.0,
+                ..PURE_BENDING
+            },
+            short_column_context(),
+            "二軸曲げ照査",
+        ),
+        (
+            MemberForcesAt {
+                qy: 1.0,
+                ..PURE_BENDING
+            },
+            short_column_context(),
+            "ウェブ内同一点",
+        ),
+        (
+            MemberForcesAt {
+                qz: 1.0,
+                ..PURE_BENDING
+            },
+            short_column_context(),
+            NO_WEAK_SHEAR_CHECK,
+        ),
+    ] {
+        let outcome = check(
+            &model,
+            &MemberForcesAt {
+                mz: -100e6,
+                ..forces
+            },
+            &ctx,
+        );
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason: detail } if detail.contains(reason)),
+            "{outcome:?}"
+        );
+        let result = checked(check(&model, &MemberForcesAt { mz: -MZ, ..forces }, &ctx));
+        assert!(!result.ok());
+        assert!(result.basis.contains(reason), "{result:?}");
+        assert_eq!(result.components[0].kind, CheckKind::Bending);
+        assert!(result.components[0].detail.contains("曲げ比の下限"));
+        assert!((result.ratio() - 1.0728793053780545).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn weak_axis_bending_requires_both_flanges_for_the_independent_bending_failure() {
+    let mut model = asymmetric_column(MZ);
+    model.sections[0] = SectionShape::SteelBuiltH {
+        height: 400.0,
+        upper_width: 160.0,
+        upper_thick: 4.0,
+        lower_width: 180.0,
+        lower_thick: 20.0,
+        web_thick: 10.0,
+    }
+    .to_section(SectionId(0), "上フランジ幅厚比20の組立H".into());
+    let ctx = short_column_context();
+    let forces = MemberForcesAt {
+        mz: -MZ,
+        ..PURE_BENDING
+    };
+
+    // 3枚の矩形から求めた上縁 Z=620411.382725 mm³。弱軸曲げ40 kN·mでは上フランジの幅端に圧縮が生じる。
+    let result = checked(check(&model, &forces, &ctx));
+    assert!(!result.ok(), "{result:?}");
+    assert!((result.ratio() - 1.0974187173016607).abs() < 1e-12);
+    assert!(result.components[0].detail.contains("引張側=上"));
+
+    for my in [-40e6, 40e6] {
+        let outcome = check(&model, &MemberForcesAt { my, ..forces }, &ctx);
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("局部座屈")
+                    && reason.contains("上フランジ b/t=20.0000")
+                    && reason.contains("二軸曲げ照査")),
+            "{outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn zero_axial_force_skips_when_applicable_edge_stresses_cannot_be_confirmed() {
+    let model = asymmetric_column(MZ);
+    let ctx = short_column_context();
+    for (forces, ctx, reason) in [
+        (
+            PURE_BENDING,
+            DesignCtx {
+                steel_attr: Some(column_flange_loss()),
+                ..short_column_context()
+            },
+            "断面欠損",
+        ),
+        (
+            PURE_BENDING,
+            DesignCtx {
+                steel_fb_basis: SteelFbBasis::Standard1973,
+                ..short_column_context()
+            },
+            "2019年版",
+        ),
+        (
+            MemberForcesAt {
+                mx: 1.0,
+                ..PURE_BENDING
+            },
+            short_column_context(),
+            "ねじりモーメントMx",
+        ),
+        (
+            MemberForcesAt {
+                mz: f64::NAN,
+                ..PURE_BENDING
+            },
+            short_column_context(),
+            "断面力が非有限",
+        ),
+    ] {
+        let outcome = check(&model, &forces, &ctx);
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason: detail } if detail.contains(reason)),
+            "{outcome:?}"
+        );
+    }
+    let mut thin_web = model;
+    thin_web.sections[0] = SectionShape::SteelBuiltH {
+        height: 400.0,
+        upper_width: 80.0,
+        upper_thick: 12.0,
+        lower_width: 180.0,
+        lower_thick: 20.0,
+        web_thick: 7.0,
+    }
+    .to_section(SectionId(0), "幅厚比上限超過の組立H".into());
+    let outcome = check(&thin_web, &PURE_BENDING, &ctx);
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains("局部座屈を省く幅厚比")),
+        "{outcome:?}"
+    );
 }
 
 #[test]
@@ -389,7 +655,6 @@ fn section_only_boundary_requires_zero_buckling_lengths_and_keeps_other_axial_re
         );
     }
     for forces in [
-        MemberForcesAt { n: 0.0, ..FORCES },
         MemberForcesAt {
             n: 77_000.0,
             ..FORCES
