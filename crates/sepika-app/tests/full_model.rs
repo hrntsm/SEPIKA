@@ -3088,31 +3088,21 @@ fn snapshot_key_scalars() {
     );
     line("design.beam_checks", results.beam_checks.len().to_string());
     line("design.slab_checks", results.slab_checks.len().to_string());
-    let max_ratio = results
+    let (checked_positions, max_ratio) = results
         .member_checks
         .iter()
-        .flat_map(|mc| mc.positions.iter())
-        .filter_map(|p| match &p.outcome {
-            sepika_design_jp::CheckOutcome::Checked(r) => Some(r.ratio()),
-            sepika_design_jp::CheckOutcome::Skipped { .. } => None,
-        })
-        .fold(0.0_f64, f64::max);
+        .flat_map(|mc| mc.positions.iter().map(|p| (mc.elem, p)))
+        .fold((0, 0.0_f64), |(count, max_ratio), (elem, p)| {
+            let sepika_design_jp::CheckOutcome::Checked(result) = &p.outcome else {
+                panic!("Mx=0の部材 {elem:?} 位置 {}: {:?}", p.xi, p.outcome);
+            };
+            (count + 1, max_ratio.max(result.ratio()))
+        });
     line("design.zero_mx_max_ratio", sig4(max_ratio));
-    let position_count = results
-        .member_checks
-        .iter()
-        .flat_map(|mc| mc.positions.iter())
-        .inspect(|p| {
-            if let sepika_design_jp::CheckOutcome::Skipped { reason } = &p.outcome {
-                assert!(
-                    !reason.trim().is_empty(),
-                    "Skipped の理由が空: 位置 {}",
-                    p.xi
-                );
-            }
-        })
-        .count();
-    line("design.positions", position_count.to_string());
+    line(
+        "design.zero_mx_checked_positions",
+        checked_positions.to_string(),
+    );
     // 接合条件不足の総合未検定で除外すると、算定済みの曲げ・たわみの数値回帰が空振りする。
     let beam_results: Vec<_> = results
         .beam_checks
