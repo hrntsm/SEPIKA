@@ -1969,6 +1969,109 @@ fn panel_759_saved_analysis46_requires_reanalysis_and_current_contract_roundtrip
 }
 
 #[test]
+fn panel_1504_ovika_restores_the_model_before_requiring_a_corrected_panel_thickness() {
+    use sepika_core::model::ElementKind;
+    use sepika_core::section_shape::SectionShape;
+    use sepika_edit::{SectionField, SetSectionField};
+
+    let mut model = crate::sample::portal_frame();
+    let original = &model.sections[0];
+    let id = original.id;
+    let mut column = SectionShape::SteelBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 16.0,
+        horizontal_thick: 16.0,
+        corner_r: Some(40.0),
+    }
+    .to_section(id, "柱 □-400×400×16".into());
+    column.frame_use = original.frame_use;
+    column.material = original.material;
+    model.sections[0] = column;
+
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.threads = 1;
+    app.run_preparation();
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.last_error.is_none());
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    assert!(bundle.has_analysis_results() && !bundle.panel_moments.is_empty());
+    bundle.analysis_contract_version = Some(77);
+    let preparation = app.core.scoped.preparation.as_mut().unwrap();
+    assert!(!preparation.panels.is_empty());
+    preparation.analysis_contract_version = 77;
+    app.core.model.sections[0].panel_thickness = Some(20.0);
+
+    let path = std::env::temp_dir().join(format!("sepika-1504-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    assert_eq!(loaded.core.model.sections[0].panel_thickness, Some(20.0));
+    assert!(loaded
+        .core
+        .model
+        .elements
+        .iter()
+        .any(|element| element.kind == ElementKind::PanelZone));
+    assert!(loaded.core.scoped.preparation.is_none());
+    assert!(loaded.core.scoped.staleness.preparation_stale);
+    let results = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(!results.has_analysis_results() && results.panel_moments.is_empty());
+    assert!(loaded.core.scoped.staleness.results_stale);
+    assert!(loaded
+        .core
+        .scoped
+        .result_contract_notice
+        .as_ref()
+        .is_some_and(|reason| reason.contains("保存版=77")));
+
+    let direct =
+        sepika_solver::statics::linear::linear_static_once(&loaded.core.model, LoadCaseId(0))
+            .err()
+            .unwrap()
+            .to_string();
+    assert!(direct.contains("実板厚と異なり"), "{direct}");
+    loaded.run_preparation();
+    assert!(loaded
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .is_some_and(|reason| reason.contains("実板厚と異なり")));
+
+    loaded.core.scoped.undo.run(
+        &mut loaded.core.model,
+        Box::new(SetSectionField {
+            id,
+            field: SectionField::PanelThickness,
+            value: 16.0,
+        }),
+    );
+    loaded.core.scoped.staleness.mark_edited();
+    loaded.run_preparation();
+    loaded.run_linear_static(LoadCaseId(0));
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    let results = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(results.has_analysis_results() && !results.panel_moments.is_empty());
+    assert_eq!(
+        results.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn panel_757_preparation_roundtrip_preserves_both_axes_and_old_scalar_requires_repreparation() {
     let app = panel_757_calculated();
     let prep = app.core.scoped.preparation.as_ref().unwrap();

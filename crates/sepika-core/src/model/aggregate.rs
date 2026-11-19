@@ -627,6 +627,18 @@ impl Model {
     }
 
     pub fn validate(&self) -> Result<(), crate::error::CoreError> {
+        self.validate_impl(crate::panel_zone::PanelValidation::Analysis)
+    }
+
+    /// プロジェクトの保存モデルを検証する。正方形等厚鋼管パネルの剛性の適用条件は解析時に検証する。
+    pub fn validate_for_project_load(&self) -> Result<(), crate::error::CoreError> {
+        self.validate_impl(crate::panel_zone::PanelValidation::ProjectLoad)
+    }
+
+    fn validate_impl(
+        &self,
+        panel_validation: crate::panel_zone::PanelValidation,
+    ) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
 
         self.validate_reference_ids()?;
@@ -792,15 +804,7 @@ impl Model {
             }
         }
 
-        for elem in &self.elements {
-            if elem.kind == ElementKind::PanelZone {
-                if let Some(&node) = elem.nodes.first() {
-                    crate::panel_zone::resolve_explicit_panel_joint(self, node, &self.elements)
-                        .map_err(|reason| CoreError::InvalidInput(reason.to_string()))?;
-                }
-            }
-        }
-        crate::panel_zone::validate_panel_connection_offsets(self)
+        crate::panel_zone::validate_explicit_panel_connections(self, panel_validation)
             .map_err(CoreError::InvalidInput)?;
 
         if !self.stories.is_empty() {

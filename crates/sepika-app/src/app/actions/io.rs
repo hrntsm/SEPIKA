@@ -355,7 +355,7 @@ impl App {
         self.core.scoped.last_error = None;
         match sepika_io::ovika::load_ovika(&path) {
             Ok(contents) => {
-                if let Err(e) = contents.model.validate() {
+                if let Err(e) = contents.model.validate_for_project_load() {
                     self.report_error(format!("読込モデルの検証エラー: {:?}", e));
                     return;
                 }

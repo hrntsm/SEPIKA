@@ -621,9 +621,9 @@ mod tests {
     use super::*;
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{ElemId, MaterialId, SectionId};
-    use sepika_core::model::MaterialCategory;
     use sepika_core::model::{
-        ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material, Node, Section,
+        ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material,
+        MaterialCategory, Node, PropertyBasis, Section,
     };
     use sepika_core::panel_zone::{panel_column_moment_axes, resolve_panel_joint};
     use sepika_core::section_shape::SectionShape;
@@ -870,6 +870,136 @@ mod tests {
         });
         model.materials[0].shear = Some(78_500.0);
         (model, data)
+    }
+
+    fn square_steel_cross_joint_model() -> (Model, ElementData) {
+        let (mut model, data) = cross_joint_model();
+        let column = &mut model.sections[1];
+        column.shape = Some(SectionShape::SteelBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+            horizontal_thick: 16.0,
+            corner_r: None,
+        });
+        column.area = 23_700.0;
+        column.property_basis.area = PropertyBasis::Supplied;
+        model.materials[0].name = "BCR295".into();
+        model.materials[0].shear = Some(78_500.0);
+        (model, data)
+    }
+
+    #[test]
+    fn square_steel_panel_matches_reference_example_in_both_elastic_responses() {
+        let (mut model, _) = square_steel_cross_joint_model();
+        let generated = crate::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+        let [generated] = generated.as_slice() else {
+            panic!("接合部のパネルが1つ必要です");
+        };
+        let data = model
+            .elements
+            .iter()
+            .find(|element| element.kind == ElementKind::PanelZone)
+            .unwrap();
+        let ctx = Ctx { model: &model };
+        // 『鋼構造接合部設計指針』例題1の A=23,700 mm²、db=583 mm、G=78,500 N/mm² に式(5.11)を適用。
+        let expected_k_n_mm = 542_321_175_000.0;
+        for k_n_mm in generated.k_panel {
+            assert!((k_n_mm / expected_k_n_mm - 1.0).abs() < 1e-12);
+        }
+        assert_eq!(generated.db, [583.0; 2]);
+        for new_panel in [PanelZone::new, PanelZone::new_nonlinear] {
+            for axis in 0..2 {
+                let mut panel = new_panel(data, &model);
+                assert_eq!(panel.resolution_error, None);
+                let tangent = panel.tangent_stiffness(&ctx);
+                assert!((tangent.get(axis, axis) / expected_k_n_mm - 1.0).abs() < 1e-12);
+                assert_eq!(tangent.get(axis, 1 - axis), 0.0);
+                let mut increment = LocalVec {
+                    data: SmallVec::from_elem(0.0, panel.n_dof()),
+                };
+                increment.data[axis] = 0.001;
+                panel.update_state(&increment, false, &ctx).unwrap();
+                let force = panel.internal_force(&ctx);
+                assert!((force.data[axis] / 542_321_175.0 - 1.0).abs() < 1e-12);
+                assert_eq!(force.data[1 - axis], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn square_steel_panel_uses_the_full_shape_area_including_specified_corners() {
+        let (mut model, data) = square_steel_cross_joint_model();
+        model.sections[1].property_basis.area = PropertyBasis::Shape;
+        model.sections[1].panel_thickness = Some(16.0);
+        for (radius_mm, expected_k_n_mm) in
+            [(40.0, 542_252_317_996.986_2), (0.0, 562_366_464_000.0)]
+        {
+            model.sections[1] = model.sections[1]
+                .with_surface_radius(Some(radius_mm))
+                .unwrap();
+            model.sections[1].area = 24_576.0;
+            let panel = PanelZone::new(&data, &model);
+            assert_eq!(panel.resolution_error, None);
+            for actual_k_n_mm in panel.k_panel {
+                assert!((actual_k_n_mm / expected_k_n_mm - 1.0).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn square_steel_panel_requires_a_resolved_area_and_the_actual_wall_thickness() {
+        let (baseline, data) = square_steel_cross_joint_model();
+        for (basis, radius_mm, area_mm2, panel_thickness, expected_reason) in [
+            (PropertyBasis::PendingShape, None, 0.0, None, "断面積A"),
+            (
+                PropertyBasis::PendingShape,
+                None,
+                23_700.0,
+                None,
+                "A は未算定",
+            ),
+            (PropertyBasis::Shape, None, 23_700.0, None, "角Rが未知"),
+            (PropertyBasis::Supplied, Some(201.0), 23_700.0, None, "半径"),
+            (PropertyBasis::Supplied, None, f64::NAN, None, "断面積A"),
+            (
+                PropertyBasis::Supplied,
+                None,
+                23_700.0,
+                Some(20.0),
+                "実板厚と異なり",
+            ),
+        ] {
+            let mut model = baseline.clone();
+            let column = &mut model.sections[1];
+            let Some(SectionShape::SteelBox { corner_r, .. }) = &mut column.shape else {
+                unreachable!();
+            };
+            *corner_r = radius_mm;
+            column.property_basis.area = basis;
+            column.area = area_mm2;
+            column.panel_thickness = panel_thickness;
+            let reason = crate::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap_err();
+            assert!(
+                reason.contains("接合部 ID 0 のパネル未算定: 柱 ID 2"),
+                "{reason}"
+            );
+            assert!(
+                reason.contains(expected_reason),
+                "{expected_reason}: {reason}"
+            );
+            assert_eq!(PanelZone::new(&data, &model).resolution_error, Some(reason));
+        }
+    }
+
+    #[test]
+    fn square_steel_panel_accepts_a_saved_model_when_the_current_stiffness_is_finite() {
+        let (mut model, _) = square_steel_cross_joint_model();
+        model.materials[0].shear = Some(2.55e301);
+        let generated = crate::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+        assert_eq!(generated.len(), 1);
+        assert!(generated[0].k_panel.iter().all(|k| k.is_finite()));
+        model.validate_for_project_load().unwrap();
     }
 
     #[test]
