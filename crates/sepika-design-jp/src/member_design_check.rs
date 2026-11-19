@@ -159,7 +159,7 @@ struct BrbAxis {
 
 fn brb_axis(model: &Model, elem: &ElementData) -> Result<BrbAxis, String> {
     let resolved_ends = model
-        .primary_frame_axis_ends(elem)
+        .primary_frame_axis_end_positions(elem)
         .map_err(|reason| format!("BRBの実材軸長 L を解決できません（{reason}）"))?;
     let [i, j] = match resolved_ends {
         Some(ends) => ends,
@@ -175,20 +175,19 @@ fn brb_axis(model: &Model, elem: &ElementData) -> Result<BrbAxis, String> {
     };
     let delta_mm = vec3::sub(j, i);
     let squared_length_mm2 = vec3::dot(delta_mm, delta_mm);
-    let length_mm = if squared_length_mm2.is_normal() {
-        squared_length_mm2.sqrt()
+    let (length_mm, scaled_direction) = if squared_length_mm2.is_normal() {
+        (squared_length_mm2.sqrt(), None)
     } else {
-        // 二乗和の精度低下・数値範囲の超過で、有効な距離を変えない。
-        let [dx, dy, dz] = delta_mm;
-        dx.hypot(dy).hypot(dz)
+        // 最初に規格化しないと、距離と局所基底の検証が二乗和の数値範囲・精度の影響を受ける。
+        let max_component_mm = delta_mm.into_iter().map(f64::abs).fold(0.0, f64::max);
+        crate::brb::validate_member_length(max_component_mm)?;
+        let direction = delta_mm.map(|value_mm| value_mm / max_component_mm);
+        (
+            vec3::norm(direction) * max_component_mm,
+            resolved_ends.is_none().then_some(direction),
+        )
     };
     crate::brb::validate_member_length(length_mm)?;
-    let scaled_direction =
-        (resolved_ends.is_none() && !squared_length_mm2.is_normal()).then(|| {
-            // 最初に規格化しないと、局所基底の検証も二乗和の精度低下を受ける。
-            let max_component_mm = delta_mm.into_iter().map(f64::abs).fold(0.0, f64::max);
-            delta_mm.map(|value_mm| value_mm / max_component_mm)
-        });
     Ok(BrbAxis {
         length_mm,
         scaled_direction,

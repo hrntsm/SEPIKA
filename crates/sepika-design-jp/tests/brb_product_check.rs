@@ -236,20 +236,53 @@ fn brb_physical_length_can_be_finite_outside_the_squared_length_range() {
         assert_ratio(&model, 0.0, LoadTerm::Short, ratio, ok);
     }
 
-    model.elements[0].local_axis.ref_vector[1] = f64::NAN;
-    let error = run_member_design_checks(
-        &model,
-        &[(
-            input::BRACE,
-            MemberForces {
-                at: vec![(0.0, [0.0; 6])],
-            },
-        )],
-        &[],
-        &Default::default(),
-    )
-    .unwrap_err();
-    assert!(error.contains("断面参照方向に非有限値"), "{error}");
+    let smallest = f64::from_bits(1);
+    model.nodes[1].coord = [smallest; 3];
+    model.brb_attrs[0].critical_length = Some(smallest);
+    assert_ratio(&model, 0.0, LoadTerm::Short, 2.0, false);
+}
+
+#[test]
+fn brb_invalid_section_direction_retains_the_local_frame_error() {
+    let mut model = input::model();
+    for (end, offset, direction, reason) in [
+        (
+            [1e-200, 0.0, 0.0],
+            [0.0; 3],
+            [0.0, f64::NAN, 0.0],
+            "断面参照方向に非有限値",
+        ),
+        (
+            [5000.0, 0.0, 0.0],
+            [-10.0, 0.0, 0.0],
+            [0.0, f64::NAN, 0.0],
+            "断面参照方向に非有限値",
+        ),
+        (
+            [2.0, 1.0, 1.0],
+            [-1.0, 0.0, 0.0],
+            [1e308, 1e308, 1e308 - 1e292],
+            "断面参照方向から単位直交基底を解決できません",
+        ),
+    ] {
+        model.nodes[1].coord = end;
+        model.elements[0].end_offsets_mm[1] = offset;
+        model.elements[0].local_axis.ref_vector = direction;
+        let error = run_member_design_checks(
+            &model,
+            &[(
+                input::BRACE,
+                MemberForces {
+                    at: vec![(0.0, [0.0; 6])],
+                },
+            )],
+            &[],
+            &Default::default(),
+        )
+        .unwrap_err();
+        assert!(error.contains(reason), "{error}");
+        assert_eq!(error, model.validate_local_frames().unwrap_err());
+    }
 }
 
 #[test]
