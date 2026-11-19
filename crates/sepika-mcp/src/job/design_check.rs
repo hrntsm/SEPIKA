@@ -316,8 +316,9 @@ mod tests {
 
     #[test]
     fn h_column_combination_reason_reaches_mcp_design_job_summary() {
-        let run = |weak_shear_n: f64| {
-            let model = steel_h_column_combined_input::cantilever(weak_shear_n);
+        let run = |axial_n, strong_moment_nmm, weak_shear_n| {
+            let model =
+                steel_h_column_combined_input::cantilever(axial_n, strong_moment_nmm, weak_shear_n);
             let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
                 &model,
                 &JobParams {
@@ -330,27 +331,42 @@ mod tests {
             };
             summary
         };
-        let summary = run(365_000.0);
-        assert_eq!(summary["n_checks"], 3, "{summary}");
-        assert!(summary["max_ratio"].is_null(), "{summary}");
-        assert_eq!(summary["n_skipped"], 3, "{summary}");
-        assert_eq!(summary["all_members_checked_and_ok"], false);
-        let skipped = summary["member_skipped"].as_array().unwrap();
-        assert_eq!(skipped.len(), 3, "{summary}");
-        for (row, xi) in skipped.iter().zip([0.0, 0.5, 1.0]) {
-            assert_eq!(row["elem"], 0);
-            assert_eq!(row["position"], xi);
-            assert!(
-                row["reason"]
-                    .as_str()
-                    .unwrap()
-                    .contains("フランジ内の設計用公称応力度の分布を規準から確定できず"),
-                "{row}"
-            );
+        for (axial_n, strong_moment_nmm, weak_shear_n) in [
+            (77_000.0, 167e6, 365_000.0),
+            (-77_000.0, 50e6, 2_000.0),
+            (0.0, 50e6, 2_000.0),
+        ] {
+            let summary = run(axial_n, strong_moment_nmm, weak_shear_n);
+            assert_eq!(summary["n_checks"], 3, "{summary}");
+            assert_eq!(summary["n_ng"], 0, "{summary}");
+            assert!(summary["max_ratio"].is_null(), "{summary}");
+            assert_eq!(summary["n_skipped"], 3, "{summary}");
+            assert_eq!(summary["all_members_checked_and_ok"], false);
+            let skipped = summary["member_skipped"].as_array().unwrap();
+            assert_eq!(skipped.len(), 3, "{summary}");
+            for (row, xi) in skipped.iter().zip([0.0, 0.5, 1.0]) {
+                assert_eq!(row["elem"], 0);
+                assert_eq!(row["position"], xi);
+                assert!(
+                    row["reason"]
+                        .as_str()
+                        .unwrap()
+                        .contains("フランジ内の設計用公称応力度の分布を規準から確定できず"),
+                    "{row}"
+                );
+            }
         }
-        let without_weak_shear = run(0.0);
+        let without_weak_shear = run(-77_000.0, 50e6, 0.0);
         assert_eq!(without_weak_shear["n_checks"], 3, "{without_weak_shear}");
         assert_eq!(without_weak_shear["n_skipped"], 0, "{without_weak_shear}");
+
+        let axial_bending_ng = run(-77_000.0, 500e6, 365_000.0);
+        assert_eq!(axial_bending_ng["n_ng"], 3, "{axial_bending_ng}");
+        assert!(
+            axial_bending_ng["max_ratio"].as_f64().unwrap() > 1.0,
+            "{axial_bending_ng}"
+        );
+        assert_eq!(axial_bending_ng["all_members_checked_and_ok"], false);
     }
 
     #[test]

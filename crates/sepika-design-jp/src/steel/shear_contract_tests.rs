@@ -51,7 +51,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             0.0,
             0.36950679988527074,
             0.5321728833206429,
-            0.41242501977451873,
+            Some(0.41242501977451873),
         ),
         (
             ShapeCategory::H,
@@ -59,7 +59,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             80_000.0,
             0.25513023352078384,
             0.46017837697649683,
-            0.3140868635121952,
+            None,
         ),
         (
             ShapeCategory::H,
@@ -67,7 +67,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             80_000.0,
             0.6246370334060547,
             0.732696476095436,
-            0.6509458850602524,
+            None,
         ),
         (
             ShapeCategory::H,
@@ -75,7 +75,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             0.0,
             0.0,
             0.3829787234042553,
-            0.18319148936170213,
+            Some(0.18319148936170213),
         ),
         (
             ShapeCategory::Box,
@@ -83,7 +83,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             0.0,
             0.1354858266245993,
             0.40623775279570473,
-            0.40623775279570473,
+            Some(0.40623775279570473),
         ),
         (
             ShapeCategory::Box,
@@ -91,7 +91,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             80_000.0,
             0.1535506035078792,
             0.41261421499748047,
-            0.41261421499748047,
+            Some(0.41261421499748047),
         ),
         (
             ShapeCategory::Box,
@@ -99,7 +99,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             80_000.0,
             0.2890364301324785,
             0.47980700341291416,
-            0.47980700341291416,
+            Some(0.47980700341291416),
         ),
         (
             ShapeCategory::Box,
@@ -107,7 +107,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             0.0,
             0.0,
             0.3829787234042553,
-            0.3829787234042553,
+            Some(0.3829787234042553),
         ),
         (
             ShapeCategory::Other,
@@ -115,7 +115,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             0.0,
             0.18426072420945502,
             0.42499966713698256,
-            0.42499966713698256,
+            Some(0.42499966713698256),
         ),
         (
             ShapeCategory::Other,
@@ -123,7 +123,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             80_000.0,
             0.22111286905134603,
             0.44222573810269206,
-            0.44222573810269206,
+            Some(0.44222573810269206),
         ),
         (
             ShapeCategory::Other,
@@ -131,7 +131,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             80_000.0,
             0.4053735932608011,
             0.5576741456204748,
-            0.5576741456204748,
+            Some(0.5576741456204748),
         ),
         (
             ShapeCategory::Other,
@@ -139,7 +139,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
             0.0,
             0.0,
             0.3829787234042553,
-            0.3829787234042553,
+            Some(0.3829787234042553),
         ),
     ];
     let mut material = test_support::mat("独立比較用鋼材");
@@ -183,9 +183,18 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
                             0.0
                         },
                     };
-                    let result = SteelDesign
-                        .check(&forces, &section, &material, &ctx)
-                        .unwrap_checked();
+                    let outcome = SteelDesign.check(&forces, &section, &material, &ctx);
+                    let expected_shear = if normal_stress && kind == MemberKind::Column {
+                        let Some(ratio) = column_nm else {
+                            assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+                                if reason.contains("同一点の組合せ応力度は未算定")));
+                            continue;
+                        };
+                        ratio
+                    } else {
+                        pure_shear
+                    };
+                    let result = outcome.unwrap_checked();
                     let component = |kind| {
                         result
                             .components
@@ -193,11 +202,6 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
                             .find(|c| c.kind == kind)
                             .unwrap()
                             .ratio
-                    };
-                    let expected_shear = if normal_stress && kind == MemberKind::Column {
-                        column_nm
-                    } else {
-                        pure_shear
                     };
                     assert!(
                         (component(CheckKind::Shear) - expected_shear).abs() < 1e-10,

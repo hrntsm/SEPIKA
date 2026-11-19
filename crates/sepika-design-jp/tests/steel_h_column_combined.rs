@@ -19,6 +19,12 @@ const ISSUE_FORCES: MemberForcesAt = MemberForcesAt {
     mz: 167e6,
 };
 
+const UNAVAILABLE: &str = "フランジ内の設計用公称応力度の分布を規準から確定できず";
+
+fn issue_model() -> Model {
+    input::cantilever(ISSUE_FORCES.n, ISSUE_FORCES.mz, ISSUE_FORCES.qz)
+}
+
 fn check(
     model: &Model,
     section: &Section,
@@ -42,8 +48,8 @@ fn check(
 }
 
 #[test]
-fn simultaneous_tension_strong_bending_and_weak_shear_skip_h_columns() {
-    let model = input::cantilever(ISSUE_FORCES.qz);
+fn simultaneous_strong_bending_and_weak_shear_leave_combination_unchecked_for_h_shapes() {
+    let model = issue_model();
     let rolled = &model.sections[0];
     let built = SectionShape::SteelBuiltH {
         height: 400.0,
@@ -59,35 +65,141 @@ fn simultaneous_tension_strong_bending_and_weak_shear_skip_h_columns() {
     from_name.property_basis.j = PropertyBasis::Supplied;
     for section in [rolled, &built, &from_name] {
         for term in [LoadTerm::Long, LoadTerm::Short] {
-            for forces in [
-                ISSUE_FORCES,
-                MemberForcesAt {
-                    qy: 10_000.0,
-                    qz: -365_000.0,
-                    my: 3e6,
-                    mz: -167e6,
-                    ..ISSUE_FORCES
-                },
-                MemberForcesAt {
-                    qz: f64::MIN_POSITIVE,
-                    ..ISSUE_FORCES
-                },
+            for (n, condition) in [
+                (77_000.0, "引張軸力が同時に作用"),
+                (-77_000.0, "圧縮軸力または軸力なしのH形鋼柱"),
+                (-0.0, "圧縮軸力または軸力なしのH形鋼柱"),
             ] {
-                let outcome = check(&model, section, &forces, term, MemberKind::Column);
-                assert!(
-                    matches!(&outcome, CheckOutcome::Skipped { reason }
-                        if reason.contains("H形鋼柱に弱軸せん断・強軸曲げ・引張軸力が同時に作用")
-                            && reason.contains("フランジ内の設計用公称応力度の分布を規準から確定できず")),
-                    "{outcome:?}"
-                );
+                for (qy, qz, my, mz) in [
+                    (0.0, 365_000.0, 0.0, 50e6),
+                    (500_000.0, -365_000.0, 3e6, -50e6),
+                    (0.0, f64::MIN_POSITIVE, 0.0, 50e6),
+                ] {
+                    let forces = MemberForcesAt {
+                        n,
+                        qy,
+                        qz,
+                        my,
+                        mz,
+                        ..ISSUE_FORCES
+                    };
+                    let outcome = check(&model, section, &forces, term, MemberKind::Column);
+                    assert!(
+                        matches!(&outcome, CheckOutcome::Skipped { reason }
+                            if reason.contains(condition) && reason.contains(UNAVAILABLE)),
+                        "{outcome:?}"
+                    );
+                }
             }
         }
     }
 }
 
 #[test]
+fn compression_and_zero_axial_counterexamples_stay_unchecked() {
+    let model = issue_model();
+    let section = &model.sections[0];
+    // N=-77 kN では圧縮座屈込みの短期 fc=183.0658305530364 N/mm²。
+    // 両ケース共通の短期 fb=192.337746536794 N/mm²、Z=1148243.413333333 mm³。
+    for (n, mz, expected) in [
+        (
+            -77_000.0,
+            167e6,
+            9.3994140625 / 183.0658305530364 + 145.439545361903 / 192.337746536794,
+        ),
+        (0.0, 177e6, 177e6 / 1148243.413333333 / 192.337746536794),
+    ] {
+        let forces = MemberForcesAt {
+            n,
+            mz,
+            ..ISSUE_FORCES
+        };
+        let outcome = check(
+            &model,
+            section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains(UNAVAILABLE)),
+            "{outcome:?}"
+        );
+        let axial_only = check(
+            &model,
+            section,
+            &MemberForcesAt { qz: 0.0, ..forces },
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        let CheckOutcome::Checked(result) = axial_only else {
+            panic!("{axial_only:?}");
+        };
+        assert!(
+            (result.components[0].ratio - expected).abs() < 1e-12,
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn confirmed_axial_bending_and_slenderness_failures_keep_the_unavailable_reason() {
+    let model = issue_model();
+    let section = &model.sections[0];
+    for n in [-77_000.0, 0.0] {
+        let forces = MemberForcesAt {
+            n,
+            mz: 250e6,
+            ..ISSUE_FORCES
+        };
+        let outcome = check(
+            &model,
+            section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        let CheckOutcome::Checked(result) = outcome else {
+            panic!("{outcome:?}")
+        };
+        assert!(!result.ok());
+        assert!(result.basis.contains(UNAVAILABLE), "{result:?}");
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].kind, CheckKind::AxialBending);
+        let expected =
+            n.abs() / 8192.0 / 183.0658305530364 + 250e6 / 1148243.413333333 / 192.337746536794;
+        assert!((result.ratio() - expected).abs() < 1e-12, "{result:?}");
+    }
+
+    let outcome = SteelDesign.check(
+        &MemberForcesAt {
+            n: -77_000.0,
+            ..ISSUE_FORCES
+        },
+        section,
+        &model.materials[0],
+        &DesignCtx {
+            kind: MemberKind::Column,
+            length: 12_000.0,
+            ..Default::default()
+        },
+    );
+    let CheckOutcome::Checked(result) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert!(!result.ok());
+    assert!(result.basis.contains(UNAVAILABLE), "{result:?}");
+    assert_eq!(result.components.len(), 1);
+    assert_eq!(result.components[0].kind, CheckKind::Provision);
+    assert!(
+        (result.ratio() - 12_000.0 / 46.01992322172358 / 200.0).abs() < 1e-12,
+        "{result:?}"
+    );
+}
+
+#[test]
 fn zero_weak_shear_preserves_axial_bending_ratio_in_the_issue_example() {
-    let model = input::cantilever(0.0);
+    let model = issue_model();
     let forces = MemberForcesAt {
         qz: -0.0,
         ..ISSUE_FORCES
@@ -114,7 +226,7 @@ fn zero_weak_shear_preserves_axial_bending_ratio_in_the_issue_example() {
 
 #[test]
 fn skip_is_limited_to_the_specified_forces_and_h_columns() {
-    let model = input::cantilever(ISSUE_FORCES.qz);
+    let model = issue_model();
     let rolled = &model.sections[0];
     let box_section = SectionShape::SteelBox {
         height: 400.0,
@@ -124,46 +236,45 @@ fn skip_is_limited_to_the_specified_forces_and_h_columns() {
         corner_r: Some(0.0),
     }
     .to_section(SectionId(0), rolled.name.clone());
-    for (section, forces, kind) in [
-        (
+    for n in [77_000.0, -77_000.0, 0.0] {
+        let issue_forces = MemberForcesAt { n, ..ISSUE_FORCES };
+        for (section, forces, kind) in [
+            (
+                rolled,
+                &MemberForcesAt {
+                    mz: 0.0,
+                    my: 3e6,
+                    ..issue_forces
+                },
+                MemberKind::Column,
+            ),
+            (
+                rolled,
+                &MemberForcesAt {
+                    qz: 0.0,
+                    qy: 50_000.0,
+                    ..issue_forces
+                },
+                MemberKind::Column,
+            ),
+            (rolled, &issue_forces, MemberKind::Girder),
+            (rolled, &issue_forces, MemberKind::Brace),
+            (&box_section, &issue_forces, MemberKind::Column),
+        ] {
+            let outcome = check(&model, section, forces, LoadTerm::Short, kind);
+            assert!(matches!(&outcome, CheckOutcome::Checked(_)), "{outcome:?}");
+        }
+        let torsion = check(
+            &model,
             rolled,
-            MemberForcesAt {
-                n: 0.0,
-                ..ISSUE_FORCES
+            &MemberForcesAt {
+                mx: 1.0,
+                ..issue_forces
             },
+            LoadTerm::Short,
             MemberKind::Column,
-        ),
-        (
-            rolled,
-            MemberForcesAt {
-                n: -77_000.0,
-                ..ISSUE_FORCES
-            },
-            MemberKind::Column,
-        ),
-        (
-            rolled,
-            MemberForcesAt {
-                mz: 0.0,
-                my: 3e6,
-                ..ISSUE_FORCES
-            },
-            MemberKind::Column,
-        ),
-        (
-            rolled,
-            MemberForcesAt {
-                qz: 0.0,
-                qy: 50_000.0,
-                ..ISSUE_FORCES
-            },
-            MemberKind::Column,
-        ),
-        (rolled, ISSUE_FORCES, MemberKind::Girder),
-        (rolled, ISSUE_FORCES, MemberKind::Brace),
-        (&box_section, ISSUE_FORCES, MemberKind::Column),
-    ] {
-        let outcome = check(&model, section, &forces, LoadTerm::Short, kind);
-        assert!(matches!(&outcome, CheckOutcome::Checked(_)), "{outcome:?}");
+        );
+        assert!(matches!(torsion, CheckOutcome::Skipped { reason }
+            if reason.contains("ねじりモーメントMx") && !reason.contains(UNAVAILABLE)));
     }
 }

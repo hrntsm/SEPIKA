@@ -3,7 +3,8 @@
 
 use crate::material_strength::{steel_fc, steel_fs, steel_ft};
 use crate::{
-    CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt, SteelFbBasis,
+    CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
+    SteelFbBasis,
 };
 use sepika_core::model::{Material, Section};
 
@@ -15,16 +16,16 @@ use super::{nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, Shape
 
 /// 鉄骨造柱の断面検定（鋼構造設計規準）。
 ///
-/// 軸力＋二軸曲げの組合せと von Mises 型せん断合成の検定比の最大値を検定比とする。
+/// 組合せ応力を算定できない場合は、独立した軸曲げの不適合のみを検定比として返す。
 pub(crate) fn check_column(
     forces: &MemberForcesAt,
     sec: &Section,
     mat: &Material,
     ctx: &DesignCtx,
     f: f64,
-    term: LoadTerm,
     lambda: f64,
-) -> Result<CheckResult, String> {
+    h_combined_reason: Option<&str>,
+) -> Result<CheckOutcome, String> {
     let h = sec.depth;
     let (shape, tf, _) = shape_of(sec);
     let a = column_allowables(sec, mat, ctx, f, Some(lambda))?;
@@ -79,6 +80,33 @@ pub(crate) fn check_column(
         (sigma_t, ratio, "引張+曲げ: σt/ft+ΣσB/fb")
     };
 
+    let term_label = match ctx.term {
+        LoadTerm::Long => "長期",
+        LoadTerm::Short => "短期",
+    };
+    let basis = format!("鋼構造設計規準 {term_label} 柱: {axial_basis}{buckling_note}");
+    let axial_bending = CheckComponent {
+        kind: CheckKind::AxialBending,
+        ratio: ratio_axial_bend,
+        detail: format!(
+            "σax={:.4} N/mm², σbX={:.4} N/mm², σbY={:.4} N/mm², fc={:.4} N/mm², fbX={:.4} N/mm², \
+fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
+            axial_stress, sigma_bx, sigma_by, fc_val, fb_strong, fb_weak, lambda, ratio_axial_bend,
+        ),
+    };
+    if let Some(reason) = h_combined_reason {
+        if ratio_axial_bend.is_finite() && ratio_axial_bend > 1.0 {
+            return Ok(CheckOutcome::Checked(CheckResult {
+                basis: format!("{basis}。{reason}"),
+                detail: String::new(),
+                components: vec![axial_bending],
+            }));
+        }
+        return Ok(CheckOutcome::Skipped {
+            reason: reason.into(),
+        });
+    }
+
     let (ay, az) = if matches!(
         sec.shape,
         Some(sepika_core::section_shape::SectionShape::SteelBox { .. })
@@ -101,19 +129,6 @@ pub(crate) fn check_column(
     let ratio_shear = ((sigma_total.powi(2) + 3.0 * tau.powi(2)).sqrt() / safe_denom(ft_val))
         .max(tau / safe_denom(fs_val));
 
-    let term_label = match term {
-        LoadTerm::Long => "長期",
-        LoadTerm::Short => "短期",
-    };
-    let basis = format!(
-        "鋼構造設計規準 {} 柱: {}{}, せん断 von Mises",
-        term_label, axial_basis, buckling_note
-    );
-    let axial_bending_detail = format!(
-        "σax={:.4} N/mm², σbX={:.4} N/mm², σbY={:.4} N/mm², fc={:.4} N/mm², fbX={:.4} N/mm², \
-fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
-        axial_stress, sigma_bx, sigma_by, fc_val, fb_strong, fb_weak, lambda, ratio_axial_bend,
-    );
     let shear_detail = if shape == ShapeCategory::Pipe {
         format!(
             "τ={:.4} N/mm², fs={:.4} N/mm², せん断比={:.4}",
@@ -125,26 +140,18 @@ fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
             tau_y, tau_z, tau, fs_val, ratio_shear
         )
     };
-    let detail = String::new();
-
-    let components = vec![
-        CheckComponent {
-            kind: CheckKind::AxialBending,
-            ratio: ratio_axial_bend,
-            detail: axial_bending_detail,
-        },
-        CheckComponent {
-            kind: CheckKind::Shear,
-            ratio: ratio_shear,
-            detail: shear_detail,
-        },
-    ];
-
-    Ok(CheckResult {
-        basis,
-        detail,
-        components,
-    })
+    Ok(CheckOutcome::Checked(CheckResult {
+        basis: format!("{basis}, せん断 von Mises"),
+        detail: String::new(),
+        components: vec![
+            axial_bending,
+            CheckComponent {
+                kind: CheckKind::Shear,
+                ratio: ratio_shear,
+                detail: shear_detail,
+            },
+        ],
+    }))
 }
 
 #[derive(Clone, Copy)]
