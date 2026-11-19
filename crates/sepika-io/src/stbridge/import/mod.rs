@@ -64,6 +64,7 @@ enum PendingSecKind {
     Shape(SectionShape),
     /// 形鋼ライブラリ参照（後で名前解決する鋼断面）。
     SteelRef(Option<String>),
+    NonuniformSteelColumn,
     /// CFT（充填鋼管）。充填鋼管の形鋼名を後で解決して CftBox/CftPipe を作る。
     CftRef(Option<String>),
     /// SRC（RC＋内蔵鉄骨）。コンクリート寸法・配筋・鋼種は確定済み、内蔵鉄骨は

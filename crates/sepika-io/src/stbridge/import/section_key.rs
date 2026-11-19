@@ -118,6 +118,7 @@ pub(super) fn section_key(tag: &str, a: &Attrs) -> Result<SectionKey, StbError> 
 pub(super) struct MemberSource {
     pub(super) tag: String,
     pub(super) id: Option<u32>,
+    pub(super) name: Option<String>,
     pub(super) kind_structure: Option<String>,
     pub(super) id_section: Option<String>,
 }
@@ -133,8 +134,8 @@ impl MemberSource {
             .map(SectionFamily::tag)
             .unwrap_or("解決不能");
         StbError::Unmappable(format!(
-            "{} id={:?}, kind_structure={:?}, 要求系列={family}, id_section={:?}: {reason}",
-            self.tag, self.id, self.kind_structure, self.id_section
+            "{} id={:?}, name={:?}, kind_structure={:?}, 要求系列={family}, id_section={:?}: {reason}",
+            self.tag, self.id, self.name, self.kind_structure, self.id_section
         ))
     }
 }
@@ -146,6 +147,7 @@ pub(super) fn member_section(
     let source = MemberSource {
         tag: tag.to_owned(),
         id: get_opt_u32(a, "id")?,
+        name: a.peek("name").cloned(),
         kind_structure: a.get("kind_structure").cloned(),
         id_section: a.get("id_section").cloned(),
     };
