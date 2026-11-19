@@ -311,6 +311,8 @@ pub enum PanelShapeKind {
     H { bc: f64, tf: f64 },
     /// H 形鋼柱の弱軸方向。フランジ 2 枚がせん断を負担する。
     HWeak,
+    /// S 造の正方形等厚鋼管柱。パネルは抵抗板 2 枚。
+    SquareBox,
     /// 角形鋼管柱（CFT 角形を含む）。`bc`: 柱幅。パネルはウェブ 2 枚。
     Box { bc: f64 },
     /// 円形鋼管柱（CFT 円形を含む）。パネルは円筒。
@@ -325,10 +327,7 @@ pub struct PanelGeometry {
     pub dc: f64,
     /// 抵抗板 1 枚あたりの有効板厚 `tp` `[mm]`。
     pub tp: f64,
-    /// 充填コンクリートを持つ柱（CFT）か。
-    ///
-    /// 断面検定では鋼管部を S 造と同じ式で評価するため区別しないが、仕口パネルの
-    /// **モデル化からは除外する**（[`PanelJoint::has_filled_column`]）。
+    /// 充填コンクリートを持つ柱（CFT）か。断面検定は鋼管部を評価し、仕口パネル要素は生成しない。
     pub filled: bool,
 }
 
@@ -361,7 +360,11 @@ impl PanelGeometry {
                 thick,
                 ..
             } => Self {
-                kind: PanelShapeKind::Box { bc: *height },
+                kind: if strong.kind == PanelShapeKind::SquareBox {
+                    PanelShapeKind::SquareBox
+                } else {
+                    PanelShapeKind::Box { bc: *height }
+                },
                 dc: width - thick,
                 tp: sec.panel_thickness.unwrap_or(shape.box_thicknesses()?.1),
                 ..strong
@@ -395,10 +398,15 @@ impl PanelGeometry {
                 height,
                 width,
                 thick,
+                horizontal_thick,
                 ..
             }) => (
-                PanelShapeKind::Box { bc: width },
-                height - sec.shape.as_ref()?.box_thicknesses()?.1,
+                if height == width && thick == horizontal_thick {
+                    PanelShapeKind::SquareBox
+                } else {
+                    PanelShapeKind::Box { bc: width }
+                },
+                height - horizontal_thick,
                 thick,
                 false,
             ),
@@ -441,6 +449,7 @@ impl PanelGeometry {
                     + 1.0 / (1.0 + (self.dc * self.tp) / (6.0 * bc * tf))
             }
             PanelShapeKind::HWeak => 1.5,
+            PanelShapeKind::SquareBox => 9.0 / 8.0,
             PanelShapeKind::Box { bc } => {
                 1.0 / (2.0 / 3.0 + 2.0 * bc / self.dc) + 1.0 / (1.0 + self.dc / (3.0 * bc))
             }
@@ -453,7 +462,10 @@ impl PanelGeometry {
         let base = self.dc * db * self.tp;
         match self.kind {
             PanelShapeKind::H { .. } => base,
-            PanelShapeKind::HWeak | PanelShapeKind::Box { .. } | PanelShapeKind::Pipe => 2.0 * base,
+            PanelShapeKind::HWeak
+            | PanelShapeKind::SquareBox
+            | PanelShapeKind::Box { .. }
+            | PanelShapeKind::Pipe => 2.0 * base,
         }
     }
 }
@@ -496,11 +508,7 @@ pub struct PanelJoint {
     pub ve: f64,
     /// 諸元を採った柱の要素 ID（軸力比 `n`・基準強度 `F` の解決に用いる）。
     pub column: ElemId,
-    /// 取り付く柱に充填断面（CFT）が 1 本でもあるか。
-    ///
-    /// モデル化はこれが `true` の接合部を対象外とする（モジュール冒頭
-    /// 「柱断面ごとの扱い」）。断面検定は鋼管部を S 造と同じ式で評価するため
-    /// 区別しない。
+    /// 取り付く柱に充填断面（CFT）が 1 本でもあるか。`true` の接合部は仕口パネル要素の生成対象外。
     pub has_filled_column: bool,
 }
 
@@ -1111,7 +1119,9 @@ fn resolve_panel_joint_impl<'a>(
     let dimensions = match geometry.kind {
         PanelShapeKind::H { bc, tf } => vec![geometry.dc, geometry.tp, bc, tf],
         PanelShapeKind::Box { bc } => vec![geometry.dc, geometry.tp, bc],
-        PanelShapeKind::HWeak | PanelShapeKind::Pipe => vec![geometry.dc, geometry.tp],
+        PanelShapeKind::HWeak | PanelShapeKind::SquareBox | PanelShapeKind::Pipe => {
+            vec![geometry.dc, geometry.tp]
+        }
     };
     if dimensions.iter().any(|v| !v.is_finite() || *v <= 0.0)
         || selected_section
@@ -1611,10 +1621,8 @@ mod tests {
         }
     }
 
-    /// CFT と対応する鋼管は、断面検定に使う Ve・κ が同一になる
-    /// （CFT を検定対象から外していないことの裏付け）。
     #[test]
-    fn test_cft_and_steel_tube_share_check_properties() {
+    fn square_steel_and_cft_tube_share_volume_but_use_distinct_yield_shape_factors() {
         let steel = sec(
             SectionShape::SteelBox {
                 height: 400.0,
@@ -1643,8 +1651,37 @@ mod tests {
         );
         assert!((gs.dc - gc.dc).abs() < 1e-12);
         assert!((gs.tp - gc.tp).abs() < 1e-12);
-        assert!((gs.kappa() - gc.kappa()).abs() < 1e-12);
+        assert_eq!(gs.kappa(), 1.125);
+        assert!((gc.kappa() - 1.121_212_121_212_121_3).abs() < 1e-12);
         assert!((gs.effective_volume(500.0) - gc.effective_volume(500.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn square_steel_panel_shape_uses_exact_outer_dimensions_and_actual_plate_thicknesses() {
+        for (width, horizontal_thick, expected_square) in [
+            (400.0, 16.0, true),
+            (400.0_f64.next_up(), 16.0, false),
+            (400.0, 16.0_f64.next_up(), false),
+        ] {
+            let section = sec(
+                SectionShape::SteelBox {
+                    height: 400.0,
+                    width,
+                    thick: 16.0,
+                    horizontal_thick,
+                    corner_r: Some(0.0),
+                },
+                400.0,
+                Some(20.0),
+            );
+            for geometry in PanelGeometry::from_column_axes(&section).unwrap() {
+                assert_eq!(geometry.tp, 20.0);
+                assert_eq!(geometry.kappa() == 1.125, expected_square);
+                if expected_square {
+                    assert_eq!(geometry.effective_volume(500.0), 7_680_000.0);
+                }
+            }
+        }
     }
 
     /// RC 柱はパネルの対象外（剛域と RC 柱梁接合部検定で扱う）。

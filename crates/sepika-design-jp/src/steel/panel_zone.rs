@@ -14,7 +14,7 @@ pub struct SPanelInput {
     /// 局所上下位置を検証する梁対。片側梁は同じ位置を2回渡す。未指定は未算定。
     pub beam_flanges: Option<[BeamFlangePositions; 2]>,
     /// 柱断面から解決したパネル諸元（寸法 `dc`・板厚 `tp`・断面区分）。
-    /// CFT も対象に含める（鋼管部を S 造と同じ式で評価する）。
+    /// CFT は鋼管部の諸元を用いる。
     pub geometry: PanelGeometry,
     /// 梁フランジ板厚中心間距離 db `[mm]`。
     pub db: f64,
@@ -57,7 +57,7 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
     let shape_label = match inp.geometry.kind {
         PanelShapeKind::H { .. } => "H形",
         PanelShapeKind::HWeak => "H形(弱軸)",
-        PanelShapeKind::Box { .. } => "角形",
+        PanelShapeKind::SquareBox | PanelShapeKind::Box { .. } => "角形",
         PanelShapeKind::Pipe => "円形",
     };
 
