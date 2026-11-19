@@ -8,9 +8,16 @@
 use crate::material_strength::{big_lambda, steel_ft};
 use crate::{DesignCtx, LoadTerm};
 use sepika_core::model::Section;
-use sepika_core::section_shape::{SectionShape, E_STEEL};
+use sepika_core::section_shape::{face_geometry::SectionGeometry, SectionShape, E_STEEL};
 
 use super::section_modulus;
+
+/// 図心基準の強軸断面係数 [mm³] を上縁、下縁の順に返す。
+pub(super) fn built_h_strong_axis_moduli(shape: &SectionShape) -> Result<(f64, f64), String> {
+    let [y_lower_mm, y_upper_mm] = SectionGeometry::of(shape)?.projected_range([1.0, 0.0])?;
+    let inertia_mm4 = shape.try_calc_iy()?;
+    Ok((inertia_mm4 / y_upper_mm, inertia_mm4 / -y_lower_mm))
+}
 
 /// 圧縮フランジとウェブからなるT形断面の断面二次半径 `[mm]` を返す（1973年版の横座屈用）。
 /// b・tf・h・twはmm。対象断面積が微小または非正の場合は0。

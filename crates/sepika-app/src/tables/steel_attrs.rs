@@ -53,16 +53,16 @@ impl SteelAttrDraft {
     /// バッファは全項目を上書きする（前の対象の値が残ると、編集していない項目まで
     /// 別部材の値で保存されてしまう）。
     ///
-    /// 座屈長さ lk_y/lk_z [mm] は元の値を復元できる桁を保持する。未設定は空欄にする。
+    /// 欠損率と座屈長さ lb/lk_y/lk_z は元の値を復元できる桁を保持する。未設定の長さは空欄にする。
     fn sync_from(&mut self, attr: &SteelDesignAttr) {
         self.elem = Some(attr.elem);
         self.synced_for = Some(attr.elem);
-        self.joint_flange_loss = format!("{:.1}", attr.joint_flange_loss);
-        self.joint_web_loss = format!("{:.1}", attr.joint_web_loss);
-        self.scallop_web_loss = format!("{:.1}", attr.scallop_web_loss);
+        self.joint_flange_loss = attr.joint_flange_loss.to_string();
+        self.joint_web_loss = attr.joint_web_loss.to_string();
+        self.scallop_web_loss = attr.scallop_web_loss.to_string();
         let (lb_s, lb_m, lb_e) = attr
             .lb_direct
-            .map(|(s, m, e)| (format!("{s:.0}"), format!("{m:.0}"), format!("{e:.0}")))
+            .map(|(s, m, e)| (s.to_string(), m.to_string(), e.to_string()))
             .unwrap_or_default();
         self.lb_start = lb_s;
         self.lb_mid = lb_m;
@@ -148,7 +148,7 @@ fn parse_lk_direct(s: &str, label: &str) -> Result<Option<f64>, String> {
 /// 横座屈長さ lb 直接入力の表示文字列。
 fn lb_direct_desc(v: Option<(f64, f64, f64)>) -> String {
     match v {
-        Some((s, m, e)) => format!("{s:.0}/{m:.0}/{e:.0}"),
+        Some((s, m, e)) => format!("{s}/{m}/{e}"),
         None => "自動".to_string(),
     }
 }
@@ -217,7 +217,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         for attr in &app.core.model.steel_design_attrs {
             ui.horizontal(|ui| {
                 ui.label(format!(
-                    "部材#{}: βf={:.1}% βw={:.1}% αw={:.1}% / lb={} / 横補剛n={} / \
+                    "部材#{}: βf={}% βw={}% αw={}% / lb={} / 横補剛n={} / \
                      lk_y={} lk_z={} / C={}",
                     attr.elem.0,
                     attr.joint_flange_loss,
@@ -378,7 +378,11 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
 
     ui.horizontal(|ui| {
         ui.label("C 係数直接入力（空欄=自動）:");
-        ui.add(egui::TextEdit::singleline(&mut app.ui.scoped.steel_attr_draft.c_direct).desired_width(60.0));
+        ui.add(
+            egui::TextEdit::singleline(&mut app.ui.scoped.steel_attr_draft.c_direct)
+                .id(egui::Id::new("steel_attr_c_direct"))
+                .desired_width(60.0),
+        );
     })
     .response
     .on_hover_text(
@@ -544,7 +548,7 @@ mod tests {
         click(ctx, app, pos);
     }
 
-    fn type_length(ctx: &egui::Context, app: &mut App, id: &'static str, text: &str) {
+    fn type_field(ctx: &egui::Context, app: &mut App, id: &'static str, text: &str) {
         draw(ctx, app, vec![]);
         click(
             ctx,
@@ -583,8 +587,8 @@ mod tests {
             let ctx = egui::Context::default();
             click_text(&ctx, &mut app, "―");
             click_text(&ctx, &mut app, "部材#0");
-            type_length(&ctx, &mut app, "steel_attr_lk_y", "4799.9");
-            type_length(&ctx, &mut app, "steel_attr_lk_z", "4800.1");
+            type_field(&ctx, &mut app, "steel_attr_lk_y", "4799.9");
+            type_field(&ctx, &mut app, "steel_attr_lk_z", "4800.1");
             click_text(&ctx, &mut app, "✔ 適用");
             let attr = input::direct_lengths(ElemId(0), Some(4799.9), Some(4800.1));
             let expected = std::slice::from_ref(&attr);
@@ -625,7 +629,7 @@ mod tests {
                 ("steel_attr_lk_y", "lk_y", "NaN"),
                 ("steel_attr_lk_z", "lk_z", "inf"),
             ] {
-                type_length(&ctx, &mut app, field, value);
+                type_field(&ctx, &mut app, field, value);
                 let reason = format!("{axis}の入力エラー: {axis}は有限な正の値");
                 assert!(draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
                     matches!(&s.shape, egui::Shape::Text(text)
@@ -637,7 +641,7 @@ mod tests {
                 click_text(&ctx, &mut app, "✏");
             }
 
-            type_length(&ctx, &mut app, "steel_attr_lk_y", "5000.25");
+            type_field(&ctx, &mut app, "steel_attr_lk_y", "5000.25");
             click_text(&ctx, &mut app, "✔ 適用");
             let app = reload(&mut app);
             assert_eq!(
@@ -724,6 +728,50 @@ mod tests {
     #[test]
     fn test_parse_lb_direct_rejects_non_numeric() {
         assert!(parse_lb_direct("abc", "2000", "3000").is_err());
+    }
+
+    #[test]
+    fn changing_only_c_preserves_lateral_buckling_lengths_and_losses() {
+        for (lb_direct, lb_label) in [
+            (Some((0.4, 0.0, 0.04)), "0.4/0/0.04"),
+            (Some((0.0, 0.4, 0.0)), "0/0.4/0"),
+            (None, "自動"),
+        ] {
+            let mut model = crate::sample::portal_frame();
+            let attr = SteelDesignAttr {
+                elem: model.elements[2].id,
+                joint_flange_loss: 0.04,
+                joint_web_loss: 0.025,
+                scallop_web_loss: 0.005,
+                lb_direct,
+                lateral_brace_count: None,
+                lk_y_direct: None,
+                lk_z_direct: None,
+                c_direct: Some(1.25),
+            };
+            model.steel_design_attrs = vec![attr.clone()];
+            let mut app = App::default();
+            assert!(app.load_model(model));
+            let ctx = egui::Context::default();
+            click_text(&ctx, &mut app, "✏");
+            type_field(&ctx, &mut app, "steel_attr_c_direct", "1.375");
+            click_text(&ctx, &mut app, "✔ 適用");
+            assert_eq!(
+                app.core.model.steel_design_attrs,
+                [SteelDesignAttr {
+                    c_direct: Some(1.375),
+                    ..attr
+                }]
+            );
+            let expected_label = format!("βf=0.04% βw=0.025% αw=0.005% / lb={lb_label} /");
+            assert!(
+                draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
+                    matches!(&s.shape, egui::Shape::Text(text)
+                    if text.galley.text().contains(&expected_label))
+                }),
+                "{expected_label}"
+            );
+        }
     }
 
     /// 空欄は None（補剛なし）として扱われること。

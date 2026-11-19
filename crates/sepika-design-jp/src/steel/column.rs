@@ -7,11 +7,11 @@ use crate::{
     SteelFbBasis,
 };
 use sepika_core::model::{Material, PropertyBasis, Section};
-use sepika_core::section_shape::{face_geometry::SectionGeometry, SectionShape};
+use sepika_core::section_shape::SectionShape;
 
 use super::section::{
-    steel_c_factor, steel_fb_h, steel_fb_h_asd2019, steel_i_t, steel_p_lambda_b,
-    steel_warping_constant,
+    built_h_strong_axis_moduli, steel_c_factor, steel_fb_h, steel_fb_h_asd2019, steel_i_t,
+    steel_p_lambda_b, steel_warping_constant,
 };
 use super::{
     has_section_loss, nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, ShapeCategory,
@@ -83,11 +83,8 @@ pub(super) fn check_asymmetric_built_h(
         if let Some(reason) = asymmetric_built_h_section_reason(forces, sec, ctx) {
             return Err(reason.into());
         }
-        let [y_lower_mm, y_upper_mm] = SectionGeometry::of(shape)?.projected_range([1.0, 0.0])?;
+        let (z_upper_mm3, z_lower_mm3) = built_h_strong_axis_moduli(shape)?;
         let area_mm2 = shape.try_calc_area()?;
-        let inertia_mm4 = shape.try_calc_iy()?;
-        let z_upper_mm3 = inertia_mm4 / y_upper_mm;
-        let z_lower_mm3 = inertia_mm4 / -y_lower_mm;
         let ft_mpa = steel_ft(f, ctx.term);
         if ![area_mm2, z_upper_mm3, z_lower_mm3, ft_mpa]
             .iter()
