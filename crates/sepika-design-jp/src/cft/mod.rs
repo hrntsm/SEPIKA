@@ -112,6 +112,7 @@ fn cft_rounded_ma(core: RoundedRectangle, cd: f64, fc: f64, n: f64) -> f64 {
 /// 縁応力 `fc` 一定・線形分布（コンクリート引張無視）を断面内で数値積分し、
 /// 任意断面形状の (cN, cM) を求める汎用ヘルパ。`width_fn(y)` は圧縮縁からの
 /// 距離 `y` [mm] における断面幅 [mm] を返す。
+#[cfg(test)]
 fn numeric_cn_cm(cd: f64, fc: f64, xn: f64, width_fn: impl Fn(f64) -> f64) -> (f64, f64) {
     if cd <= 0.0 || fc <= 0.0 || xn <= 0.0 {
         return (0.0, 0.0);
@@ -136,37 +137,69 @@ fn numeric_cn_cm(cd: f64, fc: f64, xn: f64, width_fn: impl Fn(f64) -> f64) -> (f
     (cn, cm.abs())
 }
 
-/// 部分圧縮時の円形充填コンクリートの (cN, cM) [N, N·mm]。
-/// `dc` は充填部直径 [mm]、`xn` は圧縮縁から中立軸までの距離 [mm]。
-fn cft_circle_cn_cm(dc: f64, fc: f64, xn: f64) -> (f64, f64) {
-    numeric_cn_cm(dc, fc, xn, |y| {
-        let r = dc / 2.0;
-        2.0 * (r * r - (y - r).powi(2)).max(0.0).sqrt()
-    })
+/// 中立軸深さと直径の比 `depth` ∈ [0, 1] に対する (軸力比, 断面中心からの作用点距離/直径)。
+fn cft_circle_axial_ratio_and_lever(depth: f64) -> (f64, f64) {
+    use std::f64::consts::PI;
+
+    if depth <= 0.25 {
+        // 浅い圧縮域では円弧の断面諸量の差が桁落ちするため、同じ積分の収束級数で評価する。
+        let mut force = 4.0 / 15.0;
+        let mut first_moment = 4.0 / 35.0;
+        let mut coefficient = 1.0;
+        for k in 1.. {
+            let k = f64::from(k);
+            coefficient *= depth * (k - 1.5) / k;
+            let next_force = force + coefficient / ((k + 1.5) * (k + 2.5));
+            let next_moment = first_moment + coefficient / ((k + 2.5) * (k + 3.5));
+            if next_force == force && next_moment == first_moment {
+                break;
+            }
+            force = next_force;
+            first_moment = next_moment;
+        }
+        return (
+            depth * depth.sqrt() * (8.0 / PI * force),
+            0.5 - depth * (first_moment / force),
+        );
+    }
+
+    let z = 1.0 - 2.0 * depth;
+    let sin = 2.0 * (depth * (1.0 - depth)).sqrt();
+    let theta = sin.atan2(z);
+    let area = (theta - z * sin) / 2.0;
+    let first_moment = sin.powi(3) / 3.0;
+    let second_moment = (theta + z * sin * (1.0 - 2.0 * z * z)) / 8.0;
+    let force = first_moment - z * area;
+    let moment = second_moment - z * first_moment;
+    (force / (PI * depth), 0.5 * (moment / force))
 }
 
 /// 円形充填コンクリート部分の許容曲げ [N·mm]。軸力 `c_n` と上限 `c_nc` は圧縮正 [N]。
-fn cft_circle_ma(dc: f64, fc: f64, c_nc: f64, c_n: f64) -> f64 {
+fn cft_circle_ma(dc: f64, c_nc: f64, c_n: f64) -> f64 {
     if c_n <= 0.0 || c_n >= c_nc {
         return 0.0;
     }
     if c_n >= c_nc / 2.0 {
         return (c_nc - c_n) * (dc / 8.0);
     }
-    let mut lo = 1e-6 * dc;
-    let mut hi = dc;
-    for _ in 0..60 {
-        let mid = 0.5 * (lo + hi);
-        let (cn, _) = cft_circle_cn_cm(dc, fc, mid);
-        if cn < c_n {
+    let target = c_n / c_nc;
+    let mut lo = 0.0;
+    // 軸力比 ≥ depth^(3/2)/2。浅い圧縮域でも解の大きさに応じた区間から探索する。
+    let mut hi = (2.0 * target).cbrt().powi(2);
+    let depth = loop {
+        let mid = (lo + hi) / 2.0;
+        if mid == lo || mid == hi {
+            break mid;
+        }
+        let (axial_ratio, _) = cft_circle_axial_ratio_and_lever(mid);
+        if axial_ratio < target {
             lo = mid;
         } else {
             hi = mid;
         }
-    }
-    let xn = 0.5 * (lo + hi);
-    let (_, cm) = cft_circle_cn_cm(dc, fc, xn);
-    cm
+    };
+    let (_, lever_ratio) = cft_circle_axial_ratio_and_lever(depth);
+    c_n * (dc * lever_ratio)
 }
 
 /// CFT 柱 1 軸分の許容曲げモーメント MA(N)。累加強度式による 3 分岐
@@ -463,7 +496,7 @@ fn cft_pipe_check(
     let n_design = -forces.n;
 
     let ma = cft_axis_capacity(n_design, cnc, sa, s_ft, s_fc, sz, |n| {
-        cft_circle_ma(dc, fc_allow, cnc, n)
+        cft_circle_ma(dc, cnc, n)
     });
 
     let ratio_z = ratio_or_large(forces.mz, ma);
