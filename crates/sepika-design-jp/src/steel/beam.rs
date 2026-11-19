@@ -12,6 +12,7 @@ use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
     SteelFbBasis,
 };
+use sepika_core::material_grade::resolve_steel_f;
 use sepika_core::model::{Material, PropertyBasis, Section};
 use sepika_core::section_shape::SectionShape;
 
@@ -36,10 +37,62 @@ pub(super) fn asymmetric_built_h_combination_reasons(
     .flatten()
 }
 
+fn check_built_h_girder_plate_slenderness(
+    shape: &SectionShape,
+    mat: &Material,
+    upper_in_compression: bool,
+) -> Result<(), String> {
+    let SectionShape::SteelBuiltH {
+        height,
+        upper_width,
+        upper_thick,
+        lower_width,
+        lower_thick,
+        web_thick,
+    } = *shape
+    else {
+        unreachable!("上下非対称組立H形鋼大梁だけを検定する");
+    };
+    if !mat.young.is_finite() || mat.young <= 0.0 {
+        return Err("ヤング係数が正の有限値でなく、幅厚比の限界値を算定できません".into());
+    }
+    let (flange, flange_half_width_mm, flange_thick_mm) = if upper_in_compression {
+        ("上フランジ b/t", upper_width / 2.0, upper_thick)
+    } else {
+        ("下フランジ b/t", lower_width / 2.0, lower_thick)
+    };
+    for (label, width_mm, thickness_mm, coefficient) in [
+        (flange, flange_half_width_mm, flange_thick_mm, 0.53),
+        (
+            "ウェブ d/t",
+            height - upper_thick - lower_thick,
+            web_thick,
+            2.4,
+        ),
+    ] {
+        let f_mpa = resolve_steel_f(Some(mat), Some(thickness_mm))
+            .map_err(|reason| format!("{label} の幅厚比の限界値を算定できません。{reason}"))?;
+        let ratio = width_mm / thickness_mm;
+        let limit = coefficient * (mat.young / f_mpa).sqrt();
+        if !ratio.is_finite() || ratio <= 0.0 || !limit.is_finite() || limit <= 0.0 {
+            return Err(format!(
+                "{label} の幅厚比または限界値を正の有限値で算定できません"
+            ));
+        }
+        if ratio > limit {
+            return Err(format!(
+                "局部座屈の影響を省ける幅厚比の条件を満たしません。{label}={ratio:.4}（上限 {limit:.4}）"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn check_asymmetric_built_h(
     forces: &MemberForcesAt,
     sec: &Section,
     shape: &SectionShape,
+    mat: &Material,
     ctx: &DesignCtx,
     f: f64,
     shear_reasons: [Option<&'static str>; 2],
@@ -95,7 +148,9 @@ pub(super) fn check_asymmetric_built_h(
 
         let sigma_upper_mpa = -forces.mz / z_upper_mm3;
         let sigma_lower_mpa = forces.mz / z_lower_mm3;
-        let (compression_side, tension_side, compression_mpa, tension_mpa) = if forces.mz > 0.0 {
+        let upper_in_compression = forces.mz > 0.0;
+        let (compression_side, tension_side, compression_mpa, tension_mpa) = if upper_in_compression
+        {
             ("上", "下", -sigma_upper_mpa, sigma_lower_mpa)
         } else {
             ("下", "上", -sigma_lower_mpa, sigma_upper_mpa)
@@ -114,6 +169,51 @@ pub(super) fn check_asymmetric_built_h(
         };
         let mut basis =
             format!("鋼構造許容応力度設計規準2019年版 {term} 上下非対称組立H形鋼大梁の強軸曲げ");
+        if lateral_buckling_reason.is_none() {
+            if let Err(reason) =
+                check_built_h_girder_plate_slenderness(shape, mat, upper_in_compression)
+            {
+                let SectionShape::SteelBuiltH {
+                    upper_thick,
+                    lower_thick,
+                    ..
+                } = *shape
+                else {
+                    unreachable!("上下非対称組立H形鋼大梁だけを検定する");
+                };
+                let Ok(upper_f_mpa) = resolve_steel_f(Some(mat), Some(upper_thick)) else {
+                    return Err(reason);
+                };
+                let Ok(lower_f_mpa) = resolve_steel_f(Some(mat), Some(lower_thick)) else {
+                    return Err(reason);
+                };
+                let upper_ft_mpa = steel_ft(upper_f_mpa, ctx.term);
+                let lower_ft_mpa = steel_ft(lower_f_mpa, ctx.term);
+                // 有効断面の図心が移動するため、全断面の片側の縁応力度は下限に使えない。
+                let ratio_lower_bound =
+                    (compression_mpa + tension_mpa) / (upper_ft_mpa + lower_ft_mpa);
+                if !ratio_lower_bound.is_finite() || ratio_lower_bound <= 1.0 {
+                    return Err(reason);
+                }
+                basis.push_str("（上下いずれかの縁の許容上限による不適合）。");
+                basis.push_str(&reason);
+                basis.push_str("。有効断面による曲げ照査は未算定です。表示する検定比は下限です");
+                return Ok(CheckResult {
+                    basis,
+                    detail: super::lateral_bracing::UNCONFIRMED_DETAIL.to_string(),
+                    components: vec![CheckComponent {
+                        kind: CheckKind::Bending,
+                        ratio: ratio_lower_bound,
+                        detail: format!(
+                            "全断面の上下縁の曲げ応力度の絶対値の和={:.4} N/mm², \
+                             上縁の許容上限={upper_ft_mpa:.4} N/mm², 下縁の許容上限={lower_ft_mpa:.4} N/mm², \
+                             曲げ比の下限={ratio_lower_bound:.4}",
+                            compression_mpa + tension_mpa
+                        ),
+                    }],
+                });
+            }
+        }
         let (fb_label, ratio_label) = if let Some(reason) = lateral_buckling_reason {
             if ratio <= 1.0 {
                 return Err(reason.into());
