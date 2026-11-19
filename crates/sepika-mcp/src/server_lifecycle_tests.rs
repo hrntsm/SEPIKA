@@ -6,6 +6,169 @@ use sepika_io::results::ResultKind;
 use std::future::Future;
 use std::task::Poll;
 
+fn gravity_column_model() -> Model {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCase, LoadCaseKind};
+
+    let mut model = crate::tests::rc_column_model();
+    model.load_cases.push(LoadCase {
+        origin: Default::default(),
+        id: LoadCaseId(1),
+        name: "空の架構用積載荷重".into(),
+        kind: LoadCaseKind::Live,
+        nodal: Vec::new(),
+        member: Vec::new(),
+    });
+    model
+}
+
+async fn saved_design_status(server: &SepikaServer, index: usize) -> serde_json::Value {
+    let mut args = run_args(JobKind::DesignCheck);
+    args.load_combination = Some(index);
+    let run = server.analysis_run(Parameters(args)).await.unwrap();
+    let id = extract_job_id(&run);
+    wait_for_terminal(server, &id).await;
+    public_status(server, &id).await
+}
+
+#[tokio::test]
+async fn saved_design_combines_case_coefficients_before_scaling_response() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::LoadCombination;
+
+    let mut model = gravity_column_model();
+    let dead = LoadCaseId(0);
+    let live = LoadCaseId(1);
+    let repeated_terms = vec![
+        (dead, f64::MAX),
+        (dead, -f64::MAX),
+        (dead, 1.0),
+        (live, 1.0),
+    ];
+    model.combinations = vec![
+        LoadCombination {
+            name: "基準G+P".into(),
+            terms: vec![(dead, 1.0), (live, 1.0)],
+        },
+        LoadCombination {
+            name: "重複G+P".into(),
+            terms: repeated_terms.clone(),
+        },
+    ];
+    let dir = test_store_dir("1574-duplicate-gravity-terms");
+    std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+    let path = dir.with_extension("ovika");
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let reloaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    let server = SepikaServer::new(make_state(reloaded, &dir));
+    let read_summary = |job: serde_json::Value| {
+        serde_json::from_str::<serde_json::Value>(
+            job["status"]["Done"]["result_ref"].as_str().unwrap(),
+        )
+        .unwrap()
+    };
+    let baseline = read_summary(saved_design_status(&server, 0).await);
+    let repeated = read_summary(saved_design_status(&server, 1).await);
+    let forces = &repeated["member_forces"];
+    let rows = forces["rows"].as_array().unwrap();
+    assert!(!rows.is_empty());
+    for row in rows {
+        for component in ["n", "qy", "qz", "mx", "my", "mz"] {
+            assert!(row[component].as_f64().is_some_and(f64::is_finite), "{row}");
+        }
+        approx::assert_abs_diff_eq!(row["n"].as_f64().unwrap(), -500_000.0, epsilon = 1e-8);
+    }
+    assert_eq!(forces, &baseline["member_forces"]);
+    assert_eq!(repeated["load_target"]["terms"], serde_json::json!(repeated_terms));
+    assert_eq!(
+        repeated["load_target"]["gravity_reference_terms"],
+        serde_json::json!([[0, 1.0], [1, 1.0]])
+    );
+    assert_eq!(repeated["load_target"]["combination_index"], 1);
+    assert_eq!(repeated["term"], "long");
+    assert_eq!(repeated["n_skipped"], 0);
+    assert!(repeated["max_ratio"].as_f64().is_some_and(|ratio| ratio > 0.0));
+    for key in ["n_checks", "n_ng", "max_ratio", "all_checked_and_ok"] {
+        assert_eq!(repeated[key], baseline[key], "{key}: {repeated}");
+    }
+    assert_eq!(repeated["store"]["persisted"], false);
+}
+
+#[tokio::test]
+async fn saved_design_reports_target_when_coefficient_or_response_cannot_be_evaluated() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::LoadCombination;
+
+    let dead = LoadCaseId(0);
+    let live = LoadCaseId(1);
+    for (terms, failed_case, expected) in [
+        (vec![(dead, f64::INFINITY)], false, "荷重組合せ係数が非有限"),
+        (
+            vec![(dead, f64::MAX), (dead, f64::MAX), (dead, -f64::MAX)],
+            false,
+            "荷重組合せ係数の合計が非有限",
+        ),
+        (vec![(dead, f64::MAX)], false, "合成内力"),
+        (vec![(LoadCaseId(99), 0.0)], false, "荷重ケース 99 がありません"),
+        (vec![(dead, 1.0)], true, "case:0"),
+    ] {
+        let mut model = gravity_column_model();
+        model.combinations = vec![LoadCombination {
+            name: "診断対象".into(),
+            terms: terms.into_iter().chain([(live, 1.0)]).collect(),
+        }];
+        if failed_case {
+            model.load_cases[0].nodal[0].values[2] = f64::NAN;
+        }
+        let dir = test_store_dir("1574-invalid-combination");
+        let server = SepikaServer::new(make_state(model, &dir));
+        let job = saved_design_status(&server, 0).await;
+        let status = &job["status"];
+        assert!(status.get("Done").is_none(), "{status}");
+        assert_eq!(status["Failed"]["kind"], "invalid_input", "{status}");
+        let reason = status["Failed"]["error"].as_str().unwrap();
+        assert!(reason.contains("保存組合せ #0「診断対象」"), "{reason}");
+        assert!(reason.contains(expected), "{reason}");
+    }
+}
+
+#[tokio::test]
+async fn saved_design_rejects_nonfinite_gravity_reference_with_finite_combined_response() {
+    use sepika_core::ids::{LoadCaseId, NodeId};
+    use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, NodalLoad};
+
+    let mut model = gravity_column_model();
+    let n = f64::MAX * 0.75;
+    let dead = LoadCaseId(0);
+    let live = LoadCaseId(1);
+    let seismic = LoadCaseId(2);
+    let tip = |axial_n| NodalLoad::manual(NodeId(1), [0.0, 0.0, axial_n, 0.0, 0.0, 0.0]);
+    model.load_cases[0].nodal = vec![tip(-n)];
+    model.load_cases[1].nodal = vec![tip(-n)];
+    model.load_cases.push(LoadCase {
+        origin: Default::default(),
+        id: seismic,
+        name: "手入力地震ケース".into(),
+        kind: LoadCaseKind::Seismic,
+        nodal: vec![tip(n)],
+        member: Vec::new(),
+    });
+    model.combinations = vec![LoadCombination {
+        name: "重力参照だけが非有限".into(),
+        terms: vec![(dead, 1.0), (seismic, 1.0), (live, 1.0)],
+    }];
+    let dir = test_store_dir("1574-nonfinite-gravity-reference");
+    let server = SepikaServer::new(make_state(model, &dir));
+    let job = saved_design_status(&server, 0).await;
+    let status = &job["status"];
+    assert!(status.get("Done").is_none(), "{status}");
+    assert_eq!(status["Failed"]["kind"], "invalid_input", "{status}");
+    let reason = status["Failed"]["error"].as_str().unwrap();
+    assert!(reason.contains("保存組合せ #0「重力参照だけが非有限」"), "{reason}");
+    assert!(reason.contains("部材 0 の合成重力内力が非有限"), "{reason}");
+}
+
 #[tokio::test]
 async fn cft_ultimate_rejects_concrete_strength_below_statutory_minimum() {
     for (fc_n_mm2, calculated) in [(23.999, false), (24.0, true), (24.001, true)] {

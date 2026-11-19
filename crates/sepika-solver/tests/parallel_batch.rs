@@ -177,6 +177,37 @@ fn test_parallel_combination_batch() {
     }
 }
 
+#[test]
+fn combination_entries_apply_one_effective_coefficient_per_response() {
+    let model = make_model(2);
+    let analysis = Analysis::prepare(&model).unwrap();
+    let case = LoadCaseId(1);
+    let irrelevant = LoadCaseId(2);
+    let baseline = analysis.linear_static(case).unwrap();
+    let combo = LoadCombination {
+        name: "係数が相殺する組合せ".into(),
+        terms: vec![
+            (case, f64::MAX),
+            (irrelevant, 1.0),
+            (case, -f64::MAX),
+            (irrelevant, -1.0),
+            (case, 1.0),
+        ],
+    };
+    let combos = std::slice::from_ref(&combo);
+    let combined = analysis.linear_static_with_combinations(&[case, irrelevant], combos);
+    for result in [
+        analysis.linear_combination(&combo),
+        analysis.linear_combination_batch(combos).pop().unwrap(),
+        combined.combos.into_iter().next().unwrap(),
+    ] {
+        let result = result.unwrap();
+        assert_eq!(result.disp, baseline.disp);
+        assert_eq!(result.member_forces[0].1.at, baseline.member_forces[0].1.at);
+        assert_eq!(result.story_shears, baseline.story_shears);
+    }
+}
+
 mod static_analysis_model {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),

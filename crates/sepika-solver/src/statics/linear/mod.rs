@@ -124,15 +124,16 @@ pub struct StaticOnce {
 
 /// 同じモデルのケース応答を係数倍して足し合わせる。部材・評価断面の順序は一致していること。
 /// 引張専用反復を含む応答和は、合成荷重の active-set 解を保証しない。項が空なら空の結果を返す。
-pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
+/// 係数または合成結果が非有限の場合は入力エラーを返す。
+pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, SolveError> {
     let Some((first, _)) = terms.first() else {
-        return StaticOnce {
+        return Ok(StaticOnce {
             story_shears: None,
             stiffness_ratio_disp: None,
             disp: Vec::new(),
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
-        };
+        });
     };
     let mut disp = vec![[0.0; 6]; first.disp.len()];
     let mut member_forces: Vec<(ElemId, MemberForces)> = first
@@ -153,6 +154,12 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
         .map(|(node, _)| (*node, [0.0; 2]))
         .collect();
     for (res, factor) in terms {
+        if !factor.is_finite() {
+            return Err(SolveError::InvalidInput("応答の係数が非有限です".into()));
+        }
+        if *factor == 0.0 {
+            continue;
+        }
         for (dst, src) in disp.iter_mut().zip(res.disp.iter()) {
             for (d, s) in dst.iter_mut().zip(src.iter()) {
                 *d += s * factor;
@@ -171,7 +178,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
             }
         }
     }
-    StaticOnce {
+    let result = StaticOnce {
         story_shears: terms.iter().try_fold(
             std::array::from_fn(|axis| {
                 vec![0.0; first.story_shears.as_ref().map_or(0, |q| q[axis].len())]
@@ -182,8 +189,10 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
                     if sum[axis].len() != q[axis].len() {
                         return None;
                     }
-                    for (out, value) in sum[axis].iter_mut().zip(&q[axis]) {
-                        *out += factor * value;
+                    if *factor != 0.0 {
+                        for (out, value) in sum[axis].iter_mut().zip(&q[axis]) {
+                            *out += factor * value;
+                        }
                     }
                 }
                 Some(sum)
@@ -193,7 +202,42 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
         disp,
         member_forces,
         panel_moments,
+    };
+    if let Some((id, _)) = result.member_forces.iter().find(|(_, forces)| {
+        forces.at.iter().any(|(position, values)| {
+            !position.is_finite() || values.iter().any(|v| !v.is_finite())
+        })
+    }) {
+        return Err(SolveError::InvalidInput(format!(
+            "部材 {} の合成内力または評価位置が非有限です",
+            id.0
+        )));
     }
+    if let Some((node, _)) = result
+        .panel_moments
+        .iter()
+        .find(|(_, moments)| moments.iter().any(|v| !v.is_finite()))
+    {
+        return Err(SolveError::InvalidInput(format!(
+            "節点 {} の仕口パネルの合成内力が非有限です",
+            node.0
+        )));
+    }
+    if result.disp.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(SolveError::InvalidInput("合成変位が非有限です".into()));
+    }
+    if result
+        .story_shears
+        .iter()
+        .flatten()
+        .flatten()
+        .any(|v| !v.is_finite())
+    {
+        return Err(SolveError::InvalidInput(
+            "合成層せん断力が非有限です".into(),
+        ));
+    }
+    Ok(result)
 }
 
 /// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。

@@ -5,6 +5,7 @@
 //! [`crate::statics::linear::superpose_static`]）。
 
 use sepika_core::ids::LoadCaseId;
+use sepika_core::load_combo::effective_combination_terms;
 use sepika_core::model::LoadCombination;
 use sepika_math::solver::SolveError;
 
@@ -100,11 +101,14 @@ impl Analysis<'_> {
                 .position(|cid| cid == id)
                 .and_then(|i| cases.get(i))
         };
-        let mut terms: Vec<(&StaticOnce, f64)> = Vec::with_capacity(combo.terms.len());
-        for (id, factor) in &combo.terms {
-            let case = lookup(id).ok_or_else(|| {
-                SolveError::InvalidInput(format!("荷重ケース {} が存在しません", id.0))
-            })?;
+        let invalid =
+            |reason| SolveError::InvalidInput(format!("荷重組合せ「{}」: {reason}", combo.name));
+        let effective =
+            effective_combination_terms(combo, &self.model.load_cases).map_err(invalid)?;
+        let mut terms: Vec<(&StaticOnce, f64)> = Vec::with_capacity(effective.len());
+        for (id, factor) in effective {
+            let case = lookup(&id)
+                .ok_or_else(|| invalid(format!("荷重ケース {} の解析結果がありません", id.0)))?;
             let res = case.as_ref().map_err(|e| {
                 let message = format!(
                     "荷重ケース {} の解析が失敗したため荷重組合せ「{}」を組み立てられません: {}",
@@ -115,14 +119,14 @@ impl Analysis<'_> {
                     _ => SolveError::InvalidInput(message),
                 }
             })?;
-            terms.push((res, *factor));
+            terms.push((res, factor));
         }
         if terms.is_empty() {
-            return match cases.iter().find_map(|res| res.as_ref().ok()) {
-                Some(res) => Ok(superpose_static(&[(res, 0.0)])),
-                None => Ok(self.zero_result()),
+            let Some(res) = cases.iter().find_map(|res| res.as_ref().ok()) else {
+                return Ok(self.zero_result());
             };
+            terms.push((res, 0.0));
         }
-        Ok(superpose_static(&terms))
+        superpose_static(&terms).map_err(|error| invalid(error.to_string()))
     }
 }
