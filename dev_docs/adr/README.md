@@ -182,6 +182,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0121](0121-asymmetric-built-h-weak-axis-shear.md) | accepted | 上下非対称組立H形鋼の弱軸せん断を未算定とする |
 | [0122](0122-asymmetric-built-h-girder-bending.md) | accepted | 上下非対称組立H形鋼大梁の強軸曲げは上下縁と横座屈長さの直接指定で照査する |
 | [0123](0123-asymmetric-built-h-column-pure-bending.md) | accepted | 上下非対称組立H形鋼柱の軸力ゼロの強軸曲げは実縁で照査する |
+| [0124](0124-asymmetric-built-h-girder-local-buckling.md) | accepted | 上下非対称組立H形鋼大梁の全断面照査に幅厚比の条件を設ける |
 
 ## 規約
 

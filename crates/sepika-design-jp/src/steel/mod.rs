@@ -563,6 +563,7 @@ impl SteelDesign {
                 forces,
                 sec,
                 shape,
+                mat,
                 ctx,
                 f,
                 built_h_shear_reasons,
