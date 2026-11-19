@@ -4,8 +4,8 @@
 //! 余裕度（せん断・付着が曲げに先行して破壊しないこと）を検定する。
 //! 両端ヒンジを仮定した終局せん断応力を設計用せん断力とする。
 //!
-//! 検定対象は矩形 RC 断面のみ。CFT 柱の軸終局耐力は [`cft`]、柱梁接合部の
-//! 終局耐力は [`crate::ultimate::joint`] を参照。主筋は上下対称配筋を仮定する。
+//! 検定対象は矩形 RC 梁・矩形および円形 RC 柱。CFT 柱の軸終局耐力は [`cft`]、
+//! 柱梁接合部の終局耐力は [`crate::ultimate::joint`] を参照。
 
 #[cfg(test)]
 use crate::MemberKind;
@@ -52,7 +52,9 @@ pub use rc_shear_ductility::{
 
 pub(crate) use cft_check::cft_circular_qd1_mu;
 pub use cft_check::{cft_mu_nm, collect_cft_ultimate_checks, CftUltimateCheck};
-pub use options::{MemberDemand, ShearMethod, UltimateDemandMode, UltimateShearOptions};
+pub use options::{
+    MemberDemand, ShearMethod, StaticBeamBending, UltimateDemandMode, UltimateShearOptions,
+};
 pub use rc_check::{collect_rc_ultimate_checks, UltimateCheck};
 pub use rc_strength::biaxial_margin;
 

@@ -1780,15 +1780,43 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     let ultimate = app
         .compute_ultimate_checks()
         .expect("終局検定が算定できるはず");
-    assert!(!ultimate.is_empty(), "RC 部材の終局検定が 1 件もない");
-    for u in &ultimate {
-        assert!(u.mu.is_finite() && u.mu > 0.0, "Mu が異常: {}", u.mu);
-        assert!(u.qsu.is_finite() && u.qsu > 0.0, "Qsu が異常: {}", u.qsu);
+    assert_eq!(
+        ultimate
+            .iter()
+            .map(|check| check.elem.0)
+            .collect::<Vec<_>>(),
+        [40, 41, 48, 49, 56, 57, 66, 67, 76, 77, 78, 91, 92, 93, 103, 104, 105]
+    );
+    let combination = app.core.model.ultimate_gravity_combination.unwrap();
+    app.run_combination(combination);
+    assert_no_error(&app, "終局検定用の架構用長期重力組合せ");
+    let forces = &app.core.scoped.results.as_ref().unwrap().member_forces;
+    for check in &ultimate {
+        let at = &forces
+            .iter()
+            .find(|(id, _)| *id == check.elem)
+            .unwrap()
+            .1
+            .at;
+        let (_, center) = at.iter().find(|(xi, _)| *xi == 0.5).unwrap();
+        let (_, end_j) = at.iter().find(|(xi, _)| *xi == 1.0).unwrap();
         assert!(
-            u.shear_margin.is_finite() && u.shear_margin > 0.0,
-            "せん断余裕度が異常: {}",
-            u.shear_margin
+            center[5] > 1e6 && end_j[5] < -1e6,
+            "部材 {} の Mz [N·mm] 中央={} j端={}",
+            check.elem.0,
+            center[5],
+            end_j[5]
         );
+        let reason = check.unchecked_reason.as_deref().unwrap();
+        assert!(
+            reason.starts_with("ultimate_beam_mz_mixed_signs:"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains(&format!("member={} ", check.elem.0)),
+            "{reason}"
+        );
+        assert!(!check.ok && check.mu.is_nan() && check.shear_margin.is_nan());
     }
 }
 

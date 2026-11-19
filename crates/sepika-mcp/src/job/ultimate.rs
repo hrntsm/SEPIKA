@@ -36,7 +36,7 @@ pub(crate) fn compute_ultimate_check_job(
     let axial: Vec<(sepika_core::ids::ElemId, f64)> =
         demand.iter().map(|(id, d)| (*id, d.n_axial)).collect();
 
-    // 絶対値で抽出した曲げでは RC 梁の引張側配筋を選べないため、RC の静的参照は未検定の扱いを維持する。
+    // MCP の静的終局検定の対象は CFT 柱のため、RC 断面があるジョブは需要不足として拒否する。
     for (_, member) in &mut demand {
         member.q_long = None;
         member.q_long_weak = None;

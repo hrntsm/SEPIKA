@@ -233,17 +233,26 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     row.col(|ui| {
                         ui.label(member_kind_label(c.kind));
                     });
+                    let format_capacity = |value: f64| {
+                        if value.is_nan() {
+                            "-".into()
+                        } else {
+                            format!("{value:.1}")
+                        }
+                    };
                     row.col(|ui| {
-                        ui.label(format!("{:.1}", moment_kn_m(c.mu)));
+                        ui.label(format_capacity(moment_kn_m(c.mu)));
                     });
                     row.col(|ui| {
-                        ui.label(format!("{:.1}", force_kn(c.qmu)));
+                        ui.label(format_capacity(force_kn(c.qmu)));
                     });
                     row.col(|ui| {
-                        ui.label(format!("{:.1}", force_kn(c.qsu)));
+                        ui.label(format_capacity(force_kn(c.qsu)));
                     });
                     row.col(|ui| {
-                        if let Some(m) = c.biaxial_shear_margin {
+                        if c.shear_margin.is_nan() {
+                            ui.label("-");
+                        } else if let Some(m) = c.biaxial_shear_margin {
                             ui.colored_label(margin_color(m), format!("二軸 {m:.2}"));
                         } else if biaxial_shear && c.kind == sepika_design_jp::MemberKind::Column {
                             let m = c.shear_margin;
@@ -260,13 +269,13 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     });
                     row.col(|ui| {
                         if bond {
-                            ui.label(format!("{:.1}", force_kn(c.qbu)));
+                            ui.label(format_capacity(force_kn(c.qbu)));
                         } else {
                             ui.label("-");
                         }
                     });
                     row.col(|ui| {
-                        if bond {
+                        if bond && !c.bond_margin.is_nan() {
                             ui.colored_label(
                                 margin_color(c.bond_margin),
                                 format!("{:.2}", c.bond_margin),
@@ -308,7 +317,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 crate::theme::UI_MUTED,
                 format!(
                     "{source}。{shear_demand}。{shear_note}、{bond_note}。\
-                     余裕度<1.0（赤）はせん断・付着が曲げ降伏に先行することを示す。\
+                     余裕度が 1.0 未満（赤）の場合、採用した需要に対して NG。\
                      対象は RC梁・RC矩形柱・RC円形柱。"
                 ),
             );
