@@ -17,15 +17,28 @@ pub(crate) fn compute_design_check_job(
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
     use sepika_core::load_combo::{
-        case_design_state, combination_design_state, LoadAction, LoadDuration,
+        case_design_state, combination_design_state, effective_combination_terms, LoadAction,
+        LoadDuration,
     };
     sepika_design_jp::validate_model_steel_inputs(model).map_err(JobError::InvalidInput)?;
     let (work, notices) = model_prepared_for_analysis(model, params)?;
-    let (lc_id, terms, source, state) = if let Some(index) = params.load_combination {
-        let combo = work.combinations.get(index).ok_or_else(|| {
-            JobError::InvalidInput(format!("保存組合せindex {index} がありません"))
-        })?;
-
+    let saved = params
+        .load_combination
+        .map(|index| {
+            work.combinations.get(index).ok_or_else(|| {
+                JobError::InvalidInput(format!("保存組合せindex {index} がありません"))
+            })
+        })
+        .transpose()?;
+    let invalid = |reason| {
+        JobError::InvalidInput(match (params.load_combination, saved) {
+            (Some(index), Some(combo)) => {
+                format!("保存組合せ #{index}「{}」: {reason}", combo.name)
+            }
+            _ => reason,
+        })
+    };
+    let (lc_id, terms, source, state) = if let Some(combo) = saved {
         (
             None,
             combo.terms.clone(),
@@ -66,22 +79,34 @@ pub(crate) fn compute_design_check_job(
             )
         }
     };
+    let effective_terms = if let Some(combo) = saved {
+        effective_combination_terms(combo, &work.load_cases).map_err(invalid)?
+    } else {
+        terms.clone()
+    };
     let mut solved = Vec::new();
     let mut failures = Vec::new();
-    for (id, factor) in &terms {
+    for (id, factor) in &effective_terms {
         match sepika_job::compute::compute_linear_static(work.clone(), *id) {
-            Ok(result) => solved.push((result, *factor)),
+            Ok(result) => solved.push((*id, result, *factor)),
             Err(error) => failures.push(format!("case:{}: {error}", id.0)),
         }
     }
     if !failures.is_empty() {
-        return Err(JobError::InvalidInput(format!(
+        return Err(invalid(format!(
             "必要応力が不足するため検定を拒否します: {}",
             failures.join("; ")
         )));
     }
-    let refs: Vec<_> = solved.iter().map(|(r, f)| (r, *f)).collect();
-    let result = sepika_solver::statics::linear::superpose_static(&refs);
+    let combined;
+    let result = if source == "single_case" {
+        &solved[0].1
+    } else {
+        let refs: Vec<_> = solved.iter().map(|(_, r, f)| (r, *f)).collect();
+        combined = sepika_solver::statics::linear::superpose_static(&refs)
+            .map_err(|error| invalid(error.to_string()))?;
+        &combined
+    };
     let expanded_storage;
     let wall_index;
     let model: &Model = if sepika_core::wall_expand::model_has_wall_plates_to_expand(&work) {
@@ -118,26 +143,24 @@ pub(crate) fn compute_design_check_job(
         load_error =
             Some("引張専用ブレースの別ケース合成は同一解を保証できないため未検定です".into());
     }
-    let gravity_terms = sepika_job::design_gravity_terms(model, &terms);
+    let gravity_terms = sepika_job::design_gravity_terms(model, &effective_terms);
     let long_member_forces = if state
         .as_ref()
         .is_ok_and(|s| s.combination && s.action == LoadAction::Seismic)
     {
         Some(
             sepika_job::complete_design_gravity_forces(&gravity_terms, |id| {
-                sepika_job::compute::compute_linear_static(work.clone(), id)
-                    .ok()
-                    .map(|r| r.member_forces)
+                solved
+                    .iter()
+                    .find(|(case, _, _)| *case == id)
+                    .map(|(_, response, _)| response.member_forces.clone())
             })
-            .map_err(|missing| {
-                JobError::InvalidInput(format!("検定用重力応力が不足しています: {missing:?}"))
-            })?,
+            .map_err(invalid)?,
         )
     } else {
         None
     };
-    let q0_by_elem = sepika_job::simple_beam_q0_by_terms(model, &gravity_terms)
-        .map_err(JobError::InvalidInput)?;
+    let q0_by_elem = sepika_job::simple_beam_q0_by_terms(model, &gravity_terms).map_err(invalid)?;
     let check_forces = &result.member_forces;
     let member_force_rows = flatten_member_force_rows(check_forces);
 
@@ -156,7 +179,7 @@ pub(crate) fn compute_design_check_job(
             term,
             wall_index: wall_index.as_ref(),
             wall_case: &wall_case,
-            load_terms: Some(&terms),
+            load_terms: Some(&effective_terms),
             rc_damage_control: true,
             bond_method: BondMethod::default(),
             qd_method: QdMethod::default(),
@@ -166,7 +189,7 @@ pub(crate) fn compute_design_check_job(
             steel_fb_basis: SteelFbBasis::default(),
         },
     )
-    .map_err(JobError::InvalidInput)?;
+    .map_err(invalid)?;
 
     if let Some(reason) = &load_error {
         report.skip_for_load_state(reason);
@@ -586,51 +609,31 @@ mod tests {
     }
 
     #[test]
-    fn brb_nonfinite_combination_axial_preserves_unchecked_and_length_ng_in_mcp() {
-        use sepika_core::ids::LoadCaseId;
-        use sepika_core::model::{LoadCase, LoadCombination};
+    fn brb_nonfinite_axial_preserves_unchecked_and_length_ng_in_mcp_summary() {
+        use sepika_element::frame::beam::MemberForces;
 
         let mut model = brb_input::model();
         model.nodes[1].coord[0] = 3000.0;
         model.brb_attrs[0].length_reduction = Some(0.0);
-        model.load_cases.push(LoadCase {
-            origin: Default::default(),
-            id: LoadCaseId(1),
-            name: "架構用積載".into(),
-            kind: LoadCaseKind::Live,
-            nodal: vec![],
-            member: vec![],
-        });
-        model.combinations.push(LoadCombination {
-            name: "G+P".into(),
-            terms: vec![
-                (LoadCaseId(0), f64::MAX),
-                (LoadCaseId(0), -f64::MAX),
-                (LoadCaseId(0), 1.0),
-                (LoadCaseId(1), 1.0),
-            ],
-        });
+        let forces = [(
+            brb_input::BRACE,
+            MemberForces {
+                at: vec![
+                    (0.0, [f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                    (1.0, [f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                ],
+            },
+        )];
         for (limit_mm, expected_ratio) in [(6000.0, None), (2400.0, Some(1.25))] {
             model.brb_attrs[0].critical_length = Some(limit_mm);
-            let JobOutcome::DesignCheck {
-                summary,
-                member_force_rows,
-                ..
-            } = compute_design_check_job(
+            let report = sepika_design_jp::run_member_design_checks(
                 &model,
-                &JobParams {
-                    load_combination: Some(0),
-                    ..Default::default()
-                },
+                &forces,
+                &[],
+                &MemberDesignCheckOptions::default(),
             )
-            .unwrap()
-            else {
-                panic!()
-            };
-            assert_eq!(member_force_rows.len(), 2);
-            assert!(member_force_rows
-                .iter()
-                .all(|(_, _, forces)| forces[0].is_nan()));
+            .unwrap();
+            let summary = assemble_design_check_summary(&report, None, LoadTerm::Long, false);
             assert_eq!(
                 summary["n_checks"],
                 if expected_ratio.is_some() { 4 } else { 2 },
@@ -756,6 +759,7 @@ mod tests {
     #[test]
     fn mcp_long_term_rc_reports_calculated_deflection_for_case_and_combination() {
         use sepika_core::dof::{Dof, Dof6Mask};
+        use sepika_core::ids::LoadCaseId;
         use sepika_core::model::MemberLoad;
 
         let mut model = asymmetric_beam_input::model(false);
@@ -774,12 +778,19 @@ mod tests {
             15.0,
         )];
 
-        for combo in [false, true] {
+        let mut repeated = model.combinations[0].clone();
+        repeated.name = "固定荷重を複数回参照".into();
+        repeated.terms.splice(
+            0..0,
+            [(LoadCaseId(0), f64::MAX), (LoadCaseId(0), -f64::MAX)],
+        );
+        model.combinations.push(repeated);
+        for combination in [None, Some(0), Some(model.combinations.len() - 1)] {
             let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
                 &model,
                 &JobParams {
-                    load_case: (!combo).then_some(0),
-                    load_combination: combo.then_some(0),
+                    load_case: combination.is_none().then_some(0),
+                    load_combination: combination,
                     ..Default::default()
                 },
             )
@@ -1194,7 +1205,7 @@ mod tests {
                     })
                     .collect();
                 let references: Vec<_> = solved.iter().map(|(r, f)| (r, *f)).collect();
-                let direct = sepika_solver::statics::linear::superpose_static(&references);
+                let direct = sepika_solver::statics::linear::superpose_static(&references).unwrap();
                 assert_eq!(
                     serde_json::to_value(member_force_rows).unwrap(),
                     serde_json::to_value(flatten_member_force_rows(&direct.member_forces)).unwrap()

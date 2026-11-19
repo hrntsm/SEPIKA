@@ -193,40 +193,64 @@ pub fn case_design_state(kind: crate::model::LoadCaseKind) -> Result<DesignLoadS
     })
 }
 
+/// ケースごとの係数を保存順で加算し、ケースの初出順で返す。係数がゼロのケースも保持する。
+/// 参照欠落、係数または加算途中の非有限値は理由付きのエラーを返す。
+pub fn effective_combination_terms(
+    combo: &LoadCombination,
+    cases: &[crate::model::LoadCase],
+) -> Result<Vec<(LoadCaseId, f64)>, String> {
+    let mut coefficients: Vec<(LoadCaseId, f64)> = Vec::new();
+    for (id, factor) in &combo.terms {
+        if !factor.is_finite() {
+            return Err(format!("荷重ケース {} の荷重組合せ係数が非有限です", id.0));
+        }
+        if !cases.iter().any(|c| c.id == *id) {
+            return Err(format!("荷重ケース {} がありません", id.0));
+        }
+        if let Some((_, coefficient)) = coefficients.iter_mut().find(|(case_id, _)| case_id == id) {
+            *coefficient += factor;
+            if !coefficient.is_finite() {
+                return Err(format!(
+                    "荷重ケース {} の荷重組合せ係数の合計が非有限です",
+                    id.0
+                ));
+            }
+        } else {
+            coefficients.push((*id, *factor));
+        }
+    }
+    Ok(coefficients)
+}
+
 /// 保存係数・荷重種別から検定状態を判定する。標準外係数・不足・混合作用は理由付き未判定。
 /// 状態の判定は、多雪区域指定や風時の実況等の法的適用条件の確認を代替しない。
 pub fn combination_design_state(
     combo: &LoadCombination,
     cases: &[crate::model::LoadCase],
 ) -> Result<DesignLoadState, String> {
+    let mut terms = effective_combination_terms(combo, cases)?;
+    terms.sort_unstable_by_key(|(id, _)| *id);
+    combination_design_state_for_terms(&terms, cases)
+}
+
+fn combination_design_state_for_terms(
+    terms: &[(LoadCaseId, f64)],
+    cases: &[crate::model::LoadCase],
+) -> Result<DesignLoadState, String> {
     use crate::model::LoadCaseKind as K;
-    let mut coefficients = std::collections::BTreeMap::new();
-    for (id, factor) in &combo.terms {
-        if !factor.is_finite() {
-            return Err("荷重組合せ係数が非有限です".into());
-        }
-        if !cases.iter().any(|c| c.id == *id) {
-            return Err(format!("荷重ケース {} がありません", id.0));
-        }
-        let coefficient = coefficients.entry(id.0).or_insert(0.0);
-        *coefficient += factor;
-        if !coefficient.is_finite() {
-            return Err("荷重組合せ係数の合計が非有限です".into());
-        }
-    }
     let mut dead = false;
     let mut live = false;
     let mut snow = 0.0;
     let mut snow_cases = 0;
     let mut lateral = None;
-    for (id, factor) in coefficients {
+    for &(id, factor) in terms {
         if factor == 0.0 {
             continue;
         }
         let case = cases
             .iter()
-            .find(|c| c.id.0 == id)
-            .ok_or_else(|| format!("荷重ケース {id} がありません"))?;
+            .find(|c| c.id == id)
+            .ok_or_else(|| format!("荷重ケース {} がありません", id.0))?;
         match case.kind {
             K::Dead | K::Live if factor == 1.0 => {
                 dead |= case.kind == K::Dead;
@@ -245,7 +269,8 @@ pub fn combination_design_state(
             }
             _ => {
                 return Err(format!(
-                    "荷重ケース {id} の種別・係数から検定状態を一意に判定できません"
+                    "荷重ケース {} の種別・係数から検定状態を一意に判定できません",
+                    id.0
                 ))
             }
         }
@@ -293,21 +318,18 @@ pub fn ultimate_gravity_terms(
         .combinations
         .get(index)
         .ok_or("gravity_combination_missing: 選択組合せがありません")?;
-    let state = combination_design_state(combo, &model.load_cases)
+    let mut terms = effective_combination_terms(combo, &model.load_cases)
+        .map_err(|reason| format!("gravity_combination_unsupported: {reason}"))?;
+    terms.sort_unstable_by_key(|(id, _)| *id);
+    let state = combination_design_state_for_terms(&terms, &model.load_cases)
         .map_err(|reason| format!("gravity_combination_unsupported: {reason}"))?;
     if state.duration != LoadDuration::Long
         || !matches!(state.action, LoadAction::Gravity | LoadAction::Snow)
     {
         return Err("gravity_combination_unsupported: 長期架構用G+P（明示した長期Sを含む）を選択してください".into());
     }
-    let mut terms = std::collections::BTreeMap::new();
-    for (id, factor) in &combo.terms {
-        *terms.entry(*id).or_insert(0.0) += factor;
-    }
-    Ok(terms
-        .into_iter()
-        .filter(|(_, factor)| *factor != 0.0)
-        .collect())
+    terms.retain(|(_, factor)| *factor != 0.0);
+    Ok(terms)
 }
 
 #[cfg(test)]

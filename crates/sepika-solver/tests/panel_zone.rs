@@ -550,7 +550,8 @@ fn panel_757_public_solver_whole_rotation_and_simultaneous_loading_preserve_resp
     let together = analysis.linear_static(LoadCaseId(1)).unwrap();
     let x = analysis.linear_static(LoadCaseId(2)).unwrap();
     let y = analysis.linear_static(LoadCaseId(3)).unwrap();
-    let separate = sepika_solver::statics::linear::superpose_static(&[(&x, 1.0), (&y, 1.0)]);
+    let separate =
+        sepika_solver::statics::linear::superpose_static(&[(&x, 1.0), (&y, 1.0)]).unwrap();
     let rotated_response = sepika_solver::statics::analysis::Analysis::prepare(&rotated)
         .unwrap()
         .linear_static(LoadCaseId(1))

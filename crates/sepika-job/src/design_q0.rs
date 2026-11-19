@@ -110,34 +110,35 @@ where
     }
 }
 
-/// 選択組合せのG/P/S参照terms。地震・風の作用を重力応力へ含めない。
+/// 選択組合せの有効係数から非ゼロのG/P/S項を返す。地震・風は対象外。
 pub fn design_gravity_terms(model: &Model, terms: &[(LoadCaseId, f64)]) -> Vec<(LoadCaseId, f64)> {
     terms
         .iter()
         .copied()
-        .filter(|(id, _)| {
-            model.load_cases.iter().any(|c| {
-                c.id == *id
-                    && matches!(
-                        c.kind,
-                        LoadCaseKind::Dead | LoadCaseKind::Live | LoadCaseKind::Snow
-                    )
-            })
+        .filter(|(id, factor)| {
+            *factor != 0.0
+                && model.load_cases.iter().any(|c| {
+                    c.id == *id
+                        && matches!(
+                            c.kind,
+                            LoadCaseKind::Dead | LoadCaseKind::Live | LoadCaseKind::Snow
+                        )
+                })
         })
         .collect()
 }
 
-/// 選択重力termsの全応力を係数付きで合成する。欠落ケースは拒否する。
+/// 選択重力termsの全応力を係数付きで合成し、不足ケースや非有限の合成内力を理由付きで拒否する。
 pub fn complete_design_gravity_forces<F>(
     terms: &[(LoadCaseId, f64)],
     mut force_of: F,
-) -> Result<Vec<(ElemId, MemberForces)>, Vec<LoadCaseId>>
+) -> Result<Vec<(ElemId, MemberForces)>, String>
 where
     F: FnMut(LoadCaseId) -> Option<Vec<(ElemId, MemberForces)>>,
 {
     let ids: Vec<_> = terms.iter().map(|(id, _)| *id).collect();
     let mut index = 0;
-    complete_gravity_member_forces(&ids, |id| {
+    let combined = complete_gravity_member_forces(&ids, |id| {
         let factor = terms[index].1;
         index += 1;
         force_of(id).map(|mut forces| {
@@ -151,6 +152,16 @@ where
             forces
         })
     })
+    .map_err(|missing| format!("検定用重力応力が不足しています: {missing:?}"))?;
+    if let Some((elem, _)) = combined.iter().find(|(_, forces)| {
+        forces
+            .at
+            .iter()
+            .any(|(_, values)| values.iter().any(|value| !value.is_finite()))
+    }) {
+        return Err(format!("部材 {} の合成重力内力が非有限です", elem.0));
+    }
+    Ok(combined)
 }
 
 /// 選択重力termsのQD1専用Q0 `[N]`。RC 梁は端別の係数付き合成後に最大絶対値を採る。
@@ -609,11 +620,11 @@ mod load_contract_tests {
                 force(id)
             })
             .unwrap_err(),
-            vec![LoadCaseId(1)]
+            "検定用重力応力が不足しています: [LoadCaseId(1)]"
         );
         assert_eq!(
             complete_design_gravity_forces(&terms, |_| None).unwrap_err(),
-            vec![LoadCaseId(0), LoadCaseId(1), LoadCaseId(3)]
+            "検定用重力応力が不足しています: [LoadCaseId(0), LoadCaseId(1), LoadCaseId(3)]"
         );
         let frame =
             complete_design_gravity_forces(&[(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)], force)

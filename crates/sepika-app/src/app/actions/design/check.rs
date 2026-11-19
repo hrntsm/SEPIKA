@@ -159,21 +159,38 @@ impl App {
         let is_seismic_combo = state.as_ref().is_ok_and(|s| {
             s.combination && s.action == sepika_core::load_combo::LoadAction::Seismic
         });
-        let gravity_terms = match self.core.scoped.last_static {
-            Some(StaticKey::Combo(index)) => results
-                .combos
-                .get(index)
-                .and_then(|(name, _)| {
-                    self.core
-                        .model
-                        .combinations
-                        .iter()
-                        .find(|c| &c.name == name)
-                })
-                .map(|combo| sepika_job::design_gravity_terms(&self.core.model, &combo.terms))
-                .unwrap_or_default(),
-            _ => Vec::new(),
+        let selected_combo_name = match self.core.scoped.last_static {
+            Some(StaticKey::Combo(index)) => {
+                results.combos.get(index).map(|(name, _)| name.as_str())
+            }
+            _ => None,
         };
+        let load_terms = match self.core.scoped.last_static {
+            Some(StaticKey::Case(key)) => match key {
+                StaticCaseKey::User(id) => Some(vec![(id, 1.0)]),
+                StaticCaseKey::Seismic(dir) => self.seismic_case_id(dir).map(|id| vec![(id, 1.0)]),
+            },
+            Some(StaticKey::Combo(_)) => selected_combo_name.and_then(|name| {
+                let combo = self
+                    .core
+                    .model
+                    .combinations
+                    .iter()
+                    .find(|c| c.name == name)?;
+                sepika_core::load_combo::effective_combination_terms(
+                    combo,
+                    &self.core.model.load_cases,
+                )
+                .ok()
+            }),
+            None => None,
+        };
+        let gravity_terms = load_terms
+            .as_deref()
+            .filter(|_| is_seismic_combo)
+            .map_or_else(Vec::new, |terms| {
+                sepika_job::design_gravity_terms(&self.core.model, terms)
+            });
         let gravity_long_owned = if is_seismic_combo {
             match sepika_job::complete_design_gravity_forces(&gravity_terms, |lc| {
                 sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
@@ -181,8 +198,9 @@ impl App {
                     .map(|r| r.member_forces)
             }) {
                 Ok(forces) => Some(forces),
-                Err(missing) => {
-                    load_error = Some(format!("検定用G+Pの重力応力が不足しています: {missing:?}"));
+                Err(reason) => {
+                    let name = selected_combo_name.unwrap_or_default();
+                    load_error = Some(format!("荷重組合せ「{name}」: {reason}"));
                     None
                 }
             }
@@ -212,21 +230,6 @@ impl App {
                 .map(|(name, _)| format!("combo:{idx}:{name}"))
                 .unwrap_or_else(|| format!("combo:{idx}")),
             None => "未選択".into(),
-        };
-        let load_terms = match self.core.scoped.last_static {
-            Some(StaticKey::Case(key)) => match key {
-                StaticCaseKey::User(id) => Some(vec![(id, 1.0)]),
-                StaticCaseKey::Seismic(dir) => self.seismic_case_id(dir).map(|id| vec![(id, 1.0)]),
-            },
-            Some(StaticKey::Combo(index)) => results.combos.get(index).and_then(|(name, _)| {
-                self.core
-                    .model
-                    .combinations
-                    .iter()
-                    .find(|c| c.name == *name)
-                    .map(|c| c.terms.clone())
-            }),
-            None => None,
         };
         let frame_report = if frame_design_requested {
             sepika_design_jp::run_member_design_checks(
