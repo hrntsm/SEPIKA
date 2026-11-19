@@ -289,6 +289,7 @@ fn check_compression_slenderness(
 /// H形鋼柱で弱軸せん断と強軸曲げが同時に作用する位置は理由付きで未算定とする。
 /// 圧縮・軸力なしでは確認済みの不適合を保持し、組合せの未算定理由を併記する。
 /// 上下非対称組立H形鋼柱の圧縮・強軸曲げは、無欠損の断面単独照査と独立して確定できる不適合を返す。
+/// 軸力ゼロでの同柱の強軸曲げは、材長と各座屈長さが0で局部座屈の影響を省ける無欠損断面を照査する。
 /// 上下非対称組立H形鋼大梁の単独強軸曲げは、明示された横座屈長さ0で照査する。
 /// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
@@ -391,7 +392,7 @@ impl SteelDesign {
                 .join("。")
         };
         let asymmetric_shape = asymmetric_built_h
-            .filter(|_| ctx.kind == MemberKind::Column && forces.n < 0.0 && forces.mz != 0.0);
+            .filter(|_| ctx.kind == MemberKind::Column && forces.n <= 0.0 && forces.mz != 0.0);
         let asymmetric_girder =
             asymmetric_built_h.filter(|_| ctx.kind == MemberKind::Girder && forces.mz != 0.0);
         let lambda = match check_compression_slenderness(forces, sec, ctx, torsion_reason) {
@@ -572,6 +573,7 @@ impl SteelDesign {
                 forces,
                 sec,
                 shape,
+                mat,
                 ctx,
                 f,
                 [

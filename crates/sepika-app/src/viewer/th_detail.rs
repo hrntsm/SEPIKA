@@ -657,7 +657,8 @@ fn draw_peak_check(
             "簡易検定です。通常S部材の未入力軸の座屈長さは柱1.2L・大梁と一般ブレース1.0Lです。\
              実効座屈長さが既定値を超える場合は、支持条件に応じた長さを直接入力してください。CFT柱は両軸の直接入力が必要です。\
              継手・スカラップ欠損による断面性能の低減や一本部材合成は行いません。\
-             欠損を指定した上下非対称組立H形鋼柱の圧縮・強軸曲げは未算定です。",
+             上下非対称組立H形鋼柱の圧縮時・軸力ゼロ時の強軸曲げは、欠損を指定した位置では応力度が未算定です。\
+             有限長では座屈が未算定となり、独立に確定できる不適合は表示します。",
         )
         .size(11.0)
         .color(theme::GRAY_600),
@@ -1126,23 +1127,37 @@ mod tests {
         let mut app = App::default();
         assert!(app.load_model(crate::app::steel_column_k_tests::asymmetric_built_h_cantilever()));
 
-        let compression = [-77_000.0, 0.0, 0.0, 0.0, 0.0, 160e6];
-        let text = peak_check_text(&app, 0, compression);
-        assert!(text.contains("検定比 1.117 (NG)"), "{text}");
+        let forces = [
+            [0.0, 0.0, 0.0, 0.0, 0.0, 60e6],
+            [0.0, 0.0, 0.0, 0.0, 0.0, 160e6],
+            [-77_000.0, 0.0, 0.0, 0.0, 0.0, 160e6],
+        ];
+        let texts = forces.map(|force| peak_check_text(&app, 0, force));
+        let [unchecked, bending_ng, compression_ng] = &texts;
+        assert!(
+            unchecked.contains("採用座屈長さ [mm]")
+                && unchecked.contains("検定不能: 上下非対称断面の横座屈・曲げねじり座屈")
+                && !unchecked.contains("検定比"),
+            "{unchecked}"
+        );
+        assert!(bending_ng.contains("検定比 1.073 (NG)"), "{bending_ng}");
+        assert!(
+            compression_ng.contains("検定比 1.117 (NG)"),
+            "{compression_ng}"
+        );
 
-        let zero_axial = [0.0, 0.0, 0.0, 0.0, 0.0, 60e6];
-        let zero_axial_text = peak_check_text(&app, 0, zero_axial);
-        assert!(zero_axial_text.contains("検定比"), "{zero_axial_text}");
+        app.core.model.steel_design_attrs[0].c_direct = Some(2.3);
+        assert_eq!(forces.map(|force| peak_check_text(&app, 0, force)), texts);
 
         app.core.model.steel_design_attrs[0].joint_flange_loss = 5.0;
-        app.core.model.steel_design_attrs[0].c_direct = Some(2.3);
-        let text = peak_check_text(&app, 0, compression);
-        assert!(
-            text.contains("検定不能: 上下非対称組立H形鋼柱は未算定です。断面欠損"),
-            "{text}"
-        );
-        assert!(!text.contains("検定比"), "{text}");
-        assert_eq!(peak_check_text(&app, 0, zero_axial), zero_axial_text);
+        for force in forces {
+            let text = peak_check_text(&app, 0, force);
+            assert!(
+                text.contains("検定不能: 上下非対称組立H形鋼柱は未算定です。断面欠損"),
+                "{text}"
+            );
+            assert!(!text.contains("検定比"), "{text}");
+        }
     }
 
     #[test]

@@ -135,11 +135,22 @@ fn column_and_girder_design_read_strong_shear_from_solved_member_forces() {
         )
         .unwrap();
         assert_eq!(results.member_checks.len(), 3, "{frame_use:?}");
-        for (_, _, outcome) in results.member_checks {
-            assert!(
-                matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains(UNCHECKED)),
-                "{frame_use:?} {outcome:?}"
-            );
+        for (_, pos, outcome) in results.member_checks {
+            if frame_use == FrameSectionUse::Column && pos < 1.0 {
+                let result = checked(outcome);
+                assert!(result.basis.contains(UNCHECKED), "{result:?}");
+                assert_eq!(result.components.len(), 1);
+                assert_eq!(result.components[0].kind, CheckKind::Bending);
+                // 固定端 Mz=1212 kN·m と上縁の独立断面係数 634601.730518 mm³。
+                let expected = 8.12706073823876 * (1.0 - pos);
+                assert!((result.ratio() - expected).abs() < 1e-12, "{result:?}");
+                assert!(!result.ok(), "{result:?}");
+            } else {
+                assert!(
+                    matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains(UNCHECKED)),
+                    "{frame_use:?} {outcome:?}"
+                );
+            }
         }
     }
 }
