@@ -485,6 +485,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC梁両端曲げ降伏時せん断力_Issue1497_確認記録.md](RC梁両端曲げ降伏時せん断力_Issue1497_確認記録.md) | 左右の曲げ終局耐力の釣合い、長期曲げによる上下の選択、反対側の比較、片持ち梁 | 🔶（原典と有限例を照合。支持条件の判定、方向別の梁端と付着は後続） |
 | [形状算定面積_Issue1565_確認記録.md](形状算定面積_Issue1565_確認記録.md) | 形状と記録面積の不一致、OVIKA・準備・軸剛性・自重の公開入口 | ✅（丸角鋼管の独立算術と公開入口のVerification） |
 | [上下非対称組立H形鋼柱_Issue1528_照合記録.md](上下非対称組立H形鋼柱_Issue1528_照合記録.md) | 圧縮・強軸曲げの上下縁照査、解析での局所曲げ符号、有限長での不適合保持 | 🔶（断面単独と有限解析例のVerification。座屈耐力・実験Validation未） |
 | [上下非対称組立H形鋼柱_Issue1544_時刻歴照合記録.md](上下非対称組立H形鋼柱_Issue1544_時刻歴照合記録.md) | 時刻歴の正負曲げ極値、同時刻内力による不適合・抽出限界、保存と再開 | 🔶（抽出した確定点のVerification。全時刻の適否・座屈耐力・実験Validation未） |
@@ -900,7 +901,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 24c | 固定対象のAI検討依頼と観測状態 | sepika-app | app/study/ai/operations/requests.rs、app/study/ai/operations/tests.rs | [Issue983の直接回帰索引](AI検討依頼_Issue983_確認記録.md#自動回帰と要素からの証拠索引) | #983 | 🔶（最終回帰・実機・fresh確認。CI・全UI条件は未確認） |
 | 950 | 鉄骨柱Kの端部・架構条件 | sepika-design-jp | steel/buckling.rs・member_design_check.rs | [国内原典と独立有限例](鉄骨柱K_独立釣合いと適用条件の確認記録.md)・tests/steel_column_k.rs、tests/steel_column_k_applicability.rs | 一次設計 | 🔶（限定照合。両軸直接指定。自動採用域全体と実験Validationは未確認） |
 | 948 | RC接合部の許容せん断 | sepika-design-jp | rc/joint.rs・joint_wiring/rc_joint.rs | [原画像とコードの対応](RC接合部許容せん断_Issue948_照合記録.md#コードとの対応と未確認項目)（今回新規の数値試験なし） | 一次設計 | 🔶（有効幅のみ限定照合、許容式全体・設計採用は保留） |
-| 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*`、Case2の証拠区分は[§6-c](終局検定_参照実装照合.md#6-c-cft-中柱長柱の-n-m-相互作用) | P7 | 🔶 |
+| 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp / sepika-job | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs、ultimate_demand.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*`、CFT Case2は[§6-c](終局検定_参照実装照合.md#6-c-cft-中柱長柱の-n-m-相互作用)、RC梁は[両端の釣合いと静的公開入口](RC梁両端曲げ降伏時せん断力_Issue1497_確認記録.md#公開入口の観測) | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
 | 26c | 非節点二次部材の数量 | sepika-design-jp / sepika-app / sepika-mcp / sepika-edit / sepika-io | quantity・quantity_view・summary・query・secondary・ovika | [Issue557の元6受入と実入口](非節点二次部材数量_Issue557_2026-10.md#元の受入6項目と実入口) | 横断 | 🔶（自動実入口・広域Verification成功、nativeGUI/transport/Validation未） |
 | 26d | 小梁偏心別の数量集約 | sepika-design-jp | quantity/{mod,tests}.rs | [Issue792の独立期待値と直接試験](小梁偏心別の数量集約_Issue792_2026-10.md#独立期待値と直接試験) | 数量 | 🔶（集約条件Verification、施工Validation未） |
