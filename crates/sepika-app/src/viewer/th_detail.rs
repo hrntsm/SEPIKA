@@ -20,7 +20,7 @@
 //! 依存しビューア側からは呼べないため、必要な部分だけ本ファイルへ複製する。
 //! 長期静的結果がある場合は地震時 QD / 柱メカニズムを部分配線する。
 //! 長期静的結果に対応するQ0（単純梁せん断）も用いる。
-//! 鋼継手欠損・一本部材グループ合成・BRB属性差し替えは対象外（概算検定）。
+//! 鋼継手欠損の断面性能への反映・一本部材グループ合成・BRB属性差し替えは対象外（概算検定）。
 
 use crate::app::App;
 use crate::theme;
@@ -650,7 +650,8 @@ fn draw_peak_check(
         egui::RichText::new(
             "簡易検定です。通常S部材の未入力軸の座屈長さは柱1.2L・大梁と一般ブレース1.0Lです。\
              実効座屈長さが既定値を超える場合は、支持条件に応じた長さを直接入力してください。CFT柱は両軸の直接入力が必要です。\
-             継手欠損・一本部材合成は考慮しません。\
+             継手・スカラップ欠損による断面性能の低減や一本部材合成は行いません。\
+             欠損を指定した上下非対称組立H形鋼柱の圧縮・強軸曲げは未算定です。\
              非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
              （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。\
              内力包絡では、異なる時刻の成分の組合せにより過大・過小評価が生じる場合があります。\
@@ -811,6 +812,20 @@ fn draw_peak_check(
         rebar_material: app.core.model.element_rebar_material(elem).cloned(),
         shear_rebar_material: app.core.model.element_shear_rebar_material(elem).cloned(),
         steel_material: app.core.model.element_steel_material(elem).cloned(),
+        steel_attr: attr
+            .filter(|_| {
+                structure == StructureKind::S
+                    && kind == MemberKind::Column
+                    && matches!(
+                        sec.shape,
+                        Some(sepika_core::section_shape::SectionShape::SteelBuiltH { .. })
+                    )
+            })
+            .map(|attr| sepika_core::model::SteelDesignAttr {
+                // 欠損の適用判定のために属性を渡すが、簡易検定のCは既存の自動算定を使う。
+                c_direct: None,
+                ..attr.clone()
+            }),
         beam_has_slab: kind == MemberKind::Girder
             && sepika_design_jp::beam_has_attached_slab(&app.core.model, elem),
         seismic_qd,
@@ -942,7 +957,8 @@ fn draw_labeled_outcome_row(ui: &mut egui::Ui, label: &str, outcome: &CheckOutco
                             ratio,
                             if ratio <= 1.0 { "OK" } else { "NG" }
                         ),
-                    );
+                    )
+                    .on_hover_text(&cr.basis);
                 }
                 if !evaluation.complete {
                     ui.colored_label(theme::GRAY_600, crate::app::INVALID_CHECK_COMPONENTS);
@@ -1011,6 +1027,47 @@ mod tests {
 
         let text = peak_check_text(&app, 0, [0.0, 0.0, 0.0, -100e6, 0.0, 0.0]);
         assert!(text.contains("検定不能: ねじりモーメントMx"), "{text}");
+    }
+
+    #[test]
+    fn asymmetric_built_h_peak_check_respects_section_loss_without_using_direct_c() {
+        use crate::app::steel_column_k_tests::input;
+        use sepika_core::section_shape::SectionShape;
+
+        let mut model = input::portal(1.0);
+        let former = &model.sections[0];
+        let mut section = SectionShape::SteelBuiltH {
+            height: 400.0,
+            upper_width: 80.0,
+            upper_thick: 12.0,
+            lower_width: 180.0,
+            lower_thick: 20.0,
+            web_thick: 8.0,
+        }
+        .to_section(former.id, "上下非対称組立H".into());
+        section.material = former.material;
+        section.frame_use = former.frame_use;
+        model.sections[0] = section;
+        let mut app = App::default();
+        assert!(app.load_model(model));
+
+        let compression = [-77_000.0, 0.0, 0.0, 0.0, 0.0, 160e6];
+        let text = peak_check_text(&app, 0, compression);
+        assert!(text.contains("検定比 1.117 (NG)"), "{text}");
+
+        let zero_axial = [0.0, 0.0, 0.0, 0.0, 0.0, 60e6];
+        let zero_axial_text = peak_check_text(&app, 0, zero_axial);
+        assert!(zero_axial_text.contains("検定比"), "{zero_axial_text}");
+
+        app.core.model.steel_design_attrs[0].joint_flange_loss = 5.0;
+        app.core.model.steel_design_attrs[0].c_direct = Some(2.3);
+        let text = peak_check_text(&app, 0, compression);
+        assert!(
+            text.contains("検定不能: 上下非対称組立H形鋼柱は未算定です。断面欠損"),
+            "{text}"
+        );
+        assert!(!text.contains("検定比"), "{text}");
+        assert_eq!(peak_check_text(&app, 0, zero_axial), zero_axial_text);
     }
 
     #[test]

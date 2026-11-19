@@ -6,13 +6,180 @@ use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
     SteelFbBasis,
 };
-use sepika_core::model::{Material, Section};
+use sepika_core::model::{Material, PropertyBasis, Section};
+use sepika_core::section_shape::{face_geometry::SectionGeometry, SectionShape};
 
 use super::section::{
     steel_c_factor, steel_fb_h, steel_fb_h_asd2019, steel_i_t, steel_p_lambda_b,
     steel_warping_constant,
 };
 use super::{nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, ShapeCategory};
+
+pub(super) fn asymmetric_built_h_shape(sec: &Section) -> Option<&SectionShape> {
+    let Some(
+        shape @ SectionShape::SteelBuiltH {
+            upper_width,
+            upper_thick,
+            lower_width,
+            lower_thick,
+            ..
+        },
+    ) = sec.shape.as_ref()
+    else {
+        return None;
+    };
+    (upper_width != lower_width || upper_thick != lower_thick).then_some(shape)
+}
+
+pub(super) fn asymmetric_built_h_section_reason(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    ctx: &DesignCtx,
+) -> Option<&'static str> {
+    if ![forces.n, forces.mz, forces.my, forces.qy, forces.qz]
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return Some("断面力が非有限です");
+    }
+    if ctx.steel_attr.as_ref().is_some_and(|attr| {
+        [
+            attr.joint_flange_loss,
+            attr.joint_web_loss,
+            attr.scallop_web_loss,
+        ]
+        .iter()
+        .any(|&loss| loss != 0.0)
+    }) {
+        return Some("断面欠損を控除した断面係数の適用条件が未確定です");
+    }
+    let basis = sec.property_basis;
+    [basis.area, basis.iy, basis.iz]
+        .iter()
+        .any(|&property| property != PropertyBasis::Shape)
+        .then_some("図心と断面性能の対応を確定するには、形状から求めた断面積と両軸の断面二次モーメントが必要です")
+}
+
+pub(super) fn asymmetric_built_h_combination_reasons(
+    forces: &MemberForcesAt,
+    ctx: &DesignCtx,
+) -> impl Iterator<Item = &'static str> {
+    let has_nonzero_length = [
+        ctx.length,
+        ctx.lk_y.unwrap_or(0.0),
+        ctx.lk_z.unwrap_or(0.0),
+        ctx.lb.unwrap_or(0.0),
+    ]
+    .iter()
+    .any(|&length| length != 0.0)
+        || ctx.steel_attr.as_ref().is_some_and(|attr| {
+            let (i, mid, j) = attr.lb_direct.unwrap_or_default();
+            [
+                i,
+                mid,
+                j,
+                attr.lk_y_direct.unwrap_or(0.0),
+                attr.lk_z_direct.unwrap_or(0.0),
+            ]
+            .iter()
+            .any(|&length| length != 0.0)
+        });
+    [
+        has_nonzero_length.then_some("上下非対称断面の横座屈・曲げねじり座屈の算定条件が未確定です"),
+        (forces.my != 0.0).then_some("弱軸曲げMyが同時に作用する場合の上下非対称断面の二軸曲げ照査は未算定です"),
+        (forces.qy != 0.0).then_some("強軸せん断Qyが同時に作用する場合の上下非対称断面のウェブ内同一点の組合せ応力度は未算定です"),
+    ]
+    .into_iter()
+    .flatten()
+}
+
+pub(super) fn check_asymmetric_built_h(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    shape: &SectionShape,
+    ctx: &DesignCtx,
+    f: f64,
+    h_combined_reason: Option<&'static str>,
+) -> CheckOutcome {
+    let check = || {
+        if let Some(reason) = asymmetric_built_h_section_reason(forces, sec, ctx) {
+            return Err(reason.into());
+        }
+        let [y_lower_mm, y_upper_mm] = SectionGeometry::of(shape)?.projected_range([1.0, 0.0])?;
+        let area_mm2 = shape.try_calc_area()?;
+        let inertia_mm4 = shape.try_calc_iy()?;
+        let z_upper_mm3 = inertia_mm4 / y_upper_mm;
+        let z_lower_mm3 = inertia_mm4 / -y_lower_mm;
+        let ft_mpa = steel_ft(f, ctx.term);
+        if ![area_mm2, z_upper_mm3, z_lower_mm3, ft_mpa]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0)
+        {
+            return Err("全断面積・上下の断面係数・許容応力度を有限な正値で算定できません".into());
+        }
+
+        let sigma_c_mpa = -forces.n / area_mm2;
+        let sigma_b_upper_mpa = -forces.mz / z_upper_mm3;
+        let sigma_b_lower_mpa = forces.mz / z_lower_mm3;
+        let (compression_side, tension_side, sigma_bc_mpa, sigma_bt_mpa) = if forces.mz > 0.0 {
+            ("上", "下", -sigma_b_upper_mpa, sigma_b_lower_mpa)
+        } else {
+            ("下", "上", -sigma_b_lower_mpa, sigma_b_upper_mpa)
+        };
+        // 有限長に対称断面の fc・fb を流用すると適合を誤判定しうるため、各許容値の上限で不適合だけを確定する。
+        let compression_ratio = sigma_c_mpa / ft_mpa + sigma_bc_mpa / ft_mpa;
+        let tension_ratio = (sigma_bt_mpa - sigma_c_mpa) / ft_mpa;
+        if !compression_ratio.is_finite() || !tension_ratio.is_finite() {
+            return Err("上下縁の応力度比を有限値で算定できません".into());
+        }
+        let ratio = compression_ratio.max(tension_ratio);
+
+        let unavailable: Vec<_> = asymmetric_built_h_combination_reasons(forces, ctx)
+            .chain(h_combined_reason)
+            .collect();
+        if !unavailable.is_empty() && ratio <= 1.0 {
+            return Ok(CheckOutcome::Skipped {
+                reason: unavailable.join("。"),
+            });
+        }
+
+        let term = match ctx.term {
+            LoadTerm::Long => "長期",
+            LoadTerm::Short => "短期",
+        };
+        let mut basis =
+            format!("鋼構造許容応力度設計規準 {term} 上下非対称組立H形鋼柱 式(6.1)・(6.2)");
+        let ratio_label = if unavailable.is_empty() {
+            basis.push_str("（座屈長さ0の断面照査）");
+            "軸曲げ比"
+        } else {
+            basis.push_str("（軸力・強軸曲げの照査による不適合）。");
+            basis.push_str(&unavailable.join("。"));
+            "軸曲げ比の下限"
+        };
+        Ok(CheckOutcome::Checked(CheckResult {
+            basis,
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::AxialBending,
+                ratio,
+                detail: format!(
+                    "A={area_mm2:.4} mm², Z上={z_upper_mm3:.4} mm³, Z下={z_lower_mm3:.4} mm³, \
+                     σc={sigma_c_mpa:.4} N/mm², 曲げの圧縮側={compression_side}、引張側={tension_side}, \
+                     σb上={sigma_b_upper_mpa:.4} N/mm², σb下={sigma_b_lower_mpa:.4} N/mm², \
+                     ft={ft_mpa:.4} N/mm², {ratio_label}（圧縮側）={compression_ratio:.4}, \
+                     {ratio_label}（引張側）={tension_ratio:.4}"
+                ),
+            }],
+        }))
+    };
+    check().unwrap_or_else(|reason: String| CheckOutcome::Skipped {
+        reason: match h_combined_reason {
+            Some(combined) => format!("上下非対称組立H形鋼柱は未算定です。{reason}。{combined}"),
+            None => format!("上下非対称組立H形鋼柱は未算定です。{reason}"),
+        },
+    })
+}
 
 /// 鉄骨造柱の断面検定（鋼構造設計規準）。
 ///
