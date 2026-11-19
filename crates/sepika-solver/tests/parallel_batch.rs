@@ -189,9 +189,11 @@ fn combination_entries_apply_one_effective_coefficient_per_response() {
         terms: vec![
             (case, f64::MAX),
             (irrelevant, 1.0),
+            (case, f64::MAX),
+            (case, 1.0),
             (case, -f64::MAX),
             (irrelevant, -1.0),
-            (case, 1.0),
+            (case, -f64::MAX),
         ],
     };
     let combos = std::slice::from_ref(&combo);

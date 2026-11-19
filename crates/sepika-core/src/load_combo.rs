@@ -1,5 +1,9 @@
+use num_rational::BigRational;
+use num_traits::ToPrimitive;
+use smallvec::SmallVec;
+
 use crate::ids::LoadCaseId;
-use crate::model::LoadCombination;
+use crate::model::{LoadCase, LoadCombination};
 
 /// 多雪区域組合せの積雪係数。標準外の直接入力は検定継続時間を自動確認しない。
 ///
@@ -193,33 +197,52 @@ pub fn case_design_state(kind: crate::model::LoadCaseKind) -> Result<DesignLoadS
     })
 }
 
-/// ケースごとの係数を保存順で加算し、ケースの初出順で返す。係数がゼロのケースも保持する。
-/// 参照欠落、係数または加算途中の非有限値は理由付きのエラーを返す。
+/// 同一ケースの係数を正確に合計し、最後に最近接の f64（中間値は偶数側）に丸める。
+/// 係数がゼロのケースも含めて初出順で返し、参照欠落や非有限の入力・結果はエラーにする。
 pub fn effective_combination_terms(
     combo: &LoadCombination,
-    cases: &[crate::model::LoadCase],
+    cases: &[LoadCase],
 ) -> Result<Vec<(LoadCaseId, f64)>, String> {
-    let mut coefficients: Vec<(LoadCaseId, f64)> = Vec::new();
+    let mut coefficients: Vec<(&LoadCase, SmallVec<[f64; 1]>)> = Vec::new();
     for (id, factor) in &combo.terms {
+        let case = cases
+            .iter()
+            .find(|case| case.id == *id)
+            .ok_or_else(|| format!("荷重ケース {} がありません", id.0))?;
         if !factor.is_finite() {
-            return Err(format!("荷重ケース {} の荷重組合せ係数が非有限です", id.0));
+            return Err(format!(
+                "荷重ケース「{}」（ID {}）の荷重組合せ係数が非有限です",
+                case.name, id.0
+            ));
         }
-        if !cases.iter().any(|c| c.id == *id) {
-            return Err(format!("荷重ケース {} がありません", id.0));
-        }
-        if let Some((_, coefficient)) = coefficients.iter_mut().find(|(case_id, _)| case_id == id) {
-            *coefficient += factor;
-            if !coefficient.is_finite() {
-                return Err(format!(
-                    "荷重ケース {} の荷重組合せ係数の合計が非有限です",
-                    id.0
-                ));
-            }
+        if let Some((_, factors)) = coefficients.iter_mut().find(|(case, _)| case.id == *id) {
+            factors.push(*factor);
         } else {
-            coefficients.push((*id, *factor));
+            coefficients.push((case, SmallVec::from_buf([*factor])));
         }
     }
-    Ok(coefficients)
+    coefficients
+        .into_iter()
+        .map(|(case, factors)| {
+            if let [factor] = factors.as_slice() {
+                return Ok((case.id, *factor));
+            }
+            let coefficient: BigRational = factors
+                .into_iter()
+                .map(|factor| BigRational::from_float(factor).expect("検証済みの有限な係数"))
+                .sum();
+            coefficient
+                .to_f64()
+                .filter(|factor| factor.is_finite())
+                .map(|factor| (case.id, factor))
+                .ok_or_else(|| {
+                    format!(
+                        "荷重ケース「{}」（ID {}）の荷重組合せ係数の合計が非有限です",
+                        case.name, case.id.0
+                    )
+                })
+        })
+        .collect()
 }
 
 /// 保存係数・荷重種別から検定状態を判定する。標準外係数・不足・混合作用は理由付き未判定。
@@ -228,7 +251,8 @@ pub fn combination_design_state(
     combo: &LoadCombination,
     cases: &[crate::model::LoadCase],
 ) -> Result<DesignLoadState, String> {
-    let mut terms = effective_combination_terms(combo, cases)?;
+    let mut terms = effective_combination_terms(combo, cases)
+        .map_err(|reason| format!("荷重組合せ「{}」: {reason}", combo.name))?;
     terms.sort_unstable_by_key(|(id, _)| *id);
     combination_design_state_for_terms(&terms, cases)
 }
@@ -318,8 +342,12 @@ pub fn ultimate_gravity_terms(
         .combinations
         .get(index)
         .ok_or("gravity_combination_missing: 選択組合せがありません")?;
-    let mut terms = effective_combination_terms(combo, &model.load_cases)
-        .map_err(|reason| format!("gravity_combination_unsupported: {reason}"))?;
+    let mut terms = effective_combination_terms(combo, &model.load_cases).map_err(|reason| {
+        format!(
+            "gravity_combination_unsupported: 荷重組合せ「{}」: {reason}",
+            combo.name
+        )
+    })?;
     terms.sort_unstable_by_key(|(id, _)| *id);
     let state = combination_design_state_for_terms(&terms, &model.load_cases)
         .map_err(|reason| format!("gravity_combination_unsupported: {reason}"))?;
@@ -541,6 +569,69 @@ mod state_tests {
         })
         .collect()
     }
+    #[test]
+    fn effective_terms_preserve_case_order_zero_references_and_round_once() {
+        let cases = cases();
+        let tiny = f64::from_bits(1);
+        let half_ulp = f64::EPSILON / 2.0;
+        let max = f64::MAX;
+        let combo = LoadCombination {
+            name: "係数集約".into(),
+            terms: vec![
+                (LoadCaseId(3), 0.0),
+                (LoadCaseId(2), max),
+                (LoadCaseId(1), 1.0),
+                (LoadCaseId(0), 1.0 + f64::EPSILON),
+                (LoadCaseId(2), tiny),
+                (LoadCaseId(1), half_ulp),
+                (LoadCaseId(0), half_ulp),
+                (LoadCaseId(2), -max),
+            ],
+        };
+        assert_eq!(
+            effective_combination_terms(&combo, &cases).unwrap(),
+            [
+                (LoadCaseId(3), 0.0),
+                (LoadCaseId(2), tiny),
+                (LoadCaseId(1), 1.0),
+                (LoadCaseId(0), 1.0 + 2.0 * f64::EPSILON),
+            ]
+        );
+    }
+
+    #[test]
+    fn ultimate_gravity_keeps_residual_coefficient_in_any_saved_order() {
+        let dead = LoadCaseId(0);
+        let live = LoadCaseId(1);
+        let max = f64::MAX;
+        let mut model = crate::model::Model {
+            load_cases: cases(),
+            ultimate_gravity_combination: Some(0),
+            ..Default::default()
+        };
+        for factors in [
+            [max, 1.0, -max],
+            [max, -max, 1.0],
+            [1.0, max, -max],
+            [1.0, -max, max],
+            [-max, 1.0, max],
+            [-max, max, 1.0],
+        ] {
+            model.combinations = vec![LoadCombination {
+                name: "長期架構用".into(),
+                terms: factors
+                    .map(|factor| (dead, factor))
+                    .into_iter()
+                    .chain([(live, 1.0)])
+                    .collect(),
+            }];
+            assert_eq!(
+                ultimate_gravity_terms(&model).unwrap(),
+                [(dead, 1.0), (live, 1.0)]
+            );
+        }
+    }
+
     #[test]
     fn load_state_uses_saved_terms_and_kind_after_named_roundtrip() {
         let cases = cases();

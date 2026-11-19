@@ -39,16 +39,23 @@ async fn saved_design_combines_case_coefficients_before_scaling_response() {
     let mut model = gravity_column_model();
     let dead = LoadCaseId(0);
     let live = LoadCaseId(1);
+    let additional_dead = LoadCaseId(2);
+    let mut additional_case = model.load_cases[0].clone();
+    additional_case.id = additional_dead;
+    additional_case.name = "追加固定荷重".into();
+    additional_case.nodal[0].values[2] = -100_000.0;
+    model.load_cases.push(additional_case);
     let repeated_terms = vec![
         (dead, f64::MAX),
-        (dead, -f64::MAX),
         (dead, 1.0),
+        (dead, -f64::MAX),
         (live, 1.0),
+        (additional_dead, 1.0),
     ];
     model.combinations = vec![
         LoadCombination {
             name: "基準G+P".into(),
-            terms: vec![(dead, 1.0), (live, 1.0)],
+            terms: vec![(dead, 1.0), (live, 1.0), (additional_dead, 1.0)],
         },
         LoadCombination {
             name: "重複G+P".into(),
@@ -77,13 +84,13 @@ async fn saved_design_combines_case_coefficients_before_scaling_response() {
         for component in ["n", "qy", "qz", "mx", "my", "mz"] {
             assert!(row[component].as_f64().is_some_and(f64::is_finite), "{row}");
         }
-        approx::assert_abs_diff_eq!(row["n"].as_f64().unwrap(), -500_000.0, epsilon = 1e-8);
+        approx::assert_abs_diff_eq!(row["n"].as_f64().unwrap(), -600_000.0, epsilon = 1e-8);
     }
     assert_eq!(forces, &baseline["member_forces"]);
     assert_eq!(repeated["load_target"]["terms"], serde_json::json!(repeated_terms));
     assert_eq!(
         repeated["load_target"]["gravity_reference_terms"],
-        serde_json::json!([[0, 1.0], [1, 1.0]])
+        serde_json::json!([[0, 1.0], [1, 1.0], [2, 1.0]])
     );
     assert_eq!(repeated["load_target"]["combination_index"], 1);
     assert_eq!(repeated["term"], "long");
@@ -103,11 +110,15 @@ async fn saved_design_reports_target_when_coefficient_or_response_cannot_be_eval
     let dead = LoadCaseId(0);
     let live = LoadCaseId(1);
     for (terms, failed_case, expected) in [
-        (vec![(dead, f64::INFINITY)], false, "荷重組合せ係数が非有限"),
         (
-            vec![(dead, f64::MAX), (dead, f64::MAX), (dead, -f64::MAX)],
+            vec![(dead, f64::INFINITY)],
             false,
-            "荷重組合せ係数の合計が非有限",
+            "荷重ケース「長期」（ID 0）の荷重組合せ係数が非有限",
+        ),
+        (
+            vec![(dead, f64::MAX), (dead, f64::MAX)],
+            false,
+            "荷重ケース「長期」（ID 0）の荷重組合せ係数の合計が非有限",
         ),
         (vec![(dead, f64::MAX)], false, "合成内力"),
         (vec![(LoadCaseId(99), 0.0)], false, "荷重ケース 99 がありません"),
