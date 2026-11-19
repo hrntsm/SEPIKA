@@ -45,7 +45,7 @@ fn signed_q0_gui_selected_combination_observes_independent_end_reactions() {
     let dead = app.core.model.load_cases[0].id;
     app.core.model.combinations[0]
         .terms
-        .splice(0..0, [(dead, f64::MAX), (dead, -f64::MAX)]);
+        .splice(0..1, [(dead, f64::MAX), (dead, 1.0), (dead, -f64::MAX)]);
     // D22を片側3本、d=539mm。両端Muによる需要は2×0.9×at×345×d/6000。
     let mechanism_n =
         2.0 * 0.9 * (3.0 * std::f64::consts::PI * 22.0_f64.powi(2) / 4.0) * 345.0 * 539.0 / 6000.0;

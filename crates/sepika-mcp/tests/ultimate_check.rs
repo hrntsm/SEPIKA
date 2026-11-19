@@ -123,7 +123,9 @@ fn ultimate_check_reports_snow_coefficient_and_uses_only_effective_terms() {
     snow_combination.terms = vec![
         (LoadCaseId(2), 0.7),
         (LoadCaseId(1), 0.5),
+        (LoadCaseId(0), f64::MAX),
         (LoadCaseId(0), 1.0),
+        (LoadCaseId(0), -f64::MAX),
         (LoadCaseId(1), 0.5),
     ];
     model.combinations.push(snow_combination);
