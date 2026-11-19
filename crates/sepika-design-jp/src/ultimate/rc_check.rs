@@ -21,7 +21,7 @@ use super::rc_shear::{
 use super::rc_shear_ductility::{rc_shear_vbu_ductility, RcVbuInput};
 use super::rc_strength::{biaxial_margin, column_axis_shear, column_mu, member_shear_strength};
 
-/// 1 部材分の終局検定結果。未検定の静的RC梁では、算定条件を確認できない値を NaN とする。
+/// 1 部材分の終局検定結果。未検定で算定条件を確認できない値は NaN とする。
 #[derive(Clone, Debug)]
 pub struct UltimateCheck {
     /// 部材 ID。
@@ -78,10 +78,10 @@ fn strong_tension_is_top(shape: &SectionShape, mz: f64, need_be: bool) -> bool {
     }
 }
 
-fn unchecked_beam(elem: ElemId, reason: &str) -> UltimateCheck {
+fn unchecked_member(elem: ElemId, kind: MemberKind, reason: &str) -> UltimateCheck {
     UltimateCheck {
         elem,
-        kind: MemberKind::Girder,
+        kind,
         mu: f64::NAN,
         qmu: f64::NAN,
         qsu: f64::NAN,
@@ -93,7 +93,11 @@ fn unchecked_beam(elem: ElemId, reason: &str) -> UltimateCheck {
         axial: None,
         ok: false,
         unchecked_reason: Some(reason.into()),
-        basis: "RC梁 終局検定".into(),
+        basis: match kind {
+            MemberKind::Column => "RC柱 終局検定",
+            _ => "RC梁 終局検定",
+        }
+        .into(),
         detail: reason.into(),
     }
 }
@@ -162,6 +166,7 @@ fn check_member(
         (SectionShape::RcBeamRect { rebar, .. }, UltimateDemandMode::StaticHinge) => Some(rebar),
         _ => None,
     };
+    let l_clear = clear_span(elem, model);
     if let Some(rebar) = static_beam_rebar {
         let reason = match demand.static_beam_bending {
             StaticBeamBending::Mixed => Some("ultimate_beam_mz_mixed_signs: 強軸曲げに正負が混在し、両端に適用する引張側を決定できません"),
@@ -173,22 +178,26 @@ fn check_member(
             if rebar.is_unset() || rebar.validate(b, d).is_err() {
                 return Err(invalid_rebar());
             }
-            return Ok(Some(unchecked_beam(elem.id, reason)));
+            let reason = l_clear.as_ref().err().map_or(reason, String::as_str);
+            return Ok(Some(unchecked_member(elem.id, kind, reason)));
         }
     }
-    let l_clear = clear_span(elem, model);
 
     let need_be = opts.shear_method == ShearMethod::Ductility;
     let tension_is_top = strong_tension_is_top(shape, demand.mz, need_be);
     let p = rc_bar_props(shape, RcDirection::Strong, tension_is_top, need_be)
         .ok_or_else(invalid_rebar)?;
+    let l_clear = match l_clear {
+        Ok(span) => span,
+        Err(reason) => return Ok(Some(unchecked_member(elem.id, kind, &reason))),
+    };
     if static_beam_rebar.is_some() && p.at <= 0.0 {
         let reason = if tension_is_top {
             "ultimate_beam_tension_rebar_missing: 上端引張の主筋がありません"
         } else {
             "ultimate_beam_tension_rebar_missing: 下端引張の主筋がありません"
         };
-        return Ok(Some(unchecked_beam(elem.id, reason)));
+        return Ok(Some(unchecked_member(elem.id, kind, reason)));
     }
     let jt = 7.0 * p.d_eff / 8.0;
     let at = p.at;
@@ -205,7 +214,7 @@ fn check_member(
         fc,
         pw,
         sigma_wy: opts.sigma_wy,
-        clear_span: l_clear.max(1.0),
+        clear_span: l_clear,
         sigma_0: 0.0,
     };
     let mu = match kind {
@@ -215,13 +224,7 @@ fn check_member(
 
     let qmu = match demand.shear {
         Some(qm) => opts.upper_strength_factor * qm.abs(),
-        None => {
-            if l_clear > 0.0 {
-                opts.upper_strength_factor * 2.0 * mu / l_clear
-            } else {
-                0.0
-            }
-        }
+        None => opts.upper_strength_factor * 2.0 * mu / l_clear,
     };
 
     let qsu = member_shear_strength(&p, fc, n_axial, l_clear, opts);
@@ -389,7 +392,7 @@ fn check_member(
                 qsu,
                 qbu,
                 detail: format!("Mu={mu:.0} N·mm, Qsu={qsu:.0} N, Qbu={qbu:.0} N。{reason}"),
-                ..unchecked_beam(elem.id, reason)
+                ..unchecked_member(elem.id, kind, reason)
             }));
         }
     }
@@ -426,7 +429,7 @@ fn check_member(
     };
     let detail = format!(
         "Mu={:.0} N·mm, Qmu={:.0} N, Qsu={:.0} N, Qbu={:.0} N, τbu={:.3} N/mm², \
-         Qsu/Qmu={:.3}, Qbu/Qmu={:.3}{}{}{}, pw={:.5}, jt={:.1} mm, L={:.0} mm, Rp={:.4}",
+         Qsu/Qmu={:.3}, Qbu/Qmu={:.3}{}{}{}, pw={:.5}, jt={:.1} mm, L={} mm, Rp={:.4}",
         mu,
         qmu,
         qsu,
@@ -463,7 +466,7 @@ fn check_member(
 }
 
 /// RC梁・柱の終局検定。必須需要・材料・配筋・寸法の不足は部材ID付きのエラーを返す。
-/// 静的RC梁の引張側・主筋や二軸せん断の適用条件が不足し、採用した方式で NG の判定がない部材は未検定理由を保持する。
+/// 内法長さを確認できない部材や、静的RC梁の引張側・主筋や二軸せん断の適用条件が不足して検定できない部材は、未検定理由を保持する。
 pub fn collect_rc_ultimate_checks(
     model: &Model,
     demand_by_elem: &[(ElemId, MemberDemand)],

@@ -841,18 +841,27 @@ fn actual_rc_beam_static_check_uses_bending_sign_after_gravity_superposition() {
 }
 
 #[cfg(feature = "gui")]
-fn ultimate_table_labels(app: &mut App) -> Vec<String> {
-    let output = egui::Context::default().run_ui(
+fn ultimate_table_frame(
+    ctx: &egui::Context,
+    app: &mut App,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(1800.0, 1200.0),
             )),
+            events,
             ..Default::default()
         },
         |ui| crate::ultimate_view::ultimate_table(ui, app),
-    );
-    output
+    )
+}
+
+#[cfg(feature = "gui")]
+fn ultimate_table_labels(app: &mut App) -> Vec<String> {
+    ultimate_table_frame(&egui::Context::default(), app, vec![])
         .shapes
         .iter()
         .filter_map(|shape| match &shape.shape {
@@ -860,6 +869,81 @@ fn ultimate_table_labels(app: &mut App) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+#[test]
+fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table() {
+    use sepika_core::model::{GirderTorsionMode, PanelZoneMode, ZoneSource};
+
+    let mut model = beam_model(&[3], &[3]);
+    model.girder_torsion = GirderTorsionMode::Keep;
+    model.panel_zone = PanelZoneMode::None;
+    model.nodes[1].coord = [0.0, 0.0, 200.0];
+    model.nodes.swap_remove(2);
+    model.nodes[2].id = NodeId(2);
+    model.nodes[2].coord = [6000.0, 0.0, 200.0];
+    model.elements[1].nodes = [NodeId(1), NodeId(2)].into_iter().collect();
+    for element in &mut model.elements {
+        element.rigid_zone.source_i = ZoneSource::Manual;
+        element.rigid_zone.source_j = ZoneSource::Manual;
+    }
+    model.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(2),
+        [0.0, 0.0, 0.0, 0.0, 10e6, 0.0],
+    ));
+    let mut app = solve_beam_model(model);
+    let checks = app.compute_ultimate_checks().unwrap();
+    let column = checks.iter().find(|check| check.elem == ElemId(0)).unwrap();
+    let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
+    assert_eq!(beam.unchecked_reason, None);
+    assert!(beam.qsu.is_finite());
+    assert!(!column.ok);
+    assert!(column.qsu.is_nan() && column.bond_margin.is_nan());
+    let reason = column.unchecked_reason.as_deref().unwrap();
+    for expected in [
+        "ultimate_clear_span_invalid:",
+        "材軸長 200 mm",
+        "j端フェース距離 300 mm",
+        "member=0",
+    ] {
+        assert!(reason.contains(expected), "{reason}");
+    }
+    #[cfg(feature = "gui")]
+    {
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        ultimate_table_frame(&ctx, &mut app, vec![]);
+        let settled = ultimate_table_frame(&ctx, &mut app, vec![]);
+        let unchecked_column = settled
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "未検定" => {
+                    Some(text.galley.rect.translate(text.pos.to_vec2()).center())
+                }
+                _ => None,
+            })
+            .expect("未検定の部材行");
+        ultimate_table_frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(unchecked_column)],
+        );
+        let mut output = ultimate_table_frame(&ctx, &mut app, vec![]);
+        for _ in 0..2 {
+            output = ultimate_table_frame(&ctx, &mut app, vec![]);
+        }
+        assert!(
+            output.shapes.iter().any(|shape| matches!(
+                &shape.shape,
+                egui::Shape::Text(text) if text.galley.text().contains(reason)
+            )),
+            "{reason}"
+        );
+    }
 }
 
 #[test]

@@ -186,7 +186,10 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     ui.colored_label(crate::theme::ERROR_RED, format!("NG {} 本", ng));
                 }
                 if unchecked > 0 {
-                    ui.colored_label(crate::theme::UI_MUTED, format!("未検定 {} 本", unchecked));
+                    ui.colored_label(crate::theme::UI_MUTED, format!("未検定 {} 本", unchecked))
+                        .on_hover_text(
+                            "各部材の「未検定」にカーソルを合わせると理由を確認できます。",
+                        );
                 }
                 if ng == 0 && unchecked == 0 {
                     ui.colored_label(

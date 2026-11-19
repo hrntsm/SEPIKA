@@ -54,16 +54,12 @@ pub(super) fn column_axis_shear(
         fc,
         pw: props.pw,
         sigma_wy: opts.sigma_wy,
-        clear_span: l_clear.max(1.0),
+        clear_span: l_clear,
         sigma_0: 0.0,
     };
     let qsu = member_shear_strength(props, fc, n_axial, l_clear, opts);
     let mu = rc_column_mu_simple(&cap, props.ag, n_axial);
-    let qmu = if l_clear > 0.0 {
-        opts.upper_strength_factor * 2.0 * mu / l_clear
-    } else {
-        0.0
-    };
+    let qmu = opts.upper_strength_factor * 2.0 * mu / l_clear;
     (qsu, qmu)
 }
 
