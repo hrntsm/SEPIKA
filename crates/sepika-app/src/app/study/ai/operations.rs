@@ -1258,9 +1258,14 @@ impl App {
             .chain((0..bundle.combos.len()).map(StaticKey::Combo))
             .collect();
         for key in keys {
+            let source = comparison::projection::displacement_source(&app, key);
             for node in &app.core.model.nodes {
                 for component in 0..3 {
-                    match comparison::projection::displacement(&app,key,node.id,component) {
+                    let result = source
+                        .as_ref()
+                        .map_err(Clone::clone)
+                        .and_then(|source| source.at(node.id, component));
+                    match result {
                         Ok((value,reference))=>rows.push(json!({"kind":"displacement","case":key,"node":node.id,"direction":(["X","Y","Z"][component]),"value":value,"unit":"mm","reference":reference})),
                         Err(reason)=>rows.push(json!({"kind":"displacement","case":key,"node":node.id,"direction":(["X","Y","Z"][component]),"value":null,"unit":"mm","reason":reason})),
                     }

@@ -294,15 +294,23 @@ impl EditCommand for EditSectionShape {
         new_sec.rebar_material = old.rebar_material;
         new_sec.shear_rebar_material = old.shear_rebar_material;
         new_sec.steel_material = old.steel_material;
+        if let Err(reason) = self.new_shape.validate_rebar_size_materials(
+            old.rebar_material
+                .and_then(|id| model.materials.get(id.index())),
+            old.shear_rebar_material
+                .and_then(|id| model.materials.get(id.index())),
+        ) {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         let input = model.stb_strengths.clone();
         use sepika_core::section_shape::SectionShape;
         let entered = match &self.new_shape {
             SectionShape::RcBeamRect { rebar, .. } | SectionShape::SrcBeamRect { rebar, .. } => {
                 !rebar.is_unset()
                     || [
-                        rebar.main_dia,
+                        rebar.main_dia.designation_or_diameter_mm(),
                         rebar.cover,
-                        rebar.stirrup.dia,
+                        rebar.stirrup.dia.designation_or_diameter_mm(),
                         rebar.stirrup.pitch,
                     ]
                     .iter()
@@ -313,9 +321,9 @@ impl EditCommand for EditSectionShape {
             | SectionShape::SrcColumnRect { rebar, .. } => {
                 !rebar.is_unset()
                     || [
-                        rebar.main_dia,
+                        rebar.main_dia.designation_or_diameter_mm(),
                         rebar.cover,
-                        rebar.hoop.dia,
+                        rebar.hoop.dia.designation_or_diameter_mm(),
                         rebar.hoop.pitch,
                     ]
                     .iter()
@@ -326,9 +334,9 @@ impl EditCommand for EditSectionShape {
             SectionShape::RcColumnCircle { rebar, .. } => {
                 !rebar.is_unset()
                     || [
-                        rebar.main_dia,
+                        rebar.main_dia.designation_or_diameter_mm(),
                         rebar.cover,
-                        rebar.hoop.dia,
+                        rebar.hoop.dia.designation_or_diameter_mm(),
                         rebar.hoop.pitch,
                     ]
                     .iter()

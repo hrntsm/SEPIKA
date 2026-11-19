@@ -6,12 +6,12 @@ fn model() -> Model {
         b: 400.,
         d: 600.,
         rebar: RcBeamRebar {
-            main_dia: 25.,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.),
             top: vec![3],
             bottom: vec![3],
             cover: 50.,
             stirrup: BeamStirrup {
-                dia: 10.,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.),
                 pitch: 150.,
                 legs: 2,
             },
@@ -687,12 +687,12 @@ fn 柱控除の異なる材種は既存区間を保持し共通床区間では�
         b: 600.,
         d: 600.,
         rebar: RcRectColumnRebar {
-            main_dia: 22.,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.),
             x: vec![],
             y: vec![],
             cover: 40.,
             hoop: RectColumnHoop {
-                dia: 10.,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.),
                 pitch: 100.,
                 legs_x: 2,
                 legs_y: 2,

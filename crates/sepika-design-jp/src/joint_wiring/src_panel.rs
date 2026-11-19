@@ -58,7 +58,9 @@ pub(super) fn check_src_panel(
                 return;
             }
         }
-        let col_dt = rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0;
+        let col_dt = rebar.cover
+            + rebar.hoop.dia.designation_or_diameter_mm()
+            + rebar.main_dia.designation_or_diameter_mm() / 2.0;
         let fc = col.mat.fc.unwrap_or(0.0);
         let m_cd = (col.sec.width - 2.0 * col_dt).max(0.0);
         let s_cd = (steel_height - steel_flange_thick).max(0.0);
@@ -79,7 +81,10 @@ pub(super) fn check_src_panel(
                 .max(0.0),
                 Some(SectionShape::RcColumnRect { ref rebar, .. })
                 | Some(SectionShape::SrcColumnRect { ref rebar, .. }) => (beam0.sec.depth
-                    - 2.0 * (rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0))
+                    - 2.0
+                        * (rebar.cover
+                            + rebar.hoop.dia.designation_or_diameter_mm()
+                            + rebar.main_dia.designation_or_diameter_mm() / 2.0))
                     .max(0.0),
                 _ => 0.8 * beam0.sec.depth,
             }

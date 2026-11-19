@@ -1,7 +1,7 @@
 //! 断面形状から全塑性計算用のファイバ/バネ配置を生成する。
 
 use sepika_core::error::RebarGeometryError;
-use sepika_core::section_shape::{concrete_young_modulus, one_bar_area, RebarPoint, SectionShape};
+use sepika_core::section_shape::{concrete_young_modulus, RebarPoint, RebarSize, SectionShape};
 
 use super::types::{FiberRegion, PlasticFiber, StrengthParams, YieldModelKind};
 
@@ -449,11 +449,11 @@ fn mesh_root_fillets(
 fn rebar_fibers_from_points(
     fibers: &mut Vec<PlasticFiber>,
     points: &[RebarPoint],
-    main_dia: f64,
+    main_dia: RebarSize,
     fy: f64,
     young: f64,
 ) {
-    let a = one_bar_area(main_dia);
+    let a = main_dia.area_mm2();
     for p in points {
         fibers.push(PlasticFiber {
             y: p.x,

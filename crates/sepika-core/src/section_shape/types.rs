@@ -138,6 +138,46 @@ pub enum SectionShape {
 }
 
 impl SectionShape {
+    /// RC・SRC梁柱の主筋とせん断補強筋の順に返す。対象外の形状は `None`。
+    pub fn rebar_sizes(&self) -> Option<(super::RebarSize, super::RebarSize)> {
+        match self {
+            Self::RcBeamRect { rebar, .. } | Self::SrcBeamRect { rebar, .. } => {
+                Some((rebar.main_dia, rebar.stirrup.dia))
+            }
+            Self::RcColumnRect { rebar, .. } | Self::SrcColumnRect { rebar, .. } => {
+                Some((rebar.main_dia, rebar.hoop.dia))
+            }
+            Self::RcColumnCircle { rebar, .. } => Some((rebar.main_dia, rebar.hoop.dia)),
+            _ => None,
+        }
+    }
+
+    /// 標準異形鉄筋の呼び名を丸鋼材種と組み合わせた場合は理由を返す。
+    pub fn validate_rebar_size_materials(
+        &self,
+        main: Option<&crate::model::Material>,
+        shear: Option<&crate::model::Material>,
+    ) -> Result<(), String> {
+        if let Some((main_size, shear_size)) = self.rebar_sizes() {
+            for (role, size, material) in [
+                ("主筋", main_size, main),
+                ("せん断補強筋", shear_size, shear),
+            ] {
+                if let super::RebarSize::Standard(size) = size {
+                    if let Some(material) =
+                        material.filter(|m| matches!(m.name.trim(), "SR235" | "SR295"))
+                    {
+                        return Err(format!(
+                            "{role}の標準異形鉄筋 {size} に丸鋼材種 {} が指定されています。",
+                            material.name
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// 組立H形鋼の上下フランジで幅または厚さが異なる場合に true を返す。
     pub fn is_asymmetric_built_h(&self) -> bool {
         matches!(
@@ -255,7 +295,7 @@ impl SectionShape {
             Self::SrcColumnRect { rebar, .. } => (rebar.bar_positions(b, d)?, rebar.main_dia),
             _ => unreachable!(),
         };
-        let radius = dia / 2.0;
+        let radius = dia.designation_or_diameter_mm() / 2.0;
         for (i, p) in points.iter().enumerate() {
             if p.x.abs() + radius > b / 2.0 || p.y.abs() + radius > d / 2.0 {
                 return Err(RebarGeometryError::SectionGeometry(format!(
@@ -323,20 +363,19 @@ impl SectionShape {
     }
 }
 
-/// 主筋 1 本あたりの断面積 `[mm²]`。
+/// 円断面の径 [mm] から断面積 `[mm²]`。
 pub fn one_bar_area(dia: f64) -> f64 {
     let r = dia / 2.0;
     std::f64::consts::PI * r * r
 }
 
-/// 主筋セットの総断面積 `[mm²]`。
 /// RC 梁の実配筋。
 ///
-/// `main_dia`: 正の有限な主筋径 `[mm]`（全段共通）。`top`/`bottom`: 上端筋・下端筋の
+/// `main_dia`: 主筋の標準呼び名または正の有限な数値径 `[mm]`（全段共通）。`top`/`bottom`: 上端筋・下端筋の
 /// かぶり側から内側へ数えた段別本数。`cover`: かぶり `[mm]`。`stirrup`: あばら筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcBeamRebar {
-    pub main_dia: f64,
+    pub main_dia: super::RebarSize,
     pub top: Vec<u32>,
     pub bottom: Vec<u32>,
     pub cover: f64,
@@ -352,12 +391,12 @@ impl RcBeamRebar {
 
 /// RC 矩形柱の実配筋。
 ///
-/// `main_dia`: 正の有限な主筋径 `[mm]`（全段共通）。`x`/`y`: X 方向・Y 方向の段別本数。
+/// `main_dia`: 主筋の標準呼び名または正の有限な数値径 `[mm]`（全段共通）。`x`/`y`: X 方向・Y 方向の段別本数。
 /// 各段は断面中心対称な 2 本の配筋線を 1 段とし、本数は片側 1 線あたり。
 /// `cover`: かぶり `[mm]`。`hoop`: 帯筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcRectColumnRebar {
-    pub main_dia: f64,
+    pub main_dia: super::RebarSize,
     pub x: Vec<u32>,
     pub y: Vec<u32>,
     pub cover: f64,
@@ -373,11 +412,11 @@ impl RcRectColumnRebar {
 
 /// RC 円形柱の実配筋。
 ///
-/// `main_dia`: 正の有限な主筋径 `[mm]`（呼び名への丸めなし）。`count`: 主筋総本数（円周上へ等間隔配置）。
+/// `main_dia`: 主筋の標準呼び名または正の有限な数値径 `[mm]`。`count`: 主筋総本数（円周上へ等間隔配置）。
 /// `cover`: かぶり `[mm]`。`hoop`: 帯筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcCircleColumnRebar {
-    pub main_dia: f64,
+    pub main_dia: super::RebarSize,
     pub count: u32,
     pub cover: f64,
     pub hoop: CircleColumnHoop,
@@ -392,20 +431,20 @@ impl RcCircleColumnRebar {
 
 /// RC 梁のあばら筋。
 ///
-/// `dia`: 径 `[mm]`。`pitch`: 間隔 `[mm]`。`legs`: 脚数。
+/// `dia`: 標準呼び名または数値径 `[mm]`。`pitch`: 間隔 `[mm]`。`legs`: 脚数。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BeamStirrup {
-    pub dia: f64,
+    pub dia: super::RebarSize,
     pub pitch: f64,
     pub legs: u32,
 }
 
 /// RC 矩形柱の帯筋。
 ///
-/// `dia`: 径 `[mm]`。`pitch`: 間隔 `[mm]`。`legs_x`/`legs_y`: X 方向・Y 方向の脚数。
+/// `dia`: 標準呼び名または数値径 `[mm]`。`pitch`: 間隔 `[mm]`。`legs_x`/`legs_y`: X 方向・Y 方向の脚数。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RectColumnHoop {
-    pub dia: f64,
+    pub dia: super::RebarSize,
     pub pitch: f64,
     pub legs_x: u32,
     pub legs_y: u32,
@@ -413,10 +452,10 @@ pub struct RectColumnHoop {
 
 /// RC 円形柱の帯筋。
 ///
-/// `dia`: 径 `[mm]`。`pitch`: 間隔 `[mm]`。
+/// `dia`: 標準呼び名または数値径 `[mm]`。`pitch`: 間隔 `[mm]`。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CircleColumnHoop {
-    pub dia: f64,
+    pub dia: super::RebarSize,
     pub pitch: f64,
 }
 

@@ -654,12 +654,12 @@ mod tests {
             b: 600.0,
             d: 600.0,
             rebar: sepika_core::section_shape::RcBeamRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 top: vec![8],
                 bottom: vec![8],
                 cover: 50.0,
                 stirrup: sepika_core::section_shape::BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },

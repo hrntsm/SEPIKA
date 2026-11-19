@@ -790,12 +790,12 @@ pub(crate) fn rc_girder_section(id: SectionId, name: &str) -> Section {
             b: 600.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 top: vec![8],
                 bottom: vec![8],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },
@@ -1818,11 +1818,11 @@ fn circular_post_model() -> sepika_core::model::Model {
     let mut section = SectionShape::RcColumnCircle {
         d: 400.0,
         rebar: RcCircleColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             count: 0,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         },
@@ -2956,12 +2956,12 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             top: vec![],
             bottom: vec![],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
                 legs: 0,
             },
@@ -4725,5 +4725,61 @@ fn xyz_brace_mcp_edit_changes_result_identity_and_rejects_invalid_geometry_atomi
     let restored: sepika_core::model::Model =
         serde_json::from_value(serde_json::to_value(&state.model).unwrap()).unwrap();
     assert_eq!(restored.elements[0].end_offsets_mm, offsets);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn rebar_size_mcp_edit_undo_and_ovika_preserve_standard_and_numeric_inputs() {
+    use sepika_core::section_shape::{RebarSize, StandardRebar};
+
+    let directory = std::env::temp_dir().join(format!("sepika1584-rebar-{}", std::process::id()));
+    let mut state = ServerState::with_fs_store(rc_column_model(), &directory).unwrap();
+    let edit = |main: serde_json::Value, hoop: serde_json::Value| {
+        serde_json::json!({
+            "command": "EditSectionShape",
+            "section": 0,
+            "frame_use": "Column",
+            "new_shape": {"RcColumnRect": {
+                "b": 600.0, "d": 600.0,
+                "rebar": {
+                    "main_dia": main, "x": [8], "y": [8], "cover": 40.0,
+                    "hoop": {"dia": hoop, "pitch": 100.0, "legs_x": 2, "legs_y": 2}
+                }
+            }}
+        })
+    };
+    let numeric = edit(serde_json::json!(19.0), serde_json::json!(10.0));
+    let standard = edit(serde_json::json!("D19"), serde_json::json!("D10"));
+    let unsupported = edit(serde_json::json!("D20"), serde_json::json!("D10"));
+    assert!(apply_edit(&mut state, &unsupported).is_err());
+
+    assert!(apply_edit(&mut state, &numeric).unwrap().applied);
+    let baseline = sepika_io::results::model_input_sha256(&state.model).unwrap();
+    assert!(apply_edit(&mut state, &standard).unwrap().applied);
+    let standard_fingerprint = sepika_io::results::model_input_sha256(&state.model).unwrap();
+    assert_ne!(baseline, standard_fingerprint);
+    assert!(sepika_io::stbridge::export_stbridge(&state.model)
+        .unwrap_err()
+        .to_string()
+        .contains("標準異形鉄筋"));
+
+    for expected in [
+        (
+            RebarSize::Standard(StandardRebar::D19),
+            RebarSize::Standard(StandardRebar::D10),
+        ),
+        (RebarSize::DiameterMm(19.0), RebarSize::DiameterMm(10.0)),
+    ] {
+        let path = directory.join("project.ovika");
+        sepika_io::ovika::save_ovika(&path, &state.model, Default::default()).unwrap();
+        let saved = sepika_io::ovika::load_ovika(&path).unwrap();
+        let shape = saved.model.sections[0].shape.as_ref().unwrap();
+        assert_eq!(shape.rebar_sizes(), Some(expected));
+        assert_eq!(
+            sepika_io::results::model_input_sha256(&saved.model).unwrap(),
+            sepika_io::results::model_input_sha256(&state.model).unwrap(),
+        );
+        state.undo.undo(&mut state.model);
+    }
     std::fs::remove_dir_all(directory).unwrap();
 }

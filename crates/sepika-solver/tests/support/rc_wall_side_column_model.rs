@@ -69,12 +69,12 @@ pub fn expanded_model() -> Model {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -85,12 +85,12 @@ pub fn expanded_model() -> Model {
         b: 600.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4],
             bottom: vec![4],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },

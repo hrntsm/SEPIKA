@@ -831,12 +831,12 @@ mod tests {
             b,
             d,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![3],
                 y: vec![2],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -855,12 +855,12 @@ mod tests {
             b: 300.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 0.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 x: vec![],
                 y: vec![],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 0.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 100.0,
                     legs_x: 0,
                     legs_y: 0,
@@ -906,12 +906,12 @@ mod tests {
             b: 300.0,
             d: 600.0,
             rebar: sepika_core::section_shape::RcBeamRebar {
-                main_dia: 0.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 40.0,
                 stirrup: sepika_core::section_shape::BeamStirrup {
-                    dia: 0.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 100.0,
                     legs: 0,
                 },
@@ -1003,7 +1003,7 @@ mod tests {
         {
             *steel_height = 485.0;
             *steel_width = 200.0;
-            rebar.main_dia = 20.0;
+            rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(20.0);
             rebar.x = vec![2];
             rebar.y = vec![2];
         }

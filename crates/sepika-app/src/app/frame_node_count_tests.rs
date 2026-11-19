@@ -283,12 +283,12 @@ fn frame_two_nodes_ovika_roundtrip_keeps_independent_quantity_and_support_axis()
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![4],
             bottom: vec![4],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 200.0,
                 legs: 2,
             },

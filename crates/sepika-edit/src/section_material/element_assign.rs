@@ -100,6 +100,14 @@ impl EditCommand for SetSectionMaterial {
                 "CFT の鋼管材料には鋼材を指定してください".into(),
             ));
         }
+        if let Some(shape) = &model.sections[idx].shape {
+            let material = self.material.and_then(|id| model.materials.get(id.index()));
+            let main_rebar = material.filter(|_| self.role == SectionMaterialRole::Rebar);
+            let shear_rebar = material.filter(|_| self.role == SectionMaterialRole::ShearRebar);
+            if let Err(reason) = shape.validate_rebar_size_materials(main_rebar, shear_rebar) {
+                return Box::new(crate::RejectedEdit(reason));
+            }
+        }
         let main_steel = self.role == SectionMaterialRole::Main
             && model.sections[idx]
                 .shape

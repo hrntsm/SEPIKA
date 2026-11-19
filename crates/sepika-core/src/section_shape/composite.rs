@@ -390,12 +390,12 @@ mod src_tests {
             b: 300.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 0.0,
+                main_dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                 x: vec![],
                 y: vec![],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 0.0,
+                    dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 100.0,
                     legs_x: 0,
                     legs_y: 0,

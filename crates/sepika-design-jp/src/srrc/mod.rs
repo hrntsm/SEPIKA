@@ -334,6 +334,14 @@ impl DesignCheck for SrcDesign {
                     .to_string(),
             };
         }
+        if let Err(reason) = shape.validate_rebar_size_materials(
+            ctx.rebar_material.as_ref(),
+            ctx.shear_rebar_material.as_ref(),
+        ) {
+            return CheckOutcome::Skipped {
+                reason: format!("SRC検定: {reason}"),
+            };
+        }
         if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
             ctx.shear_rebar_material.as_ref(),
         ) {
@@ -415,7 +423,7 @@ impl DesignCheck for SrcDesign {
                     ctx,
                     props,
                     props_other,
-                    rebar.main_dia,
+                    rebar.main_dia.designation_or_diameter_mm(),
                     *steel_height,
                     *steel_width,
                     *steel_web_thick,
@@ -478,8 +486,8 @@ impl DesignCheck for SrcDesign {
                     at_perp_z,
                     at_perp_y,
                     ag,
-                    rebar.main_dia,
-                    rebar.main_dia,
+                    rebar.main_dia.designation_or_diameter_mm(),
+                    rebar.main_dia.designation_or_diameter_mm(),
                     *steel_height,
                     *steel_width,
                     *steel_web_thick,

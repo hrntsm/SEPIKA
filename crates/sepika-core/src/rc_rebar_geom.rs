@@ -2,7 +2,7 @@
 
 use crate::error::RebarGeometryError;
 use crate::section_shape::{
-    one_bar_area, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, RebarPoint,
+    RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, RebarPoint, RebarSize,
 };
 
 /// RC 矩形断面の辺。
@@ -44,8 +44,8 @@ fn center_spacing_mm(dia: f64) -> f64 {
 }
 
 /// 段別本数の面積 [mm²]。未入力なら空。
-fn layer_areas(counts: &[u32], main_dia: f64) -> Vec<f64> {
-    let area = one_bar_area(main_dia);
+fn layer_areas(counts: &[u32], main_dia: RebarSize) -> Vec<f64> {
+    let area = main_dia.area_mm2();
     counts.iter().map(|&c| c as f64 * area).collect()
 }
 
@@ -66,12 +66,23 @@ fn centroid_from_edge(counts: &[u32], main_dia: f64, cover: f64, stirrup_dia: f6
 }
 
 /// 段別本数から一面の主筋諸元を作る。
-fn beam_side(counts: &[u32], main_dia: f64, cover: f64, stirrup_dia: f64, d: f64) -> SteelSide {
+fn beam_side(
+    counts: &[u32],
+    main_dia: RebarSize,
+    cover: f64,
+    stirrup_dia: f64,
+    d: f64,
+) -> SteelSide {
     let count: usize = counts.iter().map(|&c| c as usize).sum();
-    let centroid_from_edge_mm = centroid_from_edge(counts, main_dia, cover, stirrup_dia);
+    let centroid_from_edge_mm = centroid_from_edge(
+        counts,
+        main_dia.designation_or_diameter_mm(),
+        cover,
+        stirrup_dia,
+    );
     SteelSide {
         count,
-        area_mm2: count as f64 * one_bar_area(main_dia),
+        area_mm2: count as f64 * main_dia.area_mm2(),
         centroid_from_edge_mm,
         effective_depth_mm: d - centroid_from_edge_mm,
     }
@@ -211,9 +222,9 @@ impl RcBeamRebar {
         }
         check_positive("b", b)?;
         check_positive("d", d)?;
-        check_positive("main_dia", self.main_dia)?;
+        check_positive("main_dia", self.main_dia.designation_or_diameter_mm())?;
         check_non_negative("cover", self.cover)?;
-        check_non_negative("stirrup_dia", self.stirrup.dia)?;
+        check_non_negative("stirrup_dia", self.stirrup.dia.designation_or_diameter_mm())?;
 
         for (layer, &count) in self.top.iter().enumerate() {
             if count == 0 {
@@ -234,8 +245,10 @@ impl RcBeamRebar {
             }
         }
 
-        let k0 = self.cover + self.stirrup.dia + self.main_dia / 2.0;
-        let s = center_spacing_mm(self.main_dia);
+        let k0 = self.cover
+            + self.stirrup.dia.designation_or_diameter_mm()
+            + self.main_dia.designation_or_diameter_mm() / 2.0;
+        let s = center_spacing_mm(self.main_dia.designation_or_diameter_mm());
         let half = b / 2.0 - k0;
         if half <= 0.0 {
             return Err(RebarGeometryError::OutOfBounds);
@@ -271,8 +284,10 @@ impl RcBeamRebar {
 impl RcBeamRebar {
     /// 最内段の中心までの縁距離 [mm] を (上端, 下端) 順に返す。配筋が空の側は None。
     pub fn innermost_bar_distances_from_edges_mm(&self) -> (Option<f64>, Option<f64>) {
-        let first_mm = self.cover + self.stirrup.dia + self.main_dia / 2.0;
-        let spacing_mm = center_spacing_mm(self.main_dia);
+        let first_mm = self.cover
+            + self.stirrup.dia.designation_or_diameter_mm()
+            + self.main_dia.designation_or_diameter_mm() / 2.0;
+        let spacing_mm = center_spacing_mm(self.main_dia.designation_or_diameter_mm());
         let inner = |layers: &[u32]| {
             layers
                 .len()
@@ -304,12 +319,22 @@ impl RcBeamRebar {
 
     /// 上端筋の縁からの重心距離 dt `[mm]`。主筋がなければ 0。
     pub fn top_centroid_from_edge(&self) -> f64 {
-        centroid_from_edge(&self.top, self.main_dia, self.cover, self.stirrup.dia)
+        centroid_from_edge(
+            &self.top,
+            self.main_dia.designation_or_diameter_mm(),
+            self.cover,
+            self.stirrup.dia.designation_or_diameter_mm(),
+        )
     }
 
     /// 下端筋の縁からの重心距離 dt `[mm]`。主筋がなければ 0。
     pub fn bottom_centroid_from_edge(&self) -> f64 {
-        centroid_from_edge(&self.bottom, self.main_dia, self.cover, self.stirrup.dia)
+        centroid_from_edge(
+            &self.bottom,
+            self.main_dia.designation_or_diameter_mm(),
+            self.cover,
+            self.stirrup.dia.designation_or_diameter_mm(),
+        )
     }
 
     /// 上端筋側の有効せい d − dt `[mm]`。
@@ -330,13 +355,25 @@ impl RcBeamRebar {
             .chain(self.bottom.iter())
             .map(|&c| c as usize)
             .sum();
-        count as f64 * one_bar_area(self.main_dia)
+        count as f64 * self.main_dia.area_mm2()
     }
 
     /// 指定した引張側の曲げ検討用諸元。`tension_is_top=true` は上端側を引張とする。
     pub fn bending_steel(&self, d: f64, tension_is_top: bool) -> BeamBendingSteel {
-        let top = beam_side(&self.top, self.main_dia, self.cover, self.stirrup.dia, d);
-        let bottom = beam_side(&self.bottom, self.main_dia, self.cover, self.stirrup.dia, d);
+        let top = beam_side(
+            &self.top,
+            self.main_dia,
+            self.cover,
+            self.stirrup.dia.designation_or_diameter_mm(),
+            d,
+        );
+        let bottom = beam_side(
+            &self.bottom,
+            self.main_dia,
+            self.cover,
+            self.stirrup.dia.designation_or_diameter_mm(),
+            d,
+        );
         if tension_is_top {
             BeamBendingSteel {
                 tension: top,
@@ -352,7 +389,7 @@ impl RcBeamRebar {
 
     /// あばら筋 1 組（`legs` 本）の断面積 Aw `[mm²]`。
     pub fn aw_mm2(&self) -> f64 {
-        self.stirrup.legs as f64 * one_bar_area(self.stirrup.dia)
+        self.stirrup.legs as f64 * self.stirrup.dia.area_mm2()
     }
 
     /// あばら筋比 pw。`pitch<=0` または `b<=0` のときは 0。
@@ -394,12 +431,14 @@ impl RcRectColumnRebar {
         }
         check_positive("b", b)?;
         check_positive("d", d)?;
-        check_positive("main_dia", self.main_dia)?;
+        check_positive("main_dia", self.main_dia.designation_or_diameter_mm())?;
         check_non_negative("cover", self.cover)?;
-        check_non_negative("hoop_dia", self.hoop.dia)?;
+        check_non_negative("hoop_dia", self.hoop.dia.designation_or_diameter_mm())?;
 
-        let k0 = self.cover + self.hoop.dia + self.main_dia / 2.0;
-        let s = center_spacing_mm(self.main_dia);
+        let k0 = self.cover
+            + self.hoop.dia.designation_or_diameter_mm()
+            + self.main_dia.designation_or_diameter_mm() / 2.0;
+        let s = center_spacing_mm(self.main_dia.designation_or_diameter_mm());
 
         let y_inner = d / 2.0 - k0 - (nx - 1) as f64 * s;
         let x_inner = b / 2.0 - k0 - (ny - 1) as f64 * s;
@@ -496,27 +535,27 @@ impl RcRectColumnRebar {
         let sx: usize = self.x.iter().map(|&c| c as usize).sum();
         let sy: usize = self.y.iter().map(|&c| c as usize).sum();
         let unique = (2 * sx + 2 * sy).saturating_sub(4 * nx * ny);
-        unique as f64 * one_bar_area(self.main_dia)
+        unique as f64 * self.main_dia.area_mm2()
     }
 
     /// X 方向段に載る主筋の総面積 `[mm²]`（`2・Σx・A1`）。未入力なら 0。
     pub fn x_direction_area_mm2(&self) -> f64 {
-        2.0 * self.x.iter().map(|&c| c as f64).sum::<f64>() * one_bar_area(self.main_dia)
+        2.0 * self.x.iter().map(|&c| c as f64).sum::<f64>() * self.main_dia.area_mm2()
     }
 
     /// Y 方向段に載る主筋の総面積 `[mm²]`（`2・Σy・A1`）。未入力なら 0。
     pub fn y_direction_area_mm2(&self) -> f64 {
-        2.0 * self.y.iter().map(|&c| c as f64).sum::<f64>() * one_bar_area(self.main_dia)
+        2.0 * self.y.iter().map(|&c| c as f64).sum::<f64>() * self.main_dia.area_mm2()
     }
 
     /// X 方向の帯筋 1 組（`legs_x` 本）の断面積 Aw `[mm²]`。
     pub fn aw_x_mm2(&self) -> f64 {
-        self.hoop.legs_x as f64 * one_bar_area(self.hoop.dia)
+        self.hoop.legs_x as f64 * self.hoop.dia.area_mm2()
     }
 
     /// Y 方向の帯筋 1 組（`legs_y` 本）の断面積 Aw `[mm²]`。
     pub fn aw_y_mm2(&self) -> f64 {
-        self.hoop.legs_y as f64 * one_bar_area(self.hoop.dia)
+        self.hoop.legs_y as f64 * self.hoop.dia.area_mm2()
     }
 
     /// 指定した辺の最外段 1 列の主筋諸元。未入力（`is_unset`）なら全項目 0。
@@ -537,10 +576,12 @@ impl RcRectColumnRebar {
             RectEdge::Left | RectEdge::Right => (&self.y, b),
         };
         let count = counts.first().copied().unwrap_or(0) as usize;
-        let k0 = self.cover + self.hoop.dia + self.main_dia / 2.0;
+        let k0 = self.cover
+            + self.hoop.dia.designation_or_diameter_mm()
+            + self.main_dia.designation_or_diameter_mm() / 2.0;
         SteelSide {
             count,
-            area_mm2: count as f64 * one_bar_area(self.main_dia),
+            area_mm2: count as f64 * self.main_dia.area_mm2(),
             centroid_from_edge_mm: k0,
             effective_depth_mm: depth - k0,
         }
@@ -566,18 +607,24 @@ impl RcCircleColumnRebar {
             return Ok(Vec::new());
         }
         check_positive("d", d)?;
-        check_positive("main_dia", self.main_dia)?;
+        check_positive("main_dia", self.main_dia.designation_or_diameter_mm())?;
         check_non_negative("cover", self.cover)?;
-        check_non_negative("hoop_dia", self.hoop.dia)?;
+        check_non_negative("hoop_dia", self.hoop.dia.designation_or_diameter_mm())?;
 
-        let r = d / 2.0 - self.cover - self.hoop.dia - self.main_dia / 2.0;
+        let r = d / 2.0
+            - self.cover
+            - self.hoop.dia.designation_or_diameter_mm()
+            - self.main_dia.designation_or_diameter_mm() / 2.0;
         if r <= 0.0 {
             return Err(RebarGeometryError::OutOfBounds);
         }
         let n = self.count;
         if n >= 2 {
             let chord = 2.0 * r * (std::f64::consts::PI / n as f64).sin();
-            if !spacing_ok(chord, center_spacing_mm(self.main_dia)) {
+            if !spacing_ok(
+                chord,
+                center_spacing_mm(self.main_dia.designation_or_diameter_mm()),
+            ) {
                 return Err(RebarGeometryError::SpacingOrSymmetry);
             }
         }
@@ -602,7 +649,7 @@ impl RcCircleColumnRebar {
 
     /// 主筋総面積 `[mm²]`。
     pub fn total_main_area(&self) -> f64 {
-        self.count as f64 * one_bar_area(self.main_dia)
+        self.count as f64 * self.main_dia.area_mm2()
     }
 
     /// 等価正方形断面の辺長 `[mm]`（`sqrt(π・d²/4)`）。`d<=0` は 0。
@@ -626,7 +673,9 @@ impl RcCircleColumnRebar {
         if self.is_unset() {
             return 0.0;
         }
-        let k0 = self.cover + self.hoop.dia + self.main_dia / 2.0;
+        let k0 = self.cover
+            + self.hoop.dia.designation_or_diameter_mm()
+            + self.main_dia.designation_or_diameter_mm() / 2.0;
         (self.equivalent_square_side_mm(d) - k0).max(0.0)
     }
 
@@ -635,7 +684,7 @@ impl RcCircleColumnRebar {
         if self.is_unset() {
             return 0.0;
         }
-        2.0 * one_bar_area(self.hoop.dia)
+        2.0 * self.hoop.dia.area_mm2()
     }
 
     /// 円形帯筋比 pw = Aw/(等価正方形の幅・ピッチ)。`width_mm<=0` または `pitch<=0`、未入力なら 0。
@@ -651,16 +700,17 @@ impl RcCircleColumnRebar {
 mod tests {
     use super::*;
     use crate::error::RebarGeometryError;
+    use crate::section_shape::one_bar_area;
     use crate::section_shape::{BeamStirrup, CircleColumnHoop, RectColumnHoop};
 
     fn beam(top: Vec<u32>, bottom: Vec<u32>) -> RcBeamRebar {
         RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             top,
             bottom,
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -669,12 +719,12 @@ mod tests {
 
     fn rect_column(x: Vec<u32>, y: Vec<u32>) -> RcRectColumnRebar {
         RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(25.0),
             x,
             y,
             cover: 50.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 3,
                 legs_y: 3,
@@ -684,11 +734,11 @@ mod tests {
 
     fn circle(count: u32) -> RcCircleColumnRebar {
         RcCircleColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             count,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         }
@@ -845,12 +895,12 @@ mod tests {
             Err(RebarGeometryError::LayerCollision)
         ));
         let tight = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![8],
             y: vec![2],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 3,
                 legs_y: 3,
@@ -960,13 +1010,13 @@ mod tests {
     #[test]
     fn test_rect_column_section_properties() {
         let hoop = || RectColumnHoop {
-            dia: 10.0,
+            dia: crate::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 3,
         };
         let r = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![3],
             y: vec![3],
             cover: 40.0,
@@ -980,7 +1030,7 @@ mod tests {
         assert!((r.aw_y_mm2() - 3.0 * a10).abs() < 1e-12);
 
         let multi = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4, 2],
             y: vec![4],
             cover: 40.0,
@@ -994,12 +1044,12 @@ mod tests {
     #[test]
     fn test_rect_column_direction_areas() {
         let r = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4, 2],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 3,
@@ -1014,12 +1064,12 @@ mod tests {
     #[test]
     fn test_rect_column_edge_steel() {
         let r = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4, 2],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 3,

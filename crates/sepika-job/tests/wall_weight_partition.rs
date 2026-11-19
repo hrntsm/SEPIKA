@@ -725,12 +725,12 @@ fn asymmetric_real_faces_separate_wall_midpoint_from_floor_midpoint() {
             b: 400.0,
             d: depth,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![4],
                 y: vec![4],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,

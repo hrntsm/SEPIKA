@@ -11,7 +11,6 @@ use super::rc_props::RcBarProps;
 use super::rc_shear::{rc_shear_qsu_plastic, RcPlasticShearInput};
 use super::rc_shear_ductility::{rc_shear_vu_ductility, RcDuctilityShearInput};
 use sepika_core::rc_capacity::{rc_column_mu_simple, RcCapacityInput};
-use sepika_core::section_shape::one_bar_area;
 
 /// 2 軸相互作用の余裕度 `1/((rx)^α + (ry)^α)^(1/α)`（採用応力）。
 ///
@@ -103,7 +102,7 @@ fn member_vu_ductility(
     opts: &UltimateShearOptions,
 ) -> f64 {
     let s = props.shear_pitch;
-    let aw = props.shear_legs as f64 * one_bar_area(props.shear_dia);
+    let aw = props.shear_legs as f64 * props.shear_dia.area_mm2();
     let pwe = if s > 0.0 { aw / (props.be * s) } else { 0.0 };
     rc_shear_vu_ductility(&RcDuctilityShearInput {
         b: props.b_dir,

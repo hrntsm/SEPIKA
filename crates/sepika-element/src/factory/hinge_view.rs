@@ -422,12 +422,12 @@ mod tests {
             b: 400.0,
             d: 700.0,
             rebar: RcBeamRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 top: vec![4],
                 bottom: vec![4],
                 cover: 50.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },
@@ -440,12 +440,12 @@ mod tests {
             b: 400.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![4],
                 y: vec![4],
                 cover: 50.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -459,12 +459,12 @@ mod tests {
             b: 500.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![4],
                 y: vec![4],
                 cover: 50.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,

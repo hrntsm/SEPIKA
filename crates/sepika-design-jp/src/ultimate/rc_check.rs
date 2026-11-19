@@ -8,7 +8,7 @@ use crate::MemberKind;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementData, Material, Model, Section};
 use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
-use sepika_core::section_shape::{one_bar_area, SectionShape};
+use sepika_core::section_shape::SectionShape;
 
 use super::options::{
     MemberDemand, ShearMethod, StaticBeamBending, UltimateDemandMode, UltimateShearOptions,
@@ -134,6 +134,12 @@ fn check_member(
             elem.id.0
         ));
     }
+    if let Err(reason) = shape.validate_rebar_size_materials(
+        model.element_rebar_material(elem),
+        model.element_shear_rebar_material(elem),
+    ) {
+        return Err(format!("部材 ID {} の{reason}", elem.id.0));
+    }
     if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
         model.element_shear_rebar_material(elem),
     ) {
@@ -240,16 +246,16 @@ fn check_member(
         let tau_bu = bond_reliable_strength_deformed(&BondStrengthInput {
             fc,
             b: p.b_dir,
-            db1: p.main_dia,
+            db1: p.main_dia.designation_or_diameter_mm(),
             n_bars: p.n_tension,
             cover_side: p.cover,
             cover_bottom: p.cover,
-            hoop_area: p.shear_legs as f64 * one_bar_area(p.shear_dia),
+            hoop_area: p.shear_legs as f64 * p.shear_dia.area_mm2(),
             hoop_pitch: p.shear_pitch,
             pw: p.pw,
             top_bar: p.top_bar,
         });
-        let sum_phi = p.n_tension as f64 * std::f64::consts::PI * p.main_dia;
+        let sum_phi = p.n_tension as f64 * p.main_dia.perimeter_mm();
         let qbu = match opts.shear_method {
             ShearMethod::Plastic => rc_shear_qbu_bond(&RcBondSplitInput {
                 b: p.b_dir,

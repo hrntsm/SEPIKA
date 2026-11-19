@@ -551,12 +551,12 @@ fn wall_with_columns_model() -> Model {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4],
             y: vec![4],
             cover: 50.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -591,12 +591,12 @@ fn wall_with_columns_model() -> Model {
         b: 600.0,
         d: 600.0,
         rebar: sepika_core::section_shape::RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4],
             bottom: vec![4],
             cover: 50.0,
             stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -720,24 +720,24 @@ fn rc_cross_joint_ultimate_is_skipped() {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop};
 
     let col_rebar = |count: u32, dia: f64| RcRectColumnRebar {
-        main_dia: dia,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(dia),
         x: vec![count / 2],
         y: vec![count / 2],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
         },
     };
     let beam_rebar = |top: Vec<u32>, bottom: Vec<u32>, dia: f64| RcBeamRebar {
-        main_dia: dia,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(dia),
         top,
         bottom,
         cover: 40.0,
         stirrup: BeamStirrup {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs: 2,
         },
@@ -1013,12 +1013,12 @@ fn rc_cross_joint_new_types_emits_checks() {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![4, 2],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -1029,12 +1029,12 @@ fn rc_cross_joint_new_types_emits_checks() {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![4, 2],
             bottom: vec![3, 2],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1107,12 +1107,12 @@ fn rc_joint_with_invalid_beam_rebar_is_skipped() {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![4],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -1123,12 +1123,12 @@ fn rc_joint_with_invalid_beam_rebar_is_skipped() {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![0],
             bottom: vec![6],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1188,12 +1188,12 @@ fn src_cross_panel_new_types_emits_check() {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![4, 2],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -1208,12 +1208,12 @@ fn src_cross_panel_new_types_emits_check() {
         b: 400.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![4, 2],
             bottom: vec![3, 2],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1596,7 +1596,7 @@ fn mixed_side_column_concrete_and_asymmetric_sections_are_outside_reference_scop
                 section.material = Some(MaterialId(2));
             } else if let Some(SectionShape::RcColumnRect { b, d, rebar }) = &mut section.shape {
                 if change == "主筋" {
-                    rebar.main_dia = 10.0;
+                    rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(10.0);
                 } else {
                     *b = 700.0;
                     *d = 700.0;
@@ -3012,12 +3012,12 @@ fn panel_585_orthogonal_nonsteel_beam_keeps_joint_wide_gate_and_invalid_lower_di
         root_r: Some(0.0),
     };
     let rebar = RcBeamRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         top: vec![4],
         bottom: vec![4],
         cover: 40.0,
         stirrup: BeamStirrup {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs: 2,
         },

@@ -24,12 +24,12 @@ fn model() -> Model {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![3],
             bottom: vec![3],
             cover: 50.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 150.0,
                 legs: 2,
             },

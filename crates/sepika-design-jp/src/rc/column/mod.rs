@@ -91,7 +91,8 @@ pub(crate) fn column_check(
             .expect("円形柱の断面諸元を算定できる形状のみ来る");
         let info =
             rebar_info_from_shape(shape, true).expect("円形柱の鉄筋情報を算定できる形状のみ来る");
-        let ft = rebar_allowable_tension(grade, info.main_dia, long_term);
+        let ft =
+            rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term);
 
         let gross_area = std::f64::consts::PI * d_full * d_full / 4.0;
         let as_total = info.main_area;
@@ -215,7 +216,8 @@ pub(crate) fn column_check(
             .expect("矩形柱の弱軸断面諸元を算定できる形状のみ来る");
         let info =
             rebar_info_from_shape(shape, true).expect("矩形柱の鉄筋情報を算定できる形状のみ来る");
-        let ft_z = rebar_allowable_tension(grade, info.main_dia, long_term);
+        let ft_z =
+            rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term);
         let ft_y = ft_z;
 
         let gross_area = b * d;
@@ -421,12 +423,12 @@ mod tests {
             b: 800.0,
             d: 800.0,
             rebar: RcRectColumnRebar {
-                main_dia: 28.6,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(28.6),
                 x: vec![6],
                 y: vec![4],
                 cover: 65.0 - 6.35 - 28.6 / 2.0,
                 hoop: RectColumnHoop {
-                    dia: 6.35,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(6.35),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -725,8 +727,10 @@ mod tests {
             false,
         );
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
-        let ft = rebar_allowable_tension("SD345", rebar.main_dia, false);
-        let ft_axial = rebar_allowable_tension("SD345", rebar.main_dia, false);
+        let ft =
+            rebar_allowable_tension("SD345", rebar.main_dia.designation_or_diameter_mm(), false);
+        let ft_axial =
+            rebar_allowable_tension("SD345", rebar.main_dia.designation_or_diameter_mm(), false);
         let gross_area = sec.width * sec.depth;
         let as_total = rebar.total_main_area();
         let na = column_axial_capacity(gross_area, as_total, allow.fc, ft_axial, allow.n_ratio);

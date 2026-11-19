@@ -69,12 +69,12 @@ fn rc_section_shape() -> Section {
         b: 400.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![6],
             bottom: vec![4],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 200.0,
                 legs: 2,
             },
@@ -522,12 +522,12 @@ fn test_issue_when_rebar_geometry_is_invalid() {
         b: 400.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4, 2],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -578,12 +578,12 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: bar_dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(bar_dia),
             top: vec![3],
             bottom: vec![3],
             cover: 60.0 - 10.0 - bar_dia / 2.0,
             stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -858,12 +858,12 @@ fn explicit_rc_reference_fixture() -> Model {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: bar_dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(bar_dia),
             top: vec![3],
             bottom: vec![3],
             cover: 60.0 - 10.0 - bar_dia / 2.0,
             stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },

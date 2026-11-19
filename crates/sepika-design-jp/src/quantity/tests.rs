@@ -146,12 +146,12 @@ fn line_elem(id: u32, n0: u32, n1: u32, sec: u32) -> ElementData {
 
 fn rc_beam_rebar() -> RcBeamRebar {
     RcBeamRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         top: vec![4],
         bottom: vec![4],
         cover: 40.0,
         stirrup: BeamStirrup {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 200.0,
             legs: 2,
         },
@@ -204,12 +204,12 @@ fn rebar_material(id: u32) -> Material {
 
 fn rc_column_section(id: u32) -> Section {
     let rebar = RcRectColumnRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         x: vec![4],
         y: vec![3],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 13.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -1086,12 +1086,12 @@ fn test_new_rc_beam_rebar_uses_layer_counts() {
             b: 400.0,
             d: 800.0,
             rebar: RcBeamRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 top: vec![4, 2],
                 bottom: vec![3, 2],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 200.0,
                     legs: 2,
                 },
@@ -1143,12 +1143,12 @@ fn test_new_rc_rect_column_rebar_uses_layer_counts() {
             b: 700.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 x: vec![3],
                 y: vec![3],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -1195,11 +1195,11 @@ fn test_new_rc_circle_column_rebar_uses_total_count() {
         SectionShape::RcColumnCircle {
             d: 700.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 count: 8,
                 cover: 40.0,
                 hoop: CircleColumnHoop {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 100.0,
                 },
             },
@@ -1246,12 +1246,12 @@ fn test_new_rc_rebar_unset_yields_zero_without_panic() {
             b: 400.0,
             d: 800.0,
             rebar: RcBeamRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 200.0,
                     legs: 2,
                 },
@@ -1264,12 +1264,12 @@ fn test_new_rc_rebar_unset_yields_zero_without_panic() {
             b: 700.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 x: vec![],
                 y: vec![],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -1292,11 +1292,11 @@ fn test_new_rc_rebar_unset_yields_zero_without_panic() {
         SectionShape::RcColumnCircle {
             d: 700.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 count: 0,
                 cover: 40.0,
                 hoop: CircleColumnHoop {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 100.0,
                 },
             },
@@ -1318,11 +1318,11 @@ fn circular_rc_post_model(end_mm: [f64; 3]) -> Model {
         SectionShape::RcColumnCircle {
             d: 400.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 count: 0,
                 cover: 40.0,
                 hoop: CircleColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                 },
             },

@@ -416,12 +416,12 @@ mod ratio_contract_tests {
             b: 300.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(main_dia),
                 top: vec![3],
                 bottom: vec![3],
                 cover: 60.0 - hoop_dia - main_dia / 2.0,
                 stirrup: BeamStirrup {
-                    dia: hoop_dia,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(hoop_dia),
                     pitch: 100.0,
                     legs: 2,
                 },

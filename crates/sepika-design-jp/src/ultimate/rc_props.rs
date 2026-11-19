@@ -4,8 +4,9 @@
 //! 検定ロジックへ共通の [`RcBarProps`] を渡す。
 
 use sepika_core::rc_rebar_geom::RectEdge;
+use sepika_core::section_shape::RebarSize;
 use sepika_core::section_shape::{
-    one_bar_area, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, SectionShape,
+    RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, SectionShape,
 };
 
 /// RC 検定の検討方向。
@@ -33,10 +34,10 @@ pub(crate) struct RcBarProps {
     pub ag: f64,
     pub d_eff: f64,
     pub dt: f64,
-    pub main_dia: f64,
+    pub main_dia: RebarSize,
     pub n_tension: u32,
     pub cover: f64,
-    pub shear_dia: f64,
+    pub shear_dia: RebarSize,
     pub shear_pitch: f64,
     pub shear_legs: u32,
     pub pw: f64,
@@ -120,7 +121,11 @@ fn rc_beam_rect_props(
     if direction == RcDirection::Weak {
         return None;
     }
-    if b <= 0.0 || d <= 0.0 || rebar.is_unset() || rebar.main_dia <= 0.0 {
+    if b <= 0.0
+        || d <= 0.0
+        || rebar.is_unset()
+        || rebar.main_dia.designation_or_diameter_mm() <= 0.0
+    {
         return None;
     }
     rebar.validate(b, d).ok()?;
@@ -132,7 +137,7 @@ fn rc_beam_rect_props(
     let (be, n_s) = ductility_be_ns_from(
         b,
         rebar.cover,
-        rebar.stirrup.dia,
+        rebar.stirrup.dia.designation_or_diameter_mm(),
         rebar.stirrup.legs,
         needs_be,
     );
@@ -166,7 +171,11 @@ fn rc_column_rect_props(
     tension_is_top: bool,
     needs_be: bool,
 ) -> Option<RcBarProps> {
-    if b <= 0.0 || d <= 0.0 || rebar.is_unset() || rebar.main_dia <= 0.0 {
+    if b <= 0.0
+        || d <= 0.0
+        || rebar.is_unset()
+        || rebar.main_dia.designation_or_diameter_mm() <= 0.0
+    {
         return None;
     }
     rebar.validate(b, d).ok()?;
@@ -188,7 +197,13 @@ fn rc_column_rect_props(
     if steel.effective_depth_mm <= 0.0 {
         return None;
     }
-    let (be, n_s) = ductility_be_ns_from(b_dir, rebar.cover, rebar.hoop.dia, shear_legs, needs_be);
+    let (be, n_s) = ductility_be_ns_from(
+        b_dir,
+        rebar.cover,
+        rebar.hoop.dia.designation_or_diameter_mm(),
+        shear_legs,
+        needs_be,
+    );
     Some(RcBarProps {
         b_dir,
         d_dir,
@@ -218,7 +233,7 @@ fn rc_column_circle_props(
     rebar: &RcCircleColumnRebar,
     needs_be: bool,
 ) -> Option<RcBarProps> {
-    if d <= 0.0 || rebar.is_unset() || rebar.main_dia <= 0.0 {
+    if d <= 0.0 || rebar.is_unset() || rebar.main_dia.designation_or_diameter_mm() <= 0.0 {
         return None;
     }
     rebar.validate(d).ok()?;
@@ -230,10 +245,18 @@ fn rc_column_circle_props(
     let cover = rebar.cover;
     let shear_dia = rebar.hoop.dia;
     let main_dia = rebar.main_dia;
-    let dt = cover + shear_dia + main_dia / 2.0;
+    let dt = cover
+        + shear_dia.designation_or_diameter_mm()
+        + main_dia.designation_or_diameter_mm() / 2.0;
     let at = rebar.equivalent_tension_area_mm2();
-    let n_tension = (at / one_bar_area(main_dia)).round() as u32;
-    let (be, n_s) = ductility_be_ns_from(side, cover, shear_dia, 2, needs_be);
+    let n_tension = (f64::from(rebar.count) / 4.0).round() as u32;
+    let (be, n_s) = ductility_be_ns_from(
+        side,
+        cover,
+        shear_dia.designation_or_diameter_mm(),
+        2,
+        needs_be,
+    );
     Some(RcBarProps {
         b_dir: side,
         d_dir: side,
@@ -258,19 +281,19 @@ fn rc_column_circle_props(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sepika_core::section_shape::{BeamStirrup, CircleColumnHoop, RectColumnHoop};
+    use sepika_core::section_shape::{one_bar_area, BeamStirrup, CircleColumnHoop, RectColumnHoop};
 
     fn beam_shape() -> SectionShape {
         SectionShape::RcBeamRect {
             b: 400.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 top: vec![4, 2],
                 bottom: vec![3, 2],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },
@@ -283,12 +306,12 @@ mod tests {
             b: 600.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![4, 2],
                 y: vec![4],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 3,
@@ -301,11 +324,11 @@ mod tests {
         SectionShape::RcColumnCircle {
             d: 600.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 count: 8,
                 cover: 40.0,
                 hoop: CircleColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                 },
             },
@@ -413,10 +436,13 @@ mod tests {
         let circle = |pitch: f64| SectionShape::RcColumnCircle {
             d: 600.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 count: 8,
                 cover: 40.0,
-                hoop: CircleColumnHoop { dia: 10.0, pitch },
+                hoop: CircleColumnHoop {
+                    dia: RebarSize::DiameterMm(10.0),
+                    pitch,
+                },
             },
         };
         let with_hoop = circle(100.0);
@@ -446,12 +472,12 @@ mod tests {
             b: 400.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },
@@ -463,12 +489,12 @@ mod tests {
             b: 600.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![],
                 y: vec![],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 3,
@@ -480,11 +506,11 @@ mod tests {
         let circle = SectionShape::RcColumnCircle {
             d: 600.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 count: 0,
                 cover: 40.0,
                 hoop: CircleColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                 },
             },
@@ -499,12 +525,12 @@ mod tests {
             b: 600.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![4, 2],
                 y: vec![3],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 3,

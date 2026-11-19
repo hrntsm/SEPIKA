@@ -1391,12 +1391,12 @@ mod tests {
             b: 400.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 x: vec![2],
                 y: vec![2],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,

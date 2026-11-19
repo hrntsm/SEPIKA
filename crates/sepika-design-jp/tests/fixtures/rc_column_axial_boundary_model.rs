@@ -7,11 +7,11 @@ pub fn column_model(circle: bool, axial_load_n: f64) -> Model {
         SectionShape::RcColumnCircle {
             d: 600.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 19.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
                 count: 8,
                 cover: 40.0,
                 hoop: CircleColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                 },
             },
@@ -21,12 +21,12 @@ pub fn column_model(circle: bool, axial_load_n: f64) -> Model {
             b: 400.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 19.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
                 x: vec![3],
                 y: vec![3],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,

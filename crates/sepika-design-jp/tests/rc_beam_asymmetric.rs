@@ -355,7 +355,9 @@ fn standard_asymmetric_beam_is_unchecked_at_the_previous_passing_moment() {
         .iter()
         .find(|c| c.name == "two_one_shallow" && !c.negative)
         .unwrap();
-    assert!(sepika_core::material_grade::REBAR_NOMINAL_SIZES.contains(&case.main_dia_mm));
+    assert!(sepika_core::section_shape::StandardRebar::ALL
+        .iter()
+        .any(|size| size.designation_number() == case.main_dia_mm));
     assert!(sepika_core::material_grade::MAIN_REBAR_GRADES.contains(&"SD345"));
     assert!(45e6 / case.ma_t.min(case.expected[0][2]) < 1.0);
     assert!(

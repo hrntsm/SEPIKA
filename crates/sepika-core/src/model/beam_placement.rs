@@ -627,12 +627,12 @@ mod tests {
 
     fn rebar() -> RcBeamRebar {
         RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![3],
             bottom: vec![3],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 150.0,
                 legs: 2,
             },

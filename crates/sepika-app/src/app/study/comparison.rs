@@ -405,6 +405,9 @@ pub(in crate::app::study) mod projection {
             .as_ref()
             .ok_or("検定の静的応力源が欠落しています")?;
         let case = case_label(case_key, &evidence.input.model);
+        let reference_source = app
+            .recorded_result_reference_source(ResultInputKey::Design)
+            .ok();
         let mut rows = Vec::new();
         let mut add = |target: Option<ReferenceTarget>,
                        position: Option<f64>,
@@ -449,17 +452,18 @@ pub(in crate::app::study) mod projection {
                 _ => Vec::new(),
             };
             let reference = target.and_then(|target| {
-                app.recorded_target_result_reference(
-                    ResultInputKey::Design,
-                    target,
-                    DisplayConditions {
-                        position,
-                        component: Some(key.clone()),
-                        unit: Some("無次元".into()),
-                        ..Default::default()
-                    },
-                )
-                .ok()
+                reference_source
+                    .as_ref()?
+                    .reference(
+                        target,
+                        DisplayConditions {
+                            position,
+                            component: Some(key.clone()),
+                            unit: Some("無次元".into()),
+                            ..Default::default()
+                        },
+                    )
+                    .ok()
             });
             rows.push(CheckRow {
                 key: format!("{case}/{key}"),
@@ -521,6 +525,7 @@ pub(in crate::app::study) mod projection {
         Ok(rows)
     }
 
+    #[cfg(any(feature = "gui", test))]
     pub(in crate::app::study) fn displacement(
         app: &App,
         key: StaticKey,
@@ -530,6 +535,13 @@ pub(in crate::app::study) mod projection {
         if component > 2 {
             return Err("全体座標X/Y/Zの並進成分を指定してください".into());
         }
+        displacement_source(app, key)?.at(node, component)
+    }
+
+    pub(in crate::app::study) fn displacement_source(
+        app: &App,
+        key: StaticKey,
+    ) -> Result<DisplacementSource<'_>, String> {
         let kind = match key {
             StaticKey::Case(key) => ResultInputKey::Static(key),
             StaticKey::Combo(i) => ResultInputKey::Combo(
@@ -554,31 +566,56 @@ pub(in crate::app::study) mod projection {
             StaticKey::Combo(i) => bundle.combos.get(i).map(|(_, r)| r),
         }
         .ok_or("指定ケース結果が欠落")?;
-        let index = app
-            .core
-            .model
-            .nodes
-            .iter()
-            .position(|n| n.id == node)
-            .ok_or("指定節点が欠落")?;
-        let value = result
-            .disp
-            .get(index)
-            .and_then(|v| v.get(component))
-            .copied()
-            .filter(|v| v.is_finite())
-            .ok_or("指定節点変位が欠落・不正")?;
-        let reference = app.recorded_target_result_reference(
-            kind,
-            ReferenceTarget::Node(node),
-            DisplayConditions {
-                direction: Some(["X", "Y", "Z"][component].into()),
-                component: Some("節点変位".into()),
-                unit: Some("mm".into()),
-                ..Default::default()
-            },
-        )?;
-        Ok((value, (&reference).into()))
+        Ok(DisplacementSource {
+            result,
+            nodes: &app.core.model.nodes,
+            reference_source: app.recorded_result_reference_source(kind),
+        })
+    }
+
+    pub(in crate::app::study) struct DisplacementSource<'a> {
+        result: &'a sepika_solver::statics::linear::StaticOnce,
+        nodes: &'a [sepika_core::model::Node],
+        reference_source: Result<references::RecordedResultReferenceSource, String>,
+    }
+
+    impl DisplacementSource<'_> {
+        pub(in crate::app::study) fn at(
+            &self,
+            node: NodeId,
+            component: usize,
+        ) -> Result<(f64, EvidenceReference), String> {
+            let direction = ["X", "Y", "Z"]
+                .get(component)
+                .ok_or("全体座標X/Y/Zの並進成分を指定してください")?;
+            let index = self
+                .nodes
+                .iter()
+                .position(|n| n.id == node)
+                .ok_or("指定節点が欠落")?;
+            let value = self
+                .result
+                .disp
+                .get(index)
+                .and_then(|v| v.get(component))
+                .copied()
+                .filter(|v| v.is_finite())
+                .ok_or("指定節点変位が欠落・不正")?;
+            let reference = self
+                .reference_source
+                .as_ref()
+                .map_err(Clone::clone)?
+                .reference(
+                    ReferenceTarget::Node(node),
+                    DisplayConditions {
+                        direction: Some((*direction).into()),
+                        component: Some("節点変位".into()),
+                        unit: Some("mm".into()),
+                        ..Default::default()
+                    },
+                )?;
+            Ok((value, (&reference).into()))
+        }
     }
 
     #[derive(Default)]

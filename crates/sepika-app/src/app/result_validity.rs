@@ -20,6 +20,7 @@ struct VibrationResultInput {
     identity: String,
 }
 
+// RebarSize の数値と文字列を復号するには、入力の型情報を持つ形式が必要。
 pub(super) fn decode_recorded_input(
     key: &ResultInputKey,
     bytes: &[u8],
@@ -38,7 +39,7 @@ pub(super) fn decode_recorded_input(
                 sepika_design_jp::QdMethod,
                 Option<(ResultInputKey, Option<Vec<u8>>)>,
             );
-            let (model, short_term, rc_damage_control, bond_method, qd_method, source): DesignInput = bincode::deserialize(bytes).map_err(unavailable)?;
+            let (model, short_term, rc_damage_control, bond_method, qd_method, source): DesignInput = rmp_serde::from_slice(bytes).map_err(unavailable)?;
             let source = source.map(|(key, input)| {
                 let input = input
                     .and_then(|bytes| decode_recorded_input(&key, &bytes, None).ok())
@@ -57,7 +58,7 @@ pub(super) fn decode_recorded_input(
             })
         }
         ResultInputKey::TimeHistory(_) | ResultInputKey::LumpedTimeHistory(_) => {
-            let input: VibrationResultInput = bincode::deserialize(bytes).map_err(unavailable)?;
+            let input: VibrationResultInput = rmp_serde::from_slice(bytes).map_err(unavailable)?;
             Ok(RecordedCalculationInput {
                 model: input.model,
                 settings: RecordedSettings::Vibration {
@@ -69,7 +70,7 @@ pub(super) fn decode_recorded_input(
         }
         _ => {
             let (model, cfg, period_s): (sepika_core::model::Model, AnalysisSettings, Option<f64>) =
-                bincode::deserialize(bytes).map_err(unavailable)?;
+                rmp_serde::from_slice(bytes).map_err(unavailable)?;
             Ok(RecordedCalculationInput {
                 model,
                 settings: RecordedSettings::Analysis {
@@ -642,15 +643,15 @@ impl App {
                 .results
                 .as_ref()
                 .and_then(|bundle| bundle.input_records.iter().find(|(saved, _)| saved == key))
-                .and_then(|(_, input)| bincode::deserialize::<VibrationResultInput>(input).ok());
+                .and_then(|(_, input)| rmp_serde::from_slice::<VibrationResultInput>(input).ok());
             input
                 .map(|mut input| {
                     input.model = model;
-                    bincode::serialize(&input).expect("時刻歴入力の直列化")
+                    rmp_serde::to_vec_named(&input).expect("時刻歴入力の直列化")
                 })
                 .unwrap_or_default()
         } else {
-            bincode::serialize(&(model, relevant, self.result_generation_period(key, cfg)))
+            rmp_serde::to_vec_named(&(model, relevant, self.result_generation_period(key, cfg)))
                 .expect("計算入力の直列化")
         }
     }
@@ -750,7 +751,7 @@ impl App {
                 .map(|(_, input)| input.clone());
             (key, input)
         });
-        bincode::serialize(&(
+        rmp_serde::to_vec_named(&(
             self.calculation_model(),
             term,
             self.core.analysis_cfg.rc_damage_control,
@@ -818,7 +819,7 @@ impl App {
     }
 
     pub(crate) fn vibration_result_input(&self, source: &TimeHistorySource) -> Vec<u8> {
-        bincode::serialize(&VibrationResultInput {
+        rmp_serde::to_vec_named(&VibrationResultInput {
             model: self.calculation_model(),
             analysis_identity: source.analysis_identity.clone(),
             identity: source.identity.clone(),
@@ -857,10 +858,10 @@ impl App {
         else {
             return false;
         };
-        let Ok(input) = bincode::deserialize::<VibrationResultInput>(input_bytes) else {
+        let Ok(input) = rmp_serde::from_slice::<VibrationResultInput>(input_bytes) else {
             return false;
         };
-        bincode::serialize(&input).unwrap() == *input_bytes
+        rmp_serde::to_vec_named(&input).unwrap() == *input_bytes
             && input.identity == *identity
             && input.identity
                 == crate::app::vibration::vibration_identity(&(

@@ -22,12 +22,12 @@ impl RcKind {
                 b: 300.0,
                 d: 500.0 + extra_depth_mm,
                 rebar: RcBeamRebar {
-                    main_dia: 22.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                     top: vec![3],
                     bottom: vec![4],
                     cover: 40.0,
                     stirrup: BeamStirrup {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 150.0,
                         legs: 2,
                     },
@@ -37,12 +37,12 @@ impl RcKind {
                 b: 600.0,
                 d: 600.0 + extra_depth_mm,
                 rebar: RcRectColumnRebar {
-                    main_dia: 19.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
                     x: vec![4],
                     y: vec![4],
                     cover: 40.0,
                     hoop: RectColumnHoop {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 150.0,
                         legs_x: 2,
                         legs_y: 2,
@@ -52,11 +52,11 @@ impl RcKind {
             Self::CircleColumn => SectionShape::RcColumnCircle {
                 d: 600.0 + extra_depth_mm,
                 rebar: RcCircleColumnRebar {
-                    main_dia: 19.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
                     count: 12,
                     cover: 40.0,
                     hoop: CircleColumnHoop {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 150.0,
                     },
                 },

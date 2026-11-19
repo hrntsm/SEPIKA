@@ -156,8 +156,8 @@ fn valid_mass_properties(properties: SectionMassProperties) -> bool {
 pub fn validate_section_materials(
     section: &Section,
     main: Option<&Material>,
-    _rebar: Option<&Material>,
-    _shear_rebar: Option<&Material>,
+    rebar: Option<&Material>,
+    shear_rebar: Option<&Material>,
     steel: Option<&Material>,
 ) -> Result<(), String> {
     if let Some(material) = main {
@@ -182,6 +182,10 @@ pub fn validate_section_materials(
         }
         return Ok(());
     };
+
+    shape
+        .validate_rebar_size_materials(rebar, shear_rebar)
+        .map_err(|error| format!("断面{}の{error}", section.name))?;
 
     let concrete_shape = matches!(
         shape,
@@ -1067,12 +1071,12 @@ mod tests {
     fn new_beam_rebar() -> crate::section_shape::RcBeamRebar {
         use crate::section_shape::{BeamStirrup, RcBeamRebar};
         RcBeamRebar {
-            main_dia: 20.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(20.0),
             top: vec![4],
             bottom: vec![4],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1082,11 +1086,11 @@ mod tests {
     fn new_circle_rebar(count: u32) -> crate::section_shape::RcCircleColumnRebar {
         use crate::section_shape::{CircleColumnHoop, RcCircleColumnRebar};
         RcCircleColumnRebar {
-            main_dia: 20.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(20.0),
             count,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         }
@@ -1198,12 +1202,12 @@ mod tests {
             b: 400.0,
             d: 400.0,
             rebar: RcBeamRebar {
-                main_dia: 0.0,
+                main_dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 0.0,
+                    dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 0.0,
                     legs: 0,
                 },
@@ -1273,12 +1277,12 @@ mod tests {
             b: 600.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia: 22.0,
+                main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 50.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },
@@ -1458,12 +1462,12 @@ mod tests {
             b: 400.0,
             d: 400.0,
             rebar: RcBeamRebar {
-                main_dia: 0.0,
+                main_dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 0.0,
+                    dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 0.0,
                     legs: 0,
                 },
@@ -1485,12 +1489,12 @@ mod tests {
     fn rc系断面は主材料の欠落や区分不正やfc不正を受け付けない() {
         use crate::section_shape::{BeamStirrup, RcBeamRebar};
         let beam = RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4, 2],
             bottom: vec![3, 2],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1607,12 +1611,12 @@ mod tests {
         use crate::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
 
         let rebar = RcBeamRebar {
-            main_dia: 0.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(0.0),
             top: vec![],
             bottom: vec![],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 0.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
                 legs: 0,
             },
@@ -1666,12 +1670,12 @@ mod tests {
             b: 100.0,
             d: 100.0,
             rebar: RcBeamRebar {
-                main_dia: 20.0,
+                main_dia: crate::section_shape::RebarSize::DiameterMm(20.0),
                 top: vec![2],
                 bottom: vec![],
                 cover: 45.0,
                 stirrup: BeamStirrup {
-                    dia: 0.0,
+                    dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 0.0,
                     legs: 0,
                 },
@@ -1715,12 +1719,12 @@ mod tests {
             b: 400.0,
             d: 400.0,
             rebar: RcBeamRebar {
-                main_dia: 0.0,
+                main_dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 0.0,
+                    dia: crate::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 0.0,
                     legs: 0,
                 },
@@ -1843,12 +1847,12 @@ mod tests {
     fn new_column_rebar() -> crate::section_shape::RcRectColumnRebar {
         use crate::section_shape::{RcRectColumnRebar, RectColumnHoop};
         RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![3],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,

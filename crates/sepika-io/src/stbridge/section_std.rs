@@ -523,7 +523,10 @@ fn stage_ordinal(stage: u32) -> &'static str {
 /// 上端筋・下端筋を `N_main_top_*`/`N_main_bottom_*` の段別（最大 3 段）で書き出す。
 /// 標準段数を超える入力は出力入口で拒否する。
 fn beam_rebar_attrs(r: &RcBeamRebar, grades: BarGrades<'_>) -> String {
-    let mut s = format!("D_main=\"{}\"", num(r.main_dia));
+    let mut s = format!(
+        "D_main=\"{}\"",
+        num(r.main_dia.designation_or_diameter_mm())
+    );
     for (i, n) in r.top.iter().take(3).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
             " N_main_top_{}=\"{}\"",
@@ -540,7 +543,7 @@ fn beam_rebar_attrs(r: &RcBeamRebar, grades: BarGrades<'_>) -> String {
     }
     s.push_str(&format!(
         " D_stirrup=\"{}\" pitch_stirrup=\"{}\" N_stirrup=\"{}\"",
-        num(r.stirrup.dia),
+        num(r.stirrup.dia.designation_or_diameter_mm()),
         num(r.stirrup.pitch),
         r.stirrup.legs,
     ));
@@ -559,8 +562,8 @@ fn beam_rebar_attrs(r: &RcBeamRebar, grades: BarGrades<'_>) -> String {
 fn rect_column_rebar_attrs(r: &RcRectColumnRebar, grades: BarGrades<'_>) -> String {
     let mut s = format!(
         "D_main=\"{}\" N_main_total=\"{}\"",
-        num(r.main_dia),
-        (r.total_main_area() / sepika_core::section_shape::one_bar_area(r.main_dia)).round() as u64
+        num(r.main_dia.designation_or_diameter_mm()),
+        (r.total_main_area() / r.main_dia.area_mm2()).round() as u64
     );
     for (i, n) in r.x.iter().take(2).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
@@ -578,7 +581,7 @@ fn rect_column_rebar_attrs(r: &RcRectColumnRebar, grades: BarGrades<'_>) -> Stri
     }
     s.push_str(&format!(
         " D_band=\"{}\" pitch_band=\"{}\" N_band_direction_X=\"{}\" N_band_direction_Y=\"{}\"",
-        num(r.hoop.dia),
+        num(r.hoop.dia.designation_or_diameter_mm()),
         num(r.hoop.pitch),
         r.hoop.legs_x,
         r.hoop.legs_y,
@@ -597,9 +600,9 @@ fn rect_column_rebar_attrs(r: &RcRectColumnRebar, grades: BarGrades<'_>) -> Stri
 fn circle_column_rebar_attrs(r: &RcCircleColumnRebar, grades: BarGrades<'_>) -> String {
     let mut s = format!(
         "D_main=\"{}\" N_main=\"{}\" D_band=\"{}\" N_band=\"2\" pitch_band=\"{}\"",
-        num(r.main_dia),
+        num(r.main_dia.designation_or_diameter_mm()),
         r.count,
-        num(r.hoop.dia),
+        num(r.hoop.dia.designation_or_diameter_mm()),
         num(r.hoop.pitch),
     );
     if let Some(g) = grades.shear {
@@ -641,12 +644,16 @@ fn rebar_arrangement_column(shape: &SectionShape, grades: BarGrades<'_>) -> Stri
     let (child, cover, attrs) = match shape {
         SectionShape::RcColumnRect { rebar, .. } => (
             "StbSecBarColumn_RC_RectSame",
-            rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
+            rebar.cover
+                + rebar.hoop.dia.designation_or_diameter_mm()
+                + rebar.main_dia.designation_or_diameter_mm() / 2.0,
             rect_column_rebar_attrs(rebar, grades),
         ),
         SectionShape::RcColumnCircle { rebar, .. } => (
             "StbSecBarColumn_RC_CircleSame",
-            rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
+            rebar.cover
+                + rebar.hoop.dia.designation_or_diameter_mm()
+                + rebar.main_dia.designation_or_diameter_mm() / 2.0,
             circle_column_rebar_attrs(rebar, grades),
         ),
         _ => return String::new(),
@@ -666,7 +673,9 @@ fn rebar_arrangement_column(shape: &SectionShape, grades: BarGrades<'_>) -> Stri
 fn rebar_arrangement_beam(shape: &SectionShape, grades: BarGrades<'_>) -> String {
     let (cover, attrs) = match shape {
         SectionShape::RcBeamRect { rebar, .. } => (
-            rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0,
+            rebar.cover
+                + rebar.stirrup.dia.designation_or_diameter_mm()
+                + rebar.main_dia.designation_or_diameter_mm() / 2.0,
             beam_rebar_attrs(rebar, grades),
         ),
         _ => return String::new(),
@@ -890,11 +899,15 @@ fn src_section(
 fn rebar_arrangement_src(shape: &SectionShape, grades: BarGrades<'_>, is_beam: bool) -> String {
     let (cover, attrs) = match shape {
         SectionShape::SrcBeamRect { rebar, .. } => (
-            rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0,
+            rebar.cover
+                + rebar.stirrup.dia.designation_or_diameter_mm()
+                + rebar.main_dia.designation_or_diameter_mm() / 2.0,
             beam_rebar_attrs(rebar, grades),
         ),
         SectionShape::SrcColumnRect { rebar, .. } => (
-            rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
+            rebar.cover
+                + rebar.hoop.dia.designation_or_diameter_mm()
+                + rebar.main_dia.designation_or_diameter_mm() / 2.0,
             rect_column_rebar_attrs(rebar, grades),
         ),
         _ => return String::new(),
@@ -1088,6 +1101,21 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
     };
 
     for sec in &model.sections {
+        if sec
+            .shape
+            .as_ref()
+            .and_then(SectionShape::rebar_sizes)
+            .is_some_and(|(main, shear)| {
+                [main, shear]
+                    .iter()
+                    .any(|size| matches!(size, sepika_core::section_shape::RebarSize::Standard(_)))
+            })
+        {
+            return Err(super::StbError::Unmappable(format!(
+                "断面 {}: 標準異形鉄筋の呼び名をST-Bridgeへ出力できません。指定を保持するにはOVIKAを使用してください",
+                sec.name
+            )));
+        }
         let strength_input = model
             .stb_strengths
             .sections
@@ -1113,13 +1141,13 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                             && rebar.bottom.len() <= 3
                             && rebar.top.first().is_some_and(|n| *n > 0)
                             && rebar.bottom.first().is_some_and(|n| *n > 0)
-                            && rebar.main_dia.is_finite()
+                            && rebar.main_dia.designation_or_diameter_mm().is_finite()
                             && rebar.cover.is_finite()
                             && rebar.cover >= 0.0
-                            && rebar.main_dia > 0.0
-                            && rebar.stirrup.dia.is_finite()
+                            && rebar.main_dia.designation_or_diameter_mm() > 0.0
+                            && rebar.stirrup.dia.designation_or_diameter_mm().is_finite()
                             && rebar.stirrup.pitch.is_finite()
-                            && rebar.stirrup.dia > 0.0
+                            && rebar.stirrup.dia.designation_or_diameter_mm() > 0.0
                             && rebar.stirrup.pitch > 0.0
                             && rebar.stirrup.legs > 0
                     }
@@ -1130,26 +1158,26 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                             && rebar.y.len() <= 2
                             && rebar.x.first().is_some_and(|n| *n > 0)
                             && rebar.y.first().is_some_and(|n| *n > 0)
-                            && rebar.main_dia.is_finite()
+                            && rebar.main_dia.designation_or_diameter_mm().is_finite()
                             && rebar.cover.is_finite()
                             && rebar.cover >= 0.0
-                            && rebar.main_dia > 0.0
-                            && rebar.hoop.dia.is_finite()
+                            && rebar.main_dia.designation_or_diameter_mm() > 0.0
+                            && rebar.hoop.dia.designation_or_diameter_mm().is_finite()
                             && rebar.hoop.pitch.is_finite()
-                            && rebar.hoop.dia > 0.0
+                            && rebar.hoop.dia.designation_or_diameter_mm() > 0.0
                             && rebar.hoop.pitch > 0.0
                             && rebar.hoop.legs_x > 0
                             && rebar.hoop.legs_y > 0
                     }
                     SectionShape::RcColumnCircle { rebar, .. } => {
                         rebar.count > 0
-                            && rebar.main_dia.is_finite()
+                            && rebar.main_dia.designation_or_diameter_mm().is_finite()
                             && rebar.cover.is_finite()
                             && rebar.cover >= 0.0
-                            && rebar.main_dia > 0.0
-                            && rebar.hoop.dia.is_finite()
+                            && rebar.main_dia.designation_or_diameter_mm() > 0.0
+                            && rebar.hoop.dia.designation_or_diameter_mm().is_finite()
                             && rebar.hoop.pitch.is_finite()
-                            && rebar.hoop.dia > 0.0
+                            && rebar.hoop.dia.designation_or_diameter_mm() > 0.0
                             && rebar.hoop.pitch > 0.0
                     }
                     _ => true,

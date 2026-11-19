@@ -236,24 +236,24 @@ fn wall_bay_model() -> Model {
     // 壁と四周の構造種別が一致しなければ耐震要素として扱えないため、周辺架構もRCとする。
     // 側柱の主筋がなければ壁の等価引張鉄筋比を算定できないため、RC実配筋断面を使う。
     let side_column_rebar = RcRectColumnRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         x: vec![3],
         y: vec![2],
         cover: 40.0,
         hoop: sepika_core::section_shape::RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
         },
     };
     let wall_girder_rebar = RcBeamRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         top: vec![3],
         bottom: vec![3],
         cover: 40.0,
         stirrup: sepika_core::section_shape::BeamStirrup {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs: 2,
         },
@@ -605,11 +605,11 @@ fn wall_analysis_preserves_side_column_shapes_with_long_axial_cut() {
 fn circular_side_column_shear_section_runs_analysis() {
     let mut app = wall_bay_app();
     let rebar = sepika_core::section_shape::RcCircleColumnRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         count: 8,
         cover: 40.0,
         hoop: sepika_core::section_shape::CircleColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
         },
     };

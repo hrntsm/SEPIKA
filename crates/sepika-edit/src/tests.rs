@@ -8398,12 +8398,12 @@ fn supplied_rc_depth_edit_preserves_shape_geometry_and_other_properties() {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![3],
             bottom: vec![3],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -9253,12 +9253,12 @@ mod rc_section_purpose {
                     b: 300.0,
                     d: 500.0,
                     rebar: RcBeamRebar {
-                        main_dia: 22.0,
+                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                         top: vec![3],
                         bottom: vec![4],
                         cover: 40.0,
                         stirrup: BeamStirrup {
-                            dia: 10.0,
+                            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                             pitch: 150.0,
                             legs: 2,
                         },
@@ -9273,12 +9273,12 @@ mod rc_section_purpose {
                     b: 600.0,
                     d: 600.0,
                     rebar: RcRectColumnRebar {
-                        main_dia: 19.0,
+                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
                         x: vec![4],
                         y: vec![4],
                         cover: 40.0,
                         hoop: RectColumnHoop {
-                            dia: 10.0,
+                            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                             pitch: 150.0,
                             legs_x: 2,
                             legs_y: 2,
@@ -9293,11 +9293,11 @@ mod rc_section_purpose {
                 SectionShape::RcColumnCircle {
                     d: 600.0,
                     rebar: RcCircleColumnRebar {
-                        main_dia: 19.0,
+                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
                         count: 12,
                         cover: 40.0,
                         hoop: CircleColumnHoop {
-                            dia: 10.0,
+                            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                             pitch: 150.0,
                         },
                     },

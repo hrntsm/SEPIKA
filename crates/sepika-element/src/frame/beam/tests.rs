@@ -85,12 +85,12 @@ fn test_beam_new_src_cft_composite_props() {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![8],
             y: vec![8],
             cover: 50.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -330,11 +330,11 @@ fn test_beam_new_src_cft_composite_props() {
     model.sections[0] = SectionShape::RcColumnCircle {
         d: 600.0,
         rebar: sepika_core::section_shape::RcCircleColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             count: 16,
             cover: 50.0,
             hoop: sepika_core::section_shape::CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         },
@@ -400,12 +400,12 @@ fn rc_beam_for_slab_factor(plate: Option<sepika_core::model::SlabPlate>) -> (Mod
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4],
             bottom: vec![4],
             cover: 40.0,
             stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },

@@ -6,12 +6,12 @@ fn rc_beam_shape_has_section_properties() {
         b: 300.0,
         d: 500.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![3],
             bottom: vec![4],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 150.0,
                 legs: 2,
             },
@@ -28,11 +28,11 @@ fn rc_column_shapes_are_concrete_like() {
     let shape = SectionShape::RcColumnCircle {
         d: 600.0,
         rebar: RcCircleColumnRebar {
-            main_dia: 19.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(19.0),
             count: 12,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 150.0,
             },
         },
