@@ -142,7 +142,11 @@ fn frame_element(id: u32, sec: u32, n0: u32, n1: u32) -> ElementData {
         },
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
-        rigid_zone: RigidZone::default(),
+        rigid_zone: RigidZone {
+            face_i: Some(0.0),
+            face_j: Some(0.0),
+            ..Default::default()
+        },
         end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
         plastic_zone: None,
         spring: None,
@@ -246,7 +250,7 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
             false,
         )
         .expect("梁断面の諸元");
-        let l_clear = super::geometry::clear_span(&model.elements[1], model);
+        let l_clear = 6000.0;
         super::rc_strength::member_shear_strength(
             &p,
             24.0,
