@@ -87,3 +87,33 @@ pub fn model() -> Model {
         ..Default::default()
     }
 }
+
+pub fn pipe_with_brb_attr(frame_use: FrameSectionUse) -> Model {
+    let (end_mm, moment_nmm) = match frame_use {
+        FrameSectionUse::Column => ([0.0, 0.0, 3000.0], [-100e6, 0.0, 0.0]),
+        FrameSectionUse::Girder => ([3000.0, 0.0, 0.0], [0.0, 0.0, 100e6]),
+        FrameSectionUse::Brace => panic!("柱または梁の断面用途が必要です"),
+    };
+    let mut model = model();
+    let mut section = SectionShape::SteelPipe {
+        outer_dia: 200.0,
+        thick: 10.0,
+    }
+    .to_section(SectionId(0), "円形鋼管 D200×10".into());
+    section.material = Some(MaterialId(0));
+    section.frame_use = Some(frame_use);
+    model.sections[0] = section;
+    model.nodes[1].coord = end_mm;
+    model.nodes[1].restraint = Dof6Mask::FREE;
+    model.elements[0].kind = ElementKind::Beam;
+    model.elements[0].end_cond = [EndCondition::Fixed; 2];
+    model.brb_attrs[0].allowable_axial_short = Some(100_000.0);
+    model.brb_attrs[0].critical_length = Some(6000.0);
+    model.brb_attrs[0].length_reduction = Some(0.0);
+    model.load_cases[0].name = "片持ち部材の曲げ".into();
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [0.0, 0.0, 0.0, moment_nmm[0], moment_nmm[1], moment_nmm[2]],
+    )];
+    model
+}

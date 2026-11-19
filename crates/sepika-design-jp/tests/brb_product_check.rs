@@ -1,8 +1,10 @@
-use sepika_core::model::Model;
+use sepika_core::ids::LoadCaseId;
+use sepika_core::model::{FrameSectionUse, Model};
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions,
 };
 use sepika_element::frame::beam::MemberForces;
+use sepika_solver::statics::linear::linear_static_once;
 
 #[path = "fixtures/brb_model.rs"]
 mod input;
@@ -57,6 +59,83 @@ fn assert_skipped(model: &Model, axial_n: f64, name: &str, reason: &str) {
                 if actual.contains(name) && actual.contains(reason)),
             "{outcome:?}"
         );
+    }
+}
+
+#[test]
+fn brb_attribute_on_column_or_girder_reports_mismatch_instead_of_product_pass() {
+    for (frame_use, bending_kind) in [
+        (FrameSectionUse::Column, CheckKind::AxialBending),
+        (FrameSectionUse::Girder, CheckKind::Bending),
+    ] {
+        let mut model = input::pipe_with_brb_attr(frame_use);
+        let solved = linear_static_once(&model, LoadCaseId(0)).unwrap();
+        let elem = model.elements[0].id;
+        let [(force_elem, forces)] = solved.member_forces.as_slice() else {
+            panic!("{:?}", solved.member_forces);
+        };
+        assert_eq!(*force_elem, elem);
+        for (_, [n, qy, qz, mx, my, mz]) in &forces.at {
+            assert!([*n, *qy, *qz, *mx, *my]
+                .into_iter()
+                .all(|force| force.abs() < 1e-6));
+            assert!((mz.abs() - 100e6).abs() < 1e-6);
+        }
+
+        let options = MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            ..Default::default()
+        };
+        let report =
+            run_member_design_checks(&model, &solved.member_forces, &[], &options).unwrap();
+        assert_eq!(report.member_checks.len(), 3, "{frame_use:?}");
+        for ((id, pos, outcome), expected_pos) in report.member_checks.iter().zip([0.0, 0.5, 1.0]) {
+            assert_eq!((*id, *pos), (elem, expected_pos));
+            assert!(
+                matches!(outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("BRB属性の参照先") && reason.contains("断面用途がブレース")),
+                "{frame_use:?}: {outcome:?}"
+            );
+        }
+
+        model.brb_attrs.clear();
+        let report =
+            run_member_design_checks(&model, &solved.member_forces, &[], &options).unwrap();
+        assert_eq!(report.member_checks.len(), 3, "{frame_use:?}");
+        for ((id, pos, outcome), expected_pos) in report.member_checks.iter().zip([0.0, 0.5, 1.0]) {
+            assert_eq!((*id, *pos), (elem, expected_pos));
+            let CheckOutcome::Checked(result) = outcome else {
+                panic!("{frame_use:?}: {outcome:?}");
+            };
+            assert!(!result.ok(), "{frame_use:?}: {result:?}");
+            assert!(
+                result
+                    .components
+                    .iter()
+                    .any(|component| { component.kind == bending_kind && component.ratio > 1.0 }),
+                "{frame_use:?}: {result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn brb_requires_both_brace_element_and_brace_section_use() {
+    use sepika_core::model::ElementKind;
+
+    for (kind, frame_use) in [
+        (ElementKind::Beam, FrameSectionUse::Brace),
+        (
+            ElementKind::Brace {
+                tension_only: false,
+            },
+            FrameSectionUse::Column,
+        ),
+    ] {
+        let mut model = input::model();
+        model.elements[0].kind = kind;
+        model.sections[0].frame_use = Some(frame_use);
+        assert_skipped(&model, 0.0, "BRB属性の参照先", "断面用途がブレース");
     }
 }
 

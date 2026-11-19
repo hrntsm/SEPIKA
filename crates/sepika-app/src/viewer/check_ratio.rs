@@ -2377,6 +2377,28 @@ mod issue901_tests {
     }
 
     #[test]
+    fn brb_target_mismatch_displays_reason_without_ratio() {
+        let mut app = crate::app::brb_product_tests::analyzed_pipe_app(
+            sepika_core::model::FrameSectionUse::Girder,
+        );
+        app.ui.view.check_ratio_label_all = true;
+        let checks = &app.current_design_results().unwrap().member_checks;
+        let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
+        assert!(kinds.is_empty());
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|row| {
+            matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("BRB属性の参照先"))
+        }));
+        assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
+        let rendered = render_two_node_checks(&mut app);
+        assert!(is_gray_member(&rendered));
+        assert!(rendered
+            .shapes
+            .iter()
+            .any(|s| has_text(&s.shape, "BRB属性の参照先")));
+    }
+
+    #[test]
     fn issue901_angle_mixed_positions_draw_unknown_gray_and_keep_reasons_for_all_filters() {
         use sepika_element::frame::beam::MemberForces;
         let mut app = angle_app();

@@ -242,7 +242,7 @@ pub fn run_member_design_checks(
         .filter_map(|(id, _)| {
             let elem = elem_by_id.get(id)?;
             (brb_by_id.contains_key(id)
-                && matches!(elem.kind, ElementKind::Brace { .. })
+                && MemberKind::try_of_element(elem, model).ok() == Some(MemberKind::Brace)
                 && model.element_section(elem).is_some()
                 && model.element_material(elem).is_some())
             .then(|| (*id, brb_axis(model, elem)))
@@ -285,6 +285,21 @@ pub fn run_member_design_checks(
             continue;
         };
         if !frame_check_target(elem) {
+            continue;
+        }
+        let brb = brb_by_id.get(elem_id).copied();
+        if brb.is_some() && MemberKind::try_of_element(elem, model).ok() != Some(MemberKind::Brace)
+        {
+            member_checks.extend(mf.at.iter().map(|(pos, _)| {
+                (
+                    *elem_id,
+                    *pos,
+                    CheckOutcome::Skipped {
+                        reason: "BRB属性の参照先には、断面用途がブレースのブレース要素を指定してください"
+                            .into(),
+                    },
+                )
+            }));
             continue;
         }
         let sec = elem
@@ -362,7 +377,6 @@ pub fn run_member_design_checks(
             .find(|a| a.elem == *elem_id)
             .cloned();
         let structure = structure_kind_of(Some(sec), Some(mat.category));
-        let brb = brb_by_id.get(elem_id).copied();
         let group = if kind == MemberKind::Girder {
             options.girder_group_overrides.and_then(|m| m.get(elem_id))
         } else {
