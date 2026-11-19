@@ -6,6 +6,7 @@ use sepika_core::section_shape::SectionShape;
 
 mod beam;
 mod bond;
+mod clear_span;
 mod column;
 /// RC 柱の短期設計せん断力用 ΣMy（崩壊メカニズム判定）。
 pub mod column_mechanism;
@@ -24,6 +25,7 @@ mod shear_capacity;
 
 pub use bond::{rc_beam_bond_check_1991, Bond1991Result, BondCheckResult};
 pub(crate) use bond::{rc_beam_bond_check_1991_with_rebar, rc_beam_bond_check_with_rebar};
+pub use clear_span::{rc_member_clear_span, RcClearSpanError};
 pub use column_mechanism::{
     compute_column_mechanism_sum_my, design_axial_for_mechanism, resolve_column_end_hinge,
     sum_my_from_end_hinges, ColumnEndHinge,

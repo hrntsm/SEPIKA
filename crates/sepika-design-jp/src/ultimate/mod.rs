@@ -21,7 +21,6 @@ pub mod rc_shear_ductility;
 
 mod cft_check;
 mod demand_diagnostic;
-mod geometry;
 mod options;
 mod rc_check;
 #[allow(dead_code)]

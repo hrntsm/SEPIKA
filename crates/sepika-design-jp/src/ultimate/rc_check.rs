@@ -3,13 +3,13 @@
 //! - [`UltimateCheck`] — 1 部材分の終局検定結果。
 //! - [`collect_rc_ultimate_checks`] — モデルの RC梁・矩形柱・円形柱を一括検定する。
 
+use crate::rc::{rc_member_clear_span, RcClearSpanError};
 use crate::MemberKind;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementData, Material, Model, Section};
 use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::{one_bar_area, SectionShape};
 
-use super::geometry::clear_span;
 use super::options::{
     MemberDemand, ShearMethod, StaticBeamBending, UltimateDemandMode, UltimateShearOptions,
 };
@@ -166,7 +166,13 @@ fn check_member(
         (SectionShape::RcBeamRect { rebar, .. }, UltimateDemandMode::StaticHinge) => Some(rebar),
         _ => None,
     };
-    let l_clear = clear_span(elem, model);
+    let l_clear = rc_member_clear_span(elem, model).map_err(|error| {
+        let code = match error {
+            RcClearSpanError::Uncomputed(_) => "ultimate_clear_span_uncomputed",
+            RcClearSpanError::Invalid(_) => "ultimate_clear_span_invalid",
+        };
+        format!("{code}: {error}")
+    });
     if let Some(rebar) = static_beam_rebar {
         let reason = match demand.static_beam_bending {
             StaticBeamBending::Mixed => Some("ultimate_beam_mz_mixed_signs: 強軸曲げに正負が混在し、両端に適用する引張側を決定できません"),
