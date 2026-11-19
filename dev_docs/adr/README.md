@@ -179,6 +179,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0119](0119-standard-rebar-designation.md) | accepted | RC・SRC梁柱の標準異形鉄筋の呼び名と数値径を区別する |
 
 | [0120](0120-rc-beam-static-hinge-applicability.md) | accepted | RC矩形梁の静的略算に両端の曲げ降伏機構の確認を求める |
+| [0121](0121-asymmetric-built-h-weak-axis-shear.md) | accepted | 上下非対称組立H形鋼の弱軸せん断を未算定とする |
 
 ## 規約
 

@@ -77,8 +77,7 @@ pub(super) fn check_asymmetric_built_h(
     shape: &SectionShape,
     ctx: &DesignCtx,
     f: f64,
-    h_combined_reason: Option<&'static str>,
-    built_h_shear_reason: Option<&'static str>,
+    shear_reasons: [Option<&'static str>; 3],
 ) -> CheckOutcome {
     let check = || {
         if let Some(reason) = asymmetric_built_h_section_reason(forces, sec, ctx) {
@@ -114,8 +113,7 @@ pub(super) fn check_asymmetric_built_h(
         let ratio = compression_ratio.max(tension_ratio);
 
         let unavailable: Vec<_> = asymmetric_built_h_combination_reasons(forces, ctx)
-            .chain(h_combined_reason)
-            .chain(built_h_shear_reason)
+            .chain(shear_reasons.into_iter().flatten())
             .collect();
         if !unavailable.is_empty() && ratio <= 1.0 {
             return Ok(CheckOutcome::Skipped {
@@ -155,10 +153,7 @@ pub(super) fn check_asymmetric_built_h(
     };
     check().unwrap_or_else(|reason: String| {
         let mut reason = format!("上下非対称組立H形鋼柱は未算定です。{reason}");
-        for shear_reason in [h_combined_reason, built_h_shear_reason]
-            .into_iter()
-            .flatten()
-        {
+        for shear_reason in shear_reasons.into_iter().flatten() {
             reason.push('。');
             reason.push_str(shear_reason);
         }
