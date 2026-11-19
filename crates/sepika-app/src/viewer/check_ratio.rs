@@ -2322,7 +2322,7 @@ mod issue901_tests {
         app.ui.view.check_ratio_label_all = true;
         app
     }
-    fn render_angle(app: &mut App) -> egui::FullOutput {
+    fn render_two_node_checks(app: &mut App) -> egui::FullOutput {
         egui::Context::default().run_ui(Default::default(), |ui| {
             draw_check_ratio(
                 ui.painter(),
@@ -2356,6 +2356,26 @@ mod issue901_tests {
             _ => false,
         }
     }
+    #[test]
+    fn brb_product_missing_input_displays_reason_without_ratio() {
+        let mut app = crate::app::brb_product_tests::analyzed_app(None);
+        app.ui.view.check_ratio_label_all = true;
+        let checks = &app.current_design_results().unwrap().member_checks;
+        let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
+        assert!(kinds.is_empty());
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| {
+            matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("端部低減距離 L1が未入力"))
+        }));
+        assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
+        let rendered = render_two_node_checks(&mut app);
+        assert!(is_gray_member(&rendered));
+        assert!(rendered
+            .shapes
+            .iter()
+            .any(|s| has_text(&s.shape, "端部低減距離")));
+    }
+
     #[test]
     fn issue901_angle_mixed_positions_draw_unknown_gray_and_keep_reasons_for_all_filters() {
         use sepika_element::frame::beam::MemberForces;
@@ -2397,7 +2417,7 @@ mod issue901_tests {
                 filter
             )
             .contains_key(&ElemId(0)));
-            let rendered = render_angle(&mut app);
+            let rendered = render_two_node_checks(&mut app);
             assert!(is_gray_member(&rendered));
             assert!(rendered
                 .shapes
@@ -2415,7 +2435,7 @@ mod issue901_tests {
             )[&ElemId(0)]
                 .1
         );
-        assert!(!is_gray_member(&render_angle(&mut app)));
+        assert!(!is_gray_member(&render_two_node_checks(&mut app)));
         app.run_combination(1);
         assert!(
             app.core.scoped.last_error.is_none(),
@@ -2427,7 +2447,7 @@ mod issue901_tests {
             .chain(ALL_KINDS.into_iter().map(CheckRatioFilter::Kind))
         {
             app.ui.view.check_ratio_filter = filter;
-            assert!(is_gray_member(&render_angle(&mut app)));
+            assert!(is_gray_member(&render_two_node_checks(&mut app)));
         }
         app.run_combination(0);
         app.ui.view.check_ratio_filter = CheckRatioFilter::Max;
@@ -2438,7 +2458,7 @@ mod issue901_tests {
             )[&ElemId(0)]
                 .1
         );
-        assert!(!is_gray_member(&render_angle(&mut app)));
+        assert!(!is_gray_member(&render_two_node_checks(&mut app)));
     }
 }
 

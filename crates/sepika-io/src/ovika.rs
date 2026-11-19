@@ -304,6 +304,51 @@ mod tests {
     use sepika_core::section_shape::*;
 
     #[test]
+    fn brb_named_model_missing_product_fields_and_explicit_zero_are_distinct() {
+        let model = make_rich_model();
+        for (label, values, expected) in [
+            ("missing", serde_json::json!({"elem": 0}), [None; 3]),
+            (
+                "legacy-missing-reduction",
+                serde_json::json!({"elem": 0, "allowable_axial_short": 1_000_000.0, "critical_length": 4400.0}),
+                [Some(1_000_000.0), Some(4400.0), None],
+            ),
+            (
+                "explicit-zero",
+                serde_json::json!({"elem": 0, "allowable_axial_short": 1_000_000.0, "critical_length": 4400.0, "length_reduction": 0.0}),
+                [Some(1_000_000.0), Some(4400.0), Some(0.0)],
+            ),
+        ] {
+            let path = crate::test_util::test_tmp().join(format!("brb-{label}.ovika"));
+            let mut value = serde_json::to_value(&model).unwrap();
+            value["brb_attrs"] = serde_json::json!([values]);
+            let bytes = rmp_serde::to_vec_named(&value).unwrap();
+            let manifest = Manifest {
+                schema_version: CURRENT_SCHEMA_VERSION,
+                units: "internal: N-mm-s".into(),
+                created_by: "brb-test".into(),
+                entries: vec![crate::manifest::EntryHash {
+                    name: "model.msgpack".into(),
+                    sha256: sha256_of(&bytes),
+                }],
+            };
+            write_zip_with_manifest(&path, &manifest, &bytes);
+            let loaded = load_ovika(&path).unwrap().model;
+            let attr = &loaded.brb_attrs[0];
+            assert_eq!(attr.elem, ElemId(0));
+            assert_eq!(
+                [
+                    attr.allowable_axial_short,
+                    attr.critical_length,
+                    attr.length_reduction
+                ],
+                expected,
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
     fn removed_concrete_hysteresis_is_rejected_in_both_saved_slots() {
         for slot in ["rule", "rule_th"] {
             let path =

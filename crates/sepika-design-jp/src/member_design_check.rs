@@ -16,8 +16,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use sepika_core::geom::vec3;
 use sepika_core::ids::{ElemId, NodeId};
-use sepika_core::model::Model;
+use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
@@ -141,20 +142,66 @@ pub(crate) fn is_steel_input_target(
         || shape.is_none() && mat.is_none()
 }
 
+fn frame_check_target(elem: &ElementData) -> bool {
+    matches!(
+        elem.kind,
+        ElementKind::Beam
+            | ElementKind::Fiber
+            | ElementKind::MultiSpring
+            | ElementKind::Brace { .. }
+    )
+}
+
+struct BrbAxis {
+    length_mm: f64,
+    scaled_direction: Option<[f64; 3]>,
+}
+
+fn brb_axis(model: &Model, elem: &ElementData) -> Result<BrbAxis, String> {
+    let resolved_ends = model
+        .primary_frame_axis_end_positions(elem)
+        .map_err(|reason| format!("BRBの実材軸長 L を解決できません（{reason}）"))?;
+    let [i, j] = match resolved_ends {
+        Some(ends) => ends,
+        None => {
+            let [i, j] = elem.nodes.as_slice() else {
+                return Err("BRBの実材軸長 L の算定には二節点が必要です".into());
+            };
+            let (Some(i), Some(j)) = (model.node(*i), model.node(*j)) else {
+                return Err("BRBの実材軸長 L の算定に必要な節点が見つかりません".into());
+            };
+            [i.coord, j.coord]
+        }
+    };
+    let delta_mm = vec3::sub(j, i);
+    let squared_length_mm2 = vec3::dot(delta_mm, delta_mm);
+    let (length_mm, scaled_direction) = if squared_length_mm2.is_normal() {
+        (squared_length_mm2.sqrt(), None)
+    } else {
+        // 最初に規格化しないと、距離と局所基底の検証が二乗和の数値範囲・精度の影響を受ける。
+        let max_component_mm = delta_mm.into_iter().map(f64::abs).fold(0.0, f64::max);
+        crate::brb::validate_member_length(max_component_mm)?;
+        let direction = delta_mm.map(|value_mm| value_mm / max_component_mm);
+        (
+            vec3::norm(direction) * max_component_mm,
+            resolved_ends.is_none().then_some(direction),
+        )
+    };
+    crate::brb::validate_member_length(length_mm)?;
+    Ok(BrbAxis {
+        length_mm,
+        scaled_direction,
+    })
+}
+
 /// 通常鋼線材・鋼小梁・S/CFTパネルの材料・実板厚・Fを検証する。
 /// 入力不備は対象IDと理由を付けて返す。幾何未対応や検定荷重不足の判定は含めない。
 pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
-    use sepika_core::model::ElementKind;
-    for elem in &model.elements {
-        if !matches!(
-            elem.kind,
-            ElementKind::Beam
-                | ElementKind::Fiber
-                | ElementKind::MultiSpring
-                | ElementKind::Brace { .. }
-        ) {
-            continue;
-        }
+    for elem in model
+        .elements
+        .iter()
+        .filter(|elem| frame_check_target(elem))
+    {
         let sec = model.element_section(elem);
         let mat = model.element_material(elem);
         if !is_steel_input_target(sec, mat) {
@@ -182,13 +229,40 @@ pub fn run_member_design_checks(
     panel_moments: &[(NodeId, [f64; 2])],
     options: &MemberDesignCheckOptions<'_>,
 ) -> Result<MemberDesignCheckReport, String> {
-    model.validate_local_frames()?;
-    validate_model_steel_inputs(model)?;
-    let mut elem_by_id: HashMap<ElemId, &sepika_core::model::ElementData> =
-        HashMap::with_capacity(model.elements.len());
+    let mut elem_by_id = HashMap::with_capacity(model.elements.len());
     for e in &model.elements {
         elem_by_id.entry(e.id).or_insert(e);
     }
+    let mut brb_by_id = HashMap::new();
+    for attr in &model.brb_attrs {
+        brb_by_id.entry(attr.elem).or_insert(attr);
+    }
+    let brb_axes: HashMap<_, _> = member_forces
+        .iter()
+        .filter_map(|(id, _)| {
+            let elem = elem_by_id.get(id)?;
+            (brb_by_id.contains_key(id)
+                && matches!(elem.kind, ElementKind::Brace { .. })
+                && model.element_section(elem).is_some()
+                && model.element_material(elem).is_some())
+            .then(|| (*id, brb_axis(model, elem)))
+        })
+        .collect();
+    for elem in &model.elements {
+        match brb_axes.get(&elem.id) {
+            // ここで局所座標のエラーを返すと、応力が与えられたBRBの未検定理由を結果に残せない。
+            Some(Err(_)) => {}
+            Some(Ok(BrbAxis {
+                scaled_direction: Some(direction),
+                ..
+            })) => {
+                vec3::local_frame_axes([0.0; 3], *direction, elem.local_axis.ref_vector)
+                    .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
+            }
+            _ => model.validate_element_local_frame(elem)?,
+        }
+    }
+    validate_model_steel_inputs(model)?;
 
     let long_mf_by_id: Option<HashMap<ElemId, &MemberForces>> =
         options.long_member_forces.map(|list| {
@@ -210,13 +284,7 @@ pub fn run_member_design_checks(
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
             continue;
         };
-        if !matches!(
-            elem.kind,
-            sepika_core::model::ElementKind::Beam
-                | sepika_core::model::ElementKind::Fiber
-                | sepika_core::model::ElementKind::MultiSpring
-                | sepika_core::model::ElementKind::Brace { .. }
-        ) {
+        if !frame_check_target(elem) {
             continue;
         }
         let sec = elem
@@ -251,7 +319,23 @@ pub fn run_member_design_checks(
             lateral_bracing_references.push((*elem_id, reference.clone()));
         }
         let kind = MemberKind::of_element(elem, model);
-        let length = model.member_length(elem);
+        let physical_length_mm = match brb_axes.get(elem_id) {
+            Some(Ok(axis)) => axis.length_mm,
+            Some(Err(reason)) => {
+                member_checks.extend(mf.at.iter().map(|(pos, _)| {
+                    (
+                        *elem_id,
+                        *pos,
+                        CheckOutcome::Skipped {
+                            reason: reason.clone(),
+                        },
+                    )
+                }));
+                continue;
+            }
+            None => model.member_length(elem),
+        };
+        let length = physical_length_mm;
         let shear_span = mf
             .at
             .iter()
@@ -278,7 +362,7 @@ pub fn run_member_design_checks(
             .find(|a| a.elem == *elem_id)
             .cloned();
         let structure = structure_kind_of(Some(sec), Some(mat.category));
-        let brb = model.brb_attrs.iter().find(|a| a.elem == *elem_id);
+        let brb = brb_by_id.get(elem_id).copied();
         let group = if kind == MemberKind::Girder {
             options.girder_group_overrides.and_then(|m| m.get(elem_id))
         } else {
@@ -506,7 +590,10 @@ pub fn run_member_design_checks(
                 }
             } else if let Some(brb) = brb {
                 if mfa.mx == 0.0 {
-                    CheckOutcome::Checked(crate::brb::brb_check(brb, mfa.n, length, brb_long))
+                    match crate::brb::brb_check(brb, mfa.n, physical_length_mm, brb_long) {
+                        Ok(result) => CheckOutcome::Checked(result),
+                        Err(reason) => CheckOutcome::Skipped { reason },
+                    }
                 } else {
                     CheckOutcome::Skipped {
                         reason: if mfa.mx.is_finite() {

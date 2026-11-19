@@ -115,37 +115,43 @@ impl Model {
     /// 零長の節点ばねは単位回転、零長の免震支承は仮想鉛直軸を用いる。
     pub fn validate_local_frames(&self) -> Result<(), String> {
         for element in &self.elements {
-            let beam_ends = self.primary_frame_axis_ends(element)?;
-            if beam_ends.is_some() && self.element_material(element).is_none() {
-                return Err(format!(
-                    "部材 ID {} i/j端の材料: 未指定または参照先がありません",
-                    element.id.0
-                ));
-            }
-            if matches!(
-                element.kind,
-                ElementKind::PanelZone | ElementKind::Shell | ElementKind::Wall
-            ) || element.nodes.len() != 2
-            {
-                continue;
-            }
-            let (Some(i), Some(j)) = (
-                self.nodes.get(element.nodes[0].index()),
-                self.nodes.get(element.nodes[1].index()),
-            ) else {
-                continue;
-            };
-            let [p_i, mut p_j] = beam_ends.unwrap_or([i.coord, j.coord]);
-            if crate::geom::vec3::dist(p_i, p_j) < 1e-9 {
-                match element.kind {
-                    ElementKind::NodalSpring => continue,
-                    ElementKind::Isolator => p_j = [p_i[0], p_i[1], p_i[2] + 1.0],
-                    _ => {}
-                }
-            }
-            crate::geom::vec3::local_frame_axes(p_i, p_j, element.local_axis.ref_vector)
-                .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", element.id.0))?;
+            self.validate_element_local_frame(element)?;
         }
+        Ok(())
+    }
+
+    /// 1 要素の局所基底と実材軸の必須入力を検証する。失敗は部材 ID と理由を返す。
+    pub fn validate_element_local_frame(&self, element: &ElementData) -> Result<(), String> {
+        let beam_ends = self.primary_frame_axis_ends(element)?;
+        if beam_ends.is_some() && self.element_material(element).is_none() {
+            return Err(format!(
+                "部材 ID {} i/j端の材料: 未指定または参照先がありません",
+                element.id.0
+            ));
+        }
+        if matches!(
+            element.kind,
+            ElementKind::PanelZone | ElementKind::Shell | ElementKind::Wall
+        ) || element.nodes.len() != 2
+        {
+            return Ok(());
+        }
+        let (Some(i), Some(j)) = (
+            self.nodes.get(element.nodes[0].index()),
+            self.nodes.get(element.nodes[1].index()),
+        ) else {
+            return Ok(());
+        };
+        let [p_i, mut p_j] = beam_ends.unwrap_or([i.coord, j.coord]);
+        if crate::geom::vec3::dist(p_i, p_j) < 1e-9 {
+            match element.kind {
+                ElementKind::NodalSpring => return Ok(()),
+                ElementKind::Isolator => p_j = [p_i[0], p_i[1], p_i[2] + 1.0],
+                _ => {}
+            }
+        }
+        crate::geom::vec3::local_frame_axes(p_i, p_j, element.local_axis.ref_vector)
+            .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", element.id.0))?;
         Ok(())
     }
 }

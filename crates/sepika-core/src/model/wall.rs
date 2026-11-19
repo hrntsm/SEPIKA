@@ -267,13 +267,12 @@ impl SteelDesignAttr {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BrbAttr {
     pub elem: ElemId,
-    /// 短期許容軸力 `[N]`（メーカー値）
-    pub allowable_axial_short: f64,
-    /// 限界座屈長さ `[mm]`（メーカー値）
-    pub critical_length: f64,
-    /// 座屈長さ低減距離 L1 `[mm]`（= (L1上+L1下)/2）
-    #[serde(default)]
-    pub length_reduction: f64,
+    /// 短期許容軸力 `[N]`（メーカー値、有限の正値）。`None` は未入力。
+    pub allowable_axial_short: Option<f64>,
+    /// 限界座屈長さ `[mm]`（メーカー値、有限の正値）。`None` は未入力。
+    pub critical_length: Option<f64>,
+    /// 座屈長さ低減距離 L1 `[mm]`（両端の平均、有限の非負値）。`None` は未入力。
+    pub length_reduction: Option<f64>,
 }
 
 /// 免震支承材の種別（各免震部材指針）。

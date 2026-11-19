@@ -529,9 +529,9 @@ fn brb_uses_its_product_check_even_with_invalid_ordinary_lengths() {
     model.steel_design_attrs[0].lk_y_direct = Some(0.0);
     model.brb_attrs.push(BrbAttr {
         elem: ElemId(0),
-        allowable_axial_short: 1_000_000.0,
-        critical_length: 2000.0,
-        length_reduction: 300.0,
+        allowable_axial_short: Some(1_000_000.0),
+        critical_length: Some(2000.0),
+        length_reduction: Some(300.0),
     });
     let mf = MemberForces {
         at: vec![(0.0, [-10000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],

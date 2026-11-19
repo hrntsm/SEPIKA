@@ -483,6 +483,57 @@ mod tests {
         ));
     }
 
+    mod brb_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/brb_model.rs"
+        ));
+    }
+
+    #[test]
+    fn brb_product_mcp_counts_unchecked_and_limit_exceedance() {
+        for (reduction, ratio, reason) in [
+            (None, None, Some("端部低減距離 L1が未入力")),
+            (Some(f64::INFINITY), None, Some("端部低減距離 L1には有限")),
+            (Some(2500.0), None, Some("控除後の座屈長さ L−2L1")),
+            (Some(0.0), Some(5000.0 / 4400.0), None),
+            (Some(300.0), Some(1.0), None),
+        ] {
+            let mut model = brb_input::model();
+            model.brb_attrs[0].length_reduction = reduction;
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!()
+            };
+            assert_eq!(summary["n_checks"], 2, "{summary}");
+            assert_eq!(summary["max_ratio"].as_f64(), ratio);
+            let skipped = summary["member_skipped"].as_array().unwrap();
+            if let Some(reason) = reason {
+                assert_eq!(summary["n_skipped"], 2);
+                assert_eq!(summary["n_ng"], 0);
+                assert_eq!(summary["all_members_checked_and_ok"], false);
+                assert_eq!(skipped.len(), 2);
+                for (row, position) in skipped.iter().zip([0.0, 1.0]) {
+                    assert_eq!(row["elem"], brb_input::BRACE.0);
+                    assert_eq!(row["position"].as_f64(), Some(position));
+                    assert!(row["reason"].as_str().unwrap().contains(reason), "{row}");
+                }
+            } else {
+                let ok = ratio == Some(1.0);
+                assert_eq!(summary["n_skipped"], 0);
+                assert!(skipped.is_empty());
+                assert_eq!(summary["n_ng"], if ok { 0 } else { 2 });
+                assert_eq!(summary["all_members_checked_and_ok"], ok);
+            }
+        }
+    }
+
     #[test]
     fn rc_beam_asymmetric_mcp_case_and_combination_report_unchecked() {
         for asymmetric in [false, true] {

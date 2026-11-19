@@ -1203,9 +1203,9 @@ mod tests {
 
         app.core.model.brb_attrs.push(BrbAttr {
             elem: ElemId(2),
-            allowable_axial_short: 1_000_000.0,
-            critical_length: 2000.0,
-            length_reduction: 300.0,
+            allowable_axial_short: Some(1_000_000.0),
+            critical_length: Some(2000.0),
+            length_reduction: Some(300.0),
         });
         let before = peak_check_text(&app, 2, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
         app.core.model.steel_design_attrs[2].lk_z_direct = Some(0.0);

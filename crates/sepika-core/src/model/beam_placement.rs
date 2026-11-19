@@ -132,8 +132,25 @@ impl Model {
         resolve().map_err(|reason| format!("{} の実配置: {reason}", beam_label(member)))
     }
 
-    /// 大梁・柱・ブレースの実材軸端 `[mm]` を返す。対象外は None、未指定・不正な端位置や偏心は理由付きで失敗する。
+    /// 大梁・柱・ブレースの実材軸端 `[mm]` を返し、局所基底も検証する。
+    /// 端位置の扱いは [`Self::primary_frame_axis_end_positions`] と同じ。局所基底が不正なら理由付きエラー。
     pub fn primary_frame_axis_ends(
+        &self,
+        data: &ElementData,
+    ) -> Result<Option<[[f64; 3]; 2]>, String> {
+        let ends = self.primary_frame_axis_end_positions(data)?;
+        if let Some([i, j]) = ends {
+            local_frame_axes(i, j, data.local_axis.ref_vector).map_err(|reason| {
+                format!("部材 ID {} i/j端の実材軸・局所軸: {reason}", data.id.0)
+            })?;
+        }
+        Ok(ends)
+    }
+
+    /// 大梁・柱・ブレースの実材軸端の位置 `[mm]` を返す。局所基底の検証は呼出側で行う。
+    /// 節点位置をそのまま使う無偏心柱・ブレース、および対象外の部材は `None`。
+    /// 端位置や偏心の未指定・不正は理由付きエラー。
+    pub fn primary_frame_axis_end_positions(
         &self,
         data: &ElementData,
     ) -> Result<Option<[[f64; 3]; 2]>, String> {
@@ -228,8 +245,6 @@ impl Model {
         if !dist(ends[0], ends[1]).is_finite() || dist(ends[0], ends[1]) <= 0.0 {
             return Err(fail("i/j端", "実材軸長", "有限な正値ではありません"));
         }
-        local_frame_axes(ends[0], ends[1], data.local_axis.ref_vector)
-            .map_err(|reason| fail("i/j端", "実材軸・局所軸", reason))?;
         Ok(Some(ends))
     }
 
