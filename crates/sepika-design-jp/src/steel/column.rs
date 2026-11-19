@@ -17,22 +17,6 @@ use super::{
     has_section_loss, nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, ShapeCategory,
 };
 
-pub(super) fn asymmetric_built_h_shape(sec: &Section) -> Option<&SectionShape> {
-    let Some(
-        shape @ SectionShape::SteelBuiltH {
-            upper_width,
-            upper_thick,
-            lower_width,
-            lower_thick,
-            ..
-        },
-    ) = sec.shape.as_ref()
-    else {
-        return None;
-    };
-    (upper_width != lower_width || upper_thick != lower_thick).then_some(shape)
-}
-
 pub(super) fn asymmetric_built_h_section_reason(
     forces: &MemberForcesAt,
     sec: &Section,

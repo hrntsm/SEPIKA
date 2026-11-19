@@ -138,6 +138,20 @@ pub enum SectionShape {
 }
 
 impl SectionShape {
+    /// 組立H形鋼の上下フランジで幅または厚さが異なる場合に true を返す。
+    pub fn is_asymmetric_built_h(&self) -> bool {
+        matches!(
+            self,
+            Self::SteelBuiltH {
+                upper_width,
+                upper_thick,
+                lower_width,
+                lower_thick,
+                ..
+            } if upper_width != lower_width || upper_thick != lower_thick
+        )
+    }
+
     /// 梁の実配筋を持つ形状はその参照を返す。
     pub fn beam_rebar(&self) -> Option<&RcBeamRebar> {
         match self {

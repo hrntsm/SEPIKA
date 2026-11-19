@@ -26,9 +26,10 @@ pub use linear::{
     linear_time_history_with_state,
 };
 pub use nonlinear::{nonlinear_time_history_analysis, NonlinearThCfg};
+pub use recording::uses_signed_bending_peaks;
 pub use result::{
-    AxialForcePeakSnapshot, AxialForcePeaks, ResponseHistory, ResponseResult, StoryResponse,
-    ThRecording, TimeStepState,
+    AxialForcePeakSnapshot, AxialForcePeaks, ForcePeakSnapshot, ResponseHistory, ResponseResult,
+    StoryResponse, StrongAxisMomentPeaks, ThRecording, TimeStepState,
 };
 
 #[cfg(test)]

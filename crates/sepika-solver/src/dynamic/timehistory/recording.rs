@@ -5,11 +5,34 @@
 //! - [`member_forces_linear`] / [`member_forces_nonlinear`] — 部材端力分布の算定
 //!   （線形は `recover_forces`、非線形は `state_member_forces`）
 
-use super::result::{AxialForcePeaks, StoryResponse, ThRecording};
+use std::collections::BTreeMap;
+
+use super::result::{AxialForcePeaks, StoryResponse, StrongAxisMomentPeaks, ThRecording};
 use sepika_core::dof::{DofMap, DOF_PER_NODE};
-use sepika_core::model::Model;
+use sepika_core::model::{ElementData, ElementKind, FrameSectionUse, Model};
+use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::behavior::{Ctx, ElementBehavior};
 use sepika_element::frame::beam::MemberForces;
+
+/// 時刻歴簡易検定で正負の局所 Mz 極値を記録する対象かを返す。
+pub fn uses_signed_bending_peaks(model: &Model, elem: &ElementData) -> bool {
+    matches!(
+        elem.kind,
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+    ) && model.element_section(elem).is_some_and(|section| {
+        section.frame_use == Some(FrameSectionUse::Column)
+            && section
+                .shape
+                .as_ref()
+                .is_some_and(|shape| shape.is_asymmetric_built_h())
+            && structure_kind_of(
+                Some(section),
+                model
+                    .element_material(elem)
+                    .map(|material| material.category),
+            ) == StructureKind::S
+    })
+}
 
 /// 記録フレーム数が概ね 1000 になるよう `record_every`（間引き係数）を自動決定する。
 /// `n_steps` はステップ数（フレーム数は `n_steps+1`）。
@@ -40,7 +63,6 @@ pub(crate) fn member_forces_nonlinear(
     model: &Model,
     behaviors: &[Box<dyn ElementBehavior>],
 ) -> Result<Vec<Option<MemberForces>>, sepika_math::solver::SolveError> {
-    use sepika_core::model::ElementKind;
     use sepika_math::solver::SolveError;
     let responses = crate::common::member_recording::member_recording_responses(
         model,
@@ -174,6 +196,7 @@ pub(crate) struct ThRecorder {
     member_forces: Vec<Vec<Option<MemberForces>>>,
     peak_member_forces: Vec<Option<MemberForces>>,
     axial_force_peaks: Vec<AxialForcePeaks>,
+    strong_axis_moment_peaks: BTreeMap<usize, StrongAxisMomentPeaks>,
 
     story_x: StoryResponse,
     story_y: StoryResponse,
@@ -300,6 +323,13 @@ impl ThRecorder {
             member_forces: Vec::new(),
             peak_member_forces: vec![None; model.elements.len()],
             axial_force_peaks: vec![AxialForcePeaks::default(); model.elements.len()],
+            strong_axis_moment_peaks: model
+                .elements
+                .iter()
+                .enumerate()
+                .filter(|(_, elem)| uses_signed_bending_peaks(model, elem))
+                .map(|(index, _)| (index, StrongAxisMomentPeaks::default()))
+                .collect(),
             story_x: story.clone(),
             story_y: story,
         }
@@ -402,6 +432,11 @@ impl ThRecorder {
                 peaks.record(time, forces);
             }
         }
+        for (&index, peaks) in &mut self.strong_axis_moment_peaks {
+            if let Some(forces) = member_forces_now.get(index).and_then(Option::as_ref) {
+                peaks.record(time, forces);
+            }
+        }
 
         let (shear_x, accel_x, vel_x, disp_x) =
             Self::compute_story_dir(&self.groups_x, m_r_x, u_free, v_free, a_free, ma_free, xg_x);
@@ -472,6 +507,7 @@ impl ThRecorder {
             member_forces: self.member_forces,
             peak_member_forces: self.peak_member_forces,
             axial_force_peaks: self.axial_force_peaks,
+            strong_axis_moment_peaks: self.strong_axis_moment_peaks,
         }
     }
 }
@@ -558,7 +594,97 @@ mod tests {
                 before.merge(after);
             }
             assert_eq!(first, recording.axial_force_peaks);
+            assert!(recording.strong_axis_moment_peaks.is_empty());
         }
+    }
+
+    #[test]
+    fn signed_bending_peaks_keep_the_whole_section_force_at_non_displayed_steps() {
+        let mut model = two_story_density_mass_model(7.85e-9);
+        let mut section = sepika_core::section_shape::SectionShape::SteelBuiltH {
+            height: 400.0,
+            upper_width: 80.0,
+            upper_thick: 12.0,
+            lower_width: 180.0,
+            lower_thick: 20.0,
+            web_thick: 8.0,
+        }
+        .to_section(SectionId(1), "上下非対称組立H".into());
+        section.material = model.sections[0].material;
+        section.frame_use = Some(FrameSectionUse::Column);
+        model.sections.push(section);
+        model.elements[0].section = Some(SectionId(1));
+        let dofmap = DofMap::build(&model);
+        let zeros = vec![0.0; dofmap.n_active()];
+        let history = [
+            MemberForces {
+                at: vec![
+                    (0.0, [-78e3, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                    (0.5, [-78e3, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                    (1.0, [0.0; 6]),
+                ],
+            },
+            MemberForces {
+                at: vec![
+                    (0.0, [-77e3, 2.0, -3.0, 4.0, -5.0, -80e6]),
+                    (0.5, [-77e3, 12.0, -13.0, 14.0, -15.0, 150e6]),
+                    (1.0, [0.0; 6]),
+                ],
+            },
+            MemberForces {
+                at: vec![
+                    (0.0, [-77e3, -2.0, 3.0, -4.0, 5.0, 90e6]),
+                    (0.5, [-77e3, -12.0, 13.0, -14.0, 15.0, -155e6]),
+                    (1.0, [0.0; 6]),
+                ],
+            },
+            MemberForces {
+                at: vec![
+                    (0.0, [-78e3, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                    (0.5, [-78e3, 1.0, 2.0, 3.0, 4.0, 150e6]),
+                    (1.0, [0.0; 6]),
+                ],
+            },
+        ];
+        let record = |first: usize, last: usize| {
+            let mut recorder = ThRecorder::new(&model, &dofmap, 3, Some(3));
+            for (step, forces) in history.iter().enumerate().take(last + 1).skip(first) {
+                recorder.record_step(
+                    step as u64,
+                    step as f64,
+                    &model,
+                    &dofmap,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    &zeros,
+                    0.0,
+                    0.0,
+                    &[Some(forces.clone()), Some(forces.clone())],
+                );
+            }
+            recorder.finish()
+        };
+        let full = record(0, 3);
+        assert_eq!(full.frame_time, vec![0.0, 3.0]);
+        assert!(full
+            .member_forces
+            .iter()
+            .all(|frame| frame[0].as_ref().unwrap().at.len() == 2));
+        assert_eq!(full.strong_axis_moment_peaks.len(), 1);
+        let peaks = &full.strong_axis_moment_peaks[&0];
+        assert_eq!(peaks.snapshots.len(), 2);
+        for (snapshot, step) in peaks.snapshots.iter().zip([1, 2]) {
+            assert_eq!(snapshot.time, step as f64);
+            assert_eq!(snapshot.forces, history[step]);
+            assert_eq!(snapshot.positions, vec![0, 1]);
+        }
+        let mut earlier = record(0, 1).strong_axis_moment_peaks.remove(&0).unwrap();
+        let later = record(1, 3).strong_axis_moment_peaks.remove(&0).unwrap();
+        earlier.merge(later);
+        assert_eq!(&earlier, peaks);
     }
 
     /// 密度による一貫質量を持つ 2 層（3 節点）の柱列。曲げ回転（Ry）を解放し、一貫質量行列の並進-回転連成を有効にする。

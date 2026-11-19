@@ -1,7 +1,53 @@
 use super::*;
+use sepika_core::dof::Dof6Mask;
+use sepika_core::ids::{NodeId, StoryId};
+use sepika_core::model::{Model, PanelZoneMode, Story};
 use sepika_design_jp::CheckOutcome;
 #[path = "../../../sepika-design-jp/tests/fixtures/steel_column_k_model.rs"]
 pub(crate) mod input;
+
+pub(crate) fn asymmetric_built_h_cantilever() -> Model {
+    let mut model = input::portal(1.0);
+    model.panel_zone = PanelZoneMode::None;
+    model.elements.truncate(1);
+    model.nodes.remove(1);
+    model.nodes.truncate(2);
+    model.nodes[0].restraint = Dof6Mask::FIXED;
+    model.nodes[1].id = NodeId(1);
+    model.nodes[1].restraint = Dof6Mask::FREE;
+    model.elements[0].nodes[1] = NodeId(1);
+    model.load_cases[0].nodal.truncate(1);
+    model.load_cases[0].nodal[0].node = NodeId(1);
+    model.load_cases[0].nodal[0].values[2] = -10_000.0;
+    model.steel_design_attrs.truncate(1);
+    model.stories = [0.0, 3000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, fl)| {
+            Story::new(
+                StoryId(i as u32),
+                format!("{}F", i + 1),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect();
+    let former = &model.sections[0];
+    let mut section = sepika_core::section_shape::SectionShape::SteelBuiltH {
+        height: 400.0,
+        upper_width: 80.0,
+        upper_thick: 12.0,
+        lower_width: 180.0,
+        lower_thick: 20.0,
+        web_thick: 8.0,
+    }
+    .to_section(former.id, "上下非対称組立H".into());
+    section.material = former.material;
+    section.frame_use = former.frame_use;
+    model.sections[0] = section;
+    model.sections.truncate(1);
+    model
+}
 
 #[test]
 fn steel_column_gui_keeps_resolved_lengths_and_invalidates_old_design_contract() {
