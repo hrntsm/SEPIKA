@@ -3742,6 +3742,29 @@ fn panel_601_each_axis_uses_its_product_thickness_with_reinforcement() {
     assert!((ratio(&first, 1) / ratio(&direct, 1) - 235.0 / 215.0).abs() < 1e-12);
 }
 
+#[test]
+fn equal_thickness_square_steel_panel_checks_yield_on_both_column_axes() {
+    let mut model = panel_892_model(false, 24_576.0, 235.0);
+    if let Some(SectionShape::SteelH { height, .. }) = &mut model.sections[1].shape {
+        *height = 520.0;
+    }
+    model.sections[1].depth = 520.0;
+    let demand_nmm = 742_000_000.0;
+    let checks = panel_758_checks(&model, &[[0.0; 6]; 4], Some([demand_nmm; 2]));
+    assert_eq!(checks.len(), 2, "{checks:?}");
+    let capacities_nmm = checks
+        .into_iter()
+        .map(|outcome| demand_nmm / outcome.unwrap_checked().ratio())
+        .collect::<Vec<_>>();
+    let expected_nmm = 740_979_033.481_555;
+    assert!(
+        capacities_nmm
+            .iter()
+            .all(|&actual| (actual - expected_nmm).abs() < 1e-5),
+        "{capacities_nmm:?}"
+    );
+}
+
 fn panel_892_model(cft: bool, area_mm2: f64, fy_n_mm2: f64) -> Model {
     let mut model = panel_758_model(0.0);
     model.sections[0].shape = Some(if cft {
@@ -3778,12 +3801,17 @@ fn panel_892_checks(model: &Model, compression_n: f64, direct: bool) -> Vec<Chec
 fn panel_892_actual_positive_area_matches_independent_capacity_for_steel_and_cft() {
     for cft in [false, true] {
         for direct in [false, true] {
+            let [compressed_ratio, unreduced_ratio] = if cft {
+                [0.157_318_062_086_381_05, 0.136_241_438_240_943_54]
+            } else {
+                [0.157_849_542_025_862_04, 0.136_701_713_370_135_9]
+            };
             for (area, compression, expected_n, expected_ratio) in [
-                (5e-10, 5e-8, "0.5000", 0.15731806208638105),
-                (1e-9, 1e-7, "0.5000", 0.15731806208638105),
-                (24576.0, 2457600.0, "0.5000", 0.15731806208638105),
-                (24576.0, 0.0, "0.0000", 0.13624143824094354),
-                (24576.0, -2457600.0, "0.0000", 0.13624143824094354),
+                (5e-10, 5e-8, "0.5000", compressed_ratio),
+                (1e-9, 1e-7, "0.5000", compressed_ratio),
+                (24576.0, 2457600.0, "0.5000", compressed_ratio),
+                (24576.0, 0.0, "0.0000", unreduced_ratio),
+                (24576.0, -2457600.0, "0.0000", unreduced_ratio),
             ] {
                 let model = panel_892_model(cft, area, 200.0);
                 let checks = panel_892_checks(&model, compression, direct);

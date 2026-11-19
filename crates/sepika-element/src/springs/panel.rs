@@ -1399,6 +1399,63 @@ mod tests {
         );
     }
 
+    #[test]
+    fn equal_thickness_square_steel_panel_yields_on_both_column_axes() {
+        let (mut model, data) = cross_joint_model();
+        model.sections[1].shape = Some(SectionShape::SteelBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+            horizontal_thick: 16.0,
+            corner_r: Some(0.0),
+        });
+        model.sections[1].area = 24_576.0;
+        if let Some(SectionShape::SteelH { height, .. }) = &mut model.sections[0].shape {
+            *height = 517.0;
+        }
+        model.sections[0].depth = 517.0;
+        let ctx = Ctx { model: &model };
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        assert_eq!(panel.resolution_error, None);
+        let expected_nmm = 740_979_033.481_555;
+        let capacities_nmm = panel.yield_moment();
+        assert!(
+            capacities_nmm
+                .iter()
+                .all(|&actual| (actual - expected_nmm).abs() < 1e-5),
+            "{capacities_nmm:?}"
+        );
+
+        let elastic_stiffness = panel.tangent_stiffness(&ctx);
+        for axis in 0..2 {
+            let stiffness = elastic_stiffness.get(axis, axis);
+            let other_axis = 1 - axis;
+            for (elastic_moment_nmm, moment_nmm, stiffness_ratio) in [
+                (739_000_000.0, 739_000_000.0, 1.0),
+                (742_000_000.0, 740_989_243.146_739_5, 0.01),
+            ] {
+                panel.revert_state();
+                let mut increment = LocalVec {
+                    data: SmallVec::from_elem(0.0, panel.n_dof()),
+                };
+                increment.data[axis] = elastic_moment_nmm / stiffness;
+                panel.update_state(&increment, false, &ctx).unwrap();
+                let moments = panel.panel_moments();
+                let tangent = panel.tangent_stiffness(&ctx);
+                assert!(
+                    (moments[axis] - moment_nmm).abs() < 1e-5,
+                    "axis={axis}, moments={moments:?}"
+                );
+                assert_eq!(moments[other_axis], 0.0);
+                assert!((tangent.get(axis, axis) / stiffness - stiffness_ratio).abs() < 1e-12);
+                assert_eq!(
+                    tangent.get(other_axis, other_axis),
+                    elastic_stiffness.get(other_axis, other_axis)
+                );
+            }
+        }
+    }
+
     /// 軸力比 n の増加で降伏モーメントが pMy0·√(1−n²) へ低下する。
     #[test]
     fn test_yield_moment_reduces_with_axial_ratio() {
