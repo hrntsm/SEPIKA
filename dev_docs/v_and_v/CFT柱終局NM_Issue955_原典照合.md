@@ -2,7 +2,7 @@
 
 対象は [#955](https://github.com/hrntsm/SEPIKA/issues/955)、基点は 9b02db9a。照合日は2026-11-18。現行の計算・利用条件は [CFT柱の終局耐力](../../docs/calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md) を参照。
 
-## 利用判断
+## 調査基点の利用判断
 
 | 判断 | 対象と根拠 |
 | --- | --- |
@@ -36,7 +36,7 @@
 
 ## 公開入口と独立算術
 
-数値は圧縮正、軸力はN、曲げはkN·mで記録する。再現には [保存した検証コード](data/issue955/source_probe.rs) を次のように実行する。コード内の軸引張耐力の期待値は円環面積から与える。境界・せん断比は現行結果の観測として出力する。
+数値は圧縮正、軸力はN、曲げはkN·mで記録する。調査基点での再現には [保存した検証コード](data/issue955/source_probe.rs) を次のように実行する。コード内の軸引張耐力の期待値は円環面積から与える。境界・せん断比は調査時の観測結果として出力する。
 
 ```powershell
 Copy-Item dev_docs/v_and_v/data/issue955/source_probe.rs crates/sepika-design-jp/examples/issue955_probe.rs
@@ -75,14 +75,32 @@ Remove-Item -LiteralPath crates/sepika-design-jp/examples/issue955_probe.rs
 
 円400×12 mm、SN400BのFy235、両軸直接座屈長さ1200 mm、固定自由柱の柱頭に長期圧縮需要100 kN（DL100 kN、LL=0）。Fc23.999 N/mm²で、公開一次検定は告示下限の理由付き未算定だが、公開終局一括入口は軸適合・Mu=526.934586 kN·mだった。Fc24では双方算定し、終局Muは526.936239 kN·m。[#916の一次検定の是正](CFT充填Fc下限_Issue916_2026-10.md)と終局の受理条件に差がある。
 
-## 現行の接続と追跡
+## 調査基点の接続と追跡
 
 - [#1400](CFT柱の座屈長さ_Issue1400_2026-11.md) の両軸直接座屈長さを使う。軸表示は両軸の小さい耐力、強軸Muは強軸の実長と断面性能、円形のQD1/minは両直接長の大きい方を用いる。終局一括と一次のQD1/minで使う長さが一致するとは限らない。
 - [#1125の検証](角形CFT曲げ_Issue1104_確認記録.md) の等厚角丸材料領域と角形短柱の端点連続性を引き継ぐ。正の角Rの中長柱は Fc≤58.8399・lk/D≤30、正方形高圧縮Case2は同上限と個別有効域を確認する。円形および直角角形の他の枝で計算できる範囲はこれらの上限より広い。通常の幅厚比、適合鋼種・施工条件、長柱除外の適否を計算の成否から推定できない。異厚BOX・未知角Rの取扱いは製品文書の現行条件を参照。長方形の中長柱は式の準用と位置付け、面外と横座屈を別途確認する。
 - [#1298](https://github.com/hrntsm/SEPIKA/pull/1298) の記号整理に従い、軸引張1.0、短柱円形鋼管の0.89・−1.08、コア応力の0.78、短柱軸圧縮の0.27を区別する。軸引張係数の上げ下げや境界の補間による安全性はMuとQD1/minの両用途で検証が必要。
 - #1421・#1422は既知の数値で追跡する。文献差を理由にした別係数・補間の選択は本文確認後に判断する。許容曲げの低減曲線は[#1124](https://github.com/hrntsm/SEPIKA/issues/1124)、仕口は[#723](https://github.com/hrntsm/SEPIKA/issues/723)の範囲。#325・#440・#418の既存判定は先行記録どおり。未取得本文、規準への全面照合と実物Validationは確認範囲外。
 
-## ローカル検証
+## #1421 の再検証
+
+[円形CFTの製品上の軸力範囲](../../docs/calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md#円形cftの軸力範囲と純軸端点)を公開N–M入口で検査する。原典の版差と採用式の接続条件の確認は [#1495](https://github.com/hrntsm/SEPIKA/issues/1495) で追跡する。
+
+- 短柱圧縮のD/t=25・40・50、中柱・長柱で、円環面積と柱分類の採用式から求めた軸耐力の独立値を照合する。圧縮・引張とも表現可能な直近1浮動小数点刻みの内点・端点・外点を公開曲げ入口と一括終局検定へ入力する。円600×12の短柱と円400×16の長柱の圧縮限界1 N内側、および円400×16の短柱の引張限界1 N内側では、正の曲げ耐力を照合する。中柱Case1が軸圧縮上限に当たることを確認するため、通常の板厚条件外の数値例（円400×0.001）も使用する。
+- 円形長柱の軸圧縮端点では、採用式の角度に入る鋼管分はsNcrとなる。sNcrが全断面降伏力AsFyを下回る代表例で曲げが残る。sNcr=AsFyなら数式上の角度はπとなるが、純軸接続として用いる条件の原典照合は未確認。短柱引張側の1.0と1.08の差、中柱Case1の適用条件、円形長柱高圧縮枝の接続・近傍の妥当性も残る。
+- 一括終局検定は軸圧縮に両軸の小さい耐力、強軸曲げには強軸の長さを使用する。同じ圧縮需要に対して両軸の直接長を入れ替え、軸判定を維持しつつ強軸曲げの算定状態だけが変わる例を確認する。
+- 許容短期のQD1/min/QD2は圧縮・引張の限界内外と純軸端、両軸の直接長を入れ替えた条件を検証する。選択されたQD2の検定比を独立せん断力から照合する。端点では、純軸接続が成立する場合のMu=0もQD1/minに採用しない。保存済み一次検定に新条件を適用するため設計結果契約の版を更新する。
+- GUIとMCPの片持柱は円400×12、Fc24、Fy235。節点間距離1024 mmでは独立値N=−3,437,405.017851808 Nを線形解析が復元し、軸OKと曲げ未算定が同時に成立する。節点間距離3000 mmの引張解析では1浮動小数点刻み内側となる。
+
+検証には以下を実行した。
+
+- `cargo test -p sepika-design-jp --locked --lib cft`（62件）、`cargo test -p sepika-design-jp --locked --test cft_column_buckling`（7件）。
+- `cargo test -p sepika-app --locked --features gui --lib cft_ultimate`（4件）、`cargo test -p sepika-mcp --features mcp --locked --lib circular_cft_public_job`（1件）。生成された各テストバイナリの `cft` 絞り込みでもGUI 28件、MCP 7件が成功した。
+- `cargo run -p xtask --locked -- check-docs`（summary 197、links 1398、impl refs 513）、`mdbook build docs`（出力先指定、本節へのリンクと生成HTML内の数式を確認）、`git diff --check`。
+
+- `cargo clippy -p sepika-core -p sepika-design-jp -p sepika-app -p sepika-mcp --all-targets --features sepika-app/gui,sepika-mcp/mcp --locked -- -D warnings`。
+
+## #955 のローカル検証
 
 - 公開軸・曲げ、一括終局と一次検定、短期せん断の再現コードを実行。
 - `cargo test -p sepika-design-jp --lib --locked cft` で61件、`cargo test -p sepika-design-jp --test cft_column_buckling --locked` で4件が成功。

@@ -219,6 +219,7 @@ pub fn collect_cft_ultimate_checks(
 ///
 /// 許容応力度検定の設計用せん断力 `QD1 = ΣcMy/h′` の cMy（=Mu(N)）にも用いる
 /// （[`crate::cft`]）。対象外・不正入力・未知角Rは理由付きエラー。
+/// 円形では同じ座屈長さの軸終局耐力の範囲外と、純軸端点に接続できない点も理由付きエラー。
 pub fn cft_mu_nm(
     shape: &SectionShape,
     fc: f64,
@@ -226,6 +227,28 @@ pub fn cft_mu_nm(
     n_design: f64,
     lk: f64,
     weak_axis: bool,
+) -> Result<f64, String> {
+    cft_mu_nm_inner(shape, fc, fy, n_design, lk, weak_axis, false)
+}
+
+pub(crate) fn cft_circular_qd1_mu(
+    shape: &SectionShape,
+    fc: f64,
+    fy: f64,
+    n_design: f64,
+    lk: f64,
+) -> Result<f64, String> {
+    cft_mu_nm_inner(shape, fc, fy, n_design, lk, false, true)
+}
+
+fn cft_mu_nm_inner(
+    shape: &SectionShape,
+    fc: f64,
+    fy: f64,
+    n_design: f64,
+    lk: f64,
+    weak_axis: bool,
+    for_qd1: bool,
 ) -> Result<f64, String> {
     if !n_design.is_finite() || !lk.is_finite() || lk < 0.0 {
         return Err("CFT 終局 N–M の軸力・座屈長さが不正です".into());
@@ -303,6 +326,55 @@ pub fn cft_mu_nm(
     if !circular && (n_design < -r.ntu || n_design > r.ncu) {
         return Err("角形 CFT の軸終局耐力を超えています（軸NG）".into());
     }
+    let concrete_buckling = || {
+        r.long_buckling.map_or_else(
+            || cft_concrete_buckling_axial(c_inertia, c_area, fc, lk),
+            |b| b.c_ncr,
+        )
+    };
+    if circular {
+        if ![r.ncu, r.ntu].into_iter().all(|n| n.is_finite() && n > 0.0) {
+            return Err("円形 CFT の軸終局耐力が有限な正値ではありません".into());
+        }
+        if n_design > r.ncu {
+            return Err(format!(
+                "円形 CFT の軸圧縮終局耐力を超えています（軸NG、座屈長さ {lk} mm、N={n_design} N、Ncu={} N）",
+                r.ncu
+            ));
+        }
+        if n_design < -r.ntu {
+            return Err(format!(
+                "円形 CFT の軸引張終局耐力を超えています（軸NG、座屈長さ {lk} mm、N={n_design} N、−Ntu={} N）",
+                -r.ntu
+            ));
+        }
+        let endpoint = if n_design == -r.ntu {
+            Some(("引張", r.class != CftColumnClass::Short))
+        } else if n_design == r.ncu {
+            let connected = match r.class {
+                // θ=πの軸力との差を直接比較すると、D/t=40でも丸めで大小が入れ替わる。
+                CftColumnClass::Short => bd <= 40.0 * thick,
+                CftColumnClass::Medium => r.ncu > concrete_buckling(),
+                CftColumnClass::Long => false,
+            };
+            Some(("圧縮", connected))
+        } else {
+            None
+        };
+        if let Some((side, connected)) = endpoint {
+            if !connected {
+                return Err(format!(
+                    "円形 CFT の純{side}限界と終局 N–M 曲線の接続を確認できません（座屈長さ {lk} mm、N={n_design} N）"
+                ));
+            }
+            if for_qd1 {
+                return Err(format!(
+                    "円形 CFT の純{side}限界で Mu=0 のため QD1/min を算定できません（座屈長さ {lk} mm、N={n_design} N）"
+                ));
+            }
+            return Ok(0.0);
+        }
+    }
     let bending = CftBendingInput {
         circular,
         corner_r,
@@ -320,10 +392,7 @@ pub fn cft_mu_nm(
             &CftLongMediumInput {
                 bending,
                 is_long: r.class == CftColumnClass::Long,
-                c_ncr: r.long_buckling.map_or_else(
-                    || cft_concrete_buckling_axial(c_inertia, c_area, fc, lk),
-                    |b| b.c_ncr,
-                ),
+                c_ncr: concrete_buckling(),
                 c_lambda1: cft_concrete_slenderness(c_inertia, c_area, fc, lk),
                 nk: cft_nk(c_inertia, s_inertia, 205000.0, fc, lk),
                 s_ncr: r.long_buckling.map_or(0.0, |b| b.s_ncr),

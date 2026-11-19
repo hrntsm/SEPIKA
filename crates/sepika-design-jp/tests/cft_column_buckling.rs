@@ -47,6 +47,160 @@ fn cft_ultimate_rejects_concrete_strength_below_statutory_minimum() {
 }
 
 #[test]
+fn circular_cft_ultimate_checks_compression_and_tension_at_each_class_limit() {
+    use sepika_core::{ids::SectionId, section_shape::SectionShape};
+    use sepika_design_jp::ultimate::cft_mu_nm;
+
+    for (d, t, lk, class, expected_ncu, expected_ntu, compression_connects) in [
+        (
+            600.0,
+            12.0,
+            2400.0,
+            CftColumnClass::Short,
+            16_966_749.178_760,
+            7_204_300.273_212,
+            false,
+        ),
+        (
+            480.0,
+            12.0,
+            1920.0,
+            CftColumnClass::Short,
+            12_181_600.912_518,
+            5_734_034.911_332,
+            true,
+        ),
+        (
+            400.0,
+            16.0,
+            1600.0,
+            CftColumnClass::Short,
+            11_157_730.733_972,
+            6_273_132.210_688,
+            true,
+        ),
+        (
+            400.0,
+            16.0,
+            3600.0,
+            CftColumnClass::Medium,
+            9_630_388.896_738,
+            6_273_132.210_688,
+            true,
+        ),
+        (
+            400.0,
+            0.001,
+            3600.0,
+            CftColumnClass::Medium,
+            3_635_176.456_625,
+            408.406_024,
+            false,
+        ),
+        (
+            400.0,
+            16.0,
+            7200.0,
+            CftColumnClass::Long,
+            7_342_847.611_110,
+            6_273_132.210_688,
+            false,
+        ),
+    ] {
+        let shape = SectionShape::CftPipe {
+            outer_dia: d,
+            thick: t,
+        };
+        let mut model = input::cantilever(true, 100_000.0);
+        model.sections[0] = shape.to_section(SectionId(0), "CFT".into());
+        model.sections[0].material = Some(sepika_core::ids::MaterialId(0));
+        model.sections[0].steel_material = Some(sepika_core::ids::MaterialId(1));
+        model.materials[0].fc = Some(30.0);
+        model.materials[1].name = "SN490B".into();
+        model.materials[1].fy = Some(325.0);
+        model.steel_design_attrs = vec![input::direct_lengths(COLUMN, Some(lk), Some(lk))];
+
+        let check = |n| {
+            collect_cft_ultimate_checks(&model, &[(COLUMN, n)])
+                .unwrap()
+                .remove(0)
+        };
+        let zero = check(0.0);
+        assert_eq!(zero.class, class);
+        assert!((zero.ncu - expected_ncu).abs() < 1e-5, "{}", zero.ncu);
+        assert!((zero.ntu - expected_ntu).abs() < 1e-5, "{}", zero.ntu);
+        for (limit, sign, side, connects) in [
+            (zero.ncu, 1.0, "圧縮", compression_connects),
+            (-zero.ntu, -1.0, "引張", class != CftColumnClass::Short),
+        ] {
+            let just_inside = if sign > 0.0 {
+                limit.next_down()
+            } else {
+                limit.next_up()
+            };
+            let just_outside = if sign > 0.0 {
+                limit.next_up()
+            } else {
+                limit.next_down()
+            };
+            let inside = check(just_inside);
+            assert!(inside.ok && inside.mu_nm.unwrap().is_finite());
+            let outer = check(just_outside);
+            assert!(!outer.ok);
+            let reason = outer.mu_nm.unwrap_err();
+            assert!(reason.contains(side) && reason.contains("軸NG"), "{reason}");
+            assert!(reason.contains(&format!("座屈長さ {lk} mm、N={just_outside} N")));
+            assert!(reason.contains(&format!("={limit} N")));
+            assert!(outer.detail.contains(&reason));
+
+            let at = check(limit);
+            assert!(at.ok);
+            if connects {
+                assert_eq!(at.mu_nm.unwrap(), 0.0);
+            } else {
+                let reason = at.mu_nm.unwrap_err();
+                assert!(
+                    reason.contains(&format!("純{side}限界")) && reason.contains("接続"),
+                    "{reason}"
+                );
+                assert!(at.detail.contains(&reason));
+            }
+
+            for n in [just_inside, limit, just_outside] {
+                assert_eq!(cft_mu_nm(&shape, 30.0, 325.0, n, lk, true), check(n).mu_nm);
+            }
+        }
+
+        if d == 600.0 {
+            assert!((check(zero.ncu - 1.0).mu_nm.unwrap() / 1e6 - 4.322_866).abs() < 1e-6);
+        } else if class == CftColumnClass::Long {
+            assert!((check(zero.ncu - 1.0).mu_nm.unwrap() / 1e6 - 201.813_114).abs() < 1e-6);
+        } else if t == 16.0 && class == CftColumnClass::Short {
+            assert!((check(-zero.ntu + 1.0).mu_nm.unwrap() / 1e6 - 96.076_754).abs() < 1e-6);
+        }
+    }
+}
+
+#[test]
+fn circular_cft_ultimate_bending_does_not_adopt_the_weak_axis_limit() {
+    let mut model = input::cantilever(true, 100_000.0);
+    let demand = 6_500_000.0;
+    for (strong, weak, mu_available) in [(1200.0, 7200.0, true), (7200.0, 1200.0, false)] {
+        model.steel_design_attrs = vec![input::direct_lengths(COLUMN, Some(strong), Some(weak))];
+        let row = collect_cft_ultimate_checks(&model, &[(COLUMN, demand)])
+            .unwrap()
+            .remove(0);
+        assert_eq!(row.class, CftColumnClass::Long);
+        assert!(row.ncu < demand && !row.ok);
+        if mu_available {
+            assert!(row.mu_nm.unwrap() > 0.0);
+        } else {
+            assert!(row.mu_nm.unwrap_err().contains("軸圧縮終局耐力"));
+        }
+    }
+}
+
+#[test]
 fn cft_requires_two_finite_positive_direct_lengths_in_both_entries() {
     for circular in [false, true] {
         let mut model = input::cantilever(circular, COMPRESSION_N);

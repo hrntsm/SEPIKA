@@ -52,6 +52,67 @@ async fn cft_ultimate_rejects_concrete_strength_below_statutory_minimum() {
 }
 
 #[tokio::test]
+async fn circular_cft_public_job_retains_axial_status_and_unavailable_mu_reason() {
+    use crate::tests::cft_column_buckling_input::{cantilever, direct_lengths};
+    use sepika_core::ids::ElemId;
+
+    for (lk, n, axial_ok, message) in [
+        (7200.0, 6_500_000.0, false, "軸圧縮終局耐力"),
+        (1200.0, -4_000_000.0, false, "軸引張終局耐力"),
+        (
+            1200.0,
+            -std::f64::consts::PI * (200.0_f64.powi(2) - 188.0_f64.powi(2)) * 235.0,
+            true,
+            "純引張限界",
+        ),
+    ] {
+        let dir = test_store_dir(&format!("circular-cft-axis-{n}"));
+        let mut model = cantilever(true, n);
+        // 3000 mmの入力では弾性解析で復元した引張力が1刻み内側となり、端点に達しない。
+        model.nodes[1].coord[2] = 1024.0;
+        model.steel_design_attrs = vec![direct_lengths(ElemId(0), Some(lk), Some(lk))];
+        let server = SepikaServer::new(make_state(model, &dir));
+        let run = server
+            .analysis_run(Parameters(run_args(JobKind::UltimateCheck)))
+            .await
+            .unwrap();
+        let id = extract_job_id(&run);
+        wait_for_terminal(&server, &id).await;
+        let published = public_status(&server, &id).await;
+        let status = &published["status"];
+        let summary: serde_json::Value =
+            serde_json::from_str(status["Done"]["result_ref"].as_str().expect("終局検定結果"))
+                .unwrap();
+
+        assert_eq!(summary["n_cft_checks"], 1);
+        assert_eq!(summary["n_cft_axial_ng"], usize::from(!axial_ok));
+        assert_eq!(summary["n_cft_mu_unavailable"], 1);
+        assert_eq!(summary["all_checks_calculated_and_ok"], false);
+        let row = &summary["cft_members"][0];
+        assert!(
+            (row["n_design"].as_f64().unwrap() - n).abs() < 0.01,
+            "{row}"
+        );
+        assert_eq!(row["axial_ok"], axial_ok, "{row}");
+        if axial_ok {
+            assert_eq!(
+                row["n_design"].as_f64().unwrap(),
+                -row["ntu"].as_f64().unwrap(),
+                "{row}"
+            );
+        }
+        assert!(row["mu_nm"].is_null(), "{row}");
+        assert!(
+            row["mu_nm_unavailable_reason"]
+                .as_str()
+                .unwrap()
+                .contains(message),
+            "{row}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn cft_long_case2_public_job_keeps_calculated_and_unavailable_diagnostics() {
     for (case_load_n, ok) in [(2_000_000.0, true), (4_000_000.0, false)] {
         let dir = test_store_dir(&format!("cft-case2-{case_load_n}"));

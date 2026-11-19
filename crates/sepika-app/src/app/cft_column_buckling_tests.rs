@@ -33,7 +33,7 @@ fn cft_column_gui_reports_missing_axis_and_expires_older_saved_design() {
     let err = app.compute_cft_ultimate_checks().unwrap_err();
     assert!(err.contains("弱軸の座屈長さ"), "{err}");
 
-    for version in [58, 59, DESIGN_CONTRACT_VERSION] {
+    for version in [58, 59, DESIGN_CONTRACT_VERSION - 1, DESIGN_CONTRACT_VERSION] {
         let (mut loaded, path) = super::result_contract_tests::restore(
             &app,
             Some(ANALYSIS_CONTRACT_VERSION),

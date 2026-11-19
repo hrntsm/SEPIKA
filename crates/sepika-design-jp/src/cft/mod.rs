@@ -485,12 +485,11 @@ fn cft_pipe_check(
         .as_ref()
         .is_some_and(|qd| qd.method != crate::QdMethod::Qd2)
     {
-        let shape = SectionShape::CftPipe { outer_dia, thick };
         let lk = ctx
             .lk_y
             .unwrap_or(ctx.length)
             .max(ctx.lk_z.unwrap_or(ctx.length));
-        2.0 * crate::ultimate::cft_mu_nm(&shape, fc_raw, f_value, n_design, lk, false)?
+        2.0 * crate::ultimate::cft_circular_qd1_mu(&shape, fc_raw, f_value, n_design, lk)?
     } else {
         0.0
     };
