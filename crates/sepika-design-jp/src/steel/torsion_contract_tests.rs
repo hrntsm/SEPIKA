@@ -9,6 +9,7 @@ fn forces() -> MemberForcesAt {
         n: -50_000.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 50_000_000.0,
     }

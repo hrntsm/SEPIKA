@@ -54,6 +54,7 @@ fn check(pipe: bool, term: LoadTerm, steel_e: f64, lambda: f64, concrete_e: f64)
             n: -8.0e6,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         },

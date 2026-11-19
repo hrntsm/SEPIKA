@@ -47,6 +47,7 @@ fn zero_forces() -> MemberForcesAt {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     }
@@ -312,6 +313,7 @@ fn test_cft_pipe_biaxial_smoke() {
         n: -500_000.0,
         qy: 30_000.0,
         qz: 20_000.0,
+        mx: 0.0,
         my: 8_000_000.0,
         mz: 15_000_000.0,
     };

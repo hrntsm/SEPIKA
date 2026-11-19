@@ -69,6 +69,7 @@ fn circular_cft_allowable_bending_matches_linear_stress_equilibrium() {
             n: -axial_fraction * c_nc_n,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: demand_kn_m * 1e6,
         };

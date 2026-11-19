@@ -364,6 +364,7 @@ fn test_fc_missing_fallback() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     };
@@ -406,6 +407,7 @@ fn test_shape_missing_fallback() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     };
@@ -430,6 +432,7 @@ fn test_rc_unsupported_shear_rebar_grade_skip() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     };
@@ -464,6 +467,7 @@ fn test_rc_supported_shear_rebar_fy_missing_skip() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     };
@@ -517,6 +521,7 @@ fn test_rc_circle_beam_and_column_smoke() {
         n: -200_000.0,
         qy: 30_000.0,
         qz: 20_000.0,
+        mx: 0.0,
         my: 10_000_000.0,
         mz: 20_000_000.0,
     };
@@ -597,6 +602,7 @@ fn test_rc_column_rect_check_components_axial_bending_and_shear() {
         n: -200_000.0,
         qy: 50_000.0,
         qz: 30_000.0,
+        mx: 0.0,
         my: 10.0e6,
         mz: 20.0e6,
     };
@@ -623,6 +629,7 @@ fn test_rc_column_circle_check_checked() {
         n: -200_000.0,
         qy: 30_000.0,
         qz: 20_000.0,
+        mx: 0.0,
         my: 10.0e6,
         mz: 20.0e6,
     };
@@ -675,6 +682,7 @@ fn test_rc_beam_rect_bending_depends_on_tension_side() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 40_000_000.0,
     };
@@ -683,6 +691,7 @@ fn test_rc_beam_rect_bending_depends_on_tension_side() {
         n: forces_pos.n,
         qy: forces_pos.qy,
         qz: forces_pos.qz,
+        mx: 0.0,
         my: forces_pos.my,
         mz: -40_000_000.0,
     };
@@ -730,6 +739,7 @@ fn test_rc_circle_beam_bending_matches_circle_axis_props() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz,
     };
@@ -780,6 +790,7 @@ fn test_rc_beam_rect_unset_rebar_skipped() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 10_000_000.0,
     };
@@ -816,6 +827,7 @@ fn test_rc_inconsistent_column_rebar_skipped() {
         n: -100_000.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 10_000_000.0,
     };
@@ -835,6 +847,7 @@ fn test_rc_beam_shape_on_column_skipped() {
         n: -100_000.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 10_000_000.0,
     };
@@ -857,6 +870,7 @@ fn test_rc_column_shape_on_beam_skipped() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 10_000_000.0,
     };
@@ -881,6 +895,7 @@ fn direct_rc_beam_qd1_rejects_missing_q0_without_reviving_ql_and_accepts_valid_z
         n: 0.0,
         qy: 20_000.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 30_000_000.0,
     };
@@ -1091,6 +1106,7 @@ fn concrete_shear_922_rc_beam_and_column_reject_old_passing_shear() {
             n: 0.0,
             qy: q_n,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 0.0,
         };

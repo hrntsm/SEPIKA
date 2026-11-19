@@ -860,14 +860,7 @@ fn draw_peak_check(
                 if selected.is_some_and(|(positions, _)| positions.binary_search(&index).is_err()) {
                     continue;
                 }
-                let mfa = MemberForcesAt {
-                    pos,
-                    n: f[0],
-                    qy: f[1],
-                    qz: f[2],
-                    my: f[4],
-                    mz: f[5],
-                };
+                let mfa = MemberForcesAt::from_local(pos, f);
                 let outcome = checker.check(&mfa, sec, mat, &ctx);
                 if let Some((_, time)) = selected {
                     let side = if mfa.n < 0.0 {
@@ -985,10 +978,10 @@ mod signed_q0_acceptance_tests;
 mod tests {
     use super::*;
 
-    fn peak_check_text(app: &App, index: usize, n: f64, mz: f64) -> String {
+    fn peak_check_text(app: &App, index: usize, forces: [f64; 6]) -> String {
         let mut peak_member_forces = vec![None; index + 1];
         peak_member_forces[index] = Some(MemberForces {
-            at: vec![(0.0, [n, 0.0, 0.0, 0.0, 0.0, mz])],
+            at: vec![(0.0, forces)],
         });
         let rec = ThRecording {
             peak_member_forces,
@@ -1008,6 +1001,16 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn steel_peak_check_shows_the_reason_for_unchecked_torsion() {
+        use crate::app::steel_column_k_tests::input;
+        let mut app = App::default();
+        assert!(app.load_model(input::portal(1.0)));
+
+        let text = peak_check_text(&app, 0, [0.0, 0.0, 0.0, -100e6, 0.0, 0.0]);
+        assert!(text.contains("検定不能: ねじりモーメントMx"), "{text}");
     }
 
     #[test]
@@ -1035,13 +1038,13 @@ mod tests {
             let attr = &mut app.core.model.steel_design_attrs[0];
             attr.lk_y_direct = strong;
             attr.lk_z_direct = weak;
-            let text = peak_check_text(&app, 0, -3_322_800.0, 10_000_000.0);
+            let text = peak_check_text(&app, 0, [-3_322_800.0, 0.0, 0.0, 0.0, 0.0, 10_000_000.0]);
             assert!(text.contains(lengths), "{text}");
             assert!(text.contains(&format!("検定比 {ratio}")), "{text}");
         }
         for direct in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             app.core.model.steel_design_attrs[0].lk_z_direct = Some(direct);
-            let text = peak_check_text(&app, 0, -3_322_800.0, 10_000_000.0);
+            let text = peak_check_text(&app, 0, [-3_322_800.0, 0.0, 0.0, 0.0, 0.0, 10_000_000.0]);
             assert!(
                 text.contains("部材 ID 0: 弱軸の座屈長さの直接指定"),
                 "{text}"
@@ -1192,7 +1195,7 @@ mod tests {
                 (Some(1000.0), "強軸 3500 ／ 弱軸 1000"),
             ] {
                 app.core.model.steel_design_attrs[2].lk_z_direct = weak;
-                let text = peak_check_text(&app, 2, -100_000.0, 0.0);
+                let text = peak_check_text(&app, 2, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
                 assert!(text.contains(expected), "{text}");
                 assert!(text.contains("検定比"), "{text}");
             }
@@ -1204,9 +1207,9 @@ mod tests {
             critical_length: 2000.0,
             length_reduction: 300.0,
         });
-        let before = peak_check_text(&app, 2, -100_000.0, 0.0);
+        let before = peak_check_text(&app, 2, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
         app.core.model.steel_design_attrs[2].lk_z_direct = Some(0.0);
-        let after = peak_check_text(&app, 2, -100_000.0, 0.0);
+        let after = peak_check_text(&app, 2, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(before, after);
         assert!(!after.contains("採用座屈長さ"), "{after}");
         assert!(after.contains("検定比"), "{after}");

@@ -174,6 +174,7 @@ pub(crate) fn zero_forces() -> MemberForcesAt {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     }
@@ -997,6 +998,7 @@ fn sm520_out_of_range_src_beam_and_column_do_not_restore_partial_rc_capacity() {
         n: 0.0,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     };

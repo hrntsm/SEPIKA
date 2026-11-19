@@ -152,6 +152,7 @@ pub struct SeismicQd {
 /// 単位は以下に統一する（プログラム全体と共通）:
 /// - `n`: 軸力 `[N]`（**引張を正、圧縮を負**とする）
 /// - `qy`, `qz`: 部材局所 y/z 方向のせん断力 `[N]`
+/// - `mx`: 部材局所 x 軸まわりのねじりモーメント [N·mm]
 /// - `my`, `mz`: 部材局所 y/z 軸まわりの曲げモーメント [N·mm]
 ///   （`mz` が強軸まわり＝`Section.iy` に対応する曲げ、`my` が弱軸まわり）
 /// - `pos`: 部材軸方向の無次元位置 (0.0=始端, 1.0=終端)
@@ -164,8 +165,24 @@ pub struct MemberForcesAt {
     pub n: f64,
     pub qy: f64,
     pub qz: f64,
+    pub mx: f64,
     pub my: f64,
     pub mz: f64,
+}
+
+impl MemberForcesAt {
+    /// 局所断面力 `[N, Qy, Qz, Mx, My, Mz]` と無次元位置から作る。
+    pub fn from_local(pos: f64, [n, qy, qz, mx, my, mz]: [f64; 6]) -> Self {
+        Self {
+            pos,
+            n,
+            qy,
+            qz,
+            mx,
+            my,
+            mz,
+        }
+    }
 }
 
 /// 検定式の種別（検定比の内訳表示用）。

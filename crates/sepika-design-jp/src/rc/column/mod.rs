@@ -392,6 +392,7 @@ mod tests {
                 qy: 0.0,
                 qz: 0.0,
                 mz: if zero_z { 0.0 } else { 30.0 },
+                mx: 0.0,
                 my: if zero_z { 30.0 } else { 0.0 },
             };
             assert_eq!(
@@ -440,6 +441,7 @@ mod tests {
             pos: 0.5,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
         };
         let mut ctx = ctx_column(LoadTerm::Long);
@@ -573,6 +575,7 @@ mod tests {
             n: 0.0,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 1.0,
         };
@@ -588,6 +591,7 @@ mod tests {
             n: 0.0,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: mz_test,
         };
@@ -614,6 +618,7 @@ mod tests {
             n: -200_000.0,
             qy: 50_000.0,
             qz: 30_000.0,
+            mx: 0.0,
             my: 10.0e6,
             mz: 20.0e6,
         };
@@ -642,6 +647,7 @@ mod tests {
             n: -500_000.0,
             qy: 150_000.0,
             qz: 80_000.0,
+            mx: 0.0,
             my: 40.0e6,
             mz: 60.0e6,
         };
@@ -700,6 +706,7 @@ mod tests {
             n: -300_000.0,
             qy: 0.0,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: 40_000_000.0,
         };

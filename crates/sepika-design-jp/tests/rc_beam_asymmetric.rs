@@ -187,6 +187,7 @@ fn beam_check(case: &Case, pos: f64, slab: bool, demand_nmm: f64, shear_n: f64) 
             n: 0.0,
             qy: shear_n,
             qz: 0.0,
+            mx: 0.0,
             my: 0.0,
             mz: if case.negative {
                 -demand_nmm

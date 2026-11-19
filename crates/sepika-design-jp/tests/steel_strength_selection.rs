@@ -200,6 +200,7 @@ fn issue601_thick_secondary_and_primary_use_the_same_table_strength() {
         n: 1.5e6,
         qy: 0.0,
         qz: 0.0,
+        mx: 0.0,
         my: 0.0,
         mz: 0.0,
     };
