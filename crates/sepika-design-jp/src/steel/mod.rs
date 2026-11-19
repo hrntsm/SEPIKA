@@ -237,6 +237,7 @@ fn check_compression_slenderness(
 /// 平鋼の柱・大梁で片方向でもせん断力が非零なら、理由付きの未算定とする。
 /// H形鋼柱で弱軸せん断と強軸曲げが同時に作用する位置は理由付きで未算定とする。
 /// 圧縮・軸力なしでは確認済みの不適合を保持し、組合せの未算定理由を併記する。
+/// 上下非対称組立H形鋼柱の圧縮・強軸曲げは、無欠損の断面単独照査と独立して確定できる不適合を返す。
 /// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
 
@@ -294,6 +295,15 @@ impl SteelDesign {
             && forces.mz != 0.0
             && shape_of(sec).0 == ShapeCategory::H)
             .then_some("圧縮軸力または軸力なしのH形鋼柱に弱軸せん断と強軸曲げが同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度は未算定です");
+        let asymmetric_shape = if !secondary_post
+            && ctx.kind == MemberKind::Column
+            && forces.n < 0.0
+            && forces.mz != 0.0
+        {
+            column::asymmetric_built_h_shape(sec)
+        } else {
+            None
+        };
         let lambda = match check_compression_slenderness(forces, sec, ctx, torsion_reason) {
             Ok(Some(lambda)) if !secondary_post => lambda,
             Ok(_) => crate::effective_slenderness(
@@ -318,6 +328,15 @@ impl SteelDesign {
                     };
                     detail.push('。');
                     detail.push_str(h_combined_reason);
+                }
+                if let (Some(_), CheckOutcome::Checked(result)) = (asymmetric_shape, &mut outcome) {
+                    for reason in column::asymmetric_built_h_section_reason(forces, sec, ctx)
+                        .into_iter()
+                        .chain(column::asymmetric_built_h_combination_reasons(forces, ctx))
+                    {
+                        result.basis.push('。');
+                        result.basis.push_str(reason);
+                    }
                 }
                 return outcome;
             }
@@ -438,6 +457,9 @@ impl SteelDesign {
         };
         let term = ctx.term;
 
+        if let Some(shape) = asymmetric_shape {
+            return column::check_asymmetric_built_h(forces, sec, shape, ctx, f, h_combined_reason);
+        }
         let cr = match ctx.kind {
             MemberKind::Girder => {
                 beam::check_beam(forces, sec, mat, ctx, f, term, lambda).map(CheckOutcome::Checked)
