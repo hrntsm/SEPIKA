@@ -9,8 +9,8 @@ use crate::app::App;
 use sepika_core::ids::SectionId;
 use sepika_core::model::{FrameSectionUse, Section};
 use sepika_core::section_shape::{
-    BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
-    RectColumnHoop, SectionShape,
+    BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, RebarSize,
+    RectColumnHoop, SectionShape, StandardRebar,
 };
 use sepika_edit::{
     AddCatalogSection, AddSectionShape, EditSectionShape, SectionField, SetSectionField,
@@ -22,16 +22,17 @@ use sepika_section::catalog::CatalogShape;
 #[derive(Debug, Clone)]
 pub struct SectionEditorDraft {
     pub kind: ShapeKind,
-    pub frame_use: FrameSectionUse,
+    pub frame_use: Option<FrameSectionUse>,
     /// 断面符号。階と組で断面の同一性キーになる。
     pub name: String,
     /// 階（空欄は「階の指定なし」）。ST-Bridge 由来の断面は階を持つため、
     /// 既存断面の符号・階を直すときにもこの欄を使う。
     pub floor: String,
-    /// 符号・階の欄へ内容を読み込み済みの断面。断面テーブルで別の断面を選ぶたびに
-    /// その断面の符号・階を欄へ写すための記録で、同じ断面を選び直しても
-    /// 編集途中の入力を上書きしないようにする。
+    /// 断面一覧からフォームへ読み込んだ断面。編集中は同じ断面の値で上書きしない。
     pub synced_focus: Option<SectionId>,
+    pub synced_shape: Option<SectionShape>,
+    pub synced_frame_use: Option<FrameSectionUse>,
+    pub(crate) shape_origin: ShapeDraftOrigin,
     pub h: f64,
     pub b: f64,
     pub tw: f64,
@@ -52,14 +53,14 @@ pub struct SectionEditorDraft {
     pub thick: f64,
     pub rc_b: f64,
     pub rc_d: f64,
-    pub main_dia: f64,
+    pub main_dia: RebarSize,
     pub main_top: Vec<u32>,
     pub main_bottom: Vec<u32>,
     pub main_x: Vec<u32>,
     pub main_y: Vec<u32>,
     pub circle_count: u32,
     pub cover: f64,
-    pub shear_dia: f64,
+    pub shear_dia: RebarSize,
     pub shear_pitch: f64,
     pub shear_legs: u32,
     pub shear_legs_x: u32,
@@ -69,14 +70,24 @@ pub struct SectionEditorDraft {
     pub wall_pwv_ratio: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShapeDraftOrigin {
+    Manual,
+    CurrentSelection,
+    PreviousSelection,
+}
+
 impl Default for SectionEditorDraft {
     fn default() -> Self {
         Self {
             kind: ShapeKind::SteelH,
-            frame_use: FrameSectionUse::Girder,
+            frame_use: Some(FrameSectionUse::Girder),
             name: "断面1".to_string(),
             floor: String::new(),
             synced_focus: None,
+            synced_shape: None,
+            synced_frame_use: None,
+            shape_origin: ShapeDraftOrigin::Manual,
             h: 400.0,
             b: 200.0,
             tw: 8.0,
@@ -96,14 +107,14 @@ impl Default for SectionEditorDraft {
             thick: 8.0,
             rc_b: 400.0,
             rc_d: 600.0,
-            main_dia: 19.0,
+            main_dia: RebarSize::Standard(StandardRebar::D19),
             main_top: vec![3],
             main_bottom: vec![3],
             main_x: vec![3],
             main_y: vec![3],
             circle_count: 8,
             cover: 40.0,
-            shear_dia: 13.0,
+            shear_dia: RebarSize::Standard(StandardRebar::D13),
             shear_pitch: 100.0,
             shear_legs: 2,
             shear_legs_x: 2,
@@ -130,6 +141,8 @@ pub enum ShapeKind {
     RcBeamRect,
     RcColumnRect,
     RcColumnCircle,
+    SrcBeamRect,
+    SrcColumnRect,
     RcSlab,
     RcWall,
 }
@@ -150,11 +163,13 @@ impl ShapeKind {
             ShapeKind::RcBeamRect => "RC 矩形梁",
             ShapeKind::RcColumnRect => "RC 矩形柱",
             ShapeKind::RcColumnCircle => "RC 円形柱",
+            ShapeKind::SrcBeamRect => "SRC 矩形梁",
+            ShapeKind::SrcColumnRect => "SRC 矩形柱",
             ShapeKind::RcSlab => "RC スラブ",
             ShapeKind::RcWall => "RC 耐震壁",
         }
     }
-    pub const ALL: [ShapeKind; 15] = [
+    pub const ALL: [ShapeKind; 17] = [
         ShapeKind::SteelH,
         ShapeKind::SteelBox,
         ShapeKind::SteelAngle,
@@ -168,6 +183,8 @@ impl ShapeKind {
         ShapeKind::RcBeamRect,
         ShapeKind::RcColumnRect,
         ShapeKind::RcColumnCircle,
+        ShapeKind::SrcBeamRect,
+        ShapeKind::SrcColumnRect,
         ShapeKind::RcSlab,
         ShapeKind::RcWall,
     ];
@@ -284,7 +301,12 @@ pub fn catalog_section_panel(ui: &mut egui::Ui, app: &mut App) {
 
         let new_id = SectionId(app.core.model.sections.len() as u32);
         let mut sec = sepika_section::catalog::to_section(entry, new_id);
-        sec.frame_use = Some(app.ui.scoped.section_draft.frame_use);
+        sec.frame_use = app
+            .ui
+            .scoped
+            .section_draft
+            .frame_use
+            .or(Some(FrameSectionUse::Girder));
         let taken =
             sepika_core::model::section_key_taken(&app.core.model.sections, sec.key(), None);
         let add_resp = ui.add_enabled(!taken, egui::Button::new("+ 追加"));
@@ -310,21 +332,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
 
     let focused = focused_section_index(app.ui.scoped.nav.focus_section, &app.core.model.sections)
         .map(|idx| &app.core.model.sections[idx]);
-    if let Some(sec) = focused {
-        if app.ui.scoped.section_draft.synced_focus != Some(sec.id) {
-            if let Some(shape) = &sec.shape {
-                sync_wall_shape(&mut app.ui.scoped.section_draft, shape);
-            }
-            app.ui.scoped.section_draft.name = sec.name.clone();
-            app.ui.scoped.section_draft.floor = sec.floor.clone().unwrap_or_default();
-            if let Some(frame_use) = sec.frame_use {
-                app.ui.scoped.section_draft.frame_use = frame_use;
-            }
-            app.ui.scoped.section_draft.synced_focus = Some(sec.id);
-        }
-    } else {
-        app.ui.scoped.section_draft.synced_focus = None;
-    }
+    sync_selected_section(&mut app.ui.scoped.section_draft, focused);
 
     let focused_radius = focused.and_then(|sec| {
         let radius = match sec.shape.as_ref()? {
@@ -418,6 +426,9 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             ui.label("種別:");
             for k in ShapeKind::ALL {
                 if ui.selectable_label(draft.kind == k, k.label()).clicked() {
+                    if draft.shape_origin == ShapeDraftOrigin::PreviousSelection {
+                        draft.shape_origin = ShapeDraftOrigin::CurrentSelection;
+                    }
                     draft.kind = k;
                 }
             }
@@ -476,6 +487,20 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             }
             ShapeKind::RcColumnCircle => {
                 rc_circle_column_fields(ui, draft);
+            }
+            ShapeKind::SrcBeamRect | ShapeKind::SrcColumnRect => {
+                if draft.kind == ShapeKind::SrcBeamRect {
+                    rc_beam_fields(ui, draft);
+                } else {
+                    rc_rect_column_fields(ui, draft);
+                }
+                ui.horizontal(|ui| {
+                    ui.label("内蔵H形鋼 [mm]");
+                    for (label, value) in [("H", &mut draft.h), ("B", &mut draft.b), ("tw", &mut draft.tw), ("tf", &mut draft.tf)] {
+                        ui.label(label);
+                        num_field(ui, value);
+                    }
+                });
             }
             ShapeKind::RcWall => {
                 ui.horizontal(|ui| {
@@ -565,30 +590,34 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             None => draft.name.clone(),
         };
 
-        if !matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall) {
+        let has_frame_use = !matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall);
+        if has_frame_use {
             let allowed_use = sec.as_ref().ok().and_then(|section| section.rc_frame_use());
             egui::ComboBox::from_label("主架構用途")
                 .selected_text(match draft.frame_use {
-                    FrameSectionUse::Girder => "梁",
-                    FrameSectionUse::Column => "柱",
-                    FrameSectionUse::Brace => "ブレース",
+                    Some(FrameSectionUse::Girder) => "梁",
+                    Some(FrameSectionUse::Column) => "柱",
+                    Some(FrameSectionUse::Brace) => "ブレース",
+                    None => "未設定",
                 })
                 .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut draft.frame_use, None, "未設定");
                     if allowed_use.is_none_or(|usage| usage == FrameSectionUse::Girder) {
-                        ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Girder, "梁");
+                        ui.selectable_value(&mut draft.frame_use, Some(FrameSectionUse::Girder), "梁");
                     }
                     if allowed_use.is_none_or(|usage| usage == FrameSectionUse::Column) {
-                        ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Column, "柱");
+                        ui.selectable_value(&mut draft.frame_use, Some(FrameSectionUse::Column), "柱");
                     }
                     if allowed_use.is_none_or(|usage| usage == FrameSectionUse::Brace) {
-                        ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Brace, "ブレース");
+                        ui.selectable_value(&mut draft.frame_use, Some(FrameSectionUse::Brace), "ブレース");
                     }
                 });
         }
 
+        let frame_use = if has_frame_use { draft.frame_use } else { None };
         let purpose_validation = sec.as_ref().ok().map(|section| {
             let mut candidate = section.clone();
-            candidate.frame_use = Some(draft.frame_use);
+            candidate.frame_use = frame_use;
             candidate.validate_rc_frame_use().map_err(|_| {
                 "RC 梁型は梁、RC 柱型は柱の主架構用途を選択してください".to_owned()
             })
@@ -598,11 +627,14 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         }
 
         ui.horizontal(|ui| {
-            let can_add = purpose_validation.is_ok() && key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok() && sec.is_ok();
+            let needs_use = has_frame_use && frame_use.is_none();
+            let can_add = !needs_use && purpose_validation.is_ok() && key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok() && sec.is_ok();
             let add_resp = ui.add_enabled(can_add, egui::Button::new("+ 追加"));
             if !can_add {
                 add_resp.on_hover_text(if draft.name.trim().is_empty() {
                     "符号を入力してください".to_string()
+                } else if needs_use {
+                    "新規線材断面の主架構用途を選択してください".to_string()
                 } else if let Err(reason) = &purpose_validation {
                     reason.clone()
                 } else if let Err(error) = &sec {
@@ -619,8 +651,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         new_id: predicted_id,
                         name: draft.name.clone(),
                         floor: draft_floor.clone(),
-                        frame_use: (!matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall))
-                            .then_some(draft.frame_use),
+                        frame_use,
                     }),
                 );
                 if applied {
@@ -631,7 +662,8 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             }
             ui.separator();
 
-            let apply_resp = ui.add_enabled(purpose_validation.is_ok() && focus.is_some() && rebar_validation.is_ok() && sec.is_ok(), egui::Button::new("✏ 選択断面へ適用"));
+            let needs_kind_selection = draft.shape_origin == ShapeDraftOrigin::PreviousSelection;
+            let apply_resp = ui.add_enabled(!needs_kind_selection && purpose_validation.is_ok() && focus.is_some() && rebar_validation.is_ok() && sec.is_ok(), egui::Button::new("✏ 選択断面へ適用"));
             match focus {
                 Some(idx) => {
                     let sid = app.core.model.sections[idx].id;
@@ -642,18 +674,21 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         .iter()
                         .filter(|e| e.section == Some(sid))
                         .count();
-                    let apply_resp = apply_resp.on_hover_text(format!(
-                        "現在のフォーム内容で断面 {name} の形状を再定義します\
+                    let apply_resp = if needs_kind_selection {
+                        apply_resp.on_disabled_hover_text("形状を適用するには「種別」を選び直してください")
+                    } else {
+                        apply_resp.on_hover_text(format!(
+                            "現在のフォーム内容で断面 {name} の形状を再定義します\
 （この断面を使う全 {used} 部材に波及。符号と階は維持されます）"
-                    ));
+                        ))
+                    };
                     if apply_resp.clicked() {
                         let applied = app.core.scoped.undo.run(
                             &mut app.core.model,
                             Box::new(EditSectionShape {
                                 section: sid,
                                 new_shape: shape.clone(),
-                                frame_use: (!matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall))
-                                    .then_some(draft.frame_use),
+                                frame_use,
                             }),
                         );
                         if applied {
@@ -1027,22 +1062,29 @@ fn rebar_layers(ui: &mut egui::Ui, label: &str, layers: &mut Vec<u32>) {
     }
 }
 
-/// 標準呼び名以外の径は mm で表示し、標準呼び名を選んだときだけ値を更新する。
-fn size_field(ui: &mut egui::Ui, id: &str, val: &mut f64) {
-    let selected_text = if sepika_core::material_grade::REBAR_NOMINAL_SIZES.contains(val) {
-        format!("D{val}")
-    } else {
-        format!("{val} mm")
-    };
+fn size_field(ui: &mut egui::Ui, id: &str, val: &mut RebarSize) {
     egui::ComboBox::from_id_salt(id)
-        .selected_text(selected_text)
+        .selected_text(val.to_string())
         .show_ui(ui, |ui| {
-            for &s in sepika_core::material_grade::REBAR_NOMINAL_SIZES {
-                if ui.selectable_label(*val == s, format!("D{s}")).clicked() {
-                    *val = s;
-                }
+            for size in StandardRebar::ALL {
+                ui.selectable_value(val, RebarSize::Standard(size), size.to_string());
+            }
+            if ui
+                .selectable_label(matches!(val, RebarSize::DiameterMm(_)), "数値径を入力")
+                .clicked()
+            {
+                *val = RebarSize::DiameterMm(val.designation_or_diameter_mm());
             }
         });
+    if let RebarSize::DiameterMm(diameter) = val {
+        ui.add(
+            egui::DragValue::new(diameter)
+                .speed(0.1)
+                .range(0.0..=f64::MAX)
+                .clamp_existing_to_range(false),
+        )
+        .on_hover_text("数値径 [mm]");
+    }
 }
 
 fn num_field(ui: &mut egui::Ui, val: &mut f64) {
@@ -1050,6 +1092,7 @@ fn num_field(ui: &mut egui::Ui, val: &mut f64) {
         egui::DragValue::new(val)
             .speed(1.0)
             .range(0.0..=1e6)
+            .clamp_existing_to_range(false)
             .max_decimals(1),
     );
 }
@@ -1060,6 +1103,7 @@ fn int_field(ui: &mut egui::Ui, val: &mut u32) {
         egui::DragValue::new(&mut tmp)
             .speed(1.0)
             .range(0.0..=10_000.0)
+            .clamp_existing_to_range(false)
             .max_decimals(0),
     );
     if resp.changed() {
@@ -1076,20 +1120,134 @@ fn non_empty(s: &str) -> Option<String> {
     (!t.is_empty()).then(|| t.to_string())
 }
 
-fn sync_wall_shape(draft: &mut SectionEditorDraft, shape: &SectionShape) {
-    if let SectionShape::RcWall {
-        thickness,
-        ps,
-        pwh_ratio,
-        pwv_ratio,
+fn sync_selected_section(draft: &mut SectionEditorDraft, section: Option<&Section>) {
+    let Some(section) = section else {
+        draft.synced_focus = None;
+        draft.synced_shape = None;
+        draft.synced_frame_use = None;
+        return;
+    };
+    let focus_changed = draft.synced_focus != Some(section.id);
+    if focus_changed {
+        draft.name = section.name.clone();
+        draft.floor = section.floor.clone().unwrap_or_default();
+        draft.synced_focus = Some(section.id);
+    }
+    let shape_changed =
+        focus_changed || !same_loaded_shape(draft.synced_shape.as_ref(), section.shape.as_ref());
+    if shape_changed {
+        if section
+            .shape
+            .as_ref()
+            .is_some_and(|shape| sync_concrete_shape(draft, shape))
+        {
+            draft.shape_origin = ShapeDraftOrigin::CurrentSelection;
+        } else if draft.shape_origin == ShapeDraftOrigin::CurrentSelection {
+            draft.shape_origin = ShapeDraftOrigin::PreviousSelection;
+        }
+        draft.synced_shape.clone_from(&section.shape);
+    }
+    if shape_changed || draft.synced_frame_use != section.frame_use {
+        draft.frame_use = section.frame_use;
+        draft.synced_frame_use = section.frame_use;
+    }
+}
+
+fn same_loaded_shape(previous: Option<&SectionShape>, current: Option<&SectionShape>) -> bool {
+    if previous == current {
+        return true;
+    }
+    let (Some(previous), Some(current)) = (previous, current) else {
+        return false;
+    };
+    // 配筋修復中に同一の保存入力で上書きしないよう、NaN を含む形状も比較する。
+    matches!(
+        (rmp_serde::to_vec_named(previous), rmp_serde::to_vec_named(current)),
+        (Ok(previous), Ok(current)) if previous == current
+    )
+}
+
+fn sync_concrete_shape(draft: &mut SectionEditorDraft, shape: &SectionShape) -> bool {
+    match shape {
+        SectionShape::RcBeamRect { b, d, rebar }
+        | SectionShape::SrcBeamRect { b, d, rebar, .. } => {
+            draft.kind = if matches!(shape, SectionShape::SrcBeamRect { .. }) {
+                ShapeKind::SrcBeamRect
+            } else {
+                ShapeKind::RcBeamRect
+            };
+            (draft.rc_b, draft.rc_d) = (*b, *d);
+            draft.main_dia = rebar.main_dia;
+            draft.main_top.clone_from(&rebar.top);
+            draft.main_bottom.clone_from(&rebar.bottom);
+            draft.cover = rebar.cover;
+            draft.shear_dia = rebar.stirrup.dia;
+            draft.shear_pitch = rebar.stirrup.pitch;
+            draft.shear_legs = rebar.stirrup.legs;
+        }
+        SectionShape::RcColumnRect { b, d, rebar }
+        | SectionShape::SrcColumnRect { b, d, rebar, .. } => {
+            draft.kind = if matches!(shape, SectionShape::SrcColumnRect { .. }) {
+                ShapeKind::SrcColumnRect
+            } else {
+                ShapeKind::RcColumnRect
+            };
+            (draft.rc_b, draft.rc_d) = (*b, *d);
+            draft.main_dia = rebar.main_dia;
+            draft.main_x.clone_from(&rebar.x);
+            draft.main_y.clone_from(&rebar.y);
+            draft.cover = rebar.cover;
+            draft.shear_dia = rebar.hoop.dia;
+            draft.shear_pitch = rebar.hoop.pitch;
+            draft.shear_legs_x = rebar.hoop.legs_x;
+            draft.shear_legs_y = rebar.hoop.legs_y;
+        }
+        SectionShape::RcColumnCircle { d, rebar } => {
+            draft.kind = ShapeKind::RcColumnCircle;
+            draft.rc_d = *d;
+            draft.main_dia = rebar.main_dia;
+            draft.circle_count = rebar.count;
+            draft.cover = rebar.cover;
+            draft.shear_dia = rebar.hoop.dia;
+            draft.shear_pitch = rebar.hoop.pitch;
+        }
+        SectionShape::RcWall {
+            thickness,
+            ps,
+            pwh_ratio,
+            pwv_ratio,
+        } => {
+            draft.kind = ShapeKind::RcWall;
+            draft.thick = *thickness;
+            draft.wall_ps = *ps;
+            draft.wall_pwh_ratio = *pwh_ratio;
+            draft.wall_pwv_ratio = *pwv_ratio;
+        }
+        _ => return false,
+    }
+    if let SectionShape::SrcBeamRect {
+        steel_height,
+        steel_width,
+        steel_web_thick,
+        steel_flange_thick,
+        ..
+    }
+    | SectionShape::SrcColumnRect {
+        steel_height,
+        steel_width,
+        steel_web_thick,
+        steel_flange_thick,
+        ..
     } = shape
     {
-        draft.kind = ShapeKind::RcWall;
-        draft.thick = *thickness;
-        draft.wall_ps = *ps;
-        draft.wall_pwh_ratio = *pwh_ratio;
-        draft.wall_pwv_ratio = *pwv_ratio;
+        (draft.h, draft.b, draft.tw, draft.tf) = (
+            *steel_height,
+            *steel_width,
+            *steel_web_thick,
+            *steel_flange_thick,
+        );
     }
+    true
 }
 
 fn build_shape(d: &SectionEditorDraft) -> SectionShape {
@@ -1148,28 +1306,41 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
             lower_thick: d.lower_thick,
             web_thick: d.tw,
         },
-        ShapeKind::RcBeamRect => SectionShape::RcBeamRect {
-            b: d.rc_b,
-            d: d.rc_d,
-            rebar: RcBeamRebar {
+        ShapeKind::RcBeamRect | ShapeKind::SrcBeamRect => {
+            let rebar = RcBeamRebar {
                 main_dia: d.main_dia,
-                top: nonzero_layers(&d.main_top),
-                bottom: nonzero_layers(&d.main_bottom),
+                top: d.main_top.clone(),
+                bottom: d.main_bottom.clone(),
                 cover: d.cover,
                 stirrup: BeamStirrup {
                     dia: d.shear_dia,
                     pitch: d.shear_pitch,
                     legs: d.shear_legs,
                 },
-            },
-        },
-        ShapeKind::RcColumnRect => SectionShape::RcColumnRect {
-            b: d.rc_b,
-            d: d.rc_d,
-            rebar: RcRectColumnRebar {
+            };
+            if d.kind == ShapeKind::SrcBeamRect {
+                SectionShape::SrcBeamRect {
+                    b: d.rc_b,
+                    d: d.rc_d,
+                    rebar,
+                    steel_height: d.h,
+                    steel_width: d.b,
+                    steel_web_thick: d.tw,
+                    steel_flange_thick: d.tf,
+                }
+            } else {
+                SectionShape::RcBeamRect {
+                    b: d.rc_b,
+                    d: d.rc_d,
+                    rebar,
+                }
+            }
+        }
+        ShapeKind::RcColumnRect | ShapeKind::SrcColumnRect => {
+            let rebar = RcRectColumnRebar {
                 main_dia: d.main_dia,
-                x: nonzero_layers(&d.main_x),
-                y: nonzero_layers(&d.main_y),
+                x: d.main_x.clone(),
+                y: d.main_y.clone(),
                 cover: d.cover,
                 hoop: RectColumnHoop {
                     dia: d.shear_dia,
@@ -1177,8 +1348,25 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
                     legs_x: d.shear_legs_x,
                     legs_y: d.shear_legs_y,
                 },
-            },
-        },
+            };
+            if d.kind == ShapeKind::SrcColumnRect {
+                SectionShape::SrcColumnRect {
+                    b: d.rc_b,
+                    d: d.rc_d,
+                    rebar,
+                    steel_height: d.h,
+                    steel_width: d.b,
+                    steel_web_thick: d.tw,
+                    steel_flange_thick: d.tf,
+                }
+            } else {
+                SectionShape::RcColumnRect {
+                    b: d.rc_b,
+                    d: d.rc_d,
+                    rebar,
+                }
+            }
+        }
         ShapeKind::RcColumnCircle => SectionShape::RcColumnCircle {
             d: d.rc_d,
             rebar: RcCircleColumnRebar {
@@ -1198,15 +1386,6 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
             pwh_ratio: d.wall_pwh_ratio,
             pwv_ratio: d.wall_pwv_ratio,
         },
-    }
-}
-
-fn nonzero_layers(layers: &[u32]) -> Vec<u32> {
-    let result: Vec<_> = layers.iter().copied().filter(|count| *count > 0).collect();
-    if result.is_empty() {
-        vec![3]
-    } else {
-        result
     }
 }
 
@@ -1259,7 +1438,7 @@ mod tests {
 
     fn render_size_field(
         context: &egui::Context,
-        val: &mut f64,
+        val: &mut RebarSize,
         events: Vec<egui::Event>,
     ) -> Vec<(String, egui::Rect)> {
         let output = context.run_ui(
@@ -1269,6 +1448,10 @@ mod tests {
             },
             |ui| size_field(ui, "test_rebar_dia", val),
         );
+        rendered_text(&output)
+    }
+
+    fn rendered_text(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
         fn collect(shape: &egui::Shape, texts: &mut Vec<(String, egui::Rect)>) {
             match shape {
                 egui::Shape::Text(text) => texts.push((
@@ -1284,7 +1467,7 @@ mod tests {
             }
         }
         let mut texts = Vec::new();
-        for shape in output.shapes {
+        for shape in &output.shapes {
             collect(&shape.shape, &mut texts);
         }
         texts
@@ -1311,15 +1494,17 @@ mod tests {
     #[test]
     fn rebar_size_display_preserves_numeric_diameter_and_section_data() {
         for (dia, label) in [
-            (28.6, "28.6 mm"),
-            (25.0, "D25"),
-            (29.0, "D29"),
-            (28.0, "28 mm"),
+            (RebarSize::DiameterMm(28.6), "28.6 mm"),
+            (RebarSize::DiameterMm(19.0), "19 mm"),
+            (RebarSize::Standard(StandardRebar::D19), "D19"),
+            (RebarSize::Standard(StandardRebar::D29), "D29"),
         ] {
             for kind in [
                 ShapeKind::RcBeamRect,
                 ShapeKind::RcColumnRect,
                 ShapeKind::RcColumnCircle,
+                ShapeKind::SrcBeamRect,
+                ShapeKind::SrcColumnRect,
             ] {
                 let mut draft = SectionEditorDraft {
                     kind,
@@ -1328,8 +1513,9 @@ mod tests {
                     ..Default::default()
                 };
                 let shape = build_shape(&draft);
-                let section = shape.to_section(SectionId(1), "配筋断面".into());
-                let saved = bincode::serialize(&section).unwrap();
+                let mut reopened = SectionEditorDraft::default();
+                sync_concrete_shape(&mut reopened, &shape);
+                assert_eq!(build_shape(&reopened), shape);
                 let context = egui::Context::default();
                 for value in [&mut draft.main_dia, &mut draft.shear_dia] {
                     let texts = render_size_field(&context, value, Vec::new());
@@ -1338,16 +1524,12 @@ mod tests {
                 }
                 let after = build_shape(&draft);
                 assert_eq!(after, shape);
-                assert_eq!(
-                    bincode::serialize(&after.to_section(SectionId(1), "配筋断面".into())).unwrap(),
-                    saved
-                );
             }
         }
 
         let mut draft = SectionEditorDraft {
             kind: ShapeKind::RcBeamRect,
-            main_dia: 28.6,
+            main_dia: RebarSize::DiameterMm(28.6),
             ..Default::default()
         };
         let mut model = crate::sample::portal_frame();
@@ -1365,25 +1547,380 @@ mod tests {
 
     #[test]
     fn rebar_size_selection_replaces_numeric_diameter_with_standard_size() {
-        for target in [25.0, 29.0] {
+        for target in [StandardRebar::D25, StandardRebar::D29] {
             let context = egui::Context::default();
-            let mut dia = 28.6;
+            let mut dia = RebarSize::DiameterMm(28.6);
             let texts = render_size_field(&context, &mut dia, Vec::new());
             let button = texts.iter().find(|(text, _)| text == "28.6 mm").unwrap().1;
             render_size_field(&context, &mut dia, click_at(button.center()));
             let texts = render_size_field(&context, &mut dia, Vec::new());
-            assert_eq!(dia, 28.6);
+            assert_eq!(dia, RebarSize::DiameterMm(28.6));
             assert!(!texts.iter().any(|(text, _)| text == "D28"));
             let option = texts
                 .iter()
-                .find(|(text, _)| text == &format!("D{target}"))
+                .find(|(text, _)| text == &target.to_string())
                 .unwrap()
                 .1;
             render_size_field(&context, &mut dia, click_at(option.center()));
-            assert_eq!(dia, target);
+            assert_eq!(dia, RebarSize::Standard(target));
             let texts = render_size_field(&context, &mut dia, Vec::new());
-            assert!(texts.iter().any(|(text, _)| text == &format!("D{target}")));
+            assert!(texts.iter().any(|(text, _)| text == &target.to_string()));
         }
+    }
+
+    #[test]
+    fn editing_rebar_size_preserves_loaded_layer_counts_including_invalid_gaps() {
+        let shape = SectionShape::RcBeamRect {
+            b: 400.0,
+            d: 600.0,
+            rebar: RcBeamRebar {
+                main_dia: RebarSize::DiameterMm(19.0),
+                top: vec![3, 0, 2],
+                bottom: vec![3],
+                cover: 40.0,
+                stirrup: BeamStirrup {
+                    dia: RebarSize::Standard(StandardRebar::D10),
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        };
+        let mut draft = SectionEditorDraft::default();
+        sync_concrete_shape(&mut draft, &shape);
+        draft.main_dia = RebarSize::Standard(StandardRebar::D19);
+        let edited = build_shape(&draft);
+        assert!(matches!(
+            edited.validate_rebar(),
+            Err(sepika_core::error::RebarGeometryError::InvalidLayer {
+                layer: 1,
+                count: 0,
+                ..
+            })
+        ));
+        let SectionShape::RcBeamRect { rebar, .. } = edited else {
+            unreachable!()
+        };
+        assert_eq!(rebar.top, [3, 0, 2]);
+        assert_eq!(rebar.main_dia, RebarSize::Standard(StandardRebar::D19));
+    }
+
+    #[test]
+    fn rebar_form_keeps_loaded_dimensions_outside_the_interactive_range() {
+        let source = SectionEditorDraft {
+            kind: ShapeKind::RcBeamRect,
+            shear_pitch: 2_000_000.0,
+            shear_legs: 10_001,
+            ..Default::default()
+        };
+        let shape = build_shape(&source);
+        assert!(shape.validate_rebar().is_ok());
+        let mut draft = SectionEditorDraft::default();
+        sync_concrete_shape(&mut draft, &shape);
+        let context = egui::Context::default();
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            rc_beam_fields(ui, &mut draft)
+        });
+        draft.main_dia = RebarSize::DiameterMm(19.0);
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            rc_beam_fields(ui, &mut draft)
+        });
+
+        let SectionShape::RcBeamRect { rebar, .. } = build_shape(&draft) else {
+            unreachable!()
+        };
+        assert_eq!(rebar.main_dia, RebarSize::DiameterMm(19.0));
+        assert_eq!(rebar.stirrup.pitch, source.shear_pitch);
+        assert_eq!(rebar.stirrup.legs, source.shear_legs);
+    }
+
+    #[test]
+    fn selected_rebar_draft_updates_on_undo_and_redo_without_overwriting_unapplied_edits() {
+        let sid = SectionId(0);
+        let standard_size = RebarSize::Standard(StandardRebar::D19);
+        let numeric_size = RebarSize::DiameterMm(19.0);
+        let mut draft = SectionEditorDraft {
+            kind: ShapeKind::RcBeamRect,
+            ..Default::default()
+        };
+        let mut section = build_shape(&draft).to_section(sid, "梁".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        let mut model = sepika_core::model::Model {
+            sections: vec![section],
+            ..Default::default()
+        };
+        let mut undo = sepika_edit::UndoStack::new();
+        sync_selected_section(&mut draft, Some(&model.sections[0]));
+        assert_eq!(draft.main_dia, standard_size);
+
+        draft.main_dia = numeric_size;
+        sync_selected_section(&mut draft, Some(&model.sections[0]));
+        assert_eq!(draft.main_dia, numeric_size);
+        assert!(undo.run(
+            &mut model,
+            Box::new(EditSectionShape {
+                section: sid,
+                new_shape: build_shape(&draft),
+                frame_use: Some(FrameSectionUse::Girder),
+            })
+        ));
+        sync_selected_section(&mut draft, Some(&model.sections[0]));
+        assert_eq!(draft.main_dia, numeric_size);
+        undo.undo(&mut model);
+        sync_selected_section(&mut draft, Some(&model.sections[0]));
+        assert_eq!(draft.main_dia, standard_size);
+        undo.redo(&mut model);
+        sync_selected_section(&mut draft, Some(&model.sections[0]));
+        assert_eq!(draft.main_dia, numeric_size);
+    }
+
+    #[test]
+    fn editing_an_rc_post_keeps_unset_frame_use_and_tracks_purpose_only_undo() {
+        use sepika_core::model::{
+            Model, SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind,
+        };
+
+        let sid = SectionId(0);
+        let source = SectionEditorDraft {
+            kind: ShapeKind::RcColumnRect,
+            ..Default::default()
+        };
+        let shape = build_shape(&source);
+        let section = shape.to_section(sid, "間柱".into());
+        assert_eq!(section.frame_use, None);
+        let mut app = App::default();
+        assert!(app.load_model(Model {
+            sections: vec![section],
+            unassigned_posts: vec![SecondaryMember {
+                kind: SecondaryMemberKind::Post,
+                ends: SecondaryMemberEnds::Detached([[0.0; 3], [0.0, 0.0, 3_000.0]]),
+                section: Some(sid),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        app.ui.scoped.nav.focus_section = Some(sid);
+        let context = egui::Context::default();
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            section_editor_panel(ui, &mut app)
+        });
+        assert_eq!(app.ui.scoped.section_draft.frame_use, None);
+
+        let numeric = RebarSize::DiameterMm(19.0);
+        app.ui.scoped.section_draft.main_dia = numeric;
+        let output = context.run_ui(egui::RawInput::default(), |ui| {
+            section_editor_panel(ui, &mut app)
+        });
+        let apply = rendered_text(&output)
+            .into_iter()
+            .find(|(text, _)| text.contains("選択断面へ適用"))
+            .unwrap()
+            .1
+            .center();
+        for pressed in [true, false] {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    events: vec![
+                        egui::Event::PointerMoved(apply),
+                        egui::Event::PointerButton {
+                            pos: apply,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |ui| section_editor_panel(ui, &mut app),
+            );
+        }
+        let section = &app.core.model.sections[0];
+        assert_eq!(section.frame_use, None);
+        assert_eq!(
+            section.shape.as_ref().unwrap().rebar_sizes(),
+            Some((numeric, source.shear_dia))
+        );
+        let edited_shape = section.shape.clone().unwrap();
+
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(EditSectionShape {
+                section: sid,
+                new_shape: edited_shape.clone(),
+                frame_use: Some(FrameSectionUse::Column),
+            })
+        ));
+        let draft = &mut app.ui.scoped.section_draft;
+        sync_selected_section(draft, Some(&app.core.model.sections[0]));
+        assert_eq!(draft.frame_use, Some(FrameSectionUse::Column));
+        app.core.scoped.undo.undo(&mut app.core.model);
+        sync_selected_section(draft, Some(&app.core.model.sections[0]));
+        assert_eq!(draft.frame_use, None);
+        app.core.scoped.undo.redo(&mut app.core.model);
+        sync_selected_section(draft, Some(&app.core.model.sections[0]));
+        assert_eq!(draft.frame_use, Some(FrameSectionUse::Column));
+        assert_eq!(build_shape(draft), edited_shape);
+    }
+
+    #[test]
+    fn changing_to_a_steel_section_requires_choosing_a_shape_before_applying() {
+        use sepika_core::model::Model;
+
+        fn click_panel_text(context: &egui::Context, app: &mut App, label: &str) {
+            let output = context.run_ui(egui::RawInput::default(), |ui| {
+                section_editor_panel(ui, app)
+            });
+            let point = rendered_text(&output)
+                .into_iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("missing control {label}"))
+                .1
+                .center();
+            for pressed in [true, false] {
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        events: vec![
+                            egui::Event::PointerMoved(point),
+                            egui::Event::PointerButton {
+                                pos: point,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: Default::default(),
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                    |ui| section_editor_panel(ui, app),
+                );
+            }
+        }
+
+        let concrete_id = SectionId(0);
+        let steel_id = SectionId(1);
+        let other_steel_id = SectionId(2);
+        let rc = build_shape(&SectionEditorDraft {
+            kind: ShapeKind::RcBeamRect,
+            ..Default::default()
+        });
+        let steel_form = SectionEditorDraft {
+            r: Some(0.0),
+            ..Default::default()
+        };
+        let steel = build_shape(&SectionEditorDraft {
+            h: 450.0,
+            ..steel_form.clone()
+        });
+        let mut app = App::default();
+        assert!(app.load_model(Model {
+            sections: vec![
+                rc.to_section(concrete_id, "RC梁".into()),
+                steel.to_section(steel_id, "鋼梁".into()),
+                steel.to_section(other_steel_id, "鋼梁2".into()),
+            ],
+            ..Default::default()
+        }));
+        app.ui.scoped.section_draft = steel_form.clone();
+        let context = egui::Context::default();
+        let apply = "✏ 選択断面へ適用";
+
+        app.ui.scoped.nav.focus_section = Some(concrete_id);
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            section_editor_panel(ui, &mut app)
+        });
+        assert_eq!(app.ui.scoped.section_draft.kind, ShapeKind::RcBeamRect);
+        click_panel_text(&context, &mut app, ShapeKind::RcColumnRect.label());
+        assert_eq!(app.ui.scoped.section_draft.kind, ShapeKind::RcColumnRect);
+        app.ui.scoped.nav.focus_section = Some(steel_id);
+        click_panel_text(&context, &mut app, apply);
+        assert_eq!(app.core.model.sections[1].shape.as_ref(), Some(&steel));
+
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(EditSectionShape {
+                section: steel_id,
+                new_shape: rc.clone(),
+                frame_use: Some(FrameSectionUse::Girder),
+            })
+        ));
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            section_editor_panel(ui, &mut app)
+        });
+        assert_eq!(app.ui.scoped.section_draft.kind, ShapeKind::RcBeamRect);
+        app.core.scoped.undo.undo(&mut app.core.model);
+        click_panel_text(&context, &mut app, apply);
+        assert_eq!(app.core.model.sections[1].shape.as_ref(), Some(&steel));
+
+        click_panel_text(&context, &mut app, ShapeKind::SteelH.label());
+        click_panel_text(&context, &mut app, apply);
+        assert_eq!(
+            app.core.model.sections[1].shape,
+            Some(build_shape(&steel_form))
+        );
+
+        app.ui.scoped.nav.focus_section = Some(other_steel_id);
+        click_panel_text(&context, &mut app, apply);
+        assert_eq!(app.core.model.sections[2].shape.as_ref(), Some(&steel));
+    }
+
+    #[test]
+    fn selected_rebar_draft_can_repair_a_nan_diameter_from_ovika() {
+        let sid = SectionId(0);
+        let source = SectionEditorDraft {
+            kind: ShapeKind::RcBeamRect,
+            ..Default::default()
+        };
+        let mut section = build_shape(&source).to_section(sid, "梁".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        let Some(SectionShape::RcBeamRect { rebar, .. }) = section.shape.as_mut() else {
+            unreachable!()
+        };
+        rebar.main_dia = RebarSize::DiameterMm(f64::NAN);
+        let model = sepika_core::model::Model {
+            sections: vec![section],
+            ..Default::default()
+        };
+        let path =
+            std::env::temp_dir().join(format!("sepika-1584-nan-{}.ovika", uuid::Uuid::new_v4()));
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let mut app = App::default();
+        app.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.ui.scoped.nav.focus_section = Some(sid);
+        let context = egui::Context::default();
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            section_editor_panel(ui, &mut app)
+        });
+        assert!(matches!(
+            app.ui.scoped.section_draft.main_dia,
+            RebarSize::DiameterMm(diameter) if diameter.is_nan()
+        ));
+
+        app.ui.scoped.section_draft.main_dia = RebarSize::Standard(StandardRebar::D19);
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            section_editor_panel(ui, &mut app)
+        });
+        let repaired_shape = build_shape(&app.ui.scoped.section_draft);
+        assert!(repaired_shape.validate_rebar().is_ok());
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(EditSectionShape {
+                section: sid,
+                new_shape: repaired_shape,
+                frame_use: Some(FrameSectionUse::Girder),
+            })
+        ));
+        assert_eq!(
+            app.core.model.sections[0]
+                .shape
+                .as_ref()
+                .unwrap()
+                .rebar_sizes(),
+            Some((RebarSize::Standard(StandardRebar::D19), source.shear_dia)),
+        );
     }
 
     #[test]
@@ -1395,7 +1932,7 @@ mod tests {
             pwv_ratio: Some(0.002),
         };
         let mut draft = SectionEditorDraft::default();
-        sync_wall_shape(&mut draft, &shape);
+        sync_concrete_shape(&mut draft, &shape);
         assert_eq!(build_shape(&draft), shape);
         draft.wall_pwh_ratio = None;
         assert!(matches!(
@@ -1597,7 +2134,7 @@ mod tests {
             Box::new(EditSectionShape {
                 section: sid,
                 new_shape,
-                frame_use: Some(new_draft.frame_use),
+                frame_use: new_draft.frame_use,
             }),
         );
 

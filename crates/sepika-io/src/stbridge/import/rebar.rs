@@ -20,12 +20,12 @@ pub(super) struct RebarGrades {
 /// 幾何のみの RC 梁断面に用いる既定配筋（無筋相当）。
 pub(super) fn default_beam_rebar() -> RcBeamRebar {
     RcBeamRebar {
-        main_dia: 0.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
         top: Vec::new(),
         bottom: Vec::new(),
         cover: 0.0,
         stirrup: BeamStirrup {
-            dia: 0.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             pitch: 0.0,
             legs: 0,
         },
@@ -35,12 +35,12 @@ pub(super) fn default_beam_rebar() -> RcBeamRebar {
 /// 幾何のみの RC 矩形柱断面に用いる既定配筋（無筋相当）。
 pub(super) fn default_rect_column_rebar() -> RcRectColumnRebar {
     RcRectColumnRebar {
-        main_dia: 0.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
         x: Vec::new(),
         y: Vec::new(),
         cover: 0.0,
         hoop: RectColumnHoop {
-            dia: 0.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             pitch: 0.0,
             legs_x: 0,
             legs_y: 0,
@@ -51,11 +51,11 @@ pub(super) fn default_rect_column_rebar() -> RcRectColumnRebar {
 /// 幾何のみの RC 円形柱断面に用いる既定配筋（無筋相当）。
 pub(super) fn default_circle_column_rebar() -> RcCircleColumnRebar {
     RcCircleColumnRebar {
-        main_dia: 0.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
         count: 0,
         cover: 0.0,
         hoop: CircleColumnHoop {
-            dia: 0.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             pitch: 0.0,
         },
     }
@@ -140,12 +140,12 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades) {
     let top = stage_counts(a, "N_main_top_", 3);
     let bottom = stage_counts(a, "N_main_bottom_", 3);
     let mut rebar = RcBeamRebar {
-        main_dia: attr_dia(a, &["D_main"]),
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(attr_dia(a, &["D_main"])),
         top,
         bottom,
         cover: attr_f64(a, &["depth_cover_top", "depth_cover_bottom"]),
         stirrup: BeamStirrup {
-            dia: attr_dia(a, &["D_stirrup"]),
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(attr_dia(a, &["D_stirrup"])),
             pitch: attr_f64(a, &["pitch_stirrup"]),
             legs: attr_u32(a, &["N_stirrup"]),
         },
@@ -157,7 +157,9 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades) {
                 .and_then(|v| stb_numeric_lexical(v).parse::<f64>().ok())
         })
     {
-        rebar.cover = center - rebar.stirrup.dia - rebar.main_dia / 2.0;
+        rebar.cover = center
+            - rebar.stirrup.dia.designation_or_diameter_mm()
+            - rebar.main_dia.designation_or_diameter_mm() / 2.0;
     }
     (rebar, parse_grades(a, "strength_stirrup"))
 }
@@ -170,7 +172,7 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
     let legs_x = attr_u32(a, &["N_band_direction_X"]);
     let legs_y = attr_u32(a, &["N_band_direction_Y"]);
     let mut rebar = RcRectColumnRebar {
-        main_dia: attr_dia(a, &["D_main"]),
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(attr_dia(a, &["D_main"])),
         x,
         y,
         cover: attr_f64(
@@ -183,7 +185,7 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
             ],
         ),
         hoop: RectColumnHoop {
-            dia: attr_dia(a, &["D_band"]),
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(attr_dia(a, &["D_band"])),
             pitch: attr_f64(a, &["pitch_band"]),
             legs_x,
             legs_y,
@@ -200,7 +202,9 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
         a.get(k)
             .and_then(|v| stb_numeric_lexical(v).parse::<f64>().ok())
     }) {
-        rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
+        rebar.cover = center
+            - rebar.hoop.dia.designation_or_diameter_mm()
+            - rebar.main_dia.designation_or_diameter_mm() / 2.0;
     }
     (rebar, parse_grades(a, "strength_band"))
 }
@@ -208,7 +212,7 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
 /// 円形柱の主筋全本数と帯筋径・間隔を読む。
 pub(super) fn parse_circle_column_rebar(a: &Attrs) -> (RcCircleColumnRebar, RebarGrades) {
     let mut rebar = RcCircleColumnRebar {
-        main_dia: attr_dia(a, &["D_main"]),
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(attr_dia(a, &["D_main"])),
         count: attr_u32(a, &["N_main"]),
         cover: attr_f64(
             a,
@@ -220,7 +224,7 @@ pub(super) fn parse_circle_column_rebar(a: &Attrs) -> (RcCircleColumnRebar, Reba
             ],
         ),
         hoop: CircleColumnHoop {
-            dia: attr_dia(a, &["D_band"]),
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(attr_dia(a, &["D_band"])),
             pitch: attr_f64(a, &["pitch_band"]),
         },
     };
@@ -235,7 +239,9 @@ pub(super) fn parse_circle_column_rebar(a: &Attrs) -> (RcCircleColumnRebar, Reba
         a.get(k)
             .and_then(|v| stb_numeric_lexical(v).parse::<f64>().ok())
     }) {
-        rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
+        rebar.cover = center
+            - rebar.hoop.dia.designation_or_diameter_mm()
+            - rebar.main_dia.designation_or_diameter_mm() / 2.0;
     }
     (rebar, parse_grades(a, "strength_band"))
 }

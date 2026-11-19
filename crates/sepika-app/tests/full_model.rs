@@ -396,14 +396,21 @@ fn original_fixture_resolves_beam_positions_and_analysis_derivative_explicitly_s
             panic!("{name}は矩形RC梁");
         };
         assert_eq!((*b, *d), dimensions, "{name}の外形");
-        assert_eq!((rebar.main_dia, rebar.stirrup.dia), (25.0, 13.0));
+        assert_eq!(
+            (
+                rebar.main_dia.designation_or_diameter_mm(),
+                rebar.stirrup.dia.designation_or_diameter_mm()
+            ),
+            (25.0, 13.0)
+        );
         assert_eq!((rebar.stirrup.pitch, rebar.stirrup.legs), (200.0, 2));
         assert_eq!(rebar.top, [4]);
         assert_eq!(rebar.bottom, [4]);
         assert_eq!(rebar.cover, 0.0, "原本のApplyなし位置は非適用");
         if name == "FB1" {
             // 独立な芯間計算。径・本数・外形を変えず、中心だけで配置を成立させる。
-            let minimum = rebar.main_dia + (1.5 * rebar.main_dia).max(25.0);
+            let minimum = rebar.main_dia.designation_or_diameter_mm()
+                + (1.5 * rebar.main_dia.designation_or_diameter_mm()).max(25.0);
             let spaces = f64::from(rebar.top[0] - 1);
             assert!((*b - 2.0 * 65.5) / spaces < minimum);
             assert!((*b - 2.0 * 51.0) / spaces >= minimum);
@@ -692,12 +699,12 @@ fn prepared_rectangular_rc_portal() -> App {
             b: 600.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 x: vec![8],
                 y: vec![8],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -708,12 +715,12 @@ fn prepared_rectangular_rc_portal() -> App {
             b: 400.0,
             d: 700.0,
             rebar: RcBeamRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 top: vec![4],
                 bottom: vec![4],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },

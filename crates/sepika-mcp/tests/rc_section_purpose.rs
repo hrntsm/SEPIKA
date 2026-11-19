@@ -9,12 +9,12 @@ fn shapes() -> [SectionShape; 3] {
             b: 300.,
             d: 500.,
             rebar: RcBeamRebar {
-                main_dia: 22.,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.),
                 top: vec![3],
                 bottom: vec![4],
                 cover: 40.,
                 stirrup: BeamStirrup {
-                    dia: 10.,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.),
                     pitch: 150.,
                     legs: 2,
                 },
@@ -24,12 +24,12 @@ fn shapes() -> [SectionShape; 3] {
             b: 600.,
             d: 600.,
             rebar: RcRectColumnRebar {
-                main_dia: 19.,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.),
                 x: vec![4],
                 y: vec![4],
                 cover: 40.,
                 hoop: RectColumnHoop {
-                    dia: 10.,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.),
                     pitch: 150.,
                     legs_x: 2,
                     legs_y: 2,
@@ -39,11 +39,11 @@ fn shapes() -> [SectionShape; 3] {
         SectionShape::RcColumnCircle {
             d: 600.,
             rebar: RcCircleColumnRebar {
-                main_dia: 19.,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.),
                 count: 12,
                 cover: 40.,
                 hoop: CircleColumnHoop {
-                    dia: 10.,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.),
                     pitch: 150.,
                 },
             },

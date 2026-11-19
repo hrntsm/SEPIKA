@@ -335,15 +335,6 @@ pub fn shear_rebar_material_issue(mat: Option<&crate::model::Material>) -> Optio
 /// UI で選択できる主筋のグレード（表示順。JIS G 3112 の異形棒鋼と高強度異形棒鋼）。
 pub const MAIN_REBAR_GRADES: &[&str] = &["SD295A", "SD295B", "SD345", "SD390", "SD490", "USD685"];
 
-/// UI で選択できる鉄筋の呼び名サイズ（`D10`〜`D41`。表示順）。
-///
-/// 数値は**呼び名の数値**であり、用途別配筋の径フィールドはこの値で保持する
-/// （許容応力度の径依存判定（`dia >= 29.0` ＝ D29 以上）と単位を揃えるため。
-/// 公称直径 `[mm]` ではない）。
-pub const REBAR_NOMINAL_SIZES: &[f64] = &[
-    10.0, 13.0, 16.0, 19.0, 22.0, 25.0, 29.0, 32.0, 35.0, 38.0, 41.0,
-];
-
 /// コンクリートのグレード名 `FcXX` から設計基準強度 Fc [N/mm²] を取り出す。
 /// 大文字小文字を問わず `Fc` で始まり、続く数値を Fc とする（`Fc21`→21）。
 pub fn parse_concrete_fc(name: &str) -> Option<f64> {

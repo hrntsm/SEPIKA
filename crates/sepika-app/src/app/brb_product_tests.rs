@@ -300,8 +300,8 @@ fn brb_old_length_only_pass_requires_recheck_using_saved_forces() {
 fn brb_product_legacy_analysis_input_requires_new_analysis_even_at_current_version() {
     let mut app = analyzed_app(Some(0.0));
     let attr = &app.core.model.brb_attrs[0];
-    let current_attr = bincode::serialize(attr).unwrap();
-    let legacy_attr = bincode::serialize(&(
+    let current_attr = rmp_serde::to_vec_named(attr).unwrap();
+    let legacy_attr = rmp_serde::to_vec(&(
         attr.elem,
         attr.allowable_axial_short.unwrap(),
         attr.critical_length.unwrap(),

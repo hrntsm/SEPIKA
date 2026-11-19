@@ -167,6 +167,52 @@ pub(crate) fn recorded_member_material_lines(
     }).collect()
 }
 
+pub(super) struct RecordedResultReferenceSource {
+    source: InputReference,
+    model: sepika_core::model::Model,
+    kind: ResultInputKey,
+    run: String,
+    calculation_input: String,
+    contract: u32,
+}
+
+impl RecordedResultReferenceSource {
+    pub(super) fn reference(
+        &self,
+        target: ReferenceTarget,
+        display: DisplayConditions,
+    ) -> Result<ResultReference, String> {
+        let exists = match target {
+            ReferenceTarget::Node(id) => self.model.node(id).is_some(),
+            ReferenceTarget::Member(id) => self.model.element(id).is_some(),
+            ReferenceTarget::Section(id) => self.model.section(id).is_some(),
+            ReferenceTarget::Material(id) => self.model.materials.iter().any(|m| m.id == id),
+            _ => return Err("この対象の計算時参照は未対応です。".into()),
+        };
+        if !exists {
+            return Err("計算時入力内の対象は取得不能です。".into());
+        }
+        let identity = String::new();
+        let lifetime = digest(
+            &bincode::serialize(&(&self.source, target, &identity)).expect("対象参照の直列化"),
+        );
+        Ok(ResultReference {
+            target: TargetReference {
+                source: self.source.clone(),
+                target,
+                identity,
+                lifetime,
+            },
+            source: self.source.clone(),
+            kind: self.kind.clone(),
+            run: self.run.clone(),
+            calculation_input: self.calculation_input.clone(),
+            contract: self.contract,
+            display,
+        })
+    }
+}
+
 impl App {
     /// 保存された計算時入力内の対象から参照を作る。現行入力への対応は推定しない。
     pub fn recorded_target_result_reference(
@@ -175,17 +221,15 @@ impl App {
         target: ReferenceTarget,
         display: DisplayConditions,
     ) -> Result<ResultReference, String> {
+        self.recorded_result_reference_source(kind)?
+            .reference(target, display)
+    }
+
+    pub(super) fn recorded_result_reference_source(
+        &self,
+        kind: ResultInputKey,
+    ) -> Result<RecordedResultReferenceSource, String> {
         let (source, model) = self.calculation_snapshot(&kind)?;
-        let exists = match target {
-            ReferenceTarget::Node(id) => model.node(id).is_some(),
-            ReferenceTarget::Member(id) => model.element(id).is_some(),
-            ReferenceTarget::Section(id) => model.section(id).is_some(),
-            ReferenceTarget::Material(id) => model.materials.iter().any(|m| m.id == id),
-            _ => return Err("この対象の計算時参照は未対応です。".into()),
-        };
-        if !exists {
-            return Err("計算時入力内の対象は取得不能です。".into());
-        }
         let bundle = self
             .core
             .scoped
@@ -211,22 +255,13 @@ impl App {
             bundle.analysis_contract_version
         }
         .ok_or("計算契約は取得不能です。")?;
-        let identity = String::new();
-        let lifetime =
-            digest(&bincode::serialize(&(&source, target, &identity)).expect("対象参照の直列化"));
-        Ok(ResultReference {
-            target: TargetReference {
-                source: source.clone(),
-                target,
-                identity,
-                lifetime,
-            },
+        Ok(RecordedResultReferenceSource {
             source,
+            model,
             kind,
             run,
             calculation_input: digest(bytes),
             contract,
-            display,
         })
     }
 
@@ -599,8 +634,74 @@ impl App {
         &self,
         reference: &ResultReference,
     ) -> Result<sepika_core::model::Model, String> {
+        self.recorded_result_input(reference)
+            .map(|input| input.model)
+    }
+
+    pub fn resolve_result_reference(
+        &self,
+        reference: &ResultReference,
+    ) -> Result<ReferenceTarget, String> {
+        if let Some(result) = self.resolve_study_result(reference) {
+            return result;
+        }
+        self.result_input_snapshot(reference)?;
+        self.require_result_input(reference.kind.clone())?;
+        self.resolve_target_reference(&reference.target)
+    }
+
+    pub fn calculation_snapshot(
+        &self,
+        kind: &ResultInputKey,
+    ) -> Result<(InputReference, sepika_core::model::Model), String> {
+        self.recorded_calculation_input(kind)
+            .map(|(source, input)| (source, input.model))
+    }
+
+    pub fn recorded_calculation_input(
+        &self,
+        kind: &ResultInputKey,
+    ) -> Result<(InputReference, RecordedCalculationInput), String> {
+        let bundle = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .ok_or("結果がありません。")?;
+        let source = bundle
+            .reference_sources
+            .iter()
+            .find(|(key, _)| key == kind)
+            .ok_or("計算時の案・入力版は取得不能です。")?
+            .1
+            .clone();
+        if source.project != self.core.scoped.references.project
+            || source.proposal != self.core.scoped.references.proposal
+        {
+            return Err("別プロジェクトまたは別案の結果です。".into());
+        }
+        let (_, bytes) = bundle
+            .input_records
+            .iter()
+            .find(|(key, _)| key == kind)
+            .ok_or("計算時入力は取得不能です。")?;
+        let cfg = bundle
+            .reference_vibration_settings
+            .iter()
+            .find(|(key, _)| key == kind)
+            .map(|(_, cfg)| *cfg);
+        Ok((
+            source,
+            super::result_validity::decode_recorded_input(kind, bytes, cfg)?,
+        ))
+    }
+
+    pub fn recorded_result_input(
+        &self,
+        reference: &ResultReference,
+    ) -> Result<RecordedCalculationInput, String> {
         if let Some(app) = self.study_result_view(reference) {
-            return app.result_input_snapshot(reference);
+            return app.recorded_result_input(reference);
         }
         if reference.target.source != reference.source {
             return Err("結果と対象の入力版が一致しません。".into());
@@ -657,91 +758,12 @@ impl App {
         if digest(bytes) != reference.calculation_input {
             return Err("計算時入力の識別が一致しません。".into());
         }
-        bincode::deserialize_from(std::io::Cursor::new(bytes))
-            .map_err(|_| "計算時入力は取得不能です。".into())
-    }
-
-    pub fn resolve_result_reference(
-        &self,
-        reference: &ResultReference,
-    ) -> Result<ReferenceTarget, String> {
-        if let Some(result) = self.resolve_study_result(reference) {
-            return result;
-        }
-        self.result_input_snapshot(reference)?;
-        self.require_result_input(reference.kind.clone())?;
-        self.resolve_target_reference(&reference.target)
-    }
-
-    pub fn calculation_snapshot(
-        &self,
-        kind: &ResultInputKey,
-    ) -> Result<(InputReference, sepika_core::model::Model), String> {
-        let bundle = self
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .ok_or("結果がありません。")?;
-        let source = bundle
-            .reference_sources
-            .iter()
-            .find(|(key, _)| key == kind)
-            .ok_or("計算時の案・入力版は取得不能です。")?
-            .1
-            .clone();
-        if source.project != self.core.scoped.references.project
-            || source.proposal != self.core.scoped.references.proposal
-        {
-            return Err("別プロジェクトまたは別案の結果です。".into());
-        }
-        let (_, bytes) = bundle
-            .input_records
-            .iter()
-            .find(|(key, _)| key == kind)
-            .ok_or("計算時入力は取得不能です。")?;
-        let model = bincode::deserialize_from(std::io::Cursor::new(bytes))
-            .map_err(|_| "計算時入力は取得不能です。")?;
-        Ok((source, model))
-    }
-
-    pub fn recorded_calculation_input(
-        &self,
-        kind: &ResultInputKey,
-    ) -> Result<(InputReference, RecordedCalculationInput), String> {
-        let (source, _) = self.calculation_snapshot(kind)?;
-        let bundle = self
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .ok_or("結果がありません。")?;
-        let (_, bytes) = bundle
-            .input_records
-            .iter()
-            .find(|(key, _)| key == kind)
-            .ok_or("計算時入力は取得不能です。")?;
         let cfg = bundle
             .reference_vibration_settings
             .iter()
-            .find(|(key, _)| key == kind)
+            .find(|(key, _)| *key == reference.kind)
             .map(|(_, cfg)| *cfg);
-        Ok((
-            source,
-            super::result_validity::decode_recorded_input(kind, bytes, cfg)?,
-        ))
-    }
-
-    pub fn recorded_result_input(
-        &self,
-        reference: &ResultReference,
-    ) -> Result<RecordedCalculationInput, String> {
-        if let Some(app) = self.study_result_view(reference) {
-            return app.recorded_result_input(reference);
-        }
-        self.result_input_snapshot(reference)?;
-        self.recorded_calculation_input(&reference.kind)
-            .map(|(_, input)| input)
+        super::result_validity::decode_recorded_input(&reference.kind, bytes, cfg)
     }
 }
 

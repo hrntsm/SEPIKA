@@ -1487,12 +1487,12 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![3],
             bottom: vec![3],
             cover: 50.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },

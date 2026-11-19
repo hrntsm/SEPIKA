@@ -379,12 +379,12 @@ fn rc_steel_src_secondary_members_keep_edit_save_quantity_and_prepare_contract()
             b: 400.0,
             d: 400.0,
             rebar: RcRectColumnRebar {
-                main_dia: 0.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 x: vec![],
                 y: vec![],
                 cover: 0.0,
                 hoop: sepika_core::section_shape::RectColumnHoop {
-                    dia: 0.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 0.0,
                     legs_x: 0,
                     legs_y: 0,
@@ -395,12 +395,12 @@ fn rc_steel_src_secondary_members_keep_edit_save_quantity_and_prepare_contract()
             b: 400.0,
             d: 400.0,
             rebar: RcRectColumnRebar {
-                main_dia: 0.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 x: vec![],
                 y: vec![],
                 cover: 0.0,
                 hoop: sepika_core::section_shape::RectColumnHoop {
-                    dia: 0.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 0.0,
                     legs_x: 0,
                     legs_y: 0,
@@ -485,12 +485,12 @@ fn rc_steel_src_secondary_members_keep_edit_save_quantity_and_prepare_contract()
                     b: 400.0,
                     d: 400.0,
                     rebar: sepika_core::section_shape::RcBeamRebar {
-                        main_dia: 0.0,
+                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                         top: vec![],
                         bottom: vec![],
                         cover: 0.0,
                         stirrup: sepika_core::section_shape::BeamStirrup {
-                            dia: 0.0,
+                            dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                             pitch: 0.0,
                             legs: 0,
                         },

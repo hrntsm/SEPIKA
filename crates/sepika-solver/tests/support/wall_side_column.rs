@@ -9,12 +9,16 @@ const LENGTH_MM: f64 = 3000.0;
 
 pub fn rebar(count: u32) -> RcRectColumnRebar {
     RcRectColumnRebar {
-        main_dia: if count == 0 { 0.0 } else { 19.0 },
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(if count == 0 {
+            0.0
+        } else {
+            19.0
+        }),
         x: if count == 0 { vec![] } else { vec![count] },
         y: if count == 0 { vec![] } else { vec![count] },
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -144,12 +148,12 @@ pub fn wall_connection_fixture(kind: ElementKind) -> Model {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4],
             bottom: vec![4],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 200.0,
                 legs: 2,
             },

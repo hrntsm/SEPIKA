@@ -344,7 +344,7 @@ fn fixture(kind: ElementKind, dof: Dof, total_force_n: f64) -> Model {
             SectionShape::RcColumnRect { b, d, rebar } => {
                 *b = 400.0;
                 *d = 400.0;
-                rebar.main_dia = 20.0;
+                rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(20.0);
                 rebar.x = vec![3];
                 rebar.y = vec![3];
             }

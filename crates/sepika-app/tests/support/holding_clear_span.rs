@@ -33,11 +33,11 @@ pub fn rc_rank_portal(
         *section = SectionShape::RcColumnCircle {
             d: 600.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 count: 8,
                 cover: 40.0,
                 hoop: CircleColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                 },
             },

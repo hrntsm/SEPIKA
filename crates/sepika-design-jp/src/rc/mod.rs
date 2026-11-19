@@ -107,6 +107,14 @@ impl DesignCheck for RcDesign {
                     .to_string(),
             };
         }
+        if let Err(reason) = shape.validate_rebar_size_materials(
+            ctx.rebar_material.as_ref(),
+            ctx.shear_rebar_material.as_ref(),
+        ) {
+            return CheckOutcome::Skipped {
+                reason: format!("RC 検定: {reason}"),
+            };
+        }
         if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
             ctx.shear_rebar_material.as_ref(),
         ) {

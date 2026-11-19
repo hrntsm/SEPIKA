@@ -145,7 +145,10 @@ pub(crate) fn beam_check(
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
     let grade = main_rebar_grade(ctx.rebar_material.as_ref());
-    let deformed_rebar = ctx.rebar_material.as_ref().is_some_and(|m| {
+    let deformed_rebar = matches!(
+        rebar.main_dia,
+        sepika_core::section_shape::RebarSize::Standard(_)
+    ) || ctx.rebar_material.as_ref().is_some_and(|m| {
         m.category == MaterialCategory::Rebar && !matches!(m.name.trim(), "SR235" | "SR295")
     });
     let allow = rc_allow(
@@ -172,7 +175,7 @@ pub(crate) fn beam_check(
         .expect("梁の断面諸元を算定できる形状のみ来る");
     let info =
         rebar_info_from_shape(shape, tension_is_top).expect("梁の鉄筋情報を算定できる形状のみ来る");
-    let ft = rebar_allowable_tension(grade, info.main_dia, long_term);
+    let ft = rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term);
 
     let bending = match bending_component(forces, ctx, rebar, &props, tension_is_top, ft, &allow) {
         Ok(bending) => bending,
@@ -248,7 +251,7 @@ pub(crate) fn beam_check(
             }
             BondMethod::Rc1991 => {
                 let n_t = info.tension_count_1991;
-                let phi = n_t * std::f64::consts::PI * info.main_dia;
+                let phi = n_t * info.main_dia.perimeter_mm();
                 let is_end = !(0.25 < forces.pos && forces.pos < 0.75);
                 let bond = rc_beam_bond_check_1991_with_rebar(
                     q_design,
@@ -688,12 +691,12 @@ mod tests {
             b: 400.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 top: vec![4, 2],
                 bottom: vec![2, 1],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },

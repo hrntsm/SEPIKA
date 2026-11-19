@@ -344,12 +344,12 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
     let rebar = RcRectColumnRebar {
-        main_dia: 19.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
         x: vec![4],
         y: vec![4],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 150.0,
             legs_x: 2,
             legs_y: 2,
@@ -498,12 +498,12 @@ fn srcファイバーは内蔵鋼材のstrength_factorを使う() {
         b: 500.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 19.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
             x: vec![4],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 150.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -1399,12 +1399,12 @@ fn 不正な質量特性でもfiberは静的用に生成でき両質量形式で
         b: 400.0,
         d: 400.0,
         rebar: sepika_core::section_shape::RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![],
             y: vec![],
             cover: 0.0,
             hoop: sepika_core::section_shape::RectColumnHoop {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
                 legs_x: 0,
                 legs_y: 0,
@@ -2009,12 +2009,12 @@ pub(super) fn rc_fiber_model() -> Model {
         b: 500.0,
         d: 500.0,
         rebar: RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![4],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -3269,11 +3269,11 @@ fn test_steel_box_fibers_are_hollow() {
 #[test]
 fn test_rc_circle_fibers_match_circle_area() {
     let rebar = sepika_core::section_shape::RcCircleColumnRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         count: 8,
         cover: 40.0,
         hoop: sepika_core::section_shape::CircleColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
         },
     };
@@ -3324,12 +3324,12 @@ fn src_analysis_ratio_model() -> Model {
         b: 300.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             x: vec![],
             y: vec![],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 100.0,
                 legs_x: 0,
                 legs_y: 0,

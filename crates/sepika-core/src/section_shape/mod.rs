@@ -20,6 +20,7 @@ mod geometry;
 mod label;
 mod material;
 mod properties;
+mod rebar_size;
 mod rounded;
 mod shear;
 mod surface;
@@ -36,6 +37,7 @@ pub use core_torsion::{
 pub use material::{
     concrete_young_modulus, concrete_young_modulus_gamma, wall_shear_shape_factor_isection,
 };
+pub use rebar_size::{RebarSize, StandardRebar};
 pub use rounded::{RoundedRectangle, RoundedSectionProperties};
 pub use shear::{
     material_strip_section_properties, strip_section_properties,

@@ -82,8 +82,8 @@ pub(crate) fn beam_provisions(
             ));
         }
     }
-    if info.main_dia + 1e-9 < 13.0 {
-        warnings.push(format!("主筋径 D{:.0} < D13", info.main_dia));
+    if info.main_dia.designation_or_diameter_mm() + 1e-9 < 13.0 {
+        warnings.push(format!("主筋径 {} < D13", info.main_dia));
     }
     if props.pw + 1e-12 < 0.002 {
         warnings.push(format!("pw={:.4} < 0.2%", props.pw));
@@ -196,14 +196,14 @@ mod tests {
     fn sample_info(cover: f64, pitch: f64, dia: f64, count: u32) -> RcRebarInfo {
         RcRebarInfo {
             cover,
-            main_dia: dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(dia),
             main_count: count,
             main_area: count as f64 * one_bar_area(dia),
             tension_count: count,
             tension_layers: 1,
             tension_first_layer_count: count as f64,
             tension_count_1991: (count as f64 / 2.0).max(1.0),
-            shear_dia: 10.0,
+            shear_dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             shear_pitch: pitch,
             shear_legs: 2,
             is_circle: false,

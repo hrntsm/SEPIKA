@@ -256,12 +256,12 @@ fn 鋼主材料を割り当てると自重方式ごとに重力を伝え骨格�
 #[test]
 fn rcとsrcの断面の配筋に鉄筋を割り当てると解析できる() {
     let rebar_layout = RcRectColumnRebar {
-        main_dia: 19.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(19.0),
         x: vec![3],
         y: vec![3],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,

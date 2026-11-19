@@ -26,12 +26,12 @@ mod tests {
 
     fn dummy_rect_rebar() -> RcRectColumnRebar {
         RcRectColumnRebar {
-            main_dia: 16.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(16.0),
             x: vec![2],
             y: vec![2],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -41,11 +41,11 @@ mod tests {
 
     fn dummy_circle_rebar() -> RcCircleColumnRebar {
         RcCircleColumnRebar {
-            main_dia: 16.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(16.0),
             count: 8,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         }

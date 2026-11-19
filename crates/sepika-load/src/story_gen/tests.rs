@@ -2685,12 +2685,12 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
         b: 400.0,
         d: 700.0,
         rebar: sepika_core::section_shape::RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![3],
             bottom: vec![3],
             cover: 40.0,
             stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -3254,12 +3254,12 @@ fn column_finish_model() -> Model {
         b: 500.0,
         d: 700.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![],
             y: vec![],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -3881,11 +3881,11 @@ fn rc_src柱仕上げは階共通値と実形状を使いdlと地震用重量で
             SectionShape::RcColumnCircle {
                 d: 600.0,
                 rebar: RcCircleColumnRebar {
-                    main_dia: 22.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                     count: 0,
                     cover: 40.0,
                     hoop: CircleColumnHoop {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 100.0,
                     },
                 },
@@ -4608,12 +4608,12 @@ fn rc_rect_shape() -> sepika_core::section_shape::SectionShape {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,

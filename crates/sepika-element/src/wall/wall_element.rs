@@ -1801,12 +1801,12 @@ mod tests {
                 b: boundary_mm,
                 d: boundary_mm,
                 rebar: sepika_core::section_shape::RcRectColumnRebar {
-                    main_dia: 22.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                     x: vec![8],
                     y: vec![8],
                     cover: 50.0,
                     hoop: sepika_core::section_shape::RectColumnHoop {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 100.0,
                         legs_x: 2,
                         legs_y: 2,
@@ -2193,12 +2193,12 @@ mod tests {
             b: 600.0,
             d: 600.0,
             rebar: sepika_core::section_shape::RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![8],
                 y: vec![8],
                 cover: 50.0,
                 hoop: sepika_core::section_shape::RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -2795,12 +2795,12 @@ mod capacity_issue_tests {
             b: 600.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: if with_rebar { vec![4] } else { vec![] },
                 y: if with_rebar { vec![3] } else { vec![] },
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,
@@ -3203,12 +3203,12 @@ mod capacity_issue_tests {
     #[test]
     fn test_new_rect_column_side_column_uses_total_main_area() {
         let new_rebar = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![5],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -3277,12 +3277,12 @@ mod capacity_issue_tests {
             b: 600.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 x: vec![5],
                 y: vec![3],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs_x: 2,
                     legs_y: 2,

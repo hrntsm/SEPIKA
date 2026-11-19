@@ -6,12 +6,12 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             top: vec![],
             bottom: vec![],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
                 legs: 0,
             },
@@ -363,12 +363,12 @@ fn haunched_girder_fixture() -> sepika_core::model::Model {
         b: 200.0,
         d: 200.0,
         rebar: RcRectColumnRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             x: vec![],
             y: vec![],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
                 legs_x: 0,
                 legs_y: 0,

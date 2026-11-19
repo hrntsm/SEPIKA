@@ -98,12 +98,12 @@ fn elastic_wall_girder_model() -> Model {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4],
             bottom: vec![4],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 200.0,
                 legs: 2,
             },
@@ -310,12 +310,12 @@ fn elastic_wall_girder_requires_positive_finite_actual_young_for_every_section()
         b: 400.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -903,12 +903,12 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
     fn rebar() -> RcBeamRebar {
         use sepika_core::section_shape::BeamStirrup;
         RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![2],
             bottom: vec![2],
             cover: 50.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1232,12 +1232,12 @@ fn test_flexural_alpha_y_sugano_for_rc_beam() {
     assert!((flexural_alpha_y(&beam, &model) - 0.3).abs() < 1e-12);
 
     let rebar = RcBeamRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         top: vec![2],
         bottom: vec![2],
         cover: 50.0,
         stirrup: sepika_core::section_shape::BeamStirrup {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs: 2,
         },
@@ -1289,12 +1289,12 @@ fn test_src_beam_alpha_y_falls_back_to_default() {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![2],
             bottom: vec![2],
             cover: 50.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1341,12 +1341,12 @@ fn test_rc_beam_flexural_spring_exhibits_takeda_degradation() {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![2],
             bottom: vec![2],
             cover: 50.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1611,12 +1611,12 @@ pub(super) fn wall_side_column_factory_model() -> Model {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4],
             y: vec![4],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,

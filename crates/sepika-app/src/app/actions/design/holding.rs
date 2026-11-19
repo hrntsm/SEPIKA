@@ -1426,12 +1426,12 @@ mod tests {
                 b: 400.0,
                 d: 400.0,
                 rebar: RcBeamRebar {
-                    main_dia: 22.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                     top: vec![4],
                     bottom: vec![4],
                     cover: 40.0,
                     stirrup: BeamStirrup {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 100.0,
                         legs: 2,
                     },
@@ -1675,12 +1675,12 @@ mod tests {
 
     fn rebar() -> RcBeamRebar {
         RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4, 2],
             bottom: vec![3, 2],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1804,12 +1804,12 @@ mod tests {
         let elem = ElemId(3);
         let section = sepika_core::ids::SectionId(4);
         let unset = RcBeamRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             top: vec![],
             bottom: vec![],
             cover: 0.0,
             stirrup: BeamStirrup {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
                 legs: 0,
             },
@@ -1893,23 +1893,23 @@ mod tests {
         let elem = ElemId(3);
         let section = sepika_core::ids::SectionId(4);
         let rect = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![],
             y: vec![],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
             },
         };
         let circle = RcCircleColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             count: 0,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         };
@@ -1955,12 +1955,12 @@ mod tests {
 
         let (mat, main_steel, shear_steel, response) = rank_input();
         let rebar = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![3],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 3,
@@ -2044,12 +2044,12 @@ mod tests {
 
         let (mat, main_steel, shear_steel, response) = rank_input();
         let base = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![3],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 3,
@@ -2117,11 +2117,11 @@ mod tests {
         response.shear_strong = 100_000.0;
         response.shear_weak = 500_000.0;
         let rebar = RcCircleColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             count: 8,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         };
@@ -2190,12 +2190,12 @@ mod tests {
         let elem = ElemId(3);
         let section = sepika_core::ids::SectionId(4);
         let rect = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4, 2],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 3,
@@ -2207,11 +2207,11 @@ mod tests {
             ..rect.clone()
         };
         let unset_circle = RcCircleColumnRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             count: 0,
             cover: 0.0,
             hoop: CircleColumnHoop {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
             },
         };

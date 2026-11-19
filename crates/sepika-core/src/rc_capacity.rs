@@ -485,12 +485,12 @@ mod tests {
     #[test]
     fn rc_capacity_input_from_rect_matches_handcalc_without_strength_factor() {
         let rebar = RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4],
             y: vec![2],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 150.0,
                 legs_x: 2,
                 legs_y: 2,

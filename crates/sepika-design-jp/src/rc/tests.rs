@@ -38,12 +38,12 @@ pub(crate) fn rc_rect_shape(
         b,
         d,
         rebar: RcRectColumnRebar {
-            main_dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(main_dia),
             x: vec![main_count / 2; main_layers as usize],
             y: vec![main_count / 2; main_layers as usize],
             cover,
             hoop: RectColumnHoop {
-                dia: shear_dia,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(shear_dia),
                 pitch: shear_pitch,
                 legs_x: shear_legs,
                 legs_y: shear_legs,
@@ -68,12 +68,12 @@ pub(crate) fn rc_beam_shape(
         b,
         d,
         rebar: RcBeamRebar {
-            main_dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(main_dia),
             top: vec![main_count; main_layers as usize],
             bottom: vec![main_count; main_layers as usize],
             cover,
             stirrup: BeamStirrup {
-                dia: shear_dia,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(shear_dia),
                 pitch: shear_pitch,
                 legs: shear_legs,
             },
@@ -503,11 +503,11 @@ fn test_rc_circle_beam_and_column_smoke() {
     let shape = SectionShape::RcColumnCircle {
         d: 600.0,
         rebar: RcCircleColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             count: 12,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         },
@@ -543,12 +543,12 @@ fn rc_beam_rect_shape() -> SectionShape {
         b: 400.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4, 2],
             bottom: vec![2, 1],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -561,12 +561,12 @@ pub(crate) fn rc_column_rect_shape() -> SectionShape {
         b: 400.0,
         d: 400.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![3],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -579,11 +579,11 @@ fn rc_column_circle_shape() -> SectionShape {
     SectionShape::RcColumnCircle {
         d: 600.0,
         rebar: RcCircleColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             count: 8,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         },
@@ -722,11 +722,11 @@ fn test_rc_circle_beam_bending_matches_circle_axis_props() {
     let shape = SectionShape::RcColumnCircle {
         d: 600.0,
         rebar: RcCircleColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             count: 12,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         },
@@ -771,12 +771,12 @@ fn test_rc_beam_rect_unset_rebar_skipped() {
         b: 400.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![],
             bottom: vec![],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -808,12 +808,12 @@ fn test_rc_inconsistent_column_rebar_skipped() {
         b: 600.0,
         d: 700.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4, 2],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 3,

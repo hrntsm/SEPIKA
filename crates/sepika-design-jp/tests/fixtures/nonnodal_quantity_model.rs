@@ -5,12 +5,12 @@ pub fn model() -> Model {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             top: vec![],
             bottom: vec![],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 0.0,
                 legs: 0,
             },

@@ -294,12 +294,12 @@ fn test_pushover_stops_when_concrete_strength_unset() {
         b: 400.0,
         d: 400.0,
         rebar: RcRectColumnRebar {
-            main_dia: 13.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
             x: vec![4],
             y: vec![4],
             cover: 20.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -1392,12 +1392,12 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         fy: None,
     };
     let rebar = RcRectColumnRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         x: vec![8],
         y: vec![4],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -1583,12 +1583,12 @@ fn test_compute_shear_yield_qy_real_rebar_beam_uses_both_directions_and_steel_fa
         fy: None,
     };
     let rebar = RcBeamRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         top: vec![4],
         bottom: vec![4],
         cover: 40.0,
         stirrup: BeamStirrup {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs: 2,
         },
@@ -1695,12 +1695,12 @@ fn test_compute_shear_yield_qy_real_rebar_beam_uses_unfavorable_top_or_bottom() 
             b: 600.0,
             d: 700.0,
             rebar: RcBeamRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 top: vec![top],
                 bottom: vec![bottom],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },
@@ -1724,12 +1724,12 @@ fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
     use sepika_core::rc_rebar_geom::RectEdge;
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
     let rebar = RcRectColumnRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         x: vec![5],
         y: vec![3],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -1855,12 +1855,12 @@ fn test_section_rebar_materials_are_reflected_in_capacities() {
     let section = || {
         use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
         let rebar = RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![5],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -2023,12 +2023,12 @@ fn rc_column_model_with_rigid_zone(
 ) {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
     let rebar = RcRectColumnRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         x: vec![5],
         y: vec![3],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -2608,12 +2608,12 @@ fn rc_hinge_model() -> (
 ) {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
     let rebar = RcRectColumnRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         x: vec![5],
         y: vec![3],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -3381,12 +3381,12 @@ pub(super) fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
         ps: 0.0025,
     };
     let rebar = RcRectColumnRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         x: vec![8],
         y: vec![8],
         cover: 50.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -3530,12 +3530,12 @@ pub(super) fn prepared_wall_story_model_with(lw: f64, seismic_weight: f64) -> Mo
         b: 600.0,
         d: 600.0,
         rebar: sepika_core::section_shape::RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![8],
             bottom: vec![8],
             cover: 50.0,
             stirrup: sepika_core::section_shape::BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },

@@ -56,12 +56,12 @@ fn fixture() -> App {
                 b: 300.0,
                 d: 300.0,
                 rebar: sepika_core::section_shape::RcRectColumnRebar {
-                    main_dia: 22.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                     x: vec![4],
                     y: vec![4],
                     cover: 40.0,
                     hoop: sepika_core::section_shape::RectColumnHoop {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 100.0,
                         legs_x: 2,
                         legs_y: 2,
@@ -75,12 +75,12 @@ fn fixture() -> App {
                 b: 300.0,
                 d: 400.0,
                 rebar: sepika_core::section_shape::RcBeamRebar {
-                    main_dia: 22.0,
+                    main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                     top: vec![2],
                     bottom: vec![2],
                     cover: 40.0,
                     stirrup: sepika_core::section_shape::BeamStirrup {
-                        dia: 10.0,
+                        dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                         pitch: 100.0,
                         legs: 2,
                     },

@@ -200,12 +200,12 @@ fn usual_rc_fiber_and_ms_factories_keep_top_bottom_bending_under_end_swap_and_qu
                         b: 500.0,
                         d: 500.0,
                         rebar: RcBeamRebar {
-                            main_dia: 25.0,
+                            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                             top: vec![4],
                             bottom: vec![2],
                             cover: 40.0,
                             stirrup: BeamStirrup {
-                                dia: 10.0,
+                                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                                 pitch: 100.0,
                                 legs: 2,
                             },

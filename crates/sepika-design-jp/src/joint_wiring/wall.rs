@@ -760,7 +760,9 @@ fn wall_side_column_props(shape: Option<&SectionShape>) -> Option<(f64, f64, f64
     match shape? {
         SectionShape::RcColumnRect { b, d, rebar }
         | SectionShape::SrcColumnRect { b, d, rebar, .. } => {
-            let dt = rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0;
+            let dt = rebar.cover
+                + rebar.hoop.dia.designation_or_diameter_mm()
+                + rebar.main_dia.designation_or_diameter_mm() / 2.0;
             let pw = if *b > 0.0 && rebar.hoop.pitch > 0.0 {
                 rebar.aw_x_mm2() / (*b * rebar.hoop.pitch)
             } else {
@@ -1033,10 +1035,10 @@ mod tests {
     fn wall_side_circle_column_uses_hoop_ratio() {
         let rebar = RcCircleColumnRebar {
             count: 8,
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         };

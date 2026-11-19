@@ -61,12 +61,12 @@ pub(crate) fn src_rect_shape(
         b,
         d,
         rebar: RcRectColumnRebar {
-            main_dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(main_dia),
             x: vec![main_count / 2; main_layers as usize],
             y: vec![main_count / 2; main_layers as usize],
             cover,
             hoop: RectColumnHoop {
-                dia: shear_dia,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(shear_dia),
                 pitch: shear_pitch,
                 legs_x: shear_legs,
                 legs_y: shear_legs,
@@ -107,12 +107,12 @@ pub(crate) fn src_beam_rect_shape(
         b,
         d,
         rebar: RcBeamRebar {
-            main_dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(main_dia),
             top,
             bottom,
             cover,
             stirrup: BeamStirrup {
-                dia: shear_dia,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(shear_dia),
                 pitch: shear_pitch,
                 legs: shear_legs,
             },
@@ -146,12 +146,12 @@ pub(crate) fn src_column_rect_shape(
         b,
         d,
         rebar: RcRectColumnRebar {
-            main_dia,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(main_dia),
             x,
             y,
             cover,
             hoop: RectColumnHoop {
-                dia: hoop_dia,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(hoop_dia),
                 pitch: hoop_pitch,
                 legs_x,
                 legs_y,

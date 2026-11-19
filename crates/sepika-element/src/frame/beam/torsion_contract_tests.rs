@@ -124,12 +124,12 @@ fn src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution() {
             b: 300.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia: 0.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 top: vec![],
                 bottom: vec![],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 0.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 100.0,
                     legs: 0,
                 },
@@ -143,12 +143,12 @@ fn src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution() {
             b: 300.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 0.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 x: vec![],
                 y: vec![],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 0.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 100.0,
                     legs_x: 0,
                     legs_y: 0,

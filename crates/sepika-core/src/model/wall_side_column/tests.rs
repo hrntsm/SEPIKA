@@ -417,12 +417,12 @@ fn src_shape() -> SectionShape {
         b: 600.,
         d: 600.,
         rebar: RcRectColumnRebar {
-            main_dia: 22.,
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.),
             x: vec![4],
             y: vec![4],
             cover: 40.,
             hoop: RectColumnHoop {
-                dia: 10.,
+                dia: crate::section_shape::RebarSize::DiameterMm(10.),
                 pitch: 100.,
                 legs_x: 2,
                 legs_y: 2,
@@ -452,12 +452,12 @@ fn c13_c14_src_is_recognized_for_symmetric_and_one_sided_frames() {
                 b: 600.,
                 d: 600.,
                 rebar: RcBeamRebar {
-                    main_dia: 22.,
+                    main_dia: crate::section_shape::RebarSize::DiameterMm(22.),
                     top: vec![4],
                     bottom: vec![4],
                     cover: 40.,
                     stirrup: BeamStirrup {
-                        dia: 10.,
+                        dia: crate::section_shape::RebarSize::DiameterMm(10.),
                         pitch: 100.,
                         legs: 2,
                     },

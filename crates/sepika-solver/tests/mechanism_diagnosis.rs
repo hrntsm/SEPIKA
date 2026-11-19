@@ -21,12 +21,16 @@ fn scaled_rc_frame(length_scale: f64) -> Model {
                     b: width * length_scale,
                     d: depth * length_scale,
                     rebar: RcRectColumnRebar {
-                        main_dia: 25.0 * length_scale,
+                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(
+                            25.0 * length_scale,
+                        ),
                         x: vec![],
                         y: vec![],
                         cover: 40.0 * length_scale,
                         hoop: RectColumnHoop {
-                            dia: 10.0 * length_scale,
+                            dia: sepika_core::section_shape::RebarSize::DiameterMm(
+                                10.0 * length_scale,
+                            ),
                             pitch: 100.0 * length_scale,
                             legs_x: 2,
                             legs_y: 2,
@@ -38,12 +42,16 @@ fn scaled_rc_frame(length_scale: f64) -> Model {
                     b: width * length_scale,
                     d: depth * length_scale,
                     rebar: RcBeamRebar {
-                        main_dia: 25.0 * length_scale,
+                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(
+                            25.0 * length_scale,
+                        ),
                         top: vec![],
                         bottom: vec![],
                         cover: 40.0 * length_scale,
                         stirrup: BeamStirrup {
-                            dia: 10.0 * length_scale,
+                            dia: sepika_core::section_shape::RebarSize::DiameterMm(
+                                10.0 * length_scale,
+                            ),
                             pitch: 100.0 * length_scale,
                             legs: 2,
                         },

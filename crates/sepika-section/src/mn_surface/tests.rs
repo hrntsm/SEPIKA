@@ -62,12 +62,12 @@ fn sample_rc_shape() -> SectionShape {
         b: 500.0,
         d: 500.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4],
             y: vec![4],
             cover: 50.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 2,
@@ -290,12 +290,12 @@ fn test_inconsistent_column_rebar_returns_err() {
         b: 600.0,
         d: 700.0,
         rebar: RcRectColumnRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             x: vec![4, 2],
             y: vec![3],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs_x: 2,
                 legs_y: 3,
@@ -315,12 +315,12 @@ fn src552_shape() -> SectionShape {
         b: 300.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 0.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
             x: vec![],
             y: vec![],
             cover: 40.0,
             hoop: RectColumnHoop {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 100.0,
                 legs_x: 0,
                 legs_y: 0,
@@ -438,7 +438,7 @@ fn src552_mn_mphi_and_discrete_rebar_use_corrected_regions() {
         assert!(m_phi_curve(&fibers, 1.0, 0.0, 0.0, 20).is_some());
     }
     if let SectionShape::SrcColumnRect { rebar, .. } = &mut shape {
-        rebar.main_dia = 20.0;
+        rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(20.0);
         rebar.x = vec![2];
         rebar.y = vec![2];
     }
@@ -515,7 +515,7 @@ fn src552_rejects_invalid_geometry_material_and_bar_interference() {
         ..
     } = &mut shape
     {
-        rebar.main_dia = 20.0;
+        rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(20.0);
         rebar.x = vec![2];
         rebar.y = vec![2];
         *steel_height = 485.0;
@@ -537,12 +537,12 @@ fn src552_rebar_strength_overlap_and_outside_are_rejected() {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: 20.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(20.0),
             top: vec![2],
             bottom: vec![2],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 0.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 pitch: 100.0,
                 legs: 2,
             },

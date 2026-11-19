@@ -70,22 +70,26 @@ fn standard_input(family: &str, circle: bool, apply: Option<bool>, center: bool)
 fn cover(model: &Model) -> f64 {
     match model.sections[0].shape.as_ref().unwrap() {
         SectionShape::RcBeamRect { rebar, .. } | SectionShape::SrcBeamRect { rebar, .. } => {
-            assert_eq!(rebar.main_dia, 25.);
+            assert_eq!(rebar.main_dia.designation_or_diameter_mm(), 25.);
             assert_eq!(rebar.top, [4, 2]);
             assert_eq!(rebar.bottom, [3]);
             assert_eq!(
-                (rebar.stirrup.dia, rebar.stirrup.pitch, rebar.stirrup.legs),
+                (
+                    rebar.stirrup.dia.designation_or_diameter_mm(),
+                    rebar.stirrup.pitch,
+                    rebar.stirrup.legs
+                ),
                 (13., 100., 2)
             );
             rebar.cover
         }
         SectionShape::RcColumnRect { rebar, .. } | SectionShape::SrcColumnRect { rebar, .. } => {
-            assert_eq!(rebar.main_dia, 25.);
+            assert_eq!(rebar.main_dia.designation_or_diameter_mm(), 25.);
             assert_eq!(rebar.x, [3]);
             assert_eq!(rebar.y, [4]);
             assert_eq!(
                 (
-                    rebar.hoop.dia,
+                    rebar.hoop.dia.designation_or_diameter_mm(),
                     rebar.hoop.pitch,
                     rebar.hoop.legs_x,
                     rebar.hoop.legs_y
@@ -97,9 +101,9 @@ fn cover(model: &Model) -> f64 {
         SectionShape::RcColumnCircle { rebar, .. } => {
             assert_eq!(
                 (
-                    rebar.main_dia,
+                    rebar.main_dia.designation_or_diameter_mm(),
                     rebar.count,
-                    rebar.hoop.dia,
+                    rebar.hoop.dia.designation_or_diameter_mm(),
                     rebar.hoop.pitch
                 ),
                 (25., 12, 13., 100.)

@@ -35,12 +35,12 @@ pub fn section(
         b: width_mm,
         d: depth_mm,
         rebar: RcBeamRebar {
-            main_dia: main_dia_mm,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(main_dia_mm),
             top: top.to_vec(),
             bottom: bottom.to_vec(),
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },

@@ -168,12 +168,12 @@ fn public_src_analysis_uses_gc_of_member_concrete_selected_by_stb_strength() {
             b: 300.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 0.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                 x: vec![],
                 y: vec![],
                 cover: 40.0,
                 hoop: RectColumnHoop {
-                    dia: 0.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(0.0),
                     pitch: 100.0,
                     legs_x: 0,
                     legs_y: 0,

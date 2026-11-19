@@ -8,11 +8,11 @@ fn circular_post_model() -> sepika_core::model::Model {
     let mut section = SectionShape::RcColumnCircle {
         d: 400.0,
         rebar: RcCircleColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             count: 0,
             cover: 40.0,
             hoop: CircleColumnHoop {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
             },
         },

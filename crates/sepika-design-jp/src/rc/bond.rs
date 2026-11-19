@@ -1,8 +1,8 @@
 //! 鉄筋コンクリート造梁付着の断面検定（RC 規準の梁主筋の付着検討）。
 //! 既定の検定経路は RC 規準1999 方式。
 
+use super::concrete_allowable_bond_for_rebar;
 use super::section_props::RcRebarInfo;
-use super::{concrete_allowable_bond_for_rebar, one_bar_area};
 
 /// RC 規準 1991 方式の付着検定結果。
 pub struct Bond1991Result {
@@ -72,11 +72,6 @@ pub struct BondCheckResult {
     pub is_end: bool,
 }
 
-/// 主筋 1 本あたりの周長 φ = π・dia [mm]。
-fn one_bar_perimeter(dia: f64) -> f64 {
-    std::f64::consts::PI * dia
-}
-
 /// RC 規準1999の通し筋・カットオフ無しの付着検定。寸法は mm、応力は N/mm²。
 /// `top_bar` は上端筋、`deformed` は異形鉄筋を表す。付着長さ等が成立しない場合は `None`。
 #[allow(clippy::too_many_arguments)]
@@ -94,11 +89,11 @@ pub(crate) fn rc_beam_bond_check_with_rebar(
     top_bar: bool,
     deformed: bool,
 ) -> Option<BondCheckResult> {
-    if lo <= 0.0 || info.tension_count == 0 || info.main_dia <= 0.0 || at <= 0.0 || j <= 0.0 {
+    let db = info.main_dia.designation_or_diameter_mm();
+    if lo <= 0.0 || info.tension_count == 0 || db <= 0.0 || at <= 0.0 || j <= 0.0 {
         return None;
     }
 
-    let db = info.main_dia;
     let is_end = !(0.25 < pos && pos < 0.75);
 
     let ld = if is_end { (lo + d_eff) / 2.0 } else { lo / 2.0 };
@@ -111,11 +106,12 @@ pub(crate) fn rc_beam_bond_check_with_rebar(
     let clear_spacing = if n1 <= 1.0 {
         5.0 * db
     } else {
-        (b - 2.0 * (info.cover + info.shear_dia) - n1 * db) / (n1 - 1.0)
+        (b - 2.0 * (info.cover + info.shear_dia.designation_or_diameter_mm()) - n1 * db)
+            / (n1 - 1.0)
     };
     let c = clear_spacing.min(3.0 * info.cover).min(5.0 * db);
 
-    let ast = info.shear_legs as f64 * one_bar_area(info.shear_dia);
+    let ast = info.shear_legs as f64 * info.shear_dia.area_mm2();
     let w = if info.shear_pitch > 0.0 {
         (20.0 * ast / (info.shear_pitch * n1)).min(2.5 * db)
     } else {
@@ -149,8 +145,8 @@ pub(crate) fn rc_beam_bond_check_with_rebar(
     }
 
     let sigma_t = mz_abs / (at * j);
-    let as_bar = one_bar_area(db);
-    let phi = one_bar_perimeter(db);
+    let as_bar = info.main_dia.area_mm2();
+    let phi = info.main_dia.perimeter_mm();
     let ldb = sigma_t * as_bar / (k * fb * phi);
 
     Some(BondCheckResult {
@@ -168,7 +164,9 @@ pub(crate) fn rc_beam_bond_check_with_rebar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+    use sepika_core::section_shape::{
+        one_bar_area, BeamStirrup, RcBeamRebar, RebarSize, SectionShape,
+    };
 
     #[test]
     fn test_bond_1991_fc24_other_bar_long_and_short() {
@@ -187,7 +185,7 @@ mod tests {
     #[test]
     fn test_bond_1999_retains_independent_splitting_formula() {
         let info = RcRebarInfo {
-            main_dia: 20.0,
+            main_dia: RebarSize::DiameterMm(20.0),
             tension_first_layer_count: 4.0,
             shear_pitch: 0.0,
             ..bond_test_info()
@@ -238,14 +236,14 @@ mod tests {
     fn bond_test_info() -> RcRebarInfo {
         RcRebarInfo {
             cover: 40.0,
-            main_dia: 22.0,
+            main_dia: RebarSize::DiameterMm(22.0),
             main_count: 6,
             main_area: 6.0 * one_bar_area(22.0),
             tension_count: 6,
             tension_layers: 1,
             tension_first_layer_count: 6.0,
             tension_count_1991: 3.0,
-            shear_dia: 10.0,
+            shear_dia: RebarSize::DiameterMm(10.0),
             shear_pitch: 100.0,
             shear_legs: 2,
             is_circle: false,
@@ -432,12 +430,12 @@ mod tests {
             b: 400.0,
             d: 600.0,
             rebar: RcBeamRebar {
-                main_dia: 22.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
                 top: vec![4, 2],
                 bottom: vec![3, 2],
                 cover: 40.0,
                 stirrup: BeamStirrup {
-                    dia: 10.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
                     legs: 2,
                 },
@@ -473,14 +471,14 @@ mod tests {
     fn test_bond_k_clamped_at_2_5() {
         let info = RcRebarInfo {
             cover: 100.0,
-            main_dia: 10.0,
+            main_dia: RebarSize::DiameterMm(10.0),
             main_count: 2,
             main_area: 2.0 * one_bar_area(10.0),
             tension_count: 2,
             tension_layers: 1,
             tension_first_layer_count: 2.0,
             tension_count_1991: 1.0,
-            shear_dia: 12.0,
+            shear_dia: RebarSize::DiameterMm(12.0),
             shear_pitch: 50.0,
             shear_legs: 10,
             is_circle: false,

@@ -1262,30 +1262,32 @@ fn push_rect_column_rebar(
     if rebar.is_unset() {
         return;
     }
+    let main_dia_mm = rebar.main_dia.designation_or_diameter_mm();
     let nx = rebar.x.len() as u32;
     let ny = rebar.y.len() as u32;
     let sx: u32 = rebar.x.iter().sum();
     let sy: u32 = rebar.y.iter().sum();
     let main_bars = (2 * sx + 2 * sy).saturating_sub(4 * nx * ny);
-    if main_bars > 0 && rebar.main_dia > 0.0 {
+    if main_bars > 0 && main_dia_mm > 0.0 {
         let total_len = main_bars as f64 * h;
         item.rebar.push(RebarItem {
             usage: RebarUsage::MainBar,
-            dia: Some(rebar.main_dia),
+            dia: Some(main_dia_mm),
             total_length_m: total_len / 1_000.0,
-            weight_t: rebar::rebar_weight_t(total_len, rebar.main_dia),
+            weight_t: rebar::rebar_weight_t(total_len, main_dia_mm),
         });
     }
     let sh = &rebar.hoop;
-    if sh.dia > 0.0 && sh.pitch > 0.0 {
+    let shear_dia_mm = sh.dia.designation_or_diameter_mm();
+    if shear_dia_mm > 0.0 && sh.pitch > 0.0 {
         let set_len = member::hoop_set_length(b, d, sh.legs_x.max(1), sh.legs_y.max(1));
         let count = member::shear_bar_count(h, sh.pitch);
         let total_len = set_len * count;
         item.rebar.push(RebarItem {
             usage: RebarUsage::Hoop,
-            dia: Some(sh.dia),
+            dia: Some(shear_dia_mm),
             total_length_m: total_len / 1_000.0,
-            weight_t: rebar::rebar_weight_t(total_len, sh.dia),
+            weight_t: rebar::rebar_weight_t(total_len, shear_dia_mm),
         });
     }
     item.rebar_joints = main_bars as f64 * member::column_joint_count(h);
@@ -1302,25 +1304,27 @@ fn push_circle_column_rebar(
     if rebar.is_unset() {
         return;
     }
-    if rebar.main_dia > 0.0 {
+    let main_dia_mm = rebar.main_dia.designation_or_diameter_mm();
+    if main_dia_mm > 0.0 {
         let total_len = rebar.count as f64 * h;
         item.rebar.push(RebarItem {
             usage: RebarUsage::MainBar,
-            dia: Some(rebar.main_dia),
+            dia: Some(main_dia_mm),
             total_length_m: total_len / 1_000.0,
-            weight_t: rebar::rebar_weight_t(total_len, rebar.main_dia),
+            weight_t: rebar::rebar_weight_t(total_len, main_dia_mm),
         });
     }
     let sh = &rebar.hoop;
-    if sh.dia > 0.0 && sh.pitch > 0.0 {
+    let shear_dia_mm = sh.dia.designation_or_diameter_mm();
+    if shear_dia_mm > 0.0 && sh.pitch > 0.0 {
         let set_len = std::f64::consts::PI * d;
         let count = member::shear_bar_count(h, sh.pitch);
         let total_len = set_len * count;
         item.rebar.push(RebarItem {
             usage: RebarUsage::Hoop,
-            dia: Some(sh.dia),
+            dia: Some(shear_dia_mm),
             total_length_m: total_len / 1_000.0,
-            weight_t: rebar::rebar_weight_t(total_len, sh.dia),
+            weight_t: rebar::rebar_weight_t(total_len, shear_dia_mm),
         });
     }
     item.rebar_joints = rebar.count as f64 * member::column_joint_count(h);
@@ -1526,16 +1530,17 @@ fn beam_quantity(
 
         match rebar {
             Some(rebar) if !rebar.is_unset() => {
+                let main_dia_mm = rebar.main_dia.designation_or_diameter_mm();
                 let main_bars: u32 =
                     rebar.top.iter().sum::<u32>() + rebar.bottom.iter().sum::<u32>();
-                if main_bars > 0 && rebar.main_dia > 0.0 {
+                if main_bars > 0 && main_dia_mm > 0.0 {
                     let dir_xy = {
                         let dx = cj[0] - ci[0];
                         let dy = cj[1] - ci[1];
                         let l = (dx * dx + dy * dy).sqrt();
                         [dx / l, dy / l]
                     };
-                    let l2 = ctx.cfg.anchorage_dia_factor * rebar.main_dia;
+                    let l2 = ctx.cfg.anchorage_dia_factor * main_dia_mm;
                     let end_i = ctx.beam_bar_end(
                         elem_idx,
                         ni,
@@ -1554,21 +1559,22 @@ fn beam_quantity(
                     let total_len = main_bars as f64 * bar_len;
                     item.rebar.push(RebarItem {
                         usage: RebarUsage::MainBar,
-                        dia: Some(rebar.main_dia),
+                        dia: Some(main_dia_mm),
                         total_length_m: total_len / 1_000.0,
-                        weight_t: rebar::rebar_weight_t(total_len, rebar.main_dia),
+                        weight_t: rebar::rebar_weight_t(total_len, main_dia_mm),
                     });
                 }
                 let sh = &rebar.stirrup;
-                if sh.dia > 0.0 && sh.pitch > 0.0 {
+                let shear_dia_mm = sh.dia.designation_or_diameter_mm();
+                if shear_dia_mm > 0.0 && sh.pitch > 0.0 {
                     let set_len = member::stirrup_set_length(b, d, sh.legs.max(1));
                     let count = member::shear_bar_count(lo, sh.pitch);
                     let total_len = set_len * count;
                     item.rebar.push(RebarItem {
                         usage: RebarUsage::Stirrup,
-                        dia: Some(sh.dia),
+                        dia: Some(shear_dia_mm),
                         total_length_m: total_len / 1_000.0,
-                        weight_t: rebar::rebar_weight_t(total_len, sh.dia),
+                        weight_t: rebar::rebar_weight_t(total_len, shear_dia_mm),
                     });
                 }
                 item.rebar_joints = main_bars as f64 * member::beam_joint_count(lo);

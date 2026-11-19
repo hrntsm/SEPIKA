@@ -374,12 +374,12 @@ use sepika_core::section_shape::{
 
 fn beam_rebar() -> RcBeamRebar {
     RcBeamRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         top: vec![3],
         bottom: vec![3],
         cover: 40.0,
         stirrup: BeamStirrup {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs: 2,
         },
@@ -388,12 +388,12 @@ fn beam_rebar() -> RcBeamRebar {
 
 fn column_rebar() -> RcRectColumnRebar {
     RcRectColumnRebar {
-        main_dia: 22.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
         x: vec![3],
         y: vec![3],
         cover: 40.0,
         hoop: RectColumnHoop {
-            dia: 10.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
             pitch: 100.0,
             legs_x: 2,
             legs_y: 2,
@@ -812,12 +812,12 @@ fn test_standard_import_roundtrip_steel_and_rc() {
 /// したりは標準では往復しない（[`super`] モジュールドキュメント参照）。
 fn beam_rebar_distinct() -> RcBeamRebar {
     RcBeamRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         top: vec![4],
         bottom: vec![3],
         cover: 45.0,
         stirrup: BeamStirrup {
-            dia: 13.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
             pitch: 150.0,
             legs: 4,
         },
@@ -826,12 +826,12 @@ fn beam_rebar_distinct() -> RcBeamRebar {
 
 fn column_rebar_distinct() -> RcRectColumnRebar {
     RcRectColumnRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         x: vec![4],
         y: vec![3],
         cover: 45.0,
         hoop: RectColumnHoop {
-            dia: 13.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
             pitch: 150.0,
             legs_x: 4,
             legs_y: 4,
@@ -841,11 +841,11 @@ fn column_rebar_distinct() -> RcRectColumnRebar {
 
 fn circle_rebar_distinct(count: u32) -> RcCircleColumnRebar {
     RcCircleColumnRebar {
-        main_dia: 25.0,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
         count,
         cover: 45.0,
         hoop: CircleColumnHoop {
-            dia: 13.0,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
             pitch: 150.0,
         },
     }
@@ -917,11 +917,11 @@ fn test_standard_roundtrip_rc_circle_column_rebar() {
         Some(SectionShape::RcColumnCircle {
             d: 800.0,
             rebar: RcCircleColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 count: 4,
                 cover: 45.0,
                 hoop: CircleColumnHoop {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 150.0,
                 },
             },
@@ -976,12 +976,12 @@ fn test_standard_roundtrip_rc_beam_rebar() {
             b: 400.0,
             d: 700.0,
             rebar: RcBeamRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 top: vec![4],
                 bottom: vec![3],
                 cover: 45.0,
                 stirrup: BeamStirrup {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 150.0,
                     legs: 4,
                 },
@@ -1019,12 +1019,12 @@ fn test_standard_roundtrip_rc_beam_rect_stages() {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4, 2],
             bottom: vec![3],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1071,12 +1071,12 @@ fn test_standard_roundtrip_rc_column_rect_stages_legs() {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![4, 3],
             y: vec![5],
             cover: 45.0,
             hoop: RectColumnHoop {
-                dia: 13.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                 pitch: 100.0,
                 legs_x: 3,
                 legs_y: 2,
@@ -1128,11 +1128,11 @@ fn test_standard_roundtrip_rc_column_circle_count() {
     let shape = SectionShape::RcColumnCircle {
         d: 800.0,
         rebar: RcCircleColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             count: 8,
             cover: 45.0,
             hoop: CircleColumnHoop {
-                dia: 13.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                 pitch: 100.0,
             },
         },
@@ -1160,12 +1160,12 @@ fn test_standard_export_warns_on_fourth_rebar_stage() {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4, 3, 2, 1],
             bottom: vec![3, 2],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1210,12 +1210,12 @@ fn test_standard_export_src_beam_rect_stages() {
         b: 500.0,
         d: 800.0,
         rebar: RcBeamRebar {
-            main_dia: 22.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
             top: vec![4, 2],
             bottom: vec![3],
             cover: 40.0,
             stirrup: BeamStirrup {
-                dia: 10.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
                 legs: 2,
             },
@@ -1246,12 +1246,12 @@ fn test_standard_export_src_column_rect_stages() {
         b: 800.0,
         d: 800.0,
         rebar: RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![4, 3],
             y: vec![5],
             cover: 45.0,
             hoop: RectColumnHoop {
-                dia: 13.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                 pitch: 100.0,
                 legs_x: 3,
                 legs_y: 2,
@@ -1463,12 +1463,12 @@ fn test_standard_roundtrip_rc_rebar_without_shear_material() {
             b: 400.0,
             d: 600.0,
             rebar: RcRectColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 x: vec![4],
                 y: vec![3],
                 cover: 45.0,
                 hoop: RectColumnHoop {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 150.0,
                     legs_x: 4,
                     legs_y: 4,
@@ -1504,12 +1504,12 @@ fn test_standard_roundtrip_rc_rebar_non_integer() {
 </ST_BRIDGE>"#;
     let mut m = frame_nodes();
     let r = RcRectColumnRebar {
-        main_dia: 12.7,
+        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(12.7),
         x: vec![6],
         y: vec![4],
         cover: 40.5,
         hoop: RectColumnHoop {
-            dia: 6.35,
+            dia: sepika_core::section_shape::RebarSize::DiameterMm(6.35),
             pitch: 133.3,
             legs_x: 2,
             legs_y: 2,
@@ -1532,12 +1532,12 @@ fn test_standard_roundtrip_rc_rebar_non_integer() {
             b: 450.0,
             d: 650.0,
             rebar: RcRectColumnRebar {
-                main_dia: 12.7,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(12.7),
                 x: vec![6],
                 y: vec![4],
                 cover: 40.5,
                 hoop: RectColumnHoop {
-                    dia: 6.35,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(6.35),
                     pitch: 133.3,
                     legs_x: 2,
                     legs_y: 2,
@@ -1584,12 +1584,12 @@ fn test_standard_roundtrip_shear_rebar_material_with_control_chars() {
             b: 400.0,
             d: 700.0,
             rebar: RcRectColumnRebar {
-                main_dia: 25.0,
+                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
                 x: vec![4],
                 y: vec![3],
                 cover: 45.0,
                 hoop: RectColumnHoop {
-                    dia: 13.0,
+                    dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                     pitch: 150.0,
                     legs_x: 4,
                     legs_y: 4,
@@ -1626,8 +1626,16 @@ fn test_import_rc_rebar_third_party_names() {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
             assert_eq!(rebar.x, vec![3]);
             assert_eq!(rebar.y, vec![4]);
-            assert_eq!(rebar.main_dia, 22.0, "呼び名 D22 → 22mm");
-            assert_eq!(rebar.hoop.dia, 10.0, "呼び名 D10 → 10mm");
+            assert_eq!(
+                rebar.main_dia.designation_or_diameter_mm(),
+                22.0,
+                "呼び名 D22 → 22mm"
+            );
+            assert_eq!(
+                rebar.hoop.dia.designation_or_diameter_mm(),
+                10.0,
+                "呼び名 D10 → 10mm"
+            );
             assert_eq!(rebar.hoop.pitch, 100.0);
         }
         other => panic!("RcColumnRect を期待: {other:?}"),
@@ -1654,7 +1662,11 @@ fn test_import_rc_rebar_layered_counts() {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
             assert_eq!(rebar.x, vec![5], "標準Yは上下の水平列");
             assert_eq!(rebar.y, vec![4, 3], "標準Xは左右の垂直列で段別本数を保持");
-            assert_eq!(rebar.main_dia, 25.0, "呼び名 D25 → 25mm");
+            assert_eq!(
+                rebar.main_dia.designation_or_diameter_mm(),
+                25.0,
+                "呼び名 D25 → 25mm"
+            );
         }
         other => panic!("RcColumnRect を期待: {other:?}"),
     }
@@ -1680,8 +1692,8 @@ fn test_import_rc_beam_rebar_stages() {
             assert_eq!((*b, *d), (400.0, 700.0));
             assert_eq!(rebar.top, vec![4, 2], "上端筋を段別に保持");
             assert_eq!(rebar.bottom, vec![3], "下端筋を段別に保持");
-            assert_eq!(rebar.main_dia, 22.0);
-            assert_eq!(rebar.stirrup.dia, 10.0);
+            assert_eq!(rebar.main_dia.designation_or_diameter_mm(), 22.0);
+            assert_eq!(rebar.stirrup.dia.designation_or_diameter_mm(), 10.0);
             assert_eq!(rebar.stirrup.pitch, 100.0);
             assert_eq!(rebar.stirrup.legs, 2);
         }
@@ -1734,8 +1746,8 @@ fn test_import_rc_circle_column_total_count() {
         Some(SectionShape::RcColumnCircle { d, rebar }) => {
             assert_eq!(*d, 800.0);
             assert_eq!(rebar.count, 8, "円形柱の主筋は全本数");
-            assert_eq!(rebar.main_dia, 25.0);
-            assert_eq!(rebar.hoop.dia, 13.0);
+            assert_eq!(rebar.main_dia.designation_or_diameter_mm(), 25.0);
+            assert_eq!(rebar.hoop.dia.designation_or_diameter_mm(), 13.0);
             assert_eq!(rebar.hoop.pitch, 100.0);
         }
         other => panic!("RcColumnCircle を期待: {other:?}"),
@@ -2199,12 +2211,12 @@ fn test_standard_roundtrip_src_column() {
         b: 800.0,
         d: 800.0,
         rebar: RcRectColumnRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             x: vec![4],
             y: vec![3],
             cover: 45.0,
             hoop: RectColumnHoop {
-                dia: 13.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                 pitch: 150.0,
                 legs_x: 4,
                 legs_y: 4,
@@ -2267,12 +2279,12 @@ fn test_standard_roundtrip_src_beam() {
         b: 500.0,
         d: 800.0,
         rebar: RcBeamRebar {
-            main_dia: 25.0,
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
             top: vec![4],
             bottom: vec![3],
             cover: 45.0,
             stirrup: BeamStirrup {
-                dia: 13.0,
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(13.0),
                 pitch: 150.0,
                 legs: 4,
             },
