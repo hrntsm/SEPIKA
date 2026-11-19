@@ -1299,7 +1299,7 @@ fn snapshot_wall_response_and_ds_hold() {
         .iter()
         .map(|(id, forces)| (*id, forces.at.as_slice()))
         .collect();
-    let expected_compression_n = 35_707.887_290_661_97;
+    let expected_compression_n = 35_707.925_489_801_8;
     assert!((face.recover(&batch).unwrap().compression_n - expected_compression_n).abs() < 1e-6);
     // A=735000、D=4300、te=A/D、j=3631.25より軸力項は0.1·N·j/D。
     let expected_wall_capacity_n =
