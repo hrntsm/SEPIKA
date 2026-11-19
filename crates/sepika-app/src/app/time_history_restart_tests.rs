@@ -143,6 +143,12 @@ fn 再開はモデル波形刻み設定契約自由度と破損の不一致を�
     saved["result"]["recording"]
         .as_object_mut()
         .unwrap()
+        .remove("strong_axis_moment_peaks");
+    let old: LinearTimeHistoryCheckpoint = serde_json::from_value(saved.clone()).unwrap();
+    assert!(old.to_bytes().is_ok());
+    saved["result"]["recording"]
+        .as_object_mut()
+        .unwrap()
         .remove("axial_force_peaks");
     let invalid: LinearTimeHistoryCheckpoint = serde_json::from_value(saved).unwrap();
     assert!(resume_checkpoint(model.clone(), cfg, wave(), invalid)
@@ -227,6 +233,57 @@ fn 再開はモデル波形刻み設定契約自由度と破損の不一致を�
     let mut corrupt = bytes;
     *corrupt.last_mut().unwrap() ^= 1;
     assert!(LinearTimeHistoryCheckpoint::from_bytes(&corrupt).is_err());
+}
+
+#[test]
+fn 非対称組立h柱の正負曲げ極値は再開しても一致し記録がない旧状態は拒否する() {
+    let mut app = App::default();
+    let model = super::steel_column_k_tests::asymmetric_built_h_cantilever();
+    assert!(app.load_model(with_explicit_pushover_gravity(model)));
+    app.generate_stories_action();
+    app.ensure_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let model = app.core.model;
+    let cfg = AnalysisSettings {
+        th_record_every: 5,
+        ..app.core.analysis_cfg
+    };
+    let wave = wave();
+    let continuous =
+        sepika_job::compute::compute_time_history(model.clone(), cfg, wave.clone()).unwrap();
+    let checkpoint = compute_checkpoint(model.clone(), cfg, wave.clone(), 2).unwrap();
+    let mut saved = serde_json::to_value(&checkpoint).unwrap();
+    let restored =
+        LinearTimeHistoryCheckpoint::from_bytes(&checkpoint.to_bytes().unwrap()).unwrap();
+    let resumed = resume_checkpoint(model.clone(), cfg, wave.clone(), restored).unwrap();
+
+    let recording = continuous.recording.as_ref().unwrap();
+    assert!(!recording.strong_axis_moment_peaks[&0].snapshots.is_empty());
+    assert!(recording.strong_axis_moment_peaks[&0]
+        .snapshots
+        .iter()
+        .any(|s| !recording.frame_time.contains(&s.time)));
+    assert_eq!(
+        bincode::serialize(&resumed).unwrap(),
+        bincode::serialize(&continuous).unwrap()
+    );
+
+    saved["result"]["recording"]
+        .as_object_mut()
+        .unwrap()
+        .remove("strong_axis_moment_peaks");
+    let old: LinearTimeHistoryCheckpoint = serde_json::from_value(saved).unwrap();
+    let error = resume_checkpoint(model, cfg, wave, old)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("正負の強軸曲げ極値がありません。再計算"),
+        "{error}"
+    );
 }
 
 #[test]

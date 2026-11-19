@@ -7,8 +7,8 @@
 //!   部材長がほぼ 0 の要素（免震・節点ばね）は材軸が定まらないため、要素ローカル軸の
 //!   成分別（軸／せん断y／せん断z）表示に切り替わる（免震は水平せん断が既定）。
 //!   現在フレームの位置をループ上にマーカー表示し、フレームスライダーと連動する。
-//! - 最大応力に対する検定: 全ステップの内力包絡と引張・圧縮の軸力極値が生じた
-//!   確定時刻の内力で短期の断面検定を実行する。
+//! - 短期の簡易検定: 内力包絡や軸力極値が生じた確定時刻の内力を用いる。
+//!   上下非対称組立H形鋼のS柱は軸力と正負の強軸曲げの極値が生じた確定時刻を照査する。
 //!
 //! ヒンジ詳細ウィンドウ（[`super::hinge`]）と同じ構成方針（`egui::Window` +
 //! `egui_plot`）を踏襲するが、対象データ（時刻歴の全フレーム記録）が異なるため
@@ -34,6 +34,7 @@ use sepika_design_jp::{
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::dynamic::timehistory::ThRecording;
+use sepika_solver::dynamic::timehistory::{uses_signed_bending_peaks, ForcePeakSnapshot};
 
 /// ループ表示の分類（要素種別による）。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -632,7 +633,6 @@ fn end_moments(mf: &MemberForces, axis_z: bool) -> Option<(f64, f64)> {
     Some((-i_at.1[idx], j_at.1[idx]))
 }
 
-/// 最大応力（内力包絡）に対する短期検定。
 #[allow(clippy::too_many_arguments)]
 fn draw_peak_check(
     ui: &mut egui::Ui,
@@ -644,23 +644,34 @@ fn draw_peak_check(
     th_applied_long_term: bool,
     axis: &super::MemberAxisEndpoints,
 ) {
-    ui.strong("最大応力に対する検定（短期）");
+    let model = &app.core.model;
+    let signed_bending = uses_signed_bending_peaks(model, elem);
+    ui.strong(if signed_bending {
+        "抽出時刻の簡易検定（短期）"
+    } else {
+        "最大応力に対する検定（短期）"
+    });
     draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
             "簡易検定です。通常S部材の未入力軸の座屈長さは柱1.2L・大梁と一般ブレース1.0Lです。\
              実効座屈長さが既定値を超える場合は、支持条件に応じた長さを直接入力してください。CFT柱は両軸の直接入力が必要です。\
              継手・スカラップ欠損による断面性能の低減や一本部材合成は行いません。\
-             欠損を指定した上下非対称組立H形鋼柱の圧縮・強軸曲げは未算定です。\
-             非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
-             （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。\
-             内力包絡では、異なる時刻の成分の組合せにより過大・過小評価が生じる場合があります。\
-             引張側・圧縮側は、各位置でそれぞれの軸力の絶対値が最大となった確定時刻の内力を使います。\
-             軸力が極値に達していない時刻でも、より厳しい応力の組合せが生じる場合があります。",
+             欠損を指定した上下非対称組立H形鋼柱の圧縮・強軸曲げは未算定です。",
         )
         .size(11.0)
         .color(theme::GRAY_600),
     );
+    if !signed_bending {
+        ui.label(
+            egui::RichText::new(
+                "非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
+                 （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。",
+            )
+            .size(11.0)
+            .color(theme::GRAY_600),
+        );
+    }
 
     let Some(peak) = rec
         .peak_member_forces
@@ -692,7 +703,36 @@ fn draw_peak_check(
         return;
     };
     use sepika_core::structure_kind::StructureKind;
-    let model = &app.core.model;
+    let axial_peaks = rec.axial_force_peaks.get(elem_idx);
+    let moment_peaks = rec.strong_axis_moment_peaks.get(&elem_idx);
+    if signed_bending {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "上下非対称組立H形鋼柱は、各位置で引張・圧縮の軸力 N または正・負の強軸曲げ Mz が極値となった確定時刻の断面力を照査します。\
+             N・Mzがともに極値でない時刻や、せん断力などが厳しい時刻は、この抽出で漏れることがあります。\
+             全時刻の適否は未判定です。",
+        );
+        if axial_peaks.is_none() || moment_peaks.is_none() {
+            ui.colored_label(
+                theme::WARN_TEXT,
+                "軸力または正負の強軸曲げの極値記録が不足しています。確認するには解析を再実行してください。",
+            );
+        } else if axial_peaks.is_some_and(|peaks| peaks.snapshots.is_empty())
+            && moment_peaks.is_some_and(|peaks| peaks.snapshots.is_empty())
+        {
+            ui.label("非零の軸力・強軸曲げ極値がないため、照査対象の時刻がありません。");
+        }
+    } else {
+        ui.label(
+            egui::RichText::new(
+                "内力包絡では、異なる時刻の成分の組合せにより過大・過小評価が生じる場合があります。\
+                 引張側・圧縮側は、各位置でそれぞれの軸力の絶対値が最大となった確定時刻の内力を使います。\
+                 軸力が極値に達していない時刻でも、より厳しい応力の組合せが生じる場合があります。",
+            )
+            .size(11.0)
+            .color(theme::GRAY_600),
+        );
+    }
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
     let buckling_lengths = match structure {
@@ -734,7 +774,7 @@ fn draw_peak_check(
     } else {
         length
     };
-    let wire_qd = th_nonlinear && th_applied_long_term;
+    let wire_qd = th_nonlinear && th_applied_long_term && !signed_bending;
     let long_mf = wire_qd
         .then(|| {
             app.core.scoped.results.as_ref().and_then(|r| {
@@ -833,8 +873,15 @@ fn draw_peak_check(
     };
     let checker: Box<dyn DesignCheck> = sepika_design_jp::checker_for(structure);
 
+    #[derive(Clone, Copy)]
+    enum PeakComponent {
+        Axial,
+        Moment,
+    }
     let mut draw_checks =
-        |ui: &mut egui::Ui, forces: &MemberForces, selected: Option<(&[usize], f64)>| {
+        |ui: &mut egui::Ui,
+         forces: &MemberForces,
+         selected: Option<(&ForcePeakSnapshot, PeakComponent)>| {
             let m_at = |target: f64| {
                 forces
                     .at
@@ -872,46 +919,57 @@ fn draw_peak_check(
                 )
             });
             for (index, &(pos, f)) in forces.at.iter().enumerate() {
-                if selected.is_some_and(|(positions, _)| positions.binary_search(&index).is_err()) {
+                if selected
+                    .is_some_and(|(snapshot, _)| snapshot.positions.binary_search(&index).is_err())
+                {
                     continue;
                 }
                 let mfa = MemberForcesAt::from_local(pos, f);
                 let outcome = checker.check(&mfa, sec, mat, &ctx);
-                if let Some((_, time)) = selected {
-                    let side = if mfa.n < 0.0 {
-                        "圧縮側"
-                    } else {
-                        "引張側"
+                if let Some((snapshot, component)) = selected {
+                    let side = match component {
+                        PeakComponent::Axial if mfa.n < 0.0 => "圧縮側",
+                        PeakComponent::Axial => "引張側",
+                        PeakComponent::Moment if mfa.mz < 0.0 => "負曲げ側",
+                        PeakComponent::Moment => "正曲げ側",
                     };
                     draw_labeled_outcome_row(
                         ui,
-                        &format!("{side} t={time:.6} s  ξ={pos:.2}:"),
+                        &format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time),
                         &outcome,
+                        signed_bending,
                     );
                 } else {
                     draw_outcome_row(ui, pos, &outcome);
                 }
             }
         };
-    if rec.axial_force_peaks.get(elem_idx).is_none() {
-        ui.colored_label(
-            theme::WARN_TEXT,
-            "引張側・圧縮側の記録がありません。確認するには解析を再実行してください。",
-        );
+    if !signed_bending {
+        if axial_peaks.is_none() {
+            ui.colored_label(
+                theme::WARN_TEXT,
+                "引張側・圧縮側の記録がありません。確認するには解析を再実行してください。",
+            );
+        }
+        ui.label("内力包絡");
+        draw_checks(ui, peak, None);
     }
-    ui.label("内力包絡");
-    draw_checks(ui, peak, None);
-    if let Some(peaks) = rec
-        .axial_force_peaks
-        .get(elem_idx)
+    if let Some(peaks) = axial_peaks.filter(|peaks| !peaks.snapshots.is_empty()) {
+        ui.label("軸力極値が生じた確定ステップ");
+        for snapshot in &peaks.snapshots {
+            draw_checks(ui, &snapshot.forces, Some((snapshot, PeakComponent::Axial)));
+        }
+    }
+    if let Some(peaks) = moment_peaks
+        .filter(|_| signed_bending)
         .filter(|peaks| !peaks.snapshots.is_empty())
     {
-        ui.label("軸力極値が生じた確定ステップ");
+        ui.label("正負の強軸曲げ極値が生じた確定ステップ");
         for snapshot in &peaks.snapshots {
             draw_checks(
                 ui,
                 &snapshot.forces,
-                Some((&snapshot.positions, snapshot.time)),
+                Some((snapshot, PeakComponent::Moment)),
             );
         }
     }
@@ -936,10 +994,15 @@ fn draw_long_term_note(ui: &mut egui::Ui, nonlinear: bool, applied_long_term: bo
 
 /// 1 検定位置分の検定結果を 1 行で表示する（検定比・判定・式別内訳）。
 fn draw_outcome_row(ui: &mut egui::Ui, pos: f64, outcome: &CheckOutcome) {
-    draw_labeled_outcome_row(ui, &format!("ξ={pos:.2}:"), outcome);
+    draw_labeled_outcome_row(ui, &format!("ξ={pos:.2}:"), outcome, false);
 }
 
-fn draw_labeled_outcome_row(ui: &mut egui::Ui, label: &str, outcome: &CheckOutcome) {
+fn draw_labeled_outcome_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    outcome: &CheckOutcome,
+    extracted_only: bool,
+) {
     ui.horizontal_wrapped(|ui| {
         ui.label(label);
         match outcome {
@@ -950,15 +1013,16 @@ fn draw_labeled_outcome_row(ui: &mut egui::Ui, label: &str, outcome: &CheckOutco
                 } else {
                     evaluation.known_ng
                 } {
-                    ui.colored_label(
-                        theme::status_color(ratio),
-                        format!(
-                            "検定比 {:.3} ({})",
-                            ratio,
-                            if ratio <= 1.0 { "OK" } else { "NG" }
-                        ),
-                    )
-                    .on_hover_text(&cr.basis);
+                    let (color, text) = if extracted_only && ratio <= 1.0 {
+                        (theme::GRAY_600, format!("検定比 {ratio:.3}（抽出時刻）"))
+                    } else {
+                        let status = if ratio <= 1.0 { "OK" } else { "NG" };
+                        (
+                            theme::status_color(ratio),
+                            format!("検定比 {ratio:.3} ({status})"),
+                        )
+                    };
+                    ui.colored_label(color, text).on_hover_text(&cr.basis);
                 }
                 if !evaluation.complete {
                     ui.colored_label(theme::GRAY_600, crate::app::INVALID_CHECK_COMPONENTS);
@@ -966,7 +1030,7 @@ fn draw_labeled_outcome_row(ui: &mut egui::Ui, label: &str, outcome: &CheckOutco
                 for c in &cr.components {
                     let valid = c.ratio.is_finite() && c.ratio >= 0.0;
                     ui.colored_label(
-                        if valid {
+                        if valid && (!extracted_only || c.ratio > 1.0) {
                             theme::status_color(c.ratio)
                         } else {
                             theme::GRAY_600
@@ -996,14 +1060,39 @@ mod tests {
 
     fn peak_check_text(app: &App, index: usize, forces: [f64; 6]) -> String {
         let mut peak_member_forces = vec![None; index + 1];
-        peak_member_forces[index] = Some(MemberForces {
+        let distribution = MemberForces {
             at: vec![(0.0, forces)],
-        });
+        };
+        peak_member_forces[index] = Some(distribution.clone());
+        let elem = &app.core.model.elements[index];
+        let mut axial_force_peaks = Vec::new();
+        let mut strong_axis_moment_peaks = std::collections::BTreeMap::new();
+        if sepika_solver::dynamic::timehistory::uses_signed_bending_peaks(&app.core.model, elem) {
+            use sepika_solver::dynamic::timehistory::{
+                AxialForcePeaks, ForcePeakSnapshot, StrongAxisMomentPeaks,
+            };
+            let snapshot = ForcePeakSnapshot {
+                time: 0.0,
+                forces: distribution,
+                positions: vec![0],
+            };
+            axial_force_peaks.resize_with(index + 1, AxialForcePeaks::default);
+            if forces[0] != 0.0 {
+                axial_force_peaks[index].snapshots.push(snapshot.clone());
+            }
+            let snapshots = if forces[5] == 0.0 {
+                vec![]
+            } else {
+                vec![snapshot]
+            };
+            strong_axis_moment_peaks.insert(index, StrongAxisMomentPeaks { snapshots });
+        }
         let rec = ThRecording {
             peak_member_forces,
+            axial_force_peaks,
+            strong_axis_moment_peaks,
             ..Default::default()
         };
-        let elem = &app.core.model.elements[index];
         let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
         egui::Context::default()
             .run_ui(egui::RawInput::default(), |ui| {
@@ -1026,30 +1115,16 @@ mod tests {
         assert!(app.load_model(input::portal(1.0)));
 
         let text = peak_check_text(&app, 0, [0.0, 0.0, 0.0, -100e6, 0.0, 0.0]);
+        assert!(text.contains("最大応力に対する検定（短期）"), "{text}");
+        assert!(text.contains("地震時 QD / 柱メカニズム"), "{text}");
+        assert!(!text.contains("抽出時刻の簡易検定"), "{text}");
         assert!(text.contains("検定不能: ねじりモーメントMx"), "{text}");
     }
 
     #[test]
     fn asymmetric_built_h_peak_check_respects_section_loss_without_using_direct_c() {
-        use crate::app::steel_column_k_tests::input;
-        use sepika_core::section_shape::SectionShape;
-
-        let mut model = input::portal(1.0);
-        let former = &model.sections[0];
-        let mut section = SectionShape::SteelBuiltH {
-            height: 400.0,
-            upper_width: 80.0,
-            upper_thick: 12.0,
-            lower_width: 180.0,
-            lower_thick: 20.0,
-            web_thick: 8.0,
-        }
-        .to_section(former.id, "上下非対称組立H".into());
-        section.material = former.material;
-        section.frame_use = former.frame_use;
-        model.sections[0] = section;
         let mut app = App::default();
-        assert!(app.load_model(model));
+        assert!(app.load_model(crate::app::steel_column_k_tests::asymmetric_built_h_cantilever()));
 
         let compression = [-77_000.0, 0.0, 0.0, 0.0, 0.0, 160e6];
         let text = peak_check_text(&app, 0, compression);
@@ -1068,6 +1143,221 @@ mod tests {
         );
         assert!(!text.contains("検定比"), "{text}");
         assert_eq!(peak_check_text(&app, 0, zero_axial), zero_axial_text);
+    }
+
+    #[test]
+    fn asymmetric_built_h_history_shows_reverse_bending_failure_after_save_and_reopen() {
+        let mut app = App::default();
+        let mut model = crate::app::steel_column_k_tests::asymmetric_built_h_cantilever();
+        model.steel_design_attrs[0].lk_y_direct = Some(500.0);
+        model.steel_design_attrs[0].lk_z_direct = Some(500.0);
+        assert!(app.load_model(model));
+        app.generate_stories_action();
+        app.core.analysis_cfg.th_record_every = 2;
+        app.run_time_history(sepika_solver::dynamic::timehistory::GroundMotion {
+            dt: 1.0,
+            accel_x: vec![0.0, 100.0, -100.0],
+            accel_y: None,
+            accel_theta: None,
+        });
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+
+        let case_id = app.core.scoped.view_vibration_case.unwrap();
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        let mut th = bundle.time_history_for(case_id).unwrap().clone();
+        assert_eq!(th.time, vec![0.0, 1.0, 2.0]);
+        th.recording = Some(asymmetric_history(
+            &[(-78.0, 0.0), (-77.0, 150.0), (-77.0, -155.0)],
+            1,
+            2,
+        ));
+        bundle.upsert_time_history(case_id, th.clone());
+        app.set_spatial_time_history_view(case_id, &th);
+        let path =
+            std::env::temp_dir().join(format!("steel-history-{}.ovika", uuid::Uuid::new_v4()));
+        app.save_project_to(path.clone());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mut restored = App::default();
+        restored.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+
+        let text = asymmetric_history_labels(&mut restored);
+        assert!(text.contains("抽出時刻の簡易検定（短期）"), "{text}");
+        assert!(!text.contains("最大応力に対する検定"), "{text}");
+        assert!(!text.contains("地震時 QD / 柱メカニズム"), "{text}");
+        assert!(
+            text.contains("正曲げ側 t=1.000000 s  ξ=0.50:\n検定比 1.049 (NG)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("圧縮側 t=0.000000 s  ξ=0.50:\n検定比 0.045（抽出時刻）"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "負曲げ側 t=2.000000 s  ξ=0.50:\n検定不能: 上下非対称断面の横座屈・曲げねじり座屈"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("地震動による応答成分のみ"), "{text}");
+        assert!(text.contains("全時刻の適否は未判定"), "{text}");
+        assert!(!text.contains("内力包絡\n"), "{text}");
+        assert!(!text.contains("(OK)"), "{text}");
+
+        let bundle = restored.core.scoped.results.as_mut().unwrap();
+        let mut th = bundle.time_history_for(case_id).unwrap().clone();
+        th.nonlinear = true;
+        th.applied_long_term = true;
+        bundle.upsert_time_history(case_id, th);
+        let text = asymmetric_history_labels(&mut restored);
+        assert!(!text.contains("地震時 QD / 柱メカニズム"), "{text}");
+        assert!(
+            text.contains("長期荷重を初期状態として含む結果です"),
+            "{text}"
+        );
+        assert!(
+            text.contains("正曲げ側 t=1.000000 s  ξ=0.50:\n検定比 1.049 (NG)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn asymmetric_built_h_history_discloses_unselected_times_and_missing_peaks() {
+        let mut app = App::default();
+        let mut model = crate::app::steel_column_k_tests::asymmetric_built_h_cantilever();
+        model.steel_design_attrs[0].lk_y_direct = Some(500.0);
+        model.steel_design_attrs[0].lk_z_direct = Some(500.0);
+        assert!(app.load_model(model));
+        // B の上縁圧縮比は 1.065。N・Mz の個別極値となる A・C・D だけでは確定できない。
+        let recording = asymmetric_history(
+            &[
+                (-800.0, 0.0),
+                (-400.0, 125.0),
+                (-1.0, 130.0),
+                (-1.0, -145.0),
+            ],
+            2,
+            3,
+        );
+        app.core.scoped.results = Some(crate::app::ResultsBundle {
+            time_history: Some(sepika_solver::dynamic::timehistory::ResponseResult {
+                wall_capacities: Vec::new(),
+                rc_wall_shear_method: Default::default(),
+                time: vec![0.0, 1.0, 2.0, 3.0],
+                peak_disp: Vec::new(),
+                story_drift_angle: Vec::new(),
+                history: Default::default(),
+                recording: Some(recording),
+                nonlinear: true,
+                applied_long_term: false,
+                non_converged_steps: 0,
+            }),
+            ..Default::default()
+        });
+        let text = asymmetric_history_labels(&mut app);
+        assert!(text.contains("長期荷重を含まない"), "{text}");
+        assert!(
+            text.contains("N・Mzがともに極値でない時刻や、せん断力などが厳しい時刻"),
+            "{text}"
+        );
+        assert!(text.contains("全時刻の適否は未判定"), "{text}");
+        assert!(text.contains("正曲げ側 t=2.000000 s"), "{text}");
+        assert!(!text.contains("t=1.000000 s"), "{text}");
+        assert!(!text.contains("(OK)") && !text.contains("(NG)"), "{text}");
+
+        let rec = app
+            .core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .time_history
+            .as_mut()
+            .unwrap()
+            .recording
+            .as_mut()
+            .unwrap();
+        rec.strong_axis_moment_peaks.clear();
+        let text = asymmetric_history_labels(&mut app);
+        assert!(text.contains("極値記録が不足しています"), "{text}");
+        assert!(text.contains("解析を再実行してください"), "{text}");
+        assert!(text.contains("圧縮側 t=0.000000 s"), "{text}");
+        assert!(!text.contains("(OK)") && !text.contains("(NG)"), "{text}");
+    }
+
+    fn asymmetric_history(
+        history: &[(f64, f64)],
+        positive_step: usize,
+        negative_step: usize,
+    ) -> ThRecording {
+        use sepika_solver::dynamic::timehistory::{
+            AxialForcePeaks, ForcePeakSnapshot, StrongAxisMomentPeaks,
+        };
+        let forces = |n_kn, mz_knm| MemberForces {
+            at: vec![(0.5, [n_kn * 1e3, 0.0, 0.0, 0.0, 0.0, mz_knm * 1e6])],
+        };
+        let snapshot = |step: usize| {
+            let (n, mz) = history[step];
+            ForcePeakSnapshot {
+                time: step as f64,
+                forces: forces(n, mz),
+                positions: vec![0],
+            }
+        };
+        let first = snapshot(0);
+        let last = snapshot(negative_step);
+        ThRecording {
+            record_every: negative_step,
+            frame_time: vec![first.time, last.time],
+            member_forces: vec![
+                vec![Some(first.forces.clone())],
+                vec![Some(last.forces.clone())],
+            ],
+            peak_member_forces: vec![Some(forces(history[0].0, history[negative_step].1))],
+            axial_force_peaks: vec![AxialForcePeaks {
+                snapshots: vec![first],
+            }],
+            strong_axis_moment_peaks: [(
+                0,
+                StrongAxisMomentPeaks {
+                    snapshots: vec![snapshot(positive_step), last],
+                },
+            )]
+            .into(),
+            ..Default::default()
+        }
+    }
+
+    fn asymmetric_history_labels(app: &mut App) -> String {
+        let mut view = super::super::ViewportState::default();
+        view.capture_result_sources(app);
+        egui::Context::default()
+            .run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 1200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| draw_th_detail_content_at(ui, app, ElemId(0), 0, &view),
+            )
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]

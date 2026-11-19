@@ -6,6 +6,8 @@
 //!   部材履歴用の詳細記録（間引きあり）
 //! - [`TimeStepState`] — 1 時点の状態（チェックポイント／再開）
 
+use std::collections::BTreeMap;
+
 use sepika_element::frame::beam::MemberForces;
 
 /// 時刻歴応答解析の結果。
@@ -95,35 +97,45 @@ pub struct ThRecording {
     /// 旧結果では空。
     #[serde(default)]
     pub axial_force_peaks: Vec<AxialForcePeaks>,
+    /// 上下非対称組立H形鋼柱の正負の強軸曲げ極値を取る確定時刻の記録（要素添字で参照）。
+    /// 旧結果では対象の登録がない。
+    #[serde(default)]
+    pub strong_axis_moment_peaks: BTreeMap<usize, StrongAxisMomentPeaks>,
 }
 
-/// 各評価位置・軸力符号で絶対値最大となった確定ステップの部材内力。
-/// 同値は最初の時刻を採用し、軸力が 0 の時刻は対象外。
+/// 各評価位置で引張・圧縮軸力が極値となった確定時刻の部材内力。
+pub type AxialForcePeaks = SignedForcePeaks<0>;
+/// 各評価位置で正・負の局所 Mz が極値となった確定時刻の部材内力。
+pub type StrongAxisMomentPeaks = SignedForcePeaks<5>;
+pub type AxialForcePeakSnapshot = ForcePeakSnapshot;
+
+/// 各評価位置・成分符号で絶対値最大となった確定時刻の部材内力。
+/// 同値は最初の時刻を採用し、対象成分が 0 の時刻は対象外。
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct AxialForcePeaks {
-    /// 確定時刻順。同じ時刻に軸力極値を取る位置は一つの内力分布を共有する。
-    pub snapshots: Vec<AxialForcePeakSnapshot>,
+pub struct SignedForcePeaks<const COMPONENT: usize> {
+    /// 確定時刻順。同じ時刻に極値を取る位置は一つの内力分布を共有する。
+    pub snapshots: Vec<ForcePeakSnapshot>,
 }
 
-/// 軸力極値が生じた時刻の分布と、その時刻を採用する評価位置。
+/// 極値が生じた時刻の分布と、その時刻を採用する評価位置。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct AxialForcePeakSnapshot {
+pub struct ForcePeakSnapshot {
     /// 確定時刻 [s]。
     pub time: f64,
     /// 同時刻の全評価位置の内力分布。
     pub forces: MemberForces,
-    /// 軸力が極値となった評価位置の `forces.at` 内の添字（昇順）。
+    /// 成分が極値となった評価位置の `forces.at` 内の添字（昇順）。
     pub positions: Vec<usize>,
 }
 
-impl AxialForcePeaks {
+impl<const COMPONENT: usize> SignedForcePeaks<COMPONENT> {
     pub(crate) fn record(&mut self, time: f64, forces: &MemberForces) {
         let mut wins = forces
             .at
             .iter()
             .map(|(_, f)| {
-                let n = f[0];
-                n.is_finite() && n != 0.0
+                let value = f[COMPONENT];
+                value.is_finite() && value != 0.0
             })
             .collect::<Vec<_>>();
         if !wins.iter().any(|&wins| wins) {
@@ -134,12 +146,12 @@ impl AxialForcePeaks {
                 let Some(wins) = wins.get_mut(i).filter(|wins| **wins) else {
                     return true;
                 };
-                let previous_n = snapshot.forces.at[i].1[0];
-                let n = forces.at[i].1[0];
-                if previous_n.is_sign_negative() != n.is_sign_negative() {
+                let previous = snapshot.forces.at[i].1[COMPONENT];
+                let value = forces.at[i].1[COMPONENT];
+                if previous.is_sign_negative() != value.is_sign_negative() {
                     return true;
                 }
-                if n.abs() > previous_n.abs() {
+                if value.abs() > previous.abs() {
                     false
                 } else {
                     *wins = false;
@@ -154,7 +166,7 @@ impl AxialForcePeaks {
             .filter_map(|(i, wins)| wins.then_some(i))
             .collect();
         if !positions.is_empty() {
-            self.snapshots.push(AxialForcePeakSnapshot {
+            self.snapshots.push(ForcePeakSnapshot {
                 time,
                 forces: forces.clone(),
                 positions,

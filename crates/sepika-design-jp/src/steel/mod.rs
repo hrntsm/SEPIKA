@@ -371,7 +371,9 @@ impl SteelDesign {
             && forces.n < 0.0
             && forces.mz != 0.0
         {
-            column::asymmetric_built_h_shape(sec)
+            sec.shape
+                .as_ref()
+                .filter(|shape| shape.is_asymmetric_built_h())
         } else {
             None
         };

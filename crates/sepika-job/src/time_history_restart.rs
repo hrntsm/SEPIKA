@@ -5,8 +5,9 @@ use sepika_core::{dof::DofMap, model::Model};
 use sepika_solver::{
     common::constraint::Reducer,
     dynamic::timehistory::{
-        linear_time_history_from_state, linear_time_history_until, GroundMotion, NewmarkCfg,
-        ResponseResult, StoryResponse, ThRecording, TimeStepState,
+        linear_time_history_from_state, linear_time_history_until, uses_signed_bending_peaks,
+        ForcePeakSnapshot, GroundMotion, NewmarkCfg, ResponseResult, StoryResponse, ThRecording,
+        TimeStepState,
     },
     statics::analysis::Analysis,
 };
@@ -140,6 +141,14 @@ impl LinearTimeHistoryCheckpoint {
         } else {
             self.cfg.th_record_every
         };
+        if self.model.elements.iter().enumerate().any(|(index, elem)| {
+            uses_signed_bending_peaks(&self.model, elem)
+                && !recording.strong_axis_moment_peaks.contains_key(&index)
+        }) {
+            return Err(invalid(
+                "再開状態に上下非対称組立H形鋼柱の正負の強軸曲げ極値がありません。再計算してください。",
+            ));
+        }
         let times: Vec<_> = (0..=step)
             .step_by(every)
             .map(|s| s as f64 * self.wave.dt)
@@ -163,7 +172,7 @@ impl LinearTimeHistoryCheckpoint {
             })
             || recording.member_forces.iter().any(|row| !valid_forces(row))
             || !valid_forces(&recording.peak_member_forces)
-            || !valid_axial_force_peaks(recording, &self.result.time)
+            || !valid_force_peaks(recording, &self.result.time, &self.model)
             || !valid_story(&recording.story_x, self.model.layer_count(), frames)
             || !valid_story(&recording.story_y, self.model.layer_count(), frames)
             || self
@@ -188,83 +197,119 @@ impl LinearTimeHistoryCheckpoint {
     }
 }
 
-fn valid_axial_force_peaks(recording: &ThRecording, times: &[f64]) -> bool {
+fn valid_force_peaks(recording: &ThRecording, times: &[f64], model: &Model) -> bool {
     recording.axial_force_peaks.len() == recording.peak_member_forces.len()
+        && recording.strong_axis_moment_peaks.keys().all(|&i| {
+            model
+                .elements
+                .get(i)
+                .is_some_and(|elem| uses_signed_bending_peaks(model, elem))
+        })
         && recording
             .axial_force_peaks
             .iter()
-            .zip(&recording.peak_member_forces)
             .enumerate()
-            .all(|(element, (peaks, envelope))| {
-                let mut frames = recording
-                    .member_forces
+            .all(|(i, axial)| {
+                let moment = recording.strong_axis_moment_peaks.get(&i);
+                valid_component_peaks(
+                    recording,
+                    times,
+                    i,
+                    0,
+                    &axial.snapshots,
+                    moment.map_or(&[], |peaks| peaks.snapshots.as_slice()),
+                ) && moment.is_none_or(|peaks| {
+                    valid_component_peaks(
+                        recording,
+                        times,
+                        i,
+                        5,
+                        &peaks.snapshots,
+                        &axial.snapshots,
+                    )
+                })
+            })
+}
+
+fn valid_component_peaks(
+    recording: &ThRecording,
+    times: &[f64],
+    element: usize,
+    component: usize,
+    snapshots: &[ForcePeakSnapshot],
+    other_snapshots: &[ForcePeakSnapshot],
+) -> bool {
+    let mut frames = recording
+        .member_forces
+        .iter()
+        .filter_map(|frame| frame[element].as_ref());
+    let Some(envelope) = &recording.peak_member_forces[element] else {
+        return snapshots.is_empty() && frames.next().is_none();
+    };
+    let mut extrema = vec![[None; 2]; envelope.at.len()];
+    let valid_snapshots = snapshots.windows(2).all(|w| w[0].time < w[1].time)
+        && snapshots.iter().all(|snapshot| {
+            times
+                .binary_search_by(|time| time.total_cmp(&snapshot.time))
+                .is_ok()
+                && snapshot.forces.at.len() == envelope.at.len()
+                && snapshot.forces.at.iter().zip(&envelope.at).all(
+                    |((x, forces), (expected_x, _))| {
+                        x == expected_x && forces.iter().all(|v| v.is_finite())
+                    },
+                )
+                && !snapshot.positions.is_empty()
+                && snapshot.positions.windows(2).all(|w| w[0] < w[1])
+                && snapshot.positions.iter().all(|&i| {
+                    let Some((_, forces)) = snapshot.forces.at.get(i) else {
+                        return false;
+                    };
+                    let value = forces[component];
+                    value != 0.0
+                        && extrema[i][usize::from(value < 0.0)]
+                            .replace(value)
+                            .is_none()
+                })
+        });
+    let covers = |i: usize, value: f64| {
+        value == 0.0
+            || extrema[i][usize::from(value < 0.0)].is_some_and(|peak| peak.abs() >= value.abs())
+    };
+    valid_snapshots
+        && envelope
+            .at
+            .iter()
+            .zip(&extrema)
+            .all(|((_, forces), extrema)| {
+                let value = forces[component];
+                value == 0.0 || extrema[usize::from(value < 0.0)] == Some(value)
+            })
+        && snapshots.iter().chain(other_snapshots).all(|snapshot| {
+            snapshot.forces.at.len() == envelope.at.len()
+                && snapshot
+                    .forces
+                    .at
                     .iter()
-                    .filter_map(|frame| frame[element].as_ref());
-                let Some(envelope) = envelope else {
-                    return peaks.snapshots.is_empty() && frames.count() == 0;
-                };
-                let mut extrema = vec![[None; 2]; envelope.at.len()];
-                let valid_snapshots = peaks.snapshots.windows(2).all(|w| w[0].time < w[1].time)
-                    && peaks.snapshots.iter().all(|snapshot| {
-                        times
-                            .binary_search_by(|time| time.total_cmp(&snapshot.time))
-                            .is_ok()
-                            && snapshot.forces.at.len() == envelope.at.len()
-                            && snapshot.forces.at.iter().zip(&envelope.at).all(
-                                |((x, forces), (expected_x, _))| {
-                                    x == expected_x && forces.iter().all(|v| v.is_finite())
-                                },
-                            )
-                            && !snapshot.positions.is_empty()
-                            && snapshot.positions.windows(2).all(|w| w[0] < w[1])
-                            && snapshot.positions.iter().all(|&i| {
-                                let Some((_, forces)) = snapshot.forces.at.get(i) else {
-                                    return false;
-                                };
-                                let n = forces[0];
-                                n != 0.0 && extrema[i][usize::from(n < 0.0)].replace(n).is_none()
-                            })
-                    });
-                let covers = |i: usize, n: f64| {
-                    n == 0.0
-                        || extrema[i][usize::from(n < 0.0)]
-                            .is_some_and(|peak| peak.abs() >= n.abs())
-                };
-                valid_snapshots
-                    && envelope
+                    .enumerate()
+                    .all(|(i, (_, forces))| covers(i, forces[component]))
+        })
+        && frames.all(|frame| {
+            if frame.at.len() == envelope.at.len() {
+                frame.at.iter().zip(&envelope.at).enumerate().all(
+                    |(i, ((x, forces), (expected_x, _)))| {
+                        x == expected_x && covers(i, forces[component])
+                    },
+                )
+            } else {
+                frame.at.iter().all(|(x, forces)| {
+                    envelope
                         .at
                         .iter()
-                        .zip(&extrema)
-                        .all(|((_, forces), extrema)| {
-                            let n = forces[0];
-                            n == 0.0 || extrema[usize::from(n < 0.0)] == Some(n)
-                        })
-                    && peaks.snapshots.iter().all(|snapshot| {
-                        snapshot
-                            .forces
-                            .at
-                            .iter()
-                            .enumerate()
-                            .all(|(i, (_, forces))| covers(i, forces[0]))
-                    })
-                    && frames.all(|frame| {
-                        if frame.at.len() == envelope.at.len() {
-                            frame.at.iter().zip(&envelope.at).enumerate().all(
-                                |(i, ((x, forces), (expected_x, _)))| {
-                                    x == expected_x && covers(i, forces[0])
-                                },
-                            )
-                        } else {
-                            frame.at.iter().all(|(x, forces)| {
-                                envelope
-                                    .at
-                                    .iter()
-                                    .position(|(expected_x, _)| x == expected_x)
-                                    .is_some_and(|i| covers(i, forces[0]))
-                            })
-                        }
-                    })
-            })
+                        .position(|(expected_x, _)| x == expected_x)
+                        .is_some_and(|i| covers(i, forces[component]))
+                })
+            }
+        })
 }
 
 fn valid_story(story: &StoryResponse, count: usize, frames: usize) -> bool {
@@ -447,6 +492,12 @@ fn merge(mut a: ResponseResult, b: ResponseResult) -> ResponseResult {
     merge_story(&mut ar.story_y, br.story_y);
     for (a, b) in ar.axial_force_peaks.iter_mut().zip(br.axial_force_peaks) {
         a.merge(b);
+    }
+    for (i, peaks) in br.strong_axis_moment_peaks {
+        ar.strong_axis_moment_peaks
+            .get_mut(&i)
+            .unwrap()
+            .merge(peaks);
     }
     for (a, b) in ar.peak_member_forces.iter_mut().zip(br.peak_member_forces) {
         match (a.as_mut(), b) {
