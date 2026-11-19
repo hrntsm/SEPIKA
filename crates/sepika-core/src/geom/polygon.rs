@@ -92,6 +92,32 @@ pub fn intersection_area(subject: &[[f64; 2]], clip: &[[f64; 2]]) -> f64 {
     total.max(0.0)
 }
 
+/// 2つの非退化な単純多角形の内部が正面積で重なるか。
+pub fn interiors_overlap(first: &[[f64; 2]], second: &[[f64; 2]]) -> bool {
+    use i_overlay::core::{fill_rule::FillRule, overlay_rule::OverlayRule};
+    use i_overlay::float::single::SingleFloatOverlay;
+
+    !first
+        .overlay_as::<i64>(&second, OverlayRule::Intersect, FillRule::NonZero)
+        .is_empty()
+}
+
+/// 非退化な単純多角形の集合が、重複せずに外周と同じ領域を覆うか。
+pub fn forms_partition(boundary: &[[f64; 2]], parts: &[Vec<[f64; 2]>]) -> bool {
+    use i_overlay::core::{fill_rule::FillRule, overlay_rule::OverlayRule};
+    use i_overlay::float::single::SingleFloatOverlay;
+
+    // 変換前後の面積を比較すると、境界が一致していても格子化の丸め差が出る。
+    boundary
+        .overlay_as::<i64>(&parts, OverlayRule::Xor, FillRule::EvenOdd)
+        .is_empty()
+        && parts.iter().enumerate().all(|(index, part)| {
+            parts[..index]
+                .iter()
+                .all(|other| !interiors_overlap(part, other))
+        })
+}
+
 /// 3 次元の頂点を全体 XY 平面へ投影した多角形の面積 \[mm²\]。
 ///
 /// 床は水平面内にあるという前提で、床板の面積と荷重分配が見る面積をそろえる。
@@ -302,6 +328,30 @@ fn ray_crossing(poly: &[[f64; 2]], p: [f64; 2]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn partition_rejects_holes_spills_and_odd_multiplicity_overlaps() {
+        let boundary = [[0.0, 0.0], [6000.1, 0.0], [6000.1, 2500.1], [0.0, 2500.1]];
+        let rectangle =
+            |left, right| vec![[left, 0.0], [right, 0.0], [right, 2500.1], [left, 2500.1]];
+        let left = rectangle(0.0, 3000.1);
+        let right = rectangle(3000.1, 6000.1);
+        assert!(super::forms_partition(
+            &boundary,
+            &[left.clone(), right.clone()]
+        ));
+        assert!(!super::forms_partition(
+            &boundary,
+            &[left.clone(), rectangle(3000.2, 6000.1)]
+        ));
+        assert!(!super::forms_partition(
+            &boundary,
+            &[left.clone(), rectangle(3000.1, 6000.2)]
+        ));
+        assert!(!super::forms_partition(
+            &boundary,
+            &[left.clone(), right, left.clone(), left]
+        ));
+    }
     use super::*;
 
     /// 反時計回りの正方形。

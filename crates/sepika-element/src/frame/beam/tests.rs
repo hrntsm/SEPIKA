@@ -1274,6 +1274,48 @@ fn steel_girder_checks_each_support_of_a_shared_attached_slab() {
 }
 
 #[test]
+fn fractional_mm_floor_uses_the_same_composite_stiffness_when_fully_covered() {
+    use sepika_core::model::{PlateAssignment, SlabCompositeConnection};
+    let (mut model, girder) = steel_h_girder_with_slab();
+    model.nodes[1].coord[0] = 6000.1;
+    model.nodes[2].coord = [6000.1, 2500.1, 3000.0];
+    model.nodes[3].coord[1] = 2500.1;
+    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
+
+    let whole = stiffness_breakdown(&model, &girder).unwrap();
+    assert_eq!(whole.steel_slab, Some(SteelSlabStiffness::Confirmed));
+    assert!(whole.slab > 1.0);
+
+    let plate = model.slabs.remove(0).plate;
+    model.elements.truncate(1);
+    model.floor_assignment_regions.regions.clear();
+    for (id, x) in [(NodeId(4), 6000.1), (NodeId(5), 0.0)] {
+        model.nodes.push(Node {
+            id,
+            coord: [x, 1200.025, 3000.0],
+            ..model.nodes[0].clone()
+        });
+    }
+    let near = model
+        .add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(4), NodeId(5)], plate.clone());
+    let far =
+        model.add_enclosed_slab_from_nodes(&[NodeId(5), NodeId(4), NodeId(2), NodeId(3)], plate);
+    model.floor_regions[0].slab_ids = vec![near, far];
+    assert_eq!(stiffness_breakdown(&model, &girder).unwrap(), whole);
+
+    model
+        .floor_assignment_regions
+        .regions
+        .retain(|region| region.assignment != PlateAssignment::Plate(far));
+    model.floor_regions[0].slab_ids = vec![near];
+    model.slabs.pop();
+    model.nodes[4].coord[1] = 2499.987;
+    model.nodes[5].coord[1] = 2499.987;
+    let reason = stiffness_breakdown(&model, &girder).unwrap_err();
+    assert!(reason.contains("支持が連続する床板割当で全幅を確定できません"));
+}
+
+#[test]
 fn a_sloping_girder_with_a_concrete_slab_requires_explicit_noncomposite() {
     use sepika_core::model::SlabCompositeConnection;
     let (mut model, girder) = steel_h_girder_with_slab();

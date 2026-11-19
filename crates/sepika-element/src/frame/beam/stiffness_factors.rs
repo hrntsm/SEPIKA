@@ -571,16 +571,12 @@ fn composite_floor_assignments<'m>(
     if !floor_area_mm2.is_finite() || floor_area_mm2 <= 0.0 {
         return Err(width_error());
     }
-    let area_tol_mm2 = floor_area_mm2 * polygon::DEGENERATE_AREA_REL;
-
     let projected = |assignment: &'m FloorPlateAssignmentRegion| {
         let coords = model.assignment_region_boundary_coords(&assignment.boundary)?;
         let xy: Vec<_> = coords.iter().map(|p| [p[0], p[1]]).collect();
-        if !polygon::area(&xy).is_finite() {
-            return None;
-        }
-        let overlap_mm2 = polygon::intersection_area(&xy, &floor_xy);
-        (overlap_mm2 > area_tol_mm2).then_some((assignment, xy, overlap_mm2))
+        let area_mm2 = polygon::area(&xy);
+        (area_mm2.is_finite() && area_mm2 > 0.0 && polygon::interiors_overlap(&xy, &floor_xy))
+            .then_some((assignment, xy))
     };
     let mut connected = Vec::new();
     let mut pending = Vec::new();
@@ -614,25 +610,11 @@ fn composite_floor_assignments<'m>(
         cursor += 1;
     }
 
-    let mut covered_mm2 = 0.0;
-    for (index, (_, xy, overlap_mm2)) in connected.iter().enumerate() {
-        let area_mm2 = polygon::area(xy);
-        if (area_mm2 - overlap_mm2).abs() > area_tol_mm2
-            || connected[..index]
-                .iter()
-                .any(|(_, other_xy, _)| polygon::intersection_area(xy, other_xy) > area_tol_mm2)
-        {
-            return Err(width_error());
-        }
-        covered_mm2 += area_mm2;
-    }
-    if (covered_mm2 - floor_area_mm2).abs() > area_tol_mm2 {
+    let (assignments, polygons): (Vec<_>, Vec<_>) = connected.into_iter().unzip();
+    if !polygon::forms_partition(&floor_xy, &polygons) {
         return Err(width_error());
     }
-    Ok(connected
-        .into_iter()
-        .map(|(assignment, _, _)| assignment)
-        .collect())
+    Ok(assignments)
 }
 
 fn steel_slab_stiffness(
