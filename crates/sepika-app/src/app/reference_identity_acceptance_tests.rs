@@ -119,7 +119,7 @@ fn built_box_import_preserves_both_thicknesses_and_replaces_model_after_success(
 }
 
 #[cfg(feature = "gui")]
-fn assert_built_box_error_is_displayed(app: &mut App, error: &str) {
+fn assert_import_error_is_displayed(app: &mut App, error: &str) {
     assert!(app.ui.view.bottom_dock_open);
     assert_eq!(app.ui.view.bottom_tab, BottomTab::Log);
     let output = egui::Context::default().run_ui(
@@ -185,7 +185,7 @@ fn built_box_rejected_import_preserves_model_results_history_and_files_with_diag
         assert_eq!(entry.level, LogLevel::Error);
         assert_eq!(entry.message, error);
         #[cfg(feature = "gui")]
-        assert_built_box_error_is_displayed(&mut app, &error);
+        assert_import_error_is_displayed(&mut app, &error);
         assert_eq!(retained(&app), before, "{label}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
         assert_eq!(std::fs::read(&project).unwrap(), project_bytes);
@@ -390,6 +390,49 @@ fn qualified_series_app_import_binds_column_and_girder_to_their_own_fc() {
     assert_ne!(section_ids[0], section_ids[1]);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
     std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn nonuniform_steel_column_import_displays_diagnostic_and_retains_model() {
+    let mut app = existing_app();
+    let before = retained(&app);
+    for (label, xml) in [
+        (
+            "bottom-top",
+            include_str!("../../../sepika-io/tests/fixtures/column_steel_bottom_top.stb"),
+        ),
+        (
+            "top-bottom",
+            include_str!("../../../sepika-io/tests/fixtures/column_steel_top_bottom.stb"),
+        ),
+    ] {
+        let file = path(&format!("1559-{label}")).with_extension("stb");
+        std::fs::write(&file, xml).unwrap();
+        #[cfg(feature = "gui")]
+        {
+            app.ui.view.bottom_dock_open = false;
+            app.ui.view.bottom_tab = BottomTab::Model;
+        }
+        app.import_stbridge_from(file.clone());
+        std::fs::remove_file(file).unwrap();
+
+        let error = app.core.scoped.last_error.clone().unwrap();
+        for detail in [
+            "ST-Bridge読込エラー",
+            "StbColumn id=Some(41)",
+            "name=Some(\"C41\")",
+            "入力断面 StbSecColumn_S:71, name=\"C71\"",
+            "継手で切り替わる区間ごとの断面形状を保持できません",
+        ] {
+            assert!(error.contains(detail), "{label}/{detail}: {error}");
+        }
+        let entry = app.core.log.entries.last().unwrap();
+        assert_eq!(entry.level, LogLevel::Error);
+        assert_eq!(entry.message, error);
+        #[cfg(feature = "gui")]
+        assert_import_error_is_displayed(&mut app, &error);
+        assert_eq!(retained(&app), before, "{label}");
+    }
 }
 
 #[test]

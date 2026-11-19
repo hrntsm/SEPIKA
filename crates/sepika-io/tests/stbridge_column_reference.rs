@@ -1,6 +1,8 @@
 use sepika_core::geom::vec3::{dist, dot};
 use sepika_core::model::{Model, SupportMemberId};
-use sepika_io::stbridge::{export_stbridge, import_stbridge, import_stbridge_with_report};
+use sepika_io::stbridge::{
+    export_stbridge, import_stbridge, import_stbridge_with_report, StbError,
+};
 
 const INPUT: &str = include_str!("fixtures/h_column_reference.stb");
 const FALSE_ATTR: &str = r#" isReferenceDirection="false""#;
@@ -189,7 +191,7 @@ fn 同じ断面へ統合する元定義ごとの向きを保持する() {
 }
 
 #[test]
-fn 非一様断面の鉄骨向きは反映せず未取り込みと報告する() {
+fn 非一様断面は鉄骨向きを指定しても理由付きで拒否する() {
     let input = INPUT
         .replace(
             r#"<StbSecSteelColumn_S_Same shape="H600" strength_main="SN400B"/>"#,
@@ -199,24 +201,11 @@ fn 非一様断面の鉄骨向きは反映せず未取り込みと報告する()
             "</StbSecSteel>",
             r#"<StbSecRoll-H name="H400" type="H" A="400" B="200" t1="10" t2="15" r="8"/></StbSecSteel>"#,
         );
-    let (model, report) = import_stbridge_with_report(&input).unwrap();
-    let direction = report
-        .attributes
-        .iter()
-        .find(|entry| {
-            entry.element == "StbSecColumn_S" && entry.attribute == "isReferenceDirection"
-        })
-        .unwrap();
-    assert_eq!(direction.count, 1);
-    assert!(direction.is_dropped());
-    let ends = [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]];
-    assert_placement(
-        &model,
-        0,
-        ends,
-        [[0.0; 3]; 2],
-        ends,
-        [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+    let error = import_stbridge_with_report(&input).unwrap_err();
+    assert!(
+        matches!(error, StbError::Unmappable(ref reason)
+            if reason.contains("継手で切り替わる区間ごとの断面形状を保持できません")),
+        "{error}"
     );
 }
 

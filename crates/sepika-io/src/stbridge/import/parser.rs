@@ -64,6 +64,7 @@ pub(super) enum CurSec {
         shape_name: Option<String>,
         grade: Option<String>,
         column_reference_direction: Option<String>,
+        nonuniform_column: bool,
     },
     Rc {
         file_id: SectionKey,
@@ -563,7 +564,18 @@ impl StbParser {
                     } else {
                         None
                     },
+                    nonuniform_column: false,
                 };
+            }
+            "StbSecSteelColumn_S_NotSame" | "StbSecSteelColumn_S_ThreeTypes" => {
+                if let CurSec::Steel {
+                    file_id,
+                    nonuniform_column,
+                    ..
+                } = &mut self.cur
+                {
+                    *nonuniform_column = file_id.family == SectionFamily::ColumnS;
+                }
             }
             t if t.starts_with("StbSecSteelColumn_")
                 || t.starts_with("StbSecSteelBeam_")
@@ -1113,6 +1125,7 @@ impl StbParser {
                     floor,
                     shape_name,
                     grade,
+                    nonuniform_column,
                     ..
                 } = std::mem::replace(&mut self.cur, CurSec::None)
                 {
@@ -1121,7 +1134,11 @@ impl StbParser {
                         declared_use,
                         name,
                         floor,
-                        kind: PendingSecKind::SteelRef(shape_name),
+                        kind: if nonuniform_column {
+                            PendingSecKind::NonuniformSteelColumn
+                        } else {
+                            PendingSecKind::SteelRef(shape_name)
+                        },
                         mat: grade,
                         grades: Default::default(),
                     });

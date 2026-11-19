@@ -1,0 +1,25 @@
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="H column" app_name="test" app_version="1"/>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="11" X="0" Y="0" Z="0" kind="ON_GRID"/>
+      <StbNode id="29" X="0" Y="0" Z="3000" kind="ON_GRID"/>
+    </StbNodes>
+    <StbMembers><StbColumns>
+      <StbColumn id="41" name="C41" id_node_bottom="11" id_node_top="29" id_section="71" kind_structure="S" joint_bottom="1000" joint_top="1000"/>
+    </StbColumns></StbMembers>
+    <StbSections>
+      <StbSecColumn_S id="71" name="C71">
+        <StbSecSteelFigureColumn_S>
+          <StbSecSteelColumn_S_ThreeTypes pos="TOP" shape="H600" strength_main="SN400B"/>
+          <StbSecSteelColumn_S_ThreeTypes pos="CENTER" shape="H400" strength_main="SN400B"/>
+          <StbSecSteelColumn_S_ThreeTypes pos="BOTTOM" shape="H600" strength_main="SN400B"/>
+        </StbSecSteelFigureColumn_S>
+      </StbSecColumn_S>
+      <StbSecSteel>
+        <StbSecRoll-H name="H600" type="H" A="600" B="300" t1="12" t2="20" r="12"/>
+      <StbSecRoll-H name="H400" type="H" A="400" B="200" t1="10" t2="15" r="8"/>
+      </StbSecSteel>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>

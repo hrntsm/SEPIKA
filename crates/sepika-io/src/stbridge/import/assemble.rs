@@ -1821,6 +1821,11 @@ fn build_sections(
         };
         let shape = match ps.kind {
             PendingSecKind::Shape(shape) => shape,
+            PendingSecKind::NonuniformSteelColumn => {
+                return Err(section_error(
+                    "継手で切り替わる区間ごとの断面形状を保持できません。S柱断面は部材全長で単一の断面形状のみ扱います",
+                ));
+            }
             PendingSecKind::SteelRef(shape_name) => match resolve_steel(shape_name.as_deref())? {
                 Some(shape) => shape,
                 None => {
