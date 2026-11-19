@@ -337,6 +337,24 @@ impl Model {
     /// 基準端点が丸め誤差（1e-6mm）内で一致する2節点 `Beam` と、断面・用途・解決主材料が一致するとき実部材化済み。
     /// 実部材化先は偏心0を要し、小梁・間柱の表示偏心は比較しない。材端の順序は問わない。
     pub fn secondary_member_materialized(&self, sm: &SecondaryMember) -> bool {
+        self.matches_materialized_secondary(sm, &self.elements)
+    }
+
+    /// 要素が二次部材の実部材化先なら true。
+    pub(super) fn element_represents_secondary_member(
+        &self,
+        element: &ElementData,
+        sm: &SecondaryMember,
+    ) -> bool {
+        element.section == sm.section
+            && self.matches_materialized_secondary(sm, std::slice::from_ref(element))
+    }
+
+    fn matches_materialized_secondary(
+        &self,
+        sm: &SecondaryMember,
+        elements: &[ElementData],
+    ) -> bool {
         let Some(section) = sm.section.and_then(|id| self.section(id)) else {
             return false;
         };
@@ -353,16 +371,17 @@ impl Model {
         let Some((a, b)) = self.secondary_member_end_points(sm) else {
             return false;
         };
-        self.elements.iter().any(|e| {
-            if e.kind != ElementKind::Beam
-                || e.nodes.len() != 2
-                || e.section != Some(section.id)
-                || self.element_material(e).map(|m| m.id) != Some(material.id)
-                || (e.end_offsets_mm != [[0.0; 3]; 2])
+        elements.iter().any(|element| {
+            if element.kind != ElementKind::Beam
+                || element.nodes.len() != 2
+                || element.section != Some(section.id)
+                || element.end_offsets_mm != [[0.0; 3]; 2]
+                || self.element_material(element).map(|m| m.id) != Some(material.id)
             {
                 return false;
             }
-            let (Some(p), Some(q)) = (self.node(e.nodes[0]), self.node(e.nodes[1])) else {
+            let (Some(p), Some(q)) = (self.node(element.nodes[0]), self.node(element.nodes[1]))
+            else {
                 return false;
             };
             let equal = |left, right| crate::geom::vec3::dist(left, right) <= 1e-6;

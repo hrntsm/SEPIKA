@@ -1044,14 +1044,12 @@ fn test_src_beam_slab_stiffness_falls_back_to_one() {
     );
 }
 
-/// S造合成梁の強軸断面二次モーメント [mm⁴] は、鋼材基準の完全合成換算断面と鉄骨単独断面の平均。
-#[test]
-fn test_beam_new_composite_steel_beam_averages_stiffness() {
+fn steel_h_girder_with_slab() -> (Model, ElementData) {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{FloorRegionId, MaterialId, SectionId, SlabId};
     use sepika_core::model::{
-        DistributionMethod, EndCondition, FloorRegion, ForceRegime, LocalAxis, Model, Slab,
-        SlabPlate, SlabShape,
+        DistributionMethod, EndCondition, FloorRegion, ForceRegime, FrameSectionUse, LocalAxis,
+        Model, SlabPlate,
     };
     use sepika_core::section_shape::SectionShape;
 
@@ -1080,43 +1078,48 @@ fn test_beam_new_composite_steel_beam_averages_stiffness() {
         sections: vec![
             Section {
                 material: Some(MaterialId(0)),
+                frame_use: Some(FrameSectionUse::Girder),
                 ..shape.to_section(SectionId(0), "H-400x200".into())
             },
-            SectionShape::RcSlab { thickness: 150.0 }.to_section(SectionId(1), "S15".into()),
+            Section {
+                material: Some(MaterialId(1)),
+                ..SectionShape::RcSlab { thickness: 150.0 }.to_section(SectionId(1), "S15".into())
+            },
         ],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "SN400B".into(),
-            category: MaterialCategory::Steel,
-            young: 205000.0,
-            poisson: 0.3,
-            density: 7.85e-9,
-            shear: None,
-            fc: None,
-            fy: Some(235.0),
-        }],
+        materials: vec![
+            Material {
+                strength_factor: None,
+                concrete_class: Default::default(),
+                id: MaterialId(0),
+                name: "SN400B".into(),
+                category: MaterialCategory::Steel,
+                young: 205000.0,
+                poisson: 0.3,
+                density: 7.85e-9,
+                shear: None,
+                fc: None,
+                fy: Some(235.0),
+            },
+            Material {
+                strength_factor: None,
+                concrete_class: Default::default(),
+                id: MaterialId(1),
+                name: "Fc21".into(),
+                category: MaterialCategory::Concrete,
+                young: 21_000.0,
+                poisson: 0.2,
+                density: 2.4e-9,
+                shear: None,
+                fc: Some(21.0),
+                fy: None,
+            },
+        ],
         floor_regions: vec![FloorRegion {
             slab_ids: vec![SlabId(0)],
             ..FloorRegion::new(
                 FloorRegionId(0),
                 vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             )
-        }],
-        slabs: vec![Slab {
-            id: SlabId(0),
-            shape: SlabShape::Enclosed,
-            plate: SlabPlate {
-                section: Some(SectionId(1)),
-                loads: vec![],
-                usage: None,
-                method: DistributionMethod::TriTrapezoid,
-                one_way: None,
-            },
-            reference_story: None,
-            vertical_eccentricity_mm: None,
-            tip_loads: Vec::new(),
         }],
         slab_thickness: 150.0,
         ..Default::default()
@@ -1137,34 +1140,297 @@ fn test_beam_new_composite_steel_beam_averages_stiffness() {
         spring: None,
     };
 
-    let sec = &model.sections[0];
-    let (sa, si, sh) = (sec.area, sec.iy, 400.0_f64);
-    let (es, t, l) = (205000.0_f64, 150.0_f64, 6000.0_f64);
-    let a_clear = 2500.0 - 100.0 - 100.0;
-    let ba = (0.5 - 0.6 * a_clear / l) * a_clear;
-    assert!((ba - 621.0).abs() < 1e-9);
-    let bf = 200.0 + ba;
-    let ec = sepika_core::section_shape::concrete_young_modulus(21.0);
-    let ca = bf * t;
-    let g = (ec * ca * (t / 2.0) + es * sa * (t + sh / 2.0)) / (ec * ca + es * sa);
-    let i_comp = (ec / es) * (bf * t.powi(3) / 12.0 + ca * (g - t / 2.0).powi(2))
-        + si
-        + sa * (g - t - sh / 2.0).powi(2);
-    let expected = (i_comp + si) / 2.0;
-
-    let beam = BeamElement::new(&elem, &model);
-    assert!(
-        (beam.iz - expected).abs() / expected < 1e-12,
-        "iz={} expected={}",
-        beam.iz,
-        expected
+    model.elements.push(elem.clone());
+    model.add_enclosed_slab_from_nodes(
+        &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+        SlabPlate {
+            section: Some(SectionId(1)),
+            loads: vec![],
+            usage: None,
+            method: DistributionMethod::TriTrapezoid,
+            one_way: None,
+        },
     );
-    assert!(beam.iz > si && beam.iz < i_comp);
+    (model, elem)
+}
+
+#[test]
+fn test_beam_new_composite_steel_beam_averages_stiffness() {
+    use sepika_core::model::SlabCompositeConnection;
+    let (mut model, elem) = steel_h_girder_with_slab();
+    model.set_slab_composite_connection(elem.id, SlabCompositeConnection::Confirmed);
+    let beam = BeamElement::try_new(&elem, &model).unwrap();
+    // H外矩形から左右の欠損を控除し、鋼・床板それぞれの図心間距離から換算した値。
+    assert!((beam.iz - 432_020_276.398_484).abs() < 1e-5);
     assert!((beam.iy - model.sections[0].iz).abs() < 1e-9);
 
+    let mut unresolved = model.clone();
+    unresolved.sections[1].material = None;
+    let reason = stiffness_breakdown(&unresolved, &elem).unwrap_err();
+    assert!(reason.contains("主材料を解決できません"));
+    assert_eq!(
+        BeamElement::try_new(&elem, &unresolved).err().unwrap(),
+        reason
+    );
+
+    let mut invalid = model.clone();
+    invalid.materials[1].fc = Some(0.0);
+    let reason = stiffness_breakdown(&invalid, &elem).unwrap_err();
+    assert!(reason.contains("材種または材料入力が不正"));
+    assert_eq!(BeamElement::try_new(&elem, &invalid).err().unwrap(), reason);
+
+    model.floor_regions[0].slab_ids.clear();
+    model.floor_assignment_regions.regions[0].assignment =
+        sepika_core::model::PlateAssignment::NoPlate;
     model.slabs.clear();
-    let beam0 = BeamElement::new(&elem, &model);
-    assert!((beam0.iz - si).abs() < 1e-9);
+    let beam0 = BeamElement::try_new(&elem, &model).unwrap();
+    assert!((beam0.iz - 229_648_682.666_666_66).abs() < 1e-6);
+}
+
+#[test]
+fn all_linear_girder_element_kinds_require_the_same_composite_connection() {
+    use sepika_core::model::SlabCompositeConnection;
+    let (mut model, elem) = steel_h_girder_with_slab();
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut girder = elem.clone();
+        girder.kind = kind;
+        model.elements[girder.id.index()] = girder.clone();
+        model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Unconfirmed);
+        let reason = stiffness_breakdown(&model, &girder).unwrap_err();
+        assert!(reason.contains("RC床板との接合条件が未確認"));
+        assert_eq!(
+            crate::factory::elastic_stiffness_input_issue(&girder, &model),
+            Some(reason)
+        );
+        model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
+        assert!(crate::factory::elastic_stiffness_input_issue(&girder, &model).is_none());
+        let beam = BeamElement::try_new(&girder, &model).unwrap();
+        assert!((beam.iz - 432_020_276.398_484).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn steel_girder_checks_each_support_of_a_shared_attached_slab() {
+    use sepika_core::model::{LoadTransfer, RegionAnchor, SlabCompositeConnection, SlabShape};
+    let (mut model, elem) = steel_h_girder_with_slab();
+    model.floor_regions.clear();
+    model.floor_assignment_regions.regions.clear();
+    model.nodes.push(Node {
+        id: NodeId(4),
+        coord: [3000.0, 0.0, 3000.0],
+        ..model.nodes[0].clone()
+    });
+    let left = ElementData {
+        nodes: [NodeId(0), NodeId(4)].into_iter().collect(),
+        ..elem.clone()
+    };
+    let right = ElementData {
+        id: ElemId(1),
+        nodes: [NodeId(4), NodeId(1)].into_iter().collect(),
+        ..elem.clone()
+    };
+    let unrelated = ElementData {
+        id: ElemId(2),
+        nodes: [NodeId(3), NodeId(2)].into_iter().collect(),
+        ..elem
+    };
+    model.elements = vec![left, right, unrelated];
+    model.slabs[0].shape = SlabShape::Attached {
+        anchor: RegionAnchor::Line {
+            nodes: [NodeId(0), NodeId(1)],
+            span: [0.0, 1.0],
+            transfer: LoadTransfer::Anchor,
+        },
+        extent: [2000.0, 2000.0],
+    };
+    for girder in &model.elements[..2] {
+        let reason = stiffness_breakdown(&model, girder).unwrap_err();
+        assert!(reason.contains("床板 0: 取り付く床板は現行近似の対象外"));
+    }
+    assert_eq!(
+        stiffness_breakdown(&model, &model.elements[2])
+            .unwrap()
+            .steel_slab,
+        Some(SteelSlabStiffness::NoSlab)
+    );
+
+    model.set_slab_composite_connection(ElemId(1), SlabCompositeConnection::NonComposite);
+    assert_eq!(
+        stiffness_breakdown(&model, &model.elements[1])
+            .unwrap()
+            .steel_slab,
+        Some(SteelSlabStiffness::NonComposite)
+    );
+    model.sections[1].material = Some(sepika_core::ids::MaterialId(0));
+    for girder in &model.elements[..2] {
+        let got = stiffness_breakdown(&model, girder).unwrap();
+        assert_eq!(got.slab, 1.0);
+        assert_eq!(got.steel_slab, Some(SteelSlabStiffness::SteelSlab));
+    }
+}
+
+#[test]
+fn a_sloping_girder_with_a_concrete_slab_requires_explicit_noncomposite() {
+    use sepika_core::model::SlabCompositeConnection;
+    let (mut model, girder) = steel_h_girder_with_slab();
+    model.nodes[1].coord[2] += 400.0;
+    for connection in [
+        SlabCompositeConnection::Unconfirmed,
+        SlabCompositeConnection::Confirmed,
+    ] {
+        model.set_slab_composite_connection(girder.id, connection);
+        let reason = stiffness_breakdown(&model, &girder).unwrap_err();
+        assert!(reason.contains("梁両端の高低差または水平投影長が現行近似の適用範囲外"));
+    }
+    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::NonComposite);
+    let got = stiffness_breakdown(&model, &girder).unwrap();
+    assert_eq!(got.slab, 1.0);
+    assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NonComposite));
+
+    model.floor_regions[0].slab_ids.clear();
+    model.floor_assignment_regions.regions[0].assignment =
+        sepika_core::model::PlateAssignment::NoPlate;
+    model.slabs.clear();
+    let got = stiffness_breakdown(&model, &girder).unwrap();
+    assert_eq!(got.slab, 1.0);
+    assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NoSlab));
+}
+
+#[test]
+fn partial_rc_support_on_a_girder_within_the_slope_limit_is_unavailable() {
+    use sepika_core::model::{SlabCompositeConnection, SupportMemberId};
+    let (mut model, girder) = steel_h_girder_with_slab();
+    model.nodes[1].coord[2] += 100.0;
+    model.nodes[2].coord[2] += 100.0;
+    let plate = model.slabs.remove(0).plate;
+    model.elements.truncate(1);
+    model.floor_assignment_regions.regions.clear();
+    for (id, y) in [(4, 0.0), (5, 2500.0)] {
+        model.nodes.push(Node {
+            id: NodeId(id),
+            coord: [3000.0, y, 3050.0],
+            ..model.nodes[0].clone()
+        });
+    }
+    model.add_enclosed_slab_from_nodes(&[NodeId(4), NodeId(0), NodeId(3), NodeId(5)], plate);
+    model.floor_assignment_regions.regions[0].boundary[0] = sepika_core::model::SupportBoundary {
+        support: SupportMemberId::Primary(girder.id),
+        span: [0.5, 0.0],
+    };
+    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
+    let reason = stiffness_breakdown(&model, &girder).unwrap_err();
+    assert!(reason.contains("支持が連続する床板割当で全幅を確定できません"));
+
+    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::NonComposite);
+    let got = stiffness_breakdown(&model, &girder).unwrap();
+    assert_eq!(got.slab, 1.0);
+    assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NonComposite));
+}
+
+#[test]
+fn concrete_beyond_an_explicitly_empty_assignment_does_not_connect_to_the_girder() {
+    use sepika_core::model::{PlateAssignment, SlabCompositeConnection};
+    let (mut model, elem) = steel_h_girder_with_slab();
+    let plate = model.slabs.remove(0).plate;
+    model.elements.truncate(1);
+    model.floor_assignment_regions.regions.clear();
+    for (id, x) in [(NodeId(4), 0.0), (NodeId(5), 6000.0)] {
+        model.nodes.push(Node {
+            id,
+            coord: [x, 1000.0, 3000.0],
+            ..model.nodes[0].clone()
+        });
+    }
+    let far = model
+        .add_enclosed_slab_from_nodes(&[NodeId(4), NodeId(5), NodeId(2), NodeId(3)], plate.clone());
+    let near =
+        model.add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(5), NodeId(4)], plate);
+    model
+        .floor_assignment_regions
+        .regions
+        .iter_mut()
+        .find(|r| r.assignment == PlateAssignment::Plate(near))
+        .unwrap()
+        .assignment = PlateAssignment::NoPlate;
+    model.slabs.pop();
+    model.floor_regions[0].slab_ids = vec![far];
+    for connection in [
+        SlabCompositeConnection::Unconfirmed,
+        SlabCompositeConnection::Confirmed,
+    ] {
+        model.set_slab_composite_connection(elem.id, connection);
+        let got = stiffness_breakdown(&model, &elem).unwrap();
+        assert_eq!(got.slab, 1.0);
+        assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NoSlab));
+    }
+}
+
+#[test]
+fn composite_width_cannot_span_a_gap_in_the_floor_region() {
+    use sepika_core::model::{PlateAssignment, SlabCompositeConnection};
+    let (mut model, girder) = steel_h_girder_with_slab();
+    let plate = model.slabs.remove(0).plate;
+    model.elements.truncate(1);
+    model.floor_assignment_regions.regions.clear();
+    for (id, x, y) in [
+        (4, 0.0, 600.0),
+        (5, 6000.0, 600.0),
+        (6, 0.0, 1400.0),
+        (7, 6000.0, 1400.0),
+    ] {
+        model.nodes.push(Node {
+            id: NodeId(id),
+            coord: [x, y, 3000.0],
+            ..model.nodes[0].clone()
+        });
+    }
+    let near = model
+        .add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(5), NodeId(4)], plate.clone());
+    let far = model
+        .add_enclosed_slab_from_nodes(&[NodeId(6), NodeId(7), NodeId(2), NodeId(3)], plate.clone());
+    let middle =
+        model.add_enclosed_slab_from_nodes(&[NodeId(4), NodeId(5), NodeId(7), NodeId(6)], plate);
+    let gap = model
+        .floor_assignment_regions
+        .regions
+        .iter()
+        .position(|r| r.assignment == PlateAssignment::Plate(middle))
+        .unwrap();
+    model.floor_regions[0].slab_ids = vec![near, far];
+    let middle_slab = model.slabs.pop().unwrap();
+    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
+    for rise_per_width in [0.0, 0.1] {
+        for node in &mut model.nodes {
+            node.coord[2] = 3000.0 + node.coord[1] * rise_per_width;
+        }
+        for assignment in [PlateAssignment::NoPlate, PlateAssignment::Unset] {
+            model.floor_assignment_regions.regions[gap].assignment = assignment;
+            let reason = stiffness_breakdown(&model, &girder).unwrap_err();
+            assert!(reason.contains("版なしまたは未設定があり、現行近似の協力幅を確定できません"));
+        }
+    }
+    model.slabs.push(middle_slab);
+    model.floor_assignment_regions.regions[gap].assignment = PlateAssignment::Plate(middle);
+    let steel_section = sepika_core::ids::SectionId(2);
+    model.sections.push(Section {
+        id: steel_section,
+        material: Some(sepika_core::ids::MaterialId(0)),
+        ..model.sections[1].clone()
+    });
+    model.slabs[far.index()].plate.section = Some(steel_section);
+    model.floor_regions[0].slab_ids = vec![near];
+    let reason = stiffness_breakdown(&model, &girder).unwrap_err();
+    assert!(reason.contains("RC床板と鋼床板が混在"));
+
+    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::NonComposite);
+    assert_eq!(
+        stiffness_breakdown(&model, &girder).unwrap().steel_slab,
+        Some(SteelSlabStiffness::NonComposite)
+    );
 }
 
 #[test]

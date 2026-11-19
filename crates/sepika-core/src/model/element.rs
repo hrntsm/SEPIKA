@@ -324,6 +324,27 @@ impl RigidZone {
     }
 }
 
+/// H形鋼大梁とコンクリート床板の合成剛性に対する設計者の指定。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SlabCompositeConnection {
+    #[default]
+    Unconfirmed,
+    NonComposite,
+    Confirmed,
+}
+
+impl SlabCompositeConnection {
+    pub const ALL: [Self; 3] = [Self::Unconfirmed, Self::NonComposite, Self::Confirmed];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unconfirmed => "未確認",
+            Self::NonComposite => "非合成",
+            Self::Confirmed => "現行近似の適用確認済み",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ElementData {
     pub id: ElemId,

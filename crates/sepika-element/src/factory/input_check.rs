@@ -759,6 +759,19 @@ pub fn ensure_rc_beam_reference_loads(
 /// 線材の E・採用 G、弾性梁の剛性・端部縮約が不正なら部材 ID 付きの理由を返す。
 /// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
 pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
+    check_elastic_stiffness(data, model, true)
+}
+
+/// 節点集中質量だけの組立前に線材の入力を検査する。H形鋼大梁の床板接合指定は不要。
+pub fn nodal_mass_frame_input_issue(data: &ElementData, model: &Model) -> Option<String> {
+    check_elastic_stiffness(data, model, false)
+}
+
+fn check_elastic_stiffness(
+    data: &ElementData,
+    model: &Model,
+    include_steel_slab: bool,
+) -> Option<String> {
     if matches!(data.kind, ElementKind::Brace { .. }) {
         return match crate::frame::truss::TrussElement::try_new(data, model) {
             Ok(member) => elastic_young_issue(data, member.e),
@@ -768,7 +781,7 @@ pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Optio
 
     let section = model.element_section(data)?;
     let material = model.element_material(data)?;
-    match crate::frame::beam::BeamElement::resolve_properties(data, model) {
+    match crate::frame::beam::BeamElement::resolve_properties(data, model, include_steel_slab) {
         Ok(beam) => elastic_young_issue(data, beam.e).or_else(|| {
             matches!(
                 data.kind,
@@ -793,6 +806,9 @@ pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Optio
             }
             if let Some(reason) = elastic_young_issue(data, material.young) {
                 return Some(reason);
+            }
+            if model.is_steel_h_girder(data) {
+                return Some(error);
             }
             let g = material.shear_modulus();
             (matches!(

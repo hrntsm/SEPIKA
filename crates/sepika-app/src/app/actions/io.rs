@@ -383,8 +383,12 @@ impl App {
                 if let Some(prep) =
                     self.decode_on_load::<PreparationResult>(contents.preparation, "準備計算の結果")
                 {
-                    self.core.scoped.preparation = Some(prep);
-                    self.core.scoped.staleness.preparation_stale = false;
+                    if prep.is_current_contract() {
+                        self.core.scoped.preparation = Some(prep);
+                        self.core.scoped.staleness.preparation_stale = false;
+                    } else {
+                        self.report_notice("保存された準備計算の計算契約版が異なります。準備計算を再実行してください。");
+                    }
                 }
                 if let Some(saved) =
                     self.decode_on_load::<SavedResults>(contents.results, "解析結果")

@@ -618,10 +618,15 @@ impl App {
                 slot.core.scoped.diagnostics = run.diagnostics.clone();
                 slot.core.scoped.staleness.diagnostics_stale = false;
                 slot.core.scoped.results = run.results.clone();
-                slot.core.scoped.preparation = run.preparation.clone();
+                slot.core.scoped.preparation = run
+                    .preparation
+                    .as_ref()
+                    .filter(|prep| prep.is_current_contract())
+                    .cloned();
                 slot.core.scoped.last_static = run.last_static;
                 slot.core.scoped.staleness.results_stale = false;
-                slot.core.scoped.staleness.preparation_stale = false;
+                slot.core.scoped.staleness.preparation_stale =
+                    slot.core.scoped.preparation.is_none();
                 slot.core.scoped.undo.restrict_sections(Vec::new());
                 slot
             }
@@ -1866,6 +1871,56 @@ mod tests {
         assert_eq!(bytes(&app.core.model), main);
         assert!(!app.core.scoped.undo.can_undo());
     }
+    #[test]
+    fn persisted_study_restores_the_run_with_unversioned_preparation_hidden() {
+        use sepika_io::ovika::{save_ovika, OvikaExtras};
+        let mut app = app();
+        let study = app.create_study("検討".into(), vec![ElemId(2)]).unwrap();
+        app.start_study_calculation(study, 0).unwrap();
+        wait(&mut app);
+        app.switch_study(Location::History(study, 0)).unwrap();
+        assert!(app.core.scoped.preparation.is_some());
+        assert!(!app.core.scoped.staleness.preparation_stale);
+        app.switch_study(Location::Main).unwrap();
+
+        let start_input = &app.studies.items[study].runs[0].input.model;
+        let mut saved = serde_json::to_value(app.saved_studies()).unwrap();
+        let old_preparation = saved["items"][study]["runs"][0]["preparation"]
+            .as_object_mut()
+            .unwrap();
+        assert!(old_preparation
+            .remove("analysis_contract_version")
+            .is_some());
+        let studies = rmp_serde::to_vec_named(&saved).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "old-study-preparation-{}.ovika",
+            uuid::Uuid::new_v4()
+        ));
+        save_ovika(
+            &path,
+            &app.core.model,
+            OvikaExtras {
+                studies: Some(&studies),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        let run = &loaded.studies.items[study].runs[0];
+        assert!(run.input.model.eq_ignoring_dofmap(start_input));
+        loaded.switch_study(Location::History(study, 0)).unwrap();
+        assert!(loaded.core.scoped.preparation.is_none());
+        assert!(loaded.core.scoped.staleness.preparation_stale);
+    }
+
     #[test]
     fn calculation_retains_start_input_after_edit_and_roundtrip_resolves_history() {
         let mut app = app();

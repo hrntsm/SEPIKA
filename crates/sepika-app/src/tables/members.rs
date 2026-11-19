@@ -3,7 +3,7 @@ use crate::tables::nodes::{isolator_kind_label, isolator_kind_selector, isolator
 use sepika_core::ids::{ElemId, NodeId, SectionId};
 use sepika_core::model::{
     DamperDef, DamperKind, DamperProps, ElementData, ElementKind, EndCondition, ForceRegime,
-    HysteresisModel, IsolatorProps, LocalAxis, Model,
+    HysteresisModel, IsolatorProps, LocalAxis, Model, SlabCompositeConnection,
 };
 use sepika_core::units::to_display::{force_kn, stiffness_kn_per_mm, viscous_c0_kn};
 use sepika_core::units::to_internal;
@@ -11,7 +11,7 @@ use sepika_core::wall_expand::{self, WallExpansionIndex};
 use sepika_edit::{
     AddDamper, AddIsolator, AddMember, DeleteMember, DeleteWallPlate, EditCommand,
     RemoveSupportIsolator, SetDamperProps, SetElementSection, SetMemberHysteresis,
-    SetMemberHysteresisTh, SetMemberRcBeamReference,
+    SetMemberHysteresisTh, SetMemberRcBeamReference, SetSlabCompositeConnection,
 };
 use std::borrow::Cow;
 
@@ -363,6 +363,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         pending_hysteresis,
         pending_hysteresis_th,
         pending_rc_reference,
+        pending_slab_composite,
         pending_delete,
         selected_member,
     ) = {
@@ -406,6 +407,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         let mut pending_hysteresis: Vec<(ElemId, HysteresisModel)> = Vec::new();
         let mut pending_hysteresis_th: Vec<(ElemId, Option<HysteresisModel>)> = Vec::new();
         let mut pending_rc_reference = Vec::new();
+        let mut pending_slab_composite = Vec::new();
         let mut pending_delete: Option<ElemId> = None;
         let mut selected_member: Option<ElemId> = None;
 
@@ -421,6 +423,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 Col::text("履歴則(増分)"),
                 Col::text("履歴則(時刻歴)"),
                 Col::text("RC梁基準"),
+                Col::text("床板合成"),
                 Col::actions(),
             ],
             n,
@@ -612,6 +615,22 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     });
                 });
                 row.col(|ui| {
+                    if !app.core.model.is_steel_h_girder(elem) {
+                        ui.label("—");
+                        return;
+                    }
+                    let current = app.core.model.slab_composite_connection(elem.id);
+                    table_util::cell_combo(ui, format!("elem_slab_composite_{i}"), current.label(), |ui| {
+                        for option in SlabCompositeConnection::ALL {
+                            if ui.selectable_label(current == option, option.label()).clicked() {
+                                pending_slab_composite.push((elem.id, option));
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("現行近似を適用するには、接合と床板の材種・配置を設計者が確認してください。接合条件の確認前は「未確認」を選択します。");
+                });
+                row.col(|ui| {
                     let delete_hover = if generated_wall.is_some() {
                         "壁版由来の耐震壁を削除します（対応する壁版も削除されます）"
                     } else {
@@ -630,6 +649,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
             pending_hysteresis,
             pending_hysteresis_th,
             pending_rc_reference,
+            pending_slab_composite,
             pending_delete,
             selected_member,
         )
@@ -688,6 +708,12 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(SetMemberRcBeamReference { elem, reference }),
+        );
+    }
+    for (elem, connection) in pending_slab_composite {
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(SetSlabCompositeConnection { elem, connection }),
         );
     }
     if let Some(elem_id) = pending_delete {

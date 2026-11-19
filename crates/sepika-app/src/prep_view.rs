@@ -844,19 +844,14 @@ fn width_thickness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 /// 部材単位の剛性割増し・SRC/CFT 等価断面。
 fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     ui.label(format!(
-        "剛性の割増し・等価換算がある部材: {} / 梁要素 {}",
+        "部材剛性の表示対象 {} / 梁要素 {}",
         prep.member_stiffness.len(),
         prep.member_stiffness_candidates
     ));
     ui.add_space(6.0);
 
     if prep.member_stiffness.is_empty() {
-        ui.colored_label(
-            crate::theme::UI_MUTED,
-            "該当する部材がありません（スラブ協力幅は「剛性計算用のスラブ厚」が\
-             0 のとき無効、壁エレメント上下大梁は耐震壁が成立した壁がある場合、\
-             等価換算は SRC/CFT 断面がある場合に生じます）",
-        );
+        ui.colored_label(crate::theme::UI_MUTED, "表示対象の部材がありません");
         return;
     }
 
@@ -870,6 +865,7 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
             Col::text("断面"),
             Col::name("材料"),
             Col::num("スラブ"),
+            Col::text("床板合成の判定"),
             Col::num("壁上下梁"),
             Col::num("元 Iy [cm⁴]"),
             Col::num("実効 Iy [cm⁴]"),
@@ -910,10 +906,29 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 crate::table_util::text_cell(ui, &r.material);
             });
             row.col(|ui| {
-                label_factor(ui, r.slab_factor);
+                if let Some(factor) = r.slab_factor {
+                    label_factor(ui, factor);
+                } else {
+                    ui.label("未算定");
+                }
             });
             row.col(|ui| {
-                label_factor(ui, r.wall_girder_factor);
+                if let Some(status) = r.steel_slab {
+                    crate::table_util::text_cell(ui, status.label());
+                } else if r.slab_factor.is_none() {
+                    if let Some(reason) = &r.unavailable_reason {
+                        ui.label("未算定").on_hover_text(reason);
+                    }
+                } else {
+                    ui.label("—");
+                }
+            });
+            row.col(|ui| {
+                if let Some(factor) = r.wall_girder_factor {
+                    label_factor(ui, factor);
+                } else {
+                    ui.label("—");
+                }
             });
             row.col(|ui| {
                 ui.label(format!("{:.0}", r.section_iy * 1e-4));
