@@ -26,7 +26,7 @@
 //!
 //! `Model` は「配列添字 == `ElemId`」を不変条件とする。本モジュールは
 //!
-//! 1. 削除対象を参照する部材属性・部材荷重・部材別重量があれば処理を停止する
+//! 1. 削除対象を参照する支持先・部材属性・部材荷重・部材別重量があれば処理を停止する
 //! 2. 既存のパネル要素を取り除き、残る要素とそれらの参照先の ID を詰め直す
 //! 3. 新しいパネル要素を末尾へ追加する
 //!
@@ -36,6 +36,7 @@ use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Model, PanelZoneMode,
+    SecondaryMemberKind, SupportMemberId,
 };
 use sepika_core::panel_zone::{
     is_horizontal_or_vertical_member, member_orientation, panel_connection_offset,
@@ -73,6 +74,47 @@ pub fn validate_panel_removal_references(model: &Model) -> Result<(), String> {
             .element(id)
             .is_some_and(|e| e.kind == ElementKind::PanelZone)
     };
+    for member in model.beams().chain(model.posts()) {
+        for (index, anchor) in member.ends.anchors().iter().enumerate() {
+            let SupportMemberId::Primary(id) = anchor.support else {
+                continue;
+            };
+            if is_panel(id) {
+                let kind = match member.kind {
+                    SecondaryMemberKind::Beam => "小梁",
+                    SecondaryMemberKind::Post => "間柱",
+                };
+                let end = ["i端", "j端"][index];
+                return Err(format!(
+                    "{kind} ID {}（{}）の{end}が削除対象の仕口パネル要素 {} を参照しています。入力の参照先を修正してください",
+                    member.id.0, member.name, id.0
+                ));
+            }
+        }
+    }
+    let floor_regions = model
+        .floor_assignment_regions
+        .regions
+        .iter()
+        .map(|region| ("床板割当領域", region.id.0, &region.boundary));
+    let wall_regions = model
+        .wall_assignment_regions
+        .regions
+        .iter()
+        .map(|region| ("壁版割当領域", region.id.0, &region.boundary));
+    for (kind, region, boundary) in floor_regions.chain(wall_regions) {
+        for (index, edge) in boundary.iter().enumerate() {
+            let SupportMemberId::Primary(id) = edge.support else {
+                continue;
+            };
+            if is_panel(id) {
+                return Err(format!(
+                    "{kind} ID {region} の境界（{}辺目）が削除対象の仕口パネル要素 {} を参照しています。入力の参照先を修正してください",
+                    index + 1, id.0
+                ));
+            }
+        }
+    }
     if let Some((id, kind)) = model.find_elem_attr_ref(is_panel).or_else(|| {
         let cfg = model.load_cfg.as_ref()?;
         [
@@ -157,6 +199,7 @@ fn remove_existing_panels(model: &mut Model) {
             shift(&mut damper.elem);
         }
     }
+    model.visit_primary_support_elem_ids(shift);
     model.shift_elem_attr_refs(shift);
 }
 
