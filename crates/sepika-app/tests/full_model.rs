@@ -1664,42 +1664,134 @@ fn design_check_covers_every_member() {
     println!("RC/SRC 部材の検定位置の最大 |Mx| = {max_rc_src_mx_nmm} N·mm");
 }
 
-/// 層間変形角・剛性率 Rs・偏心率 Re が全層で算定される。
-#[test]
-fn story_metrics_computed_for_every_layer() {
-    let app = analyzed();
+fn story_metrics(app: &App, dir: SeismicDir) -> Vec<sepika_app::summary::StoryMetric> {
     let results = app.core.scoped.results.as_ref().expect("解析結果");
     let ctx = sepika_app::summary::metrics_ctx_from_results(&app.core.model, Some(results));
-    let metrics =
-        sepika_app::summary::compute_story_metrics_with(&app.core.model, SeismicDir::X, &ctx);
+    sepika_app::summary::compute_story_metrics_with(&app.core.model, dir, &ctx)
+}
 
-    assert_eq!(metrics.len(), 4, "層指標の層数（階数 5 − 1）");
-    for m in &metrics {
-        assert!(m.height > 0.0, "層 {} の階高が正でない", m.name);
-        let drift = m.drift.as_ref().unwrap().as_ref().unwrap().column.drift;
-        assert!(
-            drift > 0.0 && drift.is_finite(),
-            "層 {} の層間変位が異常: {drift}",
-            m.name
-        );
-        assert!(
-            *m.rs.as_ref().unwrap() > 0.0 && m.rs.as_ref().unwrap().is_finite(),
-            "層 {} の剛性率が異常: {}",
-            m.name,
-            m.rs.as_ref().unwrap()
-        );
-        assert!(
-            *m.re.as_ref().unwrap() >= 0.0 && m.re.as_ref().unwrap().is_finite(),
-            "層 {} の偏心率が異常: {}",
-            m.name,
-            m.re.as_ref().unwrap()
-        );
-        assert!(
-            *m.fes.as_ref().unwrap() >= 1.0,
-            "層 {} の Fes が 1.0 未満: {:?}",
-            m.name,
-            m.fes
-        );
+#[test]
+fn story_metrics_hold_eccentricity_in_every_coupled_layer() {
+    let app = analyzed();
+    for dir in [SeismicDir::X, SeismicDir::Y] {
+        let metrics = story_metrics(&app, dir);
+        assert_eq!(metrics.len(), 4, "層指標の層数（階数 5 − 1）");
+        for (i, (m, name)) in metrics.iter().zip(["1FL", "2FL", "3FL", "RFL"]).enumerate() {
+            assert_eq!(m.name, name);
+            assert!(m.height.is_finite() && m.height > 0.0, "{m:?}");
+            let drift = m.drift.as_ref().unwrap().as_ref().unwrap().column.drift;
+            assert!(drift.is_finite() && drift > 0.0, "{name} {dir:?}: {drift}");
+            let rs = *m.rs.as_ref().unwrap();
+            assert!(rs.is_finite() && rs > 0.0, "{name} {dir:?}: {rs}");
+            let reason = m.re.as_ref().unwrap_err();
+            for expected in [
+                format!("{name} {dir:?}: Re 算定不能"),
+                format!("階{}の剛床", i + 1),
+                "直交構面材42・79の節点12・12".into(),
+                "自由なUz".into(),
+                "全1層".into(),
+            ] {
+                assert!(reason.contains(&expected), "{reason}");
+            }
+            assert_eq!(m.re_ok, None);
+            assert_eq!(m.fes.as_ref().unwrap_err(), reason);
+        }
+    }
+}
+
+#[test]
+fn imported_orthogonal_girders_transfer_horizontal_motion_through_vertical_displacement() {
+    use sepika_core::dof::Dof;
+    use sepika_core::ids::{ElemId, LoadCaseId, NodeId};
+    use sepika_core::model::{LoadCase, LoadCaseKind, NodalLoad};
+
+    let app = prepared();
+    let model = &app.core.model;
+    let common = model.node(NodeId(12)).unwrap();
+    assert!(!common.restraint.is_fixed(Dof::Uz));
+    for (id, end, axis, span_mm) in [(42, 13, 0, 4000.0), (79, 15, 1, 6400.0)] {
+        let beam = model.element(ElemId(id)).unwrap();
+        assert_eq!(beam.nodes.as_slice(), &[NodeId(12), NodeId(end)]);
+        assert_eq!(beam.end_cond, [EndCondition::Fixed; 2]);
+        let end_coord = model.node(NodeId(end)).unwrap().coord;
+        let mut expected = common.coord;
+        expected[axis] += span_mm;
+        assert_eq!(end_coord, expected);
+    }
+
+    let masters: Vec<_> = model
+        .layers()
+        .iter()
+        .map(|layer| model.diaphragms_of(layer.top).next().unwrap().master)
+        .collect();
+    let transverse_at_fixed_rz = |fix_uz, loaded_master, along_y| {
+        let mut model = model.clone();
+        for node in &mut model.nodes {
+            node.restraint.set_fixed(Dof::Rz);
+            if fix_uz {
+                node.restraint.set_fixed(Dof::Uz);
+            }
+        }
+        let case = LoadCaseId(0);
+        let axis = usize::from(along_y);
+        let mut load = [0.0; 6];
+        load[axis] = 1000.0;
+        model.load_cases = vec![LoadCase {
+            id: case,
+            name: "独立水平加力".into(),
+            kind: LoadCaseKind::Seismic,
+            origin: Default::default(),
+            nodal: vec![NodalLoad::manual(loaded_master, load)],
+            member: Vec::new(),
+        }];
+        model.combinations.clear();
+        let result = sepika_job::compute::compute_linear_static(model, case).unwrap();
+        let mut transverse = Vec::new();
+        for master in &masters {
+            let disp = result.disp[master.index()];
+            assert_eq!(disp[Dof::Rz as usize], 0.0);
+            transverse.push(disp[1 - axis]);
+        }
+        transverse
+    };
+    let free_uz = transverse_at_fixed_rz(false, masters[0], false);
+    assert!(free_uz.iter().all(|uy| uy.abs() > 1e-8), "{free_uz:?}");
+    for &master in &masters {
+        for along_y in [false, true] {
+            let fixed_uz = transverse_at_fixed_rz(true, master, along_y);
+            assert!(
+                fixed_uz.iter().all(|u| u.abs() <= 1e-12),
+                "{master:?}, Y加力={along_y}: {fixed_uz:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn story_metrics_compute_eccentricity_with_vertical_restraint() {
+    let mut app = prepared();
+    for node in &mut app.core.model.nodes {
+        node.restraint.set_fixed(sepika_core::dof::Dof::Uz);
+    }
+    app.run_static_all();
+    assert_no_error(&app, "鉛直変位を拘束した対照の静的解析");
+    for (dir, expected) in [
+        (
+            SeismicDir::X,
+            ["6.000e-2", "5.742e-2", "3.025e-2", "1.133e-2"],
+        ),
+        (
+            SeismicDir::Y,
+            ["3.395e-2", "8.323e-3", "2.566e-2", "4.938e-2"],
+        ),
+    ] {
+        let metrics = story_metrics(&app, dir);
+        assert_eq!(metrics.len(), 4);
+        for (m, re) in metrics.iter().zip(expected) {
+            assert_eq!(sig4(*m.re.as_ref().unwrap()), re, "{dir:?} {m:?}");
+            assert_eq!(m.re_ok, Some(true), "{dir:?} {m:?}");
+            assert_eq!(m.fes, Ok(1.0), "{dir:?} {m:?}");
+        }
     }
 }
 
@@ -3184,7 +3276,8 @@ fn snapshot_key_scalars() {
         );
         line(
             &format!("metrics[{}].Re", m.name),
-            sig4(*m.re.as_ref().unwrap()),
+            m.re.as_ref()
+                .map_or_else(|_| "算定不能".into(), |re| sig4(*re)),
         );
     }
 
