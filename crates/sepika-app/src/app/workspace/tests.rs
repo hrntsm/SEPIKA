@@ -290,6 +290,7 @@ fn each_drawing_keeps_its_static_result_when_the_other_result_changes() {
         member_forces: Vec::new(),
         panel_moments: Vec::new(),
         girder_column_face_forces: Vec::new(),
+        column_end_horizontal_forces: Vec::new(),
     };
     h.app.core.scoped.results = Some(ResultsBundle {
         statics: vec![

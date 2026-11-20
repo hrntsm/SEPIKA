@@ -264,6 +264,36 @@ impl LoadedFrameSection {
         std::array::from_fn(|end| std::array::from_fn(|d| global[end * 6 + d]))
     }
 
+    /// i/j各端の直内側で、端側から部材内部に作用する全体水平力 [N] をX/Y順で返す。
+    /// 材端に作用する集中部材荷重を同じ端側の切片に含める。
+    pub fn inward_end_horizontal_forces(&self) -> Result<[[f64; 2]; 2], String> {
+        let mut local = self.node_force_local;
+        // 材端の節点力は、等価節点力を差し引いた値。端を含む切片にはその端の実荷重が作用する。
+        for load in &self.map.loads {
+            let MemberLoadKind::Point { a, .. } = load.kind else {
+                continue;
+            };
+            let end = if a == 0.0 {
+                0
+            } else if a == self.map.length_mm {
+                6
+            } else {
+                continue;
+            };
+            for (axis, comp) in resolve(load, self.map.frame()).into_iter().enumerate() {
+                if let Some(Comp::Point { p, .. }) = comp {
+                    local[end + axis] += p;
+                }
+            }
+        }
+        let global = self.map.frame().rotate_to_global(&local);
+        let horizontal = [[global[0], global[1]], [global[6], global[7]]];
+        if horizontal.iter().flatten().any(|value| !value.is_finite()) {
+            return Err("部材端の水平力が非有限です".into());
+        }
+        Ok(horizontal)
+    }
+
     /// 水平切断面の上側へ作用する部材荷重の全体並進合力 `[N]`。切断位置の集中荷重は断面力の左極限に合わせる。
     pub fn applied_force_above_elevation(
         &self,

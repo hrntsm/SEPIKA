@@ -518,6 +518,7 @@ fn fit_to_view_preserves_direction_selection_and_results_in_model_and_frame_view
                     member_forces: vec![],
                     panel_moments: vec![],
                     girder_column_face_forces: Vec::new(),
+                    column_end_horizontal_forces: Vec::new(),
                 },
             )],
             input_records: vec![(input_key, vec![7, 4, 9])],

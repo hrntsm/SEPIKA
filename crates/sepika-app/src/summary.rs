@@ -2016,6 +2016,7 @@ mod tests {
                 member_forces: vec![],
                 panel_moments: vec![],
                 girder_column_face_forces: Vec::new(),
+                column_end_horizontal_forces: Vec::new(),
             },
         )
     }
@@ -2211,11 +2212,47 @@ mod tests {
         assert_eq!(v.angle, 0.006);
     }
 
+    fn set_column_responses(model: &Model, result: &mut StaticOnce, axis: usize) {
+        use sepika_core::ids::ElemId;
+        use sepika_element::frame::beam::MemberForces;
+
+        let ids = [0, 1, 3, 4, 5].map(ElemId);
+        let mut local = [0.0; 6];
+        local[axis + 1] = 1_000.0;
+        result.member_forces = ids
+            .into_iter()
+            .map(|id| {
+                (
+                    id,
+                    MemberForces {
+                        at: vec![(0.0, local)],
+                    },
+                )
+            })
+            .collect();
+        let mut lower = [0.0; 2];
+        lower[axis] = 1_000.0;
+        let upper = lower.map(|value| -value);
+        result.column_end_horizontal_forces = ids
+            .into_iter()
+            .map(|id| {
+                let element = model.element(id).unwrap();
+                let zi = model.nodes[element.nodes[0].index()].coord[2];
+                let zj = model.nodes[element.nodes[1].index()].coord[2];
+                let ends = if zi < zj {
+                    [lower, upper]
+                } else {
+                    [upper, lower]
+                };
+                (id, Ok(ends))
+            })
+            .collect();
+    }
+
     #[test]
     fn reevaluation_holds_re_and_fes_when_a_fiber_column_cannot_be_traced() {
         use sepika_core::ids::{ElemId, NodeId, StoryId};
         use sepika_core::model::ElementKind;
-        use sepika_element::frame::beam::MemberForces;
 
         let (mut model, mut response) = drift_fixture();
         for (id, original, coord) in [
@@ -2249,18 +2286,7 @@ mod tests {
             for (node, value) in [(2, 18.0), (3, 10.0), (7, 10.0)] {
                 result.disp[node][axis] = value;
             }
-            let mut force = [0.0; 6];
-            force[axis + 1] = 1000.0;
-            result.member_forces = [0, 1, 3, 4, 5]
-                .map(|id| {
-                    (
-                        ElemId(id),
-                        MemberForces {
-                            at: vec![(0.0, force)],
-                        },
-                    )
-                })
-                .into();
+            set_column_responses(&model, &mut result, axis);
             result
         });
         let ctx = StoryMetricsCtx {
@@ -2325,7 +2351,6 @@ mod tests {
     fn layer_metrics_keep_the_column_reaching_lower_sl_when_a_mixed_branch_cannot() {
         use sepika_core::ids::{ElemId, NodeId, StoryId};
         use sepika_core::model::{ElementKind, Story};
-        use sepika_element::frame::beam::MemberForces;
 
         let (mut model, mut response) = drift_fixture();
         model.stories = [-3000.0, 0.0, 3000.0]
@@ -2372,18 +2397,7 @@ mod tests {
             ] {
                 result.disp[node][axis] = value;
             }
-            let mut force = [0.0; 6];
-            force[axis + 1] = 1000.0;
-            result.member_forces = [0, 1, 3, 4, 5]
-                .map(|id| {
-                    (
-                        ElemId(id),
-                        MemberForces {
-                            at: vec![(0.0, force)],
-                        },
-                    )
-                })
-                .into();
+            set_column_responses(&model, &mut result, axis);
             result
         });
         let ctx = StoryMetricsCtx {

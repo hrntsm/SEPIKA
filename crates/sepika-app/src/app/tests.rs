@@ -10889,6 +10889,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
         member_forces: vec![],
         panel_moments: vec![],
         girder_column_face_forces: Vec::new(),
+        column_end_horizontal_forces: Vec::new(),
     }
 }
 
@@ -13946,10 +13947,8 @@ fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
         .iter_mut()
         .find(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::Y))
         .unwrap();
-    for (_, forces) in &mut y.1.member_forces {
-        for (_, force) in &mut forces.at {
-            force.fill(0.0);
-        }
+    for (_, forces) in &mut y.1.column_end_horizontal_forces {
+        *forces.as_mut().expect("通常柱の端水平力") = [[0.0; 2]; 2];
     }
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("Re 算定不能"), "{reason}");

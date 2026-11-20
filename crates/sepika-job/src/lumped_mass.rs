@@ -509,6 +509,10 @@ mod tests {
                 .collect(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_horizontal_forces: qz
+                .iter()
+                .map(|&(id, q)| (ElemId(id), Ok([[q, 0.0], [-q, 0.0]])))
+                .collect(),
         }
     }
 
@@ -536,6 +540,10 @@ mod tests {
                 .collect(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_horizontal_forces: qy
+                .iter()
+                .map(|&(id, q)| (ElemId(id), Ok([[0.0, q], [0.0, -q]])))
+                .collect(),
         }
     }
 
