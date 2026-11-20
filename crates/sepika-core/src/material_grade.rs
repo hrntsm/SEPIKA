@@ -77,8 +77,8 @@ pub fn steel_f_value(grade: &str, thickness: f64) -> Option<f64> {
     }
 }
 
-/// 対応済み鋼材名から基準強度表の分類名を解決する。前後空白は除き、大小文字は区別する。
-pub(crate) fn steel_grade_base(name: &str) -> Option<&'static str> {
+/// 対応する鋼材名から基準強度表の分類名を返す。前後空白は除き、大小文字は区別する。
+pub fn steel_grade_base(name: &str) -> Option<&'static str> {
     let name = name.trim();
     STEEL_GRADES.iter().copied().find(|base| {
         name == *base

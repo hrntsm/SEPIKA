@@ -387,18 +387,29 @@ impl SrcDesign {
                          （断面タブで内蔵鉄骨の材料を割り当ててください）"
                 .to_string());
         };
-        let f_value = crate::material_strength::section_steel_f(sec, Some(steel_mat))
-            .map_err(|reason| format!("{member}検定: {reason}"))?;
-        crate::material_strength::src_h_steel_minimum_thickness_mm(steel_mat)
-            .and_then(|minimum_mm| {
-                crate::material_strength::validate_src_h_steel_thickness(
-                    &steel_mat.name,
-                    web_thick_mm,
-                    flange_thick_mm,
-                    minimum_mm,
-                )
-            })
-            .map_err(|reason| format!("{member}検定: 断面「{}」の{reason}", sec.name))?;
+        let resolve_f = || {
+            crate::material_strength::section_steel_f(sec, Some(steel_mat))
+                .map_err(|reason| format!("{member}検定: 内蔵鉄骨「{}」: {reason}", steel_mat.name))
+        };
+        let minimum_mm = match crate::material_strength::src_h_steel_minimum_thickness_mm(steel_mat)
+        {
+            Ok(minimum_mm) => minimum_mm,
+            Err(reason) => {
+                // 表にない名称では直接入力した降伏応力の不備も診断する。
+                if sepika_core::material_grade::steel_grade_base(&steel_mat.name).is_none() {
+                    resolve_f()?;
+                }
+                return Err(format!("{member}検定: 断面「{}」の{reason}", sec.name));
+            }
+        };
+        let f_value = resolve_f()?;
+        crate::material_strength::validate_src_h_steel_thickness(
+            &steel_mat.name,
+            web_thick_mm,
+            flange_thick_mm,
+            minimum_mm,
+        )
+        .map_err(|reason| format!("{member}検定: 断面「{}」の{reason}", sec.name))?;
 
         match shape {
             SectionShape::SrcBeamRect {

@@ -7,32 +7,37 @@ use sepika_design_jp::{
     CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind, SrcDesign,
 };
 
+fn inputs(column: bool) -> (sepika_core::model::Model, DesignCtx, MemberForcesAt) {
+    let (n, mz) = reference::demand(column);
+    let model = input::model(column, "SN400B", n, mz);
+    let ctx = DesignCtx {
+        kind: if column {
+            MemberKind::Column
+        } else {
+            MemberKind::Girder
+        },
+        term: LoadTerm::Long,
+        rebar_material: Some(model.materials[1].clone()),
+        shear_rebar_material: Some(model.materials[1].clone()),
+        steel_material: Some(model.materials[2].clone()),
+        ..Default::default()
+    };
+    let forces = MemberForcesAt {
+        pos: 0.0,
+        n,
+        qy: 0.0,
+        qz: 0.0,
+        mx: 0.0,
+        my: 0.0,
+        mz,
+    };
+    (model, ctx, forces)
+}
+
 #[test]
 fn src_beam_and_column_long_term_check_uses_h_grade_but_skips_tube_grades() {
     for column in [false, true] {
-        let (n, mz) = reference::demand(column);
-        let model = input::model(column, "SN400B", n, mz);
-        let mut ctx = DesignCtx {
-            kind: if column {
-                MemberKind::Column
-            } else {
-                MemberKind::Girder
-            },
-            term: LoadTerm::Long,
-            rebar_material: Some(model.materials[1].clone()),
-            shear_rebar_material: Some(model.materials[1].clone()),
-            steel_material: Some(model.materials[2].clone()),
-            ..Default::default()
-        };
-        let forces = MemberForcesAt {
-            pos: 0.0,
-            n,
-            qy: 0.0,
-            qz: 0.0,
-            mx: 0.0,
-            my: 0.0,
-            mz,
-        };
+        let (model, mut ctx, forces) = inputs(column);
         let check = |ctx: &DesignCtx| {
             SrcDesign.check(&forces, &model.sections[0], &model.materials[0], ctx)
         };
@@ -73,6 +78,56 @@ fn src_beam_and_column_long_term_check_uses_h_grade_but_skips_tube_grades() {
                     && reason.contains(grade) && reason.contains(diagnostic)),
                 "{outcome:?}"
             );
+        }
+    }
+}
+
+#[test]
+fn src_h_product_diagnosis_precedes_invalid_plate_thickness() {
+    use sepika_core::section_shape::SectionShape;
+
+    for column in [false, true] {
+        let (model, mut ctx, forces) = inputs(column);
+        let member = if column { "SRC柱" } else { "SRC梁" };
+
+        for invalid_mm in [101.0, 0.0, f64::NAN, f64::INFINITY] {
+            for (web_mm, flange_mm) in [(invalid_mm, 13.0), (8.0, invalid_mm)] {
+                let mut section = model.sections[0].clone();
+                match section.shape.as_mut().unwrap() {
+                    SectionShape::SrcBeamRect {
+                        steel_web_thick,
+                        steel_flange_thick,
+                        ..
+                    }
+                    | SectionShape::SrcColumnRect {
+                        steel_web_thick,
+                        steel_flange_thick,
+                        ..
+                    } => {
+                        *steel_web_thick = web_mm;
+                        *steel_flange_thick = flange_mm;
+                    }
+                    _ => panic!("SRC断面"),
+                }
+                for (grade, diagnostic) in [
+                    ("STK400", "鋼管用"),
+                    ("BCR295", "鋼管用"),
+                    ("SS490", "溶接"),
+                    ("SN400", "種類記号"),
+                    ("SM520", "種類記号"),
+                    ("TMCP355", "個別認定"),
+                    ("SN400B", "実板厚"),
+                ] {
+                    ctx.steel_material.as_mut().unwrap().name = grade.into();
+                    let outcome = SrcDesign.check(&forces, &section, &model.materials[0], &ctx);
+                    assert!(
+                        matches!(&outcome, CheckOutcome::Skipped { reason }
+                            if reason.contains(member) && reason.contains(&section.name)
+                            && reason.contains(grade) && reason.contains(diagnostic)),
+                        "{grade}, web={web_mm}, flange={flange_mm}: {outcome:?}"
+                    );
+                }
+            }
         }
     }
 }
