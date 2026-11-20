@@ -230,9 +230,25 @@ pub fn compute_time_history(
     }
     let record_every = (cfg.th_record_every > 0).then_some(cfg.th_record_every);
     let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
-    analysis
-        .time_history(&wave, newmark, damping, record_every)
-        .map_err(dynamic_solve_error)
+    let (mut result, sections) = crate::time_history_check::collect_asymmetric_column_sections(
+        &model,
+        Default::default(),
+        0,
+        |observer| {
+            analysis.time_history_with_force_observer(
+                &wave,
+                newmark,
+                damping,
+                record_every,
+                observer,
+            )
+        },
+    )
+    .map_err(dynamic_solve_error)?;
+    if let Some(recording) = &mut result.recording {
+        recording.asymmetric_column_sections = sections;
+    }
+    Ok(result)
 }
 
 pub(crate) fn time_history_damping(
@@ -336,22 +352,34 @@ fn compute_nonlinear_time_history(
         apply_long_term: cfg.th_apply_long_term,
         record_every,
     };
-    sepika_solver::dynamic::timehistory::nonlinear_time_history_analysis(
+    let (mut result, sections) = crate::time_history_check::collect_asymmetric_column_sections(
         &model,
-        &dofmap,
-        &reducer,
-        &wave,
-        &newmark,
-        &damping,
-        sepika_solver::dynamic::damping::DampingAccumulation::default(),
-        &init,
-        &init,
-        nl_cfg,
+        Default::default(),
+        0,
+        |observer| {
+            sepika_solver::dynamic::timehistory::nonlinear_time_history_with_force_observer(
+                &model,
+                &dofmap,
+                &reducer,
+                &wave,
+                &newmark,
+                &damping,
+                sepika_solver::dynamic::damping::DampingAccumulation::default(),
+                &init,
+                &init,
+                nl_cfg,
+                observer,
+            )
+        },
     )
     .map_err(|e| match e {
         sepika_math::solver::SolveError::InvalidInput(message) => JobError::InvalidInput(message),
         other => JobError::Convergence(other.to_string()),
-    })
+    })?;
+    if let Some(recording) = &mut result.recording {
+        recording.asymmetric_column_sections = sections;
+    }
+    Ok(result)
 }
 
 /// 質点系（固有値。`accel` があれば時刻歴も）。

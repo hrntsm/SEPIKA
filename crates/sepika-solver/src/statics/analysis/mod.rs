@@ -201,9 +201,20 @@ impl<'m> Analysis<'m> {
         damping: Damping,
         record_every: Option<usize>,
     ) -> Result<ResponseResult, sepika_math::solver::SolveError> {
-        let n_indep = self.n_indep;
-        let init = vec![0.0; n_indep];
-        crate::dynamic::timehistory::linear_time_history_analysis(
+        self.time_history_with_force_observer(wave, newmark, damping, record_every, None)
+    }
+
+    /// 詳細記録の間引きにかかわらず、初期点と各確定ステップの断面力を観測する。
+    pub fn time_history_with_force_observer(
+        &self,
+        wave: &GroundMotion,
+        newmark: NewmarkCfg,
+        damping: Damping,
+        record_every: Option<usize>,
+        observer: Option<&mut crate::dynamic::timehistory::CommittedMemberForcesObserver<'_>>,
+    ) -> Result<ResponseResult, sepika_math::solver::SolveError> {
+        let init = vec![0.0; self.n_indep];
+        crate::dynamic::timehistory::linear_time_history_until_with_force_observer(
             self.model,
             &self.dofmap,
             &self.reducer,
@@ -213,7 +224,10 @@ impl<'m> Analysis<'m> {
             &init,
             &init,
             record_every,
+            None,
+            observer,
         )
+        .map(|(result, _)| result)
     }
 }
 

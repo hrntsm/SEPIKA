@@ -22,7 +22,7 @@ pub use stiffness_factors::{
 
 pub use torsion::{i_end_torsion_release, i_end_torsion_release_skip, TorsionReleaseSkip};
 
-pub(crate) use construct::eval_sections_of;
+pub use construct::eval_sections_of;
 pub(crate) use forces::member_forces_from_end_forces;
 
 #[cfg(test)]

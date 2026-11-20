@@ -174,7 +174,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0117](0117-unequal-built-h-strong-axis-shear.md) | accepted | 上下のフランジ厚が異なる組立H形鋼の強軸せん断を未算定とする |
 
-| [0118](0118-asymmetric-column-time-history-peaks.md) | accepted | 上下非対称組立H形鋼柱の時刻歴簡易検定で正負の強軸曲げ極値を抽出する |
+| [0118](0118-asymmetric-column-time-history-peaks.md) | accepted | 上下非対称組立H形鋼柱の時刻歴簡易検定で全確定時刻の断面を照査する |
 
 | [0119](0119-standard-rebar-designation.md) | accepted | RC・SRC梁柱の標準異形鉄筋の呼び名と数値径を区別する |
 

@@ -6,14 +6,9 @@ use crate::frame::section_lookup::{get_material, get_section, sec_material};
 use sepika_core::ids::NodeId;
 use sepika_core::model::Model;
 
-/// 危険断面位置を正規化座標 \[0,1\] で算定する。
-///
-/// 節点芯 0.0/1.0・部材中央 0.5 に加え、柱フェース位置
-/// （`rigid_zone.face_i` / `face_j` を部材長で正規化。xi_i は \[0,0.5)、
-/// xi_j は (0.5,1\] へクランプ）を含める。face=0 の端では
-/// 節点芯と一致するため \[0.0, 0.5, 1.0\] になる。
-/// 部材付帯情報（ハンチ端・継手位置）があればその追加検定位置も含める。
-pub(crate) fn eval_sections_of(
+/// 材軸長 [mm] から、節点芯・柱フェース・材中央・付帯情報の断面位置 ξ を昇順で返す。
+/// ξ は材軸の正規化座標で、長さが 1e-12 mm 以下では節点芯と材中央を返す。
+pub fn eval_sections_of(
     data: &sepika_core::model::ElementData,
     model: &Model,
     length: f64,

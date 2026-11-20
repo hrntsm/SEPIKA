@@ -14,6 +14,7 @@ use super::history::{
 };
 use super::recording::{member_forces_linear, ThRecorder};
 use super::result::{ResponseHistory, ResponseResult, TimeStepState};
+use super::CommittedMemberForcesObserver;
 use crate::common::assemble::{assemble_global_k, assemble_global_m};
 use crate::common::constraint::Reducer;
 use crate::dynamic::damping::Damping;
@@ -99,6 +100,36 @@ pub fn linear_time_history_until(
     record_every: Option<usize>,
     end_step: Option<u64>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
+    linear_time_history_until_with_force_observer(
+        model,
+        dofmap,
+        reducer,
+        wave,
+        newmark,
+        damping,
+        initial_disp,
+        initial_vel,
+        record_every,
+        end_step,
+        None,
+    )
+}
+
+/// 各確定時刻の内力を観測する。初期点または再開点も渡す。
+#[allow(clippy::too_many_arguments)]
+pub fn linear_time_history_until_with_force_observer(
+    model: &Model,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    wave: &GroundMotion,
+    newmark: &NewmarkCfg,
+    damping: &Damping,
+    initial_disp: &[f64],
+    initial_vel: &[f64],
+    record_every: Option<usize>,
+    end_step: Option<u64>,
+    observer: Option<&mut CommittedMemberForcesObserver<'_>>,
+) -> Result<(ResponseResult, TimeStepState), SolveError> {
     validate_wall_connection(model)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
@@ -152,6 +183,7 @@ pub fn linear_time_history_until(
         a,
         record_every,
         end_step,
+        observer,
     )
 }
 
@@ -174,6 +206,32 @@ pub fn linear_time_history_from_state(
     damping: &Damping,
     state: &TimeStepState,
     record_every: Option<usize>,
+) -> Result<(ResponseResult, TimeStepState), SolveError> {
+    linear_time_history_from_state_with_force_observer(
+        model,
+        dofmap,
+        reducer,
+        wave,
+        newmark,
+        damping,
+        state,
+        record_every,
+        None,
+    )
+}
+
+/// 各確定時刻の内力を観測する。初期点または再開点も渡す。
+#[allow(clippy::too_many_arguments)]
+pub fn linear_time_history_from_state_with_force_observer(
+    model: &Model,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    wave: &GroundMotion,
+    newmark: &NewmarkCfg,
+    damping: &Damping,
+    state: &TimeStepState,
+    record_every: Option<usize>,
+    observer: Option<&mut CommittedMemberForcesObserver<'_>>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
     validate_wall_connection(model)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
@@ -228,6 +286,7 @@ pub fn linear_time_history_from_state(
         a,
         record_every,
         None,
+        observer,
     )
 }
 
@@ -318,6 +377,7 @@ fn run_steps(
     mut a: Vec<f64>,
     record_every: Option<usize>,
     end_step: Option<u64>,
+    observer: Option<&mut CommittedMemberForcesObserver<'_>>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
     let LinearSetup {
         behaviors,
@@ -372,7 +432,8 @@ fn run_steps(
     let mut ma_free = vec![0.0f64; n_free];
     sparse_matvec_into(m_free, &a_free, &mut ma_free);
 
-    let mut recorder = ThRecorder::new(model, dofmap, n_steps, record_every);
+    let mut recorder =
+        ThRecorder::new(model, dofmap, n_steps, record_every).with_force_observer(observer);
     let (xg_x_init, xg_y_init) = accel_xy_at(wave, start_step as usize);
     let mf_init = member_forces_linear(dofmap, behaviors, &u_free);
     recorder.record_step(

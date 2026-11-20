@@ -307,6 +307,52 @@ impl DesignCheck for SteelDesign {
 }
 
 impl SteelDesign {
+    /// 上下非対称組立H形鋼柱の圧縮・強軸曲げに対し、上下縁の支配比と併記する未算定理由を返す。
+    /// 検定比は座屈等の未算定時には下限となり、1以下でも適合を確定できない。
+    pub fn asymmetric_column_section_check(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> Result<(f64, Vec<&'static str>), String> {
+        let shape = sec
+            .shape
+            .as_ref()
+            .filter(|shape| ctx.kind == MemberKind::Column && shape.is_asymmetric_built_h())
+            .ok_or("上下非対称組立H形鋼柱の断面が必要です")?;
+        if let Some(reason) = steel_torsion_reason(forces, sec) {
+            return Err(reason.into());
+        }
+        if ![forces.n, forces.mz, forces.my, forces.qy, forces.qz]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err("断面力が非有限です".into());
+        }
+        if forces.n > 0.0 {
+            return Err(if forces.mz != 0.0 {
+                "引張軸力と強軸曲げが同時に作用する場合の上下非対称断面の適用条件が未確定です"
+            } else {
+                "引張軸力のみの位置は軸力極値の照査で確認してください"
+            }
+            .into());
+        }
+        let f = crate::material_strength::section_steel_f(sec, Some(mat))?;
+        let [strong, weak] = built_h_shear_reasons(forces, sec, true, true, None);
+        let combined = h_column_weak_shear_combination_reason(forces, sec, true, None);
+        let stress = column::asymmetric_built_h_section_stress(
+            forces,
+            sec,
+            shape,
+            mat,
+            ctx,
+            f,
+            [combined, strong, weak],
+        )?;
+        Ok((stress.ratio, stress.unavailable))
+    }
+
     pub(crate) fn check_secondary_post(
         &self,
         forces: &MemberForcesAt,
@@ -325,64 +371,28 @@ impl SteelDesign {
         ctx: &DesignCtx,
         secondary_post: bool,
     ) -> CheckOutcome {
-        let torsion_reason = if !forces.mx.is_finite() {
-            Some("ねじりモーメントMxが非有限です")
-        } else if forces.mx != 0.0 {
-            let pure_pipe_torsion = matches!(sec.shape, Some(SectionShape::SteelPipe { .. }))
-                && [forces.n, forces.qy, forces.qz, forces.my, forces.mz]
-                    .iter()
-                    .all(|&force| force == 0.0);
-            Some(if pure_pipe_torsion {
-                "円形鋼管に純ねじり（Mx）が作用しています。規準に基づくねじり耐力と適用条件を確定できないため、鋼部材の応力度検定は未算定です"
-            } else {
-                "ねじりモーメントMxが作用しています。この断面形状・断面力に対するねじりの採用式と、他の断面力がある場合の断面内同一点での組合せ条件が未確定のため、鋼部材の応力度検定は未算定です"
-            })
-        } else {
-            None
-        };
+        let torsion_reason = steel_torsion_reason(forces, sec);
         let primary_column_or_girder =
             !secondary_post && matches!(ctx.kind, MemberKind::Column | MemberKind::Girder);
         let asymmetric_built_h = sec
             .shape
             .as_ref()
             .filter(|shape| primary_column_or_girder && shape.is_asymmetric_built_h());
-        let built_h_strong_shear_reason = (primary_column_or_girder
-            && torsion_reason.is_none()
-            && forces.qy != 0.0
-            && matches!(
-                sec.shape,
-                Some(SectionShape::SteelBuiltH {
-                    upper_thick,
-                    lower_thick,
-                    ..
-                }) if upper_thick != lower_thick
-            ))
-        .then_some(if forces.qy.is_finite() {
-            "上下のフランジ厚が異なる組立H形鋼では、実ウェブの内法寸法に対する規準上の公称せん断応力度の評価方法と許容値の適用条件を確定できないため、強軸せん断検定は未算定です"
-        } else {
-            "上下のフランジ厚が異なる組立H形鋼の強軸せん断力Qyが非有限のため、強軸せん断検定は未算定です"
-        });
-        let built_h_weak_shear_reason =
-            (asymmetric_built_h.is_some() && torsion_reason.is_none() && forces.qz != 0.0)
-                .then_some(if forces.qz.is_finite() {
-                    "上下非対称組立H形鋼では、弱軸せん断に対する規準上の公称せん断応力度の評価方法と材料の許容せん断応力度の適用条件を確定できないため、弱軸せん断検定は未算定です"
-                } else {
-                    "上下非対称組立H形鋼の弱軸せん断力Qzが非有限のため、弱軸せん断検定は未算定です"
-                });
+        let [built_h_strong_shear_reason, built_h_weak_shear_reason] = built_h_shear_reasons(
+            forces,
+            sec,
+            primary_column_or_girder,
+            asymmetric_built_h.is_some(),
+            torsion_reason,
+        );
         let built_h_shear_reasons = [built_h_strong_shear_reason, built_h_weak_shear_reason];
         let built_h_shear_unavailable = built_h_shear_reasons.iter().any(Option::is_some);
-        let h_combined_reason = (!secondary_post
-            && ctx.kind == MemberKind::Column
-            && torsion_reason.is_none()
-            && !forces.n.is_nan()
-            && forces.qz != 0.0
-            && forces.mz != 0.0
-            && shape_of(sec).0 == ShapeCategory::H)
-        .then_some(if forces.n > 0.0 {
-            "H形鋼柱に弱軸せん断・強軸曲げ・引張軸力が同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度を求められないため、鋼部材検定は未算定です"
-        } else {
-            "圧縮軸力または軸力なしのH形鋼柱に弱軸せん断と強軸曲げが同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度は未算定です"
-        });
+        let h_combined_reason = h_column_weak_shear_combination_reason(
+            forces,
+            sec,
+            !secondary_post && ctx.kind == MemberKind::Column,
+            torsion_reason,
+        );
         let built_h_unavailable_reasons = || {
             built_h_shear_reasons
                 .into_iter()
@@ -618,6 +628,76 @@ impl SteelDesign {
             },
         }
     }
+}
+
+fn steel_torsion_reason(forces: &MemberForcesAt, sec: &Section) -> Option<&'static str> {
+    if !forces.mx.is_finite() {
+        Some("ねじりモーメントMxが非有限です")
+    } else if forces.mx != 0.0 {
+        let pure_pipe_torsion = matches!(sec.shape, Some(SectionShape::SteelPipe { .. }))
+            && [forces.n, forces.qy, forces.qz, forces.my, forces.mz]
+                .iter()
+                .all(|&force| force == 0.0);
+        Some(if pure_pipe_torsion {
+            "円形鋼管に純ねじり（Mx）が作用しています。規準に基づくねじり耐力と適用条件を確定できないため、鋼部材の応力度検定は未算定です"
+        } else {
+            "ねじりモーメントMxが作用しています。この断面形状・断面力に対するねじりの採用式と、他の断面力がある場合の断面内同一点での組合せ条件が未確定のため、鋼部材の応力度検定は未算定です"
+        })
+    } else {
+        None
+    }
+}
+
+fn built_h_shear_reasons(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    primary_column_or_girder: bool,
+    asymmetric_built_h: bool,
+    torsion_reason: Option<&str>,
+) -> [Option<&'static str>; 2] {
+    let built_h_strong_shear_reason = (primary_column_or_girder
+        && torsion_reason.is_none()
+        && forces.qy != 0.0
+        && matches!(
+            sec.shape,
+            Some(SectionShape::SteelBuiltH {
+                upper_thick,
+                lower_thick,
+                ..
+            }) if upper_thick != lower_thick
+        ))
+    .then_some(if forces.qy.is_finite() {
+        "上下のフランジ厚が異なる組立H形鋼では、実ウェブの内法寸法に対する規準上の公称せん断応力度の評価方法と許容値の適用条件を確定できないため、強軸せん断検定は未算定です"
+    } else {
+        "上下のフランジ厚が異なる組立H形鋼の強軸せん断力Qyが非有限のため、強軸せん断検定は未算定です"
+    });
+    let built_h_weak_shear_reason =
+        (asymmetric_built_h && torsion_reason.is_none() && forces.qz != 0.0)
+            .then_some(if forces.qz.is_finite() {
+                "上下非対称組立H形鋼では、弱軸せん断に対する規準上の公称せん断応力度の評価方法と材料の許容せん断応力度の適用条件を確定できないため、弱軸せん断検定は未算定です"
+            } else {
+                "上下非対称組立H形鋼の弱軸せん断力Qzが非有限のため、弱軸せん断検定は未算定です"
+            });
+    [built_h_strong_shear_reason, built_h_weak_shear_reason]
+}
+
+fn h_column_weak_shear_combination_reason(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    primary_column: bool,
+    torsion_reason: Option<&str>,
+) -> Option<&'static str> {
+    (primary_column
+        && torsion_reason.is_none()
+        && !forces.n.is_nan()
+        && forces.qz != 0.0
+        && forces.mz != 0.0
+        && shape_of(sec).0 == ShapeCategory::H)
+    .then_some(if forces.n > 0.0 {
+        "H形鋼柱に弱軸せん断・強軸曲げ・引張軸力が同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度を求められないため、鋼部材検定は未算定です"
+    } else {
+        "圧縮軸力または軸力なしのH形鋼柱に弱軸せん断と強軸曲げが同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度は未算定です"
+    })
 }
 
 #[cfg(test)]

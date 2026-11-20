@@ -236,7 +236,7 @@ fn 再開はモデル波形刻み設定契約自由度と破損の不一致を�
 }
 
 #[test]
-fn 非対称組立h柱の正負曲げ極値は再開しても一致し記録がない旧状態は拒否する() {
+fn 非対称組立h柱の全確定時刻の照査と個別極値は再開しても一致する() {
     let mut app = App::default();
     let model = super::steel_column_k_tests::asymmetric_built_h_cantilever();
     assert!(app.load_model(with_explicit_pushover_gravity(model)));
@@ -270,6 +270,27 @@ fn 非対称組立h柱の正負曲げ極値は再開しても一致し記録が�
     assert_eq!(
         bincode::serialize(&resumed).unwrap(),
         bincode::serialize(&continuous).unwrap()
+    );
+
+    let section = &recording.asymmetric_column_sections[&0];
+    assert_eq!(section.committed_count, continuous.time.len());
+    assert!(section
+        .positions
+        .iter()
+        .all(|p| p.observed_count == section.committed_count));
+
+    let mut old_recording = saved.clone();
+    old_recording["result"]["recording"]
+        .as_object_mut()
+        .unwrap()
+        .remove("asymmetric_column_sections");
+    let old = serde_json::from_value(old_recording).unwrap();
+    let error = resume_checkpoint(model.clone(), cfg, wave.clone(), old)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("全確定時刻の断面照査がありません。再計算"),
+        "{error}"
     );
 
     saved["result"]["recording"]

@@ -13,6 +13,7 @@ use super::history::{
 };
 use super::recording::{member_forces_nonlinear, ThRecorder};
 use super::result::{ResponseHistory, ResponseResult};
+use super::CommittedMemberForcesObserver;
 use crate::common::assemble::assemble_global_m;
 use crate::common::constraint::Reducer;
 use crate::common::csc_cache::{CscCache, WeightedSumGuard};
@@ -90,6 +91,36 @@ pub fn nonlinear_time_history_analysis(
     initial_disp: &[f64],
     initial_vel: &[f64],
     cfg: NonlinearThCfg,
+) -> Result<ResponseResult, SolveError> {
+    nonlinear_time_history_with_force_observer(
+        model,
+        dofmap,
+        reducer,
+        wave,
+        newmark,
+        damping,
+        accumulation,
+        initial_disp,
+        initial_vel,
+        cfg,
+        None,
+    )
+}
+
+/// 各収束・確定点の内力を観測する。初期点も渡す。
+#[allow(clippy::too_many_arguments)]
+pub fn nonlinear_time_history_with_force_observer(
+    model: &Model,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    wave: &GroundMotion,
+    newmark: &NewmarkCfg,
+    damping: &Damping,
+    accumulation: DampingAccumulation,
+    initial_disp: &[f64],
+    initial_vel: &[f64],
+    cfg: NonlinearThCfg,
+    observer: Option<&mut CommittedMemberForcesObserver<'_>>,
 ) -> Result<ResponseResult, SolveError> {
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
@@ -274,7 +305,8 @@ pub fn nonlinear_time_history_analysis(
     let mut time = Vec::with_capacity(n_steps + 1);
     time.push(0.0);
 
-    let mut recorder = ThRecorder::new(model, dofmap, n_steps, cfg.record_every);
+    let mut recorder =
+        ThRecorder::new(model, dofmap, n_steps, cfg.record_every).with_force_observer(observer);
     {
         let (xg_x_init, xg_y_init) = accel_xy_at(wave, 0);
         let mf_init = member_forces_nonlinear(model, &behaviors)?;

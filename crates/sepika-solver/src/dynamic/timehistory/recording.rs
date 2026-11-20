@@ -183,7 +183,8 @@ struct StoryDofGroup {
 /// 呼び出し側（`linear`・`nonlinear` の各時刻歴ループ）は、各ステップ確定後に
 /// [`Self::record_step`] を呼ぶ。フレーム間引き・部材内力包絡・層別集計をここに集約し、
 /// 3 つの積分スキームで同一のロジックを共有する。
-pub(crate) struct ThRecorder {
+pub(crate) struct ThRecorder<'a, 'env> {
+    observer: Option<&'a mut super::CommittedMemberForcesObserver<'env>>,
     record_every: usize,
     n_steps: u64,
     /// `weight_above[i]` = 当該層以上（i 番目〜最上層）の地震用重量の累積和。
@@ -202,7 +203,7 @@ pub(crate) struct ThRecorder {
     story_y: StoryResponse,
 }
 
-impl ThRecorder {
+impl<'a, 'env> ThRecorder<'a, 'env> {
     /// `n_steps` は解析の全積分区間数（地震波のサンプル数 − 1）。`record_every` が
     /// `None` の場合は [`auto_record_every`] で自動決定する。
     pub(crate) fn new(
@@ -313,6 +314,7 @@ impl ThRecorder {
         };
 
         Self {
+            observer: None,
             record_every,
             n_steps: n_steps as u64,
             weight_above,
@@ -333,6 +335,14 @@ impl ThRecorder {
             story_x: story.clone(),
             story_y: story,
         }
+    }
+
+    pub(crate) fn with_force_observer(
+        mut self,
+        observer: Option<&'a mut super::CommittedMemberForcesObserver<'env>>,
+    ) -> Self {
+        self.observer = observer;
+        self
     }
 
     /// 階ごとの層せん断力・階絶対加速度・階速度・階変位を求める（1 方向分）。
@@ -426,6 +436,9 @@ impl ThRecorder {
         xg_y: f64,
         member_forces_now: &[Option<MemberForces>],
     ) {
+        if let Some(observer) = &mut self.observer {
+            observer(step, time, member_forces_now);
+        }
         merge_peak_member_forces(&mut self.peak_member_forces, member_forces_now);
         for (peaks, forces) in self.axial_force_peaks.iter_mut().zip(member_forces_now) {
             if let Some(forces) = forces {
@@ -508,6 +521,7 @@ impl ThRecorder {
             peak_member_forces: self.peak_member_forces,
             axial_force_peaks: self.axial_force_peaks,
             strong_axis_moment_peaks: self.strong_axis_moment_peaks,
+            asymmetric_column_sections: BTreeMap::new(),
         }
     }
 }

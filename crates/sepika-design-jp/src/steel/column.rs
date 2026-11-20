@@ -166,7 +166,23 @@ fn compressed_built_h_plates(
     Ok((compressed_flanges, compressed_web))
 }
 
-pub(super) fn check_asymmetric_built_h(
+pub(super) struct AsymmetricColumnSectionStress {
+    area_mm2: f64,
+    z_upper_mm3: f64,
+    z_lower_mm3: f64,
+    ft_mpa: f64,
+    sigma_c_mpa: f64,
+    sigma_b_upper_mpa: f64,
+    sigma_b_lower_mpa: f64,
+    compression_side: &'static str,
+    tension_side: &'static str,
+    compression_ratio: f64,
+    tension_ratio: f64,
+    pub(super) ratio: f64,
+    pub(super) unavailable: Vec<&'static str>,
+}
+
+pub(super) fn asymmetric_built_h_section_stress(
     forces: &MemberForcesAt,
     sec: &Section,
     shape: &SectionShape,
@@ -174,8 +190,8 @@ pub(super) fn check_asymmetric_built_h(
     ctx: &DesignCtx,
     f: f64,
     shear_reasons: [Option<&'static str>; 3],
-) -> CheckOutcome {
-    let check = || {
+) -> Result<AsymmetricColumnSectionStress, String> {
+    let check = || -> Result<AsymmetricColumnSectionStress, String> {
         if let Some(reason) = asymmetric_built_h_section_reason(forces, sec, ctx) {
             return Err(reason.into());
         }
@@ -251,57 +267,101 @@ pub(super) fn check_asymmetric_built_h(
         }
         let ratio = compression_ratio.max(tension_ratio);
 
-        let unavailable: Vec<_> = asymmetric_built_h_combination_reasons(forces, ctx)
+        let unavailable = asymmetric_built_h_combination_reasons(forces, ctx)
             .chain(shear_reasons.into_iter().flatten())
-            .collect();
-        if !unavailable.is_empty() && ratio <= 1.0 {
-            return Ok(CheckOutcome::Skipped {
-                reason: unavailable.join("。"),
-            });
-        }
-
-        let term = match ctx.term {
-            LoadTerm::Long => "長期",
-            LoadTerm::Short => "短期",
-        };
-        let (check, kind, ratio_label) = if pure_bending {
-            ("強軸曲げ", CheckKind::Bending, "曲げ比")
-        } else {
-            ("式(6.1)・(6.2)", CheckKind::AxialBending, "軸曲げ比")
-        };
-        let mut basis = format!("鋼構造許容応力度設計規準 {term} 上下非対称組立H形鋼柱 {check}");
-        let (fb_label, ratio_suffix) = if unavailable.is_empty() {
-            basis.push_str("（座屈長さ0の断面照査）");
-            ("fb", "")
-        } else {
-            basis.push_str("（上下縁の応力度照査による不適合）。");
-            basis.push_str(&unavailable.join("。"));
-            ("fb上限", "の下限")
-        };
-        Ok(CheckOutcome::Checked(CheckResult {
-            basis,
-            detail: String::new(),
-            components: vec![CheckComponent {
-                kind,
-                ratio,
-                detail: format!(
-                    "A={area_mm2:.4} mm², Z上={z_upper_mm3:.4} mm³, Z下={z_lower_mm3:.4} mm³, \
-                     σc={sigma_c_mpa:.4} N/mm², 曲げの圧縮側={compression_side}、引張側={tension_side}, \
-                     σb上={sigma_b_upper_mpa:.4} N/mm², σb下={sigma_b_lower_mpa:.4} N/mm², \
-                     {fb_label}={ft_mpa:.4} N/mm², ft={ft_mpa:.4} N/mm², \
-                     {ratio_label}{ratio_suffix}（圧縮側）={compression_ratio:.4}, \
-                     {ratio_label}{ratio_suffix}（引張側）={tension_ratio:.4}"
-                ),
-            }],
-        }))
+            .collect::<Vec<_>>();
+        Ok(AsymmetricColumnSectionStress {
+            area_mm2,
+            z_upper_mm3,
+            z_lower_mm3,
+            ft_mpa,
+            sigma_c_mpa,
+            sigma_b_upper_mpa,
+            sigma_b_lower_mpa,
+            compression_side,
+            tension_side,
+            compression_ratio,
+            tension_ratio,
+            ratio,
+            unavailable,
+        })
     };
-    check().unwrap_or_else(|reason: String| {
+    check().map_err(|reason| {
         let mut reason = format!("上下非対称組立H形鋼柱は未算定です。{reason}");
         for shear_reason in shear_reasons.into_iter().flatten() {
             reason.push('。');
             reason.push_str(shear_reason);
         }
-        CheckOutcome::Skipped { reason }
+        reason
+    })
+}
+
+pub(super) fn check_asymmetric_built_h(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    shape: &SectionShape,
+    mat: &Material,
+    ctx: &DesignCtx,
+    f: f64,
+    shear_reasons: [Option<&'static str>; 3],
+) -> CheckOutcome {
+    let AsymmetricColumnSectionStress {
+        area_mm2,
+        z_upper_mm3,
+        z_lower_mm3,
+        ft_mpa,
+        sigma_c_mpa,
+        sigma_b_upper_mpa,
+        sigma_b_lower_mpa,
+        compression_side,
+        tension_side,
+        compression_ratio,
+        tension_ratio,
+        ratio,
+        unavailable,
+    } = match asymmetric_built_h_section_stress(forces, sec, shape, mat, ctx, f, shear_reasons) {
+        Ok(stress) => stress,
+        Err(reason) => return CheckOutcome::Skipped { reason },
+    };
+    if !unavailable.is_empty() && ratio <= 1.0 {
+        return CheckOutcome::Skipped {
+            reason: unavailable.join("。"),
+        };
+    }
+    let pure_bending = forces.n == 0.0;
+    let term = match ctx.term {
+        LoadTerm::Long => "長期",
+        LoadTerm::Short => "短期",
+    };
+    let (check, kind, ratio_label) = if pure_bending {
+        ("強軸曲げ", CheckKind::Bending, "曲げ比")
+    } else {
+        ("式(6.1)・(6.2)", CheckKind::AxialBending, "軸曲げ比")
+    };
+    let mut basis = format!("鋼構造許容応力度設計規準 {term} 上下非対称組立H形鋼柱 {check}");
+    let (fb_label, ratio_suffix) = if !unavailable.is_empty() {
+        basis.push_str("（上下縁の応力度照査による不適合）。");
+        basis.push_str(&unavailable.join("。"));
+        ("fb上限", "の下限")
+    } else {
+        basis.push_str("（座屈長さ0の断面照査）");
+        ("fb", "")
+    };
+    CheckOutcome::Checked(CheckResult {
+        basis,
+        detail: String::new(),
+        components: vec![CheckComponent {
+            kind,
+            ratio,
+            detail: format!(
+                "A={area_mm2:.4} mm², Z上={z_upper_mm3:.4} mm³, Z下={z_lower_mm3:.4} mm³, \
+                 σc={sigma_c_mpa:.4} N/mm², 曲げの圧縮側={compression_side}、引張側={tension_side}, \
+                 σb上={sigma_b_upper_mpa:.4} N/mm², σb下={sigma_b_lower_mpa:.4} N/mm², \
+                 {fb_label}={ft_mpa:.4} N/mm², ft={ft_mpa:.4} N/mm², \
+                 {ratio_label}{ratio_suffix}（圧縮側）={compression_ratio:.4}, \
+                 {ratio_label}{ratio_suffix}（引張側）={tension_ratio:.4}"
+            ),
+        }],
     })
 }
 
