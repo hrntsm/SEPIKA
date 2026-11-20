@@ -68,6 +68,81 @@ fn assert_skipped(model: &Model, axial_n: f64, name: &str, reason: &str) {
 }
 
 #[test]
+fn brb_duplicate_products_are_unchecked_in_either_order() {
+    for (allowable_n, ratio, ok) in [(1_000_000.0, 0.75, true), (500_000.0, 1.50, false)] {
+        let model = input::short_compression_model(&[allowable_n]);
+        for outcome in check(&model, -750_000.0, LoadTerm::Short) {
+            let CheckOutcome::Checked(result) = outcome else {
+                panic!("{outcome:?}");
+            };
+            assert_eq!(result.ratio(), ratio);
+            assert_eq!(result.ok(), ok);
+            assert!(result.components[0].detail.contains("Lk/限界座屈長=0.5000"));
+        }
+    }
+
+    let first = check(
+        &input::short_compression_model(&[1_000_000.0, 500_000.0]),
+        -750_000.0,
+        LoadTerm::Short,
+    );
+    let reverse = check(
+        &input::short_compression_model(&[500_000.0, 1_000_000.0]),
+        -750_000.0,
+        LoadTerm::Short,
+    );
+    for (first, reverse) in first.iter().zip(&reverse) {
+        let (CheckOutcome::Skipped { reason }, CheckOutcome::Skipped { reason: reverse }) =
+            (first, reverse)
+        else {
+            panic!("{first:?} / {reverse:?}");
+        };
+        assert_eq!(reason, reverse);
+        assert!(reason.contains(&format!("部材 ID {}", input::BRACE.0)));
+        assert!(reason.contains("BRB製品属性が重複"));
+    }
+}
+
+#[test]
+fn brb_duplicate_products_preserve_ng_on_an_independent_member() {
+    let mut model = input::short_compression_model(&[1_000_000.0, 500_000.0]);
+    let mut independent = model.elements[0].clone();
+    independent.id = ElemId(1);
+    let independent_id = independent.id;
+    model.elements.push(independent);
+    let mut product = model.brb_attrs[1].clone();
+    product.elem = independent_id;
+    model.brb_attrs.push(product);
+
+    let report = run_member_design_checks(
+        &model,
+        &[input::BRACE, independent_id].map(|id| {
+            (
+                id,
+                MemberForces {
+                    at: vec![(0.0, [-750_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+                },
+            )
+        }),
+        &[],
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let [(duplicate, 0.0, CheckOutcome::Skipped { reason }), (checked, 0.0, CheckOutcome::Checked(result))] =
+        report.member_checks.as_slice()
+    else {
+        panic!("{:?}", report.member_checks);
+    };
+    assert_eq!((*duplicate, *checked), (input::BRACE, independent_id));
+    assert!(reason.contains("BRB製品属性が重複"));
+    assert_eq!(result.ratio(), 1.50);
+    assert!(!result.ok());
+}
+
+#[test]
 fn brb_attribute_on_column_or_girder_reports_mismatch_instead_of_product_pass() {
     for (frame_use, bending_kind) in [
         (FrameSectionUse::Column, CheckKind::AxialBending),

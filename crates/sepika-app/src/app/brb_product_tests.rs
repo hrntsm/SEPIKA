@@ -17,6 +17,20 @@ pub(crate) fn analyzed_pipe_app(frame_use: FrameSectionUse) -> App {
     analyze(input::pipe_with_brb_attr(frame_use))
 }
 
+pub(crate) fn analyzed_short_compression_app(allowable_axial_short_n: &[f64]) -> App {
+    let mut app = App::default();
+    app.load_model(input::short_compression_model(allowable_axial_short_n));
+    app.run_preparation();
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app.current_static().is_some());
+    app
+}
+
 pub(crate) fn app_with_nonfinite_brb_axial(limit_mm: f64) -> App {
     let mut model = input::model();
     model.nodes[1].coord[0] = 3000.0;
@@ -105,6 +119,81 @@ fn brb_product_model_and_check_survive_project_reload() {
             expected,
             "{name}"
         );
+    }
+}
+
+#[test]
+fn brb_duplicate_products_survive_reload_and_invalidate_legacy_pass() {
+    let mut single = analyzed_short_compression_app(&[1_000_000.0]);
+    let legacy_checks = single.core.scoped.results.take().unwrap().member_checks;
+    assert!(!legacy_checks.is_empty());
+    assert!(legacy_checks[0].positions.iter().all(|position| {
+        matches!(&position.outcome, CheckOutcome::Checked(result)
+            if result.ok() && (result.ratio() - 0.75).abs() < 1e-12)
+    }));
+    for (name, limits) in [
+        ("pass-first", [1_000_000.0, 500_000.0]),
+        ("ng-first", [500_000.0, 1_000_000.0]),
+    ] {
+        let mut app = analyzed_short_compression_app(&limits);
+        let saved_forces = app.current_static().unwrap().member_forces.clone();
+        let [member] = app
+            .current_design_results()
+            .unwrap()
+            .member_checks
+            .as_slice()
+        else {
+            panic!("{name}の検定結果は1部材分のはずです");
+        };
+        assert_eq!(member.elem, input::BRACE);
+        assert_eq!(member.positions.len(), 2);
+        for pos in &member.positions {
+            assert!(
+                matches!(&pos.outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("BRB製品属性が重複")),
+                "{name}: {:?}",
+                pos.outcome
+            );
+        }
+        let expected = serde_json::to_value([member]).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "sepika-brb-duplicate-{name}-{}.ovika",
+            std::process::id()
+        ));
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(loaded.core.model.brb_attrs, app.core.model.brb_attrs);
+        assert_eq!(loaded.current_static().unwrap().member_forces, saved_forces);
+        assert_eq!(
+            serde_json::to_value(&loaded.current_design_results().unwrap().member_checks).unwrap(),
+            expected
+        );
+
+        if name == "pass-first" {
+            app.core.scoped.results.as_mut().unwrap().member_checks = legacy_checks.clone();
+            let (mut loaded, path) = super::result_contract_tests::restore(
+                &app,
+                Some(ANALYSIS_CONTRACT_VERSION),
+                Some(DESIGN_CONTRACT_VERSION - 1),
+                "brb-duplicate-legacy-pass",
+            );
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(loaded.current_static().unwrap().member_forces, saved_forces);
+            assert!(loaded.current_design_results().is_none());
+            loaded.run_design_check();
+            let bundle = loaded.current_design_results().unwrap();
+            assert_eq!(
+                bundle.design_contract_version,
+                Some(DESIGN_CONTRACT_VERSION)
+            );
+            assert_eq!(
+                serde_json::to_value(&bundle.member_checks).unwrap(),
+                expected
+            );
+        }
     }
 }
 

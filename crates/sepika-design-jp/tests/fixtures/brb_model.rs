@@ -88,6 +88,51 @@ pub fn model() -> Model {
     }
 }
 
+pub fn short_compression_model(allowable_axial_short_n: &[f64]) -> Model {
+    let mut model = model();
+    model.brb_attrs = allowable_axial_short_n
+        .iter()
+        .map(|&allowable_n| BrbAttr {
+            elem: BRACE,
+            allowable_axial_short: Some(allowable_n),
+            critical_length: Some(10_000.0),
+            length_reduction: Some(0.0),
+        })
+        .collect();
+    model.load_cases[0].name = "固定荷重".into();
+    model.load_cases[0].nodal.clear();
+    model.load_cases.extend([
+        LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(1),
+            name: "架構用積載荷重".into(),
+            kind: LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        },
+        LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(2),
+            name: "風荷重".into(),
+            kind: LoadCaseKind::Wind,
+            nodal: vec![NodalLoad::manual(
+                NodeId(1),
+                [-750_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            )],
+            member: vec![],
+        },
+    ]);
+    model.combinations.push(LoadCombination {
+        name: "G+P+W".into(),
+        terms: vec![
+            (LoadCaseId(0), 1.0),
+            (LoadCaseId(1), 1.0),
+            (LoadCaseId(2), 1.0),
+        ],
+    });
+    model
+}
+
 pub fn pipe_with_brb_attr(frame_use: FrameSectionUse) -> Model {
     let (end_mm, moment_nmm) = match frame_use {
         FrameSectionUse::Column => ([0.0, 0.0, 3000.0], [-100e6, 0.0, 0.0]),
