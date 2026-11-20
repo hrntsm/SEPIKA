@@ -29,18 +29,33 @@ pub(super) fn analysis_story_columns(
     model: &Model,
     story: StoryId,
 ) -> Result<Vec<StoryColumn>, String> {
-    collect_story_columns(model, story, false)
+    collect_story_columns(model, story, ColumnSelection::Analysis)
 }
 
 /// 上下階SLを結ぶ非分岐柱を列挙し、柱節点の参照・座標不整合はErrを返す。
 pub fn checked_story_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, String> {
-    collect_story_columns(model, story, true)
+    collect_story_columns(model, story, ColumnSelection::Nonbranching)
+}
+
+pub(super) fn drift_story_columns(
+    model: &Model,
+    story: StoryId,
+) -> Result<Vec<StoryColumn>, String> {
+    mixed_story_connections(model, story)?;
+    collect_story_columns(model, story, ColumnSelection::Drift)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColumnSelection {
+    Analysis,
+    Nonbranching,
+    Drift,
 }
 
 fn collect_story_columns(
     model: &Model,
     story: StoryId,
-    reject_branch: bool,
+    selection: ColumnSelection,
 ) -> Result<Vec<StoryColumn>, String> {
     let Some(layer) = story_layer(model, story) else {
         return Err(format!("上端階{}の上下階SL又はFL間高さが不正です", story.0));
@@ -52,14 +67,16 @@ fn collect_story_columns(
     let mut used_segments = HashMap::new();
     for node in &model.nodes {
         if model.on_diaphragm_level(story, node.coord[2]) {
-            if let Some((col, mixed_connection)) = trace_column_down(
-                model,
-                &adj,
-                node.id,
-                &layer,
-                reject_branch,
-                has_mixed_columns,
-            ) {
+            if let Some((col, mixed_connection)) =
+                trace_column_down(model, &adj, node.id, &layer, selection, has_mixed_columns)
+            {
+                if selection == ColumnSelection::Drift {
+                    if let Some(reason) =
+                        boundary_link_error(story, drift_boundary_links(model, &adj, &layer, &col))
+                    {
+                        return Err(reason);
+                    }
+                }
                 if has_mixed_columns {
                     for &segment in &col.segments {
                         if let Some((other, other_mixed)) =
@@ -79,6 +96,53 @@ fn collect_story_columns(
         }
     }
     Ok(out)
+}
+
+fn boundary_link_at(
+    model: &Model,
+    adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
+    level: StoryId,
+    node: NodeId,
+) -> Option<ElemId> {
+    adj.get(&node)?.iter().find_map(|&(next, elem)| {
+        (next != node && model.on_diaphragm_level(level, model.nodes[next.index()].coord[2]))
+            .then_some(elem)
+    })
+}
+
+fn drift_boundary_links(
+    model: &Model,
+    adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
+    layer: &Layer,
+    column: &StoryColumn,
+) -> [Option<ElemId>; 2] {
+    let top_link = boundary_link_at(model, adj, layer.top, column.top).or_else(|| {
+        column.segments.iter().find_map(|&id| {
+            let elem = model.element(id)?;
+            (elem.nodes[0] != elem.nodes[1]
+                && elem.nodes.iter().all(|node| {
+                    model.on_diaphragm_level(layer.top, model.nodes[node.index()].coord[2])
+                }))
+            .then_some(id)
+        })
+    });
+    [
+        top_link,
+        boundary_link_at(model, adj, layer.bottom, column.bottom),
+    ]
+}
+
+fn boundary_link_error(story: StoryId, links: [Option<ElemId>; 2]) -> Option<String> {
+    let members = match links {
+        [Some(top), Some(bottom)] => format!("上階SLの柱{}・下階SLの柱{}", top.0, bottom.0),
+        [Some(top), None] => format!("上階SLの柱{}", top.0),
+        [None, Some(bottom)] => format!("下階SLの柱{}", bottom.0),
+        [None, None] => return None,
+    };
+    Some(format!(
+        "階{}の{}に層境界のSL節点どうしを結ぶ柱接続があり、上下階SL間の区間を一意に特定できません",
+        story.0, members
+    ))
 }
 
 fn validate_column_elements(model: &Model) -> Result<(), String> {
@@ -217,19 +281,8 @@ pub(super) fn mixed_story_connections(
                 }
             }
             if reaches_bottom && includes_mixed_kind {
-                let boundary_members = match boundary_links {
-                    [Some(top), Some(bottom)] => {
-                        Some(format!("上階SLの柱{}・下階SLの柱{}", top.0, bottom.0))
-                    }
-                    [Some(top), None] => Some(format!("上階SLの柱{}", top.0)),
-                    [None, Some(bottom)] => Some(format!("下階SLの柱{}", bottom.0)),
-                    [None, None] => None,
-                };
-                if let Some(members) = boundary_members {
-                    return Err(format!(
-                        "階{}の{}に層境界のSL節点どうしを結ぶ柱接続があり、上下階SL間の区間を一意に特定できません",
-                        story.0, members
-                    ));
+                if let Some(reason) = boundary_link_error(story, boundary_links) {
+                    return Err(reason);
                 }
                 connections.push((top.id, top_elem));
             }
@@ -294,9 +347,10 @@ fn trace_column_down(
     adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
     top: NodeId,
     layer: &Layer,
-    reject_branch: bool,
+    selection: ColumnSelection,
     has_mixed_columns: bool,
 ) -> Option<(StoryColumn, bool)> {
+    let reject_branch = selection != ColumnSelection::Analysis;
     let mut current = top;
     let mut top_elem = None;
     let mut segments = Vec::new();
@@ -355,8 +409,17 @@ fn trace_column_down(
             .copied()
             .collect();
 
-        if current == top && has_mixed_columns && neighbors.len() > 1 {
-            mixed_connection = exclude_branches_without_lower_sl(model, adj, layer, &mut neighbors);
+        if current == top && neighbors.len() > 1 {
+            if has_mixed_columns {
+                mixed_connection =
+                    exclude_branches_without_lower_sl(model, adj, layer, &mut neighbors);
+            }
+            if selection == ColumnSelection::Drift && neighbors.len() > 1 {
+                // 上階SL内の分割材を枝に数えると、曖昧な境界があっても経路を検査できない。
+                neighbors.retain(|(node, _)| {
+                    !model.on_diaphragm_level(layer.top, model.nodes[node.index()].coord[2])
+                });
+            }
         }
         if neighbors.len() != 1 {
             return None;

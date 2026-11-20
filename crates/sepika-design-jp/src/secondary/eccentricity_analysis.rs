@@ -670,10 +670,14 @@ mod tests {
             });
             let ordinary = story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap();
             assert!(ordinary.re_x.unwrap().is_finite());
-            let drifts = column_drifts(&model, &x.disp, 0, story).unwrap();
-            assert!(drifts.iter().any(|col| {
-                col.elem == ElemId(0) && col.drift == if bottom_link { 6.0 } else { 10.0 }
-            }));
+            let drift = column_drifts(&model, &x.disp, 0, story);
+            if top_link || bottom_link {
+                let reason = drift.unwrap_err();
+                assert_eq!(reason.contains("上階SLの柱8"), top_link, "{reason}");
+                assert_eq!(reason.contains("下階SLの柱9"), bottom_link, "{reason}");
+            } else {
+                assert_eq!(drift.unwrap().len(), 4);
+            }
 
             for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
                 model.elements[0].kind = kind;

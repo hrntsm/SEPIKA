@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-10-24
-- Related: [#729](https://github.com/hrntsm/SEPIKA/issues/729)、[ADR 0014](0014-schema-compatibility.md)、[ADR 0059](0059-incomplete-model-reference-integrity.md)
+- Related: [#729](https://github.com/hrntsm/SEPIKA/issues/729)、[#1607](https://github.com/hrntsm/SEPIKA/issues/1607)、[ADR 0014](0014-schema-compatibility.md)、[ADR 0059](0059-incomplete-model-reference-integrity.md)
 
 ## Context
 
@@ -24,6 +24,8 @@ Layer.height と既存の床標高欄は FL、構造用の上下端 SL と SL �
 階を持たない低水準の要素／重力解析は階不要の入口を維持する。
 既存節点の移動・FL 推測・差分補完・基部自動追加・旧形式の移行は実装しない。
 
+層間変形角では、上下階 SL 間の評価区間が一意に確定することを要求する。同じ層境界の SL 候補どうしを柱材で結ぶ場合は、層全体の評価を保留する。SL との距離や分割材の端部を基準に候補を選ぶと、床版と柱の接合部が確定しないまま変位と参考比較が変わり得るためである。適用条件は[層間変形角](../../docs/calc_basis/07_二次設計/05_層間変形角.md)を正とする。
+
 ## Consequences
 
 高さ入力と構造配置を独立して編集・診断できる。生成代表節点は SL に配置でき、既存の計算には FL 間高さを供給できる。
@@ -32,4 +34,4 @@ FL や差分が不足する取込モデルを編集・保存できる一方、�
 
 ## Verification
 
-確認記録は [Issue #729 の実装・確認記録](../v_and_v/階FL_SL_Issue729_確認記録.md)に残す。
+確認記録は [Issue #729 の実装・確認記録](../v_and_v/階FL_SL_Issue729_確認記録.md)と[層間変形角の実使用経路の検証](../v_and_v/層間変形角_Issue490_2026-10.md)に残す。

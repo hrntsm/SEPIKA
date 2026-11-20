@@ -2053,7 +2053,7 @@ mod tests {
         for (i, node) in model.nodes.iter_mut().enumerate() {
             node.coord[2] = if i < 2 { 3000.0 } else { 6400.0 };
         }
-        model.elements.retain(|e| e.id.0 == 0);
+        model.elements.retain(|e| e.id.0 < 2);
         model.nodes[2].coord[0] = 1000.0;
         let mut middle = model.nodes[2].clone();
         middle.id = NodeId(4);
@@ -2066,9 +2066,11 @@ mod tests {
         model.elements.push(segment);
         response.disp.push([999.0; 6]);
         response.disp[2][0] = 18.0;
+        response.disp[3][0] = 10.0;
         for top_sl in [6400.0, 6300.0] {
             model.stories[1].sl_offset_mm = Some(top_sl - 7000.0);
             model.nodes[2].coord[2] = top_sl;
+            model.nodes[3].coord[2] = top_sl;
             let v = drift_result(&model, SeismicDir::X, &response)
                 .drift
                 .unwrap()
@@ -2078,6 +2080,79 @@ mod tests {
             assert_eq!(v.column.drift, 18.0);
             assert_eq!(v.height_mm, 3500.0);
             assert_eq!(v.angle, 18.0 / 3500.0);
+        }
+    }
+
+    #[test]
+    fn drift_1607_solved_frame_reports_an_ambiguous_column_in_the_layer_and_csv() {
+        use sepika_core::ids::{ElemId, NodeId};
+
+        let mut app = App::default();
+        for split_mm in [1500.0, 2999.5, 0.5] {
+            let (mut model, _) = drift_fixture();
+            model.stories[1].elevation = Some(3500.0);
+            model.stories[1].sl_offset_mm = Some(-500.0);
+            let mut middle = model.nodes[2].clone();
+            middle.id = NodeId(4);
+            middle.coord[2] = split_mm;
+            model.nodes.push(middle);
+            let mut segment = model.elements[0].clone();
+            segment.id = ElemId(3);
+            segment.nodes = [NodeId(4), NodeId(2)].into_iter().collect();
+            model.elements[0].nodes[1] = NodeId(4);
+            model.elements.push(segment);
+            assert!(app.load_model(model));
+            app.generate_stories_action();
+            app.run_seismic(SeismicDir::X);
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{split_mm}: {:?}",
+                app.core.scoped.last_error
+            );
+            app.core.analysis_cfg.seismic_dir = SeismicDir::X;
+            let results = app.core.scoped.results.as_ref().unwrap();
+            let (_, response) = results
+                .statics
+                .iter()
+                .find(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))
+                .unwrap();
+            assert!(response.disp[2][0].is_finite());
+            assert!(response.disp[4][0].is_finite());
+            let metric = seismic_story_metrics(&app).remove(0);
+            let csv = build_report_csv(&app);
+            if split_mm == 1500.0 {
+                let value = metric.drift.as_ref().unwrap().as_ref().unwrap();
+                assert_eq!(value.height_mm, 3500.0);
+                let a = response.disp[2][0].abs();
+                let b = response.disp[3][0].abs();
+                let (expected_id, expected_drift) = if a > b { (3, a) } else { (1, b) };
+                assert_eq!(value.column.elem, ElemId(expected_id));
+                assert_eq!(value.column.drift, expected_drift);
+                assert!(expected_drift > 0.0);
+                assert_eq!(value.angle, expected_drift / 3500.0);
+                assert!(metric.drift_ok.is_some());
+                assert!(csv.contains(&format!("地震静的,X,3500.000,\"算定済み\",{expected_id},")));
+            } else {
+                let reason = metric.drift.as_ref().unwrap_err();
+                let boundary = if split_mm == 2999.5 {
+                    "上階SLの柱3"
+                } else {
+                    "下階SLの柱0"
+                };
+                assert!(reason.contains(boundary), "{reason}");
+                assert!(reason.contains("一意に特定できません"), "{reason}");
+                assert_eq!(metric.drift_ok, None);
+                let [state, id, pos, delta, angle, comparison] = drift_cells(&metric);
+                assert_eq!(state, *reason);
+                assert_eq!(
+                    [id, pos, delta, angle].map(|cell| cell.is_empty()),
+                    [true; 4]
+                );
+                assert_eq!(comparison, "比較なし");
+                assert!(csv.contains(&format!(
+                    "地震静的,X,3500.000,\"{reason}\",,\"\",,,200,\"比較なし\","
+                )));
+            }
         }
     }
 
