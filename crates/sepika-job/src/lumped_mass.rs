@@ -1004,6 +1004,50 @@ mod tests {
         assert!((d_origin - 20.0).abs() < 1e-12, "origin δ={d_origin}");
     }
     #[test]
+    fn re_1640_spatial_model_requires_a_unique_sl_interval_for_column_stiffness() {
+        use sepika_core::ids::{ElemId, NodeId};
+
+        let mut model = two_story_column_model();
+        let mut split = model.nodes[1].clone();
+        split.id = NodeId(3);
+        split.story = None;
+        split.coord[2] = 2998.0;
+        model.nodes.push(split);
+        let mut upper = model.elements[0].clone();
+        upper.id = ElemId(2);
+        upper.nodes[0] = NodeId(3);
+        model.elements[0].nodes[1] = NodeId(3);
+        model.elements.push(upper);
+        let mut x = static_with_column_qz(4, &[(2, 100.0), (1, 40.0), (0, 100.0)]);
+        let mut y = static_with_column_qy(4, &[(2, 80.0), (1, 30.0), (0, 80.0)]);
+        x.story_shears = Some([vec![100.0, 40.0], vec![80.0, 30.0]]);
+        y.story_shears = x.story_shears.clone();
+        for (axis, result) in [(0, &mut x), (1, &mut y)] {
+            result.disp[1][axis] = 1.0;
+            result.disp[2][axis] = 2.0;
+            result.disp[3][axis] = 1.0;
+        }
+        let build = |model: &Model| {
+            let mut inp = input(model, StickDim::Spatial, SeismicDir::X, false);
+            inp.source = LumpedStiffnessSource::ColumnKi;
+            inp.res_x = Some(&x);
+            inp.res_y = Some(&y);
+            build_lumped_mass(inp)
+        };
+        let modelled = build(&model).unwrap();
+        assert_eq!(modelled.spatial.len(), 2);
+        assert_eq!(modelled.spatial[0].k1_x, 100.0);
+        assert_eq!(modelled.spatial[0].k1_y, 80.0);
+        assert_eq!(modelled.spatial[0].rigidity_xy, [0.0, 0.0]);
+
+        model.nodes[3].coord[2] = 2999.5;
+        let reason = build(&model).unwrap_err().to_string();
+        for expected in ["階1", "上階SLの柱2", "一意に特定できません"] {
+            assert!(reason.contains(expected), "{reason}");
+        }
+    }
+
+    #[test]
     fn spatial_rejects_nonfinite_column_response_with_layer_and_member_reason() {
         let model = two_story_column_model();
         let mut x = static_with_column_qz(3, &[(0, f64::INFINITY), (1, 40.0)]);
