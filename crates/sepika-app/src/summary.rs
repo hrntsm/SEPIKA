@@ -2104,6 +2104,7 @@ mod tests {
             assert!(app.load_model(model));
             app.generate_stories_action();
             app.run_seismic(SeismicDir::X);
+            app.run_seismic(SeismicDir::Y);
             assert!(
                 app.core.scoped.last_error.is_none(),
                 "{split_mm}: {:?}",
@@ -2152,6 +2153,30 @@ mod tests {
                 assert!(csv.contains(&format!(
                     "地震静的,X,3500.000,\"{reason}\",,\"\",,,200,\"比較なし\","
                 )));
+            }
+            for dir in [SeismicDir::X, SeismicDir::Y] {
+                app.core.analysis_cfg.seismic_dir = dir;
+                let metric = seismic_story_metrics(&app).remove(0);
+                assert_eq!(metric.rs, Ok(1.0));
+                if split_mm == 1500.0 {
+                    assert!(metric.re.unwrap().is_finite());
+                    assert!(metric.fes.unwrap().is_finite());
+                } else {
+                    let reason = metric.re.unwrap_err();
+                    let boundary = if split_mm == 2999.5 {
+                        "上階SLの柱3"
+                    } else {
+                        "下階SLの柱0"
+                    };
+                    assert!(reason.contains(boundary), "{reason}");
+                    assert_eq!(metric.re_ok, None);
+                    assert_eq!(metric.fes, Err(reason.clone()));
+                    let csv = build_report_csv(&app);
+                    assert!(
+                        csv.contains(&format!("算定不能: {reason},判定なし,算定不能: {reason}"))
+                    );
+                    assert!(csv.contains(&format!("必要保有水平耐力・合否,算定不能,{reason}")));
+                }
             }
         }
     }

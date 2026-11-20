@@ -12,7 +12,8 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use std::collections::HashMap;
 
 use super::story_columns::{
-    analysis_story_columns, checked_story_columns, mixed_story_connections, StoryColumn,
+    analysis_story_columns, checked_story_columns, mixed_story_connections, BoundaryLinkCheck,
+    StoryColumn,
 };
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
@@ -39,7 +40,7 @@ fn actual_axis_ends(model: &Model, elem: &ElementData) -> Result<[[f64; 3]; 2], 
 }
 
 fn resolved_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, String> {
-    let mixed_connections = mixed_story_connections(model, story)?;
+    let mixed_connections = mixed_story_connections(model, story, BoundaryLinkCheck::AllColumns)?;
     let columns = analysis_story_columns(model, story)?;
     if !mixed_connections.is_empty() {
         let nonbranching = checked_story_columns(model, story)?;
@@ -138,7 +139,7 @@ fn station_force_global(
 /// - `kX` は X 加力時の（せん断力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
 ///   変位差が0又は剛性の商が非有限となる柱は、方向・部材ID付きでErr。
 ///
-/// 必要変位・内力の欠落や非有限、局所基底の不正は部材IDと理由を返す。
+/// 上下階SL間の区間が曖昧、必要変位・内力が欠損・非有限、又は局所基底が不正なら部材IDと理由を返す。
 pub fn column_stiffnesses_from_analysis(
     model: &Model,
     story: StoryId,
@@ -164,7 +165,7 @@ pub fn column_stiffnesses_from_analysis(
 }
 
 /// 指定方向の柱水平剛性 [N/mm] を層内柱の順序で返す。他方向の応答は要求しない。
-/// 変位差0又は非有限な商、必要応答・局所軸の不正は方向・部材付きErr。
+/// 上下階SL間の区間が曖昧、変位差0又は非有限な商、必要応答・局所軸の不正はErr。
 pub fn column_horizontal_stiffnesses(
     model: &Model,
     story: StoryId,
@@ -232,7 +233,7 @@ fn horizontal_stiffnesses(
 }
 
 /// 柱の圧縮軸力を重みにした平面重心 `[mm]` を返す。
-/// 柱なし・全柱引張では Ok(None)。必要内力・位置の欠損や不正、集計・除算不能は Err。
+/// 柱なし・全柱引張では Ok(None)。上下階SL間の区間が曖昧、必要内力・位置が不正、又は集計・除算不能なら Err。
 pub fn center_of_gravity_from_axial(
     model: &Model,
     story: StoryId,
@@ -555,6 +556,115 @@ mod tests {
     }
 
     #[test]
+    fn re_1640_counts_an_ordinary_split_column_once_when_its_sl_ends_are_unique() {
+        let (mut model, story) = build_symmetric_frame(None);
+        let mut split = model.nodes[4].clone();
+        split.id = NodeId(8);
+        split.coord[2] = 2998.0;
+        split.mass = None;
+        split.story = None;
+        model.nodes.push(split);
+        let mut upper = model.elements[0].clone();
+        upper.id = ElemId(8);
+        upper.nodes[0] = NodeId(8);
+        model.elements.push(upper);
+        model.elements[0].nodes[1] = NodeId(8);
+
+        let [x, y, mut gravity] = [
+            fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]),
+            fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]),
+            fabricate_static([0.0, 0.0], [[-1000.0, 0.0, 0.0]; 4]),
+        ]
+        .map(|mut response| {
+            response.disp.push(response.disp[4]);
+            response
+                .member_forces
+                .push((ElemId(8), response.member_forces[0].1.clone()));
+            response
+        });
+        gravity.member_forces[0].1.at[0].1[0] = -9000.0;
+
+        let columns = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
+        assert_eq!(columns.len(), 4);
+        assert_eq!(columns.iter().map(|c| c.dx).sum::<f64>(), 400.0);
+        assert_eq!(columns.iter().map(|c| c.dy).sum::<f64>(), 400.0);
+        assert_eq!(
+            center_of_gravity_from_axial(&model, story, &gravity).unwrap(),
+            Some([3000.0, 3000.0])
+        );
+        for long_term in [None, Some(&gravity)] {
+            let value = story_eccentricity_from_analysis(&model, story, &x, &y, long_term).unwrap();
+            assert_eq!((value.re_x, value.re_y), (Ok(0.0), Ok(0.0)));
+        }
+
+        model.nodes[8].coord[2] = 2999.5;
+        let reason = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap_err();
+        for expected in ["階1", "上階SLの柱8", "一意に特定できません"] {
+            assert!(reason.contains(expected), "{reason}");
+        }
+        for (direction, response) in [(SeismicDir::X, &x), (SeismicDir::Y, &y)] {
+            assert_eq!(
+                column_horizontal_stiffnesses(&model, story, response, direction),
+                Err(reason.clone())
+            );
+        }
+        assert_eq!(
+            center_of_gravity_from_axial(&model, story, &gravity),
+            Err(reason.clone())
+        );
+        for long_term in [None, Some(&gravity)] {
+            assert_eq!(
+                story_eccentricity_from_analysis(&model, story, &x, &y, long_term),
+                Err(reason.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn re_1640_rejects_sl_links_even_when_branching_prevents_column_trace() {
+        for (split_mm, end, link, branch, boundary) in [
+            (2999.5, 1, [8, 4], [1, 8], "上階SLの柱8"),
+            (0.5, 0, [0, 8], [1, 4], "下階SLの柱8"),
+        ] {
+            let (mut model, story) = build_symmetric_frame(None);
+            let mut split = model.nodes[4].clone();
+            split.id = NodeId(8);
+            split.coord[2] = split_mm;
+            split.mass = None;
+            split.story = None;
+            model.nodes.push(split);
+            for (id, nodes) in [(8, link), (9, branch)] {
+                let mut segment = model.elements[0].clone();
+                segment.id = ElemId(id);
+                segment.nodes = nodes.map(NodeId).into_iter().collect();
+                model.elements.push(segment);
+            }
+            model.elements[0].nodes[end] = NodeId(8);
+            let [x, y] = [
+                fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]),
+                fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]),
+            ]
+            .map(|mut response| {
+                response
+                    .disp
+                    .push(if end == 1 { response.disp[4] } else { [0.0; 6] });
+                let force = response.member_forces[0].1.clone();
+                response
+                    .member_forces
+                    .extend([(ElemId(8), force.clone()), (ElemId(9), force)]);
+                response
+            });
+            let reason = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap_err();
+            assert!(reason.contains(boundary), "{reason}");
+            assert!(reason.contains("一意に特定できません"), "{reason}");
+            assert_eq!(
+                story_eccentricity_from_analysis(&model, story, &x, &y, None),
+                Err(reason)
+            );
+        }
+    }
+
+    #[test]
     fn a_mixed_column_cannot_share_its_lower_segment_with_another_start_on_the_same_sl() {
         let (mut model, story) = build_symmetric_frame(None);
         let mut lower_top = model.nodes[4].clone();
@@ -591,12 +701,8 @@ mod tests {
                 branch.nodes = [NodeId(4), NodeId(9)].into_iter().collect();
                 model.elements.push(branch);
             }
-            let ordinary = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
-            assert_eq!(ordinary.len(), if has_branch { 4 } else { 5 });
-            let eccentricity =
-                story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap();
-            assert!(eccentricity.re_x.unwrap().is_finite());
-            assert!(eccentricity.re_y.unwrap().is_finite());
+            let reason = story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap_err();
+            assert!(reason.contains("上階SLの柱8"), "{reason}");
             let mixed_elements: &[usize] = if has_branch { &[0, 8, 9] } else { &[0, 8] };
             for &elem in mixed_elements {
                 for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
@@ -612,15 +718,29 @@ mod tests {
             }
         }
 
-        model.elements[8].kind = ElementKind::Fiber;
         model.elements.retain(|elem| elem.id != ElemId(0));
-        let eccentricity = story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap();
-        assert!(eccentricity.re_x.unwrap().is_finite());
-        assert!(eccentricity.re_y.unwrap().is_finite());
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            model
+                .elements
+                .iter_mut()
+                .find(|elem| elem.id == ElemId(8))
+                .unwrap()
+                .kind = kind;
+            let columns = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
+            assert_eq!(columns.len(), 3);
+            let eccentricity =
+                story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap();
+            assert!(eccentricity.re_x.unwrap().is_finite());
+            assert!(eccentricity.re_y.unwrap().is_finite());
+        }
     }
 
     #[test]
-    fn re_and_drift_hold_for_explicit_links_at_either_sl_of_a_mixed_column() {
+    fn re_and_drift_hold_for_explicit_links_at_either_sl() {
         use crate::secondary::stiffness_ratio::column_drifts;
 
         for (top_link, bottom_link) in [(true, false), (false, true), (true, true), (false, false)]
@@ -668,18 +788,11 @@ mod tests {
                     .extend([(ElemId(8), force.clone()), (ElemId(9), force)]);
                 response
             });
-            let ordinary = story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap();
-            assert!(ordinary.re_x.unwrap().is_finite());
-            let drift = column_drifts(&model, &x.disp, 0, story);
-            if top_link || bottom_link {
-                let reason = drift.unwrap_err();
-                assert_eq!(reason.contains("上階SLの柱8"), top_link, "{reason}");
-                assert_eq!(reason.contains("下階SLの柱9"), bottom_link, "{reason}");
-            } else {
-                assert_eq!(drift.unwrap().len(), 4);
-            }
-
-            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+            for kind in [
+                ElementKind::Beam,
+                ElementKind::Fiber,
+                ElementKind::MultiSpring,
+            ] {
                 model.elements[0].kind = kind;
                 let re = story_eccentricity_from_analysis(&model, story, &x, &y, None);
                 let drift = column_drifts(&model, &x.disp, 0, story);

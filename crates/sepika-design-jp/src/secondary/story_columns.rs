@@ -41,7 +41,7 @@ pub(super) fn drift_story_columns(
     model: &Model,
     story: StoryId,
 ) -> Result<Vec<StoryColumn>, String> {
-    mixed_story_connections(model, story)?;
+    mixed_story_connections(model, story, BoundaryLinkCheck::MixedColumns)?;
     collect_story_columns(model, story, ColumnSelection::Drift)
 }
 
@@ -198,11 +198,19 @@ fn is_layer_interior(model: &Model, layer: &Layer, z: f64) -> bool {
         && !model.on_diaphragm_level(layer.bottom, z)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BoundaryLinkCheck {
+    MixedColumns,
+    AllColumns,
+}
+
 pub(super) fn mixed_story_connections(
     model: &Model,
     story: StoryId,
+    boundary_check: BoundaryLinkCheck,
 ) -> Result<Vec<(NodeId, ElemId)>, String> {
-    if !has_mixed_columns(model) {
+    let has_mixed_columns = has_mixed_columns(model);
+    if !has_mixed_columns && boundary_check == BoundaryLinkCheck::MixedColumns {
         return Ok(Vec::new());
     }
     let Some(layer) = story_layer(model, story) else {
@@ -231,6 +239,9 @@ pub(super) fn mixed_story_connections(
         })
         .map(|(&node, _)| node)
         .collect();
+    if !has_mixed_columns && linked_sl.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut visited = HashSet::new();
     let mut connections = Vec::new();
     for top in model.nodes.iter().filter(|node| at_top(node.coord[2])) {
@@ -280,10 +291,15 @@ pub(super) fn mixed_story_connections(
                     includes_mixed_kind |= mixed;
                 }
             }
-            if reaches_bottom && includes_mixed_kind {
+            if !reaches_bottom {
+                continue;
+            }
+            if includes_mixed_kind || boundary_check == BoundaryLinkCheck::AllColumns {
                 if let Some(reason) = boundary_link_error(story, boundary_links) {
                     return Err(reason);
                 }
+            }
+            if includes_mixed_kind {
                 connections.push((top.id, top_elem));
             }
         }
@@ -553,7 +569,7 @@ mod tests {
         let (mut model, top) = build_split_column_model();
         model.elements[0].kind = ElementKind::Fiber;
         assert_eq!(
-            mixed_story_connections(&model, top).unwrap(),
+            mixed_story_connections(&model, top, BoundaryLinkCheck::MixedColumns).unwrap(),
             [(NodeId(2), ElemId(0))]
         );
 
@@ -568,7 +584,11 @@ mod tests {
             elem.nodes = nodes.map(NodeId).into_iter().collect();
             model.elements.push(elem);
         }
-        assert!(mixed_story_connections(&model, top).unwrap().is_empty());
+        assert!(
+            mixed_story_connections(&model, top, BoundaryLinkCheck::MixedColumns)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -452,6 +452,33 @@ mod tests {
     }
 
     #[test]
+    fn re_1640_wall_stiffness_evaluation_keeps_the_sl_interval_error() {
+        let mut model = fixture(1);
+        let mut split = model.nodes[1].clone();
+        split.id = NodeId(2);
+        split.story = None;
+        split.mass = None;
+        split.restraint = Dof6Mask::FREE;
+        split.coord[2] = 999.5;
+        model.nodes.push(split);
+        let mut upper = model.elements[0].clone();
+        upper.id = ElemId(1);
+        upper.nodes[0] = NodeId(2);
+        model.elements[0].nodes[1] = NodeId(2);
+        model.elements.push(upper);
+        wall(&mut model, 1, [0.0, 1.0], [1.0, 0.0]);
+
+        let mut results = base_results(&model);
+        attach_evaluations(&model, &[LoadCaseId(0), LoadCaseId(1)], &mut results);
+        for result in results {
+            let result = result.unwrap();
+            let reason = result.stiffness_ratio_disp.unwrap().unwrap_err();
+            assert!(reason.contains("上階SLの柱1"), "{reason}");
+            assert!(reason.contains("一意に特定できません"), "{reason}");
+        }
+    }
+
+    #[test]
     fn 斜め壁のxy回転連成を同時に解く() {
         let mut model = fixture(1);
         model.sections[0].iz *= 4.0;

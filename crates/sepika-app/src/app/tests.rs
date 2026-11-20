@@ -3388,6 +3388,41 @@ fn test_holding_capacity_flow() {
     assert!(result.member_ranks.is_empty());
 }
 
+#[test]
+fn re_1640_holding_capacity_reports_the_ambiguous_column_after_seismic_and_pushover() {
+    let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
+    let mut middle = model.nodes[2].clone();
+    middle.id = NodeId(4);
+    middle.coord[2] -= 0.5;
+    model.nodes.push(middle);
+    let mut upper = model.elements[0].clone();
+    upper.id = ElemId(3);
+    upper.nodes[0] = NodeId(4);
+    model.elements[0].nodes[1] = NodeId(4);
+    model.elements.push(upper);
+
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
+    app.core.analysis_cfg.push_steps = 10;
+    app.core.analysis_cfg.seismic_dir = SeismicDir::X;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let reason = app
+        .compute_holding_capacity()
+        .err()
+        .expect("保有水平耐力の判定は算定不能");
+    assert!(reason.contains("上階SLの柱3"), "{reason}");
+    assert!(reason.contains("一意に特定できません"), "{reason}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+}
+
 /// 架構種別が「S ブレース」なのに筋かい部材を検出できない場合、βu を算定できないため
 /// βu=0（純ラーメン）の行で隠さず理由付き失敗とする。
 #[test]

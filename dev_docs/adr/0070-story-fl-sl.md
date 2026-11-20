@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-10-24
-- Related: [#729](https://github.com/hrntsm/SEPIKA/issues/729)、[#1607](https://github.com/hrntsm/SEPIKA/issues/1607)、[ADR 0014](0014-schema-compatibility.md)、[ADR 0059](0059-incomplete-model-reference-integrity.md)
+- Related: [#729](https://github.com/hrntsm/SEPIKA/issues/729)、[#1607](https://github.com/hrntsm/SEPIKA/issues/1607)、[#1640](https://github.com/hrntsm/SEPIKA/issues/1640)、[ADR 0014](0014-schema-compatibility.md)、[ADR 0059](0059-incomplete-model-reference-integrity.md)
 
 ## Context
 
@@ -26,6 +26,8 @@ Layer.height と既存の床標高欄は FL、構造用の上下端 SL と SL �
 
 層間変形角では、上下階 SL 間の評価区間が一意に確定することを要求する。同じ層境界の SL 候補どうしを柱材で結ぶ場合は、層全体の評価を保留する。SL との距離や分割材の端部を基準に候補を選ぶと、床版と柱の接合部が確定しないまま変位と参考比較が変わり得るためである。適用条件は[層間変形角](../../docs/calc_basis/07_二次設計/05_層間変形角.md)を正とする。
 
+応力解析結果から柱剛性を算定する場合も、評価区間の一意性を要求する。候補を重複集計したり、その柱を集計から除いたりすると、剛心・ねじり剛性・圧縮軸力による重心の変化により、偏心率を過小評価し得る。自立壁の n 倍法と質点系にも同じ算定条件を適用する。適用条件は[偏心率](../../docs/calc_basis/07_二次設計/04_形状係数_Fes.md#偏心率-re-と係数-fe)を正とする。
+
 ## Consequences
 
 高さ入力と構造配置を独立して編集・診断できる。生成代表節点は SL に配置でき、既存の計算には FL 間高さを供給できる。
@@ -34,4 +36,4 @@ FL や差分が不足する取込モデルを編集・保存できる一方、�
 
 ## Verification
 
-確認記録は [Issue #729 の実装・確認記録](../v_and_v/階FL_SL_Issue729_確認記録.md)と[層間変形角の実使用経路の検証](../v_and_v/層間変形角_Issue490_2026-10.md)に残す。
+確認記録は [Issue #729 の実装・確認記録](../v_and_v/階FL_SL_Issue729_確認記録.md)、[層間変形角の実使用経路の検証](../v_and_v/層間変形角_Issue490_2026-10.md)、[偏心率の実使用経路の検証](../v_and_v/Fes算定不能の伝播_Issue718_2026-10.md#通常分割柱のsl端点が曖昧な場合の確認issue-1640)に残す。
