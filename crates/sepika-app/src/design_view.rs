@@ -954,9 +954,10 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
             r.beam_checks.len(),
             |row| {
                 let (sid, ji, jr) = &r.beam_checks[row.index()];
-                let forces_unavailable = jr.post.as_ref().is_some_and(|post| {
-                    post.combinations.iter().all(|c| c.positions.is_empty())
-                });
+                let forces_unavailable = jr
+                    .post
+                    .as_ref()
+                    .is_some_and(|post| post.combinations.iter().all(|c| c.positions.is_empty()));
                 row.col(|ui| {
                     ui.label(match sid {
                         Some(id) => format!("#{}", id.0),
@@ -996,7 +997,12 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                 });
                 row.col(|ui| {
                     if let Some(post) = &jr.post {
-                        if post.combinations.iter().all(|c| c.displacement.as_ref().and_then(|d| d.resultant_mm).is_none()) {
+                        if post.combinations.iter().all(|c| {
+                            c.displacement
+                                .as_ref()
+                                .and_then(|d| d.resultant_mm)
+                                .is_none()
+                        }) {
                             ui.label("未算定");
                             return;
                         }
