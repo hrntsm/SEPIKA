@@ -349,8 +349,8 @@ fn column_cut_end(
     Ok(top)
 }
 
-/// 柱の圧縮軸力を重みにした平面重心 `[mm]` を返す。
-/// 柱なし・全柱引張では Ok(None)。上下階SL間の区間が曖昧、必要内力・位置が不正、又は集計・除算不能なら Err。
+/// 各柱の上階SL接続節点直下の材軸圧縮力で重み付けした平面重心 `[mm]` を返す。
+/// 対象柱なし・正の圧縮力なしは Ok(None)。切断位置や必要応答が不正、又は集計・除算不能なら Err。
 pub fn center_of_gravity_from_axial(
     model: &Model,
     story: StoryId,
@@ -358,7 +358,7 @@ pub fn center_of_gravity_from_axial(
 ) -> Result<Option<[f64; 2]>, String> {
     let columns = resolved_columns(model, story)?;
     let forces: HashMap<_, _> = long_term
-        .member_forces
+        .column_end_axial_forces
         .iter()
         .map(|(id, f)| (*id, f))
         .collect();
@@ -367,23 +367,23 @@ pub fn center_of_gravity_from_axial(
     let mut sum_ny = 0.0;
     for column in &columns {
         let id = column.top_elem;
-        let Some(local) = member_start(&forces, id) else {
-            return Err(format!(
-                "Re: 階{}の柱{}の部材始端の長期軸力がありません",
-                story.0, id.0
-            ));
-        };
-        let top = &model.nodes[column.top.index()];
-        if !local[0].is_finite() || top.coord[..2].iter().any(|value| !value.is_finite()) {
-            return Err(format!(
-                "Re: 階{}の柱{}の長期軸力又は位置が不正です",
-                story.0, id.0
-            ));
+        let elem = model.element(id).expect("列挙時に確認した柱");
+        let failure = |reason: &str| format!("Re: 階{}の柱{}の長期軸力: {reason}", story.0, id.0);
+        let ends = actual_axis_ends(model, elem).map_err(|reason| failure(&reason))?;
+        let end = column_cut_end(model, column, elem, ends).map_err(|reason| failure(&reason))?;
+        let axial = forces
+            .get(&id)
+            .ok_or_else(|| failure("上端の応答が欠損しています"))?
+            .as_ref()
+            .map_err(|reason| failure(reason))?[end];
+        let [x, y, _] = model.nodes[column.top.index()].coord;
+        if [axial, x, y].iter().any(|value| !value.is_finite()) {
+            return Err(failure("応答又は柱頭の平面位置が非有限です"));
         }
-        let ni = (-local[0]).max(0.0);
+        let ni = axial.max(0.0);
         sum_n += ni;
-        sum_nx += ni * top.coord[0];
-        sum_ny += ni * top.coord[1];
+        sum_nx += ni * x;
+        sum_ny += ni * y;
     }
     if [sum_n, sum_nx, sum_ny]
         .iter()
@@ -592,11 +592,13 @@ mod tests {
             reason.contains("X方向の柱0") && reason.contains("始端の内力"),
             "{reason}"
         );
-        gravity.member_forces[0].1.at.clear();
+        gravity
+            .column_end_axial_forces
+            .retain(|(id, _)| *id != ElemId(0));
         let reason =
             story_eccentricity_from_analysis(&model, story, &x, &y, Some(&gravity)).unwrap_err();
         assert!(
-            reason.contains("柱0") && reason.contains("始端の長期軸力"),
+            reason.contains("柱0の長期軸力") && reason.contains("欠損"),
             "{reason}"
         );
 
@@ -746,7 +748,7 @@ mod tests {
             copy_column_forces(&mut response, &[ElemId(8)]);
             response
         });
-        gravity.member_forces[0].1.at[0].1[0] = -9000.0;
+        gravity.column_end_axial_forces[0].1 = Ok([9000.0; 2]);
 
         let columns = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
         assert_eq!(columns.len(), 4);
@@ -1067,11 +1069,13 @@ mod tests {
     fn copy_column_forces(response: &mut StaticOnce, ids: &[ElemId]) {
         let section = response.member_forces[0].1.clone();
         let ends = response.column_end_horizontal_forces[0].1.clone();
+        let axial = response.column_end_axial_forces[0].1.clone();
         for &id in ids {
             response.member_forces.push((id, section.clone()));
             response
                 .column_end_horizontal_forces
                 .push((id, ends.clone()));
+            response.column_end_axial_forces.push((id, axial.clone()));
         }
     }
 
@@ -1108,6 +1112,11 @@ mod tests {
             member_forces,
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_axial_forces: col_local_forces
+                .iter()
+                .enumerate()
+                .map(|(i, &[n, ..])| (ElemId(i as u32), Ok([-n; 2])))
+                .collect(),
             column_end_horizontal_forces: col_local_forces
                 .iter()
                 .enumerate()
@@ -1367,6 +1376,7 @@ mod tests {
             )],
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: vec![(ElemId(0), Ok([[1000.0, 0.0], [-1000.0, -0.0]]))],
         };
         let mut disp_y = vec![[0.0; 6]; 3];
@@ -1384,6 +1394,7 @@ mod tests {
             )],
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: vec![(ElemId(0), Ok([[0.0, 1000.0], [-0.0, -1000.0]]))],
         };
         let cols = column_stiffnesses_from_analysis(&model, top, &res_x, &res_y).unwrap();
@@ -1416,12 +1427,12 @@ mod tests {
         let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
         let long_term = fabricate_static([0.0, 0.0], [[-200.0, 0.0, 0.0]; 4]);
         let mut missing = long_term.clone();
-        missing.member_forces.pop();
+        missing.column_end_axial_forces.pop();
         let mut rejected =
             vec![story_eccentricity_from_analysis(&model, story, &x, &y, Some(&missing)).is_err()];
         for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let mut result = long_term.clone();
-            result.member_forces[0].1.at[0].1[0] = invalid;
+            result.column_end_axial_forces[0].1 = Ok([0.0, invalid]);
             rejected.push(
                 story_eccentricity_from_analysis(&model, story, &x, &y, Some(&result)).is_err(),
             );
