@@ -2619,6 +2619,6 @@ pub(crate) mod cft_column_buckling_tests;
 #[cfg(test)]
 mod rc_beam_asymmetric_tests;
 #[cfg(test)]
-mod rc_column_boundary_tests;
+pub(crate) mod rc_column_boundary_tests;
 #[cfg(test)]
 pub(crate) mod steel_column_k_tests;

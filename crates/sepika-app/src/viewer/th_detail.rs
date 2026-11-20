@@ -27,14 +27,18 @@ use crate::theme;
 use sepika_core::geom::vec3::dist as member_len3;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementData, ElementKind, Model};
+use sepika_core::structure_kind::StructureKind;
 use sepika_core::units::to_display::{force_kn, moment_kn_m};
+use sepika_design_jp::member_design_check::{concrete_member_torsion_reason, strength_outcomes};
 use sepika_design_jp::{
     CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind,
 };
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::dynamic::timehistory::ThRecording;
-use sepika_solver::dynamic::timehistory::{uses_signed_bending_peaks, ForcePeakSnapshot};
+use sepika_solver::dynamic::timehistory::{
+    uses_signed_bending_peaks, AxialForcePeaks, ForcePeakSnapshot,
+};
 
 /// ループ表示の分類（要素種別による）。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -714,7 +718,6 @@ fn draw_peak_check(
         );
         return;
     };
-    use sepika_core::structure_kind::StructureKind;
     let axial_peaks = rec.axial_force_peaks.get(elem_idx);
     let moment_peaks = rec.strong_axis_moment_peaks.get(&elem_idx);
     if signed_bending {
@@ -746,6 +749,13 @@ fn draw_peak_check(
         );
     }
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
+    let torsion_reason = |forces: &MemberForcesAt| {
+        if has_brb_attr {
+            None
+        } else {
+            concrete_member_torsion_reason(structure, forces)
+        }
+    };
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
     let buckling_lengths = match structure {
         StructureKind::Cft => {
@@ -771,10 +781,7 @@ fn draw_peak_check(
         }
         Ok(None) => (None, None),
         Err(reason) => {
-            let outcome = CheckOutcome::Skipped { reason };
-            for (pos, _) in &peak.at {
-                draw_outcome_row(ui, *pos, &outcome);
-            }
+            draw_peak_precheck(ui, peak, axial_peaks, Some(&reason), torsion_reason);
             return;
         }
     };
@@ -804,6 +811,7 @@ fn draw_peak_check(
             Ok(q0) => Some(q0),
             Err(reason) => {
                 ui.colored_label(theme::PARETO_RED, reason);
+                draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason);
                 return;
             }
         }
@@ -841,12 +849,13 @@ fn draw_peak_check(
                     .any(|(p, _)| !qd.long_at.iter().any(|(q, _)| (p - q).abs() < 1e-6))
         })
     {
-        let outcome = sepika_design_jp::CheckOutcome::Skipped {
-            reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
-        };
-        for (pos, _) in &peak.at {
-            draw_outcome_row(ui, *pos, &outcome);
-        }
+        draw_peak_precheck(
+            ui,
+            peak,
+            axial_peaks,
+            Some("設計用せん断力に必要な重力参照内力が不足しています"),
+            torsion_reason,
+        );
         return;
     }
     let adjacency = (kind == MemberKind::Column && seismic_qd.is_some())
@@ -961,7 +970,11 @@ fn draw_peak_check(
                         draw_outcome(&outcome);
                     }
                 } else {
-                    draw_outcome(&checker.check(&mfa, sec, mat, &ctx));
+                    for outcome in
+                        strength_outcomes(checker.check(&mfa, sec, mat, &ctx), torsion_reason(&mfa))
+                    {
+                        draw_outcome(&outcome);
+                    }
                 }
             }
         };
@@ -992,6 +1005,48 @@ fn draw_peak_check(
                 &snapshot.forces,
                 Some((snapshot, PeakComponent::Moment)),
             );
+        }
+    }
+}
+
+fn draw_peak_precheck(
+    ui: &mut egui::Ui,
+    peak: &MemberForces,
+    axial_peaks: Option<&AxialForcePeaks>,
+    reason: Option<&str>,
+    torsion_reason: impl Fn(&MemberForcesAt) -> Option<&'static str>,
+) {
+    let draw = |ui: &mut egui::Ui, label: &str, torsion: Option<&str>| {
+        if let Some(first_reason) = reason.or(torsion) {
+            let skipped = CheckOutcome::Skipped {
+                reason: first_reason.into(),
+            };
+            for outcome in strength_outcomes(skipped, reason.and(torsion)) {
+                draw_labeled_outcome_row(ui, label, &outcome, false);
+            }
+        }
+    };
+    for &(pos, f) in &peak.at {
+        let torsion = torsion_reason(&MemberForcesAt::from_local(pos, f));
+        draw(ui, &format!("ξ={pos:.2}:"), torsion);
+    }
+    if let Some(peaks) = axial_peaks {
+        for snapshot in &peaks.snapshots {
+            for &index in &snapshot.positions {
+                let Some(&(pos, f)) = snapshot.forces.at.get(index) else {
+                    continue;
+                };
+                let mfa = MemberForcesAt::from_local(pos, f);
+                if let Some(torsion) = torsion_reason(&mfa) {
+                    let side = if mfa.n < 0.0 {
+                        "圧縮側"
+                    } else {
+                        "引張側"
+                    };
+                    let label = format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time);
+                    draw(ui, &label, Some(torsion));
+                }
+            }
         }
     }
 }
@@ -1114,10 +1169,19 @@ mod tests {
             strong_axis_moment_peaks,
             ..Default::default()
         };
+        peak_recording_text(app, elem, index, &rec)
+    }
+
+    fn peak_recording_text(
+        app: &App,
+        elem: &ElementData,
+        index: usize,
+        rec: &ThRecording,
+    ) -> String {
         let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
         egui::Context::default()
             .run_ui(egui::RawInput::default(), |ui| {
-                draw_peak_check(ui, app, elem, index, &rec, false, false, &axis)
+                draw_peak_check(ui, app, elem, index, rec, false, false, &axis)
             })
             .shapes
             .iter()
@@ -1127,6 +1191,93 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn concrete_peak_checks_report_torsion_without_ok_and_preserve_ng() {
+        use crate::app::{
+            cft_column_buckling_tests::input as cft, rc_column_boundary_tests::input as rc,
+        };
+
+        let mut rc_app = App::default();
+        assert!(rc_app.load_model(rc::column_model(false, 0.0)));
+        let src_app =
+            crate::app::src_ql_acceptance_tests::src_column_app(sepika_design_jp::QdMethod::Qd1);
+        let mut cft_app = App::default();
+        let mut cft_model = cft::cantilever(true, 0.0);
+        cft_model.steel_design_attrs =
+            vec![cft::direct_lengths(ElemId(0), Some(6000.0), Some(6000.0))];
+        assert!(cft_app.load_model(cft_model));
+
+        for (kind, app) in [("RC", rc_app), ("SRC", src_app), ("CFT", cft_app)] {
+            let elem = &app.core.model.elements[0];
+            for (envelope_mx, snapshot_mx, envelope_reason, snapshot_reason) in [
+                (0.0, -0.0, None, None),
+                (1.0e6, -0.0, Some("同時に作用"), None),
+                (
+                    f64::from_bits(1),
+                    -f64::from_bits(1),
+                    Some("同時に作用"),
+                    Some("同時に作用"),
+                ),
+                (f64::NAN, f64::INFINITY, Some("非有限"), Some("非有限")),
+                (f64::NEG_INFINITY, f64::NAN, Some("非有限"), Some("非有限")),
+            ] {
+                for n in [-100_000.0, -30.0e6] {
+                    let forces = |mx| MemberForces {
+                        at: vec![(0.0, [n, 0.0, 0.0, mx, 0.0, 0.0])],
+                    };
+                    let recording = ThRecording {
+                        peak_member_forces: vec![Some(forces(envelope_mx))],
+                        axial_force_peaks: vec![AxialForcePeaks {
+                            snapshots: vec![ForcePeakSnapshot {
+                                time: 1.0,
+                                forces: forces(snapshot_mx),
+                                positions: vec![0],
+                            }],
+                        }],
+                        ..Default::default()
+                    };
+                    let text = peak_recording_text(&app, elem, 0, &recording);
+                    let (envelope, snapshot) = text
+                        .split_once("軸力極値が生じた確定ステップ\n")
+                        .unwrap_or_else(|| panic!("{kind}: {text}"));
+                    assert!(
+                        snapshot.contains("圧縮側 t=1.000000 s  ξ=0.00:"),
+                        "{kind}: {text}"
+                    );
+                    let baseline = peak_check_text(&app, 0, [n, 0.0, 0.0, 0.0, 0.0, 0.0]);
+                    let ratio = baseline
+                        .lines()
+                        .find(|line| line.starts_with("検定比 "))
+                        .unwrap_or_else(|| panic!("{kind}: {baseline}"));
+                    let ng = n == -30.0e6;
+                    assert!(
+                        ratio.ends_with(if ng { "(NG)" } else { "(OK)" }),
+                        "{kind}: {baseline}"
+                    );
+                    for (rows, reason) in [(envelope, envelope_reason), (snapshot, snapshot_reason)]
+                    {
+                        if let Some(reason) = reason {
+                            assert!(
+                                rows.lines().any(|line| line.starts_with("検定不能: ")
+                                    && line.contains("ねじりモーメントMx")
+                                    && line.contains(reason)),
+                                "{kind}: {rows}"
+                            );
+                            assert!(!rows.contains("(OK)"), "{kind}: {rows}");
+                            assert_eq!(rows.contains(ratio), ng, "{kind}: {rows}");
+                        } else {
+                            assert!(rows.contains(ratio), "{kind}: {rows}");
+                            assert!(!rows.contains("検定不能:"), "{kind}: {rows}");
+                        }
+                    }
+                }
+            }
+            let pure = peak_check_text(&app, 0, [0.0, 0.0, 0.0, 1.0e6, 0.0, 0.0]);
+            assert!(pure.contains("検定不能: 純ねじり（Mx）"), "{kind}: {pure}");
+            assert!(!pure.contains("検定比"), "{kind}: {pure}");
+        }
     }
 
     #[test]
@@ -1672,6 +1823,41 @@ mod tests {
                 assert!(!text.contains("検定比"), "{text}");
             }
         }
+    }
+
+    #[test]
+    fn cft_missing_buckling_length_and_torsion_reasons_are_both_shown() {
+        use crate::app::cft_column_buckling_tests::input;
+        let mut app = App::default();
+        assert!(app.load_model(input::cantilever(false, 0.0)));
+        app.core.model.steel_design_attrs =
+            vec![input::direct_lengths(ElemId(0), Some(1000.0), None)];
+        let forces = MemberForces {
+            at: vec![(0.0, [-100_000.0, 0.0, 0.0, 1.0e6, 0.0, 0.0])],
+        };
+        let recording = ThRecording {
+            peak_member_forces: vec![Some(forces.clone())],
+            axial_force_peaks: vec![AxialForcePeaks {
+                snapshots: vec![ForcePeakSnapshot {
+                    time: 1.0,
+                    forces,
+                    positions: vec![0],
+                }],
+            }],
+            ..Default::default()
+        };
+        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording);
+        for label in ["ξ=0.00:", "圧縮側 t=1.000000 s  ξ=0.00:"] {
+            assert!(
+                text.lines()
+                    .zip(text.lines().skip(1))
+                    .any(|(line, reason)| line == label
+                        && reason.contains("弱軸の座屈長さ")
+                        && reason.contains("ねじりモーメントMx")),
+                "{text}"
+            );
+        }
+        assert!(!text.contains("検定比"), "{text}");
     }
 
     #[test]

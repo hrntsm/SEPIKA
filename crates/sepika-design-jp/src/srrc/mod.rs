@@ -311,7 +311,7 @@ impl DesignCheck for SrcDesign {
 }
 
 impl SrcDesign {
-    /// 検定位置の結果を返す。短期地震時のSRC柱が未算定の場合、理由と、独立に確定した不適合を別の結果で返す。
+    /// 短期地震時のSRC柱の適用条件や材軸ねじりで未算定となる場合、理由と独立に確定した不適合を別の結果で返す。
     /// 未算定を伴う位置で、適合を示す検定比は返さない。
     pub fn check_outcomes(
         &self,
@@ -321,7 +321,13 @@ impl SrcDesign {
         ctx: &DesignCtx,
     ) -> impl Iterator<Item = CheckOutcome> {
         let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, false);
-        crate::member_design_check::strength_outcomes(outcome, incomplete.as_deref())
+        use crate::member_design_check::{
+            combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
+        };
+        let torsion =
+            concrete_member_torsion_reason(sepika_core::structure_kind::StructureKind::Src, forces);
+        let reason = combine_incomplete_reasons(incomplete, torsion);
+        strength_outcomes(outcome, reason.as_deref())
     }
 
     pub(crate) fn check_with_incomplete(

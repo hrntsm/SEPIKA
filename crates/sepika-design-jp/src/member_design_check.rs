@@ -154,9 +154,18 @@ fn frame_check_target(elem: &ElementData) -> bool {
     )
 }
 
-fn concrete_member_torsion_reason(
+/// RC・SRC・CFT部材の断面力に対する材軸ねじりの未算定理由を返す。厳密にゼロのMxは対象外とする。
+pub fn concrete_member_torsion_reason(
     structure: StructureKind,
-    [n, qy, qz, mx, my, mz]: [f64; 6],
+    &MemberForcesAt {
+        n,
+        qy,
+        qz,
+        mx,
+        my,
+        mz,
+        ..
+    }: &MemberForcesAt,
 ) -> Option<&'static str> {
     if !matches!(
         structure,
@@ -185,7 +194,8 @@ fn push_strength_outcome(
         .extend(strength_outcomes(outcome, incomplete_reason).map(|outcome| (elem, pos, outcome)));
 }
 
-pub(crate) fn strength_outcomes(
+/// 未算定理由がある位置では独立に確定した不適合と理由を返す。理由がなければ元の結果を返す。
+pub fn strength_outcomes(
     outcome: CheckOutcome,
     incomplete_reason: Option<&str>,
 ) -> impl Iterator<Item = CheckOutcome> {
@@ -206,6 +216,17 @@ pub(crate) fn strength_outcomes(
     [known_ng, Some(CheckOutcome::Skipped { reason })]
         .into_iter()
         .flatten()
+}
+
+pub(crate) fn combine_incomplete_reasons(
+    incomplete: Option<String>,
+    torsion: Option<&str>,
+) -> Option<String> {
+    match (incomplete, torsion) {
+        (Some(incomplete), Some(torsion)) => Some(format!("{incomplete}。{torsion}")),
+        (Some(incomplete), None) => Some(incomplete),
+        (None, torsion) => torsion.map(str::to_owned),
+    }
 }
 
 fn brb_torsion_reason(mx: f64) -> Option<&'static str> {
@@ -394,7 +415,7 @@ pub fn run_member_design_checks(
             continue;
         };
         let structure = structure_kind_of(Some(sec), Some(mat.category));
-        let torsion_reason = |forces| {
+        let torsion_reason = |forces: &MemberForcesAt| {
             if brb.is_none() {
                 concrete_member_torsion_reason(structure, forces)
             } else {
@@ -413,7 +434,7 @@ pub fn run_member_design_checks(
                     crate::CheckOutcome::Skipped {
                         reason: reason.clone(),
                     },
-                    torsion_reason(*forces),
+                    torsion_reason(&MemberForcesAt::from_local(*pos, *forces)),
                 );
             }
             continue;
@@ -490,7 +511,7 @@ pub fn run_member_design_checks(
                         CheckOutcome::Skipped {
                             reason: reason.clone(),
                         },
-                        torsion_reason(*forces),
+                        torsion_reason(&MemberForcesAt::from_local(*pos, *forces)),
                     );
                 }
                 continue;
@@ -522,7 +543,7 @@ pub fn run_member_design_checks(
                             CheckOutcome::Skipped {
                                 reason: reason.clone(),
                             },
-                            torsion_reason(*forces),
+                            torsion_reason(&MemberForcesAt::from_local(*pos, *forces)),
                         );
                     }
                 }
@@ -762,18 +783,13 @@ pub fn run_member_design_checks(
                         .push_str(&format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
                 }
             }
-            let torsion = torsion_reason(*forces);
-            let incomplete = match (src_incomplete, torsion) {
-                (Some(src), Some(torsion)) => Some(format!("{src}。{torsion}")),
-                (Some(src), None) => Some(src),
-                (None, _) => None,
-            };
+            let incomplete = combine_incomplete_reasons(src_incomplete, torsion_reason(&mfa));
             push_strength_outcome(
                 &mut member_checks,
                 *elem_id,
                 *pos,
                 outcome,
-                incomplete.as_deref().or(torsion),
+                incomplete.as_deref(),
             );
         }
 
