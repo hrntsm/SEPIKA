@@ -415,14 +415,16 @@ fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinit
 
     let mut invalid_qa = sec.clone();
     let Some(SectionShape::SrcColumnRect {
-        steel_height,
-        steel_flange_thick,
+        b,
+        rebar,
+        steel_width,
         ..
     }) = &mut invalid_qa.shape
     else {
         unreachable!()
     };
-    *steel_height = 2.0 * *steel_flange_thick;
+    *steel_width = *b;
+    rebar.hoop.legs_x = 0;
     let rows: Vec<_> = SrcDesign
         .check_outcomes(&unknown_moment, &invalid_qa, &concrete, &ctx, false)
         .collect();
@@ -444,7 +446,7 @@ fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinit
 }
 
 #[test]
-fn qd1_rejects_invalid_demand_inputs_and_allowables() {
+fn qd1_rejects_invalid_demand_inputs_and_geometry() {
     let mut ctx = context([0.0; 2], [0.0; 2]);
     let f = forces(0.0);
     for invalid in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
@@ -510,5 +512,5 @@ fn qd1_rejects_invalid_demand_inputs_and_allowables() {
         unreachable!()
     };
     *steel_height = 2.0 * *steel_flange_thick;
-    assert_skipped(check(&invalid, &f, &ctx), "許容せん断力には有限な正値");
+    assert_skipped(check(&invalid, &f, &ctx), "ウェブ内法せい 0 mm");
 }

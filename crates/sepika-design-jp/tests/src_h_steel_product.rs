@@ -3,9 +3,13 @@ mod input;
 #[path = "fixtures/src_h_steel_product_reference.rs"]
 mod reference;
 
+use sepika_core::ids::ElemId;
+use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
-    CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind, SrcDesign,
+    run_member_design_checks, CheckOutcome, DesignCheck, DesignCtx, LoadTerm,
+    MemberDesignCheckOptions, MemberForcesAt, MemberKind, SrcDesign,
 };
+use sepika_element::frame::beam::MemberForces;
 
 fn inputs(column: bool) -> (sepika_core::model::Model, DesignCtx, MemberForcesAt) {
     let (n, mz) = reference::demand(column);
@@ -84,8 +88,6 @@ fn src_beam_and_column_long_term_check_uses_h_grade_but_skips_tube_grades() {
 
 #[test]
 fn src_h_product_diagnosis_precedes_invalid_plate_thickness() {
-    use sepika_core::section_shape::SectionShape;
-
     for column in [false, true] {
         let (model, mut ctx, forces) = inputs(column);
         let member = if column { "SRC柱" } else { "SRC梁" };
@@ -129,5 +131,74 @@ fn src_h_product_diagnosis_precedes_invalid_plate_thickness() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn src_member_checks_skip_invalid_h_geometry_and_main_bar_interference() {
+    for (column, height_mm, width_mm, web_mm, diagnostics) in [
+        (
+            true,
+            400.0,
+            90.0,
+            95.0,
+            ["ウェブ厚 95 mm", "フランジ幅 90 mm"],
+        ),
+        (true, 650.0, 200.0, 8.0, ["せい 650 mm", "断面せい 600 mm"]),
+        (true, 475.0, 200.0, 8.0, ["SRC主筋", "干渉"]),
+        (false, 475.0, 200.0, 8.0, ["SRC主筋", "干渉"]),
+    ] {
+        let (mut model, ctx, forces) = inputs(column);
+        let section = &mut model.sections[0];
+        match section.shape.as_mut().unwrap() {
+            SectionShape::SrcBeamRect {
+                steel_height,
+                steel_width,
+                steel_web_thick,
+                ..
+            }
+            | SectionShape::SrcColumnRect {
+                steel_height,
+                steel_width,
+                steel_web_thick,
+                ..
+            } => {
+                *steel_height = height_mm;
+                *steel_width = width_mm;
+                *steel_web_thick = web_mm;
+            }
+            _ => panic!("SRC断面"),
+        }
+        let section = &model.sections[0];
+        let member = if column { "SRC柱" } else { "SRC梁" };
+        let assert_skipped = |outcome: &CheckOutcome| {
+            assert!(
+                matches!(outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains(member) && reason.contains(&section.name)
+                    && diagnostics.iter().all(|diagnostic| reason.contains(diagnostic))),
+                "{member} {height_mm}×{width_mm}×{web_mm}×13: {outcome:?}"
+            );
+        };
+        assert_skipped(&SrcDesign.check(&forces, section, &model.materials[0], &ctx));
+
+        let report = run_member_design_checks(
+            &model,
+            &[(
+                ElemId(0),
+                MemberForces {
+                    at: vec![(forces.pos, [forces.n, 0.0, 0.0, 0.0, 0.0, forces.mz])],
+                },
+            )],
+            &[],
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Long,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let [(ElemId(0), 0.0, outcome)] = &report.member_checks[..] else {
+            panic!("{:?}", report.member_checks);
+        };
+        assert_skipped(outcome);
     }
 }
