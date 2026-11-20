@@ -1,7 +1,7 @@
 use super::*;
 use sepika_design_jp::CheckOutcome;
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"]
-mod input;
+pub(crate) mod input;
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_reference.rs"]
 mod reference;
 

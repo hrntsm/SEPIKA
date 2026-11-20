@@ -117,6 +117,16 @@ fn src_column_th_detail_displays_why_seismic_bending_shear_is_unchecked() {
             "{text}"
         );
         assert!(!text.contains("(OK)"), "{text}");
+
+        let mut with_torsion = overloaded.clone();
+        with_torsion.peak_member_forces[0].as_mut().unwrap().at[0].1[3] = 1.0e6;
+        let text = labels(&app, &with_torsion, true);
+        assert_eq!(text.matches("検定不能:").count(), 1, "{text}");
+        assert!(
+            text.contains(reason) && text.contains("ねじりモーメントMx"),
+            "{text}"
+        );
+        assert!(text.contains("(NG)") && !text.contains("(OK)"), "{text}");
     }
     let ordinary = labels(&app, &rec, false);
     assert!(ordinary.contains("検定比"), "{ordinary}");
