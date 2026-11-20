@@ -612,10 +612,7 @@ impl App {
                 };
                 let rebar_mat = model.element_rebar_material(elem);
                 let shear_mat = model.element_shear_rebar_material(elem);
-                let steel_grade = model
-                    .element_steel_material(elem)
-                    .map(|m| m.name.clone())
-                    .unwrap_or_default();
+                let steel_material = model.element_steel_material(elem);
                 let is_brace_elem =
                     matches!(elem.kind, sepika_core::model::ElementKind::Brace { .. })
                         || (!matches!(elem.kind, sepika_core::model::ElementKind::Wall)
@@ -632,7 +629,7 @@ impl App {
                 let grade = if elem_steel {
                     mat.name.as_str()
                 } else {
-                    steel_grade.as_str()
+                    steel_material.map_or("", |material| material.name.as_str())
                 };
                 if let Some(reason) =
                     sepika_core::material_grade::steel_f_value_issue(grade, thickness)
@@ -712,14 +709,14 @@ impl App {
                             elem.id, sec.id
                         ));
                     };
-                    let Some((n_n0, smo_m0)) =
-                        src_column_rank_ratios(shape, &steel_grade, fc, rebar_sy, resp.axial)
-                    else {
-                        return Err(format!(
-                            "部材 {:?}・断面 {:?}: SRC 柱のランク判定比を算定できません",
-                            elem.id, sec.id
-                        ));
-                    };
+                    let (n_n0, smo_m0) =
+                        src_column_rank_ratios(sec, steel_material, fc, rebar_sy, resp.axial)
+                            .map_err(|reason| {
+                                format!(
+                                    "部材 {:?}・断面 {:?}: SRC 柱の部材種別は未評価です。{reason}",
+                                    elem.id, sec.id
+                                )
+                            })?;
                     src_column_rank(n_n0, smo_m0, shear_yield_elems.contains(&elem.id))
                 } else if let Some(SectionShape::RcWall { thickness, .. }) = sec.shape.as_ref() {
                     if wall_has_src_boundary_column(elem, model) {
@@ -1316,6 +1313,86 @@ mod tests {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar};
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
     use sepika_design_jp::secondary::member_rank::worst_rank;
+
+    #[test]
+    fn src_column_auto_rank_reports_inapplicable_steel_from_a_saved_run() {
+        use super::holding_clear_span::rc_rank_portal;
+        use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
+        use sepika_core::ids::MaterialId;
+        use sepika_core::section_shape::SectionShape;
+
+        for (name, expected_reason) in [
+            ("SN400B", None),
+            ("任意鋼材", Some("H 形鋼としての適用根拠")),
+            ("STK400", Some("H 形鋼としての適用根拠")),
+            ("SS490", Some("溶接を使用する部分")),
+            ("SN400C", Some("JIS G 3136 の適用範囲外")),
+            ("SN490", Some("JIS の種類記号が不完全")),
+        ] {
+            let mut model = expanded_model();
+            let mut steel = rank_input().1;
+            steel.id = MaterialId(model.materials.len() as u32);
+            steel.name = name.into();
+            steel.fy = Some(100.0);
+            let section = &mut model.sections[0];
+            let Some(SectionShape::RcColumnRect { b, d, rebar }) = section.shape.take() else {
+                unreachable!()
+            };
+            section.shape = Some(SectionShape::SrcColumnRect {
+                b,
+                d,
+                rebar,
+                steel_height: 400.0,
+                steel_width: 200.0,
+                steel_web_thick: 8.0,
+                steel_flange_thick: 13.0,
+            });
+            section.steel_material = Some(steel.id);
+            model.materials.push(steel);
+            let mut app = rc_rank_portal(model, false, 3000.0, None);
+
+            if let Some(expected_reason) = expected_reason {
+                let assert_unevaluated = |app: &mut App| {
+                    let reason = app.compute_holding_capacity().err().unwrap();
+                    for expected in [
+                        "部材 ElemId(0)・断面 SectionId(0)",
+                        "SRC 柱の部材種別は未評価",
+                        name,
+                        expected_reason,
+                    ] {
+                        assert!(reason.contains(expected), "{reason}");
+                    }
+                    assert!(app.core.scoped.holding_capacity_source.is_none());
+                };
+                assert_unevaluated(&mut app);
+                let path = std::env::temp_dir().join(format!(
+                    "sepika-src-column-rank-{}.ovika",
+                    std::process::id()
+                ));
+                app.save_project_to(path.clone());
+                assert!(
+                    app.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    app.core.scoped.last_error
+                );
+                let mut reopened = App::default();
+                reopened.open_project_from(path.clone());
+                std::fs::remove_file(path).unwrap();
+                assert!(
+                    reopened.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    reopened.core.scoped.last_error
+                );
+                reopened.core.design_rank_auto = true;
+                assert_unevaluated(&mut reopened);
+            } else {
+                let (candidate, _) = app.compute_unconfirmed_holding_capacity().unwrap();
+                assert!(candidate
+                    .member_ranks
+                    .contains(&(ElemId(0), MemberRank::FA)));
+            }
+        }
+    }
 
     #[test]
     fn rc_rank_candidates_use_both_confirmed_faces() {

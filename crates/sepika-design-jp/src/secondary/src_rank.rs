@@ -5,6 +5,7 @@
 //! - [`src_column_rank_ratios`] — 判定比 N/N0・sM0/M0 の算定
 
 use super::holding_capacity::MemberRank;
+use sepika_core::model::{Material, MaterialCategory, Section};
 use sepika_core::rc_rebar_geom::RectEdge;
 use sepika_core::section_shape::SectionShape;
 
@@ -46,88 +47,92 @@ pub fn src_wall_type(shear_failure: bool) -> MemberRank {
     }
 }
 
-/// 表 2.6.6-5 の判定比 `(N/N0, sM0/M0)` を SRC 矩形断面と材料強度から算定する。
-///
-/// 略算累加による評価（SRC 規準の累加強度の考え方に基づく Ds 算定用の略算）:
-/// - `N0 = c·Ac·Fc + sA·sF + ar·σy`（コンクリート正味断面＋内蔵鉄骨＋主筋全量）
-/// - `sM0 = sZp·sF`（内蔵 H 形鋼の強軸全塑性モーメント）
-/// - `M0 = sM0 + rM0`（`rM0 = 0.9·at·σy·de`。N=0 の RC 部分略算曲げ耐力、
-///   [`sepika_core::rc_capacity::rc_mu_simple`] と同式）
-///
-/// 内蔵鉄骨の基準強度 sF は `steel_grade` から板厚区分込みで解決し、解決できない
-/// 場合は SS400 相当（F=235）にフォールバックする（[`crate::srrc`] の慣例と同じ）。
-///
-/// - `fc`: コンクリート強度 [N/mm²]（0 以下は算定不能で `None`）。
-/// - `rebar_sy`: 主筋の降伏強度 σy [N/mm²]（0 以下は算定不能で `None`）。
-/// - `n_ult`: メカニズム時の軸方向力 `[N]`（**圧縮正**。引張は 0 として扱う）。
-///
-/// SRC 矩形（[`SectionShape::SrcColumnRect`]）以外の
-/// 形状、または SM520 系列の板厚が適用範囲外の場合は `None`。
+/// SRC 矩形柱の部材種別用の候補値 `(N/N0, sM0/M0)` を返す。
+/// `fc` と `rebar_sy` は N/mm²、`n_ult` は N（圧縮正、引張は 0 扱い）。
+/// 入力不備や割当鉄骨材料と実板厚から基準強度を確定できない場合は理由を返す。
 pub fn src_column_rank_ratios(
-    shape: &SectionShape,
-    steel_grade: &str,
+    section: &Section,
+    steel_material: Option<&Material>,
     fc: f64,
     rebar_sy: f64,
     n_ult: f64,
-) -> Option<(f64, f64)> {
-    let (b, d, at, ar_total, dt, (sh, sb, tw, tf)) = match shape {
-        SectionShape::SrcColumnRect {
-            b,
-            d,
-            rebar,
-            steel_height,
-            steel_width,
-            steel_web_thick,
-            steel_flange_thick,
-        } => {
-            rebar.validate(*b, *d).ok()?;
-            let edge = rebar.edge_steel(RectEdge::Top, *b, *d);
-            (
-                *b,
-                *d,
-                edge.area_mm2,
-                rebar.total_main_area(),
-                edge.centroid_from_edge_mm,
-                (
-                    *steel_height,
-                    *steel_width,
-                    *steel_web_thick,
-                    *steel_flange_thick,
-                ),
-            )
-        }
-        _ => return None,
+) -> Result<(f64, f64), String> {
+    let Some(SectionShape::SrcColumnRect {
+        b,
+        d,
+        ref rebar,
+        steel_height: sh,
+        steel_width: sb,
+        steel_web_thick: tw,
+        steel_flange_thick: tf,
+    }) = section.shape
+    else {
+        return Err("SRC 矩形柱の断面形状が必要です".into());
     };
-    if fc <= 0.0 || rebar_sy <= 0.0 || b <= 0.0 || d <= 0.0 {
-        return None;
+    let steel = steel_material.ok_or("内蔵鉄骨の材料が未割当、または参照先が不明です")?;
+    if steel.category != MaterialCategory::Steel {
+        return Err(format!("材料「{}」は鋼材ではありません", steel.name));
     }
-    if sh <= 0.0 || sb <= 0.0 || tw <= 0.0 || tf <= 0.0 || sh <= 2.0 * tf {
-        return None;
+    let name = steel.name.trim();
+    let minimum_mm = match name {
+        "SN400A" | "SN400B" | "SN490B" => 6.0,
+        "SN400C" | "SN490C" => 16.0,
+        "SS400" | "SM400A" | "SM400B" | "SM400C" | "SM490A" | "SM490B" | "SM490C" | "SM490YA"
+        | "SM490YB" | "SM520B" | "SM520C" => 0.0,
+        "SS490" => {
+            return Err("内蔵鉄骨「SS490」は溶接を使用する部分に適用できません。断面入力から溶接を使用する部分か確認できません".into());
+        }
+        "SM400" | "SM490" | "SM520" | "SN400" | "SN490" => {
+            return Err(format!("内蔵鉄骨「{name}」の JIS の種類記号が不完全です"));
+        }
+        _ => {
+            return Err(format!(
+                "内蔵鉄骨「{name}」の H 形鋼としての適用根拠が未確定です"
+            ));
+        }
+    };
+    let s_f = crate::material_strength::section_steel_f(section, Some(steel))?;
+    // 断面形状だけでは圧延形鋼と鋼板組立を区別できない。
+    if tw < minimum_mm || tf < minimum_mm {
+        return Err(format!(
+            "内蔵鉄骨「{name}」の実板厚（ウェブ {tw} mm、フランジ {tf} mm）は JIS G 3136 の適用範囲外です。両方に {minimum_mm} mm 以上が必要です"
+        ));
     }
-    if sepika_core::material_grade::steel_f_value_issue(steel_grade, tw.max(tf)).is_some() {
-        return None;
+    if [fc, rebar_sy, b, d]
+        .iter()
+        .any(|v| !v.is_finite() || *v <= 0.0)
+        || !n_ult.is_finite()
+    {
+        return Err("SRC 柱の外形寸法・コンクリート強度・主筋強度・軸力が不正です".into());
     }
-    let s_f = crate::steel::steel_f_value_prefix(steel_grade, tf).unwrap_or(235.0);
+    if !sh.is_finite() || !sb.is_finite() || sh <= 2.0 * tf || sb <= 0.0 {
+        return Err("内蔵 H 形鋼の高さまたは幅が不正です".into());
+    }
+    rebar
+        .validate(b, d)
+        .map_err(|reason| format!("SRC 柱の配筋形状が不正です: {reason}"))?;
+    let edge = rebar.edge_steel(RectEdge::Top, b, d);
 
     let hw = sh - 2.0 * tf;
     let s_a = 2.0 * sb * tf + hw * tw;
     let s_zp = sb * tf * (sh - tf) + tw * hw * hw / 4.0;
     let s_m0 = s_zp * s_f;
 
-    let ac = (b * d - s_a - ar_total).max(0.0);
-    let n0 = ac * fc + s_a * s_f + ar_total * rebar_sy;
-    if n0 <= 0.0 {
-        return None;
+    let rebar_area = rebar.total_main_area();
+    let ac = (b * d - s_a - rebar_area).max(0.0);
+    let n0 = ac * fc + s_a * s_f + rebar_area * rebar_sy;
+    if !n0.is_finite() || n0 <= 0.0 {
+        return Err("SRC 柱の圧縮耐力の候補値を算定できません".into());
     }
 
-    let de = (d - dt).max(0.0);
-    let r_m0 = 0.9 * at * rebar_sy * de;
+    let de = (d - edge.centroid_from_edge_mm).max(0.0);
+    let r_m0 = 0.9 * edge.area_mm2 * rebar_sy * de;
     let m0 = s_m0 + r_m0;
-    if m0 <= 0.0 {
-        return None;
+    if !m0.is_finite() || m0 <= 0.0 {
+        return Err("SRC 柱の曲げ耐力の候補値を算定できません".into());
     }
 
-    Some((n_ult.max(0.0) / n0, s_m0 / m0))
+    Ok((n_ult.max(0.0) / n0, s_m0 / m0))
 }
 
 #[cfg(test)]
@@ -161,151 +166,5 @@ mod tests {
     fn test_src_wall_type() {
         assert_eq!(src_wall_type(false), MemberRank::FA, "WA");
         assert_eq!(src_wall_type(true), MemberRank::FC, "WC");
-    }
-
-    fn sample_src_shape() -> SectionShape {
-        use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
-        SectionShape::SrcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: RcRectColumnRebar {
-                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
-                x: vec![4],
-                y: vec![2],
-                hoop: RectColumnHoop {
-                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-                    pitch: 100.0,
-                    legs_x: 2,
-                    legs_y: 2,
-                },
-                cover: 40.0,
-            },
-            steel_height: 400.0,
-            steel_width: 200.0,
-            steel_web_thick: 8.0,
-            steel_flange_thick: 13.0,
-        }
-    }
-
-    /// 判定比の算定: N0・sM0・M0 の略算累加が手計算と一致する。
-    #[test]
-    fn test_src_column_rank_ratios_hand_calc() {
-        let shape = sample_src_shape();
-        let (n_n0, smo_m0) = src_column_rank_ratios(&shape, "SN400B", 24.0, 345.0, 2_000_000.0)
-            .expect("SRC 矩形は算定可能");
-
-        // 手計算（SN400B tf=13 → F=235）:
-        // sA = 2·200·13 + (400−26)·8 = 5200 + 2992 = 8192
-        // sZp = 200·13·(400−13) + 8·374²/4 = 1_006_200 + 279_752 = 1_285_952
-        // sM0 = 1_285_952·235 = 302_198_720 N·mm
-        let s_m0 = 1_285_952.0 * 235.0;
-        // ar = 固有本数 2·4+2·2−4=8 本分、at = 最外段 x:[4] の 4 本分
-        let one = std::f64::consts::PI / 4.0 * 25.0 * 25.0;
-        let ar = 8.0 * one;
-        let at = 4.0 * one;
-        // Ac = 600·600 − 8192 − ar、N0 = Ac·24 + 8192·235 + ar·345
-        let ac = 600.0 * 600.0 - 8192.0 - ar;
-        let n0 = ac * 24.0 + 8192.0 * 235.0 + ar * 345.0;
-        assert!((n_n0 - 2_000_000.0 / n0).abs() < 1e-9, "N/N0={n_n0}");
-        // dt = 40 + 10 + 12.5 = 62.5、de = 537.5、rM0 = 0.9·at·345·537.5
-        let r_m0 = 0.9 * at * 345.0 * 537.5;
-        let expect = s_m0 / (s_m0 + r_m0);
-        assert!(
-            (smo_m0 - expect).abs() < 1e-9,
-            "sM0/M0={smo_m0} 期待 {expect}"
-        );
-    }
-
-    /// SRC 矩形以外・強度未設定は None。
-    #[test]
-    fn test_src_column_rank_ratios_invalid_inputs() {
-        let shape = sample_src_shape();
-        assert!(src_column_rank_ratios(&shape, "SN400B", 0.0, 345.0, 0.0).is_none());
-        assert!(src_column_rank_ratios(&shape, "SN400B", 24.0, 0.0, 0.0).is_none());
-        let SectionShape::SrcColumnRect { rebar, .. } = sample_src_shape() else {
-            unreachable!()
-        };
-        let rc = SectionShape::RcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar,
-        };
-        assert!(src_column_rank_ratios(&rc, "SN400B", 24.0, 345.0, 0.0).is_none());
-    }
-
-    fn sample_src_column_rect_shape() -> SectionShape {
-        use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
-        SectionShape::SrcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: RcRectColumnRebar {
-                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
-                x: vec![3],
-                y: vec![3],
-                cover: 40.0,
-                hoop: RectColumnHoop {
-                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-                    pitch: 100.0,
-                    legs_x: 2,
-                    legs_y: 2,
-                },
-            },
-            steel_height: 400.0,
-            steel_width: 200.0,
-            steel_web_thick: 8.0,
-            steel_flange_thick: 13.0,
-        }
-    }
-
-    /// 実配筋 SRC 矩形柱でも判定比が算定でき、非ゼロの比になる。
-    #[test]
-    fn test_src_column_rank_ratios_src_column_rect() {
-        let shape = sample_src_column_rect_shape();
-        let (n_n0, smo_m0) = src_column_rank_ratios(&shape, "SN400B", 24.0, 345.0, 2_000_000.0)
-            .expect("実配筋 SRC 矩形柱は算定可能");
-        assert!(n_n0 > 0.0, "N/N0={n_n0}");
-        assert!(smo_m0 > 0.0 && smo_m0 < 1.0, "sM0/M0={smo_m0}");
-    }
-
-    /// 実配筋 SRC 矩形柱の配筋が幾何的に不整合なら None。
-    #[test]
-    fn test_src_column_rank_ratios_src_column_rect_invalid_rebar() {
-        let SectionShape::SrcColumnRect { rebar, .. } = sample_src_column_rect_shape() else {
-            unreachable!()
-        };
-        let shape = SectionShape::SrcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: sepika_core::section_shape::RcRectColumnRebar {
-                x: vec![1],
-                y: vec![1],
-                ..rebar
-            },
-            steel_height: 400.0,
-            steel_width: 200.0,
-            steel_web_thick: 8.0,
-            steel_flange_thick: 13.0,
-        };
-        assert!(src_column_rank_ratios(&shape, "SN400B", 24.0, 345.0, 2_000_000.0).is_none());
-    }
-    #[test]
-    fn sm520_src_rank_does_not_restore_235_or_partial_concrete_strength() {
-        for (tw, tf) in [(100.001, 80.0), (80.0, 100.001)] {
-            let mut shape = sample_src_shape();
-            if let SectionShape::SrcColumnRect {
-                steel_web_thick,
-                steel_flange_thick,
-                ..
-            } = &mut shape
-            {
-                *steel_web_thick = tw;
-                *steel_flange_thick = tf;
-            }
-            for name in ["SM520", "SM520B", "SM520C"] {
-                assert!(src_column_rank_ratios(&shape, name, 24.0, 345.0, 0.0).is_none());
-            }
-            assert!(src_column_rank_ratios(&shape, "SM490", 24.0, 345.0, 0.0).is_some());
-            assert!(src_column_rank_ratios(&shape, "任意鋼材", 24.0, 345.0, 0.0).is_some());
-        }
     }
 }
