@@ -108,6 +108,33 @@ fn shape_of(sec: &Section) -> (ShapeCategory, f64, f64) {
     (classify_shape(&sec.name), t, t)
 }
 
+/// 断面検定上、上下対称のH形鋼として扱う断面か。
+pub fn is_symmetric_h_section(sec: &Section) -> bool {
+    shape_of(sec).0 == ShapeCategory::H
+        && !sec
+            .shape
+            .as_ref()
+            .is_some_and(SectionShape::is_asymmetric_built_h)
+}
+
+/// 柱の両実材端間の長さ [mm]。端位置または偏心を解決できない場合は `None`。
+pub fn column_physical_length_mm(
+    model: &sepika_core::model::Model,
+    elem: &sepika_core::model::ElementData,
+) -> Option<f64> {
+    let ends = match model.primary_frame_axis_ends(elem).ok()? {
+        Some(ends) => ends,
+        None => {
+            let [i, j] = elem.nodes.as_slice() else {
+                return None;
+            };
+            [model.node(*i)?.coord, model.node(*j)?.coord]
+        }
+    };
+    let length_mm = sepika_core::geom::vec3::dist(ends[0], ends[1]);
+    (length_mm.is_finite() && length_mm > 0.0).then_some(length_mm)
+}
+
 /// せん断有効断面積 `(Ay, Az)` [mm²]（強軸 Qy・弱軸 Qz。梁・柱で共用の単一定義）。
 /// Box の寸法と外角半径は検定入口で適用可能と確認済みであること。
 fn shear_area_2d(shape: ShapeCategory, sec: &Section, tf: f64, tw: f64) -> (f64, f64) {
@@ -302,11 +329,48 @@ impl DesignCheck for SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
-        self.check_section(forces, sec, mat, ctx, false)
+        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx);
+        let mut outcomes = crate::member_design_check::strength_outcomes(outcome, incomplete);
+        let mut first = outcomes.next().expect("強度検定結果は少なくとも1件");
+        if let (CheckOutcome::Checked(result), Some(incomplete)) = (&mut first, incomplete) {
+            result.basis.push('。');
+            result.basis.push_str(incomplete);
+        }
+        first
     }
 }
 
 impl SteelDesign {
+    /// 一般H形鋼柱の横座屈長さが未確定のとき、未算定理由と独立した不適合を別の行で返す。
+    pub fn check_outcomes(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> impl Iterator<Item = CheckOutcome> {
+        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx);
+        crate::member_design_check::strength_outcomes(outcome, incomplete)
+    }
+
+    pub(crate) fn check_with_incomplete(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> (CheckOutcome, Option<&'static str>) {
+        let lateral_buckling = column::ColumnLateralBuckling::resolve(ctx, sec, forces);
+        let incomplete = match lateral_buckling {
+            column::ColumnLateralBuckling::Unconfirmed(reason) => Some(reason),
+            _ => None,
+        };
+        (
+            self.check_section(forces, sec, mat, ctx, false, lateral_buckling),
+            incomplete,
+        )
+    }
+
     /// 上下非対称組立H形鋼柱の圧縮・強軸曲げに対し、上下縁の支配比と併記する未算定理由を返す。
     /// 検定比は座屈等の未算定時には下限となり、1以下でも適合を確定できない。
     pub fn asymmetric_column_section_check(
@@ -360,7 +424,14 @@ impl SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
-        self.check_section(forces, sec, mat, ctx, true)
+        self.check_section(
+            forces,
+            sec,
+            mat,
+            ctx,
+            true,
+            column::ColumnLateralBuckling::OutsideScope,
+        )
     }
 
     fn check_section(
@@ -370,6 +441,7 @@ impl SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
         secondary_post: bool,
+        lateral_buckling: column::ColumnLateralBuckling,
     ) -> CheckOutcome {
         let torsion_reason = steel_torsion_reason(forces, sec);
         let primary_column_or_girder =
@@ -611,9 +683,25 @@ impl SteelDesign {
             MemberKind::Girder => {
                 beam::check_beam(forces, sec, mat, ctx, f, term, lambda).map(CheckOutcome::Checked)
             }
-            MemberKind::Column => {
-                column::check_column(forces, sec, mat, ctx, f, lambda, h_combined_reason)
-            }
+            MemberKind::Column => column_allowables(
+                sec,
+                mat,
+                ctx,
+                f,
+                Some(lambda),
+                lateral_buckling.length_mm(ctx.length),
+            )
+            .map(|allowables| {
+                column::check_column(
+                    forces,
+                    sec,
+                    ctx,
+                    allowables,
+                    lambda,
+                    h_combined_reason,
+                    &lateral_buckling,
+                )
+            }),
             MemberKind::Brace => Ok(CheckOutcome::Checked(brace::check_brace(
                 forces, sec, mat, ctx, f, term, lambda,
             ))),
@@ -1037,6 +1125,21 @@ pub(crate) mod test_support {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{Material, MaterialCategory, Section};
     use sepika_core::section_shape::SectionShape;
+
+    pub fn confirmed_end_supports() -> sepika_core::model::SteelDesignAttr {
+        sepika_core::model::SteelDesignAttr {
+            elem: sepika_core::ids::ElemId(0),
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            column_lateral_buckling_end_supports_confirmed: true,
+            lk_y_direct: None,
+            lk_z_direct: None,
+            c_direct: None,
+        }
+    }
 
     pub(crate) fn mat(name: &str) -> Material {
         Material {

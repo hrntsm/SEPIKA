@@ -750,6 +750,8 @@ fn draw_peak_check(
         );
     }
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
+    let steel_column = structure == StructureKind::S && kind == MemberKind::Column && !has_brb_attr;
+    let symmetric_h_column = steel_column && sepika_design_jp::steel::is_symmetric_h_section(sec);
     let torsion_reason = |forces: &MemberForcesAt| {
         if has_brb_attr {
             None
@@ -868,6 +870,9 @@ fn draw_peak_check(
         term: LoadTerm::Short,
         kind,
         length,
+        column_physical_length_mm: symmetric_h_column
+            .then(|| sepika_design_jp::steel::column_physical_length_mm(model, elem))
+            .flatten(),
         lk_y,
         lk_z,
         clear_length: Some(clear_span),
@@ -878,15 +883,16 @@ fn draw_peak_check(
         steel_material: app.core.model.element_steel_material(elem).cloned(),
         steel_attr: attr
             .filter(|_| {
-                structure == StructureKind::S
-                    && kind == MemberKind::Column
-                    && matches!(
-                        sec.shape,
-                        Some(sepika_core::section_shape::SectionShape::SteelBuiltH { .. })
-                    )
+                symmetric_h_column
+                    || (structure == StructureKind::S
+                        && kind == MemberKind::Column
+                        && matches!(
+                            sec.shape,
+                            Some(sepika_core::section_shape::SectionShape::SteelBuiltH { .. })
+                        ))
             })
             .map(|attr| sepika_core::model::SteelDesignAttr {
-                // 欠損の適用判定のために属性を渡すが、簡易検定のCは既存の自動算定を使う。
+                // 簡易検定のCには直接指定を適用しない。
                 c_direct: None,
                 ..attr.clone()
             }),
@@ -902,6 +908,7 @@ fn draw_peak_check(
         Axial,
         Moment,
     }
+    let mut lateral_detail_shown = false;
     let mut draw_checks =
         |ui: &mut egui::Ui,
          forces: &MemberForces,
@@ -966,6 +973,17 @@ fn draw_peak_check(
                     } else {
                         draw_outcome_row(ui, pos, outcome);
                     }
+                    match outcome {
+                        CheckOutcome::Checked(result)
+                            if symmetric_h_column
+                                && !lateral_detail_shown
+                                && !result.detail.is_empty() =>
+                        {
+                            ui.label(&result.detail);
+                            lateral_detail_shown = true;
+                        }
+                        _ => {}
+                    }
                 };
                 if src_column {
                     for outcome in sepika_design_jp::SrcDesign.check_outcomes(
@@ -975,6 +993,12 @@ fn draw_peak_check(
                         &ctx,
                         missing_src_gravity,
                     ) {
+                        draw_outcome(&outcome);
+                    }
+                } else if symmetric_h_column {
+                    for outcome in
+                        sepika_design_jp::SteelDesign.check_outcomes(&mfa, sec, mat, &ctx)
+                    {
                         draw_outcome(&outcome);
                     }
                 } else {
@@ -1190,8 +1214,100 @@ fn draw_labeled_outcome_row(
 mod signed_q0_acceptance_tests;
 
 #[cfg(test)]
+#[path = "../../../sepika-design-jp/tests/fixtures/steel_column_lateral_buckling_model.rs"]
+mod steel_column_lateral_buckling_input;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn time_history_detail_reports_eccentric_h_column_buckling_length_and_status() {
+        use sepika_solver::dynamic::timehistory::{AxialForcePeaks, ResponseResult};
+        use steel_column_lateral_buckling_input::{column, moments};
+
+        for (offset_mm, confirmed, count, length_text, outcome_text) in [
+            (0.0, true, Some(0), Some("lb=3000 mm"), "検定比 0.974 (OK)"),
+            (500.0, true, None, Some("lb=3500 mm"), "検定比 1.039 (NG)"),
+            (500.0, false, Some(0), None, "中間横補剛なしが未確認"),
+            (500.0, true, Some(1), None, "中間横補剛が入力されています"),
+        ] {
+            let mut model = column(offset_mm, confirmed);
+            model.steel_design_attrs[0].lateral_brace_count = count;
+            let id = model.elements[0].id;
+            let mut app = App::default();
+            assert!(app.load_model(model));
+            let times = vec![0.0, 1.0];
+            let forces = moments(215e6);
+            app.core.scoped.results = Some(crate::app::ResultsBundle {
+                time_history: Some(ResponseResult {
+                    wall_capacities: Vec::new(),
+                    rc_wall_shear_method: Default::default(),
+                    time: times.clone(),
+                    peak_disp: Vec::new(),
+                    story_drift_angle: Vec::new(),
+                    history: Default::default(),
+                    recording: Some(ThRecording {
+                        frame_time: times,
+                        node_disp: vec![vec![[0.0; 6]; 2]; 2],
+                        member_forces: vec![vec![Some(forces.clone())]; 2],
+                        peak_member_forces: vec![Some(forces)],
+                        axial_force_peaks: vec![AxialForcePeaks::default()],
+                        ..Default::default()
+                    }),
+                    nonlinear: false,
+                    applied_long_term: false,
+                    non_converged_steps: 0,
+                }),
+                ..Default::default()
+            });
+            let view = super::super::ViewportState::default();
+            let output = egui::Context::default().run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 1200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| draw_th_detail_content_at(ui, &mut app, id, 0, &view),
+            );
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if let Some(length_text) = length_text {
+                assert!(
+                    labels.iter().any(|text| text.contains(length_text)
+                        && text.contains("両実材端で横移動・ねじれを拘束")),
+                    "{labels:?}"
+                );
+                for pos in ["ξ=0.00:", "ξ=0.50:", "ξ=1.00:"] {
+                    assert!(
+                        labels.windows(2).any(|row| row == [pos, outcome_text]),
+                        "{labels:?}"
+                    );
+                }
+            } else {
+                assert!(
+                    labels.iter().any(|text| text.contains(outcome_text)),
+                    "{labels:?}"
+                );
+                assert!(
+                    !labels.iter().any(|text| text.starts_with("検定比 ")),
+                    "{labels:?}"
+                );
+                assert!(
+                    !labels.iter().any(|text| text.contains("採用横座屈長さ")),
+                    "{labels:?}"
+                );
+            }
+        }
+    }
 
     fn peak_check_text(app: &App, index: usize, forces: [f64; 6]) -> String {
         let mut peak_member_forces = vec![None; index + 1];

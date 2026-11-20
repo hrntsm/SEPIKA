@@ -410,10 +410,18 @@ fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
     app.run_linear_static(LoadCaseId(0));
     let results = app.current_design_results().unwrap();
     let csv = crate::summary::build_report_csv(&app);
-    for position in &results.member_checks[0].positions {
-        let CheckOutcome::Checked(result) = &position.outcome else {
-            panic!("{:?}", position.outcome);
+    let positions = &results.member_checks[0].positions;
+    assert_eq!(positions.len(), 6);
+    for pair in positions.chunks_exact(2) {
+        let [checked, skipped] = pair else {
+            panic!("{pair:?}");
         };
+        let CheckOutcome::Checked(result) = &checked.outcome else {
+            panic!("{:?}", checked.outcome);
+        };
+        assert_eq!(checked.xi, skipped.xi);
+        assert!(matches!(&skipped.outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("中間横補剛なしが未確認")));
         assert!(!result.ok(), "{result:?}");
         assert_eq!(result.components.len(), 1);
         assert_eq!(
@@ -422,7 +430,7 @@ fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
         );
         assert!(
             csv.lines()
-                .any(|line| line.starts_with(&format!("0,{:.3},", position.xi))
+                .any(|line| line.starts_with(&format!("0,{:.3},", checked.xi))
                     && line.contains(",NG,")
                     && line.contains("同一点の組合せ応力度は未算定")),
             "{csv}"

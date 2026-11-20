@@ -537,9 +537,28 @@ mod tests {
 
     #[test]
     fn h_column_combination_reason_reaches_mcp_design_job_summary() {
-        let run = |axial_n, strong_moment_nmm, weak_shear_n| {
-            let model =
+        let run = |axial_n, strong_moment_nmm, weak_shear_n, confirmed_end_supports| {
+            let mut model =
                 steel_h_column_combined_input::cantilever(axial_n, strong_moment_nmm, weak_shear_n);
+            if confirmed_end_supports {
+                use sepika_core::dof::Dof;
+                model.nodes[1].restraint.set_fixed(Dof::Uy);
+                model.nodes[1].restraint.set_fixed(Dof::Rz);
+                model
+                    .steel_design_attrs
+                    .push(sepika_core::model::SteelDesignAttr {
+                        elem: model.elements[0].id,
+                        joint_flange_loss: 0.0,
+                        joint_web_loss: 0.0,
+                        scallop_web_loss: 0.0,
+                        lb_direct: None,
+                        lateral_brace_count: None,
+                        column_lateral_buckling_end_supports_confirmed: true,
+                        lk_y_direct: None,
+                        lk_z_direct: None,
+                        c_direct: None,
+                    });
+            }
             let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
                 &model,
                 &JobParams {
@@ -557,7 +576,7 @@ mod tests {
             (-77_000.0, 50e6, 2_000.0),
             (0.0, 50e6, 2_000.0),
         ] {
-            let summary = run(axial_n, strong_moment_nmm, weak_shear_n);
+            let summary = run(axial_n, strong_moment_nmm, weak_shear_n, false);
             assert_eq!(summary["n_checks"], 3, "{summary}");
             assert_eq!(summary["n_ng"], 0, "{summary}");
             assert!(summary["max_ratio"].is_null(), "{summary}");
@@ -577,12 +596,28 @@ mod tests {
                 );
             }
         }
-        let without_weak_shear = run(-77_000.0, 50e6, 0.0);
+        let without_weak_shear = run(-77_000.0, 50e6, 0.0, true);
         assert_eq!(without_weak_shear["n_checks"], 3, "{without_weak_shear}");
         assert_eq!(without_weak_shear["n_skipped"], 0, "{without_weak_shear}");
 
-        let axial_bending_ng = run(-77_000.0, 500e6, 365_000.0);
+        let unconfirmed_supports = run(-77_000.0, 50e6, 0.0, false);
+        assert_eq!(
+            unconfirmed_supports["n_skipped"], 3,
+            "{unconfirmed_supports}"
+        );
+        for row in unconfirmed_supports["member_skipped"].as_array().unwrap() {
+            assert!(
+                row["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("中間横補剛なしが未確認"),
+                "{row}"
+            );
+        }
+
+        let axial_bending_ng = run(-77_000.0, 500e6, 365_000.0, false);
         assert_eq!(axial_bending_ng["n_ng"], 3, "{axial_bending_ng}");
+        assert_eq!(axial_bending_ng["n_skipped"], 3, "{axial_bending_ng}");
         assert!(
             axial_bending_ng["max_ratio"].as_f64().unwrap() > 1.0,
             "{axial_bending_ng}"

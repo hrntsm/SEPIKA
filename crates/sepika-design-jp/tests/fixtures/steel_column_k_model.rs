@@ -105,6 +105,7 @@ pub fn portal(beam_i_ratio: f64) -> Model {
             scallop_web_loss: 0.0,
             lb_direct: None,
             lateral_brace_count: None,
+            column_lateral_buckling_end_supports_confirmed: false,
             lk_y_direct: None,
             lk_z_direct: Some(3000.0),
             c_direct: None,

@@ -353,8 +353,10 @@ pub struct DesignCtx {
     pub steel_material: Option<sepika_core::model::Material>,
     pub term: LoadTerm,
     pub kind: MemberKind,
-    /// 部材長 `[mm]`。座屈長さ lk・横座屈長さ lb の既定値として用いる。
+    /// 部材長 `[mm]`。通常の圧縮座屈長さ lk と鋼梁の横座屈長さ lb の既定値として用いる。
     pub length: f64,
+    /// 一般H形鋼柱の両実材端間の長さ [mm]。実材端を解決できない場合は `None`。
+    pub column_physical_length_mm: Option<f64>,
     /// フェース控除後の内法長 `[mm]`。
     /// None のときは [`Self::length`]（幾何長）で代替する。
     pub clear_length: Option<f64>,
@@ -404,7 +406,7 @@ pub struct DesignCtx {
     /// 中央部の許容曲げを `Ma = at·ft·j` のみとする判定に用いる。
     pub beam_has_slab: bool,
     /// S 造部材の断面検定属性（継手・スカラップ欠損率、横座屈長さ入力）。
-    /// `Model::steel_design_attrs` 由来。None は欠損なし・lb 自動。
+    /// `Model::steel_design_attrs` 由来。None は欠損なし。一般H形鋼柱の横座屈支点は未確認。
     pub steel_attr: Option<SteelDesignAttr>,
     /// 鋼材の許容曲げ応力度 fb の算定基準。既定は `Asd2019`。
     pub steel_fb_basis: SteelFbBasis,
@@ -419,6 +421,7 @@ impl Default for DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
             length: 0.0,
+            column_physical_length_mm: None,
             clear_length: None,
             lb: None,
             lk_y: None,

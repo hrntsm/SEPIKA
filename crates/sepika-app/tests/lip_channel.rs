@@ -252,6 +252,7 @@ fn lip_app_with_direct_buckling_length(length_mm: f64) -> App {
             scallop_web_loss: 0.0,
             lb_direct: None,
             lateral_brace_count: None,
+            column_lateral_buckling_end_supports_confirmed: false,
             lk_y_direct: Some(length_mm),
             lk_z_direct: Some(length_mm),
             c_direct: None,

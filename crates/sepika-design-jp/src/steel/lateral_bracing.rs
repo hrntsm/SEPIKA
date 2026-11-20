@@ -753,6 +753,7 @@ mod tests {
             .push(sepika_core::model::SteelDesignAttr {
                 elem: ElemId(0),
                 lateral_brace_count: Some(100),
+                column_lateral_buckling_end_supports_confirmed: false,
                 joint_flange_loss: 0.0,
                 joint_web_loss: 0.0,
                 scallop_web_loss: 0.0,

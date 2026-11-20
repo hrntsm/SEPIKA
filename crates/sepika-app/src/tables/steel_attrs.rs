@@ -2,7 +2,7 @@
 //! 継手フランジ／ウェブ欠損率・スカラップ欠損率、横座屈長さ lb の直接入力、
 //! 等間隔横補剛本数、座屈長さ lk_y/lk_z の直接入力、横座屈修正係数 C の
 //! 直接入力）の編集 UI。
-//! 対象は `ElementKind::Beam` の部材と、`Fiber`・`MultiSpring` の CFT 柱。
+//! 対象は `ElementKind::Beam` の部材と、`Fiber`・`MultiSpring` の CFT柱・一般H形鋼柱。
 //! 編集は `sepika_edit::{SetSteelDesignAttr, RemoveSteelDesignAttr}` 経由
 //! （undo 対応）。空（すべて既定値）を適用した場合は削除として扱う
 //! （[`SteelDesignAttr::is_empty`]）。
@@ -12,7 +12,7 @@
 
 use crate::app::App;
 use sepika_core::ids::ElemId;
-use sepika_core::model::{ElementKind, FrameSectionUse, SteelDesignAttr};
+use sepika_core::model::{ElementData, ElementKind, FrameSectionUse, Model, SteelDesignAttr};
 use sepika_edit::{RemoveSteelDesignAttr, SetSteelDesignAttr};
 
 /// S造検定属性フォームのドラフト状態（GUI 専用）。
@@ -38,6 +38,7 @@ pub struct SteelAttrDraft {
     pub lb_end: String,
     /// 等間隔横補剛の本数の入力バッファ（空欄=なし）。
     pub lateral_brace_count: String,
+    pub column_lateral_buckling_end_supports_confirmed: bool,
     /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（空欄は未指定）。
     pub lk_y_direct: String,
     /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（空欄は未指定）。
@@ -71,10 +72,24 @@ impl SteelAttrDraft {
             .lateral_brace_count
             .map(|n| n.to_string())
             .unwrap_or_default();
+        self.column_lateral_buckling_end_supports_confirmed =
+            attr.column_lateral_buckling_end_supports_confirmed;
         self.lk_y_direct = attr.lk_y_direct.map(|v| v.to_string()).unwrap_or_default();
         self.lk_z_direct = attr.lk_z_direct.map(|v| v.to_string()).unwrap_or_default();
         self.c_direct = attr.c_direct.map(|v| format!("{v:.2}")).unwrap_or_default();
     }
+}
+
+fn is_symmetric_h_column(model: &Model, elem: &ElementData) -> bool {
+    let section = model.element_section(elem);
+    let material = model.element_material(elem).map(|mat| mat.category);
+    elem.kind.is_primary_frame_support()
+        && section.is_some_and(|sec| {
+            sec.frame_use == Some(FrameSectionUse::Column)
+                && sepika_design_jp::steel::is_symmetric_h_section(sec)
+        })
+        && sepika_core::structure_kind::structure_kind_of(section, material)
+            == sepika_core::structure_kind::StructureKind::S
 }
 
 /// 欠損率入力（βf/βw/αw共通）をパースする。空欄は 0（欠損なし）とする
@@ -196,9 +211,12 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         .iter()
         .filter(|e| match e.kind {
             ElementKind::Beam => true,
-            ElementKind::Fiber | ElementKind::MultiSpring => model
-                .element_section(e)
-                .is_some_and(|sec| sec.frame_use == Some(FrameSectionUse::Column) && sec.is_cft()),
+            ElementKind::Fiber | ElementKind::MultiSpring => {
+                is_symmetric_h_column(model, e)
+                    || model.element_section(e).is_some_and(|sec| {
+                        sec.frame_use == Some(FrameSectionUse::Column) && sec.is_cft()
+                    })
+            }
             _ => false,
         })
         .map(|e| e.id)
@@ -229,6 +247,9 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                     opt_len_desc(attr.lk_z_direct),
                     opt_c_desc(attr.c_direct),
                 ));
+                if attr.column_lateral_buckling_end_supports_confirmed {
+                    ui.label("柱の両実材端支持を確認済み");
+                }
                 if ui
                     .button("✏")
                     .on_hover_text("フォームへ読み込んで編集")
@@ -301,6 +322,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                 scallop_web_loss: 0.0,
                 lb_direct: None,
                 lateral_brace_count: None,
+                column_lateral_buckling_end_supports_confirmed: false,
                 lk_y_direct: None,
                 lk_z_direct: None,
                 c_direct: None,
@@ -345,7 +367,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         );
     })
     .response
-    .on_hover_text("3欄すべて空欄なら自動算定(等間隔横補剛本数、または部材長)。");
+    .on_hover_text("大梁用。3欄すべて空欄なら自動算定(等間隔横補剛本数、または部材長)。");
 
     ui.horizontal(|ui| {
         ui.label("等間隔横補剛本数:");
@@ -354,9 +376,26 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                 .desired_width(50.0),
         )
         .on_hover_text(
-            "空欄=補剛なし。lb 直接入力が空欄の場合、lb=部材長/(本数+1) の自動算定に用います。",
+            "大梁では lb を直接入力しない場合、部材長/(本数+1) を用います。空欄では部材長を用います。柱では本数から支持点を決めません。",
         );
     });
+
+    if app
+        .ui
+        .scoped
+        .steel_attr_draft
+        .elem
+        .and_then(|id| app.core.model.element(id))
+        .is_some_and(|elem| is_symmetric_h_column(&app.core.model, elem))
+    {
+        ui.checkbox(
+            &mut app.ui.scoped.steel_attr_draft.column_lateral_buckling_end_supports_confirmed,
+            "柱の両実材端で横移動・ねじれを拘束し、中間横補剛なし",
+        )
+        .on_hover_text(
+            "検定する荷重状態で圧縮側になる各フランジについて、両実材端で有効な拘束が成立することを確認してください。",
+        );
+    }
 
     ui.horizontal(|ui| {
         ui.label("座屈長さ lk_y(強軸)直接入力[mm]:");
@@ -462,6 +501,11 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                     scallop_web_loss,
                     lb_direct,
                     lateral_brace_count,
+                    column_lateral_buckling_end_supports_confirmed: app
+                        .ui
+                        .scoped
+                        .steel_attr_draft
+                        .column_lateral_buckling_end_supports_confirmed,
                     lk_y_direct,
                     lk_z_direct,
                     c_direct,
@@ -573,6 +617,79 @@ mod tests {
                 egui::Event::Text(text.into()),
             ],
         );
+    }
+
+    #[test]
+    fn general_h_column_support_confirmation_is_saved_and_invalidates_prior_design() {
+        const CONFIRM: &str = "柱の両実材端で横移動・ねじれを拘束し、中間横補剛なし";
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut model = crate::sample::portal_frame();
+            model.elements[0].kind = kind;
+            let mut app = App::default();
+            assert!(app.load_model(model));
+            app.core.scoped.results = Some(crate::app::ResultsBundle::default());
+            app.certify_design_fixture();
+            assert!(app.current_design_results().is_some());
+
+            let ctx = egui::Context::default();
+            click_text(&ctx, &mut app, "―");
+            click_text(&ctx, &mut app, "部材#0");
+            click_text(&ctx, &mut app, CONFIRM);
+            click_text(&ctx, &mut app, "✔ 適用");
+            let [attr] = app.core.model.steel_design_attrs.as_slice() else {
+                panic!("{:?}", app.core.model.steel_design_attrs);
+            };
+            assert!(attr.column_lateral_buckling_end_supports_confirmed);
+            assert!(app.core.scoped.staleness.design_stale);
+            assert!(app.current_design_results().is_none());
+
+            let path = std::env::temp_dir()
+                .join(format!("sepika-column-lb-{}.ovika", uuid::Uuid::new_v4()));
+            app.save_project_to(path.clone());
+            assert!(app.core.scoped.last_error.is_none());
+            let mut app = App::default();
+            app.open_project_from(path.clone());
+            std::fs::remove_file(path).unwrap();
+            assert!(app.core.scoped.last_error.is_none());
+            assert!(app.current_design_results().is_none());
+            assert!(
+                app.core.model.steel_design_attrs[0].column_lateral_buckling_end_supports_confirmed
+            );
+
+            let ctx = egui::Context::default();
+            click_text(&ctx, &mut app, "✏");
+            click_text(&ctx, &mut app, CONFIRM);
+            click_text(&ctx, &mut app, "✔ 適用");
+            assert!(app.core.model.steel_design_attrs.is_empty());
+        }
+    }
+
+    #[test]
+    fn column_end_support_input_is_unavailable_on_a_girder_or_cft_column() {
+        let mut app = App::default();
+        let ctx = egui::Context::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        click_text(&ctx, &mut app, "―");
+        click_text(&ctx, &mut app, "部材#2");
+        let assert_checkbox_absent = |app| {
+            assert!(!draw(&ctx, app, vec![]).shapes.iter().any(|s| {
+                matches!(&s.shape, egui::Shape::Text(text)
+                    if text.galley.text().contains("柱の両実材端で横移動・ねじれを拘束"))
+            }));
+        };
+        assert_checkbox_absent(&mut app);
+        assert!(
+            app.load_model(crate::app::cft_column_buckling_tests::input::cantilever(
+                false, 1000.0
+            ))
+        );
+        click_text(&ctx, &mut app, "―");
+        click_text(&ctx, &mut app, "部材#0");
+        assert_checkbox_absent(&mut app);
     }
 
     #[test]
@@ -745,6 +862,7 @@ mod tests {
                 scallop_web_loss: 0.005,
                 lb_direct,
                 lateral_brace_count: None,
+                column_lateral_buckling_end_supports_confirmed: false,
                 lk_y_direct: None,
                 lk_z_direct: None,
                 c_direct: Some(1.25),

@@ -58,6 +58,7 @@ fn column_flange_loss() -> SteelDesignAttr {
         scallop_web_loss: 0.0,
         lb_direct: None,
         lateral_brace_count: None,
+        column_lateral_buckling_end_supports_confirmed: false,
         lk_y_direct: None,
         lk_z_direct: None,
         c_direct: None,
