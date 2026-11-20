@@ -69,6 +69,7 @@ cargo test --locked -p sepika-design-jp --test inclined_column_eccentricity -- -
 
 - 片持ちの独立釣合いと、3柱剛床の独立剛性・純ねじりによる公開解析値を試験で照合する。現行の偏心率経路の相違は出力から再現できる。
 - 符号と層の柱頭側または切断面での物理力の選定は [#1674](https://github.com/hrntsm/SEPIKA/issues/1674)。部材荷重があるとi/jを反転したとき採用するi端断面が変わり、上表の反転結果をそのまま適用できない。分割・剛域・偏心付き斜め柱での切断位置、長期の材軸圧縮力で重みを付ける重心と鉛直負担との整合も未確認。
+  自立壁n倍法も同じ柱の水平剛性を使う。斜め柱を基準に含めた場合の壁の付加剛性とRsへの影響は本試験で定量していない。3次元質点系と「柱Ki」を指定した平面質点系にも同じ符号処理が入る。これらの質点系の生成や静的・動的解析結果への影響は、実行により確認していない。[Rs評価用再解析](../../crates/sepika-job/src/stiffness_ratio.rs)、[質点系の生成](../../crates/sepika-job/src/lumped_mass.rs)
 - X/Y連成を含む剛心・ねじり剛性と偏心率の評価条件は [#1675](https://github.com/hrntsm/SEPIKA/issues/1675)。非剛床、複数層、壁や付加ばねを含む架構の扱い、結果の設計採否と適用外診断は未確認。
 - 微小な変位差は [#1595](https://github.com/hrntsm/SEPIKA/issues/1595)、柱の連なりは [#1640](https://github.com/hrntsm/SEPIKA/issues/1640)、ファイバー・マルチスプリング柱は [#1534](https://github.com/hrntsm/SEPIKA/issues/1534) を参照する。層間変形角の評価は [#490](https://github.com/hrntsm/SEPIKA/issues/490) の範囲。実験Validation、実架構での法令適合、手動GUI・CSV確認は実施していない。
 
