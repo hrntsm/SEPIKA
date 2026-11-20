@@ -210,7 +210,11 @@ fn src_shear_check(
     mode: SrcShearMode<'_>,
     term: LoadTerm,
 ) -> SrcShearResult {
-    let alpha = shear_alpha(m_for_alpha, q_for_alpha, rd, alpha_max);
+    let alpha = if term == LoadTerm::Short && matches!(mode, SrcShearMode::Column { .. }) {
+        1.0
+    } else {
+        shear_alpha(m_for_alpha, q_for_alpha, rd, alpha_max)
+    };
     let q = q_signed.abs();
 
     let pw_cap = 0.006;
@@ -307,7 +311,7 @@ impl DesignCheck for SrcDesign {
 }
 
 impl SrcDesign {
-    /// 検定位置の結果を返す。短期地震時のSRC柱が未算定の場合、理由と、独立に確定した軸力・曲げの不適合を別の結果で返す。
+    /// 検定位置の結果を返す。短期地震時のSRC柱が未算定の場合、理由と、独立に確定した不適合を別の結果で返す。
     /// 未算定を伴う位置で、適合を示す検定比は返さない。
     pub fn check_outcomes(
         &self,

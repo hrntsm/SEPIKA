@@ -358,6 +358,92 @@ fn column_qd_never_reports_compliance_for_nonfinite_axial_force_or_moments() {
 }
 
 #[test]
+fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinite() {
+    // #953の独立例にそろえ、柱頭・柱脚ともに圧縮3,300 kNを用いる。
+    let mut ctx = context([937_029_839.646_543_6; 2], [753_887_231.892_659_7; 2]);
+    ctx.seismic_qd.as_mut().unwrap().long_at[0].0 = 0.5;
+    let sec = section();
+    let concrete = material("Fc24", MaterialCategory::Concrete, Some(24.0), None);
+    let f = MemberForcesAt {
+        pos: 0.5,
+        ..forces(3_300_000.0)
+    };
+    let CheckOutcome::Checked(result) = check(&sec, &f, &ctx) else {
+        panic!("両方向の曲げが有限");
+    };
+    let expected = result
+        .components
+        .iter()
+        .find(|c| c.kind == CheckKind::Shear)
+        .unwrap();
+    close(expected.ratio, 1.120_947_853, 1e-9);
+    close(
+        value(expected, "Qy方向", "rQD="),
+        468_514.919_823_271_8,
+        1e-6,
+    );
+    close(
+        value(expected, "Qy方向", "rQA="),
+        417_963.171_748_244_4,
+        1e-6,
+    );
+
+    let unknown_moment = MemberForcesAt { my: f64::NAN, ..f };
+    assert_skipped(check(&sec, &unknown_moment, &ctx), "モーメントMy");
+    let rows: Vec<_> = SrcDesign
+        .check_outcomes(&unknown_moment, &sec, &concrete, &ctx)
+        .collect();
+    assert!(
+        matches!(
+            rows.as_slice(),
+            [CheckOutcome::Checked(known), CheckOutcome::Skipped { reason }]
+                if known.components.as_slice() == std::slice::from_ref(expected)
+                    && reason.contains("モーメントMy")
+        ),
+        "{rows:?}"
+    );
+
+    let unknown_axial = MemberForcesAt { n: f64::NAN, ..f };
+    let rows: Vec<_> = SrcDesign
+        .check_outcomes(&unknown_axial, &sec, &concrete, &ctx)
+        .collect();
+    assert!(
+        matches!(rows.as_slice(), [CheckOutcome::Skipped { reason }]
+        if reason.contains("軸力N")),
+        "{rows:?}"
+    );
+
+    let mut invalid_qa = sec.clone();
+    let Some(SectionShape::SrcColumnRect {
+        steel_height,
+        steel_flange_thick,
+        ..
+    }) = &mut invalid_qa.shape
+    else {
+        unreachable!()
+    };
+    *steel_height = 2.0 * *steel_flange_thick;
+    let rows: Vec<_> = SrcDesign
+        .check_outcomes(&unknown_moment, &invalid_qa, &concrete, &ctx)
+        .collect();
+    assert!(
+        matches!(rows.as_slice(), [CheckOutcome::Skipped { reason }]
+        if reason.contains("モーメントMy") && reason.contains("材料別許容せん断力")),
+        "{rows:?}"
+    );
+
+    ctx.src_column_seismic_bending = None;
+    let rows: Vec<_> = SrcDesign
+        .check_outcomes(&unknown_moment, &sec, &concrete, &ctx)
+        .collect();
+    assert!(
+        matches!(rows.as_slice(), [CheckOutcome::Skipped { reason }]
+        if reason.contains("モーメントMy") && reason.contains("柱頭・柱脚の軸力")),
+        "{rows:?}"
+    );
+}
+
+#[test]
 fn qd1_rejects_invalid_demand_inputs_and_allowables() {
     let mut ctx = context([0.0; 2], [0.0; 2]);
     let f = forces(0.0);

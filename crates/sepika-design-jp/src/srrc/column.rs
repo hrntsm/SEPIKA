@@ -422,24 +422,23 @@ pub(crate) fn src_column_check(
             ),
         }],
     };
-    let (demand_n, demand_reason) = match src_column_seismic_qd(forces, ctx, missing_gravity) {
-        Ok(demand_n) => (demand_n, None),
-        Err(reason) => (None, Some(reason)),
+    let incomplete_reason = |shear_reason: Option<&str>| {
+        let reason = [
+            invalid_z.then_some("組合せの曲げモーメントMzが非有限です"),
+            invalid_y.then_some("組合せの曲げモーメントMyが非有限です"),
+            invalid_ratio.then_some("軸力・曲げの検定比が非有限です"),
+            shear_reason,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("。");
+        (!reason.is_empty()).then(|| format!("SRC柱検定: {reason}"))
     };
-    let incomplete = [
-        invalid_z.then_some("組合せの曲げモーメントMzが非有限です"),
-        invalid_y.then_some("組合せの曲げモーメントMyが非有限です"),
-        invalid_ratio.then_some("軸力・曲げの検定比が非有限です"),
-        demand_reason.as_deref(),
-    ];
-    if incomplete.iter().any(Option::is_some) {
-        let reason = incomplete
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("。");
-        return (result, Some(format!("SRC柱検定: {reason}")));
-    }
+    let demand_n = match src_column_seismic_qd(forces, ctx, missing_gravity) {
+        Ok(demand_n) => demand_n,
+        Err(reason) => return (result, incomplete_reason(Some(&reason))),
+    };
 
     let sd_flange = (steel_height - steel_flange_thick).max(0.0);
     let beta_z = if props_z.b * props_z.j > 1e-9 {
@@ -508,11 +507,11 @@ pub(crate) fn src_column_check(
     let (ratio, detail) = if demand_n.is_some() {
         let (ratio_z, detail_z) = match seismic_shear_detail("Qy", &shear_z) {
             Ok(value) => value,
-            Err(reason) => return (result, Some(reason)),
+            Err(reason) => return (result, incomplete_reason(Some(&reason))),
         };
         let (ratio_y, detail_y) = match seismic_shear_detail("Qz", &shear_y) {
             Ok(value) => value,
-            Err(reason) => return (result, Some(reason)),
+            Err(reason) => return (result, incomplete_reason(Some(&reason))),
         };
         result.basis.push_str(" + 地震時せん断曲げ方式（付1.4-1）");
         (ratio_z.max(ratio_y), format!("{detail_z}, {detail_y}"))
@@ -532,7 +531,7 @@ pub(crate) fn src_column_check(
         ratio,
         detail,
     });
-    (result, None)
+    (result, incomplete_reason(None))
 }
 
 fn seismic_shear_detail(direction: &str, shear: &SrcShearResult) -> Result<(f64, String), String> {
@@ -541,19 +540,17 @@ fn seismic_shear_detail(direction: &str, shear: &SrcShearResult) -> Result<(f64,
         .all(|qa| qa.is_finite() && *qa > 0.0)
     {
         return Err(format!(
-            "SRC柱検定: {direction}方向の材料別許容せん断力には有限な正値が必要です"
+            "{direction}方向の材料別許容せん断力には有限な正値が必要です"
         ));
     }
     let steel_ratio = shear.s_q / shear.s_qa;
     let rc_ratio = shear.r_q / shear.r_qa;
     if !steel_ratio.is_finite() || !rc_ratio.is_finite() {
-        return Err(format!(
-            "SRC柱検定: {direction}方向の材料別せん断検定比が非有限です"
-        ));
+        return Err(format!("{direction}方向の材料別せん断検定比が非有限です"));
     }
     if (shear.s_q > 0.0 && steel_ratio == 0.0) || (shear.r_q > 0.0 && rc_ratio == 0.0) {
         return Err(format!(
-            "SRC柱検定: {direction}方向の材料別せん断検定比が数値範囲外です"
+            "{direction}方向の材料別せん断検定比が数値範囲外です"
         ));
     }
     Ok((
