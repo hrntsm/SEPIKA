@@ -468,6 +468,42 @@ fn src_time_history_reports_invalid_fiber_steel_fy() {
 }
 
 #[test]
+fn src_time_history_rejects_nonsteel_fiber_materials() {
+    for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+        for (name, fy, category, category_label) in [
+            (
+                "独自H",
+                Some(235.0),
+                MaterialCategory::Concrete,
+                "コンクリート",
+            ),
+            ("SN400B", None, MaterialCategory::Rebar, "鉄筋"),
+        ] {
+            let mut model = restrained_member(frame_use, 10.0, 12.0);
+            model.materials[3].name = name.into();
+            model.materials[3].fy = fy;
+            model.materials[3].category = category;
+            let error = match run_time_history(&mut model) {
+                Err(SolveError::InvalidInput(error)) => error,
+                _ => panic!(
+                    "{frame_use:?}: 内蔵鉄骨の材料区分が {category_label} なら入力エラーが必要です"
+                ),
+            };
+            for expected in [
+                "部材 ID 0",
+                "内蔵鉄骨",
+                name,
+                "材料区分",
+                category_label,
+                "鋼材",
+            ] {
+                assert!(error.contains(expected), "{frame_use:?}: {error}");
+            }
+        }
+    }
+}
+
+#[test]
 fn src_time_history_accepts_assigned_fiber_steel_fy() {
     for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
         for (name, fy) in [("独自H", Some(235.0)), ("SN400B", None)] {
