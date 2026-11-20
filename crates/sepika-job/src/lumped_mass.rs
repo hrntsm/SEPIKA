@@ -431,7 +431,12 @@ fn rigid_floor_disp(
 }
 
 #[cfg(test)]
+#[path = "../tests/fixtures/bending_shear_model.rs"]
+mod bending_shear_model;
+
+#[cfg(test)]
 mod tests {
+    use super::bending_shear_model::two_story_column_model;
     use super::*;
     use sepika_core::model::Model;
 
@@ -479,109 +484,6 @@ mod tests {
         let err =
             build_lumped_mass(input(&model, StickDim::Spatial, SeismicDir::X, false)).unwrap_err();
         assert!(err.to_string().contains("EX"), "{err}");
-    }
-
-    pub(super) fn two_story_column_model() -> Model {
-        use sepika_core::dof::Dof6Mask;
-        use sepika_core::ids::{ElemId, NodeId, StoryId};
-        use sepika_core::model::{
-            Constraint, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse,
-            LocalAxis, Node, Section, Story,
-        };
-        let mut model = Model::default();
-        let coords = [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0], [0.0, 0.0, 6000.0]];
-        for (i, c) in coords.iter().enumerate() {
-            model.nodes.push(Node {
-                id: NodeId(i as u32),
-                coord: *c,
-                restraint: if i == 0 {
-                    Dof6Mask::FIXED
-                } else {
-                    Dof6Mask::FREE
-                },
-                mass: None,
-                story: Some(StoryId(i as u32)),
-                support_spring: None,
-            });
-        }
-        for i in 0..3u32 {
-            model.stories.push(Story {
-                wall_weights: Vec::new(),
-                id: StoryId(i),
-                name: format!("{}F", i + 1),
-                elevation: Some(coords[i as usize][2]),
-                sl_offset_mm: Some(0.0),
-                source_story: None,
-                node_ids: vec![NodeId(i)],
-                seismic_weight: if i == 0 {
-                    None
-                } else {
-                    Some(f64::from(3 - i) * 10.0 * GRAVITY_MM_S2)
-                },
-                weight_override: None,
-                structure: Default::default(),
-                level_kind: Default::default(),
-                dynamic_mass: Some(sepika_core::model::StoryDynamicMass {
-                    horizontal_inertia_t_mm2: [0.0; 3],
-                    mass_equiv_weight_n: f64::from(3 - i) * 10.0 * GRAVITY_MM_S2,
-                    lumped_mass: None,
-                    center_xy_mm: [f64::from(i), 0.0],
-                    inertia_t_mm2: 1000.0,
-                }),
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
-            });
-        }
-        model.sections.push(Section {
-            frame_use: Some(FrameSectionUse::Column),
-            id: sepika_core::ids::SectionId(0),
-            name: "column".into(),
-            area: 1.0,
-            iy: 1.0,
-            iz: 1.0,
-            j: 1.0,
-            depth: 1.0,
-            width: 1.0,
-            as_y: 1.0,
-            as_z: 1.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: None,
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        });
-        for i in 0..2u32 {
-            model.elements.push(ElementData {
-                id: ElemId(i),
-                kind: ElementKind::Beam,
-                nodes: [NodeId(i), NodeId(i + 1)].into_iter().collect(),
-                section: Some(sepika_core::ids::SectionId(0)),
-                local_axis: LocalAxis {
-                    ref_vector: [0.0, 1.0, 0.0],
-                },
-                end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-                force_regime: ForceRegime::Auto,
-                rigid_zone: Default::default(),
-                end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
-                plastic_zone: None,
-                spring: None,
-            });
-        }
-        for i in 0..3u32 {
-            model.constraints.push(Constraint::RigidDiaphragm {
-                story: StoryId(i),
-                master: NodeId(i),
-                slaves: vec![],
-                weight: None,
-                ci_override: None,
-            });
-        }
-        model
     }
 
     fn static_with_column_qz(n_nodes: usize, qz: &[(u32, f64)]) -> StaticOnce {

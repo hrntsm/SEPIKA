@@ -32,7 +32,8 @@ pub(super) fn analysis_story_columns(
     collect_story_columns(model, story, ColumnSelection::Analysis)
 }
 
-/// 上下階SLを結ぶ非分岐柱を列挙し、柱節点の参照・座標不整合はErrを返す。
+/// 上下階SL間の区間が一意に定まる非分岐柱を列挙する。
+/// SL境界が曖昧な柱や、節点の参照・座標の不整合がある場合は理由を返す。
 pub fn checked_story_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, String> {
     collect_story_columns(model, story, ColumnSelection::Nonbranching)
 }
@@ -63,6 +64,15 @@ fn collect_story_columns(
     validate_column_elements(model)?;
     let adj = column_adjacency(model);
     let has_mixed_columns = has_mixed_columns(model);
+    if selection == ColumnSelection::Nonbranching {
+        layer_column_connections(
+            model,
+            &layer,
+            &adj,
+            has_mixed_columns,
+            BoundaryLinkCheck::AllColumns,
+        )?;
+    }
     let mut out = Vec::new();
     let mut used_segments = HashMap::new();
     for node in &model.nodes {
@@ -218,9 +228,20 @@ pub(super) fn mixed_story_connections(
     };
     validate_column_elements(model)?;
     let adj = column_adjacency(model);
+    layer_column_connections(model, &layer, &adj, has_mixed_columns, boundary_check)
+}
+
+fn layer_column_connections(
+    model: &Model,
+    layer: &Layer,
+    adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
+    has_mixed_columns: bool,
+    boundary_check: BoundaryLinkCheck,
+) -> Result<Vec<(NodeId, ElemId)>, String> {
+    let story = layer.top;
     let at_top = |z| model.on_diaphragm_level(story, z);
     let at_bottom = |z| model.on_diaphragm_level(layer.bottom, z);
-    let inside = |z| is_layer_interior(model, &layer, z);
+    let inside = |z| is_layer_interior(model, layer, z);
     let link_boundaries = |first: NodeId, second: NodeId| {
         let z = [first, second].map(|id| model.nodes[id.index()].coord[2]);
         [story, layer.bottom].map(|level| {
