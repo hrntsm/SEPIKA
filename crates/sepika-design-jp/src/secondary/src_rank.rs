@@ -49,7 +49,7 @@ pub fn src_wall_type(shear_failure: bool) -> MemberRank {
 
 /// SRC 矩形柱の部材種別用の候補値 `(N/N0, sM0/M0)` を返す。
 /// `fc` と `rebar_sy` は N/mm²、`n_ult` は N（圧縮正、引張は 0 扱い）。
-/// 断面・配筋の幾何や強度・軸力の入力が不正な場合は理由を返す。
+/// 入力が不正な場合は理由を返し、断面幾何・実板厚のエラーには入力寸法 [mm] を含める。
 pub fn src_column_rank_ratios(
     section: &Section,
     steel_material: Option<&Material>,
@@ -73,14 +73,17 @@ pub fn src_column_rank_ratios(
     };
     let steel = steel_material.ok_or("内蔵鉄骨の材料が未割当、または参照先が不明です")?;
     let minimum_mm = crate::material_strength::src_h_steel_minimum_thickness_mm(steel)?;
-    let s_f = crate::material_strength::section_steel_f(section, Some(steel))?;
+    let s_f = crate::material_strength::section_steel_f(section, Some(steel))
+        .map_err(|reason| format!("{reason}（入力実板厚 ウェブ厚 {tw} mm、フランジ厚 {tf} mm）"))?;
     crate::material_strength::validate_src_h_steel_thickness(&steel.name, tw, tf, minimum_mm)?;
     if [fc, rebar_sy].iter().any(|v| !v.is_finite() || *v <= 0.0) || !n_ult.is_finite() {
         return Err("SRC 柱のコンクリート強度・主筋強度・軸力が不正です".into());
     }
-    shape
-        .validate_src_geometry()
-        .map_err(|reason| format!("SRC 柱の断面・配筋形状が不正です: {reason}"))?;
+    shape.validate_src_geometry().map_err(|reason| {
+        format!(
+            "SRC 柱の断面・配筋形状が不正です: {reason}（入力寸法 SRC 断面幅 {b} mm、断面せい {d} mm、内蔵 H 形鋼のせい {sh} mm、フランジ幅 {sb} mm、ウェブ厚 {tw} mm、フランジ厚 {tf} mm）"
+        )
+    })?;
     let edge = rebar.edge_steel(RectEdge::Top, b, d);
 
     let hw = sh - 2.0 * tf;

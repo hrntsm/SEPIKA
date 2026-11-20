@@ -178,10 +178,14 @@ fn both_actual_plate_thicknesses_determine_the_grade_strength() {
                 3_400_000.0,
             )
             .unwrap_err();
-            assert!(
-                reason.contains(name) && reason.contains("適用範囲"),
-                "{reason}"
-            );
+            for expected in [
+                name,
+                "適用範囲",
+                &format!("ウェブ厚 {web_mm} mm"),
+                &format!("フランジ厚 {flange_mm} mm"),
+            ] {
+                assert!(reason.contains(expected), "{reason}");
+            }
         }
         for invalid_mm in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             for (web_mm, flange_mm) in [(invalid_mm, 13.0), (8.0, invalid_mm)] {
@@ -193,7 +197,14 @@ fn both_actual_plate_thicknesses_determine_the_grade_strength() {
                     3_400_000.0,
                 )
                 .unwrap_err();
-                assert!(reason.contains("実板厚"), "{reason}");
+                for expected in [
+                    "実板厚が不正",
+                    "正の有限値",
+                    &format!("ウェブ厚 {web_mm} mm"),
+                    &format!("フランジ厚 {flange_mm} mm"),
+                ] {
+                    assert!(reason.contains(expected), "{reason}");
+                }
             }
         }
     }
@@ -430,8 +441,14 @@ fn src_column_rank_reports_which_steel_geometry_prevents_a_candidate() {
             [500.0, 200.0, 8.0, 13.0],
             ["径 25 mm", "500×200×8×13 mm", "干渉します"],
         ),
-        ([0.0, 200.0, 8.0, 13.0], ["SRC Hせい", "非有限", "非正"]),
-        ([400.0, f64::NAN, 8.0, 13.0], ["SRC H幅", "非有限", "非正"]),
+        (
+            [0.0, 200.0, 8.0, 13.0],
+            ["SRC Hせい", "非有限または非正", "鋼のせい 0 mm"],
+        ),
+        (
+            [400.0, f64::NAN, 8.0, 13.0],
+            ["SRC H幅", "非有限または非正", "フランジ幅 NaN mm"],
+        ),
     ] {
         let section = column_with_steel(height_mm, width_mm, web_mm, flange_mm);
         let reason =
@@ -442,5 +459,28 @@ fn src_column_rank_reports_which_steel_geometry_prevents_a_candidate() {
                 "「{detail}」がありません: {reason}"
             );
         }
+    }
+}
+
+#[test]
+fn src_column_rank_reports_dimensions_when_no_concrete_area_remains() {
+    let steel = steel("SN400B", None);
+    let mut section = column_with_steel(300.0, 90.0, 90.0, 13.0);
+    let Some(SectionShape::SrcColumnRect { b, d, .. }) = &mut section.shape else {
+        unreachable!()
+    };
+    *b = 90.0;
+    *d = 300.0;
+    let reason =
+        src_column_rank_ratios(&section, Some(&steel), 24.0, 345.0, 3_400_000.0).unwrap_err();
+    for detail in [
+        "材料面積・断面二次モーメントは正の有限値が必要",
+        "SRC 断面幅 90 mm、断面せい 300 mm",
+        "鋼のせい 300 mm、フランジ幅 90 mm、ウェブ厚 90 mm、フランジ厚 13 mm",
+    ] {
+        assert!(
+            reason.contains(detail),
+            "「{detail}」がありません: {reason}"
+        );
     }
 }
