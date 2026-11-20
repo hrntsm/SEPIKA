@@ -289,8 +289,8 @@ fn cftの鋼管fyはsteel_materialの板厚区分を使う() {
         fc: None,
     };
     assert_eq!(
-        resolve_steel_fiber_fy(Some(&shape), Some(&steel), Some(235.0)),
-        Some(325.0)
+        resolve_cft_fiber_fy(&shape, Some(&steel)).unwrap().unwrap(),
+        325.0
     );
 }
 

@@ -647,7 +647,20 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
         ) {
             return Some(format!("部材 ID {} の{}", data.id.0, msg));
         }
-        if let (Some(shape), Some(steel_mat)) = (fiber_shape, model.element_steel_material(data)) {
+        let steel_mat = model.element_steel_material(data);
+        if sec.is_cft()
+            && (data.kind != ElementKind::Beam
+                || matches!(
+                    super::resolve_force_regime(data, model),
+                    super::ResolvedRegime::Fiber
+                ))
+        {
+            return fiber_shape
+                .and_then(|shape| crate::frame::fiber::resolve_cft_fiber_fy(shape, steel_mat))
+                .and_then(Result::err)
+                .map(|reason| format!("部材 ID {} の CFT 断面の{reason}", data.id.0));
+        }
+        if let (Some(shape), Some(steel_mat)) = (fiber_shape, steel_mat) {
             let thickness = match shape {
                 SectionShape::SrcBeamRect {
                     steel_web_thick,
@@ -695,12 +708,8 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
             }
         }
         if fiber_shape.is_some_and(shape_has_steel_fiber_region)
-            && !crate::frame::fiber::resolve_steel_fiber_fy(
-                fiber_shape,
-                model.element_steel_material(data),
-                mat.fy,
-            )
-            .is_some_and(|fy| fy > 0.0)
+            && !crate::frame::fiber::resolve_steel_fiber_fy(fiber_shape, steel_mat, mat.fy)
+                .is_some_and(|fy| fy > 0.0)
         {
             return Some(format!(
                 "部材 ID {} の断面は鋼材領域（内蔵鉄骨・鋼管）を含みますが、鋼材の降伏強度を\
