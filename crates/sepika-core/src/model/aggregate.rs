@@ -1781,6 +1781,12 @@ impl Model {
                 f(&mut ml.elem);
             }
         }
+        self.visit_primary_support_elem_ids(&mut f);
+        self.shift_elem_attr_refs(&mut f);
+    }
+
+    /// 割当領域の境界と二次部材のアンカーにある主架構部材 ID に `f` を適用する。
+    pub fn visit_primary_support_elem_ids(&mut self, mut f: impl FnMut(&mut ElemId)) {
         self.floor_assignment_regions.visit_primary_supports(&mut f);
         self.wall_assignment_regions.visit_primary_supports(&mut f);
         for member in self
@@ -1805,7 +1811,6 @@ impl Model {
                 }
             }
         }
-        self.shift_elem_attr_refs(&mut f);
     }
 
     /// 条件に一致する部材属性や一本部材指定の参照先と入力種別を返す。
