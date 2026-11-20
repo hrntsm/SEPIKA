@@ -8,4 +8,5 @@ pub mod principal_axis;
 pub mod src_rank;
 pub mod stiffness_ratio;
 pub mod story_columns;
+pub mod story_rigidity;
 pub mod width_thickness;

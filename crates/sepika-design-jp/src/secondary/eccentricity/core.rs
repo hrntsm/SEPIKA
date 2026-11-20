@@ -85,11 +85,11 @@ pub struct Eccentricity {
     pub ex: f64,
     /// 偏心距離 ey = |Yg − Ys| `[mm]`。
     pub ey: f64,
-    /// ねじり剛性 KR = Σ(Dx·ȳ²) + Σ(Dy·x̄²)（剛心まわり）。
+    /// 剛心まわりのねじり剛性 [N·mm/rad]。
     pub kr: f64,
-    /// 弾力半径 rex = √(KR/ΣDx)。
+    /// X 加力方向の弾力半径 [mm]。
     pub rex: f64,
-    /// 弾力半径 rey = √(KR/ΣDy)。
+    /// Y 加力方向の弾力半径 [mm]。
     pub rey: f64,
     /// X 加力時の偏心率 Rex。半径・距離が不正又は演算不能なら Err。
     pub re_x: Result<f64, String>,
@@ -105,10 +105,6 @@ pub fn eccentricity(
     center_of_rigidity: [f64; 2],
 ) -> Result<Eccentricity, String> {
     let [xs, ys] = center_of_rigidity;
-    let [xg, yg] = center_of_mass;
-    let ex = (xg - xs).abs();
-    let ey = (yg - ys).abs();
-
     let sum_dx: f64 = cols.iter().map(|c| c.dx).sum();
     let sum_dy: f64 = cols.iter().map(|c| c.dy).sum();
 
@@ -121,6 +117,17 @@ pub fn eccentricity(
         })
         .sum();
 
+    eccentricity_with_stiffness(center_of_mass, center_of_rigidity, [sum_dx, sum_dy], kr)
+}
+
+pub(in crate::secondary) fn eccentricity_with_stiffness(
+    [xg, yg]: [f64; 2],
+    [xs, ys]: [f64; 2],
+    [sum_dx, sum_dy]: [f64; 2],
+    kr: f64,
+) -> Result<Eccentricity, String> {
+    let ex = (xg - xs).abs();
+    let ey = (yg - ys).abs();
     if [ex, ey, sum_dx, sum_dy, kr]
         .iter()
         .any(|value| !value.is_finite())

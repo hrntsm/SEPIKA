@@ -19,7 +19,9 @@ mod core;
 mod misc_wall;
 mod model_extract;
 
+pub(super) use core::eccentricity_with_stiffness;
 pub use core::{center_of_rigidity, d_value, eccentricity, ColumnStiffness, Eccentricity};
+pub(super) use misc_wall::diagonal_misc_wall;
 pub use misc_wall::{
     append_misc_wall_stiffnesses, has_misc_wall, misc_wall_stiffness, misc_wall_stiffnesses,
     sum_column_area, MiscWallStiffness,
@@ -44,7 +46,7 @@ pub(crate) mod test_support {
     /// 質量: 上端4節点に等質量（mass[0]=1.0）。
     /// section_iy_override: 右側 2 本（x=6000）の柱の iy を指定値に差し替え（None なら全同一）。
     pub(crate) fn build_symmetric_frame(section_iy_override: Option<f64>) -> (Model, StoryId) {
-        use sepika_core::dof::Dof6Mask;
+        use sepika_core::dof::{Dof, Dof6Mask};
         use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
         use sepika_core::model::{
             ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
@@ -139,7 +141,9 @@ pub(crate) mod test_support {
         };
 
         let restraint_fixed = Dof6Mask::FIXED;
-        let restraint_free = Dof6Mask::FREE;
+        let mut restraint_free = Dof6Mask::FREE;
+        restraint_free.set_fixed(Dof::Uz);
+        restraint_free.set_fixed(Dof::Rz);
         let mass_val: Option<[f64; 6]> = Some([1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
         let xy = [
             [0.0_f64, 0.0],

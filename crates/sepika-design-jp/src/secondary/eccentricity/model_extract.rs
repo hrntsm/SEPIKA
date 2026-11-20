@@ -12,6 +12,7 @@ use sepika_element::transform::LocalFrame;
 
 use super::core::{center_of_rigidity, d_value, eccentricity, ColumnStiffness, Eccentricity};
 use super::misc_wall::append_misc_wall_stiffnesses;
+use crate::secondary::story_rigidity::coupling_indicator;
 
 /// 節点の並進質量で重み付けした平面重心 `[mm]` を返す。全質量 0 なら幾何重心。
 /// 節点なし・不正な質量や位置・集計又は除算不能は Err。未設定の質量は 0 と扱う。
@@ -222,6 +223,7 @@ pub struct StoryCenters {
 /// 当該層の剛心・重心を算定して返す。
 pub fn story_centers(model: &Model, story: StoryId) -> Result<StoryCenters, String> {
     let cols = column_stiffnesses(model, story)?;
+    require_interpretable_d_values(model, story)?;
     let com = center_of_mass(model, story)?;
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
     Ok(StoryCenters {
@@ -240,7 +242,18 @@ pub fn story_eccentricity(model: &Model, story: StoryId) -> Result<Eccentricity,
     }
     let mut cols = column_stiffnesses(model, story)?;
     append_misc_wall_stiffnesses(model, story, &mut cols)?;
+    require_interpretable_d_values(model, story)?;
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
     let com = center_of_mass(model, story)?;
     eccentricity(&cols, com, cor).map_err(|reason| format!("階{}: {reason}", story.0))
+}
+
+fn require_interpretable_d_values(model: &Model, story: StoryId) -> Result<(), String> {
+    if let Some(indicator) = coupling_indicator(model, story)? {
+        return Err(format!(
+            "階{}: {indicator}。X/Y方向間連成を評価する必要がある架構のD値略算法は未対応です",
+            story.0
+        ));
+    }
+    Ok(())
 }

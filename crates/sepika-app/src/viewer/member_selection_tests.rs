@@ -273,6 +273,7 @@ fn deformed_result_selection_keeps_results_and_only_editing_switches_to_rest_sha
             sepika_solver::statics::linear::StaticOnce {
                 story_shears: None,
                 stiffness_ratio_disp: None,
+                story_rigidity: Vec::new(),
                 disp,
                 member_forces: vec![],
                 panel_moments: vec![],
@@ -532,6 +533,7 @@ fn eccentric_deformed_curve_selection_reuses_the_rendered_physical_curve() {
             sepika_solver::statics::linear::StaticOnce {
                 story_shears: None,
                 stiffness_ratio_disp: None,
+                story_rigidity: Vec::new(),
                 disp,
                 member_forces: vec![],
                 panel_moments: vec![],

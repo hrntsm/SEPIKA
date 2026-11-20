@@ -10,6 +10,7 @@ use crate::error::{JobError, JobResult};
 use crate::settings::{AnalysisSettings, ThDampingModel};
 use sepika_core::ids::LoadCaseId;
 use sepika_core::model::{LoadCase, LoadCaseKind, LoadSource, EX_CASE_NAME, EY_CASE_NAME};
+use sepika_design_jp::secondary::story_rigidity::evaluate_story_rigidities;
 use sepika_solver::statics::analysis::Analysis;
 
 /// 壁展開モデルを組み立てる（本モジュール共通のエントリポイント）。
@@ -82,6 +83,13 @@ pub fn compute_linear_static(
                 .linear_static(lc)
                 .map_err(|e| JobError::Solve(format!("{e:?}")))?;
             crate::stiffness_ratio::attach_single_evaluation(&model, &analysis, lc, &mut result);
+            if model
+                .load_cases
+                .iter()
+                .any(|case| case.id == lc && case.kind == LoadCaseKind::Seismic)
+            {
+                result.story_rigidity = evaluate_story_rigidities(&model, &analysis);
+            }
             Ok(result)
         }
         Err(e) => Err(JobError::Prepare(format!("{e:?}"))),
@@ -115,9 +123,13 @@ pub fn compute_seismic(
 ) -> JobResult<sepika_solver::statics::linear::StaticOnce> {
     let model = expand_walls(model);
     match Analysis::prepare(&model) {
-        Ok(analysis) => analysis
-            .seismic_static_with_period(cfg, t)
-            .map_err(|e| JobError::Solve(format!("{e:?}"))),
+        Ok(analysis) => {
+            let mut result = analysis
+                .seismic_static_with_period(cfg, t)
+                .map_err(|e| JobError::Solve(format!("{e:?}")))?;
+            result.story_rigidity = evaluate_story_rigidities(&model, &analysis);
+            Ok(result)
+        }
         Err(e) => Err(JobError::Prepare(format!("{e:?}"))),
     }
 }

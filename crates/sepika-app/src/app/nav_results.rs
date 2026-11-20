@@ -502,6 +502,7 @@ mod workspace_navigation_tests {
                     sepika_solver::statics::linear::StaticOnce {
                         story_shears: None,
                         stiffness_ratio_disp: None,
+                        story_rigidity: Vec::new(),
                         disp: vec![[1.0; 6]; 4],
                         member_forces: vec![],
                         panel_moments: vec![],

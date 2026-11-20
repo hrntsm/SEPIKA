@@ -3389,6 +3389,92 @@ fn test_holding_capacity_flow() {
 }
 
 #[test]
+fn coupled_story_holds_re_fes_and_required_holding_capacity_after_static_analysis() {
+    let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model.elements[0].local_axis.ref_vector = [1.0, 1.0, 0.0];
+
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let rigidity_of = |app: &App, dir| {
+        let result = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(dir)
+            .unwrap();
+        let [(layer, Ok(Some(rigidity)))] = result.story_rigidity.as_slice() else {
+            panic!(
+                "単層の剛床応答が地震静的結果に記録されていません: {:?}",
+                result.story_rigidity
+            );
+        };
+        assert_eq!(*layer, StoryId(1));
+        *rigidity
+    };
+    let x = rigidity_of(&app, SeismicDir::X);
+    assert_eq!(x, rigidity_of(&app, SeismicDir::Y));
+    app.run_static_all();
+    assert_eq!(x, rigidity_of(&app, SeismicDir::X));
+    assert_eq!(x, rigidity_of(&app, SeismicDir::Y));
+
+    let metric = crate::summary::seismic_story_metrics(&app).remove(0);
+    assert_eq!(metric.rs, Ok(1.0));
+    let reason = metric.re.unwrap_err();
+    assert!(
+        reason.contains("階1") && reason.contains("方向間連成"),
+        "{reason}"
+    );
+    assert_eq!(metric.re_ok, None);
+    assert_eq!(metric.fes, Err(reason.clone()));
+
+    let path =
+        std::env::temp_dir().join(format!("sepika-coupled-story-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    let _ = std::fs::remove_file(path);
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    assert_eq!(x, rigidity_of(&loaded, SeismicDir::X));
+    assert_eq!(x, rigidity_of(&loaded, SeismicDir::Y));
+    let restored = crate::summary::seismic_story_metrics(&loaded).remove(0);
+    assert_eq!(restored.re, Err(reason.clone()));
+    assert_eq!(restored.fes, Err(reason.clone()));
+
+    app.core.analysis_cfg.push_steps = 10;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(app.compute_holding_capacity().err(), Some(reason));
+    let csv = crate::summary::build_report_csv(&app);
+    assert!(csv.lines().any(|line| {
+        line.starts_with("必要保有水平耐力・合否,算定不能,") && line.contains("方向間連成")
+    }));
+}
+
+#[test]
 fn holding_capacity_reports_ambiguous_sl_links_and_interior_branches_after_analysis() {
     for (split_drop_mm, branch, expected) in [
         (0.5, false, "上階SLの柱3"),
@@ -10906,6 +10992,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
     sepika_solver::statics::linear::StaticOnce {
         story_shears: None,
         stiffness_ratio_disp: None,
+        story_rigidity: Vec::new(),
         disp: vec![],
         member_forces: vec![],
         panel_moments: vec![],
