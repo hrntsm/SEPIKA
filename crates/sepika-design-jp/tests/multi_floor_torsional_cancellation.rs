@@ -1,9 +1,5 @@
 use approx::assert_relative_eq;
-use sepika_core::dof::Dof;
-use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
-use sepika_core::model::{
-    Constraint, ElementKind, GirderTorsionMode, LoadCase, LoadCaseKind, Model, NodalLoad, Section,
-};
+use sepika_core::model::Model;
 use sepika_design_jp::secondary::eccentricity_analysis::{
     column_horizontal_stiffnesses, story_eccentricity_from_analysis,
 };
@@ -15,112 +11,20 @@ use sepika_solver::statics::linear::{linear_static_once, StaticOnce};
 #[allow(dead_code)]
 #[path = "fixtures/eccentricity_model.rs"]
 mod eccentricity_model;
-use eccentricity_model::{column_model, element_nodal_residual, TOP};
+use eccentricity_model::{element_nodal_residual, TOP};
 
-const HEADS: [NodeId; 4] = [NodeId(1), NodeId(3), NodeId(5), NodeId(7)];
-const XY_MM: [[f64; 2]; 4] = [[0.0, 0.0], [2000.0, 0.0], [0.0, 4000.0], [2000.0, 4000.0]];
-const UNIFORM_MM: f64 = 0.25;
-const SMALL_SCALE: f64 = 0.001;
-type HeadForces = [[f64; 2]; 4];
-
-#[derive(Clone, Copy, Debug)]
-enum Floor {
-    TwoDiaphragms,
-    Shell,
-}
-
-fn model_with_floor(floor: Floor) -> Model {
-    let mut model = column_model(&XY_MM, 0.0, 0.0);
-    model.girder_torsion = GirderTorsionMode::Keep;
-    model.sections[0].iy = 12_000_000.0;
-    for (id, direction) in HEADS
-        .into_iter()
-        .zip([[1.0, 0.0], [1.0, 0.0], [1.0, -1.0], [1.0, 1.0]])
-    {
-        let head = &mut model.nodes[id.index()];
-        head.mass = Some([1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
-        for dof in [Dof::Uz, Dof::Rx, Dof::Ry] {
-            head.restraint.set_fixed(dof);
-        }
-        let [x, y] = direction;
-        model.elements[id.index() / 2].local_axis.ref_vector = [x, y, 0.0];
-    }
-    match floor {
-        Floor::TwoDiaphragms => {
-            for [master, slave] in [[HEADS[0], HEADS[2]], [HEADS[1], HEADS[3]]] {
-                model
-                    .constraints
-                    .push(Constraint::rigid_diaphragm(TOP, master, vec![slave]));
-            }
-        }
-        Floor::Shell => {
-            let mut material = model.materials[0].clone();
-            material.id = MaterialId(1);
-            material.name = "床材".into();
-            material.young = 2_000.0;
-            model.materials.push(material);
-            let mut section = Section::zero(SectionId(1), "床断面".into());
-            section.material = Some(MaterialId(1));
-            section.thickness = Some(2.0);
-            model.sections.push(section);
-            let mut shell = model.elements[0].clone();
-            shell.id = ElemId(4);
-            shell.kind = ElementKind::Shell;
-            shell.nodes = [HEADS[0], HEADS[1], HEADS[3], HEADS[2]]
-                .into_iter()
-                .collect();
-            shell.section = Some(SectionId(1));
-            model.elements.push(shell);
-        }
-    }
-    model
-}
-
-fn uniform_displacement_reactions() -> [HeadForces; 2] {
-    // 曲げ・せん断のひずみエネルギーから得る両端固定梁の柔度。床の一様並進では床ひずみが0。
-    let stiffness = |i_mm4: f64| {
-        let length_mm: f64 = 3000.0;
-        1.0 / (length_mm.powi(3) / (12.0 * 200_000.0 * i_mm4) + length_mm / (80_000.0 * 1_600.0))
-    };
-    let strong = stiffness(12_000_000.0);
-    let weak = stiffness(8_000_000.0);
-    let diagonal = (strong + weak) / 2.0;
-    let cross = (strong - weak) / 2.0;
-    [
-        [
-            [strong, 0.0],
-            [strong, 0.0],
-            [diagonal, -cross],
-            [diagonal, cross],
-        ],
-        [
-            [0.0, weak],
-            [0.0, weak],
-            [-cross, diagonal],
-            [cross, diagonal],
-        ],
-    ]
-    .map(|forces| scale(forces, UNIFORM_MM))
-}
-
-fn scale(forces: HeadForces, factor: f64) -> HeadForces {
-    forces.map(|pair| pair.map(|value| value * factor))
-}
+#[path = "fixtures/multi_floor_torsional_cancellation_model.rs"]
+mod multi_floor_model;
+#[path = "fixtures/multi_floor_torsional_cancellation_reference.rs"]
+mod multi_floor_reference;
+use multi_floor_model::{
+    add_head_load_case, model_with_floor, scale, Floor, HeadForces, HEADS, SMALL_SCALE, UNIFORM_MM,
+    XY_MM,
+};
+use multi_floor_reference::uniform_displacement_reactions;
 
 fn solve(model: &mut Model, name: &str, forces: HeadForces) -> StaticOnce {
-    let id = LoadCaseId(model.load_cases.len() as u32);
-    model.load_cases.push(LoadCase {
-        origin: Default::default(),
-        id,
-        name: name.into(),
-        kind: LoadCaseKind::Seismic,
-        nodal: HEADS
-            .into_iter()
-            .zip(forces)
-            .map(|(node, [fx, fy])| NodalLoad::manual(node, [fx, fy, 0.0, 0.0, 0.0, 0.0]))
-            .collect(),
-        member: Vec::new(),
-    });
+    let id = add_head_load_case(model, name, forces);
     linear_static_once(model, id).unwrap()
 }
 
