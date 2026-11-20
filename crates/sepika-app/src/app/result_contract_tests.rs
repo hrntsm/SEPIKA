@@ -64,9 +64,13 @@ fn 旧解析契約39の成果は読込時に失効し再計算で現行版にな
 }
 
 #[test]
-fn panel_旧解析契約40と41の成果は読込時に失効し再計算で現行版になる() {
+fn panel_旧解析契約の成果は読込時に失効し再計算で現行版になる() {
     let app = panel_757_calculated();
-    for (version, name) in [(40, "761-analysis40"), (41, "783-analysis41")] {
+    for (version, name) in [
+        (40, "761-analysis40"),
+        (41, "783-analysis41"),
+        (84, "1625-analysis84"),
+    ] {
         let (mut loaded, path) = restore(&app, Some(version), Some(DESIGN_CONTRACT_VERSION), name);
         let stale = loaded.core.scoped.results.as_ref().unwrap();
         assert!(!stale.has_analysis_results());

@@ -6,6 +6,9 @@
 use sepika_core::model::Model;
 use sepika_core::region_rebuild::rebuild_floor_regions;
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
+use sepika_element::springs::panel_gen::{
+    apply_auto_panel_zones, validate_panel_removal_references,
+};
 
 use crate::auto_loads::{
     apply_auto_load_cases, apply_tip_loads, clear_failed_tip_seismic_cases,
@@ -27,10 +30,11 @@ pub struct PrepareReport {
 /// 剛域と仕口パネルを自動算定してモデルへ反映する。
 /// 剛域算定は壁展開モデルに対して行い、既存要素へ書き戻す。
 /// 仕口パネルは壁に依存しないため非展開モデルに対して算定する。
-/// いずれも冪等で、呼び出し順にも依存しない。
+/// 削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
 ) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
+    validate_panel_removal_references(model)?;
     model.validate_brb_references().map_err(|e| e.to_string())?;
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
@@ -57,11 +61,11 @@ pub fn apply_rigid_zones_and_panels(
         sepika_core::face_distance::try_face_distances(model)?;
         sepika_element::frame::beam::apply_auto_rigid_zones(model, &rule);
     }
-    sepika_element::springs::panel_gen::apply_auto_panel_zones(model)
+    apply_auto_panel_zones(model)
 }
 
 /// 解析前処理を一括で行う（剛域・仕口パネル・荷重ケースの自動同期）。
-/// 全ケースの部材荷重方向が不正なら、モデルを変更せずエラーを返す。
+/// 部材荷重方向が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn prepare_model_for_analysis(
     model: &mut Model,
     settings: &AnalysisSettings,
@@ -72,13 +76,14 @@ pub fn prepare_model_for_analysis(
 
 /// 階に依存する準備では FL・ΔSL の明示入力を要求し、不足・所属不成立時は停止する。
 /// 階を持たない低水準の重力解析は `initialize_stories = false` で利用できる。
-/// 全ケースの部材荷重方向が不正なら、モデルを変更せずエラーを返す。
+/// 部材荷重方向が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn prepare_model(
     model: &mut Model,
     settings: &AnalysisSettings,
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    validate_panel_removal_references(model).map_err(JobError::InvalidInput)?;
     model
         .validate_brb_references()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
@@ -306,6 +311,10 @@ pub fn clear_standard_seismic_auto(model: &mut Model) {
 }
 
 #[cfg(test)]
+#[path = "../tests/fixtures/steel_panel_model.rs"]
+mod steel_panel_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use sepika_core::ids::{ElemId, NodeId, SectionId};
@@ -315,78 +324,7 @@ mod tests {
     };
     use sepika_core::section_shape::SectionShape;
 
-    fn steel_panel_model() -> Model {
-        use sepika_core::ids::MaterialId;
-        use sepika_core::model::{FrameSectionUse, Material, MaterialCategory, PanelZoneMode};
-        let mut model = Model {
-            panel_zone: PanelZoneMode::Model,
-            stories: [0.0, 3000.0, 6000.0]
-                .into_iter()
-                .enumerate()
-                .map(|(i, fl)| {
-                    sepika_core::model::Story::new(
-                        sepika_core::ids::StoryId(i as u32),
-                        format!("{}F", i + 1),
-                        Some(fl),
-                        Some(0.0),
-                    )
-                })
-                .collect(),
-            ..Default::default()
-        };
-        for (i, coord) in [
-            [0.0, 0.0, 3000.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 6000.0],
-            [6000.0, 0.0, 3000.0],
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let mut n = node(i as u32, 0.0, 0.0);
-            n.coord = coord;
-            model.nodes.push(n);
-        }
-        model.materials.push(Material {
-            id: MaterialId(0),
-            name: "SN400B".into(),
-            category: MaterialCategory::Steel,
-            young: 205_000.0,
-            poisson: 0.3,
-            density: 7.85e-9,
-            shear: None,
-            fc: None,
-            fy: Some(235.0),
-            strength_factor: None,
-            concrete_class: Default::default(),
-        });
-        let shape = SectionShape::SteelH {
-            height: 400.0,
-            width: 400.0,
-            web_thick: 13.0,
-            flange_thick: 21.0,
-            root_r: Some(0.0),
-        };
-        for (i, usage) in [
-            FrameSectionUse::Column,
-            FrameSectionUse::Column,
-            FrameSectionUse::Girder,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let mut section = shape.to_section(SectionId(i as u32), format!("S{i}"));
-            section.frame_use = Some(usage);
-            section.material = Some(MaterialId(0));
-            model.sections.push(section);
-        }
-        for (i, nodes) in [[1, 0], [0, 2], [0, 3]].into_iter().enumerate() {
-            let mut element = beam(i as u32, nodes[0], nodes[1]);
-            element.section = Some(SectionId(i as u32));
-            model.elements.push(element);
-        }
-        model
-    }
+    use super::steel_panel_fixture::steel_panel_model;
 
     #[test]
     fn panel_759_public_preparation_uses_directional_column_faces() {

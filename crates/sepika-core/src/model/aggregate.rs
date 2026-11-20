@@ -5,6 +5,26 @@
 
 use super::*;
 
+macro_rules! for_each_elem_attr_collection {
+    ($visit:ident) => {
+        $visit!(
+            stress_cfg.misc_wall_representatives,
+            column,
+            "雑壁代表柱の指定"
+        );
+        $visit!(wall_attrs, elem, "壁属性");
+        $visit!(steel_design_attrs, elem, "鉄骨部材の検定属性");
+        $visit!(slab_composite_attrs);
+        $visit!(brb_attrs, elem, "BRB製品属性");
+        $visit!(pca_attrs, elem, "PCa梁属性");
+        $visit!(isolator_attrs, elem, "免震支承材属性");
+        $visit!(member_hysteresis_attrs, elem, "部材の履歴則指定");
+        $visit!(damper_attrs, elem, "制振ダンパー属性");
+        $visit!(member_detail_attrs, elem, "部材の付帯情報");
+        $visit!(girder_groups);
+    };
+}
+
 /// 1 つの要素に紐づく側テーブル属性のスナップショット。要素の削除・挿入
 /// （[`Model::take_elem_attrs`] / [`Model::restore_elem_attrs`]）で属性の
 /// 退避・復元に用いる（undo 用の一時保持。直列化はしない）。
@@ -1788,50 +1808,58 @@ impl Model {
         self.shift_elem_attr_refs(&mut f);
     }
 
-    /// 要素に紐づく全ての側テーブル属性（壁・鉄骨・BRB・PCa・免震・履歴則・ダンパー）と
-    /// 一本部材指定（`girder_groups`）の `elem` 参照に `f` を適用する。
+    /// 条件に一致する部材属性や一本部材指定の参照先と入力種別を返す。
+    pub fn find_elem_attr_ref(
+        &self,
+        mut matches: impl FnMut(ElemId) -> bool,
+    ) -> Option<(ElemId, &'static str)> {
+        macro_rules! find {
+            (slab_composite_attrs) => {
+                if let Some(id) = self.slab_composite_attrs.keys().copied().find(|id| matches(*id)) {
+                    return Some((id, "床板合成接合の指定"));
+                }
+            };
+            (girder_groups) => {
+                if let Some(id) = self.girder_groups.iter().flatten().copied().find(|id| matches(*id)) {
+                    return Some((id, "一本部材の指定"));
+                }
+            };
+            ($($collection:ident).+, $field:ident, $label:literal) => {
+                if let Some(entry) = self.$($collection).+.iter().find(|entry| matches(entry.$field)) {
+                    return Some((entry.$field, $label));
+                }
+            };
+        }
+        for_each_elem_attr_collection!(find);
+        None
+    }
+
+    /// 要素に紐づく全ての側テーブル属性と一本部材指定の参照に `f` を適用する。
     /// 要素の追加・削除に伴う ID 繰上げ／繰下げで、参照整合を保つために用いる
     /// （要素自身の ID・部材荷重も含めた全参照は [`Model::visit_elem_ids`]）。
     pub fn shift_elem_attr_refs(&mut self, mut f: impl FnMut(&mut ElemId)) {
-        for entry in &mut self.stress_cfg.misc_wall_representatives {
-            f(&mut entry.column);
+        macro_rules! shift {
+            (slab_composite_attrs) => {
+                self.slab_composite_attrs = std::mem::take(&mut self.slab_composite_attrs)
+                    .into_iter()
+                    .map(|(mut elem, connection)| {
+                        f(&mut elem);
+                        (elem, connection)
+                    })
+                    .collect();
+            };
+            (girder_groups) => {
+                for id in self.girder_groups.iter_mut().flatten() {
+                    f(id);
+                }
+            };
+            ($($collection:ident).+, $field:ident, $label:literal) => {
+                for entry in &mut self.$($collection).+ {
+                    f(&mut entry.$field);
+                }
+            };
         }
-        for a in &mut self.wall_attrs {
-            f(&mut a.elem);
-        }
-        for a in &mut self.steel_design_attrs {
-            f(&mut a.elem);
-        }
-        self.slab_composite_attrs = std::mem::take(&mut self.slab_composite_attrs)
-            .into_iter()
-            .map(|(mut elem, connection)| {
-                f(&mut elem);
-                (elem, connection)
-            })
-            .collect();
-        for a in &mut self.brb_attrs {
-            f(&mut a.elem);
-        }
-        for a in &mut self.pca_attrs {
-            f(&mut a.elem);
-        }
-        for a in &mut self.isolator_attrs {
-            f(&mut a.elem);
-        }
-        for a in &mut self.member_hysteresis_attrs {
-            f(&mut a.elem);
-        }
-        for a in &mut self.damper_attrs {
-            f(&mut a.elem);
-        }
-        for a in &mut self.member_detail_attrs {
-            f(&mut a.elem);
-        }
-        for group in &mut self.girder_groups {
-            for e in group.iter_mut() {
-                f(e);
-            }
-        }
+        for_each_elem_attr_collection!(shift);
     }
 
     /// 指定要素に紐づく全ての側テーブル属性を取り外して返す（要素削除時の退避用）。

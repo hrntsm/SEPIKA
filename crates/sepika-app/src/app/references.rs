@@ -344,8 +344,8 @@ impl App {
         let source_id_assignment = input.assign_stb_node_ids();
         let panel_mode = input.panel_zone;
         input.panel_zone = sepika_core::model::PanelZoneMode::None;
-        sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut input)
-            .expect("パネル除去だけでは算定を行わない");
+        // 削除を拒否したモデルも、準備計算で診断する前に元のパネルと参照を含めて識別する必要がある。
+        let _ = sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut input);
         input.panel_zone = panel_mode;
         input.load_cases.retain(|case| {
             case.origin != sepika_core::model::LoadCaseOrigin::Generated
