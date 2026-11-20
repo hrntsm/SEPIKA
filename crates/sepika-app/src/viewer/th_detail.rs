@@ -794,6 +794,7 @@ fn draw_peak_check(
         length
     };
     let wire_qd = th_nonlinear && th_applied_long_term && !signed_bending;
+    let src_column = structure == StructureKind::Src && kind == MemberKind::Column;
     let long_mf = wire_qd
         .then(|| {
             app.core.scoped.results.as_ref().and_then(|r| {
@@ -806,7 +807,7 @@ fn draw_peak_check(
             })
         })
         .flatten();
-    let q0_by_elem = if wire_qd {
+    let q0_by_elem = if wire_qd && !src_column {
         match sepika_job::simple_beam_q0_by_gravity_cases(&app.core.model) {
             Ok(q0) => Some(q0),
             Err(reason) => {
@@ -830,6 +831,7 @@ fn draw_peak_check(
                 method: app.core.analysis_cfg.qd_method,
             })
     });
+    let missing_src_gravity = wire_qd && seismic_qd.is_none();
     if wire_qd
         && matches!(
             sec.shape,
@@ -964,9 +966,14 @@ fn draw_peak_check(
                         draw_outcome_row(ui, pos, outcome);
                     }
                 };
-                if structure == StructureKind::Src && kind == MemberKind::Column {
-                    for outcome in sepika_design_jp::SrcDesign.check_outcomes(&mfa, sec, mat, &ctx)
-                    {
+                if src_column {
+                    for outcome in sepika_design_jp::SrcDesign.check_outcomes(
+                        &mfa,
+                        sec,
+                        mat,
+                        &ctx,
+                        missing_src_gravity,
+                    ) {
                         draw_outcome(&outcome);
                     }
                 } else {

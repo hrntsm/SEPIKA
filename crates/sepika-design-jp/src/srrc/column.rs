@@ -15,6 +15,7 @@ use crate::rc::{
 use crate::steel::{steel_fs, steel_ft};
 use crate::{
     CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt, QdMethod,
+    SeismicQd,
 };
 use sepika_core::model::Material;
 
@@ -103,6 +104,24 @@ impl SrcColumnSeismicBendingAxis {
     }
 }
 
+pub(super) fn gravity_reference_issue(
+    pos: f64,
+    qd: Option<&SeismicQd>,
+    missing_gravity: bool,
+) -> Option<&'static str> {
+    if missing_gravity {
+        return Some("設計用せん断力に必要な重力参照内力が不足しています");
+    }
+    let qd = qd?;
+    (!pos.is_finite()
+        || !qd
+            .long_at
+            .iter()
+            .find(|(ref_pos, _)| (ref_pos - pos).abs() < 1e-6)
+            .is_some_and(|(_, values)| values[1].is_finite() && values[2].is_finite()))
+    .then_some("設計用せん断力に必要な同位置の重力参照せん断力QL（Qy・Qz）が不足または非有限です")
+}
+
 fn src_column_seismic_qd(
     forces: &MemberForcesAt,
     ctx: &DesignCtx,
@@ -111,24 +130,14 @@ fn src_column_seismic_qd(
     if ctx.term != LoadTerm::Short {
         return Ok(None);
     }
-    if missing_gravity {
-        return Err("設計用せん断力に必要な重力参照内力が不足しています".into());
+    if let Some(reason) =
+        gravity_reference_issue(forces.pos, ctx.seismic_qd.as_ref(), missing_gravity)
+    {
+        return Err(reason.into());
     }
     let Some(qd) = &ctx.seismic_qd else {
         return Ok(None);
     };
-    if !forces.pos.is_finite()
-        || !qd
-            .long_at
-            .iter()
-            .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
-            .is_some_and(|(_, values)| values[1].is_finite() && values[2].is_finite())
-    {
-        return Err(
-            "設計用せん断力に必要な同位置の重力参照せん断力QL（Qy・Qz）が不足または非有限です"
-                .into(),
-        );
-    }
     let missing_bending = "曲げ方式（Qd1）には、柱頭・柱脚の軸力と方向別の配筋・曲げ式に基づく材料別曲げ耐力、および柱頭の接続梁による上限または両端曲げ降伏の確認が必要です";
     let missing_alternative =
         "代替式 2(Q−Qs) に必要な一次設計用地震力による柱せん断力Qを評価できません";

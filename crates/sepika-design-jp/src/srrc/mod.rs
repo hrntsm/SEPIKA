@@ -313,14 +313,29 @@ impl DesignCheck for SrcDesign {
 impl SrcDesign {
     /// 短期地震時のSRC柱の適用条件や材軸ねじりで未算定となる場合、理由と独立に確定した不適合を別の結果で返す。
     /// 未算定を伴う位置で、適合を示す検定比は返さない。
+    /// 地震時の重力参照内力が必要で、対象柱の参照内力がない場合は `missing_gravity` に true を渡す。
     pub fn check_outcomes(
         &self,
         forces: &MemberForcesAt,
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
+        missing_gravity: bool,
     ) -> impl Iterator<Item = CheckOutcome> {
-        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, false);
+        let (outcome, mut incomplete) =
+            self.check_with_incomplete(forces, sec, mat, ctx, missing_gravity);
+        if matches!(outcome, CheckOutcome::Skipped { .. })
+            && ctx.term == LoadTerm::Short
+            && ctx.kind == MemberKind::Column
+            && matches!(sec.shape, Some(SectionShape::SrcColumnRect { .. }))
+        {
+            incomplete = column::gravity_reference_issue(
+                forces.pos,
+                ctx.seismic_qd.as_ref(),
+                missing_gravity,
+            )
+            .map(str::to_owned);
+        }
         use crate::member_design_check::{
             combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
         };

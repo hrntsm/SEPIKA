@@ -292,7 +292,7 @@ fn column_qd_never_reports_compliance_for_nonfinite_axial_force_or_moments() {
     let concrete = material("Fc24", MaterialCategory::Concrete, Some(24.0), None);
     let outcomes = |f: &MemberForcesAt| {
         SrcDesign
-            .check_outcomes(f, &sec, &concrete, &ctx)
+            .check_outcomes(f, &sec, &concrete, &ctx, false)
             .collect::<Vec<_>>()
     };
 
@@ -391,7 +391,7 @@ fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinit
     let unknown_moment = MemberForcesAt { my: f64::NAN, ..f };
     assert_skipped(check(&sec, &unknown_moment, &ctx), "モーメントMy");
     let rows: Vec<_> = SrcDesign
-        .check_outcomes(&unknown_moment, &sec, &concrete, &ctx)
+        .check_outcomes(&unknown_moment, &sec, &concrete, &ctx, false)
         .collect();
     assert!(
         matches!(
@@ -405,7 +405,7 @@ fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinit
 
     let unknown_axial = MemberForcesAt { n: f64::NAN, ..f };
     let rows: Vec<_> = SrcDesign
-        .check_outcomes(&unknown_axial, &sec, &concrete, &ctx)
+        .check_outcomes(&unknown_axial, &sec, &concrete, &ctx, false)
         .collect();
     assert!(
         matches!(rows.as_slice(), [CheckOutcome::Skipped { reason }]
@@ -424,7 +424,7 @@ fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinit
     };
     *steel_height = 2.0 * *steel_flange_thick;
     let rows: Vec<_> = SrcDesign
-        .check_outcomes(&unknown_moment, &invalid_qa, &concrete, &ctx)
+        .check_outcomes(&unknown_moment, &invalid_qa, &concrete, &ctx, false)
         .collect();
     assert!(
         matches!(rows.as_slice(), [CheckOutcome::Skipped { reason }]
@@ -434,7 +434,7 @@ fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinit
 
     ctx.src_column_seismic_bending = None;
     let rows: Vec<_> = SrcDesign
-        .check_outcomes(&unknown_moment, &sec, &concrete, &ctx)
+        .check_outcomes(&unknown_moment, &sec, &concrete, &ctx, false)
         .collect();
     assert!(
         matches!(rows.as_slice(), [CheckOutcome::Skipped { reason }]
