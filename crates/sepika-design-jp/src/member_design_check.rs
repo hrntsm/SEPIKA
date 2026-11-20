@@ -181,22 +181,31 @@ fn push_strength_outcome(
     outcome: CheckOutcome,
     incomplete_reason: Option<&str>,
 ) {
+    checks
+        .extend(strength_outcomes(outcome, incomplete_reason).map(|outcome| (elem, pos, outcome)));
+}
+
+pub(crate) fn strength_outcomes(
+    outcome: CheckOutcome,
+    incomplete_reason: Option<&str>,
+) -> impl Iterator<Item = CheckOutcome> {
     let Some(incomplete_reason) = incomplete_reason else {
-        checks.push((elem, pos, outcome));
-        return;
+        return [Some(outcome), None].into_iter().flatten();
     };
 
-    let reason = match outcome {
+    let (known_ng, reason) = match outcome {
         CheckOutcome::Checked(mut result) => {
             result.components.retain(|component| component.ratio > 1.0);
-            if !result.components.is_empty() {
-                checks.push((elem, pos, CheckOutcome::Checked(result)));
-            }
-            incomplete_reason.into()
+            (
+                (!result.components.is_empty()).then_some(CheckOutcome::Checked(result)),
+                incomplete_reason.into(),
+            )
         }
-        CheckOutcome::Skipped { reason } => format!("{reason}。{incomplete_reason}"),
+        CheckOutcome::Skipped { reason } => (None, format!("{reason}。{incomplete_reason}")),
     };
-    checks.push((elem, pos, CheckOutcome::Skipped { reason }));
+    [known_ng, Some(CheckOutcome::Skipped { reason })]
+        .into_iter()
+        .flatten()
 }
 
 fn brb_torsion_reason(mx: f64) -> Option<&'static str> {
@@ -603,6 +612,7 @@ pub fn run_member_design_checks(
             end_moments_z,
             mid_moment_z,
             seismic_qd,
+            src_column_seismic_bending: None,
             column_sum_my,
             beam_has_slab: kind == MemberKind::Girder && beam_has_attached_slab(model, elem),
             steel_attr,
@@ -675,8 +685,22 @@ pub fn run_member_design_checks(
                     .as_ref()
                     .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
                 && brb.is_none();
+            let src_seismic_column = options.term == LoadTerm::Short
+                && structure == StructureKind::Src
+                && kind == MemberKind::Column
+                && matches!(
+                    sec.shape,
+                    Some(sepika_core::section_shape::SectionShape::SrcColumnRect { .. })
+                )
+                && options.long_member_forces.is_some();
+            let mut src_incomplete = None;
             let mut outcome = if eccentric_brace_compression {
                 CheckOutcome::Skipped { reason: "非0XYZ偏心ブレースの圧縮検定には強軸・弱軸の座屈長さの直接指定が必要です。実材軸長・剛体接続長からは自動算定しません".into() }
+            } else if src_seismic_column {
+                let (outcome, incomplete) =
+                    crate::SrcDesign.check_with_incomplete(&mfa, sec, mat, &ctx, missing_gravity);
+                src_incomplete = incomplete;
+                outcome
             } else if missing_gravity {
                 CheckOutcome::Skipped {
                     reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
@@ -721,12 +745,18 @@ pub fn run_member_design_checks(
                         .push_str(&format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
                 }
             }
+            let torsion = torsion_reason(*forces);
+            let incomplete = match (src_incomplete, torsion) {
+                (Some(src), Some(torsion)) => Some(format!("{src}。{torsion}")),
+                (Some(src), None) => Some(src),
+                (None, _) => None,
+            };
             push_strength_outcome(
                 &mut member_checks,
                 *elem_id,
                 *pos,
                 outcome,
-                torsion_reason(*forces),
+                incomplete.as_deref().or(torsion),
             );
         }
 

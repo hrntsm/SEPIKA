@@ -214,6 +214,46 @@ fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck
     }
 }
 
+pub(crate) fn src_column_app(method: QdMethod) -> App {
+    use sepika_core::ids::SectionId;
+    use sepika_core::model::FrameSectionUse;
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+
+    let mut app = app(false, method);
+    let old = app.core.model.sections[0].clone();
+    let mut sec = SectionShape::SrcColumnRect {
+        b: 500.0,
+        d: 700.0,
+        rebar: RcRectColumnRebar {
+            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
+            x: vec![3],
+            y: vec![3],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
+                pitch: 100.0,
+                legs_x: 2,
+                legs_y: 2,
+            },
+        },
+        steel_height: 500.0,
+        steel_width: 200.0,
+        steel_web_thick: 9.0,
+        steel_flange_thick: 14.0,
+    }
+    .to_section(SectionId(0), "SRC柱912".into());
+    sec.material = old.material;
+    sec.steel_material = old.steel_material;
+    sec.rebar_material = old.rebar_material;
+    sec.shear_rebar_material = old.shear_rebar_material;
+    sec.frame_use = Some(FrameSectionUse::Column);
+    app.core.model.sections[0] = sec;
+    app.core.model.nodes[1].coord = [0.0, 0.0, 6000.0];
+    app.core.model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
+    app.core.model.stories = super::tests::explicit_story_inputs(&[0.0, 6000.0]);
+    app
+}
+
 fn assert_src912_skipped(app: &App) {
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -230,47 +270,16 @@ fn assert_src912_skipped(app: &App) {
 
 #[test]
 fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips() {
-    use sepika_core::ids::{MaterialId, SectionId};
-    use sepika_core::model::FrameSectionUse;
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    use sepika_core::ids::MaterialId;
     use sepika_edit::{MaterialField, SetMaterialField, SetMaterialName};
 
     for column in [false, true] {
         for fy in [100.0, 235.0, 345.0] {
-            let mut app = app(false, QdMethod::Qd1);
-            if column {
-                let old = app.core.model.sections[0].clone();
-                let mut sec = SectionShape::SrcColumnRect {
-                    b: 500.0,
-                    d: 700.0,
-                    rebar: RcRectColumnRebar {
-                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-                        x: vec![3],
-                        y: vec![3],
-                        cover: 40.0,
-                        hoop: RectColumnHoop {
-                            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-                            pitch: 100.0,
-                            legs_x: 2,
-                            legs_y: 2,
-                        },
-                    },
-                    steel_height: 500.0,
-                    steel_width: 200.0,
-                    steel_web_thick: 9.0,
-                    steel_flange_thick: 14.0,
-                }
-                .to_section(SectionId(0), "SRC柱912".into());
-                sec.material = old.material;
-                sec.steel_material = old.steel_material;
-                sec.rebar_material = old.rebar_material;
-                sec.shear_rebar_material = old.shear_rebar_material;
-                sec.frame_use = Some(FrameSectionUse::Column);
-                app.core.model.sections[0] = sec;
-                app.core.model.nodes[1].coord = [0.0, 0.0, 6000.0];
-                app.core.model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
-                app.core.model.stories = super::tests::explicit_story_inputs(&[0.0, 6000.0]);
-            }
+            let mut app = if column {
+                src_column_app(QdMethod::Qd1)
+            } else {
+                app(false, QdMethod::Qd1)
+            };
             app.run_combination(0);
             assert!(
                 app.core.scoped.last_error.is_none(),
@@ -280,8 +289,12 @@ fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips()
             assert!(app.current_design_results().unwrap().member_checks[0]
                 .positions
                 .iter()
-                .all(|p| matches!(&p.outcome, CheckOutcome::Checked(_))));
-            let old_f235_checks = app.current_design_results().unwrap().member_checks.clone();
+                .all(|p| if column {
+                    matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("柱頭・柱脚の軸力"))
+                } else {
+                    matches!(&p.outcome, CheckOutcome::Checked(_))
+                }));
+            let known_steel_checks = app.current_design_results().unwrap().member_checks.clone();
             assert!(app.core.scoped.undo.run(
                 &mut app.core.model,
                 Box::new(SetMaterialName {
@@ -319,7 +332,7 @@ fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips()
                     if version == Some(DESIGN_CONTRACT_VERSION) {
                         original.member_checks.clone()
                     } else {
-                        old_f235_checks.clone()
+                        known_steel_checks.clone()
                     };
                 let (mut loaded, path) = super::result_contract_tests::restore(
                     &app,

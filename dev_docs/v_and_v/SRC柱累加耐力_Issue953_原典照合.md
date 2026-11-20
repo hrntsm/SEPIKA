@@ -2,6 +2,8 @@
 
 確認日 2026-11-18。対象 `f58c2dce`。[調査 #953](https://github.com/hrntsm/SEPIKA/issues/953)、[親調査 #697](https://github.com/hrntsm/SEPIKA/issues/697)。
 
+調査時点の比較を以下に記録する。短期地震時の設計せん断の是正と有限Verificationは [#1416の確認記録](SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md) を参照する。
+
 ## 採用判断
 
 | 用途 | 判断 |

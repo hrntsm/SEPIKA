@@ -926,22 +926,31 @@ fn draw_peak_check(
                     continue;
                 }
                 let mfa = MemberForcesAt::from_local(pos, f);
-                let outcome = checker.check(&mfa, sec, mat, &ctx);
-                if let Some((snapshot, component)) = selected {
-                    let side = match component {
-                        PeakComponent::Axial if mfa.n < 0.0 => "圧縮側",
-                        PeakComponent::Axial => "引張側",
-                        PeakComponent::Moment if mfa.mz < 0.0 => "負曲げ側",
-                        PeakComponent::Moment => "正曲げ側",
-                    };
-                    draw_labeled_outcome_row(
-                        ui,
-                        &format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time),
-                        &outcome,
-                        signed_bending,
-                    );
+                let mut draw_outcome = |outcome: &CheckOutcome| {
+                    if let Some((snapshot, component)) = selected {
+                        let side = match component {
+                            PeakComponent::Axial if mfa.n < 0.0 => "圧縮側",
+                            PeakComponent::Axial => "引張側",
+                            PeakComponent::Moment if mfa.mz < 0.0 => "負曲げ側",
+                            PeakComponent::Moment => "正曲げ側",
+                        };
+                        draw_labeled_outcome_row(
+                            ui,
+                            &format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time),
+                            outcome,
+                            signed_bending,
+                        );
+                    } else {
+                        draw_outcome_row(ui, pos, outcome);
+                    }
+                };
+                if structure == StructureKind::Src && kind == MemberKind::Column {
+                    for outcome in sepika_design_jp::SrcDesign.check_outcomes(&mfa, sec, mat, &ctx)
+                    {
+                        draw_outcome(&outcome);
+                    }
                 } else {
-                    draw_outcome_row(ui, pos, &outcome);
+                    draw_outcome(&checker.check(&mfa, sec, mat, &ctx));
                 }
             }
         };

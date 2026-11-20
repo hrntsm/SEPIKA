@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::signed_q0_acceptance_tests::fixture;
 
-fn labels(app: &App, rec: &ThRecording) -> String {
+fn labels(app: &App, rec: &ThRecording, applied_long_term: bool) -> String {
     let elem = &app.core.model.elements[0];
     let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
     egui::Context::default()
@@ -13,7 +13,7 @@ fn labels(app: &App, rec: &ThRecording) -> String {
                 )),
                 ..Default::default()
             },
-            |ui| draw_peak_check(ui, app, elem, 0, rec, true, true, &axis),
+            |ui| draw_peak_check(ui, app, elem, 0, rec, true, applied_long_term, &axis),
         )
         .shapes
         .iter()
@@ -42,7 +42,7 @@ fn signed_q0_th_detail_missing_repaired_missing_does_not_render_ordinary_check()
     for valid in [false, true, false] {
         app.core.model.load_cases[0].member[0].dir =
             if valid { [0.0, 0.0, -1.0] } else { [0.0; 3] };
-        let text = labels(&app, &rec);
+        let text = labels(&app, &rec, true);
         if valid {
             assert!(text.contains("検定比"), "{text}");
             assert!(!text.contains("検定不能"), "{text}");
@@ -56,7 +56,7 @@ fn signed_q0_th_detail_missing_repaired_missing_does_not_render_ordinary_check()
     for valid in [false, true, false] {
         app.core.scoped.results.as_mut().unwrap().combos =
             if valid { original.clone() } else { vec![] };
-        let text = labels(&app, &rec);
+        let text = labels(&app, &rec, true);
         if valid {
             assert!(text.contains("検定比"), "{text}");
         } else {
@@ -79,7 +79,46 @@ fn signed_q0_th_detail_steel_still_checks_without_rc_gravity_input() {
         ..Default::default()
     };
     assert!(app.core.scoped.results.as_ref().unwrap().combos.is_empty());
-    let text = labels(&app, &rec);
+    let text = labels(&app, &rec, true);
     assert!(text.contains("検定比"), "{text}");
     assert!(!text.contains("重力参照内力"), "{text}");
+}
+
+#[test]
+fn src_column_th_detail_displays_why_seismic_bending_shear_is_unchecked() {
+    use sepika_design_jp::QdMethod;
+
+    let mut app = crate::app::src_ql_acceptance_tests::src_column_app(QdMethod::Qd1);
+    app.run_combination(0);
+    let peak = app.current_static().unwrap().member_forces[0].1.clone();
+    app.run_combination(1);
+    let rec = ThRecording {
+        peak_member_forces: vec![Some(peak)],
+        ..Default::default()
+    };
+    let mut overloaded = rec.clone();
+    overloaded.peak_member_forces[0].as_mut().unwrap().at =
+        vec![(0.0, [-40.0e6, 0.0, 0.0, 0.0, 0.0, 0.0])];
+    for (method, reason) in [
+        (QdMethod::Qd1, "柱頭・柱脚の軸力"),
+        (QdMethod::Min, "一次設計用地震力"),
+    ] {
+        app.core.analysis_cfg.qd_method = method;
+        let text = labels(&app, &rec, true);
+        assert!(text.contains("検定不能: SRC柱検定"), "{text}");
+        assert!(text.contains(reason), "{text}");
+        assert!(!text.contains("検定比"), "{text}");
+
+        let text = labels(&app, &overloaded, true);
+        assert_eq!(text.matches("ξ=0.00:").count(), 2, "{text}");
+        assert!(text.contains("(NG)"), "{text}");
+        assert!(
+            text.contains("検定不能: SRC柱検定") && text.contains(reason),
+            "{text}"
+        );
+        assert!(!text.contains("(OK)"), "{text}");
+    }
+    let ordinary = labels(&app, &rec, false);
+    assert!(ordinary.contains("検定比"), "{ordinary}");
+    assert!(!ordinary.contains("検定不能"), "{ordinary}");
 }

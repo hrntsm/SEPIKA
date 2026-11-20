@@ -185,6 +185,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0124](0124-asymmetric-built-h-girder-local-buckling.md) | accepted | 上下非対称組立H形鋼大梁の全断面照査に幅厚比の条件を設ける |
 | [0125](0125-asymmetric-built-h-column-compression-local-buckling.md) | accepted | 上下非対称組立H形鋼柱の圧縮と強軸曲げに局部座屈を省く条件を適用する |
 | [0126](0126-src-column-rank-steel-material.md) | accepted | SRC柱の部材種別の候補計算を内蔵H形鋼の材種表と実板厚で制限する |
+| [0127](0127-src-column-seismic-bending-demand.md) | accepted | SRC柱の短期地震時せん断に適用確認済みの曲げ耐力を用いる |
 
 ## 規約
 

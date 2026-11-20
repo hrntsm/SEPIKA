@@ -47,7 +47,10 @@ pub use member_design_check::{
     MemberDesignCheckOptions, MemberDesignCheckReport,
 };
 pub use rc::RcDesign;
-pub use srrc::SrcDesign;
+pub use srrc::{
+    SrcColumnHeadLimit, SrcColumnSeismicBending, SrcColumnSeismicBendingAxis,
+    SrcColumnSeismicBendingEnd, SrcDesign,
+};
 pub use steel::SteelDesign;
 
 use sepika_core::model::{Material, Section, SteelDesignAttr};
@@ -87,7 +90,7 @@ pub enum QdMethod {
 }
 
 impl QdMethod {
-    /// QD1・QD2 から設計用せん断力を決定する（RC・SRC 共通の決定規約）。
+    /// QD1・QD2 から設計用せん断力を決定する（RC・SRC梁などの決定規約）。
     /// `Qd1` 選択時でも QD1 が無効（`qd1` が非有限）なら QD2 で代替する。
     pub(crate) fn resolve(self, qd1: f64, qd2: f64) -> f64 {
         match self {
@@ -388,6 +391,9 @@ pub struct DesignCtx {
     /// 地震時短期の設計用せん断力 QD = min(QD1, QD2) の算定文脈（RC）。
     /// None の場合は解析せん断力をそのまま用いる。
     pub seismic_qd: Option<SeismicQd>,
+    /// SRC柱の短期地震時Qd1に適用できることを呼出側が確認した材料別曲げ耐力。
+    /// 未指定時、SRC柱の短期地震時Qd1は未算定となる。
+    pub src_column_seismic_bending: Option<SrcColumnSeismicBending>,
     /// RC 柱のメカニズム ΣMy `(強軸=qy 用, 弱軸=qz 用)` [N·mm]。
     /// 各方向は `Some(ΣMy)`（梁 My 欠落時は端軸力の `Mu_i+Mu_j`）または
     /// `None`（柱 My 未算定で、その方向は検定位置の `2·Mu` で代替）。
@@ -424,6 +430,7 @@ impl Default for DesignCtx {
             end_moments_z: None,
             mid_moment_z: None,
             seismic_qd: None,
+            src_column_seismic_bending: None,
             column_sum_my: None,
             beam_has_slab: false,
             steel_attr: None,

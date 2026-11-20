@@ -68,10 +68,30 @@ fn src_column_mcp_saved_seismic_combination_supplies_both_gravity_directions() {
             model.load_cases[0].member.clear();
         }
         let result = summary(&model, false);
-        assert_eq!(result["n_skipped"], 0, "{result}");
+        assert_eq!(result["n_skipped"], 3, "{result}");
         assert_eq!(result["qd_wired"], true);
-        assert!(result["max_ratio"].as_f64().is_some_and(f64::is_finite));
+        assert_eq!(result["all_members_checked_and_ok"], false, "{result}");
+        assert!(result["max_ratio"].is_null(), "{result}");
+        assert!(
+            result["member_skipped"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| {
+                    item["reason"].as_str().is_some_and(|reason| {
+                        reason.contains("一次設計用地震力") && reason.contains("柱頭・柱脚の軸力")
+                    })
+                }),
+            "{result}"
+        );
     }
+    model.load_cases[2].nodal[0].values[2] = -100_000_000.0;
+    let overloaded = summary(&model, false);
+    assert_eq!(overloaded["n_skipped"], 3, "{overloaded}");
+    assert_eq!(overloaded["n_ng"], 3, "{overloaded}");
+    assert!(overloaded["max_ratio"]
+        .as_f64()
+        .is_some_and(|ratio| ratio.is_finite() && ratio > 1.0));
 }
 
 fn summary(model: &Model, automatic: bool) -> serde_json::Value {

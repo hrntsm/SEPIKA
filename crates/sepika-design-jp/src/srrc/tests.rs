@@ -277,7 +277,6 @@ fn test_src_beam_shear_split_handcalc() {
     let seismic = SrcSeismicCtx {
         ctx: &ctx,
         pos: 0.0,
-        q_index: 1,
         s_ft_short: 0.0,
         r_mu: 0.0,
     };
@@ -297,8 +296,8 @@ fn test_src_beam_shear_split_handcalc() {
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
-        &SrcShearMode::Beam,
-        &seismic,
+        SrcShearMode::Beam(&seismic),
+        ctx.term,
     );
     assert!(!shear.used_qd);
     assert!((shear.s_q - expected_s_q).abs() / expected_s_q < 1e-9);
@@ -345,7 +344,6 @@ fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
         let seismic = SrcSeismicCtx {
             ctx: &ctx,
             pos: 0.0,
-            q_index: 1,
             s_ft_short: 0.0,
             r_mu: 0.0,
         };
@@ -365,8 +363,8 @@ fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
             s_fs,
             0.0,
             2.0,
-            &SrcShearMode::Beam,
-            &seismic,
+            SrcShearMode::Beam(&seismic),
+            ctx.term,
         );
         assert!(
             (shear.pw - 0.006).abs() < 1e-12,
@@ -390,14 +388,6 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
     let props = column_axis_props(400.0, 700.0, &rebar, true);
     let fs = concrete_allowable_shear(24.0, false);
     let w_ft = rebar_allowable_shear("SD345", false);
-    let ctx = ctx_column(LoadTerm::Short);
-    let seismic = SrcSeismicCtx {
-        ctx: &ctx,
-        pos: 0.0,
-        q_index: 1,
-        s_ft_short: 0.0,
-        r_mu: 0.0,
-    };
     // m_for_alpha=0 → α は上限側（=2）に張り付く条件。α が式に入っていれば
     // rQA1 が 2 倍近く動くが、柱の短期 rQAS1 は α 非依存であること。
     let shear = src_shear_check(
@@ -416,8 +406,11 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
         0.0,
         0.0,
         2.0,
-        &SrcShearMode::Column { beta: 0.0 },
-        &seismic,
+        SrcShearMode::Column {
+            beta: 0.0,
+            seismic_demand_n: None,
+        },
+        LoadTerm::Short,
     );
     let pw = props.pw.min(0.006);
     let expected_rqa1 = props.b * props.j * (fs + 0.5 * pw * w_ft);
@@ -444,14 +437,6 @@ fn test_src_column_long_combined_formula() {
     };
     let props = column_axis_props(400.0, 700.0, &rebar, true);
     let fs = concrete_allowable_shear(24.0, true);
-    let ctx = ctx_column(LoadTerm::Long);
-    let seismic = SrcSeismicCtx {
-        ctx: &ctx,
-        pos: 0.0,
-        q_index: 1,
-        s_ft_short: 0.0,
-        r_mu: 0.0,
-    };
     let beta = 0.25;
     let q = 150_000.0;
     // m=0 → α=2（上限）。b′/b=0.5 < α/3=2/3 なので a′=3b′/b=1.5 が採用される。
@@ -472,8 +457,11 @@ fn test_src_column_long_combined_formula() {
         100.0,
         1000.0,
         2.0,
-        &SrcShearMode::Column { beta },
-        &seismic,
+        SrcShearMode::Column {
+            beta,
+            seismic_demand_n: None,
+        },
+        LoadTerm::Long,
     );
     let a_prime = 1.5;
     let qa = (1.0 + beta) * props.b * props.j * a_prime * fs;
@@ -643,7 +631,6 @@ fn test_src_beam_seismic_qd2_handcalc() {
     let seismic = SrcSeismicCtx {
         ctx: &ctx,
         pos: 0.0,
-        q_index: 1,
         s_ft_short,
         r_mu: 0.0,
     };
@@ -664,8 +651,8 @@ fn test_src_beam_seismic_qd2_handcalc() {
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
-        &SrcShearMode::Beam,
-        &seismic,
+        SrcShearMode::Beam(&seismic),
+        ctx.term,
     );
 
     let denom = sz + props.at * props.j;
@@ -754,7 +741,6 @@ fn test_src_beam_seismic_qd1_handcalc() {
     let seismic = SrcSeismicCtx {
         ctx: &ctx,
         pos: 0.0,
-        q_index: 1,
         s_ft_short,
         r_mu,
     };
@@ -775,8 +761,8 @@ fn test_src_beam_seismic_qd1_handcalc() {
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
-        &SrcShearMode::Beam,
-        &seismic,
+        SrcShearMode::Beam(&seismic),
+        ctx.term,
     );
 
     let denom = sz + props.at * props.j;
