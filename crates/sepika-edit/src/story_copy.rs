@@ -337,6 +337,9 @@ impl EditCommand for CopyStory {
         if !self.targets.any() {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(crate::RejectedEdit(error.to_string()));
+        }
         if let Err(error) = model.validate_rc_section_usage() {
             return Box::new(crate::RejectedEdit(error.to_string()));
         }

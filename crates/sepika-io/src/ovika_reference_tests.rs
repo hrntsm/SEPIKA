@@ -189,6 +189,33 @@ fn assert_roundtrip(model: &Model, label: &str) {
 }
 
 #[test]
+fn brb_reference_roundtrips_only_when_its_member_exists() {
+    let mut model = member_model(0, vec![], None);
+    model.elements[0].kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    let attr = BrbAttr {
+        elem: ElemId(0),
+        allowable_axial_short: Some(1_000_000.0),
+        critical_length: Some(1200.0),
+        length_reduction: Some(100.0),
+    };
+    model.brb_attrs.push(attr.clone());
+    assert_roundtrip(&model, "brb-existing-member");
+
+    model.brb_attrs.push(BrbAttr {
+        elem: ElemId(1),
+        ..attr
+    });
+    let reason = "座屈拘束ブレースの検定属性 brb_attrs[1].elem -> 部材 ID 1";
+    assert!(matches!(
+        model.validate_reference_ids(),
+        Err(sepika_core::error::CoreError::DanglingRef(actual)) if actual == reason
+    ));
+    assert_rejected_preserving_input(&model, "brb-missing-member", reason);
+}
+
+#[test]
 fn all_member_locations_reject_noncanonical_section_references_and_keep_incomplete_models() {
     for place in 0..5 {
         for (name, sections, reference, accepted) in [

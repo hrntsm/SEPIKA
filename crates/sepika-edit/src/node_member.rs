@@ -464,6 +464,7 @@ fn shift_node_ids(model: &mut Model, f: impl FnMut(&mut NodeId)) {
 ///
 /// `elem.id` は `ElemId(model.elements.len())`（末尾の次の添字）と一致し、参照する
 /// 節点・断面が実在していること（crate::refs の規約）。満たさない場合は `Noop`。
+/// 座屈拘束ブレースの検定属性に参照先欠落があれば、追加を拒否する。
 pub struct AddMember {
     pub elem: sepika_core::model::ElementData,
 }
@@ -510,6 +511,9 @@ impl EditCommand for AddMember {
         {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         let snapshot = AssignmentTopology::capture(model);
         model.elements.push(self.elem.clone());
         Box::new(RestoreAssignmentTopology {
@@ -524,7 +528,7 @@ impl EditCommand for AddMember {
 }
 
 /// モデル末尾の部材を除去する（部材を末尾へ追加するコマンドの逆操作）。
-/// `elems` の件数分だけ末尾から取り除く（生成直後の undo を想定し、末尾＝生成分）。
+/// `elems` の件数分だけ末尾から取り除く。対象に BRB 検定属性があれば除去を拒否する。
 /// 逆操作は [`PushTailMembers`]（同じ部材の末尾再追加）。
 pub struct PopTailMembers {
     pub elems: Vec<sepika_core::model::ElementData>,
@@ -534,6 +538,16 @@ impl EditCommand for PopTailMembers {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let k = self.elems.len();
         let start = model.elements.len().saturating_sub(k);
+        if let Some((index, attr)) = model.brb_attrs.iter().enumerate().find(|(_, attr)| {
+            model.elements[start..]
+                .iter()
+                .any(|elem| elem.id == attr.elem)
+        }) {
+            return Box::new(RejectedEdit(format!(
+                "部材 ID {} に座屈拘束ブレースの検定属性 brb_attrs[{index}] があるため、末尾部材を除去できません",
+                attr.elem.0
+            )));
+        }
         let removed: Vec<_> = model.elements.split_off(start);
         Box::new(PushTailMembers { elems: removed })
     }
@@ -550,6 +564,9 @@ pub struct PushTailMembers {
 
 impl EditCommand for PushTailMembers {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         for e in &self.elems {
             model.elements.push(e.clone());
         }
@@ -585,6 +602,9 @@ impl EditCommand for AddDamper {
         {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         let id = self.elem.id;
         model.elements.push(self.elem.clone());
         model.set_damper_props(id, Some(self.props));
@@ -617,6 +637,9 @@ impl EditCommand for AddIsolator {
             || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
             return Box::new(Noop);
+        }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
         }
         let id = self.elem.id;
         model.elements.push(self.elem.clone());
@@ -657,6 +680,9 @@ impl EditCommand for PlaceSupportIsolator {
         let idx = self.node.index();
         if idx >= model.nodes.len() || model.nodes[idx].id != self.node {
             return Box::new(Noop);
+        }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
         }
         let coord = model.nodes[idx].coord;
         let old_restraint = model.nodes[idx].restraint;

@@ -31,6 +31,7 @@ pub struct PrepareReport {
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
 ) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
+    model.validate_brb_references().map_err(|e| e.to_string())?;
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
     };
@@ -78,6 +79,9 @@ pub fn prepare_model(
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    model
+        .validate_brb_references()
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     model
         .validate_member_load_directions()
         .map_err(JobError::InvalidInput)?;
@@ -558,6 +562,34 @@ mod tests {
             .err()
             .unwrap();
         assert!(error.to_string().contains(&reason), "{error}");
+    }
+
+    #[test]
+    fn preparation_rejects_orphaned_brb_attribute_before_adding_a_panel() {
+        use sepika_core::model::BrbAttr;
+
+        let mut model = steel_panel_model();
+        let next_id = ElemId(model.elements.len() as u32);
+        let mut valid = model.clone();
+        assert_eq!(apply_rigid_zones_and_panels(&mut valid).unwrap().len(), 1);
+        assert!(valid.element(next_id).is_some());
+
+        model.brb_attrs.push(BrbAttr {
+            elem: next_id,
+            allowable_axial_short: Some(1_000_000.0),
+            critical_length: Some(4000.0),
+            length_reduction: Some(0.0),
+        });
+        let before = model.clone();
+        let reason = format!("brb_attrs[0].elem -> 部材 ID {}", next_id.0);
+        let error = apply_rigid_zones_and_panels(&mut model).unwrap_err();
+        assert!(error.contains(&reason), "{error}");
+        let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains(&reason), "{error}");
+        assert!(model.eq_ignoring_dofmap(&before));
     }
 
     #[test]

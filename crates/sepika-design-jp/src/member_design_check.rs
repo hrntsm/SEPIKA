@@ -296,6 +296,7 @@ pub fn run_member_design_checks(
     panel_moments: &[(NodeId, [f64; 2])],
     options: &MemberDesignCheckOptions<'_>,
 ) -> Result<MemberDesignCheckReport, String> {
+    model.validate_brb_references().map_err(|e| e.to_string())?;
     let mut elem_by_id = HashMap::with_capacity(model.elements.len());
     for e in &model.elements {
         elem_by_id.entry(e.id).or_insert(e);
