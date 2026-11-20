@@ -38,6 +38,7 @@ pub enum ModelTab {
     MemberDetails,
     /// S造検定属性（継手・スカラップ欠損率、横座屈長さ・座屈長さの直接入力）
     SteelAttrs,
+    SrcJointHoops,
     /// 通り芯（各通りの呼称。構造計算には用いない）
     Axes,
 }
@@ -1274,6 +1275,8 @@ pub struct UiModelScoped {
     /// モデルタブ「S造検定属性」フォームのドラフト状態
     #[cfg(feature = "gui")]
     pub steel_attr_draft: crate::tables::steel_attrs::SteelAttrDraft,
+    #[cfg(feature = "gui")]
+    pub(crate) src_joint_hoop_draft: Option<crate::tables::src_joint_hoops::Draft>,
 }
 
 impl Default for UiModelScoped {
@@ -1374,6 +1377,8 @@ impl Default for UiModelScoped {
             member_detail_draft: crate::tables::member_details::MemberDetailDraft::default(),
             #[cfg(feature = "gui")]
             steel_attr_draft: crate::tables::steel_attrs::SteelAttrDraft::default(),
+            #[cfg(feature = "gui")]
+            src_joint_hoop_draft: None,
         }
     }
 }

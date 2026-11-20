@@ -380,14 +380,21 @@ impl App {
                     );
                 }
                 self.core.analysis_cfg.mass_method = self.core.model.mass_method;
+                let mut weight_preparation_required = false;
                 if let Some(prep) =
                     self.decode_on_load::<PreparationResult>(contents.preparation, "準備計算の結果")
                 {
-                    if prep.is_current_contract() {
+                    if !prep.is_current_contract() {
+                        self.report_notice("保存された準備計算の計算契約版が異なります。準備計算を再実行してください。");
+                    } else if sepika_job::weight_preparation::require_current_generated_mass(
+                        &self.core.model,
+                    )
+                    .is_err()
+                    {
+                        weight_preparation_required = true;
+                    } else {
                         self.core.scoped.preparation = Some(prep);
                         self.core.scoped.staleness.preparation_stale = false;
-                    } else {
-                        self.report_notice("保存された準備計算の計算契約版が異なります。準備計算を再実行してください。");
                     }
                 }
                 if let Some(saved) =
@@ -440,6 +447,9 @@ impl App {
                     self.prune_orphan_vibration_cases();
                 }
                 self.core.scoped.project_path = Some(path);
+                if weight_preparation_required {
+                    self.report_notice("保存された地震用重量の生成記録が現在の入力または重量と一致しません。準備計算を再実行してください。");
+                }
             }
             Err(e) => self.report_error(format!("読込エラー: {}", e)),
         }

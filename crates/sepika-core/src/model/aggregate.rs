@@ -52,6 +52,9 @@ pub struct Model {
     pub lumped_skeleton_intervals: Vec<LumpedSkeletonInterval>,
     #[serde(default)]
     pub post_design_inputs: Vec<PostDesignInput>,
+    /// SRC柱梁接合部の構面ごとの帯筋指定。
+    #[serde(default)]
+    pub src_joint_hoops: Vec<SrcJointHoopAssignment>,
     /// 数量積算専用の設定。解析・検定の計算入力には含めない。
     #[serde(default)]
     pub quantity_cfg: QuantityCfg,
@@ -332,6 +335,25 @@ impl Model {
             }
         }
 
+        for assignment in &self.src_joint_hoops {
+            if self.node(assignment.node).is_none() {
+                return Err(CoreError::DanglingRef(format!(
+                    "SRC柱梁接合部の帯筋 -> 節点 {}",
+                    assignment.node.0
+                )));
+            }
+            for &id in assignment.columns.iter().chain(&assignment.beams) {
+                if !self
+                    .element(id)
+                    .is_some_and(|elem| elem.kind.is_primary_frame_support())
+                {
+                    return Err(CoreError::DanglingRef(format!(
+                        "SRC柱梁接合部 節点 {} の帯筋 -> 部材 {}",
+                        assignment.node.0, id.0
+                    )));
+                }
+            }
+        }
         for &elem in self.slab_composite_attrs.keys() {
             if self.element(elem).is_none() {
                 return Err(CoreError::DanglingRef(format!(
@@ -1408,7 +1430,7 @@ impl Model {
         }
     }
 
-    /// 通り芯・保存波形設定・数量設定・層間変形角の参考比較設定を除いた計算入力照合用モデルを返す。
+    /// 通り芯・保存波形設定・数量設定・層間変形角の参考比較設定・SRC接合部の帯筋指定を除いた計算入力照合用モデルを返す。
     pub fn calculation_model(&self) -> Self {
         let mut model = self.clone();
         for sm in model
@@ -1432,6 +1454,7 @@ impl Model {
             sm.display_local_axis = None;
         }
         model.axes.clear();
+        model.src_joint_hoops.clear();
         model.quantity_cfg = QuantityCfg::default();
         model.stress_cfg.drift_limit_denom = StressAnalysisCfg::default().drift_limit_denom;
         model.vibration_cases.clear();
@@ -1442,6 +1465,7 @@ impl Model {
     pub fn eq_ignoring_dofmap(&self, other: &Self) -> bool {
         self.lumped_skeleton_intervals == other.lumped_skeleton_intervals
             && self.post_design_inputs == other.post_design_inputs
+            && self.src_joint_hoops == other.src_joint_hoops
             && self.secondary_beam_bolts == other.secondary_beam_bolts
             && self.quantity_cfg == other.quantity_cfg
             && self.nodes == other.nodes
@@ -1522,6 +1546,9 @@ impl Model {
     /// **`NodeId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**
     /// （`validate`・`eq_ignoring_dofmap` と同様）。
     pub fn visit_node_ids(&mut self, mut f: impl FnMut(&mut NodeId)) {
+        for assignment in &mut self.src_joint_hoops {
+            f(&mut assignment.node);
+        }
         for input in &mut self.stb_strengths.members {
             f(&mut input.node);
             for node in &mut input.node_order {
@@ -1843,6 +1870,13 @@ impl Model {
     /// 要素の追加・削除に伴う ID 繰上げ／繰下げで、参照整合を保つために用いる
     /// （要素自身の ID・部材荷重も含めた全参照は [`Model::visit_elem_ids`]）。
     pub fn shift_elem_attr_refs(&mut self, mut f: impl FnMut(&mut ElemId)) {
+        for member in self
+            .src_joint_hoops
+            .iter_mut()
+            .flat_map(|assignment| assignment.columns.iter_mut().chain(&mut assignment.beams))
+        {
+            f(member);
+        }
         macro_rules! shift {
             (slab_composite_attrs) => {
                 self.slab_composite_attrs = std::mem::take(&mut self.slab_composite_attrs)

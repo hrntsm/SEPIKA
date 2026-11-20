@@ -46,7 +46,7 @@ impl SepikaServer {
 
 #[tool_router]
 impl SepikaServer {
-    #[tool(description = "節点・部材・断面・壁版・床板・床領域を検索する")]
+    #[tool(description = "節点・部材・断面・壁版・床板・床領域・SRC接合部帯筋を検索する")]
     pub async fn model_query(
         &self,
         Parameters(args): Parameters<QueryArgs>,
@@ -54,7 +54,10 @@ impl SepikaServer {
         let st = self.state.lock().await;
         let items = super::query_model(&st.model, &args.kind, args.filter.as_deref())
             .map_err(|e| ErrorData::invalid_params(e, None))?;
-        let result = QueryResult { items };
+        let result = QueryResult {
+            items,
+            query_token: (args.kind == "src_joint_hoops").then(|| st.src_joint_hoops_query_token()),
+        };
         Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
@@ -252,7 +255,7 @@ impl ServerHandler for SepikaServer {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct QueryArgs {
-    /// 対応種別: stb_strengths, rebar_notices, strength_diagnostics, resolved_strengths, source_stories, source_story_diagnostics, node/nodes, member/members/element/elements, section/sections, wall_plate/wall_plates, slab/slabs, floor_region/floor_regions, wall_region/wall_regions, floor_assignment_region/floor_assignment_regions, wall_assignment_region/wall_assignment_regions, secondary_member_end/secondary_member_ends, unassigned_beam/unassigned_beams, unassigned_post/unassigned_posts, secondary_beam/secondary_beams。未知の値は入力エラー。
+    /// 対応種別: src_joint_hoops, stb_strengths, rebar_notices, strength_diagnostics, resolved_strengths, source_stories, source_story_diagnostics, node/nodes, member/members/element/elements, section/sections, wall_plate/wall_plates, slab/slabs, floor_region/floor_regions, wall_region/wall_regions, floor_assignment_region/floor_assignment_regions, wall_assignment_region/wall_assignment_regions, secondary_member_end/secondary_member_ends, unassigned_beam/unassigned_beams, unassigned_post/unassigned_posts, secondary_beam/secondary_beams。未知の値は入力エラー。
     pub kind: String,
     pub filter: Option<String>,
 }
@@ -268,6 +271,8 @@ pub struct EditArgs {
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct QueryResult {
     pub items: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_token: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -839,6 +844,275 @@ mod tests {
         assert_eq!(value["status"], "unavailable");
         assert!(value["totals"].is_null());
         assert!(value["reason"].is_string());
+    }
+
+    mod src_joint_hoop_fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/src_joint_hoops_model.rs"
+        ));
+    }
+
+    async fn query_src_joint_hoops(server: &SepikaServer) -> serde_json::Value {
+        let result = server
+            .model_query(Parameters(QueryArgs {
+                kind: "src_joint_hoops".into(),
+                filter: None,
+            }))
+            .await
+            .unwrap();
+        serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap()
+    }
+
+    #[tokio::test]
+    async fn src_joint_hoops_mcp_tools_edit_two_planes_and_reject_other_directions() {
+        use self::src_joint_hoop_fixture as fixture;
+        use serde_json::{json, Value};
+
+        let server = SepikaServer::new(make_state(
+            fixture::frame(),
+            &test_store_dir("src_joint_hoops"),
+        ));
+        let baseline = query_src_joint_hoops(&server).await;
+        let mut edit = json!({
+            "command": "SetSrcJointHoops",
+            "node": fixture::NODE,
+            "axis": fixture::X,
+            "query_token": baseline["query_token"],
+            "hoops": fixture::example_hoops(),
+        });
+        assert_eq!(baseline["items"].as_array().unwrap().len(), 2);
+        assert!(baseline["items"][1]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("未入力"));
+        let reply = server
+            .model_edit(Parameters(EditArgs { body: edit.clone() }))
+            .await
+            .unwrap();
+        let reply: Value = serde_json::from_str(&reply.content[0].as_text().unwrap().text).unwrap();
+        assert_eq!(reply["applied"], true);
+
+        let after_x = query_src_joint_hoops(&server).await;
+        edit["axis"] = json!(fixture::Y);
+        edit["query_token"] = after_x["query_token"].clone();
+        let mut missing_token = edit.clone();
+        missing_token.as_object_mut().unwrap().remove("query_token");
+        let mut missing = edit.clone();
+        missing.as_object_mut().unwrap().remove("hoops");
+        let mut wrong_diameter = edit.clone();
+        wrong_diameter["hoops"]["diameter"] = json!("D12");
+        let mut fractional_legs = edit.clone();
+        fractional_legs["hoops"]["effective_legs"] = json!(2.5);
+        for (body, reason) in [
+            (missing_token, "query_token"),
+            (missing, "hoops"),
+            (wrong_diameter, "D12"),
+            (fractional_legs, "2.5"),
+        ] {
+            let error = server
+                .model_edit(Parameters(EditArgs { body }))
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+            assert!(error.message.contains("節点 1"), "{error:?}");
+            assert!(error.message.contains("[0.0, 1.0, 0.0]"), "{error:?}");
+            assert!(error.message.contains(reason), "{error:?}");
+        }
+        for (axis, grade, spacing, reason) in [
+            (fixture::Y, "SD295X", 425.0, "材種"),
+            (fixture::Y, "SD345", 0.0, "間隔"),
+            ([0.6, 0.8, 0.0], "SD345", 425.0, "一意に確認"),
+        ] {
+            edit["axis"] = json!(axis);
+            edit["hoops"]["grade"] = json!(grade);
+            edit["hoops"]["spacing_mm"] = json!(spacing);
+            let error = server
+                .model_edit(Parameters(EditArgs { body: edit.clone() }))
+                .await
+                .unwrap_err();
+            assert!(error.message.contains(reason), "{error:?}");
+        }
+        let mut excessive_ratio = edit.clone();
+        excessive_ratio["axis"] = json!(fixture::Y);
+        excessive_ratio["hoops"]["spacing_mm"] = json!(1.0);
+        excessive_ratio["hoops"]["width_mm"] = json!(253.4);
+        let error = server
+            .model_edit(Parameters(EditArgs {
+                body: excessive_ratio,
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(error.message.contains("節点 1") && error.message.contains("[0.0, 1.0, 0.0]"));
+        assert!(error.message.contains("帯筋比には0より大きく1未満"));
+        let queried = query_src_joint_hoops(&server).await;
+        assert_eq!(queried, after_x);
+        assert_eq!(queried["items"][1], baseline["items"][1]);
+        assert!(
+            (queried["items"][0]["prepared"]["ratio"].as_f64().unwrap() - 0.0007452941176470588)
+                .abs()
+                < 1e-15
+        );
+        assert_eq!(
+            queried["items"][0]["prepared"]["allowable_tension_n_per_mm2"],
+            295.0
+        );
+
+        edit["axis"] = queried["items"][1]["axis"].clone();
+        edit["hoops"]["spacing_mm"] = json!(250.0);
+        server
+            .model_edit(Parameters(EditArgs { body: edit.clone() }))
+            .await
+            .unwrap();
+        let queried = query_src_joint_hoops(&server).await;
+        assert_eq!(queried["items"][0]["beam_ids"], json!([1, 3]));
+        assert_eq!(queried["items"][1]["beam_ids"], json!([2]));
+        assert_eq!(queried["items"][0]["column_ids"], json!([0]));
+        assert_eq!(queried["items"][1]["assignments"][0]["columns"], json!([0]));
+        assert_eq!(
+            queried["items"][1]["assignments"][0]["hoops"],
+            edit["hoops"]
+        );
+        assert_eq!(
+            queried["items"][1]["prepared"]["allowable_tension_n_per_mm2"],
+            345.0
+        );
+
+        edit["query_token"] = queried["query_token"].clone();
+        edit["hoops"] = Value::Null;
+        server
+            .model_edit(Parameters(EditArgs { body: edit }))
+            .await
+            .unwrap();
+        assert_eq!(
+            query_src_joint_hoops(&server).await["items"][1],
+            baseline["items"][1]
+        );
+    }
+
+    #[tokio::test]
+    async fn src_joint_hoops_mcp_rejects_edits_from_before_a_beam_moves_to_another_plane() {
+        use self::src_joint_hoop_fixture as fixture;
+        use serde_json::{json, Value};
+
+        fn x_plane(query: &Value) -> &Value {
+            query["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["axis"] == json!(fixture::X))
+                .unwrap()
+        }
+
+        let server = SepikaServer::new(make_state(
+            fixture::frame(),
+            &test_store_dir("src_joint_hoops_stale"),
+        ));
+        let initial = query_src_joint_hoops(&server).await;
+        assert_eq!(x_plane(&initial)["beam_ids"], json!([1, 3]));
+        let mut edit = json!({
+            "command": "SetSrcJointHoops",
+            "node": x_plane(&initial)["node"],
+            "axis": x_plane(&initial)["axis"],
+            "query_token": initial["query_token"],
+            "hoops": fixture::example_hoops(),
+        });
+        server
+            .model_edit(Parameters(EditArgs { body: edit.clone() }))
+            .await
+            .unwrap();
+        let confirmed = query_src_joint_hoops(&server).await;
+        edit["query_token"] = confirmed["query_token"].clone();
+        let body = json!({
+            "command": "SetMemberEndOffsets",
+            "member": {"Primary": 1},
+            "end_offsets_mm": [[0.0, 0.0, 0.0], [0.0, 1000.0, 0.0]],
+        });
+        server
+            .model_edit(Parameters(EditArgs { body }))
+            .await
+            .unwrap();
+
+        let changed = query_src_joint_hoops(&server).await;
+        assert_ne!(changed["query_token"], confirmed["query_token"]);
+        assert_eq!(x_plane(&changed)["axis"], edit["axis"]);
+        assert_eq!(x_plane(&changed)["beam_ids"], json!([3]));
+        assert!(changed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["beam_ids"] == json!([1])));
+        assert!(x_plane(&changed)["prepared"].is_null());
+        let mut clear = edit.clone();
+        clear["hoops"] = Value::Null;
+        for body in [edit.clone(), clear] {
+            let error = server
+                .model_edit(Parameters(EditArgs { body }))
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+            assert!(error.message.contains("節点 1"), "{error:?}");
+            assert!(error.message.contains("[1.0, 0.0, 0.0]"), "{error:?}");
+            assert!(error.message.contains("構面を再照会"), "{error:?}");
+            assert_eq!(query_src_joint_hoops(&server).await, changed);
+        }
+
+        edit["query_token"] = changed["query_token"].clone();
+        server
+            .model_edit(Parameters(EditArgs { body: edit }))
+            .await
+            .unwrap();
+        let updated = query_src_joint_hoops(&server).await;
+        assert_eq!(x_plane(&updated)["assignments"][0]["beams"], json!([3]));
+        assert_eq!(
+            x_plane(&updated)["prepared"]["allowable_tension_n_per_mm2"],
+            295.0
+        );
+    }
+
+    #[tokio::test]
+    async fn src_joint_hoops_mcp_rejects_a_query_token_from_another_server() {
+        use self::src_joint_hoop_fixture as fixture;
+        use serde_json::{json, Value};
+
+        let old_server = SepikaServer::new(make_state(
+            fixture::frame(),
+            &test_store_dir("src_joint_hoops_old_server"),
+        ));
+        let new_server = SepikaServer::new(make_state(
+            fixture::frame(),
+            &test_store_dir("src_joint_hoops_new_server"),
+        ));
+        let old = query_src_joint_hoops(&old_server).await;
+        let current = query_src_joint_hoops(&new_server).await;
+        assert_eq!(old["items"], current["items"]);
+        assert_ne!(old["query_token"], current["query_token"]);
+
+        let mut body = json!({
+            "command": "SetSrcJointHoops",
+            "node": fixture::NODE,
+            "axis": fixture::X,
+            "query_token": old["query_token"],
+            "hoops": fixture::example_hoops(),
+        });
+        let error = new_server
+            .model_edit(Parameters(EditArgs { body: body.clone() }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(error.message.contains("節点 1"), "{error:?}");
+        assert!(error.message.contains("[1.0, 0.0, 0.0]"), "{error:?}");
+        assert!(error.message.contains("構面を再照会"), "{error:?}");
+        assert_eq!(query_src_joint_hoops(&new_server).await, current);
+
+        body["query_token"] = current["query_token"].clone();
+        let reply = new_server
+            .model_edit(Parameters(EditArgs { body }))
+            .await
+            .unwrap();
+        let reply: Value = serde_json::from_str(&reply.content[0].as_text().unwrap().text).unwrap();
+        assert_eq!(reply["applied"], true);
     }
 
     fn done_summary(status: &JobStatus) -> serde_json::Value {

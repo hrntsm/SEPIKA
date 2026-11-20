@@ -68,6 +68,97 @@ fn save_and_open(app: &mut App, path: &std::path::Path) -> App {
 }
 
 #[test]
+fn saved_preparation_requires_current_generated_seismic_weights() {
+    use sepika_io::ovika::{save_ovika, OvikaExtras};
+    use sepika_job::weight_preparation::require_current_generated_mass;
+
+    let mut app = app(true);
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.last_error.is_none());
+    let prepared = rmp_serde::to_vec_named(app.core.scoped.preparation.as_ref().unwrap()).unwrap();
+    assert!(app.core.model.seismic_weight_generation.is_some());
+    require_current_generated_mass(&app.core.model).unwrap();
+
+    let last_static = app.core.scoped.last_static.unwrap();
+    let mut bundle = app.core.scoped.results.clone().unwrap();
+    for (key, input) in &mut bundle.input_records {
+        if matches!(key, ResultInputKey::Static(_)) {
+            *input = b"old-static-input".to_vec();
+        }
+    }
+    let old_results = rmp_serde::to_vec_named(&SavedResults {
+        bundle,
+        last_static: Some(last_static),
+        pushover_view_dir: None,
+        view_vibration_case: None,
+        view_lumped_vibration_case: None,
+        last_run: app.core.scoped.staleness.last_run,
+    })
+    .unwrap();
+
+    for (name, stale) in [
+        ("weights-old", true),
+        ("weights-current", false),
+        ("weights-none", false),
+    ] {
+        let mut model = app.core.model.clone();
+        if stale {
+            model.seismic_weight_generation.as_mut().unwrap().input_key =
+                b"old-weight-input".to_vec();
+        } else if name == "weights-none" {
+            model.seismic_weight_generation = None;
+        }
+        let path = path(name);
+        save_ovika(
+            &path,
+            &model,
+            OvikaExtras {
+                preparation: Some(&prepared),
+                results: stale.then_some(old_results.as_slice()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut opened = App::default();
+        opened.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+        assert!(
+            opened.core.scoped.last_error.is_none(),
+            "{:?}",
+            opened.core.scoped.last_error
+        );
+        assert_eq!(opened.core.scoped.preparation.is_none(), stale, "{name}");
+        assert_eq!(
+            opened.core.scoped.staleness.preparation_stale, stale,
+            "{name}"
+        );
+
+        if stale {
+            assert!(opened.core.scoped.last_static.is_none());
+            assert!(opened.core.scoped.staleness.results_stale);
+            let static_notice = opened
+                .core
+                .scoped
+                .result_contract_notice
+                .as_deref()
+                .unwrap();
+            assert!(opened
+                .core
+                .log
+                .entries
+                .iter()
+                .any(|entry| entry.message == static_notice));
+            let notice = opened.core.scoped.last_notice.as_deref().unwrap();
+            assert!(notice.contains("地震用重量") && notice.contains("準備計算を再実行"));
+            opened.run_preparation();
+            assert!(opened.core.scoped.preparation.is_some());
+            assert!(!opened.core.scoped.staleness.preparation_stale);
+            require_current_generated_mass(&opened.core.model).unwrap();
+        }
+    }
+}
+
+#[test]
 fn shortened_beam_normal_save_preserves_inputs_without_repreparation_and_supports_undo_redo() {
     let mut app = app(true);
     app.run_linear_static(LoadCaseId(0));

@@ -10,6 +10,10 @@ pub fn query_model(
 ) -> Result<Vec<serde_json::Value>, String> {
     use serde_json::json;
     let items: Vec<serde_json::Value> = match kind {
+        "src_joint_hoops" => sepika_design_jp::srrc::joint_hoops::src_joint_hoop_input_statuses(model)
+            .into_iter()
+            .map(|entry| json!(entry))
+            .collect(),
         "stb_strengths" => vec![serde_json::to_value(&model.stb_strengths).unwrap()],
         "rebar_notices" => model.stb_rebar_notices().into_iter().map(|message| json!({"message":message,"blocking":false})).collect(),
         "strength_diagnostics" => model.stb_strength_diagnostics().into_iter().map(|message| json!({"message":message})).collect(),
@@ -194,7 +198,7 @@ pub fn query_model(
             .beams()
             .map(|sm| serde_json::to_value(sm).unwrap_or(json!(null)))
             .collect(),
-        _ => return Err(format!("未知の kind: {kind}。対応種別: stb_strengths, rebar_notices, strength_diagnostics, resolved_strengths, source_stories, source_story_diagnostics, node/nodes, member/members/element/elements, section/sections, wall_plate/wall_plates, slab/slabs, floor_region/floor_regions, wall_region/wall_regions, floor_assignment_region/floor_assignment_regions, wall_assignment_region/wall_assignment_regions, secondary_member_end/secondary_member_ends, unassigned_beam/unassigned_beams, unassigned_post/unassigned_posts, secondary_beam/secondary_beams")),
+        _ => return Err(format!("未知の kind: {kind}。対応種別: src_joint_hoops, stb_strengths, rebar_notices, strength_diagnostics, resolved_strengths, source_stories, source_story_diagnostics, node/nodes, member/members/element/elements, section/sections, wall_plate/wall_plates, slab/slabs, floor_region/floor_regions, wall_region/wall_regions, floor_assignment_region/floor_assignment_regions, wall_assignment_region/wall_assignment_regions, secondary_member_end/secondary_member_ends, unassigned_beam/unassigned_beams, unassigned_post/unassigned_posts, secondary_beam/secondary_beams")),
     };
     Ok(match filter {
         Some(f) if !f.is_empty() => items

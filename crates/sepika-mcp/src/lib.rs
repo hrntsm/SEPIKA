@@ -82,6 +82,7 @@ impl JobRegistry {
 /// 結果ストア本体（具象型 `FsResultStore` を直接保持し、書き込み後に `sync()` を呼ぶ）。
 pub struct ServerState {
     pub model: Model,
+    query_session: uuid::Uuid,
     pub undo: UndoStack,
     pub jobs: std::sync::Arc<std::sync::Mutex<JobRegistry>>,
     pub results: sepika_io::results::FsResultStore,
@@ -92,10 +93,15 @@ impl ServerState {
     pub fn with_fs_store(model: Model, dir: impl Into<PathBuf>) -> std::io::Result<Self> {
         Ok(Self {
             model,
+            query_session: uuid::Uuid::new_v4(),
             undo: UndoStack::new(),
             jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
             results: sepika_io::results::FsResultStore::open(dir)?,
         })
+    }
+
+    fn src_joint_hoops_query_token(&self) -> String {
+        format!("{}:{}", self.query_session, self.undo.revision())
     }
 }
 

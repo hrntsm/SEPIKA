@@ -103,6 +103,7 @@ impl App {
                 ("壁版", ModelTab::WallPlates),
                 ("部材付帯情報", ModelTab::MemberDetails),
                 ("S造検定属性", ModelTab::SteelAttrs),
+                ("SRC接合部帯筋", ModelTab::SrcJointHoops),
                 ("通り芯", ModelTab::Axes),
             ];
             for (label, sub) in &subs {
@@ -140,6 +141,7 @@ impl App {
                 crate::tables::member_details::member_details_table(ui, self)
             }
             ModelTab::SteelAttrs => crate::tables::steel_attrs::steel_attrs_table(ui, self),
+            ModelTab::SrcJointHoops => crate::tables::src_joint_hoops::table(ui, self),
             ModelTab::Axes => crate::tables::axes::axes_table(ui, self),
         }
     }
