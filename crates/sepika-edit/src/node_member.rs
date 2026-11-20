@@ -528,7 +528,7 @@ impl EditCommand for AddMember {
 }
 
 /// モデル末尾の部材を除去する（部材を末尾へ追加するコマンドの逆操作）。
-/// `elems` の件数分だけ末尾から取り除く（生成直後の undo を想定し、末尾＝生成分）。
+/// `elems` の件数分だけ末尾から取り除く。対象に BRB 検定属性があれば除去を拒否する。
 /// 逆操作は [`PushTailMembers`]（同じ部材の末尾再追加）。
 pub struct PopTailMembers {
     pub elems: Vec<sepika_core::model::ElementData>,
@@ -538,6 +538,16 @@ impl EditCommand for PopTailMembers {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let k = self.elems.len();
         let start = model.elements.len().saturating_sub(k);
+        if let Some((index, attr)) = model.brb_attrs.iter().enumerate().find(|(_, attr)| {
+            model.elements[start..]
+                .iter()
+                .any(|elem| elem.id == attr.elem)
+        }) {
+            return Box::new(RejectedEdit(format!(
+                "部材 ID {} に座屈拘束ブレースの検定属性 brb_attrs[{index}] があるため、末尾部材を除去できません",
+                attr.elem.0
+            )));
+        }
         let removed: Vec<_> = model.elements.split_off(start);
         Box::new(PushTailMembers { elems: removed })
     }

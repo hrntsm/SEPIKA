@@ -3900,7 +3900,7 @@ fn deleting_a_brb_detaches_all_its_product_values_before_id_reuse() {
             tension_only: false,
         };
     }
-    model.brb_attrs = [(1, 100_000.0), (1, 200_000.0)]
+    model.brb_attrs = [(1, 100_000.0), (2, 300_000.0), (1, 200_000.0)]
         .into_iter()
         .map(|(id, allowable_axial_short)| BrbAttr {
             elem: ElemId(id),
@@ -3910,22 +3910,62 @@ fn deleting_a_brb_detaches_all_its_product_values_before_id_reuse() {
         })
         .collect();
     let before = model.clone();
+    let mut surviving = before.brb_attrs[1].clone();
+    surviving.elem = ElemId(1);
 
     let mut stack = UndoStack::new();
     assert!(stack.run(&mut model, Box::new(DeleteMember { id: ElemId(1) })));
     assert_eq!(model.elements[1].nodes, before.elements[2].nodes);
-    assert!(model.brb_attrs.is_empty());
+    assert_eq!(model.brb_attrs.as_slice(), std::slice::from_ref(&surviving));
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     stack.redo(&mut model);
-    assert!(model.brb_attrs.is_empty());
+    assert_eq!(model.brb_attrs.as_slice(), std::slice::from_ref(&surviving));
 
     let mut elem = before.elements[0].clone();
     elem.id = ElemId(2);
     elem.nodes = smallvec![NodeId(0), NodeId(3)];
     assert!(stack.run(&mut model, Box::new(AddMember { elem })));
-    assert!(model.brb_attrs.is_empty());
+    assert_eq!(model.brb_attrs, [surviving]);
     model.validate_reference_ids().unwrap();
+}
+
+#[test]
+fn tail_member_removal_preserves_brb_references() {
+    use sepika_core::model::BrbAttr;
+
+    let mut model = seeded_model(3, 2);
+    model.brb_attrs.push(BrbAttr {
+        elem: ElemId(1),
+        allowable_axial_short: Some(100_000.0),
+        critical_length: Some(4000.0),
+        length_reduction: Some(0.0),
+    });
+    let before = model.clone();
+    let pop = PopTailMembers {
+        elems: vec![model.elements[1].clone()],
+    };
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(pop)));
+    let reason = stack.last_error().unwrap();
+    assert!(reason.contains("部材 ID 1"), "{reason}");
+    assert!(reason.contains("brb_attrs[0]"), "{reason}");
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert!(!stack.can_undo());
+
+    model.brb_attrs[0].elem = ElemId(0);
+    let before = model.clone();
+    let pop = PopTailMembers {
+        elems: vec![model.elements[1].clone()],
+    };
+    assert!(stack.run(&mut model, Box::new(pop)));
+    assert_eq!(model.elements, before.elements[..1]);
+    assert_eq!(model.brb_attrs, before.brb_attrs);
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    stack.redo(&mut model);
+    assert_eq!(model.elements, before.elements[..1]);
+    assert_eq!(model.brb_attrs, before.brb_attrs);
 }
 
 /// `CompositeCommand`: ペースト相当（既存セルの `SetNodeCoord` ×2 ＋行追加の

@@ -12,7 +12,8 @@ use super::*;
 pub struct ElemAttrs {
     pub wall: Option<WallAttr>,
     pub steel_design: Option<SteelDesignAttr>,
-    pub brb: Vec<BrbAttr>,
+    /// (元の属性位置, 属性) を位置の昇順で保持する。
+    pub brb: Vec<(usize, BrbAttr)>,
     pub pca: Option<PcaGirderAttr>,
     pub isolator: Option<IsolatorAttr>,
     pub hysteresis: Option<MemberHysteresisAttr>,
@@ -1841,11 +1842,19 @@ impl Model {
                 .position(|a| get(a) == elem)
                 .map(|pos| v.remove(pos))
         }
+        let brb = self
+            .brb_attrs
+            .iter()
+            .enumerate()
+            .filter(|(_, attr)| attr.elem == elem)
+            .map(|(index, attr)| (index, attr.clone()))
+            .collect();
+        self.brb_attrs.retain(|attr| attr.elem != elem);
         ElemAttrs {
             wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
             steel_design: take_first(&mut self.steel_design_attrs, |a| a.elem, elem),
             slab_composite: self.slab_composite_attrs.remove(&elem),
-            brb: self.brb_attrs.extract_if(.., |a| a.elem == elem).collect(),
+            brb,
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
             isolator: take_first(&mut self.isolator_attrs, |a| a.elem, elem),
             hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
@@ -1868,9 +1877,9 @@ impl Model {
         if let Some(connection) = attrs.slab_composite {
             self.slab_composite_attrs.insert(elem, connection);
         }
-        for mut a in attrs.brb {
+        for (index, mut a) in attrs.brb {
             a.elem = elem;
-            self.brb_attrs.push(a);
+            self.brb_attrs.insert(index.min(self.brb_attrs.len()), a);
         }
         if let Some(mut a) = attrs.pca {
             a.elem = elem;
