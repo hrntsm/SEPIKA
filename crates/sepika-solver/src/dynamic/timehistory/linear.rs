@@ -32,6 +32,7 @@ use sepika_math::sparse::sparse_matvec;
 /// `newmark.dt == 0.0` のときは `wave.dt` を採用する。
 /// `record_every` は詳細記録（[`super::ThRecording`]）の間引き係数。`None` は
 /// 自動決定（`super::recording::auto_record_every`）。
+/// 応答または断面力に非有限値が生じると、そのステップの時刻と理由を返す。
 #[allow(clippy::too_many_arguments)]
 pub fn linear_time_history_analysis(
     model: &Model,
@@ -167,6 +168,9 @@ pub fn linear_time_history_until_with_force_observer(
     let mut rhs_a0 = vec![0.0; n_indep];
     for i in 0..n_indep {
         rhs_a0[i] = p_red_0[i] - cv0[i] - ku0[i];
+    }
+    if rhs_a0.iter().any(|v| !v.is_finite()) {
+        return Err(step_error(0, 0.0, "初期加速度の右辺に非有限値があります"));
     }
     let a = solve_initial_accel(&setup.m_red, &rhs_a0, n_indep)?;
 
@@ -360,6 +364,12 @@ fn validate_wall_connection(model: &Model) -> Result<(), SolveError> {
     .map_err(SolveError::InvalidInput)
 }
 
+fn step_error(step: u64, time_s: f64, reason: &str) -> SolveError {
+    SolveError::Backend(format!(
+        "線形時刻歴・step {step}・時刻 {time_s} s: {reason}"
+    ))
+}
+
 /// 時刻歴ステップを `start_step` から `wave` の終端まで進める内部関数。
 /// `start_step` は既に確定した状態（u, v, a は step `start_step` の値）。
 /// 次のステップ `start_step` → `start_step+1` は `wave[start_step + 1]` を使う。
@@ -408,16 +418,8 @@ fn run_steps(
     let mut u_free = vec![0.0f64; n_free];
     let mut v_free = vec![0.0f64; n_free];
     let mut a_free = vec![0.0f64; n_free];
-    reducer.expand_u_into(&u, &mut u_free);
-    reducer.expand_u_into(&v, &mut v_free);
-    reducer.expand_u_into(&a, &mut a_free);
-
     let mut peak_disp_free = vec![0.0f64; n_free];
-    for i in 0..n_free {
-        peak_disp_free[i] = peak_disp_free[i].max(u_free[i].abs());
-    }
     let mut story_drift_angle = vec![0.0f64; model.layer_count()];
-    update_story_drift(model, dofmap, &u_free, &mut story_drift_angle);
 
     let n_steps = wave.accel_x.len() - 1;
     let end_step = end_step.unwrap_or(n_steps as u64);
@@ -426,31 +428,11 @@ fn run_steps(
             "再開ステップが波形の終端を超えています。".into(),
         ));
     }
-    let mut time = Vec::with_capacity(n_steps - start_step as usize + 1);
-    time.push(start_step as f64 * dt);
-
+    let mut time = Vec::with_capacity((end_step - start_step + 1) as usize);
     let mut ma_free = vec![0.0f64; n_free];
-    sparse_matvec_into(m_free, &a_free, &mut ma_free);
 
     let mut recorder =
         ThRecorder::new(model, dofmap, n_steps, record_every).with_force_observer(observer);
-    let (xg_x_init, xg_y_init) = accel_xy_at(wave, start_step as usize);
-    let mf_init = member_forces_linear(dofmap, behaviors, &u_free);
-    recorder.record_step(
-        start_step,
-        start_step as f64 * dt,
-        model,
-        dofmap,
-        m_r_x,
-        m_r_y,
-        &ma_free,
-        &u_free,
-        &v_free,
-        &a_free,
-        xg_x_init,
-        xg_y_init,
-        &mf_init,
-    );
 
     let record_dir_y = choose_record_dir_y(wave);
     let dir_idx = if record_dir_y { 1 } else { 0 };
@@ -461,17 +443,6 @@ fn run_steps(
         ..Default::default()
     };
     let rmr_record = total_mass(m_r_record, dofmap, model.nodes.len(), dir_idx);
-    let xg_init = accel_dir_at(wave, start_step as usize, record_dir_y);
-    record_history_step(
-        &mut history,
-        model,
-        dofmap,
-        dir_idx,
-        rmr_record,
-        &u_free,
-        &ma_free,
-        xg_init,
-    );
 
     let mut p_free_buf = vec![0.0f64; n_free];
     let mut p_red_buf = vec![0.0f64; n_indep];
@@ -482,43 +453,66 @@ fn run_steps(
     let mut p_eff_buf = vec![0.0f64; n_indep];
     let mut u_next_buf = vec![0.0f64; n_indep];
 
-    for n in start_step as usize..end_step as usize {
-        let t_next = (n + 1) as f64 * dt;
-        infl.force_at_into(wave, n + 1, &mut p_free_buf);
-        reducer.reduce_f_into(&p_free_buf, &mut p_red_buf);
-
-        for i in 0..n_indep {
-            mw_buf[i] = c1 * u[i] + c3 * v[i] + c4 * a[i];
-            cw_buf[i] = c2 * u[i] + c5 * v[i] + c6 * a[i];
+    for step in start_step..=end_step {
+        let time_s = step as f64 * dt;
+        if !time_s.is_finite() {
+            return Err(step_error(step, time_s, "時刻が非有限です"));
         }
-        sparse_matvec_into(m_red, &mw_buf, &mut m_mw_buf);
-        sparse_matvec_into(c_red, &cw_buf, &mut c_cw_buf);
+        if step > start_step {
+            infl.force_at_into(wave, step as usize, &mut p_free_buf);
+            reducer.reduce_f_into(&p_free_buf, &mut p_red_buf);
 
-        for i in 0..n_indep {
-            p_eff_buf[i] = p_red_buf[i] + m_mw_buf[i] + c_cw_buf[i];
+            for i in 0..n_indep {
+                mw_buf[i] = c1 * u[i] + c3 * v[i] + c4 * a[i];
+                cw_buf[i] = c2 * u[i] + c5 * v[i] + c6 * a[i];
+            }
+            sparse_matvec_into(m_red, &mw_buf, &mut m_mw_buf);
+            sparse_matvec_into(c_red, &cw_buf, &mut c_cw_buf);
+
+            for i in 0..n_indep {
+                p_eff_buf[i] = p_red_buf[i] + m_mw_buf[i] + c_cw_buf[i];
+            }
+
+            solver.solve_into(&p_eff_buf, &mut u_next_buf)?;
+
+            for i in 0..n_indep {
+                let a_new = c1 * (u_next_buf[i] - u[i]) - c3 * v[i] - c4 * a[i];
+                let v_new = v[i] + dt * ((1.0 - gamma) * a[i] + gamma * a_new);
+                v[i] = v_new;
+                a[i] = a_new;
+                u[i] = u_next_buf[i];
+            }
         }
 
-        solver.solve_into(&p_eff_buf, &mut u_next_buf)?;
-        let u_next = &u_next_buf;
-
-        for i in 0..n_indep {
-            let a_new = c1 * (u_next[i] - u[i]) - c3 * v[i] - c4 * a[i];
-            let v_new = v[i] + dt * ((1.0 - gamma) * a[i] + gamma * a_new);
-            v[i] = v_new;
-            a[i] = a_new;
-            u[i] = u_next[i];
+        if u.iter().chain(&v).chain(&a).any(|value| !value.is_finite()) {
+            return Err(step_error(step, time_s, "積分応答に非有限値があります"));
         }
-        time.push(t_next);
-
         reducer.expand_u_into(&u, &mut u_free);
+        reducer.expand_u_into(&v, &mut v_free);
+        reducer.expand_u_into(&a, &mut a_free);
+        sparse_matvec_into(m_free, &a_free, &mut ma_free);
+        if u_free
+            .iter()
+            .chain(&v_free)
+            .chain(&a_free)
+            .chain(&ma_free)
+            .any(|value| !value.is_finite())
+        {
+            return Err(step_error(
+                step,
+                time_s,
+                "自由度の応答または相対慣性力に非有限値があります",
+            ));
+        }
+        let member_forces = member_forces_linear(model, dofmap, behaviors, &u_free)
+            .map_err(|reason| step_error(step, time_s, &reason))?;
+
+        time.push(time_s);
         for i in 0..n_free {
             peak_disp_free[i] = peak_disp_free[i].max(u_free[i].abs());
         }
         update_story_drift(model, dofmap, &u_free, &mut story_drift_angle);
-        reducer.expand_u_into(&v, &mut v_free);
-        reducer.expand_u_into(&a, &mut a_free);
-        sparse_matvec_into(m_free, &a_free, &mut ma_free);
-        let xg_next = accel_dir_at(wave, n + 1, record_dir_y);
+        let xg = accel_dir_at(wave, step as usize, record_dir_y);
         record_history_step(
             &mut history,
             model,
@@ -527,14 +521,13 @@ fn run_steps(
             rmr_record,
             &u_free,
             &ma_free,
-            xg_next,
+            xg,
         );
 
-        let (xg_x_next, xg_y_next) = accel_xy_at(wave, n + 1);
-        let mf_now = member_forces_linear(dofmap, behaviors, &u_free);
+        let (xg_x, xg_y) = accel_xy_at(wave, step as usize);
         recorder.record_step(
-            (n + 1) as u64,
-            t_next,
+            step,
+            time_s,
             model,
             dofmap,
             m_r_x,
@@ -543,9 +536,9 @@ fn run_steps(
             &u_free,
             &v_free,
             &a_free,
-            xg_x_next,
-            xg_y_next,
-            &mf_now,
+            xg_x,
+            xg_y,
+            &member_forces,
         );
     }
 
