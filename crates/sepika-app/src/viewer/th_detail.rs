@@ -8,7 +8,7 @@
 //!   成分別（軸／せん断y／せん断z）表示に切り替わる（免震は水平せん断が既定）。
 //!   現在フレームの位置をループ上にマーカー表示し、フレームスライダーと連動する。
 //! - 短期の簡易検定: 内力包絡や軸力極値が生じた確定時刻の内力を用いる。
-//!   上下非対称組立H形鋼のS柱は軸力と正負の強軸曲げの極値が生じた確定時刻を照査する。
+//!   上下非対称組立H形鋼のS柱は全確定時刻の断面単独照査を表示する。
 //!
 //! ヒンジ詳細ウィンドウ（[`super::hinge`]）と同じ構成方針（`egui::Window` +
 //! `egui_plot`）を踏襲するが、対象データ（時刻歴の全フレーム記録）が異なるため
@@ -299,7 +299,10 @@ fn draw_th_detail_content_at(
         return;
     };
     let Some(recording) = th_result.recording.as_ref() else {
-        ui.colored_label(theme::GRAY_600, "時刻歴の詳細記録がありません。");
+        ui.colored_label(
+            theme::GRAY_600,
+            "時刻歴の詳細記録がないため、内力履歴と簡易検定を表示できません。確認するには解析を再実行してください。",
+        );
         return;
     };
     let th_nonlinear = th_result.nonlinear;
@@ -651,7 +654,7 @@ fn draw_peak_check(
     let model = &app.core.model;
     let signed_bending = uses_signed_bending_peaks(model, elem);
     ui.strong(if signed_bending {
-        "抽出時刻の簡易検定（短期）"
+        "時刻歴の簡易検定（短期）"
     } else {
         "最大応力に対する検定（短期）"
     });
@@ -689,6 +692,9 @@ fn draw_peak_check(
         );
     }
 
+    if signed_bending {
+        draw_asymmetric_column_section_history(ui, rec, elem_idx);
+    }
     let Some(peak) = rec
         .peak_member_forces
         .get(elem_idx)
@@ -721,12 +727,7 @@ fn draw_peak_check(
     let axial_peaks = rec.axial_force_peaks.get(elem_idx);
     let moment_peaks = rec.strong_axis_moment_peaks.get(&elem_idx);
     if signed_bending {
-        ui.colored_label(
-            theme::WARN_TEXT,
-            "上下非対称組立H形鋼柱は、各位置で引張・圧縮の軸力 N または正・負の強軸曲げ Mz が極値となった確定時刻の断面力を照査します。\
-             N・Mzがともに極値でない時刻や、せん断力などが厳しい時刻は、この抽出で漏れることがあります。\
-             全時刻の適否は未判定です。",
-        );
+        ui.label("軸力と正負の強軸曲げの極値が生じた確定時刻の検定");
         if axial_peaks.is_none() || moment_peaks.is_none() {
             ui.colored_label(
                 theme::WARN_TEXT,
@@ -1016,6 +1017,57 @@ fn draw_peak_check(
     }
 }
 
+fn draw_asymmetric_column_section_history(ui: &mut egui::Ui, rec: &ThRecording, elem_idx: usize) {
+    ui.strong("全確定時刻の断面単独照査");
+    ui.label("圧縮時または軸力ゼロ時に、同じ評価位置・時刻の軸力と強軸曲げから上下縁を照査します。部材全体の適否は未判定です。");
+    let Some(history) = rec.asymmetric_column_sections.get(&elem_idx) else {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "全確定時刻の断面照査の記録を取得できません。確認するには解析を再実行してください。",
+        );
+        return;
+    };
+    if history.committed_count == 0 {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "照査に必要な確定時刻の記録を取得できません。",
+        );
+    }
+    for reason in &history.unavailable {
+        ui.colored_label(theme::WARN_TEXT, format!("未算定：{reason}"));
+    }
+    for position in &history.positions {
+        ui.label(format!("評価位置 ξ={:.6}", position.xi));
+        if let Some(peak) = &position.peak {
+            let status = if peak.ratio > 1.0 { " (NG)" } else { "" };
+            let color = if peak.ratio > 1.0 {
+                theme::status_color(peak.ratio)
+            } else {
+                theme::GRAY_600
+            };
+            ui.colored_label(
+                color,
+                format!(
+                    "断面の検定比の下限 {:.5}{status}　t={:.6} s　N={:.3} kN　Mz={:.3} kN·m",
+                    peak.ratio,
+                    peak.time_s,
+                    peak.n_n / 1e3,
+                    peak.mz_nmm / 1e6,
+                ),
+            );
+        }
+        if position.observed_count < history.committed_count {
+            ui.colored_label(
+                theme::WARN_TEXT,
+                "未算定：この位置の断面力を取得できない確定時刻があります。",
+            );
+        }
+        for reason in &position.unavailable {
+            ui.colored_label(theme::WARN_TEXT, format!("未算定：{reason}"));
+        }
+    }
+}
+
 fn draw_peak_precheck(
     ui: &mut egui::Ui,
     peak: &MemberForces,
@@ -1296,7 +1348,7 @@ mod tests {
         let text = peak_check_text(&app, 0, [0.0, 0.0, 0.0, -100e6, 0.0, 0.0]);
         assert!(text.contains("最大応力に対する検定（短期）"), "{text}");
         assert!(text.contains("地震時 QD / 柱メカニズム"), "{text}");
-        assert!(!text.contains("抽出時刻の簡易検定"), "{text}");
+        assert!(!text.contains("全確定時刻の断面単独照査"), "{text}");
         assert!(text.contains("検定不能: ねじりモーメントMx"), "{text}");
     }
 
@@ -1383,7 +1435,7 @@ mod tests {
         std::fs::remove_file(path).unwrap();
 
         let text = asymmetric_history_labels(&mut restored);
-        assert!(text.contains("抽出時刻の簡易検定（短期）"), "{text}");
+        assert!(text.contains("時刻歴の簡易検定（短期）"), "{text}");
         assert!(!text.contains("最大応力に対する検定"), "{text}");
         assert!(!text.contains("地震時 QD / 柱メカニズム"), "{text}");
         assert!(
@@ -1401,7 +1453,7 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("地震動による応答成分のみ"), "{text}");
-        assert!(text.contains("全時刻の適否は未判定"), "{text}");
+        assert!(text.contains("部材全体の適否は未判定"), "{text}");
         assert!(!text.contains("内力包絡\n"), "{text}");
         assert!(!text.contains("(OK)"), "{text}");
 
@@ -1423,7 +1475,55 @@ mod tests {
     }
 
     #[test]
-    fn asymmetric_built_h_history_discloses_unselected_times_and_missing_peaks() {
+    fn asymmetric_built_h_confirmed_section_history_is_displayed_after_save_and_reopen() {
+        for nonlinear in [false, true] {
+            let mut app = App::default();
+            let model = crate::app::steel_column_k_tests::asymmetric_built_h_cantilever();
+            assert!(app.load_model(model));
+            app.generate_stories_action();
+            app.core.analysis_cfg.th_record_every = 3;
+            app.core.analysis_cfg.th_nonlinear = nonlinear;
+            app.core.analysis_cfg.th_apply_long_term = false;
+            app.run_time_history(sepika_solver::dynamic::timehistory::GroundMotion {
+                dt: 0.02,
+                accel_x: vec![0.0, 100.0, -100.0, 0.0],
+                accel_y: None,
+                accel_theta: None,
+            });
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            let text = asymmetric_history_labels(&mut app);
+            assert!(text.contains("全確定時刻の断面単独照査"), "{text}");
+            assert!(text.contains("断面の検定比の下限"), "{text}");
+            assert!(text.contains("曲げねじり座屈"), "{text}");
+            assert!(
+                !text.contains("全確定時刻の断面照査の記録を取得できません"),
+                "{text}"
+            );
+            assert!(!text.contains("(OK)"), "{text}");
+
+            let path = std::env::temp_dir().join(format!(
+                "steel-section-history-{}.ovika",
+                uuid::Uuid::new_v4()
+            ));
+            app.save_project_to(path.clone());
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            let mut restored = App::default();
+            restored.open_project_from(path.clone());
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(asymmetric_history_labels(&mut restored), text);
+        }
+    }
+
+    #[test]
+    fn asymmetric_built_h_legacy_history_discloses_missing_section_checks_and_peaks() {
         let mut app = App::default();
         let mut model = crate::app::steel_column_k_tests::asymmetric_built_h_cantilever();
         model.steel_design_attrs[0].lk_y_direct = Some(500.0);
@@ -1458,10 +1558,10 @@ mod tests {
         let text = asymmetric_history_labels(&mut app);
         assert!(text.contains("長期荷重を含まない"), "{text}");
         assert!(
-            text.contains("N・Mzがともに極値でない時刻や、せん断力などが厳しい時刻"),
+            text.contains("全確定時刻の断面照査の記録を取得できません"),
             "{text}"
         );
-        assert!(text.contains("全時刻の適否は未判定"), "{text}");
+        assert!(text.contains("部材全体の適否は未判定"), "{text}");
         assert!(text.contains("正曲げ側 t=2.000000 s"), "{text}");
         assert!(!text.contains("t=1.000000 s"), "{text}");
         assert!(!text.contains("(OK)") && !text.contains("(NG)"), "{text}");

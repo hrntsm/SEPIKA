@@ -22,13 +22,17 @@ mod result;
 
 pub use config::{GroundMotion, NewmarkCfg};
 pub use linear::{
-    linear_time_history_analysis, linear_time_history_from_state, linear_time_history_until,
-    linear_time_history_with_state,
+    linear_time_history_analysis, linear_time_history_from_state,
+    linear_time_history_from_state_with_force_observer, linear_time_history_until,
+    linear_time_history_until_with_force_observer, linear_time_history_with_state,
 };
-pub use nonlinear::{nonlinear_time_history_analysis, NonlinearThCfg};
+pub use nonlinear::{
+    nonlinear_time_history_analysis, nonlinear_time_history_with_force_observer, NonlinearThCfg,
+};
 pub use recording::uses_signed_bending_peaks;
 pub use result::{
-    AxialForcePeakSnapshot, AxialForcePeaks, ForcePeakSnapshot, ResponseHistory, ResponseResult,
+    AsymmetricColumnSectionHistory, AxialForcePeakSnapshot, AxialForcePeaks, ForcePeakSnapshot,
+    ResponseHistory, ResponseResult, SectionForceCheckPeak, SectionForceCheckPosition,
     StoryResponse, StrongAxisMomentPeaks, ThRecording, TimeStepState,
 };
 
@@ -38,6 +42,10 @@ pub(crate) use crate::common::assemble::{assemble_global_k, assemble_global_m};
 pub(crate) use sepika_element::behavior::MassOption;
 
 use crate::dynamic::damping::Damping;
+
+/// 確定ステップ番号、時刻 [s]、解析モデルの要素順の全評価位置の局所断面力を受け取る。
+pub type CommittedMemberForcesObserver<'a> =
+    dyn FnMut(u64, f64, &[Option<sepika_element::frame::beam::MemberForces>]) + 'a;
 
 /// Rayleigh 減衰の係数 (α_m, β_k) を、2つの振動数と目標減衰比から計算する。
 pub fn rayleigh_coeffs(omega1: f64, omega2: f64, h1: f64, h2: f64) -> (f64, f64) {

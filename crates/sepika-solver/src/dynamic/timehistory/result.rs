@@ -6,7 +6,7 @@
 //!   部材履歴用の詳細記録（間引きあり）
 //! - [`TimeStepState`] — 1 時点の状態（チェックポイント／再開）
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sepika_element::frame::beam::MemberForces;
 
@@ -101,6 +101,36 @@ pub struct ThRecording {
     /// 旧結果では対象の登録がない。
     #[serde(default)]
     pub strong_axis_moment_peaks: BTreeMap<usize, StrongAxisMomentPeaks>,
+    /// 解析ジョブで照査した上下非対称組立H形鋼柱の断面単独の結果（要素添字順）。
+    /// 旧結果や照査を行わない呼び出しでは空。
+    #[serde(default)]
+    pub asymmetric_column_sections: BTreeMap<usize, AsymmetricColumnSectionHistory>,
+}
+
+/// 1 本の柱の短期断面単独照査。観測した全確定時刻のうち、位置ごとの支配値と未算定理由を保持する。
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AsymmetricColumnSectionHistory {
+    pub committed_count: usize,
+    pub positions: Vec<SectionForceCheckPosition>,
+    pub unavailable: BTreeSet<String>,
+}
+
+/// 1 評価位置の照査。観測数が部材の確定時刻数に満たない場合は断面力の欠落がある。
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SectionForceCheckPosition {
+    pub xi: f64,
+    pub observed_count: usize,
+    pub peak: Option<SectionForceCheckPeak>,
+    pub unavailable: BTreeSet<String>,
+}
+
+/// 確定時刻 [s] の軸力 [N]・局所強軸曲げ [N·mm] に対する断面単独照査の支配比。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SectionForceCheckPeak {
+    pub time_s: f64,
+    pub n_n: f64,
+    pub mz_nmm: f64,
+    pub ratio: f64,
 }
 
 /// 各評価位置で引張・圧縮軸力が極値となった確定時刻の部材内力。
