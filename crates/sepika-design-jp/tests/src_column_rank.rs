@@ -53,6 +53,41 @@ fn steel(name: &str, fy: Option<f64>) -> Material {
 }
 
 #[test]
+fn issue953_capacity_definition_and_confirmed_failure_change_the_table_result() {
+    let section = column(8.0, 13.0);
+    let steel = steel("SN400B", None);
+    let compression_n = 3_300_000.0;
+    let (n_ratio, steel_m_ratio) =
+        src_column_rank_ratios(&section, Some(&steel), 24.0, 345.0, compression_n).unwrap();
+
+    // #953 の独立照合は呼び径に相当する数値径の円面積を用いる。
+    assert_abs_diff_eq!(
+        compression_n / n_ratio / 1000.0,
+        11_629.076,
+        epsilon = 0.000_5
+    );
+    assert_abs_diff_eq!(n_ratio, 0.283_771, epsilon = 0.000_000_5);
+    assert_abs_diff_eq!(steel_m_ratio, 0.479_761, epsilon = 0.000_000_5);
+    assert_eq!(
+        src_column_rank(n_ratio, steel_m_ratio, false),
+        MemberRank::FA
+    );
+    assert_eq!(
+        src_column_rank(n_ratio, steel_m_ratio, true),
+        MemberRank::FB
+    );
+
+    // AIJ SRC 規準第 6 版 32 条の単純累加による圧縮端は比較にのみ用いる。
+    let aij_compression_n = 10_467.932 * 1000.0;
+    let aij_n_ratio = compression_n / aij_compression_n;
+    assert_abs_diff_eq!(aij_n_ratio, 0.315_249, epsilon = 0.000_000_5);
+    assert_eq!(
+        src_column_rank(aij_n_ratio, steel_m_ratio, false),
+        MemberRank::FB
+    );
+}
+
+#[test]
 fn issue953_ratios_use_the_known_grade_and_reject_the_unknown_grade() {
     let section = column(8.0, 13.0);
     for (name, n_expected, m_expected) in [

@@ -523,12 +523,6 @@ impl App {
         let ds_step = ds_point.step;
         let resp_by_elem: std::collections::HashMap<_, _> =
             ds_response.members.iter().map(|r| (r.elem, *r)).collect();
-        let shear_yield_elems: std::collections::HashSet<ElemId> = po
-            .shear_yields
-            .iter()
-            .filter(|s| s.step <= ds_step)
-            .map(|s| s.elem)
-            .collect();
         let mut capacity_seen = std::collections::HashSet::new();
         if self.core.design_rank_auto
             && ds_point
@@ -674,9 +668,7 @@ impl App {
                     sec.shape.as_ref(),
                     Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. },)
                 ) {
-                    use sepika_design_jp::secondary::src_rank::{
-                        src_column_rank, src_column_rank_ratios,
-                    };
+                    use sepika_design_jp::secondary::src_rank::src_column_rank_ratios;
                     if sepika_design_jp::MemberKind::of_element(elem, model)
                         != sepika_design_jp::MemberKind::Column
                     {
@@ -709,15 +701,21 @@ impl App {
                             elem.id, sec.id
                         ));
                     };
-                    let (n_n0, smo_m0) =
-                        src_column_rank_ratios(sec, steel_material, fc, rebar_sy, resp.axial)
-                            .map_err(|reason| {
-                                format!(
-                                    "部材 {:?}・断面 {:?}: SRC 柱の部材種別は未評価です。{reason}",
-                                    elem.id, sec.id
-                                )
-                            })?;
-                    src_column_rank(n_n0, smo_m0, shear_yield_elems.contains(&elem.id))
+                    src_column_rank_ratios(sec, steel_material, fc, rebar_sy, resp.axial).map_err(
+                        |reason| {
+                            format!(
+                                "部材 {:?}・断面 {:?}: SRC 柱の部材種別は未評価です。{reason}",
+                                elem.id, sec.id
+                            )
+                        },
+                    )?;
+                    if story_index.is_none() {
+                        continue;
+                    }
+                    return Err(format!(
+                        "部材 {:?}・断面 {:?}: SRC 柱の自動部材種別と自動 Ds は保留です。告示用の圧縮耐力 N0、柱全体と鉄骨部分の曲げ耐力 M0・sM0 の定義、および崩壊形における破壊状況の根拠が不足しています。せん断降伏イベントの有無だけでは破壊状況を確定できません。",
+                        elem.id, sec.id
+                    ));
                 } else if let Some(SectionShape::RcWall { thickness, .. }) = sec.shape.as_ref() {
                     if wall_has_src_boundary_column(elem, model) {
                         let capacities = po
@@ -1425,12 +1423,13 @@ mod tests {
     }
 
     #[test]
-    fn src_column_auto_rank_reports_inapplicable_steel_from_a_saved_run() {
+    fn src_column_auto_rank_reports_inapplicable_steel_or_missing_evidence() {
         use super::holding_clear_span::rc_rank_portal;
         use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
         use sepika_core::ids::MaterialId;
-        use sepika_core::section_shape::SectionShape;
+        use sepika_core::section_shape::{RebarSize, SectionShape};
         use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+        use sepika_solver::nonlinear::pushover::ShearYieldEvent;
         use EvaluationPurpose::{Ds, HoldingCapacity};
         use SeismicDir::{X, Y};
 
@@ -1448,9 +1447,11 @@ mod tests {
             steel.name = "SN400B".into();
             steel.fy = Some(100.0);
             let section = &mut model.sections[0];
-            let Some(SectionShape::RcColumnRect { b, d, rebar }) = section.shape.take() else {
+            let Some(SectionShape::RcColumnRect { b, d, mut rebar }) = section.shape.take() else {
                 unreachable!()
             };
+            rebar.main_dia = RebarSize::DiameterMm(25.0);
+            rebar.y = vec![2];
             section.shape = Some(SectionShape::SrcColumnRect {
                 b,
                 d,
@@ -1539,13 +1540,57 @@ mod tests {
                 reopened.core.design_rank_auto = true;
                 assert_unevaluated(&mut reopened);
             } else {
-                let (candidate, _) = app.compute_unconfirmed_holding_capacity().unwrap();
-                assert!(candidate
-                    .member_ranks
-                    .contains(&(ElemId(0), MemberRank::FA)));
-                let reason = app.compute_holding_capacity().err().expect("Ds は採用保留");
-                assert!(reason.contains("Ds判定保留"), "{reason}");
-                assert!(app.core.scoped.holding_capacity_source.is_none());
+                for has_shear_yield in [false, true] {
+                    let run = app
+                        .core
+                        .scoped
+                        .results
+                        .as_mut()
+                        .unwrap()
+                        .pushover_x
+                        .as_mut()
+                        .unwrap();
+                    let step = run.ds_evaluation.as_ref().unwrap().step;
+                    let record = run
+                        .confirmed_history
+                        .as_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|record| record.step == step)
+                        .unwrap();
+                    let column = record
+                        .members
+                        .iter_mut()
+                        .find(|member| member.elem == ElemId(0))
+                        .unwrap();
+                    assert!(column.m_strong > column.m_weak);
+                    column.axial = 3_300_000.0;
+                    run.shear_yields.retain(|event| event.elem != ElemId(0));
+                    if has_shear_yield {
+                        run.shear_yields.push(ShearYieldEvent {
+                            step,
+                            elem: ElemId(0),
+                        });
+                    }
+
+                    let reason = app.compute_holding_capacity().err().expect("Ds は採用保留");
+                    for expected in [
+                        "部材 ElemId(0)・断面 SectionId(0)",
+                        "SRC 柱の自動部材種別と自動 Ds は保留",
+                        "告示用の圧縮耐力 N0",
+                        "曲げ耐力 M0・sM0 の定義",
+                        "崩壊形における破壊状況の根拠",
+                    ] {
+                        assert!(reason.contains(expected), "{reason}");
+                    }
+                    assert!(app.core.scoped.holding_capacity_source.is_none());
+                    assert!(app.core.scoped.ds_beta_u_by_story.is_empty());
+                }
+                app.core.design_rank_auto = false;
+                app.core.design_rank = MemberRank::FB;
+                let (candidate, ranks) = app.compute_unconfirmed_holding_capacity().unwrap();
+                assert_eq!(ranks, vec![MemberRank::FB]);
+                assert!(candidate.member_ranks.is_empty());
             }
         }
     }
