@@ -2250,6 +2250,57 @@ mod tests {
     }
 
     #[test]
+    fn torsional_cancellation_holds_eccentricity_and_shape_factor_for_the_layer() {
+        use sepika_core::dof::Dof;
+        use sepika_core::ids::{ElemId, NodeId, StoryId};
+        use sepika_core::model::Constraint;
+
+        let (mut model, response) = drift_fixture();
+        for node in &mut model.nodes[..2] {
+            node.story = Some(StoryId(0));
+        }
+        for node in &mut model.nodes[2..] {
+            node.story = Some(StoryId(1));
+        }
+        model.constraints.push(Constraint::rigid_diaphragm(
+            StoryId(1),
+            NodeId(2),
+            vec![NodeId(3)],
+        ));
+        let mut x = response.clone();
+        x.disp[2][Dof::Ux as usize] = 1.0;
+        x.disp[3][Dof::Ux as usize] = 1.0;
+        x.column_end_horizontal_forces = vec![
+            (ElemId(0), Ok([[-100.0, 0.0], [100.0, 0.0]])),
+            (ElemId(1), Ok([[-100.0, 0.0], [100.0, 0.0]])),
+        ];
+        let mut y = response;
+        y.disp[2][Dof::Uy as usize] = 0.01;
+        y.disp[2][Dof::Rz as usize] = 0.00033;
+        y.disp[3][Dof::Uy as usize] = 1.99;
+        y.disp[3][Dof::Rz as usize] = 0.00033;
+        y.column_end_horizontal_forces = vec![
+            (ElemId(0), Ok([[0.0, -10.0], [0.0, 10.0]])),
+            (ElemId(1), Ok([[0.0, -100.0], [0.0, 100.0]])),
+        ];
+        let ctx = StoryMetricsCtx {
+            seismic_x: Some(&x),
+            seismic_y: Some(&y),
+            ..Default::default()
+        };
+        for dir in [SeismicDir::X, SeismicDir::Y] {
+            let metric = compute_story_metrics_with(&model, dir, &ctx).remove(0);
+            assert_eq!(metric.rs.unwrap(), 1.0);
+            let reason = metric.re.unwrap_err();
+            for expected in ["1F", "階1", "Y方向", "柱0", "ねじれ", "相殺"] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+            assert_eq!(metric.re_ok, None);
+            assert_eq!(metric.fes, Err(reason));
+        }
+    }
+
+    #[test]
     fn reevaluation_holds_re_and_fes_when_an_sl_to_sl_column_cannot_be_traced() {
         use sepika_core::ids::{ElemId, NodeId, StoryId};
         use sepika_core::model::ElementKind;

@@ -452,6 +452,41 @@ mod tests {
     }
 
     #[test]
+    fn torsional_cancellation_holds_misc_wall_rs_reanalysis() {
+        let mut model = fixture(1);
+        for i in 0..2 {
+            let mut node = model.nodes[i].clone();
+            node.id = NodeId(i as u32 + 2);
+            node.coord[0] = 6000.0;
+            model.stories[i].node_ids.push(node.id);
+            model.nodes.push(node);
+        }
+        model.constraints[0] = Constraint::rigid_diaphragm(StoryId(1), NodeId(1), vec![NodeId(3)]);
+        let mut column = model.elements[0].clone();
+        column.id = ElemId(1);
+        column.nodes = [NodeId(2), NodeId(3)].into_iter().collect();
+        model.elements.push(column);
+        wall(&mut model, 1, [3000.0, 0.0], [1.0, 0.0]);
+
+        let mut results = base_results(&model);
+        let y = results[1].as_mut().unwrap();
+        for (head, uy_mm) in [(1, 0.01), (3, 1.99)] {
+            y.disp[head][Dof::Uy as usize] = uy_mm;
+            y.disp[head][Dof::Rz as usize] = 0.00033;
+        }
+        let original_displacements = results.each_ref().map(|r| r.as_ref().unwrap().disp.clone());
+        attach_evaluations(&model, &[LoadCaseId(0), LoadCaseId(1)], &mut results);
+        for (result, original) in results.into_iter().zip(original_displacements) {
+            let result = result.unwrap();
+            assert_eq!(result.disp, original);
+            let reason = result.stiffness_ratio_disp.unwrap().unwrap_err();
+            for expected in ["階1", "Y方向", "柱0", "ねじれ", "相殺"] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+        }
+    }
+
+    #[test]
     fn inclined_column_force_determines_misc_wall_reference_or_explains_hold() {
         for method in [
             MiscWallStiffnessMethod::StoryColumns,

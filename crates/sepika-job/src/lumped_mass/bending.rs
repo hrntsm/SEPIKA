@@ -661,24 +661,76 @@ mod tests {
         }
         let ey_id = model.load_cases.iter().find(|c| c.name == "EY").unwrap().id;
         let ey = sepika_solver::statics::linear::linear_static_once(&model, ey_id).unwrap();
-        for dir in [SeismicDir::X, SeismicDir::Y] {
-            let mut spatial_input = input(&model, &res, dir);
-            spatial_input.res_y = Some(&ey);
+        let mut spatial_input = input(&model, &res, SeismicDir::X);
+        spatial_input.res_y = Some(&ey);
+        spatial_input.dim = StickDim::Spatial;
+        let reason = build(spatial_input).unwrap_err().to_string();
+        for expected in ["階1", "X方向", "柱2", "ねじれ", "相殺"] {
+            assert!(reason.contains(expected), "{reason}");
+        }
+        println!(
+            "FRAME corner EX first story Ux at y=-2000/+2000 mm: [{}, {}], Rz={}",
+            res.disp[4][0], res.disp[6][0], res.disp[4][5]
+        );
+
+        let mut weakly_eccentric = model.clone();
+        for case in weakly_eccentric
+            .load_cases
+            .iter_mut()
+            .filter(|case| [ex_id, ey_id].contains(&case.id))
+        {
+            for load in &mut case.nodal {
+                let node = &weakly_eccentric.nodes[load.node.index()];
+                let [x, y, _] = node.coord;
+                let [cx, cy] = weakly_eccentric.stories[node.story.unwrap().index()]
+                    .dynamic_mass
+                    .as_ref()
+                    .unwrap()
+                    .center_xy_mm;
+                let moment_to_center = (cx - x) * load.values[1] - (cy - y) * load.values[0];
+                load.values[5] += 0.9 * moment_to_center;
+            }
+        }
+        let [eccentric_ex, eccentric_ey] = [ex_id, ey_id].map(|id| {
+            sepika_solver::statics::linear::linear_static_once(&weakly_eccentric, id).unwrap()
+        });
+        for (dir, original, reference) in [
+            (SeismicDir::X, &res, &eccentric_ex),
+            (SeismicDir::Y, &ey, &eccentric_ey),
+        ] {
+            let mut spatial_input = input(&weakly_eccentric, &eccentric_ex, dir);
+            spatial_input.res_y = Some(&eccentric_ey);
             spatial_input.dim = StickDim::Spatial;
             let spatial = build(spatial_input).unwrap();
-            let reference = if dir == SeismicDir::X { &res } else { &ey };
-            let qref = signed_shears(&model, reference, dir).unwrap();
-            let ei = ei_values(&model, reference, dir).unwrap();
+            let qref = signed_shears(&weakly_eccentric, reference, dir).unwrap();
+            let original_shears = signed_shears(&model, original, dir).unwrap();
+            let ei = ei_values(&weakly_eccentric, reference, dir).unwrap();
             let db = bending_drifts(&[3000.0; 2], &ei, &qref).unwrap();
-            for (i, layer) in model.layers().iter().enumerate() {
-                let total = story_drift_at(
-                    &model,
-                    reference,
-                    dir,
-                    layer,
-                    spatial.spatial[i].rigidity_xy,
+            for (i, layer) in weakly_eccentric.layers().iter().enumerate() {
+                near(qref[i], original_shears[i]);
+                let [lower, upper] = [layer.bottom, layer.top]
+                    .map(|story| weakly_eccentric.diaphragms_of(story).next().unwrap().master);
+                let [lower_disp, upper_disp] = [lower, upper].map(|id| reference.disp[id.index()]);
+                let [master_x, master_y, _] = weakly_eccentric.nodes[upper.index()].coord;
+                let [rigidity_x, rigidity_y] = spatial.spatial[i].rigidity_xy;
+                let (axis, arm_mm) = match dir {
+                    SeismicDir::X => (0, master_y - rigidity_y),
+                    SeismicDir::Y => (1, rigidity_x - master_x),
+                };
+                let rotation_rad = upper_disp[5] - lower_disp[5];
+                let master_drift_mm = upper_disp[axis] - lower_disp[axis];
+                let rigidity_drift_mm = master_drift_mm + arm_mm * rotation_rad;
+                assert!(rotation_rad.abs() > 1e-10, "{dir:?}, {:?}", layer.top);
+                assert!(
+                    (rigidity_drift_mm - master_drift_mm).abs() > 1e-9,
+                    "{dir:?}, {:?}",
+                    layer.top
                 );
-                near(qref[i] / spatial.stories[i].skeleton.k1 + db[i], total);
+                println!("FRAME weak eccentric {dir:?} layer {i}: rotation={rotation_rad}, master drift={master_drift_mm}, rigidity drift={rigidity_drift_mm}");
+                near(
+                    qref[i] / spatial.stories[i].skeleton.k1 + db[i],
+                    rigidity_drift_mm,
+                );
             }
         }
         let po = crate::compute::compute_pushover(model.clone(), cfg).unwrap();

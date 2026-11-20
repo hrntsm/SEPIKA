@@ -2,10 +2,11 @@ use approx::assert_relative_eq;
 use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::ids::NodeId;
 use sepika_core::model::{Constraint, Node};
-use sepika_design_jp::secondary::eccentricity::center_of_rigidity;
 use sepika_design_jp::secondary::eccentricity_analysis::{
-    column_stiffnesses_from_analysis, story_eccentricity_from_analysis,
+    column_horizontal_stiffnesses, column_stiffnesses_from_analysis,
+    story_eccentricity_from_analysis,
 };
+use sepika_solver::statics::analysis::SeismicDir;
 use sepika_solver::statics::linear::linear_static_once;
 
 #[path = "fixtures/eccentricity_model.rs"]
@@ -60,6 +61,7 @@ fn near_cancellation_retains_column_shear_unlike_proportionally_small_translatio
         [0.0, 1000.0, 0.0, 0.0, 0.0, 1000.0 * gravity_x_mm],
         [0.0, 1.0, 0.0, 0.0, 0.0, gravity_x_mm],
         [0.0, 0.0, 0.0, 0.0, 0.0, 1_000_000.0],
+        [1.0, 0.0, 0.0, 0.0, 0.0, -gravity_y_mm],
     ];
     let names = [
         "重心X",
@@ -68,8 +70,9 @@ fn near_cancellation_retains_column_shear_unlike_proportionally_small_translatio
         "重心Y",
         "小荷重Y",
         "純ねじり",
+        "小荷重の重心X",
     ];
-    let [x, pure_x, small_x, y, small_y, twist] = std::array::from_fn(|index| {
+    let [x, pure_x, small_x, y, small_y, twist, small_twisted_x] = std::array::from_fn(|index| {
         let case = add_case(&mut model, names[index], loads[index]);
         linear_static_once(&model, case).unwrap()
     });
@@ -168,22 +171,35 @@ fn near_cancellation_retains_column_shear_unlike_proportionally_small_translatio
         assert_relative_eq!(normal.dx, scaled.dx, epsilon = 1e-8);
         assert_relative_eq!(normal.dy, scaled.dy, epsilon = 1e-8);
     }
-    let current = story_eccentricity_from_analysis(&model, TOP, &x, &y, None);
-    let x_cols = column_stiffnesses_from_analysis(&model, TOP, &x, &y);
-    for (name, result, columns) in [
-        ("重心加力の公開結果", current, x_cols),
-        ("純並進の公開結果", Ok(pure), Ok(pure_cols)),
-        ("小荷重の公開結果", Ok(small), Ok(small_cols)),
-    ] {
-        match (result, columns) {
-            (Ok(re), Ok(cols)) => eprintln!(
-                "{name}の剛心={:?}, KR={:.6}, Re=({:?}, {:?}), 柱Ki={cols:?}",
-                center_of_rigidity(&cols).unwrap(),
-                re.kr,
-                re.re_x,
-                re.re_y
-            ),
-            (result, columns) => eprintln!("{name}: {result:?}, {columns:?}"),
+    assert_relative_eq!(
+        small_twisted_x.disp[5][0],
+        x.disp[5][0] * 0.001,
+        epsilon = 1e-14
+    );
+    for (twisted_x, response_y) in [(&x, &y), (&small_twisted_x, &small_y)] {
+        let reason =
+            column_horizontal_stiffnesses(&model, TOP, twisted_x, SeismicDir::X).unwrap_err();
+        for expected in ["階1", "X方向", "柱2", "ねじれ", "相殺", "保留"] {
+            assert!(reason.contains(expected), "{reason}");
         }
+        assert_eq!(
+            column_stiffnesses_from_analysis(&model, TOP, twisted_x, response_y),
+            Err(reason.clone())
+        );
+        assert_eq!(
+            story_eccentricity_from_analysis(&model, TOP, twisted_x, response_y, None).unwrap_err(),
+            reason
+        );
     }
+
+    model.constraints[0] = Constraint::rigid_diaphragm(
+        TOP,
+        NodeId(5),
+        vec![NodeId(1), NodeId(3), NodeId(7), mass_node],
+    );
+    let moved_master = linear_static_once(&model, sepika_core::ids::LoadCaseId(0)).unwrap();
+    assert_eq!(
+        column_horizontal_stiffnesses(&model, TOP, &moved_master, SeismicDir::X),
+        column_horizontal_stiffnesses(&model, TOP, &x, SeismicDir::X)
+    );
 }

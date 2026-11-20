@@ -960,6 +960,68 @@ mod tests {
     }
 
     #[test]
+    fn torsional_cancellation_between_two_diaphragms_holds_lumped_mass_generation() {
+        use sepika_core::dof::Dof;
+        use sepika_core::ids::{ElemId, NodeId, StoryId};
+        use sepika_core::model::Constraint;
+
+        let mut model = two_story_column_model();
+        for i in 0..3_u32 {
+            let mut node = model.nodes[i as usize].clone();
+            node.id = NodeId(i + 3);
+            node.coord[0] = 6000.0;
+            model.stories[i as usize].node_ids.push(node.id);
+            model.constraints[i as usize] =
+                Constraint::rigid_diaphragm(StoryId(i), NodeId(i), vec![node.id]);
+            model.nodes.push(node);
+        }
+        for i in 0..2_u32 {
+            let mut column = model.elements[i as usize].clone();
+            column.id = ElemId(i + 2);
+            column.nodes = [NodeId(i + 3), NodeId(i + 4)].into_iter().collect();
+            model.elements.push(column);
+        }
+
+        let mut x = static_with_column_qz(6, &[(0, 100.0), (1, 40.0), (2, 100.0), (3, 40.0)]);
+        x.story_shears = Some([vec![200.0, 80.0], vec![160.0, 70.0]]);
+        for (id, displacement) in [(1, 1.0), (2, 2.0), (4, 1.0), (5, 2.0)] {
+            x.disp[id][Dof::Ux as usize] = displacement;
+        }
+        let mut y = static_with_column_qy(6, &[(0, 80.0), (1, 30.0), (2, 80.0), (3, 40.0)]);
+        y.story_shears = x.story_shears.clone();
+        for (id, displacement, rotation) in [
+            (1, 0.85, 0.00005),
+            (2, 0.87, 0.00038),
+            (4, 1.15, 0.00005),
+            (5, 3.15, 0.00038),
+        ] {
+            y.disp[id][Dof::Uy as usize] = displacement;
+            y.disp[id][Dof::Rz as usize] = rotation;
+        }
+        let mut common_rotation = y.clone();
+        for (id, displacement) in [(2, 1.85), (5, 2.15)] {
+            common_rotation.disp[id][Dof::Uy as usize] = displacement;
+            common_rotation.disp[id][Dof::Rz as usize] = 0.00005;
+        }
+        for (dim, source) in [
+            (StickDim::Planar, LumpedStiffnessSource::ColumnKi),
+            (StickDim::Spatial, LumpedStiffnessSource::ColumnKi),
+            (StickDim::Spatial, LumpedStiffnessSource::StoryQd),
+        ] {
+            let mut inp = input(&model, dim, SeismicDir::Y, false);
+            inp.source = source;
+            inp.res_x = Some(&x);
+            inp.res_y = Some(&common_rotation);
+            assert!(build_lumped_mass(inp).is_ok(), "{dim:?}, {source:?}");
+            inp.res_y = Some(&y);
+            let reason = build_lumped_mass(inp).unwrap_err().to_string();
+            for expected in ["階2", "Y方向", "柱1", "ねじれ", "相殺"] {
+                assert!(reason.contains(expected), "{dim:?}, {source:?}: {reason}");
+            }
+        }
+    }
+
+    #[test]
     fn spatial_rejects_nonfinite_column_response_with_layer_and_member_reason() {
         let model = two_story_column_model();
         let mut x = static_with_column_qz(3, &[(0, f64::INFINITY), (1, 40.0)]);
