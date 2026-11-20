@@ -85,9 +85,15 @@ pub struct SecondaryTransfer {
     /// 解決する（二次部材が受け持ったぶんは反力として渡るため、そのまま載せると
     /// 二重計上になる）。
     pub leftover_region_loads: Vec<BeamLoad>,
+    incomplete_dependencies: HashSet<SecondaryKey>,
 }
 
 impl SecondaryTransfer {
+    /// 自身の支持が未解決か、自身または上流で循環・端部負担率不備により伝達を省いたか。
+    pub fn has_incomplete_dependency(&self, member: SecondaryKey) -> bool {
+        self.unresolved.contains(&member) || self.incomplete_dependencies.contains(&member)
+    }
+
     /// 主架構へ渡す荷重（節点荷重と、大梁材軸へ載せる中間集中荷重）を返す。
     ///
     /// 終端（[`SupportAt::Primary`]）の端部だけを返す。端部座標に一致するモデル節点が
@@ -604,12 +610,29 @@ pub fn solve_with_basis(
     unresolved.sort();
 
     invalid_end_shares.sort();
+    let mut pending: Vec<_> = cyclic.iter().chain(&invalid_end_shares).copied().collect();
+    let mut incomplete_dependencies = HashSet::new();
+    while let Some(key) = pending.pop() {
+        if incomplete_dependencies.insert(key) {
+            pending.extend(
+                supports
+                    .get(&key)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|support| match support {
+                        SupportAt::Secondary { key, .. } => Some(*key),
+                        _ => None,
+                    }),
+            );
+        }
+    }
     Ok(SecondaryTransfer {
         invalid_end_shares,
         members,
         unresolved,
         cyclic,
         leftover_region_loads,
+        incomplete_dependencies,
     })
 }
 

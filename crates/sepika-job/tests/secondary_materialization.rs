@@ -221,6 +221,8 @@ fn post_xyz_display_offsets_preserve_gravity_local_lateral_design_quantity_and_m
     assert_eq!(result, expected);
     assert!(result.combinations[0]
         .lateral_reactions
+        .as_ref()
+        .unwrap()
         .iter()
         .flatten()
         .any(|v| *v != 0.0));
