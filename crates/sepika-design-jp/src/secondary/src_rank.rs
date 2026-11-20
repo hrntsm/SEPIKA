@@ -1,22 +1,17 @@
 //! SRC 造の部材種別（保有水平耐力計算の Ds 算定、技術基準解説書 表 2.6.6-5）。
 //!
-//! - [`src_column_rank`] — SRC 柱の部材種別（曲げ・せん断破壊モード別）
+//! - [`src_column_rank`] — 与えた耐力比と破壊状況による SRC 柱の表引き
 //! - [`src_wall_type`] — SRC 耐震壁の種別（せん断破壊 WC・それ以外 WA）
-//! - [`src_column_rank_ratios`] — 判定比 N/N0・sM0/M0 の算定
+//! - [`src_column_rank_ratios`] — 耐力比 N/N0・sM0/M0 の候補値
 
 use super::holding_capacity::MemberRank;
 use sepika_core::model::{Material, Section};
 use sepika_core::rc_rebar_geom::RectEdge;
 use sepika_core::section_shape::SectionShape;
 
-/// SRC 柱の部材種別（表 2.6.6-5）。
-///
-/// - `n_over_n0`: メカニズム時軸力 N（圧縮正）/ SRC 断面の圧縮耐力 N0。
-/// - `smo_over_m0`: 鉄骨の曲げ耐力 sM0 / SRC 断面の曲げ耐力 M0（N=0）。
-/// - `shear_failure`: 破壊モードがせん断破壊か（増分解析のせん断降伏イベント）。
-///
-/// せん断破壊は同じ (N/N0, sM0/M0) 区分で曲げ破壊より 1 段階不利になる
-/// （FA→FB、FC→FD。N/N0 > 0.4 は破壊モードによらず FD）。
+/// SRC 柱の表 2.6.6-5 を、圧縮力と圧縮耐力の比 `n_over_n0`、鉄骨部分と柱全体の曲げ耐力の比 `smo_over_m0` で引く。
+/// `shear_failure` は崩壊形における破壊状況を表す（せん断破壊は `true`、曲げ破壊は `false`）。
+/// 告示判定に使う場合は、呼び出し側で耐力比と破壊状況の適用根拠を確認する。
 pub fn src_column_rank(n_over_n0: f64, smo_over_m0: f64, shear_failure: bool) -> MemberRank {
     if n_over_n0 > 0.4 {
         return MemberRank::FD;
@@ -47,7 +42,7 @@ pub fn src_wall_type(shear_failure: bool) -> MemberRank {
     }
 }
 
-/// SRC 矩形柱の部材種別用の候補値 `(N/N0, sM0/M0)` を返す。
+/// SRC 矩形柱の強軸の候補値 `(N/N0, sM0/M0)` を返す。告示用の耐力比としての適用は未確認。
 /// `fc` と `rebar_sy` は N/mm²、`n_ult` は N（圧縮正、引張は 0 扱い）。
 /// 入力が不正な場合は理由を返し、断面幾何・実板厚のエラーには入力寸法 [mm] を含める。
 pub fn src_column_rank_ratios(
