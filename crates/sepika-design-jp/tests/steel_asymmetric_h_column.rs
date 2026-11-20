@@ -405,6 +405,229 @@ fn issue_section_checks_each_flange_and_changes_governing_limit_when_moment_reve
 }
 
 #[test]
+fn compression_and_strong_axis_bending_skip_when_a_compressed_flange_is_slender() {
+    let mut model = asymmetric_column(MZ);
+    model.sections[0] = SectionShape::SteelBuiltH {
+        height: 400.0,
+        upper_width: 400.0,
+        upper_thick: 8.0,
+        lower_width: 180.0,
+        lower_thick: 20.0,
+        web_thick: 8.0,
+    }
+    .to_section(SectionId(0), "組立H".into());
+    let ctx = short_column_context();
+    let forces = MemberForcesAt { mz: 80e6, ..FORCES };
+    for mz in [forces.mz, 400e6] {
+        let outcome = check(&model, &MemberForcesAt { mz, ..forces }, &ctx);
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("局部座屈")
+                    && reason.contains("上フランジ b/t=25.0000（上限 15.6538）")),
+            "{outcome:?}"
+        );
+    }
+
+    let reversed = MemberForcesAt {
+        mz: -forces.mz,
+        ..forces
+    };
+    let result = checked(check(&model, &reversed, &ctx));
+    assert!(result.ok(), "{result:?}");
+    assert_eq!(result.components[0].kind, CheckKind::AxialBending);
+    assert!((result.ratio() - 0.26577949910347726).abs() < 1e-12);
+
+    // A=9776 mm²、Iy=287299496.048 mm⁴。反転曲げでは上フランジの内縁が
+    // 533.502 kN、外縁が555.279 kNの圧縮軸力で応力度ゼロになる。
+    assert!(checked(check(
+        &model,
+        &MemberForcesAt {
+            n: -530_000.0,
+            ..reversed
+        },
+        &ctx,
+    ))
+    .ok());
+    let outcome = check(
+        &model,
+        &MemberForcesAt {
+            n: -540_000.0,
+            ..reversed
+        },
+        &ctx,
+    );
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("上フランジ b/t=25.0000")),
+        "{outcome:?}"
+    );
+
+    let outcome = check(&model, &MemberForcesAt { my: 1e6, ..forces }, &ctx);
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("上フランジ b/t=25.0000") && reason.contains("二軸曲げ照査")),
+        "{outcome:?}"
+    );
+
+    let result = checked(check(
+        &model,
+        &forces,
+        &DesignCtx {
+            length: 40_000.0,
+            ..ctx
+        },
+    ));
+    assert!(!result.ok());
+    assert_eq!(result.components[0].kind, CheckKind::Provision);
+    assert!(result.basis.contains("有効細長比上限"), "{result:?}");
+}
+
+#[test]
+fn compression_and_strong_axis_bending_require_the_column_web_limit() {
+    let mut model = asymmetric_column(MZ);
+    model.sections[0] = SectionShape::SteelBuiltH {
+        height: 400.0,
+        upper_width: 80.0,
+        upper_thick: 12.0,
+        lower_width: 180.0,
+        lower_thick: 20.0,
+        web_thick: 7.0,
+    }
+    .to_section(SectionId(0), "組立H".into());
+    let outcome = check(
+        &model,
+        &MemberForcesAt { qy: 1.0, ..FORCES },
+        &short_column_context(),
+    );
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("ウェブ d/t=52.5714（上限 47.2567）")
+                && reason.contains("ウェブ内同一点")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn compression_and_strong_axis_bending_check_the_web_only_where_compression_occurs() {
+    let mut model = asymmetric_column(MZ);
+    model.sections[0] = SectionShape::SteelBuiltH {
+        height: 120.0,
+        upper_width: 450.0,
+        upper_thick: 50.0,
+        lower_width: 20.0,
+        lower_thick: 5.0,
+        web_thick: 1.1,
+    }
+    .to_section(SectionId(0), "組立H".into());
+    let ctx = short_column_context();
+    let forces = MemberForcesAt {
+        n: -10_000.0,
+        mz: 2e6,
+        ..FORCES
+    };
+    // 矩形3枚の独立計算でウェブ上端と下端は +7.9807、+30.4060 N/mm²。
+    let result = checked(check(&model, &forces, &ctx));
+    assert!(result.ok(), "{result:?}");
+    assert!((result.ratio() - 32.13099725533596 / 235.0).abs() < 1e-12);
+    let outcome = check(&model, &MemberForcesAt { qy: 1.0, ..forces }, &ctx);
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("ウェブ d/t=59.0909") && reason.contains("ウェブ内同一点")),
+        "{outcome:?}"
+    );
+
+    // N=-500 kNではウェブ上端が -13.6323、下端は +8.7929 N/mm²。
+    let outcome = check(
+        &model,
+        &MemberForcesAt {
+            n: -500_000.0,
+            ..forces
+        },
+        &ctx,
+    );
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("ウェブ d/t=59.0909（上限 47.2567）")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn zero_stress_at_a_web_end_does_not_trigger_the_column_web_limit() {
+    let mut model = asymmetric_column(MZ);
+    model.sections[0] = SectionShape::SteelBuiltH {
+        height: 120.0,
+        upper_width: 229.0,
+        upper_thick: 50.0,
+        lower_width: 17.0,
+        lower_thick: 5.0,
+        web_thick: 1.0,
+    }
+    .to_section(SectionId(0), "組立H".into());
+    let ctx = short_column_context();
+    // A=11600 mm²、図心は下縁から94 mm、Iy=10017200/3 mm⁴。
+    // ウェブ上端は図心から24 mm下なので、σc=24 N/mm²で応力度が0になる。
+    let forces = MemberForcesAt {
+        n: -278_400.0,
+        mz: 10_017_200.0 / 3.0,
+        ..FORCES
+    };
+    let result = checked(check(&model, &forces, &ctx));
+    assert!(result.ok(), "{result:?}");
+    assert!((result.ratio() - 70.0 / 235.0).abs() < 1e-12);
+    let outcome = check(
+        &model,
+        &MemberForcesAt {
+            n: -278_401.0,
+            ..forces
+        },
+        &ctx,
+    );
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("ウェブ d/t=65.0000")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn compression_and_strong_axis_bending_use_each_plate_thickness_for_the_limit() {
+    let mut model = asymmetric_column(MZ);
+    model.materials[0].name = "SN400B".into();
+    model.sections[0] = SectionShape::SteelBuiltH {
+        height: 400.0,
+        upper_width: 256.0,
+        upper_thick: 8.0,
+        lower_width: 180.0,
+        lower_thick: 50.0,
+        web_thick: 8.0,
+    }
+    .to_section(SectionId(0), "組立H".into());
+    // SN400Bの上フランジはF=235、最大板厚の下フランジはF=215 N/mm²。
+    let outcome = check(&model, &FORCES, &short_column_context());
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("上フランジ b/t=16.0000（上限 15.6538）")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn compression_and_strong_axis_bending_report_unavailable_plate_limit_basis() {
+    let model = asymmetric_column(MZ);
+    let ctx = DesignCtx {
+        steel_fb_basis: SteelFbBasis::Standard1973,
+        ..short_column_context()
+    };
+    let outcome = check(&model, &FORCES, &ctx);
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("局部座屈") && reason.contains("2019年版")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
 fn local_moment_from_rotated_model_selects_the_expected_flange_and_retains_only_failure() {
     for (global_moment, expected_mz, expected_ratio, side) in [
         ([0.0, MZ, 0.0], MZ, 1.116543960824228, "上"),

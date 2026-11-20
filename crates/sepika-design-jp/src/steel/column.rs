@@ -39,11 +39,8 @@ pub(super) fn asymmetric_built_h_section_reason(
         .then_some("図心と断面性能の対応を確定するには、形状から求めた断面積と両軸の断面二次モーメントが必要です")
 }
 
-pub(super) fn asymmetric_built_h_combination_reasons(
-    forces: &MemberForcesAt,
-    ctx: &DesignCtx,
-) -> impl Iterator<Item = &'static str> {
-    let has_nonzero_length = [
+fn has_nonzero_stability_length(ctx: &DesignCtx) -> bool {
+    [
         ctx.length,
         ctx.lk_y.unwrap_or(0.0),
         ctx.lk_z.unwrap_or(0.0),
@@ -62,9 +59,15 @@ pub(super) fn asymmetric_built_h_combination_reasons(
             ]
             .iter()
             .any(|&length| length != 0.0)
-        });
+        })
+}
+
+pub(super) fn asymmetric_built_h_combination_reasons(
+    forces: &MemberForcesAt,
+    ctx: &DesignCtx,
+) -> impl Iterator<Item = &'static str> {
     [
-        has_nonzero_length.then_some("上下非対称断面の横座屈・曲げねじり座屈の算定条件が未確定です"),
+        has_nonzero_stability_length(ctx).then_some("上下非対称断面の横座屈・曲げねじり座屈の算定条件が未確定です"),
         (forces.my != 0.0).then_some("弱軸曲げMyが同時に作用する場合の上下非対称断面の二軸曲げ照査は未算定です"),
         (forces.qy != 0.0).then_some("強軸せん断Qyが同時に作用する場合の上下非対称断面のウェブ内同一点の組合せ応力度は未算定です"),
     ]
@@ -75,7 +78,8 @@ pub(super) fn asymmetric_built_h_combination_reasons(
 fn validate_built_h_plate_slenderness(
     shape: &SectionShape,
     mat: &Material,
-    forces: &MemberForcesAt,
+    compressed_flanges: [bool; 2],
+    compressed_web: bool,
 ) -> Result<(), String> {
     let SectionShape::SteelBuiltH {
         height,
@@ -88,23 +92,25 @@ fn validate_built_h_plate_slenderness(
     else {
         unreachable!("上下非対称組立H形鋼だけを検定する");
     };
-    let web_f_mpa = resolve_steel_f(Some(mat), Some(web_thick))?;
-    let web_limit = 1.6 * (mat.young / web_f_mpa).sqrt();
-    if !web_limit.is_finite() || web_limit <= 0.0 {
-        return Err("ヤング係数から幅厚比の限界値を算定できません".into());
-    }
-    let web_ratio = (height - upper_thick - lower_thick) / web_thick;
-    if web_ratio > web_limit {
-        return Err(format!(
-            "局部座屈を省く幅厚比の条件を満たしません。ウェブ d/t={web_ratio:.4}（上限 {web_limit:.4}）"
-        ));
+    if compressed_web {
+        let web_f_mpa = resolve_steel_f(Some(mat), Some(web_thick))?;
+        let web_limit = 1.6 * (mat.young / web_f_mpa).sqrt();
+        if !web_limit.is_finite() || web_limit <= 0.0 {
+            return Err("ヤング係数から幅厚比の限界値を算定できません".into());
+        }
+        let web_ratio = (height - upper_thick - lower_thick) / web_thick;
+        if web_ratio > web_limit {
+            return Err(format!(
+                "局部座屈を省く幅厚比の条件を満たしません。ウェブ d/t={web_ratio:.4}（上限 {web_limit:.4}）"
+            ));
+        }
     }
 
-    for (side, width_mm, thick_mm, compressed_by_mz) in [
-        ("上", upper_width, upper_thick, forces.mz > 0.0),
-        ("下", lower_width, lower_thick, forces.mz < 0.0),
+    for (side, width_mm, thick_mm, compressed) in [
+        ("上", upper_width, upper_thick, compressed_flanges[0]),
+        ("下", lower_width, lower_thick, compressed_flanges[1]),
     ] {
-        if forces.my == 0.0 && !compressed_by_mz {
+        if !compressed {
             continue;
         }
         let flange_f_mpa = resolve_steel_f(Some(mat), Some(thick_mm))?;
@@ -122,6 +128,44 @@ fn validate_built_h_plate_slenderness(
     Ok(())
 }
 
+fn compressed_built_h_plates(
+    shape: &SectionShape,
+    mz_nmm: f64,
+    sigma_c_mpa: f64,
+    sigma_b_outer_mpa: [f64; 2],
+) -> Result<([bool; 2], bool), String> {
+    let SectionShape::SteelBuiltH {
+        upper_thick,
+        lower_thick,
+        ..
+    } = *shape
+    else {
+        unreachable!("上下非対称組立H形鋼だけを検定する");
+    };
+    let stress_gradient_mpa_per_mm = mz_nmm / shape.try_calc_iy()?;
+    let [upper_outer_mpa, lower_outer_mpa] =
+        sigma_b_outer_mpa.map(|stress_mpa| stress_mpa - sigma_c_mpa);
+    let upper_inner_mpa = upper_outer_mpa + stress_gradient_mpa_per_mm * upper_thick;
+    let lower_inner_mpa = lower_outer_mpa - stress_gradient_mpa_per_mm * lower_thick;
+    if ![
+        upper_outer_mpa,
+        lower_outer_mpa,
+        upper_inner_mpa,
+        lower_inner_mpa,
+    ]
+    .iter()
+    .all(|stress| stress.is_finite())
+    {
+        return Err("フランジの内縁・外縁とウェブ両端の合成応力度を有限値で算定できません".into());
+    }
+    let compressed_flanges = [
+        upper_outer_mpa.min(upper_inner_mpa) < 0.0,
+        lower_outer_mpa.min(lower_inner_mpa) < 0.0,
+    ];
+    let compressed_web = upper_inner_mpa.min(lower_inner_mpa) < 0.0;
+    Ok((compressed_flanges, compressed_web))
+}
+
 pub(super) fn check_asymmetric_built_h(
     forces: &MemberForcesAt,
     sec: &Section,
@@ -136,17 +180,23 @@ pub(super) fn check_asymmetric_built_h(
             return Err(reason.into());
         }
         let pure_bending = forces.n == 0.0;
+        let with_combination_reasons = |mut reason: String| {
+            for combination_reason in asymmetric_built_h_combination_reasons(forces, ctx) {
+                reason.push('。');
+                reason.push_str(combination_reason);
+            }
+            reason
+        };
         if pure_bending {
             if ctx.steel_fb_basis != SteelFbBasis::Asd2019 {
                 return Err("軸力ゼロの強軸曲げは鋼構造許容応力度設計規準2019年版を適用する場合に照査できます".into());
             }
-            validate_built_h_plate_slenderness(shape, mat, forces).map_err(|mut reason| {
-                for combination_reason in asymmetric_built_h_combination_reasons(forces, ctx) {
-                    reason.push('。');
-                    reason.push_str(combination_reason);
-                }
-                reason
-            })?;
+            let compressed_flanges = [
+                forces.my != 0.0 || forces.mz > 0.0,
+                forces.my != 0.0 || forces.mz < 0.0,
+            ];
+            validate_built_h_plate_slenderness(shape, mat, compressed_flanges, true)
+                .map_err(with_combination_reasons)?;
         }
         let (z_upper_mm3, z_lower_mm3) = built_h_strong_axis_moduli(shape)?;
         let area_mm2 = shape.try_calc_area()?;
@@ -165,6 +215,29 @@ pub(super) fn check_asymmetric_built_h(
         };
         let sigma_b_upper_mpa = -forces.mz / z_upper_mm3;
         let sigma_b_lower_mpa = forces.mz / z_lower_mm3;
+        if !pure_bending && !has_nonzero_stability_length(ctx) {
+            if ctx.steel_fb_basis != SteelFbBasis::Asd2019 {
+                return Err(with_combination_reasons("圧縮と強軸曲げの局部座屈を省く条件は鋼構造許容応力度設計規準2019年版で確認します".into()));
+            }
+            let (compressed_flanges, compressed_web) = if forces.my != 0.0 {
+                ([true; 2], true)
+            } else {
+                compressed_built_h_plates(
+                    shape,
+                    forces.mz,
+                    sigma_c_mpa,
+                    [sigma_b_upper_mpa, sigma_b_lower_mpa],
+                )
+                .map_err(with_combination_reasons)?
+            };
+            validate_built_h_plate_slenderness(
+                shape,
+                mat,
+                compressed_flanges,
+                compressed_web || forces.qy != 0.0 || forces.qz != 0.0,
+            )
+            .map_err(with_combination_reasons)?;
+        }
         let (compression_side, tension_side, sigma_bc_mpa, sigma_bt_mpa) = if forces.mz > 0.0 {
             ("上", "下", -sigma_b_upper_mpa, sigma_b_lower_mpa)
         } else {
