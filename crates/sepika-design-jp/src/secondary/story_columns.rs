@@ -20,7 +20,7 @@ pub struct StoryColumn {
 /// `story`（層の上端階）に属する柱の一覧を返す。
 ///
 /// 上端階 SL の節点から下端階 SL に達した柱の連なりを返す。
-/// 上下階情報が未確定、または下端に達しない連なりは対象外。
+/// 下階SLに達しない連なりを除く。層境界又は柱の区間が不明なら空。
 pub fn story_columns(model: &Model, story: StoryId) -> Vec<StoryColumn> {
     analysis_story_columns(model, story).unwrap_or_default()
 }
@@ -29,7 +29,114 @@ pub(super) fn analysis_story_columns(
     model: &Model,
     story: StoryId,
 ) -> Result<Vec<StoryColumn>, String> {
-    collect_story_columns(model, story, ColumnSelection::Analysis)
+    let layer = story_layer(model, story)
+        .ok_or_else(|| format!("上端階{}の上下階SL又はFL間高さが不正です", story.0))?;
+    validate_column_elements(model)?;
+    let adj = column_adjacency(model);
+    layer_column_connections(
+        model,
+        &layer,
+        &adj,
+        has_mixed_columns(model),
+        BoundaryLinkCheck::AllColumns,
+    )?;
+
+    let mut columns = Vec::new();
+    // 下階SLへ達する探索では直ちに算定を終了するため、未到達の成分だけが次の探索に残る。
+    let mut unreachable = HashSet::new();
+    for top in model
+        .nodes
+        .iter()
+        .filter(|node| model.on_diaphragm_level(story, node.coord[2]))
+    {
+        for &(start, top_elem) in adj.get(&top.id).into_iter().flatten() {
+            let mut current = start;
+            let mut segments = vec![top_elem];
+            loop {
+                let z_mm = model.nodes[current.index()].coord[2];
+                if model.on_diaphragm_level(layer.bottom, z_mm) {
+                    columns.push(StoryColumn {
+                        top_elem,
+                        top: top.id,
+                        bottom: current,
+                        segments,
+                    });
+                    break;
+                }
+                if !is_layer_interior(model, &layer, z_mm) {
+                    break;
+                }
+                let neighbors = &adj[&current];
+                let reason = match neighbors.len() {
+                    1 => break,
+                    2 => {
+                        let incoming = segments[segments.len() - 1];
+                        let (next, elem) = if neighbors[0].1 == incoming {
+                            neighbors[1]
+                        } else {
+                            neighbors[0]
+                        };
+                        if model.nodes[next.index()].coord[2] < z_mm - 1e-9 {
+                            segments.push(elem);
+                            current = next;
+                            continue;
+                        }
+                        "中間節点の高さが順に下がらず"
+                    }
+                    _ => "中間節点で分岐し",
+                };
+                if reaches_lower_sl(model, &layer, &adj, current, &mut unreachable) {
+                    return Err(format!(
+                        "Re: 階{}の柱{}は{}（節点{}）、上下階SL間を一本の柱として追跡できません",
+                        story.0, top_elem.0, reason, current.0
+                    ));
+                }
+                break;
+            }
+        }
+    }
+    Ok(columns)
+}
+
+fn reaches_lower_sl(
+    model: &Model,
+    layer: &Layer,
+    adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
+    start: NodeId,
+    unreachable: &mut HashSet<NodeId>,
+) -> bool {
+    let mut stack = vec![start];
+    while let Some(current) = stack.pop() {
+        let z_mm = model.nodes[current.index()].coord[2];
+        if model.on_diaphragm_level(layer.bottom, z_mm) {
+            return true;
+        }
+        // 上階SLに戻る経路をたどると、その節点に接続する独立柱を経由して下階に達してしまう。
+        if is_layer_interior(model, layer, z_mm) && unreachable.insert(current) {
+            stack.extend(adj[&current].iter().map(|&(node, _)| node));
+        }
+    }
+    false
+}
+
+pub(super) fn d_value_story_columns(
+    model: &Model,
+    story: StoryId,
+) -> Result<Vec<StoryColumn>, String> {
+    let columns = analysis_story_columns(model, story)?;
+    let adj = column_adjacency(model);
+    for column in &columns {
+        let z_mm = model.nodes[column.top.index()].coord[2];
+        if let Some(&(_, other)) = adj[&column.top].iter().find(|&&(node, id)| {
+            id != column.top_elem && model.nodes[node.index()].coord[2] < z_mm - 1e-9
+        }) {
+            return Err(format!(
+                "階{}の柱{}・柱{}: 上階SLの節点{}を共有する柱のD値略算法は未対応です",
+                story.0, column.top_elem.0, other.0, column.top.0
+            ));
+        }
+    }
+    Ok(columns)
 }
 
 /// 上下階SL間の区間が一意に定まる非分岐柱を列挙する。
@@ -48,7 +155,6 @@ pub(super) fn drift_story_columns(
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ColumnSelection {
-    Analysis,
     Nonbranching,
     Drift,
 }
@@ -387,7 +493,6 @@ fn trace_column_down(
     selection: ColumnSelection,
     has_mixed_columns: bool,
 ) -> Option<(StoryColumn, bool)> {
-    let reject_branch = selection != ColumnSelection::Analysis;
     let mut current = top;
     let mut top_elem = None;
     let mut segments = Vec::new();
@@ -413,7 +518,7 @@ fn trace_column_down(
             ));
         }
 
-        // 通常柱の列挙を変えないため、層境界を通過したかどうかと、新型を含むかを別々に追う。
+        // 混在柱の層境界判定を通常柱の層間変形計算に広げない。
         if current != top
             && has_mixed_columns
             && !is_layer_interior(model, layer, cur_node.coord[2])
@@ -423,13 +528,13 @@ fn trace_column_down(
         if crossed_boundary && mixed_connection {
             return None;
         }
-        if reject_branch && current != top && adj.get(&current)?.len() != 2 {
+        if current != top && adj.get(&current)?.len() != 2 {
             return None;
         }
         if cur_node.coord[2] < layer.bottom_sl_mm {
             return None;
         }
-        if reject_branch && cur_node.coord[2] > model.nodes[top.index()].coord[2] {
+        if cur_node.coord[2] > model.nodes[top.index()].coord[2] {
             return None;
         }
         let cur_z = cur_node.coord[2];
@@ -437,7 +542,7 @@ fn trace_column_down(
             .get(&current)?
             .iter()
             .filter(|(nid, _)| {
-                if reject_branch && current != top {
+                if current != top {
                     !visited.contains(nid)
                 } else {
                     model.nodes[nid.index()].coord[2] < cur_z - 1e-9

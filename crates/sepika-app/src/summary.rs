@@ -2250,7 +2250,7 @@ mod tests {
     }
 
     #[test]
-    fn reevaluation_holds_re_and_fes_when_a_fiber_column_cannot_be_traced() {
+    fn reevaluation_holds_re_and_fes_when_an_sl_to_sl_column_cannot_be_traced() {
         use sepika_core::ids::{ElemId, NodeId, StoryId};
         use sepika_core::model::ElementKind;
 
@@ -2296,17 +2296,19 @@ mod tests {
         };
         let metric =
             |model: &Model| compute_story_metrics_with(model, SeismicDir::X, &ctx).remove(0);
-        let ordinary = metric(&model);
-        assert!(ordinary.re.unwrap().is_finite());
-        assert!(ordinary.fes.unwrap().is_finite());
-        for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
             model.elements[3].kind = kind;
             let evaluated = metric(&model);
             let reason = evaluated.re.unwrap_err();
             assert!(
-                reason.contains("柱0") && reason.contains("追跡できません"),
+                reason.contains("柱0") && reason.contains("中間節点の高さが順に下がらず"),
                 "{reason}"
             );
+            assert_eq!(evaluated.re_ok, None);
             assert_eq!(evaluated.fes.unwrap_err(), reason);
             let drift = evaluated.drift.unwrap().unwrap();
             assert_eq!(drift.column.elem, ElemId(0));
@@ -2323,17 +2325,13 @@ mod tests {
             ] {
                 model.elements[3].kind = kind;
                 let evaluated = metric(&model);
-                if kind == ElementKind::Beam {
-                    assert!(evaluated.re.unwrap().is_finite());
-                    assert!(evaluated.fes.unwrap().is_finite());
-                } else {
-                    let reason = evaluated.re.unwrap_err();
-                    assert!(
-                        reason.contains("柱0") && reason.contains("中間節点で分岐"),
-                        "{branch_height_mm}: {reason}"
-                    );
-                    assert_eq!(evaluated.fes.unwrap_err(), reason);
-                }
+                let reason = evaluated.re.unwrap_err();
+                assert!(
+                    reason.contains("柱0") && reason.contains("中間節点で分岐"),
+                    "{branch_height_mm}: {reason}"
+                );
+                assert_eq!(evaluated.re_ok, None);
+                assert_eq!(evaluated.fes.unwrap_err(), reason);
                 let drift = evaluated.drift.unwrap().unwrap();
                 assert_ne!(drift.column.elem, ElemId(0));
                 assert_eq!(drift.angle, 10.0 / 3000.0);

@@ -3389,38 +3389,59 @@ fn test_holding_capacity_flow() {
 }
 
 #[test]
-fn re_1640_holding_capacity_reports_the_ambiguous_column_after_seismic_and_pushover() {
-    let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
-    let mut middle = model.nodes[2].clone();
-    middle.id = NodeId(4);
-    middle.coord[2] -= 0.5;
-    model.nodes.push(middle);
-    let mut upper = model.elements[0].clone();
-    upper.id = ElemId(3);
-    upper.nodes[0] = NodeId(4);
-    model.elements[0].nodes[1] = NodeId(4);
-    model.elements.push(upper);
+fn holding_capacity_reports_ambiguous_sl_links_and_interior_branches_after_analysis() {
+    for (split_drop_mm, branch, expected) in [
+        (0.5, false, "上階SLの柱3"),
+        (1750.0, true, "柱3は中間節点で分岐し（節点4）"),
+    ] {
+        let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
+        let mut middle = model.nodes[2].clone();
+        middle.id = NodeId(4);
+        middle.coord[2] -= split_drop_mm;
+        model.nodes.push(middle);
+        let mut upper = model.elements[0].clone();
+        upper.id = ElemId(3);
+        upper.nodes[0] = NodeId(4);
+        model.elements[0].nodes[1] = NodeId(4);
+        model.elements.push(upper);
+        if branch {
+            let mut base = model.nodes[0].clone();
+            base.id = NodeId(5);
+            base.coord[0] = -1000.0;
+            model.nodes.push(base);
+            let mut lower = model.elements[0].clone();
+            lower.id = ElemId(4);
+            lower.nodes[0] = NodeId(5);
+            model.elements.push(lower);
+        }
 
-    let mut app = App::default();
-    assert!(app.load_model(model));
-    app.generate_stories_action();
-    app.run_seismic(SeismicDir::X);
-    app.run_seismic(SeismicDir::Y);
-    app.core.analysis_cfg.push_steps = 10;
-    app.core.analysis_cfg.seismic_dir = SeismicDir::X;
-    app.run_pushover();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    let reason = app
-        .compute_holding_capacity()
-        .err()
-        .expect("保有水平耐力の判定は算定不能");
-    assert!(reason.contains("上階SLの柱3"), "{reason}");
-    assert!(reason.contains("一意に特定できません"), "{reason}");
-    assert!(app.core.scoped.holding_capacity_source.is_none());
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.generate_stories_action();
+        app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
+        app.core.analysis_cfg.push_steps = 10;
+        app.core.analysis_cfg.seismic_dir = SeismicDir::X;
+        app.run_pushover();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let reason = app
+            .compute_holding_capacity()
+            .err()
+            .expect("保有水平耐力の判定は算定不能");
+        assert!(reason.contains(expected), "{reason}");
+        let csv = crate::summary::build_report_csv(&app);
+        assert!(
+            csv.lines()
+                .any(|line| line.starts_with("必要保有水平耐力・合否,算定不能,")
+                    && line.contains(expected)),
+            "{reason}"
+        );
+        assert!(app.core.scoped.holding_capacity_source.is_none());
+    }
 }
 
 /// 架構種別が「S ブレース」なのに筋かい部材を検出できない場合、βu を算定できないため

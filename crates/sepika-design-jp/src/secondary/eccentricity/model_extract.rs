@@ -88,7 +88,7 @@ pub fn column_stiffnesses(model: &Model, story: StoryId) -> Result<Vec<ColumnSti
 
     let mut result = Vec::new();
 
-    for col in crate::secondary::story_columns::story_columns(model, story) {
+    for col in crate::secondary::story_columns::d_value_story_columns(model, story)? {
         let Some(elem) = model.element(col.top_elem) else {
             continue;
         };

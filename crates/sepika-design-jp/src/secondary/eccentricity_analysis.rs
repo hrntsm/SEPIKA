@@ -11,10 +11,7 @@ use sepika_core::ids::{ElemId, StoryId};
 use sepika_core::model::{ElementData, ElementKind, Model};
 use std::collections::HashMap;
 
-use super::story_columns::{
-    analysis_story_columns, checked_story_columns, mixed_story_connections, BoundaryLinkCheck,
-    StoryColumn,
-};
+use super::story_columns::{analysis_story_columns, StoryColumn};
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::statics::analysis::SeismicDir;
@@ -40,28 +37,7 @@ fn actual_axis_ends(model: &Model, elem: &ElementData) -> Result<[[f64; 3]; 2], 
 }
 
 fn resolved_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, String> {
-    let mixed_connections = mixed_story_connections(model, story, BoundaryLinkCheck::AllColumns)?;
     let columns = analysis_story_columns(model, story)?;
-    if !mixed_connections.is_empty() {
-        let nonbranching = checked_story_columns(model, story)?;
-        for &(top, top_elem) in &mixed_connections {
-            let Some(column) = nonbranching
-                .iter()
-                .find(|column| column.top == top && column.top_elem == top_elem)
-            else {
-                return Err(format!(
-                    "Re: 階{}の柱{}は上端又は中間節点で分岐し、上下階SL間を一本の柱として追跡できません",
-                    story.0, top_elem.0
-                ));
-            };
-            if !columns.contains(column) {
-                return Err(format!(
-                    "Re: 階{}の柱{}は中間節点の高さが順に下がらず、上下階SL間の連なりを偏心率算定用に追跡できません",
-                    story.0, top_elem.0
-                ));
-            }
-        }
-    }
     for column in &columns {
         let members = column
             .segments
@@ -76,12 +52,6 @@ fn resolved_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, S
             })
             .collect::<Result<Vec<_>, _>>()?;
         if members.iter().any(|elem| elem.kind != ElementKind::Beam) {
-            if !mixed_connections.contains(&(column.top, column.top_elem)) {
-                return Err(format!(
-                    "Re: 階{}の柱{}は層境界のSL節点で区切った連なりに対応せず、上下階SL間の区間を一意に特定できません",
-                    story.0, column.top_elem.0
-                ));
-            }
             for elem in members {
                 let [p0, p1] = actual_axis_ends(model, elem)?;
                 if p0[..2] != p1[..2] || p0[2] == p1[2] {
@@ -541,8 +511,8 @@ mod tests {
     }
 
     #[test]
-    fn branched_mixed_column_is_held_even_when_downward_paths_reach_the_lower_sl() {
-        for branch_height_mm in [1500.0, 2200.0, 3000.0] {
+    fn branching_at_an_interior_node_prevents_a_partial_story_evaluation() {
+        for branch_height_mm in [0.0, 1500.0, 2200.0, 3000.0] {
             let (mut model, story) = build_symmetric_frame(None);
             for (id, coord) in [(8, [0.0, 0.0, 1500.0]), (9, [300.0, 0.0, branch_height_mm])] {
                 let mut node = model.nodes[4].clone();
@@ -567,28 +537,30 @@ mod tests {
                 copy_column_forces(&mut response, &[ElemId(8), ElemId(9)]);
                 response
             });
-            let columns = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
-            assert_eq!(
-                columns.len(),
-                if branch_height_mm == 3000.0 { 5 } else { 4 }
-            );
-            let ordinary = story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap();
-            assert!(ordinary.re_x.unwrap().is_finite());
-            assert!(ordinary.re_y.unwrap().is_finite());
-            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-                model.elements[1].kind = kind;
+            let reason = story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap_err();
+            for expected in ["階1", "柱8", "中間節点で分岐", "節点8"] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+            for (axis, response) in [(SeismicDir::X, &x), (SeismicDir::Y, &y)] {
                 assert_eq!(
-                    column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap(),
-                    columns
+                    column_horizontal_stiffnesses(&model, story, response, axis),
+                    Err(reason.clone())
                 );
-                model.elements[1].kind = ElementKind::Beam;
+            }
+            assert_eq!(
+                center_of_gravity_from_axial(&model, story, &x),
+                Err(reason.clone())
+            );
+            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+                for elem in [0, 1] {
+                    model.elements[elem].kind = kind;
+                    assert_eq!(
+                        story_eccentricity_from_analysis(&model, story, &x, &y, None),
+                        Err(reason.clone())
+                    );
+                    model.elements[elem].kind = ElementKind::Beam;
+                }
                 model.elements[0].kind = kind;
-                let reason =
-                    story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap_err();
-                assert!(
-                    reason.contains("柱8") && reason.contains("中間節点で分岐"),
-                    "{reason}"
-                );
                 let drifts =
                     crate::secondary::stiffness_ratio::column_drifts(&model, &x.disp, 0, story)
                         .unwrap();

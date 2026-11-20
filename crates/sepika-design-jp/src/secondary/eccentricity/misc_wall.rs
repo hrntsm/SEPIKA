@@ -7,6 +7,7 @@ use sepika_core::model::{
 };
 
 use super::core::ColumnStiffness;
+use crate::secondary::story_columns::{analysis_story_columns, StoryColumn};
 
 /// 1以上の有限なn、正の有限な壁面積・柱面積と非負有限の柱剛性から付加剛性 [N/mm] を返す。
 /// aw・sum_acは `[mm²]`、sum_kcは `[N/mm]`、nは無次元。入力不正又は非有限な結果はErr。
@@ -27,10 +28,19 @@ pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> Result<
     Ok(stiffness)
 }
 
-/// 層内同一断面の柱の総面積 `[mm²]`。断面・材料・面積の欠落や不正はErr。
+/// 層内同一断面の柱の総面積 `[mm²]`。柱区間・断面・材料・面積の不備はErr。
 pub fn sum_column_area(model: &Model, story: StoryId) -> Result<f64, String> {
+    let columns = analysis_story_columns(model, story)?;
+    total_column_area(model, story, &columns)
+}
+
+fn total_column_area(
+    model: &Model,
+    story: StoryId,
+    columns: &[StoryColumn],
+) -> Result<f64, String> {
     let mut sum = 0.0;
-    for col in crate::secondary::story_columns::story_columns(model, story) {
+    for col in columns {
         let failure =
             |reason: &str| format!("n倍法: 階{}の柱{}: {reason}", story.0, col.top_elem.0);
         let elem = model
@@ -211,7 +221,7 @@ pub fn has_misc_wall(model: &Model, story: StoryId) -> Result<bool, String> {
 }
 
 /// 対象層の無開口RC自立壁の付加剛性を返す。n未指定なら空。
-/// n不正、対象壁・柱の必須入力不足、層内異断面、剛性集計不整合はErr。
+/// n不正、対象柱の区間や必須入力の不備、層内異断面、剛性集計不整合はErr。
 pub fn misc_wall_stiffnesses(
     model: &Model,
     story: StoryId,
@@ -228,11 +238,11 @@ pub fn misc_wall_stiffnesses(
     if walls.is_empty() {
         return Ok(Vec::new());
     }
+    let columns = analysis_story_columns(model, story)?;
     let aggregate_area = (model.stress_cfg.misc_wall_method
         == MiscWallStiffnessMethod::StoryColumns)
-        .then(|| sum_column_area(model, story))
+        .then(|| total_column_area(model, story, &columns))
         .transpose()?;
-    let columns = crate::secondary::story_columns::story_columns(model, story);
     if columns.len() != cols.len()
         || cols
             .iter()

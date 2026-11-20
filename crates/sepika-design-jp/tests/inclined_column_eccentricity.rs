@@ -19,6 +19,100 @@ mod eccentricity_model;
 use eccentricity_model::{add_case, column_model, element_nodal_residual, TOP};
 
 #[test]
+fn shared_upper_sl_counts_every_independent_column_in_both_directions() {
+    let span_mm = 6000.0;
+    let mut model = column_model(&[[0.0, 0.0], [span_mm, 0.0], [0.0, span_mm]], 4000.0, 0.0);
+    let mut mirror_base = model.nodes[0].clone();
+    mirror_base.id = NodeId(6);
+    mirror_base.coord[0] = 4000.0;
+    model.nodes.push(mirror_base);
+    model.stories[0].node_ids.push(NodeId(6));
+    let mut mirror_column = model.elements[0].clone();
+    mirror_column.id = ElemId(3);
+    mirror_column.nodes = smallvec![NodeId(1), NodeId(6)];
+    model.elements.push(mirror_column);
+
+    let responses = [0, 1].map(|axis| {
+        let mut forces = [0.0; 6];
+        forces[axis] = 1000.0;
+        let case = add_case(&mut model, if axis == 0 { "EX" } else { "EY" }, forces);
+        forces[axis] = 500.0;
+        for node in [NodeId(3), NodeId(5)] {
+            model.load_cases[case.index()]
+                .nodal
+                .push(NodalLoad::manual(node, forces));
+        }
+        linear_static_once(&model, case).unwrap()
+    });
+
+    // 共有柱頭の1000 Nを対称な2本が等分し、独立した鉛直柱の各柱頭には500 Nが作用する。
+    for (axis, response) in responses.iter().enumerate() {
+        let sum_forces: f64 = response
+            .column_end_horizontal_forces
+            .iter()
+            .map(|(id, forces)| {
+                let member = model.element(*id).unwrap();
+                let end = usize::from(member.nodes[0] != NodeId(1));
+                let q_n = forces.as_ref().unwrap()[end][axis];
+                assert_relative_eq!(q_n, 500.0, epsilon = 1e-8);
+                q_n
+            })
+            .sum();
+        assert_relative_eq!(sum_forces, 2000.0, epsilon = 1e-8);
+        assert_relative_eq!(
+            response.story_shears.as_ref().unwrap()[axis][0],
+            2000.0,
+            epsilon = 1e-8
+        );
+    }
+
+    let [x, y] = &responses;
+    let columns = column_stiffnesses_from_analysis(&model, TOP, x, y).unwrap();
+    let reason =
+        sepika_design_jp::secondary::eccentricity::story_eccentricity(&model, TOP).unwrap_err();
+    assert!(
+        reason.contains("上階SLの節点1を共有する柱のD値略算法は未対応"),
+        "{reason}"
+    );
+    assert_eq!(columns.len(), 4);
+    assert_eq!(columns.iter().filter(|c| c.pos == [0.0; 2]).count(), 2);
+    for (axis, direction) in [SeismicDir::X, SeismicDir::Y].into_iter().enumerate() {
+        let response = &responses[axis];
+        let stiffness = column_horizontal_stiffnesses(&model, TOP, response, direction).unwrap();
+        let reacted_n: f64 = stiffness
+            .iter()
+            .zip([1, 1, 3, 5])
+            .map(|(ki, head)| ki * response.disp[head][axis].abs())
+            .sum();
+        assert_relative_eq!(reacted_n, 2000.0, epsilon = 1e-8);
+    }
+
+    // 原点以外の同一断面の柱は、X・Yとも同じ剛性 k。三角形の重心は (L/3,L/3)。
+    // k の層剛性に対する比を a, b とすると、剛心は (bL,aL)、ねじり剛性は k L²(2−a−b)。
+    let [a, b] = [0, 1].map(|axis| {
+        let displacement = &responses[axis].disp;
+        assert_relative_eq!(displacement[3][axis], displacement[5][axis], epsilon = 1e-8);
+        0.5 / (1.0 + displacement[3][axis] / displacement[1][axis])
+    });
+    assert_relative_eq!(500.0 / x.disp[3][0], 500.0 / y.disp[3][1], epsilon = 1e-8);
+    let [cor_x, cor_y] = center_of_rigidity(&columns).unwrap();
+    assert_relative_eq!(cor_x, b * span_mm, epsilon = 1e-8);
+    assert_relative_eq!(cor_y, a * span_mm, epsilon = 1e-8);
+    let torsion_factor = 2.0 - a - b;
+    let result = story_eccentricity_from_analysis(&model, TOP, x, y, None).unwrap();
+    assert_relative_eq!(
+        result.re_x.unwrap(),
+        (1.0 / 3.0 - a).abs() / (a * torsion_factor).sqrt(),
+        epsilon = 1e-8
+    );
+    assert_relative_eq!(
+        result.re_y.unwrap(),
+        (1.0 / 3.0 - b).abs() / (b * torsion_factor).sqrt(),
+        epsilon = 1e-8
+    );
+}
+
+#[test]
 fn inclined_ordinary_beam_reactions_and_signed_section_forces_balance_the_applied_load() {
     let component_45 = 1000.0 * std::f64::consts::FRAC_1_SQRT_2;
     for (dx_mm, py_n, pz_n, expected_section) in [
