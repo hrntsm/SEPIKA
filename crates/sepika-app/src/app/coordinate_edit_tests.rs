@@ -80,6 +80,7 @@ fn app() -> App {
         member_forces: Vec::new(),
         panel_moments: Vec::new(),
         girder_column_face_forces: Vec::new(),
+        column_end_horizontal_forces: Vec::new(),
     };
     app.core.scoped.results = Some(ResultsBundle {
         combos: vec![("正".into(), result(1.0)), ("逆".into(), result(-1.0))],

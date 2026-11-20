@@ -199,6 +199,7 @@ pub fn bending_shear_response(dir: SeismicDir, reverse: bool, split: bool) -> (M
         }
     }
     let mut member_forces = Vec::new();
+    let mut column_end_horizontal_forces = Vec::new();
     for e in &model.elements {
         let p0 = model.nodes[e.nodes[0].index()].coord;
         let p1 = model.nodes[e.nodes[1].index()].coord;
@@ -206,6 +207,15 @@ pub fn bending_shear_response(dir: SeismicDir, reverse: bool, split: bool) -> (M
         let n = -[6e6, 3e6][layer] * p0[axis] / if axis == 0 { 4e6 } else { 16e6 };
         let frame = LocalFrame::from_nodes(p0, p1, e.local_axis.ref_vector).unwrap();
         let q = [2000.0, 1000.0][layer] / 4.0;
+        let mut lower = [0.0; 2];
+        lower[axis] = -q;
+        let upper = lower.map(|value| -value);
+        let ends = if reverse {
+            [upper, lower]
+        } else {
+            [lower, upper]
+        };
+        column_end_horizontal_forces.push((e.id, Ok(ends)));
         let local = [
             n,
             -q * frame.rot[0][2].signum() * frame.rot[1][axis],
@@ -230,6 +240,7 @@ pub fn bending_shear_response(dir: SeismicDir, reverse: bool, split: bool) -> (M
             member_forces,
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_horizontal_forces,
         },
     )
 }

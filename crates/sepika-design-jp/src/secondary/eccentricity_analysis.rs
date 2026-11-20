@@ -133,10 +133,10 @@ fn station_force_global(
 
 /// 地震時応力解析結果から柱の方向別水平剛性 `ki = Qi/δi` を算定する（精算層）。
 /// 剛心はその階の柱の水平方向剛性の中心であり、各柱の水平剛性は地震時応力解析
-/// 結果のせん断力と層間変位から算定する。
+/// 結果の負担水平力と層間変位から算定する。
 ///
 /// - `res_x` / `res_y`: X / Y 方向加力時の弾性応力解析結果
-/// - `kX` は X 加力時の（せん断力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
+/// - `kX` は X 加力時の（負担水平力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
 ///   変位差が0又は剛性の商が非有限となる柱は、方向・部材ID付きでErr。
 ///
 /// 上下階SL間の区間が曖昧、必要変位・内力が欠損・非有限、又は局所基底が不正なら部材IDと理由を返す。
@@ -188,6 +188,11 @@ fn horizontal_stiffnesses(
         .iter()
         .map(|(id, f)| (*id, f))
         .collect();
+    let end_forces: HashMap<_, _> = response
+        .column_end_horizontal_forces
+        .iter()
+        .map(|(id, force)| (*id, force))
+        .collect();
     let axis = match direction {
         SeismicDir::X => 0,
         SeismicDir::Y => 1,
@@ -215,21 +220,67 @@ fn horizontal_stiffnesses(
             if !delta.is_finite() {
                 return Err(failure("層間変位差が非有限です"));
             }
-            let local = member_start(&forces, elem.id)
-                .filter(|local| local[..3].iter().all(|value| value.is_finite()))
-                .ok_or_else(|| failure("部材始端の内力が欠損・不正です"))?;
-            let global = station_force_global(p0, p1, elem.local_axis.ref_vector, local)
-                .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
+            let horizontal_force = if elem.kind == ElementKind::Beam {
+                let top = column_cut_end(model, column, elem, [p0, p1])
+                    .map_err(|reason| failure(&reason))?;
+                end_forces
+                    .get(&elem.id)
+                    .ok_or_else(|| failure("上端の負担水平力が欠損しています"))?
+                    .as_ref()
+                    .map_err(|reason| failure(reason))?[top][axis]
+            } else {
+                let local = member_start(&forces, elem.id)
+                    .filter(|local| local[..3].iter().all(|value| value.is_finite()))
+                    .ok_or_else(|| failure("部材始端の内力が欠損・不正です"))?;
+                station_force_global(p0, p1, elem.local_axis.ref_vector, local)
+                    .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?[axis]
+            };
+            if !horizontal_force.is_finite() {
+                return Err(failure("上端の負担水平力が不正です"));
+            }
             if delta == 0.0 {
                 return Err(failure("層間変位が0のため剛性を算定できません"));
             }
-            let stiffness = global[axis].abs() / delta;
+            let stiffness = horizontal_force.abs() / delta;
             if !stiffness.is_finite() {
-                return Err(failure("せん断力と層間変位の商が非有限です"));
+                return Err(failure("負担水平力と層間変位の商が非有限です"));
             }
             Ok(stiffness)
         })
         .collect()
+}
+
+fn column_cut_end(
+    model: &Model,
+    column: &StoryColumn,
+    elem: &ElementData,
+    ends: [[f64; 3]; 2],
+) -> Result<usize, String> {
+    LocalFrame::from_nodes(ends[0], ends[1], elem.local_axis.ref_vector)
+        .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
+    let top = usize::from(elem.nodes[1] == column.top);
+    let z = model.nodes[column.top.index()].coord[2];
+    if ends[top][2] != z {
+        return Err(
+            "上端の実材軸端とSL接続節点の高さが異なり、層側の切断位置を特定できません".into(),
+        );
+    }
+    if ends[1 - top][2] >= z {
+        return Err("上端の実材軸が層側へ伸びず、層側の切断位置を特定できません".into());
+    }
+    for id in column.segments.iter().skip(1) {
+        let segment = model.element(*id).expect("列挙時に確認した柱");
+        if actual_axis_ends(model, segment)?
+            .iter()
+            .any(|end| end[2] >= z)
+        {
+            return Err(format!(
+                "分割部材{}の実材軸が上端高さに達するため、層側の切断位置を特定できません",
+                id.0
+            ));
+        }
+    }
+    Ok(top)
 }
 
 /// 柱の圧縮軸力を重みにした平面重心 `[mm]` を返す。
@@ -469,6 +520,7 @@ mod tests {
         ]
         .map(|mut response| {
             response.member_forces[0].0 = ElemId(8);
+            response.column_end_horizontal_forces[0].0 = ElemId(8);
             response
         });
         let reason = story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap_err();
@@ -512,10 +564,7 @@ mod tests {
             .map(|mut response| {
                 response.disp.push([0.0; 6]);
                 response.disp.push(response.disp[4]);
-                let forces = response.member_forces[0].1.clone();
-                response
-                    .member_forces
-                    .extend([(ElemId(8), forces.clone()), (ElemId(9), forces)]);
+                copy_column_forces(&mut response, &[ElemId(8), ElemId(9)]);
                 response
             });
             let columns = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap();
@@ -577,9 +626,7 @@ mod tests {
         ]
         .map(|mut response| {
             response.disp.push(response.disp[4]);
-            response
-                .member_forces
-                .push((ElemId(8), response.member_forces[0].1.clone()));
+            copy_column_forces(&mut response, &[ElemId(8)]);
             response
         });
         gravity.member_forces[0].1.at[0].1[0] = -9000.0;
@@ -648,10 +695,7 @@ mod tests {
                 response
                     .disp
                     .push(if end == 1 { response.disp[4] } else { [0.0; 6] });
-                let force = response.member_forces[0].1.clone();
-                response
-                    .member_forces
-                    .extend([(ElemId(8), force.clone()), (ElemId(9), force)]);
+                copy_column_forces(&mut response, &[ElemId(8), ElemId(9)]);
                 response
             });
             let reason = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap_err();
@@ -685,9 +729,7 @@ mod tests {
         ]
         .map(|mut response| {
             response.disp.push(response.disp[4]);
-            response
-                .member_forces
-                .push((ElemId(8), response.member_forces[0].1.clone()));
+            copy_column_forces(&mut response, &[ElemId(8)]);
             response
         });
         for has_branch in [false, true] {
@@ -782,10 +824,7 @@ mod tests {
                 let mut bottom_inside_disp = [0.0; 6];
                 bottom_inside_disp[axis] = 4.0;
                 response.disp.push(bottom_inside_disp);
-                let force = response.member_forces[0].1.clone();
-                response
-                    .member_forces
-                    .extend([(ElemId(8), force.clone()), (ElemId(9), force)]);
+                copy_column_forces(&mut response, &[ElemId(8), ElemId(9)]);
                 response
             });
             for kind in [
@@ -907,10 +946,21 @@ mod tests {
         }
     }
 
+    fn copy_column_forces(response: &mut StaticOnce, ids: &[ElemId]) {
+        let section = response.member_forces[0].1.clone();
+        let ends = response.column_end_horizontal_forces[0].1.clone();
+        for &id in ids {
+            response.member_forces.push((id, section.clone()));
+            response
+                .column_end_horizontal_forces
+                .push((id, ends.clone()));
+        }
+    }
+
     /// 柱 4 本（ElemId 0..4、節点 i(底)→i+4(頂)）へ、指定の局所内力
     /// [n, qy, qz] を持つ member_forces と頂部一様変位 disp を合成する。
     /// 柱の ref_vector=[0,1,0] より ex=[0,0,1], ey=[0,1,0], ez=[1,0,0]。
-    /// → 全体 X 方向せん断 = qz、全体 Y 方向せん断 = qy。
+    /// → 柱頭側からの全体 X 方向力 = -qz、全体 Y 方向力 = -qy。
     pub(super) fn fabricate_static(
         top_disp: [f64; 2],
         col_local_forces: [[f64; 3]; 4],
@@ -939,6 +989,11 @@ mod tests {
             member_forces,
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_horizontal_forces: col_local_forces
+                .iter()
+                .enumerate()
+                .map(|(i, &[_, qy, qz])| (ElemId(i as u32), Ok([[qz, qy], [-qz, -qy]])))
+                .collect(),
         }
     }
 
@@ -1192,6 +1247,7 @@ mod tests {
             )],
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_horizontal_forces: vec![(ElemId(0), Ok([[1000.0, 0.0], [-1000.0, -0.0]]))],
         };
         let mut disp_y = vec![[0.0; 6]; 3];
         disp_y[2][1] = 10.0;
@@ -1207,6 +1263,7 @@ mod tests {
             )],
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_horizontal_forces: vec![(ElemId(0), Ok([[0.0, 1000.0], [-0.0, -1000.0]]))],
         };
         let cols = column_stiffnesses_from_analysis(&model, top, &res_x, &res_y).unwrap();
         assert_eq!(cols.len(), 1, "分割柱は 1 本と数える");
@@ -1222,13 +1279,13 @@ mod tests {
         missing.disp.pop();
         assert!(story_eccentricity_from_analysis(&model, story, &missing, &y, None).is_err());
         let mut missing = x.clone();
-        missing.member_forces.pop();
+        missing.column_end_horizontal_forces.pop();
         assert!(story_eccentricity_from_analysis(&model, story, &missing, &y, None).is_err());
         let mut invalid = x.clone();
         invalid.disp[4][0] = f64::NAN;
         assert!(story_eccentricity_from_analysis(&model, story, &invalid, &y, None).is_err());
         invalid = x.clone();
-        invalid.member_forces[0].1.at[0].1[2] = f64::INFINITY;
+        invalid.column_end_horizontal_forces[0].1.as_mut().unwrap()[1][0] = f64::INFINITY;
         assert!(story_eccentricity_from_analysis(&model, story, &invalid, &y, None).is_err());
     }
     #[test]
@@ -1382,7 +1439,7 @@ mod misc620_tests {
         assert!(cols.iter().all(|c| c.dx == 0.0 && c.dy == 0.0));
         assert!(story_eccentricity_from_analysis(&model, story, &x, &y, None).is_ok());
         let mut missing = x.clone();
-        missing.member_forces.pop();
+        missing.column_end_horizontal_forces.pop();
         assert!(
             story_eccentricity_from_analysis(&model, story, &missing, &y, None)
                 .unwrap_err()

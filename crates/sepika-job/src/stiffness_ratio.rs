@@ -452,6 +452,119 @@ mod tests {
     }
 
     #[test]
+    fn inclined_column_force_determines_misc_wall_reference_or_explains_hold() {
+        for method in [
+            MiscWallStiffnessMethod::StoryColumns,
+            MiscWallStiffnessMethod::RepresentativeColumn,
+        ] {
+            for reversed in [false, true] {
+                let mut model = fixture(1);
+                model.nodes[0].coord[0] = -1000.0;
+                if reversed {
+                    model.elements[0].nodes.swap(0, 1);
+                }
+                model.stress_cfg.misc_wall_method = method;
+                model.stress_cfg.misc_wall_representatives = vec![MiscWallRepresentativeColumn {
+                    story: StoryId(1),
+                    column: ElemId(0),
+                }];
+                wall(&mut model, 1, [0.0, 0.0], [1.0, 0.0]);
+                let [x, y] = base_results(&model).map(Result::unwrap);
+                let expected_column_x = 2.0 / x.disp[1][0];
+                let evaluated = evaluation_model(&model, &x, &y).unwrap();
+                near(
+                    evaluated.elements.last().unwrap().spring.unwrap()[1],
+                    expected_column_x,
+                );
+                let mut results = [Ok(x), Ok(y)];
+                attach_evaluations(&model, &[LoadCaseId(0), LoadCaseId(1)], &mut results);
+                let result = results[0].as_ref().unwrap();
+                let drift = result
+                    .stiffness_ratio_disp
+                    .as_ref()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()[1][0];
+                near(drift, result.disp[1][0] / 2.0);
+
+                model.elements[0].end_offsets_mm[usize::from(!reversed)][2] = 100.0;
+                let mut results = base_results(&model);
+                attach_evaluations(&model, &[LoadCaseId(0), LoadCaseId(1)], &mut results);
+                for result in results {
+                    let reason = result.unwrap().stiffness_ratio_disp.unwrap().unwrap_err();
+                    assert!(
+                        reason.contains("柱0") && reason.contains("切断位置"),
+                        "{reason}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inclined_column_force_reaches_planar_and_spatial_lumped_models() {
+        use sepika_core::units::GRAVITY_MM_S2;
+        use sepika_solver::dynamic::lumped_mass::{
+            LumpedMassType, LumpedStiffnessSource, StickDim,
+        };
+        use sepika_solver::statics::analysis::SeismicDir;
+
+        let mut model = fixture(1);
+        model.nodes[0].coord[0] = -1000.0;
+        model.elements[0].nodes.swap(0, 1);
+        model.stories[1].dynamic_mass = Some(StoryDynamicMass {
+            horizontal_inertia_t_mm2: [0.0; 3],
+            mass_equiv_weight_n: GRAVITY_MM_S2,
+            lumped_mass: None,
+            center_xy_mm: [0.0, 0.0],
+            inertia_t_mm2: 1e6,
+        });
+        wall(&mut model, 1, [0.0, 1000.0], [1.0, 0.0]);
+        model.wall_weight_generation = Some(WallWeightGenerationMode::GravityCasesOnly);
+        let [x, y] = base_results(&model).map(Result::unwrap);
+        let expected = 2.0 / x.disp[1][0];
+        let input = crate::LumpedMassBuildInput {
+            model_type: LumpedMassType::EquivalentShear,
+            model: &model,
+            dim: StickDim::Planar,
+            source: LumpedStiffnessSource::ColumnKi,
+            dir: SeismicDir::X,
+            nonlinear: false,
+            secant_ratio: 0.75,
+            target_drift_angle: 1.0 / 200.0,
+            res_x: Some(&x),
+            res_y: Some(&y),
+            po_x: None,
+            po_y: None,
+        };
+        let planar = crate::build_lumped_mass(input).unwrap();
+        near(planar.stories[0].skeleton.k1, expected);
+        for source in [
+            LumpedStiffnessSource::ColumnKi,
+            LumpedStiffnessSource::StoryQd,
+        ] {
+            let spatial = crate::build_lumped_mass(crate::LumpedMassBuildInput {
+                dim: StickDim::Spatial,
+                source,
+                ..input
+            })
+            .unwrap();
+            let layer = &spatial.spatial[0];
+            near(layer.rigidity_xy[0], 0.0);
+            near(layer.rigidity_xy[1], 500.0);
+            near(
+                layer.k1_x,
+                if source == LumpedStiffnessSource::ColumnKi {
+                    2.0 * expected
+                } else {
+                    expected
+                },
+            );
+            near(layer.kr / 500_000.0, expected);
+        }
+    }
+
+    #[test]
     fn re_1640_wall_stiffness_evaluation_keeps_the_sl_interval_error() {
         let mut model = fixture(1);
         let mut split = model.nodes[1].clone();

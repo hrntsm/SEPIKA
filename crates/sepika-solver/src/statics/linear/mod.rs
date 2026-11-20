@@ -119,6 +119,10 @@ pub struct StaticOnce {
     pub stiffness_ratio_disp: Option<Result<Vec<[f64; 6]>, String>>,
     pub disp: Vec<[f64; 6]>,
     pub member_forces: Vec<(sepika_core::ids::ElemId, MemberForces)>,
+    /// 通常柱のi/j各端直内側で、端側から部材内部に作用する全体水平力 [N]（X/Y順）。
+    /// 対象の応答がない場合は空。算定不能な柱は理由付きエラーを保持する。
+    #[serde(default)]
+    pub column_end_horizontal_forces: Vec<(ElemId, ColumnEndHorizontalForces)>,
     /// 全体 X・Y 軸まわりの仕口パネルせん断モーメント `[MSX, MSY]` [N·mm] を節点ごとに保持する。
     /// パネルをモデル化していない場合は空。
     #[serde(default)]
@@ -136,6 +140,8 @@ pub struct GirderColumnFaceForces {
     pub forces: Result<[f64; 6], String>,
 }
 
+pub type ColumnEndHorizontalForces = Result<[[f64; 2]; 2], String>;
+
 pub type GirderColumnFaceEnds = [Result<GirderColumnFaceForces, String>; 2];
 
 /// 同じモデルのケース応答を係数倍して足し合わせる。部材・評価断面の順序は一致していること。
@@ -148,6 +154,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
             stiffness_ratio_disp: None,
             disp: Vec::new(),
             member_forces: Vec::new(),
+            column_end_horizontal_forces: Vec::new(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
         });
@@ -220,6 +227,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
         member_forces,
         panel_moments,
         girder_column_face_forces: superpose_girder_column_faces(terms)?,
+        column_end_horizontal_forces: superpose_column_end_horizontal_forces(terms),
     };
     if let Some((id, _)) = result.member_forces.iter().find(|(_, forces)| {
         forces.at.iter().any(|(position, values)| {
@@ -256,6 +264,64 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
         ));
     }
     Ok(result)
+}
+
+fn superpose_column_end_horizontal_forces(
+    terms: &[(&StaticOnce, f64)],
+) -> Vec<(ElemId, ColumnEndHorizontalForces)> {
+    let mut sums = Vec::new();
+    let mut cases = terms.iter().filter(|(_, factor)| *factor != 0.0);
+    if let Some((first, factor)) = cases.next() {
+        sums.extend(
+            first
+                .column_end_horizontal_forces
+                .iter()
+                .map(|(id, forces)| {
+                    (
+                        *id,
+                        forces
+                            .clone()
+                            .map(|ends| ends.map(|xy| xy.map(|value| factor * value))),
+                    )
+                }),
+        );
+    } else if let Some((first, _)) = terms.first() {
+        sums.extend(
+            first
+                .column_end_horizontal_forces
+                .iter()
+                .map(|(id, _)| (*id, Ok([[0.0; 2]; 2]))),
+        );
+    }
+    for (res, factor) in cases {
+        let current: HashMap<_, _> = res
+            .column_end_horizontal_forces
+            .iter()
+            .map(|(id, force)| (*id, force))
+            .collect();
+        for (id, sum) in &mut sums {
+            if let Ok(values) = sum {
+                match current.get(id) {
+                    Some(Ok(ends)) => {
+                        for (out, value) in values.iter_mut().flatten().zip(ends.iter().flatten()) {
+                            *out += factor * value;
+                        }
+                    }
+                    Some(Err(reason)) => *sum = Err(reason.clone()),
+                    None => *sum = Err("合成対象ケースの柱端水平力がありません".into()),
+                }
+            }
+        }
+    }
+    for (_, sum) in &mut sums {
+        if sum
+            .as_ref()
+            .is_ok_and(|ends| ends.iter().flatten().any(|value| !value.is_finite()))
+        {
+            *sum = Err("合成した柱端水平力が非有限です".into());
+        }
+    }
+    sums
 }
 
 fn superpose_girder_column_faces(
@@ -712,6 +778,7 @@ fn recover_static(
         .map(|values| values.map(|v| -v))
         .collect();
     let mut member_forces = Vec::new();
+    let mut column_end_horizontal_forces = Vec::new();
     let mut panel_moments = Vec::new();
     let adjacency = NodeAdjacency::primary_frame(model);
     let mut girder_column_face_forces = Vec::new();
@@ -732,6 +799,15 @@ fn recover_static(
                 .recover(&positions)
                 .map_err(|reason| element_error(elem.id, reason))?;
             member_forces.push((elem.id, forces));
+            if elem.kind == ElementKind::Beam
+                && model
+                    .element_section(elem)
+                    .and_then(|section| section.frame_use)
+                    == Some(FrameSectionUse::Column)
+            {
+                column_end_horizontal_forces
+                    .push((elem.id, response.section.inward_end_horizontal_forces()));
+            }
             recover_girder_column_faces(
                 model,
                 elem,
@@ -819,6 +895,7 @@ fn recover_static(
             member_forces,
             panel_moments,
             girder_column_face_forces,
+            column_end_horizontal_forces,
         },
         reactions,
     ))

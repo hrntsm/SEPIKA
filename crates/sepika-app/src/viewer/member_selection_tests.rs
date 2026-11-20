@@ -277,6 +277,7 @@ fn deformed_result_selection_keeps_results_and_only_editing_switches_to_rest_sha
                 member_forces: vec![],
                 panel_moments: vec![],
                 girder_column_face_forces: Vec::new(),
+                column_end_horizontal_forces: Vec::new(),
             },
         )],
         ..Default::default()
@@ -535,6 +536,7 @@ fn eccentric_deformed_curve_selection_reuses_the_rendered_physical_curve() {
                 member_forces: vec![],
                 panel_moments: vec![],
                 girder_column_face_forces: Vec::new(),
+                column_end_horizontal_forces: Vec::new(),
             },
         )],
         ..Default::default()

@@ -3,8 +3,8 @@ use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, StoryId};
 use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase,
-    LoadCaseKind, LocalAxis, Material, MaterialCategory, Model, NodalLoad, Node, RigidZone,
-    Section, Story,
+    LoadCaseKind, LocalAxis, Material, MaterialCategory, MemberLoad, MemberLoadKind, Model,
+    NodalLoad, Node, RigidZone, Section, Story, ZoneSource,
 };
 use sepika_design_jp::secondary::eccentricity::{
     center_of_rigidity, eccentricity, ColumnStiffness,
@@ -14,10 +14,9 @@ use sepika_design_jp::secondary::eccentricity_analysis::{
     story_eccentricity_from_analysis,
 };
 use sepika_design_jp::secondary::holding_capacity::fes;
-use sepika_element::behavior::ElementBehavior;
-use sepika_element::frame::beam::BeamElement;
+use sepika_element::factory::build_behavior;
 use sepika_solver::statics::analysis::SeismicDir;
-use sepika_solver::statics::linear::{linear_static_once, StaticOnce};
+use sepika_solver::statics::linear::{linear_static_once, superpose_static, StaticOnce};
 use smallvec::smallvec;
 
 const TOP: StoryId = StoryId(1);
@@ -112,14 +111,18 @@ fn add_case(model: &mut Model, name: &str, values: [f64; 6]) -> LoadCaseId {
     id
 }
 
-fn element_nodal_residual(model: &Model, element: &ElementData, result: &StaticOnce) -> [f64; 12] {
+fn element_nodal_residual(
+    model: &Model,
+    element: &ElementData,
+    result: &StaticOnce,
+    loads: &[MemberLoad],
+) -> [f64; 12] {
     let mut disp = [0.0; 12];
     for (dofs, node) in disp.as_chunks_mut::<6>().0.iter_mut().zip(&element.nodes) {
         dofs.copy_from_slice(&result.disp[node.index()]);
     }
-    BeamElement::try_new(element, model)
-        .unwrap()
-        .frame_load_response(&disp, &[])
+    build_behavior(element, model)
+        .frame_load_response(&disp, loads)
         .unwrap()
         .unwrap()
         .nodal_residual
@@ -145,7 +148,7 @@ fn inclined_ordinary_beam_reactions_and_signed_section_forces_balance_the_applie
             }
             let case = add_case(&mut model, "先端荷重", [1000.0, py_n, pz_n, 0.0, 0.0, 0.0]);
             let response = linear_static_once(&model, case).unwrap();
-            let residual = element_nodal_residual(&model, &model.elements[0], &response);
+            let residual = element_nodal_residual(&model, &model.elements[0], &response, &[]);
             let fixed = if reversed { 6 } else { 0 };
             for (actual, expected) in residual[fixed..fixed + 6].iter().zip([
                 -1000.0,
@@ -168,13 +171,27 @@ fn inclined_ordinary_beam_reactions_and_signed_section_forces_balance_the_applie
                     assert_relative_eq!(*actual, expected, epsilon = 1e-8);
                 }
             }
-            let kx =
-                column_horizontal_stiffnesses(&model, TOP, &response, SeismicDir::X).unwrap()[0];
-            let horizontal_n = kx * response.disp[1][0].abs();
-            if dx_mm == 0.0 {
-                assert_relative_eq!(horizontal_n, 1000.0, epsilon = 1e-8);
+            let [(_, signed)] = response.column_end_horizontal_forces.as_slice() else {
+                panic!("対象柱の負担水平力が一意に記録されていません");
+            };
+            let ends = signed.as_ref().unwrap();
+            for (axis, (direction, expected)) in [SeismicDir::X, SeismicDir::Y]
+                .into_iter()
+                .zip([1000.0, py_n])
+                .enumerate()
+            {
+                assert_relative_eq!(ends[usize::from(!reversed)][axis], expected, epsilon = 1e-8);
+                assert_relative_eq!(ends[usize::from(reversed)][axis], -expected, epsilon = 1e-8);
+                if py_n != 0.0 || axis == 0 {
+                    let ki = column_horizontal_stiffnesses(&model, TOP, &response, direction)
+                        .unwrap()[0];
+                    assert_relative_eq!(
+                        ki,
+                        expected.abs() / response.disp[1][axis].abs(),
+                        max_relative = 1e-9
+                    );
+                }
             }
-            eprintln!("柱頭のXずれ={dx_mm} mm、i/j反転={reversed}、偏心率に使う水平力の大きさ={horizontal_n:.9} N");
         }
     }
 }
@@ -232,8 +249,8 @@ fn inclined_ordinary_column_eccentricity_is_compared_with_the_rigid_floor_respon
         .zip(&current_columns)
         .map(|(element, col)| {
             let head = element.nodes[1].index();
-            let fx = element_nodal_residual(&model, element, &res_x)[6];
-            let fy = element_nodal_residual(&model, element, &res_y)[7];
+            let fx = element_nodal_residual(&model, element, &res_x, &[])[6];
+            let fy = element_nodal_residual(&model, element, &res_y, &[])[7];
             ColumnStiffness {
                 pos: col.pos,
                 dx: fx.abs() / res_x.disp[head][0].abs(),
@@ -243,6 +260,25 @@ fn inclined_ordinary_column_eccentricity_is_compared_with_the_rigid_floor_respon
         .collect();
     let nodal_center = center_of_rigidity(&with_nodal_forces).unwrap();
     let nodal_ecc = eccentricity(&with_nodal_forces, center_of_mass, nodal_center).unwrap();
+    for (actual, expected) in current_columns.iter().zip(&with_nodal_forces) {
+        assert_relative_eq!(actual.dx, expected.dx, max_relative = 1e-9);
+        assert_relative_eq!(actual.dy, expected.dy, max_relative = 1e-9);
+    }
+    for (actual, expected) in [
+        (current_center[0], nodal_center[0]),
+        (current_center[1], nodal_center[1]),
+        (current.kr, nodal_ecc.kr),
+        (
+            *current.re_x.as_ref().unwrap(),
+            *nodal_ecc.re_x.as_ref().unwrap(),
+        ),
+        (
+            *current.re_y.as_ref().unwrap(),
+            *nodal_ecc.re_y.as_ref().unwrap(),
+        ),
+    ] {
+        assert_relative_eq!(actual, expected, max_relative = 1e-9);
+    }
 
     let [ux, uy, _, _, _, rotation] = res_twist.disp[1];
     let floor_center = [-uy / rotation, ux / rotation];
@@ -294,5 +330,165 @@ fn inclined_ordinary_column_eccentricity_is_compared_with_the_rigid_floor_respon
             "{name} の剛心={center:?}、KR={kr}、Re={re:?}、Fes={:?}",
             re.map(|r| fes(1.0, r).unwrap())
         );
+    }
+}
+
+#[test]
+fn the_upper_inward_cut_accounts_for_end_loads_with_offsets_and_rigid_zones() {
+    for reversed in [false, true] {
+        let mut model = column_model(&[[0.0, 0.0]], 3000.0, 0.0);
+        model.stress_cfg.consider_rigid_zones = true;
+        let elem = &mut model.elements[0];
+        if reversed {
+            elem.nodes.swap(0, 1);
+        }
+        let upper = usize::from(!reversed);
+        elem.end_offsets_mm[upper][0] = 1000.0;
+        elem.rigid_zone.length_i = 400.0;
+        elem.rigid_zone.length_j = 400.0;
+        elem.rigid_zone.source_i = ZoneSource::Manual;
+        elem.rigid_zone.source_j = ZoneSource::Manual;
+        let case = add_case(
+            &mut model,
+            "材端荷重・剛域内荷重・分布荷重",
+            [1000.0, 700.0, -500.0, 0.0, 0.0, 0.0],
+        );
+        let from_base = |distance_mm: f64| {
+            if reversed {
+                5000.0 - distance_mm
+            } else {
+                distance_mm
+            }
+        };
+        let point = |distance_mm, dir, p| {
+            MemberLoad::manual(
+                ElemId(0),
+                dir,
+                MemberLoadKind::Point {
+                    a: from_base(distance_mm),
+                    p,
+                },
+            )
+        };
+        let [a, b] = if reversed {
+            [4300.0, 4500.0]
+        } else {
+            [500.0, 700.0]
+        };
+        model.load_cases[case.index()].member = vec![
+            point(0.0, [1.0, 0.0, 0.0], 50.0),
+            point(4850.0, [1.0, 0.0, 0.0], 350.0),
+            point(5000.0, [1.0, 0.0, 0.0], -250.0),
+            point(5000.0, [0.0, 1.0, 0.0], 150.0),
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 1.0, 0.0],
+                MemberLoadKind::Distributed {
+                    a,
+                    b,
+                    w1: -1.0,
+                    w2: -1.0,
+                },
+            ),
+        ];
+        let response = linear_static_once(&model, case).unwrap();
+        let ends = response.column_end_horizontal_forces[0].1.as_ref().unwrap();
+        for (axis, (direction, expected)) in [SeismicDir::X, SeismicDir::Y]
+            .into_iter()
+            .zip([750.0, 850.0])
+            .enumerate()
+        {
+            assert_relative_eq!(ends[upper][axis], expected, epsilon = 1e-8);
+            let ki = column_horizontal_stiffnesses(&model, TOP, &response, direction).unwrap()[0];
+            assert_relative_eq!(
+                ki,
+                expected / response.disp[1][axis].abs(),
+                max_relative = 1e-9
+            );
+        }
+        assert_relative_eq!(ends[1 - upper][0], -1100.0, epsilon = 1e-8);
+        assert_relative_eq!(ends[1 - upper][1], -650.0, epsilon = 1e-8);
+        let residual = element_nodal_residual(
+            &model,
+            &model.elements[0],
+            &response,
+            &model.load_cases[case.index()].member,
+        );
+        let fixed = (1 - upper) * 6;
+        assert_relative_eq!(residual[fixed], -1150.0, epsilon = 1e-8);
+        assert_relative_eq!(residual[fixed + 1], -650.0, epsilon = 1e-8);
+
+        let sum = superpose_static(&[(&response, 1.0), (&response, -1.5)]).unwrap();
+        let combined = sum.column_end_horizontal_forces[0].1.as_ref().unwrap();
+        assert_relative_eq!(combined[upper][0], -375.0, epsilon = 1e-8);
+        assert_relative_eq!(combined[upper][1], -425.0, epsilon = 1e-8);
+        let mut missing = response.clone();
+        missing.column_end_horizontal_forces.clear();
+        let sum = superpose_static(&[(&response, 1.0), (&missing, 1.0)]).unwrap();
+        let reason =
+            story_eccentricity_from_analysis(&model, TOP, &sum, &response, None).unwrap_err();
+        assert!(
+            reason.contains("柱0") && reason.contains("合成対象ケース"),
+            "{reason}"
+        );
+    }
+}
+
+#[test]
+fn an_interior_segment_load_does_not_change_the_upper_cut_force() {
+    for reversed in [false, true] {
+        let mut model = column_model(&[[0.0, 0.0]], -4000.0, 0.0);
+        let mut split = model.nodes[1].clone();
+        split.id = NodeId(2);
+        split.coord = [2000.0, 0.0, 1500.0];
+        split.story = None;
+        model.nodes.push(split);
+        model.elements[0].nodes[1] = NodeId(2);
+        let mut upper = model.elements[0].clone();
+        upper.id = ElemId(1);
+        upper.nodes = smallvec![NodeId(2), NodeId(1)];
+        if reversed {
+            upper.nodes.swap(0, 1);
+        }
+        model.elements.push(upper);
+        let case = add_case(&mut model, "分割柱", [1000.0, 700.0, 0.0, 0.0, 0.0, 0.0]);
+        model.load_cases[case.index()].nodal.push(NodalLoad::manual(
+            NodeId(2),
+            [-400.0, 200.0, 0.0, 0.0, 0.0, 0.0],
+        ));
+        let response = linear_static_once(&model, case).unwrap();
+        let upper_ends = response.column_end_horizontal_forces[1].1.as_ref().unwrap();
+        assert_relative_eq!(
+            upper_ends[usize::from(!reversed)][0],
+            1000.0,
+            epsilon = 1e-8
+        );
+        assert_relative_eq!(
+            response.column_end_horizontal_forces[0].1.as_ref().unwrap()[0][0],
+            -600.0,
+            epsilon = 1e-8
+        );
+        let kx = column_horizontal_stiffnesses(&model, TOP, &response, SeismicDir::X).unwrap();
+        assert_eq!(kx.len(), 1);
+        assert_relative_eq!(
+            kx[0],
+            1000.0 / response.disp[1][0].abs(),
+            max_relative = 1e-9
+        );
+
+        for (elem, end, offset, detail) in [
+            (1, usize::from(!reversed), -100.0, "上端の実材軸端"),
+            (0, 1, 1500.0, "分割部材0"),
+        ] {
+            model.elements[elem].end_offsets_mm[end][2] = offset;
+            let shifted = linear_static_once(&model, case).unwrap();
+            let reason = story_eccentricity_from_analysis(&model, TOP, &shifted, &shifted, None)
+                .unwrap_err();
+            assert!(
+                reason.contains("柱1") && reason.contains("切断位置") && reason.contains(detail),
+                "{reason}"
+            );
+            model.elements[elem].end_offsets_mm[end][2] = 0.0;
+        }
     }
 }
