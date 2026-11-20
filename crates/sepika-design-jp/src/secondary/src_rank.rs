@@ -77,8 +77,11 @@ pub fn src_column_rank_ratios(
     let minimum_mm = match name {
         "SN400A" | "SN400B" | "SN490B" => 6.0,
         "SN400C" | "SN490C" => 16.0,
-        "SS400" | "SS490" | "SM400A" | "SM400B" | "SM400C" | "SM490A" | "SM490B" | "SM490C"
-        | "SM490YA" | "SM490YB" | "SM520B" | "SM520C" => 0.0,
+        "SS400" | "SM400A" | "SM400B" | "SM400C" | "SM490A" | "SM490B" | "SM490C" | "SM490YA"
+        | "SM490YB" | "SM520B" | "SM520C" => 0.0,
+        "SS490" => {
+            return Err("内蔵鉄骨「SS490」は溶接を使用する部分に適用できません。断面入力から溶接を使用する部分か確認できません".into());
+        }
         "SM400" | "SM490" | "SM520" | "SN400" | "SN490" => {
             return Err(format!("内蔵鉄骨「{name}」の JIS の種類記号が不完全です"));
         }

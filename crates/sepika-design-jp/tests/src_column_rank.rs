@@ -52,6 +52,7 @@ fn steel(name: &str, fy: Option<f64>) -> Material {
 fn issue953_ratios_use_the_known_grade_and_reject_the_unknown_grade() {
     let section = column(8.0, 13.0);
     for (name, n_expected, m_expected) in [
+        ("SS400", 0.292_370_604_915_024, 0.479_761_357_753_610),
         ("SN400B", 0.292_370_604_915_024, 0.479_761_357_753_610),
         ("SN490B", 0.274_939_520_230_019, 0.560_512_148_953_901),
     ] {
@@ -292,6 +293,13 @@ fn missing_or_inapplicable_steel_reports_why_the_ratio_is_unavailable() {
             reason.contains(name) && reason.contains("H 形鋼としての適用根拠"),
             "{reason}"
         );
+    }
+    for fy in [None, Some(275.0)] {
+        let ss490 = steel("SS490", fy);
+        let reason = ratios(Some(&ss490)).unwrap_err();
+        assert!(reason.contains("SS490"), "{reason}");
+        assert!(reason.contains("溶接を使用する部分"), "{reason}");
+        assert!(reason.contains("確認できません"), "{reason}");
     }
     for name in ["SM400", "SM490", "SM520", "SN400", "SN490"] {
         for fy in [None, Some(235.0)] {
