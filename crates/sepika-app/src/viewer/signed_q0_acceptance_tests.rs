@@ -130,5 +130,198 @@ fn src_column_th_detail_displays_why_seismic_bending_shear_is_unchecked() {
     }
     let ordinary = labels(&app, &rec, false);
     assert!(ordinary.contains("検定比"), "{ordinary}");
+    assert!(ordinary.contains("(OK)"), "{ordinary}");
     assert!(!ordinary.contains("検定不能"), "{ordinary}");
+}
+
+#[test]
+fn src_column_th_detail_keeps_axial_bending_ng_when_gravity_reference_is_missing() {
+    let mut app =
+        crate::app::src_ql_acceptance_tests::src_column_app(sepika_design_jp::QdMethod::Qd1);
+    app.run_combination(1);
+    let forces = MemberForces {
+        at: vec![
+            (0.0, [-40.0e6, 0.0, 0.0, 1.0e6, 0.0, 0.0]),
+            (0.5, [10_000.0, 0.0, 0.0, 0.0, 0.0, 4.0e9]),
+            (1.0, [10_000.0, 10.0e6, 0.0, 0.0, 0.0, 0.0]),
+        ],
+    };
+    let rec = ThRecording {
+        peak_member_forces: vec![Some(forces.clone())],
+        axial_force_peaks: vec![AxialForcePeaks {
+            snapshots: [0.25, 0.5, 0.75]
+                .into_iter()
+                .enumerate()
+                .map(|(index, time)| {
+                    let mut at_step = forces.clone();
+                    for (i, (_, f)) in at_step.at.iter_mut().enumerate() {
+                        if i != index {
+                            *f = [0.0; 6];
+                        }
+                    }
+                    ForcePeakSnapshot {
+                        time,
+                        forces: at_step,
+                        positions: vec![index],
+                    }
+                })
+                .collect(),
+        }],
+        ..Default::default()
+    };
+    let assert_rows = |text: &str, reasons: [&str; 3]| {
+        let (envelope, snapshots) = text
+            .split_once("軸力極値が生じた確定ステップ\n")
+            .unwrap_or_else(|| panic!("{text}"));
+        for (rows, positions) in [
+            (envelope, ["ξ=0.00:", "ξ=0.50:", "ξ=1.00:"]),
+            (
+                snapshots,
+                [
+                    "圧縮側 t=0.250000 s  ξ=0.00:",
+                    "引張側 t=0.500000 s  ξ=0.50:",
+                    "引張側 t=0.750000 s  ξ=1.00:",
+                ],
+            ),
+        ] {
+            assert!(!rows.contains("(OK)"), "{rows}");
+            assert!(!rows.contains("せん断 "), "{rows}");
+            assert_eq!(rows.matches("検定比 ").count(), 2, "{rows}");
+            assert_eq!(rows.matches("軸+曲げ ").count(), 2, "{rows}");
+            for (index, position) in positions.into_iter().enumerate() {
+                let (_, at_position) = rows
+                    .split_once(position)
+                    .unwrap_or_else(|| panic!("{rows}"));
+                let at_position = positions
+                    .get(index + 1)
+                    .and_then(|next| at_position.split_once(next).map(|(row, _)| row))
+                    .unwrap_or(at_position);
+                assert_eq!(
+                    at_position.matches("(NG)").count(),
+                    usize::from(index < 2),
+                    "{rows}"
+                );
+                assert_eq!(at_position.matches("検定不能:").count(), 1, "{rows}");
+                assert!(at_position.contains(reasons[index]), "{rows}");
+                assert_eq!(
+                    at_position.contains("ねじりモーメントMx"),
+                    index == 0,
+                    "{rows}"
+                );
+            }
+        }
+    };
+
+    let qd1_reason = "柱頭・柱脚の軸力";
+    assert_rows(&labels(&app, &rec, true), [qd1_reason; 3]);
+
+    let stored = &mut app.core.scoped.results.as_mut().unwrap().combos;
+    assert_eq!(stored.len(), 1);
+    let long_at = &mut stored[0].1.member_forces[0].1.at;
+    long_at.retain(|(pos, _)| *pos != 1.0);
+    long_at.iter_mut().find(|(pos, _)| *pos == 0.5).unwrap().1[2] = f64::NAN;
+    assert_rows(
+        &labels(&app, &rec, true),
+        [
+            qd1_reason,
+            "同位置の重力参照せん断力QL（Qy・Qz）が不足または非有限",
+            "同位置の重力参照せん断力QL（Qy・Qz）が不足または非有限",
+        ],
+    );
+
+    let stored = &mut app.core.scoped.results.as_mut().unwrap().combos;
+    stored[0].1.member_forces.clear();
+    let reason = "設計用せん断力に必要な重力参照内力が不足しています";
+    assert_rows(&labels(&app, &rec, true), [reason; 3]);
+    app.core.scoped.results.as_mut().unwrap().combos.clear();
+    assert_rows(&labels(&app, &rec, true), [reason; 3]);
+
+    let ordinary = labels(&app, &rec, false);
+    assert!(!ordinary.contains(reason), "{ordinary}");
+    let (_, shear_only_ng) = ordinary
+        .split_once("引張側 t=0.750000 s  ξ=1.00:")
+        .unwrap_or_else(|| panic!("{ordinary}"));
+    assert!(shear_only_ng.contains("(NG)"), "{ordinary}");
+    assert!(shear_only_ng.contains("軸+曲げ 0.00"), "{ordinary}");
+    assert!(shear_only_ng.contains("せん断 "), "{ordinary}");
+}
+
+#[test]
+fn src_column_th_detail_checks_without_q0_for_another_beam() {
+    use sepika_core::ids::{ElemId, SectionId};
+
+    let mut app =
+        crate::app::src_ql_acceptance_tests::src_column_app(sepika_design_jp::QdMethod::Qd1);
+    let mut beam_fixture = fixture::model();
+    let mut section = beam_fixture.sections.remove(0);
+    section.id = SectionId(1);
+    let mut beam = beam_fixture.elements.remove(0);
+    beam.id = ElemId(1);
+    beam.section = Some(section.id);
+    beam.nodes[1] = beam.nodes[0];
+    app.core.model.sections.push(section);
+    app.core.model.elements.push(beam);
+    assert!(sepika_job::simple_beam_q0_by_gravity_cases(&app.core.model).is_err());
+
+    let rec = ThRecording {
+        peak_member_forces: vec![Some(MemberForces {
+            at: vec![(0.0, [-40.0e6, 0.0, 0.0, 0.0, 0.0, 0.0])],
+        })],
+        ..Default::default()
+    };
+    let text = labels(&app, &rec, true);
+    assert!(text.contains("重力参照内力が不足しています"), "{text}");
+    assert!(text.contains("(NG)") && text.contains("軸+曲げ "), "{text}");
+    assert!(!text.contains("せん断 "), "{text}");
+}
+
+#[test]
+fn src_column_th_detail_reports_gravity_reference_even_if_other_inputs_prevent_checks() {
+    let mut app =
+        crate::app::src_ql_acceptance_tests::src_column_app(sepika_design_jp::QdMethod::Qd1);
+    app.run_combination(1);
+    let long_at = &mut app.core.scoped.results.as_mut().unwrap().combos[0]
+        .1
+        .member_forces[0]
+        .1
+        .at;
+    long_at.retain(|(pos, _)| *pos != 0.5);
+
+    let assert_reasons = |app: &App, n, input_reason, gravity_reason| {
+        let rec = ThRecording {
+            peak_member_forces: vec![Some(MemberForces {
+                at: vec![(0.5, [n, 0.0, 0.0, 1.0e6, 0.0, 0.0])],
+            })],
+            ..Default::default()
+        };
+        let text = labels(app, &rec, true);
+        let (_, row) = text
+            .split_once("ξ=0.50:")
+            .unwrap_or_else(|| panic!("{text}"));
+        for reason in [
+            "検定不能:",
+            input_reason,
+            gravity_reason,
+            "ねじりモーメントMx",
+        ] {
+            assert_eq!(row.matches(reason).count(), 1, "{text}");
+        }
+        assert!(!row.contains("検定比 "), "{text}");
+    };
+
+    let material = app.core.model.sections[0].shear_rebar_material.take();
+    assert!(material.is_some());
+    let missing_material = "せん断補強筋の材料が未割当";
+    assert_reasons(
+        &app,
+        -40.0e6,
+        missing_material,
+        "同位置の重力参照せん断力QL（Qy・Qz）が不足または非有限です",
+    );
+    app.core.scoped.results.as_mut().unwrap().combos.clear();
+    let missing_gravity = "設計用せん断力に必要な重力参照内力が不足しています";
+    assert_reasons(&app, -40.0e6, missing_material, missing_gravity);
+
+    app.core.model.sections[0].shear_rebar_material = material;
+    assert_reasons(&app, f64::NAN, "組合せの軸力Nが非有限です", missing_gravity);
 }
