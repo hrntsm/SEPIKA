@@ -5,7 +5,7 @@
 //! - [`src_column_rank_ratios`] — 判定比 N/N0・sM0/M0 の算定
 
 use super::holding_capacity::MemberRank;
-use sepika_core::model::{Material, MaterialCategory, Section};
+use sepika_core::model::{Material, Section};
 use sepika_core::rc_rebar_geom::RectEdge;
 use sepika_core::section_shape::SectionShape;
 
@@ -70,34 +70,9 @@ pub fn src_column_rank_ratios(
         return Err("SRC 矩形柱の断面形状が必要です".into());
     };
     let steel = steel_material.ok_or("内蔵鉄骨の材料が未割当、または参照先が不明です")?;
-    if steel.category != MaterialCategory::Steel {
-        return Err(format!("材料「{}」は鋼材ではありません", steel.name));
-    }
-    let name = steel.name.trim();
-    let minimum_mm = match name {
-        "SN400A" | "SN400B" | "SN490B" => 6.0,
-        "SN400C" | "SN490C" => 16.0,
-        "SS400" | "SM400A" | "SM400B" | "SM400C" | "SM490A" | "SM490B" | "SM490C" | "SM490YA"
-        | "SM490YB" | "SM520B" | "SM520C" => 0.0,
-        "SS490" => {
-            return Err("内蔵鉄骨「SS490」は溶接を使用する部分に適用できません。断面入力から溶接を使用する部分か確認できません".into());
-        }
-        "SM400" | "SM490" | "SM520" | "SN400" | "SN490" => {
-            return Err(format!("内蔵鉄骨「{name}」の JIS の種類記号が不完全です"));
-        }
-        _ => {
-            return Err(format!(
-                "内蔵鉄骨「{name}」の H 形鋼としての適用根拠が未確定です"
-            ));
-        }
-    };
+    let minimum_mm = crate::material_strength::src_h_steel_minimum_thickness_mm(steel)?;
     let s_f = crate::material_strength::section_steel_f(section, Some(steel))?;
-    // 断面形状だけでは圧延形鋼と鋼板組立を区別できない。
-    if tw < minimum_mm || tf < minimum_mm {
-        return Err(format!(
-            "内蔵鉄骨「{name}」の実板厚（ウェブ {tw} mm、フランジ {tf} mm）は JIS G 3136 の適用範囲外です。両方に {minimum_mm} mm 以上が必要です"
-        ));
-    }
+    crate::material_strength::validate_src_h_steel_thickness(&steel.name, tw, tf, minimum_mm)?;
     if [fc, rebar_sy, b, d]
         .iter()
         .any(|v| !v.is_finite() || *v <= 0.0)

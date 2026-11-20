@@ -380,3 +380,114 @@ fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips()
         }
     }
 }
+
+#[path = "../../../sepika-design-jp/tests/fixtures/src_h_steel_product_model.rs"]
+mod steel_product_input;
+#[path = "../../../sepika-design-jp/tests/fixtures/src_h_steel_product_reference.rs"]
+mod steel_product_reference;
+
+#[test]
+fn src_h_steel_product_results_survive_project_save_and_old_contract_requires_recheck() {
+    for column in [false, true] {
+        let (n, mz) = steel_product_reference::demand(column);
+        let run = |grade| {
+            let mut app = App::default();
+            assert!(app.load_model(steel_product_input::model(column, grade, n, mz)));
+            app.core.analysis_cfg.threads = 1;
+            app.run_combination(0);
+            app.run_design_check();
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            app
+        };
+        let checked = run("SN400B");
+        let checked_bundle = checked
+            .current_design_results()
+            .expect("適用できる材種の検定結果");
+        let checked_positions = &checked_bundle.member_checks[0].positions;
+        assert_eq!(checked_positions.len(), 3);
+        for position in checked_positions {
+            let CheckOutcome::Checked(result) = &position.outcome else {
+                panic!("{:?}", position.outcome);
+            };
+            assert!(
+                (result.ratio() - steel_product_reference::expected_ratio(column)).abs() < 1e-10,
+                "{result:?}"
+            );
+            assert!(!result.ok());
+        }
+        let assert_skipped = |app: &App| {
+            let bundle = app
+                .current_design_results()
+                .expect("理由付きの現行検定結果");
+            assert_eq!(
+                bundle.design_contract_version,
+                Some(DESIGN_CONTRACT_VERSION)
+            );
+            assert_eq!(bundle.member_checks.len(), 1);
+            let positions = &bundle.member_checks[0].positions;
+            assert_eq!(positions.len(), 3);
+            for position in positions {
+                assert!(
+                    matches!(
+                        &position.outcome, CheckOutcome::Skipped { reason }
+                            if reason.contains("STK400") && reason.contains("鋼管")
+                            && reason.contains(if column { "SRC柱" } else { "SRC梁" })
+                    ),
+                    "{:?}",
+                    position.outcome
+                );
+            }
+            assert!(crate::summary::build_report_csv(app).contains("STK400"));
+        };
+        let mut skipped = run("STK400");
+        assert_skipped(&skipped);
+        let expected_checks = bytes(&skipped.current_design_results().unwrap().member_checks);
+        let expected_forces = bytes(&skipped.current_static().unwrap().member_forces);
+
+        for old in [false, true] {
+            if old {
+                skipped.core.scoped.results.as_mut().unwrap().member_checks =
+                    checked_bundle.member_checks.clone();
+            }
+            let version = DESIGN_CONTRACT_VERSION - u32::from(old);
+            let (mut loaded, path) = super::result_contract_tests::restore(
+                &skipped,
+                Some(ANALYSIS_CONTRACT_VERSION),
+                Some(version),
+                &format!("src-h-steel-product-{column}-{old}"),
+            );
+            assert!(loaded.require_selected_static_input().is_ok());
+            assert_eq!(
+                bytes(&loaded.current_static().unwrap().member_forces),
+                expected_forces
+            );
+            if old {
+                assert!(loaded.current_design_results().is_none());
+                loaded.run_design_check();
+            }
+            assert_skipped(&loaded);
+            assert_eq!(
+                bytes(&loaded.current_design_results().unwrap().member_checks),
+                expected_checks
+            );
+            loaded.save_project_to(path.clone());
+            assert!(
+                loaded.core.scoped.last_error.is_none(),
+                "{:?}",
+                loaded.core.scoped.last_error
+            );
+            let mut reopened = App::default();
+            reopened.open_project_from(path.clone());
+            assert_skipped(&reopened);
+            assert_eq!(
+                bytes(&reopened.current_design_results().unwrap().member_checks),
+                expected_checks
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}

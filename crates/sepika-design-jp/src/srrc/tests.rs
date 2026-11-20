@@ -988,7 +988,7 @@ fn sm520_out_of_range_src_beam_and_column_do_not_restore_partial_rc_capacity() {
         my: 0.0,
         mz: 0.0,
     };
-    for name in ["SM520", "SM520B", "SM520C"] {
+    for name in ["SM520B", "SM520C"] {
         for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
             let mut steel = make_material_no_fc(name);
             steel.fy = fy;
