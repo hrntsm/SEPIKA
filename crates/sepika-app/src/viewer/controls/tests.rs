@@ -514,6 +514,7 @@ fn fit_to_view_preserves_direction_selection_and_results_in_model_and_frame_view
                 sepika_solver::statics::linear::StaticOnce {
                     story_shears: None,
                     stiffness_ratio_disp: None,
+                    story_rigidity: Vec::new(),
                     disp: vec![[0.0, 0.0, 10.0, 0.0, 0.0, 0.0]; h.app.core.model.nodes.len()],
                     member_forces: vec![],
                     panel_moments: vec![],

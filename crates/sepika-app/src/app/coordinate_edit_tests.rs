@@ -70,6 +70,7 @@ fn app() -> App {
     let result = |sign: f64| sepika_solver::statics::linear::StaticOnce {
         story_shears: None,
         stiffness_ratio_disp: None,
+        story_rigidity: Vec::new(),
         // 自動倍率10・手動係数10でN1がN0の原位置に重なる。N0自身は別の位置へ移る。
         disp: vec![
             [0.0, 10.0 * sign, 0.0, 0.0, 0.0, 0.0],

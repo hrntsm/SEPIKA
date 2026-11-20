@@ -14,8 +14,8 @@ use crate::statics::linear::{
 };
 
 pub type StaticResult = StaticOnce;
-use sepika_core::dof::DofMap;
-use sepika_core::ids::LoadCaseId;
+use sepika_core::dof::{Dof, DofMap, DOF_PER_NODE};
+use sepika_core::ids::{LoadCaseId, NodeId};
 use sepika_core::model::{LoadCase, Model};
 use sepika_element::factory::build_behavior;
 use sepika_math::solver::{make_solver, LinearSolver, SolveError, SolverBackend};
@@ -103,6 +103,7 @@ impl<'m> Analysis<'m> {
                 vec![0.0; self.model.layers().len()]
             })),
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: vec![[0.0; 6]; self.model.nodes.len()],
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
@@ -146,6 +147,48 @@ impl<'m> Analysis<'m> {
                 SolveError::InvalidInput(format!("荷重ケース {} が存在しません", lc.0))
             })?;
         self.solve_and_recover(load_case)
+    }
+
+    /// 節点の Fx・Fy・Mz 各単位荷重に対する軸順 Ux・Uy・Rz の変位を返す（行が変位、列が荷重）。
+    /// 基準弾性剛性を用いる。節点がない場合、3成分が独立自由度でない場合、荷重依存の剛性を使うモデルでは Err。
+    pub fn nodal_planar_flexibility(&self, node: NodeId) -> Result<[[f64; 3]; 3], SolveError> {
+        if self.model.node(node).is_none() {
+            return Err(SolveError::InvalidInput(format!(
+                "節点{}が存在しません",
+                node.0
+            )));
+        }
+        if self.model.stress_cfg.tension_only_iteration && has_tension_only_brace(self.model) {
+            return Err(SolveError::InvalidInput(
+                "引張専用ブレースの活動状態が加力によって変わります".into(),
+            ));
+        }
+        let indices = [Dof::Ux, Dof::Uy, Dof::Rz].map(|dof| {
+            let active =
+                self.dofmap
+                    .active(node.index() * DOF_PER_NODE + dof as usize)? as usize;
+            let [(reduced, 1.0)] = self.reducer.t_rows[active].as_slice() else {
+                return None;
+            };
+            (self.reducer.free_dof_of(*reduced) == Some(active)).then_some(*reduced)
+        });
+        let [Some(i), Some(j), Some(k)] = indices else {
+            return Err(SolveError::InvalidInput(format!(
+                "節点{}のUx・Uy・Rzが独立自由度ではありません",
+                node.0
+            )));
+        };
+        let indices = [i, j, k];
+        let mut result = [[0.0; 3]; 3];
+        for (column, load_index) in indices.into_iter().enumerate() {
+            let mut load = vec![0.0; self.n_indep];
+            load[load_index] = 1.0;
+            let displacement = self.solver.solve(&load)?;
+            for (row, index) in indices.into_iter().enumerate() {
+                result[row][column] = displacement[index];
+            }
+        }
+        Ok(result)
     }
 
     /// 準備済みの基準剛性の分解を再利用し、指定数の固有モードを返す。

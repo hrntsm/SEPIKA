@@ -6,7 +6,12 @@ use sepika_core::units::GRAVITY_MM_S2;
 use sepika_design_jp::secondary::eccentricity::{
     append_misc_wall_stiffnesses, center_of_rigidity, eccentricity,
 };
-use sepika_design_jp::secondary::eccentricity_analysis::column_stiffnesses_from_analysis;
+use sepika_design_jp::secondary::eccentricity_analysis::{
+    column_stiffnesses_from_analysis, validate_rigidity_column_sections,
+};
+use sepika_design_jp::secondary::story_rigidity::{
+    coupling_reason, story_rigidity_requiring_coupled_analysis, RigidFloorStoryRigidity,
+};
 use sepika_element::transform::LocalFrame;
 use sepika_solver::dynamic::lumped_mass::{
     LumpedMassModel, LumpedMassType, LumpedStiffnessSource, StickDim, StorySpatial, StoryStick,
@@ -92,7 +97,7 @@ fn build_lumped_mass_inner(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMas
     }
     match inp.dim {
         StickDim::Planar => build_planar(inp),
-        StickDim::Spatial => build_spatial(inp),
+        StickDim::Spatial => build_spatial(inp, spatial_rigidity(&inp)?),
     }
 }
 
@@ -133,25 +138,72 @@ fn build_planar(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     }
 }
 
-fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
+fn spatial_rigidity(
+    inp: &LumpedMassBuildInput<'_>,
+) -> JobResult<Vec<Option<RigidFloorStoryRigidity>>> {
+    let [res_x, res_y] = spatial_results(inp)?;
+    inp.model
+        .layers()
+        .iter()
+        .map(|layer| {
+            let invalid = |reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name));
+            let rigidity = story_rigidity_requiring_coupled_analysis(
+                inp.model,
+                layer.top,
+                [Some(res_x), Some(res_y)],
+            )
+            .map_err(invalid)?;
+            if let Some(reason) = rigidity.and_then(|value| coupling_reason(layer.top, value)) {
+                return Err(invalid(format!(
+                    "{reason}。3次元質点系の独立したX/Yばねでは表現できません"
+                )));
+            }
+            if inp.nonlinear && rigidity.is_some() {
+                return Err(invalid(
+                    "弾性時の剛床応答で層のX/Y並進が独立でも、非線形時に独立したX/Yばねで表現できることを確認できません".into()
+                ));
+            }
+            if rigidity.is_some() {
+                let has_columns =
+                    validate_rigidity_column_sections(inp.model, layer.top).map_err(invalid)?;
+                if inp.model_type == LumpedMassType::EquivalentShear
+                    && inp.source == LumpedStiffnessSource::ColumnKi
+                {
+                    let reason = if has_columns {
+                        "剛床の層応答から柱だけの水平剛性を分離できないため、柱 ki 方式で生成できません"
+                    } else {
+                        "柱 ki に用いる上下階SLを結ぶ対象柱がありません"
+                    };
+                    return Err(invalid(reason.into()));
+                }
+            }
+            Ok(rigidity)
+        })
+        .collect()
+}
+
+fn spatial_results<'a>(inp: &LumpedMassBuildInput<'a>) -> JobResult<[&'a StaticOnce; 2]> {
     let res_x = inp.res_x.ok_or_else(|| {
         JobError::InvalidInput("3次元質点系には地震静的 EX の結果が必要です".into())
     })?;
     let res_y = inp.res_y.ok_or_else(|| {
         JobError::InvalidInput("3次元質点系には地震静的 EY の結果が必要です".into())
     })?;
+    Ok([res_x, res_y])
+}
 
+fn build_spatial(
+    inp: LumpedMassBuildInput<'_>,
+    layer_rigidity: Vec<Option<RigidFloorStoryRigidity>>,
+) -> JobResult<LumpedMassModel> {
+    let [res_x, res_y] = spatial_results(&inp)?;
     let layers = inp.model.layers();
     let qx = story_shears(inp.model, res_x, SeismicDir::X)?;
     let qy = story_shears(inp.model, res_y, SeismicDir::Y)?;
 
     let mut stories = Vec::with_capacity(layers.len());
     let mut spatial = Vec::with_capacity(layers.len());
-    for (i, layer) in layers.iter().enumerate() {
-        let mut cols = column_stiffnesses_from_analysis(inp.model, layer.top, res_x, res_y)
-            .map_err(JobError::InvalidInput)?;
-        append_misc_wall_stiffnesses(inp.model, layer.top, &mut cols)
-            .map_err(JobError::InvalidInput)?;
+    for (i, (layer, rigidity)) in layers.iter().zip(layer_rigidity).enumerate() {
         let dm = layer.dynamic_mass.ok_or_else(|| {
             JobError::InvalidInput(format!(
                 "階 {} の動的質量が未算定です。準備計算で階を生成してください",
@@ -163,17 +215,31 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
         // 質量を先に判定し、J も 0 になる質量 0 の階を J の誤診断にしない。
         let mass = layer_mass(layer)?;
         let j = layer_inertia(layer)?;
-        let cor = center_of_rigidity(&cols)
-            .map_err(|reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name)))?;
-        let kr = eccentricity(&cols, com, cor)
-            .map_err(|reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name)))?
-            .kr;
+        let invalid = |reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name));
+        let (cor, kr, kx, ky) = if let Some(rigidity) = rigidity {
+            let [kx, _, ky] = rigidity.translational_stiffness_n_per_mm;
+            (
+                rigidity.center_xy_mm,
+                rigidity.torsional_stiffness_nmm,
+                kx,
+                ky,
+            )
+        } else {
+            let mut cols = column_stiffnesses_from_analysis(inp.model, layer.top, res_x, res_y)
+                .map_err(JobError::InvalidInput)?;
+            append_misc_wall_stiffnesses(inp.model, layer.top, &mut cols)
+                .map_err(JobError::InvalidInput)?;
+            let cor = center_of_rigidity(&cols).map_err(invalid)?;
+            let kr = eccentricity(&cols, com, cor).map_err(invalid)?.kr;
+            (
+                cor,
+                kr,
+                cols.iter().map(|c| c.dx).sum(),
+                cols.iter().map(|c| c.dy).sum(),
+            )
+        };
         let (kxi, kyi) = match inp.source {
-            LumpedStiffnessSource::ColumnKi => {
-                let sx: f64 = cols.iter().map(|c| c.dx).sum();
-                let sy: f64 = cols.iter().map(|c| c.dy).sum();
-                (sx, sy)
-            }
+            LumpedStiffnessSource::ColumnKi => (kx, ky),
             LumpedStiffnessSource::StoryQd => {
                 let dx = story_drift_at(inp.model, res_x, SeismicDir::X, layer, cor);
                 let dy = story_drift_at(inp.model, res_y, SeismicDir::Y, layer, cor);
@@ -495,6 +561,7 @@ mod tests {
                 qz.iter().map(|(_, q)| *q).collect(),
             ]),
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: vec![[0.0; 6]; n_nodes],
             member_forces: qz
                 .iter()
@@ -526,6 +593,7 @@ mod tests {
                 qy.iter().map(|(_, q)| *q).collect(),
             ]),
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: vec![[0.0; 6]; n_nodes],
             member_forces: qy
                 .iter()

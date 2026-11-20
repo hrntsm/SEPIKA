@@ -1,11 +1,7 @@
 //! 偏心率の精算層（応力解析結果に基づく。令82条の6・昭55建告1792号）。
 //!
-//! [`crate::secondary::eccentricity`] のモデル抽出層（D値法の略算）に対し、本
-//! モジュールは弾性応力解析結果から柱の水平剛性・長期軸力による重心を直接算定
-//! する精算ルートを提供する。剛心・重心・ねじり剛性の合成自体は
-//! [`crate::secondary::eccentricity`] の計算コア（`center_of_rigidity` /
-//! `eccentricity` / `center_of_mass`）と雑壁剛性（`append_misc_wall_stiffnesses`）
-//! をそのまま再利用する。
+//! 方向別の柱剛性と長期軸力による重心を弾性応力解析結果から求める。
+//! 方向間連成が疑われる層の剛性評価は [`super::story_rigidity`] に従う。
 
 use sepika_core::dof::Dof;
 use sepika_core::ids::{ElemId, NodeId, StoryId};
@@ -13,6 +9,7 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use std::collections::HashMap;
 
 use super::story_columns::{analysis_story_columns, story_layer, StoryColumn};
+use super::story_rigidity::{coupling_reason, story_rigidity_requiring_coupled_analysis};
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::statics::analysis::SeismicDir;
@@ -20,7 +17,7 @@ use sepika_solver::statics::linear::StaticOnce;
 
 use super::eccentricity::{
     append_misc_wall_stiffnesses, center_of_mass, center_of_rigidity, eccentricity,
-    ColumnStiffness, Eccentricity,
+    eccentricity_with_stiffness, ColumnStiffness, Eccentricity,
 };
 
 fn actual_axis_ends(model: &Model, elem: &ElementData) -> Result<[[f64; 3]; 2], String> {
@@ -413,10 +410,10 @@ pub fn center_of_gravity_from_axial(
 
 /// 応力解析結果に基づく当該層の偏心率（精算ルート）。
 ///
-/// - 剛心: `column_stiffnesses_from_analysis`（ki = Qi/δi）
+/// - 方向間連成がある層では、弾力半径の採用条件が未定義のため階と理由を返す。
 /// - 重心: 長期結果が未指定又は圧縮軸力の合計が非正なら質量重心を用いる。
 ///
-/// `res_x`/`res_y` には弾性解析結果が必要。階や柱の変位・内力が欠損又は不正なら Err。
+/// `res_x`/`res_y` は同じ架構の両方向の弾性解析結果。柱の変位・内力は方向別の柱剛性を使う場合に必要。
 pub fn story_eccentricity_from_analysis(
     model: &Model,
     story: StoryId,
@@ -427,6 +424,34 @@ pub fn story_eccentricity_from_analysis(
     if !model.stories.iter().any(|item| item.id == story) {
         return Err(format!("Re: 上端階{}に対応する層がありません", story.0));
     }
+    let rigidity =
+        story_rigidity_requiring_coupled_analysis(model, story, [Some(res_x), Some(res_y)])?;
+    if let Some(reason) = rigidity.and_then(|value| coupling_reason(story, value)) {
+        return Err(format!(
+            "Re: {reason}。方向間連成がある層の弾力半径の評価条件が確定していません"
+        ));
+    }
+    let mass_center = || match long_term
+        .map(|lt| center_of_gravity_from_axial(model, story, lt))
+        .transpose()?
+        .flatten()
+    {
+        Some(center) => Ok(center),
+        None => center_of_mass(model, story),
+    };
+    if let Some(rigidity) = rigidity {
+        if !validate_rigidity_column_sections(model, story)? {
+            return Err(format!("階{}の上下階SLを結ぶ対象柱がありません", story.0));
+        }
+        let [kx, _, ky] = rigidity.translational_stiffness_n_per_mm;
+        return eccentricity_with_stiffness(
+            mass_center()?,
+            rigidity.center_xy_mm,
+            [kx, ky],
+            rigidity.torsional_stiffness_nmm,
+        )
+        .map_err(|reason| format!("階{}: {reason}", story.0));
+    }
     let mut cols = column_stiffnesses_from_analysis(model, story, res_x, res_y)?;
     if cols.is_empty() {
         return Err(format!(
@@ -436,14 +461,7 @@ pub fn story_eccentricity_from_analysis(
     }
     append_misc_wall_stiffnesses(model, story, &mut cols)?;
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
-    let com = match long_term
-        .map(|lt| center_of_gravity_from_axial(model, story, lt))
-        .transpose()?
-        .flatten()
-    {
-        Some(center) => center,
-        None => center_of_mass(model, story)?,
-    };
+    let com = mass_center()?;
     if cols.iter().any(|column| {
         column.pos.iter().any(|p| !p.is_finite())
             || !column.dx.is_finite()
@@ -455,6 +473,31 @@ pub fn story_eccentricity_from_analysis(
         ));
     }
     eccentricity(&cols, com, cor).map_err(|reason| format!("階{}: {reason}", story.0))
+}
+
+pub(super) fn validate_rigidity_column_axes(model: &Model, story: StoryId) -> Result<(), String> {
+    for column in resolved_columns(model, story)? {
+        let element = model.element(column.top_elem).expect("列挙時に確認した柱");
+        let [start, end] = actual_axis_ends(model, element)?;
+        LocalFrame::from_nodes(start, end, element.local_axis.ref_vector)
+            .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", element.id.0))?;
+    }
+    Ok(())
+}
+
+/// 層剛性を偏心率・質点系に採用できる柱区間と上端切断位置を確認する。
+/// 対象柱の有無を返し、区間・切断位置が定まらない場合は階・柱と理由を返す。
+pub fn validate_rigidity_column_sections(model: &Model, story: StoryId) -> Result<bool, String> {
+    let columns = resolved_columns(model, story)?;
+    for column in &columns {
+        let element = model.element(column.top_elem).expect("列挙時に確認した柱");
+        if element.kind == ElementKind::Beam {
+            let ends = actual_axis_ends(model, element)?;
+            column_cut_end(model, column, element, ends)
+                .map_err(|reason| format!("階{}の柱{}: {reason}", story.0, element.id.0))?;
+        }
+    }
+    Ok(!columns.is_empty())
 }
 
 #[cfg(test)]
@@ -471,6 +514,9 @@ mod tests {
 
         let (mut model, story) = build_symmetric_frame(None);
         model.elements.truncate(4);
+        for node in &mut model.nodes[4..] {
+            node.restraint.set_free(Dof::Uz);
+        }
         model.elements[2].nodes.swap(0, 1);
         for (axis, kind) in [
             LoadCaseKind::Seismic,
@@ -807,7 +853,7 @@ mod tests {
             if has_branch {
                 let mut end = model.nodes[4].clone();
                 end.id = NodeId(9);
-                end.coord = [300.0, 0.0, 1500.0];
+                end.coord = [0.0, 0.0, 1500.0];
                 model.nodes.push(end);
                 let mut branch = model.elements[8].clone();
                 branch.id = ElemId(9);
@@ -882,6 +928,7 @@ mod tests {
             }
             if !top_link && !bottom_link {
                 model.elements[1].nodes[0] = NodeId(0);
+                model.elements.retain(|elem| elem.id.0 < 6);
             }
             let [x, y] = [0, 1].map(|axis| {
                 let top_disp = if axis == 0 { [10.0, 0.0] } else { [0.0, 10.0] };
@@ -1056,6 +1103,7 @@ mod tests {
         StaticOnce {
             story_shears: None,
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp,
             member_forces,
             panel_moments: Vec::new(),
@@ -1309,6 +1357,7 @@ mod tests {
         let res_x = StaticOnce {
             story_shears: None,
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: disp_x,
             member_forces: vec![(
                 ElemId(0),
@@ -1325,6 +1374,7 @@ mod tests {
         let res_y = StaticOnce {
             story_shears: None,
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: disp_y,
             member_forces: vec![(
                 ElemId(0),

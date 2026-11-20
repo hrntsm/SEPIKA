@@ -1244,8 +1244,11 @@ fn test_region_gen_wall_finds_all_four_faces() {
 }
 
 #[test]
-fn wall_bay_with_torsional_cancellation_holds_re_fes_and_holding_capacity() {
+fn wall_bay_uses_rigid_floor_rigidity_when_column_drift_partly_cancels() {
     use sepika_app::summary::seismic_story_metrics;
+    use sepika_design_jp::secondary::eccentricity_analysis::{
+        center_of_gravity_from_axial, column_horizontal_stiffnesses,
+    };
     use sepika_element::factory::build_behavior;
 
     let mut app = unperforated_wall_bay_app();
@@ -1262,11 +1265,8 @@ fn wall_bay_with_torsional_cancellation_holds_re_fes_and_holding_capacity() {
     );
 
     let model = &app.core.model;
-    let master = model
-        .diaphragms_of(model.layers()[0].top)
-        .next()
-        .unwrap()
-        .master;
+    let story = model.layers()[0].top;
+    let master = model.diaphragms_of(story).next().unwrap().master;
     let x = static_res_for(&app, StaticCaseKey::Seismic(SeismicDir::X));
     let wall_side_mm = x.disp[4][0];
     let far_side_mm = x.disp[7][0];
@@ -1321,18 +1321,68 @@ fn wall_bay_with_torsional_cancellation_holds_re_fes_and_holding_capacity() {
     assert!(balanced_forces_n.iter().all(|q| q.abs() < 1e-6));
     println!("壁側X変位={wall_side_mm}, 反対側X変位={far_side_mm}, 図心X変位={floor_center_mm}, 壁側回転変位={wall_side_rotation_mm}, Rz={angle_rad}, Qx={original_forces_n:?}, 並進対照のQx={balanced_forces_n:?}, 層水平力={}", horizontal_force_n(x));
 
-    let metric = seismic_story_metrics(&app).remove(0);
-    let reason = metric.re.unwrap_err();
+    let reason = column_horizontal_stiffnesses(model, story, x, SeismicDir::X).unwrap_err();
     for expected in ["階1", "X方向", "柱0", "ねじれ", "相殺"] {
         assert!(reason.contains(expected), "{reason}");
     }
-    assert_eq!(metric.re_ok, None);
-    assert_eq!(metric.fes, Err(reason.clone()));
-    assert!(app
-        .compute_holding_capacity()
-        .err()
+    let [(_, Ok(Some(rigidity)))] = x.story_rigidity.as_slice() else {
+        panic!("壁展開後の層剛性が記録されていません");
+    };
+    let mut probe = expanded.clone();
+    let mut solve = |load: [f64; 6]| {
+        let case = &mut probe.load_cases[ex.index()];
+        case.member.clear();
+        case.nodal = vec![NodalLoad::manual(master, load)];
+        sepika_solver::statics::linear::linear_static_once(&probe, ex)
+            .unwrap()
+            .disp[master.index()]
+    };
+    let moment_nmm = 1_000_000.0;
+    let [u, v, _, _, _, theta] = solve([0.0, 0.0, 0.0, 0.0, 0.0, moment_nmm]);
+    let [origin_x, origin_y, _] = expanded.nodes[master.index()].coord;
+    let cor = [origin_x - v / theta, origin_y + u / theta];
+    let kr = moment_nmm / theta;
+    for (actual, expected) in rigidity.center_xy_mm.iter().zip(cor) {
+        assert!((actual - expected).abs() < 1e-8);
+    }
+    assert!((rigidity.torsional_stiffness_nmm / kr - 1.0).abs() < 1e-10);
+    let force_n = 1000.0;
+    let [ux, uy, _, _, _, rx] =
+        solve([force_n, 0.0, 0.0, 0.0, 0.0, -force_n * (cor[1] - origin_y)]);
+    let [vx, vy, _, _, _, ry] = solve([0.0, force_n, 0.0, 0.0, 0.0, force_n * (cor[0] - origin_x)]);
+    assert!(uy.abs() < 1e-9 && vx.abs() < 1e-9);
+    assert!(rx.abs() < 1e-12 && ry.abs() < 1e-12);
+    let [kx, kxy, ky] = rigidity.translational_stiffness_n_per_mm;
+    assert!(kxy.abs() < 1e-7);
+    assert!((kx * ux / force_n - 1.0).abs() < 1e-10);
+    assert!((ky * vy / force_n - 1.0).abs() < 1e-10);
+
+    let gravity = &app
+        .core
+        .scoped
+        .results
+        .as_ref()
         .unwrap()
-        .contains(&reason));
+        .combos
+        .iter()
+        .find(|(name, _)| sepika_core::load_combo::is_gravity_combination(name, model))
+        .unwrap()
+        .1;
+    let cog = center_of_gravity_from_axial(model, story, gravity)
+        .unwrap()
+        .unwrap();
+    let expected_re = (cog[1] - cor[1]).abs() * (force_n / ux / kr).sqrt();
+    let metric = seismic_story_metrics(&app).remove(0);
+    let re = metric.re.unwrap();
+    assert!((re - expected_re).abs() < 1e-10);
+    assert_eq!(metric.re_ok, Some(false));
+    assert_eq!(metric.fes, Ok(1.5));
+    println!("剛心={cor:?}, KR={kr}, Kxx={kx}, Kxy={kxy}, Kyy={ky}, X偏心率={re}");
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(
+        reason.contains("Ds判定保留") && reason.contains("RC壁版 ID 0"),
+        "{reason}"
+    );
     assert!(app.core.scoped.holding_capacity_source.is_none());
 }
 
@@ -1711,7 +1761,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
 }
 
 #[test]
-fn diagonal_wall_response_is_preserved_but_ds_conditions_stay_unconfirmed() {
+fn diagonal_wall_response_is_preserved_when_directional_coupling_holds_required_capacity() {
     let mut app = unperforated_wall_bay_app();
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.core.analysis_cfg.push_use_max_disp = true;
@@ -1778,6 +1828,23 @@ fn diagonal_wall_response_is_preserved_but_ds_conditions_stay_unconfirmed() {
     );
     app.core.design_rank_auto = true;
     app.core.wall_structure = true;
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(
+        reason.contains("階1") && reason.contains("方向間連成"),
+        "{reason}"
+    );
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+
+    // Dsの適用条件を独立に照合するため、層評価は成立済みの入力を与える。
+    for (key, response) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+        if matches!(key, sepika_app::app::StaticCaseKey::Seismic(_)) {
+            let [(story, Ok(Some(mut rigidity)))] = response.story_rigidity.as_slice() else {
+                panic!("剛床の層評価が記録されていません");
+            };
+            rigidity.translational_stiffness_n_per_mm[1] = 0.0;
+            response.story_rigidity = vec![(*story, Ok(Some(rigidity)))];
+        }
+    }
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(reason.contains("Ds判定保留"), "{reason}");
     assert!(reason.contains("壁せん断破壊時のβuは採用保留"), "{reason}");

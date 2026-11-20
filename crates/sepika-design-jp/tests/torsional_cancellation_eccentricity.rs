@@ -6,9 +6,11 @@ use sepika_design_jp::secondary::eccentricity_analysis::{
     column_horizontal_stiffnesses, column_stiffnesses_from_analysis,
     story_eccentricity_from_analysis,
 };
+use sepika_design_jp::secondary::story_rigidity::rigid_floor_story_rigidity;
 use sepika_solver::statics::analysis::SeismicDir;
 use sepika_solver::statics::linear::linear_static_once;
 
+#[allow(dead_code)]
 #[path = "fixtures/eccentricity_model.rs"]
 mod eccentricity_model;
 use eccentricity_model::{add_case, column_model, element_nodal_residual, TOP};
@@ -155,6 +157,15 @@ fn near_cancellation_retains_column_shear_unlike_proportionally_small_translatio
     );
     let independent_x = gravity_y_mm / (torsional_stiffness / (1000.0 / pure_x.disp[1][0])).sqrt();
     assert_relative_eq!(independent_x, 0.688_882_668_214_38, epsilon = 1e-12);
+    let exact = rigid_floor_story_rigidity(&model, TOP).unwrap();
+    for (actual, expected) in exact.center_xy_mm.into_iter().zip(rigidity_center) {
+        assert_relative_eq!(actual, expected, epsilon = 1e-8);
+    }
+    assert_relative_eq!(
+        exact.torsional_stiffness_nmm,
+        torsional_stiffness,
+        max_relative = 1e-12
+    );
 
     let pure = story_eccentricity_from_analysis(&model, TOP, &pure_x, &y, None).unwrap();
     let small = story_eccentricity_from_analysis(&model, TOP, &small_x, &small_y, None).unwrap();
@@ -186,10 +197,11 @@ fn near_cancellation_retains_column_shear_unlike_proportionally_small_translatio
             column_stiffnesses_from_analysis(&model, TOP, twisted_x, response_y),
             Err(reason.clone())
         );
-        assert_eq!(
-            story_eccentricity_from_analysis(&model, TOP, twisted_x, response_y, None).unwrap_err(),
-            reason
-        );
+        let ecc =
+            story_eccentricity_from_analysis(&model, TOP, twisted_x, response_y, None).unwrap();
+        assert_relative_eq!(ecc.kr, torsional_stiffness, max_relative = 1e-12);
+        assert_relative_eq!(ecc.re_x.unwrap(), independent_x, epsilon = 1e-12);
+        assert_relative_eq!(ecc.re_y.unwrap(), 0.0, epsilon = 1e-12);
     }
 
     model.constraints[0] = Constraint::rigid_diaphragm(
@@ -202,4 +214,8 @@ fn near_cancellation_retains_column_shear_unlike_proportionally_small_translatio
         column_horizontal_stiffnesses(&model, TOP, &moved_master, SeismicDir::X),
         column_horizontal_stiffnesses(&model, TOP, &x, SeismicDir::X)
     );
+    let moved = story_eccentricity_from_analysis(&model, TOP, &moved_master, &y, None).unwrap();
+    assert_relative_eq!(moved.kr, torsional_stiffness, max_relative = 1e-12);
+    assert_relative_eq!(moved.re_x.unwrap(), independent_x, epsilon = 1e-12);
+    assert_relative_eq!(moved.re_y.unwrap(), 0.0, epsilon = 1e-12);
 }

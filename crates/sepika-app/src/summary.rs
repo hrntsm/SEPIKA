@@ -201,9 +201,11 @@ pub fn compute_story_metrics_with(
                         .ok_or_else(|| "対応する層の剛性率がありません".into())
                 })
                 .map_err(|reason| format!("{} {:?}: Rs 算定不能: {reason}", l.name, dir));
-            let fes = rs
-                .clone()
-                .and_then(|rs| re.clone().and_then(|re| fes(rs, re)));
+            let fes = match (&rs, &re) {
+                (Ok(rs), Ok(re)) => fes(*rs, *re),
+                (Err(rs), Err(re)) => Err(format!("{rs} / {re}")),
+                (Err(reason), _) | (_, Err(reason)) => Err(reason.clone()),
+            };
             let rs_ok = rs.as_ref().ok().map(|rs| *rs >= 0.6);
             let re_ok = re.as_ref().ok().map(|re| *re <= 0.15);
             let drift = if let Some(reason) = &ctx.drift_error {
@@ -2012,6 +2014,7 @@ mod tests {
             StaticOnce {
                 story_shears: None,
                 stiffness_ratio_disp: None,
+                story_rigidity: Vec::new(),
                 disp: vec![[0.0; 6]; 4],
                 member_forces: vec![],
                 panel_moments: vec![],

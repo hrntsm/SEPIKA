@@ -335,6 +335,7 @@ fn 質点系job入口も不正指定と編集後の古い質量を拒否する()
             story_shears: Some([vec![100.0], vec![0.0]]),
             disp: vec![[0.0; 6]; model.nodes.len()],
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),

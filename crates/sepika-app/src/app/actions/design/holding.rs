@@ -2566,6 +2566,21 @@ mod tests {
         );
         app.core.design_rank_auto = true;
         app.core.wall_structure = true;
+        let reason = app.compute_holding_capacity().err().unwrap();
+        assert!(
+            reason.contains("階1") && reason.contains("方向間連成"),
+            "{reason}"
+        );
+        // 局所せん断力の部材ランクだけを照合するため、層評価は成立済みの入力を与える。
+        for (key, response) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+            if matches!(key, crate::app::StaticCaseKey::Seismic(_)) {
+                let [(_, Ok(Some(mut rigidity)))] = response.story_rigidity.as_slice() else {
+                    panic!("剛床の層評価が記録されていません");
+                };
+                rigidity.translational_stiffness_n_per_mm[1] = 0.0;
+                response.story_rigidity = vec![(sepika_core::ids::StoryId(1), Ok(Some(rigidity)))];
+            }
+        }
         use sepika_design_jp::secondary::holding_capacity::MemberRank;
         for (qw, expected) in [
             (qu[0], MemberRank::FD),

@@ -1,5 +1,6 @@
 use super::*;
 use sepika_design_jp::secondary::story_columns::checked_story_columns;
+use sepika_design_jp::secondary::story_rigidity::validate_rigidity_node_ids;
 use sepika_solver::dynamic::lumped_mass::{bending_drifts, StoryBending, StoryIdentification};
 
 fn bad(layer: &Layer, reason: impl std::fmt::Display) -> JobError {
@@ -141,8 +142,7 @@ fn ei_values(model: &Model, res: &StaticOnce, dir: SeismicDir) -> JobResult<Vec<
     Ok(result)
 }
 
-fn scope_location(model: &Model, node: sepika_core::ids::NodeId) -> String {
-    let node = &model.nodes[node.index()];
+fn scope_location(model: &Model, node: &sepika_core::model::Node) -> String {
     let name = node
         .story
         .and_then(|id| model.stories.get(id.index()))
@@ -164,6 +164,7 @@ fn validate_scope(inp: &LumpedMassBuildInput<'_>) -> JobResult<()> {
     use sepika_core::dof::Dof;
     use sepika_core::model::ElementKind;
     let model = inp.model;
+    validate_rigidity_node_ids(model).map_err(JobError::InvalidInput)?;
     let mut structural = sepika_core::dof::structural_nodes(model);
     for constraint in &model.constraints {
         use sepika_core::model::Constraint;
@@ -204,7 +205,7 @@ fn validate_scope(inp: &LumpedMassBuildInput<'_>) -> JobResult<()> {
             {
                 return Err(JobError::InvalidInput(format!(
                     "{}: 節点 {} の活動する支持ばね（{:?}={}）は基部固定の曲げせん断型の対象外です",
-                    scope_location(model, node.id),
+                    scope_location(model, node),
                     node.id.0,
                     dof,
                     value
@@ -214,7 +215,7 @@ fn validate_scope(inp: &LumpedMassBuildInput<'_>) -> JobResult<()> {
         if base_z.is_some_and(|z| node.coord[2] > z)
             && horizontal.iter().any(|dof| node.restraint.is_fixed(*dof))
         {
-            return Err(JobError::InvalidInput(format!("{}: 節点 {} は基部以外で解析対象の水平方向が固定されているため、基部固定の曲げせん断型の対象外です",scope_location(model,node.id),node.id.0)));
+            return Err(JobError::InvalidInput(format!("{}: 節点 {} は基部以外で解析対象の水平方向が固定されているため、基部固定の曲げせん断型の対象外です",scope_location(model,node),node.id.0)));
         }
     }
     for element in &model.elements {
@@ -239,7 +240,8 @@ fn validate_scope(inp: &LumpedMassBuildInput<'_>) -> JobResult<()> {
         let location = element
             .nodes
             .first()
-            .map(|node| scope_location(model, *node))
+            .and_then(|&node| model.node(node))
+            .map(|node| scope_location(model, node))
             .unwrap_or_else(|| "階未所属".into());
         return Err(JobError::InvalidInput(format!(
             "{}: 部材 {} の{}は柱・梁・ブレース骨組の曲げせん断型の対象外です",
@@ -381,6 +383,22 @@ fn skeletons(
 }
 
 pub(super) fn build(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
+    let rigidity = if inp.dim == StickDim::Spatial {
+        spatial_rigidity(&inp).map_err(|rigidity_error| {
+            if validate_rigidity_node_ids(inp.model).is_err() {
+                return rigidity_error;
+            }
+            if let Err(JobError::InvalidInput(scope)) = validate_scope(&inp) {
+                let JobError::InvalidInput(rigidity) = rigidity_error else {
+                    return rigidity_error;
+                };
+                return JobError::InvalidInput(format!("{rigidity} / {scope}"));
+            }
+            rigidity_error
+        })?
+    } else {
+        Vec::new()
+    };
     validate_scope(&inp)?;
     let selected = static_of(&inp, inp.dir)?;
     let ex = if inp.dim == StickDim::Spatial {
@@ -427,12 +445,15 @@ pub(super) fn build(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel>
             model.dir = inp.dir;
             model
         }
-        StickDim::Spatial => build_spatial(LumpedMassBuildInput {
-            model_type: LumpedMassType::EquivalentShear,
-            nonlinear: false,
-            source: LumpedStiffnessSource::StoryQd,
-            ..inp
-        })?,
+        StickDim::Spatial => build_spatial(
+            LumpedMassBuildInput {
+                model_type: LumpedMassType::EquivalentShear,
+                nonlinear: false,
+                source: LumpedStiffnessSource::StoryQd,
+                ..inp
+            },
+            rigidity,
+        )?,
     };
     let layers = inp.model.layers();
     let mut heights = Vec::new();
@@ -665,7 +686,7 @@ mod tests {
         spatial_input.res_y = Some(&ey);
         spatial_input.dim = StickDim::Spatial;
         let reason = build(spatial_input).unwrap_err().to_string();
-        for expected in ["階1", "X方向", "柱2", "ねじれ", "相殺"] {
+        for expected in ["階1", "直交構面材", "自由なUz", "全1層"] {
             assert!(reason.contains(expected), "{reason}");
         }
         println!(
@@ -674,6 +695,38 @@ mod tests {
         );
 
         let mut weakly_eccentric = model.clone();
+        let node_offset = model.nodes.len() as u32;
+        let second_plane = |node: NodeId| NodeId(node.0 + node_offset);
+        for original in &model.nodes {
+            let mut node = original.clone();
+            node.id = second_plane(node.id);
+            node.coord[0] += 300.0;
+            node.coord[1] += 200.0;
+            node.mass = None;
+            let story = node.story.unwrap();
+            weakly_eccentric.stories[story.index()]
+                .node_ids
+                .push(node.id);
+            if let Constraint::RigidDiaphragm { slaves, .. } =
+                &mut weakly_eccentric.constraints[story.index()]
+            {
+                slaves.push(node.id);
+            }
+            weakly_eccentric.nodes.push(node);
+        }
+        for original in &model.elements {
+            let [i, j] = [original.nodes[0], original.nodes[1]];
+            let [a, b] = [i, j].map(|id| model.nodes[id.index()].coord);
+            if a[2] != b[2] {
+                let mut column = original.clone();
+                column.id = ElemId(weakly_eccentric.elements.len() as u32);
+                column.nodes = [i, j].map(second_plane).into_iter().collect();
+                weakly_eccentric.elements.push(column);
+            } else if a[0] == b[0] {
+                weakly_eccentric.elements[original.id.index()].nodes =
+                    [i, j].map(second_plane).into_iter().collect();
+            }
+        }
         for case in weakly_eccentric
             .load_cases
             .iter_mut()

@@ -126,6 +126,31 @@ fn direction_model(loads: Vec<MemberLoad>) -> Model {
 }
 
 #[test]
+fn nodal_planar_flexibility_requires_existing_node_and_independent_dofs() {
+    let mut model = make_cantilever_model();
+    let analysis = Analysis::prepare(&model).unwrap();
+    let c = analysis.nodal_planar_flexibility(NodeId(1)).unwrap();
+    assert!(c[0][0] > 0.0 && c[1][1] > 0.0 && c[2][2] > 0.0);
+    let missing = analysis.nodal_planar_flexibility(NodeId(2)).unwrap_err();
+    assert!(
+        matches!(missing, SolveError::InvalidInput(reason) if reason.contains("節点2が存在しません"))
+    );
+
+    let mut tied = Dof6Mask::FREE;
+    tied.set_fixed(Dof::Ux);
+    model.constraints.push(Constraint::RigidLink {
+        master: NodeId(0),
+        slaves: vec![NodeId(1)],
+        dofs: tied,
+    });
+    let analysis = Analysis::prepare(&model).unwrap();
+    let dependent = analysis.nodal_planar_flexibility(NodeId(1)).unwrap_err();
+    assert!(
+        matches!(dependent, SolveError::InvalidInput(reason) if reason.contains("節点1") && reason.contains("独立自由度"))
+    );
+}
+
+#[test]
 fn member_load_directions_reject_before_solve_even_with_zero_intensity_and_all_dofs_fixed() {
     for kind in [
         MemberLoadKind::Point { a: 250.0, p: 100.0 },

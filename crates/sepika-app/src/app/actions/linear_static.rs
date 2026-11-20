@@ -468,6 +468,18 @@ impl App {
         let ids: Vec<LoadCaseId> = case_keys.iter().map(|(id, _)| *id).collect();
         let mut batch = analysis.linear_static_with_combinations(&ids, &combos);
         sepika_job::stiffness_ratio::attach_evaluations(&model, &ids, &mut batch.cases);
+        let mut story_rigidity = None;
+        for ((_, key), result) in case_keys.iter().zip(&mut batch.cases) {
+            if let (StaticCaseKey::Seismic(_), Ok(result)) = (key, result) {
+                result.story_rigidity = story_rigidity
+                    .get_or_insert_with(|| {
+                        sepika_design_jp::secondary::story_rigidity::evaluate_story_rigidities(
+                            &model, &analysis,
+                        )
+                    })
+                    .clone();
+            }
+        }
         let case_name = |id: LoadCaseId| {
             model
                 .load_cases
@@ -1325,6 +1337,7 @@ mod workspace_result_tests {
         let make = |value| sepika_solver::statics::linear::StaticOnce {
             story_shears: None,
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: vec![[value; 6]; 4],
             member_forces: Vec::new(),
             panel_moments: Vec::new(),

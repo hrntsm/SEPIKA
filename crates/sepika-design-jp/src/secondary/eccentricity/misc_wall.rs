@@ -220,6 +220,15 @@ pub fn has_misc_wall(model: &Model, story: StoryId) -> Result<bool, String> {
     Ok(!walls_for_story(model, story)?.is_empty())
 }
 
+pub(in crate::secondary) fn diagonal_misc_wall(
+    model: &Model,
+    story: StoryId,
+) -> Result<Option<sepika_core::ids::WallPlateId>, String> {
+    Ok(walls_for_story(model, story)?
+        .into_iter()
+        .find_map(|(id, wall)| (wall.dir[0] != 0.0 && wall.dir[1] != 0.0).then_some(id)))
+}
+
 /// 対象層の無開口RC自立壁の付加剛性を返す。n未指定なら空。
 /// n不正、対象柱の区間や必須入力の不備、層内異断面、剛性集計不整合はErr。
 pub fn misc_wall_stiffnesses(

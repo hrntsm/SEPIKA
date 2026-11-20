@@ -8,7 +8,7 @@ use crate::common::linear_load::{
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::DofMap;
 use sepika_core::face_distance::{girder_column_faces, GirderColumnFace};
-use sepika_core::ids::{ElemId, LoadCaseId};
+use sepika_core::ids::{ElemId, LoadCaseId, StoryId};
 use sepika_core::model::{
     ElementData, ElementKind, FrameSectionUse, LoadCase, LoadCaseKind, MemberLoad, Model,
 };
@@ -109,6 +109,19 @@ impl StaticStiffness {
     }
 }
 
+/// 線形弾性の剛床応答から求めた層剛性。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RigidFloorStoryRigidity {
+    /// 純ねじり時の面内変位がゼロとなる位置 [mm]。
+    pub center_xy_mm: [f64; 2],
+    /// 純ねじり荷重を回転角で除したねじり剛性 [N·mm/rad]。
+    pub torsional_stiffness_nmm: f64,
+    /// 剛心での並進剛性行列の成分 [Kxx, Kxy, Kyy] [N/mm]。
+    pub translational_stiffness_n_per_mm: [f64; 3],
+}
+
+pub type StoryRigidityEvaluation = (StoryId, Result<Option<RigidFloorStoryRigidity>, String>);
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticOnce {
     /// 性能曲線と同じ物理節点力・支持反力による全層せん断 `[N]`。要素種別によらず X/Y 順。
@@ -117,6 +130,9 @@ pub struct StaticOnce {
     /// Noneは評価未実施であり、通常変位で補完しない。
     #[serde(default)]
     pub stiffness_ratio_disp: Option<Result<Vec<[f64; 6]>, String>>,
+    /// 地震静的と同じ弾性系の層剛性。同定対象外の従来評価は Ok(None)、保留は Err。
+    #[serde(default)]
+    pub story_rigidity: Vec<StoryRigidityEvaluation>,
     pub disp: Vec<[f64; 6]>,
     pub member_forces: Vec<(sepika_core::ids::ElemId, MemberForces)>,
     /// 通常柱のi/j各端直内側で、端側から部材内部に作用する全体水平力 [N]（X/Y順）。
@@ -152,6 +168,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
         return Ok(StaticOnce {
             story_shears: None,
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: Vec::new(),
             member_forces: Vec::new(),
             column_end_horizontal_forces: Vec::new(),
@@ -223,6 +240,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
             },
         ),
         stiffness_ratio_disp: None,
+        story_rigidity: Vec::new(),
         disp,
         member_forces,
         panel_moments,
@@ -891,6 +909,7 @@ fn recover_static(
         StaticOnce {
             story_shears,
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp: dofmap.expand_to_nodes(u_free, model.nodes.len()),
             member_forces,
             panel_moments,

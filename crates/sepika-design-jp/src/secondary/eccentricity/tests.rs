@@ -406,7 +406,7 @@ fn test_column_stiffnesses_merges_split_column() {
     );
     model.stress_cfg.misc_wall_n = Some(1.0);
     let wall_section = push_wall_section(&mut model);
-    push_self_standing(&mut model, [NodeId(0), NodeId(3)], None, Some(wall_section));
+    push_self_standing(&mut model, [NodeId(0), NodeId(1)], None, Some(wall_section));
     assert_eq!(sum_column_area(&model, s0).unwrap(), 400.0);
     assert!(story_eccentricity(&model, s0).is_ok());
     model.elements.last_mut().unwrap().section = Some(sepika_core::ids::SectionId(1));

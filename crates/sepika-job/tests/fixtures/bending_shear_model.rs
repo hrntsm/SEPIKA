@@ -236,6 +236,7 @@ pub fn bending_shear_response(dir: SeismicDir, reverse: bool, split: bool) -> (M
         StaticOnce {
             story_shears: Some([vec![2000.0, 1000.0], vec![2000.0, 1000.0]]),
             stiffness_ratio_disp: None,
+            story_rigidity: Vec::new(),
             disp,
             member_forces,
             panel_moments: Vec::new(),
