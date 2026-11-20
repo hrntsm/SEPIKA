@@ -12,6 +12,7 @@ use sepika_core::section_shape::{RcBeamRebar, RcRectColumnRebar, SectionShape};
 
 mod beam;
 mod column;
+pub mod joint_hoops;
 pub mod panel_zone;
 
 pub(crate) use crate::ratio_or_large;

@@ -40,12 +40,38 @@ pub struct WriteResult {
 /// MCP ツール引数は `command` をトップレベルに置く。
 /// `{ "body": { "command": ... } }` も受け付ける。
 pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditCommand>, String> {
+    parse_edit_command_with_state(value, None)
+}
+
+fn parse_edit_command_with_state(
+    value: &serde_json::Value,
+    state: Option<&ServerState>,
+) -> Result<Box<dyn EditCommand>, String> {
     let value = resolve_edit_payload(value);
     let command = value
         .get("command")
         .and_then(|v| v.as_str())
         .ok_or("command が必要です")?;
     match command {
+        "SetSrcJointHoops" => {
+            let node: sepika_core::ids::NodeId = serde_json::from_value(value.get("node").ok_or("node が必要です")?.clone())
+                .map_err(|e| format!("node: {e}"))?;
+            let axis: [f64; 3] = serde_json::from_value(value.get("axis").ok_or("axis が必要です")?.clone())
+                .map_err(|e| format!("axis: {e}"))?;
+            let target_reason = |reason| format!("SRC柱梁接合部 節点 {} 構面 {axis:?}: {reason}", node.0);
+            let query_token = value.get("query_token").and_then(serde_json::Value::as_str)
+                .filter(|token| !token.is_empty())
+                .ok_or_else(|| target_reason("query_token に構面照会の応答で得た文字列が必要です".to_owned()))?;
+            if state.is_some_and(|state| state.src_joint_hoops_query_token() != query_token) {
+                return Err(target_reason(
+                    "照会証跡が現在のモデルと一致しません。構面を再照会して確認してください".to_owned(),
+                ));
+            }
+            let hoops = value.get("hoops").ok_or_else(|| target_reason("hoops は帯筋指定または null が必要です".to_owned()))?;
+            let hoops = serde_json::from_value(hoops.clone())
+                .map_err(|e| target_reason(format!("hoops: {e}")))?;
+            Ok(Box::new(sepika_edit::SetSrcJointHoops { node, axis, hoops }))
+        }
         "SetMemberEndOffsets" => {
             let member = serde_json::from_value(value.get("member").ok_or("member が必要です")?.clone()).map_err(|e| format!("member: {e}"))?;
             let offsets: [[f64; 3]; 2] = serde_json::from_value(value.get("end_offsets_mm").ok_or("end_offsets_mm はi端・j端のXYZ有限値[mm]が必要です")?.clone()).map_err(|e| format!("end_offsets_mm: {e}"))?;
@@ -415,7 +441,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
              床領域: SetFloorRegionName, SetFloorRegionSecondaryBeams / \
              二次部材: PlaceSecondaryMember, DeleteSecondaryMember, SetSecondaryMemberEnds, \
              SetSecondaryMemberEndSupport, SetPostGravityEndShares / \
-             壁領域: SetWallRegionPosts / \
+             SRC接合部の帯筋: SetSrcJointHoops / 壁領域: SetWallRegionPosts / \
              未割当: AddUnassignedBeam, DeleteUnassignedBeam, AddUnassignedPost, DeleteUnassignedPost）"
         )),
     }
@@ -426,7 +452,7 @@ pub fn apply_edit(
     state: &mut ServerState,
     value: &serde_json::Value,
 ) -> Result<WriteResult, String> {
-    let cmd = parse_edit_command(value)?;
+    let cmd = parse_edit_command_with_state(value, Some(state))?;
     let label = cmd.label().to_string();
     let loss = sepika_edit::preview_plate_assignment_loss(&state.model, cmd.as_ref())?;
     if cmd.changes_assignment_boundaries()

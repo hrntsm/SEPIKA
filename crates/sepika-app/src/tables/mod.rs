@@ -12,5 +12,6 @@ pub mod nodes;
 pub mod secondary;
 pub mod sections;
 pub mod slabs;
+pub mod src_joint_hoops;
 pub mod steel_attrs;
 pub mod wall_plates;

@@ -935,6 +935,7 @@ fn test_apply_edit_set_wall_plate_slit() {
     use sepika_core::model::{WallPlate, WallPlateShape};
 
     let mut state = ServerState {
+        query_session: uuid::Uuid::new_v4(),
         model: sample_model(),
         undo: sepika_edit::UndoStack::new(),
         jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
@@ -1036,6 +1037,7 @@ fn test_apply_edit_wall_plate_region_assignment() {
         .expect("割当領域")
         .id;
     let mut state = ServerState {
+        query_session: uuid::Uuid::new_v4(),
         model,
         undo: sepika_edit::UndoStack::new(),
         jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
@@ -1161,6 +1163,7 @@ fn test_apply_edit_assign_slab_to_floor_plate_region() {
     let region = model.floor_assignment_regions.regions[0].id;
 
     let mut state = ServerState {
+        query_session: uuid::Uuid::new_v4(),
         model,
         undo: sepika_edit::UndoStack::new(),
         jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
@@ -1193,6 +1196,7 @@ fn four_node_edit_state(name: &str) -> ServerState {
     use sepika_core::model::Node;
 
     ServerState {
+        query_session: uuid::Uuid::new_v4(),
         model: Model {
             nodes: (0..4)
                 .map(|i| Node {
