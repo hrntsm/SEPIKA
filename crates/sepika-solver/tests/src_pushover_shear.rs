@@ -7,7 +7,12 @@ use sepika_core::model::{
 use sepika_core::section_shape::{
     BeamStirrup, RcBeamRebar, RcRectColumnRebar, RebarSize, RectColumnHoop, SectionShape,
 };
+use sepika_math::solver::SolveError;
 use sepika_solver::common::constraint::Reducer;
+use sepika_solver::dynamic::damping::{Damping, DampingAccumulation};
+use sepika_solver::dynamic::timehistory::{
+    nonlinear_time_history_analysis, GroundMotion, NewmarkCfg, NonlinearThCfg, ResponseResult,
+};
 use sepika_solver::nonlinear::pushover::{
     pushover_analysis_recording, PushoverControl, PushoverResult, PushoverTarget,
 };
@@ -361,13 +366,14 @@ fn src_pushover_checks_both_plates_and_respects_external_steel_assignments() {
         );
     }
 
-    let mut model = restrained_member(FrameSectionUse::Column, 10.0, 45.0);
+    let mut model = restrained_member(FrameSectionUse::Column, 10.0, 12.0);
     model.materials[0].fy = Some(235.0);
     model.materials[3].name = "独自H".into();
     model.materials[3].fy = None;
     let error = run(&mut model, SeismicDir::X, 1_000.0).unwrap_err();
     assert!(
-        error.contains("せん断降伏耐力")
+        error.contains("部材 ID 0")
+            && error.contains("せん断降伏耐力")
             && error.contains("独自H")
             && error.contains("明示 fy も未入力"),
         "{error}"
@@ -411,4 +417,68 @@ fn src_pushover_checks_both_plates_and_respects_external_steel_assignments() {
         error.contains("単一の参照先") && error.contains("STK400") && error.contains("SN400B"),
         "{error}"
     );
+}
+
+fn run_time_history(model: &mut Model) -> Result<ResponseResult, SolveError> {
+    model.nodes[1].restraint.set_free(Dof::Uy);
+    model.nodes[1].mass = Some([1.0; 6]);
+    model.materials[0].density = 2.4e-9;
+    model.materials[3].density = 7.85e-9;
+    let dofmap = DofMap::build(model);
+    let reducer = Reducer::build(model, &dofmap);
+    nonlinear_time_history_analysis(
+        model,
+        &dofmap,
+        &reducer,
+        &GroundMotion {
+            dt: 0.01,
+            accel_x: vec![0.0; 3],
+            accel_y: Some(vec![0.0, 10.0, 0.0]),
+            accel_theta: None,
+        },
+        &NewmarkCfg::average_accel(),
+        &Damping::MassProportional { h: 0.0, omega: 1.0 },
+        DampingAccumulation::default(),
+        &[],
+        &[],
+        NonlinearThCfg::default(),
+    )
+}
+
+#[test]
+fn src_time_history_reports_invalid_fiber_steel_fy() {
+    for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+        for (fy, reason) in [
+            (None, "未入力"),
+            (Some(0.0), "正の有限値"),
+            (Some(f64::INFINITY), "正の有限値"),
+        ] {
+            let mut model = restrained_member(frame_use, 10.0, 12.0);
+            model.materials[0].fy = Some(235.0);
+            model.materials[3].name = "独自H".into();
+            model.materials[3].fy = fy;
+            let Err(SolveError::InvalidInput(error)) = run_time_history(&mut model) else {
+                panic!("内蔵鉄骨の fy を解決できないときは入力エラーが必要です");
+            };
+            for expected in ["部材 ID 0", "内蔵鉄骨", "独自H", "降伏強度 fy", reason] {
+                assert!(error.contains(expected), "{frame_use:?}: {error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn src_time_history_accepts_assigned_fiber_steel_fy() {
+    for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+        for (name, fy) in [("独自H", Some(235.0)), ("SN400B", None)] {
+            let mut model = restrained_member(frame_use, 10.0, 12.0);
+            model.materials[3].name = name.into();
+            model.materials[3].fy = fy;
+            let result = run_time_history(&mut model).unwrap();
+            assert!(result.nonlinear);
+            assert_eq!(result.time.len(), 3);
+            assert!(result.history.node_disp.iter().any(|&u| u.abs() > 0.0));
+            assert!(result.history.node_disp.iter().all(|u| u.is_finite()));
+        }
+    }
 }

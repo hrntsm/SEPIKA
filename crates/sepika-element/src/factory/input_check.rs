@@ -658,7 +658,28 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                     steel_web_thick,
                     steel_flange_thick,
                     ..
-                } => Some(steel_web_thick.max(*steel_flange_thick)),
+                } => {
+                    if data.kind != ElementKind::Beam
+                        || matches!(
+                            super::resolve_force_regime(data, model),
+                            super::ResolvedRegime::Fiber
+                        )
+                    {
+                        return crate::frame::fiber::resolve_src_fiber_fy(
+                            steel_mat,
+                            *steel_web_thick,
+                            *steel_flange_thick,
+                        )
+                        .err()
+                        .map(|reason| {
+                            format!(
+                                "部材 ID {} の SRC 断面の内蔵鉄骨材料「{}」: {reason}",
+                                data.id.0, steel_mat.name
+                            )
+                        });
+                    }
+                    Some(steel_web_thick.max(*steel_flange_thick))
+                }
                 SectionShape::CftBox {
                     thick,
                     horizontal_thick,
