@@ -87,7 +87,9 @@ Re=0.15、0.225、0.30 に対して Fe=1.0、1.25、1.5 です。Rs=0.15、Re=0.
 
 方向別の柱剛性を使うときは、対象柱の区間、負担水平力、上下階SLの節点変位のいずれかを確認できないと、対象柱と理由が表示され、その層の偏心率・形状係数・必要保有水平耐力は算定不能になります。自立壁のn倍法で同じ柱の区間が必要な場合は、壁の付加剛性とそれを使う剛性率も算定不能になります。
 
-重心は、長期の常時G+P組合せ結果のうち先頭のものを用い、各柱の圧縮軸力の大きさで重み付けします。分割柱は同じ最上部材の始端軸力を用います。引張軸力は重みに入れません。
+地震層せん断力の合力点に対する略算として、長期の常時G+P組合せ結果のうち先頭のものを用い、柱頭のSL接続節点の平面位置を各柱の材軸圧縮力で重み付けします。略算の出典は『2025年版 建築物の構造関係技術基準解説書』第2版第1刷 6.2.3(3) p.359 式(6.2-2)です。端の指定にかかわらず、最上部材の上階SL接続節点の高さから層側に入った直後の断面で軸力を評価します。ファイバー柱・マルチスプリング柱を含む連なりにも、前述の適用条件の下でこの切断位置を使います。
+
+切断位置、端点の集中部材荷重、剛域、水平の材端偏心の扱いは、通常柱の負担水平力の評価と共通です。傾斜柱も実材軸方向の力を使用します。全体鉛直方向への投影や局所せん断力の鉛直成分の加算は行いません。引張軸力は重みに入れません。
 
 \\[ X_g=\frac{\sum_i N_{c,i}x_i}{\sum_i N_{c,i}},\qquad Y_g=\frac{\sum_i N_{c,i}y_i}{\sum_i N_{c,i}} \\]
 
@@ -245,7 +247,7 @@ Re には有限な偏心距離と正の有限な弾力半径が必要です。�
 
 この保留条件は、原典が指定する数値基準ではありません。非剛床、多剛床、剛床から独立に水平移動できる柱などでは、層を共通の並進・回転で表せないため、この相殺判定を行わず、比による評価の適否を設計者が確認します。全評価柱の下端が固定され、上端の加力直交方向の座標がすべて等しい場合は、平面図心からの回転の腕がすべて0となるため、この方法では回転変位を分離できません。検出されない場合も、表示値を採用する前に各構面の水平変形を確認してください。ねじれで柱の層間変位が0に近づく場合は、各階がねじれず構面の水平変形がそろう並進架構等を用いて別途偏心率を評価します。『2025年版 建築物の構造関係技術基準解説書』第2版第1刷 6.2.3 p.362 (5) によります。
 
-長期解析結果を用いて重心を求める場合、その必要柱の軸力が欠ける場合や非有限の場合も算定不能です。
+長期解析結果を用いて重心を求める場合、必要な柱の上階SL直下の切断位置を一意に特定できない場合や、その材軸力が欠損・非有限の場合は、柱と理由を示して偏心率を算定不能とします。組合せを構成する非零係数の荷重ケースの応答が欠ける場合も、同様に算定不能とします。
 長期結果がない場合又は全柱の圧縮軸力の合計が 0 の場合は、質量重心を用います。
 質量重心に使う節点質量は未設定を 0 と扱い、全質量が 0 なら節点座標の幾何重心を用います。
 長期軸力又は質量から重心を求める際、必要な位置・質量の不正、軸力・質量・位置一次モーメントの集計不能、重心座標の除算不能がある場合も算定不能です。
@@ -260,6 +262,6 @@ Rs 又は Re を算定できなければ Fes と、それに依存する必要�
 
 <div class="impl-ref">
 
-**実装参照**：GUI・CSV集計は `sepika_app::summary::seismic_story_metrics`（`crates/sepika-app/src/summary.rs`）、解析剛性・重心は `sepika_design_jp::secondary::eccentricity_analysis`（`crates/sepika-design-jp/src/secondary/eccentricity_analysis.rs`）、剛床の方向間連成と剛性は `sepika_design_jp::secondary::story_rigidity`（`crates/sepika-design-jp/src/secondary/story_rigidity.rs`）、n倍法の評価用再解析は `sepika_job::stiffness_ratio`（`crates/sepika-job/src/stiffness_ratio.rs`）。
+**実装参照**：GUI・CSV集計は `sepika_app::summary::seismic_story_metrics`（`crates/sepika-app/src/summary.rs`）、解析剛性・重心は `sepika_design_jp::secondary::eccentricity_analysis`（`crates/sepika-design-jp/src/secondary/eccentricity_analysis.rs`）、剛床の方向間連成と剛性は `sepika_design_jp::secondary::story_rigidity`（`crates/sepika-design-jp/src/secondary/story_rigidity.rs`）、柱端の力は `LoadedFrameSection::inward_end_forces`（`crates/sepika-element/src/frame/member_load.rs`）、n倍法の評価用再解析は `sepika_job::stiffness_ratio`（`crates/sepika-job/src/stiffness_ratio.rs`）。
 
 </div>
