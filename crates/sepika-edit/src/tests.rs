@@ -639,6 +639,32 @@ fn test_add_delete_member_roundtrip() {
 }
 
 #[test]
+fn adding_a_member_cannot_fill_an_orphaned_brb_reference() {
+    use sepika_core::model::BrbAttr;
+
+    let mut model = seeded_model(3, 1);
+    let mut elem = seeded_model(3, 2).elements.pop().unwrap();
+    elem.kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    model.brb_attrs.push(BrbAttr {
+        elem: elem.id,
+        allowable_axial_short: Some(1_000_000.0),
+        critical_length: Some(4000.0),
+        length_reduction: Some(0.0),
+    });
+    let before = model.clone();
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(AddMember { elem })));
+    assert!(stack
+        .last_error()
+        .unwrap()
+        .contains("brb_attrs[0].elem -> 部材 ID 1"));
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert!(!stack.can_undo());
+}
+
+#[test]
 fn test_add_section_shape_roundtrip() {
     let mut model = Model::default();
     let mut stack = UndoStack::new();
@@ -3862,6 +3888,44 @@ fn test_delete_member_shifts_and_restores_side_table_attrs() {
     assert_eq!(model.damper_props(ElemId(0)), Some(props));
     assert_eq!(model.member_hysteresis(ElemId(0)), None);
     assert!(model.member_detail(ElemId(0)).is_none());
+}
+
+#[test]
+fn deleting_a_brb_detaches_all_its_product_values_before_id_reuse() {
+    use sepika_core::model::BrbAttr;
+
+    let mut model = seeded_model(4, 3);
+    for member in &mut model.elements {
+        member.kind = ElementKind::Brace {
+            tension_only: false,
+        };
+    }
+    model.brb_attrs = [(1, 100_000.0), (1, 200_000.0)]
+        .into_iter()
+        .map(|(id, allowable_axial_short)| BrbAttr {
+            elem: ElemId(id),
+            allowable_axial_short: Some(allowable_axial_short),
+            critical_length: Some(4000.0),
+            length_reduction: Some(0.0),
+        })
+        .collect();
+    let before = model.clone();
+
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(DeleteMember { id: ElemId(1) })));
+    assert_eq!(model.elements[1].nodes, before.elements[2].nodes);
+    assert!(model.brb_attrs.is_empty());
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    stack.redo(&mut model);
+    assert!(model.brb_attrs.is_empty());
+
+    let mut elem = before.elements[0].clone();
+    elem.id = ElemId(2);
+    elem.nodes = smallvec![NodeId(0), NodeId(3)];
+    assert!(stack.run(&mut model, Box::new(AddMember { elem })));
+    assert!(model.brb_attrs.is_empty());
+    model.validate_reference_ids().unwrap();
 }
 
 /// `CompositeCommand`: ペースト相当（既存セルの `SetNodeCoord` ×2 ＋行追加の

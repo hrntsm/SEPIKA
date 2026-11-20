@@ -464,6 +464,7 @@ fn shift_node_ids(model: &mut Model, f: impl FnMut(&mut NodeId)) {
 ///
 /// `elem.id` は `ElemId(model.elements.len())`（末尾の次の添字）と一致し、参照する
 /// 節点・断面が実在していること（crate::refs の規約）。満たさない場合は `Noop`。
+/// 座屈拘束ブレースの検定属性に参照先欠落があれば、追加を拒否する。
 pub struct AddMember {
     pub elem: sepika_core::model::ElementData,
 }
@@ -510,6 +511,9 @@ impl EditCommand for AddMember {
         {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         let snapshot = AssignmentTopology::capture(model);
         model.elements.push(self.elem.clone());
         Box::new(RestoreAssignmentTopology {
@@ -550,6 +554,9 @@ pub struct PushTailMembers {
 
 impl EditCommand for PushTailMembers {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         for e in &self.elems {
             model.elements.push(e.clone());
         }
@@ -585,6 +592,9 @@ impl EditCommand for AddDamper {
         {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         let id = self.elem.id;
         model.elements.push(self.elem.clone());
         model.set_damper_props(id, Some(self.props));
@@ -617,6 +627,9 @@ impl EditCommand for AddIsolator {
             || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
             return Box::new(Noop);
+        }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
         }
         let id = self.elem.id;
         model.elements.push(self.elem.clone());
@@ -657,6 +670,9 @@ impl EditCommand for PlaceSupportIsolator {
         let idx = self.node.index();
         if idx >= model.nodes.len() || model.nodes[idx].id != self.node {
             return Box::new(Noop);
+        }
+        if let Err(error) = model.validate_brb_references() {
+            return Box::new(RejectedEdit(error.to_string()));
         }
         let coord = model.nodes[idx].coord;
         let old_restraint = model.nodes[idx].restraint;

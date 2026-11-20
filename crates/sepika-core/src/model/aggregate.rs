@@ -12,7 +12,7 @@ use super::*;
 pub struct ElemAttrs {
     pub wall: Option<WallAttr>,
     pub steel_design: Option<SteelDesignAttr>,
-    pub brb: Option<BrbAttr>,
+    pub brb: Vec<BrbAttr>,
     pub pca: Option<PcaGirderAttr>,
     pub isolator: Option<IsolatorAttr>,
     pub hysteresis: Option<MemberHysteresisAttr>,
@@ -278,7 +278,7 @@ impl Model {
     }
 
     /// 節点・要素・断面・材料・階・床/壁領域・床板/壁版の添字 ID と、
-    /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・節点荷重・生成記録の参照を検査する。
+    /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・節点荷重・生成記録・BRB 検定属性の参照を検査する。
     /// 二次部材 ID は一意性だけを要求し、未割当 `None`・用途・幾何・入力完成度は検査しない。
     pub fn validate_reference_ids(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
@@ -319,6 +319,7 @@ impl Model {
                 )));
             }
         }
+        self.validate_brb_references()?;
 
         for sec in &self.sections {
             for (role, mid) in [
@@ -635,6 +636,20 @@ impl Model {
             }
         }
 
+        Ok(())
+    }
+
+    /// 座屈拘束ブレースの検定属性が実在する部材を参照するか検査する。
+    /// 参照先がない場合は属性の位置と部材 ID を含むエラーを返す。
+    pub fn validate_brb_references(&self) -> Result<(), crate::error::CoreError> {
+        for (index, attr) in self.brb_attrs.iter().enumerate() {
+            if self.element(attr.elem).is_none() {
+                return Err(crate::error::CoreError::DanglingRef(format!(
+                    "座屈拘束ブレースの検定属性 brb_attrs[{index}].elem -> 部材 ID {}",
+                    attr.elem.0
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -1830,7 +1845,7 @@ impl Model {
             wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
             steel_design: take_first(&mut self.steel_design_attrs, |a| a.elem, elem),
             slab_composite: self.slab_composite_attrs.remove(&elem),
-            brb: take_first(&mut self.brb_attrs, |a| a.elem, elem),
+            brb: self.brb_attrs.extract_if(.., |a| a.elem == elem).collect(),
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
             isolator: take_first(&mut self.isolator_attrs, |a| a.elem, elem),
             hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
@@ -1853,7 +1868,7 @@ impl Model {
         if let Some(connection) = attrs.slab_composite {
             self.slab_composite_attrs.insert(elem, connection);
         }
-        if let Some(mut a) = attrs.brb {
+        for mut a in attrs.brb {
             a.elem = elem;
             self.brb_attrs.push(a);
         }

@@ -143,6 +143,19 @@ fn brb_duplicate_products_preserve_ng_on_an_independent_member() {
 }
 
 #[test]
+fn design_check_reports_brb_attributes_that_have_no_member() {
+    let mut model = input::model();
+    model.brb_attrs[0].elem = ElemId(1);
+    let reason = run_member_design_checks(&model, &[], &[], &Default::default())
+        .err()
+        .unwrap();
+    assert!(
+        reason.contains("brb_attrs[0].elem -> 部材 ID 1"),
+        "{reason}"
+    );
+}
+
+#[test]
 fn brb_attribute_on_column_or_girder_reports_mismatch_instead_of_product_pass() {
     for (frame_use, bending_kind) in [
         (FrameSectionUse::Column, CheckKind::AxialBending),
