@@ -342,7 +342,7 @@ impl SectionShape {
                 let dz = ((p.y - cz).abs() - height / 2.0).max(0.0);
                 if dy.hypot(dz) < radius {
                     return Err(RebarGeometryError::SectionGeometry(format!(
-                        "SRC 主筋 {}（径 {diameter_mm} mm、中心位置 ({}, {}) mm）が内蔵 H 形鋼 {h}×{w}×{tw}×{tf} mm と干渉します",
+                        "SRC主筋{}（径 {diameter_mm} mm、中心位置 ({}, {}) mm）が内蔵 H 形鋼 {h}×{w}×{tw}×{tf} mm と干渉します",
                         i + 1, p.x, p.y
                     )));
                 }
