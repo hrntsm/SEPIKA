@@ -3988,10 +3988,6 @@ fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infin
                 assert!(sepika_element::factory::ensure_nonlinear_input(&model)
                     .unwrap_err()
                     .contains("適用範囲"));
-                if fy.is_some() {
-                    model.materials[3].name = "任意鋼材".into();
-                    assert!(compute_shear_yield_thresholds(&model).is_ok());
-                }
             }
         }
     }

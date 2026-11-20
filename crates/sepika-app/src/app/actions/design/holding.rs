@@ -1320,6 +1320,9 @@ mod tests {
         use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
         use sepika_core::ids::MaterialId;
         use sepika_core::section_shape::SectionShape;
+        use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+        use EvaluationPurpose::{Ds, HoldingCapacity};
+        use SeismicDir::{X, Y};
 
         for (name, expected_reason) in [
             ("SN400B", None),
@@ -1332,7 +1335,7 @@ mod tests {
             let mut model = expanded_model();
             let mut steel = rank_input().1;
             steel.id = MaterialId(model.materials.len() as u32);
-            steel.name = name.into();
+            steel.name = "SN400B".into();
             steel.fy = Some(100.0);
             let section = &mut model.sections[0];
             let Some(SectionShape::RcColumnRect { b, d, rebar }) = section.shape.take() else {
@@ -1347,12 +1350,52 @@ mod tests {
                 steel_web_thick: 8.0,
                 steel_flange_thick: 13.0,
             });
-            section.steel_material = Some(steel.id);
+            let steel_id = steel.id;
+            section.steel_material = Some(steel_id);
             model.materials.push(steel);
             let mut app = rc_rank_portal(model, false, 3000.0, None);
 
             if let Some(expected_reason) = expected_reason {
+                let external_response = app.pushover_for(X).unwrap().clone();
+                let mut model = app.core.model.clone();
+                model.materials[steel_id.index()].name = name.into();
+                assert!(app.load_model(model));
+                app.run_preparation();
+                for dir in [X, Y] {
+                    app.run_seismic(dir);
+                    app.require_result_input(ResultInputKey::Static(StaticCaseKey::Seismic(dir)))
+                        .unwrap();
+                }
+
+                app.run_pushover();
+                let error = app.core.scoped.last_error.as_deref().unwrap();
+                for expected in ["部材 ID 0", "せん断降伏耐力", name, expected_reason] {
+                    assert!(error.contains(expected), "{error}");
+                }
+                assert!(app.pushover_for(X).is_none());
+
+                // 現行の増分解析では生成できない応答が届いた場合の部材種別診断を検証する。
+                app.apply_pushover_result(Ok(external_response));
+                crate::app::tests::select_holding_points(&mut app);
+
                 let assert_unevaluated = |app: &mut App| {
+                    app.require_result_input(ResultInputKey::Pushover(X))
+                        .unwrap();
+                    let response = app.pushover_for(X).unwrap();
+                    let confirmed = response
+                        .confirmed_response(response.ds_evaluation.as_ref().unwrap(), Ds)
+                        .unwrap();
+                    assert!(confirmed
+                        .members
+                        .iter()
+                        .any(|member| member.elem == ElemId(0)));
+                    response
+                        .confirmed_response(
+                            response.capacity_evaluation.as_ref().unwrap(),
+                            HoldingCapacity,
+                        )
+                        .unwrap();
+
                     let reason = app.compute_holding_capacity().err().unwrap();
                     for expected in [
                         "部材 ElemId(0)・断面 SectionId(0)",

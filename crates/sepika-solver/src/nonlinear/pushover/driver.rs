@@ -17,6 +17,7 @@ use super::loads::PhysicalPushoverLoads;
 use super::mechanism::determine_mechanism;
 use super::member_response::compute_member_response;
 use super::response::{get_roof_dof, story_heights};
+use super::shear_yield::{build_shear_yield_thresholds, resolve_src_steel_shear_capacities};
 use super::step_record::StepRecorder;
 use super::types::{
     DuctilityMethod, MemberHistory, PushoverControl, PushoverResult, PushoverTarget,
@@ -135,6 +136,7 @@ pub fn pushover_analysis_recording(
         return Err("no active DOF".into());
     }
 
+    let src_steel_capacities = resolve_src_steel_shear_capacities(model)?;
     let mut st = SolverState::new(n_active, reducer.n_indep);
 
     sepika_element::factory::ensure_nonlinear_input_with_basis(
@@ -231,8 +233,9 @@ pub fn pushover_analysis_recording(
         dir,
         &heights,
         ductility_method,
+        build_shear_yield_thresholds(model, src_steel_capacities),
         physical_loads,
-    )?;
+    );
     let mut total_disp = vec![0.0; n_active];
     let n_steps = max_steps.clamp(1, 100);
     let dlambda = 1.0 / n_steps as f64;

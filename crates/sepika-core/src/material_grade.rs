@@ -165,6 +165,55 @@ pub fn resolve_steel_f(mat: Option<&Material>, thickness_mm: Option<f64>) -> Res
     })
 }
 
+/// SRC 内蔵 H 形鋼に適用できる材種の最小板厚 [mm]。分類・材種が不適合なら理由を返す。
+pub fn src_h_steel_minimum_thickness_mm(steel: &Material) -> Result<f64, String> {
+    if steel.category != MaterialCategory::Steel {
+        return Err(format!("材料「{}」は鋼材ではありません", steel.name));
+    }
+    let name = steel.name.trim();
+    let minimum_mm = match name {
+        "SN400A" | "SN400B" | "SN490B" => 6.0,
+        "SN400C" | "SN490C" => 16.0,
+        "SS400" | "SM400A" | "SM400B" | "SM400C" | "SM490A" | "SM490B" | "SM490C" | "SM490YA"
+        | "SM490YB" | "SM520B" | "SM520C" => 0.0,
+        "SS490" => {
+            return Err("内蔵鉄骨「SS490」は溶接を使用する部分に適用できません。断面入力から溶接を使用する部分か確認できません".into());
+        }
+        "SM400" | "SM490" | "SM520" | "SN400" | "SN490" => {
+            return Err(format!("内蔵鉄骨「{name}」の JIS の種類記号が不完全です"));
+        }
+        "STK400" | "STK490" | "STKR400" | "STKR490" | "STKN400" | "STKN400W" | "STKN400B"
+        | "STKN490" | "STKN490W" | "STKN490B" | "BCR235" | "BCR295" | "BCP235" | "BCP325" => {
+            return Err(format!(
+                "内蔵鉄骨「{name}」は鋼管用として登録されている材料名で、H 形鋼としての適用根拠が未確定です"
+            ));
+        }
+        _ => {
+            return Err(format!(
+                "内蔵鉄骨「{name}」の H 形鋼としての適用根拠が未確定です。材料名と直接入力した降伏応力だけでは個別認定の番号・対象形状・板厚・基準強度を確認できません"
+            ));
+        }
+    };
+    Ok(minimum_mm)
+}
+
+/// ウェブとフランジの実板厚 [mm] のいずれかが材種の下限を下回れば理由を返す。
+pub fn validate_src_h_steel_thickness(
+    steel_name: &str,
+    tw_mm: f64,
+    tf_mm: f64,
+    minimum_mm: f64,
+) -> Result<(), String> {
+    let name = steel_name.trim();
+    // 断面形状だけでは圧延形鋼と鋼板組立を区別できない。
+    if tw_mm < minimum_mm || tf_mm < minimum_mm {
+        return Err(format!(
+            "内蔵鉄骨「{name}」の実板厚（ウェブ {tw_mm} mm、フランジ {tf_mm} mm）は JIS G 3136 の適用範囲外です。両方に {minimum_mm} mm 以上が必要です"
+        ));
+    }
+    Ok(())
+}
+
 /// CFT 鋼管材料の F [N/mm²] を材料名と板厚 `[mm]` から解決し、未知名は明示 fy を用いる。
 /// 非鋼材・非正または非有限の明示 fy・SM520 系列の適用範囲外は `None`。
 pub fn cft_steel_f_value(mat: &crate::model::Material, thickness: f64) -> Option<f64> {

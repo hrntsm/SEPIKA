@@ -191,9 +191,10 @@ fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() 
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
+            crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&model)
+                .unwrap(),
             super::super::loads::PhysicalPushoverLoads::empty(),
-        )
-        .unwrap();
+        );
         recorder.constant_external = rhs;
         recorder.reference_external = vec![0.; map.n_active()];
         recorder.physical_loads = super::super::loads::PhysicalPushoverLoads::new(

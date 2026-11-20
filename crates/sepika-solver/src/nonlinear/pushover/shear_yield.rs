@@ -2,14 +2,18 @@
 //! 部材ランク判定で「破壊モードがせん断破壊か」の判定に用いる）。
 //!
 //! - [`ShearThreshold`] / [`DirThreshold`] / [`ShearDir`] — 方向別 Qy しきい値
-//! - [`compute_shear_yield_thresholds`] — 全部材のしきい値を組み立て
+//! - [`build_shear_yield_thresholds`] — 全部材のしきい値を組み立て
 //! - [`track_shear_yield`] — 各ステップのせん断降伏を軸力 σ0 を反映して判定
 
 use super::geom::member_local_frame;
 use super::geom::{axial_compression, dot3, recording_force};
 use super::types::ShearYieldEvent;
-use sepika_core::material_grade::{material_strength_factor_rebar, material_strength_factor_steel};
-use sepika_core::model::{ElementData, Material, Model, Section};
+use sepika_core::material_grade::{
+    material_strength_factor_rebar, material_strength_factor_steel, resolve_steel_f,
+    src_h_steel_minimum_thickness_mm, steel_f_value_issue, steel_grade_base,
+    validate_src_h_steel_thickness,
+};
+use sepika_core::model::{ElementData, Material, MaterialCategory, Model, Section};
 use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
@@ -72,10 +76,9 @@ fn real_rebar_capacity_input(
     mat: &Material,
     rebar_mat: Option<&Material>,
     shear_mat: Option<&Material>,
-    steel_mat: Option<&Material>,
     dir: ShearDir,
     clear_span: f64,
-) -> Option<(RcCapacityInput, f64)> {
+) -> Option<RcCapacityInput> {
     let (b, d, steel_candidates, pw) = match shape {
         SectionShape::RcBeamRect { b, d, rebar }
         | SectionShape::SrcBeamRect { b, d, rebar, .. } => {
@@ -167,7 +170,7 @@ fn real_rebar_capacity_input(
         clear_span,
         sigma_0: 0.0,
     };
-    let input = steel_candidates
+    steel_candidates
         .into_iter()
         .filter(|(at, d_eff)| *at > 0.0 && *d_eff > 0.0)
         .map(input_for)
@@ -175,41 +178,66 @@ fn real_rebar_capacity_input(
             rc_qsu_simple(a)
                 .partial_cmp(&rc_qsu_simple(b))
                 .unwrap_or(std::cmp::Ordering::Equal)
-        })?;
-    let steel_qy = match shape {
+        })
+}
+
+fn src_steel_shear_capacities(
+    shape: Option<&SectionShape>,
+    steel: Option<&Material>,
+) -> Result<[f64; 2], String> {
+    let Some(
         SectionShape::SrcBeamRect {
-            steel_height,
-            steel_width,
-            steel_web_thick,
-            steel_flange_thick,
+            steel_height: height_mm,
+            steel_width: width_mm,
+            steel_web_thick: tw_mm,
+            steel_flange_thick: tf_mm,
             ..
         }
         | SectionShape::SrcColumnRect {
-            steel_height,
-            steel_width,
-            steel_web_thick,
-            steel_flange_thick,
+            steel_height: height_mm,
+            steel_width: width_mm,
+            steel_web_thick: tw_mm,
+            steel_flange_thick: tf_mm,
             ..
-        } => {
-            let (sh, sb, tw, tf) = (
-                *steel_height,
-                *steel_width,
-                *steel_web_thick,
-                *steel_flange_thick,
-            );
-            let (s_aw, plate_t) = match dir {
-                ShearDir::Y => ((tw * (sh - 2.0 * tf)).max(0.0), tw),
-                ShearDir::Z => ((2.0 * sb * tf).max(0.0), tf),
-            };
-            let name = steel_mat.map(|m| m.name.as_str()).unwrap_or("");
-            let f = sepika_core::material_grade::steel_f_value_prefix(name, plate_t)
-                .or_else(|| steel_mat.and_then(|m| m.fy))
-                .unwrap_or(235.0);
-            s_aw * f * steel_mat.map(material_strength_factor_steel).unwrap_or(1.0) / 3.0_f64.sqrt()
-        }
-        _ => 0.0,
+        },
+    ) = shape
+    else {
+        return Ok([0.0; 2]);
     };
-    Some((input, steel_qy))
+
+    let steel = steel.ok_or("内蔵鉄骨の材料が未割当、または単一の参照先を確定できません")?;
+    let tw_mm = *tw_mm;
+    let tf_mm = *tf_mm;
+    // 不完全な SM520 の種類記号でも、既知の板厚範囲外を先に診断する。
+    if steel.category == MaterialCategory::Steel {
+        for thickness_mm in [tw_mm, tf_mm] {
+            if let Some(reason) = steel_f_value_issue(&steel.name, thickness_mm) {
+                return Err(reason);
+            }
+        }
+    }
+    let minimum_mm = src_h_steel_minimum_thickness_mm(steel).map_err(|reason| {
+        if steel.category != MaterialCategory::Steel || steel_grade_base(&steel.name).is_some() {
+            return reason;
+        }
+        if steel.fy.is_some() {
+            format!("{reason}。未登録の材種名に明示 fy が入力されています")
+        } else {
+            format!("{reason}。未登録の材種名で、明示 fy も未入力です")
+        }
+    })?;
+    validate_src_h_steel_thickness(&steel.name, tw_mm, tf_mm, minimum_mm)?;
+    let web_f_n_mm2 = resolve_steel_f(Some(steel), Some(tw_mm))?;
+    let flange_f_n_mm2 = resolve_steel_f(Some(steel), Some(tf_mm))?;
+
+    let factor = material_strength_factor_steel(steel);
+    let divisor = 3.0_f64.sqrt();
+    let web_area_mm2 = (tw_mm * (height_mm - 2.0 * tf_mm)).max(0.0);
+    let flange_area_mm2 = (2.0 * width_mm * tf_mm).max(0.0);
+    Ok([
+        web_area_mm2 * web_f_n_mm2 * factor / divisor,
+        flange_area_mm2 * flange_f_n_mm2 * factor / divisor,
+    ])
 }
 
 /// 方向別のせん断降伏耐力しきい値（[`DirThreshold`]）を組み立てる。
@@ -218,6 +246,7 @@ pub(crate) struct SecMaterials<'a> {
     pub material: Option<&'a Material>,
     pub rebar_mat: Option<&'a Material>,
     pub shear_mat: Option<&'a Material>,
+    #[cfg(test)]
     pub steel_mat: Option<&'a Material>,
 }
 
@@ -228,12 +257,13 @@ fn build_dir_threshold(
     section: Option<&Section>,
     dir: ShearDir,
     clear_span: f64,
+    steel_qy: f64,
 ) -> DirThreshold {
     let SecMaterials {
         material,
         rebar_mat,
         shear_mat,
-        steel_mat,
+        ..
     } = mats;
     if as_area <= 0.0 {
         return DirThreshold::Static(f64::INFINITY);
@@ -242,8 +272,8 @@ fn build_dir_threshold(
         return DirThreshold::Static(f64::INFINITY);
     };
     if let Some(shape) = section.and_then(|s| s.shape.as_ref()) {
-        if let Some((input, steel_qy)) =
-            real_rebar_capacity_input(shape, mat, rebar_mat, shear_mat, steel_mat, dir, clear_span)
+        if let Some(input) =
+            real_rebar_capacity_input(shape, mat, rebar_mat, shear_mat, dir, clear_span)
         {
             if rc_qsu_simple(&input) + steel_qy > 0.0 {
                 return DirThreshold::RcArakawa {
@@ -276,7 +306,13 @@ pub(crate) fn compute_shear_yield_qy(
     dir: ShearDir,
     clear_span: f64,
 ) -> f64 {
-    build_dir_threshold(as_area, mats, section, dir, clear_span).qy(0.0)
+    let [steel_y, steel_z] =
+        src_steel_shear_capacities(section.and_then(|s| s.shape.as_ref()), mats.steel_mat).unwrap();
+    let steel_qy = match dir {
+        ShearDir::Y => steel_y,
+        ShearDir::Z => steel_z,
+    };
+    build_dir_threshold(as_area, mats, section, dir, clear_span, steel_qy).qy(0.0)
 }
 
 /// 部材長（節点間距離）[mm]。節点参照が欠落・退化の場合は None。
@@ -285,53 +321,66 @@ fn elem_length(model: &Model, elem: &ElementData) -> Option<f64> {
     (len > 0.0).then_some(len)
 }
 
-pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearThreshold>, String> {
-    for elem in &model.elements {
-        if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
-            continue;
-        }
-        if let (
-            Some(
-                SectionShape::SrcBeamRect {
-                    steel_web_thick,
-                    steel_flange_thick,
-                    ..
-                }
-                | SectionShape::SrcColumnRect {
-                    steel_web_thick,
-                    steel_flange_thick,
-                    ..
-                },
-            ),
-            Some(mat),
-        ) = (
-            model.element_section(elem).and_then(|s| s.shape.as_ref()),
-            model.element_steel_material(elem),
-        ) {
-            for t in [*steel_web_thick, *steel_flange_thick] {
-                if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(&mat.name, t)
-                {
-                    return Err(format!("部材 ID {} のせん断降伏耐力: {reason}", elem.id.0));
-                }
-            }
-        }
-    }
-    Ok(model
+pub(super) fn resolve_src_steel_shear_capacities(model: &Model) -> Result<Vec<[f64; 2]>, String> {
+    model
         .elements
         .iter()
         .map(|elem| {
+            if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
+                return Ok([0.0; 2]);
+            }
+            let section = model.element_section(elem);
+            let shape = section.and_then(|section| section.shape.as_ref());
+            let steel = model.element_steel_material(elem);
+            src_steel_shear_capacities(shape, steel).map_err(|reason| {
+                let references =
+                    section
+                        .and_then(|section| {
+                            model.stb_strengths.sections.iter().find(|input| {
+                                input.section == section.id && !input.steel.is_empty()
+                            })
+                        })
+                        .filter(|_| steel.is_none())
+                        .map(|input| {
+                            let grades: Vec<_> = input
+                                .steel
+                                .iter()
+                                .map(|steel| steel.strength.as_str())
+                                .collect();
+                            format!("（外部入力の材種: {}）", grades.join("、"))
+                        })
+                        .unwrap_or_default();
+                format!(
+                    "部材 ID {} のせん断降伏耐力: {reason}{references}",
+                    elem.id.0
+                )
+            })
+        })
+        .collect()
+}
+
+pub(super) fn build_shear_yield_thresholds(
+    model: &Model,
+    src_steel_capacities: Vec<[f64; 2]>,
+) -> Vec<ShearThreshold> {
+    model
+        .elements
+        .iter()
+        .zip(src_steel_capacities)
+        .map(|(elem, [steel_y, steel_z])| {
             if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
                 return ShearThreshold {
                     y: DirThreshold::Static(f64::INFINITY),
                     z: DirThreshold::Static(f64::INFINITY),
                 };
             }
-            let sec = elem.section.and_then(|sid| model.sections.get(sid.index()));
+            let sec = model.element_section(elem);
             let mats = SecMaterials {
                 material: model.element_material(elem),
                 rebar_mat: model.element_rebar_material(elem),
                 shear_mat: model.element_shear_rebar_material(elem),
-                steel_mat: model.element_steel_material(elem),
+                #[cfg(test)]
+                steel_mat: None,
             };
             let (as_y, as_z) = sec.map(|s| (s.as_y, s.as_z)).unwrap_or((0.0, 0.0));
             let raw_length = elem_length(model, elem).unwrap_or(0.0);
@@ -339,11 +388,19 @@ pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearT
                 .analysis_rigid_zone(elem)
                 .flexible_length_from(raw_length);
             ShearThreshold {
-                y: build_dir_threshold(as_z, mats, sec, ShearDir::Y, clear_span),
-                z: build_dir_threshold(as_y, mats, sec, ShearDir::Z, clear_span),
+                y: build_dir_threshold(as_z, mats, sec, ShearDir::Y, clear_span, steel_y),
+                z: build_dir_threshold(as_y, mats, sec, ShearDir::Z, clear_span, steel_z),
             }
         })
-        .collect())
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearThreshold>, String> {
+    Ok(build_shear_yield_thresholds(
+        model,
+        resolve_src_steel_shear_capacities(model)?,
+    ))
 }
 
 /// せん断降伏イベントの追跡（曲げとは独立の判定）。
@@ -440,14 +497,13 @@ mod ratio_contract_tests {
             strength_factor: None,
             concrete_class: Default::default(),
         };
-        let (input, steel_qy) =
-            real_rebar_capacity_input(&shape, &mat, None, None, None, ShearDir::Y, 3000.0).unwrap();
+        let input =
+            real_rebar_capacity_input(&shape, &mat, None, None, ShearDir::Y, 3000.0).unwrap();
         assert!((input.at - 1800.0).abs() < 1e-9);
         assert_eq!(input.b, 300.0);
         assert_eq!(input.d, 600.0);
         assert!((input.d_eff - 540.0).abs() < 1e-12);
         assert!((input.pw - 0.002).abs() < 1e-15);
-        assert_eq!(steel_qy, 0.0);
         assert!((rc_qsu_simple(&input) - 235_681.416_383_415_87).abs() < 1e-8);
     }
 }

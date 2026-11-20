@@ -5,7 +5,7 @@ use super::ductility::{compute_ductility_refs, update_ductility, DuctilityRef, D
 use super::hinge::{compute_hinge_thresholds, track_hinges, HingeThreshold};
 use super::member_response::record_member_step;
 use super::response::{compute_story_drift, get_roof_disp, max_story_drift_angle};
-use super::shear_yield::{compute_shear_yield_thresholds, track_shear_yield, ShearThreshold};
+use super::shear_yield::{track_shear_yield, ShearThreshold};
 use super::types::{
     CapacityPoint, DuctilityMethod, HingeEvent, MemberStepState, PushoverStep, ShearYieldEvent,
 };
@@ -80,13 +80,14 @@ impl<'a> StepRecorder<'a> {
         dir: SeismicDir,
         heights: &'a [f64],
         ductility_method: DuctilityMethod,
+        shear_thresholds: Vec<ShearThreshold>,
         physical_loads: super::loads::PhysicalPushoverLoads,
-    ) -> Result<Self, String> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             dir,
             heights,
             hinge_thresholds: compute_hinge_thresholds(model),
-            shear_thresholds: compute_shear_yield_thresholds(model)?,
+            shear_thresholds,
             ductility_refs: compute_ductility_refs(model),
             ductility_method,
             ductility_trackers: vec![DuctilityTracker::default(); model.elements.len()],
@@ -103,7 +104,7 @@ impl<'a> StepRecorder<'a> {
             physical_loads,
             fixed_dofs: super::physical_response::fixed_dofs(model, dofmap),
             confirmed_history: vec![],
-        })
+        }
     }
 
     /// 確定したステップを 1 つ記録する。
@@ -296,9 +297,10 @@ mod tests {
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
+            crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&model)
+                .unwrap(),
             super::super::loads::PhysicalPushoverLoads::empty(),
-        )
-        .unwrap();
+        );
         let behaviors: Vec<_> = model
             .elements
             .iter()
@@ -347,9 +349,10 @@ mod tests {
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
+            crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&model)
+                .unwrap(),
             super::super::loads::PhysicalPushoverLoads::empty(),
-        )
-        .unwrap();
+        );
         for (step, (sign, point)) in [(1.0, false), (-1.0, false), (1.0, true), (-1.0, true)]
             .into_iter()
             .enumerate()
