@@ -68,19 +68,17 @@ fn signed_q0_th_detail_missing_repaired_missing_does_not_render_ordinary_check()
 
 #[test]
 fn signed_q0_th_detail_steel_still_checks_without_rc_gravity_input() {
+    use super::steel_column_lateral_buckling_input::{column, moments};
+
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
-    app.run_linear_static(sepika_core::ids::LoadCaseId(0));
-    let peak = app.core.scoped.results.as_ref().unwrap().member_forces[0]
-        .1
-        .clone();
+    assert!(app.load_model(column(0.0, true)));
     let rec = ThRecording {
-        peak_member_forces: vec![Some(peak)],
+        peak_member_forces: vec![Some(moments(215e6))],
         ..Default::default()
     };
-    assert!(app.core.scoped.results.as_ref().unwrap().combos.is_empty());
     let text = labels(&app, &rec, true);
     assert!(text.contains("検定比"), "{text}");
+    assert!(text.contains("採用横座屈長さ lb=3000 mm"), "{text}");
     assert!(!text.contains("重力参照内力"), "{text}");
 }
 

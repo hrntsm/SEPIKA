@@ -20,8 +20,7 @@ fn context(kind: MemberKind) -> DesignCtx {
         kind,
         term: LoadTerm::Long,
         length: 6000.0,
-        column_physical_length_mm: Some(6000.0),
-        steel_attr: (kind == MemberKind::Column).then(test_support::confirmed_end_supports),
+        column_lateral_buckling_length: Some(Ok(6000.0)),
         steel_fb_basis: SteelFbBasis::Asd2019,
         ..Default::default()
     }
@@ -160,7 +159,9 @@ fn asd2019_requires_j_only_above_the_resolved_buckling_length_threshold() {
                 }
                 let mut ctx = context(kind);
                 match route {
-                    0 if kind == MemberKind::Column => ctx.column_physical_length_mm = Some(lb_mm),
+                    0 if kind == MemberKind::Column => {
+                        ctx.column_lateral_buckling_length = Some(Ok(lb_mm))
+                    }
                     0 => ctx.length = lb_mm,
                     1 => ctx.lb = Some(lb_mm),
                     _ => {
@@ -171,7 +172,7 @@ fn asd2019_requires_j_only_above_the_resolved_buckling_length_threshold() {
                             scallop_web_loss: 0.0,
                             lb_direct: Some((lb_mm, lb_mm, lb_mm)),
                             lateral_brace_count: None,
-                            column_lateral_buckling_end_supports_confirmed: false,
+                            column_lateral_buckling_end_supports: None,
                             lk_y_direct: None,
                             lk_z_direct: None,
                             c_direct: None,

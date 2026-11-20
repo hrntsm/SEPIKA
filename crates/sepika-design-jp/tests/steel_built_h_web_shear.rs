@@ -320,7 +320,7 @@ fn axial_material_limit_failure_requires_a_shape_area_and_no_section_loss() {
                 scallop_web_loss: 0.0,
                 lb_direct: None,
                 lateral_brace_count: None,
-                column_lateral_buckling_end_supports_confirmed: false,
+                column_lateral_buckling_end_supports: None,
                 lk_y_direct: None,
                 lk_z_direct: None,
                 c_direct: None,

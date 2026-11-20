@@ -870,9 +870,8 @@ fn draw_peak_check(
         term: LoadTerm::Short,
         kind,
         length,
-        column_physical_length_mm: symmetric_h_column
-            .then(|| sepika_design_jp::steel::column_physical_length_mm(model, elem))
-            .flatten(),
+        column_lateral_buckling_length: symmetric_h_column
+            .then(|| sepika_design_jp::steel::column_lateral_buckling_length(model, elem, attr)),
         lk_y,
         lk_z,
         clear_length: Some(clear_span),
@@ -1226,14 +1225,46 @@ mod tests {
         use sepika_solver::dynamic::timehistory::{AxialForcePeaks, ResponseResult};
         use steel_column_lateral_buckling_input::{column, moments};
 
-        for (offset_mm, confirmed, count, length_text, outcome_text) in [
-            (0.0, true, Some(0), Some("lb=3000 mm"), "検定比 0.974 (OK)"),
-            (500.0, true, None, Some("lb=3500 mm"), "検定比 1.039 (NG)"),
-            (500.0, false, Some(0), None, "中間横補剛なしが未確認"),
-            (500.0, true, Some(1), None, "中間横補剛が入力されています"),
+        for (offset_mm, confirmed, count, revised, length_text, outcome_text) in [
+            (
+                0.0,
+                true,
+                Some(0),
+                false,
+                Some("lb=3000 mm"),
+                "検定比 0.974 (OK)",
+            ),
+            (
+                500.0,
+                true,
+                None,
+                false,
+                Some("lb=3500 mm"),
+                "検定比 1.039 (NG)",
+            ),
+            (500.0, false, Some(0), false, None, "中間横補剛なしが未確認"),
+            (
+                500.0,
+                true,
+                Some(1),
+                false,
+                None,
+                "中間横補剛が入力されています",
+            ),
+            (
+                500.0,
+                true,
+                None,
+                true,
+                None,
+                "実材端の条件が確認時から変わりました",
+            ),
         ] {
             let mut model = column(offset_mm, confirmed);
             model.steel_design_attrs[0].lateral_brace_count = count;
+            if revised {
+                model.elements[0].end_offsets_mm[1][2] = 0.0;
+            }
             let id = model.elements[0].id;
             let mut app = App::default();
             assert!(app.load_model(model));

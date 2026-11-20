@@ -3,14 +3,16 @@ use sepika_core::model::{Model, SteelDesignAttr};
 use sepika_element::frame::beam::MemberForces;
 
 #[path = "steel_h_column_combined_model.rs"]
-mod input;
+mod combined_column;
 
 pub fn column(offset_mm: f64, support_confirmed: bool) -> Model {
-    let mut model = input::cantilever(0.0, 0.0, 0.0);
+    let mut model = combined_column::cantilever(0.0, 0.0, 0.0);
     model.load_cases.clear();
     model.nodes[1].restraint.set_fixed(Dof::Uy);
     model.nodes[1].restraint.set_fixed(Dof::Rz);
     model.elements[0].end_offsets_mm[1][2] = offset_mm;
+    let end_supports =
+        support_confirmed.then(|| model.column_end_supports(&model.elements[0]).unwrap());
     model.steel_design_attrs.push(SteelDesignAttr {
         elem: model.elements[0].id,
         joint_flange_loss: 0.0,
@@ -18,7 +20,7 @@ pub fn column(offset_mm: f64, support_confirmed: bool) -> Model {
         scallop_web_loss: 0.0,
         lb_direct: None,
         lateral_brace_count: None,
-        column_lateral_buckling_end_supports_confirmed: support_confirmed,
+        column_lateral_buckling_end_supports: end_supports,
         lk_y_direct: Some(3500.0),
         lk_z_direct: Some(3500.0),
         c_direct: None,

@@ -355,8 +355,8 @@ pub struct DesignCtx {
     pub kind: MemberKind,
     /// 部材長 `[mm]`。通常の圧縮座屈長さ lk と鋼梁の横座屈長さ lb の既定値として用いる。
     pub length: f64,
-    /// 一般H形鋼柱の両実材端間の長さ [mm]。実材端を解決できない場合は `None`。
-    pub column_physical_length_mm: Option<f64>,
+    /// 一般H形鋼柱の横座屈長さ [mm] または現行条件で算定できない理由。未指定時は未確認。
+    pub column_lateral_buckling_length: Option<Result<f64, &'static str>>,
     /// フェース控除後の内法長 `[mm]`。
     /// None のときは [`Self::length`]（幾何長）で代替する。
     pub clear_length: Option<f64>,
@@ -421,7 +421,7 @@ impl Default for DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
             length: 0.0,
-            column_physical_length_mm: None,
+            column_lateral_buckling_length: None,
             clear_length: None,
             lb: None,
             lk_y: None,

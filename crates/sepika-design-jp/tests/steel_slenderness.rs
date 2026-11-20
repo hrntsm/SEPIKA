@@ -167,7 +167,7 @@ fn model() -> Model {
             scallop_web_loss: 0.0,
             lb_direct: None,
             lateral_brace_count: None,
-            column_lateral_buckling_end_supports_confirmed: false,
+            column_lateral_buckling_end_supports: None,
             lk_y_direct: Some(1000.0),
             lk_z_direct: Some(25000.01),
             c_direct: None,

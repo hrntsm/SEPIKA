@@ -12,7 +12,9 @@
 
 use crate::app::App;
 use sepika_core::ids::ElemId;
-use sepika_core::model::{ElementData, ElementKind, FrameSectionUse, Model, SteelDesignAttr};
+use sepika_core::model::{
+    ColumnEndSupports, ElementData, ElementKind, FrameSectionUse, Model, SteelDesignAttr,
+};
 use sepika_edit::{RemoveSteelDesignAttr, SetSteelDesignAttr};
 
 /// S造検定属性フォームのドラフト状態（GUI 専用）。
@@ -38,7 +40,7 @@ pub struct SteelAttrDraft {
     pub lb_end: String,
     /// 等間隔横補剛の本数の入力バッファ（空欄=なし）。
     pub lateral_brace_count: String,
-    pub column_lateral_buckling_end_supports_confirmed: bool,
+    pub column_lateral_buckling_end_supports: Option<ColumnEndSupports>,
     /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（空欄は未指定）。
     pub lk_y_direct: String,
     /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（空欄は未指定）。
@@ -72,8 +74,8 @@ impl SteelAttrDraft {
             .lateral_brace_count
             .map(|n| n.to_string())
             .unwrap_or_default();
-        self.column_lateral_buckling_end_supports_confirmed =
-            attr.column_lateral_buckling_end_supports_confirmed;
+        self.column_lateral_buckling_end_supports =
+            attr.column_lateral_buckling_end_supports.clone();
         self.lk_y_direct = attr.lk_y_direct.map(|v| v.to_string()).unwrap_or_default();
         self.lk_z_direct = attr.lk_z_direct.map(|v| v.to_string()).unwrap_or_default();
         self.c_direct = attr.c_direct.map(|v| format!("{v:.2}")).unwrap_or_default();
@@ -247,8 +249,8 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                     opt_len_desc(attr.lk_z_direct),
                     opt_c_desc(attr.c_direct),
                 ));
-                if attr.column_lateral_buckling_end_supports_confirmed {
-                    ui.label("柱の両実材端支持を確認済み");
+                if attr.column_lateral_buckling_end_supports.is_some() {
+                    ui.label("柱の両実材端支持の確認記録あり");
                 }
                 if ui
                     .button("✏")
@@ -322,7 +324,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                 scallop_web_loss: 0.0,
                 lb_direct: None,
                 lateral_brace_count: None,
-                column_lateral_buckling_end_supports_confirmed: false,
+                column_lateral_buckling_end_supports: None,
                 lk_y_direct: None,
                 lk_z_direct: None,
                 c_direct: None,
@@ -380,21 +382,40 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         );
     });
 
-    if app
+    let model = &app.core.model;
+    if let Some(elem) = app
         .ui
         .scoped
         .steel_attr_draft
         .elem
-        .and_then(|id| app.core.model.element(id))
-        .is_some_and(|elem| is_symmetric_h_column(&app.core.model, elem))
+        .and_then(|id| model.element(id))
+        .filter(|elem| is_symmetric_h_column(model, elem))
     {
-        ui.checkbox(
-            &mut app.ui.scoped.steel_attr_draft.column_lateral_buckling_end_supports_confirmed,
-            "柱の両実材端で横移動・ねじれを拘束し、中間横補剛なし",
-        )
-        .on_hover_text(
-            "検定する荷重状態で圧縮側になる各フランジについて、両実材端で有効な拘束が成立することを確認してください。",
-        );
+        let current = model.column_end_supports(elem);
+        let recorded = &mut app
+            .ui
+            .scoped
+            .steel_attr_draft
+            .column_lateral_buckling_end_supports;
+        let mut confirmed = current.is_some() && *recorded == current;
+        if ui
+            .add_enabled(
+                current.is_some(),
+                egui::Checkbox::new(
+                    &mut confirmed,
+                    "柱の両実材端で横移動・ねじれを拘束し、中間横補剛なし",
+                ),
+            )
+            .on_hover_text(
+                "検定する荷重状態で圧縮側になる各フランジについて、両実材端で有効な拘束が成立することを確認してください。",
+            )
+            .changed()
+        {
+            *recorded = current.filter(|_| confirmed);
+        }
+        if recorded.is_some() && !confirmed {
+            ui.label("確認時から実材端の条件が変わりました。現在の条件を再確認してください。");
+        }
     }
 
     ui.horizontal(|ui| {
@@ -501,11 +522,12 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                     scallop_web_loss,
                     lb_direct,
                     lateral_brace_count,
-                    column_lateral_buckling_end_supports_confirmed: app
+                    column_lateral_buckling_end_supports: app
                         .ui
                         .scoped
                         .steel_attr_draft
-                        .column_lateral_buckling_end_supports_confirmed,
+                        .column_lateral_buckling_end_supports
+                        .clone(),
                     lk_y_direct,
                     lk_z_direct,
                     c_direct,
@@ -643,7 +665,7 @@ mod tests {
             let [attr] = app.core.model.steel_design_attrs.as_slice() else {
                 panic!("{:?}", app.core.model.steel_design_attrs);
             };
-            assert!(attr.column_lateral_buckling_end_supports_confirmed);
+            assert!(attr.column_lateral_buckling_end_supports.is_some());
             assert!(app.core.scoped.staleness.design_stale);
             assert!(app.current_design_results().is_none());
 
@@ -656,9 +678,9 @@ mod tests {
             std::fs::remove_file(path).unwrap();
             assert!(app.core.scoped.last_error.is_none());
             assert!(app.current_design_results().is_none());
-            assert!(
-                app.core.model.steel_design_attrs[0].column_lateral_buckling_end_supports_confirmed
-            );
+            assert!(app.core.model.steel_design_attrs[0]
+                .column_lateral_buckling_end_supports
+                .is_some());
 
             let ctx = egui::Context::default();
             click_text(&ctx, &mut app, "✏");
@@ -669,13 +691,67 @@ mod tests {
     }
 
     #[test]
+    fn changing_column_end_conditions_requires_a_new_checkbox_action() {
+        use sepika_core::model::SupportMemberId;
+        use sepika_edit::SetMemberEndOffsets;
+
+        const CONFIRM: &str = "柱の両実材端で横移動・ねじれを拘束し、中間横補剛なし";
+        let mut model = crate::sample::portal_frame();
+        let id = model.elements[0].id;
+        model.elements[0].end_offsets_mm[1][2] = 500.0;
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        let ctx = egui::Context::default();
+        click_text(&ctx, &mut app, "―");
+        click_text(&ctx, &mut app, "部材#0");
+        click_text(&ctx, &mut app, CONFIRM);
+        click_text(&ctx, &mut app, "✔ 適用");
+
+        let adopted_length = |app: &App| {
+            let model = &app.core.model;
+            sepika_design_jp::steel::column_lateral_buckling_length(
+                model,
+                &model.elements[0],
+                model.steel_design_attrs.first(),
+            )
+        };
+        let original = adopted_length(&app).unwrap();
+        let offset_change = || {
+            Box::new(SetMemberEndOffsets {
+                member: SupportMemberId::Primary(id),
+                value: [[0.0; 3]; 2],
+            })
+        };
+        app.core
+            .scoped
+            .undo
+            .run(&mut app.core.model, offset_change());
+        app.core.scoped.undo.undo(&mut app.core.model);
+        assert_eq!(adopted_length(&app), Ok(original));
+        app.core.scoped.undo.redo(&mut app.core.model);
+        assert!(adopted_length(&app)
+            .unwrap_err()
+            .contains("確認時から変わりました"));
+        assert!(draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
+            matches!(&s.shape, egui::Shape::Text(text)
+                if text.galley.text().contains("現在の条件を再確認"))
+        }));
+
+        click_text(&ctx, &mut app, "✔ 適用");
+        assert!(adopted_length(&app).is_err());
+        click_text(&ctx, &mut app, CONFIRM);
+        click_text(&ctx, &mut app, "✔ 適用");
+        assert_eq!(adopted_length(&app), Ok(original - 500.0));
+    }
+
+    #[test]
     fn column_end_support_input_is_unavailable_on_a_girder_or_cft_column() {
         let mut app = App::default();
         let ctx = egui::Context::default();
         assert!(app.load_model(crate::sample::portal_frame()));
         click_text(&ctx, &mut app, "―");
         click_text(&ctx, &mut app, "部材#2");
-        let assert_checkbox_absent = |app| {
+        let assert_checkbox_absent = |app: &mut App| {
             assert!(!draw(&ctx, app, vec![]).shapes.iter().any(|s| {
                 matches!(&s.shape, egui::Shape::Text(text)
                     if text.galley.text().contains("柱の両実材端で横移動・ねじれを拘束"))
@@ -862,7 +938,7 @@ mod tests {
                 scallop_web_loss: 0.005,
                 lb_direct,
                 lateral_brace_count: None,
-                column_lateral_buckling_end_supports_confirmed: false,
+                column_lateral_buckling_end_supports: None,
                 lk_y_direct: None,
                 lk_z_direct: None,
                 c_direct: Some(1.25),

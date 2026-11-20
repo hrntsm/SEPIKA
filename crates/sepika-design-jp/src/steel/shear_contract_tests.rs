@@ -151,8 +151,7 @@ fn directional_shear_sum_and_mises_use_independent_ratios_without_repeating_norm
                 kind,
                 term: LoadTerm::Long,
                 length: 0.0,
-                column_physical_length_mm: Some(1.0),
-                steel_attr: Some(test_support::confirmed_end_supports()),
+                column_lateral_buckling_length: Some(Ok(1.0)),
                 steel_fb_basis: SteelFbBasis::Standard1973,
                 ..Default::default()
             };

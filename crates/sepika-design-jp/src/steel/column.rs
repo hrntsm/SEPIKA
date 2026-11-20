@@ -77,29 +77,16 @@ impl ColumnLateralBuckling {
         if forces.mz == 0.0 {
             return Self::NoStrongAxisBending;
         }
-        let attr = ctx.steel_attr.as_ref();
-        if attr
-            .and_then(|a| a.lateral_brace_count)
-            .is_some_and(|count| count > 0)
-        {
-            return Self::Unconfirmed(
-                "中間横補剛が入力されています。補剛位置と拘束を確認した区間の横座屈長さは未算定です",
-            );
+        match ctx.column_lateral_buckling_length {
+            Some(Ok(length_mm)) if length_mm.is_finite() && length_mm > 0.0 => {
+                Self::Confirmed(length_mm)
+            }
+            Some(Ok(_)) => {
+                Self::Unconfirmed("実材軸長を有限な正値で取得できないため、横座屈長さは未算定です")
+            }
+            Some(Err(reason)) => Self::Unconfirmed(reason),
+            None => Self::Unconfirmed(super::UNCONFIRMED_COLUMN_END_SUPPORTS),
         }
-        if !attr.is_some_and(|a| a.column_lateral_buckling_end_supports_confirmed) {
-            return Self::Unconfirmed(
-                "両実材端での横移動・ねじれの拘束と中間横補剛なしが未確認です。実材端以外の支点や中間横補剛がある区間では横座屈長さは未算定です。始端・中央・終端のlb直接入力と等間隔横補剛本数からは一般H形鋼柱のlbを算定しません",
-            );
-        }
-        let Some(length_mm) = ctx
-            .column_physical_length_mm
-            .filter(|v| v.is_finite() && *v > 0.0)
-        else {
-            return Self::Unconfirmed(
-                "実材軸長を有限な正値で取得できないため、横座屈長さは未算定です",
-            );
-        };
-        Self::Confirmed(length_mm)
     }
 
     pub(super) fn length_mm(&self, physical_length_mm: f64) -> Option<f64> {
@@ -662,7 +649,7 @@ pub(crate) fn column_allowables(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::steel::test_support::{confirmed_end_supports, h_section, mat, rect_section};
+    use crate::steel::test_support::{h_section, mat, rect_section};
     use crate::steel::SteelDesign;
     use crate::{DesignCheck, MemberKind};
 
@@ -687,8 +674,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
-            column_physical_length_mm: Some(3500.0),
-            steel_attr: Some(confirmed_end_supports()),
+            column_lateral_buckling_length: Some(Ok(3500.0)),
             ..Default::default()
         };
         let result = SteelDesign
@@ -936,8 +922,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
-            column_physical_length_mm: Some(3500.0),
-            steel_attr: Some(confirmed_end_supports()),
+            column_lateral_buckling_length: Some(Ok(3500.0)),
             steel_fb_basis: SteelFbBasis::Standard1973,
             ..Default::default()
         };
@@ -976,8 +961,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
-            column_physical_length_mm: Some(3500.0),
-            steel_attr: Some(confirmed_end_supports()),
+            column_lateral_buckling_length: Some(Ok(3500.0)),
             steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };

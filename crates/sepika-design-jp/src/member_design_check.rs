@@ -642,11 +642,12 @@ pub fn run_member_design_checks(
             term: options.term,
             kind,
             length,
-            column_physical_length_mm: (structure == StructureKind::S
+            column_lateral_buckling_length: (structure == StructureKind::S
                 && kind == MemberKind::Column
                 && crate::steel::is_symmetric_h_section(sec))
-            .then(|| crate::steel::column_physical_length_mm(model, elem))
-            .flatten(),
+            .then(|| {
+                crate::steel::column_lateral_buckling_length(model, elem, steel_attr.as_ref())
+            }),
             clear_length: Some(clear_span),
             lb: None,
             lk_y,

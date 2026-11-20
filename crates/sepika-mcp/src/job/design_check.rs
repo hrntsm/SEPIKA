@@ -544,6 +544,7 @@ mod tests {
                 use sepika_core::dof::Dof;
                 model.nodes[1].restraint.set_fixed(Dof::Uy);
                 model.nodes[1].restraint.set_fixed(Dof::Rz);
+                let end_supports = model.column_end_supports(&model.elements[0]).unwrap();
                 model
                     .steel_design_attrs
                     .push(sepika_core::model::SteelDesignAttr {
@@ -553,7 +554,7 @@ mod tests {
                         scallop_web_loss: 0.0,
                         lb_direct: None,
                         lateral_brace_count: None,
-                        column_lateral_buckling_end_supports_confirmed: true,
+                        column_lateral_buckling_end_supports: Some(end_supports),
                         lk_y_direct: None,
                         lk_z_direct: None,
                         c_direct: None,

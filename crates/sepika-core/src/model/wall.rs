@@ -244,9 +244,9 @@ pub struct SteelDesignAttr {
     /// 入力がある場合は自動算定（M2/M1 比・上限 2.3）を行わず入力値を採用する。
     #[serde(default)]
     pub c_direct: Option<f64>,
-    /// 一般H形鋼柱の両実材端で横移動・ねじれを拘束し、中間横補剛がないことを確認済み。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub column_lateral_buckling_end_supports_confirmed: bool,
+    /// 一般H形鋼柱の両実材端支持と中間横補剛なしを確認したときの入力条件。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column_lateral_buckling_end_supports: Option<super::ColumnEndSupports>,
 }
 
 impl SteelDesignAttr {
@@ -259,7 +259,7 @@ impl SteelDesignAttr {
             && self.scallop_web_loss == 0.0
             && self.lb_direct.is_none()
             && self.lateral_brace_count.is_none()
-            && !self.column_lateral_buckling_end_supports_confirmed
+            && self.column_lateral_buckling_end_supports.is_none()
             && self.lk_y_direct.is_none()
             && self.lk_z_direct.is_none()
             && self.c_direct.is_none()

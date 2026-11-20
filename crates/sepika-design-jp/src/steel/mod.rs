@@ -117,22 +117,33 @@ pub fn is_symmetric_h_section(sec: &Section) -> bool {
             .is_some_and(SectionShape::is_asymmetric_built_h)
 }
 
-/// 柱の両実材端間の長さ [mm]。端位置または偏心を解決できない場合は `None`。
-pub fn column_physical_length_mm(
+pub(crate) const UNCONFIRMED_COLUMN_END_SUPPORTS: &str =
+    "両実材端での横移動・ねじれの拘束と中間横補剛なしが未確認です。実材端以外の支点や中間横補剛がある区間では横座屈長さは未算定です。始端・中央・終端のlb直接入力と等間隔横補剛本数からは一般H形鋼柱のlbを算定しません";
+
+/// 一般H形鋼柱の確認済みの横座屈長さ [mm]。現行条件と一致する確認がなければ理由を返す。
+pub fn column_lateral_buckling_length(
     model: &sepika_core::model::Model,
     elem: &sepika_core::model::ElementData,
-) -> Option<f64> {
-    let ends = match model.primary_frame_axis_ends(elem).ok()? {
-        Some(ends) => ends,
-        None => {
-            let [i, j] = elem.nodes.as_slice() else {
-                return None;
-            };
-            [model.node(*i)?.coord, model.node(*j)?.coord]
-        }
-    };
-    let length_mm = sepika_core::geom::vec3::dist(ends[0], ends[1]);
-    (length_mm.is_finite() && length_mm > 0.0).then_some(length_mm)
+    attr: Option<&sepika_core::model::SteelDesignAttr>,
+) -> Result<f64, &'static str> {
+    if attr
+        .and_then(|a| a.lateral_brace_count)
+        .is_some_and(|count| count > 0)
+    {
+        return Err(
+            "中間横補剛が入力されています。補剛位置と拘束を確認した区間の横座屈長さは未算定です",
+        );
+    }
+    let confirmed = attr
+        .and_then(|a| a.column_lateral_buckling_end_supports.as_ref())
+        .ok_or(UNCONFIRMED_COLUMN_END_SUPPORTS)?;
+    let current = model
+        .column_end_supports(elem)
+        .ok_or("実材軸長を有限な正値で取得できないため、横座屈長さは未算定です")?;
+    if *confirmed != current {
+        return Err("実材端の条件が確認時から変わりました。両実材端の拘束と中間横補剛の有無を再確認してください");
+    }
+    Ok(current.length_mm())
 }
 
 /// せん断有効断面積 `(Ay, Az)` [mm²]（強軸 Qy・弱軸 Qz。梁・柱で共用の単一定義）。
@@ -1125,21 +1136,6 @@ pub(crate) mod test_support {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{Material, MaterialCategory, Section};
     use sepika_core::section_shape::SectionShape;
-
-    pub fn confirmed_end_supports() -> sepika_core::model::SteelDesignAttr {
-        sepika_core::model::SteelDesignAttr {
-            elem: sepika_core::ids::ElemId(0),
-            joint_flange_loss: 0.0,
-            joint_web_loss: 0.0,
-            scallop_web_loss: 0.0,
-            lb_direct: None,
-            lateral_brace_count: None,
-            column_lateral_buckling_end_supports_confirmed: true,
-            lk_y_direct: None,
-            lk_z_direct: None,
-            c_direct: None,
-        }
-    }
 
     pub(crate) fn mat(name: &str) -> Material {
         Material {

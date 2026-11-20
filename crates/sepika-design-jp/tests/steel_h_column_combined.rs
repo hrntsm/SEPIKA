@@ -40,7 +40,7 @@ fn check(
             term,
             kind,
             length: 3000.0,
-            column_physical_length_mm: Some(3000.0),
+            column_lateral_buckling_length: Some(Ok(3000.0)),
             lb: Some(1000.0),
             steel_attr: Some(sepika_core::model::SteelDesignAttr {
                 elem: model.elements[0].id,
@@ -49,7 +49,7 @@ fn check(
                 scallop_web_loss: 0.0,
                 lb_direct: None,
                 lateral_brace_count: None,
-                column_lateral_buckling_end_supports_confirmed: true,
+                column_lateral_buckling_end_supports: None,
                 lk_y_direct: None,
                 lk_z_direct: None,
                 c_direct: None,

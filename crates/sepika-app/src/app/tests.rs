@@ -12196,7 +12196,7 @@ fn load_state_gui_contract_model() -> sepika_core::model::Model {
             scallop_web_loss: 0.0,
             lb_direct: None,
             lateral_brace_count: None,
-            column_lateral_buckling_end_supports_confirmed: false,
+            column_lateral_buckling_end_supports: None,
             c_direct: None,
         });
     model.load_cases = [
