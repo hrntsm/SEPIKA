@@ -1315,6 +1315,116 @@ mod tests {
     use sepika_design_jp::secondary::member_rank::worst_rank;
 
     #[test]
+    fn invalid_src_column_geometry_prevents_automatic_holding_capacity() {
+        use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
+        use crate::app::{DiagSeverity, DiagTarget};
+        use sepika_core::ids::MaterialId;
+        use sepika_core::section_shape::{RebarSize, SectionShape};
+        use SeismicDir::{X, Y};
+
+        for ([height_mm, width_mm, web_mm], expected) in [
+            ([400.0, 90.0, 95.0], ["ウェブ厚 95 mm", "フランジ幅 90 mm"]),
+            (
+                [650.0, 200.0, 8.0],
+                ["鋼のせい 650 mm", "SRC 断面せい 600 mm"],
+            ),
+        ] {
+            let mut model = expanded_model();
+            model.elements.pop();
+            model.sections.truncate(2);
+            let mut steel = rank_input().1;
+            steel.id = MaterialId(model.materials.len() as u32);
+            steel.name = "SN400B".into();
+            let section = &mut model.sections[0];
+            let Some(SectionShape::RcColumnRect { b, d, mut rebar }) = section.shape.take() else {
+                unreachable!()
+            };
+            rebar.main_dia = RebarSize::DiameterMm(25.0);
+            rebar.y = vec![2];
+            section.shape = Some(SectionShape::SrcColumnRect {
+                b,
+                d,
+                rebar,
+                steel_height: height_mm,
+                steel_width: width_mm,
+                steel_web_thick: web_mm,
+                steel_flange_thick: 13.0,
+            });
+            section.steel_material = Some(steel.id);
+            model.materials.push(steel);
+            let mut app = App::default();
+            assert!(app.load_model(crate::app::tests::with_explicit_pushover_gravity(model)));
+            app.core.analysis_cfg.threads = 1;
+            app.core.design_rank_auto = true;
+
+            let assert_geometry_error = |reason: &str| {
+                for detail in ["柱 0", "超えています"].into_iter().chain(expected) {
+                    assert!(
+                        reason.contains(detail),
+                        "「{detail}」がありません: {reason}"
+                    );
+                }
+            };
+            app.run_preparation();
+            assert_geometry_error(
+                app.core
+                    .scoped
+                    .last_error
+                    .as_deref()
+                    .expect("準備計算で停止"),
+            );
+            assert!(app.core.scoped.preparation.is_none());
+            assert!(app.core.scoped.diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == DiagSeverity::Error
+                    && diagnostic.target == Some(DiagTarget::Member(ElemId(0)))
+                    && expected
+                        .iter()
+                        .all(|detail| diagnostic.message.contains(detail))
+            }));
+
+            for dir in [X, Y] {
+                app.run_seismic(dir);
+                assert_geometry_error(
+                    app.core
+                        .scoped
+                        .last_error
+                        .as_deref()
+                        .expect("地震静的解析で停止"),
+                );
+                assert!(app
+                    .require_result_input(ResultInputKey::Static(StaticCaseKey::Seismic(dir)))
+                    .is_err());
+            }
+            app.run_pushover();
+            assert_geometry_error(
+                app.core
+                    .scoped
+                    .last_error
+                    .as_deref()
+                    .expect("増分解析で停止"),
+            );
+            assert!(app.pushover_for(X).is_none());
+            assert!(app.pushover_for(Y).is_none());
+            assert!(app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .is_none_or(|results| !results.has_analysis_results()));
+
+            let error = app
+                .compute_holding_capacity()
+                .err()
+                .expect("保有水平耐力は未判定");
+            assert!(
+                error.contains("増分解析 Xの入力識別情報がありません"),
+                "{error}"
+            );
+            assert!(app.core.scoped.holding_capacity_source.is_none());
+        }
+    }
+
+    #[test]
     fn src_column_auto_rank_reports_inapplicable_steel_from_a_saved_run() {
         use super::holding_clear_span::rc_rank_portal;
         use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
@@ -1433,6 +1543,9 @@ mod tests {
                 assert!(candidate
                     .member_ranks
                     .contains(&(ElemId(0), MemberRank::FA)));
+                let reason = app.compute_holding_capacity().err().expect("Ds は採用保留");
+                assert!(reason.contains("Ds判定保留"), "{reason}");
+                assert!(app.core.scoped.holding_capacity_source.is_none());
             }
         }
     }
