@@ -10888,6 +10888,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
         disp: vec![],
         member_forces: vec![],
         panel_moments: vec![],
+        girder_column_face_forces: Vec::new(),
     }
 }
 

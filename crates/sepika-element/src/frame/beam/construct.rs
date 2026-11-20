@@ -6,7 +6,7 @@ use crate::frame::section_lookup::{get_material, get_section, sec_material};
 use sepika_core::ids::NodeId;
 use sepika_core::model::Model;
 
-/// 材軸長 [mm] から、節点芯・柱フェース・材中央・付帯情報の断面位置 ξ を昇順で返す。
+/// 材軸長 [mm] から節点芯・危険断面の端部フェース・材中央・付帯情報の断面位置 ξ を昇順で返す。
 /// ξ は材軸の正規化座標で、長さが 1e-12 mm 以下では節点芯と材中央を返す。
 pub fn eval_sections_of(
     data: &sepika_core::model::ElementData,

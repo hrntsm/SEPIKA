@@ -229,6 +229,7 @@ pub fn bending_shear_response(dir: SeismicDir, reverse: bool, split: bool) -> (M
             disp,
             member_forces,
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         },
     )
 }

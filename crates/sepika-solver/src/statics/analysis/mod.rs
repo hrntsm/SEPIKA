@@ -106,6 +106,7 @@ impl<'m> Analysis<'m> {
             disp: vec![[0.0; 6]; self.model.nodes.len()],
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         }
     }
 

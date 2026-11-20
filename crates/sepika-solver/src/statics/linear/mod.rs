@@ -5,7 +5,9 @@ use crate::common::linear_load::{
     assemble_linear_rhs, element_error, legacy_member_force, loaded_response, validate_entries,
     PhysicalLoadLedger,
 };
+use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::DofMap;
+use sepika_core::face_distance::{girder_column_faces, GirderColumnFace};
 use sepika_core::ids::{ElemId, LoadCaseId};
 use sepika_core::model::{
     ElementData, ElementKind, FrameSectionUse, LoadCase, LoadCaseKind, MemberLoad, Model,
@@ -13,6 +15,7 @@ use sepika_core::model::{
 use sepika_element::behavior::{Ctx, ElementBehavior};
 use sepika_element::factory::build_behavior_with_axial_factor;
 use sepika_element::frame::beam::MemberForces;
+use sepika_element::frame::member_load::LoadedFrameSection;
 use sepika_math::solver::{make_solver, LinearSolver, SolveError, SolverBackend};
 use sepika_math::sparse::{assemble_csc, Triplet};
 use std::collections::HashMap;
@@ -120,7 +123,20 @@ pub struct StaticOnce {
     /// パネルをモデル化していない場合は空。
     #[serde(default)]
     pub panel_moments: Vec<(sepika_core::ids::NodeId, [f64; 2])>,
+    /// 大梁の実柱面の断面力。大梁IDごとにi/j順。幾何を決められない端は理由付きエラー。
+    /// 対象の大梁がない場合とケース応答を持たない空の組合せでは空。
+    #[serde(default)]
+    pub girder_column_face_forces: Vec<(ElemId, GirderColumnFaceEnds)>,
 }
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GirderColumnFaceForces {
+    pub face: GirderColumnFace,
+    /// 梁局所系の `[N, Qy, Qz, Mx, My, Mz]` `[N, N·mm]`。算定不能時は理由付きエラー。
+    pub forces: Result<[f64; 6], String>,
+}
+
+pub type GirderColumnFaceEnds = [Result<GirderColumnFaceForces, String>; 2];
 
 /// 同じモデルのケース応答を係数倍して足し合わせる。部材・評価断面の順序は一致していること。
 /// 引張専用反復を含む応答和は、合成荷重の active-set 解を保証しない。項が空なら空の結果を返す。
@@ -133,6 +149,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
             disp: Vec::new(),
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         });
     };
     let mut disp = vec![[0.0; 6]; first.disp.len()];
@@ -202,6 +219,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
         disp,
         member_forces,
         panel_moments,
+        girder_column_face_forces: superpose_girder_column_faces(terms)?,
     };
     if let Some((id, _)) = result.member_forces.iter().find(|(_, forces)| {
         forces.at.iter().any(|(position, values)| {
@@ -238,6 +256,103 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
         ));
     }
     Ok(result)
+}
+
+fn superpose_girder_column_faces(
+    terms: &[(&StaticOnce, f64)],
+) -> Result<Vec<(ElemId, GirderColumnFaceEnds)>, SolveError> {
+    let nonzero = || terms.iter().filter(|(_, factor)| *factor != 0.0);
+    let base = nonzero().next().or_else(|| {
+        terms
+            .iter()
+            .find(|(res, _)| !res.girder_column_face_forces.is_empty())
+    });
+    let mut sum = base.map_or_else(Vec::new, |(res, _)| res.girder_column_face_forces.clone());
+    for face in sum
+        .iter_mut()
+        .flat_map(|(_, ends)| ends.iter_mut().flatten())
+    {
+        face.forces = Ok([0.0; 6]);
+    }
+    for (res, factor) in nonzero() {
+        if sum.len() != res.girder_column_face_forces.len() {
+            return Err(SolveError::InvalidInput(
+                "合成する結果間で実柱面の大梁数が一致しません".into(),
+            ));
+        }
+        for ((id, dest), (source_id, source)) in sum.iter_mut().zip(&res.girder_column_face_forces)
+        {
+            if id != source_id {
+                return Err(SolveError::InvalidInput(format!(
+                    "合成する結果間で実柱面の大梁IDが一致しません（{}と{}）",
+                    id.0, source_id.0
+                )));
+            }
+            for (side, (dest, source)) in dest.iter_mut().zip(source).enumerate() {
+                let Ok(dest_face) = dest else { continue };
+                let source_face = match source {
+                    Ok(source_face) if dest_face.face == source_face.face => source_face,
+                    Ok(_) => {
+                        *dest = Err(column_face_reason(
+                            *id,
+                            side,
+                            "合成する結果間で評価位置または支持柱が一致しません",
+                        ));
+                        continue;
+                    }
+                    Err(reason) => {
+                        *dest = Err(reason.clone());
+                        continue;
+                    }
+                };
+                if let Ok(values) = &mut dest_face.forces {
+                    dest_face.forces =
+                        source_face
+                            .forces
+                            .as_ref()
+                            .map_err(Clone::clone)
+                            .and_then(|current| {
+                                let next = std::array::from_fn(|d| values[d] + factor * current[d]);
+                                if next.iter().all(|value| value.is_finite()) {
+                                    Ok(next)
+                                } else {
+                                    Err(column_face_reason(*id, side, "合成した断面力が非有限です"))
+                                }
+                            });
+                }
+            }
+        }
+    }
+    Ok(sum)
+}
+
+fn column_face_reason(id: ElemId, side: usize, reason: &str) -> String {
+    format!("大梁 ID {} {}端の実柱面: {reason}", id.0, ["i", "j"][side])
+}
+
+fn recover_girder_column_faces(
+    model: &Model,
+    elem: &ElementData,
+    adjacency: &NodeAdjacency,
+    section: Option<&LoadedFrameSection>,
+    results: &mut Vec<(ElemId, GirderColumnFaceEnds)>,
+) {
+    if let Some([i, j]) = girder_column_faces(model, elem, adjacency) {
+        results.push((
+            elem.id,
+            [(0, i), (1, j)].map(|(side, face)| {
+                face.map(|face| {
+                    let forces = section
+                        .ok_or_else(|| "要素に荷重込みの断面力回収がありません".to_owned())
+                        .and_then(|section| {
+                            section.at_continuous_section_mm(face.position_mm, face.length_mm)
+                        })
+                        .map_err(|reason| column_face_reason(elem.id, side, &reason));
+                    GirderColumnFaceForces { face, forces }
+                })
+            }),
+        ));
+    }
 }
 
 /// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。
@@ -598,6 +713,8 @@ fn recover_static(
         .collect();
     let mut member_forces = Vec::new();
     let mut panel_moments = Vec::new();
+    let adjacency = NodeAdjacency::primary_frame(model);
+    let mut girder_column_face_forces = Vec::new();
     for (elem, &(_, behavior, gdofs)) in model.elements.iter().zip(entries) {
         let u_elem = crate::common::elem_loop::gather_u_elem(gdofs, u_free);
         let loads = physical.member_loads(elem.id);
@@ -615,12 +732,26 @@ fn recover_static(
                 .recover(&positions)
                 .map_err(|reason| element_error(elem.id, reason))?;
             member_forces.push((elem.id, forces));
+            recover_girder_column_faces(
+                model,
+                elem,
+                &adjacency,
+                Some(&response.section),
+                &mut girder_column_face_forces,
+            );
             for (i, node) in elem.nodes.iter().enumerate() {
                 for d in 0..6 {
                     reactions[node.index()][d] += response.nodal_residual.data[i * 6 + d];
                 }
             }
         } else {
+            recover_girder_column_faces(
+                model,
+                elem,
+                &adjacency,
+                None,
+                &mut girder_column_face_forces,
+            );
             if let Some(mut forces) = behavior.recover_forces(&u_elem) {
                 superpose_member_loads(model, elem, loads, &mut forces);
                 member_forces.push((elem.id, forces));
@@ -687,6 +818,7 @@ fn recover_static(
             disp: dofmap.expand_to_nodes(u_free, model.nodes.len()),
             member_forces,
             panel_moments,
+            girder_column_face_forces,
         },
         reactions,
     ))
