@@ -404,13 +404,18 @@ impl App {
             row.unchecked = !post.complete();
             row.ok = !row.unchecked && row.ratio <= 1.0;
             for c in &post.combinations {
-                row.deflection = row.deflection.max(c.resultant_displacement_mm);
+                if let Some(delta_mm) = c.displacement.as_ref().and_then(|d| d.resultant_mm) {
+                    row.deflection = row.deflection.max(delta_mm);
+                }
                 for p in &c.positions {
                     row.m_max = row.m_max.max(p.forces.mz.abs().max(p.forces.my.abs()));
                     row.q_max = row.q_max.max(p.forces.qy.abs().max(p.forces.qz.abs()));
                 }
             }
-            row.deflection_span_ratio = row.deflection / span;
+            let span_ratio = row.deflection / span;
+            if span_ratio.is_finite() {
+                row.deflection_span_ratio = span_ratio;
+            }
             row.post = Some(post);
             beam_checks.push((
                 None,

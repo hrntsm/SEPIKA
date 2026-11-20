@@ -954,6 +954,10 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
             r.beam_checks.len(),
             |row| {
                 let (sid, ji, jr) = &r.beam_checks[row.index()];
+                let forces_unavailable = jr
+                    .post
+                    .as_ref()
+                    .is_some_and(|post| post.combinations.iter().all(|c| c.positions.is_empty()));
                 row.col(|ui| {
                     ui.label(match sid {
                         Some(id) => format!("#{}", id.0),
@@ -978,12 +982,44 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                     ui.label(format!("{:.0}", jr.span));
                 });
                 row.col(|ui| {
-                    ui.label(format!("{:.2}", moment_kn_m(jr.m_max)));
+                    if forces_unavailable {
+                        ui.label("未算定");
+                    } else {
+                        ui.label(format!("{:.2}", moment_kn_m(jr.m_max)));
+                    }
                 });
                 row.col(|ui| {
-                    ui.label(format!("{:.2}", force_kn(jr.q_max)));
+                    if forces_unavailable {
+                        ui.label("未算定");
+                    } else {
+                        ui.label(format!("{:.2}", force_kn(jr.q_max)));
+                    }
                 });
                 row.col(|ui| {
+                    if let Some(post) = &jr.post {
+                        if post.combinations.iter().all(|c| {
+                            c.displacement
+                                .as_ref()
+                                .and_then(|d| d.resultant_mm)
+                                .is_none()
+                        }) {
+                            ui.label("未算定");
+                            return;
+                        }
+                        let ratio = jr.deflection_span_ratio;
+                        let inverse = ratio.recip();
+                        let relative = if inverse.is_finite() {
+                            format!("1/{inverse:.0}")
+                        } else if jr.deflection == 0.0 {
+                            "0".into()
+                        } else if ratio > 0.0 {
+                            format!("{ratio:.3e}")
+                        } else {
+                            "未算定".into()
+                        };
+                        ui.label(format!("{:.2} (δ/L={relative})", jr.deflection));
+                        return;
+                    }
                     ui.label(format!("{:.2} (δ/L=1/{:.0})", jr.deflection, {
                         if jr.deflection_span_ratio > 0.0 {
                             1.0 / jr.deflection_span_ratio
@@ -1107,9 +1143,53 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
             for (ci,c)in post.combinations.iter().enumerate(){
                 ui.strong(format!("{} / {}",c.name,if c.short_term{"短期"}else{"長期"}));
                 for reason in &c.reasons{ui.colored_label(crate::theme::UI_MUTED,format!("未検定: {reason}"));}
-                ui.label(format!("鉛直端部反力 始 {:.3} / 終 {:.3} kN",c.gravity_reactions[0]/1000.0,c.gravity_reactions[1]/1000.0));
-                for k in 0..2{ui.label(format!("{}端: 横反力 X {:.3} / Y {:.3} kN、固定端曲げ（強/弱）{:.3}/{:.3} kN·m",if k==0{"始"}else{"終"},c.lateral_reactions[k][0]/1000.0,c.lateral_reactions[k][1]/1000.0,c.support_moments[k][0]/1e6,c.support_moments[k][1]/1e6));}
-                ui.label(format!("変位 強軸方向 {:.4} / 弱軸方向 {:.4} / 同位置合成最大 {:.4} mm、δ/L={:.6}、たわみ検定比 {}",c.displacement_mm[0],c.displacement_mm[1],c.resultant_displacement_mm,c.resultant_displacement_mm/row.span,c.deflection_ratio.map(|r|format!("{r:.4} {}",if r<=1.0{"OK"}else{"NG"})).unwrap_or_else(||"未検定".into())));
+                if let Some(gravity) = c.gravity_reactions {
+                    ui.label(format!(
+                        "鉛直端部反力 始 {:.3} / 終 {:.3} kN",
+                        gravity[0] / 1000.0,
+                        gravity[1] / 1000.0,
+                    ));
+                }
+                if c.lateral_reactions.is_some() || c.support_moments.is_some() {
+                    for (index, end) in ["始端", "終端"].into_iter().enumerate() {
+                        let reaction = c.lateral_reactions.map(|r| {
+                            format!("横反力 X {:.3} / Y {:.3} kN", r[index][0] / 1000.0, r[index][1] / 1000.0)
+                        }).unwrap_or_else(|| "横反力 未算定".into());
+                        let moment = c.support_moments.map(|m| {
+                            format!("固定端曲げ（強/弱）{:.3}/{:.3} kN·m", m[index][0] / 1e6, m[index][1] / 1e6)
+                        }).unwrap_or_else(|| "固定端曲げ 未算定".into());
+                        ui.label(format!("{end}: {reaction}、{moment}"));
+                    }
+                }
+                if let Some(displacement) = &c.displacement {
+                    let display_mm = |delta: Option<f64>| match delta {
+                        Some(mm) if mm >= 1e6 => format!("{mm:.4e} mm"),
+                        Some(mm) => format!("{mm:.4} mm"),
+                        None => "未算定".into(),
+                    };
+                    let relative = displacement.resultant_mm.map(|mm| mm / row.span)
+                        .filter(|relative| relative.is_finite())
+                        .map(|relative| format!("{relative:.6}"))
+                        .unwrap_or_else(|| "未算定".into());
+                    let ratio = c.deflection_ratio
+                        .map(|r| format!("{r:.4} {}", if r <= 1.0 { "OK" } else { "NG" }))
+                        .unwrap_or_else(|| {
+                            if c.deflection_limit_exceeded_without_ratio {
+                                "NG（限界超過、比は未算定）".into()
+                            } else {
+                                "未検定".into()
+                            }
+                        });
+                    ui.label(format!(
+                        "変位 強軸方向 {} / 弱軸方向 {} / 同位置合成最大 {}、δ/L={relative}、たわみ検定比 {ratio}",
+                        display_mm(displacement.axes_mm[0]),
+                        display_mm(displacement.axes_mm[1]),
+                        display_mm(displacement.resultant_mm),
+                    ));
+                }
+                if c.positions.is_empty() {
+                    continue;
+                }
                 crate::table_util::standard_table(ui,&format!("post_positions_{}_{}",member.0,ci),&[Col::num("位置[mm]"),Col::num("N[kN] 引張+"),Col::num("Mz[kN·m]"),Col::num("My[kN·m]"),Col::num("Qy[kN]"),Col::num("Qz[kN]"),Col::wide_num("項目別比・判定・許容値")],c.positions.len(),|row|{
                     let p=&c.positions[row.index()];
                     for v in [p.position,p.forces.n/1000.0,p.forces.mz/1e6,p.forces.my/1e6,p.forces.qy/1000.0,p.forces.qz/1000.0]{row.col(|ui|{ui.label(format!("{v:.4}"));});}
