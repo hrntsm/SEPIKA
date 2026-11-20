@@ -84,7 +84,6 @@ pub(crate) fn src_beam_check(
     let seismic = SrcSeismicCtx {
         ctx,
         pos: forces.pos,
-        q_index: 1,
         s_ft_short,
         r_mu,
     };
@@ -105,8 +104,8 @@ pub(crate) fn src_beam_check(
         s_fs,
         steel_web_thick * dw,
         2.0,
-        &super::SrcShearMode::Beam,
-        &seismic,
+        super::SrcShearMode::Beam(&seismic),
+        ctx.term,
     );
 
     let basis = "SRC規準(1987) 梁: 累加強度式(曲げ)+ せん断弾性分担".to_string();

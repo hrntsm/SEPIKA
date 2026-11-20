@@ -81,7 +81,6 @@ fn forces() -> MemberForcesAt {
 fn column_qd_rejects_missing_position_and_either_nonfinite_gravity_direction() {
     for method in [QdMethod::Qd1, QdMethod::Qd2, QdMethod::Min] {
         for (label, values) in [
-            ("valid", Some([100_000.0, 30_000.0])),
             ("missing", None),
             ("nan_y", Some([f64::NAN, 30_000.0])),
             ("nan_z", Some([100_000.0, f64::NAN])),
@@ -101,21 +100,10 @@ fn column_qd_rejects_missing_position_and_either_nonfinite_gravity_direction() {
                 &material("Fc24", MaterialCategory::Concrete),
                 &ctx,
             );
-            if label == "valid" {
-                let r = checked(out);
-                let shear = r
-                    .components
-                    .iter()
-                    .find(|c| c.kind == CheckKind::Shear)
-                    .unwrap();
-                assert!((shear.ratio - 0.34759322126721853).abs() < 1e-12);
-                assert_eq!(shear.detail.matches("構造規定方式").count(), 2);
-            } else {
-                assert!(
-                    matches!(out, CheckOutcome::Skipped { reason } if reason.contains("QL（Qy・Qz）")),
-                    "{method:?} {label}"
-                );
-            }
+            assert!(
+                matches!(out, CheckOutcome::Skipped { reason } if reason.contains("QL（Qy・Qz）")),
+                "{method:?} {label}"
+            );
         }
         for pos in [0.5, 1.1e-6, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let mut ctx = context(method);
@@ -147,36 +135,10 @@ fn column_qd_rejects_missing_position_and_either_nonfinite_gravity_direction() {
 }
 
 #[test]
-fn column_qd_accepts_zero_signed_and_tolerant_gravity_but_normal_short_uses_elastic_share() {
+fn normal_short_uses_elastic_share_and_long_uses_combined_allowable() {
     let mat = material("Fc24", MaterialCategory::Concrete);
     let sec = section();
     let mut ctx = context(QdMethod::Min);
-    let baseline = checked(SrcDesign.check(&forces(), &sec, &mat, &ctx));
-    let qd = ctx.seismic_qd.as_mut().unwrap();
-    qd.long_at[0] = (
-        0.5e-6,
-        [
-            f64::NAN,
-            -100_000.0,
-            -30_000.0,
-            f64::NAN,
-            f64::NAN,
-            f64::NAN,
-        ],
-    );
-    assert_eq!(
-        checked(SrcDesign.check(&forces(), &sec, &mat, &ctx)).components,
-        baseline.components
-    );
-    ctx.seismic_qd.as_mut().unwrap().long_at[0].1[1..3].fill(0.0);
-    let zero = checked(SrcDesign.check(&forces(), &sec, &mat, &ctx));
-    assert!(zero
-        .components
-        .iter()
-        .find(|c| c.kind == CheckKind::Shear)
-        .unwrap()
-        .detail
-        .contains("構造規定方式"));
     ctx.seismic_qd = None;
     let normal = checked(SrcDesign.check(&forces(), &sec, &mat, &ctx));
     let shear = normal
@@ -255,33 +217,43 @@ fn public_batch_distinguishes_requested_missing_member_from_normal_short() {
     let empty = vec![];
     let other = vec![(ElemId(99), mf.clone())];
     let no_position = vec![(ElemId(0), MemberForces { at: vec![] })];
-    for reference in [
-        None,
-        Some(empty.as_slice()),
-        Some(other.as_slice()),
-        Some(no_position.as_slice()),
-        Some(current.as_slice()),
+    for (reference, expected_reason) in [
+        (None, None),
+        (Some(empty.as_slice()), Some("重力参照内力")),
+        (Some(other.as_slice()), Some("重力参照内力")),
+        (Some(no_position.as_slice()), Some("QL（Qy・Qz）")),
+        (Some(current.as_slice()), Some("一次設計用地震力")),
     ] {
-        let report = sepika_design_jp::run_member_design_checks(
-            &model,
-            &current,
-            &[],
-            &sepika_design_jp::MemberDesignCheckOptions {
-                term: LoadTerm::Short,
-                long_member_forces: reference,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(report.member_checks.len(), 1);
-        let outcome = &report.member_checks[0].2;
-        if reference.is_none() || reference == Some(current.as_slice()) {
-            assert!(matches!(outcome, CheckOutcome::Checked(_)), "{outcome:?}");
-        } else {
-            assert!(
-                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("重力参照")),
-                "{outcome:?}"
-            );
+        let options = sepika_design_jp::MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            long_member_forces: reference,
+            ..Default::default()
+        };
+        let run = |forces: &[(ElemId, MemberForces)]| {
+            sepika_design_jp::run_member_design_checks(&model, forces, &[], &options)
+                .unwrap()
+                .member_checks
+        };
+        let checks = run(&current);
+        assert_eq!(checks.len(), 1);
+        let Some(reason) = expected_reason else {
+            assert!(matches!(&checks[0].2, CheckOutcome::Checked(result) if result.ok()));
+            continue;
+        };
+        assert!(
+            matches!(&checks[0].2, CheckOutcome::Skipped { reason: actual } if actual.contains(reason)),
+            "{checks:?}"
+        );
+        for bad_force_index in [0, 5] {
+            let mut overloaded = current.clone();
+            overloaded[0].1.at[0].1[bad_force_index] = 100_000_000_000.0;
+            let checks = run(&overloaded);
+            assert_eq!(checks.len(), 2, "{checks:?}");
+            assert!(matches!(&checks[0].2, CheckOutcome::Checked(result)
+                if !result.ok() && result.components.len() == 1
+                   && result.components[0].kind == CheckKind::AxialBending
+            ));
+            assert_eq!(checks[1].2, run(&current)[0].2);
         }
     }
 }
