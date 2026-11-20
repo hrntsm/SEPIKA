@@ -87,6 +87,33 @@ fn src_beam_and_column_long_term_check_uses_h_grade_but_skips_tube_grades() {
 }
 
 #[test]
+fn src_column_long_term_check_skips_nonfinite_axial_force() {
+    let (model, ctx, mut forces) = inputs(true);
+    let check = |forces: &MemberForcesAt| {
+        SrcDesign.check(forces, &model.sections[0], &model.materials[0], &ctx)
+    };
+
+    forces.n = 0.0;
+    forces.mz = 0.0;
+    let unloaded = check(&forces);
+    let CheckOutcome::Checked(result) = unloaded else {
+        panic!("{unloaded:?}");
+    };
+    assert_eq!(result.ratio(), 0.0);
+    assert!(result.ok());
+
+    for n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        forces.n = n;
+        let outcome = check(&forces);
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("軸力") && reason.contains("非有限")),
+            "N={n}: {outcome:?}"
+        );
+    }
+}
+
+#[test]
 fn src_h_product_diagnosis_precedes_invalid_plate_thickness() {
     for column in [false, true] {
         let (model, mut ctx, forces) = inputs(column);
