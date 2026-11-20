@@ -91,4 +91,16 @@ cargo test --locked -p sepika-design-jp --test inclined_column_eccentricity -- -
 
 公開解析では変位・部材端力・層せん断力を照合し、剛床の比較と方向別剛性の相対許容差は 1e−9、片持ちの力の絶対許容差は 1e−8 N とした。既存の鉛直ファイバー柱・マルチスプリング柱の成立条件と不成立時の診断も回帰試験で確認した。[公開解析試験](../../crates/sepika-design-jp/tests/inclined_column_eccentricity.rs)、[偏心率の回帰試験](../../crates/sepika-design-jp/src/secondary/eccentricity_analysis.rs)、[自立壁・質点系の試験](../../crates/sepika-job/src/stiffness_ratio.rs)
 
-長期軸力重心の端選択は [#1677](https://github.com/hrntsm/SEPIKA/issues/1677)、同じ上階SLの節点を共有する普通梁柱の列挙は [#1678](https://github.com/hrntsm/SEPIKA/issues/1678) で追跡する。今回、質点系の照合は生成値までで、時刻歴の影響量、実架構の設計適合、実験Validationは未確認。
+長期軸力重心の端選択は [#1677](https://github.com/hrntsm/SEPIKA/issues/1677)、同じ上階SLの節点を共有する普通梁柱の列挙は[後続の照合](#1678-の修正後の照合)に記録した。今回、質点系の照合は生成値までで、時刻歴の影響量、実架構の設計適合、実験Validationは未確認。
+
+## #1678 の修正後の照合
+
+| 照合対象 | 独立した期待値と観測 |
+| --- | --- |
+| 共通の柱頭に取り付く傾斜柱2本と独立した鉛直柱2本 | 柱脚は固定し、階高3,000 mm。傾斜柱の柱脚は X = ±4,000 mm、共有柱頭は原点、鉛直柱の柱頭は (6,000, 0) mm と (0, 6,000) mm。X・Yの各加力で、共有柱頭への1,000 Nを対称な傾斜柱2本が等分する。鉛直柱には各500 N。公開線形解析は各柱の符号付き上端力500 Nと各方向の層せん断力2,000 Nを返し、4本から算定した剛性を各柱の変位差に掛け戻した和も各方向2,000 N。偏心率は、鉛直柱の剛性の層合計に対する比を用い、重心が三角形の重心になることから求めた独立値と照合した。 |
+| 層内の分岐 | 上階側や下階側への分岐、途中で行き止まりとなる枝が下階SLへ達する柱に付く場合を検証した。対象部材と節点の診断が方向別柱剛性・偏心率と長期軸力重心に伝わる。上階SLだけを共有する下階SL未到達の枝が付く #1534 のケース、一意に結ぶ通常柱・ファイバー柱・マルチスプリング柱と #1640 のSL境界の診断を回帰確認した。 |
+| 派生結果 | 偏心率とFesは同じ診断となり、保有水平耐力の判定とCSVにも診断が伝わる。剛性率評価用の自立壁n倍法と、柱剛性を使う平面・立体の質点系生成も、独立した柱を使う集計と層内分岐の保留を確認した。 |
+
+[公開線形解析と独立照合](../../crates/sepika-design-jp/tests/inclined_column_eccentricity.rs)、[柱区間と偏心率の試験](../../crates/sepika-design-jp/src/secondary/eccentricity_analysis.rs)、[自立壁・質点系の試験](../../crates/sepika-job/src/stiffness_ratio.rs)、[CSVと保有水平耐力の試験](../../crates/sepika-app/src/app/tests.rs)
+
+連成の影響は [#1675](https://github.com/hrntsm/SEPIKA/issues/1675)、並進とねじれで柱の層間変位が相殺される場合の扱いは [#1680](https://github.com/hrntsm/SEPIKA/issues/1680) で追跡する。今回の照合は結果を生成する経路までで、実架構での必要耐力や時刻歴応答への影響量は未確認。

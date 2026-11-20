@@ -201,8 +201,14 @@ fn test_story_eccentricity_biased_rigidity() {
 /// テスト3: 柱がない層（story=S1 が存在するが柱の上端は S0）→ 空 Vec、剛心 [0,0]。
 #[test]
 fn test_story_eccentricity_empty_story() {
-    let (model, _s0) = build_symmetric_frame(None);
+    let (mut model, _s0) = build_symmetric_frame(None);
     let s1 = StoryId(2);
+    model.stories.push(sepika_core::model::Story::new(
+        s1,
+        "上階".into(),
+        Some(6000.0),
+        Some(0.0),
+    ));
     let cols = column_stiffnesses(&model, s1).unwrap();
     assert!(cols.is_empty(), "S1 に柱がないはず、got {} 本", cols.len());
     let cor = center_of_rigidity(&cols).unwrap();

@@ -565,6 +565,129 @@ mod tests {
     }
 
     #[test]
+    fn shared_sl_columns_and_interior_branches_reach_wall_and_lumped_model_evaluation() {
+        use sepika_core::units::GRAVITY_MM_S2;
+        use sepika_solver::dynamic::lumped_mass::{
+            LumpedMassType, LumpedStiffnessSource, StickDim,
+        };
+        use sepika_solver::statics::analysis::SeismicDir;
+
+        let mut model = fixture(1);
+        model.nodes[0].coord[0] = -500.0;
+        let mut mirror_base = model.nodes[0].clone();
+        mirror_base.id = NodeId(2);
+        mirror_base.coord[0] = 500.0;
+        model.nodes.push(mirror_base);
+        model.stories[0].node_ids.push(NodeId(2));
+        let mut mirror_column = model.elements[0].clone();
+        mirror_column.id = ElemId(1);
+        mirror_column.nodes[0] = NodeId(2);
+        model.elements.push(mirror_column);
+        model.stories[1].dynamic_mass = Some(StoryDynamicMass {
+            horizontal_inertia_t_mm2: [0.0; 3],
+            mass_equiv_weight_n: GRAVITY_MM_S2,
+            lumped_mass: None,
+            center_xy_mm: [0.0, 0.0],
+            inertia_t_mm2: 1e6,
+        });
+        wall(&mut model, 1, [0.0, 1000.0], [1.0, 0.0]);
+        model.wall_weight_generation = Some(WallWeightGenerationMode::GravityCasesOnly);
+        model.stress_cfg.misc_wall_representatives = vec![MiscWallRepresentativeColumn {
+            story: StoryId(1),
+            column: ElemId(1),
+        }];
+        let [x, y] = base_results(&model).map(Result::unwrap);
+        let expected_columns = 2.0 / x.disp[1][0].abs();
+
+        let build = |model: &Model, x: &StaticOnce, y: &StaticOnce, dim, source| {
+            crate::build_lumped_mass(crate::LumpedMassBuildInput {
+                model_type: LumpedMassType::EquivalentShear,
+                model,
+                dim,
+                source,
+                dir: SeismicDir::X,
+                nonlinear: false,
+                secant_ratio: 0.75,
+                target_drift_angle: 1.0 / 200.0,
+                res_x: Some(x),
+                res_y: Some(y),
+                po_x: None,
+                po_y: None,
+            })
+        };
+        for method in [
+            MiscWallStiffnessMethod::StoryColumns,
+            MiscWallStiffnessMethod::RepresentativeColumn,
+        ] {
+            model.stress_cfg.misc_wall_method = method;
+            let evaluated = evaluation_model(&model, &x, &y).unwrap();
+            near(
+                evaluated.elements.last().unwrap().spring.unwrap()[1],
+                expected_columns / 2.0,
+            );
+            let spatial = build(
+                &model,
+                &x,
+                &y,
+                StickDim::Spatial,
+                LumpedStiffnessSource::ColumnKi,
+            )
+            .unwrap();
+            near(spatial.spatial[0].k1_x, expected_columns * 1.5);
+        }
+        let planar = build(
+            &model,
+            &x,
+            &y,
+            StickDim::Planar,
+            LumpedStiffnessSource::ColumnKi,
+        )
+        .unwrap();
+        near(planar.stories[0].skeleton.k1, expected_columns);
+
+        let mut middle = model.nodes[1].clone();
+        let middle_id = NodeId(model.nodes.len() as u32);
+        middle.id = middle_id;
+        middle.story = None;
+        middle.mass = None;
+        middle.restraint = Dof6Mask::FREE;
+        middle.coord[2] = 500.0;
+        model.nodes.push(middle);
+        for lower in &mut model.elements {
+            lower.nodes[1] = middle_id;
+        }
+        let mut upper = model.elements[0].clone();
+        upper.id = ElemId(2);
+        upper.nodes = [middle_id, NodeId(1)].into_iter().collect();
+        model.elements.push(upper);
+
+        let mut results = base_results(&model);
+        let reason = evaluation_model(
+            &model,
+            results[0].as_ref().unwrap(),
+            results[1].as_ref().unwrap(),
+        )
+        .unwrap_err();
+        assert!(reason.contains("階1の柱2は中間節点で分岐"), "{reason}");
+        attach_evaluations(&model, &[LoadCaseId(0), LoadCaseId(1)], &mut results);
+        for response in &results {
+            assert_eq!(
+                response.as_ref().unwrap().stiffness_ratio_disp.as_ref(),
+                Some(&Err(reason.clone()))
+            );
+        }
+        let [x, y] = results.map(Result::unwrap);
+        for (dim, source) in [
+            (StickDim::Planar, LumpedStiffnessSource::ColumnKi),
+            (StickDim::Spatial, LumpedStiffnessSource::ColumnKi),
+            (StickDim::Spatial, LumpedStiffnessSource::StoryQd),
+        ] {
+            let failure = build(&model, &x, &y, dim, source).unwrap_err();
+            assert!(failure.to_string().contains(&reason), "{failure}");
+        }
+    }
+
+    #[test]
     fn re_1640_wall_stiffness_evaluation_keeps_the_sl_interval_error() {
         let mut model = fixture(1);
         let mut split = model.nodes[1].clone();

@@ -192,6 +192,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0131](0131-src-joint-allowable-shear.md) | accepted | SRC柱梁接合部を構面別に評価し、応力欠落と応力伝達の別途確認を保持する |
 | [0132](0132-steel-column-lateral-buckling-end-supports.md) | accepted | 一般H形鋼柱の横座屈長さに実材端支持の確認を求める |
 | [0133](0133-column-horizontal-force-section.md) | accepted | 通常柱の負担水平力を上階SL接続節点の層側で求める |
+| [0134](0134-story-column-paths-for-rigidity.md) | accepted | 偏心率は上下階SL間の区間が定まる柱をすべて集計する |
 
 ## 規約
 
