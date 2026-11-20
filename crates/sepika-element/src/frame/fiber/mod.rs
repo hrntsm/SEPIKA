@@ -81,7 +81,7 @@ pub(crate) struct FiberYield {
     pub main: Option<f64>,
     /// 主筋の σy（RC・SRC 断面）。
     pub rebar: Option<f64>,
-    /// 鋼材領域の fy（SRC は内蔵鉄骨、それ以外は主材料）。
+    /// 鋼材領域の fy（SRC は内蔵鉄骨、CFT は鋼管、それ以外は主材料）。
     pub steel: Option<f64>,
 }
 
@@ -107,23 +107,45 @@ pub(crate) fn resolve_fiber_yield(
         ) => model
             .element_steel_material(data)
             .and_then(|m| resolve_src_fiber_fy(m, *steel_web_thick, *steel_flange_thick).ok()),
-        Some(
-            box_shape @ SectionShape::CftBox { thick, .. }
-            | box_shape @ SectionShape::CftPipe { thick, .. },
-        ) => {
-            let thick = box_shape
-                .box_thicknesses()
-                .map_or(*thick, |(t1, t2)| t1.max(t2));
-            model.element_steel_material(data).and_then(|m| {
-                if steel_f_value_issue(&m.name, thick).is_some() {
-                    return None;
-                }
-                steel_f_value_prefix(&m.name, thick).or(m.fy)
-            })
+        Some(shape @ (SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })) => {
+            resolve_cft_fiber_fy(shape, model.element_steel_material(data)).and_then(Result::ok)
         }
         _ => main,
     };
     FiberYield { main, rebar, steel }
+}
+
+pub(crate) fn resolve_cft_fiber_fy(
+    shape: &SectionShape,
+    steel: Option<&Material>,
+) -> Option<Result<f64, String>> {
+    let thickness_mm = match shape {
+        SectionShape::CftBox {
+            thick,
+            horizontal_thick,
+            ..
+        } => thick.max(*horizontal_thick),
+        SectionShape::CftPipe { thick, .. } => *thick,
+        _ => return None,
+    };
+    let Some(steel) = steel else {
+        return Some(Err(
+            "鋼管材料が設定されていません。断面タブで鋼管材料を割り当ててください。".into(),
+        ));
+    };
+    let reason = if let Some(reason) = steel_f_value_issue(&steel.name, thickness_mm) {
+        reason
+    } else {
+        match steel_f_value_prefix(&steel.name, thickness_mm).or(steel.fy) {
+            Some(fy) if fy.is_finite() && fy > 0.0 => return Some(Ok(fy)),
+            Some(_) => "材種名から基準強度 F を求められません。明示 fy には正の有限値が必要です。材料タブで設定を見直してください。".into(),
+            None => "材種名から基準強度 F を求められず、明示 fy も未入力です。材料タブで正の有限値を設定してください。".into(),
+        }
+    };
+    Some(Err(format!(
+        "鋼管材料「{}」の降伏強度 fy を確定できません。{reason}",
+        steel.name
+    )))
 }
 
 pub(crate) fn resolve_src_fiber_fy(
