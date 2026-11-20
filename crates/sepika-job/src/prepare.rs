@@ -6,6 +6,9 @@
 use sepika_core::model::Model;
 use sepika_core::region_rebuild::rebuild_floor_regions;
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
+use sepika_element::springs::panel_gen::{
+    apply_auto_panel_zones, validate_panel_removal_references,
+};
 
 use crate::auto_loads::{
     apply_auto_load_cases, apply_tip_loads, clear_failed_tip_seismic_cases,
@@ -27,10 +30,11 @@ pub struct PrepareReport {
 /// 剛域と仕口パネルを自動算定してモデルへ反映する。
 /// 剛域算定は壁展開モデルに対して行い、既存要素へ書き戻す。
 /// 仕口パネルは壁に依存しないため非展開モデルに対して算定する。
-/// いずれも冪等で、呼び出し順にも依存しない。
+/// 削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
 ) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
+    validate_panel_removal_references(model)?;
     model.validate_brb_references().map_err(|e| e.to_string())?;
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
@@ -57,11 +61,11 @@ pub fn apply_rigid_zones_and_panels(
         sepika_core::face_distance::try_face_distances(model)?;
         sepika_element::frame::beam::apply_auto_rigid_zones(model, &rule);
     }
-    sepika_element::springs::panel_gen::apply_auto_panel_zones(model)
+    apply_auto_panel_zones(model)
 }
 
 /// 解析前処理を一括で行う（剛域・仕口パネル・荷重ケースの自動同期）。
-/// 全ケースの部材荷重方向が不正なら、モデルを変更せずエラーを返す。
+/// 部材荷重方向が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn prepare_model_for_analysis(
     model: &mut Model,
     settings: &AnalysisSettings,
@@ -72,13 +76,14 @@ pub fn prepare_model_for_analysis(
 
 /// 階に依存する準備では FL・ΔSL の明示入力を要求し、不足・所属不成立時は停止する。
 /// 階を持たない低水準の重力解析は `initialize_stories = false` で利用できる。
-/// 全ケースの部材荷重方向が不正なら、モデルを変更せずエラーを返す。
+/// 部材荷重方向が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn prepare_model(
     model: &mut Model,
     settings: &AnalysisSettings,
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    validate_panel_removal_references(model).map_err(JobError::InvalidInput)?;
     model
         .validate_brb_references()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
@@ -386,6 +391,127 @@ mod tests {
             model.elements.push(element);
         }
         model
+    }
+
+    #[test]
+    fn preparation_rejects_references_to_removed_panels_without_changing_input() {
+        use sepika_core::ids::LoadCaseId;
+        use sepika_core::model::{BrbAttr, LoadCase, MemberLoad, MemberLoadKind, PanelZoneMode};
+
+        let mut input = steel_panel_model();
+        input.stories.clear();
+        assert_eq!(apply_rigid_zones_and_panels(&mut input).unwrap().len(), 1);
+
+        for (mode, panel_index) in [
+            (PanelZoneMode::None, 2),
+            (PanelZoneMode::Model, 2),
+            (PanelZoneMode::Model, 3),
+        ] {
+            for attr in [true, false] {
+                let mut model = input.clone();
+                model.panel_zone = mode;
+                model.elements[2].rigid_zone.length_i = 1_234.0;
+                model.elements.swap(panel_index, 3);
+                model.elements[2].id = ElemId(2);
+                model.elements[3].id = ElemId(3);
+                let panel_id = ElemId(panel_index as u32);
+                let load = MemberLoadKind::Point { a: 0.0, p: 100.0 };
+                model.load_cases.push(LoadCase {
+                    origin: Default::default(),
+                    id: LoadCaseId(0),
+                    name: sepika_core::model::DL_CASE_NAME.into(),
+                    kind: sepika_core::model::LoadCaseKind::Dead,
+                    nodal: Vec::new(),
+                    member: vec![MemberLoad::auto(ElemId(0), [0.0, 0.0, -1.0], load.clone())],
+                });
+                let input_kind = if attr {
+                    model.brb_attrs.push(BrbAttr {
+                        elem: panel_id,
+                        allowable_axial_short: Some(100_000.0),
+                        critical_length: Some(5_000.0),
+                        length_reduction: Some(0.0),
+                    });
+                    "BRB製品属性"
+                } else {
+                    model.load_cases[0].member.push(MemberLoad::manual(
+                        panel_id,
+                        [0.0, 0.0, -1.0],
+                        load,
+                    ));
+                    "部材荷重"
+                };
+                let before = bincode::serialize(&model).unwrap();
+                let mut rigid_zones = model.clone();
+                let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+                    .err()
+                    .unwrap_or_else(|| panic!("{mode:?} の仕口パネル {panel_index} に付いた{input_kind}で準備が成功しました"));
+                let diagnostic = error.to_string();
+                assert!(
+                    diagnostic.contains(&format!("仕口パネル要素 {panel_index}")),
+                    "{diagnostic}"
+                );
+                assert!(diagnostic.contains(input_kind), "{diagnostic}");
+                assert!(diagnostic.contains("削除"), "{diagnostic}");
+                assert_eq!(bincode::serialize(&model).unwrap(), before);
+
+                let error = apply_rigid_zones_and_panels(&mut rigid_zones).unwrap_err();
+                assert!(error.contains(input_kind), "{error}");
+                assert_eq!(bincode::serialize(&rigid_zones).unwrap(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn preparation_keeps_attributes_and_loads_on_the_surviving_member() {
+        use sepika_core::ids::LoadCaseId;
+        use sepika_core::model::{LoadCase, MemberDetailAttr, MemberLoad, PanelZoneMode};
+
+        let mut input = steel_panel_model();
+        input.stories.clear();
+        assert_eq!(apply_rigid_zones_and_panels(&mut input).unwrap().len(), 1);
+        input.elements.swap(2, 3);
+        input.elements[2].id = ElemId(2);
+        input.elements[3].id = ElemId(3);
+        let beam = &input.elements[3];
+        let mut attr = MemberDetailAttr::new(beam.id);
+        attr.joints.push(sepika_core::model::MemberJoint {
+            distance: 1_500.0,
+            kind: Default::default(),
+        });
+        input.member_detail_attrs.push(attr.clone());
+        let load = MemberLoad::full_length_uniform(beam.id, [0.0, 0.0, -1.0], 6_000.0, 2.0);
+        input.load_cases.push(LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(0),
+            name: "手入力荷重".into(),
+            kind: Default::default(),
+            nodal: Vec::new(),
+            member: vec![load.clone()],
+        });
+
+        for (mode, num_panels) in [(PanelZoneMode::None, 0), (PanelZoneMode::Model, 1)] {
+            let mut model = input.clone();
+            model.panel_zone = mode;
+            let report =
+                prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            assert_eq!(report.panels.len(), num_panels);
+            assert_eq!(model.elements[2].nodes, beam.nodes);
+            assert_eq!(model.elements[2].section, beam.section);
+            assert_eq!(
+                model.member_detail_attrs,
+                [MemberDetailAttr {
+                    elem: ElemId(2),
+                    ..attr.clone()
+                }]
+            );
+            assert_eq!(
+                model.load_cases[0].member,
+                [MemberLoad {
+                    elem: ElemId(2),
+                    ..load.clone()
+                }]
+            );
+        }
     }
 
     #[test]

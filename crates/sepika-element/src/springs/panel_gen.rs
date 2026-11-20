@@ -26,9 +26,9 @@
 //!
 //! `Model` は「配列添字 == `ElemId`」を不変条件とする。本モジュールは
 //!
-//! 1. 既存のパネル要素をすべて取り除き、残った要素の ID を連番へ詰め直す
-//!    （モデル内の全 `ElemId` 参照を同時に付け替える）
-//! 2. 新しいパネル要素を末尾へ追加する
+//! 1. 削除対象を参照する部材属性・部材荷重があれば処理を停止する
+//! 2. 既存のパネル要素を取り除き、残る要素と部材属性・部材荷重の ID を詰め直す
+//! 3. 新しいパネル要素を末尾へ追加する
 //!
 //! の順で処理する。
 
@@ -59,8 +59,42 @@ pub struct GeneratedPanel {
     pub k_panel: [f64; 2],
 }
 
-/// モデルから既存の仕口パネル要素をすべて取り除き、残った要素の ID を連番へ
-/// 詰め直す（モデル内の全 `ElemId` 参照も同時に付け替える）。
+/// 再生成またはモデル化解除で削除する仕口パネルを参照する入力を拒否する。
+pub fn validate_panel_removal_references(model: &Model) -> Result<(), String> {
+    if !model
+        .elements
+        .iter()
+        .any(|e| e.kind == ElementKind::PanelZone)
+    {
+        return Ok(());
+    }
+    let is_panel = |id| {
+        model
+            .element(id)
+            .is_some_and(|e| e.kind == ElementKind::PanelZone)
+    };
+    if let Some((id, kind)) = model.find_elem_attr_ref(is_panel) {
+        return Err(format!(
+            "{kind}が削除対象の仕口パネル要素 {} を参照しています。入力の参照先を修正してください",
+            id.0
+        ));
+    }
+    for case in &model.load_cases {
+        if let Some((index, load)) = case
+            .member
+            .iter()
+            .enumerate()
+            .find(|(_, load)| is_panel(load.elem))
+        {
+            return Err(format!(
+                "荷重ケース「{}」（ID {}）の部材荷重（{}件目）が削除対象の仕口パネル要素 {} を参照しています。入力の参照先を修正してください",
+                case.name, case.id.0, index + 1, load.elem.0
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn remove_existing_panels(model: &mut Model) {
     if !model
         .elements
@@ -184,8 +218,9 @@ fn apply_panel_offsets(
 /// `Model::panel_zone` が [`PanelZoneMode::None`] のときは既存のパネルを取り除く
 /// だけで、新しいパネルは生成しない。
 ///
-/// 戻り値は生成したパネルの諸元（節点 index の昇順）。採用柱の解決失敗は接合部 ID と理由付きエラー。
+/// 戻り値は生成したパネルの諸元（節点 index の昇順）。削除対象への参照があればモデルを変更せず失敗する。
 pub fn apply_auto_panel_zones(model: &mut Model) -> Result<Vec<GeneratedPanel>, String> {
+    validate_panel_removal_references(model)?;
     if model.panel_zone == PanelZoneMode::Model {
         let adjacency = NodeAdjacency::build(model);
         for node in &model.nodes {
