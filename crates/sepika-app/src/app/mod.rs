@@ -2574,6 +2574,8 @@ mod rc_wall_direction_tests;
 mod rc_wall_cracking_tests;
 #[cfg(test)]
 pub(crate) mod rc_wall_side_column_tests;
+#[cfg(all(test, feature = "gui"))]
+mod src_panel_tests;
 
 #[cfg(test)]
 mod time_history_restart_tests;

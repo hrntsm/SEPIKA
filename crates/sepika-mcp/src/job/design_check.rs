@@ -177,6 +177,7 @@ pub(crate) fn compute_design_check_job(
         &result.panel_moments,
         &MemberDesignCheckOptions {
             term,
+            girder_column_face_forces: &result.girder_column_face_forces,
             wall_index: wall_index.as_ref(),
             wall_case: &wall_case,
             load_terms: Some(&effective_terms),
@@ -255,6 +256,7 @@ fn assemble_design_check_summary(
     let mut n_joint_ng = 0usize;
     let mut n_joint_skipped = 0usize;
     let mut joint_skipped = Vec::new();
+    let mut src_joint_checked = Vec::new();
     for (node, label, outcome) in &report.joint_checks {
         match outcome {
             sepika_design_jp::CheckOutcome::Checked(cr) => {
@@ -263,6 +265,13 @@ fn assemble_design_check_summary(
                 }
                 if !cr.components.is_empty() {
                     max_ratio = Some(max_ratio.map_or(cr.ratio(), |r| r.max(cr.ratio())));
+                }
+                if label.starts_with("柱梁接合部(SRC)") {
+                    src_joint_checked.push(serde_json::json!({
+                        "node": node.0,
+                        "label": label,
+                        "result": cr,
+                    }));
                 }
             }
             sepika_design_jp::CheckOutcome::Skipped { reason } => {
@@ -306,6 +315,7 @@ fn assemble_design_check_summary(
         "n_joint_checks": n_joint_checks,
         "n_joint_ng": n_joint_ng,
         "n_joint_skipped": n_joint_skipped,
+        "src_joint_checked": src_joint_checked,
         "joint_skipped": joint_skipped,
         "max_ratio": max_ratio,
         "qd_wired": qd_wired,
@@ -322,6 +332,135 @@ mod tests {
     use sepika_core::ids::{ElemId, NodeId, WallPlateId};
     use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+
+    mod src_panel_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/src_panel_model.rs"
+        ));
+    }
+
+    mod src_panel_reference {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/src_panel_reference.rs"
+        ));
+    }
+
+    #[test]
+    fn design_job_returns_src_panel_direction_ratio_and_transfer_diagnostics() {
+        use src_panel_input as fixture;
+        let params = JobParams {
+            load_case: Some(0),
+            ..Default::default()
+        };
+        let JobOutcome::DesignCheck { summary, .. } =
+            compute_design_check_job(&fixture::input_model(), &params).unwrap()
+        else {
+            panic!("断面検定ジョブの結果が必要");
+        };
+        let checked = summary["src_joint_checked"].as_array().unwrap();
+        let x = checked
+            .iter()
+            .find(|row| row["node"] == fixture::JOINT.0 && row["label"] == fixture::PANEL_X)
+            .unwrap_or_else(|| panic!("X構面の検定結果がありません: {summary}"));
+        let ratio = x["result"]["components"][0]["ratio"].as_f64().unwrap();
+        assert!(
+            (ratio
+                - src_panel_reference::DEMAND_KN_M / src_panel_reference::RC_LONG_ALLOWABLE_KN_M)
+                .abs()
+                < 1e-10
+        );
+        let skipped = summary["joint_skipped"].as_array().unwrap();
+        assert!(skipped.iter().any(|row| row["node"] == fixture::JOINT.0
+            && row["label"] == fixture::PANEL_Y
+            && row["reason"].as_str().unwrap().contains("弱軸")));
+        assert!(skipped.iter().any(|row| row["node"] == fixture::JOINT.0
+            && row["label"] == format!("{} 応力伝達", fixture::PANEL_X)
+            && row["reason"].as_str().unwrap().contains("別途確認")));
+        assert_eq!(summary["all_checked_and_ok"], false);
+        let missing = fixture::with_unavailable_column_face(fixture::input_model());
+        let JobOutcome::DesignCheck { summary, .. } =
+            compute_design_check_job(&missing, &params).unwrap()
+        else {
+            panic!("断面検定ジョブの結果が必要");
+        };
+        assert!(summary["joint_skipped"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["node"] == fixture::JOINT.0
+                && row["label"] == fixture::PANEL_X
+                && row["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("実柱面") && reason.contains("切断側"))));
+        assert_eq!(summary["all_checked_and_ok"], false);
+    }
+
+    #[test]
+    fn design_job_uses_short_src_and_s_capacities_and_keeps_rc_unavailable() {
+        use src_panel_input::ShortBeam;
+        use src_panel_reference as reference;
+        for (beam, expected) in [
+            (
+                ShortBeam::Src,
+                Some(("(20.2)", reference::SRC_SHORT_ALLOWABLE_KN_M)),
+            ),
+            (
+                ShortBeam::Steel,
+                Some(("(解20.12)", reference::STEEL_SHORT_ALLOWABLE_KN_M)),
+            ),
+            (ShortBeam::Rc, None),
+        ] {
+            let model = src_panel_input::short_model(beam);
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_combination: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!("断面検定ジョブの結果が必要");
+            };
+            let is_panel_x = |row: &&serde_json::Value| {
+                row["node"] == src_panel_input::JOINT.0 && row["label"] == src_panel_input::PANEL_X
+            };
+            assert_eq!(summary["term"], "short");
+            let checked = summary["src_joint_checked"].as_array().unwrap();
+            let skipped = summary["joint_skipped"].as_array().unwrap();
+            if let Some((equation, allowable)) = expected {
+                let row = checked
+                    .iter()
+                    .find(is_panel_x)
+                    .unwrap_or_else(|| panic!("{summary}"));
+                let basis = row["result"]["basis"].as_str().unwrap();
+                assert!(basis.contains(equation) && basis.contains("L字形・短期"));
+                let ratio = row["result"]["components"][0]["ratio"].as_f64().unwrap();
+                assert!(
+                    (ratio - reference::DEMAND_KN_M / allowable).abs() < 1e-10,
+                    "{row}"
+                );
+            } else {
+                assert!(!checked.iter().any(|row| is_panel_x(&row)));
+                let row = skipped
+                    .iter()
+                    .find(is_panel_x)
+                    .unwrap_or_else(|| panic!("{summary}"));
+                let reason = row["reason"].as_str().unwrap();
+                assert!(
+                    reason.contains("RC梁の短期式(20.2)")
+                        && reason.contains("有効高さと鉄骨ウェブへの応力伝達")
+                );
+            }
+            assert!(skipped
+                .iter()
+                .any(|row| row["node"] == src_panel_input::JOINT.0
+                    && row["label"] == format!("{} 応力伝達", src_panel_input::PANEL_X)
+                    && row["reason"].as_str().unwrap().contains("別途確認")));
+            assert_eq!(summary["all_checked_and_ok"], false);
+        }
+    }
 
     mod steel_column_k_input {
         include!(concat!(

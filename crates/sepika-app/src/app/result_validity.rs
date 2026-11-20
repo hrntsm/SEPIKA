@@ -751,8 +751,14 @@ impl App {
                 .map(|(_, input)| input.clone());
             (key, input)
         });
+        let mut model = self.calculation_model();
+        if term {
+            model
+                .src_joint_hoops
+                .clone_from(&self.core.model.src_joint_hoops);
+        }
         rmp_serde::to_vec_named(&(
-            self.calculation_model(),
+            model,
             term,
             self.core.analysis_cfg.rc_damage_control,
             self.core.analysis_cfg.bond_method,

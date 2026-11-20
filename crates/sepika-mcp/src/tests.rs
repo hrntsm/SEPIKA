@@ -3992,16 +3992,18 @@ fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved
     };
     let normal = rebar507_with_explicit_zero_beam_eccentricity(source).unwrap();
     let checks = joint(&normal);
-    assert_eq!(checks.len(), 1);
-    assert_eq!(checks[0].1, "柱梁接合部(SRC)");
-    assert_eq!(checked_ratio507(&checks[0].2), 0.0);
+    assert_eq!(checks.len(), 2);
+    assert!(checks[0].1.starts_with("柱梁接合部(SRC) 検討面"));
+    assert!(
+        matches!(&checks[0].2, CheckOutcome::Skipped { reason } if reason.contains("実柱面曲げ"))
+    );
     for (name, input, reason) in [
         ("src_joint_secondary", source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\""), "副主筋"),
         ("src_joint_corner", source.replace("<StbSecBarArrangementColumn_SRC>", "<StbSecBarArrangementColumn_SRC kind_corner=\"DIR_X\">"), "kind_corner"),
     ] {
         let model = rebar507_with_explicit_zero_beam_eccentricity(&input).unwrap();
         let result = joint(&model);
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 2);
         assert!(matches!(&result[0].2, CheckOutcome::Skipped { reason: message } if message.contains(reason)));
         let output = sepika_io::stbridge::export_stbridge(&model).unwrap();
         let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
@@ -4015,7 +4017,9 @@ fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved
     let src_beam_source =
         include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/src_column_beam.stb");
     let src_beam_normal = rebar507_with_explicit_zero_beam_eccentricity(src_beam_source).unwrap();
-    assert_eq!(checked_ratio507(&joint(&src_beam_normal)[0].2), 0.0);
+    assert!(
+        matches!(&joint(&src_beam_normal)[0].2, CheckOutcome::Skipped { reason } if reason.contains("実柱面曲げ"))
+    );
     let src_beam_extra = rebar507_with_explicit_zero_beam_eccentricity(&src_beam_source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"")).unwrap();
     assert!(
         matches!(&joint(&src_beam_extra)[0].2, CheckOutcome::Skipped { reason } if reason.contains("副主筋"))

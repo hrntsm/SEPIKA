@@ -1181,7 +1181,7 @@ fn rc_joint_with_invalid_beam_rebar_is_skipped() {
 /// 実配筋モデル（`SrcBeamRect`＋`SrcColumnRect`）の SRC 十字形接合部で、
 /// パネルゾーン検定が出力される。
 #[test]
-fn src_cross_panel_new_types_emits_check() {
+fn src_cross_panel_uses_signed_column_face_moments_and_direction() {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop};
 
     let col_shape = SectionShape::SrcColumnRect {
@@ -1189,8 +1189,8 @@ fn src_cross_panel_new_types_emits_check() {
         d: 600.0,
         rebar: RcRectColumnRebar {
             main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
-            x: vec![4, 2],
-            y: vec![4],
+            x: vec![2],
+            y: vec![2],
             cover: 40.0,
             hoop: RectColumnHoop {
                 dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
@@ -1225,44 +1225,231 @@ fn src_cross_panel_new_types_emits_check() {
     };
     let mut model = cross_joint_model(col_shape, beam_shape);
 
-    let col_f: [(f64, [f64; 6]); 2] = [
-        (0.0, [-500_000.0, 100_000.0, 0.0, 0.0, 0.0, 0.0]),
-        (1.0, [-500_000.0, 100_000.0, 0.0, 0.0, 0.0, 0.0]),
-    ];
-    let beam_f: [(f64, [f64; 6]); 2] = [
-        (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 2.0e8]),
-        (1.0, [0.0, 0.0, 0.0, 0.0, 0.0, 2.0e8]),
-    ];
-    let member_forces: Vec<(ElemId, ForcesAt)> = vec![
-        (ElemId(0), &col_f),
-        (ElemId(1), &col_f),
-        (ElemId(2), &beam_f),
-        (ElemId(3), &beam_f),
-    ];
-
-    let checks = collect_joint_checks(&model, &member_forces, LoadTerm::Short);
-    let found = checks
+    for (index, coord, start) in [
+        (5, [6000.0, 0.0, 0.0], NodeId(1)),
+        (6, [6000.0, 0.0, 6000.0], NodeId(2)),
+        (7, [0.0, 6000.0, 3000.0], NodeId(0)),
+    ] {
+        model.nodes.push(Node {
+            id: NodeId(index),
+            coord,
+            ..model.nodes[4].clone()
+        });
+        model.elements.push(ElementData {
+            id: ElemId(index - 1),
+            nodes: [start, NodeId(index)].into_iter().collect(),
+            ..model.elements[3].clone()
+        });
+    }
+    let left = [(0.95, [0.0, 0.0, 0.0, 0.0, 0.0, -80e6]), (1.0, [0.0; 6])];
+    let right = [(0.0, [0.0; 6]), (0.05, [0.0, 0.0, 0.0, 0.0, 0.0, 120e6])];
+    let member_forces: [(ElemId, ForcesAt); 2] = [(ElemId(2), &left), (ElemId(3), &right)];
+    let label = "柱梁接合部(SRC) 検討面 [1.000, 0.000, 0.000]";
+    let checks = collect_joint_checks(&model, &member_forces, LoadTerm::Long);
+    let result = checks
         .iter()
-        .find(|(_, l, _)| l == "柱梁接合部(SRC)")
-        .expect("SRC 十字形接合部はパネルゾーン検定が出力されるはず");
-    let cr = found.2.clone().unwrap_checked();
-    // mBd=2575/6、mCd=475 mm、sCd=384 mm、β=0.18189473684210527。
-    assert!((cr.ratio() - 0.8423158554214742).abs() < 1e-12);
-    assert_eq!(found.0, NodeId(0));
-    assert!(cr.components[0].detail.contains("cV=122312500.0 mm3"));
+        .find(|(id, l, _)| *id == NodeId(0) && l == label)
+        .expect("SRC 十字形接合部のX構面");
+    let check = result.2.clone().unwrap_checked();
+    assert!(check.basis.contains("(20.1) 十字形・長期"));
+    assert!(check.components[0].detail.contains("設計値 160.000 kN·m"));
+    assert!(checks.iter().any(|(id, label, check)| *id == NodeId(0)
+        && label.ends_with("応力伝達")
+        && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("別途確認"))));
+    assert!(checks.iter().any(|(id, label, check)| *id == NodeId(0)
+        && label.contains("[0.000, 1.000, 0.000]")
+        && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("弱軸"))));
+
+    let reversed_left = [(0.05, left[0].1)];
+    model.elements[2].nodes.swap(0, 1);
+    let reversed = collect_joint_checks(
+        &model,
+        &[(ElemId(2), &reversed_left), (ElemId(3), &right)],
+        LoadTerm::Long,
+    );
+    assert!(reversed.iter().any(|row| row == result));
+    model.elements[2].nodes.swap(0, 1);
+
+    let opposing_left = [(0.95, right[1].1)];
+    let balanced = collect_joint_checks(
+        &model,
+        &[(ElemId(2), &opposing_left), (ElemId(3), &right)],
+        LoadTerm::Long,
+    );
+    assert!(balanced.iter().any(|(id, l, check)| *id == NodeId(0)
+        && l == label
+        && matches!(check, CheckOutcome::Checked(cr) if cr.ratio() == 0.0)));
+
+    let center_only = [(1.0, [0.0; 6])];
+    for forces in [
+        [
+            (ElemId(2), center_only.as_slice()),
+            (ElemId(3), right.as_slice()),
+        ]
+        .as_slice(),
+        [(ElemId(2), &[][..]), (ElemId(3), right.as_slice())].as_slice(),
+        &member_forces[1..],
+        &[][..],
+    ] {
+        let missing = collect_joint_checks(&model, forces, LoadTerm::Long);
+        assert!(missing.iter().any(|(id, l, check)| *id == NodeId(0)
+            && l == label
+            && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("大梁 ID 2 j端の実柱面曲げ"))));
+    }
+    let short = collect_joint_checks(&model, &member_forces, LoadTerm::Short);
+    assert!(short.iter().any(|(id, l, check)| *id == NodeId(0)
+        && l == label
+        && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("帯筋"))));
+    for checks in [short, collect_joint_checks(&model, &[], LoadTerm::Long)] {
+        assert!(checks.iter().any(|(id, name, check)| *id == NodeId(0)
+            && name == &format!("{label} 応力伝達")
+            && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("別途確認"))));
+    }
+
+    for skew in [true, false] {
+        let mut coupled = model.clone();
+        if skew {
+            coupled.nodes[7].coord[0] = 400.0;
+        } else {
+            coupled.elements[6].end_offsets_mm = [[100.0, 0.0, 0.0]; 2];
+        }
+        let checks = collect_joint_checks(&coupled, &member_forces, LoadTerm::Long);
+        assert!(checks.iter().any(|(id, l, check)| *id == NodeId(0)
+            && l == label
+            && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("検討面を独立に算定できません"))));
+    }
+    let mut sloped = model.clone();
+    sloped.nodes[7].coord[2] += 400.0;
+    let checks = collect_joint_checks(&sloped, &member_forces, LoadTerm::Long);
+    assert!(checks.iter().any(|(id, l, check)| *id == NodeId(0)
+        && l == label
+        && matches!(check, CheckOutcome::Skipped { reason }
+            if reason.contains("梁 ID 6") && reason.contains("勾配"))));
+
+    for no_section in [true, false] {
+        let mut unresolved = model.clone();
+        if no_section {
+            unresolved.elements[2].section = None;
+        } else {
+            let section_id = SectionId(2);
+            unresolved.sections.push(Section {
+                id: section_id,
+                frame_use: None,
+                ..unresolved.sections[1].clone()
+            });
+            unresolved.elements[2].section = Some(section_id);
+        }
+        let checks = collect_joint_checks(&unresolved, &member_forces, LoadTerm::Long);
+        assert!(checks.iter().any(|(id, l, check)| *id == NodeId(0)
+            && l == label
+            && matches!(check, CheckOutcome::Skipped { reason }
+                if reason.contains("接続部材 ID 2 の断面または断面用途が未設定"))));
+    }
+    let mut only_unresolved_girder = model.clone();
+    only_unresolved_girder.elements.truncate(3);
+    only_unresolved_girder.elements[2].section = None;
+    let checks = collect_joint_checks(&only_unresolved_girder, &[], LoadTerm::Long);
+    assert!(checks.iter().any(|(id, label, check)| *id == NodeId(0)
+        && label.contains("検討面未確定")
+        && matches!(check, CheckOutcome::Skipped { reason }
+            if reason.contains("接続部材 ID 2 の断面または断面用途が未設定"))));
+    assert!(checks.iter().any(|(id, label, check)| *id == NodeId(0)
+        && label == "柱梁接合部(SRC) 検討面未確定 応力伝達"
+        && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("別途確認"))));
+    only_unresolved_girder.elements.truncate(2);
+    assert!(collect_joint_checks(&only_unresolved_girder, &[], LoadTerm::Long).is_empty());
+
+    let mut unresolved_column = model.clone();
+    unresolved_column.sections[0].frame_use = None;
+    let checks = collect_joint_checks(&unresolved_column, &member_forces, LoadTerm::Long);
+    for (target, reason_text) in [
+        (label.to_owned(), "断面用途が未設定"),
+        (format!("{label} 応力伝達"), "別途確認"),
+    ] {
+        assert!(checks.iter().any(|(id, name, check)| *id == NodeId(0)
+            && name == &target
+            && matches!(check, CheckOutcome::Skipped { reason } if reason.contains(reason_text))));
+    }
+
+    for (unresolved_use, invalid_axis, end_z, reason_text) in [
+        (true, false, 0.0, "断面用途が未設定"),
+        (false, true, 0.0, "実材軸が未確定"),
+        (false, false, 400.0, "勾配があり"),
+    ] {
+        let mut unresolved_story = model.clone();
+        unresolved_story.nodes.push(Node {
+            id: NodeId(8),
+            coord: [-6000.0, 0.0, end_z],
+            ..model.nodes[4].clone()
+        });
+        unresolved_story.elements.push(ElementData {
+            id: ElemId(7),
+            nodes: [NodeId(1), NodeId(8)].into_iter().collect(),
+            section: (!unresolved_use).then_some(SectionId(1)),
+            end_offsets_mm: [[if invalid_axis { f64::NAN } else { 0.0 }, 0.0, 0.0]; 2],
+            ..model.elements[4].clone()
+        });
+        let checks = collect_joint_checks(&unresolved_story, &member_forces, LoadTerm::Long);
+        assert!(checks.iter().any(|(id, name, check)| *id == NodeId(0)
+            && name == label
+            && matches!(check, CheckOutcome::Skipped { reason }
+                if reason.contains("隣階") && reason.contains(reason_text))));
+    }
+
+    let mut with_brace = model.clone();
+    with_brace.sections.push(Section {
+        id: SectionId(2),
+        frame_use: Some(sepika_core::model::FrameSectionUse::Brace),
+        ..with_brace.sections[1].clone()
+    });
+    with_brace.elements[6].section = Some(SectionId(2));
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+    ] {
+        with_brace.elements[6].kind = kind;
+        let checks = collect_joint_checks(&with_brace, &member_forces, LoadTerm::Long);
+        assert!(checks.iter().any(|(id, name, check)| *id == NodeId(0)
+            && name == label
+            && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("ブレース ID 6"))));
+    }
+
+    for rc_beam in [false, true] {
+        for no_upper_rebar in [false, true] {
+            let mut missing_rebar = model.clone();
+            let Some(SectionShape::SrcBeamRect { b, d, rebar, .. }) =
+                &mut missing_rebar.sections[1].shape
+            else {
+                panic!("配筋のあるSRC梁が必要")
+            };
+            if no_upper_rebar {
+                rebar.top.clear();
+            } else {
+                rebar.bottom.clear();
+            }
+            if rc_beam {
+                missing_rebar.sections[1].shape = Some(SectionShape::RcBeamRect {
+                    b: *b,
+                    d: *d,
+                    rebar: rebar.clone(),
+                });
+            }
+            let checks = collect_joint_checks(&missing_rebar, &member_forces, LoadTerm::Long);
+            assert!(checks.iter().any(|(id, l, check)| *id == NodeId(0)
+                && l == label
+                && matches!(check, CheckOutcome::Skipped { reason } if reason.contains("上下両側の主筋群"))));
+        }
+    }
+
     model.elements[0].end_offsets_mm = [[100.0, 0.0, 0.0]; 2];
-    let forces = [
-        (ElemId(0), col_f.as_slice()),
-        (ElemId(1), col_f.as_slice()),
-        (ElemId(2), beam_f.as_slice()),
-        (ElemId(3), beam_f.as_slice()),
-    ];
-    let eccentric = collect_joint_checks(&model, &forces, LoadTerm::Short);
+    let eccentric = collect_joint_checks(&model, &member_forces, LoadTerm::Short);
     let joint: Vec<_> = eccentric
         .iter()
-        .filter(|(id, _, _)| *id == NodeId(0))
+        .filter(|(id, label, _)| *id == NodeId(0) && !label.ends_with("応力伝達"))
         .collect();
-    assert!(!joint.is_empty());
+    assert_eq!(joint.len(), 2);
     assert!(joint.iter().all(|(_,_,check)| matches!(check, CheckOutcome::Skipped { reason } if reason.contains("柱 ID 0") && reason.contains("非0XYZ偏心"))));
 }
 

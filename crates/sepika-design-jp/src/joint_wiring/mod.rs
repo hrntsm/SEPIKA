@@ -12,21 +12,23 @@ mod wall;
 
 pub use self::common::ForcesAt;
 use self::common::MemberInfo;
+pub(crate) use self::src_panel::GirderFaceForces;
 
 #[cfg(test)]
 pub(crate) use crate::rc::wall::{rc_wall_shear_check, RcWallInput};
 #[cfg(test)]
 pub(crate) use crate::wall_opening::equivalent_opening;
-#[cfg(test)]
-pub(crate) use sepika_core::model::ElementKind;
 
 use crate::{CheckOutcome, LoadTerm, MemberKind};
+use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::ids::{ElemId, NodeId};
-use sepika_core::model::Model;
+use sepika_core::model::{ElementKind, FrameSectionUse, Model};
+use std::collections::HashMap;
 
 /// モデルと部材内力から節点単位の検定を一括実行する。
 ///
 /// 戻り値: `(節点, 種別ラベル, 検定結果/検定不能)` のリスト。
+/// SRC接合部では、解析から求めた実柱面の評価点を部材内力に含める。
 ///
 /// 冷間成形角形鋼管の存在軸力に `NL + 1.5・NE` の割増を効かせたい場合は
 /// [`collect_joint_checks_with_long`] を使う（本関数は割増なし＝当該ケースの
@@ -63,6 +65,7 @@ pub fn collect_joint_checks_with_long(
         member_forces,
         long_member_forces,
         panel_moments,
+        GirderFaceForces::EvaluationPoints(member_forces),
         term,
         true,
     )
@@ -73,12 +76,28 @@ pub(crate) fn collect_joint_checks_impl(
     member_forces: &[(ElemId, ForcesAt<'_>)],
     long_member_forces: Option<&[(ElemId, ForcesAt<'_>)]>,
     panel_moments: &[(NodeId, [f64; 2])],
+    src_face_forces: GirderFaceForces<'_>,
     term: LoadTerm,
     include_walls: bool,
 ) -> Vec<(NodeId, String, CheckOutcome)> {
     let mut out = Vec::new();
 
     let members = member_infos(model, member_forces);
+    let adjacency = NodeAdjacency::primary_frame(model);
+    let mut connected_braces = HashMap::new();
+    for element in &model.elements {
+        if matches!(element.kind, ElementKind::Brace { .. })
+            || (element.kind.is_primary_frame_support()
+                && model
+                    .element_section(element)
+                    .and_then(|section| section.frame_use)
+                    == Some(FrameSectionUse::Brace))
+        {
+            for &node in &element.nodes {
+                connected_braces.entry(node).or_insert(element.id);
+            }
+        }
+    }
 
     if include_walls {
         wall::check_walls(
@@ -92,9 +111,17 @@ pub(crate) fn collect_joint_checks_impl(
         );
     }
 
-    for (ni, node) in model.nodes.iter().enumerate() {
+    for node in &model.nodes {
         let nid = node.id;
-        let _ = ni;
+        src_panel::check_src_panel(
+            model,
+            &adjacency,
+            src_face_forces,
+            nid,
+            connected_braces.get(&nid).copied(),
+            term,
+            &mut out,
+        );
         let cols: Vec<&MemberInfo> = members
             .iter()
             .filter(|m| m.is_column() && m.elem.nodes.contains(&nid))
@@ -111,16 +138,20 @@ pub(crate) fn collect_joint_checks_impl(
                         section.frame_use == Some(sepika_core::model::FrameSectionUse::Column)
                     })
             }) {
-                out.push((
-                    nid,
-                    "柱梁接合部".into(),
-                    CheckOutcome::Skipped {
-                        reason: format!(
-                            "接合部 ID {}・柱 ID {}: 非0XYZ偏心柱の柱梁接合部式は未対応です",
-                            nid.0, column.id.0
-                        ),
-                    },
-                ));
+                if sepika_core::structure_kind::member_structure_kind(model, column)
+                    != sepika_core::structure_kind::StructureKind::Src
+                {
+                    out.push((
+                        nid,
+                        "柱梁接合部".into(),
+                        CheckOutcome::Skipped {
+                            reason: format!(
+                                "接合部 ID {}・柱 ID {}: 非0XYZ偏心柱の柱梁接合部式は未対応です",
+                                nid.0, column.id.0
+                            ),
+                        },
+                    ));
+                }
                 continue;
             }
         }
@@ -132,7 +163,6 @@ pub(crate) fn collect_joint_checks_impl(
         steel_panel::check_s_panel(model, &cols, &beams, nid, panel_moment, &mut out);
         if !cols.is_empty() && !beams.is_empty() {
             rc_joint::check_rc_joint(model, &cols, &beams, nid, &mut out);
-            src_panel::check_src_panel(model, &cols, &beams, nid, term, &mut out);
             cold_formed::check_cold_formed(&cols, &beams, nid, long_member_forces, &mut out);
         }
         rc_joint::check_rc_joint_ultimate(model, nid, &mut out);
