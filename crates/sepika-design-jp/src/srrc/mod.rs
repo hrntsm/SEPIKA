@@ -291,7 +291,7 @@ fn src_shear_check(
 
 /// SRC 梁・SRC 柱の断面検定
 /// （`SectionShape::SrcBeamRect`・`SrcColumnRect` を対象とする）。
-/// 内蔵 H 形鋼の材種・実板厚や短期地震時の柱せん断が適用条件を満たさない場合、理由付き未算定とする。
+/// 断面形状・配筋、内蔵 H 形鋼の材種・実板厚、短期地震時の柱せん断が適用条件を満たさない場合は理由付き未算定とする。
 pub struct SrcDesign;
 
 impl DesignCheck for SrcDesign {
@@ -431,6 +431,12 @@ impl SrcDesign {
             minimum_mm,
         )
         .map_err(|reason| format!("{member}検定: 断面「{}」の{reason}", sec.name))?;
+        shape.validate_src_geometry().map_err(|reason| {
+            format!(
+                "{member}検定: 断面「{}」の形状・配筋が不整合です（{reason}）",
+                sec.name
+            )
+        })?;
 
         match shape {
             SectionShape::SrcBeamRect {
@@ -460,9 +466,6 @@ impl SrcDesign {
                 }
                 if rebar.is_unset() {
                     return Err("SRC検定: 配筋が未入力です".to_string());
-                }
-                if let Err(e) = rebar.validate(*b, *d) {
-                    return Err(format!("SRC検定: 配筋が不整合です（{e}）"));
                 }
                 let tension_is_top = beam_tension_is_top(forces, *d, rebar);
                 let props = beam_axis_props(*b, *d, rebar, tension_is_top);
@@ -503,28 +506,12 @@ impl SrcDesign {
                     if !forces.n.is_finite() {
                         return Err("SRC柱検定: 組合せの軸力Nが非有限です".into());
                     }
-                    if ![
-                        fc_raw,
-                        *b,
-                        *d,
-                        *steel_height,
-                        *steel_width,
-                        *steel_web_thick,
-                        *steel_flange_thick,
-                    ]
-                    .iter()
-                    .all(|v| v.is_finite() && *v > 0.0)
-                    {
-                        return Err(
-                            "SRC柱検定: Fcと断面・内蔵鉄骨の寸法には有限な正値が必要です".into(),
-                        );
+                    if !fc_raw.is_finite() {
+                        return Err("SRC柱検定: Fcには有限な正値が必要です".into());
                     }
                 }
                 if rebar.is_unset() {
                     return Err("SRC検定: 配筋が未入力です".to_string());
-                }
-                if let Err(e) = rebar.validate(*b, *d) {
-                    return Err(format!("SRC検定: 配筋が不整合です（{e}）"));
                 }
                 let props_z = column_axis_props(*b, *d, rebar, true);
                 let props_y = column_axis_props(*b, *d, rebar, false);

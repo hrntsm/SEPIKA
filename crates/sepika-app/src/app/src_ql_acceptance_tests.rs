@@ -117,6 +117,7 @@ fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck
         ("src-old18", Some(18), false),
         ("src-old35", Some(35), false),
         ("src-old36", Some(36), false),
+        ("src-old89", Some(89), false),
         ("src-current", Some(DESIGN_CONTRACT_VERSION), true),
         ("src-future", Some(DESIGN_CONTRACT_VERSION + 1), false),
     ] {
