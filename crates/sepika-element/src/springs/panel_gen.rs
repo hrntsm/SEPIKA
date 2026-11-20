@@ -26,8 +26,8 @@
 //!
 //! `Model` は「配列添字 == `ElemId`」を不変条件とする。本モジュールは
 //!
-//! 1. 削除対象を参照する部材属性・部材荷重があれば処理を停止する
-//! 2. 既存のパネル要素を取り除き、残る要素と部材属性・部材荷重の ID を詰め直す
+//! 1. 削除対象を参照する部材属性・部材荷重・部材別重量があれば処理を停止する
+//! 2. 既存のパネル要素を取り除き、残る要素とそれらの参照先の ID を詰め直す
 //! 3. 新しいパネル要素を末尾へ追加する
 //!
 //! の順で処理する。
@@ -73,7 +73,26 @@ pub fn validate_panel_removal_references(model: &Model) -> Result<(), String> {
             .element(id)
             .is_some_and(|e| e.kind == ElementKind::PanelZone)
     };
-    if let Some((id, kind)) = model.find_elem_attr_ref(is_panel) {
+    if let Some((id, kind)) = model.find_elem_attr_ref(is_panel).or_else(|| {
+        let cfg = model.load_cfg.as_ref()?;
+        [
+            (&cfg.extra_line_weight, "部材付加線重量"),
+            (&cfg.finish_area_weight, "仕上げ面重量"),
+        ]
+        .into_iter()
+        .find_map(|(weights, kind)| {
+            weights
+                .iter()
+                .find(|(id, _)| is_panel(*id))
+                .map(|(id, _)| (*id, kind))
+        })
+        .or_else(|| {
+            cfg.dampers
+                .iter()
+                .find(|damper| is_panel(damper.elem))
+                .map(|damper| (damper.elem, "ダンパー総重量"))
+        })
+    }) {
         return Err(format!(
             "{kind}が削除対象の仕口パネル要素 {} を参照しています。入力の参照先を修正してください",
             id.0
@@ -124,6 +143,18 @@ fn remove_existing_panels(model: &mut Model) {
     for lc in &mut model.load_cases {
         for ml in &mut lc.member {
             shift(&mut ml.elem);
+        }
+    }
+    if let Some(cfg) = &mut model.load_cfg {
+        for (id, _) in cfg
+            .extra_line_weight
+            .iter_mut()
+            .chain(&mut cfg.finish_area_weight)
+        {
+            shift(id);
+        }
+        for damper in &mut cfg.dampers {
+            shift(&mut damper.elem);
         }
     }
     model.shift_elem_attr_refs(shift);
