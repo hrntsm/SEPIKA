@@ -114,6 +114,35 @@ fn src_column_long_term_check_skips_nonfinite_axial_force() {
 }
 
 #[test]
+fn src_column_short_term_check_without_seismic_qd_skips_nonfinite_axial_force() {
+    let (model, mut ctx, mut forces) = inputs(true);
+    ctx.term = LoadTerm::Short;
+    let check = |forces: &MemberForcesAt| {
+        SrcDesign.check(forces, &model.sections[0], &model.materials[0], &ctx)
+    };
+
+    forces.n = 3_600_000.0;
+    let outcome = check(&forces);
+    let CheckOutcome::Checked(result) = outcome else {
+        panic!("{outcome:?}");
+    };
+    // 内蔵H形鋼8,192 mm²と径25 mmの主筋8本の短期純引張耐力。
+    let capacity_n = 8_192.0 * 235.0 + 8.0 * std::f64::consts::PI * 12.5_f64.powi(2) * 345.0;
+    approx::assert_abs_diff_eq!(result.ratio(), forces.n / capacity_n, epsilon = 1e-12);
+    assert!(!result.ok());
+
+    for n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        forces.n = n;
+        let outcome = check(&forces);
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("軸力") && reason.contains("非有限")),
+            "N={n}: {outcome:?}"
+        );
+    }
+}
+
+#[test]
 fn src_h_product_diagnosis_precedes_invalid_plate_thickness() {
     for column in [false, true] {
         let (model, mut ctx, forces) = inputs(column);

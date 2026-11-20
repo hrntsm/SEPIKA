@@ -292,7 +292,7 @@ fn src_shear_check(
 
 /// 矩形SRC梁・柱の断面検定（`SectionShape::SrcBeamRect`・`SrcColumnRect` を対象とする）。
 /// 断面形状・配筋、内蔵 H 形鋼の材種・実板厚、短期地震時の柱せん断が適用条件を満たさない場合は理由付き未算定とする。
-/// 長期のSRC柱で軸力が非有限の位置は理由付き未算定とする。
+/// SRC柱で軸力が非有限の位置は理由付き未算定とする。
 pub struct SrcDesign;
 
 impl DesignCheck for SrcDesign {
@@ -514,7 +514,7 @@ impl SrcDesign {
                 if rebar.is_unset() {
                     return Err("SRC検定: 配筋が未入力です".to_string());
                 }
-                if ctx.term == LoadTerm::Long && !forces.n.is_finite() {
+                if !forces.n.is_finite() {
                     return Err("SRC柱検定: 設計軸力Nが非有限です".into());
                 }
                 let props_z = column_axis_props(*b, *d, rebar, true);
