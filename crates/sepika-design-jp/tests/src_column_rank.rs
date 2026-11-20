@@ -305,17 +305,20 @@ fn missing_or_inapplicable_steel_reports_why_the_ratio_is_unavailable() {
     }
     for fy in [
         None,
+        Some(100.0),
         Some(0.0),
         Some(-1.0),
         Some(f64::NAN),
         Some(f64::INFINITY),
+        Some(f64::NEG_INFINITY),
     ] {
         let unknown = steel("任意鋼材", fy);
         let reason = ratios(Some(&unknown)).unwrap_err();
         assert!(
-            reason.contains("任意鋼材") && reason.contains("基準強度 fy"),
+            reason.contains("任意鋼材") && reason.contains("H 形鋼としての適用根拠"),
             "{reason}"
         );
+        assert!(!reason.contains("fy"), "{reason}");
     }
 }
 

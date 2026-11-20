@@ -1323,7 +1323,7 @@ mod tests {
 
         for (name, expected_reason) in [
             ("SN400B", None),
-            ("任意鋼材", Some("直接入力強度のSRC規準への適用根拠")),
+            ("任意鋼材", Some("H 形鋼としての適用根拠")),
             ("STK400", Some("H 形鋼としての適用根拠")),
             ("SN400C", Some("JIS G 3136 の適用範囲外")),
             ("SN490", Some("JIS の種類記号が不完全")),

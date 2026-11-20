@@ -5,7 +5,7 @@
 //! - [`src_column_rank_ratios`] — 判定比 N/N0・sM0/M0 の算定
 
 use super::holding_capacity::MemberRank;
-use sepika_core::model::{Material, Section};
+use sepika_core::model::{Material, MaterialCategory, Section};
 use sepika_core::rc_rebar_geom::RectEdge;
 use sepika_core::section_shape::SectionShape;
 
@@ -70,7 +70,9 @@ pub fn src_column_rank_ratios(
         return Err("SRC 矩形柱の断面形状が必要です".into());
     };
     let steel = steel_material.ok_or("内蔵鉄骨の材料が未割当、または参照先が不明です")?;
-    let s_f = crate::srrc::src_steel_f(section, steel)?;
+    if steel.category != MaterialCategory::Steel {
+        return Err(format!("材料「{}」は鋼材ではありません", steel.name));
+    }
     let name = steel.name.trim();
     let minimum_mm = match name {
         "SN400A" | "SN400B" | "SN490B" => 6.0,
@@ -86,6 +88,7 @@ pub fn src_column_rank_ratios(
             ));
         }
     };
+    let s_f = crate::material_strength::section_steel_f(section, Some(steel))?;
     // 断面形状だけでは圧延形鋼と鋼板組立を区別できない。
     if tw < minimum_mm || tf < minimum_mm {
         return Err(format!(
