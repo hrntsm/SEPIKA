@@ -413,10 +413,7 @@ fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
     let positions = &results.member_checks[0].positions;
     assert_eq!(positions.len(), 6);
     let (pairs, _) = positions.as_chunks::<2>();
-    for pair in pairs {
-        let [checked, skipped] = pair else {
-            panic!("{pair:?}");
-        };
+    for [checked, skipped] in pairs {
         let CheckOutcome::Checked(result) = &checked.outcome else {
             panic!("{:?}", checked.outcome);
         };
