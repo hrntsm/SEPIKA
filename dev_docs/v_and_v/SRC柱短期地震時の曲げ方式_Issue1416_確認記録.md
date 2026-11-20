@@ -1,0 +1,39 @@
+# SRC柱短期地震時の曲げ方式の確認（#1416）
+
+[Issue #1416](https://github.com/hrntsm/SEPIKA/issues/1416)。原典の照合範囲と旧版の挙動は、[Issue #953の記録](SRC柱累加耐力_Issue953_原典照合.md#設計せん断用のrc軸力と端部条件)を参照する。
+
+## 確認済み曲げ耐力から求めた有限例
+
+『2025年版 建築物の構造関係技術基準解説書』第2版第1刷（2026年2月11日）、付録1-04 pp.758–759の付1.4-1・付1.4-3、付録1-03 pp.703–704の付1.3-10〜15を参照した。独立値は[#953のPython計算](data/issue953/independent_values.py)の600 mm角・Fc24・H400×200×8×13（F235）・上下各4-D25・帯筋D10@100・内法4,000 mmから得た。鉄骨短期許容曲げはウェブとフランジを矩形として積分した弾性断面係数で算定した。鉄骨の要求値は強軸134.918601 kN、弱軸20.385417 kN。短期許容せん断力との比は順に0.332355604、0.043341134。公開 `SrcDesign::check` に材料別曲げ耐力を渡し、要求値と検定比を結果の詳細から照合した。
+
+| RC部分の独立入力 | QyのRC需要 [kN] | QzのRC需要 [kN] | 確認 |
+| --- | ---: | ---: | --- |
+| 両端ともRC純圧縮終局強度 9,994.811832 kN | 0 | 0 | 鉄骨部の最大比0.332355604を保持。QLを0からQy −15 kN・Qz 75 kNへ変えても一致 |
+| 両端とも全主筋の純引張下限 −1,354.811832 kN | 0 | 0 | RC比0、鉄骨部の比は圧縮境界例と同じ |
+| 柱頭3,300 kN・柱脚1,000 kN（圧縮正） | 381.865614 | 308.419221 | 強軸の単段式と弱軸の多段式それぞれの両端和。最大せん断比0.913634598 |
+| 両端 −1,219.330649 kN（純引張下限の0.9倍） | 16.257742 | 10.725594 | 弱軸の多段式の比0.025661576 |
+| 両端3,300 kN、強軸の左右梁各450 kN·m | 279.298159（一般階）、391.798159（最上階） | — | 柱頭RC曲げの上限のみが変わる。上限が負の例は理由付き未算定 |
+
+注記の軸力境界は式の有限Verification用で、同じ荷重条件に対するAIJ17条の許容軸力・靱性条件または実架構の崩壊機構が成立することを示さない。耐力値を求めた独立式と、その値を受け取った後の公開検定の算術を分けて確認した。
+
+## 通常検定・回帰の範囲
+
+- `tests/src_column_seismic_bending.rs` は有限例、曲げ・代替側の根拠不足、負・非有限・数値範囲外の入力、正の材料別許容値が得られない例を検証する。既定Minは確認済み曲げ耐力があっても一次設計地震力による代替側が未算定となる。
+- `tests/src_column_gravity.rs` は重力参照の欠落・位置不一致・方向別の非有限値を識別し、軸力または曲げの不適合が共通検定で保持されることを確認する。長期および地震割増を用いない短期の既存結果も照合する。
+- GUIで既知鋼材の短期地震時SRC柱が理由付き未算定となり、梁は算定される経路を `src_ql_acceptance_tests` で確認する。MCPの `signed_q0_acceptance_tests` は有限の重力内力がある場合の未算定と軸力不適合の集計を確認する。
+- 時刻歴簡易検定は、非線形・長期初期載荷の結果に保存重力参照を組み合わせた場合のQd1とMinの未算定表示をheadless描画で確認した。長期初期載荷なしの通常表示も確認した。保存重力参照が欠ける場合の表示は別経路で、コード追跡で見つけた問題を [#1615](https://github.com/hrntsm/SEPIKA/issues/1615) で扱う。
+
+通常モデルから材料別曲げ耐力と柱頭条件を確定する処理、一次設計用地震力の柱せん断を使う代替式、他の原典適用条件の全面確認、実験Validationは対象外。製品の自動算定は [#1612](https://github.com/hrntsm/SEPIKA/issues/1612) で追跡する。
+
+## ローカル検証
+
+| コマンド | 結果 |
+| --- | --- |
+| `python dev_docs/v_and_v/data/issue953/independent_values.py` | 独立値を再計算 |
+| `cargo test -p sepika-design-jp --locked --quiet` | 866件成功 |
+| `cargo clippy -p sepika-design-jp --all-targets --locked -- -D warnings` | 成功 |
+| `cargo test -p sepika-app --features gui --locked --lib src_ql_acceptance_tests` | 3件成功 |
+| `cargo test -p sepika-app --features gui --locked --lib --test full_model --no-fail-fast` | lib 1,292件成功、既存ignore 3件。full_model 41件成功 |
+| `cargo test -p sepika-mcp --features mcp --locked --lib signed_q0_acceptance_tests` | 4件成功 |
+| `cargo run -p xtask --locked -- check-docs` | 成功（目次197、リンク1,485、実装参照521） |
+| `mdbook build docs --dest-dir <出力先>` | 成功 |

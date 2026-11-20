@@ -512,6 +512,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
 | [SRC柱累加耐力_Issue953_原典照合.md](SRC柱累加耐力_Issue953_原典照合.md) | SRC柱の設計せん断・終局N–M・部材種別と断面・材料・方向の条件 | 🔶（原典・現行比較と独立有限Verification） |
 | [SRC柱部材種別材料_Issue1417_確認記録.md](SRC柱部材種別材料_Issue1417_確認記録.md) | 内蔵H形鋼の材種・実板厚による両比と保存runからの未評価理由 | 🔶（材料契約Verification、候補耐力と破壊状況の適用判断は継続） |
+| [SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md](SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md) | SRC柱の短期地震時の設計用せん断力、成立した0・正値と理由付き未算定 | 🔶（両端・両方向の独立値、共通検定とGUI/MCPを確認。自動算定と実験Validationは未対応） |
 | [SRC靭性終局仕口_Issue886_原典照合.md](SRC靭性終局仕口_Issue886_原典照合.md) | SRC靭性・曲げ累加/軸力・せん断区分・終局/許容パネルの原典対応と有限独立値 | 🔶（限定Verification、未対応終局・別原典・Validationは残る） |
 | [SRC構造細則一次設計_Issue884_原典照合.md](SRC構造細則一次設計_Issue884_原典照合.md) | SRC固有細則・複合断面・一次設計の適用と公開梁検定境界 | 🔶（有限Verification、法定詳細/別原典/Validationは残る） |
 | [RC壁横筋寄与の縦筋比上限_Issue910_2026-10.md](RC壁横筋寄与の縦筋比上限_Issue910_2026-10.md) | 壁横筋のte換算・壁板縦筋2倍上限・公開増分準備 | 🔶（有限Verification、実験Validation・全体ランク/Ds未実測） |
@@ -916,6 +917,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
 | 1274 | SRC柱の地震時重力参照不足 | sepika-design-jp / sepika-app / sepika-mcp | srrc/mod.rs・member_design_check.rs、app/src_ql_acceptance_tests.rs、job/signed_q0_acceptance_tests.rs | [独立算術と公開入口](SRC柱重力参照不足_確認記録.md#恒久回帰と確認範囲)、tests/src_column_gravity.rs | 一次設計・入出力 | 🔶（入力不足拒否・代表算術Verification、採用式Validation未） |
+| 1416 | SRC柱短期地震時の曲げ方式 | sepika-design-jp / sepika-app / sepika-mcp | srrc/column.rs・member_design_check.rs、app/src_ql_acceptance_tests.rs、job/signed_q0_acceptance_tests.rs | [独立値と公開検定](SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md)、tests/src_column_seismic_bending.rs、tests/src_column_gravity.rs | 一次設計 | 🔶（確定需要と不足を区別。自動算定は[#1612](https://github.com/hrntsm/SEPIKA/issues/1612)、実験Validation未） |
 | 912 | SRC梁柱の内蔵鉄骨材料解決 | sepika-design-jp / sepika-app | srrc/{mod,beam,column,tests}.rs、app/src_ql_acceptance_tests.rs | [独立耐力・境界と保存経路](SRC内蔵鉄骨材料_Issue912_確認記録.md#要素から製品経路への証拠索引) | 一次設計・入出力 | 🔶（材料契約Verification、全規準・Validation未） |
 | 871 | Ds条件不足の保留 | sepika-app / sepika-design-jp | actions/design/holding・holding_conditions、member_rank、tests/vnv_rigid_zone_mechanism | [実入口と観測契約](Ds条件不足の保留_Issue871_確認記録.md#実入口と観測契約) | 二次設計 | 🔶（条件不足の保留Verification、全規準・Validation未） |
 | 872 | Ds/Qu採用条件 | sepika-app | actions/design/holding_adoption.rs・holding.rs、summary.rs | [公開入口の要素→試験索引](DsQu採用条件_Issue872_確認記録.md#要素試験索引) | 二次設計 | 🔶（採用保留Verification、証拠保存・Validation未） |
