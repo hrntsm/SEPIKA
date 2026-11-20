@@ -44,16 +44,30 @@ pub(crate) fn auto_record_every(n_steps: usize) -> usize {
 /// （`model.elements` と同じ並び。`behaviors` は事前に `build_behavior` で
 /// 構築済みのもの）。
 pub(crate) fn member_forces_linear(
+    model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
     u_free: &[f64],
-) -> Vec<Option<MemberForces>> {
+) -> Result<Vec<Option<MemberForces>>, String> {
     behaviors
         .iter()
-        .map(|b| {
+        .zip(&model.elements)
+        .map(|(b, elem)| {
             let gdofs = b.global_dofs(dofmap);
             let u_elem = crate::common::elem_loop::gather_u_elem(&gdofs, u_free);
-            b.recover_forces(&u_elem)
+            let forces = b.recover_forces(&u_elem);
+            if forces.as_ref().is_some_and(|forces| {
+                forces
+                    .at
+                    .iter()
+                    .any(|(xi, f)| !xi.is_finite() || f.iter().any(|v| !v.is_finite()))
+            }) {
+                return Err(format!(
+                    "要素 ID {} の断面位置または断面力に非有限値があります",
+                    elem.id.0
+                ));
+            }
+            Ok(forces)
         })
         .collect()
 }
