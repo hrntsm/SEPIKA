@@ -231,6 +231,17 @@ impl App {
                 .unwrap_or_else(|| format!("combo:{idx}")),
             None => "未選択".into(),
         };
+        let selected_response = match self.core.scoped.last_static {
+            Some(StaticKey::Case(key)) => results
+                .statics
+                .iter()
+                .find(|(stored_key, _)| *stored_key == key)
+                .map(|(_, response)| response),
+            Some(StaticKey::Combo(index)) => {
+                results.combos.get(index).map(|(_, response)| response)
+            }
+            None => None,
+        };
         let frame_report = if frame_design_requested {
             sepika_design_jp::run_member_design_checks(
                 design_model,
@@ -238,6 +249,8 @@ impl App {
                 &results.panel_moments,
                 &sepika_design_jp::MemberDesignCheckOptions {
                     term: self.core.design_term,
+                    girder_column_face_forces: selected_response
+                        .map_or(&[], |response| &response.girder_column_face_forces),
                     wall_index: wall_index.as_ref(),
                     wall_case: &wall_case,
                     load_terms: load_terms.as_deref(),

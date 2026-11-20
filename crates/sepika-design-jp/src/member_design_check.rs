@@ -22,6 +22,7 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
+use sepika_solver::statics::linear::GirderColumnFaceEnds;
 
 use crate::design_position::{design_positions, is_near_design_position};
 use crate::{
@@ -53,6 +54,8 @@ pub struct GirderGroupContextOverride {
 pub struct MemberDesignCheckOptions<'a> {
     /// 検定条件（長期/短期）。
     pub term: LoadTerm,
+    /// 同じ解析結果の大梁実柱面断面力。欠落時は対応するSRC接合部を未算定とする。
+    pub girder_column_face_forces: &'a [(ElemId, GirderColumnFaceEnds)],
     /// 壁展開時の元壁版と生成要素の対応。壁版のない要素fixtureではNoneを許す。
     pub wall_index: Option<&'a sepika_core::wall_expand::WallExpansionIndex>,
     /// 検定する荷重ケース・組合せの既存キー。
@@ -891,6 +894,7 @@ pub fn run_member_design_checks(
         &mf_slices,
         long_slices.as_deref(),
         panel_moments,
+        crate::joint_wiring::GirderFaceForces::Analysis(options.girder_column_face_forces),
         options.term,
         false,
     );

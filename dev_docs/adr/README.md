@@ -189,6 +189,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0128](0128-src-primary-h-steel-applicability.md) | accepted | SRC梁・柱の一次検定で内蔵H形鋼の材種と実板厚を確認する |
 | [0129](0129-src-pushover-shear-steel-applicability.md) | accepted | SRC矩形梁・柱の増分解析でせん断降伏に用いる内蔵H形鋼の基準強度を確認する |
 | [0130](0130-src-joint-hoops-by-plane.md) | accepted | SRC接合部帯筋を節点と構面ごとに登録する |
+| [0131](0131-src-joint-allowable-shear.md) | accepted | SRC柱梁接合部を構面別に評価し、応力欠落と応力伝達の別途確認を保持する |
 
 ## 規約
 
