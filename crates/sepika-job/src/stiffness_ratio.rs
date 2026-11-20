@@ -558,6 +558,35 @@ mod tests {
     }
 
     #[test]
+    fn mixed_column_model_supplies_both_misc_wall_reference_methods() {
+        for method in [
+            MiscWallStiffnessMethod::StoryColumns,
+            MiscWallStiffnessMethod::RepresentativeColumn,
+        ] {
+            let mut model = fixture(2);
+            model.elements[1].kind = ElementKind::MultiSpring;
+            model.stress_cfg.misc_wall_method = method;
+            model.stress_cfg.misc_wall_representatives = vec![MiscWallRepresentativeColumn {
+                story: StoryId(2),
+                column: ElemId(1),
+            }];
+            wall(&mut model, 2, [0.0, 0.0], [1.0, 0.0]);
+            let mut results = base_results(&model);
+            attach_evaluations(&model, &[LoadCaseId(0), LoadCaseId(1)], &mut results);
+            let evaluated = results[0]
+                .as_ref()
+                .unwrap()
+                .stiffness_ratio_disp
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap();
+            near(evaluated[1][0], 4.0);
+            near(evaluated[2][0], 5.0);
+        }
+    }
+
+    #[test]
     fn 対象壁がなければ他方向や柱内力を要求しない() {
         let model = fixture(1);
         let mut results = [linear_static_once(&model, LoadCaseId(0))];

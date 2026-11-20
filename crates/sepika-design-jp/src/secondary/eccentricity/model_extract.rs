@@ -73,6 +73,17 @@ pub fn center_of_mass(model: &Model, story: StoryId) -> Result<[f64; 2], String>
 /// 層の柱はその上端の床に取り付くためである。
 /// 実際に採用する柱の局所基底を解決できなければ、部材 ID と理由を返す。
 pub fn column_stiffnesses(model: &Model, story: StoryId) -> Result<Vec<ColumnStiffness>, String> {
+    if let Some(elem) = model.elements.iter().find(|elem| {
+        matches!(elem.kind, ElementKind::Fiber | ElementKind::MultiSpring)
+            && model
+                .element_section(elem)
+                .is_some_and(|section| section.frame_use == Some(FrameSectionUse::Column))
+    }) {
+        return Err(format!(
+            "柱 ID {}: ファイバー柱・マルチスプリング柱を含む架構のD値略算法は未対応です",
+            elem.id.0
+        ));
+    }
     let first_story = story.index() == 1;
 
     let mut result = Vec::new();

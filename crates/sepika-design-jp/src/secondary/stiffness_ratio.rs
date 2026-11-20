@@ -3,7 +3,7 @@
 use sepika_core::ids::{ElemId, StoryId};
 use sepika_core::model::{Model, Node};
 
-use super::story_columns::checked_story_columns;
+use super::story_columns::{checked_story_columns, mixed_story_connections};
 
 /// 柱 1 本の層間変位（加力方向）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -26,6 +26,7 @@ pub fn column_drifts(
     if dir > 1 {
         return Err(format!("層間変形角: 水平方向{dir}が不正です"));
     }
+    mixed_story_connections(model, story)?;
     checked_story_columns(model, story)?
         .into_iter()
         .map(|col| {

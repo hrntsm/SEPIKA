@@ -3,7 +3,7 @@
 //! 層間変位・偏心率など、当該層の柱を数える処理の判定ロジックの単一情報源。
 
 use sepika_core::ids::{ElemId, NodeId, StoryId};
-use sepika_core::model::{ElementKind, FrameSectionUse, Model};
+use sepika_core::model::{ElementKind, FrameSectionUse, Layer, Model};
 use std::collections::{HashMap, HashSet};
 
 /// 層に帰属する 1 本の柱（中間節点で分割された柱の連なりを束ねたもの）。
@@ -22,7 +22,14 @@ pub struct StoryColumn {
 /// 上端階 SL の節点から下端階 SL に達した柱の連なりを返す。
 /// 上下階情報が未確定、または下端に達しない連なりは対象外。
 pub fn story_columns(model: &Model, story: StoryId) -> Vec<StoryColumn> {
-    collect_story_columns(model, story, false).unwrap_or_default()
+    analysis_story_columns(model, story).unwrap_or_default()
+}
+
+pub(super) fn analysis_story_columns(
+    model: &Model,
+    story: StoryId,
+) -> Result<Vec<StoryColumn>, String> {
+    collect_story_columns(model, story, false)
 }
 
 /// 上下階SLを結ぶ非分岐柱を列挙し、柱節点の参照・座標不整合はErrを返す。
@@ -35,15 +42,52 @@ fn collect_story_columns(
     story: StoryId,
     reject_branch: bool,
 ) -> Result<Vec<StoryColumn>, String> {
-    let Some((_, bottom)) = layer_bounds(model, story) else {
+    let Some(layer) = story_layer(model, story) else {
         return Err(format!("上端階{}の上下階SL又はFL間高さが不正です", story.0));
     };
+    validate_column_elements(model)?;
+    let adj = column_adjacency(model);
+    let has_mixed_columns = has_mixed_columns(model);
+    let mut out = Vec::new();
+    let mut used_segments = HashMap::new();
+    for node in &model.nodes {
+        if model.on_diaphragm_level(story, node.coord[2]) {
+            if let Some((col, mixed_connection)) = trace_column_down(
+                model,
+                &adj,
+                node.id,
+                &layer,
+                reject_branch,
+                has_mixed_columns,
+            ) {
+                if has_mixed_columns {
+                    for &segment in &col.segments {
+                        if let Some((other, other_mixed)) =
+                            used_segments.insert(segment, (col.top_elem, mixed_connection))
+                        {
+                            if mixed_connection || other_mixed {
+                                return Err(format!(
+                                    "階{}の柱{}と柱{}は中間節点で分岐し、部材{}を共有するため層内の柱を一意に特定できません",
+                                    story.0, other.0, col.top_elem.0, segment.0
+                                ));
+                            }
+                        }
+                    }
+                }
+                out.push(col);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn validate_column_elements(model: &Model) -> Result<(), String> {
     for elem in &model.elements {
         if model
             .element_section(elem)
             .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Column))
         {
-            if elem.kind != ElementKind::Beam || elem.nodes.len() != 2 {
+            if !elem.kind.is_primary_frame_support() || elem.nodes.len() != 2 {
                 return Err(format!("柱{}の接続節点数又は要素種別が不正です", elem.id.0));
             }
             for id in &elem.nodes {
@@ -60,34 +104,148 @@ fn collect_story_columns(
             }
         }
     }
-    let adj = vertical_beam_adjacency(model);
-    let mut out = Vec::new();
-    for node in &model.nodes {
-        if model.on_diaphragm_level(story, node.coord[2]) {
-            if let Some(col) = trace_column_down(model, &adj, node.id, bottom, reject_branch) {
-                out.push(col);
-            }
-        }
-    }
-    Ok(out)
+    Ok(())
 }
 
-fn layer_bounds(model: &Model, top_story: StoryId) -> Option<(StoryId, StoryId)> {
+fn story_layer(model: &Model, top_story: StoryId) -> Option<Layer> {
     model
         .layers()
         .into_iter()
         .find(|layer| layer.top == top_story)
-        .map(|layer| (top_story, layer.bottom))
+}
+
+fn is_mixed_member(elem: &sepika_core::model::ElementData) -> bool {
+    matches!(elem.kind, ElementKind::Fiber | ElementKind::MultiSpring)
+}
+
+fn has_mixed_columns(model: &Model) -> bool {
+    model.elements.iter().any(|elem| {
+        is_mixed_member(elem)
+            && model
+                .element_section(elem)
+                .is_some_and(|section| section.frame_use == Some(FrameSectionUse::Column))
+    })
+}
+
+fn is_layer_interior(model: &Model, layer: &Layer, z: f64) -> bool {
+    layer.bottom_sl_mm < z
+        && z < layer.top_sl_mm
+        && !model.on_diaphragm_level(layer.top, z)
+        && !model.on_diaphragm_level(layer.bottom, z)
+}
+
+pub(super) fn mixed_story_connections(
+    model: &Model,
+    story: StoryId,
+) -> Result<Vec<(NodeId, ElemId)>, String> {
+    if !has_mixed_columns(model) {
+        return Ok(Vec::new());
+    }
+    let Some(layer) = story_layer(model, story) else {
+        return Ok(Vec::new());
+    };
+    validate_column_elements(model)?;
+    let adj = column_adjacency(model);
+    let at_top = |z| model.on_diaphragm_level(story, z);
+    let at_bottom = |z| model.on_diaphragm_level(layer.bottom, z);
+    let inside = |z| is_layer_interior(model, &layer, z);
+    let link_boundaries = |first: NodeId, second: NodeId| {
+        let z = [first, second].map(|id| model.nodes[id.index()].coord[2]);
+        [story, layer.bottom].map(|level| {
+            first != second
+                && z.iter()
+                    .all(|&height| model.on_diaphragm_level(level, height))
+        })
+    };
+    let is_mixed_kind = |id| model.element(id).is_some_and(is_mixed_member);
+    let linked_sl: HashSet<_> = adj
+        .iter()
+        .filter(|&(&node, neighbors)| {
+            neighbors
+                .iter()
+                .any(|&(next, _)| link_boundaries(node, next).into_iter().any(|linked| linked))
+        })
+        .map(|(&node, _)| node)
+        .collect();
+    let mut visited = HashSet::new();
+    let mut connections = Vec::new();
+    for top in model.nodes.iter().filter(|node| at_top(node.coord[2])) {
+        let starts_at_boundary_link = linked_sl.contains(&top.id);
+        for &(start, top_elem) in adj.get(&top.id).into_iter().flatten() {
+            let z = model.nodes[start.index()].coord[2];
+            let mut reaches_bottom = !starts_at_boundary_link && at_bottom(z);
+            let mut stack = Vec::new();
+            if starts_at_boundary_link {
+                if !visited.insert(top.id) {
+                    break;
+                }
+                stack.push(top.id);
+            } else if inside(z) || linked_sl.contains(&start) {
+                if !visited.insert(start) {
+                    continue;
+                }
+                stack.push(start);
+            } else if !reaches_bottom {
+                continue;
+            }
+            let mut includes_mixed_kind = !starts_at_boundary_link && is_mixed_kind(top_elem);
+            let mut boundary_links = [None; 2];
+            while let Some(current) = stack.pop() {
+                let current_is_interior = inside(model.nodes[current.index()].coord[2]);
+                for &(next, elem) in &adj[&current] {
+                    let z = model.nodes[next.index()].coord[2];
+                    let mixed = is_mixed_kind(elem);
+                    for (link, linked) in boundary_links
+                        .iter_mut()
+                        .zip(link_boundaries(current, next))
+                    {
+                        if linked && (link.is_none() || mixed) {
+                            *link = Some(elem);
+                        }
+                    }
+                    reaches_bottom |= at_bottom(z);
+                    // 明示的な境界内の柱接続がないSL節点を通ると、独立した柱まで連結してしまう。
+                    if inside(z) || linked_sl.contains(&next) {
+                        if visited.insert(next) {
+                            stack.push(next);
+                        }
+                    // 層内の中間節点に取り付く層外枝も、そこでの分岐を判定するために必要。
+                    } else if !current_is_interior && !at_top(z) && !at_bottom(z) {
+                        continue;
+                    }
+                    includes_mixed_kind |= mixed;
+                }
+            }
+            if reaches_bottom && includes_mixed_kind {
+                let boundary_members = match boundary_links {
+                    [Some(top), Some(bottom)] => {
+                        Some(format!("上階SLの柱{}・下階SLの柱{}", top.0, bottom.0))
+                    }
+                    [Some(top), None] => Some(format!("上階SLの柱{}", top.0)),
+                    [None, Some(bottom)] => Some(format!("下階SLの柱{}", bottom.0)),
+                    [None, None] => None,
+                };
+                if let Some(members) = boundary_members {
+                    return Err(format!(
+                        "階{}の{}に層境界のSL節点どうしを結ぶ柱接続があり、上下階SL間の区間を一意に特定できません",
+                        story.0, members
+                    ));
+                }
+                connections.push((top.id, top_elem));
+            }
+        }
+    }
+    Ok(connections)
 }
 
 fn on_bottom_level(model: &Model, bottom: StoryId, z: f64) -> bool {
     model.on_diaphragm_level(bottom, z)
 }
 
-fn vertical_beam_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId)>> {
+fn column_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId)>> {
     let mut adj: HashMap<NodeId, Vec<(NodeId, ElemId)>> = HashMap::new();
     for elem in &model.elements {
-        if elem.kind != ElementKind::Beam || elem.nodes.len() != 2 {
+        if !elem.kind.is_primary_frame_support() || elem.nodes.len() != 2 {
             continue;
         }
         let Some(section) = model.element_section(elem) else {
@@ -104,41 +262,87 @@ fn vertical_beam_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId
     adj
 }
 
+fn exclude_branches_without_lower_sl(
+    model: &Model,
+    adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
+    layer: &Layer,
+    candidates: &mut Vec<(NodeId, ElemId)>,
+) -> bool {
+    let mut includes_mixed_member = false;
+    let mut reaches_lower_sl = HashSet::new();
+    for &(start, representative) in candidates.iter() {
+        let mut stack = vec![(start, representative)];
+        let mut visited = HashSet::new();
+        while let Some((node, elem)) = stack.pop() {
+            includes_mixed_member |= model.element(elem).is_some_and(is_mixed_member);
+            let z = model.nodes[node.index()].coord[2];
+            if model.on_diaphragm_level(layer.bottom, z) {
+                reaches_lower_sl.insert(representative);
+            } else if is_layer_interior(model, layer, z) && visited.insert(node) {
+                stack.extend(adj[&node].iter().copied());
+            }
+        }
+    }
+    if includes_mixed_member {
+        candidates.retain(|(_, id)| reaches_lower_sl.contains(id));
+    }
+    includes_mixed_member
+}
+
 fn trace_column_down(
     model: &Model,
     adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
     top: NodeId,
-    bottom: StoryId,
+    layer: &Layer,
     reject_branch: bool,
-) -> Option<StoryColumn> {
+    has_mixed_columns: bool,
+) -> Option<(StoryColumn, bool)> {
     let mut current = top;
     let mut top_elem = None;
     let mut segments = Vec::new();
     let mut visited = HashSet::new();
     visited.insert(top);
+    let mut crossed_boundary = false;
+    let mut mixed_connection = false;
 
     loop {
         let cur_node = &model.nodes[current.index()];
-        if current != top && on_bottom_level(model, bottom, cur_node.coord[2]) {
-            return Some(StoryColumn {
-                top_elem: top_elem?,
-                top,
-                bottom: current,
-                segments,
-            });
+        if current != top && on_bottom_level(model, layer.bottom, cur_node.coord[2]) {
+            if crossed_boundary && mixed_connection {
+                return None;
+            }
+            return Some((
+                StoryColumn {
+                    top_elem: top_elem?,
+                    top,
+                    bottom: current,
+                    segments,
+                },
+                mixed_connection,
+            ));
         }
 
+        // 通常柱の列挙を変えないため、層境界を通過したかどうかと、新型を含むかを別々に追う。
+        if current != top
+            && has_mixed_columns
+            && !is_layer_interior(model, layer, cur_node.coord[2])
+        {
+            crossed_boundary = true;
+        }
+        if crossed_boundary && mixed_connection {
+            return None;
+        }
         if reject_branch && current != top && adj.get(&current)?.len() != 2 {
             return None;
         }
-        if cur_node.coord[2] < model.stories.iter().find(|s| s.id == bottom)?.sl_mm()? {
+        if cur_node.coord[2] < layer.bottom_sl_mm {
             return None;
         }
         if reject_branch && cur_node.coord[2] > model.nodes[top.index()].coord[2] {
             return None;
         }
         let cur_z = cur_node.coord[2];
-        let neighbors: Vec<_> = adj
+        let mut neighbors: Vec<_> = adj
             .get(&current)?
             .iter()
             .filter(|(nid, _)| {
@@ -151,10 +355,14 @@ fn trace_column_down(
             .copied()
             .collect();
 
+        if current == top && has_mixed_columns && neighbors.len() > 1 {
+            mixed_connection = exclude_branches_without_lower_sl(model, adj, layer, &mut neighbors);
+        }
         if neighbors.len() != 1 {
             return None;
         }
         let (next, elem) = neighbors[0];
+        mixed_connection |= has_mixed_columns && model.element(elem).is_some_and(is_mixed_member);
         if !visited.insert(next) {
             return None;
         }
@@ -173,7 +381,7 @@ mod tests {
     use sepika_core::ids::{ElemId, NodeId, SectionId};
     use sepika_core::model::Section;
     use sepika_core::model::{
-        ElementData, EndCondition, ForceRegime, LocalAxis, Node, RigidZone, Story,
+        ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node, RigidZone, Story,
     };
     use smallvec::SmallVec;
 
@@ -275,6 +483,29 @@ mod tests {
             ..Default::default()
         };
         (model, top_story)
+    }
+
+    #[test]
+    fn mixed_column_reachability_stays_in_the_layer_and_stops_at_sl_nodes() {
+        let (mut model, top) = build_split_column_model();
+        model.elements[0].kind = ElementKind::Fiber;
+        assert_eq!(
+            mixed_story_connections(&model, top).unwrap(),
+            [(NodeId(2), ElemId(0))]
+        );
+
+        let mut outside = model.nodes[0].clone();
+        outside.id = NodeId(3);
+        outside.coord[2] = -1000.0;
+        model.nodes.push(outside);
+        model.elements[1].nodes[0] = NodeId(3);
+        for (id, nodes) in [(2, [3, 0]), (3, [2, 0])] {
+            let mut elem = model.elements[1].clone();
+            elem.id = ElemId(id);
+            elem.nodes = nodes.map(NodeId).into_iter().collect();
+            model.elements.push(elem);
+        }
+        assert!(mixed_story_connections(&model, top).unwrap().is_empty());
     }
 
     #[test]
