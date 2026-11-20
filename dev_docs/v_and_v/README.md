@@ -447,7 +447,11 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 ## ねじれで柱の層間変位が相殺される場合の偏心率（#1595）
 
-[原典・剛床の独立釣合い・公開偏心率の照合](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md)に、層の並進連成が0でも局所の変位相殺で公開Reが変わる例と、同比例荷重の比較を記録した。[#1680 の修正後の照合](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md#1680-の修正後の照合)に、単一剛床での算定保留と下流経路の検証を記載する。状態🔶。非剛床・複数剛床の評価は [#1683](https://github.com/hrntsm/SEPIKA/issues/1683) で追跡する。
+[原典・剛床の独立釣合い・公開偏心率の照合](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md)に、層の並進連成が0でも局所の変位相殺で公開Reが変わる例と、同比例荷重の比較を記録した。[#1680 の修正後の照合](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md#1680-の修正後の照合)に、単一剛床での算定保留と下流経路の検証を記載する。状態🔶。
+
+## 複数剛床と床面内変形による柱の層間変位相殺（#1683）
+
+[一様変位の独立反力・線形解析・公開偏心率の照合](複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md)に、複数剛床・シェル床各1例の層間変位相殺、符号付き柱頭力、比例小荷重との違い、公開柱比とRe・Fesの算定可否、設計採用に必要な条件を記録した。状態🔶。実建物の一次設計用載荷と設計用剛心・弾力半径の妥当性確認は未実施。
 
 ## 層指標の生成入力照合（#810）
 
@@ -577,7 +581,8 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [梁の床板嵩上げ_Issue731_2026-10.md](梁の床板嵩上げ_Issue731_2026-10.md) | 中心線上端・投影幅、床板材料別の嵩上げ重量/質量、区間DL・小梁設計・動的層質量 | 🔶（独立Verification、手動GUI・Validation未） |
 | [RC梁左右床板厚_Issue618_2026-10.md](RC梁左右床板厚_Issue618_2026-10.md) | RC梁の左右床板実厚・長さ平均/丸め上下界・矩形集計・実配置と未解決/複数梁Attached診断 | 🔶（単体/公開入口・床板群の独立Verificationと危険側例。Validation・手動GUI・最終ゲートは記録参照） |
 | [方向間で連成する層の偏心率_Issue1685_照合記録.md](方向間で連成する層の偏心率_Issue1685_照合記録.md) | 直交変位ゼロ・直交外力ゼロ・主軸方向によるRe・Fes・Qun | 🔶（原典と連成・非連成各1例の独立照合。連成層の設計値は保留） |
-| [ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md) | ねじれによる柱の層間変位相殺、同比例小荷重、対象層の算定保留 | 🔶（単一剛床での独立値・保留と共有経路、非剛床・複数剛床・並進架構等による再評価・Validation未） |
+| [ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md) | ねじれによる柱の層間変位相殺、同比例小荷重、対象層の算定保留 | 🔶（単一剛床での独立値・保留と共有経路、並進架構等による再評価・Validation未） |
+| [複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md](複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md) | 複数剛床・シェル床の柱変位相殺、独立反力、公開柱比とRe・Fes | 🔶（有限例のVerification。実架構の設計値の採用・Validation未） |
 | [層指標の生成入力照合_Issue810_2026-10.md](層指標の生成入力照合_Issue810_2026-10.md) | GUI/CSVのRs/Re/Fes依存成果と現在入力・計算契約 | 🔶（自動Verificationの記録は同レポート、手動GUI・Validation未） |
 | [保存ブランチ496の変更採否_2026-10.md](保存ブランチ496の変更採否_2026-10.md) | 全102コミットの採否、免震/保存の復元、全固定時刻歴と確定前記録 | 🔶（有限Verification。実験Validationは未実施） |
 | [保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | 物理曲率・非対称断面・剛域付き軸履歴、元端部解放の内外残差整合 | 🔶（有限Verification。全履歴の収束性・実験Validationは未検証） |
@@ -913,7 +918,8 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 620 | 自立壁n倍法 | sepika-design-jp / sepika-core / sepika-job / sepika-app | eccentricity::tests::misc620、eccentricity_analysis::misc620_tests、lumped_mass::tests::misc620 | [点検と独立期待値](自立壁n倍法_Issue620_確認記録.md#独立期待値と試験) | 二次設計 | 🔶（有限Verification、2025限定照合は#740、採用整合・Validation未） |
 | 740 | 自立壁二方式とRs再解析 | sepika-core / sepika-edit / sepika-design-jp / sepika-job / sepika-app | stress_cfg、eccentricity::tests::misc740、stiffness_ratio::tests、summary / result_validity | [独立数値・製品経路](自立壁二方式Rs再解析_Issue740_確認記録.md)、[調査と採用決定](自立壁Rs接続_Issue740_調査記録.md) | 二次設計 | 🔶（二方式と再解析の限定Verification。実験Validationは別範囲） |
 | 1685 | 方向間連成層のRe・Fes・Qun | sepika-design-jp / sepika-app | eccentricity_analysis.rs、holding_capacity.rs、app/tests.rs | [独立計算と現行経路](方向間で連成する層の偏心率_Issue1685_照合記録.md#再現と現行経路) | 二次設計 | 🔶（原典と有限例のVerification。連成層の設計採用根拠・Validation未確認） |
-| 1595 / 1680 | ねじれによる柱の層間変位相殺と偏心率 | sepika-design-jp / sepika-solver / sepika-app / sepika-job | tests/torsional_cancellation_eccentricity.rs、summary.rs、stiffness_ratio.rs、lumped_mass.rs | [独立釣合いと修正後の公開経路](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md#1680-の修正後の照合) | 二次設計 | 🔶（単一剛床での算定保留、非剛床・複数剛床・再評価・Validation未） |
+| 1595 / 1680 | ねじれによる柱の層間変位相殺と偏心率 | sepika-design-jp / sepika-solver / sepika-app / sepika-job | tests/torsional_cancellation_eccentricity.rs、summary.rs、stiffness_ratio.rs、lumped_mass.rs | [独立釣合いと修正後の公開経路](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md#1680-の修正後の照合) | 二次設計 | 🔶（単一剛床での算定保留。並進架構等による再評価・Validation未） |
+| 1683 | 複数剛床・シェル床の柱の層間変位相殺 | sepika-design-jp / sepika-solver | tests/multi_floor_torsional_cancellation.rs | [一様変位と線形応答の照合](複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md#再現と未確認の範囲) | 二次設計 | 🔶（各1例の柱比とRe・Fesの算定可否。設計値の採用・Validation未） |
 | 718 | Fes 算定不能の伝播 | sepika-design-jp / sepika-app / sepika-job | secondary/holding_capacity・stiffness_ratio・eccentricity、summary、actions/design/holding、lumped_mass | [独立期待値と直接入口](Fes算定不能の伝播_Issue718_2026-10.md#独立期待値と直接入口) | 横断 | 🔶（Scope 内の自動 Verification 成功、手動 GUI・原典/Validation・最終ゲートは未確認） |
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測)、[柱4材端の形成荷重（#1160）](剛域_保有水平耐力_系レベル検証.md#柱4材端の形成荷重を独立に照合する模型) | P5 | 🔶（弧長削除、固有材端の初回降伏の識別、1層門形架構の柱4材端でVerification。4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
