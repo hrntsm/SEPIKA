@@ -21,7 +21,7 @@ G 3106の改正原案表1は、SM400A・B、SM490A・Bの鋼板・鋼帯・形�
 
 ## 製品入口
 
-- `sepika-design-jp/tests/src_h_steel_product.rs` は公開 `SrcDesign::check` の梁と柱に同じ需要を与え、SN400B、SS400、SM400Aが独立の比で不適合になることを確認する。同じ形状・需要でSTK・STKR・STKN・BCR・BCPを割り当てたときは、部材種別・断面・鋼管材種を含む理由付き未算定になる。種類記号不足、SS490の溶接条件、SN400Cの板厚下限、TMCP325・355の認定条件の理由も照合する。
+- `sepika-design-jp/tests/src_h_steel_product.rs` は公開 `SrcDesign::check` の梁と柱に同じ需要を与え、SN400B、SS400、SM400Aが独立の比で不適合になることを確認する。同じ形状・需要でSTK・STKR・STKN・BCR・BCPを割り当てたときは、部材種別・断面・鋼管材種を含む理由付き未算定になる。種類記号不足、SS490の溶接条件、SN400Cの板厚下限、TMCP325・355の認定条件の理由も照合する。実板厚の過大・ゼロ・非有限が重なる場合も、鋼管材には形状との不一致を、適用できるH形鋼材には材種を含む板厚の理由を返すことを確認する。
 - App の `src_h_steel_product_results_survive_project_save_and_old_contract_requires_recheck` と独立MCPの `mcp_src_h_steel_product_uses_saved_long_combination` は、単部材の長期組合せを実際に解析して検定する。SN400Bの比と不適合、STK400の理由付き未算定の伝達を確認する。OVIKAは旧検定版の算定済み検定を失効させ、保存した内力で再検定する。独立MCPは理由を要素IDと位置とともに返す。
 - 時刻歴の簡易検定については、梁が部材検定の共通入口、柱が `SrcDesign::check_outcomes` を通ることをコードで確認した。時刻歴の個別ケース、手動GUI操作、MCP外部通信および認定製品の実験Validationは未確認。
 
@@ -29,4 +29,4 @@ G 3106の改正原案表1は、SM400A・B、SM490A・Bの鋼板・鋼帯・形�
 
 ## ローカル検証
 
-Windowsのstable 1.100.0で公開一次検定1件、部材種別5件、AppのGUI feature付きライブラリ1294件（3件除外）、MCPのmcp feature付きライブラリ152件が成功した。Appのライブラリはローカルのコンパイルで最適化を無効にし、スタックを16 MiBにして全件を実行した。変更4クレートのClippy `--all-targets -- -D warnings`、`cargo fmt --all --check`、`cargo run -p xtask --locked -- check-docs`、`mdbook build docs` が成功した。
+Windowsのstable 1.100.0で設計ライブラリ695件（#912の回帰4件を含む）、公開一次検定2件、部材種別5件、AppのGUI feature付きライブラリ1295件（3件は既定で除外）、MCPのmcp feature付きライブラリ152件が成功した。Appのライブラリはローカルのコンパイルで最適化を無効にし、スタックを16 MiBにして全件を実行した。変更4クレートのClippy `--all-targets -- -D warnings`、`cargo fmt --all --check`、`cargo run -p xtask --locked -- check-docs`、`mdbook build docs` が成功した。
