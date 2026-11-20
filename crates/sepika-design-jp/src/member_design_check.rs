@@ -289,6 +289,7 @@ pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
 /// 部材ループ（DesignCtx 組み立て → 危険断面位置での検定）のほか、
 /// 大梁の長期たわみ、PCa 水平接合面検定と節点単位検定も含む。床の小梁・スラブ設計は
 /// 呼び出し側（`sepika-app`）の責務とする。鋼材入力不備は対象ID付きエラー。
+/// BRB製品属性が同じブレースを複数回参照する場合、入力内力の各位置に部材ID付きの未検定を返す。
 pub fn run_member_design_checks(
     model: &Model,
     member_forces: &[(ElemId, MemberForces)],
@@ -301,7 +302,10 @@ pub fn run_member_design_checks(
     }
     let mut brb_by_id = HashMap::new();
     for attr in &model.brb_attrs {
-        brb_by_id.entry(attr.elem).or_insert(attr);
+        brb_by_id
+            .entry(attr.elem)
+            .and_modify(|product| *product = None)
+            .or_insert(Some(attr));
     }
     let brb_axes: HashMap<_, _> = member_forces
         .iter()
@@ -353,21 +357,33 @@ pub fn run_member_design_checks(
         if !frame_check_target(elem) {
             continue;
         }
-        let brb = brb_by_id.get(elem_id).copied();
-        if brb.is_some() && MemberKind::try_of_element(elem, model).ok() != Some(MemberKind::Brace)
-        {
+        let product = brb_by_id.get(elem_id);
+        let brb_input_error = match product {
+            Some(_) if MemberKind::try_of_element(elem, model).ok() != Some(MemberKind::Brace) => {
+                Some(
+                    "BRB属性の参照先には、断面用途がブレースのブレース要素を指定してください"
+                        .into(),
+                )
+            }
+            Some(None) => Some(format!(
+                "部材 ID {} を参照するBRB製品属性が重複しています",
+                elem_id.0
+            )),
+            _ => None,
+        };
+        if let Some(reason) = brb_input_error {
             member_checks.extend(mf.at.iter().map(|(pos, _)| {
                 (
                     *elem_id,
                     *pos,
                     CheckOutcome::Skipped {
-                        reason: "BRB属性の参照先には、断面用途がブレースのブレース要素を指定してください"
-                            .into(),
+                        reason: reason.clone(),
                     },
                 )
             }));
             continue;
         }
+        let brb = product.copied().flatten();
         let sec = elem
             .section
             .and_then(|sid| model.sections.get(sid.index()))

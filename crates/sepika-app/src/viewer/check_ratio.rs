@@ -2377,6 +2377,30 @@ mod issue901_tests {
     }
 
     #[test]
+    fn brb_duplicate_products_display_member_and_reason_without_ratio() {
+        for limits in [[1_000_000.0, 500_000.0], [500_000.0, 1_000_000.0]] {
+            let mut app = crate::app::brb_product_tests::analyzed_short_compression_app(&limits);
+            app.ui.view.check_ratio_label_all = true;
+            let checks = &app.current_design_results().unwrap().member_checks;
+            let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
+            let id = format!("部材 ID {}", checks[0].elem.0);
+            assert!(kinds.is_empty());
+            assert_eq!(rows.len(), 2);
+            assert!(rows.iter().all(|row| {
+                matches!(&row.verdict, RowVerdict::Skipped(reason)
+                    if reason.contains(&id) && reason.contains("BRB製品属性が重複"))
+            }));
+            assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
+            let rendered = render_two_node_checks(&mut app);
+            assert!(is_gray_member(&rendered));
+            assert!(rendered
+                .shapes
+                .iter()
+                .any(|s| has_text(&s.shape, &id) && has_text(&s.shape, "BRB製品属性が重複")));
+        }
+    }
+
+    #[test]
     fn brb_nonfinite_axial_displays_unchecked_and_preserves_length_ng() {
         for (limit_mm, expected_ng) in [(6000.0, None), (2400.0, Some((1.25, false)))] {
             let mut app = crate::app::brb_product_tests::app_with_nonfinite_brb_axial(limit_mm);

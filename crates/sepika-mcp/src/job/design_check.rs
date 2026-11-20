@@ -668,6 +668,67 @@ mod tests {
     }
 
     #[test]
+    fn brb_duplicate_products_mcp_counts_unchecked_in_either_order() {
+        let mut duplicate_rows = None;
+        for (limits, expected_ratio, expected_ng) in [
+            (&[1_000_000.0][..], Some(0.75), 0),
+            (&[500_000.0][..], Some(1.50), 2),
+            (&[1_000_000.0, 500_000.0][..], None, 0),
+            (&[500_000.0, 1_000_000.0][..], None, 0),
+        ] {
+            let model = brb_input::short_compression_model(limits);
+            let JobOutcome::DesignCheck {
+                summary,
+                member_force_rows,
+                ..
+            } = compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_combination: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            else {
+                panic!();
+            };
+            assert_eq!(summary["term"], "short", "{summary}");
+            assert_eq!(summary["n_checks"], 2, "{summary}");
+            assert_eq!(summary["n_ng"], expected_ng, "{summary}");
+            assert_eq!(member_force_rows.len(), 2);
+            for (elem, _, forces) in member_force_rows {
+                assert_eq!(elem, brb_input::BRACE.0);
+                assert!((forces[0] + 750_000.0).abs() < 1e-6, "{forces:?}");
+            }
+            let ok = expected_ratio.is_some() && expected_ng == 0;
+            assert_eq!(summary["all_members_checked_and_ok"], ok, "{summary}");
+            assert_eq!(summary["all_checked_and_ok"], ok, "{summary}");
+            let skipped = summary["member_skipped"].as_array().unwrap();
+            if let Some(expected) = expected_ratio {
+                assert_eq!(summary["n_skipped"], 0, "{summary}");
+                assert!(skipped.is_empty());
+                let ratio = summary["max_ratio"].as_f64().unwrap();
+                assert!((ratio - expected).abs() < 1e-12, "{summary}");
+            } else {
+                assert_eq!(summary["n_skipped"], 2, "{summary}");
+                assert!(summary["max_ratio"].is_null(), "{summary}");
+                assert_eq!(skipped.len(), 2);
+                for (row, position) in skipped.iter().zip([0.0, 1.0]) {
+                    assert_eq!(row["elem"], brb_input::BRACE.0);
+                    assert_eq!(row["position"], position);
+                    let reason = row["reason"].as_str().unwrap();
+                    assert!(reason.contains(&format!("部材 ID {}", brb_input::BRACE.0)));
+                    assert!(reason.contains("BRB製品属性が重複"));
+                }
+                if let Some(first) = &duplicate_rows {
+                    assert_eq!(skipped, first);
+                }
+                duplicate_rows = Some(skipped.clone());
+            }
+        }
+    }
+
+    #[test]
     fn brb_nonfinite_axial_preserves_unchecked_and_length_ng_in_mcp_summary() {
         use sepika_element::frame::beam::MemberForces;
 
