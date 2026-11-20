@@ -62,6 +62,42 @@ fn has_nonzero_stability_length(ctx: &DesignCtx) -> bool {
         })
 }
 
+pub(super) enum ColumnLateralBuckling {
+    OutsideScope,
+    NoStrongAxisBending,
+    Confirmed(f64),
+    Unconfirmed(&'static str),
+}
+
+impl ColumnLateralBuckling {
+    pub(super) fn resolve(ctx: &DesignCtx, sec: &Section, forces: &MemberForcesAt) -> Self {
+        if ctx.kind != crate::MemberKind::Column || !super::is_symmetric_h_section(sec) {
+            return Self::OutsideScope;
+        }
+        if forces.mz == 0.0 {
+            return Self::NoStrongAxisBending;
+        }
+        match ctx.column_lateral_buckling_length {
+            Some(Ok(length_mm)) if length_mm.is_finite() && length_mm > 0.0 => {
+                Self::Confirmed(length_mm)
+            }
+            Some(Ok(_)) => {
+                Self::Unconfirmed("実材軸長を有限な正値で取得できないため、横座屈長さは未算定です")
+            }
+            Some(Err(reason)) => Self::Unconfirmed(reason),
+            None => Self::Unconfirmed(super::UNCONFIRMED_COLUMN_END_SUPPORTS),
+        }
+    }
+
+    pub(super) fn length_mm(&self, physical_length_mm: f64) -> Option<f64> {
+        match *self {
+            Self::OutsideScope => Some(physical_length_mm),
+            Self::Confirmed(length_mm) => Some(length_mm),
+            Self::NoStrongAxisBending | Self::Unconfirmed(_) => None,
+        }
+    }
+}
+
 pub(super) fn asymmetric_built_h_combination_reasons(
     forces: &MemberForcesAt,
     ctx: &DesignCtx,
@@ -368,18 +404,17 @@ pub(super) fn check_asymmetric_built_h(
 /// 鉄骨造柱の断面検定（鋼構造設計規準）。
 ///
 /// 組合せ応力を算定できない場合は、独立した軸曲げの不適合のみを検定比として返す。
-pub(crate) fn check_column(
+pub(super) fn check_column(
     forces: &MemberForcesAt,
     sec: &Section,
-    mat: &Material,
     ctx: &DesignCtx,
-    f: f64,
+    a: ColumnAllowables,
     lambda: f64,
     h_combined_reason: Option<&str>,
-) -> Result<CheckOutcome, String> {
+    lateral_buckling: &ColumnLateralBuckling,
+) -> CheckOutcome {
     let h = sec.depth;
     let (shape, tf, _) = shape_of(sec);
-    let a = column_allowables(sec, mat, ctx, f, Some(lambda))?;
     let ColumnAllowables {
         area,
         z_strong,
@@ -436,26 +471,51 @@ pub(crate) fn check_column(
         LoadTerm::Short => "短期",
     };
     let basis = format!("鋼構造設計規準 {term_label} 柱: {axial_basis}{buckling_note}");
+    let (fb_strong_detail, ratio_label) = match lateral_buckling {
+        ColumnLateralBuckling::Unconfirmed(_) => {
+            (format!("fbX上限={fb_strong:.4} N/mm²"), "軸曲げ比の下限")
+        }
+        ColumnLateralBuckling::NoStrongAxisBending => {
+            ("fbX=対象外（強軸曲げなし）".into(), "軸曲げ比")
+        }
+        _ => (format!("fbX={fb_strong:.4} N/mm²"), "軸曲げ比"),
+    };
+    let lateral_detail = match *lateral_buckling {
+        ColumnLateralBuckling::Confirmed(length_mm) => {
+            let mut detail = format!(
+                "採用横座屈長さ lb={length_mm} mm（両実材端で横移動・ねじれを拘束し、中間横補剛なしを確認）"
+            );
+            if ctx
+                .steel_attr
+                .as_ref()
+                .is_some_and(|a| a.lb_direct.is_some())
+            {
+                detail.push_str("。梁用のlb直接入力は不使用");
+            }
+            detail
+        }
+        _ => String::new(),
+    };
     let axial_bending = CheckComponent {
         kind: CheckKind::AxialBending,
         ratio: ratio_axial_bend,
         detail: format!(
-            "σax={:.4} N/mm², σbX={:.4} N/mm², σbY={:.4} N/mm², fc={:.4} N/mm², fbX={:.4} N/mm², \
-fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
-            axial_stress, sigma_bx, sigma_by, fc_val, fb_strong, fb_weak, lambda, ratio_axial_bend,
+            "σax={:.4} N/mm², σbX={:.4} N/mm², σbY={:.4} N/mm², fc={:.4} N/mm², {fb_strong_detail}, \
+fbY={:.4} N/mm², λ={:.3}, {ratio_label}={:.4}",
+            axial_stress, sigma_bx, sigma_by, fc_val, fb_weak, lambda, ratio_axial_bend,
         ),
     };
     if let Some(reason) = h_combined_reason {
         if ratio_axial_bend.is_finite() && ratio_axial_bend > 1.0 {
-            return Ok(CheckOutcome::Checked(CheckResult {
+            return CheckOutcome::Checked(CheckResult {
                 basis: format!("{basis}。{reason}"),
-                detail: String::new(),
+                detail: lateral_detail,
                 components: vec![axial_bending],
-            }));
+            });
         }
-        return Ok(CheckOutcome::Skipped {
+        return CheckOutcome::Skipped {
             reason: reason.into(),
-        });
+        };
     }
 
     let (ay, az) = if matches!(
@@ -491,9 +551,9 @@ fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
             tau_y, tau_z, tau, fs_val, ratio_shear
         )
     };
-    Ok(CheckOutcome::Checked(CheckResult {
+    CheckOutcome::Checked(CheckResult {
         basis: format!("{basis}, せん断 von Mises"),
-        detail: String::new(),
+        detail: lateral_detail,
         components: vec![
             axial_bending,
             CheckComponent {
@@ -502,7 +562,7 @@ fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
                 detail: shear_detail,
             },
         ],
-    }))
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -525,6 +585,7 @@ pub(crate) fn column_allowables(
     ctx: &DesignCtx,
     f: f64,
     checked_slenderness: Option<f64>,
+    lb_mm: Option<f64>,
 ) -> Result<ColumnAllowables, String> {
     let term = ctx.term;
     let h = sec.depth;
@@ -544,14 +605,14 @@ pub(crate) fn column_allowables(
     let fc_val = steel_fc(f, mat.young, lambda, term);
 
     let c = steel_c_factor(ctx, false);
-    let fb_strong = match shape {
-        ShapeCategory::H => match ctx.steel_fb_basis {
+    let fb_strong = match (shape, lb_mm) {
+        (ShapeCategory::H, Some(lb_mm)) => match ctx.steel_fb_basis {
             SteelFbBasis::Standard1973 => {
                 let af = b * tf;
                 let i_t = steel_i_t(b, tf, h, tw);
-                steel_fb_h(f, term, ctx.length, i_t, h, af, c)
+                steel_fb_h(f, term, lb_mm, i_t, h, af, c)
             }
-            SteelFbBasis::Asd2019 if ctx.length <= 1e-9 => ft_val,
+            SteelFbBasis::Asd2019 if lb_mm <= 1e-9 => ft_val,
             SteelFbBasis::Asd2019 => {
                 let iz = sec.iz;
                 let iw = steel_warping_constant(sec, tf);
@@ -559,9 +620,7 @@ pub(crate) fn column_allowables(
                 let e = mat.young;
                 let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
                 let p_lambda_b = steel_p_lambda_b(ctx, false);
-                steel_fb_h_asd2019(
-                    f, term, ctx.length, iz, iw, j, e, g, z_strong, c, p_lambda_b,
-                )
+                steel_fb_h_asd2019(f, term, lb_mm, iz, iw, j, e, g, z_strong, c, p_lambda_b)
             }
         },
         _ => ft_val,
@@ -615,6 +674,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
+            column_lateral_buckling_length: Some(Ok(3500.0)),
             ..Default::default()
         };
         let result = SteelDesign
@@ -862,6 +922,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
+            column_lateral_buckling_length: Some(Ok(3500.0)),
             steel_fb_basis: SteelFbBasis::Standard1973,
             ..Default::default()
         };
@@ -882,8 +943,7 @@ mod tests {
     }
 
     /// AIJ-ASD19 fb（`SteelFbBasis::Asd2019`）: H形柱の fbX がその式の
-    /// 手計算と一致することを確認する（柱の階高 `ctx.length` を lb として
-    /// 用いる）。
+    /// 手計算と一致することを確認する。
     #[test]
     fn test_column_check_fb_basis_asd2019_matches_hand_calc() {
         let sec = h_section(400.0, 200.0, 8.0, 13.0);
@@ -901,6 +961,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
+            column_lateral_buckling_length: Some(Ok(3500.0)),
             steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };

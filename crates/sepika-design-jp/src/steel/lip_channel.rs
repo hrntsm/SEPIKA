@@ -150,6 +150,7 @@ mod tests {
                         lb: count.map(|_| 1000.0),
                         steel_attr: Some(SteelDesignAttr {
                             lateral_brace_count: count,
+                            column_lateral_buckling_end_supports: None,
                             elem: sepika_core::ids::ElemId(0),
                             joint_flange_loss: 0.0,
                             joint_web_loss: 0.0,

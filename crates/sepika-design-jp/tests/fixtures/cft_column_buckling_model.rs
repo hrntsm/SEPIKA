@@ -11,6 +11,7 @@ pub fn direct_lengths(elem: ElemId, strong: Option<f64>, weak: Option<f64>) -> S
         scallop_web_loss: 0.0,
         lb_direct: None,
         lateral_brace_count: None,
+        column_lateral_buckling_end_supports: None,
         lk_y_direct: strong,
         lk_z_direct: weak,
         c_direct: None,

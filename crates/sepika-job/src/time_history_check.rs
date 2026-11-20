@@ -275,6 +275,7 @@ mod tests {
             scallop_web_loss: 15.0,
             lb_direct: None,
             lateral_brace_count: None,
+            column_lateral_buckling_end_supports: None,
             lk_y_direct: None,
             lk_z_direct: None,
             c_direct: None,

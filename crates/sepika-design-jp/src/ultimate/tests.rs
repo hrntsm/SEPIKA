@@ -829,6 +829,7 @@ pub(super) fn cft_test_direct_lengths() -> Vec<sepika_core::model::SteelDesignAt
         scallop_web_loss: 0.0,
         lb_direct: None,
         lateral_brace_count: None,
+        column_lateral_buckling_end_supports: None,
         lk_y_direct: Some(3000.0),
         lk_z_direct: Some(3000.0),
         c_direct: None,

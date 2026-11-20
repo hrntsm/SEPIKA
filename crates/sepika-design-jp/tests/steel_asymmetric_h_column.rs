@@ -58,6 +58,7 @@ fn column_flange_loss() -> SteelDesignAttr {
         scallop_web_loss: 0.0,
         lb_direct: None,
         lateral_brace_count: None,
+        column_lateral_buckling_end_supports: None,
         lk_y_direct: None,
         lk_z_direct: None,
         c_direct: None,
@@ -902,7 +903,14 @@ fn section_only_boundary_requires_zero_buckling_lengths_and_keeps_other_axial_re
         web_thick: 8.0,
     }
     .to_section(SectionId(0), "対称組立H".into());
-    let result = checked(check(&symmetric, &FORCES, &short_column_context()));
+    let result = checked(check(
+        &symmetric,
+        &FORCES,
+        &DesignCtx {
+            column_lateral_buckling_length: Some(Ok(3000.0)),
+            ..short_column_context()
+        },
+    ));
     assert!(
         !result.basis.contains("上下非対称組立H形鋼柱"),
         "{result:?}"

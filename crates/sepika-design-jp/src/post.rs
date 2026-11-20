@@ -526,9 +526,9 @@ pub fn design_post(model: &Model, sm: &SecondaryMember) -> PostDesignResult {
                 };
                 match crate::steel::SteelDesign.check_secondary_post(&zero, sec, mat, &ctx) {
                     CheckOutcome::Skipped { reason } => Err(reason),
-                    CheckOutcome::Checked(_) => {
-                        f.and_then(|f| crate::steel::column_allowables(sec, mat, &ctx, f, None))
-                    }
+                    CheckOutcome::Checked(_) => f.and_then(|f| {
+                        crate::steel::column_allowables(sec, mat, &ctx, f, None, Some(ctx.length))
+                    }),
                 }
             } else {
                 Err("断面形式・座屈条件が未確定です".into())

@@ -186,13 +186,23 @@ fn fixed_volume_signed_displacement_and_every_case_design_match_normal_results_a
             .collect();
         assert!(
             column_rows.iter().any(|row| {
-                row.complete && row.ratio.is_some_and(f64::is_finite) && row.evidence.is_some()
+                !row.complete
+                    && row.ratio.is_none()
+                    && row.reason.contains("中間横補剛なしが未確認")
+                    && row.evidence.is_some()
             }),
             "{column_rows:?}"
         );
-        assert!(column_rows
+        let girder_rows: Vec<_> = rows
             .iter()
-            .all(|row| !row.reason.contains("座屈長さ")));
+            .filter(|row| row.target == Some(ReferenceTarget::Member(ElemId(2))))
+            .collect();
+        assert!(
+            girder_rows.iter().any(|row| {
+                row.complete && row.ratio.is_some_and(f64::is_finite) && row.evidence.is_some()
+            }),
+            "{girder_rows:?}"
+        );
     }
 }
 

@@ -642,6 +642,12 @@ pub fn run_member_design_checks(
             term: options.term,
             kind,
             length,
+            column_lateral_buckling_length: (structure == StructureKind::S
+                && kind == MemberKind::Column
+                && crate::steel::is_symmetric_h_section(sec))
+            .then(|| {
+                crate::steel::column_lateral_buckling_length(model, elem, steel_attr.as_ref())
+            }),
             clear_length: Some(clear_span),
             lb: None,
             lk_y,
@@ -734,13 +740,13 @@ pub fn run_member_design_checks(
                     Some(sepika_core::section_shape::SectionShape::SrcColumnRect { .. })
                 )
                 && options.long_member_forces.is_some();
-            let mut src_incomplete = None;
+            let mut check_incomplete = None;
             let mut outcome = if eccentric_brace_compression {
                 CheckOutcome::Skipped { reason: "非0XYZ偏心ブレースの圧縮検定には強軸・弱軸の座屈長さの直接指定が必要です。実材軸長・剛体接続長からは自動算定しません".into() }
             } else if src_seismic_column {
                 let (outcome, incomplete) =
                     crate::SrcDesign.check_with_incomplete(&mfa, sec, mat, &ctx, missing_gravity);
-                src_incomplete = incomplete;
+                check_incomplete = incomplete;
                 outcome
             } else if missing_gravity {
                 CheckOutcome::Skipped {
@@ -761,6 +767,11 @@ pub fn run_member_design_checks(
                         Err(reason) => CheckOutcome::Skipped { reason },
                     }
                 }
+            } else if structure == StructureKind::S && kind == MemberKind::Column {
+                let (outcome, incomplete) =
+                    crate::SteelDesign.check_with_incomplete(&mfa, sec, mat, &ctx);
+                check_incomplete = incomplete.map(str::to_owned);
+                outcome
             } else {
                 checker.check(&mfa, sec, mat, &ctx)
             };
@@ -786,7 +797,7 @@ pub fn run_member_design_checks(
                         .push_str(&format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
                 }
             }
-            let incomplete = combine_incomplete_reasons(src_incomplete, torsion_reason(&mfa));
+            let incomplete = combine_incomplete_reasons(check_incomplete, torsion_reason(&mfa));
             push_strength_outcome(
                 &mut member_checks,
                 *elem_id,
