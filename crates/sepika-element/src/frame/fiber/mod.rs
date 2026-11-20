@@ -3,7 +3,10 @@ use crate::frame::member_load::FrameDeadLoadMap;
 use sepika_core::dof::DofMap;
 use sepika_core::error::RebarGeometryError;
 use sepika_core::ids::NodeId;
-use sepika_core::model::{AnalysisKind, HysteresisModel, MemberLoad, SectionMassProperties};
+use sepika_core::material_grade::{steel_f_value_issue, steel_f_value_prefix};
+use sepika_core::model::{
+    AnalysisKind, HysteresisModel, Material, MemberLoad, SectionMassProperties,
+};
 use sepika_core::section_shape::SectionShape;
 use sepika_material::uniaxial::{MenegottoPinto, UniaxialMaterial};
 use sepika_section::fiber::{Fiber, FiberSection};
@@ -92,20 +95,18 @@ pub(crate) fn resolve_fiber_yield(
     let steel = match model.element_section(data).and_then(|s| s.shape.as_ref()) {
         Some(
             SectionShape::SrcBeamRect {
-                steel_flange_thick, ..
+                steel_web_thick,
+                steel_flange_thick,
+                ..
             }
             | SectionShape::SrcColumnRect {
-                steel_flange_thick, ..
+                steel_web_thick,
+                steel_flange_thick,
+                ..
             },
-        ) => {
-            let thick = *steel_flange_thick;
-            model.element_steel_material(data).and_then(|m| {
-                if sepika_core::material_grade::steel_f_value_issue(&m.name, thick).is_some() {
-                    return None;
-                }
-                sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
-            })
-        }
+        ) => model
+            .element_steel_material(data)
+            .and_then(|m| resolve_src_fiber_fy(m, *steel_web_thick, *steel_flange_thick).ok()),
         Some(
             box_shape @ SectionShape::CftBox { thick, .. }
             | box_shape @ SectionShape::CftPipe { thick, .. },
@@ -114,15 +115,37 @@ pub(crate) fn resolve_fiber_yield(
                 .box_thicknesses()
                 .map_or(*thick, |(t1, t2)| t1.max(t2));
             model.element_steel_material(data).and_then(|m| {
-                if sepika_core::material_grade::steel_f_value_issue(&m.name, thick).is_some() {
+                if steel_f_value_issue(&m.name, thick).is_some() {
                     return None;
                 }
-                sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
+                steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
         }
         _ => main,
     };
     FiberYield { main, rebar, steel }
+}
+
+pub(crate) fn resolve_src_fiber_fy(
+    steel: &Material,
+    web_thick_mm: f64,
+    flange_thick_mm: f64,
+) -> Result<f64, String> {
+    for thickness_mm in [web_thick_mm.max(flange_thick_mm), flange_thick_mm] {
+        if let Some(reason) = steel_f_value_issue(&steel.name, thickness_mm) {
+            return Err(reason);
+        }
+    }
+    steel_f_value_prefix(&steel.name, flange_thick_mm)
+        .or(steel.fy)
+        .filter(|fy| fy.is_finite() && *fy > 0.0)
+        .ok_or_else(|| {
+            if steel.fy.is_none() {
+                "材種名から降伏強度 fy を解決できず、明示 fy も未入力です。材料タブで正の有限値を設定してください。".into()
+            } else {
+                "材種名から降伏強度 fy を解決できず、明示 fy は正の有限値が必要です。材料タブで設定を見直してください。".into()
+            }
+        })
 }
 
 /// 断面形状が生成するファイバ領域の降伏点が [`FiberYield`] から解決できるか。
@@ -253,7 +276,7 @@ pub(crate) fn resolve_steel_fiber_fy(
         _ => None,
     };
     if let (Some(m), Some(t)) = (steel_mat, thickness) {
-        if sepika_core::material_grade::steel_f_value_issue(&m.name, t).is_some() {
+        if steel_f_value_issue(&m.name, t).is_some() {
             return None;
         }
     }
@@ -266,10 +289,7 @@ pub(crate) fn resolve_steel_fiber_fy(
                 steel_flange_thick, ..
             },
         ) => steel_mat
-            .and_then(|m| {
-                sepika_core::material_grade::steel_f_value_prefix(&m.name, *steel_flange_thick)
-                    .or(m.fy)
-            })
+            .and_then(|m| steel_f_value_prefix(&m.name, *steel_flange_thick).or(m.fy))
             .or(mat_fy),
         Some(
             box_shape @ SectionShape::CftBox { thick, .. }
@@ -279,7 +299,7 @@ pub(crate) fn resolve_steel_fiber_fy(
                 let thick = box_shape
                     .box_thicknesses()
                     .map_or(*thick, |(t1, t2)| t1.max(t2));
-                sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
+                steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
             .or(mat_fy),
         _ => mat_fy,
