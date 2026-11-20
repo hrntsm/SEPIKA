@@ -651,6 +651,17 @@ fn draw_peak_check(
     } else {
         "最大応力に対する検定（短期）"
     });
+    let has_brb_attr = model.brb_attrs.iter().any(|attr| attr.elem == elem.id);
+    if has_brb_attr && MemberKind::try_of_element(elem, model).ok() != Some(MemberKind::Brace) {
+        ui.colored_label(
+            theme::GRAY_600,
+            format!(
+                "検定不能: 部材 ID {}: BRB属性の参照先には、断面用途がブレースのブレース要素を指定してください",
+                elem.id.0
+            ),
+        );
+        return;
+    }
     draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
@@ -740,7 +751,7 @@ fn draw_peak_check(
         StructureKind::Cft => {
             sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
         }
-        StructureKind::S if !model.brb_attrs.iter().any(|a| a.elem == elem.id) => {
+        StructureKind::S if !has_brb_attr => {
             sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
                 elem.id,
                 kind,
@@ -1534,6 +1545,45 @@ mod tests {
                     "{text:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn steel_peak_check_reports_misassigned_brb_attribute_without_a_ratio() {
+        use crate::app::steel_column_k_tests::input;
+        use sepika_core::model::BrbAttr;
+
+        let mut app = App::default();
+        assert!(app.load_model(input::portal(1.0)));
+        app.core.model.steel_design_attrs[0].lk_z_direct = Some(6000.0);
+        app.core.model.brb_attrs.push(BrbAttr {
+            elem: ElemId(0),
+            allowable_axial_short: Some(1_000_000.0),
+            critical_length: Some(2000.0),
+            length_reduction: Some(300.0),
+        });
+
+        for (index, kind) in [
+            (0, ElementKind::Beam),
+            (2, ElementKind::Beam),
+            (
+                2,
+                ElementKind::Brace {
+                    tension_only: false,
+                },
+            ),
+        ] {
+            let elem = &mut app.core.model.elements[index];
+            elem.kind = kind;
+            let id = elem.id;
+            app.core.model.brb_attrs[0].elem = id;
+            let text = peak_check_text(&app, index, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+            assert!(
+                text.contains(&format!("検定不能: 部材 ID {}: BRB属性", id.0)),
+                "{text}"
+            );
+            assert!(text.contains("断面用途がブレースのブレース要素"), "{text}");
+            assert!(!text.contains("検定比"), "{text}");
         }
     }
 
