@@ -35,7 +35,8 @@ pub struct SPanelInput {
     pub design_moment: Option<f64>,
 }
 
-/// 上下フランジ位置が一致する標準形式の検定。未検証・段違いは理由付きエラー。
+/// 上下フランジ位置が一致する標準形式の検定。
+/// フランジ位置の未検証・不整合・段違い、または非有限な形状係数は理由付きエラー。
 pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
     let [left, right] = inp
         .beam_flanges
@@ -52,8 +53,14 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
     }) {
         return Err("dbとフランジ位置が不整合です".into());
     }
-    let ve = inp.geometry.effective_volume(inp.db);
     let kappa = inp.geometry.kappa();
+    if !kappa.is_finite() {
+        return Err(format!(
+            "仕口パネルの形状係数が非有限です（κ={kappa}、断面諸元={:?}）",
+            inp.geometry
+        ));
+    }
+    let ve = inp.geometry.effective_volume(inp.db);
     let shape_label = match inp.geometry.kind {
         PanelShapeKind::H { .. } => "H形",
         PanelShapeKind::HWeak => "H形(弱軸)",
