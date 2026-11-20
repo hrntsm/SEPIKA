@@ -18,7 +18,7 @@ pub struct SPanelInput {
     pub geometry: PanelGeometry,
     /// 梁フランジ板厚中心間距離 db `[mm]`。
     pub db: f64,
-    /// パネルの降伏強さ F 値 [N/mm²]。
+    /// パネルの基準強度 F [N/mm²]。非有限値は検定エラー。
     pub fy: f64,
     /// 軸力比 n = N / (Fy・A)（符号は問わない。内部で絶対値を用いる）。
     pub axial_ratio: f64,
@@ -31,7 +31,7 @@ pub struct SPanelInput {
     /// 下柱せん断力 `[N]`。
     pub col_shear_lower: f64,
     /// 柱の対象主軸の設計用モーメント `pM` `[N·mm]`。指定時は材端力を再加算しない。
-    /// 未指定時は `bML + bMR − (cQU + cQL) db/2` で組み立てる。
+    /// 未指定時は `bML + bMR − (cQU + cQL) db/2` で組み立てる。使用する `pM` が非有限なら検定エラー。
     pub design_moment: Option<f64>,
 }
 
@@ -68,6 +68,9 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
         PanelShapeKind::Pipe => "円形",
     };
 
+    if !inp.fy.is_finite() {
+        return Err("仕口パネルの基準強度 F は有限値 [N/mm²] が必要です".into());
+    }
     let n = inp.axial_ratio.abs();
     let reduction = if n >= 1.0 { 0.0 } else { (1.0 - n * n).sqrt() };
 
@@ -77,6 +80,9 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
         inp.beam_moment_left + inp.beam_moment_right
             - (inp.col_shear_upper + inp.col_shear_lower) * inp.db / 2.0
     });
+    if !p_m.is_finite() {
+        return Err("設計用パネルモーメントは有限値 [N·mm] が必要です".into());
+    }
 
     let ratio = if p_my > 0.0 {
         p_m.abs() / p_my
