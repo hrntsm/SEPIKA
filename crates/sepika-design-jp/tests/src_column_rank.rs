@@ -6,6 +6,10 @@ use sepika_design_jp::secondary::holding_capacity::MemberRank;
 use sepika_design_jp::secondary::src_rank::{src_column_rank, src_column_rank_ratios};
 
 fn column(web_mm: f64, flange_mm: f64) -> Section {
+    column_with_steel(400.0, 200.0, web_mm, flange_mm)
+}
+
+fn column_with_steel(height_mm: f64, width_mm: f64, web_mm: f64, flange_mm: f64) -> Section {
     let mut section = SectionShape::SrcColumnRect {
         b: 600.0,
         d: 600.0,
@@ -21,8 +25,8 @@ fn column(web_mm: f64, flange_mm: f64) -> Section {
                 legs_y: 2,
             },
         },
-        steel_height: 400.0,
-        steel_width: 200.0,
+        steel_height: height_mm,
+        steel_width: width_mm,
         steel_web_thick: web_mm,
         steel_flange_thick: flange_mm,
     }
@@ -347,4 +351,96 @@ fn invalid_geometry_or_strength_does_not_produce_ratios() {
     section.shape = None;
     let reason = src_column_rank_ratios(&section, Some(&steel), 24.0, 345.0, 0.0).unwrap_err();
     assert!(reason.contains("SRC 矩形柱の断面形状"), "{reason}");
+}
+
+#[test]
+fn src_column_rank_accepts_h_steel_on_geometry_limits_without_interference() {
+    let steel = steel("SN400B", None);
+    for (height_mm, width_mm, web_mm, n_expected, m_expected) in [
+        (
+            400.0,
+            200.0,
+            8.0,
+            0.292_370_604_915_024,
+            0.479_761_357_753_610,
+        ),
+        (
+            600.0,
+            100.0,
+            8.0,
+            0.297_773_458_894_517,
+            0.504_900_536_592_460,
+        ),
+        (
+            400.0,
+            600.0,
+            8.0,
+            0.245_958_396_220_166,
+            0.702_853_840_557_948,
+        ),
+        (
+            300.0,
+            90.0,
+            90.0,
+            0.225_800_135_280_932,
+            0.570_557_008_130_156,
+        ),
+    ] {
+        let section = column_with_steel(height_mm, width_mm, web_mm, 13.0);
+        let (n, m) = src_column_rank_ratios(&section, Some(&steel), 24.0, 345.0, 3_400_000.0)
+            .unwrap_or_else(|reason| panic!("H {height_mm}×{width_mm}×{web_mm}×13: {reason}"));
+        assert_abs_diff_eq!(n, n_expected, epsilon = 1e-12);
+        assert_abs_diff_eq!(m, m_expected, epsilon = 1e-12);
+    }
+}
+
+#[test]
+fn src_column_rank_reports_which_steel_geometry_prevents_a_candidate() {
+    let steel = steel("SN400B", None);
+    for ([height_mm, width_mm, web_mm, flange_mm], expected) in [
+        (
+            [400.0, 90.0, 95.0, 13.0],
+            ["ウェブ厚 95 mm", "フランジ幅 90 mm", "超えています"],
+        ),
+        (
+            [650.0, 200.0, 8.0, 13.0],
+            ["鋼のせい 650 mm", "SRC 断面せい 600 mm", "超えています"],
+        ),
+        (
+            [600.001, 100.0, 8.0, 13.0],
+            ["鋼のせい 600.001 mm", "SRC 断面せい 600 mm", "超えています"],
+        ),
+        (
+            [400.0, 600.001, 8.0, 13.0],
+            ["鋼の幅 600.001 mm", "SRC 断面幅 600 mm", "超えています"],
+        ),
+        (
+            [300.0, 90.0, 90.001, 13.0],
+            ["ウェブ厚 90.001 mm", "フランジ幅 90 mm", "超えています"],
+        ),
+        (
+            [200.0, 200.0, 8.0, 100.0],
+            [
+                "ウェブ内法せい 0 mm",
+                "鋼材せい 200 mm",
+                "フランジ厚 100 mm",
+            ],
+        ),
+        (
+            [500.0, 200.0, 8.0, 13.0],
+            ["径 25 mm", "500×200×8×13 mm", "干渉します"],
+        ),
+        ([0.0, 200.0, 8.0, 13.0], ["SRC Hせい", "非有限", "非正"]),
+        ([400.0, f64::NAN, 8.0, 13.0], ["SRC H幅", "非有限", "非正"]),
+    ] {
+        let section = column_with_steel(height_mm, width_mm, web_mm, flange_mm);
+        let reason =
+            src_column_rank_ratios(&section, Some(&steel), 24.0, 345.0, 3_400_000.0).unwrap_err();
+        for detail in expected {
+            assert!(
+                reason.contains(detail),
+                "「{detail}」がありません: {reason}"
+            );
+        }
+    }
 }

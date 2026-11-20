@@ -49,7 +49,7 @@ pub fn src_wall_type(shear_failure: bool) -> MemberRank {
 
 /// SRC 矩形柱の部材種別用の候補値 `(N/N0, sM0/M0)` を返す。
 /// `fc` と `rebar_sy` は N/mm²、`n_ult` は N（圧縮正、引張は 0 扱い）。
-/// 入力不備や割当鉄骨材料と実板厚から基準強度を確定できない場合は理由を返す。
+/// 断面・配筋の幾何や強度・軸力の入力が不正な場合は理由を返す。
 pub fn src_column_rank_ratios(
     section: &Section,
     steel_material: Option<&Material>,
@@ -57,15 +57,17 @@ pub fn src_column_rank_ratios(
     rebar_sy: f64,
     n_ult: f64,
 ) -> Result<(f64, f64), String> {
-    let Some(SectionShape::SrcColumnRect {
-        b,
-        d,
-        ref rebar,
-        steel_height: sh,
-        steel_width: sb,
-        steel_web_thick: tw,
-        steel_flange_thick: tf,
-    }) = section.shape
+    let Some(
+        ref shape @ SectionShape::SrcColumnRect {
+            b,
+            d,
+            ref rebar,
+            steel_height: sh,
+            steel_width: sb,
+            steel_web_thick: tw,
+            steel_flange_thick: tf,
+        },
+    ) = section.shape
     else {
         return Err("SRC 矩形柱の断面形状が必要です".into());
     };
@@ -73,19 +75,12 @@ pub fn src_column_rank_ratios(
     let minimum_mm = crate::material_strength::src_h_steel_minimum_thickness_mm(steel)?;
     let s_f = crate::material_strength::section_steel_f(section, Some(steel))?;
     crate::material_strength::validate_src_h_steel_thickness(&steel.name, tw, tf, minimum_mm)?;
-    if [fc, rebar_sy, b, d]
-        .iter()
-        .any(|v| !v.is_finite() || *v <= 0.0)
-        || !n_ult.is_finite()
-    {
-        return Err("SRC 柱の外形寸法・コンクリート強度・主筋強度・軸力が不正です".into());
+    if [fc, rebar_sy].iter().any(|v| !v.is_finite() || *v <= 0.0) || !n_ult.is_finite() {
+        return Err("SRC 柱のコンクリート強度・主筋強度・軸力が不正です".into());
     }
-    if !sh.is_finite() || !sb.is_finite() || sh <= 2.0 * tf || sb <= 0.0 {
-        return Err("内蔵 H 形鋼の高さまたは幅が不正です".into());
-    }
-    rebar
-        .validate(b, d)
-        .map_err(|reason| format!("SRC 柱の配筋形状が不正です: {reason}"))?;
+    shape
+        .validate_src_geometry()
+        .map_err(|reason| format!("SRC 柱の断面・配筋形状が不正です: {reason}"))?;
     let edge = rebar.edge_steel(RectEdge::Top, b, d);
 
     let hw = sh - 2.0 * tf;

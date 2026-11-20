@@ -1,4 +1,4 @@
-use super::SectionShape;
+use super::{types::validate_src_steel_fit, SectionShape};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Primitive {
@@ -222,9 +222,7 @@ impl SectionGeometry {
                     ..
                 } = *shape
                 {
-                    if h > d || w > b || h <= 2.0 * tf || w < tw {
-                        return Err("SRC内蔵鉄骨の寸法が不正です".into());
-                    }
+                    validate_src_steel_fit(b, d, h, w, tw, tf)?;
                     rect([-h / 2.0, -h / 2.0 + tf], [-w / 2.0, w / 2.0], Some(1));
                     rect([h / 2.0 - tf, h / 2.0], [-w / 2.0, w / 2.0], Some(1));
                     rect(

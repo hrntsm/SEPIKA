@@ -1,5 +1,37 @@
 //! 断面形状の型定義。
 
+pub(super) fn validate_src_steel_fit(
+    b_mm: f64,
+    d_mm: f64,
+    h_mm: f64,
+    w_mm: f64,
+    tw_mm: f64,
+    tf_mm: f64,
+) -> Result<(), String> {
+    if h_mm > d_mm {
+        return Err(format!(
+            "内蔵 H 形鋼のせい {h_mm} mm が SRC 断面せい {d_mm} mm を超えています"
+        ));
+    }
+    if w_mm > b_mm {
+        return Err(format!(
+            "内蔵 H 形鋼の幅 {w_mm} mm が SRC 断面幅 {b_mm} mm を超えています"
+        ));
+    }
+    if tw_mm > w_mm {
+        return Err(format!(
+            "内蔵 H 形鋼のウェブ厚 {tw_mm} mm がフランジ幅 {w_mm} mm を超えています"
+        ));
+    }
+    if h_mm <= 2.0 * tf_mm {
+        let web_height_mm = h_mm - 2.0 * tf_mm;
+        return Err(format!(
+            "内蔵 H 形鋼のウェブ内法せい {web_height_mm} mm は正の値が必要です（鋼材せい {h_mm} mm、フランジ厚 {tf_mm} mm）"
+        ));
+    }
+    Ok(())
+}
+
 /// Parametric section shape definition.
 ///
 /// Each variant carries the minimal parameters needed to define the geometry.
@@ -270,19 +302,16 @@ impl SectionShape {
                 return Err(RebarGeometryError::InvalidDimension { field });
             }
         }
-        if h > d || w > b || tw > w || 2.0 * tf >= h {
-            return Err(RebarGeometryError::SectionGeometry(
-                "SRCのHは矩形内に収まり、webとflangeが正面積・非重複となる寸法が必要です".into(),
-            ));
-        }
-        let as_mm2 = 2.0 * w * tf + tw * (h - 2.0 * tf);
+        validate_src_steel_fit(b, d, h, w, tw, tf).map_err(RebarGeometryError::SectionGeometry)?;
+        let web_height_mm = h - 2.0 * tf;
+        let as_mm2 = 2.0 * w * tf + tw * web_height_mm;
         for value in [
             b * d - as_mm2,
             as_mm2,
             b * d.powi(3) / 12.0,
             d * b.powi(3) / 12.0,
             w * tf.powi(3) / 12.0,
-            tw * (h - 2.0 * tf).powi(3) / 12.0,
+            tw * web_height_mm.powi(3) / 12.0,
         ] {
             if !value.is_finite() || value <= 0.0 {
                 return Err(RebarGeometryError::SectionGeometry(
@@ -295,7 +324,8 @@ impl SectionShape {
             Self::SrcColumnRect { rebar, .. } => (rebar.bar_positions(b, d)?, rebar.main_dia),
             _ => unreachable!(),
         };
-        let radius = dia.designation_or_diameter_mm() / 2.0;
+        let diameter_mm = dia.designation_or_diameter_mm();
+        let radius = diameter_mm / 2.0;
         for (i, p) in points.iter().enumerate() {
             if p.x.abs() + radius > b / 2.0 || p.y.abs() + radius > d / 2.0 {
                 return Err(RebarGeometryError::SectionGeometry(format!(
@@ -306,14 +336,14 @@ impl SectionShape {
             for (cy, cz, width, height) in [
                 (0.0, (h - tf) / 2.0, w, tf),
                 (0.0, -(h - tf) / 2.0, w, tf),
-                (0.0, 0.0, tw, h - 2.0 * tf),
+                (0.0, 0.0, tw, web_height_mm),
             ] {
                 let dy = ((p.x - cy).abs() - width / 2.0).max(0.0);
                 let dz = ((p.y - cz).abs() - height / 2.0).max(0.0);
                 if dy.hypot(dz) < radius {
                     return Err(RebarGeometryError::SectionGeometry(format!(
-                        "SRC主筋{}が内蔵Hと干渉します",
-                        i + 1
+                        "SRC 主筋 {}（径 {diameter_mm} mm、中心位置 ({}, {}) mm）が内蔵 H 形鋼 {h}×{w}×{tw}×{tf} mm と干渉します",
+                        i + 1, p.x, p.y
                     )));
                 }
             }
