@@ -3,7 +3,7 @@
 use sepika_core::ids::{ElemId, StoryId};
 use sepika_core::model::{Model, Node};
 
-use super::story_columns::{checked_story_columns, mixed_story_connections};
+use super::story_columns::drift_story_columns;
 
 /// 柱 1 本の層間変位（加力方向）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -17,6 +17,7 @@ pub struct ColumnDrift {
 
 /// 上下階SLを結ぶ非分岐柱の水平変位差の絶対値 `[mm]` を返す。
 /// `disp` は節点ID順、`dir` は0=X・1=Y。対象変位の欠測・非有限値はErr。
+/// 対象柱のいずれかで上下階SL間の区間を一意に特定できない場合は層全体をErrとする。
 pub fn column_drifts(
     model: &Model,
     disp: &[[f64; 6]],
@@ -26,8 +27,7 @@ pub fn column_drifts(
     if dir > 1 {
         return Err(format!("層間変形角: 水平方向{dir}が不正です"));
     }
-    mixed_story_connections(model, story)?;
-    checked_story_columns(model, story)?
+    drift_story_columns(model, story)?
         .into_iter()
         .map(|col| {
             let top = &model.nodes[col.top.index()];
@@ -429,6 +429,63 @@ mod tests {
             "層間変位は |10−0|=10、got {}",
             drifts[0].drift
         );
+    }
+
+    #[test]
+    fn drift_1607_requires_unique_sl_ends_of_an_ordinary_split_column() {
+        let (mut model, top) = build_split_column_model();
+        model.stories[1].elevation = Some(3000.0);
+        model.nodes[2].coord[2] = 3000.0;
+        model.elements.swap(0, 1);
+        model.elements[0].id = ElemId(0);
+        model.elements[1].id = ElemId(1);
+        let mut disp = [[0.0; 6]; 3];
+        disp[1][0] = 18.0;
+        disp[2][0] = 2.0;
+
+        for (middle_mm, ambiguous_link) in [
+            (2999.5, "上階SLの柱1"),
+            (3000.5, "上階SLの柱1"),
+            (0.5, "下階SLの柱0"),
+        ] {
+            model.nodes[1].coord[2] = middle_mm;
+            let reason = column_drifts(&model, &disp, 0, top).unwrap_err();
+            assert!(reason.contains(ambiguous_link), "{reason}");
+            assert!(reason.contains("一意に特定できません"), "{reason}");
+            assert_eq!(max_column_drift(&model, &disp, 0, top), Err(reason));
+        }
+
+        model.nodes[1].coord[2] = 1500.0;
+        let expected = ColumnDrift {
+            elem: ElemId(1),
+            pos: [0.0, 0.0],
+            drift: 2.0,
+        };
+        assert_eq!(column_drifts(&model, &disp, 0, top), Ok(vec![expected]));
+        assert_eq!(max_column_drift(&model, &disp, 0, top), Ok(Some(expected)));
+    }
+
+    #[test]
+    fn drift_1607_distinguishes_a_link_at_an_eligible_column_from_an_excluded_branch() {
+        let (mut model, top) = build_split_column_model();
+        for (id, z) in [(3, 3999.5), (4, 2500.0), (5, -4000.0)] {
+            let mut node = model.nodes[1].clone();
+            node.id = NodeId(id);
+            node.coord[2] = z;
+            model.nodes.push(node);
+        }
+        for (id, nodes) in [(2, [2, 3]), (3, [1, 4]), (4, [3, 5])] {
+            let mut member = model.elements[0].clone();
+            member.id = ElemId(id);
+            member.nodes = nodes.map(NodeId).into_iter().collect();
+            model.elements.push(member);
+        }
+        let disp = [[0.0; 6]; 6];
+        assert_eq!(max_column_drift(&model, &disp, 0, top), Ok(None));
+
+        model.elements.remove(3);
+        let reason = max_column_drift(&model, &disp, 0, top).unwrap_err();
+        assert!(reason.contains("上階SLの柱2"), "{reason}");
     }
 
     /// 重心変位は中間節点（床レベル外）の変位を混ぜないこと。
