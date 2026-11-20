@@ -18,6 +18,7 @@ pub use steel::{
     big_lambda, plate_thickness, section_steel_f, steel_f_value, steel_f_value_prefix, steel_fc,
     steel_fs, steel_ft,
 };
+pub(crate) use steel::{src_h_steel_minimum_thickness_mm, validate_src_h_steel_thickness};
 
 #[cfg(test)]
 mod tests {

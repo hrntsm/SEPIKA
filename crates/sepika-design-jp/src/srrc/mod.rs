@@ -291,7 +291,7 @@ fn src_shear_check(
 
 /// SRC 梁・SRC 柱の断面検定
 /// （`SectionShape::SrcBeamRect`・`SrcColumnRect` を対象とする）。
-/// 短期地震時の柱せん断を算定できない場合、位置の結果を理由付き未算定とする。
+/// 内蔵 H 形鋼の材種・実板厚や短期地震時の柱せん断が適用条件を満たさない場合、理由付き未算定とする。
 pub struct SrcDesign;
 
 impl DesignCheck for SrcDesign {
@@ -350,13 +350,14 @@ impl SrcDesign {
             return Err("SRC検定: Fc未設定（Material.fc が None/0 です）".to_string());
         }
 
-        let shape = match &sec.shape {
-            Some(s @ (SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. })) => s,
-            _ => {
-                return Err("SRC検定: 断面形状不一致（Section.shape が SrcBeamRect/\
-                             SrcColumnRect ではありません）"
-                    .to_string());
+        let (shape, member, web_thick_mm, flange_thick_mm) = match &sec.shape {
+            Some(shape @ SectionShape::SrcBeamRect { steel_web_thick, steel_flange_thick, .. }) => {
+                (shape, "SRC梁", *steel_web_thick, *steel_flange_thick)
             }
+            Some(shape @ SectionShape::SrcColumnRect { steel_web_thick, steel_flange_thick, .. }) => {
+                (shape, "SRC柱", *steel_web_thick, *steel_flange_thick)
+            }
+            _ => return Err("SRC検定: 断面形状不一致（Section.shape が SrcBeamRect/SrcColumnRect ではありません）".into()),
         };
 
         if ctx.rebar_material.is_none() {
@@ -386,18 +387,18 @@ impl SrcDesign {
                          （断面タブで内蔵鉄骨の材料を割り当ててください）"
                 .to_string());
         };
-        let f_value = match crate::material_strength::section_steel_f(sec, Some(steel_mat)) {
-            Ok(f_value) => f_value,
-            Err(reason) => return Err(format!("SRC検定: {reason}")),
-        };
-        if sepika_core::material_grade::steel_f_value_prefix(
-            &steel_mat.name,
-            crate::material_strength::plate_thickness(sec),
-        )
-        .is_none()
-        {
-            return Err(format!("SRC検定: 内蔵鉄骨「{}」は対応する鋼材名ではなく、直接入力強度のSRC規準への適用根拠が未確定です", steel_mat.name));
-        }
+        let f_value = crate::material_strength::section_steel_f(sec, Some(steel_mat))
+            .map_err(|reason| format!("{member}検定: {reason}"))?;
+        crate::material_strength::src_h_steel_minimum_thickness_mm(steel_mat)
+            .and_then(|minimum_mm| {
+                crate::material_strength::validate_src_h_steel_thickness(
+                    &steel_mat.name,
+                    web_thick_mm,
+                    flange_thick_mm,
+                    minimum_mm,
+                )
+            })
+            .map_err(|reason| format!("{member}検定: 断面「{}」の{reason}", sec.name))?;
 
         match shape {
             SectionShape::SrcBeamRect {

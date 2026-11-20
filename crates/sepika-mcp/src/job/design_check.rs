@@ -337,6 +337,65 @@ mod tests {
         ));
     }
 
+    mod steel_product_input {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/src_h_steel_product_model.rs"
+        ));
+    }
+    mod steel_product_reference {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-design-jp/tests/fixtures/src_h_steel_product_reference.rs"
+        ));
+    }
+
+    #[test]
+    fn mcp_src_h_steel_product_uses_saved_long_combination() {
+        let summary = |model: &Model| {
+            let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+                model,
+                &JobParams {
+                    load_combination: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap() else {
+                panic!("DesignCheck");
+            };
+            summary
+        };
+        for column in [false, true] {
+            let (n, mz) = steel_product_reference::demand(column);
+            let checked = summary(&steel_product_input::model(column, "SN400B", n, mz));
+            assert_eq!(checked["n_checks"], 3, "{checked}");
+            assert_eq!(checked["n_ng"], 3, "{checked}");
+            assert_eq!(checked["n_skipped"], 0, "{checked}");
+            let ratio = checked["max_ratio"].as_f64().unwrap();
+            assert!(
+                (ratio - steel_product_reference::expected_ratio(column)).abs() < 1e-10,
+                "{checked}"
+            );
+
+            let skipped = summary(&steel_product_input::model(column, "STK400", n, mz));
+            assert_eq!(skipped["n_checks"], 3, "{skipped}");
+            assert_eq!(skipped["n_ng"], 0, "{skipped}");
+            assert_eq!(skipped["n_skipped"], 3, "{skipped}");
+            assert_eq!(skipped["all_checked_and_ok"], false, "{skipped}");
+            assert!(skipped["max_ratio"].is_null(), "{skipped}");
+            for position in skipped["member_skipped"].as_array().unwrap() {
+                assert_eq!(position["elem"], 0, "{skipped}");
+                let reason = position["reason"].as_str().unwrap();
+                assert!(
+                    reason.contains("STK400")
+                        && reason.contains("鋼管")
+                        && reason.contains(if column { "SRC柱" } else { "SRC梁" }),
+                    "{reason}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn h_column_combination_reason_reaches_mcp_design_job_summary() {
         let run = |axial_n, strong_moment_nmm, weak_shear_n| {
