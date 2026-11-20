@@ -28,6 +28,8 @@
 
 それぞれの等号から鋼材せい・幅・ウェブ厚だけを0.001 mm増やした三例では、公開 API が超過理由と両寸法を返すことを確認する。H200×200×8×100 ではウェブ内法せいが0 mmのため拒否する。H500×200×8×13 のフランジは、せい方向の絶対値237～250 mm、幅方向の絶対値100 mm以下の領域を占め、内側の主筋中心を含む。公開 API は主筋径と内蔵鉄骨寸法を含む干渉理由を返す。
 
+せい0 mmと幅NaNの内蔵鉄骨、および SRC 外形90×300 mmに H300×90×90×13 を入れてコンクリート領域の面積が0となる場合は、幾何の不成立理由と入力寸法を返す。ウェブ・フランジそれぞれの実板厚が0、負、NaN、無限大または材種表の上限を超える場合も、既存の板厚理由と両板厚を確認する。
+
 ## 通常の製品入口
 
 App の `invalid_src_column_geometry_prevents_automatic_holding_capacity` では、不正な二断面を使う架構のモデル読込みに成功した後、準備計算の大梁の端部柱フェース解決で最初に停止する。準備のエラーと対象部材の診断に寸法と理由が現れ、X/Y 地震静的解析と増分解析も同じ寸法理由で停止する。自動の保有水平耐力判定は増分解析結果がないため判定結果と採用元を返さない。
@@ -39,3 +41,5 @@ App の `invalid_src_column_geometry_prevents_automatic_holding_capacity` では
 Windows の stable 1.100.0 で `cargo test --locked -p sepika-core -p sepika-design-jp -p sepika-app` と、同じ3クレートの `cargo clippy --all-targets --locked -- -D warnings` が成功した。テストは core 647件成功・1件 ignore、design-jp 900件成功、App 639件成功・2件 ignore。App の確認は通常入口を呼ぶ自動試験で実施した。
 
 `cargo fmt --all -- --check`、`git diff --check`、`cargo run --locked -p xtask -- check-docs`、`mdbook build docs` が成功し、生成 HTML で幾何条件と構造細則の扱いを確認した。
+
+公開 API の診断に入力寸法を追記した後、`cargo +stable test --locked -p sepika-design-jp --test src_column_rank` の8件と、同クレートの Clippy、整形、差分チェックが成功した。
