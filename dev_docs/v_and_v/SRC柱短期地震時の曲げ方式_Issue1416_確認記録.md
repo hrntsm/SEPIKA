@@ -20,8 +20,9 @@
 
 - `tests/src_column_seismic_bending.rs` は有限例、曲げ・代替側の根拠不足、負・非有限・数値範囲外の入力、正の材料別許容値が得られない例を検証する。既定Minは確認済み曲げ耐力があっても一次設計地震力による代替側が未算定となる。
 - `tests/src_column_gravity.rs` は重力参照の欠落・位置不一致・方向別の非有限値を識別し、軸力または曲げの不適合が共通検定で保持されることを確認する。長期および地震割増を用いない短期の既存結果も照合する。
+- レビュー指摘を受け、有限な軸力・片方向曲げの不適合が反対方向の非有限値で失われないことを、公開 `SrcDesign::check_outcomes` と共通検定で確認した。確認済み曲げ耐力があるQd1でも、軸力Nや曲げモーメントが非有限なら理由付き未算定となる。
 - GUIで既知鋼材の短期地震時SRC柱が理由付き未算定となり、梁は算定される経路を `src_ql_acceptance_tests` で確認する。MCPの `signed_q0_acceptance_tests` は有限の重力内力がある場合の未算定と軸力不適合の集計を確認する。
-- 時刻歴簡易検定は、非線形・長期初期載荷の結果に保存重力参照を組み合わせた場合のQd1とMinの未算定表示をheadless描画で確認した。長期初期載荷なしの通常表示も確認した。保存重力参照が欠ける場合の表示は別経路で、コード追跡で見つけた問題を [#1615](https://github.com/hrntsm/SEPIKA/issues/1615) で扱う。
+- 時刻歴簡易検定は、非線形・長期初期載荷の結果に保存重力参照を組み合わせた場合のQd1とMinの未算定表示と、圧縮40,000 kNの不適合を同位置に併記することをheadless描画で確認した。長期初期載荷なしの通常表示も確認した。保存重力参照が欠ける場合の表示は別経路で、コード追跡で見つけた問題を [#1615](https://github.com/hrntsm/SEPIKA/issues/1615) で扱う。
 
 通常モデルから材料別曲げ耐力と柱頭条件を確定する処理、一次設計用地震力の柱せん断を使う代替式、他の原典適用条件の全面確認、実験Validationは対象外。製品の自動算定は [#1612](https://github.com/hrntsm/SEPIKA/issues/1612) で追跡する。
 
@@ -30,7 +31,7 @@
 | コマンド | 結果 |
 | --- | --- |
 | `python dev_docs/v_and_v/data/issue953/independent_values.py` | 独立値を再計算 |
-| `cargo test -p sepika-design-jp --locked --quiet` | 866件成功 |
+| `cargo test -p sepika-design-jp --locked --quiet` | 867件成功 |
 | `cargo clippy -p sepika-design-jp --all-targets --locked -- -D warnings` | 成功 |
 | `cargo test -p sepika-app --features gui --locked --lib src_ql_acceptance_tests` | 3件成功 |
 | `cargo test -p sepika-app --features gui --locked --lib --test full_model --no-fail-fast` | lib 1,292件成功、既存ignore 3件。full_model 41件成功 |
