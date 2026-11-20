@@ -5,7 +5,7 @@ use sepika_core::error::RebarGeometryError;
 use sepika_core::ids::NodeId;
 use sepika_core::material_grade::{steel_f_value_issue, steel_f_value_prefix};
 use sepika_core::model::{
-    AnalysisKind, HysteresisModel, Material, MemberLoad, SectionMassProperties,
+    AnalysisKind, HysteresisModel, Material, MaterialCategory, MemberLoad, SectionMassProperties,
 };
 use sepika_core::section_shape::SectionShape;
 use sepika_material::uniaxial::{MenegottoPinto, UniaxialMaterial};
@@ -131,6 +131,12 @@ pub(crate) fn resolve_src_fiber_fy(
     web_thick_mm: f64,
     flange_thick_mm: f64,
 ) -> Result<f64, String> {
+    if steel.category != MaterialCategory::Steel {
+        return Err(format!(
+            "材料区分は「{}」です。内蔵鉄骨には材料区分が「鋼材」の材料を割り当ててください。",
+            steel.category.label()
+        ));
+    }
     for thickness_mm in [web_thick_mm.max(flange_thick_mm), flange_thick_mm] {
         if let Some(reason) = steel_f_value_issue(&steel.name, thickness_mm) {
             return Err(reason);
