@@ -2,15 +2,16 @@ use approx::assert_relative_eq;
 use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::ids::{ElemId, NodeId, SectionId, StoryId};
 use sepika_core::model::{
-    Constraint, ElementKind, EndCondition, FrameSectionUse, MaterialCategory, MemberLoad,
-    MemberLoadKind, NodalLoad, Story, WallAttr, WallOpening, WallPlate, WallPlateShape, ZoneSource,
+    Constraint, ElementKind, EndCondition, FrameSectionUse, LoadCaseKind, MaterialCategory,
+    MemberLoad, MemberLoadKind, NodalLoad, Story, WallAttr, WallOpening, WallPlate, WallPlateShape,
+    ZoneSource,
 };
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::secondary::eccentricity::{
     center_of_rigidity, story_centers, story_eccentricity,
 };
 use sepika_design_jp::secondary::eccentricity_analysis::{
-    column_horizontal_stiffnesses, column_stiffnesses_from_analysis,
+    center_of_gravity_from_axial, column_horizontal_stiffnesses, column_stiffnesses_from_analysis,
     story_eccentricity_from_analysis,
 };
 use sepika_design_jp::secondary::story_rigidity::{
@@ -26,6 +27,81 @@ use eccentricity_model::{
     add_case, column_model, element_nodal_residual, oppositely_rotated_columns_rigid_floor,
     three_column_rigid_floor, TOP,
 };
+
+#[test]
+fn long_term_center_and_eccentricity_use_the_upper_cut_in_both_end_orders() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for reversed in [false, true] {
+            let mut model = column_model(&[[0.0, 0.0], [6000.0, 0.0]], 0.0, 0.0);
+            model.nodes[1].mass = Some([1.0; 6]);
+            model.elements[0].kind = kind;
+            if reversed {
+                model.elements[0].nodes.swap(0, 1);
+            }
+            let dead = add_case(&mut model, "G", [0.0; 6]);
+            model.load_cases[dead.index()].kind = LoadCaseKind::Dead;
+            model.load_cases[dead.index()]
+                .member
+                .push(MemberLoad::manual(
+                    ElemId(0),
+                    [0.0, 0.0, -1.0],
+                    MemberLoadKind::Point {
+                        a: 1500.0,
+                        p: 1000.0,
+                    },
+                ));
+            let live_load = [0.0, 0.0, -1000.0, 0.0, 0.0, 0.0];
+            let live = add_case(&mut model, "P", live_load);
+            model.load_cases[live.index()].kind = LoadCaseKind::Live;
+            model.load_cases[live.index()]
+                .nodal
+                .push(NodalLoad::manual(NodeId(3), live_load));
+            let [x, y] = [0, 1].map(|axis| {
+                let mut load = [0.0; 6];
+                load[axis] = 1000.0;
+                let id = add_case(&mut model, ["EX", "EY"][axis], load);
+                model.load_cases[id.index()]
+                    .nodal
+                    .push(NodalLoad::manual(NodeId(3), load));
+                linear_static_once(&model, id).unwrap()
+            });
+            let [dead, live] = [dead, live].map(|id| linear_static_once(&model, id).unwrap());
+            let combined = superpose_static(&[(&dead, 1.0), (&live, 1.0)]).unwrap();
+            let upper = usize::from(!reversed);
+            // 左柱の柱頭側には P の1000 N、柱脚側には G の材中荷重も伝わる。
+            let left = combined.column_end_axial_forces[0].1.as_ref().unwrap();
+            assert_relative_eq!(left[upper], 1000.0, epsilon = 1e-8);
+            assert_relative_eq!(left[1 - upper], 2000.0, epsilon = 1e-8);
+            for axial in combined.column_end_axial_forces[1].1.as_ref().unwrap() {
+                assert_relative_eq!(*axial, 1000.0, epsilon = 1e-8);
+            }
+            let [gx, gy] = center_of_gravity_from_axial(&model, TOP, &combined)
+                .unwrap()
+                .unwrap();
+            assert_relative_eq!(gx, 3000.0, epsilon = 1e-8);
+            assert_eq!(gy, 0.0);
+            let re =
+                story_eccentricity_from_analysis(&model, TOP, &x, &y, Some(&combined)).unwrap();
+            assert_relative_eq!(re.re_y.unwrap(), 0.0, epsilon = 1e-8);
+            let fallback = story_eccentricity_from_analysis(&model, TOP, &x, &y, None).unwrap();
+            assert_relative_eq!(fallback.re_y.unwrap(), 1.0, epsilon = 1e-8);
+
+            let mut missing = live.clone();
+            missing.column_end_axial_forces.clear();
+            let incomplete = superpose_static(&[(&dead, 1.0), (&missing, 1.0)]).unwrap();
+            let reason = story_eccentricity_from_analysis(&model, TOP, &x, &y, Some(&incomplete))
+                .unwrap_err();
+            assert!(
+                reason.contains("柱0の長期軸力") && reason.contains("合成対象ケース"),
+                "{reason}"
+            );
+        }
+    }
+}
 
 #[test]
 fn shared_upper_sl_counts_every_independent_column_in_both_directions() {
@@ -1057,7 +1133,7 @@ fn coupled_rigidity_reports_the_layer_and_failed_identification_condition() {
 #[test]
 fn the_upper_inward_cut_accounts_for_end_loads_with_offsets_and_rigid_zones() {
     for reversed in [false, true] {
-        let mut model = column_model(&[[0.0, 0.0]], 3000.0, 0.0);
+        let mut model = column_model(&[[0.0, 0.0], [6000.0, 0.0]], 3000.0, 0.0);
         model.stress_cfg.consider_rigid_zones = true;
         let elem = &mut model.elements[0];
         if reversed {
@@ -1072,8 +1148,12 @@ fn the_upper_inward_cut_accounts_for_end_loads_with_offsets_and_rigid_zones() {
         let case = add_case(
             &mut model,
             "材端荷重・剛域内荷重・分布荷重",
-            [1000.0, 700.0, -500.0, 0.0, 0.0, 0.0],
+            [1000.0, 700.0, -2000.0, 0.0, 0.0, 0.0],
         );
+        model.load_cases[case.index()].nodal.push(NodalLoad::manual(
+            NodeId(3),
+            [1000.0, 700.0, -1000.0, 0.0, 0.0, 0.0],
+        ));
         let from_base = |distance_mm: f64| {
             if reversed {
                 5000.0 - distance_mm
@@ -1139,13 +1219,34 @@ fn the_upper_inward_cut_accounts_for_end_loads_with_offsets_and_rigid_zones() {
         assert_relative_eq!(residual[fixed], -1150.0, epsilon = 1e-8);
         assert_relative_eq!(residual[fixed + 1], -650.0, epsilon = 1e-8);
 
+        // 上端側の全体力 (750, 850, -2000) N と実材軸 (4/5, 0, 3/5) から圧縮力600 N。
+        // 柱頭節点 X=0 と6000 mmに、材軸圧縮力600 Nと1000 Nが作用する。
+        let axial = response.column_end_axial_forces[0].1.as_ref().unwrap();
+        assert_relative_eq!(axial[upper], 600.0, epsilon = 1e-8);
+        assert_relative_eq!(axial[1 - upper], 320.0, epsilon = 1e-8);
+        let center = center_of_gravity_from_axial(&model, TOP, &response)
+            .unwrap()
+            .unwrap();
+        assert_relative_eq!(center[0], 3750.0, epsilon = 1e-8);
+        assert_eq!(center[1], 0.0);
+
         let sum = superpose_static(&[(&response, 1.0), (&response, -1.5)]).unwrap();
         let combined = sum.column_end_horizontal_forces[0].1.as_ref().unwrap();
         assert_relative_eq!(combined[upper][0], -375.0, epsilon = 1e-8);
         assert_relative_eq!(combined[upper][1], -425.0, epsilon = 1e-8);
+        let axial = sum.column_end_axial_forces[0].1.as_ref().unwrap();
+        assert_relative_eq!(axial[upper], -300.0, epsilon = 1e-8);
+        assert_eq!(
+            center_of_gravity_from_axial(&model, TOP, &sum).unwrap(),
+            None
+        );
         let mut missing = response.clone();
         missing.column_end_horizontal_forces.clear();
         let sum = superpose_static(&[(&response, 1.0), (&missing, 1.0)]).unwrap();
+        let center = center_of_gravity_from_axial(&model, TOP, &sum)
+            .unwrap()
+            .unwrap();
+        assert_relative_eq!(center[0], 3750.0, epsilon = 1e-8);
         let reason =
             story_eccentricity_from_analysis(&model, TOP, &sum, &response, None).unwrap_err();
         assert!(
@@ -1207,6 +1308,13 @@ fn an_interior_segment_load_does_not_change_the_upper_cut_force() {
                 .unwrap_err();
             assert!(
                 reason.contains("柱1") && reason.contains("切断位置") && reason.contains(detail),
+                "{reason}"
+            );
+            let reason = center_of_gravity_from_axial(&model, TOP, &shifted).unwrap_err();
+            assert!(
+                reason.contains("柱1の長期軸力")
+                    && reason.contains("切断位置")
+                    && reason.contains(detail),
                 "{reason}"
             );
             model.elements[elem].end_offsets_mm[end][2] = 0.0;

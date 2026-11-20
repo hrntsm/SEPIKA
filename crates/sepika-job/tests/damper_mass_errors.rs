@@ -339,6 +339,7 @@ fn 質点系job入口も不正指定と編集後の古い質量を拒否する()
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: Vec::new(),
         };
         for node in &model.nodes {

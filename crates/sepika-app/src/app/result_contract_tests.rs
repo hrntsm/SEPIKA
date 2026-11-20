@@ -1167,7 +1167,7 @@ fn gui_reports_old_contract_and_explicit_recheck_button_recovers_without_reanaly
 }
 
 #[test]
-fn ovika_preserves_girder_column_face_forces_and_diagnostics_for_case_and_combination() {
+fn ovika_preserves_girder_column_face_and_column_end_forces_for_case_and_combination() {
     use sepika_core::model::{LoadCombination, MemberLoad, MemberLoadKind, PanelZoneMode};
 
     let mut model = crate::sample::portal_frame();
@@ -1201,7 +1201,7 @@ fn ovika_preserves_girder_column_face_forces_and_diagnostics_for_case_and_combin
         app.core.scoped.last_error
     );
 
-    let column_faces = |app: &App| {
+    let saved_forces = |app: &App| {
         let bundle = app.core.scoped.results.as_ref().unwrap();
         let case = bundle
             .statics
@@ -1213,13 +1213,15 @@ fn ovika_preserves_girder_column_face_forces_and_diagnostics_for_case_and_combin
             .iter()
             .find(|(name, _)| name == "実柱面の保存")
             .unwrap();
-        [
-            case.1.girder_column_face_forces.clone(),
-            combo.1.girder_column_face_forces.clone(),
-        ]
+        [&case.1, &combo.1].map(|result| {
+            (
+                result.girder_column_face_forces.clone(),
+                result.column_end_axial_forces.clone(),
+            )
+        })
     };
-    let before = column_faces(&app);
-    for row in &before {
+    let before = saved_forces(&app);
+    for (row, axial) in &before {
         let (_, [i, j]) = row.iter().find(|(id, _)| *id == girder).unwrap();
         let i = i.as_ref().unwrap();
         assert_eq!(i.face.position_mm, 150.0);
@@ -1234,6 +1236,12 @@ fn ovika_preserves_girder_column_face_forces_and_diagnostics_for_case_and_combin
         assert_eq!(j.face.position_mm, 5850.0);
         assert_eq!(j.face.columns, [ElemId(1)]);
         assert!(j.forces.as_ref().unwrap_err().contains("切断側"));
+        assert_eq!(axial.len(), 2);
+        assert!(axial.iter().all(|(_, forces)| {
+            forces
+                .as_ref()
+                .is_ok_and(|ends| ends.iter().all(|force| *force > 1.0))
+        }));
     }
     let path = std::env::temp_dir().join(format!("sepika-1511-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
@@ -1250,7 +1258,27 @@ fn ovika_preserves_girder_column_face_forces_and_diagnostics_for_case_and_combin
         loaded.core.scoped.last_error
     );
     assert!(!loaded.core.scoped.staleness.results_stale);
-    assert_eq!(column_faces(&loaded), before);
+    assert_eq!(saved_forces(&loaded), before);
+
+    let (mut legacy, old_path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION - 1),
+        Some(DESIGN_CONTRACT_VERSION),
+        "1677-previous-analysis-contract",
+    );
+    assert!(legacy.core.scoped.staleness.results_stale);
+    assert!(!legacy
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .has_analysis_results());
+    legacy.run_linear_static(LoadCaseId(0));
+    legacy.run_combination(0);
+    assert_eq!(saved_forces(&legacy), before);
+
+    std::fs::remove_file(old_path).unwrap();
     std::fs::remove_file(path).unwrap();
 }
 
