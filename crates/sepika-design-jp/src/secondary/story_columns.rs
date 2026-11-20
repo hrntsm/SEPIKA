@@ -287,7 +287,7 @@ fn validate_column_elements(model: &Model) -> Result<(), String> {
     Ok(())
 }
 
-fn story_layer(model: &Model, top_story: StoryId) -> Option<Layer> {
+pub(super) fn story_layer(model: &Model, top_story: StoryId) -> Option<Layer> {
     model
         .layers()
         .into_iter()

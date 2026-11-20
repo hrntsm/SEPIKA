@@ -7,11 +7,12 @@
 //! `eccentricity` / `center_of_mass`）と雑壁剛性（`append_misc_wall_stiffnesses`）
 //! をそのまま再利用する。
 
-use sepika_core::ids::{ElemId, StoryId};
+use sepika_core::dof::Dof;
+use sepika_core::ids::{ElemId, NodeId, StoryId};
 use sepika_core::model::{ElementData, ElementKind, Model};
 use std::collections::HashMap;
 
-use super::story_columns::{analysis_story_columns, StoryColumn};
+use super::story_columns::{analysis_story_columns, story_layer, StoryColumn};
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::statics::analysis::SeismicDir;
@@ -107,7 +108,7 @@ fn station_force_global(
 ///
 /// - `res_x` / `res_y`: X / Y 方向加力時の弾性応力解析結果
 /// - `kX` は X 加力時の（負担水平力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
-///   変位差が0又は剛性の商が非有限となる柱は、方向・部材ID付きでErr。
+///   剛床のねじれによる変位の相殺、変位差0又は商の非有限は、方向・部材ID付きでErr。
 ///
 /// 上下階SL間の区間が曖昧、必要変位・内力が欠損・非有限、又は局所基底が不正なら部材IDと理由を返す。
 pub fn column_stiffnesses_from_analysis(
@@ -135,7 +136,7 @@ pub fn column_stiffnesses_from_analysis(
 }
 
 /// 指定方向の柱水平剛性 [N/mm] を層内柱の順序で返す。他方向の応答は要求しない。
-/// 上下階SL間の区間が曖昧、変位差0又は非有限な商、必要応答・局所軸の不正はErr。
+/// 層区間の曖昧さ、剛床のねじれによる変位の相殺、変位差0、必要応答・演算の不正はErr。
 pub fn column_horizontal_stiffnesses(
     model: &Model,
     story: StoryId,
@@ -144,6 +145,68 @@ pub fn column_horizontal_stiffnesses(
 ) -> Result<Vec<f64>, String> {
     let columns = resolved_columns(model, story)?;
     horizontal_stiffnesses(model, story, &columns, response, direction)
+}
+
+fn layer_rotations(
+    model: &Model,
+    story: StoryId,
+    columns: &[StoryColumn],
+    response: &StaticOnce,
+    direction: SeismicDir,
+) -> Result<Option<[f64; 2]>, String> {
+    let Some(layer) = story_layer(model, story) else {
+        return Ok(None);
+    };
+    let dof = match direction {
+        SeismicDir::X => Dof::Ux,
+        SeismicDir::Y => Dof::Uy,
+    };
+    let single_master = |story, end: fn(&StoryColumn) -> NodeId| {
+        let mut diaphragms = model.diaphragms_of(story);
+        let diaphragm = diaphragms.next()?;
+        if diaphragms.next().is_some()
+            || !columns.iter().map(end).all(|id| {
+                id == diaphragm.master
+                    || (diaphragm.slaves.contains(&id)
+                        && !model.nodes[id.index()].restraint.is_fixed(dof))
+            })
+        {
+            return None;
+        }
+        Some(diaphragm.master)
+    };
+    let Some(top) = single_master(layer.top, |c| c.top) else {
+        return Ok(None);
+    };
+    let bottom = single_master(layer.bottom, |c| c.bottom);
+    if bottom.is_none()
+        && !columns.iter().all(|c| {
+            model.nodes[c.bottom.index()].restraint.is_fixed(dof)
+                && response
+                    .disp
+                    .get(c.bottom.index())
+                    .is_some_and(|u| u[dof as usize] == 0.0)
+        })
+    {
+        return Ok(None);
+    }
+    let rotation = |id: NodeId| {
+        response
+            .disp
+            .get(id.index())
+            .map(|u| u[Dof::Rz as usize])
+            .filter(|u| u.is_finite())
+            .ok_or_else(|| {
+                format!(
+                    "Re: 階{}・{direction:?}方向の剛床代表節点{}の回転変位が欠損・非有限です",
+                    story.0, id.0
+                )
+            })
+    };
+    Ok(Some([
+        rotation(top)?,
+        bottom.map(rotation).transpose()?.unwrap_or(0.0),
+    ]))
 }
 
 fn horizontal_stiffnesses(
@@ -167,6 +230,26 @@ fn horizontal_stiffnesses(
         SeismicDir::X => 0,
         SeismicDir::Y => 1,
     };
+    let projected_coordinate = |id: NodeId| {
+        let coord = model.nodes[id.index()].coord;
+        [-coord[1], coord[0]][axis]
+    };
+    let cancellation_input = if let Some(first) = columns.first() {
+        layer_rotations(model, story, columns, response, direction)?
+            .filter(|angles| *angles != [0.0, 0.0])
+            .map(|rotations| {
+                let anchor = projected_coordinate(first.top);
+                let center = columns
+                    .iter()
+                    .map(|column| {
+                        (projected_coordinate(column.top) - anchor) / columns.len() as f64
+                    })
+                    .sum::<f64>();
+                (rotations, anchor, center)
+            })
+    } else {
+        None
+    };
     columns
         .iter()
         .map(|column| {
@@ -178,7 +261,7 @@ fn horizontal_stiffnesses(
                     story.0, elem.id.0
                 )
             };
-            let displacement = |id: sepika_core::ids::NodeId| {
+            let displacement = |id: NodeId| {
                 response
                     .disp
                     .get(id.index())
@@ -186,7 +269,8 @@ fn horizontal_stiffnesses(
                     .filter(|u| u.is_finite())
                     .ok_or_else(|| failure(&format!("SL節点{}の変位が欠損・非有限です", id.0)))
             };
-            let delta = (displacement(column.top)? - displacement(column.bottom)?).abs();
+            let signed_delta = displacement(column.top)? - displacement(column.bottom)?;
+            let delta = signed_delta.abs();
             if !delta.is_finite() {
                 return Err(failure("層間変位差が非有限です"));
             }
@@ -207,6 +291,21 @@ fn horizontal_stiffnesses(
             };
             if !horizontal_force.is_finite() {
                 return Err(failure("上端の負担水平力が不正です"));
+            }
+            if let Some(([top, bottom], anchor, center)) = cancellation_input {
+                let arm = |id| (projected_coordinate(id) - anchor) - center;
+                let rotation = top * arm(column.top) - bottom * arm(column.bottom);
+                let translation = signed_delta - rotation;
+                if !rotation.is_finite() || !translation.is_finite() {
+                    return Err(failure("剛床のねじれによる層間変位を確認できません"));
+                }
+                if rotation.is_sign_positive() != translation.is_sign_positive()
+                    && delta < rotation.abs().min(translation.abs())
+                {
+                    return Err(failure(
+                        "剛床のねじれが層間変位を相殺するため柱の水平剛性の算定を保留しました",
+                    ));
+                }
             }
             if delta == 0.0 {
                 return Err(failure("層間変位が0のため剛性を算定できません"));

@@ -65,8 +65,8 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, WallPlateId};
 use sepika_core::model::{
     AreaLoad, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadTransfer,
-    LocalAxis, Material, MaterialCategory, Model, Node, RegionAnchor, RigidZone, Section,
-    WallOpening, WallPlate, WallPlateShape,
+    LocalAxis, Material, MaterialCategory, Model, NodalLoad, Node, RegionAnchor, RigidZone,
+    Section, WallOpening, WallPlate, WallPlateShape,
 };
 use sepika_core::section_shape::{RcBeamRebar, RcRectColumnRebar, SectionShape};
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
@@ -496,6 +496,32 @@ fn unperforated_wall_bay_app() -> App {
     assert_eq!(plate.opening_area, 0.0);
     assert_eq!(plate.opening_weight, 0.0);
     app
+}
+
+fn balance_ex_floor_rotation(model: &mut Model) {
+    let story = model.layers()[0].top;
+    let master = model.diaphragms_of(story).next().unwrap().master;
+    let ex = model
+        .load_cases
+        .iter()
+        .find(|case| case.name == sepika_core::model::EX_CASE_NAME)
+        .unwrap()
+        .id;
+    let x = sepika_job::compute::compute_linear_static(model.clone(), ex).unwrap();
+    let mut torsion_model = sepika_core::wall_expand::expand_wall_elements(model).0;
+    let moment_nmm = 1_000_000.0;
+    let case = &mut torsion_model.load_cases[ex.index()];
+    case.member.clear();
+    case.nodal = vec![NodalLoad::manual(
+        master,
+        [0.0, 0.0, 0.0, 0.0, 0.0, moment_nmm],
+    )];
+    let torsion = sepika_solver::statics::linear::linear_static_once(&torsion_model, ex).unwrap();
+    let balance_nmm = -moment_nmm * x.disp[master.index()][5] / torsion.disp[master.index()][5];
+    model.load_cases[ex.index()].nodal.push(NodalLoad::manual(
+        master,
+        [0.0, 0.0, 0.0, 0.0, 0.0, balance_nmm],
+    ));
 }
 
 #[test]
@@ -1217,6 +1243,99 @@ fn test_region_gen_wall_finds_all_four_faces() {
     }
 }
 
+#[test]
+fn wall_bay_with_torsional_cancellation_holds_re_fes_and_holding_capacity() {
+    use sepika_app::summary::seismic_story_metrics;
+    use sepika_element::factory::build_behavior;
+
+    let mut app = unperforated_wall_bay_app();
+    app.run_preparation();
+    select_frame_gravity(&mut app.core.model);
+    app.run_static_all();
+    app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
+    select_holding_points(&mut app);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+
+    let model = &app.core.model;
+    let master = model
+        .diaphragms_of(model.layers()[0].top)
+        .next()
+        .unwrap()
+        .master;
+    let x = static_res_for(&app, StaticCaseKey::Seismic(SeismicDir::X));
+    let wall_side_mm = x.disp[4][0];
+    let far_side_mm = x.disp[7][0];
+    let floor_center_mm = (wall_side_mm + far_side_mm) / 2.0;
+    let angle_rad = x.disp[master.index()][5];
+    let wall_side_rotation_mm = 1500.0 * angle_rad;
+    assert!((wall_side_mm - floor_center_mm - wall_side_rotation_mm).abs() < 1e-12);
+    assert!(floor_center_mm > 0.0 && wall_side_rotation_mm < 0.0);
+    assert!(wall_side_mm.abs() < floor_center_mm.abs().min(wall_side_rotation_mm.abs()));
+
+    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(model);
+    let wall_side_forces = |response: &sepika_solver::statics::linear::StaticOnce| {
+        [ElemId(0), ElemId(1)].map(|id| {
+            let column = expanded.element(id).unwrap();
+            let mut disp = [0.0; 12];
+            for (six, id) in disp.as_chunks_mut::<6>().0.iter_mut().zip(&column.nodes) {
+                *six = response.disp[id.index()];
+            }
+            let element = build_behavior(column, &expanded)
+                .frame_load_response(&disp, &[])
+                .unwrap()
+                .unwrap();
+            let force_n = response
+                .column_end_horizontal_forces
+                .iter()
+                .find(|(id, _)| *id == column.id)
+                .unwrap()
+                .1
+                .as_ref()
+                .unwrap()[1][0];
+            assert!((force_n - element.nodal_residual.data[6]).abs() < 1e-6);
+            force_n
+        })
+    };
+    let original_forces_n = wall_side_forces(x);
+    assert!(original_forces_n.iter().all(|q| q.abs() < 1e-6));
+    let mut comparison = model.clone();
+    balance_ex_floor_rotation(&mut comparison);
+    let ex = comparison
+        .load_cases
+        .iter()
+        .find(|case| case.name == sepika_core::model::EX_CASE_NAME)
+        .unwrap()
+        .id;
+    let balanced = sepika_job::compute::compute_linear_static(comparison, ex).unwrap();
+    assert!(balanced.disp[master.index()][5].abs() < 1e-12);
+    let horizontal_force_n = |result: &sepika_solver::statics::linear::StaticOnce| {
+        result.story_shears.as_ref().unwrap()[0][0]
+    };
+    assert!((horizontal_force_n(x) - horizontal_force_n(&balanced)).abs() < 1e-6);
+    let balanced_forces_n = wall_side_forces(&balanced);
+    assert!(balanced_forces_n.iter().all(|q| q.abs() < 1e-6));
+    println!("壁側X変位={wall_side_mm}, 反対側X変位={far_side_mm}, 図心X変位={floor_center_mm}, 壁側回転変位={wall_side_rotation_mm}, Rz={angle_rad}, Qx={original_forces_n:?}, 並進対照のQx={balanced_forces_n:?}, 層水平力={}", horizontal_force_n(x));
+
+    let metric = seismic_story_metrics(&app).remove(0);
+    let reason = metric.re.unwrap_err();
+    for expected in ["階1", "X方向", "柱0", "ねじれ", "相殺"] {
+        assert!(reason.contains(expected), "{reason}");
+    }
+    assert_eq!(metric.re_ok, None);
+    assert_eq!(metric.fes, Err(reason.clone()));
+    assert!(app
+        .compute_holding_capacity()
+        .err()
+        .unwrap()
+        .contains(&reason));
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+}
+
 /// 壁の実応答・重量・Qud・Fesを維持し、Ds条件不足では確定判定を保留する。
 #[test]
 fn snapshot_wall_response_and_ds_hold() {
@@ -1227,6 +1346,7 @@ fn snapshot_wall_response_and_ds_hold() {
         "準備計算: {:?}",
         app.core.scoped.last_error
     );
+    balance_ex_floor_rotation(&mut app.core.model);
     select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     assert!(
@@ -1234,6 +1354,11 @@ fn snapshot_wall_response_and_ds_hold() {
         "静的解析: {:?}",
         app.core.scoped.last_error
     );
+    let x = static_res_for(&app, StaticCaseKey::Seismic(SeismicDir::X));
+    let model = &app.core.model;
+    let floor = model.diaphragms_of(model.layers()[0].top).next().unwrap();
+    assert!(x.disp[floor.master.index()][5].abs() < 1e-12);
+    assert!((x.disp[4][0] - x.disp[7][0]).abs() < 1e-10);
     app.run_eigen(app.core.analysis_cfg.n_modes);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1393,6 +1518,7 @@ fn test_holding_capacity_auto_rank_detects_wall_before_ds_hold() {
         "準備計算: {:?}",
         app.core.scoped.last_error
     );
+    balance_ex_floor_rotation(&mut app.core.model);
     select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     assert!(
@@ -1432,6 +1558,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
     let mut app = unperforated_wall_bay_app();
     app.run_preparation();
+    balance_ex_floor_rotation(&mut app.core.model);
     select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     app.run_pushover();
