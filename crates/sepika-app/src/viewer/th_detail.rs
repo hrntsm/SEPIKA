@@ -1217,6 +1217,9 @@ mod signed_q0_acceptance_tests;
 mod steel_column_lateral_buckling_input;
 
 #[cfg(test)]
+use crate::app::shear_area_acceptance_tests::h_column_input as combined_column;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

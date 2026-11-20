@@ -1,9 +1,7 @@
+use super::combined_column;
 use sepika_core::dof::Dof;
 use sepika_core::model::{Model, SteelDesignAttr};
 use sepika_element::frame::beam::MemberForces;
-
-#[path = "steel_h_column_combined_model.rs"]
-mod combined_column;
 
 pub fn column(offset_mm: f64, support_confirmed: bool) -> Model {
     let mut model = combined_column::cantilever(0.0, 0.0, 0.0);

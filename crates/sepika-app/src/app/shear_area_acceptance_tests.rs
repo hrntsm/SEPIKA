@@ -4,7 +4,7 @@ use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::CheckOutcome;
 
 #[path = "../../../sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs"]
-mod h_column_input;
+pub(crate) mod h_column_input;
 
 #[cfg(feature = "gui")]
 pub(super) fn design_table_contains(shape: &egui::epaint::Shape, needle: &str) -> bool {
@@ -412,7 +412,8 @@ fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
     let csv = crate::summary::build_report_csv(&app);
     let positions = &results.member_checks[0].positions;
     assert_eq!(positions.len(), 6);
-    for pair in positions.chunks_exact(2) {
+    let (pairs, _) = positions.as_chunks::<2>();
+    for pair in pairs {
         let [checked, skipped] = pair else {
             panic!("{pair:?}");
         };

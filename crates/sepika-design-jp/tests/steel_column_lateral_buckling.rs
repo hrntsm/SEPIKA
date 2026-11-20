@@ -2,6 +2,9 @@ use sepika_core::model::Model;
 use sepika_design_jp::member_design_check::{run_member_design_checks, MemberDesignCheckOptions};
 use sepika_design_jp::{CheckKind, CheckOutcome, LoadTerm};
 
+#[path = "fixtures/steel_h_column_combined_model.rs"]
+mod combined_column;
+
 #[path = "fixtures/steel_column_lateral_buckling_model.rs"]
 mod input;
 
