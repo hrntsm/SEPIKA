@@ -17,6 +17,22 @@ pub mod panel_zone;
 pub(crate) use crate::ratio_or_large;
 pub(crate) use crate::rc::{shear_alpha, AxisProps as SrcAxisProps};
 
+pub(crate) fn src_steel_f(sec: &Section, steel: &Material) -> Result<f64, String> {
+    let f = crate::material_strength::section_steel_f(sec, Some(steel))?;
+    if sepika_core::material_grade::steel_f_value_prefix(
+        &steel.name,
+        crate::material_strength::plate_thickness(sec),
+    )
+    .is_none()
+    {
+        return Err(format!(
+            "内蔵鉄骨「{}」は対応する鋼材名ではなく、直接入力強度のSRC規準への適用根拠が未確定です",
+            steel.name
+        ));
+    }
+    Ok(f)
+}
+
 /// 内蔵鋼材の断面積・断面係数を [`SectionShape`] の断面性能計算を借りて
 /// 求める（H 形鋼: `sA`, 強軸 `sZ`, 弱軸 `sZ`）。
 fn steel_h_props(height: f64, width: f64, web_thick: f64, flange_thick: f64) -> (f64, f64, f64) {
@@ -356,7 +372,7 @@ impl DesignCheck for SrcDesign {
                     .to_string(),
             };
         };
-        let f_value = match crate::material_strength::section_steel_f(sec, Some(steel_mat)) {
+        let f_value = match src_steel_f(sec, steel_mat) {
             Ok(f_value) => f_value,
             Err(reason) => {
                 return CheckOutcome::Skipped {
@@ -364,16 +380,6 @@ impl DesignCheck for SrcDesign {
                 }
             }
         };
-        if sepika_core::material_grade::steel_f_value_prefix(
-            &steel_mat.name,
-            crate::material_strength::plate_thickness(sec),
-        )
-        .is_none()
-        {
-            return CheckOutcome::Skipped {
-                reason: format!("SRC検定: 内蔵鉄骨「{}」は対応する鋼材名ではなく、直接入力強度のSRC規準への適用根拠が未確定です", steel_mat.name),
-            };
-        }
 
         let cr = match shape {
             SectionShape::SrcBeamRect {
