@@ -22,14 +22,14 @@ pub struct StoryColumn {
 /// 上端階 SL の節点から下端階 SL に達した柱の連なりを返す。
 /// 上下階情報が未確定、または下端に達しない連なりは対象外。
 pub fn story_columns(model: &Model, story: StoryId) -> Vec<StoryColumn> {
-    collect_story_columns(model, story, ColumnSelection::Analysis).unwrap_or_default()
+    analysis_story_columns(model, story).unwrap_or_default()
 }
 
-pub(super) fn eccentricity_story_columns(
+pub(super) fn analysis_story_columns(
     model: &Model,
     story: StoryId,
 ) -> Result<Vec<StoryColumn>, String> {
-    collect_story_columns(model, story, ColumnSelection::Eccentricity)
+    collect_story_columns(model, story, ColumnSelection::Analysis)
 }
 
 /// 上下階SLを結ぶ非分岐柱を列挙し、柱節点の参照・座標不整合はErrを返す。
@@ -41,22 +41,15 @@ pub(super) fn drift_story_columns(
     model: &Model,
     story: StoryId,
 ) -> Result<Vec<StoryColumn>, String> {
-    mixed_story_connections(model, story)?;
+    mixed_story_connections(model, story, BoundaryLinkCheck::MixedColumns)?;
     collect_story_columns(model, story, ColumnSelection::Drift)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ColumnSelection {
     Analysis,
-    Eccentricity,
     Nonbranching,
     Drift,
-}
-
-impl ColumnSelection {
-    fn checks_boundary_links(self) -> bool {
-        matches!(self, Self::Eccentricity | Self::Drift)
-    }
 }
 
 fn collect_story_columns(
@@ -77,9 +70,9 @@ fn collect_story_columns(
             if let Some((col, mixed_connection)) =
                 trace_column_down(model, &adj, node.id, &layer, selection, has_mixed_columns)
             {
-                if selection.checks_boundary_links() {
+                if selection == ColumnSelection::Drift {
                     if let Some(reason) =
-                        boundary_link_error(story, column_boundary_links(model, &adj, &layer, &col))
+                        boundary_link_error(story, drift_boundary_links(model, &adj, &layer, &col))
                     {
                         return Err(reason);
                     }
@@ -117,7 +110,7 @@ fn boundary_link_at(
     })
 }
 
-fn column_boundary_links(
+fn drift_boundary_links(
     model: &Model,
     adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
     layer: &Layer,
@@ -205,11 +198,19 @@ fn is_layer_interior(model: &Model, layer: &Layer, z: f64) -> bool {
         && !model.on_diaphragm_level(layer.bottom, z)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BoundaryLinkCheck {
+    MixedColumns,
+    AllColumns,
+}
+
 pub(super) fn mixed_story_connections(
     model: &Model,
     story: StoryId,
+    boundary_check: BoundaryLinkCheck,
 ) -> Result<Vec<(NodeId, ElemId)>, String> {
-    if !has_mixed_columns(model) {
+    let has_mixed_columns = has_mixed_columns(model);
+    if !has_mixed_columns && boundary_check == BoundaryLinkCheck::MixedColumns {
         return Ok(Vec::new());
     }
     let Some(layer) = story_layer(model, story) else {
@@ -238,6 +239,9 @@ pub(super) fn mixed_story_connections(
         })
         .map(|(&node, _)| node)
         .collect();
+    if !has_mixed_columns && linked_sl.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut visited = HashSet::new();
     let mut connections = Vec::new();
     for top in model.nodes.iter().filter(|node| at_top(node.coord[2])) {
@@ -287,10 +291,15 @@ pub(super) fn mixed_story_connections(
                     includes_mixed_kind |= mixed;
                 }
             }
-            if reaches_bottom && includes_mixed_kind {
+            if !reaches_bottom {
+                continue;
+            }
+            if includes_mixed_kind || boundary_check == BoundaryLinkCheck::AllColumns {
                 if let Some(reason) = boundary_link_error(story, boundary_links) {
                     return Err(reason);
                 }
+            }
+            if includes_mixed_kind {
                 connections.push((top.id, top_elem));
             }
         }
@@ -357,10 +366,7 @@ fn trace_column_down(
     selection: ColumnSelection,
     has_mixed_columns: bool,
 ) -> Option<(StoryColumn, bool)> {
-    let reject_branch = matches!(
-        selection,
-        ColumnSelection::Nonbranching | ColumnSelection::Drift
-    );
+    let reject_branch = selection != ColumnSelection::Analysis;
     let mut current = top;
     let mut top_elem = None;
     let mut segments = Vec::new();
@@ -424,7 +430,7 @@ fn trace_column_down(
                 mixed_connection =
                     exclude_branches_without_lower_sl(model, adj, layer, &mut neighbors);
             }
-            if selection.checks_boundary_links() && neighbors.len() > 1 {
+            if selection == ColumnSelection::Drift && neighbors.len() > 1 {
                 // 上階SL内の分割材を枝に数えると、曖昧な境界があっても経路を検査できない。
                 neighbors.retain(|(node, _)| {
                     !model.on_diaphragm_level(layer.top, model.nodes[node.index()].coord[2])
@@ -563,7 +569,7 @@ mod tests {
         let (mut model, top) = build_split_column_model();
         model.elements[0].kind = ElementKind::Fiber;
         assert_eq!(
-            mixed_story_connections(&model, top).unwrap(),
+            mixed_story_connections(&model, top, BoundaryLinkCheck::MixedColumns).unwrap(),
             [(NodeId(2), ElemId(0))]
         );
 
@@ -578,7 +584,11 @@ mod tests {
             elem.nodes = nodes.map(NodeId).into_iter().collect();
             model.elements.push(elem);
         }
-        assert!(mixed_story_connections(&model, top).unwrap().is_empty());
+        assert!(
+            mixed_story_connections(&model, top, BoundaryLinkCheck::MixedColumns)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

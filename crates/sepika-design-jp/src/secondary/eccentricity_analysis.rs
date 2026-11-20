@@ -12,7 +12,8 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use std::collections::HashMap;
 
 use super::story_columns::{
-    checked_story_columns, eccentricity_story_columns, mixed_story_connections, StoryColumn,
+    analysis_story_columns, checked_story_columns, mixed_story_connections, BoundaryLinkCheck,
+    StoryColumn,
 };
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
@@ -39,8 +40,8 @@ fn actual_axis_ends(model: &Model, elem: &ElementData) -> Result<[[f64; 3]; 2], 
 }
 
 fn resolved_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, String> {
-    let mixed_connections = mixed_story_connections(model, story)?;
-    let columns = eccentricity_story_columns(model, story)?;
+    let mixed_connections = mixed_story_connections(model, story, BoundaryLinkCheck::AllColumns)?;
+    let columns = analysis_story_columns(model, story)?;
     if !mixed_connections.is_empty() {
         let nonbranching = checked_story_columns(model, story)?;
         for &(top, top_elem) in &mixed_connections {
@@ -615,6 +616,50 @@ mod tests {
             assert_eq!(
                 story_eccentricity_from_analysis(&model, story, &x, &y, long_term),
                 Err(reason.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn re_1640_rejects_sl_links_even_when_branching_prevents_column_trace() {
+        for (split_mm, end, link, branch, boundary) in [
+            (2999.5, 1, [8, 4], [1, 8], "上階SLの柱8"),
+            (0.5, 0, [0, 8], [1, 4], "下階SLの柱8"),
+        ] {
+            let (mut model, story) = build_symmetric_frame(None);
+            let mut split = model.nodes[4].clone();
+            split.id = NodeId(8);
+            split.coord[2] = split_mm;
+            split.mass = None;
+            split.story = None;
+            model.nodes.push(split);
+            for (id, nodes) in [(8, link), (9, branch)] {
+                let mut segment = model.elements[0].clone();
+                segment.id = ElemId(id);
+                segment.nodes = nodes.map(NodeId).into_iter().collect();
+                model.elements.push(segment);
+            }
+            model.elements[0].nodes[end] = NodeId(8);
+            let [x, y] = [
+                fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]),
+                fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]),
+            ]
+            .map(|mut response| {
+                response
+                    .disp
+                    .push(if end == 1 { response.disp[4] } else { [0.0; 6] });
+                let force = response.member_forces[0].1.clone();
+                response
+                    .member_forces
+                    .extend([(ElemId(8), force.clone()), (ElemId(9), force)]);
+                response
+            });
+            let reason = column_stiffnesses_from_analysis(&model, story, &x, &y).unwrap_err();
+            assert!(reason.contains(boundary), "{reason}");
+            assert!(reason.contains("一意に特定できません"), "{reason}");
+            assert_eq!(
+                story_eccentricity_from_analysis(&model, story, &x, &y, None),
+                Err(reason)
             );
         }
     }
