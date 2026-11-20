@@ -71,15 +71,25 @@ pub fn src_column_rank_ratios(
     };
     let steel = steel_material.ok_or("内蔵鉄骨の材料が未割当、または参照先が不明です")?;
     let s_f = crate::srrc::src_steel_f(section, steel)?;
-    if ![
-        "SS400", "SS490", "SM400", "SM490", "SM520", "SN400", "SN490",
-    ]
-    .iter()
-    .any(|base| steel.name.trim().starts_with(base))
-    {
+    let name = steel.name.trim();
+    let minimum_mm = match name {
+        "SN400A" | "SN400B" | "SN490B" => 6.0,
+        "SN400C" | "SN490C" => 16.0,
+        "SS400" | "SS490" | "SM400A" | "SM400B" | "SM400C" | "SM490A" | "SM490B" | "SM490C"
+        | "SM490YA" | "SM490YB" | "SM520B" | "SM520C" => 0.0,
+        "SM400" | "SM490" | "SM520" | "SN400" | "SN490" => {
+            return Err(format!("内蔵鉄骨「{name}」の JIS の種類記号が不完全です"));
+        }
+        _ => {
+            return Err(format!(
+                "内蔵鉄骨「{name}」の H 形鋼としての適用根拠が未確定です"
+            ));
+        }
+    };
+    // 断面形状だけでは圧延形鋼と鋼板組立を区別できない。
+    if tw < minimum_mm || tf < minimum_mm {
         return Err(format!(
-            "内蔵鉄骨「{}」の H 形鋼としての適用根拠が未確定です",
-            steel.name
+            "内蔵鉄骨「{name}」の実板厚（ウェブ {tw} mm、フランジ {tf} mm）は JIS G 3136 の適用範囲外です。両方に {minimum_mm} mm 以上が必要です"
         ));
     }
     if [fc, rebar_sy, b, d]

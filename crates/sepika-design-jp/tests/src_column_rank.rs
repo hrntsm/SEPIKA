@@ -195,6 +195,79 @@ fn both_actual_plate_thicknesses_determine_the_grade_strength() {
 }
 
 #[test]
+fn each_sn_plate_meets_its_designated_grade_thickness_range() {
+    for (name, minimum_mm, n_expected, m_expected) in [
+        ("SN400A", 6.0, 0.311_978_924_878_245, 0.333_776_816_597_366),
+        ("SN400B", 6.0, 0.311_978_924_878_245, 0.333_776_816_597_366),
+        ("SN490B", 6.0, 0.300_255_427_674_188, 0.409_287_280_410_680),
+        ("SN400C", 16.0, 0.272_145_171_982_913, 0.559_408_444_610_443),
+        ("SN490C", 16.0, 0.250_013_749_795_655, 0.637_146_692_988_121),
+    ] {
+        let steel = steel(name, Some(999.0));
+        let ratios = |web_mm, flange_mm| {
+            src_column_rank_ratios(
+                &column(web_mm, flange_mm),
+                Some(&steel),
+                24.0,
+                345.0,
+                3_400_000.0,
+            )
+        };
+        let (n, m) = ratios(minimum_mm, minimum_mm).unwrap();
+        assert_abs_diff_eq!(n, n_expected, epsilon = 1e-12);
+        assert_abs_diff_eq!(m, m_expected, epsilon = 1e-12);
+
+        let too_thin_mm = minimum_mm - 0.001;
+        for (web_mm, flange_mm) in [(too_thin_mm, minimum_mm), (minimum_mm, too_thin_mm)] {
+            let reason = ratios(web_mm, flange_mm).unwrap_err();
+            assert!(
+                reason.contains(name) && reason.contains("JIS G 3136"),
+                "{reason}"
+            );
+            assert!(
+                reason.contains(&format!("{minimum_mm} mm 以上")),
+                "{reason}"
+            );
+        }
+        for (web_mm, flange_mm) in [(100.001, minimum_mm), (minimum_mm, 100.001)] {
+            let reason = ratios(web_mm, flange_mm).unwrap_err();
+            assert!(
+                reason.contains(name) && reason.contains("適用範囲"),
+                "{reason}"
+            );
+        }
+    }
+
+    for (name, web_mm, flange_mm, n_expected, m_expected) in [
+        (
+            "SN400C",
+            100.0,
+            16.0,
+            0.187_309_618_514_902,
+            0.751_706_835_351_704,
+        ),
+        (
+            "SN490C",
+            16.0,
+            100.0,
+            0.157_350_848_138_565,
+            0.847_220_915_361_451,
+        ),
+    ] {
+        let (n, m) = src_column_rank_ratios(
+            &column(web_mm, flange_mm),
+            Some(&steel(name, Some(999.0))),
+            24.0,
+            345.0,
+            3_400_000.0,
+        )
+        .unwrap();
+        assert_abs_diff_eq!(n, n_expected, epsilon = 1e-12);
+        assert_abs_diff_eq!(m, m_expected, epsilon = 1e-12);
+    }
+}
+
+#[test]
 fn missing_or_inapplicable_steel_reports_why_the_ratio_is_unavailable() {
     let section = column(8.0, 13.0);
     let ratios = |steel: Option<&Material>| {
@@ -219,6 +292,16 @@ fn missing_or_inapplicable_steel_reports_why_the_ratio_is_unavailable() {
             reason.contains(name) && reason.contains("H 形鋼としての適用根拠"),
             "{reason}"
         );
+    }
+    for name in ["SM400", "SM490", "SM520", "SN400", "SN490"] {
+        for fy in [None, Some(235.0)] {
+            let incomplete = steel(name, fy);
+            let reason = ratios(Some(&incomplete)).unwrap_err();
+            assert!(
+                reason.contains(name) && reason.contains("JIS の種類記号が不完全"),
+                "{reason}"
+            );
+        }
     }
     for fy in [
         None,
