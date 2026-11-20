@@ -255,6 +255,21 @@ fn public_batch_distinguishes_requested_missing_member_from_normal_short() {
             ));
             assert_eq!(checks[1].2, run(&current)[0].2);
         }
+        let mut partly_nonfinite = current.clone();
+        partly_nonfinite[0].1.at[0].1[0] = -40.0e6;
+        partly_nonfinite[0].1.at[0].1[4] = f64::NAN;
+        let checks = run(&partly_nonfinite);
+        assert!(
+            matches!(
+                checks.as_slice(),
+                [(_, _, CheckOutcome::Checked(result)), (_, _, CheckOutcome::Skipped { reason: actual })]
+                    if result.ratio().is_finite() && !result.ok()
+                        && result.components.len() == 1
+                        && result.components[0].kind == CheckKind::AxialBending
+                        && actual.contains("モーメントMy") && actual.contains(reason)
+            ),
+            "{checks:?}"
+        );
     }
 }
 

@@ -286,6 +286,78 @@ fn column_qd_reports_missing_bending_or_alternative_without_a_ratio() {
 }
 
 #[test]
+fn column_qd_never_reports_compliance_for_nonfinite_axial_force_or_moments() {
+    let ctx = context([0.0; 2], [0.0; 2]);
+    let sec = section();
+    let concrete = material("Fc24", MaterialCategory::Concrete, Some(24.0), None);
+    let outcomes = |f: &MemberForcesAt| {
+        SrcDesign
+            .check_outcomes(f, &sec, &concrete, &ctx)
+            .collect::<Vec<_>>()
+    };
+
+    for (f, reason) in [
+        (forces(f64::NAN), "軸力N"),
+        (
+            MemberForcesAt {
+                my: f64::NAN,
+                ..forces(0.0)
+            },
+            "モーメントMy",
+        ),
+    ] {
+        assert_skipped(check(&sec, &f, &ctx), reason);
+        let rows = outcomes(&f);
+        assert!(
+            matches!(rows.as_slice(), [CheckOutcome::Skipped { reason: actual }]
+            if actual.contains(reason)),
+            "{rows:?}"
+        );
+    }
+
+    for (f, reason) in [
+        (
+            MemberForcesAt {
+                my: f64::NAN,
+                mz: 4.0e9,
+                ..forces(0.0)
+            },
+            "モーメントMy",
+        ),
+        (
+            MemberForcesAt {
+                my: -4.0e9,
+                mz: f64::INFINITY,
+                ..forces(0.0)
+            },
+            "モーメントMz",
+        ),
+        (
+            MemberForcesAt {
+                my: f64::INFINITY,
+                mz: f64::NAN,
+                ..forces(40.0e6)
+            },
+            "モーメントMy",
+        ),
+    ] {
+        assert_skipped(check(&sec, &f, &ctx), reason);
+        let rows = outcomes(&f);
+        assert!(
+            matches!(
+                rows.as_slice(),
+                [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason: actual }]
+                    if result.ratio().is_finite() && !result.ok()
+                        && result.components.len() == 1
+                        && result.components[0].kind == CheckKind::AxialBending
+                        && actual.contains(reason)
+            ),
+            "{rows:?}"
+        );
+    }
+}
+
+#[test]
 fn qd1_rejects_invalid_demand_inputs_and_allowables() {
     let mut ctx = context([0.0; 2], [0.0; 2]);
     let f = forces(0.0);

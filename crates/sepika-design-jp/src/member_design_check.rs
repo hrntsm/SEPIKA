@@ -181,22 +181,31 @@ fn push_strength_outcome(
     outcome: CheckOutcome,
     incomplete_reason: Option<&str>,
 ) {
+    checks
+        .extend(strength_outcomes(outcome, incomplete_reason).map(|outcome| (elem, pos, outcome)));
+}
+
+pub(crate) fn strength_outcomes(
+    outcome: CheckOutcome,
+    incomplete_reason: Option<&str>,
+) -> impl Iterator<Item = CheckOutcome> {
     let Some(incomplete_reason) = incomplete_reason else {
-        checks.push((elem, pos, outcome));
-        return;
+        return [Some(outcome), None].into_iter().flatten();
     };
 
-    let reason = match outcome {
+    let (known_ng, reason) = match outcome {
         CheckOutcome::Checked(mut result) => {
             result.components.retain(|component| component.ratio > 1.0);
-            if !result.components.is_empty() {
-                checks.push((elem, pos, CheckOutcome::Checked(result)));
-            }
-            incomplete_reason.into()
+            (
+                (!result.components.is_empty()).then_some(CheckOutcome::Checked(result)),
+                incomplete_reason.into(),
+            )
         }
-        CheckOutcome::Skipped { reason } => format!("{reason}。{incomplete_reason}"),
+        CheckOutcome::Skipped { reason } => (None, format!("{reason}。{incomplete_reason}")),
     };
-    checks.push((elem, pos, CheckOutcome::Skipped { reason }));
+    [known_ng, Some(CheckOutcome::Skipped { reason })]
+        .into_iter()
+        .flatten()
 }
 
 fn brb_torsion_reason(mx: f64) -> Option<&'static str> {

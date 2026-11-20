@@ -307,6 +307,19 @@ impl DesignCheck for SrcDesign {
 }
 
 impl SrcDesign {
+    /// 検定位置の結果を返す。短期地震時のSRC柱が未算定の場合、理由と、独立に確定した軸力・曲げの不適合を別の結果で返す。
+    /// 未算定を伴う位置で、適合を示す検定比は返さない。
+    pub fn check_outcomes(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> impl Iterator<Item = CheckOutcome> {
+        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, false);
+        crate::member_design_check::strength_outcomes(outcome, incomplete.as_deref())
+    }
+
     pub(crate) fn check_with_incomplete(
         &self,
         forces: &MemberForcesAt,
@@ -450,13 +463,8 @@ impl SrcDesign {
                     );
                 }
                 if ctx.term == LoadTerm::Short && (missing_gravity || ctx.seismic_qd.is_some()) {
-                    if ![forces.n, forces.my, forces.mz]
-                        .iter()
-                        .all(|v| v.is_finite())
-                    {
-                        return Err(
-                            "SRC柱検定: 組合せの軸力または曲げモーメントが非有限です".into()
-                        );
+                    if !forces.n.is_finite() {
+                        return Err("SRC柱検定: 組合せの軸力Nが非有限です".into());
                     }
                     if ![
                         fc_raw,

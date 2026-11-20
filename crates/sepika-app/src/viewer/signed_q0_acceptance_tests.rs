@@ -96,6 +96,9 @@ fn src_column_th_detail_displays_why_seismic_bending_shear_is_unchecked() {
         peak_member_forces: vec![Some(peak)],
         ..Default::default()
     };
+    let mut overloaded = rec.clone();
+    overloaded.peak_member_forces[0].as_mut().unwrap().at =
+        vec![(0.0, [-40.0e6, 0.0, 0.0, 0.0, 0.0, 0.0])];
     for (method, reason) in [
         (QdMethod::Qd1, "柱頭・柱脚の軸力"),
         (QdMethod::Min, "一次設計用地震力"),
@@ -105,6 +108,15 @@ fn src_column_th_detail_displays_why_seismic_bending_shear_is_unchecked() {
         assert!(text.contains("検定不能: SRC柱検定"), "{text}");
         assert!(text.contains(reason), "{text}");
         assert!(!text.contains("検定比"), "{text}");
+
+        let text = labels(&app, &overloaded, true);
+        assert_eq!(text.matches("ξ=0.00:").count(), 2, "{text}");
+        assert!(text.contains("(NG)"), "{text}");
+        assert!(
+            text.contains("検定不能: SRC柱検定") && text.contains(reason),
+            "{text}"
+        );
+        assert!(!text.contains("(OK)"), "{text}");
     }
     let ordinary = labels(&app, &rec, false);
     assert!(ordinary.contains("検定比"), "{ordinary}");

@@ -383,9 +383,12 @@ pub(crate) fn src_column_check(
     let ma_z = src_column_axis_ma(n_design, rnc, rnt, sa, s_ft, s_fc, sz_z, s_mo_z, &curve_z);
     let ma_y = src_column_axis_ma(n_design, rnc, rnt, sa, s_ft, s_fc, sz_y, s_mo_y, &curve_y);
 
-    let ratio_z = ratio_or_large(forces.mz, ma_z);
-    let ratio_y = ratio_or_large(forces.my, ma_y);
-    let ratio_biaxial = ratio_z + ratio_y;
+    let short_seismic = !long_term && (missing_gravity || ctx.seismic_qd.is_some());
+    let invalid_z = short_seismic && !forces.mz.is_finite();
+    let invalid_y = short_seismic && !forces.my.is_finite();
+    let ratio_z = (!invalid_z).then(|| ratio_or_large(forces.mz, ma_z));
+    let ratio_y = (!invalid_y).then(|| ratio_or_large(forces.my, ma_y));
+    let ratio_biaxial: f64 = ratio_z.into_iter().chain(ratio_y).sum();
 
     let ratio_axial = if n_design > rnc + s_nc {
         n_design / (rnc + s_nc)
@@ -395,12 +398,23 @@ pub(crate) fn src_column_check(
         0.0
     };
 
+    let invalid_ratio = short_seismic && (!ratio_axial.is_finite() || !ratio_biaxial.is_finite());
+    let ratio = if invalid_ratio {
+        [ratio_axial, ratio_biaxial]
+            .into_iter()
+            .chain(ratio_z)
+            .chain(ratio_y)
+            .filter(|ratio| ratio.is_finite())
+            .fold(0.0, f64::max)
+    } else {
+        ratio_axial.max(ratio_biaxial)
+    };
     let mut result = CheckResult {
         basis: "SRC規準(1987) 柱: 累加強度式(軸力+二軸曲げ)".into(),
         detail: String::new(),
         components: vec![CheckComponent {
             kind: CheckKind::AxialBending,
-            ratio: ratio_axial.max(ratio_biaxial),
+            ratio,
             detail: format!(
                 "rNc={:.1} N, rNt={:.1} N, sNc={:.1} N, sNt={:.1} N, N={:.1} N, \
                  MAz={:.1} N·mm, MAy={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm, s_pc={:.5}, fc'={:.3}",
@@ -408,10 +422,24 @@ pub(crate) fn src_column_check(
             ),
         }],
     };
-    let demand_n = match src_column_seismic_qd(forces, ctx, missing_gravity) {
-        Ok(demand_n) => demand_n,
-        Err(reason) => return (result, Some(format!("SRC柱検定: {reason}"))),
+    let (demand_n, demand_reason) = match src_column_seismic_qd(forces, ctx, missing_gravity) {
+        Ok(demand_n) => (demand_n, None),
+        Err(reason) => (None, Some(reason)),
     };
+    let incomplete = [
+        invalid_z.then_some("組合せの曲げモーメントMzが非有限です"),
+        invalid_y.then_some("組合せの曲げモーメントMyが非有限です"),
+        invalid_ratio.then_some("軸力・曲げの検定比が非有限です"),
+        demand_reason.as_deref(),
+    ];
+    if incomplete.iter().any(Option::is_some) {
+        let reason = incomplete
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("。");
+        return (result, Some(format!("SRC柱検定: {reason}")));
+    }
 
     let sd_flange = (steel_height - steel_flange_thick).max(0.0);
     let beta_z = if props_z.b * props_z.j > 1e-9 {
