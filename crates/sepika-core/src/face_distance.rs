@@ -2,12 +2,124 @@
 
 use crate::adjacency::NodeAdjacency;
 use crate::geom::{element_axis as elem_axis, vec3, ORTHOGONAL_DOT_MAX};
+use crate::ids::ElemId;
 use crate::model::{
     ElementData, FrameSectionUse, SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind,
     Section, SupportMemberId,
 };
 use crate::model::{ElementKind, Model};
 use crate::section_shape::face_geometry::SectionGeometry;
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GirderColumnFace {
+    /// 大梁の実材軸のi端から評価位置までの距離 `[mm]`。
+    pub position_mm: f64,
+    /// 大梁の実材軸の全長 `[mm]`。
+    pub length_mm: f64,
+    /// 評価位置を与えた接続柱のID。順序はモデルの要素順。
+    pub columns: Vec<ElemId>,
+}
+
+/// 大梁の実材軸上の実柱面位置。i/j順。面を決められない端は対象・端・理由付きエラー。
+/// 大梁用途の主架構線材以外は None。`adjacency` は同一モデルの `NodeAdjacency::primary_frame`。
+pub fn girder_column_faces(
+    model: &Model,
+    elem: &ElementData,
+    adjacency: &NodeAdjacency,
+) -> Option<[Result<GirderColumnFace, String>; 2]> {
+    if !elem.kind.is_primary_frame_support()
+        || !model
+            .element_section(elem)
+            .is_some_and(|section| section.frame_use == Some(FrameSectionUse::Girder))
+    {
+        return None;
+    }
+    let fail = |side: usize, reason: String| {
+        format!(
+            "大梁 ID {} {}端の実柱面: {reason}",
+            elem.id.0,
+            ["i", "j"][side]
+        )
+    };
+    let geometry = (|| {
+        let ends = model
+            .primary_frame_axis_ends(elem)?
+            .ok_or("大梁の実材軸が未解決です")?;
+        Ok::<_, String>((ends, axis_direction(ends[0], ends[1])?))
+    })();
+    let mut faces = std::array::from_fn(|side| {
+        let resolve = || {
+            let (ends, forward) = geometry.as_ref().map_err(Clone::clone)?;
+            let direction = if side == 0 {
+                *forward
+            } else {
+                vec3::scale(*forward, -1.0)
+            };
+            let length_mm = vec3::dist(ends[0], ends[1]);
+            let mut connected = adjacency
+                .elements_at(model, elem.nodes[side])
+                .filter(|col| {
+                    col.id != elem.id
+                        && model.element_section(col).is_some_and(|section| {
+                            section.frame_use == Some(FrameSectionUse::Column)
+                        })
+                })
+                .peekable();
+            if connected.peek().is_none() {
+                return Err("接続柱がありません".into());
+            }
+            let mut candidates = connected.filter_map(|col| {
+                model
+                    .girder_exit_at_column_face_mm(col, ends[side], direction, length_mm)
+                    .map(|distance_mm| distance_mm.map(|distance_mm| (col.id, distance_mm)))
+                    .transpose()
+            });
+            let (first, distance_mm) = candidates
+                .next()
+                .ok_or("梁の実材軸が接続柱の側面を横切りません")??;
+            let mut columns = vec![first];
+            for other in candidates {
+                let (id, other_distance_mm) = other?;
+                let tol_mm = 32.0 * f64::EPSILON * distance_mm.max(other_distance_mm).max(1.0);
+                if (other_distance_mm - distance_mm).abs() > tol_mm {
+                    return Err(format!(
+                        "柱 ID {}（梁端から {distance_mm} mm）と柱 ID {}（{other_distance_mm} mm）の側面位置が一致しません",
+                        first.0, id.0
+                    ));
+                }
+                columns.push(id);
+            }
+            if !distance_mm.is_finite() || !(0.0..length_mm).contains(&distance_mm) {
+                return Err(format!(
+                    "柱 ID {} の側面位置が大梁実材軸上の端部範囲外です",
+                    first.0
+                ));
+            }
+            let position_mm = if side == 0 {
+                distance_mm
+            } else {
+                length_mm - distance_mm
+            };
+            Ok(GirderColumnFace {
+                position_mm,
+                length_mm,
+                columns,
+            })
+        };
+        resolve().map_err(|reason| fail(side, reason))
+    });
+    if matches!(&faces, [Ok(i), Ok(j)] if i.position_mm >= j.position_mm) {
+        let [Ok(i), Ok(j)] = &faces else {
+            unreachable!()
+        };
+        let reason = format!(
+            "接続柱の側面間に梁区間がありません（i端 {} mm、j端 {} mm）",
+            i.position_mm, j.position_mm
+        );
+        faces = std::array::from_fn(|side| Err(fail(side, reason.clone())));
+    }
+    Some(faces)
+}
 
 fn axis_direction(a: [f64; 3], b: [f64; 3]) -> Result<[f64; 3], String> {
     let delta = vec3::sub(b, a);

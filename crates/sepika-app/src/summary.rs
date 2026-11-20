@@ -2015,6 +2015,7 @@ mod tests {
                 disp: vec![[0.0; 6]; 4],
                 member_forces: vec![],
                 panel_moments: vec![],
+                girder_column_face_forces: Vec::new(),
             },
         )
     }

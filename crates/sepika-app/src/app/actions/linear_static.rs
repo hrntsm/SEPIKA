@@ -1328,6 +1328,7 @@ mod workspace_result_tests {
             disp: vec![[value; 6]; 4],
             member_forces: Vec::new(),
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         };
         app.core.scoped.results = Some(ResultsBundle {
             combos: vec![

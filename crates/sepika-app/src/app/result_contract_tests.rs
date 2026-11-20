@@ -1167,6 +1167,94 @@ fn gui_reports_old_contract_and_explicit_recheck_button_recovers_without_reanaly
 }
 
 #[test]
+fn ovika_preserves_girder_column_face_forces_and_diagnostics_for_case_and_combination() {
+    use sepika_core::model::{LoadCombination, MemberLoad, MemberLoadKind, PanelZoneMode};
+
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = PanelZoneMode::None;
+    let girder = model.elements[2].id;
+    model.load_cases[0].member.push(MemberLoad::manual(
+        girder,
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: 5850.0,
+            p: 1000.0,
+        },
+    ));
+    model.combinations.push(LoadCombination {
+        name: "実柱面の保存".into(),
+        terms: vec![(LoadCaseId(0), 2.0)],
+    });
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+
+    let column_faces = |app: &App| {
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        let case = bundle
+            .statics
+            .iter()
+            .find(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0)))
+            .unwrap();
+        let combo = bundle
+            .combos
+            .iter()
+            .find(|(name, _)| name == "実柱面の保存")
+            .unwrap();
+        [
+            case.1.girder_column_face_forces.clone(),
+            combo.1.girder_column_face_forces.clone(),
+        ]
+    };
+    let before = column_faces(&app);
+    for row in &before {
+        let (_, [i, j]) = row.iter().find(|(id, _)| *id == girder).unwrap();
+        let i = i.as_ref().unwrap();
+        assert_eq!(i.face.position_mm, 150.0);
+        assert_eq!(i.face.columns, [ElemId(0)]);
+        assert!(i
+            .forces
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|force| force.abs() > 1.0));
+        let j = j.as_ref().unwrap();
+        assert_eq!(j.face.position_mm, 5850.0);
+        assert_eq!(j.face.columns, [ElemId(1)]);
+        assert!(j.forces.as_ref().unwrap_err().contains("切断側"));
+    }
+    let path = std::env::temp_dir().join(format!("sepika-1511-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    assert!(!loaded.core.scoped.staleness.results_stale);
+    assert_eq!(column_faces(&loaded), before);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn ovika_current_selected_input_missing_or_mismatched_is_excluded_without_losing_other_runs() {
     for combo in [false, true] {
         for missing in [false, true] {

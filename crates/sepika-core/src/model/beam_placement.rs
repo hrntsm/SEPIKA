@@ -11,8 +11,9 @@ pub(super) fn deserialize_end_offsets<'de, D: serde::Deserializer<'de>>(
 }
 
 use super::*;
-use crate::geom::vec3::{add, dist, dot, local_frame_axes, sub};
+use crate::geom::vec3::{add, dist, dot, local_frame_axes, local_frame_axes_with_fallback, sub};
 use crate::section_shape::face_geometry::{Primitive, SectionGeometry};
+use crate::section_shape::SectionShape;
 
 /// 梁の有限な実配置。座標・偏心・断面寸法は mm、基底は局所 x/y/z 順。
 pub struct BeamPlacement {
@@ -39,6 +40,308 @@ impl Model {
         member: SupportMemberId,
     ) -> Result<BeamPlacement, String> {
         self.resolve_beam_placement(member, true)
+    }
+
+    /// 梁実材端からの側面出口距離 `[mm]`。側面を横切らないことが確定する場合は None、採用面を解決できない場合はエラー。
+    pub(crate) fn girder_exit_at_column_face_mm(
+        &self,
+        column: &ElementData,
+        origin_mm: [f64; 3],
+        inward: [f64; 3],
+        girder_length_mm: f64,
+    ) -> Result<Option<f64>, String> {
+        let fail = |reason: &str| format!("柱 ID {}: {reason}", column.id.0);
+        let [i, j] = column.nodes.as_slice() else {
+            return Err(fail("二節点の柱が必要です"));
+        };
+        let a = self
+            .node(*i)
+            .ok_or_else(|| fail("i端節点がありません"))?
+            .coord;
+        let b = self
+            .node(*j)
+            .ok_or_else(|| fail("j端節点がありません"))?
+            .coord;
+        let reference_ends = [a, b];
+        let [a, b] = actual_beam_axis_ends(reference_ends, column.end_offsets_mm)
+            .map_err(|reason| fail(&reason))?;
+        let length_mm = dist(a, b);
+        let axis = sub(b, a).map(|component| component / length_mm);
+        let start_mm = dot(sub(origin_mm, a), axis);
+        let end_mm = start_mm + girder_length_mm * dot(inward, axis);
+        if ![length_mm, start_mm, end_mm]
+            .iter()
+            .all(|value| value.is_finite())
+            || length_mm <= 0.0
+        {
+            return Err(fail("柱の有限な材軸区間を解決できません"));
+        }
+        let tol_mm = 32.0 * f64::EPSILON * length_mm.max(girder_length_mm).max(1.0);
+        if start_mm.max(end_mm) < -tol_mm || start_mm.min(end_mm) > length_mm + tol_mm {
+            return Ok(None);
+        }
+        let section = self
+            .element_section(column)
+            .ok_or_else(|| fail("断面がありません"))?;
+        let shape = section
+            .shape
+            .as_ref()
+            .ok_or_else(|| fail("実断面形状が未指定です"))?;
+        let (axes, fallback) =
+            local_frame_axes_with_fallback(a, b, column.local_axis.ref_vector).map_err(fail)?;
+        if fallback
+            && !matches!(
+                shape,
+                SectionShape::RcColumnCircle { .. }
+                    | SectionShape::SteelRoundBar { .. }
+                    | SectionShape::SteelPipe { .. }
+                    | SectionShape::CftPipe { .. }
+            )
+        {
+            return Err(fail("断面の向きを解決できません"));
+        }
+        let p = axes.map(|axis| dot(sub(origin_mm, a), axis));
+        let v = axes.map(|axis| dot(inward, axis));
+        if ![length_mm, p[0], p[1], p[2], v[0], v[1], v[2]]
+            .iter()
+            .all(|x| x.is_finite())
+            || v[1].hypot(v[2]) <= 32.0 * f64::EPSILON
+        {
+            return Err(fail("梁材軸と柱側面の交点を解決できません"));
+        }
+        let resolve = || {
+            shape.validate_surface_radius()?;
+            let mut cap = [f64::NEG_INFINITY, f64::INFINITY];
+            if v[0].abs() > 32.0 * f64::EPSILON {
+                clip(&mut cap, p[0], v[0], [0.0, length_mm])?;
+            }
+            let finite_span = [
+                cap[0].max(0.0) - tol_mm,
+                cap[1].min(girder_length_mm) + tol_mm,
+            ];
+            let member = SupportMemberId::Primary(column.id);
+            // 外接矩形ではウェブ側や隅角の実外周が分からないため、候補外の証明にだけ使う。
+            let intersects_envelope = |depth: [f64; 2], width: f64| {
+                let mut span = finite_span;
+                let half_width = width / 2.0 + tol_mm;
+                Ok::<_, String>(
+                    span[0] <= span[1]
+                        && clip(
+                            &mut span,
+                            p[1],
+                            v[1],
+                            [depth[0] - tol_mm, depth[1] + tol_mm],
+                        )?
+                        && clip(&mut span, p[2], v[2], [-half_width, half_width])?,
+                )
+            };
+            let intersects_complete_section = |geometry: &SectionGeometry| {
+                let misses_with_margin = |margin_mm| {
+                    BeamPlacement::material_intervals(
+                        geometry,
+                        p,
+                        v,
+                        finite_span,
+                        member,
+                        margin_mm,
+                    )
+                    .map(|intervals| intervals.is_empty())
+                };
+                if !misses_with_margin(-tol_mm)? {
+                    Ok(true)
+                } else if misses_with_margin(tol_mm)? {
+                    Ok(false)
+                } else {
+                    Err("梁材軸と鋼材の交差が境界付近のため確定できません".to_owned())
+                }
+            };
+            let exits_only_at_cap = |guaranteed: &SectionGeometry, continuous_web| {
+                let start = cap[0].max(0.0);
+                let exit = cap[1];
+                if exit <= start + tol_mm || exit >= girder_length_mm - tol_mm {
+                    return Ok(false);
+                }
+                let with_continuous_web;
+                let guaranteed = if let Some(web) = continuous_web {
+                    // フランジとウェブの内部継目に、境界公差による隙間を作らない。
+                    with_continuous_web = SectionGeometry {
+                        parts: guaranteed
+                            .parts
+                            .iter()
+                            .copied()
+                            .chain([(web, Some(0))])
+                            .collect(),
+                    };
+                    &with_continuous_web
+                } else {
+                    guaranteed
+                };
+                let intervals = BeamPlacement::material_intervals(
+                    guaranteed,
+                    p,
+                    v,
+                    finite_span,
+                    member,
+                    -tol_mm,
+                )?;
+                Ok::<_, String>(
+                    intervals
+                        .iter()
+                        .any(|[entry, end]| *entry <= finite_span[0] && *end >= finite_span[1]),
+                )
+            };
+            let web_band = |depth, width_mm: f64| {
+                Some(Primitive::Rectangle {
+                    y: depth,
+                    z: [-width_mm / 2.0, width_mm / 2.0],
+                })
+            };
+            let (side_exit, known_region) = match *shape {
+                SectionShape::SteelH {
+                    height,
+                    width,
+                    root_r,
+                    web_thick,
+                    flange_thick,
+                } => {
+                    let depth = height / 2.0;
+                    if !intersects_envelope([-depth, depth], width)? {
+                        return Ok(None);
+                    }
+                    // フィレット未指定時もフランジとウェブの板領域には鋼材がある。
+                    let cap_proof = SectionGeometry::h_geometry(
+                        height,
+                        width,
+                        web_thick,
+                        flange_thick,
+                        root_r.unwrap_or(0.0),
+                        true,
+                    );
+                    if exits_only_at_cap(
+                        &cap_proof,
+                        web_band([-depth, depth], web_thick.min(width)),
+                    )? {
+                        return Ok(None);
+                    }
+                    let known = if root_r.is_some() {
+                        SectionGeometry::of(shape)?
+                    } else {
+                        cap_proof
+                    };
+                    if root_r.is_some() && !intersects_complete_section(&known)? {
+                        return Ok(None);
+                    }
+                    let face = flange_face_mm(p, v, [-depth, depth], [width; 2]);
+                    (face, known)
+                }
+                SectionShape::SteelBuiltH {
+                    lower_width,
+                    upper_width,
+                    web_thick,
+                    ..
+                } => {
+                    let known = SectionGeometry::of(shape)?;
+                    let depth = known.projected_range([1.0, 0.0])?;
+                    if !intersects_envelope(depth, lower_width.max(upper_width))?
+                        || exits_only_at_cap(
+                            &known,
+                            web_band(depth, web_thick.min(lower_width).min(upper_width)),
+                        )?
+                        || !intersects_complete_section(&known)?
+                    {
+                        return Ok(None);
+                    }
+                    let face = flange_face_mm(p, v, depth, [lower_width, upper_width]);
+                    (face, known)
+                }
+                SectionShape::SteelBox {
+                    height,
+                    width,
+                    corner_r: None,
+                    ..
+                }
+                | SectionShape::CftBox {
+                    height,
+                    width,
+                    corner_r: None,
+                    ..
+                } => {
+                    let depth = height / 2.0;
+                    if !intersects_envelope([-depth, depth], width)? {
+                        return Ok(None);
+                    }
+                    let guaranteed_outer = SectionGeometry::rounded_outer_envelope(
+                        height,
+                        width,
+                        height.min(width) / 2.0,
+                    );
+                    if exits_only_at_cap(&guaranteed_outer, None)? {
+                        return Ok(None);
+                    }
+                    let face = flat_face_with_unknown_radius_mm(p, v, [height / 2.0, width / 2.0]);
+                    (face, guaranteed_outer)
+                }
+                SectionShape::RcColumnRect { .. }
+                | SectionShape::SrcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::SteelRoundBar { .. }
+                | SectionShape::SteelFlatBar { .. }
+                | SectionShape::SteelPipe { .. }
+                | SectionShape::CftPipe { .. }
+                | SectionShape::SteelBox { .. }
+                | SectionShape::CftBox { .. } => {
+                    let placement = BeamPlacement::new(
+                        SupportMemberId::Primary(column.id),
+                        reference_ends,
+                        column.end_offsets_mm,
+                        section,
+                        column.local_axis.ref_vector,
+                    )?;
+                    return placement.closed_column_side_exit_mm(
+                        p,
+                        v,
+                        cap,
+                        girder_length_mm,
+                        tol_mm,
+                    );
+                }
+                _ => return Err("接合詳細がなく、柱の採用側面を一意に決められません".into()),
+            };
+            let intervals = BeamPlacement::material_intervals(
+                &known_region,
+                p,
+                v,
+                [f64::NEG_INFINITY, f64::INFINITY],
+                member,
+                0.0,
+            )?;
+            let mut finite_intervals = intervals
+                .into_iter()
+                .filter(|[entry, exit]| *entry <= finite_span[1] && *exit >= finite_span[0]);
+            let interval = finite_intervals.next();
+            if finite_intervals.next().is_some() {
+                return Err(
+                    "有限な柱の既知の鋼材区間が連続せず、採用面を決めるには接合詳細が必要です"
+                        .into(),
+                );
+            }
+            let side_exit = side_exit?;
+            let [entry, exit] =
+                interval.ok_or("有限な柱の端面と梁材軸が交わる位置の外周を確定できません")?;
+            if (exit - side_exit).abs() > tol_mm {
+                return Err("採用面までの既知の柱断面区間を解決できません".into());
+            }
+            let position = finite_column_side_exit_mm(
+                [entry, side_exit],
+                cap,
+                girder_length_mm,
+                tol_mm,
+                false,
+            )?
+            .ok_or("柱の端面だけを通過することを確定できず、接合詳細が必要です")?;
+            Ok(Some(position))
+        };
+        resolve().map_err(|reason| fail(&reason))
     }
 
     fn resolve_beam_placement(
@@ -288,7 +591,123 @@ impl Model {
     }
 }
 
+fn flange_face_mm(
+    p: [f64; 3],
+    v: [f64; 3],
+    depth: [f64; 2],
+    flange_width: [f64; 2],
+) -> Result<f64, String> {
+    let side = usize::from(v[1] > 0.0);
+    let distance_mm = (depth[side] - p[1]) / v[1];
+    let width_at_face_mm = (p[2] + distance_mm * v[2]).abs();
+    let tol_mm = 32.0 * f64::EPSILON * flange_width[side].max(1.0);
+    if v[1].abs() > 32.0 * f64::EPSILON
+        && distance_mm.is_finite()
+        && width_at_face_mm < flange_width[side] / 2.0 - tol_mm
+    {
+        Ok(distance_mm)
+    } else {
+        Err(
+            "H形柱の外フランジ広面の内部に交わらず、接合詳細から採用面を決める必要があります"
+                .into(),
+        )
+    }
+}
+
+fn flat_face_with_unknown_radius_mm(
+    p: [f64; 3],
+    v: [f64; 3],
+    half_mm: [f64; 2],
+) -> Result<f64, String> {
+    let max_radius_mm = half_mm[0].min(half_mm[1]);
+    let flats_mm = half_mm.map(|half| half - max_radius_mm);
+    for side in 0..2 {
+        let other = 1 - side;
+        let component = v[side + 1];
+        if component == 0.0 {
+            continue;
+        }
+        let distance_mm = (component.signum() * half_mm[side] - p[side + 1]) / component;
+        // 最大の角Rでも残る平面上の点だけは、半径にかかわらず同じ外周に属する。
+        if distance_mm.is_finite()
+            && (p[other + 1] + distance_mm * v[other + 1]).abs()
+                <= flats_mm[other] + 32.0 * f64::EPSILON * half_mm[other]
+        {
+            return Ok(distance_mm);
+        }
+    }
+    Err("角Rが未知で、梁材軸と柱外周の交点を一意に決められません".into())
+}
+
+fn finite_column_side_exit_mm(
+    [side_entry, side_exit]: [f64; 2],
+    cap: [f64; 2],
+    girder_length_mm: f64,
+    tol_mm: f64,
+    tangent: bool,
+) -> Result<Option<f64>, String> {
+    let entry = side_entry.max(cap[0]);
+    let exit = side_exit.min(cap[1]);
+    let overlap_mm = exit.min(girder_length_mm) - entry.max(0.0);
+    if overlap_mm < -tol_mm {
+        return Ok(None);
+    }
+    if tangent
+        || overlap_mm <= tol_mm
+        || (side_exit - cap[1]).abs() <= tol_mm
+        || (side_entry >= -tol_mm && (side_entry - cap[0]).abs() <= tol_mm)
+    {
+        return Err("梁材軸が柱の境界だけに接するか、側面と端面の交点を分けられません".into());
+    }
+    if side_entry > tol_mm && side_entry > cap[0] {
+        return Err(
+            "実材端と離れた位置で梁材軸が柱側面へ入る可能性があり、接合詳細が必要です".into(),
+        );
+    }
+    if cap[1] < side_exit {
+        return Ok(None);
+    }
+    Ok(Some(side_exit))
+}
+
 impl BeamPlacement {
+    fn closed_column_side_exit_mm(
+        &self,
+        p: [f64; 3],
+        v: [f64; 3],
+        cap: [f64; 2],
+        girder_length_mm: f64,
+        tol_mm: f64,
+    ) -> Result<Option<f64>, String> {
+        let norm = v[1].hypot(v[2]);
+        let normal = [v[2] / norm, -v[1] / norm];
+        let offset = p[1] * normal[0] + p[2] * normal[1];
+        let [lo, hi] = self.geometry.projected_range(normal)?;
+        if offset < lo - tol_mm || offset > hi + tol_mm {
+            return Ok(None);
+        }
+        let intervals = Self::material_intervals(
+            &self.geometry,
+            p,
+            v,
+            [f64::NEG_INFINITY, f64::INFINITY],
+            self.member,
+            0.0,
+        )?;
+        let (first, last) = intervals
+            .first()
+            .zip(intervals.last())
+            .ok_or("梁材軸が柱外周に接するかを判定できません")?;
+        // 鋼管の中空部の境界を柱の側面に採ることはできない。
+        finite_column_side_exit_mm(
+            [first[0], last[1]],
+            cap,
+            girder_length_mm,
+            tol_mm,
+            offset <= lo + tol_mm || offset >= hi - tol_mm,
+        )
+    }
+
     /// 水平面内の材軸直交方向への実断面外側投影幅 `[mm]`。
     pub fn plan_width_mm(&self) -> Result<f64, String> {
         let x = self.axes[0];
@@ -492,16 +911,44 @@ impl BeamPlacement {
         if finite_ends && !clip(&mut cap, p[0], v[0], [0.0, self.length_mm])? {
             return Ok(Vec::new());
         }
+        Self::material_intervals(&self.geometry, p, v, cap, self.member, 0.0)
+    }
+
+    fn material_intervals(
+        geometry: &SectionGeometry,
+        p: [f64; 3],
+        v: [f64; 3],
+        cap: [f64; 2],
+        member: SupportMemberId,
+        boundary_margin_mm: f64,
+    ) -> Result<Vec<[f64; 2]>, String> {
         let mut intervals = Vec::new();
-        for (primitive, material) in &self.geometry.parts {
+        for (primitive, material) in &geometry.parts {
             let mut span = cap;
+            // 境界付近を確定扱いしないため、非交差の証明では材料を広げ、鋼材内部の通過の証明では狭める。
+            let margin_mm = if material.is_some() {
+                boundary_margin_mm
+            } else {
+                -boundary_margin_mm
+            };
             match *primitive {
                 Primitive::Rectangle { y, z } => {
-                    if !clip(&mut span, p[1], v[1], y)? || !clip(&mut span, p[2], v[2], z)? {
+                    let expanded = |[lo, hi]: [f64; 2]| [lo - margin_mm, hi + margin_mm];
+                    let y = expanded(y);
+                    let z = expanded(z);
+                    if y[1] < y[0]
+                        || z[1] < z[0]
+                        || !clip(&mut span, p[1], v[1], y)?
+                        || !clip(&mut span, p[2], v[2], z)?
+                    {
                         continue;
                     }
                 }
                 Primitive::Circle { center, radius } => {
+                    let radius = radius + margin_mm;
+                    if radius < 0.0 {
+                        continue;
+                    }
                     let dy = p[1] - center[0];
                     let dz = p[2] - center[1];
                     let a = v[1] * v[1] + v[2] * v[2];
@@ -509,7 +956,7 @@ impl BeamPlacement {
                     if ![dy, dz, a, b].iter().all(|x| x.is_finite()) {
                         return Err(format!(
                             "{}: 断面交点の導出が非有限です",
-                            beam_label(self.member)
+                            beam_label(member)
                         ));
                     }
                     if a == 0.0 {
@@ -522,7 +969,7 @@ impl BeamPlacement {
                         if !discriminant.is_finite() {
                             return Err(format!(
                                 "{}: 断面交点の判別式が非有限です",
-                                beam_label(self.member)
+                                beam_label(member)
                             ));
                         }
                         if discriminant < 0.0 {
@@ -557,10 +1004,7 @@ impl BeamPlacement {
             }
         }
         if !result.iter().flatten().all(|v| v.is_finite()) {
-            return Err(format!(
-                "{}: 実形状交点が非有限です",
-                beam_label(self.member)
-            ));
+            return Err(format!("{}: 実形状交点が非有限です", beam_label(member)));
         }
         result.sort_by(|left, right| {
             left[0]

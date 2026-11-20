@@ -508,6 +508,7 @@ mod tests {
                 })
                 .collect(),
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         }
     }
 
@@ -534,6 +535,7 @@ mod tests {
                 })
                 .collect(),
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         }
     }
 

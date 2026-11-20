@@ -505,6 +505,7 @@ mod workspace_navigation_tests {
                         disp: vec![[1.0; 6]; 4],
                         member_forces: vec![],
                         panel_moments: vec![],
+                        girder_column_face_forces: Vec::new(),
                     },
                 )],
                 time_histories: vec![(

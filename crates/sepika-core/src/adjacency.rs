@@ -17,7 +17,7 @@
 //!
 //! # 対象は線材のみ
 //!
-//! [`ElementKind::Beam`] の 2 節点要素だけを収める。耐震壁・シェル等が混ざると、
+//! 標準の [`NodeAdjacency::build`] は [`ElementKind::Beam`] を収める。耐震壁・シェル等が混ざると、
 //! 剛域の直交材探索へ壁の名目せいが紛れ込む（「耐震壁周辺の柱・梁の剛域は
 //! 考慮しない」という方針に反する）。
 
@@ -34,9 +34,18 @@ pub struct NodeAdjacency {
 impl NodeAdjacency {
     /// モデル全体から 1 回だけ構築する（`O(要素数)`）。
     pub fn build(model: &Model) -> Self {
+        Self::build_matching(model, |kind| matches!(kind, ElementKind::Beam))
+    }
+
+    /// 梁・柱の主架構線材を収める。節点ごとの添字はモデルの要素順。
+    pub fn primary_frame(model: &Model) -> Self {
+        Self::build_matching(model, ElementKind::is_primary_frame_support)
+    }
+
+    fn build_matching(model: &Model, accepts: impl Fn(ElementKind) -> bool) -> Self {
         let mut by_node: HashMap<usize, Vec<usize>> = HashMap::new();
         for (ei, e) in model.elements.iter().enumerate() {
-            if !matches!(e.kind, ElementKind::Beam) || e.nodes.len() < 2 {
+            if !accepts(e.kind) || e.nodes.len() < 2 {
                 continue;
             }
             for n in e.nodes.iter().take(2) {

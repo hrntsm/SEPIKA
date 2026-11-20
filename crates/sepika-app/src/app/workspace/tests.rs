@@ -289,6 +289,7 @@ fn each_drawing_keeps_its_static_result_when_the_other_result_changes() {
         disp: vec![[displacement; 6]; h.app.core.model.nodes.len()],
         member_forces: Vec::new(),
         panel_moments: Vec::new(),
+        girder_column_face_forces: Vec::new(),
     };
     h.app.core.scoped.results = Some(ResultsBundle {
         statics: vec![

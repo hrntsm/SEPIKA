@@ -63,6 +63,73 @@ pub struct SectionGeometry {
 }
 
 impl SectionGeometry {
+    pub(crate) fn rounded_outer_envelope(height: f64, width: f64, radius: f64) -> Self {
+        let mut parts = Vec::new();
+        rounded_rectangle(&mut parts, height, width, radius, Some(0));
+        Self { parts }
+    }
+
+    fn h_plate_parts(
+        height: f64,
+        width: f64,
+        web: f64,
+        flange: f64,
+    ) -> [(Primitive, Option<usize>); 3] {
+        let h = height / 2.0;
+        let w = width / 2.0;
+        let tw = web / 2.0;
+        [
+            ([-h, -h + flange], [-w, w]),
+            ([h - flange, h], [-w, w]),
+            ([-h + flange, h - flange], [-tw, tw]),
+        ]
+        .map(|(y, z)| (Primitive::Rectangle { y, z }, Some(0)))
+    }
+
+    pub(crate) fn h_geometry(
+        height: f64,
+        width: f64,
+        web: f64,
+        flange: f64,
+        root_r: f64,
+        overlap_plates: bool,
+    ) -> Self {
+        let mut parts = Vec::from(Self::h_plate_parts(height, width, web, flange));
+        if root_r > 0.0 {
+            let half_height = height / 2.0;
+            let web_edge = web / 2.0;
+            let flange_edge = half_height - flange;
+            let fillet_y = flange_edge - root_r;
+            let fillet_z = web_edge + root_r;
+            // 個別に境界公差を取る場合、正領域の内部継目には公差分の隙間を設けない。
+            let (plate_y, plate_z) = if overlap_plates {
+                (half_height, 0.0)
+            } else {
+                (flange_edge, web_edge)
+            };
+            let bounds = |a: f64, b: f64| [a.min(b), a.max(b)];
+            for sy in [-1.0, 1.0] {
+                for sz in [-1.0, 1.0] {
+                    parts.push((
+                        Primitive::Rectangle {
+                            y: bounds(sy * fillet_y, sy * plate_y),
+                            z: bounds(sz * plate_z, sz * fillet_z),
+                        },
+                        Some(0),
+                    ));
+                    parts.push((
+                        Primitive::Circle {
+                            center: [sy * fillet_y, sz * fillet_z],
+                            radius: root_r,
+                        },
+                        None,
+                    ));
+                }
+            }
+        }
+        Self { parts }
+    }
+
     /// 図心基準の実断面を指定方向へ投影した外側範囲 `[mm]`。空洞は除外する。
     pub fn projected_range(&self, direction: [f64; 2]) -> Result<[f64; 2], String> {
         let norm = direction[0].hypot(direction[1]);
@@ -194,35 +261,8 @@ impl SectionGeometry {
                 flange_thick: tf,
                 root_r,
             } => {
-                rect([-h / 2.0, -h / 2.0 + tf], [-w / 2.0, w / 2.0], Some(0));
-                rect([h / 2.0 - tf, h / 2.0], [-w / 2.0, w / 2.0], Some(0));
-                rect(
-                    [-h / 2.0 + tf, h / 2.0 - tf],
-                    [-tw / 2.0, tw / 2.0],
-                    Some(0),
-                );
                 let r = root_r.ok_or("H 形鋼のフィレット半径が未知です")?;
-                if r > 0.0 {
-                    for sy in [-1.0, 1.0] {
-                        for sz in [-1.0, 1.0] {
-                            let bounds = |a: f64, b: f64| [a.min(b), a.max(b)];
-                            parts.push((
-                                Primitive::Rectangle {
-                                    y: bounds(sy * (h / 2.0 - tf - r), sy * (h / 2.0 - tf)),
-                                    z: bounds(sz * tw / 2.0, sz * (tw / 2.0 + r)),
-                                },
-                                Some(0),
-                            ));
-                            parts.push((
-                                Primitive::Circle {
-                                    center: [sy * (h / 2.0 - tf - r), sz * (tw / 2.0 + r)],
-                                    radius: r,
-                                },
-                                None,
-                            ));
-                        }
-                    }
-                }
+                parts = Self::h_geometry(h, w, tw, tf, r, false).parts;
             }
             SectionShape::SteelFlatBar { width: w, thick: h } => {
                 rect([-h / 2.0, h / 2.0], [-w / 2.0, w / 2.0], Some(0))

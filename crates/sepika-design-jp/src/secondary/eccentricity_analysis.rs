@@ -938,6 +938,7 @@ mod tests {
             disp,
             member_forces,
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         }
     }
 
@@ -1190,6 +1191,7 @@ mod tests {
                 },
             )],
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         };
         let mut disp_y = vec![[0.0; 6]; 3];
         disp_y[2][1] = 10.0;
@@ -1204,6 +1206,7 @@ mod tests {
                 },
             )],
             panel_moments: Vec::new(),
+            girder_column_face_forces: Vec::new(),
         };
         let cols = column_stiffnesses_from_analysis(&model, top, &res_x, &res_y).unwrap();
         assert_eq!(cols.len(), 1, "分割柱は 1 本と数える");

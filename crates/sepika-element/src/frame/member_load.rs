@@ -319,7 +319,35 @@ impl LoadedFrameSection {
         if !xi.is_finite() || !(0.0..=1.0).contains(&xi) {
             return Err("部材断面位置は有限の全長比0以上1以下が必要です".into());
         }
-        let x = xi * self.map.length_mm;
+        self.at_mm(xi * self.map.length_mm)
+    }
+
+    /// 実材軸i端からの距離 `[mm]` を指定して `[N,Qy,Qz,Mx,My,Mz]` を返す。
+    /// 範囲外・回収座標の長さの不一致・非零集中荷重位置（丸め誤差の範囲を含む）はエラー。
+    pub fn at_continuous_section_mm(
+        &self,
+        position_mm: f64,
+        length_mm: f64,
+    ) -> Result<[f64; 6], String> {
+        let tol_mm = 32.0 * f64::EPSILON * self.map.length_mm.max(1.0);
+        if !length_mm.is_finite() || (length_mm - self.map.length_mm).abs() > tol_mm {
+            return Err("実材軸長が部材荷重応答の全長と一致しません".into());
+        }
+        if !position_mm.is_finite() || !(0.0..=self.map.length_mm).contains(&position_mm) {
+            return Err("実柱面が部材荷重応答の全長区間外です".into());
+        }
+        if self.map.loads.iter().any(|load| {
+            matches!(load.kind, MemberLoadKind::Point { a, p }
+                if p != 0.0 && (a - position_mm).abs() <= tol_mm)
+        }) {
+            return Err(
+                "実柱面に非零の集中部材荷重が作用し、断面力の切断側を一意に決められません".into(),
+            );
+        }
+        self.at_mm(position_mm)
+    }
+
+    fn at_mm(&self, x: f64) -> Result<[f64; 6], String> {
         let mut force = [0.0; 3];
         let mut moment = [0.0; 3];
         for load in &self.map.loads {
