@@ -555,6 +555,56 @@ fn qd1_keeps_the_orthogonal_girder_only_for_an_exactly_parallel_rigid_arm() {
         assert_near(strong, reference::BOTH_COLUMN_ENDS_QD1_N, 1e-6);
         assert_near(weak, weak_qd1_n, 1e-6);
     }
+
+    model.nodes[2].coord[..2].copy_from_slice(&[3500.0, 2300.0]);
+    for (column_x_mm, far_offset_x_mm, weak_qd1_n) in [
+        (1e-14, 0.0, 189_308.326_858_618),
+        (0.0, 1e-14, 189_308.326_858_618),
+        (1e-14, 1e-14, 162_630.279_382_081),
+    ] {
+        model.nodes[0].coord[0] = column_x_mm;
+        model.nodes[1].coord[0] = column_x_mm;
+        model.elements[fixture::GIRDER.index()].end_offsets_mm[1][0] = far_offset_x_mm;
+        model.validate().unwrap();
+        let [strong, weak] = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
+        assert_near(strong, reference::BOTH_COLUMN_ENDS_QD1_N, 1e-6);
+        assert_near(weak, weak_qd1_n, 1e-6);
+    }
+}
+
+#[test]
+fn qd1_uses_both_column_ends_for_an_inclined_column_with_a_pinned_girder_and_rigid_arm() {
+    use reference::{BOTH_COLUMN_ENDS_QD1_N, ONE_GIRDER_QD1_N};
+
+    let mut model = fixture::column_with_opposing_head_girders(
+        column::column_model(false, 0.0),
+        ElementKind::MultiSpring,
+    );
+    model.elements[COLUMN.index()].local_axis.ref_vector = [3500.0, 2300.0, 0.0];
+    model.nodes[0].coord = [-1000.0, 0.0, -3000.0];
+    model.nodes[1].coord = [0.0; 3];
+    // 単位化済みの柱の局所z軸を4096倍した座標。
+    model.nodes[2].coord = [
+        -2_212.664_151_288_898,
+        3_367.097_621_526_583_7,
+        737.554_717_096_299_4,
+    ];
+    model.nodes[3].coord = [-2300.0, 3500.0, 0.0];
+    model.nodes[4].coord = [-3500.0, -2300.0, 0.0];
+    let girder = &mut model.elements[fixture::GIRDER.index()];
+    girder.end_cond[0] = EndCondition::Pinned;
+    girder.rigid_zone.length_i = 100.0;
+    model.validate().unwrap();
+    for (enabled, expected) in [
+        (false, [ONE_GIRDER_QD1_N, 162_630.279_382_081]),
+        (true, [BOTH_COLUMN_ENDS_QD1_N, 189_308.326_858_618]),
+    ] {
+        model.stress_cfg.consider_rigid_zones = enabled;
+        let qd1 = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
+        for (actual, expected) in qd1.into_iter().zip(expected) {
+            assert_near(actual, expected, 1e-6);
+        }
+    }
 }
 
 #[test]

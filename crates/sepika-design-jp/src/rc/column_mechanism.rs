@@ -3,8 +3,9 @@
 use std::collections::HashSet;
 
 use num_rational::BigRational;
+use num_traits::Zero;
 use sepika_core::adjacency::NodeAdjacency;
-use sepika_core::geom::vec3::{cross, norm, sub};
+use sepika_core::geom::vec3::{norm, sub};
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, ElementKind, EndCondition, Material, Model};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
@@ -185,21 +186,32 @@ fn column_my_at_n(model: &Model, elem: &ElementData, n_axial: f64, strong: bool)
     Some(rc_column_mu_simple(&inp, as_total, n_axial))
 }
 
-fn axes_are_parallel(a: [f64; 3], b: [f64; 3]) -> bool {
-    if cross(a, b) != [0.0; 3] {
+fn rigid_arm_is_parallel(
+    [i, j]: [[f64; 3]; 2],
+    [offset_i, offset_j]: [[f64; 3]; 2],
+    [axis_x, axis_y]: [f64; 2],
+) -> bool {
+    // 外積だけを厳密に求めても、座標の差や偏心の加算を丸めると斜交を見落とす。
+    let exact = |value| BigRational::from_float(value).expect("有限な座標・偏心・方向成分");
+    let exact_delta =
+        |d: usize| exact(j[d]) + exact(offset_j[d]) - exact(i[d]) - exact(offset_i[d]);
+    let delta_is_zero = |d: usize| {
+        if offset_i[d] == offset_j[d] {
+            i[d] == j[d]
+        } else {
+            exact_delta(d).is_zero()
+        }
+    };
+    if !delta_is_zero(2) {
         return false;
     }
-    // 積を丸めると、実際には斜交する二方向の差も 0 になり得る。
-    let exact = |value| BigRational::from_float(value).expect("有限な材軸・曲げ軸成分");
-    [(0, 1), (1, 2), (2, 0)].into_iter().all(|(i, j)| {
-        let left_zero = a[i] == 0.0 || b[j] == 0.0;
-        let right_zero = a[j] == 0.0 || b[i] == 0.0;
-        if left_zero || right_zero {
-            left_zero && right_zero
-        } else {
-            exact(a[i]) * exact(b[j]) == exact(a[j]) * exact(b[i])
-        }
-    })
+    if axis_x == 0.0 {
+        return delta_is_zero(0);
+    }
+    if axis_y == 0.0 {
+        return delta_is_zero(1);
+    }
+    exact_delta(0) * exact(axis_y) == exact_delta(1) * exact(axis_x)
 }
 
 fn sum_beam_my_at_node(
@@ -209,7 +221,7 @@ fn sum_beam_my_at_node(
     load_h: [f64; 2],
     peer_h: [f64; 2],
     prefer_on_tie: bool,
-    column_bending_axis: [f64; 3],
+    column_bending_axis: Option<[f64; 2]>,
 ) -> Result<Option<f64>, String> {
     let mut sum = Some(0.0);
     for other in adjacency.elements_at(model, node) {
@@ -256,7 +268,11 @@ fn sum_beam_my_at_node(
                 rigid.rigid_length_j(),
                 norm(actual_axis),
             );
-            if [i, j][end] > 0.0 && !axes_are_parallel(actual_axis, column_bending_axis) {
+            if [i, j][end] > 0.0
+                && !column_bending_axis.is_some_and(|axis| {
+                    rigid_arm_is_parallel([n0.coord, n1.coord], other.end_offsets_mm, axis)
+                })
+            {
                 sum = None;
                 continue;
             }
@@ -445,15 +461,17 @@ fn column_mechanism_sum_my(
     let [ref_x, ref_y, _] = column.local_axis.ref_vector;
     let reference_h = [ref_x, ref_y, 0.0];
     let reference_length = norm(reference_h);
-    // 幾何上の平行を、局所軸を単位化したときの丸めで失わないようにする。
-    let (bending_y, bending_z) = if p_i[..2] == p_j[..2]
-        && reference_length > 0.0
-        && ey == reference_h.map(|value| value / reference_length)
-    {
-        (reference_h, [-ref_y, ref_x, 0.0])
+    // 単位化済みの柱軸だけでは、入力の幾何が平行であることを確認できない。
+    let bending_y = if p_i[..2] != p_j[..2] {
+        None
+    } else if reference_h == [0.0; 3] && ey == [1.0, 0.0, 0.0] {
+        Some([1.0, 0.0])
+    } else if reference_length > 0.0 && ey == reference_h.map(|value| value / reference_length) {
+        Some([ref_x, ref_y])
     } else {
-        (ey, ez)
+        None
     };
+    let bending_z = bending_y.map(|[x, y]| [-y, x]);
 
     let i_is_bottom = p_i[2] <= p_j[2];
     let design_n = design_axial(i_is_bottom);
@@ -464,7 +482,10 @@ fn column_mechanism_sum_my(
     };
     let head_beam_factor = topology.head_beam_factor(model, head, head_z_mm);
 
-    let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2], bending_axis: [f64; 3]| {
+    let sum_for = |strong: bool,
+                   load_h: [f64; 2],
+                   peer_h: [f64; 2],
+                   bending_axis: Option<[f64; 2]>| {
         let beam_sum = |node| {
             sum_beam_my_at_node(
                 model,
