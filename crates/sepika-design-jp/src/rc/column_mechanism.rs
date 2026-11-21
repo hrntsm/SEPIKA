@@ -12,6 +12,7 @@ use sepika_solver::common::constraint::Reducer;
 
 use super::section_props::{axis_props_from_shape, rebar_info_from_shape, AxisProps};
 use crate::material_strength::{main_rebar_category_issue, rebar_sigma_y_of};
+use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
 use crate::MemberKind;
 
@@ -272,13 +273,14 @@ impl ColumnMechanismTopology {
 }
 
 /// RC 柱の方向別降伏モーメント和 [N·mm]。 `Ok(None)` は柱 My 未算定、
-/// `Err` は接続大梁の主筋材料区分が不適合で、その方向の QD1 が未算定。
+/// `Err` は入力不足・不適合により、その方向の QD1 が未算定。
 #[derive(Clone, Debug)]
 pub struct ColumnMechanism {
     /// Qy（強軸）方向。
     pub qy: Result<Option<f64>, String>,
     /// Qz（弱軸）方向。
     pub qz: Result<Option<f64>, String>,
+    pub(crate) missing_gravity_axial: bool,
 }
 
 /// 柱のメカニズム ΣMy [N·mm]。方向別に算定値または材料区分の不適合を返す。
@@ -294,6 +296,72 @@ pub fn compute_column_mechanism_sum_my(
     n_combo_i: f64,
     n_combo_j: f64,
     n_axial_factor: f64,
+) -> Option<ColumnMechanism> {
+    column_mechanism_sum_my(model, topology, column, false, |_| {
+        Ok([
+            design_axial_for_mechanism(n_long_i, n_combo_i, n_axial_factor),
+            design_axial_for_mechanism(n_long_j, n_combo_j, n_axial_factor),
+        ])
+    })
+}
+
+/// 時刻歴の柱端軸力 [N] から方向別の ΣMy [N·mm] を求める。
+/// 軸力は i端・j端の順で引張正。欠損・非有限があれば接続大梁の理由と併記する。
+pub fn time_history_column_mechanism_sum_my(
+    model: &Model,
+    topology: &ColumnMechanismTopology,
+    column: &ElementData,
+    long_end_n: [Option<f64>; 2],
+    response_end_n: [Option<f64>; 2],
+) -> Option<ColumnMechanism> {
+    let missing_gravity_axial = long_end_n.iter().any(|n| n.is_none_or(|n| !n.is_finite()));
+    column_mechanism_sum_my(
+        model,
+        topology,
+        column,
+        missing_gravity_axial,
+        |i_is_bottom| {
+            let mut reason = None;
+            let mut design_n = [0.0; 2];
+            for index in 0..2 {
+                let end = if (index == 0) == i_is_bottom {
+                    "柱脚"
+                } else {
+                    "柱頭"
+                };
+                let n_long = long_end_n[index].filter(|n| n.is_finite());
+                let n_response = response_end_n[index].filter(|n| n.is_finite());
+                for (value, source) in [(n_long, "重力参照"), (n_response, "時刻歴")] {
+                    if value.is_none() {
+                        reason = combine_incomplete_reasons(
+                            reason,
+                            Some(&format!("{end}の{source}軸力Nが不足または非有限です")),
+                        );
+                    }
+                }
+                if let (Some(n_long), Some(n_response)) = (n_long, n_response) {
+                    let n = design_axial_for_mechanism(n_long, n_response, 1.0);
+                    if n.is_finite() {
+                        design_n[index] = n;
+                    } else {
+                        reason = combine_incomplete_reasons(
+                            reason,
+                            Some(&format!("{end}の設計軸力Nが非有限です")),
+                        );
+                    }
+                }
+            }
+            reason.map_or(Ok(design_n), Err)
+        },
+    )
+}
+
+fn column_mechanism_sum_my(
+    model: &Model,
+    topology: &ColumnMechanismTopology,
+    column: &ElementData,
+    missing_gravity_axial: bool,
+    design_axial: impl FnOnce(bool) -> Result<[f64; 2], String>,
 ) -> Option<ColumnMechanism> {
     if column.kind != ElementKind::Beam || column.nodes.len() < 2 {
         return None;
@@ -317,9 +385,8 @@ pub fn compute_column_mechanism_sum_my(
     let load_strong = horizontal_unit(ey)?;
     let load_weak = horizontal_unit(ez)?;
 
-    let n_i = design_axial_for_mechanism(n_long_i, n_combo_i, n_axial_factor);
-    let n_j = design_axial_for_mechanism(n_long_j, n_combo_j, n_axial_factor);
     let i_is_bottom = p_i[2] <= p_j[2];
+    let design_n = design_axial(i_is_bottom);
     let (head, head_z_mm) = if i_is_bottom {
         (nj, p_j[2])
     } else {
@@ -328,26 +395,29 @@ pub fn compute_column_mechanism_sum_my(
     let head_beam_factor = topology.head_beam_factor(model, head, head_z_mm);
 
     let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2]| {
-        let beam_sum = |node| {
-            sum_beam_my_at_node(model, &topology.frame, node, load_h, peer_h, strong).map_err(
-                |reason| {
-                    let axis = if strong { "Qy" } else { "Qz" };
-                    format!(
-                        "RC柱 ID {} の {axis} 方向のせん断検定: {reason}",
-                        column.id.0
-                    )
-                },
-            )
+        let beam_sum =
+            |node| sum_beam_my_at_node(model, &topology.frame, node, load_h, peer_h, strong);
+        let beam_ends = beam_sum(ni).and_then(|bi| beam_sum(nj).map(|bj| (bi, bj)));
+        let (n, beams) = match (&design_n, beam_ends) {
+            (Ok(n), Ok(beams)) => (*n, beams),
+            (n, beams) => {
+                let axis = if strong { "Qy" } else { "Qz" };
+                let reason =
+                    combine_incomplete_reasons(beams.err(), n.as_ref().err().map(String::as_str))
+                        .expect("検定に必要な梁または柱端軸力を取得できない");
+                return Err(format!(
+                    "RC柱 ID {} の {axis} 方向のせん断検定: {reason}",
+                    column.id.0
+                ));
+            }
         };
-        let beam_i = beam_sum(ni)?;
-        let beam_j = beam_sum(nj)?;
         let (Some(col_i), Some(col_j)) = (
-            column_my_at_n(model, column, n_i, strong),
-            column_my_at_n(model, column, n_j, strong),
+            column_my_at_n(model, column, n[0], strong),
+            column_my_at_n(model, column, n[1], strong),
         ) else {
             return Ok(None);
         };
-        match (beam_i, beam_j) {
+        match beams {
             (Some(bi), Some(bj)) => {
                 let hi = resolve_column_end_hinge(col_i, bi, false);
                 let hj = resolve_column_end_hinge(col_j, bj, false);
@@ -369,6 +439,7 @@ pub fn compute_column_mechanism_sum_my(
     Some(ColumnMechanism {
         qy: sum_for(true, load_strong, load_weak),
         qz: sum_for(false, load_weak, load_strong),
+        missing_gravity_axial,
     })
 }
 

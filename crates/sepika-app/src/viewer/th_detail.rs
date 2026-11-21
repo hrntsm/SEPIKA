@@ -711,6 +711,13 @@ fn draw_peak_check(
     };
     let wire_qd = th_nonlinear && th_applied_long_term && !signed_bending;
     let src_column = structure == StructureKind::Src && kind == MemberKind::Column;
+    let src_beam = structure == StructureKind::Src
+        && matches!(sec.shape, Some(SectionShape::SrcBeamRect { .. }));
+    let rc_column = structure == StructureKind::Rc
+        && matches!(
+            sec.shape,
+            Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
+        );
     let rc_beam = structure == StructureKind::Rc
         && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
     let qd_method = app.core.analysis_cfg.qd_method;
@@ -751,19 +758,18 @@ fn draw_peak_check(
     } else {
         None
     };
-    let seismic_qd = long_mf.and_then(|list| {
-        list.iter()
-            .find(|(id, _)| *id == elem.id)
-            .map(|(_, mf)| sepika_design_jp::SeismicQd {
-                long_at: mf.at.clone(),
-                n_factor: 1.5,
-                n_mechanism: 1.0,
-                q_simple,
-                clear_length: clear_span,
-                method: qd_method,
-            })
-    });
-    let missing_gravity = wire_qd && seismic_qd.is_none();
+    let long_at = long_mf.and_then(|list| list.iter().find(|(id, _)| *id == elem.id));
+    let missing_gravity = wire_qd && long_at.is_none();
+    let seismic_qd = (long_at.is_some()
+        || (wire_qd && (rc_column || structure == StructureKind::Cft)))
+        .then(|| sepika_design_jp::SeismicQd {
+            long_at: long_at.map_or_else(Vec::new, |(_, mf)| mf.at.clone()),
+            n_factor: 1.5,
+            n_mechanism: 1.0,
+            q_simple,
+            clear_length: clear_span,
+            method: qd_method,
+        });
     let missing_rc_beam_gravity = wire_qd
         && rc_beam
         && seismic_qd.as_ref().is_none_or(|qd| {
@@ -787,13 +793,9 @@ fn draw_peak_check(
         );
         return;
     }
-    let column_mechanism_topology = (structure == StructureKind::Rc
-        && kind == MemberKind::Column
-        && seismic_qd
-            .as_ref()
-            .is_some_and(|qd| qd.method != QdMethod::Qd2)
-        && !wrong_main_rebar)
-        .then(|| sepika_design_jp::rc::ColumnMechanismTopology::new(model));
+    let column_mechanism_topology =
+        (rc_column && kind == MemberKind::Column && wire_qd && qd_method != QdMethod::Qd2)
+            .then(|| sepika_design_jp::rc::ColumnMechanismTopology::new(model));
 
     let mut ctx = DesignCtx {
         term: LoadTerm::Short,
@@ -860,21 +862,16 @@ fn draw_peak_check(
             ctx.shear_span = shear_span(5, 1);
             ctx.shear_span_y = shear_span(4, 2);
             ctx.column_sum_my = column_mechanism_topology.as_ref().and_then(|topology| {
-                let axial_at = |at: &[(f64, [f64; 6])], target: f64| {
-                    at.iter()
-                        .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
-                        .map_or(0.0, |(_, f)| f[0])
+                let end_axial = |at: &[(f64, [f64; 6])]| {
+                    [0.0, 1.0].map(|xi| at.iter().find(|(p, _)| *p == xi).map(|(_, f)| f[0]))
                 };
                 let qd = ctx.seismic_qd.as_ref()?;
-                sepika_design_jp::rc::compute_column_mechanism_sum_my(
+                sepika_design_jp::rc::time_history_column_mechanism_sum_my(
                     model,
                     topology,
                     elem,
-                    axial_at(&qd.long_at, 0.0),
-                    axial_at(&qd.long_at, 1.0),
-                    axial_at(&forces.at, 0.0),
-                    axial_at(&forces.at, 1.0),
-                    1.0,
+                    end_axial(&qd.long_at),
+                    end_axial(&forces.at),
                 )
             });
             for (index, &(pos, f)) in forces.at.iter().enumerate() {
@@ -919,7 +916,8 @@ fn draw_peak_check(
                         sec,
                         mat,
                         &ctx,
-                        missing_gravity && (src_column || wrong_main_rebar || wrong_shear_rebar),
+                        missing_gravity
+                            && (src_column || src_beam || wrong_main_rebar || wrong_shear_rebar),
                     ) {
                         draw_outcome(&outcome);
                     }
@@ -929,12 +927,19 @@ fn draw_peak_check(
                         sec,
                         mat,
                         &ctx,
-                        if wrong_shear_rebar {
+                        if rc_column {
+                            false
+                        } else if wrong_shear_rebar {
                             missing_gravity
                         } else {
                             missing_rc_beam_gravity || (missing_gravity && wrong_main_rebar)
                         },
                     ) {
+                        draw_outcome(&outcome);
+                    }
+                } else if structure == StructureKind::Cft {
+                    for outcome in sepika_design_jp::CftDesign.check_outcomes(&mfa, sec, mat, &ctx)
+                    {
                         draw_outcome(&outcome);
                     }
                 } else if symmetric_h_column {
@@ -1375,7 +1380,9 @@ mod tests {
                     member_forces: vec![(
                         input::COLUMN,
                         MemberForces {
-                            at: vec![(0.5, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+                            at: [0.0, 0.5, 1.0]
+                                .map(|xi| (xi, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+                                .to_vec(),
                         },
                     )],
                     column_end_horizontal_forces: Vec::new(),
@@ -1392,7 +1399,9 @@ mod tests {
     fn rc_column_peak_check_text(app: &App) -> String {
         let recording = ThRecording {
             peak_member_forces: vec![Some(MemberForces {
-                at: vec![(0.5, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0])],
+                at: [0.0, 0.5, 1.0]
+                    .map(|xi| (xi, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0]))
+                    .to_vec(),
             })],
             ..Default::default()
         };

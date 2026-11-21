@@ -9,15 +9,19 @@
 //! [`crate::srrc`] の共通ヘルパ（断面諸元抽出等）には依存しない
 //! （断面形状・N-M 相関の算定方法が SRC 矩形断面と異なるため）。
 
-use crate::rc::concrete_allowable_compression;
+use crate::member_design_check::{
+    combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
+};
+use crate::rc::{column_design_shear, column_qd2_reference_issue, concrete_allowable_compression};
 use crate::steel::{steel_fs, steel_ft};
 use crate::{
     effective_slenderness, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCheck,
-    DesignCtx, LoadTerm, MemberForcesAt,
+    DesignCtx, LoadTerm, MemberForcesAt, QdMethod,
 };
 use sepika_core::ids::ElemId;
 use sepika_core::model::{Material, Section, SteelDesignAttr};
 use sepika_core::section_shape::{RoundedRectangle, SectionShape};
+use sepika_core::structure_kind::StructureKind;
 
 use crate::ratio_or_large;
 
@@ -311,8 +315,30 @@ fn cft_pipe_steel_props(outer_dia: f64, thick: f64) -> (f64, f64) {
 ///
 /// `ctx.seismic_qd` が None、または長期内力に同一評価位置が見つからない
 /// 場合は解析せん断力 `|q_signed|` をそのまま返す。
-fn cft_q_design(ctx: &DesignCtx, pos: f64, q_signed: f64, q_index: usize, sum_c_my: f64) -> f64 {
-    crate::rc::seismic_design_shear(ctx, pos, q_signed, q_index, sum_c_my, true)
+fn cft_q_design(
+    ctx: &DesignCtx,
+    forces: &MemberForcesAt,
+    q_index: usize,
+    sum_c_my: Result<f64, String>,
+    strict_gravity: bool,
+    incomplete: &mut Option<String>,
+) -> Result<Option<f64>, String> {
+    let q_signed = if q_index == 1 { forces.qy } else { forces.qz };
+    if !strict_gravity {
+        return Ok(Some(crate::rc::seismic_design_shear(
+            ctx, forces.pos, q_signed, q_index, sum_c_my?, true,
+        )));
+    }
+    let qd = ctx.seismic_qd.as_ref().expect("設計用せん断力を使う条件");
+    match column_design_shear(qd, forces.pos, q_signed, q_index, sum_c_my?) {
+        Ok(value) => Ok(Some(value)),
+        Err(reason) => {
+            if qd.method == QdMethod::Qd1 {
+                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(reason));
+            }
+            Ok(None)
+        }
+    }
 }
 
 fn cft_box_check(
@@ -321,6 +347,8 @@ fn cft_box_check(
     ctx: &DesignCtx,
     shape: &SectionShape,
     fc_raw: f64,
+    strict_gravity: bool,
+    incomplete: &mut Option<String>,
 ) -> Result<CheckResult, String> {
     let SectionShape::CftBox {
         height,
@@ -395,44 +423,56 @@ fn cft_box_check(
     let s_aw_z = 2.0 * thick * (width - 2.0 * thick).max(0.0);
     let s_qa_y = s_aw_y * s_fs;
     let s_qa_z = s_aw_z * s_fs;
-    let (sum_c_my_z, sum_c_my_y) = if ctx
-        .seismic_qd
-        .as_ref()
-        .is_some_and(|qd| qd.method != crate::QdMethod::Qd2)
-    {
-        let lk_y = ctx.lk_y.unwrap_or(ctx.length);
-        let lk_z = ctx.lk_z.unwrap_or(ctx.length);
-        let mu_z = crate::ultimate::cft_mu_nm(shape, fc_raw, f_value, n_design, lk_y, false)?;
-        let mu_y = crate::ultimate::cft_mu_nm(shape, fc_raw, f_value, n_design, lk_z, true)?;
+    let sum_c_my = |lk: f64, weak_axis| {
+        if !ctx
+            .seismic_qd
+            .as_ref()
+            .is_some_and(|qd| qd.method != QdMethod::Qd2)
+        {
+            return Ok(0.0);
+        }
+        let mu = crate::ultimate::cft_mu_nm(shape, fc_raw, f_value, n_design, lk, weak_axis)?;
         if height == width
-            && [(lk_y, mu_z), (lk_z, mu_y)].into_iter().any(|(lk, mu)| {
-                lk > 12.0 * height
-                    && mu == 0.0
-                    && n_design
-                        > crate::ultimate::cft_concrete_buckling_axial(
-                            c_core.iy, c_area, fc_raw, lk,
-                        )
-            })
+            && lk > 12.0 * height
+            && mu == 0.0
+            && n_design
+                > crate::ultimate::cft_concrete_buckling_axial(c_core.iy, c_area, fc_raw, lk)
         {
             return Err("正方形 CFT 長柱の純圧縮限界で Mu=0 のため QD1/min を算定できません。QD2 へ自動切替しません".into());
         }
-        (2.0 * mu_z, 2.0 * mu_y)
-    } else {
-        (0.0, 0.0)
+        Ok(2.0 * mu)
     };
-    let q_design_y = cft_q_design(ctx, forces.pos, forces.qy, 1, sum_c_my_z);
-    let q_design_z = cft_q_design(ctx, forces.pos, forces.qz, 2, sum_c_my_y);
-    let ratio_shear_y = if s_qa_y > 1e-9 {
-        q_design_y / s_qa_y
-    } else {
-        0.0
-    };
-    let ratio_shear_z = if s_qa_z > 1e-9 {
-        q_design_z / s_qa_z
-    } else {
-        0.0
-    };
-    let ratio_shear = ratio_shear_y.max(ratio_shear_z);
+    let directions = [
+        (1, "Qy", s_qa_y, ctx.lk_y.unwrap_or(ctx.length), false),
+        (2, "Qz", s_qa_z, ctx.lk_z.unwrap_or(ctx.length), true),
+    ];
+    let mut shear_errors = Vec::new();
+    let mut ratio_shear = None;
+    for (index, axis, qa, lk, weak_axis) in directions {
+        match cft_q_design(
+            ctx,
+            forces,
+            index,
+            sum_c_my(lk, weak_axis),
+            strict_gravity,
+            incomplete,
+        ) {
+            Ok(Some(q)) => {
+                let ratio = if qa > 1e-9 { q / qa } else { 0.0 };
+                ratio_shear = Some(ratio_shear.map_or(ratio, |other| f64::max(ratio, other)));
+            }
+            Ok(None) => {}
+            Err(reason) if strict_gravity => shear_errors.push((axis, reason)),
+            Err(reason) => return Err(reason),
+        }
+    }
+    for (axis, reason) in shear_errors {
+        if incomplete.is_none() {
+            return Err(reason);
+        }
+        *incomplete =
+            combine_incomplete_reasons(incomplete.take(), Some(&format!("{axis}方向: {reason}")));
+    }
 
     let basis = "CFT柱(角形): SRC規準に基づく累加強度式".to_string();
     let axial_bending_detail = format!(
@@ -446,18 +486,18 @@ fn cft_box_check(
     );
     let detail = String::new();
 
-    let components = vec![
-        CheckComponent {
-            kind: CheckKind::AxialBending,
-            ratio: ratio_axial.max(ratio_biaxial),
-            detail: axial_bending_detail,
-        },
-        CheckComponent {
+    let mut components = vec![CheckComponent {
+        kind: CheckKind::AxialBending,
+        ratio: ratio_axial.max(ratio_biaxial),
+        detail: axial_bending_detail,
+    }];
+    if let Some(ratio) = ratio_shear {
+        components.push(CheckComponent {
             kind: CheckKind::Shear,
-            ratio: ratio_shear,
+            ratio,
             detail: shear_detail,
-        },
-    ];
+        });
+    }
 
     Ok(CheckResult {
         basis,
@@ -466,6 +506,7 @@ fn cft_box_check(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cft_pipe_check(
     forces: &MemberForcesAt,
     mat: &Material,
@@ -473,6 +514,8 @@ fn cft_pipe_check(
     outer_dia: f64,
     thick: f64,
     fc_raw: f64,
+    strict_gravity: bool,
+    incomplete: &mut Option<String>,
 ) -> Result<CheckResult, String> {
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
@@ -516,20 +559,43 @@ fn cft_pipe_check(
     let sum_c_my = if ctx
         .seismic_qd
         .as_ref()
-        .is_some_and(|qd| qd.method != crate::QdMethod::Qd2)
+        .is_some_and(|qd| qd.method != QdMethod::Qd2)
     {
         let lk = ctx
             .lk_y
             .unwrap_or(ctx.length)
             .max(ctx.lk_z.unwrap_or(ctx.length));
-        2.0 * crate::ultimate::cft_circular_qd1_mu(&shape, fc_raw, f_value, n_design, lk)?
+        crate::ultimate::cft_circular_qd1_mu(&shape, fc_raw, f_value, n_design, lk)
+            .map(|mu| 2.0 * mu)
     } else {
-        0.0
+        Ok(0.0)
     };
-    let q_design_y = cft_q_design(ctx, forces.pos, forces.qy, 1, sum_c_my);
-    let q_design_z = cft_q_design(ctx, forces.pos, forces.qz, 2, sum_c_my);
-    let q_res = (q_design_y.powi(2) + q_design_z.powi(2)).sqrt();
-    let ratio_shear = if s_qa > 1e-9 { q_res / s_qa } else { 0.0 };
+    let ratio_shear = match sum_c_my {
+        Ok(sum) => {
+            let q_design_y = cft_q_design(ctx, forces, 1, Ok(sum), strict_gravity, incomplete)?;
+            let q_design_z = cft_q_design(ctx, forces, 2, Ok(sum), strict_gravity, incomplete)?;
+            match (q_design_y, q_design_z) {
+                (Some(y), Some(z)) => {
+                    let q_res = (y.powi(2) + z.powi(2)).sqrt();
+                    Some(if s_qa > 1e-9 { q_res / s_qa } else { 0.0 })
+                }
+                (Some(q), None) | (None, Some(q)) if s_qa > 1e-9 && q / s_qa > 1.0 => {
+                    let axis = if q_design_y.is_some() { "Qy" } else { "Qz" };
+                    *incomplete = combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some(&format!("せん断のNGは{axis}方向のみで確定し、表示する検定比は合力による検定比の下限です")),
+                    );
+                    Some(q / s_qa)
+                }
+                _ => None,
+            }
+        }
+        Err(reason) if strict_gravity && incomplete.is_some() => {
+            *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
+            None
+        }
+        Err(reason) => return Err(reason),
+    };
 
     let basis = "CFT柱(円形): SRC規準に基づく累加強度式".to_string();
     let axial_bending_detail = format!(
@@ -543,18 +609,18 @@ fn cft_pipe_check(
     );
     let detail = String::new();
 
-    let components = vec![
-        CheckComponent {
-            kind: CheckKind::AxialBending,
-            ratio: ratio_axial.max(ratio_biaxial),
-            detail: axial_bending_detail,
-        },
-        CheckComponent {
+    let mut components = vec![CheckComponent {
+        kind: CheckKind::AxialBending,
+        ratio: ratio_axial.max(ratio_biaxial),
+        detail: axial_bending_detail,
+    }];
+    if let Some(ratio) = ratio_shear {
+        components.push(CheckComponent {
             kind: CheckKind::Shear,
-            ratio: ratio_shear,
+            ratio,
             detail: shear_detail,
-        },
-    ];
+        });
+    }
 
     Ok(CheckResult {
         basis,
@@ -584,6 +650,47 @@ impl DesignCheck for CftDesign {
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
+    ) -> CheckOutcome {
+        Self::check_section(forces, sec, mat, ctx, false, &mut None)
+    }
+}
+
+impl CftDesign {
+    /// 短期地震時の検定で必要な重力参照が不足する場合、理由と独立に確定した不適合を返す。
+    pub fn check_outcomes(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> impl Iterator<Item = CheckOutcome> {
+        let seismic = ctx
+            .seismic_qd
+            .as_ref()
+            .filter(|_| ctx.term == LoadTerm::Short);
+        let mut incomplete = None;
+        if let Some(qd) = seismic {
+            for index in [1, 2] {
+                incomplete = combine_incomplete_reasons(
+                    incomplete,
+                    column_qd2_reference_issue(qd, forces.pos, index),
+                );
+            }
+        }
+        let outcome =
+            Self::check_section(forces, sec, mat, ctx, seismic.is_some(), &mut incomplete);
+        let torsion = concrete_member_torsion_reason(StructureKind::Cft, forces);
+        let reason = combine_incomplete_reasons(incomplete, torsion);
+        strength_outcomes(outcome, reason.as_deref())
+    }
+
+    fn check_section(
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        strict_gravity: bool,
+        incomplete: &mut Option<String>,
     ) -> CheckOutcome {
         let fc_raw = mat.fc.unwrap_or(0.0);
         if !fc_raw.is_finite() || fc_raw <= 0.0 {
@@ -623,12 +730,25 @@ impl DesignCheck for CftDesign {
         }
 
         let cr = match &sec.shape {
-            Some(shape @ SectionShape::CftBox { .. }) => {
-                cft_box_check(forces, steel_mat, ctx, shape, fc_raw)
-            }
-            Some(SectionShape::CftPipe { outer_dia, thick }) => {
-                cft_pipe_check(forces, steel_mat, ctx, *outer_dia, *thick, fc_raw)
-            }
+            Some(shape @ SectionShape::CftBox { .. }) => cft_box_check(
+                forces,
+                steel_mat,
+                ctx,
+                shape,
+                fc_raw,
+                strict_gravity,
+                incomplete,
+            ),
+            Some(SectionShape::CftPipe { outer_dia, thick }) => cft_pipe_check(
+                forces,
+                steel_mat,
+                ctx,
+                *outer_dia,
+                *thick,
+                fc_raw,
+                strict_gravity,
+                incomplete,
+            ),
             _ => {
                 return CheckOutcome::Skipped {
                     reason:

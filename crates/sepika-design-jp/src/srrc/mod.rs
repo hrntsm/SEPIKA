@@ -112,7 +112,7 @@ struct SrcShearResult {
 
 struct SrcSeismicCtx<'a> {
     ctx: &'a DesignCtx,
-    pos: f64,
+    ql_signed: f64,
     s_ft_short: f64,
     r_mu: Option<f64>,
 }
@@ -124,9 +124,7 @@ struct SrcSeismicShearDemand {
 }
 
 /// SRC 梁の地震時短期の設計用せん断力（構造規定方式、SRC 規準 1987）。
-/// `seismic.ctx.seismic_qd` が None、または長期内力に
-/// 同一評価位置が見つからない場合は None を返す（呼び出し側は弾性
-/// 分担にフォールバックする）。
+/// 地震時の設計条件がない場合は None を返す。
 ///
 /// - `sQD = sQL + (sM1+sM2)/l′`（`sQL = share・|QL|`、`sM1+sM2 = 2・sZ・sft`）
 /// - `rQD1 = rQL + (rMu1+rMu2)/l′`（`rQL = |QL| − sQL`、`rMu1+rMu2 = 2・rMu`）
@@ -144,13 +142,7 @@ fn src_beam_seismic_qd(
     sz: f64,
 ) -> Option<SrcSeismicShearDemand> {
     let qd = seismic.ctx.seismic_qd.as_ref()?;
-    let ql_signed = qd
-        .long_at
-        .iter()
-        .find(|(p, _)| (p - seismic.pos).abs() < 1e-6)
-        .map(|(_, f)| f[1])?;
-
-    let ql = ql_signed.abs();
+    let ql = seismic.ql_signed.abs();
     let q = q_signed.abs();
 
     let s_ql = share * ql;
@@ -339,7 +331,7 @@ impl DesignCheck for SrcDesign {
 impl SrcDesign {
     /// 鉄筋の材料区分、短期地震時のSRC柱の適用条件や材軸ねじりで未算定となる場合、理由と独立に確定した不適合を別の結果で返す。
     /// 未算定を伴う位置で、適合を示す検定比は返さない。
-    /// 地震時の重力参照内力が必要で、対象柱の参照内力がない場合は `missing_gravity` に true を渡す。
+    /// 地震時の重力参照内力が必要で、対象部材の参照内力がない場合は `missing_gravity` に true を渡す。
     pub fn check_outcomes(
         &self,
         forces: &MemberForcesAt,
@@ -351,8 +343,17 @@ impl SrcDesign {
         use crate::member_design_check::{
             combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
         };
+        let peak_beam = ctx.term == LoadTerm::Short
+            && ctx.kind != MemberKind::Column
+            && matches!(sec.shape, Some(SectionShape::SrcBeamRect { .. }));
         let (outcome, mut incomplete) =
-            self.check_with_incomplete(forces, sec, mat, ctx, missing_gravity);
+            self.check_with_gravity_mode(forces, sec, mat, ctx, missing_gravity, peak_beam);
+        if peak_beam && matches!(outcome, CheckOutcome::Skipped { .. }) {
+            incomplete = combine_incomplete_reasons(
+                incomplete,
+                beam_gravity_reference(forces, ctx, missing_gravity, peak_beam).err(),
+            );
+        }
         if matches!(outcome, CheckOutcome::Skipped { .. })
             && ctx.term == LoadTerm::Short
             && ctx.kind == MemberKind::Column
@@ -381,6 +382,18 @@ impl SrcDesign {
         ctx: &DesignCtx,
         missing_gravity: bool,
     ) -> (CheckOutcome, Option<String>) {
+        self.check_with_gravity_mode(forces, sec, mat, ctx, missing_gravity, false)
+    }
+
+    fn check_with_gravity_mode(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        missing_gravity: bool,
+        peak_beam: bool,
+    ) -> (CheckOutcome, Option<String>) {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
                 .map(|reason| format!("SRC検定: 断面「{}」の{reason}", sec.name));
@@ -402,6 +415,7 @@ impl SrcDesign {
             missing_gravity,
             main_rebar_valid,
             shear_rebar_valid,
+            peak_beam,
         ) {
             Ok((result, incomplete)) => (
                 CheckOutcome::Checked(result),
@@ -414,6 +428,7 @@ impl SrcDesign {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn try_check(
         forces: &MemberForcesAt,
         sec: &Section,
@@ -422,6 +437,7 @@ impl SrcDesign {
         missing_gravity: bool,
         main_rebar_valid: bool,
         shear_rebar_valid: bool,
+        peak_beam: bool,
     ) -> Result<(crate::CheckResult, Option<String>), String> {
         let fc_raw = mat.fc.unwrap_or(0.0);
         if fc_raw <= 0.0 {
@@ -514,20 +530,10 @@ impl SrcDesign {
                         "SRC検定: 梁用断面を柱部材に割り当てています（用途不一致）".to_string()
                     );
                 }
-                let shear_reference_issue = if missing_gravity {
-                    Some("設計用せん断力に必要な重力参照内力が不足しています")
-                } else {
-                    ctx.seismic_qd.as_ref().and_then(|qd| {
-                        (!forces.pos.is_finite()
-                            || !qd
-                                .long_at
-                                .iter()
-                                .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
-                                .is_some_and(|(_, values)| values[1].is_finite()))
-                            .then_some("SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です")
-                    })
-                };
-                if let (true, Some(reason)) = (shear_rebar_valid, shear_reference_issue) {
+                let shear_reference =
+                    beam_gravity_reference(forces, ctx, missing_gravity, peak_beam);
+                if let (false, true, Err(reason)) = (peak_beam, shear_rebar_valid, shear_reference)
+                {
                     return Err(reason.into());
                 }
                 if rebar.is_unset() {
@@ -552,9 +558,9 @@ impl SrcDesign {
                         fc_raw,
                         main_rebar_valid,
                         shear_rebar_valid,
-                        shear_reference_issue.is_none(),
+                        shear_reference,
                     ),
-                    shear_reference_issue.map(str::to_owned),
+                    shear_reference.err().map(str::to_owned),
                 ))
             }
             SectionShape::SrcColumnRect {
@@ -615,6 +621,38 @@ impl SrcDesign {
             _ => unreachable!(),
         }
     }
+}
+
+fn beam_gravity_reference(
+    forces: &MemberForcesAt,
+    ctx: &DesignCtx,
+    missing_gravity: bool,
+    peak_beam: bool,
+) -> Result<Option<f64>, &'static str> {
+    if missing_gravity {
+        return Err(if peak_beam {
+            "設計用せん断力に必要な重力参照内力が不足しています（Qy方向）"
+        } else {
+            "設計用せん断力に必要な重力参照内力が不足しています"
+        });
+    }
+    let Some(qd) = ctx.seismic_qd.as_ref() else {
+        return Ok(None);
+    };
+    let ql = if peak_beam {
+        crate::rc::gravity_component(qd, forces.pos, 1)
+    } else {
+        qd.long_at
+            .iter()
+            .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
+            .map(|(_, values)| values[1])
+            .filter(|value| value.is_finite())
+    };
+    ql.map(Some).ok_or(if peak_beam {
+        "SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です（Qy方向）"
+    } else {
+        "SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です"
+    })
 }
 
 #[cfg(test)]

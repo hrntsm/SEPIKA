@@ -35,7 +35,7 @@ pub(crate) fn src_beam_check(
     fc_raw: f64,
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
-    shear_reference_valid: bool,
+    gravity_shear: Result<Option<f64>, &str>,
 ) -> CheckResult {
     let long_term = ctx.term == LoadTerm::Long;
 
@@ -83,37 +83,39 @@ pub(crate) fn src_beam_check(
         detail: String::new(),
         components,
     };
-    if !shear_reference_valid {
+    let Ok(gravity_shear_n) = gravity_shear else {
         return result;
-    }
+    };
 
     let (m_alpha, q_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
     let b_prime = (props.b - steel_width).max(0.0);
     let dw = steel_height - 2.0 * steel_flange_thick;
 
-    let seismic = ctx.seismic_qd.as_ref().map(|qd| SrcSeismicCtx {
-        ctx,
-        pos: forces.pos,
-        s_ft_short: steel_ft(f_value, LoadTerm::Short),
-        r_mu: (main_rebar_valid && qd.method != crate::QdMethod::Qd2).then(|| {
-            let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
-            let rc_mu = |p: &SrcAxisProps| {
-                rc_mu_simple(&RcCapacityInput {
-                    b: p.b,
-                    d: p.d_full,
-                    at: p.at,
-                    d_eff: p.d,
-                    sigma_y,
-                    fc: fc_raw,
-                    pw: p.pw,
-                    sigma_wy: 0.0,
-                    clear_span: 0.0,
-                    sigma_0: 0.0,
-                })
-            };
-            rc_mu(&props).min(rc_mu(&props_other))
-        }),
-    });
+    let seismic = gravity_shear_n
+        .zip(ctx.seismic_qd.as_ref())
+        .map(|(ql_signed, qd)| SrcSeismicCtx {
+            ctx,
+            ql_signed,
+            s_ft_short: steel_ft(f_value, LoadTerm::Short),
+            r_mu: (main_rebar_valid && qd.method != crate::QdMethod::Qd2).then(|| {
+                let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
+                let rc_mu = |p: &SrcAxisProps| {
+                    rc_mu_simple(&RcCapacityInput {
+                        b: p.b,
+                        d: p.d_full,
+                        at: p.at,
+                        d_eff: p.d,
+                        sigma_y,
+                        fc: fc_raw,
+                        pw: p.pw,
+                        sigma_wy: 0.0,
+                        clear_span: 0.0,
+                        sigma_0: 0.0,
+                    })
+                };
+                rc_mu(&props).min(rc_mu(&props_other))
+            }),
+        });
 
     let shear = src_shear_check(
         forces.qy,

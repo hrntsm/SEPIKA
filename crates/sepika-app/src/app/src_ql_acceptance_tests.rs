@@ -6,7 +6,7 @@ fn bytes(value: &impl serde::Serialize) -> Vec<u8> {
     rmp_serde::to_vec_named(value).unwrap()
 }
 
-fn app(empty_gravity: bool, method: QdMethod) -> App {
+pub(crate) fn src_beam_app(empty_gravity: bool, method: QdMethod) -> App {
     let mut model: sepika_core::model::Model =
         serde_json::from_str(include_str!("../../tests/fixtures/src_ql_contract.json")).unwrap();
     if empty_gravity {
@@ -44,7 +44,7 @@ fn assert_checked(app: &App) {
 fn public_src_actions_check_real_ql_and_valid_empty_gravity_without_q0() {
     for method in [QdMethod::Qd1, QdMethod::Qd2, QdMethod::Min] {
         for empty in [false, true] {
-            let mut app = app(empty, method);
+            let mut app = src_beam_app(empty, method);
             let manual = bytes(&app.core.model.load_cases[0].member);
             app.run_combination(1);
             assert!(
@@ -103,7 +103,7 @@ fn public_src_actions_check_real_ql_and_valid_empty_gravity_without_q0() {
 
 #[test]
 fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck() {
-    let mut original = app(false, QdMethod::Qd1);
+    let mut original = src_beam_app(false, QdMethod::Qd1);
     original.run_combination(0);
     assert_checked(&original);
     let input = bytes(&original.core.model);
@@ -220,7 +220,7 @@ pub(crate) fn src_column_app(method: QdMethod) -> App {
     use sepika_core::model::FrameSectionUse;
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
-    let mut app = app(false, method);
+    let mut app = src_beam_app(false, method);
     let old = app.core.model.sections[0].clone();
     let mut sec = SectionShape::SrcColumnRect {
         b: 500.0,
@@ -279,7 +279,7 @@ fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips()
             let mut app = if column {
                 src_column_app(QdMethod::Qd1)
             } else {
-                app(false, QdMethod::Qd1)
+                src_beam_app(false, QdMethod::Qd1)
             };
             app.run_combination(0);
             assert!(

@@ -276,7 +276,7 @@ fn test_src_beam_shear_split_handcalc() {
     let ctx = ctx_beam(LoadTerm::Long);
     let seismic = SrcSeismicCtx {
         ctx: &ctx,
-        pos: 0.0,
+        ql_signed: 0.0,
         s_ft_short: 0.0,
         r_mu: Some(0.0),
     };
@@ -343,7 +343,7 @@ fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
         let ctx = ctx_beam(term);
         let seismic = SrcSeismicCtx {
             ctx: &ctx,
-            pos: 0.0,
+            ql_signed: 0.0,
             s_ft_short: 0.0,
             r_mu: Some(0.0),
         };
@@ -630,7 +630,7 @@ fn test_src_beam_seismic_qd2_handcalc() {
     };
     let seismic = SrcSeismicCtx {
         ctx: &ctx,
-        pos: 0.0,
+        ql_signed: ql,
         s_ft_short,
         r_mu: Some(0.0),
     };
@@ -740,7 +740,7 @@ fn test_src_beam_seismic_qd1_handcalc() {
     };
     let seismic = SrcSeismicCtx {
         ctx: &ctx,
-        pos: 0.0,
+        ql_signed: ql,
         s_ft_short,
         r_mu: Some(r_mu),
     };
