@@ -442,8 +442,34 @@ pub(crate) fn member_rebar_material_strength_issue(
     if basis != super::StrengthBasis::MaterialStrength {
         return None;
     }
-    sepika_core::material_grade::main_rebar_material_strength_issue(material)
-        .map(|reason| format!("部材 ID {} の主筋の{reason}", data.id.0))
+    if let Some(reason) = sepika_core::material_grade::main_rebar_material_strength_issue(material)
+    {
+        return Some(format!("部材 ID {} の主筋の{reason}", data.id.0));
+    }
+    if data.kind == ElementKind::Beam
+        && matches!(
+            super::resolve_force_regime(data, model),
+            super::ResolvedRegime::ConcentratedSpring
+        )
+    {
+        return None;
+    }
+    let factor = basis.rebar_factor(Some(material));
+    let reason = match material.fy {
+        _ if !factor.is_finite() || factor <= 0.0 => "割増には正の有限値が必要です",
+        Some(fy) if fy.is_finite() && fy > 0.0 => {
+            let strength = fy * factor;
+            if strength.is_finite() && strength > 0.0 {
+                return None;
+            }
+            "割増後の材料強度は正の有限値である必要があります"
+        }
+        _ => "Fy には正の有限値 [N/mm²] が必要です",
+    };
+    Some(format!(
+        "部材 ID {} の主筋の材料 ID {}「{}」の保有水平耐力計算用の入力を確認してください。{reason}",
+        data.id.0, material.id.0, material.name
+    ))
 }
 
 /// 鋼断面の線材の主材料が鉄筋またはコンクリートの場合に、部材・断面・材料を特定する。
