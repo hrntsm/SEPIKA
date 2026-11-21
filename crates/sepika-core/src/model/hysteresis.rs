@@ -6,18 +6,17 @@
 
 use super::*;
 
-/// 部材の復元力特性（履歴則）。各履歴則の原典（武田モデル等）に基づく
-/// 履歴特性で、既定の非線形特性は本実装の既定として与える。
-/// 材端集中バネ（`ConcentratedSpringBeam`）の曲げ履歴に適用され、`Auto` は
-/// 構造種別ごとの既定（[`default_member_hysteresis`]）へ解決される。
+/// 材端曲げばねや壁せん断ばねなどに指定する部材の履歴則（復元力特性）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum HysteresisModel {
-    /// 既定（構造種別で自動判定: RC/SRC/CFT=武田型、S=標準型）。
+    /// 既定の履歴則。材端曲げばねでは [`default_member_hysteresis`] に従い、
+    /// RC/SRC/CFT 造は武田型、S 造は標準型となる。
     #[default]
     Auto,
     /// 逆行型（常にスケルトン上、履歴ループなし）。
     Retrograde,
-    /// 標準型（Masing 則。除荷開始剛性=初期剛性）。
+    /// 標準型。材端曲げばね（M–θ）では線形移動硬化（バイリニア）、
+    /// 壁せん断ばね（Q–δ）では Masing 相似則を用いる。
     Standard,
     /// 原点指向型（除荷・再載荷は原点指向の割線）。
     OriginOriented,
