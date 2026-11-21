@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn panel_generation_rejects_dangling_attributes_before_numbering_generated_panels() {
-        use sepika_core::model::HysteresisModel;
+        use sepika_core::model::{HysteresisModel, WallAttr};
 
         let mut model = steel_panel_model();
         let id = ElemId(model.elements.len() as u32);
@@ -345,10 +345,20 @@ mod tests {
             .is_empty());
         let mut dangling_damper = model.clone();
         dangling_damper.set_damper_props(id, Some(Default::default()));
+        let mut dangling_wall = model.clone();
+        dangling_wall.wall_attrs.push(WallAttr {
+            elem: id,
+            opening_area: 100_000.0,
+            opening_weight: 0.0,
+            slit: Default::default(),
+            openings: vec![],
+            finish_intensity: 0.0,
+        });
         model.set_member_hysteresis(id, HysteresisModel::Retrograde);
         for (mut model, label) in [
             (model, "部材の履歴則指定"),
             (dangling_damper, "制振ダンパー属性"),
+            (dangling_wall, "壁属性（開口・耐震スリット・仕上げ）"),
         ] {
             let before = model.clone();
             let expected = format!("{label} -> 部材 {}", id.0);

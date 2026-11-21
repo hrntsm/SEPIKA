@@ -220,6 +220,56 @@ fn ovika_rejects_joint_and_haunch_refs_to_missing_members() {
 }
 
 #[test]
+fn ovika_rejects_wall_attributes_without_a_wall_or_shell() {
+    let mut model = baseline();
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        end_offsets_mm: [[0.0; 3]; 2],
+        plastic_zone: None,
+        spring: None,
+    });
+    let path =
+        std::env::temp_dir().join(format!("sepika1764-invalid-{}.ovika", std::process::id()));
+    for (id, reason) in [
+        (0, "壁要素・シェルのいずれでもありません"),
+        (7, "dangling reference"),
+    ] {
+        model.wall_attrs = vec![WallAttr {
+            elem: ElemId(id),
+            opening_area: 100_000.0,
+            opening_weight: 20.0,
+            openings: vec![],
+            slit: WallSlit {
+                column_face: [true, false],
+                ..Default::default()
+            },
+            finish_intensity: 0.001,
+        }];
+        independent_file(&path, &model);
+        let original = std::fs::read(&path).unwrap();
+        let load = load_ovika(&path).err().unwrap();
+        let save = save_ovika(&path, &model, OvikaExtras::default()).unwrap_err();
+        for error in [load, save] {
+            let message = error.to_string();
+            assert!(message.contains("壁属性（開口・耐震スリット・仕上げ）"));
+            assert!(message.contains(&format!("部材 {id}")), "{message}");
+            assert!(message.contains(reason), "{message}");
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn ovika_rejects_each_hysteresis_attribute_without_a_member() {
     use HysteresisModel::{Auto, Retrograde, Takeda};
 

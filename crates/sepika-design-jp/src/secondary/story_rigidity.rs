@@ -106,13 +106,20 @@ pub fn validate_rigidity_node_ids(model: &Model) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_rigidity_inputs(model: &Model, story: StoryId) -> Result<(), String> {
+    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
+    model
+        .validate_wall_attr_refs()
+        .map_err(|error| evaluation_error(story, error.to_string()))
+}
+
 /// 独立な X・Y・Mz 荷重から剛心と層剛性を返す。
 /// 単層・上端単一剛床・基部の面内固定を確認できる線形弾性モデルに適用する。
 pub fn rigid_floor_story_rigidity(
     model: &Model,
     story: StoryId,
 ) -> Result<RigidFloorStoryRigidity, String> {
-    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
+    validate_rigidity_inputs(model, story)?;
     let model = with_wall_elements(model);
     evaluation_master(&model, story)
         .and_then(|master| rigidity_from_analysis(&model, master, None))
@@ -290,13 +297,14 @@ pub fn story_rigidity_requiring_coupled_analysis(
             "指定した上端階に対応する層がありません".into(),
         ));
     }
-    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
+    validate_rigidity_inputs(model, story)?;
     if let Some((_, evaluation)) = recorded_story_rigidity(story, responses)
         .map_err(|reason| evaluation_error(story, reason))?
     {
         return evaluation.clone();
     }
-    evaluate_story_rigidity(&with_wall_elements(model), story, None).or_else(|reason| {
+    let expanded = with_wall_elements(model);
+    evaluate_story_rigidity(&expanded, story, None).or_else(|reason| {
         validate_rigidity_column_axes(model, story)?;
         Err(reason)
     })
@@ -393,8 +401,9 @@ enum CouplingIndicator {
 }
 
 pub(super) fn coupling_indicator(model: &Model, story: StoryId) -> Result<Option<String>, String> {
-    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
-    match coupling_indicator_from_expanded(&with_wall_elements(model), story)? {
+    validate_rigidity_inputs(model, story)?;
+    let model = with_wall_elements(model);
+    match coupling_indicator_from_expanded(&model, story)? {
         CouplingIndicator::Candidate(reason) => Ok(Some(reason)),
         _ => Ok(None),
     }

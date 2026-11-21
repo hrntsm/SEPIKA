@@ -759,7 +759,7 @@ fn resolve_secondary_quantities(
 }
 
 /// 二次 CFT、必要な材料領域・床接触が未知、不正または適用対象外の場合は理由付きエラー。
-/// 壁版は内部で展開して集計する。未参照断面の未入力は許容する。
+/// 壁版は壁属性の参照を確認してから展開する。未参照断面の未入力は許容する。
 /// 円形RC間柱の直径・解決実長 `[mm]` が有限かつ正でない場合は部材 ID と原因を返す。
 /// 鉄筋の概算用体積比が負値または非有限の場合は、該当する全項目の名前と原因を返す。
 pub fn try_compute_quantity_takeoff(
@@ -790,6 +790,7 @@ pub fn try_compute_quantity_takeoff(
     model
         .validate_frame_node_counts()
         .map_err(|e| e.to_string())?;
+    model.validate_wall_attr_refs().map_err(|e| e.to_string())?;
     model
         .validate_rc_section_usage()
         .map_err(|e| e.to_string())?;

@@ -514,10 +514,12 @@ impl App {
 
         // 診断と解析前チェックの検査を分けると、一方だけに検査項目が追加されて判定が食い違う。
         // 入力モデルには壁解析要素がないため、そのままでは耐震壁と周辺架構の種別不整合を診断できない。
-        // 壁展開で追加される番号が、実在しないダンパー特性の参照先と一致することがある。
+        // 壁展開で追加される番号が、実在しない部材への属性の参照先と一致することがある。
         let model = &self.core.model;
         let expanded;
-        let diagnostic_model = if model.validate_damper_attr_refs().is_err() {
+        let diagnostic_model = if model.validate_damper_attr_refs().is_err()
+            || model.validate_wall_attr_refs().is_err()
+        {
             model
         } else {
             expanded = sepika_core::wall_expand::expand_wall_elements(model).0;

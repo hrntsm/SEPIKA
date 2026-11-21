@@ -55,6 +55,62 @@ fn physical_story_shear_includes_wall_brace_and_support_conditions() {
 }
 
 #[test]
+fn direct_wall_solves_reject_invalid_wall_attributes() {
+    use sepika_math::solver::SolveError;
+    use sepika_solver::common::constraint::Reducer;
+    use sepika_solver::dynamic::damping::Damping;
+    use sepika_solver::dynamic::eigen::solve_eigen;
+    use sepika_solver::dynamic::timehistory::{
+        linear_time_history_analysis, GroundMotion, NewmarkCfg,
+    };
+
+    let mut model = fixture(ElementKind::Beam, Dof::Ux, 100_000.0);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let initial = vec![0.0; reducer.n_indep];
+    let wave = GroundMotion {
+        dt: 0.01,
+        accel_x: vec![0.0, 1.0, 0.0],
+        accel_y: None,
+        accel_theta: None,
+    };
+    let newmark = NewmarkCfg::average_accel();
+    let damping = Damping::MassProportional { h: 0.0, omega: 1.0 };
+    for id in [ElemId(0), ElemId(99)] {
+        model.wall_attrs = vec![WallAttr {
+            elem: id,
+            opening_area: 100_000.0,
+            opening_weight: 0.0,
+            slit: Default::default(),
+            openings: vec![],
+            finish_intensity: 0.0,
+        }];
+        let static_result = linear_static_once(&model, LoadCaseId(0)).map(|_| ());
+        let modal_result = solve_eigen(&model, &dofmap, &reducer, 1).map(|_| ());
+        let history_result = linear_time_history_analysis(
+            &model, &dofmap, &reducer, &wave, &newmark, &damping, &initial, &initial, None,
+        )
+        .map(|_| ());
+        for (analysis, result) in [
+            ("線形静的解析", static_result),
+            ("固有値解析", modal_result),
+            ("線形時刻歴解析", history_result),
+        ] {
+            let error = result.expect_err(analysis);
+            assert!(
+                matches!(&error, SolveError::InvalidInput(_)),
+                "{analysis}: {error}"
+            );
+            assert!(error.to_string().contains("壁属性"), "{analysis}: {error}");
+            assert!(
+                error.to_string().contains(&format!("部材 {}", id.0)),
+                "{analysis}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
 #[ignore = "Issue821の現行モデル監査。開口モデルの妥当性を保証する回帰試験ではない"]
 fn audit_rc_wall_opening_linear_response() {
     let opening = |width, height, x, z| WallOpening {

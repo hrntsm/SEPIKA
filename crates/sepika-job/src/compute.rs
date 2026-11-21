@@ -13,13 +13,16 @@ use sepika_core::model::{LoadCase, LoadCaseKind, LoadSource, EX_CASE_NAME, EY_CA
 use sepika_design_jp::secondary::story_rigidity::evaluate_story_rigidities;
 use sepika_solver::statics::analysis::Analysis;
 
-/// 壁展開前にダンパー特性の参照を検査する。参照先がなければ入力エラーを返す。
+/// 壁展開前に壁属性とダンパー特性の参照を検査する。参照先が不正なら入力エラーを返す。
 pub(crate) fn expand_walls(
     model: sepika_core::model::Model,
 ) -> JobResult<(
     sepika_core::model::Model,
     sepika_core::wall_expand::WallExpansionIndex,
 )> {
+    model
+        .validate_wall_attr_refs()
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     model
         .validate_damper_attr_refs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;

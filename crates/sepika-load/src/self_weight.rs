@@ -37,10 +37,14 @@ const DIR_DOWN: [f64; 3] = [0.0, 0.0, -1.0];
 /// - **シェル**: 頂点への節点荷重。壁の階重量は別の水平帯積分で算定する。
 ///
 /// 同一節点への荷重は 1 件の `NodalLoad` に合算して返す。
+/// 壁属性の参照先が不正なら、入力種別と部材番号を含むエラーを返す。
 pub fn self_weight_case_content(
     model: &Model,
     load_cfg: &LoadCfg,
 ) -> Result<(Vec<NodalLoad>, Vec<MemberLoad>), String> {
+    model
+        .validate_wall_attr_refs()
+        .map_err(|error| error.to_string())?;
     let mut node_force = vec![0.0_f64; model.nodes.len()];
     let mut node_moment = vec![[0.0; 3]; model.nodes.len()];
     let mut member: Vec<MemberLoad> = Vec::new();

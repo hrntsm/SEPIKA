@@ -1045,6 +1045,40 @@ fn stored_story_rigidity_requires_consistent_finite_positive_identification() {
 }
 
 #[test]
+fn stored_and_unrecorded_rigidity_reject_invalid_wall_attributes() {
+    let mut model = three_column_rigid_floor([0.0; 2]);
+    let x = add_case(&mut model, "X", [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let y = add_case(&mut model, "Y", [0.0, 1000.0, 0.0, 0.0, 0.0, 0.0]);
+    let results = [x, y].map(|id| linear_static_once(&model, id).unwrap());
+    let stored = results.clone().map(|mut result| {
+        result.story_rigidity = vec![(TOP, Ok(None))];
+        result
+    });
+    let mut invalid = model;
+    for id in [ElemId(0), ElemId(99)] {
+        invalid.wall_attrs = vec![WallAttr {
+            elem: id,
+            opening_area: 100_000.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            slit: Default::default(),
+            finish_intensity: 0.0,
+        }];
+        for [x, y] in [&stored, &results] {
+            for reason in [
+                story_rigidity_requiring_coupled_analysis(&invalid, TOP, [Some(x), Some(y)])
+                    .unwrap_err(),
+                story_eccentricity_from_analysis(&invalid, TOP, x, y, None).unwrap_err(),
+            ] {
+                assert!(reason.contains("階1"), "{reason}");
+                assert!(reason.contains("壁属性"), "{reason}");
+                assert!(reason.contains(&format!("部材 {}", id.0)), "{reason}");
+            }
+        }
+    }
+}
+
+#[test]
 fn stored_and_unrecorded_rigidity_reject_stories_without_a_layer() {
     let mut model = three_column_rigid_floor([0.0; 2]);
     let case = add_case(&mut model, "X", [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);

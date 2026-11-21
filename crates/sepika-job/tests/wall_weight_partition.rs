@@ -12,6 +12,45 @@ use sepika_load::story_gen::{
 mod rc_wall_side_column_model;
 
 #[test]
+fn in_memory_inputs_reject_a_wall_attribute_for_a_number_reused_by_expansion() {
+    let mut model = rc_wall_side_column_model::input_model();
+    let id = ElemId(model.elements.len() as u32);
+    let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
+    assert!(model.element(id).is_none());
+    assert_eq!(expanded.element(id).unwrap().kind, ElementKind::Wall);
+    assert!(index.plate_of(id).is_some());
+
+    model.wall_attrs.push(WallAttr {
+        elem: id,
+        opening_area: 300_000.0,
+        opening_weight: 80.0,
+        slit: WallSlit {
+            beam_face: [true, false],
+            ..Default::default()
+        },
+        openings: vec![],
+        finish_intensity: 0.001,
+    });
+    let expected = format!("壁属性（開口・耐震スリット・仕上げ） -> 部材 {}", id.0);
+    let story = model.stories.last().unwrap().id;
+    let errors = [
+        sepika_job::compute::compute_linear_static(model.clone(), LoadCaseId(0))
+            .err()
+            .unwrap()
+            .to_string(),
+        sepika_load::self_weight::self_weight_case_content(&model, &LoadCfg::default())
+            .unwrap_err(),
+        sepika_design_jp::quantity::try_compute_quantity_takeoff(&model, &model.quantity_cfg)
+            .unwrap_err(),
+        sepika_design_jp::secondary::story_rigidity::rigid_floor_story_rigidity(&model, story)
+            .unwrap_err(),
+    ];
+    for error in errors {
+        assert!(error.contains(&expected), "{error}");
+    }
+}
+
+#[test]
 fn nonlinear_jobs_reject_a_hysteresis_ref_to_an_expanded_wall_number() {
     use sepika_job::compute::{compute_pushover, compute_time_history};
     use sepika_job::{AnalysisSettings, JobError};

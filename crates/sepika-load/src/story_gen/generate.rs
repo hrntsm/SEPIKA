@@ -134,6 +134,9 @@ fn generate_stories_impl(
     mass_method: MassMethod,
 ) -> Result<StoryGenResult, String> {
     model
+        .validate_wall_attr_refs()
+        .map_err(|error| error.to_string())?;
+    model
         .validate_member_weight_refs()
         .map_err(|error| error.to_string())?;
     for (index, &id) in model.generated_masters.iter().enumerate() {
