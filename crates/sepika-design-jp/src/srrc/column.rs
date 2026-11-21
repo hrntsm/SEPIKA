@@ -6,7 +6,10 @@
 //! モーメントを軸力範囲に応じて 3 分岐で累加する（[`src_column_axis_ma`]）。
 //! せん断は [`super::src_shear_check`] に委譲する。
 
-use super::{ratio_or_large, src_shear_check, steel_h_props, SrcAxisProps, SrcShearResult};
+use super::{
+    ratio_or_large, src_shear_check, steel_h_props, SrcAxisProps, SrcSeismicShearDemand,
+    SrcShearResult,
+};
 use crate::material_strength::main_rebar_grade;
 use crate::rc::{
     concrete_allowable_compression, concrete_allowable_shear_class, interp_ma,
@@ -60,47 +63,68 @@ pub enum SrcColumnHeadLimit {
 }
 
 impl SrcColumnSeismicBendingAxis {
-    fn shear_demand_n(&self, height_mm: f64) -> Result<(f64, f64), &'static str> {
+    fn shear_demand_n(
+        &self,
+        height_mm: f64,
+        main_rebar_valid: bool,
+    ) -> Result<SrcSeismicShearDemand, &'static str> {
         let steel_head = self.head.steel_allowable_n_mm;
         let steel_base = self.base.steel_allowable_n_mm;
-        let rc_head = self.head.rc_ultimate_n_mm;
-        let rc_base = self.base.rc_ultimate_n_mm;
-        if ![steel_head, steel_base, rc_head, rc_base]
+        if ![steel_head, steel_base]
             .iter()
             .all(|m| m.is_finite() && *m >= 0.0)
         {
             return Err("柱頭・柱脚の材料別曲げ耐力には有限な非負値が必要です");
         }
 
-        let rc_head = match self.head_limit {
-            SrcColumnHeadLimit::BothEndsYield => rc_head,
-            SrcColumnHeadLimit::ConnectedBeams {
-                sum_n_mm,
-                top_story,
-            } => {
-                if !sum_n_mm.is_finite() || sum_n_mm < 0.0 {
-                    return Err("柱頭の接続梁の材料別曲げ耐力の合計には有限な非負値が必要です");
-                }
-                let factor = if top_story { 1.0 } else { 0.5 };
-                let rc_limit = factor * sum_n_mm - steel_head;
-                if rc_limit < 0.0 {
-                    return Err("柱頭の接続梁によるRC曲げ耐力の上限が負となり、適用範囲外です");
-                }
-                rc_head.min(rc_limit)
+        let rc_sum = if main_rebar_valid {
+            let rc_head = self.head.rc_ultimate_n_mm;
+            let rc_base = self.base.rc_ultimate_n_mm;
+            if ![rc_head, rc_base]
+                .iter()
+                .all(|m| m.is_finite() && *m >= 0.0)
+            {
+                return Err("柱頭・柱脚の材料別曲げ耐力には有限な非負値が必要です");
             }
+            let rc_head = match self.head_limit {
+                SrcColumnHeadLimit::BothEndsYield => rc_head,
+                SrcColumnHeadLimit::ConnectedBeams {
+                    sum_n_mm,
+                    top_story,
+                } => {
+                    if !sum_n_mm.is_finite() || sum_n_mm < 0.0 {
+                        return Err("柱頭の接続梁の材料別曲げ耐力の合計には有限な非負値が必要です");
+                    }
+                    let factor = if top_story { 1.0 } else { 0.5 };
+                    let rc_limit = factor * sum_n_mm - steel_head;
+                    if rc_limit < 0.0 {
+                        return Err("柱頭の接続梁によるRC曲げ耐力の上限が負となり、適用範囲外です");
+                    }
+                    rc_head.min(rc_limit)
+                }
+            };
+            Some(rc_head + rc_base)
+        } else {
+            None
         };
 
         let steel_sum = steel_head + steel_base;
-        let rc_sum = rc_head + rc_base;
         let s_qd = steel_sum / height_mm;
-        let r_qd = rc_sum / height_mm;
-        if !s_qd.is_finite() || !r_qd.is_finite() {
+        let r_qd = rc_sum.map(|sum| sum / height_mm);
+        if !s_qd.is_finite() || r_qd.is_some_and(|qd| !qd.is_finite()) {
             return Err("材料別の設計用せん断力が非有限です");
         }
-        if (steel_sum > 0.0 && s_qd == 0.0) || (rc_sum > 0.0 && r_qd == 0.0) {
+        if (steel_sum > 0.0 && s_qd == 0.0)
+            || rc_sum
+                .zip(r_qd)
+                .is_some_and(|(sum, qd)| sum > 0.0 && qd == 0.0)
+        {
             return Err("材料別の設計用せん断力が数値範囲外です");
         }
-        Ok((s_qd, r_qd))
+        Ok(SrcSeismicShearDemand {
+            steel_n: s_qd,
+            rc_n: r_qd,
+        })
     }
 }
 
@@ -126,7 +150,8 @@ fn src_column_seismic_qd(
     forces: &MemberForcesAt,
     ctx: &DesignCtx,
     missing_gravity: bool,
-) -> Result<Option<[(f64, f64); 2]>, String> {
+    main_rebar_valid: bool,
+) -> Result<Option<[SrcSeismicShearDemand; 2]>, String> {
     if ctx.term != LoadTerm::Short {
         return Ok(None);
     }
@@ -160,11 +185,11 @@ fn src_column_seismic_qd(
     }
     let qy = bending
         .qy
-        .shear_demand_n(qd.clear_length)
+        .shear_demand_n(qd.clear_length, main_rebar_valid)
         .map_err(|reason| format!("Qy方向の{reason}"))?;
     let qz = bending
         .qz
-        .shear_demand_n(qd.clear_length)
+        .shear_demand_n(qd.clear_length, main_rebar_valid)
         .map_err(|reason| format!("Qz方向の{reason}"))?;
     Ok(Some([qy, qz]))
 }
@@ -331,9 +356,9 @@ pub(crate) fn src_column_check(
     f_value: f64,
     fc_raw: f64,
     missing_gravity: bool,
+    main_rebar_valid: bool,
 ) -> (CheckResult, Option<String>) {
     let long_term = ctx.term == LoadTerm::Long;
-    let grade = main_rebar_grade(ctx.rebar_material.as_ref());
 
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
     let fs = concrete_allowable_shear_class(fc_raw, mat.concrete_class, long_term);
@@ -345,8 +370,6 @@ pub(crate) fn src_column_check(
 
     let s_ft = steel_ft(f_value, ctx.term);
     let s_fs = steel_fs(f_value, ctx.term);
-    let s_fc = s_ft;
-
     let (sa, sz_z, sz_y) = steel_h_props(
         steel_height,
         steel_width,
@@ -354,74 +377,84 @@ pub(crate) fn src_column_check(
         steel_flange_thick,
     );
 
-    let s_pc = (steel_width * steel_flange_thick) / (props_z.b * props_z.d_full).max(1e-9);
-    let fc_prime = (fc_allow * (1.0 - 15.0 * s_pc)).max(0.0);
-
-    let ft_z = rebar_allowable_tension(grade, main_dia_z, long_term);
-    let ft_y = rebar_allowable_tension(grade, main_dia_y, long_term);
-    let ft_axial = rebar_allowable_tension(grade, main_dia_z.max(main_dia_y), long_term);
-
-    let ae = props_z.b * props_z.d_full + (n_ratio - 1.0) * as_total;
-    let rnc1 = ae * fc_prime;
-    let rnc2 = ae * ft_axial / n_ratio;
-    let rnc = rnc1.min(rnc2).max(0.0);
-    let rnt = -(as_total * ft_axial);
-
-    let s_nc = sa * s_fc;
-    let s_nt = sa * s_ft;
-
-    let axis_z = SrcColumnAxis {
-        props: props_z,
-        at_perp: at_perp_z,
-        ft: ft_z,
-    };
-    let axis_y = SrcColumnAxis {
-        props: props_y,
-        at_perp: at_perp_y,
-        ft: ft_y,
-    };
-
-    let curve_z = src_column_nm_curve(&axis_z, fc_prime, n_ratio, rnc, rnt);
-    let curve_y = src_column_nm_curve(&axis_y, fc_prime, n_ratio, rnc, rnt);
-
-    let n_design = -forces.n;
-
-    let s_mo_z = sz_z * s_ft;
-    let s_mo_y = sz_y * s_ft;
-
-    let ma_z = src_column_axis_ma(n_design, rnc, rnt, sa, s_ft, s_fc, sz_z, s_mo_z, &curve_z);
-    let ma_y = src_column_axis_ma(n_design, rnc, rnt, sa, s_ft, s_fc, sz_y, s_mo_y, &curve_y);
-
     let short_seismic = !long_term && (missing_gravity || ctx.seismic_qd.is_some());
     let invalid_z = short_seismic && !forces.mz.is_finite();
     let invalid_y = short_seismic && !forces.my.is_finite();
-    let ratio_z = (!invalid_z).then(|| ratio_or_large(forces.mz, ma_z));
-    let ratio_y = (!invalid_y).then(|| ratio_or_large(forces.my, ma_y));
-    let ratio_biaxial: f64 = ratio_z.into_iter().chain(ratio_y).sum();
-
-    let ratio_axial = if n_design > rnc + s_nc {
-        n_design / (rnc + s_nc)
-    } else if n_design < rnt - s_nt {
-        (-n_design) / (-rnt + s_nt)
-    } else {
-        0.0
-    };
-
-    let invalid_ratio = short_seismic && (!ratio_axial.is_finite() || !ratio_biaxial.is_finite());
-    let ratio = if invalid_ratio {
-        [ratio_axial, ratio_biaxial]
-            .into_iter()
-            .chain(ratio_z)
-            .chain(ratio_y)
-            .filter(|ratio| ratio.is_finite())
-            .fold(0.0, f64::max)
-    } else {
-        ratio_axial.max(ratio_biaxial)
-    };
+    let mut invalid_ratio = false;
     let mut result = CheckResult {
-        basis: "SRC規準(1987) 柱: 累加強度式(軸力+二軸曲げ)".into(),
+        basis: if main_rebar_valid {
+            "SRC規準(1987) 柱: 累加強度式(軸力+二軸曲げ)".into()
+        } else {
+            "SRC規準(1987) 柱: せん断".into()
+        },
         detail: String::new(),
-        components: vec![CheckComponent {
+        components: Vec::new(),
+    };
+    if main_rebar_valid {
+        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+        let s_fc = s_ft;
+        let s_pc = (steel_width * steel_flange_thick) / (props_z.b * props_z.d_full).max(1e-9);
+        let fc_prime = (fc_allow * (1.0 - 15.0 * s_pc)).max(0.0);
+
+        let ft_z = rebar_allowable_tension(grade, main_dia_z, long_term);
+        let ft_y = rebar_allowable_tension(grade, main_dia_y, long_term);
+        let ft_axial = rebar_allowable_tension(grade, main_dia_z.max(main_dia_y), long_term);
+
+        let ae = props_z.b * props_z.d_full + (n_ratio - 1.0) * as_total;
+        let rnc1 = ae * fc_prime;
+        let rnc2 = ae * ft_axial / n_ratio;
+        let rnc = rnc1.min(rnc2).max(0.0);
+        let rnt = -(as_total * ft_axial);
+
+        let s_nc = sa * s_fc;
+        let s_nt = sa * s_ft;
+
+        let axis_z = SrcColumnAxis {
+            props: props_z,
+            at_perp: at_perp_z,
+            ft: ft_z,
+        };
+        let axis_y = SrcColumnAxis {
+            props: props_y,
+            at_perp: at_perp_y,
+            ft: ft_y,
+        };
+
+        let curve_z = src_column_nm_curve(&axis_z, fc_prime, n_ratio, rnc, rnt);
+        let curve_y = src_column_nm_curve(&axis_y, fc_prime, n_ratio, rnc, rnt);
+
+        let n_design = -forces.n;
+
+        let s_mo_z = sz_z * s_ft;
+        let s_mo_y = sz_y * s_ft;
+
+        let ma_z = src_column_axis_ma(n_design, rnc, rnt, sa, s_ft, s_fc, sz_z, s_mo_z, &curve_z);
+        let ma_y = src_column_axis_ma(n_design, rnc, rnt, sa, s_ft, s_fc, sz_y, s_mo_y, &curve_y);
+
+        let ratio_z = (!invalid_z).then(|| ratio_or_large(forces.mz, ma_z));
+        let ratio_y = (!invalid_y).then(|| ratio_or_large(forces.my, ma_y));
+        let ratio_biaxial: f64 = ratio_z.into_iter().chain(ratio_y).sum();
+
+        let ratio_axial = if n_design > rnc + s_nc {
+            n_design / (rnc + s_nc)
+        } else if n_design < rnt - s_nt {
+            (-n_design) / (-rnt + s_nt)
+        } else {
+            0.0
+        };
+
+        invalid_ratio = short_seismic && (!ratio_axial.is_finite() || !ratio_biaxial.is_finite());
+        let ratio = if invalid_ratio {
+            [ratio_axial, ratio_biaxial]
+                .into_iter()
+                .chain(ratio_z)
+                .chain(ratio_y)
+                .filter(|ratio| ratio.is_finite())
+                .fold(0.0, f64::max)
+        } else {
+            ratio_axial.max(ratio_biaxial)
+        };
+        result.components.push(CheckComponent {
             kind: CheckKind::AxialBending,
             ratio,
             detail: format!(
@@ -429,8 +462,8 @@ pub(crate) fn src_column_check(
                  MAz={:.1} N·mm, MAy={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm, s_pc={:.5}, fc'={:.3}",
                 rnc, rnt, s_nc, s_nt, n_design, ma_z, ma_y, forces.mz, forces.my, s_pc, fc_prime
             ),
-        }],
-    };
+    });
+    }
     let incomplete_reason = |shear_reason: Option<&str>| {
         let reason = [
             invalid_z.then_some("組合せの曲げモーメントMzが非有限です"),
@@ -444,7 +477,7 @@ pub(crate) fn src_column_check(
         .join("。");
         (!reason.is_empty()).then(|| format!("SRC柱検定: {reason}"))
     };
-    let demand_n = match src_column_seismic_qd(forces, ctx, missing_gravity) {
+    let demand_n = match src_column_seismic_qd(forces, ctx, missing_gravity, main_rebar_valid) {
         Ok(demand_n) => demand_n,
         Err(reason) => return (result, incomplete_reason(Some(&reason))),
     };
@@ -544,8 +577,9 @@ pub(crate) fn src_column_check(
 }
 
 fn seismic_shear_detail(direction: &str, shear: &SrcShearResult) -> Result<(f64, String), String> {
-    if ![shear.s_qa, shear.r_qa]
+    if ![Some(shear.s_qa), shear.r_q.map(|_| shear.r_qa)]
         .iter()
+        .flatten()
         .all(|qa| qa.is_finite() && *qa > 0.0)
     {
         return Err(format!(
@@ -553,22 +587,31 @@ fn seismic_shear_detail(direction: &str, shear: &SrcShearResult) -> Result<(f64,
         ));
     }
     let steel_ratio = shear.s_q / shear.s_qa;
-    let rc_ratio = shear.r_q / shear.r_qa;
-    if !steel_ratio.is_finite() || !rc_ratio.is_finite() {
+    let rc_ratio = shear.r_q.map(|q| q / shear.r_qa);
+    if !steel_ratio.is_finite() || rc_ratio.is_some_and(|ratio| !ratio.is_finite()) {
         return Err(format!("{direction}方向の材料別せん断検定比が非有限です"));
     }
-    if (shear.s_q > 0.0 && steel_ratio == 0.0) || (shear.r_q > 0.0 && rc_ratio == 0.0) {
+    if (shear.s_q > 0.0 && steel_ratio == 0.0)
+        || shear
+            .r_q
+            .zip(rc_ratio)
+            .is_some_and(|(q, ratio)| q > 0.0 && ratio == 0.0)
+    {
         return Err(format!(
             "{direction}方向の材料別せん断検定比が数値範囲外です"
         ));
     }
+    let rc_detail = shear.r_q.zip(rc_ratio).map_or_else(
+        || "RC rQD=未算定".into(),
+        |(q, ratio)| format!("RC rQD={q:e} N, rQA={:e} N, rQD/rQA={ratio:e}", shear.r_qa),
+    );
+    let detail = format!(
+        "{direction}方向 鉄骨 sQD={:e} N, sQA={:e} N, sQD/sQA={steel_ratio:e}, {rc_detail}",
+        shear.s_q, shear.s_qa,
+    );
     Ok((
-        steel_ratio.max(rc_ratio),
-        format!(
-            "{direction}方向 鉄骨 sQD={:e} N, sQA={:e} N, sQD/sQA={:e}, \
-             RC rQD={:e} N, rQA={:e} N, rQD/rQA={:e}",
-            shear.s_q, shear.s_qa, steel_ratio, shear.r_q, shear.r_qa, rc_ratio
-        ),
+        rc_ratio.map_or(steel_ratio, |ratio| steel_ratio.max(ratio)),
+        detail,
     ))
 }
 

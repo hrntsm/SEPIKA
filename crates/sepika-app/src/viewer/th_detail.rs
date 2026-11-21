@@ -798,6 +798,9 @@ fn draw_peak_check(
     };
     let wire_qd = th_nonlinear && th_applied_long_term && !signed_bending;
     let src_column = structure == StructureKind::Src && kind == MemberKind::Column;
+    let rebar_material = model.element_rebar_material(elem);
+    let wrong_main_rebar = rebar_material
+        .is_some_and(|material| material.category != sepika_core::model::MaterialCategory::Rebar);
     let long_mf = wire_qd
         .then(|| {
             app.core.scoped.results.as_ref().and_then(|r| {
@@ -834,8 +837,8 @@ fn draw_peak_check(
                 method: app.core.analysis_cfg.qd_method,
             })
     });
-    let missing_src_gravity = wire_qd && seismic_qd.is_none();
-    if wire_qd
+    let missing_gravity = wire_qd && seismic_qd.is_none();
+    let missing_rc_beam_gravity = wire_qd
         && matches!(
             sec.shape,
             Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
@@ -852,8 +855,8 @@ fn draw_peak_check(
                     .at
                     .iter()
                     .any(|(p, _)| !qd.long_at.iter().any(|(q, _)| (p - q).abs() < 1e-6))
-        })
-    {
+        });
+    if missing_rc_beam_gravity && !wrong_main_rebar {
         draw_peak_precheck(
             ui,
             peak,
@@ -863,7 +866,7 @@ fn draw_peak_check(
         );
         return;
     }
-    let adjacency = (kind == MemberKind::Column && seismic_qd.is_some())
+    let adjacency = (kind == MemberKind::Column && seismic_qd.is_some() && !wrong_main_rebar)
         .then(|| sepika_core::adjacency::NodeAdjacency::build(model));
 
     let mut ctx = DesignCtx {
@@ -877,7 +880,7 @@ fn draw_peak_check(
         clear_length: Some(clear_span),
         rc_damage_control: app.core.analysis_cfg.rc_damage_control,
         bond_method: app.core.analysis_cfg.bond_method,
-        rebar_material: app.core.model.element_rebar_material(elem).cloned(),
+        rebar_material: rebar_material.cloned(),
         shear_rebar_material: app.core.model.element_shear_rebar_material(elem).cloned(),
         steel_material: app.core.model.element_steel_material(elem).cloned(),
         steel_attr: attr
@@ -984,13 +987,23 @@ fn draw_peak_check(
                         _ => {}
                     }
                 };
-                if src_column {
+                if structure == StructureKind::Src {
                     for outcome in sepika_design_jp::SrcDesign.check_outcomes(
                         &mfa,
                         sec,
                         mat,
                         &ctx,
-                        missing_src_gravity,
+                        missing_gravity && (src_column || wrong_main_rebar),
+                    ) {
+                        draw_outcome(&outcome);
+                    }
+                } else if structure == StructureKind::Rc {
+                    for outcome in sepika_design_jp::RcDesign.check_outcomes(
+                        &mfa,
+                        sec,
+                        mat,
+                        &ctx,
+                        missing_rc_beam_gravity || (missing_gravity && wrong_main_rebar),
                     ) {
                         draw_outcome(&outcome);
                     }

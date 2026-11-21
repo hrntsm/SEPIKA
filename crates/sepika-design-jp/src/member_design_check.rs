@@ -606,37 +606,42 @@ pub fn run_member_design_checks(
                 method: options.qd_method,
             });
 
-        let column_sum_my = if kind == MemberKind::Column && seismic_qd.is_some() {
-            let n_at = |mf: &MemberForces, end: usize| {
-                let target = if end == 0 { 0.0 } else { 1.0 };
-                mf.at
-                    .iter()
-                    .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
-                    .map(|(_, f)| f[0])
-                    .unwrap_or(0.0)
+        let rebar_material = model.element_rebar_material(elem);
+        let wrong_main_rebar = rebar_material.is_some_and(|material| {
+            material.category != sepika_core::model::MaterialCategory::Rebar
+        });
+        let column_sum_my =
+            if kind == MemberKind::Column && seismic_qd.is_some() && !wrong_main_rebar {
+                let n_at = |mf: &MemberForces, end: usize| {
+                    let target = if end == 0 { 0.0 } else { 1.0 };
+                    mf.at
+                        .iter()
+                        .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
+                        .map(|(_, f)| f[0])
+                        .unwrap_or(0.0)
+                };
+                let (n_combo_i, n_combo_j) = (n_at(mf, 0), n_at(mf, 1));
+                let (n_long_i, n_long_j) = long_mf_by_id
+                    .as_ref()
+                    .and_then(|m| m.get(elem_id))
+                    .map(|mf_l| (n_at(mf_l, 0), n_at(mf_l, 1)))
+                    .unwrap_or((n_combo_i, n_combo_j));
+                crate::rc::compute_column_mechanism_sum_my(
+                    model,
+                    &column_k_index,
+                    elem,
+                    n_long_i,
+                    n_long_j,
+                    n_combo_i,
+                    n_combo_j,
+                    1.0,
+                )
+            } else {
+                None
             };
-            let (n_combo_i, n_combo_j) = (n_at(mf, 0), n_at(mf, 1));
-            let (n_long_i, n_long_j) = long_mf_by_id
-                .as_ref()
-                .and_then(|m| m.get(elem_id))
-                .map(|mf_l| (n_at(mf_l, 0), n_at(mf_l, 1)))
-                .unwrap_or((n_combo_i, n_combo_j));
-            crate::rc::compute_column_mechanism_sum_my(
-                model,
-                &column_k_index,
-                elem,
-                n_long_i,
-                n_long_j,
-                n_combo_i,
-                n_combo_j,
-                1.0,
-            )
-        } else {
-            None
-        };
 
         let ctx = DesignCtx {
-            rebar_material: model.element_rebar_material(elem).cloned(),
+            rebar_material: rebar_material.cloned(),
             shear_rebar_material: model.element_shear_rebar_material(elem).cloned(),
             steel_material: model.element_steel_material(elem).cloned(),
             term: options.term,
@@ -732,36 +737,35 @@ pub fn run_member_design_checks(
                     .as_ref()
                     .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
                 && brb.is_none();
-            let src_seismic_column = options.term == LoadTerm::Short
-                && structure == StructureKind::Src
-                && kind == MemberKind::Column
-                && matches!(
-                    sec.shape,
-                    Some(sepika_core::section_shape::SectionShape::SrcColumnRect { .. })
-                )
-                && options.long_member_forces.is_some();
             let mut check_incomplete = None;
             let mut outcome = if eccentric_brace_compression {
                 CheckOutcome::Skipped { reason: "非0XYZ偏心ブレースの圧縮検定には強軸・弱軸の座屈長さの直接指定が必要です。実材軸長・剛体接続長からは自動算定しません".into() }
-            } else if src_seismic_column {
+            } else if structure == StructureKind::Src && brb.is_none() {
                 let (outcome, incomplete) =
                     crate::SrcDesign.check_with_incomplete(&mfa, sec, mat, &ctx, missing_gravity);
                 check_incomplete = incomplete;
                 outcome
-            } else if missing_gravity {
-                check_incomplete = crate::material_strength::main_rebar_category_issue(
-                    ctx.rebar_material.as_ref(),
+            } else if structure == StructureKind::Rc && brb.is_none() {
+                let missing_column_reference = wrong_main_rebar
+                    && kind == MemberKind::Column
+                    && options.long_member_forces.is_some()
+                    && ctx.seismic_qd.is_none();
+                let missing_shear_reference = if missing_gravity || missing_column_reference {
+                    Some("設計用せん断力に必要な重力参照内力が不足しています")
+                } else if missing_q0 {
+                    Some("QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません")
+                } else {
+                    None
+                };
+                let (outcome, incomplete) = crate::RcDesign.check_with_incomplete(
+                    &mfa,
+                    sec,
+                    mat,
+                    &ctx,
+                    missing_shear_reference,
                 );
-                CheckOutcome::Skipped {
-                    reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
-                }
-            } else if missing_q0 {
-                check_incomplete = crate::material_strength::main_rebar_category_issue(
-                    ctx.rebar_material.as_ref(),
-                );
-                CheckOutcome::Skipped {
-                    reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
-                }
+                check_incomplete = incomplete;
+                outcome
             } else if let Some(brb) = brb {
                 if let Some(reason) = brb_torsion_reason(mfa.mx) {
                     CheckOutcome::Skipped {

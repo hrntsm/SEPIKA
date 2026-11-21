@@ -33,17 +33,15 @@ pub(crate) fn src_beam_check(
     steel_flange_thick: f64,
     f_value: f64,
     fc_raw: f64,
+    main_rebar_valid: bool,
 ) -> CheckResult {
     let long_term = ctx.term == LoadTerm::Long;
-    let grade = main_rebar_grade(ctx.rebar_material.as_ref());
 
     let fs = concrete_allowable_shear_class(fc_raw, mat.concrete_class, long_term);
     let w_ft = rebar_allowable_shear(
         crate::material_strength::shear_rebar_grade(ctx.shear_rebar_material.as_ref()),
         long_term,
     );
-    let ft = rebar_allowable_tension(grade, main_dia, long_term);
-
     let s_ft = steel_ft(f_value, ctx.term);
     let s_fs = steel_fs(f_value, ctx.term);
 
@@ -54,39 +52,50 @@ pub(crate) fn src_beam_check(
         steel_flange_thick,
     );
 
-    let s_mo = sz * s_ft;
-    let r_ma = props.at * ft * props.j;
-    let ma = s_mo + r_ma;
-
-    let ratio_m = ratio_or_large(forces.mz, ma);
+    let mut components = Vec::new();
+    if main_rebar_valid {
+        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+        let ft = rebar_allowable_tension(grade, main_dia, long_term);
+        let s_mo = sz * s_ft;
+        let r_ma = props.at * ft * props.j;
+        let ma = s_mo + r_ma;
+        components.push(CheckComponent {
+            kind: CheckKind::Bending,
+            ratio: ratio_or_large(forces.mz, ma),
+            detail: format!(
+                "sMo={:.1} N·mm, rMA={:.1} N·mm, MA={:.1} N·mm, |mz|={:.1} N·mm",
+                s_mo, r_ma, ma, forces.mz,
+            ),
+        });
+    }
 
     let (m_alpha, q_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
     let b_prime = (props.b - steel_width).max(0.0);
     let dw = steel_height - 2.0 * steel_flange_thick;
 
-    let s_ft_short = steel_ft(f_value, LoadTerm::Short);
-    let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
-    let rc_mu = |p: &SrcAxisProps| {
-        rc_mu_simple(&RcCapacityInput {
-            b: p.b,
-            d: p.d_full,
-            at: p.at,
-            d_eff: p.d,
-            sigma_y,
-            fc: fc_raw,
-            pw: p.pw,
-            sigma_wy: 0.0,
-            clear_span: 0.0,
-            sigma_0: 0.0,
-        })
-    };
-    let r_mu = rc_mu(&props).min(rc_mu(&props_other));
-    let seismic = SrcSeismicCtx {
+    let seismic = ctx.seismic_qd.as_ref().map(|qd| SrcSeismicCtx {
         ctx,
         pos: forces.pos,
-        s_ft_short,
-        r_mu,
-    };
+        s_ft_short: steel_ft(f_value, LoadTerm::Short),
+        r_mu: (main_rebar_valid && qd.method != crate::QdMethod::Qd2).then(|| {
+            let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
+            let rc_mu = |p: &SrcAxisProps| {
+                rc_mu_simple(&RcCapacityInput {
+                    b: p.b,
+                    d: p.d_full,
+                    at: p.at,
+                    d_eff: p.d,
+                    sigma_y,
+                    fc: fc_raw,
+                    pw: p.pw,
+                    sigma_wy: 0.0,
+                    clear_span: 0.0,
+                    sigma_0: 0.0,
+                })
+            };
+            rc_mu(&props).min(rc_mu(&props_other))
+        }),
+    });
 
     let shear = src_shear_check(
         forces.qy,
@@ -104,41 +113,38 @@ pub(crate) fn src_beam_check(
         s_fs,
         steel_web_thick * dw,
         2.0,
-        super::SrcShearMode::Beam(&seismic),
+        super::SrcShearMode::Beam(seismic.as_ref()),
         ctx.term,
     );
 
-    let basis = "SRC規準(1987) 梁: 累加強度式(曲げ)+ せん断弾性分担".to_string();
+    let basis = if main_rebar_valid {
+        "SRC規準(1987) 梁: 累加強度式(曲げ)+ せん断弾性分担".to_string()
+    } else {
+        "SRC規準(1987) 梁: せん断".to_string()
+    };
     let qd_note = if shear.used_qd {
         "構造規定方式"
     } else {
         "弾性分担"
     };
-    let bending_detail = format!(
-        "sMo={:.1} N·mm, rMA={:.1} N·mm, MA={:.1} N·mm, |mz|={:.1} N·mm",
-        s_mo, r_ma, ma, forces.mz,
-    );
+    let r_q = shear
+        .r_q
+        .map_or_else(|| "未算定".into(), |q| format!("{q:.1} N"));
     let shear_detail = format!(
-        "sQ={:.1} N, rQ={:.1} N, sQA={:.1} N, rQA={:.1} N, α={:.3}, pw={:.5}, \
+        "sQ={:.1} N, rQ={r_q}, sQA={:.1} N, rQA={:.1} N, α={:.3}, pw={:.5}, \
          設計用せん断力={qd_note}",
-        shear.s_q, shear.r_q, shear.s_qa, shear.r_qa, shear.alpha, shear.pw
+        shear.s_q, shear.s_qa, shear.r_qa, shear.alpha, shear.pw
     );
+    components.push(CheckComponent {
+        kind: CheckKind::Shear,
+        ratio: shear.ratio,
+        detail: shear_detail,
+    });
 
     CheckResult {
         basis,
         detail: String::new(),
-        components: vec![
-            CheckComponent {
-                kind: CheckKind::Bending,
-                ratio: ratio_m,
-                detail: bending_detail,
-            },
-            CheckComponent {
-                kind: CheckKind::Shear,
-                ratio: shear.ratio,
-                detail: shear_detail,
-            },
-        ],
+        components,
     }
 }
 

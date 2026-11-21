@@ -308,9 +308,10 @@ fn check_member(
             elem.id.0
         ));
     }
-    if let Err(reason) =
-        shape.validate_rebar_size_materials(main_rebar, model.element_shear_rebar_material(elem))
-    {
+    if let Err(reason) = shape.validate_rebar_size_materials(
+        main_rebar.filter(|_| main_rebar_issue.is_none()),
+        model.element_shear_rebar_material(elem),
+    ) {
         if main_rebar_issue.is_some() {
             return unchecked(&reason);
         }

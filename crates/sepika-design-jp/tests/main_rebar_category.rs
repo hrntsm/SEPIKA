@@ -10,13 +10,16 @@ use sepika_core::ids::{ElemId, MaterialId, SectionId};
 use sepika_core::model::{
     default_combinations, default_load_cases, FrameSectionUse, MaterialCategory, Model,
 };
+use sepika_core::section_shape::{RebarSize, SectionShape, StandardRebar};
 use sepika_design_jp::ultimate::{
     collect_rc_ultimate_checks, MemberDemand, StaticBeamHingeMechanism, UltimateShearOptions,
 };
 use sepika_design_jp::{
-    run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions,
+    run_member_design_checks, BondMethod, CheckComponent, CheckKind, CheckOutcome, LoadTerm,
+    MemberDesignCheckOptions, QdMethod,
 };
 use sepika_element::frame::beam::MemberForces;
+use std::collections::HashMap;
 
 fn assign_main_rebar(model: &mut Model, category: MaterialCategory) {
     let previous = model.sections[0].rebar_material.unwrap();
@@ -46,12 +49,24 @@ fn allowable_checks(
     torsion_nmm: f64,
     options: &MemberDesignCheckOptions<'_>,
 ) -> Vec<(ElemId, f64, CheckOutcome)> {
+    allowable_checks_with_demand(
+        model,
+        [0.0, 1_000.0, 0.0, torsion_nmm, 0.0, 1_000_000.0],
+        options,
+    )
+}
+
+fn allowable_checks_with_demand(
+    model: &Model,
+    demand: [f64; 6],
+    options: &MemberDesignCheckOptions<'_>,
+) -> Vec<(ElemId, f64, CheckOutcome)> {
     run_member_design_checks(
         model,
         &[(
             ElemId(0),
             MemberForces {
-                at: vec![(0.5, [0.0, 1_000.0, 0.0, torsion_nmm, 0.0, 1_000_000.0])],
+                at: vec![(0.5, demand)],
             },
         )],
         &[],
@@ -59,6 +74,183 @@ fn allowable_checks(
     )
     .unwrap()
     .member_checks
+}
+
+fn components_with_wrong_material(
+    model: &Model,
+    demand: [f64; 6],
+    options: &MemberDesignCheckOptions<'_>,
+) -> Vec<CheckComponent> {
+    let mut model = model.clone();
+    assign_main_rebar(&mut model, MaterialCategory::Steel);
+    let (checked, skipped): (Vec<_>, Vec<_>) =
+        allowable_checks_with_demand(&model, demand, options)
+            .into_iter()
+            .partition(|(_, _, outcome)| matches!(outcome, CheckOutcome::Checked(_)));
+    assert_eq!(skipped.len(), 1, "{skipped:?}");
+    let CheckOutcome::Skipped { reason } = &skipped[0].2 else {
+        unreachable!()
+    };
+    assert_material_diagnostic(reason, MaterialCategory::Steel);
+    let components: Vec<_> = checked
+        .into_iter()
+        .flat_map(|(_, _, outcome)| checked_components(outcome))
+        .collect();
+    assert!(components.iter().all(|row| row.ratio > 1.0));
+    components
+}
+
+fn checked_components(outcome: CheckOutcome) -> Vec<CheckComponent> {
+    match outcome {
+        CheckOutcome::Checked(result) => result.components,
+        CheckOutcome::Skipped { reason } => panic!("検定が未算定です: {reason}"),
+    }
+}
+
+#[test]
+fn rc_allowable_preserves_elastic_shear_and_cover_failures() {
+    for mut model in rc_members() {
+        match model.sections[0].shape.as_mut().unwrap() {
+            SectionShape::RcBeamRect { rebar, .. } => rebar.cover = 20.0,
+            SectionShape::RcColumnRect { rebar, .. } => rebar.cover = 20.0,
+            SectionShape::RcColumnCircle { rebar, .. } => rebar.cover = 20.0,
+            _ => unreachable!(),
+        }
+        let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
+        let options = short_term();
+        let correct = checked_components(
+            allowable_checks_with_demand(&model, demand, &options)
+                .remove(0)
+                .2,
+        );
+        let components = components_with_wrong_material(&model, demand, &options);
+        let independent: Vec<_> = correct
+            .into_iter()
+            .filter(|row| matches!(row.kind, CheckKind::Shear | CheckKind::Provision))
+            .collect();
+        assert_eq!(components, independent);
+        assert_eq!(components.len(), 2);
+        let missing_gravity = MemberDesignCheckOptions {
+            long_member_forces: Some(&[]),
+            ..short_term()
+        };
+        let components = components_with_wrong_material(&model, demand, &missing_gravity);
+        assert_eq!(components.len(), 1, "{components:?}");
+        assert_eq!(components[0].kind, CheckKind::Provision);
+    }
+}
+
+#[test]
+fn rc_allowable_preserves_explicit_deformed_bar_bond_failure() {
+    let mut model = rc_beam::model(false);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D19);
+    let components = components_with_wrong_material(
+        &model,
+        [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0],
+        &MemberDesignCheckOptions {
+            bond_method: BondMethod::Rc1991,
+            ..short_term()
+        },
+    );
+    assert!(components.iter().any(|row| row.kind == CheckKind::Bond));
+    assert!(components.iter().any(|row| row.kind == CheckKind::Shear));
+}
+
+#[test]
+fn rc_allowable_keeps_qd2_failure_without_replacing_unknown_qd1() {
+    for model in rc_members() {
+        let long = [(
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.5, [0.0; 6])],
+            },
+        )];
+        let q0 = HashMap::from([(ElemId(0), 0.0)]);
+        for method in [QdMethod::Qd1, QdMethod::Min, QdMethod::Qd2] {
+            let components = components_with_wrong_material(
+                &model,
+                [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0],
+                &MemberDesignCheckOptions {
+                    long_member_forces: Some(&long),
+                    q_simple_by_elem: Some(&q0),
+                    qd_method: method,
+                    ..short_term()
+                },
+            );
+            if method == QdMethod::Qd2 {
+                assert_eq!(components.len(), 1, "{components:?}");
+                assert_eq!(components[0].kind, CheckKind::Shear);
+            } else {
+                assert!(components.is_empty(), "{method:?} {components:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn src_allowable_preserves_shear_failure_for_beam_and_column() {
+    for column in [false, true] {
+        let model = src::model(column, "SN400B", 0.0, 0.0);
+        let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            let options = MemberDesignCheckOptions {
+                term,
+                ..Default::default()
+            };
+            let correct = checked_components(
+                allowable_checks_with_demand(&model, demand, &options)
+                    .remove(0)
+                    .2,
+            );
+            let components = components_with_wrong_material(&model, demand, &options);
+            assert_eq!(components.len(), 1, "{components:?}");
+            assert_eq!(
+                &components[0],
+                correct
+                    .iter()
+                    .find(|row| row.kind == CheckKind::Shear)
+                    .unwrap(),
+            );
+        }
+    }
+}
+
+#[test]
+fn src_beam_seismic_shear_keeps_steel_failure_and_only_a_confirmed_rc_demand() {
+    let model = src::model(false, "SN400B", 0.0, 0.0);
+    let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
+    for method in [QdMethod::Qd1, QdMethod::Min, QdMethod::Qd2] {
+        for q_long_n in [0.0, 10_000_000.0] {
+            let long = [(
+                ElemId(0),
+                MemberForces {
+                    at: vec![(0.5, [0.0, q_long_n, 0.0, 0.0, 0.0, 0.0])],
+                },
+            )];
+            let components = components_with_wrong_material(
+                &model,
+                demand,
+                &MemberDesignCheckOptions {
+                    long_member_forces: Some(&long),
+                    qd_method: method,
+                    ..short_term()
+                },
+            );
+            if q_long_n == 0.0 && method != QdMethod::Qd2 {
+                assert!(components.is_empty(), "{method:?} {components:?}");
+            } else {
+                assert_eq!(components.len(), 1, "{components:?}");
+                assert_eq!(components[0].kind, CheckKind::Shear);
+                assert_eq!(
+                    components[0].detail.contains("rQ=未算定"),
+                    method != QdMethod::Qd2
+                );
+            }
+        }
+    }
 }
 
 fn short_term() -> MemberDesignCheckOptions<'static> {
@@ -197,6 +389,11 @@ fn static_rc_beam_keeps_independent_gravity_failure_with_wrong_main_rebar() {
     let mut model = rc_beam::model(false);
     set_ultimate_input(&mut model);
     assign_main_rebar(&mut model, MaterialCategory::Steel);
+    model.materials.last_mut().unwrap().name = "SR235".into();
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D19);
     let check = collect_rc_ultimate_checks(
         &model,
         &[(
@@ -215,7 +412,9 @@ fn static_rc_beam_keeps_independent_gravity_failure_with_wrong_main_rebar() {
     assert!(check.mu.is_nan() && check.qmu.is_nan(), "{check:?}");
     assert_eq!(check.shear_margin, 0.0);
     assert_eq!(check.bond_margin, 0.0);
-    assert_material_diagnostic(&check.detail, MaterialCategory::Steel);
+    for text in ["SR235", "主筋", "鋼材", "断面タブ", "「鉄筋」"] {
+        assert!(check.detail.contains(text), "{check:?}");
+    }
 }
 
 #[test]
