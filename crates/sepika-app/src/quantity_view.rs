@@ -101,6 +101,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                 crate::theme::ERROR_RED,
                 format!("数量積算は未算定です: {reason}"),
             );
+            ui.horizontal(|ui| quantity_csv_controls(ui, app));
             return;
         }
     };
@@ -130,22 +131,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
             }
         }
         ui.separator();
-        if ui.button("💾 CSV エクスポート…").clicked() {
-            let csv = crate::summary::build_quantity_csv(&app.core.model);
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("CSV", &["csv"])
-                .set_file_name("quantity.csv")
-                .save_file()
-            {
-                if let Err(e) = std::fs::write(&path, &csv) {
-                    app.report_error(format!("数量 CSV 保存エラー: {}", e));
-                }
-            }
-        }
-        if ui.button("📋 クリップボードへコピー").clicked() {
-            ui.ctx()
-                .copy_text(crate::summary::build_quantity_csv(&app.core.model));
-        }
+        quantity_csv_controls(ui, app);
     });
 
     let totals = takeoff.totals();
@@ -386,6 +372,25 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
 
     if let Some(id) = focus {
         app.select_member(id);
+    }
+}
+
+fn quantity_csv_controls(ui: &mut egui::Ui, app: &mut App) {
+    if ui.button("💾 CSV エクスポート…").clicked() {
+        let csv = crate::summary::build_quantity_csv(&app.core.model);
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("CSV", &["csv"])
+            .set_file_name("quantity.csv")
+            .save_file()
+        {
+            if let Err(e) = std::fs::write(&path, &csv) {
+                app.report_error(format!("数量 CSV 保存エラー: {}", e));
+            }
+        }
+    }
+    if ui.button("📋 クリップボードへコピー").clicked() {
+        ui.ctx()
+            .copy_text(crate::summary::build_quantity_csv(&app.core.model));
     }
 }
 
