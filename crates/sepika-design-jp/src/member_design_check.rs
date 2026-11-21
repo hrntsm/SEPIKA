@@ -474,35 +474,41 @@ pub fn run_member_design_checks(
         let wrong_main_rebar = rebar_material.is_some_and(|material| {
             material.category != sepika_core::model::MaterialCategory::Rebar
         });
-        let column_sum_my =
-            if kind == MemberKind::Column && seismic_qd.is_some() && !wrong_main_rebar {
-                let n_at = |mf: &MemberForces, end: usize| {
-                    let target = if end == 0 { 0.0 } else { 1.0 };
-                    mf.at
-                        .iter()
-                        .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
-                        .map(|(_, f)| f[0])
-                        .unwrap_or(0.0)
-                };
-                let (n_combo_i, n_combo_j) = (n_at(mf, 0), n_at(mf, 1));
-                let (n_long_i, n_long_j) = long_mf_by_id
-                    .as_ref()
-                    .and_then(|m| m.get(elem_id))
-                    .map(|mf_l| (n_at(mf_l, 0), n_at(mf_l, 1)))
-                    .unwrap_or((n_combo_i, n_combo_j));
-                crate::rc::compute_column_mechanism_sum_my(
-                    model,
-                    &column_k_index,
-                    elem,
-                    n_long_i,
-                    n_long_j,
-                    n_combo_i,
-                    n_combo_j,
-                    1.0,
-                )
-            } else {
-                None
+        let column_sum_my = if structure == StructureKind::Rc
+            && kind == MemberKind::Column
+            && options.term == LoadTerm::Short
+            && seismic_qd
+                .as_ref()
+                .is_some_and(|qd| qd.method != QdMethod::Qd2)
+            && !wrong_main_rebar
+        {
+            let n_at = |mf: &MemberForces, end: usize| {
+                let target = if end == 0 { 0.0 } else { 1.0 };
+                mf.at
+                    .iter()
+                    .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
+                    .map(|(_, f)| f[0])
+                    .unwrap_or(0.0)
             };
+            let (n_combo_i, n_combo_j) = (n_at(mf, 0), n_at(mf, 1));
+            let (n_long_i, n_long_j) = long_mf_by_id
+                .as_ref()
+                .and_then(|m| m.get(elem_id))
+                .map(|mf_l| (n_at(mf_l, 0), n_at(mf_l, 1)))
+                .unwrap_or((n_combo_i, n_combo_j));
+            crate::rc::compute_column_mechanism_sum_my(
+                model,
+                &column_k_index,
+                elem,
+                n_long_i,
+                n_long_j,
+                n_combo_i,
+                n_combo_j,
+                1.0,
+            )
+        } else {
+            None
+        };
 
         let ctx = DesignCtx {
             rebar_material: rebar_material.cloned(),
