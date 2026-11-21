@@ -5,6 +5,9 @@
 
 use std::collections::HashMap;
 
+use num_rational::BigRational;
+use num_traits::ToPrimitive;
+
 use crate::material_strength::{main_rebar_grade, shear_rebar_category_issue};
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::rc::{rc_member_clear_span, RcClearSpanError};
@@ -45,7 +48,7 @@ pub struct UltimateCheck {
     /// 曲げ終局強度 Mu [N·mm]。RC梁は適用未確認の参考値で、方向と理由は `detail` に示す。
     pub mu: f64,
     /// 比較用せん断需要 [N]。静的RC柱は Qmu（上限強度倍率·2·Mu/内法）、確定総応答は |Qtotal|。
-    /// 静的RC梁は未算定のため NaN。
+    /// 静的RC梁および数値の表現範囲を超える静的RC柱の需要は未算定のため NaN。
     pub qmu: f64,
     /// 選択された [`ShearMethod`] に応じた終局せん断強度 Qsu/Vu `[N]`。
     pub qsu: f64,
@@ -93,6 +96,56 @@ fn strong_tension_is_top(shape: &SectionShape, mz: f64, need_be: bool) -> bool {
         (Some(_), None) => true,
         _ => false,
     }
+}
+
+fn static_hinge_shear(mu_n_mm: f64, factor: f64, span_mm: f64, axis: &str) -> Result<f64, String> {
+    if mu_n_mm == 0.0 {
+        return Ok(0.0);
+    }
+    if !mu_n_mm.is_finite() {
+        return Err(format!(
+            "ultimate_hinge_shear_mu_nonfinite: {axis}の曲げ終局耐力 Mu が非有限のためヒンジせん断需要を算定できません"
+        ));
+    }
+    // 積と除算の順を変えるだけでは、最終値が有限でも中間値が桁あふれや丸めで失われる。
+    let (mu_fraction, mu_exponent) = libm::frexp(mu_n_mm);
+    let (factor_fraction, factor_exponent) = libm::frexp(factor);
+    let (span_fraction, span_exponent) = libm::frexp(span_mm);
+    let estimate_n = libm::scalbn(
+        mu_fraction * factor_fraction / span_fraction,
+        1 + mu_exponent + factor_exponent - span_exponent,
+    );
+    let shear_n = if (2.0 * f64::MIN_POSITIVE..f64::MAX / 2.0).contains(&estimate_n) {
+        estimate_n
+    } else {
+        // 仮数の丸めが最終の丸めに重なると 0 や inf を誤判定しうる。正規数の上下端に接する
+        // 指数帯も含め、有理数のまま求めて最後に丸める。
+        let mu = BigRational::from_float(mu_n_mm).unwrap();
+        let factor = BigRational::from_float(factor).unwrap();
+        let span = BigRational::from_float(span_mm).unwrap();
+        ((&mu + &mu) * factor / span).to_f64().unwrap()
+    };
+    if !shear_n.is_finite() {
+        Err(format!(
+            "ultimate_hinge_shear_overflow: {axis}のヒンジせん断需要が数値の表現上限を超えます"
+        ))
+    } else if shear_n == 0.0 {
+        Err(format!(
+            "ultimate_hinge_shear_underflow: {axis}の正のヒンジせん断需要が数値の表現範囲を下回り、丸めで 0 N になります"
+        ))
+    } else {
+        Ok(shear_n)
+    }
+}
+
+fn static_biaxial_margin(strong_margin: f64, weak_margin: f64) -> f64 {
+    let min = strong_margin.min(weak_margin);
+    let max = strong_margin.max(weak_margin);
+    if min == 0.0 || min.is_infinite() {
+        return min;
+    }
+    // 需要／耐力やそのノルムの上限を超えても、逆数の余裕度は表現できる場合がある。
+    min / 1.0_f64.hypot(min / max)
 }
 
 fn unchecked_member(elem: ElemId, kind: MemberKind, reason: &str) -> UltimateCheck {
@@ -645,9 +698,14 @@ fn check_member(
     }
 
     let qmu = match demand.shear {
-        Some(qm) => opts.upper_strength_factor * qm.abs(),
-        None => opts.upper_strength_factor * 2.0 * mu / l_clear,
+        Some(qm) => Ok(opts.upper_strength_factor * qm.abs()),
+        None if sigma_y.is_some() => {
+            static_hinge_shear(mu, opts.upper_strength_factor, l_clear, "強軸")
+        }
+        None => Ok(f64::NAN),
     };
+    let strong_hinge_issue = qmu.as_ref().err().map(String::as_str);
+    let qmu = qmu.as_ref().copied().unwrap_or(f64::NAN);
     let biaxial_shear_requested = kind == MemberKind::Column && opts.biaxial_shear;
     let static_biaxial_shear =
         biaxial_shear_requested && demand.mode == UltimateDemandMode::StaticHinge;
@@ -656,7 +714,7 @@ fn check_member(
     let margin = |capacity_n: f64| {
         if demand.mode == UltimateDemandMode::StaticHinge && gravity_exceeds_capacity(capacity_n) {
             0.0
-        } else if sigma_y.is_none() && qmu.is_nan() {
+        } else if qmu.is_nan() {
             f64::NAN
         } else if qmu > 0.0 {
             (capacity_n - ql).max(0.0) / qmu
@@ -672,6 +730,7 @@ fn check_member(
     };
 
     let mut weak_shear_ng = false;
+    let mut weak_hinge_issue = None;
     let biaxial_shear = biaxial_shear_requested.then(|| {
         if static_biaxial_shear {
             let ql_weak = demand.q_long_weak.ok_or(
@@ -683,9 +742,10 @@ fn check_member(
         }
         let p_y = rc_bar_props(shape, RcDirection::Weak, tension_is_top, need_be)
             .ok_or("二軸せん断に必要な弱軸の配筋形状または有効せいが不正です")?;
-        let Some(qsu_y) = member_shear_strength(&p_y, fc, n_axial, l_clear, sigma_wy, opts) else {
+        let shear_strength_y = member_shear_strength(&p_y, fc, n_axial, l_clear, sigma_wy, opts);
+        if !static_biaxial_shear && shear_strength_y.is_none() {
             return Ok(None);
-        };
+        }
         let qmu_y = match demand.shear_weak {
             Some(qmy) => opts.upper_strength_factor * qmy.abs(),
             None => {
@@ -693,17 +753,44 @@ fn check_member(
                 let mu_y = column_mu(
                     p_y.b_dir, p_y.d_dir, p_y.dt, p_y.at, p_y.ag, fy, fc, n_axial,
                 );
-                opts.upper_strength_factor * 2.0 * mu_y / l_clear
+                match static_hinge_shear(mu_y, opts.upper_strength_factor, l_clear, "弱軸") {
+                    Ok(shear_n) => shear_n,
+                    Err(reason) => {
+                        weak_hinge_issue = Some(reason);
+                        return Ok(None);
+                    }
+                }
             }
         };
-        let Some(qsu) = shear_strength else {
+        let Some(qsu_y) = shear_strength_y else {
+            return Ok(None);
+        };
+        let Some(qsu) = shear_strength.filter(|_| !qmu.is_nan()) else {
             weak_shear_ng = qmu_y > qsu_y;
             return Ok(None);
         };
+        let zero_capacity_with_unknown_rebar = |demand_n, capacity_n| {
+            shear_rebar_issue.is_some() && capacity_n == 0.0 && demand_n == 0.0
+        };
+        if static_biaxial_shear {
+            let axis_margin = |demand_n: f64, capacity_n: f64| {
+                if capacity_n > 0.0 {
+                    capacity_n / demand_n
+                } else if zero_capacity_with_unknown_rebar(demand_n, capacity_n) {
+                    f64::INFINITY
+                } else {
+                    0.0
+                }
+            };
+            return Ok(Some(static_biaxial_margin(
+                axis_margin(qmu, qsu),
+                axis_margin(qmu_y, qsu_y),
+            )));
+        }
         let ratio = |demand_n: f64, capacity_n: f64| {
             if capacity_n > 0.0 {
                 demand_n / capacity_n
-            } else if shear_rebar_issue.is_some() && capacity_n == 0.0 && demand_n == 0.0 {
+            } else if zero_capacity_with_unknown_rebar(demand_n, capacity_n) {
                 0.0
             } else {
                 f64::INFINITY
@@ -757,6 +844,9 @@ fn check_member(
         UltimateDemandMode::StaticHinge if qmu == 0.0 => {
             format!("Qmu=0 N, QL={ql:.0} N（強軸の長期せん断力を耐力と直接比較）")
         }
+        UltimateDemandMode::StaticHinge if qmu <= 0.5 => {
+            format!("{demand_symbol}={qmu:e} N, QL={ql:.0} N（強軸）")
+        }
         UltimateDemandMode::StaticHinge => {
             format!("{demand_symbol}={qmu:.0} N, QL={ql:.0} N（強軸）")
         }
@@ -776,10 +866,20 @@ fn check_member(
     };
     let shear_margin_label = margin_label("強軸せん断余裕度", shear_symbol);
     let bond_margin_label = margin_label("付着余裕度", bond_symbol);
+    let format_margin = |margin: f64| {
+        if strong_hinge_issue.is_some() && margin.is_nan() {
+            "未算定".into()
+        } else {
+            format!("{margin:.3}")
+        }
+    };
     let shear_detail = if shear_strength.is_none() {
         format!("{shear_symbol}=未算定, {shear_margin_label}=未算定")
     } else {
-        format!("{shear_symbol}={qsu:.0} N, {shear_margin_label}={shear_margin:.3}")
+        format!(
+            "{shear_symbol}={qsu:.0} N, {shear_margin_label}={}",
+            format_margin(shear_margin)
+        )
     };
     if let Some(reason) = main_rebar_issue {
         let reason =
@@ -823,17 +923,25 @@ fn check_member(
         return Ok(Some(check));
     }
 
-    let shear_ok = (shear_strength.is_none() || shear_margin >= 1.0)
+    let comparison_ok =
+        |margin: f64| margin >= 1.0 || (strong_hinge_issue.is_some() && margin.is_nan());
+    let shear_ok = (shear_strength.is_none() || comparison_ok(shear_margin))
         && biaxial_shear_margin.is_none_or(|m| m >= 1.0)
         && !weak_shear_ng;
     let bending_ok = biaxial_bending_margin.map(|m| m >= 1.0).unwrap_or(true);
-    let checked_parts_ok = shear_ok && (bond_unverified || bond_margin >= 1.0) && bending_ok;
+    let checked_parts_ok =
+        shear_ok && (bond_unverified || comparison_ok(bond_margin)) && bending_ok;
+    let hinge_issue = combine_incomplete_reasons(
+        strong_hinge_issue.map(str::to_owned),
+        weak_hinge_issue.as_deref(),
+    );
     let unchecked_reason = if checked_parts_ok {
         let reason = combine_incomplete_reasons(
             biaxial_shear.and_then(Result::err).map(str::to_owned),
             round_bond_reason.as_deref(),
         );
-        combine_incomplete_reasons(reason, shear_rebar_issue.as_deref())
+        let reason = combine_incomplete_reasons(reason, shear_rebar_issue.as_deref());
+        combine_incomplete_reasons(reason, hinge_issue.as_deref())
     } else {
         None
     };
@@ -872,10 +980,14 @@ fn check_member(
     let bond_detail = if bond_unverified {
         format!("{bond_symbol}=未算定, τbu=未算定, {bond_margin_label}=未算定")
     } else if bond_zero_upper {
-        format!("{bond_symbol}={qbu:.0} N, τbu=未算定, {bond_margin_label}={bond_margin:.3}")
+        format!(
+            "{bond_symbol}={qbu:.0} N, τbu=未算定, {bond_margin_label}={}",
+            format_margin(bond_margin)
+        )
     } else {
         format!(
-            "{bond_symbol}={qbu:.0} N, τbu={tau_bu:.3} N/mm², {bond_margin_label}={bond_margin:.3}"
+            "{bond_symbol}={qbu:.0} N, τbu={tau_bu:.3} N/mm², {bond_margin_label}={}",
+            format_margin(bond_margin)
         )
     };
     let mut detail = format!(
@@ -885,7 +997,7 @@ fn check_member(
     if weak_shear_ng {
         detail.push_str("。弱軸せん断耐力を超えます");
     }
-    for reason in [&round_bond_reason, &shear_rebar_issue]
+    for reason in [&round_bond_reason, &shear_rebar_issue, &hinge_issue]
         .into_iter()
         .flatten()
     {
