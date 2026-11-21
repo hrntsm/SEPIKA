@@ -185,7 +185,7 @@ pub(crate) fn beam_check(
             _ => false,
         }
     };
-    let props = axis_props_from_shape(shape, RcDirection::Strong, tension_is_top)
+    let mut props = axis_props_from_shape(shape, RcDirection::Strong, tension_is_top)
         .expect("梁の断面諸元を算定できる形状のみ来る");
     let info =
         rebar_info_from_shape(shape, tension_is_top).expect("梁の鉄筋情報を算定できる形状のみ来る");
@@ -212,8 +212,6 @@ pub(crate) fn beam_check(
 
     let (m_for_alpha, q_for_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
     let alpha = shear_alpha(m_for_alpha, q_for_alpha, props.d, 2.0);
-    let damage_control = ctx.rc_damage_control;
-    let qa = shear_capacity(&props, &allow, alpha, ctx.term, damage_control, false);
     let valid_tension_props = [props.b, props.d, props.j, props.at, fc_raw]
         .into_iter()
         .all(|value| value.is_finite() && value > 0.0);
@@ -237,7 +235,7 @@ pub(crate) fn beam_check(
             d_eff: props.d,
             sigma_y: rebar_sigma_y_of(ctx.rebar_material.as_ref()),
             fc: fc_raw,
-            pw: props.pw,
+            pw: 0.0,
             sigma_wy: 0.0,
             clear_span: 0.0,
             sigma_0: 0.0,
@@ -261,7 +259,8 @@ pub(crate) fn beam_check(
     if let Some(reason) = shear_input_issue {
         *section_issue = combine_incomplete_reasons(section_issue.take(), Some(reason));
     }
-    let check_stirrup_spacing = section_issue.is_none() || info.shear_pitch.is_finite();
+    // 間隔の診断を先に追加すると、間隔を使わない QD1 も未算定になる。
+    let check_stirrup_spacing = info.shear_pitch.is_finite();
     let has_stirrups = info.shear_legs > 0 && info.shear_dia.area_mm2() > 0.0;
     let stirrup_effect_available = check_stirrup_spacing || !has_stirrups;
     if !check_stirrup_spacing {
@@ -269,16 +268,30 @@ pub(crate) fn beam_check(
             section_issue.take(),
             Some("RC 梁検定: あばら筋間隔が非有限です"),
         );
+        if !has_stirrups {
+            props.pw = 0.0;
+        }
     }
+    let qa = (stirrup_effect_available
+        && [m_for_alpha, q_for_alpha, props.pw]
+            .into_iter()
+            .all(f64::is_finite))
+    .then(|| {
+        shear_capacity(
+            &props,
+            &allow,
+            alpha,
+            ctx.term,
+            ctx.rc_damage_control,
+            false,
+        )
+    })
+    .flatten();
     let q_design = q_design.filter(|_| valid_tension_props);
-    if let Some((q_design, qa)) = q_design.zip(qa).filter(|&(_, qa)| {
-        stirrup_effect_available
-            && [m_for_alpha, q_for_alpha, props.pw]
-                .into_iter()
-                .all(f64::is_finite)
-            && qa.is_finite()
-            && qa > 0.0
-    }) {
+    if let Some((q_design, qa)) = q_design
+        .zip(qa)
+        .filter(|&(_, qa)| qa.is_finite() && qa > 0.0)
+    {
         components.push(CheckComponent {
             kind: CheckKind::Shear,
             ratio: q_design / qa,

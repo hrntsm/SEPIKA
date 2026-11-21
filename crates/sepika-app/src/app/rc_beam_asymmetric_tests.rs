@@ -107,6 +107,77 @@ fn rc_beam_asymmetric_gui_preserves_provision_failure_and_unchecked_reason() {
 }
 
 #[test]
+fn rc_beam_nonfinite_spacing_reuses_saved_analysis_after_design_106_expires() {
+    use sepika_core::section_shape::SectionShape;
+
+    let mut app = App::default();
+    let mut model = input::model(false);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
+        unreachable!()
+    };
+    rebar.stirrup.pitch = f64::INFINITY;
+    model.load_cases[0].nodal[0].values[5] = 300e6;
+    assert!(app.load_model(model));
+    app.run_preparation();
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+
+    let expected = &app.current_design_results().unwrap().member_checks;
+    assert_eq!(expected.len(), 1);
+    for xi in [0.0, 0.5, 1.0] {
+        let outcomes: Vec<_> = expected[0]
+            .positions
+            .iter()
+            .filter(|position| position.xi == xi)
+            .map(|position| &position.outcome)
+            .collect();
+        let [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+        else {
+            panic!("{xi}: {outcomes:?}")
+        };
+        assert!(reason.contains("あばら筋間隔が非有限"), "{reason}");
+        assert_eq!(result.components.len(), 2, "{result:?}");
+        let [bending, bond] = result.components.as_slice() else {
+            unreachable!()
+        };
+        assert_eq!(bending.kind, CheckKind::Bending);
+        assert!((bending.ratio - 7.657_483_127).abs() < 1e-8, "{bending:?}");
+        assert_eq!(bond.kind, CheckKind::Bond);
+        assert!(bond.ratio > 1.0, "{bond:?}");
+    }
+    let expected = serde_json::to_value(expected).unwrap();
+    let saved_forces = serde_json::to_value(&app.current_static().unwrap().member_forces).unwrap();
+    let (mut loaded, path) = super::result_contract_tests::restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(106),
+        "rc-beam-1853",
+    );
+    std::fs::remove_file(path).unwrap();
+    assert!(matches!(&loaded.core.model.sections[0].shape,
+        Some(SectionShape::RcBeamRect { rebar, .. }) if rebar.stirrup.pitch == f64::INFINITY));
+    assert_eq!(
+        serde_json::to_value(&loaded.current_static().unwrap().member_forces).unwrap(),
+        saved_forces
+    );
+    assert!(loaded.current_design_results().is_none());
+    loaded.run_design_check();
+    let results = loaded.current_design_results().unwrap();
+    assert_eq!(
+        results.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        serde_json::to_value(&results.member_checks).unwrap(),
+        expected
+    );
+}
+
+#[test]
 fn rc_rebar_sizes_are_retained_in_recorded_calculation_inputs() {
     use crate::app::references::{DisplayConditions, RecordedSettings, ReferenceTarget};
     use sepika_core::section_shape::{RebarSize, StandardRebar};

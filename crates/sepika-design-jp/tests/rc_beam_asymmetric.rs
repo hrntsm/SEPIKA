@@ -900,6 +900,190 @@ fn common_member_check_with_invalid_stirrup_spacing_keeps_only_independent_bond_
     }
 }
 
+const NONFINITE_STIRRUP_PITCHES: [f64; 3] = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+
+fn symmetric_beam_outcomes(
+    pitch_mm: f64,
+    legs: u32,
+    mz_nmm: f64,
+    qy_n: f64,
+    options: &MemberDesignCheckOptions<'_>,
+) -> Vec<CheckOutcome> {
+    let mut model = input::model(false);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
+        unreachable!()
+    };
+    rebar.stirrup.pitch = pitch_mm;
+    rebar.stirrup.legs = legs;
+    let report = run_member_design_checks(
+        &model,
+        &[(
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.5, [0.0, qy_n, 0.0, 0.0, 0.0, mz_nmm])],
+            },
+        )],
+        &[],
+        options,
+    )
+    .unwrap();
+    report
+        .member_checks
+        .into_iter()
+        .map(|(member, pos, outcome)| {
+            assert_eq!(member, ElemId(0));
+            assert_eq!(pos, 0.5);
+            outcome
+        })
+        .collect()
+}
+
+fn assert_components(components: &[CheckComponent], expected: &[(CheckKind, f64)]) {
+    assert_eq!(components.len(), expected.len(), "{components:?}");
+    for (component, &(kind, ratio)) in components.iter().zip(expected) {
+        assert_eq!(component.kind, kind);
+        assert!((component.ratio - ratio).abs() < 1e-8, "{component:?}");
+    }
+}
+
+#[test]
+fn symmetric_beam_with_nonfinite_stirrup_spacing_is_unchecked_with_only_independent_ng() {
+    let options = MemberDesignCheckOptions {
+        term: LoadTerm::Short,
+        rc_damage_control: true,
+        ..Default::default()
+    };
+
+    // 強軸許容曲げ 74.591892 kN·m、許容せん断 139.730012 kN（間隔100 mm）／92.778438 kN（0 mm）。
+    for (pitch_mm, shear, bond) in [
+        (100.0, 1.431_331_730, 0.338_108_100),
+        (0.0, 2.155_673_294, 0.387_398_027),
+    ] {
+        let outcomes = symmetric_beam_outcomes(pitch_mm, 2, 45e6, 200_000.0, &options);
+        let [CheckOutcome::Checked(result)] = outcomes.as_slice() else {
+            panic!("{pitch_mm}: {outcomes:?}")
+        };
+        assert_components(
+            &result.components,
+            &[
+                (CheckKind::Bending, 0.603_282_727),
+                (CheckKind::Shear, shear),
+                (CheckKind::Bond, bond),
+            ],
+        );
+    }
+
+    for pitch_mm in NONFINITE_STIRRUP_PITCHES {
+        let outcomes = symmetric_beam_outcomes(pitch_mm, 2, 45e6, 200_000.0, &options);
+        assert!(
+            matches!(outcomes.as_slice(), [CheckOutcome::Skipped { reason }]
+                if reason.contains("あばら筋間隔が非有限")),
+            "{pitch_mm}: {outcomes:?}"
+        );
+        let outcomes = symmetric_beam_outcomes(pitch_mm, 2, 300e6, 300_000.0, &options);
+        let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+        else {
+            panic!("{pitch_mm}: {outcomes:?}")
+        };
+        assert!(reason.contains("あばら筋間隔が非有限"), "{reason}");
+        assert!(!ng.ok() && !ng.detail.contains("あばら間隔"), "{ng:?}");
+        assert_components(&ng.components, &[(CheckKind::Bending, 4.021_884_847)]);
+    }
+}
+
+#[test]
+fn symmetric_beam_with_nonfinite_stirrup_spacing_retains_spacing_independent_bond() {
+    let gravity = [(
+        ElemId(0),
+        MemberForces {
+            at: vec![(0.5, [0.0; 6])],
+        },
+    )];
+    let q0 = HashMap::from([(ElemId(0), 150_000.0)]);
+    for (term, method, long_member_forces, q_simple_by_elem, mz, qy, expected) in [
+        (
+            LoadTerm::Short,
+            BondMethod::Rc1991,
+            None,
+            None,
+            45e6,
+            200_000.0,
+            vec![(CheckKind::Bond, 1.268_083_462)],
+        ),
+        (
+            LoadTerm::Short,
+            BondMethod::Rc1991,
+            Some(gravity.as_slice()),
+            Some(&q0),
+            45e6,
+            300_000.0,
+            vec![(CheckKind::Bond, 1.275_366_859)],
+        ),
+        (
+            LoadTerm::Long,
+            BondMethod::Rc1999,
+            None,
+            None,
+            300e6,
+            300_000.0,
+            vec![
+                (CheckKind::Bending, 7.657_483_123),
+                (CheckKind::Bond, 3.873_980_265),
+            ],
+        ),
+    ] {
+        let options = MemberDesignCheckOptions {
+            term,
+            bond_method: method,
+            qd_method: QdMethod::Qd1,
+            long_member_forces,
+            q_simple_by_elem,
+            ..Default::default()
+        };
+        for pitch_mm in NONFINITE_STIRRUP_PITCHES {
+            let outcomes = symmetric_beam_outcomes(pitch_mm, 2, mz, qy, &options);
+            let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+            else {
+                panic!("{pitch_mm}: {outcomes:?}")
+            };
+            assert!(reason.contains("あばら筋間隔が非有限"), "{reason}");
+            assert!(!ng.ok(), "{ng:?}");
+            assert_components(&ng.components, &expected);
+        }
+    }
+}
+
+#[test]
+fn symmetric_beam_without_stirrups_retains_concrete_shear_and_1999_bond() {
+    let options = MemberDesignCheckOptions {
+        term: LoadTerm::Short,
+        rc_damage_control: true,
+        ..Default::default()
+    };
+    // 0脚では短期せん断の補強項と、短期1999付着の横補強筋効果 W がともに0。
+    for pitch_mm in [100.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let outcomes = symmetric_beam_outcomes(pitch_mm, 0, 300e6, 300_000.0, &options);
+        let result = match (pitch_mm.is_finite(), outcomes.as_slice()) {
+            (true, [CheckOutcome::Checked(result)]) => result,
+            (false, [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }])
+                if reason.contains("あばら筋間隔が非有限") =>
+            {
+                result
+            }
+            _ => panic!("{pitch_mm}: {outcomes:?}"),
+        };
+        assert!(!result.ok(), "{result:?}");
+        assert_components(
+            &result.components,
+            &[
+                (CheckKind::Bending, 4.021_884_847),
+                (CheckKind::Shear, 6.467_019_883),
+                (CheckKind::Bond, 2.582_653_510),
+            ],
+        );
+    }
+}
+
 #[test]
 fn simplified_zero_bending_beam_reports_unavailable_shear_instead_of_a_pass() {
     let model = input::model(true);
