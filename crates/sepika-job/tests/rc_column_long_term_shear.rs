@@ -15,7 +15,7 @@ use sepika_core::model::{
 };
 use sepika_design_jp::{
     run_member_design_checks, CheckComponent, CheckKind, CheckOutcome, MemberDesignCheckOptions,
-    RcColumnLongTermShearInput,
+    MemberDesignCheckReport, RcColumnLongTermShearInput,
 };
 use sepika_solver::statics::analysis::Analysis;
 use sepika_solver::statics::linear::StaticOnce;
@@ -45,6 +45,19 @@ fn check(
     solved: &StaticOnce,
     source: RcColumnLongTermShearInput<'_>,
 ) -> Vec<(f64, CheckOutcome)> {
+    check_report(model, solved, source)
+        .member_checks
+        .into_iter()
+        .filter(|(id, _, _)| *id == COLUMN)
+        .map(|(_, xi, outcome)| (xi, outcome))
+        .collect()
+}
+
+fn check_report(
+    model: &Model,
+    solved: &StaticOnce,
+    source: RcColumnLongTermShearInput<'_>,
+) -> MemberDesignCheckReport {
     run_member_design_checks(
         model,
         &solved.member_forces,
@@ -55,11 +68,6 @@ fn check(
         },
     )
     .unwrap()
-    .member_checks
-    .into_iter()
-    .filter(|(id, _, _)| *id == COLUMN)
-    .map(|(_, xi, outcome)| (xi, outcome))
-    .collect()
 }
 
 fn check_combination(model: &Model, solved: &StaticOnce) -> Vec<(f64, CheckOutcome)> {
@@ -90,6 +98,135 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
         (actual - expected).abs() < tolerance,
         "{actual} != {expected}"
     );
+}
+
+#[test]
+fn 検定断面の内力がなくても許容上限を超える長期せん断の不適合を保持する() {
+    for circle in [false, true] {
+        for exceeds_bound in [false, true] {
+            let mut model = model(circle, true);
+            if !exceeds_bound {
+                model.load_cases[0].member[1..].clone_from_slice(&[
+                    distributed(X, 1050.0, 1100.0, -3400.0, -3400.0),
+                    distributed(X, 1100.0, 1150.0, 3400.0, 3400.0),
+                ]);
+            }
+            let mut girder_tip = model.nodes[2].clone();
+            girder_tip.id = NodeId(3);
+            girder_tip.coord[2] = LENGTH_MM;
+            girder_tip.restraint = sepika_core::dof::Dof6Mask::FREE;
+            model.nodes.push(girder_tip);
+            let mut upper_girder = model.elements[1].clone();
+            upper_girder.id = ElemId(2);
+            upper_girder.nodes = [NodeId(1), NodeId(3)].into_iter().collect();
+            model.elements.push(upper_girder);
+            let mut solved = analyze(&mut model);
+            let zone = model.elements[0].rigid_zone;
+            assert_eq!((zone.face_i, zone.face_j), (Some(300.0), Some(300.0)));
+            if !exceeds_bound {
+                let complete = check_combination(&model, &solved);
+                assert_eq!(complete.len(), 3);
+                for (_, outcome) in complete {
+                    let component = shear(&outcome);
+                    assert!(component.detail.contains("局所Qy最大 |Qy|=183900.000 N"));
+                    assert!(component.ratio > 1.0);
+                }
+            }
+            let column = solved
+                .member_forces
+                .iter_mut()
+                .find(|(id, _)| *id == COLUMN)
+                .unwrap();
+            assert_eq!(column.1.at.len(), 5);
+            column.1.at.retain(|(xi, _)| [0.0, 1.0].contains(xi));
+            assert_eq!(column.1.at.len(), 2);
+
+            let rows = check_combination(&model, &solved);
+            assert_eq!(rows.len(), if exceeds_bound { 2 } else { 1 }, "{rows:?}");
+            assert!(rows.iter().any(|(_, outcome)| matches!(
+                outcome, CheckOutcome::Skipped { reason } if
+                    reason.contains("軸力・曲げを検定する断面位置の解析内力がありません")
+                    && reason.contains("長期せん断の許容値を決めるαの参照断面が揃いません")
+            )));
+            if exceeds_bound {
+                let (xi, outcome) = rows
+                    .iter()
+                    .find(|(_, outcome)| matches!(outcome, CheckOutcome::Checked(_)))
+                    .unwrap();
+                assert_close(*xi * LENGTH_MM, 1100.0, 1e-8);
+                let CheckOutcome::Checked(result) = outcome else {
+                    unreachable!()
+                };
+                assert!(!result.ok());
+                assert_eq!(result.components.len(), 1);
+                let component = shear(outcome);
+                let alpha_one_capacity_n = if circle { 160_393.3 } else { 138_097.8 };
+                assert_close(
+                    component.ratio,
+                    313_900.0 / (alpha_one_capacity_n * 1.5),
+                    1e-6,
+                );
+                assert!(component.detail.contains("検定比の下限"));
+                assert!(component
+                    .detail
+                    .contains("局所Qy最大 |Qy|=313900.000 N（i端から x=1100.000000 mm"));
+                println!("円形={circle} {}", component.detail);
+            }
+        }
+    }
+}
+
+#[test]
+fn 釣合いを満たす内力系列が重複しても他の柱の長期せん断検定を継続する() {
+    let mut model = model(false, true);
+    let mut other_tip = model.nodes[1].clone();
+    other_tip.id = NodeId(3);
+    other_tip.coord[0] = 3000.0;
+    model.nodes.push(other_tip);
+    let mut other = model.elements[0].clone();
+    other.id = ElemId(2);
+    other.nodes = [NodeId(2), NodeId(3)].into_iter().collect();
+    model.elements.push(other);
+    let mut solved = analyze(&mut model);
+    let source = RcColumnLongTermShearInput::SavedCombination(&model.combinations[0].name);
+    let original = check_report(&model, &solved, source);
+    let mut duplicate = solved
+        .member_forces
+        .iter()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap()
+        .clone();
+    for (_, values) in &mut duplicate.1.at {
+        values[1] += 500_000.0;
+    }
+    solved.member_forces.push(duplicate);
+    let report = check_report(&model, &solved, source);
+    let target: Vec<_> = report
+        .member_checks
+        .iter()
+        .filter(|(id, _, _)| *id == COLUMN)
+        .collect();
+    assert!(
+        matches!(target.as_slice(), [(_, _, CheckOutcome::Skipped { reason })]
+        if reason.contains("解析内力が重複し、一意の断面力を確認できません"))
+    );
+    let all_other_columns = |(id, _, _): &&(ElemId, f64, CheckOutcome)| *id == ElemId(2);
+    assert_eq!(
+        original
+            .member_checks
+            .iter()
+            .filter(all_other_columns)
+            .count(),
+        3
+    );
+    assert!(original.member_checks.iter().filter(all_other_columns).all(|(_, _, outcome)| {
+        matches!(outcome, CheckOutcome::Checked(result) if result.components.iter().any(|component| component.kind == CheckKind::Shear))
+    }));
+    assert!(report
+        .member_checks
+        .iter()
+        .filter(all_other_columns)
+        .eq(original.member_checks.iter().filter(all_other_columns)));
 }
 
 #[test]

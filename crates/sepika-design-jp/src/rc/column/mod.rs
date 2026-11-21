@@ -3,7 +3,7 @@
 use super::{
     axis_props_from_shape, main_rebar_grade, rc_allow, rebar_allowable_tension,
     rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity,
-    shear_rebar_grade, AxisProps, ColumnGravityMode, ColumnMechanism,
+    shear_rebar_grade, AxisProps, ColumnGravityMode, ColumnMechanism, RcAllow,
 };
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
@@ -19,6 +19,8 @@ mod nm_interaction;
 
 pub(crate) use nm_interaction::interp_ma;
 use nm_interaction::*;
+
+const MAX_SHEAR_ALPHA: f64 = 1.5;
 
 pub(super) fn qd1_mechanism(ctx: &DesignCtx) -> Option<&ColumnMechanism> {
     (ctx.kind == MemberKind::Column
@@ -133,7 +135,12 @@ fn shear_input_issue(q_index: usize) -> &'static str {
     }
 }
 
-fn long_shear_detail(axis: usize, peak: &FrameShearPeak, capacity: Option<f64>) -> String {
+fn long_shear_detail(
+    axis: usize,
+    peak: &FrameShearPeak,
+    capacity: Option<f64>,
+    ratio_label: &str,
+) -> String {
     let direction = ["Qy", "Qz"][axis];
     let side = match peak.side {
         SectionSide::Left => "（i端側）",
@@ -147,9 +154,63 @@ fn long_shear_detail(axis: usize, peak: &FrameShearPeak, capacity: Option<f64>) 
         .filter(|ratio| ratio.is_finite())
         .map_or_else(|| "未算定".into(), |ratio| format!("{ratio:.6}"));
     format!(
-        "、局所{direction}最大 |{direction}|={q:.3} N（i端から x={:.6} mm{side}、検定比 {ratio}）",
+        "、局所{direction}最大 |{direction}|={q:.3} N（i端から x={:.6} mm{side}、{ratio_label} {ratio}）",
         peak.x_mm
     )
+}
+
+pub(super) fn long_shear_failure_over_capacity_bound(
+    shape: &SectionShape,
+    allow: &RcAllow,
+    length_mm: f64,
+    peaks: &[Result<FrameShearPeak, String>; 2],
+) -> Option<(f64, CheckResult)> {
+    let mut detail = format!("αの上限 {MAX_SHEAR_ALPHA}");
+    let mut governing: Option<(f64, f64)> = None;
+    for (axis, direction) in [RcDirection::Strong, RcDirection::Weak]
+        .into_iter()
+        .enumerate()
+    {
+        let Ok(peak) = &peaks[axis] else { continue };
+        let Some(props) = axis_props_from_shape(shape, direction, true) else {
+            continue;
+        };
+        let Some(capacity_n) =
+            shear_capacity(&props, allow, MAX_SHEAR_ALPHA, LoadTerm::Long, false, true)
+                .filter(|capacity_n| capacity_n.is_finite() && *capacity_n > 0.0)
+        else {
+            continue;
+        };
+        let ratio = peak.q_n.abs() / capacity_n;
+        if !ratio.is_finite() || ratio <= 1.0 {
+            continue;
+        }
+        if governing.is_none_or(|(_, previous)| ratio > previous) {
+            governing = Some((peak.x_mm / length_mm, ratio));
+        }
+        let capacity = ["QAy", "QAz"][axis];
+        detail.push_str(&format!("、{capacity}の上限 {capacity_n:.1} N"));
+        detail.push_str(&long_shear_detail(
+            axis,
+            peak,
+            Some(capacity_n),
+            "検定比の下限",
+        ));
+    }
+    governing.map(|(xi, ratio)| {
+        (
+            xi,
+            CheckResult {
+                basis: "RC柱の長期せん断（許容せん断力の上限による判定）".into(),
+                detail: String::new(),
+                components: vec![CheckComponent {
+                    kind: CheckKind::Shear,
+                    ratio,
+                    detail,
+                }],
+            },
+        )
+    })
 }
 
 fn column_allowable_moment(curve: &[(f64, f64)], n_design: f64) -> f64 {
@@ -263,7 +324,7 @@ pub(super) fn column_check(
             String::new(),
             |mut text, (axis, (peak, capacity))| {
                 if let Ok(peak) = peak {
-                    text.push_str(&long_shear_detail(axis, peak, capacity));
+                    text.push_str(&long_shear_detail(axis, peak, capacity, "検定比"));
                 }
                 text
             },
@@ -421,7 +482,7 @@ pub(super) fn column_check(
 
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props.d, 1.5);
+        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props.d, MAX_SHEAR_ALPHA);
         let qay = shear_capacity(&props, &allow, alpha_y, ctx.term, damage_control, true);
         let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
@@ -465,7 +526,7 @@ pub(super) fn column_check(
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
-        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, 1.5);
+        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, MAX_SHEAR_ALPHA);
         let qaz = shear_capacity(&props, &allow, alpha_z, ctx.term, damage_control, true);
 
         if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {
@@ -591,7 +652,7 @@ pub(super) fn column_check(
 
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props_z.d, 1.5);
+        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props_z.d, MAX_SHEAR_ALPHA);
         let qay = shear_capacity(&props_z, &allow, alpha_y, ctx.term, damage_control, true);
         let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
@@ -639,7 +700,7 @@ pub(super) fn column_check(
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
-        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, 1.5);
+        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, MAX_SHEAR_ALPHA);
         let qaz = shear_capacity(&props_y, &allow, alpha_z, ctx.term, damage_control, true);
 
         if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {

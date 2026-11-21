@@ -313,13 +313,40 @@ pub fn run_member_design_checks(
             .iter()
             .any(|elem| rc_column_long_term_shear::is_target(model, elem)))
     .then(|| ColumnShearLoads::from_input(model, options.rc_column_long_term_shear));
+    let requires_column_envelope = column_shear_loads
+        .as_ref()
+        .is_some_and(ColumnShearLoads::requires_envelope);
     let mut checked_column_ids = HashSet::new();
+    let mut seen_column_ids = HashSet::new();
+    let duplicate_column_ids: HashSet<_> = member_forces
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| {
+            requires_column_envelope
+                && elem_by_id
+                    .get(id)
+                    .is_some_and(|elem| rc_column_long_term_shear::is_target(model, elem))
+                && !seen_column_ids.insert(*id)
+        })
+        .collect();
 
     for (elem_id, mf) in member_forces {
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
             continue;
         };
         if !frame_check_target(elem) {
+            continue;
+        }
+        if duplicate_column_ids.contains(elem_id) {
+            if checked_column_ids.insert(*elem_id) {
+                member_checks.push((
+                    *elem_id,
+                    0.5,
+                    CheckOutcome::Skipped {
+                        reason: "RC柱の解析内力が重複し、一意の断面力を確認できません".into(),
+                    },
+                ));
+            }
             continue;
         }
         let sec = elem
@@ -750,10 +777,32 @@ pub fn run_member_design_checks(
 
         if let Some(shear) = &long_term_shear {
             if first_row == member_checks.len() {
-                let reason = shear.as_ref().err().map_or_else(
-                    || "RC柱の長期せん断検定の断面位置に解析内力がありません".into(),
-                    |reason| format!("RC柱の長期せん断は未算定です（{reason}）"),
-                );
+                let mut reason =
+                    "RC柱の軸力・曲げを検定する断面位置の解析内力がありません".to_owned();
+                match shear {
+                    Ok(peaks) => {
+                        reason.push_str("。長期せん断の許容値を決めるαの参照断面が揃いません");
+                        for (axis, peak) in ["Qy", "Qz"].into_iter().zip(peaks) {
+                            if let Err(issue) = peak {
+                                reason.push_str(&format!(
+                                    "。局所{axis}の最大せん断は未算定です（{issue}）"
+                                ));
+                            }
+                        }
+                        match crate::RcDesign::long_column_shear_failure_over_capacity_bound(
+                            sec, mat, &ctx, peaks,
+                        ) {
+                            Ok(Some((xi, result))) => {
+                                member_checks.push((*elem_id, xi, CheckOutcome::Checked(result)))
+                            }
+                            Ok(None) => {}
+                            Err(issue) => reason.push_str(&format!("。{issue}")),
+                        }
+                    }
+                    Err(issue) => {
+                        reason.push_str(&format!("。RC柱の長期せん断は未算定です（{issue}）"));
+                    }
+                }
                 member_checks.push((*elem_id, 0.5, CheckOutcome::Skipped { reason }));
             }
         }
@@ -831,10 +880,7 @@ pub fn run_member_design_checks(
         }
     }
 
-    if column_shear_loads
-        .as_ref()
-        .is_some_and(ColumnShearLoads::requires_envelope)
-    {
+    if requires_column_envelope {
         for elem in &model.elements {
             if !checked_column_ids.contains(&elem.id)
                 && rc_column_long_term_shear::is_target(model, elem)
@@ -853,6 +899,7 @@ pub fn run_member_design_checks(
 
     let mf_slices: Vec<(ElemId, crate::joint_wiring::ForcesAt)> = member_forces
         .iter()
+        .filter(|(id, _)| !duplicate_column_ids.contains(id))
         .map(|(id, mf)| (*id, mf.at.as_slice()))
         .collect();
     let long_slices: Option<Vec<(ElemId, crate::joint_wiring::ForcesAt)>> =
