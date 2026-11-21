@@ -205,6 +205,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0139](0139-rc-beam-ultimate-shear-demand.md) | accepted | RC矩形梁の要求せん断力の上側評価を静的終局検定の条件とする |
 | [0140](0140-remove-mcp-and-local-ai.md) | accepted | MCP サーバと GUI の外部 AI 接続を廃止する |
 | [0141](0141-remove-st-bridge.md) | accepted | ST-Bridge の入出力と専用情報の保持を廃止する |
+| [0142](0142-remove-pca-members.md) | accepted | PCa 部材への対応を廃止する |
 
 ## 規約
 
