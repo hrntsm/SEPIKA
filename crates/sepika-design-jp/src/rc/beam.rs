@@ -10,7 +10,7 @@ use super::{
 use crate::ultimate::rc_props::RcDirection;
 use crate::{
     BondMethod, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm,
-    MemberForcesAt,
+    MemberForcesAt, QdMethod,
 };
 use sepika_core::model::{Material, MaterialCategory};
 use sepika_core::section_shape::{RcBeamRebar, SectionShape};
@@ -82,6 +82,9 @@ fn bending_component(
     allow: &super::RcAllow,
 ) -> Result<CheckComponent, &'static str> {
     let demand_nmm = forces.mz.abs();
+    if !demand_nmm.is_finite() {
+        return Err("解析曲げモーメントMzが非有限です");
+    }
     let (ratio, detail) = if demand_nmm == 0.0 {
         (0.0, "強軸曲げ需要=0 N·mm".into())
     } else if props.at <= 0.0 {
@@ -146,6 +149,7 @@ pub(crate) fn beam_check(
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
     shear_reference_valid: bool,
+    bending_issue: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
     let deformed_rebar = if matches!(
@@ -193,12 +197,14 @@ pub(crate) fn beam_check(
         match bending_component(forces, ctx, rebar, &props, tension_is_top, ft, &allow) {
             Ok(bending) => components.push(bending),
             Err(reason) => {
-                return CheckOutcome::Skipped {
-                    reason: format!(
-                        "RC 梁曲げ検定不能（{}曲げ）: {reason}",
-                        if tension_is_top { "負" } else { "正" }
-                    ),
+                let direction = if !forces.mz.is_finite() {
+                    ""
+                } else if tension_is_top {
+                    "（負曲げ）"
+                } else {
+                    "（正曲げ）"
                 };
+                *bending_issue = Some(format!("RC 梁曲げ検定不能{direction}: {reason}"));
             }
         }
     }
@@ -207,11 +213,26 @@ pub(crate) fn beam_check(
     let alpha = shear_alpha(m_for_alpha, q_for_alpha, props.d, 2.0);
     let damage_control = ctx.rc_damage_control;
     let qa = shear_capacity(&props, &allow, alpha, ctx.term, damage_control, false);
-    let q_design = if !shear_reference_valid {
+    let valid_tension_props = [props.b, props.d, props.j, props.at, fc_raw]
+        .into_iter()
+        .all(|value| value.is_finite() && value > 0.0);
+    let q_design = if !shear_reference_valid
+        || !valid_tension_props
+        || !forces.mz.is_finite()
+        || !forces.qy.is_finite()
+    {
         None
-    } else if !main_rebar_valid {
-        super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qy, 1)
-    } else if ctx.seismic_qd.is_some() {
+    } else if ctx
+        .seismic_qd
+        .as_ref()
+        .is_none_or(|qd| qd.method == QdMethod::Qd2)
+    {
+        Some(seismic_design_shear(
+            ctx, forces.pos, forces.qy, 1, 0.0, false,
+        ))
+    } else if !main_rebar_valid || bending_issue.is_some() {
+        None
+    } else {
         let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
             b: props.b,
             d: props.d_full,
@@ -228,13 +249,18 @@ pub(crate) fn beam_check(
         Some(seismic_design_shear(
             ctx, forces.pos, forces.qy, 1, sum_mu, false,
         ))
-    } else {
-        Some(forces.qy.abs())
-    };
-    if let Some((q_design, qa)) = q_design.zip(qa) {
+    }
+    .filter(|value| value.is_finite());
+    if let Some((q_design, qa)) = q_design.zip(qa).filter(|&(_, qa)| {
+        [m_for_alpha, q_for_alpha, props.pw]
+            .into_iter()
+            .all(f64::is_finite)
+            && qa.is_finite()
+            && qa > 0.0
+    }) {
         components.push(CheckComponent {
             kind: CheckKind::Shear,
-            ratio: if qa > 0.0 { q_design / qa } else { 0.0 },
+            ratio: q_design / qa,
             detail: format!(
                 "QA={:.1} N, |qy|={:.1} N, α={:.3}, pw={:.5}",
                 qa, forces.qy, alpha, props.pw,
@@ -245,11 +271,15 @@ pub(crate) fn beam_check(
     let (ratio_bond, bond_detail) =
         match (ctx.bond_method, deformed_rebar, q_design) {
             (BondMethod::Rc1999, Some(deformed_rebar), _)
-                if shear_rebar_valid
-                    || long_term
-                    || info.shear_pitch <= 0.0
-                    || info.shear_legs == 0
-                    || info.shear_dia.area_mm2() == 0.0 =>
+                if valid_tension_props
+                    && [forces.mz, forces.pos, ctx.length]
+                        .into_iter()
+                        .all(f64::is_finite)
+                    && (shear_rebar_valid
+                        || long_term
+                        || info.shear_pitch <= 0.0
+                        || info.shear_legs == 0
+                        || info.shear_dia.area_mm2() == 0.0) =>
             {
                 let bond = rc_beam_bond_check_with_rebar(
                     forces.pos,
@@ -264,7 +294,8 @@ pub(crate) fn beam_check(
                     long_term,
                     tension_is_top,
                     deformed_rebar,
-                );
+                )
+                .filter(|bond| bond.ratio.is_finite());
                 let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
                 let detail =
                     bond.as_ref().map(|b| {
@@ -296,7 +327,8 @@ pub(crate) fn beam_check(
                     tension_is_top,
                     long_term,
                     deformed_rebar,
-                );
+                )
+                .filter(|bond| bond.ratio.is_finite());
                 let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
                 let detail = bond.as_ref().map(|b| {
                     format!(
@@ -398,7 +430,10 @@ mod tests {
         let SectionShape::RcBeamRect { rebar, .. } = shape else {
             unreachable!()
         };
-        beam_check(forces, mat, ctx, shape, rebar, 24.0, true, true, true).unwrap_checked()
+        beam_check(
+            forces, mat, ctx, shape, rebar, 24.0, true, true, true, &mut None,
+        )
+        .unwrap_checked()
     }
 
     #[test]

@@ -1200,7 +1200,7 @@ mod tests {
     }
 
     #[test]
-    fn rc_beam_asymmetric_is_drawn_unchecked_after_real_analysis() {
+    fn rc_beam_asymmetric_draws_shear_failure_and_unchecked_bending_after_real_analysis() {
         mod input {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -1208,7 +1208,9 @@ mod tests {
             ));
         }
         let mut app = App::default();
-        app.load_model(input::model(true));
+        let mut model = input::model(true);
+        model.load_cases[0].nodal[0].values[1] = 150_000.0;
+        app.load_model(model);
         app.run_preparation();
         app.run_linear_static(sepika_core::ids::LoadCaseId(0));
         assert!(
@@ -1217,10 +1219,20 @@ mod tests {
             app.core.scoped.last_error
         );
         let checks = &app.current_design_results().unwrap().member_checks;
-        let (_, rows) = build_tooltip_rows(&checks[0].positions);
-        assert_eq!(rows.len(), 3);
-        assert!(rows.iter().all(|row| matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("重心までの距離が一致しません"))));
-        assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
+        let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
+        let shear_column = kinds
+            .iter()
+            .position(|kind| *kind == CheckKind::Shear)
+            .unwrap();
+        assert!(!kinds.contains(&CheckKind::Bending));
+        for xi in [0.0, 0.5, 1.0] {
+            assert!(rows.iter().any(|row| row.xi == xi &&
+                matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("重心までの距離が一致しません"))));
+            assert!(rows.iter().any(|row| row.xi == xi
+                && matches!(&row.verdict, RowVerdict::Ng)
+                && row.values[shear_column].is_some_and(|ratio| ratio > 1.0)));
+        }
+        assert!(!member_ratios_for_filter(checks, CheckRatioFilter::Max)[&ElemId(0)].1);
 
         let ctx = egui::Context::default();
         let output = ctx.run_ui(Default::default(), |ui| {
@@ -1241,7 +1253,13 @@ mod tests {
             })
             .collect();
         assert!(
-            labels.iter().any(|label| label.contains("未検定")),
+            labels
+                .iter()
+                .any(|label| label.contains("付着（未検定あり）")),
+            "{labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label.contains("NG 1件")),
             "{labels:?}"
         );
         assert!(

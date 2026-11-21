@@ -1,7 +1,12 @@
 use sepika_core::ids::ElemId;
 use sepika_core::model::MaterialCategory;
-use sepika_design_jp::{run_member_design_checks, CheckComponent, MemberDesignCheckOptions};
+use sepika_core::section_shape::SectionShape;
+use sepika_design_jp::{
+    run_member_design_checks, BondMethod, CheckComponent, LoadTerm, MemberDesignCheckOptions,
+    QdMethod, SeismicQd,
+};
 use sepika_element::frame::beam::MemberForces;
+use std::collections::HashMap;
 
 #[path = "fixtures/rc_beam_asymmetric_model.rs"]
 mod input;
@@ -582,4 +587,251 @@ fn common_member_check_runner_preserves_unchecked_stations_with_zero_bending_at_
             );
         }
     }
+}
+
+#[test]
+fn common_member_check_retains_only_independent_failures_when_beam_bending_is_unchecked() {
+    let mut model = input::model(true);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
+        unreachable!()
+    };
+    rebar.stirrup.pitch = 350.0;
+    let at = [0.0, 0.5, 1.0];
+    let forces = [(
+        ElemId(0),
+        MemberForces {
+            at: at
+                .map(|pos| (pos, [0.0, 150_000.0, 0.0, 0.0, 0.0, 45e6]))
+                .to_vec(),
+        },
+    )];
+    let gravity = [(
+        ElemId(0),
+        MemberForces {
+            at: at
+                .map(|pos| (pos, [0.0, -20_000.0, 0.0, 0.0, 0.0, 0.0]))
+                .to_vec(),
+        },
+    )];
+    let other_member_gravity = [(ElemId(1), gravity[0].1.clone())];
+    let other_station_gravity = [(
+        ElemId(0),
+        MemberForces {
+            at: vec![(0.2, [0.0; 6])],
+        },
+    )];
+    let q0 = HashMap::from([(ElemId(0), 20_000.0)]);
+    for (term, method, long, q0, expected, reference_reason) in [
+        (
+            LoadTerm::Long,
+            QdMethod::Min,
+            None,
+            None,
+            Some((1.643_190_723, 1.426_593_895)),
+            None,
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Qd2,
+            None,
+            None,
+            Some((1.643_190_723, 0.951_062_597)),
+            None,
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Qd2,
+            Some(gravity.as_slice()),
+            None,
+            Some((3.012_516_326, 1.743_614_760)),
+            None,
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Qd1,
+            Some(gravity.as_slice()),
+            Some(&q0),
+            None,
+            None,
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Min,
+            Some(gravity.as_slice()),
+            Some(&q0),
+            None,
+            None,
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Qd2,
+            Some(other_member_gravity.as_slice()),
+            None,
+            None,
+            Some("重力参照"),
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Qd2,
+            Some(other_station_gravity.as_slice()),
+            None,
+            None,
+            Some("重力参照"),
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Qd1,
+            Some(gravity.as_slice()),
+            None,
+            None,
+            Some("Q0"),
+        ),
+        (
+            LoadTerm::Short,
+            QdMethod::Min,
+            Some(gravity.as_slice()),
+            None,
+            None,
+            Some("Q0"),
+        ),
+    ] {
+        let report = run_member_design_checks(
+            &model,
+            &forces,
+            &[],
+            &MemberDesignCheckOptions {
+                term,
+                qd_method: method,
+                long_member_forces: long,
+                q_simple_by_elem: q0,
+                bond_method: BondMethod::Rc1991,
+                rc_damage_control: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for pos in at {
+            let mut components = vec![];
+            let mut reasons = vec![];
+            for (_, _, outcome) in report.member_checks.iter().filter(|(_, p, _)| *p == pos) {
+                match outcome {
+                    CheckOutcome::Checked(result) => {
+                        assert!(!result.ok());
+                        components.extend(&result.components);
+                    }
+                    CheckOutcome::Skipped { reason } => reasons.push(reason),
+                }
+            }
+            assert_eq!(reasons.len(), 1);
+            assert!(reasons[0].contains("正曲げ") && reasons[0].contains("重心までの距離"));
+            if let Some(reference) = reference_reason {
+                assert!(reasons[0].contains(reference), "{reasons:?}");
+            }
+            let mut expected_components = vec![];
+            if let Some((shear, bond)) = expected {
+                expected_components.push((CheckKind::Shear, shear));
+                if bond > 1.0 {
+                    expected_components.push((CheckKind::Bond, bond));
+                }
+            }
+            if pos == 0.5 {
+                expected_components.push((CheckKind::Provision, 1.01));
+            }
+            assert_eq!(
+                components.len(),
+                expected_components.len(),
+                "{components:?}"
+            );
+            for (component, (kind, ratio)) in components.into_iter().zip(expected_components) {
+                assert_eq!(component.kind, kind);
+                assert!((component.ratio - ratio).abs() < 1e-8, "{component:?}");
+                if kind == CheckKind::Provision {
+                    assert!(component.detail.contains("あばら間隔 350 mm"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn simplified_beam_check_keeps_1999_bond_failure_with_bending_and_reference_issues() {
+    let model = input::model(true);
+    let section = &model.sections[0];
+    let concrete = &model.materials[0];
+    let rebar = &model.materials[1];
+    let mut forces = MemberForcesAt::from_local(0.5, [0.0, 150_000.0, 0.0, 10.0, 0.0, 300e6]);
+    let mut ctx = DesignCtx {
+        length: 3000.0,
+        term: LoadTerm::Short,
+        rebar_material: Some(rebar.clone()),
+        shear_rebar_material: Some(rebar.clone()),
+        bond_method: BondMethod::Rc1999,
+        seismic_qd: Some(SeismicQd {
+            method: QdMethod::Min,
+            long_at: vec![(0.5, [0.0; 6])],
+            n_factor: 1.5,
+            n_mechanism: 1.0,
+            clear_length: 3000.0,
+            q_simple: None,
+        }),
+        ..Default::default()
+    };
+    for (missing_gravity, reference) in [(false, "Q0"), (true, "重力参照")] {
+        let results: Vec<_> = RcDesign
+            .check_outcomes(&forces, section, concrete, &ctx, missing_gravity)
+            .collect();
+        let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] = results.as_slice()
+        else {
+            panic!("{results:?}")
+        };
+        assert_eq!(ng.components.len(), 1);
+        assert_eq!(ng.components[0].kind, CheckKind::Bond);
+        assert!((ng.components[0].ratio - 2.254_053_998).abs() < 1e-8);
+        assert!(ng.components[0].detail.contains("1999"));
+        for expected in ["重心までの距離", "ねじり", reference] {
+            assert!(reason.contains(expected), "{reason}");
+        }
+    }
+    assert!(matches!(
+        RcDesign.check(&forces, section, concrete, &ctx),
+        CheckOutcome::Skipped { reason } if reason.contains("重心までの距離") && reason.contains("Q0")
+    ));
+    for (mz, length) in [
+        (f64::NAN, 3000.0),
+        (f64::INFINITY, 3000.0),
+        (300e6, f64::INFINITY),
+    ] {
+        forces.mz = mz;
+        ctx.length = length;
+        let results: Vec<_> = RcDesign
+            .check_outcomes(&forces, section, concrete, &ctx, false)
+            .collect();
+        assert!(
+            matches!(results.as_slice(), [CheckOutcome::Skipped { .. }]),
+            "{results:?}"
+        );
+    }
+}
+
+#[test]
+fn simplified_beam_check_does_not_infer_shear_failure_without_tension_bars() {
+    let model = input::model(true);
+    let section = section(250.0, 350.0, 19.0, &[3], &[]);
+    let concrete = &model.materials[0];
+    let rebar = &model.materials[1];
+    let forces = MemberForcesAt::from_local(0.0, [0.0, 1e6, 0.0, 0.0, 0.0, 45e6]);
+    let ctx = DesignCtx {
+        length: 3000.0,
+        rebar_material: Some(rebar.clone()),
+        shear_rebar_material: Some(rebar.clone()),
+        bond_method: BondMethod::Rc1991,
+        ..Default::default()
+    };
+    let results: Vec<_> = RcDesign
+        .check_outcomes(&forces, &section, concrete, &ctx, false)
+        .collect();
+    assert!(
+        matches!(results.as_slice(), [CheckOutcome::Skipped { reason }] if reason.contains("引張側の主筋がありません")),
+        "{results:?}"
+    );
 }
