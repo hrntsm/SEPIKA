@@ -4204,7 +4204,7 @@ fn h_shape() -> sepika_core::section_shape::SectionShape {
 }
 
 /// 符号＋階が同じ断面は追加できない。符号か階のどちらかが違えば追加できる。
-/// GUI 以外の呼び出し元（MCP など）に対しても不変条件を守るため、コマンド側で拒否する。
+/// GUI の事前検証を経ない呼び出しでも不変条件を守るため、コマンド側で拒否する。
 #[test]
 fn test_add_section_shape_rejects_duplicate_key() {
     let mut model = Model::default();

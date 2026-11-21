@@ -1,7 +1,7 @@
 //! 重力（DL/LL）・地震（EX/EY）荷重ケースの自動生成（モデルは書き換えない）。
 //!
 //! GUI は [`compute_auto_load_cases`] で内容を求め、undo 付きの
-//! `SyncSlabLoadsToCase` で書き込む。MCP 等のエフェメラルな作業コピーは
+//! `SyncSlabLoadsToCase` で書き込む。解析準備用の作業コピーは
 //! [`apply_auto_load_cases`] で直接反映する。
 
 use sepika_core::ids::LoadCaseId;

@@ -10,8 +10,7 @@ pub enum IdChange {
     SectionInserted(SectionId),
 }
 
-/// 編集コマンド。`Send` を要求するのは、MCP サーバが `UndoStack` を
-/// スレッド間で共有する(`rmcp::ServerHandler: Send + Sync`)ため。
+/// 編集コマンド。
 pub trait EditCommand: Send {
     /// モデルと履歴の確定後にだけ呼ばれる通知。候補の検証中には呼ばれない。
     fn committed(&self) {}

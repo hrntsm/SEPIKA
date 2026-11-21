@@ -1,5 +1,4 @@
 //! 解析ジョブ（モデルの解析前処理・解析条件・各解析の純粋計算）。
-//! GUI（`sepika-app`）と MCP サーバ（`sepika-mcp`）の共通下層。
 //!
 //! - [`auto_loads`] — 荷重ケースの自動生成（DL/LL/EX/EY。モデルは書き換えない）
 //! - [`prepare`] — 解析前処理（剛域・仕口パネル・荷重ケースの自動同期）
@@ -8,8 +7,6 @@
 //! - [`sample_wave`] — 正弦減衰のサンプル地震波（[`sample_wave::sample_ground_motion`]）
 //! - [`ultimate_demand`] — 終局検定用の部材需要組み立て（[`ultimate_demand::member_demand_from_static_forces`] 等）
 //! - [`error`] — ジョブのエラー型（[`error::JobError`]）
-//!
-//! 結果の整形（MCP の JSON・GUI の表示）は各クレートに残す。
 
 pub mod auto_loads;
 pub mod compute;

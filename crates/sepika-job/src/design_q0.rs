@@ -1,4 +1,4 @@
-//! 断面検定 QD1 用の単純梁せん断 Q0 と、重力ケース選択（GUI・MCP 共用）。
+//! 断面検定 QD1 用の単純梁せん断 Q0 と、重力ケース選択。
 
 use std::collections::HashMap;
 

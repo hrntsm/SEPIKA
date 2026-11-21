@@ -97,7 +97,6 @@ fn 公開固有値と時刻歴ジョブはダンパー質量不備をinvalid_inp
             }
             let expected = model.validate_damper_mass_placement().unwrap_err();
             let check = |error: JobError| {
-                assert_eq!(error.kind(), "invalid_input");
                 assert!(matches!(error, JobError::InvalidInput(message) if message == expected));
             };
             check(compute_eigen(model.clone(), 1).unwrap_err());

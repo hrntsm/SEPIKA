@@ -7,7 +7,7 @@
 //! - `fs_store` — [`FsResultStore`] 具体実装＋マニフェスト
 //!
 //! 全 pub 項目を `pub use` で再エクスポートし、`sepika_io::results::*` の
-//! フラットなパスを維持する（MCP サーバ等が参照するため）。
+//! フラットなパスで参照できます。
 
 mod fs_store;
 mod parquet_io;

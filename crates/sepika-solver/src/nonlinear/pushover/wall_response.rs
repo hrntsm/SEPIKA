@@ -101,7 +101,7 @@ pub struct WallStepResponse {
     pub unavailable: Option<WallUnavailableReason>,
 }
 
-/// 解析実行ごとの識別。入力世代はGUI/MCPの既存入力照合データで識別する。
+/// 解析実行ごとの識別。入力世代の識別は呼び出し側が行う。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WallRunIdentity {
     pub gravity_terms: Vec<(sepika_core::ids::LoadCaseId, f64)>,
