@@ -6,6 +6,16 @@ fn labels(app: &App, rec: &ThRecording, applied_long_term: bool) -> String {
 }
 
 fn member_labels(app: &App, rec: &ThRecording, index: usize, applied_long_term: bool) -> String {
+    peak_labels(app, rec, index, true, applied_long_term)
+}
+
+fn peak_labels(
+    app: &App,
+    rec: &ThRecording,
+    index: usize,
+    nonlinear: bool,
+    applied_long_term: bool,
+) -> String {
     let elem = &app.core.model.elements[index];
     let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
     egui::Context::default()
@@ -17,7 +27,18 @@ fn member_labels(app: &App, rec: &ThRecording, index: usize, applied_long_term: 
                 )),
                 ..Default::default()
             },
-            |ui| draw_peak_check(ui, app, elem, index, rec, true, applied_long_term, &axis),
+            |ui| {
+                draw_peak_check(
+                    ui,
+                    app,
+                    elem,
+                    index,
+                    rec,
+                    nonlinear,
+                    applied_long_term,
+                    &axis,
+                )
+            },
         )
         .shapes
         .iter()
@@ -525,5 +546,395 @@ fn rc_beam_th_detail_uses_available_gravity_to_keep_an_independent_bond_failure(
             row.contains("せん断補強筋材料") && !row.contains("(OK)"),
             "{text}"
         );
+    }
+}
+
+fn set_gravity_forces(app: &mut App, at: Option<Vec<(f64, [f64; 6])>>) {
+    use sepika_solver::statics::linear::StaticOnce;
+
+    let gravity = app
+        .core
+        .model
+        .combinations
+        .iter()
+        .find(|combo| sepika_core::load_combo::is_gravity_combination(&combo.name, &app.core.model))
+        .expect("常時重力組合せ");
+    app.core.scoped.results = Some(crate::app::ResultsBundle {
+        combos: vec![(
+            gravity.name.clone(),
+            StaticOnce {
+                story_shears: None,
+                stiffness_ratio_disp: None,
+                story_rigidity: Vec::new(),
+                disp: Vec::new(),
+                member_forces: at
+                    .map(|at| (app.core.model.elements[0].id, MemberForces { at }))
+                    .into_iter()
+                    .collect(),
+                column_end_horizontal_forces: Vec::new(),
+                column_end_axial_forces: Vec::new(),
+                panel_moments: Vec::new(),
+                girder_column_face_forces: Vec::new(),
+            },
+        )],
+        ..Default::default()
+    });
+}
+
+fn gravity_test_record(envelope: [f64; 6], snapshot: [f64; 6]) -> ThRecording {
+    ThRecording {
+        peak_member_forces: vec![Some(MemberForces {
+            at: [0.0, 0.5, 1.0].map(|xi| (xi, envelope)).to_vec(),
+        })],
+        axial_force_peaks: vec![AxialForcePeaks {
+            snapshots: vec![ForcePeakSnapshot {
+                time: 0.25,
+                forces: MemberForces {
+                    at: vec![(0.0, snapshot), (0.75, snapshot), (1.0, snapshot)],
+                },
+                positions: vec![1],
+            }],
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component() {
+    use crate::app::{
+        cft_column_buckling_tests::input as cft, rc_column_boundary_tests::input as rc,
+    };
+    use sepika_core::model::Model;
+    use sepika_design_jp::QdMethod;
+
+    let load = |model: Model| {
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.qd_method = QdMethod::Qd2;
+        app
+    };
+    let rc_app = |circle| {
+        load(super::rc_column_mechanism_input::column_with_girder(
+            rc::column_model(circle, 0.0),
+        ))
+    };
+    let cft_app = |circle| {
+        let mut model = cft::cantilever(circle, 0.0);
+        model.steel_design_attrs = vec![cft::direct_lengths(ElemId(0), Some(3000.0), Some(3000.0))];
+        load(model)
+    };
+    let src = crate::app::src_ql_acceptance_tests::src_beam_app(true, QdMethod::Qd2);
+    let response = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
+    let rec = gravity_test_record(response, response);
+
+    for (member, mut app) in [
+        ("RC矩形", rc_app(false)),
+        ("RC円形", rc_app(true)),
+        ("CFT角形", cft_app(false)),
+        ("CFT円形", cft_app(true)),
+        ("SRC梁", src),
+    ] {
+        for missing_combo in [true, false] {
+            set_gravity_forces(&mut app, None);
+            if missing_combo {
+                app.core.scoped.results.as_mut().unwrap().combos.clear();
+            }
+            let all_missing = labels(&app, &rec, true);
+            assert_eq!(
+                all_missing.matches("検定不能:").count(),
+                4,
+                "{member}: {all_missing}"
+            );
+            assert!(all_missing.contains("重力参照"), "{member}: {all_missing}");
+            assert!(
+                all_missing.contains("t=0.250000 s  ξ=0.75:"),
+                "{member}: {all_missing}"
+            );
+            assert!(!all_missing.contains("検定比 "), "{member}: {all_missing}");
+            for (nonlinear, with_gravity) in [(false, false), (false, true), (true, false)] {
+                let ordinary = peak_labels(&app, &rec, 0, nonlinear, with_gravity);
+                assert_eq!(ordinary.matches("(OK)").count(), 4, "{member}: {ordinary}");
+                assert!(!ordinary.contains("検定不能"), "{member}: {ordinary}");
+            }
+        }
+
+        let valid = [
+            f64::NAN,
+            0.0,
+            if member == "SRC梁" {
+                f64::INFINITY
+            } else {
+                -0.0
+            },
+            f64::NAN,
+            f64::INFINITY,
+            f64::NAN,
+        ];
+        let mut gy_missing = valid;
+        gy_missing[1] = f64::NAN;
+        set_gravity_forces(
+            &mut app,
+            Some(vec![
+                (0.0, valid),
+                (0.5, gy_missing),
+                (0.750_000_1, valid),
+                (1.0, valid),
+            ]),
+        );
+        let split = labels(&app, &rec, true);
+        assert!(split.contains("ξ=0.50:\n検定不能:"), "{member}: {split}");
+        assert!(
+            split.contains("t=0.250000 s  ξ=0.75:\n検定不能:"),
+            "{member}: {split}"
+        );
+        assert_eq!(split.matches("(OK)").count(), 2, "{member}: {split}");
+        assert_eq!(split.matches("検定不能:").count(), 2, "{member}: {split}");
+        assert!(split.contains("Qy方向"), "{member}: {split}");
+        assert_eq!(
+            split.contains("Qz方向"),
+            member != "SRC梁",
+            "{member}: {split}"
+        );
+
+        set_gravity_forces(
+            &mut app,
+            Some([0.0, 0.5, 0.75, 1.0].map(|xi| (xi, valid)).to_vec()),
+        );
+        let complete = labels(&app, &rec, true);
+        assert_eq!(complete.matches("(OK)").count(), 4, "{member}: {complete}");
+        assert!(!complete.contains("検定不能"), "{member}: {complete}");
+
+        set_gravity_forces(
+            &mut app,
+            Some([0.0, 0.5, 0.75, 1.0].map(|xi| (xi, gy_missing)).to_vec()),
+        );
+        let mut independent_ng = response;
+        if member == "SRC梁" {
+            independent_ng[5] = 1.0e9;
+        } else {
+            independent_ng[2] = 2.0e6;
+        }
+        let rec = gravity_test_record(independent_ng, independent_ng);
+        let text = labels(&app, &rec, true);
+        assert_eq!(text.matches("(NG)").count(), 4, "{member}: {text}");
+        assert_eq!(text.matches("検定不能:").count(), 4, "{member}: {text}");
+        assert!(!text.contains("(OK)"), "{member}: {text}");
+        assert!(
+            text.contains(if member == "SRC梁" {
+                "曲げ "
+            } else {
+                "せん断 "
+            }),
+            "{member}: {text}"
+        );
+        assert_eq!(
+            text.contains("検定比の下限"),
+            member == "CFT円形",
+            "{member}: {text}"
+        );
+
+        if member.starts_with("CFT") {
+            let shear_area_mm2 = if member == "CFT円形" {
+                std::f64::consts::PI * (200.0_f64.powi(2) - 188.0_f64.powi(2)) / 2.0
+            } else {
+                2.0 * 12.0 * 376.0
+            };
+            let allowable_shear_n = shear_area_mm2 * 235.0 / 3.0_f64.sqrt();
+            let ordinary = peak_labels(&app, &rec, 0, true, false);
+            let ordinary_ratio =
+                2.0e6_f64.hypot(if member == "CFT円形" { 1000.0 } else { 0.0 }) / allowable_shear_n;
+            assert!(
+                ordinary.contains(&format!("せん断 {ordinary_ratio:.2}")),
+                "{member}: {ordinary}"
+            );
+
+            let mut complete = valid;
+            complete[2] = -100_000.0;
+            set_gravity_forces(
+                &mut app,
+                Some([0.0, 0.5, 0.75, 1.0].map(|xi| (xi, complete)).to_vec()),
+            );
+            let qd2 = labels(&app, &rec, true);
+            let qd_z = 100_000.0 + 1.5 * 2_100_000.0;
+            let expected = f64::hypot(qd_z, if member == "CFT円形" { 1500.0 } else { 0.0 })
+                / allowable_shear_n;
+            assert!(
+                qd2.contains(&format!("せん断 {expected:.2}")),
+                "{member}: {qd2}"
+            );
+            assert!(!qd2.contains("検定不能"), "{member}: {qd2}");
+        }
+
+        if member != "SRC梁" {
+            let mut axial_ng = response;
+            axial_ng[0] = -30.0e6;
+            axial_ng[5] = 1.0;
+            let rec = gravity_test_record(axial_ng, axial_ng);
+            set_gravity_forces(&mut app, None);
+            let text = labels(&app, &rec, true);
+            assert_eq!(text.matches("(NG)").count(), 4, "{member}: {text}");
+            assert!(text.contains("軸+曲げ "), "{member}: {text}");
+            assert!(!text.contains("(OK)"), "{member}: {text}");
+            if member.starts_with("RC") {
+                assert!(text.contains("許容曲げが非正"), "{member}: {text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn time_history_rc_qd1_uses_end_axial_and_retains_connected_girder_diagnostics() {
+    use super::rc_column_mechanism_input as input;
+    use crate::app::rc_column_boundary_tests::input as rc;
+    use sepika_design_jp::QdMethod;
+
+    let mut app = App::default();
+    assert!(app.load_model(input::column_with_girder(rc::column_model(false, 0.0))));
+    let response = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
+    let rec = gravity_test_record(response, response);
+    let end = [0.0, f64::NAN, f64::INFINITY, f64::NAN, f64::NAN, f64::NAN];
+    let center = [0.0; 6];
+
+    for method in [QdMethod::Qd1, QdMethod::Min] {
+        app.core.analysis_cfg.qd_method = method;
+        app.core.model.sections[input::GIRDER_SECTION.index()].rebar_material =
+            Some(input::WRONG_REBAR);
+        app.core.model.sections[0].shear_rebar_material = Some(input::WRONG_REBAR);
+        for head in [None, Some([f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0])] {
+            let forces = vec![(0.0, end), (0.5, center), (0.75, center), (0.98, center)];
+            set_gravity_forces(
+                &mut app,
+                Some(
+                    forces
+                        .into_iter()
+                        .chain(head.map(|head| (1.0, head)))
+                        .collect(),
+                ),
+            );
+            let text = labels(&app, &rec, true);
+            for reason in [
+                "柱頭の重力参照軸力N",
+                "大梁 ID 1",
+                "せん断補強筋",
+                "Qy 方向",
+                "Qz 方向",
+            ] {
+                assert!(text.contains(reason), "{method:?}: {text}");
+            }
+            assert!(!text.contains("(OK)"), "{method:?}: {text}");
+        }
+
+        app.core.model.sections[input::GIRDER_SECTION.index()].rebar_material = Some(input::REBAR);
+        app.core.model.sections[0].shear_rebar_material = Some(input::REBAR);
+        set_gravity_forces(&mut app, Some(vec![(0.0, end), (1.0, end)]));
+        let text = labels(&app, &rec, true);
+        if method == QdMethod::Qd1 {
+            assert!(text.contains("せん断 "), "{text}");
+            assert!(!text.contains("検定不能:"), "{text}");
+        } else {
+            assert_eq!(text.matches("検定不能:").count(), 4, "{text}");
+            assert!(!text.contains("(OK)"), "{text}");
+        }
+    }
+}
+
+#[test]
+fn time_history_cft_qd1_uses_only_necessary_gravity_components() {
+    use crate::app::cft_column_buckling_tests::input as cft;
+    use sepika_design_jp::QdMethod;
+
+    for circular in [false, true] {
+        let mut app = App::default();
+        let mut model = cft::cantilever(circular, 0.0);
+        model.steel_design_attrs = vec![cft::direct_lengths(ElemId(0), Some(3000.0), Some(3000.0))];
+        assert!(app.load_model(model));
+        let response = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
+        let rec = gravity_test_record(response, response);
+        app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+        set_gravity_forces(&mut app, None);
+        let with_no_ql = labels(&app, &rec, true);
+        assert_eq!(with_no_ql.matches("せん断 ").count(), 4, "{with_no_ql}");
+        assert!(!with_no_ql.contains("検定不能"), "{with_no_ql}");
+        set_gravity_forces(
+            &mut app,
+            Some([0.0, 0.5, 0.75, 1.0].map(|xi| (xi, [1.0e20; 6])).to_vec()),
+        );
+        assert_eq!(labels(&app, &rec, true), with_no_ql);
+        set_gravity_forces(&mut app, None);
+        app.core.analysis_cfg.qd_method = QdMethod::Min;
+        let text = labels(&app, &rec, true);
+        assert_eq!(text.matches("検定不能:").count(), 4, "{text}");
+        assert!(!text.contains("(OK)"), "{text}");
+    }
+}
+
+#[test]
+fn time_history_cft_shows_buckling_and_required_gravity_reasons_at_each_position() {
+    use crate::app::cft_column_buckling_tests::input as cft;
+    use sepika_design_jp::QdMethod;
+
+    for circular in [false, true] {
+        let mut app = App::default();
+        let mut model = cft::cantilever(circular, 0.0);
+        model.steel_design_attrs = vec![cft::direct_lengths(ElemId(0), Some(3000.0), None)];
+        assert!(app.load_model(model));
+        let response = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
+        let rec = gravity_test_record(response, response);
+        let mut missing_qy = [0.0; 6];
+        missing_qy[1] = f64::NAN;
+        let mut missing_qz = [0.0; 6];
+        missing_qz[2] = f64::INFINITY;
+        set_gravity_forces(
+            &mut app,
+            Some(vec![(0.0, [0.0; 6]), (0.5, missing_qy), (0.75, missing_qz)]),
+        );
+
+        for weak_length in [None, Some(0.0), Some(f64::NAN)] {
+            app.core.model.steel_design_attrs[0].lk_z_direct = weak_length;
+            for (method, nonlinear, applied_long_term) in [
+                (QdMethod::Qd2, true, true),
+                (QdMethod::Min, true, true),
+                (QdMethod::Qd1, true, true),
+                (QdMethod::Qd2, true, false),
+                (QdMethod::Qd2, false, false),
+            ] {
+                app.core.analysis_cfg.qd_method = method;
+                let text = peak_labels(&app, &rec, 0, nonlinear, applied_long_term);
+                assert!(!text.contains("検定比 "), "{text}");
+                assert!(!text.contains("(OK)") && !text.contains("(NG)"), "{text}");
+                let reason = "弱軸の座屈長さを有限な正値で直接指定";
+                let shows_gravity = nonlinear && applied_long_term && method != QdMethod::Qd1;
+                assert_eq!(
+                    text.matches(reason).count(),
+                    if shows_gravity { 4 } else { 3 },
+                    "{text}"
+                );
+                if !shows_gravity {
+                    assert!(
+                        !text.contains("重力参照内力") && !text.contains("t=0.250000 s"),
+                        "{text}"
+                    );
+                    continue;
+                }
+
+                for (label, qy_missing, qz_missing) in [
+                    ("ξ=0.00:", false, false),
+                    ("ξ=0.50:", true, false),
+                    ("ξ=1.00:", true, true),
+                    ("圧縮側 t=0.250000 s  ξ=0.75:", false, true),
+                ] {
+                    let (_, after_label) = text
+                        .split_once(label)
+                        .unwrap_or_else(|| panic!("{label}: {text}"));
+                    let row = after_label.lines().nth(1).unwrap();
+                    assert!(
+                        row.starts_with("検定不能:") && row.contains(reason),
+                        "{text}"
+                    );
+                    assert_eq!(row.contains("Qy方向の設計用せん断力"), qy_missing, "{text}");
+                    assert_eq!(row.contains("Qz方向の設計用せん断力"), qz_missing, "{text}");
+                }
+            }
+        }
     }
 }

@@ -675,33 +675,6 @@ fn draw_peak_check(
     let torsion_reason =
         |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
-    let buckling_lengths = match structure {
-        StructureKind::Cft => {
-            sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
-        }
-        StructureKind::S => sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
-            elem.id,
-            kind,
-            model.member_length(elem),
-            attr,
-        )
-        .map(Some),
-        _ => Ok(None),
-    };
-    let (lk_y, lk_z) = match buckling_lengths {
-        Ok(Some((strong, weak))) => {
-            if structure == StructureKind::S {
-                ui.label(format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
-            }
-            (Some(strong), Some(weak))
-        }
-        Ok(None) => (None, None),
-        Err(reason) => {
-            draw_peak_precheck(ui, peak, axial_peaks, Some(&reason), torsion_reason);
-            return;
-        }
-    };
-
     let length = axis.length;
     let face_sum = elem.rigid_zone.face_i_or_zero() + elem.rigid_zone.face_j_or_zero();
     let clear_span = if length - face_sum > 0.0 {
@@ -711,6 +684,13 @@ fn draw_peak_check(
     };
     let wire_qd = th_nonlinear && th_applied_long_term && !signed_bending;
     let src_column = structure == StructureKind::Src && kind == MemberKind::Column;
+    let src_beam = structure == StructureKind::Src
+        && matches!(sec.shape, Some(SectionShape::SrcBeamRect { .. }));
+    let rc_column = structure == StructureKind::Rc
+        && matches!(
+            sec.shape,
+            Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
+        );
     let rc_beam = structure == StructureKind::Rc
         && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
     let qd_method = app.core.analysis_cfg.qd_method;
@@ -742,7 +722,7 @@ fn draw_peak_check(
                     format!("検定不能: QD1用の部材荷重由来Q0を算定できません（{reason}）"),
                 );
                 if !wrong_shear_rebar {
-                    draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason);
+                    draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason, None);
                     return;
                 }
                 None
@@ -751,19 +731,55 @@ fn draw_peak_check(
     } else {
         None
     };
-    let seismic_qd = long_mf.and_then(|list| {
-        list.iter()
-            .find(|(id, _)| *id == elem.id)
-            .map(|(_, mf)| sepika_design_jp::SeismicQd {
-                long_at: mf.at.clone(),
-                n_factor: 1.5,
-                n_mechanism: 1.0,
-                q_simple,
-                clear_length: clear_span,
-                method: qd_method,
-            })
-    });
-    let missing_gravity = wire_qd && seismic_qd.is_none();
+    let long_at = long_mf.and_then(|list| list.iter().find(|(id, _)| *id == elem.id));
+    let missing_gravity = wire_qd && long_at.is_none();
+    let seismic_qd = (long_at.is_some()
+        || (wire_qd && (rc_column || structure == StructureKind::Cft)))
+        .then(|| sepika_design_jp::SeismicQd {
+            long_at: long_at.map_or_else(Vec::new, |(_, mf)| mf.at.clone()),
+            n_factor: 1.5,
+            n_mechanism: 1.0,
+            q_simple,
+            clear_length: clear_span,
+            method: qd_method,
+        });
+    let buckling_lengths = match structure {
+        StructureKind::Cft => {
+            sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
+        }
+        StructureKind::S => sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
+            elem.id,
+            kind,
+            model.member_length(elem),
+            attr,
+        )
+        .map(Some),
+        _ => Ok(None),
+    };
+    let (lk_y, lk_z) = match buckling_lengths {
+        Ok(Some((strong, weak))) => {
+            if structure == StructureKind::S {
+                ui.label(format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
+            }
+            (Some(strong), Some(weak))
+        }
+        Ok(None) => (None, None),
+        Err(reason) => {
+            let cft_qd2 = seismic_qd
+                .as_ref()
+                .filter(|qd| structure == StructureKind::Cft && qd.method != QdMethod::Qd1);
+            draw_peak_precheck(
+                ui,
+                peak,
+                axial_peaks,
+                Some(&reason),
+                torsion_reason,
+                cft_qd2,
+            );
+            return;
+        }
+    };
+
     let missing_rc_beam_gravity = wire_qd
         && rc_beam
         && seismic_qd.as_ref().is_none_or(|qd| {
@@ -784,16 +800,13 @@ fn draw_peak_check(
             axial_peaks,
             Some("設計用せん断力に必要な重力参照内力が不足しています"),
             torsion_reason,
+            None,
         );
         return;
     }
-    let column_mechanism_topology = (structure == StructureKind::Rc
-        && kind == MemberKind::Column
-        && seismic_qd
-            .as_ref()
-            .is_some_and(|qd| qd.method != QdMethod::Qd2)
-        && !wrong_main_rebar)
-        .then(|| sepika_design_jp::rc::ColumnMechanismTopology::new(model));
+    let column_mechanism_topology =
+        (rc_column && kind == MemberKind::Column && wire_qd && qd_method != QdMethod::Qd2)
+            .then(|| sepika_design_jp::rc::ColumnMechanismTopology::new(model));
 
     let mut ctx = DesignCtx {
         term: LoadTerm::Short,
@@ -860,21 +873,16 @@ fn draw_peak_check(
             ctx.shear_span = shear_span(5, 1);
             ctx.shear_span_y = shear_span(4, 2);
             ctx.column_sum_my = column_mechanism_topology.as_ref().and_then(|topology| {
-                let axial_at = |at: &[(f64, [f64; 6])], target: f64| {
-                    at.iter()
-                        .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
-                        .map_or(0.0, |(_, f)| f[0])
+                let end_axial = |at: &[(f64, [f64; 6])]| {
+                    [0.0, 1.0].map(|xi| at.iter().find(|(p, _)| *p == xi).map(|(_, f)| f[0]))
                 };
                 let qd = ctx.seismic_qd.as_ref()?;
-                sepika_design_jp::rc::compute_column_mechanism_sum_my(
+                sepika_design_jp::rc::time_history_column_mechanism_sum_my(
                     model,
                     topology,
                     elem,
-                    axial_at(&qd.long_at, 0.0),
-                    axial_at(&qd.long_at, 1.0),
-                    axial_at(&forces.at, 0.0),
-                    axial_at(&forces.at, 1.0),
-                    1.0,
+                    end_axial(&qd.long_at),
+                    end_axial(&forces.at),
                 )
             });
             for (index, &(pos, f)) in forces.at.iter().enumerate() {
@@ -919,7 +927,8 @@ fn draw_peak_check(
                         sec,
                         mat,
                         &ctx,
-                        missing_gravity && (src_column || wrong_main_rebar || wrong_shear_rebar),
+                        missing_gravity
+                            && (src_column || src_beam || wrong_main_rebar || wrong_shear_rebar),
                     ) {
                         draw_outcome(&outcome);
                     }
@@ -929,12 +938,19 @@ fn draw_peak_check(
                         sec,
                         mat,
                         &ctx,
-                        if wrong_shear_rebar {
+                        if rc_column {
+                            false
+                        } else if wrong_shear_rebar {
                             missing_gravity
                         } else {
                             missing_rc_beam_gravity || (missing_gravity && wrong_main_rebar)
                         },
                     ) {
+                        draw_outcome(&outcome);
+                    }
+                } else if structure == StructureKind::Cft {
+                    for outcome in sepika_design_jp::CftDesign.check_outcomes(&mfa, sec, mat, &ctx)
+                    {
                         draw_outcome(&outcome);
                     }
                 } else if symmetric_h_column {
@@ -1040,36 +1056,48 @@ fn draw_peak_precheck(
     axial_peaks: Option<&AxialForcePeaks>,
     reason: Option<&str>,
     torsion_reason: impl Fn(&MemberForcesAt) -> Option<&'static str>,
+    cft_qd2: Option<&sepika_design_jp::SeismicQd>,
 ) {
-    let draw = |ui: &mut egui::Ui, label: &str, torsion: Option<&str>| {
-        if let Some(first_reason) = reason.or(torsion) {
+    let draw = |ui: &mut egui::Ui, label: &str, pos: f64, torsion: Option<&str>| {
+        let gravity = cft_qd2.and_then(|qd| sepika_design_jp::cft::qd2_reference_issue(qd, pos));
+        let reasons: Vec<_> = reason
+            .into_iter()
+            .chain(torsion)
+            .chain(gravity.as_deref())
+            .collect();
+        if !reasons.is_empty() {
             let skipped = CheckOutcome::Skipped {
-                reason: first_reason.into(),
+                reason: reasons.join("。"),
             };
-            for outcome in strength_outcomes(skipped, reason.and(torsion)) {
-                draw_labeled_outcome_row(ui, label, &outcome, false);
-            }
+            draw_labeled_outcome_row(ui, label, &skipped, false);
         }
     };
+    if cft_qd2.is_some() {
+        ui.label("内力包絡");
+    }
     for &(pos, f) in &peak.at {
         let torsion = torsion_reason(&MemberForcesAt::from_local(pos, f));
-        draw(ui, &format!("ξ={pos:.2}:"), torsion);
+        draw(ui, &format!("ξ={pos:.2}:"), pos, torsion);
     }
     if let Some(peaks) = axial_peaks {
+        if cft_qd2.is_some() && !peaks.snapshots.is_empty() {
+            ui.label("軸力極値が生じた確定ステップ");
+        }
         for snapshot in &peaks.snapshots {
             for &index in &snapshot.positions {
                 let Some(&(pos, f)) = snapshot.forces.at.get(index) else {
                     continue;
                 };
                 let mfa = MemberForcesAt::from_local(pos, f);
-                if let Some(torsion) = torsion_reason(&mfa) {
+                let torsion = torsion_reason(&mfa);
+                if cft_qd2.is_some() || torsion.is_some() {
                     let side = if mfa.n < 0.0 {
                         "圧縮側"
                     } else {
                         "引張側"
                     };
                     let label = format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time);
-                    draw(ui, &label, Some(torsion));
+                    draw(ui, &label, pos, torsion);
                 }
             }
         }
@@ -1375,7 +1403,9 @@ mod tests {
                     member_forces: vec![(
                         input::COLUMN,
                         MemberForces {
-                            at: vec![(0.5, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+                            at: [0.0, 0.5, 1.0]
+                                .map(|xi| (xi, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+                                .to_vec(),
                         },
                     )],
                     column_end_horizontal_forces: Vec::new(),
@@ -1392,7 +1422,9 @@ mod tests {
     fn rc_column_peak_check_text(app: &App) -> String {
         let recording = ThRecording {
             peak_member_forces: vec![Some(MemberForces {
-                at: vec![(0.5, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0])],
+                at: [0.0, 0.5, 1.0]
+                    .map(|xi| (xi, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0]))
+                    .to_vec(),
             })],
             ..Default::default()
         };

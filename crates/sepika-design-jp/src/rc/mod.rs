@@ -27,7 +27,8 @@ pub(crate) use bond::{rc_beam_bond_check_1991_with_rebar, rc_beam_bond_check_wit
 pub use clear_span::{rc_member_clear_span, RcClearSpanError};
 pub use column_mechanism::{
     compute_column_mechanism_sum_my, design_axial_for_mechanism, resolve_column_end_hinge,
-    sum_my_from_end_hinges, ColumnEndHinge, ColumnMechanism, ColumnMechanismTopology,
+    sum_my_from_end_hinges, time_history_column_mechanism_sum_my, ColumnEndHinge, ColumnMechanism,
+    ColumnMechanismTopology,
 };
 pub use wall_nonlinear::{
     wall_shear_beta_s, wall_shear_crack, wall_shear_trilinear, wall_shear_ultimate,
@@ -68,7 +69,8 @@ impl DesignCheck for RcDesign {
 
 impl RcDesign {
     /// 鉄筋の材料区分または材軸ねじりで未算定の場合、独立に確定した不適合を別に返す。
-    /// 必要な重力参照内力を用意できない場合は `missing_gravity` に true を渡す。
+    /// 時刻歴のRC柱で地震時せん断を照査する場合は、参照欠損時も `ctx.seismic_qd` を設定する。
+    /// その他の部材で必要な重力参照内力を用意できない場合は `missing_gravity` に true を渡す。
     pub fn check_outcomes(
         &self,
         forces: &MemberForcesAt,
@@ -80,10 +82,22 @@ impl RcDesign {
         use crate::member_design_check::{
             combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
         };
-        let missing_shear_reference =
-            missing_gravity.then_some("設計用せん断力に必要な重力参照内力が不足しています");
-        let (outcome, incomplete) =
-            self.check_with_incomplete(forces, sec, mat, ctx, missing_shear_reference);
+        let strict_column_gravity = ctx.term == crate::LoadTerm::Short
+            && ctx.seismic_qd.is_some()
+            && matches!(
+                sec.shape,
+                Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
+            );
+        let missing_shear_reference = (missing_gravity && !strict_column_gravity)
+            .then_some("設計用せん断力に必要な重力参照内力が不足しています");
+        let (outcome, incomplete) = self.check_with_gravity_mode(
+            forces,
+            sec,
+            mat,
+            ctx,
+            missing_shear_reference,
+            strict_column_gravity,
+        );
         let torsion =
             concrete_member_torsion_reason(sepika_core::structure_kind::StructureKind::Rc, forces);
         let reason = combine_incomplete_reasons(incomplete, torsion);
@@ -98,6 +112,18 @@ impl RcDesign {
         ctx: &DesignCtx,
         missing_shear_reference: Option<&str>,
     ) -> (CheckOutcome, Option<String>) {
+        self.check_with_gravity_mode(forces, sec, mat, ctx, missing_shear_reference, false)
+    }
+
+    fn check_with_gravity_mode(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        missing_shear_reference: Option<&str>,
+        strict_column_gravity: bool,
+    ) -> (CheckOutcome, Option<String>) {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
                 .map(|reason| format!("RC 検定: 断面「{}」の{reason}", sec.name));
@@ -108,6 +134,7 @@ impl RcDesign {
         let main_rebar_valid = material_issue.is_none();
         let shear_rebar_valid = shear_material_issue.is_none();
         let shear_issue = missing_shear_reference.or_else(|| beam_shear_issue(forces, sec, ctx));
+        let mut column_issue = None;
         let outcome = if let (true, true, Some(reason)) =
             (main_rebar_valid, shear_rebar_valid, missing_shear_reference)
         {
@@ -123,21 +150,34 @@ impl RcDesign {
                 main_rebar_valid,
                 shear_rebar_valid,
                 shear_issue,
+                strict_column_gravity,
+                &mut column_issue,
             )
         };
         let incomplete =
             combine_incomplete_reasons(material_issue, shear_material_issue.as_deref())
                 .and_then(|reason| combine_incomplete_reasons(Some(reason), shear_issue));
-        let incomplete = match sec.shape.as_ref() {
-            Some(shape) if !shear_rebar_valid && missing_shear_reference.is_none() => {
-                column::gravity_shear_reference_issues(ctx, forces.pos, shape).fold(
-                    incomplete,
-                    |reason, reference_issue| {
-                        combine_incomplete_reasons(reason, Some(reference_issue))
-                    },
+        let incomplete = combine_incomplete_reasons(incomplete, column_issue.as_deref());
+        let incomplete = if let Some(qd) = ctx.seismic_qd.as_ref().filter(|_| strict_column_gravity)
+        {
+            [1, 2].into_iter().fold(incomplete, |reason, index| {
+                combine_incomplete_reasons(
+                    reason,
+                    column_qd2_reference_issue(qd, forces.pos, index),
                 )
+            })
+        } else {
+            match sec.shape.as_ref() {
+                Some(shape) if !shear_rebar_valid && missing_shear_reference.is_none() => {
+                    column::gravity_shear_reference_issues(ctx, forces.pos, shape).fold(
+                        incomplete,
+                        |reason, reference_issue| {
+                            combine_incomplete_reasons(reason, Some(reference_issue))
+                        },
+                    )
+                }
+                _ => incomplete,
             }
-            _ => incomplete,
         };
         let incomplete = if let Some(mechanism) = column::qd1_mechanism(ctx) {
             [&mechanism.qy, &mechanism.qz]
@@ -152,6 +192,7 @@ impl RcDesign {
         (outcome, incomplete)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn check_section(
         forces: &MemberForcesAt,
         sec: &Section,
@@ -160,6 +201,8 @@ impl RcDesign {
         main_rebar_valid: bool,
         shear_rebar_valid: bool,
         shear_issue: Option<&str>,
+        strict_column_gravity: bool,
+        column_issue: &mut Option<String>,
     ) -> CheckOutcome {
         let fc_raw = mat.fc.unwrap_or(0.0);
         if fc_raw <= 0.0 {
@@ -283,6 +326,8 @@ impl RcDesign {
                 main_rebar_valid,
                 shear_rebar_valid,
                 shear_issue.is_none(),
+                strict_column_gravity,
+                column_issue,
             ),
         }
     }

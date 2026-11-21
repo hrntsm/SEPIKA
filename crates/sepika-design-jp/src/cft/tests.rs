@@ -777,15 +777,24 @@ fn sm520_out_of_range_cft_primary_and_direct_checks_keep_reason_for_every_fy() {
                     horizontal_thick: 100.001,
                     corner_r: Some(0.0)
                 },
-                24.0
+                24.0,
+                false,
+                &mut None,
             )
             .unwrap_err()
             .contains("適用範囲"));
-            assert!(
-                cft_pipe_check(&zero_forces(), steel, &ctx, 1000.0, 100.001, 24.0)
-                    .unwrap_err()
-                    .contains("適用範囲")
-            );
+            assert!(cft_pipe_check(
+                &zero_forces(),
+                steel,
+                &ctx,
+                1000.0,
+                100.001,
+                24.0,
+                false,
+                &mut None
+            )
+            .unwrap_err()
+            .contains("適用範囲"));
         }
     }
 }

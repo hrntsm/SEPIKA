@@ -5,6 +5,7 @@ use super::{
     rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity,
     shear_rebar_grade, AxisProps, ColumnMechanism,
 };
+use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
 use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
@@ -70,16 +71,23 @@ pub(super) fn gravity_shear_reference_issues<'a>(
         .filter_map(move |(_, index)| gravity_shear_reference_issue(ctx, pos, index))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn seismic_column_design_shear(
     ctx: &DesignCtx,
     forces: &MemberForcesAt,
     fallback_qy: f64,
     fallback_qz: f64,
     shear_rebar_valid: bool,
+    strict_gravity: bool,
+    incomplete: &mut Option<String>,
 ) -> (Option<f64>, Option<f64>) {
+    let qd = ctx.seismic_qd.as_ref().expect("設計用せん断力を使う条件");
     let mechanism = qd1_mechanism(ctx);
-    let demand = |q_signed, q_index, sum_my: Option<&Result<Option<f64>, String>>, fallback| {
-        if !shear_rebar_valid && gravity_shear_reference_issue(ctx, forces.pos, q_index).is_some() {
+    let mut demand = |q_signed, q_index, sum_my: Option<&Result<Option<f64>, String>>, fallback| {
+        if !strict_gravity
+            && !shear_rebar_valid
+            && gravity_shear_reference_issue(ctx, forces.pos, q_index).is_some()
+        {
             return None;
         }
         let sum_my = match sum_my {
@@ -87,9 +95,21 @@ fn seismic_column_design_shear(
             Some(Ok(Some(sum_my))) => *sum_my,
             _ => fallback,
         };
-        Some(seismic_design_shear(
-            ctx, forces.pos, q_signed, q_index, sum_my, true,
-        ))
+        if strict_gravity {
+            match super::column_design_shear(qd, forces.pos, q_signed, q_index, sum_my) {
+                Ok(value) => Some(value),
+                Err(reason) => {
+                    if qd.method == QdMethod::Qd1 {
+                        *incomplete = combine_incomplete_reasons(incomplete.take(), Some(reason));
+                    }
+                    None
+                }
+            }
+        } else {
+            Some(seismic_design_shear(
+                ctx, forces.pos, q_signed, q_index, sum_my, true,
+            ))
+        }
     };
     (
         demand(forces.qy, 1, mechanism.map(|m| &m.qy), fallback_qy),
@@ -120,6 +140,17 @@ fn column_moment_ratio(
             if circle { "（円形柱、等価矩形近似）" } else { "" },
         ));
     }
+    Ok(available_column_moment_ratio(
+        forces, ma_z_nmm, ma_y_nmm, circle,
+    ))
+}
+
+fn available_column_moment_ratio(
+    forces: &MemberForcesAt,
+    ma_z_nmm: f64,
+    ma_y_nmm: f64,
+    circle: bool,
+) -> f64 {
     let ratio_z = if ma_z_nmm > 0.0 {
         forces.mz.abs() / ma_z_nmm
     } else {
@@ -130,11 +161,11 @@ fn column_moment_ratio(
     } else {
         0.0
     };
-    Ok(if circle {
+    if circle {
         ratio_z.powi(2) + ratio_y.powi(2)
     } else {
         ratio_z + ratio_y
-    })
+    }
 }
 
 /// 矩形柱の直交方向主筋総断面積 at_perp [mm²]。
@@ -156,6 +187,8 @@ pub(crate) fn column_check(
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
     shear_reference_valid: bool,
+    strict_gravity: bool,
+    incomplete: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
     let allow = rc_allow(
@@ -166,6 +199,36 @@ pub(crate) fn column_check(
     );
 
     let n_design = -forces.n;
+    let mut bending_issue = None;
+    let missing_gravity = ctx.seismic_qd.as_ref().is_some_and(|qd| {
+        strict_gravity
+            && ([1, 2]
+                .into_iter()
+                .any(|index| super::column_qd2_reference_issue(qd, forces.pos, index).is_some())
+                || qd1_mechanism(ctx).is_some_and(|m| m.missing_gravity_axial))
+    });
+    let finish_bending = |bending_issue: Option<String>, incomplete: &mut Option<String>| {
+        if let Some(reason) = bending_issue {
+            if missing_gravity || incomplete.is_some() {
+                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
+            } else {
+                return Err(CheckOutcome::Skipped { reason });
+            }
+        }
+        Ok(())
+    };
+    let demand_without_main_rebar = |q, index| {
+        if strict_gravity {
+            let qd = ctx.seismic_qd.as_ref().expect("設計用せん断力を使う条件");
+            if qd.method == QdMethod::Qd2 {
+                return super::column_design_shear(qd, forces.pos, q, index, 0.0)
+                    .ok()
+                    .filter(|q| q.is_finite());
+            }
+            return None;
+        }
+        super::shear_demand_without_main_rebar(ctx, forces.pos, q, index)
+    };
     let shear_ratio = |q_design_y: Option<f64>, q_design_z: Option<f64>, qay, qaz| {
         [q_design_y.zip(qay), q_design_z.zip(qaz)]
             .into_iter()
@@ -203,6 +266,10 @@ pub(crate) fn column_check(
             let ma = column_allowable_moment(&curve, n_design);
             let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true) {
                 Ok(ratio) => ratio,
+                Err(reason) if strict_gravity => {
+                    bending_issue = Some(reason);
+                    available_column_moment_ratio(forces, ma, ma, true)
+                }
                 Err(reason) => return CheckOutcome::Skipped { reason },
             };
             let nt = as_total * ft;
@@ -232,8 +299,8 @@ pub(crate) fn column_check(
             (None, None)
         } else if !main_rebar_valid {
             (
-                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qy, 1),
-                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qz, 2),
+                demand_without_main_rebar(forces.qy, 1),
+                demand_without_main_rebar(forces.qz, 2),
             )
         } else if ctx.seismic_qd.is_some() {
             let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
@@ -256,6 +323,8 @@ pub(crate) fn column_check(
                 sum_mu_fallback,
                 sum_mu_fallback,
                 shear_rebar_valid,
+                strict_gravity,
+                incomplete,
             )
         } else {
             (Some(forces.qy.abs()), Some(forces.qz.abs()))
@@ -267,6 +336,9 @@ pub(crate) fn column_check(
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, 1.5);
         let qaz = shear_capacity(&props, &allow, alpha_z, ctx.term, damage_control, true);
 
+        if let Err(outcome) = finish_bending(bending_issue, incomplete) {
+            return outcome;
+        }
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
         let mut detail = format!("at={:.1} mm², d={:.1} mm", props.at, props.d);
 
@@ -351,6 +423,10 @@ pub(crate) fn column_check(
             let ma_y = column_allowable_moment(&curve_y, n_design);
             let ratio_moment = match column_moment_ratio(forces, na, ma_z, ma_y, false) {
                 Ok(ratio) => ratio,
+                Err(reason) if strict_gravity => {
+                    bending_issue = Some(reason);
+                    available_column_moment_ratio(forces, ma_z, ma_y, false)
+                }
                 Err(reason) => return CheckOutcome::Skipped { reason },
             };
             let nt = as_total * ft_z;
@@ -380,8 +456,8 @@ pub(crate) fn column_check(
             (None, None)
         } else if !main_rebar_valid {
             (
-                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qy, 1),
-                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qz, 2),
+                demand_without_main_rebar(forces.qy, 1),
+                demand_without_main_rebar(forces.qz, 2),
             )
         } else if ctx.seismic_qd.is_some() {
             let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
@@ -402,7 +478,15 @@ pub(crate) fn column_check(
             };
             let fallback_z = 2.0 * mu_of(*b, *d, &props_z);
             let fallback_y = 2.0 * mu_of(*d, *b, &props_y);
-            seismic_column_design_shear(ctx, forces, fallback_z, fallback_y, shear_rebar_valid)
+            seismic_column_design_shear(
+                ctx,
+                forces,
+                fallback_z,
+                fallback_y,
+                shear_rebar_valid,
+                strict_gravity,
+                incomplete,
+            )
         } else {
             (Some(forces.qy.abs()), Some(forces.qz.abs()))
         };
@@ -413,6 +497,9 @@ pub(crate) fn column_check(
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, 1.5);
         let qaz = shear_capacity(&props_y, &allow, alpha_z, ctx.term, damage_control, true);
 
+        if let Err(outcome) = finish_bending(bending_issue, incomplete) {
+            return outcome;
+        }
         let basis = "RC 規準14条（柱、軸力+二軸曲げ+せん断）".to_string();
         let mut detail = String::new();
 
@@ -769,6 +856,7 @@ mod tests {
         ctx_dirs_missing.column_sum_my = Some(ColumnMechanism {
             qy: Ok(None),
             qz: Ok(None),
+            missing_gravity_axial: false,
         });
 
         let design = crate::rc::RcDesign;
