@@ -166,9 +166,9 @@ fn evaluation_master(model: &Model, story: StoryId) -> Result<NodeId, String> {
     for element in &model.elements {
         match element.kind {
             ElementKind::NodalSpring if no_spring_stiffness(element) => {}
-            ElementKind::NodalSpring | ElementKind::Isolator | ElementKind::Damper => {
+            ElementKind::NodalSpring | ElementKind::Damper => {
                 return Err(format!(
-                    "部材{}の付加ばね・免震支承・ダンパーは対象外です",
+                    "部材{}の付加ばね・ダンパーは対象外です",
                     element.id.0
                 ));
             }
@@ -475,10 +475,7 @@ fn coupling_indicator_from_expanded(
         {
             continue;
         }
-        if matches!(
-            kind,
-            ElementKind::NodalSpring | ElementKind::Isolator | ElementKind::Damper
-        ) {
+        if matches!(kind, ElementKind::NodalSpring | ElementKind::Damper) {
             if affects_layer(&element.nodes) {
                 if kind == ElementKind::NodalSpring {
                     let independent = independent_horizontal_spring(model, element)
@@ -488,7 +485,7 @@ fn coupling_indicator_from_expanded(
                     }
                 }
                 return Ok(CouplingIndicator::Candidate(format!(
-                    "接続する架構に部材{}の付加ばね・免震支承・ダンパーがあります",
+                    "接続する架構に部材{}の付加ばね・ダンパーがあります",
                     element.id.0
                 )));
             }

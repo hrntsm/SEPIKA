@@ -1,21 +1,20 @@
 use crate::app::App;
-use crate::tables::nodes::{isolator_kind_label, isolator_kind_selector, isolator_props_fields};
 use sepika_core::ids::{ElemId, NodeId, SectionId};
 use sepika_core::model::{
     DamperDef, DamperKind, DamperProps, ElementData, ElementKind, EndCondition, ForceRegime,
-    HysteresisModel, IsolatorProps, LocalAxis, Model, SlabCompositeConnection,
+    HysteresisModel, LocalAxis, Model, SlabCompositeConnection,
 };
 use sepika_core::units::to_display::{force_kn, stiffness_kn_per_mm, viscous_c0_kn};
 use sepika_core::units::to_internal;
 use sepika_core::wall_expand::{self, WallExpansionIndex};
 use sepika_edit::{
-    AddDamper, AddIsolator, AddMember, DeleteMember, DeleteWallPlate, EditCommand,
-    RemoveSupportIsolator, SetDamperProps, SetElementSection, SetMemberHysteresis,
-    SetMemberHysteresisTh, SetMemberRcBeamReference, SetSlabCompositeConnection,
+    AddDamper, AddMember, DeleteMember, DeleteWallPlate, SetDamperProps, SetElementSection,
+    SetMemberHysteresis, SetMemberHysteresisTh, SetMemberRcBeamReference,
+    SetSlabCompositeConnection,
 };
 use std::borrow::Cow;
 
-/// 要素の節点 ID をカンマ区切りで並べたセル文字列（制振ダンパー表・免震支承材表で共有）。
+/// 要素の節点 ID をカンマ区切りで並べたセル文字列。
 /// 要素が見つからない場合は空文字列。
 fn elem_nodes_label(model: &Model, elem_id: ElemId) -> String {
     model
@@ -28,14 +27,6 @@ fn elem_nodes_label(model: &Model, elem_id: ElemId) -> String {
                 .join(",")
         })
         .unwrap_or_default()
-}
-
-/// 「+ 免震支承材追加」フォームのドラフト状態（`AddIsolator` の諸元）。
-/// 2節点間へ免震支承材要素を作成する独立フォーム用（境界条件タブの
-/// 「支点への配置」〔`PlaceSupportIsolator`〕とは別導線）。
-#[derive(Clone, Debug, Default)]
-pub struct IsolatorMemberDraft {
-    pub props: IsolatorProps,
 }
 
 /// 「制振ダンパーの定義から選択」の選択中インデックスを、定義削除後も選択中の
@@ -136,7 +127,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         .map(|(i, _)| i);
 
         let mut do_add = false;
-        let mut do_add_isolator = false;
         let mut do_add_damper = false;
 
         ui.horizontal(|ui| {
@@ -185,15 +175,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
             }
 
             ui.separator();
-            if ui
-                .add_enabled(enabled, egui::Button::new("+ 免震支承材追加"))
-                .on_hover_text(
-                    "下の「免震支承材を追加」フォームで種別・諸元を編集してから追加します",
-                )
-                .clicked()
-            {
-                do_add_isolator = true;
-            }
             if ui
                 .add_enabled(enabled, egui::Button::new("+ 制振ダンパー追加"))
                 .on_hover_text(
@@ -248,28 +229,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         });
         ui.data_mut(|d| d.insert_temp(id_damper_def_sel, to_store));
 
-        ui.separator();
-        egui::CollapsingHeader::new("免震支承材を追加")
-            .default_open(false)
-            .id_salt("add_isolator_section")
-            .show(ui, |ui| {
-                ui.label(format!(
-                    "対象（上の梁追加と共通の2節点）: {} → {}",
-                    sel_i
-                        .map(|n| format!("N{}", n.0))
-                        .unwrap_or_else(|| "―".to_string()),
-                    sel_j
-                        .map(|n| format!("N{}", n.0))
-                        .unwrap_or_else(|| "―".to_string()),
-                ));
-                isolator_kind_selector(ui, &mut app.ui.scoped.isolator_member_draft.props.kind);
-                isolator_props_fields(
-                    ui,
-                    "members_add_isolator",
-                    &mut app.ui.scoped.isolator_member_draft.props,
-                );
-            });
-
         if do_add {
             if let (Some(i_node), Some(j_node)) = (sel_i, sel_j) {
                 let new_id = ElemId(app.core.model.elements.len() as u32);
@@ -291,36 +250,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 if app.apply_model_edit(Box::new(AddMember { elem })) {
                     app.clear_generated_member_selection();
                 }
-            }
-        }
-
-        if do_add_isolator {
-            if let (Some(i_node), Some(j_node)) = (sel_i, sel_j) {
-                let new_id = ElemId(app.core.model.elements.len() as u32);
-                let elem = ElementData {
-                    id: new_id,
-                    kind: ElementKind::Isolator,
-                    nodes: [i_node, j_node].into_iter().collect(),
-                    section: None,
-                    local_axis: LocalAxis {
-                        ref_vector: [1.0, 0.0, 0.0],
-                    },
-                    end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-                    force_regime: ForceRegime::Auto,
-                    rigid_zone: Default::default(),
-                    end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
-                    plastic_zone: None,
-                    spring: None,
-                };
-                app.core.scoped.undo.run(
-                    &mut app.core.model,
-                    Box::new(AddIsolator {
-                        elem,
-                        props: app.ui.scoped.isolator_member_draft.props,
-                    }),
-                );
-                app.select_member(new_id);
-                app.core.scoped.staleness.mark_edited();
             }
         }
 
@@ -453,7 +382,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                             ElementKind::Shell => "Shell",
                             ElementKind::Brace { .. } => "Brace",
                             ElementKind::Damper => "Damper",
-                            ElementKind::Isolator => "Isolator",
                             ElementKind::NodalSpring => "NodalSpring",
                             ElementKind::PanelZone => "PanelZone",
                         }
@@ -738,7 +666,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
     }
 
     dampers_table(ui, app);
-    isolators_table(ui, app);
 }
 
 /// 制振ダンパー要素（`ElementKind::Damper`）の諸元編集・削除の一覧
@@ -959,254 +886,6 @@ fn dampers_table(ui: &mut egui::Ui, app: &mut App) {
     }
 }
 
-/// 免震支承材要素（`ElementKind::Isolator`）の諸元編集・削除の一覧。
-/// 支点への設置（`PlaceSupportIsolator`、境界条件タブ）で生成された零長要素も
-/// ここに一覧される（削除もここから行える。境界条件タブ側は要約表示のみ）。
-fn isolators_table(ui: &mut egui::Ui, app: &mut App) {
-    use crate::table_util::{self, Col};
-
-    let isolators: Vec<(ElemId, IsolatorProps)> = app
-        .core
-        .model
-        .elements
-        .iter()
-        .filter(|e| e.kind == ElementKind::Isolator)
-        .filter_map(|e| {
-            app.core
-                .model
-                .isolator_attrs
-                .iter()
-                .find(|a| a.elem == e.id)
-                .map(|a| (e.id, a.props))
-        })
-        .collect();
-    if isolators.is_empty() {
-        return;
-    }
-
-    ui.separator();
-    ui.strong("免震支承材");
-    ui.label(
-        egui::RichText::new(
-            "K1[kN/mm]・K2[kN/mm]・Qd[kN]（積層ゴム系のバイリニア。すべり支承は K2=Qd=0）・\
-             Kv[kN/mm]（鉛直剛性）・μ（すべり支承の摩擦係数）。",
-        )
-        .color(crate::theme::UI_MUTED)
-        .small(),
-    );
-
-    let mut pending_props: Vec<(ElemId, IsolatorProps)> = Vec::new();
-    let mut pending_del: Option<ElemId> = None;
-
-    table_util::standard_table(
-        ui,
-        "isolators_table",
-        &[
-            Col::id(),
-            Col::wide_num("節点"),
-            Col::text("種別"),
-            Col::num("K1"),
-            Col::num("K2"),
-            Col::num("Qd"),
-            Col::num("Kv"),
-            Col::num("μ"),
-            Col::actions(),
-        ],
-        isolators.len(),
-        |row| {
-            let (elem_id, props) = isolators[row.index()];
-            let mut props = props;
-            let is_sliding = props.kind == sepika_core::model::IsolatorKind::ElasticSliding;
-            row.col(|ui| {
-                table_util::id_label(ui, elem_id.0);
-            });
-            row.col(|ui| {
-                table_util::text_cell(ui, &elem_nodes_label(&app.core.model, elem_id));
-            });
-            row.col(|ui| {
-                table_util::cell_combo(
-                    ui,
-                    format!("isolator_kind_{}", elem_id.0),
-                    isolator_kind_label(props.kind),
-                    |ui| {
-                        for k in [
-                            sepika_core::model::IsolatorKind::LaminatedRubber,
-                            sepika_core::model::IsolatorKind::LeadRubber,
-                            sepika_core::model::IsolatorKind::HighDampingRubber,
-                            sepika_core::model::IsolatorKind::ElasticSliding,
-                        ] {
-                            if ui
-                                .selectable_label(props.kind == k, isolator_kind_label(k))
-                                .clicked()
-                                && props.kind != k
-                            {
-                                props.kind = k;
-                                pending_props.push((elem_id, props));
-                            }
-                        }
-                    },
-                );
-            });
-            row.col(|ui| {
-                let mut k1_kn = stiffness_kn_per_mm(props.k1);
-                let resp = table_util::cell_drag_value(
-                    ui,
-                    true,
-                    egui::DragValue::new(&mut k1_kn)
-                        .speed(1.0)
-                        .range(0.0..=1.0e6),
-                );
-                props.k1 = to_internal::stiffness_kn_per_mm(k1_kn);
-                if resp.drag_stopped() || resp.lost_focus() {
-                    pending_props.push((elem_id, props));
-                }
-            });
-            row.col(|ui| {
-                let mut k2_kn = stiffness_kn_per_mm(props.k2);
-                let resp = table_util::cell_drag_value(
-                    ui,
-                    !is_sliding,
-                    egui::DragValue::new(&mut k2_kn)
-                        .speed(1.0)
-                        .range(0.0..=1.0e6),
-                );
-                props.k2 = to_internal::stiffness_kn_per_mm(k2_kn);
-                if resp.drag_stopped() || resp.lost_focus() {
-                    pending_props.push((elem_id, props));
-                }
-            });
-            row.col(|ui| {
-                let mut qd_kn = force_kn(props.qd);
-                let resp = table_util::cell_drag_value(
-                    ui,
-                    !is_sliding,
-                    egui::DragValue::new(&mut qd_kn)
-                        .speed(1.0)
-                        .range(0.0..=1.0e6),
-                );
-                props.qd = to_internal::force_kn(qd_kn);
-                if resp.drag_stopped() || resp.lost_focus() {
-                    pending_props.push((elem_id, props));
-                }
-            });
-            row.col(|ui| {
-                let mut kv_kn = stiffness_kn_per_mm(props.kv);
-                let resp = table_util::cell_drag_value(
-                    ui,
-                    true,
-                    egui::DragValue::new(&mut kv_kn)
-                        .speed(10.0)
-                        .range(0.0..=1.0e9),
-                );
-                props.kv = to_internal::stiffness_kn_per_mm(kv_kn);
-                if resp.drag_stopped() || resp.lost_focus() {
-                    pending_props.push((elem_id, props));
-                }
-            });
-            row.col(|ui| {
-                let resp = table_util::cell_drag_value(
-                    ui,
-                    is_sliding,
-                    egui::DragValue::new(&mut props.mu)
-                        .speed(0.005)
-                        .range(0.0..=2.0),
-                );
-                if resp.drag_stopped() || resp.lost_focus() {
-                    pending_props.push((elem_id, props));
-                }
-            });
-            row.col(|ui| {
-                if table_util::delete_cell(ui, "免震支承材を削除", None) {
-                    pending_del = Some(elem_id);
-                }
-            });
-        },
-    );
-
-    let mut changed = false;
-    for (elem_id, props) in pending_props {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetIsolatorPropsLocal {
-                elem: elem_id,
-                props: Some(props),
-            }),
-        );
-        changed = true;
-    }
-    if let Some(elem_id) = pending_del {
-        let applied = match app.core.model.support_isolator_ends(elem_id) {
-            Some((upper, _)) => {
-                let applied = app.apply_model_edit(Box::new(RemoveSupportIsolator { node: upper }));
-                if applied {
-                    app.ui.scoped.boundary_node = None;
-                }
-                applied
-            }
-            None => app.apply_model_edit(Box::new(DeleteMember { id: elem_id })),
-        };
-        if applied {
-            app.clear_geometry_selection();
-            changed = true;
-        }
-    }
-    if changed {
-        app.core.scoped.staleness.mark_edited();
-    }
-}
-
-/// 免震支承材の特性（`IsolatorProps`）変更。
-///
-/// `sepika-edit` には制振ダンパーの `SetDamperProps` に相当する免震支承材用の
-/// コマンドがないため（今回の作業範囲は `sepika-edit` を読み取り専用とする方針）、
-/// `Model::isolator_attrs` が公開フィールドであることを利用してこの UI 層で
-/// `EditCommand` を実装する。`SetDamperProps` と同様、`props=None` で指定解除。
-///
-/// `props=Some` の場合は既存エントリを `iter_mut().find()` でインプレース書換え
-/// する（retain+push だと undo 後に再適用した際、当該エントリが `isolator_attrs`
-/// の末尾へ移動してしまい並び順が変わる）。`props=None`（解除）の場合のみ
-/// `retain` で取り除く。
-struct SetIsolatorPropsLocal {
-    elem: ElemId,
-    props: Option<IsolatorProps>,
-}
-
-impl EditCommand for SetIsolatorPropsLocal {
-    fn apply(&self, model: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
-        let old = model
-            .isolator_attrs
-            .iter()
-            .find(|a| a.elem == self.elem)
-            .map(|a| a.props);
-        match self.props {
-            Some(p) => {
-                if let Some(a) = model
-                    .isolator_attrs
-                    .iter_mut()
-                    .find(|a| a.elem == self.elem)
-                {
-                    a.props = p;
-                } else {
-                    model.isolator_attrs.push(sepika_core::model::IsolatorAttr {
-                        elem: self.elem,
-                        props: p,
-                    });
-                }
-            }
-            None => {
-                model.isolator_attrs.retain(|a| a.elem != self.elem);
-            }
-        }
-        Box::new(SetIsolatorPropsLocal {
-            elem: self.elem,
-            props: old,
-        })
-    }
-
-    fn label(&self) -> &str {
-        "免震支承材特性変更"
-    }
-}
 pub(crate) fn delete_frame_member(app: &mut App, id: ElemId) -> bool {
     app.apply_model_edit(Box::new(DeleteMember { id }))
 }
@@ -1214,96 +893,6 @@ pub(crate) fn delete_frame_member(app: &mut App, id: ElemId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn isolators_table_remove_clears_boundary_target_after_node_ids_shift() {
-        use sepika_core::dof::Dof6Mask;
-        use sepika_edit::{AddNode, PlaceSupportIsolator};
-
-        let mut app = App::default();
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(AddNode {
-                coord: [0.0; 3],
-                restraint: Dof6Mask::FIXED,
-            }),
-        );
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(PlaceSupportIsolator {
-                node: NodeId(0),
-                props: IsolatorProps::default(),
-            }),
-        );
-        let elem_id = app.core.model.elements[0].id;
-        assert_eq!(
-            app.core.model.support_isolator_ends(elem_id),
-            Some((NodeId(0), NodeId(1)))
-        );
-        let b_coord = [1000.0, 0.0, 0.0];
-        let c_coord = [2000.0, 0.0, 0.0];
-        for coord in [b_coord, c_coord] {
-            app.core.scoped.undo.run(
-                &mut app.core.model,
-                Box::new(AddNode {
-                    coord,
-                    restraint: Dof6Mask::FREE,
-                }),
-            );
-        }
-        app.ui.scoped.boundary_node = Some(NodeId(2));
-        app.select_member(elem_id);
-
-        let ctx = egui::Context::default();
-        let input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1600.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let _ = ctx.run_ui(input(), |ui| isolators_table(ui, &mut app));
-        let output = ctx.run_ui(input(), |ui| isolators_table(ui, &mut app));
-        let delete_pos = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) if text.galley.job.text == "🗑" => {
-                    Some(text.visual_bounding_rect().center())
-                }
-                _ => None,
-            })
-            .expect("免震支承材表の削除ボタン");
-        for pressed in [true, false] {
-            let mut raw = input();
-            raw.events = vec![
-                egui::Event::PointerMoved(delete_pos),
-                egui::Event::PointerButton {
-                    pos: delete_pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ];
-            let _ = ctx.run_ui(raw, |ui| isolators_table(ui, &mut app));
-        }
-
-        assert!(app.core.model.elements.is_empty());
-        assert_eq!(app.core.model.nodes.len(), 3);
-        assert_eq!(app.core.model.node(NodeId(1)).unwrap().coord, b_coord);
-        assert_eq!(app.core.model.node(NodeId(2)).unwrap().coord, c_coord);
-        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
-        assert_eq!(app.ui.scoped.boundary_node, None);
-
-        let _ = ctx.run_ui(input(), |ui| {
-            crate::tables::nodes::boundary_condition_panel(ui, &mut app);
-        });
-        assert_eq!(app.ui.scoped.boundary_node, None);
-        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
-        for id in [NodeId(1), NodeId(2)] {
-            assert_eq!(app.core.model.node(id).unwrap().restraint, Dof6Mask::FREE);
-        }
-    }
 
     fn def(name: &str) -> DamperDef {
         DamperDef {

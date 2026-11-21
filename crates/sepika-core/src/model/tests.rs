@@ -719,7 +719,7 @@ fn test_requires_section_and_material_covers_line_and_area_elements() {
     }
 }
 
-/// 仕口パネル・節点バネ・免震・ダンパーは断面を持たないのが正常な状態であり、
+/// 仕口パネル・節点バネ・ダンパーは断面を持たないのが正常な状態であり、
 /// 未割当の検出対象にしてはならない（準備計算が自動生成する仕口パネル要素が
 /// そのまま「断面未割当」警告になっていた不具合の再発防止）。
 #[test]
@@ -727,7 +727,6 @@ fn test_requires_section_and_material_excludes_property_driven_elements() {
     for kind in [
         ElementKind::PanelZone,
         ElementKind::NodalSpring,
-        ElementKind::Isolator,
         ElementKind::Damper,
     ] {
         assert!(
@@ -1904,7 +1903,6 @@ fn frame_node_count_matrix_and_support_axes() {
         ElementKind::Wall,
         ElementKind::PanelZone,
         ElementKind::NodalSpring,
-        ElementKind::Isolator,
         ElementKind::Damper,
     ] {
         let element = ElementData {
@@ -1967,15 +1965,13 @@ fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_sprin
     }
     model.nodes[1].coord = model.nodes[0].coord;
     element.nodes = vec![NodeId(0), NodeId(1)].into();
-    for kind in [ElementKind::NodalSpring, ElementKind::Isolator] {
-        element.kind = kind;
-        model.elements = vec![element.clone()];
-        model.validate().unwrap();
-    }
+    element.kind = ElementKind::NodalSpring;
+    model.elements = vec![element];
+    model.validate().unwrap();
 }
 
 #[test]
-fn local_frame_guard_distinguishes_zero_length_members_from_spring_and_isolator() {
+fn local_frame_guard_distinguishes_zero_length_members_from_nodal_spring() {
     let mut model = Model {
         nodes: (0..2)
             .map(|id| Node {
@@ -2014,17 +2010,9 @@ fn local_frame_guard_distinguishes_zero_length_members_from_spring_and_isolator(
     );
     model.elements[0].kind = ElementKind::NodalSpring;
     model.validate_local_frames().unwrap();
-    model.elements[0].kind = ElementKind::Isolator;
-    model.validate_local_frames().unwrap();
     model.elements[0].local_axis.ref_vector[0] = f64::NAN;
-    let error = model.validate_local_frames().unwrap_err();
-    assert!(
-        error.contains("部材 ID 12") && error.contains("非有限"),
-        "{error}"
-    );
-    for length_mm in [0.5e-9, 1e-9, 2e-9] {
+    for length_mm in [0.0, 0.5e-9, 1e-9, 2e-9] {
         model.nodes[1].coord = [length_mm, 0.0, 0.0];
-        model.elements[0].kind = ElementKind::NodalSpring;
         if length_mm < 1e-9 {
             model.validate_local_frames().unwrap();
         } else {
@@ -2034,12 +2022,6 @@ fn local_frame_guard_distinguishes_zero_length_members_from_spring_and_isolator(
                 "{error}"
             );
         }
-        model.elements[0].kind = ElementKind::Isolator;
-        let error = model.validate_local_frames().unwrap_err();
-        assert!(
-            error.contains("部材 ID 12") && error.contains("非有限"),
-            "{error}"
-        );
     }
 }
 

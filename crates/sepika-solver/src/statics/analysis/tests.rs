@@ -2273,7 +2273,6 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
         ElementKind::PanelZone,
         ElementKind::NodalSpring,
         ElementKind::Damper,
-        ElementKind::Isolator,
     ] {
         let mut model = make_cantilever_model();
         model.elements[0].kind = kind;

@@ -73,7 +73,7 @@ pub(super) enum ModelClass {
     Panel,
     /// トラス／軸材（ブレースなど軸剛性のみ）。
     Truss,
-    /// バネ・免震・ダンパー等その他の要素。
+    /// ばね・ダンパー等その他の要素。
     Other,
 }
 
@@ -107,7 +107,7 @@ impl ModelClass {
             ModelClass::WallPlateNoStiffness => "剛性算入なしの壁版",
             ModelClass::Panel => "仕口パネル",
             ModelClass::Truss => "トラス/軸材",
-            ModelClass::Other => "その他(バネ/免震/ダンパー)",
+            ModelClass::Other => "その他(ばね/ダンパー)",
         }
     }
 }
@@ -189,10 +189,7 @@ pub(super) fn classify_with(
         }
         ElementKind::PanelZone => ModelClass::Panel,
         ElementKind::Brace { .. } => ModelClass::Truss,
-        ElementKind::Shell
-        | ElementKind::NodalSpring
-        | ElementKind::Isolator
-        | ElementKind::Damper => ModelClass::Other,
+        ElementKind::Shell | ElementKind::NodalSpring | ElementKind::Damper => ModelClass::Other,
     }
 }
 
@@ -1804,7 +1801,7 @@ mod tests {
             );
             assert_eq!(
                 classify(
-                    &elem(ElementKind::Isolator, ForceRegime::Auto),
+                    &elem(ElementKind::Damper, ForceRegime::Auto),
                     &model,
                     analysis
                 ),

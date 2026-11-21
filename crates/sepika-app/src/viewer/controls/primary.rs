@@ -266,7 +266,7 @@ pub(super) fn primary_controls_with_view(
                     }
                     if !lumped::is_lumped_view(view.view_mode) {
                         ui.checkbox(&mut view.show_supports, "支点")
-                            .on_hover_text("拘束された節点の矢印・円弧、支点ばね、免震マーカー");
+                            .on_hover_text("拘束された節点の矢印・円弧、支点ばね");
                     }
                     if app.core.model.constraints.iter().any(|constraint| matches!(
                         constraint, sepika_core::model::Constraint::RigidDiaphragm { .. }

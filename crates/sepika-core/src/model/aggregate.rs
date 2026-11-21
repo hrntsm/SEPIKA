@@ -17,7 +17,6 @@ macro_rules! for_each_elem_attr_collection {
         $visit!(slab_composite_attrs);
         $visit!(brb_attrs, elem, "BRB製品属性");
         $visit!(pca_attrs, elem, "PCa梁属性");
-        $visit!(isolator_attrs, elem, "免震支承材属性");
         $visit!(member_hysteresis_attrs, elem, "部材の履歴則指定");
         $visit!(damper_attrs, elem, "制振ダンパー属性");
         $visit!(member_detail_attrs, elem, "部材の付帯情報");
@@ -35,7 +34,6 @@ pub struct ElemAttrs {
     /// (元の属性位置, 属性) を位置の昇順で保持する。
     pub brb: Vec<(usize, BrbAttr)>,
     pub pca: Option<PcaGirderAttr>,
-    pub isolator: Option<IsolatorAttr>,
     pub hysteresis: Option<MemberHysteresisAttr>,
     pub damper: Option<DamperAttr>,
     pub detail: Option<MemberDetailAttr>,
@@ -118,9 +116,6 @@ pub struct Model {
     /// PCa（プレキャスト）梁の水平接合面検定用属性（水平接合面のせん断摩擦検定）。
     #[serde(default)]
     pub pca_attrs: Vec<PcaGirderAttr>,
-    /// 免震支承材の非線形特性（`ElementKind::Isolator` 要素、各免震部材指針）。
-    #[serde(default)]
-    pub isolator_attrs: Vec<IsolatorAttr>,
     /// 部材の履歴則の個別指定（各履歴則の原典）。
     /// 未指定の部材は構造種別ごとの既定（[`default_member_hysteresis`]）に従う。
     #[serde(default)]
@@ -1346,23 +1341,7 @@ impl Model {
     /// 参照中の節点を削除すると参照が壊れる（ダングリング）ため、削除前にこれで確認する。
     pub fn node_in_use(&self, id: NodeId) -> bool {
         self.elements.iter().any(|e| e.nodes.contains(&id))
-            || self.node_referenced_outside_elements(id)
-    }
-
-    /// [`Model::node_in_use`] と同様だが、要素からの参照は `excl` を除いて判定する
-    /// （支点免震要素の接地節点が「この要素以外から孤立しているか」の判定に使う。
-    /// `excl` 要素自身が `id` を参照していても、それだけでは「使用中」とみなさない）。
-    pub fn node_in_use_excluding_elem(&self, id: NodeId, excl: ElemId) -> bool {
-        self.elements
-            .iter()
-            .any(|e| e.id != excl && e.nodes.contains(&id))
-            || self.node_referenced_outside_elements(id)
-    }
-
-    /// 要素以外（節点荷重・階・床領域・床板・壁領域・壁版・二次部材・拘束）からの
-    /// 参照有無。[`Model::node_in_use`]・[`Model::node_in_use_excluding_elem`] の共通部分。
-    fn node_referenced_outside_elements(&self, id: NodeId) -> bool {
-        self.stories.iter().any(|s| s.node_ids.contains(&id))
+            || self.stories.iter().any(|s| s.node_ids.contains(&id))
             || self.node_referenced_by_regions_or_plates(id)
     }
 
@@ -1397,37 +1376,6 @@ impl Model {
                     *master == id || terms.iter().any(|(n, _, _)| *n == id)
                 }
             })
-    }
-
-    /// 要素が「支点免震要素」（sepika-edit の `PlaceSupportIsolator` が生成する配置形。
-    /// 対象節点と同一座標の接地節点との間に設置する零長 Isolator 要素）であるかを判定する。
-    /// 該当すれば `(上部節点, 接地節点)` を返す（上部節点＝支点として振る舞う対象節点、
-    /// 接地節点＝自動生成された `restraint=FIXED` の孤立節点）。
-    ///
-    /// 条件: `ElementKind::Isolator` の2節点要素で、両端が同一座標（零長）かつ、
-    /// 一方の節点が `restraint=FIXED` でこの要素以外から参照されていない（孤立）こと。
-    /// 通常の（支点ではない）免震要素はこの条件を満たさず `None` を返す。
-    pub fn support_isolator_ends(&self, elem: ElemId) -> Option<(NodeId, NodeId)> {
-        let e = self.elements.get(elem.index()).filter(|e| e.id == elem)?;
-        if e.kind != ElementKind::Isolator || e.nodes.len() != 2 {
-            return None;
-        }
-        let (n0, n1) = (e.nodes[0], e.nodes[1]);
-        let node0 = self.node(n0)?;
-        let node1 = self.node(n1)?;
-        if node0.coord != node1.coord {
-            return None;
-        }
-        let is_isolated_ground = |id: NodeId, restraint: crate::dof::Dof6Mask| {
-            restraint == crate::dof::Dof6Mask::FIXED && !self.node_in_use_excluding_elem(id, elem)
-        };
-        if is_isolated_ground(n0, node0.restraint) {
-            Some((n1, n0))
-        } else if is_isolated_ground(n1, node1.restraint) {
-            Some((n0, n1))
-        } else {
-            None
-        }
     }
 
     /// 通り芯・保存波形設定・数量設定・層間変形角の参考比較設定・SRC接合部の帯筋指定を除いた計算入力照合用モデルを返す。
@@ -1504,7 +1452,6 @@ impl Model {
             && self.unassigned_posts == other.unassigned_posts
             && self.axes == other.axes
             && self.girder_groups == other.girder_groups
-            && self.isolator_attrs == other.isolator_attrs
             && self.member_hysteresis_attrs == other.member_hysteresis_attrs
             && self.damper_attrs == other.damper_attrs
             && self.damper_defs == other.damper_defs
@@ -1923,7 +1870,6 @@ impl Model {
             slab_composite: self.slab_composite_attrs.remove(&elem),
             brb,
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
-            isolator: take_first(&mut self.isolator_attrs, |a| a.elem, elem),
             hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
             damper: take_first(&mut self.damper_attrs, |a| a.elem, elem),
             detail: take_first(&mut self.member_detail_attrs, |a| a.elem, elem),
@@ -1951,10 +1897,6 @@ impl Model {
         if let Some(mut a) = attrs.pca {
             a.elem = elem;
             self.pca_attrs.push(a);
-        }
-        if let Some(mut a) = attrs.isolator {
-            a.elem = elem;
-            self.isolator_attrs.push(a);
         }
         if let Some(mut a) = attrs.hysteresis {
             a.elem = elem;

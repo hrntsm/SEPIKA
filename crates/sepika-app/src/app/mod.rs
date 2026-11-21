@@ -1168,9 +1168,9 @@ pub struct UiModelScoped {
     /// `None` はウィンドウ非表示）。
     #[cfg(feature = "gui")]
     pub th_detail_elem: Option<sepika_core::ids::ElemId>,
-    /// 時刻歴詳細ウィンドウの零長要素（免震・節点ばね）N-δ ループで選択中の成分
+    /// 時刻歴詳細ウィンドウの零長の節点ばねN-δ ループで選択中の成分
     /// （中-2）。`(部材, 成分)` を保持し、`th_detail_elem` と部材が一致しない場合は
-    /// 要素種別ごとの既定（免震＝せん断、それ以外＝軸）へ戻す。`None` は未選択。
+    /// 既定の軸方向へ戻す。`None` は未選択。
     #[cfg(feature = "gui")]
     pub th_detail_axial_component: Option<(
         sepika_core::ids::ElemId,
@@ -1185,12 +1185,6 @@ pub struct UiModelScoped {
     /// 断面カタログ選択UI のドラフト（Shape→Family→Name）
     #[cfg(feature = "gui")]
     pub catalog_draft: crate::section_editor::CatalogDraft,
-    /// 境界条件タブ「免震支承の配置」フォームのドラフト状態（`PlaceSupportIsolator` 用）
-    #[cfg(feature = "gui")]
-    pub isolator_support_draft: crate::tables::nodes::IsolatorSupportDraft,
-    /// 部材タブ「免震支承材を追加」フォームのドラフト状態（`AddIsolator` 用）
-    #[cfg(feature = "gui")]
-    pub isolator_member_draft: crate::tables::members::IsolatorMemberDraft,
     /// 断面タブ「制振要素」パネルのドラフト状態（`AddDamperDef`/`UpdateDamperDef` 用）
     #[cfg(feature = "gui")]
     pub damper_def_draft: crate::damper_def_editor::DamperDefDraft,
@@ -1324,10 +1318,6 @@ impl Default for UiModelScoped {
             section_draft: crate::section_editor::SectionEditorDraft::default(),
             #[cfg(feature = "gui")]
             catalog_draft: crate::section_editor::CatalogDraft::default(),
-            #[cfg(feature = "gui")]
-            isolator_support_draft: crate::tables::nodes::IsolatorSupportDraft::default(),
-            #[cfg(feature = "gui")]
-            isolator_member_draft: crate::tables::members::IsolatorMemberDraft::default(),
             #[cfg(feature = "gui")]
             damper_def_draft: crate::damper_def_editor::DamperDefDraft::default(),
             #[cfg(feature = "gui")]
@@ -2497,7 +2487,7 @@ fn elem_is_steel(
 /// ナビゲータの部材グループ（鋼材部材, RC部材）へ振り分けた要素 ID。
 ///
 /// 対象は材料を持つ要素（[`sepika_core::model::ElementKind::requires_section_and_material`]）
-/// に限る。仕口パネル・節点バネ・免震支承材・制振ダンパーは材料を持たないのが正常で、
+/// に限る。仕口パネル・節点バネ・制振ダンパーは材料を持たないのが正常で、
 /// 材種で分けようがない。特に仕口パネルは準備計算が接合部ごとに自動生成するため、
 /// 除外しないと「鋼系でないもの」＝RC 部材へ生成数だけ流れ込み、純 S 造の建物でも
 /// RC 部材が多数あるように見えてしまう。

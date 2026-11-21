@@ -1063,7 +1063,6 @@ mod tests {
                 tension_only: false,
             },
             ElementKind::NodalSpring,
-            ElementKind::Isolator,
             ElementKind::Damper,
         ] {
             let model = support_model(kind);

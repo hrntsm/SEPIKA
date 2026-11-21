@@ -1,10 +1,13 @@
 use super::*;
-fn isolator_and_fiber_model(kind: sepika_core::model::ElementKind, friction: bool) -> Model {
+fn damper_and_fiber_model(
+    kind: sepika_core::model::ElementKind,
+    damper_kind: sepika_core::model::DamperKind,
+) -> Model {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
     use sepika_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, IsolatorAttr, IsolatorKind,
-        IsolatorProps, LocalAxis, Material, MaterialCategory, Node, Section,
+        DamperAttr, DamperProps, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis,
+        Material, MaterialCategory, Node, Section,
     };
     let nodes = [
         [0.0, 0.0, 0.0],
@@ -57,7 +60,7 @@ fn isolator_and_fiber_model(kind: sepika_core::model::ElementKind, friction: boo
         elements: vec![
             element(
                 0,
-                ElementKind::Isolator,
+                ElementKind::Damper,
                 smallvec::smallvec![NodeId(0), NodeId(1)],
                 None,
                 [1.0, 0.0, 0.0],
@@ -84,23 +87,14 @@ fn isolator_and_fiber_model(kind: sepika_core::model::ElementKind, friction: boo
             strength_factor: None,
             concrete_class: Default::default(),
         }],
-        isolator_attrs: vec![IsolatorAttr {
+        damper_attrs: vec![DamperAttr {
             elem: ElemId(0),
-            props: IsolatorProps {
-                kind: if friction {
-                    IsolatorKind::ElasticSliding
-                } else {
-                    IsolatorKind::HighDampingRubber
-                },
-                k1: 10.0,
-                k2: 1.0,
-                qd: 100.0,
-                kv: 1000.0,
-                mu: 0.1,
-                n_long: 1000.0,
-                total_rubber_thickness: 100.0,
-                ckd_gamma: [1.0, -0.2, 0.0],
-                cqd_gamma: [1.0, -0.1, 0.0],
+            props: DamperProps {
+                kind: damper_kind,
+                kd: 10.0,
+                c0: 5.0,
+                qy: 100.0,
+                k2_ratio: 0.1,
                 ..Default::default()
             },
         }],
@@ -114,34 +108,36 @@ fn real_batch(model: &Model) -> Vec<Box<dyn ElementBehavior>> {
         .elements
         .iter()
         .map(|e| {
-            build_nonlinear_behavior(
+            let mut behavior = build_nonlinear_behavior(
                 e,
                 model,
                 StrengthBasis::Nominal,
                 sepika_core::model::AnalysisKind::Incremental,
                 None,
-            )
+            );
+            behavior.set_time_step(0.1);
+            behavior
         })
         .collect()
 }
 
 #[test]
-fn real_isolator_and_failed_fiber_ms_batch_preserves_uncommitted_state_in_both_modes() {
-    use sepika_core::model::ElementKind;
+fn real_damper_and_failed_fiber_ms_batch_preserves_uncommitted_state_in_both_modes() {
+    use sepika_core::model::{DamperKind, ElementKind};
     for parallel in [false, true] {
-        for friction in [false, true] {
+        for damper_kind in [DamperKind::Maxwell, DamperKind::HystereticBilinear] {
             for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
                 for trial_displacement in [1.0, 20.0] {
-                    let model = isolator_and_fiber_model(kind, friction);
+                    let model = damper_and_fiber_model(kind, damper_kind);
                     let dofmap = DofMap::build(&model);
                     let ctx = Ctx { model: &model };
                     let mut behaviors = real_batch(&model);
                     let mut du = LocalVec {
                         data: smallvec::smallvec![0.0;12],
                     };
-                    du.data[6] = 1.0;
+                    du.data[8] = 1.0;
                     behaviors[0].update_state(&du, true, &ctx).unwrap();
-                    du.data[6] = trial_displacement - 1.0;
+                    du.data[8] = trial_displacement - 1.0;
                     behaviors[0].update_state(&du, false, &ctx).unwrap();
                     let checkpoints: Vec<_> =
                         behaviors.iter().map(|b| b.serialize_checkpoint()).collect();
@@ -154,7 +150,7 @@ fn real_isolator_and_failed_fiber_ms_batch_preserves_uncommitted_state_in_both_m
                         .map(|b| b.tangent_stiffness(&ctx).data)
                         .collect();
                     let mut bad = vec![0.0; dofmap.n_active()];
-                    bad[dofmap.active(6).unwrap() as usize] = 30.0;
+                    bad[dofmap.active(8).unwrap() as usize] = 30.0;
                     bad[dofmap.active(3 * 6 + 3).unwrap() as usize] = f64::MAX;
                     let error =
                         apply_du_trial_mode(&model, &dofmap, &mut behaviors, &bad, parallel)
@@ -185,7 +181,7 @@ fn real_isolator_and_failed_fiber_ms_batch_preserves_uncommitted_state_in_both_m
                             .map(|b| b.tangent_stiffness(&ctx).data)
                             .collect();
                         let mut good = vec![0.0; dofmap.n_active()];
-                        good[dofmap.active(6).unwrap() as usize] = 5.0;
+                        good[dofmap.active(8).unwrap() as usize] = 5.0;
                         apply_du_trial_mode(&model, &dofmap, batch, &good, parallel).unwrap();
                         for (i, b) in batch.iter_mut().enumerate() {
                             b.revert_state();

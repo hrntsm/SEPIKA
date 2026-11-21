@@ -243,7 +243,7 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 ///
 /// 仕口パネルは採用柱の解決に失敗した場合も診断する。
 /// 弾性としてモデル化することが仕様である要素（`Shell` / `NodalSpring`、
-/// および特性を専用の属性で持つ `Isolator` / `Damper`）は対象外。
+/// および特性を専用の属性で持つ `Damper`）は対象外。
 /// ブレースは弾性トラスに必要な幾何・断面・材料だけを診断する。
 pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {
     nonlinear_input_issues_for_kind(model, sepika_core::model::AnalysisKind::Incremental)

@@ -183,15 +183,8 @@ pub(super) fn draw_support_symbol(
 }
 
 /// 支持条件シンボルの凡例をビュー左下に描く。
-/// `has_diaphragm` が真のとき剛床マーク、`has_spring` が真のとき支点ばね、
-/// `has_isolator` が真のとき免震支承の説明行を追加する（実際にモデル内に
-/// 存在する種別のみ表示。既存の支持記号凡例と同じ方針）。
-pub(super) fn draw_support_legend(
-    painter: &egui::Painter,
-    has_diaphragm: bool,
-    has_spring: bool,
-    has_isolator: bool,
-) {
+/// `has_diaphragm` と `has_spring` に応じて剛床マークと支点ばねの説明を表示する。
+pub(super) fn draw_support_legend(painter: &egui::Painter, has_diaphragm: bool, has_spring: bool) {
     let rect = painter.clip_rect();
     let x0 = rect.min.x + 10.0;
     let mut y0 = rect.max.y - 10.0;
@@ -201,22 +194,6 @@ pub(super) fn draw_support_legend(
             egui::pos2(x0, y0),
             egui::Align2::LEFT_BOTTOM,
             "剛床マーク: 面内拘束 (Ux/Uy/Rz)",
-            egui::FontId::proportional(11.0),
-            theme::GRAY_600,
-        );
-        y0 -= 16.0;
-    }
-
-    if has_isolator {
-        support_symbols::draw_isolator_marker(
-            painter,
-            egui::pos2(x0 + 10.0, y0 - 8.0),
-            theme::ISOLATOR_TEAL,
-        );
-        painter.text(
-            egui::pos2(x0 + 28.0, y0),
-            egui::Align2::LEFT_BOTTOM,
-            "免震支承",
             egui::FontId::proportional(11.0),
             theme::GRAY_600,
         );

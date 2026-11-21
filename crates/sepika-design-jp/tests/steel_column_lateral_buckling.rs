@@ -278,9 +278,9 @@ fn a_directly_connected_input_plate_requires_reconfirmation_after_an_edit() {
 }
 
 #[test]
-fn changing_the_stiffness_of_a_directly_connected_isolator_requires_reconfirmation() {
+fn changing_the_stiffness_of_a_directly_connected_damper_requires_reconfirmation() {
     use sepika_core::ids::{ElemId, NodeId};
-    use sepika_core::model::{ElementKind, IsolatorAttr, IsolatorProps};
+    use sepika_core::model::{DamperAttr, DamperProps, ElementKind};
     use sepika_design_jp::steel::column_lateral_buckling_length;
 
     let mut model = input::column(500.0, false);
@@ -288,16 +288,16 @@ fn changing_the_stiffness_of_a_directly_connected_isolator_requires_reconfirmati
     other_node.id = NodeId(2);
     other_node.coord[1] += 1000.0;
     model.nodes.push(other_node);
-    let mut isolator = model.elements[0].clone();
-    isolator.id = ElemId(1);
-    isolator.kind = ElementKind::Isolator;
-    isolator.nodes = [NodeId(1), NodeId(2)].into_iter().collect();
-    isolator.section = None;
-    isolator.end_offsets_mm = [[0.0; 3]; 2];
-    model.elements.push(isolator);
-    model.isolator_attrs.push(IsolatorAttr {
+    let mut damper = model.elements[0].clone();
+    damper.id = ElemId(1);
+    damper.kind = ElementKind::Damper;
+    damper.nodes = [NodeId(1), NodeId(2)].into_iter().collect();
+    damper.section = None;
+    damper.end_offsets_mm = [[0.0; 3]; 2];
+    model.elements.push(damper);
+    model.damper_attrs.push(DamperAttr {
         elem: ElemId(1),
-        props: IsolatorProps::default(),
+        props: DamperProps::default(),
     });
     model.steel_design_attrs[0].column_lateral_buckling_end_supports =
         Some(model.column_end_supports(&model.elements[0]).unwrap());
@@ -305,7 +305,7 @@ fn changing_the_stiffness_of_a_directly_connected_isolator_requires_reconfirmati
         column_lateral_buckling_length(model, &model.elements[0], model.steel_design_attrs.first())
     };
     assert_eq!(length(&model), Ok(3500.0));
-    model.isolator_attrs[0].props.k1 *= 0.5;
+    model.damper_attrs[0].props.kd *= 0.5;
     assert!(length(&model)
         .unwrap_err()
         .contains("実材端の条件が確認時から変わりました"));

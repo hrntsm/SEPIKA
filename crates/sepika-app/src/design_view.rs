@@ -1,6 +1,6 @@
 use crate::app::App;
 use sepika_core::units::to_display::{
-    area_load_kn_per_m2, force_kn, moment_kn_m, moment_kn_m_per_m, stiffness_kn_per_mm,
+    area_load_kn_per_m2, force_kn, moment_kn_m, moment_kn_m_per_m,
 };
 
 fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
@@ -548,63 +548,6 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 });
             },
         );
-    }
-
-    if !app.core.model.isolator_attrs.is_empty() {
-        ui.add_space(12.0);
-        ui.strong("免震支承材の非線形特性");
-        for a in &app.core.model.isolator_attrs {
-            let p = a.props;
-            let ks = sepika_design_jp::isolator::multi_shear_stiffness_reduction(p.n_springs);
-            let qs = sepika_design_jp::isolator::multi_shear_strength_reduction(p.n_springs);
-            use sepika_core::model::IsolatorKind;
-            let desc = match p.kind {
-                IsolatorKind::LaminatedRubber
-                | IsolatorKind::LeadRubber
-                | IsolatorKind::HighDampingRubber => {
-                    let disp = 200.0;
-                    let keq = sepika_design_jp::isolator::equivalent_stiffness(p.k2, p.qd, disp);
-                    let heq =
-                        sepika_design_jp::isolator::equivalent_damping(p.k1, p.k2, p.qd, disp);
-                    let kind_label = match p.kind {
-                        IsolatorKind::LeadRubber => "鉛プラグ積層ゴム(LRB)",
-                        IsolatorKind::HighDampingRubber => "高減衰ゴム(HDR)",
-                        _ => "天然ゴム積層ゴム",
-                    };
-                    let strain_dep = if p.total_rubber_thickness > 0.0
-                        && (p.ckd_gamma != [1.0, 0.0, 0.0] || p.cqd_gamma != [1.0, 0.0, 0.0])
-                    {
-                        format!("／ 歪依存 H={:.0}mm", p.total_rubber_thickness)
-                    } else {
-                        String::new()
-                    };
-                    format!(
-                        "{} K1={:.0}kN/mm K2={:.0}kN/mm Qd={:.0}kN Kv={:.0}kN/mm ／ δ=200mm時 keq={:.1}kN/mm Heq={:.3} {}",
-                        kind_label,
-                        stiffness_kn_per_mm(p.k1),
-                        stiffness_kn_per_mm(p.k2),
-                        force_kn(p.qd),
-                        stiffness_kn_per_mm(p.kv),
-                        stiffness_kn_per_mm(keq),
-                        heq,
-                        strain_dep
-                    )
-                }
-                IsolatorKind::ElasticSliding => format!(
-                    "弾性すべり μ={:.3} N={:.0}kN Qmax={:.0}kN Kv={:.0}kN/mm",
-                    p.mu,
-                    force_kn(p.n_long),
-                    force_kn(sepika_design_jp::isolator::friction_max_force(
-                        p.mu, p.n_long
-                    )),
-                    stiffness_kn_per_mm(p.kv)
-                ),
-            };
-            ui.label(format!(
-                "部材{}: {} ／ マルチシア n={} 剛性低減={:.4} 耐力低減={:.4}",
-                a.elem.0, desc, p.n_springs, ks, qs
-            ));
-        }
     }
 
     if !app.core.model.damper_attrs.is_empty() {
