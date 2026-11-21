@@ -578,7 +578,7 @@ fn ultimate_keeps_zero_shear_capacity_when_the_adopted_formula_has_no_reinforcem
             assert!(
                 partial
                     .detail
-                    .contains("Qbu=0 N, τbu=未算定, Qbu/Qmu=0.000"),
+                    .contains("Vbu=0 N, τbu=未算定, 付着余裕度 Vbu/|Qtotal|=0.000"),
                 "{partial:?}"
             );
 

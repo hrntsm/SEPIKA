@@ -90,7 +90,11 @@ fn round_main_bars_leave_bond_unchecked_and_keep_independent_capacities() {
                     assert!(reason.contains(expected), "{reason}");
                 }
                 assert!(result.detail.contains(ROUND_BOND_UNSUPPORTED));
-                assert!(result.detail.contains("Qbu=未算定"));
+                let unavailable = match shear_method {
+                    ShearMethod::Plastic => "Qbu=未算定",
+                    ShearMethod::Ductility => "Vbu=未算定",
+                };
+                assert!(result.detail.contains(unavailable), "{}", result.detail);
                 assert!(result.mu.is_finite() && result.mu > 0.0);
                 assert!(result.qsu.is_finite() && result.qsu > 0.0);
                 assert_eq!(result.mu, disabled.mu);

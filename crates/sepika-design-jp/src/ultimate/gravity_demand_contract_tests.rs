@@ -198,6 +198,19 @@ fn static_uniaxial_shear_checks_long_term_shear_when_hinge_demand_is_zero() {
         assert_eq!(result.shear_margin, margin, "QL={ql_n}");
         assert_eq!(result.ok, ok, "QL={ql_n}");
         assert_eq!(result.unchecked_reason, None);
+        assert!(
+            result.detail.contains("強軸の長期せん断力を耐力と直接比較"),
+            "{}",
+            result.detail
+        );
+        assert!(
+            result
+                .detail
+                .contains(&format!("強軸せん断余裕度={margin:.3}")),
+            "{}",
+            result.detail
+        );
+        assert!(!result.detail.contains("/Qmu"), "{}", result.detail);
     }
 }
 
@@ -250,6 +263,14 @@ fn static_bond_split_checks_long_term_shear_when_hinge_demand_is_zero() {
         assert_eq!(result.bond_margin, margin, "QL={ql_n}");
         assert_eq!(result.ok, ok, "QL={ql_n}");
         assert_eq!(result.unchecked_reason, None);
+        if include_bond {
+            assert!(
+                result.detail.contains(&format!("付着余裕度={margin:.3}")),
+                "{}",
+                result.detail
+            );
+            assert!(!result.detail.contains("/Qmu"), "{}", result.detail);
+        }
     }
 }
 

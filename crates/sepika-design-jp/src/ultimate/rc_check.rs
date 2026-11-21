@@ -44,15 +44,15 @@ pub struct UltimateCheck {
     pub kind: MemberKind,
     /// 曲げ終局強度 Mu [N·mm]。RC梁は適用未確認の参考値で、方向と理由は `detail` に示す。
     pub mu: f64,
-    /// 比較用せん断需要 Qmu [N]。静的RC柱は上限強度倍率·2·Mu/内法、確定総応答は総せん断力の絶対値。
+    /// 比較用せん断需要 [N]。静的RC柱は Qmu（上限強度倍率·2·Mu/内法）、確定総応答は |Qtotal|。
     /// 静的RC梁は未算定のため NaN。
     pub qmu: f64,
     /// 選択された [`ShearMethod`] に応じた終局せん断強度 Qsu/Vu `[N]`。
     pub qsu: f64,
-    /// 付着割裂による終局せん断耐力 Qbu `[N]`（`include_bond=false` なら 0）。
+    /// 選択された方式に応じた付着耐力 Qbu/Vbu `[N]`（`include_bond=false` なら 0）。
     pub qbu: f64,
-    /// 強軸のせん断余裕度。静的RC柱は max(Qsu−|QL|, 0)/Qmu、確定総応答は Qsu/Qmu。
-    /// Qmu が 0 の場合は無限大。ただし静的RC柱で |QL| が Qsu を超える場合は 0。
+    /// 強軸のせん断余裕度。静的RC柱は長期せん断を控除し、確定総応答は耐力を直接比較する。
+    /// 比較需要が 0 の場合は無限大。ただし静的RC柱で長期せん断力が耐力を超える場合は 0。
     /// 静的RC梁は長期せん断力だけで超過が確定した場合は 0、それ以外は NaN。
     pub shear_margin: f64,
     /// 二軸せん断余裕度。静的では両軸の長期せん断が明示的に 0、確定総応答では両軸の総せん断を使用できる場合に算定。
@@ -60,9 +60,9 @@ pub struct UltimateCheck {
     /// 2 軸曲げ余裕度（柱かつ `biaxial_bending=true` のとき Some）。
     /// `1/((Mmx/Mux)^2+(Mmy/Muy)^2)^(1/2)`。設計用曲げ需要が 0 なら `f64::INFINITY`。
     pub biaxial_bending_margin: Option<f64>,
-    /// 付着余裕度。静的RC柱は max(Qbu−|QL|, 0)/Qmu、確定総応答は Qbu/Qmu。
-    /// これらでは、付着が無効、または付着耐力が算定済みで Qmu が 0 なら無限大。
-    /// 静的RC柱で付着が有効かつ |QL| が Qbu を超える場合は 0、付着耐力が未算定の場合は NaN。
+    /// 付着余裕度。静的RC柱は長期せん断を控除し、確定総応答は耐力を直接比較する。
+    /// 付着が無効、または耐力が算定済みで比較需要が 0 なら無限大。
+    /// 静的RC柱で付着が有効かつ長期せん断力が耐力を超える場合は 0、耐力が未算定の場合は NaN。
     /// 静的RC梁は付着が有効で長期せん断力だけで超過が確定した場合は 0、それ以外は NaN。
     pub bond_margin: f64,
     /// 軸終局耐力（柱のみ Some）。
@@ -585,6 +585,7 @@ fn check_member(
         (true, false) => bond_strength(&p),
         (true, true) => (f64::NAN, f64::NAN),
     };
+    let (shear_symbol, bond_symbol) = opts.shear_method.capacity_symbols();
     if static_beam_rebar.is_some() {
         static_beam_reasons.extend(beam_reference);
         static_beam_reasons.extend(main_rebar_issue);
@@ -636,7 +637,9 @@ fn check_member(
             shear_margin: if shear_ng { 0.0 } else { f64::NAN },
             bond_margin: if bond_ng { 0.0 } else { f64::NAN },
             unchecked_reason: (!gravity_ng).then(|| reason.clone()),
-            detail: format!("Qsu={qsu_detail}, Qbu={qbu_detail}。{reason}"),
+            detail: format!(
+                "Qmu=未算定, {shear_symbol}={qsu_detail}, {bond_symbol}={qbu_detail}。{reason}"
+            ),
             ..unchecked_member(elem.id, kind, &reason)
         }));
     }
@@ -746,6 +749,38 @@ fn check_member(
         .filter(|_| kind == MemberKind::Column)
         .map(|fy| rc_column_axial_ultimate(p.b_dir, p.d_dir, fc, ag, fy));
 
+    let demand_symbol = demand.mode.strong_shear_demand_symbol();
+    let demand_detail = match demand.mode {
+        UltimateDemandMode::StaticHinge if qmu.is_nan() => {
+            format!("Qmu=未算定, QL={ql:.0} N（強軸）")
+        }
+        UltimateDemandMode::StaticHinge if qmu == 0.0 => {
+            format!("Qmu=0 N, QL={ql:.0} N（強軸の長期せん断力を耐力と直接比較）")
+        }
+        UltimateDemandMode::StaticHinge => {
+            format!("{demand_symbol}={qmu:.0} N, QL={ql:.0} N（強軸）")
+        }
+        UltimateDemandMode::ConfirmedTotal => {
+            format!("{demand_symbol}={qmu:.0} N（初期重力込み）")
+        }
+    };
+    let margin_label = |label: &str, capacity| {
+        if qmu > 0.0 {
+            format!(
+                "{label} {}",
+                demand.mode.strong_shear_margin_formula(capacity)
+            )
+        } else {
+            label.to_owned()
+        }
+    };
+    let shear_margin_label = margin_label("強軸せん断余裕度", shear_symbol);
+    let bond_margin_label = margin_label("付着余裕度", bond_symbol);
+    let shear_detail = if shear_strength.is_none() {
+        format!("{shear_symbol}=未算定, {shear_margin_label}=未算定")
+    } else {
+        format!("{shear_symbol}={qsu:.0} N, {shear_margin_label}={shear_margin:.3}")
+    };
     if let Some(reason) = main_rebar_issue {
         let reason =
             combine_incomplete_reasons(Some(reason), shear_rebar_issue.as_deref()).unwrap();
@@ -756,17 +791,19 @@ fn check_member(
         if shear_ng || biaxial_shear_ng || weak_shear_ng || bond_ng {
             check.unchecked_reason = None;
             check.qmu = qmu;
+            check.detail.push_str(&format!("。{demand_detail}"));
             if shear_ng || biaxial_shear_ng {
                 check.qsu = qsu;
                 check.shear_margin = shear_margin;
                 check.biaxial_shear_margin = biaxial_shear_margin.filter(|margin| *margin < 1.0);
+                check.detail.push_str(&format!("。{shear_detail}"));
                 if shear_ng {
                     check.detail.push_str("。強軸せん断耐力を超えます");
                 }
-                if biaxial_shear_ng {
-                    check
-                        .detail
-                        .push_str("。二軸せん断の組合せで耐力を超えます");
+                if let Some(margin) = check.biaxial_shear_margin {
+                    check.detail.push_str(&format!(
+                        "。二軸せん断の組合せで耐力を超えます（二軸せん断余裕度={margin:.3}）"
+                    ));
                 }
             }
             if weak_shear_ng {
@@ -777,7 +814,7 @@ fn check_member(
                 check.bond_margin = bond_margin;
                 check
                     .detail
-                    .push_str(&format!("。付着耐力を超えます（Qbu={qbu:.0} N）"));
+                    .push_str(&format!("。付着耐力を超えます（{bond_symbol}={qbu:.0} N, {bond_margin_label}={bond_margin:.3}）"));
                 if bond_zero_upper {
                     check.detail.push_str("。τbu=未算定");
                 }
@@ -803,22 +840,24 @@ fn check_member(
     let ok = checked_parts_ok && unchecked_reason.is_none();
 
     let shear_label = match opts.shear_method {
-        ShearMethod::Plastic => "塑性理論式 Qsu",
-        ShearMethod::Ductility => "靭性指針式 Vu",
+        ShearMethod::Plastic => "塑性理論式",
+        ShearMethod::Ductility => "靭性指針式",
     };
     let basis = match kind {
-        MemberKind::Column => format!("RC柱 終局検定（{shear_label}/Qbu）"),
-        _ => format!("RC梁 終局検定（{shear_label}/Qbu）"),
+        MemberKind::Column => {
+            format!("RC柱 終局検定（{shear_label} {shear_symbol}/{bond_symbol}）")
+        }
+        _ => format!("RC梁 終局検定（{shear_label} {shear_symbol}/{bond_symbol}）"),
     };
     let biaxial_str = match biaxial_shear_margin {
-        Some(m) => format!(", 2軸せん断余裕度={m:.3}"),
+        Some(m) => format!(", 二軸せん断余裕度={m:.3}"),
         None => String::new(),
     };
     let ql_str = if static_biaxial_shear {
         let weak = demand
             .q_long_weak
             .map_or_else(|| "未取得".into(), |q| q.abs().to_string());
-        format!(", 長期せん断[N] 強軸={ql}, 弱軸={weak}")
+        format!(", 弱軸の QL[N]={weak}")
     } else {
         String::new()
     };
@@ -830,20 +869,17 @@ fn check_member(
         (Some(reference), Some(reason)) => format!("{reference}。{reason}"),
         _ => format!("Mu={mu:.0} N·mm"),
     };
-    let shear_detail = if shear_strength.is_none() {
-        "Qsu=未算定, Qsu/Qmu=未算定".into()
-    } else {
-        format!("Qsu={qsu:.0} N, Qsu/Qmu={shear_margin:.3}")
-    };
     let bond_detail = if bond_unverified {
-        "Qbu=未算定, τbu=未算定, Qbu/Qmu=未算定".into()
+        format!("{bond_symbol}=未算定, τbu=未算定, {bond_margin_label}=未算定")
     } else if bond_zero_upper {
-        format!("Qbu={qbu:.0} N, τbu=未算定, Qbu/Qmu={bond_margin:.3}")
+        format!("{bond_symbol}={qbu:.0} N, τbu=未算定, {bond_margin_label}={bond_margin:.3}")
     } else {
-        format!("Qbu={qbu:.0} N, τbu={tau_bu:.3} N/mm², Qbu/Qmu={bond_margin:.3}")
+        format!(
+            "{bond_symbol}={qbu:.0} N, τbu={tau_bu:.3} N/mm², {bond_margin_label}={bond_margin:.3}"
+        )
     };
     let mut detail = format!(
-        "{bending_detail}, Qmu={qmu:.0} N, {shear_detail}, {bond_detail}\
+        "{bending_detail}, {demand_detail}, {shear_detail}, {bond_detail}\
          {biaxial_str}{bend_str}{ql_str}, pw={pw:.5}, jt={jt:.1} mm, L={l_clear} mm, Rp={rp:.4}",
     );
     if weak_shear_ng {
