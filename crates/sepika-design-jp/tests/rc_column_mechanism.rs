@@ -525,6 +525,39 @@ fn qd1_accounts_for_rigid_arm_moment_beyond_the_plan_direction_of_a_girder() {
 }
 
 #[test]
+fn qd1_keeps_the_orthogonal_girder_only_for_an_exactly_parallel_rigid_arm() {
+    let mut model = fixture::column_with_opposing_head_girders(
+        column::column_model(false, 0.0),
+        ElementKind::MultiSpring,
+    );
+    model.elements[COLUMN.index()].local_axis.ref_vector = [3500.0, 2300.0, 0.0];
+    model.nodes[3].coord[..2].copy_from_slice(&[-2300.0, 3500.0]);
+    model.nodes[4].coord[..2].copy_from_slice(&[-3500.0, -2300.0]);
+    let girder = &mut model.elements[fixture::GIRDER.index()];
+    girder.end_cond[0] = EndCondition::Pinned;
+    girder.rigid_zone.length_i = 100.0;
+    model.stress_cfg.consider_rigid_zones = true;
+    for (xy_mm, weak_qd1_n) in [
+        ([3500.0, 2300.0], 162_630.279_382_081),
+        ([5250.0, 3450.0], 162_630.279_382_081),
+        (
+            // 積を f64 で丸めると外積が 0 になる斜交例。
+            [
+                f64::from_bits(5250.0_f64.to_bits() - 4),
+                f64::from_bits(3450.0_f64.to_bits() - 5),
+            ],
+            189_308.326_858_618,
+        ),
+    ] {
+        model.nodes[2].coord[..2].copy_from_slice(&xy_mm);
+        model.validate().unwrap();
+        let [strong, weak] = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
+        assert_near(strong, reference::BOTH_COLUMN_ENDS_QD1_N, 1e-6);
+        assert_near(weak, weak_qd1_n, 1e-6);
+    }
+}
+
+#[test]
 fn qd1_uses_column_ends_when_xyz_offsets_make_the_girder_mechanism_uncertain() {
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),

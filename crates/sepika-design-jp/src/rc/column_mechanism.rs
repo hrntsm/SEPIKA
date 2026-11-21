@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use num_rational::BigRational;
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::geom::vec3::{cross, norm, sub};
 use sepika_core::ids::NodeId;
@@ -184,6 +185,23 @@ fn column_my_at_n(model: &Model, elem: &ElementData, n_axial: f64, strong: bool)
     Some(rc_column_mu_simple(&inp, as_total, n_axial))
 }
 
+fn axes_are_parallel(a: [f64; 3], b: [f64; 3]) -> bool {
+    if cross(a, b) != [0.0; 3] {
+        return false;
+    }
+    // 積を丸めると、実際には斜交する二方向の差も 0 になり得る。
+    let exact = |value| BigRational::from_float(value).expect("有限な材軸・曲げ軸成分");
+    [(0, 1), (1, 2), (2, 0)].into_iter().all(|(i, j)| {
+        let left_zero = a[i] == 0.0 || b[j] == 0.0;
+        let right_zero = a[j] == 0.0 || b[i] == 0.0;
+        if left_zero || right_zero {
+            left_zero && right_zero
+        } else {
+            exact(a[i]) * exact(b[j]) == exact(a[j]) * exact(b[i])
+        }
+    })
+}
+
 fn sum_beam_my_at_node(
     model: &Model,
     adjacency: &NodeAdjacency,
@@ -231,16 +249,14 @@ fn sum_beam_my_at_node(
         };
         let end_condition = other.end_cond[end];
         // 材軸方向の腕が柱の曲げ軸と平行な場合だけ、その軸まわりの付加曲げは生じない。
-        if end_condition != EndCondition::Fixed
-            && cross(actual_axis, column_bending_axis) != [0.0; 3]
-        {
+        if end_condition != EndCondition::Fixed {
             let rigid = model.analysis_rigid_zone(other);
             let (i, j) = resolve_lengths(
                 rigid.rigid_length_i(),
                 rigid.rigid_length_j(),
                 norm(actual_axis),
             );
-            if [i, j][end] > 0.0 {
+            if [i, j][end] > 0.0 && !axes_are_parallel(actual_axis, column_bending_axis) {
                 sum = None;
                 continue;
             }
@@ -426,6 +442,19 @@ fn column_mechanism_sum_my(
     let load_strong = horizontal_unit(ey)?;
     let load_weak = horizontal_unit(ez)?;
 
+    let [ref_x, ref_y, _] = column.local_axis.ref_vector;
+    let reference_h = [ref_x, ref_y, 0.0];
+    let reference_length = norm(reference_h);
+    // 幾何上の平行を、局所軸を単位化したときの丸めで失わないようにする。
+    let (bending_y, bending_z) = if p_i[..2] == p_j[..2]
+        && reference_length > 0.0
+        && ey == reference_h.map(|value| value / reference_length)
+    {
+        (reference_h, [-ref_y, ref_x, 0.0])
+    } else {
+        (ey, ez)
+    };
+
     let i_is_bottom = p_i[2] <= p_j[2];
     let design_n = design_axial(i_is_bottom);
     let (head, head_z_mm) = if i_is_bottom {
@@ -487,8 +516,8 @@ fn column_mechanism_sum_my(
     };
 
     Some(ColumnMechanism {
-        qy: sum_for(true, load_strong, load_weak, ez),
-        qz: sum_for(false, load_weak, load_strong, ey),
+        qy: sum_for(true, load_strong, load_weak, bending_z),
+        qz: sum_for(false, load_weak, load_strong, bending_y),
         missing_gravity_axial,
     })
 }
