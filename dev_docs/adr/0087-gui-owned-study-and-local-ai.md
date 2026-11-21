@@ -4,7 +4,7 @@ Status: partially superseded by ADR-0140
 
 [ADR 0140](0140-remove-mcp-and-local-ai.md) で外部 AI の接続と操作を廃止した。GUI の所有権と採用の判断は引き継ぐ。
 
-2026-10-28、[#972](https://github.com/hrntsm/SEPIKA/issues/972)・[#973](https://github.com/hrntsm/SEPIKA/issues/973)の判断として確定する。これは所有権・保存境界・接続方式の決定であり、製品への実装完了を意味しない。操作の決定記録は[申し送り](../handoff/UI検討_Issue973_決定記録.md)、実測の範囲は[接続実験](../v_and_v/UI検討_Issue973_接続確認.md)に分ける。
+2026-10-28、[#972](https://github.com/hrntsm/SEPIKA/issues/972)・[#973](https://github.com/hrntsm/SEPIKA/issues/973)の判断として確定する。これは所有権・保存境界・接続方式の決定であり、製品への実装完了を意味しない。当時の操作案は [Issue #973](https://github.com/hrntsm/SEPIKA/issues/973)、実測範囲は[接続実験](../v_and_v/UI検討_Issue973_接続確認.md)を参照する。
 
 ## 所有権と採用
 

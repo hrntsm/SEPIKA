@@ -782,7 +782,7 @@ mod tests {
     }
 
     /// 閉路 1 + 床板 2 枚。荷重同期の前に、大梁の区画（床領域）1 つへ帰属し直す
-    /// （床板そのものは畳まない。申し送り「床領域・壁領域の再設計」参照）。
+    /// （床板は個別に保持する）。
     #[test]
     fn prepare_groups_two_slabs_into_one_region_before_loads() {
         let mut model = Model::default();
@@ -953,8 +953,7 @@ mod tests {
     /// 回帰テスト。壁展開しないまま算定すると `model.elements` に壁要素が
     /// 0 件のため `rigid_zone_consider_walls`（既定 true。柱の袖壁・梁の腰壁/垂壁
     /// の張り出しを剛域長へ反映する技術基準の規定）が壁の有無に関わらず常に
-    /// 無効化されてしまう（`dev_docs/handoff/床領域・壁領域の再設計_申し送り.md`
-    /// §5.15 参照）。
+    /// 無効化されてしまう。
     ///
     /// 柱・梁を全周 RC にそろえる（`all_rc_src_at` が全節点で成立する構成に
     /// する）必要がある点に注意。RC/S 混在フレームでは「1 本でも S 系が

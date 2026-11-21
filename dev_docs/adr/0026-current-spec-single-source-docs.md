@@ -8,9 +8,9 @@ Status: partially superseded by ADR-0140
 外部AIの通信仕様と保存形式も、外部連携の利用者に必要な現行契約として `docs/` に含める。
 GUI未接続の計算は機能不足としてIssueへ計算資料とともに集約し、別の恒久仕様書に分離せず、GUI実装時に確定した根拠を `docs/` へ反映する。
 
-`dev_docs/` は、現在仕様そのものではなく、その背景にある設計判断（`dev_docs/adr/`）・検証（`dev_docs/v_and_v/`）・実装経緯と申し送り（`dev_docs/handoff/`）・開発者向けアーキテクチャ（`dev_docs/architecture.md`）に限る。同じ現在仕様を `docs/` と `dev_docs/` の両方へ重複して書かない。
+`dev_docs/` は、現在仕様そのものではなく、その背景にある設計判断（`dev_docs/adr/`）・検証（`dev_docs/v_and_v/`）・開発者向けアーキテクチャ（`dev_docs/architecture.md`）に限る。同じ現在仕様を `docs/` と `dev_docs/` の両方へ重複して書かない。通常の変更理由や経緯は該当するPR・コミットログに記録する。[#1746](https://github.com/hrntsm/SEPIKA/issues/1746)
 
-旧 `dev_docs/specs/` のフェーズ実装仕様書は廃止する。実装計画・タスク一覧・完了条件（DoD）・型シグネチャの写経指示は、現在も有効な仕様ではなく、置いておくと実装に追従できず古くなる。当時の計画は Issue・PR・git 履歴で参照する。現在仕様の不足は `docs/` へ、実装の背景と落とし穴は handoff へ、後から覆すコストの高い判断は ADR へ置く。
+旧 `dev_docs/specs/` のフェーズ実装仕様書は廃止する。実装計画・タスク一覧・完了条件（DoD）・型シグネチャの写経指示は、現在も有効な仕様ではなく、置いておくと実装に追従できず古くなる。当時の計画は Issue・PR・git 履歴で参照する。現在仕様の不足は `docs/` へ、後から覆すコストの高い判断は ADR へ置く。
 
 原典照合の管理は `dev_docs/v_and_v/原典照合リスト.md` を正本とする。
 

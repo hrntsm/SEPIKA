@@ -112,3 +112,11 @@ STBを依存に含めない一時Cargoプロジェクトで、`RcRectColumnRebar
 - `cargo run -p xtask --locked -- check-docs`：成功（summary124、links669、impl refs710）。`mdbook build`・`git diff --check`：成功。変更dev_docsの追加リンク・アンカー20件を別途確認した。
 - native径API追加後：`check-docs`成功（summary124、links671、impl refs710）、`mdbook build`成功。`git diff origin/main...HEAD --check`と作業ツリー込みの`git diff origin/main --check`成功。main比較差分の追加dev_docsリンク・アンカー21件を確認した。
 - 初回の一時probe・PDF画像は実行後に削除。追加native径probeは独立再実行確認までworktree内tmpに保持。恒久的な計算コード・テストの変更なし。材料強度割増のRustdocは、強度解決と係数算定の責務を混同させる記述だけを訂正した。
+
+## 後続の長期許容径境界の検証（Issue #961）
+
+- `material_strength::tests::rebar_long_term_tension_follows_article_90_diameter_boundary_mm`: 令90条表2と告示第1024号の独立期待値で28前後、D25/D29の整数保持値と公称直径、3材種の長短期値を検証する。
+- `rc::column::tests::public_column_check_uses_195_for_nominal_d29_diameter_mm`: 800×800 mm、Fc24、x=[6]/y=[4]、4面の中心65 mm、帯筋6.35 mm@100、N=-100 kN・Mz=1 kN·m、長期中央の公開入口を確認する。同じ幾何・需要で法令長期195のSD295Aと結果が一致することを検証する。N–M耐力・合成比そのものの独立正解を保証する試験ではない。
+- 当時のSTB試験 `test_standard_roundtrip_rc_rebar_non_integer` は数値径12.7/6.35の保持を、D22取込試験は呼び名整数の保持を検証した。[ADR 0141](../adr/0141-remove-st-bridge.md)によるST-Bridge廃止前の観測である。
+
+公開mm入力でも全断面・全材料の耐力の独立正解までは検証していない。廃止前のSTB仕様上の径解釈と、当時の整数保持による幾何・数量のJIS表との差もこの検証の範囲外である。

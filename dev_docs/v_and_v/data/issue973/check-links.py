@@ -6,10 +6,8 @@ root = Path(__file__).resolve().parents[4]
 files = [
     root / "CONTEXT.md",
     root / "dev_docs/adr/0087-gui-owned-study-and-local-ai.md",
-    root / "dev_docs/handoff/UI検討_Issue973_決定記録.md",
     root / "dev_docs/v_and_v/UI検討_Issue973_接続確認.md",
     root / "dev_docs/adr/README.md",
-    root / "dev_docs/handoff/README.md",
     root / "dev_docs/v_and_v/README.md",
     root / "dev_docs/v_and_v/未検証一覧.md",
 ]
@@ -31,14 +29,14 @@ for file in files:
             errors.append(f"{file.relative_to(root)}: missing {target}")
             continue
         if anchor and destination.suffix == ".md":
-            headings = re.findall(
-                r"^#+\s+(.+)$", destination.read_text(encoding="utf-8-sig"), re.M
-            )
+            markdown = destination.read_text(encoding="utf-8-sig")
+            headings = re.findall(r"^#+\s+(.+)$", markdown, re.M)
+            explicit_ids = re.findall(r'<[^>]+\bid="([^"]+)"', markdown)
             slugs = [
                 re.sub(r"[^\w\-\s]", "", heading.lower()).replace(" ", "-")
                 for heading in headings
             ]
-            if anchor not in slugs:
+            if anchor not in slugs and anchor not in explicit_ids:
                 errors.append(f"{file.relative_to(root)}: missing anchor {target}")
 print(f"Local links and anchors: {count} checked; {len(errors)} errors")
 for error in errors:

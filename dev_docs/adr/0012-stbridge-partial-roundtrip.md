@@ -7,4 +7,3 @@ ST-Bridge の取り込みは幾何・断面・部材・荷重までを対象と�
 Legacy source:
 - 初回設計書（#313 で廃止。git 履歴参照）§12.5
 - [廃止前の利用マニュアル](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/02_ST-Bridge_%E5%BD%A2%E5%BC%8F.md)（荷重は取り込みのみ）
-- `dev_docs/handoff/床領域・壁領域の再設計_申し送り.md` §3 D12

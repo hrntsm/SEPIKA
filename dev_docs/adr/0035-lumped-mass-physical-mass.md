@@ -73,4 +73,3 @@ Status: accepted
 - `crates/squid-n-job/src/lumped_mass.rs`
 - `crates/squid-n-solver/src/dynamic/lumped_mass/model.rs`
 - `docs/calc_basis/05_構造解析/10_質点系解析.md`
-- `dev_docs/handoff/質点系の物理質量化_Issue365_申し送り.md`

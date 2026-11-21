@@ -2648,7 +2648,7 @@ mod cascade_tests {
     /// さらに小梁 B を A の中央から右側の大梁へ架けたモデル。
     ///
     /// B の端点（A の中央）はどの大梁の材軸上にもないため、逐次伝達がないと B の
-    /// 反力は非構造節点で捨てられる（申し送り §3.4 F10）。
+    /// 反力は非構造節点で捨てられる。
     fn beam_on_beam_model() -> Model {
         let mk_node = |id: u32, x: f64, y: f64| Node {
             id: NodeId(id),

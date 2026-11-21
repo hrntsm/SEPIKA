@@ -4,7 +4,6 @@
 //!
 //! # 目的
 //!
-//! `dev_docs/handoff/床領域・壁領域の再設計_申し送り.md` §3.2 E8 で決めたとおり、
 //! 実フィクスチャ（`tests/fixtures/full_model.ovika`、`full_model.rs`）には壁要素が 0 件で、
 //! 壁関連の機能（`WallAttr` の開口低減・自重、取り付く壁版の自重配分）は
 //! いずれも単体テストでしか検証されていない。`Model.floor_regions`（26 件）を
@@ -867,9 +866,8 @@ fn wall_fixture_closed_columns_keep_real_properties_and_four_panel_connections()
     );
 }
 
-/// `App::run_design_check` が壁展開モデルを見ていることの回帰テスト（申し送り
-/// §5.15）。`run_member_design_checks`（内部の `joint_wiring::wall::check_walls`）
-/// は `results.member_forces` の壁 `ElemId` を `model.element` で引き直すため、
+/// `App::run_design_check` が壁展開モデルを見ていることの回帰テスト。
+/// `run_member_design_checks`（内部の `joint_wiring::wall::check_walls`）は `results.member_forces` の壁 `ElemId` を `model.element` で引き直すため、
 /// `self.model`（壁展開前）をそのまま渡すと該当 `ElemId` が見つからず
 /// `continue` し、耐震壁のせん断断面検定が常にスキップされる。
 #[test]

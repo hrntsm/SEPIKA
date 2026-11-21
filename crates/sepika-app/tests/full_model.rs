@@ -3137,8 +3137,8 @@ fn snapshot_key_scalars() {
 ///
 /// 二次部材は解析要素ではないため、その反力は節点荷重として出され
 /// `resolve_nodal_to_primary` が主架構の梁へ変換する。変換できない節点への荷重は
-/// `DofMap::build` が非構造節点として無視するため、**荷重が黙って消える**
-/// （申し送り §3.4 F10）。小梁の途中に別の小梁が取り付くモデルでこれが起こりうる。
+/// `DofMap::build` が非構造節点として無視するため、**荷重が黙って消える**。
+/// 小梁の途中に別の小梁が取り付くモデルでこれが起こりうる。
 #[test]
 fn slab_floor_load_reaches_primary_frame() {
     use sepika_load::secondary::{node_connected_flags, resolve_nodal_to_primary, SPAN_TOL_MM};

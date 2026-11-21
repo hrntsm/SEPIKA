@@ -38,7 +38,6 @@ Status: accepted
 - [RC 終局せん断（塑性理論式・靭性指針式）](../../docs/calc_basis/08_部材終局耐力/02_RC_終局せん断.md)
 
 Legacy source:
-- `dev_docs/handoff/高強度せん断補強筋の撤回_申し送り.md`
 - `dev_docs/v_and_v/断面検定_参照実装照合.md`（製品別 w_ft・pw 上限の当時の照合記録）
 - `dev_docs/v_and_v/終局検定_参照実装照合.md`（製品別 σwy・ν0・pw 上限の当時の照合記録）
 - `dev_docs/v_and_v/非線形モデル_参照実装照合.md`（κ=0.068 の当時の照合記録）
