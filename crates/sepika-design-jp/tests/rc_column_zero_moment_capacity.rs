@@ -292,77 +292,122 @@ fn time_history_without_seismic_design_shear_keeps_the_unchecked_bending_outcome
     }
 }
 
+fn assert_axial_overload_and_unchecked_bending(
+    report: &[(ElemId, f64, CheckOutcome)],
+    demand_n: f64,
+    limit_n: f64,
+    axial_ng: bool,
+) {
+    assert_eq!(report.len(), if axial_ng { 6 } else { 3 }, "{report:?}");
+    for xi in [0.0, 0.5, 1.0] {
+        let mut at_xi = report
+            .iter()
+            .filter(|(elem, pos, _)| *elem == ElemId(0) && *pos == xi);
+        if axial_ng {
+            let Some((_, _, CheckOutcome::Checked(result))) = at_xi.next() else {
+                panic!("{report:?}")
+            };
+            let [axial] = result.components.as_slice() else {
+                panic!("{result:?}")
+            };
+            assert_eq!(axial.kind, CheckKind::Axial);
+            assert!(!result.ok());
+            assert!((axial.ratio - 1.01).abs() < 1e-12, "{axial:?}");
+            let limit_label = if demand_n < 0.0 { "NA" } else { "NT" };
+            assert!(axial
+                .detail
+                .contains(&format!("{limit_label}={limit_n:.1} N")));
+            assert!(axial.detail.contains(&format!("N={:.1} N", -demand_n)));
+        }
+        let Some((_, _, CheckOutcome::Skipped { reason })) = at_xi.next() else {
+            panic!("{report:?}")
+        };
+        for field in ["NA=", "N=", "MA_z=0", "MA_y=0", "mz=", "my=", "検定不能"] {
+            assert!(reason.contains(field), "{reason}");
+        }
+        assert!(at_xi.next().is_none(), "{report:?}");
+    }
+}
+
 #[test]
 fn common_product_entry_rejects_nonzero_bending_at_zero_capacity() {
     for circle in [false, true] {
         let na_n = reference::axial_limit_n(circle);
         let model = column_model(circle, na_n);
-        for (factor, moments, expected_ok) in [
-            (0.99, [0.0, 0.0], true),
-            (0.99, [1.0, 0.0], true),
-            (0.99, [0.0, 1.0], true),
-            (0.99, [1.0, 1.0], true),
-            (1.0, [0.0, 0.0], true),
-            (1.0, [1_000_000.0, 0.0], false),
-            (1.0, [0.0, 2_000_000.0], false),
-            (1.0, [1_000_000.0, 2_000_000.0], false),
-            (1.01, [1_000_000.0, 0.0], false),
-            (1.01, [0.0, 2_000_000.0], false),
-            (1.01, [1_000_000.0, 2_000_000.0], false),
-            (1.01, [0.0, 0.0], false),
-        ] {
-            let forces = vec![(
-                ElemId(0),
-                MemberForces {
-                    at: [0.0, 0.5, 1.0]
-                        .into_iter()
-                        .map(|pos| (pos, [-factor * na_n, 0.0, 0.0, 0.0, moments[0], moments[1]]))
-                        .collect(),
-                },
-            )];
-            let report = run_member_design_checks(
-                &model,
-                &forces,
-                &[],
-                &MemberDesignCheckOptions {
-                    term: LoadTerm::Long,
-                    rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            assert_eq!(report.member_checks.len(), 3);
-            for (_, pos, outcome) in report.member_checks {
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            let limit_n = na_n * if term == LoadTerm::Long { 1.0 } else { 2.0 };
+            for (factor, moments, expected_ok) in [
+                (0.99, [0.0, 0.0], true),
+                (0.99, [1.0, 0.0], true),
+                (0.99, [0.0, 1.0], true),
+                (0.99, [1.0, 1.0], true),
+                (1.0, [0.0, 0.0], true),
+                (1.0, [1_000_000.0, 0.0], false),
+                (1.0, [0.0, 2_000_000.0], false),
+                (1.0, [1_000_000.0, 2_000_000.0], false),
+                (1.01, [1_000_000.0, 0.0], false),
+                (1.01, [0.0, 2_000_000.0], false),
+                (1.01, [1_000_000.0, 2_000_000.0], false),
+                (1.01, [0.0, 0.0], false),
+            ] {
+                let forces = vec![(
+                    ElemId(0),
+                    MemberForces {
+                        at: [0.0, 0.5, 1.0]
+                            .into_iter()
+                            .map(|pos| {
+                                (
+                                    pos,
+                                    [-factor * limit_n, 0.0, 0.0, 0.0, moments[0], moments[1]],
+                                )
+                            })
+                            .collect(),
+                    },
+                )];
+                let report = run_member_design_checks(
+                    &model,
+                    &forces,
+                    &[],
+                    &MemberDesignCheckOptions {
+                        term,
+                        rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
                 if factor >= 1.0 && moments != [0.0, 0.0] {
-                    let CheckOutcome::Skipped { reason } = outcome else {
-                        panic!("{outcome:?}")
-                    };
-                    for field in ["NA=", "N=", "MA_z=0", "MA_y=0", "mz=", "my=", "検定不能"] {
-                        assert!(reason.contains(field), "{reason}");
-                    }
+                    assert_axial_overload_and_unchecked_bending(
+                        &report.member_checks,
+                        -factor * limit_n,
+                        limit_n,
+                        factor > 1.0,
+                    );
                     continue;
                 }
-                let CheckOutcome::Checked(result) = outcome else {
-                    panic!("{outcome:?}")
-                };
-                let nm = result
-                    .components
-                    .iter()
-                    .find(|c| c.kind == CheckKind::AxialBending)
-                    .unwrap();
-                assert!((nm.ratio - factor).abs() < 1e-12);
-                assert_eq!(result.ok(), expected_ok);
-                assert!(result
-                    .components
-                    .iter()
-                    .filter(|c| c.kind != CheckKind::AxialBending)
-                    .all(|c| c.ratio <= 1.0));
-                if circle && factor >= 1.0 {
-                    assert!(nm.detail.contains("MA=0.0 N·mm"));
-                } else if !circle && factor >= 1.0 {
-                    assert!(nm.detail.contains("MA_z=0.0 N·mm, MA_y=0.0 N·mm"));
+                assert_eq!(report.member_checks.len(), 3);
+                for (_, pos, outcome) in report.member_checks {
+                    let CheckOutcome::Checked(result) = outcome else {
+                        panic!("{outcome:?}")
+                    };
+                    let nm = result
+                        .components
+                        .iter()
+                        .find(|c| c.kind == CheckKind::AxialBending)
+                        .unwrap();
+                    assert!((nm.ratio - factor).abs() < 1e-12);
+                    assert_eq!(result.ok(), expected_ok);
+                    assert!(result
+                        .components
+                        .iter()
+                        .filter(|c| c.kind != CheckKind::AxialBending)
+                        .all(|c| c.ratio <= 1.0));
+                    if circle && factor >= 1.0 {
+                        assert!(nm.detail.contains("MA=0.0 N·mm"));
+                    } else if !circle && factor >= 1.0 {
+                        assert!(nm.detail.contains("MA_z=0.0 N·mm, MA_y=0.0 N·mm"));
+                    }
+                    println!("circle={circle}, pos={pos}, factor={factor}, moments={moments:?}, ok={}, {}, {}", result.ok(), nm.detail, result.detail);
                 }
-                println!("circle={circle}, pos={pos}, factor={factor}, moments={moments:?}, ok={}, {}, {}", result.ok(), nm.detail, result.detail);
             }
         }
         let solved =
@@ -444,49 +489,46 @@ fn common_product_entry_checks_tension_against_all_main_bars_for_both_load_terms
                         },
                     )
                     .unwrap();
+                    if factor >= 0.99 && moments != [0.0, 0.0] {
+                        assert_axial_overload_and_unchecked_bending(
+                            &report.member_checks,
+                            factor * nt_n,
+                            nt_n,
+                            factor > 1.0,
+                        );
+                        continue;
+                    }
                     assert_eq!(report.member_checks.len(), 3);
                     for (_, _, outcome) in report.member_checks {
-                        if factor >= 0.99 && moments != [0.0, 0.0] {
-                            let CheckOutcome::Skipped { reason } = outcome else {
-                                panic!("{circle} {term:?} {factor} {outcome:?}")
-                            };
-                            assert!(
-                                reason.contains("検定不能")
-                                    && reason.contains("MA_z=0")
-                                    && reason.contains("MA_y=0"),
-                                "{reason}"
-                            );
-                        } else {
-                            let CheckOutcome::Checked(result) = outcome else {
-                                panic!("{circle} {term:?} {factor} {outcome:?}")
-                            };
-                            let nm = result
-                                .components
-                                .iter()
-                                .find(|c| c.kind == CheckKind::AxialBending)
-                                .unwrap();
-                            if moments == [0.0, 0.0] {
-                                let expected = if factor >= 0.0 {
-                                    factor
+                        let CheckOutcome::Checked(result) = outcome else {
+                            panic!("{circle} {term:?} {factor} {outcome:?}")
+                        };
+                        let nm = result
+                            .components
+                            .iter()
+                            .find(|c| c.kind == CheckKind::AxialBending)
+                            .unwrap();
+                        if moments == [0.0, 0.0] {
+                            let expected = if factor >= 0.0 {
+                                factor
+                            } else {
+                                let na_long_n = if circle {
+                                    2_515_988.458_924_536
                                 } else {
-                                    let na_long_n = if circle {
-                                        2_515_988.458_924_536
-                                    } else {
-                                        2_254_041.748_339_885
-                                    };
-                                    let na_n =
-                                        na_long_n * if term == LoadTerm::Long { 1.0 } else { 2.0 };
-                                    -factor * nt_n / na_n
+                                    2_254_041.748_339_885
                                 };
-                                assert!((nm.ratio - expected).abs() < 1e-12, "{nm:?}");
-                            }
-                            assert_eq!(
-                                result.ok(),
-                                factor <= 1.0,
-                                "{circle} {term:?} {factor} {result:?}"
-                            );
-                            assert!(nm.detail.contains("NT="));
+                                let na_n =
+                                    na_long_n * if term == LoadTerm::Long { 1.0 } else { 2.0 };
+                                -factor * nt_n / na_n
+                            };
+                            assert!((nm.ratio - expected).abs() < 1e-12, "{nm:?}");
                         }
+                        assert_eq!(
+                            result.ok(),
+                            factor <= 1.0,
+                            "{circle} {term:?} {factor} {result:?}"
+                        );
+                        assert!(nm.detail.contains("NT="));
                     }
                 }
             }
@@ -524,4 +566,44 @@ fn common_product_entry_checks_tension_against_all_main_bars_for_both_load_terms
             }
         }
     }
+}
+
+#[test]
+fn common_product_entry_retains_axial_ng_if_the_ratio_exceeds_f64_range() {
+    use sepika_core::section_shape::{RebarSize, SectionShape};
+
+    let mut model = column_model(false, 0.0);
+    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::DiameterMm(0.01);
+    model.validate().unwrap();
+    let forces = [(
+        ElemId(0),
+        MemberForces {
+            at: vec![(0.5, [f64::MAX, 0.0, 0.0, 0.0, 1_000_000.0, 0.0])],
+        },
+    )];
+    let report = run_member_design_checks(
+        &model,
+        &forces,
+        &[],
+        &MemberDesignCheckOptions {
+            rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let [(_, 0.5, CheckOutcome::Checked(result)), (_, 0.5, CheckOutcome::Skipped { reason })] =
+        report.member_checks.as_slice()
+    else {
+        panic!("{:?}", report.member_checks)
+    };
+    let [axial] = result.components.as_slice() else {
+        panic!("{result:?}")
+    };
+    assert_eq!(axial.kind, CheckKind::Axial);
+    assert_eq!(axial.ratio, f64::MAX);
+    assert!(axial.detail.contains("検定比の下限"), "{axial:?}");
+    assert!(reason.contains("許容曲げが非正"), "{reason}");
 }
