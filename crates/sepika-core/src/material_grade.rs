@@ -314,8 +314,8 @@ pub fn requires_direct_high_strength_main_rebar(
     ) || (!has_jis_rebar_strength_limit(mat, stb_grade) && mat.fy.is_some_and(|fy| fy > 490.0))
 }
 
-/// 保有水平耐力計算で梁・柱の主筋に使う材料の入力不備を返す。
-/// 高強度鉄筋の直接入力には、鉄筋区分、正の有限Fy [N/mm²]、明示の割増1.0が必要。
+/// 保有水平耐力計算で梁・柱の主筋に使う鉄筋区分の材料について、強度の入力不備を返す。
+/// 高強度鉄筋の直接入力には、正の有限Fy [N/mm²] と明示の割増1.0が必要。
 pub fn main_rebar_material_strength_issue(
     mat: &crate::model::Material,
     stb_grade: Option<&str>,
@@ -323,9 +323,7 @@ pub fn main_rebar_material_strength_issue(
     if !requires_direct_high_strength_main_rebar(mat, stb_grade) {
         return rebar_material_strength_issue(mat, stb_grade);
     }
-    let reason = if mat.category != crate::model::MaterialCategory::Rebar {
-        "主筋には材料区分が「鉄筋」の材料を割り当ててください"
-    } else if mat.fy.is_none_or(|fy| !fy.is_finite() || fy <= 0.0) {
+    let reason = if mat.fy.is_none_or(|fy| !fy.is_finite() || fy <= 0.0) {
         "Fy が未指定または不正です"
     } else if mat.strength_factor != Some(1.0) {
         "一般主筋の割増は適用できません"

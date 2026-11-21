@@ -233,13 +233,13 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 
 /// 非線形解析を開始できない部材の設定不備を列挙する（是正内容を示す日本語文）。
 ///
-/// 線材は、降伏の扱いにかかわらず鋼断面と主材料の区分の不一致を診断する。
+/// 線材は、降伏の扱いにかかわらず鋼断面の主材料と RC・SRC 梁柱の主筋材料の区分を診断する。
 /// 非線形解析で降伏を扱う要素は、次の強度入力も検査する:
 /// - 耐震壁（`Wall`）: 面内せん断の終局強度 Qu
 ///   （[`crate::wall::wall_element::WallElement::wall_shear_capacity_issue`]）
 /// - 線材（`Beam` / `Fiber` / `MultiSpring`）: 断面と主材料の適合、曲げ・せん断の終局耐力に要する材料強度
 ///
-/// 壁上下の剛梁は弾性剛性・形状・質量に必要な入力だけを検査する。
+/// 壁上下の剛梁は主筋材料の区分と、弾性剛性・形状・質量に必要な入力を検査する。
 ///
 /// 仕口パネルは採用柱の解決に失敗した場合も診断する。
 /// 弾性としてモデル化することが仕様である要素（`Shell` / `NodalSpring`、
@@ -409,7 +409,7 @@ pub(crate) fn member_rebar_material_strength_issue(
     model: &Model,
     basis: super::StrengthBasis,
 ) -> Option<String> {
-    if basis != super::StrengthBasis::MaterialStrength || !data.kind.is_primary_frame_support() {
+    if !data.kind.is_primary_frame_support() {
         return None;
     }
     let shape = model.element_section(data)?.shape.as_ref()?;
@@ -420,6 +420,19 @@ pub(crate) fn member_rebar_material_strength_issue(
         return None;
     }
     let (material, grade) = model.element_rebar_material_input(data)?;
+    if material.category != MaterialCategory::Rebar {
+        return Some(format!(
+            "部材 ID {} の主筋の材料 ID {}「{}」の区分は「{}」です。\
+             主筋には材料区分が「鉄筋」の材料を割り当ててください。",
+            data.id.0,
+            material.id.0,
+            material.name,
+            material.category.label()
+        ));
+    }
+    if basis != super::StrengthBasis::MaterialStrength {
+        return None;
+    }
     sepika_core::material_grade::main_rebar_material_strength_issue(material, grade)
         .map(|reason| format!("部材 ID {} の主筋の{reason}", data.id.0))
 }
@@ -508,6 +521,13 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
     };
     if let Some(msg) = category_mismatch_issue(data, sec, mat) {
         return Some(msg);
+    }
+    if elastic_wall_girder {
+        if let Some(issue) =
+            member_rebar_material_strength_issue(data, model, super::StrengthBasis::Nominal)
+        {
+            return Some(issue);
+        }
     }
     let shear_material = if sec.is_cft() {
         model.element_steel_material(data)
