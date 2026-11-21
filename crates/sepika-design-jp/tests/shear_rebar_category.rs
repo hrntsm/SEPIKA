@@ -15,7 +15,7 @@ use sepika_design_jp::ultimate::{
 };
 use sepika_design_jp::{
     run_member_design_checks, BondMethod, CheckComponent, CheckKind, CheckOutcome, LoadTerm,
-    MemberDesignCheckOptions, QdMethod,
+    MemberDesignCheckOptions, QdMethod, RcColumnLongTermShearInput,
 };
 use sepika_element::frame::beam::MemberForces;
 
@@ -132,6 +132,7 @@ fn allowable_rc_keeps_bending_and_cover_but_only_independent_bond_and_shear() {
                 let opts = MemberDesignCheckOptions {
                     term,
                     bond_method,
+                    rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
                     ..Default::default()
                 };
                 let (normal, _) = allowable(&model, demand, &opts);

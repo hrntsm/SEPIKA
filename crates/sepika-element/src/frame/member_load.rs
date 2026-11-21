@@ -6,6 +6,9 @@ use crate::transform::LocalFrame;
 use sepika_core::geom::vec3;
 use sepika_core::model::{MemberLoad, MemberLoadKind};
 
+mod shear_envelope;
+pub use shear_envelope::{frame_shear_envelope, FrameShearPeak, SectionSide};
+
 #[derive(Clone, Copy, Debug)]
 enum Comp {
     Point { a: f64, p: f64 },
@@ -576,11 +579,15 @@ fn comp_resultant(comp: &Comp, lo: f64, hi: f64) -> f64 {
             if h <= l {
                 return 0.0;
             }
-            let wl = w1 * ((b - l) / (b - a)) + w2 * ((l - a) / (b - a));
-            let wh = w1 * ((b - h) / (b - a)) + w2 * ((h - a) / (b - a));
+            let wl = distributed_intensity(a, b, w1, w2, l);
+            let wh = distributed_intensity(a, b, w1, w2, h);
             (h - l) * (wl * 0.5 + wh * 0.5)
         }
     }
+}
+
+fn distributed_intensity(a: f64, b: f64, w1: f64, w2: f64, x: f64) -> f64 {
+    w1 * ((b - x) / (b - a)) + w2 * ((x - a) / (b - a))
 }
 
 fn comp_moment(comp: &Comp, lo: f64, hi: f64, xref: f64) -> f64 {

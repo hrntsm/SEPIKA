@@ -2,7 +2,8 @@ use sepika_core::ids::{ElemId, LoadCaseId};
 use sepika_core::model::ElementKind;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, DesignCtx, LoadTerm,
-    MemberDesignCheckOptions, MemberForcesAt, MemberKind, QdMethod, RcDesign,
+    MemberDesignCheckOptions, MemberForcesAt, MemberKind, QdMethod, RcColumnLongTermShearInput,
+    RcDesign,
 };
 use sepika_element::frame::beam::MemberForces;
 
@@ -84,6 +85,7 @@ fn common_product_entry_retains_only_known_shear_ng_at_the_unchecked_position() 
                     term,
                     qd_method: QdMethod::Qd2,
                     long_member_forces: long.as_deref(),
+                    rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
                     ..Default::default()
                 },
             )
@@ -324,6 +326,7 @@ fn common_product_entry_rejects_nonzero_bending_at_zero_capacity() {
                 &[],
                 &MemberDesignCheckOptions {
                     term: LoadTerm::Long,
+                    rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
                     ..Default::default()
                 },
             )
@@ -383,6 +386,7 @@ fn common_product_entry_rejects_nonzero_bending_at_zero_capacity() {
             &solved.panel_moments,
             &MemberDesignCheckOptions {
                 term: LoadTerm::Long,
+                rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
                 ..Default::default()
             },
         )
@@ -435,6 +439,7 @@ fn common_product_entry_checks_tension_against_all_main_bars_for_both_load_terms
                         &[],
                         &MemberDesignCheckOptions {
                             term,
+                            rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
                             ..Default::default()
                         },
                     )
@@ -500,6 +505,7 @@ fn common_product_entry_checks_tension_against_all_main_bars_for_both_load_terms
                 &[],
                 &MemberDesignCheckOptions {
                     term,
+                    rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
                     ..Default::default()
                 },
             )

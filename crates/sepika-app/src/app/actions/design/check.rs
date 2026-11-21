@@ -242,6 +242,20 @@ impl App {
             }
             None => None,
         };
+        use sepika_design_jp::RcColumnLongTermShearInput;
+        let rc_column_long_term_shear = if state
+            .as_ref()
+            .is_ok_and(|state| state.duration == sepika_core::load_combo::LoadDuration::Long)
+            && selected_response
+                .is_some_and(|response| response.member_forces == results.member_forces)
+        {
+            selected_combo_name.map_or(
+                RcColumnLongTermShearInput::SingleCase,
+                RcColumnLongTermShearInput::SavedCombination,
+            )
+        } else {
+            RcColumnLongTermShearInput::Unverified
+        };
         let frame_report = if frame_design_requested {
             sepika_design_jp::run_member_design_checks(
                 design_model,
@@ -254,6 +268,7 @@ impl App {
                     wall_index: wall_index.as_ref(),
                     wall_case: &wall_case,
                     load_terms: load_terms.as_deref(),
+                    rc_column_long_term_shear,
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,
                     qd_method: self.core.analysis_cfg.qd_method,
