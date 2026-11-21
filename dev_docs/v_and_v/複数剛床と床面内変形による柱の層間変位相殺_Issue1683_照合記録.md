@@ -104,4 +104,4 @@ cargo test --locked -p sepika-design-jp --test multi_floor_torsional_cancellatio
 
 基点 `4db6848a` に本変更を適用し、WindowsのRust 1.100.0で上記再現試験2件、先行の相殺試験を含むsepika-design-jpの全950試験、同クレートの全ターゲットClippy、`xtask check-docs`、`mdbook build docs`、変更文書のローカルリンクとアンカー、`git diff --check` の成功を確認した。Cargoでは既存の未使用ワークスペース依存宣言 `schemars` の警告が出た。
 
-実建物の一次設計用載荷、床の諸元・メッシュの感度、複数層、壁・ブレース、非線形域、設計用剛心・弾力半径の妥当性確認、GUIと実験Validationは未確認。二次元線形せん断型質点系で「柱 ki」を選ぶと同じ方向別柱比を集計する。質点系の公開生成と応答への影響、その保留条件は [#1701](https://github.com/hrntsm/SEPIKA/issues/1701) で追跡する。
+実建物の一次設計用載荷、床の諸元・メッシュの感度、複数層、壁・ブレース、非線形域、設計用剛心・弾力半径の妥当性確認、GUIと実験Validationは未確認。二次元線形せん断型質点系で「柱 ki」を選ぶと同じ方向別柱比を集計する。質点系の公開生成、ばね剛性と周期への影響は [#1701 の照合記録](複数剛床とシェル床の二次元質点系層剛性_Issue1701_照合記録.md)を参照する。
