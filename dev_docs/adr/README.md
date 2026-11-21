@@ -197,6 +197,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0136](0136-coupled-story-rigidity.md) | accepted | 方向間連成層の剛心とねじり剛性を剛床応答から求める |
 | [0137](0137-column-axial-force-gravity-center.md) | accepted | 長期軸力重心には柱頭の層側断面の材軸圧縮力を使う |
 | [0138](0138-common-planar-column-drift.md) | accepted | 二次元線形せん断型の柱剛性に加力方向の共通層間変位を求める |
+| [0139](0139-rc-beam-ultimate-shear-demand.md) | accepted | RC矩形梁の要求せん断力の上側評価を静的終局検定の条件とする |
 
 ## 規約
 
