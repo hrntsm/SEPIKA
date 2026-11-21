@@ -190,6 +190,55 @@ pub(super) fn restore(
 }
 
 #[test]
+fn 検定版95の旧水平接合面検定は読込時に失効する() {
+    use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+
+    let mut app = calculated();
+    let basis = "PCa 水平接合面（使用限界状態）せん断検定";
+    let saved = app.core.scoped.results.as_mut().unwrap();
+    saved.member_checks[0].positions.push(PositionCheck {
+        xi: 0.5,
+        outcome: CheckOutcome::Checked(CheckResult {
+            basis: basis.into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Shear,
+                ratio: 1.2,
+                detail: String::new(),
+            }],
+        }),
+    });
+    let forces = saved.member_forces.clone();
+
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(95),
+        "1790-design95",
+    );
+    let bundle = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(bundle.member_forces, forces);
+    assert!(bundle.member_checks.is_empty());
+    assert!(loaded.core.scoped.staleness.design_stale);
+    assert!(!crate::summary::build_report_csv(&loaded).contains(basis));
+
+    loaded.run_design_check();
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    let bundle = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        bundle.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert!(!bundle.member_checks.is_empty());
+    assert!(!crate::summary::build_report_csv(&loaded).contains(basis));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_results() {
     let app = calculated();
     for (name, version, reason) in [

@@ -10,8 +10,6 @@ mod clear_span;
 mod column;
 /// RC 柱の短期設計せん断力用 ΣMy（崩壊メカニズム判定）。
 pub mod column_mechanism;
-/// 鉄筋コンクリート造水平接合面の検討（PCa 打継ぎ面のせん断検定）。
-pub mod horizontal_joint;
 pub mod joint;
 mod provisions;
 pub mod wall;

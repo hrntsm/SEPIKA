@@ -21,7 +21,6 @@ macro_rules! for_each_elem_attr_collection {
         $visit!(wall_attrs, elem, WALL_ATTR_LABEL);
         $visit!(steel_design_attrs, elem, STEEL_DESIGN_ATTR_LABEL);
         $visit!(slab_composite_attrs);
-        $visit!(pca_attrs, elem, "PCa梁属性");
         $visit!(member_hysteresis_attrs, elem, MEMBER_HYSTERESIS_ATTR_LABEL);
         $visit!(damper_attrs, elem, DAMPER_ATTR_LABEL);
         $visit!(member_detail_attrs, elem, MEMBER_DETAIL_ATTR_LABEL);
@@ -39,7 +38,6 @@ pub struct ElemAttrs {
     pub wall: Vec<(usize, WallAttr)>,
     /// 元の配列位置と鉄骨部材の検定属性。
     pub steel_design: Vec<(usize, SteelDesignAttr)>,
-    pub pca: Option<PcaGirderAttr>,
     /// 元の配列位置と部材の履歴則指定。
     pub hysteresis: Vec<(usize, MemberHysteresisAttr)>,
     /// 元の配列位置と制振ダンパー属性。
@@ -125,9 +123,6 @@ pub struct Model {
     /// 鋼構造設計規準）。
     #[serde(default)]
     pub steel_design_attrs: Vec<SteelDesignAttr>,
-    /// PCa（プレキャスト）梁の水平接合面検定用属性（水平接合面のせん断摩擦検定）。
-    #[serde(default)]
-    pub pca_attrs: Vec<PcaGirderAttr>,
     /// 部材の履歴則の個別指定（各履歴則の原典）。
     /// 未指定の部材は構造種別ごとの既定（[`default_member_hysteresis`]）に従う。
     #[serde(default)]
@@ -1317,7 +1312,6 @@ impl Model {
             && self.stress_cfg == other.stress_cfg
             && self.steel_design_attrs == other.steel_design_attrs
             && self.slab_composite_attrs == other.slab_composite_attrs
-            && self.pca_attrs == other.pca_attrs
             && self.unassigned_beams == other.unassigned_beams
             && self.unassigned_posts == other.unassigned_posts
             && self.axes == other.axes
@@ -1776,12 +1770,6 @@ impl Model {
 
     /// 指定要素に紐づく全ての側テーブル属性を取り外して返す（要素削除時の退避用）。
     pub fn take_elem_attrs(&mut self, elem: ElemId) -> ElemAttrs {
-        /// `elem` フィールドが一致する最初の要素を取り外して返す。
-        fn take_first<T>(v: &mut Vec<T>, get: impl Fn(&T) -> ElemId, elem: ElemId) -> Option<T> {
-            v.iter()
-                .position(|a| get(a) == elem)
-                .map(|pos| v.remove(pos))
-        }
         fn take_ordered<T, V>(
             entries: &mut Vec<T>,
             mut removed_value: impl FnMut(&T) -> Option<V>,
@@ -1824,7 +1812,6 @@ impl Model {
                 (attr.elem == elem).then(|| attr.clone())
             }),
             slab_composite: self.slab_composite_attrs.remove(&elem),
-            pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
             hysteresis: take_ordered(&mut self.member_hysteresis_attrs, |attr| {
                 (attr.elem == elem).then_some(*attr)
             }),
@@ -1855,10 +1842,6 @@ impl Model {
         }
         if let Some(connection) = attrs.slab_composite {
             self.slab_composite_attrs.insert(elem, connection);
-        }
-        if let Some(mut a) = attrs.pca {
-            a.elem = elem;
-            self.pca_attrs.push(a);
         }
         for (index, mut attr) in attrs.hysteresis {
             attr.elem = elem;

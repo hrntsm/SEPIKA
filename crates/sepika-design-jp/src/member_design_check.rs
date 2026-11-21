@@ -6,7 +6,7 @@
 //! - 部材単位の [`crate::DesignCtx`] 組み立て（部材長・座屈長さ・せん断スパン比代表値等）
 //! - 構造種別に応じた [`crate::checker_for`] による検定器選択
 //! - 危険断面位置（[`crate::design_position`]）での断面検定ループ
-//! - 節点単位検定（[`crate::joint_wiring`]）と PCa 水平接合面（[`crate::rc::horizontal_joint`]）
+//! - 節点単位検定（[`crate::joint_wiring`]）
 //!
 //! 呼び出し側は解析結果（部材内力・パネルモーメント）と
 //! [`MemberDesignCheckOptions`] を渡す。地震時短期 QD 割増・一本部材グループ合成・
@@ -80,7 +80,7 @@ pub struct MemberDesignCheckOptions<'a> {
 /// 部材断面検定オーケストレーションの結果。
 #[derive(Clone, Debug, Default)]
 pub struct MemberDesignCheckReport {
-    /// 部材断面検定（危険断面位置・PCa 水平接合面を含む）。
+    /// 部材断面検定（危険断面位置を含む）。
     /// RC・SRC・CFTでねじりモーメントが非零または非有限の位置には未算定行を返す。
     pub member_checks: Vec<(ElemId, f64, CheckOutcome)>,
     /// 必要横補剛箇所数の参考結果。検定比・合否には含めない。
@@ -259,7 +259,7 @@ pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
 /// 部材内力に対する許容応力度検定を一括実行する。
 ///
 /// 部材ループ（DesignCtx 組み立て → 危険断面位置での検定）のほか、
-/// 大梁の長期たわみ、PCa 水平接合面検定と節点単位検定も含む。床の小梁・スラブ設計は
+/// 大梁の長期たわみと節点単位検定も含む。床の小梁・スラブ設計は
 /// 呼び出し側（`sepika-app`）の責務とする。鋼材入力不備は対象ID付きエラー。
 pub fn run_member_design_checks(
     model: &Model,
@@ -737,12 +737,6 @@ pub fn run_member_design_checks(
                 .map(|(id, mf)| (*id, mf.at.as_slice()))
                 .collect()
         });
-
-    member_checks.extend(crate::rc::horizontal_joint::collect_pca_checks(
-        model,
-        &mf_slices,
-        options.term == LoadTerm::Long,
-    ));
 
     // 同じ位置の既存行を先に置き、たわみ算定可否で比較時の順序を変えない。
     member_checks.extend(standalone_deflection_checks);
