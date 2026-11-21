@@ -1,7 +1,11 @@
 //! RC 柱の短期設計せん断力用 ΣMy（崩壊メカニズム判定）。
 
+use std::collections::HashSet;
+
 use sepika_core::adjacency::NodeAdjacency;
-use sepika_core::model::{ElementData, ElementKind, Material, Model};
+use sepika_core::dof::{DofMap, DOF_PER_NODE};
+use sepika_core::ids::NodeId;
+use sepika_core::model::{Constraint, ElementData, ElementKind, Material, Model};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::transform::LocalFrame;
@@ -35,6 +39,8 @@ pub fn resolve_column_end_hinge(
 }
 
 /// 両端ヒンジから ΣMy を組み立てる。両端とも梁降伏なら下端を柱降伏へ落とす。
+/// 柱頭の梁寄与に係数を掛ける。係数が `None` の柱頭は柱降伏とする。
+#[allow(clippy::too_many_arguments)]
 pub fn sum_my_from_end_hinges(
     hinge_i: ColumnEndHinge,
     hinge_j: ColumnEndHinge,
@@ -43,6 +49,7 @@ pub fn sum_my_from_end_hinges(
     sum_beam_my_i: f64,
     sum_beam_my_j: f64,
     i_is_bottom: bool,
+    head_beam_factor: Option<f64>,
 ) -> f64 {
     let (mut hi, mut hj) = (hinge_i, hinge_j);
     if hi == ColumnEndHinge::Beam && hj == ColumnEndHinge::Beam {
@@ -52,11 +59,17 @@ pub fn sum_my_from_end_hinges(
             hj = ColumnEndHinge::Column;
         }
     }
-    let contrib = |h: ColumnEndHinge, col_my: f64, beam_sum: f64| match h {
-        ColumnEndHinge::Column => col_my,
-        ColumnEndHinge::Beam => 0.5 * beam_sum,
+    let contrib = |h, col_my, beam_sum, beam_factor: Option<f64>| match (h, beam_factor) {
+        (ColumnEndHinge::Beam, Some(factor)) => factor * beam_sum,
+        _ => col_my,
     };
-    contrib(hi, column_my_i, sum_beam_my_i) + contrib(hj, column_my_j, sum_beam_my_j)
+    let (factor_i, factor_j) = if i_is_bottom {
+        (Some(0.5), head_beam_factor)
+    } else {
+        (head_beam_factor, Some(0.5))
+    };
+    contrib(hi, column_my_i, sum_beam_my_i, factor_i)
+        + contrib(hj, column_my_j, sum_beam_my_j, factor_j)
 }
 
 /// 設計軸力 N = NL + n·|NE|（圧縮正）。`n` は引張正の部材軸力。
@@ -170,7 +183,7 @@ fn column_my_at_n(model: &Model, elem: &ElementData, n_axial: f64, strong: bool)
 fn sum_beam_my_at_node(
     model: &Model,
     adjacency: &NodeAdjacency,
-    node: sepika_core::ids::NodeId,
+    node: NodeId,
     load_h: [f64; 2],
     peer_h: [f64; 2],
     prefer_on_tie: bool,
@@ -222,6 +235,79 @@ fn sum_beam_my_at_node(
     Ok(sum)
 }
 
+/// 柱の方向別降伏モーメント和を求めるモデルの接続情報。
+pub struct ColumnMechanismTopology {
+    frame: NodeAdjacency,
+    linked_nodes: HashSet<NodeId>,
+}
+
+impl ColumnMechanismTopology {
+    /// 検定対象モデルの主架構線材と、別節点との連結拘束を索引化する。
+    pub fn new(model: &Model) -> Self {
+        let mut linked_nodes = HashSet::new();
+        let mut dof_map = None;
+        let mut both_active = |a: NodeId, b: NodeId, dof: usize| {
+            if a == b {
+                return false;
+            }
+            let map = dof_map.get_or_insert_with(|| DofMap::build(model));
+            [a, b].into_iter().all(|node| {
+                let global_dof = node.index() * DOF_PER_NODE + dof;
+                map.is_node_dof(global_dof) && map.active(global_dof).is_some()
+            })
+        };
+        for constraint in &model.constraints {
+            match constraint {
+                Constraint::RigidLink {
+                    master,
+                    slaves,
+                    dofs,
+                } => {
+                    for &slave in slaves {
+                        if (0..DOF_PER_NODE)
+                            .any(|d| dofs.0 & (1 << d) != 0 && both_active(*master, slave, d))
+                        {
+                            linked_nodes.extend([*master, slave]);
+                        }
+                    }
+                }
+                Constraint::Mpc { master, terms } => {
+                    for &(node, dof, factor) in terms {
+                        if factor != 0.0 && both_active(*master, node, dof as usize) {
+                            linked_nodes.extend([*master, node]);
+                        }
+                    }
+                }
+                Constraint::RigidDiaphragm { .. } => {}
+            }
+        }
+        Self {
+            frame: NodeAdjacency::primary_frame(model),
+            linked_nodes,
+        }
+    }
+
+    fn head_beam_factor(&self, model: &Model, head: NodeId, head_z_mm: f64) -> Option<f64> {
+        let has_upper_column = self.frame.elements_at(model, head).any(|elem| {
+            matches!(
+                MemberKind::try_of_element(elem, model),
+                Ok(MemberKind::Column)
+            ) && elem.nodes.iter().take(2).any(|&node| {
+                model
+                    .node(node)
+                    .is_some_and(|node| node.coord[2] > head_z_mm)
+            })
+        });
+        if has_upper_column {
+            Some(0.5)
+        } else if self.linked_nodes.contains(&head) {
+            None
+        } else {
+            Some(1.0)
+        }
+    }
+}
+
 /// RC 柱の方向別降伏モーメント和 [N·mm]。 `Ok(None)` は柱 My 未算定、
 /// `Err` は接続大梁の主筋材料区分が不適合で、その方向の QD1 が未算定。
 #[derive(Clone, Debug)]
@@ -234,11 +320,11 @@ pub struct ColumnMechanism {
 
 /// 柱のメカニズム ΣMy [N·mm]。方向別に算定値または材料区分の不適合を返す。
 /// `n_*` は引張正。
-/// `model` は `Model::validate_local_frames` 済みを前提とする。
+/// `model` は `Model::validate_local_frames` 済みとし、そのモデルの `topology` を渡す。
 #[allow(clippy::too_many_arguments)]
 pub fn compute_column_mechanism_sum_my(
     model: &Model,
-    adjacency: &NodeAdjacency,
+    topology: &ColumnMechanismTopology,
     column: &ElementData,
     n_long_i: f64,
     n_long_j: f64,
@@ -271,16 +357,24 @@ pub fn compute_column_mechanism_sum_my(
     let n_i = design_axial_for_mechanism(n_long_i, n_combo_i, n_axial_factor);
     let n_j = design_axial_for_mechanism(n_long_j, n_combo_j, n_axial_factor);
     let i_is_bottom = p_i[2] <= p_j[2];
+    let (head, head_z_mm) = if i_is_bottom {
+        (nj, p_j[2])
+    } else {
+        (ni, p_i[2])
+    };
+    let head_beam_factor = topology.head_beam_factor(model, head, head_z_mm);
 
     let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2]| {
         let beam_sum = |node| {
-            sum_beam_my_at_node(model, adjacency, node, load_h, peer_h, strong).map_err(|reason| {
-                let axis = if strong { "Qy" } else { "Qz" };
-                format!(
-                    "RC柱 ID {} の {axis} 方向のせん断検定: {reason}",
-                    column.id.0
-                )
-            })
+            sum_beam_my_at_node(model, &topology.frame, node, load_h, peer_h, strong).map_err(
+                |reason| {
+                    let axis = if strong { "Qy" } else { "Qz" };
+                    format!(
+                        "RC柱 ID {} の {axis} 方向のせん断検定: {reason}",
+                        column.id.0
+                    )
+                },
+            )
         };
         let beam_i = beam_sum(ni)?;
         let beam_j = beam_sum(nj)?;
@@ -302,6 +396,7 @@ pub fn compute_column_mechanism_sum_my(
                     bi,
                     bj,
                     i_is_bottom,
+                    head_beam_factor,
                 )))
             }
             _ => Ok(Some(col_i + col_j)),
@@ -349,6 +444,7 @@ mod tests {
             300.0,
             400.0,
             true,
+            Some(0.5),
         );
         assert!((s - (100.0 + 0.5 * 400.0)).abs() < 1e-9, "s={s}");
     }
@@ -364,6 +460,7 @@ mod tests {
             300.0,
             400.0,
             true,
+            Some(0.5),
         );
         assert!((s - (100.0 + 200.0)).abs() < 1e-9);
     }
@@ -501,7 +598,7 @@ mod tests {
         };
         model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
 
-        let adj = NodeAdjacency::build(&model);
+        let adj = ColumnMechanismTopology::new(&model);
         let sum = compute_column_mechanism_sum_my(
             &model,
             &adj,
@@ -604,7 +701,7 @@ mod tests {
     }
 
     fn sum_my_of(model: &Model) -> (Option<f64>, Option<f64>) {
-        let adj = NodeAdjacency::build(model);
+        let adj = ColumnMechanismTopology::new(model);
         let sum_my = compute_column_mechanism_sum_my(
             model,
             &adj,
@@ -751,8 +848,8 @@ mod tests {
         let col_my = 0.8 * 4.0 * a1 * sigma_y * 700.0;
         let beam_bottom = 0.9 * 2.0 * a1 * sigma_y * 539.0;
         let beam_top = 0.9 * 4.0 * a1 * sigma_y * 539.0;
-        let expected = col_my + 0.5 * beam_top;
-        let if_bottom_tension = col_my + 0.5 * beam_bottom;
+        let expected = col_my + beam_top;
+        let if_bottom_tension = col_my + beam_bottom;
         assert!((s - expected).abs() < 1e-6, "s={s}, expected={expected}");
         assert!(
             (s - if_bottom_tension).abs() > 1.0,
