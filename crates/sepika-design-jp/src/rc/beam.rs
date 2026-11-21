@@ -144,6 +144,7 @@ pub(crate) fn beam_check(
     rebar: &RcBeamRebar,
     fc_raw: f64,
     main_rebar_valid: bool,
+    shear_rebar_valid: bool,
     shear_reference_valid: bool,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
@@ -162,7 +163,7 @@ pub(crate) fn beam_check(
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
-        shear_rebar_grade(ctx.shear_rebar_material.as_ref()),
+        shear_rebar_valid.then(|| shear_rebar_grade(ctx.shear_rebar_material.as_ref())),
         long_term,
     );
 
@@ -230,7 +231,7 @@ pub(crate) fn beam_check(
     } else {
         Some(forces.qy.abs())
     };
-    if let Some(q_design) = q_design {
+    if let Some((q_design, qa)) = q_design.zip(qa) {
         components.push(CheckComponent {
             kind: CheckKind::Shear,
             ratio: if qa > 0.0 { q_design / qa } else { 0.0 },
@@ -243,7 +244,13 @@ pub(crate) fn beam_check(
 
     let (ratio_bond, bond_detail) =
         match (ctx.bond_method, deformed_rebar, q_design) {
-            (BondMethod::Rc1999, Some(deformed_rebar), _) => {
+            (BondMethod::Rc1999, Some(deformed_rebar), _)
+                if shear_rebar_valid
+                    || long_term
+                    || info.shear_pitch <= 0.0
+                    || info.shear_legs == 0
+                    || info.shear_dia.area_mm2() == 0.0 =>
+            {
                 let bond = rc_beam_bond_check_with_rebar(
                     forces.pos,
                     ctx.length,
@@ -319,7 +326,7 @@ pub(crate) fn beam_check(
         props.at,
         props.d,
         props.j,
-        if bond_detail.is_some() || !main_rebar_valid {
+        if bond_detail.is_some() || !main_rebar_valid || !shear_rebar_valid {
             ""
         } else {
             ", 付着検定: 部材長(柱面間距離)が未設定、または入力不足のため省略"
@@ -391,7 +398,7 @@ mod tests {
         let SectionShape::RcBeamRect { rebar, .. } = shape else {
             unreachable!()
         };
-        beam_check(forces, mat, ctx, shape, rebar, 24.0, true, true).unwrap_checked()
+        beam_check(forces, mat, ctx, shape, rebar, 24.0, true, true, true).unwrap_checked()
     }
 
     #[test]

@@ -13,16 +13,21 @@ pub(crate) struct RcAllow {
     /// コンクリート許容せん断応力度 fs [N/mm²]。
     pub(crate) fs: f64,
     /// せん断補強筋許容引張応力度 w_ft [N/mm²]。
-    pub(crate) w_ft: f64,
+    pub(crate) w_ft: Option<f64>,
     /// ヤング係数比 n。
     pub(crate) n_ratio: f64,
 }
 
-pub(crate) fn rc_allow(fc_raw: f64, class: ConcreteClass, grade: &str, long_term: bool) -> RcAllow {
+pub(crate) fn rc_allow(
+    fc_raw: f64,
+    class: ConcreteClass,
+    grade: Option<&str>,
+    long_term: bool,
+) -> RcAllow {
     RcAllow {
         fc: concrete_allowable_compression(fc_raw, long_term),
         fs: concrete_allowable_shear_class(fc_raw, class, long_term),
-        w_ft: rebar_allowable_shear(grade, long_term),
+        w_ft: grade.map(|grade| rebar_allowable_shear(grade, long_term)),
         n_ratio: young_ratio_n(fc_raw),
     }
 }

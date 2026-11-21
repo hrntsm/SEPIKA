@@ -419,3 +419,111 @@ fn src_column_th_detail_reports_gravity_reference_even_if_other_inputs_prevent_c
     app.core.model.sections[0].shear_rebar_material = material;
     assert_reasons(&app, f64::NAN, "組合せの軸力Nが非有限です", missing_gravity);
 }
+
+#[test]
+fn concrete_beam_th_detail_keeps_bending_ng_and_shear_rebar_diagnostic_without_gravity() {
+    use sepika_core::ids::MaterialId;
+    use sepika_core::model::{MaterialCategory, Model};
+
+    let src_model: Model =
+        serde_json::from_str(include_str!("../../tests/fixtures/src_ql_contract.json")).unwrap();
+    for (model, member) in [(fixture::model(), "RC梁"), (src_model, "SRC梁")] {
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+        let model = &mut app.core.model;
+        let original = model.sections[0].shear_rebar_material.unwrap();
+        let mut wrong = model.materials[original.index()].clone();
+        wrong.id = MaterialId(model.materials.len() as u32);
+        wrong.category = MaterialCategory::Steel;
+        model.sections[0].shear_rebar_material = Some(wrong.id);
+        model.materials.push(wrong);
+        let recording = ThRecording {
+            peak_member_forces: vec![Some(MemberForces {
+                at: vec![(0.5, [0.0, 20_000.0, 0.0, 0.0, 0.0, 2e9])],
+            })],
+            ..Default::default()
+        };
+
+        let text = labels(&app, &recording, true);
+        for message in [
+            "ξ=0.50:",
+            "(NG)",
+            "曲げ ",
+            member,
+            "せん断補強筋材料「SD345」",
+            "材料区分は「鋼材」",
+            "断面タブでせん断補強筋に「鉄筋」区分の材料を割り当て",
+            "重力参照内力が不足",
+        ] {
+            assert!(text.contains(message), "{text}");
+        }
+        assert!(
+            !text.contains("(OK)") && !text.contains("せん断 "),
+            "{text}"
+        );
+
+        if member == "RC梁" {
+            app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 1.0];
+            let text = labels(&app, &recording, true);
+            assert!(text.contains("Q0"), "{text}");
+            assert!(
+                text.contains("(NG)") && text.contains("せん断補強筋材料"),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rc_beam_th_detail_uses_available_gravity_to_keep_an_independent_bond_failure() {
+    use sepika_core::ids::MaterialId;
+    use sepika_core::model::MaterialCategory;
+
+    let mut app = App::default();
+    assert!(app.load_model(fixture::model()));
+    app.run_combination(1);
+    app.core.analysis_cfg.qd_method = QdMethod::Qd2;
+    app.core.analysis_cfg.bond_method = sepika_design_jp::BondMethod::Rc1991;
+    let long = &mut app.core.scoped.results.as_mut().unwrap().combos[0]
+        .1
+        .member_forces[0]
+        .1
+        .at;
+    *long = vec![(0.5, [0.0; 6])];
+
+    let model = &mut app.core.model;
+    let mut wrong = model.materials[1].clone();
+    wrong.id = MaterialId(2);
+    wrong.category = MaterialCategory::Steel;
+    model.sections[0].shear_rebar_material = Some(wrong.id);
+    model.materials.push(wrong);
+    let recording = ThRecording {
+        peak_member_forces: vec![Some(MemberForces {
+            at: [0.5, 1.0]
+                .map(|pos| (pos, [0.0, 10e6, 0.0, 0.0, 0.0, 1e6]))
+                .to_vec(),
+        })],
+        ..Default::default()
+    };
+
+    let text = labels(&app, &recording, true);
+    let (_, at_middle) = text.split_once("ξ=0.50:").unwrap();
+    let (at_middle, at_end) = at_middle.split_once("ξ=1.00:").unwrap();
+    assert!(
+        at_middle.contains("付着 ") && at_middle.contains("(NG)"),
+        "{text}"
+    );
+    assert!(!at_middle.contains("重力参照内力が不足"), "{text}");
+    assert!(at_end.contains("重力参照内力が不足"), "{text}");
+    assert!(
+        !at_end.contains("付着 ") && !at_end.contains("(NG)"),
+        "{text}"
+    );
+    for row in [at_middle, at_end] {
+        assert!(
+            row.contains("せん断補強筋材料") && !row.contains("(OK)"),
+            "{text}"
+        );
+    }
+}

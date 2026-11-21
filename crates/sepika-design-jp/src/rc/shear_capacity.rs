@@ -48,28 +48,26 @@ pub(crate) fn shear_capacity(
     term: LoadTerm,
     damage_control: bool,
     is_column: bool,
-) -> f64 {
+) -> Option<f64> {
+    if is_column && term == LoadTerm::Long {
+        return Some(props.b * props.j * alpha * allow.fs);
+    }
     let pw_cap = if term == LoadTerm::Long { 0.006 } else { 0.012 };
-    let w_ft = if term == LoadTerm::Short && damage_control {
-        allow.w_ft.min(DAMAGE_CONTROL_W_FT_CAP_N_MM2)
-    } else {
-        allow.w_ft
-    };
     let pw = props.pw.min(pw_cap);
-    let pw_term = if props.pw < 0.002 {
+    let pw_term = if pw <= 0.002 {
         0.0
     } else {
+        let w_ft = allow.w_ft?;
+        let w_ft = if term == LoadTerm::Short && damage_control {
+            w_ft.min(DAMAGE_CONTROL_W_FT_CAP_N_MM2)
+        } else {
+            w_ft
+        };
         0.5 * w_ft * (pw - 0.002)
     };
 
-    match term {
-        LoadTerm::Long => {
-            if is_column {
-                props.b * props.j * alpha * allow.fs
-            } else {
-                props.b * props.j * (alpha * allow.fs + pw_term)
-            }
-        }
+    Some(match term {
+        LoadTerm::Long => props.b * props.j * (alpha * allow.fs + pw_term),
         LoadTerm::Short => {
             if damage_control {
                 props.b * props.j * ((2.0 / 3.0) * alpha * allow.fs + pw_term)
@@ -79,5 +77,5 @@ pub(crate) fn shear_capacity(
                 props.b * props.j * (alpha * allow.fs + pw_term)
             }
         }
-    }
+    })
 }

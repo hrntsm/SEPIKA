@@ -11,6 +11,27 @@ pub(crate) fn main_rebar_category_issue(material: Option<&Material>) -> Option<S
     ))
 }
 
+pub(crate) fn shear_rebar_category_issue(
+    sec: &sepika_core::model::Section,
+    material: Option<&Material>,
+) -> Option<String> {
+    use sepika_core::section_shape::SectionShape;
+    let member = match sec.shape.as_ref()? {
+        SectionShape::RcBeamRect { .. } => "RC梁",
+        SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. } => "RC柱",
+        SectionShape::SrcBeamRect { .. } => "SRC梁",
+        SectionShape::SrcColumnRect { .. } => "SRC柱",
+        _ => return None,
+    };
+    let material = material.filter(|material| material.category != MaterialCategory::Rebar)?;
+    Some(format!(
+        "{member}検定: 断面「{}」のせん断補強筋材料「{}」の材料区分は「{}」です。断面タブでせん断補強筋に「鉄筋」区分の材料を割り当ててください",
+        sec.name,
+        material.name,
+        material.category.label()
+    ))
+}
+
 /// 鉄筋の許容引張・圧縮応力度 ft [N/mm²]。
 ///
 /// `dia` は正の有限な径 `[mm]`。SD345・SD390・SD490 は長期に径28 mm超で低減する。

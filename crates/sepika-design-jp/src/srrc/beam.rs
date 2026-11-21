@@ -34,14 +34,18 @@ pub(crate) fn src_beam_check(
     f_value: f64,
     fc_raw: f64,
     main_rebar_valid: bool,
+    shear_rebar_valid: bool,
+    shear_reference_valid: bool,
 ) -> CheckResult {
     let long_term = ctx.term == LoadTerm::Long;
 
     let fs = concrete_allowable_shear_class(fc_raw, mat.concrete_class, long_term);
-    let w_ft = rebar_allowable_shear(
-        crate::material_strength::shear_rebar_grade(ctx.shear_rebar_material.as_ref()),
-        long_term,
-    );
+    let w_ft = shear_rebar_valid.then(|| {
+        rebar_allowable_shear(
+            crate::material_strength::shear_rebar_grade(ctx.shear_rebar_material.as_ref()),
+            long_term,
+        )
+    });
     let s_ft = steel_ft(f_value, ctx.term);
     let s_fs = steel_fs(f_value, ctx.term);
 
@@ -67,6 +71,20 @@ pub(crate) fn src_beam_check(
                 s_mo, r_ma, ma, forces.mz,
             ),
         });
+    }
+
+    let basis = if main_rebar_valid {
+        "SRC規準(1987) 梁: 累加強度式(曲げ)+ せん断弾性分担".to_string()
+    } else {
+        "SRC規準(1987) 梁: せん断".to_string()
+    };
+    let mut result = CheckResult {
+        basis,
+        detail: String::new(),
+        components,
+    };
+    if !shear_reference_valid {
+        return result;
     }
 
     let (m_alpha, q_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
@@ -117,11 +135,6 @@ pub(crate) fn src_beam_check(
         ctx.term,
     );
 
-    let basis = if main_rebar_valid {
-        "SRC規準(1987) 梁: 累加強度式(曲げ)+ せん断弾性分担".to_string()
-    } else {
-        "SRC規準(1987) 梁: せん断".to_string()
-    };
     let qd_note = if shear.used_qd {
         "構造規定方式"
     } else {
@@ -130,22 +143,21 @@ pub(crate) fn src_beam_check(
     let r_q = shear
         .r_q
         .map_or_else(|| "未算定".into(), |q| format!("{q:.1} N"));
+    let r_qa = shear
+        .r_qa
+        .map_or_else(|| "未算定".into(), |qa| format!("{qa:.1} N"));
     let shear_detail = format!(
-        "sQ={:.1} N, rQ={r_q}, sQA={:.1} N, rQA={:.1} N, α={:.3}, pw={:.5}, \
+        "sQ={:.1} N, rQ={r_q}, sQA={:.1} N, rQA={r_qa}, α={:.3}, pw={:.5}, \
          設計用せん断力={qd_note}",
-        shear.s_q, shear.s_qa, shear.r_qa, shear.alpha, shear.pw
+        shear.s_q, shear.s_qa, shear.alpha, shear.pw
     );
-    components.push(CheckComponent {
+    result.components.push(CheckComponent {
         kind: CheckKind::Shear,
         ratio: shear.ratio,
         detail: shear_detail,
     });
 
-    CheckResult {
-        basis,
-        detail: String::new(),
-        components,
-    }
+    result
 }
 
 #[cfg(test)]

@@ -104,7 +104,7 @@ struct SrcShearResult {
     s_q: f64,
     r_q: Option<f64>,
     s_qa: f64,
-    r_qa: f64,
+    r_qa: Option<f64>,
     alpha: f64,
     pw: f64,
     used_qd: bool,
@@ -217,7 +217,7 @@ fn src_shear_check(
     b_prime: f64,
     pw_raw: f64,
     fs: f64,
-    w_ft: f64,
+    w_ft: Option<f64>,
     s_fs: f64,
     steel_shear_area: f64,
     alpha_max: f64,
@@ -254,7 +254,7 @@ fn src_shear_check(
                 s_q: 0.0,
                 r_q: Some(q),
                 s_qa: steel_shear_area * s_fs,
-                r_qa: qa,
+                r_qa: Some(qa),
                 alpha,
                 pw,
                 used_qd: false,
@@ -283,15 +283,25 @@ fn src_shear_check(
 
     let s_qa = steel_shear_area * s_fs;
 
-    let r_qa1 = match mode {
-        SrcShearMode::Beam(_) => b * rj * (alpha * fs + 0.5 * pw * w_ft),
-        SrcShearMode::Column { .. } => b * rj * (fs + 0.5 * pw * w_ft),
+    let pw_term = if pw == 0.0 {
+        Some(0.0)
+    } else {
+        w_ft.map(|w_ft| pw * w_ft)
     };
-    let r_qa2 = b * rj * (2.0 * b_ratio * fs + pw * w_ft);
-    let r_qa = r_qa1.min(r_qa2);
+    let r_qa = pw_term.map(|pw_term| {
+        let r_qa1 = match mode {
+            SrcShearMode::Beam(_) => b * rj * (alpha * fs + 0.5 * pw_term),
+            SrcShearMode::Column { .. } => b * rj * (fs + 0.5 * pw_term),
+        };
+        let r_qa2 = b * rj * (2.0 * b_ratio * fs + pw_term);
+        r_qa1.min(r_qa2)
+    });
 
     let ratio_s = if s_qa > 1e-9 { s_q / s_qa } else { 0.0 };
-    let ratio_r = r_q.filter(|_| r_qa > 1e-9).map_or(0.0, |q| q / r_qa);
+    let ratio_r = r_q
+        .zip(r_qa)
+        .filter(|(_, qa)| *qa > 1e-9)
+        .map_or(0.0, |(q, qa)| q / qa);
 
     SrcShearResult {
         ratio: ratio_s.max(ratio_r),
@@ -327,7 +337,7 @@ impl DesignCheck for SrcDesign {
 }
 
 impl SrcDesign {
-    /// 短期地震時のSRC柱の適用条件や材軸ねじりで未算定となる場合、理由と独立に確定した不適合を別の結果で返す。
+    /// 鉄筋の材料区分、短期地震時のSRC柱の適用条件や材軸ねじりで未算定となる場合、理由と独立に確定した不適合を別の結果で返す。
     /// 未算定を伴う位置で、適合を示す検定比は返さない。
     /// 地震時の重力参照内力が必要で、対象柱の参照内力がない場合は `missing_gravity` に true を渡す。
     pub fn check_outcomes(
@@ -374,13 +384,24 @@ impl SrcDesign {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
                 .map(|reason| format!("SRC検定: 断面「{}」の{reason}", sec.name));
+        let shear_material_issue = crate::material_strength::shear_rebar_category_issue(
+            sec,
+            ctx.shear_rebar_material.as_ref(),
+        );
+        let main_rebar_valid = material_issue.is_none();
+        let shear_rebar_valid = shear_material_issue.is_none();
+        let material_issue = crate::member_design_check::combine_incomplete_reasons(
+            material_issue,
+            shear_material_issue.as_deref(),
+        );
         match Self::try_check(
             forces,
             sec,
             mat,
             ctx,
             missing_gravity,
-            material_issue.is_none(),
+            main_rebar_valid,
+            shear_rebar_valid,
         ) {
             Ok((result, incomplete)) => (
                 CheckOutcome::Checked(result),
@@ -400,6 +421,7 @@ impl SrcDesign {
         ctx: &DesignCtx,
         missing_gravity: bool,
         main_rebar_valid: bool,
+        shear_rebar_valid: bool,
     ) -> Result<(crate::CheckResult, Option<String>), String> {
         let fc_raw = mat.fc.unwrap_or(0.0);
         if fc_raw <= 0.0 {
@@ -429,12 +451,16 @@ impl SrcDesign {
         }
         if let Err(reason) = shape.validate_rebar_size_materials(
             ctx.rebar_material.as_ref().filter(|_| main_rebar_valid),
-            ctx.shear_rebar_material.as_ref(),
+            ctx.shear_rebar_material
+                .as_ref()
+                .filter(|_| shear_rebar_valid),
         ) {
             return Err(format!("SRC検定: {reason}"));
         }
         if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
-            ctx.shear_rebar_material.as_ref(),
+            ctx.shear_rebar_material
+                .as_ref()
+                .filter(|_| shear_rebar_valid),
         ) {
             return Err(format!("SRC検定: {msg}"));
         }
@@ -488,19 +514,21 @@ impl SrcDesign {
                         "SRC検定: 梁用断面を柱部材に割り当てています（用途不一致）".to_string()
                     );
                 }
-                if missing_gravity {
-                    return Err("設計用せん断力に必要な重力参照内力が不足しています".into());
-                }
-                if let Some(qd) = &ctx.seismic_qd {
-                    if !forces.pos.is_finite()
-                        || !qd
-                            .long_at
-                            .iter()
-                            .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
-                            .is_some_and(|(_, values)| values[1].is_finite())
-                    {
-                        return Err("SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です".into());
-                    }
+                let shear_reference_issue = if missing_gravity {
+                    Some("設計用せん断力に必要な重力参照内力が不足しています")
+                } else {
+                    ctx.seismic_qd.as_ref().and_then(|qd| {
+                        (!forces.pos.is_finite()
+                            || !qd
+                                .long_at
+                                .iter()
+                                .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
+                                .is_some_and(|(_, values)| values[1].is_finite()))
+                            .then_some("SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です")
+                    })
+                };
+                if let (true, Some(reason)) = (shear_rebar_valid, shear_reference_issue) {
+                    return Err(reason.into());
                 }
                 if rebar.is_unset() {
                     return Err("SRC検定: 配筋が未入力です".to_string());
@@ -523,8 +551,10 @@ impl SrcDesign {
                         f_value,
                         fc_raw,
                         main_rebar_valid,
+                        shear_rebar_valid,
+                        shear_reference_issue.is_none(),
                     ),
-                    None,
+                    shear_reference_issue.map(str::to_owned),
                 ))
             }
             SectionShape::SrcColumnRect {
@@ -579,6 +609,7 @@ impl SrcDesign {
                     fc_raw,
                     missing_gravity,
                     main_rebar_valid,
+                    shear_rebar_valid,
                 ))
             }
             _ => unreachable!(),

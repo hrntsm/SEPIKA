@@ -29,14 +29,59 @@ pub(super) fn qd1_mechanism(ctx: &DesignCtx) -> Option<&ColumnMechanism> {
     .flatten()
 }
 
+fn gravity_shear_reference_issue(
+    ctx: &DesignCtx,
+    pos: f64,
+    q_index: usize,
+) -> Option<&'static str> {
+    let qd = ctx.seismic_qd.as_ref()?;
+    if pos.is_finite()
+        && qd
+            .long_at
+            .iter()
+            .find(|(p, _)| (p - pos).abs() < 1e-6)
+            .is_some_and(|(_, values)| values[q_index].is_finite())
+    {
+        return None;
+    }
+    Some(if q_index == 1 {
+        "RC柱: Qy方向の設計用せん断力に必要な同位置の重力参照内力が不足または非有限です"
+    } else {
+        "RC柱: Qz方向の設計用せん断力に必要な同位置の重力参照内力が不足または非有限です"
+    })
+}
+
+pub(super) fn gravity_shear_reference_issues<'a>(
+    ctx: &'a DesignCtx,
+    pos: f64,
+    shape: &'a SectionShape,
+) -> impl Iterator<Item = &'static str> + 'a {
+    let column = matches!(
+        shape,
+        SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }
+    );
+    [(RcDirection::Strong, 1), (RcDirection::Weak, 2)]
+        .into_iter()
+        .filter(move |(direction, _)| {
+            column
+                && axis_props_from_shape(shape, *direction, true)
+                    .is_some_and(|props| ctx.term == LoadTerm::Long || props.pw <= 0.002)
+        })
+        .filter_map(move |(_, index)| gravity_shear_reference_issue(ctx, pos, index))
+}
+
 fn seismic_column_design_shear(
     ctx: &DesignCtx,
     forces: &MemberForcesAt,
     fallback_qy: f64,
     fallback_qz: f64,
+    shear_rebar_valid: bool,
 ) -> (Option<f64>, Option<f64>) {
     let mechanism = qd1_mechanism(ctx);
     let demand = |q_signed, q_index, sum_my: Option<&Result<Option<f64>, String>>, fallback| {
+        if !shear_rebar_valid && gravity_shear_reference_issue(ctx, forces.pos, q_index).is_some() {
+            return None;
+        }
         let sum_my = match sum_my {
             Some(Err(_)) => return None,
             Some(Ok(Some(sum_my))) => *sum_my,
@@ -101,6 +146,7 @@ fn rect_column_at_perp(ag_mm2: f64, at_mm2: f64, ac_mm2: f64) -> f64 {
 
 /// 柱の断面検定（RC 規準 14条）。
 /// 許容曲げが非正の方向に非零需要があれば、理由付き未検定を返す。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn column_check(
     forces: &MemberForcesAt,
     mat: &Material,
@@ -108,17 +154,26 @@ pub(crate) fn column_check(
     shape: &SectionShape,
     fc_raw: f64,
     main_rebar_valid: bool,
+    shear_rebar_valid: bool,
     shear_reference_valid: bool,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
-        shear_rebar_grade(ctx.shear_rebar_material.as_ref()),
+        shear_rebar_valid.then(|| shear_rebar_grade(ctx.shear_rebar_material.as_ref())),
         long_term,
     );
 
     let n_design = -forces.n;
+    let shear_ratio = |q_design_y: Option<f64>, q_design_z: Option<f64>, qay, qaz| {
+        [q_design_y.zip(qay), q_design_z.zip(qaz)]
+            .into_iter()
+            .flatten()
+            .map(|(q, qa)| if qa > 0.0 { q / qa } else { 0.0 })
+            .reduce(f64::max)
+    };
+    let capacity = |qa: Option<f64>| qa.map_or_else(|| "未算定".into(), |qa| format!("{qa:.1} N"));
 
     if let SectionShape::RcColumnCircle { d, .. } = shape {
         let damage_control = ctx.rc_damage_control;
@@ -195,7 +250,13 @@ pub(crate) fn column_check(
             };
             let sum_mu_fallback =
                 2.0 * sepika_core::rc_capacity::rc_column_mu_simple(&mu_inp, as_total, n_design);
-            seismic_column_design_shear(ctx, forces, sum_mu_fallback, sum_mu_fallback)
+            seismic_column_design_shear(
+                ctx,
+                forces,
+                sum_mu_fallback,
+                sum_mu_fallback,
+                shear_rebar_valid,
+            )
         } else {
             (Some(forces.qy.abs()), Some(forces.qz.abs()))
         };
@@ -207,21 +268,18 @@ pub(crate) fn column_check(
         let qaz = shear_capacity(&props, &allow, alpha_z, ctx.term, damage_control, true);
 
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
-        let shear_detail = format!(
-            "QAy={:.1} N, QAz={:.1} N, αy={:.3}, αz={:.3}, pw={:.5}",
-            qay, qaz, alpha_y, alpha_z, props.pw,
-        );
         let mut detail = format!("at={:.1} mm², d={:.1} mm", props.at, props.d);
 
-        if let Some(ratio) = [(q_design_y, qay), (q_design_z, qaz)]
-            .into_iter()
-            .filter_map(|(q, qa)| q.map(|q| if qa > 0.0 { q / qa } else { 0.0 }))
-            .reduce(f64::max)
-        {
+        if let Some(ratio) = shear_ratio(q_design_y, q_design_z, qay, qaz) {
             components.push(CheckComponent {
                 kind: CheckKind::Shear,
                 ratio,
-                detail: shear_detail,
+                detail: format!(
+                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw={:.5}",
+                    capacity(qay),
+                    capacity(qaz),
+                    props.pw,
+                ),
             });
         }
 
@@ -344,7 +402,7 @@ pub(crate) fn column_check(
             };
             let fallback_z = 2.0 * mu_of(*b, *d, &props_z);
             let fallback_y = 2.0 * mu_of(*d, *b, &props_y);
-            seismic_column_design_shear(ctx, forces, fallback_z, fallback_y)
+            seismic_column_design_shear(ctx, forces, fallback_z, fallback_y, shear_rebar_valid)
         } else {
             (Some(forces.qy.abs()), Some(forces.qz.abs()))
         };
@@ -356,21 +414,19 @@ pub(crate) fn column_check(
         let qaz = shear_capacity(&props_y, &allow, alpha_z, ctx.term, damage_control, true);
 
         let basis = "RC 規準14条（柱、軸力+二軸曲げ+せん断）".to_string();
-        let shear_detail = format!(
-            "QAy={:.1} N, QAz={:.1} N, αy={:.3}, αz={:.3}, pw_z={:.5}, pw_y={:.5}",
-            qay, qaz, alpha_y, alpha_z, props_z.pw, props_y.pw
-        );
         let mut detail = String::new();
 
-        if let Some(ratio) = [(q_design_y, qay), (q_design_z, qaz)]
-            .into_iter()
-            .filter_map(|(q, qa)| q.map(|q| if qa > 0.0 { q / qa } else { 0.0 }))
-            .reduce(f64::max)
-        {
+        if let Some(ratio) = shear_ratio(q_design_y, q_design_z, qay, qaz) {
             components.push(CheckComponent {
                 kind: CheckKind::Shear,
                 ratio,
-                detail: shear_detail,
+                detail: format!(
+                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw_z={:.5}, pw_y={:.5}",
+                    capacity(qay),
+                    capacity(qaz),
+                    props_z.pw,
+                    props_y.pw,
+                ),
             });
         }
 
@@ -528,7 +584,7 @@ mod tests {
         let allow = rc_allow(
             24.0,
             sepika_core::units::ConcreteClass::Normal,
-            "SD345",
+            Some("SD345"),
             true,
         );
         let ft = rebar_allowable_tension("SD345", 22.0, true);
@@ -571,7 +627,7 @@ mod tests {
         let allow = rc_allow(
             24.0,
             sepika_core::units::ConcreteClass::Normal,
-            "SD345",
+            Some("SD345"),
             true,
         );
         let ft = rebar_allowable_tension("SD345", 19.0, true);
@@ -764,7 +820,7 @@ mod tests {
         let allow = rc_allow(
             24.0,
             sepika_core::units::ConcreteClass::Normal,
-            "SD345",
+            Some("SD345"),
             false,
         );
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();

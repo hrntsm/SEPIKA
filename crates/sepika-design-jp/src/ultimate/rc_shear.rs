@@ -92,26 +92,38 @@ pub struct RcPlasticShearInput {
 /// 塑性理論式の終局せん断強度Qsu `[N]` を返す。
 /// 軽量コンクリートは0.9倍。b・D・jt・Fcのいずれかが0以下なら0。
 pub fn rc_shear_qsu_plastic(inp: &RcPlasticShearInput) -> f64 {
+    rc_shear_qsu_plastic_with_strength(inp, Some(inp.sigma_wy)).unwrap()
+}
+
+pub(super) fn rc_shear_qsu_plastic_with_strength(
+    inp: &RcPlasticShearInput,
+    sigma_wy: Option<f64>,
+) -> Option<f64> {
     if inp.b <= 0.0 || inp.d_full <= 0.0 || inp.jt <= 0.0 || inp.fc <= 0.0 {
-        return 0.0;
+        return Some(0.0);
     }
     let nu0 = plastic_nu0(inp.fc);
     let nu = plastic_nu_from_nu0(nu0, inp.rp);
     let cot_phi = plastic_cot_phi(inp.rp);
     let k1 = plastic_k1(inp.l_clear, inp.d_full);
 
-    let pw_sigma = (inp.pw.max(0.0) * inp.sigma_wy.max(0.0)).min(nu * inp.fc / 2.0);
-    let k2 = plastic_k2(inp.pw, inp.sigma_wy, nu, inp.fc);
+    let nu_fc = nu * inp.fc;
+    let (pw_sigma, k2) = match sigma_wy {
+        Some(sigma_wy) => (
+            (inp.pw.max(0.0) * sigma_wy.max(0.0)).min(nu_fc / 2.0),
+            plastic_k2(inp.pw, sigma_wy, nu, inp.fc),
+        ),
+        // νFc が0なら、アーチ項と、νFc/2で上限を定めるトラス項の双方が0になる。
+        None if nu_fc == 0.0 => return Some(0.0),
+        None if inp.pw == 0.0 => (0.0, 0.0),
+        None => return None,
+    };
 
     let truss = inp.b * inp.jt * pw_sigma * cot_phi;
     let arch = k1 * (1.0 - k2) * inp.b * inp.d_full * nu * inp.fc;
     let qsu = (truss + arch).max(0.0);
 
-    if inp.lightweight {
-        0.9 * qsu
-    } else {
-        qsu
-    }
+    Some(if inp.lightweight { 0.9 * qsu } else { qsu })
 }
 
 /// 付着割裂による終局せん断耐力 `Qbu` の算定入力（靭性保証型耐震設計指針）。

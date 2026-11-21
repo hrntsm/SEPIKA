@@ -255,3 +255,39 @@ fn short_term_has_no_deflection_component_or_unavailable_reference() {
         }));
     }
 }
+
+#[test]
+fn rc_girder_with_wrong_shear_rebar_keeps_a_deflection_failure_without_showing_a_pass() {
+    for (applied_moment_knm, expected_ng) in [(0.0, false), (32.0, true)] {
+        let mut model = girder(false, false, applied_moment_knm, applied_moment_knm);
+        let mut shear_material = model.materials[1].clone();
+        shear_material.id = MaterialId(2);
+        shear_material.category = MaterialCategory::Steel;
+        model.sections[0].shear_rebar_material = Some(shear_material.id);
+        model.materials.push(shear_material);
+
+        let report = analyze(&model, LoadTerm::Long, Some(&TERMS));
+        let outcomes: Vec<_> = report
+            .member_checks
+            .iter()
+            .filter(|(_, pos, _)| *pos == 0.5)
+            .map(|(_, _, outcome)| outcome)
+            .collect();
+        assert!(outcomes.iter().any(|outcome| matches!(
+            outcome,
+            CheckOutcome::Skipped { reason } if reason.contains("せん断補強筋材料")
+        )));
+        let components: Vec<_> = outcomes
+            .into_iter()
+            .filter_map(|outcome| match outcome {
+                CheckOutcome::Checked(result) => Some(result.components.as_slice()),
+                CheckOutcome::Skipped { .. } => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(components.len(), usize::from(expected_ng), "{components:?}");
+        assert!(components
+            .iter()
+            .all(|component| { component.kind == CheckKind::Deflection && component.ratio > 1.0 }));
+    }
+}

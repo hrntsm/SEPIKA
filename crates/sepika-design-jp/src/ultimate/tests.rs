@@ -255,16 +255,8 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
         )
         .expect("梁断面の諸元");
         let l_clear = 6000.0;
-        super::rc_strength::member_shear_strength(
-            &p,
-            24.0,
-            0.0,
-            l_clear,
-            &UltimateShearOptions {
-                sigma_wy,
-                ..opts.clone()
-            },
-        )
+        super::rc_strength::member_shear_strength(&p, 24.0, 0.0, l_clear, Some(sigma_wy), &opts)
+            .unwrap()
     };
     let model_with_shear_fy = |shear_fy: Option<f64>| -> Model {
         let mut model = column_and_beam_model();

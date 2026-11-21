@@ -453,16 +453,32 @@ mod tests {
         assert!(p.pw > 0.0, "円形柱の pw が正: pw={}", p.pw);
         assert!(p0.pw < p.pw, "pitch 大では pw が小さい");
 
-        let allow = rc_allow(24.0, ConcreteClass::Normal, "SD345", false);
+        let allow = rc_allow(24.0, ConcreteClass::Normal, Some("SD345"), false);
         let props = axis_props_from_shape(&with_hoop, RcDirection::Strong, true).unwrap();
         let props0 = axis_props_from_shape(&without_hoop, RcDirection::Strong, true).unwrap();
-        let qa = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, true, true);
-        let qa0 = shear_capacity(&props0, &allow, 1.5, LoadTerm::Short, true, true);
+        let qa = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, true, true).unwrap();
+        let qa0 = shear_capacity(&props0, &allow, 1.5, LoadTerm::Short, true, true).unwrap();
         assert!(qa > qa0, "許容せん断: with={qa}, without={qa0}");
 
         let opts = UltimateShearOptions::default();
-        let qsu = super::super::rc_strength::member_shear_strength(&p, 24.0, 0.0, 3000.0, &opts);
-        let qsu0 = super::super::rc_strength::member_shear_strength(&p0, 24.0, 0.0, 3000.0, &opts);
+        let qsu = super::super::rc_strength::member_shear_strength(
+            &p,
+            24.0,
+            0.0,
+            3000.0,
+            Some(opts.sigma_wy),
+            &opts,
+        )
+        .unwrap();
+        let qsu0 = super::super::rc_strength::member_shear_strength(
+            &p0,
+            24.0,
+            0.0,
+            3000.0,
+            Some(opts.sigma_wy),
+            &opts,
+        )
+        .unwrap();
         assert!(qsu > qsu0, "終局せん断: with={qsu}, without={qsu0}");
     }
 

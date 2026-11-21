@@ -474,6 +474,10 @@ pub fn run_member_design_checks(
         let wrong_main_rebar = rebar_material.is_some_and(|material| {
             material.category != sepika_core::model::MaterialCategory::Rebar
         });
+        let shear_rebar_material = model.element_shear_rebar_material(elem);
+        let wrong_shear_rebar = shear_rebar_material.is_some_and(|material| {
+            material.category != sepika_core::model::MaterialCategory::Rebar
+        });
         let column_sum_my = if structure == StructureKind::Rc
             && kind == MemberKind::Column
             && options.term == LoadTerm::Short
@@ -512,7 +516,7 @@ pub fn run_member_design_checks(
 
         let ctx = DesignCtx {
             rebar_material: rebar_material.cloned(),
-            shear_rebar_material: model.element_shear_rebar_material(elem).cloned(),
+            shear_rebar_material: shear_rebar_material.cloned(),
             steel_material: model.element_steel_material(elem).cloned(),
             term: options.term,
             kind,
@@ -601,7 +605,7 @@ pub fn run_member_design_checks(
                 check_incomplete = incomplete;
                 outcome
             } else if structure == StructureKind::Rc {
-                let missing_column_reference = wrong_main_rebar
+                let missing_column_reference = (wrong_main_rebar || wrong_shear_rebar)
                     && kind == MemberKind::Column
                     && options.long_member_forces.is_some()
                     && ctx.seismic_qd.is_none();
@@ -650,6 +654,10 @@ pub fn run_member_design_checks(
                         .detail
                         .push_str(&format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
                 }
+            }
+            if wrong_shear_rebar && matches!(structure, StructureKind::Rc | StructureKind::Src) {
+                check_incomplete =
+                    check_incomplete.map(|reason| format!("部材 ID {}: {reason}", elem.id.0));
             }
             let incomplete = combine_incomplete_reasons(check_incomplete, torsion_reason(&mfa));
             push_strength_outcome(
@@ -702,6 +710,7 @@ pub fn run_member_design_checks(
                     .ok_or_else(|| "検定比を有限な数値で算定できません".into())
             });
             match (component, center) {
+                (Ok(component), _) if wrong_shear_rebar && component.ratio <= 1.0 => {}
                 (Ok(component), Some(CheckOutcome::Checked(result))) => {
                     result.components.push(component)
                 }

@@ -440,6 +440,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-local-frame", Some(23)),
         ("design-old-face-direction", Some(24)),
         ("design-old-secondary-materialization", Some(27)),
+        ("design-old-before-shear-rebar-category-check", Some(98)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
