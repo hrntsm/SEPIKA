@@ -100,7 +100,7 @@ impl SpaceGrid {
 /// - レベルは構造最下端（[`Model::base_elevation`]）と各階 SL。階は SL の昇順に
 ///   並ぶ不変条件を持つ（[`Model::validate`]）ため、そのまま使える。
 ///
-/// 同じ位置の通りが複数あるモデル（取り込みで重複した通り）では、[`GRID_TOL_MM`]
+/// 同じ位置の通りが複数あるモデルでは、[`GRID_TOL_MM`]
 /// 以内の格子線を 1 本にまとめ、名前は先に現れたものを採る。
 pub fn space_grid(model: &Model) -> SpaceGrid {
     let mut x_lines = plan_lines(model, AxisPlanDir::X);
@@ -602,7 +602,6 @@ pub fn generate_frame(spec: &FrameSpec) -> Result<FrameGenResult, String> {
                 name,
                 elevation: Some(fls[si]),
                 sl_offset_mm: spec.sl_offsets_mm[si],
-                source_story: None,
                 node_ids: Vec::new(),
                 seismic_weight: None,
                 weight_override: None,

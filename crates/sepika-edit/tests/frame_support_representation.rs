@@ -8,7 +8,6 @@ fn 明示解析表現の床壁は節点編集再構築undo_redoで版と支持�
     for wall in [false, true] {
         for kinds in fixture::representations() {
             let mut model = fixture::with_plate(wall, kinds);
-            model.assign_stb_node_ids().unwrap();
             let before = model.clone();
             let mut undo = UndoStack::new();
             assert!(

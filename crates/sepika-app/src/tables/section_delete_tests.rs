@@ -3,13 +3,12 @@ use crate::app::App;
 use sepika_core::{
     ids::{SectionId, SlabId, WallPlateId},
     model::{
-        SecondaryMember, SecondaryMemberKind, Slab, SlabPlate, SlabShape, StbSectionStrength,
-        WallPlate, WallPlateShape,
+        SecondaryMember, SecondaryMemberKind, Slab, SlabPlate, SlabShape, WallPlate, WallPlateShape,
     },
 };
 use sepika_edit::{DeleteSection, UndoStack};
 
-fn app_with_reference(reference: &str, strength: bool) -> App {
+fn app_with_reference(reference: &str) -> App {
     let mut app = App::default();
     let mut model = crate::sample::portal_frame();
     model.sections.truncate(1);
@@ -59,18 +58,6 @@ fn app_with_reference(reference: &str, strength: bool) -> App {
             slit: Default::default(),
             dl_support: None,
             self_weight_shares: vec![],
-        });
-    }
-    if strength {
-        model.stb_strengths.sections.push(StbSectionStrength {
-            section: SectionId(0),
-            concrete: Some("Fc30".into()),
-            native_material: None,
-            reinforcement: vec![],
-            steel: vec![],
-            built_box: None,
-            native_rebar: false,
-            rebar: None,
         });
     }
     app.core.model = model;
@@ -128,66 +115,56 @@ fn click(ctx: &egui::Context, app: &mut App, pos: egui::Pos2) {
 
 #[test]
 fn section_table_reference_counts_disabled_delete_and_hover_reasons_match_command() {
-    for reference in ["none", "element", "slab", "beam", "post", "mixed"] {
-        for strength in [false, true] {
-            if reference == "none" && !strength {
-                continue;
-            }
-            if reference == "mixed" && !strength {
-                continue;
-            }
-            let mut app = app_with_reference(reference, strength);
-            let before = app.core.model.clone();
-            let ctx = egui::Context::default();
-            ctx.global_style_mut(|style| {
-                style.interaction.tooltip_delay = 0.0;
-                style.interaction.show_tooltips_only_when_still = false;
-            });
-            draw(&ctx, &mut app, vec![]);
-            let output = draw(&ctx, &mut app, vec![]);
-            let labels = texts(&output);
-            let count_column = labels.iter().find(|(s, _)| s == "部材数").unwrap().1;
-            let expected = match reference {
-                "none" => "0",
-                "mixed" => "5",
-                _ => "1",
-            };
-            assert!(
-                labels.iter().any(|(s, rect)| s == expected
-                    && (rect.center().x - count_column.center().x).abs() < 35.0),
-                "部材数: {reference}, 強度={strength}"
-            );
-            let delete_pos = labels.iter().find(|(s, _)| s == "🗑").unwrap().1.center();
-            let mut output = draw(&ctx, &mut app, vec![egui::Event::PointerMoved(delete_pos)]);
-            for _ in 0..3 {
-                output = draw(&ctx, &mut app, vec![]);
-            }
-            let labels = texts(&output);
-            let reason = labels
-                .iter()
-                .find(|(s, _)| s.contains("参照中のため削除できません"))
-                .unwrap();
-            assert_eq!(reason.0.contains("ST-Bridge断面強度入力"), strength);
-            assert_eq!(
-                reason.0.contains("部材・小梁・二次部材・床・壁版"),
-                reference != "none"
-            );
-            click(&ctx, &mut app, delete_pos);
-            assert!(app.core.model.eq_ignoring_dofmap(&before));
-            assert!(!app.core.scoped.undo.can_undo());
-            let mut history = UndoStack::new();
-            assert!(!history.run(
-                &mut app.core.model,
-                Box::new(DeleteSection { id: SectionId(0) })
-            ));
-            assert!(app.core.model.eq_ignoring_dofmap(&before));
+    for reference in ["element", "slab", "beam", "post", "mixed"] {
+        let mut app = app_with_reference(reference);
+        let before = app.core.model.clone();
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        draw(&ctx, &mut app, vec![]);
+        let output = draw(&ctx, &mut app, vec![]);
+        let labels = texts(&output);
+        let count_column = labels.iter().find(|(s, _)| s == "部材数").unwrap().1;
+        let expected = match reference {
+            "mixed" => "5",
+            _ => "1",
+        };
+        assert!(
+            labels.iter().any(|(s, rect)| s == expected
+                && (rect.center().x - count_column.center().x).abs() < 35.0),
+            "部材数: {reference}"
+        );
+        let delete_pos = labels.iter().find(|(s, _)| s == "🗑").unwrap().1.center();
+        let mut output = draw(&ctx, &mut app, vec![egui::Event::PointerMoved(delete_pos)]);
+        for _ in 0..3 {
+            output = draw(&ctx, &mut app, vec![]);
         }
+        let labels = texts(&output);
+        let reason = labels
+            .iter()
+            .find(|(s, _)| s.contains("参照中のため削除できません"))
+            .unwrap();
+        assert_eq!(
+            reason.0.contains("部材・小梁・二次部材・床・壁版"),
+            reference != "none"
+        );
+        click(&ctx, &mut app, delete_pos);
+        assert!(app.core.model.eq_ignoring_dofmap(&before));
+        assert!(!app.core.scoped.undo.can_undo());
+        let mut history = UndoStack::new();
+        assert!(!history.run(
+            &mut app.core.model,
+            Box::new(DeleteSection { id: SectionId(0) })
+        ));
+        assert!(app.core.model.eq_ignoring_dofmap(&before));
     }
 }
 
 #[test]
 fn section_table_unreferenced_delete_click_supports_undo_and_redo() {
-    let mut app = app_with_reference("none", false);
+    let mut app = app_with_reference("none");
     let before = app.core.model.clone();
     let ctx = egui::Context::default();
     draw(&ctx, &mut app, vec![]);

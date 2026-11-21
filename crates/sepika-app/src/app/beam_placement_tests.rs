@@ -62,10 +62,8 @@ fn changing_cantilever_support_preserves_asymmetric_display_and_end_offsets_thro
     app.undo_action();
     assert_eq!(app.core.model.unassigned_beams[0], original_member);
     app.redo_action();
-    let path = std::env::temp_dir().join(format!(
-        "sepika-stb-display-1367-{}.ovika",
-        std::process::id()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("sepika-display-1367-{}.ovika", std::process::id()));
     sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
     let loaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
     std::fs::remove_file(path).unwrap();

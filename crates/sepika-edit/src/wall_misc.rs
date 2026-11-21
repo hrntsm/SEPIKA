@@ -287,7 +287,7 @@ impl EditCommand for SetPanelZoneMode {
     }
 }
 
-/// 明示階種別を変更する。native由来の標準kindだけを同期し、取り込みkindは保持する。
+/// 階種別を変更する。
 /// 存在しない `StoryId` は Noop。
 pub struct SetStoryLevelKind {
     pub story: StoryId,
@@ -304,21 +304,6 @@ impl EditCommand for SetStoryLevelKind {
             return Box::new(Noop);
         }
         let before = crate::story::snapshot(model);
-        if let Err(reason) = model.initialize_source_stories() {
-            return Box::new(crate::RejectedEdit(reason));
-        }
-        let source = match crate::story::source_story_index(model, self.story) {
-            Ok(source) => source,
-            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
-        };
-        if let Some(source) = source.filter(|&index| model.source_stories[index].kind_from_native) {
-            use sepika_core::model::{SourceStoryKind, StoryLevelKind};
-            model.source_stories[source].kind = match self.level_kind {
-                StoryLevelKind::Normal => SourceStoryKind::General,
-                StoryLevelKind::Penthouse { .. } => SourceStoryKind::Penthouse,
-                StoryLevelKind::Basement { .. } => SourceStoryKind::Basement,
-            };
-        }
         model.stories[idx].level_kind = self.level_kind;
         Box::new(before)
     }
@@ -659,11 +644,6 @@ impl EditCommand for DeleteWallPlate {
             }
         }
 
-        let strength_input = model.stb_strengths.clone();
-        model
-            .stb_strengths
-            .members
-            .retain(|m| m.target != sepika_core::model::StrengthTarget::Wall(self.id));
         let removed = model.wall_plates.remove(idx);
         let target = self.id.0;
         model.visit_wall_plate_ids(|id| {
@@ -672,15 +652,11 @@ impl EditCommand for DeleteWallPlate {
             }
         });
 
-        Box::new(crate::strength::RestoreStrengthInput {
-            input: strength_input,
-            stories: model.source_stories.clone(),
-            inverse: Box::new(InsertWallPlate {
-                index: idx,
-                plate: removed,
-                region_refs,
-                assignment_refs,
-            }),
+        Box::new(InsertWallPlate {
+            index: idx,
+            plate: removed,
+            region_refs,
+            assignment_refs,
         })
     }
 

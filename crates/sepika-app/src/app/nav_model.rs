@@ -245,7 +245,6 @@ mod tests {
             name: name.to_string(),
             elevation: Some(0.0),
             sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids: Vec::new(),
             seismic_weight: None,
             weight_override: None,

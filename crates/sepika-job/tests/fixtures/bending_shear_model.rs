@@ -35,7 +35,6 @@ pub fn two_story_column_model() -> Model {
             name: format!("{}F", i + 1),
             elevation: Some(coords[i as usize][2]),
             sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids: vec![NodeId(i)],
             seismic_weight: if i == 0 {
                 None

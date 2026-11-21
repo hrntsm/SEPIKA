@@ -192,7 +192,6 @@ fn story_frame_includes_columns_below() {
         name: "2FL".into(),
         elevation: Some(4000.0),
         sl_offset_mm: Some(0.0),
-        source_story: None,
         node_ids: vec![top_a, top_b],
         seismic_weight: None,
         weight_override: None,
@@ -228,7 +227,7 @@ fn missing_target_returns_none() {
     assert!(build_frame(&m, FrameTarget::Story(StoryId(0))).is_none());
 }
 
-/// 所属部材が 0 本の通り（ST-Bridge から取り込んだ `Y0` など）でも構面は作れる。
+/// 所属部材が 0 本の通りでも構面は作れる。
 /// 空であることは呼び出し側が [`Frame::elem_count`] で判断する。
 #[test]
 fn empty_axis_builds_frame_with_no_elements() {

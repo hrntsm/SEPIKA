@@ -357,7 +357,6 @@ fn secondary_fireproof_support_reactions_design_loads_and_mass() {
             name: "1F".into(),
             elevation: Some(0.0),
             sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids: vec![],
             seismic_weight: None,
             weight_override: None,

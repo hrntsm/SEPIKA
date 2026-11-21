@@ -105,7 +105,6 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
             name: format!("{iz}F"),
             elevation: Some(iz as f64 * height),
             sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids,
             seismic_weight: None,
             weight_override: None,

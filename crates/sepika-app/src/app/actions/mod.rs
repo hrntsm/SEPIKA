@@ -2,7 +2,7 @@
 //!
 //! 責務ごとのサブモジュール:
 //! - [`design`] — 許容・終局・保有水平耐力・床内検定
-//! - [`io`] — プロジェクト／ST-Bridge 入出力とモデル読込
+//! - [`io`] — プロジェクト 入出力とモデル読込
 //! - [`loads`] — 荷重ケース自動同期・床荷重分配
 //! - [`linear_static`] — 線形静的解析（荷重ケース・組合せ・一括・地震静的）
 //! - [`eigen`] — 固有値解析
@@ -193,7 +193,7 @@ impl App {
     /// 通り芯は構造計算に用いないため、**準備計算の一部ではなく利用者が明示的に
     /// 実行する操作**とし、解析結果・設計結果も陳腐化させない
     /// （[`Staleness::mark_non_calc_edited`](crate::app::Staleness::mark_non_calc_edited)）。
-    /// 生成規則は [`sepika_core::axis_gen`] を参照。手動作成・ST-Bridge 取り込み・
+    /// 生成規則は [`sepika_core::axis_gen`] を参照。手動作成・
     /// 利用者が改名した通り（`AxisSource::Manual`）は保護される。
     pub fn generate_axes_action(&mut self) {
         use sepika_core::model::AxisSource;

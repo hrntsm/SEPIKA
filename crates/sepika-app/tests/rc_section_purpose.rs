@@ -93,14 +93,6 @@ impl RcKind {
             Self::CircleColumn => 1.8 * std::f64::consts::PI,
         }
     }
-
-    fn standard_figure(self) -> &'static str {
-        match self {
-            Self::Beam => "<StbSecBeam_RC_Straight width=\"300\" depth=\"500\"/>",
-            Self::RectColumn => "<StbSecColumn_RC_Rect width_X=\"600\" width_Y=\"600\"/>",
-            Self::CircleColumn => "<StbSecColumn_RC_Circle D=\"600\"/>",
-        }
-    }
 }
 
 fn material(id: u32, concrete: bool) -> Material {
@@ -358,9 +350,6 @@ fn assert_normal_path(kind: RcKind, shared: bool, label: &str) {
         (secondary_quantity.concrete_m3 - kind.expected_area_mm2() * 3000.0 / 1e9).abs() < 1e-10
     );
     assert!((secondary_quantity.formwork_m2 - kind.expected_formwork_m2()).abs() < 1e-10);
-    let (stb, _) = sepika_io::stbridge::export_stbridge_with_report(&loaded).unwrap();
-    assert!(stb.contains(kind.standard_figure()), "{stb}");
-    assert!(!stb.contains("<StbSecRaw"));
 }
 
 #[test]

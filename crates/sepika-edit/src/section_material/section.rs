@@ -302,64 +302,8 @@ impl EditCommand for EditSectionShape {
         ) {
             return Box::new(crate::RejectedEdit(reason));
         }
-        let input = model.stb_strengths.clone();
-        use sepika_core::section_shape::SectionShape;
-        let entered = match &self.new_shape {
-            SectionShape::RcBeamRect { rebar, .. } | SectionShape::SrcBeamRect { rebar, .. } => {
-                !rebar.is_unset()
-                    || [
-                        rebar.main_dia.designation_or_diameter_mm(),
-                        rebar.cover,
-                        rebar.stirrup.dia.designation_or_diameter_mm(),
-                        rebar.stirrup.pitch,
-                    ]
-                    .iter()
-                    .any(|n| *n != 0.0)
-                    || rebar.stirrup.legs != 0
-            }
-            SectionShape::RcColumnRect { rebar, .. }
-            | SectionShape::SrcColumnRect { rebar, .. } => {
-                !rebar.is_unset()
-                    || [
-                        rebar.main_dia.designation_or_diameter_mm(),
-                        rebar.cover,
-                        rebar.hoop.dia.designation_or_diameter_mm(),
-                        rebar.hoop.pitch,
-                    ]
-                    .iter()
-                    .any(|n| *n != 0.0)
-                    || rebar.hoop.legs_x != 0
-                    || rebar.hoop.legs_y != 0
-            }
-            SectionShape::RcColumnCircle { rebar, .. } => {
-                !rebar.is_unset()
-                    || [
-                        rebar.main_dia.designation_or_diameter_mm(),
-                        rebar.cover,
-                        rebar.hoop.dia.designation_or_diameter_mm(),
-                        rebar.hoop.pitch,
-                    ]
-                    .iter()
-                    .any(|n| *n != 0.0)
-            }
-            _ => false,
-        };
-        if let Some(source) = model
-            .stb_strengths
-            .sections
-            .iter_mut()
-            .find(|s| s.section == self.section && (s.rebar.is_some() || entered))
-        {
-            source.rebar = None;
-            source.native_rebar = true;
-            source.reinforcement.clear();
-        }
         model.sections[idx] = new_sec;
-        Box::new(crate::strength::RestoreStrengthInput {
-            input,
-            inverse: Box::new(RestoreSection { old }),
-            stories: model.source_stories.clone(),
-        })
+        Box::new(RestoreSection { old })
     }
 
     fn label(&self) -> &str {
@@ -611,7 +555,7 @@ impl EditCommand for RestoreElementSectionAndDeleteSection {
 }
 
 id_indexed_delete_insert!(
-    /// 断面削除。部材・床板・壁版・ST-Bridge断面強度入力から参照中は Noop とする
+    /// 断面削除。部材・床板・壁版から参照中は Noop とする
     /// （先に割当を解除するか、UI 側でボタンを無効化する）。
     /// ID＝配列インデックスの不変条件を保つため、削除後は後続の断面 ID と
     /// 部材からの参照を 1 つずつ繰り上げる。
@@ -643,11 +587,6 @@ impl DeleteSection {
     /// 参照中で削除できない場合は理由を返す。参照がなければ `None` を返す。
     /// 断面 ID の実在は検証しない。
     pub fn blocked_reason(&self, model: &Model) -> Option<&'static str> {
-        let strength = model
-            .stb_strengths
-            .sections
-            .iter()
-            .any(|s| s.section == self.id);
         let member = model.elements.iter().any(|e| e.section == Some(self.id))
             || model.slabs.iter().any(|s| s.section() == Some(self.id))
             || model.wall_plates.iter().any(|p| p.section == Some(self.id))
@@ -655,14 +594,7 @@ impl DeleteSection {
                 .beams()
                 .chain(model.posts())
                 .any(|sm| sm.section == Some(self.id));
-        match (member, strength) {
-            (false, false) => None,
-            (true, false) => Some("部材・小梁・二次部材・床・壁版から参照中のため削除できません"),
-            (false, true) => Some("ST-Bridge断面強度入力から参照中のため削除できません"),
-            (true, true) => {
-                Some("部材・小梁・二次部材・床・壁版とST-Bridge断面強度入力から参照中のため削除できません")
-            }
-        }
+        member.then_some("部材・小梁・二次部材・床・壁版から参照中のため削除できません")
     }
 }
 

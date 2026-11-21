@@ -128,23 +128,12 @@ pub fn assert_inputs_eq(actual: &Model, expected: &Model) {
     assert_eq!(actual.nodes, expected.nodes);
     assert_eq!(actual.elements, expected.elements);
     assert_eq!(actual.load_cases, expected.load_cases);
-    assert_eq!(actual.stb_node_ids, expected.stb_node_ids);
     assert!(actual.eq_ignoring_dofmap(expected));
 }
 
 #[allow(dead_code)]
 pub fn with_plate_metadata(wall: bool) -> Model {
     let mut model = with_plate(wall);
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: if wall {
-            StrengthTarget::Wall(WallPlateId(0))
-        } else {
-            StrengthTarget::Slab(SlabId(0))
-        },
-        node: NodeId(0),
-        node_order: vec![],
-        concrete: Some("Fc24".into()),
-    });
     model.seismic_weight_generation = Some(SeismicWeightGeneration {
         input_key: vec![5, 0, 6],
         output_key: vec![24],

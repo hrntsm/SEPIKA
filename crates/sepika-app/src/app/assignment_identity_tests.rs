@@ -35,7 +35,6 @@ fn guiは除去確認キャンセルで未更新とし確認後に一undoで全�
     for wall in [false, true] {
         let mut app = App::default();
         app.core.model = fixture::with_plate(wall);
-        app.core.model.assign_stb_node_ids().unwrap();
         let before = app.core.model.clone();
         let command = || {
             let sm = fixture::divider(wall);
@@ -118,7 +117,6 @@ fn 主架構一覧削除と節点移動は確認前とキャンセルで未更�
         {
             let mut app = App::default();
             app.core.model = fixture::with_plate(wall);
-            app.core.model.assign_stb_node_ids().unwrap();
             let before = app.core.model.clone();
             let edit = |app: &mut App| {
                 if move_node {
@@ -163,7 +161,6 @@ fn 節点グリッドの非平面貼付は旧版荷重を診断して未更新�
     let wall = true;
     let mut app = App::default();
     app.core.model = fixture::with_plate(wall);
-    app.core.model.assign_stb_node_ids().unwrap();
     let before = app.core.model.clone();
     let mut adapter = node_grid::NodeGridAdapter {
         model: &mut app.core.model,
@@ -227,7 +224,6 @@ fn 一般準備の候補拒否は支持再推定もauto_ex生成記録強度入�
             app.core.model.seismic_weight_generation,
             before.seismic_weight_generation
         );
-        assert_eq!(app.core.model.stb_strengths, before.stb_strengths);
         assert_eq!(app.core.scoped.undo.revision(), 0);
         assert!(!app.core.scoped.undo.can_undo());
     }
@@ -243,7 +239,6 @@ fn gui_redo拒否は理由を表示しモデル履歴と選択を維持し正常
             let mut app = App::default();
             app.core.model = fixture::with_plate_metadata(wall);
             super::tests::assign_zero_density_test_frame_sections(&mut app.core.model);
-            app.core.model.assign_stb_node_ids().unwrap();
             let valid = app.core.model.clone();
             let sm = fixture::divider(wall);
             assert!(!app.apply_model_edit(Box::new(PlaceSecondaryMember {
@@ -341,7 +336,6 @@ fn 床支持節点zのグリッド編集は版入力と支持idを維持し確�
     use crate::grid::GridAdapter;
     let mut app = App::default();
     app.core.model = fixture::with_plate(false);
-    app.core.model.assign_stb_node_ids().unwrap();
     let before = app.core.model.clone();
     let mut adapter = node_grid::NodeGridAdapter {
         model: &mut app.core.model,

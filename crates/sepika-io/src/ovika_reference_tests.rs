@@ -159,7 +159,7 @@ fn assert_rejected_preserving_input(model: &Model, label: &str, reason: &str) {
     std::fs::remove_file(raw).unwrap();
 }
 
-fn assert_roundtrip(model: &Model, label: &str) {
+fn assert_roundtrip(model: &Model, label: &str) -> Model {
     let path = crate::test_util::test_tmp().join(format!("reference-{label}.ovika"));
     let before = rmp_serde::to_vec_named(model).unwrap();
     save_ovika(
@@ -186,6 +186,97 @@ fn assert_roundtrip(model: &Model, label: &str) {
     );
     assert_eq!(rmp_serde::to_vec_named(model).unwrap(), before);
     std::fs::remove_file(path).unwrap();
+    contents.model
+}
+
+#[test]
+fn ovika_preserves_asymmetric_built_h_and_rolled_member_placement() {
+    use sepika_core::section_shape::SectionShape;
+
+    let sine = (6.0_f64.sqrt() - 2.0_f64.sqrt()) / 4.0;
+    let cosine = (6.0_f64.sqrt() + 2.0_f64.sqrt()) / 4.0;
+    let expected_axes = [[1.0, 0.0, 0.0], [0.0, -sine, cosine], [0.0, -cosine, -sine]];
+    for (lower_width, lower_thick, area_mm2) in [
+        (150.0, 10.0, 14_340.0),
+        (150.0, 20.0, 15_720.0),
+        (300.0, 10.0, 15_840.0),
+    ] {
+        let shape = SectionShape::SteelBuiltH {
+            height: 600.0,
+            upper_width: 300.0,
+            upper_thick: 20.0,
+            lower_width,
+            lower_thick,
+            web_thick: 12.0,
+        };
+        let mut section = shape.to_section(SectionId(0), "非対称組立H".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        let mut model = member_model(0, vec![section], Some(0));
+        model.nodes[0].coord = [0.0, 0.0, 3000.0];
+        model.nodes[1].coord = [6000.0, 0.0, 3000.0];
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, -300.0]; 2];
+        let (sin, cos) = 15.0_f64.to_radians().sin_cos();
+        model.elements[0].local_axis.ref_vector = [0.0, -sin, cos];
+        let saved = assert_roundtrip(&model, &format!("built-h-{lower_width}-{lower_thick}"));
+        assert_eq!(saved.elements[0].section, Some(SectionId(0)));
+        assert_eq!(saved.sections[0].area, area_mm2);
+        let placement = saved
+            .beam_placement(SupportMemberId::Primary(ElemId(0)))
+            .unwrap();
+        assert_eq!(placement.section_shape, shape);
+        assert_eq!(
+            placement.reference_ends,
+            [[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]
+        );
+        assert_eq!(
+            placement.actual_ends,
+            [[0.0, 0.0, 2700.0], [6000.0, 0.0, 2700.0]]
+        );
+        for (actual, expected) in placement.axes.into_iter().zip(expected_axes) {
+            assert!(sepika_core::geom::vec3::dist(actual, expected) < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn ovika_preserves_steel_bar_and_lip_channel_shapes_and_member_assignments() {
+    use sepika_core::section_shape::SectionShape;
+
+    for (shape, area_mm2, label) in [
+        (
+            SectionShape::SteelFlatBar {
+                width: 100.0,
+                thick: 12.0,
+            },
+            1200.0,
+            "flat-bar",
+        ),
+        (
+            SectionShape::SteelRoundBar { dia: 32.0 },
+            std::f64::consts::PI * 256.0,
+            "round-bar",
+        ),
+        (
+            SectionShape::SteelLipChannel {
+                height: 150.0,
+                width: 75.0,
+                lip: 20.0,
+                thick: 2.3,
+            },
+            760.84,
+            "lip-channel",
+        ),
+    ] {
+        let mut section = shape.to_section(SectionId(0), label.into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        let model = member_model(0, vec![section], Some(0));
+        let saved = assert_roundtrip(&model, label);
+        let member = saved.element(ElemId(0)).unwrap();
+        assert_eq!(member.section, Some(SectionId(0)));
+        let section = saved.element_section(member).unwrap();
+        assert_eq!(section.shape, Some(shape));
+        assert!((section.area - area_mm2).abs() < 1e-9);
+    }
 }
 
 #[test]
@@ -294,7 +385,6 @@ fn reference_model() -> Model {
         name: "階".into(),
         elevation: Some(0.),
         sl_offset_mm: Some(0.0),
-        source_story: None,
         node_ids: vec![],
         seismic_weight: None,
         weight_override: None,
@@ -539,10 +629,6 @@ fn built_box_ovika_roundtrip_keeps_both_thicknesses_pending_properties_and_refer
                 Some((9.0, 12.0))
             );
             assert_roundtrip(&model, &format!("built-box-{cft}-{place}"));
-            assert!(crate::stbridge::export_stbridge(&model)
-                .unwrap_err()
-                .to_string()
-                .contains("異厚BOXのSTB出力は未対応"));
             assert_eq!(
                 (
                     model.sections[1].area,

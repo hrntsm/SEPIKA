@@ -19,11 +19,9 @@ thiserror  = { workspace = true }
 arrow      = { workspace = true, optional = true }
 parquet    = { workspace = true, optional = true }
 tempfile   = { version = "3", optional = true }
-quick-xml  = { workspace = true }
-smallvec   = { workspace = true }
-encoding_rs = { workspace = true }
 dirs        = { workspace = true }
 sepika-core    = { path = "../sepika-core" }
 
 [dev-dependencies]
+smallvec = { workspace = true }
 sepika-element = { path = "../sepika-element" }

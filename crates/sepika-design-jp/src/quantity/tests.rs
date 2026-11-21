@@ -1351,7 +1351,6 @@ fn circular_rc_post_model(end_mm: [f64; 3]) -> Model {
             name: "1F".into(),
             elevation: Some(0.0),
             sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids: vec![NodeId(0)],
             seismic_weight: None,
             weight_override: None,
@@ -2926,29 +2925,18 @@ fn secondary_overflow_is_id_error_before_and_after_materialization() {
 }
 
 #[test]
-fn nonnodal_secondary_stb_member_strength_is_preserved_and_material_mismatch_is_rejected() {
-    use sepika_core::model::{StbGradeMaterial, StbMemberStrength, StrengthTarget};
+fn nonnodal_secondary_section_material_is_preserved_and_inconsistent_section_is_rejected() {
     let mut model = nonnodal_beam_model();
     let mut fc30 = rc_material(2);
     fc30.name = "Fc30".into();
     fc30.fc = Some(30.0);
     model.materials.push(fc30);
-    model.stb_strengths.materials = vec![
-        StbGradeMaterial {
-            grade: "Fc24".into(),
-            material: MaterialId(0),
-        },
-        StbGradeMaterial {
-            grade: "Fc30".into(),
-            material: MaterialId(2),
-        },
-    ];
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Secondary(SecondaryMemberId(557)),
-        node: NodeId(0),
-        node_order: vec![NodeId(0)],
-        concrete: Some("Fc30".into()),
-    });
+    let sid = SectionId(model.sections.len() as u32);
+    let mut alternate = model.sections[0].clone();
+    alternate.id = sid;
+    alternate.material = Some(MaterialId(2));
+    model.sections.push(alternate);
+    model.unassigned_beams[0].section = Some(sid);
     for nodes in [false, true] {
         if nodes {
             model.nodes.extend([
@@ -2975,12 +2963,7 @@ fn nonnodal_secondary_stb_member_strength_is_preserved_and_material_mismatch_is_
         error.contains("557") && error.contains("解決材料"),
         "{error}"
     );
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Element(ElemId(2)),
-        node: NodeId(0),
-        node_order: vec![NodeId(0)],
-        concrete: Some("Fc30".into()),
-    });
+    model.elements[2].section = Some(sid);
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     assert_eq!(q.items.len(), 3);
     assert!(q.items.iter().all(|i| i.secondary.is_none()));

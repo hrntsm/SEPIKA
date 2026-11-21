@@ -12,7 +12,6 @@ use sepika_core::model::{
 /// 再構築が変更しうる派生データ（床領域・壁領域・割当領域・版）を退避する。
 #[derive(Clone)]
 struct AssignmentTopology {
-    strengths: sepika_core::model::StbStrengthInput,
     src_joint_hoops: Vec<sepika_core::model::SrcJointHoopAssignment>,
     floor_regions: Vec<FloorRegion>,
     wall_regions: Vec<WallRegion>,
@@ -27,7 +26,6 @@ struct AssignmentTopology {
 impl AssignmentTopology {
     fn capture(model: &Model) -> Self {
         Self {
-            strengths: model.stb_strengths.clone(),
             src_joint_hoops: model.src_joint_hoops.clone(),
             floor_regions: model.floor_regions.clone(),
             wall_regions: model.wall_regions.clone(),
@@ -41,7 +39,6 @@ impl AssignmentTopology {
     }
 
     fn restore(self, model: &mut Model) {
-        model.stb_strengths = self.strengths;
         model.src_joint_hoops = self.src_joint_hoops;
         model.floor_regions = self.floor_regions;
         model.wall_regions = self.wall_regions;
@@ -300,9 +297,6 @@ pub struct AddNode {
 impl EditCommand for AddNode {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let new_id = NodeId(model.nodes.len() as u32);
-        if let Err(reason) = model.assign_stb_node_ids() {
-            return Box::new(RejectedEdit(reason));
-        }
         model.nodes.push(sepika_core::model::Node {
             id: new_id,
             coord: self.coord,
@@ -311,9 +305,6 @@ impl EditCommand for AddNode {
             story: None,
             support_spring: None,
         });
-        if let Err(reason) = model.assign_stb_node_ids() {
-            return Box::new(RejectedEdit(reason));
-        }
         Box::new(DeleteNode { id: new_id })
     }
 
@@ -343,13 +334,7 @@ impl EditCommand for DeleteNode {
         if let Some(record) = &mut model.seismic_weight_generation {
             record.retain_node_references(|node| node != self.id);
         }
-        let source_stories = model.source_stories.clone();
-        let stb_node_ids = model.stb_node_ids.clone();
         let story_membership = model.stories.iter().map(|s| s.node_ids.clone()).collect();
-        for story in &mut model.source_stories {
-            story.node_ids.retain(|n| n.node != Some(self.id));
-        }
-        model.stb_node_ids.retain(|n| n.node != self.id);
         for story in &mut model.stories {
             story.node_ids.retain(|n| *n != self.id);
         }
@@ -388,8 +373,6 @@ impl EditCommand for DeleteNode {
             support_spring: removed.support_spring,
             generated_master,
             axis_membership,
-            source_stories,
-            stb_node_ids,
             story_membership,
         })
     }
@@ -403,8 +386,6 @@ impl EditCommand for DeleteNode {
 pub struct InsertNode {
     pub src_joint_hoops: Vec<sepika_core::model::SrcJointHoopAssignment>,
     pub seismic_weight_generation: Option<sepika_core::model::SeismicWeightGeneration>,
-    pub source_stories: Vec<sepika_core::model::SourceStory>,
-    pub stb_node_ids: Vec<sepika_core::model::StbNodeIdentity>,
     pub story_membership: Vec<Vec<NodeId>>,
     pub index: usize,
     pub coord: [f64; 3],
@@ -447,8 +428,6 @@ impl EditCommand for InsertNode {
         }
         model.seismic_weight_generation = self.seismic_weight_generation.clone();
         model.src_joint_hoops = self.src_joint_hoops.clone();
-        model.source_stories = self.source_stories.clone();
-        model.stb_node_ids = self.stb_node_ids.clone();
         for (story, nodes) in model.stories.iter_mut().zip(&self.story_membership) {
             story.node_ids = nodes.clone();
         }
@@ -749,10 +728,6 @@ impl EditCommand for DeleteMember {
                 }
             }
         }
-        model
-            .stb_strengths
-            .members
-            .retain(|m| m.target != sepika_core::model::StrengthTarget::Element(self.id));
         model.floor_assignment_regions.regions.retain(|region| {
             !region
                 .boundary

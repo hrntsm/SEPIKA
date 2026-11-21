@@ -74,7 +74,7 @@ pub(crate) enum ShearDir {
 fn real_rebar_capacity_input(
     shape: &SectionShape,
     mat: &Material,
-    rebar_mat: Option<(&Material, Option<&str>)>,
+    rebar_mat: Option<&Material>,
     shear_mat: Option<&Material>,
     dir: ShearDir,
     clear_span: f64,
@@ -159,12 +159,10 @@ fn real_rebar_capacity_input(
         d,
         at,
         d_eff,
-        sigma_y: sepika_core::material_grade::rebar_yield_strength(rebar_mat.map(|(mat, _)| mat))
+        sigma_y: sepika_core::material_grade::rebar_yield_strength(rebar_mat)
             .or(mat.fy)
             .unwrap_or(345.0)
-            * rebar_mat
-                .map(|(mat, grade)| material_strength_factor_rebar(mat, grade))
-                .unwrap_or(1.1),
+            * rebar_mat.map(material_strength_factor_rebar).unwrap_or(1.1),
         fc,
         pw,
         sigma_wy: sepika_core::material_grade::shear_rebar_yield_strength(shear_mat)
@@ -246,7 +244,7 @@ fn src_steel_shear_capacities(
 #[derive(Clone, Copy)]
 pub(crate) struct SecMaterials<'a> {
     pub material: Option<&'a Material>,
-    pub rebar_mat: Option<(&'a Material, Option<&'a str>)>,
+    pub rebar_mat: Option<&'a Material>,
     pub shear_mat: Option<&'a Material>,
     #[cfg(test)]
     pub steel_mat: Option<&'a Material>,
@@ -334,29 +332,8 @@ pub(super) fn resolve_src_steel_shear_capacities(model: &Model) -> Result<Vec<[f
             let section = model.element_section(elem);
             let shape = section.and_then(|section| section.shape.as_ref());
             let steel = model.element_steel_material(elem);
-            src_steel_shear_capacities(shape, steel).map_err(|reason| {
-                let references =
-                    section
-                        .and_then(|section| {
-                            model.stb_strengths.sections.iter().find(|input| {
-                                input.section == section.id && !input.steel.is_empty()
-                            })
-                        })
-                        .filter(|_| steel.is_none())
-                        .map(|input| {
-                            let grades: Vec<_> = input
-                                .steel
-                                .iter()
-                                .map(|steel| steel.strength.as_str())
-                                .collect();
-                            format!("（外部入力の材種: {}）", grades.join("、"))
-                        })
-                        .unwrap_or_default();
-                format!(
-                    "部材 ID {} のせん断降伏耐力: {reason}{references}",
-                    elem.id.0
-                )
-            })
+            src_steel_shear_capacities(shape, steel)
+                .map_err(|reason| format!("部材 ID {} のせん断降伏耐力: {reason}", elem.id.0))
         })
         .collect()
 }
@@ -379,7 +356,7 @@ pub(super) fn build_shear_yield_thresholds(
             let sec = model.element_section(elem);
             let mats = SecMaterials {
                 material: model.element_material(elem),
-                rebar_mat: model.element_rebar_material_with_grade(elem),
+                rebar_mat: model.element_rebar_material(elem),
                 shear_mat: model.element_shear_rebar_material(elem),
                 #[cfg(test)]
                 steel_mat: None,

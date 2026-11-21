@@ -13,7 +13,6 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     input.axes.clear();
     input.src_joint_hoops.clear();
     input.quantity_cfg = Default::default();
-    input.stb_node_ids.clear();
     input.vibration_cases.clear();
     input.lumped_vibration_cases.clear();
     input.lumped_skeleton_intervals.clear();
@@ -48,9 +47,6 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     }
     for material in &mut input.materials {
         material.name.clear();
-    }
-    for story in &mut input.source_stories {
-        story.name.clear();
     }
     input.generated_masters.clear();
     input

@@ -341,7 +341,6 @@ impl App {
             .map(|element| element.id)
             .collect();
         input.mass_method = self.core.analysis_cfg.mass_method;
-        let source_id_assignment = input.assign_stb_node_ids();
         let panel_mode = input.panel_zone;
         input.panel_zone = sepika_core::model::PanelZoneMode::None;
         // 削除を拒否したモデルも、準備計算で診断する前に元のパネルと参照を含めて識別する必要がある。
@@ -368,7 +367,6 @@ impl App {
             .map(|s| &s.name)
             .chain(model.materials.iter().map(|m| &m.name))
             .chain(model.stories.iter().map(|s| &s.name))
-            .chain(model.source_stories.iter().map(|s| &s.name))
             .chain(model.floor_regions.iter().flat_map(|r| {
                 std::iter::once(&r.name).chain(r.secondary_beams.iter().map(|member| &member.name))
             }))
@@ -389,8 +387,6 @@ impl App {
                 &model.axes,
                 &model.quantity_cfg,
                 &model.combinations,
-                &model.stb_node_ids,
-                source_id_assignment,
                 member_ids,
                 self.core.analysis_cfg,
                 &self.core.scoped.references.accepted_time_history,
@@ -1681,10 +1677,7 @@ impl App {
                 for member in model.floor_regions.iter().flat_map(|region| &region.secondary_beams).chain(model.wall_regions.iter().flat_map(|region| &region.posts)).chain(&model.unassigned_beams).chain(&model.unassigned_posts) {
                     ui.label(format!("二次部材 #{} {} / 種別 {:?} / 断面 {:?} / 支持位置 {:?} / 端別XYZ偏心 {:?} mm", member.id.0, member.name, member.kind, member.section, member.ends, member.end_offsets_mm));
                     ui.label(format!("二次部材 #{} の両端 [mm]: {}", member.id.0, model.secondary_member_end_points(member).map_or_else(|| "取得不能".into(), |coords| format!("{coords:?}"))));
-                    let steel = member.section.and_then(|id| model.section(id)).and_then(|section| {
-                        if model.stb_strengths.sections.iter().any(|input| input.section == section.id && !input.steel.is_empty()) { model.stb_steel_material(section.id) }
-                        else { section.steel_material.and_then(|id| model.materials.get(id.index())) }
-                    });
+                    let steel = member.section.and_then(|id| model.section(id)).and_then(|section| section.steel_material).and_then(|id| model.materials.get(id.index()));
                     for (role, material) in [("主材料", model.secondary_material(member)), ("主筋", model.secondary_rebar_material(member)), ("せん断補強筋", model.secondary_shear_rebar_material(member)), ("内蔵鉄骨・鋼管", steel)] {
                         ui.label(material.map_or_else(|| format!("二次部材 #{} / {role}: 未割当・解決不能（形状により対象外の役割を含む）", member.id.0), |material| format!("二次部材 #{} / {role}: #{} {} / Fc={:?} N/mm² / Fy={:?} N/mm²", member.id.0, material.id.0, material.name, material.fc, material.fy)));
                     }
@@ -3015,27 +3008,28 @@ mod tests {
     }
 
     #[test]
-    fn 派生仕口パネルを正規化しても手入力剛域と明示stb識別は保持する() {
-        use sepika_core::model::{StbNodeIdentity, ZoneSource};
+    fn 派生仕口パネルを正規化しても手入力剛域と準備前の入力参照を保持する() {
+        use sepika_core::model::{ElementKind, ZoneSource};
+
         let mut app = sample();
         app.core.model.elements[0].rigid_zone.source_i = ZoneSource::Manual;
         app.core.model.elements[0].rigid_zone.length_i = 120.0;
-        app.core.model.stb_node_ids.push(StbNodeIdentity {
-            node: NodeId(0),
-            id: 100,
-            guid: Some("12345678-1234-1234-1234-123456789abc".into()),
-        });
         let input = app.input_reference();
-        assert_eq!(app.core.model.stb_node_ids.len(), 1);
         assert_eq!(app.core.model.elements.len(), 3);
+
         app.run_preparation();
+        assert!(app
+            .core
+            .model
+            .elements
+            .iter()
+            .any(|element| element.kind == ElementKind::PanelZone));
         assert_eq!(app.input_reference(), input);
-        assert_eq!(app.core.model.elements[0].rigid_zone.length_i, 120.0);
-        assert_eq!(app.core.model.stb_node_ids[0].id, 100);
-        app.core.model.stb_node_ids[0].guid = Some("87654321-1234-1234-1234-123456789abc".into());
-        assert_ne!(app.input_reference().input, input.input);
-        app.core.model.stb_node_ids[0].guid = Some("12345678-1234-1234-1234-123456789abc".into());
-        app.core.model.stb_node_ids[0].id = 200;
+        let rigid_zone = &app.core.model.elements[0].rigid_zone;
+        assert_eq!(rigid_zone.source_i, ZoneSource::Manual);
+        assert_eq!(rigid_zone.length_i, 120.0);
+
+        app.core.model.elements[0].rigid_zone.length_i = 150.0;
         assert_ne!(app.input_reference().input, input.input);
     }
 

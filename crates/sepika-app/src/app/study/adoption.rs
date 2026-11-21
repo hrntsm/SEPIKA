@@ -53,9 +53,6 @@ pub(super) fn same_input(a: &StudyInput, b: &StudyInput) -> bool {
             case.member.retain(|load| !load.source.is_auto());
         }
     }
-    if a_model.assign_stb_node_ids().is_err() || b_model.assign_stb_node_ids().is_err() {
-        return false;
-    }
     a.references.project == b.references.project
         && a.settings.same_input_conditions(&b.settings)
         && bincode::serialize(&a_model).expect("入力")

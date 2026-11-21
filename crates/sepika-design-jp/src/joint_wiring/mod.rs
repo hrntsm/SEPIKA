@@ -162,7 +162,7 @@ pub(crate) fn collect_joint_checks_impl(
 
         steel_panel::check_s_panel(model, &cols, &beams, nid, panel_moment, &mut out);
         if !cols.is_empty() && !beams.is_empty() {
-            rc_joint::check_rc_joint(model, &cols, &beams, nid, &mut out);
+            rc_joint::check_rc_joint(&cols, &beams, nid, &mut out);
             cold_formed::check_cold_formed(&cols, &beams, nid, long_member_forces, &mut out);
         }
         rc_joint::check_rc_joint_ultimate(model, nid, &mut out);

@@ -2,31 +2,8 @@ use super::*;
 use sepika_app::app::study::Location;
 use sepika_core::ids::{ElemId, SectionId};
 
-fn fixture_content_hash(bytes: &[u8]) -> String {
-    use sha2::Digest;
-    let text = std::str::from_utf8(bytes).unwrap().replace("\r\n", "\n");
-    format!("{:x}", sha2::Sha256::digest(text.as_bytes()))
-}
-
-#[test]
-fn issue985_fixture_hash_ignores_checkout_line_endings_but_detects_content_changes() {
-    let bytes = std::fs::read(fixture_path()).unwrap();
-    let lf = std::str::from_utf8(&bytes).unwrap().replace("\r\n", "\n");
-    let expected = "c137797755de759807a3e04f90fa349a01104072045e526ca22b353c25f72e9a";
-    assert_eq!(fixture_content_hash(lf.as_bytes()), expected);
-    assert_eq!(
-        fixture_content_hash(lf.replace('\n', "\r\n").as_bytes()),
-        expected
-    );
-    assert_ne!(fixture_content_hash(format!("{lf} ").as_bytes()), expected);
-}
-
 fn fixture() -> App {
     let mut app = imported();
-    assert_eq!(
-        fixture_content_hash(&std::fs::read(fixture_path()).unwrap()),
-        "c137797755de759807a3e04f90fa349a01104072045e526ca22b353c25f72e9a"
-    );
     let supports: Vec<_> = app
         .core
         .model
@@ -62,18 +39,7 @@ fn fixture() -> App {
 }
 
 fn target(app: &App) -> ElemId {
-    let ids: Vec<_> = [13, 14]
-        .into_iter()
-        .map(|source| {
-            app.core
-                .model
-                .stb_node_ids
-                .iter()
-                .find(|n| n.id == source)
-                .unwrap()
-                .node
-        })
-        .collect();
+    let ids = [sepika_core::ids::NodeId(12), sepika_core::ids::NodeId(13)];
     let matches: Vec<_> = app
         .core
         .model
@@ -160,15 +126,7 @@ fn representative_manual_study_retains_three_completed_runs() {
             .iter()
             .find(|(name, _)| name == "保存長期架構G+P")
             .unwrap();
-        let node = run
-            .prepared
-            .model
-            .stb_node_ids
-            .iter()
-            .find(|n| n.id == 14)
-            .unwrap()
-            .node;
-        let z = combo.1.disp[node.index()][2];
+        let z = combo.1.disp[13][2];
         assert!(z.is_finite() && z < 0.0);
         let checks = run
             .comparison_checks

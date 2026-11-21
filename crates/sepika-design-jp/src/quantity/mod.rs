@@ -653,17 +653,9 @@ fn resolve_secondary_quantities(
         let mat = model
             .secondary_material(sm)
             .ok_or_else(|| error("主材料の参照が未設定または不明です".to_string()))?;
-        let steel = if model
-            .stb_strengths
-            .sections
-            .iter()
-            .any(|input| input.section == sec.id && !input.steel.is_empty())
-        {
-            model.stb_steel_material(sec.id)
-        } else {
-            sec.steel_material
-                .and_then(|id| model.materials.get(id.index()))
-        };
+        let steel = sec
+            .steel_material
+            .and_then(|id| model.materials.get(id.index()));
         sepika_core::model::SectionMassProperties::try_from_section(
             sec,
             Some(mat),

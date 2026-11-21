@@ -205,6 +205,7 @@ impl StoryFireproof {
 
 /// 階の入力と準備計算で得られる所属・重量。FL・ΔSL の単位は mm。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Story {
     pub id: StoryId,
     /// 階名（`2F`・`PH1` など）。表示用の自由文字列。識別子は `id`。
@@ -213,8 +214,6 @@ pub struct Story {
     pub elevation: Option<f64>,
     /// SL − FL `[mm]`。上向きを正とし、`None` は未入力。
     pub sl_offset_mm: Option<f64>,
-    /// 取込元の原階 ID。現在の FL・SL の編集では元属性を変更しない。
-    pub source_story: Option<u32>,
     /// この階に属する節点（準備計算が [`crate::model::Model::story_at`] で埋める）。
     pub node_ids: Vec<NodeId>,
     /// 設計に用いる地震用重量 `[N]`。準備計算の階生成が自動算定値を書き込むが、
@@ -314,7 +313,6 @@ impl Story {
             name,
             elevation,
             sl_offset_mm,
-            source_story: None,
             node_ids: Vec::new(),
             seismic_weight: None,
             weight_override: None,
@@ -375,11 +373,6 @@ impl Model {
             {
                 errors.push(format!("{owner}: SL の導出結果が有限値ではありません"));
             }
-            if let Some(id) = story.source_story {
-                if !self.source_stories.iter().any(|s| s.id == id) {
-                    errors.push(format!("{owner}: 原階 {id} が存在しません"));
-                }
-            }
             if i > 0 {
                 let lower = &self.stories[i - 1];
                 for (field, bottom, top) in [
@@ -404,11 +397,7 @@ impl Model {
     /// 階依存の生成に必要な入力・SL 所属区間・利用者剛床を検査する。
     /// 重量・材料・荷重の完成度とは独立し、既存の座標・拘束は変更しない。
     pub fn validate_story_structure_inputs(&self) -> Result<(), String> {
-        let errors: Vec<_> = self
-            .story_level_diagnostics()
-            .into_iter()
-            .chain(self.source_story_diagnostics())
-            .collect();
+        let errors = self.story_level_diagnostics();
         if !errors.is_empty() {
             return Err(errors.join("; "));
         }
@@ -488,29 +477,12 @@ impl Model {
 
     /// 保存された明示所属を返す。自動生成時の所属値は除外する。
     pub fn explicit_story_of_node(&self, node: NodeId) -> Option<StoryId> {
-        if let Some(story) = self.stories.iter().find(|story| {
-            story.source_story.is_some_and(|source| {
-                self.source_stories
-                    .iter()
-                    .any(|s| s.id == source && s.node_ids.iter().any(|n| n.node == Some(node)))
-            })
-        }) {
-            return Some(story.id);
-        }
-        let story = self
-            .node(node)?
-            .story
-            .filter(|id| {
-                self.stories
-                    .get(id.index())
-                    .is_none_or(|story| story.source_story.is_none())
-            })
-            .or_else(|| {
-                self.stories
-                    .iter()
-                    .find(|s| s.source_story.is_none() && s.node_ids.contains(&node))
-                    .map(|s| s.id)
-            })?;
+        let story = self.node(node)?.story.or_else(|| {
+            self.stories
+                .iter()
+                .find(|story| story.node_ids.contains(&node))
+                .map(|story| story.id)
+        })?;
         if self
             .seismic_weight_generation
             .as_ref()
@@ -753,7 +725,7 @@ mod level_tests {
     #[test]
     fn incomplete_nonfinite_overflow_or_reversed_levels_never_supply_layers() {
         let base = model();
-        let invalid: [fn(&mut Model); 11] = [
+        let invalid: [fn(&mut Model); 10] = [
             |m| m.stories[0].elevation = None,
             |m| m.stories[1].sl_offset_mm = None,
             |m| m.stories[1].elevation = Some(f64::NAN),
@@ -772,7 +744,6 @@ mod level_tests {
                 m.stories[1].sl_offset_mm = Some(0.0);
             },
             |m| m.stories[1].id = StoryId(8),
-            |m| m.stories[1].source_story = Some(999),
         ];
         for corrupt in invalid {
             let mut m = base.clone();

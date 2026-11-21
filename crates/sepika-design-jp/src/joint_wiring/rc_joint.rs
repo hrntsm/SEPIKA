@@ -15,7 +15,6 @@ struct RcBeam<'a> {
 
 /// RC 柱梁接合部の許容応力度検定を `out` へ追加する。
 pub(super) fn check_rc_joint(
-    model: &sepika_core::model::Model,
     cols: &[&MemberInfo<'_>],
     beams: &[&MemberInfo<'_>],
     nid: NodeId,
@@ -40,7 +39,7 @@ pub(super) fn check_rc_joint(
         })
         .collect();
     if let (Some(col), false) = (rc_col, rc_beams.is_empty()) {
-        if let Some(reason) = joint_rebar_issue(model, col, &rc_beams) {
+        if let Some(reason) = joint_rebar_issue(col, &rc_beams) {
             out.push((
                 nid,
                 "接合部(RC)".to_string(),
@@ -120,16 +119,7 @@ pub(super) fn check_rc_joint(
 }
 
 /// 接合部に用いる柱・梁の実配筋幾何を検証する。不整合があれば理由を返す。
-fn joint_rebar_issue(
-    model: &sepika_core::model::Model,
-    col: &MemberInfo<'_>,
-    beams: &[RcBeam<'_>],
-) -> Option<String> {
-    for section in std::iter::once(col.sec.id).chain(beams.iter().map(|beam| beam.member.sec.id)) {
-        if let Err(reason) = model.ensure_stb_rebar_supported(section) {
-            return Some(reason);
-        }
-    }
+fn joint_rebar_issue(col: &MemberInfo<'_>, beams: &[RcBeam<'_>]) -> Option<String> {
     match col.sec.shape {
         Some(SectionShape::RcColumnRect { b, d, ref rebar }) => {
             if let Err(err) = rebar.validate(b, d) {

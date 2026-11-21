@@ -547,6 +547,10 @@ pub(super) fn draw_section_solids_with_displacements(
 }
 
 #[cfg(test)]
+#[path = "../../tests/support/h_column_model.rs"]
+mod h_column_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use sepika_core::ids::ElemId;
@@ -559,59 +563,48 @@ mod tests {
     }
 
     #[test]
-    fn imported_h_column_direction_turns_the_drawn_flange_outline() {
-        use sepika_io::stbridge::{export_stbridge, import_stbridge};
-
-        let input = include_str!("../../../sepika-io/tests/fixtures/h_column_reference.stb");
+    fn h_column_direction_turns_the_drawn_flange_outline() {
         let mut camera = super::super::CameraState::default();
         camera.snap_to_direction([0.0, 0.0, 1.0]);
         let projector = Projector::new([0.0; 3], &camera, 1.0, [400.0, 400.0]);
-        for (direction, (width_px, height_px)) in
-            [("true", (600.0, 300.0)), ("false", (300.0, 600.0))]
-        {
-            let model = import_stbridge(&input.replace(
-                r#"isReferenceDirection="false""#,
-                &format!(r#"isReferenceDirection="{direction}""#),
-            ))
-            .unwrap();
-            let reread = import_stbridge(&export_stbridge(&model).unwrap()).unwrap();
-            for model in [model, reread] {
-                let coords: Vec<_> = model.nodes.iter().map(|node| node.coord).collect();
-                let context = egui::Context::default();
-                let output = context.run_ui(egui::RawInput::default(), |ui| {
-                    let (skipped, _) = draw_section_solids(
-                        ui.painter(),
-                        &model,
-                        &coords,
-                        &projector,
-                        false,
-                        super::super::FrameFilter::default(),
-                        true,
-                    );
-                    assert_eq!(skipped, 0);
-                });
-                let outlines: Vec<_> = output
-                    .shapes
-                    .iter()
-                    .filter_map(|clipped| match &clipped.shape {
-                        egui::Shape::Path(path) if path.closed && path.points.len() > 4 => {
-                            Some(path)
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                assert_eq!(outlines.len(), 2);
-                for path in outlines {
-                    let bounds = egui::Rect::from_points(&path.points);
-                    assert!(
-                        (bounds.width() - width_px).abs() < 0.01,
-                        "{direction}: {bounds:?}"
-                    );
-                    assert!(
-                        (bounds.height() - height_px).abs() < 0.01,
-                        "{direction}: {bounds:?}"
-                    );
-                }
+        for (direction, (width_px, height_px)) in [
+            ([1.0, 0.0, 0.0], (600.0, 300.0)),
+            ([0.0, 1.0, 0.0], (300.0, 600.0)),
+        ] {
+            let model = h_column_fixture::cantilever(crate::sample::portal_frame(), direction);
+            let coords: Vec<_> = model.nodes.iter().map(|node| node.coord).collect();
+            let context = egui::Context::default();
+            let output = context.run_ui(egui::RawInput::default(), |ui| {
+                let (skipped, _) = draw_section_solids(
+                    ui.painter(),
+                    &model,
+                    &coords,
+                    &projector,
+                    false,
+                    super::super::FrameFilter::default(),
+                    true,
+                );
+                assert_eq!(skipped, 0);
+            });
+            let outlines: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Path(path) if path.closed && path.points.len() > 4 => Some(path),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(outlines.len(), 2);
+            for path in outlines {
+                let bounds = egui::Rect::from_points(&path.points);
+                assert!(
+                    (bounds.width() - width_px).abs() < 0.01,
+                    "{direction:?}: {bounds:?}"
+                );
+                assert!(
+                    (bounds.height() - height_px).abs() < 0.01,
+                    "{direction:?}: {bounds:?}"
+                );
             }
         }
     }

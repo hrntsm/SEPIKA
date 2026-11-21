@@ -43,38 +43,13 @@ fn preparation_distinguishes_incremental_sd490_wall_diagnostics_from_common_inpu
 }
 
 #[test]
-fn preparation_reports_each_analysis_blocked_on_renamed_stb_wall_rebar() {
+fn preparation_reports_invalid_native_wall_rebar_strength() {
     use sepika_job::{prepare_model_for_analysis, AnalysisSettings};
 
     let mut model = rc_wall_side_column_model::input_model();
-    model.materials[1].name = "壁縦筋A".into();
+    model.materials[1].name = "SD490".into();
     model.materials[1].strength_factor = None;
-    model.stb_strengths.materials = vec![StbGradeMaterial {
-        grade: "SD490".into(),
-        material: MaterialId(1),
-    }];
-    model.stb_strengths.sections = vec![StbSectionStrength {
-        built_box: None,
-        native_rebar: false,
-        rebar: None,
-        section: SectionId(2),
-        concrete: None,
-        native_material: None,
-        reinforcement: vec![StbRebarStrength {
-            element: "StbSecBar_Wall_RC_Vertical".into(),
-            part: "vertical".into(),
-            position: None,
-            native_material: None,
-            diameter: None,
-            strength: Some("SD490".into()),
-        }],
-        steel: Vec::new(),
-    }];
-
-    for (fy, expected) in [
-        (490.0, vec!["非線形時刻歴解析不可"]),
-        (539.0, vec!["増分解析不可", "非線形時刻歴解析不可"]),
-    ] {
+    for (fy, expected) in [(490.0, vec![]), (539.0, vec!["増分解析不可"])] {
         let mut input = model.clone();
         input.materials[1].fy = Some(fy);
         let report =
@@ -82,7 +57,7 @@ fn preparation_reports_each_analysis_blocked_on_renamed_stb_wall_rebar() {
         let observed: Vec<_> = report
             .notices
             .iter()
-            .filter(|notice| notice.contains("縦筋材料") && notice.contains("壁縦筋A"))
+            .filter(|notice| notice.contains("縦筋材料") && notice.contains("SD490"))
             .filter_map(|notice| notice.split_once(':').map(|(prefix, _)| prefix))
             .collect();
         assert_eq!(observed, expected, "{:?}", report.notices);

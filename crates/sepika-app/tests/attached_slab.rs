@@ -4,14 +4,18 @@ use sepika_core::model::{
     ElementKind, LoadTransfer, MemberLoadKind, Model, RegionAnchor, SlabShape,
 };
 use sepika_core::region_rebuild::rebuild_floor_regions;
-use sepika_io::stbridge::import_stbridge_with_report;
 use sepika_job::auto_loads::slab_load_case_content;
 use sepika_load::floor::distribute_slab_resolved;
 
+fn attached_slab() -> Model {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/attached_slab.ovika");
+    sepika_io::ovika::load_ovika(&path).unwrap().model
+}
+
 #[test]
-fn imported_boundary_rectangle_preserves_support_interval_area_and_actual_load_resultant() {
-    let xml = include_str!("../../sepika-io/tests/fixtures/cantilever_slab.stb");
-    let (model, _) = import_stbridge_with_report(xml).unwrap();
+fn native_boundary_rectangle_preserves_support_interval_area_and_actual_load_resultant() {
+    let model = attached_slab();
     assert_eq!(model.slabs.len(), 1);
     let slab = &model.slabs[0];
     assert!(slab.is_attached());
@@ -76,8 +80,7 @@ fn assert_actual_supports_and_loads(model: &Model, expected: &[([f64; 2], f64)])
 #[test]
 fn existing_split_preserves_same_geometry_support_intervals_and_actual_resultant() {
     for sign in [1.0, -1.0] {
-        let xml = include_str!("../../sepika-io/tests/fixtures/cantilever_slab.stb");
-        let (mut model, _) = import_stbridge_with_report(xml).unwrap();
+        let mut model = attached_slab();
         model.slabs[0].shape = SlabShape::Attached {
             anchor: RegionAnchor::Line {
                 nodes: [NodeId(0), NodeId(1)],
@@ -111,8 +114,7 @@ fn existing_split_preserves_same_geometry_support_intervals_and_actual_resultant
 #[test]
 fn existing_merge_preserves_same_geometry_support_intervals_and_actual_resultant() {
     for sign in [1.0, -1.0] {
-        let xml = include_str!("../../sepika-io/tests/fixtures/cantilever_slab.stb");
-        let (mut model, _) = import_stbridge_with_report(xml).unwrap();
+        let mut model = attached_slab();
         let mut right = model.slabs[0].clone();
         right.id = SlabId(1);
         for (slab, span, extent) in [

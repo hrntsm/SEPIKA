@@ -205,21 +205,22 @@ fn steel_slab_synced_story_entry_rejects_high_density_but_cases_only_remains_ind
 }
 
 #[test]
-fn steel_slab_design_guard_uses_stb_material_priority_without_section_fallback() {
+fn slab_design_guard_uses_assigned_material_and_rejects_missing_input() {
     let mut model = fixture::one_cubic_metre(true);
     model.materials[1].density = 85e-6 / 9806.65;
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Slab(SlabId(0)),
-        node: NodeId(2),
-        node_order: vec![NodeId(2), NodeId(3)],
-        concrete: Some("Fc24".into()),
-    });
-    model.prepare_stb_strength_materials();
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(model.materials.len() as u32);
+    concrete.name = "Fc24".into();
+    concrete.category = MaterialCategory::Concrete;
+    concrete.fc = Some(24.0);
+    concrete.density = 2.4e-9;
+    model.sections[2].material = Some(concrete.id);
+    model.materials.push(concrete);
     let material = model.slab_plate_material(&model.slabs[0]).unwrap();
     assert_eq!(material.category, MaterialCategory::Concrete);
     assert_ne!(material.id, MaterialId(1));
     auto_loads::compute_dl_beam_loads(&model).unwrap();
-    model.stb_strengths.materials.clear();
+    model.sections[2].material = None;
     let error = auto_loads::compute_dl_beam_loads(&model)
         .unwrap_err()
         .to_string();

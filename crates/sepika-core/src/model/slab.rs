@@ -349,17 +349,9 @@ impl Model {
             .filter(|t| *t > 0.0)
     }
 
-    /// 床板の主材料。STB 強度指定を優先し、指定がなければ割当断面の材料を返す。
+    /// 床板の主材料。断面未割当・材料未割当は `None`。
     /// 対応する材料を解決できなければ `None`。
     pub fn slab_plate_material(&self, slab: &Slab) -> Option<&Material> {
-        if self
-            .stb_strengths
-            .members
-            .iter()
-            .any(|m| m.target == StrengthTarget::Slab(slab.id))
-        {
-            return self.stb_concrete_material(StrengthTarget::Slab(slab.id));
-        }
         self.slab_section(slab)
             .and_then(|s| s.material)
             .and_then(|id| self.materials.get(id.index()))
@@ -403,7 +395,6 @@ impl Model {
     }
 
     /// 床板の設計自重の参照と密度を検査し、床板 ID と計算目的付きで拒否する。
-    /// 材料は STB 強度情報を優先する既存の床板材料解決に従う。
     pub fn validate_slab_design_self_weight(
         &self,
         slab: &Slab,

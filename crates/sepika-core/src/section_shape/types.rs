@@ -86,7 +86,7 @@ pub enum SectionShape {
     ///
     /// `dia`: 直径 D `[mm]`。
     SteelRoundBar { dia: f64 },
-    /// Steel welded built-up H with unequal flanges (非対称組立 H 形鋼). `StbSecBuild-H`。
+    /// Steel welded built-up H with unequal flanges (非対称組立 H 形鋼).
     ///
     /// 上下フランジの幅・厚が異なる溶接組立断面。`height`: せい H（外〜外）、
     /// `upper_width`/`upper_thick`: 上フランジ、`lower_width`/`lower_thick`: 下フランジ、

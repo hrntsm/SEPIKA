@@ -789,49 +789,6 @@ fn test_section_key_taken_skips_self() {
     assert!(!section_key_taken(&sections, ("C1", None), None));
 }
 
-/// `properties_eq` は同一性キーを見ず、断面性能・形状・材料を比べる。
-/// 取り込みで符号＋階が衝突した定義を統合してよいかの判定に使う。
-#[test]
-fn test_section_properties_eq_ignores_key() {
-    let a = named_section(0, "C1", Some("1"));
-    let mut b = named_section(1, "C9", Some("PH1"));
-    assert!(
-        a.properties_eq(&b),
-        "符号・階・ID が違っても中身が同じなら真"
-    );
-    b.iy *= 2.0;
-    assert!(!a.properties_eq(&b));
-}
-
-/// 材料だけが違う断面は `properties_eq` で偽になる。
-/// 材料は断面が持つため、統合すると片方の材料が無言で捨てられる。
-#[test]
-fn test_section_properties_eq_compares_materials() {
-    let base = named_section(0, "C1", Some("1"));
-    for (label, mutate) in [
-        (
-            "主材料",
-            (|s: &mut Section| s.material = Some(MaterialId(1))) as fn(&mut Section),
-        ),
-        ("主筋", |s: &mut Section| {
-            s.rebar_material = Some(MaterialId(1))
-        }),
-        ("せん断補強筋", |s: &mut Section| {
-            s.shear_rebar_material = Some(MaterialId(1))
-        }),
-        ("内蔵鉄骨", |s: &mut Section| {
-            s.steel_material = Some(MaterialId(1))
-        }),
-    ] {
-        let mut other = base.clone();
-        mutate(&mut other);
-        assert!(
-            !base.properties_eq(&other),
-            "{label}だけが違う断面は別の断面として扱う"
-        );
-    }
-}
-
 /// 標高 `z` の節点を並べ、階を `levels` で定義したモデル。
 fn make_story_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
     let nodes: Vec<Node> = zs

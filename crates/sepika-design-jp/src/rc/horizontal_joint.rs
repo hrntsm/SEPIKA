@@ -152,18 +152,6 @@ pub fn collect_pca_checks(
             continue;
         }
 
-        if let Err(reason) = model.ensure_stb_rebar_supported(sec.id) {
-            for pos in [0.0, 1.0] {
-                out.push((
-                    attr.elem,
-                    pos,
-                    crate::CheckOutcome::Skipped {
-                        reason: reason.clone(),
-                    },
-                ));
-            }
-            continue;
-        }
         let Some((b, d, d_eff, at)) = pca_section_geometry(shape) else {
             continue;
         };

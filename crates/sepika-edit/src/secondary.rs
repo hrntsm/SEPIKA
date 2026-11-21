@@ -110,19 +110,10 @@ impl EditCommand for DeleteUnassignedBeam {
         if self.index >= model.unassigned_beams.len() {
             return Box::new(Noop);
         }
-        let strength_input = model.stb_strengths.clone();
         let removed = model.unassigned_beams.remove(self.index);
-        model
-            .stb_strengths
-            .members
-            .retain(|m| m.target != sepika_core::model::StrengthTarget::Secondary(removed.id));
-        Box::new(crate::strength::RestoreStrengthInput {
-            input: strength_input,
-            stories: model.source_stories.clone(),
-            inverse: Box::new(InsertUnassignedBeam {
-                index: self.index,
-                sm: removed,
-            }),
+        Box::new(InsertUnassignedBeam {
+            index: self.index,
+            sm: removed,
         })
     }
 
@@ -890,7 +881,6 @@ enum SecondaryAction {
 #[derive(Clone)]
 struct SecondarySnapshot {
     post_design_inputs: Vec<sepika_core::model::PostDesignInput>,
-    strengths: sepika_core::model::StbStrengthInput,
     floor_regions: Vec<sepika_core::model::FloorRegion>,
     wall_regions: Vec<sepika_core::model::WallRegion>,
     unassigned_beams: Vec<SecondaryMember>,
@@ -905,7 +895,6 @@ struct SecondarySnapshot {
 fn snapshot_secondary(model: &Model) -> SecondarySnapshot {
     SecondarySnapshot {
         post_design_inputs: model.post_design_inputs.clone(),
-        strengths: model.stb_strengths.clone(),
         floor_regions: model.floor_regions.clone(),
         wall_regions: model.wall_regions.clone(),
         unassigned_beams: model.unassigned_beams.clone(),
@@ -920,7 +909,6 @@ fn snapshot_secondary(model: &Model) -> SecondarySnapshot {
 
 fn restore_secondary(model: &mut Model, snapshot: SecondarySnapshot) {
     model.post_design_inputs = snapshot.post_design_inputs;
-    model.stb_strengths = snapshot.strengths;
     model.floor_regions = snapshot.floor_regions;
     model.wall_regions = snapshot.wall_regions;
     model.unassigned_beams = snapshot.unassigned_beams;
@@ -934,10 +922,6 @@ fn restore_secondary(model: &mut Model, snapshot: SecondarySnapshot) {
 
 fn remove_secondary(model: &mut Model, id: SecondaryMemberId) -> bool {
     model.post_design_inputs.retain(|i| i.member != id);
-    model
-        .stb_strengths
-        .members
-        .retain(|m| m.target != sepika_core::model::StrengthTarget::Secondary(id));
     if let Some(pos) = model.unassigned_beams.iter().position(|sm| sm.id == id) {
         model.unassigned_beams.remove(pos);
         return true;

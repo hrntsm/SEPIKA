@@ -11,9 +11,7 @@
 use crate::geom::polygon;
 use crate::geom::{LEVEL_TOL_MM, MEMBER_AXIS_TOL_MM};
 use crate::ids::{FloorRegionId, NodeId};
-use crate::model::{
-    ElementKind, FloorRegion, LoadTransfer, Model, RegionAnchor, SecondaryMember, SlabShape,
-};
+use crate::model::{FloorRegion, LoadTransfer, Model, RegionAnchor, SecondaryMember, SlabShape};
 use crate::region_gen::{generate_region_boundaries, scan_region_boundaries};
 
 /// 重心照合で面積が近いとみなす相対許容（新旧の床領域の面積比）。
@@ -42,7 +40,7 @@ pub struct FloorRegionRebuildReport {
 /// 付け替え、小梁を入れ直す。
 ///
 /// 床板そのもの（`model.slabs`）は畳まない。どの床領域にも収まらない床板は帰属なしの
-/// まま残す（警告。落とさない）。取り付く床板への変換は ST-Bridge の取り込みが行い、
+/// まま残す（警告）。
 /// ここでは既存の取り付く床板を、直交して先端まで届く小梁または実梁の位置で支持部材の
 /// 間の床板ごとに分割し、部材がない隣り合う床板は統合する。
 pub fn rebuild_floor_regions(model: &mut Model) -> FloorRegionRebuildReport {
@@ -618,85 +616,6 @@ fn region_area(model: &Model, region: &FloorRegion) -> f64 {
     boundary_centroid_area(model, &region.boundary)
         .map(|(_, _, a)| a)
         .unwrap_or(f64::MAX)
-}
-
-/// 水平な大梁の 1 本ぶん（XY 線分 ＋ レベル）。壁側の相当判定
-/// （[`crate::wall_region_rebuild`]）も同じ「同一レベルの大梁に全長覆われているか」を
-/// 使うため `pub(crate)` にしている。
-pub(crate) struct GirderSeg {
-    a: [f64; 2],
-    b: [f64; 2],
-    z: f64,
-}
-
-pub(crate) fn horizontal_girders(model: &Model) -> Vec<GirderSeg> {
-    let mut out = Vec::new();
-    for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
-            continue;
-        }
-        let (Some(na), Some(nb)) = (
-            model.nodes.get(e.nodes[0].index()),
-            model.nodes.get(e.nodes[1].index()),
-        ) else {
-            continue;
-        };
-        if (na.coord[2] - nb.coord[2]).abs() > LEVEL_TOL_MM {
-            continue;
-        }
-        out.push(GirderSeg {
-            a: [na.coord[0], na.coord[1]],
-            b: [nb.coord[0], nb.coord[1]],
-            z: (na.coord[2] + nb.coord[2]) / 2.0,
-        });
-    }
-    out
-}
-
-pub(crate) fn edge_fully_covered(a: [f64; 2], b: [f64; 2], z: f64, beams: &[GirderSeg]) -> bool {
-    let dx = b[0] - a[0];
-    let dy = b[1] - a[1];
-    let len = (dx * dx + dy * dy).sqrt();
-    if len <= f64::EPSILON {
-        return false;
-    }
-    let ux = dx / len;
-    let uy = dy / len;
-    let nx = -uy;
-    let ny = ux;
-    let mut intervals: Vec<(f64, f64)> = Vec::new();
-    for beam in beams {
-        if (beam.z - z).abs() > LEVEL_TOL_MM {
-            continue;
-        }
-        let da = (beam.a[0] - a[0]) * nx + (beam.a[1] - a[1]) * ny;
-        let db = (beam.b[0] - a[0]) * nx + (beam.b[1] - a[1]) * ny;
-        if da.abs() > MEMBER_AXIS_TOL_MM || db.abs() > MEMBER_AXIS_TOL_MM {
-            continue;
-        }
-        let ta = (beam.a[0] - a[0]) * ux + (beam.a[1] - a[1]) * uy;
-        let tb = (beam.b[0] - a[0]) * ux + (beam.b[1] - a[1]) * uy;
-        let t0 = ta.min(tb).clamp(0.0, len);
-        let t1 = ta.max(tb).clamp(0.0, len);
-        if t1 > t0 {
-            intervals.push((t0, t1));
-        }
-    }
-    if intervals.is_empty() {
-        return false;
-    }
-    intervals.sort_by(|x, y| x.0.total_cmp(&y.0));
-    let mut merged = vec![intervals[0]];
-    for &(s, e) in intervals.iter().skip(1) {
-        let last = merged.last_mut().expect("merged is non-empty");
-        if s <= last.1 + MEMBER_AXIS_TOL_MM {
-            last.1 = last.1.max(e);
-        } else {
-            merged.push((s, e));
-        }
-    }
-    let covered: f64 = merged.iter().map(|(s, e)| e - s).sum();
-    covered >= len - MEMBER_AXIS_TOL_MM
 }
 
 fn beam_midpoint(model: &Model, sm: &SecondaryMember) -> Option<([f64; 2], f64)> {

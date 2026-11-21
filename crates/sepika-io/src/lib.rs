@@ -2,7 +2,6 @@ pub mod manifest;
 pub mod ovika;
 #[cfg(feature = "parquet")]
 pub mod results;
-pub mod stbridge;
 pub mod wave_library;
 
 /// テスト用の共有ユーティリティ。

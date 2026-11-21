@@ -25,8 +25,7 @@ pub struct SectionEditorDraft {
     pub frame_use: Option<FrameSectionUse>,
     /// 断面符号。階と組で断面の同一性キーになる。
     pub name: String,
-    /// 階（空欄は「階の指定なし」）。ST-Bridge 由来の断面は階を持つため、
-    /// 既存断面の符号・階を直すときにもこの欄を使う。
+    /// 階（空欄は「階の指定なし」）。
     pub floor: String,
     /// 断面一覧からフォームへ読み込んだ断面。編集中は同じ断面の値で上書きしない。
     pub synced_focus: Option<SectionId>,

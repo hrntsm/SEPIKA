@@ -1128,18 +1128,17 @@ pub fn build_preparation_csv(app: &App) -> String {
     }
 
     if !p.beam_upstands.is_empty() {
-        out.push_str("\n[梁の床板嵩上げ]\n梁,床板ID,材料ID,採用元,側,始端[mm],終端[mm],幅[mm],始端空き[mm],終端空き[mm],体積[m³],設計重量[kN],物理質量[t],物理質量相当重量[kN],設計単位重量[kN/m³],物理密度[t/m³]\n");
+        out.push_str("\n[梁の床板嵩上げ]\n梁,床板ID,材料ID,側,始端[mm],終端[mm],幅[mm],始端空き[mm],終端空き[mm],体積[m³],設計重量[kN],物理質量[t],物理質量相当重量[kN],設計単位重量[kN/m³],物理密度[t/m³]\n");
         for s in &p.beam_upstands {
             let beam = match s.beam {
                 sepika_core::model::SupportMemberId::Primary(id) => format!("大梁 {}", id.0),
                 sepika_core::model::SupportMemberId::Secondary(id) => format!("小梁 {}", id.0),
             };
             out.push_str(&format!(
-                "{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.9},{:.6},{:.9},{:.6},{:.9},{:.9}\n",
+                "{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.9},{:.6},{:.9},{:.6},{:.9},{:.9}\n",
                 beam,
                 s.slab.0,
                 s.material.0,
-                s.material_source_label(),
                 if s.side == 0 { "左" } else { "右" },
                 s.interval_mm[0],
                 s.interval_mm[1],
