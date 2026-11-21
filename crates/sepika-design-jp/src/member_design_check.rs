@@ -479,7 +479,7 @@ pub fn run_member_design_checks(
         let wrong_shear_rebar = shear_rebar_material.is_some_and(|material| {
             material.category != sepika_core::model::MaterialCategory::Rebar
         });
-        let column_sum_my = if structure == StructureKind::Rc
+        let (column_sum_my, column_end_axial_issue) = if structure == StructureKind::Rc
             && kind == MemberKind::Column
             && options.term == LoadTerm::Short
             && seismic_qd
@@ -487,21 +487,30 @@ pub fn run_member_design_checks(
                 .is_some_and(|qd| qd.method != QdMethod::Qd2)
             && !wrong_main_rebar
         {
-            let n_at = |mf: &MemberForces, end: usize| {
-                let target = if end == 0 { 0.0 } else { 1.0 };
-                mf.at
-                    .iter()
-                    .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
-                    .map(|(_, f)| f[0])
-                    .unwrap_or(0.0)
-            };
-            let (n_combo_i, n_combo_j) = (n_at(mf, 0), n_at(mf, 1));
-            let (n_long_i, n_long_j) = long_mf_by_id
+            let axial_factor = 1.0;
+            let qd = seismic_qd
                 .as_ref()
-                .and_then(|m| m.get(elem_id))
-                .map(|mf_l| (n_at(mf_l, 0), n_at(mf_l, 1)))
-                .unwrap_or((n_combo_i, n_combo_j));
-            crate::rc::compute_column_mechanism_sum_my(
+                .expect("柱のQD1に使う重力参照を設定済み");
+            let closest_axial = |at: &[(f64, [f64; 6])], end: f64| {
+                at.iter()
+                    .min_by(|a, b| (a.0 - end).abs().total_cmp(&(b.0 - end).abs()))
+                    .map(|(pos, values)| (*pos, values[0]))
+            };
+            let end_forces = [0.0, 1.0].map(|end| {
+                (
+                    end,
+                    closest_axial(&qd.long_at, end),
+                    closest_axial(&mf.at, end),
+                )
+            });
+            let [(n_long_i, n_combo_i), (n_long_j, n_combo_j)] =
+                end_forces.map(|(_, long, response)| {
+                    (
+                        long.map_or(0.0, |(_, n)| n),
+                        response.map_or(0.0, |(_, n)| n),
+                    )
+                });
+            let column_sum_my = crate::rc::compute_column_mechanism_sum_my(
                 model,
                 column_mechanism_topology
                     .get_or_insert_with(|| crate::rc::ColumnMechanismTopology::new(model)),
@@ -510,10 +519,36 @@ pub fn run_member_design_checks(
                 n_long_j,
                 n_combo_i,
                 n_combo_j,
-                1.0,
-            )
+                axial_factor,
+            );
+            let column_end_axial_issue =
+                end_forces.into_iter().find_map(|(end, long, response)| {
+                    let end_axial = |point: Option<(f64, f64)>| {
+                        point
+                            .filter(|(pos, n)| *pos == end && n.is_finite())
+                            .map(|(_, n)| n)
+                    };
+                    match (end_axial(long), end_axial(response)) {
+                        (None, _) => {
+                            Some("設計用せん断力に必要な柱端の重力参照軸力が不足または非有限です")
+                        }
+                        (_, None) => {
+                            Some("設計用せん断力に必要な柱端の応答軸力が不足または非有限です")
+                        }
+                        (Some(n_long), Some(n_response)) => {
+                            (!crate::rc::design_axial_for_mechanism(
+                                n_long,
+                                n_response,
+                                axial_factor,
+                            )
+                            .is_finite())
+                            .then_some("設計用せん断力に必要な柱端の設計軸力が非有限です")
+                        }
+                    }
+                });
+            (column_sum_my, column_end_axial_issue)
         } else {
-            None
+            (None, None)
         };
 
         let ctx = DesignCtx {
@@ -607,10 +642,11 @@ pub fn run_member_design_checks(
                 check_incomplete = incomplete;
                 outcome
             } else if structure == StructureKind::Rc {
-                let missing_column_reference = (wrong_main_rebar || wrong_shear_rebar)
-                    && kind == MemberKind::Column
+                let column_without_gravity = kind == MemberKind::Column
                     && options.long_member_forces.is_some()
                     && ctx.seismic_qd.is_none();
+                let missing_column_reference =
+                    (wrong_main_rebar || wrong_shear_rebar) && column_without_gravity;
                 let missing_shear_reference = if missing_gravity || missing_column_reference {
                     Some("設計用せん断力に必要な重力参照内力が不足しています")
                 } else if missing_q0 {
@@ -618,12 +654,19 @@ pub fn run_member_design_checks(
                 } else {
                     None
                 };
-                let (outcome, incomplete) = crate::RcDesign.check_with_incomplete(
+                let boundary_shear_issue =
+                    if options.term == LoadTerm::Short && column_without_gravity {
+                        Some("設計用せん断力に必要な重力参照内力が不足しています")
+                    } else {
+                        column_end_axial_issue
+                    };
+                let (outcome, incomplete) = crate::RcDesign.check_ordinary_with_incomplete(
                     &mfa,
                     sec,
                     mat,
                     &ctx,
                     missing_shear_reference,
+                    boundary_shear_issue,
                 );
                 check_incomplete = incomplete;
                 outcome

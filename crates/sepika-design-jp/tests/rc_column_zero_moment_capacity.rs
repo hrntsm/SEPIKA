@@ -1,6 +1,8 @@
 use sepika_core::ids::{ElemId, LoadCaseId};
+use sepika_core::model::ElementKind;
 use sepika_design_jp::{
-    run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions,
+    run_member_design_checks, CheckKind, CheckOutcome, DesignCtx, LoadTerm,
+    MemberDesignCheckOptions, MemberForcesAt, MemberKind, QdMethod, RcDesign,
 };
 use sepika_element::frame::beam::MemberForces;
 
@@ -9,6 +11,284 @@ mod input;
 #[path = "fixtures/rc_column_axial_boundary_reference.rs"]
 mod reference;
 use input::column_model;
+
+#[test]
+fn common_product_entry_retains_only_known_shear_ng_at_the_unchecked_position() {
+    for circle in [false, true] {
+        let na_n = reference::axial_limit_n(circle);
+        let model = column_model(circle, na_n);
+        for (term, gravity, qz_n, ng_positions, missing_axes) in [
+            (LoadTerm::Long, None, 0.0, &[0.0][..], &[][..]),
+            (
+                LoadTerm::Short,
+                Some(&[][..]),
+                0.0,
+                &[][..],
+                &[0.0, 0.5, 1.0][..],
+            ),
+            (
+                LoadTerm::Short,
+                Some(&[(0.0, f64::NAN), (0.5, 0.0), (1.0, 0.0)][..]),
+                0.0,
+                &[][..],
+                &[0.0][..],
+            ),
+            (
+                LoadTerm::Short,
+                Some(&[(0.0, f64::NAN), (0.5, 0.0), (1.0, 0.0)][..]),
+                1_000_000.0,
+                &[0.0][..],
+                &[0.0][..],
+            ),
+            (
+                LoadTerm::Short,
+                Some(&[(0.0, 0.0), (1.0, 0.0)][..]),
+                0.0,
+                &[0.0][..],
+                &[0.5][..],
+            ),
+        ] {
+            let n_n = na_n * if term == LoadTerm::Long { 1.0 } else { 2.0 };
+            let forces = vec![(
+                ElemId(0),
+                MemberForces {
+                    at: vec![
+                        (
+                            0.0,
+                            [-n_n, 1_000_000.0, qz_n, 0.0, 1_000_000.0, 2_000_000.0],
+                        ),
+                        (0.5, [-n_n, 0.0, 0.0, 0.0, 1_000_000.0, 2_000_000.0]),
+                        (1.0, [-n_n, 10_000.0, 0.0, 0.0, 1_000_000.0, 2_000_000.0]),
+                    ],
+                },
+            )];
+            let long = gravity.map(|input| {
+                if input.is_empty() {
+                    return vec![];
+                }
+                vec![(
+                    ElemId(0),
+                    MemberForces {
+                        at: input
+                            .iter()
+                            .map(|&(pos, qy)| (pos, [-na_n, qy, 0.0, 0.0, 0.0, 0.0]))
+                            .collect(),
+                    },
+                )]
+            });
+            let report = run_member_design_checks(
+                &model,
+                &forces,
+                &[],
+                &MemberDesignCheckOptions {
+                    term,
+                    qd_method: QdMethod::Qd2,
+                    long_member_forces: long.as_deref(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut ng = Vec::new();
+            let mut skipped = Vec::new();
+            for (id, pos, outcome) in report.member_checks {
+                assert_eq!(id, ElemId(0));
+                match outcome {
+                    CheckOutcome::Checked(result) => {
+                        assert_eq!(result.components.len(), 1, "{result:?}");
+                        assert_eq!(result.components[0].kind, CheckKind::Shear);
+                        assert!(result.ratio().is_finite() && result.ratio() > 1.0);
+                        ng.push(pos);
+                    }
+                    CheckOutcome::Skipped { reason } => {
+                        assert!(
+                            reason.contains("MA_y=0") && reason.contains("検定不能"),
+                            "{reason}"
+                        );
+                        assert_eq!(
+                            reason.contains("重力参照内力"),
+                            missing_axes.contains(&pos),
+                            "{reason}"
+                        );
+                        skipped.push(pos);
+                    }
+                }
+            }
+            assert_eq!(ng, ng_positions, "{circle} {term:?} {gravity:?}");
+            assert_eq!(skipped, [0.0, 0.5, 1.0]);
+        }
+    }
+}
+
+#[test]
+fn common_product_entry_uses_required_force_components_for_qd1_and_minimum() {
+    for (circle, element_kind) in [false, true].into_iter().flat_map(|circle| {
+        [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ]
+        .map(|element_kind| (circle, element_kind))
+    }) {
+        let na_n = reference::axial_limit_n(circle);
+        let mut model = column_model(circle, na_n);
+        model.elements[0].kind = element_kind;
+        model.nodes[1].coord[2] = 1_000.0;
+        for (qd_method, gravity_at_middle, gravity_end_n, response_end_n, missing_reason) in [
+            (QdMethod::Qd1, false, Some(-na_n), Some(-2.0 * na_n), None),
+            (QdMethod::Min, true, Some(-na_n), Some(-2.0 * na_n), None),
+            (
+                QdMethod::Min,
+                false,
+                Some(-na_n),
+                Some(-2.0 * na_n),
+                Some("同位置の重力参照内力"),
+            ),
+            (
+                QdMethod::Qd1,
+                false,
+                None,
+                Some(-2.0 * na_n),
+                Some("柱端の重力参照軸力"),
+            ),
+            (
+                QdMethod::Qd1,
+                false,
+                Some(f64::NAN),
+                Some(-2.0 * na_n),
+                Some("柱端の重力参照軸力"),
+            ),
+            (
+                QdMethod::Qd1,
+                false,
+                Some(-na_n),
+                None,
+                Some("柱端の応答軸力"),
+            ),
+            (
+                QdMethod::Min,
+                true,
+                Some(-na_n),
+                Some(f64::INFINITY),
+                Some("柱端の応答軸力"),
+            ),
+            (
+                QdMethod::Qd1,
+                false,
+                Some(-f64::MAX),
+                Some(f64::MAX),
+                Some("柱端の設計軸力が非有限"),
+            ),
+            (QdMethod::Qd2, true, None, None, None),
+        ] {
+            let response = [(
+                ElemId(0),
+                MemberForces {
+                    at: [
+                        (0.0, Some(-2.0 * na_n)),
+                        (0.5, Some(-2.0 * na_n)),
+                        (1.0, response_end_n),
+                    ]
+                    .into_iter()
+                    .filter_map(|(pos, n)| {
+                        n.map(|n| (pos, [n, 1_000_000.0, 0.0, 0.0, 1_000_000.0, 2_000_000.0]))
+                    })
+                    .collect(),
+                },
+            )];
+            let gravity = [(
+                ElemId(0),
+                MemberForces {
+                    at: [
+                        (0.0, Some(-na_n)),
+                        (0.5, gravity_at_middle.then_some(-na_n)),
+                        (1.0, gravity_end_n),
+                    ]
+                    .into_iter()
+                    .filter_map(|(pos, n)| n.map(|n| (pos, [n, 0.0, 0.0, 0.0, 0.0, 0.0])))
+                    .collect(),
+                },
+            )];
+            let report = run_member_design_checks(
+                &model,
+                &response,
+                &[],
+                &MemberDesignCheckOptions {
+                    term: LoadTerm::Short,
+                    qd_method,
+                    long_member_forces: Some(&gravity),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let middle: Vec<_> = report
+                .member_checks
+                .iter()
+                .filter_map(|(_, pos, outcome)| (*pos == 0.5).then_some(outcome))
+                .collect();
+            assert_eq!(
+                middle.len(),
+                if missing_reason.is_none() { 2 } else { 1 },
+                "{circle} {element_kind:?} {qd_method:?} {middle:?}"
+            );
+            let Some(CheckOutcome::Skipped { reason }) = middle.last() else {
+                panic!("{middle:?}")
+            };
+            assert!(reason.contains("許容曲げが非正"), "{reason}");
+            if let Some(missing_reason) = missing_reason {
+                assert!(reason.contains(missing_reason), "{reason}");
+            } else {
+                let CheckOutcome::Checked(result) = middle[0] else {
+                    panic!("{middle:?}")
+                };
+                assert_eq!(result.components.len(), 1);
+                assert_eq!(result.components[0].kind, CheckKind::Shear);
+                assert!(result.ratio().is_finite() && result.ratio() > 1.0);
+            }
+        }
+    }
+}
+
+#[test]
+fn time_history_without_seismic_design_shear_keeps_the_unchecked_bending_outcome() {
+    for circle in [false, true] {
+        let na_n = reference::axial_limit_n(circle);
+        let model = column_model(circle, na_n);
+        let ctx = DesignCtx {
+            kind: MemberKind::Column,
+            term: LoadTerm::Short,
+            length: 3_000.0,
+            rebar_material: Some(model.materials[1].clone()),
+            shear_rebar_material: Some(model.materials[1].clone()),
+            ..Default::default()
+        };
+        for (n, checked) in [(-0.5 * na_n, true), (-2.02 * na_n, false)] {
+            let forces = MemberForcesAt::from_local(
+                0.5,
+                [n, 1_000_000.0, 0.0, 0.0, 1_000_000.0, 2_000_000.0],
+            );
+            let outcomes: Vec<_> = RcDesign
+                .check_outcomes(
+                    &forces,
+                    &model.sections[0],
+                    &model.materials[0],
+                    &ctx,
+                    false,
+                )
+                .collect();
+            if checked {
+                assert!(
+                    matches!(outcomes.as_slice(), [CheckOutcome::Checked(result)] if result.components.iter().any(|component| component.kind == CheckKind::Shear && component.ratio > 1.0)),
+                    "{outcomes:?}"
+                );
+            } else {
+                assert!(
+                    matches!(outcomes.as_slice(), [CheckOutcome::Skipped { reason }] if reason.contains("許容曲げが非正")),
+                    "{outcomes:?}"
+                );
+            }
+        }
+    }
+}
 
 #[test]
 fn common_product_entry_rejects_nonzero_bending_at_zero_capacity() {

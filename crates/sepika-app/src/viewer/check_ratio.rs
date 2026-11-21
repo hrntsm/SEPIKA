@@ -1030,6 +1030,102 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rc_column_shear_ng_and_unchecked_bending_are_drawn_after_real_analysis() {
+        use crate::app::rc_column_boundary_tests::{input, reference};
+        use sepika_core::ids::LoadCaseId;
+
+        for circle in [false, true] {
+            for (shear_n, ng) in [(10_000.0, false), (1_000_000.0, true)] {
+                let mut model =
+                    input::column_model(circle, 1.01 * reference::axial_limit_n(circle));
+                model.load_cases[0].nodal[0].values[0] = shear_n;
+                let mut app = App::default();
+                assert!(app.load_model(model));
+                app.run_preparation();
+                app.run_linear_static(LoadCaseId(0));
+                assert!(
+                    app.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    app.core.scoped.last_error
+                );
+
+                let checks = &app.current_design_results().unwrap().member_checks;
+                let positions = elem_check_positions(checks, ElemId(0));
+                let (kinds, rows) = build_tooltip_rows(positions);
+                assert_eq!(kinds, if ng { &[CheckKind::Shear][..] } else { &[][..] });
+                assert_eq!(rows.len(), if ng { 6 } else { 3 });
+                for xi in [0.0, 0.5, 1.0] {
+                    assert!(rows.iter().any(|row| row.xi == xi && matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("MA_y=0"))));
+                    assert_eq!(
+                        rows.iter()
+                            .any(|row| row.xi == xi && matches!(row.verdict, RowVerdict::Ng)),
+                        ng
+                    );
+                }
+                let ratios = member_ratios_for_filter(checks, CheckRatioFilter::Max);
+                assert_eq!(
+                    ratios.get(&ElemId(0)).map(|(_, ok)| *ok),
+                    ng.then_some(false)
+                );
+
+                let context = egui::Context::default();
+                let mut labels = Vec::new();
+                for _ in 0..2 {
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1600.0, 1000.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(egui::pos2(100.0, 175.0))],
+                            ..Default::default()
+                        },
+                        |ui| {
+                            draw_check_ratio(
+                                ui.painter(),
+                                &app,
+                                &app.core.model,
+                                &[egui::pos2(100.0, 300.0), egui::pos2(100.0, 50.0)],
+                                Default::default(),
+                            );
+                            show_check_tooltip(ui, &app, ElemId(0));
+                        },
+                    );
+                    labels.extend(output.shapes.iter().filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                        _ => None,
+                    }));
+                }
+                assert!(
+                    labels
+                        .iter()
+                        .any(|label| label.contains(&format!("NG {}件", usize::from(ng)))),
+                    "{labels:?}"
+                );
+                assert!(
+                    labels
+                        .iter()
+                        .any(|label| label.contains("検定不能（RC柱: 許容曲げ")),
+                    "{labels:?}"
+                );
+                if ng {
+                    assert!(
+                        labels.iter().any(|label| label == "NG")
+                            && labels.iter().any(|label| label.contains("未検定あり")),
+                        "{labels:?}"
+                    );
+                } else {
+                    assert!(
+                        labels.iter().any(|label| label == "未検定")
+                            && !labels.iter().any(|label| label == "OK"),
+                        "{labels:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn rc_column_tension_is_drawn_as_ng_or_unchecked_after_real_analysis() {
         mod boundary {
             include!(concat!(

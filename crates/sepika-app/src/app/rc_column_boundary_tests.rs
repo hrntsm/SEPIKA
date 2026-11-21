@@ -1,18 +1,17 @@
 use super::*;
-use sepika_design_jp::CheckOutcome;
+use sepika_design_jp::{CheckKind, CheckOutcome};
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"]
 pub(crate) mod input;
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_reference.rs"]
-mod reference;
+pub(crate) mod reference;
 
 #[test]
 fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_state() {
     for circle in [false, true] {
         let mut app = App::default();
-        app.load_model(input::column_model(
-            circle,
-            1.01 * reference::axial_limit_n(circle),
-        ));
+        let mut model = input::column_model(circle, 1.01 * reference::axial_limit_n(circle));
+        model.load_cases[0].nodal[0].values[0] = 1_000_000.0;
+        assert!(app.load_model(model));
         app.run_preparation();
         app.run_linear_static(LoadCaseId(0));
         assert!(
@@ -22,13 +21,19 @@ fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_stat
         );
         let expected = app.current_design_results().unwrap().member_checks.clone();
         assert_eq!(expected.len(), 1);
-        assert_eq!(expected[0].positions.len(), 3);
-        assert!(expected[0].positions.iter().all(|position| matches!(&position.outcome, CheckOutcome::Skipped { reason } if reason.contains("検定不能") && reason.contains("MA_y=0"))));
-        let json = serde_json::to_string(&expected).unwrap();
-        assert!(!json.contains("Checked"));
-        assert!(json.contains("Skipped"));
+        assert_eq!(expected[0].positions.len(), 6);
+        for xi in [0.0, 0.5, 1.0] {
+            let at_xi = || {
+                expected[0]
+                    .positions
+                    .iter()
+                    .filter(|position| position.xi == xi)
+            };
+            assert!(at_xi().any(|position| matches!(&position.outcome, CheckOutcome::Skipped { reason } if reason.contains("検定不能") && reason.contains("MA_y=0"))));
+            assert!(at_xi().any(|position| matches!(&position.outcome, CheckOutcome::Checked(result) if !result.ok() && result.components.len() == 1 && result.components[0].kind == CheckKind::Shear)));
+        }
         let path =
-            std::env::temp_dir().join(format!("sepika1374-{circle}-{}.ovika", std::process::id()));
+            std::env::temp_dir().join(format!("sepika1803-{circle}-{}.ovika", std::process::id()));
         app.save_project_to(path.clone());
         assert!(
             app.core.scoped.last_error.is_none(),
@@ -50,8 +55,8 @@ fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_stat
         let (mut stale, path) = super::result_contract_tests::restore(
             &app,
             Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
-            Some(50),
-            &format!("rc-column1374-old-{circle}"),
+            Some(100),
+            &format!("rc-column1803-old-{circle}"),
         );
         std::fs::remove_file(path).unwrap();
         assert!(stale
