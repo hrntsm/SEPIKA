@@ -4595,6 +4595,8 @@ version = "0.0.1"
 dependencies = [
  "approx",
  "libm",
+ "num-rational",
+ "num-traits",
  "sepika-core",
  "sepika-element",
  "sepika-load",

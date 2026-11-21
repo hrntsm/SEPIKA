@@ -5,6 +5,9 @@
 
 use std::collections::HashMap;
 
+use num_rational::BigRational;
+use num_traits::ToPrimitive;
+
 use crate::material_strength::{main_rebar_grade, shear_rebar_category_issue};
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::rc::{rc_member_clear_span, RcClearSpanError};
@@ -108,10 +111,20 @@ fn static_hinge_shear(mu_n_mm: f64, factor: f64, span_mm: f64, axis: &str) -> Re
     let (mu_fraction, mu_exponent) = libm::frexp(mu_n_mm);
     let (factor_fraction, factor_exponent) = libm::frexp(factor);
     let (span_fraction, span_exponent) = libm::frexp(span_mm);
-    let shear_n = libm::scalbn(
+    let estimate_n = libm::scalbn(
         mu_fraction * factor_fraction / span_fraction,
         1 + mu_exponent + factor_exponent - span_exponent,
     );
+    let shear_n = if (2.0 * f64::MIN_POSITIVE..f64::MAX / 2.0).contains(&estimate_n) {
+        estimate_n
+    } else {
+        // 仮数の丸めが最終の丸めに重なると 0 や inf を誤判定しうる。正規数の上下端に接する
+        // 指数帯も含め、有理数のまま求めて最後に丸める。
+        let mu = BigRational::from_float(mu_n_mm).unwrap();
+        let factor = BigRational::from_float(factor).unwrap();
+        let span = BigRational::from_float(span_mm).unwrap();
+        ((&mu + &mu) * factor / span).to_f64().unwrap()
+    };
     if !shear_n.is_finite() {
         Err(format!(
             "ultimate_hinge_shear_overflow: {axis}のヒンジせん断需要が数値の表現上限を超えます"

@@ -160,6 +160,36 @@ fn static_column_compares_hinge_shear_when_the_product_would_overflow() {
 }
 
 #[test]
+fn static_column_rounds_to_the_largest_finite_hinge_shear_before_overflow() {
+    let mut model = static_column(4, 4);
+    model.nodes[1].coord[2] = 2996.0;
+    // 算定済み Mu からの有理値は、この倍率とその次の倍率で上側の丸め境界を挟む。
+    let factor = 7.290_570_824_515_764e302_f64;
+    let check = column_check(&model, factor, 150_000.0, 0.0, true);
+    assert_eq!(check.qmu, f64::MAX);
+    assert!(!check.ok && check.unchecked_reason.is_none());
+    for margin in [
+        check.shear_margin,
+        check.bond_margin,
+        check.biaxial_shear_margin.unwrap(),
+    ] {
+        assert!(margin > 0.0 && margin < 1.0);
+    }
+
+    let check = column_check(&model, factor.next_up(), 150_000.0, 0.0, true);
+    assert!(!check.ok && check.qmu.is_nan());
+    assert!(check.shear_margin.is_nan() && check.bond_margin.is_nan());
+    assert_eq!(check.biaxial_shear_margin, None);
+    let reason = check.unchecked_reason.unwrap();
+    for axis in ["強軸", "弱軸"] {
+        assert!(
+            reason.contains(&format!("ultimate_hinge_shear_overflow: {axis}")),
+            "{reason}"
+        );
+    }
+}
+
+#[test]
 fn static_column_reports_an_unrepresentable_hinge_demand_by_axis() {
     let model = static_column(4, 4);
     let check = column_check(&model, 1e303, 150_000.0, 0.0, true);
@@ -252,6 +282,30 @@ fn static_column_distinguishes_positive_subnormal_shear_from_underflow_to_zero()
         reason.contains("強軸") && reason.contains("弱軸"),
         "{reason}"
     );
+}
+
+#[test]
+fn static_column_rounds_to_the_smallest_positive_hinge_shear_above_zero() {
+    let mut model = static_column(4, 4);
+    model.nodes[1].coord[2] = 13_297_449_227.275_57;
+    // 倍率が最小正値の9倍なら、算定済み Mu からの有理値は最小正値の半分を僅かに超える。
+    let check = column_check(&model, f64::from_bits(9), 150_000.0, 0.0, true);
+    assert_eq!(check.qmu, f64::from_bits(1));
+    assert!(check.ok && check.unchecked_reason.is_none());
+    assert_eq!(check.biaxial_shear_margin, Some(f64::INFINITY));
+    assert!(!check.detail.contains("Qmu=0 N"));
+
+    let check = column_check(&model, f64::from_bits(8), 150_000.0, 0.0, true);
+    assert!(!check.ok && check.mu > 0.0 && check.qmu.is_nan());
+    assert!(check.shear_margin.is_nan() && check.bond_margin.is_nan());
+    assert_eq!(check.biaxial_shear_margin, None);
+    let reason = check.unchecked_reason.unwrap();
+    for axis in ["強軸", "弱軸"] {
+        assert!(
+            reason.contains(&format!("ultimate_hinge_shear_underflow: {axis}")),
+            "{reason}"
+        );
+    }
 }
 
 #[test]
