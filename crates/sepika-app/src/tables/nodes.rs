@@ -376,7 +376,7 @@ mod tests {
     use sepika_edit::UndoStack;
 
     #[test]
-    fn rejected_point_slab_support_removal_preserves_model_history_selection_and_validity() {
+    fn rejected_unsupported_point_slab_addition_preserves_model_history_selection_and_results() {
         use sepika_core::model::{RegionAnchor, SlabPlate};
         let mut app = App::default();
         app.core.model = crate::sample::portal_frame();
@@ -388,9 +388,14 @@ mod tests {
             plate: SlabPlate::default(),
         })));
         assert_eq!(app.core.model.validate_attached_slabs(), Ok(()));
+        let isolated_node = NodeId(app.core.model.nodes.len() as u32);
         assert!(app.apply_model_edit(Box::new(AddNode {
             coord: [8000.0, 0.0, 0.0],
             restraint: Dof6Mask::FREE,
+        })));
+        assert!(app.apply_model_edit(Box::new(SetNodeRestraint {
+            node: isolated_node,
+            restraint: Dof6Mask::FIXED,
         })));
         app.core.scoped.undo.undo(&mut app.core.model);
         app.select_node(NodeId(0));
@@ -414,10 +419,13 @@ mod tests {
         assert!(app.core.scoped.undo.can_undo());
         assert!(app.core.scoped.undo.can_redo());
 
-        assert!(!crate::tables::members::delete_frame_member(
-            &mut app,
-            sepika_core::ids::ElemId(0),
-        ));
+        assert!(
+            !app.apply_model_edit(Box::new(sepika_edit::AddAttachedSlab {
+                anchor: RegionAnchor::Point(isolated_node),
+                extent: [1000.0, 2000.0],
+                plate: SlabPlate::default(),
+            }))
+        );
 
         assert_eq!(format!("{:?}", app.core.model), model);
         assert_eq!(format!("{:?}", app.ui.scoped.selection), selection);
@@ -437,10 +445,9 @@ mod tests {
         assert!(app
             .core
             .scoped
-            .undo
-            .last_error()
-            .unwrap()
-            .contains("Slab 0: 集中荷重の支持先が欠落"));
+            .last_error
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Slab 1: 集中荷重の支持先が欠落")));
     }
 
     #[test]
