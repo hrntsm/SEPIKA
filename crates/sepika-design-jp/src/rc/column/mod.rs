@@ -3,7 +3,7 @@
 use super::{
     axis_props_from_shape, main_rebar_grade, rc_allow, rebar_allowable_tension,
     rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity,
-    shear_rebar_grade, AxisProps, ColumnGravityMode, ColumnMechanism, RcAllow,
+    shear_rebar_grade, AxisProps, ColumnGravityMode, ColumnMechanism,
 };
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
@@ -13,8 +13,8 @@ use crate::{
 };
 use sepika_core::model::Material;
 use sepika_core::section_shape::SectionShape;
-use sepika_element::frame::member_load::{FrameShearPeak, SectionSide};
 
+pub(crate) mod long_term_shear;
 mod nm_interaction;
 
 pub(crate) use nm_interaction::interp_ma;
@@ -135,103 +135,6 @@ fn shear_input_issue(q_index: usize) -> &'static str {
     }
 }
 
-fn long_shear_detail(
-    axis: usize,
-    peak: &FrameShearPeak,
-    comparison: Option<(Option<f64>, &str)>,
-) -> String {
-    let direction = ["Qy", "Qz"][axis];
-    let side = match peak.side {
-        SectionSide::Left => "（i端側）",
-        SectionSide::Right => "（j端側）",
-        SectionSide::Continuous => "",
-    };
-    let q = peak.q_n.abs();
-    let ratio_detail = comparison.map_or_else(String::new, |(capacity, label)| {
-        let ratio = capacity
-            .filter(|qa| qa.is_finite() && *qa > 0.0)
-            .map(|qa| q / qa)
-            .filter(|ratio| ratio.is_finite())
-            .map_or_else(|| "未算定".into(), |ratio| format!("{ratio:.6}"));
-        format!("、{label} {ratio}")
-    });
-    format!(
-        "、局所{direction}最大 |{direction}|={q:.3} N（i端から x={:.6} mm{side}{ratio_detail}）",
-        peak.x_mm
-    )
-}
-
-pub(crate) fn recovered_long_shear_detail(peaks: &[Result<FrameShearPeak, String>; 2]) -> String {
-    let details: String = peaks
-        .iter()
-        .enumerate()
-        .filter_map(|(axis, peak)| {
-            peak.as_ref()
-                .ok()
-                .map(|peak| long_shear_detail(axis, peak, None))
-        })
-        .collect();
-    if details.is_empty() {
-        details
-    } else {
-        format!("。確認できた部材の最大せん断力{details}")
-    }
-}
-
-pub(super) fn long_shear_failure_over_capacity_bound(
-    shape: &SectionShape,
-    allow: &RcAllow,
-    length_mm: f64,
-    peaks: &[Result<FrameShearPeak, String>; 2],
-    confirmed_shear_alpha: [bool; 2],
-) -> Option<(f64, CheckResult)> {
-    let mut detail = format!("αの上限 {MAX_SHEAR_ALPHA}");
-    let mut governing: Option<(f64, f64)> = None;
-    for (axis, direction) in [RcDirection::Strong, RcDirection::Weak]
-        .into_iter()
-        .enumerate()
-    {
-        let Ok(peak) = &peaks[axis] else { continue };
-        let failure = (!confirmed_shear_alpha[axis])
-            .then(|| axis_props_from_shape(shape, direction, true))
-            .flatten()
-            .and_then(|props| {
-                shear_capacity(&props, allow, MAX_SHEAR_ALPHA, LoadTerm::Long, false, true)
-            })
-            .filter(|capacity_n| capacity_n.is_finite() && *capacity_n > 0.0)
-            .map(|capacity_n| (capacity_n, peak.q_n.abs() / capacity_n))
-            .filter(|(_, ratio)| ratio.is_finite() && *ratio > 1.0);
-        let Some((capacity_n, ratio)) = failure else {
-            detail.push_str(&long_shear_detail(axis, peak, None));
-            continue;
-        };
-        if governing.is_none_or(|(_, previous)| ratio > previous) {
-            governing = Some((peak.x_mm / length_mm, ratio));
-        }
-        let capacity = ["QAy", "QAz"][axis];
-        detail.push_str(&format!("、{capacity}の上限 {capacity_n:.1} N"));
-        detail.push_str(&long_shear_detail(
-            axis,
-            peak,
-            Some((Some(capacity_n), "検定比の下限")),
-        ));
-    }
-    governing.map(|(xi, ratio)| {
-        (
-            xi,
-            CheckResult {
-                basis: "RC柱の長期せん断（許容せん断力の上限による判定）".into(),
-                detail: String::new(),
-                components: vec![CheckComponent {
-                    kind: CheckKind::Shear,
-                    ratio,
-                    detail,
-                }],
-            },
-        )
-    })
-}
-
 fn column_allowable_moment(curve: &[(f64, f64)], n_design: f64) -> f64 {
     if n_design < 0.0 && curve.first().is_some_and(|point| n_design < point.0) {
         // 引張側の算定範囲外では、端点の曲げ耐力を外挿できない。
@@ -308,7 +211,7 @@ pub(super) fn column_check(
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
     shear_reference_valid: bool,
-    column_gravity: ColumnGravityMode<'_>,
+    column_gravity: ColumnGravityMode,
     incomplete: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
@@ -319,57 +222,20 @@ pub(super) fn column_check(
         }
     );
     let ordinary = matches!(column_gravity, ColumnGravityMode::Ordinary { .. });
-    let (long_term_shear, confirmed_shear_alpha) = match column_gravity {
+    let saved_long_term = matches!(
+        column_gravity,
         ColumnGravityMode::Ordinary {
-            long_term_shear,
-            confirmed_shear_alpha,
+            saved_long_term: true,
             ..
-        } => (long_term_shear, confirmed_shear_alpha),
-        _ => (None, [true; 2]),
-    };
-    let long_term_demand = long_term_shear.map(|shear| match shear {
-        Ok(peaks) => std::array::from_fn(|axis| match &peaks[axis] {
-            Ok(peak) if confirmed_shear_alpha[axis] => Some(peak.q_n.abs()),
-            Ok(_) => {
-                let axis = ["Qy", "Qz"][axis];
-                let reason = format!("RC柱の長期せん断（局所{axis}）の許容値を決めるαの断面力参照が不足または非有限です");
-                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
-                None
-            }
-            Err(reason) => {
-                let axis = ["Qy", "Qz"][axis];
-                let reason = format!("RC柱の長期せん断（局所{axis}）は未算定です（{reason}）");
-                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
-                None
-            }
-        }),
-        Err(reason) => {
-            let reason = format!("RC柱の長期せん断は未算定です（{reason}）");
-            *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
-            [None, None]
         }
-    });
-    let demand_detail = |capacities: [Option<f64>; 2]| {
-        let Some(Ok(peaks)) = long_term_shear else {
-            return String::new();
-        };
-        peaks.iter().zip(capacities).enumerate().fold(
-            String::new(),
-            |mut text, (axis, (peak, capacity))| {
-                if let Ok(peak) = peak {
-                    text.push_str(&long_shear_detail(axis, peak, Some((capacity, "検定比"))));
-                }
-                text
-            },
-        )
-    };
+    );
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
         shear_rebar_valid.then(|| shear_rebar_grade(ctx.shear_rebar_material.as_ref())),
         long_term,
     );
-    let check_finite = long_term_shear.is_some();
+    let check_finite = saved_long_term;
     let axial_available = !check_finite || forces.n.is_finite();
     let bending_partial = check_finite && !(forces.my.is_finite() && forces.mz.is_finite());
     let partial_detail = if bending_partial {
@@ -377,19 +243,6 @@ pub(super) fn column_check(
     } else {
         ""
     };
-    let capacity_for = |axis: usize, props: &AxisProps, alpha, damage_control| {
-        confirmed_shear_alpha[axis]
-            .then(|| shear_capacity(props, &allow, alpha, ctx.term, damage_control, true))
-            .flatten()
-    };
-    let alpha_detail = |axis: usize, value: f64| {
-        if confirmed_shear_alpha[axis] {
-            format!("{value:.3}")
-        } else {
-            "未算定".into()
-        }
-    };
-
     let n_design = -forces.n;
     let mut bending_issue = None;
     let missing_gravity = ctx.seismic_qd.as_ref().is_some_and(|qd| {
@@ -453,15 +306,9 @@ pub(super) fn column_check(
             .enumerate()
             .filter_map(|(axis, ((demand, capacity), (m, span_q)))| {
                 let q = demand?;
-                if long_term_shear.is_some() && capacity.is_none() {
-                    *incomplete = combine_incomplete_reasons(
-                        incomplete.take(),
-                        Some(shear_input_issue(axis + 1)),
-                    );
-                }
                 let qa = capacity?;
                 let ratio = if qa > 0.0 { q / qa } else { 0.0 };
-                if (boundary_shear_only || long_term_shear.is_some())
+                if boundary_shear_only
                     && (!q.is_finite()
                         || !qa.is_finite()
                         || qa <= 0.0
@@ -536,51 +383,50 @@ pub(super) fn column_check(
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
         let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props.d, MAX_SHEAR_ALPHA);
-        let qay = capacity_for(0, &props, alpha_y, damage_control);
+        let qay = shear_capacity(&props, &allow, alpha_y, ctx.term, damage_control, true);
         let boundary_shear_only = ordinary && bending_issue.is_some();
-        let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
-            (None, None)
-        } else if let Some([qy, qz]) = long_term_demand {
-            (qy, qz)
-        } else if !main_rebar_valid {
-            (
-                demand_without_main_rebar(forces.qy, 1),
-                demand_without_main_rebar(forces.qz, 2),
-            )
-        } else if ctx.seismic_qd.is_some() {
-            let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
-                b: gross_area / d_full,
-                d: d_full,
-                at: props.at,
-                d_eff: props.d,
-                sigma_y: rebar_sigma_y_of(ctx.rebar_material.as_ref()),
-                fc: fc_raw,
-                pw: props.pw,
-                sigma_wy: 0.0,
-                clear_span: 0.0,
-                sigma_0: 0.0,
+        let (q_design_y, q_design_z) =
+            if saved_long_term || !shear_reference_valid(boundary_shear_only, incomplete) {
+                (None, None)
+            } else if !main_rebar_valid {
+                (
+                    demand_without_main_rebar(forces.qy, 1),
+                    demand_without_main_rebar(forces.qz, 2),
+                )
+            } else if ctx.seismic_qd.is_some() {
+                let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
+                    b: gross_area / d_full,
+                    d: d_full,
+                    at: props.at,
+                    d_eff: props.d,
+                    sigma_y: rebar_sigma_y_of(ctx.rebar_material.as_ref()),
+                    fc: fc_raw,
+                    pw: props.pw,
+                    sigma_wy: 0.0,
+                    clear_span: 0.0,
+                    sigma_0: 0.0,
+                };
+                let sum_mu_fallback = 2.0
+                    * sepika_core::rc_capacity::rc_column_mu_simple(&mu_inp, as_total, n_design);
+                seismic_column_design_shear(
+                    ctx,
+                    forces,
+                    sum_mu_fallback,
+                    sum_mu_fallback,
+                    shear_rebar_valid,
+                    strict_gravity,
+                    boundary_shear_only,
+                    incomplete,
+                )
+            } else {
+                (Some(forces.qy.abs()), Some(forces.qz.abs()))
             };
-            let sum_mu_fallback =
-                2.0 * sepika_core::rc_capacity::rc_column_mu_simple(&mu_inp, as_total, n_design);
-            seismic_column_design_shear(
-                ctx,
-                forces,
-                sum_mu_fallback,
-                sum_mu_fallback,
-                shear_rebar_valid,
-                strict_gravity,
-                boundary_shear_only,
-                incomplete,
-            )
-        } else {
-            (Some(forces.qy.abs()), Some(forces.qz.abs()))
-        };
 
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, MAX_SHEAR_ALPHA);
-        let qaz = capacity_for(1, &props, alpha_z, damage_control);
+        let qaz = shear_capacity(&props, &allow, alpha_z, ctx.term, damage_control, true);
 
         if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {
             return outcome;
@@ -602,13 +448,12 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={}, αz={}, pw={:.5}{}",
+                    "QAy={}, QAz={}, αy={:.3}, αz={:.3}, pw={:.5}",
                     capacity(qay),
                     capacity(qaz),
-                    alpha_detail(0, alpha_y),
-                    alpha_detail(1, alpha_z),
+                    alpha_y,
+                    alpha_z,
                     props.pw,
-                    demand_detail([qay, qaz]),
                 ),
             });
         }
@@ -709,55 +554,54 @@ pub(super) fn column_check(
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
         let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props_z.d, MAX_SHEAR_ALPHA);
-        let qay = capacity_for(0, &props_z, alpha_y, damage_control);
+        let qay = shear_capacity(&props_z, &allow, alpha_y, ctx.term, damage_control, true);
         let boundary_shear_only = ordinary && bending_issue.is_some();
-        let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
-            (None, None)
-        } else if let Some([qy, qz]) = long_term_demand {
-            (qy, qz)
-        } else if !main_rebar_valid {
-            (
-                demand_without_main_rebar(forces.qy, 1),
-                demand_without_main_rebar(forces.qz, 2),
-            )
-        } else if ctx.seismic_qd.is_some() {
-            let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
-            let mu_of = |b_dir: f64, d_dir: f64, props: &AxisProps| {
-                let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
-                    b: b_dir,
-                    d: d_dir,
-                    at: props.at,
-                    d_eff: props.d,
-                    sigma_y,
-                    fc: fc_raw,
-                    pw: props.pw,
-                    sigma_wy: 0.0,
-                    clear_span: 0.0,
-                    sigma_0: 0.0,
+        let (q_design_y, q_design_z) =
+            if saved_long_term || !shear_reference_valid(boundary_shear_only, incomplete) {
+                (None, None)
+            } else if !main_rebar_valid {
+                (
+                    demand_without_main_rebar(forces.qy, 1),
+                    demand_without_main_rebar(forces.qz, 2),
+                )
+            } else if ctx.seismic_qd.is_some() {
+                let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
+                let mu_of = |b_dir: f64, d_dir: f64, props: &AxisProps| {
+                    let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
+                        b: b_dir,
+                        d: d_dir,
+                        at: props.at,
+                        d_eff: props.d,
+                        sigma_y,
+                        fc: fc_raw,
+                        pw: props.pw,
+                        sigma_wy: 0.0,
+                        clear_span: 0.0,
+                        sigma_0: 0.0,
+                    };
+                    sepika_core::rc_capacity::rc_column_mu_simple(&mu_inp, as_total, n_design)
                 };
-                sepika_core::rc_capacity::rc_column_mu_simple(&mu_inp, as_total, n_design)
+                let fallback_z = 2.0 * mu_of(*b, *d, &props_z);
+                let fallback_y = 2.0 * mu_of(*d, *b, &props_y);
+                seismic_column_design_shear(
+                    ctx,
+                    forces,
+                    fallback_z,
+                    fallback_y,
+                    shear_rebar_valid,
+                    strict_gravity,
+                    boundary_shear_only,
+                    incomplete,
+                )
+            } else {
+                (Some(forces.qy.abs()), Some(forces.qz.abs()))
             };
-            let fallback_z = 2.0 * mu_of(*b, *d, &props_z);
-            let fallback_y = 2.0 * mu_of(*d, *b, &props_y);
-            seismic_column_design_shear(
-                ctx,
-                forces,
-                fallback_z,
-                fallback_y,
-                shear_rebar_valid,
-                strict_gravity,
-                boundary_shear_only,
-                incomplete,
-            )
-        } else {
-            (Some(forces.qy.abs()), Some(forces.qz.abs()))
-        };
 
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, MAX_SHEAR_ALPHA);
-        let qaz = capacity_for(1, &props_y, alpha_z, damage_control);
+        let qaz = shear_capacity(&props_y, &allow, alpha_z, ctx.term, damage_control, true);
 
         if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {
             return outcome;
@@ -779,14 +623,13 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={}, αz={}, pw_z={:.5}, pw_y={:.5}{}",
+                    "QAy={}, QAz={}, αy={:.3}, αz={:.3}, pw_z={:.5}, pw_y={:.5}",
                     capacity(qay),
                     capacity(qaz),
-                    alpha_detail(0, alpha_y),
-                    alpha_detail(1, alpha_z),
+                    alpha_y,
+                    alpha_z,
                     props_z.pw,
                     props_y.pw,
-                    demand_detail([qay, qaz]),
                 ),
             });
         }

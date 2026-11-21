@@ -13,13 +13,13 @@ use sepika_core::model::{
 use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
-use sepika_element::frame::member_load::{frame_shear_envelope, FrameShearPeak};
+use sepika_element::frame::member_load::{frame_shear_envelope, FrameShearEnvelope};
 use sepika_element::transform::LocalFrame;
 
 use super::RcColumnLongTermShearInput;
 use crate::design_position::is_near_design_position;
 
-pub(crate) type LongTermColumnShear = Result<[Result<FrameShearPeak, String>; 2], String>;
+pub(crate) type LongTermColumnShear = Result<[Result<FrameShearEnvelope, String>; 2], String>;
 
 pub(super) enum ColumnShearLoads<'a> {
     SingleCase,

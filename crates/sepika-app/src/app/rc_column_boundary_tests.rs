@@ -51,12 +51,12 @@ fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika()
         }
         let expected = serde_json::to_value(&result.member_checks).unwrap();
         let expected_forces = result.member_forces.clone();
-        for version in [102, 103, DESIGN_CONTRACT_VERSION] {
+        for version in [102, 103, 104, 105, DESIGN_CONTRACT_VERSION] {
             let (mut reopened, path) = super::result_contract_tests::restore(
                 &app,
                 Some(ANALYSIS_CONTRACT_VERSION),
                 Some(version),
-                &format!("rc-column1843-{circle}-{version}"),
+                &format!("rc-column-long-term-shear-{circle}-{version}"),
             );
             std::fs::remove_file(path).unwrap();
             assert!(reopened.require_selected_static_input().is_ok());

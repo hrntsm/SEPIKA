@@ -25,7 +25,7 @@ ST-Bridge に関する各レポートは [ADR 0141](../adr/0141-remove-st-bridge
 
 ## RC柱の長期許容せん断力の割増係数（#1841）
 
-[照合記録](RC柱の長期許容せん断力_Issue1841_照合記録.md)に、矩形・円形の通常の長期保存組合せで、RC規準の解説と現行のαの選び方により許容値と適否が変わる条件を記録する。状態🔶。 [#1854の是正課題](https://github.com/hrntsm/SEPIKA/issues/1854)
+[照合記録](RC柱の長期許容せん断力_Issue1841_照合記録.md)に、矩形・円形の通常の長期保存組合せで、RC規準の解説と調査時のαの選び方により許容値と適否が変わる条件を記録する。状態🔶。 [#1854の是正後の検証](RC柱の長期許容せん断力_Issue1854_検証.md)
 
 ## RC梁の曲げ終局耐力略算（#1501）
 
@@ -587,7 +587,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [RC柱QD1の接続大梁](RC柱QD1の接続大梁_Issue1820_照合記録.md) | 梁・ファイバー・マルチスプリングの降伏モーメント和、算定不能時の両端柱降伏、保存検定版102 | 🔶（独立計算と有限の解析・検定例を照合。実験Validationは未確認） |
 | [RC柱の短期地震時QD1の柱頭係数](RC柱頭の梁降伏による設計用せん断力_Issue1800_照合記録.md) | 柱頭の上階柱の有無、通常・時刻歴簡易検定、保存検定版100 | 🔶（原典と有限例を照合。実験Validationは未確認） |
 | [RC柱の方向別長期最大せん断力](RC柱の長期せん断需要_Issue1843_検証.md) | 矩形・円形の方向別最大需要、集中荷重、分布荷重、未算定、保存検定版104 | 🔶（有限の独立釣合いと通常検定を照合。長期許容値のαおよび実験Validationは未確認） |
-| [RC柱の長期許容せん断力の割増係数](RC柱の長期許容せん断力_Issue1841_照合記録.md) | 矩形・円形の柱脚・柱頭のα、許容値、通常検定の適否 | 🔶（単軸の有限例で独立計算と公開検定を照合。選定の是正は[#1854](https://github.com/hrntsm/SEPIKA/issues/1854)） |
+| [RC柱の長期許容せん断力の割増係数](RC柱の長期許容せん断力_Issue1854_検証.md) | 矩形・円形の柱脚・柱頭支配、方向別α、未算定、保存検定版106 | 🔶（原典、独立計算と通常検定を照合。せん断の二方向相関、実験Validationは未確認） |
 | [時刻歴簡易検定のRC梁Q0](時刻歴簡易検定のRC梁Q0_Issue1646_確認記録.md) | Q0算定エラーが及ぶ部材・需要方式 | 🔶（自動描画で検証。通常操作・保存済み結果からの再現は未確認） |
 | [材端偏心のあるH形鋼柱の横座屈長さ_Issue1651_確認記録.md](材端偏心のあるH形鋼柱の横座屈長さ_Issue1651_確認記録.md) | 材端偏心のあるH形鋼柱の支持点間隔、短期通常検定と時刻歴簡易検定の適否 | 🔶（同一曲げで時刻歴の危険側判定を再現。支持条件の一般化・是正は後続） |
 | [SRC柱RC梁接合部短期許容せん断_Issue1512_原典照合.md](SRC柱RC梁接合部短期許容せん断_Issue1512_原典照合.md) | SRC柱・RC梁の短期許容せん断、ウェブの有効高さ、応力伝達 | 🔶（原典の有限照合。RC梁の短期許容値は未確定） |
@@ -1053,7 +1053,8 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 947 | RC鉄筋径と未指定強度 | sepika-core / sepika-io / sepika-element / sepika-design-jp | material_grade・factory/input_check・rc | [原典・入口・観測の記録](RC鉄筋径と未指定強度_Issue947_照合記録.md#独立期待値と公開入口の実行) | 一次設計・入力 | 🔶（公開入口Verification、API径の過大選択は[#961](https://github.com/hrntsm/SEPIKA/issues/961)修正待ち、STB径意味・別原典・全入口未） |
 | 944 | RC断面設計用n | sepika-design-jp / sepika-core / sepika-element | material_strength/concrete・rc/allowable・rc/beam・rc/column・srrc/column・srrc/panel_zone | [要素から用途への対応](RC断面設計n_Issue944_適用照合.md#要素から用途への対応と検証限界) | 一次設計・解析との区別 | 🔶（公開案の区分・境界照合とコード読取。既存実測と再実行を区別、刊行版・適用域・Validation未） |
 | 1843 | RC柱の方向別長期最大せん断力 | sepika-element / sepika-design-jp / sepika-app | frame/member_load/shear_envelope.rs、member_design_check/rc_column_long_term_shear.rs、rc/column/mod.rs、app/actions/design/check.rs | [公開解析・検定と独立釣合い](RC柱の長期せん断需要_Issue1843_検証.md) | 一次設計・保存 | 🔶（方向別の需要・位置・不適合と未算定。実験Validationは未確認） |
-| 1841 | RC柱の長期許容せん断力の割増係数 | sepika-job / sepika-design-jp | member_design_check.rs、rc/column/mod.rs、rc/shear_capacity.rs | [原典・独立計算・通常検定の照合](RC柱の長期許容せん断力_Issue1841_照合記録.md) | 一次設計 | 🔶（矩形・円形の単軸の有限例。是正は[#1854](https://github.com/hrntsm/SEPIKA/issues/1854)） |
+| 1841 | RC柱の長期許容せん断力の割増係数 | sepika-job / sepika-design-jp | member_design_check.rs、rc/column/mod.rs、rc/shear_capacity.rs | [是正前の照合](RC柱の長期許容せん断力_Issue1841_照合記録.md) | 一次設計 | 🔶（矩形・円形の単軸の有限例） |
+| 1854 | RC柱の長期許容せん断力の二段階判定 | sepika-element / sepika-design-jp / sepika-job / sepika-app | frame/member_load/shear_envelope.rs、rc/column/long_term_shear.rs、member_design_check.rs | [是正後の公開解析・検定と独立計算](RC柱の長期許容せん断力_Issue1854_検証.md) | 一次設計・保存 | 🔶（両材端支配、有限二方向と未算定。せん断の二方向相関と実験Validationは未確認） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 945 | USD685主筋の認定条件 | sepika-core / sepika-design-jp | material_grade.rs・material_strength/rebar.rs・rc/beam.rs | [指定値・入力経路・直接観測](USD685主筋_Issue945_認定条件照合.md) | 一次設計・入力 | 🔶（MSRB-0117長期差#991、他認定・使用条件・Validation未） |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
