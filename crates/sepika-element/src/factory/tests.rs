@@ -304,6 +304,40 @@ fn assert_wall_girder_factory_rejection(model: &Model) -> String {
 }
 
 #[test]
+fn elastic_wall_girder_requires_rebar_category_without_checking_strength_increase() {
+    let mut model = elastic_wall_girder_model();
+    model.materials.push(Material {
+        id: MaterialId(1),
+        name: "SD345".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        fc: None,
+        fy: Some(345.0),
+        strength_factor: Some(1.2),
+        ..model.materials[0].clone()
+    });
+    model.sections[0].rebar_material = Some(MaterialId(1));
+
+    let diagnostic = assert_wall_girder_factory_rejection(&model);
+    assert!(
+        diagnostic.contains("部材 ID 0 の主筋の材料 ID 1「SD345」"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("区分は「鋼材」"), "{diagnostic}");
+
+    model.materials[1].category = MaterialCategory::Rebar;
+    let diagnostic = ensure_nonlinear_input_with_basis(
+        &model,
+        AnalysisKind::Incremental,
+        StrengthBasis::MaterialStrength,
+    )
+    .err()
+    .unwrap_or_default();
+    assert!(!diagnostic.contains("部材 ID 0 "), "{diagnostic}");
+    assert!(!diagnostic.contains("部材 ID 1 "), "{diagnostic}");
+}
+
+#[test]
 fn elastic_wall_girder_requires_positive_finite_actual_young_for_every_section() {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
     let column_shape = SectionShape::RcColumnRect {

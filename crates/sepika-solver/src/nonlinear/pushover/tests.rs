@@ -2970,6 +2970,26 @@ fn pushover_uses_sd345_main_rebar_strength_only_within_jis_limits() {
     let reducer = Reducer::build(&model, &dofmap);
     let run = |model: &Model| pushover_analysis(model, &dofmap, &reducer, SeismicDir::X, 40, 60.0);
     model.materials[0].strength_factor = Some(1.2);
+    model.materials[1].strength_factor = Some(1.2);
+
+    for (category, label) in [
+        (MaterialCategory::Steel, "鋼材"),
+        (MaterialCategory::Concrete, "コンクリート"),
+    ] {
+        model.materials[1].category = category;
+        let diagnostic = run(&model).expect_err("鉄筋以外の区分を主筋に使えません");
+        assert!(diagnostic.contains("部材 ID 0 の主筋"), "{diagnostic}");
+        assert!(diagnostic.contains("材料 ID 1「SD345」"), "{diagnostic}");
+        assert!(
+            diagnostic.contains(&format!("区分は「{label}」")),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("材料区分が「鉄筋」の材料を割り当て"),
+            "{diagnostic}"
+        );
+    }
+    model.materials[1].category = MaterialCategory::Rebar;
 
     let mut capacities = Vec::new();
     for (factor, expected_fy) in [(Some(1.0), 345.0), (Some(1.1), 379.5), (None, 379.5)] {
@@ -3072,6 +3092,20 @@ fn pushover_uses_stb_main_rebar_grade_independent_of_display_name() {
         }],
         steel: Vec::new(),
     }];
+
+    model.sections[0].rebar_material = Some(MaterialId(3));
+    model.materials[3].category = MaterialCategory::Steel;
+    assert!((run(&model).unwrap().qu - expected_qu).abs() < 1e-6);
+    model.stb_strengths.sections[0].reinforcement[0].native_material = Some(MaterialId(3));
+    let diagnostic = run(&model).expect_err("ST-Bridgeで明示された主筋の材料区分を診断する");
+    assert!(
+        diagnostic.contains("部材 ID 0 の主筋の材料 ID 3「SD345」"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("区分は「鋼材」"), "{diagnostic}");
+    model.stb_strengths.sections[0].reinforcement[0].native_material = None;
+    model.sections[0].rebar_material = Some(MaterialId(1));
+    model.materials[3].category = MaterialCategory::Rebar;
 
     for grade in [Some("SD490"), None] {
         model.stb_strengths.sections[0].reinforcement[0].strength = grade.map(str::to_owned);

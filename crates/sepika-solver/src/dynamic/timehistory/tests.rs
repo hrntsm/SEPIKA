@@ -641,6 +641,104 @@ fn fiber_column_model(fy: f64) -> Model {
     }
 }
 
+#[test]
+fn nonlinear_time_history_requires_rebar_category_for_src_main_bars() {
+    use sepika_core::model::FrameSectionUse;
+    use sepika_core::section_shape::{RcRectColumnRebar, RebarSize, RectColumnHoop, SectionShape};
+    use sepika_math::solver::SolveError;
+
+    let mut model = fiber_column_model(235.0);
+    model.materials[0].name = "SN400B".into();
+    model.materials[0].density = 7.85e-9;
+    model.materials.push(Material {
+        id: MaterialId(1),
+        name: "Fc24".into(),
+        category: MaterialCategory::Concrete,
+        young: 23000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        fc: Some(24.0),
+        fy: None,
+        ..model.materials[0].clone()
+    });
+    model.materials.push(Material {
+        id: MaterialId(2),
+        name: "SD345".into(),
+        fy: Some(345.0),
+        strength_factor: Some(1.2),
+        ..model.materials[0].clone()
+    });
+    model.materials.push(Material {
+        id: MaterialId(3),
+        name: "SD295A".into(),
+        category: MaterialCategory::Rebar,
+        fy: Some(295.0),
+        ..model.materials[0].clone()
+    });
+    let mut section = SectionShape::SrcColumnRect {
+        b: 500.0,
+        d: 600.0,
+        rebar: RcRectColumnRebar {
+            main_dia: RebarSize::DiameterMm(25.0),
+            x: vec![5],
+            y: vec![3],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: RebarSize::DiameterMm(10.0),
+                pitch: 100.0,
+                legs_x: 2,
+                legs_y: 2,
+            },
+        },
+        steel_height: 350.0,
+        steel_width: 160.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 12.0,
+    }
+    .to_section(SectionId(0), "SRC柱".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    section.material = Some(MaterialId(1));
+    section.rebar_material = Some(MaterialId(2));
+    section.shear_rebar_material = Some(MaterialId(3));
+    section.steel_material = Some(MaterialId(0));
+    model.sections[0] = section;
+
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let wave = zero_wave(0.01, 2);
+    let run = |model: &Model| {
+        nonlinear_time_history_analysis(
+            model,
+            &dofmap,
+            &reducer,
+            &wave,
+            &NewmarkCfg::average_accel(),
+            &Damping::StiffnessProportional {
+                h: 0.0,
+                omega: 1.0,
+                basis: StiffnessKind::Initial,
+            },
+            DampingAccumulation::NonCumulative,
+            &[0.01],
+            &[0.0],
+            NonlinearThCfg::default(),
+        )
+    };
+    let error = run(&model).expect_err("鋼材区分の主筋を拒否する");
+    assert!(
+        matches!(error, SolveError::InvalidInput(ref reason)
+        if reason.contains("部材 ID 0 の主筋の材料 ID 2「SD345」")
+            && reason.contains("区分は「鋼材」")
+            && reason.contains("材料区分が「鉄筋」の材料を割り当て")),
+        "{error}"
+    );
+
+    model.materials[2].category = MaterialCategory::Rebar;
+    let response = run(&model).unwrap();
+    assert_eq!(response.time.len(), 3);
+    assert!(response.peak_disp[1][0] >= 0.01);
+}
+
 /// 弾性 SDOF（降伏しないファイバ柱）の非線形時刻歴が線形解と一致。
 #[test]
 fn test_nonlinear_time_history_sdof_elastic() {
