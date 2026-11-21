@@ -488,27 +488,38 @@ fn qd1_accounts_for_the_analytical_rigid_zone_at_the_connected_end() {
 }
 
 #[test]
-fn qd1_uses_both_column_ends_across_a_sloped_pinned_girder_with_a_rigid_zone() {
+fn qd1_accounts_for_rigid_arm_moment_beyond_the_plan_direction_of_a_girder() {
+    use reference::{BOTH_COLUMN_ENDS_QD1_N, ONE_GIRDER_QD1_N};
+
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),
         ElementKind::MultiSpring,
     );
-    let girder = &mut model.elements[fixture::GIRDER.index()];
-    model.nodes[girder.nodes[1].index()].coord[2] += 1000.0;
-    girder.end_cond[0] = EndCondition::Pinned;
-    girder.rigid_zone.length_i = 100.0;
-    model.validate().unwrap();
-    for (enabled, expected) in [
+    let girder = fixture::GIRDER.index();
+    let far = model.elements[girder].nodes[1].index();
+    let head_z_mm = model.nodes[NodeId(1).index()].coord[2];
+    let weak_beam_qd1_n = 162_630.279_382_081;
+    model.elements[girder].rigid_zone.length_i = 100.0;
+    for (condition, unarmed_strong_qd1_n) in [
+        (EndCondition::Pinned, ONE_GIRDER_QD1_N),
         (
-            true,
-            [reference::BOTH_COLUMN_ENDS_QD1_N, 189_308.326_858_618],
+            EndCondition::SemiRigid { k_theta: 1e8 },
+            BOTH_COLUMN_ENDS_QD1_N,
         ),
-        (false, [reference::ONE_GIRDER_QD1_N, 162_630.279_382_081]),
     ] {
-        model.stress_cfg.consider_rigid_zones = enabled;
-        let qd1 = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
-        for (actual, expected) in qd1.into_iter().zip(expected) {
-            assert_near(actual, expected, 1e-6);
+        model.elements[girder].end_cond[0] = condition;
+        for (rise_mm, enabled, expected) in [
+            (0.0, true, [BOTH_COLUMN_ENDS_QD1_N, weak_beam_qd1_n]),
+            (1000.0, true, [BOTH_COLUMN_ENDS_QD1_N, 189_308.326_858_618]),
+            (1000.0, false, [unarmed_strong_qd1_n, weak_beam_qd1_n]),
+        ] {
+            model.nodes[far].coord[2] = head_z_mm + rise_mm;
+            model.stress_cfg.consider_rigid_zones = enabled;
+            model.validate().unwrap();
+            let qd1 = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
+            for (actual, expected) in qd1.into_iter().zip(expected) {
+                assert_near(actual, expected, 1e-6);
+            }
         }
     }
 }

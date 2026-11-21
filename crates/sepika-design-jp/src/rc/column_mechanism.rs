@@ -229,20 +229,24 @@ fn sum_beam_my_at_node(
         } else {
             axis
         };
-        match other.end_cond[end] {
-            EndCondition::Pinned | EndCondition::SemiRigid { k_theta: 0.0 } => {
-                let rigid = model.analysis_rigid_zone(other);
-                let (i, j) = resolve_lengths(
-                    rigid.rigid_length_i(),
-                    rigid.rigid_length_j(),
-                    norm(actual_axis),
-                );
-                // 材軸方向の腕が柱の曲げ軸と平行な場合だけ、その軸まわりの付加曲げは生じない。
-                if [i, j][end] > 0.0 && cross(actual_axis, column_bending_axis) != [0.0; 3] {
-                    sum = None;
-                }
+        let end_condition = other.end_cond[end];
+        // 材軸方向の腕が柱の曲げ軸と平行な場合だけ、その軸まわりの付加曲げは生じない。
+        if end_condition != EndCondition::Fixed
+            && cross(actual_axis, column_bending_axis) != [0.0; 3]
+        {
+            let rigid = model.analysis_rigid_zone(other);
+            let (i, j) = resolve_lengths(
+                rigid.rigid_length_i(),
+                rigid.rigid_length_j(),
+                norm(actual_axis),
+            );
+            if [i, j][end] > 0.0 {
+                sum = None;
                 continue;
             }
+        }
+        match end_condition {
+            EndCondition::Pinned | EndCondition::SemiRigid { k_theta: 0.0 } => continue,
             _ if !aligns(axis) && !aligns(actual_axis) => continue,
             EndCondition::Fixed if !has_far_offset => {}
             _ => {
