@@ -241,10 +241,22 @@ fn static_column_preserves_a_weak_axis_failure_when_strong_axis_demand_overflows
 fn static_column_preserves_zero_hinge_shear_at_the_largest_factor() {
     let model = static_column(4, 4);
     let equality = column_check(&model, f64::MAX, 20_000_000.0, 0.0, false);
-    for (ql_n, shear, bond, ok) in [
-        (equality.qsu, f64::INFINITY, f64::INFINITY, true),
-        (equality.qsu + 1.0, 0.0, f64::INFINITY, false),
-        (equality.qbu + 1.0, 0.0, 0.0, false),
+    for (ql_n, shear, bond, ok, bond_detail) in [
+        (
+            equality.qsu,
+            f64::INFINITY,
+            f64::INFINITY,
+            true,
+            "付着余裕度=inf",
+        ),
+        (
+            equality.qsu + 1.0,
+            0.0,
+            f64::INFINITY,
+            false,
+            "付着余裕度=inf",
+        ),
+        (equality.qbu + 1.0, 0.0, 0.0, false, "付着余裕度=0.000"),
     ] {
         let check = column_check(&model, f64::MAX, 20_000_000.0, ql_n, false);
         assert_eq!(check.mu, 0.0);
@@ -254,6 +266,7 @@ fn static_column_preserves_zero_hinge_shear_at_the_largest_factor() {
         assert_eq!(check.ok, ok);
         assert_eq!(check.unchecked_reason, None);
         assert!(check.detail.contains("長期せん断力を耐力と直接比較"));
+        assert!(check.detail.contains(bond_detail), "{}", check.detail);
     }
 }
 

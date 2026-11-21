@@ -195,7 +195,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             });
             ui.add_space(4.0);
 
-            let bond = app.core.ultimate_include_bond;
+            let include_bond = app.core.ultimate_include_bond;
             let biaxial_shear = app.core.ultimate_biaxial_shear;
             let mode = if app.core.ultimate_use_pushover {
                 UltimateDemandMode::ConfirmedTotal
@@ -294,20 +294,24 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                         }
                     });
                     row.col(|ui| {
-                        if bond {
-                            ui.label(format_capacity(force_kn(c.qbu)));
+                        if !include_bond {
+                            ui.label("無効");
+                        } else if c.qbu.is_nan() {
+                            ui.label("未算定");
                         } else {
-                            ui.label("-");
+                            ui.label(format!("{:.1}", force_kn(c.qbu)));
                         }
                     });
                     row.col(|ui| {
-                        if bond && !c.bond_margin.is_nan() {
+                        if !include_bond {
+                            ui.label("無効");
+                        } else if c.bond_margin.is_nan() {
+                            ui.label("未算定");
+                        } else {
                             ui.colored_label(
                                 margin_color(c.bond_margin),
                                 format!("{:.2}", c.bond_margin),
                             );
-                        } else {
-                            ui.label("-");
                         }
                     });
                     row.col(|ui| {
