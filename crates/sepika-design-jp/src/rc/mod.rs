@@ -51,6 +51,13 @@ pub(crate) use shear_capacity::*;
 
 pub struct RcDesign;
 
+#[derive(Clone, Copy)]
+enum ColumnGravityMode {
+    Ordinary,
+    OrdinaryMissing,
+    TimeHistory,
+}
+
 impl DesignCheck for RcDesign {
     fn check(
         &self,
@@ -59,7 +66,7 @@ impl DesignCheck for RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
-        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, None);
+        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, None, false);
         match incomplete {
             Some(reason) => CheckOutcome::Skipped { reason },
             None => outcome,
@@ -68,7 +75,7 @@ impl DesignCheck for RcDesign {
 }
 
 impl RcDesign {
-    /// 鉄筋の材料区分または材軸ねじりで未算定の場合、独立に確定した不適合を別に返す。
+    /// 未算定理由がある位置では、独立に確定した不適合を別に返す。
     /// 時刻歴のRC柱で地震時せん断を照査する場合は、参照欠損時も `ctx.seismic_qd` を設定する。
     /// その他の部材で必要な重力参照内力を用意できない場合は `missing_gravity` に true を渡す。
     pub fn check_outcomes(
@@ -96,7 +103,11 @@ impl RcDesign {
             mat,
             ctx,
             missing_shear_reference,
-            strict_column_gravity,
+            if strict_column_gravity {
+                ColumnGravityMode::TimeHistory
+            } else {
+                ColumnGravityMode::Ordinary
+            },
         );
         let torsion =
             concrete_member_torsion_reason(sepika_core::structure_kind::StructureKind::Rc, forces);
@@ -111,8 +122,20 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         missing_shear_reference: Option<&str>,
+        missing_column_gravity: bool,
     ) -> (CheckOutcome, Option<String>) {
-        self.check_with_gravity_mode(forces, sec, mat, ctx, missing_shear_reference, false)
+        self.check_with_gravity_mode(
+            forces,
+            sec,
+            mat,
+            ctx,
+            missing_shear_reference,
+            if missing_column_gravity {
+                ColumnGravityMode::OrdinaryMissing
+            } else {
+                ColumnGravityMode::Ordinary
+            },
+        )
     }
 
     fn check_with_gravity_mode(
@@ -122,7 +145,7 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         missing_shear_reference: Option<&str>,
-        strict_column_gravity: bool,
+        column_gravity: ColumnGravityMode,
     ) -> (CheckOutcome, Option<String>) {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
@@ -150,7 +173,7 @@ impl RcDesign {
                 main_rebar_valid,
                 shear_rebar_valid,
                 shear_issue,
-                strict_column_gravity,
+                column_gravity,
                 &mut column_issue,
             )
         };
@@ -158,6 +181,7 @@ impl RcDesign {
             combine_incomplete_reasons(material_issue, shear_material_issue.as_deref())
                 .and_then(|reason| combine_incomplete_reasons(Some(reason), shear_issue));
         let incomplete = combine_incomplete_reasons(incomplete, column_issue.as_deref());
+        let strict_column_gravity = matches!(column_gravity, ColumnGravityMode::TimeHistory);
         let incomplete = if let Some(qd) = ctx.seismic_qd.as_ref().filter(|_| strict_column_gravity)
         {
             [1, 2].into_iter().fold(incomplete, |reason, index| {
@@ -201,7 +225,7 @@ impl RcDesign {
         main_rebar_valid: bool,
         shear_rebar_valid: bool,
         shear_issue: Option<&str>,
-        strict_column_gravity: bool,
+        column_gravity: ColumnGravityMode,
         column_issue: &mut Option<String>,
     ) -> CheckOutcome {
         let fc_raw = mat.fc.unwrap_or(0.0);
@@ -326,7 +350,7 @@ impl RcDesign {
                 main_rebar_valid,
                 shear_rebar_valid,
                 shear_issue.is_none(),
-                strict_column_gravity,
+                column_gravity,
                 column_issue,
             ),
         }

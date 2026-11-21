@@ -607,10 +607,11 @@ pub fn run_member_design_checks(
                 check_incomplete = incomplete;
                 outcome
             } else if structure == StructureKind::Rc {
-                let missing_column_reference = (wrong_main_rebar || wrong_shear_rebar)
-                    && kind == MemberKind::Column
+                let column_without_gravity = kind == MemberKind::Column
                     && options.long_member_forces.is_some()
                     && ctx.seismic_qd.is_none();
+                let missing_column_reference =
+                    (wrong_main_rebar || wrong_shear_rebar) && column_without_gravity;
                 let missing_shear_reference = if missing_gravity || missing_column_reference {
                     Some("設計用せん断力に必要な重力参照内力が不足しています")
                 } else if missing_q0 {
@@ -624,6 +625,7 @@ pub fn run_member_design_checks(
                     mat,
                     &ctx,
                     missing_shear_reference,
+                    options.term == LoadTerm::Short && column_without_gravity,
                 );
                 check_incomplete = incomplete;
                 outcome
