@@ -229,7 +229,6 @@ fn validate_scope(inp: &LumpedMassBuildInput<'_>) -> JobResult<()> {
         }
         let kind = match element.kind {
             ElementKind::NodalSpring => "節点ばね",
-            ElementKind::Isolator => "免震部材",
             ElementKind::Damper => "制振ダンパー",
             ElementKind::Wall => "壁要素",
             ElementKind::Shell => "シェル要素",
@@ -1224,7 +1223,6 @@ mod tests {
         use sepika_core::model::ElementKind;
         for kind in [
             ElementKind::NodalSpring,
-            ElementKind::Isolator,
             ElementKind::Damper,
             ElementKind::Wall,
             ElementKind::Shell,

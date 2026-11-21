@@ -313,7 +313,7 @@ impl ForceComponent {
         match self {
             ForceComponent::N => theme::DATA_BLUE,
             ForceComponent::Qy => theme::GOOD_GREEN,
-            ForceComponent::Qz => theme::ISOLATOR_TEAL,
+            ForceComponent::Qz => theme::FORCE_QZ_TEAL,
             ForceComponent::Mx => theme::SECONDARY_AMBER,
             ForceComponent::My => theme::PARETO_RED,
             ForceComponent::Mz => theme::HILITE_PURPLE,
@@ -491,7 +491,7 @@ impl<'a> FrameFilter<'a> {
     }
 
     /// 節点の配列添字で判定する。要素として持たない描画（支点記号・支点ばね・
-    /// 免震マーカー・スラブ・二次部材・剛床代表点）を構面へ絞り込むために使う。
+    /// スラブ・二次部材・剛床代表点）を構面へ絞り込むために使う。
     /// 「床壁・二次部材」トグルとは独立で、構面の所属だけを見る。
     pub(crate) fn shows_node(&self, i: usize) -> bool {
         match self.node_on {
@@ -1233,17 +1233,8 @@ pub fn viewer_panel_with_view(
         } else {
             None
         };
-    let isolator_hover = supports_visible(lumped::is_lumped_view(mode), view.show_supports)
-        && response.hover_pos().is_some_and(|pos| {
-            support_symbols::support_isolators(&app.core.model)
-                .iter()
-                .any(|&(idx, _, _)| {
-                    filter.shows_node(idx)
-                        && pts.get(idx).is_some_and(|p| (*p - pos).length() <= 8.0)
-                })
-        });
-    let hovered_member =
-        member_candidate.filter(|_| checked_node_hover.is_none() && !isolator_hover);
+
+    let hovered_member = member_candidate.filter(|_| checked_node_hover.is_none());
 
     if lumped::is_lumped_view(mode) {
         lumped::draw_with_view(view, &painter, app, &proj, mode, mode_idx, model_size);
@@ -1549,42 +1540,8 @@ pub fn viewer_panel_with_view(
         }
     }
 
-    let support_isolators = if draw_supports {
-        support_symbols::support_isolators(&app.core.model)
-    } else {
-        Vec::new()
-    };
-    let has_isolator = !support_isolators.is_empty();
-    for &(idx, _elem_id, _props) in support_isolators
-        .iter()
-        .filter(|&&(i, _, _)| filter.shows_node(i))
-    {
-        let coord = coords3
-            .get(idx)
-            .copied()
-            .unwrap_or_else(|| app.core.model.nodes[idx].coord);
-        support_symbols::draw_isolator_marker(&painter, proj.project(coord), theme::ISOLATOR_TEAL);
-    }
-    if cube_hover.is_none() {
-        if let Some(hover_pos) = response.hover_pos() {
-            const HOVER_PICK_THRESHOLD: f32 = 8.0;
-            let nearest = support_isolators
-                .iter()
-                .filter(|&&(idx, _, _)| filter.shows_node(idx))
-                .filter_map(|&(idx, elem_id, props)| {
-                    pts.get(idx)
-                        .map(|&p| (elem_id, props, (hover_pos - p).length()))
-                })
-                .filter(|&(_, _, d)| d <= HOVER_PICK_THRESHOLD)
-                .min_by(|a, b| a.2.total_cmp(&b.2));
-            if let Some((elem_id, props, _)) = nearest {
-                support_symbols::show_isolator_tooltip(ui, elem_id, &props);
-            }
-        }
-    }
-
-    if has_support || has_diaphragm || has_spring || has_isolator {
-        draw_support_legend(&painter, has_diaphragm, has_spring, has_isolator);
+    if has_support || has_diaphragm || has_spring {
+        draw_support_legend(&painter, has_diaphragm, has_spring);
     }
 
     if cube.visible {

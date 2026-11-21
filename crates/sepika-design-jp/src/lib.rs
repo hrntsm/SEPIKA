@@ -18,8 +18,6 @@ pub mod floor;
 pub mod floor_bolt;
 mod girder_deflection;
 pub mod girder_group;
-/// 免震支承材のマルチシアスプリング低減率・摩擦力（各免震部材指針）。
-pub mod isolator;
 pub mod joint_wiring;
 /// 材料強度・許容応力度（各構造規準の材料強度・許容応力度）。材種横断の
 /// 許容応力度・材料定数を集約する。構成則モデルの `sepika-material`

@@ -78,7 +78,7 @@
 | `calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md` | [calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md](../../docs/calc_basis/08_部材終局耐力/06_CFT_柱_終局耐力.md) | 維持・全節維持 |
 | `calc_basis/08_部材終局耐力/07_終局検定の統括.md` | [calc_basis/08_部材終局耐力/07_終局検定の統括.md](../../docs/calc_basis/08_部材終局耐力/07_終局検定の統括.md) | 維持・全節維持 |
 | `calc_basis/08_部材終局耐力/README.md` | [calc_basis/08_部材終局耐力/README.md](../../docs/calc_basis/08_部材終局耐力/README.md) | 章入口・案内を更新 |
-| `calc_basis/09_免震制振/01_免震アイソレータ.md` | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) | 分割（節対応参照） |
+| `calc_basis/09_免震制振/01_免震アイソレータ.md` | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) | 分割（節対応参照） |
 | `calc_basis/09_免震制振/02_制振ダンパー.md` | [calc_basis/09_免震制振/02_制振ダンパー.md](../../docs/calc_basis/09_免震制振/02_制振ダンパー.md) | 維持・全節維持 |
 | `calc_basis/09_免震制振/03_座屈拘束ブレース.md` | [calc_basis/06_一次設計/06_座屈拘束ブレース.md](../../docs/calc_basis/06_一次設計/06_座屈拘束ブレース.md) | 移動・全節維持 |
 | `calc_basis/09_免震制振/04_辻_山田モデル.md` | [calc_basis/09_免震制振/04_辻_山田モデル.md](../../docs/calc_basis/09_免震制振/04_辻_山田モデル.md) | 維持・全節維持 |
@@ -284,8 +284,8 @@ MCPの6ページは本再編では配置を維持する。GUIから使う接続�
 | --- | --- |
 | 冒頭（最初の節より前） | 弾性ばねと非線形ばねの目的別入口へ置換。製品固有係数の適用条件は非線形側に維持 |
 | 算定式 | [calc_basis/04_要素剛性/07_ばね要素.md](../../docs/calc_basis/04_要素剛性/07_ばね要素.md) |
-| 記号・単位 | [calc_basis/04_要素剛性/07_ばね要素.md](../../docs/calc_basis/04_要素剛性/07_ばね要素.md)、[nonlinear/08_免震制振ばねの復元力.md](../../docs/nonlinear/08_免震制振ばねの復元力.md) |
-| 算定式：積層ゴム・摩擦・Maxwell・免震回転剛性/残留せん断剛性 | [nonlinear/08_免震制振ばねの復元力.md](../../docs/nonlinear/08_免震制振ばねの復元力.md) |
+| 記号・単位 | [calc_basis/04_要素剛性/07_ばね要素.md](../../docs/calc_basis/04_要素剛性/07_ばね要素.md)、[nonlinear/08_免震制振ばねの復元力.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/nonlinear/08_免震制振ばねの復元力.md) |
+| 算定式：積層ゴム・摩擦・Maxwell・免震回転剛性/残留せん断剛性 | [nonlinear/08_免震制振ばねの復元力.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/nonlinear/08_免震制振ばねの復元力.md) |
 | 算定式：節点ばね・支点ばね | [calc_basis/04_要素剛性/07_ばね要素.md](../../docs/calc_basis/04_要素剛性/07_ばね要素.md) |
 | 記号・単位表、実装参照 | 対応する式ごとに両ページへ分配 |
 
@@ -294,15 +294,15 @@ MCPの6ページは本再編では配置を維持する。GUIから使う接続�
 | 元の節・範囲 | 正本先 |
 | --- | --- |
 | 冒頭（最初の節より前） | 免震特性の記号・単位を維持 |
-| 記号・単位 | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| マルチシア（多層積層ゴム）低減率 | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| 算定式 | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| 摩擦（すべり）支承 | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| 鉛プラグ入り積層ゴム（LRB）統一型・歪依存 | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| 算定式 | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| 転がり支承・球面すべり支承・高減衰ゴム | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| 算定式（代表） | [calc_basis/09_免震制振/01_免震アイソレータ.md](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
-| 支点への免震支承配置 | [model_edit/14_免震支承の配置.md](../../docs/model_edit/14_免震支承の配置.md) |
+| 記号・単位 | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| マルチシア（多層積層ゴム）低減率 | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| 算定式 | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| 摩擦（すべり）支承 | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| 鉛プラグ入り積層ゴム（LRB）統一型・歪依存 | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| 算定式 | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| 転がり支承・球面すべり支承・高減衰ゴム | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| 算定式（代表） | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) |
+| 支点への免震支承配置 | [model_edit/14_免震支承の配置.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/model_edit/14_免震支承の配置.md) |
 
 
 ## 許容応力度・部材検定の整理（Issue #1024）

@@ -418,11 +418,11 @@ fn spring_column_model(kx: f64, support_kx: Option<f64>, seismic_weight: f64) ->
 }
 
 #[test]
-fn pushover_member_frame_uses_spring_and_isolator_axes_at_short_length_boundary() {
+fn pushover_member_frame_uses_nodal_spring_axes_at_short_length_boundary() {
     let mut model = spring_column_model(1000.0, None, 100_000.0);
     for length_mm in [0.0, 0.5e-9, 1e-9, 2e-9] {
         let p_i = model.nodes[0].coord;
-        let p_j = [length_mm, 0.0, 0.0];
+        let p_j = [0.0, length_mm, 0.0];
         model.nodes[1].coord = p_j;
         let spring = super::geom::member_local_frame(&model.elements[0], p_i, p_j).unwrap();
         if length_mm < 1e-9 {
@@ -431,19 +431,8 @@ fn pushover_member_frame_uses_spring_and_isolator_axes_at_short_length_boundary(
                 [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
             );
         } else {
-            assert_eq!(spring.rot[0], [1.0, 0.0, 0.0]);
+            assert_eq!(spring.rot[0], [0.0, 1.0, 0.0]);
         }
-        model.elements[0].kind = ElementKind::Isolator;
-        let isolator = super::geom::member_local_frame(&model.elements[0], p_i, p_j).unwrap();
-        assert_eq!(
-            isolator.rot[0],
-            if length_mm < 1e-9 {
-                [0.0, 0.0, 1.0]
-            } else {
-                [1.0, 0.0, 0.0]
-            }
-        );
-        model.elements[0].kind = ElementKind::NodalSpring;
     }
 }
 

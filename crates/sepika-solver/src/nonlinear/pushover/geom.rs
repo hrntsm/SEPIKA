@@ -16,22 +16,10 @@ pub(crate) fn member_local_frame(
     p_i: [f64; 3],
     p_j: [f64; 3],
 ) -> Result<LocalFrame, &'static str> {
-    if sepika_core::geom::vec3::dist(p_i, p_j) < 1e-9 {
-        match elem.kind {
-            ElementKind::NodalSpring => {
-                return Ok(LocalFrame {
-                    rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                });
-            }
-            ElementKind::Isolator => {
-                return LocalFrame::from_nodes(
-                    p_i,
-                    [p_i[0], p_i[1], p_i[2] + 1.0],
-                    elem.local_axis.ref_vector,
-                );
-            }
-            _ => {}
-        }
+    if elem.kind == ElementKind::NodalSpring && sepika_core::geom::vec3::dist(p_i, p_j) < 1e-9 {
+        return Ok(LocalFrame {
+            rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        });
     }
     LocalFrame::from_nodes(p_i, p_j, elem.local_axis.ref_vector)
 }

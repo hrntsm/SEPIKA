@@ -1,6 +1,6 @@
 # 免震支承の水平二方向と摩擦用鉛直荷重の照合
 
-[Issue #957](https://github.com/hrntsm/SEPIKA/issues/957)の限定照合。利用者向けの入力は[免震アイソレータ](../../docs/calc_basis/09_免震制振/01_免震アイソレータ.md)、復元力の式は[免震・制振ばねの復元力](../../docs/nonlinear/08_免震制振ばねの復元力.md)を正とする。
+[Issue #957](https://github.com/hrntsm/SEPIKA/issues/957)の限定照合。免震支承は [#1741](https://github.com/hrntsm/SEPIKA/issues/1741) で対応を終了した。以下は当時の照合記録であり、入力は[免震アイソレータ](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md)、復元力の式は[免震・制振ばねの復元力](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/nonlinear/08_免震制振ばねの復元力.md)に当時の説明がある。
 
 ## 実利用範囲
 

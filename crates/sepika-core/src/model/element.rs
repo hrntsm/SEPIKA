@@ -1,6 +1,6 @@
 //! 要素（部材）の型。
 //!
-//! - [`ElementKind`] — 要素種別（梁・シェル・ブレース・免震・ダンパー等）。
+//! - [`ElementKind`] — 要素種別（梁・シェル・ブレース・ダンパー等）。
 //! - [`ForceRegime`] — 応力評価の方式。
 //! - [`LocalAxis`] — 部材ローカル軸の基準ベクトル。
 //! - [`EndCondition`] — 部材端の接合条件。
@@ -36,11 +36,6 @@ pub enum ElementKind {
     /// 軸方向の変形成分を独立なバネ剛性として持ちうる 2 節点要素。
     /// 各自由度のバネ定数は `ElementData::spring` に保持する（局所軸 6 成分）。
     NodalSpring,
-    /// 免震支承材（各免震部材指針）。
-    /// 2 節点要素で、水平は非線形せん断ばね（マルチシアスプリング＝積層ゴム系
-    /// バイリニア、または摩擦ばね＝弾性すべり支承 Qmax=μN）、鉛直は弾性軸ばね。
-    /// 特性は `Model::isolator_attrs` に要素 ID と対で保持する。
-    Isolator,
     /// 制振ダンパー要素（各制振部材の力学モデル）。
     /// 2 節点の軸方向要素で、マクスウェル要素（バネ Kd と粘性ダッシュポットの直列）等で
     /// モデル化する。減衰要素の要素力は節点力として運動方程式へ与えられ、特性は
@@ -77,8 +72,7 @@ impl ElementKind {
     ///   準備計算が自動生成するため、未割当として警告すると生成数だけ
     ///   警告が並び、本当に割当が漏れている部材が埋もれる。
     /// - 節点バネ（`NodalSpring`）: 剛性は `ElementData::spring`（局所軸 6 成分）。
-    /// - 免震支承材（`Isolator`）・制振ダンパー（`Damper`）: 特性は
-    ///   `Model::isolator_attrs`・`Model::damper_attrs` に持つ。
+    /// - 制振ダンパー（`Damper`）: 特性は `Model::damper_attrs` に持つ。
     ///
     /// 要素種別を追加したときに扱いを決め忘れないよう、網羅 `match` で書く
     /// （ワイルドカードを使わない）。
@@ -90,10 +84,7 @@ impl ElementKind {
             | ElementKind::Brace { .. }
             | ElementKind::Shell
             | ElementKind::Wall => true,
-            ElementKind::PanelZone
-            | ElementKind::NodalSpring
-            | ElementKind::Isolator
-            | ElementKind::Damper => false,
+            ElementKind::PanelZone | ElementKind::NodalSpring | ElementKind::Damper => false,
         }
     }
 }
@@ -112,7 +103,7 @@ pub struct LocalAxis {
 
 impl Model {
     /// 二節点要素の局所基底と梁実材軸の必須入力を検証する。失敗は部材 ID と理由を返す。
-    /// 零長の節点ばねは単位回転、零長の免震支承は仮想鉛直軸を用いる。
+    /// 零長の節点ばねは単位回転を用いる。
     pub fn validate_local_frames(&self) -> Result<(), String> {
         for element in &self.elements {
             self.validate_element_local_frame(element)?;
@@ -142,13 +133,9 @@ impl Model {
         ) else {
             return Ok(());
         };
-        let [p_i, mut p_j] = beam_ends.unwrap_or([i.coord, j.coord]);
-        if crate::geom::vec3::dist(p_i, p_j) < 1e-9 {
-            match element.kind {
-                ElementKind::NodalSpring => return Ok(()),
-                ElementKind::Isolator => p_j = [p_i[0], p_i[1], p_i[2] + 1.0],
-                _ => {}
-            }
+        let [p_i, p_j] = beam_ends.unwrap_or([i.coord, j.coord]);
+        if element.kind == ElementKind::NodalSpring && crate::geom::vec3::dist(p_i, p_j) < 1e-9 {
+            return Ok(());
         }
         crate::geom::vec3::local_frame_axes(p_i, p_j, element.local_axis.ref_vector)
             .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", element.id.0))?;

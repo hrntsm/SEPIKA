@@ -35,7 +35,6 @@ struct EndSupportMember {
     material_moduli_mpa: Option<(f64, f64)>,
     manual_rigid_lengths_mm: [Option<f64>; 2],
     spring: Option<[f64; 6]>,
-    isolator: Option<IsolatorProps>,
     damper: Option<DamperProps>,
 }
 
@@ -137,14 +136,6 @@ impl EndSupportMember {
                 (zone.source_j == ZoneSource::Manual).then_some(zone.length_j),
             ],
             spring: elem.spring,
-            isolator: (elem.kind == ElementKind::Isolator).then(|| {
-                model
-                    .isolator_attrs
-                    .iter()
-                    .find(|attr| attr.elem == elem.id)
-                    .map(|attr| attr.props)
-                    .unwrap_or_default()
-            }),
             damper: (elem.kind == ElementKind::Damper)
                 .then(|| model.damper_props(elem.id).unwrap_or_default()),
         })

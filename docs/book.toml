@@ -53,6 +53,10 @@ additional-js = ["theme/footer.js"]
 "/calc_basis/08_部材終局耐力/04_RC_部材_非線形復元力特性.html" = "../../nonlinear/05_RC_部材_非線形復元力特性.html"
 "/calc_basis/09_免震制振/03_座屈拘束ブレース.html" = "../06_一次設計/06_座屈拘束ブレース.html"
 
+"/calc_basis/09_免震制振/01_免震アイソレータ.html" = "index.html"
+"/model_edit/14_免震支承の配置.html" = "../calc_basis/09_免震制振/index.html"
+"/nonlinear/08_免震制振ばねの復元力.html" = "../calc_basis/09_免震制振/index.html"
+
 # 移設前の壁脚内力ページは、旧見出しのアンカーを持つ案内ページへ転送する。
 "/calc_basis/04_要素剛性/10_RC壁の壁脚内力と初期耐力.html" = "../08_部材終局耐力/08_RC壁の壁脚内力と初期耐力.html"
 

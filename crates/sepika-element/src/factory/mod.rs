@@ -131,9 +131,6 @@ pub fn build_behavior_with_axial_factor(
         ElementKind::NodalSpring => {
             Box::new(crate::springs::spring::NodalSpringElement::new(data, model))
         }
-        ElementKind::Isolator => {
-            Box::new(crate::springs::isolator::IsolatorElement::new(data, model))
-        }
         ElementKind::Damper => {
             use sepika_core::model::DamperKind;
             let kind = model.damper_props(data.id).unwrap_or_default().kind;

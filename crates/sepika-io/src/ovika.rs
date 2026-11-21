@@ -349,6 +349,55 @@ mod tests {
     }
 
     #[test]
+    fn removed_bearing_element_is_rejected_on_project_load() {
+        let path = crate::test_util::test_tmp().join("removed-bearing.ovika");
+        let mut value = serde_json::to_value(make_rich_model()).unwrap();
+        value["elements"][0]["kind"] = serde_json::json!("Isolator");
+        let bytes = rmp_serde::to_vec_named(&value).unwrap();
+        let manifest = Manifest {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            units: "internal: N-mm-s".into(),
+            created_by: "legacy-bearing-fixture".into(),
+            entries: vec![crate::manifest::EntryHash {
+                name: "model.msgpack".into(),
+                sha256: sha256_of(&bytes),
+            }],
+        };
+        write_zip_with_manifest(&path, &manifest, &bytes);
+        let error = load_ovika(&path).err().unwrap();
+        assert!(
+            matches!(&error, IoError::Decode(reason) if reason.contains("Isolator") && reason.contains("unknown variant")),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn supported_dampers_keep_their_kind_and_properties_on_project_roundtrip() {
+        for kind in [DamperKind::Maxwell, DamperKind::HystereticBilinear] {
+            let mut model = make_rich_model();
+            model.elements[0].kind = ElementKind::Damper;
+            let props = DamperProps {
+                kind,
+                kd: 150_000.0,
+                c0: 1750.0,
+                alpha: 0.7,
+                qy: 60_000.0,
+                k2_ratio: 0.08,
+                ..Default::default()
+            };
+            model.damper_attrs.push(DamperAttr {
+                elem: ElemId(0),
+                props,
+            });
+            let path = crate::test_util::test_tmp().join(format!("damper-{kind:?}.ovika"));
+            save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+            let loaded = load_ovika(&path).unwrap().model;
+            assert_eq!(loaded.elements[0].kind, ElementKind::Damper);
+            assert_eq!(loaded.damper_props(ElemId(0)), Some(props));
+        }
+    }
+
+    #[test]
     fn removed_member_hysteresis_is_rejected_in_both_saved_slots() {
         for removed in ["KarsanJirsa", "TsujiYamada"] {
             for slot in ["rule", "rule_th"] {

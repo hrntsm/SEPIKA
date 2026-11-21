@@ -1158,7 +1158,6 @@ fn explicit_rc_basis_rejects_every_other_resolved_element_path() {
             tension_only: false,
         },
         ElementKind::NodalSpring,
-        ElementKind::Isolator,
         ElementKind::Damper,
     ] {
         let mut model = base.clone();

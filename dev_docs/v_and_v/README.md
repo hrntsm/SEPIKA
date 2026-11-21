@@ -37,9 +37,9 @@
 
 [原典・独立曲率積分・公開検定の照合](鋼RC大梁略算たわみ_Issue1195_照合記録.md)に、等分布荷重で中央たわみが一致する曲げ符号、鋼の参考表示とRCの検定比、面と芯の位置関係を記録する。状態🔶。単純支持・両端固定は限定一致。端部正曲げのRCで表示比0.937・独立比1.066を再現し、最大値・片持ちを含む是正を[#1435](https://github.com/hrntsm/SEPIKA/issues/1435)で追跡する。
 
-## 免震支承の水平二方向と摩擦用鉛直荷重（#957）
+## 免震支承の過去の照合（#957）
 
-[原典・独立有限例と適用条件](免震支承の多方向と摩擦_Issue957_照合記録.md)に、等角度MSSの投影と合成、現行要素の独立二軸・固定長期軸力、および鉛直荷重変動や浮上りの適用範囲を記録する。状態🔶。既設支承の長期軸力編集は[#1437](https://github.com/hrntsm/SEPIKA/issues/1437)、低減率の表示は[#1438](https://github.com/hrntsm/SEPIKA/issues/1438)で追跡する。個別製品の実験Validationは未実施。
+免震支承は [#1741](https://github.com/hrntsm/SEPIKA/issues/1741) で対応を終了した。[原典・独立有限例と適用条件](免震支承の多方向と摩擦_Issue957_照合記録.md)には、当時の等角度MSSの投影と合成、独立二軸・固定長期軸力、鉛直荷重変動や浮上りの適用範囲を記録している。
 
 ## 終局重力組合せと応力割増し（#958）
 
@@ -176,7 +176,7 @@ OS100%/150%別の全代表操作・可読性/性能の条件と最終HEADの全C
 
 ## 要素共通処理の現役参照整理（#1059）
 
-[現役回帰の対応表](要素共通処理の試験整理_Issue1059.md#現役の保証)に、DOF順序・ばね剛性・ダンパー断面力の統合先とシェル感度・免震状態確定の保証、および免震降伏・MS初期状態・パネル柱剛性・線材回転質量の同一fixture統合先を記録した。数値契約・状態遷移と既存V&Vの状態を維持し、固定SHAと過去の出力は履歴として保持する。
+[整理時点の試験対応表](要素共通処理の試験整理_Issue1059.md#現役の保証)に、DOF順序・ばね剛性・ダンパー断面力・MS初期状態・パネル柱剛性・線材回転質量等の試験を記録した。免震支承に関する記載は [#1741](https://github.com/hrntsm/SEPIKA/issues/1741) の対応終了前の履歴。
 
 ## 階重量・物理質量試験の現役参照整理（#1059）
 
@@ -747,10 +747,10 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | レポート | 対象 | 判定 | 備考 |
 |----------|--------|------|------|
 | [load_calculation_review.md](load_calculation_review.md) | 荷重計算 | 🔶 | 風荷重等のギャップ |
-| [剛性計算の実装確認記録](剛性計算_参照実装照合.md) | 剛性計算の採用実装・修正記録 | 🔶（規準本体・独立根拠との照合未完） | 免震・製品要素は未実装 |
+| [剛性計算の実装確認記録](剛性計算_参照実装照合.md) | 剛性計算の採用実装・修正記録 | 🔶（規準本体・独立根拠との照合未完） | 製品要素は未実装 |
 | [応力解析の実装・検証記録](応力解析_参照実装照合.md) | 応力解析の実装・試験対応 | 🔶（方式・係数の全面的な規準適合は未確認） | 制振間柱等 |
 | [断面検定（許容応力度検定）の実装確認記録](断面検定_参照実装照合.md) | 断面検定の採用実装・修正記録 | 🔶（許容値・接合部係数等の根拠照合未完） | C 節に残置項目。[選定済み断面保持 #1100](断面検定_参照実装照合.md#issue-1100)の数値応答Verificationを追補（既存状態維持） |
-| [非線形モデルの実装・検証記録](非線形モデル_参照実装照合.md) | 非線形モデルの実装・試験履歴 | 🔶（係数・適用条件の一次資料照合未完） | 免震 UI・分割ロジック等 |
+| [非線形モデルの実装・検証記録](非線形モデル_参照実装照合.md) | 非線形モデルの実装・試験履歴 | 🔶（係数・適用条件の一次資料照合未完） | 分割ロジック等 |
 | [#956の照合記録](非線形材料と塑性率_Issue956_照合記録.md) | 現行の基点ひずみ・ヒンジ表示、NewRC係数とコンクリート履歴則 | 🔶（Dの符号差と有限例を確認。実験Validation・採用強度は未確認） | [#1414](https://github.com/hrntsm/SEPIKA/issues/1414) |
 | [終局検定の実装・検証記録](終局検定_参照実装照合.md) | 終局検定、§6-c 正方形CFT長柱Case2（#325） | 🔶（一次画像/独立期待値、Source式・core・共有静的符号是正job、修正後App/MCP6件の成功証拠を受領。RC影響あり。手動GUI/外部transport・規準本文・Validation未確認、広検証/正式レビューは後続） | #565他残契約は未完。Vu・二軸曲げ等 |
 | [ゼロ増分履歴保持_Issue596_2026-10.md](ゼロ増分履歴保持_Issue596_2026-10.md) | 同点trial/probe/commitの全履歴・独立応答、実集中ばね/非対称壁/1D・spatial時刻歴、解析5の実OVIKA失効と明示回復 | 🔶（代表入口Verification、実験Validation未） |
@@ -973,7 +973,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 20a | 微小相似Fiber初期断面 | sepika-math / sepika-element / sepika-solver | dense_lu.rs, frame/fiber/constitutive_tests.rs, panel_zone.rs | `near_diagonal_coupling_roundoff_*`・`similar_*`・`panel_753_public_nonlinear_time_history_*`（[Issue #783検証](微小相似Fiber初期断面_Issue783_2026-10.md)）。偏心試験の現役統合先は[共通処理の対応表](ファイバー共通処理の試験整理_Issue1059.md#現役の保証) | P4 | 🔶（数値Verification。実験Validation未） |
 | 20b | 物理曲率・非対称断面・剛域付き軸履歴 | sepika-element | frame/fiber/physical_curvature_tests.rs、rigid_axial_tests.rs | [保存成果の補完と端部解放の収束検証](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | P4 | 🔶（有限Verification。実験Validation未） |
-| 20c | 保存/失敗時の全要素復元と全固定時刻歴 | sepika-element / sepika-io / sepika-solver | springs/isolator/tests.rs、checkpoint/preserved_tests.rs、common/elem_loop/preserved_tests.rs、timehistory/tests/loaded_recording.rs、tests/general_member_loads.rs | [保存ブランチの残りの復元検証](保存ブランチ496の変更採否_2026-10.md) | 横断 | 🔶（有限Verification。実験Validation未） |
+| 20c | 失敗時の要素状態復元・全固定時刻歴の回帰 | sepika-solver | `common/elem_loop/preserved_tests.rs`、`dynamic/timehistory/tests/loaded_recording.rs`、`tests/general_member_loads.rs` | 現行の混在要素復元試験はマクスウェル型・履歴型ダンパーとFiber/MS。削除された免震要素の試験（[#1741](https://github.com/hrntsm/SEPIKA/issues/1741)）や当時のチェックポイント復元は[保存ブランチの検証記録](保存ブランチ496の変更採否_2026-10.md)を参照 | 横断 | 🔶（有限Verification。実験Validation未） |
 | 21 | 参考骨格算定（M–φ→M–θ、廃止済み） | — | — | 現行の試験対象なし。上記#436の履歴記録を参照 | P4 / #436 / #849 | 廃止済み（単位・拒否契約の検証履歴を保持） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 廃止済み（過去の検証を記録） |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |

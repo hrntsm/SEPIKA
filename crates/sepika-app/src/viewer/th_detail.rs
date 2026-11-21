@@ -1,11 +1,9 @@
 //! 時刻歴モード（[`super::ViewMode::TimeHistory`]）で部材をクリックした際に開く
 //! 詳細ウィンドウ。
 //!
-//! - 荷重変形関係の履歴ループ（egui_plot）: 軸力系要素（ブレース・ダンパー・
-//!   免震・節点ばね）は軸力 N - 軸方向相対変位 δ（材軸方向）、梁・柱は材端モーメント
-//!   M - 材端回転角 θ（弦からのたわみ角、「節点端モーメント」規約に統一）。
-//!   部材長がほぼ 0 の要素（免震・節点ばね）は材軸が定まらないため、要素ローカル軸の
-//!   成分別（軸／せん断y／せん断z）表示に切り替わる（免震は水平せん断が既定）。
+//! - ブレース・ダンパー・節点ばねの履歴ループは軸力と軸方向相対変位を表示する。
+//!   零長の節点ばねでは、全体座標系での成分別表示に切り替わる。
+//!   梁・柱の履歴ループは材端モーメントと材端回転角を表示する。
 //!   現在フレームの位置をループ上にマーカー表示し、フレームスライダーと連動する。
 //! - 短期の簡易検定: 内力包絡や軸力極値が生じた確定時刻の内力を用いる。
 //!   上下非対称組立H形鋼のS柱は全確定時刻の断面単独照査を表示する。
@@ -43,7 +41,7 @@ use sepika_solver::dynamic::timehistory::{
 /// ループ表示の分類（要素種別による）。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LoopKind {
-    /// 軸力系（ブレース・ダンパー・免震・節点ばね）: N - δ
+    /// 軸力系（ブレース・ダンパー・節点ばね）: N - δ
     Axial,
     /// 梁・柱（曲げ材）: M - θ
     Flexural,
@@ -53,10 +51,9 @@ enum LoopKind {
 
 fn loop_kind_of(kind: &ElementKind) -> LoopKind {
     match kind {
-        ElementKind::Brace { .. }
-        | ElementKind::Damper
-        | ElementKind::Isolator
-        | ElementKind::NodalSpring => LoopKind::Axial,
+        ElementKind::Brace { .. } | ElementKind::Damper | ElementKind::NodalSpring => {
+            LoopKind::Axial
+        }
         ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => LoopKind::Flexural,
         ElementKind::Wall | ElementKind::Shell | ElementKind::PanelZone => LoopKind::Unsupported,
     }
@@ -72,7 +69,6 @@ fn kind_label(kind: &ElementKind) -> &'static str {
         ElementKind::PanelZone => "パネルゾーン",
         ElementKind::Brace { .. } => "ブレース",
         ElementKind::NodalSpring => "節点ばね",
-        ElementKind::Isolator => "免震支承",
         ElementKind::Damper => "ダンパー",
         ElementKind::Shell => "シェル",
     }
@@ -81,9 +77,7 @@ fn kind_label(kind: &ElementKind) -> &'static str {
 /// 軸力系要素の軸方向相対変位 δ [mm]（引張を正）。
 ///
 /// 両端節点の変位差（並進成分のみ）を、未変形材軸方向（i→j の単位ベクトル）へ
-/// 射影する。微小変形の近似（弦回転による二次項は無視）。部材長がほぼ 0 の
-/// 要素（免震・節点ばね）は材軸そのものが定まらないため 0 を返す
-/// （零長要素は [`zero_length_local_frame`]／[`zero_length_relative_disp`] を使う）。
+/// 射影する。部材長が 1e-9 mm 未満の場合は 0 を返す。
 pub(super) fn axial_relative_disp(
     p_i: [f64; 3],
     p_j: [f64; 3],
@@ -106,45 +100,7 @@ pub(super) fn axial_relative_disp(
 /// 3 次元ベクトルの内積。
 use sepika_core::geom::vec3::dot as dot3;
 
-/// 零長要素（部材長 < 1e-9。免震・節点ばね）の局所座標系（中-2）。
-///
-/// `sepika_element` の各要素実装は零長時に材軸射影ができないため、要素種別ごとに
-/// 固有の既定軸を用いる（`sepika_element::springs::isolator::IsolatorElement::new`／
-/// `sepika_element::springs::spring::NodalSpringElement::new` と同じ規約を複製）。
-/// - **免震支承（[`ElementKind::Isolator`]）**: 局所 x 軸＝鉛直（全体 Z）、
-///   局所 y・z 軸＝水平（`ref_vector` から定まる）。
-/// - **それ以外（節点ばね等）**: 全体座標系＝局所座標系（単位回転）。
-pub(super) fn zero_length_local_frame(
-    kind: &ElementKind,
-    p_i: [f64; 3],
-    ref_vector: [f64; 3],
-) -> Option<LocalFrame> {
-    match kind {
-        ElementKind::Isolator => {
-            LocalFrame::from_nodes(p_i, [p_i[0], p_i[1], p_i[2] + 1.0], ref_vector).ok()
-        }
-        _ => Some(LocalFrame {
-            rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        }),
-    }
-}
-
-/// 零長要素の局所軸 `component` 方向の相対変位 [mm]（[`zero_length_local_frame`] 参照）。
-/// 両端節点の変位差（並進成分のみ）を局所軸へ射影する（純粋関数）。
-pub(super) fn zero_length_relative_disp(
-    kind: &ElementKind,
-    p_i: [f64; 3],
-    ref_vector: [f64; 3],
-    d_i: [f64; 6],
-    d_j: [f64; 6],
-    component: AxialComponent,
-) -> Option<f64> {
-    let frame = zero_length_local_frame(kind, p_i, ref_vector)?;
-    let du = [d_j[0] - d_i[0], d_j[1] - d_i[1], d_j[2] - d_i[2]];
-    Some(dot3(du, frame.rot[component.axis_index()]))
-}
-
-/// 軸力系要素の N-δ ループで表示する成分（中-2）。
+/// 軸力系要素の荷重変形ループで表示する成分。
 /// `MemberForces::at` の力成分の並び `[N,Qy,Qz,Mx,My,Mz]` の先頭 3 つに対応する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AxialComponent {
@@ -158,7 +114,7 @@ pub enum AxialComponent {
 
 impl AxialComponent {
     /// `MemberForces::at` の力配列 `[N,Qy,Qz,Mx,My,Mz]` の添字（0..3）。
-    /// [`zero_length_local_frame`] の局所軸（`rot[0..3]`）の添字とも共通。
+    /// 零長の節点ばねでは全体座標系の X・Y・Z 成分に対応する。
     fn axis_index(self) -> usize {
         match self {
             Self::Axial => 0,
@@ -183,16 +139,6 @@ impl AxialComponent {
             Self::ShearY => "せん断y(Qy-δy)",
             Self::ShearZ => "せん断z(Qz-δz)",
         }
-    }
-}
-
-/// 零長要素（免震・節点ばね）の N-δ ループで既定表示する成分（中-2）。
-/// 免震支承は水平せん断力 Qy を既定にする（水平ループの確認が主目的のため）。
-/// それ以外（節点ばね等）は軸方向を既定にする。
-pub(super) fn default_axial_component(kind: &ElementKind) -> AxialComponent {
-    match kind {
-        ElementKind::Isolator => AxialComponent::ShearY,
-        _ => AxialComponent::Axial,
     }
 }
 
@@ -237,7 +183,7 @@ fn elem_has_force_recording(rec: &ThRecording, elem_idx: usize) -> bool {
         .any(|frame| frame.get(elem_idx).is_some_and(|o| o.is_some()))
 }
 
-/// 断面検定の対象になる部材種別か（軸力のみの減衰・免震・節点ばね要素、
+/// 断面検定の対象になる部材種別か（ダンパー・節点ばね要素、
 /// 耐震壁・シェル・パネルゾーンは対象外）。
 fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
     match elem.kind {
@@ -336,7 +282,7 @@ fn draw_th_detail_content_at(
     let mut axis_z = app.ui.view.th_detail_axis_z;
     let mut axial_component = match app.ui.scoped.th_detail_axial_component {
         Some((id, c)) if id == elem_id => c,
-        _ => default_axial_component(&elem.kind),
+        _ => AxialComponent::Axial,
     };
     match loop_kind_of(&elem.kind) {
         LoopKind::Axial => draw_axial_loop(
@@ -344,12 +290,10 @@ fn draw_th_detail_content_at(
             recording,
             elem_id,
             elem_idx,
-            &elem.kind,
             n0,
             n1,
             p_i,
             p_j,
-            elem.local_axis.ref_vector,
             frame,
             &mut axial_component,
         ),
@@ -409,26 +353,18 @@ fn draw_th_detail_content_at(
     app.ui.scoped.th_detail_axial_component = Some((elem_id, axial_component));
 }
 
-/// 軸力系要素（ブレース・ダンパー・免震・節点ばね）の荷重変形ループ。
-///
-/// 部材長がほぼ 0 の要素（免震・節点ばね。中-2）は材軸方向が定まらないため、
-/// 通常の軸方向 N-δ の代わりに要素ローカル軸の成分別（軸／せん断y／せん断z）
-/// 表示に切り替え、成分切替 UI を出す（既定は [`default_axial_component`]。
-/// 免震はせん断＝水平ループを既定にする）。`component`（表示中の成分）は
-/// 呼び出し側（`App::th_detail_axial_component`）が保持する状態をローカル変数
-/// として受け渡す（[`draw_flexural_loop`] の `axis_z` と同じ理由）。
+/// 軸力系要素（ブレース・ダンパー・節点ばね）の荷重変形ループ。
+/// 零長の節点ばねは節点変位と内力の全体座標成分を表示する。
 #[allow(clippy::too_many_arguments)]
 fn draw_axial_loop(
     ui: &mut egui::Ui,
     rec: &ThRecording,
     elem_id: ElemId,
     elem_idx: usize,
-    elem_kind: &ElementKind,
     n0: usize,
     n1: usize,
     p_i: [f64; 3],
     p_j: [f64; 3],
-    ref_vector: [f64; 3],
     cur_frame: usize,
     component: &mut AxialComponent,
 ) {
@@ -456,9 +392,7 @@ fn draw_axial_loop(
     };
 
     let point = |f: usize| -> Option<[f64; 2]> {
-        axial_point(
-            rec, elem_idx, elem_kind, n0, n1, p_i, p_j, ref_vector, component, f,
-        )
+        axial_point(rec, elem_idx, n0, n1, p_i, p_j, component, f)
     };
     let series: Vec<[f64; 2]> = (0..rec.frame_time.len()).filter_map(point).collect();
     let current = point(cur_frame);
@@ -485,20 +419,15 @@ fn draw_axial_loop(
         });
 }
 
-/// フレーム `f` の軸力系 (δ[単位は成分により mm]、力[kN]) を求める。内力・変位の
-/// いずれかが欠けていれば `None`。零長要素（`p_i`・`p_j` がほぼ一致）は
-/// [`zero_length_relative_disp`]（要素ローカル軸への射影）を、それ以外は
-/// [`axial_relative_disp`]（材軸射影、常に軸方向成分）を使う。
+/// フレーム `f` の変位 [mm] と力 [kN] を返す。内力か変位が欠けていれば `None`。
 #[allow(clippy::too_many_arguments)]
 fn axial_point(
     rec: &ThRecording,
     elem_idx: usize,
-    elem_kind: &ElementKind,
     n0: usize,
     n1: usize,
     p_i: [f64; 3],
     p_j: [f64; 3],
-    ref_vector: [f64; 3],
     component: AxialComponent,
     f: usize,
 ) -> Option<[f64; 2]> {
@@ -508,7 +437,8 @@ fn axial_point(
     let d_i = *disp_frame.get(n0)?;
     let d_j = *disp_frame.get(n1)?;
     let delta = if member_len3(p_i, p_j) < 1e-9 {
-        zero_length_relative_disp(elem_kind, p_i, ref_vector, d_i, d_j, component)?
+        let axis = component.axis_index();
+        d_j[axis] - d_i[axis]
     } else {
         axial_relative_disp(p_i, p_j, d_i, d_j)
     };
@@ -706,7 +636,7 @@ fn draw_peak_check(
     let Some(kind) = design_member_kind(elem, &app.core.model) else {
         ui.colored_label(
             theme::GRAY_600,
-            "この要素種別は断面検定の対象外です（軸力のみの減衰・免震・節点ばね要素等）。",
+            "この要素種別は断面検定の対象外です（ダンパー・節点ばね要素等）。",
         );
         return;
     };
@@ -2280,10 +2210,6 @@ mod tests {
             LoopKind::Axial
         ));
         assert!(matches!(
-            loop_kind_of(&ElementKind::Isolator),
-            LoopKind::Axial
-        ));
-        assert!(matches!(
             loop_kind_of(&ElementKind::NodalSpring),
             LoopKind::Axial
         ));
@@ -2295,6 +2221,31 @@ mod tests {
             loop_kind_of(&ElementKind::Wall),
             LoopKind::Unsupported
         ));
+    }
+
+    #[test]
+    fn zero_length_spring_loop_uses_global_translation_and_force_components() {
+        let recording = ThRecording {
+            frame_time: vec![0.0],
+            node_disp: vec![vec![
+                [1.0, 2.0, 3.0, 0.0, 0.0, 0.0],
+                [3.0, 6.0, 0.0, 0.0, 0.0, 0.0],
+            ]],
+            member_forces: vec![vec![Some(MemberForces {
+                at: vec![(0.0, [1000.0, 2000.0, -3000.0, 0.0, 0.0, 0.0])],
+            })]],
+            ..Default::default()
+        };
+        for (component, expected) in [
+            (AxialComponent::Axial, [2.0, 1.0]),
+            (AxialComponent::ShearY, [4.0, 2.0]),
+            (AxialComponent::ShearZ, [-3.0, -3.0]),
+        ] {
+            assert_eq!(
+                axial_point(&recording, 0, 0, 1, [0.0; 3], [0.0; 3], component, 0),
+                Some(expected)
+            );
+        }
     }
 
     /// テスト用の弾性梁要素（X 軸材、ref_vector=[0,1,0]。`beam_end_rotations` の
@@ -2377,41 +2328,6 @@ mod tests {
         }
     }
 
-    /// 免震支承の零長局所軸は局所 x=鉛直（全体 Z）。
-    #[test]
-    fn zero_length_local_frame_isolator_axis_is_vertical() {
-        let frame =
-            zero_length_local_frame(&ElementKind::Isolator, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0])
-                .unwrap();
-        assert!(
-            (frame.rot[0][2] - 1.0).abs() < 1e-9,
-            "局所xは全体Z: {:?}",
-            frame.rot[0]
-        );
-    }
-
-    /// 節点ばね（免震以外）の零長局所軸は単位回転（全体座標系＝局所座標系）。
-    #[test]
-    fn zero_length_local_frame_nodal_spring_is_identity() {
-        let frame =
-            zero_length_local_frame(&ElementKind::NodalSpring, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0])
-                .unwrap();
-        assert_eq!(
-            frame.rot,
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-        );
-    }
-
-    #[test]
-    fn 不正な参照方向の免震履歴軸は生成しない() {
-        assert!(zero_length_local_frame(
-            &ElementKind::Isolator,
-            [0.0, 0.0, 0.0],
-            [f64::NAN, 0.0, 0.0],
-        )
-        .is_none());
-    }
-
     #[test]
     fn 不正な参照方向の梁端回転は生成しない() {
         assert!(beam_end_rotations(
@@ -2422,48 +2338,5 @@ mod tests {
             [0.0; 6],
         )
         .is_none());
-    }
-
-    /// 免震支承の零長要素で、水平方向（局所y）の相対変位が ShearY 成分として
-    /// 取り出せること（軸=鉛直方向の変位は寄与しない）。
-    #[test]
-    fn zero_length_relative_disp_isolator_shear_y() {
-        let p_i = [0.0, 0.0, 0.0];
-        let ref_vector = [1.0, 0.0, 0.0];
-        let d_i = [0.0; 6];
-        // j端が水平(グローバルX、局所y相当)へ5mm、鉛直(グローバルZ、局所x)へ2mm変位。
-        let d_j = [5.0, 0.0, 2.0, 0.0, 0.0, 0.0];
-        let shear_y = zero_length_relative_disp(
-            &ElementKind::Isolator,
-            p_i,
-            ref_vector,
-            d_i,
-            d_j,
-            AxialComponent::ShearY,
-        )
-        .unwrap();
-        let axial = zero_length_relative_disp(
-            &ElementKind::Isolator,
-            p_i,
-            ref_vector,
-            d_i,
-            d_j,
-            AxialComponent::Axial,
-        )
-        .unwrap();
-        assert!((shear_y - 5.0).abs() < 1e-9, "shear_y={shear_y}");
-        assert!((axial - 2.0).abs() < 1e-9, "axial={axial}");
-    }
-
-    #[test]
-    fn default_axial_component_isolator_is_shear_horizontal_loop() {
-        assert_eq!(
-            default_axial_component(&ElementKind::Isolator),
-            AxialComponent::ShearY
-        );
-        assert_eq!(
-            default_axial_component(&ElementKind::NodalSpring),
-            AxialComponent::Axial
-        );
     }
 }
