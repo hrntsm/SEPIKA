@@ -207,6 +207,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0141](0141-remove-st-bridge.md) | accepted | ST-Bridge の入出力と専用情報の保持を廃止する |
 | [0142](0142-remove-pca-members.md) | accepted | PCa 部材への対応を廃止する |
 | [0143](0143-rc-column-head-shear-factor.md) | accepted | RC柱の短期地震時せん断の柱頭係数を接続節点から決める |
+| [0144](0144-rc-column-qd1-girder-end-conditions.md) | accepted | RC柱の短期地震時QD1では柱側梁端の曲げ伝達条件を確認する |
 
 ## 規約
 
