@@ -7,6 +7,7 @@ use super::*;
 
 const STEEL_DESIGN_ATTR_LABEL: &str = "鉄骨部材の検定属性";
 const MEMBER_HYSTERESIS_ATTR_LABEL: &str = "部材の履歴則指定";
+const DAMPER_ATTR_LABEL: &str = "制振ダンパー属性";
 
 macro_rules! for_each_elem_attr_collection {
     ($visit:ident) => {
@@ -20,7 +21,7 @@ macro_rules! for_each_elem_attr_collection {
         $visit!(slab_composite_attrs);
         $visit!(pca_attrs, elem, "PCa梁属性");
         $visit!(member_hysteresis_attrs, elem, MEMBER_HYSTERESIS_ATTR_LABEL);
-        $visit!(damper_attrs, elem, "制振ダンパー属性");
+        $visit!(damper_attrs, elem, DAMPER_ATTR_LABEL);
         $visit!(member_detail_attrs, elem, "部材の付帯情報");
         $visit!(girder_groups);
         $visit!(load_cfg);
@@ -38,7 +39,8 @@ pub struct ElemAttrs {
     pub pca: Option<PcaGirderAttr>,
     /// 元の配列位置と部材の履歴則指定。
     pub hysteresis: Vec<(usize, MemberHysteresisAttr)>,
-    pub damper: Option<DamperAttr>,
+    /// 元の配列位置と制振ダンパー属性。
+    pub damper: Vec<(usize, DamperAttr)>,
     pub detail: Option<MemberDetailAttr>,
     pub slab_composite: Option<SlabCompositeConnection>,
     /// 削除前の配列位置と付加線重量 [N/mm]。
@@ -355,6 +357,7 @@ impl Model {
         self.validate_steel_design_attr_refs()?;
         self.validate_member_weight_refs()?;
         self.validate_member_hysteresis_attr_refs()?;
+        self.validate_damper_attr_refs()?;
 
         for sec in &self.sections {
             for (role, mid) in [
@@ -1324,7 +1327,7 @@ impl Model {
             && self.next_secondary_member_id == other.next_secondary_member_id
     }
 
-    /// ダンパー要素の特性を返す（`Model::damper_attrs` から要素 ID で検索）。
+    /// 指定部材の先頭のダンパー特性を返す。指定がなければ `None`。
     pub fn damper_props(&self, elem: ElemId) -> Option<DamperProps> {
         self.damper_attrs
             .iter()
@@ -1631,6 +1634,19 @@ impl Model {
         Ok(())
     }
 
+    /// 参照先が存在しない最初の制振ダンパー属性を、部材番号付きエラーで返す。
+    pub fn validate_damper_attr_refs(&self) -> Result<(), crate::error::CoreError> {
+        for attr in &self.damper_attrs {
+            if self.element(attr.elem).is_none() {
+                return Err(crate::error::CoreError::DanglingRef(format!(
+                    "{DAMPER_ATTR_LABEL} -> 部材 {}",
+                    attr.elem.0
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// 条件に一致する部材属性・部材別重量・一本部材指定の参照先と入力種別を返す。
     pub fn find_elem_attr_ref(
         &self,
@@ -1754,7 +1770,9 @@ impl Model {
             hysteresis: take_ordered(&mut self.member_hysteresis_attrs, |attr| {
                 (attr.elem == elem).then_some(*attr)
             }),
-            damper: take_first(&mut self.damper_attrs, |a| a.elem, elem),
+            damper: take_ordered(&mut self.damper_attrs, |attr| {
+                (attr.elem == elem).then_some(*attr)
+            }),
             detail: take_first(&mut self.member_detail_attrs, |a| a.elem, elem),
             extra_line_weight,
             finish_area_weight,
@@ -1786,9 +1804,10 @@ impl Model {
             self.member_hysteresis_attrs
                 .insert(index.min(self.member_hysteresis_attrs.len()), attr);
         }
-        if let Some(mut a) = attrs.damper {
-            a.elem = elem;
-            self.damper_attrs.push(a);
+        for (index, mut attr) in attrs.damper {
+            attr.elem = elem;
+            self.damper_attrs
+                .insert(index.min(self.damper_attrs.len()), attr);
         }
         if let Some(mut a) = attrs.detail {
             a.elem = elem;

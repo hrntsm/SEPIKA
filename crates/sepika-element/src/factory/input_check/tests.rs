@@ -988,6 +988,18 @@ fn both_nonlinear_input_checks_report_a_hysteresis_ref_to_a_missing_member() {
 }
 
 #[test]
+fn both_nonlinear_input_checks_report_a_damper_attr_to_a_missing_member() {
+    use sepika_core::model::AnalysisKind;
+
+    let mut model = Model::default();
+    model.set_damper_props(ElemId(7), Some(Default::default()));
+    for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+        let error = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
+        assert!(error.contains("制振ダンパー属性 -> 部材 7"), "{error}");
+    }
+}
+
+#[test]
 fn rc_reference_kind_and_active_load_diagnostics_do_not_use_inactive_settings() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{AnalysisKind, HysteresisModel, LoadCase, LoadCaseKind, MemberLoad};

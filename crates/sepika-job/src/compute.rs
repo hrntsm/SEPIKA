@@ -13,9 +13,18 @@ use sepika_core::model::{LoadCase, LoadCaseKind, LoadSource, EX_CASE_NAME, EY_CA
 use sepika_design_jp::secondary::story_rigidity::evaluate_story_rigidities;
 use sepika_solver::statics::analysis::Analysis;
 
-/// 壁展開モデルを組み立てる（本モジュール共通のエントリポイント）。
-fn expand_walls(model: sepika_core::model::Model) -> sepika_core::model::Model {
-    sepika_core::wall_expand::expand_wall_elements_owned(model).0
+/// 壁展開前にダンパー特性の参照を検査する。参照先がなければ入力エラーを返す。
+pub(crate) fn expand_walls(
+    model: sepika_core::model::Model,
+) -> JobResult<(
+    sepika_core::model::Model,
+    sepika_core::wall_expand::WallExpansionIndex,
+)> {
+    model
+        .validate_damper_attr_refs()
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
+    let (model, wall_index, _) = sepika_core::wall_expand::expand_wall_elements_owned(model);
+    Ok((model, wall_index))
 }
 
 pub(crate) fn dynamic_solve_error(error: sepika_math::solver::SolveError) -> JobError {
@@ -76,7 +85,7 @@ pub fn compute_linear_static(
             )));
         }
     }
-    let model = expand_walls(model);
+    let (model, _) = expand_walls(model)?;
     match Analysis::prepare(&model) {
         Ok(analysis) => {
             let mut result = analysis
@@ -108,7 +117,7 @@ pub fn compute_eigen(
     model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
-    let model = expand_walls(model);
+    let (model, _) = expand_walls(model)?;
     match Analysis::prepare(&model) {
         Ok(analysis) => analysis.eigen(n_modes).map_err(dynamic_solve_error),
         Err(e) => Err(JobError::Prepare(format!("{e:?}"))),
@@ -121,7 +130,7 @@ pub fn compute_seismic(
     cfg: sepika_solver::statics::analysis::SeismicCfg,
     t: f64,
 ) -> JobResult<sepika_solver::statics::linear::StaticOnce> {
-    let model = expand_walls(model);
+    let (model, _) = expand_walls(model)?;
     match Analysis::prepare(&model) {
         Ok(analysis) => {
             let mut result = analysis
@@ -171,7 +180,7 @@ pub fn compute_pushover(
     model
         .validate_member_hysteresis_attr_refs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
-    let (work, wall_index, _) = sepika_core::wall_expand::expand_wall_elements_owned(model);
+    let (work, wall_index) = expand_walls(model)?;
     Analysis::prepare(&work).map_err(|e| JobError::Prepare(e.to_string()))?;
     let dofmap = sepika_core::dof::DofMap::build(&work);
     let reducer = sepika_solver::common::constraint::Reducer::build(&work, &dofmap);
@@ -230,7 +239,7 @@ pub fn compute_time_history(
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
     let wave = effective_time_history_wave(&cfg, wave)?;
-    let model = expand_walls(model);
+    let (model, _) = expand_walls(model)?;
     sepika_element::factory::ensure_wall_side_column_analysis(
         &model,
         cfg.th_nonlinear
@@ -413,7 +422,7 @@ pub fn compute_lumped_mass(
     po_y: Option<sepika_solver::nonlinear::pushover::PushoverResult>,
     accel: Option<&[f64]>,
 ) -> JobResult<sepika_solver::dynamic::lumped_mass::LumpedMassResult> {
-    let model = expand_walls(model);
+    let (model, _) = expand_walls(model)?;
     let lm = crate::lumped_mass::build_lumped_mass(crate::lumped_mass::LumpedMassBuildInput {
         model_type: cfg.lumped_mass_type,
         model: &model,
