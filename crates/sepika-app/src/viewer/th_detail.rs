@@ -675,33 +675,6 @@ fn draw_peak_check(
     let torsion_reason =
         |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
-    let buckling_lengths = match structure {
-        StructureKind::Cft => {
-            sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
-        }
-        StructureKind::S => sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
-            elem.id,
-            kind,
-            model.member_length(elem),
-            attr,
-        )
-        .map(Some),
-        _ => Ok(None),
-    };
-    let (lk_y, lk_z) = match buckling_lengths {
-        Ok(Some((strong, weak))) => {
-            if structure == StructureKind::S {
-                ui.label(format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
-            }
-            (Some(strong), Some(weak))
-        }
-        Ok(None) => (None, None),
-        Err(reason) => {
-            draw_peak_precheck(ui, peak, axial_peaks, Some(&reason), torsion_reason);
-            return;
-        }
-    };
-
     let length = axis.length;
     let face_sum = elem.rigid_zone.face_i_or_zero() + elem.rigid_zone.face_j_or_zero();
     let clear_span = if length - face_sum > 0.0 {
@@ -749,7 +722,7 @@ fn draw_peak_check(
                     format!("検定不能: QD1用の部材荷重由来Q0を算定できません（{reason}）"),
                 );
                 if !wrong_shear_rebar {
-                    draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason);
+                    draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason, None);
                     return;
                 }
                 None
@@ -770,6 +743,43 @@ fn draw_peak_check(
             clear_length: clear_span,
             method: qd_method,
         });
+    let buckling_lengths = match structure {
+        StructureKind::Cft => {
+            sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
+        }
+        StructureKind::S => sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
+            elem.id,
+            kind,
+            model.member_length(elem),
+            attr,
+        )
+        .map(Some),
+        _ => Ok(None),
+    };
+    let (lk_y, lk_z) = match buckling_lengths {
+        Ok(Some((strong, weak))) => {
+            if structure == StructureKind::S {
+                ui.label(format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
+            }
+            (Some(strong), Some(weak))
+        }
+        Ok(None) => (None, None),
+        Err(reason) => {
+            let cft_qd2 = seismic_qd
+                .as_ref()
+                .filter(|qd| structure == StructureKind::Cft && qd.method != QdMethod::Qd1);
+            draw_peak_precheck(
+                ui,
+                peak,
+                axial_peaks,
+                Some(&reason),
+                torsion_reason,
+                cft_qd2,
+            );
+            return;
+        }
+    };
+
     let missing_rc_beam_gravity = wire_qd
         && rc_beam
         && seismic_qd.as_ref().is_none_or(|qd| {
@@ -790,6 +800,7 @@ fn draw_peak_check(
             axial_peaks,
             Some("設計用せん断力に必要な重力参照内力が不足しています"),
             torsion_reason,
+            None,
         );
         return;
     }
@@ -1045,36 +1056,48 @@ fn draw_peak_precheck(
     axial_peaks: Option<&AxialForcePeaks>,
     reason: Option<&str>,
     torsion_reason: impl Fn(&MemberForcesAt) -> Option<&'static str>,
+    cft_qd2: Option<&sepika_design_jp::SeismicQd>,
 ) {
-    let draw = |ui: &mut egui::Ui, label: &str, torsion: Option<&str>| {
-        if let Some(first_reason) = reason.or(torsion) {
+    let draw = |ui: &mut egui::Ui, label: &str, pos: f64, torsion: Option<&str>| {
+        let gravity = cft_qd2.and_then(|qd| sepika_design_jp::cft::qd2_reference_issue(qd, pos));
+        let reasons: Vec<_> = reason
+            .into_iter()
+            .chain(torsion)
+            .chain(gravity.as_deref())
+            .collect();
+        if !reasons.is_empty() {
             let skipped = CheckOutcome::Skipped {
-                reason: first_reason.into(),
+                reason: reasons.join("。"),
             };
-            for outcome in strength_outcomes(skipped, reason.and(torsion)) {
-                draw_labeled_outcome_row(ui, label, &outcome, false);
-            }
+            draw_labeled_outcome_row(ui, label, &skipped, false);
         }
     };
+    if cft_qd2.is_some() {
+        ui.label("内力包絡");
+    }
     for &(pos, f) in &peak.at {
         let torsion = torsion_reason(&MemberForcesAt::from_local(pos, f));
-        draw(ui, &format!("ξ={pos:.2}:"), torsion);
+        draw(ui, &format!("ξ={pos:.2}:"), pos, torsion);
     }
     if let Some(peaks) = axial_peaks {
+        if cft_qd2.is_some() && !peaks.snapshots.is_empty() {
+            ui.label("軸力極値が生じた確定ステップ");
+        }
         for snapshot in &peaks.snapshots {
             for &index in &snapshot.positions {
                 let Some(&(pos, f)) = snapshot.forces.at.get(index) else {
                     continue;
                 };
                 let mfa = MemberForcesAt::from_local(pos, f);
-                if let Some(torsion) = torsion_reason(&mfa) {
+                let torsion = torsion_reason(&mfa);
+                if cft_qd2.is_some() || torsion.is_some() {
                     let side = if mfa.n < 0.0 {
                         "圧縮側"
                     } else {
                         "引張側"
                     };
                     let label = format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time);
-                    draw(ui, &label, Some(torsion));
+                    draw(ui, &label, pos, torsion);
                 }
             }
         }

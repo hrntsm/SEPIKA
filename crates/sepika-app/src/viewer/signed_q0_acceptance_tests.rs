@@ -867,3 +867,74 @@ fn time_history_cft_qd1_uses_only_necessary_gravity_components() {
         assert!(!text.contains("(OK)"), "{text}");
     }
 }
+
+#[test]
+fn time_history_cft_shows_buckling_and_required_gravity_reasons_at_each_position() {
+    use crate::app::cft_column_buckling_tests::input as cft;
+    use sepika_design_jp::QdMethod;
+
+    for circular in [false, true] {
+        let mut app = App::default();
+        let mut model = cft::cantilever(circular, 0.0);
+        model.steel_design_attrs = vec![cft::direct_lengths(ElemId(0), Some(3000.0), None)];
+        assert!(app.load_model(model));
+        let response = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
+        let rec = gravity_test_record(response, response);
+        let mut missing_qy = [0.0; 6];
+        missing_qy[1] = f64::NAN;
+        let mut missing_qz = [0.0; 6];
+        missing_qz[2] = f64::INFINITY;
+        set_gravity_forces(
+            &mut app,
+            Some(vec![(0.0, [0.0; 6]), (0.5, missing_qy), (0.75, missing_qz)]),
+        );
+
+        for weak_length in [None, Some(0.0), Some(f64::NAN)] {
+            app.core.model.steel_design_attrs[0].lk_z_direct = weak_length;
+            for (method, nonlinear, applied_long_term) in [
+                (QdMethod::Qd2, true, true),
+                (QdMethod::Min, true, true),
+                (QdMethod::Qd1, true, true),
+                (QdMethod::Qd2, true, false),
+                (QdMethod::Qd2, false, false),
+            ] {
+                app.core.analysis_cfg.qd_method = method;
+                let text = peak_labels(&app, &rec, 0, nonlinear, applied_long_term);
+                assert!(!text.contains("検定比 "), "{text}");
+                assert!(!text.contains("(OK)") && !text.contains("(NG)"), "{text}");
+                let reason = "弱軸の座屈長さを有限な正値で直接指定";
+                let shows_gravity = nonlinear && applied_long_term && method != QdMethod::Qd1;
+                assert_eq!(
+                    text.matches(reason).count(),
+                    if shows_gravity { 4 } else { 3 },
+                    "{text}"
+                );
+                if !shows_gravity {
+                    assert!(
+                        !text.contains("重力参照内力") && !text.contains("t=0.250000 s"),
+                        "{text}"
+                    );
+                    continue;
+                }
+
+                for (label, qy_missing, qz_missing) in [
+                    ("ξ=0.00:", false, false),
+                    ("ξ=0.50:", true, false),
+                    ("ξ=1.00:", true, true),
+                    ("圧縮側 t=0.250000 s  ξ=0.75:", false, true),
+                ] {
+                    let (_, after_label) = text
+                        .split_once(label)
+                        .unwrap_or_else(|| panic!("{label}: {text}"));
+                    let row = after_label.lines().nth(1).unwrap();
+                    assert!(
+                        row.starts_with("検定不能:") && row.contains(reason),
+                        "{text}"
+                    );
+                    assert_eq!(row.contains("Qy方向の設計用せん断力"), qy_missing, "{text}");
+                    assert_eq!(row.contains("Qz方向の設計用せん断力"), qz_missing, "{text}");
+                }
+            }
+        }
+    }
+}

@@ -16,7 +16,7 @@ use crate::rc::{column_design_shear, column_qd2_reference_issue, concrete_allowa
 use crate::steel::{steel_fs, steel_ft};
 use crate::{
     effective_slenderness, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCheck,
-    DesignCtx, LoadTerm, MemberForcesAt, QdMethod,
+    DesignCtx, LoadTerm, MemberForcesAt, QdMethod, SeismicQd,
 };
 use sepika_core::ids::ElemId;
 use sepika_core::model::{Material, Section, SteelDesignAttr};
@@ -24,6 +24,13 @@ use sepika_core::section_shape::{RoundedRectangle, SectionShape};
 use sepika_core::structure_kind::StructureKind;
 
 use crate::ratio_or_large;
+
+/// QD2 を算定・比較する位置で、同位置の有限な重力参照せん断力を取得できない方向を返す。
+pub fn qd2_reference_issue(qd: &SeismicQd, pos: f64) -> Option<String> {
+    [1, 2].into_iter().fold(None, |reason, index| {
+        combine_incomplete_reasons(reason, column_qd2_reference_issue(qd, pos, index))
+    })
+}
 
 /// CFT柱の直接座屈長さを mm で返す。順序は強軸・弱軸。
 /// 両軸とも有限な正値が必要。不足・不正の軸は理由に示す。
@@ -668,15 +675,7 @@ impl CftDesign {
             .seismic_qd
             .as_ref()
             .filter(|_| ctx.term == LoadTerm::Short);
-        let mut incomplete = None;
-        if let Some(qd) = seismic {
-            for index in [1, 2] {
-                incomplete = combine_incomplete_reasons(
-                    incomplete,
-                    column_qd2_reference_issue(qd, forces.pos, index),
-                );
-            }
-        }
+        let mut incomplete = seismic.and_then(|qd| qd2_reference_issue(qd, forces.pos));
         let outcome =
             Self::check_section(forces, sec, mat, ctx, seismic.is_some(), &mut incomplete);
         let torsion = concrete_member_torsion_reason(StructureKind::Cft, forces);
