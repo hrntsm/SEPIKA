@@ -275,12 +275,9 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     .and_then(|i| app.core.model.damper_defs.get(i))
                     .map(|d| d.props)
                     .unwrap_or_default();
-                app.core
-                    .scoped
-                    .undo
-                    .run(&mut app.core.model, Box::new(AddDamper { elem, props }));
-                app.select_member(new_id);
-                app.core.scoped.staleness.mark_edited();
+                if app.apply_model_edit(Box::new(AddDamper { elem, props })) {
+                    app.select_member(new_id);
+                }
             }
         }
     }

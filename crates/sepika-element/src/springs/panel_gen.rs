@@ -60,8 +60,11 @@ pub struct GeneratedPanel {
     pub k_panel: [f64; 2],
 }
 
-/// 再生成またはモデル化解除で削除する仕口パネルを参照する入力を拒否する。
-pub fn validate_panel_removal_references(model: &Model) -> Result<(), String> {
+/// 削除対象のパネルへの参照と、生成前に参照先が存在しない部材別重量を拒否する。
+pub fn validate_panel_generation_references(model: &Model) -> Result<(), String> {
+    model
+        .validate_member_weight_refs()
+        .map_err(|error| error.to_string())?;
     if !model
         .elements
         .iter()
@@ -115,26 +118,7 @@ pub fn validate_panel_removal_references(model: &Model) -> Result<(), String> {
             }
         }
     }
-    if let Some((id, kind)) = model.find_elem_attr_ref(is_panel).or_else(|| {
-        let cfg = model.load_cfg.as_ref()?;
-        [
-            (&cfg.extra_line_weight, "部材付加線重量"),
-            (&cfg.finish_area_weight, "仕上げ面重量"),
-        ]
-        .into_iter()
-        .find_map(|(weights, kind)| {
-            weights
-                .iter()
-                .find(|(id, _)| is_panel(*id))
-                .map(|(id, _)| (*id, kind))
-        })
-        .or_else(|| {
-            cfg.dampers
-                .iter()
-                .find(|damper| is_panel(damper.elem))
-                .map(|damper| (damper.elem, "ダンパー総重量"))
-        })
-    }) {
+    if let Some((id, kind)) = model.find_elem_attr_ref(is_panel) {
         return Err(format!(
             "{kind}が削除対象の仕口パネル要素 {} を参照しています。入力の参照先を修正してください",
             id.0
@@ -185,18 +169,6 @@ fn remove_existing_panels(model: &mut Model) {
     for lc in &mut model.load_cases {
         for ml in &mut lc.member {
             shift(&mut ml.elem);
-        }
-    }
-    if let Some(cfg) = &mut model.load_cfg {
-        for (id, _) in cfg
-            .extra_line_weight
-            .iter_mut()
-            .chain(&mut cfg.finish_area_weight)
-        {
-            shift(id);
-        }
-        for damper in &mut cfg.dampers {
-            shift(&mut damper.elem);
         }
     }
     model.visit_primary_support_elem_ids(shift);
@@ -294,7 +266,7 @@ fn apply_panel_offsets(
 ///
 /// 戻り値は生成したパネルの諸元（節点 index の昇順）。削除対象への参照があればモデルを変更せず失敗する。
 pub fn apply_auto_panel_zones(model: &mut Model) -> Result<Vec<GeneratedPanel>, String> {
-    validate_panel_removal_references(model)?;
+    validate_panel_generation_references(model)?;
     if model.panel_zone == PanelZoneMode::Model {
         let adjacency = NodeAdjacency::build(model);
         for node in &model.nodes {

@@ -224,6 +224,9 @@ pub fn compute_dl_beam_loads(
 pub fn compute_gravity_auto_load_cases(
     model: &Model,
 ) -> Result<AutoLoadComputeResult, crate::error::JobError> {
+    model
+        .validate_member_weight_refs()
+        .map_err(|error| crate::error::JobError::InvalidInput(error.to_string()))?;
     for plate in &model.wall_plates {
         model
             .validate_wall_design_self_weight(plate)

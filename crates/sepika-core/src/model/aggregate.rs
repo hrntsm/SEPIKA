@@ -22,6 +22,7 @@ macro_rules! for_each_elem_attr_collection {
         $visit!(damper_attrs, elem, "制振ダンパー属性");
         $visit!(member_detail_attrs, elem, "部材の付帯情報");
         $visit!(girder_groups);
+        $visit!(load_cfg);
     };
 }
 
@@ -38,6 +39,12 @@ pub struct ElemAttrs {
     pub damper: Option<DamperAttr>,
     pub detail: Option<MemberDetailAttr>,
     pub slab_composite: Option<SlabCompositeConnection>,
+    /// 削除前の配列位置と付加線重量 [N/mm]。
+    pub extra_line_weight: Vec<(usize, f64)>,
+    /// 削除前の配列位置と仕上げ面重量 [N/mm²]。
+    pub finish_area_weight: Vec<(usize, f64)>,
+    /// 削除前の配列位置とダンパー総重量 [N]。
+    pub damper_weight: Vec<(usize, f64)>,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -283,7 +290,7 @@ impl Model {
     }
 
     /// 節点・要素・断面・材料・階・床/壁領域・床板/壁版の添字 ID と、
-    /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・節点荷重・生成記録の参照を検査する。
+    /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・荷重・部材別重量・生成記録の参照を検査する。
     /// 二次部材 ID は一意性だけを要求し、未割当 `None`・用途・幾何・入力完成度は検査しない。
     pub fn validate_reference_ids(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
@@ -344,6 +351,7 @@ impl Model {
             }
         }
         self.validate_steel_design_attr_refs()?;
+        self.validate_member_weight_refs()?;
 
         for sec in &self.sections {
             for (role, mid) in [
@@ -1551,7 +1559,7 @@ impl Model {
         }
     }
 
-    /// モデル内の全ての `ElemId` 参照（要素自身の ID・部材荷重・側テーブル属性・
+    /// モデル内の全ての `ElemId` 参照（要素自身の ID・部材荷重・部材別重量・側テーブル属性・
     /// 一本部材指定・二次部材の主架構アンカー）へ `f` を適用する（[`Model::visit_node_ids`] と同じ規約）。
     pub fn visit_elem_ids(&mut self, mut f: impl FnMut(&mut ElemId)) {
         for elem in &mut self.elements {
@@ -1607,7 +1615,7 @@ impl Model {
         Ok(())
     }
 
-    /// 条件に一致する部材属性や一本部材指定の参照先と入力種別を返す。
+    /// 条件に一致する部材属性・部材別重量・一本部材指定の参照先と入力種別を返す。
     pub fn find_elem_attr_ref(
         &self,
         mut matches: impl FnMut(ElemId) -> bool,
@@ -1623,6 +1631,11 @@ impl Model {
                     return Some((id, "一本部材の指定"));
                 }
             };
+            (load_cfg) => {
+                if let Some(reference) = self.load_cfg.as_ref().and_then(|cfg| cfg.find_member_weight_ref(&mut matches)) {
+                    return Some(reference);
+                }
+            };
             ($($collection:ident).+, $field:ident, $label:expr) => {
                 if let Some(entry) = self.$($collection).+.iter().find(|entry| matches(entry.$field)) {
                     return Some((entry.$field, $label));
@@ -1633,7 +1646,7 @@ impl Model {
         None
     }
 
-    /// 要素に紐づく全ての側テーブル属性と一本部材指定の参照に `f` を適用する。
+    /// 要素に紐づく全ての側テーブル属性・部材別重量・一本部材指定の参照に `f` を適用する。
     /// 要素の追加・削除に伴う ID 繰上げ／繰下げで、参照整合を保つために用いる
     /// （要素自身の ID・部材荷重も含めた全参照は [`Model::visit_elem_ids`]）。
     pub fn shift_elem_attr_refs(&mut self, mut f: impl FnMut(&mut ElemId)) {
@@ -1659,6 +1672,11 @@ impl Model {
                     f(id);
                 }
             };
+            (load_cfg) => {
+                if let Some(cfg) = &mut self.load_cfg {
+                    cfg.visit_member_weight_refs(&mut f);
+                }
+            };
             ($($collection:ident).+, $field:ident, $label:expr) => {
                 for entry in &mut self.$($collection).+ {
                     f(&mut entry.$field);
@@ -1676,24 +1694,53 @@ impl Model {
                 .position(|a| get(a) == elem)
                 .map(|pos| v.remove(pos))
         }
-        let mut steel_design = Vec::new();
-        let mut index = 0;
-        self.steel_design_attrs.retain(|attr| {
-            let keep = attr.elem != elem;
-            if !keep {
-                steel_design.push((index, attr.clone()));
-            }
-            index += 1;
-            keep
-        });
+        fn take_ordered<T, V>(
+            entries: &mut Vec<T>,
+            mut removed_value: impl FnMut(&T) -> Option<V>,
+        ) -> Vec<(usize, V)> {
+            let mut removed = Vec::new();
+            let mut index = 0;
+            entries.retain(|entry| {
+                let value = removed_value(entry);
+                let keep = value.is_none();
+                if let Some(value) = value {
+                    removed.push((index, value));
+                }
+                index += 1;
+                keep
+            });
+            removed
+        }
+        let (extra_line_weight, finish_area_weight, damper_weight) = self
+            .load_cfg
+            .as_mut()
+            .map(|cfg| {
+                (
+                    take_ordered(&mut cfg.extra_line_weight, |&(id, value)| {
+                        (id == elem).then_some(value)
+                    }),
+                    take_ordered(&mut cfg.finish_area_weight, |&(id, value)| {
+                        (id == elem).then_some(value)
+                    }),
+                    take_ordered(&mut cfg.dampers, |damper| {
+                        (damper.elem == elem).then_some(damper.total_weight)
+                    }),
+                )
+            })
+            .unwrap_or_default();
         ElemAttrs {
             wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
-            steel_design,
+            steel_design: take_ordered(&mut self.steel_design_attrs, |attr| {
+                (attr.elem == elem).then(|| attr.clone())
+            }),
             slab_composite: self.slab_composite_attrs.remove(&elem),
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
             hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
             damper: take_first(&mut self.damper_attrs, |a| a.elem, elem),
             detail: take_first(&mut self.member_detail_attrs, |a| a.elem, elem),
+            extra_line_weight,
+            finish_area_weight,
+            damper_weight,
         }
     }
 
@@ -1727,6 +1774,26 @@ impl Model {
         if let Some(mut a) = attrs.detail {
             a.elem = elem;
             self.member_detail_attrs.push(a);
+        }
+        if !attrs.extra_line_weight.is_empty()
+            || !attrs.finish_area_weight.is_empty()
+            || !attrs.damper_weight.is_empty()
+        {
+            let cfg = self.load_cfg.get_or_insert_with(LoadCfg::default);
+            for (index, value) in attrs.extra_line_weight {
+                cfg.extra_line_weight
+                    .insert(index.min(cfg.extra_line_weight.len()), (elem, value));
+            }
+            for (index, value) in attrs.finish_area_weight {
+                cfg.finish_area_weight
+                    .insert(index.min(cfg.finish_area_weight.len()), (elem, value));
+            }
+            for (index, total_weight) in attrs.damper_weight {
+                cfg.dampers.insert(
+                    index.min(cfg.dampers.len()),
+                    DamperSpec { elem, total_weight },
+                );
+            }
         }
     }
 
