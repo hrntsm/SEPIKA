@@ -1492,11 +1492,11 @@ mod tests {
         use super::rc_column_mechanism_input as input;
         use super::rc_column_mechanism_reference::{
             BOTH_COLUMN_ENDS_QD1_N, COLUMN_ALLOWABLE_SHEAR_N, CONTINUOUS_TWO_GIRDER_QD1_N,
-            TWO_GIRDER_QD1_N,
+            ONE_GIRDER_QD1_N, TWO_GIRDER_QD1_N,
         };
         use crate::app::rc_column_boundary_tests::input as column;
         use sepika_core::ids::NodeId;
-        use sepika_core::model::ElementKind;
+        use sepika_core::model::{ElementKind, EndCondition};
         use sepika_design_jp::QdMethod;
         use sepika_element::frame::beam::{apply_auto_rigid_zones, RigidZoneRule};
 
@@ -1510,8 +1510,25 @@ mod tests {
         let mut incomplete = model.clone();
         input::remove_opposite_girder_yield_strength(&mut incomplete);
 
+        let mut far_pin = model.clone();
+        far_pin.elements[input::GIRDER.index()].end_cond[1] = EndCondition::Pinned;
+        let mut head_pin = model.clone();
+        head_pin.elements[input::GIRDER.index()].end_cond[0] = EndCondition::Pinned;
+        head_pin.stress_cfg.consider_rigid_zones = false;
+        let mut head_pin_with_rigid_zone = head_pin.clone();
+        head_pin_with_rigid_zone.stress_cfg.consider_rigid_zones = true;
+        head_pin_with_rigid_zone.elements[input::GIRDER.index()]
+            .rigid_zone
+            .length_i = 100.0;
+        head_pin_with_rigid_zone.elements[input::GIRDER.index()]
+            .rigid_zone
+            .source_i = sepika_core::model::ZoneSource::Manual;
+
         for (mut model, qd1_n, status) in [
             (model, TWO_GIRDER_QD1_N, "NG"),
+            (far_pin, TWO_GIRDER_QD1_N, "NG"),
+            (head_pin, ONE_GIRDER_QD1_N, "OK"),
+            (head_pin_with_rigid_zone, BOTH_COLUMN_ENDS_QD1_N, "NG"),
             (continuous, CONTINUOUS_TWO_GIRDER_QD1_N, "OK"),
             (incomplete, BOTH_COLUMN_ENDS_QD1_N, "NG"),
         ] {

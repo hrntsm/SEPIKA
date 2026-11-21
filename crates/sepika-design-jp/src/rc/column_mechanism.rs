@@ -2,11 +2,15 @@
 
 use std::collections::HashSet;
 
+use num_rational::BigRational;
+use num_traits::Zero;
 use sepika_core::adjacency::NodeAdjacency;
+use sepika_core::geom::vec3::{norm, sub};
 use sepika_core::ids::NodeId;
-use sepika_core::model::{ElementData, ElementKind, Material, Model};
+use sepika_core::model::{ElementData, ElementKind, EndCondition, Material, Model};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
+use sepika_element::frame::rigid_arm::resolve_lengths;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::common::constraint::Reducer;
 
@@ -182,6 +186,34 @@ fn column_my_at_n(model: &Model, elem: &ElementData, n_axial: f64, strong: bool)
     Some(rc_column_mu_simple(&inp, as_total, n_axial))
 }
 
+fn rigid_arm_is_parallel(
+    [i, j]: [[f64; 3]; 2],
+    [offset_i, offset_j]: [[f64; 3]; 2],
+    [axis_x, axis_y]: [f64; 2],
+) -> bool {
+    // 外積だけを厳密に求めても、座標の差や偏心の加算を丸めると斜交を見落とす。
+    let exact = |value| BigRational::from_float(value).expect("有限な座標・偏心・方向成分");
+    let exact_delta =
+        |d: usize| exact(j[d]) + exact(offset_j[d]) - exact(i[d]) - exact(offset_i[d]);
+    let delta_is_zero = |d: usize| {
+        if offset_i[d] == offset_j[d] {
+            i[d] == j[d]
+        } else {
+            exact_delta(d).is_zero()
+        }
+    };
+    if !delta_is_zero(2) {
+        return false;
+    }
+    if axis_x == 0.0 {
+        return delta_is_zero(0);
+    }
+    if axis_y == 0.0 {
+        return delta_is_zero(1);
+    }
+    exact_delta(0) * exact(axis_y) == exact_delta(1) * exact(axis_x)
+}
+
 fn sum_beam_my_at_node(
     model: &Model,
     adjacency: &NodeAdjacency,
@@ -189,6 +221,7 @@ fn sum_beam_my_at_node(
     load_h: [f64; 2],
     peer_h: [f64; 2],
     prefer_on_tie: bool,
+    column_bending_axis: Option<[f64; 2]>,
 ) -> Result<Option<f64>, String> {
     let mut sum = Some(0.0);
     for other in adjacency.elements_at(model, node) {
@@ -198,21 +231,57 @@ fn sum_beam_my_at_node(
         ) else {
             continue;
         };
-        let axis = [
-            n1.coord[0] - n0.coord[0],
-            n1.coord[1] - n0.coord[1],
-            n1.coord[2] - n0.coord[2],
-        ];
-        let Some(axis_h) = horizontal_unit(axis) else {
-            continue;
+        let axis = sub(n1.coord, n0.coord);
+        let aligns = |axis| {
+            horizontal_unit(axis)
+                .is_some_and(|axis_h| aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie))
         };
-        if !aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie) {
-            continue;
-        }
         match MemberKind::try_of_element(other, model) {
             Ok(MemberKind::Girder) => {}
-            Ok(_) => continue,
-            Err(_) => {
+            Err(_) if aligns(axis) => {
+                sum = None;
+                continue;
+            }
+            _ => continue,
+        }
+        let end = usize::from(other.nodes[1] == node);
+        if other.end_offsets_mm[end] != [0.0; 3] {
+            sum = None;
+            continue;
+        }
+        let has_far_offset = other.end_offsets_mm[1 - end] != [0.0; 3];
+        let actual_axis = if has_far_offset {
+            model
+                .primary_frame_axis_end_positions(other)
+                .ok()
+                .flatten()
+                .map_or(axis, |[i, j]| sub(j, i))
+        } else {
+            axis
+        };
+        let end_condition = other.end_cond[end];
+        // 材軸方向の腕が柱の曲げ軸と平行な場合だけ、その軸まわりの付加曲げは生じない。
+        if end_condition != EndCondition::Fixed {
+            let rigid = model.analysis_rigid_zone(other);
+            let (i, j) = resolve_lengths(
+                rigid.rigid_length_i(),
+                rigid.rigid_length_j(),
+                norm(actual_axis),
+            );
+            if [i, j][end] > 0.0
+                && !column_bending_axis.is_some_and(|axis| {
+                    rigid_arm_is_parallel([n0.coord, n1.coord], other.end_offsets_mm, axis)
+                })
+            {
+                sum = None;
+                continue;
+            }
+        }
+        match end_condition {
+            EndCondition::Pinned | EndCondition::SemiRigid { k_theta: 0.0 } => continue,
+            _ if !aligns(axis) && !aligns(actual_axis) => continue,
+            EndCondition::Fixed if !has_far_offset => {}
+            _ => {
                 sum = None;
                 continue;
             }
@@ -389,6 +458,21 @@ fn column_mechanism_sum_my(
     let load_strong = horizontal_unit(ey)?;
     let load_weak = horizontal_unit(ez)?;
 
+    let [ref_x, ref_y, _] = column.local_axis.ref_vector;
+    let reference_h = [ref_x, ref_y, 0.0];
+    let reference_length = norm(reference_h);
+    // 単位化済みの柱軸だけでは、入力の幾何が平行であることを確認できない。
+    let bending_y = if p_i[..2] != p_j[..2] {
+        None
+    } else if reference_h == [0.0; 3] && ey == [1.0, 0.0, 0.0] {
+        Some([1.0, 0.0])
+    } else if reference_length > 0.0 && ey == reference_h.map(|value| value / reference_length) {
+        Some([ref_x, ref_y])
+    } else {
+        None
+    };
+    let bending_z = bending_y.map(|[x, y]| [-y, x]);
+
     let i_is_bottom = p_i[2] <= p_j[2];
     let design_n = design_axial(i_is_bottom);
     let (head, head_z_mm) = if i_is_bottom {
@@ -398,9 +482,21 @@ fn column_mechanism_sum_my(
     };
     let head_beam_factor = topology.head_beam_factor(model, head, head_z_mm);
 
-    let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2]| {
-        let beam_sum =
-            |node| sum_beam_my_at_node(model, &topology.frame, node, load_h, peer_h, strong);
+    let sum_for = |strong: bool,
+                   load_h: [f64; 2],
+                   peer_h: [f64; 2],
+                   bending_axis: Option<[f64; 2]>| {
+        let beam_sum = |node| {
+            sum_beam_my_at_node(
+                model,
+                &topology.frame,
+                node,
+                load_h,
+                peer_h,
+                strong,
+                bending_axis,
+            )
+        };
         let beam_ends = beam_sum(ni).and_then(|bi| beam_sum(nj).map(|bj| (bi, bj)));
         let (n, beams) = match (&design_n, beam_ends) {
             (Ok(n), Ok(beams)) => (*n, beams),
@@ -422,7 +518,7 @@ fn column_mechanism_sum_my(
             return Ok(None);
         };
         match beams {
-            (Some(bi), Some(bj)) => {
+            (Some(bi), Some(bj)) if column.end_offsets_mm == [[0.0; 3]; 2] => {
                 let hi = resolve_column_end_hinge(col_i, bi, false);
                 let hj = resolve_column_end_hinge(col_j, bj, false);
                 Ok(Some(sum_my_from_end_hinges(
@@ -441,8 +537,8 @@ fn column_mechanism_sum_my(
     };
 
     Some(ColumnMechanism {
-        qy: sum_for(true, load_strong, load_weak),
-        qz: sum_for(false, load_weak, load_strong),
+        qy: sum_for(true, load_strong, load_weak, bending_z),
+        qz: sum_for(false, load_weak, load_strong, bending_y),
         missing_gravity_axial,
     })
 }
