@@ -1,6 +1,6 @@
 # AI依頼を未開始から保存し、確認元入力を編集対象と分離する
 
-Status: accepted
+Status: superseded by ADR-0140
 
 ## 判断
 

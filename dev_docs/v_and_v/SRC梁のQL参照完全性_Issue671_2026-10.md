@@ -3,7 +3,7 @@
 ## 対象と記録時点
 
 対象は SRC 梁の地震時短期せん断で消費する QL、分担、評価位置、QD 選択と不足ゲートの Verification。
-現在仕様の正本は[SRC/CFT断面検定](../../docs/calc_basis/06_一次設計/04_SRC_CFT_断面検定.md#src-梁の地震時設計用せん断と重力参照)、保存資格は[OVIKA](../../docs/model_io/01_プロジェクト形式_ovika.md#保存結果の計算契約と再実行)と[MCP](../../docs/mcp_server/04_解析ジョブと結果取得.md#保存成果の生成元と利用可否)に置く。
+現在仕様の正本は[SRC/CFT断面検定](../../docs/calc_basis/06_一次設計/04_SRC_CFT_断面検定.md#src-梁の地震時設計用せん断と重力参照)、保存資格は[OVIKA](../../docs/model_io/01_プロジェクト形式_ovika.md#保存結果の計算契約と再実行)と[MCP](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/06_通信仕様と独立サーバ.md#保存成果の生成元と利用可否)に置く。
 
 2026-10-16 の変更前 Source 観測は `e91060d208adaf7ac4c7c0c6abc06f397a3c769d` に対するもの。
 恒久修正は #687/PR #688 後の `a1098c55f9ec82e9bed4cee8ab0c4f6bab4984c7` を基点とする。

@@ -1,6 +1,6 @@
 # GUIの検討操作を限定DACLのパイプと保存受理台帳で中継する
 
-Status: accepted
+Status: superseded by ADR-0140
 
 ## 判断
 
