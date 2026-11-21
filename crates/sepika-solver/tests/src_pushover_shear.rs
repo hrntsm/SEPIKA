@@ -233,8 +233,7 @@ fn run(
     )
 }
 
-#[test]
-fn pushover_requires_rebar_material_category_for_rc_and_src_shear_reinforcement() {
+fn shear_reinforced_members() -> [(&'static str, Model, SeismicDir); 5] {
     let src_beam = restrained_member(FrameSectionUse::Girder, 10.0, 13.0);
     let src_column = restrained_member(FrameSectionUse::Column, 10.0, 13.0);
     let rc_beam = SectionShape::RcBeamRect {
@@ -269,7 +268,7 @@ fn pushover_requires_rebar_material_category_for_rc_and_src_shear_reinforcement(
             },
         },
     };
-    for (name, mut model, direction) in [
+    [
         (
             "RC矩形梁",
             restrained_member_with_shape(FrameSectionUse::Girder, rc_beam, None),
@@ -287,7 +286,12 @@ fn pushover_requires_rebar_material_category_for_rc_and_src_shear_reinforcement(
         ),
         ("SRC矩形梁", src_beam, SeismicDir::Y),
         ("SRC矩形柱", src_column, SeismicDir::X),
-    ] {
+    ]
+}
+
+#[test]
+fn pushover_requires_rebar_material_category_for_rc_and_src_shear_reinforcement() {
+    for (name, mut model, direction) in shear_reinforced_members() {
         model.materials[2].name = "SD345".into();
         model.materials[2].fy = Some(345.0);
         for (category, label) in [
@@ -310,6 +314,53 @@ fn pushover_requires_rebar_material_category_for_rc_and_src_shear_reinforcement(
             }
         }
         model.materials[2].category = MaterialCategory::Rebar;
+        let result =
+            run(&mut model, direction, 1_000.0).unwrap_or_else(|error| panic!("{name}: {error}"));
+        let shear_n = result.member_response[0].shear_strong;
+        assert!((shear_n - 1_000.0).abs() < 1.0, "{name}: {shear_n}");
+    }
+}
+
+#[test]
+fn pushover_requires_finite_positive_shear_rebar_fy() {
+    for (name, mut model, direction) in shear_reinforced_members() {
+        let material = model.sections[0].shear_rebar_material.unwrap().index();
+        for fy in [
+            Some(f64::INFINITY),
+            Some(f64::NAN),
+            Some(f64::NEG_INFINITY),
+            Some(0.0),
+            Some(-1.0),
+        ] {
+            model.materials[material].fy = fy;
+            let Err(error) = run(&mut model, direction, 1_000.0) else {
+                panic!("{name} {fy:?}: 解析を停止する必要があります");
+            };
+            for expected in [
+                "部材 ID 0",
+                "せん断補強筋材料「SD295A」",
+                "降伏強度 Fy",
+                "材料タブ",
+                "正の有限値",
+            ] {
+                assert!(
+                    error.contains(expected),
+                    "{name} {fy:?} {expected}: {error}"
+                );
+            }
+        }
+
+        model.materials[material].fy = None;
+        let Err(error) = run(&mut model, direction, 1_000.0) else {
+            panic!("{name}: 降伏強度が未入力のときも解析を停止する必要があります");
+        };
+        assert!(
+            error.contains("部材 ID 0")
+                && error.contains("せん断補強筋材料「SD295A」に降伏強度 fy が設定されていません")
+                && error.contains("材料タブで fy を設定"),
+            "{name}: {error}"
+        );
+        model.materials[material].fy = Some(295.0);
         let result =
             run(&mut model, direction, 1_000.0).unwrap_or_else(|error| panic!("{name}: {error}"));
         let shear_n = result.member_response[0].shear_strong;
@@ -548,6 +599,9 @@ fn time_history_accepts_src_member_without_using_shear_reinforcement_strength() 
         model.materials[2].name = "SD345".into();
         model.materials[2].fy = Some(345.0);
         model.materials[2].category = MaterialCategory::Steel;
+        run_time_history(&mut model).unwrap_or_else(|error| panic!("{frame_use:?}: {error}"));
+        model.materials[2].category = MaterialCategory::Rebar;
+        model.materials[2].fy = Some(f64::INFINITY);
         run_time_history(&mut model).unwrap_or_else(|error| panic!("{frame_use:?}: {error}"));
     }
 }

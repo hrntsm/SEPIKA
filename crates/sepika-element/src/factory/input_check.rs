@@ -316,7 +316,7 @@ fn nonlinear_input_issues_with_basis(
                 member_rebar_material_strength_issue(elem, model, basis)
                     .or_else(|| {
                         if kind == sepika_core::model::AnalysisKind::Incremental {
-                            shear_yield_rebar_category_issue(elem, model)
+                            shear_yield_rebar_issue(elem, model)
                         } else {
                             None
                         }
@@ -363,7 +363,7 @@ fn nonlinear_input_issues_with_basis(
     issues
 }
 
-fn shear_yield_rebar_category_issue(data: &ElementData, model: &Model) -> Option<String> {
+fn shear_yield_rebar_issue(data: &ElementData, model: &Model) -> Option<String> {
     let shape = model.element_section(data)?.shape.as_ref()?;
     if !matches!(
         shape,
@@ -376,14 +376,20 @@ fn shear_yield_rebar_category_issue(data: &ElementData, model: &Model) -> Option
         return None;
     }
     let material = model.element_shear_rebar_material(data)?;
-    (material.category != MaterialCategory::Rebar).then(|| {
-        format!(
+    if material.category != MaterialCategory::Rebar {
+        return Some(format!(
             "部材 ID {} のせん断補強筋に割り当てた材料「{}」は区分が「{}」のため、\
              せん断降伏耐力を算定できません。断面タブでせん断補強筋に区分「鉄筋」の材料を\
              割り当てて、再解析してください。",
             data.id.0,
             material.name,
             material.category.label()
+        ));
+    }
+    sepika_core::material_grade::shear_rebar_fy_issue(material).map(|reason| {
+        format!(
+            "部材 ID {} の{reason} せん断降伏耐力を算定できません。",
+            data.id.0
         )
     })
 }
