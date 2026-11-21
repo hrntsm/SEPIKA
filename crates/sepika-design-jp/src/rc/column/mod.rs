@@ -13,6 +13,7 @@ use crate::{
 };
 use sepika_core::model::Material;
 use sepika_core::section_shape::SectionShape;
+use sepika_element::frame::member_load::{FrameShearPeak, SectionSide};
 
 mod nm_interaction;
 
@@ -132,6 +133,25 @@ fn shear_input_issue(q_index: usize) -> &'static str {
     }
 }
 
+fn long_shear_detail(axis: usize, peak: &FrameShearPeak, capacity: Option<f64>) -> String {
+    let direction = ["Qy", "Qz"][axis];
+    let side = match peak.side {
+        SectionSide::Left => "（i端側）",
+        SectionSide::Right => "（j端側）",
+        SectionSide::Continuous => "",
+    };
+    let q = peak.q_n.abs();
+    let ratio = capacity
+        .filter(|qa| qa.is_finite() && *qa > 0.0)
+        .map(|qa| q / qa)
+        .filter(|ratio| ratio.is_finite())
+        .map_or_else(|| "未算定".into(), |ratio| format!("{ratio:.6}"));
+    format!(
+        "、局所{direction}最大 |{direction}|={q:.3} N（i端から x={:.6} mm{side}、検定比 {ratio}）",
+        peak.x_mm
+    )
+}
+
 fn column_allowable_moment(curve: &[(f64, f64)], n_design: f64) -> f64 {
     if n_design < 0.0 && curve.first().is_some_and(|point| n_design < point.0) {
         // 引張側の算定範囲外では、端点の曲げ耐力を外挿できない。
@@ -202,7 +222,7 @@ pub(super) fn column_check(
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
     shear_reference_valid: bool,
-    column_gravity: ColumnGravityMode,
+    column_gravity: ColumnGravityMode<'_>,
     incomplete: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
@@ -213,6 +233,42 @@ pub(super) fn column_check(
         }
     );
     let ordinary = matches!(column_gravity, ColumnGravityMode::Ordinary { .. });
+    let long_term_shear = match column_gravity {
+        ColumnGravityMode::Ordinary {
+            long_term_shear, ..
+        } => long_term_shear,
+        _ => None,
+    };
+    let long_term_demand = long_term_shear.map(|shear| match shear {
+        Ok(peaks) => std::array::from_fn(|axis| match &peaks[axis] {
+            Ok(peak) => Some(peak.q_n.abs()),
+            Err(reason) => {
+                let axis = ["Qy", "Qz"][axis];
+                let reason = format!("RC柱の長期せん断（局所{axis}）は未算定です（{reason}）");
+                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
+                None
+            }
+        }),
+        Err(reason) => {
+            let reason = format!("RC柱の長期せん断は未算定です（{reason}）");
+            *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
+            [None, None]
+        }
+    });
+    let demand_detail = |capacities: [Option<f64>; 2]| {
+        let Some(Ok(peaks)) = long_term_shear else {
+            return String::new();
+        };
+        peaks.iter().zip(capacities).enumerate().fold(
+            String::new(),
+            |mut text, (axis, (peak, capacity))| {
+                if let Ok(peak) = peak {
+                    text.push_str(&long_shear_detail(axis, peak, capacity));
+                }
+                text
+            },
+        )
+    };
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
@@ -250,6 +306,7 @@ pub(super) fn column_check(
         if boundary_shear_only {
             if let ColumnGravityMode::Ordinary {
                 boundary_shear_issue: Some(reason),
+                ..
             } = column_gravity
             {
                 *incomplete = combine_incomplete_reasons(incomplete.take(), Some(reason));
@@ -281,9 +338,16 @@ pub(super) fn column_check(
             .zip(spans)
             .enumerate()
             .filter_map(|(axis, ((demand, capacity), (m, span_q)))| {
-                let (q, qa) = demand.zip(capacity)?;
+                let q = demand?;
+                if long_term_shear.is_some() && capacity.is_none() {
+                    *incomplete = combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some(shear_input_issue(axis + 1)),
+                    );
+                }
+                let qa = capacity?;
                 let ratio = if qa > 0.0 { q / qa } else { 0.0 };
-                if boundary_shear_only
+                if (boundary_shear_only || long_term_shear.is_some())
                     && (!q.is_finite()
                         || !qa.is_finite()
                         || qa <= 0.0
@@ -362,6 +426,8 @@ pub(super) fn column_check(
         let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
             (None, None)
+        } else if let Some([qy, qz]) = long_term_demand {
+            (qy, qz)
         } else if !main_rebar_valid {
             (
                 demand_without_main_rebar(forces.qy, 1),
@@ -422,10 +488,11 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw={:.5}",
+                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw={:.5}{}",
                     capacity(qay),
                     capacity(qaz),
                     props.pw,
+                    demand_detail([qay, qaz]),
                 ),
             });
         }
@@ -529,6 +596,8 @@ pub(super) fn column_check(
         let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
             (None, None)
+        } else if let Some([qy, qz]) = long_term_demand {
+            (qy, qz)
         } else if !main_rebar_valid {
             (
                 demand_without_main_rebar(forces.qy, 1),
@@ -593,11 +662,12 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw_z={:.5}, pw_y={:.5}",
+                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw_z={:.5}, pw_y={:.5}{}",
                     capacity(qay),
                     capacity(qaz),
                     props_z.pw,
                     props_y.pw,
+                    demand_detail([qay, qaz]),
                 ),
             });
         }

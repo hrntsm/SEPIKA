@@ -1,6 +1,7 @@
 //! RC 造の許容応力度と断面検定（RC 規準13〜18条・令82条による許容応力度計算）。
 
 use crate::member_design_check::combine_incomplete_reasons;
+use crate::member_design_check::rc_column_long_term_shear::LongTermColumnShear;
 use crate::{CheckOutcome, DesignCheck, DesignCtx, MemberForcesAt, MemberKind};
 use sepika_core::model::{Material, Section};
 use sepika_core::section_shape::SectionShape;
@@ -52,10 +53,11 @@ pub(crate) use shear_capacity::*;
 pub struct RcDesign;
 
 #[derive(Clone, Copy)]
-enum ColumnGravityMode {
+pub(crate) enum ColumnGravityMode<'a> {
     SingleOutcome,
     Ordinary {
         boundary_shear_issue: Option<&'static str>,
+        long_term_shear: Option<&'a LongTermColumnShear>,
     },
     TimeHistory {
         strict_gravity: bool,
@@ -131,7 +133,7 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         missing_shear_reference: Option<&str>,
-        boundary_shear_issue: Option<&'static str>,
+        column_gravity: ColumnGravityMode<'_>,
     ) -> (CheckOutcome, Option<String>) {
         self.check_with_gravity_mode(
             forces,
@@ -139,9 +141,7 @@ impl RcDesign {
             mat,
             ctx,
             missing_shear_reference,
-            ColumnGravityMode::Ordinary {
-                boundary_shear_issue,
-            },
+            column_gravity,
         )
     }
 
@@ -152,7 +152,7 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         missing_shear_reference: Option<&str>,
-        column_gravity: ColumnGravityMode,
+        column_gravity: ColumnGravityMode<'_>,
     ) -> (CheckOutcome, Option<String>) {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
@@ -237,7 +237,7 @@ impl RcDesign {
         main_rebar_valid: bool,
         shear_rebar_valid: bool,
         shear_issue: Option<&str>,
-        column_gravity: ColumnGravityMode,
+        column_gravity: ColumnGravityMode<'_>,
         column_issue: &mut Option<String>,
     ) -> CheckOutcome {
         let fc_raw = mat.fc.unwrap_or(0.0);

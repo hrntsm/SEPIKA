@@ -5,6 +5,82 @@ pub(crate) mod input;
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_reference.rs"]
 pub(crate) mod reference;
 
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_column_long_term_shear_model.rs"]
+mod long_term_shear_input;
+
+#[test]
+fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+
+    for circle in [false, true] {
+        let mut app = App::default();
+        assert!(app.load_model(long_term_shear_input::model(
+            input::column_model(circle, 0.0),
+            super::rc_beam_asymmetric_tests::input::section(300.0, 600.0, 19.0, &[3], &[3]),
+            true,
+        )));
+        app.run_combination(0);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let result = app.current_design_results().unwrap();
+        let column = result
+            .member_checks
+            .iter()
+            .find(|record| record.elem == long_term_shear_input::COLUMN)
+            .unwrap();
+        assert_eq!(column.positions.len(), 3);
+        for position in &column.positions {
+            assert!(
+                matches!(&position.outcome, CheckOutcome::Checked(result) if !result.ok()
+                && result.components.iter().any(|component| component.kind == CheckKind::Shear
+                    && component.ratio > 1.0
+                    && component.detail.contains("局所Qy最大 |Qy|=313900.000 N（i端から x=1100.000000 mm")))
+            );
+        }
+        let expected = serde_json::to_value(&result.member_checks).unwrap();
+        let expected_forces = result.member_forces.clone();
+        for version in [102, 103, DESIGN_CONTRACT_VERSION] {
+            let (mut reopened, path) = super::result_contract_tests::restore(
+                &app,
+                Some(ANALYSIS_CONTRACT_VERSION),
+                Some(version),
+                &format!("rc-column1843-{circle}-{version}"),
+            );
+            std::fs::remove_file(path).unwrap();
+            assert!(reopened.require_selected_static_input().is_ok());
+            let bundle = reopened.core.scoped.results.as_ref().unwrap();
+            assert_eq!(bundle.member_forces, expected_forces);
+            assert_eq!(
+                reopened.current_design_results().is_some(),
+                version == DESIGN_CONTRACT_VERSION
+            );
+            if version != DESIGN_CONTRACT_VERSION {
+                assert!(bundle.member_checks.is_empty());
+            }
+            reopened.run_design_check();
+            assert!(
+                reopened.core.scoped.last_error.is_none(),
+                "{:?}",
+                reopened.core.scoped.last_error
+            );
+            let rechecked = reopened.current_design_results().unwrap();
+            assert_eq!(
+                rechecked.design_contract_version,
+                Some(DESIGN_CONTRACT_VERSION)
+            );
+            assert_eq!(rechecked.member_forces, expected_forces);
+            assert_eq!(
+                serde_json::to_value(&rechecked.member_checks).unwrap(),
+                expected
+            );
+            println!("円形={circle} 解析版={ANALYSIS_CONTRACT_VERSION} 保存検定版={version} 再検定版={DESIGN_CONTRACT_VERSION}");
+        }
+    }
+}
+
 #[test]
 fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_state() {
     for circle in [false, true] {

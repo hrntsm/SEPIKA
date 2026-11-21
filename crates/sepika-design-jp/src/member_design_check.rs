@@ -22,6 +22,9 @@ use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
 use sepika_solver::statics::linear::GirderColumnFaceEnds;
 
+pub(crate) mod rc_column_long_term_shear;
+use rc_column_long_term_shear::ColumnShearLoads;
+
 use crate::design_position::{design_positions, is_near_design_position};
 use crate::{
     beam_has_attached_slab, checker_for, girder_deflection, BondMethod, CheckOutcome, CheckResult,
@@ -61,6 +64,8 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
     /// None では大梁の長期たわみは未算定とし、壁は全荷重ケースの未対応部材荷重を検査する。
     pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    /// 通常の長期RC柱検定に渡す線形静的解析結果の由来。
+    pub rc_column_long_term_shear: RcColumnLongTermShearInput<'a>,
     /// RC 短期許容せん断力で損傷制御式（2/3·α）を使うか。
     pub rc_damage_control: bool,
     /// RC 梁付着検定の方式（既定は 1999）。
@@ -75,6 +80,18 @@ pub struct MemberDesignCheckOptions<'a> {
     pub girder_group_overrides: Option<&'a HashMap<ElemId, GirderGroupContextOverride>>,
     /// 鋼材の許容曲げ応力度 fb の算定基準（既定は Asd2019）。
     pub steel_fb_basis: SteelFbBasis,
+}
+
+/// 通常の長期RC柱検定に用いる部材内力の由来。
+#[derive(Clone, Copy, Debug, Default)]
+pub enum RcColumnLongTermShearInput<'a> {
+    /// 由来が未確認のため長期せん断を未算定とする。
+    #[default]
+    Unverified,
+    /// 単独長期ケースの断面位置での検定。
+    SingleCase,
+    /// 保存組合せ名。同じ組合せの線形静的解析結果と生成・展開済み解析モデルを渡す。
+    SavedCombination(&'a str),
 }
 
 /// 部材断面検定オーケストレーションの結果。
@@ -290,6 +307,13 @@ pub fn run_member_design_checks(
     let mut steel_deflection_references = Vec::new();
     let mut standalone_deflection_checks = Vec::new();
     let grouped_girders: HashSet<_> = model.girder_groups.iter().flatten().copied().collect();
+    let column_shear_loads = (options.term == LoadTerm::Long
+        && model
+            .elements
+            .iter()
+            .any(|elem| rc_column_long_term_shear::is_target(model, elem)))
+    .then(|| ColumnShearLoads::from_input(model, options.rc_column_long_term_shear));
+    let mut checked_column_ids = HashSet::new();
 
     for (elem_id, mf) in member_forces {
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
@@ -307,6 +331,13 @@ pub fn run_member_design_checks(
             continue;
         };
         let structure = structure_kind_of(Some(sec), Some(mat.category));
+        let long_term_shear = column_shear_loads
+            .as_ref()
+            .filter(|_| rc_column_long_term_shear::is_target(model, elem))
+            .and_then(|loads| {
+                checked_column_ids.insert(*elem_id);
+                loads.envelope(model, elem, mf)
+            });
         let torsion_reason =
             |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
         if let Err(reason) = sec.ensure_properties_resolved() {
@@ -666,7 +697,10 @@ pub fn run_member_design_checks(
                     mat,
                     &ctx,
                     missing_shear_reference,
-                    boundary_shear_issue,
+                    crate::rc::ColumnGravityMode::Ordinary {
+                        boundary_shear_issue,
+                        long_term_shear: long_term_shear.as_ref(),
+                    },
                 );
                 check_incomplete = incomplete;
                 outcome
@@ -712,6 +746,16 @@ pub fn run_member_design_checks(
                 outcome,
                 incomplete.as_deref(),
             );
+        }
+
+        if let Some(shear) = &long_term_shear {
+            if first_row == member_checks.len() {
+                let reason = shear.as_ref().err().map_or_else(
+                    || "RC柱の長期せん断検定の断面位置に解析内力がありません".into(),
+                    |reason| format!("RC柱の長期せん断は未算定です（{reason}）"),
+                );
+                member_checks.push((*elem_id, 0.5, CheckOutcome::Skipped { reason }));
+            }
         }
 
         let rc_girder = structure == StructureKind::Rc
@@ -783,6 +827,26 @@ pub fn run_member_design_checks(
                         reason: format!("長期たわみ未算定（{reason}）"),
                     },
                 )),
+            }
+        }
+    }
+
+    if column_shear_loads
+        .as_ref()
+        .is_some_and(ColumnShearLoads::requires_envelope)
+    {
+        for elem in &model.elements {
+            if !checked_column_ids.contains(&elem.id)
+                && rc_column_long_term_shear::is_target(model, elem)
+            {
+                member_checks.push((
+                    elem.id,
+                    0.5,
+                    CheckOutcome::Skipped {
+                        reason: "RC柱の長期せん断は未算定です（対象部材の解析内力がありません）"
+                            .into(),
+                    },
+                ));
             }
         }
     }

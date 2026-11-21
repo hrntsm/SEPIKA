@@ -862,19 +862,39 @@ impl BeamPlacement {
         origin: [f64; 3],
         direction: [f64; 3],
     ) -> Result<f64, String> {
+        self.connection_face_mm(origin, direction, 1e-6)
+            .map(|distance| distance.unwrap_or(0.0))
+    }
+
+    /// 原点に実部材端の座標 `[mm]`、方向に単位ベクトルを渡し、接触する支持実外形の出口距離 `[mm]` を返す。
+    /// 端点だけの接触は距離0、非交差はNone、正方向の途中だけで交わる場合はエラー。
+    pub fn connection_face_at_contact_mm(
+        &self,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Option<f64>, String> {
+        self.connection_face_mm(origin, direction, 0.0)
+    }
+
+    fn connection_face_mm(
+        &self,
+        origin: [f64; 3],
+        direction: [f64; 3],
+        entry_tolerance_mm: f64,
+    ) -> Result<Option<f64>, String> {
         let Some([entry, exit]) = self.line_range(origin, direction)? else {
-            return Ok(0.0);
+            return Ok(None);
         };
         if exit < 0.0 {
-            return Ok(0.0);
+            return Ok(None);
         }
-        if entry > 1e-6 {
+        if entry > entry_tolerance_mm {
             return Err(format!(
                 "{}: 実材端と離れた位置で支持実形状と交差する接合は未対応です",
                 beam_label(self.member)
             ));
         }
-        Ok(exit.max(0.0))
+        Ok(Some(exit.max(0.0)))
     }
 
     fn line_range(

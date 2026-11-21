@@ -1,5 +1,7 @@
 use sepika_core::ids::LoadCaseId;
-use sepika_design_jp::{run_member_design_checks, CheckOutcome, MemberDesignCheckOptions};
+use sepika_design_jp::{
+    run_member_design_checks, CheckOutcome, MemberDesignCheckOptions, RcColumnLongTermShearInput,
+};
 
 #[path = "../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"]
 mod input;
@@ -36,7 +38,10 @@ fn prepared_column_with_self_weight_reaches_axial_limit_at_loaded_end() {
             &model,
             &solved.member_forces,
             &solved.panel_moments,
-            &MemberDesignCheckOptions::default(),
+            &MemberDesignCheckOptions {
+                rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(report.member_checks.len(), 3);
