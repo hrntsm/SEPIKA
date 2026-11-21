@@ -228,6 +228,56 @@ fn qd1_head_with_unconfirmed_column_connection_uses_column_moment() {
 }
 
 #[test]
+fn qd1_uses_the_explicit_constraint_that_survives_reduction() {
+    let mut model = yielding_head_model();
+    let head = NodeId(1);
+    let girder_end = NodeId(2);
+    let upper_base = NodeId(4);
+    let mut offset_base = model.nodes[head.index()].clone();
+    offset_base.id = upper_base;
+    offset_base.coord[0] += 100.0;
+    model.nodes.push(offset_base);
+    fixture::add_column_above(&mut model, upper_base, ElementKind::Beam);
+
+    let mut dofs = Dof6Mask::FREE;
+    dofs.set_fixed(Dof::Ux);
+    let link_to_upper_base = |master| Constraint::RigidLink {
+        master,
+        slaves: vec![upper_base],
+        dofs,
+    };
+    let head_link = link_to_upper_base(head);
+    let far_link = link_to_upper_base(girder_end);
+    let head_mpc = Constraint::Mpc {
+        master: upper_base,
+        terms: vec![(head, Dof::Ux, 1.0)],
+    };
+    for constraints in [
+        vec![far_link.clone()],
+        vec![head_link.clone(), far_link.clone()],
+        vec![far_link.clone(), head_mpc],
+        vec![
+            Constraint::rigid_diaphragm(StoryId(1), girder_end, vec![upper_base]),
+            head_link.clone(),
+        ],
+    ] {
+        model.constraints = constraints;
+        assert_qd1_shear_ratio(&model, TERMINAL_SHEAR_RATIO);
+    }
+
+    for constraints in [
+        vec![far_link, head_link.clone()],
+        vec![
+            Constraint::rigid_diaphragm(StoryId(1), girder_end, vec![head]),
+            head_link,
+        ],
+    ] {
+        model.constraints = constraints;
+        assert_qd1_shear_ratio(&model, 0.8410746938296013);
+    }
+}
+
+#[test]
 fn invalid_girder_rebar_category_blocks_only_its_assigned_column_shear_direction() {
     for (girder_xy, axis) in [
         ([4000.0, 0.0], "Qy"),

@@ -1,6 +1,9 @@
+use std::collections::{HashMap, HashSet};
+
 use crate::common::csc_cache::CscCache;
 use faer::sparse::SparseColMat;
 use sepika_core::dof::{Dof, DofMap, DOF_PER_NODE};
+use sepika_core::ids::NodeId;
 use sepika_core::model::{Constraint, Model};
 use sepika_math::sparse::{assemble_csc, Triplet};
 
@@ -24,6 +27,85 @@ impl Reducer {
     }
 
     pub fn build(model: &Model, dofmap: &DofMap) -> Self {
+        Self::build_observing_rows(model, dofmap, |_, _| {})
+    }
+
+    /// 採用された剛体リンク・多点拘束で、縮約後にも節点間の参照が残る節点を返す。
+    pub fn explicit_constraint_linked_nodes(model: &Model) -> HashSet<NodeId> {
+        if !model
+            .constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::RigidLink { .. } | Constraint::Mpc { .. }))
+        {
+            return HashSet::new();
+        }
+        let dofmap = DofMap::build(model);
+        let mut explicit_rows = HashMap::new();
+        let reducer = Self::build_observing_rows(model, &dofmap, |row, explicit_terms| {
+            if let Some(terms) = explicit_terms {
+                explicit_rows.insert(row, terms.to_vec());
+            } else {
+                explicit_rows.remove(&row);
+            }
+        });
+        let node_of = |free: usize| {
+            let global = dofmap.global(free as u32);
+            dofmap
+                .is_node_dof(global)
+                .then_some(NodeId((global / DOF_PER_NODE) as u32))
+        };
+        let mut linked = HashSet::new();
+        let mut final_terms = HashMap::new();
+        let mut assigned_terms = HashMap::new();
+        for (free, assigned_row) in explicit_rows {
+            let Some(node) = node_of(free) else {
+                continue;
+            };
+            final_terms.clear();
+            for &(reduced, coefficient) in &reducer.t_rows[free] {
+                *final_terms.entry(reduced).or_insert(0.0) += coefficient;
+            }
+            final_terms.retain(|&reduced, coefficient| {
+                if *coefficient == 0.0 {
+                    return false;
+                }
+                let Some(other) = reducer
+                    .free_dof_of(reduced)
+                    .and_then(node_of)
+                    .filter(|&other| other != node)
+                else {
+                    return false;
+                };
+                linked.extend([node, other]);
+                true
+            });
+            for (reference, coefficient) in assigned_row {
+                *assigned_terms.entry(reference).or_insert(0.0) += coefficient;
+            }
+            // 縮約で従属自由度が置き換わっても、元の明示拘束の節点を取り落とさない。
+            for (reference, coefficient) in assigned_terms.drain() {
+                if coefficient != 0.0
+                    && final_terms.keys().any(|&reduced| {
+                        reducer.t_rows[reference]
+                            .iter()
+                            .filter(|&&(index, _)| index == reduced)
+                            .map(|&(_, coefficient)| coefficient)
+                            .sum::<f64>()
+                            != 0.0
+                    })
+                {
+                    linked.extend(node_of(reference));
+                }
+            }
+        }
+        linked
+    }
+
+    fn build_observing_rows(
+        model: &Model,
+        dofmap: &DofMap,
+        mut row_assigned: impl FnMut(usize, Option<&[(usize, f64)]>),
+    ) -> Self {
         let n_free = dofmap.n_active();
         let n_nodes = model.nodes.len();
         let mut t_rows: Vec<Vec<(usize, f64)>> = (0..n_free).map(|i| vec![(i, 1.0)]).collect();
@@ -55,6 +137,7 @@ impl Reducer {
                         }
                         if has_term {
                             t_rows[s_idx] = row;
+                            row_assigned(s_idx, Some(&t_rows[s_idx]));
                         }
                     }
                 }
@@ -96,6 +179,7 @@ impl Reducer {
                                     None => Vec::new(),
                                 };
                                 t_rows[s_idx] = row;
+                                row_assigned(s_idx, Some(&t_rows[s_idx]));
                             }
                         }
                     }
@@ -129,6 +213,7 @@ impl Reducer {
                             row.push((ma as usize, -dy));
                         }
                         t_rows[s_idx] = row;
+                        row_assigned(s_idx, None);
                     }
                     let sg_uy = si * DOF_PER_NODE + 1;
                     let mg_uy = mi * DOF_PER_NODE + 1;
@@ -142,12 +227,14 @@ impl Reducer {
                             row.push((ma as usize, dx));
                         }
                         t_rows[s_idx] = row;
+                        row_assigned(s_idx, None);
                     }
                     let sg_rz = si * DOF_PER_NODE + 5;
                     if let Some(sa) = dofmap.active(sg_rz) {
                         let s_idx = sa as usize;
                         if let Some(ma) = dofmap.active(mg_rz) {
                             t_rows[s_idx] = vec![(ma as usize, 1.0)];
+                            row_assigned(s_idx, None);
                         }
                     }
                 }
@@ -465,6 +552,50 @@ mod tests {
         assert_eq!(reducer.n_indep, reducer.n_free);
         for i in 0..reducer.n_free {
             assert_eq!(reducer.t_rows[i], vec![(i, 1.0)]);
+        }
+    }
+
+    #[test]
+    fn explicit_constraint_nodes_follow_the_winning_reduced_row() {
+        let mut model = make_3node_model();
+        model.nodes[0].restraint = Dof6Mask::FREE;
+        let mut dofs = Dof6Mask::FREE;
+        dofs.set_fixed(Dof::Ux);
+        let link = |master| Constraint::RigidLink {
+            master,
+            slaves: vec![NodeId(2)],
+            dofs,
+        };
+        let floor = Constraint::rigid_diaphragm(StoryId(0), NodeId(1), vec![NodeId(2)]);
+        let mpc = Constraint::Mpc {
+            master: NodeId(2),
+            terms: vec![(NodeId(0), Dof::Ux, 2.0)],
+        };
+        for (constraints, winner, linked) in [
+            (
+                vec![link(NodeId(0)), link(NodeId(1))],
+                link(NodeId(1)),
+                HashSet::from([NodeId(1), NodeId(2)]),
+            ),
+            (
+                vec![link(NodeId(1)), mpc],
+                link(NodeId(1)),
+                HashSet::from([NodeId(1), NodeId(2)]),
+            ),
+            (vec![floor.clone(), link(NodeId(0))], floor, HashSet::new()),
+        ] {
+            model.constraints = vec![winner];
+            let reference = Reducer::build(&model, &DofMap::build(&model));
+            model.constraints = constraints;
+            let reducer = Reducer::build(&model, &DofMap::build(&model));
+            assert_eq!(reducer.n_indep, reference.n_indep);
+            assert_eq!(reducer.t_rows, reference.t_rows);
+            let displacements: Vec<_> = (1..=reference.n_indep).map(|i| i as f64).collect();
+            assert_eq!(
+                reducer.expand_u(&displacements),
+                reference.expand_u(&displacements)
+            );
+            assert_eq!(Reducer::explicit_constraint_linked_nodes(&model), linked);
         }
     }
 

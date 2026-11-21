@@ -3,12 +3,12 @@
 use std::collections::HashSet;
 
 use sepika_core::adjacency::NodeAdjacency;
-use sepika_core::dof::{DofMap, DOF_PER_NODE};
 use sepika_core::ids::NodeId;
-use sepika_core::model::{Constraint, ElementData, ElementKind, Material, Model};
+use sepika_core::model::{ElementData, ElementKind, Material, Model};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::transform::LocalFrame;
+use sepika_solver::common::constraint::Reducer;
 
 use super::section_props::{axis_props_from_shape, rebar_info_from_shape, AxisProps};
 use crate::material_strength::{main_rebar_category_issue, rebar_sigma_y_of};
@@ -244,46 +244,9 @@ pub struct ColumnMechanismTopology {
 impl ColumnMechanismTopology {
     /// 検定対象モデルの主架構線材と、別節点との連結拘束を索引化する。
     pub fn new(model: &Model) -> Self {
-        let mut linked_nodes = HashSet::new();
-        let mut dof_map = None;
-        let mut both_active = |a: NodeId, b: NodeId, dof: usize| {
-            if a == b {
-                return false;
-            }
-            let map = dof_map.get_or_insert_with(|| DofMap::build(model));
-            [a, b].into_iter().all(|node| {
-                let global_dof = node.index() * DOF_PER_NODE + dof;
-                map.is_node_dof(global_dof) && map.active(global_dof).is_some()
-            })
-        };
-        for constraint in &model.constraints {
-            match constraint {
-                Constraint::RigidLink {
-                    master,
-                    slaves,
-                    dofs,
-                } => {
-                    for &slave in slaves {
-                        if (0..DOF_PER_NODE)
-                            .any(|d| dofs.0 & (1 << d) != 0 && both_active(*master, slave, d))
-                        {
-                            linked_nodes.extend([*master, slave]);
-                        }
-                    }
-                }
-                Constraint::Mpc { master, terms } => {
-                    for &(node, dof, factor) in terms {
-                        if factor != 0.0 && both_active(*master, node, dof as usize) {
-                            linked_nodes.extend([*master, node]);
-                        }
-                    }
-                }
-                Constraint::RigidDiaphragm { .. } => {}
-            }
-        }
         Self {
             frame: NodeAdjacency::primary_frame(model),
-            linked_nodes,
+            linked_nodes: Reducer::explicit_constraint_linked_nodes(model),
         }
     }
 
