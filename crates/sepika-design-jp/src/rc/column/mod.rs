@@ -3,7 +3,7 @@
 use super::{
     axis_props_from_shape, main_rebar_grade, rc_allow, rebar_allowable_tension,
     rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity,
-    shear_rebar_grade, AxisProps, ColumnGravityMode, ColumnMechanism,
+    shear_rebar_grade, AxisProps, ColumnGravityMode, ColumnMechanism, RcAllow,
 };
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
@@ -13,11 +13,14 @@ use crate::{
 };
 use sepika_core::model::Material;
 use sepika_core::section_shape::SectionShape;
+use sepika_element::frame::member_load::{FrameShearPeak, SectionSide};
 
 mod nm_interaction;
 
 pub(crate) use nm_interaction::interp_ma;
 use nm_interaction::*;
+
+const MAX_SHEAR_ALPHA: f64 = 1.5;
 
 pub(super) fn qd1_mechanism(ctx: &DesignCtx) -> Option<&ColumnMechanism> {
     (ctx.kind == MemberKind::Column
@@ -132,6 +135,103 @@ fn shear_input_issue(q_index: usize) -> &'static str {
     }
 }
 
+fn long_shear_detail(
+    axis: usize,
+    peak: &FrameShearPeak,
+    comparison: Option<(Option<f64>, &str)>,
+) -> String {
+    let direction = ["Qy", "Qz"][axis];
+    let side = match peak.side {
+        SectionSide::Left => "（i端側）",
+        SectionSide::Right => "（j端側）",
+        SectionSide::Continuous => "",
+    };
+    let q = peak.q_n.abs();
+    let ratio_detail = comparison.map_or_else(String::new, |(capacity, label)| {
+        let ratio = capacity
+            .filter(|qa| qa.is_finite() && *qa > 0.0)
+            .map(|qa| q / qa)
+            .filter(|ratio| ratio.is_finite())
+            .map_or_else(|| "未算定".into(), |ratio| format!("{ratio:.6}"));
+        format!("、{label} {ratio}")
+    });
+    format!(
+        "、局所{direction}最大 |{direction}|={q:.3} N（i端から x={:.6} mm{side}{ratio_detail}）",
+        peak.x_mm
+    )
+}
+
+pub(crate) fn recovered_long_shear_detail(peaks: &[Result<FrameShearPeak, String>; 2]) -> String {
+    let details: String = peaks
+        .iter()
+        .enumerate()
+        .filter_map(|(axis, peak)| {
+            peak.as_ref()
+                .ok()
+                .map(|peak| long_shear_detail(axis, peak, None))
+        })
+        .collect();
+    if details.is_empty() {
+        details
+    } else {
+        format!("。確認できた部材の最大せん断力{details}")
+    }
+}
+
+pub(super) fn long_shear_failure_over_capacity_bound(
+    shape: &SectionShape,
+    allow: &RcAllow,
+    length_mm: f64,
+    peaks: &[Result<FrameShearPeak, String>; 2],
+    confirmed_shear_alpha: [bool; 2],
+) -> Option<(f64, CheckResult)> {
+    let mut detail = format!("αの上限 {MAX_SHEAR_ALPHA}");
+    let mut governing: Option<(f64, f64)> = None;
+    for (axis, direction) in [RcDirection::Strong, RcDirection::Weak]
+        .into_iter()
+        .enumerate()
+    {
+        let Ok(peak) = &peaks[axis] else { continue };
+        let failure = (!confirmed_shear_alpha[axis])
+            .then(|| axis_props_from_shape(shape, direction, true))
+            .flatten()
+            .and_then(|props| {
+                shear_capacity(&props, allow, MAX_SHEAR_ALPHA, LoadTerm::Long, false, true)
+            })
+            .filter(|capacity_n| capacity_n.is_finite() && *capacity_n > 0.0)
+            .map(|capacity_n| (capacity_n, peak.q_n.abs() / capacity_n))
+            .filter(|(_, ratio)| ratio.is_finite() && *ratio > 1.0);
+        let Some((capacity_n, ratio)) = failure else {
+            detail.push_str(&long_shear_detail(axis, peak, None));
+            continue;
+        };
+        if governing.is_none_or(|(_, previous)| ratio > previous) {
+            governing = Some((peak.x_mm / length_mm, ratio));
+        }
+        let capacity = ["QAy", "QAz"][axis];
+        detail.push_str(&format!("、{capacity}の上限 {capacity_n:.1} N"));
+        detail.push_str(&long_shear_detail(
+            axis,
+            peak,
+            Some((Some(capacity_n), "検定比の下限")),
+        ));
+    }
+    governing.map(|(xi, ratio)| {
+        (
+            xi,
+            CheckResult {
+                basis: "RC柱の長期せん断（許容せん断力の上限による判定）".into(),
+                detail: String::new(),
+                components: vec![CheckComponent {
+                    kind: CheckKind::Shear,
+                    ratio,
+                    detail,
+                }],
+            },
+        )
+    })
+}
+
 fn column_allowable_moment(curve: &[(f64, f64)], n_design: f64) -> f64 {
     if n_design < 0.0 && curve.first().is_some_and(|point| n_design < point.0) {
         // 引張側の算定範囲外では、端点の曲げ耐力を外挿できない。
@@ -147,8 +247,10 @@ fn column_moment_ratio(
     ma_z_nmm: f64,
     ma_y_nmm: f64,
     circle: bool,
+    finite_only: bool,
 ) -> Result<f64, String> {
-    if (ma_z_nmm <= 0.0 && forces.mz != 0.0) || (ma_y_nmm <= 0.0 && forces.my != 0.0) {
+    let nonzero = |m: f64| m != 0.0 && (!finite_only || m.is_finite());
+    if (ma_z_nmm <= 0.0 && nonzero(forces.mz)) || (ma_y_nmm <= 0.0 && nonzero(forces.my)) {
         return Err(format!(
             "RC柱: 許容曲げが非正で非零の曲げ需要があるため検定不能: NA={na_n} N, N={} N, MA_z={ma_z_nmm} N·mm, MA_y={ma_y_nmm} N·mm, mz={} N·mm, my={} N·mm{}",
             -forces.n, forces.mz, forces.my,
@@ -156,7 +258,11 @@ fn column_moment_ratio(
         ));
     }
     Ok(available_column_moment_ratio(
-        forces, ma_z_nmm, ma_y_nmm, circle,
+        forces,
+        ma_z_nmm,
+        ma_y_nmm,
+        circle,
+        finite_only,
     ))
 }
 
@@ -165,17 +271,17 @@ fn available_column_moment_ratio(
     ma_z_nmm: f64,
     ma_y_nmm: f64,
     circle: bool,
+    finite_only: bool,
 ) -> f64 {
-    let ratio_z = if ma_z_nmm > 0.0 {
-        forces.mz.abs() / ma_z_nmm
-    } else {
-        0.0
+    let ratio = |m: f64, ma: f64| {
+        if ma > 0.0 && (!finite_only || m.is_finite()) {
+            m.abs() / ma
+        } else {
+            0.0
+        }
     };
-    let ratio_y = if ma_y_nmm > 0.0 {
-        forces.my.abs() / ma_y_nmm
-    } else {
-        0.0
-    };
+    let ratio_z = ratio(forces.mz, ma_z_nmm);
+    let ratio_y = ratio(forces.my, ma_y_nmm);
     if circle {
         ratio_z.powi(2) + ratio_y.powi(2)
     } else {
@@ -202,7 +308,7 @@ pub(super) fn column_check(
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
     shear_reference_valid: bool,
-    column_gravity: ColumnGravityMode,
+    column_gravity: ColumnGravityMode<'_>,
     incomplete: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
@@ -213,12 +319,76 @@ pub(super) fn column_check(
         }
     );
     let ordinary = matches!(column_gravity, ColumnGravityMode::Ordinary { .. });
+    let (long_term_shear, confirmed_shear_alpha) = match column_gravity {
+        ColumnGravityMode::Ordinary {
+            long_term_shear,
+            confirmed_shear_alpha,
+            ..
+        } => (long_term_shear, confirmed_shear_alpha),
+        _ => (None, [true; 2]),
+    };
+    let long_term_demand = long_term_shear.map(|shear| match shear {
+        Ok(peaks) => std::array::from_fn(|axis| match &peaks[axis] {
+            Ok(peak) if confirmed_shear_alpha[axis] => Some(peak.q_n.abs()),
+            Ok(_) => {
+                let axis = ["Qy", "Qz"][axis];
+                let reason = format!("RC柱の長期せん断（局所{axis}）の許容値を決めるαの断面力参照が不足または非有限です");
+                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
+                None
+            }
+            Err(reason) => {
+                let axis = ["Qy", "Qz"][axis];
+                let reason = format!("RC柱の長期せん断（局所{axis}）は未算定です（{reason}）");
+                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
+                None
+            }
+        }),
+        Err(reason) => {
+            let reason = format!("RC柱の長期せん断は未算定です（{reason}）");
+            *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
+            [None, None]
+        }
+    });
+    let demand_detail = |capacities: [Option<f64>; 2]| {
+        let Some(Ok(peaks)) = long_term_shear else {
+            return String::new();
+        };
+        peaks.iter().zip(capacities).enumerate().fold(
+            String::new(),
+            |mut text, (axis, (peak, capacity))| {
+                if let Ok(peak) = peak {
+                    text.push_str(&long_shear_detail(axis, peak, Some((capacity, "検定比"))));
+                }
+                text
+            },
+        )
+    };
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
         shear_rebar_valid.then(|| shear_rebar_grade(ctx.shear_rebar_material.as_ref())),
         long_term,
     );
+    let check_finite = long_term_shear.is_some();
+    let axial_available = !check_finite || forces.n.is_finite();
+    let bending_partial = check_finite && !(forces.my.is_finite() && forces.mz.is_finite());
+    let partial_detail = if bending_partial {
+        "、有限成分による検定比の下限"
+    } else {
+        ""
+    };
+    let capacity_for = |axis: usize, props: &AxisProps, alpha, damage_control| {
+        confirmed_shear_alpha[axis]
+            .then(|| shear_capacity(props, &allow, alpha, ctx.term, damage_control, true))
+            .flatten()
+    };
+    let alpha_detail = |axis: usize, value: f64| {
+        if confirmed_shear_alpha[axis] {
+            format!("{value:.3}")
+        } else {
+            "未算定".into()
+        }
+    };
 
     let n_design = -forces.n;
     let mut bending_issue = None;
@@ -236,7 +406,7 @@ pub(super) fn column_check(
             if !ordinary && !(strict_gravity && (missing_gravity || incomplete.is_some())) {
                 return Err(CheckOutcome::Skipped { reason });
             }
-            if ordinary {
+            if ordinary && !bending_partial {
                 components.clear();
             }
             *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
@@ -250,6 +420,7 @@ pub(super) fn column_check(
         if boundary_shear_only {
             if let ColumnGravityMode::Ordinary {
                 boundary_shear_issue: Some(reason),
+                ..
             } = column_gravity
             {
                 *incomplete = combine_incomplete_reasons(incomplete.take(), Some(reason));
@@ -281,9 +452,16 @@ pub(super) fn column_check(
             .zip(spans)
             .enumerate()
             .filter_map(|(axis, ((demand, capacity), (m, span_q)))| {
-                let (q, qa) = demand.zip(capacity)?;
+                let q = demand?;
+                if long_term_shear.is_some() && capacity.is_none() {
+                    *incomplete = combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some(shear_input_issue(axis + 1)),
+                    );
+                }
+                let qa = capacity?;
                 let ratio = if qa > 0.0 { q / qa } else { 0.0 };
-                if boundary_shear_only
+                if (boundary_shear_only || long_term_shear.is_some())
                     && (!q.is_finite()
                         || !qa.is_finite()
                         || qa <= 0.0
@@ -313,7 +491,7 @@ pub(super) fn column_check(
         let gross_area = std::f64::consts::PI * d_full * d_full / 4.0;
         let as_total = info.main_area;
         let mut components = Vec::new();
-        if main_rebar_valid {
+        if main_rebar_valid && axial_available {
             let grade = main_rebar_grade(ctx.rebar_material.as_ref());
             let ft = rebar_allowable_tension(
                 grade,
@@ -329,11 +507,11 @@ pub(super) fn column_check(
             };
             let curve = column_nm_curve(&axis, &allow, na);
             let ma = column_allowable_moment(&curve, n_design);
-            let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true) {
+            let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true, check_finite) {
                 Ok(ratio) => ratio,
                 Err(reason) => {
                     bending_issue = Some(reason);
-                    available_column_moment_ratio(forces, ma, ma, true)
+                    available_column_moment_ratio(forces, ma, ma, true, check_finite)
                 }
             };
             let nt = as_total * ft;
@@ -345,7 +523,7 @@ pub(super) fn column_check(
                 0.0
             };
             let axial_bending_detail = format!(
-            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm",
+            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
             na, nt, n_design, ma, forces.mz, forces.my,
         );
             components.push(CheckComponent {
@@ -357,11 +535,13 @@ pub(super) fn column_check(
 
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props.d, 1.5);
-        let qay = shear_capacity(&props, &allow, alpha_y, ctx.term, damage_control, true);
+        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props.d, MAX_SHEAR_ALPHA);
+        let qay = capacity_for(0, &props, alpha_y, damage_control);
         let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
             (None, None)
+        } else if let Some([qy, qz]) = long_term_demand {
+            (qy, qz)
         } else if !main_rebar_valid {
             (
                 demand_without_main_rebar(forces.qy, 1),
@@ -399,8 +579,8 @@ pub(super) fn column_check(
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
-        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, 1.5);
-        let qaz = shear_capacity(&props, &allow, alpha_z, ctx.term, damage_control, true);
+        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, MAX_SHEAR_ALPHA);
+        let qaz = capacity_for(1, &props, alpha_z, damage_control);
 
         if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {
             return outcome;
@@ -422,10 +602,13 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw={:.5}",
+                    "QAy={}, QAz={}, αy={}, αz={}, pw={:.5}{}",
                     capacity(qay),
                     capacity(qaz),
+                    alpha_detail(0, alpha_y),
+                    alpha_detail(1, alpha_z),
                     props.pw,
+                    demand_detail([qay, qaz]),
                 ),
             });
         }
@@ -468,7 +651,7 @@ pub(super) fn column_check(
         let gross_area = b * d;
         let as_total = info.main_area;
         let mut components = Vec::new();
-        if main_rebar_valid {
+        if main_rebar_valid && axial_available {
             let grade = main_rebar_grade(ctx.rebar_material.as_ref());
             let ft_z = rebar_allowable_tension(
                 grade,
@@ -496,13 +679,14 @@ pub(super) fn column_check(
             let curve_y = column_nm_curve(&axis_y, &allow, na);
             let ma_z = column_allowable_moment(&curve_z, n_design);
             let ma_y = column_allowable_moment(&curve_y, n_design);
-            let ratio_moment = match column_moment_ratio(forces, na, ma_z, ma_y, false) {
-                Ok(ratio) => ratio,
-                Err(reason) => {
-                    bending_issue = Some(reason);
-                    available_column_moment_ratio(forces, ma_z, ma_y, false)
-                }
-            };
+            let ratio_moment =
+                match column_moment_ratio(forces, na, ma_z, ma_y, false, check_finite) {
+                    Ok(ratio) => ratio,
+                    Err(reason) => {
+                        bending_issue = Some(reason);
+                        available_column_moment_ratio(forces, ma_z, ma_y, false, check_finite)
+                    }
+                };
             let nt = as_total * ft_z;
             let ratio_axial = if forces.n > 0.0 {
                 forces.n / nt
@@ -512,7 +696,7 @@ pub(super) fn column_check(
                 0.0
             };
             let axial_bending_detail = format!(
-            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm",
+            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
             na, nt, n_design, ma_z, ma_y, forces.mz, forces.my,
         );
             components.push(CheckComponent {
@@ -524,11 +708,13 @@ pub(super) fn column_check(
 
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props_z.d, 1.5);
-        let qay = shear_capacity(&props_z, &allow, alpha_y, ctx.term, damage_control, true);
+        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props_z.d, MAX_SHEAR_ALPHA);
+        let qay = capacity_for(0, &props_z, alpha_y, damage_control);
         let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
             (None, None)
+        } else if let Some([qy, qz]) = long_term_demand {
+            (qy, qz)
         } else if !main_rebar_valid {
             (
                 demand_without_main_rebar(forces.qy, 1),
@@ -570,8 +756,8 @@ pub(super) fn column_check(
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
-        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, 1.5);
-        let qaz = shear_capacity(&props_y, &allow, alpha_z, ctx.term, damage_control, true);
+        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, MAX_SHEAR_ALPHA);
+        let qaz = capacity_for(1, &props_y, alpha_z, damage_control);
 
         if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {
             return outcome;
@@ -593,11 +779,14 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={alpha_y:.3}, αz={alpha_z:.3}, pw_z={:.5}, pw_y={:.5}",
+                    "QAy={}, QAz={}, αy={}, αz={}, pw_z={:.5}, pw_y={:.5}{}",
                     capacity(qay),
                     capacity(qaz),
+                    alpha_detail(0, alpha_y),
+                    alpha_detail(1, alpha_z),
                     props_z.pw,
                     props_y.pw,
+                    demand_detail([qay, qaz]),
                 ),
             });
         }
@@ -664,7 +853,7 @@ mod tests {
                 my: if zero_z { 30.0 } else { 0.0 },
             };
             assert_eq!(
-                column_moment_ratio(&forces, 100.0, ma_z, ma_y, false),
+                column_moment_ratio(&forces, 100.0, ma_z, ma_y, false, false),
                 Ok(1.5)
             );
             if zero_z {
@@ -672,7 +861,7 @@ mod tests {
             } else {
                 forces.my = -1.0;
             }
-            let reason = column_moment_ratio(&forces, 100.0, ma_z, ma_y, false).unwrap_err();
+            let reason = column_moment_ratio(&forces, 100.0, ma_z, ma_y, false, false).unwrap_err();
             for field in [
                 "NA=100 N", "N=100 N", "MA_z=", "MA_y=", "20 N·mm", "30 N·mm", "-1 N·mm",
             ] {

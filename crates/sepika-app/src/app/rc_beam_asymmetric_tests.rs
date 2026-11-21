@@ -3,7 +3,7 @@ use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VE
 use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
 
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs"]
-mod input;
+pub(super) mod input;
 
 #[test]
 fn rc_beam_asymmetric_gui_rechecks_legacy_capacity_and_preserves_unchecked_reason() {
