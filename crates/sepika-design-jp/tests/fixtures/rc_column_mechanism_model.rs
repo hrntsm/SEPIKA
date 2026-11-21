@@ -1,11 +1,14 @@
+use sepika_core::dof::Dof;
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
     ElementKind, FrameSectionUse, LoadCase, LoadCaseKind, LoadCombination, MaterialCategory, Model,
+    NodalLoad,
 };
 use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RebarSize, SectionShape};
 
 pub const COLUMN: ElemId = ElemId(0);
 pub const GIRDER: ElemId = ElemId(1);
+const OPPOSITE_GIRDER: ElemId = ElemId(3);
 pub const GIRDER_SECTION: SectionId = SectionId(1);
 pub const REBAR: MaterialId = MaterialId(1);
 pub const WRONG_REBAR: MaterialId = MaterialId(2);
@@ -89,6 +92,58 @@ pub fn column_with_yielding_head_girders(model: Model) -> Model {
     girder.nodes[1] = NodeId(3);
     model.elements.push(girder);
     model
+}
+
+pub fn column_with_opposing_head_girders(model: Model, opposite_kind: ElementKind) -> Model {
+    let mut model = column_with_yielding_head_girders(model);
+    for node in &mut model.nodes[1..] {
+        node.coord[2] = 1700.0;
+        node.restraint.set_fixed(Dof::Rz);
+    }
+    model.stories[1].elevation = Some(1700.0);
+
+    let mut opposite_end = model.nodes[2].clone();
+    opposite_end.id = NodeId(4);
+    opposite_end.coord[0] = -4000.0;
+    let mut opposite = model.elements[GIRDER.index()].clone();
+    opposite.id = OPPOSITE_GIRDER;
+    opposite.kind = opposite_kind;
+    opposite.nodes = [opposite_end.id, NodeId(1)].into_iter().collect();
+    model.nodes.push(opposite_end);
+    model.elements.push(opposite);
+
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [0.0, 0.0, -200_000.0, 0.0, 0.0, 0.0],
+    )];
+    let seismic = LoadCaseId(2);
+    model.load_cases.push(LoadCase {
+        origin: Default::default(),
+        id: seismic,
+        name: "X方向地震".into(),
+        kind: LoadCaseKind::Seismic,
+        nodal: vec![NodalLoad::manual(
+            NodeId(1),
+            [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        )],
+        member: Vec::new(),
+    });
+    model.combinations.push(LoadCombination {
+        name: "X方向短期".into(),
+        terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0), (seismic, 1.0)],
+    });
+    model
+}
+
+pub fn remove_opposite_girder_yield_strength(model: &mut Model) {
+    let material = &mut model.materials[WRONG_REBAR.index()];
+    material.category = MaterialCategory::Rebar;
+    material.fy = None;
+    let mut section = model.sections[GIRDER_SECTION.index()].clone();
+    section.id = SectionId(2);
+    section.rebar_material = Some(material.id);
+    model.elements[OPPOSITE_GIRDER.index()].section = Some(section.id);
+    model.sections.push(section);
 }
 
 pub fn add_column_above(model: &mut Model, base: NodeId, kind: ElementKind) {
