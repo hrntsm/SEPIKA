@@ -196,6 +196,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0135](0135-torsional-cancellation-holds-column-stiffness.md) | accepted | ねじれで柱の層間変位が相殺される層の水平剛性を保留する |
 | [0136](0136-coupled-story-rigidity.md) | accepted | 方向間連成層の剛心とねじり剛性を剛床応答から求める |
 | [0137](0137-column-axial-force-gravity-center.md) | accepted | 長期軸力重心には柱頭の層側断面の材軸圧縮力を使う |
+| [0138](0138-common-planar-column-drift.md) | accepted | 二次元線形せん断型の柱剛性に加力方向の共通層間変位を求める |
 
 ## 規約
 

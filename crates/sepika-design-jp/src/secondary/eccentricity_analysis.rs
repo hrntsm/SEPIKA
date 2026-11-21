@@ -9,7 +9,9 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use std::collections::HashMap;
 
 use super::story_columns::{analysis_story_columns, story_layer, StoryColumn};
-use super::story_rigidity::{coupling_reason, story_rigidity_requiring_coupled_analysis};
+use super::story_rigidity::{
+    coupling_reason, story_rigidity_requiring_coupled_analysis, ROUND_OFF,
+};
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::statics::analysis::SeismicDir;
@@ -115,8 +117,8 @@ pub fn column_stiffnesses_from_analysis(
     res_y: &StaticOnce,
 ) -> Result<Vec<ColumnStiffness>, String> {
     let columns = resolved_columns(model, story)?;
-    let x = horizontal_stiffnesses(model, story, &columns, res_x, SeismicDir::X)?;
-    let y = horizontal_stiffnesses(model, story, &columns, res_y, SeismicDir::Y)?;
+    let x = horizontal_stiffnesses(model, story, &columns, res_x, SeismicDir::X, false)?;
+    let y = horizontal_stiffnesses(model, story, &columns, res_y, SeismicDir::Y, false)?;
     Ok(columns
         .iter()
         .zip(x)
@@ -141,7 +143,19 @@ pub fn column_horizontal_stiffnesses(
     direction: SeismicDir,
 ) -> Result<Vec<f64>, String> {
     let columns = resolved_columns(model, story)?;
-    horizontal_stiffnesses(model, story, &columns, response, direction)
+    horizontal_stiffnesses(model, story, &columns, response, direction, false)
+}
+
+/// 二次元線形せん断型の「柱 ki」に用いる指定方向の柱水平剛性 [N/mm] を返す。
+/// 単一剛床による照合ができない層では、加力方向の層間変位が柱間で一致せず、又は直交方向の層間変位が 0 でなければ Err。
+pub fn planar_column_horizontal_stiffnesses(
+    model: &Model,
+    story: StoryId,
+    response: &StaticOnce,
+    direction: SeismicDir,
+) -> Result<Vec<f64>, String> {
+    let columns = resolved_columns(model, story)?;
+    horizontal_stiffnesses(model, story, &columns, response, direction, true)
 }
 
 fn layer_rotations(
@@ -212,6 +226,7 @@ fn horizontal_stiffnesses(
     columns: &[StoryColumn],
     response: &StaticOnce,
     direction: SeismicDir,
+    require_common_planar_drift: bool,
 ) -> Result<Vec<f64>, String> {
     let forces: HashMap<_, _> = response
         .member_forces
@@ -232,7 +247,11 @@ fn horizontal_stiffnesses(
         [-coord[1], coord[0]][axis]
     };
     let cancellation_input = if let Some(first) = columns.first() {
-        layer_rotations(model, story, columns, response, direction)?
+        let rotations = layer_rotations(model, story, columns, response, direction)?;
+        if require_common_planar_drift && rotations.is_none() {
+            validate_common_planar_drift(story, columns, response, direction, axis)?;
+        }
+        rotations
             .filter(|angles| *angles != [0.0, 0.0])
             .map(|rotations| {
                 let anchor = projected_coordinate(first.top);
@@ -258,19 +277,9 @@ fn horizontal_stiffnesses(
                     story.0, elem.id.0
                 )
             };
-            let displacement = |id: NodeId| {
-                response
-                    .disp
-                    .get(id.index())
-                    .map(|u| u[axis])
-                    .filter(|u| u.is_finite())
-                    .ok_or_else(|| failure(&format!("SL節点{}の変位が欠損・非有限です", id.0)))
-            };
-            let signed_delta = displacement(column.top)? - displacement(column.bottom)?;
+            let signed_delta =
+                column_drift_mm(column, response, axis).map_err(|reason| failure(&reason))?;
             let delta = signed_delta.abs();
-            if !delta.is_finite() {
-                return Err(failure("層間変位差が非有限です"));
-            }
             let horizontal_force = if elem.kind == ElementKind::Beam {
                 let top = column_cut_end(model, column, elem, [p0, p1])
                     .map_err(|reason| failure(&reason))?;
@@ -314,6 +323,77 @@ fn horizontal_stiffnesses(
             Ok(stiffness)
         })
         .collect()
+}
+
+fn column_drift_mm(
+    column: &StoryColumn,
+    response: &StaticOnce,
+    axis: usize,
+) -> Result<f64, String> {
+    let displacement = |id: NodeId| {
+        response
+            .disp
+            .get(id.index())
+            .map(|u| u[axis])
+            .filter(|u| u.is_finite())
+            .ok_or_else(|| format!("SL節点{}の変位が欠損・非有限です", id.0))
+    };
+    let delta = displacement(column.top)? - displacement(column.bottom)?;
+    if !delta.is_finite() {
+        return Err("層間変位差が非有限です".into());
+    }
+    Ok(delta)
+}
+
+fn validate_common_planar_drift(
+    story: StoryId,
+    columns: &[StoryColumn],
+    response: &StaticOnce,
+    direction: SeismicDir,
+    axis: usize,
+) -> Result<(), String> {
+    let failure = |column: ElemId, reason: &str| {
+        format!(
+            "階{}・{direction:?}方向の柱{}: {reason}。柱 ki 方式の生成を保留しました",
+            story.0, column.0
+        )
+    };
+    let drifts = columns
+        .iter()
+        .map(|column| {
+            let drift = |component, label| {
+                column_drift_mm(column, response, component)
+                    .map_err(|reason| failure(column.top_elem, &format!("{label}の{reason}")))
+            };
+            Ok((
+                column.top_elem,
+                drift(axis, "加力方向")?,
+                drift(1 - axis, "直交方向")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let Some(&(reference, common_mm, _)) = drifts
+        .iter()
+        .max_by(|(_, a, _), (_, b, _)| a.abs().total_cmp(&b.abs()))
+    else {
+        return Ok(());
+    };
+    let scale_mm = common_mm.abs();
+    if scale_mm == 0.0 {
+        return Err(failure(reference, "加力方向の層間変位が0です"));
+    }
+    for (column, along_mm, transverse_mm) in drifts {
+        if (along_mm / scale_mm - common_mm / scale_mm).abs() > ROUND_OFF {
+            return Err(failure(
+                column,
+                &format!("加力方向の層間変位が柱{}と一致しません", reference.0),
+            ));
+        }
+        if (transverse_mm / scale_mm).abs() > ROUND_OFF {
+            return Err(failure(column, "直交方向に層間変位があります"));
+        }
+    }
+    Ok(())
 }
 
 fn column_cut_end(

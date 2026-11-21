@@ -7,7 +7,8 @@ use sepika_design_jp::secondary::eccentricity::{
     append_misc_wall_stiffnesses, center_of_rigidity, eccentricity,
 };
 use sepika_design_jp::secondary::eccentricity_analysis::{
-    column_stiffnesses_from_analysis, validate_rigidity_column_sections,
+    column_stiffnesses_from_analysis, planar_column_horizontal_stiffnesses,
+    validate_rigidity_column_sections,
 };
 use sepika_design_jp::secondary::story_rigidity::{
     coupling_reason, story_rigidity_requiring_coupled_analysis, RigidFloorStoryRigidity,
@@ -404,7 +405,7 @@ fn story_stiffness(
         }
         LumpedStiffnessSource::ColumnKi => {
             for layer in &layers {
-                let cols = sepika_design_jp::secondary::eccentricity_analysis::column_horizontal_stiffnesses(model, layer.top, res, dir)
+                let cols = planar_column_horizontal_stiffnesses(model, layer.top, res, dir)
                     .map_err(JobError::InvalidInput)?;
                 let sum: f64 = cols.iter().sum();
                 if sum <= 0.0 {

@@ -30,6 +30,15 @@ fn close(actual: f64, expected: f64, tolerance: f64) {
     );
 }
 
+fn assert_column_hold(floor: Floor, load: &str, reason: &str, drift_reason: &str) {
+    assert!(
+        (0..HEADS.len()).any(|i| reason.contains(&format!("階1・X方向の柱{i}:"))),
+        "{floor:?} {load}: {reason}"
+    );
+    assert!(reason.contains(drift_reason), "{floor:?} {load}: {reason}");
+    assert!(reason.contains("生成を保留"), "{floor:?} {load}: {reason}");
+}
+
 fn prepare_comparison_mass(model: &mut Model) {
     let mut mass_model = column_model(&XY_MM, 0.0, 0.0);
     let weight = add_head_load_case(&mut mass_model, "比較用重量", [[0.0; 2]; 4]);
@@ -43,13 +52,13 @@ fn prepare_comparison_mass(model: &mut Model) {
 }
 
 #[test]
-fn planar_column_ki_shows_a_load_dependent_stiffness_when_column_drift_cancels() {
-    let [uniform_x, _] = uniform_displacement_reactions();
+fn planar_column_ki_requires_compatible_column_drifts_under_proportional_loads() {
+    let [uniform_x, uniform_y] = uniform_displacement_reactions();
     let uniform_k = uniform_x.iter().map(|load| load[0]).sum::<f64>() / UNIFORM_MM;
     let uniform_period = TAU * (4.0 / uniform_k).sqrt();
     let unit_couple = [[1.0, 0.0], [0.0; 2], [-1.0, 0.0], [0.0; 2]];
 
-    for (floor, minimum_stiffness_ratio) in [(Floor::TwoDiaphragms, 5.0), (Floor::Shell, 15.0)] {
+    for floor in [Floor::TwoDiaphragms, Floor::Shell] {
         let mut model = model_with_floor(floor);
         prepare_comparison_mass(&mut model);
 
@@ -61,12 +70,12 @@ fn planar_column_ki_shows_a_load_dependent_stiffness_when_column_drift_cancels()
         twisted_x[0][0] += couple_n;
         twisted_x[2][0] -= couple_n;
 
-        let mut observe = |name, forces, expected_shear, expected_c_drift| {
+        let mut observe = |name, forces, expected_shears: [f64; 2], expected_c_drift| {
             let case = add_head_load_case(&mut model, name, forces);
             let response = compute_linear_static(model.clone(), case).unwrap();
             let shears = response.story_shears.as_ref().unwrap();
-            close(shears[0][0], expected_shear, 1e-8);
-            close(shears[1][0], 0.0, 1e-8);
+            close(shears[0][0], expected_shears[0], 1e-8);
+            close(shears[1][0], expected_shears[1], 1e-8);
             close(response.disp[c][0], expected_c_drift, 1e-11);
             let result = build_lumped_mass(LumpedMassBuildInput {
                 model_type: LumpedMassType::EquivalentShear,
@@ -81,52 +90,68 @@ fn planar_column_ki_shows_a_load_dependent_stiffness_when_column_drift_cancels()
                 res_y: None,
                 po_x: None,
                 po_y: None,
-            })
-            .unwrap_or_else(|err| panic!("{floor:?} {name}: {err}"));
-            let [story] = result.stories.as_slice() else {
-                panic!("{floor:?} {name}: 層ばねは1個必要です");
-            };
-            close(story.mass, 4.0, 1e-10);
-            let modal = lumped_mass_eigen(&result, 1).unwrap();
-            let [period_s] = modal.period.as_slice() else {
-                panic!("{floor:?} {name}: 固有周期は1個必要です");
-            };
+            });
             let shear_n = response.column_end_horizontal_forces[2].1.as_ref().unwrap()[1][0];
-            eprintln!("{floor:?} {name}: 層せん断力={:.9} N、柱C変位={:.12} mm、柱C負担力={shear_n:.9} N、質量={:.9} t、K={:.9} N/mm、T={period_s:.9} s",
-                shears[0][0], response.disp[c][0], story.mass, story.skeleton.k1);
-            (story.skeleton.k1, *period_s, shear_n)
+            let head_displacements_mm = HEADS.map(|head| response.disp[head.index()]);
+            (result, shear_n, head_displacements_mm)
         };
 
         let full_shear = uniform_k * UNIFORM_MM;
-        let small_drift = SMALL_SCALE * UNIFORM_MM;
-        let small_shear = SMALL_SCALE * full_shear;
-        let (uniform, period, _) = observe("X対照", uniform_x, full_shear, UNIFORM_MM);
-        let (small, small_period, small_column_shear) = observe(
-            "X対照縮小",
-            scale(uniform_x, SMALL_SCALE),
-            small_shear,
-            small_drift,
-        );
-        let (twisted, twisted_period, twisted_column_shear) =
-            observe("Xねじれ", twisted_x, full_shear, small_drift);
-        let (small_twisted, small_twisted_period, _) = observe(
-            "Xねじれ縮小",
-            scale(twisted_x, SMALL_SCALE),
-            small_shear,
-            small_drift * SMALL_SCALE,
-        );
+        let mut twisted_column_shear = None;
+        for (factor, control, twisted) in [
+            (1.0, "X対照", "Xねじれ"),
+            (SMALL_SCALE, "X対照縮小", "Xねじれ縮小"),
+        ] {
+            let expected_shears = [factor * full_shear, 0.0];
+            let (result, control_shear_n, _) = observe(
+                control,
+                scale(uniform_x, factor),
+                expected_shears,
+                factor * UNIFORM_MM,
+            );
+            let result = result.unwrap_or_else(|err| panic!("{floor:?} {control}: {err}"));
+            let [story] = result.stories.as_slice() else {
+                panic!("{floor:?} {control}: 層ばねは1個必要です");
+            };
+            close(story.mass, 4.0, 1e-10);
+            close(story.skeleton.k1, uniform_k, 1e-6);
+            let modal = lumped_mass_eigen(&result, 1).unwrap();
+            let [period_s] = modal.period.as_slice() else {
+                panic!("{floor:?} {control}: 固有周期は1個必要です");
+            };
+            close(*period_s, uniform_period, 1e-10);
+            close(control_shear_n, uniform_x[2][0] * factor, 1e-9);
 
-        for result in [uniform, small] {
-            close(result, uniform_k, 1e-6);
+            let (result, shear_n, _) = observe(
+                twisted,
+                scale(twisted_x, factor),
+                expected_shears,
+                factor * SMALL_SCALE * UNIFORM_MM,
+            );
+            assert!(shear_n.abs() > 20.0 * SMALL_SCALE * control_shear_n.abs());
+            if let Some(full_column_shear) = twisted_column_shear {
+                close(shear_n, factor * full_column_shear, 1e-9);
+            } else {
+                twisted_column_shear = Some(shear_n);
+            }
+            assert_column_hold(floor, twisted, &result.unwrap_err().to_string(), "層間変位");
         }
-        for result in [period, small_period] {
-            close(result, uniform_period, 1e-10);
+
+        let combined = std::array::from_fn(|i| {
+            std::array::from_fn(|axis| uniform_x[i][axis] + uniform_y[i][axis])
+        });
+        let y_shear = uniform_y.iter().map(|load| load[1]).sum::<f64>();
+        let (result, _, head_displacements_mm) =
+            observe("X・Y一様並進", combined, [full_shear, y_shear], UNIFORM_MM);
+        for displacements_mm in head_displacements_mm {
+            close(displacements_mm[0], UNIFORM_MM, 1e-11);
+            close(displacements_mm[1], UNIFORM_MM, 1e-11);
         }
-        close(small_column_shear, uniform_x[2][0] * SMALL_SCALE, 1e-9);
-        assert!(twisted_column_shear > 20.0 * small_column_shear);
-        assert!(twisted > minimum_stiffness_ratio * uniform_k);
-        assert!(twisted_period < uniform_period / minimum_stiffness_ratio.sqrt());
-        close(small_twisted, twisted, 1e-6);
-        close(small_twisted_period, twisted_period, 1e-10);
+        assert_column_hold(
+            floor,
+            "X・Y一様並進",
+            &result.unwrap_err().to_string(),
+            "直交方向に層間変位",
+        );
     }
 }
