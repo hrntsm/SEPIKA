@@ -284,6 +284,7 @@ pub fn run_member_design_checks(
         });
 
     let column_k_index = sepika_core::adjacency::NodeAdjacency::build(model);
+    let mut column_mechanism_topology = None;
     let mut member_checks: Vec<(ElemId, f64, CheckOutcome)> = Vec::new();
     let mut lateral_bracing_references = Vec::new();
     let mut steel_deflection_references = Vec::new();
@@ -502,7 +503,8 @@ pub fn run_member_design_checks(
                 .unwrap_or((n_combo_i, n_combo_j));
             crate::rc::compute_column_mechanism_sum_my(
                 model,
-                &column_k_index,
+                column_mechanism_topology
+                    .get_or_insert_with(|| crate::rc::ColumnMechanismTopology::new(model)),
                 elem,
                 n_long_i,
                 n_long_j,
