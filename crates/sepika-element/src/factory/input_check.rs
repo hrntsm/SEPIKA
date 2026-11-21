@@ -304,7 +304,8 @@ fn nonlinear_input_issues_with_basis(
                 )
             }),
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
-                member_strength_issue(elem, model)
+                member_rebar_material_strength_issue(elem, model, basis)
+                    .or_else(|| member_strength_issue(elem, model))
                     .or_else(|| {
                         super::springs::rc_reference_issue(
                             elem,
@@ -358,6 +359,7 @@ pub fn rc_beam_reference_input_issue(
     }
     model.member_rc_beam_reference(data.id)?;
     super::springs::rc_reference_target_issue(data, model)
+        .or_else(|| member_rebar_material_strength_issue(data, model, basis))
         .or_else(|| member_strength_issue(data, model))
         .or_else(|| {
             super::springs::rc_reference_issue(
@@ -400,6 +402,26 @@ pub fn ensure_nonlinear_input_with_basis(
         String::new()
     };
     Err(format!("{}{}", head.join("\n"), more))
+}
+
+pub(crate) fn member_rebar_material_strength_issue(
+    data: &ElementData,
+    model: &Model,
+    basis: super::StrengthBasis,
+) -> Option<String> {
+    if basis != super::StrengthBasis::MaterialStrength || !data.kind.is_primary_frame_support() {
+        return None;
+    }
+    let shape = model.element_section(data)?.shape.as_ref()?;
+    if shape.beam_rebar().is_none()
+        && shape.rect_column_rebar().is_none()
+        && shape.circle_column_rebar().is_none()
+    {
+        return None;
+    }
+    let (material, grade) = model.element_rebar_material_input(data)?;
+    sepika_core::material_grade::rebar_material_strength_issue(material, grade)
+        .map(|reason| format!("部材 ID {} の主筋の{reason}", data.id.0))
 }
 
 /// 鋼断面の線材の主材料が鉄筋またはコンクリートの場合に、部材・断面・材料を特定する。

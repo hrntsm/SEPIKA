@@ -203,7 +203,26 @@ pub(crate) fn fiber_strength_params(
     model: &sepika_core::model::Model,
     basis: crate::factory::StrengthBasis,
 ) -> StrengthParams {
-    fiber_strength_params_from_yield(data, model, basis, resolve_fiber_yield(model, data))
+    fiber_strength_params_from_yield(
+        data,
+        model,
+        basis,
+        resolve_fiber_yield(model, data),
+        fiber_rebar_factor(data, model, basis),
+    )
+}
+
+fn fiber_rebar_factor(
+    data: &sepika_core::model::ElementData,
+    model: &sepika_core::model::Model,
+    basis: crate::factory::StrengthBasis,
+) -> f64 {
+    // 他材種で主材料に割増を設定したモデルも使われるため、主筋材を参照するのは SD490 に限る。
+    let material = model
+        .element_rebar_material_with_grade(data)
+        .filter(|(mat, grade)| sepika_core::material_grade::is_jis_sd490(mat, *grade))
+        .or_else(|| model.element_material(data).map(|mat| (mat, None)));
+    basis.rebar_factor(material)
 }
 
 fn fiber_steel_material<'a>(
@@ -266,6 +285,7 @@ fn fiber_strength_params_from_yield(
     model: &sepika_core::model::Model,
     basis: crate::factory::StrengthBasis,
     yield_: FiberYield,
+    rebar_factor: f64,
 ) -> StrengthParams {
     let mat_ref = model.element_material(data);
     let steel_mat_ref = fiber_steel_material(data, model);
@@ -275,7 +295,7 @@ fn fiber_strength_params_from_yield(
     let steel_fy = yield_.steel;
     StrengthParams {
         steel_fy: steel_fy.unwrap_or(235.0) * basis.steel_factor(steel_mat_ref),
-        rebar_fy: rebar_fy.unwrap_or(345.0) * basis.rebar_factor(mat_ref),
+        rebar_fy: rebar_fy.unwrap_or(345.0) * rebar_factor,
         concrete_fc: fc.unwrap_or(24.0),
         steel_e,
     }
@@ -353,9 +373,9 @@ pub(crate) fn build_gauss_fiber_pair(
     let fc = mat_ref.and_then(|m| m.fc);
     let (concrete_e, steel_e) = fiber_young_moduli(data, model);
     let yield_ = resolve_fiber_yield(model, data);
-    let strength = fiber_strength_params_from_yield(data, model, basis, yield_);
+    let rebar_factor = fiber_rebar_factor(data, model, basis);
+    let strength = fiber_strength_params_from_yield(data, model, basis, yield_, rebar_factor);
     let steel_factor = basis.steel_factor(fiber_steel_material(data, model));
-    let rebar_factor = basis.rebar_factor(mat_ref);
     let concrete_rule = crate::factory::resolve_fiber_concrete_hysteresis(data, model, kind);
     let build = || {
         build_gauss_fibers(
@@ -923,6 +943,11 @@ impl FiberBeam {
         basis: crate::factory::StrengthBasis,
         kind: AnalysisKind,
     ) -> Result<Self, String> {
+        if let Some(reason) =
+            crate::factory::member_rebar_material_strength_issue(data, model, basis)
+        {
+            return Err(reason);
+        }
         let geometry = crate::transform::EndGeometry::try_of_element(data, model)?;
         let length = geometry.length;
         let (rigid_i, rigid_j) = crate::frame::rigid_arm::resolve_lengths(

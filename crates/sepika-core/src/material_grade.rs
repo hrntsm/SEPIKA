@@ -263,12 +263,43 @@ pub fn material_strength_factor_steel(mat: &crate::model::Material) -> f64 {
 /// **RC 主筋**として用いる文脈（RC 断面の集中ばね・主筋ファイバー・
 /// 曲げヒンジ・せん断降伏の主筋 σy）の材料強度割増係数。
 ///
-/// 直接入力の割増係数（[`crate::model::Material::strength_factor`]）があれば
-/// それを優先し、なければ 1.1（鉄筋の材料強度は基準強度の 1.1 倍以下と
-/// できる規定）。本関数は fy の解決・補完を行わない。
-/// **せん断補強筋は割増対象外**（本係数を用いないこと）。
-pub fn material_strength_factor_rebar(mat: &crate::model::Material) -> f64 {
-    mat.strength_factor.unwrap_or(1.1)
+/// SD490 は 1.0。他の材種は直接指定値を優先し、空欄は 1.1。
+/// SD490 の入力は [`rebar_material_strength_issue`] で検証する。せん断補強筋には適用しない。
+pub fn material_strength_factor_rebar(
+    mat: &crate::model::Material,
+    stb_grade: Option<&str>,
+) -> f64 {
+    if is_jis_sd490(mat, stb_grade) {
+        1.0
+    } else {
+        mat.strength_factor.unwrap_or(1.1)
+    }
+}
+
+/// ST-Bridge標準材種、またはネイティブ鉄筋材料の名称からJIS SD490を判定する。
+/// 前後の空白を除き、種類記号は完全一致するものを採用する。
+pub fn is_jis_sd490(mat: &crate::model::Material, stb_grade: Option<&str>) -> bool {
+    match stb_grade {
+        Some(grade) => grade.trim() == "SD490",
+        None => mat.category == crate::model::MaterialCategory::Rebar && mat.name.trim() == "SD490",
+    }
+}
+
+/// 保有水平耐力計算で主筋・壁縦筋に使う SD490 の入力不備を返す。
+/// Fy は 490 N/mm²、割増は空欄または 1.0 が必要。
+pub fn rebar_material_strength_issue(
+    mat: &crate::model::Material,
+    stb_grade: Option<&str>,
+) -> Option<String> {
+    if !is_jis_sd490(mat, stb_grade) {
+        return None;
+    }
+    (mat.fy != Some(490.0) || mat.strength_factor.is_some_and(|factor| factor != 1.0)).then(|| {
+        format!(
+            "材料 ID {}「{}」（材種 SD490）は保有水平耐力計算で Fy = 490 N/mm²、割増は空欄または 1.0 が必要です",
+            mat.id.0, mat.name
+        )
+    })
 }
 
 /// 鉄筋の基準強度 [N/mm²]（H12 建告第2464号）。
@@ -783,13 +814,23 @@ mod tests {
         assert_eq!(material_strength_factor_steel(&mk("SS400", None)), 1.1);
         assert_eq!(material_strength_factor_steel(&mk("SA440", None)), 1.05);
         assert_eq!(material_strength_factor_steel(&mk("カスタム", None)), 1.0);
-        assert_eq!(material_strength_factor_rebar(&mk("Fc24", None)), 1.1);
-        assert_eq!(material_strength_factor_rebar(&mk("SD345", None)), 1.1);
+        assert_eq!(material_strength_factor_rebar(&mk("Fc24", None), None), 1.1);
+        assert_eq!(
+            material_strength_factor_rebar(&mk("SD345", None), None),
+            1.1
+        );
         assert_eq!(
             material_strength_factor_steel(&mk("カスタム", Some(1.2))),
             1.2
         );
-        assert_eq!(material_strength_factor_rebar(&mk("Fc24", Some(1.0))), 1.0);
+        assert_eq!(
+            material_strength_factor_rebar(&mk("Fc24", Some(1.0)), None),
+            1.0
+        );
+        let mut conflict = mk("SD490", Some(1.2));
+        conflict.category = MaterialCategory::Concrete;
+        assert_eq!(material_strength_factor_rebar(&conflict, None), 1.2);
+        assert!(rebar_material_strength_issue(&conflict, None).is_none());
     }
 
     #[test]

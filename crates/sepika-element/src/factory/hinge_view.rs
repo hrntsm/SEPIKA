@@ -91,6 +91,7 @@ pub fn build_hinge_view(
     }
     if let Some(reason) = super::steel_section_primary_material_issue(data, model)
         .or_else(|| super::springs::rc_reference_target_issue(data, model))
+        .or_else(|| super::input_check::member_rebar_material_strength_issue(data, model, basis))
     {
         let model_kind = match data.kind {
             ElementKind::Beam if resolves_to_concentrated_spring(data, model) => {

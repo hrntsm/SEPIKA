@@ -576,29 +576,51 @@ impl Model {
         self.materials.get(sec.material?.index())
     }
 
-    /// 要素の主筋材料（RC・SRC 断面のみ）。
+    /// 要素の主筋・RC壁縦筋の材料。
     pub fn element_rebar_material(&self, elem: &ElementData) -> Option<&Material> {
-        if matches!(
-            self.element_section(elem)?.shape,
+        self.element_rebar_material_with_grade(elem)
+            .map(|(material, _)| material)
+    }
+
+    /// 要素の主筋・RC壁縦筋の材料とST-Bridge標準材種を返す。
+    /// ネイティブ材料を参照する場合、材種は `None`。
+    pub fn element_rebar_material_with_grade(
+        &self,
+        elem: &ElementData,
+    ) -> Option<(&Material, Option<&str>)> {
+        self.element_rebar_material_selection(elem, true)
+    }
+
+    /// 入力診断用にFy検証前の主筋・RC壁縦筋の材料とST-Bridge標準材種を返す。
+    pub fn element_rebar_material_input(
+        &self,
+        elem: &ElementData,
+    ) -> Option<(&Material, Option<&str>)> {
+        self.element_rebar_material_selection(elem, false)
+    }
+
+    fn element_rebar_material_selection(
+        &self,
+        elem: &ElementData,
+        validate_fy: bool,
+    ) -> Option<(&Material, Option<&str>)> {
+        let section = self.element_section(elem)?;
+        let part = if matches!(
+            section.shape,
             Some(crate::section_shape::SectionShape::RcWall { .. })
         ) {
-            if self.stb_strengths.sections.iter().any(|s| {
-                Some(s.section) == elem.section
-                    && s.reinforcement.iter().any(|r| r.part == "vertical")
-            }) {
-                return self.stb_rebar_material(elem.section?, "vertical");
-            }
-            return self
-                .materials
-                .get(self.element_section(elem)?.rebar_material?.index());
-        }
+            "vertical"
+        } else {
+            "main"
+        };
         if self.stb_strengths.sections.iter().any(|s| {
-            Some(s.section) == elem.section && s.reinforcement.iter().any(|r| r.part == "main")
+            Some(s.section) == elem.section && s.reinforcement.iter().any(|r| r.part == part)
         }) {
-            return self.stb_rebar_material(elem.section?, "main");
+            return self.stb_rebar_material_with_grade(elem.section?, part, validate_fy);
         }
         self.materials
-            .get(self.element_section(elem)?.rebar_material?.index())
+            .get(section.rebar_material?.index())
+            .map(|material| (material, None))
     }
 
     /// 要素のせん断補強筋材料（RC・SRC 断面のみ）。

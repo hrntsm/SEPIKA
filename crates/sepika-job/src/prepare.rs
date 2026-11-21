@@ -250,14 +250,30 @@ fn prepare_work_model(
             .elements
             .iter()
             .filter(|elem| elem.kind == sepika_core::model::ElementKind::Wall)
-            .filter_map(|elem| {
-                sepika_element::wall::wall_element::WallElement::wall_shear_capacity_issue(
+            .flat_map(|elem| {
+                use sepika_element::factory::StrengthBasis;
+                use sepika_element::wall::wall_element::WallElement;
+
+                let incremental = WallElement::wall_shear_capacity_issue(
                     elem,
                     &expanded,
-                    sepika_element::factory::StrengthBasis::MaterialStrength,
-                )
+                    StrengthBasis::MaterialStrength,
+                );
+                let time_history =
+                    WallElement::wall_shear_capacity_issue(elem, &expanded, StrengthBasis::Nominal);
+                if incremental == time_history {
+                    [
+                        incremental.map(|reason| format!("非線形解析不可: {reason}")),
+                        None,
+                    ]
+                } else {
+                    [
+                        incremental.map(|reason| format!("増分解析不可: {reason}")),
+                        time_history.map(|reason| format!("非線形時刻歴解析不可: {reason}")),
+                    ]
+                }
             })
-            .map(|reason| format!("非線形解析不可: {reason}")),
+            .flatten(),
     );
     Ok(PrepareReport {
         panels,

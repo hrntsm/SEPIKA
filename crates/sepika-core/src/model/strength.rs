@@ -269,6 +269,16 @@ impl Model {
     }
 
     pub fn stb_rebar_material(&self, section: SectionId, part: &str) -> Option<&Material> {
+        self.stb_rebar_material_with_grade(section, part, true)
+            .map(|(material, _)| material)
+    }
+
+    pub(super) fn stb_rebar_material_with_grade(
+        &self,
+        section: SectionId,
+        part: &str,
+        validate_fy: bool,
+    ) -> Option<(&Material, Option<&str>)> {
         let inputs: Vec<_> = self
             .stb_strengths
             .sections
@@ -286,24 +296,37 @@ impl Model {
         {
             return None;
         }
-        let resolved = self.resolve_stb_rebar(inputs.first()?).ok()?;
-        if inputs.iter().any(|input| {
-            self.resolve_stb_rebar(input)
-                .ok()
-                .is_none_or(|other| other.grade != resolved.grade || other.value != resolved.value)
-        }) {
-            return None;
+        let first = inputs.first()?;
+        let resolved = if validate_fy {
+            let resolved = self.resolve_stb_rebar(first).ok()?;
+            if inputs.iter().any(|input| {
+                self.resolve_stb_rebar(input).ok().is_none_or(|other| {
+                    other.grade != resolved.grade || other.value != resolved.value
+                })
+            }) {
+                return None;
+            }
+            Some(resolved)
+        } else {
+            None
+        };
+        if let Some(id) = first.native_material {
+            return self
+                .materials
+                .get(id.index())
+                .map(|material| (material, None));
         }
-        if let Some(id) = inputs.first()?.native_material {
-            return self.materials.get(id.index());
-        }
-        let id = self
+        let grade = match &resolved {
+            Some(resolved) => resolved.grade.as_str(),
+            None => self.stb_standard_rebar_grade(first).ok()?.0,
+        };
+        let record = self
             .stb_strengths
             .materials
             .iter()
-            .find(|m| m.grade == resolved.grade)?
-            .material;
-        self.materials.get(id.index())
+            .find(|m| m.grade == grade)?;
+        let material = self.materials.get(record.material.index())?;
+        Some((material, Some(&record.grade)))
     }
 
     pub fn stb_steel_material(&self, section: SectionId) -> Option<&Material> {
@@ -459,12 +482,21 @@ impl Model {
         else {
             return Ok((standard, false));
         };
-        let value = self
-            .materials
-            .get(record.material.index())
-            .and_then(|m| m.fy)
+        let material = self.materials.get(record.material.index()).ok_or_else(|| {
+            format!(
+                "元材種 {grade} の材料 ID {} がありません",
+                record.material.0
+            )
+        })?;
+        let value = material
+            .fy
             .filter(|v| v.is_finite() && *v > 0.0)
-            .ok_or_else(|| format!("材料 {grade} の明示fyが未指定または不正です"))?;
+            .ok_or_else(|| {
+                format!(
+                    "材料 ID {}「{}」（元材種 {grade}）の明示fyが未指定または不正です",
+                    material.id.0, material.name
+                )
+            })?;
         Ok((value, value != standard))
     }
 
@@ -477,7 +509,12 @@ impl Model {
             let value = material
                 .fy
                 .filter(|v| v.is_finite() && *v > 0.0)
-                .ok_or("明示したnative鉄筋材料のfyがありません")?;
+                .ok_or_else(|| {
+                    format!(
+                        "明示したnative鉄筋材料 ID {}「{}」のfyが未指定または不正です",
+                        material.id.0, material.name
+                    )
+                })?;
             return Ok(ResolvedStrength {
                 grade: input
                     .strength
@@ -488,8 +525,24 @@ impl Model {
                 value,
             });
         }
-        let (grade, source) = if let Some(grade) = input.strength.as_deref() {
-            (grade, StrengthSource::Section)
+        let (grade, source) = self.stb_standard_rebar_grade(input)?;
+        let value = crate::standard_material::rebar_grade_strength(grade)
+            .ok_or_else(|| format!("鉄筋強度 {grade} を解決できません"))?;
+        let (value, native_override) = self.stb_yield_value(grade, value)?;
+        Ok(ResolvedStrength {
+            grade: grade.into(),
+            source,
+            native_override,
+            value,
+        })
+    }
+
+    fn stb_standard_rebar_grade<'a>(
+        &'a self,
+        input: &'a StbRebarStrength,
+    ) -> Result<(&'a str, StrengthSource), String> {
+        if let Some(grade) = input.strength.as_deref() {
+            Ok((grade, StrengthSource::Section))
         } else {
             let diameter = input
                 .diameter
@@ -509,17 +562,8 @@ impl Model {
             if grades.any(|g| g != grade) {
                 return Err(format!("径 {diameter} の鉄筋強度が競合"));
             }
-            (grade, StrengthSource::Diameter)
-        };
-        let value = crate::standard_material::rebar_grade_strength(grade)
-            .ok_or_else(|| format!("鉄筋強度 {grade} を解決できません"))?;
-        let (value, native_override) = self.stb_yield_value(grade, value)?;
-        Ok(ResolvedStrength {
-            grade: grade.into(),
-            source,
-            native_override,
-            value,
-        })
+            Ok((grade, StrengthSource::Diameter))
+        }
     }
 
     /// 元鋼材部位の標準gradeと採用元。材料物性の既定復元とは別に解決する。
