@@ -13,6 +13,7 @@ use sepika_core::model::{
     ElementKind, FrameSectionUse, JointKind, MaterialCategory, MemberDetailAttr, MemberJoint,
     MemberLoad, MemberLoadKind, Model, NodalLoad, Section,
 };
+use sepika_core::section_shape::{RebarSize, SectionShape};
 use sepika_design_jp::{
     run_member_design_checks, CheckComponent, CheckKind, CheckOutcome, MemberDesignCheckOptions,
     MemberDesignCheckReport, RcColumnLongTermShearInput,
@@ -29,6 +30,34 @@ fn model(circle: bool, inner_peak: bool) -> Model {
         beam_input::section(300.0, 600.0, 19.0, &[3], &[3]),
         inner_peak,
     )
+}
+
+fn alpha_model(circle: bool, tip_moment_nmm: f64) -> Model {
+    let mut model = model(circle, false);
+    let section = &mut model.sections[0];
+    let mut shape = section.shape.take().unwrap();
+    let main_dia = RebarSize::DiameterMm(29.0);
+    match &mut shape {
+        SectionShape::RcColumnRect { rebar, .. } => rebar.main_dia = main_dia,
+        SectionShape::RcColumnCircle { rebar, .. } => {
+            rebar.main_dia = main_dia;
+            rebar.count = 16;
+        }
+        other => panic!("{other:?}"),
+    }
+    *section = Section {
+        material: section.material,
+        rebar_material: section.rebar_material,
+        shear_rebar_material: section.shear_rebar_material,
+        frame_use: section.frame_use,
+        ..shape.to_section(section.id, section.name.clone())
+    };
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [25_000.0, 0.0, 0.0, 0.0, tip_moment_nmm, 0.0],
+    )];
+    model.load_cases[0].member = vec![distributed(X, 0.0, LENGTH_MM, 60.0, 60.0)];
+    model
 }
 
 fn analyze(model: &mut Model) -> StaticOnce {
@@ -101,7 +130,7 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
 }
 
 #[test]
-fn 検定断面の欠落位置を表示し長期せん断は許容上限を超えた場合だけ不適合にする() {
+fn 軸力曲げの検定位置を欠く場合も材端を復元してせん断を判定する() {
     for circle in [false, true] {
         for (w, demand_n) in [(0.0, 14_700.0), (3400.0, 183_900.0), (6000.0, 313_900.0)] {
             let mut model = model(circle, false);
@@ -135,8 +164,8 @@ fn 検定断面の欠落位置を表示し長期せん断は許容上限を超�
                 complete.iter().map(|(xi, _)| *xi).collect::<Vec<_>>(),
                 nominal
             );
-            for (_, outcome) in complete {
-                let component = shear(&outcome);
+            for (_, outcome) in &complete {
+                let component = shear(outcome);
                 assert!(component
                     .detail
                     .contains(&format!("局所Qy最大 |Qy|={demand_n:.3} N")));
@@ -154,17 +183,18 @@ fn 検定断面の欠落位置を表示し長期せん断は許容上限を超�
                 let rows = check_combination(&model, &incomplete);
                 let y_peak_mm = if w == 0.0 { 300.0 } else { 1100.0 };
                 let y_demand =
-                    format!("局所Qy最大 |Qy|={demand_n:.3} N（i端から x={y_peak_mm:.6} mm）");
-                let z_demand = "局所Qz最大 |Qz|=0.000 N（i端から x=300.000000 mm）";
+                    format!("局所Qy最大 |Qy|={demand_n:.3} N（i端から x={y_peak_mm:.6} mm");
+                let z_demand = "局所Qz最大 |Qz|=0.000 N（i端から x=300.000000 mm";
                 for target in omitted {
                     assert!(rows.iter().any(|(xi, outcome)| xi == target && matches!(
                         outcome, CheckOutcome::Skipped { reason } if
                             reason.contains("軸力・曲げを検定する断面位置の解析内力がありません")
-                            && reason.contains("長期せん断の許容値を決めるαの参照断面が揃いません")
-                            && reason.contains(&y_demand) && reason.contains(z_demand)
-                            && !reason.contains("検定比")
+                            && reason.contains(&y_demand)
+                            && reason.contains(z_demand)
+                            && !reason.contains("未算定")
                     )), "省略位置={omitted:?} {rows:?}");
                 }
+                let expected = shear(&complete[0].1);
                 let shear_rows = rows
                     .iter()
                     .filter_map(|(xi, outcome)| match outcome {
@@ -176,25 +206,21 @@ fn 検定断面の欠落位置を表示し長期せん断は許容上限を超�
                         CheckOutcome::Skipped { .. } => None,
                     })
                     .collect::<Vec<_>>();
-                if w == 6000.0 {
-                    let [(xi, component)] = shear_rows.as_slice() else {
-                        panic!("{rows:?}")
-                    };
-                    assert_close(**xi * LENGTH_MM, 1100.0, 1e-8);
-                    let alpha_one_capacity_n = if circle { 160_393.3 } else { 138_097.8 };
-                    assert_close(
-                        component.ratio,
-                        313_900.0 / (alpha_one_capacity_n * 1.5),
-                        1e-6,
-                    );
-                    assert!(component.detail.contains("検定比の下限"));
-                    assert!(component.detail.contains(z_demand));
-                    println!("円形={circle} 省略位置={omitted:?} {}", component.detail);
+                if omitted == nominal {
+                    if w == 0.0 {
+                        assert!(shear_rows.is_empty(), "{rows:?}");
+                    } else {
+                        let [(xi, component)] = shear_rows.as_slice() else {
+                            panic!("{rows:?}");
+                        };
+                        assert_close(**xi * LENGTH_MM, 1100.0, 1e-8);
+                        assert_eq!(*component, expected);
+                    }
                 } else {
-                    assert!(shear_rows.is_empty(), "{rows:?}");
-                    assert!(rows
+                    assert_eq!(shear_rows.len(), nominal.len() - omitted.len());
+                    assert!(shear_rows
                         .iter()
-                        .any(|(_, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
+                        .all(|(_, component)| *component == expected));
                 }
             }
         }
@@ -202,48 +228,7 @@ fn 検定断面の欠落位置を表示し長期せん断は許容上限を超�
 }
 
 #[test]
-fn 両方向の許容値が未算定でも照合した最大せん断力と位置を表示する() {
-    let mut model = model(false, false);
-    model.load_cases[0].member.push(MemberLoad::manual(
-        COLUMN,
-        Y,
-        MemberLoadKind::Point {
-            a: 300.0,
-            p: -1200.0,
-        },
-    ));
-    model.load_cases[0].nodal.push(NodalLoad::manual(
-        NodeId(1),
-        [0.0, 2000.0, 0.0, 0.0, 0.0, 0.0],
-    ));
-    let mut solved = analyze(&mut model);
-    let (_, response) = solved
-        .member_forces
-        .iter_mut()
-        .find(|(id, _)| *id == COLUMN)
-        .unwrap();
-    let (_, middle) = response.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap();
-    middle[4] = f64::NAN;
-    middle[5] = f64::INFINITY;
-    let rows = check_combination(&model, &solved);
-    assert!(
-        rows.iter().any(|(xi, outcome)| *xi == 0.5
-            && matches!(
-                outcome, CheckOutcome::Skipped { reason } if reason.contains("曲げMyが非有限")
-                    && reason.contains("曲げMzが非有限")
-                    && reason.contains("局所Qy最大 |Qy|=14700.000 N（i端から x=300.000000 mm）")
-                    && reason.contains("局所Qz最大 |Qz|=2000.000 N（i端から x=300.000000 mm（j端側））")
-                    && !reason.contains("検定比")
-            )),
-        "{rows:?}"
-    );
-    assert!(rows
-        .iter()
-        .all(|(_, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
-}
-
-#[test]
-fn 非有限な軸力や曲げを未算定にし確認できる局所力とせん断の不適合を保持する() {
+fn 片方向の材端が未確認なら他方向の確定検定と独立した曲げ不適合を保持する() {
     let mut model = model(false, true);
     model.load_cases[0]
         .member
@@ -252,103 +237,191 @@ fn 非有限な軸力や曲げを未算定にし確認できる局所力とせ�
         .member
         .push(distributed(Y, 800.0, 2800.0, -83.0, -83.0));
     let solved = analyze(&mut model);
-    for invalid_index in [0, 4, 5] {
+    for (index, damage, direction, bound_x_mm, exact_alpha) in [
+        (4, f64::INFINITY, "Qz", 1600.0, "αy=1.000, αz=未算定"),
+        (5, 900_000_000.0, "Qy", 1100.0, "αy=未算定, αz=1.000"),
+    ] {
         let mut incomplete = solved.clone();
         let (_, column) = incomplete
             .member_forces
             .iter_mut()
             .find(|(id, _)| *id == COLUMN)
             .unwrap();
+        let (_, face) = column.at.iter_mut().find(|(xi, _)| *xi == 0.1).unwrap();
+        face[index] = damage;
         let (_, mid) = column.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap();
-        mid[invalid_index] = if invalid_index == 4 {
-            f64::INFINITY
-        } else {
-            f64::NAN
-        };
-        if invalid_index == 5 {
-            mid[4] = 520_000_000.0;
-        }
+        mid[5] = f64::NAN;
+        mid[4] = 520_000_000.0;
         let rows = check_combination(&model, &incomplete);
-        let invalid_force = match invalid_index {
-            0 => "軸力Nが非有限",
-            4 => "曲げMyが非有限",
-            _ => "曲げMzが非有限",
+        let reason_part = if damage.is_finite() {
+            "曲げ釣合い"
+        } else {
+            "曲げモーメントが非有限"
         };
-        assert!(
-            rows.iter().any(|(xi, outcome)| *xi == 0.5
-                && matches!(
-                    outcome, CheckOutcome::Skipped { reason } if reason.contains(invalid_force)
-                        && (reason.contains("αの断面力参照") == (invalid_index != 0))
-                )),
-            "{rows:?}"
-        );
-        let components = rows.iter().filter_map(|(xi, outcome)| match outcome {
+        assert!(rows.iter().any(|(_, outcome)| matches!(outcome,
+            CheckOutcome::Skipped { reason } if reason.contains(&format!("長期せん断（局所{direction}）"))
+                && reason.contains(reason_part)
+        )), "{rows:?}");
+        let mut components = rows.iter().filter_map(|(xi, outcome)| match outcome {
             CheckOutcome::Checked(result) => Some((xi, result.components.as_slice())),
             CheckOutcome::Skipped { .. } => None,
         });
-        if invalid_index == 0 {
-            assert!(components
-                .clone()
-                .filter(|(xi, _)| **xi == 0.5)
-                .any(|(_, checks)| {
-                    checks.len() == 1
-                        && checks[0].kind == CheckKind::Shear
-                        && checks[0].detail.contains("αy=1.000, αz=1.000")
-                        && !checks[0].detail.contains("検定比の下限")
-                }));
-        } else {
-            let (direction, bound_position) = if invalid_index == 4 {
-                ("Qz", 1600.0)
-            } else {
-                ("Qy", 1100.0)
-            };
-            assert!(
-                components.clone().any(|(xi, checks)| {
-                    (*xi * LENGTH_MM - bound_position).abs() < 1e-8
-                        && checks.iter().any(|component| {
-                            component.kind == CheckKind::Shear
-                                && component.ratio > 1.0
-                                && component.detail.contains("検定比の下限")
-                                && component.detail.contains(&format!("局所{direction}最大"))
-                        })
-                }),
-                "{rows:?}"
-            );
-            assert!(
-                components
-                    .clone()
-                    .any(|(_, checks)| checks.iter().any(|component| {
-                        let alpha = if invalid_index == 4 {
-                            "αy=1.000, αz=未算定"
-                        } else {
-                            "αy=未算定, αz=1.000"
-                        };
+        assert!(
+            components.clone().any(|(xi, checks)| {
+                (*xi * LENGTH_MM - bound_x_mm).abs() < 1e-8
+                    && checks.iter().any(|component| {
                         component.kind == CheckKind::Shear
                             && component.ratio > 1.0
-                            && component.detail.contains(alpha)
-                            && !component.detail.contains("検定比の下限")
-                    })),
-                "{rows:?}"
-            );
-            if invalid_index == 5 {
-                assert!(
-                    components.filter(|(xi, _)| **xi == 0.5).any(|(_, checks)| {
-                        checks.iter().any(|component| {
-                            component.kind == CheckKind::AxialBending
-                                && component.ratio > 1.0
-                                && component.detail.contains("有限成分による検定比の下限")
-                        })
-                    }),
-                    "{rows:?}"
-                );
+                            && component.detail.contains("検定比の下限")
+                            && component.detail.contains(&format!("局所{direction}最大"))
+                    })
+            }),
+            "{rows:?}"
+        );
+        assert!(
+            components
+                .clone()
+                .any(|(_, checks)| checks.iter().any(|component| {
+                    component.kind == CheckKind::Shear
+                        && component.ratio > 1.0
+                        && component.detail.contains(exact_alpha)
+                        && !component.detail.contains("検定比の下限")
+                })),
+            "{rows:?}"
+        );
+        assert!(
+            components.any(|(xi, checks)| *xi == 0.5
+                && checks.iter().any(|component| {
+                    component.kind == CheckKind::AxialBending
+                        && component.ratio > 1.0
+                        && component.detail.contains("有限成分による検定比の下限")
+                })),
+            "{rows:?}"
+        );
+    }
+}
+
+#[test]
+fn 矩形と円形で柱脚と柱頭の小さい方の割増係数を採用する() {
+    for (circle, tip_moment, face_moment, expected_qa_n, alpha) in [
+        (false, -145_000_000.0, 141_200_000.0, 136_820.250, "1.000"),
+        (
+            true,
+            -145_000_000.0,
+            141_200_000.0,
+            158_695.110_485_7,
+            "1.000",
+        ),
+        (
+            false,
+            -30_000_000.0,
+            256_200_000.0,
+            153_797.297_846,
+            "1.124",
+        ),
+        (true, -30_000_000.0, 256_200_000.0, 161_429.296_698, "1.017"),
+    ] {
+        let mut model = alpha_model(circle, tip_moment);
+        let solved = analyze(&mut model);
+        let (_, column) = solved
+            .member_forces
+            .iter()
+            .find(|(id, _)| *id == COLUMN)
+            .unwrap();
+        let face = |xi| column.at.iter().find(|(x, _)| *x == xi).unwrap().1;
+        assert_close(face(0.1)[5], face_moment, 1e-2);
+        assert_close(face(0.1)[1], -187_000.0, 1e-5);
+        assert_close(face(1.0)[5], tip_moment, 1e-2);
+        assert_close(face(1.0)[1], -25_000.0, 1e-5);
+        let rows = check_combination(&model, &solved);
+        assert_eq!(
+            rows.iter().map(|(xi, _)| *xi).collect::<Vec<_>>(),
+            [0.1, 0.5, 1.0]
+        );
+        for (_, outcome) in rows {
+            let CheckOutcome::Checked(ref result) = outcome else {
+                panic!("{outcome:?}");
+            };
+            assert!(!result.ok(), "{outcome:?}");
+            if tip_moment == -145_000_000.0 {
+                assert!(result
+                    .components
+                    .iter()
+                    .any(|c| c.kind == CheckKind::AxialBending && c.ratio < 1.0));
             }
+            let component = shear(&outcome);
+            assert_close(component.ratio, 187_000.0 / expected_qa_n, 1e-8);
+            assert!(component
+                .detail
+                .contains(&format!("QAy={expected_qa_n:.1} N")));
+            assert!(component.detail.contains(&format!("αy={alpha}, αz=1.000")));
+            assert!(component
+                .detail
+                .contains("局所Qy最大 |Qy|=187000.000 N（i端から x=300.000000 mm"));
         }
     }
 }
 
 #[test]
-fn 一方向が未算定なら確認済み方向の適合範囲のせん断比を理由に表示する() {
-    let mut model = model(false, true);
+fn 両方向が割増を要するとき対応する曲げと有効せいを使う() {
+    let mut model = alpha_model(false, -30_000_000.0);
+    let tip = &mut model.load_cases[0].nodal[0].values;
+    tip[1] = 170_000.0;
+    tip[3] = 225_000_000.0;
+    let solved = analyze(&mut model);
+    let (_, column) = solved
+        .member_forces
+        .iter()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap();
+    let face = |xi| column.at.iter().find(|(x, _)| *x == xi).unwrap().1;
+    assert_close(face(0.1)[4], -234_000_000.0, 1e-2);
+    assert_close(face(1.0)[4], 225_000_000.0, 1e-2);
+    assert_close(face(0.1)[2], -170_000.0, 1e-5);
+    assert_close(face(1.0)[2], -170_000.0, 1e-5);
+    for (_, outcome) in check_combination(&model, &solved) {
+        let component = shear(&outcome);
+        assert_close(component.ratio, 170_000.0 / 128_580.375, 1e-8);
+        assert!(component.detail.contains("QAy=153797.3 N, QAz=128580.4 N"));
+        assert!(component.detail.contains("αy=1.124, αz=1.000"));
+    }
+}
+
+#[test]
+fn 回転大梁の未保存フェースと集中荷重の柱区間側の内力を使う() {
+    for (rotated, expected_q_n, expected_qa_n, position) in [
+        (false, 187_000.0, 153_797.297_846, "300.000000 mm（j端側）"),
+        (true, 196_000.0, 147_330.145_705, "150.000000 mm"),
+    ] {
+        let mut model = alpha_model(false, -30_000_000.0);
+        if rotated {
+            model.elements[1].local_axis.ref_vector = Y;
+        } else {
+            model.load_cases[0].member.push(point(300.0, 50_000.0));
+        }
+        let solved = analyze(&mut model);
+        let rows = check_combination(&model, &solved);
+        assert_eq!(
+            rows.iter().map(|(xi, _)| *xi).collect::<Vec<_>>(),
+            [0.1, 0.5, 1.0]
+        );
+        for (_, outcome) in rows {
+            let component = shear(&outcome);
+            assert_close(component.ratio, expected_q_n / expected_qa_n, 1e-8);
+            assert!(
+                component.detail.contains(&format!(
+                    "局所Qy最大 |Qy|={expected_q_n:.3} N（i端から x={position}"
+                )),
+                "{}",
+                component.detail
+            );
+        }
+    }
+}
+
+#[test]
+fn 割増係数が不足する方向を保留し他方向の検定比を理由に表示する() {
+    let mut model = alpha_model(false, -145_000_000.0);
     model.load_cases[0]
         .member
         .push(distributed(Y, 800.0, 2800.0, 50.0, -50.0));
@@ -361,17 +434,78 @@ fn 一方向が未算定なら確認済み方向の適合範囲のせん断比�
         .iter_mut()
         .find(|(id, _)| *id == COLUMN)
         .unwrap();
-    let (_, middle) = column.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap();
-    middle[5] = f64::NAN;
+    let (_, face) = column.at.iter_mut().find(|(xi, _)| *xi == 0.1).unwrap();
+    face[5] = f64::NAN;
+    face[4] = f64::NAN;
     let rows = check_combination(&model, &solved);
-    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.5 && matches!(
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.1 && matches!(
         outcome, CheckOutcome::Skipped { reason } if reason.contains("曲げMzが非有限")
+            && reason.contains("長期せん断（局所Qy）")
+            && !reason.contains("長期せん断（局所Qz）")
             && reason.contains("αy=未算定, αz=1.000")
-            && reason.contains("局所Qz最大 |Qz|=36000.000 N（i端から x=1600.000000 mm、検定比 0.275869）")
+            && reason.contains("局所Qy最大 |Qy|=187000.000 N（i端から x=300.000000 mm）")
+            && reason.contains("局所Qz最大 |Qz|=36000.000 N（i端から x=1600.000000 mm、検定比 ")
     )), "{rows:?}");
-    assert!(!rows
-        .iter()
-        .any(|(_, outcome)| matches!(outcome, CheckOutcome::Checked(result) if result.ok())));
+    assert!(!rows.iter().any(|(_, outcome)| matches!(outcome, CheckOutcome::Checked(result)
+        if result.ok() || result.components.iter().any(|component| component.kind == CheckKind::Shear))));
+}
+
+#[test]
+fn 割増なしで需要を満たせば両方向の材端曲げモーメントを要しない() {
+    let mut model = model(false, false);
+    model.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(1),
+        [0.0, 2000.0, 0.0, 0.0, 0.0, 0.0],
+    ));
+    let mut solved = analyze(&mut model);
+    let (_, column) = solved
+        .member_forces
+        .iter_mut()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap();
+    column.at[0].1[4] = f64::NAN;
+    column.at[0].1[5] = f64::INFINITY;
+    let rows = check_combination(&model, &solved);
+    for (_, outcome) in rows {
+        let component = shear(&outcome);
+        assert!(component.detail.contains("αy=1.000, αz=1.000"));
+        assert!(component.detail.contains("局所Qy最大 |Qy|=14700.000 N"));
+        assert!(component.detail.contains("局所Qz最大 |Qz|=2000.000 N"));
+        assert!(component.ratio < 1.0);
+    }
+}
+
+#[test]
+fn 材中央の非有限な軸力や曲げは実フェースのせん断判定に影響しない() {
+    let mut model = alpha_model(false, -145_000_000.0);
+    let solved = analyze(&mut model);
+    for index in [0, 4, 5] {
+        let mut incomplete = solved.clone();
+        let (_, column) = incomplete
+            .member_forces
+            .iter_mut()
+            .find(|(id, _)| *id == COLUMN)
+            .unwrap();
+        let (_, mid) = column.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap();
+        mid[index] = f64::NAN;
+        let rows = check_combination(&model, &incomplete);
+        assert!(
+            rows.iter().any(|(xi, outcome)| *xi == 0.5
+                && matches!(
+                    outcome, CheckOutcome::Skipped { reason } if reason.contains("非有限")
+                        && !reason.contains("長期せん断（局所")
+                )),
+            "{rows:?}"
+        );
+        assert!(rows.iter().any(|(xi, outcome)| *xi == 0.5 && matches!(
+            outcome, CheckOutcome::Checked(result) if result.components.iter().any(|component| {
+                component.kind == CheckKind::Shear
+                    && component.ratio > 1.0
+                    && component.detail.contains("αy=1.000, αz=1.000")
+                    && !component.detail.contains("検定比の下限")
+            })
+        )), "{rows:?}");
+    }
 }
 
 #[test]

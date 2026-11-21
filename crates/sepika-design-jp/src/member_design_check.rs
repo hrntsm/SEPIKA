@@ -660,13 +660,13 @@ pub fn run_member_design_checks(
         } else {
             Vec::new()
         };
-        let confirmed_shear_alpha = [(1, 5), (2, 4)].map(|(q_index, m_index)| {
-            long_term_shear.is_none()
-                || missing_positions.is_empty()
-                    && mf.at.iter().all(|(_, values)| {
-                        values[q_index].is_finite() && values[m_index].is_finite()
-                    })
-        });
+        let long_shear_check = long_term_shear
+            .as_ref()
+            .map(|envelope| crate::RcDesign::long_column_shear_check(sec, mat, &ctx, envelope));
+        let confirmed_long_shear = long_shear_check
+            .as_ref()
+            .and_then(|check| check.as_ref().ok());
+        let mut has_long_shear_row = false;
 
         let first_row = member_checks.len();
         for (pos, forces) in &mf.at {
@@ -750,8 +750,7 @@ pub fn run_member_design_checks(
                     missing_shear_reference,
                     crate::rc::ColumnGravityMode::Ordinary {
                         boundary_shear_issue,
-                        long_term_shear: long_term_shear.as_ref(),
-                        confirmed_shear_alpha,
+                        saved_long_term: long_term_shear.is_some(),
                     },
                 );
                 check_incomplete = incomplete;
@@ -789,6 +788,21 @@ pub fn run_member_design_checks(
             if wrong_shear_rebar && matches!(structure, StructureKind::Rc | StructureKind::Src) {
                 check_incomplete =
                     check_incomplete.map(|reason| format!("部材 ID {}: {reason}", elem.id.0));
+            }
+            if let Some(check) = confirmed_long_shear {
+                check_incomplete =
+                    combine_incomplete_reasons(check_incomplete, check.incomplete.as_deref());
+                if let (Some((_, shear)), CheckOutcome::Checked(result)) =
+                    (&check.exact, &mut outcome)
+                {
+                    result.components.push(shear.clone());
+                    has_long_shear_row = true;
+                }
+            } else if let (Some(Err(issue)), CheckOutcome::Checked(_)) =
+                (&long_shear_check, &outcome)
+            {
+                let reason = format!("RC柱の長期せん断は未算定です（{issue}）");
+                check_incomplete = combine_incomplete_reasons(check_incomplete, Some(&reason));
             }
             let mut incomplete = combine_incomplete_reasons(check_incomplete, torsion_reason(&mfa));
             if long_term_shear.is_some() {
@@ -836,56 +850,40 @@ pub fn run_member_design_checks(
             );
         }
 
-        if let Some(shear) = &long_term_shear {
-            let mut bound_issue = None;
-            if confirmed_shear_alpha.contains(&false) {
-                if let Ok(peaks) = shear {
-                    match crate::RcDesign::long_column_shear_failure_over_capacity_bound(
-                        sec,
-                        mat,
-                        &ctx,
-                        peaks,
-                        confirmed_shear_alpha,
-                    ) {
-                        Ok(Some((xi, result))) => {
-                            member_checks.push((*elem_id, xi, CheckOutcome::Checked(result)))
-                        }
-                        Ok(None) => {}
-                        Err(issue) => bound_issue = Some(issue),
-                    }
+        if let Some(check) = confirmed_long_shear {
+            if let Some((xi, result)) = &check.bound_failure {
+                member_checks.push((*elem_id, *xi, CheckOutcome::Checked(result.clone())));
+            }
+            if !has_long_shear_row {
+                if let Some((xi, shear)) =
+                    check.exact.as_ref().filter(|(_, shear)| shear.ratio > 1.0)
+                {
+                    let result = crate::rc::shear_check_result("RC柱の長期せん断", shear.clone());
+                    member_checks.push((*elem_id, *xi, CheckOutcome::Checked(result)));
                 }
             }
-            if !missing_positions.is_empty() {
-                let mut reason =
-                    "RC柱の軸力・曲げを検定する断面位置の解析内力がありません".to_owned();
-                match shear {
-                    Ok(peaks) => {
-                        reason.push_str("。長期せん断の許容値を決めるαの参照断面が揃いません");
-                        for (axis, peak) in ["Qy", "Qz"].into_iter().zip(peaks) {
-                            if let Err(issue) = peak {
-                                reason.push_str(&format!(
-                                    "。局所{axis}の最大せん断は未算定です（{issue}）"
-                                ));
-                            }
-                        }
-                    }
-                    Err(issue) => {
-                        reason.push_str(&format!("。RC柱の長期せん断は未算定です（{issue}）"));
-                    }
-                }
-                if let Some(issue) = bound_issue {
-                    reason.push_str(&format!("。{issue}"));
-                }
+        }
+        if !missing_positions.is_empty() {
+            let mut reason = "RC柱の軸力・曲げを検定する断面位置の解析内力がありません".to_owned();
+            if let Some(issue) = long_shear_check.as_ref().and_then(|check| match check {
+                Ok(check) => check.incomplete.as_deref(),
+                Err(issue) => Some(issue.as_str()),
+            }) {
+                reason.push_str(&format!("。{issue}"));
+            }
+            if let Some((_, shear)) = confirmed_long_shear.and_then(|check| check.exact.as_ref()) {
+                reason.push_str(&format!("。せん断の確認結果（{}）", shear.detail));
+            } else {
                 reason.push_str(&recovered_shear_detail);
-                for pos in missing_positions {
-                    member_checks.push((
-                        *elem_id,
-                        pos,
-                        CheckOutcome::Skipped {
-                            reason: reason.clone(),
-                        },
-                    ));
-                }
+            }
+            for pos in missing_positions {
+                member_checks.push((
+                    *elem_id,
+                    pos,
+                    CheckOutcome::Skipped {
+                        reason: reason.clone(),
+                    },
+                ));
             }
         }
 

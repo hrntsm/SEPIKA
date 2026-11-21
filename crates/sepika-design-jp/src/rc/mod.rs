@@ -2,10 +2,9 @@
 
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::member_design_check::rc_column_long_term_shear::LongTermColumnShear;
-use crate::{CheckOutcome, CheckResult, DesignCheck, DesignCtx, MemberForcesAt, MemberKind};
+use crate::{CheckOutcome, DesignCheck, DesignCtx, MemberForcesAt, MemberKind};
 use sepika_core::model::{Material, Section};
 use sepika_core::section_shape::SectionShape;
-use sepika_element::frame::member_load::FrameShearPeak;
 
 mod beam;
 mod bond;
@@ -46,7 +45,9 @@ pub use crate::material_strength::{
 };
 
 pub(crate) use allowable::*;
-pub(crate) use column::{interp_ma, recovered_long_shear_detail};
+pub(crate) use column::interp_ma;
+use column::long_term_shear::LongTermColumnShearCheck;
+pub(crate) use column::long_term_shear::{recovered_long_shear_detail, shear_check_result};
 pub(crate) use design_shear::*;
 pub(crate) use section_props::*;
 pub(crate) use shear_capacity::*;
@@ -54,12 +55,11 @@ pub(crate) use shear_capacity::*;
 pub struct RcDesign;
 
 #[derive(Clone, Copy)]
-pub(crate) enum ColumnGravityMode<'a> {
+pub(crate) enum ColumnGravityMode {
     SingleOutcome,
     Ordinary {
         boundary_shear_issue: Option<&'static str>,
-        long_term_shear: Option<&'a LongTermColumnShear>,
-        confirmed_shear_alpha: [bool; 2],
+        saved_long_term: bool,
     },
     TimeHistory {
         strict_gravity: bool,
@@ -135,7 +135,7 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         missing_shear_reference: Option<&str>,
-        column_gravity: ColumnGravityMode<'_>,
+        column_gravity: ColumnGravityMode,
     ) -> (CheckOutcome, Option<String>) {
         self.check_with_gravity_mode(
             forces,
@@ -154,7 +154,7 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         missing_shear_reference: Option<&str>,
-        column_gravity: ColumnGravityMode<'_>,
+        column_gravity: ColumnGravityMode,
     ) -> (CheckOutcome, Option<String>) {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
@@ -263,7 +263,7 @@ impl RcDesign {
         main_rebar_valid: bool,
         shear_rebar_valid: bool,
         shear_issue: Option<&str>,
-        column_gravity: ColumnGravityMode<'_>,
+        column_gravity: ColumnGravityMode,
         section_issue: &mut Option<String>,
     ) -> CheckOutcome {
         let (shape, fc_raw) =
@@ -310,13 +310,12 @@ impl RcDesign {
         }
     }
 
-    pub(crate) fn long_column_shear_failure_over_capacity_bound(
+    pub(crate) fn long_column_shear_check(
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
-        peaks: &[Result<FrameShearPeak, String>; 2],
-        confirmed_shear_alpha: [bool; 2],
-    ) -> Result<Option<(f64, CheckResult)>, String> {
+        envelope: &LongTermColumnShear,
+    ) -> Result<LongTermColumnShearCheck, String> {
         let main_rebar_valid =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
                 .is_none();
@@ -331,12 +330,8 @@ impl RcDesign {
             return Err("RC 検定: Fc が非有限です".into());
         }
         let allow = rc_allow(fc_raw, mat.concrete_class, None, true);
-        Ok(column::long_shear_failure_over_capacity_bound(
-            shape,
-            &allow,
-            ctx.length,
-            peaks,
-            confirmed_shear_alpha,
+        Ok(column::long_term_shear::check(
+            shape, &allow, ctx.length, envelope,
         ))
     }
 
