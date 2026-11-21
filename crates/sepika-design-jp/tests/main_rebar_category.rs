@@ -385,35 +385,52 @@ fn rc_ultimate_checks_require_rebar_for_beam_and_columns() {
 }
 
 #[test]
-fn static_rc_beam_keeps_independent_gravity_failure_with_wrong_main_rebar() {
-    let mut model = rc_beam::model(false);
-    set_ultimate_input(&mut model);
-    assign_main_rebar(&mut model, MaterialCategory::Steel);
-    model.materials.last_mut().unwrap().name = "SR235".into();
-    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
-        unreachable!()
-    };
-    rebar.main_dia = RebarSize::Standard(StandardRebar::D19);
-    let check = collect_rc_ultimate_checks(
-        &model,
-        &[(
-            ElemId(0),
-            MemberDemand {
-                static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
-                q_long: Some(10_000_000.0),
-                ..MemberDemand::axial(0.0)
-            },
-        )],
-        &UltimateShearOptions::default(),
-    )
-    .unwrap()
-    .remove(0);
-    assert!(!check.ok && check.unchecked_reason.is_none(), "{check:?}");
-    assert!(check.mu.is_nan() && check.qmu.is_nan(), "{check:?}");
-    assert_eq!(check.shear_margin, 0.0);
-    assert_eq!(check.bond_margin, 0.0);
-    for text in ["SR235", "主筋", "鋼材", "断面タブ", "「鉄筋」"] {
-        assert!(check.detail.contains(text), "{check:?}");
+fn static_rc_beam_keeps_shear_and_only_confirmed_bond_failure_with_wrong_main_rebar() {
+    for main_dia in [
+        RebarSize::Standard(StandardRebar::D19),
+        RebarSize::DiameterMm(19.0),
+    ] {
+        let mut model = rc_beam::model(false);
+        set_ultimate_input(&mut model);
+        assign_main_rebar(&mut model, MaterialCategory::Steel);
+        model.materials.last_mut().unwrap().name = "SR235".into();
+        let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+            unreachable!()
+        };
+        rebar.main_dia = main_dia;
+        let check = collect_rc_ultimate_checks(
+            &model,
+            &[(
+                ElemId(0),
+                MemberDemand {
+                    static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
+                    q_long: Some(10_000_000.0),
+                    ..MemberDemand::axial(0.0)
+                },
+            )],
+            &UltimateShearOptions::default(),
+        )
+        .unwrap()
+        .remove(0);
+        assert!(!check.ok && check.unchecked_reason.is_none(), "{check:?}");
+        assert!(check.mu.is_nan() && check.qmu.is_nan(), "{check:?}");
+        assert_eq!(check.shear_margin, 0.0);
+        match main_dia {
+            RebarSize::Standard(_) => {
+                assert!(check.qbu.is_finite(), "{check:?}");
+                assert_eq!(check.bond_margin, 0.0);
+            }
+            RebarSize::DiameterMm(_) => {
+                assert!(
+                    check.qbu.is_nan() && check.bond_margin.is_nan(),
+                    "{check:?}"
+                );
+                assert!(check.detail.contains("付着は未算定"), "{check:?}");
+            }
+        }
+        for text in ["SR235", "主筋", "鋼材", "断面タブ", "「鉄筋」"] {
+            assert!(check.detail.contains(text), "{check:?}");
+        }
     }
 }
 
@@ -443,6 +460,16 @@ fn rc_ultimate_keeps_failures_on_members_with_and_without_wrong_main_rebar() {
         assert!(check.shear_margin < 1.0, "{check:?}");
     }
     assert!(checks[0].mu.is_nan(), "{:?}", checks[0]);
+    assert!(
+        checks[0].qbu.is_nan() && checks[0].bond_margin.is_nan(),
+        "{:?}",
+        checks[0]
+    );
+    assert!(checks[0].detail.contains("付着は未算定"), "{:?}", checks[0]);
     assert_material_diagnostic(&checks[0].detail, MaterialCategory::Steel);
-    assert!(checks[1].mu.is_finite(), "{:?}", checks[1]);
+    assert!(
+        checks[1].mu.is_finite() && checks[1].qbu.is_finite(),
+        "{:?}",
+        checks[1]
+    );
 }

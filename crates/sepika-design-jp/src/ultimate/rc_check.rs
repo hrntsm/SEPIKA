@@ -14,7 +14,7 @@ use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, Material, Model, Section,
 };
 use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
-use sepika_core::section_shape::SectionShape;
+use sepika_core::section_shape::{RebarSize, SectionShape};
 
 use super::options::{
     MemberDemand, ShearMethod, StaticBeamBending, StaticBeamHingeMechanism, UltimateDemandMode,
@@ -529,10 +529,20 @@ fn check_member(
         };
         (qbu, tau_bu)
     };
-    let (qbu, tau_bu) = if opts.include_bond {
-        bond_strength(&p)
-    } else {
-        (0.0, 0.0)
+    let bond_unverified = opts.include_bond
+        && main_rebar_issue.is_some()
+        && !matches!(p.main_dia, RebarSize::Standard(_));
+    let main_rebar_issue = main_rebar_issue.map(|reason| {
+        if bond_unverified {
+            format!("{reason}。数値径から異形鉄筋であることを確認できないため付着は未算定です")
+        } else {
+            reason
+        }
+    });
+    let (qbu, tau_bu) = match (opts.include_bond, bond_unverified) {
+        (false, _) => (0.0, 0.0),
+        (true, false) => bond_strength(&p),
+        (true, true) => (f64::NAN, f64::NAN),
     };
     if static_beam_rebar.is_some() {
         static_beam_reasons.extend(beam_reference);
@@ -561,6 +571,11 @@ fn check_member(
         if sigma_y.is_none() && !gravity_ng {
             return Ok(Some(unchecked_member(elem.id, kind, &reason)));
         }
+        let qbu_detail = if bond_unverified {
+            "未算定".into()
+        } else {
+            format!("{qbu:.0} N")
+        };
         return Ok(Some(UltimateCheck {
             mu,
             qsu,
@@ -568,7 +583,7 @@ fn check_member(
             shear_margin: if shear_ng { 0.0 } else { f64::NAN },
             bond_margin: if bond_ng { 0.0 } else { f64::NAN },
             unchecked_reason: (!gravity_ng).then(|| reason.clone()),
-            detail: format!("Qsu={qsu:.0} N, Qbu={qbu:.0} N。{reason}"),
+            detail: format!("Qsu={qsu:.0} N, Qbu={qbu_detail}。{reason}"),
             ..unchecked_member(elem.id, kind, &reason)
         }));
     }
@@ -594,10 +609,10 @@ fn check_member(
         }
     };
     let shear_margin = margin(qsu);
-    let bond_margin = if opts.include_bond {
-        margin(qbu)
-    } else {
-        f64::INFINITY
+    let bond_margin = match (opts.include_bond, bond_unverified) {
+        (false, _) => f64::INFINITY,
+        (true, false) => margin(qbu),
+        (true, true) => f64::NAN,
     };
 
     let biaxial_shear = biaxial_shear_requested.then(|| {
