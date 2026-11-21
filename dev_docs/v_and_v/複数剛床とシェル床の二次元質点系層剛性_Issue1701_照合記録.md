@@ -53,6 +53,8 @@ cargo test --locked -p sepika-design-jp --test multi_floor_torsional_cancellatio
 
 基点 `4ebf5992` に本差分を適用し、WindowsのRust 1.100.0で `cargo test --locked -p sepika-job` の246件、`cargo test --locked -p sepika-design-jp` の950件が成功した。stable更新確認後の両クレートの全ターゲットClippy（`--locked -- -D warnings`）、`cargo fmt --all -- --check`、`cargo run --locked -p xtask -- check-docs`、`mdbook build docs`、変更文書のローカルリンク・見出し、`git diff --check` も成功した。Cargoは既存のワークスペース依存宣言 `schemars` の未使用警告を出した。
 
+[#1705](https://github.com/hrntsm/SEPIKA/issues/1705) の修正後は、質点系の統合試験を表と同じ荷重で実行し、無ねじれ対照とその比例小荷重の層ばね・周期は独立値と一致し、ねじれ荷重とその比例小荷重は対象層・方向・柱を示して保留することを確認した。X・Yの一様並進を重ねた荷重も、X方向の層間変位が全柱で一致する一方、直交方向に層間変位があることを示して保留した。上表のねじれ時の層ばね・周期は #1701 の照合時の記録である。
+
 ## 未確認の範囲
 
 各床1例、1層、X方向の線形せん断型と手入力地震荷重に限る。立体の固有値・モード・有効質量、地震波を使った時刻歴応答、実建物のAi地震荷重、GUIの準備から解析までの操作、複数層・複数床構成、床物性やメッシュの感度、壁・ブレースその他の抵抗要素、非線形、実験Validationは未確認。これらの検証は、[未検証一覧](未検証一覧.md#ねじれで柱の層間変位が相殺される場合の偏心率1595)を参照する。
