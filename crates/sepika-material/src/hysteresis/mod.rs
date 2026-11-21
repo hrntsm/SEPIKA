@@ -2,9 +2,7 @@
 pub mod material;
 pub mod rule;
 pub mod steel_buckling;
-pub mod tsuji_yamada;
 
 pub use material::HysteresisMaterial;
 pub use rule::HysteresisRule;
 pub use steel_buckling::{lateral_buckling_mu_ratio, SteelBuckling};
-pub use tsuji_yamada::TsujiYamada;

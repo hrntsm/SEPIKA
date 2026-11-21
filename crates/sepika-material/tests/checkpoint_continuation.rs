@@ -1,6 +1,5 @@
 use sepika_material::{
-    Bilinear, Concrete, ConcreteNewRc, HysteresisMaterial, HysteresisRule, TsujiYamada,
-    UniaxialMaterial,
+    Bilinear, Concrete, ConcreteNewRc, HysteresisMaterial, HysteresisRule, UniaxialMaterial,
 };
 
 #[test]
@@ -9,7 +8,6 @@ fn checkpoints_preserve_committed_and_outstanding_trial_history() {
         Box::new(Bilinear::new(205000.0, 235.0, 0.01)),
         Box::new(Concrete::new(30.0, 2.0)),
         Box::new(ConcreteNewRc::new(30.0, 2.0)),
-        Box::new(TsujiYamada::new(205000.0, 235.0, 2050.0, 0.5)),
     ];
     let mut origin = ConcreteNewRc::new(30.0, 2.0);
     origin.set_concrete_hysteresis(true);

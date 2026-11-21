@@ -1043,11 +1043,7 @@ fn rc_alpha_materials_are_required_and_explicit_basis_never_falls_back_to_other_
                 .unwrap_err();
         assert!(error.to_string().contains(role), "{error}");
     }
-    for rule in [
-        HysteresisModel::Standard,
-        HysteresisModel::TsujiYamada,
-        HysteresisModel::SteelBuckling,
-    ] {
+    for rule in [HysteresisModel::Standard, HysteresisModel::SteelBuckling] {
         let mut other = model.clone();
         other.set_member_hysteresis(ElemId(0), rule);
         assert!(ensure_nonlinear_input_for_kind(&other, AnalysisKind::Incremental).is_err());
