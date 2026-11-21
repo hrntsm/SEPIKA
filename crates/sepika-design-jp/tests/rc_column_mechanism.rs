@@ -477,12 +477,39 @@ fn qd1_accounts_for_the_analytical_rigid_zone_at_the_connected_end() {
             girder.rigid_zone.length_j = lengths_mm[1 - end];
             model.stress_cfg.consider_rigid_zones = enabled;
             model.validate().unwrap();
-            let [strong, _] = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
+            let [strong, weak] = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
             assert_near(strong, expected, 1e-6);
+            assert_near(weak, 162_630.279_382_081, 1e-6);
         }
         let girder = &mut model.elements[id.index()];
         girder.end_cond[end] = EndCondition::Fixed;
         girder.rigid_zone = Default::default();
+    }
+}
+
+#[test]
+fn qd1_uses_both_column_ends_across_a_sloped_pinned_girder_with_a_rigid_zone() {
+    let mut model = fixture::column_with_opposing_head_girders(
+        column::column_model(false, 0.0),
+        ElementKind::MultiSpring,
+    );
+    let girder = &mut model.elements[fixture::GIRDER.index()];
+    model.nodes[girder.nodes[1].index()].coord[2] += 1000.0;
+    girder.end_cond[0] = EndCondition::Pinned;
+    girder.rigid_zone.length_i = 100.0;
+    model.validate().unwrap();
+    for (enabled, expected) in [
+        (
+            true,
+            [reference::BOTH_COLUMN_ENDS_QD1_N, 189_308.326_858_618],
+        ),
+        (false, [reference::ONE_GIRDER_QD1_N, 162_630.279_382_081]),
+    ] {
+        model.stress_cfg.consider_rigid_zones = enabled;
+        let qd1 = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
+        for (actual, expected) in qd1.into_iter().zip(expected) {
+            assert_near(actual, expected, 1e-6);
+        }
     }
 }
 
@@ -493,31 +520,41 @@ fn qd1_uses_column_ends_when_xyz_offsets_make_the_girder_mechanism_uncertain() {
         ElementKind::MultiSpring,
     );
     let i = fixture::GIRDER.index();
-    for (condition, offsets, expected_weak) in [
+    for (condition, offsets, expected_strong, expected_weak) in [
         (
             EndCondition::Pinned,
-            [[0.0, 0.0, 200.0]; 2],
-            162_630.279_382_081,
+            [[0.0, 200.0, 0.0]; 2],
+            reference::BOTH_COLUMN_ENDS_QD1_N,
+            189_308.326_858_618,
         ),
         (
             EndCondition::Fixed,
             [[0.0, 0.0, 200.0], [0.0; 3]],
-            162_630.279_382_081,
+            reference::BOTH_COLUMN_ENDS_QD1_N,
+            189_308.326_858_618,
         ),
         (
             EndCondition::Fixed,
             [[0.0; 3], [-4000.0, 5000.0, 0.0]],
+            reference::BOTH_COLUMN_ENDS_QD1_N,
             189_308.326_858_618,
+        ),
+        (
+            EndCondition::Pinned,
+            [[0.0; 3], [-4000.0, 5000.0, 0.0]],
+            reference::ONE_GIRDER_QD1_N,
+            162_630.279_382_081,
         ),
     ] {
         model.elements[i].end_cond[0] = condition;
         model.elements[i].end_offsets_mm = offsets;
         model.validate().unwrap();
         let [strong, weak] = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
-        assert_near(strong, reference::BOTH_COLUMN_ENDS_QD1_N, 1e-6);
+        assert_near(strong, expected_strong, 1e-6);
         assert_near(weak, expected_weak, 1e-6);
     }
     model.elements[i].end_offsets_mm = [[0.0; 3]; 2];
+    model.elements[i].end_cond[0] = EndCondition::Fixed;
     for end in [0, 1] {
         model.elements[COLUMN.index()].end_offsets_mm = [[0.0; 3]; 2];
         model.elements[COLUMN.index()].end_offsets_mm[end] = [0.0, 100.0, 0.0];
@@ -556,6 +593,26 @@ fn pinned_flexible_end_can_transfer_nodal_moment_through_a_rigid_arm_or_xyz_offs
     assert_near(response.flex_face_force_local[5], 0.0, 1e-6);
     assert_near(response.nodal_residual.data[0], 10_350.0, 1e-6);
     assert_near(response.nodal_residual.data[4], 2_070_000.0, 1e-6);
+
+    model.elements[girder].end_offsets_mm = [[0.0, 200.0, 0.0]; 2];
+    let response = response_for(&model, 2, 1.0);
+    assert_near(response.flex_face_force_local[5], 0.0, 1e-6);
+    assert_near(response.nodal_residual.data[2], 5_729.064_160_598, 1e-6);
+    assert_near(response.nodal_residual.data[3], 1_145_812.832_119_661, 1e-6);
+
+    model.elements[girder].end_offsets_mm[0] = [0.0; 3];
+    let response = response_for(&model, 2, 1.0);
+    for moment in &response.nodal_residual.data[3..6] {
+        assert_near(*moment, 0.0, 1e-6);
+    }
+
+    model.elements[girder].end_offsets_mm = [[0.0; 3]; 2];
+    model.nodes[2].coord[2] += 1000.0;
+    model.stress_cfg.consider_rigid_zones = true;
+    let response = response_for(&model, 1, 1.0);
+    assert_near(response.flex_face_force_local[4], 0.0, 1e-6);
+    assert_near(response.nodal_residual.data[1], 1_424.830_746_940, 1e-6);
+    assert_near(response.nodal_residual.data[3], -34_557.221_578_003, 1e-6);
 }
 
 #[test]

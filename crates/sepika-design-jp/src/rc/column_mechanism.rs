@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use sepika_core::adjacency::NodeAdjacency;
-use sepika_core::geom::vec3::{norm, sub};
+use sepika_core::geom::vec3::{cross, norm, sub};
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, ElementKind, EndCondition, Material, Model};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
@@ -191,6 +191,7 @@ fn sum_beam_my_at_node(
     load_h: [f64; 2],
     peer_h: [f64; 2],
     prefer_on_tie: bool,
+    column_bending_axis: [f64; 3],
 ) -> Result<Option<f64>, String> {
     let mut sum = Some(0.0);
     for other in adjacency.elements_at(model, node) {
@@ -205,43 +206,46 @@ fn sum_beam_my_at_node(
             horizontal_unit(axis)
                 .is_some_and(|axis_h| aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie))
         };
-        let has_offset = other.end_offsets_mm != [[0.0; 3]; 2];
-        if !aligns(axis)
-            && !(has_offset
-                && model
-                    .primary_frame_axis_end_positions(other)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|[i, j]| aligns(sub(j, i))))
-        {
-            continue;
-        }
         match MemberKind::try_of_element(other, model) {
             Ok(MemberKind::Girder) => {}
-            Ok(_) => continue,
-            Err(_) => {
+            Err(_) if aligns(axis) => {
                 sum = None;
                 continue;
             }
+            _ => continue,
         }
-        if has_offset {
+        let end = usize::from(other.nodes[1] == node);
+        if other.end_offsets_mm[end] != [0.0; 3] {
             sum = None;
             continue;
         }
-        let end = usize::from(n1.id == node);
+        let has_far_offset = other.end_offsets_mm[1 - end] != [0.0; 3];
+        let actual_axis = if has_far_offset {
+            model
+                .primary_frame_axis_end_positions(other)
+                .ok()
+                .flatten()
+                .map_or(axis, |[i, j]| sub(j, i))
+        } else {
+            axis
+        };
         match other.end_cond[end] {
-            EndCondition::Fixed => {}
             EndCondition::Pinned | EndCondition::SemiRigid { k_theta: 0.0 } => {
                 let rigid = model.analysis_rigid_zone(other);
-                let (i, j) =
-                    resolve_lengths(rigid.rigid_length_i(), rigid.rigid_length_j(), norm(axis));
-                // ピンでも可撓端のせん断力は剛域を介して節点に曲げを伝える。
-                if [i, j][end] > 0.0 {
+                let (i, j) = resolve_lengths(
+                    rigid.rigid_length_i(),
+                    rigid.rigid_length_j(),
+                    norm(actual_axis),
+                );
+                // 材軸方向の腕が柱の曲げ軸と平行な場合だけ、その軸まわりの付加曲げは生じない。
+                if [i, j][end] > 0.0 && cross(actual_axis, column_bending_axis) != [0.0; 3] {
                     sum = None;
                 }
                 continue;
             }
-            EndCondition::SemiRigid { .. } => {
+            _ if !aligns(axis) && !aligns(actual_axis) => continue,
+            EndCondition::Fixed if !has_far_offset => {}
+            _ => {
                 sum = None;
                 continue;
             }
@@ -427,9 +431,18 @@ fn column_mechanism_sum_my(
     };
     let head_beam_factor = topology.head_beam_factor(model, head, head_z_mm);
 
-    let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2]| {
-        let beam_sum =
-            |node| sum_beam_my_at_node(model, &topology.frame, node, load_h, peer_h, strong);
+    let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2], bending_axis: [f64; 3]| {
+        let beam_sum = |node| {
+            sum_beam_my_at_node(
+                model,
+                &topology.frame,
+                node,
+                load_h,
+                peer_h,
+                strong,
+                bending_axis,
+            )
+        };
         let beam_ends = beam_sum(ni).and_then(|bi| beam_sum(nj).map(|bj| (bi, bj)));
         let (n, beams) = match (&design_n, beam_ends) {
             (Ok(n), Ok(beams)) => (*n, beams),
@@ -470,8 +483,8 @@ fn column_mechanism_sum_my(
     };
 
     Some(ColumnMechanism {
-        qy: sum_for(true, load_strong, load_weak),
-        qz: sum_for(false, load_weak, load_strong),
+        qy: sum_for(true, load_strong, load_weak, ez),
+        qz: sum_for(false, load_weak, load_strong, ey),
         missing_gravity_axial,
     })
 }
