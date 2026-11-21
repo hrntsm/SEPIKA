@@ -787,13 +787,13 @@ fn draw_peak_check(
         );
         return;
     }
-    let adjacency = (structure == StructureKind::Rc
+    let column_mechanism_topology = (structure == StructureKind::Rc
         && kind == MemberKind::Column
         && seismic_qd
             .as_ref()
             .is_some_and(|qd| qd.method != QdMethod::Qd2)
         && !wrong_main_rebar)
-        .then(|| sepika_core::adjacency::NodeAdjacency::build(model));
+        .then(|| sepika_design_jp::rc::ColumnMechanismTopology::new(model));
 
     let mut ctx = DesignCtx {
         term: LoadTerm::Short,
@@ -859,7 +859,7 @@ fn draw_peak_check(
             };
             ctx.shear_span = shear_span(5, 1);
             ctx.shear_span_y = shear_span(4, 2);
-            ctx.column_sum_my = adjacency.as_ref().and_then(|adj| {
+            ctx.column_sum_my = column_mechanism_topology.as_ref().and_then(|topology| {
                 let axial_at = |at: &[(f64, [f64; 6])], target: f64| {
                     at.iter()
                         .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
@@ -868,7 +868,7 @@ fn draw_peak_check(
                 let qd = ctx.seismic_qd.as_ref()?;
                 sepika_design_jp::rc::compute_column_mechanism_sum_my(
                     model,
-                    adj,
+                    topology,
                     elem,
                     axial_at(&qd.long_at, 0.0),
                     axial_at(&qd.long_at, 1.0),
@@ -1164,6 +1164,10 @@ mod steel_column_lateral_buckling_input;
 mod rc_column_mechanism_input;
 
 #[cfg(test)]
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_column_mechanism_reference.rs"]
+mod rc_column_mechanism_reference;
+
+#[cfg(test)]
 use crate::app::shear_area_acceptance_tests::h_column_input as combined_column;
 
 #[cfg(test)]
@@ -1350,16 +1354,16 @@ mod tests {
             .join("\n")
     }
 
-    #[test]
-    fn rc_column_peak_check_reports_invalid_connected_girder_rebar_for_qd1() {
+    fn rc_column_peak_check_app(
+        model: sepika_core::model::Model,
+        method: sepika_design_jp::QdMethod,
+    ) -> App {
         use super::rc_column_mechanism_input as input;
-        use crate::app::rc_column_boundary_tests::input as column;
-        use sepika_design_jp::QdMethod;
         use sepika_solver::statics::linear::StaticOnce;
 
         let mut app = App::default();
-        assert!(app.load_model(input::column_with_girder(column::column_model(false, 0.0))));
-        app.core.analysis_cfg.qd_method = QdMethod::Min;
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.qd_method = method;
         app.core.scoped.results = Some(crate::app::ResultsBundle {
             combos: vec![(
                 input::GRAVITY.into(),
@@ -1382,18 +1386,29 @@ mod tests {
             )],
             ..Default::default()
         });
+        app
+    }
+
+    fn rc_column_peak_check_text(app: &App) -> String {
         let recording = ThRecording {
             peak_member_forces: vec![Some(MemberForces {
                 at: vec![(0.5, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0])],
             })],
             ..Default::default()
         };
-        let labels = |app: &App| {
-            let i = input::COLUMN.index();
-            peak_recording_text(app, &app.core.model.elements[i], i, &recording, true)
-        };
+        let i = super::rc_column_mechanism_input::COLUMN.index();
+        peak_recording_text(app, &app.core.model.elements[i], i, &recording, true)
+    }
 
-        let text = labels(&app);
+    #[test]
+    fn rc_column_peak_check_reports_invalid_connected_girder_rebar_for_qd1() {
+        use super::rc_column_mechanism_input as input;
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_design_jp::QdMethod;
+
+        let model = input::column_with_girder(column::column_model(false, 0.0));
+        let mut app = rc_column_peak_check_app(model, QdMethod::Min);
+        let text = rc_column_peak_check_text(&app);
         for message in [
             "検定不能",
             "RC柱 ID 0 の Qy 方向",
@@ -1406,12 +1421,37 @@ mod tests {
         assert!(!text.contains("検定比 "), "{text}");
 
         app.core.model.sections[input::GIRDER_SECTION.index()].rebar_material = Some(input::REBAR);
-        let text = labels(&app);
+        let text = rc_column_peak_check_text(&app);
         assert!(
             text.contains("検定比 ") && text.contains("せん断 "),
             "{text}"
         );
         assert!(!text.contains("検定不能"), "{text}");
+    }
+
+    #[test]
+    fn rc_column_peak_qd1_check_uses_upper_column_continuity() {
+        use super::rc_column_mechanism_input as input;
+        use super::rc_column_mechanism_reference::{CONTINUOUS_SHEAR_RATIO, TERMINAL_SHEAR_RATIO};
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_core::ids::NodeId;
+        use sepika_core::model::ElementKind;
+        use sepika_design_jp::QdMethod;
+
+        let terminal = input::column_with_yielding_head_girders(column::column_model(false, 0.0));
+        let mut continuous = terminal.clone();
+        input::add_column_above(&mut continuous, NodeId(1), ElementKind::Fiber);
+        for (model, expected_ratio) in [
+            (terminal, TERMINAL_SHEAR_RATIO),
+            (continuous, CONTINUOUS_SHEAR_RATIO),
+        ] {
+            let app = rc_column_peak_check_app(model, QdMethod::Qd1);
+            let text = rc_column_peak_check_text(&app);
+            assert!(
+                text.contains(&format!("せん断 {expected_ratio:.2}")),
+                "{text}"
+            );
+        }
     }
 
     #[test]

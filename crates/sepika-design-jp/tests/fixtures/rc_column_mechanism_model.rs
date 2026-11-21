@@ -1,6 +1,6 @@
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
-    FrameSectionUse, LoadCase, LoadCaseKind, LoadCombination, MaterialCategory, Model,
+    ElementKind, FrameSectionUse, LoadCase, LoadCaseKind, LoadCombination, MaterialCategory, Model,
 };
 use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RebarSize, SectionShape};
 
@@ -67,4 +67,39 @@ pub fn column_with_girder(mut model: Model) -> Model {
     });
     model.validate().unwrap();
     model
+}
+
+pub fn column_with_yielding_head_girders(model: Model) -> Model {
+    let mut model = column_with_girder(model);
+    let section = &mut model.sections[GIRDER_SECTION.index()];
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut section.shape else {
+        unreachable!();
+    };
+    rebar.main_dia = RebarSize::DiameterMm(19.0);
+    rebar.top = vec![2];
+    rebar.bottom = vec![2];
+    section.rebar_material = Some(REBAR);
+
+    let mut far_node = model.nodes[2].clone();
+    far_node.id = NodeId(3);
+    far_node.coord = [0.0, 4000.0, 1500.0];
+    model.nodes.push(far_node);
+    let mut girder = model.elements[GIRDER.index()].clone();
+    girder.id = ElemId(2);
+    girder.nodes[1] = NodeId(3);
+    model.elements.push(girder);
+    model
+}
+
+pub fn add_column_above(model: &mut Model, base: NodeId, kind: ElementKind) {
+    let mut top = model.nodes[base.index()].clone();
+    top.id = NodeId(model.nodes.len() as u32);
+    top.coord[2] = 4500.0;
+    let mut upper = model.elements[COLUMN.index()].clone();
+    upper.id = ElemId(model.elements.len() as u32);
+    upper.kind = kind;
+    upper.nodes = [base, top.id].into_iter().collect();
+    upper.end_offsets_mm = [[0.0; 3]; 2];
+    model.nodes.push(top);
+    model.elements.push(upper);
 }
