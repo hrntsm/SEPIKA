@@ -693,17 +693,24 @@ fn check_member(
                 opts.upper_strength_factor * 2.0 * mu_y / l_clear
             }
         };
-        let ry = if qsu_y > 0.0 {
-            qmu_y / qsu_y
-        } else {
-            f64::INFINITY
-        };
         let Some(qsu) = shear_strength else {
             weak_shear_ng = qmu_y > qsu_y;
             return Ok(None);
         };
-        let rx = if qsu > 0.0 { qmu / qsu } else { f64::INFINITY };
-        Ok(Some(biaxial_margin(rx, ry, 2.0)))
+        let ratio = |demand_n: f64, capacity_n: f64| {
+            if capacity_n > 0.0 {
+                demand_n / capacity_n
+            } else if shear_rebar_issue.is_some() && capacity_n == 0.0 && demand_n == 0.0 {
+                0.0
+            } else {
+                f64::INFINITY
+            }
+        };
+        Ok(Some(biaxial_margin(
+            ratio(qmu, qsu),
+            ratio(qmu_y, qsu_y),
+            2.0,
+        )))
     });
     let biaxial_shear_margin = biaxial_shear.and_then(Result::ok).flatten();
 

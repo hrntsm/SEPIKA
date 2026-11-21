@@ -611,6 +611,44 @@ fn ultimate_keeps_zero_shear_capacity_when_the_adopted_formula_has_no_reinforcem
 }
 
 #[test]
+fn ultimate_biaxial_shear_at_zero_capacity_requires_positive_demand_for_independent_failure() {
+    for (method, fc, rp) in [
+        (ShearMethod::Ductility, 24.0, 0.05),
+        (ShearMethod::Plastic, 140.0, 0.0),
+    ] {
+        let mut model = rc_column::column_model(false, 0.0);
+        set_ultimate_input(&mut model);
+        model.materials[0].fc = Some(fc);
+        assign_shear_rebar(&mut model, MaterialCategory::Steel);
+        let opts = UltimateShearOptions {
+            shear_method: method,
+            biaxial_shear: true,
+            include_bond: false,
+            ..Default::default()
+        };
+
+        for (qy, qz) in [(0.0, 0.0), (10_000.0, 0.0), (0.0, 10_000.0)] {
+            let demand = MemberDemand::from_pushover(0.0, 0.0, 0.0, qy, qz, rp);
+            let result = ultimate(&model, demand, &opts);
+            assert_eq!(result.qsu, 0.0, "{result:?}");
+            assert!(!result.ok);
+            if qy == 0.0 && qz == 0.0 {
+                assert_eq!(result.biaxial_shear_margin, Some(f64::INFINITY));
+                let reason = result
+                    .unchecked_reason
+                    .as_deref()
+                    .expect("材料の未算定理由");
+                assert_diagnostic(reason, &model, "RC柱", MaterialCategory::Steel);
+            } else {
+                assert_eq!(result.biaxial_shear_margin, Some(0.0));
+                assert!(result.unchecked_reason.is_none(), "{result:?}");
+                assert_diagnostic(&result.detail, &model, "RC柱", MaterialCategory::Steel);
+            }
+        }
+    }
+}
+
+#[test]
 fn both_invalid_rebar_assignments_keep_independent_failures_and_both_diagnostics() {
     let mut model = rc_beam::model(false);
     set_ultimate_input(&mut model);
