@@ -222,6 +222,9 @@ fn fiber_rebar_factor(
         .element_rebar_material_with_grade(data)
         .filter(|(mat, grade)| {
             sepika_core::material_grade::has_jis_rebar_strength_limit(mat, *grade)
+                || sepika_core::material_grade::requires_direct_high_strength_main_rebar(
+                    mat, *grade,
+                )
         })
         .or_else(|| model.element_material(data).map(|mat| (mat, None)));
     basis.rebar_factor(material)
