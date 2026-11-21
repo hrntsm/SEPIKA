@@ -155,6 +155,30 @@ fn independent_file(path: &Path, m: &Model) {
 }
 
 #[test]
+fn ovika_rejects_steel_design_attr_without_a_member() {
+    let mut model = baseline();
+    model.steel_design_attrs = vec![serde_json::from_value(serde_json::json!({
+        "elem": 0,
+        "lk_y_direct": 1000.0
+    }))
+    .unwrap()];
+    let path = std::env::temp_dir().join(format!("sepika1751-{}.ovika", std::process::id()));
+    independent_file(&path, &model);
+    let original = std::fs::read(&path).unwrap();
+
+    let load = load_ovika(&path).err().unwrap();
+    let save = save_ovika(&path, &model, OvikaExtras::default()).unwrap_err();
+    for error in [load, save] {
+        assert!(
+            error.to_string().contains("鉄骨部材の検定属性 -> 部材 0"),
+            "{error}"
+        );
+    }
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn save_and_independent_load_reject_missing_targets_and_preserve_input() {
     let dir = std::env::temp_dir().join(format!("sepika681-reference-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

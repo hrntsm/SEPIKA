@@ -5,6 +5,8 @@
 
 use super::*;
 
+const STEEL_DESIGN_ATTR_LABEL: &str = "鉄骨部材の検定属性";
+
 macro_rules! for_each_elem_attr_collection {
     ($visit:ident) => {
         $visit!(
@@ -13,7 +15,7 @@ macro_rules! for_each_elem_attr_collection {
             "雑壁代表柱の指定"
         );
         $visit!(wall_attrs, elem, "壁属性");
-        $visit!(steel_design_attrs, elem, "鉄骨部材の検定属性");
+        $visit!(steel_design_attrs, elem, STEEL_DESIGN_ATTR_LABEL);
         $visit!(slab_composite_attrs);
         $visit!(pca_attrs, elem, "PCa梁属性");
         $visit!(member_hysteresis_attrs, elem, "部材の履歴則指定");
@@ -29,7 +31,8 @@ macro_rules! for_each_elem_attr_collection {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ElemAttrs {
     pub wall: Option<WallAttr>,
-    pub steel_design: Option<SteelDesignAttr>,
+    /// 元の配列位置と鉄骨部材の検定属性。
+    pub steel_design: Vec<(usize, SteelDesignAttr)>,
     pub pca: Option<PcaGirderAttr>,
     pub hysteresis: Option<MemberHysteresisAttr>,
     pub damper: Option<DamperAttr>,
@@ -340,6 +343,7 @@ impl Model {
                 )));
             }
         }
+        self.validate_steel_design_attr_refs()?;
 
         for sec in &self.sections {
             for (role, mid) in [
@@ -1590,6 +1594,19 @@ impl Model {
         }
     }
 
+    /// 参照先が存在しない最初の鉄骨部材の検定属性を、部材番号付きエラーで返す。
+    pub fn validate_steel_design_attr_refs(&self) -> Result<(), crate::error::CoreError> {
+        for attr in &self.steel_design_attrs {
+            if self.element(attr.elem).is_none() {
+                return Err(crate::error::CoreError::DanglingRef(format!(
+                    "{STEEL_DESIGN_ATTR_LABEL} -> 部材 {}",
+                    attr.elem.0
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// 条件に一致する部材属性や一本部材指定の参照先と入力種別を返す。
     pub fn find_elem_attr_ref(
         &self,
@@ -1606,7 +1623,7 @@ impl Model {
                     return Some((id, "一本部材の指定"));
                 }
             };
-            ($($collection:ident).+, $field:ident, $label:literal) => {
+            ($($collection:ident).+, $field:ident, $label:expr) => {
                 if let Some(entry) = self.$($collection).+.iter().find(|entry| matches(entry.$field)) {
                     return Some((entry.$field, $label));
                 }
@@ -1642,7 +1659,7 @@ impl Model {
                     f(id);
                 }
             };
-            ($($collection:ident).+, $field:ident, $label:literal) => {
+            ($($collection:ident).+, $field:ident, $label:expr) => {
                 for entry in &mut self.$($collection).+ {
                     f(&mut entry.$field);
                 }
@@ -1659,9 +1676,19 @@ impl Model {
                 .position(|a| get(a) == elem)
                 .map(|pos| v.remove(pos))
         }
+        let mut steel_design = Vec::new();
+        let mut index = 0;
+        self.steel_design_attrs.retain(|attr| {
+            let keep = attr.elem != elem;
+            if !keep {
+                steel_design.push((index, attr.clone()));
+            }
+            index += 1;
+            keep
+        });
         ElemAttrs {
             wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
-            steel_design: take_first(&mut self.steel_design_attrs, |a| a.elem, elem),
+            steel_design,
             slab_composite: self.slab_composite_attrs.remove(&elem),
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
             hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
@@ -1677,9 +1704,10 @@ impl Model {
             a.elem = elem;
             self.wall_attrs.push(a);
         }
-        if let Some(mut a) = attrs.steel_design {
-            a.elem = elem;
-            self.steel_design_attrs.push(a);
+        for (index, mut attr) in attrs.steel_design {
+            attr.elem = elem;
+            self.steel_design_attrs
+                .insert(index.min(self.steel_design_attrs.len()), attr);
         }
         if let Some(connection) = attrs.slab_composite {
             self.slab_composite_attrs.insert(elem, connection);

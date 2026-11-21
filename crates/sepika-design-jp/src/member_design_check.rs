@@ -229,9 +229,12 @@ pub(crate) fn combine_incomplete_reasons(
     }
 }
 
-/// 通常鋼線材・鋼小梁・S/CFTパネルの材料・実板厚・Fを検証する。
+/// 鉄骨部材の検定属性の参照と、通常鋼線材・鋼小梁・S/CFTパネルの材料・実板厚・Fを検証する。
 /// 入力不備は対象IDと理由を付けて返す。幾何未対応や検定荷重不足の判定は含めない。
 pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
+    model
+        .validate_steel_design_attr_refs()
+        .map_err(|error| error.to_string())?;
     for elem in model
         .elements
         .iter()
