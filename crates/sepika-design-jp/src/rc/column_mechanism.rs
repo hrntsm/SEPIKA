@@ -3,10 +3,12 @@
 use std::collections::HashSet;
 
 use sepika_core::adjacency::NodeAdjacency;
+use sepika_core::geom::vec3::{norm, sub};
 use sepika_core::ids::NodeId;
-use sepika_core::model::{ElementData, ElementKind, Material, Model};
+use sepika_core::model::{ElementData, ElementKind, EndCondition, Material, Model};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
+use sepika_element::frame::rigid_arm::resolve_lengths;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::common::constraint::Reducer;
 
@@ -198,21 +200,48 @@ fn sum_beam_my_at_node(
         ) else {
             continue;
         };
-        let axis = [
-            n1.coord[0] - n0.coord[0],
-            n1.coord[1] - n0.coord[1],
-            n1.coord[2] - n0.coord[2],
-        ];
-        let Some(axis_h) = horizontal_unit(axis) else {
-            continue;
+        let axis = sub(n1.coord, n0.coord);
+        let aligns = |axis| {
+            horizontal_unit(axis)
+                .is_some_and(|axis_h| aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie))
         };
-        if !aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie) {
+        let has_offset = other.end_offsets_mm != [[0.0; 3]; 2];
+        if !aligns(axis)
+            && !(has_offset
+                && model
+                    .primary_frame_axis_end_positions(other)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|[i, j]| aligns(sub(j, i))))
+        {
             continue;
         }
         match MemberKind::try_of_element(other, model) {
             Ok(MemberKind::Girder) => {}
             Ok(_) => continue,
             Err(_) => {
+                sum = None;
+                continue;
+            }
+        }
+        if has_offset {
+            sum = None;
+            continue;
+        }
+        let end = usize::from(n1.id == node);
+        match other.end_cond[end] {
+            EndCondition::Fixed => {}
+            EndCondition::Pinned | EndCondition::SemiRigid { k_theta: 0.0 } => {
+                let rigid = model.analysis_rigid_zone(other);
+                let (i, j) =
+                    resolve_lengths(rigid.rigid_length_i(), rigid.rigid_length_j(), norm(axis));
+                // ピンでも可撓端のせん断力は剛域を介して節点に曲げを伝える。
+                if [i, j][end] > 0.0 {
+                    sum = None;
+                }
+                continue;
+            }
+            EndCondition::SemiRigid { .. } => {
                 sum = None;
                 continue;
             }
@@ -422,7 +451,7 @@ fn column_mechanism_sum_my(
             return Ok(None);
         };
         match beams {
-            (Some(bi), Some(bj)) => {
+            (Some(bi), Some(bj)) if column.end_offsets_mm == [[0.0; 3]; 2] => {
                 let hi = resolve_column_end_hinge(col_i, bi, false);
                 let hj = resolve_column_end_hinge(col_j, bj, false);
                 Ok(Some(sum_my_from_end_hinges(
