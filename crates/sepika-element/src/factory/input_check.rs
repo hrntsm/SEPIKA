@@ -420,7 +420,7 @@ pub(crate) fn member_rebar_material_strength_issue(
         return None;
     }
     let (material, grade) = model.element_rebar_material_input(data)?;
-    sepika_core::material_grade::rebar_material_strength_issue(material, grade)
+    sepika_core::material_grade::main_rebar_material_strength_issue(material, grade)
         .map(|reason| format!("部材 ID {} の主筋の{reason}", data.id.0))
 }
 

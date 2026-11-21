@@ -301,6 +301,47 @@ pub fn has_jis_rebar_strength_limit(mat: &crate::model::Material, stb_grade: Opt
         .is_some_and(|grade| grade == "SD490" || ordinary_jis_rebar_fy(grade).is_some())
 }
 
+/// 梁・柱の主筋で、適用条件の確認に基づく材料強度の直接入力が必要かを返す。
+/// 既知の高強度鉄筋名と、対応済みJIS材種以外の490 N/mm²を超えるFyを対象とする。
+pub fn requires_direct_high_strength_main_rebar(
+    mat: &crate::model::Material,
+    stb_grade: Option<&str>,
+) -> bool {
+    let grade = stb_grade.unwrap_or(&mat.name).trim();
+    matches!(
+        grade,
+        "USD590" | "USD590A" | "USD590B" | "USD685" | "USD685A" | "USD685B"
+    ) || (!has_jis_rebar_strength_limit(mat, stb_grade) && mat.fy.is_some_and(|fy| fy > 490.0))
+}
+
+/// 保有水平耐力計算で梁・柱の主筋に使う材料の入力不備を返す。
+/// 高強度鉄筋の直接入力には、鉄筋区分、正の有限Fy [N/mm²]、明示の割増1.0が必要。
+pub fn main_rebar_material_strength_issue(
+    mat: &crate::model::Material,
+    stb_grade: Option<&str>,
+) -> Option<String> {
+    if !requires_direct_high_strength_main_rebar(mat, stb_grade) {
+        return rebar_material_strength_issue(mat, stb_grade);
+    }
+    let reason = if mat.category != crate::model::MaterialCategory::Rebar {
+        "主筋には材料区分が「鉄筋」の材料を割り当ててください"
+    } else if mat.fy.is_none_or(|fy| !fy.is_finite() || fy <= 0.0) {
+        "Fy が未指定または不正です"
+    } else if mat.strength_factor != Some(1.0) {
+        "一般主筋の割増は適用できません"
+    } else {
+        return None;
+    };
+    let grade = stb_grade
+        .map(str::trim)
+        .map(|grade| format!("（元材種 {grade}）"))
+        .unwrap_or_default();
+    Some(format!(
+        "材料 ID {}「{}」{grade}の保有水平耐力計算用の入力を確認してください。{reason}。設計者が認定・指定書等の適用条件を確認し、材料強度を正の有限値の Fy [N/mm²] として入力し、割増を 1.0 と明示してください",
+        mat.id.0, mat.name
+    ))
+}
+
 /// 保有水平耐力計算で JIS 主筋・壁縦筋に使う材料の入力不備を返す。
 /// Fy [N/mm²] は材種の基準強度、割増は空欄または材種ごとの許容範囲が必要。
 pub fn rebar_material_strength_issue(

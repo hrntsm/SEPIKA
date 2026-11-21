@@ -2789,6 +2789,178 @@ fn rc_rebar_strength_in_pushover_capacity_and_yield_thresholds() {
 }
 
 #[test]
+fn pushover_uses_explicit_high_strength_main_rebar_without_increase() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_core::section_shape::{RebarSize, StandardRebar};
+    use sepika_element::factory::{build_hinge_view, StrengthBasis};
+
+    let (mut model, mut rebar, _, _) = rc_hinge_model();
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D25);
+    let Some(SectionShape::RcColumnRect {
+        rebar: section_rebar,
+        ..
+    }) = model.sections[0].shape.as_mut()
+    else {
+        panic!("RC矩形柱の断面が必要です");
+    };
+    *section_rebar = rebar.clone();
+    model.materials[0].strength_factor = Some(1.2);
+
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let run = |model: &Model| pushover_analysis(model, &dofmap, &reducer, SeismicDir::X, 40, 60.0);
+    let hinge = |model: &Model, basis, kind| {
+        build_hinge_view(&model.elements[0], model, basis, kind, 0.0, 8, 8).unwrap()
+    };
+
+    for (name, fy, factor) in [
+        ("USD685B", Some(685.0), None),
+        (" USD685A ", Some(685.0), Some(1.1)),
+        ("USD685", Some(685.0), Some(0.95)),
+        ("USD685B", Some(685.0), Some(f64::NAN)),
+        ("USD685B", None, Some(1.0)),
+        ("USD685B", Some(f64::INFINITY), Some(1.0)),
+        ("USD590", None, Some(1.0)),
+        ("USD590A", None, Some(1.0)),
+        ("USD590B", None, Some(1.0)),
+        ("USD658B", Some(685.0), None),
+        ("直接入力の主筋", Some(685.0), Some(1.1)),
+        ("SD685", Some(685.0), None),
+    ] {
+        model.materials[1].name = name.into();
+        model.materials[1].fy = fy;
+        model.materials[1].strength_factor = factor;
+        let diagnostic = run(&model).expect_err("主筋の材料強度の直接入力が必要です");
+        assert!(
+            diagnostic.contains("部材 ID 0 の主筋の材料 ID 1"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains(name) && diagnostic.contains("認定・指定書等"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("割増を 1.0"), "{diagnostic}");
+        let view = hinge(
+            &model,
+            StrengthBasis::MaterialStrength,
+            AnalysisKind::Incremental,
+        );
+        assert!(view.mn_surface.is_none());
+        assert_eq!(
+            view.unavailability_reason.as_deref(),
+            Some(diagnostic.as_str())
+        );
+    }
+
+    model.materials[1].name = "USD685B".into();
+    model.materials[1].fy = Some(685.0);
+    model.materials[1].strength_factor = Some(1.1);
+    model.materials[1].category = MaterialCategory::Steel;
+    let diagnostic = run(&model).expect_err("鋼材区分では鉄筋の条件を満たしません");
+    assert!(diagnostic.contains("材料区分が「鉄筋」"), "{diagnostic}");
+    model.materials[1].category = MaterialCategory::Rebar;
+
+    let nominal = hinge(&model, StrengthBasis::Nominal, AnalysisKind::TimeHistory);
+    let expected_tension = 12.0 * 506.7 * 685.0;
+    assert!((nominal.mn_surface.unwrap().n_tens - expected_tension).abs() < 1e-6);
+
+    model.materials[1].strength_factor = Some(1.0);
+    let explicit_capacity = run(&model).unwrap().qu;
+    assert!(explicit_capacity > 0.0);
+    let view = hinge(
+        &model,
+        StrengthBasis::MaterialStrength,
+        AnalysisKind::Incremental,
+    );
+    assert!((view.mn_surface.unwrap().n_tens - expected_tension).abs() < 1e-6);
+    let shear = compute_shear_yield_thresholds(&model).unwrap();
+    let DirThreshold::RcArakawa { input, .. } = &shear[0].y else {
+        panic!("RC矩形柱のせん断耐力を算定できません");
+    };
+    assert_eq!(input.sigma_y, 685.0);
+    assert_eq!(input.sigma_wy, 295.0);
+
+    model.materials[0].strength_factor = Some(1.0);
+    assert_eq!(run(&model).unwrap().qu, explicit_capacity);
+}
+
+#[test]
+fn pushover_requires_direct_high_strength_main_rebar_for_concentrated_rc_beam() {
+    use sepika_core::model::{FrameSectionUse, RcBeamReference};
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RebarSize, StandardRebar};
+
+    let (mut model, _, _, _) = rc_hinge_model();
+    let shape = SectionShape::RcBeamRect {
+        b: 400.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: RebarSize::Standard(StandardRebar::D25),
+            top: vec![4],
+            bottom: vec![4],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: RebarSize::Standard(StandardRebar::D10),
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    };
+    let mut section = shape.to_section(SectionId(1), "RC梁".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(3));
+    section.shear_rebar_material = Some(MaterialId(2));
+    model.sections.push(section);
+    model.materials.push(Material {
+        id: MaterialId(3),
+        name: "USD685B".into(),
+        fy: Some(685.0),
+        ..model.materials[1].clone()
+    });
+    model.nodes.push(Node {
+        id: NodeId(2),
+        coord: [0.0, 3000.0, 3000.0],
+        ..model.nodes[1].clone()
+    });
+    model.stories[1].node_ids.push(NodeId(2));
+    model.nodes.push(Node {
+        id: NodeId(3),
+        coord: [0.0, 3000.0, 0.0],
+        ..model.nodes[0].clone()
+    });
+    model.stories[0].node_ids = vec![NodeId(0), NodeId(3)];
+    model.elements.push(ElementData {
+        id: ElemId(1),
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(1), NodeId(2)],
+        section: Some(SectionId(1)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        force_regime: ForceRegime::UniaxialBendingShear,
+        ..model.elements[0].clone()
+    });
+    model.elements.push(ElementData {
+        id: ElemId(2),
+        nodes: smallvec::smallvec![NodeId(3), NodeId(2)],
+        ..model.elements[0].clone()
+    });
+    model.set_member_rc_beam_reference(ElemId(1), Some(RcBeamReference::AntisymmetricHalfMember));
+
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let run = |model: &Model| pushover_analysis(model, &dofmap, &reducer, SeismicDir::X, 40, 20.0);
+    let diagnostic = run(&model).expect_err("認定主筋の割増の空欄を診断する");
+    assert!(
+        diagnostic.contains("部材 ID 1 の主筋の材料 ID 3"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("割増を 1.0"), "{diagnostic}");
+    model.materials[3].strength_factor = Some(1.0);
+    assert!(run(&model).unwrap().qu > 0.0);
+}
+
+#[test]
 fn pushover_uses_sd345_main_rebar_strength_only_within_jis_limits() {
     use sepika_core::model::AnalysisKind;
     use sepika_element::factory::{build_hinge_view, StrengthBasis};
@@ -2960,6 +3132,23 @@ fn pushover_uses_stb_main_rebar_grade_independent_of_display_name() {
         model.materials[3].strength_factor = None;
     }
 
+    model.materials[1].name = "SD345".into();
+    model.materials[1].fy = Some(685.0);
+    model.stb_strengths.materials[0].grade = "USD685".into();
+    model.stb_strengths.common.as_mut().unwrap().reinforcement[0].strength = "USD685".into();
+    let input = &mut model.stb_strengths.sections[0].reinforcement[0];
+    input.native_material = None;
+    input.strength = None;
+    let diagnostic = run(&model).expect_err("ST-Bridgeの元材種に応じて強度の直接入力を要求する");
+    assert!(
+        diagnostic.contains("材料 ID 1「SD345」（元材種 USD685）"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("割増を 1.0"), "{diagnostic}");
+    model.materials[1].strength_factor = Some(1.0);
+    assert!(run(&model).unwrap().qu > 0.0);
+
+    model.stb_strengths.sections[0].reinforcement[0].native_material = Some(MaterialId(3));
     model.materials[3].name = "SD490".into();
     for fy in [None, Some(-1.0)] {
         model.materials[3].fy = fy;
