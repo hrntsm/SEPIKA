@@ -165,11 +165,15 @@ impl RcDesign {
         );
         let main_rebar_valid = material_issue.is_none();
         let shear_rebar_valid = shear_material_issue.is_none();
+        let beam = matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
         let shear_issue = missing_shear_reference.or_else(|| beam_shear_issue(forces, sec, ctx));
-        let mut column_issue = None;
-        let outcome = if let (true, true, Some(reason)) =
-            (main_rebar_valid, shear_rebar_valid, missing_shear_reference)
-        {
+        let mut section_issue = None;
+        let outcome = if let (false, true, true, Some(reason)) = (
+            beam,
+            main_rebar_valid,
+            shear_rebar_valid,
+            missing_shear_reference,
+        ) {
             CheckOutcome::Skipped {
                 reason: reason.into(),
             }
@@ -183,13 +187,33 @@ impl RcDesign {
                 shear_rebar_valid,
                 shear_issue,
                 column_gravity,
-                &mut column_issue,
+                &mut section_issue,
             )
         };
+        if let (true, true, true, Some(reason), None) = (
+            beam,
+            main_rebar_valid,
+            shear_rebar_valid,
+            shear_issue,
+            &section_issue,
+        ) {
+            if matches!(outcome, CheckOutcome::Checked(_)) {
+                return (
+                    CheckOutcome::Skipped {
+                        reason: reason.into(),
+                    },
+                    None,
+                );
+            }
+        }
         let incomplete =
-            combine_incomplete_reasons(material_issue, shear_material_issue.as_deref())
-                .and_then(|reason| combine_incomplete_reasons(Some(reason), shear_issue));
-        let incomplete = combine_incomplete_reasons(incomplete, column_issue.as_deref());
+            combine_incomplete_reasons(material_issue, shear_material_issue.as_deref());
+        let incomplete = if beam || incomplete.is_some() {
+            combine_incomplete_reasons(incomplete, shear_issue)
+        } else {
+            incomplete
+        };
+        let incomplete = combine_incomplete_reasons(incomplete, section_issue.as_deref());
         let strict_column_gravity = matches!(
             column_gravity,
             ColumnGravityMode::TimeHistory {
@@ -240,14 +264,19 @@ impl RcDesign {
         shear_rebar_valid: bool,
         shear_issue: Option<&str>,
         column_gravity: ColumnGravityMode<'_>,
-        column_issue: &mut Option<String>,
+        section_issue: &mut Option<String>,
     ) -> CheckOutcome {
         let (shape, fc_raw) =
             match Self::validate_section(sec, mat, ctx, main_rebar_valid, shear_rebar_valid) {
                 Ok(input) => input,
                 Err(reason) => return CheckOutcome::Skipped { reason },
             };
-        if let (true, true, Some(reason)) = (main_rebar_valid, shear_rebar_valid, shear_issue) {
+        if let (false, true, true, Some(reason)) = (
+            matches!(shape, SectionShape::RcBeamRect { .. }),
+            main_rebar_valid,
+            shear_rebar_valid,
+            shear_issue,
+        ) {
             return CheckOutcome::Skipped {
                 reason: reason.into(),
             };
@@ -264,6 +293,7 @@ impl RcDesign {
                 main_rebar_valid,
                 shear_rebar_valid,
                 shear_issue.is_none(),
+                section_issue,
             ),
             _ => column::column_check(
                 forces,
@@ -275,7 +305,7 @@ impl RcDesign {
                 shear_rebar_valid,
                 shear_issue.is_none(),
                 column_gravity,
-                column_issue,
+                section_issue,
             ),
         }
     }

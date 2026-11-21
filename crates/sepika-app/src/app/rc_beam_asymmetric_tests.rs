@@ -6,9 +6,16 @@ use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
 pub(super) mod input;
 
 #[test]
-fn rc_beam_asymmetric_gui_rechecks_legacy_capacity_and_preserves_unchecked_reason() {
+fn rc_beam_asymmetric_gui_preserves_provision_failure_and_unchecked_reason() {
     let mut app = App::default();
-    app.load_model(input::model(true));
+    let mut model = input::model(true);
+    let Some(sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. }) =
+        model.sections[0].shape.as_mut()
+    else {
+        unreachable!()
+    };
+    rebar.stirrup.pitch = 350.0;
+    app.load_model(model);
     app.run_preparation();
     app.run_linear_static(LoadCaseId(0));
     assert!(
@@ -24,16 +31,17 @@ fn rc_beam_asymmetric_gui_rechecks_legacy_capacity_and_preserves_unchecked_reaso
 
     let expected = &app.current_design_results().unwrap().member_checks;
     assert_eq!(expected.len(), 1);
-    assert_eq!(expected[0].positions.len(), 3);
-    for position in &expected[0].positions {
-        assert!(
-            matches!(&position.outcome, CheckOutcome::Skipped { reason } if reason.contains("正曲げ") && reason.contains("重心までの距離が一致しません"))
-        );
+    assert_eq!(expected[0].positions.len(), 4);
+    for pos in [0.0, 0.5, 1.0] {
+        assert!(expected[0].positions.iter().any(|position| position.xi == pos &&
+            matches!(&position.outcome, CheckOutcome::Skipped { reason } if reason.contains("正曲げ") && reason.contains("重心までの距離が一致しません"))));
     }
+    assert!(expected[0].positions.iter().any(|position| position.xi == 0.5 &&
+        matches!(&position.outcome, CheckOutcome::Checked(result) if !result.ok() && result.components.len() == 1 && result.components[0].kind == CheckKind::Provision)));
     let expected = serde_json::to_value(expected).unwrap();
 
     let path =
-        std::env::temp_dir().join(format!("sepika-1388-current-{}.ovika", std::process::id()));
+        std::env::temp_dir().join(format!("sepika-1814-current-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -48,11 +56,27 @@ fn rc_beam_asymmetric_gui_rechecks_legacy_capacity_and_preserves_unchecked_reaso
         expected
     );
 
-    let bundle = app.core.scoped.results.as_mut().unwrap();
+    let bundle = app.core.scoped.results.as_ref().unwrap();
     assert_eq!(
         bundle.design_contract_version,
         Some(DESIGN_CONTRACT_VERSION)
     );
+    let (mut stale, path) = super::result_contract_tests::restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(104),
+        "rc-beam-1814",
+    );
+    std::fs::remove_file(path).unwrap();
+    assert!(stale.current_static().is_some());
+    assert!(stale.current_design_results().is_none());
+    stale.run_design_check();
+    assert_eq!(
+        serde_json::to_value(&stale.current_design_results().unwrap().member_checks).unwrap(),
+        expected
+    );
+
+    let bundle = app.core.scoped.results.as_mut().unwrap();
     let legacy = CheckResult {
         basis: "RC 規準13条".into(),
         detail: String::new(),

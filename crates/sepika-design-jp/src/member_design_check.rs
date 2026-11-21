@@ -920,15 +920,21 @@ pub fn run_member_design_checks(
             }
             steel_deflection_references.push((*elem_id, detail));
         } else {
-            let center = member_checks[first_row..]
-                .iter_mut()
-                .find(|(_, pos, _)| *pos == 0.5)
-                .map(|(_, _, outcome)| outcome);
             let component = deflection.and_then(|value| {
                 value
                     .rc_component()
                     .ok_or_else(|| "検定比を有限な数値で算定できません".into())
             });
+            let center_rows = &mut member_checks[first_row..];
+            let unchecked_center = center_rows.iter().position(|(_, pos, outcome)| {
+                *pos == 0.5 && matches!(outcome, CheckOutcome::Skipped { .. })
+            });
+            let center = if let Some(index) = unchecked_center.filter(|_| component.is_err()) {
+                Some(&mut center_rows[index])
+            } else {
+                center_rows.iter_mut().find(|(_, pos, _)| *pos == 0.5)
+            }
+            .map(|(_, _, outcome)| outcome);
             match (component, center) {
                 (Ok(component), _) if wrong_shear_rebar && component.ratio <= 1.0 => {}
                 (Ok(component), Some(CheckOutcome::Checked(result))) => {
