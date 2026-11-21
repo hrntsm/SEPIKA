@@ -131,6 +131,56 @@ fn assert_relative(actual: f64, expected: f64) {
 }
 
 #[test]
+fn static_column_combines_margins_beyond_the_single_axis_range() {
+    for (factor, strong_bars, weak_bars, strong_margin, biaxial_margin) in [
+        (1.5e-308, 4, 4, f64::INFINITY, 1.389_149_853_392_81e308),
+        (1.5e-308, 4, 6, f64::INFINITY, 1.120_498_307_036_174e308),
+        (
+            1.5e-308,
+            6,
+            4,
+            1.364_137_971_379_613e308,
+            1.120_498_307_036_174e308,
+        ),
+        (1.2e-308, 2, 6, f64::INFINITY, 1.589_303_039_218_801e308),
+    ] {
+        let check = column_check(
+            &static_column(strong_bars, weak_bars),
+            factor,
+            150_000.0,
+            0.0,
+            true,
+        );
+        if strong_margin.is_infinite() {
+            assert_eq!(check.shear_margin, strong_margin);
+        } else {
+            assert_relative(check.shear_margin, strong_margin);
+        }
+        assert!(check.ok && check.unchecked_reason.is_none());
+        assert_relative(check.biaxial_shear_margin.unwrap(), biaxial_margin);
+    }
+}
+
+#[test]
+fn static_column_distinguishes_infinite_and_normal_biaxial_margins() {
+    let model = static_column(4, 4);
+    let check = column_check(&model, 1.0, 150_000.0, 0.0, true);
+    assert_relative(check.biaxial_shear_margin.unwrap(), 2.083_724_780_089_214_6);
+    assert!(check.ok && check.unchecked_reason.is_none());
+
+    let check = column_check(&model, 1e-308, 150_000.0, 0.0, true);
+    assert!(check.qmu > 0.0 && check.qmu.is_finite());
+    assert_eq!(check.biaxial_shear_margin, Some(f64::INFINITY));
+    assert!(check.ok && check.unchecked_reason.is_none());
+
+    let check = column_check(&model, f64::MAX, 20_000_000.0, 0.0, true);
+    assert_eq!(check.qmu, 0.0);
+    assert!(check.qsu > 0.0 && check.qsu.is_finite());
+    assert_eq!(check.biaxial_shear_margin, Some(f64::INFINITY));
+    assert!(check.ok && check.unchecked_reason.is_none());
+}
+
+#[test]
 fn static_column_compares_hinge_shear_when_the_product_would_overflow() {
     let model = static_column(4, 4);
     for (factor, qmu_n, shear, bond, biaxial) in [
