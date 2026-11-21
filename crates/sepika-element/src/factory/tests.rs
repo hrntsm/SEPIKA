@@ -282,6 +282,25 @@ fn wall_girder_diagnostic_keeps_common_geometry_and_mass_requirements() {
     );
 }
 
+#[test]
+fn wall_girder_does_not_require_a_shear_reinforcement_material_category() {
+    let mut model = elastic_wall_girder_model();
+    model.materials.push(Material {
+        id: MaterialId(1),
+        name: "SD345".into(),
+        category: MaterialCategory::Steel,
+        fy: Some(345.0),
+        ..model.materials[0].clone()
+    });
+    let issues_without_assignment = nonlinear_input_issues(&model);
+    model.sections[0].shear_rebar_material = Some(MaterialId(1));
+    assert!(crate::frame::beam::is_elastic_wall_girder(
+        &model,
+        &model.elements[0]
+    ));
+    assert_eq!(nonlinear_input_issues(&model), issues_without_assignment);
+}
+
 fn assert_wall_girder_factory_rejection(model: &Model) -> String {
     let data = &model.elements[0];
     assert!(crate::frame::beam::is_elastic_wall_girder(model, data));

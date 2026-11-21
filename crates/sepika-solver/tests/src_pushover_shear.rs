@@ -5,7 +5,8 @@ use sepika_core::model::{
     MaterialCategory, Model, Node, Story,
 };
 use sepika_core::section_shape::{
-    BeamStirrup, RcBeamRebar, RcRectColumnRebar, RebarSize, RectColumnHoop, SectionShape,
+    BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, RebarSize,
+    RectColumnHoop, SectionShape,
 };
 use sepika_math::solver::SolveError;
 use sepika_solver::common::constraint::Reducer;
@@ -86,12 +87,21 @@ fn restrained_member(frame_use: FrameSectionUse, web_mm: f64, flange_mm: f64) ->
             steel_flange_thick: flange_mm,
         }
     };
-    let mut sec = shape.input_section(SectionId(0), "SRC".into()).unwrap();
+    restrained_member_with_shape(frame_use, shape, Some(MaterialId(3)))
+}
+
+fn restrained_member_with_shape(
+    frame_use: FrameSectionUse,
+    shape: SectionShape,
+    steel_material: Option<MaterialId>,
+) -> Model {
+    let beam = frame_use == FrameSectionUse::Girder;
+    let mut sec = shape.input_section(SectionId(0), "断面".into()).unwrap();
     sec.frame_use = Some(frame_use);
     sec.material = Some(MaterialId(0));
     sec.rebar_material = Some(MaterialId(1));
     sec.shear_rebar_material = Some(MaterialId(2));
-    sec.steel_material = Some(MaterialId(3));
+    sec.steel_material = steel_material;
     let concrete = Material {
         id: MaterialId(0),
         name: "Fc24".into(),
@@ -221,6 +231,90 @@ fn run(
         false,
         Default::default(),
     )
+}
+
+#[test]
+fn pushover_requires_rebar_material_category_for_rc_and_src_shear_reinforcement() {
+    let src_beam = restrained_member(FrameSectionUse::Girder, 10.0, 13.0);
+    let src_column = restrained_member(FrameSectionUse::Column, 10.0, 13.0);
+    let rc_beam = SectionShape::RcBeamRect {
+        b: 400.0,
+        d: 600.0,
+        rebar: src_beam.sections[0]
+            .shape
+            .as_ref()
+            .and_then(SectionShape::beam_rebar)
+            .unwrap()
+            .clone(),
+    };
+    let rc_rect_column = SectionShape::RcColumnRect {
+        b: 400.0,
+        d: 600.0,
+        rebar: src_column.sections[0]
+            .shape
+            .as_ref()
+            .and_then(SectionShape::rect_column_rebar)
+            .unwrap()
+            .clone(),
+    };
+    let rc_circle_column = SectionShape::RcColumnCircle {
+        d: 600.0,
+        rebar: RcCircleColumnRebar {
+            main_dia: RebarSize::DiameterMm(25.0),
+            count: 16,
+            cover: 40.0,
+            hoop: CircleColumnHoop {
+                dia: RebarSize::DiameterMm(10.0),
+                pitch: 100.0,
+            },
+        },
+    };
+    for (name, mut model, direction) in [
+        (
+            "RC矩形梁",
+            restrained_member_with_shape(FrameSectionUse::Girder, rc_beam, None),
+            SeismicDir::Y,
+        ),
+        (
+            "RC矩形柱",
+            restrained_member_with_shape(FrameSectionUse::Column, rc_rect_column, None),
+            SeismicDir::X,
+        ),
+        (
+            "RC円形柱",
+            restrained_member_with_shape(FrameSectionUse::Column, rc_circle_column, None),
+            SeismicDir::X,
+        ),
+        ("SRC矩形梁", src_beam, SeismicDir::Y),
+        ("SRC矩形柱", src_column, SeismicDir::X),
+    ] {
+        model.materials[2].name = "SD345".into();
+        model.materials[2].fy = Some(345.0);
+        for (category, label) in [
+            (MaterialCategory::Steel, "鋼材"),
+            (MaterialCategory::Concrete, "コンクリート"),
+        ] {
+            model.materials[2].category = category;
+            let error = run(&mut model, direction, 1_000.0).unwrap_err();
+            for expected in [
+                "部材 ID 0",
+                "せん断補強筋",
+                "材料「SD345」",
+                label,
+                "せん断降伏耐力",
+                "断面タブ",
+                "区分「鉄筋」",
+                "再解析",
+            ] {
+                assert!(error.contains(expected), "{name} {expected}: {error}");
+            }
+        }
+        model.materials[2].category = MaterialCategory::Rebar;
+        let result =
+            run(&mut model, direction, 1_000.0).unwrap_or_else(|error| panic!("{name}: {error}"));
+        let shear_n = result.member_response[0].shear_strong;
+        assert!((shear_n - 1_000.0).abs() < 1.0, "{name}: {shear_n}");
+    }
 }
 
 #[test]
@@ -445,6 +539,17 @@ fn run_time_history(model: &mut Model) -> Result<ResponseResult, SolveError> {
         &[],
         NonlinearThCfg::default(),
     )
+}
+
+#[test]
+fn time_history_accepts_src_member_without_using_shear_reinforcement_strength() {
+    for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+        let mut model = restrained_member(frame_use, 10.0, 13.0);
+        model.materials[2].name = "SD345".into();
+        model.materials[2].fy = Some(345.0);
+        model.materials[2].category = MaterialCategory::Steel;
+        run_time_history(&mut model).unwrap_or_else(|error| panic!("{frame_use:?}: {error}"));
+    }
 }
 
 #[test]
