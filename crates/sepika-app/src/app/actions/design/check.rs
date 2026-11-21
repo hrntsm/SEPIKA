@@ -1,5 +1,28 @@
 use super::super::*;
 
+// NaNを含む同じ保存応答のコピーは、PartialEqだけでは出所の一致を確認できない。
+fn same_saved_member_forces(
+    expected: &[(ElemId, sepika_element::frame::beam::MemberForces)],
+    observed: &[(ElemId, sepika_element::frame::beam::MemberForces)],
+) -> bool {
+    expected.len() == observed.len()
+        && expected.iter().zip(observed).all(
+            |((expected_id, expected), (observed_id, observed))| {
+                expected_id == observed_id
+                    && expected.at.len() == observed.at.len()
+                    && expected.at.iter().zip(&observed.at).all(
+                        |((expected_pos, expected), (observed_pos, observed))| {
+                            expected_pos == observed_pos
+                                && expected
+                                    .iter()
+                                    .zip(observed)
+                                    .all(|(a, b)| a == b || a.to_bits() == b.to_bits())
+                        },
+                    )
+            },
+        )
+}
+
 impl App {
     /// 選択対象の保存係数・種別による状態。単独ケースと組合せを区別する。
     pub fn selected_design_load_state(
@@ -246,9 +269,11 @@ impl App {
         let rc_column_long_term_shear = if state
             .as_ref()
             .is_ok_and(|state| state.duration == sepika_core::load_combo::LoadDuration::Long)
-            && selected_response
-                .is_some_and(|response| response.member_forces == results.member_forces)
-        {
+            && selected_response.is_some_and(|response| {
+                response.member_forces == results.member_forces
+                    || selected_combo_name.is_some()
+                        && same_saved_member_forces(&response.member_forces, &results.member_forces)
+            }) {
             selected_combo_name.map_or(
                 RcColumnLongTermShearInput::SingleCase,
                 RcColumnLongTermShearInput::SavedCombination,

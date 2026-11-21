@@ -8,23 +8,28 @@ pub(crate) mod reference;
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_long_term_shear_model.rs"]
 mod long_term_shear_input;
 
+fn rc_column_long_term_shear_app(circle: bool) -> App {
+    let mut app = App::default();
+    assert!(app.load_model(long_term_shear_input::model(
+        input::column_model(circle, 0.0),
+        super::rc_beam_asymmetric_tests::input::section(300.0, 600.0, 19.0, &[3], &[3]),
+        true,
+    )));
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+
 #[test]
 fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika() {
     use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
 
     for circle in [false, true] {
-        let mut app = App::default();
-        assert!(app.load_model(long_term_shear_input::model(
-            input::column_model(circle, 0.0),
-            super::rc_beam_asymmetric_tests::input::section(300.0, 600.0, 19.0, &[3], &[3]),
-            true,
-        )));
-        app.run_combination(0);
-        assert!(
-            app.core.scoped.last_error.is_none(),
-            "{:?}",
-            app.core.scoped.last_error
-        );
+        let app = rc_column_long_term_shear_app(circle);
         let result = app.current_design_results().unwrap();
         let column = result
             .member_checks
@@ -79,6 +84,46 @@ fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika()
             println!("円形={circle} 解析版={ANALYSIS_CONTRACT_VERSION} 保存検定版={version} 再検定版={DESIGN_CONTRACT_VERSION}");
         }
     }
+}
+
+#[test]
+fn rc_column_long_term_shear_keeps_independent_failure_with_invalid_saved_axial_force() {
+    let mut app = rc_column_long_term_shear_app(false);
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    for forces in [
+        &mut bundle.member_forces,
+        &mut bundle.combos[0].1.member_forces,
+    ] {
+        let (_, response) = forces
+            .iter_mut()
+            .find(|(id, _)| *id == long_term_shear_input::COLUMN)
+            .unwrap();
+        let (_, station) = response.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap();
+        station[0] = f64::NAN;
+    }
+    assert!(app.require_selected_static_input().is_ok());
+    app.run_design_check();
+    let result = app.current_design_results().unwrap();
+    let column = result
+        .member_checks
+        .iter()
+        .find(|record| record.elem == long_term_shear_input::COLUMN)
+        .unwrap();
+    let middle = || {
+        column
+            .positions
+            .iter()
+            .filter(|position| position.xi == 0.5)
+    };
+    assert!(middle().any(|position| matches!(&position.outcome,
+        CheckOutcome::Skipped { reason } if reason.contains("軸力Nが非有限")
+            && !reason.contains("αの断面力参照") && !reason.contains("生成入力が未確認")
+    )));
+    assert!(middle().any(|position| matches!(&position.outcome,
+        CheckOutcome::Checked(result) if !result.ok() && result.components.len() == 1
+            && result.components[0].kind == CheckKind::Shear
+            && result.components[0].detail.contains("局所Qy最大 |Qy|=313900.000 N")
+    )));
 }
 
 #[test]

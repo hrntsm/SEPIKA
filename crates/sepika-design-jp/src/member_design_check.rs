@@ -23,7 +23,7 @@ use sepika_element::frame::beam::MemberForces;
 use sepika_solver::statics::linear::GirderColumnFaceEnds;
 
 pub(crate) mod rc_column_long_term_shear;
-use rc_column_long_term_shear::ColumnShearLoads;
+use rc_column_long_term_shear::{missing_design_positions, ColumnShearLoads};
 
 use crate::design_position::{design_positions, is_near_design_position};
 use crate::{
@@ -367,6 +367,7 @@ pub fn run_member_design_checks(
             });
         let torsion_reason =
             |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
+        let length = model.member_length(elem);
         if let Err(reason) = sec.ensure_properties_resolved() {
             for (pos, forces) in &mf.at {
                 push_strength_outcome(
@@ -379,6 +380,13 @@ pub fn run_member_design_checks(
                     torsion_reason(&MemberForcesAt::from_local(*pos, *forces)),
                 );
             }
+            if long_term_shear.is_some() {
+                for pos in missing_design_positions(&design_positions(elem, model, length), mf) {
+                    member_checks.push((*elem_id, pos, CheckOutcome::Skipped {
+                        reason: format!("RC柱の軸力・曲げを検定する断面位置の解析内力がありません。{reason}"),
+                    }));
+                }
+            }
             continue;
         }
 
@@ -390,7 +398,6 @@ pub fn run_member_design_checks(
             lateral_bracing_references.push((*elem_id, reference.clone()));
         }
         let kind = MemberKind::of_element(elem, model);
-        let length = model.member_length(elem);
         let shear_span = mf
             .at
             .iter()
@@ -643,6 +650,18 @@ pub fn run_member_design_checks(
         let checker: Box<dyn DesignCheck> = checker_for(structure);
 
         let positions = design_positions(elem, model, length);
+        let missing_positions = if long_term_shear.is_some() {
+            missing_design_positions(&positions, mf)
+        } else {
+            Vec::new()
+        };
+        let confirmed_shear_alpha = [(1, 5), (2, 4)].map(|(q_index, m_index)| {
+            long_term_shear.is_none()
+                || missing_positions.is_empty()
+                    && mf.at.iter().all(|(_, values)| {
+                        values[q_index].is_finite() && values[m_index].is_finite()
+                    })
+        });
 
         let first_row = member_checks.len();
         for (pos, forces) in &mf.at {
@@ -727,6 +746,7 @@ pub fn run_member_design_checks(
                     crate::rc::ColumnGravityMode::Ordinary {
                         boundary_shear_issue,
                         long_term_shear: long_term_shear.as_ref(),
+                        confirmed_shear_alpha,
                     },
                 );
                 check_incomplete = incomplete;
@@ -765,7 +785,31 @@ pub fn run_member_design_checks(
                 check_incomplete =
                     check_incomplete.map(|reason| format!("部材 ID {}: {reason}", elem.id.0));
             }
-            let incomplete = combine_incomplete_reasons(check_incomplete, torsion_reason(&mfa));
+            let mut incomplete = combine_incomplete_reasons(check_incomplete, torsion_reason(&mfa));
+            if long_term_shear.is_some() {
+                for (value, reason) in [
+                    (mfa.n, "軸力Nが非有限のため、軸力・曲げを検定できません"),
+                    (
+                        mfa.my,
+                        "曲げMyが非有限のため、当該方向の曲げを検定できません",
+                    ),
+                    (
+                        mfa.mz,
+                        "曲げMzが非有限のため、当該方向の曲げを検定できません",
+                    ),
+                ] {
+                    if !value.is_finite() {
+                        incomplete = combine_incomplete_reasons(incomplete, Some(reason));
+                    }
+                }
+                if let (Some(reason), CheckOutcome::Checked(result)) = (&mut incomplete, &outcome) {
+                    if let Some(shear) = result.components.iter().find(|component| {
+                        component.kind == crate::CheckKind::Shear && component.ratio <= 1.0
+                    }) {
+                        reason.push_str(&format!("。せん断の確認結果（{}）", shear.detail));
+                    }
+                }
+            }
             push_strength_outcome(
                 &mut member_checks,
                 *elem_id,
@@ -776,7 +820,25 @@ pub fn run_member_design_checks(
         }
 
         if let Some(shear) = &long_term_shear {
-            if first_row == member_checks.len() {
+            let mut bound_issue = None;
+            if confirmed_shear_alpha.contains(&false) {
+                if let Ok(peaks) = shear {
+                    match crate::RcDesign::long_column_shear_failure_over_capacity_bound(
+                        sec,
+                        mat,
+                        &ctx,
+                        peaks,
+                        confirmed_shear_alpha,
+                    ) {
+                        Ok(Some((xi, result))) => {
+                            member_checks.push((*elem_id, xi, CheckOutcome::Checked(result)))
+                        }
+                        Ok(None) => {}
+                        Err(issue) => bound_issue = Some(issue),
+                    }
+                }
+            }
+            if !missing_positions.is_empty() {
                 let mut reason =
                     "RC柱の軸力・曲げを検定する断面位置の解析内力がありません".to_owned();
                 match shear {
@@ -789,21 +851,23 @@ pub fn run_member_design_checks(
                                 ));
                             }
                         }
-                        match crate::RcDesign::long_column_shear_failure_over_capacity_bound(
-                            sec, mat, &ctx, peaks,
-                        ) {
-                            Ok(Some((xi, result))) => {
-                                member_checks.push((*elem_id, xi, CheckOutcome::Checked(result)))
-                            }
-                            Ok(None) => {}
-                            Err(issue) => reason.push_str(&format!("。{issue}")),
-                        }
                     }
                     Err(issue) => {
                         reason.push_str(&format!("。RC柱の長期せん断は未算定です（{issue}）"));
                     }
                 }
-                member_checks.push((*elem_id, 0.5, CheckOutcome::Skipped { reason }));
+                if let Some(issue) = bound_issue {
+                    reason.push_str(&format!("。{issue}"));
+                }
+                for pos in missing_positions {
+                    member_checks.push((
+                        *elem_id,
+                        pos,
+                        CheckOutcome::Skipped {
+                            reason: reason.clone(),
+                        },
+                    ));
+                }
             }
         }
 
@@ -885,14 +949,17 @@ pub fn run_member_design_checks(
             if !checked_column_ids.contains(&elem.id)
                 && rc_column_long_term_shear::is_target(model, elem)
             {
-                member_checks.push((
-                    elem.id,
-                    0.5,
-                    CheckOutcome::Skipped {
-                        reason: "RC柱の長期せん断は未算定です（対象部材の解析内力がありません）"
-                            .into(),
-                    },
-                ));
+                for pos in design_positions(elem, model, model.member_length(elem)) {
+                    member_checks.push((
+                        elem.id,
+                        pos,
+                        CheckOutcome::Skipped {
+                            reason:
+                                "RC柱の長期せん断は未算定です（対象部材の解析内力がありません）"
+                                    .into(),
+                        },
+                    ));
+                }
             }
         }
     }

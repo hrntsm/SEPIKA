@@ -59,6 +59,7 @@ pub(crate) enum ColumnGravityMode<'a> {
     Ordinary {
         boundary_shear_issue: Option<&'static str>,
         long_term_shear: Option<&'a LongTermColumnShear>,
+        confirmed_shear_alpha: [bool; 2],
     },
     TimeHistory {
         strict_gravity: bool,
@@ -284,6 +285,7 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         peaks: &[Result<FrameShearPeak, String>; 2],
+        confirmed_shear_alpha: [bool; 2],
     ) -> Result<Option<(f64, CheckResult)>, String> {
         let main_rebar_valid =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
@@ -300,7 +302,11 @@ impl RcDesign {
         }
         let allow = rc_allow(fc_raw, mat.concrete_class, None, true);
         Ok(column::long_shear_failure_over_capacity_bound(
-            shape, &allow, ctx.length, peaks,
+            shape,
+            &allow,
+            ctx.length,
+            peaks,
+            confirmed_shear_alpha,
         ))
     }
 

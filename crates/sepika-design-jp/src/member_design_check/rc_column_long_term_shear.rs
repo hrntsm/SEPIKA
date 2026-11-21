@@ -17,6 +17,7 @@ use sepika_element::frame::member_load::{frame_shear_envelope, FrameShearPeak};
 use sepika_element::transform::LocalFrame;
 
 use super::RcColumnLongTermShearInput;
+use crate::design_position::is_near_design_position;
 
 pub(crate) type LongTermColumnShear = Result<[Result<FrameShearPeak, String>; 2], String>;
 
@@ -43,6 +44,26 @@ pub(super) fn is_target(model: &Model, elem: &ElementData) -> bool {
                     structure_kind_of(Some(sec), Some(material.category)) == StructureKind::Rc
                 })
         })
+}
+
+pub(super) fn missing_design_positions(required: &[f64], forces: &MemberForces) -> Vec<f64> {
+    let mut observed = vec![false; required.len()];
+    for &(pos, _) in &forces.at {
+        if let Some((index, _)) = required
+            .iter()
+            .enumerate()
+            .filter(|(_, target)| is_near_design_position(pos, std::slice::from_ref(*target)))
+            .min_by(|(_, a), (_, b)| (pos - *a).abs().total_cmp(&(pos - *b).abs()))
+        {
+            observed[index] = true;
+        }
+    }
+    required
+        .iter()
+        .copied()
+        .zip(observed)
+        .filter_map(|(pos, has_response)| (!has_response).then_some(pos))
+        .collect()
 }
 
 impl<'a> ColumnShearLoads<'a> {
