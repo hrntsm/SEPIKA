@@ -8,13 +8,14 @@ mod reference;
 use fixture::{COLUMN, GIRDER_SECTION, REBAR};
 use reference::{CONTINUOUS_SHEAR_RATIO, TERMINAL_SHEAR_RATIO};
 use sepika_core::dof::{Dof, Dof6Mask};
-use sepika_core::ids::{ElemId, NodeId, SectionId, StoryId};
+use sepika_core::ids::{ElemId, LoadCaseId, NodeId, SectionId, StoryId};
 use sepika_core::model::{Constraint, ElementKind, FrameSectionUse, Model, Story};
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions, QdMethod,
 };
-use sepika_element::frame::beam::MemberForces;
+use sepika_element::frame::beam::{apply_auto_rigid_zones, MemberForces, RigidZoneRule};
+use sepika_solver::statics::linear::{linear_static_once, superpose_static};
 
 fn check(
     model: &Model,
@@ -145,15 +146,144 @@ fn qd1_continuous_column_uses_half_head_girder_moment() {
 }
 
 #[test]
-fn qd1_head_girder_search_retains_existing_beam_scope() {
+fn qd1_sloped_fiber_girder_contributes_without_counting_as_upper_column() {
     let mut model = yielding_head_model();
     fixture::add_column_above(&mut model, NodeId(1), ElementKind::Fiber);
     let top = model.nodes.last_mut().unwrap();
     top.coord[0] = 3000.0;
+    let mut section = model.sections[GIRDER_SECTION.index()].clone();
+    section.id = SectionId(2);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut section.shape else {
+        unreachable!();
+    };
+    rebar.top = vec![1];
+    rebar.bottom = vec![1];
     let sloped_girder = model.elements.last_mut().unwrap();
-    sloped_girder.section = Some(GIRDER_SECTION);
+    sloped_girder.section = Some(section.id);
     sloped_girder.local_axis.ref_vector = [0.0, 0.0, 1.0];
-    assert_qd1_shear_ratio(&model, TERMINAL_SHEAR_RATIO);
+    model.sections.push(section);
+    // 柱頭は終端で、斜めの大梁は主筋が半数なので平梁の半分を寄与する。
+    assert_qd1_shear_ratio(&model, 0.7729675715693718);
+}
+
+fn assert_analyzed_column_qd1(mut model: Model, expected_qd1_n: f64, expected_pass: bool) {
+    apply_auto_rigid_zones(&mut model, &RigidZoneRule::default());
+    assert_eq!(
+        model.elements[COLUMN.index()]
+            .rigid_zone
+            .clear_span_from(1700.0),
+        Some(1400.0)
+    );
+    let [dead, live, seismic] =
+        [0, 1, 2].map(|id| linear_static_once(&model, LoadCaseId(id)).unwrap());
+    let gravity = superpose_static(&[(&dead, 1.0), (&live, 1.0)]).unwrap();
+    let short = superpose_static(&[(&gravity, 1.0), (&seismic, 1.0)]).unwrap();
+    let column_forces = short
+        .member_forces
+        .iter()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap();
+    for (_, force) in &column_forces.1.at {
+        assert!((force[0] + 200_000.0).abs() < 1e-6, "{force:?}");
+        assert!((force[1].abs() - 1000.0).abs() < 1e-6, "{force:?}");
+    }
+    let report = run_member_design_checks(
+        &model,
+        std::slice::from_ref(column_forces),
+        &short.panel_moments,
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            qd_method: QdMethod::Qd1,
+            long_member_forces: Some(&gravity.member_forces),
+            girder_column_face_forces: &short.girder_column_face_forces,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(report.member_checks.len(), 3);
+    for (id, _, row) in &report.member_checks {
+        assert_eq!(*id, COLUMN);
+        let CheckOutcome::Checked(result) = row else {
+            panic!("{row:?}");
+        };
+        let shear = result
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Shear)
+            .unwrap();
+        assert!(shear.detail.contains("QAy=270029.5 N"), "{shear:?}");
+        let expected_ratio = expected_qd1_n / reference::COLUMN_ALLOWABLE_SHEAR_N;
+        let qd1_n = shear.ratio * reference::COLUMN_ALLOWABLE_SHEAR_N;
+        assert!(
+            (qd1_n - expected_qd1_n).abs() < 1e-6,
+            "QD1={qd1_n} N, 期待値={expected_qd1_n} N"
+        );
+        assert!((shear.ratio - expected_ratio).abs() < 1e-12, "{shear:?}");
+        assert_eq!(result.ok(), expected_pass, "{result:?}");
+    }
+}
+
+#[test]
+fn qd1_counts_both_opposing_girders_for_all_elastic_representations() {
+    for (positive, negative) in [
+        (ElementKind::Beam, ElementKind::Beam),
+        (ElementKind::Fiber, ElementKind::Beam),
+        (ElementKind::Beam, ElementKind::MultiSpring),
+        (ElementKind::MultiSpring, ElementKind::Fiber),
+    ] {
+        let mut model =
+            fixture::column_with_opposing_head_girders(column::column_model(false, 0.0), negative);
+        model.elements[fixture::GIRDER.index()].kind = positive;
+        model.validate().unwrap();
+        assert_analyzed_column_qd1(model.clone(), reference::TWO_GIRDER_QD1_N, false);
+
+        fixture::add_column_above(&mut model, NodeId(1), ElementKind::Beam);
+        model.validate().unwrap();
+        assert_analyzed_column_qd1(model, reference::CONTINUOUS_TWO_GIRDER_QD1_N, true);
+    }
+}
+
+#[test]
+fn qd1_uses_both_column_ends_if_an_opposing_girder_lacks_yield_strength() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model =
+            fixture::column_with_opposing_head_girders(column::column_model(false, 0.0), kind);
+        fixture::remove_opposite_girder_yield_strength(&mut model);
+        model.validate().unwrap();
+
+        assert_analyzed_column_qd1(model, reference::BOTH_COLUMN_ENDS_QD1_N, false);
+    }
+}
+
+#[test]
+fn qd1_uses_both_column_ends_only_in_the_direction_of_unclassified_frame_members() {
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        for (unclassified, expected_qd1_n) in [
+            (ElemId(3), reference::BOTH_COLUMN_ENDS_QD1_N),
+            (ElemId(2), reference::TWO_GIRDER_QD1_N),
+        ] {
+            let mut model = fixture::column_with_opposing_head_girders(
+                column::column_model(false, 0.0),
+                ElementKind::Beam,
+            );
+            let mut section = model.sections[GIRDER_SECTION.index()].clone();
+            section.id = SectionId(2);
+            section.name = "断面用途未設定の汎用断面".into();
+            section.shape = None;
+            section.property_basis = Default::default();
+            section.frame_use = None;
+            let member = &mut model.elements[unclassified.index()];
+            member.kind = kind;
+            member.section = Some(section.id);
+            model.sections.push(section);
+
+            assert_analyzed_column_qd1(model, expected_qd1_n, false);
+        }
+    }
 }
 
 #[test]
@@ -279,12 +409,13 @@ fn qd1_uses_the_explicit_constraint_that_survives_reduction() {
 
 #[test]
 fn invalid_girder_rebar_category_blocks_only_its_assigned_column_shear_direction() {
-    for (girder_xy, axis) in [
-        ([4000.0, 0.0], "Qy"),
-        ([0.0, 4000.0], "Qz"),
-        ([4000.0, 4000.0], "Qy"),
+    for (kind, girder_xy, axis) in [
+        (ElementKind::Beam, [4000.0, 0.0], "Qy"),
+        (ElementKind::Fiber, [0.0, 4000.0], "Qz"),
+        (ElementKind::MultiSpring, [4000.0, 4000.0], "Qy"),
     ] {
         let mut model = fixture::column_with_girder(column::column_model(false, 0.0));
+        model.elements[fixture::GIRDER.index()].kind = kind;
         model.nodes[2].coord[..2].copy_from_slice(&girder_xy);
         let demand = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
         for method in [QdMethod::Qd1, QdMethod::Min] {

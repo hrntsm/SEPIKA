@@ -135,7 +135,8 @@ fn beam_my_simple(shape: &SectionShape, material: Option<&Material>) -> Option<f
             clear_span: 0.0,
             sigma_0: 0.0,
         };
-        Some(rc_mu_simple(&inp))
+        let my = rc_mu_simple(&inp);
+        (my.is_finite() && my > 0.0).then_some(my)
     };
     let top = axis_props_from_shape(shape, RcDirection::Strong, true)?;
     let bottom = axis_props_from_shape(shape, RcDirection::Strong, false)?;
@@ -191,12 +192,6 @@ fn sum_beam_my_at_node(
 ) -> Result<Option<f64>, String> {
     let mut sum = Some(0.0);
     for other in adjacency.elements_at(model, node) {
-        if other.kind != ElementKind::Beam || other.nodes.len() < 2 {
-            continue;
-        }
-        if MemberKind::of_element(other, model) != MemberKind::Girder {
-            continue;
-        }
         let (Some(n0), Some(n1)) = (
             other.nodes.first().and_then(|n| model.nodes.get(n.index())),
             other.nodes.get(1).and_then(|n| model.nodes.get(n.index())),
@@ -213,6 +208,14 @@ fn sum_beam_my_at_node(
         };
         if !aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie) {
             continue;
+        }
+        match MemberKind::try_of_element(other, model) {
+            Ok(MemberKind::Girder) => {}
+            Ok(_) => continue,
+            Err(_) => {
+                sum = None;
+                continue;
+            }
         }
         let Some(sec) = model.element_section(other) else {
             sum = None;
@@ -231,7 +234,8 @@ fn sum_beam_my_at_node(
         }
         sum = sum
             .zip(beam_my_simple(shape, material))
-            .map(|(sum, my)| sum + my);
+            .map(|(sum, my)| sum + my)
+            .filter(|sum| sum.is_finite());
     }
     Ok(sum)
 }

@@ -1385,6 +1385,7 @@ mod tests {
     fn rc_column_peak_check_app(
         model: sepika_core::model::Model,
         method: sepika_design_jp::QdMethod,
+        axial_n: f64,
     ) -> App {
         use super::rc_column_mechanism_input as input;
         use sepika_solver::statics::linear::StaticOnce;
@@ -1404,7 +1405,7 @@ mod tests {
                         input::COLUMN,
                         MemberForces {
                             at: [0.0, 0.5, 1.0]
-                                .map(|xi| (xi, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+                                .map(|xi| (xi, [axial_n, 0.0, 0.0, 0.0, 0.0, 0.0]))
                                 .to_vec(),
                         },
                     )],
@@ -1419,11 +1420,11 @@ mod tests {
         app
     }
 
-    fn rc_column_peak_check_text(app: &App) -> String {
+    fn rc_column_peak_check_text(app: &App, axial_n: f64) -> String {
         let recording = ThRecording {
             peak_member_forces: vec![Some(MemberForces {
                 at: [0.0, 0.5, 1.0]
-                    .map(|xi| (xi, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0]))
+                    .map(|xi| (xi, [axial_n, 1000.0, 1000.0, 0.0, 0.0, 0.0]))
                     .to_vec(),
             })],
             ..Default::default()
@@ -1439,8 +1440,8 @@ mod tests {
         use sepika_design_jp::QdMethod;
 
         let model = input::column_with_girder(column::column_model(false, 0.0));
-        let mut app = rc_column_peak_check_app(model, QdMethod::Min);
-        let text = rc_column_peak_check_text(&app);
+        let mut app = rc_column_peak_check_app(model, QdMethod::Min, -100_000.0);
+        let text = rc_column_peak_check_text(&app, -100_000.0);
         for message in [
             "検定不能",
             "RC柱 ID 0 の Qy 方向",
@@ -1453,7 +1454,7 @@ mod tests {
         assert!(!text.contains("検定比 "), "{text}");
 
         app.core.model.sections[input::GIRDER_SECTION.index()].rebar_material = Some(input::REBAR);
-        let text = rc_column_peak_check_text(&app);
+        let text = rc_column_peak_check_text(&app, -100_000.0);
         assert!(
             text.contains("検定比 ") && text.contains("せん断 "),
             "{text}"
@@ -1477,10 +1478,50 @@ mod tests {
             (terminal, TERMINAL_SHEAR_RATIO),
             (continuous, CONTINUOUS_SHEAR_RATIO),
         ] {
-            let app = rc_column_peak_check_app(model, QdMethod::Qd1);
-            let text = rc_column_peak_check_text(&app);
+            let app = rc_column_peak_check_app(model, QdMethod::Qd1, -100_000.0);
+            let text = rc_column_peak_check_text(&app, -100_000.0);
             assert!(
                 text.contains(&format!("せん断 {expected_ratio:.2}")),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn rc_column_peak_qd1_check_counts_nonlinear_girders_and_falls_back_to_column_ends() {
+        use super::rc_column_mechanism_input as input;
+        use super::rc_column_mechanism_reference::{
+            BOTH_COLUMN_ENDS_QD1_N, COLUMN_ALLOWABLE_SHEAR_N, CONTINUOUS_TWO_GIRDER_QD1_N,
+            TWO_GIRDER_QD1_N,
+        };
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_core::ids::NodeId;
+        use sepika_core::model::ElementKind;
+        use sepika_design_jp::QdMethod;
+        use sepika_element::frame::beam::{apply_auto_rigid_zones, RigidZoneRule};
+
+        let mut model = input::column_with_opposing_head_girders(
+            column::column_model(false, 0.0),
+            ElementKind::MultiSpring,
+        );
+        model.elements[input::GIRDER.index()].kind = ElementKind::Fiber;
+        let mut continuous = model.clone();
+        input::add_column_above(&mut continuous, NodeId(1), ElementKind::Beam);
+        let mut incomplete = model.clone();
+        input::remove_opposite_girder_yield_strength(&mut incomplete);
+
+        for (mut model, qd1_n, status) in [
+            (model, TWO_GIRDER_QD1_N, "NG"),
+            (continuous, CONTINUOUS_TWO_GIRDER_QD1_N, "OK"),
+            (incomplete, BOTH_COLUMN_ENDS_QD1_N, "NG"),
+        ] {
+            apply_auto_rigid_zones(&mut model, &RigidZoneRule::default());
+            let app = rc_column_peak_check_app(model, QdMethod::Qd1, -200_000.0);
+            let text = rc_column_peak_check_text(&app, -200_000.0);
+            let ratio = qd1_n / COLUMN_ALLOWABLE_SHEAR_N;
+            assert!(text.contains(&format!("せん断 {ratio:.2}")), "{text}");
+            assert!(
+                text.contains(&format!("検定比 {ratio:.3} ({status})")),
                 "{text}"
             );
         }
