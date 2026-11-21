@@ -655,6 +655,9 @@ impl EditCommand for DeleteMember {
         if idx >= model.elements.len() || model.elements[idx].id != self.id {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_damper_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         let detached = match detached_secondary_ends(model, self.id) {
             Ok(detached) => detached,
             Err(reason) => return Box::new(RejectedEdit(reason)),

@@ -3305,6 +3305,22 @@ fn deleting_a_damper_removes_all_its_properties_and_undo_restores_their_order() 
 }
 
 #[test]
+fn member_deletion_rejects_a_damper_attr_to_a_missing_member_before_renumbering() {
+    let mut model = seeded_model(3, 2);
+    model.set_damper_props(ElemId(2), Some(Default::default()));
+    let before = model.clone();
+    let mut stack = UndoStack::new();
+
+    assert!(!stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+    let error = stack.last_error().unwrap();
+    assert!(error.contains("制振ダンパー属性 -> 部材 2"), "{error}");
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert_eq!(stack.revision(), 0);
+    assert!(!stack.can_undo());
+    assert!(!stack.can_redo());
+}
+
+#[test]
 fn member_addition_and_restoration_reject_a_damper_attr_to_a_missing_member() {
     let mut before = seeded_model(3, 2);
     let beam = before.elements.pop().unwrap();
