@@ -711,6 +711,376 @@ fn quantity_setting_edit_undo_redo_save_preserves_rc_mass_response_and_current_r
     assert!(loaded.require_selected_static_input().is_ok());
 }
 
+fn quantity_ratio_fixture() -> Model {
+    use sepika_core::{
+        ids::{NodeId, SlabId, StoryId},
+        model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape},
+    };
+
+    let mut model = quantity_fixture();
+    let mut steel = crate::sample::portal_frame().materials.remove(0);
+    steel.id = MaterialId(3);
+    model.materials.push(steel);
+    let rc = &model.sections[1];
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &rc.shape else {
+        unreachable!()
+    };
+    let mut src = SectionShape::SrcBeamRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: rebar.clone(),
+        steel_height: 400.0,
+        steel_width: 200.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 13.0,
+    }
+    .to_section(SectionId(3), "SRC小梁".into());
+    src.frame_use = rc.frame_use;
+    src.material = rc.material;
+    src.rebar_material = rc.rebar_material;
+    src.shear_rebar_material = rc.shear_rebar_material;
+    src.steel_material = Some(MaterialId(3));
+    model.sections.push(src);
+
+    for (id, x_mm, y_mm) in [(4, 4600.0, 2000.0), (5, 0.0, 2000.0), (6, 0.0, 4000.0)] {
+        let mut node = model.nodes[2].clone();
+        node.id = NodeId(id);
+        node.coord = [x_mm, y_mm, 3600.0];
+        model.nodes.push(node);
+    }
+    for (id, i, j, section) in [(4, 3, 4, 1), (5, 4, 5, 3), (6, 5, 2, 1), (7, 5, 6, 1)] {
+        let mut member = model.elements[2].clone();
+        member.id = ElemId(id);
+        member.nodes = [NodeId(i), NodeId(j)].into_iter().collect();
+        member.section = Some(SectionId(section));
+        model.elements.push(member);
+    }
+
+    let slab_section = SectionId(4);
+    let mut section =
+        SectionShape::RcSlab { thickness: 150.0 }.to_section(slab_section, "床断面".into());
+    section.material = Some(MaterialId(0));
+    model.sections.push(section);
+    let plate = SlabPlate {
+        section: Some(slab_section),
+        ..Default::default()
+    };
+    let enclosed = model
+        .add_enclosed_slab_from_nodes(&[NodeId(2), NodeId(3), NodeId(4), NodeId(5)], plate.clone());
+    model.slabs[enclosed.index()].reference_story = Some(StoryId(1));
+    model.slabs[enclosed.index()].vertical_eccentricity_mm = Some(300.0);
+    model.slabs.push(Slab {
+        id: SlabId(1),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                // RC梁の床板協力剛性は取り付く床板に未対応なので、SRC梁に取り付ける。
+                nodes: [NodeId(4), NodeId(5)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [-1000.0; 2],
+        },
+        plate,
+        reference_story: Some(StoryId(1)),
+        // 取り付く床板の実重複控除は未対応なので、床下面を梁上端に揃える。
+        vertical_eccentricity_mm: Some(450.0),
+        tip_loads: Vec::new(),
+    });
+    model
+}
+
+#[test]
+fn quantity_ratio_inputs_change_only_their_estimates_and_roundtrip_without_staling_results() {
+    use sepika_design_jp::quantity::{
+        try_compute_quantity_takeoff, MemberCategory, RebarUsage, StructureKind,
+    };
+
+    let mut app = App::default();
+    app.load_model(quantity_ratio_fixture());
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let results = app.current_design_results().unwrap();
+    assert!(!results.member_checks.is_empty());
+    let check_values = |results: &ResultsBundle| {
+        rmp_serde::to_vec_named(&(
+            &results.member_checks,
+            &results.slab_checks,
+            &results.wall_checks,
+        ))
+        .unwrap()
+    };
+    let checks = check_values(results);
+    let static_response = results.statics[0].1.disp.clone();
+    let input_keys = [
+        ResultInputKey::Static(StaticCaseKey::User(LoadCaseId(0))),
+        ResultInputKey::Design,
+    ];
+    let inputs = input_keys.each_ref().map(|key| app.result_input(key));
+    let assert_results = |app: &App| {
+        assert!(app.require_selected_static_input().is_ok());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert!(!app.core.scoped.staleness.design_stale);
+        assert_eq!(
+            input_keys.each_ref().map(|key| app.result_input(key)),
+            inputs
+        );
+        let current = app.current_design_results().unwrap();
+        assert_eq!(current.statics[0].1.disp, static_response);
+        assert_eq!(check_values(current), checks);
+    };
+    let takeoff = |app: &App| {
+        let model = &app.core.model;
+        try_compute_quantity_takeoff(model, &model.quantity_cfg).unwrap()
+    };
+
+    let initial = takeoff(&app);
+    for (category, structure) in [
+        (MemberCategory::Beam, StructureKind::Rc),
+        (MemberCategory::Beam, StructureKind::Src),
+        (MemberCategory::Slab, StructureKind::Rc),
+        (MemberCategory::CantileverSlab, StructureKind::Rc),
+        (MemberCategory::Girder, StructureKind::Rc),
+        (MemberCategory::Wall, StructureKind::Rc),
+    ] {
+        assert!(initial.items.iter().any(|item| {
+            item.category == category && item.structure == structure && item.rebar_weight_t() > 0.0
+        }));
+    }
+
+    let ctx = egui::Context::default();
+    install_japanese_fonts(&ctx);
+    app.ui.view.design_view = DesignView::Quantities;
+    let frame = |app: &mut App, events| {
+        ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| app.design_tab_panel(ui));
+            },
+        )
+    };
+    let position = |out: &egui::FullOutput, matches_text: &dyn Fn(&str) -> bool| {
+        out.shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if matches_text(t.galley.text()) => {
+                    Some(t.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .expect("数量設定の文字が描画される")
+    };
+    let number_position = |out: &egui::FullOutput, value| {
+        position(out, &|text| text.parse::<f64>().ok() == Some(value))
+    };
+    let click = |app: &mut App, pos| {
+        for pressed in [true, false] {
+            frame(
+                app,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    };
+    let key = |key, modifiers| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    let edit = |app: &mut App, pos, text: &str| {
+        click(app, pos);
+        let revision = app.core.scoped.undo.revision();
+        frame(
+            app,
+            vec![
+                key(egui::Key::A, egui::Modifiers::COMMAND),
+                egui::Event::Text(text.into()),
+            ],
+        );
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        frame(app, vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    };
+
+    let mut cfg = app.core.model.quantity_cfg;
+    for (usage, label, default, after_text, multiplier) in [
+        (
+            RebarUsage::BeamMain,
+            "主架構小梁の主筋比",
+            0.008,
+            "0.016",
+            2.0,
+        ),
+        (
+            RebarUsage::BeamStirrup,
+            "主架構小梁のスターラップ比",
+            0.001,
+            "0.003",
+            3.0,
+        ),
+        (
+            RebarUsage::SlabBar,
+            "床・片持ち床の鉄筋比",
+            0.01,
+            "0.04",
+            4.0,
+        ),
+    ] {
+        let before = takeoff(&app);
+        let previous_cfg = cfg;
+        let out = frame(&mut app, vec![]);
+        position(&out, &|text| {
+            text == "鉄筋の概算に用いるコンクリート体積比 [m³/m³]"
+        });
+        position(&out, &|text| text == label);
+        edit(&mut app, number_position(&out, default), after_text);
+        let next = after_text.parse().unwrap();
+        match usage {
+            RebarUsage::BeamMain => cfg.beam_main_ratio = next,
+            RebarUsage::BeamStirrup => cfg.beam_stirrup_ratio = next,
+            RebarUsage::SlabBar => cfg.slab_rebar_ratio = next,
+            _ => unreachable!(),
+        }
+        assert_eq!(app.core.model.quantity_cfg, cfg, "{label}");
+        let after = takeoff(&app);
+        assert_eq!(before.items.len(), after.items.len());
+        for (previous, changed) in before.items.iter().zip(&after.items) {
+            assert_eq!(previous.label, changed.label);
+            assert_eq!(previous.concrete_m3, changed.concrete_m3);
+            assert_eq!(previous.formwork_m2, changed.formwork_m2);
+            assert_eq!(previous.steel_weight_t(), changed.steel_weight_t());
+            assert_eq!(previous.rebar_joints, changed.rebar_joints);
+            assert_eq!(previous.rebar.len(), changed.rebar.len());
+            for (old, new) in previous.rebar.iter().zip(&changed.rebar) {
+                assert_eq!(old.usage, new.usage);
+                assert_eq!(old.dia, new.dia);
+                assert_eq!(old.total_length_m, new.total_length_m);
+                if old.usage == usage {
+                    assert!((new.weight_t - multiplier * old.weight_t).abs() < 1e-12);
+                } else {
+                    assert_eq!(old.weight_t, new.weight_t);
+                }
+            }
+        }
+        assert_results(&app);
+
+        app.undo_action();
+        assert_eq!(app.core.model.quantity_cfg, previous_cfg);
+        assert_eq!(takeoff(&app).totals().rebar_t, before.totals().rebar_t);
+        assert_results(&app);
+        app.redo_action();
+        assert_eq!(app.core.model.quantity_cfg, cfg);
+        assert_eq!(takeoff(&app).totals().rebar_t, after.totals().rebar_t);
+        assert_results(&app);
+    }
+
+    let revision = app.core.scoped.undo.revision();
+    for invalid in ["abc", "NaN"] {
+        let out = frame(&mut app, vec![]);
+        edit(
+            &mut app,
+            number_position(&out, cfg.beam_main_ratio),
+            invalid,
+        );
+        assert_eq!(app.core.model.quantity_cfg, cfg);
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+    }
+    let out = frame(&mut app, vec![]);
+    edit(
+        &mut app,
+        number_position(&out, cfg.beam_main_ratio),
+        "-0.01",
+    );
+    assert_eq!(app.core.model.quantity_cfg.beam_main_ratio, 0.0);
+    let out = frame(&mut app, vec![]);
+    click(&mut app, number_position(&out, 0.0));
+    let boundary_revision = app.core.scoped.undo.revision();
+    frame(
+        &mut app,
+        vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+    );
+    assert_eq!(app.core.model.quantity_cfg.beam_main_ratio, 0.0);
+    assert_eq!(app.core.scoped.undo.revision(), boundary_revision);
+    frame(
+        &mut app,
+        vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+    );
+    app.undo_action();
+    assert_eq!(app.core.model.quantity_cfg, cfg);
+
+    let csv = crate::summary::build_quantity_csv(&app.core.model);
+    let path =
+        std::env::temp_dir().join(format!("sepika-1744-ratios-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    std::fs::remove_file(&path).unwrap();
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    assert_eq!(reopened.core.model.quantity_cfg, cfg);
+    assert_eq!(
+        crate::summary::build_quantity_csv(&reopened.core.model),
+        csv
+    );
+    assert_results(&reopened);
+
+    let legacy_cfg = sepika_core::model::QuantityCfg {
+        beam_main_ratio: -0.02,
+        slab_rebar_ratio: 0.012345678901234567,
+        ..cfg
+    };
+    reopened.core.model.quantity_cfg = legacy_cfg;
+    sepika_io::ovika::save_ovika(&path, &reopened.core.model, Default::default()).unwrap();
+    let mut legacy = App::default();
+    legacy.open_project_from(path.clone());
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(legacy.core.model.quantity_cfg, legacy_cfg);
+    legacy.ui.view.design_view = DesignView::Quantities;
+    let revision = legacy.core.scoped.undo.revision();
+    for old in [legacy_cfg.beam_main_ratio, legacy_cfg.slab_rebar_ratio] {
+        let out = frame(&mut legacy, vec![]);
+        click(&mut legacy, number_position(&out, old));
+    }
+    let out = frame(&mut legacy, vec![]);
+    assert_eq!(legacy.core.scoped.undo.revision(), revision);
+    edit(
+        &mut legacy,
+        number_position(&out, legacy_cfg.beam_stirrup_ratio),
+        "0.006",
+    );
+    assert_eq!(
+        legacy.core.model.quantity_cfg,
+        sepika_core::model::QuantityCfg {
+            beam_stirrup_ratio: 0.006,
+            ..legacy_cfg
+        }
+    );
+    legacy.undo_action();
+    assert_eq!(legacy.core.model.quantity_cfg, legacy_cfg);
+}
+
 #[test]
 fn current_schema_ps_only_model_keeps_missing_directions_after_ovika_read() {
     let mut value = serde_json::to_value(quantity_fixture()).unwrap();

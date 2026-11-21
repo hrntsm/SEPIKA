@@ -48,6 +48,38 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                 .add(egui::DragValue::new(&mut cfg.anchorage_dia_factor).speed(1.0))
                 .changed();
         });
+        ui.label("鉄筋の概算に用いるコンクリート体積比 [m³/m³]");
+        ui.horizontal_wrapped(|ui| {
+            for (label, ratio) in [
+                ("主架構小梁の主筋比", &mut cfg.beam_main_ratio),
+                ("主架構小梁のスターラップ比", &mut cfg.beam_stirrup_ratio),
+                ("床・片持ち床の鉄筋比", &mut cfg.slab_rebar_ratio),
+            ] {
+                ui.horizontal(|ui| {
+                    let label = ui.label(label);
+                    let mut candidate = *ratio;
+                    ui.add(
+                        egui::DragValue::new(&mut candidate)
+                            .speed(0.0001)
+                            .update_while_editing(false)
+                            .custom_formatter(|value, _| value.to_string())
+                            .custom_parser(|text| {
+                                text.trim()
+                                    .parse::<f64>()
+                                    .ok()
+                                    .filter(|value| value.is_finite())
+                            }),
+                    )
+                    .labelled_by(label.id);
+                    if candidate.is_finite() && candidate != *ratio {
+                        // 初期値も丸めると、値を入力せずフォーカスを外しただけで既存の設定が変わる。
+                        let candidate = candidate.clamp(0.0, 1.0);
+                        changed |= candidate != *ratio;
+                        *ratio = candidate;
+                    }
+                });
+            }
+        });
     });
     if changed {
         app.apply_model_edit(Box::new(sepika_edit::SetQuantityCfg { cfg }));
