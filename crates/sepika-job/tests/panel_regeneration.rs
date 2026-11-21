@@ -19,6 +19,34 @@ mod fixture;
 use fixture::steel_panel_model;
 
 #[test]
+fn preparation_rejects_a_member_detail_ref_to_a_new_panel_number() {
+    let mut model = steel_panel_model();
+    let mut valid = model.clone();
+    assert_eq!(apply_rigid_zones_and_panels(&mut valid).unwrap().len(), 1);
+    let new_panel = ElemId(3);
+    assert_eq!(valid.elements[3].kind, ElementKind::PanelZone);
+    assert!(model.element(new_panel).is_none());
+    let mut attr = MemberDetailAttr::new(new_panel);
+    attr.joints.push(MemberJoint {
+        distance: 800.0,
+        kind: Default::default(),
+    });
+    model.member_detail_attrs.push(attr);
+    let before = model.clone();
+    let diagnostic = "部材の付帯情報（継手・ハンチ） -> 部材 3";
+
+    let error = apply_rigid_zones_and_panels(&mut model).unwrap_err();
+    assert!(error.contains(diagnostic), "{error}");
+    assert!(model.eq_ignoring_dofmap(&before));
+    let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains(diagnostic), "{error}");
+    assert!(model.eq_ignoring_dofmap(&before));
+}
+
+#[test]
 fn preparation_rejects_references_to_removed_panels_without_changing_input() {
     let mut input = steel_panel_model();
     input.stories.clear();

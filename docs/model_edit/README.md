@@ -32,9 +32,13 @@
 `NaN`、`inf`、`Infinity`、`1e309` などは理由を表示して適用を拒否し、モデルと Undo/Redo 履歴は変更しません。
 既存の小数寸法はフォームへの読込み時に丸めず、他の項目だけを適用した場合も保持します。Undo で変更前の値に戻せます。
 
+部材そのものを削除すると、その部材の継手・ハンチの指定をすべて取り除きます。
+残る部材の番号が変わっても指定は元の部材に付き、削除した番号を再利用しても新しい部材へは引き継ぎません。
+部材の削除を Undo すると、元の部材と指定を件数・順序・値ごと復元します。
+
 <div class="impl-ref">
 
-**実装参照**：`crates/sepika-app/src/tables/member_details.rs`、`crates/sepika-edit/src/member_detail.rs`。
+**実装参照**：`crates/sepika-app/src/tables/member_details.rs`、`crates/sepika-edit/src/member_detail.rs`、`crates/sepika-edit/src/node_member.rs`。
 
 </div>
 

@@ -3529,6 +3529,53 @@ fn test_remove_member_detail_attr_missing_is_noop() {
 }
 
 #[test]
+fn edits_reject_details_for_a_missing_member_without_changing_model_or_history() {
+    use sepika_core::model::MemberDetailAttr;
+
+    let mut model = seeded_model(4, 2);
+    let attr = MemberDetailAttr::new(ElemId(1));
+    let mut member = model.elements[1].clone();
+    member.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    let mut damper = member.clone();
+    damper.kind = ElementKind::Damper;
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(DeleteMember { id: attr.elem })));
+
+    let before_assignment = model.clone();
+    let revision = stack.revision();
+    assert!(!stack.run(
+        &mut model,
+        Box::new(SetMemberDetailAttr { attr: attr.clone() })
+    ));
+    let diagnostic = "部材の付帯情報（継手・ハンチ） -> 部材 1";
+    assert!(stack.last_error().unwrap().contains(diagnostic));
+    assert!(model.eq_ignoring_dofmap(&before_assignment));
+    assert_eq!(stack.revision(), revision);
+
+    model.member_detail_attrs.push(attr);
+    let before = model.clone();
+    for command in [
+        Box::new(AddMember { elem: member }) as Box<dyn EditCommand>,
+        Box::new(AddDamper {
+            elem: damper,
+            props: Default::default(),
+        }),
+        Box::new(DeleteMember { id: ElemId(0) }),
+    ] {
+        assert!(!stack.run(&mut model, command));
+        assert!(stack.last_error().unwrap().contains(diagnostic));
+        assert!(model.eq_ignoring_dofmap(&before));
+        assert_eq!(stack.revision(), revision);
+    }
+    stack.undo(&mut model);
+    assert!(stack.last_error().unwrap().contains(diagnostic));
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert_eq!(stack.revision(), revision);
+    assert!(stack.can_undo());
+    assert!(!stack.can_redo());
+}
+
+#[test]
 fn test_set_steel_design_attr_add_replace_and_remove_roundtrip() {
     use sepika_core::model::SteelDesignAttr;
     let mut model = seeded_model(3, 2);
@@ -4946,7 +4993,7 @@ fn test_copy_story_without_overwrite_keeps_existing() {
 
 #[test]
 fn copying_a_story_slab_rejects_dangling_attributes_before_generating_boundary_beams() {
-    use sepika_core::model::{HysteresisModel, RcBeamReference, Story};
+    use sepika_core::model::{HysteresisModel, MemberDetailAttr, RcBeamReference, Story};
 
     let mut model = seeded_model(6, 0);
     for (i, z_mm) in [3000.0, 6000.0].into_iter().enumerate() {
@@ -4988,11 +5035,17 @@ fn copying_a_story_slab_rejects_dangling_attributes_before_generating_boundary_b
 
     let mut dangling_damper = model.clone();
     dangling_damper.set_damper_props(new_beam, Some(Default::default()));
-    model.set_member_hysteresis_th(new_beam, Some(HysteresisModel::Retrograde));
-    model.set_member_rc_beam_reference(new_beam, Some(RcBeamReference::AntisymmetricHalfMember));
+    let mut dangling_hysteresis = model.clone();
+    dangling_hysteresis.set_member_hysteresis_th(new_beam, Some(HysteresisModel::Retrograde));
+    dangling_hysteresis
+        .set_member_rc_beam_reference(new_beam, Some(RcBeamReference::AntisymmetricHalfMember));
+    model
+        .member_detail_attrs
+        .push(MemberDetailAttr::new(new_beam));
 
     for (mut model, expected) in [
-        (model, "部材の履歴則指定 -> 部材 3"),
+        (dangling_hysteresis, "部材の履歴則指定 -> 部材 3"),
+        (model, "部材の付帯情報（継手・ハンチ） -> 部材 3"),
         (dangling_damper, "制振ダンパー属性 -> 部材 3"),
     ] {
         let before = model.clone();

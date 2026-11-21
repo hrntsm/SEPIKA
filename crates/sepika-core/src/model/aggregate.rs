@@ -8,6 +8,7 @@ use super::*;
 const STEEL_DESIGN_ATTR_LABEL: &str = "鉄骨部材の検定属性";
 const MEMBER_HYSTERESIS_ATTR_LABEL: &str = "部材の履歴則指定";
 const DAMPER_ATTR_LABEL: &str = "制振ダンパー属性";
+const MEMBER_DETAIL_ATTR_LABEL: &str = "部材の付帯情報（継手・ハンチ）";
 
 macro_rules! for_each_elem_attr_collection {
     ($visit:ident) => {
@@ -22,7 +23,7 @@ macro_rules! for_each_elem_attr_collection {
         $visit!(pca_attrs, elem, "PCa梁属性");
         $visit!(member_hysteresis_attrs, elem, MEMBER_HYSTERESIS_ATTR_LABEL);
         $visit!(damper_attrs, elem, DAMPER_ATTR_LABEL);
-        $visit!(member_detail_attrs, elem, "部材の付帯情報");
+        $visit!(member_detail_attrs, elem, MEMBER_DETAIL_ATTR_LABEL);
         $visit!(girder_groups);
         $visit!(load_cfg);
     };
@@ -41,7 +42,8 @@ pub struct ElemAttrs {
     pub hysteresis: Vec<(usize, MemberHysteresisAttr)>,
     /// 元の配列位置と制振ダンパー属性。
     pub damper: Vec<(usize, DamperAttr)>,
-    pub detail: Option<MemberDetailAttr>,
+    /// 元の配列位置と部材の付帯情報。
+    pub detail: Vec<(usize, MemberDetailAttr)>,
     pub slab_composite: Option<SlabCompositeConnection>,
     /// 削除前の配列位置と付加線重量 [N/mm]。
     pub extra_line_weight: Vec<(usize, f64)>,
@@ -358,6 +360,7 @@ impl Model {
         self.validate_member_weight_refs()?;
         self.validate_member_hysteresis_attr_refs()?;
         self.validate_damper_attr_refs()?;
+        self.validate_member_detail_attr_refs()?;
 
         for sec in &self.sections {
             for (role, mid) in [
@@ -1647,6 +1650,32 @@ impl Model {
         Ok(())
     }
 
+    /// 継手・ハンチの対象部材が存在しなければ、部材番号付きエラーを返す。
+    pub fn validate_member_detail_attr_ref(
+        &self,
+        elem: ElemId,
+    ) -> Result<(), crate::error::CoreError> {
+        if self
+            .elements
+            .get(elem.index())
+            .is_some_and(|element| element.id == elem)
+        {
+            Ok(())
+        } else {
+            Err(crate::error::CoreError::DanglingRef(format!(
+                "{MEMBER_DETAIL_ATTR_LABEL} -> 部材 {}",
+                elem.0
+            )))
+        }
+    }
+
+    /// 参照先が存在しない最初の継手・ハンチ指定を、部材番号付きエラーで返す。
+    pub fn validate_member_detail_attr_refs(&self) -> Result<(), crate::error::CoreError> {
+        self.member_detail_attrs
+            .iter()
+            .try_for_each(|attr| self.validate_member_detail_attr_ref(attr.elem))
+    }
+
     /// 条件に一致する部材属性・部材別重量・一本部材指定の参照先と入力種別を返す。
     pub fn find_elem_attr_ref(
         &self,
@@ -1773,7 +1802,9 @@ impl Model {
             damper: take_ordered(&mut self.damper_attrs, |attr| {
                 (attr.elem == elem).then_some(*attr)
             }),
-            detail: take_first(&mut self.member_detail_attrs, |a| a.elem, elem),
+            detail: take_ordered(&mut self.member_detail_attrs, |attr| {
+                (attr.elem == elem).then(|| attr.clone())
+            }),
             extra_line_weight,
             finish_area_weight,
             damper_weight,
@@ -1809,9 +1840,10 @@ impl Model {
             self.damper_attrs
                 .insert(index.min(self.damper_attrs.len()), attr);
         }
-        if let Some(mut a) = attrs.detail {
-            a.elem = elem;
-            self.member_detail_attrs.push(a);
+        for (index, mut attr) in attrs.detail {
+            attr.elem = elem;
+            self.member_detail_attrs
+                .insert(index.min(self.member_detail_attrs.len()), attr);
         }
         if !attrs.extra_line_weight.is_empty()
             || !attrs.finish_area_weight.is_empty()
@@ -1873,7 +1905,7 @@ impl Model {
         .unwrap_or_default()
     }
 
-    /// 部材の付帯情報（ハンチ・継手位置）を返す（未指定は `None`）。
+    /// 指定部材のハンチ・継手位置のうち先頭のエントリを返す。未指定なら `None`。
     pub fn member_detail(&self, elem: ElemId) -> Option<&MemberDetailAttr> {
         self.member_detail_attrs.iter().find(|a| a.elem == elem)
     }

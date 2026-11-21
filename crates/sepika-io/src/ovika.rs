@@ -1121,7 +1121,7 @@ mod tests {
                 ],
             },
             MemberDetailAttr {
-                elem: ElemId(1),
+                elem: ElemId(0),
                 haunch_i: Some(Haunch {
                     length: 400.0,
                     depth_increase: 100.0,

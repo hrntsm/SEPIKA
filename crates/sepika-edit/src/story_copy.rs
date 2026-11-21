@@ -344,6 +344,9 @@ impl EditCommand for CopyStory {
             if let Err(error) = model.validate_damper_attr_refs() {
                 return Box::new(crate::RejectedEdit(error.to_string()));
             }
+            if let Err(error) = model.validate_member_detail_attr_refs() {
+                return Box::new(crate::RejectedEdit(error.to_string()));
+            }
         }
         if let Err(error) = model.validate_rc_section_usage() {
             return Box::new(crate::RejectedEdit(error.to_string()));

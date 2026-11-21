@@ -60,7 +60,7 @@ pub struct GeneratedPanel {
     pub k_panel: [f64; 2],
 }
 
-/// 部材別重量・履歴則指定・ダンパー特性の参照先がない場合や、入力が削除対象の仕口パネルを参照する場合は失敗する。
+/// 部材別重量・履歴則指定・ダンパー特性・継手やハンチの参照先がない場合や、入力が削除対象の仕口パネルを参照する場合は失敗する。
 pub fn validate_panel_generation_references(model: &Model) -> Result<(), String> {
     model
         .validate_member_weight_refs()
@@ -70,6 +70,9 @@ pub fn validate_panel_generation_references(model: &Model) -> Result<(), String>
         .map_err(|error| error.to_string())?;
     model
         .validate_damper_attr_refs()
+        .map_err(|error| error.to_string())?;
+    model
+        .validate_member_detail_attr_refs()
         .map_err(|error| error.to_string())?;
     if !model
         .elements
