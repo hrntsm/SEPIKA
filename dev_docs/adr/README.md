@@ -208,6 +208,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0142](0142-remove-pca-members.md) | accepted | PCa 部材への対応を廃止する |
 | [0143](0143-rc-column-head-shear-factor.md) | accepted | RC柱の短期地震時せん断の柱頭係数を接続節点から決める |
 | [0144](0144-rc-column-qd1-girder-end-conditions.md) | accepted | RC柱の短期地震時QD1では柱側梁端の曲げ伝達条件を確認する |
+| [0145](0145-rc-column-long-term-shear-span.md) | accepted | RC柱の長期設計用せん断力を両材端フェース間で求める |
 
 ## 規約
 
