@@ -192,6 +192,29 @@ fn available_column_moment_ratio(
     }
 }
 
+fn column_axial_overload(n_design_n: f64, na_n: f64, nt_n: f64) -> Option<CheckComponent> {
+    let (label, limit_n) = if n_design_n < 0.0 {
+        ("NT", nt_n)
+    } else {
+        ("NA", na_n)
+    };
+    let demand_n = n_design_n.abs();
+    if !(demand_n.is_finite() && limit_n.is_finite() && limit_n > 0.0 && demand_n > limit_n) {
+        return None;
+    }
+    let ratio = demand_n / limit_n;
+    let detail = if ratio.is_finite() {
+        format!("{label}={limit_n:.1} N, N={n_design_n:.1} N（圧縮正）")
+    } else {
+        format!("{label}={limit_n:e} N, N={n_design_n:e} N（圧縮正、検定比の下限）")
+    };
+    Some(CheckComponent {
+        kind: CheckKind::Axial,
+        ratio: ratio.min(f64::MAX),
+        detail,
+    })
+}
+
 /// 矩形柱の直交方向主筋総断面積 at_perp [mm²]。
 ///
 /// 全主筋 ag から検討方向の引張側・圧縮側最外段 at・ac を除いた残り（負にならない）。
@@ -252,19 +275,43 @@ pub(super) fn column_check(
                 .any(|index| super::column_qd2_reference_issue(qd, forces.pos, index).is_some())
                 || qd1_mechanism(ctx).is_some_and(|m| m.missing_gravity_axial))
     });
-    let finish_bending = |bending_issue: Option<String>,
-                          components: &mut Vec<CheckComponent>,
-                          incomplete: &mut Option<String>| {
+    let finish_bending = |bending_issue: Option<String>, incomplete: &mut Option<String>| {
         if let Some(reason) = bending_issue {
             if !ordinary && !(strict_gravity && (missing_gravity || incomplete.is_some())) {
                 return Err(CheckOutcome::Skipped { reason });
             }
-            if ordinary && !bending_partial {
-                components.clear();
-            }
             *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
         }
         Ok(())
+    };
+    let push_axial_bending = |components: &mut Vec<CheckComponent>,
+                              bending_unchecked,
+                              na,
+                              nt,
+                              ratio_moment: f64,
+                              detail| {
+        let mut ratio_axial = if forces.n > 0.0 {
+            forces.n / nt
+        } else if forces.n < 0.0 && na > 0.0 {
+            n_design / na
+        } else {
+            0.0
+        };
+        if ordinary && bending_unchecked {
+            if let Some(axial_ng) = column_axial_overload(n_design, na, nt) {
+                components.push(axial_ng);
+                // 有限曲げ成分の下限に、単独で記録した軸力比を重ねない。
+                ratio_axial = 0.0;
+            }
+            if !bending_partial {
+                return;
+            }
+        }
+        components.push(CheckComponent {
+            kind: CheckKind::AxialBending,
+            ratio: ratio_axial.max(ratio_moment),
+            detail,
+        });
     };
     let shear_reference_valid = |boundary_shear_only: bool, incomplete: &mut Option<String>| {
         if !shear_reference_valid {
@@ -362,22 +409,18 @@ pub(super) fn column_check(
                 }
             };
             let nt = as_total * ft;
-            let ratio_axial = if forces.n > 0.0 {
-                forces.n / nt
-            } else if forces.n < 0.0 && na > 0.0 {
-                (-forces.n) / na
-            } else {
-                0.0
-            };
             let axial_bending_detail = format!(
             "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
             na, nt, n_design, ma, forces.mz, forces.my,
         );
-            components.push(CheckComponent {
-                kind: CheckKind::AxialBending,
-                ratio: ratio_axial.max(ratio_moment),
-                detail: axial_bending_detail,
-            });
+            push_axial_bending(
+                &mut components,
+                bending_issue.is_some(),
+                na,
+                nt,
+                ratio_moment,
+                axial_bending_detail,
+            );
         }
 
         let (m_for_alpha_y, q_for_alpha_y) =
@@ -428,7 +471,7 @@ pub(super) fn column_check(
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, MAX_SHEAR_ALPHA);
         let qaz = shear_capacity(&props, &allow, alpha_z, ctx.term, damage_control, true);
 
-        if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {
+        if let Err(outcome) = finish_bending(bending_issue, incomplete) {
             return outcome;
         }
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
@@ -533,22 +576,18 @@ pub(super) fn column_check(
                     }
                 };
             let nt = as_total * ft_z;
-            let ratio_axial = if forces.n > 0.0 {
-                forces.n / nt
-            } else if forces.n < 0.0 && na > 0.0 {
-                (-forces.n) / na
-            } else {
-                0.0
-            };
             let axial_bending_detail = format!(
             "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
             na, nt, n_design, ma_z, ma_y, forces.mz, forces.my,
         );
-            components.push(CheckComponent {
-                kind: CheckKind::AxialBending,
-                ratio: ratio_axial.max(ratio_moment),
-                detail: axial_bending_detail,
-            });
+            push_axial_bending(
+                &mut components,
+                bending_issue.is_some(),
+                na,
+                nt,
+                ratio_moment,
+                axial_bending_detail,
+            );
         }
 
         let (m_for_alpha_y, q_for_alpha_y) =
@@ -603,7 +642,7 @@ pub(super) fn column_check(
         let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, MAX_SHEAR_ALPHA);
         let qaz = shear_capacity(&props_y, &allow, alpha_z, ctx.term, damage_control, true);
 
-        if let Err(outcome) = finish_bending(bending_issue, &mut components, incomplete) {
+        if let Err(outcome) = finish_bending(bending_issue, incomplete) {
             return outcome;
         }
         let basis = "RC 規準14条（柱、軸力+二軸曲げ+せん断）".to_string();

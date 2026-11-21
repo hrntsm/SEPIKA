@@ -1030,12 +1030,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rc_column_shear_ng_and_unchecked_bending_are_drawn_after_real_analysis() {
+    fn rc_column_axial_ng_and_unchecked_bending_are_drawn_after_real_analysis() {
         use crate::app::rc_column_boundary_tests::{input, reference};
         use sepika_core::ids::LoadCaseId;
 
         for circle in [false, true] {
-            for (shear_n, ng) in [(10_000.0, false), (1_000_000.0, true)] {
+            for (shear_n, shear_ng) in [(10_000.0, false), (1_000_000.0, true)] {
                 let mut model =
                     input::column_model(circle, 1.01 * reference::axial_limit_n(circle));
                 model.load_cases[0].nodal[0].values[0] = shear_n;
@@ -1052,21 +1052,32 @@ mod tests {
                 let checks = &app.current_design_results().unwrap().member_checks;
                 let positions = elem_check_positions(checks, ElemId(0));
                 let (kinds, rows) = build_tooltip_rows(positions);
-                assert_eq!(kinds, if ng { &[CheckKind::Shear][..] } else { &[][..] });
-                assert_eq!(rows.len(), if ng { 6 } else { 3 });
+                let expected_kinds = if shear_ng {
+                    &[CheckKind::Shear, CheckKind::Axial][..]
+                } else {
+                    &[CheckKind::Axial][..]
+                };
+                assert_eq!(kinds, expected_kinds);
+                assert_eq!(rows.len(), 6);
                 for xi in [0.0, 0.5, 1.0] {
                     assert!(rows.iter().any(|row| row.xi == xi && matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("MA_y=0"))));
-                    assert_eq!(
-                        rows.iter()
-                            .any(|row| row.xi == xi && matches!(row.verdict, RowVerdict::Ng)),
-                        ng
-                    );
+                    let row = rows
+                        .iter()
+                        .find(|row| row.xi == xi && matches!(row.verdict, RowVerdict::Ng))
+                        .unwrap();
+                    assert_eq!(row.values.len(), expected_kinds.len());
+                    assert!(row
+                        .values
+                        .iter()
+                        .all(|value| value.is_some_and(|ratio| ratio > 1.0)));
                 }
                 let ratios = member_ratios_for_filter(checks, CheckRatioFilter::Max);
-                assert_eq!(
-                    ratios.get(&ElemId(0)).map(|(_, ok)| *ok),
-                    ng.then_some(false)
-                );
+                assert_eq!(ratios.len(), 1);
+                assert!(!ratios[&ElemId(0)].1);
+                let axial_ratios =
+                    member_ratios_for_filter(checks, CheckRatioFilter::Kind(CheckKind::Axial));
+                assert_eq!(axial_ratios.len(), 1);
+                assert!(!axial_ratios[&ElemId(0)].1);
 
                 let context = egui::Context::default();
                 let mut labels = Vec::new();
@@ -1097,9 +1108,7 @@ mod tests {
                     }));
                 }
                 assert!(
-                    labels
-                        .iter()
-                        .any(|label| label.contains(&format!("NG {}件", usize::from(ng)))),
+                    labels.iter().any(|label| label.contains("NG 1件")),
                     "{labels:?}"
                 );
                 assert!(
@@ -1108,25 +1117,19 @@ mod tests {
                         .any(|label| label.contains("検定不能（RC柱: 許容曲げ")),
                     "{labels:?}"
                 );
-                if ng {
-                    assert!(
-                        labels.iter().any(|label| label == "NG")
-                            && labels.iter().any(|label| label.contains("未検定あり")),
-                        "{labels:?}"
-                    );
-                } else {
-                    assert!(
-                        labels.iter().any(|label| label == "未検定")
-                            && !labels.iter().any(|label| label == "OK"),
-                        "{labels:?}"
-                    );
-                }
+                assert!(
+                    labels.iter().any(|label| label == "軸")
+                        && labels.iter().any(|label| label == "NG")
+                        && labels.iter().any(|label| label.contains("未検定あり"))
+                        && !labels.iter().any(|label| label == "OK"),
+                    "{labels:?}"
+                );
             }
         }
     }
 
     #[test]
-    fn rc_column_tension_is_drawn_as_ng_or_unchecked_after_real_analysis() {
+    fn rc_column_tension_ng_and_unchecked_bending_are_drawn_after_real_analysis() {
         mod boundary {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -1140,7 +1143,9 @@ mod tests {
             ));
         }
         for circle in [false, true] {
-            for (moments, checked) in [([0.0, 0.0], true), ([1_000_000.0, 2_000_000.0], false)] {
+            for (moments, bending_unchecked) in
+                [([0.0, 0.0], false), ([1_000_000.0, 2_000_000.0], true)]
+            {
                 let mut app = App::default();
                 app.load_model(input::tension_model(
                     boundary::column_model(circle, 0.0),
@@ -1155,16 +1160,24 @@ mod tests {
                     app.core.scoped.last_error
                 );
                 let checks = &app.current_design_results().unwrap().member_checks;
-                let (_, rows) = build_tooltip_rows(&checks[0].positions);
-                assert_eq!(rows.len(), 3);
-                if checked {
-                    assert!(rows.iter().all(|row| matches!(row.verdict, RowVerdict::Ng)));
-                    assert!(
-                        member_ratios_for_filter(checks, CheckRatioFilter::Max)[&ElemId(0)].0 > 2.0
-                    );
+                let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
+                if bending_unchecked {
+                    assert_eq!(kinds, [CheckKind::Axial]);
+                    assert_eq!(rows.len(), 6);
+                    for xi in [0.0, 0.5, 1.0] {
+                        assert!(rows.iter().any(|row| row.xi == xi && matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("検定不能"))));
+                        assert!(rows.iter().any(|row| row.xi == xi
+                            && matches!(row.verdict, RowVerdict::Ng)
+                            && row.values[0].is_some_and(|ratio| ratio > 2.0)));
+                    }
                 } else {
-                    assert!(rows.iter().all(|row| matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("検定不能"))));
+                    assert_eq!(rows.len(), 3);
+                    assert!(kinds.contains(&CheckKind::AxialBending));
+                    assert!(rows.iter().all(|row| matches!(row.verdict, RowVerdict::Ng)));
                 }
+                assert!(
+                    member_ratios_for_filter(checks, CheckRatioFilter::Max)[&ElemId(0)].0 > 2.0
+                );
                 let output = egui::Context::default().run_ui(Default::default(), |ui| {
                     draw_check_ratio(
                         ui.painter(),
@@ -1184,11 +1197,7 @@ mod tests {
                     })
                     .collect();
                 assert!(
-                    labels.iter().any(|label| label.contains(if checked {
-                        "NG"
-                    } else {
-                        "未検定"
-                    })),
+                    labels.iter().any(|label| label.contains("NG 1件")),
                     "{labels:?}"
                 );
                 assert!(

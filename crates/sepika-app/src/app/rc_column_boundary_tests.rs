@@ -238,7 +238,7 @@ fn rc_column_long_term_shear_localizes_invalid_saved_section_position() {
 }
 
 #[test]
-fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_state() {
+fn rc_column_boundary_gui_saves_axial_and_shear_ng_with_unchecked_bending() {
     for circle in [false, true] {
         let mut app = App::default();
         let mut model = input::column_model(circle, 1.01 * reference::axial_limit_n(circle));
@@ -251,7 +251,10 @@ fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_stat
             "{:?}",
             app.core.scoped.last_error
         );
-        let expected = app.current_design_results().unwrap().member_checks.clone();
+        let design = app.current_design_results().unwrap();
+        assert_eq!(design.design_contract_version, Some(108));
+        let expected_forces = design.member_forces.clone();
+        let expected = design.member_checks.clone();
         assert_eq!(expected.len(), 1);
         assert_eq!(expected[0].positions.len(), 6);
         for xi in [0.0, 0.5, 1.0] {
@@ -262,10 +265,22 @@ fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_stat
                     .filter(|position| position.xi == xi)
             };
             assert!(at_xi().any(|position| matches!(&position.outcome, CheckOutcome::Skipped { reason } if reason.contains("検定不能") && reason.contains("MA_y=0"))));
-            assert!(at_xi().any(|position| matches!(&position.outcome, CheckOutcome::Checked(result) if !result.ok() && result.components.len() == 1 && result.components[0].kind == CheckKind::Shear)));
+            let checked = at_xi()
+                .find_map(|position| match &position.outcome {
+                    CheckOutcome::Checked(result) => Some(result),
+                    CheckOutcome::Skipped { .. } => None,
+                })
+                .unwrap();
+            let [axial, shear] = checked.components.as_slice() else {
+                panic!("{checked:?}")
+            };
+            assert_eq!(axial.kind, CheckKind::Axial);
+            assert!(axial.ratio > 1.0 && axial.detail.contains("NA="));
+            assert_eq!(shear.kind, CheckKind::Shear);
+            assert!(shear.ratio > 1.0);
         }
         let path =
-            std::env::temp_dir().join(format!("sepika1803-{circle}-{}.ovika", std::process::id()));
+            std::env::temp_dir().join(format!("sepika1813-{circle}-{}.ovika", std::process::id()));
         app.save_project_to(path.clone());
         assert!(
             app.core.scoped.last_error.is_none(),
@@ -287,21 +302,22 @@ fn rc_column_boundary_gui_analysis_save_and_old_contract_preserve_unchecked_stat
         let (mut stale, path) = super::result_contract_tests::restore(
             &app,
             Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
-            Some(100),
-            &format!("rc-column1803-old-{circle}"),
+            Some(107),
+            &format!("rc-column1813-old-{circle}"),
         );
         std::fs::remove_file(path).unwrap();
-        assert!(stale
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .unwrap()
-            .has_analysis_results());
+        let stale_results = stale.core.scoped.results.as_ref().unwrap();
+        assert!(stale_results.has_analysis_results());
+        assert!(stale_results.member_checks.is_empty());
+        assert_eq!(stale_results.member_forces, expected_forces);
+        assert!(stale.require_selected_static_input().is_ok());
         assert!(stale.current_design_results().is_none());
         stale.run_design_check();
+        let rechecked = stale.current_design_results().unwrap();
+        assert_eq!(rechecked.design_contract_version, Some(108));
+        assert_eq!(rechecked.member_forces, expected_forces);
         assert_eq!(
-            serde_json::to_value(&stale.current_design_results().unwrap().member_checks).unwrap(),
+            serde_json::to_value(&rechecked.member_checks).unwrap(),
             serde_json::to_value(&expected).unwrap()
         );
     }
