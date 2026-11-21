@@ -26,7 +26,7 @@ pub(crate) use bond::{rc_beam_bond_check_1991_with_rebar, rc_beam_bond_check_wit
 pub use clear_span::{rc_member_clear_span, RcClearSpanError};
 pub use column_mechanism::{
     compute_column_mechanism_sum_my, design_axial_for_mechanism, resolve_column_end_hinge,
-    sum_my_from_end_hinges, ColumnEndHinge,
+    sum_my_from_end_hinges, ColumnEndHinge, ColumnMechanism,
 };
 pub use wall_nonlinear::{
     wall_shear_beta_s, wall_shear_crack, wall_shear_trilinear, wall_shear_ultimate,
@@ -108,9 +108,19 @@ impl RcDesign {
         } else {
             Self::check_section(forces, sec, mat, ctx, material_issue.is_none(), shear_issue)
         };
-        let incomplete = material_issue.and_then(|reason| {
-            crate::member_design_check::combine_incomplete_reasons(Some(reason), shear_issue)
-        });
+        use crate::member_design_check::combine_incomplete_reasons;
+        let incomplete =
+            material_issue.and_then(|reason| combine_incomplete_reasons(Some(reason), shear_issue));
+        let incomplete = if let Some(mechanism) = column::qd1_mechanism(ctx) {
+            [&mechanism.qy, &mechanism.qz]
+                .into_iter()
+                .filter_map(|direction| direction.as_ref().err())
+                .fold(incomplete, |reason, axis_reason| {
+                    combine_incomplete_reasons(reason, Some(axis_reason))
+                })
+        } else {
+            incomplete
+        };
         (outcome, incomplete)
     }
 

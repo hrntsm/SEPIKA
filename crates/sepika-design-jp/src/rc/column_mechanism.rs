@@ -1,13 +1,13 @@
 //! RC 柱の短期設計せん断力用 ΣMy（崩壊メカニズム判定）。
 
 use sepika_core::adjacency::NodeAdjacency;
-use sepika_core::model::{ElementData, ElementKind, Model};
+use sepika_core::model::{ElementData, ElementKind, Material, Model};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::transform::LocalFrame;
 
 use super::section_props::{axis_props_from_shape, rebar_info_from_shape, AxisProps};
-use crate::material_strength::rebar_sigma_y_of;
+use crate::material_strength::{main_rebar_category_issue, rebar_sigma_y_of};
 use crate::ultimate::rc_props::RcDirection;
 use crate::MemberKind;
 
@@ -100,12 +100,8 @@ fn aligns_exclusively(
 }
 
 /// 梁の略算降伏モーメント。上下の大きい方を用いる。
-fn beam_my_simple(model: &Model, elem: &ElementData) -> Option<f64> {
-    let sec = elem
-        .section
-        .and_then(|sid| model.sections.get(sid.index()))?;
-    let shape = sec.shape.as_ref()?;
-    let sigma_y = rebar_sigma_y_of(model.element_rebar_material(elem));
+fn beam_my_simple(shape: &SectionShape, material: Option<&Material>) -> Option<f64> {
+    let sigma_y = rebar_sigma_y_of(material);
     if sigma_y <= 0.0 {
         return None;
     }
@@ -127,14 +123,9 @@ fn beam_my_simple(model: &Model, elem: &ElementData) -> Option<f64> {
         };
         Some(rc_mu_simple(&inp))
     };
-    match shape {
-        SectionShape::RcBeamRect { .. } => {
-            let top = axis_props_from_shape(shape, RcDirection::Strong, true)?;
-            let bottom = axis_props_from_shape(shape, RcDirection::Strong, false)?;
-            Some(mu_of(top)?.max(mu_of(bottom)?))
-        }
-        _ => None,
-    }
+    let top = axis_props_from_shape(shape, RcDirection::Strong, true)?;
+    let bottom = axis_props_from_shape(shape, RcDirection::Strong, false)?;
+    Some(mu_of(top)?.max(mu_of(bottom)?))
 }
 
 fn column_my_at_n(model: &Model, elem: &ElementData, n_axial: f64, strong: bool) -> Option<f64> {
@@ -183,8 +174,8 @@ fn sum_beam_my_at_node(
     load_h: [f64; 2],
     peer_h: [f64; 2],
     prefer_on_tie: bool,
-) -> Result<f64, ()> {
-    let mut sum = 0.0;
+) -> Result<Option<f64>, String> {
+    let mut sum = Some(0.0);
     for other in adjacency.elements_at(model, node) {
         if other.kind != ElementKind::Beam || other.nodes.len() < 2 {
             continue;
@@ -209,15 +200,39 @@ fn sum_beam_my_at_node(
         if !aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie) {
             continue;
         }
-        let Some(my) = beam_my_simple(model, other) else {
-            return Err(());
+        let Some(sec) = model.element_section(other) else {
+            sum = None;
+            continue;
         };
-        sum += my;
+        let Some(shape @ SectionShape::RcBeamRect { .. }) = &sec.shape else {
+            sum = None;
+            continue;
+        };
+        let material = model.element_rebar_material(other);
+        if let Some(reason) = main_rebar_category_issue(material) {
+            return Err(format!(
+                "大梁 ID {} の断面「{}」の{reason}",
+                other.id.0, sec.name
+            ));
+        }
+        sum = sum
+            .zip(beam_my_simple(shape, material))
+            .map(|(sum, my)| sum + my);
     }
     Ok(sum)
 }
 
-/// 柱のメカニズム ΣMy。戻り値は `(強軸=qy 用, 弱軸=qz 用)`。
+/// RC 柱の方向別降伏モーメント和 [N·mm]。 `Ok(None)` は柱 My 未算定、
+/// `Err` は接続大梁の主筋材料区分が不適合で、その方向の QD1 が未算定。
+#[derive(Clone, Debug)]
+pub struct ColumnMechanism {
+    /// Qy（強軸）方向。
+    pub qy: Result<Option<f64>, String>,
+    /// Qz（弱軸）方向。
+    pub qz: Result<Option<f64>, String>,
+}
+
+/// 柱のメカニズム ΣMy [N·mm]。方向別に算定値または材料区分の不適合を返す。
 /// `n_*` は引張正。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
 #[allow(clippy::too_many_arguments)]
@@ -230,7 +245,7 @@ pub fn compute_column_mechanism_sum_my(
     n_combo_i: f64,
     n_combo_j: f64,
     n_axial_factor: f64,
-) -> Option<(Option<f64>, Option<f64>)> {
+) -> Option<ColumnMechanism> {
     if column.kind != ElementKind::Beam || column.nodes.len() < 2 {
         return None;
     }
@@ -257,16 +272,29 @@ pub fn compute_column_mechanism_sum_my(
     let n_j = design_axial_for_mechanism(n_long_j, n_combo_j, n_axial_factor);
     let i_is_bottom = p_i[2] <= p_j[2];
 
-    let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2]| -> Option<f64> {
-        let col_i = column_my_at_n(model, column, n_i, strong)?;
-        let col_j = column_my_at_n(model, column, n_j, strong)?;
-        let beam_i = sum_beam_my_at_node(model, adjacency, ni, load_h, peer_h, strong);
-        let beam_j = sum_beam_my_at_node(model, adjacency, nj, load_h, peer_h, strong);
+    let sum_for = |strong: bool, load_h: [f64; 2], peer_h: [f64; 2]| {
+        let beam_sum = |node| {
+            sum_beam_my_at_node(model, adjacency, node, load_h, peer_h, strong).map_err(|reason| {
+                let axis = if strong { "Qy" } else { "Qz" };
+                format!(
+                    "RC柱 ID {} の {axis} 方向のせん断検定: {reason}",
+                    column.id.0
+                )
+            })
+        };
+        let beam_i = beam_sum(ni)?;
+        let beam_j = beam_sum(nj)?;
+        let (Some(col_i), Some(col_j)) = (
+            column_my_at_n(model, column, n_i, strong),
+            column_my_at_n(model, column, n_j, strong),
+        ) else {
+            return Ok(None);
+        };
         match (beam_i, beam_j) {
-            (Ok(bi), Ok(bj)) => {
+            (Some(bi), Some(bj)) => {
                 let hi = resolve_column_end_hinge(col_i, bi, false);
                 let hj = resolve_column_end_hinge(col_j, bj, false);
-                Some(sum_my_from_end_hinges(
+                Ok(Some(sum_my_from_end_hinges(
                     hi,
                     hj,
                     col_i,
@@ -274,16 +302,16 @@ pub fn compute_column_mechanism_sum_my(
                     bi,
                     bj,
                     i_is_bottom,
-                ))
+                )))
             }
-            _ => Some(col_i + col_j),
+            _ => Ok(Some(col_i + col_j)),
         }
     };
 
-    Some((
-        sum_for(true, load_strong, load_weak),
-        sum_for(false, load_weak, load_strong),
-    ))
+    Some(ColumnMechanism {
+        qy: sum_for(true, load_strong, load_weak),
+        qz: sum_for(false, load_weak, load_strong),
+    })
 }
 
 #[cfg(test)]
@@ -485,15 +513,12 @@ mod tests {
             1.0,
         )
         .expect("柱として算定できる");
-        assert!(
-            sum.0.is_some(),
-            "SRC 梁付き方向は端軸力の Mu_i+Mu_j で確定: {sum:?}"
-        );
-        assert!(sum.1.is_some(), "梁無し方向は柱ヒンジで Some: {sum:?}");
-        assert!(
-            (sum.0.unwrap() - sum.1.unwrap()).abs() / sum.0.unwrap() < 1e-9,
-            "sum={sum:?}"
-        );
+        let qy = sum
+            .qy
+            .unwrap()
+            .expect("SRC 梁付き方向は端軸力の Mu_i+Mu_j で確定");
+        let qz = sum.qz.unwrap().expect("梁無し方向は柱ヒンジで確定");
+        assert!((qy - qz).abs() / qy < 1e-9, "qy={qy}, qz={qz}");
     }
 
     #[test]
@@ -580,8 +605,18 @@ mod tests {
 
     fn sum_my_of(model: &Model) -> (Option<f64>, Option<f64>) {
         let adj = NodeAdjacency::build(model);
-        compute_column_mechanism_sum_my(model, &adj, &model.elements[0], 0.0, 0.0, 0.0, 0.0, 1.0)
-            .expect("柱として算定できる")
+        let sum_my = compute_column_mechanism_sum_my(
+            model,
+            &adj,
+            &model.elements[0],
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        )
+        .expect("柱として算定できる");
+        (sum_my.qy.unwrap(), sum_my.qz.unwrap())
     }
 
     /// 柱 1 本の上端（節点 j）に X 方向の梁 1 本を取り付けたモデル。

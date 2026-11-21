@@ -390,12 +390,9 @@ pub struct DesignCtx {
     /// SRC柱の短期地震時Qd1に適用できることを呼出側が確認した材料別曲げ耐力。
     /// 未指定時、SRC柱の短期地震時Qd1は未算定となる。
     pub src_column_seismic_bending: Option<SrcColumnSeismicBending>,
-    /// RC 柱のメカニズム ΣMy `(強軸=qy 用, 弱軸=qz 用)` [N·mm]。
-    /// 各方向は `Some(ΣMy)`（梁 My 欠落時は端軸力の `Mu_i+Mu_j`）または
-    /// `None`（柱 My 未算定で、その方向は検定位置の `2·Mu` で代替）。
-    /// 外側の `None` はメカニズム未算定（両方向とも検定位置の `2·Mu`）。
-    /// [`rc::column_mechanism::compute_column_mechanism_sum_my`] の結果。
-    pub column_sum_my: Option<(Option<f64>, Option<f64>)>,
+    /// RC 柱の方向別メカニズム ΣMy [N·mm]。適用できる算定値が未指定の方向は
+    /// 検定位置軸力の `2·Mu` で代替する。材料区分の不適合は QD1 に伝える。
+    pub column_sum_my: Option<rc::ColumnMechanism>,
     /// 梁にスラブが取り付くか（両端節点がいずれかのスラブ境界に含まれる）。
     /// 中央部の許容曲げを `Ma = at·ft·j` のみとする判定に用いる。
     pub beam_has_slab: bool,

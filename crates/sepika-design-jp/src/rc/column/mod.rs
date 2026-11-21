@@ -3,11 +3,12 @@
 use super::{
     axis_props_from_shape, main_rebar_grade, rc_allow, rebar_allowable_tension,
     rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity,
-    shear_rebar_grade, AxisProps,
+    shear_rebar_grade, AxisProps, ColumnMechanism,
 };
 use crate::ultimate::rc_props::RcDirection;
 use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
+    MemberKind, QdMethod,
 };
 use sepika_core::model::Material;
 use sepika_core::section_shape::SectionShape;
@@ -16,6 +17,40 @@ mod nm_interaction;
 
 pub(crate) use nm_interaction::interp_ma;
 use nm_interaction::*;
+
+pub(super) fn qd1_mechanism(ctx: &DesignCtx) -> Option<&ColumnMechanism> {
+    (ctx.kind == MemberKind::Column
+        && ctx.term == LoadTerm::Short
+        && ctx
+            .seismic_qd
+            .as_ref()
+            .is_some_and(|qd| qd.method != QdMethod::Qd2))
+    .then_some(ctx.column_sum_my.as_ref())
+    .flatten()
+}
+
+fn seismic_column_design_shear(
+    ctx: &DesignCtx,
+    forces: &MemberForcesAt,
+    fallback_qy: f64,
+    fallback_qz: f64,
+) -> (Option<f64>, Option<f64>) {
+    let mechanism = qd1_mechanism(ctx);
+    let demand = |q_signed, q_index, sum_my: Option<&Result<Option<f64>, String>>, fallback| {
+        let sum_my = match sum_my {
+            Some(Err(_)) => return None,
+            Some(Ok(Some(sum_my))) => *sum_my,
+            _ => fallback,
+        };
+        Some(seismic_design_shear(
+            ctx, forces.pos, q_signed, q_index, sum_my, true,
+        ))
+    };
+    (
+        demand(forces.qy, 1, mechanism.map(|m| &m.qy), fallback_qy),
+        demand(forces.qz, 2, mechanism.map(|m| &m.qz), fallback_qz),
+    )
+}
 
 fn column_allowable_moment(curve: &[(f64, f64)], n_design: f64) -> f64 {
     if n_design < 0.0 && curve.first().is_some_and(|point| n_design < point.0) {
@@ -160,18 +195,7 @@ pub(crate) fn column_check(
             };
             let sum_mu_fallback =
                 2.0 * sepika_core::rc_capacity::rc_column_mu_simple(&mu_inp, as_total, n_design);
-            let (sum_mu_z, sum_mu_y) = match ctx.column_sum_my {
-                Some((sz, sy)) => (sz.unwrap_or(sum_mu_fallback), sy.unwrap_or(sum_mu_fallback)),
-                None => (sum_mu_fallback, sum_mu_fallback),
-            };
-            (
-                Some(seismic_design_shear(
-                    ctx, forces.pos, forces.qy, 1, sum_mu_z, true,
-                )),
-                Some(seismic_design_shear(
-                    ctx, forces.pos, forces.qz, 2, sum_mu_y, true,
-                )),
-            )
+            seismic_column_design_shear(ctx, forces, sum_mu_fallback, sum_mu_fallback)
         } else {
             (Some(forces.qy.abs()), Some(forces.qz.abs()))
         };
@@ -320,18 +344,7 @@ pub(crate) fn column_check(
             };
             let fallback_z = 2.0 * mu_of(*b, *d, &props_z);
             let fallback_y = 2.0 * mu_of(*d, *b, &props_y);
-            let (sum_mu_z, sum_mu_y) = match ctx.column_sum_my {
-                Some((sz, sy)) => (sz.unwrap_or(fallback_z), sy.unwrap_or(fallback_y)),
-                None => (fallback_z, fallback_y),
-            };
-            (
-                Some(seismic_design_shear(
-                    ctx, forces.pos, forces.qy, 1, sum_mu_z, true,
-                )),
-                Some(seismic_design_shear(
-                    ctx, forces.pos, forces.qz, 2, sum_mu_y, true,
-                )),
-            )
+            seismic_column_design_shear(ctx, forces, fallback_z, fallback_y)
         } else {
             (Some(forces.qy.abs()), Some(forces.qz.abs()))
         };
@@ -697,7 +710,10 @@ mod tests {
             clear_length: 3500.0,
             method: QdMethod::Qd1,
         });
-        ctx_dirs_missing.column_sum_my = Some((None, None));
+        ctx_dirs_missing.column_sum_my = Some(ColumnMechanism {
+            qy: Ok(None),
+            qz: Ok(None),
+        });
 
         let design = crate::rc::RcDesign;
         let r0 = design

@@ -781,7 +781,12 @@ fn draw_peak_check(
         );
         return;
     }
-    let adjacency = (kind == MemberKind::Column && seismic_qd.is_some() && !wrong_main_rebar)
+    let adjacency = (structure == StructureKind::Rc
+        && kind == MemberKind::Column
+        && seismic_qd
+            .as_ref()
+            .is_some_and(|qd| qd.method != QdMethod::Qd2)
+        && !wrong_main_rebar)
         .then(|| sepika_core::adjacency::NodeAdjacency::build(model));
 
     let mut ctx = DesignCtx {
@@ -1145,6 +1150,10 @@ mod signed_q0_acceptance_tests;
 mod steel_column_lateral_buckling_input;
 
 #[cfg(test)]
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_column_mechanism_model.rs"]
+mod rc_column_mechanism_input;
+
+#[cfg(test)]
 use crate::app::shear_area_acceptance_tests::h_column_input as combined_column;
 
 #[cfg(test)]
@@ -1306,7 +1315,7 @@ mod tests {
             strong_axis_moment_peaks,
             ..Default::default()
         };
-        peak_recording_text(app, elem, index, &rec)
+        peak_recording_text(app, elem, index, &rec, false)
     }
 
     fn peak_recording_text(
@@ -1314,11 +1323,12 @@ mod tests {
         elem: &ElementData,
         index: usize,
         rec: &ThRecording,
+        with_gravity: bool,
     ) -> String {
         let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
         egui::Context::default()
             .run_ui(egui::RawInput::default(), |ui| {
-                draw_peak_check(ui, app, elem, index, rec, false, false, &axis)
+                draw_peak_check(ui, app, elem, index, rec, with_gravity, with_gravity, &axis)
             })
             .shapes
             .iter()
@@ -1328,6 +1338,70 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn rc_column_peak_check_reports_invalid_connected_girder_rebar_for_qd1() {
+        use super::rc_column_mechanism_input as input;
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_design_jp::QdMethod;
+        use sepika_solver::statics::linear::StaticOnce;
+
+        let mut app = App::default();
+        assert!(app.load_model(input::column_with_girder(column::column_model(false, 0.0))));
+        app.core.analysis_cfg.qd_method = QdMethod::Min;
+        app.core.scoped.results = Some(crate::app::ResultsBundle {
+            combos: vec![(
+                input::GRAVITY.into(),
+                StaticOnce {
+                    story_shears: None,
+                    stiffness_ratio_disp: None,
+                    story_rigidity: Vec::new(),
+                    disp: Vec::new(),
+                    member_forces: vec![(
+                        input::COLUMN,
+                        MemberForces {
+                            at: vec![(0.5, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+                        },
+                    )],
+                    column_end_horizontal_forces: Vec::new(),
+                    column_end_axial_forces: Vec::new(),
+                    panel_moments: Vec::new(),
+                    girder_column_face_forces: Vec::new(),
+                },
+            )],
+            ..Default::default()
+        });
+        let recording = ThRecording {
+            peak_member_forces: vec![Some(MemberForces {
+                at: vec![(0.5, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0])],
+            })],
+            ..Default::default()
+        };
+        let labels = |app: &App| {
+            let i = input::COLUMN.index();
+            peak_recording_text(app, &app.core.model.elements[i], i, &recording, true)
+        };
+
+        let text = labels(&app);
+        for message in [
+            "検定不能",
+            "RC柱 ID 0 の Qy 方向",
+            "大梁 ID 1",
+            "材料区分は「鋼材」",
+            "断面タブで主筋に「鉄筋」区分の材料を割り当て",
+        ] {
+            assert!(text.contains(message), "{text}");
+        }
+        assert!(!text.contains("検定比 "), "{text}");
+
+        app.core.model.sections[input::GIRDER_SECTION.index()].rebar_material = Some(input::REBAR);
+        let text = labels(&app);
+        assert!(
+            text.contains("検定比 ") && text.contains("せん断 "),
+            "{text}"
+        );
+        assert!(!text.contains("検定不能"), "{text}");
     }
 
     #[test]
@@ -1375,7 +1449,7 @@ mod tests {
                         }],
                         ..Default::default()
                     };
-                    let text = peak_recording_text(&app, elem, 0, &recording);
+                    let text = peak_recording_text(&app, elem, 0, &recording, false);
                     let (envelope, snapshot) = text
                         .split_once("軸力極値が生じた確定ステップ\n")
                         .unwrap_or_else(|| panic!("{kind}: {text}"));
@@ -1979,7 +2053,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording);
+        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording, false);
         for label in ["ξ=0.00:", "圧縮側 t=1.000000 s  ξ=0.00:"] {
             assert!(
                 text.lines()
