@@ -508,8 +508,8 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                     ui.label("直交最小筋比 ps");
                     ui.add(egui::DragValue::new(&mut draft.wall_ps).speed(0.0001));
                 });
+                ui.label("入力した横筋比・縦筋比を、それぞれ横筋・縦筋の概算数量に使います。未入力の方向は未算定です。");
                 let mut known = draft.wall_pwh_ratio.is_some();
-                ui.label("解析用方向別筋比（数量は直交最小筋比 ps を使用）");
                 if ui.checkbox(&mut known, "横筋比を指定（実壁厚基準）").changed() {
                     draft.wall_pwh_ratio = known.then_some(0.0);
                 }
@@ -1470,6 +1470,35 @@ mod tests {
             collect(&shape.shape, &mut texts);
         }
         texts
+    }
+
+    #[test]
+    fn rc_wall_section_editor_explains_directional_quantity_and_missing_ratio() {
+        let mut app = App::default();
+        let sid = SectionId(0);
+        let shape = SectionShape::RcWall {
+            thickness: 180.0,
+            ps: 0.0025,
+            pwh_ratio: Some(0.003),
+            pwv_ratio: None,
+        };
+        assert!(app.load_model(sepika_core::model::Model {
+            sections: vec![shape.to_section(sid, "W1".into())],
+            ..Default::default()
+        }));
+        app.ui.scoped.nav.focus_section = Some(sid);
+
+        let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            section_editor_panel(ui, &mut app)
+        });
+        let text = rendered_text(&output);
+        assert!(text.iter().any(|(label, _)| {
+            label.contains("入力した横筋比・縦筋比を、それぞれ横筋・縦筋の概算数量に使います。")
+                && label.contains("未入力の方向は未算定です。")
+        }));
+        assert!(!text
+            .iter()
+            .any(|(label, _)| label.contains("数量は直交最小筋比 ps を使用")));
     }
 
     fn click_at(pos: egui::Pos2) -> Vec<egui::Event> {
