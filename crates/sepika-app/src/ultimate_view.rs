@@ -211,13 +211,15 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             let demand_symbol = mode.strong_shear_demand_symbol();
             let shear_formula = mode.strong_shear_margin_formula(shear_symbol);
             let bond_formula = mode.strong_shear_margin_formula(bond_symbol);
-            let demand_note = match mode {
-                UltimateDemandMode::StaticHinge => {
-                    "静的・両端ヒンジ略算。QL は長期せん断力の最大絶対値、Qmu は上限強度倍率·2·Mu/内法（RC梁は未算定）。"
-                }
-                UltimateDemandMode::ConfirmedTotal => {
-                    "増分・確定総応答。|Qtotal| は採用stepの総せん断力の絶対値（初期重力込み）。"
-                }
+            let (table_id, demand_note) = match mode {
+                UltimateDemandMode::StaticHinge => (
+                    "ultimate_checks_static_hinge",
+                    "静的・両端ヒンジ略算。QL は長期せん断力の最大絶対値、Qmu は上限強度倍率·2·Mu/内法（RC梁は未算定）。",
+                ),
+                UltimateDemandMode::ConfirmedTotal => (
+                    "ultimate_checks_confirmed_total",
+                    "増分・確定総応答。|Qtotal| は採用stepの総せん断力の絶対値（初期重力込み）。",
+                ),
             };
             ui.label(demand_note);
             ui.label(format!(
@@ -225,7 +227,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             ));
             crate::table_util::standard_table(
                 ui,
-                "ultimate_checks",
+                table_id,
                 &[
                     Col::id_named("部材"),
                     Col::label("種別"),

@@ -1006,6 +1006,15 @@ fn rc_ultimate_table_and_member_hover_show_mode_and_method_specific_margins() {
                 _ => None,
             })
             .collect();
+        let demand_header = format!("{demand}[kN]");
+        let header = texts
+            .iter()
+            .find(|text| text.galley.text() == demand_header)
+            .expect("比較需要の列見出し");
+        assert!(
+            !header.galley.elided,
+            "{demand_header} が切り詰められています"
+        );
         let labels: Vec<_> = texts.iter().map(|text| text.galley.text()).collect();
         let source = if confirmed {
             "確定総応答:"
@@ -1017,7 +1026,6 @@ fn rc_ultimate_table_and_member_hover_show_mode_and_method_specific_margins() {
             "{labels:?}"
         );
         for expected in [
-            format!("{demand}[kN]"),
             format!("{shear}[kN]"),
             format!("{bond}[kN]"),
             format!(
