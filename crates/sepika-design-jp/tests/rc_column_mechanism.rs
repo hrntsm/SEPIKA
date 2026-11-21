@@ -545,7 +545,7 @@ fn pinned_flexible_end_can_transfer_nodal_moment_through_a_rigid_arm_or_xyz_offs
     };
     let response = response_for(&model, 2, 1.0);
     assert_near(response.flex_face_force_local[5], 0.0, 1e-6);
-    assert_near(response.nodal_residual.data[2], 6176.044_109_486, 1e-6);
+    assert_near(response.nodal_residual.data[2], 6_176.044_109_486, 1e-6);
     assert_near(response.nodal_residual.data[4], -617_604.410_948_605, 1e-6);
     model.stress_cfg.consider_rigid_zones = false;
     let response = response_for(&model, 2, 1.0);
