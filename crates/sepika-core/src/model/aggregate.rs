@@ -5,6 +5,7 @@
 
 use super::*;
 
+const WALL_ATTR_LABEL: &str = "壁属性（開口・耐震スリット・仕上げ）";
 const STEEL_DESIGN_ATTR_LABEL: &str = "鉄骨部材の検定属性";
 const MEMBER_HYSTERESIS_ATTR_LABEL: &str = "部材の履歴則指定";
 const DAMPER_ATTR_LABEL: &str = "制振ダンパー属性";
@@ -17,7 +18,7 @@ macro_rules! for_each_elem_attr_collection {
             column,
             "雑壁代表柱の指定"
         );
-        $visit!(wall_attrs, elem, "壁属性");
+        $visit!(wall_attrs, elem, WALL_ATTR_LABEL);
         $visit!(steel_design_attrs, elem, STEEL_DESIGN_ATTR_LABEL);
         $visit!(slab_composite_attrs);
         $visit!(pca_attrs, elem, "PCa梁属性");
@@ -34,7 +35,8 @@ macro_rules! for_each_elem_attr_collection {
 /// 退避・復元に用いる（undo 用の一時保持。直列化はしない）。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ElemAttrs {
-    pub wall: Option<WallAttr>,
+    /// 元の配列位置と壁属性。
+    pub wall: Vec<(usize, WallAttr)>,
     /// 元の配列位置と鉄骨部材の検定属性。
     pub steel_design: Vec<(usize, SteelDesignAttr)>,
     pub pca: Option<PcaGirderAttr>,
@@ -297,7 +299,8 @@ impl Model {
 
     /// 節点・要素・断面・材料・階・床/壁領域・床板/壁版の添字 ID と、
     /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・荷重・部材別重量・生成記録の参照を検査する。
-    /// 二次部材 ID は一意性だけを要求し、未割当 `None`・用途・幾何・入力完成度は検査しない。
+    /// 壁属性の参照先は壁要素またはシェルに限る。二次部材 ID は一意性だけを要求する。
+    /// 未割当 `None`・断面用途・幾何・入力完成度は検査しない。
     pub fn validate_reference_ids(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
 
@@ -356,6 +359,7 @@ impl Model {
                 )));
             }
         }
+        self.validate_wall_attr_refs()?;
         self.validate_steel_design_attr_refs()?;
         self.validate_member_weight_refs()?;
         self.validate_member_hysteresis_attr_refs()?;
@@ -1611,6 +1615,29 @@ impl Model {
         }
     }
 
+    /// 参照先が存在しないか、壁要素・シェルでない最初の壁属性を、部材番号付きエラーで返す。
+    pub fn validate_wall_attr_refs(&self) -> Result<(), crate::error::CoreError> {
+        use crate::error::CoreError;
+
+        for attr in &self.wall_attrs {
+            let id = attr.elem.0;
+            match self.element(attr.elem).map(|elem| elem.kind) {
+                Some(ElementKind::Wall | ElementKind::Shell) => {}
+                None => {
+                    return Err(CoreError::DanglingRef(format!(
+                        "{WALL_ATTR_LABEL} -> 部材 {id}"
+                    )))
+                }
+                Some(_) => {
+                    return Err(CoreError::InvalidInput(format!(
+                        "{WALL_ATTR_LABEL} -> 部材 {id} は壁要素・シェルのいずれでもありません"
+                    )))
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// 参照先が存在しない最初の鉄骨部材の検定属性を、部材番号付きエラーで返す。
     pub fn validate_steel_design_attr_refs(&self) -> Result<(), crate::error::CoreError> {
         for attr in &self.steel_design_attrs {
@@ -1790,7 +1817,9 @@ impl Model {
             })
             .unwrap_or_default();
         ElemAttrs {
-            wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
+            wall: take_ordered(&mut self.wall_attrs, |attr| {
+                (attr.elem == elem).then(|| attr.clone())
+            }),
             steel_design: take_ordered(&mut self.steel_design_attrs, |attr| {
                 (attr.elem == elem).then(|| attr.clone())
             }),
@@ -1814,9 +1843,10 @@ impl Model {
     /// 取り外した側テーブル属性を、指定要素 ID へ紐づけ直して復元する
     /// （要素削除の undo 用）。各属性の `elem` は `elem` へ上書きする。
     pub fn restore_elem_attrs(&mut self, elem: ElemId, attrs: ElemAttrs) {
-        if let Some(mut a) = attrs.wall {
-            a.elem = elem;
-            self.wall_attrs.push(a);
+        for (index, mut attr) in attrs.wall {
+            attr.elem = elem;
+            self.wall_attrs
+                .insert(index.min(self.wall_attrs.len()), attr);
         }
         for (index, mut attr) in attrs.steel_design {
             attr.elem = elem;

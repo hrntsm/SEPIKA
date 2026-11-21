@@ -141,6 +141,9 @@ pub(crate) fn enumerate_self_weight(
     model: &Model,
     load_cfg: &LoadCfg,
 ) -> Result<Vec<SelfWeightItem>, String> {
+    model
+        .validate_wall_attr_refs()
+        .map_err(|error| error.to_string())?;
     load_cfg
         .validate_member_weight_refs(model)
         .map_err(|error| error.to_string())?;

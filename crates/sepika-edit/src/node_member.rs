@@ -506,6 +506,9 @@ impl EditCommand for AddMember {
         if let Err(error) = model.validate_member_hysteresis_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
+        if let Err(error) = model.validate_wall_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         if let Err(error) = model.validate_damper_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
@@ -554,6 +557,9 @@ impl EditCommand for AddDamper {
             return Box::new(RejectedEdit(error.to_string()));
         }
         if let Err(error) = model.validate_member_hysteresis_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
+        if let Err(error) = model.validate_wall_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
         if let Err(error) = model.validate_damper_attr_refs() {
@@ -661,6 +667,9 @@ impl EditCommand for DeleteMember {
         if idx >= model.elements.len() || model.elements[idx].id != self.id {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_wall_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         if let Err(error) = model.validate_damper_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
@@ -763,6 +772,9 @@ impl EditCommand for InsertMember {
             return Box::new(Noop);
         }
         if let Err(error) = model.validate_member_hysteresis_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
+        if let Err(error) = model.validate_wall_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
         if let Err(error) = model.validate_damper_attr_refs() {

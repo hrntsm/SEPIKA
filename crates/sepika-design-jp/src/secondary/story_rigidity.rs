@@ -55,11 +55,19 @@ fn rigidity_from_analysis(
     rigidity_from_flexibility(model.nodes[master.index()].coord, flexibility)
 }
 
-fn with_wall_elements(model: &Model) -> std::borrow::Cow<'_, Model> {
+fn with_wall_elements(
+    model: &Model,
+    story: StoryId,
+) -> Result<std::borrow::Cow<'_, Model>, String> {
+    model
+        .validate_wall_attr_refs()
+        .map_err(|error| evaluation_error(story, error.to_string()))?;
     if model.wall_plates.is_empty() || !model.generated_wall_origins.is_empty() {
-        std::borrow::Cow::Borrowed(model)
+        Ok(std::borrow::Cow::Borrowed(model))
     } else {
-        std::borrow::Cow::Owned(sepika_core::wall_expand::expand_wall_elements(model).0)
+        Ok(std::borrow::Cow::Owned(
+            sepika_core::wall_expand::expand_wall_elements(model).0,
+        ))
     }
 }
 
@@ -113,7 +121,7 @@ pub fn rigid_floor_story_rigidity(
     story: StoryId,
 ) -> Result<RigidFloorStoryRigidity, String> {
     validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
-    let model = with_wall_elements(model);
+    let model = with_wall_elements(model, story)?;
     evaluation_master(&model, story)
         .and_then(|master| rigidity_from_analysis(&model, master, None))
         .map_err(|reason| evaluation_error(story, reason))
@@ -296,7 +304,8 @@ pub fn story_rigidity_requiring_coupled_analysis(
     {
         return evaluation.clone();
     }
-    evaluate_story_rigidity(&with_wall_elements(model), story, None).or_else(|reason| {
+    let expanded = with_wall_elements(model, story)?;
+    evaluate_story_rigidity(&expanded, story, None).or_else(|reason| {
         validate_rigidity_column_axes(model, story)?;
         Err(reason)
     })
@@ -394,7 +403,8 @@ enum CouplingIndicator {
 
 pub(super) fn coupling_indicator(model: &Model, story: StoryId) -> Result<Option<String>, String> {
     validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
-    match coupling_indicator_from_expanded(&with_wall_elements(model), story)? {
+    let model = with_wall_elements(model, story)?;
+    match coupling_indicator_from_expanded(&model, story)? {
         CouplingIndicator::Candidate(reason) => Ok(Some(reason)),
         _ => Ok(None),
     }
