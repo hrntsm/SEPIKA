@@ -1533,7 +1533,10 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
             0.0,
         )
         .unwrap_err();
-        assert!(reason.contains("My"), "{reason}");
+        assert!(
+            reason.contains("材種 SD345") && reason.contains("1.0～1.1"),
+            "{reason}"
+        );
         let dt = 0.01;
         let response = nonlinear_time_history_analysis(
             &model,

@@ -1239,7 +1239,13 @@ fn unspecified_rc_basis_preserves_the_existing_fiber_path() {
 fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
     use crate::factory::StrengthBasis;
     use sepika_core::model::AnalysisKind;
-    let base = explicit_rc_reference_fixture();
+    let mut base = explicit_rc_reference_fixture();
+    base.materials.push(Material {
+        id: MaterialId(3),
+        ..base.materials[1].clone()
+    });
+    base.sections[0].shear_rebar_material = Some(MaterialId(3));
+    base.materials[1].name = "入力強度で評価する主筋".into();
     let view = |model: &Model, basis| {
         crate::factory::build_hinge_view(
             &model.elements[0],

@@ -11,6 +11,11 @@ use sepika_edit::{
     SetMaterialName,
 };
 
+const STRENGTH_FACTOR_HELP: &str = "保有水平耐力計算（増分解析）の材料強度割増係数。\
+    空欄は自動設定（鋼材1.1、590N級1.05、一般のRC主筋1.1）。\
+    告示第2464号の対象となる普通強度JIS主筋・壁縦筋はFyに基準強度を入力し、割増は空欄または1.0～1.1。\
+    SD490の主筋・壁縦筋はFy=490 N/mm²、割増は空欄または1.0。";
+
 /// プリセット追加 UI の選択状態（区分・グレード名・SRC造トグル）。
 /// `ui.data`/`data_mut` の temp storage に保持する。
 #[derive(Clone, Debug)]
@@ -207,11 +212,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         }
         ui.label("割増");
         ui.add(egui::TextEdit::singleline(&mut draft[6]).desired_width(50.0))
-            .on_hover_text(
-                "保有水平耐力計算（増分解析）の材料強度割増係数。\
-                 空欄=自動（鋼材1.1、590N級1.05、一般のRC主筋1.1）。\
-                 SD490を主筋・壁縦筋に用いる場合はFy=490 N/mm²、割増は空欄または1.0。",
-            );
+            .on_hover_text(STRENGTH_FACTOR_HELP);
         let parsed = parse_material_draft(&draft);
         if let Err(reason) = &parsed {
             ui.colored_label(crate::theme::ERROR_RED, reason);
@@ -301,11 +302,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
             Col::num("ρ [t/mm³]"),
             Col::num("Fc"),
             Col::num("Fy"),
-            Col::num("割増").hover(
-                "保有水平耐力計算（増分解析）の材料強度割増係数。\
-                 空欄=自動（鋼材1.1、590N級1.05、一般のRC主筋1.1）。\
-                 SD490を主筋・壁縦筋に用いる場合はFy=490 N/mm²、割増は空欄または1.0。",
-            ),
+            Col::num("割増").hover(STRENGTH_FACTOR_HELP),
             Col::actions(),
         ],
         n,
