@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use crate::material_strength::main_rebar_grade;
 use crate::rc::{rc_member_clear_span, RcClearSpanError};
 use crate::MemberKind;
 use sepika_core::dof::{Dof, Dof6Mask};
@@ -57,7 +58,8 @@ pub struct UltimateCheck {
     /// `1/((Mmx/Mux)^2+(Mmy/Muy)^2)^(1/2)`。設計用曲げ需要が 0 なら `f64::INFINITY`。
     pub biaxial_bending_margin: Option<f64>,
     /// 付着余裕度。静的RC柱は max(Qbu−|QL|, 0)/Qmu、確定総応答は Qbu/Qmu。
-    /// これらでは、付着無効または Qmu が 0 なら無限大。ただし静的RC柱で付着が有効かつ |QL| が Qbu を超える場合は 0。
+    /// これらでは、付着が無効、または付着耐力が算定済みで Qmu が 0 なら無限大。
+    /// 静的RC柱で付着が有効かつ |QL| が Qbu を超える場合は 0、付着耐力が未算定の場合は NaN。
     /// 静的RC梁は付着が有効で長期せん断力だけで超過が確定した場合は 0、それ以外は NaN。
     pub bond_margin: f64,
     /// 軸終局耐力（柱のみ Some）。
@@ -290,10 +292,24 @@ fn check_member(
     let main_rebar = model.element_rebar_material(elem);
     let main_rebar_issue = crate::material_strength::main_rebar_category_issue(main_rebar)
         .map(|reason| format!("部材 ID {}（断面「{}」）の{reason}", elem.id.0, sec.name));
+    let grade = main_rebar_grade(main_rebar);
+    let round_bond_reason = (opts.include_bond
+        && main_rebar_issue.is_none()
+        && matches!(grade, "SR235" | "SR295"))
+    .then(|| {
+        format!(
+            "ultimate_bond_round_bar_unsupported: 部材 ID {} の主筋は丸鋼（{grade}）です。終局付着割裂に用いる付着信頼強度の適用根拠を確認できないため、付着は未算定です",
+            elem.id.0
+        )
+    });
     let unchecked = |reason: &str| {
-        let reason = main_rebar_issue
-            .as_ref()
-            .map_or_else(|| reason.to_owned(), |issue| format!("{issue}。{reason}"));
+        let reason = if let Some(issue) = &main_rebar_issue {
+            format!("{issue}。{reason}")
+        } else if let Some(issue) = &round_bond_reason {
+            format!("{reason}。{issue}")
+        } else {
+            reason.to_owned()
+        };
         Ok(Some(unchecked_member(elem.id, kind, &reason)))
     };
     let Some(fc) = mat.fc else {
@@ -529,11 +545,12 @@ fn check_member(
         };
         (qbu, tau_bu)
     };
-    let bond_unverified = opts.include_bond
+    let bond_unknown_bar_type = opts.include_bond
         && main_rebar_issue.is_some()
         && !matches!(p.main_dia, RebarSize::Standard(_));
+    let bond_unverified = bond_unknown_bar_type || round_bond_reason.is_some();
     let main_rebar_issue = main_rebar_issue.map(|reason| {
-        if bond_unverified {
+        if bond_unknown_bar_type {
             format!("{reason}。数値径から異形鉄筋であることを確認できないため付着は未算定です")
         } else {
             reason
@@ -547,6 +564,7 @@ fn check_member(
     if static_beam_rebar.is_some() {
         static_beam_reasons.extend(beam_reference);
         static_beam_reasons.extend(main_rebar_issue);
+        static_beam_reasons.extend(round_bond_reason);
         let ql = demand.q_long.unwrap_or_default().abs();
         let shear_ng = beam_mechanism.is_some() && qsu.is_finite() && ql > qsu;
         let bond_ng =
@@ -716,9 +734,13 @@ fn check_member(
 
     let shear_ok = shear_margin >= 1.0 && biaxial_shear_margin.is_none_or(|m| m >= 1.0);
     let bending_ok = biaxial_bending_margin.map(|m| m >= 1.0).unwrap_or(true);
-    let checked_parts_ok = shear_ok && bond_margin >= 1.0 && bending_ok;
+    let checked_parts_ok = shear_ok && (bond_unverified || bond_margin >= 1.0) && bending_ok;
     let unchecked_reason = if checked_parts_ok {
-        biaxial_shear.and_then(Result::err).map(str::to_owned)
+        match (&round_bond_reason, biaxial_shear.and_then(Result::err)) {
+            (Some(bond), Some(shear)) => Some(format!("{shear}。{bond}")),
+            (Some(bond), None) => Some(bond.clone()),
+            (None, shear) => shear.map(str::to_owned),
+        }
     } else {
         None
     };
@@ -752,23 +774,20 @@ fn check_member(
         (Some(reference), Some(reason)) => format!("{reference}。{reason}"),
         _ => format!("Mu={mu:.0} N·mm"),
     };
-    let detail = format!(
-        "{bending_detail}, Qmu={:.0} N, Qsu={:.0} N, Qbu={:.0} N, τbu={:.3} N/mm², \
-         Qsu/Qmu={:.3}, Qbu/Qmu={:.3}{}{}{}, pw={:.5}, jt={:.1} mm, L={} mm, Rp={:.4}",
-        qmu,
-        qsu,
-        qbu,
-        tau_bu,
-        shear_margin,
-        bond_margin,
-        biaxial_str,
-        bend_str,
-        ql_str,
-        pw,
-        jt,
-        l_clear,
+    let bond_detail = if round_bond_reason.is_some() {
+        "Qbu=未算定, τbu=未算定, Qbu/Qmu=未算定".into()
+    } else {
+        format!("Qbu={qbu:.0} N, τbu={tau_bu:.3} N/mm², Qbu/Qmu={bond_margin:.3}")
+    };
+    let mut detail = format!(
+        "{bending_detail}, Qmu={qmu:.0} N, Qsu={qsu:.0} N, Qsu/Qmu={shear_margin:.3}, {bond_detail}\
+         {biaxial_str}{bend_str}{ql_str}, pw={pw:.5}, jt={jt:.1} mm, L={l_clear} mm, Rp={:.4}",
         opts.rp
     );
+    if let Some(reason) = &round_bond_reason {
+        detail.push('。');
+        detail.push_str(reason);
+    }
 
     Ok(Some(UltimateCheck {
         elem: elem.id,
