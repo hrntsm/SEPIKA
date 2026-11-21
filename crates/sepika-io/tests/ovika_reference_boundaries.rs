@@ -179,6 +179,47 @@ fn ovika_rejects_steel_design_attr_without_a_member() {
 }
 
 #[test]
+fn ovika_rejects_joint_and_haunch_refs_to_missing_members() {
+    let path =
+        std::env::temp_dir().join(format!("sepika1762-invalid-{}.ovika", std::process::id()));
+    let mut model = baseline();
+    for attr in [
+        MemberDetailAttr {
+            joints: vec![MemberJoint {
+                distance: 800.0,
+                kind: Default::default(),
+            }],
+            ..MemberDetailAttr::new(ElemId(2))
+        },
+        MemberDetailAttr {
+            haunch_j: Some(Haunch {
+                length: 700.0,
+                depth_increase: 100.0,
+                width_increase: 25.0,
+            }),
+            ..MemberDetailAttr::new(ElemId(2))
+        },
+    ] {
+        model.member_detail_attrs = vec![attr];
+        independent_file(&path, &model);
+        let original = std::fs::read(&path).unwrap();
+
+        let load = load_ovika(&path).err().unwrap();
+        let save = save_ovika(&path, &model, OvikaExtras::default()).unwrap_err();
+        for error in [load, save] {
+            assert!(
+                error
+                    .to_string()
+                    .contains("部材の付帯情報（継手・ハンチ） -> 部材 2"),
+                "{error}"
+            );
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn ovika_rejects_each_hysteresis_attribute_without_a_member() {
     use HysteresisModel::{Auto, Retrograde, Takeda};
 
