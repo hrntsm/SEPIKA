@@ -550,6 +550,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [時刻歴簡易検定のRC梁Q0](時刻歴簡易検定のRC梁Q0_Issue1646_確認記録.md) | Q0算定エラーが及ぶ部材・需要方式 | 🔶（自動描画で検証。通常操作・保存済み結果からの再現は未確認） |
 | [材端偏心のあるH形鋼柱の横座屈長さ_Issue1651_確認記録.md](材端偏心のあるH形鋼柱の横座屈長さ_Issue1651_確認記録.md) | 材端偏心のあるH形鋼柱の支持点間隔、短期通常検定と時刻歴簡易検定の適否 | 🔶（同一曲げで時刻歴の危険側判定を再現。支持条件の一般化・是正は後続） |
 | [SRC柱RC梁接合部短期許容せん断_Issue1512_原典照合.md](SRC柱RC梁接合部短期許容せん断_Issue1512_原典照合.md) | SRC柱・RC梁の短期許容せん断、ウェブの有効高さ、応力伝達 | 🔶（原典の有限照合。RC梁の短期許容値は未確定） |
 | [SRC柱梁接合部帯筋_Issue1513_原典照合.md](SRC柱梁接合部帯筋_Issue1513_原典照合.md) | SRC柱梁接合部の構面別帯筋比と短期せん断補強用許容引張応力度 | 🔶（原典と検定入力の有限照合） |
@@ -1023,6 +1024,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 36a | 直接線形求解 | sepika-math / sepika-solver / sepika-core / sepika-app | cholesky・lu・solver・statics/analysis/linear・result_contract_tests | [Issue598独立期待値と実入口](直接線形求解_Issue598_2026-10.md#独立期待値と実入口) | 横断 | 🔶（Verification、実験Validation・最終headゲート未） |
 | 36 | 静的設定の公開経路一致 | sepika-solver / sepika-element / sepika-job / sepika-app / sepika-mcp | statics/linear、statics/analysis、factory、compute、actions/linear_static、tests | [Issue595の直接入口と回帰](静的設定採用_Issue595_2026-10.md#直接入口と回帰) | 横断 | 🔶（Verification、Validation・最終headゲート未） |
 | 600 | RC梁Q0の符号付き端反力合成 | sepika-job / sepika-design-jp / sepika-app / sepika-mcp | design_q0.rs・rc/beam.rs・th_detail.rs | [Issue600の受入対応](RC梁Q0の符号付き端反力合成_Issue600_2026-10.md#接続保存受入の対応) | 横断 | 🔶（直接/追加受入・保存・関連構成Verification成功、手動GUI/Validation・最終ゲート未確認） |
+| 1646 | 時刻歴簡易検定のRC梁Q0 | sepika-job / sepika-app | design_q0.rs・th_detail.rs | [描画回帰の再現条件](時刻歴簡易検定のRC梁Q0_Issue1646_確認記録.md#再現条件) | 自動egui | 🔶（通常操作・保存済み結果からの再現は未確認） |
 | 633 | 符号付き単純梁反力 | sepika-load / sepika-element / sepika-app | floor/fem.rs・story_gen/reactions.rs・frame/member_load.rs・viewer/cmq.rs | [Issue633の独立値・公開入口](符号付き単純梁反力_Issue633_2026-10.md#独立verification) | 横断 | 🔶（直接Verification、原本／Validation・最終CIは後続） |
 | 615 | 節点TSVの一括拒否と状態保持 | sepika-app | app/node_grid.rs・grid/core.rs・grid/widget.rs・tables/nodes.rs | [実入口と期待値](節点TSV一括拒否_Issue615_2026-10.md#独立期待値と実入口) | 自動egui／編集 | 🔶（SEPIKA側Verification、外部Excel/OS手操作未実施） |
 | 546 | 節点・材料直接入力の有限判定 | sepika-app / sepika-edit | tables/nodes.rs・tables/materials.rs・section_material/material.rs | [直接入力matrix](節点材料の直接有限入力_Issue546_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（直接Verification、最終head CI後続） |
