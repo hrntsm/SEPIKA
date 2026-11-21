@@ -12,6 +12,25 @@ pub enum UltimateDemandMode {
     ConfirmedTotal,
 }
 
+impl UltimateDemandMode {
+    /// 比較に用いる強軸せん断需要の表示記号。
+    pub fn strong_shear_demand_symbol(self) -> &'static str {
+        match self {
+            Self::StaticHinge => "Qmu",
+            Self::ConfirmedTotal => "|Qtotal|",
+        }
+    }
+
+    /// 強軸のせん断または付着の余裕度を表す表示用の式。
+    pub fn strong_shear_margin_formula(self, capacity: &str) -> String {
+        let demand = self.strong_shear_demand_symbol();
+        match self {
+            Self::StaticHinge => format!("max({capacity}−QL, 0)/{demand}"),
+            Self::ConfirmedTotal => format!("{capacity}/{demand}"),
+        }
+    }
+}
+
 /// 静的RC梁の強軸曲げ符号の確認結果。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StaticBeamBending {
@@ -108,6 +127,16 @@ pub enum ShearMethod {
     Ductility,
 }
 
+impl ShearMethod {
+    /// 表示用の耐力記号を（せん断、付着）の順で返す。
+    pub fn capacity_symbols(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Plastic => ("Qsu", "Qbu"),
+            Self::Ductility => ("Vu", "Vbu"),
+        }
+    }
+}
+
 /// 終局検定の算定オプション。
 #[derive(Clone, Debug)]
 pub struct UltimateShearOptions {
@@ -123,8 +152,7 @@ pub struct UltimateShearOptions {
     pub sigma_wy: f64,
     /// 付着割裂の検定を含める場合 true。
     pub include_bond: bool,
-    /// 終局せん断強度の算定方法（既定 塑性理論式）。靭性指針式を選ぶと Qsu 列に
-    /// Vu=min(Vu1,Vu2,Vu3)（[`crate::ultimate::rc_shear_ductility`]）を用いる。
+    /// 終局せん断・付着耐力の算定方法（既定 塑性理論式）。
     pub shear_method: ShearMethod,
     /// RC 柱の二軸せん断を検定する場合 true。
     /// 静的ヒンジでの二軸せん断余裕度は、両軸の QL が明示的に 0 の場合に算定する。

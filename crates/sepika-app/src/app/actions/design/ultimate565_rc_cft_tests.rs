@@ -372,6 +372,16 @@ fn static_rc_biaxial_table_distinguishes_ok_ng_and_unchecked() {
         app.core.ultimate_include_bond = false;
         solve_statics(&mut app);
 
+        let check = &app.compute_ultimate_checks().unwrap()[0];
+        assert!(
+            check
+                .detail
+                .contains("強軸せん断余裕度 max(Qsu−QL, 0)/Qmu="),
+            "{}",
+            check.detail
+        );
+        assert_eq!(check.detail.contains("二軸せん断余裕度="), status == "OK");
+
         let ctx = egui::Context::default();
         let frame = || egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -394,6 +404,9 @@ fn static_rc_biaxial_table_distinguishes_ok_ng_and_unchecked() {
         assert!(labels.contains(&status), "load={load}: {labels:?}");
         assert!(labels.contains(&summary), "load={load}: {labels:?}");
         assert!(labels.iter().any(|s| s.starts_with(margin)), "{labels:?}");
+        assert!(labels
+            .iter()
+            .any(|s| s.contains("強軸せん断余裕度 max(Qsu−QL, 0)/Qmu")));
         assert_eq!(
             labels
                 .iter()
@@ -868,6 +881,216 @@ fn ultimate_table_labels(app: &mut App) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn rc_ultimate_table_and_member_hover_show_mode_and_method_specific_margins() {
+    let mut app = column(false);
+    app.core.ultimate_include_bond = true;
+    solve_statics(&mut app);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.core.analysis_cfg.push_steps = 3;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let po = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_x
+        .as_mut()
+        .unwrap();
+    let response = &po.confirmed_history.as_ref().unwrap()[1];
+    po.capacity_evaluation = Some(
+        po.evaluation_point(
+            EvaluationPurpose::HoldingCapacity,
+            SeismicDir::X,
+            response.step,
+            "初期重力を含む確定総応答を採用".into(),
+        )
+        .unwrap(),
+    );
+
+    for (confirmed, ductility, demand, shear, bond, shear_formula, bond_formula) in [
+        (
+            false,
+            false,
+            "Qmu",
+            "Qsu",
+            "Qbu",
+            "max(Qsu−QL, 0)/Qmu",
+            "max(Qbu−QL, 0)/Qmu",
+        ),
+        (
+            false,
+            true,
+            "Qmu",
+            "Vu",
+            "Vbu",
+            "max(Vu−QL, 0)/Qmu",
+            "max(Vbu−QL, 0)/Qmu",
+        ),
+        (
+            true,
+            false,
+            "|Qtotal|",
+            "Qsu",
+            "Qbu",
+            "Qsu/|Qtotal|",
+            "Qbu/|Qtotal|",
+        ),
+        (
+            true,
+            true,
+            "|Qtotal|",
+            "Vu",
+            "Vbu",
+            "Vu/|Qtotal|",
+            "Vbu/|Qtotal|",
+        ),
+    ] {
+        app.core.ultimate_use_pushover = confirmed;
+        app.core.ultimate_shear_ductility = ductility;
+        let check = &app.compute_ultimate_checks().unwrap()[0];
+        let verdict = if check.ok { "OK" } else { "NG" };
+        assert!(check.unchecked_reason.is_none(), "{check:?}");
+
+        let ctx = egui::Context::default();
+        app.core.ultimate_use_pushover = !confirmed;
+        ultimate_table_frame(&ctx, &mut app, vec![]);
+        let before_toggle = ultimate_table_frame(&ctx, &mut app, vec![]);
+        let toggle = before_toggle
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text)
+                    if text.galley.text() == "設計用応力・Rp を増分解析応答から反映" =>
+                {
+                    Some(text.galley.rect.translate(text.pos.to_vec2()).center())
+                }
+                _ => None,
+            })
+            .expect("需要モードのチェックボックス");
+        let settled = ultimate_table_frame(
+            &ctx,
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(toggle),
+                egui::Event::PointerButton {
+                    pos: toggle,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: toggle,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(app.core.ultimate_use_pushover, confirmed);
+        let texts: Vec<_> = settled
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text),
+                _ => None,
+            })
+            .collect();
+        let demand_header = format!("{demand}[kN]");
+        let header = texts
+            .iter()
+            .find(|text| text.galley.text() == demand_header)
+            .expect("比較需要の列見出し");
+        assert!(
+            !header.galley.elided,
+            "{demand_header} が切り詰められています"
+        );
+        let labels: Vec<_> = texts.iter().map(|text| text.galley.text()).collect();
+        let source = if confirmed {
+            "確定総応答:"
+        } else {
+            "静的重力参照:"
+        };
+        assert!(
+            labels.iter().any(|label| label.starts_with(source)),
+            "{labels:?}"
+        );
+        for expected in [
+            format!("{shear}[kN]"),
+            format!("{bond}[kN]"),
+            format!(
+                "（比較需要が正の場合）強軸せん断余裕度 {shear_formula}、付着余裕度 {bond_formula}"
+            ),
+            format!("{:.2}", check.shear_margin),
+            format!("{:.2}", check.bond_margin),
+            verdict.into(),
+        ] {
+            assert!(
+                labels.contains(&expected.as_str()),
+                "{expected}: {labels:?}"
+            );
+        }
+        let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        ultimate_table_frame(&ctx, &mut app, vec![]);
+        let member_id = ultimate_table_frame(&ctx, &mut app, vec![])
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "0" => {
+                    Some(text.galley.rect.translate(text.pos.to_vec2()).center())
+                }
+                _ => None,
+            })
+            .expect("部材IDのセル");
+        ultimate_table_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(member_id)]);
+        let mut hovered = ultimate_table_frame(&ctx, &mut app, vec![]);
+        for _ in 0..2 {
+            hovered = ultimate_table_frame(&ctx, &mut app, vec![]);
+        }
+        let detail = hovered
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text)
+                    if text.galley.text().contains("強軸せん断余裕度")
+                        && text.galley.text().contains("Mu=") =>
+                {
+                    Some(text.galley.text())
+                }
+                _ => None,
+            })
+            .expect("部材IDのホバー詳細");
+        for expected in [
+            format!("{demand}={:.0} N", check.qmu),
+            format!("{shear}={:.0} N", check.qsu),
+            format!("{bond}={:.0} N", check.qbu),
+            format!("強軸せん断余裕度 {shear_formula}={:.3}", check.shear_margin),
+            format!("付着余裕度 {bond_formula}={:.3}", check.bond_margin),
+            if confirmed {
+                "初期重力込み"
+            } else {
+                "QL=12000 N（強軸）"
+            }
+            .into(),
+        ] {
+            assert!(detail.contains(&expected), "{expected}: {detail}");
+        }
+        assert_eq!(detail.contains("QL="), !confirmed, "{detail}");
+    }
 }
 
 #[test]
