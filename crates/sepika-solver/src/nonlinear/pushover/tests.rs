@@ -1586,6 +1586,7 @@ fn test_compute_shear_yield_qy_real_rebar_beam_uses_unfavorable_top_or_bottom() 
 /// （`rc_qsu_simple`）による方向別算定値に一致すること。
 /// 要素座標系はせい方向＝ローカル y のため、y 方向（強軸・X 方向最外段）、
 /// z 方向（弱軸・Y 方向最外段、b/d 入れ替え）の双方を検証する。
+/// 帯筋材料を割り当てた強軸と、未割当の弱軸で σwy = 295 N/mm² を確認する。
 #[test]
 fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
     use sepika_core::rc_rebar_geom::RectEdge;
@@ -1692,12 +1693,13 @@ fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
         clear_span,
         sigma_0: 0.0,
     });
+    sec.shear_rebar_material = None;
     let qy_z = compute_shear_yield_qy(
         sec.as_y,
         SecMaterials {
             material: Some(&mat),
             rebar_mat: Some(&rebar_mat),
-            shear_mat: Some(&shear_mat),
+            shear_mat: None,
             steel_mat: None,
         },
         Some(&sec),

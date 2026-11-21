@@ -206,9 +206,8 @@ mod tests {
     }
 
     #[test]
-    fn rect_column_yield_uses_strong_axis() {
-        use crate::rc_rebar_geom::RectEdge;
-        use crate::section_shape::{one_bar_area, RcRectColumnRebar, RectColumnHoop};
+    fn rect_column_nominal_yield_matches_strong_axis_handcalc() {
+        use crate::section_shape::{RcRectColumnRebar, RectColumnHoop};
         let mut model = Model::default();
         model.materials.push(Material {
             id: MaterialId(0),
@@ -224,24 +223,20 @@ mod tests {
             strength_factor: None,
         });
         let rebar = RcRectColumnRebar {
-            main_dia: crate::section_shape::RebarSize::DiameterMm(25.0),
-            x: vec![5],
+            main_dia: crate::section_shape::RebarSize::DiameterMm(22.0),
+            x: vec![4],
             y: vec![2],
             cover: 40.0,
             hoop: RectColumnHoop {
                 dia: crate::section_shape::RebarSize::DiameterMm(10.0),
-                pitch: 100.0,
+                pitch: 150.0,
                 legs_x: 2,
                 legs_y: 2,
             },
         };
         let (b, d) = (400.0, 600.0);
-        let mut sec = SectionShape::RcColumnRect {
-            b,
-            d,
-            rebar: rebar.clone(),
-        }
-        .to_section(SectionId(0), "C1".into());
+        let mut sec =
+            SectionShape::RcColumnRect { b, d, rebar }.to_section(SectionId(0), "C1".into());
         sec.material = Some(MaterialId(0));
         model.sections.push(sec);
         let elem = ElementData {
@@ -260,18 +255,14 @@ mod tests {
             spring: None,
         };
         let my = member_flexural_yield_moment(&elem, &model, FlexuralStrengthFactors::NOMINAL);
-        let a1 = one_bar_area(25.0);
-        let k0 = 40.0 + 10.0 + 25.0 / 2.0;
-        let strong = rebar.edge_steel(RectEdge::Top, b, d);
-        let weak = rebar.edge_steel(RectEdge::Left, b, d);
-        assert!((strong.effective_depth_mm - (d - k0)).abs() < 1e-9);
-        assert!((weak.effective_depth_mm - (b - k0)).abs() < 1e-9);
-        let my_strong = 0.9 * (5.0 * a1) * 345.0 * (d - k0);
-        let my_weak = 0.9 * (2.0 * a1) * 345.0 * (b - k0);
-        assert!(my_weak < my_strong);
+        let bar_area_mm2 = std::f64::consts::PI * 11.0_f64.powi(2);
+        let edge_to_bar_center_mm = 40.0 + 10.0 + 11.0;
+        let my_strong = 0.9 * (4.0 * bar_area_mm2) * 345.0 * (600.0 - edge_to_bar_center_mm);
+        let my_weak = 0.9 * (2.0 * bar_area_mm2) * 345.0 * (400.0 - edge_to_bar_center_mm);
         assert!(
             (my - my_strong).abs() < 1e-6 * my_strong.max(1.0),
             "My={my} 強軸手計算={my_strong} 弱軸手計算={my_weak}"
         );
+        assert!((my - my_weak).abs() > 1e-6 * my_weak);
     }
 }

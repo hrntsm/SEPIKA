@@ -3426,61 +3426,6 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     assert!(app.core.scoped.ds_rank_fallback_stories.is_empty());
 }
 
-/// 矩形柱の配筋から `RcCapacityInput` を組み立てる経路で、App が
-/// 強軸配筋（X 方向）を Core へ渡すことを確認する（弱軸 Y 方向は使わない）。
-/// 耐力式そのものは Core / Design-JP 側の所有テストで確認する。
-#[test]
-fn test_rc_capacity_input_from_rect_uses_main_x() {
-    use sepika_core::ids::MaterialId;
-    use sepika_core::model::Material;
-    use sepika_core::rc_capacity::rc_capacity_input_from_rect;
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
-
-    let rebar = RcRectColumnRebar {
-        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-        x: vec![4],
-        y: vec![2],
-        cover: 40.0,
-        hoop: RectColumnHoop {
-            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-            pitch: 150.0,
-            legs_x: 2,
-            legs_y: 2,
-        },
-    };
-    let mat = Material {
-        strength_factor: None,
-        concrete_class: Default::default(),
-        id: MaterialId(0),
-        name: "FC24".into(),
-        category: MaterialCategory::Concrete,
-        young: 23000.0,
-        poisson: 0.2,
-        density: 2.4e-9,
-        shear: None,
-        fc: Some(24.0),
-        fy: None,
-    };
-
-    let input = rc_capacity_input_from_rect(400.0, 600.0, &rebar, &mat, None, None, 3000.0)
-        .expect("fc が設定されているので Some のはず");
-
-    // at は X 方向の総断面積の半分。Y 方向の断面積とは一致しない。
-    let main_x_area = 8.0 * std::f64::consts::PI / 4.0 * 22.0 * 22.0;
-    let main_y_area = 4.0 * std::f64::consts::PI / 4.0 * 22.0 * 22.0;
-    assert!(
-        (input.at - main_x_area / 2.0).abs() < 1e-9,
-        "at={}",
-        input.at
-    );
-    assert!(
-        (input.at - main_y_area / 2.0).abs() > 1.0,
-        "弱軸配筋の断面積を使っている: at={}",
-        input.at
-    );
-    assert_eq!(input.fc, 24.0);
-}
-
 /// RC矩形門型の自動部材ランクを観測する。梁は部材種別表、柱は固定FDと照合する。
 /// 柱ランクと独立した手計算の整合は未確認であり、規準適合・安全性の確認とは扱わない。
 #[test]

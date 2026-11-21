@@ -1055,9 +1055,9 @@ mod tests {
                 legs_y: 3,
             },
         };
-        let a1 = one_bar_area(22.0);
-        assert!((r.x_direction_area_mm2() - 12.0 * a1).abs() < 1e-9);
-        assert!((r.y_direction_area_mm2() - 8.0 * a1).abs() < 1e-9);
+        let bar_area_mm2 = std::f64::consts::PI * 11.0_f64.powi(2);
+        assert!((r.x_direction_area_mm2() - 12.0 * bar_area_mm2).abs() < 1e-9);
+        assert!((r.y_direction_area_mm2() - 8.0 * bar_area_mm2).abs() < 1e-9);
     }
 
     /// 矩形柱: 辺別の最外段 1 列のみを引張側鉄筋量として返す。
