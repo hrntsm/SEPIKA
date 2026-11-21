@@ -304,46 +304,38 @@ mod tests {
     use sepika_core::section_shape::*;
 
     #[test]
-    fn brb_named_model_missing_product_fields_and_explicit_zero_are_distinct() {
+    fn removed_brb_product_attributes_are_rejected_on_project_load() {
         let model = make_rich_model();
-        for (label, values, expected) in [
-            ("missing", serde_json::json!({"elem": 0}), [None; 3]),
+        for (label, attrs) in [
+            ("empty", serde_json::json!([])),
             (
-                "legacy-missing-reduction",
-                serde_json::json!({"elem": 0, "allowable_axial_short": 1_000_000.0, "critical_length": 4400.0}),
-                [Some(1_000_000.0), Some(4400.0), None],
-            ),
-            (
-                "explicit-zero",
-                serde_json::json!({"elem": 0, "allowable_axial_short": 1_000_000.0, "critical_length": 4400.0, "length_reduction": 0.0}),
-                [Some(1_000_000.0), Some(4400.0), Some(0.0)],
+                "assigned",
+                serde_json::json!([{
+                    "elem": 0,
+                    "allowable_axial_short": 1_000_000.0,
+                    "critical_length": 4400.0,
+                    "length_reduction": 300.0
+                }]),
             ),
         ] {
-            let path = crate::test_util::test_tmp().join(format!("brb-{label}.ovika"));
+            let path = crate::test_util::test_tmp().join(format!("removed-brb-{label}.ovika"));
             let mut value = serde_json::to_value(&model).unwrap();
-            value["brb_attrs"] = serde_json::json!([values]);
+            value["brb_attrs"] = attrs;
             let bytes = rmp_serde::to_vec_named(&value).unwrap();
             let manifest = Manifest {
                 schema_version: CURRENT_SCHEMA_VERSION,
                 units: "internal: N-mm-s".into(),
-                created_by: "brb-test".into(),
+                created_by: "legacy-brb-fixture".into(),
                 entries: vec![crate::manifest::EntryHash {
                     name: "model.msgpack".into(),
                     sha256: sha256_of(&bytes),
                 }],
             };
             write_zip_with_manifest(&path, &manifest, &bytes);
-            let loaded = load_ovika(&path).unwrap().model;
-            let attr = &loaded.brb_attrs[0];
-            assert_eq!(attr.elem, ElemId(0));
-            assert_eq!(
-                [
-                    attr.allowable_axial_short,
-                    attr.critical_length,
-                    attr.length_reduction
-                ],
-                expected,
-                "{label}"
+            let error = load_ovika(&path).err().unwrap();
+            assert!(
+                matches!(&error, IoError::Decode(reason) if reason.contains("unknown field") && reason.contains("brb_attrs")),
+                "{label}: {error}"
             );
         }
     }

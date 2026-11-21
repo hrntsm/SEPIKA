@@ -53,7 +53,6 @@ additional-js = ["theme/footer.js"]
 "/calc_basis/04_要素剛性/09_非線形梁要素のモデル化.html" = "../../nonlinear/04_非線形梁要素のモデル化.html"
 # 分割前の項目ページは SUMMARY に残し、旧アンカーから詳細ページへ案内する。
 "/calc_basis/08_部材終局耐力/04_RC_部材_非線形復元力特性.html" = "../../nonlinear/05_RC_部材_非線形復元力特性.html"
-"/calc_basis/09_免震制振/03_座屈拘束ブレース.html" = "../06_一次設計/06_座屈拘束ブレース.html"
 
 "/calc_basis/09_免震制振/01_免震アイソレータ.html" = "index.html"
 "/model_edit/14_免震支承の配置.html" = "../calc_basis/09_免震制振/index.html"

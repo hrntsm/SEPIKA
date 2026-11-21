@@ -7,8 +7,8 @@ use sepika_core::model::{
     SlabPlate, SlabShape, SupportMemberId, WallDlSupport, WallPlate, WallPlateShape,
 };
 use sepika_core::model::{
-    BrbAttr, DamperSpec, LoadCase, LoadCaseKind, LoadCfg, MemberDetailAttr, MemberJoint,
-    MemberLoad, MemberLoadKind, Model, PanelZoneMode, DL_CASE_NAME,
+    DamperSpec, LoadCase, LoadCaseKind, LoadCfg, MemberDetailAttr, MemberJoint, MemberLoad,
+    MemberLoadKind, Model, PanelZoneMode, DL_CASE_NAME,
 };
 use sepika_core::section_shape::SectionShape;
 use sepika_job::settings::AnalysisSettings;
@@ -37,13 +37,8 @@ fn preparation_rejects_references_to_removed_panels_without_changing_input() {
     });
     type AssignInput = fn(&mut Model, ElemId);
     let inputs: [(&str, AssignInput); 5] = [
-        ("BRB製品属性", |model, elem| {
-            model.brb_attrs.push(BrbAttr {
-                elem,
-                allowable_axial_short: Some(100_000.0),
-                critical_length: Some(5_000.0),
-                length_reduction: Some(0.0),
-            });
+        ("部材の付帯情報", |model, elem| {
+            model.member_detail_attrs.push(MemberDetailAttr::new(elem));
         }),
         ("部材荷重", |model, elem| {
             model.load_cases[0].member.push(MemberLoad::manual(

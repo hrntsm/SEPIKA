@@ -15,7 +15,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use sepika_core::geom::vec3;
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_core::section_shape::SectionShape;
@@ -81,9 +80,8 @@ pub struct MemberDesignCheckOptions<'a> {
 /// 部材断面検定オーケストレーションの結果。
 #[derive(Clone, Debug, Default)]
 pub struct MemberDesignCheckReport {
-    /// 部材断面検定（危険断面位置・BRB・PCa 水平接合面を含む）。
+    /// 部材断面検定（危険断面位置・PCa 水平接合面を含む）。
     /// RC・SRC・CFTでねじりモーメントが非零または非有限の位置には未算定行を返す。
-    /// BRBで設計軸力が非有限の位置にも未算定行を返す。同じ位置の既知の不適合は別行で返す。
     pub member_checks: Vec<(ElemId, f64, CheckOutcome)>,
     /// 必要横補剛箇所数の参考結果。検定比・合否には含めない。
     pub lateral_bracing_references: Vec<(
@@ -231,58 +229,6 @@ pub(crate) fn combine_incomplete_reasons(
     }
 }
 
-fn brb_torsion_reason(mx: f64) -> Option<&'static str> {
-    if mx == 0.0 {
-        None
-    } else if mx.is_finite() {
-        Some("ねじりモーメントMxが作用しています。BRBの製品許容値による検定の適用範囲は軸力と座屈長さです")
-    } else {
-        Some("ねじりモーメントMxが非有限です")
-    }
-}
-
-struct BrbAxis {
-    length_mm: f64,
-    scaled_direction: Option<[f64; 3]>,
-}
-
-fn brb_axis(model: &Model, elem: &ElementData) -> Result<BrbAxis, String> {
-    let resolved_ends = model
-        .primary_frame_axis_end_positions(elem)
-        .map_err(|reason| format!("BRBの実材軸長 L を解決できません（{reason}）"))?;
-    let [i, j] = match resolved_ends {
-        Some(ends) => ends,
-        None => {
-            let [i, j] = elem.nodes.as_slice() else {
-                return Err("BRBの実材軸長 L の算定には二節点が必要です".into());
-            };
-            let (Some(i), Some(j)) = (model.node(*i), model.node(*j)) else {
-                return Err("BRBの実材軸長 L の算定に必要な節点が見つかりません".into());
-            };
-            [i.coord, j.coord]
-        }
-    };
-    let delta_mm = vec3::sub(j, i);
-    let squared_length_mm2 = vec3::dot(delta_mm, delta_mm);
-    let (length_mm, scaled_direction) = if squared_length_mm2.is_normal() {
-        (squared_length_mm2.sqrt(), None)
-    } else {
-        // 最初に規格化しないと、距離と局所基底の検証が二乗和の数値範囲・精度の影響を受ける。
-        let max_component_mm = delta_mm.into_iter().map(f64::abs).fold(0.0, f64::max);
-        crate::brb::validate_member_length(max_component_mm)?;
-        let direction = delta_mm.map(|value_mm| value_mm / max_component_mm);
-        (
-            vec3::norm(direction) * max_component_mm,
-            resolved_ends.is_none().then_some(direction),
-        )
-    };
-    crate::brb::validate_member_length(length_mm)?;
-    Ok(BrbAxis {
-        length_mm,
-        scaled_direction,
-    })
-}
-
 /// 通常鋼線材・鋼小梁・S/CFTパネルの材料・実板厚・Fを検証する。
 /// 入力不備は対象IDと理由を付けて返す。幾何未対応や検定荷重不足の判定は含めない。
 pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
@@ -312,50 +258,17 @@ pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
 /// 部材ループ（DesignCtx 組み立て → 危険断面位置での検定）のほか、
 /// 大梁の長期たわみ、PCa 水平接合面検定と節点単位検定も含む。床の小梁・スラブ設計は
 /// 呼び出し側（`sepika-app`）の責務とする。鋼材入力不備は対象ID付きエラー。
-/// BRB製品属性が同じブレースを複数回参照する場合、入力内力の各位置に部材ID付きの未検定を返す。
 pub fn run_member_design_checks(
     model: &Model,
     member_forces: &[(ElemId, MemberForces)],
     panel_moments: &[(NodeId, [f64; 2])],
     options: &MemberDesignCheckOptions<'_>,
 ) -> Result<MemberDesignCheckReport, String> {
-    model.validate_brb_references().map_err(|e| e.to_string())?;
     let mut elem_by_id = HashMap::with_capacity(model.elements.len());
     for e in &model.elements {
         elem_by_id.entry(e.id).or_insert(e);
     }
-    let mut brb_by_id = HashMap::new();
-    for attr in &model.brb_attrs {
-        brb_by_id
-            .entry(attr.elem)
-            .and_modify(|product| *product = None)
-            .or_insert(Some(attr));
-    }
-    let brb_axes: HashMap<_, _> = member_forces
-        .iter()
-        .filter_map(|(id, _)| {
-            let elem = elem_by_id.get(id)?;
-            (brb_by_id.contains_key(id)
-                && MemberKind::try_of_element(elem, model).ok() == Some(MemberKind::Brace)
-                && model.element_section(elem).is_some()
-                && model.element_material(elem).is_some())
-            .then(|| (*id, brb_axis(model, elem)))
-        })
-        .collect();
-    for elem in &model.elements {
-        match brb_axes.get(&elem.id) {
-            // ここで局所座標のエラーを返すと、応力が与えられたBRBの未検定理由を結果に残せない。
-            Some(Err(_)) => {}
-            Some(Ok(BrbAxis {
-                scaled_direction: Some(direction),
-                ..
-            })) => {
-                vec3::local_frame_axes([0.0; 3], *direction, elem.local_axis.ref_vector)
-                    .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
-            }
-            _ => model.validate_element_local_frame(elem)?,
-        }
-    }
+    model.validate_local_frames()?;
     validate_model_steel_inputs(model)?;
 
     let long_mf_by_id: Option<HashMap<ElemId, &MemberForces>> =
@@ -381,33 +294,6 @@ pub fn run_member_design_checks(
         if !frame_check_target(elem) {
             continue;
         }
-        let product = brb_by_id.get(elem_id);
-        let brb_input_error = match product {
-            Some(_) if MemberKind::try_of_element(elem, model).ok() != Some(MemberKind::Brace) => {
-                Some(
-                    "BRB属性の参照先には、断面用途がブレースのブレース要素を指定してください"
-                        .into(),
-                )
-            }
-            Some(None) => Some(format!(
-                "部材 ID {} を参照するBRB製品属性が重複しています",
-                elem_id.0
-            )),
-            _ => None,
-        };
-        if let Some(reason) = brb_input_error {
-            member_checks.extend(mf.at.iter().map(|(pos, _)| {
-                (
-                    *elem_id,
-                    *pos,
-                    CheckOutcome::Skipped {
-                        reason: reason.clone(),
-                    },
-                )
-            }));
-            continue;
-        }
-        let brb = product.copied().flatten();
         let sec = elem
             .section
             .and_then(|sid| model.sections.get(sid.index()))
@@ -417,13 +303,8 @@ pub fn run_member_design_checks(
             continue;
         };
         let structure = structure_kind_of(Some(sec), Some(mat.category));
-        let torsion_reason = |forces: &MemberForcesAt| {
-            if brb.is_none() {
-                concrete_member_torsion_reason(structure, forces)
-            } else {
-                None
-            }
-        };
+        let torsion_reason =
+            |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
         if let Err(reason) = sec.ensure_properties_resolved() {
             for (pos, forces) in &mf.at {
                 push_strength_outcome(
@@ -447,23 +328,7 @@ pub fn run_member_design_checks(
             lateral_bracing_references.push((*elem_id, reference.clone()));
         }
         let kind = MemberKind::of_element(elem, model);
-        let physical_length_mm = match brb_axes.get(elem_id) {
-            Some(Ok(axis)) => axis.length_mm,
-            Some(Err(reason)) => {
-                member_checks.extend(mf.at.iter().map(|(pos, _)| {
-                    (
-                        *elem_id,
-                        *pos,
-                        CheckOutcome::Skipped {
-                            reason: reason.clone(),
-                        },
-                    )
-                }));
-                continue;
-            }
-            None => model.member_length(elem),
-        };
-        let length = physical_length_mm;
+        let length = model.member_length(elem);
         let shear_span = mf
             .at
             .iter()
@@ -518,7 +383,7 @@ pub fn run_member_design_checks(
         }
         let buckling_lengths = if structure == StructureKind::Cft {
             crate::cft::direct_column_buckling_lengths(*elem_id, steel_attr.as_ref()).map(Some)
-        } else if structure == StructureKind::S && brb.is_none() {
+        } else if structure == StructureKind::S {
             crate::steel::buckling::resolve_steel_buckling_lengths(
                 *elem_id,
                 kind,
@@ -670,7 +535,6 @@ pub fn run_member_design_checks(
         let checker: Box<dyn DesignCheck> = checker_for(structure);
 
         let positions = design_positions(elem, model, length);
-        let brb_long = options.term == LoadTerm::Long;
 
         let first_row = member_checks.len();
         for (pos, forces) in &mf.at {
@@ -678,19 +542,6 @@ pub fn run_member_design_checks(
                 continue;
             }
             let mfa = MemberForcesAt::from_local(*pos, *forces);
-            if let Some(brb) = brb.filter(|_| !mfa.n.is_finite()) {
-                let axial_reason = crate::brb::NONFINITE_AXIAL_REASON;
-                let reason = match brb_torsion_reason(mfa.mx) {
-                    Some(torsion_reason) => format!("{axial_reason}。{torsion_reason}"),
-                    None => axial_reason.into(),
-                };
-                let outcome = match crate::brb::brb_length_check(brb, physical_length_mm) {
-                    Ok(result) => CheckOutcome::Checked(result),
-                    Err(reason) => CheckOutcome::Skipped { reason },
-                };
-                push_strength_outcome(&mut member_checks, *elem_id, *pos, outcome, Some(&reason));
-                continue;
-            }
             let missing_q0 = kind == MemberKind::Girder
                 && options.long_member_forces.is_some()
                 && options.qd_method != QdMethod::Qd2
@@ -731,17 +582,16 @@ pub fn run_member_design_checks(
                 && !ctx
                     .steel_attr
                     .as_ref()
-                    .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
-                && brb.is_none();
+                    .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some());
             let mut check_incomplete = None;
             let mut outcome = if eccentric_brace_compression {
                 CheckOutcome::Skipped { reason: "非0XYZ偏心ブレースの圧縮検定には強軸・弱軸の座屈長さの直接指定が必要です。実材軸長・剛体接続長からは自動算定しません".into() }
-            } else if structure == StructureKind::Src && brb.is_none() {
+            } else if structure == StructureKind::Src {
                 let (outcome, incomplete) =
                     crate::SrcDesign.check_with_incomplete(&mfa, sec, mat, &ctx, missing_gravity);
                 check_incomplete = incomplete;
                 outcome
-            } else if structure == StructureKind::Rc && brb.is_none() {
+            } else if structure == StructureKind::Rc {
                 let missing_column_reference = wrong_main_rebar
                     && kind == MemberKind::Column
                     && options.long_member_forces.is_some()
@@ -762,17 +612,6 @@ pub fn run_member_design_checks(
                 );
                 check_incomplete = incomplete;
                 outcome
-            } else if let Some(brb) = brb {
-                if let Some(reason) = brb_torsion_reason(mfa.mx) {
-                    CheckOutcome::Skipped {
-                        reason: reason.into(),
-                    }
-                } else {
-                    match crate::brb::brb_check(brb, mfa.n, physical_length_mm, brb_long) {
-                        Ok(result) => CheckOutcome::Checked(result),
-                        Err(reason) => CheckOutcome::Skipped { reason },
-                    }
-                }
             } else if structure == StructureKind::S && kind == MemberKind::Column {
                 let (outcome, incomplete) =
                     crate::SteelDesign.check_with_incomplete(&mfa, sec, mat, &ctx);
@@ -815,8 +654,7 @@ pub fn run_member_design_checks(
 
         let rc_girder = structure == StructureKind::Rc
             && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
-        if !brb_long
-            || brb.is_some()
+        if options.term != LoadTerm::Long
             || kind != MemberKind::Girder
             || !(structure == StructureKind::S || rc_girder)
         {

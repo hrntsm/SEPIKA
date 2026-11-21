@@ -6,6 +6,6 @@ Status: accepted
 
 この判断は、節点剛度比から支持条件や層内座屈を自動判定する方式の採用を意味しない。水平移動非拘束・理想ピン柱脚の独立例では既定値より長い有効長が得られ、許容圧縮応力度を過大評価して適否が逆転する。各方向の条件を確認した直接指定を優先する。適用条件と有限反例は[確認記録](../v_and_v/通常S部材の座屈長さと時刻歴簡易検定_確認記録.md)に示す。
 
-[ADR 0110](0110-steel-column-explicit-buckling-length.md)の通常S柱に対する両軸直接指定と0の扱いを置き換える。[ADR 0108](0108-eccentric-brace-buckling-length.md)の偏心ブレースの直接指定要件を置き換え、実材軸と剛体腕の力学上の区別を保持する。[ADR 0113](0113-cft-column-explicit-buckling-length.md)のCFT柱、SRC、横座屈長さ、BRBの契約は維持する。旧検定成果は失効させる。
+[ADR 0110](0110-steel-column-explicit-buckling-length.md)の通常S柱に対する両軸直接指定と0の扱いを置き換える。[ADR 0108](0108-eccentric-brace-buckling-length.md)の偏心ブレースの直接指定要件を置き換え、実材軸と剛体腕の力学上の区別を保持する。[ADR 0113](0113-cft-column-explicit-buckling-length.md)のCFT柱、SRC、横座屈長さの契約は維持する。旧検定成果は失効させる。座屈拘束ブレースの製品別検定はこの決定の対象外で、後に [#1739](https://github.com/hrntsm/SEPIKA/issues/1739) で対応を終了した。
 
 現在仕様は[鋼構造の断面検定](../../docs/calc_basis/06_一次設計/03_鋼構造_断面検定.md#通常s主架構部材の座屈長さ)を正とする。

@@ -15,7 +15,6 @@ macro_rules! for_each_elem_attr_collection {
         $visit!(wall_attrs, elem, "壁属性");
         $visit!(steel_design_attrs, elem, "鉄骨部材の検定属性");
         $visit!(slab_composite_attrs);
-        $visit!(brb_attrs, elem, "BRB製品属性");
         $visit!(pca_attrs, elem, "PCa梁属性");
         $visit!(member_hysteresis_attrs, elem, "部材の履歴則指定");
         $visit!(damper_attrs, elem, "制振ダンパー属性");
@@ -31,8 +30,6 @@ macro_rules! for_each_elem_attr_collection {
 pub struct ElemAttrs {
     pub wall: Option<WallAttr>,
     pub steel_design: Option<SteelDesignAttr>,
-    /// (元の属性位置, 属性) を位置の昇順で保持する。
-    pub brb: Vec<(usize, BrbAttr)>,
     pub pca: Option<PcaGirderAttr>,
     pub hysteresis: Option<MemberHysteresisAttr>,
     pub damper: Option<DamperAttr>,
@@ -110,10 +107,6 @@ pub struct Model {
     /// 鋼構造設計規準）。
     #[serde(default)]
     pub steel_design_attrs: Vec<SteelDesignAttr>,
-    /// 座屈補剛ブレース（BRB）の断面検定用属性（メーカー許容値。
-    /// 各メーカーの製品技術資料）。
-    #[serde(default)]
-    pub brb_attrs: Vec<BrbAttr>,
     /// PCa（プレキャスト）梁の水平接合面検定用属性（水平接合面のせん断摩擦検定）。
     #[serde(default)]
     pub pca_attrs: Vec<PcaGirderAttr>,
@@ -287,7 +280,7 @@ impl Model {
     }
 
     /// 節点・要素・断面・材料・階・床/壁領域・床板/壁版の添字 ID と、
-    /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・節点荷重・生成記録・BRB 検定属性の参照を検査する。
+    /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・節点荷重・生成記録の参照を検査する。
     /// 二次部材 ID は一意性だけを要求し、未割当 `None`・用途・幾何・入力完成度は検査しない。
     pub fn validate_reference_ids(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
@@ -347,7 +340,6 @@ impl Model {
                 )));
             }
         }
-        self.validate_brb_references()?;
 
         for sec in &self.sections {
             for (role, mid) in [
@@ -656,20 +648,6 @@ impl Model {
             }
         }
 
-        Ok(())
-    }
-
-    /// 座屈拘束ブレースの検定属性が実在する部材を参照するか検査する。
-    /// 参照先がない場合は属性の位置と部材 ID を含むエラーを返す。
-    pub fn validate_brb_references(&self) -> Result<(), crate::error::CoreError> {
-        for (index, attr) in self.brb_attrs.iter().enumerate() {
-            if self.element(attr.elem).is_none() {
-                return Err(crate::error::CoreError::DanglingRef(format!(
-                    "座屈拘束ブレースの検定属性 brb_attrs[{index}].elem -> 部材 ID {}",
-                    attr.elem.0
-                )));
-            }
-        }
         Ok(())
     }
 
@@ -1314,7 +1292,6 @@ impl Model {
             && self.stress_cfg == other.stress_cfg
             && self.steel_design_attrs == other.steel_design_attrs
             && self.slab_composite_attrs == other.slab_composite_attrs
-            && self.brb_attrs == other.brb_attrs
             && self.pca_attrs == other.pca_attrs
             && self.unassigned_beams == other.unassigned_beams
             && self.unassigned_posts == other.unassigned_posts
@@ -1682,19 +1659,10 @@ impl Model {
                 .position(|a| get(a) == elem)
                 .map(|pos| v.remove(pos))
         }
-        let brb = self
-            .brb_attrs
-            .iter()
-            .enumerate()
-            .filter(|(_, attr)| attr.elem == elem)
-            .map(|(index, attr)| (index, attr.clone()))
-            .collect();
-        self.brb_attrs.retain(|attr| attr.elem != elem);
         ElemAttrs {
             wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
             steel_design: take_first(&mut self.steel_design_attrs, |a| a.elem, elem),
             slab_composite: self.slab_composite_attrs.remove(&elem),
-            brb,
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
             hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
             damper: take_first(&mut self.damper_attrs, |a| a.elem, elem),
@@ -1715,10 +1683,6 @@ impl Model {
         }
         if let Some(connection) = attrs.slab_composite {
             self.slab_composite_attrs.insert(elem, connection);
-        }
-        for (index, mut a) in attrs.brb {
-            a.elem = elem;
-            self.brb_attrs.insert(index.min(self.brb_attrs.len()), a);
         }
         if let Some(mut a) = attrs.pca {
             a.elem = elem;

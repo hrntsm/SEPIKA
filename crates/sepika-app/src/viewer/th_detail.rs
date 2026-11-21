@@ -18,7 +18,7 @@
 //! 依存しビューア側からは呼べないため、必要な部分だけ本ファイルへ複製する。
 //! 長期静的結果がある場合は地震時 QD / 柱メカニズムを部分配線する。
 //! 長期静的結果に対応するQ0（単純梁せん断）も用いる。
-//! 鋼継手欠損の断面性能への反映・一本部材グループ合成・BRB属性差し替えは対象外（概算検定）。
+//! 鋼継手欠損の断面性能への反映・一本部材グループ合成は対象外（概算検定）。
 
 use crate::app::App;
 use crate::theme;
@@ -588,17 +588,6 @@ fn draw_peak_check(
     } else {
         "最大応力に対する検定（短期）"
     });
-    let has_brb_attr = model.brb_attrs.iter().any(|attr| attr.elem == elem.id);
-    if has_brb_attr && MemberKind::try_of_element(elem, model).ok() != Some(MemberKind::Brace) {
-        ui.colored_label(
-            theme::GRAY_600,
-            format!(
-                "検定不能: 部材 ID {}: BRB属性の参照先には、断面用途がブレースのブレース要素を指定してください",
-                elem.id.0
-            ),
-        );
-        return;
-    }
     draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
@@ -680,29 +669,22 @@ fn draw_peak_check(
         );
     }
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
-    let steel_column = structure == StructureKind::S && kind == MemberKind::Column && !has_brb_attr;
+    let steel_column = structure == StructureKind::S && kind == MemberKind::Column;
     let symmetric_h_column = steel_column && sepika_design_jp::steel::is_symmetric_h_section(sec);
-    let torsion_reason = |forces: &MemberForcesAt| {
-        if has_brb_attr {
-            None
-        } else {
-            concrete_member_torsion_reason(structure, forces)
-        }
-    };
+    let torsion_reason =
+        |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
     let buckling_lengths = match structure {
         StructureKind::Cft => {
             sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
         }
-        StructureKind::S if !has_brb_attr => {
-            sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
-                elem.id,
-                kind,
-                model.member_length(elem),
-                attr,
-            )
-            .map(Some)
-        }
+        StructureKind::S => sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
+            elem.id,
+            kind,
+            model.member_length(elem),
+            attr,
+        )
+        .map(Some),
         _ => Ok(None),
     };
     let (lk_y, lk_z) = match buckling_lengths {
@@ -1900,48 +1882,9 @@ mod tests {
     }
 
     #[test]
-    fn steel_peak_check_reports_misassigned_brb_attribute_without_a_ratio() {
+    fn steel_peak_check_girder_and_ordinary_brace_use_physical_length() {
         use crate::app::steel_column_k_tests::input;
-        use sepika_core::model::BrbAttr;
-
-        let mut app = App::default();
-        assert!(app.load_model(input::portal(1.0)));
-        app.core.model.steel_design_attrs[0].lk_z_direct = Some(6000.0);
-        app.core.model.brb_attrs.push(BrbAttr {
-            elem: ElemId(0),
-            allowable_axial_short: Some(1_000_000.0),
-            critical_length: Some(2000.0),
-            length_reduction: Some(300.0),
-        });
-
-        for (index, kind) in [
-            (0, ElementKind::Beam),
-            (2, ElementKind::Beam),
-            (
-                2,
-                ElementKind::Brace {
-                    tension_only: false,
-                },
-            ),
-        ] {
-            let elem = &mut app.core.model.elements[index];
-            elem.kind = kind;
-            let id = elem.id;
-            app.core.model.brb_attrs[0].elem = id;
-            let text = peak_check_text(&app, index, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-            assert!(
-                text.contains(&format!("検定不能: 部材 ID {}: BRB属性", id.0)),
-                "{text}"
-            );
-            assert!(text.contains("断面用途がブレースのブレース要素"), "{text}");
-            assert!(!text.contains("検定比"), "{text}");
-        }
-    }
-
-    #[test]
-    fn steel_peak_check_girder_and_ordinary_brace_use_physical_length_and_keep_brb_path() {
-        use crate::app::steel_column_k_tests::input;
-        use sepika_core::model::{BrbAttr, FrameSectionUse};
+        use sepika_core::model::FrameSectionUse;
 
         let mut model = input::portal(1.0);
         model.elements[2].end_offsets_mm = [[100.0, 200.0, 0.0], [600.0, 200.0, 0.0]];
@@ -1972,19 +1915,6 @@ mod tests {
                 assert!(text.contains("検定比"), "{text}");
             }
         }
-
-        app.core.model.brb_attrs.push(BrbAttr {
-            elem: ElemId(2),
-            allowable_axial_short: Some(1_000_000.0),
-            critical_length: Some(2000.0),
-            length_reduction: Some(300.0),
-        });
-        let before = peak_check_text(&app, 2, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-        app.core.model.steel_design_attrs[2].lk_z_direct = Some(0.0);
-        let after = peak_check_text(&app, 2, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-        assert_eq!(before, after);
-        assert!(!after.contains("採用座屈長さ"), "{after}");
-        assert!(after.contains("検定比"), "{after}");
     }
 
     #[test]

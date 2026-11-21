@@ -1,4 +1,4 @@
-//! 壁関連の型（開口・壁属性・雑壁・鉄骨/BRB/PCa 属性など）。
+//! 壁関連の型（開口・壁属性・雑壁・鉄骨/PCa 属性など）。
 
 use super::*;
 use crate::geom::vec3::{dot, norm, sub, unit};
@@ -266,27 +266,13 @@ impl SteelDesignAttr {
     }
 }
 
-/// 座屈補剛ブレース（BRB）の断面検定用属性。許容値はメーカー資料による入力値
-/// （各メーカーの製品技術資料による）。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct BrbAttr {
-    pub elem: ElemId,
-    /// 短期許容軸力 `[N]`（メーカー値、有限の正値）。`None` は未入力。
-    pub allowable_axial_short: Option<f64>,
-    /// 限界座屈長さ `[mm]`（メーカー値、有限の正値）。`None` は未入力。
-    pub critical_length: Option<f64>,
-    /// 座屈長さ低減距離 L1 `[mm]`（両端の平均、有限の非負値）。`None` は未入力。
-    pub length_reduction: Option<f64>,
-}
-
 /// 制振ダンパーの種別（各制振部材の力学モデル）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DamperKind {
     /// マクスウェル要素（バネ Kd と粘性ダッシュポットの直列。速度依存型）。
     #[default]
     Maxwell,
-    /// 履歴型（弾塑性バイリニア）ダンパー。鋼材系ダンパー（SUB／アンボンドブレース／
-    /// 二重鋼管座屈補剛ブレース／鉛ダンパー／U 型ダンパー等の標準型バイリニア）。
+    /// 履歴型（弾塑性バイリニア）ダンパー。
     HystereticBilinear,
 }
 
