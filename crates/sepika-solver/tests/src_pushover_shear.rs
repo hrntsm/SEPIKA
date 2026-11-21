@@ -226,18 +226,46 @@ fn run(
 
 #[test]
 fn src_pushover_event_uses_web_or_flange_f_at_each_independent_shear_threshold() {
-    // Fc24、軸力0、SN400B のウェブ10 mmは235、フランジ45 mmは215 N/mm²。
-    for (frame_use, direction, qy_n) in [
-        (FrameSectionUse::Column, SeismicDir::X, 980_076.778_015_748),
+    // Fc24、軸力0。SN400B の10・13 mmは235、45 mmは215 N/mm²。
+    for (frame_use, direction, web_mm, flange_mm, qy_n) in [
+        (
+            FrameSectionUse::Column,
+            SeismicDir::X,
+            10.0,
+            45.0,
+            980_076.778_015_748,
+        ),
         (
             FrameSectionUse::Column,
             SeismicDir::Y,
+            10.0,
+            45.0,
             2_395_602.442_002_425,
         ),
-        (FrameSectionUse::Girder, SeismicDir::Y, 955_335.210_331_358),
+        (
+            FrameSectionUse::Girder,
+            SeismicDir::Y,
+            10.0,
+            45.0,
+            955_335.210_331_358,
+        ),
+        (
+            FrameSectionUse::Column,
+            SeismicDir::X,
+            45.0,
+            13.0,
+            2_350_241.55,
+        ),
+        (
+            FrameSectionUse::Column,
+            SeismicDir::Y,
+            45.0,
+            13.0,
+            1_134_323.04,
+        ),
     ] {
         for (load_n, yields) in [(qy_n - 1_000.0, false), (qy_n + 1_000.0, true)] {
-            let mut model = restrained_member(frame_use, 10.0, 45.0);
+            let mut model = restrained_member(frame_use, web_mm, flange_mm);
             let result = run(&mut model, direction, load_n)
                 .unwrap_or_else(|error| panic!("{frame_use:?} {direction:?} {error}"));
             let response = &result.member_response[0];
@@ -506,8 +534,12 @@ fn src_time_history_rejects_nonsteel_fiber_materials() {
 #[test]
 fn src_time_history_accepts_assigned_fiber_steel_fy() {
     for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
-        for (name, fy) in [("独自H", Some(235.0)), ("SN400B", None)] {
-            let mut model = restrained_member(frame_use, 10.0, 12.0);
+        for (name, fy, web_mm, flange_mm) in [
+            ("独自H", Some(235.0), 10.0, 12.0),
+            ("SN400B", None, 10.0, 12.0),
+            ("SN400B", None, 45.0, 13.0),
+        ] {
+            let mut model = restrained_member(frame_use, web_mm, flange_mm);
             model.materials[3].name = name.into();
             model.materials[3].fy = fy;
             let result = run_time_history(&mut model).unwrap();
@@ -515,6 +547,96 @@ fn src_time_history_accepts_assigned_fiber_steel_fy() {
             assert_eq!(result.time.len(), 3);
             assert!(result.history.node_disp.iter().any(|&u| u.abs() > 0.0));
             assert!(result.history.node_disp.iter().all(|u| u.is_finite()));
+        }
+    }
+}
+
+#[test]
+fn src_fiber_reports_uniform_steel_reference_in_axial_and_bending_responses() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::behavior::{Ctx, LocalVec};
+    use sepika_element::factory::{
+        build_nonlinear_behavior, ensure_nonlinear_input_with_basis, StrengthBasis,
+    };
+
+    for (basis, kind, factor, name, explicit_fy, reference_fy, axial_kn, bending_k_nm) in [
+        (
+            StrengthBasis::Nominal,
+            AnalysisKind::TimeHistory,
+            1.0,
+            "SN400B",
+            80.0,
+            235.0,
+            5_906.276,
+            1_060.586,
+        ),
+        (
+            StrengthBasis::Nominal,
+            AnalysisKind::TimeHistory,
+            1.0,
+            "独自H",
+            215.0,
+            215.0,
+            5_591.872,
+            1_032.806,
+        ),
+        (
+            StrengthBasis::MaterialStrength,
+            AnalysisKind::Incremental,
+            1.1,
+            "SN400B",
+            80.0,
+            258.5,
+            6_496.903,
+            1_133.786,
+        ),
+    ] {
+        let mut model = restrained_member(FrameSectionUse::Column, 45.0, 13.0);
+        model.nodes[1].coord[2] = 3_000.0;
+        model.materials[3].name = name.into();
+        model.materials[3].fy = Some(explicit_fy);
+        let context = Ctx { model: &model };
+        model.validate_local_frames().unwrap();
+        ensure_nonlinear_input_with_basis(&model, kind, basis).unwrap();
+
+        let mut axial = LocalVec {
+            data: smallvec::smallvec![0.0; 12],
+        };
+        axial.data[8] = 3_000.0 * 225.0 * factor / 205_000.0;
+        let mut bending = LocalVec {
+            data: smallvec::smallvec![0.0; 12],
+        };
+        bending.data[4] = 0.02;
+        bending.data[10] = -0.02;
+
+        for (displacement, force_index, force_divisor, expected) in
+            [(axial, 8, 1e3, axial_kn), (bending, 4, 1e6, bending_k_nm)]
+        {
+            let mut member =
+                build_nonlinear_behavior(&model.elements[0], &model, basis, kind, None);
+            member.update_state(&displacement, true, &context).unwrap();
+            let response = member.internal_force(&context).data[force_index] / force_divisor;
+            assert!(
+                (response - expected).abs() < 1.0,
+                "{name} {basis:?}: {response}"
+            );
+
+            for section in member.fiber_section_states().unwrap() {
+                let mut area_mm2 = [0.0; 2];
+                let mut max_yield_ratio = [0.0_f64; 2];
+                for fiber in section.fibers.iter().filter(|fiber| fiber.material == 2) {
+                    let plate = usize::from(fiber.y.abs() > 137.0);
+                    area_mm2[plate] += fiber.area;
+                    max_yield_ratio[plate] = max_yield_ratio[plate].max(fiber.yield_ratio);
+                    if fiber.strain.abs() > 1e-12 {
+                        let fy = 205_000.0 * fiber.strain.abs() / fiber.yield_ratio;
+                        assert!((fy - reference_fy).abs() < 1e-8, "{fiber:?}");
+                    }
+                }
+                assert!((area_mm2[0] - 12_330.0).abs() < 1e-8);
+                assert!((area_mm2[1] - 3_900.0).abs() < 1e-8);
+                assert!(max_yield_ratio.into_iter().all(|ratio| ratio > 1.0));
+            }
         }
     }
 }
