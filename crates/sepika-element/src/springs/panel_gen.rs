@@ -60,10 +60,13 @@ pub struct GeneratedPanel {
     pub k_panel: [f64; 2],
 }
 
-/// 削除対象のパネルへの参照と、生成前に参照先が存在しない部材別重量を拒否する。
+/// 部材別重量・履歴則指定の参照先がない場合や、入力が削除対象の仕口パネルを参照する場合は失敗する。
 pub fn validate_panel_generation_references(model: &Model) -> Result<(), String> {
     model
         .validate_member_weight_refs()
+        .map_err(|error| error.to_string())?;
+    model
+        .validate_member_hysteresis_attr_refs()
         .map_err(|error| error.to_string())?;
     if !model
         .elements
@@ -264,7 +267,7 @@ fn apply_panel_offsets(
 /// `Model::panel_zone` が [`PanelZoneMode::None`] のときは既存のパネルを取り除く
 /// だけで、新しいパネルは生成しない。
 ///
-/// 戻り値は生成したパネルの諸元（節点 index の昇順）。削除対象への参照があればモデルを変更せず失敗する。
+/// 戻り値は生成したパネルの諸元（節点 index の昇順）。参照の検査に失敗した場合はモデルを変更しない。
 pub fn apply_auto_panel_zones(model: &mut Model) -> Result<Vec<GeneratedPanel>, String> {
     validate_panel_generation_references(model)?;
     if model.panel_zone == PanelZoneMode::Model {

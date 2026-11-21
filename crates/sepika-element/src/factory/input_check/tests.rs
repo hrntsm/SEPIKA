@@ -976,6 +976,18 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
 }
 
 #[test]
+fn both_nonlinear_input_checks_report_a_hysteresis_ref_to_a_missing_member() {
+    use sepika_core::model::{AnalysisKind, HysteresisModel};
+
+    let mut model = Model::default();
+    model.set_member_hysteresis_th(ElemId(7), Some(HysteresisModel::Retrograde));
+    for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+        let error = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
+        assert!(error.contains("部材の履歴則指定 -> 部材 7"), "{error}");
+    }
+}
+
+#[test]
 fn rc_reference_kind_and_active_load_diagnostics_do_not_use_inactive_settings() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{AnalysisKind, HysteresisModel, LoadCase, LoadCaseKind, MemberLoad};

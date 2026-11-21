@@ -30,7 +30,7 @@ pub struct PrepareReport {
 /// 剛域と仕口パネルを自動算定してモデルへ反映する。
 /// 剛域算定は壁展開モデルに対して行い、既存要素へ書き戻す。
 /// 仕口パネルは壁に依存しないため非展開モデルに対して算定する。
-/// 削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
+/// 仕口パネル生成前の参照検査に失敗した場合はモデルを変更しない。
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
 ) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
@@ -64,7 +64,7 @@ pub fn apply_rigid_zones_and_panels(
 }
 
 /// 解析前処理を一括で行う（剛域・仕口パネル・荷重ケースの自動同期）。
-/// 部材荷重方向・部材別重量の参照先が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
+/// 部材荷重方向が不正、または仕口パネル生成前の参照検査に失敗した場合はモデルを変更しない。
 pub fn prepare_model_for_analysis(
     model: &mut Model,
     settings: &AnalysisSettings,
@@ -75,7 +75,7 @@ pub fn prepare_model_for_analysis(
 
 /// 階に依存する準備では FL・ΔSL の明示入力を要求し、不足・所属不成立時は停止する。
 /// 階を持たない低水準の重力解析は `initialize_stories = false` で利用できる。
-/// 部材荷重方向・部材別重量の参照先が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
+/// 部材荷重方向が不正、または仕口パネル生成前の参照検査に失敗した場合はモデルを変更しない。
 pub fn prepare_model(
     model: &mut Model,
     settings: &AnalysisSettings,
@@ -333,6 +333,32 @@ mod tests {
     use sepika_core::section_shape::SectionShape;
 
     use super::steel_panel_fixture::steel_panel_model;
+
+    #[test]
+    fn panel_generation_rejects_a_hysteresis_ref_to_a_generated_number() {
+        use sepika_core::model::HysteresisModel;
+
+        let mut model = steel_panel_model();
+        let id = ElemId(model.elements.len() as u32);
+        assert!(!apply_auto_panel_zones(&mut model.clone())
+            .unwrap()
+            .is_empty());
+        model.set_member_hysteresis(id, HysteresisModel::Retrograde);
+        let before = model.clone();
+        let expected = format!("部材の履歴則指定 -> 部材 {}", id.0);
+
+        for error in [
+            apply_auto_panel_zones(&mut model).unwrap_err(),
+            apply_rigid_zones_and_panels(&mut model).unwrap_err(),
+            prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+                .err()
+                .unwrap()
+                .to_string(),
+        ] {
+            assert!(error.contains(&expected), "{error}");
+        }
+        assert!(model.eq_ignoring_dofmap(&before));
+    }
 
     #[test]
     fn panel_759_public_preparation_uses_directional_column_faces() {

@@ -3496,6 +3496,110 @@ fn test_remove_steel_design_attr_missing_is_noop() {
 }
 
 #[test]
+fn member_and_damper_addition_reject_a_hysteresis_ref_to_the_next_number() {
+    use sepika_core::model::{HysteresisModel, MemberHysteresisAttr, RcBeamReference};
+
+    let mut before = seeded_model(3, 2);
+    let mut beam = before.elements.pop().unwrap();
+    beam.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    let mut damper = beam.clone();
+    damper.kind = ElementKind::Damper;
+    before.member_hysteresis_attrs.push(MemberHysteresisAttr {
+        elem: beam.id,
+        rule: HysteresisModel::Auto,
+        rule_th: None,
+        rc_beam_reference: Some(RcBeamReference::AntisymmetricHalfMember),
+    });
+    for edit in [
+        Box::new(AddMember { elem: beam }) as Box<dyn EditCommand>,
+        Box::new(AddDamper {
+            elem: damper,
+            props: Default::default(),
+        }),
+    ] {
+        let mut model = before.clone();
+        let mut stack = UndoStack::new();
+        assert!(!stack.run(&mut model, edit));
+        let error = stack.last_error().unwrap();
+        assert!(error.contains("部材の履歴則指定 -> 部材 1"), "{error}");
+        assert!(model.eq_ignoring_dofmap(&before));
+        assert_eq!(stack.revision(), 0);
+    }
+}
+
+#[test]
+fn undo_of_member_deletion_rejects_an_invalid_hysteresis_ref_before_renumbering() {
+    use sepika_core::model::HysteresisModel;
+
+    let mut model = seeded_model(3, 2);
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+    model.set_member_hysteresis(ElemId(u32::MAX), HysteresisModel::Takeda);
+    let before_undo = model.clone();
+    stack.undo(&mut model);
+    let error = stack.last_error().unwrap();
+    assert!(
+        error.contains("部材の履歴則指定 -> 部材 4294967295"),
+        "{error}"
+    );
+    assert!(model.eq_ignoring_dofmap(&before_undo));
+    assert!(stack.can_undo());
+}
+
+#[test]
+fn deleting_a_member_removes_all_hysteresis_rows_and_undo_restores_their_order() {
+    use sepika_core::model::{HysteresisModel::*, MemberHysteresisAttr, RcBeamReference};
+
+    let mut model = seeded_model(4, 3);
+    let reference = Some(RcBeamReference::AntisymmetricHalfMember);
+    model.member_hysteresis_attrs = [
+        (1, Takeda, Some(Retrograde), reference),
+        (2, MaxPointOriented, None, None),
+        (1, Retrograde, Some(OriginOriented), None),
+        (0, Standard, None, None),
+    ]
+    .map(
+        |(id, rule, rule_th, rc_beam_reference)| MemberHysteresisAttr {
+            elem: ElemId(id),
+            rule,
+            rule_th,
+            rc_beam_reference,
+        },
+    )
+    .to_vec();
+    let before = model.clone();
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(DeleteMember { id: ElemId(1) })));
+    assert_eq!(model.elements[1].nodes, before.elements[2].nodes);
+    assert_eq!(model.member_hysteresis(ElemId(1)), Some(MaxPointOriented));
+    assert_eq!(
+        model.member_hysteresis_th(ElemId(1)),
+        Some(MaxPointOriented)
+    );
+    assert_eq!(model.member_rc_beam_reference(ElemId(1)), None);
+    assert_eq!(model.member_hysteresis_attrs.len(), 2);
+
+    let mut new_beam = before.elements[1].clone();
+    new_beam.id = ElemId(2);
+    new_beam.nodes = smallvec![NodeId(0), NodeId(3)];
+    assert!(stack.run(&mut model, Box::new(AddMember { elem: new_beam })));
+    assert_eq!(model.member_hysteresis(ElemId(2)), None);
+    assert_eq!(model.member_hysteresis_th(ElemId(2)), None);
+    assert_eq!(model.member_rc_beam_reference(ElemId(2)), None);
+
+    stack.undo(&mut model);
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert_eq!(model.member_hysteresis(ElemId(1)), Some(Takeda));
+    assert_eq!(model.member_hysteresis_th(ElemId(1)), Some(Retrograde));
+    assert_eq!(model.member_rc_beam_reference(ElemId(1)), reference);
+
+    stack.redo(&mut model);
+    assert_eq!(model.member_hysteresis(ElemId(1)), Some(MaxPointOriented));
+    assert_eq!(model.member_hysteresis_attrs.len(), 2);
+}
+
+#[test]
 fn test_delete_member_shifts_and_restores_side_table_attrs() {
     use sepika_core::model::{DamperProps, Haunch, HysteresisModel, MemberDetailAttr};
     let mut model = seeded_model(3, 2);
@@ -4728,6 +4832,63 @@ fn test_copy_story_without_overwrite_keeps_existing() {
         kept.kind,
         MemberLoadKind::Distributed { w1, .. } if (w1 - 99.0).abs() < 1e-9
     ));
+}
+
+#[test]
+fn copying_a_story_slab_rejects_a_hysteresis_ref_to_a_new_boundary_beam() {
+    use sepika_core::model::{HysteresisModel, RcBeamReference, Story};
+
+    let mut model = seeded_model(6, 0);
+    for (i, z_mm) in [3000.0, 6000.0].into_iter().enumerate() {
+        let story = StoryId(i as u32);
+        model.stories.push(Story::new(
+            story,
+            format!("{}F", i + 1),
+            Some(z_mm),
+            Some(0.0),
+        ));
+        for (node, (x_mm, y_mm)) in
+            model.nodes[i * 3..i * 3 + 3]
+                .iter_mut()
+                .zip([(0.0, 0.0), (4000.0, 0.0), (0.0, 4000.0)])
+        {
+            node.coord = [x_mm, y_mm, z_mm];
+            node.story = Some(story);
+        }
+    }
+    model.add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(2)], SlabPlate::default());
+    let command = CopyStory {
+        from: StoryId(0),
+        to: vec![StoryId(1)],
+        targets: CopyTargets {
+            slabs: true,
+            ..Default::default()
+        },
+        overwrite: false,
+    };
+    let new_beam = ElemId(3);
+    assert!(model.element(new_beam).is_none());
+    let mut valid = model.clone();
+    assert!(!command.apply(&mut valid).is_noop());
+    assert_eq!(valid.slabs.len(), 2);
+    assert_eq!(
+        valid.element(new_beam).unwrap().nodes.as_slice(),
+        &[NodeId(3), NodeId(4)]
+    );
+
+    model.set_member_hysteresis_th(new_beam, Some(HysteresisModel::Retrograde));
+    model.set_member_rc_beam_reference(new_beam, Some(RcBeamReference::AntisymmetricHalfMember));
+    let before = model.clone();
+    let inverse = command.apply(&mut model);
+    let reason = inverse.rejection().unwrap();
+    assert!(reason.contains("部材の履歴則指定 -> 部材 3"), "{reason}");
+    assert!(model.eq_ignoring_dofmap(&before));
+
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(command)));
+    assert_eq!(stack.last_error(), Some(reason));
+    assert_eq!(stack.revision(), 0);
+    assert!(model.eq_ignoring_dofmap(&before));
 }
 
 /// 上書きが真でも、複製元の平面の外にある複製先の床には手を触れない。

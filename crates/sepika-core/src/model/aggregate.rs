@@ -6,6 +6,7 @@
 use super::*;
 
 const STEEL_DESIGN_ATTR_LABEL: &str = "鉄骨部材の検定属性";
+const MEMBER_HYSTERESIS_ATTR_LABEL: &str = "部材の履歴則指定";
 
 macro_rules! for_each_elem_attr_collection {
     ($visit:ident) => {
@@ -18,7 +19,7 @@ macro_rules! for_each_elem_attr_collection {
         $visit!(steel_design_attrs, elem, STEEL_DESIGN_ATTR_LABEL);
         $visit!(slab_composite_attrs);
         $visit!(pca_attrs, elem, "PCa梁属性");
-        $visit!(member_hysteresis_attrs, elem, "部材の履歴則指定");
+        $visit!(member_hysteresis_attrs, elem, MEMBER_HYSTERESIS_ATTR_LABEL);
         $visit!(damper_attrs, elem, "制振ダンパー属性");
         $visit!(member_detail_attrs, elem, "部材の付帯情報");
         $visit!(girder_groups);
@@ -35,7 +36,8 @@ pub struct ElemAttrs {
     /// 元の配列位置と鉄骨部材の検定属性。
     pub steel_design: Vec<(usize, SteelDesignAttr)>,
     pub pca: Option<PcaGirderAttr>,
-    pub hysteresis: Option<MemberHysteresisAttr>,
+    /// 元の配列位置と部材の履歴則指定。
+    pub hysteresis: Vec<(usize, MemberHysteresisAttr)>,
     pub damper: Option<DamperAttr>,
     pub detail: Option<MemberDetailAttr>,
     pub slab_composite: Option<SlabCompositeConnection>,
@@ -352,6 +354,7 @@ impl Model {
         }
         self.validate_steel_design_attr_refs()?;
         self.validate_member_weight_refs()?;
+        self.validate_member_hysteresis_attr_refs()?;
 
         for sec in &self.sections {
             for (role, mid) in [
@@ -1615,6 +1618,19 @@ impl Model {
         Ok(())
     }
 
+    /// 参照先が存在しない最初の履歴則・RC梁基準分布の指定を、部材番号付きエラーで返す。
+    pub fn validate_member_hysteresis_attr_refs(&self) -> Result<(), crate::error::CoreError> {
+        for attr in &self.member_hysteresis_attrs {
+            if self.element(attr.elem).is_none() {
+                return Err(crate::error::CoreError::DanglingRef(format!(
+                    "{MEMBER_HYSTERESIS_ATTR_LABEL} -> 部材 {}",
+                    attr.elem.0
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// 条件に一致する部材属性・部材別重量・一本部材指定の参照先と入力種別を返す。
     pub fn find_elem_attr_ref(
         &self,
@@ -1735,7 +1751,9 @@ impl Model {
             }),
             slab_composite: self.slab_composite_attrs.remove(&elem),
             pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
-            hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
+            hysteresis: take_ordered(&mut self.member_hysteresis_attrs, |attr| {
+                (attr.elem == elem).then_some(*attr)
+            }),
             damper: take_first(&mut self.damper_attrs, |a| a.elem, elem),
             detail: take_first(&mut self.member_detail_attrs, |a| a.elem, elem),
             extra_line_weight,
@@ -1763,9 +1781,10 @@ impl Model {
             a.elem = elem;
             self.pca_attrs.push(a);
         }
-        if let Some(mut a) = attrs.hysteresis {
-            a.elem = elem;
-            self.member_hysteresis_attrs.push(a);
+        for (index, mut attr) in attrs.hysteresis {
+            attr.elem = elem;
+            self.member_hysteresis_attrs
+                .insert(index.min(self.member_hysteresis_attrs.len()), attr);
         }
         if let Some(mut a) = attrs.damper {
             a.elem = elem;

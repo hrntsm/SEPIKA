@@ -168,6 +168,9 @@ pub fn compute_pushover(
     model: sepika_core::model::Model,
     cfg: AnalysisSettings,
 ) -> JobResult<sepika_solver::nonlinear::pushover::PushoverResult> {
+    model
+        .validate_member_hysteresis_attr_refs()
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     let (work, wall_index, _) = sepika_core::wall_expand::expand_wall_elements_owned(model);
     Analysis::prepare(&work).map_err(|e| JobError::Prepare(e.to_string()))?;
     let dofmap = sepika_core::dof::DofMap::build(&work);
@@ -214,6 +217,11 @@ pub fn compute_time_history(
     cfg: AnalysisSettings,
     wave: sepika_solver::dynamic::timehistory::GroundMotion,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
+    if cfg.th_nonlinear {
+        model
+            .validate_member_hysteresis_attr_refs()
+            .map_err(|e| JobError::InvalidInput(e.to_string()))?;
+    }
     crate::weight_preparation::require_current_generated_mass(&model)?;
     model
         .validate_wall_weight_generation()

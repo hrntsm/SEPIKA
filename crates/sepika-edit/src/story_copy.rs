@@ -337,6 +337,11 @@ impl EditCommand for CopyStory {
         if !self.targets.any() {
             return Box::new(Noop);
         }
+        if self.targets.slabs {
+            if let Err(error) = model.validate_member_hysteresis_attr_refs() {
+                return Box::new(crate::RejectedEdit(error.to_string()));
+            }
+        }
         if let Err(error) = model.validate_rc_section_usage() {
             return Box::new(crate::RejectedEdit(error.to_string()));
         }
