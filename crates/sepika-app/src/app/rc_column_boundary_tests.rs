@@ -8,13 +8,17 @@ pub(crate) mod reference;
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_long_term_shear_model.rs"]
 mod long_term_shear_input;
 
-fn rc_column_long_term_shear_app(circle: bool) -> App {
-    let mut app = App::default();
-    assert!(app.load_model(long_term_shear_input::model(
+fn rc_column_long_term_shear_model(circle: bool) -> sepika_core::model::Model {
+    long_term_shear_input::model(
         input::column_model(circle, 0.0),
         super::rc_beam_asymmetric_tests::input::section(300.0, 600.0, 19.0, &[3], &[3]),
         true,
-    )));
+    )
+}
+
+fn rc_column_long_term_shear_app(model: sepika_core::model::Model) -> App {
+    let mut app = App::default();
+    assert!(app.load_model(model));
     app.run_combination(0);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -29,7 +33,7 @@ fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika()
     use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
 
     for circle in [false, true] {
-        let app = rc_column_long_term_shear_app(circle);
+        let app = rc_column_long_term_shear_app(rc_column_long_term_shear_model(circle));
         let result = app.current_design_results().unwrap();
         let column = result
             .member_checks
@@ -88,7 +92,7 @@ fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika()
 
 #[test]
 fn rc_column_long_term_shear_keeps_independent_failure_with_invalid_saved_axial_force() {
-    let mut app = rc_column_long_term_shear_app(false);
+    let mut app = rc_column_long_term_shear_app(rc_column_long_term_shear_model(false));
     let bundle = app.core.scoped.results.as_mut().unwrap();
     for forces in [
         &mut bundle.member_forces,
@@ -123,6 +127,113 @@ fn rc_column_long_term_shear_keeps_independent_failure_with_invalid_saved_axial_
         CheckOutcome::Checked(result) if !result.ok() && result.components.len() == 1
             && result.components[0].kind == CheckKind::Shear
             && result.components[0].detail.contains("局所Qy最大 |Qy|=313900.000 N")
+    )));
+}
+
+#[test]
+fn rc_column_long_term_shear_localizes_invalid_saved_section_position() {
+    let mut model = rc_column_long_term_shear_model(false);
+    let mut other_base = model.nodes[0].clone();
+    other_base.id = NodeId(3);
+    other_base.coord[0] = 6000.0;
+    model.nodes.push(other_base);
+    let mut other_tip = model.nodes[1].clone();
+    other_tip.id = NodeId(4);
+    other_tip.coord = [6000.0, 0.0, 2400.0];
+    model.nodes.push(other_tip);
+    let mut other = model.elements[0].clone();
+    other.id = ElemId(2);
+    other.nodes = [NodeId(3), NodeId(4)].into_iter().collect();
+    let other_column = other.id;
+    model.elements.push(other);
+    let mut app = rc_column_long_term_shear_app(model);
+    assert!(!app.core.model.node_on_rigid_diaphragm(NodeId(4)));
+    let expected = app
+        .current_design_results()
+        .unwrap()
+        .member_checks
+        .iter()
+        .find(|member| member.elem == long_term_shear_input::COLUMN)
+        .unwrap();
+    assert_eq!(expected.positions.len(), 3);
+    assert!(
+        expected
+            .positions
+            .iter()
+            .all(|position| matches!(&position.outcome,
+                CheckOutcome::Checked(result) if result.components.iter().any(|component| {
+                    component.kind == CheckKind::Shear && component.ratio > 1.0
+                        && component.detail.contains("局所Qy最大 |Qy|=313900.000 N")
+                        && component.detail.contains("i端から x=1100.000000 mm")
+                })
+            )),
+        "{expected:?}"
+    );
+    let expected = serde_json::to_value(&expected.positions).unwrap();
+
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    for forces in [
+        &mut bundle.member_forces,
+        &mut bundle.combos[0].1.member_forces,
+    ] {
+        let (_, response) = forces
+            .iter_mut()
+            .find(|(id, _)| *id == other_column)
+            .unwrap();
+        response.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap().0 = f64::NAN;
+    }
+    app.run_design_check();
+    let result = app.current_design_results().unwrap();
+    let affected = result
+        .member_checks
+        .iter()
+        .find(|member| member.elem == other_column)
+        .unwrap();
+    assert!(affected
+        .positions
+        .iter()
+        .any(|position| matches!(&position.outcome,
+            CheckOutcome::Skipped { reason } if reason.contains("断面力の評価位置が不足・不正")
+        )));
+    let unaffected = result
+        .member_checks
+        .iter()
+        .find(|member| member.elem == long_term_shear_input::COLUMN)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&unaffected.positions).unwrap(),
+        expected
+    );
+
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    let (_, response) = bundle.combos[0]
+        .1
+        .member_forces
+        .iter_mut()
+        .find(|(id, _)| *id == other_column)
+        .unwrap();
+    let position = &mut response
+        .at
+        .iter_mut()
+        .find(|(xi, _)| xi.is_nan())
+        .unwrap()
+        .0;
+    *position = f64::from_bits(position.to_bits() ^ 1);
+    app.run_design_check();
+    let result = app.current_design_results().unwrap();
+    let unverified = result
+        .member_checks
+        .iter()
+        .find(|member| member.elem == long_term_shear_input::COLUMN)
+        .unwrap();
+    assert!(unverified
+        .positions
+        .iter()
+        .any(|position| matches!(&position.outcome,
+            CheckOutcome::Skipped { reason } if reason.contains("生成入力が未確認")
+        )));
+    assert!(!unverified.positions.iter().any(|position| matches!(&position.outcome,
+        CheckOutcome::Checked(result) if result.components.iter().any(|component| component.kind == CheckKind::Shear)
     )));
 }
 

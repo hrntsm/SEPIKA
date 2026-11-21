@@ -365,6 +365,11 @@ pub fn run_member_design_checks(
                 checked_column_ids.insert(*elem_id);
                 loads.envelope(model, elem, mf)
             });
+        let recovered_shear_detail = long_term_shear
+            .as_ref()
+            .and_then(|shear| shear.as_ref().ok())
+            .map(crate::rc::recovered_long_shear_detail)
+            .unwrap_or_default();
         let torsion_reason =
             |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
         let length = model.member_length(elem);
@@ -375,7 +380,7 @@ pub fn run_member_design_checks(
                     *elem_id,
                     *pos,
                     crate::CheckOutcome::Skipped {
-                        reason: reason.clone(),
+                        reason: format!("{reason}{recovered_shear_detail}"),
                     },
                     torsion_reason(&MemberForcesAt::from_local(*pos, *forces)),
                 );
@@ -383,7 +388,7 @@ pub fn run_member_design_checks(
             if long_term_shear.is_some() {
                 for pos in missing_design_positions(&design_positions(elem, model, length), mf) {
                     member_checks.push((*elem_id, pos, CheckOutcome::Skipped {
-                        reason: format!("RC柱の軸力・曲げを検定する断面位置の解析内力がありません。{reason}"),
+                            reason: format!("RC柱の軸力・曲げを検定する断面位置の解析内力がありません。{reason}{recovered_shear_detail}"),
                     }));
                 }
             }
@@ -802,12 +807,24 @@ pub fn run_member_design_checks(
                         incomplete = combine_incomplete_reasons(incomplete, Some(reason));
                     }
                 }
-                if let (Some(reason), CheckOutcome::Checked(result)) = (&mut incomplete, &outcome) {
-                    if let Some(shear) = result.components.iter().find(|component| {
-                        component.kind == crate::CheckKind::Shear && component.ratio <= 1.0
-                    }) {
-                        reason.push_str(&format!("。せん断の確認結果（{}）", shear.detail));
+                match (&mut incomplete, &mut outcome) {
+                    (_, CheckOutcome::Skipped { reason }) => {
+                        reason.push_str(&recovered_shear_detail)
                     }
+                    (Some(reason), CheckOutcome::Checked(result)) => {
+                        match result
+                            .components
+                            .iter()
+                            .find(|component| component.kind == crate::CheckKind::Shear)
+                        {
+                            Some(shear) if shear.ratio <= 1.0 => {
+                                reason.push_str(&format!("。せん断の確認結果（{}）", shear.detail))
+                            }
+                            None => reason.push_str(&recovered_shear_detail),
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
             }
             push_strength_outcome(
@@ -859,6 +876,7 @@ pub fn run_member_design_checks(
                 if let Some(issue) = bound_issue {
                     reason.push_str(&format!("。{issue}"));
                 }
+                reason.push_str(&recovered_shear_detail);
                 for pos in missing_positions {
                     member_checks.push((
                         *elem_id,

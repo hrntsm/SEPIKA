@@ -5,6 +5,7 @@ fn same_saved_member_forces(
     expected: &[(ElemId, sepika_element::frame::beam::MemberForces)],
     observed: &[(ElemId, sepika_element::frame::beam::MemberForces)],
 ) -> bool {
+    let same_value = |a: &f64, b: &f64| a == b || a.to_bits() == b.to_bits();
     expected.len() == observed.len()
         && expected.iter().zip(observed).all(
             |((expected_id, expected), (observed_id, observed))| {
@@ -12,11 +13,8 @@ fn same_saved_member_forces(
                     && expected.at.len() == observed.at.len()
                     && expected.at.iter().zip(&observed.at).all(
                         |((expected_pos, expected), (observed_pos, observed))| {
-                            expected_pos == observed_pos
-                                && expected
-                                    .iter()
-                                    .zip(observed)
-                                    .all(|(a, b)| a == b || a.to_bits() == b.to_bits())
+                            same_value(expected_pos, observed_pos)
+                                && expected.iter().zip(observed).all(|(a, b)| same_value(a, b))
                         },
                     )
             },

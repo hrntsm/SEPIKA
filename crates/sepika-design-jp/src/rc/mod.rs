@@ -46,7 +46,7 @@ pub use crate::material_strength::{
 };
 
 pub(crate) use allowable::*;
-pub(crate) use column::interp_ma;
+pub(crate) use column::{interp_ma, recovered_long_shear_detail};
 pub(crate) use design_shear::*;
 pub(crate) use section_props::*;
 pub(crate) use shear_capacity::*;

@@ -152,11 +152,17 @@ fn 検定断面の欠落位置を表示し長期せん断は許容上限を超�
                 assert_eq!(column.1.at.len(), 6);
                 column.1.at.retain(|(xi, _)| !omitted.contains(xi));
                 let rows = check_combination(&model, &incomplete);
+                let y_peak_mm = if w == 0.0 { 300.0 } else { 1100.0 };
+                let y_demand =
+                    format!("局所Qy最大 |Qy|={demand_n:.3} N（i端から x={y_peak_mm:.6} mm）");
+                let z_demand = "局所Qz最大 |Qz|=0.000 N（i端から x=300.000000 mm）";
                 for target in omitted {
                     assert!(rows.iter().any(|(xi, outcome)| xi == target && matches!(
                         outcome, CheckOutcome::Skipped { reason } if
                             reason.contains("軸力・曲げを検定する断面位置の解析内力がありません")
                             && reason.contains("長期せん断の許容値を決めるαの参照断面が揃いません")
+                            && reason.contains(&y_demand) && reason.contains(z_demand)
+                            && !reason.contains("検定比")
                     )), "省略位置={omitted:?} {rows:?}");
                 }
                 let shear_rows = rows
@@ -182,6 +188,7 @@ fn 検定断面の欠落位置を表示し長期せん断は許容上限を超�
                         1e-6,
                     );
                     assert!(component.detail.contains("検定比の下限"));
+                    assert!(component.detail.contains(z_demand));
                     println!("円形={circle} 省略位置={omitted:?} {}", component.detail);
                 } else {
                     assert!(shear_rows.is_empty(), "{rows:?}");
@@ -192,6 +199,47 @@ fn 検定断面の欠落位置を表示し長期せん断は許容上限を超�
             }
         }
     }
+}
+
+#[test]
+fn 両方向の許容値が未算定でも照合した最大せん断力と位置を表示する() {
+    let mut model = model(false, false);
+    model.load_cases[0].member.push(MemberLoad::manual(
+        COLUMN,
+        Y,
+        MemberLoadKind::Point {
+            a: 300.0,
+            p: -1200.0,
+        },
+    ));
+    model.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(1),
+        [0.0, 2000.0, 0.0, 0.0, 0.0, 0.0],
+    ));
+    let mut solved = analyze(&mut model);
+    let (_, response) = solved
+        .member_forces
+        .iter_mut()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap();
+    let (_, middle) = response.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap();
+    middle[4] = f64::NAN;
+    middle[5] = f64::INFINITY;
+    let rows = check_combination(&model, &solved);
+    assert!(
+        rows.iter().any(|(xi, outcome)| *xi == 0.5
+            && matches!(
+                outcome, CheckOutcome::Skipped { reason } if reason.contains("曲げMyが非有限")
+                    && reason.contains("曲げMzが非有限")
+                    && reason.contains("局所Qy最大 |Qy|=14700.000 N（i端から x=300.000000 mm）")
+                    && reason.contains("局所Qz最大 |Qz|=2000.000 N（i端から x=300.000000 mm（j端側））")
+                    && !reason.contains("検定比")
+            )),
+        "{rows:?}"
+    );
+    assert!(rows
+        .iter()
+        .all(|(_, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
 }
 
 #[test]

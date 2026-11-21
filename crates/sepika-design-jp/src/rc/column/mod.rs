@@ -138,8 +138,7 @@ fn shear_input_issue(q_index: usize) -> &'static str {
 fn long_shear_detail(
     axis: usize,
     peak: &FrameShearPeak,
-    capacity: Option<f64>,
-    ratio_label: &str,
+    comparison: Option<(Option<f64>, &str)>,
 ) -> String {
     let direction = ["Qy", "Qz"][axis];
     let side = match peak.side {
@@ -148,15 +147,35 @@ fn long_shear_detail(
         SectionSide::Continuous => "",
     };
     let q = peak.q_n.abs();
-    let ratio = capacity
-        .filter(|qa| qa.is_finite() && *qa > 0.0)
-        .map(|qa| q / qa)
-        .filter(|ratio| ratio.is_finite())
-        .map_or_else(|| "未算定".into(), |ratio| format!("{ratio:.6}"));
+    let ratio_detail = comparison.map_or_else(String::new, |(capacity, label)| {
+        let ratio = capacity
+            .filter(|qa| qa.is_finite() && *qa > 0.0)
+            .map(|qa| q / qa)
+            .filter(|ratio| ratio.is_finite())
+            .map_or_else(|| "未算定".into(), |ratio| format!("{ratio:.6}"));
+        format!("、{label} {ratio}")
+    });
     format!(
-        "、局所{direction}最大 |{direction}|={q:.3} N（i端から x={:.6} mm{side}、{ratio_label} {ratio}）",
+        "、局所{direction}最大 |{direction}|={q:.3} N（i端から x={:.6} mm{side}{ratio_detail}）",
         peak.x_mm
     )
+}
+
+pub(crate) fn recovered_long_shear_detail(peaks: &[Result<FrameShearPeak, String>; 2]) -> String {
+    let details: String = peaks
+        .iter()
+        .enumerate()
+        .filter_map(|(axis, peak)| {
+            peak.as_ref()
+                .ok()
+                .map(|peak| long_shear_detail(axis, peak, None))
+        })
+        .collect();
+    if details.is_empty() {
+        details
+    } else {
+        format!("。確認できた部材の最大せん断力{details}")
+    }
 }
 
 pub(super) fn long_shear_failure_over_capacity_bound(
@@ -172,23 +191,20 @@ pub(super) fn long_shear_failure_over_capacity_bound(
         .into_iter()
         .enumerate()
     {
-        if confirmed_shear_alpha[axis] {
-            continue;
-        }
         let Ok(peak) = &peaks[axis] else { continue };
-        let Some(props) = axis_props_from_shape(shape, direction, true) else {
+        let failure = (!confirmed_shear_alpha[axis])
+            .then(|| axis_props_from_shape(shape, direction, true))
+            .flatten()
+            .and_then(|props| {
+                shear_capacity(&props, allow, MAX_SHEAR_ALPHA, LoadTerm::Long, false, true)
+            })
+            .filter(|capacity_n| capacity_n.is_finite() && *capacity_n > 0.0)
+            .map(|capacity_n| (capacity_n, peak.q_n.abs() / capacity_n))
+            .filter(|(_, ratio)| ratio.is_finite() && *ratio > 1.0);
+        let Some((capacity_n, ratio)) = failure else {
+            detail.push_str(&long_shear_detail(axis, peak, None));
             continue;
         };
-        let Some(capacity_n) =
-            shear_capacity(&props, allow, MAX_SHEAR_ALPHA, LoadTerm::Long, false, true)
-                .filter(|capacity_n| capacity_n.is_finite() && *capacity_n > 0.0)
-        else {
-            continue;
-        };
-        let ratio = peak.q_n.abs() / capacity_n;
-        if !ratio.is_finite() || ratio <= 1.0 {
-            continue;
-        }
         if governing.is_none_or(|(_, previous)| ratio > previous) {
             governing = Some((peak.x_mm / length_mm, ratio));
         }
@@ -197,8 +213,7 @@ pub(super) fn long_shear_failure_over_capacity_bound(
         detail.push_str(&long_shear_detail(
             axis,
             peak,
-            Some(capacity_n),
-            "検定比の下限",
+            Some((Some(capacity_n), "検定比の下限")),
         ));
     }
     governing.map(|(xi, ratio)| {
@@ -342,7 +357,7 @@ pub(super) fn column_check(
             String::new(),
             |mut text, (axis, (peak, capacity))| {
                 if let Ok(peak) = peak {
-                    text.push_str(&long_shear_detail(axis, peak, capacity, "検定比"));
+                    text.push_str(&long_shear_detail(axis, peak, Some((capacity, "検定比"))));
                 }
                 text
             },
