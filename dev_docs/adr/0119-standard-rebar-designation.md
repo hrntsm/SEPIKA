@@ -3,7 +3,7 @@
 Status: accepted
 
 RC・SRC梁柱の主筋・せん断補強筋は、標準異形鉄筋の呼び名または数値径として保持する。
-MCPのJSONとOVIKAのMessagePackでは、標準呼び名を文字列、数値径を数値として表す。
+OVIKA の MessagePack では、標準呼び名を文字列、数値径を数値として表す。MCP の JSON 表現は [ADR 0140](0140-remove-mcp-and-local-ai.md) で廃止した。
 結果と共に記録する計算時入力もMessagePackで書き、文字列と数値を同じ型で復号する。
 旧数値入力も数値径として開き、標準への自動変換は行わない。丸鋼の材種SR235・SR295には数値径を指定する。
 
@@ -14,8 +14,7 @@ MCPのJSONとOVIKAのMessagePackでは、標準呼び名を文字列、数値径
 主筋中心等の配置モデルも呼び名の数値で円を表す従来の幾何を維持する。
 公称直径への一律置換は施工上の最外径を再現できず、有効せいと耐力・需要を同時に変えるため採用しない。
 
-ST-Bridge取込から計算用配筋へ標準の意味を引き継ぐ対応は [#1587](https://github.com/hrntsm/SEPIKA/issues/1587) で扱う。
-今回新たに標準呼び名を指定した断面は、再読込で数値径に変化するST-Bridge出力を拒否する。
+旧 ST-Bridge 取込で標準呼び名を継承する計画 [#1587](https://github.com/hrntsm/SEPIKA/issues/1587) は取り下げた。再読込で標準呼び名が数値径へ変わる場合に出力を拒否する規則も、ST-Bridge 入出力とともに [ADR 0141](0141-remove-st-bridge.md) で廃止した。
 数量の既存扱いは [#1585](https://github.com/hrntsm/SEPIKA/issues/1585)、径区分は [#961](https://github.com/hrntsm/SEPIKA/issues/961) で扱う。
 
 保存形式は初回リリース前の [ADR 0014](0014-schema-compatibility.md) に従いスキーマ版1とする。

@@ -187,6 +187,4 @@
 - [保存・入出力](./external/README.md)
     - [モデル入出力](./model_io/README.md)
         - [OVIKA プロジェクト形式（.ovika）](./model_io/01_プロジェクト形式_ovika.md)
-        - [ST-Bridge 形式（.stb / .xml）](./model_io/02_ST-Bridge_形式.md)
-        - [ST-Bridge 要素別 変換状況一覧](./model_io/03_ST-Bridge_要素別変換状況.md)
         - [波形ライブラリ](./model_io/04_波形ライブラリ.md)

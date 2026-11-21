@@ -1,5 +1,7 @@
 # STB断面系列別ID（Issue #571）
 
+ST-Bridge の入出力・専用処理は [ADR 0141](../adr/0141-remove-st-bridge.md) で廃止しました。この文書の対応範囲と入出力の観測は検証時点の記録です。
+
 ## 記録の状態と対象
 
 2026-10-18、基準main `cf2c4ec9597ce8659f0b9e60b6e95299c1e70225` からの読込限定変更を対象とする。
@@ -7,7 +9,7 @@
 Windowsローカル検証は、初回統合IO191成功/36失敗・App自動受入8成功/1失敗、第2統合IO225成功/2失敗・App9成功、関連feature回帰1321成功/1失敗を経て、最終ローカルでfeature1322成功/0失敗・IO default227成功/0失敗となった。異なるWIP snapshotの結果を分け、初期失敗を取り消さない。今回の文書最終修正後の再検査とfreshレビュー、親監査・最終head全CI・mergeは未確認であり、元5Done全体は完了認定しない。
 最新の開発状態は[Issue #571](https://github.com/hrntsm/SEPIKA/issues/571)を正とする。
 
-製品仕様は[ST-Bridge形式](../../docs/model_io/02_ST-Bridge_形式.md#断面系列と数値id)と[系列対応表](../../docs/model_io/03_ST-Bridge_要素別変換状況.md#断面参照の系列対応)、判断は[ADR0036](../adr/0036-stbridge-section-use-explicit-mapping.md#入力識別の判断issue-571)、語彙は[CONTEXT](../../CONTEXT.md#断面と材料)を正本とする。
+製品仕様は[ST-Bridge形式](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/02_ST-Bridge_%E5%BD%A2%E5%BC%8F.md#断面系列と数値id)と[系列対応表](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/03_ST-Bridge_%E8%A6%81%E7%B4%A0%E5%88%A5%E5%A4%89%E6%8F%9B%E7%8A%B6%E6%B3%81.md#断面参照の系列対応)、判断は[ADR0036](../adr/0036-stbridge-section-use-explicit-mapping.md#入力識別の判断issue-571)、語彙は[CONTEXT](../../CONTEXT.md#断面と材料)を正本とする。
 
 ## 元5完了条件との対応
 

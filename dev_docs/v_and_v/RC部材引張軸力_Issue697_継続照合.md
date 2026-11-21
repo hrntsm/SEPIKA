@@ -105,11 +105,14 @@ a/D=1、実M/(Qd)=h0/(2d)=1.116279069767…であり、指定原典のせん断�
 [500mmの606点成功](data/issue697/probe-short500.log)、[片持ち500/600mmの1212点成功](data/issue697/probe-cantilever500-600.log)、[回転拘束柱の厳しい釣合い許容での失敗](data/issue697/probe-fixed-tight-equilibrium.log)も保持する。
 最終ログは1試験内18run、1成功/0失敗。中間版は最終保存sourceと同一ではない。
 
+以下は記録時の基点 `440654c7` での再現手順。証跡コードは廃止前の `Story::source_story` を使用する。
+この記録がある作業ツリーの `dev_docs/v_and_v/data/issue697` の絶対パスを `$evidenceDir` に設定し、基点の作業ツリーで実行する。
+
 ```powershell
-Copy-Item dev_docs/v_and_v/data/issue697/source_probe.rs crates/sepika-solver/tests/issue697_probe.rs
+Copy-Item -LiteralPath (Join-Path $evidenceDir 'source_probe.rs') -Destination crates/sepika-solver/tests/issue697_probe.rs
 cargo test -p sepika-solver --test issue697_probe -- --nocapture
 Remove-Item -LiteralPath crates/sepika-solver/tests/issue697_probe.rs
-python dev_docs/v_and_v/data/issue697/independent_decimal.py
+python (Join-Path $evidenceDir 'independent_decimal.py')
 ```
 
 ## 継続可否と再開条件

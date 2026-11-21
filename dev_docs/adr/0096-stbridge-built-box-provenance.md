@@ -1,6 +1,6 @@
 # ST-Bridge組立BOXの再出力は原形状の来歴で区別する
 
-Status: accepted
+Status: superseded by ADR-0141
 
 ## 判断
 

@@ -1,6 +1,6 @@
 # 標準配筋の元入力と解析用配筋を分離する
 
-Status: proposed
+Status: superseded by ADR-0141
 
 ST-Bridge 2.0.2の梁・柱配筋コンテナ、posごとの子要素、Apply条件は、属性の明示と省略を保持する。副主筋を主筋の2段目へ変換せず、腹筋・巾止筋・軸筋とそれぞれのD/strengthを区別する。強度はADR-0051のresolverを再利用する。
 

@@ -1,8 +1,10 @@
 # STB異厚組立BOXの読込確認（Issue #683）
 
+ST-Bridge の入出力・専用処理は [ADR 0141](../adr/0141-remove-st-bridge.md) で廃止しました。この文書の対応範囲と入出力の観測は検証時点の記録です。
+
 状態: 🔶。2026-10-26。STB 2.0.2の組立BOXから汎用断面モデルへの結合を対象とする。
 [Issue #683](https://github.com/hrntsm/SEPIKA/issues/683)と[汎用形状の確認記録](異厚組立BOX_Issue831_確認記録.md)を参照。
-入力条件と計算の現在仕様は[製品文書](../../docs/model_io/02_ST-Bridge_形式.md#組立boxの読み込み)を正とする。
+入力条件と計算の現在仕様は[製品文書](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/02_ST-Bridge_%E5%BD%A2%E5%BC%8F.md#組立boxの読み込み)を正とする。
 
 ## 独立期待値
 

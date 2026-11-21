@@ -105,8 +105,8 @@
 | `model_edit/10_断面案の検討.md` | [section_study/01_断面案の検討.md](../../docs/section_study/01_断面案の検討.md) | 移動・全節維持 |
 | `model_edit/README.md` | [model_edit/README.md](../../docs/model_edit/README.md) | 章入口・案内を更新 |
 | `model_io/01_プロジェクト形式_ovika.md` | [model_io/01_プロジェクト形式_ovika.md](../../docs/model_io/01_プロジェクト形式_ovika.md) | 維持・全節維持 |
-| `model_io/02_ST-Bridge_形式.md` | [model_io/02_ST-Bridge_形式.md](../../docs/model_io/02_ST-Bridge_形式.md) | 維持・全節維持 |
-| `model_io/03_ST-Bridge_要素別変換状況.md` | [model_io/03_ST-Bridge_要素別変換状況.md](../../docs/model_io/03_ST-Bridge_要素別変換状況.md) | 維持・全節維持 |
+| `model_io/02_ST-Bridge_形式.md` | [model_io/02_ST-Bridge_形式.md](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/02_ST-Bridge_%E5%BD%A2%E5%BC%8F.md) | 廃止前の掲載先（[ADR 0141](../adr/0141-remove-st-bridge.md)） |
+| `model_io/03_ST-Bridge_要素別変換状況.md` | [model_io/03_ST-Bridge_要素別変換状況.md](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/03_ST-Bridge_%E8%A6%81%E7%B4%A0%E5%88%A5%E5%A4%89%E6%8F%9B%E7%8A%B6%E6%B3%81.md) | 廃止前の掲載先（[ADR 0141](../adr/0141-remove-st-bridge.md)） |
 | `model_io/04_波形ライブラリ.md` | [model_io/04_波形ライブラリ.md](../../docs/model_io/04_波形ライブラリ.md) | 維持・全節維持 |
 | `model_io/README.md` | [model_io/README.md](../../docs/model_io/README.md) | 章入口・案内を更新 |
 | `preparation/01_階の分布.md` | [preparation/01_階の分布.md](../../docs/preparation/01_階の分布.md) | 維持・全節維持 |
@@ -228,7 +228,7 @@ MCPの6ページは本再編では配置を維持する。GUIから使う接続�
 | 取り付く壁版の取付き先 | [model_edit/13_壁版の入力.md](../../docs/model_edit/13_壁版の入力.md) |
 | 自立壁の高さは階高いっぱいにできる | [model_edit/13_壁版の入力.md](../../docs/model_edit/13_壁版の入力.md) |
 | 階高を選べるのは自立壁だけです。 | [model_edit/13_壁版の入力.md](../../docs/model_edit/13_壁版の入力.md) |
-| 取り付く壁版への自動変換 | [calc_basis/01_荷重/09_壁の断面と自重.md](../../docs/calc_basis/01_荷重/09_壁の断面と自重.md) |
+| 壁領域への所属の再計算 | [calc_basis/01_荷重/09_壁の断面と自重.md](../../docs/calc_basis/01_荷重/09_壁の断面と自重.md) |
 | ST-Bridge との対応 | [calc_basis/01_荷重/09_壁の断面と自重.md](../../docs/calc_basis/01_荷重/09_壁の断面と自重.md) |
 | 採用範囲と確認限界 | [calc_basis/01_荷重/09_壁の断面と自重.md](../../docs/calc_basis/01_荷重/09_壁の断面と自重.md) |
 

@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-利用者ドキュメントの [ST-Bridge 要素別 変換状況一覧](../../docs/model_io/03_ST-Bridge_要素別変換状況.md)
+利用者ドキュメントの [ST-Bridge 要素別 変換状況一覧](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/03_ST-Bridge_%E8%A6%81%E7%B4%A0%E5%88%A5%E5%A4%89%E6%8F%9B%E7%8A%B6%E6%B3%81.md)
 が実装より古くなっていたため、`squid-n-io::stbridge` の実装を読み直して全面的に照合した。
 
 照合したのは以下のファイルで、表の各行はこれらの分岐と対応している。
@@ -28,7 +28,7 @@
 | `StbSecWall_RC` | 取り込み・書き出しとも対応 | 取り込むのは厚さのみ（符号・階・`strength_concrete` は読まない） |
 | 角形鋼管の角部外半径 | 記載なし | `r` 属性を `SteelBox::corner_r` として往復する |
 
-併せて [ST-Bridge 形式（.stb / .xml）](../../docs/model_io/02_ST-Bridge_形式.md) 側も、
+併せて [ST-Bridge 形式（.stb / .xml）](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/02_ST-Bridge_%E5%BD%A2%E5%BC%8F.md) 側も、
 階の種別（`kind`）が書き出し専用であること、小梁が対応範囲に入ること、
 荷重は取り込みのみ対応であることを直した。
 

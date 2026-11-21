@@ -16,7 +16,7 @@ GUI が本案と検討を所有する。断面案の編集・比較・採否に�
 
 - 床板・壁版消失時の GUI 確認と、取り付く床板の共通入力検査・編集診断は引き継ぐ。MCP の確認引数と診断応答は廃止する。[ADR 0020](0020-assign-plates-to-member-bounded-regions.md)、[ADR 0042](0042-attached-slab-validation-and-support-resolution.md)
 - 壁の確定応答の記録と GUI の入力照合は引き継ぐ。MCP 固有の入力世代識別は廃止する。[ADR 0045](0045-wall-committed-response.md)
-- ST-Bridge 取込の配筋通知と OVIKA の鉄筋寸法表現は引き継ぐ。MCP の配筋通知と JSON 表現は廃止する。[ADR 0052](0052-stbridge-rebar-source-and-analysis-boundary.md)、[ADR 0119](0119-standard-rebar-designation.md)
+- OVIKA の鉄筋寸法表現は引き継ぐ。MCP の配筋通知と JSON 表現は廃止する。当時は ST-Bridge 取込の配筋通知を引き継ぎ、後に [ADR 0141](0141-remove-st-bridge.md) で廃止した。[ADR 0052](0052-stbridge-rebar-source-and-analysis-boundary.md)、[ADR 0119](0119-standard-rebar-designation.md)。
 - 保存モデルの数量設定、GUI と CSV の方向別壁筋小計、比較 GUI と共通の固定鋼材数量根拠は引き継ぐ。MCP の数量設定・小計・根拠の応答は廃止する。[ADR 0057](0057-quantity-settings-and-directional-wall-subtotals.md)、[ADR 0095](0095-fixed-steel-quantity-evidence.md)
 - CFT 柱の共通・GUI 検定の座屈長さ条件は引き継ぐ。MCP の軸終局検定の入口は廃止する。[ADR 0113](0113-cft-column-explicit-buckling-length.md)
 - SRC 接合部帯筋を登録する GUI のリビジョン照合と、共通検定結果の構面・未算定理由・伝達の別途確認は引き継ぐ。MCP の構面照会証跡、帯筋の登録・更新・解除、検定応答は廃止する。[ADR 0130](0130-src-joint-hoops-by-plane.md)、[ADR 0131](0131-src-joint-allowable-shear.md)

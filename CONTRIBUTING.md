@@ -69,7 +69,7 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 - `src/` 内の単体テストは、対象モジュールの契約・内部状態を検証する。GUI操作・描画に依存する補助だけをGUI内部に置く。
 - `tests/*.rs` はクレートの公開入口・複数機能を接続する統合テストを置く。テスト本体を別ファイルから読み込む場合も、親の統合テストを実行入口とする。
 - `tests/support/` はモデル構築・操作・通信などのRust/Python補助コードを置く。固定入力ファイルは `tests/fixtures/` に置き、読み込み側で期待結果を検証する。
-- 新しいフォルダを増やさず既存の検証責務を維持するため、`sepika-job/tests/fixtures/` と `sepika-design-jp/tests/fixtures/` のRust補助コードは既存位置で管理する。モデル生成は `*_model.rs`、独立期待値とassertは `*_reference.rs` とし、読み込むSTB・JSON・TSV等と区別する。
+- 新しいフォルダを増やさず既存の検証責務を維持するため、`sepika-job/tests/fixtures/` と `sepika-design-jp/tests/fixtures/` のRust補助コードは既存位置で管理する。モデル生成は `*_model.rs`、独立期待値とassertは `*_reference.rs` とし、読み込むOVIKA・JSON・TSV等と区別する。
 - 管理先は検証対象を所有するクレートで決める。core型だけを使う入力でも、解析・耐力・数量などの仕様を検証するものはその責務側に置く。共有のための製品API・依存・共有クレートは追加しない。
 - 共有入力は一か所で構築し、各利用側のテスト・独立期待値・許容誤差を保持する。共通の期待契約を使う場合も、入力構築とは別ファイルにする。
 
@@ -89,7 +89,8 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 | `sepika-design-jp/tests/fixtures/rc_column_tension_model.rs`・`rc_column_tension_reference.rs` | RC柱の矩形500角・円形D600、全主筋による純引張許容上限と算定範囲外曲げ。独立期待値と検定伝達を検証 | design-jp `tests/rc_column_zero_moment_capacity.rs`、app `src/app/rc_column_boundary_tests.rs`・`src/viewer/check_ratio.rs` |
 | `sepika-core/tests/support/assignment_identity_model.rs` | 割当領域の識別・外部ID。coreのモデル契約を各入口でも維持 | core `model/assignment_identity_tests`、edit/job `tests/assignment_identity.rs`、app `src/app/assignment_identity_tests.rs` |
 | `sepika-core/tests/support/frame_support_model.rs` | 主架構支持の解析表現。coreの物理支持契約を編集・入出力・準備で維持 | core/edit/io/job `tests/frame_support_representation.rs` |
-| `sepika-io/tests/fixtures/h_column_reference.stb` | ST-BridgeのH形鋼柱の鉄骨向き。入出力、表示の断面外形、解析の強弱軸の曲げ応答を検証 | io `tests/stbridge_column_reference.rs`、app `tests/stbridge_column_reference_analysis.rs`・`src/viewer/solid.rs` |
+| `sepika-app/tests/support/h_column_model.rs` | 組立H形鋼柱の断面の向き。表示断面の外形、強弱軸の純曲げ応答、OVIKA保存・読込を検証 | app `tests/h_column_analysis.rs`・`src/viewer/solid.rs` |
+| `sepika-app/tests/fixtures/full_model.ovika` | 4層と塔屋を持つ実建物モデル。解析・検定・表示の回帰とプロジェクト形式の読み書きの性能計測で同じ入力を使う | app `tests/full_model.rs`・`src/viewer/mod.rs`、io `src/ovika.rs` |
 | `sepika-core/tests/support/secondary_materialization_model.rs` | 二次部材の解析要素化。coreの生成契約をジョブ・GUI入口で維持 | core/job `tests/secondary_materialization.rs`、app `src/app/tests.rs` |
 | `sepika-core/tests/support/steel_secondary_post_model.rs` | 鋼製間柱のモデル属性・材料対応。編集・検定・GUIで同じ入力を保持 | edit `src/secondary.rs`、design-jp `src/post.rs`、app `src/app/post_design_tests.rs`、job `tests/secondary_materialization.rs` |
 | `sepika-solver/tests/support/static_analysis_model.rs` | 柱の軸剛性設定と引張専用ブレース反復。solverの静的解析契約を各実行入口で維持 | solver `tests/parallel_batch.rs`、job `src/compute.rs`、app `src/app/actions/linear_static.rs` |
@@ -99,7 +100,6 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 | `sepika-solver/tests/support/wall_side_column.rs` | 共通断面の質量・慣性。solverの解析質量を準備・GUI入口でも検証 | solver `tests/common_section_mass.rs`、job `tests/wall_side_column_entry.rs`、app `src/app/tests.rs` |
 | `sepika-design-jp/tests/fixtures/rc_wall_cracking_model.rs`・`rc_wall_cracking_reference.rs` | RC壁のひび割れ耐力の入力と独立期待契約。design-jpの耐力計算をGUIでも照合 | design-jp `src/joint_wiring/tests.rs`、app `src/app/rc_wall_cracking_tests.rs` |
 | `sepika-app/tests/fixtures/src_ql_contract.json` | SRCの重力参照・材料割当・保存契約。GUI固定入力を時刻歴の簡易表示でも使用 | app `src/app/src_ql_acceptance_tests.rs`・`src/viewer/signed_q0_acceptance_tests.rs` |
-| `sepika-io/tests/fixtures/column_steel_bottom_top.stb`・`column_steel_top_bottom.stb` | 区間別のS柱断面を両記述順で拒否する診断とGUI読込時のモデル保持 | io `tests/stbridge_nonuniform_steel_column.rs`、app `src/app/reference_identity_acceptance_tests.rs` |
 | `sepika-design-jp/tests/fixtures/signed_beam_gravity_model.rs` | RC梁の符号付き重力端反力と検定組合せ。design-jpのせん断需要算定に共通の入力 | app `src/app/signed_q0_acceptance_tests.rs`（viewerからも利用） |
 | `sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs`・`nonnodal_quantity_reference.rs` | 非節点小梁の材料別数量。design-jpの数量計算とassertをGUIから検証 | app `src/app/nonnodal_quantity_acceptance_tests.rs` |
 | `sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs` | H形鋼片持ち柱の軸力・強軸曲げ・弱軸せん断。組合せの未算定と独立した不適合の保持、断面を置き換えた組立Hの局所曲げ・強軸せん断、水平の組立H大梁に置き換えた場合の純強軸曲げを検証。同じ柱断面を用いる時刻歴で、軸力・強軸曲げの成分極値の間に生じる断面単独の不適合を照合 | design-jp `tests/steel_h_column_combined.rs`・`tests/steel_asymmetric_h_column.rs`・`tests/steel_asymmetric_h_girder.rs`・`tests/steel_built_h_web_shear.rs`、job `tests/fixtures/asymmetric_column_model.rs` 経由で `tests/asymmetric_column_time_history.rs`・`src/time_history_check.rs`、app `src/app/shear_area_acceptance_tests.rs` |

@@ -1,5 +1,7 @@
 # ST-Bridgeの柱・大梁の中間節点とオフセット（#1366）
 
+ST-Bridge の入出力・専用処理は [ADR 0141](../adr/0141-remove-st-bridge.md) で廃止しました。この文書の対応範囲と入出力の観測は検証時点の記録です。
+
 2026-11-19、SEPIKA基点 d44411f929ed78b7e04be36d7e11e0e8eec9c0b8。状態🔶。
 柱・大梁とも、公式説明書が定める中間節点の順序・接続と、修正版XSDの最小3点制約を確認した。
 両公開取込は、XSDに適合する直線・折れ線の例でも対象と理由を示して停止した。
@@ -49,7 +51,7 @@ XSDは要素の順序・必須属性・値の型を検証する。`StbNodes` の
 | `StbMemberOffsetList` を柱・大梁の直下、または `StbMembers` 直下に置く | 2例とも不適合 | `StbMemberOffsetList` で停止。前者は親部材IDを報告。後者に前の部材IDを付けない |
 
 適正な位置に置いた中間節点要素の診断には、親 `StbColumn id=Some(11)` または `StbGirder id=Some(21)`、対象タグ、理由「部材中間節点・中間offsetの配置変換は未対応です」が含まれた。
-共通情報のglobal変換属性は先に読み取られる。中間節点列・中間オフセットの内容を処理せず、座標へglobal変換を適用する前に、対象の開始タグで停止した。[公開取込](../../crates/sepika-io/src/stbridge/import/mod.rs)・[開始タグでの診断](../../crates/sepika-io/src/stbridge/import/parser.rs)
+共通情報のglobal変換属性は先に読み取られる。中間節点列・中間オフセットの内容を処理せず、座標へglobal変換を適用する前に、対象の開始タグで停止した。[公開取込](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/crates/sepika-io/src/stbridge/import/mod.rs)・[開始タグでの診断](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/crates/sepika-io/src/stbridge/import/parser.rs)
 
 ## 独立幾何と入力の再構成
 
@@ -86,6 +88,6 @@ XSDは要素の順序・必須属性・値の型を検証する。`StbNodes` の
 | 一次資料 | `curl.exe -fsSL --max-time 30 --output <保存先> <公式URL>`、`Get-FileHash -Algorithm SHA256`。本文と図の確認は PyMuPDF の `get_text()`、`get_pixmap()`。 |
 | XSDと独立幾何 | Python 3.13で `python ../../target/tmp/issue1366-coder/probe.py`。`zipfile` で再取得ZIPから抽出し、`etree.XMLSchema(etree.fromstring(raw[3:]))` を生成。46文書を `schema.validate(etree.fromstring(xml))`、点間距離を `math.dist` で確認。XSD適合28・不適合18で上表に一致。 |
 | 両公開取込 | `cargo test -p sepika-io --test issue1366_probe --locked -- --nocapture`。一時test 1件成功。46入力 × 2入口で成功4観測・理由付き拒否88観測。ローカルに保存した一時testを実行時だけ crates/sepika-io/tests/issue1366_probe.rs に配置。 |
-| 既存回帰 | `cargo test -p sepika-io --test stbridge_placement --locked`。32成功、0失敗、1既存ignored。中間情報の親診断、梁天端基準から材軸への変換、両端の独立オフセット、global変換の既存回帰を含む。[試験ソース](../../crates/sepika-io/tests/stbridge_placement.rs) |
+| 既存回帰 | `cargo test -p sepika-io --test stbridge_placement --locked`。32成功、0失敗、1既存ignored。中間情報の親診断、梁天端基準から材軸への変換、両端の独立オフセット、global変換の既存回帰を含む。[試験ソース](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/crates/sepika-io/tests/stbridge_placement.rs) |
 
 一時入力・スクリプト・ログはローカルの `target/tmp/issue1366-coder/` に保存した。上の座標と条件から入力を生成できる。cargo run -p xtask --locked -- check-docs、追加文書のローカルリンク・アンカー確認と git diff --check も成功。恒久回帰は既存試験を参照し、今回の検証状態は🔶とする。

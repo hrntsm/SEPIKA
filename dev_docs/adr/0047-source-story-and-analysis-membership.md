@@ -1,6 +1,6 @@
 # 原階の明示所属は解析用所属から独立して保存する
 
-Status: accepted
+Status: superseded by ADR-0141
 
 STB の StbStory 属性と明示節点列を `SourceStory` に保存し、準備計算の `Story`・`Node.story` と所有を分ける。STB height は GL から意匠 FL の高さであり、節点 Z・解析所属とは一致しないため、幾何所属で元属性を置き換えない。原階の ID/GUID と節点の標準 ID/GUID は内部配列 ID から分離する。
 

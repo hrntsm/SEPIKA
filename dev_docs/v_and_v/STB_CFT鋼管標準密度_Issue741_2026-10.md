@@ -1,5 +1,7 @@
 # STB CFT鋼管の標準密度（Issue #741）
 
+ST-Bridge の入出力・専用処理は [ADR 0141](../adr/0141-remove-st-bridge.md) で廃止しました。この文書の対応範囲と入出力の観測は検証時点の記録です。
+
 ## 対象と範囲
 
 [Issue #741](https://github.com/hrntsm/SEPIKA/issues/741)の、既知標準鋼材を指定したCFTの鋼管材料解決を対象とする。
