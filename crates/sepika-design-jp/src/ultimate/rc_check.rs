@@ -40,23 +40,25 @@ pub struct UltimateCheck {
     pub kind: MemberKind,
     /// 曲げ終局強度 Mu [N·mm]。RC梁は適用未確認の参考値で、方向と理由は `detail` に示す。
     pub mu: f64,
-    /// 比較用せん断需要 Qmu `[N]`。静的は上限強度倍率·2·Mu/内法、確定総応答は総せん断力の絶対値。
+    /// 比較用せん断需要 Qmu [N]。静的RC柱は上限強度倍率·2·Mu/内法、確定総応答は総せん断力の絶対値。
+    /// 静的RC梁は未算定のため NaN。
     pub qmu: f64,
     /// 選択された [`ShearMethod`] に応じた終局せん断強度 Qsu/Vu `[N]`。
     pub qsu: f64,
     /// 付着割裂による終局せん断耐力 Qbu `[N]`（`include_bond=false` なら 0）。
     pub qbu: f64,
-    /// 強軸のせん断余裕度。静的は max(Qsu−|QL|, 0)/Qmu、確定総応答は Qsu/Qmu。
-    /// Qmu が 0 の場合は無限大。ただし静的で |QL| が Qsu を超える場合は 0。
+    /// 強軸のせん断余裕度。静的RC柱は max(Qsu−|QL|, 0)/Qmu、確定総応答は Qsu/Qmu。
+    /// Qmu が 0 の場合は無限大。ただし静的RC柱で |QL| が Qsu を超える場合は 0。
+    /// 静的RC梁は長期せん断力だけで超過が確定した場合は 0、それ以外は NaN。
     pub shear_margin: f64,
     /// 二軸せん断余裕度。静的では両軸の長期せん断が明示的に 0、確定総応答では両軸の総せん断を使用できる場合に算定。
     pub biaxial_shear_margin: Option<f64>,
     /// 2 軸曲げ余裕度（柱かつ `biaxial_bending=true` のとき Some）。
     /// `1/((Mmx/Mux)^2+(Mmy/Muy)^2)^(1/2)`。設計用曲げ需要が 0 なら `f64::INFINITY`。
     pub biaxial_bending_margin: Option<f64>,
-    /// 付着余裕度。静的は max(Qbu−|QL|, 0)/Qmu、確定総応答は Qbu/Qmu。
-    /// `include_bond=false` または Qmu が 0 の場合は無限大。
-    /// 付着が有効かつ静的で、Qmu が 0 でも |QL| が Qbu を超える場合は 0。
+    /// 付着余裕度。静的RC柱は max(Qbu−|QL|, 0)/Qmu、確定総応答は Qbu/Qmu。
+    /// これらでは、付着無効または Qmu が 0 なら無限大。ただし静的RC柱で付着が有効かつ |QL| が Qbu を超える場合は 0。
+    /// 静的RC梁は付着が有効で長期せん断力だけで超過が確定した場合は 0、それ以外は NaN。
     pub bond_margin: f64,
     /// 軸終局耐力（柱のみ Some）。
     pub axial: Option<RcAxialUltimate>,
@@ -219,7 +221,7 @@ fn beam_mu_direction_detail(p: &RcBarProps, location: &str) -> String {
     }
     let pt = 100.0 * (p.at / p.b_dir) / p.d_eff;
     let ratio = if pt >= 2.0 {
-        "、通常域の目安（2%未満）を外れます"
+        "、表示定義で2%以上です"
     } else {
         ""
     };

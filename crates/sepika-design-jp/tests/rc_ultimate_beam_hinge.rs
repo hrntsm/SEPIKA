@@ -295,6 +295,35 @@ fn two_percent_tension_ratio_is_reported_without_enabling_static_hinge_demand() 
 }
 
 #[test]
+fn narrow_compression_width_and_unconfirmed_materials_are_reported_without_hinge_demand() {
+    let mut model = fully_fixed_beam();
+    model.sections[0] = beam_input::section(180.0, 1000.0, 19.0, &[2], &[2]);
+    let demand = MemberDemand {
+        q_long: Some(0.0),
+        static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
+        ..Default::default()
+    };
+    let result = verify(&model, demand);
+    assert!(result.mu.is_finite());
+    assert!(result.detail.contains("圧縮幅/有効せい=0.191"));
+    assert!(result.detail.contains("圧縮幅の適否"));
+    assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
+
+    let mut unverified_main = main_material("SD345");
+    unverified_main.fy = Some(350.0);
+    model.materials.push(unverified_main);
+    model.sections[0].rebar_material = Some(MaterialId(2));
+    model.materials[0].concrete_class = sepika_core::units::ConcreteClass::UserDefined;
+    let result = verify(&model, demand);
+    assert!(result.mu.is_finite());
+    assert!(result
+        .detail
+        .contains("材料名とfyから原典の通常域に該当する主筋材種を確認できません"));
+    assert!(result.detail.contains("普通コンクリートを確認できません"));
+    assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
+}
+
+#[test]
 fn asymmetric_beam_returns_directional_reference_mu_and_withholds_static_hinge_demand() {
     let mut model = fully_fixed_beam();
     model.materials[0].fc = Some(18.0);
@@ -433,7 +462,18 @@ fn static_shear_can_fail_on_gravity_response_without_confirming_hinge_demand() {
         static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
         ..Default::default()
     };
-    for (ql, fails) in [(609_100.0, false), (610_000.0, true)] {
+    let capacity = collect_rc_ultimate_checks(
+        &model,
+        &[(
+            ElemId(0),
+            MemberDemand::from_pushover(0.0, -10e6, 0.0, 0.0, 0.0, 0.0),
+        )],
+        &opts,
+    )
+    .unwrap()[0]
+        .qsu;
+    assert!(capacity.is_finite() && capacity > 0.0);
+    for (ql, fails) in [(capacity, false), (capacity.next_up(), true)] {
         let result = collect_rc_ultimate_checks(
             &model,
             &[(
