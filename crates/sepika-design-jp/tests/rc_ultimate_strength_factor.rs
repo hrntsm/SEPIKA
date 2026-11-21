@@ -162,6 +162,22 @@ fn static_column_combines_margins_beyond_the_single_axis_range() {
 }
 
 #[test]
+fn static_column_rounds_to_the_largest_finite_biaxial_margin_before_overflow() {
+    let mut model = static_column(4, 4);
+    model.nodes[1].coord[2] = 2900.42;
+    // 公開検定の需要・耐力からの独立算術では、この倍率とその一つ下が丸め境界を挟む。
+    let factor = f64::from_bits(0x0008_238d_2f77_b89a);
+    for (factor, expected) in [(factor, f64::MAX), (factor.next_down(), f64::INFINITY)] {
+        let check = column_check(&model, factor, 150_000.0, 0.0, true);
+        assert!(check.qmu > 0.0 && check.qmu.is_finite());
+        assert!(check.qsu > 0.0 && check.qsu.is_finite());
+        assert_eq!(check.shear_margin, f64::INFINITY);
+        assert_eq!(check.biaxial_shear_margin, Some(expected));
+        assert!(check.ok && check.unchecked_reason.is_none());
+    }
+}
+
+#[test]
 fn static_column_distinguishes_infinite_and_normal_biaxial_margins() {
     let model = static_column(4, 4);
     let check = column_check(&model, 1.0, 150_000.0, 0.0, true);

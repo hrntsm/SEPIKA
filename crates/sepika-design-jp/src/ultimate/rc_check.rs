@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use num_rational::BigRational;
-use num_traits::ToPrimitive;
+use num_traits::{One, ToPrimitive, Zero};
 
 use crate::material_strength::{main_rebar_grade, shear_rebar_category_issue};
 use crate::member_design_check::combine_incomplete_reasons;
@@ -179,7 +179,31 @@ fn static_biaxial_margin(
     };
     let strong_ratio = scaled_demand_ratio(strong_demand_n, strong_capacity_n, strong_margin);
     let weak_ratio = scaled_demand_ratio(weak_demand_n, weak_capacity_n, weak_margin);
-    scale / strong_ratio.hypot(weak_ratio)
+    let norm = strong_ratio.hypot(weak_ratio);
+    let estimate = scale / norm;
+    if min.is_infinite() && (norm - 0.5).abs() <= 4.0 * f64::EPSILON {
+        // 比とノルムの丸めが重なると、有限値と無限大の境界を越えうる。
+        // 上側の丸め境界 MAX + 半 ULP に対応するノルムはほぼ 0.5。平方根を取ると
+        // また丸めが入るため、二乗のまま境界と比較する。
+        let squared_ratio = |demand_n: f64, capacity_n: f64| {
+            if capacity_n > 0.0 && capacity_n.is_finite() {
+                let demand = BigRational::from_float(demand_n).unwrap();
+                let capacity = BigRational::from_float(capacity_n).unwrap();
+                (demand / capacity).pow(2)
+            } else {
+                BigRational::zero()
+            }
+        };
+        let boundary = BigRational::from_float(f64::MAX).unwrap()
+            + BigRational::from_float(2.0_f64.powi(970)).unwrap();
+        let sum = squared_ratio(strong_demand_n, strong_capacity_n)
+            + squared_ratio(weak_demand_n, weak_capacity_n);
+        if sum * boundary.pow(2) <= BigRational::one() {
+            return f64::INFINITY;
+        }
+        return estimate.min(f64::MAX);
+    }
+    estimate
 }
 
 fn unchecked_member(elem: ElemId, kind: MemberKind, reason: &str) -> UltimateCheck {
