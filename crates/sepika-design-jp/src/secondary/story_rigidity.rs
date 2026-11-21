@@ -16,7 +16,7 @@ use super::eccentricity_analysis::validate_rigidity_column_axes;
 use super::story_columns::story_layer;
 
 const FLOOR_DOFS: [Dof; 3] = [Dof::Ux, Dof::Uy, Dof::Rz];
-const ROUND_OFF: f64 = 512.0 * f64::EPSILON;
+pub(super) const ROUND_OFF: f64 = 512.0 * f64::EPSILON;
 
 /// 対角項から正規化した方向間連成が、丸め誤差の判定範囲を超える場合は理由を返す。
 pub fn coupling_reason(story: StoryId, rigidity: RigidFloorStoryRigidity) -> Option<String> {
