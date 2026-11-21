@@ -315,7 +315,7 @@ struct HingeViewKey {
     rigid_zone: Option<RigidZone>,
     section: Option<SectionFingerprint>,
     material: Option<MaterialFingerprint>,
-    rebar_material: Option<MaterialFingerprint>,
+    rebar_material: Option<(MaterialFingerprint, Option<String>, bool)>,
     steel_material: Option<MaterialFingerprint>,
     /// 材端集中ばねの履歴則。それ以外は `None`。
     hysteresis: Option<HysteresisModel>,
@@ -445,8 +445,20 @@ fn hinge_view_key(
         section: section.map(SectionFingerprint::from),
         material: model.element_material(elem).map(MaterialFingerprint::from),
         rebar_material: model
-            .element_rebar_material(elem)
-            .map(MaterialFingerprint::from),
+            .element_rebar_material_with_grade(elem)
+            .map(|(material, grade)| (material, grade, true))
+            .or_else(|| {
+                model
+                    .element_rebar_material_input(elem)
+                    .map(|(material, grade)| (material, grade, false))
+            })
+            .map(|(material, grade, resolved)| {
+                (
+                    MaterialFingerprint::from(material),
+                    grade.map(str::to_owned),
+                    resolved,
+                )
+            }),
         steel_material: model
             .element_steel_material(elem)
             .map(MaterialFingerprint::from),

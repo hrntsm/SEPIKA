@@ -36,10 +36,12 @@ fn member_moment_thresholds(elem: &ElementData, model: &Model) -> HingeThreshold
         return HingeThreshold { mc: 0.0, my: 0.0 };
     };
     let mat = model.element_material(elem);
-    let rebar_mat = model.element_rebar_material(elem);
+    let rebar_mat = model.element_rebar_material_with_grade(elem);
     let factors = FlexuralStrengthFactors {
         steel: mat.map(material_strength_factor_steel).unwrap_or(1.0),
-        rebar: rebar_mat.map(material_strength_factor_rebar).unwrap_or(1.0),
+        rebar: rebar_mat
+            .map(|(mat, grade)| material_strength_factor_rebar(mat, grade))
+            .unwrap_or(1.0),
     };
     let ze = section_elastic_modulus(sec);
     let kind = sepika_core::structure_kind::structure_kind_of(Some(sec), mat.map(|m| m.category));

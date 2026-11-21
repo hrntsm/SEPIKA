@@ -40,7 +40,7 @@ pub(super) fn build_fiber(
 /// それ以外（複合断面・形状不明）は σy·Z弾性でフォールバックする。
 fn flexural_yield_moment(data: &ElementData, model: &Model, basis: StrengthBasis) -> f64 {
     let mat = model.element_material(data);
-    let rebar_mat = model.element_rebar_material(data);
+    let rebar_mat = model.element_rebar_material_with_grade(data);
     sepika_core::flexural_strength::member_flexural_yield_moment(
         data,
         model,

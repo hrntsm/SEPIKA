@@ -184,17 +184,28 @@ fn wall_rebar_strength(
     } else {
         "横筋材料"
     };
-    let mat = if vertical {
-        model.element_rebar_material(data)
+    let material_strength_vertical =
+        vertical && basis == crate::factory::StrengthBasis::MaterialStrength;
+    let (mat, grade) = if vertical {
+        model.element_rebar_material_with_grade(data)
     } else {
-        model.element_shear_rebar_material(data)
+        model
+            .element_shear_rebar_material(data)
+            .map(|mat| (mat, None))
     }
     .ok_or_else(|| {
-        wall_input_error(
-            data,
-            role,
-            "材料参照が未設定・破損、または元部位の方向を解決できません",
-        )
+        let specific_issue = if material_strength_vertical {
+            model
+                .element_rebar_material_input(data)
+                .and_then(|(mat, grade)| {
+                    sepika_core::material_grade::rebar_material_strength_issue(mat, grade)
+                })
+        } else {
+            None
+        };
+        let reason = specific_issue
+            .unwrap_or_else(|| "材料参照が未設定・破損、または元部位の方向を解決できません".into());
+        wall_input_error(data, role, reason)
     })?;
     if model
         .materials
@@ -209,6 +220,7 @@ fn wall_rebar_strength(
     }
     let supported = if vertical {
         sepika_core::standard_material::rebar_grade_strength(&mat.name).is_some()
+            || material_strength_vertical && sepika_core::material_grade::is_jis_sd490(mat, grade)
     } else {
         sepika_core::material_grade::is_supported_shear_rebar_grade(&mat.name)
     };
@@ -235,8 +247,14 @@ fn wall_rebar_strength(
                 ),
             )
         })?;
+    if material_strength_vertical {
+        if let Some(reason) = sepika_core::material_grade::rebar_material_strength_issue(mat, grade)
+        {
+            return Err(wall_input_error(data, role, reason));
+        }
+    }
     let factor = if vertical {
-        basis.rebar_factor(Some(mat))
+        basis.rebar_factor(Some((mat, grade)))
     } else {
         1.0
     };
@@ -3327,12 +3345,15 @@ mod capacity_issue_tests {
     #[test]
     fn vertical_fibers_use_explicit_area_fy_and_own_strength_factor() {
         let (mut model, wall) = directional_fixture();
-        for (factor, expected_fy, expected_yield_force) in [
-            (Some(1.0), 345.0, 1_656_000.0),
-            (Some(1.2), 414.0, 1_987_200.0),
-            (None, 379.5, 1_821_600.0),
+        for (name, fy, factor, expected_fy, expected_yield_force) in [
+            ("SD345", 345.0, Some(1.0), 345.0, 1_656_000.0),
+            ("SD345", 345.0, Some(1.2), 414.0, 1_987_200.0),
+            ("SD345", 345.0, None, 379.5, 1_821_600.0),
+            ("SD490", 490.0, None, 490.0, 2_352_000.0),
         ] {
             model.materials[0].strength_factor = Some(8.0);
+            model.materials[1].name = name.into();
+            model.materials[1].fy = Some(fy);
             model.materials[1].strength_factor = factor;
             let element = WallElement::try_new(&wall, &model)
                 .unwrap()
@@ -3485,6 +3506,90 @@ mod capacity_issue_tests {
         assert_ne!(first.column.iz, changed_vertical.column.iz);
         assert_ne!(first.shear_k0, changed_vertical.shear_k0);
     }
+    #[test]
+    fn material_strength_sd490_input_diagnostic_applies_to_wall_vertical_rebar() {
+        use crate::factory::StrengthBasis;
+
+        let (mut model, wall) = directional_fixture();
+        for material in &mut model.materials[1..=2] {
+            material.name = "SD490".into();
+            material.fy = Some(490.0);
+            material.strength_factor = Some(1.1);
+        }
+        let reason =
+            WallElement::wall_shear_capacity_issue(&wall, &model, StrengthBasis::MaterialStrength)
+                .unwrap();
+        assert!(reason.contains("縦筋材料"), "{reason}");
+        assert!(reason.contains("SD490"), "{reason}");
+        assert!(
+            WallElement::wall_shear_capacity_issue(&wall, &model, StrengthBasis::Nominal).is_none()
+        );
+
+        model.materials[1].strength_factor = None;
+        assert!(WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            StrengthBasis::MaterialStrength,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn wall_vertical_rebar_adopts_stb_sd490_grade_after_material_rename() {
+        use crate::factory::StrengthBasis;
+        use sepika_core::model::{StbGradeMaterial, StbRebarStrength, StbSectionStrength};
+
+        let (mut model, wall) = directional_fixture();
+        let basis = StrengthBasis::MaterialStrength;
+        model.materials[1].name = "壁縦筋A".into();
+        model.materials[1].fy = Some(490.0);
+        model.materials[1].strength_factor = None;
+        model.stb_strengths.materials = vec![StbGradeMaterial {
+            grade: "SD490".into(),
+            material: MaterialId(1),
+        }];
+        model.stb_strengths.sections = vec![StbSectionStrength {
+            built_box: None,
+            native_rebar: false,
+            rebar: None,
+            section: wall.section.unwrap(),
+            concrete: None,
+            native_material: None,
+            reinforcement: vec![StbRebarStrength {
+                element: "StbSecBar_Wall_RC_Vertical".into(),
+                part: "vertical".into(),
+                position: None,
+                native_material: None,
+                diameter: None,
+                strength: Some("SD490".into()),
+            }],
+            steel: Vec::new(),
+        }];
+
+        assert!(WallElement::wall_shear_capacity_issue(&wall, &model, basis).is_none());
+        assert_eq!(
+            wall_rebar_strength(&wall, &model, true, basis).unwrap(),
+            490.0
+        );
+
+        for fy in [Some(539.0), None, Some(0.0)] {
+            model.materials[1].fy = fy;
+            let reason = WallElement::wall_shear_capacity_issue(&wall, &model, basis).unwrap();
+            assert!(
+                reason.contains("壁縦筋A")
+                    && reason.contains("SD490")
+                    && reason.contains("490 N/mm²"),
+                "{reason}"
+            );
+        }
+
+        model.materials[1].name = "SD345".into();
+        model.materials[1].fy = Some(345.0);
+        model.stb_strengths.sections[0].reinforcement[0].native_material = Some(MaterialId(1));
+        let fy = wall_rebar_strength(&wall, &model, true, basis).unwrap();
+        assert!((fy - 379.5).abs() < 1e-10);
+    }
+
     #[test]
     fn vertical_inputs_reject_invalid_strength_ratio_category_and_factor() {
         let (mut model, wall) = directional_fixture();

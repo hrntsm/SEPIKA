@@ -23,6 +23,7 @@ mod wall_opening;
 pub use hinge_view::{
     build_hinge_view, resolves_to_concentrated_spring, AnalysisHingeModel, HingeView,
 };
+pub(crate) use input_check::member_rebar_material_strength_issue;
 pub use input_check::{
     elastic_stiffness_input_issue, ensure_nonlinear_input, ensure_nonlinear_input_for_kind,
     ensure_nonlinear_input_with_basis, ensure_rc_beam_reference_loads,
@@ -206,11 +207,16 @@ impl StrengthBasis {
     }
 
     /// RC 主筋文脈の材料強度割増係数。
-    pub(crate) fn rebar_factor(self, mat: Option<&sepika_core::model::Material>) -> f64 {
+    pub(crate) fn rebar_factor(
+        self,
+        rebar: Option<(&sepika_core::model::Material, Option<&str>)>,
+    ) -> f64 {
         match self {
             StrengthBasis::Nominal => 1.0,
-            StrengthBasis::MaterialStrength => mat
-                .map(sepika_core::material_grade::material_strength_factor_rebar)
+            StrengthBasis::MaterialStrength => rebar
+                .map(|(mat, grade)| {
+                    sepika_core::material_grade::material_strength_factor_rebar(mat, grade)
+                })
                 .unwrap_or(1.0),
         }
     }
@@ -249,6 +255,11 @@ pub fn build_nonlinear_behavior(
         ElementKind::Beam => {
             let inner: Box<dyn ElementBehavior> = match resolve_force_regime(data, model) {
                 ResolvedRegime::ConcentratedSpring => {
+                    if let Some(issue) =
+                        input_check::member_rebar_material_strength_issue(data, model, basis)
+                    {
+                        panic!("{issue}");
+                    }
                     if matches!(
                         model
                             .element_section(data)

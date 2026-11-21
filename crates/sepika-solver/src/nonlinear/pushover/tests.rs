@@ -1446,7 +1446,7 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         1.0,
         SecMaterials {
             material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: Some(&steel_mat),
         },
@@ -1458,7 +1458,7 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         1.0,
         SecMaterials {
             material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: Some(&steel_mat),
         },
@@ -1479,7 +1479,7 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         1.0,
         SecMaterials {
             material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: Some(&steel_mat),
         },
@@ -1491,7 +1491,7 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         1.0,
         SecMaterials {
             material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: Some(&steel_mat),
         },
@@ -1514,7 +1514,7 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         1.0e6,
         SecMaterials {
             material: Some(&mat_with_fy),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: Some(&steel_mat),
         },
@@ -1548,7 +1548,7 @@ fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
         1.0,
         SecMaterials {
             material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: Some(&steel_mat),
         },
@@ -1636,7 +1636,7 @@ fn test_compute_shear_yield_qy_real_rebar_beam_uses_both_directions_and_steel_fa
     };
     let mats = SecMaterials {
         material: Some(&concrete),
-        rebar_mat: Some(&rebar_mat),
+        rebar_mat: Some((&rebar_mat, None)),
         shear_mat: Some(&shear_mat),
         steel_mat: Some(&steel_mat),
     };
@@ -1686,7 +1686,7 @@ fn test_compute_shear_yield_qy_real_rebar_beam_uses_unfavorable_top_or_bottom() 
     };
     let mats = SecMaterials {
         material: Some(&concrete),
-        rebar_mat: Some(&rebar_mat),
+        rebar_mat: Some((&rebar_mat, None)),
         shear_mat: Some(&shear_mat),
         steel_mat: None,
     };
@@ -1798,7 +1798,7 @@ fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
         sec.as_z,
         SecMaterials {
             material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: None,
         },
@@ -1829,7 +1829,7 @@ fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
         sec.as_y,
         SecMaterials {
             material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
+            rebar_mat: Some((&rebar_mat, None)),
             shear_mat: Some(&shear_mat),
             steel_mat: None,
         },
@@ -1904,7 +1904,7 @@ fn test_section_rebar_materials_are_reflected_in_capacities() {
             sec.as_z,
             SecMaterials {
                 material: Some(&mat),
-                rebar_mat: Some(&sd345),
+                rebar_mat: Some((&sd345, None)),
                 shear_mat: Some(shear_mat),
                 steel_mat: None,
             },
@@ -2129,8 +2129,7 @@ fn test_compute_shear_yield_thresholds_rc_rect_uses_rigid_zone_reduced_clear_spa
     let expected_clear_span = 2400.0;
 
     // y方向（強軸・X 方向最外段。クロス変換で局所 y が強軸側）: RcArakawa を採用し、
-    // h0=2400 での rc_qsu_simple 手計算に一致。σy は主筋の材料強度係数（一律1.1）を
-    // 乗じた 345×1.1（保有水平耐力計算専用モジュールのため無条件で適用）。
+    // h0=2400、SD345 の σy=345×1.1 とした計算と照合する。
     let edge_y = rebar.edge_steel(sepika_core::rc_rebar_geom::RectEdge::Top, b, d);
     let qsu_y_handcalc = rc_qsu_simple(&RcCapacityInput {
         b,
@@ -2599,7 +2598,7 @@ fn steel_grade_recognition_agrees_in_factory_hinge_and_shear_consumers() {
     }
 }
 
-/// RC 矩形断面 + 配筋情報を持つ片持ち柱モデル（fy 未設定＝既定345）を作る。
+/// RC 矩形断面と SD345 の主筋を持つ片持ち柱モデル。
 fn rc_hinge_model() -> (
     Model,
     sepika_core::section_shape::RcRectColumnRebar,
@@ -2626,6 +2625,7 @@ fn rc_hinge_model() -> (
         rebar: rebar.clone(),
     };
     let mut sec = shape.to_section(SectionId(0), "RC-400x600".into());
+    sec.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     sec.material = Some(MaterialId(0));
     sec.rebar_material = Some(MaterialId(1));
     sec.shear_rebar_material = Some(MaterialId(2));
@@ -2694,39 +2694,286 @@ fn rc_hinge_model() -> (
         }],
         sections: vec![sec],
         materials: vec![mat, rebar_mat, shear_mat],
-        ..Default::default()
+        ..single_column_model(235.0, 1_000_000.0)
     };
     (model, rebar, b, d)
 }
 
-/// RC 主筋文脈: fy 未設定（既定 SD345=345）の RC 矩形で、`compute_hinge_thresholds`
-/// の My が主筋の材料強度係数（一律1.1）を乗じた σy=345×1.1 の
-/// `rc_mu_simple` 相当になることを確認する。
-/// 矩形柱は材端集中ばねと同じ強軸に一致する。
 #[test]
-fn test_compute_hinge_thresholds_rc_rebar_uses_material_strength_factor() {
-    let (model, rebar, b, d) = rc_hinge_model();
-    let thresholds = compute_hinge_thresholds(&model);
-
+fn rc_rebar_strength_in_pushover_capacity_and_yield_thresholds() {
+    let (mut model, rebar, b, d) = rc_hinge_model();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let run = |model: &Model| pushover_analysis(model, &dofmap, &reducer, SeismicDir::X, 40, 60.0);
     let edge = rebar.edge_steel(sepika_core::rc_rebar_geom::RectEdge::Top, b, d);
-    let expected_my = rc_mu_simple(&RcCapacityInput {
-        b: 1.0,
-        d,
-        at: edge.area_mm2,
-        d_eff: edge.effective_depth_mm,
-        sigma_y: 345.0 * 1.1,
-        fc: 24.0,
-        pw: 0.0,
-        sigma_wy: 0.0,
-        clear_span: 1.0,
-        sigma_0: 0.0,
+
+    for (name, fy, factor, expected_fy) in [
+        ("SD490", 490.0, None, 490.0),
+        (" SD490 ", 490.0, Some(1.0), 490.0),
+        ("SD345", 345.0, None, 379.5),
+        ("SD345", 345.0, Some(1.05), 362.25),
+    ] {
+        model.materials[1].name = name.into();
+        model.materials[1].fy = Some(fy);
+        model.materials[1].strength_factor = factor;
+
+        let expected_my = 0.9 * edge.area_mm2 * expected_fy * edge.effective_depth_mm;
+        let result = run(&model).unwrap();
+        assert!(result.qu > 0.0);
+        if name.trim() == "SD490" {
+            let mut reference = model.clone();
+            reference.materials[0].strength_factor = Some(1.0);
+            reference.materials[1].name = "比較用鉄筋".into();
+            reference.materials[1].fy = Some(490.0);
+            reference.materials[1].strength_factor = Some(1.0);
+            let reference_result = run(&reference).unwrap();
+            assert!(
+                (result.qu - reference_result.qu).abs() < 1e-6,
+                "SD490: {}, 490 N/mm² の比較材: {}",
+                result.qu,
+                reference_result.qu,
+            );
+            use sepika_core::model::AnalysisKind;
+            use sepika_element::factory::{build_hinge_view, AnalysisHingeModel, StrengthBasis};
+
+            let view = build_hinge_view(
+                &model.elements[0],
+                &model,
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+                0.0,
+                8,
+                8,
+            )
+            .unwrap();
+            let n_tens = view.mn_surface.unwrap().n_tens;
+            let expected_n_tens = rebar.total_main_area() * 490.0;
+            assert!((n_tens - expected_n_tens).abs() < 1e-6);
+
+            let mut concentrated = model.elements[0].clone();
+            concentrated.kind = ElementKind::Beam;
+            concentrated.force_regime = ForceRegime::UniaxialBendingShear;
+            let view = build_hinge_view(
+                &concentrated,
+                &model,
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+                0.0,
+                8,
+                8,
+            )
+            .unwrap();
+            assert_eq!(view.model, AnalysisHingeModel::ConcentratedSpring);
+            let backbone = view.backbone.unwrap();
+            assert!((backbone[2][1] - expected_my).abs() < 1e-6);
+
+            reference.materials[1].fy = Some(539.0);
+            let overestimated = run(&reference).unwrap();
+            assert!(
+                overestimated.qu > result.qu * 1.02,
+                "490 N/mm²: {}, 539 N/mm²: {}",
+                result.qu,
+                overestimated.qu,
+            );
+        }
+
+        let my = compute_hinge_thresholds(&model)[0].my;
+        assert!((my - expected_my).abs() < 1e-6, "{name} {factor:?}");
+        let shear = &compute_shear_yield_thresholds(&model).unwrap()[0];
+        let DirThreshold::RcArakawa { input, .. } = &shear.y else {
+            panic!("RC矩形柱のせん断耐力を算定できません");
+        };
+        assert!((input.sigma_y - expected_fy).abs() < 1e-10);
+        assert_eq!(input.sigma_wy, 295.0);
+    }
+}
+
+#[test]
+fn pushover_uses_stb_main_rebar_grade_independent_of_display_name() {
+    use sepika_core::model::{
+        DiameterStrength, StbCommonStrength, StbGradeMaterial, StbRebarStrength, StbSectionStrength,
+    };
+
+    let (mut model, rebar, b, d) = rc_hinge_model();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let run = |model: &Model| pushover_analysis(model, &dofmap, &reducer, SeismicDir::X, 40, 60.0);
+    let edge = rebar.edge_steel(sepika_core::rc_rebar_geom::RectEdge::Top, b, d);
+
+    model.materials[1].name = "SD490".into();
+    model.materials[1].fy = Some(490.0);
+    let expected_qu = run(&model).unwrap().qu;
+
+    model.materials[1].name = "主筋A".into();
+    model.materials.push(Material {
+        id: MaterialId(3),
+        name: "SD345".into(),
+        fy: Some(345.0),
+        ..model.materials[1].clone()
     });
-    assert!(
-        (thresholds[0].my - expected_my).abs() < 1e-6,
-        "my={} expected={}",
-        thresholds[0].my,
-        expected_my
-    );
+    model.stb_strengths.materials = vec![
+        StbGradeMaterial {
+            grade: "SD490".into(),
+            material: MaterialId(1),
+        },
+        StbGradeMaterial {
+            grade: "SD345".into(),
+            material: MaterialId(3),
+        },
+    ];
+    model.stb_strengths.common = Some(StbCommonStrength {
+        project_name: String::new(),
+        app_name: String::new(),
+        app_version: String::new(),
+        strength_concrete: None,
+        reinforcement: vec![DiameterStrength {
+            diameter: "D25".into(),
+            strength: "SD490".into(),
+        }],
+    });
+    model.stb_strengths.sections = vec![StbSectionStrength {
+        built_box: None,
+        native_rebar: false,
+        rebar: None,
+        section: SectionId(0),
+        concrete: None,
+        native_material: None,
+        reinforcement: vec![StbRebarStrength {
+            element: "StbSecBar_Column_RC_Main".into(),
+            part: "main".into(),
+            position: None,
+            native_material: None,
+            diameter: Some("D25".into()),
+            strength: Some("SD490".into()),
+        }],
+        steel: Vec::new(),
+    }];
+
+    for grade in [Some("SD490"), None] {
+        model.stb_strengths.sections[0].reinforcement[0].strength = grade.map(str::to_owned);
+        assert!((run(&model).unwrap().qu - expected_qu).abs() < 1e-6);
+        let my = compute_hinge_thresholds(&model)[0].my;
+        assert!((my - 0.9 * edge.area_mm2 * 490.0 * edge.effective_depth_mm).abs() < 1e-6);
+        let thresholds = compute_shear_yield_thresholds(&model).unwrap();
+        let DirThreshold::RcArakawa { input, .. } = &thresholds[0].y else {
+            panic!("RC矩形柱のせん断耐力を算定できません");
+        };
+        assert_eq!(input.sigma_y, 490.0);
+        for fy in [Some(510.0), None, Some(0.0)] {
+            model.materials[1].fy = fy;
+            let message = run(&model).expect_err("ST-Bridgeの標準材種の入力不備を診断する");
+            assert!(
+                message.contains("主筋A")
+                    && message.contains("SD490")
+                    && message.contains("490 N/mm²"),
+                "{message}"
+            );
+            if fy != Some(510.0) {
+                let prepared = crate::statics::analysis::Analysis::prepare(&model)
+                    .err()
+                    .expect("通常入口の前処理で未設定または不正なFyを診断する")
+                    .to_string();
+                assert!(
+                    prepared.contains("主筋A") && prepared.contains("元材種 SD490"),
+                    "{prepared}"
+                );
+            }
+        }
+        model.materials[1].fy = Some(490.0);
+    }
+
+    for (grade, native, display_name) in [
+        ("SD345", None, "SD490"),
+        ("SD490", Some(MaterialId(3)), "別材料"),
+    ] {
+        model.materials[3].name = display_name.into();
+        let input = &mut model.stb_strengths.sections[0].reinforcement[0];
+        input.strength = Some(grade.into());
+        input.native_material = native;
+        assert!(run(&model).is_ok());
+        let thresholds = compute_shear_yield_thresholds(&model).unwrap();
+        let DirThreshold::RcArakawa { input, .. } = &thresholds[0].y else {
+            panic!("RC矩形柱のせん断耐力を算定できません");
+        };
+        assert!((input.sigma_y - 379.5).abs() < 1e-10);
+    }
+
+    model.materials[3].name = "SD490".into();
+    for fy in [None, Some(-1.0)] {
+        model.materials[3].fy = fy;
+        let message = run(&model).expect_err("明示native SD490の入力不備を診断する");
+        assert!(
+            message.contains("材料 ID 3")
+                && message.contains("SD490")
+                && message.contains("490 N/mm²"),
+            "{message}"
+        );
+        let prepared = crate::statics::analysis::Analysis::prepare(&model)
+            .err()
+            .expect("通常入口の前処理で明示native SD490のFyを診断する")
+            .to_string();
+        assert!(
+            prepared.contains("材料 ID 3") && prepared.contains("SD490"),
+            "{prepared}"
+        );
+    }
+}
+
+#[test]
+fn pushover_and_hinge_view_reject_inconsistent_sd490_main_rebar_input() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::factory::{build_hinge_view, StrengthBasis};
+
+    let (mut model, _, _, _) = rc_hinge_model();
+    model.materials[1].name = "SD490".into();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+
+    for (fy, factor) in [
+        (Some(490.0), Some(1.1)),
+        (Some(490.0), Some(0.95)),
+        (Some(539.0), Some(1.0)),
+        (Some(460.0), None),
+        (None, None),
+    ] {
+        model.materials[1].fy = fy;
+        model.materials[1].strength_factor = factor;
+        let diagnostic = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 40, 0.0)
+            .expect_err("SD490の材料入力不備を診断する");
+        assert!(diagnostic.contains("部材 ID 0 の主筋"), "{diagnostic}");
+        assert!(diagnostic.contains("SD490"), "{diagnostic}");
+        assert!(diagnostic.contains("490 N/mm²"), "{diagnostic}");
+        let view = build_hinge_view(
+            &model.elements[0],
+            &model,
+            StrengthBasis::MaterialStrength,
+            AnalysisKind::Incremental,
+            0.0,
+            8,
+            8,
+        )
+        .unwrap();
+        assert!(view.backbone.is_none() && view.mn_surface.is_none());
+        assert_eq!(
+            view.unavailability_reason.as_deref(),
+            Some(diagnostic.as_str())
+        );
+    }
+
+    model.materials[1].fy = Some(500.0);
+    model.materials[1].strength_factor = Some(1.1);
+    assert!(build_hinge_view(
+        &model.elements[0],
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::TimeHistory,
+        0.0,
+        8,
+        8,
+    )
+    .unwrap()
+    .mn_surface
+    .is_some());
 }
 
 /// 変位制御フェーズが実際に目標変位まで押し切り、荷重制御（λ=1＝C0=0.2 級）を

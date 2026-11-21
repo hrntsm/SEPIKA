@@ -209,7 +209,8 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         ui.add(egui::TextEdit::singleline(&mut draft[6]).desired_width(50.0))
             .on_hover_text(
                 "保有水平耐力計算（増分解析）の材料強度割増係数。\
-                 空欄=自動（鋼材1.1、590N級1.05、RC主筋1.1）",
+                 空欄=自動（鋼材1.1、590N級1.05、一般のRC主筋1.1）。\
+                 SD490を主筋・壁縦筋に用いる場合はFy=490 N/mm²、割増は空欄または1.0。",
             );
         let parsed = parse_material_draft(&draft);
         if let Err(reason) = &parsed {
@@ -302,7 +303,8 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
             Col::num("Fy"),
             Col::num("割増").hover(
                 "保有水平耐力計算（増分解析）の材料強度割増係数。\
-                 空欄=自動（鋼材1.1、590N級1.05、RC主筋1.1）",
+                 空欄=自動（鋼材1.1、590N級1.05、一般のRC主筋1.1）。\
+                 SD490を主筋・壁縦筋に用いる場合はFy=490 N/mm²、割増は空欄または1.0。",
             ),
             Col::actions(),
         ],

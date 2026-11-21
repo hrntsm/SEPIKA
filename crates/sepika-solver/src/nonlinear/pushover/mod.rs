@@ -48,7 +48,7 @@ use mechanism::{compute_static_indeterminacy, determine_mechanism};
 #[cfg(test)]
 use sepika_core::model::{Model, RigidZone};
 #[cfg(test)]
-use sepika_core::rc_capacity::{rc_mu_simple, rc_qsu_simple, RcCapacityInput};
+use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
 #[cfg(test)]
 use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
 #[cfg(test)]

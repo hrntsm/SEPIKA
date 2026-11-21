@@ -11,6 +11,84 @@ use sepika_load::story_gen::{
 #[path = "../../sepika-solver/tests/support/rc_wall_side_column_model.rs"]
 mod rc_wall_side_column_model;
 
+#[test]
+fn preparation_distinguishes_incremental_sd490_wall_diagnostics_from_common_input_errors() {
+    use sepika_job::{prepare_model_for_analysis, AnalysisSettings};
+
+    let model = rc_wall_side_column_model::input_model();
+    for (fy, factor, expected) in [
+        (Some(490.0), None, None),
+        (Some(490.0), Some(1.1), Some("増分解析不可:")),
+        (None, Some(1.1), Some("非線形解析不可:")),
+    ] {
+        let mut model = model.clone();
+        model.materials[1].name = "SD490".into();
+        model.materials[1].fy = fy;
+        model.materials[1].strength_factor = factor;
+        let report =
+            prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+        let wall_notices: Vec<_> = report
+            .notices
+            .iter()
+            .filter(|notice| notice.contains("縦筋材料"))
+            .collect();
+        if let Some(expected) = expected {
+            assert_eq!(wall_notices.len(), 1, "{:?}", report.notices);
+            assert!(wall_notices[0].starts_with(expected), "{}", wall_notices[0]);
+            assert!(wall_notices[0].contains("SD490"), "{}", wall_notices[0]);
+        } else {
+            assert!(wall_notices.is_empty(), "{wall_notices:?}");
+        }
+    }
+}
+
+#[test]
+fn preparation_reports_each_analysis_blocked_on_renamed_stb_wall_rebar() {
+    use sepika_job::{prepare_model_for_analysis, AnalysisSettings};
+
+    let mut model = rc_wall_side_column_model::input_model();
+    model.materials[1].name = "壁縦筋A".into();
+    model.materials[1].strength_factor = None;
+    model.stb_strengths.materials = vec![StbGradeMaterial {
+        grade: "SD490".into(),
+        material: MaterialId(1),
+    }];
+    model.stb_strengths.sections = vec![StbSectionStrength {
+        built_box: None,
+        native_rebar: false,
+        rebar: None,
+        section: SectionId(2),
+        concrete: None,
+        native_material: None,
+        reinforcement: vec![StbRebarStrength {
+            element: "StbSecBar_Wall_RC_Vertical".into(),
+            part: "vertical".into(),
+            position: None,
+            native_material: None,
+            diameter: None,
+            strength: Some("SD490".into()),
+        }],
+        steel: Vec::new(),
+    }];
+
+    for (fy, expected) in [
+        (490.0, vec!["非線形時刻歴解析不可"]),
+        (539.0, vec!["増分解析不可", "非線形時刻歴解析不可"]),
+    ] {
+        let mut input = model.clone();
+        input.materials[1].fy = Some(fy);
+        let report =
+            prepare_model_for_analysis(&mut input, &AnalysisSettings::default(), None).unwrap();
+        let observed: Vec<_> = report
+            .notices
+            .iter()
+            .filter(|notice| notice.contains("縦筋材料") && notice.contains("壁縦筋A"))
+            .filter_map(|notice| notice.split_once(':').map(|(prefix, _)| prefix))
+            .collect();
+        assert_eq!(observed, expected, "{:?}", report.notices);
+    }
+}
+
 const WALL_SYSTEM_KINDS: [ElementKind; 3] = [
     ElementKind::Beam,
     ElementKind::Fiber,
