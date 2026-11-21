@@ -558,7 +558,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                 }
             };
             ui.label(format!(
-                "算定: A = {} mm²   Iy = {} mm⁴   Iz = {} mm⁴   J = {} mm⁴",
+                "形状からの算定値　A = {} mm²   Iy = {} mm⁴   Iz = {} mm⁴   J = {} mm⁴",
                 format_property(preview.area, preview.property_basis.area),
                 format_property(preview.iy, preview.property_basis.iy),
                 format_property(preview.iz, preview.property_basis.iz),
@@ -677,7 +677,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         apply_resp.on_disabled_hover_text("形状を適用するには「種別」を選び直してください")
                     } else {
                         apply_resp.on_hover_text(format!(
-                            "現在のフォーム内容で断面 {name} の形状を再定義します\
+                            "現在のフォーム内容を断面 {name} に適用します\
 （この断面を使う全 {used} 部材に波及。符号と階は維持されます）"
                         ))
                     };
@@ -1891,6 +1891,9 @@ mod tests {
 
     #[test]
     fn selected_rebar_draft_can_repair_a_nan_diameter_from_ovika() {
+        use sepika_core::model::PropertyBasis;
+
+        const DIRECT_J_MM4: f64 = 2.5e9;
         let sid = SectionId(0);
         let source = SectionEditorDraft {
             kind: ShapeKind::RcBeamRect,
@@ -1898,6 +1901,9 @@ mod tests {
         };
         let mut section = build_shape(&source).to_section(sid, "梁".into());
         section.frame_use = Some(FrameSectionUse::Girder);
+        section.j = DIRECT_J_MM4;
+        section.property_basis.j = PropertyBasis::Supplied;
+        section.panel_thickness = Some(24.0);
         let Some(SectionShape::RcBeamRect { rebar, .. }) = section.shape.as_mut() else {
             unreachable!()
         };
@@ -1941,14 +1947,14 @@ mod tests {
                 frame_use: Some(FrameSectionUse::Girder),
             })
         ));
+        let section = &app.core.model.sections[0];
         assert_eq!(
-            app.core.model.sections[0]
-                .shape
-                .as_ref()
-                .unwrap()
-                .rebar_sizes(),
+            section.shape.as_ref().unwrap().rebar_sizes(),
             Some((RebarSize::Standard(StandardRebar::D19), source.shear_dia)),
         );
+        assert_eq!(section.resolved_j().unwrap(), DIRECT_J_MM4);
+        assert_eq!(section.property_basis.j, PropertyBasis::Supplied);
+        assert_eq!(section.panel_thickness, Some(24.0));
     }
 
     #[test]

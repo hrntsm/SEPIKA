@@ -168,10 +168,8 @@ impl EditCommand for AddSectionShape {
     }
 }
 
-/// 断面形状変更。逆操作は RestoreSection。
-///
-/// 符号と階は断面の同一性キーなので、形状を差し替えても維持する
-/// （`to_section` は形状から決まらない階を `None` で返すため、明示的に引き継ぐ）。
+/// 断面形状を変更し、符号・階・材料割当を維持する。
+/// RC・SRC梁柱で配筋以外の形状と用途が同じなら、断面性能・算定元・仕口パネル板厚も維持する。
 pub struct EditSectionShape {
     pub section: SectionId,
     pub new_shape: sepika_core::section_shape::SectionShape,
@@ -302,13 +300,66 @@ impl EditCommand for EditSectionShape {
         ) {
             return Box::new(crate::RejectedEdit(reason));
         }
-        model.sections[idx] = new_sec;
+        model.sections[idx] = if old.frame_use == self.frame_use
+            && old
+                .shape
+                .as_ref()
+                .is_some_and(|shape| same_geometry_ignoring_rebar(shape, &self.new_shape))
+        {
+            candidate
+        } else {
+            new_sec
+        };
         Box::new(RestoreSection { old })
     }
 
     fn label(&self) -> &str {
         "断面形状変更"
     }
+}
+
+fn same_geometry_ignoring_rebar(
+    old: &sepika_core::section_shape::SectionShape,
+    new: &sepika_core::section_shape::SectionShape,
+) -> bool {
+    use sepika_core::section_shape::SectionShape::*;
+
+    if std::mem::discriminant(old) != std::mem::discriminant(new) {
+        return false;
+    }
+    let dimensions = |shape: &sepika_core::section_shape::SectionShape| match *shape {
+        RcBeamRect { b, d, rebar: _ } | RcColumnRect { b, d, rebar: _ } => Some((b, d, None)),
+        RcColumnCircle { d, rebar: _ } => Some((d, d, None)),
+        SrcBeamRect {
+            b,
+            d,
+            rebar: _,
+            steel_height,
+            steel_width,
+            steel_web_thick,
+            steel_flange_thick,
+        }
+        | SrcColumnRect {
+            b,
+            d,
+            rebar: _,
+            steel_height,
+            steel_width,
+            steel_web_thick,
+            steel_flange_thick,
+        } => Some((
+            b,
+            d,
+            Some([
+                steel_height,
+                steel_width,
+                steel_web_thick,
+                steel_flange_thick,
+            ]),
+        )),
+        _ => None,
+    };
+    dimensions(old).is_some_and(|old_dimensions| dimensions(new) == Some(old_dimensions))
 }
 
 fn cft_section_references_are_valid(model: &Model, section: &sepika_core::model::Section) -> bool {

@@ -13162,6 +13162,8 @@ fn native_rebar_edit_undo_save_and_result_generation() {
 #[cfg(feature = "gui")]
 #[test]
 fn native_rebar_gui_pointer_apply_undo_and_save() {
+    use sepika_core::model::PropertyBasis;
+
     fn text_position(shape: &egui::epaint::Shape, needle: &str) -> Option<egui::Pos2> {
         match shape {
             egui::epaint::Shape::Text(text) if text.galley.text().contains(needle) => {
@@ -13171,8 +13173,12 @@ fn native_rebar_gui_pointer_apply_undo_and_save() {
             _ => None,
         }
     }
+    let mut model = rebar_edit_model(true);
+    model.sections[1].j = 2.5e9;
+    model.sections[1].property_basis.j = PropertyBasis::Supplied;
+    model.sections[1].panel_thickness = Some(24.0);
     let mut app = App::default();
-    assert!(app.load_model(rebar_edit_model(true)));
+    assert!(app.load_model(model));
     let before = app.core.model.clone();
     app.ui.scoped.nav.focus_section = Some(SectionId(1));
     app.ui.scoped.section_draft = crate::section_editor::SectionEditorDraft {
@@ -13222,10 +13228,15 @@ fn native_rebar_gui_pointer_apply_undo_and_save() {
     }
     assert_ne!(generation, app.result_input(&key));
     assert_rebar_top(&app.core.model, &[3]);
+    let mut expected = before.sections[1].clone();
+    expected.shape = app.core.model.sections[1].shape.clone();
+    assert_eq!(app.core.model.sections[1], expected);
     app.undo_action();
     assert!(before.eq_ignoring_dofmap(&app.core.model));
     assert_eq!(generation, app.result_input(&key));
     app.redo_action();
+    assert_eq!(app.core.model.sections[1], expected);
+    assert_ne!(generation, app.result_input(&key));
     let path = test_tmp().join("507-gui-pointer.ovika");
     app.save_project_to(path.clone());
     assert!(sepika_io::ovika::load_ovika(&path)
