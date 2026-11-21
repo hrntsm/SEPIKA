@@ -518,36 +518,3 @@ fn girder_group_uses_whole_length_and_preserves_lateral_length() {
     }
     assert!(ratios[1] > ratios[0], "{ratios:?}");
 }
-
-#[test]
-fn brb_uses_its_product_check_even_with_invalid_ordinary_lengths() {
-    use sepika_element::frame::beam::MemberForces;
-    let mut model = model();
-    model.elements[0].kind = ElementKind::Brace {
-        tension_only: false,
-    };
-    model.sections[0].frame_use = Some(FrameSectionUse::Brace);
-    model.steel_design_attrs[0].lk_y_direct = Some(0.0);
-    model.brb_attrs.push(BrbAttr {
-        elem: ElemId(0),
-        allowable_axial_short: Some(1_000_000.0),
-        critical_length: Some(2000.0),
-        length_reduction: Some(300.0),
-    });
-    let mf = MemberForces {
-        at: vec![(0.0, [-10000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
-    };
-    let report = sepika_design_jp::run_member_design_checks(
-        &model,
-        &[(ElemId(0), mf)],
-        &[],
-        &Default::default(),
-    )
-    .unwrap();
-    let result = result(report.member_checks[0].2.clone());
-    assert!((result.ratio() - 1.2).abs() < 1e-12, "{result:?}");
-    assert!(
-        result.components[0].detail.contains("Lk=2400.0000"),
-        "{result:?}"
-    );
-}

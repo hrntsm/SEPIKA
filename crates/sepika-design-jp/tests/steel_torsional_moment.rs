@@ -6,7 +6,6 @@ use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, DesignCheck, DesignCtx, LoadTerm,
     MemberDesignCheckOptions, MemberForcesAt, MemberKind, SteelDesign,
 };
-use sepika_element::frame::beam::MemberForces;
 use sepika_solver::statics::linear::linear_static_once;
 
 const COLUMN: ElemId = ElemId(0);
@@ -210,45 +209,4 @@ fn steel_check_requires_shape_and_action_specific_torsion_rules() {
     );
     assert_skipped(&outcome, "有効細長比の法定上限を判定できません");
     assert_skipped(&outcome, COMBINED_REASON);
-}
-
-#[test]
-fn brb_product_check_rejects_torque_instead_of_returning_axial_only_pass() {
-    let mut model = pipe_column(0.0);
-    model.elements[0].kind = ElementKind::Brace {
-        tension_only: false,
-    };
-    model.sections[0].frame_use = Some(FrameSectionUse::Brace);
-    model.brb_attrs.push(BrbAttr {
-        elem: COLUMN,
-        allowable_axial_short: Some(100_000.0),
-        critical_length: Some(6000.0),
-        length_reduction: Some(0.0),
-    });
-    let forces = MemberForces {
-        at: vec![
-            (0.0, [10_000.0, 0.0, 0.0, -0.0, 0.0, 0.0]),
-            (0.5, [10_000.0, 0.0, 0.0, 100e6, 0.0, 0.0]),
-            (1.0, [10_000.0, 0.0, 0.0, f64::NAN, 0.0, 0.0]),
-        ],
-    };
-    let report = run_member_design_checks(
-        &model,
-        &[(COLUMN, forces)],
-        &[],
-        &MemberDesignCheckOptions {
-            term: LoadTerm::Short,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert_eq!(report.member_checks.len(), 3);
-    let outcome = &report.member_checks[0].2;
-    let CheckOutcome::Checked(result) = outcome else {
-        panic!("{outcome:?}");
-    };
-    assert!(result.ok());
-    assert_eq!(result.ratio(), 0.5);
-    assert_skipped(&report.member_checks[1].2, "BRB");
-    assert_skipped(&report.member_checks[2].2, "非有限");
 }

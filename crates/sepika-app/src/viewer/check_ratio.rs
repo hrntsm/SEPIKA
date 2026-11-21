@@ -33,7 +33,7 @@ use super::CheckRatioFilter;
 pub(super) const LABEL_MIN_RATIO: f64 = 0.8;
 
 /// `CheckKind` の定義順で、フィルタ選択肢・ツールチップの列順を揃える。
-const ALL_KINDS: [CheckKind; 8] = [
+const ALL_KINDS: [CheckKind; 7] = [
     CheckKind::Bending,
     CheckKind::Shear,
     CheckKind::Bond,
@@ -41,7 +41,6 @@ const ALL_KINDS: [CheckKind; 8] = [
     CheckKind::Axial,
     CheckKind::Deflection,
     CheckKind::Provision,
-    CheckKind::BucklingLength,
 ];
 
 /// フィルタ `filter` を検定結果 `outcome` に適用した結果（検定比, OK か）を
@@ -2356,106 +2355,6 @@ mod issue901_tests {
             _ => false,
         }
     }
-    #[test]
-    fn brb_product_missing_input_displays_reason_without_ratio() {
-        let mut app = crate::app::brb_product_tests::analyzed_app(None);
-        app.ui.view.check_ratio_label_all = true;
-        let checks = &app.current_design_results().unwrap().member_checks;
-        let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
-        assert!(kinds.is_empty());
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|row| {
-            matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("端部低減距離 L1が未入力"))
-        }));
-        assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
-        let rendered = render_two_node_checks(&mut app);
-        assert!(is_gray_member(&rendered));
-        assert!(rendered
-            .shapes
-            .iter()
-            .any(|s| has_text(&s.shape, "端部低減距離")));
-    }
-
-    #[test]
-    fn brb_duplicate_products_display_member_and_reason_without_ratio() {
-        for limits in [[1_000_000.0, 500_000.0], [500_000.0, 1_000_000.0]] {
-            let mut app = crate::app::brb_product_tests::analyzed_short_compression_app(&limits);
-            app.ui.view.check_ratio_label_all = true;
-            let checks = &app.current_design_results().unwrap().member_checks;
-            let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
-            let id = format!("部材 ID {}", checks[0].elem.0);
-            assert!(kinds.is_empty());
-            assert_eq!(rows.len(), 2);
-            assert!(rows.iter().all(|row| {
-                matches!(&row.verdict, RowVerdict::Skipped(reason)
-                    if reason.contains(&id) && reason.contains("BRB製品属性が重複"))
-            }));
-            assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
-            let rendered = render_two_node_checks(&mut app);
-            assert!(is_gray_member(&rendered));
-            assert!(rendered
-                .shapes
-                .iter()
-                .any(|s| has_text(&s.shape, &id) && has_text(&s.shape, "BRB製品属性が重複")));
-        }
-    }
-
-    #[test]
-    fn brb_nonfinite_axial_displays_unchecked_and_preserves_length_ng() {
-        for (limit_mm, expected_ng) in [(6000.0, None), (2400.0, Some((1.25, false)))] {
-            let mut app = crate::app::brb_product_tests::app_with_nonfinite_brb_axial(limit_mm);
-            app.ui.view.check_ratio_label_all = true;
-            let checks = &app.current_design_results().unwrap().member_checks;
-            let member = &checks[0];
-            let (_, rows) = build_tooltip_rows(&member.positions);
-            assert!(rows.iter().any(|row| {
-                matches!(&row.verdict, RowVerdict::Skipped(reason)
-                    if reason.contains("設計軸力 N が非有限"))
-            }));
-            for filter in [
-                CheckRatioFilter::Max,
-                CheckRatioFilter::Kind(CheckKind::BucklingLength),
-            ] {
-                let ratios = member_ratios_for_filter(checks, filter);
-                assert_eq!(ratios.get(&member.elem).copied(), expected_ng);
-            }
-            let rendered = render_two_node_checks(&mut app);
-            assert_eq!(is_gray_member(&rendered), expected_ng.is_none());
-            assert!(rendered
-                .shapes
-                .iter()
-                .any(|s| has_text(&s.shape, "設計軸力 N が非有限")));
-            if expected_ng.is_some() {
-                assert!(rendered
-                    .shapes
-                    .iter()
-                    .any(|s| has_text(&s.shape, "座屈長さ 1.25 超過")));
-            }
-        }
-    }
-
-    #[test]
-    fn brb_target_mismatch_displays_reason_without_ratio() {
-        let mut app = crate::app::brb_product_tests::analyzed_pipe_app(
-            sepika_core::model::FrameSectionUse::Girder,
-        );
-        app.ui.view.check_ratio_label_all = true;
-        let checks = &app.current_design_results().unwrap().member_checks;
-        let (kinds, rows) = build_tooltip_rows(&checks[0].positions);
-        assert!(kinds.is_empty());
-        assert_eq!(rows.len(), 3);
-        assert!(rows.iter().all(|row| {
-            matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("BRB属性の参照先"))
-        }));
-        assert!(member_ratios_for_filter(checks, CheckRatioFilter::Max).is_empty());
-        let rendered = render_two_node_checks(&mut app);
-        assert!(is_gray_member(&rendered));
-        assert!(rendered
-            .shapes
-            .iter()
-            .any(|s| has_text(&s.shape, "BRB属性の参照先")));
-    }
-
     #[test]
     fn issue901_angle_mixed_positions_draw_unknown_gray_and_keep_reasons_for_all_filters() {
         use sepika_element::frame::beam::MemberForces;

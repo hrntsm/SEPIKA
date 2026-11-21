@@ -58,11 +58,6 @@ pub(crate) fn collect_asymmetric_column_sections<T, E>(
                 item.unavailable
                     .insert("断面に材料が割り当てられていません".into());
             }
-            if model.brb_attrs.iter().any(|attr| attr.elem == elem.id) {
-                item.unavailable
-                    .insert("BRB属性の参照先にはブレース要素を指定してください".into());
-                return None;
-            }
             if !length.is_finite() || length <= 0.0 {
                 item.unavailable
                     .insert("有効な材軸長を取得できません".into());
