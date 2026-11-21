@@ -761,10 +761,32 @@ fn resolve_secondary_quantities(
 /// 二次 CFT、必要な材料領域・床接触が未知、不正または適用対象外の場合は理由付きエラー。
 /// 壁版は内部で展開して集計する。未参照断面の未入力は許容する。
 /// 円形RC間柱の直径・解決実長 `[mm]` が有限かつ正でない場合は部材 ID と原因を返す。
+/// 鉄筋の概算用体積比が負値または非有限の場合は、該当する全項目の名前と原因を返す。
 pub fn try_compute_quantity_takeoff(
     model: &Model,
     cfg: &QuantityCfg,
 ) -> Result<QuantityTakeoff, String> {
+    let ratio_errors: Vec<_> = [
+        ("主架構小梁の主筋比", cfg.beam_main_ratio),
+        ("主架構小梁のスターラップ比", cfg.beam_stirrup_ratio),
+        ("床・片持ち床の鉄筋比", cfg.slab_rebar_ratio),
+    ]
+    .into_iter()
+    .filter_map(|(name, ratio)| {
+        let cause = if !ratio.is_finite() {
+            "非有限"
+        } else if ratio < 0.0 {
+            "負値"
+        } else {
+            return None;
+        };
+        Some(format!("{name}が{cause}です ({ratio})"))
+    })
+    .collect();
+    if !ratio_errors.is_empty() {
+        return Err(ratio_errors.join(" / "));
+    }
+
     model
         .validate_frame_node_counts()
         .map_err(|e| e.to_string())?;

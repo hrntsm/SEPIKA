@@ -1082,6 +1082,165 @@ fn quantity_ratio_inputs_change_only_their_estimates_and_roundtrip_without_stali
 }
 
 #[test]
+fn saved_quantity_ratios_show_all_invalid_inputs_in_panel_and_csv() {
+    let ctx = egui::Context::default();
+    install_japanese_fonts(&ctx);
+    let frame = |app: &mut App, events| {
+        ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| app.design_tab_panel(ui));
+            },
+        )
+    };
+    let model = quantity_ratio_fixture();
+    let path =
+        std::env::temp_dir().join(format!("sepika-1760-invalid-{}.ovika", std::process::id()));
+    for (value, cause) in [
+        (-0.008, "負値"),
+        (f64::NAN, "非有限"),
+        (f64::INFINITY, "非有限"),
+        (f64::NEG_INFINITY, "非有限"),
+    ] {
+        let mut model = model.clone();
+        model.quantity_cfg.beam_main_ratio = value;
+        model.quantity_cfg.beam_stirrup_ratio = value;
+        model.quantity_cfg.slab_rebar_ratio = value;
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let mut app = App::default();
+        app.open_project_from(path.clone());
+        std::fs::remove_file(&path).unwrap();
+        assert!(app.core.scoped.last_error.is_none());
+
+        let csv = crate::summary::build_quantity_csv(&app.core.model);
+        let lines: Vec<_> = csv.lines().collect();
+        assert_eq!(lines.len(), 3, "{csv}");
+        assert_eq!(lines[..2], ["[数量積算 未算定]", "理由"]);
+        let panel = quantity_panel_text(&mut app);
+        assert!(panel.contains("数量積算は未算定です"), "{panel}");
+        assert!(!panel.contains("コンクリート "), "{panel}");
+        for name in [
+            "主架構小梁の主筋比",
+            "主架構小梁のスターラップ比",
+            "床・片持ち床の鉄筋比",
+        ] {
+            let diagnostic = format!("{name}が{cause}です ({value})");
+            assert!(lines[2].contains(&diagnostic), "{csv}");
+            assert!(panel.contains(&diagnostic), "{panel}");
+        }
+        let report = crate::summary::build_report_csv(&app);
+        assert!(report.contains(&csv), "{report}");
+        assert!(!report.contains("[数量積算 明細]"), "{report}");
+
+        app.ui.view.design_view = DesignView::Quantities;
+        let output = frame(&mut app, vec![]);
+        let button_position = |label| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => {
+                        Some(text.visual_bounding_rect().center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("操作が見つからない: {label}"))
+        };
+        button_position("💾 CSV エクスポート…");
+        let pos = button_position("📋 クリップボードへコピー");
+        let click = |pressed| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        frame(&mut app, click(true));
+        let copied = frame(&mut app, click(false));
+        assert!(copied
+            .platform_output
+            .commands
+            .iter()
+            .any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text == &csv)));
+
+        assert!(app.core.scoped.last_error.is_none());
+        let cfg = app.core.model.quantity_cfg;
+        assert_eq!(
+            [
+                cfg.beam_main_ratio.to_bits(),
+                cfg.beam_stirrup_ratio.to_bits(),
+                cfg.slab_rebar_ratio.to_bits(),
+            ],
+            [value.to_bits(); 3],
+        );
+    }
+}
+
+#[test]
+fn saved_zero_quantity_ratios_are_calculated_as_zero() {
+    use sepika_design_jp::quantity::{
+        try_compute_quantity_takeoff, MemberCategory, QuantityStatus, RebarUsage,
+    };
+
+    let mut model = quantity_ratio_fixture();
+    model.quantity_cfg.beam_main_ratio = 0.0;
+    model.quantity_cfg.beam_stirrup_ratio = 0.0;
+    model.quantity_cfg.slab_rebar_ratio = 0.0;
+    let path = std::env::temp_dir().join(format!("sepika-1760-zero-{}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let mut app = App::default();
+    app.open_project_from(path.clone());
+    std::fs::remove_file(&path).unwrap();
+    assert!(app.core.scoped.last_error.is_none());
+
+    let model = &app.core.model;
+    let takeoff = try_compute_quantity_takeoff(model, &model.quantity_cfg).unwrap();
+    let csv = crate::summary::build_quantity_csv(model);
+    assert!(csv.contains("[数量積算 明細]"), "{csv}");
+    assert!(!csv.contains("[数量積算 未算定]"), "{csv}");
+    for (category, usage, expected_count) in [
+        (MemberCategory::Beam, RebarUsage::BeamMain, 2),
+        (MemberCategory::Beam, RebarUsage::BeamStirrup, 2),
+        (MemberCategory::Slab, RebarUsage::SlabBar, 1),
+        (MemberCategory::CantileverSlab, RebarUsage::SlabBar, 1),
+    ] {
+        let items: Vec<_> = takeoff
+            .items
+            .iter()
+            .filter(|item| item.category == category)
+            .collect();
+        assert_eq!(items.len(), expected_count);
+        for item in items {
+            assert!(item.concrete_m3 > 0.0);
+            assert_eq!(item.rebar_status(), QuantityStatus::Complete);
+            let rebar = item
+                .rebar
+                .iter()
+                .find(|rebar| rebar.usage == usage)
+                .unwrap();
+            assert_eq!(rebar.weight_t, 0.0);
+        }
+    }
+    for label in ["小梁主筋", "小梁スターラップ", "床筋"] {
+        let row_suffix = format!(",{label},,0.000000,0.000000,算定済み概算,");
+        assert_eq!(
+            csv.lines()
+                .filter(|line| line.ends_with(&row_suffix))
+                .count(),
+            2,
+            "{csv}"
+        );
+    }
+}
+
+#[test]
 fn current_schema_ps_only_model_keeps_missing_directions_after_ovika_read() {
     let mut value = serde_json::to_value(quantity_fixture()).unwrap();
     let wall = value["sections"][2]["shape"]["RcWall"]
