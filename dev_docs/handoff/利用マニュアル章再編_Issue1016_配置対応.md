@@ -80,7 +80,7 @@
 | `calc_basis/08_部材終局耐力/README.md` | [calc_basis/08_部材終局耐力/README.md](../../docs/calc_basis/08_部材終局耐力/README.md) | 章入口・案内を更新 |
 | `calc_basis/09_免震制振/01_免震アイソレータ.md` | [calc_basis/09_免震制振/01_免震アイソレータ.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/calc_basis/09_免震制振/01_免震アイソレータ.md) | 分割（節対応参照） |
 | `calc_basis/09_免震制振/02_制振ダンパー.md` | [calc_basis/09_免震制振/02_制振ダンパー.md](../../docs/calc_basis/09_免震制振/02_制振ダンパー.md) | 維持・全節維持 |
-| `calc_basis/09_免震制振/03_座屈拘束ブレース.md` | [calc_basis/06_一次設計/06_座屈拘束ブレース.md](../../docs/calc_basis/06_一次設計/06_座屈拘束ブレース.md) | 移動・全節維持 |
+| `calc_basis/09_免震制振/03_座屈拘束ブレース.md` | `calc_basis/06_一次設計/06_座屈拘束ブレース.md` | 移動・全節維持（後に [#1739](https://github.com/hrntsm/SEPIKA/issues/1739) で削除） |
 | `calc_basis/09_免震制振/04_辻_山田モデル.md` | [calc_basis/09_免震制振/04_辻_山田モデル.md](../../docs/calc_basis/09_免震制振/04_辻_山田モデル.md) | 維持・全節維持 |
 | `calc_basis/09_免震制振/README.md` | [calc_basis/09_免震制振/README.md](../../docs/calc_basis/09_免震制振/README.md) | 章入口・案内を更新 |
 | `calc_basis/10_数量積算/01_数量積算の算定式.md` | [calc_basis/10_数量積算/01_数量積算の算定式.md](../../docs/calc_basis/10_数量積算/01_数量積算の算定式.md) | 維持・全節維持 |
