@@ -208,24 +208,8 @@ pub(crate) fn fiber_strength_params(
         model,
         basis,
         resolve_fiber_yield(model, data),
-        fiber_rebar_factor(data, model, basis),
+        basis.rebar_factor(model.element_rebar_material(data)),
     )
-}
-
-fn fiber_rebar_factor(
-    data: &sepika_core::model::ElementData,
-    model: &sepika_core::model::Model,
-    basis: crate::factory::StrengthBasis,
-) -> f64 {
-    // その他の材種で主材料に割増を設定したモデルも使われるため、主筋材の参照は割増範囲を検証する材種に限る。
-    let material = model
-        .element_rebar_material(data)
-        .filter(|mat| {
-            sepika_core::material_grade::has_jis_rebar_strength_limit(mat)
-                || sepika_core::material_grade::requires_direct_high_strength_main_rebar(mat)
-        })
-        .or_else(|| model.element_material(data));
-    basis.rebar_factor(material)
 }
 
 fn fiber_steel_material<'a>(
@@ -376,7 +360,7 @@ pub(crate) fn build_gauss_fiber_pair(
     let fc = mat_ref.and_then(|m| m.fc);
     let (concrete_e, steel_e) = fiber_young_moduli(data, model);
     let yield_ = resolve_fiber_yield(model, data);
-    let rebar_factor = fiber_rebar_factor(data, model, basis);
+    let rebar_factor = basis.rebar_factor(model.element_rebar_material(data));
     let strength = fiber_strength_params_from_yield(data, model, basis, yield_, rebar_factor);
     let steel_factor = basis.steel_factor(fiber_steel_material(data, model));
     let concrete_rule = crate::factory::resolve_fiber_concrete_hysteresis(data, model, kind);
