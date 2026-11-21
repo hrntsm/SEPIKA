@@ -25,11 +25,12 @@ use crate::theme;
 use sepika_core::geom::vec3::dist as member_len3;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementData, ElementKind, Model};
+use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::StructureKind;
 use sepika_core::units::to_display::{force_kn, moment_kn_m};
 use sepika_design_jp::member_design_check::{concrete_member_torsion_reason, strength_outcomes};
 use sepika_design_jp::{
-    CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind,
+    CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind, QdMethod,
 };
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
@@ -710,6 +711,9 @@ fn draw_peak_check(
     };
     let wire_qd = th_nonlinear && th_applied_long_term && !signed_bending;
     let src_column = structure == StructureKind::Src && kind == MemberKind::Column;
+    let rc_beam = structure == StructureKind::Rc
+        && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
+    let qd_method = app.core.analysis_cfg.qd_method;
     let rebar_material = model.element_rebar_material(elem);
     let wrong_main_rebar = rebar_material
         .is_some_and(|material| material.category != sepika_core::model::MaterialCategory::Rebar);
@@ -725,11 +729,15 @@ fn draw_peak_check(
             })
         })
         .flatten();
-    let q0_by_elem = if wire_qd && !src_column {
-        match sepika_job::simple_beam_q0_by_gravity_cases(&app.core.model) {
-            Ok(q0) => Some(q0),
+    let q_simple = if wire_qd && rc_beam && kind != MemberKind::Column && qd_method != QdMethod::Qd2
+    {
+        match sepika_job::design_q0::rc_beam_q0_for_gravity_cases(model, elem) {
+            Ok(q0) => q0,
             Err(reason) => {
-                ui.colored_label(theme::PARETO_RED, reason);
+                ui.colored_label(
+                    theme::PARETO_RED,
+                    format!("検定不能: QD1用の部材荷重由来Q0を算定できません（{reason}）"),
+                );
                 draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason);
                 return;
             }
@@ -744,19 +752,14 @@ fn draw_peak_check(
                 long_at: mf.at.clone(),
                 n_factor: 1.5,
                 n_mechanism: 1.0,
-                q_simple: q0_by_elem.as_ref().and_then(|m| m.get(&elem.id).copied()),
+                q_simple,
                 clear_length: clear_span,
-                method: app.core.analysis_cfg.qd_method,
+                method: qd_method,
             })
     });
     let missing_gravity = wire_qd && seismic_qd.is_none();
     let missing_rc_beam_gravity = wire_qd
-        && matches!(
-            sec.shape,
-            Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
-        )
-        && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
-            == sepika_core::structure_kind::StructureKind::Rc
+        && rc_beam
         && seismic_qd.as_ref().is_none_or(|qd| {
             qd.long_at.is_empty()
                 || !qd

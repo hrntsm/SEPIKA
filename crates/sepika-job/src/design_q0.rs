@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use sepika_core::ids::{ElemId, LoadCaseId};
-use sepika_core::model::{LoadCaseKind, MemberLoadKind, Model, LL_FRAME_CASE_NAME};
+use sepika_core::model::{ElementData, LoadCaseKind, MemberLoadKind, Model, LL_FRAME_CASE_NAME};
 use sepika_element::frame::beam::MemberForces;
 
 /// 地震用重量に使う重力ケース ID 列。検定用QL・QD1用Q0とは区別する。
@@ -177,7 +177,7 @@ pub fn simple_beam_q0_by_terms(
             *map.entry(elem).or_insert(0.0) += q * factor;
         }
     }
-    map.extend(rc_beam_q0_by_terms(model, terms)?);
+    map.extend(rc_beam_q0_by_terms(model, terms, &model.elements)?);
     Ok(map)
 }
 
@@ -190,11 +190,11 @@ pub fn simple_beam_q0_by_elem(
     lc: LoadCaseId,
 ) -> Result<HashMap<ElemId, f64>, String> {
     let mut map = other_beam_q0_by_elem(model, lc);
-    map.extend(rc_beam_q0_by_terms(model, &[(lc, 1.0)])?);
+    map.extend(rc_beam_q0_by_terms(model, &[(lc, 1.0)], &model.elements)?);
     Ok(map)
 }
 
-fn is_rc_beam(model: &Model, elem: &sepika_core::model::ElementData) -> bool {
+fn is_rc_beam(model: &Model, elem: &ElementData) -> bool {
     matches!(
         model.element_section(elem).and_then(|s| s.shape.as_ref()),
         Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
@@ -202,10 +202,7 @@ fn is_rc_beam(model: &Model, elem: &sepika_core::model::ElementData) -> bool {
         == sepika_core::structure_kind::StructureKind::Rc
 }
 
-fn rc_beam_geometry(
-    model: &Model,
-    elem: &sepika_core::model::ElementData,
-) -> Result<Option<(f64, [f64; 3])>, String> {
+fn rc_beam_geometry(model: &Model, elem: &ElementData) -> Result<Option<(f64, [f64; 3])>, String> {
     use sepika_core::geom::vec3;
     if model.element_material(elem).is_none() {
         return Ok(None);
@@ -244,6 +241,7 @@ fn rc_beam_geometry(
 fn rc_beam_q0_by_terms(
     model: &Model,
     terms: &[(LoadCaseId, f64)],
+    elements: &[ElementData],
 ) -> Result<HashMap<ElemId, f64>, String> {
     use sepika_core::geom::vec3;
 
@@ -256,7 +254,7 @@ fn rc_beam_q0_by_terms(
         }
     }
     let mut reactions: HashMap<ElemId, Option<(f64, f64)>> = HashMap::new();
-    for elem in model.elements.iter().filter(|elem| is_rc_beam(model, elem)) {
+    for elem in elements.iter().filter(|elem| is_rc_beam(model, elem)) {
         reactions.insert(elem.id, rc_beam_geometry(model, elem)?.map(|_| (0.0, 0.0)));
     }
     for (id, factor) in terms {
@@ -394,11 +392,28 @@ fn other_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, f64> 
 /// 検定用G+PのQD1専用Q0 `[N]`。RC 梁は端別合成後に最大絶対値、他はケース別Q0の和。
 /// 算定対象の RC 梁で局所基底を解決できなければ、部材 ID と理由を含む `Err` を返す。
 pub fn simple_beam_q0_by_gravity_cases(model: &Model) -> Result<HashMap<ElemId, f64>, String> {
-    let terms: Vec<_> = gravity_case_ids_for_design(model)
+    simple_beam_q0_by_terms(model, &design_gravity_unit_terms(model))
+}
+
+/// モデル内の指定RC梁について、検定用G+PのQD1専用Q0 `[N]` を返す。
+/// 入力不足は `None`、対象梁の局所基底を解決できない場合は理由付き `Err` を返す。
+pub fn rc_beam_q0_for_gravity_cases(
+    model: &Model,
+    elem: &ElementData,
+) -> Result<Option<f64>, String> {
+    Ok(rc_beam_q0_by_terms(
+        model,
+        &design_gravity_unit_terms(model),
+        std::slice::from_ref(elem),
+    )?
+    .remove(&elem.id))
+}
+
+fn design_gravity_unit_terms(model: &Model) -> Vec<(LoadCaseId, f64)> {
+    gravity_case_ids_for_design(model)
         .into_iter()
         .map(|id| (id, 1.0))
-        .collect();
-    simple_beam_q0_by_terms(model, &terms)
+        .collect()
 }
 
 /// 複数ケースの部材内力を位置ごとに加算する（線形重ね合わせ）。

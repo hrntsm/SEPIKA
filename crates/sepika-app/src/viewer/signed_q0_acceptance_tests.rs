@@ -2,7 +2,11 @@ use super::*;
 use crate::app::signed_q0_acceptance_tests::fixture;
 
 fn labels(app: &App, rec: &ThRecording, applied_long_term: bool) -> String {
-    let elem = &app.core.model.elements[0];
+    member_labels(app, rec, 0, applied_long_term)
+}
+
+fn member_labels(app: &App, rec: &ThRecording, index: usize, applied_long_term: bool) -> String {
+    let elem = &app.core.model.elements[index];
     let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
     egui::Context::default()
         .run_ui(
@@ -13,7 +17,7 @@ fn labels(app: &App, rec: &ThRecording, applied_long_term: bool) -> String {
                 )),
                 ..Default::default()
             },
-            |ui| draw_peak_check(ui, app, elem, 0, rec, true, applied_long_term, &axis),
+            |ui| draw_peak_check(ui, app, elem, index, rec, true, applied_long_term, &axis),
         )
         .shapes
         .iter()
@@ -67,19 +71,111 @@ fn signed_q0_th_detail_missing_repaired_missing_does_not_render_ordinary_check()
 }
 
 #[test]
+fn signed_q0_th_detail_local_axis_error_affects_only_beam_that_needs_q0() {
+    use sepika_core::ids::{ElemId, NodeId};
+    use sepika_design_jp::QdMethod;
+
+    let mut model = fixture::model();
+    for mut node in model.nodes.clone() {
+        node.id = NodeId(node.id.0 + 2);
+        node.coord[1] += 4000.0;
+        model.nodes.push(node);
+    }
+    let mut beam = model.elements[0].clone();
+    beam.id = ElemId(1);
+    beam.nodes = [NodeId(2), NodeId(3)].into_iter().collect();
+    model.elements.push(beam);
+    for case in &mut model.load_cases[..2] {
+        let mut load = case.member[0].clone();
+        load.elem = ElemId(1);
+        case.member.push(load);
+    }
+
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.run_combination(0);
+    let peak = &app.current_static().unwrap().member_forces;
+    let rec = ThRecording {
+        peak_member_forces: [ElemId(0), ElemId(1)]
+            .map(|id| Some(peak.iter().find(|(elem, _)| *elem == id).unwrap().1.clone()))
+            .to_vec(),
+        ..Default::default()
+    };
+    app.run_combination(1);
+
+    for method in [QdMethod::Qd1, QdMethod::Min, QdMethod::Qd2] {
+        app.core.analysis_cfg.qd_method = method;
+        app.core.model.elements[1].local_axis.ref_vector = [0.0, 0.0, 1.0];
+        let expected_healthy = labels(&app, &rec, true);
+        let expected_other = member_labels(&app, &rec, 1, true);
+        assert!(expected_healthy.contains("検定比"), "{expected_healthy}");
+        assert!(expected_other.contains("検定比"), "{expected_other}");
+
+        app.core.model.elements[1].local_axis.ref_vector = [f64::NAN, 0.0, 1.0];
+        let reason = sepika_job::simple_beam_q0_by_gravity_cases(&app.core.model).unwrap_err();
+        assert!(reason.contains("部材 ID 1"), "{reason}");
+        assert!(
+            reason.contains("断面参照方向に非有限値があります"),
+            "{reason}"
+        );
+        assert_eq!(labels(&app, &rec, true), expected_healthy, "{method:?}");
+        let other = member_labels(&app, &rec, 1, true);
+        if method == QdMethod::Qd2 {
+            assert_eq!(other, expected_other);
+        } else {
+            assert!(
+                other.contains("検定不能:") && other.contains(&reason),
+                "{other}"
+            );
+            assert!(!other.contains("検定比"), "{other}");
+        }
+    }
+}
+
+#[test]
 fn signed_q0_th_detail_steel_still_checks_without_rc_gravity_input() {
     use super::steel_column_lateral_buckling_input::{column, moments};
+    use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
+    use sepika_design_jp::QdMethod;
 
     let mut app = App::default();
     assert!(app.load_model(column(0.0, true)));
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
     let rec = ThRecording {
-        peak_member_forces: vec![Some(moments(215e6))],
+        peak_member_forces: vec![Some(moments(250e6))],
         ..Default::default()
     };
     let text = labels(&app, &rec, true);
-    assert!(text.contains("検定比"), "{text}");
+    assert!(text.contains("検定比") && text.contains("(NG)"), "{text}");
     assert!(text.contains("採用横座屈長さ lb=3000 mm"), "{text}");
     assert!(!text.contains("重力参照内力"), "{text}");
+
+    let mut rc_model = fixture::model();
+    let mut concrete = rc_model.materials.remove(0);
+    concrete.id = MaterialId(1);
+    let mut section = rc_model.sections.remove(0);
+    section.id = SectionId(1);
+    section.material = Some(concrete.id);
+    let mut beam = rc_model.elements.remove(0);
+    beam.id = ElemId(1);
+    beam.section = Some(section.id);
+    beam.nodes = [NodeId(2), NodeId(3)].into_iter().collect();
+    for mut node in rc_model.nodes {
+        node.id = NodeId(node.id.0 + 2);
+        node.coord[1] += 4000.0;
+        app.core.model.nodes.push(node);
+    }
+    app.core.model.materials.push(concrete);
+    app.core.model.sections.push(section);
+    app.core.model.elements.push(beam);
+    let mut dead_loads = rc_model.load_cases.remove(0);
+    dead_loads.member[0].elem = ElemId(1);
+    app.core.model.load_cases.push(dead_loads);
+    assert_eq!(labels(&app, &rec, true), text);
+
+    app.core.model.elements[1].local_axis.ref_vector = [f64::NAN, 0.0, 1.0];
+    assert!(sepika_job::simple_beam_q0_by_gravity_cases(&app.core.model).is_err());
+    assert_eq!(labels(&app, &rec, true), text);
 }
 
 #[test]
