@@ -311,17 +311,9 @@ fn cft_pipe_steel_props(outer_dia: f64, thick: f64) -> (f64, f64) {
     (a, sz)
 }
 
-/// CFT 柱の設計用せん断力 `QD`（SRC 規準準用）。
-///
-/// - `QD1 = ΣcMy/h′`。cMy は CFT 指針の N-M 相互作用による終局曲げ耐力
-///   Mu(N)（[`crate::ultimate::cft_mu_nm`]、柱分類対応）とし、柱頭・柱脚
-///   同一断面の仮定で `ΣcMy = 2·Mu(N)` とする（RC 柱の QD1 と同じ扱い）。
-/// - `QD2 = |QL| + n・|Q−QL|`。
-/// - `ctx.seismic_qd.method`（QD1/QD2/min）の選択は RC と共通の
-///   [`crate::rc::seismic_design_shear`] に委譲する。
-///
-/// `ctx.seismic_qd` が None、または長期内力に同一評価位置が見つからない
-/// 場合は解析せん断力 `|q_signed|` をそのまま返す。
+/// CFT柱の指定方向のせん断需要（N）。通常検定では地震時条件や同位置の重力参照がなければ、応答せん断力の絶対値を返す。
+/// 時刻歴の地震時検定では、必要な同位置の有限な重力参照を取得できない方向を `Ok(None)` とする。
+/// 参照の不足理由は QD1 では `incomplete` に加え、QD2・min では呼び出し元が記録する。
 fn cft_q_design(
     ctx: &DesignCtx,
     forces: &MemberForcesAt,
