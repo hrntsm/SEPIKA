@@ -206,7 +206,13 @@ pub(super) fn column_check(
     incomplete: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
-    let strict_gravity = matches!(column_gravity, ColumnGravityMode::TimeHistory);
+    let strict_gravity = matches!(
+        column_gravity,
+        ColumnGravityMode::TimeHistory {
+            strict_gravity: true
+        }
+    );
+    let ordinary = matches!(column_gravity, ColumnGravityMode::Ordinary { .. });
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
@@ -227,10 +233,10 @@ pub(super) fn column_check(
                           components: &mut Vec<CheckComponent>,
                           incomplete: &mut Option<String>| {
         if let Some(reason) = bending_issue {
-            if strict_gravity && !missing_gravity && incomplete.is_none() {
+            if !ordinary && !(strict_gravity && (missing_gravity || incomplete.is_some())) {
                 return Err(CheckOutcome::Skipped { reason });
             }
-            if !strict_gravity {
+            if ordinary {
                 components.clear();
             }
             *incomplete = combine_incomplete_reasons(incomplete.take(), Some(&reason));
@@ -241,24 +247,14 @@ pub(super) fn column_check(
         if !shear_reference_valid {
             return false;
         }
-        if boundary_shear_only && matches!(column_gravity, ColumnGravityMode::OrdinaryMissing) {
-            *incomplete = Some("設計用せん断力に必要な重力参照内力が不足しています".into());
-            return false;
-        }
-        if boundary_shear_only
-            && qd1_mechanism(ctx).is_some()
-            && ctx.seismic_qd.as_ref().is_some_and(|qd| {
-                [0.0, 1.0].into_iter().any(|end| {
-                    !qd.long_at
-                        .iter()
-                        .find(|(pos, _)| (pos - end).abs() < 1e-6)
-                        .is_some_and(|(_, f)| f[0].is_finite())
-                })
-            })
-        {
-            *incomplete =
-                Some("設計用せん断力に必要な柱端の重力参照軸力が不足または非有限です".into());
-            return false;
+        if boundary_shear_only {
+            if let ColumnGravityMode::Ordinary {
+                boundary_shear_issue: Some(reason),
+            } = column_gravity
+            {
+                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(reason));
+                return false;
+            }
         }
         true
     };
@@ -363,7 +359,7 @@ pub(super) fn column_check(
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
         let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props.d, 1.5);
         let qay = shear_capacity(&props, &allow, alpha_y, ctx.term, damage_control, true);
-        let boundary_shear_only = !strict_gravity && bending_issue.is_some();
+        let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
             (None, None)
         } else if !main_rebar_valid {
@@ -530,7 +526,7 @@ pub(super) fn column_check(
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
         let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props_z.d, 1.5);
         let qay = shear_capacity(&props_z, &allow, alpha_y, ctx.term, damage_control, true);
-        let boundary_shear_only = !strict_gravity && bending_issue.is_some();
+        let boundary_shear_only = ordinary && bending_issue.is_some();
         let (q_design_y, q_design_z) = if !shear_reference_valid(boundary_shear_only, incomplete) {
             (None, None)
         } else if !main_rebar_valid {
