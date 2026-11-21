@@ -100,17 +100,6 @@ impl SecondaryMember {
     }
 }
 
-/// 取付き位置表現へ解決する前の、モデル節点対で表した二次部材。
-///
-/// 取り込みと一括変換の入力専用。`Model` へ入る `SecondaryMember` は
-/// `ends` を持つため、この型は `Model` の外にだけ現れる。
-#[derive(Clone, Copy, Debug)]
-pub struct SecondaryMemberNodes {
-    pub id: SecondaryMemberId,
-    pub kind: SecondaryMemberKind,
-    pub nodes: [NodeId; 2],
-}
-
 /// 点 `p` が線分 `a`–`b` の材軸上（距離 `tol` [mm] 以内）にあり、両端から `tol` を
 /// 超えた内法にあるか。
 fn point_in_segment_interior(p: [f64; 3], a: [f64; 3], b: [f64; 3], tol: f64) -> bool {

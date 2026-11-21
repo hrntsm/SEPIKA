@@ -3,7 +3,7 @@
 //! 鋼材の基準強度 F・鉄筋の基準強度・コンクリート設計基準強度 Fc の
 //! 「名称 → 数値」対応は本モジュールに一本化する（H12 建告第2464号、
 //! JIS 規格、大臣認定品の基準強度）。設計計算（sepika-design-jp）・
-//! ST-Bridge 取込（sepika-io）・UI プリセット（sepika-app）は
+//! UI プリセット（sepika-app）は
 //! いずれも本対応表を参照し、独立の表を持たない。
 //!
 //! - [`steel_f_value`] — 鋼材の基準強度 F（完全一致、板厚区分対応）
@@ -264,24 +264,16 @@ const ORDINARY_JIS_REBAR_MAX_STRENGTH_FACTOR: f64 = 1.1;
 /// 保有水平耐力計算の主筋・壁縦筋に用いる無次元の材料強度割増係数。
 /// SD490 は 1.0。他の材種は直接指定値を優先し、空欄は 1.1。
 /// JIS 主筋の入力は [`rebar_material_strength_issue`] で検証する。せん断補強筋には適用しない。
-pub fn material_strength_factor_rebar(
-    mat: &crate::model::Material,
-    stb_grade: Option<&str>,
-) -> f64 {
-    if main_rebar_grade(mat, stb_grade) == Some("SD490") {
+pub fn material_strength_factor_rebar(mat: &crate::model::Material) -> f64 {
+    if main_rebar_grade(mat) == Some("SD490") {
         1.0
     } else {
         mat.strength_factor.unwrap_or(1.1)
     }
 }
 
-fn main_rebar_grade<'a>(
-    mat: &'a crate::model::Material,
-    stb_grade: Option<&'a str>,
-) -> Option<&'a str> {
-    stb_grade.map(str::trim).or_else(|| {
-        (mat.category == crate::model::MaterialCategory::Rebar).then(|| mat.name.trim())
-    })
+fn main_rebar_grade(mat: &crate::model::Material) -> Option<&str> {
+    (mat.category == crate::model::MaterialCategory::Rebar).then(|| mat.name.trim())
 }
 
 fn ordinary_jis_rebar_fy(grade: &str) -> Option<f64> {
@@ -295,33 +287,27 @@ fn ordinary_jis_rebar_fy(grade: &str) -> Option<f64> {
 }
 
 /// 保有水平耐力計算で基準強度と割増を検証する JIS 主筋・壁縦筋の材種かを返す。
-/// ST-Bridge 標準材種を優先し、鉄筋材料名・種類記号の前後の空白は除く。
-pub fn has_jis_rebar_strength_limit(mat: &crate::model::Material, stb_grade: Option<&str>) -> bool {
-    main_rebar_grade(mat, stb_grade)
+/// 鉄筋材料名の前後の空白は除く。
+pub fn has_jis_rebar_strength_limit(mat: &crate::model::Material) -> bool {
+    main_rebar_grade(mat)
         .is_some_and(|grade| grade == "SD490" || ordinary_jis_rebar_fy(grade).is_some())
 }
 
 /// 梁・柱の主筋で、適用条件の確認に基づく材料強度の直接入力が必要かを返す。
 /// 既知の高強度鉄筋名と、対応済みJIS材種以外の490 N/mm²を超えるFyを対象とする。
-pub fn requires_direct_high_strength_main_rebar(
-    mat: &crate::model::Material,
-    stb_grade: Option<&str>,
-) -> bool {
-    let grade = stb_grade.unwrap_or(&mat.name).trim();
+pub fn requires_direct_high_strength_main_rebar(mat: &crate::model::Material) -> bool {
+    let grade = mat.name.trim();
     matches!(
         grade,
         "USD590" | "USD590A" | "USD590B" | "USD685" | "USD685A" | "USD685B"
-    ) || (!has_jis_rebar_strength_limit(mat, stb_grade) && mat.fy.is_some_and(|fy| fy > 490.0))
+    ) || (!has_jis_rebar_strength_limit(mat) && mat.fy.is_some_and(|fy| fy > 490.0))
 }
 
 /// 保有水平耐力計算で梁・柱の主筋に使う鉄筋区分の材料について、強度の入力不備を返す。
 /// 高強度鉄筋の直接入力には、正の有限Fy [N/mm²] と明示の割増1.0が必要。
-pub fn main_rebar_material_strength_issue(
-    mat: &crate::model::Material,
-    stb_grade: Option<&str>,
-) -> Option<String> {
-    if !requires_direct_high_strength_main_rebar(mat, stb_grade) {
-        return rebar_material_strength_issue(mat, stb_grade);
+pub fn main_rebar_material_strength_issue(mat: &crate::model::Material) -> Option<String> {
+    if !requires_direct_high_strength_main_rebar(mat) {
+        return rebar_material_strength_issue(mat);
     }
     let reason = if mat.fy.is_none_or(|fy| !fy.is_finite() || fy <= 0.0) {
         "Fy が未指定または不正です"
@@ -330,23 +316,16 @@ pub fn main_rebar_material_strength_issue(
     } else {
         return None;
     };
-    let grade = stb_grade
-        .map(str::trim)
-        .map(|grade| format!("（元材種 {grade}）"))
-        .unwrap_or_default();
     Some(format!(
-        "材料 ID {}「{}」{grade}の保有水平耐力計算用の入力を確認してください。{reason}。設計者が認定・指定書等の適用条件を確認し、材料強度を正の有限値の Fy [N/mm²] として入力し、割増を 1.0 と明示してください",
+        "材料 ID {}「{}」の保有水平耐力計算用の入力を確認してください。{reason}。設計者が認定・指定書等の適用条件を確認し、材料強度を正の有限値の Fy [N/mm²] として入力し、割増を 1.0 と明示してください",
         mat.id.0, mat.name
     ))
 }
 
 /// 保有水平耐力計算で JIS 主筋・壁縦筋に使う材料の入力不備を返す。
 /// Fy [N/mm²] は材種の基準強度、割増は空欄または材種ごとの許容範囲が必要。
-pub fn rebar_material_strength_issue(
-    mat: &crate::model::Material,
-    stb_grade: Option<&str>,
-) -> Option<String> {
-    let grade = main_rebar_grade(mat, stb_grade)?;
+pub fn rebar_material_strength_issue(mat: &crate::model::Material) -> Option<String> {
+    let grade = main_rebar_grade(mat)?;
     if grade == "SD490" {
         return (mat.fy != Some(490.0) || mat.strength_factor.is_some_and(|factor| factor != 1.0))
             .then(|| {
@@ -383,9 +362,7 @@ pub fn rebar_f_value(name: &str) -> Option<f64> {
 
 /// 鉄筋のグレード名から降伏点（基準強度）[N/mm²] を解決する。
 ///
-/// **取り込みの境界専用**。ST-Bridge の `strength_main` などグレード名しか持たない
-/// 入力から材料を起こすときに使う。名称末尾の数値を強度とみなす推定を含むため、
-/// 内部の強度解決には用いない（[`rebar_yield_strength`]）。
+/// 規格名・既知の製品名から基準強度を解決する。
 ///
 /// [`rebar_f_value`]（異形鉄筋 `SD`・丸鋼 `SR` の接頭辞規則）で解けない名称は、
 /// 大臣認定品の高強度鉄筋として**名称末尾の数値**を強度とみなす
@@ -497,32 +474,6 @@ pub fn parse_concrete_fc(name: &str) -> Option<f64> {
     digits.parse::<f64>().ok().filter(|v| *v > 0.0)
 }
 
-/// グレード名から材料の区分を推定する。
-///
-/// **ST-Bridge の取込専用**である。ST-Bridge は材料を「グレード名」で表し
-/// （`Fc21`・`SN400B`・`SD345`）、名称が物性を一意に定める規格化された体系なので、
-/// 名前からの推定が成り立つ。
-///
-/// モデル内部では区分を [`crate::model::Material::category`] として明示的に持ち、
-/// 構造種別の判定に名前は用いない（`crate::structure_kind`）。利用者が任意の名前を
-/// 付けた材料でも正しく扱うためである。
-///
-/// 判定できない名称は `None` を返し、呼び出し側が既定を決める。
-pub fn category_of_grade(name: &str) -> Option<MaterialCategory> {
-    let upper = name.trim().to_uppercase();
-    if upper.starts_with("FC") {
-        return Some(MaterialCategory::Concrete);
-    }
-    if upper.starts_with("SD") || upper.starts_with("SR") || upper.starts_with("KH") {
-        return Some(MaterialCategory::Rebar);
-    }
-    const STEEL_PREFIX: &[&str] = &["SS", "SN", "SM", "STK", "ST", "SA", "BC", "TMCP", "LY"];
-    if STEEL_PREFIX.iter().any(|p| upper.starts_with(p)) {
-        return Some(MaterialCategory::Steel);
-    }
-    None
-}
-
 /// UI に提示する標準材料プリセット（内部単位系 N-mm-s。密度は ton/mm³）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct MaterialPreset {
@@ -613,65 +564,6 @@ pub fn material_presets() -> Vec<MaterialPreset> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// ST-Bridge の代表的なグレード名から区分を判定できることを確認する。
-    #[test]
-    fn test_category_of_grade() {
-        for (name, expected) in [
-            ("Fc21", MaterialCategory::Concrete),
-            ("FC60", MaterialCategory::Concrete),
-            ("SN400B", MaterialCategory::Steel),
-            ("SS400", MaterialCategory::Steel),
-            ("SM490A", MaterialCategory::Steel),
-            ("STKR400", MaterialCategory::Steel),
-            ("BCR295", MaterialCategory::Steel),
-            ("TMCP325", MaterialCategory::Steel),
-            ("LY225", MaterialCategory::Steel),
-            ("SD295A", MaterialCategory::Rebar),
-            ("SD345", MaterialCategory::Rebar),
-            ("SR235", MaterialCategory::Rebar),
-            ("KH785", MaterialCategory::Rebar),
-        ] {
-            assert_eq!(
-                category_of_grade(name),
-                Some(expected),
-                "グレード名 {name} の区分"
-            );
-        }
-    }
-
-    /// 判定できない名称は `None` を返し、取込側が既定を決める。
-    #[test]
-    fn test_category_of_grade_unknown() {
-        for name in ["コンクリート", "普通強度", "", "   ", "X999"] {
-            assert_eq!(category_of_grade(name), None, "未知の名称 {name:?}");
-        }
-    }
-
-    /// 判定の順序（コンクリート → 鉄筋 → 鋼材）を確認する。
-    /// `SD`/`SR` は鋼材の前方一致（`S…`）より先に判定する必要がある。
-    #[test]
-    fn test_category_of_grade_order() {
-        assert_eq!(category_of_grade("SD390"), Some(MaterialCategory::Rebar));
-        assert_eq!(category_of_grade("fc24"), Some(MaterialCategory::Concrete));
-        assert_eq!(category_of_grade("sn400b"), Some(MaterialCategory::Steel));
-        assert_eq!(
-            category_of_grade("  SD345  "),
-            Some(MaterialCategory::Rebar)
-        );
-    }
-
-    /// プリセット表の区分は、名前から推定した区分と一致する。
-    /// 一致しない項目があるとプリセットで追加した材料と ST-Bridge から
-    /// 取り込んだ同名の材料で構造種別が食い違う。
-    #[test]
-    fn test_presets_agree_with_category_of_grade() {
-        for p in material_presets() {
-            if let Some(guessed) = category_of_grade(p.name) {
-                assert_eq!(guessed, p.category, "プリセット {} の区分", p.name);
-            }
-        }
-    }
 
     /// H12 建告第2464号の基準強度表と一致することを確認する（板厚 40mm 以下）。
     #[test]
@@ -881,23 +773,17 @@ mod tests {
         assert_eq!(material_strength_factor_steel(&mk("SS400", None)), 1.1);
         assert_eq!(material_strength_factor_steel(&mk("SA440", None)), 1.05);
         assert_eq!(material_strength_factor_steel(&mk("カスタム", None)), 1.0);
-        assert_eq!(material_strength_factor_rebar(&mk("Fc24", None), None), 1.1);
-        assert_eq!(
-            material_strength_factor_rebar(&mk("SD345", None), None),
-            1.1
-        );
+        assert_eq!(material_strength_factor_rebar(&mk("Fc24", None)), 1.1);
+        assert_eq!(material_strength_factor_rebar(&mk("SD345", None)), 1.1);
         assert_eq!(
             material_strength_factor_steel(&mk("カスタム", Some(1.2))),
             1.2
         );
-        assert_eq!(
-            material_strength_factor_rebar(&mk("Fc24", Some(1.0)), None),
-            1.0
-        );
+        assert_eq!(material_strength_factor_rebar(&mk("Fc24", Some(1.0))), 1.0);
         let mut conflict = mk("SD490", Some(1.2));
         conflict.category = MaterialCategory::Concrete;
-        assert_eq!(material_strength_factor_rebar(&conflict, None), 1.2);
-        assert!(rebar_material_strength_issue(&conflict, None).is_none());
+        assert_eq!(material_strength_factor_rebar(&conflict), 1.2);
+        assert!(rebar_material_strength_issue(&conflict).is_none());
     }
 
     #[test]
@@ -924,30 +810,18 @@ mod tests {
         ] {
             let mut mat = rebar_mat(grade, Some(fy));
             mat.strength_factor = Some(1.1);
-            assert!(
-                rebar_material_strength_issue(&mat, None).is_none(),
-                "{grade}"
-            );
+            assert!(rebar_material_strength_issue(&mat).is_none(), "{grade}");
             mat.strength_factor = Some(1.2);
-            assert!(
-                rebar_material_strength_issue(&mat, None).is_some(),
-                "{grade}"
-            );
+            assert!(rebar_material_strength_issue(&mat).is_some(), "{grade}");
             mat.strength_factor = Some(1.0);
             mat.fy = Some(fy + 1.0);
-            assert!(
-                rebar_material_strength_issue(&mat, None).is_some(),
-                "{grade}"
-            );
+            assert!(rebar_material_strength_issue(&mat).is_some(), "{grade}");
         }
 
         for name in ["sd345", "SD345-別材料", "USD685"] {
             let mut mat = rebar_mat(name, Some(400.0));
             mat.strength_factor = Some(1.2);
-            assert!(
-                rebar_material_strength_issue(&mat, None).is_none(),
-                "{name}"
-            );
+            assert!(rebar_material_strength_issue(&mat).is_none(), "{name}");
         }
     }
 

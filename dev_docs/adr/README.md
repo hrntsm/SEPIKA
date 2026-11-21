@@ -4,6 +4,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 過去の ADR の MCP・GUI 外部 AI 接続専用の契約は、一覧で accepted のものも含めて失効しています。共通機能、通常 GUI、OVIKA の判断は引き継ぎます。[ADR 0140 の適用範囲](0140-remove-mcp-and-local-ai.md#既存-adr-の適用範囲)
 
+ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remove-st-bridge.md#既存-adr-の適用範囲) で廃止しました。
+
 ## 一覧
 
 | # | Status | タイトル |
@@ -19,7 +21,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0009](0009-fail-loud-unassigned-inputs.md) | accepted | 未設定の材料・断面を既定値で埋めない |
 | 0010 | — | 欠番（HHT-α 廃止は handoff と現行仕様で足りるため ADR 化しない） |
 | [0011](0011-no-gpu-reserved-crates.md) | accepted | GPU は恒久的に実装せず、予約クレートを置かない |
-| [0012](0012-stbridge-partial-roundtrip.md) | accepted | ST-Bridge は完全往復を保証しない |
+| [0012](0012-stbridge-partial-roundtrip.md) | superseded by ADR-0141 | ST-Bridge は完全往復を保証しない |
 | [0013](0013-adopt-wall-element-model.md) | accepted | 耐震壁は壁エレメント置換モデルを採用し、TVLEM は採用しない |
 | [0014](0014-schema-compatibility.md) | accepted | スキーマ互換は初回リリースまで維持しない |
 | [0015](0015-cantilever-secondary-members.md) | accepted | 片持ち小梁は支持条件で表し、基端モーメントは伝達しない |
@@ -43,6 +45,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0033](0033-steel-design-weight-vs-physical-mass.md) | accepted | 鋼材の設計重量（78.5 kN/m³）と物理質量（7.85 t/m³）を分離する |
 | [0034](0034-rc-section-purpose-types-and-real-rebar.md) | accepted | RC 断面を用途別に型分離し、実配筋モデルへ移行する |
 | [0035](0035-lumped-mass-physical-mass.md) | accepted | 質点系の層質量を物理質量相当へ統一する |
+| [0036](0036-stbridge-section-use-explicit-mapping.md) | partially superseded by ADR-0141 | ST-Bridge 断面と主架構用途の対応を明示する |
 | [0037](0037-cantilever-slab-load-to-attachment-girder.md) | accepted | 線アンカーの取り付く床板は取付き大梁だけへ等分布伝達する |
 | [0038](0038-cantilever-slab-tip-load-transfer.md) | accepted | 片持ちスラブの先端荷重は取付き梁へ力のみ等分布伝達する |
 | [0039](0039-section-property-basis.md) | accepted | 断面性能の算定元を項目別に区別し、フィレット半径・角Rの編集時の更新を分ける |
@@ -58,14 +61,14 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0045](0045-wall-committed-response.md) | accepted | 壁単体の確定step応答を線材応答から分離する |
 
 | [0046](0046-polygon-floor-finite-segment-integration.md) | accepted | 全周支持の凹形床を有限線分最近接と境界実面積で分配し、モデル差と格子誤差を区別する |
-| [0047](0047-source-story-and-analysis-membership.md) | accepted | 原階の明示所属は解析用所属から独立して保存する |
+| [0047](0047-source-story-and-analysis-membership.md) | superseded by ADR-0141 | 原階の明示所属は解析用所属から独立して保存する |
 | [0048](0048-rc-beam-reference-total-rotation.md) | accepted | RC梁の明示基準総角と追加端回転を分離する |
 | [0049](0049-purpose-specific-story-evaluation.md) | accepted | 目的別確定評価点と層切断面力を保持する |
 | [0050](0050-wall-weight-purpose-partitions.md) | accepted | 壁版の物理総量からDL支持と地震用階帯を独立生成する |
 
-| [0051](0051-stbridge-strength-input-and-section-material.md) | accepted | ST-Bridgeの元強度指定と断面材料を分離する |
+| [0051](0051-stbridge-strength-input-and-section-material.md) | partially superseded by ADR-0141 | ST-Bridgeの元強度指定と断面材料を分離する |
 
-| [0052](0052-stbridge-rebar-source-and-analysis-boundary.md) | proposed | 標準配筋の元入力と解析用配筋を分離する |
+| [0052](0052-stbridge-rebar-source-and-analysis-boundary.md) | superseded by ADR-0141 | 標準配筋の元入力と解析用配筋を分離する |
 
 | [0053](0053-src-material-regions-and-discrete-rebar.md) | accepted | 矩形SRCの内蔵H控除と離散主筋近似・独立質量を分離する |
 
@@ -128,18 +131,18 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0086](0086-initial-stiffness-damping.md) | partially superseded by ADR-0104 | 非線形時刻歴の既定減衰を未載荷の初期剛性比例とする |
 | [0087](0087-gui-owned-study-and-local-ai.md) | partially superseded by ADR-0140 | GUIを検討の所有者とし、外部AIは名前付きパイプで比較案を操作する |
 
-| [0088](0088-version-scoped-references.md) | accepted | 対象参照を入力版内で照合し、計算開始時の案版を保存する |
+| [0088](0088-version-scoped-references.md) | partially superseded by ADR-0141 | 対象参照を入力版内で照合し、計算開始時の案版を保存する |
 | [0089](0089-recorded-result-and-quantity-evidence.md) | accepted | 結果と数量の根拠を固定入力の参照から開く |
 
 | [0090](0090-study-calculation-evidence.md) | accepted | 検討の計算根拠を現在の案入力と分離して保存する |
 
-| [0091](0091-study-comparison-evidence.md) | accepted | 比較用のケース別検定根拠を原本から分け、数量の固定対象を保持する |
+| [0091](0091-study-comparison-evidence.md) | partially superseded by ADR-0141 | 比較用のケース別検定根拠を原本から分け、数量の固定対象を保持する |
 
-| [0092](0092-confirmed-study-adoption.md) | accepted | 確認済み断面割当を既存Undoで採用し、判断根拠を固定する |
+| [0092](0092-confirmed-study-adoption.md) | partially superseded by ADR-0141 | 確認済み断面割当を既存Undoで採用し、判断根拠を固定する |
 | [0093](0093-gui-ai-connection-protocol.md) | superseded by ADR-0140 | GUIの検討操作を限定DACLのパイプと保存受理台帳で中継する |
 | [0094](0094-prepared-ai-study-requests.md) | superseded by ADR-0140 | AI依頼を未開始から保存し、確認元入力を編集対象と分離する |
 | [0095](0095-fixed-steel-quantity-evidence.md) | accepted | 固定したS造部材の鋼材数量と全体数量の算定状態を分離する |
-| [0096](0096-stbridge-built-box-provenance.md) | accepted | ST-Bridge組立BOXの再出力は原形状の来歴で区別する |
+| [0096](0096-stbridge-built-box-provenance.md) | superseded by ADR-0141 | ST-Bridge組立BOXの再出力は原形状の来歴で区別する |
 | [0097](0097-secondary-steel-post-check.md) | accepted | 鋼製間柱の独立検定条件を鉛直荷重伝達と分離する |
 | [0098](0098-fixed-elastic-story-yield.md) | accepted | 共通弾性静的応答を固定した層骨格と未同定診断を分離する |
 | [0100](0100-rounded-cft-flexure.md) | accepted | 角形CFTの許容・終局曲げで同じ角部材料領域を積分する |
@@ -158,7 +161,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0108](0108-eccentric-brace-buckling-length.md) | partially superseded by ADR-0114 | 偏心ブレースの軸力接続と圧縮座屈長さを分離する |
 
-| [0109](0109-stb-reference-placement.md) | accepted | STBの配置基準を材軸偏心へ変換し未確定の幾何を拒否する |
+| [0109](0109-stb-reference-placement.md) | superseded by ADR-0141 | STBの配置基準を材軸偏心へ変換し未確定の幾何を拒否する |
 
 | [0110](0110-steel-column-explicit-buckling-length.md) | superseded by ADR-0113 and ADR-0114 | 通常S柱は両軸の座屈長さ直接指定を必要とする |
 
@@ -201,6 +204,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0138](0138-common-planar-column-drift.md) | accepted | 二次元線形せん断型の柱剛性に加力方向の共通層間変位を求める |
 | [0139](0139-rc-beam-ultimate-shear-demand.md) | accepted | RC矩形梁の要求せん断力の上側評価を静的終局検定の条件とする |
 | [0140](0140-remove-mcp-and-local-ai.md) | accepted | MCP サーバと GUI の外部 AI 接続を廃止する |
+| [0141](0141-remove-st-bridge.md) | accepted | ST-Bridge の入出力と専用情報の保持を廃止する |
 
 ## 規約
 

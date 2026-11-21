@@ -455,7 +455,7 @@ fn wall_plates_list(ui: &mut egui::Ui, app: &mut App) {
     ui.strong("壁版");
     if app.core.model.wall_plates.is_empty() {
         ui.label(
-            "壁版がありません（ST-Bridge の取り込み、または下の「囲まれた壁版を追加」\
+            "壁版がありません（下の「囲まれた壁版を追加」\
              「取り付く壁版を追加」で作ります）。",
         );
         return;

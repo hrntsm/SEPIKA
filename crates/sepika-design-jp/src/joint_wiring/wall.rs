@@ -264,22 +264,6 @@ fn check_walls_selected(
             if !bindings.iter().any(|binding| binding.column == m.elem.id) {
                 continue;
             }
-            if matches!(
-                m.sec.shape,
-                Some(
-                    SectionShape::RcColumnRect { .. }
-                        | SectionShape::SrcColumnRect { .. }
-                        | SectionShape::RcColumnCircle { .. }
-                        | SectionShape::RcBeamRect { .. }
-                        | SectionShape::SrcBeamRect { .. }
-                )
-            ) {
-                if let Err(reason) = model.ensure_stb_rebar_supported(m.sec.id) {
-                    allowable_issue = Some(reason.clone());
-                    nonlinear_issue = Some(reason);
-                    continue;
-                }
-            }
             let steel_shear = match m.sec.shape {
                 Some(
                     SectionShape::SrcBeamRect {
@@ -376,10 +360,6 @@ fn check_walls_selected(
                         nonlinear_issue = Some(format!("側柱 ID {} の主筋量・骨格用有効断面を解決できません（同質の正方形RC側柱のみ対応）", column.id.0));
                         continue;
                     };
-                    if let Err(reason) = model.ensure_stb_rebar_supported(section.id) {
-                        nonlinear_issue = Some(reason);
-                        continue;
-                    }
                     if b != d {
                         nonlinear_issue = Some(format!(
                             "側柱 ID {} の骨格用有効断面は未対応です（正方形RC側柱のみ対応）",

@@ -162,7 +162,7 @@ fn public_analysis_uses_current_h_and_rounded_box_j_in_tl_over_gj() {
 }
 
 #[test]
-fn public_src_analysis_uses_gc_of_member_concrete_selected_by_stb_strength() {
+fn public_src_analysis_uses_gc_of_concrete_assigned_to_section() {
     let mut model = cantilever(
         SectionShape::SrcColumnRect {
             b: 300.0,
@@ -206,16 +206,7 @@ fn public_src_analysis_uses_gc_of_member_concrete_selected_by_stb_strength() {
         fy: Some(345.0),
         ..model.materials[0].clone()
     });
-    model.stb_strengths.materials.push(StbGradeMaterial {
-        grade: "Fc60".into(),
-        material: MaterialId(2),
-    });
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Element(ElemId(0)),
-        node: NodeId(0),
-        node_order: vec![],
-        concrete: Some("Fc60".into()),
-    });
+    model.sections[0].material = Some(MaterialId(2));
     assert_twist(&model, 74_180_413_264_102.56);
     model.materials[2].shear = None;
     assert_twist(&model, 51_778_762_873_477.56);
@@ -332,7 +323,7 @@ fn cft_material_failure_groups_all_members_and_recovers_on_the_next_call() {
 }
 
 #[test]
-fn cft_diagnostics_distinguish_actual_member_materials_on_the_same_section() {
+fn cft_diagnostics_group_members_by_assigned_concrete() {
     let mut model = cantilever(
         SectionShape::CftPipe {
             outer_dia: 400.0,
@@ -350,24 +341,11 @@ fn cft_diagnostics_distinguish_actual_member_materials_on_the_same_section() {
     fc30.name = "Fc30".into();
     fc30.fc = Some(30.0);
     model.materials.push(fc30);
-    model.stb_strengths.materials = vec![
-        StbGradeMaterial {
-            grade: "Fc24".into(),
-            material: MaterialId(1),
-        },
-        StbGradeMaterial {
-            grade: "Fc30".into(),
-            material: MaterialId(2),
-        },
-    ];
-    model.stb_strengths.members = (0..3)
-        .map(|id| StbMemberStrength {
-            target: StrengthTarget::Element(ElemId(id)),
-            node: NodeId(0),
-            node_order: vec![],
-            concrete: Some(if id == 2 { "Fc30" } else { "Fc24" }.into()),
-        })
-        .collect();
+    let mut alternate = model.sections[0].clone();
+    alternate.id = SectionId(1);
+    alternate.material = Some(MaterialId(2));
+    model.sections.push(alternate);
+    model.elements[2].section = Some(SectionId(1));
     assert_eq!(
         model.element_material(&model.elements[0]).unwrap().id,
         MaterialId(1)

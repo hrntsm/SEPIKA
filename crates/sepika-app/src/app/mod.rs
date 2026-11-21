@@ -1858,36 +1858,6 @@ impl App {
             }
             ui.separator();
             if ui
-                .button("📥 ST-Bridge 読込…")
-                .on_hover_text(
-                    "ST-Bridge 2.0 サブセット（節点・部材・断面・材料・節点荷重）。支点・部材荷重・組合せは含まれません",
-                )
-                .clicked()
-            {
-                self.import_stbridge_dialog();
-                ui.close();
-            }
-            if ui
-                .button("📤 ST-Bridge 書出（開発中）…")
-                .on_hover_text(
-                     "標準 ST-Bridge 2.0.2（StbSecColumn_S 等＋形鋼ライブラリ）で書き出す。BIM・他ソフト向け。材料はグレード名で表し、支点・荷重・材料の E/ν は含まれません（完全一致の保存は .ovika）",
-                )
-                .clicked()
-            {
-                self.export_stbridge_dialog();
-                ui.close();
-            }
-            ui.scope(|ui| {
-                ui.set_max_width(360.0);
-                ui.add(
-                    egui::Label::new(
-                        "ST-Bridge書き出しは開発中です。一部の形状・属性・断面性能を正しく出力できない場合があります。出力内容は利用先で確認してください。モデルの保存にはOVIKAを使用してください。",
-                    )
-                    .wrap(),
-                );
-            });
-            ui.separator();
-            if ui
                 .button("🌊 波形を保存…")
                 .on_hover_text(
                     "時刻歴応答解析の入力波形（CSV）を波形ライブラリへコピーします。\

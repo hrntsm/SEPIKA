@@ -424,10 +424,7 @@ pub fn run_member_design_checks(
                 None
             }
         };
-        if let Err(reason) = model
-            .ensure_stb_rebar_supported(sec.id)
-            .and_then(|()| sec.ensure_properties_resolved())
-        {
+        if let Err(reason) = sec.ensure_properties_resolved() {
             for (pos, forces) in &mf.at {
                 push_strength_outcome(
                     &mut member_checks,

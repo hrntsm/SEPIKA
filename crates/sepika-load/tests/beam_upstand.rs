@@ -477,7 +477,7 @@ fn 実部材化済み小梁は主架構でのみ嵩上げを持つ() {
 }
 
 #[test]
-fn stb床板材料を断面材料より優先し採用元の変更と密度変更に追随する() {
+fn 床板断面の材料割当と密度変更が嵩上げ重量に反映される() {
     let mut m = model();
     m.floor_assignment_regions.regions[1].assignment = PlateAssignment::NoPlate;
     m.slabs.pop();
@@ -485,16 +485,8 @@ fn stb床板材料を断面材料より優先し採用元の変更と密度変�
     alternate.id = MaterialId(2);
     alternate.density = 18e-6 / sepika_core::units::GRAVITY_MM_S2;
     m.materials.push(alternate);
-    m.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Slab(SlabId(0)),
-        node: NodeId(0),
-        node_order: vec![],
-        concrete: Some("Fc24".into()),
-    });
-    m.stb_strengths.materials.push(StbGradeMaterial {
-        grade: "Fc24".into(),
-        material: MaterialId(2),
-    });
+    let section = m.slabs[0].section().unwrap().index();
+    m.sections[section].material = Some(MaterialId(2));
     assert!((weight(&m) - 2160.).abs() < 1e-7);
     assert!(
         beam_upstand_segments(&m, SupportMemberId::Primary(ElemId(0)))
@@ -504,9 +496,9 @@ fn stb床板材料を断面材料より優先し採用元の変更と密度変�
     );
     m.materials[2].density = 12e-6 / sepika_core::units::GRAVITY_MM_S2;
     assert!((weight(&m) - 1440.).abs() < 1e-7);
-    m.stb_strengths.materials[0].material = MaterialId(1);
+    m.sections[section].material = Some(MaterialId(1));
     assert!((weight(&m) - 2880.).abs() < 1e-7);
-    m.stb_strengths.materials[0].material = MaterialId(99);
+    m.sections[section].material = Some(MaterialId(99));
     assert!(beam_upstand_segments(&m, SupportMemberId::Primary(ElemId(0))).is_err());
 }
 

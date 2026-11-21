@@ -219,14 +219,12 @@ fn fiber_rebar_factor(
 ) -> f64 {
     // その他の材種で主材料に割増を設定したモデルも使われるため、主筋材の参照は割増範囲を検証する材種に限る。
     let material = model
-        .element_rebar_material_with_grade(data)
-        .filter(|(mat, grade)| {
-            sepika_core::material_grade::has_jis_rebar_strength_limit(mat, *grade)
-                || sepika_core::material_grade::requires_direct_high_strength_main_rebar(
-                    mat, *grade,
-                )
+        .element_rebar_material(data)
+        .filter(|mat| {
+            sepika_core::material_grade::has_jis_rebar_strength_limit(mat)
+                || sepika_core::material_grade::requires_direct_high_strength_main_rebar(mat)
         })
-        .or_else(|| model.element_material(data).map(|mat| (mat, None)));
+        .or_else(|| model.element_material(data));
     basis.rebar_factor(material)
 }
 

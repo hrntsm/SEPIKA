@@ -1,8 +1,6 @@
 use super::*;
 use sepika_core::ids::WallPlateId;
-use sepika_core::model::{
-    ElementKind, MaterialCategory, Model, StbGradeMaterial, StbMemberStrength, StrengthTarget,
-};
+use sepika_core::model::{ElementKind, MaterialCategory, Model};
 use sepika_core::section_shape::{
     BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
 };
@@ -312,7 +310,7 @@ fn preparation_and_pushover_report_the_same_missing_wall_direction() {
 }
 
 #[test]
-fn same_section_wall_member_fc_and_direction_materials_survive_expansion_and_renumbering() {
+fn wall_section_fc_and_direction_materials_survive_expansion_and_renumbering() {
     let mut model = fixture();
     let original_nodes = model.nodes.clone();
     let node_offset = original_nodes.len() as u32;
@@ -344,27 +342,14 @@ fn same_section_wall_member_fc_and_direction_materials_survive_expansion_and_ren
     fc30.name = "Fc30".into();
     fc30.fc = Some(30.0);
     model.materials.push(fc30);
-    model.stb_strengths.materials = vec![
-        StbGradeMaterial {
-            grade: "Fc24".into(),
-            material: MaterialId(0),
-        },
-        StbGradeMaterial {
-            grade: "Fc30".into(),
-            material: MaterialId(3),
-        },
-    ];
-    for (wall, node, grade) in [
-        (WallPlateId(0), NodeId(0), "Fc30"),
-        (second, NodeId(node_offset), "Fc24"),
-    ] {
-        model.stb_strengths.members.push(StbMemberStrength {
-            target: StrengthTarget::Wall(wall),
-            node,
-            node_order: vec![node],
-            concrete: Some(grade.into()),
-        });
-    }
+    let mut alternate = model
+        .wall_plate_section(&model.wall_plates[0])
+        .unwrap()
+        .clone();
+    alternate.id = SectionId(model.sections.len() as u32);
+    alternate.material = Some(MaterialId(3));
+    model.wall_plates[0].section = Some(alternate.id);
+    model.sections.push(alternate);
     sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut model);
     for reverse in [false, true] {
         if reverse {
@@ -403,121 +388,6 @@ fn same_section_wall_member_fc_and_direction_materials_survive_expansion_and_ren
         }
         assert!(capacities[0][0] > capacities[1][0]);
     }
-}
-
-#[test]
-fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
-    use sepika_core::model::{StbRebarStrength, StbSectionStrength};
-    let mut model = fixture();
-    let bar = |part: &str, position: Option<&str>, native_material| StbRebarStrength {
-        element: "StbSecBarWall".into(),
-        part: part.into(),
-        position: position.map(str::to_owned),
-        native_material,
-        diameter: None,
-        strength: None,
-    };
-    model.stb_strengths.sections.push(StbSectionStrength {
-        built_box: None,
-        section: SectionId(2),
-        concrete: None,
-        native_material: None,
-        native_rebar: false,
-        rebar: None,
-        reinforcement: vec![
-            bar("main", None, Some(MaterialId(1))),
-            bar("stirrup", None, Some(MaterialId(2))),
-        ],
-        steel: vec![],
-    });
-    model.sections[2].rebar_material = None;
-    model.sections[2].shear_rebar_material = None;
-    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
-    let wall = expanded
-        .elements
-        .iter()
-        .find(|e| e.kind == ElementKind::Wall)
-        .unwrap();
-    assert!(expanded.element_rebar_material(wall).is_none());
-    assert!(expanded.element_shear_rebar_material(wall).is_none());
-    model.stb_strengths.sections[0].reinforcement = vec![
-        bar("vertical", None, Some(MaterialId(1))),
-        bar("horizontal", None, Some(MaterialId(2))),
-    ];
-    assert!(capacity(&model)[0] > 0.0);
-    for position in [Some("TOP"), Some("BOTTOM")] {
-        model.stb_strengths.sections[0].reinforcement[1].position = position.map(str::to_owned);
-        let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
-        let wall = expanded
-            .elements
-            .iter()
-            .find(|e| e.kind == ElementKind::Wall)
-            .unwrap();
-        assert!(WallElement::directional_shear_capacity_at_reference(
-            wall,
-            &expanded,
-            StrengthBasis::Nominal,
-            0.0,
-            [1.0; 2]
-        )
-        .unwrap_err()
-        .contains("横筋材料"));
-    }
-    model.stb_strengths.sections[0].reinforcement[1].position = None;
-    let mut same_grade = model.materials[2].clone();
-    same_grade.id = MaterialId(3);
-    same_grade.strength_factor = Some(1.2);
-    model.materials.push(same_grade);
-    model.stb_strengths.sections[0].reinforcement.push(bar(
-        "horizontal",
-        None,
-        Some(MaterialId(3)),
-    ));
-    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&model);
-    let wall = expanded
-        .elements
-        .iter()
-        .find(|e| e.kind == ElementKind::Wall)
-        .unwrap();
-    assert!(WallElement::directional_shear_capacity_at_reference(
-        wall,
-        &expanded,
-        StrengthBasis::MaterialStrength,
-        0.0,
-        [1.0; 2]
-    )
-    .unwrap_err()
-    .contains("横筋材料"));
-    let mut app = App::default();
-    app.load_model(model);
-    assert!(
-        app.apply_model_edit(Box::new(sepika_edit::SetSectionMaterial {
-            section: SectionId(2),
-            role: sepika_edit::SectionMaterialRole::ShearRebar,
-            material: Some(MaterialId(2)),
-        }))
-    );
-    assert!(capacity(&app.core.model)[0] > 0.0);
-    assert!(
-        app.apply_model_edit(Box::new(sepika_edit::SetSectionMaterial {
-            section: SectionId(2),
-            role: sepika_edit::SectionMaterialRole::ShearRebar,
-            material: None,
-        }))
-    );
-    let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
-    let wall = expanded
-        .elements
-        .iter()
-        .find(|e| e.kind == ElementKind::Wall)
-        .unwrap();
-    assert!(expanded.element_shear_rebar_material(wall).is_none());
-    assert_eq!(
-        expanded.element_rebar_material(wall).unwrap().id,
-        MaterialId(1)
-    );
-    app.undo_action();
-    assert!(capacity(&app.core.model)[0] > 0.0);
 }
 
 #[test]

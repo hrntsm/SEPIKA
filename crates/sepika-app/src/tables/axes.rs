@@ -45,7 +45,7 @@ pub fn axes_table(ui: &mut egui::Ui, app: &mut App) {
                 "柱（両端の水平距離が 1mm 未満の線材）が立つ位置に、X 方向・Y 方向の\
                  通り芯を作ります。座標の昇順に、そのグループで未使用の最小番号で\
                  X1・X2… と名付けます。\
-                 手動で作った通り・ST-Bridge から取り込んだ通り・名前を変更した通りは\
+                 手動で作った通り・名前を変更した通りは\
                  保護され、同じ位置には新しい通りを作りません。\
                  通り芯は構造計算に用いないため、生成しても解析結果は陳腐化しません。",
             )
@@ -63,8 +63,7 @@ pub fn axes_table(ui: &mut egui::Ui, app: &mut App) {
     if app.core.model.axes.is_empty() {
         ui.colored_label(
             crate::theme::UI_MUTED,
-            "通り芯はありません。「柱位置から自動生成」で作成するか、\
-             ST-Bridge ファイル（StbAxes）を読み込むと取り込まれます。",
+            "通り芯はありません。「柱位置から自動生成」で作成できます。",
         );
         return;
     }

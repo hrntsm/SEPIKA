@@ -419,7 +419,7 @@ pub(crate) fn member_rebar_material_strength_issue(
     {
         return None;
     }
-    let (material, grade) = model.element_rebar_material_input(data)?;
+    let material = model.element_rebar_material(data)?;
     if material.category != MaterialCategory::Rebar {
         return Some(format!(
             "部材 ID {} の主筋の材料 ID {}「{}」の区分は「{}」です。\
@@ -433,7 +433,7 @@ pub(crate) fn member_rebar_material_strength_issue(
     if basis != super::StrengthBasis::MaterialStrength {
         return None;
     }
-    sepika_core::material_grade::main_rebar_material_strength_issue(material, grade)
+    sepika_core::material_grade::main_rebar_material_strength_issue(material)
         .map(|reason| format!("部材 ID {} の主筋の{reason}", data.id.0))
 }
 

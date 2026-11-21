@@ -235,12 +235,7 @@ pub(in crate::app::study) mod projection {
             };
             after.section = before.section;
         }
-        let mut baseline_model = baseline.model.clone();
-        if baseline_model.assign_stb_node_ids().is_err() || candidate.assign_stb_node_ids().is_err()
-        {
-            return false;
-        }
-        bincode::serialize(&baseline_model).unwrap() == bincode::serialize(&candidate).unwrap()
+        bincode::serialize(&baseline.model).unwrap() == bincode::serialize(&candidate).unwrap()
     }
 
     pub(in crate::app::study) fn condition_differences(

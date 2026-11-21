@@ -96,7 +96,6 @@ pub fn model() -> Model {
             name: "1F".into(),
             elevation: Some(3000.0),
             sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids: (0..4).map(NodeId).collect(),
             seismic_weight: None,
             weight_override: None,
@@ -167,23 +166,18 @@ pub fn moved_ends() -> SecondaryMemberEnds {
     ])
 }
 
-pub fn with_stb_strengths(mut model: Model, id: SecondaryMemberId) -> Model {
-    model.stb_strengths.sections.push(StbSectionStrength {
-        built_box: None,
-        section: SectionId(0),
-        concrete: Some("Fc24".into()),
-        native_material: None,
-        native_rebar: false,
-        rebar: None,
-        reinforcement: vec![],
-        steel: vec![],
-    });
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Secondary(id),
-        node: NodeId(0),
-        node_order: vec![],
-        concrete: Some("Fc30".into()),
-    });
-    model.prepare_stb_strength_materials();
+pub fn with_fc30_secondary_section(mut model: Model) -> Model {
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(model.materials.len() as u32);
+    concrete.name = "Fc30".into();
+    concrete.fc = Some(30.0);
+    let member = &model.unassigned_beams[0];
+    let mut section = model.section(member.section.unwrap()).unwrap().clone();
+    section.id = SectionId(model.sections.len() as u32);
+    section.name += " Fc30";
+    section.material = Some(concrete.id);
+    model.unassigned_beams[0].section = Some(section.id);
+    model.materials.push(concrete);
+    model.sections.push(section);
     model
 }

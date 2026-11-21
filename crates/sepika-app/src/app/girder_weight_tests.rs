@@ -802,10 +802,6 @@ fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_b
     alternate_section.id = SectionId(3);
     alternate_section.material = Some(MaterialId(2));
     base.sections.push(alternate_section);
-    base.stb_strengths.materials.push(StbGradeMaterial {
-        grade: "Fc24".into(),
-        material: MaterialId(1),
-    });
     let upstand = |model: &Model| {
         sepika_load::self_weight::beam_upstand_segments(model, SupportMemberId::Primary(ElemId(0)))
             .unwrap()
@@ -842,20 +838,6 @@ fn beam_upstand_edits_undo_redo_save_reload_and_preparation_keep_material_mass_b
                 coord: [3000., 0., 2650.],
             }),
             1440.,
-        ),
-        (
-            Box::new(SetStbStrengths {
-                input: StbStrengthInput {
-                    members: vec![StbMemberStrength {
-                        target: StrengthTarget::Slab(sepika_core::ids::SlabId(0)),
-                        node: NodeId(0),
-                        node_order: vec![],
-                        concrete: Some("Fc24".into()),
-                    }],
-                    ..Default::default()
-                },
-            }),
-            2880.,
         ),
         (
             Box::new(SetMemberEndOffsets {

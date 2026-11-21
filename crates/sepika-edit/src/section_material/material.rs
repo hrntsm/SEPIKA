@@ -81,27 +81,15 @@ fn shift_material_ids(model: &mut Model, f: impl FnMut(&mut MaterialId)) {
 /// 指定材料を参照している断面が存在するか（削除ガード用）。
 /// **材料は断面が持つ**ため、参照元は断面だけを見ればよい。
 fn material_in_use(model: &Model, id: MaterialId) -> bool {
-    model
-        .stb_strengths
-        .materials
-        .iter()
-        .any(|m| m.material == id)
-        || model.stb_strengths.sections.iter().any(|s| {
-            s.native_material == Some(id)
-                || s.steel.iter().any(|r| r.native_material == Some(id))
-                || s.reinforcement
-                    .iter()
-                    .any(|r| r.native_material == Some(id))
-        })
-        || model.sections.iter().any(|s| {
-            [
-                s.material,
-                s.rebar_material,
-                s.shear_rebar_material,
-                s.steel_material,
-            ]
-            .contains(&Some(id))
-        })
+    model.sections.iter().any(|s| {
+        [
+            s.material,
+            s.rebar_material,
+            s.shear_rebar_material,
+            s.steel_material,
+        ]
+        .contains(&Some(id))
+    })
 }
 
 /// 編集対象の材料プロパティ。
@@ -148,30 +136,14 @@ impl EditCommand for SetMaterialField {
         {
             return reject("必須空欄");
         }
-        let strength_input = model.stb_strengths.clone();
-        let strength_stories = model.source_stories.clone();
         let old = replace_material_field(&mut model.materials[idx], self.field, self.value);
-        if self.field == MaterialField::Fc {
-            let grade = self
-                .value
-                .map(|v| format!("Fc{v}"))
-                .unwrap_or_else(|| "未指定Fc".into());
-            model.replace_stb_material_grade(self.id, &grade);
-        }
-        if old.map(f64::to_bits) == self.value.map(f64::to_bits)
-            && model.stb_strengths == strength_input
-            && model.source_stories == strength_stories
-        {
+        if old.map(f64::to_bits) == self.value.map(f64::to_bits) {
             return Box::new(Noop);
         }
-        Box::new(crate::strength::RestoreStrengthInput {
-            input: strength_input,
-            stories: strength_stories,
-            inverse: Box::new(RestoreMaterialField {
-                id: self.id,
-                field: self.field,
-                value: old,
-            }),
+        Box::new(RestoreMaterialField {
+            id: self.id,
+            field: self.field,
+            value: old,
         })
     }
 

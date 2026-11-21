@@ -11,7 +11,6 @@ pub struct BeamUpstandSegment {
     pub beam: SupportMemberId,
     pub slab: SlabId,
     pub material: MaterialId,
-    pub stb_strength_source: Option<sepika_core::model::StrengthSource>,
     pub design_unit_weight_n_per_mm3: f64,
     pub physical_density_t_per_mm3: f64,
     /// 始端から終端を向いた左側は0、右側は1。
@@ -27,20 +26,6 @@ pub struct BeamUpstandSegment {
     pub mass_equivalent_load: MemberLoadKind,
 }
 
-impl BeamUpstandSegment {
-    pub fn material_source_label(&self) -> &'static str {
-        use sepika_core::model::StrengthSource;
-        match self.stb_strength_source {
-            None => "床断面",
-            Some(StrengthSource::Member) => "STB部材",
-            Some(StrengthSource::Section) => "STB断面",
-            Some(StrengthSource::Story) => "STB階",
-            Some(StrengthSource::Common) => "STB共通",
-            Some(StrengthSource::Diameter) => "STB径別",
-        }
-    }
-}
-
 struct Candidate {
     slab: SlabId,
     side: usize,
@@ -49,24 +34,6 @@ struct Candidate {
     material: MaterialId,
     gamma: f64,
     density: f64,
-    source: Option<sepika_core::model::StrengthSource>,
-}
-
-fn material_source(
-    model: &Model,
-    slab: SlabId,
-) -> Result<Option<sepika_core::model::StrengthSource>, String> {
-    model
-        .stb_strengths
-        .members
-        .iter()
-        .find(|input| input.target == sepika_core::model::StrengthTarget::Slab(slab))
-        .map(|input| {
-            model
-                .resolve_stb_concrete(input)
-                .map(|resolved| resolved.source)
-        })
-        .transpose()
 }
 
 /// 主架構と未実部材化小梁の嵩上げ区間を一度ずつ列挙する。
@@ -298,7 +265,6 @@ pub fn beam_upstand_segments(
             material: mat.id,
             gamma,
             density: mat.density,
-            source: material_source(model, id).map_err(|e| fail(&e))?,
         });
     }
     for (id, span) in attached {
@@ -345,7 +311,6 @@ pub fn beam_upstand_segments(
             material: mat.id,
             gamma,
             density: mat.density,
-            source: material_source(model, id).map_err(|e| fail(&e))?,
         });
     }
     if candidates.is_empty() {
@@ -438,7 +403,6 @@ pub fn beam_upstand_segments(
                     beam: member,
                     slab: c.slab,
                     material: c.material,
-                    stb_strength_source: c.source,
                     design_unit_weight_n_per_mm3: c.gamma,
                     physical_density_t_per_mm3: c.density,
                     side: c.side,

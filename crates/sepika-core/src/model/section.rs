@@ -481,26 +481,6 @@ impl Section {
             None => self.name.clone(),
         }
     }
-
-    /// 断面性能・形状・材料が一致するか（同一性キーは見ない）。
-    pub fn properties_eq(&self, other: &Section) -> bool {
-        self.area == other.area
-            && self.iy == other.iy
-            && self.iz == other.iz
-            && self.j == other.j
-            && self.depth == other.depth
-            && self.width == other.width
-            && self.as_y == other.as_y
-            && self.as_z == other.as_z
-            && self.panel_thickness == other.panel_thickness
-            && self.thickness == other.thickness
-            && self.shape == other.shape
-            && self.material == other.material
-            && self.rebar_material == other.rebar_material
-            && self.shear_rebar_material == other.shear_rebar_material
-            && self.steel_material == other.steel_material
-            && self.property_basis == other.property_basis
-    }
 }
 
 /// `sections` に符号＋階が `key` と一致する断面があるか（`skip` の添字は除く）。
@@ -525,185 +505,44 @@ impl Model {
                 return self.wall_plate_material(self.wall_plate(*origin)?);
             }
         }
-        if self
-            .stb_strengths
-            .members
-            .iter()
-            .any(|m| m.target == StrengthTarget::Element(elem.id))
-        {
-            return self.stb_concrete_material(StrengthTarget::Element(elem.id));
-        }
         let section = self.element_section(elem)?;
-        if section
-            .shape
-            .as_ref()
-            .is_some_and(|shape| !shape.is_concrete_like())
-            && self
-                .stb_strengths
-                .sections
-                .iter()
-                .any(|input| input.section == section.id && !input.steel.is_empty())
-        {
-            return self.stb_steel_material(section.id);
-        }
         self.materials.get(section.material?.index())
     }
 
     /// 二次部材（小梁・間柱）の主材料（自重算定に用いる）。
     /// 規約は [`Model::element_material`] と同じ。
     pub fn secondary_material(&self, sm: &SecondaryMember) -> Option<&Material> {
-        if self
-            .stb_strengths
-            .members
-            .iter()
-            .any(|m| m.target == StrengthTarget::Secondary(sm.id))
-        {
-            return self.stb_concrete_material(StrengthTarget::Secondary(sm.id));
-        }
         let sec = self.sections.get(sm.section?.index())?;
-        if sec
-            .shape
-            .as_ref()
-            .is_some_and(|shape| !shape.is_concrete_like())
-            && self
-                .stb_strengths
-                .sections
-                .iter()
-                .any(|input| input.section == sec.id && !input.steel.is_empty())
-        {
-            return self.stb_steel_material(sec.id);
-        }
         self.materials.get(sec.material?.index())
     }
 
     /// 要素の主筋・RC壁縦筋の材料。
     pub fn element_rebar_material(&self, elem: &ElementData) -> Option<&Material> {
-        self.element_rebar_material_with_grade(elem)
-            .map(|(material, _)| material)
-    }
-
-    /// 要素の主筋・RC壁縦筋の材料とST-Bridge標準材種を返す。
-    /// ネイティブ材料を参照する場合、材種は `None`。
-    pub fn element_rebar_material_with_grade(
-        &self,
-        elem: &ElementData,
-    ) -> Option<(&Material, Option<&str>)> {
-        self.element_rebar_material_selection(elem, true)
-    }
-
-    /// 入力診断用にFy検証前の主筋・RC壁縦筋の材料とST-Bridge標準材種を返す。
-    pub fn element_rebar_material_input(
-        &self,
-        elem: &ElementData,
-    ) -> Option<(&Material, Option<&str>)> {
-        self.element_rebar_material_selection(elem, false)
-    }
-
-    fn element_rebar_material_selection(
-        &self,
-        elem: &ElementData,
-        validate_fy: bool,
-    ) -> Option<(&Material, Option<&str>)> {
-        let section = self.element_section(elem)?;
-        let part = if matches!(
-            section.shape,
-            Some(crate::section_shape::SectionShape::RcWall { .. })
-        ) {
-            "vertical"
-        } else {
-            "main"
-        };
-        if self.stb_strengths.sections.iter().any(|s| {
-            Some(s.section) == elem.section && s.reinforcement.iter().any(|r| r.part == part)
-        }) {
-            return self.stb_rebar_material_with_grade(elem.section?, part, validate_fy);
-        }
         self.materials
-            .get(section.rebar_material?.index())
-            .map(|material| (material, None))
+            .get(self.element_section(elem)?.rebar_material?.index())
     }
 
     /// 要素のせん断補強筋材料（RC・SRC 断面のみ）。
     pub fn element_shear_rebar_material(&self, elem: &ElementData) -> Option<&Material> {
-        if matches!(
-            self.element_section(elem)?.shape,
-            Some(crate::section_shape::SectionShape::RcWall { .. })
-        ) {
-            if self.stb_strengths.sections.iter().any(|s| {
-                Some(s.section) == elem.section
-                    && s.reinforcement.iter().any(|r| r.part == "horizontal")
-            }) {
-                return self.stb_rebar_material(elem.section?, "horizontal");
-            }
-            return self
-                .materials
-                .get(self.element_section(elem)?.shear_rebar_material?.index());
-        }
-        if let Some(input) = self
-            .stb_strengths
-            .sections
-            .iter()
-            .find(|s| Some(s.section) == elem.section)
-        {
-            let part = if self.element_section(elem)?.frame_use == Some(FrameSectionUse::Column) {
-                "band"
-            } else {
-                "stirrup"
-            };
-            if input.reinforcement.iter().any(|r| r.part == part) {
-                return self.stb_rebar_material(elem.section?, part);
-            }
-        }
         self.materials
             .get(self.element_section(elem)?.shear_rebar_material?.index())
     }
 
     /// 二次部材の主筋材料。
     pub fn secondary_rebar_material(&self, sm: &SecondaryMember) -> Option<&Material> {
-        let section = sm.section?;
-        if self
-            .stb_strengths
-            .sections
-            .iter()
-            .any(|s| s.section == section && s.reinforcement.iter().any(|r| r.part == "main"))
-        {
-            return self.stb_rebar_material(section, "main");
-        }
         self.materials
-            .get(self.section(section)?.rebar_material?.index())
+            .get(self.section(sm.section?)?.rebar_material?.index())
     }
 
     /// 二次部材の帯筋・あばら筋材料。
     pub fn secondary_shear_rebar_material(&self, sm: &SecondaryMember) -> Option<&Material> {
-        let section = sm.section?;
-        let part = if sm.kind == super::SecondaryMemberKind::Post {
-            "band"
-        } else {
-            "stirrup"
-        };
-        if self
-            .stb_strengths
-            .sections
-            .iter()
-            .any(|s| s.section == section && s.reinforcement.iter().any(|r| r.part == part))
-        {
-            return self.stb_rebar_material(section, part);
-        }
         self.materials
-            .get(self.section(section)?.shear_rebar_material?.index())
+            .get(self.section(sm.section?)?.shear_rebar_material?.index())
     }
 
     /// 要素の内蔵鉄骨・鋼管材料。
     pub fn element_steel_material(&self, elem: &ElementData) -> Option<&Material> {
-        let section = self.element_section(elem)?;
-        if self
-            .stb_strengths
-            .sections
-            .iter()
-            .any(|input| input.section == section.id && !input.steel.is_empty())
-        {
-            return self.stb_steel_material(section.id);
-        }
-        self.materials.get(section.steel_material?.index())
+        self.materials
+            .get(self.element_section(elem)?.steel_material?.index())
     }
 }

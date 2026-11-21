@@ -100,8 +100,6 @@ fn input_key_excludes_generated_outputs_and_retains_manual_mass_and_section_floo
     let settings = AnalysisSettings::default();
     prepare_model(&mut model, &settings, None, true).unwrap();
     let key = weight_input_key(&model, settings.mass_method);
-    model.assign_stb_node_ids().unwrap();
-    assert_eq!(weight_input_key(&model, settings.mass_method), key);
     model.stories[1].seismic_weight = Some(123.0);
     model.stories[1].dynamic_mass = None;
     let master = model.generated_masters[0];

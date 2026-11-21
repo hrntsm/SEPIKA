@@ -141,10 +141,6 @@ fn generate_stories_impl(
             ));
         }
     }
-    let source_errors = model.source_story_diagnostics();
-    if !source_errors.is_empty() {
-        return Err(source_errors.join("\n"));
-    }
     model.validate_damper_weights()?;
     if model.nodes.is_empty() {
         return Err("節点がありません".into());
@@ -948,7 +944,6 @@ fn generate_stories_impl(
             name,
             elevation: prev.elevation,
             sl_offset_mm: prev.sl_offset_mm,
-            source_story: prev.source_story,
             node_ids,
             seismic_weight: Some(weight_override.unwrap_or(weight)),
             weight_override,

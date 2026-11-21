@@ -184,14 +184,9 @@ fn check_plane(
     else {
         return Err("内蔵H形鉄骨を持つ矩形SRC柱に限ります".into());
     };
-    model.ensure_stb_rebar_supported(col_section.id)?;
     col_shape
         .validate_rebar()
         .map_err(|error| error.to_string())?;
-    for beam in &model_beams {
-        let sec = model.element_section(beam).ok_or("梁断面が未設定です")?;
-        model.ensure_stb_rebar_supported(sec.id)?;
-    }
     let concrete = model
         .element_material(column)
         .ok_or("柱コンクリート材料が未設定です")?;
@@ -215,7 +210,6 @@ fn check_plane(
         {
             return Err("上下の異断面・異材または接合部の板厚変更を伴うSRC柱は対象外です".into());
         }
-        model.ensure_stb_rebar_supported(sec.id)?;
         let (ends, [axis, depth, _]) = standard_frame(model, candidate, node)?;
         if axis[0].abs() > PANEL_DIRECTION_TOL || axis[1].abs() > PANEL_DIRECTION_TOL {
             return Err("非鉛直柱は対象外です".into());

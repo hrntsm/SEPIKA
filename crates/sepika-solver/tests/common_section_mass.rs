@@ -558,6 +558,32 @@ fn constrained(model: &mut Model) {
 }
 
 #[test]
+fn cft_member_mass_rejects_nonpositive_or_nonfinite_tube_density() {
+    let mut model = fixture(
+        Some(SectionShape::CftBox {
+            height: 600.0,
+            width: 300.0,
+            thick: 10.0,
+            horizontal_thick: 10.0,
+            corner_r: Some(0.0),
+        }),
+        MaterialCategory::Concrete,
+    );
+    let steel = model.sections[0].steel_material.unwrap();
+    assert!(model.element_mass_properties(&model.elements[0]).is_ok());
+    for density in [0.0, -7.85e-9, f64::NAN, f64::INFINITY] {
+        model.materials[steel.index()].density = density;
+        let reason = model
+            .element_mass_properties(&model.elements[0])
+            .unwrap_err();
+        assert!(
+            reason.contains("鋼管材料の密度が不正"),
+            "{density}: {reason}"
+        );
+    }
+}
+
+#[test]
 fn cft_mass_only_failure_allows_static_but_public_dynamic_analyses_return_diagnostics() {
     let mut model = fixture(
         Some(SectionShape::CftBox {

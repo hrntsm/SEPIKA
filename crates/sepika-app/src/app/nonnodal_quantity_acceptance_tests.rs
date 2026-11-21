@@ -219,28 +219,20 @@ fn nonnodal557_app_supported_edits_undo_redo_and_ovika_preserve_quantities() {
 }
 
 #[test]
-fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
+fn nonnodal557_app_section_fc30_survives_movement_undo_and_ovika() {
     let mut model = fixture::placed();
     let sm = model.floor_regions[0].secondary_beams.remove(0);
     model.floor_regions.clear();
     model.elements.truncate(2);
     model.unassigned_beams.push(sm);
-    model = fixture::with_stb_strengths(model, SecondaryMemberId(557));
+    model = fixture::with_fc30_secondary_section(model);
     model.validate().unwrap();
-    let original_strengths = model.stb_strengths.clone();
     assert_eq!(
         model
             .secondary_material(model.secondary_member(SecondaryMemberId(557)).unwrap())
             .unwrap()
             .fc,
         Some(30.0)
-    );
-    assert_eq!(
-        model
-            .resolve_stb_concrete(&model.stb_strengths.members[0])
-            .unwrap()
-            .source,
-        StrengthSource::Member
     );
     let mut control = model.clone();
     for (id, coord) in [(4, [1500.0, 0.0, 3000.0]), (5, [1500.0, 3000.0, 3000.0])] {
@@ -259,7 +251,6 @@ fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
             .fc,
         Some(30.0)
     );
-    assert_eq!(control.stb_strengths, original_strengths);
     let mut app = App::default();
     app.core.model = model;
     let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
@@ -276,14 +267,12 @@ fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
         }))
     );
     quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.675, 5.625);
-    assert_eq!(app.core.model.stb_strengths, original_strengths);
     app.undo_action();
     quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.54, 4.5);
-    assert_eq!(app.core.model.stb_strengths, original_strengths);
     app.redo_action();
     quantity_reference::assert_quantity(&app.core.model, SecondaryMemberId(557), 0.675, 5.625);
-    assert_eq!(app.core.model.stb_strengths, original_strengths);
-    let path = std::env::temp_dir().join(format!("sepika557-stb-app-{}.ovika", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("sepika557-fc30-app-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -298,7 +287,6 @@ fn nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika() {
         reopened.core.scoped.last_error
     );
     let loaded = &reopened.core.model;
-    assert_eq!(loaded.stb_strengths, original_strengths);
     assert_eq!(
         loaded
             .secondary_material(loaded.secondary_member(SecondaryMemberId(557)).unwrap())

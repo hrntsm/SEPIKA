@@ -99,10 +99,6 @@ pub fn prepare_model(
     model
         .validate_section_properties()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
-    let rebar_errors = model.stb_rebar_analysis_diagnostics();
-    if !rebar_errors.is_empty() {
-        return Err(JobError::InvalidInput(rebar_errors.join("; ")));
-    }
     if initialize_stories || !model.stories.is_empty() {
         if let Err(error) = model.validate_story_structure_inputs() {
             invalidate_design_weights(model);

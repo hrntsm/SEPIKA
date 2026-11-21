@@ -61,65 +61,6 @@ struct CommandWithIdChanges {
     changes: Vec<IdChange>,
 }
 
-struct RestoreStbNodeIdentities {
-    command: Box<dyn EditCommand>,
-    identities: Vec<sepika_core::model::StbNodeIdentity>,
-}
-
-impl EditCommand for RestoreStbNodeIdentities {
-    fn section_assignments(&self) -> Option<Vec<(sepika_core::ids::ElemId, Option<SectionId>)>> {
-        self.command.section_assignments()
-    }
-    fn committed(&self) {
-        self.command.committed();
-    }
-    fn section_assignment(&self) -> Option<(sepika_core::ids::ElemId, Option<SectionId>)> {
-        self.command.section_assignment()
-    }
-    fn affects_calculation(&self) -> bool {
-        self.command.affects_calculation()
-    }
-    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        let identities = model.stb_node_ids.clone();
-        let command = self.command.apply(model);
-        model.stb_node_ids = self.identities.clone();
-        Box::new(Self {
-            command,
-            identities,
-        })
-    }
-    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        let identities = model.stb_node_ids.clone();
-        let command = self.command.apply_candidate(model);
-        model.stb_node_ids = self.identities.clone();
-        Box::new(Self {
-            command,
-            identities,
-        })
-    }
-    fn apply_in_transaction(&self, before: &Model, model: &mut Model) -> Box<dyn EditCommand> {
-        let identities = model.stb_node_ids.clone();
-        let command = self.command.apply_in_transaction(before, model);
-        model.stb_node_ids = self.identities.clone();
-        Box::new(Self {
-            command,
-            identities,
-        })
-    }
-    fn label(&self) -> &str {
-        self.command.label()
-    }
-    fn is_noop(&self) -> bool {
-        self.command.is_noop()
-    }
-    fn rejection(&self) -> Option<&str> {
-        self.command.rejection()
-    }
-    fn inverse_id_changes(&self) -> Vec<IdChange> {
-        self.command.inverse_id_changes()
-    }
-}
-
 fn with_id_changes(command: Box<dyn EditCommand>, changes: Vec<IdChange>) -> Box<dyn EditCommand> {
     Box::new(CommandWithIdChanges { command, changes })
 }
@@ -283,12 +224,6 @@ impl UndoStack {
         }
         let mut candidate = model.clone();
         let affects_calculation = cmd.affects_calculation();
-        if affects_calculation {
-            if let Err(reason) = candidate.assign_stb_node_ids() {
-                self.last_error = Some(reason);
-                return false;
-            }
-        }
         let inv = cmd.apply_in_transaction(model, &mut candidate);
         if let Some(reason) = inv.rejection() {
             self.last_error = Some(reason.to_owned());
@@ -309,16 +244,6 @@ impl UndoStack {
             self.last_error = Some(error.to_string());
             return false;
         }
-        if affects_calculation {
-            if let Err(reason) = candidate.assign_stb_node_ids() {
-                self.last_error = Some(reason);
-                return false;
-            }
-        }
-        let inv: Box<dyn EditCommand> = Box::new(RestoreStbNodeIdentities {
-            command: inv,
-            identities: model.stb_node_ids.clone(),
-        });
         *model = candidate;
         self.affects_calculation = affects_calculation;
         self.id_changes = inv.inverse_id_changes();
@@ -617,9 +542,6 @@ pub use wall_misc::*;
 
 #[cfg(test)]
 mod tests;
-
-mod strength;
-pub use strength::{SetSourceStoryConcreteStrength, SetStbStrengths};
 
 /// 数量設定の全置換。解析入力を変更せず、逆操作は以前の数量設定へ戻す。
 pub struct SetQuantityCfg {

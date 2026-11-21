@@ -12,83 +12,7 @@
 
 use crate::EditCommand;
 use sepika_core::ids::StoryId;
-use sepika_core::model::{Model, Story, StoryLevelKind};
-
-/// 元の STB 階 ID を指定し、明示所属を置き換える。節点 ID は内部 ID。
-pub struct SetSourceStoryNodes {
-    pub source_story: u32,
-    pub nodes: Vec<sepika_core::ids::NodeId>,
-}
-
-struct RestoreSourceStories(Vec<sepika_core::model::SourceStory>);
-
-impl EditCommand for RestoreSourceStories {
-    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        Box::new(Self(std::mem::replace(
-            &mut model.source_stories,
-            self.0.clone(),
-        )))
-    }
-    fn label(&self) -> &str {
-        "原階所属の復元"
-    }
-}
-
-impl EditCommand for SetSourceStoryNodes {
-    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if self
-            .nodes
-            .iter()
-            .any(|n| model.node(*n).is_none() || model.generated_masters.contains(n))
-        {
-            return Box::new(crate::RejectedEdit(
-                "原階所属には実在する構造節点が必要です".into(),
-            ));
-        }
-        let Some(index) = model
-            .source_stories
-            .iter()
-            .position(|s| s.id == self.source_story)
-        else {
-            return Box::new(crate::RejectedEdit("原階IDが存在しません".into()));
-        };
-        if model.source_stories[index]
-            .node_ids
-            .iter()
-            .map(|n| n.node)
-            .eq(self.nodes.iter().copied().map(Some))
-        {
-            return Box::new(crate::Noop);
-        }
-        let mut seen = std::collections::HashSet::new();
-        if !self.nodes.iter().all(|n| seen.insert(*n)) {
-            return Box::new(crate::RejectedEdit(
-                "原階所属の節点IDが重複しています".into(),
-            ));
-        }
-        if let Err(reason) = model.assign_stb_node_ids() {
-            return Box::new(crate::RejectedEdit(reason));
-        }
-        let before = model.source_stories.clone();
-        model.source_stories[index].node_ids = self
-            .nodes
-            .iter()
-            .map(|node| sepika_core::model::SourceStoryNode {
-                id: model
-                    .stb_node_ids
-                    .iter()
-                    .find(|n| n.node == *node)
-                    .unwrap()
-                    .id,
-                node: Some(*node),
-            })
-            .collect();
-        Box::new(RestoreSourceStories(before))
-    }
-    fn label(&self) -> &str {
-        "原階の明示所属変更"
-    }
-}
+use sepika_core::model::{Model, Story};
 
 pub struct SetStoryFireproof {
     pub story: StoryId,
@@ -154,9 +78,6 @@ pub struct RestoreStoryDefs {
     pub lumped_skeleton_intervals: Vec<sepika_core::model::LumpedSkeletonInterval>,
     pub misc_wall_representatives: Vec<sepika_core::model::MiscWallRepresentativeColumn>,
     pub seismic_weight_generation: Option<sepika_core::model::SeismicWeightGeneration>,
-    pub source_stories_initialized: bool,
-    pub source_stories: Vec<sepika_core::model::SourceStory>,
-    pub stb_node_ids: Vec<sepika_core::model::StbNodeIdentity>,
     pub stories: Vec<Story>,
     /// 復元後の各節点の所属階（`model.nodes` と同順）。
     pub node_story: Vec<Option<StoryId>>,
@@ -171,26 +92,10 @@ pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
         lumped_skeleton_intervals: model.lumped_skeleton_intervals.clone(),
         misc_wall_representatives: model.stress_cfg.misc_wall_representatives.clone(),
         seismic_weight_generation: model.seismic_weight_generation.clone(),
-        source_stories_initialized: model.source_stories_initialized,
-        source_stories: model.source_stories.clone(),
-        stb_node_ids: model.stb_node_ids.clone(),
         stories: model.stories.clone(),
         node_story: model.nodes.iter().map(|n| n.story).collect(),
         slab_story: model.slabs.iter().map(|s| s.reference_story).collect(),
         constraints: model.constraints.clone(),
-    }
-}
-
-pub(crate) fn source_story_index(model: &Model, story: StoryId) -> Result<Option<usize>, String> {
-    let level = &model.stories[story.index()];
-    match level.source_story {
-        Some(id) => model
-            .source_stories
-            .iter()
-            .position(|s| s.id == id)
-            .map(Some)
-            .ok_or_else(|| format!("階 {}: 原階 {id} が存在しません", story.0)),
-        None => Ok(None),
     }
 }
 
@@ -257,31 +162,14 @@ impl EditCommand for SetStoryLevel {
         if idx >= model.stories.len() || model.stories[idx].id != self.story {
             return Box::new(crate::Noop);
         }
-        if let Err(reason) = source_story_index(model, self.story) {
-            return Box::new(crate::RejectedEdit(reason));
-        }
         let before = snapshot(model);
         let mut candidate = model.clone();
-        if let Err(reason) = candidate.initialize_source_stories() {
-            return Box::new(crate::RejectedEdit(reason));
-        }
         let story = &mut candidate.stories[idx];
         story.name = self.name.clone();
         story.elevation = self.elevation;
         story.sl_offset_mm = self.sl_offset_mm;
         if let Some(reason) = invalid_level_edit(&candidate, idx) {
             return Box::new(crate::RejectedEdit(reason));
-        }
-        if let Some(source) = candidate.stories[idx].source_story.and_then(|id| {
-            candidate
-                .source_stories
-                .iter_mut()
-                .find(|s| s.id == id && s.kind_from_native)
-        }) {
-            source.name = self.name.clone();
-            if let Some(fl) = self.elevation {
-                source.height = fl;
-            }
         }
         *model = candidate;
         Box::new(before)
@@ -325,56 +213,18 @@ impl EditCommand for AddStory {
         if !diagnostics.is_empty() {
             return Box::new(crate::RejectedEdit(diagnostics.join("; ")));
         }
-        if let Err(reason) = model.initialize_source_stories() {
-            return Box::new(crate::RejectedEdit(reason));
-        }
-        let Some(id) = model
-            .source_stories
-            .iter()
-            .map(|s| s.id)
-            .max()
-            .unwrap_or(0)
-            .checked_add(1)
-        else {
-            return Box::new(crate::RejectedEdit("STB原階IDの上限です".into()));
-        };
-        model.source_stories.push(sepika_core::model::SourceStory {
-            kind_from_native: true,
-            id,
-            guid: None,
-            name: self.name.clone(),
-            height: self.elevation.unwrap(),
-            kind: sepika_core::model::SourceStoryKind::General,
-            id_dependence: None,
-            strength_concrete: None,
-            node_ids: Vec::new(),
-        });
-        model.stories.push(Story {
-            wall_weights: Vec::new(),
-            id: StoryId(model.stories.len() as u32),
-            name: self.name.clone(),
-            elevation: self.elevation,
-            sl_offset_mm: self.sl_offset_mm,
-            source_story: Some(id),
-            node_ids: Vec::new(),
-            seismic_weight: None,
-            weight_override: None,
-            structure: Default::default(),
-            level_kind: StoryLevelKind::default(),
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
-        });
+        let elevation = self.elevation.unwrap();
+        let index = model
+            .stories
+            .partition_point(|story| story.fl_mm().unwrap() < elevation);
+        model.stories.push(Story::new(
+            StoryId(model.stories.len() as u32),
+            self.name.clone(),
+            self.elevation,
+            self.sl_offset_mm,
+        ));
         resort_and_renumber(model);
-        if let Some(reason) = invalid_level_edit(
-            model,
-            model
-                .stories
-                .iter()
-                .position(|s| s.source_story == Some(id))
-                .unwrap(),
-        ) {
+        if let Some(reason) = invalid_level_edit(model, index) {
             before.apply(model);
             return Box::new(crate::RejectedEdit(reason));
         }
@@ -411,26 +261,6 @@ impl EditCommand for DeleteStory {
             return Box::new(crate::Noop);
         }
         let before = snapshot(model);
-        if let Err(reason) = model.initialize_source_stories() {
-            return Box::new(crate::RejectedEdit(reason));
-        }
-        let index = match source_story_index(model, self.story) {
-            Ok(index) => index,
-            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
-        };
-        if let Some(index) = index {
-            let source_id = model.source_stories[index].id;
-            if model
-                .source_stories
-                .iter()
-                .any(|s| s.id_dependence == Some(source_id))
-            {
-                return Box::new(crate::RejectedEdit(
-                    "従属階から参照されている原階は削除できません".into(),
-                ));
-            }
-            model.source_stories.remove(index);
-        }
         model.stories.remove(idx);
         model
             .lumped_skeleton_intervals
@@ -497,9 +327,6 @@ impl EditCommand for RestoreStoryDefs {
         model.stress_cfg.misc_wall_representatives = self.misc_wall_representatives.clone();
         model.seismic_weight_generation = self.seismic_weight_generation.clone();
         model.stories = self.stories.clone();
-        model.source_stories = self.source_stories.clone();
-        model.source_stories_initialized = self.source_stories_initialized;
-        model.stb_node_ids = self.stb_node_ids.clone();
         for (node, story) in model.nodes.iter_mut().zip(self.node_story.iter()) {
             node.story = *story;
         }

@@ -629,8 +629,7 @@ use support::{
 /// 含むモデルを返す。壁の解析要素は `model` 自体には存在せず、`WallRegion`/
 /// `WallPlate` から都度生成する（D5・`sepika_core::wall_expand`）。
 ///
-/// ビューアは毎フレーム呼ばれるため、壁版を1つも持たないモデル（既定・現状の
-/// 実 ST-Bridge フィクスチャは全件該当）では `expand_wall_elements` が伴う
+/// ビューアは毎フレーム呼ばれるため、壁版を1つも持たないモデルでは `expand_wall_elements` が伴う
 /// `model.clone()` を払わずそのまま借用する
 /// （`model_has_wall_plates_to_expand` によるガード。
 /// `sepika_job::prepare::apply_rigid_zones_and_panels` と同じ性能ガード）。
@@ -1673,10 +1672,11 @@ mod beam_placement_tests {
     };
 
     #[test]
-    fn original_stb_import_draws_all_75_girders_and_56_beams_as_selectable_bodies() {
+    fn native_fixture_draws_all_75_girders_and_56_beams_as_selectable_bodies() {
         let mut app = crate::app::App::default();
-        app.import_stbridge_from(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/model.stb"),
+        app.open_project_from(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/full_model.ovika"),
         );
         let model = &app.core.model;
         let girders: Vec<_> = model

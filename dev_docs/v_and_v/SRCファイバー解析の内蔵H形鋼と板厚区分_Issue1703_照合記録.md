@@ -16,7 +16,7 @@ SN400Bのウェブ45 mm・フランジ13 mmを持つ矩形SRC柱は現行解析�
 
 ## 現行入力で表現できる範囲
 
-矩形SRC梁・柱の内蔵鉄骨断面には、Hのせい・幅・ウェブ厚・上下共通のフランジ厚と、共通の鋼材割当がある。圧延・組立の製造区分、各板の材種・強度根拠、フィレットの寸法は保持できない。ST-Bridge取込ではH形鋼と、上下のフランジ幅・厚さが等しい組立H形鋼を同じ4寸法に展開する。上下で幅・厚さが異なる組立H形鋼はSRC断面の鉄骨参照として解決できない。材種名、寸法の一致、受理済みかどうかだけでは、製品の適合根拠を確定できない。 [SRC形状定義](../../crates/sepika-core/src/section_shape/types.rs)・[ST-Bridge取込](../../crates/sepika-io/src/stbridge/import/assemble.rs)
+矩形SRC梁・柱の内蔵鉄骨断面には、Hのせい・幅・ウェブ厚・上下共通のフランジ厚と、共通の鋼材割当がある。圧延・組立の製造区分、各板の材種・強度根拠、フィレットの寸法は保持できない。ST-Bridge取込ではH形鋼と、上下のフランジ幅・厚さが等しい組立H形鋼を同じ4寸法に展開する。上下で幅・厚さが異なる組立H形鋼はSRC断面の鉄骨参照として解決できない。材種名、寸法の一致、受理済みかどうかだけでは、製品の適合根拠を確定できない。 [SRC形状定義](../../crates/sepika-core/src/section_shape/types.rs)・[ST-Bridge取込](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/crates/sepika-io/src/stbridge/import/assemble.rs)
 
 ファイバーの強度決定では、`steel_f_value_issue` がSM520系列に限って板厚範囲を検査する。その後、`steel_f_value_prefix` でフランジ厚に対応するFを内蔵鋼部全体に選ぶ。SN400BのFは `bucket2` が40 mm以下と40 mm超に振り分けるため、他の入力条件を満たせば、正のフランジ厚が6 mm未満でも235 N/mm²、100 mm超でも215 N/mm²を選択し得る。時刻歴の入力検査を通ることと、製品規格や告示の適用条件を満たすことは個別に確認する必要がある。応答が参照する降伏強度は、公称値基準ではそのまま、保有水平耐力計算の材料強度基準では割増後の値となる。 [ファイバーの降伏強度](../../crates/sepika-element/src/frame/fiber/mod.rs)・[材料強度表と板厚検査](../../crates/sepika-core/src/material_grade.rs)・[時刻歴の入力検査](../../crates/sepika-solver/src/dynamic/timehistory/nonlinear.rs)
 

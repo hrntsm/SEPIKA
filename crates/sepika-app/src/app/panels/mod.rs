@@ -70,26 +70,6 @@ impl App {
         }
     }
 
-    /// 「ST-Bridge 読込…」ダイアログを表示して読み込む。
-    pub(crate) fn import_stbridge_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("ST-Bridge", &["stb", "xml"])
-            .pick_file()
-        {
-            self.import_stbridge_from(path);
-        }
-    }
-
-    /// 「ST-Bridge 書出…」ダイアログを表示して保存先を尋ね、標準 ST-Bridge で書き出す。
-    pub(crate) fn export_stbridge_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("ST-Bridge", &["stb", "xml"])
-            .set_file_name("model.stb")
-            .save_file()
-        {
-            self.export_stbridge_to(path);
-        }
-    }
     /// モデルタブ：サブタブ切替で節点/部材/断面/材料を編集するテーブルを表示。
     pub(crate) fn model_tab_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {

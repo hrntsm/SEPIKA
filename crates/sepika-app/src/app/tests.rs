@@ -133,70 +133,40 @@ use sepika_core::model::MaterialCategory;
 use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 
 #[cfg(feature = "gui")]
-fn source_story_close_levels_model() -> sepika_core::model::Model {
-    let mut model = sepika_io::stbridge::import_stbridge(
-        r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes>
-    <StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/>
-    <StbNode id="3" X="0" Y="0" Z="3000.5"/><StbNode id="4" X="0" Y="0" Z="6000"/>
-    </StbNodes><StbStories>
-    <StbStory id="20" name="基部" height="0" kind="GENERAL"/>
-    <StbStory id="30" name="A" height="3000" kind="ROOF"/>
-    <StbStory id="40" name="B" height="3000.5" kind="ISOLATION"/>
-    <StbStory id="50" name="C" height="6000" kind="DEPENDENCE" id_dependence="30"/>
-    </StbStories></StbModel></ST_BRIDGE>"#,
-    )
-    .unwrap();
-    for (story, offset) in model.stories.iter_mut().zip([0.0, 0.0, 0.0, 0.0]) {
-        story.sl_offset_mm = Some(offset);
+fn close_story_levels_model() -> sepika_core::model::Model {
+    use sepika_core::model::{Model, Node};
+    let fls = [0.0, 3000.0, 3000.5, 6000.0];
+    let mut stories = explicit_story_inputs(&fls);
+    for (story, name) in stories.iter_mut().zip(["基部", "A", "B", "C"]) {
+        story.name = name.into();
     }
-    model
+    let nodes = fls
+        .into_iter()
+        .enumerate()
+        .map(|(i, z)| Node {
+            id: NodeId(i as u32),
+            coord: [0.0, 0.0, z],
+            restraint: Default::default(),
+            support_spring: None,
+            story: None,
+            mass: None,
+        })
+        .collect();
+    Model {
+        stories,
+        nodes,
+        ..Default::default()
+    }
 }
 
 #[cfg(feature = "gui")]
 #[test]
-fn source_story_empty_table_gui_kind_edit_does_not_create_source() {
-    let mut model = source_story_close_levels_model();
-    model.source_stories.clear();
-    for story in &mut model.stories {
-        story.source_story = None;
-    }
-    assert!(model.source_stories_initialized);
-    let mut app = App::default();
-    app.load_model(model);
-    let before = app.core.model.clone();
-    app.ui
-        .scoped
-        .pending_story_cmds
-        .push_back(Box::new(sepika_edit::SetStoryLevelKind {
-            story: StoryId(0),
-            level_kind: sepika_core::model::StoryLevelKind::Penthouse { k: 0.7 },
-        }));
-    app.apply_pending_story_command();
-    assert!(app.core.model.source_stories.is_empty());
-    assert!(app.core.model.source_stories_initialized);
-    assert!(!sepika_io::stbridge::export_stbridge(&app.core.model)
-        .unwrap()
-        .contains("<StbStory "));
-    app.core.scoped.undo.undo(&mut app.core.model);
-    assert!(app.core.model.eq_ignoring_dofmap(&before));
-    app.core.scoped.undo.redo(&mut app.core.model);
-    assert!(app.core.model.source_stories.is_empty());
-}
-
-#[cfg(feature = "gui")]
-#[test]
-fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
-    use sepika_core::model::{SourceStoryKind, StoryLevelKind};
+fn native_story_kind_gui_save_undo_and_edit_order() {
+    use sepika_core::model::StoryLevelKind;
     for order in 0..3 {
-        let mut model = source_story_close_levels_model();
+        let mut model = close_story_levels_model();
         model.nodes.truncate(2);
         model.stories.truncate(2);
-        model.source_stories.clear();
-        for story in &mut model.stories {
-            story.source_story = None;
-        }
-        model.source_stories_initialized = false;
-        model.stb_node_ids.clear();
         let mut app = App::default();
         app.load_model(model);
         let target = if order == 2 {
@@ -229,36 +199,15 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
             }));
         app.apply_pending_story_command();
         assert_ne!(app.result_input(&key), input);
-        let exported = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
-        let output = sepika_io::stbridge::import_stbridge(&exported).unwrap();
-        assert_eq!(
-            output
-                .source_stories
-                .iter()
-                .find(|s| Some(s.height) == app.core.model.stories[target.index()].elevation)
-                .unwrap()
-                .kind,
-            SourceStoryKind::Penthouse
-        );
-        assert!(app
-            .core
-            .model
-            .source_stories
-            .iter()
-            .all(|s| s.kind_from_native));
         let path = test_tmp().join(format!("497-native-kind-{order}.ovika"));
         sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
         let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
-        assert_eq!(saved.source_stories, app.core.model.source_stories);
+        assert_eq!(saved.stories, app.core.model.stories);
         std::fs::remove_file(path).unwrap();
         app.undo_action();
         assert!(app.core.model.eq_ignoring_dofmap(&before));
         assert_eq!(app.result_input(&key), input);
         app.redo_action();
-        assert_eq!(
-            sepika_io::stbridge::export_stbridge(&app.core.model).unwrap(),
-            exported
-        );
         app.run_preparation();
         assert!(
             app.core.scoped.last_error.is_none(),
@@ -275,24 +224,15 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
                 level_kind: StoryLevelKind::Basement { depth_mm: 1000.0 }
             }))
         );
-        let source = app
-            .core
-            .model
-            .source_stories
-            .iter()
-            .find(|s| Some(s.height) == app.core.model.stories[target.index()].elevation)
-            .unwrap();
-        assert_eq!(source.kind, SourceStoryKind::Basement);
     }
 }
 
 #[cfg(feature = "gui")]
 #[test]
-fn source_story_imported_kinds_close_levels_and_explicit_edit_correspondence() {
+fn native_close_story_levels_keep_identity_through_edit_and_undo() {
     use sepika_core::model::StoryLevelKind;
     let mut app = App::default();
-    app.load_model(source_story_close_levels_model());
-    let source = app.core.model.source_stories.clone();
+    app.load_model(close_story_levels_model());
     for index in 0..4 {
         assert!(
             app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
@@ -309,7 +249,6 @@ fn source_story_imported_kinds_close_levels_and_explicit_edit_correspondence() {
         "{:?}",
         app.core.scoped.last_error
     );
-    assert_eq!(app.core.model.source_stories, source);
     assert_eq!(app.core.model.stories[1].name, "A");
     assert_eq!(app.core.model.stories[2].name, "B");
     assert_eq!(
@@ -324,97 +263,16 @@ fn source_story_imported_kinds_close_levels_and_explicit_edit_correspondence() {
         elevation: Some(3500.0),
         sl_offset_mm: Some(0.0),
     })));
-    let edited = sepika_io::stbridge::import_stbridge(
-        &sepika_io::stbridge::export_stbridge(&app.core.model).unwrap(),
-    )
-    .unwrap();
-    let raw = edited.source_stories.iter().find(|s| s.id == 40).unwrap();
-    assert_eq!((&raw.name, raw.height), (&"B".to_string(), 3000.5));
+    assert_eq!(app.core.model.stories[2].fl_mm(), Some(3500.0));
+    assert_eq!(app.core.model.stories[2].name, "B編集");
     app.undo_action();
     assert!(app.core.model.eq_ignoring_dofmap(&before));
     assert!(app.apply_model_edit(Box::new(sepika_edit::DeleteStory { story: StoryId(2) })));
-    assert!(!app.core.model.source_stories.iter().any(|s| s.id == 40));
+    assert_eq!(app.core.model.stories[2].name, "C");
     app.undo_action();
     assert!(app.core.model.eq_ignoring_dofmap(&before));
     app.redo_action();
-    assert!(!sepika_io::stbridge::import_stbridge(
-        &sepika_io::stbridge::export_stbridge(&app.core.model).unwrap()
-    )
-    .unwrap()
-    .source_stories
-    .iter()
-    .any(|s| s.id == 40));
-}
-
-#[cfg(feature = "gui")]
-#[test]
-fn source_story_missing_ambiguous_mapping_rejects_and_generated_base_has_no_source() {
-    let mut model = source_story_close_levels_model();
-    let original = model.source_stories.clone();
-    model.stories[2].elevation = Some(3300.0);
-    let mut app = App::default();
-    assert!(app.load_model(model));
-    assert!(app.apply_model_edit(Box::new(sepika_edit::SetStoryLevel {
-        story: StoryId(2),
-        name: "編集".into(),
-        elevation: Some(3400.0),
-        sl_offset_mm: Some(0.0)
-    })));
-    assert_eq!(app.core.model.stories[2].id, StoryId(2));
-    assert_eq!(app.core.model.stories[2].source_story, Some(40));
-    assert_eq!(app.core.model.source_stories, original);
-    app.undo_action();
-    assert_eq!(app.core.model.stories[2].fl_mm(), Some(3300.0));
-    app.redo_action();
-    assert_eq!(app.core.model.stories[2].fl_mm(), Some(3400.0));
-    let before = app.core.model.clone();
-    let mut invalid = before.clone();
-    invalid.stories[2].source_story = Some(999);
-    assert!(!app.load_model(invalid));
-    assert!(app.core.model.eq_ignoring_dofmap(&before));
-}
-
-#[cfg(feature = "gui")]
-#[test]
-fn source_story_gui_membership_edit_invalidates_input_and_undo_restores_it() {
-    let fixture = include_str!("../../tests/fixtures/public_source_stories_497.stb");
-    let mut app = App::default();
-    app.load_model(sepika_io::stbridge::import_stbridge(fixture).unwrap());
-    let source = app.core.model.source_stories.clone();
-    let source_id = source.iter().find(|s| !s.node_ids.is_empty()).unwrap().id;
-    let key = result_validity::ResultInputKey::Modal;
-    let before = app.result_input(&key);
-    app.core.scoped.staleness.mark_fresh();
-    app.ui
-        .scoped
-        .pending_story_cmds
-        .push_back(Box::new(sepika_edit::SetSourceStoryNodes {
-            source_story: source_id,
-            nodes: Vec::new(),
-        }));
-    app.apply_pending_story_command();
-    assert!(app.core.scoped.staleness.results_stale);
-    assert!(app.core.scoped.staleness.preparation_stale);
-    assert_ne!(app.result_input(&key), before);
-    app.undo_action();
-    assert_eq!(app.core.model.source_stories, source);
-    assert_eq!(app.result_input(&key), before);
-    app.redo_action();
-    assert_ne!(app.result_input(&key), before);
-    let revision = app.core.scoped.undo.revision();
-    app.ui
-        .scoped
-        .pending_story_cmds
-        .push_back(Box::new(sepika_edit::SetSourceStoryNodes {
-            source_story: source_id,
-            nodes: vec![NodeId(u32::MAX)],
-        }));
-    app.apply_pending_story_command();
-    assert_eq!(app.core.scoped.undo.revision(), revision);
-    assert_eq!(
-        app.core.scoped.last_error.as_deref(),
-        Some("原階所属には実在する構造節点が必要です")
-    );
+    assert_eq!(app.core.model.stories[2].name, "C");
 }
 
 /// テストが書き込む一時ディレクトリ（プロセス ID 入り）。
@@ -1403,7 +1261,7 @@ fn test_run_design_check_includes_member_detail_positions() {
 /// 1FL が基部にある建物では、基部の剛床のスレーブが「水平拘束された柱脚」と
 /// 「拘束の無い小梁支持点」の混在になる。後者は解析自由度を持たず剛性を写さないため、
 /// これを可動と数えると剛床代表節点の Ux・Uy が剛性ゼロの独立自由度として残り、
-/// 剛性行列が特異になる（ST-Bridge 取り込みモデルで解析が止まった不具合）。
+/// 剛性行列が特異になる。
 #[test]
 fn test_analysis_runs_with_non_structural_nodes_on_base_floor() {
     use sepika_core::dof::Dof6Mask;
@@ -3008,123 +2866,6 @@ fn test_open_missing_files_set_error() {
         "/nonexistent/dir/does_not_exist.ovika",
     ));
     assert!(app.core.scoped.last_error.is_some());
-
-    let mut app = App::default();
-    app.import_stbridge_from(std::path::PathBuf::from(
-        "/nonexistent/dir/does_not_exist.stb",
-    ));
-    assert!(app.core.scoped.last_error.is_some());
-}
-
-#[test]
-fn test_export_and_import_stbridge_roundtrip() {
-    let dir = test_tmp().join("sepika_app_test_stbridge");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("roundtrip.stb");
-
-    let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
-    app.core.scoped.project_path = Some(dir.join("original.ovika"));
-    app.core.scoped.staleness.unsaved_changes = true;
-    let original = app.core.model.clone();
-    app.export_stbridge_to(path.clone());
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-
-    assert_eq!(
-        rmp_serde::to_vec_named(&app.core.model).unwrap(),
-        rmp_serde::to_vec_named(&original).unwrap()
-    );
-    assert_eq!(
-        app.core.scoped.project_path,
-        Some(dir.join("original.ovika"))
-    );
-    assert!(app.core.scoped.staleness.unsaved_changes);
-
-    let mut app2 = App::default();
-    app2.import_stbridge_from(path.clone());
-    let msg = app2.core.scoped.last_error.as_deref().unwrap_or("");
-    assert!(
-        msg.contains("ピン支点に設定"),
-        "支点自動設定の通知が出るはず: {msg}"
-    );
-    assert!(app2.core.model.validate().is_ok());
-    assert!(app2.core.scoped.project_path.is_none());
-
-    // 標準 ST-Bridge は幾何サブセットのため完全一致は求めない（拘束・荷重・材料の
-    // E/ν は対象外）が、節点数・部材数・座標・接続関係は保たれる。
-    assert_eq!(app2.core.model.nodes.len(), original.nodes.len());
-    assert_eq!(app2.core.model.elements.len(), original.elements.len());
-    for (a, b) in app2.core.model.nodes.iter().zip(original.nodes.iter()) {
-        assert_eq!(a.coord, b.coord);
-    }
-    for (a, b) in app2
-        .core
-        .model
-        .elements
-        .iter()
-        .zip(original.elements.iter())
-    {
-        assert_eq!(a.kind, b.kind, "要素種別が保たれる");
-        assert_eq!(a.nodes, b.nodes, "節点接続が保たれる");
-    }
-
-    std::fs::remove_file(&path).ok();
-}
-
-#[test]
-fn test_export_stbridge_rejects_fourth_stage_without_overwriting_file() {
-    let dir = test_tmp().join("sepika_app_test_stbridge_warning");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("warning.stb");
-
-    let mut app = App::default();
-    let mut model = crate::sample::portal_frame();
-    let section_id = model
-        .elements
-        .iter()
-        .find(|element| {
-            model.element_section(element).is_some_and(|section| {
-                section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder)
-            })
-        })
-        .and_then(|element| element.section)
-        .expect("梁断面");
-    model.sections[section_id.index()].shape =
-        Some(sepika_core::section_shape::SectionShape::RcBeamRect {
-            b: 400.0,
-            d: 700.0,
-            rebar: sepika_core::section_shape::RcBeamRebar {
-                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-                top: vec![4, 3, 2, 1],
-                bottom: vec![3, 2],
-                cover: 40.0,
-                stirrup: sepika_core::section_shape::BeamStirrup {
-                    dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-                    pitch: 100.0,
-                    legs: 2,
-                },
-            },
-        });
-    app.load_model(model);
-    std::fs::write(&path, "existing output").unwrap();
-    app.export_stbridge_to(path.clone());
-    let error = app.core.scoped.last_error.as_deref().unwrap();
-    assert!(
-        error.contains("ST-Bridge書出エラー") && error.contains("標準段数"),
-        "{error}"
-    );
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing output");
-    assert!(app
-        .core
-        .log
-        .entries
-        .iter()
-        .any(|entry| entry.message == error));
-    std::fs::remove_file(&path).ok();
 }
 
 #[test]
@@ -8023,80 +7764,30 @@ fn test_run_combination_errors_on_empty_seismic_case() {
     );
 }
 
-/// ST-Bridge が荷重ケース（`StbLoadCase`）を持つ場合は、ファイルの荷重ケースを
-/// そのまま採用し、標準荷重ケースを追加しないことを確認する。
 #[test]
-fn test_import_stbridge_with_loads_keeps_file_cases() {
-    let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
-  <StbNodes>
-    <StbNode id="0" X="0" Y="0" Z="0"/>
-    <StbNode id="1" X="0" Y="0" Z="3000"/>
-  </StbNodes>
-  <StbSections>
-    <StbSecColumn_S id="0" name="C">
-      <StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H1"/></StbSecSteelFigureColumn_S>
-    </StbSecColumn_S>
-    <StbSecSteel>
-      <StbSecRoll-H name="H1" A="300" B="150" t1="6.5" t2="9"/>
-    </StbSecSteel>
-  </StbSections>
-  <StbMembers>
-    <StbColumns>
-      <StbColumn id="0" name="C1" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="S"/>
-    </StbColumns>
-  </StbMembers>
-  <StbLoads>
-    <StbLoadCase id="0" name="L1">
-      <StbNodalLoad id_node="1" fz="-5000"/>
-    </StbLoadCase>
-  </StbLoads>
-</StbModel></ST_BRIDGE>"#;
-    let dir = test_tmp().join("sepika_app_test_stbridge_with_lc");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("with_loads.stb");
-    std::fs::write(&path, xml).unwrap();
-
-    let mut app = App::default();
-    app.import_stbridge_from(path.clone());
-    assert_eq!(
-        app.core.model.load_cases.len(),
-        1,
-        "STB 自身の荷重ケースを採用し、標準ケースは追加しない: {:?}",
-        app.core.scoped.last_error
-    );
-    assert_eq!(app.core.model.load_cases[0].name, "L1");
-
-    std::fs::remove_file(&path).ok();
-}
-
-/// 報告された問題の再発防止: 支点情報のない ST-Bridge を読み込んだ直後に
-/// DL の線形静的解析がそのまま実行できる（支点の自動設定（ピン）＋標準荷重
-/// ケースの自動作成＋DL 自重同期のエンドツーエンド）。
-///
-/// モデルは 1 層の立体フレーム（柱4本＋外周梁4本）。支点をピンにする既定では
-/// 平面フレーム（支点が一直線）は面外の機構になり解けないため、実建物と同じく
-/// 支点が平面的に分布する立体モデルで確認する。
-#[test]
-fn test_import_stbridge_then_run_dl_succeeds() {
+fn native_project_reopen_runs_dl_with_saved_supports_and_automatic_self_weight() {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, Node,
     };
     use sepika_core::section_shape::SectionShape;
 
-    let dir = test_tmp().join("sepika_app_test_stbridge_run_dl");
+    let dir = test_tmp().join("sepika_app_test_project_run_dl");
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("run_dl.stb");
+    let path = dir.join("run_dl.ovika");
 
-    let mut model = sepika_core::model::Model::default();
+    let mut model = sepika_core::model::Model::with_default_load_cases();
     let plan = [(0.0, 0.0), (6000.0, 0.0), (6000.0, 4000.0), (0.0, 4000.0)];
     for (k, z) in [0.0, 3000.0].into_iter().enumerate() {
         for (i, (x, y)) in plan.iter().enumerate() {
             model.nodes.push(Node {
                 id: NodeId((i + 4 * k) as u32),
                 coord: [*x, *y, z],
-                restraint: sepika_core::dof::Dof6Mask::FREE,
+                restraint: if k == 0 {
+                    sepika_core::dof::Dof6Mask::PINNED
+                } else {
+                    sepika_core::dof::Dof6Mask::FREE
+                },
                 mass: None,
                 story: None,
                 support_spring: None,
@@ -8178,7 +7869,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
 
     let mut app = App::default();
     app.load_model(model);
-    app.export_stbridge_to(path.clone());
+    app.save_project_to(path.clone());
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -8186,14 +7877,15 @@ fn test_import_stbridge_then_run_dl_succeeds() {
     );
 
     let mut app2 = App::default();
-    app2.import_stbridge_from(path.clone());
+    app2.open_project_from(path.clone());
+    assert!(app2.core.scoped.last_error.is_none());
     let dl_id = app2
         .core
         .model
         .load_cases
         .iter()
         .find(|lc| lc.name == DL_CASE_NAME)
-        .expect("標準荷重ケース DL が自動作成されるはず")
+        .expect("保存した標準荷重ケース DL")
         .id;
 
     let imported_beams = app2
@@ -8226,7 +7918,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
     app2.run_linear_static(dl_id);
     assert!(
         app2.core.scoped.last_error.is_none(),
-        "支点自動設定により DL 解析が成功するはず: {:?}",
+        "保存された支点で DL 解析が成功するはず: {:?}",
         app2.core.scoped.last_error
     );
     let results = app2
@@ -8255,7 +7947,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
 }
 
 /// 二次部材（小梁）と、その節点で区切られた床板（`Slab`）を持つモデル
-/// （ST-Bridge 取り込みの典型形）の DL 同期と解析:
+/// の DL 同期と解析。
 ///
 /// - 小梁は解析要素ではなく、その支持節点（大梁スパン中間・要素非接続）に
 ///   落ちる床荷重・小梁自重は大梁の**中間集中荷重（CMQ）**へ変換される。
@@ -12071,126 +11763,6 @@ fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
         .is_none());
 }
 
-#[cfg(feature = "gui")]
-#[test]
-fn stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission() {
-    use sepika_core::model::StrengthSource;
-    let path = test_tmp().join("520-strength-input.stb");
-    std::fs::write(
-        &path,
-        include_str!("../../../sepika-io/tests/fixtures/strength_priority.stb"),
-    )
-    .unwrap();
-    let mut app = App::default();
-    app.import_stbridge_from(path.clone());
-    let before = app.core.model.clone();
-    assert_eq!(
-        before.element_material(&before.elements[0]).unwrap().fc,
-        Some(36.)
-    );
-    let key = result_validity::ResultInputKey::Modal;
-    let generation = app.result_input(&key);
-    let mut input = before.stb_strengths.clone();
-    input.members[0].concrete = None;
-    input.sections[0].concrete = None;
-    app.ui
-        .scoped
-        .pending_story_cmds
-        .push_back(Box::new(sepika_edit::CompositeCommand {
-            label: "強度編集".into(),
-            children: vec![
-                Box::new(sepika_edit::SetStbStrengths { input }),
-                Box::new(sepika_edit::SetSourceStoryConcreteStrength {
-                    source_story: 1,
-                    strength: Some("Fc33".into()),
-                }),
-            ],
-        }));
-    app.apply_pending_story_command();
-    assert_ne!(generation, app.result_input(&key));
-    let resolved = app
-        .core
-        .model
-        .resolve_stb_concrete(&app.core.model.stb_strengths.members[0])
-        .unwrap();
-    assert_eq!(resolved.value, 33.);
-    assert_eq!(resolved.source, StrengthSource::Story);
-    let output = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
-    let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
-    assert!(again.stb_strengths.members[0].concrete.is_none());
-    assert!(again.stb_strengths.sections[0].concrete.is_none());
-    app.undo_action();
-    assert!(app.core.model.eq_ignoring_dofmap(&before));
-    assert_eq!(generation, app.result_input(&key));
-    app.redo_action();
-    assert_eq!(
-        app.core
-            .model
-            .element_material(&app.core.model.elements[0])
-            .unwrap()
-            .fc,
-        Some(33.)
-    );
-    let context = egui::Context::default();
-    let _ = context.run_ui(Default::default(), |ui| {
-        app.preparation_panel(ui);
-    });
-    std::fs::remove_file(path).unwrap();
-}
-
-#[cfg(feature = "gui")]
-#[test]
-fn stb_strength_gui_raw_src_grade_edit_updates_material_and_result_input() {
-    let path = test_tmp().join("520-src-strength-edit.stb");
-    std::fs::write(
-        &path,
-        include_str!("../../../sepika-io/tests/fixtures/strength_src.stb"),
-    )
-    .unwrap();
-    let mut app = App::default();
-    app.import_stbridge_from(path);
-    let before = app.core.model.clone();
-    let key = result_validity::ResultInputKey::Modal;
-    let generation = app.result_input(&key);
-    let mut input = before.stb_strengths.clone();
-    input.sections[0].steel[0].strength = "SN400B".into();
-    app.ui
-        .scoped
-        .pending_story_cmds
-        .push_back(Box::new(sepika_edit::SetStbStrengths { input }));
-    app.apply_pending_story_command();
-    assert_eq!(
-        app.core
-            .model
-            .element_steel_material(&app.core.model.elements[0])
-            .unwrap()
-            .fy,
-        Some(235.)
-    );
-    assert_eq!(
-        app.core
-            .model
-            .element_material(&app.core.model.elements[0])
-            .unwrap()
-            .fc,
-        Some(36.)
-    );
-    assert!(app.core.model.stb_strength_diagnostics().is_empty());
-    assert_ne!(generation, app.result_input(&key));
-    app.undo_action();
-    assert!(app.core.model.eq_ignoring_dofmap(&before));
-    assert_eq!(generation, app.result_input(&key));
-    app.redo_action();
-    assert_eq!(
-        app.core
-            .model
-            .element_steel_material(&app.core.model.elements[0])
-            .unwrap()
-            .fy,
-        Some(235.)
-    );
-}
-
 #[test]
 fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
     use sepika_core::model::{WallDlSupport, WallOpening, WallWeightGenerationMode};
@@ -13519,11 +13091,45 @@ fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
 }
 
 #[cfg(feature = "gui")]
+fn rebar_edit_model(with_rebar: bool) -> sepika_core::model::Model {
+    use sepika_core::section_shape::{BeamStirrup, RebarSize, SectionShape};
+    let mut model = crate::sample::portal_frame();
+    let shape = SectionShape::RcBeamRect {
+        b: 400.0,
+        d: 700.0,
+        rebar: sepika_core::section_shape::RcBeamRebar {
+            main_dia: RebarSize::DiameterMm(22.0),
+            top: if with_rebar { vec![4] } else { vec![] },
+            bottom: if with_rebar { vec![3] } else { vec![] },
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: RebarSize::DiameterMm(10.0),
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    };
+    let mut section = shape.to_section(SectionId(1), "G1".into());
+    section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    model.sections[1] = section;
+    model
+}
+
+#[cfg(feature = "gui")]
+fn assert_rebar_top(model: &sepika_core::model::Model, expected: &[u32]) {
+    let Some(sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. }) =
+        &model.sections[1].shape
+    else {
+        panic!("矩形RC梁の断面が必要")
+    };
+    assert_eq!(rebar.top, expected);
+}
+
+#[cfg(feature = "gui")]
 #[test]
-fn standard_rebar507_edit_undo_save_and_result_generation_preserve_source() {
-    let xml = include_str!("../../../sepika-io/tests/fixtures/rebar507/normal_same.stb");
+fn native_rebar_edit_undo_save_and_result_generation() {
     let mut app = App::default();
-    app.load_model(sepika_io::stbridge::import_stbridge(xml).unwrap());
+    assert!(app.load_model(rebar_edit_model(true)));
     let before = app.core.model.clone();
     let key = result_validity::ResultInputKey::Modal;
     let generation = app.result_input(&key);
@@ -13540,30 +13146,22 @@ fn standard_rebar507_edit_undo_save_and_result_generation_preserve_source() {
             frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
         }));
     app.apply_pending_story_command();
-    assert!(app.core.model.stb_strengths.sections[1].rebar.is_none());
-    assert!(app.core.model.stb_strengths.sections[1]
-        .reinforcement
-        .is_empty());
     assert_ne!(generation, app.result_input(&key));
-    let changed = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
-    assert!(changed.contains("N_main_top_1st=\"3\""));
-    assert!(!changed.contains("D_2nd_main"));
+    assert_rebar_top(&app.core.model, &[3]);
     app.undo_action();
     assert!(before.eq_ignoring_dofmap(&app.core.model));
     assert_eq!(generation, app.result_input(&key));
     app.redo_action();
-    assert!(app.core.model.stb_strengths.sections[1].rebar.is_none());
     let path = test_tmp().join("507-edit-rebar.ovika");
     app.save_project_to(path.clone());
     let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
-    assert!(restored.stb_strengths.sections[1].rebar.is_none());
     assert!(restored.eq_ignoring_dofmap(&app.core.model));
     std::fs::remove_file(path).unwrap();
 }
 
 #[cfg(feature = "gui")]
 #[test]
-fn standard_rebar507_gui_pointer_apply_undo_and_save() {
+fn native_rebar_gui_pointer_apply_undo_and_save() {
     fn text_position(shape: &egui::epaint::Shape, needle: &str) -> Option<egui::Pos2> {
         match shape {
             egui::epaint::Shape::Text(text) if text.galley.text().contains(needle) => {
@@ -13574,12 +13172,7 @@ fn standard_rebar507_gui_pointer_apply_undo_and_save() {
         }
     }
     let mut app = App::default();
-    app.load_model(
-        sepika_io::stbridge::import_stbridge(include_str!(
-            "../../../sepika-io/tests/fixtures/rebar507/normal_same.stb"
-        ))
-        .unwrap(),
-    );
+    assert!(app.load_model(rebar_edit_model(true)));
     let before = app.core.model.clone();
     app.ui.scoped.nav.focus_section = Some(SectionId(1));
     app.ui.scoped.section_draft = crate::section_editor::SectionEditorDraft {
@@ -13627,11 +13220,8 @@ fn standard_rebar507_gui_pointer_apply_undo_and_save() {
             |ui| crate::section_editor::section_editor_panel(ui, &mut app),
         );
     }
-    assert!(app.core.model.stb_strengths.sections[1].rebar.is_none());
     assert_ne!(generation, app.result_input(&key));
-    let xml = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
-    assert!(xml.contains("N_main_top_1st=\"3\""));
-    assert!(!xml.contains("D_2nd_main"));
+    assert_rebar_top(&app.core.model, &[3]);
     app.undo_action();
     assert!(before.eq_ignoring_dofmap(&app.core.model));
     assert_eq!(generation, app.result_input(&key));
@@ -13647,15 +13237,9 @@ fn standard_rebar507_gui_pointer_apply_undo_and_save() {
 
 #[cfg(feature = "gui")]
 #[test]
-fn standard_rebar507_geometry_only_section_accepts_new_rebar_and_undo() {
-    let mut xml =
-        include_str!("../../../sepika-io/tests/fixtures/rebar507/normal_same.stb").to_string();
-    let start = xml.find("<StbSecBarArrangementBeam_RC>").unwrap();
-    let end = xml.find("</StbSecBarArrangementBeam_RC>").unwrap()
-        + "</StbSecBarArrangementBeam_RC>".len();
-    xml.replace_range(start..end, "");
+fn geometry_only_section_accepts_native_rebar_and_undo() {
     let mut app = App::default();
-    app.load_model(sepika_io::stbridge::import_stbridge(&xml).unwrap());
+    assert!(app.load_model(rebar_edit_model(false)));
     let before = app.core.model.clone();
     let mut shape = before.sections[1].shape.clone().unwrap();
     if let sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. } = &mut shape {
@@ -13678,269 +13262,10 @@ fn standard_rebar507_geometry_only_section_accepts_new_rebar_and_undo() {
             frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
         }));
     app.apply_pending_story_command();
-    let exported = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
-    assert!(exported.contains("N_main_top_1st=\"3\""));
-    let restored = sepika_io::stbridge::import_stbridge(&exported).unwrap();
-    restored.ensure_stb_rebar_supported(SectionId(1)).unwrap();
+    assert_rebar_top(&app.core.model, &[3]);
     app.undo_action();
     assert!(before.eq_ignoring_dofmap(&app.core.model));
-    let exported = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
-    assert!(!exported.contains("<StbSecBarArrangementBeam_RC>"));
-}
-
-#[test]
-fn standard_rebar507_import_notice_reports_center_priority_without_refusing_preparation() {
-    let xml=include_str!("../../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb").replace("center_top_bottom=\"51\" center_side=\"51\"", "center_top_bottom=\"51\" center_side=\"51\" depth_cover_top_bottom=\"40\" depth_cover_side=\"40\"");
-    let path = std::env::temp_dir().join(format!("rebar507-notice-gui-{}.stb", std::process::id()));
-    std::fs::write(&path, xml).unwrap();
-    let mut app = App::default();
-    app.import_stbridge_from(path.clone());
-    let notice = app.core.scoped.last_error.as_ref().unwrap();
-    assert!(notice.starts_with('⚠') && notice.contains("採用あき=30 mm"));
-    assert!(app.core.model.stb_strength_diagnostics().is_empty());
-    app.core.scoped.last_error = None;
-    app.core.model.stories = explicit_story_inputs(&[0.0, 3000.0]);
-    for element in &mut app.core.model.elements {
-        element.end_offsets_mm = [[0.0, 0.0, 0.0]; 2];
-    }
-    app.run_preparation();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "非blocking通知が準備計算を妨げない: {:?}",
-        app.core.scoped.last_error
-    );
-    std::fs::remove_file(path).unwrap();
-}
-
-#[test]
-fn unassigned_member_625_app_export_preserves_files_state_and_recovers_by_assignment() {
-    let dir = test_tmp().join("sepika_app_unassigned625");
-    std::fs::create_dir_all(&dir).unwrap();
-    for unsaved in [false, true] {
-        let mut app = App::default();
-        let mut model = crate::sample::portal_frame();
-        let index = model
-            .elements
-            .iter()
-            .position(|e| e.kind == sepika_core::model::ElementKind::Beam)
-            .unwrap();
-        let section = model.elements[index].section.unwrap();
-        let id = model.elements[index].id;
-        model.elements[index].section = None;
-        app.load_model(model);
-        app.core.scoped.project_path = Some(dir.join("source.ovika"));
-        app.core.scoped.staleness.unsaved_changes = unsaved;
-        let model_before = serde_json::to_value(&app.core.model).unwrap();
-        let project_before = app.core.scoped.project_path.clone();
-        let absent = dir.join(format!("absent-{unsaved}.stb"));
-        let existing = dir.join(format!("existing-{unsaved}.stb"));
-        let bytes = b"existing output\0\xff\n";
-        std::fs::write(&existing, bytes).unwrap();
-        for path in [&absent, &existing, &absent, &existing] {
-            app.export_stbridge_to(path.clone());
-            let reason = app.core.scoped.last_error.as_deref().unwrap();
-            for expected in [
-                "ST-Bridge書出エラー",
-                "主架構部材",
-                "断面未割当",
-                "必須の断面参照",
-                "適切な断面を割り当てて再出力",
-            ] {
-                assert!(reason.contains(expected), "{reason}");
-            }
-            assert!(reason.contains(&format!("ElemId({})", id.0)), "{reason}");
-            assert!(app
-                .core
-                .log
-                .entries
-                .iter()
-                .any(|entry| entry.message == reason));
-            assert!(!absent.exists());
-            assert_eq!(std::fs::read(&existing).unwrap(), bytes);
-            assert_eq!(serde_json::to_value(&app.core.model).unwrap(), model_before);
-            assert_eq!(app.core.scoped.project_path, project_before);
-            assert_eq!(app.core.scoped.staleness.unsaved_changes, unsaved);
-        }
-        let normal = app
-            .core
-            .model
-            .elements
-            .iter()
-            .filter(|e| e.id != id)
-            .cloned()
-            .collect::<Vec<_>>();
-        app.core.model.elements[index].section = Some(section);
-        let repaired_before = serde_json::to_value(&app.core.model).unwrap();
-        for path in [&absent, &existing] {
-            app.export_stbridge_to(path.clone());
-            assert!(
-                app.core.scoped.last_error.is_none(),
-                "{:?}",
-                app.core.scoped.last_error
-            );
-            assert!(std::fs::read_to_string(path)
-                .unwrap()
-                .contains("<ST_BRIDGE"));
-            assert_eq!(
-                serde_json::to_value(&app.core.model).unwrap(),
-                repaired_before
-            );
-            assert_eq!(app.core.scoped.project_path, project_before);
-            assert_eq!(app.core.scoped.staleness.unsaved_changes, unsaved);
-        }
-        assert_eq!(
-            app.core
-                .model
-                .elements
-                .iter()
-                .filter(|e| e.id != id)
-                .cloned()
-                .collect::<Vec<_>>(),
-            normal
-        );
-        std::fs::remove_file(absent).unwrap();
-        std::fs::remove_file(existing).unwrap();
-    }
-}
-
-#[cfg(feature = "gui")]
-#[test]
-fn stbridge647_file_menu_renders_notice_before_export_and_closes_without_state_changes() {
-    fn text_rect(shape: &egui::Shape, needle: &str) -> Option<egui::Rect> {
-        match shape {
-            egui::Shape::Text(text) if text.galley.text().contains(needle) => {
-                Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
-            }
-            egui::Shape::Vec(parts) => parts.iter().find_map(|part| text_rect(part, needle)),
-            _ => None,
-        }
-    }
-
-    for width in [640.0, 1280.0] {
-        let mut app = App::default();
-        app.load_model(crate::sample::portal_frame());
-        app.core.scoped.project_path = Some(std::path::PathBuf::from("existing.ovika"));
-        app.core.scoped.staleness.unsaved_changes = true;
-        app.report_error("既存の通知");
-        let model_before = rmp_serde::to_vec_named(&app.core.model).unwrap();
-        let log_before: Vec<_> = app
-            .core
-            .log
-            .entries
-            .iter()
-            .map(|entry| (entry.elapsed, entry.level, entry.message.clone()))
-            .collect();
-        let context = egui::Context::default();
-        install_japanese_fonts(&context);
-        crate::theme::apply_theme(&context);
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 720.0));
-        let frame = |app: &mut App, events| {
-            context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(screen),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    ui.horizontal(|ui| app.file_menu(ui));
-                },
-            )
-        };
-        frame(&mut app, vec![]);
-        let closed = frame(&mut app, vec![]);
-        let menu_pos = closed
-            .shapes
-            .iter()
-            .find_map(|clipped| text_rect(&clipped.shape, "ファイル"))
-            .unwrap()
-            .center();
-        assert!(!closed
-            .shapes
-            .iter()
-            .any(|clipped| text_rect(&clipped.shape, "開発中").is_some()));
-        for pressed in [true, false] {
-            frame(
-                &mut app,
-                vec![
-                    egui::Event::PointerMoved(menu_pos),
-                    egui::Event::PointerButton {
-                        pos: menu_pos,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: Default::default(),
-                    },
-                ],
-            );
-        }
-        frame(&mut app, vec![]);
-        let opened = frame(&mut app, vec![]);
-        let visible_rect = |needle| {
-            opened
-                .shapes
-                .iter()
-                .find_map(|clipped| {
-                    text_rect(&clipped.shape, needle).inspect(|&rect| {
-                        assert!(
-                            clipped.clip_rect.contains_rect(rect),
-                            "クリップ内: {needle}"
-                        );
-                        assert!(screen.contains_rect(rect), "画面内: {needle}");
-                    })
-                })
-                .unwrap_or_else(|| panic!("操作前に描画: {needle}"))
-        };
-        let export = visible_rect("ST-Bridge 書出（開発中）");
-        visible_rect("ST-Bridge 読込");
-        visible_rect("名前を付けて保存");
-        let notice = visible_rect("ST-Bridge書き出しは開発中です");
-        assert!(notice.top() >= export.bottom());
-        assert!(notice.width() <= 360.0);
-        for expected in [
-            "形状・属性・断面性能を正しく出力できない場合",
-            "出力内容は利用先で確認してください",
-            "モデルの保存にはOVIKAを使用してください",
-        ] {
-            visible_rect(expected);
-        }
-        let outside = egui::pos2(width - 10.0, 710.0);
-        for pressed in [true, false] {
-            frame(
-                &mut app,
-                vec![
-                    egui::Event::PointerMoved(outside),
-                    egui::Event::PointerButton {
-                        pos: outside,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: Default::default(),
-                    },
-                ],
-            );
-        }
-        let closed = frame(&mut app, vec![]);
-        assert!(!closed
-            .shapes
-            .iter()
-            .any(|clipped| text_rect(&clipped.shape, "開発中").is_some()));
-        assert_eq!(
-            rmp_serde::to_vec_named(&app.core.model).unwrap(),
-            model_before
-        );
-        assert_eq!(
-            app.core.scoped.project_path.as_deref(),
-            Some(std::path::Path::new("existing.ovika"))
-        );
-        assert!(app.core.scoped.staleness.unsaved_changes);
-        assert_eq!(app.core.scoped.last_error.as_deref(), Some("既存の通知"));
-        let log_after: Vec<_> = app
-            .core
-            .log
-            .entries
-            .iter()
-            .map(|entry| (entry.elapsed, entry.level, entry.message.clone()))
-            .collect();
-        assert_eq!(log_after, log_before);
-    }
+    assert_rebar_top(&app.core.model, &[]);
 }
 
 mod wall_connection_entry_fixture {
@@ -14464,14 +13789,6 @@ fn fl_sl_preparation_uses_sl_and_never_infers_missing_input_or_moves_nodes() {
         coordinates
     );
     assert!(app.core.model.explicit_story_of_node(NodeId(2)).is_none());
-    app.core.model.initialize_source_stories().unwrap();
-    assert!(app
-        .core
-        .model
-        .source_stories
-        .iter()
-        .all(|source| source.node_ids.is_empty()));
-    assert!(app.core.model.explicit_story_of_node(NodeId(2)).is_none());
     app.core.model.stories[1].sl_offset_mm = None;
     app.generate_stories_action();
     assert!(app.core.scoped.last_error.as_ref().unwrap().contains("ΔSL"));
@@ -14488,15 +13805,13 @@ fn fl_sl_preparation_uses_sl_and_never_infers_missing_input_or_moves_nodes() {
 }
 
 #[test]
-fn fl_sl_stb_missing_offset_save_reopen_then_explicit_input_preserves_original_attributes() {
+fn fl_sl_missing_offset_save_reopen_then_explicit_input_preserves_coordinates() {
     use sepika_core::model::Model;
     use sepika_edit::{SetStoryLevel, UndoStack};
-    let xml = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes>
-    <StbNode id="10" X="0" Y="0" Z="3000"/><StbNode id="20" X="0" Y="0" Z="6400"/>
-    </StbNodes><StbStories><StbStory id="30" name="1F" height="3500" kind="GENERAL"><StbNodeIdList><StbNodeId id="10"/></StbNodeIdList></StbStory>
-    <StbStory id="40" name="2F" height="7000" kind="GENERAL"><StbNodeIdList><StbNodeId id="20"/></StbNodeIdList></StbStory></StbStories></StbModel></ST_BRIDGE>"#;
-    let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
-    let original_sources = model.source_stories.clone();
+    let mut model = fl_sl_acceptance_model();
+    for story in &mut model.stories {
+        story.sl_offset_mm = None;
+    }
     let coordinates: Vec<_> = model.nodes.iter().map(|n| n.coord).collect();
     assert_eq!(
         model
@@ -14551,14 +13866,12 @@ fn fl_sl_stb_missing_offset_save_reopen_then_explicit_input_preserves_original_a
     }
     assert_eq!(model.layers()[0].height, 3500.0);
     assert_eq!(model.layers()[0].structural_height_mm, 3400.0);
-    assert_eq!(model.source_stories, original_sources);
     assert_eq!(
         model.nodes.iter().map(|n| n.coord).collect::<Vec<_>>(),
         coordinates
     );
     let restored = roundtrip(&model);
     assert_eq!(restored.stories, model.stories);
-    assert_eq!(restored.source_stories, original_sources);
     undo.undo(&mut model);
     assert!(model.stories[1].sl_mm().is_none());
     undo.redo(&mut model);
@@ -14601,9 +13914,9 @@ fn fl_sl_gui_pending_edit_and_undo_redo_invalidate_results_and_preserve_floor_id
 }
 
 #[test]
-fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
-    use sepika_core::model::{Node, SourceStory, SourceStoryKind, SourceStoryNode, Story};
-    use sepika_edit::{ApplyPreparedModel, SetSourceStoryNodes, SetStoryLevel, UndoStack};
+fn fl_sl_native_membership_removal_recomputes_automatic_owner_and_undo_redo() {
+    use sepika_core::model::{Node, Story};
+    use sepika_edit::{ApplyPreparedModel, SetStoryLevel, UndoStack};
     let mut model = sepika_core::model::Model::default();
     for (i, (fl, delta, z)) in [
         (500.0, -500.0, 0.0),
@@ -14615,7 +13928,6 @@ fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
     {
         let id = StoryId(i as u32);
         let node = NodeId(i as u32);
-        let source = i as u32 + 10;
         model.nodes.push(Node {
             id: node,
             coord: [0.0, 0.0, z],
@@ -14625,25 +13937,9 @@ fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
             support_spring: None,
         });
         let mut story = Story::new(id, format!("{}F", i + 1), Some(fl), Some(delta));
-        story.source_story = Some(source);
         story.node_ids = vec![node];
         model.stories.push(story);
-        model.source_stories.push(SourceStory {
-            id: source,
-            guid: None,
-            name: format!("原階{}", i + 1),
-            height: fl,
-            kind: SourceStoryKind::General,
-            kind_from_native: false,
-            id_dependence: None,
-            strength_concrete: None,
-            node_ids: vec![SourceStoryNode {
-                id: i as u32 + 1,
-                node: Some(node),
-            }],
-        });
     }
-    model.source_stories_initialized = true;
     model.load_cases.push(sepika_core::model::LoadCase {
         origin: Default::default(),
         id: LoadCaseId(0),
@@ -14661,11 +13957,13 @@ fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
     assert_eq!(model.stories[1].seismic_weight, Some(100.0));
     let mut undo = UndoStack::new();
     let original = model.clone();
+    let mut without_membership = model.clone();
+    without_membership.nodes[1].story = None;
+    without_membership.stories[1].node_ids.clear();
     assert!(undo.run(
         &mut model,
-        Box::new(SetSourceStoryNodes {
-            source_story: 11,
-            nodes: vec![]
+        Box::new(ApplyPreparedModel {
+            prepared: without_membership
         })
     ));
     assert!(model.explicit_story_of_node(NodeId(1)).is_none());
@@ -14697,7 +13995,6 @@ fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
         undo.redo(&mut model);
     }
     assert_eq!(model.nodes[1].story, Some(StoryId(2)));
-    assert!(model.source_stories[1].node_ids.is_empty());
 }
 
 #[cfg(feature = "gui")]

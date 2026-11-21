@@ -130,7 +130,6 @@ pub(crate) mod test_support {
             name: "1F".to_string(),
             elevation: Some(3000.0),
             sl_offset_mm: Some(0.0),
-            source_story: None,
             node_ids: vec![],
             seismic_weight: None,
             weight_override: None,

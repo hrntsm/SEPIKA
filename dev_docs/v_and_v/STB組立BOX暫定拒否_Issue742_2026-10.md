@@ -1,11 +1,13 @@
 # STB組立BOXの暫定拒否（Issue #742）
 
+ST-Bridge の入出力・専用処理は [ADR 0141](../adr/0141-remove-st-bridge.md) で廃止しました。この文書の対応範囲と入出力の観測は検証時点の記録です。
+
 ## 対象と境界
 
 [Issue #742](https://github.com/hrntsm/SEPIKA/issues/742)の先行対応を対象とする。
 元Issue本文と[#683](https://github.com/hrntsm/SEPIKA/issues/683)の調査記録をGitHub connectorで独自に全文取得した。
 実行日2026-10-21、基点`8cdbe874c652919755266dc3b5fc316fce89f2cf`。
-現在の受理・拒否仕様は[製品文書](../../docs/model_io/02_ST-Bridge_形式.md#組立boxの読み込み)を正本とする。
+現在の受理・拒否仕様は[製品文書](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/docs/model_io/02_ST-Bridge_%E5%BD%A2%E5%BC%8F.md#組立boxの読み込み)を正本とする。
 内部両板厚・性能・重量・保存・編集の本対応は#683が所有し、この先行拒否の完了で本対応を完了扱いにしない。
 CFT密度#741の変更は基点に含まれ、本変更では触れない。
 

@@ -15,7 +15,7 @@ ignore = [
     "RUSTSEC-2026-0370", # zvariant: unmaintained
     "RUSTSEC-2026-0371", # zbus_names: unmaintained
     "RUSTSEC-2026-0372", # zvariant_derive: unmaintained
-    # quick-xml の DoS 脆弱性。直接依存は 0.41 に更新済みだが、
+    # quick-xml の DoS 脆弱性。
     # wayland-scanner / zbus_xml（eframe 経由の推移的依存）の最新版が
     # まだ quick-xml ^0.39 を要求しているため、上流の更新待ち。
     "RUSTSEC-2026-0194", # quick-xml: 属性重複チェックの計算量DoS

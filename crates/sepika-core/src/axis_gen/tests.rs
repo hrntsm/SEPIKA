@@ -120,7 +120,7 @@ fn ignores_non_vertical_members() {
     assert!(groups.is_empty(), "柱がなければグループを作らない");
 }
 
-/// 既存の手動・取り込み由来の通りは保護され、同じ位置には新しい通りを作らない。
+/// 手動の既存の通りは保護され、同じ位置には新しい通りを作らない。
 /// 名前も既存と衝突せず、未使用の最小番号が使われる。
 #[test]
 fn keeps_manual_axes_and_avoids_name_collision() {
@@ -174,7 +174,7 @@ fn regenerates_auto_axes_idempotently() {
     assert_eq!(m.axes, again);
 }
 
-/// 取り込み由来のグループが別名・別角度でも、幾何で突き合わせてそこへ追加する。
+/// 既存グループが別名・別角度でも、幾何で突き合わせてそこへ追加する。
 /// 方向角 90° のグループでは離れの符号が反転する。
 #[test]
 fn adds_into_existing_group_matched_by_geometry() {

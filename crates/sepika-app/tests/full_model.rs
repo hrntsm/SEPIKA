@@ -1,4 +1,4 @@
-//! 実建物モデル（ST-Bridge）の対応解析と入力診断、および鋼構造サンプルの非線形解析の統合テスト。
+//! 実建物モデルの対応解析と入力診断、および鋼構造サンプルの非線形解析の統合テスト。
 //!
 //! # 目的
 //!
@@ -9,7 +9,7 @@
 //! `run_*` / `compute_*`）を通して実行する。スラブ協力付きRC梁の非線形解析は
 //! 必要情報不足を診断し、完走・収束は独立した既存の鋼構造サンプルで検証する。
 //!
-//! # モデル（`tests/fixtures/model.stb`）
+//! # モデル（`tests/fixtures/full_model.ovika`）
 //!
 //! 4 層＋PH の S 造（一部 RC）。節点 166・解析要素 115（柱 40・大梁 75）・
 //! 二次部材 56（小梁）・床領域 26（大梁1床領域単位）・階 5（Z=200/4700/8700/12700/16500）。
@@ -17,9 +17,7 @@
 //! 解析用fixtureの矩形RC梁は床上面へ梁上端を揃え、節点材軸から-D/2 mmと明示する。
 //! その他の梁は節点材軸から0 mmと明示する。
 //! 既存解析の比較条件としてH形鋼大梁の床板合成近似を明示し、実建物の接合条件とは区別する。
-//! 荷重は ST-Bridge に含まれないため、取り込み時に標準荷重ケース
-//! （DL・LL(架構用)・LL(地震用)・EX・EY）が自動生成される。支点情報も
-//! 含まれないため、最下レベルの柱脚 12 箇所がピン支点として自動設定される。
+//! 標準荷重ケースを持ち、最下レベルの柱脚12箇所をピン支点とする。
 //!
 //! # 検証の三層構造
 //!
@@ -61,12 +59,12 @@ use frame_gravity::select_frame_gravity;
 #[path = "support/full_model_study.rs"]
 mod full_model_study;
 
-/// 固定フィクスチャ（実建物の ST-Bridge）のパス。
+/// 実建物のOVIKAフィクスチャのパス。
 fn fixture_path() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("model.stb")
+        .join("full_model.ovika")
 }
 
 #[test]
@@ -210,11 +208,6 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
     }
     assert!(model.wall_plates.is_empty());
     assert!(model.generated_wall_origins.is_empty());
-    assert!(model.stb_strengths.members.iter().all(|input| !matches!(
-        input.target,
-        sepika_core::model::StrengthTarget::Element(_)
-            | sepika_core::model::StrengthTarget::Wall(_)
-    )));
     model.validate().unwrap();
     let mut expected = 0.0;
     let mut old = 0.0;
@@ -316,134 +309,51 @@ fn clear_error(app: &mut App) {
     app.core.scoped.last_error = None;
 }
 
-/// 公開原本とかぶり属性を保持した、解析用の明示派生fixture。
-/// 従来の計算幾何はcover40 + D13 + D25/2 = center65.5を使っていた。
-/// FB1だけは横芯間を満たすcenter51とし、共通既定なしで個別位置を適用する。
-fn analysis_fixture_path() -> std::path::PathBuf {
-    static PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-    PATH.get_or_init(|| {
-        let mut xml = std::fs::read_to_string(fixture_path()).unwrap();
-        assert_eq!(xml.matches("<StbSecBarArrangementBeam_RC").count(), 4);
-        xml = xml.replace("<StbSecBarArrangementBeam_RC", "<StbSecBarArrangementBeam_RC center_top=\"65.5\" center_bottom=\"65.5\" center_side=\"65.5\"");
-        // FB1は幅300/D25×4本で中心65.5では芯間56.33<最小62.5となる。
-        // この解析派生だけ中心51（芯間66）を明示し、原本は変更しない。
-        let fb1 = xml.find("<StbSecBeam_RC id=\"26\" name=\"FB1\"").unwrap();
-        let end = fb1 + xml[fb1..].find("</StbSecBeam_RC>").unwrap();
-        let corrected = xml[fb1..end].replace("65.5", "51");
-        xml.replace_range(fb1..end, &corrected);
-        let common = xml.find("<StbCommon ").unwrap();
-        let close = common + xml[common..].find("/>").unwrap();
-        xml.replace_range(close..close + 2, "><StbApplyConditionsList><StbBeam_RC_RebarPositionApply set_default=\"false\"/></StbApplyConditionsList></StbCommon>");
-        let path = test_tmp().join("model.stb");
-        std::fs::write(&path, xml).unwrap();
-        path
-    }).clone()
-}
-
 #[test]
-fn original_fixture_resolves_beam_positions_and_analysis_derivative_explicitly_supplies_rebar() {
-    let original = std::fs::read_to_string(fixture_path()).unwrap();
-    let original_model = sepika_io::stbridge::import_stbridge(&original).unwrap();
-    assert!(original_model
-        .stb_rebar_analysis_diagnostics()
-        .iter()
-        .any(|m| m.contains("主筋中心位置")));
-    let derivative = std::fs::read_to_string(analysis_fixture_path()).unwrap();
-    let supported = sepika_io::stbridge::import_stbridge(&derivative).unwrap();
-    let beam_depth_mm = |section: &sepika_core::model::Section| match section.shape.as_ref() {
-        Some(sepika_core::section_shape::SectionShape::RcBeamRect { d, .. }) => *d,
-        Some(sepika_core::section_shape::SectionShape::SteelH { height, .. }) => *height,
-        shape => panic!("原本の梁は矩形RCまたは対称H形: {shape:?}"),
-    };
-    for model in [&original_model, &supported] {
-        for element in &model.elements {
-            let section = model.element_section(element).unwrap();
-            let z_mm = if section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder) {
-                -beam_depth_mm(section) / 2.0
-            } else {
-                0.0
-            };
-            assert_eq!(element.end_offsets_mm, [[0.0, 0.0, z_mm]; 2]);
-        }
-        for beam in model.beams() {
-            let section = model.section(beam.section.unwrap()).unwrap();
-            assert_eq!(
-                beam.end_offsets_mm,
-                [[0.0, 0.0, -beam_depth_mm(section) / 2.0]; 2]
-            );
-        }
+fn native_fixture_preserves_beam_offsets_and_explicit_rebar_geometry() {
+    use sepika_core::model::{FrameSectionUse, SupportMemberId};
+    use sepika_core::section_shape::SectionShape;
+    let model = sepika_io::ovika::load_ovika(&fixture_path()).unwrap().model;
+    for element in &model.elements {
+        let section = model.element_section(element).unwrap();
+        let offset_mm = if section.frame_use == Some(FrameSectionUse::Girder) {
+            -section.depth / 2.0
+        } else {
+            0.0
+        };
+        assert_eq!(element.end_offsets_mm, [[0.0, 0.0, offset_mm]; 2]);
     }
-    assert!(
-        supported.stb_rebar_analysis_diagnostics().is_empty(),
-        "{:?}",
-        supported.stb_rebar_analysis_diagnostics()
-    );
-    let mut expected_sections = original_model.sections.clone();
+    for beam in model.beams() {
+        let section = model.section(beam.section.unwrap()).unwrap();
+        assert_eq!(beam.end_offsets_mm, [[0.0, 0.0, -section.depth / 2.0]; 2]);
+        assert!(model
+            .beam_placement(SupportMemberId::Secondary(beam.id))
+            .is_ok());
+    }
     for (name, floor, dimensions, center_mm) in [
         ("FB1", None, (300.0, 1800.0), 51.0),
         ("FGY1", Some("1"), (500.0, 1800.0), 65.5),
         ("FGX1", Some("1"), (500.0, 1800.0), 65.5),
         ("B1", None, (400.0, 700.0), 65.5),
     ] {
-        let mut matches = expected_sections
-            .iter_mut()
-            .filter(|section| section.name == name && section.floor.as_deref() == floor);
-        let section = matches.next().expect("原本の対象断面が存在する");
-        assert!(matches.next().is_none(), "断面 {name}/{floor:?} が一意");
-        let Some(sepika_core::section_shape::SectionShape::RcBeamRect { b, d, rebar }) =
-            &mut section.shape
-        else {
+        let section = model
+            .sections
+            .iter()
+            .find(|section| section.name == name && section.floor.as_deref() == floor)
+            .unwrap();
+        let Some(SectionShape::RcBeamRect { b, d, rebar }) = &section.shape else {
             panic!("{name}は矩形RC梁");
         };
-        assert_eq!((*b, *d), dimensions, "{name}の外形");
-        assert_eq!(
-            (
-                rebar.main_dia.designation_or_diameter_mm(),
-                rebar.stirrup.dia.designation_or_diameter_mm()
-            ),
-            (25.0, 13.0)
-        );
+        assert_eq!((*b, *d), dimensions);
+        assert_eq!(rebar.main_dia.designation_or_diameter_mm(), 25.0);
+        assert_eq!(rebar.stirrup.dia.designation_or_diameter_mm(), 13.0);
         assert_eq!((rebar.stirrup.pitch, rebar.stirrup.legs), (200.0, 2));
         assert_eq!(rebar.top, [4]);
         assert_eq!(rebar.bottom, [4]);
-        assert_eq!(rebar.cover, 0.0, "原本のApplyなし位置は非適用");
-        if name == "FB1" {
-            // 独立な芯間計算。径・本数・外形を変えず、中心だけで配置を成立させる。
-            let minimum = rebar.main_dia.designation_or_diameter_mm()
-                + (1.5 * rebar.main_dia.designation_or_diameter_mm()).max(25.0);
-            let spaces = f64::from(rebar.top[0] - 1);
-            assert!((*b - 2.0 * 65.5) / spaces < minimum);
-            assert!((*b - 2.0 * 51.0) / spaces >= minimum);
-        }
-        rebar.cover = center_mm - 13.0 - 25.0 / 2.0;
+        assert_eq!(rebar.cover, center_mm - 13.0 - 25.0 / 2.0);
     }
-    assert_eq!(
-        expected_sections, supported.sections,
-        "明示した4断面の配筋中心以外の断面・材料・外形を保持する"
-    );
-    assert_eq!(original_model.materials, supported.materials);
-    assert_eq!(original_model.elements, supported.elements);
-    assert_eq!(original_model.load_cases, supported.load_cases);
-    assert_eq!(std::fs::read_to_string(fixture_path()).unwrap(), original);
-    let mut app = App::default();
-    app.import_stbridge_from(fixture_path());
-    clear_error(&mut app);
-    app.run_preparation();
-    assert!(app
-        .core
-        .scoped
-        .last_error
-        .as_ref()
-        .is_some_and(|message| message.contains("主筋中心位置")));
 }
 
-/// フィクスチャを取り込んだ `App`。
-///
-/// ST-Bridge 取り込みは、欠落属性の要約や支点の自動設定といった**注意**も
-/// `report_error` 経由で `last_error` に載せる（`app/actions.rs` の
-/// `import_stbridge_from`。ステータスバーで見落とされないようにするための仕様）。
-/// そのため「注意（先頭が ⚠️）以外のエラーが出ていないこと」を確認したうえで
-/// クリアする。
 fn declare_analysis_story_levels(model: &mut sepika_core::model::Model) {
     let input = [
         (200.0, 0.0),
@@ -515,14 +425,8 @@ fn imported() -> App {
     let mut app = App::default();
     // 解析結果の完全再現性を確保する（スナップショット比較の前提）。
     app.core.analysis_cfg.threads = 1;
-    app.import_stbridge_from(analysis_fixture_path());
-    if let Some(e) = &app.core.scoped.last_error {
-        assert!(
-            e.starts_with('⚠'),
-            "ST-Bridge 取り込みが失敗した（注意ではなくエラー）: {e}"
-        );
-    }
-    clear_error(&mut app);
+    app.open_project_from(fixture_path());
+    assert_no_error(&app, "OVIKA読込");
     declare_analysis_story_levels(&mut app.core.model);
     declare_analysis_beam_placements(&mut app.core.model);
     declare_analysis_slab_placements(&mut app.core.model);
@@ -667,7 +571,7 @@ fn four_story_steel_portal() -> sepika_core::model::Model {
     model
 }
 
-/// 元STBとは独立した、床を持たない鋼構造の非線形解析用モデル。
+/// 床を持たない鋼構造の非線形解析用モデル。
 fn prepared_steel_portal(four_story: bool) -> App {
     let mut app = App::default();
     app.core.analysis_cfg.threads = 1;
@@ -959,8 +863,8 @@ fn sig4(v: f64) -> String {
     format!("{v:.3e}")
 }
 
-/// ST-Bridge の取り込みが、想定どおりのモデル構成（部材・二次部材・床・階・
-/// 荷重ケース・支点）を組み立てる。
+/// OVIKA 読込後に、モデル構成（部材・二次部材・床・階・
+/// 荷重ケース・支点）を保持する。
 ///
 /// 取り込み側の分類が変わると（例: 小梁を解析要素として取り込むようになる）、
 /// 以降のすべての解析の前提が変わるため、まず構成を固定する。
@@ -1042,93 +946,14 @@ fn import_builds_expected_model() {
     );
 }
 
-/// ST-Bridge フィクスチャの `<StbNode>` 座標 [mm] を id で引く（テスト専用の簡易走査）。
-/// 本番のパーサは `sepika-io` にあり、ここは元スラブの面積を独立に検算するためだけに使う。
-fn fixture_node_coords(xml: &str) -> std::collections::HashMap<u32, [f64; 2]> {
-    let mut nodes = std::collections::HashMap::new();
-    for chunk in xml.split("<StbNode ").skip(1) {
-        let head = chunk.split('>').next().unwrap_or("");
-        let (Some(id), Some(x), Some(y)) = (
-            stb_attr(head, "id").and_then(|v| v.parse::<u32>().ok()),
-            stb_attr(head, "X").and_then(|v| v.parse::<f64>().ok()),
-            stb_attr(head, "Y").and_then(|v| v.parse::<f64>().ok()),
-        ) else {
-            continue;
-        };
-        nodes.insert(id, [x, y]);
-    }
-    nodes
-}
-
-/// タグの属性値 `name="value"` を取り出す。
-fn stb_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    let needle = format!("{name}=\"");
-    let start = tag.find(&needle)? + needle.len();
-    let rest = &tag[start..];
-    Some(&rest[..rest.find('"')?])
-}
-
-/// ST-Bridge フィクスチャの元スラブ総面積 [mm²] と、板厚を掛けた総和 [mm³] を返す。
-/// 板厚は `StbSecSlab_RC` の `depth`（無ければ `thickness`）を使う。
-fn fixture_source_slab_measures(xml: &str) -> (f64, f64) {
-    use sepika_core::geom::polygon;
-    let nodes = fixture_node_coords(xml);
-    let mut thickness = std::collections::HashMap::new();
-    for chunk in xml.split("<StbSecSlab_RC ").skip(1) {
-        let block = chunk.split("</StbSecSlab_RC>").next().unwrap_or("");
-        let (Some(id), Some(t)) = (
-            stb_attr(block, "id").and_then(|v| v.parse::<u32>().ok()),
-            stb_attr(block, "depth")
-                .or_else(|| stb_attr(block, "thickness"))
-                .and_then(|v| v.parse::<f64>().ok()),
-        ) else {
-            continue;
-        };
-        thickness.insert(id, t);
-    }
-    let mut area_sum = 0.0;
-    let mut thickness_sum = 0.0;
-    for chunk in xml.split("<StbSlab ").skip(1) {
-        let block = chunk.split("</StbSlab>").next().unwrap_or("");
-        let head = block.split('>').next().unwrap_or("");
-        let section = stb_attr(head, "id_section").and_then(|v| v.parse::<u32>().ok());
-        let order = block
-            .split("<StbNodeIdOrder>")
-            .nth(1)
-            .and_then(|rest| rest.split("</StbNodeIdOrder>").next());
-        let Some(order) = order else {
-            continue;
-        };
-        let poly: Vec<[f64; 2]> = order
-            .split_whitespace()
-            .filter_map(|v| v.parse::<u32>().ok())
-            .filter_map(|id| nodes.get(&id).copied())
-            .collect();
-        if poly.len() < 3 {
-            continue;
-        }
-        let area = polygon::area(&poly);
-        area_sum += area;
-        if let Some(t) = section.and_then(|s| thickness.get(&s)) {
-            thickness_sum += area * t;
-        }
-    }
-    (area_sum, thickness_sum)
-}
-
-/// 取り込み後も床板の総面積と、総重量に比例する「面積×板厚」が元 StbSlab と一致すること。
-///
-/// 割当領域と境界が一致しない版を領域ごとに切り分けるとき、面積を領域面積へ置き換えると
-/// 総重量が動く。ここでは元フィクスチャの境界から独立に面積を求め、取り込み結果と比べる。
-/// フィクスチャの床板はすべて同じコンクリート（Fc21）なので、面積×板厚の一致は総重量の一致を意味する。
 #[test]
-fn import_preserves_stbridge_slab_area_and_weight() {
+fn native_floor_plates_preserve_independent_area_and_volume() {
     let app = imported();
     let m = &app.core.model;
 
-    let xml = std::fs::read_to_string(fixture_path()).expect("フィクスチャを読む");
-    let (source_area, source_area_thickness) = fixture_source_slab_measures(&xml);
-
+    // 入力の版境界を靴紐公式で積算した面積と、各版の面積に板厚を掛けた体積。
+    let source_area = 999_040_000.0;
+    let source_area_thickness = 139_843_200_000.0;
     let mut slab_area = 0.0;
     let mut slab_area_thickness = 0.0;
     for slab in &m.slabs {
@@ -1822,7 +1647,7 @@ fn select_holding_points(app: &mut App) -> u32 {
     selected_step
 }
 
-/// 鋼構造の解析点・Qud・FesとDs保留、および元STBのRC梁の静的終局検定の未検定理由。
+/// 鋼構造の解析点・Qud・FesとDs保留、および実建物モデルのRC梁の静的終局検定の未検定理由。
 #[test]
 fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
     let mut app = prepared_steel_portal(true);
@@ -2192,7 +2017,7 @@ fn time_history_linear_runs() {
 
 /// 鋼構造サンプルの120秒波形で、減衰末尾を含め非収束を生じない。
 ///
-/// 元STBで同定された収束不具合の条件はT形骨格未対応のため現在は完走検証できない。
+/// 実建物モデルで同定された収束不具合の条件はT形骨格未対応のため現在は完走検証できない。
 /// 有効な別モデルでも長期荷重初期化なし・dt=.05の長時間検証を維持する。
 #[test]
 fn time_history_nonlinear_long_duration_has_no_false_non_convergence() {
@@ -2563,33 +2388,16 @@ fn ovika_invalid_restored_model_is_not_installed() {
     std::fs::remove_file(path).unwrap();
 }
 
-/// ST-Bridge へ書き出し、読み直してもモデル構成が保たれ、そのまま再解析できる。
-///
-/// 「読める → 書ける → また読める → 解ける」の往復は、取り込み・書き出しの
-/// どちらが壊れても落ちる最も安価な回帰テストになる。
-///
-/// 書き出しは**準備計算の前**（取り込み直後）の状態から行う。準備計算は仕口パネル
-/// 要素を `Model::elements` へ追加するが、これは解析用の生成物であって
-/// ST-Bridge の部材ではないため書き出されない。準備計算後のモデルと比べると
-/// 要素数が一致せず、往復の検証にならない。
 #[test]
-fn stbridge_roundtrip_is_reanalyzable() {
+fn native_roundtrip_preserves_placements_and_is_reanalyzable() {
     let mut app = imported();
-    let path = test_tmp().join("full_model_roundtrip.stb");
-    app.export_stbridge_to(path.clone());
-    assert_no_error(&app, "ST-Bridge 書き出し");
+    let path = test_tmp().join("full_model_roundtrip.ovika");
+    app.save_project_to(path.clone());
+    assert_no_error(&app, "OVIKA保存");
 
     let mut reimported = App::default();
-    reimported.core.analysis_cfg.threads = 1;
-    reimported.import_stbridge_from(path.clone());
-    if let Some(e) = &reimported.core.scoped.last_error {
-        assert!(
-            e.starts_with('⚠'),
-            "書き出したファイルの再取り込みが失敗: {e}"
-        );
-    }
-    clear_error(&mut reimported);
-
+    reimported.open_project_from(path.clone());
+    assert_no_error(&reimported, "OVIKA読込");
     assert_eq!(
         reimported.core.model.nodes.len(),
         app.core.model.nodes.len(),
@@ -2613,7 +2421,7 @@ fn stbridge_roundtrip_is_reanalyzable() {
     assert_eq!(
         app.core.model.floor_regions.len(),
         26,
-        "STB 再取り込みで小片 82 に戻らない"
+        "床領域を細分化せず保持する"
     );
 
     for (original, reread) in app
@@ -2639,10 +2447,6 @@ fn stbridge_roundtrip_is_reanalyzable() {
     for (original, reread) in app.core.model.beams().zip(reimported.core.model.beams()) {
         assert_eq!(reread.end_offsets_mm, original.end_offsets_mm);
     }
-    declare_analysis_story_levels(&mut reimported.core.model);
-    declare_analysis_slab_placements(&mut reimported.core.model);
-    assert!(reimported.core.model.slab_composite_attrs.is_empty());
-    declare_analysis_slab_composite(&mut reimported.core.model);
     reimported.run_preparation();
     assert_eq!(
         reimported.core.model.floor_regions.len(),
@@ -2656,7 +2460,7 @@ fn stbridge_roundtrip_is_reanalyzable() {
     std::fs::remove_file(&path).ok();
 }
 
-/// ST-Bridge から取り込んだ小梁が、床の小梁設計で検定される。
+/// 床の小梁設計でフィクスチャの小梁を検定する。
 ///
 /// あわせて、各小梁が**自分と同じレベルのスラブ**で検定されていることを確認する。
 /// スラブの内包判定は XY 平面へ投影して行うため、レベルを見ないと上下階のスラブが
@@ -2858,16 +2662,10 @@ fn region_gen_finds_wall_bounded_regions() {
     );
 }
 
-/// ST-Bridge 取り込み（`assemble.rs`）が `rebuild_wall_regions` を実際に呼び、
-/// `model.wall_regions` が `region_gen::wall` の検出結果と一致する件数で
-/// 埋まっていること（§5.9 で結線した経路の end-to-end 確認）。
-///
-/// 本フィクスチャは壁版（`WallPlate`）を 1 枚も持たないため、検出した壁領域は
-/// すべて `wall_plate_ids` が空のまま（幾何の検出だけが先に結線され、壁版の取り込み
-/// はまだ Step 7+8 本体で行うため）。
 #[test]
-fn import_populates_wall_regions_from_region_gen() {
-    let app = imported();
+fn rebuilding_wall_regions_matches_detected_boundaries() {
+    let mut app = imported();
+    sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut app.core.model);
     assert_eq!(
         app.core.model.wall_regions.len(),
         55,
@@ -2929,25 +2727,17 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
     use sepika_core::{model::FrameSectionUse, section_shape::SectionShape};
     use sepika_design_jp::CheckOutcome;
     let model = &app.core.model;
-    let source_id = |node| {
-        model
-            .stb_node_ids
-            .iter()
-            .find(|identity| identity.node == node)
-            .unwrap()
-            .id
-    };
-    let staggered = [14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 45, 49];
-    let unequal_ms_depth = [15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 50];
+    let staggered = [13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 44, 48];
+    let unequal_ms_depth = [14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 45, 49];
     let standard = [
-        13, 15, 16, 18, 19, 21, 22, 24, 25, 27, 28, 30, 31, 33, 34, 36, 37, 39, 40, 42, 43, 44, 46,
-        47, 48, 50, 51, 52, 53, 54,
+        12, 14, 15, 17, 18, 20, 21, 23, 24, 26, 27, 29, 30, 32, 33, 35, 36, 38, 39, 41, 42, 43, 45,
+        46, 47, 49, 50, 51, 52, 53,
     ];
     let mut panels: Vec<_> = model
         .elements
         .iter()
         .filter(|e| matches!(e.kind, ElementKind::PanelZone))
-        .map(|e| source_id(e.nodes[0]))
+        .map(|e| e.nodes[0].0)
         .collect();
     panels.sort_unstable();
     assert_eq!(panels, standard);
@@ -2966,8 +2756,8 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
     let mut skipped = Vec::new();
     let mut ms_depth_skipped = Vec::new();
     for id in standard.into_iter().chain(staggered) {
-        let pair: Vec<_> = checks.iter().filter(|c| source_id(c.node) == id).collect();
-        assert_eq!(pair.len(), 2, "STB節点{id}");
+        let pair: Vec<_> = checks.iter().filter(|c| c.node.0 == id).collect();
+        assert_eq!(pair.len(), 2, "節点{id}");
         let node = model.node(pair[0].node).unwrap();
         let mut flange_distances = [Vec::new(), Vec::new()];
         for member in model.elements.iter().filter(|e| e.nodes.contains(&node.id)) {
@@ -2998,7 +2788,7 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
                     ..
                 }) = section.shape
                 else {
-                    panic!("STB節点{id}の鋼梁断面");
+                    panic!("節点{id}の鋼梁断面");
                 };
                 assert!(matches!(
                     (height, flange_thick),
@@ -3011,7 +2801,7 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
             distances.sort_by(f64::total_cmp);
             distances.dedup();
         }
-        assert_eq!(flange_distances[1], [484.0], "STB節点{id} Y面");
+        assert_eq!(flange_distances[1], [484.0], "節点{id} Y面");
         assert_eq!(
             flange_distances[0],
             if staggered.contains(&id) {
@@ -3021,7 +2811,7 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
             } else {
                 vec![484.0]
             },
-            "STB節点{id} X面"
+            "節点{id} X面"
         );
         assert_eq!(
             app.core
@@ -3046,20 +2836,20 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
             assert!(
                 matches!(&weak.outcome, CheckOutcome::Skipped { reason }
                 if reason.contains("解析MS応答の共通db=681 mm") && reason.contains("柱弱軸") && reason.contains("db=484 mm") && reason.contains("不整合")),
-                "STB節点{id}: {:?}",
+                "節点{id}: {:?}",
                 weak.outcome
             );
             ms_depth_skipped.push(id);
         } else {
             assert!(
                 matches!(weak.outcome, CheckOutcome::Checked(_)),
-                "STB節点{id}弱軸: {:?}",
+                "節点{id}弱軸: {:?}",
                 weak.outcome
             );
         }
         if staggered.contains(&id) {
             let CheckOutcome::Skipped { reason } = &strong.outcome else {
-                panic!("STB節点{id}段違いX面");
+                panic!("節点{id}段違いX面");
             };
             assert!(
                 reason.contains("db=484 mm") && reason.contains("db=681 mm"),
@@ -3073,7 +2863,7 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
         } else {
             assert!(
                 matches!(strong.outcome, CheckOutcome::Checked(_)),
-                "STB節点{id}標準X面"
+                "節点{id}標準X面"
             );
         }
     }

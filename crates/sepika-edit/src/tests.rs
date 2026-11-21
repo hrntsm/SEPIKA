@@ -8,49 +8,6 @@ use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 use smallvec::smallvec;
 
 #[test]
-fn section_strength_reference_blocks_delete_without_losing_input_or_redo() {
-    use sepika_core::model::StbSectionStrength;
-
-    let mut model = Model::default();
-    model.sections.push(bare_section(SectionId(0), None));
-    model.stb_strengths.sections.push(StbSectionStrength {
-        section: SectionId(0),
-        concrete: Some("Fc30".into()),
-        native_material: None,
-        reinforcement: vec![],
-        steel: vec![],
-        built_box: None,
-        native_rebar: false,
-        rebar: None,
-    });
-    let mut stack = UndoStack::new();
-    assert!(stack.run(
-        &mut model,
-        Box::new(SetSectionName {
-            id: SectionId(0),
-            name: "変更後".into(),
-            floor: None,
-        })
-    ));
-    stack.undo(&mut model);
-    let before = model.clone();
-    let revision = stack.revision();
-    let delete = DeleteSection { id: SectionId(0) };
-    assert_eq!(
-        delete.blocked_reason(&model),
-        Some("ST-Bridge断面強度入力から参照中のため削除できません")
-    );
-    assert!(!stack.run(&mut model, Box::new(delete)));
-    assert!(model.eq_ignoring_dofmap(&before));
-    assert_eq!(stack.revision(), revision);
-    assert!(!stack.can_undo());
-    assert!(stack.can_redo());
-    stack.redo(&mut model);
-    assert_eq!(model.sections[0].name, "変更後");
-    assert_eq!(model.stb_strengths, before.stb_strengths);
-}
-
-#[test]
 fn restricted_section_batch_is_atomic_and_one_undo_including_unchanged_assignments() {
     let mut model = seeded_model(4, 3);
     let mut setup = UndoStack::new();
@@ -2334,7 +2291,6 @@ fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
         name: format!("{}F", id + 1),
         elevation: Some(id as f64 * 3000.0),
         sl_offset_mm: Some(0.0),
-        source_story: None,
         node_ids: vec![],
         seismic_weight: weight,
         weight_override: None,
@@ -2471,7 +2427,6 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     prepared.damper_mass_generation = Some(Default::default());
     prepared.seismic_weight_generation = Some(generation);
     prepared.mass_method = MassMethod::LumpedOnly;
-    prepared.assign_stb_node_ids().unwrap();
     let applied = prepared.clone();
     assert!(stack.run(&mut model, Box::new(ApplyPreparedModel { prepared })));
     assert!(model.eq_ignoring_dofmap(&applied));
@@ -8862,8 +8817,7 @@ fn issue546_signed_zero_is_a_material_change_but_same_bits_are_noop() {
 }
 
 #[test]
-fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() {
-    use sepika_core::model::{SourceStory, SourceStoryKind, StbCommonStrength};
+fn issue546_repairs_nonfinite_material_values_restore_bits() {
     use MaterialField::*;
     fn bits(m: &sepika_core::model::Material) -> [Option<u64>; 6] {
         [
@@ -8883,25 +8837,19 @@ fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() 
             f64::NEG_INFINITY,
         ] {
             let mut model = Model::default();
-            model.stb_strengths.common = Some(StbCommonStrength {
-                project_name: "repair".into(),
-                app_name: "STB".into(),
-                app_version: "2".into(),
-                strength_concrete: Some("Fc24".into()),
-                reinforcement: vec![],
+            model.materials.push(sepika_core::model::Material {
+                id: sepika_core::ids::MaterialId(0),
+                name: "Fc24".into(),
+                category: sepika_core::model::MaterialCategory::Concrete,
+                concrete_class: sepika_core::units::ConcreteClass::Normal,
+                young: 23000.0,
+                poisson: 0.2,
+                density: 2.4e-9,
+                shear: None,
+                fc: Some(24.0),
+                fy: None,
+                strength_factor: None,
             });
-            model.source_stories.push(SourceStory {
-                id: 1,
-                guid: None,
-                name: "1F".into(),
-                height: 0.0,
-                kind: SourceStoryKind::General,
-                kind_from_native: false,
-                id_dependence: None,
-                strength_concrete: None,
-                node_ids: vec![],
-            });
-            model.prepare_stb_strength_materials();
             model.materials[0].concrete_class = sepika_core::units::ConcreteClass::UserDefined;
             let m = &mut model.materials[0];
             match field {
@@ -8913,8 +8861,6 @@ fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() 
                 StrengthFactor => m.strength_factor = Some(old),
             }
             let before = bits(&model.materials[0]);
-            let strengths = model.stb_strengths.clone();
-            let stories = model.source_stories.clone();
             let mut undo = UndoStack::new();
             assert!(undo.run(
                 &mut model,
@@ -8925,17 +8871,10 @@ fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() 
                 })
             ));
             let after = bits(&model.materials[0]);
-            let after_strengths = model.stb_strengths.clone();
-            let after_stories = model.source_stories.clone();
             undo.undo(&mut model);
             assert_eq!(bits(&model.materials[0]), before);
-            assert_eq!(model.stb_strengths, strengths);
-            assert_eq!(model.source_stories, stories);
-            assert_eq!(model.source_stories[0].strength_concrete, None);
             undo.redo(&mut model);
             assert_eq!(bits(&model.materials[0]), after);
-            assert_eq!(model.stb_strengths, after_strengths);
-            assert_eq!(model.source_stories, after_stories);
             if field == Density {
                 model.materials[0].young = f64::NAN;
             } else {
@@ -9371,7 +9310,6 @@ fn adding_a_floor_requires_known_existing_fl_without_reordering_partial_input() 
             NodeId(1),
             vec![NodeId(3)],
         ));
-    model.initialize_source_stories().unwrap();
     let complete = model.clone();
     let mut undo = UndoStack::new();
     assert!(undo.run(
@@ -9433,7 +9371,6 @@ fn adding_a_floor_requires_known_existing_fl_without_reordering_partial_input() 
             (StoryId(3), "D")
         ]
     );
-    assert_eq!(model.source_stories[..3], complete.source_stories);
     assert_eq!(model.nodes, complete.nodes);
     assert_eq!(model.constraints, complete.constraints);
     model.validate_reference_ids().unwrap();

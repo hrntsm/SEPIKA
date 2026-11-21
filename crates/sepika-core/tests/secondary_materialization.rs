@@ -105,16 +105,11 @@ fn materialization_does_not_merge_distinct_resolved_member_materials() {
     concrete.category = MaterialCategory::Concrete;
     concrete.fc = Some(30.);
     model.materials.push(concrete);
-    model.stb_strengths.materials.push(StbGradeMaterial {
-        grade: "Fc30".into(),
-        material: MaterialId(1),
-    });
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Secondary(SecondaryMemberId(0)),
-        node: NodeId(0),
-        node_order: vec![NodeId(0), NodeId(1)],
-        concrete: Some("Fc30".into()),
-    });
+    let mut secondary_section = model.sections[0].clone();
+    secondary_section.id = SectionId(1);
+    secondary_section.material = Some(MaterialId(1));
+    model.sections.push(secondary_section);
+    model.unassigned_beams[0].section = Some(SectionId(1));
     assert_eq!(
         model
             .secondary_material(&model.unassigned_beams[0])

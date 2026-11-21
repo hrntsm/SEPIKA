@@ -37,4 +37,4 @@ GUI の `open_project_from` は従来の全 `Model.validate` を維持し、IO �
 
 一般参照の全網羅とはしない。Story 所属・Constraint/Mpc・荷重・生成記録等の未網羅集合は
 [#681](https://github.com/hrntsm/SEPIKA/issues/681) が独立調査する。実到達や数値影響は静的な未網羅確認から推定しない。
-CFT 二次用途の #539、RC 専用用途の #674、板参照の #677、STB 外部系列 ID の #571 はそれぞれの所有を維持する。
+CFT 二次用途の #539、RC 専用用途の #674、板参照の #677 はそれぞれの所有を維持する。旧 ST-Bridge 外部系列 ID の #571 はこの参照検証の対象とは別に扱っていた。その専用系列は [ADR 0141](0141-remove-st-bridge.md) で廃止した。

@@ -6,8 +6,7 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
     AnalysisKind, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
-    MaterialCategory, Model, Node, PropertyBasis, StbGradeMaterial, StbMemberStrength,
-    StrengthTarget,
+    MaterialCategory, Model, Node, PropertyBasis,
 };
 use sepika_core::section_shape::{
     BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
@@ -165,23 +164,6 @@ fn src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution() {
         m.materials[0].shear = Some(65_000.0);
         m.materials[1].young = 33_500.0;
         m.materials[1].fc = Some(60.0);
-        let mut stb_model = m.clone();
-        stb_model.materials.push(Material {
-            id: MaterialId(2),
-            name: "Fc60".into(),
-            ..m.materials[1].clone()
-        });
-        stb_model.materials[1].shear = Some(12_000.0);
-        stb_model.stb_strengths.materials.push(StbGradeMaterial {
-            grade: "Fc60".into(),
-            material: MaterialId(2),
-        });
-        stb_model.stb_strengths.members.push(StbMemberStrength {
-            target: StrengthTarget::Element(ElemId(0)),
-            node: NodeId(0),
-            node_order: vec![],
-            concrete: Some("Fc60".into()),
-        });
         // 軸・曲げは三矩形の鉄骨とその領域を除いたコンクリートの合算。
         let ea = 7_369_072_000.0;
         let ei_strong = 217_969_493_589_333.33;
@@ -204,19 +186,17 @@ fn src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution() {
                 74_180_413_264_102.56,
             ),
         ] {
-            for (model, material_index) in [(&mut m, 1), (&mut stb_model, 2)] {
-                model.materials[material_index].shear = specified_g;
-                let beam = BeamElement::try_new(&model.elements[0], model).unwrap();
-                let k = beam.local_stiffness_raw();
-                relative(beam.g, gc, 1.0e-12);
-                relative(beam.e * beam.iz, ei_strong, 1.0e-12);
-                relative(beam.e * beam.iy, ei_weak, 1.0e-12);
-                relative(k.get(6, 6) * length_mm, ea, 1.0e-12);
-                relative(k.get(9, 9) * length_mm, gj, 1.0e-12);
-                for (dof, ei, ga) in [(7, ei_strong, ga_strong), (8, ei_weak, ga_weak)] {
-                    let compliance = length_mm.powi(3) / (12.0 * ei) + length_mm / ga;
-                    relative(k.get(dof, dof), 1.0 / compliance, 1.0e-12);
-                }
+            m.materials[1].shear = specified_g;
+            let beam = BeamElement::try_new(&m.elements[0], &m).unwrap();
+            let k = beam.local_stiffness_raw();
+            relative(beam.g, gc, 1.0e-12);
+            relative(beam.e * beam.iz, ei_strong, 1.0e-12);
+            relative(beam.e * beam.iy, ei_weak, 1.0e-12);
+            relative(k.get(6, 6) * length_mm, ea, 1.0e-12);
+            relative(k.get(9, 9) * length_mm, gj, 1.0e-12);
+            for (dof, ei, ga) in [(7, ei_strong, ga_strong), (8, ei_weak, ga_weak)] {
+                let compliance = length_mm.powi(3) / (12.0 * ei) + length_mm / ga;
+                relative(k.get(dof, dof), 1.0 / compliance, 1.0e-12);
             }
         }
     }

@@ -6,14 +6,14 @@
 
 ## 再現と実測
 
-リポジトリルートの通常ユーザーのPowerShell 7から実行する。管理者権限は不要。パイプはランダム名で作成し、完了時に閉じる。外部サービス・製品モデル・製品設定を変更しない。
+検証時のリポジトリルートで、通常ユーザーのPowerShell 7から実行した。管理者権限は不要。パイプはランダム名で作成し、完了時に閉じる。外部サービス・製品モデル・製品設定を変更しない。
 
 ```powershell
 ./dev_docs/v_and_v/data/issue973/pipe-probe.ps1
 ./dev_docs/v_and_v/data/issue973/model-input.ps1
 ```
 
-`-OutputPath <保存先>`を指定した場合だけJSONを保存する。検証済みの出力は[pipe-observed.json](data/issue973/pipe-observed.json)・[model-input.json](data/issue973/model-input.json)、再現コードは[pipe-probe.ps1](data/issue973/pipe-probe.ps1)・[model-input.ps1](data/issue973/model-input.ps1)にある。
+`-OutputPath <保存先>`を指定した場合だけJSONを保存する。検証済みの出力は[pipe-observed.json](data/issue973/pipe-observed.json)・[model-input.json](data/issue973/model-input.json)、再現コードは[pipe-probe.ps1](data/issue973/pipe-probe.ps1)・[model-input.ps1](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/dev_docs/v_and_v/data/issue973/model-input.ps1)にある。
 
 | 実測項目 | 観測 |
 | --- | --- |
@@ -29,9 +29,9 @@
 
 ## 代表モデルと入力データ
 
-対象は現行の[実モデル統合テスト](../../crates/sepika-app/tests/full_model.rs)で使う[model.stb](../../crates/sepika-app/tests/fixtures/model.stb)を明示入力で準備した派生モデル一つとする。元データは4層+PHの混構造、主架構115部材（柱40・大梁75）で、初回検討対象だけを鉄骨大梁に限定する。小さい独自モデルを新設して既存の床・二次部材・共有断面の影響を省略しない。
+対象は現行の[実モデル統合テスト](../../crates/sepika-app/tests/full_model.rs)で使う[model.stb](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/crates/sepika-app/tests/fixtures/model.stb)を明示入力で準備した派生モデル一つとする。元データは4層+PHの混構造、主架構115部材（柱40・大梁75）で、初回検討対象だけを鉄骨大梁に限定する。小さい独自モデルを新設して既存の床・二次部材・共有断面の影響を省略しない。
 
-データの基点は`1b057e81`、原本SHA-256は`1909407d49574fe563ca21aac9c6c7ab04d267dccb9e9e73119582732be79215`。[抽出スクリプト](data/issue973/model-input.ps1)で原本の対象/断面/節点を確認した。ここでのSTB IDは取込時の照合用であり、GUIやAIへ渡す複合参照を内部ID番号から推定しない。取込後に元ID対応と端点/断面用途を照合して#974の参照へ解決し、検討に固定する。
+データの基点は`1b057e81`、原本SHA-256は`1909407d49574fe563ca21aac9c6c7ab04d267dccb9e9e73119582732be79215`。[抽出スクリプト](https://github.com/hrntsm/SEPIKA/blob/92355319350152b75e39ea1a8cd88cb779301fef/dev_docs/v_and_v/data/issue973/model-input.ps1)で原本の対象/断面/節点を確認した。ここでのSTB IDは取込時の照合用であり、GUIやAIへ渡す複合参照を内部ID番号から推定しない。取込後に元ID対応と端点/断面用途を照合して#974の参照へ解決し、検討に固定する。
 
 | 入力 | 固定値/作成方法 |
 | --- | --- |

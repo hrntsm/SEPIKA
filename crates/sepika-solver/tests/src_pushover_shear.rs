@@ -2,7 +2,7 @@ use sepika_core::dof::{Dof, Dof6Mask, DofMap};
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
 use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material,
-    MaterialCategory, Model, Node, StbSectionStrength, StbSteelStrength, Story,
+    MaterialCategory, Model, Node, Story,
 };
 use sepika_core::section_shape::{
     BeamStirrup, RcBeamRebar, RcRectColumnRebar, RebarSize, RectColumnHoop, SectionShape,
@@ -27,7 +27,6 @@ fn story(id: u32, elevation_mm: f64, node_ids: Vec<NodeId>, seismic_weight_n: f6
         name: format!("階{id}"),
         elevation: Some(elevation_mm),
         sl_offset_mm: Some(0.0),
-        source_story: None,
         node_ids,
         seismic_weight: Some(seismic_weight_n),
         weight_override: None,
@@ -414,35 +413,10 @@ fn src_pushover_checks_both_plates_and_respects_external_steel_assignments() {
         fy: Some(235.0),
         ..model.materials[3].clone()
     });
-    let steel_input = |material, part, grade: &str| StbSteelStrength {
-        native_material: Some(MaterialId(material)),
-        element: "StbSecSteelColumn_S_Same".into(),
-        part,
-        position: None,
-        strength: grade.into(),
-    };
-    model.stb_strengths.sections.push(StbSectionStrength {
-        built_box: None,
-        native_rebar: false,
-        rebar: None,
-        section: SectionId(0),
-        concrete: None,
-        native_material: None,
-        reinforcement: vec![],
-        steel: vec![steel_input(4, "shape".into(), "STK400")],
-    });
+    model.sections[0].steel_material = Some(MaterialId(4));
     let error = run(&mut model, SeismicDir::X, 1_000.0).unwrap_err();
     assert!(
         error.contains("せん断降伏耐力") && error.contains("STK400") && error.contains("鋼管用"),
-        "{error}"
-    );
-
-    model.stb_strengths.sections[0]
-        .steel
-        .push(steel_input(3, "flange".into(), "SN400B"));
-    let error = run(&mut model, SeismicDir::X, 1_000.0).unwrap_err();
-    assert!(
-        error.contains("単一の参照先") && error.contains("STK400") && error.contains("SN400B"),
         "{error}"
     );
 }

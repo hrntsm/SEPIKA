@@ -204,16 +204,11 @@ impl StrengthBasis {
     }
 
     /// RC 主筋文脈の材料強度割増係数。
-    pub(crate) fn rebar_factor(
-        self,
-        rebar: Option<(&sepika_core::model::Material, Option<&str>)>,
-    ) -> f64 {
+    pub(crate) fn rebar_factor(self, rebar: Option<&sepika_core::model::Material>) -> f64 {
         match self {
             StrengthBasis::Nominal => 1.0,
             StrengthBasis::MaterialStrength => rebar
-                .map(|(mat, grade)| {
-                    sepika_core::material_grade::material_strength_factor_rebar(mat, grade)
-                })
+                .map(sepika_core::material_grade::material_strength_factor_rebar)
                 .unwrap_or(1.0),
         }
     }

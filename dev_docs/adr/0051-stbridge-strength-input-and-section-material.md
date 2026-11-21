@@ -1,6 +1,12 @@
 # ST-Bridgeの元強度指定と断面材料を分離する
 
-Status: accepted
+Status: partially superseded by ADR-0141
+
+モデル内の材料割当は断面が持つ。SRC の内蔵鋼材料も断面から参照する。
+
+## 廃止前の決定
+
+以下は廃止前の ST-Bridge 強度入力、専用材料採用、編集・診断・出力の記録である。これらを [ADR 0141](0141-remove-st-bridge.md) で廃止した。
 
 ST-Bridge 2.0.2の部材・断面・指定節点の原階・共通によるFcと、径別・位置別の鉄筋・鋼材gradeを、元の省略状態のまま保存する。強度採用結果を断面の属性へ補完しない。
 

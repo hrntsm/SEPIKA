@@ -6,8 +6,7 @@ use sepika_io::ovika::{load_ovika, save_ovika, OvikaExtras};
 fn 明示解析表現の床壁版支持境界は実ovika保存読込再構築で保持する() {
     for wall in [false, true] {
         for (variant, kinds) in fixture::representations().into_iter().enumerate() {
-            let mut model = fixture::with_plate(wall, kinds);
-            model.assign_stb_node_ids().unwrap();
+            let model = fixture::with_plate(wall, kinds);
             let path = std::env::temp_dir().join(format!(
                 "sepika-597-{}-{wall}-{variant}.ovika",
                 std::process::id()

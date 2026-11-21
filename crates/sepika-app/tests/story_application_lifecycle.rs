@@ -178,7 +178,6 @@ fn stale_records_with_existing_ids_and_manual_settings_survive_adoption_and_rege
     let generated =
         sepika_load::story_gen::generate_stories_with_opts(&model, &[], true, method).unwrap();
     apply_generated_weights(&mut model, generated, method);
-    model.assign_stb_node_ids().unwrap();
     let automatic = model.clone();
     let mut manual = model.clone();
     manual.stories[1].weight_override = Some(123456.0);

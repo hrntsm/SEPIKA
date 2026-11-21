@@ -1269,15 +1269,53 @@ mod tests {
     }
 
     #[test]
+    fn ovika_rejects_unknown_model_and_story_fields_after_hash_validation() {
+        let dir = crate::test_util::test_tmp();
+        let path = dir.join("unknown-model-fields.ovika");
+        let model = Model {
+            stories: vec![sepika_core::model::Story::new(
+                sepika_core::ids::StoryId(0),
+                "1F".into(),
+                Some(0.0),
+                Some(0.0),
+            )],
+            ..Default::default()
+        };
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        assert!(load_ovika(&path).unwrap().model.eq_ignoring_dofmap(&model));
+        let clean = read_manifest(&path);
+        for (field, story) in [("stb_strengths", false), ("source_story", true)] {
+            let mut input = serde_json::to_value(&model).unwrap();
+            let object = if story {
+                &mut input["stories"][0]
+            } else {
+                &mut input
+            };
+            object[field] = serde_json::Value::Null;
+            let bytes = rmp_serde::to_vec_named(&input).unwrap();
+            let mut manifest = clean.clone();
+            manifest
+                .entries
+                .iter_mut()
+                .find(|e| e.name == "model.msgpack")
+                .unwrap()
+                .sha256 = sha256_of(&bytes);
+            write_zip_with_manifest(&path, &manifest, &bytes);
+            assert!(matches!(
+                load_ovika(&path),
+                Err(IoError::Decode(reason)) if reason.contains("unknown field") && reason.contains(field)
+            ));
+        }
+    }
+
+    #[test]
     #[ignore = "実モデルの codec 比較計測。release・単独で実行する"]
     fn measure_real_model_msgpack() {
         use std::hint::black_box;
         use std::time::Instant;
-        let xml = crate::stbridge::read_stbridge_file(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../sepika-app/tests/fixtures/model.stb"),
-        )
-        .unwrap();
-        let (model, _) = crate::stbridge::import_stbridge_with_report(&xml).unwrap();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sepika-app/tests/fixtures/full_model.ovika");
+        let model = load_ovika(&path).unwrap().model;
         model.validate().unwrap();
         println!(
             "nodes={} elements={} secondary={} floor_regions={} sections={}",
@@ -1362,7 +1400,6 @@ mod tests {
                 name: format!("{}F", i + 1),
                 elevation: Some(elevation),
                 sl_offset_mm: Some(0.0),
-                source_story: None,
                 node_ids: vec![],
                 seismic_weight: None,
                 weight_override: None,

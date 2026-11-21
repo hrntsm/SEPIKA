@@ -909,8 +909,7 @@ impl App {
     /// 都度組み立てて走査する（`App` に専用のキャッシュは持たせない。
     /// `sepika_core::wall_expand` の「都度計算」方針に揃える）。壁展開は
     /// 既存要素の末尾へ生成要素を追記するだけなので、柱・梁の `ElemId` は
-    /// 展開の有無で変わらない。壁を持たないモデル（実 ST-Bridge フィクスチャは
-    /// 現状すべて該当する）では `expand_wall_elements` の `model.clone()` を
+    /// 展開の有無で変わらない。壁を持たないモデルでは `expand_wall_elements` の `model.clone()` を
     /// 避け、`self.core.model` をそのまま見る。
     fn build_prep_member_stiffness(&self) -> Result<(Vec<PrepMemberStiffnessRow>, usize), String> {
         use sepika_core::model::{ElementKind, Model};

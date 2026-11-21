@@ -77,7 +77,7 @@ g で除して導出していたため、設計重量と動的質量が
   `LumpedOnly` の総動的質量が一致する。
 - 設計重量と動的質量は一致しない。利用者向け計算根拠に両者の用途分離を明記する。
 - 数量積算（7.85 t/m³）は不変。
-- プリセット・ST-Bridge 取込・UI 既定の鋼材・鉄筋密度は 7.85e-9 t/mm³ になる。
+- プリセットと UI 既定の鋼材・鉄筋密度は 7.85e-9 t/mm³ とする。廃止前の ST-Bridge 取り込みでも同じ値を使っていた。取り込みは [ADR 0141](0141-remove-st-bridge.md) で廃止した。
 - 質点系解析 `crates/squid-n-job/src/lumped_mass.rs` の層質量は、本決定当時は
   `seismic_weight/g`（設計重量ベース）のままであった。その後 [ADR-0034](0035-lumped-mass-physical-mass.md)
   で `Story::dynamic_mass`（物理質量相当）へ統一した（GitHub Issue #365）。

@@ -23,7 +23,6 @@ fn place(wall: bool) -> PlaceSecondaryMember {
 fn 明示分割の診断と旧版除去は一undoで全入力へ戻りredoで同じidになる() {
     for wall in [false, true] {
         let mut model = fixture::with_plate(wall);
-        model.assign_stb_node_ids().unwrap();
         let before = model.clone();
         let mut undo = UndoStack::new();
         let loss = preview_plate_assignment_loss(&model, &place(wall)).unwrap();
@@ -105,7 +104,6 @@ fn 既存キー衝突と重複版は直接編集とundo入口で全状態と履�
     for wall in [false, true] {
         for duplicate_plate in [false, true] {
             let mut model = fixture::with_plate(wall);
-            model.assign_stb_node_ids().unwrap();
             let mut undo = UndoStack::new();
             assert!(undo.run(&mut model, Box::new(place(wall))));
             undo.undo(&mut model);
@@ -150,7 +148,6 @@ fn 版あり二領域の明示統合は二版の入力荷重を診断して一un
     use sepika_core::model::PlateAssignment;
     for wall in [false, true] {
         let mut model = fixture::with_plate(wall);
-        model.assign_stb_node_ids().unwrap();
         let mut undo = UndoStack::new();
         assert!(undo.run(&mut model, Box::new(place(wall))));
         let original = fixture::with_plate(wall);
@@ -259,7 +256,6 @@ fn 支持関係を失う主架構編集は旧版荷重を診断し一undoとredo
     for wall in [false, true] {
         for operation in (0..3).filter(|operation| wall || *operation != 1) {
             let mut model = fixture::with_plate(wall);
-            model.assign_stb_node_ids().unwrap();
             let before = model.clone();
             let loss = preview_plate_assignment_loss(&model, frame_edit(wall, operation).as_ref())
                 .unwrap();
@@ -310,7 +306,6 @@ fn 確認できない入口は支持境界変更の版荷重消失を拒否しre
     for wall in [false, true] {
         for operation in (0..3).filter(|operation| wall || *operation != 1) {
             let mut model = fixture::with_plate(wall);
-            model.assign_stb_node_ids().unwrap();
             let before = model.clone();
             let mut undo = UndoStack::new();
             assert!(undo.run(
@@ -341,7 +336,6 @@ fn 確認できない入口は支持境界変更の版荷重消失を拒否しre
 fn 同じ支持区間の構面内節点移動は確認なしで版idと入力荷重を保持する() {
     for wall in [false, true] {
         let mut model = fixture::with_plate(wall);
-        model.assign_stb_node_ids().unwrap();
         let before = model.clone();
         let plates = (model.slabs.clone(), model.wall_plates.clone());
         let command = || {
@@ -391,7 +385,6 @@ fn 拒否redoは床壁の衝突と重複版でモデル両履歴ラベルrevisio
     for wall in [false, true] {
         for duplicate_plate in [false, true] {
             let mut model = fixture::with_plate_metadata(wall);
-            model.assign_stb_node_ids().unwrap();
             let mut undo = UndoStack::new();
             assert!(undo.run(
                 &mut model,
@@ -486,7 +479,6 @@ fn noop_redoは候補変更を確定せず履歴とrevisionを保持する() {
         }
     }
     let mut model = fixture::with_plate_metadata(false);
-    model.assign_stb_node_ids().unwrap();
     let mut undo = UndoStack::new();
     assert!(undo.run(&mut model, Box::new(Initial)));
     undo.undo(&mut model);
@@ -504,7 +496,7 @@ fn noop_redoは候補変更を確定せず履歴とrevisionを保持する() {
 }
 
 #[test]
-fn コマンド拒否redoはstb復元ラッパー越しに理由を伝え候補と履歴を確定しない() {
+fn コマンド拒否redoは理由を伝え候補と履歴を確定しない() {
     struct Reject;
     impl EditCommand for Reject {
         fn apply(&self, _: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
@@ -549,7 +541,6 @@ fn コマンド拒否redoはstb復元ラッパー越しに理由を伝え候補�
         }
     }
     let mut model = fixture::with_plate_metadata(false);
-    model.assign_stb_node_ids().unwrap();
     let mut undo = UndoStack::new();
     assert!(undo.run(&mut model, Box::new(Initial)));
     undo.undo(&mut model);
@@ -623,7 +614,6 @@ fn colliding_old_boundaries(wall: bool) -> sepika_core::model::Model {
         plate.plate.loads[0].value = 0.0037;
         model.slabs.push(plate);
     }
-    model.assign_stb_node_ids().unwrap();
     model
 }
 

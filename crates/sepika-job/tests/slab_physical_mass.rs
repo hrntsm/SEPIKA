@@ -155,16 +155,17 @@ fn finish_live_load_and_shared_material_are_preserved_once() {
 }
 
 #[test]
-fn stb_resolved_material_and_all_material_density_validation_apply_to_physical_mass() {
+fn assigned_slab_material_density_and_thickness_are_validated_for_physical_mass() {
     let mut model = fixture::one_cubic_metre(true);
     model.materials[1].density = f64::NAN;
-    model.stb_strengths.members.push(StbMemberStrength {
-        target: StrengthTarget::Slab(SlabId(0)),
-        node: NodeId(2),
-        node_order: vec![NodeId(2), NodeId(3)],
-        concrete: Some("Fc24".into()),
-    });
-    model.prepare_stb_strength_materials();
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(model.materials.len() as u32);
+    concrete.name = "Fc24".into();
+    concrete.category = MaterialCategory::Concrete;
+    concrete.fc = Some(24.0);
+    concrete.density = 2.4e-9;
+    model.sections[2].material = Some(concrete.id);
+    model.materials.push(concrete);
     let resolved = model.slab_plate_material(&model.slabs[0]).unwrap().id;
     let density = model.materials[resolved.index()].density;
     prepare_model(&mut model, &Default::default(), None, true).unwrap();
@@ -175,7 +176,7 @@ fn stb_resolved_material_and_all_material_density_validation_apply_to_physical_m
     model.sections[2].thickness = Some(f64::INFINITY);
     assert!(sepika_load::slab_load::physical_self_weight_loads(&model).is_err());
     model.sections[2].thickness = Some(100.0);
-    model.stb_strengths.materials.clear();
+    model.sections[2].material = None;
     assert!(sepika_load::slab_load::physical_self_weight_loads(&model).is_err());
 }
 

@@ -694,30 +694,23 @@ fn issue546_finite_controls_through_real_add_and_single_edit() {
 }
 
 #[test]
-fn issue546_real_stb_strength_loss_focus_and_standard_e_contract() {
-    use sepika_core::model::{SourceStory, SourceStoryKind, StbCommonStrength};
+fn issue546_real_strength_loss_focus_and_standard_e_contract() {
     use sepika_edit::MaterialField::*;
     let ctx = egui::Context::default();
     let mut app = App::default();
-    app.core.model.stb_strengths.common = Some(StbCommonStrength {
-        project_name: "fixture".into(),
-        app_name: "STB".into(),
-        app_version: "2".into(),
-        strength_concrete: Some("Fc24".into()),
-        reinforcement: vec![],
+    app.core.model.materials.push(sepika_core::model::Material {
+        id: sepika_core::ids::MaterialId(0),
+        name: "Fc24".into(),
+        category: sepika_core::model::MaterialCategory::Concrete,
+        concrete_class: sepika_core::units::ConcreteClass::Normal,
+        young: 23000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+        strength_factor: None,
     });
-    app.core.model.source_stories.push(SourceStory {
-        id: 1,
-        guid: None,
-        name: "1F".into(),
-        height: 0.0,
-        kind: SourceStoryKind::General,
-        kind_from_native: false,
-        id_dependence: None,
-        strength_concrete: Some("Fc24".into()),
-        node_ids: vec![],
-    });
-    app.core.model.prepare_stb_strength_materials();
     fresh(&mut app);
     let original = snapshot(&app);
     for text in ["NaN", "abc"] {
@@ -728,13 +721,6 @@ fn issue546_real_stb_strength_loss_focus_and_standard_e_contract() {
     assert_eq!(snapshot(&app), original);
     edit_cell(&ctx, &mut app, Fc, "");
     assert_eq!(app.core.model.materials[0].fc, None);
-    assert_eq!(app.core.model.stb_strengths.materials[0].grade, "未指定Fc");
-    assert_eq!(
-        app.core.model.source_stories[0]
-            .strength_concrete
-            .as_deref(),
-        Some("未指定Fc")
-    );
     let clear = rmp_serde::to_vec_named(&app.core.model).unwrap();
     app.core.scoped.undo.undo(&mut app.core.model);
     assert_eq!(
@@ -1057,7 +1043,6 @@ fn issue546_real_unchanged_blur_tracks_undo_redo_and_other_edits() {
 
 #[test]
 fn issue546_real_nonfinite_repair_undo_redo_restores_original_model() {
-    use sepika_core::model::{SourceStory, SourceStoryKind, StbCommonStrength};
     use sepika_edit::MaterialField::*;
     for field in [Young, Poisson, Density, Fc, Fy, StrengthFactor] {
         for old in [
@@ -1067,25 +1052,19 @@ fn issue546_real_nonfinite_repair_undo_redo_restores_original_model() {
         ] {
             let ctx = egui::Context::default();
             let mut app = App::default();
-            app.core.model.stb_strengths.common = Some(StbCommonStrength {
-                project_name: "repair".into(),
-                app_name: "STB".into(),
-                app_version: "2".into(),
-                strength_concrete: Some("Fc24".into()),
-                reinforcement: vec![],
+            app.core.model.materials.push(sepika_core::model::Material {
+                id: sepika_core::ids::MaterialId(0),
+                name: "Fc24".into(),
+                category: sepika_core::model::MaterialCategory::Concrete,
+                concrete_class: sepika_core::units::ConcreteClass::Normal,
+                young: 23000.0,
+                poisson: 0.2,
+                density: 2.4e-9,
+                shear: None,
+                fc: Some(24.0),
+                fy: None,
+                strength_factor: None,
             });
-            app.core.model.source_stories.push(SourceStory {
-                id: 1,
-                guid: None,
-                name: "1F".into(),
-                height: 0.0,
-                kind: SourceStoryKind::General,
-                kind_from_native: false,
-                id_dependence: None,
-                strength_concrete: None,
-                node_ids: vec![],
-            });
-            app.core.model.prepare_stb_strength_materials();
             app.core.model.materials[0].concrete_class =
                 sepika_core::units::ConcreteClass::UserDefined;
             let m = &mut app.core.model.materials[0];
@@ -1107,7 +1086,6 @@ fn issue546_real_nonfinite_repair_undo_redo_restores_original_model() {
                 material_value(&app, field).unwrap().to_bits(),
                 old.to_bits()
             );
-            assert_eq!(app.core.model.source_stories[0].strength_concrete, None);
             app.redo_action();
             assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), after);
             if field == Density {

@@ -125,27 +125,20 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     if let Err(error) = model.validate_frame_node_counts() {
         return vec![ModelIssue::model(error.to_string())];
     }
-    let source_issues = model
-        .source_story_diagnostics()
-        .into_iter()
-        .chain(model.stb_strength_diagnostics())
-        .chain(if model.stories.is_empty() {
-            Vec::new()
-        } else {
-            model.story_level_diagnostics()
-        });
     use sepika_core::model::ElementKind;
 
-    let mut issues: Vec<_> = source_issues.into_iter().map(ModelIssue::model).collect();
+    let mut issues = if model.stories.is_empty() {
+        Vec::new()
+    } else {
+        model
+            .story_level_diagnostics()
+            .into_iter()
+            .map(ModelIssue::model)
+            .collect()
+    };
     if let Err(error) = model.validate_member_load_directions() {
         issues.push(ModelIssue::model(error));
     }
-    issues.extend(
-        model
-            .source_story_assignment_diagnostics()
-            .into_iter()
-            .map(|message| ModelIssue::model(message).warn()),
-    );
     if let Err(error) = model.validate_attached_slabs() {
         issues.push(ModelIssue::model(error.to_string()));
         return issues;
