@@ -212,6 +212,26 @@ fn ovika_rejects_each_hysteresis_attribute_without_a_member() {
 }
 
 #[test]
+fn ovika_rejects_a_damper_attr_without_a_member() {
+    let mut model = baseline();
+    model.set_damper_props(ElemId(7), Some(Default::default()));
+    let path =
+        std::env::temp_dir().join(format!("sepika1763-invalid-{}.ovika", std::process::id()));
+    independent_file(&path, &model);
+    let original = std::fs::read(&path).unwrap();
+    let load = load_ovika(&path).err().unwrap();
+    let save = save_ovika(&path, &model, OvikaExtras::default()).unwrap_err();
+    for error in [load, save] {
+        assert!(
+            error.to_string().contains("制振ダンパー属性 -> 部材 7"),
+            "{error}"
+        );
+    }
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn ovika_preserves_hysteresis_selection_and_rc_beam_reference_for_both_analyses() {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RebarSize, SectionShape};
     use sepika_element::factory::{ensure_nonlinear_input_for_kind, resolve_member_hysteresis};

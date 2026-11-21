@@ -2,6 +2,23 @@ use super::*;
 #[path = "../../../sepika-solver/tests/support/rc_wall_side_column_model.rs"]
 pub(crate) mod fixture;
 
+#[test]
+fn diagnostics_show_a_damper_attr_with_the_number_used_by_an_expanded_wall() {
+    let mut app = App::default();
+    app.load_model(fixture::input_model());
+    let model = &mut app.core.model;
+    let id = ElemId(model.elements.len() as u32);
+    let (_, index, _) = sepika_core::wall_expand::expand_wall_elements(model);
+    assert!(index.plate_of(id).is_some());
+    model.set_damper_props(id, Some(Default::default()));
+
+    app.run_diagnostics();
+    let expected = format!("制振ダンパー属性 -> 部材 {}", id.0);
+    assert!(app.core.scoped.diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == DiagSeverity::Error && diagnostic.message.contains(&expected)
+    }));
+}
+
 fn ready() -> App {
     let mut app = App::default();
     app.load_model(crate::app::tests::with_explicit_pushover_gravity(

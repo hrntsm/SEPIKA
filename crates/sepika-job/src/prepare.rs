@@ -335,7 +335,7 @@ mod tests {
     use super::steel_panel_fixture::steel_panel_model;
 
     #[test]
-    fn panel_generation_rejects_a_hysteresis_ref_to_a_generated_number() {
+    fn panel_generation_rejects_dangling_attributes_before_numbering_generated_panels() {
         use sepika_core::model::HysteresisModel;
 
         let mut model = steel_panel_model();
@@ -343,21 +343,27 @@ mod tests {
         assert!(!apply_auto_panel_zones(&mut model.clone())
             .unwrap()
             .is_empty());
+        let mut dangling_damper = model.clone();
+        dangling_damper.set_damper_props(id, Some(Default::default()));
         model.set_member_hysteresis(id, HysteresisModel::Retrograde);
-        let before = model.clone();
-        let expected = format!("部材の履歴則指定 -> 部材 {}", id.0);
-
-        for error in [
-            apply_auto_panel_zones(&mut model).unwrap_err(),
-            apply_rigid_zones_and_panels(&mut model).unwrap_err(),
-            prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
-                .err()
-                .unwrap()
-                .to_string(),
+        for (mut model, label) in [
+            (model, "部材の履歴則指定"),
+            (dangling_damper, "制振ダンパー属性"),
         ] {
-            assert!(error.contains(&expected), "{error}");
+            let before = model.clone();
+            let expected = format!("{label} -> 部材 {}", id.0);
+            for error in [
+                apply_auto_panel_zones(&mut model).unwrap_err(),
+                apply_rigid_zones_and_panels(&mut model).unwrap_err(),
+                prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+                    .err()
+                    .unwrap()
+                    .to_string(),
+            ] {
+                assert!(error.contains(&expected), "{error}");
+            }
+            assert!(model.eq_ignoring_dofmap(&before));
         }
-        assert!(model.eq_ignoring_dofmap(&before));
     }
 
     #[test]

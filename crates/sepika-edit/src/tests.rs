@@ -3251,6 +3251,100 @@ fn test_set_damper_props_roundtrip() {
 }
 
 #[test]
+fn deleting_a_damper_removes_all_its_properties_and_undo_restores_their_order() {
+    use sepika_core::model::{DamperAttr, DamperProps};
+
+    let mut baseline = seeded_model(3, 2);
+    for elem in &mut baseline.elements {
+        elem.kind = ElementKind::Damper;
+        elem.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    }
+    let props = |c0| DamperProps {
+        c0,
+        alpha: 1.0,
+        ..Default::default()
+    };
+    let remaining_attr = DamperAttr {
+        elem: ElemId(0),
+        props: props(3000.0),
+    };
+    let mut remaining_elem = baseline.elements[1].clone();
+    remaining_elem.id = ElemId(0);
+    for rows in [
+        [(0, 1000.0), (0, 2000.0), (1, 3000.0)],
+        [(0, 1000.0), (1, 3000.0), (0, 2000.0)],
+    ] {
+        let mut model = baseline.clone();
+        model.damper_attrs = rows
+            .into_iter()
+            .map(|(id, c0)| DamperAttr {
+                elem: ElemId(id),
+                props: props(c0),
+            })
+            .collect();
+        let original = model.clone();
+        assert_eq!(model.damper_props(ElemId(0)), Some(props(1000.0)));
+        assert_eq!(model.damper_props(ElemId(1)), Some(props(3000.0)));
+
+        let mut stack = UndoStack::new();
+        assert!(stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+        assert_eq!(model.damper_props(ElemId(0)), Some(remaining_attr.props));
+        assert_eq!(model.elements, [remaining_elem.clone()]);
+        assert_eq!(model.damper_attrs, [remaining_attr]);
+
+        stack.undo(&mut model);
+        assert!(model.eq_ignoring_dofmap(&original));
+        assert_eq!(model.damper_props(ElemId(0)), Some(props(1000.0)));
+        assert_eq!(model.damper_props(ElemId(1)), Some(props(3000.0)));
+
+        stack.redo(&mut model);
+        assert_eq!(model.damper_props(ElemId(0)), Some(remaining_attr.props));
+        assert_eq!(model.elements, [remaining_elem.clone()]);
+        assert_eq!(model.damper_attrs, [remaining_attr]);
+    }
+}
+
+#[test]
+fn member_addition_and_restoration_reject_a_damper_attr_to_a_missing_member() {
+    let mut before = seeded_model(3, 2);
+    let beam = before.elements.pop().unwrap();
+    let damper = ElementData {
+        kind: ElementKind::Damper,
+        ..beam.clone()
+    };
+    before.set_damper_props(ElemId(1), Some(Default::default()));
+    for edit in [
+        Box::new(AddMember { elem: beam }) as Box<dyn EditCommand>,
+        Box::new(AddDamper {
+            elem: damper,
+            props: Default::default(),
+        }),
+    ] {
+        let mut model = before.clone();
+        let mut stack = UndoStack::new();
+        assert!(!stack.run(&mut model, edit));
+        let error = stack.last_error().unwrap();
+        assert!(error.contains("制振ダンパー属性 -> 部材 1"), "{error}");
+        assert!(model.eq_ignoring_dofmap(&before));
+        assert_eq!(stack.revision(), 0);
+    }
+
+    let mut model = seeded_model(3, 2);
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+    model.set_damper_props(ElemId(u32::MAX), Some(Default::default()));
+    let before_undo = model.clone();
+    stack.undo(&mut model);
+    let error = stack.last_error().unwrap();
+    assert!(
+        error.contains("制振ダンパー属性 -> 部材 4294967295"),
+        "{error}"
+    );
+    assert!(model.eq_ignoring_dofmap(&before_undo));
+    assert!(stack.can_undo());
+}
+
+#[test]
 fn test_damper_def_add_update_remove_roundtrip() {
     use sepika_core::model::{DamperDef, DamperKind, DamperProps};
     let mut model = Model::default();
@@ -4835,7 +4929,7 @@ fn test_copy_story_without_overwrite_keeps_existing() {
 }
 
 #[test]
-fn copying_a_story_slab_rejects_a_hysteresis_ref_to_a_new_boundary_beam() {
+fn copying_a_story_slab_rejects_dangling_attributes_before_generating_boundary_beams() {
     use sepika_core::model::{HysteresisModel, RcBeamReference, Story};
 
     let mut model = seeded_model(6, 0);
@@ -4857,7 +4951,7 @@ fn copying_a_story_slab_rejects_a_hysteresis_ref_to_a_new_boundary_beam() {
         }
     }
     model.add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(2)], SlabPlate::default());
-    let command = CopyStory {
+    let command = || CopyStory {
         from: StoryId(0),
         to: vec![StoryId(1)],
         targets: CopyTargets {
@@ -4869,26 +4963,34 @@ fn copying_a_story_slab_rejects_a_hysteresis_ref_to_a_new_boundary_beam() {
     let new_beam = ElemId(3);
     assert!(model.element(new_beam).is_none());
     let mut valid = model.clone();
-    assert!(!command.apply(&mut valid).is_noop());
+    assert!(!command().apply(&mut valid).is_noop());
     assert_eq!(valid.slabs.len(), 2);
     assert_eq!(
         valid.element(new_beam).unwrap().nodes.as_slice(),
         &[NodeId(3), NodeId(4)]
     );
 
+    let mut dangling_damper = model.clone();
+    dangling_damper.set_damper_props(new_beam, Some(Default::default()));
     model.set_member_hysteresis_th(new_beam, Some(HysteresisModel::Retrograde));
     model.set_member_rc_beam_reference(new_beam, Some(RcBeamReference::AntisymmetricHalfMember));
-    let before = model.clone();
-    let inverse = command.apply(&mut model);
-    let reason = inverse.rejection().unwrap();
-    assert!(reason.contains("部材の履歴則指定 -> 部材 3"), "{reason}");
-    assert!(model.eq_ignoring_dofmap(&before));
 
-    let mut stack = UndoStack::new();
-    assert!(!stack.run(&mut model, Box::new(command)));
-    assert_eq!(stack.last_error(), Some(reason));
-    assert_eq!(stack.revision(), 0);
-    assert!(model.eq_ignoring_dofmap(&before));
+    for (mut model, expected) in [
+        (model, "部材の履歴則指定 -> 部材 3"),
+        (dangling_damper, "制振ダンパー属性 -> 部材 3"),
+    ] {
+        let before = model.clone();
+        let inverse = command().apply(&mut model);
+        let reason = inverse.rejection().unwrap();
+        assert!(reason.contains(expected), "{reason}");
+        assert!(model.eq_ignoring_dofmap(&before));
+
+        let mut stack = UndoStack::new();
+        assert!(!stack.run(&mut model, Box::new(command())));
+        assert_eq!(stack.last_error(), Some(reason));
+        assert_eq!(stack.revision(), 0);
+        assert!(model.eq_ignoring_dofmap(&before));
+    }
 }
 
 /// 上書きが真でも、複製元の平面の外にある複製先の床には手を触れない。

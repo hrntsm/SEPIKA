@@ -406,7 +406,8 @@ fn prepare(model: Model, cfg: AnalysisSettings) -> JobResult<Model> {
     model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
-    Ok(sepika_core::wall_expand::expand_wall_elements_owned(model).0)
+    let (model, _) = crate::compute::expand_walls(model)?;
+    Ok(model)
 }
 
 /// 全波形を保持し、指定確定ステップまで計算する。最終点の指定は拒否する。

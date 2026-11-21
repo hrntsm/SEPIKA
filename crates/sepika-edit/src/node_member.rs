@@ -506,6 +506,9 @@ impl EditCommand for AddMember {
         if let Err(error) = model.validate_member_hysteresis_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
+        if let Err(error) = model.validate_damper_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         let snapshot = AssignmentTopology::capture(model);
         model.elements.push(self.elem.clone());
         Box::new(RestoreAssignmentTopology {
@@ -548,6 +551,9 @@ impl EditCommand for AddDamper {
             return Box::new(RejectedEdit(error.to_string()));
         }
         if let Err(error) = model.validate_member_hysteresis_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
+        if let Err(error) = model.validate_damper_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
         let id = self.elem.id;
@@ -745,6 +751,9 @@ impl EditCommand for InsertMember {
             return Box::new(Noop);
         }
         if let Err(error) = model.validate_member_hysteresis_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
+        if let Err(error) = model.validate_damper_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
         let id = ElemId(self.index as u32);

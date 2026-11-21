@@ -47,6 +47,55 @@ fn nonlinear_jobs_reject_a_hysteresis_ref_to_an_expanded_wall_number() {
 }
 
 #[test]
+fn analysis_jobs_reject_a_damper_attr_before_assigning_its_number_to_a_wall() {
+    use sepika_job::compute::{
+        compute_eigen, compute_linear_static, compute_lumped_mass, compute_pushover,
+        compute_seismic, compute_time_history,
+    };
+    use sepika_job::time_history_restart::compute_checkpoint;
+    use sepika_job::{AnalysisSettings, JobError};
+    use sepika_solver::dynamic::timehistory::GroundMotion;
+
+    let mut model = rc_wall_side_column_model::input_model();
+    let id = ElemId(model.elements.len() as u32);
+    let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
+    assert!(expanded.element(id).is_some());
+    assert!(index.plate_of(id).is_some());
+    model.set_damper_props(id, Some(Default::default()));
+
+    let linear = AnalysisSettings {
+        th_nonlinear: false,
+        ..AnalysisSettings::default()
+    };
+    let nonlinear = AnalysisSettings {
+        th_nonlinear: true,
+        ..linear
+    };
+    let wave = GroundMotion {
+        dt: 0.01,
+        accel_x: vec![0.0, 1.0, 0.0],
+        accel_y: None,
+        accel_theta: None,
+    };
+    let expected = format!("制振ダンパー属性 -> 部材 {}", id.0);
+    for error in [
+        compute_linear_static(model.clone(), LoadCaseId(0)).err(),
+        compute_eigen(model.clone(), 1).err(),
+        compute_seismic(model.clone(), Default::default(), 0.1).err(),
+        compute_pushover(model.clone(), nonlinear).err(),
+        compute_time_history(model.clone(), linear, wave.clone()).err(),
+        compute_time_history(model.clone(), nonlinear, wave.clone()).err(),
+        compute_lumped_mass(model.clone(), linear, None, None, None, None, None).err(),
+        compute_checkpoint(model, linear, wave, 1).err(),
+    ] {
+        assert!(
+            matches!(&error, Some(JobError::InvalidInput(reason)) if reason.contains(&expected)),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
 fn preparation_distinguishes_incremental_sd490_wall_diagnostics_from_common_input_errors() {
     use sepika_job::{prepare_model_for_analysis, AnalysisSettings};
 

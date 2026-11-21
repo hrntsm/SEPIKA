@@ -266,6 +266,9 @@ fn nonlinear_input_issues_with_basis(
     if let Err(error) = model.validate_member_hysteresis_attr_refs() {
         issues.push(error.to_string());
     }
+    if let Err(error) = model.validate_damper_attr_refs() {
+        issues.push(error.to_string());
+    }
     let index = sepika_core::model::WallSideColumnIndex::build(model);
     for elem in &model.elements {
         if let Some(issue) = steel_section_primary_material_issue(elem, model) {
