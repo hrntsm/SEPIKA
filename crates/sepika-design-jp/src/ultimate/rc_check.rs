@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use num_rational::BigRational;
-use num_traits::ToPrimitive;
+use num_traits::{One, ToPrimitive, Zero};
 
 use crate::material_strength::{main_rebar_grade, shear_rebar_category_issue};
 use crate::member_design_check::combine_incomplete_reasons;
@@ -138,14 +138,72 @@ fn static_hinge_shear(mu_n_mm: f64, factor: f64, span_mm: f64, axis: &str) -> Re
     }
 }
 
-fn static_biaxial_margin(strong_margin: f64, weak_margin: f64) -> f64 {
+fn static_biaxial_margin(
+    (strong_demand_n, strong_capacity_n): (f64, f64),
+    (weak_demand_n, weak_capacity_n): (f64, f64),
+    shear_rebar_unknown: bool,
+) -> f64 {
+    let axis_margin = |demand_n: f64, capacity_n: f64| {
+        if capacity_n > 0.0 {
+            capacity_n / demand_n
+        } else if shear_rebar_unknown && capacity_n == 0.0 && demand_n == 0.0 {
+            f64::INFINITY
+        } else {
+            0.0
+        }
+    };
+    let strong_margin = axis_margin(strong_demand_n, strong_capacity_n);
+    let weak_margin = axis_margin(weak_demand_n, weak_capacity_n);
     let min = strong_margin.min(weak_margin);
     let max = strong_margin.max(weak_margin);
-    if min == 0.0 || min.is_infinite() {
+    if min == 0.0 {
         return min;
     }
     // 需要／耐力やそのノルムの上限を超えても、逆数の余裕度は表現できる場合がある。
-    min / 1.0_f64.hypot(min / max)
+    if max.is_finite() {
+        return min / 1.0_f64.hypot(min / max);
+    }
+
+    let scale = if min.is_finite() {
+        min
+    } else {
+        2.0_f64.powi(1023)
+    };
+    let scaled_demand_ratio = |demand_n: f64, capacity_n: f64, margin: f64| {
+        // 有限かつ正の耐力との比があふれる需要は 1 N 未満なので、需要を先に拡大できる。
+        if margin.is_infinite() && capacity_n > 0.0 && capacity_n.is_finite() {
+            (scale * demand_n) / capacity_n
+        } else {
+            scale / margin
+        }
+    };
+    let strong_ratio = scaled_demand_ratio(strong_demand_n, strong_capacity_n, strong_margin);
+    let weak_ratio = scaled_demand_ratio(weak_demand_n, weak_capacity_n, weak_margin);
+    let norm = strong_ratio.hypot(weak_ratio);
+    let estimate = scale / norm;
+    if min.is_infinite() && (norm - 0.5).abs() <= 4.0 * f64::EPSILON {
+        // 比とノルムの丸めが重なると、有限値と無限大の境界を越えうる。
+        // 上側の丸め境界 MAX + 半 ULP に対応するノルムはほぼ 0.5。平方根を取ると
+        // また丸めが入るため、二乗のまま境界と比較する。
+        let squared_ratio = |demand_n: f64, capacity_n: f64| {
+            if capacity_n > 0.0 && capacity_n.is_finite() {
+                let demand = BigRational::from_float(demand_n).unwrap();
+                let capacity = BigRational::from_float(capacity_n).unwrap();
+                (demand / capacity).pow(2)
+            } else {
+                BigRational::zero()
+            }
+        };
+        let boundary = BigRational::from_float(f64::MAX).unwrap()
+            + BigRational::from_float(2.0_f64.powi(970)).unwrap();
+        let sum = squared_ratio(strong_demand_n, strong_capacity_n)
+            + squared_ratio(weak_demand_n, weak_capacity_n);
+        if sum * boundary.pow(2) <= BigRational::one() {
+            return f64::INFINITY;
+        }
+        return estimate.min(f64::MAX);
+    }
+    estimate
 }
 
 fn unchecked_member(elem: ElemId, kind: MemberKind, reason: &str) -> UltimateCheck {
@@ -795,18 +853,10 @@ fn check_member(
             shear_rebar_issue.is_some() && capacity_n == 0.0 && demand_n == 0.0
         };
         if static_biaxial_shear {
-            let axis_margin = |demand_n: f64, capacity_n: f64| {
-                if capacity_n > 0.0 {
-                    capacity_n / demand_n
-                } else if zero_capacity_with_unknown_rebar(demand_n, capacity_n) {
-                    f64::INFINITY
-                } else {
-                    0.0
-                }
-            };
             return Ok(Some(static_biaxial_margin(
-                axis_margin(qmu, qsu),
-                axis_margin(qmu_y, qsu_y),
+                (qmu, qsu),
+                (qmu_y, qsu_y),
+                shear_rebar_issue.is_some(),
             )));
         }
         let ratio = |demand_n: f64, capacity_n: f64| {
