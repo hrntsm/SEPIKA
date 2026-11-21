@@ -521,7 +521,7 @@ pub fn run_member_design_checks(
                 n_combo_j,
                 axial_factor,
             );
-            let column_end_axial_issue = column_sum_my.as_ref().and_then(|_| {
+            let column_end_axial_issue =
                 end_forces.into_iter().find_map(|(end, long, response)| {
                     let end_axial = |point: Option<(f64, f64)>| {
                         point
@@ -545,8 +545,7 @@ pub fn run_member_design_checks(
                             .then_some("設計用せん断力に必要な柱端の設計軸力が非有限です")
                         }
                     }
-                })
-            });
+                });
             (column_sum_my, column_end_axial_issue)
         } else {
             (None, None)

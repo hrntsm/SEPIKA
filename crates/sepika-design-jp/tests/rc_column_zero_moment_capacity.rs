@@ -1,4 +1,5 @@
 use sepika_core::ids::{ElemId, LoadCaseId};
+use sepika_core::model::ElementKind;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, DesignCtx, LoadTerm,
     MemberDesignCheckOptions, MemberForcesAt, MemberKind, QdMethod, RcDesign,
@@ -120,44 +121,64 @@ fn common_product_entry_retains_only_known_shear_ng_at_the_unchecked_position() 
 
 #[test]
 fn common_product_entry_uses_required_force_components_for_qd1_and_minimum() {
-    for circle in [false, true] {
+    for (circle, element_kind) in [false, true].into_iter().flat_map(|circle| {
+        [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ]
+        .map(|element_kind| (circle, element_kind))
+    }) {
         let na_n = reference::axial_limit_n(circle);
         let mut model = column_model(circle, na_n);
+        model.elements[0].kind = element_kind;
         model.nodes[1].coord[2] = 1_000.0;
-        for (qd_method, gravity_end_n, response_end_n, missing_reason) in [
-            (QdMethod::Qd1, Some(-na_n), Some(-2.0 * na_n), None),
+        for (qd_method, gravity_at_middle, gravity_end_n, response_end_n, missing_reason) in [
+            (QdMethod::Qd1, false, Some(-na_n), Some(-2.0 * na_n), None),
+            (QdMethod::Min, true, Some(-na_n), Some(-2.0 * na_n), None),
             (
                 QdMethod::Min,
+                false,
                 Some(-na_n),
                 Some(-2.0 * na_n),
                 Some("同位置の重力参照内力"),
             ),
             (
                 QdMethod::Qd1,
+                false,
                 None,
                 Some(-2.0 * na_n),
                 Some("柱端の重力参照軸力"),
             ),
             (
                 QdMethod::Qd1,
+                false,
                 Some(f64::NAN),
                 Some(-2.0 * na_n),
                 Some("柱端の重力参照軸力"),
             ),
-            (QdMethod::Qd1, Some(-na_n), None, Some("柱端の応答軸力")),
+            (
+                QdMethod::Qd1,
+                false,
+                Some(-na_n),
+                None,
+                Some("柱端の応答軸力"),
+            ),
             (
                 QdMethod::Min,
+                true,
                 Some(-na_n),
                 Some(f64::INFINITY),
                 Some("柱端の応答軸力"),
             ),
             (
                 QdMethod::Qd1,
+                false,
                 Some(-f64::MAX),
                 Some(f64::MAX),
                 Some("柱端の設計軸力が非有限"),
             ),
-            (QdMethod::Qd2, None, None, None),
+            (QdMethod::Qd2, true, None, None, None),
         ] {
             let response = [(
                 ElemId(0),
@@ -179,7 +200,7 @@ fn common_product_entry_uses_required_force_components_for_qd1_and_minimum() {
                 MemberForces {
                     at: [
                         (0.0, Some(-na_n)),
-                        (0.5, (qd_method == QdMethod::Qd2).then_some(-na_n)),
+                        (0.5, gravity_at_middle.then_some(-na_n)),
                         (1.0, gravity_end_n),
                     ]
                     .into_iter()
@@ -207,7 +228,7 @@ fn common_product_entry_uses_required_force_components_for_qd1_and_minimum() {
             assert_eq!(
                 middle.len(),
                 if missing_reason.is_none() { 2 } else { 1 },
-                "{circle} {qd_method:?} {middle:?}"
+                "{circle} {element_kind:?} {qd_method:?} {middle:?}"
             );
             let Some(CheckOutcome::Skipped { reason }) = middle.last() else {
                 panic!("{middle:?}")
