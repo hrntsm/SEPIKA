@@ -34,7 +34,7 @@
 
 `linear_static_once` の実解析では有限節点荷重と有限断面力を確認し、矩形は未検定になる。円形は浮動小数点の丸めでNA直下・微小正容量となる場合があるため、有限の不適合または未検定を要求する。0とみなす新しい閾値は導入しない。`sepika-job/tests/rc_column_axial_boundary.rs` は共通準備と自重を含め、上端が独立NAになる節点荷重を与える。
 
-MCPの `rc_column_boundary_mcp_case_and_combination_are_unchecked_in_json` は単独長期ケースと保存長期組合せを実ジョブへ通し、せん断の不適合がないときの未検定3・不適合0・全件適合falseと理由のJSON保持を確認する。
+MCP廃止前に実施した `rc_column_boundary_mcp_case_and_combination_are_unchecked_in_json` では、単独長期ケースと保存長期組合せを実ジョブへ通し、せん断の不適合がないときの未検定3・不適合0・全件適合falseと理由のJSON保持を確認した。
 
 ## 軸力・曲げの未検定とせん断の併記（#1803）
 
