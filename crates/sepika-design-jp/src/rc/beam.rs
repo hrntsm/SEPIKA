@@ -7,6 +7,7 @@ use super::{
     rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity, shear_rebar_grade,
     AxisProps,
 };
+use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
 use crate::{
     BondMethod, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm,
@@ -149,7 +150,7 @@ pub(crate) fn beam_check(
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
     shear_reference_valid: bool,
-    bending_issue: &mut Option<String>,
+    section_issue: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
     let deformed_rebar = if matches!(
@@ -204,7 +205,7 @@ pub(crate) fn beam_check(
                 } else {
                     "（正曲げ）"
                 };
-                *bending_issue = Some(format!("RC 梁曲げ検定不能{direction}: {reason}"));
+                *section_issue = Some(format!("RC 梁曲げ検定不能{direction}: {reason}"));
             }
         }
     }
@@ -216,21 +217,17 @@ pub(crate) fn beam_check(
     let valid_tension_props = [props.b, props.d, props.j, props.at, fc_raw]
         .into_iter()
         .all(|value| value.is_finite() && value > 0.0);
-    let q_design = if !shear_reference_valid
-        || !valid_tension_props
-        || !forces.mz.is_finite()
-        || !forces.qy.is_finite()
-    {
-        None
-    } else if ctx
+    let uses_qd1 = ctx
         .seismic_qd
         .as_ref()
-        .is_none_or(|qd| qd.method == QdMethod::Qd2)
-    {
+        .is_some_and(|qd| qd.method != QdMethod::Qd2);
+    let q_design = if !shear_reference_valid || !forces.mz.is_finite() || !forces.qy.is_finite() {
+        None
+    } else if !uses_qd1 {
         Some(seismic_design_shear(
             ctx, forces.pos, forces.qy, 1, 0.0, false,
         ))
-    } else if !main_rebar_valid || bending_issue.is_some() {
+    } else if !main_rebar_valid || !valid_tension_props || section_issue.is_some() {
         None
     } else {
         let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
@@ -251,10 +248,34 @@ pub(crate) fn beam_check(
         ))
     }
     .filter(|value| value.is_finite());
+    let shear_input_issue = if !forces.qy.is_finite() {
+        Some("RC 梁せん断検定不能: 解析せん断力Qyが非有限です")
+    } else if forces.mz == 0.0
+        && props.at <= 0.0
+        && q_design.map_or(forces.qy != 0.0 || uses_qd1, |q| q > 0.0)
+    {
+        Some("RC 梁せん断検定不能: 引張側に主筋がなく有効せいを確定できません")
+    } else {
+        None
+    };
+    if let Some(reason) = shear_input_issue {
+        *section_issue = combine_incomplete_reasons(section_issue.take(), Some(reason));
+    }
+    let check_stirrup_spacing = section_issue.is_none() || info.shear_pitch.is_finite();
+    let has_stirrups = info.shear_legs > 0 && info.shear_dia.area_mm2() > 0.0;
+    let stirrup_effect_available = check_stirrup_spacing || !has_stirrups;
+    if !check_stirrup_spacing {
+        *section_issue = combine_incomplete_reasons(
+            section_issue.take(),
+            Some("RC 梁検定: あばら筋間隔が非有限です"),
+        );
+    }
+    let q_design = q_design.filter(|_| valid_tension_props);
     if let Some((q_design, qa)) = q_design.zip(qa).filter(|&(_, qa)| {
-        [m_for_alpha, q_for_alpha, props.pw]
-            .into_iter()
-            .all(f64::is_finite)
+        stirrup_effect_available
+            && [m_for_alpha, q_for_alpha, props.pw]
+                .into_iter()
+                .all(f64::is_finite)
             && qa.is_finite()
             && qa > 0.0
     }) {
@@ -272,6 +293,7 @@ pub(crate) fn beam_check(
         match (ctx.bond_method, deformed_rebar, q_design) {
             (BondMethod::Rc1999, Some(deformed_rebar), _)
                 if valid_tension_props
+                    && (long_term || stirrup_effect_available)
                     && [forces.mz, forces.pos, ctx.length]
                         .into_iter()
                         .all(f64::is_finite)
@@ -392,6 +414,7 @@ pub(crate) fn beam_check(
             long_term,
             mz_for_at,
             ft,
+            check_stirrup_spacing,
         );
         if let Some(c) = prov.provision_component() {
             components.push(c);

@@ -55,6 +55,7 @@ pub(crate) fn beam_provisions(
     long_term: bool,
     mz_abs: f64,
     ft: Option<f64>,
+    check_stirrup_spacing: bool,
 ) -> ProvisionCheck {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
@@ -66,7 +67,7 @@ pub(crate) fn beam_provisions(
         ));
     }
     let pitch = info.shear_pitch;
-    if pitch > 0.0 {
+    if check_stirrup_spacing && pitch > 0.0 {
         let lim_err = (0.75 * d_full).min(300.0);
         if pitch > lim_err + 1e-9 {
             errors.push(format!(
@@ -85,7 +86,7 @@ pub(crate) fn beam_provisions(
     if info.main_dia.designation_or_diameter_mm() + 1e-9 < 13.0 {
         warnings.push(format!("主筋径 {} < D13", info.main_dia));
     }
-    if props.pw + 1e-12 < 0.002 {
+    if check_stirrup_spacing && props.pw + 1e-12 < 0.002 {
         warnings.push(format!("pw={:.4} < 0.2%", props.pw));
     }
     if let Some(ft) =
@@ -225,7 +226,7 @@ mod tests {
             j: 7.0 * 550.0 / 8.0,
             pw: 0.003,
         };
-        let p = beam_provisions(600.0, &props, &info, true, 0.0, Some(195.0));
+        let p = beam_provisions(600.0, &props, &info, true, 0.0, Some(195.0), true);
         assert!(p.errors.iter().any(|e| e.contains("かぶり")));
         assert!(p.errors.iter().any(|e| e.contains("あばら間隔")));
     }

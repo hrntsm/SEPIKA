@@ -776,7 +776,12 @@ fn simplified_beam_check_keeps_1999_bond_failure_with_bending_and_reference_issu
         }),
         ..Default::default()
     };
-    for (missing_gravity, reference) in [(false, "Q0"), (true, "重力参照")] {
+    for (qy, missing_gravity, reference) in [
+        (150_000.0, false, "Q0"),
+        (150_000.0, true, "重力参照"),
+        (f64::NAN, false, "Q0"),
+    ] {
+        forces.qy = qy;
         let results: Vec<_> = RcDesign
             .check_outcomes(&forces, section, concrete, &ctx, missing_gravity)
             .collect();
@@ -791,7 +796,11 @@ fn simplified_beam_check_keeps_1999_bond_failure_with_bending_and_reference_issu
         for expected in ["重心までの距離", "ねじり", reference] {
             assert!(reason.contains(expected), "{reason}");
         }
+        if !qy.is_finite() {
+            assert!(reason.contains("解析せん断力Qyが非有限"), "{reason}");
+        }
     }
+    forces.qy = 150_000.0;
     assert!(matches!(
         RcDesign.check(&forces, section, concrete, &ctx),
         CheckOutcome::Skipped { reason } if reason.contains("重心までの距離") && reason.contains("Q0")
@@ -834,4 +843,102 @@ fn simplified_beam_check_does_not_infer_shear_failure_without_tension_bars() {
         matches!(results.as_slice(), [CheckOutcome::Skipped { reason }] if reason.contains("引張側の主筋がありません")),
         "{results:?}"
     );
+}
+
+#[test]
+fn common_member_check_with_invalid_stirrup_spacing_keeps_only_independent_bond_failures() {
+    let mut model = input::model(true);
+    let forces = [(
+        ElemId(0),
+        MemberForces {
+            at: vec![(0.5, [0.0, 300_000.0, 0.0, 0.0, 0.0, 300e6])],
+        },
+    )];
+    for pitch in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
+            unreachable!()
+        };
+        rebar.stirrup.pitch = pitch;
+        for (term, bond_method, bond_failure) in [
+            (LoadTerm::Long, BondMethod::Rc1991, true),
+            (LoadTerm::Long, BondMethod::Rc1999, true),
+            (LoadTerm::Short, BondMethod::Rc1999, false),
+        ] {
+            let report = run_member_design_checks(
+                &model,
+                &forces,
+                &[],
+                &MemberDesignCheckOptions {
+                    term,
+                    bond_method,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let (unrated, checked): (Vec<_>, Vec<_>) = report
+                .member_checks
+                .iter()
+                .map(|(_, _, outcome)| outcome)
+                .partition(|outcome| matches!(outcome, CheckOutcome::Skipped { .. }));
+            assert!(
+                matches!(unrated.as_slice(),
+                [CheckOutcome::Skipped { reason }] if reason.contains("重心までの距離")
+                    && reason.contains("あばら筋間隔が非有限")),
+                "{unrated:?}"
+            );
+            if bond_failure {
+                assert!(
+                    matches!(checked.as_slice(),
+                    [CheckOutcome::Checked(result)] if result.components.len() == 1
+                        && result.components[0].kind == CheckKind::Bond && !result.ok()),
+                    "{checked:?}"
+                );
+            } else {
+                assert!(checked.is_empty(), "{checked:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn simplified_zero_bending_beam_reports_unavailable_shear_instead_of_a_pass() {
+    let model = input::model(true);
+    let section = section(250.0, 350.0, 19.0, &[3], &[]);
+    let concrete = &model.materials[0];
+    let rebar = &model.materials[1];
+    let mut ctx = DesignCtx {
+        length: 3000.0,
+        rebar_material: Some(rebar.clone()),
+        shear_rebar_material: Some(rebar.clone()),
+        ..Default::default()
+    };
+    for (qy, reason) in [
+        (f64::NAN, "解析せん断力Qyが非有限"),
+        (f64::INFINITY, "解析せん断力Qyが非有限"),
+        (1e6, "引張側に主筋がなく"),
+    ] {
+        let forces = MemberForcesAt::from_local(0.0, [0.0, qy, 0.0, 0.0, 0.0, 0.0]);
+        let results: Vec<_> = RcDesign
+            .check_outcomes(&forces, &section, concrete, &ctx, false)
+            .collect();
+        assert!(
+            matches!(results.as_slice(),
+            [CheckOutcome::Skipped { reason: actual }] if actual.contains(reason)),
+            "{results:?}"
+        );
+    }
+
+    let zero = MemberForcesAt::from_local(0.0, [0.0; 6]);
+    assert!(matches!(RcDesign.check(&zero, &section, concrete, &ctx),
+        CheckOutcome::Checked(result) if result.ok()));
+    ctx.seismic_qd = Some(SeismicQd {
+        method: QdMethod::Qd2,
+        long_at: vec![(0.0, [0.0, -20_000.0, 0.0, 0.0, 0.0, 0.0])],
+        n_factor: 1.5,
+        n_mechanism: 1.0,
+        clear_length: 3000.0,
+        q_simple: None,
+    });
+    assert!(matches!(RcDesign.check(&zero, &section, concrete, &ctx),
+        CheckOutcome::Skipped { reason } if reason.contains("引張側に主筋がなく")));
 }
