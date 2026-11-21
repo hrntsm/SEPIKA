@@ -13,7 +13,7 @@ pub struct ColumnEndSupports {
 }
 
 impl ColumnEndSupports {
-    /// 確認した両実材端の間隔 [mm]。
+    /// 確認した両実材端の間隔 \[mm\]。
     pub fn length_mm(&self) -> f64 {
         let [i, j] = self.actual_end_positions_mm;
         dist(i, j)

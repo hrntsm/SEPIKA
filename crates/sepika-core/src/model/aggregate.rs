@@ -49,7 +49,7 @@ pub struct ElemAttrs {
     pub extra_line_weight: Vec<(usize, f64)>,
     /// 削除前の配列位置と仕上げ面重量 [N/mm²]。
     pub finish_area_weight: Vec<(usize, f64)>,
-    /// 削除前の配列位置とダンパー総重量 [N]。
+    /// 削除前の配列位置とダンパー総重量 \[N\]。
     pub damper_weight: Vec<(usize, f64)>,
 }
 

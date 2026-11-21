@@ -165,7 +165,7 @@ pub fn resolve_steel_f(mat: Option<&Material>, thickness_mm: Option<f64>) -> Res
     })
 }
 
-/// SRC 内蔵 H 形鋼に適用できる材種の最小板厚 [mm]。分類・材種が不適合なら理由を返す。
+/// SRC 内蔵 H 形鋼に適用できる材種の最小板厚 \[mm\]。分類・材種が不適合なら理由を返す。
 pub fn src_h_steel_minimum_thickness_mm(steel: &Material) -> Result<f64, String> {
     if steel.category != MaterialCategory::Steel {
         return Err(format!("材料「{}」は鋼材ではありません", steel.name));
@@ -197,7 +197,7 @@ pub fn src_h_steel_minimum_thickness_mm(steel: &Material) -> Result<f64, String>
     Ok(minimum_mm)
 }
 
-/// ウェブとフランジの実板厚 [mm] のいずれかが材種の下限を下回れば理由を返す。
+/// ウェブとフランジの実板厚 \[mm\] のいずれかが材種の下限を下回れば理由を返す。
 pub fn validate_src_h_steel_thickness(
     steel_name: &str,
     tw_mm: f64,
