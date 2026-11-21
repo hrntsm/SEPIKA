@@ -25,7 +25,6 @@ additional-js = ["theme/footer.js"]
 [output.html.redirect]
 "/model_io/README.html" = "index.html"
 "/model_edit/README.html" = "index.html"
-"/mcp_server/README.html" = "index.html"
 "/preparation/README.html" = "index.html"
 "/result_view/README.html" = "index.html"
 "/calc_basis/README.html" = "index.html"

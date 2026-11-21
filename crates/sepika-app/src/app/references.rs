@@ -3332,7 +3332,7 @@ impl From<&EvidenceReference> for EvidenceReference {
     }
 }
 
-#[cfg(any(feature = "gui", test))]
+#[cfg(feature = "gui")]
 impl QuantityEvidenceScope {
     pub(crate) fn label(&self) -> String {
         match self {
@@ -3343,7 +3343,7 @@ impl QuantityEvidenceScope {
 }
 
 impl QuantityEvidenceReference {
-    #[cfg(any(feature = "gui", test))]
+    #[cfg(feature = "gui")]
     pub(crate) fn steel_takeoff(&self) -> Result<FixedSteelQuantity, String> {
         let QuantityEvidenceScope::Members(ids) = &self.scope else {
             return Err("固定した主架構S造部材の鋼材範囲が必要です".into());
@@ -3372,13 +3372,6 @@ impl QuantityEvidenceReference {
             items,
             whole_quantity_error,
         })
-    }
-    #[cfg(any(feature = "gui", test))]
-    pub(crate) fn validate_available(&self) -> Result<(), String> {
-        match &self.scope {
-            QuantityEvidenceScope::Members(_) => self.steel_takeoff().map(|_| ()),
-            QuantityEvidenceScope::WholeModel => self.takeoff().map(|_| ()),
-        }
     }
     #[cfg(any(feature = "gui", test))]
     pub(crate) fn takeoff(&self) -> Result<sepika_design_jp::quantity::QuantityTakeoff, String> {
@@ -3410,13 +3403,13 @@ impl QuantityEvidenceReference {
     }
 }
 
-#[cfg(any(feature = "gui", test))]
+#[cfg(feature = "gui")]
 pub(crate) struct FixedSteelQuantity {
     pub items: Vec<sepika_design_jp::quantity::steel_members::SteelMemberQuantity>,
     pub whole_quantity_error: Option<String>,
 }
 
-#[cfg(any(feature = "gui", test))]
+#[cfg(feature = "gui")]
 impl FixedSteelQuantity {
     pub fn volume_m3(&self) -> f64 {
         self.items.iter().map(|item| item.volume_m3).sum()

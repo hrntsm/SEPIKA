@@ -185,7 +185,7 @@ impl ResultStore for FsResultStore {
             ResultKind::Story => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Unsupported,
-                    "Story kind はスキーマ未定義のため未対応(MCP からは呼ばれない前提)",
+                    "Story kind はスキーマ未定義のため未対応",
                 ));
             }
         };
@@ -277,7 +277,7 @@ impl ResultStore for FsResultStore {
             }
             ResultKind::Story => Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
-                "Story kind の query は未対応(MCP からは呼ばれない前提)",
+                "Story kind の query は未対応",
             )),
         }
     }

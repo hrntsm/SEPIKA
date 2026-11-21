@@ -2,7 +2,7 @@
 
 作成日: 2026-10-28
 
-[#972](https://github.com/hrntsm/SEPIKA/issues/972)で合意した画面・検討方針を、[#973](https://github.com/hrntsm/SEPIKA/issues/973)時点で具体化した履歴である。**以下は後続実装への決定事項であり、現行製品の操作説明ではない。** 現在仕様は[画面構成](../../docs/model_edit/06_画面構成と工程タブ.md)・[MCP制約](../../docs/mcp_server/05_制約・注意点.md)を正とする。用語は[CONTEXT](../../CONTEXT.md)、所有/保存/接続判断は[ADR 0087](../adr/0087-gui-owned-study-and-local-ai.md)、実験・一連検証のデータは[V&V](../v_and_v/UI検討_Issue973_接続確認.md)に分ける。作業の進捗は各GitHub Issueで管理する。
+[#972](https://github.com/hrntsm/SEPIKA/issues/972)で合意した画面・検討方針を、[#973](https://github.com/hrntsm/SEPIKA/issues/973)時点で具体化した履歴である。**以下は後続実装への決定事項であり、現行製品の操作説明ではない。** 現在のGUI仕様は[画面構成](../../docs/model_edit/06_画面構成と工程タブ.md)を正とする。廃止前の接続仕様は[MCP制約](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/05_制約・注意点.md)、廃止の判断は[ADR 0140](../adr/0140-remove-mcp-and-local-ai.md)を参照。用語は[CONTEXT](../../CONTEXT.md)、所有/保存/接続判断は[ADR 0087](../adr/0087-gui-owned-study-and-local-ai.md)、実験・一連検証のデータは[V&V](../v_and_v/UI検討_Issue973_接続確認.md)に分ける。作業の進捗は各GitHub Issueで管理する。
 
 ## 代表4画面と移動
 

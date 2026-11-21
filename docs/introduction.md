@@ -12,7 +12,7 @@ Integrated Structural Analysis
 - [基本操作・モデル入力](model_edit/README.md)、[準備・解析の実行・結果の確認](workflow/README.md)、[断面案の検討](section_study/README.md)
 - [荷重・重量・質量](calc_basis/01_荷重/README.md)、[材料・断面諸量・弾性剛性](elastic/README.md)、[非線形モデル・復元力](nonlinear/README.md)、[構造解析の方法](calc_basis/05_構造解析/README.md)
 - [許容応力度・部材検定](calc_basis/06_一次設計/README.md)、[部材終局耐力](calc_basis/08_部材終局耐力/README.md)、[建物全体の耐震評価](calc_basis/07_二次設計/README.md)
-- [数量積算](calc_basis/10_数量積算/README.md)、[保存・入出力・外部AI連携](external/README.md)
+- [数量積算](calc_basis/10_数量積算/README.md)、[保存・入出力](external/README.md)
 
 式・単位・出典と実装参照の読み方は[計算根拠の読み方](calc_basis/README.md)にまとめています。
 

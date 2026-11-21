@@ -1,5 +1,4 @@
 mod adoption;
-pub mod ai;
 mod comparison;
 use super::*;
 use serde::{Deserialize, Serialize};
@@ -71,7 +70,6 @@ pub enum Location {
     Proposal(usize, usize),
     History(usize, usize),
     StartedInput(usize, usize),
-    RequestInput(usize, usize),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -81,13 +79,6 @@ pub struct StudyInput {
     pub references: references::ProjectReferences,
 }
 impl StudyInput {
-    fn input_reference(&self) -> references::InputReference {
-        App {
-            core: self.core(),
-            ..Default::default()
-        }
-        .input_reference()
-    }
     fn capture(core: &AppCore) -> Self {
         let mut references = core.scoped.references.clone();
         references.generation +=
@@ -128,7 +119,6 @@ pub struct Proposal {
     pub state: Option<Slot>,
 }
 pub struct Study {
-    pub ai: ai::StudyAi,
     pub purpose: String,
     pub notes: String,
     pub fixed: Vec<references::TargetReference>,
@@ -211,8 +201,6 @@ impl ViewReferences {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StudyRun {
-    #[serde(default)]
-    pub ai_job: Option<String>,
     pub proposal: String,
     pub proposal_name: String,
     pub input_view_references: ViewReferences,
@@ -235,13 +223,6 @@ pub struct StudyRun {
     pub diagnostics: Vec<Diagnostic>,
 }
 impl StudyRun {
-    fn calculation_state(&self) -> &'static str {
-        if self.error.is_some() || self.results.is_none() {
-            "failed"
-        } else {
-            "calculated"
-        }
-    }
     fn result_scope_error(&self, reference: &references::ResultReference) -> Option<String> {
         if reference.kind != ResultInputKey::Design {
             return None;
@@ -285,11 +266,9 @@ impl StudyRun {
     }
 }
 pub struct RunningStudy {
-    ai_job: Option<String>,
-    ai_error: Option<String>,
     study: usize,
     name: String,
-    #[cfg(any(feature = "gui", test))]
+    #[cfg(feature = "gui")]
     input: std::sync::Arc<StudyInput>,
     worker: Box<App>,
     preparing: Option<std::sync::mpsc::Receiver<Result<StudyWorkerOutcome, String>>>,
@@ -311,8 +290,6 @@ pub struct SavedStudies {
 }
 #[derive(Serialize, Deserialize)]
 struct SavedStudy {
-    #[serde(default)]
-    ai: ai::StudyAi,
     purpose: String,
     notes: String,
     fixed: Vec<references::TargetReference>,
@@ -338,7 +315,6 @@ fn finish_study_run(worker: &mut App, input: &StudyInput, name: String) -> Study
         .take()
         .unwrap_or_else(|| worker.core.scoped.diagnostics.clone());
     StudyRun {
-        ai_job: None,
         expected_result_checks: worker
             .core
             .scoped
@@ -415,10 +391,7 @@ impl App {
     pub fn study_read_only(&self) -> bool {
         matches!(
             self.studies.active,
-            Location::History(..)
-                | Location::StartedInput(..)
-                | Location::RequestInput(..)
-                | Location::Proposal(_, 0)
+            Location::History(..) | Location::StartedInput(..) | Location::Proposal(_, 0)
         )
     }
     pub fn study_is_main(&self) -> bool {
@@ -463,7 +436,6 @@ impl App {
         state.core.scoped.undo.restrict_sections(Vec::new());
         let index = self.studies.items.len();
         self.studies.items.push(Study {
-            ai: ai::StudyAi::default(),
             purpose,
             notes: String::new(),
             fixed,
@@ -486,10 +458,7 @@ impl App {
         reference: references::QuantityEvidenceReference,
     ) -> Result<(), String> {
         let s = match self.studies.active {
-            Location::Proposal(s, _)
-            | Location::History(s, _)
-            | Location::StartedInput(s, _)
-            | Location::RequestInput(s, _) => s,
+            Location::Proposal(s, _) | Location::History(s, _) | Location::StartedInput(s, _) => s,
             Location::Main => {
                 return Err("保存先の検討で基準案・比較案または計算履歴を表示してください".into())
             }
@@ -540,9 +509,7 @@ impl App {
         match location {
             Location::Main => self.studies.main = Some(slot),
             Location::Proposal(s, p) => self.studies.items[s].proposals[p].state = Some(slot),
-            Location::History(..) | Location::StartedInput(..) | Location::RequestInput(..) => {
-                return Some(slot)
-            }
+            Location::History(..) | Location::StartedInput(..) => return Some(slot),
         }
         None
     }
@@ -589,19 +556,6 @@ impl App {
                 slot.core.log.entries = run.log.clone();
                 slot.core.scoped.diagnostics = run.diagnostics.clone();
                 slot.core.scoped.staleness.diagnostics_stale = false;
-                slot.core.scoped.undo.restrict_sections(Vec::new());
-                slot
-            }
-            Location::RequestInput(s, t) => {
-                let task = self
-                    .studies
-                    .items
-                    .get(s)
-                    .and_then(|s| s.ai.tasks.get(t))
-                    .ok_or("依頼時入力がありません")?;
-                let mut slot = Slot::new(&task.origin);
-                slot.core.scoped.references.fixed = task.source_targets.clone();
-                slot.core.scoped.references.fixed_results = task.results.clone();
                 slot.core.scoped.undo.restrict_sections(Vec::new());
                 slot
             }
@@ -705,13 +659,6 @@ impl App {
                 .runs
                 .iter()
                 .any(|r| r.proposal == input.references.proposal)
-            || self.studies.items[s]
-                .ai
-                .tasks
-                .iter()
-                .flat_map(|task| &task.submissions)
-                .flat_map(|submission| &submission.quantity_references)
-                .any(|quantity| quantity.source.proposal == input.references.proposal)
         {
             return Err("保持した計算結果の根拠となる案は削除できません".into());
         }
@@ -854,7 +801,7 @@ impl App {
         // 派生値の再算定で共通参照の入力版は変わらないため、両ビューが同じ参照を持つときは表示先を維持する。
         if matches!(
             self.studies.active,
-            Location::StartedInput(..) | Location::History(..) | Location::RequestInput(..)
+            Location::StartedInput(..) | Location::History(..)
         ) && self.core.scoped.references.fixed.contains(target)
         {
             return Some(self.studies.active);
@@ -864,26 +811,15 @@ impl App {
             .iter()
             .enumerate()
             .find_map(|(s, study)| {
-                study
-                    .runs
-                    .iter()
-                    .enumerate()
-                    .find_map(|(r, run)| {
-                        if run.result_view_references.fixed.contains(target) {
-                            Some(Location::History(s, r))
-                        } else if run.input_view_references.fixed.contains(target) {
-                            Some(Location::StartedInput(s, r))
-                        } else {
-                            None
-                        }
-                    })
-                    .or_else(|| {
-                        study.ai.tasks.iter().enumerate().find_map(|(t, task)| {
-                            task.source_targets
-                                .contains(target)
-                                .then_some(Location::RequestInput(s, t))
-                        })
-                    })
+                study.runs.iter().enumerate().find_map(|(r, run)| {
+                    if run.result_view_references.fixed.contains(target) {
+                        Some(Location::History(s, r))
+                    } else if run.input_view_references.fixed.contains(target) {
+                        Some(Location::StartedInput(s, r))
+                    } else {
+                        None
+                    }
+                })
             })
     }
     pub fn saved_studies(&self) -> SavedStudies {
@@ -893,41 +829,29 @@ impl App {
                 .items
                 .iter()
                 .enumerate()
-                .map(|(s, study)| {
-                    let runs = self.saved_study_runs(s);
-                    let mut ai = study.ai.clone();
-                    let running = self
-                        .studies
-                        .running
-                        .as_ref()
-                        .filter(|running| running.study == s);
-                    ai.sync_jobs(&runs, running);
-                    SavedStudy {
-                        ai,
-                        purpose: study.purpose.clone(),
-                        notes: study.notes.clone(),
-                        fixed: study.fixed.clone(),
-                        baseline: study.baseline.clone(),
-                        quantity_evidence: study.quantity_evidence.clone(),
-                        proposals: study
-                            .proposals
-                            .iter()
-                            .enumerate()
-                            .map(|(p, proposal)| (proposal.name.clone(), self.proposal_input(s, p)))
-                            .collect(),
-                        runs,
-                        decisions: study
-                            .decisions
-                            .iter()
-                            .map(adoption::Decision::snapshot)
-                            .collect(),
-                    }
+                .map(|(s, study)| SavedStudy {
+                    purpose: study.purpose.clone(),
+                    notes: study.notes.clone(),
+                    fixed: study.fixed.clone(),
+                    baseline: study.baseline.clone(),
+                    quantity_evidence: study.quantity_evidence.clone(),
+                    proposals: study
+                        .proposals
+                        .iter()
+                        .enumerate()
+                        .map(|(p, proposal)| (proposal.name.clone(), self.proposal_input(s, p)))
+                        .collect(),
+                    runs: self.saved_study_runs(s),
+                    decisions: study
+                        .decisions
+                        .iter()
+                        .map(adoption::Decision::snapshot)
+                        .collect(),
                 })
                 .collect(),
         }
     }
     pub fn restore_studies(&mut self, saved: SavedStudies) -> Result<(), String> {
-        self.ai_connection = ai::AiConnection::default();
         let mut items = Vec::new();
         for study in saved.items {
             let targets: Vec<_> = study
@@ -962,7 +886,6 @@ impl App {
                 });
             }
             items.push(Study {
-                ai: study.ai,
                 purpose: study.purpose,
                 notes: study.notes,
                 fixed: study.fixed,
@@ -972,23 +895,6 @@ impl App {
                 runs: study.runs,
                 decisions: study.decisions,
             });
-        }
-        for study in &mut items {
-            for task in &study.ai.tasks {
-                task.origin
-                    .model
-                    .validate_reference_ids()
-                    .map_err(|error| error.to_string())?;
-            }
-            study.ai.sync_jobs(&study.runs, None);
-            for task in &mut study.ai.tasks {
-                if task.started.is_some() {
-                    task.interrupted = Some((
-                        SystemTime::now(),
-                        "再読込後の継続未確認・接続許可なし".into(),
-                    ));
-                }
-            }
         }
         self.studies = Studies {
             items,
@@ -1016,11 +922,9 @@ impl App {
             false,
         ));
         self.studies.running = Some(RunningStudy {
-            ai_job: None,
-            ai_error: None,
             study: s,
             name,
-            #[cfg(any(feature = "gui", test))]
+            #[cfg(feature = "gui")]
             input,
             worker: Box::default(),
             preparing,
@@ -1046,7 +950,6 @@ impl App {
     }
     pub fn poll_study_calculation(&mut self) -> bool {
         let Some(mut running) = self.studies.running.take() else {
-            self.sync_ai_jobs();
             return false;
         };
         if let Some(preparing) = &running.preparing {
@@ -1056,21 +959,17 @@ impl App {
                     running.preparing = None;
                     self.studies.window_open = true;
                 }
-                Ok(Ok(StudyWorkerOutcome::Finished(mut run))) => {
-                    run.ai_job = running.ai_job.take();
+                Ok(Ok(StudyWorkerOutcome::Finished(run))) => {
                     self.studies.items[running.study].runs.push(*run);
                     self.mark_study_dirty();
-                    self.sync_ai_jobs();
                     return true;
                 }
                 Ok(Err(reason)) => {
                     self.fail_study_worker(running, reason);
-                    self.sync_ai_jobs();
                     return true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.fail_study_worker(running, "計算スレッドが異常終了しました".into());
-                    self.sync_ai_jobs();
                     return true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -1079,22 +978,7 @@ impl App {
             self.studies.window_open = true;
         }
         self.studies.running = Some(running);
-        self.sync_ai_jobs();
         false
-    }
-    pub(crate) fn sync_ai_jobs(&mut self) {
-        let mut changed = false;
-        for (s, study) in self.studies.items.iter_mut().enumerate() {
-            let running = self
-                .studies
-                .running
-                .as_ref()
-                .filter(|running| running.study == s);
-            changed |= study.ai.sync_jobs(&study.runs, running);
-        }
-        if changed {
-            self.mark_study_dirty();
-        }
     }
     pub fn study_main_changed(&self, s: usize) -> bool {
         let main = if self.study_is_main() {
@@ -1105,13 +989,8 @@ impl App {
         let baseline = &self.studies.items[s].baseline;
         !adoption::same_input(&StudyInput::capture(main), baseline)
     }
-    fn fail_study_worker(&mut self, mut running: RunningStudy, reason: String) {
+    fn fail_study_worker(&mut self, running: RunningStudy, reason: String) {
         self.report_error(format!("検討「{}」: {reason}", running.name));
-        running.ai_error = Some(reason);
-        let study = &mut self.studies.items[running.study];
-        if study.ai.sync_jobs(&study.runs, Some(&running)) {
-            self.mark_study_dirty();
-        }
     }
 }
 
@@ -1218,10 +1097,6 @@ impl App {
                 "{} の計算開始時入力（読取専用）",
                 self.studies.items[s].runs[r].proposal_name
             ),
-            Location::RequestInput(s, t) => format!(
-                "依頼「{}」の固定入力（読取専用）",
-                self.studies.items[s].ai.tasks[t].purpose
-            ),
         }
     }
     pub(crate) fn study_window(&mut self, ctx: &egui::Context) {
@@ -1236,8 +1111,6 @@ impl App {
             .collapsible(self.studies.running.is_none())
             .vscroll(true)
             .show(ctx, |ui| {
-                self.ai_connection_panel(ui);
-                self.ai_request_panel(ui);
                 let active = self.study_display_name();
                 ui.strong(format!("表示・編集先: {active}"));
                 if ui.button("本案を表示").clicked() {

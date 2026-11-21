@@ -58,10 +58,6 @@ PR 前は、変更範囲と合理的に影響を受ける範囲を検証しま�
 PR でのみ実施します。PR ではテスト構成ごとにジョブを分けて並列実行し、全構成が成功した
 場合のみ必須チェック「テスト」が成功します。
 
-Windows固有の名前付きパイプ・GUI検討の実通信・MCP stdio中継は、専用のWindowsジョブで検証し、
-必須チェック「テスト」へ含めます。mainでは同じWindows構成を`--no-run`でビルドして専用キャッシュを
-生成し、完全一致のキャッシュがある場合は再ビルドしません。PRはそのキャッシュを復元し、更新しません。
-
 CI ではビルド成果物の容量を抑えるため、dev / test profile のデバッグ情報を生成しません。
 デバッグアサーション・整数オーバーフロー検査と検証対象は維持します。
 Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、ビルド前後の空き容量と `target` の
@@ -83,49 +79,47 @@ Linux のテスト用キャッシュ生成・各テスト構成・Clippy は、�
 
 | 管理先 | 共有する検証対象・管理理由 | 利用元・実行入口 |
 | --- | --- | --- |
-| `sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs` | RC梁の数値径19 mm・非対称配筋と正曲げ需要。共通検定・GUI表示と保存・MCP集計で未算定理由を検証 | design-jp `tests/rc_beam_asymmetric.rs`・`tests/rc_ultimate_clear_span.rs`・`tests/rc_ultimate_beam_hinge.rs`、app `src/app/rc_beam_asymmetric_tests.rs`・`src/viewer/check_ratio.rs`、mcp `src/job/design_check.rs`・`tests/ultimate_check.rs` |
-| `sepika-design-jp/tests/fixtures/brb_model.rs` | 座屈拘束ブレースの製品値と軸力。共通検定・GUI表示と保存・MCP集計で未検定理由と製品限度を検証 | design-jp `tests/brb_product_check.rs`、app `src/app/brb_product_tests.rs`（`src/viewer/check_ratio.rs`からも利用）、mcp `src/job/design_check.rs` |
-| `sepika-design-jp/tests/fixtures/rc_joint_model.rs` | RC終局接合部のモデル候補と未算定理由。応力欠落時の保持を公開入口・保存・GUI/MCP集計で検証 | design-jp `tests/rc_joint_selection.rs`、app `src/app/result_contract_tests.rs`、mcp `src/job/design_check.rs` |
-| `sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs`・`rc_column_axial_boundary_reference.rs` | RC柱の圧縮軸力上限と非零曲げ。許容曲げ0の境界を独立軸力・解析・共通検定で観測。材軸ねじりの未算定を確認するRC・SRC柱にもモデルを利用 | design-jp `tests/rc_column_zero_moment_capacity.rs`・`tests/rc_ultimate_clear_span.rs`と`tests/concrete_member_torsion.rs`（後二者はモデルのみ）、job `tests/rc_column_axial_boundary.rs`、app `src/app/rc_column_boundary_tests.rs`（`src/viewer/th_detail.rs`でもモデルを利用）・`src/viewer/check_ratio.rs`、mcp `src/job/design_check.rs` |
-| `sepika-design-jp/tests/fixtures/src_panel_model.rs`・`src_panel_reference.rs` | SRC柱梁接合部の構面別長期・短期許容せん断、対象外構面と応力伝達の別途確認 | design-jp `tests/src_panel.rs`、app `src/app/src_panel_tests.rs`、mcp `src/job/design_check.rs` |
-| `sepika-design-jp/tests/fixtures/src_joint_hoops_model.rs` | 同一SRC柱梁接合部の2構面と計算例10の帯筋入力。共通の短期検定入力とGUI/MCPの操作を照合 | design-jp `tests/src_joint_hoops.rs`、app `src/tables/src_joint_hoops.rs`、mcp `src/server.rs` |
-| `sepika-design-jp/tests/fixtures/src_h_steel_product_model.rs`・`src_h_steel_product_reference.rs` | 矩形SRC梁・柱の内蔵H形鋼。独立長期許容耐力と鋼管材の理由付き未算定を公開API・GUI保存・MCP集計で検証 | design-jp `tests/src_h_steel_product.rs`・`tests/fixtures/src_joint_hoops_model.rs`（後者はモデルのみ）、app `src/app/src_ql_acceptance_tests.rs`、mcp `src/job/design_check.rs` |
-| `sepika-design-jp/tests/fixtures/rc_column_tension_model.rs`・`rc_column_tension_reference.rs` | RC柱の矩形500角・円形D600、全主筋による純引張許容上限と算定範囲外曲げ。独立期待値と検定伝達を検証 | design-jp `tests/rc_column_zero_moment_capacity.rs`、app `src/app/rc_column_boundary_tests.rs`・`src/viewer/check_ratio.rs`、mcp `src/job/design_check.rs` |
-| `sepika-core/tests/support/assignment_identity_model.rs` | 割当領域の識別・外部ID。coreのモデル契約を各入口でも維持 | core `model/assignment_identity_tests`、edit/job/mcp `tests/assignment_identity.rs`、mcp `tests/external_ids.rs`・`src/server_external_ids.rs`、app `src/app/assignment_identity_tests.rs` |
+| `sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs` | RC梁の数値径19 mm・非対称配筋と正曲げ需要。共通検定・GUI表示と保存で未算定理由を検証 | design-jp `tests/rc_beam_asymmetric.rs`・`tests/rc_ultimate_clear_span.rs`・`tests/rc_ultimate_beam_hinge.rs`、app `src/app/rc_beam_asymmetric_tests.rs`・`src/viewer/check_ratio.rs` |
+| `sepika-design-jp/tests/fixtures/brb_model.rs` | 座屈拘束ブレースの製品値と軸力。共通検定・GUI表示と保存で未検定理由と製品限度を検証 | design-jp `tests/brb_product_check.rs`、app `src/app/brb_product_tests.rs`（`src/viewer/check_ratio.rs`からも利用） |
+| `sepika-design-jp/tests/fixtures/rc_joint_model.rs` | RC終局接合部のモデル候補と未算定理由。応力欠落時の保持を公開入口・保存・GUI集計で検証 | design-jp `tests/rc_joint_selection.rs`、app `src/app/result_contract_tests.rs` |
+| `sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs`・`rc_column_axial_boundary_reference.rs` | RC柱の圧縮軸力上限と非零曲げ。許容曲げ0の境界を独立軸力・解析・共通検定で観測。材軸ねじりの未算定を確認するRC・SRC柱にもモデルを利用 | design-jp `tests/rc_column_zero_moment_capacity.rs`・`tests/rc_ultimate_clear_span.rs`と`tests/concrete_member_torsion.rs`（後二者はモデルのみ）、job `tests/rc_column_axial_boundary.rs`、app `src/app/rc_column_boundary_tests.rs`（`src/viewer/th_detail.rs`でもモデルを利用）・`src/viewer/check_ratio.rs` |
+| `sepika-design-jp/tests/fixtures/src_panel_model.rs`・`src_panel_reference.rs` | SRC柱梁接合部の構面別長期・短期許容せん断、対象外構面と応力伝達の別途確認 | design-jp `tests/src_panel.rs`、app `src/app/src_panel_tests.rs` |
+| `sepika-design-jp/tests/fixtures/src_joint_hoops_model.rs` | 同一SRC柱梁接合部の2構面と計算例10の帯筋入力。共通の短期検定入力とGUIの操作を照合 | design-jp `tests/src_joint_hoops.rs`、app `src/tables/src_joint_hoops.rs` |
+| `sepika-design-jp/tests/fixtures/src_h_steel_product_model.rs`・`src_h_steel_product_reference.rs` | 矩形SRC梁・柱の内蔵H形鋼。独立長期許容耐力と鋼管材の理由付き未算定を公開API・GUI保存で検証 | design-jp `tests/src_h_steel_product.rs`・`tests/fixtures/src_joint_hoops_model.rs`（後者はモデルのみ）、app `src/app/src_ql_acceptance_tests.rs` |
+| `sepika-design-jp/tests/fixtures/rc_column_tension_model.rs`・`rc_column_tension_reference.rs` | RC柱の矩形500角・円形D600、全主筋による純引張許容上限と算定範囲外曲げ。独立期待値と検定伝達を検証 | design-jp `tests/rc_column_zero_moment_capacity.rs`、app `src/app/rc_column_boundary_tests.rs`・`src/viewer/check_ratio.rs` |
+| `sepika-core/tests/support/assignment_identity_model.rs` | 割当領域の識別・外部ID。coreのモデル契約を各入口でも維持 | core `model/assignment_identity_tests`、edit/job `tests/assignment_identity.rs`、app `src/app/assignment_identity_tests.rs` |
 | `sepika-core/tests/support/frame_support_model.rs` | 主架構支持の解析表現。coreの物理支持契約を編集・入出力・準備で維持 | core/edit/io/job `tests/frame_support_representation.rs` |
 | `sepika-io/tests/fixtures/h_column_reference.stb` | ST-BridgeのH形鋼柱の鉄骨向き。入出力、表示の断面外形、解析の強弱軸の曲げ応答を検証 | io `tests/stbridge_column_reference.rs`、app `tests/stbridge_column_reference_analysis.rs`・`src/viewer/solid.rs` |
 | `sepika-core/tests/support/secondary_materialization_model.rs` | 二次部材の解析要素化。coreの生成契約をジョブ・GUI入口で維持 | core/job `tests/secondary_materialization.rs`、app `src/app/tests.rs` |
 | `sepika-core/tests/support/steel_secondary_post_model.rs` | 鋼製間柱のモデル属性・材料対応。編集・検定・GUIで同じ入力を保持 | edit `src/secondary.rs`、design-jp `src/post.rs`、app `src/app/post_design_tests.rs`、job `tests/secondary_materialization.rs` |
-| `sepika-solver/tests/support/static_analysis_model.rs` | 柱の軸剛性設定と引張専用ブレース反復。solverの静的解析契約を各実行入口で維持 | solver `tests/parallel_batch.rs`、job `src/compute.rs`、app `src/app/actions/linear_static.rs`、mcp `src/tests.rs` |
+| `sepika-solver/tests/support/static_analysis_model.rs` | 柱の軸剛性設定と引張専用ブレース反復。solverの静的解析契約を各実行入口で維持 | solver `tests/parallel_batch.rs`、job `src/compute.rs`、app `src/app/actions/linear_static.rs` |
 | `sepika-design-jp/tests/fixtures/eccentricity_model.rs` | 斜材と鉛直材で支持する剛床、複数剛床・シェル床を支持する柱。剛性の独立値と方向間連成時の算定保留を照合する | design-jp `tests/inclined_column_eccentricity.rs`・`tests/torsional_cancellation_eccentricity.rs`・`tests/multi_floor_torsional_cancellation.rs`、job `tests/coupled_story_lumped_mass.rs`・`tests/planar_column_ki_torsional_cancellation.rs`（後者は四柱モデル経由） |
 | `sepika-design-jp/tests/fixtures/multi_floor_torsional_cancellation_model.rs`・`multi_floor_torsional_cancellation_reference.rs` | 2剛床・シェル床の四柱架構と独立な一様並進の反力。柱変位の相殺と比例小荷重の違いを偏心率・形状係数と二次元線形せん断型質点系で照合 | design-jp `tests/multi_floor_torsional_cancellation.rs`、job `tests/planar_column_ki_torsional_cancellation.rs` |
-| `sepika-solver/tests/support/rc_wall_side_column_model.rs` | 側柱付きRC壁の共通face・剛性・力の分担。solverの壁系解析を要素・検定・重量・GUI/MCPでも検証 | solver `tests/wall_system_linear.rs`・`src/nonlinear/wall_reference.rs`、element `src/wall/static_face.rs`、design-jp `src/joint_wiring/tests.rs`、job `tests/wall_weight_partition.rs`・`tests/rc_wall_zero_span.rs`、app `src/app/rc_wall_side_column_tests.rs`（holding・viewerからも利用）・`tests/rc_rank_clear_span.rs`、mcp `src/job/mod.rs`経由のdesign_check・pushover・time_history・server |
+| `sepika-solver/tests/support/rc_wall_side_column_model.rs` | 側柱付きRC壁の共通face・剛性・力の分担。solverの壁系解析を要素・検定・重量・GUIでも検証 | solver `tests/wall_system_linear.rs`・`src/nonlinear/wall_reference.rs`、element `src/wall/static_face.rs`、design-jp `src/joint_wiring/tests.rs`、job `tests/wall_weight_partition.rs`・`tests/rc_wall_zero_span.rs`、app `src/app/rc_wall_side_column_tests.rs`（holding・viewerからも利用）・`tests/rc_rank_clear_span.rs` |
 | `sepika-solver/tests/support/wall_side_column.rs` | 共通断面の質量・慣性。solverの解析質量を準備・GUI入口でも検証 | solver `tests/common_section_mass.rs`、job `tests/wall_side_column_entry.rs`、app `src/app/tests.rs` |
-| `sepika-design-jp/tests/fixtures/rc_wall_cracking_model.rs`・`rc_wall_cracking_reference.rs` | RC壁のひび割れ耐力の入力と独立期待契約。design-jpの耐力計算をGUI・MCPでも照合 | design-jp `src/joint_wiring/tests.rs`、app `src/app/rc_wall_cracking_tests.rs`、mcp `src/job/design_check.rs`・`src/server.rs`（`src/job/mod.rs`から共有） |
-| `sepika-app/tests/fixtures/src_ql_contract.json` | SRCの重力参照・材料割当・保存契約。GUI固定入力を時刻歴の簡易表示とMCPの通常SRC柱検定でも使用 | app `src/app/src_ql_acceptance_tests.rs`・`src/viewer/signed_q0_acceptance_tests.rs`、mcp `src/job/signed_q0_acceptance_tests.rs` |
+| `sepika-design-jp/tests/fixtures/rc_wall_cracking_model.rs`・`rc_wall_cracking_reference.rs` | RC壁のひび割れ耐力の入力と独立期待契約。design-jpの耐力計算をGUIでも照合 | design-jp `src/joint_wiring/tests.rs`、app `src/app/rc_wall_cracking_tests.rs` |
+| `sepika-app/tests/fixtures/src_ql_contract.json` | SRCの重力参照・材料割当・保存契約。GUI固定入力を時刻歴の簡易表示でも使用 | app `src/app/src_ql_acceptance_tests.rs`・`src/viewer/signed_q0_acceptance_tests.rs` |
 | `sepika-io/tests/fixtures/column_steel_bottom_top.stb`・`column_steel_top_bottom.stb` | 区間別のS柱断面を両記述順で拒否する診断とGUI読込時のモデル保持 | io `tests/stbridge_nonuniform_steel_column.rs`、app `src/app/reference_identity_acceptance_tests.rs` |
-| `sepika-design-jp/tests/fixtures/signed_beam_gravity_model.rs` | RC梁の符号付き重力端反力と検定組合せ。design-jpのせん断需要算定に共通の入力 | app `src/app/signed_q0_acceptance_tests.rs`（viewerからも利用）、mcp `src/job/signed_q0_acceptance_tests.rs` |
-| `sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs`・`nonnodal_quantity_reference.rs` | 非節点小梁の材料別数量。design-jpの数量計算とassertをGUI・MCPの編集操作から検証 | app `src/app/nonnodal_quantity_acceptance_tests.rs`、mcp `src/nonnodal_quantity_acceptance_tests.rs` |
-| `sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs` | H形鋼片持ち柱の軸力・強軸曲げ・弱軸せん断。組合せの未算定と独立した不適合の保持、断面を置き換えた組立Hの局所曲げ・強軸せん断、水平の組立H大梁に置き換えた場合の純強軸曲げを検証。同じ柱断面を用いる時刻歴で、軸力・強軸曲げの成分極値の間に生じる断面単独の不適合を照合 | design-jp `tests/steel_h_column_combined.rs`・`tests/steel_asymmetric_h_column.rs`・`tests/steel_asymmetric_h_girder.rs`・`tests/steel_built_h_web_shear.rs`、job `tests/fixtures/asymmetric_column_model.rs` 経由で `tests/asymmetric_column_time_history.rs`・`src/time_history_check.rs`、app `src/app/shear_area_acceptance_tests.rs`、mcp `src/job/design_check.rs` |
-| `sepika-design-jp/tests/fixtures/steel_column_k_model.rs` | 理想ピンポータルの独立座屈長と固定倍率の差。公開共通検定・GUI通常／時刻歴簡易検定・MCPで同じ断面と架構を使用 | design-jp `tests/steel_column_k.rs`・`tests/steel_column_k_applicability.rs`、app `src/app/steel_column_k_tests.rs`・`src/viewer/th_detail.rs`、mcp `src/job/design_check.rs` |
+| `sepika-design-jp/tests/fixtures/signed_beam_gravity_model.rs` | RC梁の符号付き重力端反力と検定組合せ。design-jpのせん断需要算定に共通の入力 | app `src/app/signed_q0_acceptance_tests.rs`（viewerからも利用） |
+| `sepika-design-jp/tests/fixtures/nonnodal_quantity_model.rs`・`nonnodal_quantity_reference.rs` | 非節点小梁の材料別数量。design-jpの数量計算とassertをGUIから検証 | app `src/app/nonnodal_quantity_acceptance_tests.rs` |
+| `sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs` | H形鋼片持ち柱の軸力・強軸曲げ・弱軸せん断。組合せの未算定と独立した不適合の保持、断面を置き換えた組立Hの局所曲げ・強軸せん断、水平の組立H大梁に置き換えた場合の純強軸曲げを検証。同じ柱断面を用いる時刻歴で、軸力・強軸曲げの成分極値の間に生じる断面単独の不適合を照合 | design-jp `tests/steel_h_column_combined.rs`・`tests/steel_asymmetric_h_column.rs`・`tests/steel_asymmetric_h_girder.rs`・`tests/steel_built_h_web_shear.rs`、job `tests/fixtures/asymmetric_column_model.rs` 経由で `tests/asymmetric_column_time_history.rs`・`src/time_history_check.rs`、app `src/app/shear_area_acceptance_tests.rs` |
+| `sepika-design-jp/tests/fixtures/steel_column_k_model.rs` | 理想ピンポータルの独立座屈長と固定倍率の差。公開共通検定・GUI通常／時刻歴簡易検定で同じ断面と架構を使用 | design-jp `tests/steel_column_k.rs`・`tests/steel_column_k_applicability.rs`、app `src/app/steel_column_k_tests.rs`・`src/viewer/th_detail.rs` |
 | `sepika-design-jp/tests/fixtures/steel_column_lateral_buckling_model.rs` | 同一断面力を与える一般H形鋼柱の実材端支持確認と端部偏心。通常検定と時刻歴簡易検定の横座屈長さを照合 | design-jp `tests/steel_column_lateral_buckling.rs`、app `src/viewer/th_detail.rs` |
-| `sepika-design-jp/tests/fixtures/cft_column_buckling_model.rs` | CFT片持ち柱の許容・終局検定に必要な両軸直接長。材軸ねじりの未算定と既存NGの併記を共通許容検定、GUI保存、MCP集計で検証。MCPでは長期架構用重力も検証 | design-jp `tests/cft_column_buckling.rs`・`tests/concrete_member_torsion.rs`、app `src/app/cft_column_buckling_tests.rs`（`src/viewer/th_detail.rs`・`src/tables/steel_attrs.rs`・既存CFT検定試験からも利用）、mcp `src/tests.rs`・`src/job/design_check.rs`・`tests/ultimate_check.rs`・`src/server_lifecycle_tests.rs`（後二者は `tests/support/cft_long_case2_model.rs` を共有） |
-| `sepika-design-jp/tests/fixtures/cft_ultimate_strength_model.rs` | 円形CFT片持ち柱の充填Fc下限。共通終局検定、GUI表示、MCPの終局検定集計を検証 | design-jp `tests/cft_column_buckling.rs`、app `src/ultimate_view.rs`、mcp `src/server_lifecycle_tests.rs`（`src/tests.rs`から参照） |
-| `sepika-design-jp/tests/fixtures/lateral_bracing_model.rs` | 横補剛の検定入力。GUI・MCPからdesign-jpの同一検定契約を検証 | app `src/app/tests.rs`、mcp `src/tests.rs` |
-| `sepika-job/tests/fixtures/steel_slab_model.rs` | 鋼床板の密度・物理質量。jobの重量準備をGUI・MCP入口でも検証 | job `tests/steel_slab_density.rs`・`tests/slab_physical_mass.rs`、app `tests/slab_physical_mass.rs`・`src/app/tests.rs`、mcp `src/server.rs` |
-| `sepika-job/tests/fixtures/seismic_freshness_model.rs`・`high_density_steel_model.rs` | 地震荷重の更新と高密度鋼材。jobの荷重準備・検証契約をGUI・MCPからも検証。鋼床板モデルもこの入力を使用 | job `tests/seismic_freshness.rs`・`tests/high_density_steel.rs`・`tests/steel_weight_reduction.rs`・`tests/member_load_direction.rs`、app `src/app/tests.rs`、mcp `src/server.rs` |
+| `sepika-design-jp/tests/fixtures/cft_column_buckling_model.rs` | CFT片持ち柱の許容・終局検定に必要な両軸直接長。材軸ねじりの未算定と既存NGの併記を共通許容検定とGUI保存で検証 | design-jp `tests/cft_column_buckling.rs`・`tests/concrete_member_torsion.rs`、app `src/app/cft_column_buckling_tests.rs`（`src/viewer/th_detail.rs`・`src/tables/steel_attrs.rs`・既存CFT検定試験からも利用） |
+| `sepika-design-jp/tests/fixtures/cft_ultimate_strength_model.rs` | 円形CFT片持ち柱の充填Fc下限。共通終局検定とGUI表示を検証 | design-jp `tests/cft_column_buckling.rs`、app `src/ultimate_view.rs` |
+| `sepika-design-jp/tests/fixtures/lateral_bracing_model.rs` | 横補剛の検定入力。GUIからdesign-jpの同一検定契約を検証 | app `src/app/tests.rs` |
+| `sepika-job/tests/fixtures/steel_slab_model.rs` | 鋼床板の密度・物理質量。jobの重量準備をGUIでも検証 | job `tests/steel_slab_density.rs`・`tests/slab_physical_mass.rs`、app `tests/slab_physical_mass.rs`・`src/app/tests.rs` |
+| `sepika-job/tests/fixtures/seismic_freshness_model.rs`・`high_density_steel_model.rs` | 地震荷重の更新と高密度鋼材。jobの荷重準備・検証契約をGUIからも検証。鋼床板モデルもこの入力を使用 | job `tests/seismic_freshness.rs`・`tests/high_density_steel.rs`・`tests/steel_weight_reduction.rs`・`tests/member_load_direction.rs`、app `src/app/tests.rs` |
 
 appの `tests/support/frame_gravity.rs` は `full_model.rs`・`wall_model.rs` と、`tests/support/holding_clear_span.rs` 経由の `tests/rc_rank_clear_span.rs`・`src/app/actions/design/holding.rs` で保存重力組合せの選択に使う。
-`full_model_study.rs`・`full_model_study_wire.rs` は `full_model.rs` のGUI検討・Windows実通信テストを管理する。
-mcpの `tests/support/gui_probe.py` はGUI中継の外部プロセス操作を管理する。
-これらはGUI・通信固有なので計算用の共有入力へ移さない。
+`full_model_study.rs` は `full_model.rs` の断面案の検討に使います。
 
 ### 参照元と検証の追跡
 
 `#[path]` と `include!(concat!(env!("CARGO_MANIFEST_DIR"), ...))` によるソース共有はCargo依存だけでは追跡できない。
 変更ファイル名を `rg 'static_analysis_model.rs' crates` のように検索し、親モジュールから使う入口も上表で確認する。
 共有先を移動・追加したら上表を更新する。入力変更時には利用元すべての単体・統合テストを実行し、
-appの `gui`、mcpの `mcp` など利用元のfeature経路も確認する。具体的なコマンド構成は[CI workflow](.github/workflows/ci.yml)を正とする。
+appの `gui` など利用元のfeature経路も確認する。具体的なコマンド構成は[CI workflow](.github/workflows/ci.yml)を正とする。
 過去のV&V文書・保存ログ内のパス・コマンド・ハッシュは記録時点の証跡であり、現行の入口とは区別する。
 
 ## Issue の起票
@@ -198,7 +192,6 @@ UIの修正も操作・入力・表示の対象で分類し、ファイル形式
 | `建物全体の耐震評価` | 層・建物全体の変形や耐力、耐震性能の評価。 |
 | `数量積算` | 材料・部材の数量算定。 |
 | `保存・入出力` | 保存・読込・書出と形式間のデータ交換。 |
-| `外部AI連携` | 外部AIとの接続・操作・結果の受け渡し。 |
 | `開発基盤` | ビルド・CI・依存関係・配布・リポジトリ運用。 |
 
 ## プルリクエスト

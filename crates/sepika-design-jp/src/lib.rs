@@ -12,7 +12,7 @@ extern crate self as sepika_design_jp;
 
 pub mod brb;
 pub mod cft;
-/// 危険断面位置（断面検定を行う部材軸上の位置）。GUI と MCP が共通で用いる。
+/// 危険断面位置（断面検定を行う部材軸上の位置）。
 pub mod design_position;
 pub mod floor;
 pub mod floor_bolt;
@@ -25,7 +25,7 @@ pub mod joint_wiring;
 /// 許容応力度・材料定数を集約する。構成則モデルの `sepika-material`
 /// クレートとは別物（本モジュールは設計規準の許容応力度）。
 pub mod material_strength;
-/// 部材断面検定の共通オーケストレーション（GUI・MCP 共用）。
+/// 部材断面検定の共通オーケストレーション。
 pub mod member_design_check;
 /// 数量積算（部位別の概算数量集計）。
 pub mod quantity;
@@ -570,7 +570,7 @@ pub trait DesignCheck {
 /// 構造種別に対応する断面検定器を返す。
 ///
 /// 構造種別の判定は [`sepika_core::structure_kind`] が一元で行い、本関数は
-/// その結果を検定器へ写すだけとする。検定・設計タブ・時刻歴の詳細表示・MCP の
+/// その結果を検定器へ写すだけとする。検定・設計タブ・時刻歴の詳細表示の
 /// いずれも同じ対応表を使うことで、経路によって適用される式が変わらないようにする。
 pub fn checker_for(kind: sepika_core::structure_kind::StructureKind) -> Box<dyn DesignCheck> {
     use sepika_core::structure_kind::StructureKind;

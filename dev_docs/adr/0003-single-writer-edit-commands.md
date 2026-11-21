@@ -1,6 +1,8 @@
 # モデル所有権は単一ライタとし、編集はコマンド経由に限る
 
-Status: accepted
+Status: partially superseded by ADR-0140
+
+単一ライタと編集コマンドの契約は引き継ぐ。MCP の編集入口は [ADR 0140](0140-remove-mcp-and-local-ai.md) で廃止した。
 
 モデルの編集は GUI・MCP とも編集トランザクション（コマンド）経由に直列化し、直接書き換えを許さない。同じモデルに対して GUI と MCP が同じ解析結果を返すこと、Undo と将来の外部連携（Grasshopper Sync）が同じ経路に乗ることを保証するためである。
 

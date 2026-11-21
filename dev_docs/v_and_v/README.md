@@ -182,7 +182,9 @@ OS100%/150%別の全代表操作・可読性/性能の条件と最終HEADの全C
 
 [現役回帰の対応表](階重量と物理質量の試験整理_Issue1059.md#現役の保証)に、設計重量と物理質量、CFT割増、両質量方式、壁スリット、柱脚4接続、Kブレース3設定の統合先を記録した。独立期待値・入力ケース・観測フィールドを保持し、既存のV&V状態は変更しない。
 
-## MCP試験の現役参照整理（#1059）
+## MCP試験の参照整理の記録（#1059）
+
+[ADR 0140](../adr/0140-remove-mcp-and-local-ai.md)で廃止した機能の検証記録。
 
 [保存生成元の現役回帰](MCP保存成果の生成元_Issue589_2026-10.md#現役回帰の参照1059)と[外部IDの現役回帰](外部ID入力拒否_Issue603_2026-10.md#現役回帰の参照1059)に、版判定・保存中status・手書きparserの統合先を記録した。独立の数値契約、default/mcp feature別の保証、Windowsの実transport、編集・保存の状態遷移を維持し、Verificationの対象範囲と既存の✅/🔶は変更しない。固定SHA・raw出力・過去件数は履歴として保持する。
 
@@ -196,13 +198,19 @@ OS100%/150%別の全代表操作・可読性/性能の条件と最終HEADの全C
 
 ## 図表による検討から採用までの一連確認（#985）
 
+以下の外部接続・AI 操作は廃止前の観測。[ADR 0140](../adr/0140-remove-mcp-and-local-ai.md) を参照。
+
 [代表実モデル・手作業・実通信・実AIの確認記録](図表検討一連操作_Issue985_確認記録.md)を参照。状態🔶。全62壁なしのユーザー明示条件による3案の自動照合に加え、Codex CLIのComparison/Review提出、専用GUIの代理採用・Undo/Redo・過去根拠保持・保存再読込、荷重数値入力取消・IME変換・図表同時表示・実狭幅・隔離した配置保持と復旧を確認した。全体型枠未算定・未評価・壁なしの危険側可能性は残る。Review終了時と再読込後の接続状態欄のGUI表示は未実証で、旧endpoint読取の接続不能と実装・自動回帰の失効契約を区別する。限定Verificationであり、全入力・全画面・全DPIや実建物Validation、親Issueの完了判定へ拡張しない。
 
 ## 固定対象からのAI検討依頼（#983）
 
+[ADR 0140](../adr/0140-remove-mcp-and-local-ai.md)で廃止した機能の検証記録。
+
 [未開始・実状態・固定入力と根拠の確認記録](AI検討依頼_Issue983_確認記録.md)を参照。状態🔶。最終sourceのAI直接回帰28件・GUI検討71件（既存無視2）、静的・文書確認、独立freshが成功。Windows実機でReview・Comparisonの実通信、固定入力・根拠、許可取消、保存再読込、人の理由だけの保存、AIなしの手作業・採否入口を確認した。最新HEADのCIと全UI条件の網羅は未確認。
 
 ## 開いているGUIへの外部AI接続（#982）
+
+[ADR 0140](../adr/0140-remove-mcp-and-local-ai.md)で廃止した機能の検証記録。
 
 [Rust実通信・権限・検討操作の確認記録](外部AI接続_Issue982_確認記録.md)を参照。状態🔶。製品Rustの限定DACL・通信4件、GUI/非GUI・AI16件の直接回帰と独立確認が成功した。正常fixtureの最終Windows実機でReviewでの編集・計算拒否、Comparison実編集・既存計算・同GUI値と根拠・run提出、切断後の新endpoint再承認、明示解除後拒否、専用保存・通常exit0を有限確認した。同パイプ再使用の上流制限、別Issue #1001の終了事象、実機未網羅範囲は確認記録で区別する。
 
@@ -235,6 +243,8 @@ OS100%/150%別の全代表操作・可読性/性能の条件と最終HEADの全C
 [項目別の原典・用途・再判定条件](RC材料短期倍率軽量_Issue946_適用調査.md)に、2025年版収録法令の倍率と学会公開資料の同値掲載を記録した。軽量1・2種0.9及びせん断・付着短期1.5の掲載確認を、通常RC/SRC部材への適用承認と区別する。状態🔶。RC規準の当該本文・解説が未取得のため採用判断を保留し、#922/#923の是正及び用途別上限を維持する。今回新規の計算修正候補はない。
 
 ## 図表による設計案検討の接続確認（#973）
+
+[ADR 0140](../adr/0140-remove-mcp-and-local-ai.md)で廃止した機能の検証記録。
 
 [Windowsの接続小実験と代表モデルの検証データ](UI検討_Issue973_接続確認.md)に、ローカル名前付きパイプのJSON往復・サーバ切断・接続先不在の実測を記録した。状態🔶。GUI/MCP製品接続・権限検証・構造計算の一連操作は未実施で、#982/#985の証拠に代用しない。
 
@@ -812,6 +822,9 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 ## 索引（要素/設計式 → テスト）
 
+MCP と外部 AI 接続に関する試験名・件数・観測は廃止前の記録です。
+廃止の範囲は [ADR 0140](../adr/0140-remove-mcp-and-local-ai.md) を参照してください。
+
 Issue #1651の材端偏心がある一般H形鋼柱の横座屈は[通常検定・時刻歴詳細の観測](材端偏心のあるH形鋼柱の横座屈長さ_Issue1651_確認記録.md#通常検定と時刻歴詳細での観測)を参照。両経路に同じ強軸曲げを与え、偏心の有無による適否を独立算術と比較した（🔶）。
 
 Issue #1528の上下非対称組立H形鋼柱は[要素と検証](上下非対称組立H形鋼柱_Issue1528_照合記録.md#要素と検証)を参照。上下縁を独立算術で確認し、有限材長の片持ち柱で局所曲げ符号と検定状態を検証した（🔶）。
@@ -962,7 +975,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 20b | 物理曲率・非対称断面・剛域付き軸履歴 | sepika-element | frame/fiber/physical_curvature_tests.rs、rigid_axial_tests.rs | [保存成果の補完と端部解放の収束検証](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | P4 | 🔶（有限Verification。実験Validation未） |
 | 20c | 保存/失敗時の全要素復元と全固定時刻歴 | sepika-element / sepika-io / sepika-solver | springs/isolator/tests.rs、checkpoint/preserved_tests.rs、common/elem_loop/preserved_tests.rs、timehistory/tests/loaded_recording.rs、tests/general_member_loads.rs | [保存ブランチの残りの復元検証](保存ブランチ496の変更採否_2026-10.md) | 横断 | 🔶（有限Verification。実験Validation未） |
 | 21 | 参考骨格算定（M–φ→M–θ、廃止済み） | — | — | 現行の試験対象なし。上記#436の履歴記録を参照 | P4 / #436 / #849 | 廃止済み（単位・拒否契約の検証履歴を保持） |
-| 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
+| 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 廃止済み（過去の検証を記録） |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
 | 23d | STB組立BOXの入力境界 | sepika-io / sepika-app | tests/stbridge_built_box.rs、app/reference_identity_acceptance_tests.rs | [Issue683の読込結合](STB異厚組立BOX_Issue683_確認記録.md#要素テスト索引) | 横断 | 🔶（異厚の公開入口・参照/属性報告・質量/保存と不正寸法のVerification、Validation・手動GUIは未確認） |
 | 23e | STB単材L・C・Tの正値半径 | sepika-io | tests/stbridge_placement.rs | `asymmetric_rolled_sections_reject_unrepresentable_radius_instead_of_silently_losing_it`、[独立輪郭積分・XSDの再現手順](STB単材形鋼の正値半径_Issue1386_確認記録.md#検証の再現) | #1386 | 🔶（既存の入力拒否・要素断片のXSD・独立候補を確認。製品接続・意味往復未） |
@@ -972,7 +985,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
 | 24b | 比較案の確認済み断面割当採用と判断記録 | sepika-app / sepika-edit | app/study/adoption.rs、app/study/comparison.rs、app/actions/io.rs、sepika-edit/src/lib.rs | [Issue981の直接回帰索引](断面案採用_Issue981_確認記録.md#自動回帰と要素からの証拠索引) | #981 | 🔶（状態契約・有限GUI。全画面条件・外部AI・Validation未） |
-| 24c | 固定対象のAI検討依頼と観測状態 | sepika-app | app/study/ai/operations/requests.rs、app/study/ai/operations/tests.rs | [Issue983の直接回帰索引](AI検討依頼_Issue983_確認記録.md#自動回帰と要素からの証拠索引) | #983 | 🔶（最終回帰・実機・fresh確認。CI・全UI条件は未確認） |
+| 24c | 固定対象のAI検討依頼と観測状態 | sepika-app | app/study/ai/operations/requests.rs、app/study/ai/operations/tests.rs | [Issue983の直接回帰索引](AI検討依頼_Issue983_確認記録.md#自動回帰と要素からの証拠索引) | #983 | 廃止済み（過去の検証を記録） |
 | 950 | 鉄骨柱Kの端部・架構条件 | sepika-design-jp | steel/buckling.rs・member_design_check.rs | [国内原典と独立有限例](鉄骨柱K_独立釣合いと適用条件の確認記録.md)・tests/steel_column_k.rs、tests/steel_column_k_applicability.rs | 一次設計 | 🔶（限定照合。両軸直接指定。自動採用域全体と実験Validationは未確認） |
 | 948 | RC接合部の許容せん断 | sepika-design-jp | rc/joint.rs・joint_wiring/rc_joint.rs | [原画像とコードの対応](RC接合部許容せん断_Issue948_照合記録.md#コードとの対応と未確認項目)（今回新規の数値試験なし） | 一次設計 | 🔶（有効幅のみ限定照合、許容式全体・設計採用は保留） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp / sepika-job | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs、ultimate_demand.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*`、CFT Case2は[§6-c](終局検定_参照実装照合.md#6-c-cft-中柱長柱の-n-m-相互作用)、RC梁は[両端の釣合いと静的公開入口](RC梁両端曲げ降伏時せん断力_Issue1497_確認記録.md#公開入口の観測)・[方向別曲げ耐力と公開検定](RC梁の曲げ終局耐力略算_Issue1501_確認記録.md#公開入口と再現) | P7 | 🔶 |
@@ -1007,7 +1020,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 30b | RC開口壁の線形モデル監査 | sepika-core / sepika-element / sepika-solver | tests/wall_system_linear.rs、data/issue821_axial_energy_bound.py、data/issue821_bending_energy_bounds.py | [実入口・原典照合・独立軸上界と曲げ上下界](RC開口壁_Issue821_モデル監査.md) | 要素／線形 | 🔶（実RC Validation・側柱ありと層間水平並進の独立比較・採否未了） |
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・逆行型・原点指向型の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 | 32a | OVIKA保存成果の計算契約 | sepika-core / sepika-app | result_contract.rs・result_validity.rs・actions/design・result_contract_tests.rs | [Issue587の実OVIKA・実入口](保存成果の計算契約版_Issue587_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終全構成は後続） |
-| 32b | MCP保存成果の生成元と公開 | sepika-core / sepika-io / sepika-mcp | results/fs_store.rs・persist.rs・server_lifecycle_tests.rs | [Issue589の独立期待状態と実入口](MCP保存成果の生成元_Issue589_2026-10.md#独立期待状態と実入口) | 横断 | 🔶（直接Verification。最終ゲートは[PR #651](https://github.com/hrntsm/SEPIKA/pull/651)） |
+| 32b | MCP保存成果の生成元と公開 | sepika-core / sepika-io / sepika-mcp | results/fs_store.rs・persist.rs・server_lifecycle_tests.rs | [Issue589の独立期待状態と実入口](MCP保存成果の生成元_Issue589_2026-10.md#独立期待状態と実入口) | 横断 | 廃止済み（過去の検証を記録） |
 | 32b | 静的検定の生成入力 | sepika-core / sepika-app | result_validity.rs・actions/design/check.rs・design_input_tests.rs | [Issue602の独立数値・実入口](静的検定の生成入力_Issue602_2026-10.md#実入口と観測) | 横断 | 🔶（直接Verification、freshレビュー・最終全CIは後続） |
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 | 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[未検定](リップ溝形材_未検定_Issue509_2026-10.md)と[幾何成立](リップ溝形の幾何成立条件_Issue544_2026-10.md)の記録 | 横断 | 🔶（未検定契約・幾何入力Verification。耐力Validation未） |

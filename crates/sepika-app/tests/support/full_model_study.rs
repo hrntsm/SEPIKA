@@ -2,10 +2,6 @@ use super::*;
 use sepika_app::app::study::Location;
 use sepika_core::ids::{ElemId, SectionId};
 
-#[cfg(all(windows, feature = "gui"))]
-#[path = "full_model_study_wire.rs"]
-mod wire;
-
 fn fixture_content_hash(bytes: &[u8]) -> String {
     use sha2::Digest;
     let text = std::str::from_utf8(bytes).unwrap().replace("\r\n", "\n");

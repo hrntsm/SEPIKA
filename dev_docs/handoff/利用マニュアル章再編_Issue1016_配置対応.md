@@ -87,12 +87,12 @@
 | `calc_basis/10_数量積算/README.md` | [calc_basis/10_数量積算/README.md](../../docs/calc_basis/10_数量積算/README.md) | 章入口・案内を更新 |
 | `calc_basis/README.md` | [calc_basis/README.md](../../docs/calc_basis/README.md) | 章入口・案内を更新 |
 | `introduction.md` | [introduction.md](../../docs/introduction.md) | 章入口・案内を更新 |
-| `mcp_server/01_ビルドと起動.md` | [mcp_server/01_ビルドと起動.md](../../docs/mcp_server/01_ビルドと起動.md) | 維持・全節維持 |
-| `mcp_server/02_クライアント設定例.md` | [mcp_server/02_クライアント設定例.md](../../docs/mcp_server/02_クライアント設定例.md) | 維持・全節維持 |
-| `mcp_server/03_ツール一覧.md` | [mcp_server/03_ツール一覧.md](../../docs/mcp_server/03_ツール一覧.md) | 維持・全節維持 |
-| `mcp_server/04_解析ジョブと結果取得.md` | [mcp_server/04_解析ジョブと結果取得.md](../../docs/mcp_server/04_解析ジョブと結果取得.md) | 維持・全節維持 |
-| `mcp_server/05_制約・注意点.md` | [mcp_server/05_制約・注意点.md](../../docs/mcp_server/05_制約・注意点.md) | 維持・全節維持 |
-| `mcp_server/README.md` | [mcp_server/README.md](../../docs/mcp_server/README.md) | 章入口・案内を更新 |
+| `mcp_server/01_ビルドと起動.md` | [mcp_server/01_ビルドと起動.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/01_ビルドと起動.md) | 維持・全節維持 |
+| `mcp_server/02_クライアント設定例.md` | [mcp_server/02_クライアント設定例.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/02_クライアント設定例.md) | 維持・全節維持 |
+| `mcp_server/03_ツール一覧.md` | [mcp_server/03_ツール一覧.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/03_ツール一覧.md) | 維持・全節維持 |
+| `mcp_server/04_解析ジョブと結果取得.md` | [mcp_server/04_解析ジョブと結果取得.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/04_解析ジョブと結果取得.md) | 維持・全節維持 |
+| `mcp_server/05_制約・注意点.md` | [mcp_server/05_制約・注意点.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/05_制約・注意点.md) | 維持・全節維持 |
+| `mcp_server/README.md` | [mcp_server/README.md](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/README.md) | 章入口・案内を更新 |
 | `model_edit/01_通り芯.md` | [model_edit/01_通り芯.md](../../docs/model_edit/01_通り芯.md) | 維持・全節維持 |
 | `model_edit/02_断面の符号と階.md` | [model_edit/02_断面の符号と階.md](../../docs/model_edit/02_断面の符号と階.md) | 維持・全節維持 |
 | `model_edit/03_架構作成ウィザード.md` | [model_edit/03_架構作成ウィザード.md](../../docs/model_edit/03_架構作成ウィザード.md) | 維持・全節維持 |
@@ -156,22 +156,22 @@
 
 ## 外部AI連携の正本境界
 
-MCPの6ページは本再編では配置を維持する。GUIから使う接続・許可・検討操作は製品マニュアルを正本とする。独立起動とAPI開発契約は [MCPサーバの開発者向け仕様](../../docs/mcp_server/06_通信仕様と独立サーバ.md)へ分離した（[Issue #1030](https://github.com/hrntsm/SEPIKA/issues/1030)）。以下はページ・節ごとの正本の対応を示す。
+MCPの6ページは本再編では配置を維持する。GUIから使う接続・許可・検討操作は製品マニュアルを正本とする。独立起動とAPI開発契約は [MCPサーバの開発者向け仕様](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/06_通信仕様と独立サーバ.md)へ分離した（[Issue #1030](https://github.com/hrntsm/SEPIKA/issues/1030)）。以下はページ・節ごとの正本の対応を示す。
 
 | 現在のページ・節 | 製品側に保持する正本 | 開発側の正本先・既存の実装入口 |
 | --- | --- | --- |
-| `mcp_server/README.md`：概要・機能フラグ・この章の内容 | [外部AI連携の入口](../../docs/mcp_server/README.md)：GUI接続の入口と公開操作の概要 | `docs/mcp_server/06_通信仕様と独立サーバ.md#構成と起動方式`：stdio、機能フラグ、独立サーバの構成。[クレート構成](../architecture.md) |
-| `01_ビルドと起動.md`：開いているGUIの検討への接続 | [GUI接続の起動手順](../../docs/mcp_server/01_ビルドと起動.md#開いているguiの検討への接続) | GUIブリッジの通信実装は [gui_bridge.rs](../../crates/sepika-mcp/src/gui_bridge.rs) |
-| `01_ビルドと起動.md`：独立したモデルでの起動・環境変数・stdout・起動エラー | GUIの接続方式との違いだけを参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#ビルドと独立起動`。[main.rs](../../crates/sepika-mcp/src/main.rs)、[Cargo.toml](../../crates/sepika-mcp/Cargo.toml) |
-| `02_クライアント設定例.md`：開いているGUIへ接続する場合 | [GUI接続設定](../../docs/mcp_server/02_クライアント設定例.md#開いているguiへ接続する場合) | 独立サーバの設定と混在させない |
+| `mcp_server/README.md`：概要・機能フラグ・この章の内容 | [外部AI連携の入口](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/README.md)：GUI接続の入口と公開操作の概要 | `docs/mcp_server/06_通信仕様と独立サーバ.md#構成と起動方式`：stdio、機能フラグ、独立サーバの構成。[クレート構成](../architecture.md) |
+| `01_ビルドと起動.md`：開いているGUIの検討への接続 | [GUI接続の起動手順](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/01_ビルドと起動.md#開いているguiの検討への接続) | GUIブリッジの通信実装は [gui_bridge.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/gui_bridge.rs) |
+| `01_ビルドと起動.md`：独立したモデルでの起動・環境変数・stdout・起動エラー | GUIの接続方式との違いだけを参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#ビルドと独立起動`。[main.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/main.rs)、[Cargo.toml](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/Cargo.toml) |
+| `02_クライアント設定例.md`：開いているGUIへ接続する場合 | [GUI接続設定](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/02_クライアント設定例.md#開いているguiへ接続する場合) | 独立サーバの設定と混在させない |
 | `02_クライアント設定例.md`：Claude Code・Claude Desktop | GUI接続の設定例から独立起動の開発文書へ案内する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動クライアント設定`：両クライアントの独立起動設定 |
-| `03_ツール一覧.md`：開いているGUIへの接続 | [GUIで公開する検討操作](../../docs/mcp_server/03_ツール一覧.md#開いているguiへの接続) | GUIの要求・応答型は [sepika-ai-connection](../../crates/sepika-ai-connection/src/lib.rs) |
-| `03_ツール一覧.md`：model_query・model_edit（全下位節）・quantity_takeoff・analysis_run・analysis_status・result_get | GUIの公開範囲と利用者が確認する結果の意味を参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動ツール契約` 以下に同名ツールの小見出し。[server.rs](../../crates/sepika-mcp/src/server.rs)、[query.rs](../../crates/sepika-mcp/src/query.rs)、[edit.rs](../../crates/sepika-mcp/src/edit.rs)、[JobParams](../../crates/sepika-mcp/src/job/mod.rs) |
-| `04_解析ジョブと結果取得.md`：解析ジョブのフロー | GUIの実行と結果確認は [準備・解析の実行・結果の確認](../../docs/workflow/README.md) | `docs/mcp_server/06_通信仕様と独立サーバ.md#ジョブと結果取得`。[JobRegistry・JobStatus](../../crates/sepika-mcp/src/lib.rs) |
-| `04_解析ジョブと結果取得.md`：保存成果の生成元と利用可否 | OViKAの保存成果の扱いは [保存結果の計算契約と再実行](../../docs/model_io/01_プロジェクト形式_ovika.md#保存結果の計算契約と再実行) | `docs/mcp_server/06_通信仕様と独立サーバ.md#保存成果の生成元と利用可否`：result_getのstatus/entry/provenance/reason契約。[persist.rs](../../crates/sepika-mcp/src/persist.rs) |
+| `03_ツール一覧.md`：開いているGUIへの接続 | [GUIで公開する検討操作](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/03_ツール一覧.md#開いているguiへの接続) | GUIの要求・応答型は [sepika-ai-connection](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-ai-connection/src/lib.rs) |
+| `03_ツール一覧.md`：model_query・model_edit（全下位節）・quantity_takeoff・analysis_run・analysis_status・result_get | GUIの公開範囲と利用者が確認する結果の意味を参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動ツール契約` 以下に同名ツールの小見出し。[server.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/server.rs)、[query.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/query.rs)、[edit.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/edit.rs)、[JobParams](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/job/mod.rs) |
+| `04_解析ジョブと結果取得.md`：解析ジョブのフロー | GUIの実行と結果確認は [準備・解析の実行・結果の確認](../../docs/workflow/README.md) | `docs/mcp_server/06_通信仕様と独立サーバ.md#ジョブと結果取得`。[JobRegistry・JobStatus](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/lib.rs) |
+| `04_解析ジョブと結果取得.md`：保存成果の生成元と利用可否 | OViKAの保存成果の扱いは [保存結果の計算契約と再実行](../../docs/model_io/01_プロジェクト形式_ovika.md#保存結果の計算契約と再実行) | `docs/mcp_server/06_通信仕様と独立サーバ.md#保存成果の生成元と利用可否`：result_getのstatus/entry/provenance/reason契約。[persist.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/persist.rs) |
 | `04_解析ジョブと結果取得.md`：結果ストアのスキーマ（NodalDisp・MemberForce・Modal・TimeHistory） | GUIで読む量・単位は各結果表示ページを参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#結果ストアのスキーマ`。IOの公開型は [results/mod.rs](../../crates/sepika-io/src/results/mod.rs)、[APIリファレンス](https://hrntsm.github.io/SEPIKA/api/) |
-| `05_制約・注意点.md`：GUI接続の共有と許可・保持結果・提出・要求ID | [GUI接続の共有と許可](../../docs/mcp_server/05_制約・注意点.md#gui接続の共有と許可) | GUI通信・受理台帳の型の契約は [sepika-ai-connection](../../crates/sepika-ai-connection/src/lib.rs) |
-| `05_制約・注意点.md`：独立モデル読込・編集範囲・2節点条件・質点系対象外・ジョブの永続化制限・DesignCheck応答 | 入力不足の構造計算上の影響は各モデル入力・解析の正本を参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動のモデル入力制約` と上記ツール/保存成果の節。実装入口は [main.rs](../../crates/sepika-mcp/src/main.rs)、[server.rs](../../crates/sepika-mcp/src/server.rs)、[persist.rs](../../crates/sepika-mcp/src/persist.rs) |
+| `05_制約・注意点.md`：GUI接続の共有と許可・保持結果・提出・要求ID | [GUI接続の共有と許可](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/docs/mcp_server/05_制約・注意点.md#gui接続の共有と許可) | GUI通信・受理台帳の型の契約は [sepika-ai-connection](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-ai-connection/src/lib.rs) |
+| `05_制約・注意点.md`：独立モデル読込・編集範囲・2節点条件・質点系対象外・ジョブの永続化制限・DesignCheck応答 | 入力不足の構造計算上の影響は各モデル入力・解析の正本を参照する | `docs/mcp_server/06_通信仕様と独立サーバ.md#独立起動のモデル入力制約` と上記ツール/保存成果の節。実装入口は [main.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/main.rs)、[server.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/server.rs)、[persist.rs](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/persist.rs) |
 
 ## 分割ページの節対応
 

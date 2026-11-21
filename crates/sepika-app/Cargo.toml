@@ -6,7 +6,7 @@ license = "MIT"
 
 [features]
 default = []
-gui = ["egui", "eframe", "egui_extras", "egui_plot", "dep:rfd", "dep:time"]
+gui = ["egui", "eframe", "egui_extras", "egui_plot", "dep:rfd"]
 
 [[bin]]
 name = "sepika"
@@ -14,16 +14,10 @@ path = "src/main.rs"
 required-features = ["gui"]
 
 [[example]]
-name = "ai_connection_fixture"
-required-features = ["gui"]
-
-[[example]]
 name = "issue985_fixture"
 required-features = ["gui"]
 
 [dependencies]
-sepika-ai-connection = { path = "../sepika-ai-connection" }
-serde_json = { workspace = true }
 sepika-core = { path = "../sepika-core" }
 sepika-element = { path = "../sepika-element" }
 sepika-solver = { path = "../sepika-solver" }
@@ -39,7 +33,6 @@ egui_extras = { workspace = true, optional = true, features = ["svg"] }
 egui_plot = { workspace = true, optional = true }
 smallvec = { workspace = true }
 rfd = { version = "0.17", optional = true }
-time = { version = "0.3.49", features = ["formatting"], optional = true }
 sepika-math = { version = "0.0.1", path = "../sepika-math" }
 bincode = { workspace = true }
 serde = { workspace = true }
@@ -48,6 +41,6 @@ uuid = { version = "1.23.3", features = ["v4"] }
 rmp-serde = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+serde_json = { workspace = true }
 zip = { workspace = true }
 insta = { workspace = true }

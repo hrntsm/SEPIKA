@@ -1627,7 +1627,7 @@ fn horizontal_ratio_is_explicit_and_missing_or_inconsistent_input_is_skipped() {
 }
 
 #[test]
-fn gui_mcp_common_dispatch_and_direct_entry_report_identical_missing_material() {
+fn common_dispatch_and_direct_entry_report_identical_missing_material() {
     use sepika_element::frame::beam::MemberForces;
     let mut model = wall_with_columns_model();
     model.sections[0].shear_rebar_material = None;
