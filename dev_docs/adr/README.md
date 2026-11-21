@@ -2,13 +2,15 @@
 
 Squid-n の重要な設計判断の正本。用語の意味はルートの [CONTEXT.md](../../CONTEXT.md) が持つ。
 
+過去の ADR の MCP・GUI 外部 AI 接続専用の契約は、一覧で accepted のものも含めて失効しています。共通機能、通常 GUI、OVIKA の判断は引き継ぎます。[ADR 0140 の適用範囲](0140-remove-mcp-and-local-ai.md#既存-adr-の適用範囲)
+
 ## 一覧
 
 | # | Status | タイトル |
 |---|--------|----------|
 | [0001](0001-internal-units.md) | accepted | 内部単位系は N・mm・s とする |
 | [0002](0002-determinism.md) | accepted | 決定性は単一スレッドのビット一致を保証する |
-| [0003](0003-single-writer-edit-commands.md) | accepted | モデル所有権は単一ライタとし、編集はコマンド経由に限る |
+| [0003](0003-single-writer-edit-commands.md) | partially superseded by ADR-0140 | モデル所有権は単一ライタとし、編集はコマンド経由に限る |
 | [0004](0004-story-and-diaphragm-separation.md) | accepted | 階と剛床を分離し、階は床レベル基準の利用者定義とする |
 | [0005](0005-materials-on-sections.md) | superseded by ADR-0051 | 材料は断面が持つ |
 | [0006](0006-wall-elements-generated-from-wall-plates.md) | accepted | 壁エレメントは壁版から都度生成する派生物とする |
@@ -31,7 +33,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0023](0023-hinge-detail-single-source-analysis-models.md) | accepted | ヒンジ詳細の表示は解析要素と同じ非線形モデルを単一情報源とする |
 | [0024](0024-separate-panel-element-and-joint-check.md) | accepted | 仕口パネル解析要素と柱梁接合部の断面算定を分離する |
 | [0025](0025-consistent-mass-section-properties.md) | accepted | Beam と Fiber の整合質量は共通の断面質量特性から算定する |
-| [0026](0026-current-spec-single-source-docs.md) | accepted | 現在仕様の正本は docs とし、フェーズ実装仕様書を置かない |
+| [0026](0026-current-spec-single-source-docs.md) | partially superseded by ADR-0140 | 現在仕様の正本は docs とし、フェーズ実装仕様書を置かない |
 | [0027](0027-calc-docs-use-code-units.md) | accepted | 計算根拠の単位表記は法令・規準の単位に従う |
 | [0028](0028-src-cft-ns-material-or-fallback.md) | partially superseded by ADR-0062 | SRC/CFT の等価断面剛性は材料由来 ns を通常とし、算定不能時は N_S_EQ=15 へフォールバックして通知する |
 | [0029](0029-live-load-four-purposes.md) | accepted | 積載荷重を床用・小梁用・大梁用・地震力用の 4 区分とする |
@@ -67,7 +69,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0053](0053-src-material-regions-and-discrete-rebar.md) | accepted | 矩形SRCの内蔵H控除と離散主筋近似・独立質量を分離する |
 
-| [0054](0054-mcp-result-publication-provenance.md) | accepted | MCP 保存成果の開始入力・計算契約と公開ファイルを結び付ける |
+| [0054](0054-mcp-result-publication-provenance.md) | superseded by ADR-0140 | MCP 保存成果の開始入力・計算契約と公開ファイルを結び付ける |
 
 | [0055](0055-rc-wall-static-face-and-initial-capacity.md) | accepted | RC壁の同一face内力とrun初期耐力を分離する |
 
@@ -124,7 +126,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0085](0085-misc-wall-methods-and-rs-analysis.md) | accepted | 自立壁の基準剛性を二方式から選択し、Rsは付加剛性を反映して再解析する |
 
 | [0086](0086-initial-stiffness-damping.md) | partially superseded by ADR-0104 | 非線形時刻歴の既定減衰を未載荷の初期剛性比例とする |
-| [0087](0087-gui-owned-study-and-local-ai.md) | accepted | GUIを検討の所有者とし、外部AIは名前付きパイプで比較案を操作する |
+| [0087](0087-gui-owned-study-and-local-ai.md) | partially superseded by ADR-0140 | GUIを検討の所有者とし、外部AIは名前付きパイプで比較案を操作する |
 
 | [0088](0088-version-scoped-references.md) | accepted | 対象参照を入力版内で照合し、計算開始時の案版を保存する |
 | [0089](0089-recorded-result-and-quantity-evidence.md) | accepted | 結果と数量の根拠を固定入力の参照から開く |
@@ -134,8 +136,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0091](0091-study-comparison-evidence.md) | accepted | 比較用のケース別検定根拠を原本から分け、数量の固定対象を保持する |
 
 | [0092](0092-confirmed-study-adoption.md) | accepted | 確認済み断面割当を既存Undoで採用し、判断根拠を固定する |
-| [0093](0093-gui-ai-connection-protocol.md) | accepted | GUIの検討操作を限定DACLのパイプと保存受理台帳で中継する |
-| [0094](0094-prepared-ai-study-requests.md) | accepted | AI依頼を未開始から保存し、確認元入力を編集対象と分離する |
+| [0093](0093-gui-ai-connection-protocol.md) | superseded by ADR-0140 | GUIの検討操作を限定DACLのパイプと保存受理台帳で中継する |
+| [0094](0094-prepared-ai-study-requests.md) | superseded by ADR-0140 | AI依頼を未開始から保存し、確認元入力を編集対象と分離する |
 | [0095](0095-fixed-steel-quantity-evidence.md) | accepted | 固定したS造部材の鋼材数量と全体数量の算定状態を分離する |
 | [0096](0096-stbridge-built-box-provenance.md) | accepted | ST-Bridge組立BOXの再出力は原形状の来歴で区別する |
 | [0097](0097-secondary-steel-post-check.md) | accepted | 鋼製間柱の独立検定条件を鉛直荷重伝達と分離する |
@@ -198,6 +200,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0137](0137-column-axial-force-gravity-center.md) | accepted | 長期軸力重心には柱頭の層側断面の材軸圧縮力を使う |
 | [0138](0138-common-planar-column-drift.md) | accepted | 二次元線形せん断型の柱剛性に加力方向の共通層間変位を求める |
 | [0139](0139-rc-beam-ultimate-shear-demand.md) | accepted | RC矩形梁の要求せん断力の上側評価を静的終局検定の条件とする |
+| [0140](0140-remove-mcp-and-local-ai.md) | accepted | MCP サーバと GUI の外部 AI 接続を廃止する |
 
 ## 規約
 

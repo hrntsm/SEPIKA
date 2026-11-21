@@ -3,9 +3,6 @@
 //! - [`crate::design_position::design_positions`] — 1 部材の危険断面位置（正規化座標 \[0,1\]）
 //! - [`crate::design_position::is_near_design_position`] — 内力の評価位置が危険断面位置と一致するか
 //!
-//! GUI（`sepika-app`）と MCP サーバ（`sepika-mcp`）が同じ断面検定を別々の
-//! 入口から実行するため、検定位置の規則はここに 1 つだけ置く。
-//!
 //! 要素側の**内力の評価断面**（`sepika_element` の `eval_sections`）は、
 //! ここに節点芯（0.0 / 1.0）を加えたものになる。検定は危険断面位置の内力を使う。
 

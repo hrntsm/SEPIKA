@@ -23,8 +23,8 @@
 | 入口 | 確認した受理・拒否 |
 | --- | --- |
 | GUIの編集 | [断面表](../../crates/sepika-app/src/tables/sections.rs) は主材料の選択肢にコンクリートも出し、[材料表](../../crates/sepika-app/src/tables/materials.rs) の直接入力はコンクリート区分で正のFyも入力できる。[編集コマンド](../../crates/sepika-edit/src/section_material/element_assign.rs) の主材料変更はこの組合せを拒否しない。GUIコードで確認した。 |
-| MCP編集、モデル検証、OVIKA | [MCPモデル編集](../../crates/sepika-mcp/src/edit.rs) の `EditSectionShape` でコンクリート割当済みの断面をH形に変更すると、その主材料を継承する。MCPの公開コマンド一覧では断面の主材料を直接変更する操作は提供されていない。公開MCP編集の適用、`Model::validate`、[OVIKA保存読込](../../crates/sepika-io/src/ovika.rs) を実行し、H形・主材料・Fyを保持した。 |
-| GUI・MCPの解析準備（断面自重） | [GUIの解析入口](../../crates/sepika-app/src/app/actions/mod.rs) は準備エラーでジョブ開始を止める。[MCP増分ジョブ](../../crates/sepika-mcp/src/job/pushover.rs) が呼ぶものと同じ [準備処理](../../crates/sepika-job/src/prepare.rs) は、自動DLの自重算定で [断面の材料条件](../../crates/sepika-core/src/model/mass.rs) を確認する。H形はFyの有無を問わず「鋼材断面RC0の主材料が鋼材ではありません」。MCPの線形静的・増分・終局検定ジョブと準備APIで確認した。角形鋼管・円形鋼管のFyありもMCP増分で同じエラー。 |
+| MCP編集、モデル検証、OVIKA | [MCPモデル編集](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/edit.rs) の `EditSectionShape` でコンクリート割当済みの断面をH形に変更すると、その主材料を継承する。MCPの公開コマンド一覧では断面の主材料を直接変更する操作は提供されていない。公開MCP編集の適用、`Model::validate`、[OVIKA保存読込](../../crates/sepika-io/src/ovika.rs) を実行し、H形・主材料・Fyを保持した。 |
+| GUI・MCPの解析準備（断面自重） | [GUIの解析入口](../../crates/sepika-app/src/app/actions/mod.rs) は準備エラーでジョブ開始を止める。[MCP増分ジョブ](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/job/pushover.rs) が呼ぶものと同じ [準備処理](../../crates/sepika-job/src/prepare.rs) は、自動DLの自重算定で [断面の材料条件](../../crates/sepika-core/src/model/mass.rs) を確認する。H形はFyの有無を問わず「鋼材断面RC0の主材料が鋼材ではありません」。MCPの線形静的・増分・終局検定ジョブと準備APIで確認した。角形鋼管・円形鋼管のFyありもMCP増分で同じエラー。 |
 | 許容応力度検定 | [鋼材の前段検証](../../crates/sepika-design-jp/src/member_design_check.rs) は鋼断面形状から対象を選び、コンクリート主材料のH形を、重量の置換やFyの有無を問わず「部材 0: 断面『RC0』: 材料『Fc24』は鋼材ではありません」と拒否する。MCPの検定ジョブと共通検定APIで確認した。 |
 | 準備を呼ばない下位API | [非線形入力診断](../../crates/sepika-element/src/factory/input_check.rs) はコンクリート主材料のH形でFy未入力を拒否し、正のFyがあるとこの有限例を受理した。骨格取得も同じ条件で変化した。重量置換による解析入力の診断差と合わせて [#1462](https://github.com/hrntsm/SEPIKA/issues/1462) で追跡する。 |
 

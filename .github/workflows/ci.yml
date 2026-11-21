@@ -43,15 +43,10 @@ jobs:
       - name: テストビルド
         if: steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo test --workspace --locked --no-run
-      # MCP / GUI は非デフォルト feature のため --workspace では検証されない。
-      - name: featureテストビルド（MCP/GUI/Parquet）
+      # GUI / Parquet は非デフォルト feature のため --workspace では検証されない。
+      - name: featureテストビルド（GUI/Parquet）
         if: steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked --no-run
-      # feature 統一により --workspace では sepika-io の default（parquet 無効）構成が
-      # 検証されないため、parquet 無効構成と GUI 単体構成を以下で直接検証する。
-      - name: テストビルド（sepika-io の default 構成）
-        if: steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-io --locked --no-run
+        run: cargo test -p sepika-app -p sepika-io --features sepika-app/gui,sepika-io/parquet --locked --no-run
       - name: ビルド確認（GUI 単体・Parquet なし）
         if: steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo check -p sepika-app --features sepika-app/gui --locked
@@ -61,7 +56,7 @@ jobs:
           df -h .
           if [ -d target ]; then du -sh target; fi
 
-  # PR のUbuntu 4 構成は独立ジョブで並列実行する。各ジョブは main の同一キャッシュを復元するだけで、
+  # PR のUbuntu 3 構成は独立ジョブで並列実行する。各ジョブは main の同一キャッシュを復元するだけで、
   # 保存はしない（同一キーへの競合保存を避ける）。
   test:
     name: テスト（${{ matrix.name }}）
@@ -73,10 +68,8 @@ jobs:
         include:
           - name: workspace
             command: cargo test --workspace --locked
-          - name: MCP/GUI/Parquet feature
-            command: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked
-          - name: sepika-io default
-            command: cargo test -p sepika-io --locked
+          - name: GUI/Parquet feature
+            command: cargo test -p sepika-app -p sepika-io --features sepika-app/gui,sepika-io/parquet --locked
           - name: GUI 単体 check
             command: cargo check -p sepika-app --features sepika-app/gui --locked
     steps:
@@ -98,52 +91,15 @@ jobs:
           df -h .
           if [ -d target ]; then du -sh target; fi
 
-  windows-connection:
-    name: ${{ github.event_name == 'push' && 'Windows通信（キャッシュ生成）' || 'Windows通信' }}
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        id: rust-cache
-        with:
-          shared-key: test-windows-ai
-          save-if: ${{ github.event_name == 'push' }}
-      - name: パイプ通信テストビルド
-        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-ai-connection --locked --no-run
-      - name: GUI検討通信テストビルド
-        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-app --lib --features gui --locked --no-run
-      - name: 実モデル検討E2Eテストビルド
-        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-app --features gui --test full_model issue985 --locked --no-run
-      - name: MCP中継テストビルド
-        if: github.event_name == 'push' && steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked --no-run
-      - name: パイプ実通信テスト
-        if: github.event_name == 'pull_request'
-        run: cargo test -p sepika-ai-connection --locked
-      - name: GUI検討の実通信・編集・計算テスト
-        if: github.event_name == 'pull_request'
-        run: cargo test -p sepika-app --lib --features gui --locked app::study::ai::operations::tests -- --test-threads=1
-      - name: 実モデル検討の実通信E2Eテスト
-        if: github.event_name == 'pull_request'
-        run: cargo test -p sepika-app --features gui --test full_model issue985 --locked
-      - name: MCP stdio中継テスト
-        if: github.event_name == 'pull_request'
-        run: cargo test -p sepika-mcp --features mcp --test gui_bridge_stdio --locked
-
-  # ブランチ保護の必須チェック名「テスト」を維持するための集約ジョブ。Ubuntu構成かWindows通信が
-  # 失敗・キャンセルされた場合に失敗する。
+  # ブランチ保護の必須チェック名「テスト」を維持するための集約ジョブ。
   test-gate:
     name: テスト
-    needs: [test, windows-connection]
+    needs: [test]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: 検証結果
-        if: needs.test.result != 'success' || needs['windows-connection'].result != 'success'
+        if: needs.test.result != 'success'
         run: exit 1
 
   clippy:
@@ -162,9 +118,9 @@ jobs:
           if [ -d target ]; then du -sh target; fi
       - name: Clippy実行
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # MCP / GUI は非デフォルト feature のため --workspace の Clippy では検証されない。
-      - name: Clippy実行（MCP/GUI/Parquet feature）
-        run: cargo clippy -p sepika-mcp -p sepika-app -p sepika-io --all-targets --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked -- -D warnings
+      # GUI / Parquet は非デフォルト feature のため --workspace の Clippy では検証されない。
+      - name: Clippy実行（GUI/Parquet feature）
+        run: cargo clippy -p sepika-app -p sepika-io --all-targets --features sepika-app/gui,sepika-io/parquet --locked -- -D warnings
       - name: ディスク使用量（ビルド後）
         if: always()
         run: |

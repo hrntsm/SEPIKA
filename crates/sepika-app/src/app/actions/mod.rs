@@ -248,7 +248,6 @@ impl App {
     /// は `ZoneSource::Auto` の端のみ更新し `Manual` 端を保護するため、
     /// 各解析エントリの先頭で毎回呼んでも冪等で安全。
     fn apply_rigid_zones_for_analysis(&mut self) -> Result<(), String> {
-        // GUIとMCPで前処理を分けると、同じモデルでも剛性が変わってしまう。
         self.core.scoped.generated_panels =
             sepika_job::prepare::apply_rigid_zones_and_panels(&mut self.core.model)?;
         Ok(())

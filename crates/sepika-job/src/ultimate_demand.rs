@@ -1,4 +1,4 @@
-//! 終局検定用の部材需要組み立て（GUI・MCP 共用）。
+//! 終局検定用の部材需要組み立て。
 
 use std::collections::HashMap;
 

@@ -1,7 +1,4 @@
 //! 解析ジョブのエラー型。
-//!
-//! GUI と MCP サーバの双方がこの型を経由するため、`Display` は**日本語**とする。
-//! 種別を型で分けているのは、MCP が原因を機械的に判別できるようにするため。
 
 use thiserror::Error;
 
@@ -26,25 +23,6 @@ pub enum JobError {
     /// 入力（モデル・解析条件）が解析の前提を満たさない。
     #[error("入力不備: {0}")]
     InvalidInput(String),
-
-    /// 指定された荷重ケース・組合せが見つからない。
-    #[error("荷重ケースが見つかりません: {0}")]
-    LoadCaseNotFound(String),
-}
-
-impl JobError {
-    /// 機械可読な種別コード（MCP のレスポンスに載せる）。
-    /// 文言（`Display`）は変わり得るが、このコードは安定とする。
-    pub fn kind(&self) -> &'static str {
-        match self {
-            JobError::LumpedIdentification(_) => "lumped_identification",
-            JobError::Prepare(_) => "prepare",
-            JobError::Solve(_) => "solve",
-            JobError::Convergence(_) => "convergence",
-            JobError::InvalidInput(_) => "invalid_input",
-            JobError::LoadCaseNotFound(_) => "load_case_not_found",
-        }
-    }
 }
 
 /// 解析ジョブの結果型。

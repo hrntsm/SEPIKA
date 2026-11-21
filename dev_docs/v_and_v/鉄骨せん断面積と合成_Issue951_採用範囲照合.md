@@ -63,7 +63,7 @@ Hの強軸、BOXの両軸を含む剛性式の採用条件、1973年版・2005�
 
 [断面検定の公開入口](../../crates/sepika-design-jp/tests/steel_h_column_combined.rs)では、上記の直角H 400×200×8×13 mm・F235 N/mm²・材長3000 mmに N=77 kN、Mz=167 kN·m、Qz=365 kN が作用する短期の再現入力で、理由付き未算定を確認する。Qz=0の対照では、独立算術の断面諸量 A=8192 mm²・Z=1148243.413333333 mm³、横座屈の弾性限界モーメント824185820.619118 N·mm（C=1、G=E/2.6）、短期 fb=192.337746536794 N/mm²から、従来の軸曲げ比 0.7961649672 と一致する。これは既存式の維持を確認する比較で、規準6.2の式(6.3)・(6.4)は同じ応力と許容値でもそれぞれ0.6588891890・0.7072981448となる。軸曲げ式自体の規準への適合確認とは区別する。
 
-[通常GUIの回帰](../../crates/sepika-app/src/app/shear_area_acceptance_tests.rs)と[MCPジョブの回帰](../../crates/sepika-mcp/src/job/design_check.rs)では、同じ断面・材長に柱頭荷重を与えた片持ち柱の実解析から未算定理由を確認する。GUIは検定表、CSV、現行OVIKAの保存再読、および旧検定契約の失効と現行内力からの再検定を対象とする。実験・実建物を用いた妥当性確認は行っていない。
+[通常GUIの回帰](../../crates/sepika-app/src/app/shear_area_acceptance_tests.rs)と[MCPジョブの回帰](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/job/design_check.rs)では、同じ断面・材長に柱頭荷重を与えた片持ち柱の実解析から未算定理由を確認する。GUIは検定表、CSV、現行OVIKAの保存再読、および旧検定契約の失効と現行内力からの再検定を対象とする。実験・実建物を用いた妥当性確認は行っていない。
 
 ### 直角H形断面の局所弾性解
 
@@ -86,7 +86,7 @@ Hの強軸、BOXの両軸を含む剛性式の採用条件、1973年版・2005�
 
 右端の比較では短期 fc=183.0658305530 N/mm²（圧縮時）、短期 fb=192.3377465368 N/mm²を使う。厚さ平均の成分から得た比は局所弾性応力の最大の下限であり、規準判定には用いない。フィレットのある断面の最大値や公称応力度への換算も扱わない。
 
-[公開断面検定の回帰](../../crates/sepika-design-jp/tests/steel_h_column_combined.rs)は両例の理由付き未算定と Qz=0 の対照での軸曲げ比を照合する。軸曲げと法定細長比が独立に不適合となる別入力では、各比と組合せ未算定理由の併存を検証する。軸曲げの比較は既存式のVerificationであり、規準6.1への全面適合を確認するものではない。[GUI回帰](../../crates/sepika-app/src/app/shear_area_acceptance_tests.rs)は片持ち柱を実解析し、検定表、CSV、保存再読と旧検定失効後の再検定を対象とする。[MCP回帰](../../crates/sepika-mcp/src/job/design_check.rs)は未算定の位置・理由と独立不適合の集計を確認する。
+[公開断面検定の回帰](../../crates/sepika-design-jp/tests/steel_h_column_combined.rs)は両例の理由付き未算定と Qz=0 の対照での軸曲げ比を照合する。軸曲げと法定細長比が独立に不適合となる別入力では、各比と組合せ未算定理由の併存を検証する。軸曲げの比較は既存式のVerificationであり、規準6.1への全面適合を確認するものではない。[GUI回帰](../../crates/sepika-app/src/app/shear_area_acceptance_tests.rs)は片持ち柱を実解析し、検定表、CSV、保存再読と旧検定失効後の再検定を対象とする。[MCP回帰](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/job/design_check.rs)は未算定の位置・理由と独立不適合の集計を確認する。
 
 ## 結論と証拠の境界
 

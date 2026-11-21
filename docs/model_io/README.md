@@ -25,7 +25,3 @@ ST-Bridgeは[取込前・直後の確認・再出力](02_ST-Bridge_形式.md#取
 - [ST-Bridge 形式（.stb / .xml）](02_ST-Bridge_形式.md)
 - [ST-Bridge 要素別 変換状況一覧](03_ST-Bridge_要素別変換状況.md)
 - [波形ライブラリ](04_波形ライブラリ.md)
-
-## MCP サーバでのモデル入力
-
-MCP サーバのモデル入力には制約があります。詳細は [MCP の制約・注意点](../mcp_server/05_制約・注意点.md)を参照してください。

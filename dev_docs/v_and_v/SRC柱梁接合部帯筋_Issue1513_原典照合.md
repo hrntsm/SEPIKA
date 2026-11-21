@@ -26,4 +26,4 @@
 ## 製品入口の検証
 
 - [短期検定の入力準備](../../crates/sepika-design-jp/tests/src_joint_hoops.rs)では、計算例10の独立期待値を構面の入口で比較する。未登録の直交構面、未対応材種・不正数値・帯筋比1以上・重複登録の診断、構面変更後の無効化も確認する。
-- [GUIの表編集と保存](../../crates/sepika-app/src/tables/src_joint_hoops.rs)と[MCPのモデル照会・編集](../../crates/sepika-mcp/src/server.rs)では、同じ節点の二つの構面に異なる帯筋を登録し、対象と入力を照会する。GUIではOVIKA再読込、節点・梁の再採番、元に戻す操作で対応を確認する。MCPでは照会後に梁の構面を変更し、変更前の照会に基づく登録と解除の拒否を確認する。
+- [GUIの表編集と保存](../../crates/sepika-app/src/tables/src_joint_hoops.rs)と[MCPのモデル照会・編集](https://github.com/hrntsm/SEPIKA/blob/8ae832fa7b87dc61dfd03198a1a4bdbbb2eca0cf/crates/sepika-mcp/src/server.rs)では、同じ節点の二つの構面に異なる帯筋を登録し、対象と入力を照会する。GUIではOVIKA再読込、節点・梁の再採番、元に戻す操作で対応を確認する。MCPでは照会後に梁の構面を変更し、変更前の照会に基づく登録と解除の拒否を確認する。

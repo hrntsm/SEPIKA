@@ -95,7 +95,7 @@ impl MemberDetailAttr {
     ///   部材長以上）の値は不正入力として黙って除外する。
     ///
     /// 応力の評価断面（`sepika_element` の `eval_sections`）と検定位置
-    /// （sepika-app / sepika-mcp の `design_positions`）の双方から呼ばれる
+    /// （`design_positions`）の双方から呼ばれる
     /// 共通実装。両者の位置一致判定（1e-6）はこの単一実装により保証される。
     /// `geom_len` が 0 以下（不正な幾何）のときは空を返す。
     pub fn extra_check_positions(&self, rigid_zone: &RigidZone, geom_len: f64) -> Vec<f64> {
