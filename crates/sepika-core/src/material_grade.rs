@@ -456,6 +456,18 @@ pub fn shear_rebar_material_issue(mat: Option<&crate::model::Material>) -> Optio
     None
 }
 
+/// 対応材種のせん断補強筋に入力した Fy [N/mm²] が正の有限値でなければ、是正文言を返す。
+pub fn shear_rebar_fy_issue(mat: &crate::model::Material) -> Option<String> {
+    (is_supported_shear_rebar_grade(&mat.name)
+        && mat.fy.is_some_and(|fy| !fy.is_finite() || fy <= 0.0))
+    .then(|| {
+        format!(
+            "せん断補強筋材料「{}」の降伏強度 Fy が不正です。材料タブで Fy に正の有限値 [N/mm²] を入力してください。",
+            mat.name.trim()
+        )
+    })
+}
+
 /// UI で選択できる主筋のグレード（表示順。JIS G 3112 の異形棒鋼と高強度異形棒鋼）。
 pub const MAIN_REBAR_GRADES: &[&str] = &["SD295A", "SD295B", "SD345", "SD390", "SD490", "USD685"];
 

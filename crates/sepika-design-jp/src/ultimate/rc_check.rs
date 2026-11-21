@@ -326,7 +326,7 @@ fn beam_mu_applicability_reason(
 
 /// 1 部材の終局検定を実行する（対応断面以外は `Ok(None)`、
 /// RC梁・矩形柱・円形柱なのに Fc・主筋降伏強度・配筋・有効せいが不整合なら部材 ID 付きで `Err`、
-/// せん断補強筋に未対応グレードまたは `fy` 未設定がある場合も `Err`）。
+/// せん断補強筋の材種が未対応または Fy が未入力の場合も `Err`。区分の不備と明示の不正な Fy は結果に記録する）。
 fn check_member(
     elem: &ElementData,
     sec: &Section,
@@ -349,8 +349,14 @@ fn check_member(
     let main_rebar_issue = crate::material_strength::main_rebar_category_issue(main_rebar)
         .map(|reason| format!("部材 ID {}（断面「{}」）の{reason}", elem.id.0, sec.name));
     let shear_rebar = model.element_shear_rebar_material(elem);
-    let shear_rebar_issue = shear_rebar_category_issue(sec, shear_rebar)
+    let shear_category_issue = shear_rebar_category_issue(sec, shear_rebar)
         .map(|reason| format!("部材 ID {}: {reason}", elem.id.0));
+    let shear_rebar = shear_rebar.filter(|_| shear_category_issue.is_none());
+    let shear_rebar_issue = shear_category_issue.clone().or_else(|| {
+        shear_rebar
+            .and_then(sepika_core::material_grade::shear_rebar_fy_issue)
+            .map(|reason| format!("部材 ID {}（断面「{}」）の{reason}", elem.id.0, sec.name))
+    });
     let grade = main_rebar_grade(main_rebar);
     let round_bond_reason = (opts.include_bond
         && main_rebar_issue.is_none()
@@ -385,7 +391,7 @@ fn check_member(
     }
     if let Err(reason) = shape.validate_rebar_size_materials(
         main_rebar.filter(|_| main_rebar_issue.is_none()),
-        shear_rebar.filter(|_| shear_rebar_issue.is_none()),
+        shear_rebar,
     ) {
         if main_rebar_issue.is_some() || shear_rebar_issue.is_some() {
             return unchecked(&reason);
@@ -395,7 +401,7 @@ fn check_member(
     if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
         shear_rebar.filter(|_| shear_rebar_issue.is_none()),
     ) {
-        return Err(format!("部材 ID {} の{}", elem.id.0, msg));
+        return Err(format!("部材 ID {} の{msg}", elem.id.0));
     }
     let rp = demand.rp.map_or(opts.rp, |rp| rp.max(0.0));
     let sigma_wy = shear_rebar_issue.is_none().then(|| {
@@ -611,7 +617,7 @@ fn check_member(
     let bond_bar_type_unverified = bond_unknown_bar_type || round_bond_reason.is_some();
     let bond_zero_upper = opts.include_bond
         && !bond_bar_type_unverified
-        && shear_rebar_issue.is_some()
+        && shear_category_issue.is_some()
         && opts.shear_method == ShearMethod::Ductility
         && ductility_truss_upper_bound(
             truss_lambda(p.shear_pitch, jt, p.be, p.n_s),
@@ -621,7 +627,7 @@ fn check_member(
         ) == 0.0;
     let bond_unverified = bond_bar_type_unverified
         || (opts.include_bond
-            && shear_rebar_issue.is_some()
+            && shear_category_issue.is_some()
             && bond_uses_transverse_rebar
             && !bond_zero_upper);
     let main_rebar_issue = main_rebar_issue.map(|reason| {
