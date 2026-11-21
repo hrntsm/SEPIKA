@@ -2794,6 +2794,26 @@ fn test_generate_stories_with_opts_self_weight_via_case_matches_density() {
 }
 
 #[test]
+fn gravity_cases_only_rejects_invalid_wall_attributes() {
+    let mut model = two_columns_with_dl_model();
+    for id in [model.elements[0].id, ElemId(99)] {
+        model.wall_attrs = vec![sepika_core::model::WallAttr {
+            elem: id,
+            opening_area: 100_000.0,
+            opening_weight: 0.0,
+            slit: Default::default(),
+            openings: vec![],
+            finish_intensity: 0.0,
+        }];
+        let error =
+            generate_stories_with_opts(&model, &[LoadCaseId(0)], false, MassMethod::LumpedOnly)
+                .unwrap_err();
+        assert!(error.contains("壁属性"), "{error}");
+        assert!(error.contains(&format!("部材 {}", id.0)), "{error}");
+    }
+}
+
+#[test]
 fn test_gravity_cases_only_uses_case_content_without_replacement() {
     let model = two_columns_with_dl_model();
 

@@ -449,7 +449,11 @@ fn recover_girder_column_faces(
 
 /// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。
 /// 全ケースの不正な部材荷重方向は、強度・拘束状態によらず `SolveError::InvalidInput` を返す。
+/// 壁属性の参照先が不正なら、部材番号を含む `SolveError::InvalidInput` を返す。
 pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, SolveError> {
+    model
+        .validate_wall_attr_refs()
+        .map_err(|e| SolveError::InvalidInput(e.to_string()))?;
     sepika_core::panel_zone::validate_panel_connection_offsets(model)
         .map_err(SolveError::InvalidInput)?;
     for panel in model
