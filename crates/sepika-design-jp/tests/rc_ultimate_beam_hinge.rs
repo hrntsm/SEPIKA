@@ -135,7 +135,7 @@ fn a_connected_end_without_confirmed_rotation_restraint_is_support_unverified() 
 }
 
 #[test]
-fn confirmed_symmetric_beam_hinge_demand_matches_the_loaded_beam_equilibrium() {
+fn beam_equilibrium_and_confirmed_hinges_do_not_verify_the_shear_upper_bound() {
     let mut model = fully_fixed_beam();
     model.nodes[1].restraint.set_free(Dof::Uy);
     let lateral_case = LoadCaseId(2);
@@ -190,8 +190,7 @@ fn confirmed_symmetric_beam_hinge_demand_matches_the_loaded_beam_equilibrium() {
             },
         );
         assert!((check.mu - mu_n_mm).abs() < 1e-6);
-        assert!((check.qmu - shear_n).abs() < 1e-6);
-        assert!(check.ok && check.unchecked_reason.is_none(), "{check:?}");
+        assert_unchecked(check, "ultimate_beam_hinge_shear_upper_bound_unverified:");
     }
 }
 
@@ -235,7 +234,7 @@ fn main_material(grade: &str) -> Material {
 }
 
 #[test]
-fn static_hinge_checker_returns_the_same_mu_and_qmu_across_the_section_balance_boundary() {
+fn static_hinge_demand_is_withheld_on_both_sides_of_the_reference_balance_boundary() {
     let mut model = fully_fixed_beam();
     model.sections[0] = d29_section(480.0, 202.0, &[2], &[2]);
     model.materials.push(main_material("SD490"));
@@ -254,27 +253,25 @@ fn static_hinge_checker_returns_the_same_mu_and_qmu_across_the_section_balance_b
         model.materials[0].fc = Some(fc);
         model.validate().unwrap();
         let result = verify(&model, demand);
-        assert!(
-            result.ok && result.unchecked_reason.is_none(),
-            "Fc={fc}: {result:?}"
-        );
         assert!((result.mu - 77_907_060.0).abs() < 1e-6, "{result:?}");
-        assert!((result.qmu - 38_953.530).abs() < 1e-6, "{result:?}");
-        assert_eq!(result.qmu > reference_q_n, overestimates, "{result:?}");
+        assert_eq!(38_953.530 > reference_q_n, overestimates);
+        let reason = result.unchecked_reason.as_deref().unwrap();
+        assert!(reason.contains("i端上端引張") && reason.contains("j端下端引張"));
+        assert!(reason.contains("先行する引張主筋の降伏を確認できません"));
+        assert_eq!(reason.contains("Fcが通常域の目安18"), fc < 18.0);
+        assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
     }
 
     model.materials[0].fc = Some(18.0);
     model.materials[2] = main_material("USD685");
     model.validate().unwrap();
     let result = verify(&model, demand);
-    assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
     assert!((result.mu - 108_910_890.0).abs() < 1e-6, "{result:?}");
-    assert!((result.qmu - 54_455.445).abs() < 1e-6, "{result:?}");
-    assert!(result.qmu > 31_584.359);
+    assert_unchecked(result, "主筋強度が原典記載のSD490級を超えます");
 }
 
 #[test]
-fn static_hinge_checker_does_not_screen_the_two_percent_tension_ratio() {
+fn two_percent_tension_ratio_is_reported_without_enabling_static_hinge_demand() {
     let mut model = fully_fixed_beam();
     model.materials[0].fc = Some(18.0);
     model.materials.push(main_material("SD490"));
@@ -283,13 +280,17 @@ fn static_hinge_checker_does_not_screen_the_two_percent_tension_ratio() {
         static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
         ..Default::default()
     };
-    for width_mm in [440.0, 441.512_027_491_408_9, 450.0] {
+    for (width_mm, ratio) in [
+        (440.0, "2.0069%"),
+        (441.512_027_491_408_9, "2.0000%"),
+        (450.0, "1.9623%"),
+    ] {
         model.sections[0] = d29_section(width_mm, 210.0, &[2], &[2]);
         model.validate().unwrap();
         let result = verify(&model, demand);
-        assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
         assert!((result.mu - 82_439_834.4).abs() < 1e-6, "{result:?}");
-        assert!((result.qmu - 41_219.917_2).abs() < 1e-6, "{result:?}");
+        assert!(result.detail.contains(&format!("a_t/(b d)={ratio}")));
+        assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
     }
 }
 
@@ -325,6 +326,20 @@ fn asymmetric_beam_returns_directional_reference_mu_and_withholds_static_hinge_d
         );
         assert!((result.mu - mu_n_mm).abs() < 1e-6, "{result:?}");
         assert!(result.mu > section_mu_n_mm);
+        let (i_detail, j_detail, side) = if moment < 0.0 {
+            (
+                "i端上端引張: a_t/(b d)=1.9832%",
+                "j端下端引張: a_t/(b d)=1.3222%",
+                "上端引張",
+            )
+        } else {
+            (
+                "i端下端引張: a_t/(b d)=1.3222%",
+                "j端上端引張: a_t/(b d)=1.9832%",
+                "下端引張",
+            )
+        };
+        assert!(result.detail.contains(i_detail) && result.detail.contains(j_detail));
         assert_unchecked(result, "ultimate_beam_hinge_bending_unverified:");
 
         let result = verify(
@@ -334,11 +349,15 @@ fn asymmetric_beam_returns_directional_reference_mu_and_withholds_static_hinge_d
         assert!((result.mu - mu_n_mm).abs() < 1e-6, "{result:?}");
         assert_eq!(result.qmu, 30_000.0);
         assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
+        assert!(result.detail.contains("参考曲げ略算 Mu") && result.detail.contains(side));
+        assert!(result
+            .detail
+            .contains("ultimate_beam_mu_applicability_unverified:"));
     }
 }
 
 #[test]
-fn static_hinge_shear_can_pass_with_less_remaining_capacity_than_the_section_reference_demand() {
+fn static_hinge_shear_is_withheld_when_the_reference_demand_can_underestimate_it() {
     let mut model = fully_fixed_beam();
     model.sections[0] = beam_input::section(350.0, 610.0, 19.0, &[2], &[2]);
     let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
@@ -365,8 +384,119 @@ fn static_hinge_shear_can_pass_with_less_remaining_capacity_than_the_section_ref
     .unwrap()
     .remove(0);
     assert!((result.mu - 97_943_033.25).abs() < 1e-6, "{result:?}");
-    assert!((result.qmu - 48_971.516_625).abs() < 1e-6, "{result:?}");
+    let old_demand_n = 48_971.516_625;
     let reference_q_n = 54_677.241;
-    assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
-    assert!(result.qsu - q_long_n < reference_q_n, "{result:?}");
+    let remaining_n = result.qsu - q_long_n;
+    assert!(
+        old_demand_n < remaining_n && remaining_n < reference_q_n,
+        "{result:?}"
+    );
+    assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
+}
+
+#[test]
+fn confirmed_total_shear_is_compared_even_when_reference_mu_cannot_be_calculated() {
+    let mut model = fully_fixed_beam();
+    model.sections[0] = beam_input::section(350.0, 610.0, 19.0, &[], &[2]);
+    let options = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    for (q_n, ok) in [(30_000.0, true), (1_000_000.0, false)] {
+        let result = collect_rc_ultimate_checks(
+            &model,
+            &[(
+                ElemId(0),
+                MemberDemand::from_pushover(0.0, -10e6, 0.0, -q_n, 0.0, 0.0),
+            )],
+            &options,
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(result.qmu, q_n);
+        assert_eq!(result.ok, ok);
+        assert_eq!(result.unchecked_reason, None);
+        assert!(result.mu.is_nan());
+        assert!(result.detail.contains("参考曲げ略算 Muは未算定"));
+        assert!(result.detail.contains("上端引張: 引張主筋がありません"));
+    }
+}
+
+#[test]
+fn static_shear_can_fail_on_gravity_response_without_confirming_hinge_demand() {
+    let model = fully_fixed_beam();
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    let demand = MemberDemand {
+        static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
+        ..Default::default()
+    };
+    for (ql, fails) in [(609_100.0, false), (610_000.0, true)] {
+        let result = collect_rc_ultimate_checks(
+            &model,
+            &[(
+                ElemId(0),
+                MemberDemand {
+                    q_long: Some(-ql),
+                    ..demand
+                },
+            )],
+            &opts,
+        )
+        .unwrap()
+        .remove(0);
+        assert!(result.qmu.is_nan() && !result.ok);
+        if fails {
+            assert_eq!(result.shear_margin, 0.0);
+            assert_eq!(result.unchecked_reason, None);
+            assert!(result.detail.contains("がせん断耐力を超えます"));
+        } else {
+            assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
+        }
+    }
+}
+
+#[test]
+fn static_bond_can_fail_on_gravity_response_only_if_both_directions_are_over_capacity() {
+    let mut model = fully_fixed_beam();
+    model.sections[0] = beam_input::section(400.0, 600.0, 22.0, &[1], &[1]);
+    let top = verify(
+        &model,
+        MemberDemand::from_pushover(0.0, -10e6, 0.0, 0.0, 0.0, 0.0),
+    );
+    let bottom = verify(
+        &model,
+        MemberDemand::from_pushover(0.0, 10e6, 0.0, 0.0, 0.0, 0.0),
+    );
+    assert!(0.0 < top.qbu && top.qbu < bottom.qbu && bottom.qbu < top.qsu);
+    for mechanism in [
+        StaticBeamHingeMechanism::ITopJBottom,
+        StaticBeamHingeMechanism::IBottomJTop,
+    ] {
+        for (ql, fails) in [
+            (top.qbu.next_up(), false),
+            (bottom.qbu, false),
+            (bottom.qbu.next_up(), true),
+        ] {
+            let result = verify(
+                &model,
+                MemberDemand {
+                    q_long: Some(ql),
+                    static_beam_hinge_mechanism: Some(mechanism),
+                    ..Default::default()
+                },
+            );
+            assert!(result.qmu.is_nan() && !result.ok);
+            if fails {
+                assert_eq!(result.bond_margin, 0.0);
+                assert!(result.shear_margin.is_nan());
+                assert_eq!(result.unchecked_reason, None);
+                assert!(result.detail.contains("双方の付着耐力を超えます"));
+            } else {
+                assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
+            }
+        }
+    }
 }

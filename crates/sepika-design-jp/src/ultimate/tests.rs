@@ -212,7 +212,8 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
     assert_eq!(beam.kind, MemberKind::Girder);
 
     assert!(col.mu > 0.0 && col.qmu > 0.0 && col.qsu > 0.0 && col.qbu > 0.0);
-    assert!(beam.mu > 0.0 && beam.qmu > 0.0 && beam.qsu > 0.0);
+    assert!(beam.mu > 0.0 && beam.qmu.is_nan() && beam.qsu > 0.0);
+    assert!(!beam.ok && beam.unchecked_reason.is_some());
 
     let ax = col.axial.expect("柱は軸終局耐力を持つ");
     assert!((ax.nuc - 600.0 * 600.0 * 24.0).abs() < 1e-3);
@@ -402,14 +403,14 @@ fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
             MemberDemand {
                 mz: 1.0e6,
                 static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::IBottomJTop),
-                q_long: Some(ql),
+                q_long: Some(0.0),
                 ..MemberDemand::axial(0.0)
             },
         ),
         (
             ElemId(0),
             MemberDemand {
-                q_long: Some(0.0),
+                q_long: Some(ql),
                 ..MemberDemand::axial(0.0)
             },
         ),
@@ -420,8 +421,8 @@ fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
     model.nodes[1].restraint = Dof6Mask::FIXED;
     model.nodes[2].restraint = Dof6Mask::FIXED;
     let checks = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
-    let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
-    assert!((beam.shear_margin - (beam.qsu - ql).max(0.0) / beam.qmu).abs() < 1e-9);
+    let col = checks.iter().find(|c| c.elem == ElemId(0)).unwrap();
+    assert!((col.shear_margin - (col.qsu - ql).max(0.0) / col.qmu).abs() < 1e-9);
 
     let mut model_kh = column_and_beam_model();
     model_kh.materials.push(Material {
@@ -493,7 +494,11 @@ fn test_ultimate_check_option_flags() {
     .unwrap();
     for c in &no_bond {
         assert_eq!(c.qbu, 0.0);
-        assert!(c.bond_margin.is_infinite());
+        if c.kind == MemberKind::Column {
+            assert!(c.bond_margin.is_infinite());
+        } else {
+            assert!(c.bond_margin.is_nan());
+        }
     }
 }
 
