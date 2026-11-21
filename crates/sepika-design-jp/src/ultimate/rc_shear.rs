@@ -213,18 +213,25 @@ pub fn bond_split_ratio(b: f64, db1: f64, n_bars: u32, cover_side: f64, cover_bo
     bvi.min(bci).min(bsi).max(0.0)
 }
 
-/// 異形鉄筋の1段目主筋の付着信頼強度τbu `[N/mm²]` を返す。
-/// Fc・b・db1のいずれかが0以下、またはNが0なら0。横補強筋ピッチが0以下ならその寄与は0。
-pub fn bond_reliable_strength_deformed(inp: &BondStrengthInput) -> f64 {
+pub(super) fn bond_reliable_strength_factor(inp: &BondStrengthInput) -> f64 {
     if inp.fc <= 0.0 || inp.b <= 0.0 || inp.db1 <= 0.0 || inp.n_bars == 0 {
         return 0.0;
     }
-    let b1 = bond_split_ratio(inp.b, inp.db1, inp.n_bars, inp.cover_side, inp.cover_bottom);
-    let alpha_t = if inp.top_bar {
+    if inp.top_bar {
         (0.75 - inp.fc / 400.0).max(0.0)
     } else {
         1.0
-    };
+    }
+}
+
+/// 異形鉄筋の1段目主筋の付着信頼強度τbu `[N/mm²]` を返す。
+/// Fc・b・db1のいずれかが0以下、またはNが0なら0。横補強筋ピッチが0以下ならその寄与は0。
+pub fn bond_reliable_strength_deformed(inp: &BondStrengthInput) -> f64 {
+    let alpha_t = bond_reliable_strength_factor(inp);
+    if alpha_t == 0.0 {
+        return 0.0;
+    }
+    let b1 = bond_split_ratio(inp.b, inp.db1, inp.n_bars, inp.cover_side, inp.cover_bottom);
     let kst = if inp.hoop_pitch > 0.0 {
         140.0 * inp.hoop_area.max(0.0) / (inp.db1 * inp.hoop_pitch)
     } else {

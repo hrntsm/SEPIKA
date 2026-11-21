@@ -289,6 +289,63 @@ fn confirmed_total_plastic_bond_failure_without_tension_bars_survives_nonfinite_
 }
 
 #[test]
+fn confirmed_total_zero_bond_with_tension_axial_or_zero_top_factor_survives_nonfinite_pitch() {
+    for (method, fc, top, axial_n, expected_shear_n) in [
+        (
+            ShearMethod::Ductility,
+            24.0,
+            &[][..],
+            -10_000.0,
+            215_865.483_1,
+        ),
+        (ShearMethod::Plastic, 300.0, &[3][..], 0.0, 0.0),
+    ] {
+        let mut model = stirrup_pitch_beam();
+        model.sections[0] = beam_input::section(250.0, 350.0, 19.0, top, &[3]);
+        model.materials[0].fc = Some(fc);
+        let demand = MemberDemand::from_pushover(axial_n, -10e6, 0.0, 30_000.0, 0.0, 0.0);
+        for pitch_mm in [100.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            set_stirrup_pitch(&mut model, pitch_mm, 2);
+            let check = verify_shear_method(&model, demand, method, true);
+            assert_eq!((check.qbu, check.bond_margin), (0.0, 0.0), "{check:?}");
+            assert!(check.detail.contains("τbu=0.000 N/mm²"), "{check:?}");
+            assert!(!check.ok && check.unchecked_reason.is_none());
+            assert_eq!(
+                check.detail.contains(NONFINITE_STIRRUP_PITCH),
+                !pitch_mm.is_finite()
+            );
+            if !pitch_mm.is_finite() && method == ShearMethod::Ductility {
+                assert!(check.qsu.is_nan() && check.shear_margin.is_nan());
+            } else {
+                assert!((check.qsu - expected_shear_n).abs() < 0.001, "{check:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn static_beam_bond_failure_requires_independent_capacity_on_both_tension_sides() {
+    let mut model = stirrup_pitch_beam();
+    model.materials[0].fc = Some(300.0);
+    for (pitch_mm, expected_margin) in [(100.0, 0.0), (f64::NAN, f64::NAN)] {
+        set_stirrup_pitch(&mut model, pitch_mm, 2);
+        let demand = MemberDemand {
+            mz: -10e6,
+            q_long: Some(2e6),
+            static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
+            ..Default::default()
+        };
+        let check = verify_shear_method(&model, demand, ShearMethod::Plastic, true);
+        assert_eq!((check.qbu, check.shear_margin), (0.0, 0.0), "{check:?}");
+        assert!(!check.ok && check.unchecked_reason.is_none());
+        assert_eq!(check.bond_margin.is_nan(), expected_margin.is_nan());
+        if expected_margin.is_finite() {
+            assert_eq!(check.bond_margin, expected_margin);
+        }
+    }
+}
+
+#[test]
 fn beam_end_support_is_required_even_with_a_confirmed_hinge_mechanism() {
     let demand = MemberDemand {
         mz: -10e6,
