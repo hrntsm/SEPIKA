@@ -5,7 +5,7 @@ contact_links:
     about: 利用者向けの計算根拠・使い方。
   - name: 開発者向けドキュメント（dev_docs/）
     url: https://github.com/hrntsm/SEPIKA/tree/main/dev_docs
-    about: 設計判断・開発経緯・V&V・申し送り。
+    about: 設計判断・V&V・開発運用。
   - name: CONTRIBUTING.md
     url: https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md
     about: ビルド・テスト・静的解析・PR の手順。貢献を検討している場合に確認してください。

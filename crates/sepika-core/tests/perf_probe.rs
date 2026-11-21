@@ -2,14 +2,6 @@
 //! `sepika_core::region_gen::wall::wall_planes`（`generate_wall_region_boundaries`
 //! を通じて計測する）on synthetic regular column-grid models.
 //!
-//! `dev_docs/handoff/床領域・壁領域の再設計_申し送り.md` §5.7 参照。素朴な実装
-//! （「候補ペアごとに既知の全直線と実距離で比較する」、外側ループ O(N²) × 内側の
-//! 線形探索 O(L)）を実測したところ、格子状の柱配置では斜め方向の候補直線が
-//! 柱本数の増加とともに大量に残るため L 自体が増え、900 本の柱（30×30 格子）で
-//! 19 秒を超えた。グリッド索引（`LineIndex`）による重複判定の高速化後は同じ
-//! ケースで約 1.8 秒まで縮んだが、依然として超線形に増える（本ファイルはこの
-//! 実測値を得るためのものであり、更に最適化する場合の回帰検知にも使う）。
-//!
 //! Run (release, single-threaded so wall time is not muddied by test
 //! parallelism; timings are printed via --nocapture):
 //!

@@ -19,7 +19,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0007](0007-floor-regions-slabs-secondary-members.md) | accepted | 床は床領域・床板・二次部材で表し、解析要素は柱と大梁までとする |
 | [0008](0008-secondary-member-load-cascade.md) | superseded by ADR-0018 | 二次部材の荷重は支持相手へ逐次伝達し、交点は常にピンとする |
 | [0009](0009-fail-loud-unassigned-inputs.md) | accepted | 未設定の材料・断面を既定値で埋めない |
-| 0010 | — | 欠番（HHT-α 廃止は handoff と現行仕様で足りるため ADR 化しない） |
+| 0010 | — | 欠番（HHT-α 廃止は ADR 化していない） |
 | [0011](0011-no-gpu-reserved-crates.md) | accepted | GPU は恒久的に実装せず、予約クレートを置かない |
 | [0012](0012-stbridge-partial-roundtrip.md) | superseded by ADR-0141 | ST-Bridge は完全往復を保証しない |
 | [0013](0013-adopt-wall-element-model.md) | accepted | 耐震壁は壁エレメント置換モデルを採用し、TVLEM は採用しない |
@@ -211,5 +211,5 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 - ADR にするのは「後から覆すコストが高い」「背景を知らないと意外に見える」「実際のトレードオフがあった」の 3 条件をすべて満たす**現在有効な判断**だけ。単なる実装手順・容易に変えられる選択・未実装の計画・自明な判断は書かない。
 - 番号は本ディレクトリ内の新規連番。欠番は許容し、削除した番号を再利用しない。本文で D 番号（文書ローカルな識別子）を引用するときは「文書パス＋定義節＋番号」で書く。
 - 判断を覆すときは、新しい ADR を作成し、旧 ADR の Status を `superseded by ADR-XXXX` に更新する。
-- Legacy source には移行元の一次資料を残す。移行元を現行仕様へ書き換えた場合は、改訂前の要点を handoff に転記してから参照する。
+- 判断を理解するために必要な経緯はADRに記録する。改訂前の一次資料を引く場合は、コミットを固定して参照する。
 - 追加・更新したら、この一覧にも 1 行追記する。

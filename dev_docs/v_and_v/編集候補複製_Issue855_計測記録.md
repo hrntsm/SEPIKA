@@ -1,6 +1,6 @@
-作成日: 2026-10-26
-
 # 編集候補のモデル全体複製回数（Issue #855）
+
+作成日: 2026-10-26。対象: [Issue #855](https://github.com/hrntsm/SEPIKA/issues/855)。計測時点の有限な編集操作を扱う。
 
 ## 計測対象と結果
 
@@ -28,7 +28,7 @@ Windows / Rust 1.99.1、`cargo test -p sepika-edit --locked` の test profile �
 
 ## 再現手順
 
-対象コミットを別作業ディレクトリへ用意し、未コミット変更がない状態で以下を
+変更前は `b8d61a04b1a217d7850c7516f7abd792881b1301`、変更後の実装は `2fa6b5a1c60f376dcae57c4ff57142ac58004837`（[PR #866](https://github.com/hrntsm/SEPIKA/pull/866)）にある。対象コミットを別作業ディレクトリへ用意し、未コミット変更がない状態で以下を
 `measure_issue855.py` としてルートへ一時保存し、`python measure_issue855.py` で実行する。
 スクリプトは Model の自動 Clone を全フィールドの同等な手動 Clone とログへ一時置換し、
 既存 `seeded_model` を使う計測テストを追加する。終了時には正常・失敗にかかわらず両ファイルを元へ戻す。

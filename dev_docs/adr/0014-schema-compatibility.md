@@ -6,4 +6,3 @@ Status: accepted
 
 Legacy source:
 - 初回設計書（#313 で廃止。git 履歴参照）§12.1
-- `dev_docs/handoff/DomainDocs基盤導入_申し送り.md` §5

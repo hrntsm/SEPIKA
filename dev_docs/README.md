@@ -18,11 +18,10 @@
 | [docs/](../docs/) | 製品の現在仕様・理論・計算根拠・保存形式と、分離した実装参照 |
 | [docs_authoring.md](docs_authoring.md) | 製品ドキュメントの執筆・検証・プレビュー手順 |
 | [adr/](adr/README.md) | 設計判断と理由。現在有効かどうかは Status で管理 |
-| [handoff/](handoff/README.md) | 過去の実装経緯・判断の履歴。未完了作業の状態はGitHub Issuesで管理 |
 | [v_and_v/](v_and_v/README.md) | V&V の証拠・未検証項目。目録・要素→テスト索引と更新手順はリンク先で管理 |
 | [architecture.md](architecture.md) | クレート構成・依存方向等のアーキテクチャ |
 | [theme.rs](../crates/sepika-app/src/theme.rs)・[table_util.rs](../crates/sepika-app/src/table_util.rs) | UI のテーマ・frame helper・表の規約と実装 |
-| [full_model.rs](../crates/sepika-app/tests/full_model.rs)・[wall_model.rs](../crates/sepika-app/tests/wall_model.rs) | 実モデル統合テスト固有の情報・実行方法。既知不具合・経緯は [既存 handoff](handoff/実モデル統合テスト_申し送り.md) |
+| [full_model.rs](../crates/sepika-app/tests/full_model.rs)・[wall_model.rs](../crates/sepika-app/tests/wall_model.rs) | 実モデル統合テスト固有の情報・実行方法 |
 | [book.toml](../docs/book.toml)・[theme/](../docs/theme/)・[docs workflow](../.github/workflows/docs.yml) | mdBook 設定、表示・フッター、公開と API リファレンス生成の実装 |
 
 `docs/` は **GUIから利用する構造設計者向け**の製品ドキュメントとする。
@@ -35,7 +34,7 @@ OSS としてコードまで追えるよう、既存の `実装参照` を本文
 具体的な執筆規約は [docs_authoring.md](docs_authoring.md) を正とする。
 
 現在の製品仕様・既定値・制約・計算根拠は `docs/` を唯一の正本とし、`dev_docs/` に複製しない。
-`dev_docs/` は判断・検証・経緯・アーキテクチャを扱い、製品ドキュメントサイトには含めない。
+`dev_docs/` は判断・検証・アーキテクチャを扱い、製品ドキュメントサイトには含めない。
 
 ## GUIの共通表示
 
@@ -75,19 +74,14 @@ UI用パレットと、モデル・結果の意味を表す配色を分け、UI�
 ## 開発作業と検証状態への入口
 
 - [未完了の開発作業（GitHub Issues）](https://github.com/hrntsm/SEPIKA/issues)
-- [handoffのIssue移行判定記録](handoff/handoffのIssue移行_Issue430_判定記録.md)（移行時点の履歴）
 - [未検証一覧](v_and_v/未検証一覧.md)
-
-## 利用マニュアルの配置
-
-- [章再編のページ・節対応](handoff/利用マニュアル章再編_Issue1016_配置対応.md)：各内容の正本と、操作・剛性・復元力・耐力・建物評価の境界。
 
 ## 直下の文書と情報の振り分け
 
 直下には本索引・配置ルール、執筆規約、全体アーキテクチャを置く。
 分野別の現在仕様やコードの処理説明を、別の開発者向け仕様書として増やさない。
 
-- 設計判断と理由は `adr/`、必要な実装経緯は `handoff/`、検証証跡は `v_and_v/` に置く。
+- 重要な設計判断と承認の経緯は `adr/`、検証結果・再現条件・未確認範囲は `v_and_v/` に置く。通常の変更理由や経緯は該当するPR・コミットログに記録する。
 - API利用者が必要とする契約はRustdocへ記載し、コードから読める実装手順を別文書へ複製しない。
 - GUI未接続の計算は機能不足としてGitHub Issuesで管理する。必要な計算資料・適用条件・未確認事項をIssueへ集約し、GUI実装時に確定した根拠を `docs/` へ反映する。
 - 一時的な作業資料を `issue-*` 等の作業名のままGitで追跡しない。残す必要のある証跡は用途に対応する管理場所と内容を示す名前で保存する。

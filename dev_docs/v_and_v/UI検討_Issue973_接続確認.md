@@ -2,7 +2,7 @@
 
 作成日: 2026-10-28
 
-状態: 🔶 限定Verification。2026-10-27にWindowsの名前付きパイプの往復・サーバ切断・接続先不在を実測した。GUI本体、Rust実装、MCPクライアント、構造計算、画面操作の実測ではない。[決定記録](../handoff/UI検討_Issue973_決定記録.md)と[ADR0087](../adr/0087-gui-owned-study-and-local-ai.md)の接続選定に必要な範囲を確認する。
+状態: 🔶 限定Verification。2026-10-27にWindowsの名前付きパイプの往復・サーバ切断・接続先不在を実測した。GUI本体、Rust実装、MCPクライアント、構造計算、画面操作の実測ではない。[ADR0087](../adr/0087-gui-owned-study-and-local-ai.md)の接続選定に必要な範囲を確認する。
 
 ## 再現と実測
 
